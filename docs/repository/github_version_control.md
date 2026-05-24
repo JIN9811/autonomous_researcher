@@ -58,3 +58,53 @@ Before pushing to GitHub:
 2. Confirm secrets are not staged.
 3. Confirm large generated artifacts are not staged.
 4. Commit only source, docs, reusable config, templates, and lightweight assets.
+
+## Branch-First Development Policy
+
+Do not modify `main` directly for feature work, experiments, hardware workflow
+changes, model-serving changes, or GUI refactors.
+
+Required workflow:
+
+1. Start from a clean `main`.
+2. Create a dedicated branch before editing:
+
+   ```bash
+   git checkout main
+   git pull
+   git checkout -b <work-branch-name>
+   ```
+
+3. Make changes only on that branch.
+4. Run the relevant tests or live checks.
+5. Commit the branch work:
+
+   ```bash
+   git status
+   git add .
+   git commit -m "<clear change summary>"
+   ```
+
+6. Merge into `main` only after the updated system works as expected:
+
+   ```bash
+   git checkout main
+   git merge <work-branch-name>
+   git push
+   ```
+
+7. If the branch fails or becomes messy, discard it instead of damaging `main`:
+
+   ```bash
+   git checkout main
+   git branch -D <work-branch-name>
+   ```
+
+Recommended branch names:
+
+- `dev`
+- `feature-<short-topic>`
+- `fix-<short-topic>`
+- `experiment-<short-topic>`
+
+Use `main` as the latest known-good version.

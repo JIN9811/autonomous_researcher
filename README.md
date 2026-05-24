@@ -13,6 +13,9 @@ Local-first multi-agent autonomous research framework designed for DGX Spark-sty
 See `REQUIREMENTS.md` for OS tools, Docker/NemoClaw, vLLM model checkpoints,
 LeRobot, PrusaSlicer, and Windows bridge setup requirements.
 
+Development rule: keep `main` as the latest known-good version. Create a branch
+for edits, test it, then merge only after it works.
+
 1. Create environment and install dependencies:
 
 ```bash

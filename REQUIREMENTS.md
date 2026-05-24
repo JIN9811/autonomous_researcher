@@ -237,3 +237,10 @@ After cloning on a new machine:
 7. Clone/setup LeRobot separately if robot workflows are needed.
 8. Install/run the Windows PyAutoGUI bridge on the Windows machine if GUI macro
    control is needed.
+
+## Version-Control Workflow Requirement
+
+Use branch-first development. Do not edit `main` directly for normal work.
+Create a branch, test the change, then merge to `main` only after the program
+works correctly. See `docs/repository/github_version_control.md` for the exact
+workflow.
