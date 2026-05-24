@@ -1,0 +1,78 @@
+# File purpose:
+# - Model routing and backend configuration.
+#
+# Key classes/functions:
+# - backends.model_router.ModelRouter
+#
+# Inputs/outputs:
+# - Input: task-type to model-role mapping
+# - Output: selected model id per call
+#
+# Dependencies:
+# - backends/ollama_client.py, backends/model_router.py
+#
+# Modification guide:
+# - Safe places to edit: model names, fallbacks
+# - Risky places to edit: role keys expected by code
+# - Related files: backends/model_router.py, .env.example
+#
+# The default and vllm branches use NemoClaw/k3s vLLM NVFP4 ModelOpt FP4
+# deployments defined in configs/system.yaml and deploy/nemoclaw-vllm.yaml.
+# The ollama and nemoclaw branches intentionally keep the installed Ollama
+# tags because those backends are proxy/local-Ollama paths, not vLLM.
+
+backend:
+  default: vllm
+  fallback: vllm
+
+models:
+  orchestrator:
+    primary: gemma4:31b
+    fallback: gemma4:e4b-it-nvfp4
+  e4b:
+    primary: gemma4:e4b-it-nvfp4
+    fallback: gemma4:31b
+  e2b:
+    primary: gemma4:e2b-it-nvfp4
+    fallback: gemma4:e4b-it-nvfp4
+
+backend_models:
+  nemoclaw:
+    orchestrator:
+      primary: gemma4:e4b-it-bf16
+      fallback: gemma4:31b
+    e4b:
+      primary: gemma4:e4b-it-bf16
+      fallback: gemma4:31b
+    e2b:
+      primary: gemma4:e2b-it-bf16
+      fallback: gemma4:e4b-it-bf16
+  ollama:
+    orchestrator:
+      primary: gemma4:e4b-it-bf16
+      fallback: gemma4:31b
+    e4b:
+      primary: gemma4:e4b-it-bf16
+      fallback: gemma4:31b
+    e2b:
+      primary: gemma4:e2b-it-bf16
+      fallback: gemma4:e4b-it-bf16
+  vllm:
+    orchestrator:
+      primary: gemma4:31b
+      fallback: gemma4:e4b-it-nvfp4
+    e4b:
+      primary: gemma4:e4b-it-nvfp4
+      fallback: gemma4:31b
+    e2b:
+      primary: gemma4:e2b-it-nvfp4
+      fallback: gemma4:e4b-it-nvfp4
+
+task_routes:
+  orchestrator_plan: orchestrator
+  design_reasoning: e4b
+  analysis_reasoning: e4b
+  knowledge_query: e4b
+  guardian_reasoning: e4b
+  tool_formatting: e2b
+  gui_helper: e2b

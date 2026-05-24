@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<!--
+File purpose:
+- Dedicated Prusa MK4S / 3DP printer workspace GUI.
+
+Key classes/functions:
+- Consumed by web/static/printer.js
+
+Inputs/outputs:
+- Input: /api/printer/profile and /api/printer/status
+- Output: saved print defaults used by Live GUI and test-mode handoffs
+
+Dependencies:
+- /static/styles.css
+- /static/printer.js
+
+Modification guide:
+- Safe places to edit: labels, explanatory copy, non-critical layout.
+- Risky places to edit: element IDs consumed by printer.js.
+-->
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{ title }}</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="page equipment-setup-page printer-page">
+      <section class="hero panel">
+        <div class="hero-copy">
+          <p class="eyebrow">Device Workspace</p>
+          <h1>3DP Printer GUI</h1>
+          <p class="subhead">
+            Prusa MK4S live 출력에 사용할 기본 출력 파라미터를 조정합니다. 저장된 값은 Live GUI의
+            Design Agent handoff와 Specimen Making Agent의 PrusaSlicer/PrusaLink 준비 단계에 반영됩니다.
+          </p>
+        </div>
+        <article class="status-card">
+          <div class="status-head">
+            <span class="status-title">Prusa Bridge</span>
+            <span id="printer-status-dot" class="status-dot idle"></span>
+          </div>
+          <strong id="printer-status-label">Loading</strong>
+          <p id="printer-status-detail">Reading Prusa profile and bridge status.</p>
+        </article>
+      </section>
+
+      <section class="panel equipment-setup-grid printer-setup-grid">
+        <article>
+          <h2>1. Print Defaults</h2>
+          <div class="lerobot-form-grid">
+            <label>
+              Material
+              <input id="printer-material-input" class="text-input" value="PLA" />
+            </label>
+            <label>
+              Printer Model
+              <input id="printer-model-input" class="text-input" value="Prusa MK4S" />
+            </label>
+            <label>
+              Printer Profile
+              <input id="printer-profile-input" class="text-input" value="prusa_mk4s_pla_0p4_nozzle" />
+            </label>
+            <label>
+              Slicer Profile Hint
+              <input id="printer-slicer-profile-input" class="text-input" value="0.2mm_quality" />
+            </label>
+            <label>
+              Nozzle Diameter mm
+              <input id="printer-nozzle-input" class="text-input" type="number" min="0.1" max="2" step="0.05" value="0.4" />
+            </label>
+            <label>
+              Layer Height mm
+              <input id="printer-layer-input" class="text-input" type="number" min="0.02" max="1" step="0.01" value="0.2" />
+            </label>
+            <label>
+              First Layer Height mm
+              <input id="printer-first-layer-height-input" class="text-input" type="number" min="0.02" max="1" step="0.01" value="0.2" />
+            </label>
+            <label>
+              First Layer Speed mm/s
+              <input id="printer-first-layer-speed-input" class="text-input" type="number" min="3" max="60" step="1" value="10" />
+            </label>
+            <label>
+              Bed Temperature C
+              <input id="printer-bed-temp-input" class="text-input" type="number" min="0" max="120" step="1" value="60" />
+            </label>
+            <label>
+              First Layer Bed Temperature C
+              <input id="printer-first-layer-bed-temp-input" class="text-input" type="number" min="0" max="120" step="1" value="60" />
+            </label>
+            <label>
+              Storage Target
+              <input id="printer-storage-input" class="text-input" value="usb" />
+            </label>
+            <label>
+              Max Print Time min
+              <input id="printer-max-time-input" class="text-input" type="number" min="1" step="1" value="120" />
+            </label>
+          </div>
+          <label class="checkbox-line">
+            <input id="printer-overwrite-input" type="checkbox" checked />
+            overwrite existing G-code with same name on PrusaLink storage
+          </label>
+          <label class="checkbox-line">
+            <input id="printer-start-input" type="checkbox" checked />
+            live mode에서 upload 후 즉시 start print
+          </label>
+          <label class="checkbox-line">
+            <input id="printer-ejection-input" type="checkbox" />
+            append bed-sweep auto ejection G-code in test, live, and live-test runs
+          </label>
+          <label class="checkbox-line">
+            <input id="printer-slow-first-layer-input" type="checkbox" checked />
+            slow down first layer for bare TPMS bed adhesion
+          </label>
+          <label class="checkbox-line">
+            <input id="printer-skirt-input" type="checkbox" />
+            generate slicer skirt/brim/raft structures
+          </label>
+          <label class="checkbox-line">
+            <input id="printer-bottom-cap-input" type="checkbox" checked />
+            generate bottom cap skin for bed adhesion
+          </label>
+          <label class="checkbox-line">
+            <input id="printer-top-cap-input" type="checkbox" />
+            generate top cap skin for flat compression face
+          </label>
+          <div class="lerobot-form-grid">
+            <label>
+              Cap Skin Thickness mm
+              <input id="printer-skin-input" class="text-input" type="number" min="0.2" max="3" step="0.05" value="0.8" />
+            </label>
+          </div>
+          <label class="planning-message-label">
+            Notes
+            <textarea id="printer-notes-input" class="text-input" rows="4"></textarea>
+          </label>
+          <div class="printer-subsection">
+            <h3>Test Options</h3>
+            <p class="hint">Live GUI의 <code>테스트 모드</code>, <code>테스트 모드, 실제 출력</code>에서 기본값으로 사용됩니다.</p>
+            <div class="lerobot-form-grid">
+              <label>
+                Test Specimen Size mm
+                <input id="printer-test-size-input" class="text-input" value="30,30,30" placeholder="30,30,30 또는 30 x 30 x 30" />
+              </label>
+              <label>
+                Test Unit Cell Size mm
+                <input id="printer-test-cell-input" class="text-input" type="number" min="3" max="10" step="0.5" value="10" />
+              </label>
+            </div>
+          </div>
+          <div class="button-row">
+            <button id="btn-printer-save" class="btn primary">Save Print Defaults & Test Options</button>
+            <button id="btn-printer-reset" class="btn">Reset Fields</button>
+          </div>
+        </article>
+
+        <article>
+          <h2>2. Live Bridge Status</h2>
+          <p class="hint">
+            연결정보는 <code>memory/prusa_connection.json</code>에 저장됩니다. 비밀번호/API key는 표시하지 않고,
+            새 값을 입력한 경우에만 덮어씁니다.
+          </p>
+          <div class="printer-subsection">
+            <h3>PrusaLink Connection</h3>
+            <div class="lerobot-form-grid">
+              <label>
+                Host / IP
+                <input id="printer-connection-host-input" class="text-input" value="" placeholder="192.168.x.x 또는 prusa-mk4.local" />
+              </label>
+              <label>
+                Scheme
+                <select id="printer-connection-scheme-input" class="text-input">
+                  <option value="http">http</option>
+                  <option value="https">https</option>
+                </select>
+              </label>
+              <label>
+                Port
+                <input id="printer-connection-port-input" class="text-input" type="number" min="1" max="65535" step="1" value="80" />
+              </label>
+              <label>
+                Storage
+                <input id="printer-connection-storage-input" class="text-input" value="usb" />
+              </label>
+              <label>
+                Auth Mode
+                <select id="printer-connection-auth-mode-input" class="text-input">
+                  <option value="digest">digest</option>
+                  <option value="basic">basic</option>
+                  <option value="api_key">api_key</option>
+                  <option value="none">none</option>
+                </select>
+              </label>
+              <label>
+                Username
+                <input id="printer-connection-username-input" class="text-input" value="maker" />
+              </label>
+              <label>
+                Password
+                <input id="printer-connection-password-input" class="text-input" type="password" placeholder="blank = keep saved password" autocomplete="new-password" />
+              </label>
+              <label>
+                API Key Header
+                <input id="printer-connection-api-key-header-input" class="text-input" value="X-Api-Key" />
+              </label>
+              <label>
+                API Key
+                <input id="printer-connection-api-key-input" class="text-input" type="password" placeholder="blank = keep saved API key" autocomplete="new-password" />
+              </label>
+            </div>
+            <div class="button-row">
+              <button id="btn-printer-connection-save" class="btn primary">Set Bridge Connection</button>
+              <button id="btn-printer-connection-reload" class="btn">Reload Connection</button>
+            </div>
+          </div>
+          <div class="printer-status-grid">
+            <div>
+              <span class="status-title">Connection Memory</span>
+              <strong id="printer-connection-summary">Loading</strong>
+              <p id="printer-connection-detail" class="hint">Reading connection memory.</p>
+            </div>
+            <div>
+              <span class="status-title">Live Gates</span>
+              <strong id="printer-gate-summary">Loading</strong>
+              <p id="printer-gate-detail" class="hint">Reading config gates.</p>
+            </div>
+            <div>
+              <span class="status-title">Slicer</span>
+              <strong id="printer-slicer-summary">Loading</strong>
+              <p id="printer-slicer-detail" class="hint">Reading slicer config.</p>
+            </div>
+          </div>
+          <div class="button-row">
+            <button id="btn-printer-status-test" class="btn">Test Status</button>
+            <button id="btn-printer-status-live" class="btn">Live Status</button>
+            <button id="btn-printer-open-live" class="btn primary">Open Live GUI</button>
+          </div>
+        </article>
+
+        <article>
+          <h2>3. Autoejection Test</h2>
+          <p class="hint">
+            출력 없이 기존 bed-sweep autoejection G-code만 실제 PrusaLink에 업로드/시작합니다.
+            좌/중/우 버튼은 해당 위치에 출력물이 있다고 가정한 object bounds를 기존 ejection builder에 넣어 테스트합니다.
+          </p>
+          <div class="lerobot-form-grid">
+            <label>
+              Assumed Object Size mm
+              <input id="printer-ejection-object-size-input" class="text-input" value="30,30,30" placeholder="Test Specimen Size 기본값 사용" />
+            </label>
+            <label>
+              Apply Test Option
+              <button id="btn-printer-ejection-apply-test-size" class="btn" type="button">Apply Test Size</button>
+            </label>
+          </div>
+          <div class="button-row">
+            <button id="btn-printer-eject-left" class="btn">Autoeject Left</button>
+            <button id="btn-printer-eject-center" class="btn primary">Autoeject Center</button>
+            <button id="btn-printer-eject-right" class="btn">Autoeject Right</button>
+          </div>
+        </article>
+
+        <article>
+          <h2>Result Log</h2>
+          <pre id="printer-result-log" class="equipment-result-log">{}</pre>
+        </article>
+      </section>
+    </main>
+
+    <script src="/static/printer.js" defer></script>
+  </body>
+</html>

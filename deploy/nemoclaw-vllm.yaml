@@ -1,0 +1,291 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: nemoclaw-vllm
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm-gemma4-31b
+  namespace: nemoclaw-vllm
+spec:
+  replicas: 0
+  progressDeadlineSeconds: 1800
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: vllm-gemma4-31b
+  template:
+    metadata:
+      labels:
+        app: vllm-gemma4-31b
+    spec:
+      runtimeClassName: nvidia
+      enableServiceLinks: false
+      containers:
+        - name: vllm
+          image: vllm/vllm-openai:v0.21.0-cu129-ubuntu2404
+          imagePullPolicy: IfNotPresent
+          args:
+            - --model
+            - nvidia/Gemma-4-31B-IT-NVFP4
+            - --served-model-name
+            - gemma4:31b
+            - --quantization
+            - modelopt_fp4
+            - --max-model-len
+            - "8192"
+            - --max-num-batched-tokens
+            - "4096"
+            - --gpu-memory-utilization
+            - "0.37"
+            - --generation-config
+            - vllm
+            - --speculative-config
+            - '{"method":"mtp","model":"google/gemma-4-31B-it-assistant","num_speculative_tokens":4}'
+            - --safetensors-load-strategy
+            - prefetch
+          ports:
+            - containerPort: 8000
+              name: http
+          env:
+            - name: HF_HOME
+              value: /root/.cache/huggingface
+            - name: VLLM_CACHE_ROOT
+              value: /root/.cache/vllm
+            - name: VLLM_SERVER_DEV_MODE
+              value: "1"
+            - name: VLLM_NVFP4_GEMM_BACKEND
+              value: marlin
+            - name: NVIDIA_VISIBLE_DEVICES
+              value: all
+            - name: NVIDIA_DRIVER_CAPABILITIES
+              value: compute,utility
+          volumeMounts:
+            - name: hf-cache
+              mountPath: /root/.cache/huggingface
+            - name: vllm-cache
+              mountPath: /root/.cache/vllm
+          readinessProbe:
+            httpGet:
+              path: /v1/models
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 60
+      volumes:
+        - name: hf-cache
+          hostPath:
+            path: /var/lib/rancher/k3s/storage/vllm-hf-cache
+            type: DirectoryOrCreate
+        - name: vllm-cache
+          hostPath:
+            path: /var/lib/rancher/k3s/storage/vllm-compile-cache
+            type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm-gemma4-31b
+  namespace: nemoclaw-vllm
+spec:
+  type: NodePort
+  selector:
+    app: vllm-gemma4-31b
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+      nodePort: 31001
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm-gemma4-e4b
+  namespace: nemoclaw-vllm
+spec:
+  replicas: 0
+  progressDeadlineSeconds: 1800
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: vllm-gemma4-e4b
+  template:
+    metadata:
+      labels:
+        app: vllm-gemma4-e4b
+    spec:
+      runtimeClassName: nvidia
+      enableServiceLinks: false
+      containers:
+        - name: vllm
+          image: vllm/vllm-openai:v0.21.0-cu129-ubuntu2404
+          imagePullPolicy: IfNotPresent
+          args:
+            - --model
+            - bg-digitalservices/Gemma-4-E4B-it-NVFP4
+            - --served-model-name
+            - gemma4:e4b-it-nvfp4
+            - --quantization
+            - modelopt_fp4
+            - --max-model-len
+            - "8192"
+            - --gpu-memory-utilization
+            - "0.20"
+            - --generation-config
+            - vllm
+            - --speculative-config
+            - '{"method":"mtp","model":"google/gemma-4-E4B-it-assistant","num_speculative_tokens":4}'
+            - --safetensors-load-strategy
+            - prefetch
+          ports:
+            - containerPort: 8000
+              name: http
+          env:
+            - name: HF_HOME
+              value: /root/.cache/huggingface
+            - name: VLLM_CACHE_ROOT
+              value: /root/.cache/vllm
+            - name: VLLM_SERVER_DEV_MODE
+              value: "1"
+            - name: VLLM_NVFP4_GEMM_BACKEND
+              value: marlin
+            - name: NVIDIA_VISIBLE_DEVICES
+              value: all
+            - name: NVIDIA_DRIVER_CAPABILITIES
+              value: compute,utility
+          volumeMounts:
+            - name: hf-cache
+              mountPath: /root/.cache/huggingface
+            - name: vllm-cache
+              mountPath: /root/.cache/vllm
+          readinessProbe:
+            httpGet:
+              path: /v1/models
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 60
+      volumes:
+        - name: hf-cache
+          hostPath:
+            path: /var/lib/rancher/k3s/storage/vllm-hf-cache
+            type: DirectoryOrCreate
+        - name: vllm-cache
+          hostPath:
+            path: /var/lib/rancher/k3s/storage/vllm-compile-cache
+            type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm-gemma4-e4b
+  namespace: nemoclaw-vllm
+spec:
+  type: NodePort
+  selector:
+    app: vllm-gemma4-e4b
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+      nodePort: 31002
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm-gemma4-e2b
+  namespace: nemoclaw-vllm
+spec:
+  replicas: 0
+  progressDeadlineSeconds: 1800
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: vllm-gemma4-e2b
+  template:
+    metadata:
+      labels:
+        app: vllm-gemma4-e2b
+    spec:
+      runtimeClassName: nvidia
+      enableServiceLinks: false
+      containers:
+        - name: vllm
+          image: vllm/vllm-openai:v0.21.0-cu129-ubuntu2404
+          imagePullPolicy: IfNotPresent
+          args:
+            - --model
+            - bg-digitalservices/Gemma-4-E2B-it-NVFP4
+            - --served-model-name
+            - gemma4:e2b-it-nvfp4
+            - --quantization
+            - modelopt_fp4
+            - --max-model-len
+            - "8192"
+            - --gpu-memory-utilization
+            - "0.12"
+            - --generation-config
+            - vllm
+            - --speculative-config
+            - '{"method":"mtp","model":"google/gemma-4-E2B-it-assistant","num_speculative_tokens":2}'
+            - --safetensors-load-strategy
+            - prefetch
+          ports:
+            - containerPort: 8000
+              name: http
+          env:
+            - name: HF_HOME
+              value: /root/.cache/huggingface
+            - name: VLLM_CACHE_ROOT
+              value: /root/.cache/vllm
+            - name: VLLM_SERVER_DEV_MODE
+              value: "1"
+            - name: VLLM_NVFP4_GEMM_BACKEND
+              value: marlin
+            - name: NVIDIA_VISIBLE_DEVICES
+              value: all
+            - name: NVIDIA_DRIVER_CAPABILITIES
+              value: compute,utility
+          volumeMounts:
+            - name: hf-cache
+              mountPath: /root/.cache/huggingface
+            - name: vllm-cache
+              mountPath: /root/.cache/vllm
+          readinessProbe:
+            httpGet:
+              path: /v1/models
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 60
+      volumes:
+        - name: hf-cache
+          hostPath:
+            path: /var/lib/rancher/k3s/storage/vllm-hf-cache
+            type: DirectoryOrCreate
+        - name: vllm-cache
+          hostPath:
+            path: /var/lib/rancher/k3s/storage/vllm-compile-cache
+            type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm-gemma4-e2b
+  namespace: nemoclaw-vllm
+spec:
+  type: NodePort
+  selector:
+    app: vllm-gemma4-e2b
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+      nodePort: 31003

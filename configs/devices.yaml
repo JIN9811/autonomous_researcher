@@ -1,0 +1,221 @@
+# File purpose:
+# - Device bridge mode selection and safe Prusa MK4S phase1 printer workflow config.
+#
+# Key classes/functions:
+# - Parsed by app.bootstrap and mcp_tools.printer_tools.
+#
+# Inputs/outputs:
+# - Input: bridge mode, virtual PrusaLink defaults, live action gates
+# - Output: selected device bridge strategy
+#
+# Dependencies:
+# - app/bootstrap.py
+# - device_bridges/prusa_bridge.py
+#
+# Modification guide:
+# - Safe places to edit: host env names, action gates, virtual test defaults
+# - Risky places to edit: live upload/start/ejection gates
+# - Related files: docs/hardware/printer_agent_prusabridge_phase1_runtime_guideline.txt
+
+devices:
+  printer:
+    mode: test                # test | live
+    provider: prusa_mk4s
+    virtual_prusalink_dry_run: true
+    connection_memory_path: memory/prusa_connection.json
+
+    simulator:
+      enabled: true
+      create_dummy_gcode: true
+      default_location_after_prepare: printer_bed
+      default_location_after_ejection: basket
+
+    virtual_prusalink:
+      enabled: true
+      simulate_status: true
+      simulate_storage: true
+      simulate_job: true
+      simulate_transfer: true
+      validate_upload_payload: true
+      validate_start_payload: true
+      validate_ejection_payload: true
+      virtual_state: IDLE
+      virtual_storage: usb
+
+    test_printer_live_promotion:
+      enabled: true
+      # Default remains virtual so automated test mode never touches a real printer.
+      # Set transport=real and allow_real_network_in_test=true only for deliberate bench checks.
+      transport: virtual      # virtual | real
+      allow_real_network_in_test: false
+
+    live:
+      host_env: PRUSA_HOST
+      port: 80
+      scheme: http
+      storage: usb
+      poll_interval_sec: 5
+      timeouts:
+        connect_sec: 5
+        request_sec: 60
+        # Real MK4S uploads over PrusaLink can be slow for dense TPMS G-code
+        # files. Keep this above the observed 11 MiB / ~95 s transfer case.
+        upload_sec: 900
+        print_sec: 7200
+        # Never start over a running print/ejection job. New physical starts
+        # wait up to this budget until PrusaLink clears the previous job and
+        # reports an idle/FINISHED state.
+        ready_wait_sec: 7200
+      auth:
+        # Prusa MK4S PrusaLink live writes were validated with digest auth.
+        # `memory/prusa_connection.json` remains authoritative and may override this.
+        mode: digest          # digest | api_key | basic | none
+        username_env: PRUSA_USERNAME
+        password_env: PRUSA_PASSWORD
+        api_key_env: PRUSA_API_KEY
+        api_key_header: X-Api-Key
+      allow_status: true
+      # This local profile is armed for actual MK4S live printing after the
+      # 2026-05-06 PrusaLink validation. Test modes remain virtual/read-only
+      # unless SpecimenMakingAgent explicitly selects the actual-print path.
+      allow_upload: true
+      allow_start_print: true
+      allow_ejection: false
+      allow_cancel_pause: false
+
+    slicer:
+      enabled: true
+      executable_env: PRUSA_SLICER_EXECUTABLE
+      # Used when the env var is unset. Build with:
+      #   docker build -t atr-prusa-slicer:ubuntu24.04 install/prusaslicer
+      executable_path: install/prusaslicer/prusa-slicer-docker
+      output_dir: artifacts/gcode
+      timeout_sec: 300
+      # Optional map used by PrusaSlicer command templates that include
+      # `--load {profile_path}`. Keys may be slicer_profile_hint or printer_profile.
+      profile_map: {}
+      command_template:
+        - "{executable}"
+        - "--export-gcode"
+        - "--output"
+        - "{output_path}"
+        - "{stl_path}"
+
+    ejection:
+      enabled: false
+      method: bed_sweep
+      mode: append_end_gcode
+      require_cooldown: true
+      max_bed_temp_c: 40.0
+      require_pre_eject_vision: false
+      require_post_eject_vision: false
+      calibration_id: mk4s-bed-sweep-v0
+      max_feedrate_mm_min: 25000
+      safe_envelope:
+        x_min_mm: 0.0
+        x_max_mm: 250.0
+        y_min_mm: 0.0
+        y_max_mm: 210.0
+        z_min_mm: 0.0
+        z_max_mm: 220.0
+      paddle:
+        offset_x_mm: null
+        offset_y_mm: null
+        safe_z_mm: null
+        sweep_z_mm: null
+        sweep_start_x_mm: null
+        sweep_start_y_mm: null
+        sweep_end_x_mm: null
+        sweep_end_y_mm: null
+        sweep_feedrate_mm_min: null
+        park_x_mm: null
+        park_y_mm: null
+      bed_sweep:
+        cooldown_bed_temp_c: 40.0
+        bed_forward_y_mm: 210.0
+        bed_back_y_mm: 6.0
+        head_center_x_mm: 125.0
+        head_z_mm: 1.0
+        travel_feedrate_mm_min: 3000.0
+        z_feedrate_mm_min: 1000.0
+        eject_feedrate_mm_min: 25000.0
+        cycles: 2
+        use_object_bounds: true
+        object_x_offset_mm: 0.0
+        home_xy_after: true
+        disable_motors_after: true
+        turn_off_heaters_after: true
+
+  camera:
+    mode: simulator
+    endpoint: local
+  robot:
+    mode: simulator
+    endpoint: local
+  utm:
+    mode: simulator
+    endpoint: local
+
+  equipment:
+    mode: simulator              # simulator | live
+    provider: windows_pyautogui
+    windows_pyautogui:
+      enabled: true
+      bridge_url_env: WINDOWS_PYAUTOGUI_BRIDGE_URL
+      token_env: WINDOWS_PYAUTOGUI_BRIDGE_TOKEN
+      token_header: X-Bridge-Token
+      request_timeout_sec: 10
+      discovery_timeout_sec: 0.45
+      discovery_port: 8765
+      allow_live_execute: false
+      allow_screenshot: true
+      artifact_dir: artifacts/equipment
+      connection_memory_path: memory/windows_pyautogui_connection.json
+      allowed_actions:
+        - health
+        - screenshot
+        - locate_image
+        - wait
+        - move_to
+        - click
+        - double_click
+        - press
+        - hotkey
+        - write
+        - scroll
+        - run_registered_program
+        - demo_mouse_wiggle
+        - log
+      allowed_hotkeys:
+        - ["ctrl", "s"]
+        - ["ctrl", "o"]
+        - ["enter"]
+        - ["esc"]
+      limits:
+        max_wait_sec: 30
+        max_write_chars: 512
+        max_steps: 50
+      simulator:
+        screen_width: 1920
+        screen_height: 1080
+        screenshot_name: simulated_windows_screen.png
+        pyautogui_available: true
+      test_live_promotion:
+        enabled: false
+        transport: virtual
+        allow_real_network_in_test: false
+      default_sequence:
+        - action: health
+        - action: screenshot
+      registered_programs:
+        program1:
+          description: "Connectivity demo: bounded mouse wiggle and completion log."
+          requires_pyautogui: true
+          safe_test: true
+          sequence:
+            - action: health
+            - action: demo_mouse_wiggle
+              duration_sec: 1.0
+              distance_px: 20
+            - action: log
+              message: "program1 completed"

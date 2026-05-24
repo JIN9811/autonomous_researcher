@@ -1,0 +1,834 @@
+Specimen Design-to-STL Integration Guideline for Existing Runtime (Phase 1)
+
+Project:
+- Autonomous Researcher Framework for Low-Cost Self-Driving Lab on DGX Spark
+
+Purpose:
+- Adapt the specimen design-to-STL algorithm to the existing autonomous_researcher codebase.
+- This file is an implementation guideline, not executable code.
+- The existing runtime contract is authoritative. Do not redesign the orchestrator around the downloaded algorithm.
+
+Source Basis:
+- /home/jin/downloads/specimen_design_to_stl_algorithm_for_codex.txt
+- /home/jin/다운로드/specimen_design_to_stl_algorithm_for_codex.txt
+- /home/jin/autonomous_researcher/docs/runtime/agent_program_baseline.md
+- /home/jin/autonomous_researcher/docs/project/Project_guide.txt
+
+============================================================
+0. Current Runtime Snapshot (Phase 1)
+============================================================
+
+This repository already has the target Topology implemented for Phase 1:
+- Stage routing remains fixed: design -> specimen -> vision -> manipulation -> equipment -> analysis -> knowledge -> guardian.
+- MainLoop keeps full-cycle execution, and Guardian continue/stop/error transitions are already wired.
+- `orchestrator_plan` LLM calls are only for discussion-level orchestration in Live GUI, not stage execution logic.
+- No new top-level stage nodes are required for the downloaded algorithm.
+
+Design/Specimen contract currently used:
+- `DesignAgent` emits `experiment_spec` and `rationale`.
+- `SpecimenMakingAgent` validates/creates geometry and returns `specimen_result` and `protocol_note`.
+- `guardian` still owns stop/recover decisions and returns `guardian`.
+
+Phase 1 execution contract (required for next implementation step):
+- Live GUI planning route uses only orchestration planning handoff, not full run loop stages.
+- Trigger `실험 수행` for operator-confirmed execution and trigger `테스트 모드` / `테스트모드` for LLM-assisted test-value generation.
+- After trigger, enforce exact handoff chain in planning conversation:
+  1) DesignAgent (produces `experiment_spec`)
+  2) SpecimenMakingAgent (builds STL + mesh/manufacturability + `specimen_result`)
+  3) GuardianAgent (validates and decides continue/stop/error)
+- The planning transcript should emit `design_ai`, `printer_ai` (SpecimenMakingAgent), and `guardian` messages in that order.
+- Keep test/hardstop safety behavior unchanged: if any agent fails, stop chain and expose failure reason.
+
+Live GUI (planning route) behavior currently expected:
+- Message `"실험 수행"` triggers Design handoff. In normal Live GUI mode this also means the generated `experiment_spec.print` requests actual Prusa MK4S PrusaLink upload/start after SpecimenMakingAgent completes slicing.
+- Message `"테스트 모드"` or `"테스트모드"` triggers LLM-assisted value generation, then handoff.
+- Message `"테스트 모드, 가상 브릿지"`, `"테스트 모드, 설치 프린터"`, or `"테스트 모드, 실제 출력"` triggers the same test-value generation and injects the matching `printer_test_path`, so SpecimenMakingAgent continues without asking the path question again.
+- For `"테스트 모드, 실제 출력"`, the controller should return the Live GUI request immediately and continue the long physical-print handoff in a background task. The GUI must refresh through planning events/session state instead of waiting for PrusaLink upload/start in the original fetch.
+- For physical TPMS gyroid output, use the operator/profile-controlled cap setting. The default profile enables bottom-only cap skin: `bottom_cap_enabled=true`, `top_cap_enabled=false`, `top_bottom_cap=true`, `require_flat_compression_faces=false`, and `skin_thickness_mm=0.8`. Enable `top_cap_enabled` only when a flat upper compression face is explicitly required and the unsupported top skin is acceptable.
+- Bare TPMS first-layer adhesion should use operator/profile-controlled first-layer and bed-temperature options by default: `first_layer_height_mm=0.2`, `slow_first_layer_enabled=true`, `first_layer_speed_mm_s=10.0`, `bed_temperature_c=60.0`, `first_layer_bed_temperature_c=60.0`. Always pass PrusaSlicer `--layer-height`, `--first-layer-height`, `--bed-temperature`, and `--first-layer-bed-temperature`; pass `--first-layer-speed` only when slow-first-layer is enabled.
+- 3DP GUI saved `Test Options` values, especially `Test Specimen Size mm` stored as `test_specimen_size_mm` and `Test Unit Cell Size mm` stored as `test_unit_cell_size_mm` in `memory/prusa_print_profile.json`, are authoritative constraints for test-mode handoffs and should be preserved through DesignAgent -> Specimen Making Agent.
+- In Live GUI `테스트 모드`, the generated print block starts with `start_immediately=false` unless `printer_test_path=physical_print` is already explicitly selected, and asks SpecimenMakingAgent for one of three printer paths when no inline path is provided:
+  - `virtual_bridge`: real PrusaSlicer slicing, then virtual PrusaLink upload/start-boundary validation.
+  - `installed_printer`: real PrusaSlicer slicing, then installed PrusaLink read-only communication.
+  - `physical_print`: real PrusaSlicer slicing, then real PrusaLink upload/start for the test-generated specimen.
+- Design handoff should move to Specimen stage in the planning transcript before Guardian validation.
+- DesignAgent is the only Live GUI role that should render STL preview/viewer artifacts.
+- SpecimenMakingAgent should render manufacturing runtime state:
+  - PrusaSlicer settings
+  - output G-code path
+  - PrusaLink storage readiness
+  - PrusaLink endpoint shape
+  - upload/start result
+  - upload/start/ejection gate result
+  - `printer.prepare` step trace
+
+Artifact handling:
+- Primary planning artifacts are exposed at `/api/planning/artifacts/{run_id}/{specimen_id}/{filename}`.
+- If planning-generated STL is missing, resolve and serve files from `runs/<run_id>/specimens/<specimen_id>/`.
+- Use `specimen.stl`, `specimen_preview.svg`, and `experiment_spec.json` only.
+
+Test mode expectations:
+- `test` run mode must be end-to-end executable without real hardware (mock tools + simulator-friendly defaults).
+- Deterministic Design fallback is required in TEST mode for schema compliance.
+
+============================================================
+0. Non-Negotiable Existing Runtime Rules
+============================================================
+
+Do not change these unless a separate full-runtime migration is explicitly requested.
+
+1. Keep existing Stage enum values:
+   - idle
+   - design
+   - specimen
+   - vision
+   - manipulation
+   - equipment
+   - analysis
+   - knowledge
+   - guardian
+   - complete
+   - error
+
+2. Keep existing stage order:
+   - design
+   - specimen
+   - vision
+   - manipulation
+   - equipment
+   - analysis
+   - knowledge
+   - guardian
+   - guardian=continue routes back to design
+   - guardian=stop routes to complete
+   - guardian=error routes to error
+
+3. Keep existing agent interface:
+   - async run(state: OrchestratorState, ctx: AgentContext) -> AgentResult
+
+4. Keep existing required AgentResult.data keys:
+   - design must return experiment_spec
+   - vision must return observation
+   - analysis must return analysis
+   - guardian must return guardian
+
+5. Keep current output key compatibility:
+   - DesignAgent returns experiment_spec and rationale
+   - SpecimenMakingAgent returns specimen_result and protocol_note
+   - VisionAgent returns observation and protocol_note
+   - ManipulationAgent returns manipulation, sarm, and protocol_note
+   - LabEquipmentAgent returns equipment_result and protocol_note
+   - AnalysisAgent returns analysis
+   - KnowledgeAgent returns knowledge
+   - GuardianAgent returns guardian
+
+6. Do not add new top-level orchestrator stages for:
+   - parse_reasoning_json
+   - validate_schema
+   - generate_stl
+   - validate_mesh
+   - create_handoff_package
+
+These are internal substeps inside existing agents and tools.
+
+7. The AI must not directly generate STL mesh vertices or G-code.
+   - DesignAgent proposes parameters.
+   - GuardianAgent validates candidate safety/manufacturability.
+   - MCP-compatible geometry tools generate and validate artifacts.
+   - SpecimenMakingAgent consumes the handoff package and delegates print preparation.
+
+============================================================
+1. Correct Mapping into Existing Agents
+============================================================
+
+The downloaded specimen design algorithm must be decomposed into the current agents as follows.
+
+DesignAgent:
+- Owns candidate parameter generation.
+- Produces state.current_experiment_spec via AgentResult.data["experiment_spec"].
+- May use LLM reasoning, prior experiment memory, and deterministic fallback.
+- Must remain deterministic in test mode when real LLM is disabled or unavailable.
+
+GuardianAgent:
+- Owns safety and feasibility judgment.
+- Must validate design candidate fields before hardware-facing execution.
+- Should read state.current_experiment_spec and latest SARM/anomaly signals.
+- Must return AgentResult.data["guardian"].
+
+SpecimenMakingAgent:
+- Owns specimen artifact handoff and print-preparation delegation.
+- Calls geometry/handoff tools only through ctx.tools.call(...).
+- Calls printer.prepare only after a valid handoff package exists.
+- Must still return AgentResult.data["specimen_result"] and "protocol_note".
+- Must forward `printer.prepare` runtime details into `specimen_result`:
+  - `sliced_path`
+  - `slicer_settings`
+  - `slicer_result`
+  - `gcode_validation`
+  - `printer`
+  - `prusalink`
+  - `print_result`
+  - `ejection_result`
+  - `step_trace`
+- May stream `printer.prepare` step events to Live GUI through AgentContext's tool-event callback.
+
+MCP Tools:
+- Own deterministic geometry generation and validation.
+- Must be registered in ToolRegistry.
+- Must return dict payloads with ok/status and stable keys.
+
+KnowledgeAgent:
+- Owns memory update after analysis.
+- May later store design artifact metadata, STL hash, validation reports, and handoff paths.
+- Do not move design generation into KnowledgeAgent.
+
+AnalysisAgent:
+- Owns post-UTM objective computation.
+- The proxy score produced by DesignAgent is not the final objective.
+- Final objective is computed after equipment result exists.
+
+============================================================
+2. Experiment Spec Schema for DesignAgent
+============================================================
+
+DesignAgent must keep the top-level key:
+
+AgentResult.data = {
+  "experiment_spec": { ... },
+  "rationale": "..."
+}
+
+Recommended experiment_spec fields:
+
+Required minimal fields:
+- candidate_id: str
+- specimen_id: str
+- objective_type: str
+- objective_direction: "maximize" | "minimize" | "explore"
+- geometry_type: str
+- specimen_size_mm: list[float]
+- cell_size_mm: float
+- wall_thickness_mm: float
+- relative_density: float
+- porosity: float
+- anisotropy_ratio: float
+- orientation_deg: float
+- defect_seed: int
+- defect_ratio: float
+- skin_thickness_mm: float
+- top_cap_enabled: bool
+- bottom_cap_enabled: bool
+- top_bottom_cap: bool
+- material: str
+- printer_profile: str
+- slicer_profile_hint: str
+- expected_mass_g: float
+- expected_volume_mm3: float
+- expected_print_time_min: float
+- expected_manufacturability_score: float
+- expected_objective_proxy_score: float
+- generation_strategy: str
+- generation_reason: str
+
+Recommended optional fields:
+- design_space: dict
+- constraints: dict
+- prior_results_summary: dict
+- failure_memory_summary: dict
+- validation_warnings: list[str]
+- model_note: str
+
+Do not remove existing candidate_id compatibility.
+
+============================================================
+3. Default Constraint Profile
+============================================================
+
+If user input is only a natural-language goal, DesignAgent may fill safe defaults.
+
+Recommended default constraints:
+
+constraints:
+- printer_model: "Prusa MK4S"
+- material: "PLA"
+- max_specimen_size_mm: [30.0, 30.0, 30.0]
+- utm_fixture_limit_mm: [40.0, 40.0, 60.0]
+- max_print_time_min: 120.0
+- max_mass_g: 50.0
+- nozzle_diameter_mm: 0.4
+- layer_height_mm: 0.2
+- storage: "usb"
+- printer_profile: "prusa_mk4s_pla_0p4_nozzle"
+- slicer_profile_hint: "0.2mm_quality"
+- min_wall_thickness_mm: 0.8
+- minimum_feature_size_mm: 0.8
+- require_flat_compression_faces: false
+
+Recommended default design space:
+
+design_space:
+- geometry_types:
+  - gyroid
+  - lattice_bcc
+  - lattice_fcc
+  - lattice_octet
+  - honeycomb
+  - auxetic_reentrant
+  - random_voronoi
+- specimen_size_mm: [[20.0, 20.0, 20.0], [30.0, 30.0, 30.0]]
+- cell_size_mm: [5.0, 10.0]
+- wall_thickness_mm: [1.2, 3.0]
+- relative_density: [0.10, 0.60]
+- porosity: [0.40, 0.90]
+- anisotropy_ratio: [0.5, 2.0]
+- orientation_deg: [0, 15, 30, 45, 60, 90]
+- defect_ratio: [0.0, 0.15]
+- skin_thickness_mm: [0.0, 1.2]
+- tpms_thickness: [0.18, 0.68]
+- tpms_resolution: [56, 96]
+- fdm_min_wall_thickness_mm: 1.2
+- fdm_max_bridge_distance_mm: 10.0
+- fdm_max_unsupported_overhang_deg: 45.0
+- fdm_max_gyroid_wall_cell_ratio: 0.28
+
+Current default geometry policy:
+- Default Live GUI, main GUI test mode, and underspecified orchestrator proposals should use TPMS gyroid.
+- Keep explicit legacy labels such as lattice_bcc, lattice_fcc, and lattice_octet valid for compatibility.
+- Map generic labels such as lattice, bending-dominated lattice, TPMS, metamaterial, compression cube, and cube to gyroid unless the operator explicitly asks for BCC/FCC/octet.
+- TPMS gyroid uses the existing payload variables:
+  - specimen_size_mm controls the bounding box.
+  - cell_size_mm controls the physical gyroid unit-cell size; repeat count is derived as round(specimen dimension / cell_size_mm).
+  - wall_thickness_mm and relative_density control shell threshold/thickness.
+  - anisotropy_ratio changes cell count along z.
+  - orientation_deg changes gyroid phase.
+  - defect_seed and defect_ratio create deterministic void defects.
+  - skin_thickness_mm plus top_cap_enabled/bottom_cap_enabled create optional cap skins.
+  - Default operator profile enables bottom cap only: bottom_cap_enabled=true, top_cap_enabled=false, top_bottom_cap=true, and skin_thickness_mm=0.8.
+  - Disable both cap flags only when bare TPMS output is explicitly requested for the current fixture.
+  - Optional tpms_surface, tpms_thickness, and tpms_resolution may be passed, but the MCP tool contract must remain geometry.generate_metamaterial_stl with the existing required keys.
+- Runtime generation must emit an actual gyroid TPMS surface, not a cubical voxel hull:
+  - Preferred backend: numpy + scikit-image marching_cubes + trimesh, when available.
+  - Dependency-free backend: marching tetrahedra over |gyroid_field| - tpms_thickness = 0.
+  - Axis-aligned faces should be limited to optional top/bottom compression caps; the gyroid body should be dominated by curved/non-axis STL facets.
+  - After mesh generation, disconnected islands must be removed by keeping the largest connected component and recording cleanup metadata.
+- FDM printability is a hard precondition for generated gyroid specimens:
+  - Assume Prusa MK4S FDM/FFF with 0.4 mm nozzle and 0.2 mm layer height unless overridden.
+  - wall_thickness_mm must be at least 1.2 mm for gyroid TPMS compression specimens.
+  - cell_size_mm should stay at or below 10 mm to avoid excessive unsupported span/bridging risk.
+  - Default test-mode cell_size_mm comes from the 3DP GUI saved `test_unit_cell_size_mm`, defaulting to 10.0 mm unless the operator explicitly overrides it with another valid value.
+  - For FDM gyroid cells, keep wall_thickness_mm / cell_size_mm at or below 0.28.
+  - bottom_cap_enabled defaults to true for bed adhesion; top_cap_enabled defaults to false because unsupported top TPMS skins can sag during FDM printing.
+  - top_bottom_cap is a compatibility field equal to top_cap_enabled OR bottom_cap_enabled.
+  - If both cap flags are false, require_flat_compression_faces must also be false and skin_thickness_mm must be 0.0.
+  - require_flat_compression_faces may be true only when both top_cap_enabled and bottom_cap_enabled are true.
+  - relative_density should be at least 0.20 so the shell remains continuous enough for FDM.
+  - tpms_thickness must be clamped to the physical wall/nozzle rule even if the LLM proposes a thinner value.
+  - Overhang risk should assume a 45 degree FDM support threshold; if the final slicer detects worse regions, Guardian/Specimen Making should block or require support strategy.
+
+============================================================
+4. Candidate Generation Policy
+============================================================
+
+DesignAgent should choose a strategy based on available memory.
+
+Strategy selection:
+- If no prior valid records exist: use deterministic DOE or seeded constrained random.
+- If few prior records exist: use simple acquisition from expected proxy score and uncertainty.
+- If enough prior records exist: use learning.bo_engine / learning.active_learning when available.
+- If LLM or learning model fails in test mode: use deterministic fallback.
+
+Candidate generation process:
+1. Build candidate pool of 5 to 20 candidates internally.
+2. Apply hard constraints.
+3. Apply known failure-memory filters.
+4. Estimate expected mass, print time, manufacturability, and objective proxy.
+5. Rank candidates.
+6. Return one selected candidate in experiment_spec.
+
+The selected candidate must be valid enough for downstream tools, not merely descriptive text.
+
+Proxy score guidance:
+- expected_objective_proxy_score is a design-time estimate only.
+- Real objective must be computed by AnalysisAgent after equipment testing.
+
+============================================================
+5. Pre-Geometry Guardian Validation
+============================================================
+
+GuardianAgent should validate state.current_experiment_spec before allowing risky continuation.
+
+Hard reject conditions:
+- Missing candidate_id or specimen_id.
+- geometry_type unsupported by configured geometry tool.
+- specimen_size_mm exceeds printer or UTM fixture limits.
+- wall_thickness_mm < max(2.0 * nozzle_diameter_mm, minimum_feature_size_mm).
+- cell_size_mm < 3.0 * wall_thickness_mm.
+- expected_mass_g > max_mass_g.
+- expected_print_time_min > max_print_time_min, unless policy explicitly allows it.
+- top_bottom_cap is false when flat compression faces are required.
+- candidate matches a known failure pattern in FailureMemory.
+
+Guardian output must keep this shape:
+
+AgentResult.data = {
+  "guardian": {
+    "decision": "continue" | "stop" | "error",
+    "reason": "...",
+    "precursor": float,
+    "policy_note": "...",
+    "design_validation": {
+      "status": "pass" | "fail" | "warning",
+      "reject_reasons": [...],
+      "warnings": [...]
+    }
+  }
+}
+
+Important:
+- The current RunLoop routes guardian after knowledge.
+- Do not add a new stage before specimen just to validate design.
+- If early design validation is needed before specimen, implement it inside SpecimenMakingAgent or as a policy helper used by SpecimenMakingAgent, while preserving the existing stage flow.
+
+============================================================
+6. Geometry and Validation Tool Contracts
+============================================================
+
+Add new MCP-style tools without breaking existing tools.
+
+Existing tools to keep:
+- printer.prepare
+- camera.capture
+- robot.pick_place
+- utm.run_protocol
+- device.health
+
+Recommended new tool names:
+- geometry.generate_metamaterial_stl
+- geometry.check_mesh_quality
+- geometry.check_manufacturability
+- artifact.create_specimen_handoff
+- artifact.register_design_artifact
+
+Tool: geometry.generate_metamaterial_stl
+
+Input:
+- run_id
+- experiment_id
+- candidate_id
+- specimen_id
+- geometry_type
+- specimen_size_mm
+- cell_size_mm
+- wall_thickness_mm
+- relative_density
+- anisotropy_ratio
+- orientation_deg
+- defect_seed
+- defect_ratio
+- skin_thickness_mm
+- top_cap_enabled
+- bottom_cap_enabled
+- top_bottom_cap
+- output_dir
+- output_format
+
+Output:
+- ok: bool
+- tool: "geometry.generate_metamaterial_stl"
+- specimen_id
+- stl_path
+- metadata_path
+- preview_image_path
+- geometry_report
+- estimated_volume_mm3
+- estimated_mass_g
+- bounding_box_mm
+- generation_log_path
+- geometry_hash
+- error_message
+
+Tool: geometry.check_mesh_quality
+
+Input:
+- stl_path
+- expected_bounding_box_mm
+- constraints
+
+Output:
+- ok: bool
+- tool: "geometry.check_mesh_quality"
+- mesh_status: "pass" | "fail"
+- mesh_report
+- watertight: bool
+- non_manifold_edges: int
+- inverted_normals: int
+- self_intersections: int
+- disconnected_components: int
+- bounding_box_mm
+- volume_mm3
+- reject_reasons: list[str]
+- warnings: list[str]
+
+Tool: geometry.check_manufacturability
+
+Input:
+- stl_path
+- printer_profile
+- material
+- constraints
+- mesh_report
+
+Output:
+- ok: bool
+- tool: "geometry.check_manufacturability"
+- manufacturability_status: "pass" | "fail"
+- risk_score: float
+- expected_print_time_min: float
+- expected_mass_g: float
+- minimum_feature_size_mm: float
+- overhang_risk: str
+- unsupported_island_risk: str
+- bed_contact_area_mm2: float
+- compression_fixture_status: "pass" | "fail"
+- reject_reasons: list[str]
+- warnings: list[str]
+
+Tool: artifact.create_specimen_handoff
+
+Input:
+- run_id
+- experiment_id
+- specimen_id
+- experiment_spec
+- geometry_result
+- mesh_result
+- manufacturability_result
+- next_agent
+
+Output:
+- ok: bool
+- tool: "artifact.create_specimen_handoff"
+- handoff_status: "ready" | "failed"
+- handoff_package_path
+- handoff_package
+- error_message
+
+============================================================
+7. SpecimenMakingAgent Internal Flow
+============================================================
+
+SpecimenMakingAgent must keep:
+
+AgentResult.data = {
+  "specimen_result": response,
+  "protocol_note": protocol_note
+}
+
+Recommended internal flow:
+
+1. Read candidate from state.current_experiment_spec.
+2. Validate that required candidate fields exist.
+3. Derive output_dir under existing run directory conventions:
+   - runs/{run_id}/specimens/{specimen_id}/
+4. Call geometry.generate_metamaterial_stl through ctx.tools.call.
+5. If generation fails:
+   - raise a structured exception or otherwise enter the existing RunLoop retry/fatal-error path.
+   - include failure context in the exception message or logged payload.
+   - do not call printer.prepare.
+6. Call geometry.check_mesh_quality.
+7. If mesh fails:
+   - raise a structured exception or otherwise enter the existing RunLoop retry/fatal-error path.
+   - include reject reasons in the exception message or logged payload.
+   - do not call printer.prepare.
+8. Call geometry.check_manufacturability.
+9. If manufacturability fails:
+   - raise a structured exception or otherwise enter the existing RunLoop retry/fatal-error path.
+   - include reject reasons in the exception message or logged payload.
+   - do not call printer.prepare.
+10. Call artifact.create_specimen_handoff.
+11. If handoff fails:
+   - raise a structured exception or otherwise enter the existing RunLoop retry/fatal-error path.
+   - do not call printer.prepare.
+12. Call printer.prepare with at least:
+   - specimen_id
+   - stl_path
+   - handoff_package_path
+   - printer_profile
+   - material
+   - slicer_profile_hint
+13. Return specimen_result containing:
+   - ok
+   - tool result from printer.prepare
+   - specimen_id
+   - stl_path
+   - handoff_package_path
+   - mesh_status
+   - manufacturability_status
+   - expected_mass_g
+   - expected_print_time_min
+   - geometry_hash
+
+The existing validation policy does not require specimen_result, but downstream UI/logging expects the key to remain stable.
+
+Important failure-handling rule:
+- The current RunLoop validates required payload keys, merges data, logs agent_result, and advances to the next stage.
+- It does not stop only because AgentResult.success is false.
+- Therefore hard specimen failures must not be represented only as AgentResult(success=False).
+- Hard failures must raise an exception or use an equivalent mechanism that triggers the existing retry/fatal_error path.
+- Recoverable warnings may be returned inside specimen_result with ok=true and warning fields.
+
+============================================================
+8. Artifact Path and Naming Policy
+============================================================
+
+Use existing runtime IDs and run directory conventions.
+
+Existing ID style:
+- run_id: run-YYYYMMDDTHHMMSSZ-xxxxxx
+- experiment_id: exp-YYYYMMDDTHHMMSSZ-xxxx
+
+Recommended specimen_id:
+- specimen-{candidate_id}
+- or specimen-{experiment_id}-{geometry_type}-{short_hash}
+
+Recommended artifact directory:
+- runs/{run_id}/specimens/{specimen_id}/
+
+Recommended files:
+- design_input.json
+- candidate_params.json
+- design_reason.txt
+- specimen.stl
+- specimen_preview.png
+- geometry_report.json
+- mesh_report.json
+- manufacturability_report.json
+- handoff_package.json
+- logs/
+
+Cache key:
+- stable hash of:
+  - geometry_type
+  - specimen_size_mm
+  - cell_size_mm
+  - wall_thickness_mm
+  - relative_density
+  - anisotropy_ratio
+  - orientation_deg
+  - defect_seed
+  - defect_ratio
+  - skin_thickness_mm
+  - top_cap_enabled
+  - bottom_cap_enabled
+  - top_bottom_cap
+  - geometry_tool_version
+
+Cache behavior:
+- If cache hit, reuse STL path.
+- Re-run validation if validation version changed.
+- Always create a fresh handoff package for the current run.
+
+============================================================
+9. Test Mode Behavior
+============================================================
+
+Test mode must remain full-loop executable without hardware.
+
+In test mode:
+- Use deterministic candidate generation.
+- Use mock geometry tool when real geometry engine is unavailable.
+- Mock geometry tool may write a minimal dummy STL or a placeholder file path.
+- Mesh/manufacturability validators may return synthetic pass reports.
+- The same handoff_package schema must still be produced.
+- printer.prepare must remain mock/simulator, virtual-bridge, or read-only installed-printer by default.
+- Exception: when the Specimen Making Agent printer-path prompt is answered with `physical_print` / `실제 출력`, or when the Live GUI one-shot command is `테스트 모드, 실제 출력`, the test-generated specimen may proceed through real PrusaSlicer slicing and real PrusaLink upload/start using the same physical-print gates as Live GUI.
+
+Required test scenarios:
+1. Valid TPMS gyroid candidate creates handoff package successfully.
+2. Too-small wall thickness fails before printer.prepare.
+3. Too-small cell size fails before printer.prepare.
+4. Geometry tool failure returns success=False from SpecimenMakingAgent.
+5. Mesh validation failure returns success=False and reject reasons.
+6. Manufacturability failure returns success=False and reject reasons.
+7. Missing required candidate field returns success=False without hardware call.
+8. Cache hit reuses STL and still creates handoff.
+
+============================================================
+10. STL Visualization Policy
+============================================================
+
+Generated STL artifacts should be visually inspectable, but the GUI role is split by agent responsibility.
+
+1. Operator/manual viewing:
+   - Open stl_path with a normal STL viewer.
+   - Recommended tools:
+     - PrusaSlicer for printability and slicing inspection.
+     - MeshLab for mesh inspection.
+     - FreeCAD or Blender for geometry inspection.
+     - Any OS file manager STL previewer if installed.
+
+2. DesignAgent runtime/GUI preview:
+   - geometry.generate_metamaterial_stl should also produce preview_image_path when possible.
+   - preview_image_path should point to a PNG rendered from the STL.
+   - artifact.create_specimen_handoff should include both stl_path and preview_image_path.
+   - SpecimenMakingAgent should return preview_image_path inside specimen_result.
+   - The Live GUI may display preview_image_path or a browser STL viewer from DesignAgent artifact messages.
+   - DesignAgent is responsible for visual geometry inspection in the chat.
+
+Recommended preview artifact:
+- runs/{run_id}/specimens/{specimen_id}/specimen_preview.png
+
+Recommended preview generation approaches:
+- Use the real geometry engine to export a preview render if it supports one.
+- Use trimesh, pyvista, blender, or another deterministic local renderer.
+- In test mode, a simple placeholder preview image is acceptable only if the STL generator is mocked.
+
+SpecimenMakingAgent GUI policy:
+- Do not render the STL viewer again in SpecimenMakingAgent messages.
+- Show manufacturing/runtime information instead:
+  - PrusaSlicer input model path
+  - PrusaSlicer output G-code path
+  - printer_profile, material, slicer_profile_hint
+  - final layer_height_mm and nozzle_diameter_mm from experiment_spec; infer only when the numeric fields are absent
+  - final cell_size_mm, relative_density, and expected_mass_g from the selected candidate
+  - resolved slicer command template
+  - PrusaLink transport and endpoint shape
+  - print/ejection gate result
+  - `printer.prepare` step trace
+
+============================================================
+11. Logging and GUI Requirements
+============================================================
+
+Do not bypass existing RunLoop event emission.
+
+Agent-level details should be included in AgentResult.data payloads so the existing RunLoop logs them through log_agent_event.
+
+Recommended payload fields for specimen_result:
+- stage: "specimen"
+- candidate_id
+- specimen_id
+- geometry_status
+- mesh_status
+- manufacturability_status
+- handoff_status
+- printer_prepare_status
+- stl_path
+- sliced_path
+- preview_image_path
+- handoff_package_path
+- slicer_settings
+- slicer_result
+- gcode_validation
+- printer
+- prusalink
+- print_result
+- ejection_result
+- step_trace
+- reject_reasons
+- warnings
+
+Recommended event messages:
+- "Specimen geometry generated"
+- "Specimen mesh validation failed"
+- "Specimen manufacturability validation failed"
+- "Specimen handoff package ready"
+- "Specimen preparation executed"
+- "Specimen Making Agent 단계 진행: SLICE -> ok"
+- "Specimen Making Agent 단계 진행: UPLOAD -> not_enabled"
+
+Do not create a separate top-level GUI stage for printer/slicer work.
+Live GUI may consume tool-event callbacks emitted by `printer.prepare`, but those events must remain supplemental to the stable `specimen_result` payload.
+
+============================================================
+12. Error Handling Policy
+============================================================
+
+Errors must be structured and visible in logs.
+
+Recoverable errors:
+- Candidate missing optional field.
+- Geometry tool transient failure.
+- Cache miss.
+- Mesh/manufacturability warning.
+
+Hard failure for specimen stage:
+- Missing required candidate fields.
+- Invalid handoff package.
+- Mesh validation fail.
+- Manufacturability validation fail.
+- printer.prepare failure in live mode.
+
+SpecimenMakingAgent should not silently convert invalid geometry into ok=True.
+SpecimenMakingAgent should not rely on AgentResult(success=False) alone for hard failures.
+Hard failures should raise so the existing RunLoop can log the exception, retry within budget, and emit fatal_error if retries are exhausted.
+
+Recommended failure payload:
+
+specimen_result = {
+  "ok": false,
+  "stage": "specimen",
+  "failure_type": "mesh_validation_failed",
+  "reject_reasons": [...],
+  "warnings": [...],
+  "candidate_id": "...",
+  "specimen_id": "...",
+  "stl_path": null,
+  "handoff_package_path": null
+}
+
+This payload is useful for logs or exception context. It is not sufficient by itself if the stage must stop.
+
+============================================================
+13. Implementation Order
+============================================================
+
+Implement in bounded steps.
+
+Step 1:
+- Define small schema/helper module for specimen design payloads.
+- Keep it independent from RunLoop.
+
+Step 2:
+- Expand DesignAgent deterministic experiment_spec.
+- Preserve current AgentResult keys.
+
+Step 3:
+- Add mock geometry tools to ToolRegistry registration.
+- Do not remove existing mock tools.
+
+Step 4:
+- Update SpecimenMakingAgent internal flow to call geometry tools and create handoff.
+- Preserve specimen_result and protocol_note keys.
+
+Step 5:
+- Add Guardian precheck helper or integrate design validation into GuardianAgent.
+- Preserve guardian key and decision values.
+
+Step 6:
+- Add targeted unit tests for candidate validation and geometry tool contracts.
+
+Step 7:
+- Add integration test for full test-mode run with handoff package generation.
+
+Step 8:
+- Only after mock path is stable, replace mock geometry tool with a real deterministic generator.
+
+============================================================
+14. Integration Checklist
+============================================================
+
+Before merge:
+- pytest -q passes.
+- Existing API endpoints still return state and events.
+- Existing GUI still renders stage and agent status.
+- design stage still emits experiment_spec.
+- specimen stage still emits specimen_result.
+- guardian stage still emits guardian.
+- No new Stage enum values were introduced.
+- No existing tool names were removed.
+- Test mode does not call real printer, camera, robot, or UTM.
+- Invalid STL/mesh/manufacturability never reaches printer.prepare.
+- All generated artifact paths are inside the configured run root.
+
+End of guideline.

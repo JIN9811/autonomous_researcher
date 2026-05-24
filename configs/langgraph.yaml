@@ -1,0 +1,32 @@
+# File purpose:
+# - Graph node and transition metadata for orchestrator introspection.
+#
+# Key classes/functions:
+# - Used as documentation and future dynamic graph wiring input.
+#
+# Inputs/outputs:
+# - Input: ordered stage list and transition hints
+# - Output: graph metadata
+#
+# Dependencies:
+# - orchestrator/transitions.py
+#
+# Modification guide:
+# - Safe places to edit: stage descriptions
+# - Risky places to edit: node ids mismatched with runtime stage enums
+# - Related files: orchestrator/state.py, orchestrator/graph.py
+
+graph:
+  nodes:
+    - design
+    - specimen
+    - vision
+    - manipulation
+    - equipment
+    - analysis
+    - knowledge
+    - guardian
+  transitions:
+    guardian_continue: design
+    guardian_stop: complete
+    guardian_error: error

@@ -1,0 +1,1218 @@
+Printer Agentic Workflow + PrusaBridge Integration Guideline for Existing Runtime (Phase 1)
+
+Project:
+- Autonomous Researcher Framework for Low-Cost Self-Driving Lab on DGX Spark
+
+Purpose:
+- Adapt `/home/jin/다운로드/codex_printer_agent_prusabridge_phase1.txt` to this repository's actual runtime.
+- This file is an implementation guideline, not executable code.
+- The existing autonomous_researcher runtime contract is authoritative.
+- Phase 1 must make the printer pipeline ready for staged live integration without starting physical hardware by default.
+
+Source Basis:
+- /home/jin/다운로드/codex_printer_agent_prusabridge_phase1.txt
+- /home/jin/autonomous_researcher/docs/project/Project_guide.txt
+- /home/jin/autonomous_researcher/docs/runtime/agent_program_baseline.md
+- /home/jin/autonomous_researcher/docs/runtime/architecture.md
+- /home/jin/autonomous_researcher/docs/runtime/test_mode.md
+- /home/jin/autonomous_researcher/docs/process/codex_workflow.md
+- /home/jin/autonomous_researcher/docs/agents/specimen_design_existing_runtime_guideline.txt
+
+============================================================
+0. Current Runtime Snapshot
+============================================================
+
+Current repository state after Phase 1 alignment:
+- Stage routing already exists and must remain:
+  - design -> specimen -> vision -> manipulation -> equipment -> analysis -> knowledge -> guardian
+  - guardian=continue routes back to design
+  - guardian=stop routes to complete
+  - guardian=error routes to error
+- `SpecimenMakingAgent` already performs the correct high-level sequence:
+  1. validate `state.current_experiment_spec`
+  2. call `geometry.generate_metamaterial_stl`
+  3. call `geometry.check_mesh_quality`
+  4. call `geometry.check_manufacturability`
+  5. call `artifact.create_specimen_handoff`
+  6. call `printer.prepare`
+  7. return `AgentResult.data["specimen_result"]` and `protocol_note`
+- `printer.prepare` is registered through `mcp_tools/printer_tools.py` and routes to the phase 1 printer workflow.
+- `device_bridges/prusa_bridge.py` owns the PrusaLink-shaped workflow, virtual transport, live connection memory, slicer wrapper, safety validation, and gated ejection path.
+- `device_bridges/simulator/printer_sim.py` delegates to the same workflow in test mode instead of using an echo-only simulator.
+- `configs/devices.yaml` includes safe PrusaLink, slicer, action-gate, test virtual bridge, and ejection calibration defaults.
+
+Therefore:
+- The SpecimenMakingAgent flow is already mostly in the correct place.
+- Phase 1 implementation should stay concentrated in the printer tool/bridge/simulator/config layer.
+- Avoid rewriting stage orchestration or adding a new printer stage.
+
+============================================================
+1. Non-Negotiable Existing Runtime Contracts
+============================================================
+
+Do not change:
+- Stage enum values in `orchestrator/state.py`.
+- Stage order and RunLoop routing.
+- Agent names:
+  - `design_agent`
+  - `specimen_agent`
+  - `vision_agent`
+  - `manipulation_agent`
+  - `equipment_agent`
+  - `analysis_agent`
+  - `knowledge_agent`
+  - `guardian_agent`
+- Tool names:
+  - `printer.prepare`
+  - `camera.capture`
+  - `robot.pick_place`
+  - `utm.run_protocol`
+  - `device.health`
+- Agent interface:
+  - `async run(state: OrchestratorState, ctx: AgentContext) -> AgentResult`
+- `AgentResult` structure:
+  - `success: bool`
+  - `summary: str`
+  - `data: dict[str, Any]`
+  - `next_hint: str | None`
+- Specimen output compatibility:
+  - `AgentResult.data["specimen_result"]`
+  - `AgentResult.data["protocol_note"]`
+
+Do not add a new top-level stage:
+- no `printer` stage
+- no `slicer` stage
+- no `ejection` stage
+- no `prusa_bridge` stage
+
+Allowed internal additions:
+- `PrinterAgenticWorkflow`
+- `PrusaBridge`
+- `PrusaLinkClient`
+- `PrusaSlicerRunner`
+- `GCodeSafetyValidator`
+- `PaddleEjectionRoutineBuilder`
+- `PrusaPrintJobManager`
+
+These must remain internal helpers called from `printer.prepare` or the specimen tool path.
+
+============================================================
+2. Correct Phase 1 Responsibility Split
+============================================================
+
+DesignAgent:
+- Produces `experiment_spec`.
+- Does not control the printer.
+- Does not generate G-code.
+- Does not decide to bypass hardware gates.
+
+SpecimenMakingAgent:
+- Remains the owner of specimen artifact preparation.
+- Calls geometry and manufacturability tools first.
+- Calls `printer.prepare` only after a valid handoff package exists.
+- Should not directly implement PrusaLink upload/start/ejection logic.
+- Should pass enough context into `printer.prepare`:
+  - `specimen_id`
+  - `stl_path`
+  - `handoff_package_path`
+  - `printer_profile`
+  - `material`
+  - `slicer_profile_hint`
+  - optional `experiment_spec`
+  - optional `print` and `ejection` request blocks
+
+Printer tool layer (`mcp_tools/printer_tools.py`):
+- Owns registration of `printer.prepare`.
+- Selects simulator, virtual PrusaLink dry-run, or live workflow from config/runtime mode.
+- Normalizes payloads and returns structured tool results.
+- Must keep response keys stable for SpecimenMakingAgent.
+
+Printer simulator (`device_bridges/simulator/printer_sim.py`):
+- Owns deterministic test-mode print pipeline simulation.
+- Must not require PrusaSlicer or a real printer.
+- Should create deterministic dummy G-code/BG-code artifact metadata when an STL path exists.
+
+Prusa bridge (`device_bridges/prusa_bridge.py`):
+- Owns live PrusaLink client, slicer wrapper, safety validator, ejection builder, and job manager.
+- Live write actions must be blocked unless explicitly enabled by config gates.
+- Live read-only status may be allowed when explicitly configured.
+
+Device health:
+- Should continue exposing `device.health`.
+- In default test mode, printer health should report simulator status.
+- In test virtual-bridge dry-run mode, printer health should report deterministic virtual PrusaLink responses without touching a real printer.
+- In live mode with read-only status allowed, printer health may call PrusaLink status.
+- Printer unreachable must produce a structured health failure, not crash the whole runtime.
+
+============================================================
+3. Phase 1 Objective
+============================================================
+
+Primary Phase 1 objective:
+- Build a safe, typed foundation for the Prusa MK4S printer workflow while preserving existing test-mode behavior.
+
+Phase 1 must support:
+1. `printer.prepare` in default test mode using simulator-backed behavior.
+2. `printer.prepare` in optional test virtual-bridge dry-run mode that simulates PrusaBridge/PrusaLink communication and verifies payloads reach the physical-action boundary.
+3. Live PrusaLink read-only health/status when explicitly configured.
+4. Live upload, print start, monitoring, cooldown, and paddle ejection when explicit live gates are armed.
+5. Hard config gates that prevent unintended physical actions in test and dry-run modes.
+6. Existing full orchestration in test mode without mandatory real hardware.
+
+Phase 1 must not:
+- Start a real print by default.
+- Upload a real file by default.
+- Execute real ejection by default.
+- Execute any physical action in `test` or virtual dry-run modes.
+- Hardcode printer IP, username, password, API key, or LAN details.
+- Let an LLM generate arbitrary G-code.
+- Use `shell=True` for slicer or network commands.
+- Remove existing mock/test behavior.
+- Disable existing tests to pass.
+
+============================================================
+4. Target File-Level Plan
+============================================================
+
+Primary files to update/create:
+
+`device_bridges/prusa_bridge.py`
+- Add:
+  - `PrusaBridgeConfig`
+  - `SlicerConfig`
+  - `EjectionConfig`
+  - `PrusaLinkClient`
+  - `PrusaSlicerRunner`
+  - `GCodeSafetyValidator`
+  - `PaddleEjectionRoutineBuilder`
+  - `PrusaPrintJobManager`
+  - `PrusaBridge`
+
+`device_bridges/simulator/printer_sim.py`
+- Replace echo-only simulator with deterministic printer workflow simulator.
+- Return the same schema shape as live `printer.prepare`.
+
+`mcp_tools/printer_tools.py`
+- Register `printer.prepare` to run `PrinterAgenticWorkflow` or equivalent.
+- Optionally register `printer.health` only if it does not conflict with existing `device.health`.
+- Preserve tool name `printer.prepare`.
+
+`mcp_tools/mock_tools.py`
+- Keep compatibility with existing tests.
+- Either route mock `printer.prepare` to the new simulator or update the mock output to include the new phase 1 fields.
+
+`configs/devices.yaml`
+- Add safe printer, PrusaLink, slicer, and ejection defaults.
+- All live write gates default to false.
+
+`agents/specimen_agent.py`
+- Only change if needed to pass richer payload into `printer.prepare`.
+- Preserve `specimen_result` and `protocol_note`.
+- Do not move print control into SpecimenMakingAgent.
+
+Tests to add:
+- `tests/unit/test_prusa_bridge.py`
+- `tests/unit/test_printer_tools.py`
+- `tests/unit/test_gcode_safety_validator.py`
+- `tests/unit/test_paddle_ejection_builder.py`
+- `tests/integration/test_specimen_agent_printer_prepare.py`
+
+============================================================
+5. Recommended Config Shape for This Repository
+============================================================
+
+Use `configs/devices.yaml` as the authoritative device configuration file.
+
+Recommended safe default shape:
+
+```yaml
+devices:
+  printer:
+    mode: test                # test | live
+    virtual_prusalink_dry_run: true
+    provider: prusa_mk4s
+
+    simulator:
+      enabled: true
+      create_dummy_gcode: true
+      default_location_after_prepare: printer_bed
+      default_location_after_ejection: basket
+
+    virtual_prusalink:
+      # Test-mode path that exercises the PrusaBridge workflow against a virtual
+      # PrusaLink transport. It validates the same request/response contracts as
+      # live mode without opening a network connection to a real printer.
+      enabled: true
+      simulate_status: true
+      simulate_storage: true
+      simulate_job: true
+      simulate_transfer: true
+      validate_upload_payload: true
+      validate_start_payload: true
+      validate_ejection_payload: true
+      virtual_state: IDLE
+      virtual_storage: usb
+
+    live:
+      host_env: PRUSA_HOST
+      port: 80
+      scheme: http
+      storage: usb
+      poll_interval_sec: 5
+      timeouts:
+        connect_sec: 5
+        request_sec: 60
+        # Dense TPMS G-code files may take minutes to transfer through PrusaLink.
+        # The validated 30 mm gyroid test generated ~11 MiB G-code and took
+        # about 95 s to upload, so the live upload budget is intentionally long.
+        upload_sec: 900
+        print_sec: 7200
+      auth:
+        mode: digest           # digest | api_key | basic | none
+        username_env: PRUSA_USERNAME
+        password_env: PRUSA_PASSWORD
+        api_key_env: PRUSA_API_KEY
+        api_key_header: X-Api-Key
+      allow_status: true
+      allow_upload: true
+      allow_start_print: true
+      allow_ejection: false
+      allow_cancel_pause: false
+
+    slicer:
+      enabled: false
+      executable_env: PRUSA_SLICER_EXECUTABLE
+      executable_path: install/prusaslicer/prusa-slicer-docker
+      output_dir: artifacts/gcode
+      timeout_sec: 300
+      profile_map: {}
+      command_template:
+        - "{executable}"
+        - "--export-gcode"
+        - "--output"
+        - "{output_path}"
+        - "{stl_path}"
+      # Runtime appends --skirts=0 --brim-width=0 --raft-layers=0 unless the
+      # operator enables skirt/brim/raft in the 3DP GUI profile.
+
+    ejection:
+      enabled: false
+      method: bed_sweep
+      mode: append_end_gcode
+      require_cooldown: true
+      max_bed_temp_c: 40.0
+      require_pre_eject_vision: false
+      require_post_eject_vision: false
+      calibration_id: mk4s-bed-sweep-v0
+      safe_envelope:
+        x_min_mm: 0.0
+        x_max_mm: 250.0
+        y_min_mm: 0.0
+        y_max_mm: 210.0
+        z_min_mm: 0.0
+        z_max_mm: 220.0
+      paddle:
+        offset_x_mm: null
+        offset_y_mm: null
+        safe_z_mm: null
+        sweep_z_mm: null
+        sweep_start_x_mm: null
+        sweep_start_y_mm: null
+        sweep_end_x_mm: null
+        sweep_end_y_mm: null
+        sweep_feedrate_mm_min: null
+        park_x_mm: null
+        park_y_mm: null
+
+  camera:
+    mode: simulator
+    endpoint: local
+
+  robot:
+    mode: simulator
+    endpoint: local
+
+  utm:
+    mode: simulator
+    endpoint: local
+```
+
+Important:
+- `mode: test` must remain the default.
+- `virtual_prusalink_dry_run: true` may be the default if the simulator transport is fully local and deterministic.
+- On this validated local MK4S profile, `allow_upload` and `allow_start_print` are true so normal Live GUI `실험 수행` can physically print.
+- Operator bed-sweep ejection is controlled by the 3DP GUI print-default profile field `allow_ejection`.
+- Toolhead-paddle ejection still requires full paddle calibration; bed-sweep append ejection uses the configured MK4S bed/head coordinates and must pass `GCodeSafetyValidator` before upload.
+- Secrets are resolved from environment variables or `memory/prusa_connection.json` at runtime; never hardcode them in source/config templates.
+
+Runtime interpretation:
+- `mode: live`:
+  - run the normal end-to-end workflow without test-only substitution
+  - route printer operations through real `PrusaBridge`
+  - allow physical actions only when the corresponding live gate is true
+  - actual ejection is allowed only when all ejection gates, calibration, cooldown, stop/safe-stop, and vision checks pass
+- `mode: test` and `virtual_prusalink_dry_run: false`:
+  - use simple `PrinterSimulator`
+  - no PrusaLink-shaped request simulation
+  - no PrusaSlicer requirement
+- `mode: test` and `virtual_prusalink_dry_run: true`:
+  - route through the same `PrinterAgenticWorkflow` and PrusaBridge interfaces used by live mode
+  - use a virtual/local PrusaLink transport instead of real network I/O
+  - simulate status/version/storage/job/transfer responses
+  - build and validate upload/start/ejection request payloads up to the physical-action boundary
+  - return upload/start/ejection as `virtual_ack`, `dry_run_blocked`, or `not_enabled`
+  - never perform live network write actions regardless of live allow flags
+- `mode: test` with printer-live promotion enabled:
+  - the overall run remains test mode
+  - when `SpecimenMakingAgent` reaches `printer.prepare`, emit a GUI/event message that printer connectivity is being checked
+  - perform a read-only connectivity probe through PrusaLink if host/auth config is present and status probing is allowed
+  - if the printer is reachable and operator/config gates allow it, promote only the printer subsystem to live mode for this specimen preparation
+  - all non-printer stages remain test/simulated
+  - if the printer is not reachable, not configured, or not approved, continue through the virtual PrusaLink dry-run path
+  - never silently promote the whole workflow to live mode from a test run
+
+============================================================
+6. PrusaLink Client Requirements
+============================================================
+
+`PrusaLinkClient` must provide typed methods:
+- `get_version()`
+- `get_status()`
+- `get_storage()`
+- `get_job()`
+- `get_transfer()`
+- `get_file_metadata(storage, remote_path)`
+- `upload_file(local_path, storage, remote_path, overwrite=False, print_after_upload=False)`
+- `start_file(storage, remote_path)`
+
+Behavior:
+- Build URLs safely from `scheme`, `host`, `port`, and path.
+- Resolve host and secrets from env vars at call time.
+- Support auth modes:
+  - none
+  - api_key header
+  - basic
+  - digest if the chosen HTTP client supports it cleanly
+- Use connect/request/upload timeouts from config.
+- Return structured errors for:
+  - missing host
+  - connection failure
+  - timeout
+  - unauthorized
+  - non-2xx response
+  - storage unavailable / read-only / not found
+  - invalid JSON
+- Never log passwords, API keys, or full auth headers.
+- Digest-auth uploads must use a replayable bytes payload, not a one-shot generator stream, because the HTTP client may perform an initial challenge and replay the request body.
+- `GET /api/v1/storage` should be checked before live upload. If the selected `storage` entry reports `available: false` or `read_only: true`, block with `PRINTER_STORAGE_UNAVAILABLE` or `PRINTER_STORAGE_READ_ONLY` before uploading.
+- `PUT /api/v1/files/{storage}/{path}` returning HTTP 507 must be normalized to `PRINTER_STORAGE_UNAVAILABLE`; on MK4S this was observed when USB storage was not writable/available.
+- After a successful live upload, the workflow must poll `GET /api/v1/transfer` until it is idle/empty before calling `start_file`. This avoids the intermittent race where the file appears in storage but PrusaLink has not finished USB transfer/indexing.
+- After transfer idle, every physical start path must read `GET /api/v1/files/{storage}/{requested_remote_path}` and start the returned storage filename from metadata (`payload.name`, e.g. `AUTOEJ~1.GCO`). Do not directly start the requested/display filename when PrusaLink has converted it to an 8.3 USB filename.
+- If metadata cannot be read for a physical start, block with a structured failure instead of falling back to the requested/display filename. Virtual transport may keep using the requested path.
+- If `start_file` returns a retryable non-2xx response after upload, retry the start call after rechecking transfer-idle state. The returned `print_result` must include `transfer_wait` and `start.retry_history` diagnostics.
+
+Phase 1 live gate rules:
+- `get_status`, `get_storage`, `get_job`, `get_transfer` may run only when:
+  - `devices.printer.mode == live`
+  - `devices.printer.live.allow_status == true`
+- `upload_file` must refuse before any network call unless:
+  - `allow_upload == true`
+- `start_file` must refuse before any network call unless:
+  - `allow_start_print == true`
+- Ejection-related live calls must refuse unless:
+  - `allow_ejection == true`
+  - `devices.printer.ejection.enabled == true`
+
+============================================================
+7. PrusaSlicer Runner Requirements
+============================================================
+
+`PrusaSlicerRunner` must:
+- Accept:
+  - `stl_path`
+  - `output_path`
+  - optional profile/material hints
+- Validate input file exists.
+- Validate allowed input extensions:
+  - `.stl`
+  - `.3mf`
+  - `.obj`
+  - `.amf`
+  - optionally `.step` / `.stp` if the configured slicer supports it
+- Use configured `command_template`.
+- Use list argv with `subprocess.run(...)`.
+- Never use `shell=True`.
+- Capture stdout/stderr.
+- Respect timeout.
+- Return structured result:
+
+```python
+{
+  "ok": True,
+  "sliced_path": "...",
+  "stdout": "...",
+  "stderr": "...",
+  "elapsed_sec": 0.0,
+  "failure_code": None,
+}
+```
+
+Failure examples:
+- `SLICER_DISABLED`
+- `SLICER_EXECUTABLE_NOT_CONFIGURED`
+- `SLICER_EXECUTABLE_NOT_FOUND`
+- `SLICER_INPUT_MISSING`
+- `SLICER_BAD_INPUT_EXTENSION`
+- `SLICER_TIMEOUT`
+- `SLICER_FAILED`
+
+Test mode:
+- Must not require PrusaSlicer to be installed.
+- Simulator should create deterministic dummy G-code/BG-code metadata/artifact.
+
+============================================================
+8. G-code Safety Validator Requirements
+============================================================
+
+`GCodeSafetyValidator` must validate ejection G-code strictly.
+
+Allowed ejection command set should be small and explicit:
+- `G0`
+- `G1`
+- `G4`
+- `G28`
+- `G90`
+- `G91`
+- `M73`
+- `M400`
+- `M104`
+- `M140`
+- `M190`
+- `M107`
+- `M84`
+
+Rules:
+- Reject unknown G/M commands.
+- Reject extrusion moves if `E` is present.
+- Reject coordinates outside configured safe envelope.
+- Reject feedrates above configured max if a max exists.
+- Reject heating commands:
+  - `M104 S200` must fail.
+  - `M140 S60` must fail.
+- `M190 R<temp>` is allowed only when `<temp> <= max_bed_temp_c`; this is used by the bed-sweep append routine to wait for the bed to cool before ejection.
+- Heater commands are only allowed for turning heaters off:
+  - `M104 S0`
+  - `M140 S0`
+- Reject missing paddle calibration values before generating toolhead-paddle live ejection G-code.
+
+Return structured validation:
+
+```python
+{
+  "ok": False,
+  "failure_code": "GCODE_UNSAFE_COORDINATE",
+  "violations": [...],
+}
+```
+
+Print G-code validation in Phase 1:
+- Keep lightweight.
+- Confirm file exists.
+- Optionally scan for project-forbidden commands.
+- Do not try to fully parse every PrusaSlicer command in Phase 1.
+
+============================================================
+9. Toolhead-Mounted Paddle Ejection Builder
+============================================================
+
+`PaddleEjectionRoutineBuilder` must:
+- Require `method == toolhead_paddle`.
+- Require all calibration values.
+- Generate G-code only from a deterministic template.
+- Never use the nozzle tip as the pusher.
+- Never include heat-up commands.
+- Treat print job and ejection job as logically separate.
+- Validate generated G-code with `GCodeSafetyValidator` before returning it.
+
+Conceptual template:
+
+```gcode
+; AUTO-GENERATED PADDLE EJECTION ROUTINE
+; calibration_id={calibration_id}
+M400
+M104 S0
+M140 S0
+G90
+G1 Z{safe_z_mm} F1200
+G1 X{sweep_start_x_mm} Y{sweep_start_y_mm} F3000
+G1 Z{sweep_z_mm} F600
+G1 X{sweep_end_x_mm} Y{sweep_end_y_mm} F{sweep_feedrate_mm_min}
+G1 Z{safe_z_mm} F1200
+G1 X{park_x_mm} Y{park_y_mm} F3000
+M400
+```
+
+All numeric values must come from config/calibration.
+Do not hardcode live ejection geometry.
+
+============================================================
+9A. Bed-Sweep Append Ejection Builder
+============================================================
+
+Current MK4S auto-ejection option:
+- `devices.printer.ejection.method: bed_sweep`
+- `devices.printer.ejection.mode: append_end_gcode`
+- Operator toggle: `memory/prusa_print_profile.json` -> `allow_ejection`
+
+Runtime behavior:
+1. PrusaSlicer generates normal print G-code.
+2. The bridge validates the sliced G-code exists.
+3. If `ejection.enabled=true` is supplied by the GUI/profile-driven run payload, the bridge builds a deterministic bed-sweep ejection tail.
+4. The bridge validates the ejection tail with `GCodeSafetyValidator`.
+5. The bridge writes `<specimen>.autoeject.gcode`.
+6. PrusaLink upload/start uses the `.autoeject.gcode` file, not the original sliced file.
+
+Deterministic template:
+
+```gcode
+; AUTO-GENERATED BED-SWEEP EJECTION ROUTINE
+; adapted_for=Prusa MK4S Buddy firmware
+; calibration_id={calibration_id}
+M400
+M190 R{cooldown_bed_temp_c}
+G90
+G0 Y{bed_forward_y_mm} F{travel_feedrate_mm_min}
+M73 P99 R0
+M73 Q99 S0
+G0 X{head_center_x_mm} F{travel_feedrate_mm_min}
+G0 Z{head_z_mm} F{z_feedrate_mm_min}
+G0 Y{bed_back_y_mm} F{eject_feedrate_mm_min}
+G0 Y{bed_forward_y_mm} F{travel_feedrate_mm_min}
+G0 Y{bed_back_y_mm} F{eject_feedrate_mm_min}
+G28 X Y
+M84 X Y E
+M104 S0
+M140 S0
+M400
+M73 P100 R0
+M73 Q100 S0
+```
+
+Default MK4S bed-sweep values:
+- `cooldown_bed_temp_c: 40`
+- `bed_forward_y_mm: 210`
+- `bed_back_y_mm: 6`
+- `head_center_x_mm: 125`
+- `head_z_mm: 1`
+- `travel_feedrate_mm_min: 3000`
+- `z_feedrate_mm_min: 1000`
+- `eject_feedrate_mm_min: 25000`
+- `cycles: 2`
+
+Safety notes:
+- This routine assumes a print shape that can release after bed cooldown; it is not guaranteed for every material/geometry.
+- It must stay behind the operator profile toggle, which is materialized in the run payload as `ejection.enabled=true`.
+- The appended G-code is the only physical ejection path for this bed-sweep mode; no separate ejection job is started.
+- The final `M400` plus `M73 P100/Q100` markers are required so the MK4S UI/progress state closes cleanly after the appended ejection tail. Earlier 99% markers are only the transition into the ejection tail.
+- Ready-state transition is observed through PrusaLink status/job, not forced through G-code or a SetReady API. Before every physical start path, the bridge checks PrusaLink status/job. It must never start a new job while a previous `PRINTING` job remains at 99% or 100%, because the appended autoejection tail may still be executing homing or bed-sweep moves. The bridge waits until `/api/v1/job` is cleared and the printer reports idle/FINISHED before the next upload/start.
+
+Reference basis:
+- Operator-provided MK4S auto-ejection video/G-code snippet.
+- Prusa Buddy firmware command documentation for MK4-family `G0/G1`, `G28`, `M73`, `M84`, and `M190`.
+- Marlin temperature command documentation for `M190 R<temp>` wait-for-heating-or-cooling semantics and `M140` non-waiting bed target behavior.
+- PrusaLink source exposes a local SetReady route in some deployments, but the validated MK4S embedded PrusaLink 2.1.2 target returned 404 for `POST /api/printer/ready` and `/api/v1/printer/ready`. Local MK4S observation showed autoejection jobs can remain at `PRINTING`, `progress=99` and later `progress=100`, `time_remaining=0`, with heaters off while final G-code is still settling. These states are not safe for a new start. Wait for `/api/v1/job` to return 204 before starting the next file.
+
+============================================================
+10. PrinterAgenticWorkflow Requirements
+============================================================
+
+Add `PrinterAgenticWorkflow` or equivalent internal class.
+
+Input:
+- Accept the existing `printer.prepare` payload.
+- Minimum:
+
+```python
+{
+  "specimen_id": "specimen-0001",
+  "stl_path": "runs/.../specimen.stl",
+  "handoff_package_path": "runs/.../handoff_package.json",
+  "printer_profile": "prusa_mk4s_pla_0p4_nozzle",
+  "material": "PLA",
+  "slicer_profile_hint": "0.2mm_quality",
+  "experiment_spec": {},
+  "print": {
+    "start_immediately": False,
+    "profile_id": "mk4s_pla_0p20_quality",
+    "storage": "usb",
+    "overwrite": False
+  },
+  "ejection": {
+    "enabled": False,
+    "mode": "append_end_gcode",
+    "method": "bed_sweep",
+    "require_vision_before_eject": False,
+    "require_cooldown": True
+  }
+}
+```
+
+Internal step trace states:
+- `PRECHECK`
+- `RESOLVE_STL`
+- `VALIDATE_MESH`
+- `SLICE`
+- `VALIDATE_GCODE`
+- `UPLOAD`
+- `START_PRINT`
+- `MONITOR_PRINT`
+- `COOLDOWN`
+- `AUTO_EJECT`
+- `VERIFY_EJECTED`
+- `DONE`
+
+Phase 1 behavior:
+- In live mode, proceed through the normal workflow and use real PrusaBridge for printer actions, subject to explicit gates.
+- In test mode, stages other than printer remain test/simulated.
+- In test mode at SpecimenMakingAgent -> `printer.prepare`, send a printer connectivity check message/event before selecting the printer path.
+- In Live GUI test-mode handoff, the path question must be raised by `SpecimenMakingAgent`, not by a separate planner panel:
+  - `virtual_bridge`: run real PrusaSlicer slicing, then use the virtual PrusaLink bridge for upload/start-boundary validation.
+  - `installed_printer`: run real PrusaSlicer slicing, then perform real PrusaLink read-only communication testing, with physical write actions still blocked by test-mode gates.
+  - `physical_print`: run real PrusaSlicer slicing, then physically upload/start the test-generated specimen through PrusaLink.
+- If installed-printer communication info is missing, `SpecimenMakingAgent` should request editing `memory/prusa_connection.json` and retry the same specimen step after confirmation.
+- In test virtual-bridge dry-run mode, the workflow should use PrusaLink-shaped virtual communication so the payload can be checked immediately before any physical upload/start/ejection boundary.
+- In normal Live GUI live mode, upload/start may execute because the validated local profile has those gates enabled and the generated spec includes `print.start_immediately=true`.
+- In test mode and Live GUI `테스트 모드`, write steps must remain virtual/read-only unless the operator explicitly selects `physical_print`/`실제 출력` at the SpecimenMakingAgent prompt.
+- Read-only status may run only when `allow_status == true`.
+- Do not sleep for real print durations.
+
+Required `printer.prepare` response shape:
+
+```python
+{
+  "ok": True,
+  "tool": "printer.prepare",
+  "mode": "test",
+  "specimen_id": "...",
+  "stl_path": "...",
+  "sliced_path": "...",
+  "slicer_settings": {
+    "enabled": false,
+    "simulated": true,
+    "input_model_path": "...",
+    "output_gcode_path": "...",
+    "printer_profile": "prusa_mk4s_pla_0p4_nozzle",
+    "material": "PLA",
+    "slicer_profile_hint": "0.2mm_quality",
+    "layer_height_mm": 0.2,
+    "nozzle_diameter_mm": 0.4,
+    "resolved_command": [...]
+  },
+  "slicer_result": {
+    "ok": True,
+    "sliced_path": "...",
+    "simulated": True,
+    "failure_code": None
+  },
+  "gcode_validation": {
+    "ok": True,
+    "failure_code": None,
+    "violations": []
+  },
+  "prusalink": {
+    "transport": "virtual",
+    "storage": "usb",
+    "remote_path": "...",
+    "upload_endpoint": "/api/v1/files/usb/...",
+    "start_endpoint": "/api/v1/files/usb/..."
+  },
+  "printer": {
+    "provider": "prusa_mk4s",
+    "host_configured": False,
+    "state": None
+  },
+  "print_result": {
+    "status": "simulated_finished",
+    "failure_code": None
+  },
+  "ejection_result": {
+    "status": "disabled",
+    "attempts": 0,
+    "failure_code": None
+  },
+  "step_trace": [...],
+  "artifacts": {...},
+  "failure_code": None
+}
+```
+
+Compatibility mapping for SpecimenMakingAgent:
+- `specimen_result["printer_prepare_status"]` may continue to read `response["status"]`.
+- New `printer.prepare` should also include `status` for backward compatibility.
+- Recommended status mapping:
+  - test prepared only: `prepared`
+  - test print simulated: `simulated_printed`
+  - test print + ejection simulated: `simulated_printed_and_ejected`
+  - live prepared but not started: `prepared`
+  - live blocked by gate: `not_enabled`
+  - failure: `failed`
+
+============================================================
+11. Device Health Requirements
+============================================================
+
+Existing `device.health` must keep returning stable keys:
+- `ok`
+- `printer`
+- `camera`
+- `robot`
+- `utm`
+- `simulator`
+
+Recommended upgraded printer health shape:
+
+```python
+{
+  "ok": True,
+  "printer": {
+    "ok": True,
+    "mode": "test",
+    "provider": "prusa_mk4s",
+    "reachable": True,
+    "state": "SIMULATED_READY",
+    "allow_upload": False,
+    "allow_start_print": False,
+    "allow_ejection": False,
+    "failure_code": None
+  },
+  "camera": "ready",
+  "robot": "ready",
+  "utm": "ready",
+  "simulator": "active"
+}
+```
+
+Live mode:
+- If status is allowed and host is configured, query PrusaLink read-only status.
+- If unreachable, return printer object with `ok: false` and a failure code.
+- Do not crash `device.health` because the printer is offline.
+
+============================================================
+12. Safety and Guardrail Rules
+============================================================
+
+Hard-block:
+- Live upload unless `allow_upload == true`.
+- Live print start unless `allow_start_print == true`.
+- Live ejection unless:
+  - `allow_ejection == true`
+  - `ejection.enabled == true`
+  - calibration values are complete
+  - generated ejection G-code passes validator
+- Ejection if bed temperature is unknown or above `max_bed_temp_c` when cooldown is required.
+- Ejection if printer state is not idle/finished.
+- Ejection if `state.stop_requested` or `state.safe_stop_requested` is true and available.
+- Ejection if pre-eject vision is required but no pre-eject verification is available.
+
+Return structured errors instead of leaking internal exceptions into the tool result.
+
+Common failure codes:
+- `PRINTER_HOST_MISSING`
+- `PRINTER_UNREACHABLE`
+- `PRINTER_UNAUTHORIZED`
+- `PRINTER_STATUS_DISABLED`
+- `UPLOAD_DISABLED`
+- `START_PRINT_DISABLED`
+- `EJECTION_DISABLED`
+- `EJECTION_NOT_CALIBRATED`
+- `EJECTION_COOLDOWN_NOT_SATISFIED`
+- `GCODE_UNSAFE_COMMAND`
+- `GCODE_UNSAFE_COORDINATE`
+- `GCODE_UNSAFE_HEATING`
+- `SLICER_DISABLED`
+- `SLICER_FAILED`
+
+============================================================
+13. Logging Requirements
+============================================================
+
+Use existing logging/event patterns where possible.
+
+Log structured events for:
+- `printer.prepare` started/completed
+- selected printer mode: test/live
+- PrusaLink endpoint call started/completed/failure
+- slicer run started/completed/failure
+- safety gate denied action
+- ejection G-code generated/validated in non-live/test path
+
+Do not log:
+- passwords
+- API keys
+- full auth headers
+- printer LAN secrets
+
+Include when available:
+- `run_id`
+- `experiment_id`
+- `specimen_id`
+- `mode`
+- `failure_code`
+
+============================================================
+14. Test Requirements
+============================================================
+
+Minimum unit tests:
+
+1. `test_prusa_bridge_config_defaults_are_safe`
+- `mode` defaults to test.
+- `allow_upload`, `allow_start_print`, and `allow_ejection` default false.
+
+2. `test_prusalink_client_refuses_upload_when_gate_false`
+- No network call when upload gate is false.
+
+3. `test_prusalink_client_refuses_start_when_gate_false`
+- No network call when start gate is false.
+
+4. `test_paddle_ejection_builder_requires_calibration`
+- Missing paddle values produce controlled failure.
+
+5. `test_paddle_ejection_builder_generates_valid_gcode_from_calibration`
+- Fully calibrated template passes validator.
+
+6. `test_gcode_safety_validator_rejects_out_of_bounds_coordinate`
+- Coordinate outside safe envelope fails.
+
+7. `test_gcode_safety_validator_rejects_heating_in_ejection`
+- `M104 S200` or `M140 S60` fails.
+
+8. `test_printer_prepare_test_mode_schema`
+- `printer.prepare` in test mode returns:
+  - `ok`
+  - `tool`
+  - `specimen_id`
+  - `print_result`
+  - `ejection_result`
+  - `step_trace`
+
+9. `test_virtual_prusalink_dry_run_reaches_action_boundary`
+- `printer.prepare` in test mode with `virtual_prusalink_dry_run == true` returns virtual PrusaLink status/storage/job/transfer observations.
+- Upload/start/ejection payloads are constructed and validated.
+- No real network call is made.
+- Physical actions report `virtual_ack`, `dry_run_blocked`, or `not_enabled`.
+
+10. `test_test_mode_printer_connectivity_check_falls_back_to_virtual_bridge`
+- In test mode, SpecimenMakingAgent emits a printer connectivity check event/message before printer path selection.
+- If the connectivity probe reports unreachable/not configured, `printer.prepare` uses virtual PrusaLink dry-run.
+- Non-printer stages remain test mode.
+
+11. `test_test_mode_printer_live_promotion_is_printer_only`
+- In test mode with connectivity available and printer-live promotion explicitly allowed, only `printer.prepare` uses the live PrusaBridge path.
+- The controller/run state remains `mode=test`.
+- Vision/manipulation/equipment/analysis/knowledge/guardian do not automatically become live hardware actions.
+
+Minimum integration tests:
+
+1. `test_specimen_agent_keeps_specimen_result_key`
+- Specimen stage result still includes `specimen_result` and `protocol_note`.
+
+2. `test_device_health_in_test_mode_reports_printer_simulator`
+- `device.health` reports printer simulator without hardware.
+
+3. `test_live_mode_without_allow_flags_does_not_upload_or_start`
+- Configure dummy live host with all write gates false.
+- Assert no upload/start/ejection is attempted.
+
+Recommended validation commands:
+
+```bash
+pytest -q tests/unit/test_prusa_bridge.py
+pytest -q tests/unit/test_printer_tools.py
+pytest -q tests/unit/test_gcode_safety_validator.py
+pytest -q tests/unit/test_paddle_ejection_builder.py
+pytest -q tests/integration/test_specimen_agent_printer_prepare.py
+pytest -q
+```
+
+============================================================
+15. Acceptance Criteria for Phase 1
+============================================================
+
+Phase 1 is complete when:
+- `printer.prepare` still works in the full test-mode run.
+- Existing `SpecimenMakingAgent` result keys remain stable.
+- Test mode returns a structured simulator-backed printer workflow result.
+- Test virtual-bridge dry-run validates PrusaLink-shaped communication and action-boundary payloads without touching a real printer.
+- Test mode emits a printer connectivity check at the specimen stage and falls back to virtual bridge if the printer is unavailable.
+- Test mode may promote only the printer subsystem to live mode when connectivity and explicit gates allow it; the rest of the workflow remains test mode.
+- Live status can be queried only when explicitly configured.
+- Live upload/start are enabled in the current local MK4S profile after validation; ejection remains blocked.
+- Live armed profile can execute upload/start only when the generated `print` block requests physical execution and selected storage is writable.
+- Slicer wrapper never uses `shell=True`.
+- Ejection G-code is deterministic and validated.
+- Missing ejection calibration blocks ejection.
+- No printer IP or secret is hardcoded.
+- New tests cover safe defaults, blocked live writes, G-code safety, simulator schema, and SpecimenMakingAgent compatibility.
+
+============================================================
+16. Implementation Order
+============================================================
+
+Recommended order:
+
+1. Add safe `configs/devices.yaml` printer config.
+2. Implement dataclass/config parsing in `device_bridges/prusa_bridge.py`.
+3. Implement `GCodeSafetyValidator`.
+4. Implement `PaddleEjectionRoutineBuilder`.
+5. Implement `PrusaSlicerRunner`.
+6. Implement `PrusaLinkClient` with read-only status and write-gate refusal.
+7. Implement `PrusaPrintJobManager` / `PrinterAgenticWorkflow`.
+8. Upgrade `PrinterSimulator`.
+9. Wire `mcp_tools/printer_tools.py` to the workflow.
+10. Preserve or adapt `mcp_tools/mock_tools.py`.
+11. Add tests.
+12. Run full test suite.
+
+Do not start from SpecimenMakingAgent unless the printer payload needs small enrichment.
+
+============================================================
+17. Current Implementation Alignment After Prusa Official RAG
+============================================================
+
+Official source basis checked:
+- Prusa Knowledge Base, "Prusa Connect and PrusaLink explained":
+  https://help.prusa3d.com/article/prusa-connect-and-prusalink-explained_302608
+- Prusa Knowledge Base, "Sending G-codes to printer via network":
+  https://help.prusa3d.com/article/sending-g-codes-to-printer-via-network-prusa-connect-prusalink-octoprint_196761
+- Prusa-Link-Web OpenAPI spec:
+  https://github.com/prusa3d/Prusa-Link-Web/blob/master/spec/openapi.yaml
+- Prusa-Link release notes around 0.7.0 API changes:
+  https://github.com/prusa3d/Prusa-Link/releases
+- PrusaSlicer upstream repository and CLI wiki:
+  https://github.com/prusa3d/PrusaSlicer
+  https://github.com/prusa3d/PrusaSlicer/wiki/Command-Line-Interface
+
+RAG-derived operational facts:
+- PrusaLink is a local-network interface for printer monitoring, file upload, and print control.
+- The OpenAPI spec defines read endpoints used by Phase 1:
+  - `GET /api/version`
+  - `GET /api/v1/status`
+  - `GET /api/v1/storage`
+  - `GET /api/v1/job`
+  - `GET /api/v1/transfer`
+- The OpenAPI spec defines the file action boundary:
+  - `PUT /api/v1/files/{storage}/{path}` uploads a file.
+  - Upload uses `application/octet-stream`.
+  - Upload headers include `Overwrite` and `Print-After-Upload` as structured booleans `?0` or `?1`.
+  - `POST /api/v1/files/{storage}/{path}` starts printing the uploaded file when no job is running.
+- PrusaLink 0.7.0 release notes call out the newer v1 endpoints and the preferred PUT upload path.
+- PrusaSlicer has a CLI, but the upstream CLI wiki warns that `--help` is the current source of truth.
+- For CLI slicing, PrusaSlicer can load project/profile data from AMF/3MF, and command-line parameters override imported values.
+
+Implementation-level decisions for this repository:
+- DesignAgent remains the only stage that should render STL geometry previews in Live GUI.
+- SpecimenMakingAgent must not show the STL viewer again.
+- SpecimenMakingAgent should show:
+  - PrusaSlicer input model path
+  - output G-code path
+  - printer profile
+  - material
+  - slicer profile hint
+  - final `layer_height_mm` from `experiment_spec`, with `slicer_profile_hint` inference only as fallback
+  - final `nozzle_diameter_mm` from `experiment_spec`, with `printer_profile` inference only as fallback
+  - final `cell_size_mm`, `relative_density`, and `expected_mass_g` from the selected Design Agent candidate
+  - resolved PrusaSlicer command template
+  - PrusaLink transport and endpoint shape
+  - `printer.prepare` step trace
+  - upload/start/ejection gate result
+- `PrusaSlicerRunner` supports `profile_map` so a configured command template may include `--load {profile_path}` without changing agent code.
+- Default slicer command remains minimal and safe:
+  - `{executable} --export-gcode --output {output_path} {stl_path}`
+- If a local production profile is needed, set for example:
+
+```yaml
+devices:
+  printer:
+    slicer:
+      enabled: true
+      executable_env: PRUSA_SLICER_EXECUTABLE
+      executable_path: install/prusaslicer/prusa-slicer-docker
+      profile_map:
+        0.2mm_quality: configs/prusa_profiles/mk4s_pla_0p20_quality.ini
+      command_template:
+        - "{executable}"
+        - "--load"
+        - "{profile_path}"
+        - "--export-gcode"
+        - "--output"
+        - "{output_path}"
+        - "{stl_path}"
+```
+
+Runtime adhesion geometry policy:
+- The 3DP GUI exposes skirt/brim/raft as an operator option.
+- Default profile sets `skirt_enabled=false`.
+- When `skirt_enabled=false`, the bridge appends `--skirts=0 --brim-width=0 --raft-layers=0` to the PrusaSlicer command so auxiliary adhesion structures are not printed around the specimen.
+- TPMS cap skins are separate specimen-geometry options: default bottom-only `bottom_cap_enabled=true`, `top_cap_enabled=false`, `top_bottom_cap=true`, `skin_thickness_mm=0.8` for bed adhesion. Enable the top cap only for explicit flat upper compression-face requirements; disabling both caps is allowed when the operator explicitly wants bare TPMS output.
+- Auto-ejection bed sweep must parse the sliced G-code extrusion moves before appending the tail. Use the derived object bounds to set the nozzle X position to the printed object's center (`resolved_head_x_mm`) and report `object_bounds` / `head_x_source` in `ejection_result`. Keep the full configured Y sweep for physical ejection distance unless a separately validated calibration changes it.
+- Standalone 3DP GUI autoejection tests for left/center/right must use the same bed-sweep ejection builder and safety validator. They may inject synthetic object bounds and run ejection-only G-code, but they must not use a separate unvalidated motion program or include specimen-printing extrusion moves.
+
+Live safety gates remain authoritative:
+- `allow_upload=false` blocks before any upload network call.
+- `allow_start_print=false` blocks before any print-start network call.
+- In the current local profile these two gates are true so normal Live GUI `실험 수행` can upload/start.
+- `allow_ejection=false` or incomplete ejection calibration blocks ejection.
+- Test-mode virtual bridge may build and display PrusaLink-shaped upload/start/ejection requests without touching a real printer.
+- Test-mode installed-printer communication may run real PrusaSlicer slicing and read-only PrusaLink status/storage/job/transfer checks, but upload/start remain blocked.
+- Test-mode `physical_print` / `실제 출력` is the explicit exception: it runs real PrusaSlicer slicing and may upload/start the test-generated specimen through PrusaLink when live gates and connection memory allow it.
+
+Current production-readiness target:
+- A real PrusaSlicer executable and local profile path can be configured without modifying agent code.
+- A real PrusaLink host/auth can be configured through `memory/prusa_connection.json` or environment variables without hardcoding secrets.
+- Live GUI should expose the exact slicer settings, PrusaLink storage readiness, upload/start result, and step trace instead of only a final "completed" line.
+- The STL viewer belongs to DesignAgent; SpecimenMakingAgent owns slicing and printer runtime visibility.
+- During Live GUI handoff, `printer.prepare` may emit per-step runtime events so the chat can show `PRECHECK`, `SLICE`, `UPLOAD`, `START_PRINT`, `AUTO_EJECT`, and related gate states while the tool is running.
+
+============================================================
+18. Validated MK4S Live Runtime Update (2026-05-06)
+============================================================
+
+Validated hardware/network target:
+- Printer: Prusa MK4S.
+- Local PrusaLink hostname observed from `/api/version`: `prusa-mk4`.
+- Local IP used for the validation run: stored in `memory/prusa_connection.json`; do not commit the machine-specific address.
+- PrusaLink API/server response:
+  - `api: 2.0.0`
+  - `server: 2.1.2`
+  - `nozzle_diameter: 0.4`
+  - `capabilities.upload-by-put: true`
+- Authentication mode: Digest auth with username/password stored only in `memory/prusa_connection.json`.
+- Storage target: `usb`.
+
+Repository runtime changes required by this validation:
+- `memory/prusa_connection.json` is the authoritative local connection-memory file. Store only host, scheme, port, storage, auth mode, username, and password there.
+- Do not copy password values into docs, logs, screenshots, prompts, structured events, or chat messages.
+- Default config may use `auth.mode: digest` because the actual MK4S PrusaLink path was validated that way.
+- Current local live gates after validation:
+  - `allow_upload: true`
+  - `allow_start_print: true`
+  - `allow_ejection: false`
+- Physical upload/start should happen only from normal Live GUI `실험 수행`, an equivalent explicit API payload with physical print intent, or the Specimen Making Agent test-mode `physical_print` / `실제 출력` printer-path choice. Live GUI `테스트 모드` and Main GUI `test` must not physically print unless that explicit test printer-path choice is selected.
+
+Validated PrusaSlicer deployment:
+- Host-native PrusaSlicer was not assumed.
+- Docker PrusaSlicer wrapper is available at:
+  - `install/prusaslicer/Dockerfile`
+  - `install/prusaslicer/prusa-slicer-docker`
+- Docker image tag:
+  - `atr-prusa-slicer:ubuntu24.04`
+- The wrapper mounts the repository into the container and runs `prusa-slicer` without `shell=True`.
+- `SlicerConfig.executable_path` should default to `install/prusaslicer/prusa-slicer-docker`; `PRUSA_SLICER_EXECUTABLE` may override it.
+- The Ubuntu apt image currently reports PrusaSlicer 2.7.2-class behavior. Latest upstream MK4S profiles may require a newer slicer, so production profile upgrades must be validated before relying on upstream profile bundles.
+
+Validated PrusaLink upload/start boundary:
+- Status endpoint:
+  - `GET /api/v1/status`
+- Storage endpoint:
+  - `GET /api/v1/storage`
+- Upload endpoint:
+  - `PUT /api/v1/files/usb/<file>.gcode`
+- Metadata endpoint:
+  - `GET /api/v1/files/usb/<requested-file>.gcode`
+- Start endpoint:
+  - `POST /api/v1/files/usb/<metadata.name>`
+  - Example: requested/display filename `autoeject-test-center.gcode` resolves to `AUTOEJ~1.GCO`, and the validated start endpoint is `POST /api/v1/files/usb/AUTOEJ~1.GCO`.
+- Upload headers:
+  - `Content-Type: application/octet-stream`
+  - `Overwrite: ?1` or `?0`
+  - `Print-After-Upload: ?0` for staged upload/start separation
+- Upload/start order:
+  - check `GET /api/v1/status` and `GET /api/v1/job`
+  - if a previous physical job is active, wait until `/api/v1/job` clears and status returns idle/FINISHED
+  - upload with staged separation
+  - poll `GET /api/v1/transfer` until HTTP 204 or an idle/completed payload
+  - read file metadata and resolve the actual storage filename
+  - then `POST /api/v1/files/usb/<metadata.name>`
+  - after every start request, poll `GET /api/v1/status` and `GET /api/v1/job` to confirm `PRINTING`
+  - if `PRINTING` is not confirmed, retry the start request every 1 second while recording retry history
+- Successful upload status observed:
+  - HTTP 201
+- Successful print-start status observed:
+  - HTTP 204
+- Successful final print state observed:
+  - `FINISHED`
+
+Storage failure rule learned from validation:
+- `GET /api/v1/storage` may return a `storage_list` entry for USB with `available: false`.
+- In that state, `PUT /api/v1/files/usb/<file>.gcode` can fail with HTTP 507 and text similar to "Failed to write to location".
+- The bridge must block or normalize this as `PRINTER_STORAGE_UNAVAILABLE`, not a generic HTTP failure.
+- Operator action is to insert/enable writable USB storage, then rerun upload/start.
+
+Validation artifact location:
+- `runs/prusa_cube_20260506T124928Z/bridge_comm_log.jsonl`
+
+============================================================
+19. Main GUI 3DP Printer Workspace Update (2026-05-07)
+============================================================
+
+Device workspace route:
+- Main GUI -> Device Workspaces -> `Open 3DP GUI`.
+- Route: `/printer`.
+- Template/script:
+  - `web/templates/printer.html`
+  - `web/static/printer.js`
+- API:
+  - `GET /api/printer/profile`
+  - `POST /api/printer/profile`
+  - `GET /api/printer/connection`
+  - `POST /api/printer/connection`
+  - `GET /api/printer/status?mode=test|live`
+
+Profile memory:
+- Path: `memory/prusa_print_profile.json`.
+- This file stores operator-controlled print defaults only:
+  - material
+  - printer_model
+  - printer_profile
+  - slicer_profile_hint
+  - nozzle_diameter_mm
+  - layer_height_mm
+  - storage
+  - max_print_time_min
+  - overwrite
+  - start_immediately_live
+  - notes
+- It must not store PrusaLink host auth secrets.
+- `allow_ejection` is stored as an operator print default. Saving `allow_ejection=true` makes controller-generated test, live, and Live GUI test-mode print payloads include `ejection.enabled=true`.
+
+Connection memory remains separate:
+- Path: `memory/prusa_connection.json`.
+- Stores local PrusaLink connection information.
+- The 3DP GUI `PrusaLink Connection` panel edits this file through `/api/printer/connection`.
+- Editable fields are host/IP, scheme, port, storage, auth mode, username, password, API key header, and API key.
+- Blank password/API key submissions preserve the existing saved secret.
+- `/api/printer/status` and `/api/printer/connection` may report `password_set=true|false` and `api_key_set=true|false` but must not return the password or API key value.
+
+Runtime effect:
+- `MainController._validated_printer_defaults()` loads `memory/prusa_print_profile.json`.
+- Live GUI handoff uses this saved profile when the operator does not override a field in chat.
+- Material from the 3DP GUI is treated as an operator-confirmed default, not an LLM-fabricated value.
+- In normal Live GUI mode, `start_immediately_live=true` makes `실험 수행` generate a `print` block with `start_immediately=true`, `physical_intent=true`, and `confirm_physical_print=true`.
+- If `start_immediately_live=false`, the live workflow may still upload when gates allow it, but does not start the print unless the operator overrides the print block.
+- Test mode and Live GUI `테스트 모드` force `start_immediately=false` and `physical_intent=false` regardless of the saved profile, except when the operator explicitly selects `physical_print` / `실제 출력` or sends the one-shot `테스트 모드, 실제 출력` command.
+
+Live gates:
+- `configs/devices.yaml` remains authoritative for physical write permission:
+  - `allow_upload`
+  - `allow_start_print`
+  - `allow_ejection`
+- The 3DP GUI displays these gates but does not silently change them.
+- `runs/prusa_cube_20260506T124928Z/test_log.jsonl`
+- `runs/prusa_cube_20260506T124928Z/cube_2mm.stl`
+- `runs/prusa_cube_20260506T124928Z/cube_2mm_mk4s_safe_start.gcode`
+
+Acceptance evidence:
+- A 2 mm cube G-code was uploaded through PrusaLink, started through PrusaLink, monitored, and reached `FINISHED`.
+- The first blocked attempt correctly identified the USB storage condition after diagnostics.
+- The successful attempt used the same stored connection memory and Digest auth, with password redacted from runtime logs.

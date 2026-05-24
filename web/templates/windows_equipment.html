@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<!--
+File purpose:
+- Windows PyAutoGUI bridge discovery and setup GUI.
+
+Key classes/functions:
+- Consumed by web/static/windows_equipment.js
+
+Inputs/outputs:
+- Input: /api/equipment/windows/* endpoints
+- Output: saved bridge selection and setup test results
+
+Dependencies:
+- /static/styles.css
+- /static/windows_equipment.js
+
+Modification guide:
+- Safe places to edit: labels, explanatory copy, visual layout.
+- Risky places to edit: element IDs consumed by windows_equipment.js.
+-->
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{ title }}</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="page equipment-setup-page">
+      <section class="hero panel">
+        <div class="hero-copy">
+          <p class="eyebrow">Equipment Agent</p>
+          <h1>Windows PyAutoGUI Bridge</h1>
+          <p class="subhead">
+            현재 내부망에서 Windows bridge 프로그램이 실행 중인 PC를 검색하고, 선택한 candidate를 alias와 설정으로 저장한 뒤
+            <code>program1</code> 데모 매크로로 통신과 GUI 제어를 확인합니다. Scan 결과는 토큰이 맞는 bridge만 표시됩니다.
+          </p>
+        </div>
+        <article class="status-card">
+          <div class="status-head">
+            <span class="status-title">Saved Connection</span>
+            <span id="equipment-connection-dot" class="status-dot idle"></span>
+          </div>
+          <strong id="equipment-connection-label">Loading</strong>
+          <p id="equipment-connection-detail">Reading saved PyAutoGUI bridge candidates.</p>
+        </article>
+      </section>
+
+      <section class="panel equipment-setup-grid">
+        <article>
+          <h2>1. Scan Network</h2>
+          <label class="planning-message-label">
+            Subnet
+            <input id="equipment-subnet-input" class="text-input" placeholder="비우면 현재 네트워크 /24 자동 검색, 예: 192.168.0.0/24" />
+          </label>
+          <label class="planning-message-label">
+            Port
+            <input id="equipment-port-input" class="text-input" value="8765" />
+          </label>
+          <label class="planning-message-label">
+            Token
+            <input id="equipment-token-input" class="text-input" type="password" placeholder="Windows bridge token" />
+          </label>
+          <div class="button-row">
+            <button id="btn-equipment-scan" class="btn primary">Scan</button>
+            <button id="btn-equipment-refresh" class="btn">Refresh Saved</button>
+          </div>
+        </article>
+
+        <article>
+          <h2>2. Candidates</h2>
+          <div id="equipment-candidates" class="equipment-candidates">No scan yet.</div>
+        </article>
+      </section>
+
+      <section class="panel equipment-setup-grid">
+        <article>
+          <h2>3. Saved Candidates</h2>
+          <p class="hint">저장된 candidate를 Quick Select하거나 삭제합니다. 선택된 candidate가 아래 테스트에 사용됩니다.</p>
+          <div id="equipment-saved-candidates" class="equipment-candidates">No saved candidate.</div>
+        </article>
+        <article>
+          <h2>4. Test Selected Bridge</h2>
+          <p class="hint">
+            Health와 program registry를 먼저 확인합니다. PyAutoGUI가 아직 없으면 bridge 통신은 성공해도
+            <code>PYAUTOGUI_NOT_INSTALLED</code>가 나올 수 있습니다.
+          </p>
+          <div class="button-row">
+            <button id="btn-equipment-test" class="btn">Test Health + Programs</button>
+            <button id="btn-equipment-program1" class="btn primary">Run program1 Demo</button>
+          </div>
+        </article>
+        <article>
+          <h2>Result Log</h2>
+          <pre id="equipment-result-log" class="equipment-result-log">{}</pre>
+        </article>
+      </section>
+    </main>
+
+    <script src="/static/windows_equipment.js" defer></script>
+  </body>
+</html>

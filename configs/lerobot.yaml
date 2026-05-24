@@ -1,0 +1,146 @@
+# File purpose:
+# - Robot profile and safety-gate configuration for LeRobot / ROBOTIS integration.
+#
+# Key classes/functions:
+# - Parsed by device_bridges.lerobot_bridge.LeRobotBridgeConfig
+#
+# Inputs/outputs:
+# - Input: profile metadata, dry-run defaults, live safety gates
+# - Output: command previews and deterministic test-mode sessions
+#
+# Modification guide:
+# - Safe places to edit: fake profile labels, FPS, command templates, live gate defaults
+# - Risky places to edit: live_enabled and allow_* hardware gates
+# - Related files: docs/hardware/lerobot_robotis_manipulation_runtime_guideline.md
+
+lerobot:
+  default_profile_id: robotis_omx_ai
+  default_mode: test
+  session_memory_path: memory/lerobot_sessions.json
+  device_memory_path: memory/lerobot_device_ports.json
+  fake_dataset_root: artifacts/lerobot/fake_datasets
+  fake_checkpoint_root: artifacts/lerobot/fake_checkpoints
+  dataset_root: ~/.cache/huggingface/lerobot
+  output_root: outputs/train
+  policy_root: outputs/train
+  session_log_root: runs/lerobot_sessions
+  conda_env_name: lerobot
+  conda_executable: /home/jin/miniconda3/bin/conda
+  pi05_conda_env_name: lerobot-pi05
+  pi05_repo_root: /home/jin/lerobot_pi05
+  pi05_hf_home: /home/jin/.cache/huggingface_pi05
+  pi05_base_policy: lerobot/pi05_base
+
+  policy_presets:
+    - label: Manual local checkpoint path
+      value: ""
+      source: manual
+    - label: lerobot/act_koch_real
+      value: lerobot/act_koch_real
+      repo_id: lerobot/act_koch_real
+      source: huggingface
+    - label: Pi0.5 base
+      value: lerobot/pi05_base
+      repo_id: lerobot/pi05_base
+      source: huggingface
+    - label: Pi0 base
+      value: lerobot/pi0_base
+      repo_id: lerobot/pi0_base
+      source: huggingface
+    - label: Pi0FAST base
+      value: lerobot/pi0fast-base
+      repo_id: lerobot/pi0fast-base
+      source: huggingface
+
+  profiles:
+    robotis_omx_ai:
+      profile_id: robotis_omx_ai
+      display_name: ROBOTIS OMX-AI
+      robot_family: robotis_omx
+      robot_type: omx_follower
+      teleop_type: omx_leader
+      robot_port: ""
+      teleop_port: ""
+      robot_id: omx_follower_arm
+      teleop_id: omx_leader_arm
+      calibration_dir: ""
+      camera_map:
+        top: top_camera
+        wrist: wrist_camera
+      fps: 30
+      observation_schema: lerobot_omx_v1
+      action_schema: lerobot_omx_v1
+      safety_limits:
+        live_enabled: true
+        require_operator_confirm: true
+        allow_policy_rollout: true
+        allow_recording: true
+        allow_training: true
+        allow_teleoperation: true
+      command_templates:
+        find_ports: ["lerobot-find-port"]
+        teleoperate: ["python", "-m", "lerobot.teleoperate"]
+        record: ["lerobot-record"]
+        train: ["lerobot-train"]
+        rollout: ["lerobot-rollout"]
+      supported_workflows:
+        - find_ports
+        - teleoperate
+        - record
+        - train
+        - rollout
+      test_fixture: fake_omx_ai
+
+    so101:
+      profile_id: so101
+      display_name: SO-101
+      robot_family: so101
+      robot_type: so101_follower
+      teleop_type: so101_leader
+      robot_port: ""
+      teleop_port: ""
+      robot_id: atr-so101-follower
+      teleop_id: atr-so101-leader
+      calibration_dir: memory/lerobot/calibration
+      camera_map:
+        top: top_camera
+        wrist: wrist_camera
+      fps: 30
+      observation_schema: lerobot_so101_v1
+      action_schema: lerobot_so101_v1
+      safety_limits:
+        live_enabled: false
+        require_operator_confirm: true
+        allow_policy_rollout: false
+        allow_recording: false
+        allow_training: false
+        allow_teleoperation: false
+      command_templates:
+        find_ports: ["lerobot-find-port"]
+        teleoperate: ["lerobot-teleoperate"]
+        record: ["lerobot-record"]
+        train: ["lerobot-train"]
+        rollout: ["lerobot-rollout"]
+      supported_workflows:
+        - find_ports
+        - teleoperate
+        - record
+        - train
+        - rollout
+      test_fixture: fake_so101
+
+    fake_omx_ai:
+      inherits: robotis_omx_ai
+      profile_id: fake_omx_ai
+      display_name: Fake ROBOTIS OMX-AI
+      robot_port: /dev/ttyUSB_FAKE_FOLLOWER
+      teleop_port: /dev/ttyUSB_FAKE_LEADER
+      test_fixture: fake_omx_ai
+
+    fake_so101:
+      inherits: so101
+      profile_id: fake_so101
+      display_name: Fake SO-101
+      robot_port: /dev/ttyUSB_FAKE_SO101_FOLLOWER
+      teleop_port: /dev/ttyUSB_FAKE_SO101_LEADER
+      test_fixture: fake_so101

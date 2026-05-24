@@ -1,0 +1,159 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080" role="img" aria-labelledby="title desc">
+<title id="title">Autonomous Researcher End-to-End Runtime</title>
+<desc id="desc">Generated from prompt/00_system_architecture.prompt.md</desc>
+<defs>
+<filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="0" stdDeviation="0" flood-color="#ffffff" flood-opacity="0"/></filter>
+<marker id="arrow" markerWidth="16" markerHeight="16" refX="12" refY="8" orient="auto" markerUnits="strokeWidth"><path d="M2,2 L14,8 L2,14 Z" fill="#374151"/></marker>
+<style>
+text { font-family: Noto Sans CJK KR, Noto Sans, DejaVu Sans, Arial, sans-serif; fill: #111827; }
+.title { font-size: 42px; font-weight: 760; letter-spacing: -0.3px; }
+.subtitle { font-size: 25px; font-weight: 560; fill: #4b5563; }
+.section { font-size: 29px; font-weight: 720; }
+.label { font-size: 26px; font-weight: 720; }
+.body { font-size: 24px; font-weight: 500; }
+.small { font-size: 24px; font-weight: 500; }
+.tiny { font-size: 24px; font-weight: 500; }
+.mono { font-family: JetBrains Mono, DejaVu Sans Mono, monospace; font-size: 24px; }
+</style>
+</defs>
+<rect width="1920" height="1080" fill="#ffffff"/>
+<text x="80" y="72" class="title">Autonomous Researcher End-to-End Runtime</text>
+<text x="82" y="116" class="subtitle">Live GUI + Device Workspaces + NemoClaw/vLLM + Tool Bridges</text>
+<line x1="80" y1="136" x2="1840" y2="136" stroke="#e5e7eb" stroke-width="2"/>
+<rect x="80" y="150" width="1760" height="140" rx="18" fill="#ffffff" stroke="#374151" stroke-width="2"/>
+<text x="120" y="197" class="section" font-size="32" fill="#1e3a8a">
+<tspan x="120" dy="0">Operator / GUI Surface</tspan>
+</text>
+<text x="120" y="238" class="body" font-size="24" fill="#4b5563">
+<tspan x="120" dy="0">Main GUI: run, model, device controls · Live GUI chat: value intake + workflow trigger · Device Workspaces:</tspan>
+<tspan x="120" dy="30">3DP, Windows, LeRobot · atr CLI + SSE state snapshots</tspan>
+</text>
+<rect x="80" y="330" width="300" height="170" rx="18" fill="#f8fbff" stroke="#2563eb" stroke-width="2"/>
+<rect x="80" y="330" width="300" height="8" rx="4" fill="#2563eb"/>
+<text x="102" y="375" class="label" font-size="28">
+<tspan x="102" dy="0">Orchestrator</tspan>
+</text>
+<text x="102" y="418" class="small" font-size="24" fill="#4b5563">
+<tspan x="102" dy="0">route + state</tspan>
+</text>
+<rect x="430" y="330" width="300" height="170" rx="18" fill="#f8fbff" stroke="#2563eb" stroke-width="2"/>
+<rect x="430" y="330" width="300" height="8" rx="4" fill="#2563eb"/>
+<text x="452" y="375" class="label" font-size="28">
+<tspan x="452" dy="0">Design</tspan>
+</text>
+<text x="452" y="418" class="small" font-size="24" fill="#4b5563">
+<tspan x="452" dy="0">experiment_spec</tspan>
+</text>
+<rect x="780" y="330" width="300" height="170" rx="18" fill="#f7fcfa" stroke="#047857" stroke-width="2"/>
+<rect x="780" y="330" width="300" height="8" rx="4" fill="#047857"/>
+<text x="802" y="375" class="label" font-size="28">
+<tspan x="802" dy="0">Specimen</tspan>
+<tspan x="802" dy="34">Making</tspan>
+</text>
+<text x="802" y="449" class="small" font-size="24" fill="#4b5563">
+<tspan x="802" dy="0">STL +</tspan>
+<tspan x="802" dy="30">printer.prepare</tspan>
+</text>
+<rect x="1130" y="330" width="300" height="170" rx="18" fill="#f7fcfa" stroke="#047857" stroke-width="2"/>
+<rect x="1130" y="330" width="300" height="8" rx="4" fill="#047857"/>
+<text x="1152" y="375" class="label" font-size="28">
+<tspan x="1152" dy="0">Vision</tspan>
+</text>
+<text x="1152" y="418" class="small" font-size="24" fill="#4b5563">
+<tspan x="1152" dy="0">observation</tspan>
+</text>
+<rect x="1480" y="330" width="300" height="170" rx="18" fill="#f7fcfa" stroke="#047857" stroke-width="2"/>
+<rect x="1480" y="330" width="300" height="8" rx="4" fill="#047857"/>
+<text x="1502" y="375" class="label" font-size="28">
+<tspan x="1502" dy="0">Manipulation</tspan>
+</text>
+<text x="1502" y="418" class="small" font-size="24" fill="#4b5563">
+<tspan x="1502" dy="0">robot / SARM</tspan>
+</text>
+<line x1="380" y1="415" x2="430" y2="415" stroke="#1f3a5f" stroke-width="4" marker-end="url(#arrow)"/>
+<line x1="730" y1="415" x2="780" y2="415" stroke="#1f3a5f" stroke-width="4" marker-end="url(#arrow)"/>
+<line x1="1080" y1="415" x2="1130" y2="415" stroke="#1f3a5f" stroke-width="4" marker-end="url(#arrow)"/>
+<line x1="1430" y1="415" x2="1480" y2="415" stroke="#1f3a5f" stroke-width="4" marker-end="url(#arrow)"/>
+<rect x="1480" y="540" width="300" height="170" rx="18" fill="#fffaf2" stroke="#b45309" stroke-width="2"/>
+<rect x="1480" y="540" width="300" height="8" rx="4" fill="#b45309"/>
+<text x="1502" y="585" class="label" font-size="28">
+<tspan x="1502" dy="0">Lab Equipment</tspan>
+</text>
+<text x="1502" y="628" class="small" font-size="24" fill="#4b5563">
+<tspan x="1502" dy="0">Windows / UTM</tspan>
+</text>
+<rect x="1130" y="540" width="300" height="170" rx="18" fill="#fbf9ff" stroke="#6d28d9" stroke-width="2"/>
+<rect x="1130" y="540" width="300" height="8" rx="4" fill="#6d28d9"/>
+<text x="1152" y="585" class="label" font-size="28">
+<tspan x="1152" dy="0">Analysis</tspan>
+</text>
+<text x="1152" y="628" class="small" font-size="24" fill="#4b5563">
+<tspan x="1152" dy="0">metrics + score</tspan>
+</text>
+<rect x="780" y="540" width="300" height="170" rx="18" fill="#fbf9ff" stroke="#6d28d9" stroke-width="2"/>
+<rect x="780" y="540" width="300" height="8" rx="4" fill="#6d28d9"/>
+<text x="802" y="585" class="label" font-size="28">
+<tspan x="802" dy="0">Knowledge</tspan>
+</text>
+<text x="802" y="628" class="small" font-size="24" fill="#4b5563">
+<tspan x="802" dy="0">RAG + memory</tspan>
+</text>
+<rect x="430" y="540" width="300" height="170" rx="18" fill="#fff8f8" stroke="#b91c1c" stroke-width="2"/>
+<rect x="430" y="540" width="300" height="8" rx="4" fill="#b91c1c"/>
+<text x="452" y="585" class="label" font-size="28">
+<tspan x="452" dy="0">Guardian</tspan>
+</text>
+<text x="452" y="628" class="small" font-size="24" fill="#4b5563">
+<tspan x="452" dy="0">policy gate</tspan>
+</text>
+<rect x="80" y="540" width="300" height="170" rx="18" fill="#ffffff" stroke="#374151" stroke-width="2"/>
+<text x="102" y="588" class="label" font-size="28" fill="#374151">
+<tspan x="102" dy="0">Loop Signal</tspan>
+</text>
+<text x="102" y="628" class="small" font-size="24" fill="#4b5563">
+<tspan x="102" dy="0">revise ·</tspan>
+<tspan x="102" dy="30">continue · stop</tspan>
+<tspan x="102" dy="30">· fail-safe</tspan>
+</text>
+<line x1="1630" y1="500" x2="1630" y2="540" stroke="#1f3a5f" stroke-width="4" marker-end="url(#arrow)"/>
+<line x1="1480" y1="625" x2="1430" y2="625" stroke="#1f3a5f" stroke-width="4" marker-end="url(#arrow)"/>
+<line x1="1130" y1="625" x2="1080" y2="625" stroke="#1f3a5f" stroke-width="4" marker-end="url(#arrow)"/>
+<line x1="780" y1="625" x2="730" y2="625" stroke="#1f3a5f" stroke-width="4" marker-end="url(#arrow)"/>
+<line x1="430" y1="625" x2="380" y2="625" stroke="#1f3a5f" stroke-width="4" marker-end="url(#arrow)" stroke-dasharray="12 10"/>
+<line x1="230" y1="540" x2="230" y2="500" stroke="#1f3a5f" stroke-width="4" marker-end="url(#arrow)" stroke-dasharray="12 10"/>
+<rect x="80" y="750" width="520" height="300" rx="30" fill="#f8fbff" stroke="#2563eb" stroke-width="2"/>
+<text x="108" y="798" class="section" font-size="30" fill="#2563eb">
+<tspan x="108" dy="0">Model Runtime</tspan>
+</text>
+<text x="108" y="848" class="body" font-size="24" fill="#111827">
+<tspan x="108" dy="0">NemoClaw/vLLM default · E4B</tspan>
+<tspan x="108" dy="30">orchestrator, E2B formatter ·</tspan>
+<tspan x="108" dy="30">31B deep reasoning on demand ·</tspan>
+<tspan x="108" dy="30">Ollama optional branch</tspan>
+</text>
+<rect x="700" y="750" width="520" height="300" rx="30" fill="#f7fcfa" stroke="#047857" stroke-width="2"/>
+<text x="728" y="798" class="section" font-size="30" fill="#047857">
+<tspan x="728" dy="0">MCP Tools / Device</tspan>
+<tspan x="728" dy="38">Bridges</tspan>
+</text>
+<text x="728" y="878" class="body" font-size="24" fill="#111827">
+<tspan x="728" dy="0">TPMS geometry + STL assets ·</tspan>
+<tspan x="728" dy="30">PrusaSlicer + PrusaLink short-</tspan>
+<tspan x="728" dy="30">name start · Windows PyAutoGUI</tspan>
+<tspan x="728" dy="30">macros · LeRobot</tspan>
+<tspan x="728" dy="30">teleop/record/train/rollout</tspan>
+</text>
+<rect x="1320" y="750" width="520" height="300" rx="30" fill="#fffaf2" stroke="#b45309" stroke-width="2"/>
+<text x="1348" y="798" class="section" font-size="30" fill="#b45309">
+<tspan x="1348" dy="0">Memory / Logs /</tspan>
+<tspan x="1348" dy="38">Artifacts</tspan>
+</text>
+<text x="1348" y="878" class="body" font-size="24" fill="#111827">
+<tspan x="1348" dy="0">ExperimentDB + FailureMemory ·</tspan>
+<tspan x="1348" dy="30">Prusa/Windows/LeRobot</tspan>
+<tspan x="1348" dy="30">connection memory · Run</tspan>
+<tspan x="1348" dy="30">artifacts: STL, G-code, logs,</tspan>
+<tspan x="1348" dy="30">datasets, policies · Docs +</tspan>
+<tspan x="1348" dy="30">HybridRAG + session state</tspan>
+</text>
+</svg>

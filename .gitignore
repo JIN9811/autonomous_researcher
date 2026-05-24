@@ -1,0 +1,67 @@
+# Python / local environments
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+env/
+
+# Local secrets and machine-specific environment files
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*token*
+*secret*
+*password*
+
+# Runtime/user state. Keep folder README files tracked.
+memory/*
+!memory/README.md
+!memory/.gitkeep
+!memory/__init__.py
+!memory/*.py
+runs/*
+!runs/README.md
+!runs/.gitkeep
+artifacts/*
+!artifacts/README.md
+!artifacts/.gitkeep
+outputs/*
+!outputs/README.md
+!outputs/.gitkeep
+user_files/*
+!user_files/README.md
+!user_files/.gitkeep
+
+# Generated hardware / experiment outputs
+*.stl
+*.gcode
+*.3mf
+*.obj
+*.ply
+*.step
+*.stp
+*.log
+*.safetensors
+*.ckpt
+*.pt
+*.pth
+*.bin
+
+# Local GUI/image rendering environments
+image/.render_venv/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/

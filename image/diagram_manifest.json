@@ -1,0 +1,432 @@
+{
+  "canvas": {
+    "width": 1920,
+    "height": 1080,
+    "min_font_px": 24,
+    "ppt_ratio": "16:9"
+  },
+  "diagrams": [
+    {
+      "slug": "00_system_architecture",
+      "type": "system",
+      "title": "Autonomous Researcher End-to-End Runtime",
+      "subtitle": "Live GUI + Device Workspaces + NemoClaw/vLLM + Tool Bridges",
+      "prompt_focus": "전체 autonomous researcher 시스템 구조를 PPT용 16:9 벡터 다이어그램으로 표현한다. Main GUI, Live GUI, 3DP/Windows/LeRobot device workspaces, agent workflow, NemoClaw/vLLM runtime, tool bridges, memory/logging을 명확히 분리하고 현재 실가동 경로를 화살표로 표시한다.",
+      "operator": [
+        "Main GUI: run, model, device controls",
+        "Live GUI chat: value intake + workflow trigger",
+        "Device Workspaces: 3DP, Windows, LeRobot",
+        "atr CLI + SSE state snapshots"
+      ],
+      "workflow": [
+        "Orchestrator",
+        "Design",
+        "Specimen Making",
+        "Vision",
+        "Manipulation",
+        "Lab Equipment",
+        "Analysis",
+        "Knowledge",
+        "Guardian"
+      ],
+      "runtime": [
+        "NemoClaw/vLLM default",
+        "E4B orchestrator, E2B formatter",
+        "31B deep reasoning on demand",
+        "Ollama optional branch"
+      ],
+      "tools": [
+        "TPMS geometry + STL assets",
+        "PrusaSlicer + PrusaLink short-name start",
+        "Windows PyAutoGUI macros",
+        "LeRobot teleop/record/train/rollout"
+      ],
+      "memory": [
+        "ExperimentDB + FailureMemory",
+        "Prusa/Windows/LeRobot connection memory",
+        "Run artifacts: STL, G-code, logs, datasets, policies",
+        "Docs + HybridRAG + session state"
+      ]
+    },
+    {
+      "slug": "01_orchestrator_agent",
+      "type": "agent",
+      "title": "Orchestrator Agent",
+      "stage": "Live GUI orchestration + run-loop routing",
+      "prompt_focus": "Orchestrator Agent를 상위 대화형 조율자로 표현한다. 실험 의도 수집, 필수값 검증, 실행 트리거 안내, live/test/virtual/installed/actual-print routing, stage handoff, SSE 이벤트 스트리밍, E4B 기반 빠른 응답을 강조한다.",
+      "role": "사용자 대화를 검증된 experiment_spec과 stage handoff 흐름으로 변환한다.",
+      "inputs": [
+        "operator goal / chat / trigger phrase",
+        "mode: live, test, virtual bridge, installed printer, actual print",
+        "Main GUI backend and model state",
+        "3DP test options and device workspace settings",
+        "current state snapshot and agent registry"
+      ],
+      "actions": [
+        "Check required values",
+        "Update Live GUI memory",
+        "Route mode-specific path",
+        "Emit stage handoff events",
+        "Coordinate model readiness"
+      ],
+      "outputs": [
+        "missing-value checklist or confirmed experiment_spec",
+        "next stage decision",
+        "visible planning and handoff messages",
+        "run metadata and state transition",
+        "Design Agent handoff package"
+      ],
+      "tools": [
+        "FastAPI controller",
+        "RunLoop / Router",
+        "ModelRouter",
+        "NemoClaw/vLLM",
+        "SSE stream"
+      ],
+      "safety": [
+        "No fabricated required values",
+        "No direct hardware execution",
+        "Block handoff on missing values",
+        "Show blocked state visibly"
+      ]
+    },
+    {
+      "slug": "02_design_agent",
+      "type": "agent",
+      "title": "Design Agent",
+      "stage": "Design stage",
+      "prompt_focus": "Design Agent를 FDM-printable gyroid TPMS metamaterial 설계자로 표현한다. BO-ready numeric parameters, cell size, relative density, cap skin intent, printability constraints, final authoritative experiment_spec 생성을 강조한다.",
+      "role": "실험 목표와 제약조건을 연속 단일 바디 TPMS specimen candidate로 변환한다.",
+      "inputs": [
+        "objective / metric / loading mode",
+        "material and printer defaults",
+        "specimen size and cell size",
+        "relative density / thickness",
+        "prior results / failure memory"
+      ],
+      "actions": [
+        "Validate dimensions",
+        "Generate gyroid TPMS parameters",
+        "Apply FDM printability constraints",
+        "Rank BO-ready candidates",
+        "Estimate mass and volume"
+      ],
+      "outputs": [
+        "experiment_spec",
+        "selected TPMS candidate",
+        "cell_size_mm / unit_cells",
+        "relative_density / mass",
+        "cap skin and printability notes"
+      ],
+      "tools": [
+        "DesignAgent algorithm",
+        "ExperimentDB",
+        "FailureMemory",
+        "geometry parameter schema",
+        "E4B review"
+      ],
+      "safety": [
+        "Final values are authoritative",
+        "No G-code or printer action",
+        "Reject disconnected geometry",
+        "Consistent mm/g units"
+      ]
+    },
+    {
+      "slug": "03_specimen_making_agent",
+      "type": "agent",
+      "title": "Specimen Making Agent + Printer Boundary",
+      "stage": "Specimen + printer preparation stage",
+      "prompt_focus": "Specimen Making Agent를 TPMS STL 생성, PrusaSlicer slicing, PrusaLink upload/start 경계 담당자로 표현한다. slicer settings, virtual/installed/actual print options, transfer idle wait, metadata-resolved 8.3 short filename start를 강조한다.",
+      "role": "최종 design spec을 STL, G-code, PrusaLink start-ready 상태로 변환한다.",
+      "inputs": [
+        "final experiment_spec",
+        "3DP GUI profile options",
+        "virtual / installed / actual print mode",
+        "Prusa connection memory",
+        "stop / safe-stop flags"
+      ],
+      "actions": [
+        "Generate continuous TPMS STL",
+        "Check mesh and manufacturability",
+        "Slice with PrusaSlicer profile",
+        "Upload G-code and wait idle",
+        "Start metadata short filename"
+      ],
+      "outputs": [
+        "specimen_result",
+        "STL path and G-code path",
+        "slicer settings",
+        "PrusaLink upload/start trace",
+        "autoejection gate / bounds"
+      ],
+      "tools": [
+        "TPMS STL generator",
+        "Mesh quality check",
+        "PrusaSlicer CLI",
+        "PrusaLinkClient / printer.prepare",
+        "GCodeSafetyValidator"
+      ],
+      "safety": [
+        "Gates control upload/start/ejection",
+        "Wait for /api/v1/job=204 clear",
+        "Start metadata short filename",
+        "No unsupported SetReady dependency"
+      ]
+    },
+    {
+      "slug": "04_vision_agent",
+      "type": "agent",
+      "title": "Vision Agent",
+      "stage": "Vision stage",
+      "prompt_focus": "Vision Agent를 typed observation provider로 표현한다. top/wrist cameras, LeRobot dataset frames, simulator sources, specimen/equipment observations, uncertainty metadata, downstream manipulation/guardian feedback를 강조한다.",
+      "role": "카메라, dataset, simulator에서 검증 가능한 observation을 만들고 다음 stage에 전달한다.",
+      "inputs": [
+        "current experiment state",
+        "top/wrist camera config",
+        "LeRobot dataset samples",
+        "specimen/equipment request",
+        "capture schema"
+      ],
+      "actions": [
+        "Capture or load frame",
+        "Extract observation",
+        "Attach source and confidence",
+        "Write evidence link",
+        "Report stale camera state"
+      ],
+      "outputs": [
+        "vision_observation",
+        "frame metadata",
+        "protocol_note",
+        "uncertainty / blocked state",
+        "vision status"
+      ],
+      "tools": [
+        "camera bridge",
+        "OpenCV sources",
+        "LeRobot dataset path",
+        "camera simulator",
+        "ToolRegistry"
+      ],
+      "safety": [
+        "Read-only hardware behavior",
+        "No gate bypass",
+        "Fail closed on ambiguous camera",
+        "No contact inference without evidence"
+      ]
+    },
+    {
+      "slug": "05_manipulation_agent",
+      "type": "agent",
+      "title": "Manipulation Agent",
+      "stage": "Manipulation / LeRobot stage",
+      "prompt_focus": "Manipulation Agent를 LeRobot 기반 robot runtime 담당자로 표현한다. teleoperation, recording, local dataset visualization, training, inference/rollout, by-id port resolution, top/wrist multi-camera, safe rollout clamp, ACT temporal ensemble, SARM 내부 submodule을 강조한다.",
+      "role": "LeRobot workflow와 SARM submodule을 통해 물리 robot manipulation을 관리한다.",
+      "inputs": [
+        "follower and leader IDs",
+        "saved serial by-id links",
+        "top/wrist camera profiles",
+        "dataset / task / train params",
+        "policy path / rollout options"
+      ],
+      "actions": [
+        "Resolve ports by hardware identity",
+        "Run teleop and recording",
+        "Visualize local datasets",
+        "Train LeRobot policy",
+        "Run rollout until stop/duration"
+      ],
+      "outputs": [
+        "teleop/record/train/rollout sessions",
+        "dataset and checkpoint paths",
+        "progress / ETA / logs",
+        "manipulation trace",
+        "force-stop cleanup events"
+      ],
+      "tools": [
+        "conda env lerobot",
+        "LeRobot CLI/API bridge",
+        "top/wrist cameras",
+        "robot process registry",
+        "SARM submodule"
+      ],
+      "safety": [
+        "SARM is internal only",
+        "Live gate required",
+        "Re-resolve by-id after reconnect",
+        "Stop before motion",
+        "Force-stop clears processes"
+      ]
+    },
+    {
+      "slug": "06_lab_equipment_agent",
+      "type": "agent",
+      "title": "Lab Equipment Agent",
+      "stage": "Equipment / Windows bridge stage",
+      "prompt_focus": "Lab Equipment Agent를 Windows PyAutoGUI bridge와 allowlisted macro runner 담당자로 표현한다. token verified discovery, scanned candidate save, quick select/delete, Windows-owned program1 execution, Linux GUI/API control boundary를 강조한다.",
+      "role": "Windows PC의 GUI 장비 프로그램을 안전한 HTTP bridge와 allowlisted macro로 실행한다.",
+      "inputs": [
+        "selected Windows bridge",
+        "token host/port memory",
+        "program_id such as program1",
+        "structured macro args",
+        "health state"
+      ],
+      "actions": [
+        "Scan token-matching hosts",
+        "Save quick-select candidate",
+        "Health check and list programs",
+        "Run allowlisted macro",
+        "Collect logs/screenshots"
+      ],
+      "outputs": [
+        "bridge discovery result",
+        "equipment_result",
+        "program1 status",
+        "Windows step_trace/log",
+        "protocol_note"
+      ],
+      "tools": [
+        "pyautogui.health/discover",
+        "pyautogui.list/run",
+        "Windows Bridge server",
+        "macro registry",
+        "UTM fallback"
+      ],
+      "safety": [
+        "Windows owns live macros",
+        "Token-verified internal network",
+        "No shell/Python/PowerShell/eval",
+        "Fail safe on lost health"
+      ]
+    },
+    {
+      "slug": "07_analysis_agent",
+      "type": "agent",
+      "title": "Analysis Agent",
+      "stage": "Analysis stage",
+      "prompt_focus": "Analysis Agent를 design, printer, robot, equipment 실행 결과 해석 담당자로 표현한다. 최종 채택값과 중간 제안값 분리, slicer/printer/LeRobot log parsing, measured vs predicted comparison, uncertainty와 root-cause extraction을 강조한다.",
+      "role": "실험 산출물과 실행 로그를 metric, score, failure hypothesis로 변환한다.",
+      "inputs": [
+        "final experiment_spec",
+        "STL/G-code/slicer logs",
+        "PrusaLink event logs",
+        "LeRobot and camera data",
+        "equipment logs / metrics"
+      ],
+      "actions": [
+        "Check parameter consistency",
+        "Compute metrics and score",
+        "Parse device logs",
+        "Estimate uncertainty",
+        "Identify root-cause hypotheses"
+      ],
+      "outputs": [
+        "analysis_report",
+        "score / uncertainty",
+        "measured-vs-predicted summary",
+        "failure labels",
+        "next learning signal"
+      ],
+      "tools": [
+        "analysis code",
+        "artifact readers",
+        "Prusa/LeRobot log parsers",
+        "ExperimentDB handoff",
+        "E4B note"
+      ],
+      "safety": [
+        "Separate measured and predicted data",
+        "No hardware mutation",
+        "Preserve raw artifacts",
+        "Flag missing measurements"
+      ]
+    },
+    {
+      "slug": "08_knowledge_agent",
+      "type": "agent",
+      "title": "Knowledge Agent",
+      "stage": "Knowledge stage",
+      "prompt_focus": "Knowledge Agent를 docs/RAG와 persistent runtime evidence writer로 표현한다. 성공한 PrusaLink short-name start workflow, Windows bridge behavior, LeRobot profile conventions, failure memory, future prompt updates를 강조한다.",
+      "role": "분석 결과와 검증된 실가동 절차를 프로젝트 지식으로 정리한다.",
+      "inputs": [
+        "analysis result",
+        "run artifacts",
+        "docs/RAG query",
+        "runtime validation logs",
+        "failure context"
+      ],
+      "actions": [
+        "Retrieve local context",
+        "Classify evidence by role",
+        "Write experiment memory",
+        "Write failure memory",
+        "Update guidance snippets"
+      ],
+      "outputs": [
+        "knowledge record",
+        "memory update",
+        "retrieved context",
+        "validated workflow summary",
+        "next-design guidance"
+      ],
+      "tools": [
+        "HybridRAG",
+        "ExperimentDB",
+        "FailureMemory",
+        "local docs",
+        "artifact indexers"
+      ],
+      "safety": [
+        "Keep source context visible",
+        "Design stays in Design Agent",
+        "Do not store broad secrets",
+        "Mark validation context"
+      ]
+    },
+    {
+      "slug": "09_guardian_agent",
+      "type": "agent",
+      "title": "Guardian Agent",
+      "stage": "Guardian stage",
+      "prompt_focus": "Guardian Agent를 physical execution safety/policy gate로 표현한다. design constraints, printer state, PrusaLink metadata start path, LeRobot live gates, Windows bridge allowlist, continue/stop/error transition을 강조한다.",
+      "role": "전체 loop의 안전성, 실행 권한, 다음 transition을 최종 판정한다.",
+      "inputs": [
+        "current state and tool call",
+        "experiment_spec",
+        "specimen_result",
+        "device status",
+        "safety validation / bounds",
+        "failure memory"
+      ],
+      "actions": [
+        "Validate constraints",
+        "Check live/test gates",
+        "Inspect printer start path",
+        "Check robot ports/cameras",
+        "Check Windows allowlist"
+      ],
+      "outputs": [
+        "guardian_decision",
+        "continue / stop / error",
+        "reject reasons",
+        "remediation checklist",
+        "policy audit event"
+      ],
+      "tools": [
+        "policy checks",
+        "GCodeSafetyValidator",
+        "PrusaLink checks",
+        "LeRobot registry",
+        "Windows bridge registry"
+      ],
+      "safety": [
+        "Default deny unknown hardware",
+        "Reject unsafe device state",
+        "Require short-name PrusaLink start",
+        "No unsupported SetReady assumption"
+      ]
+    }
+  ]
+}

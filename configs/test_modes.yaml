@@ -1,0 +1,34 @@
+# File purpose:
+# - Test, replay, and fault injection mode configuration.
+#
+# Key classes/functions:
+# - Referenced by orchestrator control logic.
+#
+# Inputs/outputs:
+# - Input: test mode options and fault catalog
+# - Output: mode-specific run parameters
+#
+# Dependencies:
+# - app/controller.py, orchestrator/run_loop.py
+#
+# Modification guide:
+# - Safe places to edit: fault names and replay speed
+# - Risky places to edit: modes key names
+# - Related files: configs/system.yaml, app/main.py
+
+test_modes:
+  dry_run:
+    enabled: true
+    max_cycles: 6
+  replay:
+    enabled: true
+    speed_seconds: 0.15
+  fault_injection:
+    enabled: true
+    catalog:
+      - printer_failure
+      - camera_disconnect
+      - grasp_failure
+      - utm_not_ready
+      - model_timeout
+      - malformed_tool_output

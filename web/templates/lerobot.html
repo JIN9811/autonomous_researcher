@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<!--
+File purpose:
+- Dedicated LeRobot / ROBOTIS workspace for practical teleoperation, recording, training, rollout, and local visualization.
+
+Key classes/functions:
+- DOM surface consumed by web/static/lerobot.js
+
+Inputs/outputs:
+- Input: /api/lerobot/* responses
+- Output: operator-facing device workflow controls, local path selection, command previews, and dataset media visualization
+
+Dependencies:
+- /static/styles.css
+- /static/lerobot.js
+
+Modification guide:
+- Safe places to edit: labels, grouping, helper text
+- Risky places to edit: element IDs consumed by JavaScript
+- Related files: app/main.py, device_bridges/lerobot_bridge.py
+-->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{ title }}</title>
+    <link rel="stylesheet" href="/static/styles.css?v=20260507-lerobot-folded" />
+  </head>
+  <body>
+    <main class="page lerobot-page">
+      <section class="hero panel lerobot-hero">
+        <div class="hero-copy">
+          <p class="eyebrow">LeRobot / ROBOTIS Workspace</p>
+          <h1>Lerobot Framework GUI</h1>
+          <p class="subhead">
+            Unified local GUI for LeRobot device setup, teleoperation, recording, dataset visualization, policy training, and rollout through the installed <code>lerobot</code> conda environment.
+          </p>
+          <div class="hero-badges">
+            <span class="hero-badge">conda env: lerobot</span>
+            <span class="hero-badge">local dataset first</span>
+            <span class="hero-badge">live gates explicit</span>
+          </div>
+        </div>
+        <div class="hero-stack">
+          <article class="status-card">
+            <div class="status-head">
+              <span class="status-title">Bridge Status</span>
+              <span id="lerobot-status-dot" class="status-dot idle"></span>
+            </div>
+            <strong id="lerobot-status-label">Reading config</strong>
+            <p id="lerobot-status-detail">Waiting for /api/lerobot/config.</p>
+          </article>
+          <article class="status-card">
+            <div class="status-head">
+              <span class="status-title">Default Paths</span>
+              <span id="lerobot-gate-dot" class="status-dot idle"></span>
+            </div>
+            <strong id="lerobot-gate-label">Gate summary unavailable</strong>
+            <p id="lerobot-gate-detail">Profile live gates are loaded from configs/lerobot.yaml.</p>
+          </article>
+        </div>
+      </section>
+
+      <nav class="panel lerobot-quick-nav" aria-label="LeRobot workspace navigation">
+        <a href="#profile-execution">Profile</a>
+        <a href="#device-port-setup">Devices</a>
+        <a href="#local-paths">Paths</a>
+        <a href="#teleoperation-card">Teleop</a>
+        <a href="#recording-card">Record</a>
+        <a href="#visualization-card">Visualize</a>
+        <a href="#training-card">Train</a>
+        <a href="#rollout-card">Rollout</a>
+        <a href="#session-output">Logs</a>
+      </nav>
+
+      <section id="profile-execution" class="panel lerobot-config-panel">
+        <div class="panel-title-row">
+          <h2>1. Profile & Execution</h2>
+          <span id="lerobot-session-pill" class="badge idle">NO SESSION</span>
+        </div>
+        <div class="control-grid lerobot-control-grid">
+          <label>
+            Mode
+            <select id="lerobot-mode-select">
+              <option value="test">test</option>
+              <option value="live" selected>live</option>
+              <option value="replay">replay</option>
+              <option value="fault-injection">fault-injection</option>
+            </select>
+          </label>
+          <label>
+            Profile
+            <select id="lerobot-profile-select"></select>
+          </label>
+          <label>
+            FPS
+            <input id="lerobot-fps-input" type="number" min="1" value="30" />
+          </label>
+          <label>
+            Device
+            <input id="lerobot-device-input" type="text" value="cuda" />
+          </label>
+        </div>
+        <label class="checkbox-line">
+          <input id="lerobot-confirm-live-input" type="checkbox" checked />
+          Confirm live execution when mode=live and profile gates are enabled
+        </label>
+        <div class="button-row">
+          <button id="btn-lerobot-refresh" class="btn">Refresh</button>
+          <button id="btn-lerobot-save-profile" class="btn primary">Use Profile</button>
+          <button id="btn-lerobot-validate" class="btn">Validate Profile</button>
+          <button id="btn-lerobot-find-ports" class="btn">Scan Existing Ports</button>
+        </div>
+        <div id="lerobot-profile-action-status" class="lerobot-action-status idle">Waiting for profile action.</div>
+      </section>
+
+      <details id="device-port-setup" class="panel lerobot-device-panel lerobot-panel-details">
+        <summary class="panel-title-row lerobot-panel-summary">
+          <h2>2. Device Port Setup</h2>
+          <span class="hint">follower, leader, and multiple cameras are remembered per profile</span>
+        </summary>
+        <p class="subhead">
+          For follower/leader MotorBus setup: save a baseline, disconnect or reconnect one target arm, then detect and save the changed port. Camera setup is key-based; defaults are top and wrist, and more cameras can be added.
+        </p>
+        <div class="lerobot-device-grid">
+          <article class="lerobot-device-card">
+            <strong>Follower Arm</strong>
+            <code id="lerobot-follower-port-display">not saved</code>
+            <div class="button-row compact">
+              <button id="btn-port-baseline-follower" class="btn mini">Baseline</button>
+              <button id="btn-port-detect-follower" class="btn mini primary">Detect & Save</button>
+            </div>
+            <div id="lerobot-follower-action-status" class="lerobot-action-status idle">Waiting for follower action.</div>
+          </article>
+          <article class="lerobot-device-card">
+            <strong>Leader Arm</strong>
+            <code id="lerobot-leader-port-display">not saved</code>
+            <div class="button-row compact">
+              <button id="btn-port-baseline-leader" class="btn mini">Baseline</button>
+              <button id="btn-port-detect-leader" class="btn mini primary">Detect & Save</button>
+            </div>
+            <div id="lerobot-leader-action-status" class="lerobot-action-status idle">Waiting for leader action.</div>
+          </article>
+        </div>
+        <div class="lerobot-camera-manager">
+          <div class="panel-title-row compact-title">
+            <h2>Cameras</h2>
+            <span class="input-action-row">
+              <input id="lerobot-new-camera-key-input" type="text" placeholder="side, front, microscope..." />
+              <button id="btn-add-camera" class="btn mini" type="button">+ Camera</button>
+            </span>
+          </div>
+          <div id="lerobot-camera-card-list" class="lerobot-device-grid"></div>
+          <div id="lerobot-camera-manager-status" class="lerobot-action-status idle">Waiting for camera setup action.</div>
+        </div>
+        <details class="lerobot-details lerobot-port-panel">
+          <summary>Manual Port Override</summary>
+          <div class="input-action-row">
+            <input id="lerobot-manual-port-input" type="text" placeholder="/dev/ttyUSB0, /dev/ttyACM0, /dev/video0, or camera index 0" />
+            <button id="btn-port-save-manual" class="btn">Save Manual Port</button>
+          </div>
+          <div class="lerobot-inline-options">
+            <label>
+              Save Manual As
+              <select id="lerobot-manual-role-select">
+                <option value="follower">follower</option>
+                <option value="leader">leader</option>
+                <option value="camera">camera</option>
+              </select>
+            </label>
+            <label>
+              Camera Key
+              <input id="lerobot-manual-camera-key-input" type="text" value="top" />
+            </label>
+          </div>
+          <div id="lerobot-port-candidates" class="lerobot-port-list"></div>
+          <div id="lerobot-manual-port-action-status" class="lerobot-action-status idle">Waiting for manual save action.</div>
+        </details>
+        <div id="lerobot-camera-preview" class="lerobot-camera-preview">No camera capture yet.</div>
+      </details>
+
+      <section id="local-paths" class="panel lerobot-path-panel">
+        <div class="panel-title-row">
+          <h2>3. Local Paths</h2>
+          <span class="hint">LeRobot defaults, editable</span>
+        </div>
+        <div class="lerobot-path-grid">
+          <label>
+            Dataset Root
+            <span class="input-action-row">
+              <input id="lerobot-dataset-root-input" type="text" placeholder="~/.cache/huggingface/lerobot" />
+              <button id="btn-browse-dataset-root" class="btn mini" type="button">Browse</button>
+            </span>
+          </label>
+          <label>
+            Dataset Repo ID / Local Name
+            <span class="input-action-row">
+              <input id="lerobot-dataset-input" type="text" value="jin/record-test" placeholder="jin/record-test" />
+              <button id="btn-browse-dataset-repo" class="btn mini" type="button">Browse</button>
+            </span>
+          </label>
+          <label>
+            Policy / Output Root
+            <span class="input-action-row">
+              <input id="lerobot-output-dir-input" type="text" placeholder="outputs/train/atr_lerobot_train" />
+              <button id="btn-browse-output-dir" class="btn mini" type="button">Browse</button>
+            </span>
+          </label>
+          <label>
+            Policy Checkpoint / Repo
+            <span class="input-action-row">
+              <input id="lerobot-policy-input" type="text" placeholder="outputs/train/.../checkpoints/last/pretrained_model or HF repo id" />
+              <button id="btn-browse-policy" class="btn mini" type="button">Browse</button>
+            </span>
+          </label>
+        </div>
+        <div id="lerobot-browser" class="lerobot-browser hidden"></div>
+      </section>
+
+      <section class="lerobot-workflow-grid">
+        <article id="teleoperation-card" class="panel lerobot-workflow-card">
+          <div class="panel-title-row">
+            <h2>4. Teleoperation</h2>
+            <span class="hint">leader/follower control</span>
+          </div>
+          <div class="lerobot-form-grid single">
+            <label>
+              Teleop Duration Seconds (optional)
+              <input id="lerobot-teleop-time-input" type="number" min="0" step="1" placeholder="blank = until stopped" />
+            </label>
+            <label class="checkbox-line inline-check">
+              <input id="lerobot-display-data-input" type="checkbox" checked />
+              Display camera/joint visualization when supported
+            </label>
+          </div>
+          <div class="button-row compact">
+            <button id="btn-teleop-start" class="btn primary">Start Teleop</button>
+            <button id="btn-teleop-stop" class="btn danger">Stop Teleop</button>
+            <button id="btn-teleop-status" class="btn">Status</button>
+          </div>
+          <div id="lerobot-teleop-action-status" class="lerobot-action-status idle">Waiting for teleoperation action.</div>
+        </article>
+
+        <article id="recording-card" class="panel lerobot-workflow-card">
+          <div class="panel-title-row">
+            <h2>5. Recording</h2>
+            <span class="hint">local LeRobotDataset</span>
+          </div>
+          <div class="lerobot-form-grid">
+            <label>
+              Task Instruction
+              <input id="lerobot-task-input" type="text" value="Pick up the cylinder" />
+            </label>
+            <label>
+              Episodes
+              <input id="lerobot-episodes-input" type="number" min="1" value="5" />
+            </label>
+            <label>
+              Episode Time (s)
+              <input id="lerobot-episode-time-input" type="number" min="1" value="60" />
+            </label>
+            <label>
+              Reset Time (s)
+              <input id="lerobot-reset-time-input" type="number" min="0" value="30" />
+            </label>
+          </div>
+          <div class="lerobot-inline-options">
+            <label class="checkbox-line"><input id="lerobot-resume-input" type="checkbox" /> Resume dataset</label>
+            <label class="checkbox-line"><input id="lerobot-push-hub-input" type="checkbox" /> Push to Hub</label>
+          </div>
+          <p class="hint">
+            Live controls map to LeRobot recording keys: Save/Next sends Right Arrow, Retry sends Left Arrow, Finish sends Esc. Force Stop performs emergency cleanup of LeRobot live processes if a session or stale subprocess keeps devices open.
+          </p>
+          <div class="button-row compact">
+            <button id="btn-record-start" class="btn primary">Start Record</button>
+            <button id="btn-record-next" class="btn primary">Save / Next -></button>
+            <button id="btn-record-retry" class="btn warning">Retry Current <-</button>
+            <button id="btn-record-finish" class="btn">Finish Gracefully (Esc)</button>
+            <button id="btn-record-stop" class="btn danger">Force Stop</button>
+          </div>
+          <div id="lerobot-record-action-status" class="lerobot-action-status idle">Waiting for recording action.</div>
+        </article>
+
+        <details id="visualization-card" class="panel lerobot-workflow-card lerobot-visualization-panel lerobot-panel-details">
+          <summary class="panel-title-row lerobot-panel-summary">
+            <h2>6. Dataset Visualization</h2>
+            <span class="hint">LeRobot HTML viewer + local preview</span>
+          </summary>
+          <div class="lerobot-card-note">
+            Open LeRobot's dataset visualizer for the selected episode. The default uses <code>python -m lerobot.scripts.visualize_dataset_html</code>, which serves the same multi-camera HTML viewer provided by LeRobot.
+          </div>
+          <div class="lerobot-form-grid">
+            <label>
+              Episode Index
+              <input id="lerobot-episode-index-input" type="number" min="0" value="0" />
+            </label>
+            <label>
+              Visualization Dataset Path (optional)
+              <span class="input-action-row">
+                <input id="lerobot-visualization-path-input" type="text" placeholder="leave blank to use dataset root + repo id" />
+                <button id="btn-browse-visualization" class="btn mini" type="button">Browse</button>
+              </span>
+            </label>
+          </div>
+          <details class="lerobot-details">
+            <summary>LeRobot Visualization Options</summary>
+            <div class="lerobot-form-grid train-form-grid">
+              <label>
+                Visualization Tool
+                <select id="lerobot-visualization-tool-input">
+                  <option value="html" selected>LeRobot HTML visualizer</option>
+                  <option value="rerun">Rerun stream/script</option>
+                </select>
+              </label>
+              <label>
+                Rerun Mode
+                <select id="lerobot-visualization-mode-input">
+                  <option value="local" selected>local - spawn Rerun viewer</option>
+                  <option value="distant">distant - serve websocket</option>
+                </select>
+              </label>
+              <label>
+                Batch Size
+                <input id="lerobot-visualization-batch-size-input" type="number" min="1" value="32" />
+              </label>
+              <label>
+                Num Workers
+                <input id="lerobot-visualization-workers-input" type="number" min="0" value="4" />
+              </label>
+              <label>
+                Web Port
+                <input id="lerobot-visualization-web-port-input" type="number" min="1" value="9090" />
+              </label>
+              <label>
+                WS Port
+                <input id="lerobot-visualization-ws-port-input" type="number" min="1" value="9087" />
+              </label>
+              <label>
+                Tolerance Seconds
+                <input id="lerobot-visualization-tolerance-input" type="number" min="0" step="0.0001" value="0.0001" />
+              </label>
+              <label>
+                Visualizer Output Dir
+                <span class="input-action-row">
+                  <input id="lerobot-visualization-output-dir-input" type="text" placeholder="outputs/train/visualize_dataset" />
+                  <button id="btn-browse-visualization-output" class="btn mini" type="button">Browse</button>
+                </span>
+              </label>
+            </div>
+            <div class="lerobot-inline-options">
+              <label class="checkbox-line"><input id="lerobot-visualization-save-input" type="checkbox" /> Rerun tool only: save .rrd instead of spawning local viewer</label>
+            </div>
+          </details>
+          <div class="button-row compact">
+            <button id="btn-dataset-visualize" class="btn primary">Open LeRobot Viz</button>
+            <button id="btn-dataset-visualize-status" class="btn">Viz Status</button>
+            <button id="btn-dataset-visualize-stop" class="btn danger">Stop Viz</button>
+            <button id="btn-dataset-preview" class="btn">Preview Local Media</button>
+          </div>
+          <div id="lerobot-visualization-action-status" class="lerobot-action-status idle">Waiting for visualization action.</div>
+          <div id="lerobot-visualization" class="lerobot-visualization"></div>
+        </details>
+
+        <article id="training-card" class="panel lerobot-workflow-card lerobot-training-card">
+          <div class="panel-title-row">
+            <h2>7. Training</h2>
+            <span class="hint">policy checkpoint · GPU job</span>
+          </div>
+          <div class="lerobot-card-note">
+            Core settings match the practical LeRobot train command. Advanced optimizer, scheduler, policy, and WandB options stay available below without crowding the default path.
+          </div>
+          <div class="lerobot-form-grid train-form-grid train-core-grid">
+            <label>
+              Policy Type
+              <select id="lerobot-policy-type-input">
+                <option value="act" selected>act</option>
+                <option value="diffusion">diffusion</option>
+                <option value="smolvla">smolvla</option>
+                <option value="pi0">pi0</option>
+                <option value="pi05">pi05 (Pi0.5)</option>
+                <option value="pi0fast">pi0fast</option>
+                <option value="vqbet">vqbet</option>
+              </select>
+            </label>
+            <label>
+              Train Source Policy / HF Base
+              <input id="lerobot-train-source-policy-input" type="text" placeholder="lerobot/pi05_base" />
+            </label>
+            <label>
+              Job Name
+              <input id="lerobot-job-name-input" type="text" value="atr_lerobot_act_train" />
+            </label>
+            <label>
+              Policy Repo ID
+              <input id="lerobot-train-policy-repo-input" type="text" placeholder="jin/robotis_omx_ai_act_policy" />
+            </label>
+            <label>
+              Batch Size
+              <input id="lerobot-train-batch-size-input" type="number" min="1" value="8" />
+            </label>
+            <label>
+              Steps
+              <input id="lerobot-train-steps-input" type="number" min="1" value="100000" />
+            </label>
+            <label>
+              Num Workers
+              <input id="lerobot-train-workers-input" type="number" min="0" value="4" />
+            </label>
+          </div>
+
+          <details class="lerobot-details" open>
+            <summary>Schedule & Checkpoints</summary>
+            <div class="lerobot-form-grid train-form-grid">
+            <label>
+              Eval Frequency
+              <input id="lerobot-train-eval-freq-input" type="number" min="1" value="20000" />
+            </label>
+            <label>
+              Log Frequency
+              <input id="lerobot-train-log-freq-input" type="number" min="1" value="200" />
+            </label>
+            <label>
+              Save Frequency
+              <input id="lerobot-train-save-freq-input" type="number" min="1" value="20000" />
+            </label>
+            <label>
+              Seed
+              <input id="lerobot-train-seed-input" type="number" placeholder="optional" />
+            </label>
+            </div>
+            <div class="lerobot-inline-options">
+              <label class="checkbox-line"><input id="lerobot-train-save-checkpoint-input" type="checkbox" checked /> Save checkpoints</label>
+            </div>
+          </details>
+
+          <details class="lerobot-details">
+            <summary>Optimizer & Scheduler</summary>
+            <div class="lerobot-form-grid train-form-grid">
+            <label>
+              Optimizer
+              <select id="lerobot-train-optimizer-input">
+                <option value="" selected>policy default</option>
+                <option value="adamw">adamw</option>
+                <option value="adam">adam</option>
+                <option value="sgd">sgd</option>
+                <option value="multi_adam">multi_adam</option>
+              </select>
+            </label>
+            <label>
+              Optimizer LR
+              <input id="lerobot-train-lr-input" type="number" min="0" step="0.000001" placeholder="policy default" />
+            </label>
+            <label>
+              Weight Decay
+              <input id="lerobot-train-weight-decay-input" type="number" min="0" step="0.000001" placeholder="policy default" />
+            </label>
+            <label>
+              Grad Clip Norm
+              <input id="lerobot-train-grad-clip-input" type="number" min="0" step="0.1" placeholder="policy default" />
+            </label>
+            <label>
+              Scheduler
+              <select id="lerobot-train-scheduler-input">
+                <option value="" selected>policy default</option>
+                <option value="cosine_decay_with_warmup">cosine_decay_with_warmup</option>
+                <option value="diffuser">diffuser</option>
+                <option value="vqbet">vqbet</option>
+              </select>
+            </label>
+            <label>
+              Warmup Steps
+              <input id="lerobot-train-warmup-input" type="number" min="0" placeholder="optional" />
+            </label>
+            <label>
+              Decay Steps
+              <input id="lerobot-train-decay-steps-input" type="number" min="0" placeholder="optional" />
+            </label>
+            <label>
+              Peak LR
+              <input id="lerobot-train-peak-lr-input" type="number" min="0" step="0.000001" placeholder="optional" />
+            </label>
+            <label>
+              Decay LR
+              <input id="lerobot-train-decay-lr-input" type="number" min="0" step="0.000001" placeholder="optional" />
+            </label>
+            </div>
+          </details>
+
+          <details class="lerobot-details">
+            <summary>Policy, WandB & Advanced CLI</summary>
+            <div class="lerobot-form-grid train-form-grid">
+            <label>
+              Policy n_obs_steps
+              <input id="lerobot-train-n-obs-input" type="number" min="1" value="1" />
+            </label>
+            <label>
+              Policy chunk_size
+              <input id="lerobot-train-chunk-input" type="number" min="1" value="100" />
+            </label>
+            <label>
+              Policy n_action_steps
+              <input id="lerobot-train-n-action-input" type="number" min="1" value="100" />
+            </label>
+            <label>
+              Eval Batch Size
+              <input id="lerobot-train-eval-batch-input" type="number" min="1" placeholder="optional" />
+            </label>
+            <label>
+              WandB Project
+              <input id="lerobot-train-wandb-project-input" type="text" placeholder="optional" />
+            </label>
+            <label>
+              WandB Mode
+              <select id="lerobot-train-wandb-mode-input">
+                <option value="disabled" selected>disabled</option>
+                <option value="offline">offline</option>
+                <option value="online">online</option>
+              </select>
+            </label>
+            <label class="planning-message-label train-extra-args">
+              Additional Train CLI Args
+              <textarea id="lerobot-train-extra-args-input" rows="4" placeholder="one --key=value per line, e.g. --policy.use_torch_compile=true"></textarea>
+            </label>
+            </div>
+            <div class="lerobot-inline-options">
+              <label class="checkbox-line"><input id="lerobot-train-use-amp-input" type="checkbox" /> policy.use_amp</label>
+              <label class="checkbox-line"><input id="lerobot-train-wandb-input" type="checkbox" /> wandb.enable</label>
+            </div>
+          </details>
+          <div id="lerobot-train-progress" class="lerobot-training-progress hidden">
+            <div class="training-progress-head">
+              <strong>Progress</strong>
+              <span id="lerobot-train-progress-label">0 / 0 · ETA unknown</span>
+            </div>
+            <div class="training-progress-track"><span id="lerobot-train-progress-bar"></span></div>
+          </div>
+          <div class="button-row compact">
+            <button id="btn-train-start" class="btn primary">Start Train</button>
+            <button id="btn-train-cancel" class="btn danger">Cancel Train</button>
+            <button id="btn-train-status" class="btn">Status</button>
+            <button id="btn-policy-refresh" class="btn">Refresh Policies</button>
+          </div>
+          <div id="lerobot-train-action-status" class="lerobot-action-status idle">Waiting for training action.</div>
+          <div id="lerobot-policy-list" class="lerobot-policy-list"></div>
+        </article>
+
+        <article id="rollout-card" class="panel lerobot-workflow-card">
+          <div class="panel-title-row">
+            <h2>8. Inference / Rollout</h2>
+            <span class="hint">policy-controlled robot run</span>
+          </div>
+          <div class="lerobot-form-grid single">
+            <label>
+              Policy Preset / Existing HF Policy
+              <select id="lerobot-policy-select"></select>
+            </label>
+            <label>
+              Rollout Policy Checkpoint / Output File
+              <span class="input-action-row">
+                <input id="lerobot-rollout-policy-input" type="text" placeholder="outputs/train/.../checkpoints/last/pretrained_model or model.safetensors" />
+                <button id="btn-browse-rollout-policy" class="btn mini" type="button">Browse</button>
+                <button id="btn-rollout-latest-policy" class="btn mini" type="button">Use Latest</button>
+              </span>
+            </label>
+            <label>
+              Rollout Task Instruction
+              <textarea id="lerobot-rollout-instruction-input" rows="3" placeholder="e.g. Pick up the cube and place it in the target area."></textarea>
+            </label>
+            <label>
+              Rollout Duration Seconds (optional)
+              <input id="lerobot-rollout-duration-input" type="number" min="1" step="1" placeholder="blank = run until Stop Rollout" />
+            </label>
+            <label>
+              Safe Action Clamp
+              <span class="input-action-row">
+                <span class="checkbox-inline">
+                  <input id="lerobot-rollout-action-clamp-input" type="checkbox" checked />
+                  Enabled
+                </span>
+                <input id="lerobot-rollout-max-relative-target-input" type="number" min="1" step="1" value="5" title="LeRobot expects robot.max_relative_target as an integer safety limit" />
+              </span>
+            </label>
+            <label>
+              ACT Temporal Ensemble
+              <span class="input-action-row">
+                <span class="checkbox-inline">
+                  <input id="lerobot-rollout-temporal-ensemble-input" type="checkbox" checked />
+                  Enabled
+                </span>
+                <input id="lerobot-rollout-temporal-coeff-input" type="number" min="0" step="0.001" value="0.01" title="LeRobot policy.temporal_ensemble_coeff; enables policy.n_action_steps=1" />
+              </span>
+            </label>
+            <label>
+              Observation / Note JSON
+              <textarea id="lerobot-observation-input" rows="4">{"observation_id":"manual","anomaly":false}</textarea>
+            </label>
+          </div>
+          <div class="button-row compact">
+            <button id="btn-rollout-start" class="btn primary">Start Rollout</button>
+            <button id="btn-rollout-stop" class="btn danger">Stop Rollout</button>
+            <button id="btn-rollout-status" class="btn">Status</button>
+            <button id="btn-dataset-inspect" class="btn">Inspect Dataset</button>
+          </div>
+          <div id="lerobot-rollout-action-status" class="lerobot-action-status idle">Waiting for rollout action.</div>
+        </article>
+      </section>
+
+      <section id="session-output" class="split lerobot-output-split">
+        <article class="panel">
+          <div class="panel-title-row">
+            <h2>Recent Sessions</h2>
+            <span class="hint">shared server state</span>
+          </div>
+          <div id="lerobot-session-list" class="list"></div>
+        </article>
+        <article class="panel">
+          <div class="panel-title-row">
+            <h2>Last Result</h2>
+            <span class="hint">command preview + trace + logs</span>
+          </div>
+          <pre id="lerobot-output" class="command-output">Waiting for action.</pre>
+        </article>
+      </section>
+    </main>
+    <script src="/static/lerobot.js?v=20260507-vizhtml" defer></script>
+  </body>
+</html>

@@ -1,0 +1,140 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080" role="img" aria-labelledby="title desc">
+<title id="title">Orchestrator Agent</title>
+<desc id="desc">Generated from prompt/01_orchestrator_agent.prompt.md</desc>
+<defs>
+<filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="0" stdDeviation="0" flood-color="#ffffff" flood-opacity="0"/></filter>
+<marker id="arrow" markerWidth="16" markerHeight="16" refX="12" refY="8" orient="auto" markerUnits="strokeWidth"><path d="M2,2 L14,8 L2,14 Z" fill="#374151"/></marker>
+<style>
+text { font-family: Noto Sans CJK KR, Noto Sans, DejaVu Sans, Arial, sans-serif; fill: #111827; }
+.title { font-size: 42px; font-weight: 760; letter-spacing: -0.3px; }
+.subtitle { font-size: 25px; font-weight: 560; fill: #4b5563; }
+.section { font-size: 29px; font-weight: 720; }
+.label { font-size: 26px; font-weight: 720; }
+.body { font-size: 24px; font-weight: 500; }
+.small { font-size: 24px; font-weight: 500; }
+.tiny { font-size: 24px; font-weight: 500; }
+.mono { font-family: JetBrains Mono, DejaVu Sans Mono, monospace; font-size: 24px; }
+</style>
+</defs>
+<rect width="1920" height="1080" fill="#ffffff"/>
+<text x="80" y="72" class="title">Orchestrator Agent</text>
+<text x="82" y="116" class="subtitle">Live GUI orchestration + run-loop routing</text>
+<line x1="80" y1="136" x2="1840" y2="136" stroke="#e5e7eb" stroke-width="2"/>
+<rect x="560" y="185" width="800" height="610" rx="22" fill="#ffffff" stroke="#1e3a8a" stroke-width="2"/>
+<circle cx="960" cy="265" r="68" fill="#f8fbff" stroke="#1e3a8a" stroke-width="2"/>
+<text x="920" y="282" class="title" font-size="40" fill="#1e3a8a">
+<tspan x="920" dy="0">OA</tspan>
+</text>
+<text x="610" y="370" class="section" font-size="32" fill="#1e3a8a">
+<tspan x="610" dy="0">Role</tspan>
+</text>
+<text x="610" y="415" class="body" font-size="26">
+<tspan x="610" dy="0">사용자 대화를 검증된 experiment_spec과 stage handoff</tspan>
+<tspan x="610" dy="33">흐름으로 변환한다.</tspan>
+</text>
+<text x="610" y="510" class="section" font-size="32" fill="#1e3a8a">
+<tspan x="610" dy="0">Core Actions</tspan>
+</text>
+<circle cx="618" cy="545" r="6" fill="#2563eb"/>
+<text x="638" y="552" class="body" font-size="24">
+<tspan x="638" dy="0">Check required values</tspan>
+</text>
+<circle cx="618" cy="585" r="6" fill="#2563eb"/>
+<text x="638" y="592" class="body" font-size="24">
+<tspan x="638" dy="0">Update Live GUI memory</tspan>
+</text>
+<circle cx="618" cy="625" r="6" fill="#2563eb"/>
+<text x="638" y="632" class="body" font-size="24">
+<tspan x="638" dy="0">Route mode-specific path</tspan>
+</text>
+<circle cx="618" cy="665" r="6" fill="#2563eb"/>
+<text x="638" y="672" class="body" font-size="24">
+<tspan x="638" dy="0">Emit stage handoff events</tspan>
+</text>
+<circle cx="618" cy="705" r="6" fill="#2563eb"/>
+<text x="638" y="712" class="body" font-size="24">
+<tspan x="638" dy="0">Coordinate model readiness</tspan>
+</text>
+<rect x="80" y="190" width="420" height="650" rx="20" fill="#f7fcfa" stroke="#065f46" stroke-width="2"/>
+<text x="115" y="242" class="section" font-size="34" fill="#065f46">
+<tspan x="115" dy="0">Inputs</tspan>
+</text>
+<circle cx="128" cy="285" r="6" fill="#047857"/>
+<text x="148" y="292" class="body" font-size="24">
+<tspan x="148" dy="0">operator goal / chat</tspan>
+<tspan x="148" dy="30">/ trigger phrase</tspan>
+</text>
+<circle cx="128" cy="355" r="6" fill="#047857"/>
+<text x="148" y="362" class="body" font-size="24">
+<tspan x="148" dy="0">mode: live, test,</tspan>
+<tspan x="148" dy="30">virtual bridge,</tspan>
+<tspan x="148" dy="30">installed printer,</tspan>
+<tspan x="148" dy="30">actual print</tspan>
+</text>
+<circle cx="128" cy="485" r="6" fill="#047857"/>
+<text x="148" y="492" class="body" font-size="24">
+<tspan x="148" dy="0">Main GUI backend and</tspan>
+<tspan x="148" dy="30">model state</tspan>
+</text>
+<circle cx="128" cy="555" r="6" fill="#047857"/>
+<text x="148" y="562" class="body" font-size="24">
+<tspan x="148" dy="0">3DP test options and</tspan>
+<tspan x="148" dy="30">device workspace</tspan>
+<tspan x="148" dy="30">settings</tspan>
+</text>
+<circle cx="128" cy="655" r="6" fill="#047857"/>
+<text x="148" y="662" class="body" font-size="24">
+<tspan x="148" dy="0">current state</tspan>
+<tspan x="148" dy="30">snapshot and agent</tspan>
+<tspan x="148" dy="30">registry</tspan>
+</text>
+<rect x="1420" y="190" width="420" height="650" rx="20" fill="#fffaf2" stroke="#92400e" stroke-width="2"/>
+<text x="1455" y="242" class="section" font-size="34" fill="#92400e">
+<tspan x="1455" dy="0">Outputs</tspan>
+</text>
+<circle cx="1468" cy="285" r="6" fill="#b45309"/>
+<text x="1488" y="292" class="body" font-size="24">
+<tspan x="1488" dy="0">missing-value</tspan>
+<tspan x="1488" dy="30">checklist or</tspan>
+<tspan x="1488" dy="30">confirmed</tspan>
+<tspan x="1488" dy="30">experiment_spec</tspan>
+</text>
+<circle cx="1468" cy="415" r="6" fill="#b45309"/>
+<text x="1488" y="422" class="body" font-size="24">
+<tspan x="1488" dy="0">next stage decision</tspan>
+</text>
+<circle cx="1468" cy="455" r="6" fill="#b45309"/>
+<text x="1488" y="462" class="body" font-size="24">
+<tspan x="1488" dy="0">visible planning and</tspan>
+<tspan x="1488" dy="30">handoff messages</tspan>
+</text>
+<circle cx="1468" cy="525" r="6" fill="#b45309"/>
+<text x="1488" y="532" class="body" font-size="24">
+<tspan x="1488" dy="0">run metadata and</tspan>
+<tspan x="1488" dy="30">state transition</tspan>
+</text>
+<circle cx="1468" cy="595" r="6" fill="#b45309"/>
+<text x="1488" y="602" class="body" font-size="24">
+<tspan x="1488" dy="0">Design Agent handoff</tspan>
+<tspan x="1488" dy="30">package</tspan>
+</text>
+<line x1="500" y1="515" x2="560" y2="515" stroke="#065f46" stroke-width="5" marker-end="url(#arrow)"/>
+<line x1="1360" y1="515" x2="1420" y2="515" stroke="#92400e" stroke-width="5" marker-end="url(#arrow)"/>
+<rect x="80" y="850" width="860" height="195" rx="18" fill="#fbf9ff" stroke="#6d28d9" stroke-width="2"/>
+<text x="115" y="895" class="section" font-size="30" fill="#6d28d9">
+<tspan x="115" dy="0">Tools / Interfaces</tspan>
+</text>
+<text x="120" y="937" class="body" font-size="24" fill="#111827">
+<tspan x="120" dy="0">FastAPI controller · RunLoop / Router · ModelRouter</tspan>
+<tspan x="120" dy="30">· NemoClaw/vLLM · SSE stream</tspan>
+</text>
+<rect x="980" y="850" width="860" height="195" rx="18" fill="#fff8f8" stroke="#b91c1c" stroke-width="2"/>
+<text x="1015" y="895" class="section" font-size="30" fill="#b91c1c">
+<tspan x="1015" dy="0">Safety / Contract</tspan>
+</text>
+<text x="1020" y="937" class="body" font-size="24" fill="#111827">
+<tspan x="1020" dy="0">No fabricated required values · No direct hardware</tspan>
+<tspan x="1020" dy="30">execution · Block handoff on missing values · Show</tspan>
+<tspan x="1020" dy="30">blocked state visibly</tspan>
+</text>
+</svg>

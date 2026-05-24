@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<!--
+File purpose:
+- Live-mode chat workspace opened from the main dashboard before hardware execution.
+
+Key classes/functions:
+- Chat-only planning layout consumed by web/static/planning.js
+
+Inputs/outputs:
+- Input: query string goal and runtime API state
+- Output: OpenClaw-style orchestrator conversation, agent handoff messages, and STL artifacts
+
+Dependencies:
+- /static/styles.css
+- /static/planning.js
+
+Modification guide:
+- Safe places to edit: chat copy and non-API visual layout
+- Risky places to edit: IDs consumed by planning.js
+- Related files: app/main.py, web/static/app.js
+-->
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{ title }}</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="page planning-page chat-only">
+      <section class="panel planning-chat-shell">
+        <header class="planning-chat-header">
+          <div>
+            <p class="eyebrow">Live GUI</p>
+            <h1>Live Orchestrator</h1>
+            <p class="subhead">오케스트레이터, Design Agent handoff, Specimen Making Agent handoff를 한 대화창에서 정리합니다.</p>
+          </div>
+          <div class="planning-runtime-strip" aria-label="runtime status">
+            <span id="planning-state-dot" class="status-dot idle"></span>
+            <span id="planning-stage-label">Stage: loading</span>
+            <span id="planning-run-detail">Reading shared controller state.</span>
+            <span id="planning-chat-status" class="badge idle">READY</span>
+          </div>
+        </header>
+
+        <div id="planning-chat-log" class="planning-chat-log planning-chat-window"></div>
+
+        <footer class="planning-composer">
+          <input id="planning-goal-input" type="hidden" />
+          <label class="planning-message-label" for="planning-message-input">
+            Message
+            <textarea
+              id="planning-message-input"
+              rows="4"
+              placeholder="예: PLA로 30 x 30 x 30 mm 압축 시편을 만들고 에너지 흡수량/질량을 최대화하고 싶어. 충분하면 실험 수행."
+            ></textarea>
+          </label>
+          <div class="button-row planning-composer-actions">
+            <button id="btn-planning-refresh" class="btn">Refresh</button>
+            <button id="btn-planning-send" class="btn primary">Send</button>
+          </div>
+          <p class="hint planning-trigger-hint">
+            <code>실험 수행</code>: live mode에서는 Prusa MK4S upload/start까지 진행 · <code>테스트 모드</code>: LLM 테스트값 생성 후 가상/통신검증 handoff
+          </p>
+        </footer>
+      </section>
+
+      <div id="planning-spec-summary" hidden></div>
+    </main>
+
+    <script src="/static/planning.js" defer></script>
+  </body>
+</html>

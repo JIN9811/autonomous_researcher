@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DEFAULT_REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+REPO_ROOT="${ATR_REPO_ROOT:-${DEFAULT_REPO_ROOT}}"
+exec docker run --rm \
+  -v "${REPO_ROOT}:${REPO_ROOT}" \
+  -w "${REPO_ROOT}" \
+  atr-prusa-slicer:ubuntu24.04 "$@"

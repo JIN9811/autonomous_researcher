@@ -1,0 +1,134 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080" role="img" aria-labelledby="title desc">
+<title id="title">Design Agent</title>
+<desc id="desc">Generated from prompt/02_design_agent.prompt.md</desc>
+<defs>
+<filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="0" stdDeviation="0" flood-color="#ffffff" flood-opacity="0"/></filter>
+<marker id="arrow" markerWidth="16" markerHeight="16" refX="12" refY="8" orient="auto" markerUnits="strokeWidth"><path d="M2,2 L14,8 L2,14 Z" fill="#374151"/></marker>
+<style>
+text { font-family: Noto Sans CJK KR, Noto Sans, DejaVu Sans, Arial, sans-serif; fill: #111827; }
+.title { font-size: 42px; font-weight: 760; letter-spacing: -0.3px; }
+.subtitle { font-size: 25px; font-weight: 560; fill: #4b5563; }
+.section { font-size: 29px; font-weight: 720; }
+.label { font-size: 26px; font-weight: 720; }
+.body { font-size: 24px; font-weight: 500; }
+.small { font-size: 24px; font-weight: 500; }
+.tiny { font-size: 24px; font-weight: 500; }
+.mono { font-family: JetBrains Mono, DejaVu Sans Mono, monospace; font-size: 24px; }
+</style>
+</defs>
+<rect width="1920" height="1080" fill="#ffffff"/>
+<text x="80" y="72" class="title">Design Agent</text>
+<text x="82" y="116" class="subtitle">Design stage</text>
+<line x1="80" y1="136" x2="1840" y2="136" stroke="#e5e7eb" stroke-width="2"/>
+<rect x="560" y="185" width="800" height="610" rx="22" fill="#ffffff" stroke="#1e3a8a" stroke-width="2"/>
+<circle cx="960" cy="265" r="68" fill="#f8fbff" stroke="#1e3a8a" stroke-width="2"/>
+<text x="920" y="282" class="title" font-size="40" fill="#1e3a8a">
+<tspan x="920" dy="0">DA</tspan>
+</text>
+<text x="610" y="370" class="section" font-size="32" fill="#1e3a8a">
+<tspan x="610" dy="0">Role</tspan>
+</text>
+<text x="610" y="415" class="body" font-size="26">
+<tspan x="610" dy="0">실험 목표와 제약조건을 연속 단일 바디 TPMS specimen</tspan>
+<tspan x="610" dy="33">candidate로 변환한다.</tspan>
+</text>
+<text x="610" y="510" class="section" font-size="32" fill="#1e3a8a">
+<tspan x="610" dy="0">Core Actions</tspan>
+</text>
+<circle cx="618" cy="545" r="6" fill="#2563eb"/>
+<text x="638" y="552" class="body" font-size="24">
+<tspan x="638" dy="0">Validate dimensions</tspan>
+</text>
+<circle cx="618" cy="585" r="6" fill="#2563eb"/>
+<text x="638" y="592" class="body" font-size="24">
+<tspan x="638" dy="0">Generate gyroid TPMS parameters</tspan>
+</text>
+<circle cx="618" cy="625" r="6" fill="#2563eb"/>
+<text x="638" y="632" class="body" font-size="24">
+<tspan x="638" dy="0">Apply FDM printability constraints</tspan>
+</text>
+<circle cx="618" cy="665" r="6" fill="#2563eb"/>
+<text x="638" y="672" class="body" font-size="24">
+<tspan x="638" dy="0">Rank BO-ready candidates</tspan>
+</text>
+<circle cx="618" cy="705" r="6" fill="#2563eb"/>
+<text x="638" y="712" class="body" font-size="24">
+<tspan x="638" dy="0">Estimate mass and volume</tspan>
+</text>
+<rect x="80" y="190" width="420" height="650" rx="20" fill="#f7fcfa" stroke="#065f46" stroke-width="2"/>
+<text x="115" y="242" class="section" font-size="34" fill="#065f46">
+<tspan x="115" dy="0">Inputs</tspan>
+</text>
+<circle cx="128" cy="285" r="6" fill="#047857"/>
+<text x="148" y="292" class="body" font-size="24">
+<tspan x="148" dy="0">objective / metric /</tspan>
+<tspan x="148" dy="30">loading mode</tspan>
+</text>
+<circle cx="128" cy="355" r="6" fill="#047857"/>
+<text x="148" y="362" class="body" font-size="24">
+<tspan x="148" dy="0">material and printer</tspan>
+<tspan x="148" dy="30">defaults</tspan>
+</text>
+<circle cx="128" cy="425" r="6" fill="#047857"/>
+<text x="148" y="432" class="body" font-size="24">
+<tspan x="148" dy="0">specimen size and</tspan>
+<tspan x="148" dy="30">cell size</tspan>
+</text>
+<circle cx="128" cy="495" r="6" fill="#047857"/>
+<text x="148" y="502" class="body" font-size="24">
+<tspan x="148" dy="0">relative density /</tspan>
+<tspan x="148" dy="30">thickness</tspan>
+</text>
+<circle cx="128" cy="565" r="6" fill="#047857"/>
+<text x="148" y="572" class="body" font-size="24">
+<tspan x="148" dy="0">prior results /</tspan>
+<tspan x="148" dy="30">failure memory</tspan>
+</text>
+<rect x="1420" y="190" width="420" height="650" rx="20" fill="#fffaf2" stroke="#92400e" stroke-width="2"/>
+<text x="1455" y="242" class="section" font-size="34" fill="#92400e">
+<tspan x="1455" dy="0">Outputs</tspan>
+</text>
+<circle cx="1468" cy="285" r="6" fill="#b45309"/>
+<text x="1488" y="292" class="body" font-size="24">
+<tspan x="1488" dy="0">experiment_spec</tspan>
+</text>
+<circle cx="1468" cy="325" r="6" fill="#b45309"/>
+<text x="1488" y="332" class="body" font-size="24">
+<tspan x="1488" dy="0">selected TPMS</tspan>
+<tspan x="1488" dy="30">candidate</tspan>
+</text>
+<circle cx="1468" cy="395" r="6" fill="#b45309"/>
+<text x="1488" y="402" class="body" font-size="24">
+<tspan x="1488" dy="0">cell_size_mm /</tspan>
+<tspan x="1488" dy="30">unit_cells</tspan>
+</text>
+<circle cx="1468" cy="465" r="6" fill="#b45309"/>
+<text x="1488" y="472" class="body" font-size="24">
+<tspan x="1488" dy="0">relative_density /</tspan>
+<tspan x="1488" dy="30">mass</tspan>
+</text>
+<circle cx="1468" cy="535" r="6" fill="#b45309"/>
+<text x="1488" y="542" class="body" font-size="24">
+<tspan x="1488" dy="0">cap skin and</tspan>
+<tspan x="1488" dy="30">printability notes</tspan>
+</text>
+<line x1="500" y1="515" x2="560" y2="515" stroke="#065f46" stroke-width="5" marker-end="url(#arrow)"/>
+<line x1="1360" y1="515" x2="1420" y2="515" stroke="#92400e" stroke-width="5" marker-end="url(#arrow)"/>
+<rect x="80" y="850" width="860" height="195" rx="18" fill="#fbf9ff" stroke="#6d28d9" stroke-width="2"/>
+<text x="115" y="895" class="section" font-size="30" fill="#6d28d9">
+<tspan x="115" dy="0">Tools / Interfaces</tspan>
+</text>
+<text x="120" y="937" class="body" font-size="24" fill="#111827">
+<tspan x="120" dy="0">DesignAgent algorithm · ExperimentDB · FailureMemory</tspan>
+<tspan x="120" dy="30">· geometry parameter schema · E4B review</tspan>
+</text>
+<rect x="980" y="850" width="860" height="195" rx="18" fill="#fff8f8" stroke="#b91c1c" stroke-width="2"/>
+<text x="1015" y="895" class="section" font-size="30" fill="#b91c1c">
+<tspan x="1015" dy="0">Safety / Contract</tspan>
+</text>
+<text x="1020" y="937" class="body" font-size="24" fill="#111827">
+<tspan x="1020" dy="0">Final values are authoritative · No G-code or</tspan>
+<tspan x="1020" dy="30">printer action · Reject disconnected geometry ·</tspan>
+<tspan x="1020" dy="30">Consistent mm/g units</tspan>
+</text>
+</svg>

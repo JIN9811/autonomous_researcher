@@ -1,0 +1,114 @@
+# File purpose:
+# - Global runtime behavior configuration.
+#
+# Key classes/functions:
+# - Parsed by utils.config_loader.load_yaml
+#
+# Inputs/outputs:
+# - Input: YAML key/value pairs
+# - Output: system runtime dictionary
+#
+# Dependencies:
+# - app.bootstrap
+#
+# Modification guide:
+# - Safe places to edit: mode defaults and intervals
+# - Risky places to edit: key names consumed by orchestrator
+# - Related files: configs/models.yaml, orchestrator/state.py
+
+system:
+  app_name: autonomous_researcher
+  default_mode: test
+  event_buffer_size: 300
+  loop_interval_seconds: 0.05
+  max_retry_per_stage: 2
+  planning_timeout_seconds: 600
+  planning_primary_timeout_seconds: 240
+  vllm_startup_task_types:
+    - orchestrator_plan
+  vllm_background_startup_models:
+    - gemma4:e2b-it-nvfp4
+    - gemma4:31b
+  prewarm_vllm_on_server_start: false
+  force_real_llm_in_test: true
+  allow_mock_fallback: false
+  inference_backend: vllm
+  guide_path: ./docs/project/Project_guide.txt
+  run_root: ./runs
+
+control:
+  allow_fault_injection: true
+  default_fault: none
+
+nemoclaw:
+  proxy_url: http://127.0.0.1:11435
+  token_file: ~/.nemoclaw/ollama-proxy-token
+  auto_start_proxy: true
+  proxy_script: ~/.nemoclaw/source/scripts/ollama-auth-proxy.js
+  proxy_port: 11435
+  backend_port: 11434
+  timeout_seconds: 300
+  keep_alive: "0"
+
+ollama:
+  base_url: http://127.0.0.1:11434
+  timeout_seconds: 300
+  keep_alive: "0"
+
+vllm:
+  base_url: http://127.0.0.1:8001/v1
+  api_key: EMPTY
+  timeout_seconds: 300
+  model_base_urls:
+    gemma4:31b: http://127.0.0.1:8001/v1
+    gemma4:e4b-it-nvfp4: http://127.0.0.1:8002/v1
+    gemma4:e2b-it-nvfp4: http://127.0.0.1:8003/v1
+  nemoclaw_k8s:
+    enabled: true
+    cluster_container: openshell-cluster-nemoclaw
+    namespace: nemoclaw-vllm
+    node_host: auto
+    startup_timeout_seconds: 1200
+    readiness_cache_seconds: 120
+    models:
+      gemma4:31b:
+        deployment: vllm-gemma4-31b
+        node_port: 31001
+        persistent: true
+        hf_repo: nvidia/Gemma-4-31B-IT-NVFP4
+        quantization: modelopt_fp4
+        speculative_method: mtp
+        assistant_repo: google/gemma-4-31B-it-assistant
+        num_speculative_tokens: 4
+        nvfp4_gemm_backend: marlin
+      gemma4:e4b-it-nvfp4:
+        deployment: vllm-gemma4-e4b
+        node_port: 31002
+        persistent: true
+        hf_repo: bg-digitalservices/Gemma-4-E4B-it-NVFP4
+        quantization: modelopt_fp4
+        speculative_method: mtp
+        assistant_repo: google/gemma-4-E4B-it-assistant
+        num_speculative_tokens: 4
+        nvfp4_gemm_backend: marlin
+      gemma4:e2b-it-nvfp4:
+        deployment: vllm-gemma4-e2b
+        node_port: 31003
+        persistent: true
+        hf_repo: bg-digitalservices/Gemma-4-E2B-it-NVFP4
+        quantization: modelopt_fp4
+        speculative_method: mtp
+        assistant_repo: google/gemma-4-E2B-it-assistant
+        num_speculative_tokens: 2
+        nvfp4_gemm_backend: marlin
+
+server:
+  host: 127.0.0.1
+  port: 7860
+  reload: false
+  workers: 1
+
+runtime_env:
+  AUTONOMOUS_BACKEND: vllm
+  AUTONOMOUS_USE_REAL_LLM_IN_TEST: "1"
+  AUTONOMOUS_ALLOW_MOCK_FALLBACK: "0"

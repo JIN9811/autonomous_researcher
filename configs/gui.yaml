@@ -1,0 +1,28 @@
+# File purpose:
+# - Web GUI layout and refresh behavior settings.
+#
+# Key classes/functions:
+# - Used by future frontend config endpoint.
+#
+# Inputs/outputs:
+# - Input: panel toggles and refresh timings
+# - Output: runtime GUI behavior preferences
+#
+# Dependencies:
+# - app/main.py (future extension)
+#
+# Modification guide:
+# - Safe places to edit: refresh intervals and panel defaults
+# - Risky places to edit: key names if frontend binds directly
+# - Related files: web/templates/index.html, web/static/app.js
+
+gui:
+  title: Autonomous AI Researcher
+  refresh_interval_ms: 1200
+  timeline_limit: 40
+  show_panels:
+    global_overview: true
+    agent_status: true
+    device_status: true
+    run_control: true
+    log_viewer: true

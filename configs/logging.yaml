@@ -1,0 +1,23 @@
+# File purpose:
+# - Structured logging behavior for system, agent, tool, and experiment logs.
+#
+# Key classes/functions:
+# - logging_system.logger_factory.build_logger_bundle
+#
+# Inputs/outputs:
+# - Input: logging levels and file paths
+# - Output: logger handlers and formatter settings
+#
+# Dependencies:
+# - logging_system/structured_logger.py
+#
+# Modification guide:
+# - Safe places to edit: levels and filenames
+# - Risky places to edit: key names referenced in logger_factory
+# - Related files: configs/system.yaml, logging_system/logger_factory.py
+
+logging:
+  level: INFO
+  json_file: structured.jsonl
+  human_file: summary.log
+  console: true
