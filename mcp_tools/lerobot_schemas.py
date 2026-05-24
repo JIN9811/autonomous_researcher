@@ -119,6 +119,9 @@ class LeRobotSessionRequest(LeRobotBaseRequest):
     rollout_max_relative_target: int = 5
     rollout_temporal_ensemble: bool = True
     rollout_temporal_ensemble_coeff: float = 0.01
+    rollout_inference_type: str = ""
+    rollout_rtc_execution_horizon: int | None = None
+    rollout_rtc_max_guidance_weight: float | None = None
     camera_enabled: bool = False
     display_data: bool = False
     resume: bool = False

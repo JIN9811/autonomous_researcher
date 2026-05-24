@@ -25,7 +25,8 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Literal
+from pathlib import Path
+from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, StreamingResponse
@@ -33,6 +34,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
+from agents.manipulation_agent import ManipulationAgent
+from agents.bo_agent import BOAgent
 from app.bootstrap import load_runtime
 from device_bridges.lerobot_bridge import LeRobotBridge, LeRobotBridgeConfig
 from device_bridges.prusa_bridge import PrusaBridgeConfig, PrinterAgenticWorkflow
@@ -41,8 +44,13 @@ from device_bridges.windows_pyautogui_bridge import (
     WindowsPyAutoGUIBridgeConfig,
     discover_windows_pyautogui_bridges,
 )
-from orchestrator.state import Mode
+from orchestrator.state import Mode, OrchestratorState, Stage
 from utils.config_loader import load_all_configs
+from utils.manipulation_profile import (
+    MANIPULATION_AGENT_PROFILE_PATH,
+    load_manipulation_agent_profile,
+    save_manipulation_agent_profile,
+)
 from utils.paths import resolve_path
 from utils.printer_profile import PRUSA_PRINT_PROFILE_PATH, load_prusa_print_profile, save_prusa_print_profile
 
@@ -52,8 +60,28 @@ app.mount("/static", StaticFiles(directory=str(resolve_path("web/static"))), nam
 
 controller = load_runtime()
 AGENT_BASELINE_DOC_PATH = resolve_path("docs/runtime/agent_program_baseline.md")
+BO_WORKSPACE_SETTINGS_PATH = resolve_path("memory/bo_workspace_settings.json")
+CAE_WORKSPACE_SETTINGS_PATH = resolve_path("memory/cae_workspace_settings.json")
 _LEROBOT_BRIDGE: LeRobotBridge | None = None
 _LEROBOT_CONFIG_MTIME_NS: int = -1
+
+
+def _read_workspace_settings(path: Path) -> dict[str, Any]:
+    """Read a workspace settings JSON file, returning an empty dict on first use/corruption."""
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def _write_workspace_settings(path: Path, payload: dict[str, Any]) -> dict[str, Any]:
+    """Persist workspace settings under memory/ using an atomic-ish replace."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    tmp.replace(path)
+    return payload
 
 
 @app.on_event("startup")
@@ -107,6 +135,42 @@ class RuntimeModelRequest(BaseModel):
     """Request body for managed vLLM model load/unload controls."""
 
     model: str = Field(..., min_length=1)
+
+
+class BOAgentRequest(BaseModel):
+    """Request body for BO Workspace benchmark and agent execution."""
+
+    strategy: str = "bo"
+    acquisition: str = "expected_improvement"
+    budget: int = 8
+    random_seed: int = 7
+    kappa: float = 2.0
+    xi: float = 0.01
+    exploration_weight: float = 0.35
+    exploitation_weight: float = 0.65
+    parameter_space: dict[str, object] = Field(default_factory=dict)
+    objective: dict[str, object] = Field(default_factory=dict)
+    mode: Literal["test", "live", "virtual", "replay"] = "test"
+
+
+class CAEAnalysisRequest(BaseModel):
+    """Request body for CAE Workspace analysis execution."""
+
+    mode: Literal["test", "live", "virtual", "replay"] = "test"
+    solver: str = "calculix"
+    mesher: str = "gmsh"
+    stl_path: str = ""
+    specimen_id: str = "manual-specimen"
+    specimen_size_mm: list[float] = Field(default_factory=lambda: [20.0, 20.0, 20.0])
+    mesh_size_mm: float = 2.0
+    elastic_modulus_mpa: float = 1800.0
+    poisson_ratio: float = 0.35
+    yield_strength_mpa: float = 35.0
+    load_max_n: float = 500.0
+    load_min_ratio: float = 0.1
+    cycles: int = 10
+    frequency_hz: float = 1.0
+    require_solver: bool = False
 
 
 class PrinterProfileRequest(BaseModel):
@@ -261,6 +325,7 @@ class LeRobotAPIRequest(BaseModel):
     rollout_max_relative_target: int = 5
     rollout_temporal_ensemble: bool = True
     rollout_temporal_ensemble_coeff: float = 0.01
+    rollout_inference_type: str = ""
     camera_enabled: bool = False
     display_data: bool = False
     resume: bool = False
@@ -279,6 +344,15 @@ class LeRobotAPIRequest(BaseModel):
     observation: dict[str, object] = Field(default_factory=dict)
     fault: str = ""
     dry_run: bool = True
+
+
+class ManipulationAgentBridgeRequest(LeRobotAPIRequest):
+    """Request body for running the actual Manipulation Agent from the LeRobot GUI."""
+
+    manipulation_strategy: str = "pi05_lerobot_policy"
+    source_location: str = "3dp_output_area"
+    target_location: str = "utm_fixture"
+    specimen_result: dict[str, object] = Field(default_factory=dict)
 
 
 class LeRobotRecordControlAPIRequest(BaseModel):
@@ -412,6 +486,26 @@ async def printer_gui(request: Request) -> HTMLResponse:
     )
 
 
+@app.get("/bo", response_class=HTMLResponse)
+async def bo_gui(request: Request) -> HTMLResponse:
+    """Serve Bayesian Optimization / MBO workspace GUI."""
+    return templates.TemplateResponse(
+        request=request,
+        name="bo.html",
+        context={"title": "BO Workspace"},
+    )
+
+
+@app.get("/cae", response_class=HTMLResponse)
+async def cae_gui(request: Request) -> HTMLResponse:
+    """Serve CAE analysis workspace GUI."""
+    return templates.TemplateResponse(
+        request=request,
+        name="cae.html",
+        context={"title": "CAE Analysis Workspace"},
+    )
+
+
 @app.get("/planning", response_class=HTMLResponse)
 async def planning(request: Request) -> HTMLResponse:
     """Serve the live-mode GUI workspace (legacy planning route)."""
@@ -447,6 +541,164 @@ async def windows_equipment_gui(request: Request) -> HTMLResponse:
 async def get_state() -> dict[str, object]:
     """Return current controller state."""
     return controller.snapshot()
+
+
+@app.get("/api/bo/config")
+async def get_bo_config() -> dict[str, object]:
+    """Return BO Workspace defaults and recent BO state."""
+    snapshot = controller.snapshot()
+    state = snapshot.get("state", {}) if isinstance(snapshot.get("state"), dict) else {}
+    metadata = state.get("run_metadata", {}) if isinstance(state.get("run_metadata"), dict) else {}
+    saved = _read_workspace_settings(BO_WORKSPACE_SETTINGS_PATH)
+    return {
+        "ok": True,
+        "defaults": BOAgent.defaults(),
+        "saved": saved,
+        "settings_path": str(BO_WORKSPACE_SETTINGS_PATH),
+        "recent": metadata.get("bo_agent", {}),
+        "state": state,
+    }
+
+
+@app.post("/api/bo/config")
+async def save_bo_config(req: BOAgentRequest) -> dict[str, object]:
+    """Persist BO Workspace settings for future GUI sessions."""
+    settings, warnings = BOAgent.normalize_settings(req.model_dump())
+    saved: dict[str, Any] = {
+        **settings,
+        "objective": req.objective,
+        "mode": req.mode,
+    }
+    _write_workspace_settings(BO_WORKSPACE_SETTINGS_PATH, saved)
+    return {
+        "ok": True,
+        "saved": saved,
+        "warnings": warnings,
+        "settings_path": str(BO_WORKSPACE_SETTINGS_PATH),
+    }
+
+
+@app.post("/api/bo/benchmark")
+async def post_bo_benchmark(req: BOAgentRequest) -> dict[str, object]:
+    """Run experiment.benchmark from BO Workspace without changing hardware state."""
+    settings, warnings = BOAgent.normalize_settings(req.model_dump())
+    objective = req.objective or {
+        "objective_id": "bo-workspace-objective",
+        "name": "Specimen printability and performance proxy",
+        "metric_name": "objective_score",
+        "direction": "maximize",
+        "tags": ["bo", "workspace"],
+    }
+    strategies = ["random", "grid", "bo"] if settings["strategy"] == "mbo" else [settings["strategy"]]
+    result = controller._deps.agent_context.tools.call(
+        "experiment.benchmark",
+        {
+            "budget": settings["budget"],
+            "strategies": strategies,
+            "seed": settings["random_seed"],
+            "parameter_space": settings["parameter_space"],
+            "objective": objective,
+            "request": {
+                "run_id": controller.snapshot()["state"]["run_id"],
+                "experiment_id": controller.snapshot()["state"]["experiment_id"],
+                "objective": objective,
+                "execution": {"mode": "virtual", "bridge": "virtual", "dry_run": True},
+                "metadata": {
+                    "source": "bo_workspace",
+                    "acquisition": settings["acquisition"],
+                    "kappa": settings["kappa"],
+                    "xi": settings["xi"],
+                    "exploration_weight": settings["exploration_weight"],
+                    "exploitation_weight": settings["exploitation_weight"],
+                },
+            },
+        },
+    )
+    return {"ok": bool(result.get("ok", False)), "warnings": warnings, "benchmark": result}
+
+
+@app.post("/api/bo/run")
+async def post_bo_run(req: BOAgentRequest) -> dict[str, object]:
+    """Run registered BO Agent and store latest advisory result in controller state."""
+    state = controller._state
+    if req.mode in {"test", "live", "replay"}:
+        state.mode = Mode(req.mode)
+    agent = controller._deps.agent_registry.get("bo_agent")
+    result = await agent.run_with_settings(state, controller._deps.agent_context, req.model_dump())
+    return {
+        "ok": bool(result.success),
+        "summary": result.summary,
+        "data": result.data,
+        "snapshot": controller.snapshot(),
+    }
+
+
+@app.get("/api/cae/config")
+async def get_cae_config() -> dict[str, object]:
+    """Return CAE Workspace defaults, solver health, and recent analysis state."""
+    health = controller._deps.agent_context.tools.call("cae.health", {})
+    snapshot = controller.snapshot()
+    state = snapshot.get("state", {}) if isinstance(snapshot.get("state"), dict) else {}
+    latest = state.get("latest_analysis", {}) if isinstance(state.get("latest_analysis"), dict) else {}
+    metadata = state.get("run_metadata", {}) if isinstance(state.get("run_metadata"), dict) else {}
+    saved = _read_workspace_settings(CAE_WORKSPACE_SETTINGS_PATH)
+    return {
+        "ok": True,
+        "health": health,
+        "defaults": health.get("defaults", {}),
+        "saved": saved,
+        "settings_path": str(CAE_WORKSPACE_SETTINGS_PATH),
+        "recent": latest.get("cae_result") or metadata.get("last_cae_result") or {},
+        "state": state,
+    }
+
+
+@app.post("/api/cae/config")
+async def save_cae_config(req: CAEAnalysisRequest) -> dict[str, object]:
+    """Persist CAE Workspace settings for future GUI sessions."""
+    saved = req.model_dump()
+    _write_workspace_settings(CAE_WORKSPACE_SETTINGS_PATH, saved)
+    return {
+        "ok": True,
+        "saved": saved,
+        "settings_path": str(CAE_WORKSPACE_SETTINGS_PATH),
+    }
+
+
+@app.post("/api/cae/run")
+async def post_cae_run(req: CAEAnalysisRequest) -> dict[str, object]:
+    """Run CAE analysis from the dedicated workspace."""
+    payload = {
+        "runtime_mode": req.mode,
+        "mode": req.mode,
+        "solver": req.solver,
+        "mesher": req.mesher,
+        "stl_path": req.stl_path,
+        "specimen_id": req.specimen_id,
+        "specimen_size_mm": req.specimen_size_mm,
+        "mesh_size_mm": req.mesh_size_mm,
+        "material": {
+            "elastic_modulus_mpa": req.elastic_modulus_mpa,
+            "poisson_ratio": req.poisson_ratio,
+            "yield_strength_mpa": req.yield_strength_mpa,
+        },
+        "loading": {
+            "load_type": "cyclic_compression",
+            "load_max_n": req.load_max_n,
+            "load_min_ratio": req.load_min_ratio,
+            "cycles": req.cycles,
+            "frequency_hz": req.frequency_hz,
+        },
+        "boundary": {"bottom": "fixed_support", "top": "cyclic_loading"},
+        "require_solver": req.require_solver,
+        "source": "cae_workspace",
+    }
+    result = controller._deps.agent_context.tools.call("cae.run_static_analysis", payload)
+    controller._state.run_metadata["last_cae_result"] = result
+    if result.get("ok"):
+        controller._state.latest_analysis["cae_result"] = result
+        controller._state.latest_analysis["cae_metrics"] = result.get("cae_metrics") or result.get("metrics") or {}
+    return {"ok": bool(result.get("ok")), "result": result, "snapshot": controller.snapshot()}
 
 
 @app.post("/api/runtime/backend")
@@ -884,6 +1136,155 @@ async def post_lerobot_rollout_start(req: LeRobotAPIRequest) -> dict[str, object
     """Start LeRobot policy rollout/inference."""
     result = _lerobot_bridge().rollout_start(req.model_dump())
     return await _publish_lerobot_result(result)
+
+
+def _manipulation_profile_from_request(req: ManipulationAgentBridgeRequest) -> dict[str, object]:
+    """Convert GUI/API request to persisted Manipulation Agent profile keys."""
+    policy_path = req.policy_path or req.policy_checkpoint_path
+    return {
+        "manipulation_strategy": req.manipulation_strategy,
+        "policy_type": req.policy_type,
+        "policy_path": policy_path,
+        "policy_checkpoint_path": req.policy_checkpoint_path,
+        "policy_repo_id": req.policy_repo_id,
+        "profile_id": req.profile_id,
+        "dataset_repo_id": req.dataset_repo_id,
+        "dataset_root": req.dataset_root,
+        "task_instruction": req.task_instruction,
+        "source_location": req.source_location,
+        "target_location": req.target_location,
+        "device": req.device,
+        "fps": req.fps,
+        "camera_enabled": req.camera_enabled,
+        "display_data": req.display_data,
+        "continuous_rollout": req.continuous_rollout,
+        "rollout_action_clamp": req.rollout_action_clamp,
+        "rollout_max_relative_target": req.rollout_max_relative_target,
+        "rollout_temporal_ensemble": req.rollout_temporal_ensemble,
+        "rollout_temporal_ensemble_coeff": req.rollout_temporal_ensemble_coeff,
+        "rollout_inference_type": req.rollout_inference_type,
+    }
+
+
+def _manipulation_spec_from_request(req: ManipulationAgentBridgeRequest) -> dict[str, object]:
+    """Convert GUI/API request to ManipulationAgent current_experiment_spec keys."""
+    profile = _manipulation_profile_from_request(req)
+    policy_path = str(profile.get("policy_path") or "")
+    return {
+        "manipulation_strategy": profile.get("manipulation_strategy"),
+        "lerobot_profile_id": profile.get("profile_id"),
+        "robot_profile_id": profile.get("profile_id"),
+        "lerobot_policy_type": profile.get("policy_type"),
+        "policy_type": profile.get("policy_type"),
+        "lerobot_policy_path": policy_path,
+        "policy_path": policy_path,
+        "lerobot_policy_checkpoint_path": profile.get("policy_checkpoint_path"),
+        "policy_checkpoint_path": profile.get("policy_checkpoint_path"),
+        "lerobot_policy_repo_id": profile.get("policy_repo_id"),
+        "policy_repo_id": profile.get("policy_repo_id"),
+        "lerobot_rollout_dataset_repo_id": profile.get("dataset_repo_id"),
+        "dataset_repo_id": profile.get("dataset_repo_id"),
+        "lerobot_dataset_root": profile.get("dataset_root"),
+        "dataset_root": profile.get("dataset_root"),
+        "task_instruction": profile.get("task_instruction"),
+        "source_location": profile.get("source_location"),
+        "target_location": profile.get("target_location"),
+        "lerobot_device": profile.get("device"),
+        "device": profile.get("device"),
+        "fps": profile.get("fps"),
+        "camera_enabled": profile.get("camera_enabled"),
+        "display_data": profile.get("display_data"),
+        "confirm_live_execute": req.confirm_live_execute,
+        "rollout_episode_s": req.episode_s,
+        "rollout_num_episodes": req.num_episodes,
+        "continuous_rollout": profile.get("continuous_rollout"),
+        "rollout_action_clamp": profile.get("rollout_action_clamp"),
+        "rollout_max_relative_target": profile.get("rollout_max_relative_target"),
+        "rollout_temporal_ensemble": profile.get("rollout_temporal_ensemble"),
+        "rollout_temporal_ensemble_coeff": profile.get("rollout_temporal_ensemble_coeff"),
+        "rollout_inference_type": profile.get("rollout_inference_type"),
+    }
+
+
+async def _run_manipulation_agent_bridge(req: ManipulationAgentBridgeRequest, *, force_test: bool = False) -> dict[str, object]:
+    """Run the actual Manipulation Agent bridge with optional forced test mode."""
+    mode = Mode.TEST if force_test else Mode(req.runtime_mode or req.mode)
+    specimen_result = dict(req.specimen_result or {})
+    specimen_result.setdefault("ok", True)
+    specimen_result.setdefault("handoff_status", "ready")
+    specimen_result.setdefault("specimen_id", "manual-specimen")
+    specimen_result.setdefault("candidate_id", "manual-candidate")
+    spec = _manipulation_spec_from_request(req)
+    if force_test:
+        spec["confirm_live_execute"] = False
+        spec["lerobot_profile_id"] = spec.get("lerobot_profile_id") or "fake_omx_ai"
+        spec["robot_profile_id"] = spec.get("robot_profile_id") or "fake_omx_ai"
+    snapshot = controller.snapshot()
+    state = OrchestratorState(
+        run_id=str(snapshot.get("state", {}).get("run_id") or "gui-manipulation"),
+        experiment_id=str(snapshot.get("state", {}).get("experiment_id") or "gui-manipulation-experiment"),
+        active_session_id=str(snapshot.get("state", {}).get("active_session_id") or "gui-manipulation"),
+        mode=mode,
+        stage=Stage.MANIPULATION,
+        active_goal=req.task_instruction,
+        current_experiment_spec={key: value for key, value in spec.items() if value not in (None, "")},
+        latest_observations=dict(req.observation or {}),
+        run_metadata={"specimen_result": specimen_result, "source": "lerobot_gui_manipulation_bridge"},
+        device_health={"printer": "ready", "camera": "ready", "robot": "ready", "utm": "ready"},
+    )
+    result = await ManipulationAgent().run(state, controller._deps.agent_context)
+    manipulation = result.data.get("manipulation") if isinstance(result.data.get("manipulation"), dict) else {}
+    if manipulation:
+        await controller.emit_lerobot_result(manipulation)
+    return {
+        "ok": bool(result.success),
+        "tool": "manipulation_agent.run",
+        "mode": mode.value,
+        "summary": result.summary,
+        "data": result.data,
+        "manipulation": manipulation,
+        "sarm": result.data.get("sarm", {}),
+        "next_hint": result.next_hint,
+        "state": state.model_dump(mode="json"),
+    }
+
+
+@app.get("/api/lerobot/manipulation-agent/config")
+async def get_lerobot_manipulation_agent_config() -> dict[str, object]:
+    """Return saved Manipulation Agent bridge defaults."""
+    return {
+        "ok": True,
+        "profile": load_manipulation_agent_profile(),
+        "profile_path": str(MANIPULATION_AGENT_PROFILE_PATH),
+    }
+
+
+@app.post("/api/lerobot/manipulation-agent/config")
+async def post_lerobot_manipulation_agent_config(req: ManipulationAgentBridgeRequest) -> dict[str, object]:
+    """Persist Manipulation Agent bridge defaults for live/test loop usage."""
+    profile = save_manipulation_agent_profile(_manipulation_profile_from_request(req))
+    return {
+        "ok": True,
+        "tool": "manipulation_agent.config.save",
+        "profile": profile,
+        "profile_path": str(MANIPULATION_AGENT_PROFILE_PATH),
+        "message": "Manipulation Agent bridge defaults saved.",
+    }
+
+
+@app.post("/api/lerobot/manipulation-agent/test")
+async def post_lerobot_manipulation_agent_test(req: ManipulationAgentBridgeRequest) -> dict[str, object]:
+    """Run Manipulation Agent bridge in forced test mode before live-loop use."""
+    result = await _run_manipulation_agent_bridge(req, force_test=True)
+    result["tool"] = "manipulation_agent.test"
+    result["test_mode_forced"] = True
+    return result
+
+
+@app.post("/api/lerobot/manipulation-agent/run")
+async def post_lerobot_manipulation_agent_run(req: ManipulationAgentBridgeRequest) -> dict[str, object]:
+    """Run the actual Manipulation Agent bridge from the LeRobot GUI."""
+    return await _run_manipulation_agent_bridge(req)
 
 
 @app.post("/api/lerobot/rollout/stop")

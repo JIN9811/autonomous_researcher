@@ -155,3 +155,21 @@ Rules:
 - Manipulation Agent may provide `rollout_temporal_ensemble` and `rollout_temporal_ensemble_coeff`.
 - `device_bridges/lerobot_bridge.py` remains the single enforcement point for `eval_` naming, local policy-path normalization, and manual-stop rollout conversion.
 - This keeps GUI rollout and autonomous Manipulation Agent rollout consistent.
+
+## Pi0.5 Transfer Rollout Rule
+
+When the workflow reaches Manipulation after a ready 3DP specimen, the default robot-transfer policy is Pi0.5 LeRobot rollout unless the experiment spec explicitly requests `fixed_kinematic`.
+
+Rules:
+
+- Manipulation Agent sends `policy_type=pi05`.
+- Test mode may use `policy_path=fake://pi05_policy`.
+- Live mode requires a real `policy_path`, `policy_checkpoint_path`, or `policy_repo_id`.
+- The LeRobot bridge runs Pi0.5 rollout in conda env `lerobot-pi05`.
+- Pi0.5 rollout command preview uses `lerobot-rollout`, `--policy.type=pi05`, `--device=<device>`, and `--inference.type=rtc` by default.
+- The task text must mention the concrete transfer target: `3dp_output_area -> utm_fixture`.
+
+References:
+
+- https://huggingface.co/docs/lerobot/main/en/inference
+- https://huggingface.co/docs/lerobot/pi05

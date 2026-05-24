@@ -30,6 +30,7 @@ from dotenv import load_dotenv
 
 from agents.analysis_agent import AnalysisAgent
 from agents.base_agent import AgentContext
+from agents.bo_agent import BOAgent
 from agents.design_agent import DesignAgent
 from agents.equipment_agent import LabEquipmentAgent
 from agents.guardian_agent import GuardianAgent
@@ -49,6 +50,7 @@ from backends.vllm_client import VLLMBackend
 from knowledge.experiment_db import ExperimentDB
 from knowledge.failure_memory import FailureMemory
 from knowledge.rag import HybridRAG, LocalRAGIndex, WebRetriever
+from mcp_tools.cae_tools import register_cae_tools
 from mcp_tools.equipment_tools import register_equipment_tools
 from mcp_tools.experiment_tools import register_experiment_tools
 from mcp_tools.lerobot_tools import register_lerobot_tools
@@ -248,6 +250,7 @@ def load_runtime() -> MainController:
     register_printer_tools(tools, cfg.get("devices", {}), repo_root=resolve_path("."))
     register_equipment_tools(tools, cfg.get("devices", {}), repo_root=resolve_path("."))
     register_lerobot_tools(tools, cfg.get("lerobot", {}), repo_root=resolve_path("."))
+    register_cae_tools(tools, cfg.get("devices", {}), repo_root=resolve_path("."))
     register_experiment_tools(tools, cfg.get("devices", {}))
 
     agent_context = AgentContext(
@@ -269,6 +272,7 @@ def load_runtime() -> MainController:
 
     agent_registry = AgentRegistry()
     agent_registry.register(OrchestratorAgent())
+    agent_registry.register(BOAgent())
     agent_registry.register(DesignAgent())
     agent_registry.register(SpecimenMakingAgent())
     agent_registry.register(VisionAgent())

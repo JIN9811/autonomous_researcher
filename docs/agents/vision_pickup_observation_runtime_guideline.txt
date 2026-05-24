@@ -1,0 +1,140 @@
+# Vision Pickup Observation Runtime Guideline
+
+Status: implementation guideline
+Last reviewed: 2026-05-24
+Scope: Vision Agent observation contract between Specimen Making and Manipulation.
+
+## 1. Purpose
+
+Vision Agent performs a lightweight pickup-area observation after the Specimen
+Making Agent finishes 3DP preparation or printing.
+
+The goal is not full scene understanding. The goal is to provide the
+Manipulation Agent with a stable, typed observation for the 3DP output area:
+
+- whether a camera capture succeeded
+- whether the pickup area is anomalous
+- the approximate specimen pickup pose
+- whether the printed specimen is ready for robot transfer
+- the source and target locations for the following manipulation stage
+
+## 2. Pipeline Position
+
+The runtime stage order remains:
+
+```text
+Design -> Specimen Making -> Vision -> Manipulation -> Lab Equipment -> Analysis -> Knowledge -> Guardian
+```
+
+Vision remains between Specimen Making and Manipulation so robot policy rollout
+does not bypass the latest observation.
+
+## 3. Tool Contract
+
+Vision Agent calls:
+
+```text
+camera.capture
+```
+
+Minimum request:
+
+```json
+{
+  "frame_id": "frame-0-vision",
+  "camera_key": "top",
+  "purpose": "3dp_output_pickup_check",
+  "specimen_id": "specimen-id"
+}
+```
+
+Minimum tool response:
+
+```json
+{
+  "ok": true,
+  "tool": "camera.capture",
+  "frame_id": "frame-0-vision",
+  "camera_key": "top",
+  "source": "simulator",
+  "anomaly": false
+}
+```
+
+Live camera bridges may add image paths, measured pose fields, confidence, or
+camera-specific metadata. The agent must tolerate absent optional fields.
+
+## 4. Output Contract
+
+Vision Agent returns:
+
+```json
+{
+  "observation": {
+    "observation_id": "frame-0-vision",
+    "frame_id": "frame-0-vision",
+    "camera_key": "top",
+    "source": "simulator",
+    "summary": "3DP output pickup area clear",
+    "anomaly": false,
+    "pose_estimate": {
+      "x_mm": 0.0,
+      "y_mm": 0.0,
+      "z_mm": 5.0,
+      "roll_deg": 0.0,
+      "pitch_deg": 0.0,
+      "yaw_deg": 0.0,
+      "confidence": 0.82
+    },
+    "pickup_target": {
+      "specimen_id": "specimen-id",
+      "candidate_id": "candidate-id",
+      "source_location": "3dp_output_area",
+      "target_location": "utm_fixture",
+      "stl_path": "...",
+      "sliced_path": "..."
+    },
+    "transfer_readiness": {
+      "ready": true,
+      "camera_ok": true,
+      "specimen_ready": true,
+      "pose_confidence": 0.82
+    },
+    "raw_capture": {}
+  },
+  "protocol_note": "..."
+}
+```
+
+## 5. Test Mode
+
+Test mode uses the deterministic `camera.capture` mock and the latest
+`run_metadata.specimen_result`.
+
+Expected behavior:
+
+- if `specimen_result.ok` is not false and no operator input is pending,
+  `transfer_readiness.ready=true`
+- if capture fails or anomaly is true, `transfer_readiness.ready=false`
+- no real camera or robot process is launched by Vision Agent itself
+
+## 6. Live Mode
+
+Live mode keeps the same contract, but the camera tool may use saved top/wrist
+camera identities from the LeRobot workspace.
+
+Vision Agent still only observes. It must not start robot rollout, printer jobs,
+or UTM equipment.
+
+## 7. Downstream Use
+
+Manipulation Agent consumes:
+
+- `state.latest_observations.pose_estimate`
+- `state.latest_observations.pickup_target`
+- `state.latest_observations.transfer_readiness`
+- `state.latest_observations.anomaly`
+
+The Manipulation Agent may block, reduce confidence, or request recovery when
+`transfer_readiness.ready=false` or `anomaly=true`.
+

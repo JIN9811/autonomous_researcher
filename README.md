@@ -140,6 +140,7 @@ This repository currently implements Phase 1 plus foundational parts of Phase 2:
 - mock MCP tools and simulated device mode
 - `experiment.evaluate` common API for virtual/test/live experiment evaluation
 - `experiment.benchmark` random/grid/BO comparison mode
+- `/bo` BO Workspace with acquisition, BO/MBO, budget, and parameter-space controls
 - per-device job/session metadata for hardware-facing actions
 - modern real-time web GUI
 - unit/integration tests for core flow

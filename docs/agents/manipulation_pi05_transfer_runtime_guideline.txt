@@ -1,0 +1,231 @@
+# Manipulation Pi0.5 Transfer Runtime Guideline
+
+Status: implementation guideline
+Last reviewed: 2026-05-24
+Scope: Manipulation Agent Pi0.5/LeRobot policy rollout for moving a 3DP specimen to the UTM fixture.
+
+## 1. Purpose
+
+Manipulation Agent owns the robot transfer stage after specimen fabrication and
+vision observation.
+
+Target task:
+
+```text
+Move the printed specimen from the 3D printer pickup area to the UTM fixture,
+place it on the fixture datum, release safely, then report transfer complete.
+```
+
+This is implemented as a Manipulation Agent strategy, not as a new top-level
+agent. The existing stage remains:
+
+```text
+Specimen Making -> Vision -> Manipulation -> Lab Equipment
+```
+
+## 2. Runtime Strategy
+
+Supported strategies:
+
+- `fixed_kinematic`: legacy deterministic/mock `robot.pick_place` path
+- `lerobot_policy`: generic LeRobot policy rollout
+- `pi05_lerobot_policy`: Pi0.5 VLA policy rollout through `lerobot.rollout.start`
+
+Automatic strategy selection:
+
+- explicit `manipulation_strategy=pi05_lerobot_policy` selects Pi0.5 rollout
+- explicit `policy_type=pi05` or `lerobot_policy_type=pi05` selects Pi0.5 rollout
+- existing LeRobot policy/profile fields select LeRobot rollout
+- after `specimen_result` is stored and ready, default transfer strategy is
+  `pi05_lerobot_policy`
+- explicit `manipulation_strategy=fixed_kinematic` keeps the legacy path
+
+## 3. Required Upstream Inputs
+
+From Specimen Making Agent via `state.run_metadata.specimen_result`:
+
+- `specimen_id`
+- `candidate_id`
+- `handoff_status`
+- `stl_path`
+- `sliced_path`
+- `printer_path`
+- `print_result`
+
+From Vision Agent via `state.latest_observations`:
+
+- `pose_estimate`
+- `pickup_target`
+- `transfer_readiness`
+- `anomaly`
+
+## 4. Pi0.5 Rollout Payload
+
+Manipulation Agent calls:
+
+```text
+lerobot.rollout.start
+```
+
+Payload shape:
+
+```json
+{
+  "mode": "test",
+  "runtime_mode": "test",
+  "profile_id": "fake_omx_ai",
+  "session_id": "rollout-run-id",
+  "task_instruction": "Move specimen from the 3D printer pickup area to the UTM fixture...",
+  "dataset_repo_id": "jin/3dp_to_utm_pi05_rollout",
+  "policy_path": "fake://pi05_policy",
+  "policy_repo_id": "",
+  "policy_type": "pi05",
+  "device": "cuda",
+  "continuous_rollout": true,
+  "rollout_action_clamp": true,
+  "rollout_max_relative_target": 5,
+  "rollout_inference_type": "rtc",
+  "camera_enabled": true,
+  "confirm_live_execute": false,
+  "source_location": "3dp_output_area",
+  "target_location": "utm_fixture",
+  "observation": {},
+  "specimen": {}
+}
+```
+
+## 5. LeRobot / Pi0.5 Runtime Rules
+
+Use the LeRobot bridge as the single execution boundary.
+
+Do not let Manipulation Agent build shell commands directly.
+
+Pi0.5-specific rollout rules:
+
+- set `policy_type=pi05`
+- default device is `cuda`
+- default camera input is enabled because Pi0.5 is a VLA policy
+- use a real policy checkpoint or repo in live mode
+- test mode may use `fake://pi05_policy`
+- use `rollout_action_clamp=true` by default
+- preserve `rollout_max_relative_target` for safer early rollout validation
+- use RTC inference when supported by the installed LeRobot runtime
+
+Official LeRobot references:
+
+- Policy deployment / `lerobot-rollout`: https://huggingface.co/docs/lerobot/main/en/inference
+- Pi0.5 policy configuration: https://huggingface.co/docs/lerobot/pi05
+
+## 6. Test Mode
+
+Test mode must still exercise the robot bridge path.
+
+Expected behavior:
+
+- use `profile_id=fake_omx_ai` unless specified
+- use `policy_path=fake://pi05_policy` unless a policy is specified
+- call `lerobot.rollout.start`
+- return a deterministic LeRobot session response
+- report `completion_status=reported_complete` when the bridge returns ok
+- pass control to the next stage
+
+Test mode does not physically move a robot unless a live robot workflow is
+explicitly selected outside normal test mode.
+
+## 7. Live Mode
+
+Live mode requires:
+
+- `profile_id=robotis_omx_ai` or another validated robot profile
+- saved follower/leader/camera identities in LeRobot device memory
+- an existing Pi0.5 policy path, checkpoint path, or policy repo id
+- `confirm_live_execute=true`
+- profile live gates allowing policy rollout
+
+The bridge must launch the process and stream events/status. Manipulation Agent
+only interprets the structured result.
+
+## 7.1 GUI Management Surface
+
+The LeRobot workspace at `/lerobot` is also the Manipulation Agent management GUI.
+
+The `Manipulation Agent Bridge` panel must expose:
+
+- strategy: `pi05_lerobot_policy`, `lerobot_policy`, or `fixed_kinematic`
+- policy type: `pi05` or `act`
+- policy checkpoint/repo with Browse support
+- source and target locations
+- specimen id and candidate id
+- optional STL/artifact path with Browse support
+- task instruction
+- vision observation JSON
+- camera/display/continuous-rollout toggles
+
+The panel must also expose two non-motion management actions:
+
+- `Save Agent Defaults`: persist operator-selected defaults to
+  `memory/manipulation_agent_bridge.json`. The live/test orchestration loop reads
+  this profile before executing Manipulation Agent, then lets explicit experiment
+  spec fields override it.
+- `Test Agent Bridge`: run the same Manipulation Agent code path in forced
+  `test` mode. This validates strategy, profile, policy, specimen handoff, and
+  vision observation payloads without physical robot motion.
+
+The primary execution button calls:
+
+```text
+POST /api/lerobot/manipulation-agent/run
+```
+
+This endpoint must run the actual `ManipulationAgent`, not call
+`lerobot.rollout.start` directly from the GUI.
+
+The management endpoints are:
+
+```text
+GET  /api/lerobot/manipulation-agent/config
+POST /api/lerobot/manipulation-agent/config
+POST /api/lerobot/manipulation-agent/test
+```
+
+## 8. Output Contract
+
+Manipulation Agent returns:
+
+```json
+{
+  "manipulation": {
+    "ok": true,
+    "tool": "lerobot.rollout.start",
+    "strategy": "pi05_lerobot_policy",
+    "workflow": "rollout",
+    "status": "POLICY_ACTIVE",
+    "transfer_task": {
+      "source": "3dp_output_area",
+      "target": "utm_fixture",
+      "task_instruction": "...",
+      "policy_type": "pi05",
+      "specimen_id": "specimen-id"
+    },
+    "handoff_status": "ready_for_equipment_agent",
+    "completion_status": "reported_complete",
+    "step_trace": []
+  },
+  "sarm": {},
+  "protocol_note": "..."
+}
+```
+
+## 9. SARM and Guardian Interaction
+
+SARM remains inside Manipulation Agent.
+
+SARM uses:
+
+- bridge ok/failure status
+- grasp/transfer score
+- latest observation anomaly flag
+- retry count
+
+Guardian later evaluates the resulting manipulation and SARM signals. Guardian
+must not launch robot commands directly.

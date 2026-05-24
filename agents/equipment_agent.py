@@ -44,14 +44,28 @@ class LabEquipmentAgent(BaseAgent):
     def _program_hint(self, state: OrchestratorState) -> str:
         spec = state.current_experiment_spec if isinstance(state.current_experiment_spec, dict) else {}
         candidates: list[Any] = [
+            spec.get("lab_equipment_program_id"),
+            spec.get("equipment_pyautogui_program_id"),
+            spec.get("pyautogui_program_id"),
             spec.get("equipment_program_id"),
             spec.get("program_id"),
             spec.get("equipment_command"),
             spec.get("command"),
             state.active_goal,
         ]
+        lab_equipment = spec.get("lab_equipment") if isinstance(spec.get("lab_equipment"), dict) else {}
         equipment = spec.get("equipment") if isinstance(spec.get("equipment"), dict) else {}
-        candidates.extend([equipment.get("program_id"), equipment.get("command")])
+        pyautogui = spec.get("pyautogui") if isinstance(spec.get("pyautogui"), dict) else {}
+        candidates.extend(
+            [
+                lab_equipment.get("program_id"),
+                lab_equipment.get("command"),
+                equipment.get("program_id"),
+                equipment.get("command"),
+                pyautogui.get("program_id"),
+                pyautogui.get("command"),
+            ]
+        )
         for value in candidates:
             text = str(value or "").strip()
             if not text:
@@ -66,12 +80,20 @@ class LabEquipmentAgent(BaseAgent):
 
     def _sequence_hint(self, state: OrchestratorState) -> list[dict[str, Any]]:
         spec = state.current_experiment_spec if isinstance(state.current_experiment_spec, dict) else {}
-        for key in ("equipment_pyautogui_sequence", "equipment_sequence"):
+        for key in ("lab_equipment_sequence", "equipment_pyautogui_sequence", "equipment_sequence", "pyautogui_sequence"):
             raw = spec.get(key)
             if isinstance(raw, list):
                 return [dict(item) for item in raw if isinstance(item, dict)]
+        lab_equipment = spec.get("lab_equipment") if isinstance(spec.get("lab_equipment"), dict) else {}
+        raw = lab_equipment.get("pyautogui_sequence")
+        if isinstance(raw, list):
+            return [dict(item) for item in raw if isinstance(item, dict)]
         equipment = spec.get("equipment") if isinstance(spec.get("equipment"), dict) else {}
         raw = equipment.get("pyautogui_sequence")
+        if isinstance(raw, list):
+            return [dict(item) for item in raw if isinstance(item, dict)]
+        pyautogui = spec.get("pyautogui") if isinstance(spec.get("pyautogui"), dict) else {}
+        raw = pyautogui.get("sequence")
         if isinstance(raw, list):
             return [dict(item) for item in raw if isinstance(item, dict)]
         return []
@@ -148,7 +170,16 @@ class LabEquipmentAgent(BaseAgent):
         return {
             "sequence_id": f"equipment-{state.run_id}",
             "runtime_mode": state.mode.value,
+            "run_id": state.run_id,
+            "experiment_id": state.experiment_id,
+            "active_goal": state.active_goal,
             "experiment_spec": dict(state.current_experiment_spec or {}),
+            "source_stage_context": {
+                "specimen": state.run_metadata.get("specimen_result", {}),
+                "vision": dict(state.latest_observations or {}),
+                "manipulation": state.run_metadata.get("manipulation_result", {}),
+                "analysis": dict(state.latest_analysis or {}),
+            },
         }
 
     async def _call_tool(self, ctx: AgentContext, tool: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -260,10 +291,21 @@ class LabEquipmentAgent(BaseAgent):
                     if isinstance(item, dict) and item.get("program_id")
                 }
             tool_results.append({"tool": tool, "result": result})
+            if tool in {"equipment.pyautogui.health", "equipment.pyautogui.list_programs"} and not result.get("ok", False):
+                break
             if tool == "equipment.pyautogui.run":
                 break
 
         final_result = tool_results[-1]["result"] if tool_results else {"ok": False, "status": "no_tool_calls"}
+        source_stage_context = base_payload["source_stage_context"]
+        run_payload = next(
+            (
+                item.get("result", {})
+                for item in tool_results
+                if isinstance(item.get("result"), dict) and item.get("tool") == "equipment.pyautogui.run"
+            ),
+            final_result,
+        )
         return AgentResult(
             success=bool(final_result.get("ok")),
             summary="Equipment PyAutoGUI workflow completed",
@@ -272,5 +314,15 @@ class LabEquipmentAgent(BaseAgent):
                 "protocol_note": protocol_note,
                 "equipment_bridge": "windows_pyautogui",
                 "tool_results": tool_results,
+                "tool_plan": calls,
+                "program_catalog": sorted(program_catalog),
+                "source_stage_context": source_stage_context,
+                "equipment_handoff": {
+                    "status": "ready_for_analysis" if final_result.get("ok") else "blocked",
+                    "bridge": "windows_pyautogui",
+                    "program_id": str(run_payload.get("program_id") or ""),
+                    "sequence_id": str(run_payload.get("sequence_id") or base_payload["sequence_id"]),
+                    "failure_code": final_result.get("failure_code"),
+                },
             },
         )

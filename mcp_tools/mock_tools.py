@@ -96,7 +96,14 @@ def _printer_prepare(payload: dict[str, Any]) -> dict[str, Any]:
 
 def _camera_capture(payload: dict[str, Any]) -> dict[str, Any]:
     frame_id = payload.get("frame_id", f"frame-{_rng.randint(1000, 9999)}")
-    return {"ok": True, "tool": "camera.capture", "frame_id": frame_id, "anomaly": False}
+    return {
+        "ok": True,
+        "tool": "camera.capture",
+        "frame_id": frame_id,
+        "camera_key": payload.get("camera_key", "top"),
+        "source": "simulator",
+        "anomaly": False,
+    }
 
 
 def _robot_pick_place(payload: dict[str, Any]) -> dict[str, Any]:
@@ -409,7 +416,7 @@ def _generate_geometry_stl(payload: dict[str, Any]) -> dict[str, Any]:
         "top_bottom_cap": cap,
         "tpms_thickness": payload.get("tpms_thickness"),
         "tpms_resolution": payload.get("tpms_resolution"),
-        "tool_version": "tpms-geometry-v2",
+        "tool_version": "tpms-geometry-v3",
     }
     geometry_hash = hashlib.sha1(json.dumps(digest_source, sort_keys=True).encode("utf-8")).hexdigest()
     estimated_volume = float(generator_meta.get("estimated_volume_mm3") or (float(size[0] * size[1] * size[2]) * relative_density))
@@ -458,7 +465,7 @@ def _generate_geometry_stl(payload: dict[str, Any]) -> dict[str, Any]:
         "estimated_mass_g": round(estimated_mass, 3),
         "bounding_box_mm": size,
         "geometry_hash": geometry_hash,
-        "tool_version": "tpms-geometry-v2",
+        "tool_version": "tpms-geometry-v3",
         **generator_meta,
     }
     metadata_path.write_text(json.dumps(metadata_payload, ensure_ascii=True, indent=2), encoding="utf-8")

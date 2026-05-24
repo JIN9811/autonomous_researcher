@@ -48,6 +48,19 @@ const rolloutActionClampInput = $("lerobot-rollout-action-clamp-input");
 const rolloutMaxRelativeTargetInput = $("lerobot-rollout-max-relative-target-input");
 const rolloutTemporalEnsembleInput = $("lerobot-rollout-temporal-ensemble-input");
 const rolloutTemporalCoeffInput = $("lerobot-rollout-temporal-coeff-input");
+const manipulationStrategyInput = $("lerobot-manipulation-strategy-input");
+const manipulationPolicyTypeInput = $("lerobot-manipulation-policy-type-input");
+const manipulationSourceInput = $("lerobot-manipulation-source-input");
+const manipulationTargetInput = $("lerobot-manipulation-target-input");
+const manipulationSpecimenIdInput = $("lerobot-manipulation-specimen-id-input");
+const manipulationCandidateIdInput = $("lerobot-manipulation-candidate-id-input");
+const manipulationPolicyInput = $("lerobot-manipulation-policy-input");
+const manipulationStlInput = $("lerobot-manipulation-stl-input");
+const manipulationTaskInput = $("lerobot-manipulation-task-input");
+const manipulationObservationInput = $("lerobot-manipulation-observation-input");
+const manipulationCameraInput = $("lerobot-manipulation-camera-input");
+const manipulationDisplayInput = $("lerobot-manipulation-display-input");
+const manipulationContinuousInput = $("lerobot-manipulation-continuous-input");
 const policySelect = $("lerobot-policy-select");
 const jobNameInput = $("lerobot-job-name-input");
 const trainSourcePolicyInput = $("lerobot-train-source-policy-input");
@@ -124,6 +137,7 @@ let lastPortCandidates = [];
 let lastConfigData = null;
 let extraCameraKeys = [];
 let trainStatusTimer = null;
+let manipulationProfileLoaded = false;
 
 function setStatusDot(el, state) {
   if (!el) return;
@@ -335,6 +349,16 @@ function rolloutPolicyFields() {
   return policyFields(rolloutPolicyInput || policyInput);
 }
 
+function parseJsonText(inputEl, fallback = {}) {
+  const raw = inputEl ? String(inputEl.value || "").trim() : "";
+  if (!raw) return fallback;
+  try {
+    return JSON.parse(raw);
+  } catch (err) {
+    return { parse_error: String(err), raw };
+  }
+}
+
 function basePayload(overrides = {}) {
   const datasetValue = datasetInput ? datasetInput.value.trim() : "";
   const datasetSplit = splitPathOrRepo(datasetValue);
@@ -434,6 +458,101 @@ function rolloutPayload(overrides = {}) {
   payload.rollout_temporal_ensemble = rolloutTemporalEnsembleInput ? boolValue(rolloutTemporalEnsembleInput) : true;
   payload.rollout_temporal_ensemble_coeff = numberValue(rolloutTemporalCoeffInput, 0.01);
   return payload;
+}
+
+function manipulationAgentPayload(overrides = {}) {
+  const payload = rolloutPayload(overrides);
+  const policy = policyFields(manipulationPolicyInput || rolloutPolicyInput || policyInput);
+  const policyType = manipulationPolicyTypeInput ? manipulationPolicyTypeInput.value || "pi05" : "pi05";
+  const strategy = manipulationStrategyInput ? manipulationStrategyInput.value || "pi05_lerobot_policy" : "pi05_lerobot_policy";
+  const specimenId = manipulationSpecimenIdInput ? manipulationSpecimenIdInput.value.trim() || "manual-specimen" : "manual-specimen";
+  const candidateId = manipulationCandidateIdInput ? manipulationCandidateIdInput.value.trim() || "manual-candidate" : "manual-candidate";
+  const sourceLocation = manipulationSourceInput ? manipulationSourceInput.value.trim() || "3dp_output_area" : "3dp_output_area";
+  const targetLocation = manipulationTargetInput ? manipulationTargetInput.value.trim() || "utm_fixture" : "utm_fixture";
+  payload.policy_path = policy.policy_path;
+  payload.policy_checkpoint_path = policy.policy_checkpoint_path;
+  payload.policy_repo_id = policy.policy_path ? "" : policy.policy_repo_id;
+  payload.policy_type = policyType;
+  payload.rollout_inference_type = policyType === "pi05" ? "rtc" : "";
+  payload.manipulation_strategy = strategy;
+  payload.task_instruction = manipulationTaskInput && manipulationTaskInput.value.trim()
+    ? manipulationTaskInput.value.trim()
+    : `Move ${specimenId} from ${sourceLocation} to ${targetLocation}.`;
+  payload.camera_enabled = manipulationCameraInput ? boolValue(manipulationCameraInput) : true;
+  payload.display_data = manipulationDisplayInput ? boolValue(manipulationDisplayInput) : false;
+  payload.continuous_rollout = manipulationContinuousInput ? boolValue(manipulationContinuousInput) : true;
+  payload.source_location = sourceLocation;
+  payload.target_location = targetLocation;
+  payload.observation = parseJsonText(manipulationObservationInput, {
+    observation_id: "manual-transfer",
+    anomaly: false,
+    transfer_readiness: { ready: true, pose_confidence: 0.82 },
+  });
+  payload.specimen_result = {
+    ok: true,
+    specimen_id: specimenId,
+    candidate_id: candidateId,
+    handoff_status: "ready",
+    stl_path: manipulationStlInput ? manipulationStlInput.value.trim() : "",
+    sliced_path: "",
+  };
+  return payload;
+}
+
+function setInputValue(input, value) {
+  if (!input || value === undefined || value === null) return;
+  input.value = String(value);
+}
+
+function setCheckboxValue(input, value) {
+  if (!input || value === undefined || value === null) return;
+  input.checked = Boolean(value);
+}
+
+function applyManipulationProfile(profile, force = false) {
+  if (!profile || (manipulationProfileLoaded && !force)) return;
+  manipulationProfileLoaded = true;
+  if (profileSelect && profile.profile_id) {
+    const hasProfile = Array.from(profileSelect.options || []).some((opt) => opt.value === profile.profile_id);
+    if (hasProfile) profileSelect.value = profile.profile_id;
+  }
+  setInputValue(manipulationStrategyInput, profile.manipulation_strategy);
+  setInputValue(manipulationPolicyTypeInput, profile.policy_type);
+  setInputValue(manipulationSourceInput, profile.source_location);
+  setInputValue(manipulationTargetInput, profile.target_location);
+  setInputValue(
+    manipulationPolicyInput,
+    profile.policy_path || profile.policy_checkpoint_path || profile.policy_repo_id || "",
+  );
+  if (profile.task_instruction) setInputValue(manipulationTaskInput, profile.task_instruction);
+  setCheckboxValue(manipulationCameraInput, profile.camera_enabled);
+  setCheckboxValue(manipulationDisplayInput, profile.display_data);
+  setCheckboxValue(manipulationContinuousInput, profile.continuous_rollout);
+  if (deviceInput && profile.device) deviceInput.value = profile.device;
+  if (fpsInput && profile.fps) fpsInput.value = String(profile.fps);
+  if (rolloutActionClampInput && profile.rollout_action_clamp !== undefined) {
+    rolloutActionClampInput.checked = Boolean(profile.rollout_action_clamp);
+  }
+  if (rolloutMaxRelativeTargetInput && profile.rollout_max_relative_target !== undefined) {
+    rolloutMaxRelativeTargetInput.value = String(profile.rollout_max_relative_target);
+  }
+  if (rolloutTemporalEnsembleInput && profile.rollout_temporal_ensemble !== undefined) {
+    rolloutTemporalEnsembleInput.checked = Boolean(profile.rollout_temporal_ensemble);
+  }
+  if (rolloutTemporalCoeffInput && profile.rollout_temporal_ensemble_coeff !== undefined) {
+    rolloutTemporalCoeffInput.value = String(profile.rollout_temporal_ensemble_coeff);
+  }
+}
+
+async function refreshManipulationProfile({ force = false } = {}) {
+  try {
+    const res = await fetch("/api/lerobot/manipulation-agent/config");
+    const data = await res.json();
+    applyManipulationProfile(data.profile || {}, force);
+    return data;
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
 }
 
 function visualizationPayload(overrides = {}) {
@@ -791,6 +910,7 @@ async function refreshConfig() {
     const data = await res.json();
     renderConfig(data);
     await refreshPolicies();
+    await refreshManipulationProfile();
     return data;
   } catch (err) {
     renderResult("config error", { ok: false, error: String(err) });
@@ -849,11 +969,11 @@ async function useLatestLocalPolicy(statusTarget = null) {
   return local;
 }
 
-async function runAction(label, url, payload = null, statusTarget = null) {
+async function runAction(label, url, payload = null, statusTarget = null, timeoutMs = 30000) {
   renderResult(`${label} running`, { ok: true, status: "request_sent" });
   setActionStatus(statusTarget, "running", label, { status: "request sent" });
   try {
-    const data = await postJson(url, payload || basePayload());
+    const data = await postJson(url, payload || basePayload(), timeoutMs);
     renderResult(label, data);
     setActionStatus(statusTarget, data && data.ok ? "ok" : "error", label, data);
     syncFieldsFromWorkflowResponse(data);
@@ -1205,6 +1325,19 @@ bind("btn-browse-rollout-policy", () => {
   const startPath = (rolloutPolicyInput && rolloutPolicyInput.value.trim()) || (outputDirInput && outputDirInput.value.trim()) || "";
   return browsePath("policy", startPath, rolloutPolicyInput || policyInput, { select: "file", include_files: true });
 });
+bind("btn-browse-manipulation-policy", () => {
+  const startPath = (manipulationPolicyInput && manipulationPolicyInput.value.trim())
+    || (rolloutPolicyInput && rolloutPolicyInput.value.trim())
+    || (outputDirInput && outputDirInput.value.trim())
+    || "";
+  return browsePath("policy", startPath, manipulationPolicyInput || rolloutPolicyInput || policyInput, { select: "file", include_files: true });
+});
+bind("btn-browse-manipulation-stl", () => browsePath("any", manipulationStlInput ? manipulationStlInput.value : "", manipulationStlInput, { select: "file", include_files: true }));
+bind("btn-manipulation-use-rollout-policy", (event) => {
+  if (manipulationPolicyInput && rolloutPolicyInput) manipulationPolicyInput.value = rolloutPolicyInput.value;
+  const statusTarget = actionStatusFromEvent(event);
+  setActionStatus(statusTarget, "ok", "use rollout policy", { status: "rollout policy copied to Manipulation Agent Bridge" });
+});
 bind("btn-rollout-latest-policy", (event) => useLatestLocalPolicy(actionStatusFromEvent(event)));
 bind("btn-browse-visualization", () => browsePath("dataset", visualizationPathInput ? visualizationPathInput.value : "", visualizationPathInput));
 bind("btn-browse-visualization-output", () => browsePath("output", visualizationOutputDirInput ? visualizationOutputDirInput.value : "", visualizationOutputDirInput));
@@ -1236,6 +1369,32 @@ bind("btn-policy-refresh", async (event) => {
 bind("btn-rollout-start", (event) => runAction("rollout start", "/api/lerobot/rollout/start", rolloutPayload(), actionStatusFromEvent(event)));
 bind("btn-rollout-stop", (event) => runAction("rollout stop", "/api/lerobot/rollout/stop", sessionPayload("rollout"), actionStatusFromEvent(event)));
 bind("btn-rollout-status", (event) => runAction("rollout status", "/api/lerobot/rollout/status", sessionPayload("rollout"), actionStatusFromEvent(event)));
+bind("btn-manipulation-save", async (event) => {
+  const statusTarget = actionStatusFromEvent(event);
+  setActionStatus(statusTarget, "running", "manipulation defaults save", { status: "request sent" });
+  try {
+    const data = await postJson("/api/lerobot/manipulation-agent/config", manipulationAgentPayload());
+    renderResult("manipulation defaults save", data);
+    setActionStatus(statusTarget, data && data.ok ? "ok" : "error", "manipulation defaults save", data);
+    applyManipulationProfile(data.profile || {}, true);
+    await refreshConfig();
+    return data;
+  } catch (err) {
+    const error = { ok: false, status: "request_failed", error: String(err) };
+    renderResult("manipulation defaults save", error);
+    setActionStatus(statusTarget, "error", "manipulation defaults save", error);
+    return error;
+  }
+});
+bind("btn-manipulation-test", (event) => runAction("manipulation agent test", "/api/lerobot/manipulation-agent/test", manipulationAgentPayload(), actionStatusFromEvent(event), 300000));
+bind("btn-manipulation-preview", (event) => {
+  const payload = manipulationAgentPayload();
+  renderResult("manipulation agent payload preview", payload);
+  setActionStatus(actionStatusFromEvent(event), "ok", "manipulation preview", { status: "payload generated", payload });
+});
+bind("btn-manipulation-run", (event) => runAction("manipulation agent run", "/api/lerobot/manipulation-agent/run", manipulationAgentPayload(), actionStatusFromEvent(event), 300000));
+bind("btn-manipulation-rollout-stop", (event) => runAction("manipulation rollout stop", "/api/lerobot/rollout/stop", sessionPayload("rollout"), actionStatusFromEvent(event)));
+bind("btn-manipulation-rollout-status", (event) => runAction("manipulation rollout status", "/api/lerobot/rollout/status", sessionPayload("rollout"), actionStatusFromEvent(event)));
 bind("btn-dataset-inspect", (event) => runAction("dataset inspect", "/api/lerobot/dataset/inspect", null, actionStatusFromEvent(event)));
 bind("btn-dataset-visualize", (event) => visualizeDataset(actionStatusFromEvent(event)));
 bind("btn-dataset-visualize-status", async (event) => {

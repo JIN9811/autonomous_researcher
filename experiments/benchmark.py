@@ -52,9 +52,12 @@ def _grid_candidates(parameter_space: dict[str, Any], budget: int) -> list[dict[
     candidates: list[dict[str, Any]] = []
     for combo in itertools.product(*(values[key] for key in keys)):
         candidates.append(dict(zip(keys, combo, strict=True)))
-        if len(candidates) >= budget:
-            break
-    return candidates
+    if len(candidates) <= budget:
+        return candidates
+    if budget <= 1:
+        return candidates[:1]
+    indexes = [round(i * (len(candidates) - 1) / (budget - 1)) for i in range(budget)]
+    return [candidates[idx] for idx in indexes]
 
 
 def _random_candidates(parameter_space: dict[str, Any], budget: int, *, seed: int) -> list[dict[str, Any]]:
@@ -73,14 +76,128 @@ def _random_candidates(parameter_space: dict[str, Any], budget: int, *, seed: in
     return candidates
 
 
-def _numeric_vector(candidate: dict[str, Any]) -> list[float]:
+def _numeric_vector(candidate: dict[str, Any], keys: list[str] | None = None) -> list[float]:
     vector: list[float] = []
-    for value in candidate.values():
+    values = (candidate.get(key) for key in keys) if keys is not None else candidate.values()
+    for value in values:
         if isinstance(value, (int, float)):
             vector.append(float(value))
         else:
             vector.append(float(abs(hash(str(value))) % 1000) / 1000.0)
     return vector
+
+
+def _vector_signature(vector: list[float]) -> tuple[float, ...]:
+    """Return a rounded signature stable enough for duplicate-point detection."""
+    return tuple(round(float(item), 9) for item in vector)
+
+
+def _candidate_proxy(candidate: dict[str, Any]) -> float:
+    density = float(candidate.get("relative_density", 0.32) or 0.32)
+    wall = float(candidate.get("wall_thickness_mm", 1.2) or 1.2)
+    cell = max(0.1, float(candidate.get("cell_size_mm", 5.0) or 5.0))
+    geometry_bonus = 0.08 if str(candidate.get("geometry_type", "")).lower() == "gyroid" else 0.0
+    density_term = 1.0 - abs(density - 0.32)
+    manufacturability = min(1.0, wall / max(1.2, 0.24 * cell))
+    return max(0.0, density_term * 0.55 + manufacturability * 0.35 + geometry_bonus)
+
+
+def _distance(a: list[float], b: list[float]) -> float:
+    return sum(abs(x - y) for x, y in zip(a, b, strict=False))
+
+
+def _uncertainty(vector: list[float], seen_vectors: list[list[float]]) -> float:
+    if not seen_vectors:
+        return 1.0
+    return min(1.0, min(_distance(vector, item) for item in seen_vectors))
+
+
+def _compact_parameters(candidate: dict[str, Any]) -> dict[str, Any]:
+    """Return BO-relevant parameters for trace display without large nested payloads."""
+    preferred = (
+        "geometry_type",
+        "relative_density",
+        "wall_thickness_mm",
+        "cell_size_mm",
+        "tpms_thickness",
+        "orientation_deg",
+        "anisotropy_ratio",
+        "skin_thickness_mm",
+        "bottom_cap_enabled",
+        "top_cap_enabled",
+        "skirt_enabled",
+    )
+    compact = {key: candidate.get(key) for key in preferred if key in candidate}
+    if compact:
+        return compact
+    return {
+        key: value
+        for key, value in candidate.items()
+        if isinstance(value, (str, int, float, bool)) or value is None
+    }
+
+
+def _prior_points(payload: dict[str, Any], keys: list[str]) -> tuple[list[list[float]], list[float], list[dict[str, Any]]]:
+    raw = payload.get("prior_evaluations")
+    if not isinstance(raw, list):
+        return [], [], []
+    vectors: list[list[float]] = []
+    scores: list[float] = []
+    records: list[dict[str, Any]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        params = item.get("parameters") if isinstance(item.get("parameters"), dict) else {}
+        if not any(key in params for key in keys):
+            continue
+        vector = _numeric_vector(params, keys)
+        score = item.get("score")
+        if isinstance(score, (int, float)):
+            score_value = float(score)
+        else:
+            score_value = _candidate_proxy(params)
+        vectors.append(vector)
+        scores.append(score_value)
+        records.append(
+            {
+                "source": str(item.get("source") or "prior"),
+                "candidate_id": str(item.get("candidate_id") or params.get("candidate_id") or f"prior-{len(records) + 1}"),
+                "score": round(score_value, 6),
+                "parameters": _compact_parameters(params),
+                "vector_signature": list(_vector_signature(vector)),
+            }
+        )
+    return vectors, scores, records
+
+
+def _acquisition_value(
+    *,
+    candidate: dict[str, Any],
+    vector: list[float],
+    seen_vectors: list[list[float]],
+    scores: list[float],
+    acquisition: str,
+    kappa: float,
+    xi: float,
+    exploration_weight: float,
+    exploitation_weight: float,
+) -> float:
+    mean = _candidate_proxy(candidate)
+    uncertainty = _uncertainty(vector, seen_vectors)
+    best = max(scores) if scores else mean
+    improvement = mean - best - xi
+    if acquisition == "upper_confidence_bound":
+        return mean + kappa * uncertainty
+    if acquisition == "probability_of_improvement":
+        return 1.0 if improvement > 0 else max(0.0, mean - best + xi)
+    if acquisition == "uncertainty_sampling":
+        return uncertainty
+    if acquisition == "exploitation":
+        return mean
+    if acquisition == "exploration":
+        return uncertainty + 0.1 * mean
+    # expected_improvement fallback
+    return max(0.0, improvement) * exploitation_weight + uncertainty * exploration_weight
 
 
 def _evaluate_candidate(
@@ -97,8 +214,78 @@ def _evaluate_candidate(
     candidate["candidate_id"] = candidate.get("candidate_id") or f"bench-candidate-{index:03d}"
     request["candidate"] = candidate
     if evaluator:
-        return evaluator(request)
-    return evaluate_experiment(request)
+        result = evaluator(request)
+    else:
+        result = evaluate_experiment(request)
+    if isinstance(result, dict):
+        result.setdefault("parameters", dict(candidate_parameters))
+    return result
+
+
+def _bo_landscape(
+    *,
+    candidates: list[dict[str, Any]],
+    vectors: list[list[float]],
+    evaluated_vectors: list[list[float]],
+    scores: list[float],
+    acquisition: str,
+    kappa: float,
+    xi: float,
+    exploration_weight: float,
+    exploitation_weight: float,
+) -> list[dict[str, Any]]:
+    """Return per-candidate surrogate/acquisition values for plotting."""
+    seen_signatures = {_vector_signature(vector) for vector in evaluated_vectors}
+    landscape: list[dict[str, Any]] = []
+    for index, candidate in enumerate(candidates, start=1):
+        vector = vectors[index - 1]
+        signature = _vector_signature(vector)
+        uncertainty = _uncertainty(vector, evaluated_vectors)
+        mean = _candidate_proxy(candidate)
+        acquisition_value = _acquisition_value(
+            candidate=candidate,
+            vector=vector,
+            seen_vectors=evaluated_vectors,
+            scores=scores,
+            acquisition=acquisition,
+            kappa=kappa,
+            xi=xi,
+            exploration_weight=exploration_weight,
+            exploitation_weight=exploitation_weight,
+        )
+        landscape.append(
+            {
+                "candidate_id": str(candidate.get("candidate_id") or f"candidate-{index:03d}"),
+                "x": index,
+                "surrogate_mean": round(mean, 6),
+                "uncertainty": round(uncertainty, 6),
+                "acquisition_value": round(acquisition_value, 6),
+                "already_evaluated": signature in seen_signatures,
+                "parameters": _compact_parameters(candidate),
+                "vector_signature": list(signature),
+            }
+        )
+    return landscape
+
+
+def _trace_records_with_x(records: list[dict[str, Any]], landscape: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Attach candidate-pool x positions to prior/evaluated trace records when possible."""
+    by_signature = {
+        tuple(item.get("vector_signature", [])): item
+        for item in landscape
+        if isinstance(item.get("vector_signature"), list)
+    }
+    out: list[dict[str, Any]] = []
+    for record in records:
+        item = dict(record)
+        match = by_signature.get(tuple(item.get("vector_signature", [])))
+        if match:
+            item["x"] = match.get("x")
+            item["candidate_id"] = item.get("candidate_id") or match.get("candidate_id")
+        else:
+            item.setdefault("x", None)
+        out.append(item)
+    return out
 
 
 def _curve_summary(results: list[dict[str, Any]]) -> dict[str, Any]:
@@ -144,11 +331,23 @@ def run_benchmark(
     budget = max(1, int(payload.get("budget", 6)))
     strategies = payload.get("strategies") if isinstance(payload.get("strategies"), list) else ["random", "grid", "bo"]
     seed = int(payload.get("seed", 7))
+    metadata = (
+        payload.get("request", {}).get("metadata", {})
+        if isinstance(payload.get("request"), dict) and isinstance(payload.get("request", {}).get("metadata"), dict)
+        else {}
+    )
+    acquisition = str(payload.get("acquisition") or metadata.get("acquisition") or "expected_improvement").strip().lower()
+    kappa = float(payload.get("kappa", metadata.get("kappa", 2.0)) or 2.0)
+    xi = float(payload.get("xi", metadata.get("xi", 0.01)) or 0.01)
+    exploration_weight = float(payload.get("exploration_weight", metadata.get("exploration_weight", 0.35)) or 0.35)
+    exploitation_weight = float(payload.get("exploitation_weight", metadata.get("exploitation_weight", 0.65)) or 0.65)
     base_request = dict(payload.get("request", {})) if isinstance(payload.get("request"), dict) else {}
     base_request.setdefault("objective", payload.get("objective", {}))
     base_request.setdefault("execution", {"mode": "virtual", "bridge": "virtual"})
 
-    grid_pool = _grid_candidates(parameter_space, max(budget * 3, budget))
+    grid_pool = _grid_candidates(parameter_space, max(budget * 6, budget))
+    parameter_keys = list(parameter_space)
+    prior_vectors, prior_scores, prior_records = _prior_points(payload, parameter_keys)
     output: dict[str, Any] = {
         "ok": True,
         "tool": "experiment.benchmark",
@@ -165,20 +364,44 @@ def run_benchmark(
                 results.append(_evaluate_candidate(base_request=base_request, candidate_parameters=candidate, index=idx, evaluator=evaluator))
         elif name == "bo":
             candidates = list(grid_pool)
-            vectors = [_numeric_vector(candidate) for candidate in candidates]
+            vectors = [_numeric_vector(candidate, parameter_keys) for candidate in candidates]
             seen: set[int] = set()
-            scores: list[float] = []
-            evaluated_vectors: list[list[float]] = []
+            scores: list[float] = list(prior_scores)
+            evaluated_vectors: list[list[float]] = list(prior_vectors)
+            evaluated_records: list[dict[str, Any]] = [dict(item) for item in prior_records]
+            surrogate_trace: list[dict[str, Any]] = []
             for idx in range(min(budget, len(candidates))):
+                available_indexes = [i for i in range(len(vectors)) if i not in seen]
+                if not available_indexes:
+                    break
+                landscape = _bo_landscape(
+                    candidates=candidates,
+                    vectors=vectors,
+                    evaluated_vectors=evaluated_vectors,
+                    scores=scores,
+                    acquisition=acquisition,
+                    kappa=kappa,
+                    xi=xi,
+                    exploration_weight=exploration_weight,
+                    exploitation_weight=exploitation_weight,
+                )
                 if not scores:
                     pick = 0
                 else:
-                    available_indexes = [i for i in range(len(vectors)) if i not in seen]
-                    best_seen = propose_next(evaluated_vectors, scores)
-                    anchor = evaluated_vectors[min(best_seen, len(evaluated_vectors) - 1)]
-                    pick = min(
+                    _ = propose_next(evaluated_vectors, scores)
+                    pick = max(
                         available_indexes,
-                        key=lambda item: sum(abs(a - b) for a, b in zip(vectors[item], anchor, strict=False)),
+                        key=lambda item: _acquisition_value(
+                            candidate=candidates[item],
+                            vector=vectors[item],
+                            seen_vectors=evaluated_vectors,
+                            scores=scores,
+                            acquisition=acquisition,
+                            kappa=kappa,
+                            xi=xi,
+                            exploration_weight=exploration_weight,
+                            exploitation_weight=exploitation_weight,
+                        ),
                     )
                 seen.add(pick)
                 result = _evaluate_candidate(
@@ -189,11 +412,51 @@ def run_benchmark(
                 )
                 results.append(result)
                 score = result.get("objective_score")
-                scores.append(float(score) if isinstance(score, (int, float)) else float("-inf"))
+                score_value = float(score) if isinstance(score, (int, float)) else float("-inf")
+                selected_trace = dict(landscape[pick])
+                selected_trace["score"] = None if score_value == float("-inf") else round(score_value, 6)
+                selected_trace["candidate_id"] = str(result.get("candidate_id") or selected_trace.get("candidate_id"))
+                observed_records = _trace_records_with_x(
+                    [
+                        *evaluated_records,
+                        {
+                            "source": "bo_evaluation",
+                            "candidate_id": selected_trace["candidate_id"],
+                            "score": selected_trace["score"],
+                            "parameters": _compact_parameters(candidates[pick]),
+                            "vector_signature": list(_vector_signature(vectors[pick])),
+                        },
+                    ],
+                    landscape,
+                )
+                surrogate_trace.append(
+                    {
+                        "step": idx + 1,
+                        "acquisition": acquisition,
+                        "x_axis": "candidate_pool_index",
+                        "candidate_count": len(candidates),
+                        "selected": selected_trace,
+                        "evaluated_points": observed_records,
+                        "candidates": landscape,
+                    }
+                )
+                scores.append(score_value)
                 evaluated_vectors.append(vectors[pick])
+                evaluated_records.append(
+                    {
+                        "source": "bo_evaluation",
+                        "candidate_id": selected_trace["candidate_id"],
+                        "score": selected_trace["score"],
+                        "parameters": _compact_parameters(candidates[pick]),
+                        "vector_signature": list(_vector_signature(vectors[pick])),
+                    }
+                )
         else:
             candidates = _random_candidates(parameter_space, budget, seed=seed)
             for idx, candidate in enumerate(candidates, start=1):
                 results.append(_evaluate_candidate(base_request=base_request, candidate_parameters=candidate, index=idx, evaluator=evaluator))
-        output["strategies"][name] = {"results": results, **_curve_summary(results)}
+        payload = {"results": results, **_curve_summary(results)}
+        if name == "bo":
+            payload["surrogate_trace"] = surrogate_trace
+        output["strategies"][name] = payload
     return output

@@ -1,0 +1,261 @@
+BO Agent Runtime Guideline
+
+Purpose
+- Add a dedicated Bayesian Optimization Agent to the Autonomous Researcher system.
+- The BO Agent must improve the current system rather than replace the existing Design Agent, Analysis Agent, or Experiment Runtime.
+- The agent chooses the next candidate or benchmark strategy using existing experiment memory, the standard ExperimentObjective / ExperimentCandidate / ExperimentEvaluationResult contract, and operator-tunable BO settings.
+
+External reference scope
+- Reference repository: https://github.com/sparks-baird/self-driving-lab-demo
+- Only reuse the concepts:
+  - one thin experiment evaluation interface
+  - grid/random/Bayesian optimization comparison
+  - best-so-far objective trace
+  - operator-readable optimization tutorial structure
+- Do not copy RGB/optics/MQTT/cloud demo code.
+- Do not import the reference project as a dependency.
+- Adapt all names and behavior to this repository's Autonomous Experiment Runtime.
+
+System-native name
+- User-facing name: BO Workspace
+- Agent name: `bo_agent`
+- Runtime tool path: `experiment.benchmark`
+- Result key: `bo_result`
+- State metadata key: `run_metadata["bo_agent"]`
+
+Role in the system
+- BO Agent is an advisory optimization agent and a runtime sidecar.
+- It runs after KnowledgeAgent and before GuardianAgent in the loop. It is intentionally not a new `Stage` enum value.
+- It must consume `run_metadata["knowledge"]` and accumulated `experiment_evaluations` before recommending next-cycle DesignAgent constraints.
+- It must store the full result in `run_metadata["bo_agent"]` and next-cycle design parameters in `run_metadata["bo_recommended_constraints"]`.
+- It must not own STL generation, slicing, printing, robot control, or Guardian safety.
+- Design Agent remains the concrete specimen-spec generator.
+- Specimen Making Agent remains the physical fabrication handoff owner.
+- Analysis Agent remains the owner of measured data parsing and objective calculation.
+- Guardian Agent remains the final safety/consistency decision point.
+
+Primary responsibilities
+1. Normalize the active objective.
+2. Normalize the design parameter space.
+3. Select an optimization strategy:
+   - random
+   - grid
+   - bo
+   - mbo
+4. Select acquisition behavior:
+   - expected_improvement
+   - upper_confidence_bound
+   - probability_of_improvement
+   - uncertainty_sampling
+   - exploitation
+   - exploration
+5. Evaluate candidate proposal quality through `experiment.benchmark`.
+6. Return best-so-far curves and a recommended candidate parameter payload.
+7. Preserve a compact record in state for GUI/reporting.
+8. Attach KnowledgeAgent context to `bo_result.knowledge_context`.
+9. Return `experiment_spec_update` so the next DesignAgent cycle can generate the next shape.
+
+Definitions
+- BO: Bayesian optimization over one current objective using a surrogate/acquisition rule.
+- MBO: model-based optimization. In this project, MBO means "use prior ExperimentEvaluationResult records and surrogate-style predictions to bias candidate selection." It is not a separate external package by default.
+- Acquisition function: a deterministic policy for scoring candidate proposals.
+- Best-so-far: the best objective score observed up to each iteration, respecting direction.
+
+Inputs
+- `OrchestratorState.run_id`
+- `OrchestratorState.experiment_id`
+- `OrchestratorState.mode`
+- `OrchestratorState.active_goal`
+- `OrchestratorState.current_experiment_spec`
+- `OrchestratorState.current_experiment_objective`
+- `OrchestratorState.experiment_evaluations`
+- `OrchestratorState.run_metadata["knowledge"]`
+- optional payload supplied by GUI/API:
+  - strategy
+  - acquisition
+  - budget
+  - random_seed
+  - exploration_weight
+  - exploitation_weight
+  - kappa
+  - xi
+  - parameter_space
+  - objective
+  - execution
+
+Default objective
+- name: "Specimen printability and performance proxy"
+- metric_name: "objective_score"
+- direction: "maximize"
+- constraints: merge active Design Agent / 3DP printer constraints when available.
+
+Default parameter space for current TPMS specimen work
+- geometry_type: ["gyroid"]
+- relative_density: [0.20, 0.48]
+- wall_thickness_mm: [1.2, 2.0]
+- cell_size_mm: [5.0, 10.0]
+- tpms_thickness: [0.28, 0.52]
+- orientation_deg: [0, 15, 30, 45, 60, 90]
+- anisotropy_ratio: [0.85, 1.0, 1.25]
+- skin_thickness_mm: [0.0, 0.8]
+- bottom_cap_enabled: [true]
+- top_cap_enabled: [false]
+- skirt_enabled: [false]
+
+Loop-stable parameters:
+- `cell_size_mm` is operator/test-option controlled during the closed-loop specimen series.
+- If `current_experiment_spec.cell_size_mm` or `current_experiment_spec.constraints.cell_size_mm` exists, BO must lock the benchmark parameter space to that single value.
+- BO may recommend `relative_density`, `wall_thickness_mm`, `tpms_thickness`, `orientation_deg`, `anisotropy_ratio`, cap flags, skirt flags, and preferred geometry, but it must not change the saved/test-selected cell size between cycles.
+- For gyroid TPMS, BO must not recommend `relative_density < 0.20`; that violates the FDM continuous-shell rule and would stop SpecimenMakingAgent manufacturability validation.
+- `experiment_spec_update` may include the locked `cell_size_mm` for traceability, but runtime merge logic must not let BO overwrite the active cell-size constraint.
+- BO must pass current/prior ExperimentEvaluationResult points into `experiment.benchmark` as prior evaluations. The benchmark acquisition must treat prior/current specimens as already-seen points so repeated shape recommendations are penalized.
+- In closed-loop test series, only static/operator constraints should be carried to the next DesignAgent cycle. Previous-cycle shape values such as `relative_density`, `wall_thickness_mm`, `orientation_deg`, `anisotropy_ratio`, and `tpms_thickness` must remain free unless BO explicitly recommends them.
+
+Supported strategy values
+- `random`
+  - Sample candidates from parameter space with seed.
+  - Useful as baseline.
+- `grid`
+  - Enumerate midpoint/edge values.
+  - Useful for small discrete spaces and debugging.
+- `bo`
+  - Use benchmark BO path and acquisition settings.
+  - Default for iterative candidate selection.
+- `mbo`
+  - Use available prior evaluations to bias candidate scoring.
+  - If prior data is missing, degrade to `bo` with a clear warning.
+
+Supported acquisition values
+- `expected_improvement`
+  - Default BO acquisition.
+  - Balances best observed score and predicted improvement.
+- `upper_confidence_bound`
+  - Uses `mean + kappa * uncertainty`.
+  - Higher kappa means more exploration.
+- `probability_of_improvement`
+  - Uses probability-like improvement over the current best.
+  - Uses `xi` as a minimum improvement margin.
+- `uncertainty_sampling`
+  - Prioritizes uncertain regions.
+  - Useful when model confidence is poor.
+- `exploitation`
+  - Prioritizes high predicted score.
+  - Risk: can converge early.
+- `exploration`
+  - Prioritizes coverage/uncertainty.
+  - Risk: can waste physical experiments.
+
+Output schema
+AgentResult.data must include:
+- `bo_result`
+  - ok: bool
+  - tool: "bo.agent"
+  - run_id: str
+  - experiment_id: str
+  - strategy: str
+  - acquisition: str
+  - budget: int
+  - parameter_space: dict
+  - objective: dict
+  - benchmark: dict
+  - recommendation: dict
+  - best_so_far: list[dict]
+  - warnings: list[str]
+  - metadata: dict
+- `bo_result.benchmark.strategies.bo.surrogate_trace`
+  - step: int
+  - acquisition: str
+  - x_axis: "candidate_pool_index"
+  - selected: selected candidate with score, surrogate_mean, uncertainty, acquisition_value, and compact parameters
+  - evaluated_points: prior/current/evaluated points with score and compact parameters
+  - candidates: candidate landscape with surrogate_mean, uncertainty, acquisition_value, and evaluated/duplicate marker
+- `experiment_objective`
+  - normalized objective dict
+- `experiment_spec_update`
+  - candidate parameter update to merge into Design Agent constraints if used
+
+Recommendation schema
+- candidate_id: str
+- parameters: dict
+- objective_score: float | null
+- source_strategy: str
+- reason: str
+
+Mode behavior
+- Test mode:
+  - Must not call physical hardware.
+  - Use `execution.mode=virtual` and `bridge=virtual`.
+  - Must be deterministic for fixed seed.
+- Live mode:
+  - BO Agent itself should still evaluate virtually unless explicitly told to run a live experiment.
+  - Physical execution remains downstream of Design Agent and Specimen Making Agent.
+- Live GUI:
+  - BO configuration may be edited in BO Workspace.
+  - Live GUI may consume the latest BO recommendation as design constraints.
+
+GUI requirements
+- Add dedicated route: `/bo`
+- Add main GUI Device Workspaces card: "BO Workspace"
+- BO Workspace must expose:
+  - strategy selector: random / grid / bo / mbo
+  - acquisition selector
+  - budget input
+  - random seed input
+  - kappa input
+  - xi input
+  - exploration_weight input
+  - exploitation_weight input
+  - parameter-space editor for current specimen variables
+  - run benchmark button
+  - run BO Agent button
+  - JSON/result status panel
+  - best-so-far table or simple chart data
+  - surrogate/acquisition trace plot for BO/MBO runs
+  - selected/evaluated point list with compact parameter values
+  - recommended candidate panel
+  - Save Settings button
+- BO Workspace saved settings:
+  - persist to `memory/bo_workspace_settings.json`
+  - are returned by `GET /api/bo/config` under `saved`
+  - are reapplied by the GUI when a new BO Workspace window is opened
+  - include mode, objective, strategy, acquisition, budget, seed, acquisition hyperparameters, and parameter-space bounds
+- GUI must not trigger printer/robot hardware directly.
+- GUI must call API endpoints that use BO Agent / experiment.benchmark only.
+
+API requirements
+- `GET /bo`
+  - Serve dedicated BO Workspace.
+- `GET /api/bo/config`
+  - Return defaults, supported strategies, supported acquisitions, and recent BO state.
+- `POST /api/bo/config`
+  - Validate and persist BO Workspace settings.
+  - Return normalized settings, warnings, and the saved settings path.
+- `POST /api/bo/benchmark`
+  - Run benchmark with supplied settings.
+- `POST /api/bo/run`
+  - Run BO Agent with supplied settings and return `bo_result`.
+
+Implementation rules
+- Keep BO Agent additive.
+- Do not add BO as a mandatory stage in the main RunLoop until explicitly requested.
+- Register BO Agent in `app/bootstrap.py` so API and future orchestrator paths can retrieve it.
+- Do not modify existing MCP protocol names.
+- Do not change Design Agent required output schema.
+- If BO recommendation is consumed by Design Agent later, merge it through `current_experiment_spec["constraints"]`.
+- When merging BO recommendations into DesignAgent constraints, filter out `cell_size_mm`; the current operator/test-option cell size remains authoritative.
+
+Validation requirements
+- Unit tests:
+  - BO Agent returns valid `bo_result`.
+  - Strategy/acquisition normalization works.
+  - Test mode is deterministic.
+  - `mbo` without priors degrades safely.
+  - API benchmark endpoint returns random/grid/bo results.
+- Existing full test suite must pass.
+
+Failure behavior
+- Invalid parameter space returns structured error in API.
+- Unknown strategy falls back to `bo` with warning.
+- Unknown acquisition falls back to `expected_improvement` with warning.
+- Empty benchmark budget coerces to 1.
+- Missing prior evaluations in MBO does not fail; degrade to BO with warning.

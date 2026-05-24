@@ -140,6 +140,7 @@ Manipulation Agent owns:
 - robot policy adapter invocation
 - SARM scoring and recovery hint generation
 - robot-related protocol notes for GUI/logging
+- Pi0.5 policy transfer from `3dp_output_area` to `utm_fixture` after a ready Specimen Making result and Vision observation
 
 Manipulation Agent does not become a LeRobot-specific agent. LeRobot is one strategy/tool backend inside Manipulation Agent.
 
@@ -168,6 +169,22 @@ Recommended extended manipulation payload:
   "success": true,
   "failure_reason": null,
   "step_trace": []
+}
+```
+
+Pi0.5 3DP-to-UTM transfer payload extension:
+
+```json
+{
+  "strategy": "pi05_lerobot_policy",
+  "policy_type": "pi05",
+  "transfer_task": {
+    "source": "3dp_output_area",
+    "target": "utm_fixture",
+    "specimen_id": "specimen-id"
+  },
+  "completion_status": "reported_complete",
+  "handoff_status": "ready_for_equipment_agent"
 }
 ```
 

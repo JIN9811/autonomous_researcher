@@ -291,6 +291,71 @@ async def test_specimen_agent_executes_geometry_handoff_and_printer_prepare(tmp_
 
 
 @pytest.mark.asyncio
+async def test_specimen_agent_disables_generated_caps_after_first_test_loop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    agent = SpecimenMakingAgent()
+    spec = _valid_spec()
+    spec["tpms_resolution"] = 18
+    state = OrchestratorState(
+        run_id="run-test",
+        experiment_id="exp-test",
+        mode=Mode.TEST,
+        stage=Stage.SPECIMEN,
+        loop_count=1,
+        active_goal="test specimen",
+        current_experiment_spec=spec,
+    )
+    ctx = _CtxStub()
+
+    monkeypatch.setattr(
+        SpecimenMakingAgent,
+        "_artifact_dir",
+        staticmethod(lambda _state, specimen_id: tmp_path / specimen_id),
+    )
+
+    result = await agent.run(state, ctx)
+    specimen_result = result.data["specimen_result"]
+    report = specimen_result["geometry_report"]
+
+    assert result.success is True
+    assert specimen_result["surface_cap_policy"]["generated_model_caps_disabled"] is True
+    assert report["top_cap_enabled"] is False
+    assert report["bottom_cap_enabled"] is False
+    assert report["top_bottom_cap"] is False
+    assert report["cap_skin_applied"] is False
+    assert state.current_experiment_spec["test_loop_surface_caps_disabled"] is True
+
+
+@pytest.mark.asyncio
+async def test_specimen_agent_clamps_low_gyroid_density_before_manufacturability(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    agent = SpecimenMakingAgent()
+    spec = _valid_spec()
+    spec["relative_density"] = 0.18
+    spec["constraints"]["relative_density"] = 0.18
+    spec["tpms_resolution"] = 18
+    state = OrchestratorState(
+        run_id="run-test",
+        experiment_id="exp-test",
+        mode=Mode.TEST,
+        stage=Stage.SPECIMEN,
+        active_goal="test specimen",
+        current_experiment_spec=spec,
+    )
+    ctx = _CtxStub()
+
+    monkeypatch.setattr(
+        SpecimenMakingAgent,
+        "_artifact_dir",
+        staticmethod(lambda _state, specimen_id: tmp_path / specimen_id),
+    )
+
+    result = await agent.run(state, ctx)
+
+    assert result.success is True
+    assert state.current_experiment_spec["relative_density"] == 0.20
+    assert result.data["specimen_result"]["manufacturability_status"] == "pass"
+
+
+@pytest.mark.asyncio
 async def test_specimen_agent_uses_phase1_printer_prepare_schema(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     agent = SpecimenMakingAgent()
     state = OrchestratorState(

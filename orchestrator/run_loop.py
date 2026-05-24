@@ -119,6 +119,8 @@ class RunLoop:
         if "experiment_evaluation" in data and isinstance(data["experiment_evaluation"], dict):
             self._state.experiment_evaluations.append(data["experiment_evaluation"])
         specimen_result = data.get("specimen_result") if isinstance(data.get("specimen_result"), dict) else {}
+        if specimen_result:
+            self._state.run_metadata["specimen_result"] = specimen_result
         if isinstance(specimen_result.get("experiment_evaluation"), dict):
             self._state.experiment_evaluations.append(specimen_result["experiment_evaluation"])
         if "observation" in data:
@@ -128,9 +130,32 @@ class RunLoop:
         if "sarm" in data:
             self._state.latest_analysis["sarm"] = data["sarm"]
         if "manipulation" in data:
+            self._state.run_metadata["manipulation_result"] = data["manipulation"]
             self._state.latest_analysis["last_grasp_score"] = float(data["manipulation"].get("grasp_score", 0.0))
             if "sarm" in data:
                 self._state.latest_analysis["sarm"] = data["sarm"]
+        if "equipment_result" in data:
+            equipment_result = data["equipment_result"] if isinstance(data["equipment_result"], dict) else {}
+            self._state.run_metadata["equipment_result"] = equipment_result
+            if "equipment_handoff" in data:
+                self._state.run_metadata["equipment_handoff"] = data["equipment_handoff"]
+            self._state.latest_analysis["equipment_ok"] = bool(equipment_result.get("ok", False))
+            self._state.latest_analysis["equipment_status"] = str(equipment_result.get("status") or "")
+            self._state.latest_analysis["equipment_program_id"] = str(equipment_result.get("program_id") or "")
+            failure_code = equipment_result.get("failure_code")
+            if failure_code:
+                self._state.latest_analysis["equipment_failure_code"] = str(failure_code)
+        if "knowledge" in data:
+            self._state.run_metadata["knowledge"] = data["knowledge"]
+        if "bo_result" in data:
+            self._state.run_metadata["bo_agent"] = data["bo_result"]
+        if "experiment_spec_update" in data and isinstance(data["experiment_spec_update"], dict):
+            update = {
+                key: value
+                for key, value in data["experiment_spec_update"].items()
+                if key != "cell_size_mm"
+            }
+            self._state.run_metadata["bo_recommended_constraints"] = update
         if "guardian" in data:
             self._state.run_metadata["guardian"] = data["guardian"]
         self._state.run_metadata["last_stage_payload"] = {"stage": stage.value, "data": data}
@@ -150,6 +175,45 @@ class RunLoop:
             event_type="orchestrator_plan",
             message=result.summary,
             payload=result.data,
+        )
+
+    async def _run_bo_after_knowledge(self) -> None:
+        """Run BOAgent after KnowledgeAgent so the next DesignAgent cycle can use the recommendation."""
+        agent_name = "bo_agent"
+        try:
+            agent = self._agent_registry.get(agent_name)
+        except KeyError:
+            await self._emit(
+                event_type="bo_skipped",
+                message="BO Agent is not registered; continuing to Guardian.",
+                level="WARNING",
+            )
+            return
+
+        status = self._ensure_agent_status(agent_name)
+        status.state = "running"
+        status.mode = self._state.mode.value
+        result = await agent.run(self._state, self._ctx)
+        if not result.success:
+            raise RuntimeError(f"BOAgent failed: {result.summary}")
+        self._merge_agent_data(Stage.KNOWLEDGE, result.data)
+        status.state = "idle"
+        status.last_result = result.summary
+        status.last_run_time = agent.now_iso()
+        status.success = True
+        log_agent_event(
+            self._logger,
+            run_id=self._state.run_id,
+            agent_name=agent_name,
+            event_type="completed",
+            message=result.summary,
+            payload=result.data,
+            experiment_id=self._state.experiment_id,
+        )
+        await self._emit(
+            event_type="agent_result",
+            message=f"{agent_name}: {result.summary}",
+            payload={"agent": agent_name, "result": result.data},
         )
 
     async def step(self) -> None:
@@ -215,6 +279,9 @@ class RunLoop:
                 message=f"{agent_name}: {result.summary}",
                 payload={"agent": agent_name, "result": result.data},
             )
+
+            if stage == Stage.KNOWLEDGE:
+                await self._run_bo_after_knowledge()
 
             guardian_decision = "continue"
             if stage == Stage.GUARDIAN:

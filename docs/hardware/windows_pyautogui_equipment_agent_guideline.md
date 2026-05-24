@@ -701,9 +701,24 @@ Recommended `AgentResult.data`:
 {
   "equipment_result": {},
   "protocol_note": "Windows PyAutoGUI bridge sequence prepared and executed.",
-  "equipment_bridge": "windows_pyautogui"
+  "equipment_bridge": "windows_pyautogui",
+  "equipment_handoff": {
+    "status": "ready_for_analysis",
+    "bridge": "windows_pyautogui",
+    "program_id": "program1",
+    "sequence_id": "equipment-<run_id>",
+    "failure_code": null
+  }
 }
 ```
+
+Main-loop integration:
+
+- The stage order is `Manipulation -> Lab Equipment -> Analysis`.
+- `RunLoop` stores `equipment_result` in `state.run_metadata.equipment_result`.
+- `RunLoop` stores `equipment_handoff` in `state.run_metadata.equipment_handoff`.
+- `RunLoop` exposes `equipment_ok`, `equipment_status`, `equipment_program_id`, and any `equipment_failure_code` under `state.latest_analysis`.
+- Validation requires `equipment_result` and `protocol_note`; if `equipment_result.ok=false`, the Equipment stage must retry or stop before Analysis.
 
 If live bridge information is missing:
 

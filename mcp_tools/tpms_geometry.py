@@ -149,17 +149,24 @@ def _gyroid_value(
     *,
     size: list[float],
     cell_counts_xyz: tuple[int, int, int],
-    phase_rad: float,
+    orientation_rad: float,
 ) -> float:
     sx, sy, sz = [max(float(item), 1e-6) for item in size]
     cx, cy, cz = cell_counts_xyz
     kx = 2.0 * math.pi * cx / sx
     ky = 2.0 * math.pi * cy / sy
     kz = 2.0 * math.pi * cz / sz
+    xc = x - sx / 2.0
+    yc = y - sy / 2.0
+    zc = z - sz / 2.0
+    cos_a = math.cos(orientation_rad)
+    sin_a = math.sin(orientation_rad)
+    xr = xc * cos_a - yc * sin_a
+    yr = xc * sin_a + yc * cos_a
     return (
-        math.sin(kx * x + phase_rad) * math.cos(ky * y)
-        + math.sin(ky * y + phase_rad * 0.5) * math.cos(kz * z)
-        + math.sin(kz * z + phase_rad * 0.25) * math.cos(kx * x)
+        math.sin(kx * xr) * math.cos(ky * yr)
+        + math.sin(ky * yr) * math.cos(kz * zc)
+        + math.sin(kz * zc) * math.cos(kx * xr)
     )
 
 
@@ -412,7 +419,7 @@ def generate_gyroid_stl_text(
         relative_density=rel_density,
     )
     cell_counts_xyz = _cell_counts(size, cell, float(anisotropy_ratio))
-    phase_rad = math.radians(float(orientation_deg))
+    orientation_rad = math.radians(float(orientation_deg))
     defect = _clamp(float(defect_ratio), 0.0, 0.35)
     cap_skin, top_cap, bottom_cap = _cap_skin_config(
         skin_thickness_mm=skin_thickness_mm,
@@ -436,7 +443,7 @@ def generate_gyroid_stl_text(
                         zs[iz],
                         size=[x_dim, y_dim, z_dim],
                         cell_counts_xyz=cell_counts_xyz,
-                        phase_rad=phase_rad,
+                        orientation_rad=orientation_rad,
                     )
                 )
                 - thickness_level
@@ -532,7 +539,7 @@ def generate_gyroid_stl_text(
     metadata = {
         "generator_backend": "tpms_gyroid_marching_tetra_fallback",
         "tpms_surface": "gyroid",
-        "tpms_equation": "sin(x)cos(y)+sin(y)cos(z)+sin(z)cos(x)=0",
+        "tpms_equation": "canonical_gyroid: sin(xr)cos(yr)+sin(yr)cos(zc)+sin(zc)cos(xr)=0",
         "tpms_thickness": round(thickness_level, 5),
         "tpms_resolution": [nx + 1, ny + 1, nz + 1],
         "cell_count_xyz": list(cell_counts_xyz),
@@ -598,18 +605,25 @@ def write_smooth_gyroid_stl(
         relative_density=rel_density,
     )
     cx, cy, cz = _cell_counts(size, cell, float(anisotropy_ratio))
-    phase_rad = math.radians(float(orientation_deg))
+    orientation_rad = math.radians(float(orientation_deg))
     xs = np.linspace(0.0, x_dim, n)
     ys = np.linspace(0.0, y_dim, n)
     zs = np.linspace(0.0, z_dim, n)
     x_grid, y_grid, z_grid = np.meshgrid(xs, ys, zs, indexing="ij")
+    x_centered = x_grid - x_dim / 2.0
+    y_centered = y_grid - y_dim / 2.0
+    z_centered = z_grid - z_dim / 2.0
+    cos_a = np.cos(orientation_rad)
+    sin_a = np.sin(orientation_rad)
+    x_rot = x_centered * cos_a - y_centered * sin_a
+    y_rot = x_centered * sin_a + y_centered * cos_a
     kx = 2.0 * np.pi * cx / x_dim
     ky = 2.0 * np.pi * cy / y_dim
     kz = 2.0 * np.pi * cz / z_dim
     field = (
-        np.sin(kx * x_grid + phase_rad) * np.cos(ky * y_grid)
-        + np.sin(ky * y_grid + phase_rad * 0.5) * np.cos(kz * z_grid)
-        + np.sin(kz * z_grid + phase_rad * 0.25) * np.cos(kx * x_grid)
+        np.sin(kx * x_rot) * np.cos(ky * y_rot)
+        + np.sin(ky * y_rot) * np.cos(kz * z_centered)
+        + np.sin(kz * z_centered) * np.cos(kx * x_rot)
     )
     levelset = np.abs(field) - thickness_level
     cap_skin, top_cap, bottom_cap = _cap_skin_config(
@@ -663,7 +677,7 @@ def write_smooth_gyroid_stl(
     return {
         "generator_backend": "tpms_gyroid_marching_cubes",
         "tpms_surface": "gyroid",
-        "tpms_equation": "sin(x)cos(y)+sin(y)cos(z)+sin(z)cos(x)=0",
+        "tpms_equation": "canonical_gyroid: sin(xr)cos(yr)+sin(yr)cos(zc)+sin(zc)cos(xr)=0",
         "tpms_thickness": round(thickness_level, 5),
         "tpms_resolution": [n, n, n],
         "cell_count_xyz": [cx, cy, cz],

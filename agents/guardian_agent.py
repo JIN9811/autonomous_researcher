@@ -31,6 +31,7 @@ class GuardianAgent(BaseAgent):
     """Applies run safety and consistency checks."""
 
     name = "guardian_agent"
+    TEST_LOOP_CYCLE_LIMIT = 5
     _SUPPORTED_GEOMETRIES = {
         "lattice_bcc",
         "lattice_fcc",
@@ -153,10 +154,10 @@ class GuardianAgent(BaseAgent):
                     context={"precursor": precursor, "loop_count": state.loop_count},
                 )
             )
-        elif state.mode.value == "test" and state.loop_count >= 6:
+        elif state.mode.value == "test" and state.loop_count >= self.TEST_LOOP_CYCLE_LIMIT - 1:
             decision = "stop"
             action = "safe_stop"
-            reason = "Test run reached planned loop cap."
+            reason = f"Test run reached planned {self.TEST_LOOP_CYCLE_LIMIT}-cycle loop cap."
         elif consistency["status"] == "fail":
             decision = "continue"
             action = "recover"

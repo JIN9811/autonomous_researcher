@@ -61,12 +61,18 @@ const btnGpuClear = document.getElementById("btn-gpu-clear");
 const btnOpenPrinter = document.getElementById("btn-open-printer");
 const btnOpenWindowsBridge = document.getElementById("btn-open-windows-bridge");
 const btnOpenLerobot = document.getElementById("btn-open-lerobot");
+const btnOpenBo = document.getElementById("btn-open-bo");
+const btnOpenCae = document.getElementById("btn-open-cae");
 const printerWorkspaceDotEl = document.getElementById("printer-workspace-dot");
 const printerWorkspaceDetailEl = document.getElementById("printer-workspace-detail");
 const windowsWorkspaceDotEl = document.getElementById("windows-workspace-dot");
 const windowsWorkspaceDetailEl = document.getElementById("windows-workspace-detail");
 const lerobotWorkspaceDotEl = document.getElementById("lerobot-workspace-dot");
 const lerobotWorkspaceDetailEl = document.getElementById("lerobot-workspace-detail");
+const boWorkspaceDotEl = document.getElementById("bo-workspace-dot");
+const boWorkspaceDetailEl = document.getElementById("bo-workspace-detail");
+const caeWorkspaceDotEl = document.getElementById("cae-workspace-dot");
+const caeWorkspaceDetailEl = document.getElementById("cae-workspace-detail");
 
 let events = [];
 let currentRunId = null;
@@ -86,6 +92,7 @@ const GRAPH_NODES = [
   { id: "design", label: "Design Agent", col: 2, row: 3, terminal: false, accent: "planning" },
   { id: "analysis", label: "Analysis Agent", col: 4, row: 3, terminal: false, accent: "planning" },
   { id: "knowledge", label: "Knowledge Agent", col: 6, row: 3, terminal: false, accent: "planning" },
+  { id: "bo", label: "BO Agent", col: 8, row: 3, terminal: false, accent: "planning" },
   { id: "specimen", label: "Specimen Making Agent", col: 2, row: 5, terminal: false, accent: "execution" },
   { id: "vision", label: "Vision", col: 4, row: 5, terminal: false, accent: "execution" },
   { id: "manipulation", label: "Manipulation", col: 6, row: 5, terminal: false, accent: "execution" },
@@ -102,6 +109,7 @@ const GRAPH_EDGES = [
   ["controller", "orchestrator"],
   ["orchestrator", "design"],
   ["orchestrator", "knowledge"],
+  ["orchestrator", "bo"],
   ["orchestrator", "analysis"],
   ["orchestrator", "guardian"],
   ["orchestrator", "specimen"],
@@ -111,6 +119,8 @@ const GRAPH_EDGES = [
   ["orchestrator", "ollama"],
   ["design", "orchestrator"],
   ["knowledge", "orchestrator"],
+  ["knowledge", "bo"],
+  ["bo", "orchestrator"],
   ["analysis", "orchestrator"],
   ["guardian", "orchestrator"],
   ["specimen", "mcp"],
@@ -123,6 +133,7 @@ const GRAPH_EDGES = [
   ["memory", "orchestrator"],
   ["design", "memory"],
   ["knowledge", "memory"],
+  ["bo", "memory"],
   ["analysis", "memory"],
   ["guardian", "memory"],
   ["guardian", "complete"],
@@ -179,7 +190,10 @@ const STAGE_ACTIVE_PATHS = {
     "controller->orchestrator",
     "orchestrator->knowledge",
     "knowledge->orchestrator",
+    "knowledge->bo",
+    "bo->orchestrator",
     "knowledge->memory",
+    "bo->memory",
     "orchestrator->ollama",
     "ollama->memory",
   ],
@@ -233,6 +247,22 @@ function openPrinterWindow() {
 function openWindowsBridgeWindow() {
   const url = new URL("/equipment/windows", window.location.origin).toString();
   const opened = window.open(url, "_blank", "width=1180,height=880,popup=yes");
+  if (!opened) {
+    window.location.href = url;
+  }
+}
+
+function openBoWindow() {
+  const url = new URL("/bo", window.location.origin).toString();
+  const opened = window.open(url, "_blank", "width=1320,height=920,popup=yes");
+  if (!opened) {
+    window.location.href = url;
+  }
+}
+
+function openCaeWindow() {
+  const url = new URL("/cae", window.location.origin).toString();
+  const opened = window.open(url, "_blank", "width=1320,height=920,popup=yes");
   if (!opened) {
     window.location.href = url;
   }
@@ -303,6 +333,12 @@ function captureVisitedStage(state, isRunning = false) {
   if (isRunning) {
     visitedStages.add("controller");
     visitedStages.add("orchestrator");
+  }
+  if (state.run_metadata && state.run_metadata.bo_agent) {
+    visitedStages.add("bo");
+    visitedEdges.add("knowledge->bo");
+    visitedEdges.add("bo->orchestrator");
+    visitedEdges.add("bo->memory");
   }
 }
 
@@ -652,6 +688,7 @@ async function refreshState() {
   await refreshPrinterWorkspaceStatus();
   await refreshWindowsWorkspaceStatus();
   await refreshLerobotWorkspaceStatus();
+  await refreshCaeWorkspaceStatus();
 }
 
 async function refreshPrinterWorkspaceStatus() {
@@ -721,6 +758,50 @@ async function refreshLerobotWorkspaceStatus() {
     setDotState(lerobotWorkspaceDotEl, "warn");
     if (lerobotWorkspaceDetailEl) {
       lerobotWorkspaceDetailEl.textContent = `LeRobot bridge status unavailable: ${err}`;
+    }
+  }
+}
+
+async function refreshBoWorkspaceStatus() {
+  if (!boWorkspaceDetailEl && !boWorkspaceDotEl) return;
+  try {
+    const res = await fetch("/api/bo/config");
+    const data = await res.json();
+    const defaults = data.defaults || {};
+    const recent = data.recent || {};
+    setDotState(boWorkspaceDotEl, data.ok ? "busy" : "warn");
+    if (boWorkspaceDetailEl) {
+      const strategy = recent.strategy || defaults.strategy || "bo";
+      const acquisition = recent.acquisition || defaults.acquisition || "expected_improvement";
+      const budget = recent.budget || defaults.budget || 8;
+      boWorkspaceDetailEl.textContent = `${strategy} · ${acquisition} · budget=${budget}`;
+    }
+  } catch (err) {
+    setDotState(boWorkspaceDotEl, "warn");
+    if (boWorkspaceDetailEl) {
+      boWorkspaceDetailEl.textContent = `BO status unavailable: ${err}`;
+    }
+  }
+}
+
+async function refreshCaeWorkspaceStatus() {
+  if (!caeWorkspaceDetailEl && !caeWorkspaceDotEl) return;
+  try {
+    const res = await fetch("/api/cae/config");
+    const data = await res.json();
+    const health = data.health || {};
+    const solver = health.calculix || {};
+    const mesher = health.gmsh || {};
+    const recent = data.recent || {};
+    setDotState(caeWorkspaceDotEl, data.ok ? "busy" : "warn");
+    if (caeWorkspaceDetailEl) {
+      const recentStatus = recent.status ? ` · latest=${recent.status}` : "";
+      caeWorkspaceDetailEl.textContent = `ccx=${Boolean(solver.available)} · gmsh=${Boolean(mesher.available)} · bottom fixed/top cyclic${recentStatus}`;
+    }
+  } catch (err) {
+    setDotState(caeWorkspaceDotEl, "warn");
+    if (caeWorkspaceDetailEl) {
+      caeWorkspaceDetailEl.textContent = `CAE status unavailable: ${err}`;
     }
   }
 }
@@ -825,6 +906,20 @@ if (btnOpenWindowsBridge) {
   });
 }
 
+if (btnOpenBo) {
+  btnOpenBo.addEventListener("click", (event) => {
+    event.preventDefault();
+    openBoWindow();
+  });
+}
+
+if (btnOpenCae) {
+  btnOpenCae.addEventListener("click", (event) => {
+    event.preventDefault();
+    openCaeWindow();
+  });
+}
+
 if (levelFilterEl) {
   levelFilterEl.addEventListener("change", renderLogs);
 }
@@ -862,6 +957,8 @@ async function bootstrap() {
   await refreshPrinterWorkspaceStatus();
   await refreshWindowsWorkspaceStatus();
   await refreshLerobotWorkspaceStatus();
+  await refreshBoWorkspaceStatus();
+  await refreshCaeWorkspaceStatus();
   await loadRecentEvents();
   connectEventStream();
   if (!modelStatusTimer) {

@@ -61,6 +61,7 @@ The current validation policy enforces these keys:
 |---|---|
 | `design` | `experiment_spec` |
 | `vision` | `observation` |
+| `equipment` | `equipment_result`, `protocol_note` |
 | `analysis` | `analysis` |
 | `guardian` | `guardian` |
 
@@ -87,10 +88,10 @@ When replacing internals with real programs, keep these output keys stable.
 |---|---|---|---|
 | `design` | `experiment_spec` | `experiment_spec`, `rationale` | protocol/candidate generation service |
 | `specimen` | none | `specimen_result`, `protocol_note` | geometry handoff + PrusaSlicer/PrusaLink runtime pipeline |
-| `vision` | `observation` | `observation`, `protocol_note` | camera capture/inference pipeline |
-| `manipulation` | none | `manipulation`, `sarm`, `protocol_note` | robot control runtime (pick/place) |
-| `equipment` | none | `equipment_result`, `protocol_note` | Windows PyAutoGUI bridge macro runner or legacy UTM runner |
-| `analysis` | `analysis` | `analysis` | metric computation + reasoning post-processor |
+| `vision` | `observation` | `observation`, `protocol_note` | 3DP output pickup observation via `camera.capture` |
+| `manipulation` | none | `manipulation`, `sarm`, `protocol_note` | robot control runtime: `robot.pick_place` or Pi0.5/LeRobot rollout |
+| `equipment` | `equipment_result`, `protocol_note` | `equipment_result`, `protocol_note`, `equipment_handoff` | Windows PyAutoGUI bridge macro runner or legacy UTM runner |
+| `analysis` | `analysis` | `analysis` | UTM curve feature extraction + CAE closed-loop objective/uncertainty post-processor |
 | `knowledge` | none | `knowledge` | local+web RAG and memory writer |
 | `guardian` | `guardian` | `guardian` | safety/policy engine |
 
@@ -166,6 +167,12 @@ Current tool-level event producer:
 - `printer.prepare` emits per-step progress for the Specimen Making Agent path.
 - `lerobot.*` emits per-step progress for the Manipulation Agent / LeRobot path.
 - `equipment.pyautogui.run` emits per-step progress for the Equipment Agent / Windows GUI macro path.
+- `cae.run_static_analysis` provides bottom-fixed/top-cyclic CAE metrics for Analysis Agent and `/cae`.
+- Main loop stage order includes `Manipulation -> Equipment -> Analysis`; Equipment stage results are stored in `run_metadata.equipment_result`, `run_metadata.equipment_handoff`, and summary fields under `latest_analysis`.
+- Equipment validation requires `equipment_result` and `protocol_note`. If `equipment_result.ok` is false, the loop retries or errors instead of continuing to Analysis.
+- Analysis Agent reads UTM data from `run_metadata.equipment_result.utm_data`/`utm_curve`/`curve` or from `result_file`/`result_path`/CSV/JSON paths.
+- Test mode may synthesize a deterministic UTM curve when no data is available; live mode must not fabricate UTM metrics and returns `UTM_DATA_REQUIRED` when no readable data is present.
+- Test mode also runs deterministic equivalent CAE when `cae.run_static_analysis` is registered; Analysis blends CAE structural score into `objective_score` and records `analysis.closed_loop_sources`.
 - Typical steps: `PRECHECK`, `RESOLVE_STL`, `PRUSALINK_STORAGE`, `VALIDATE_MESH`, `SLICE`, `VALIDATE_GCODE`, `UPLOAD`, `START_PRINT`, `MONITOR_PRINT`, `COOLDOWN`, `AUTO_EJECT`, `VERIFY_EJECTED`, `DONE`.
 - Runtime events are best-effort UI/logging signals and must not alter hardware safety gates.
 
@@ -182,6 +189,8 @@ Current tool names expected by agents:
 - `equipment.pyautogui.run`
 - `equipment.pyautogui.connection_status`
 - `equipment.pyautogui.save_connection`
+- `cae.health`
+- `cae.run_static_analysis`
 - `lerobot.profiles.list`
 - `lerobot.profiles.validate`
 - `lerobot.find_ports`
@@ -206,7 +215,7 @@ Payload baseline:
 | Tool | Minimal payload keys | Typical response keys |
 |---|---|---|
 | `printer.prepare` | `specimen_id`, optional `stl_path` | `ok`, `tool`, `specimen_id`, `status`, `printer_path`, `printer_mode`, `sliced_path`, `slicer_settings`, `slicer_result`, `gcode_validation`, `printer`, `prusalink`, `print_result`, `ejection_result`, `step_trace` |
-| `camera.capture` | `frame_id` | `ok`, `tool`, `frame_id`, `anomaly` |
+| `camera.capture` | `frame_id`, optional `camera_key`, `purpose`, `specimen_id` | `ok`, `tool`, `frame_id`, `camera_key`, `source`, `anomaly` |
 | `robot.pick_place` | `task` | `ok`, `tool`, `grasp_score`, `task` |
 | `utm.run_protocol` | `profile` | `ok`, `tool`, `result_file`, `cycles` |
 | `equipment.pyautogui.health` | none | `ok`, `tool`, `status`, `screen`, `pyautogui` |
@@ -214,6 +223,8 @@ Payload baseline:
 | `equipment.pyautogui.run` | `program_id` or `sequence` | `ok`, `tool`, `status`, `program_id`, `program_log`, `step_trace`, `failure_code` |
 | `equipment.pyautogui.connection_status` | none | `ok`, `bridge_url`, `token_configured`, `connection_memory_path` |
 | `equipment.pyautogui.save_connection` | `host` or `bridge_url`, optional `token` | `ok`, `bridge_url`, `selected`, `token_configured` |
+| `cae.health` | none | `ok`, `tool`, `calculix`, `gmsh`, `defaults`, `artifact_dir` |
+| `cae.run_static_analysis` | `runtime_mode`, `specimen_id`, `specimen_size_mm`, `material`, `loading`, `boundary` | `ok`, `tool`, `status`, `boundary_condition`, `loading_mode`, `metrics`, `cae_metrics`, `artifacts`, `step_trace`, `closed_loop_source` |
 | `lerobot.find_ports` | `mode`, optional `profile_id` | `ok`, `tool`, `mode`, `profile_id`, `ports`, `command_preview`, `step_trace` |
 | `lerobot.teleoperate.*` | `mode`, `profile_id`, optional `session_id` | `ok`, `tool`, `workflow`, `session_id`, `status`, `command_preview`, `step_trace` |
 | `lerobot.record.*` | `mode`, `profile_id`, optional `dataset_path`/`dataset_repo_id`/`session_id` | `ok`, `tool`, `workflow`, `session_id`, `status`, `dataset_path`, `command_preview`, `step_trace` |
@@ -241,6 +252,7 @@ Printer-specific integration rule:
 Equipment-specific integration rule:
 
 - Equipment Agent uses LLM-selected tool calls over `equipment.pyautogui.health`, `equipment.pyautogui.list_programs`, and `equipment.pyautogui.run`.
+- Equipment Agent stops before execution when `equipment.pyautogui.health` or `equipment.pyautogui.list_programs` fails.
 - Internal-network Windows bridge discovery and selection are handled by `/equipment/windows`.
 - Saved bridge selection is stored in `memory/windows_pyautogui_connection.json`.
 - Discovery lists only token-verified Windows bridge hosts.

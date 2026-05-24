@@ -207,21 +207,24 @@ function roleLabel(role) {
     design_ai: "Design Agent",
     specimen_ai: "Specimen Making Agent",
     printer_ai: "Specimen Making Agent",
+    vision_ai: "Vision Agent",
+    manipulation_ai: "Manipulation Agent",
+    equipment_ai: "Lab Equipment Agent",
+    analysis_ai: "Analysis Agent",
+    knowledge_ai: "Knowledge Agent",
+    bo_ai: "BO Agent",
     guardian: "Guardian Agent",
     system: "System",
   };
   return labels[role] || role || "Orchestrator";
 }
 
-function renderArtifactCard(msg) {
-  if (msg.render_artifacts === false || msg.role === "printer_ai") return "";
-  const artifacts = msg.artifacts || {};
+function renderSingleArtifactCard(artifacts, spec, label = "") {
   const previewUrl = safeUrl(artifacts.preview_url);
   const stlUrl = safeUrl(artifacts.stl_url);
   const specUrl = safeUrl(artifacts.experiment_spec_url);
   if (!previewUrl && !stlUrl && !specUrl) return "";
 
-  const spec = msg.experiment_spec || {};
   const specimenId = escapeHtml(spec.specimen_id || "specimen");
   const geometry = escapeHtml(spec.geometry_type || "geometry");
   const size = escapeHtml(JSON.stringify(spec.specimen_size_mm || []));
@@ -230,6 +233,7 @@ function renderArtifactCard(msg) {
     <div class="artifact-card">
       ${previewUrl ? `<img class="artifact-preview" src="${escapeHtml(previewUrl)}" alt="STL preview for ${specimenId}" />` : ""}
       <div class="artifact-meta">
+        ${label ? `<em>${escapeHtml(label)}</em>` : ""}
         <strong>${specimenId}</strong>
         <span>${geometry} / size=${size}</span>
         <div class="artifact-links">
@@ -243,6 +247,217 @@ function renderArtifactCard(msg) {
           <div class="stl-viewer-hint">drag to rotate / wheel to zoom</div>
         </div>
       ` : ""}
+    </div>
+  `;
+}
+
+function renderArtifactCard(msg) {
+  if (msg.render_artifacts === false || msg.role === "printer_ai") return "";
+  if (msg.role === "analysis_ai" && msg.fem_artifacts) return "";
+  const pair = msg.artifact_pair || {};
+  if (pair.previous || pair.next) {
+    const previous = pair.previous || {};
+    const next = pair.next || {};
+    const previousCard = renderSingleArtifactCard(
+      previous.artifacts || {},
+      previous.experiment_spec || {},
+      previous.label || "Previous shape"
+    );
+    const nextCard = renderSingleArtifactCard(
+      next.artifacts || {},
+      next.experiment_spec || msg.experiment_spec || {},
+      next.label || "Next shape"
+    );
+    return `<div class="artifact-pair">${previousCard}${nextCard}</div>`;
+  }
+  return renderSingleArtifactCard(msg.artifacts || {}, msg.experiment_spec || {});
+}
+
+function renderFemContourCard(msg) {
+  const fem = msg.fem_artifacts || {};
+  const contourUrl = safeUrl(fem.contour_url);
+  const reportUrl = safeUrl(fem.report_url);
+  if (!contourUrl && !reportUrl) return "";
+  return `
+    <div class="fem-contour-card">
+      <div class="fem-contour-head">
+        <strong>FEM / CAE Contour</strong>
+        ${reportUrl ? `<a href="${escapeHtml(reportUrl)}" target="_blank" rel="noreferrer">CAE report</a>` : ""}
+      </div>
+      ${contourUrl ? `<img class="fem-contour-preview" src="${escapeHtml(contourUrl)}" alt="FEM contour visualization" />` : ""}
+    </div>
+  `;
+}
+
+function numberText(value, digits = 4) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return "n/a";
+  return String(Number(num.toFixed(digits)));
+}
+
+function finiteRange(values, fallback = [0, 1]) {
+  const nums = values.map(Number).filter(Number.isFinite);
+  if (!nums.length) return fallback;
+  let min = Math.min(...nums);
+  let max = Math.max(...nums);
+  if (Math.abs(max - min) < 1e-9) {
+    min -= 0.5;
+    max += 0.5;
+  }
+  return [min, max];
+}
+
+function scaleLinear(value, domain, range) {
+  const v = Number(value);
+  if (!Number.isFinite(v)) return range[0];
+  const t = (v - domain[0]) / Math.max(1e-9, domain[1] - domain[0]);
+  return range[0] + Math.max(0, Math.min(1, t)) * (range[1] - range[0]);
+}
+
+function polyline(points) {
+  return points.map(([x, y]) => `${numberText(x, 2)},${numberText(y, 2)}`).join(" ");
+}
+
+function compactBoParams(params) {
+  const p = params || {};
+  const keys = ["geometry_type", "relative_density", "wall_thickness_mm", "cell_size_mm", "tpms_thickness", "orientation_deg", "anisotropy_ratio"];
+  return keys
+    .filter((key) => p[key] !== undefined && p[key] !== null)
+    .map((key) => `${key}=${numberText(p[key], 4)}`)
+    .join(", ");
+}
+
+function boStrategyFromBenchmark(benchmark) {
+  const strategies = benchmark && benchmark.strategies ? benchmark.strategies : {};
+  if (strategies.bo) return strategies.bo;
+  const firstKey = Object.keys(strategies)[0];
+  return firstKey ? strategies[firstKey] : null;
+}
+
+function renderBoTraceSvg(trace) {
+  const candidates = Array.isArray(trace.candidates) ? trace.candidates : [];
+  if (!candidates.length) {
+    return `<div class="bo-plot-empty">BO candidate landscape가 없습니다.</div>`;
+  }
+
+  const width = 840;
+  const height = 320;
+  const pad = { left: 52, right: 24, top: 28, bottom: 48 };
+  const plotW = width - pad.left - pad.right;
+  const plotH = height - pad.top - pad.bottom;
+  const xDomain = finiteRange(candidates.map((item) => item.x), [1, candidates.length || 1]);
+  const meanValues = candidates.flatMap((item) => [
+    Number(item.surrogate_mean) - Number(item.uncertainty || 0) * 0.12,
+    Number(item.surrogate_mean),
+    Number(item.surrogate_mean) + Number(item.uncertainty || 0) * 0.12,
+  ]);
+  const acqValues = candidates.map((item) => item.acquisition_value);
+  const scoreValues = (trace.evaluated_points || []).map((item) => item.score);
+  const meanDomain = finiteRange(meanValues, [0, 1]);
+  const acqDomain = finiteRange(acqValues, [0, 1]);
+  const scoreDomain = finiteRange(scoreValues.length ? scoreValues : meanValues, meanDomain);
+  const xScale = (value) => pad.left + scaleLinear(value, xDomain, [0, plotW]);
+  const yMean = (value) => pad.top + scaleLinear(value, meanDomain, [plotH, 0]);
+  const yAcq = (value) => pad.top + scaleLinear(value, acqDomain, [plotH, 0]);
+  const yScore = (value) => pad.top + scaleLinear(value, scoreDomain, [plotH, 0]);
+  const meanLine = candidates.map((item) => [xScale(item.x), yMean(item.surrogate_mean)]);
+  const acqLine = candidates.map((item) => [xScale(item.x), yAcq(item.acquisition_value)]);
+  const upper = candidates.map((item) => [xScale(item.x), yMean(Number(item.surrogate_mean) + Number(item.uncertainty || 0) * 0.12)]);
+  const lower = candidates
+    .slice()
+    .reverse()
+    .map((item) => [xScale(item.x), yMean(Number(item.surrogate_mean) - Number(item.uncertainty || 0) * 0.12)]);
+  const selected = trace.selected || {};
+  const selectedX = Number(selected.x);
+  const selectedY = yAcq(selected.acquisition_value);
+  const observed = Array.isArray(trace.evaluated_points) ? trace.evaluated_points.filter((item) => Number.isFinite(Number(item.x))) : [];
+  const candidateCount = Number(trace.candidate_count || candidates.length);
+  const xTicks = [1, Math.max(1, Math.round(candidateCount / 2)), candidateCount].filter((v, i, arr) => arr.indexOf(v) === i);
+  const yTicks = [0, 0.5, 1];
+
+  return `
+    <svg class="bo-trace-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="BO surrogate and acquisition trace step ${escapeHtml(trace.step)}">
+      <rect x="0" y="0" width="${width}" height="${height}" rx="18" class="bo-svg-bg"></rect>
+      <line x1="${pad.left}" y1="${pad.top + plotH}" x2="${pad.left + plotW}" y2="${pad.top + plotH}" class="bo-axis"></line>
+      <line x1="${pad.left}" y1="${pad.top}" x2="${pad.left}" y2="${pad.top + plotH}" class="bo-axis"></line>
+      ${xTicks.map((tick) => `
+        <g>
+          <line x1="${xScale(tick)}" y1="${pad.top}" x2="${xScale(tick)}" y2="${pad.top + plotH}" class="bo-grid"></line>
+          <text x="${xScale(tick)}" y="${height - 18}" text-anchor="middle" class="bo-axis-label">${tick}</text>
+        </g>
+      `).join("")}
+      ${yTicks.map((tick) => `
+        <g>
+          <line x1="${pad.left}" y1="${pad.top + plotH * (1 - tick)}" x2="${pad.left + plotW}" y2="${pad.top + plotH * (1 - tick)}" class="bo-grid"></line>
+          <text x="${pad.left - 12}" y="${pad.top + plotH * (1 - tick) + 4}" text-anchor="end" class="bo-axis-label">${tick}</text>
+        </g>
+      `).join("")}
+      <polygon points="${polyline([...upper, ...lower])}" class="bo-uncertainty-band"></polygon>
+      <polyline points="${polyline(meanLine)}" class="bo-mean-line"></polyline>
+      <polyline points="${polyline(acqLine)}" class="bo-acq-line"></polyline>
+      ${observed.map((point) => `
+        <circle cx="${xScale(point.x)}" cy="${yScore(point.score)}" r="5.8" class="bo-observed-point">
+          <title>${escapeHtml(point.candidate_id || point.source || "observed")} score=${escapeHtml(numberText(point.score, 5))} ${escapeHtml(compactBoParams(point.parameters))}</title>
+        </circle>
+      `).join("")}
+      ${Number.isFinite(selectedX) ? `
+        <line x1="${xScale(selectedX)}" y1="${pad.top}" x2="${xScale(selectedX)}" y2="${pad.top + plotH}" class="bo-selected-line"></line>
+        <circle cx="${xScale(selectedX)}" cy="${selectedY}" r="8" class="bo-selected-point">
+          <title>${escapeHtml(selected.candidate_id || "selected")} acquisition=${escapeHtml(numberText(selected.acquisition_value, 5))} ${escapeHtml(compactBoParams(selected.parameters))}</title>
+        </circle>
+      ` : ""}
+      <text x="${pad.left}" y="20" class="bo-svg-title">step ${escapeHtml(trace.step)} · ${escapeHtml(trace.acquisition || "acquisition")} · candidate pool index</text>
+      <g class="bo-legend">
+        <line x1="${width - 330}" y1="20" x2="${width - 300}" y2="20" class="bo-mean-line"></line>
+        <text x="${width - 294}" y="24">surrogate mean</text>
+        <line x1="${width - 190}" y1="20" x2="${width - 160}" y2="20" class="bo-acq-line"></line>
+        <text x="${width - 154}" y="24">acquisition</text>
+      </g>
+    </svg>
+  `;
+}
+
+function renderBoResultCard(msg) {
+  const boResult = msg.bo_result && typeof msg.bo_result === "object" ? msg.bo_result : {};
+  if (msg.role !== "bo_ai" || !Object.keys(boResult).length) return "";
+  const benchmark = boResult.benchmark || {};
+  const strategyPayload = boStrategyFromBenchmark(benchmark);
+  const trace = strategyPayload && Array.isArray(strategyPayload.surrogate_trace) ? strategyPayload.surrogate_trace : [];
+  const visibleTrace = trace.length > 12 ? trace.slice(-12) : trace;
+  const recommendation = boResult.recommendation && typeof boResult.recommendation === "object" ? boResult.recommendation : {};
+  const selectedRows = trace
+    .map((item) => {
+      const selected = item.selected || {};
+      return `
+        <div class="bo-selected-row">
+          <strong>#${escapeHtml(item.step || "")}</strong>
+          <span>${escapeHtml(selected.candidate_id || "candidate")}</span>
+          <code>${escapeHtml(compactBoParams(selected.parameters))}</code>
+          <em>score=${escapeHtml(numberText(selected.score, 5))} · acq=${escapeHtml(numberText(selected.acquisition_value, 5))}</em>
+        </div>
+      `;
+    })
+    .join("");
+
+  return `
+    <div class="bo-live-card">
+      <div class="runtime-card-section">
+        <h4>BO Surrogate / Acquisition Trace</h4>
+        ${runtimeRows([
+          ["strategy", boResult.strategy],
+          ["acquisition", boResult.acquisition],
+          ["budget", boResult.budget],
+          ["recommended_candidate", recommendation.candidate_id],
+          ["recommended_score", recommendation.objective_score],
+        ])}
+      </div>
+      <div class="bo-plot-stack">
+        ${trace.length > visibleTrace.length ? `<p class="hint">최근 ${visibleTrace.length}/${trace.length} step만 표시합니다.</p>` : ""}
+        ${visibleTrace.length
+          ? visibleTrace.map((item) => `<article class="bo-trace-card">${renderBoTraceSvg(item)}</article>`).join("")
+          : `<div class="bo-plot-empty">BO surrogate/acquisition trace가 없습니다. BO/MBO strategy 결과가 들어오면 여기에 표시됩니다.</div>`}
+      </div>
+      ${selectedRows ? `<div class="bo-selected-points">${selectedRows}</div>` : ""}
     </div>
   `;
 }
@@ -435,6 +650,8 @@ function renderPlanningMessages(messages) {
       ${renderReasoningBlock(msg)}
       ${content ? `<div class="message-content">${content}</div>` : ""}
       ${renderSpecimenRuntimeCard(msg)}
+      ${renderFemContourCard(msg)}
+      ${renderBoResultCard(msg)}
       ${renderArtifactCard(msg)}
     `;
     planningChatLog.appendChild(item);

@@ -706,10 +706,26 @@ class LeRobotBridge:
         policy_ref = self._policy_ref(request)
         if not policy_ref and (request.runtime_mode or request.mode) == "live":
             return self._error("lerobot.rollout.start", "live", request.profile_id, "LEROBOT_POLICY_PATH_REQUIRED", "Live rollout requires policy_path, policy_checkpoint_path, or policy_repo_id.")
+        policy_type = self._canonical_policy_type(request.policy_type or "act")
         policy_args = [f"--policy.path={policy_ref or str(self.config.fake_checkpoint_root / 'policy.ckpt')}"]
+        if self._is_pi05_policy(policy_type):
+            policy_args.append("--policy.type=pi05")
         device_override = str(raw_payload.get("device") or "").strip()
         if device_override:
-            policy_args.append(f"--policy.device={device_override}")
+            if self._is_pi05_policy(policy_type):
+                policy_args.append(f"--device={device_override}")
+            else:
+                policy_args.append(f"--policy.device={device_override}")
+        inference_type = str(request.rollout_inference_type or "").strip().lower()
+        if self._is_pi05_policy(policy_type) and not inference_type:
+            inference_type = "rtc"
+        if inference_type:
+            policy_args.append(f"--inference.type={inference_type}")
+            if inference_type == "rtc":
+                if request.rollout_rtc_execution_horizon is not None:
+                    policy_args.append(f"--inference.rtc.execution_horizon={int(request.rollout_rtc_execution_horizon)}")
+                if request.rollout_rtc_max_guidance_weight is not None:
+                    policy_args.append(f"--inference.rtc.max_guidance_weight={float(request.rollout_rtc_max_guidance_weight)}")
         if "policy_use_amp" in raw_payload:
             policy_args.append(f"--policy.use_amp={_bool_arg(request.policy_use_amp)}")
         if request.rollout_temporal_ensemble:
@@ -719,6 +735,25 @@ class LeRobotBridge:
         if request.rollout_action_clamp:
             max_relative_target = max(1, int(round(float(request.rollout_max_relative_target or 5))))
             policy_args.append(f"--robot.max_relative_target={max_relative_target}")
+        if self._is_pi05_policy(policy_type):
+            duration = 0 if request.continuous_rollout else max(1, int(round(float(request.episode_s or 1))))
+            rollout_extra_args = policy_args + [
+                "--strategy.type=base",
+                f"--task={request.task_instruction}",
+                f"--duration={duration}",
+                f"--display_data={_bool_arg(request.display_data)}",
+            ]
+        else:
+            rollout_extra_args = policy_args + [
+                f"--dataset.repo_id={request.dataset_repo_id or 'local/eval_lerobot_policy'}",
+                f"--dataset.root={self._dataset_path_for(request)}",
+                f"--dataset.single_task={request.task_instruction}",
+                f"--dataset.fps={request.fps or ''}",
+                f"--dataset.episode_time_s={request.episode_s}",
+                f"--dataset.num_episodes={request.num_episodes}",
+                f"--dataset.push_to_hub={_bool_arg(request.push_to_hub)}",
+                f"--display_data={_bool_arg(request.display_data)}",
+            ]
         return self._start_session(
             tool="lerobot.rollout.start",
             workflow="rollout",
@@ -731,17 +766,7 @@ class LeRobotBridge:
                 ("POLICY_ACTIVE", "active", "policy rollout active"),
             ],
             allow_key="allow_policy_rollout",
-            extra_args=policy_args
-            + [
-                f"--dataset.repo_id={request.dataset_repo_id or 'local/eval_lerobot_policy'}",
-                f"--dataset.root={self._dataset_path_for(request)}",
-                f"--dataset.single_task={request.task_instruction}",
-                f"--dataset.fps={request.fps or ''}",
-                f"--dataset.episode_time_s={request.episode_s}",
-                f"--dataset.num_episodes={request.num_episodes}",
-                f"--dataset.push_to_hub={_bool_arg(request.push_to_hub)}",
-                f"--display_data={_bool_arg(request.display_data)}",
-            ],
+            extra_args=rollout_extra_args,
             event_payload=payload or {},
         )
 
@@ -1533,7 +1558,10 @@ class LeRobotBridge:
     def _workflow_command(self, profile: RobotProfile, workflow: str, request: LeRobotSessionRequest, args: list[str]) -> list[str]:
         mode = request.runtime_mode or request.mode
         command = [self.config.conda_executable, "run", "--no-capture-output", "-n", self._workflow_conda_env_name(workflow, request)]
-        command.extend(self._workflow_entrypoint(profile, workflow))
+        if workflow == "rollout" and self._is_pi05_policy(request.policy_type):
+            command.append("lerobot-rollout")
+        else:
+            command.extend(self._workflow_entrypoint(profile, workflow))
         if workflow in {"teleoperate", "record", "rollout"}:
             command.extend(self._robot_args(profile, request=request, allow_fake=mode != "live"))
         if workflow in {"teleoperate", "record"}:
@@ -1542,12 +1570,12 @@ class LeRobotBridge:
         return command
 
     def _workflow_conda_env_name(self, workflow: str, request: LeRobotSessionRequest) -> str:
-        if workflow == "train" and self._is_pi05_policy(request.policy_type):
+        if workflow in {"train", "rollout"} and self._is_pi05_policy(request.policy_type):
             return self.config.pi05_conda_env_name
         return self.config.conda_env_name
 
     def _workflow_env_overrides(self, workflow: str, request: LeRobotSessionRequest) -> dict[str, str]:
-        if workflow == "train" and self._is_pi05_policy(request.policy_type):
+        if workflow in {"train", "rollout"} and self._is_pi05_policy(request.policy_type):
             hf_home = self.config.pi05_hf_home
             return {
                 "HF_HOME": str(hf_home),

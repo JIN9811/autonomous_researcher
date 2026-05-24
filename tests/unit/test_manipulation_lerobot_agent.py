@@ -14,6 +14,7 @@ from mcp_tools.mock_tools import register_mock_tools
 from mcp_tools.tool_registry import ToolRegistry
 from orchestrator.state import Mode, OrchestratorState, Stage
 from utils.config_loader import load_all_configs
+import utils.manipulation_profile as manipulation_profile_module
 
 
 class _CtxStub:
@@ -48,6 +49,33 @@ def _state() -> OrchestratorState:
     )
 
 
+def _post_specimen_state() -> OrchestratorState:
+    return OrchestratorState(
+        run_id="run-pi05-transfer",
+        experiment_id="exp-pi05-transfer",
+        mode=Mode.TEST,
+        stage=Stage.MANIPULATION,
+        active_goal="transfer printed specimen to UTM",
+        current_experiment_spec={},
+        latest_observations={
+            "frame_id": "frame-transfer",
+            "anomaly": False,
+            "transfer_readiness": {"ready": True, "pose_confidence": 0.82},
+            "pose_estimate": {"x_mm": 0.0, "y_mm": 0.0, "z_mm": 5.0, "confidence": 0.82},
+        },
+        run_metadata={
+            "specimen_result": {
+                "ok": True,
+                "specimen_id": "specimen-transfer-001",
+                "candidate_id": "candidate-transfer-001",
+                "handoff_status": "ready",
+                "stl_path": "runs/specimen-transfer-001.stl",
+                "sliced_path": "runs/specimen-transfer-001.gcode",
+            }
+        },
+    )
+
+
 def _tools(tmp_path: Path) -> ToolRegistry:
     cfg = load_all_configs(Path("configs"))
     tools = ToolRegistry()
@@ -56,8 +84,17 @@ def _tools(tmp_path: Path) -> ToolRegistry:
     return tools
 
 
+def _isolate_manipulation_profile(tmp_path: Path, monkeypatch: Any) -> None:
+    monkeypatch.setattr(
+        manipulation_profile_module,
+        "MANIPULATION_AGENT_PROFILE_PATH",
+        tmp_path / "memory" / "manipulation_agent_bridge.json",
+    )
+
+
 @pytest.mark.asyncio
-async def test_manipulation_agent_calls_lerobot_rollout(tmp_path: Path) -> None:
+async def test_manipulation_agent_calls_lerobot_rollout(tmp_path: Path, monkeypatch: Any) -> None:
+    _isolate_manipulation_profile(tmp_path, monkeypatch)
     ctx = _CtxStub(_tools(tmp_path))
 
     result = await ManipulationAgent().run(_state(), ctx)
@@ -75,3 +112,27 @@ async def test_manipulation_agent_calls_lerobot_rollout(tmp_path: Path) -> None:
     assert result.data["sarm"]["failure_precursor"] >= 0
     assert ctx.events
     assert ctx.events[0]["tool"] == "lerobot.rollout.start"
+
+
+@pytest.mark.asyncio
+async def test_manipulation_agent_defaults_to_pi05_transfer_after_specimen(tmp_path: Path, monkeypatch: Any) -> None:
+    _isolate_manipulation_profile(tmp_path, monkeypatch)
+    ctx = _CtxStub(_tools(tmp_path))
+
+    result = await ManipulationAgent().run(_post_specimen_state(), ctx)
+
+    manipulation = result.data["manipulation"]
+    assert result.success is True
+    assert manipulation["tool"] == "lerobot.rollout.start"
+    assert manipulation["strategy"] == "pi05_lerobot_policy"
+    assert manipulation["transfer_task"]["policy_type"] == "pi05"
+    assert manipulation["transfer_task"]["source"] == "3dp_output_area"
+    assert manipulation["transfer_task"]["target"] == "utm_fixture"
+    assert manipulation["transfer_task"]["specimen_id"] == "specimen-transfer-001"
+    assert manipulation["completion_status"] == "reported_complete"
+    assert "-n" in manipulation["command_preview"]
+    assert manipulation["command_preview"][manipulation["command_preview"].index("-n") + 1] == "lerobot-pi05"
+    assert "lerobot-rollout" in manipulation["command_preview"]
+    assert "--policy.type=pi05" in manipulation["command_preview"]
+    assert "--inference.type=rtc" in manipulation["command_preview"]
+    assert any(item.startswith("--task=Move specimen-transfer-001") for item in manipulation["command_preview"])

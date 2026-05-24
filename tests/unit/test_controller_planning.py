@@ -7,8 +7,9 @@ from types import SimpleNamespace
 
 import pytest
 
+from agents.base_agent import AgentResult
 from app.bootstrap import load_runtime
-from orchestrator.state import Mode
+from orchestrator.state import Mode, Stage
 
 
 def test_live_gui_test_mode_flags_survive_design_adaptation() -> None:
@@ -39,6 +40,30 @@ def test_live_gui_test_mode_flags_survive_design_adaptation() -> None:
     assert spec["print"]["start_immediately"] is False
     assert spec["print"]["physical_intent"] is False
     assert "printer_test_path" not in spec
+
+
+def test_live_gui_regenerates_specimen_id_when_geometry_is_overridden() -> None:
+    controller = load_runtime()
+    controller._state.mode = Mode.LIVE
+
+    spec = controller._build_planning_spec(
+        base_spec={
+            "candidate_id": "cand-mismatch",
+            "geometry_type": "honeycomb",
+            "specimen_id": "specimen-cand-mismatch-honeycomb-old",
+            "specimen_size_mm": [30, 30, 30],
+        },
+        constraints={
+            "geometry_type": "gyroid",
+            "specimen_size_mm": [30, 30, 30],
+            "test_mode_autofill": True,
+            "test_mode_llm_generated": True,
+        },
+    )
+
+    assert spec["geometry_type"] == "gyroid"
+    assert "honeycomb" not in spec["specimen_id"]
+    assert "gyroid" in spec["specimen_id"]
 
 
 def test_live_gui_test_defaults_use_3dp_gui_saved_test_size(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -484,6 +509,228 @@ async def test_live_gui_test_mode_inline_printer_choice_handoffs_without_prompt(
     assert constraints["require_flat_compression_faces"] is False
     assert constraints["skin_thickness_mm"] == 0.8
     assert not controller._state.run_metadata.get("pending_specimen_input")
+
+
+@pytest.mark.asyncio
+async def test_planning_tail_continues_original_loop_after_specimen() -> None:
+    controller = load_runtime()
+    controller._state.mode = Mode.LIVE
+    spec = controller._build_planning_spec(
+        base_spec={
+            "candidate_id": "cand-tail",
+            "geometry_type": "gyroid",
+            "specimen_size_mm": [30, 30, 30],
+        },
+        constraints={
+            "geometry_type": "gyroid",
+            "specimen_size_mm": [30, 30, 30],
+            "test_mode_autofill": True,
+            "test_mode_llm_generated": True,
+            "printer_test_path": "virtual_bridge",
+        },
+    )
+    controller._state.current_experiment_spec = spec
+    controller._state.run_metadata["specimen_result"] = {
+        "ok": True,
+        "candidate_id": spec["candidate_id"],
+        "specimen_id": spec["specimen_id"],
+        "handoff_status": "ready",
+        "stl_path": "/tmp/specimen-tail.stl",
+    }
+
+    result = await controller._run_planning_loop_tail(spec)
+
+    assert result["ok"] is True
+    assert controller._state.mode == Mode.LIVE
+    assert controller._state.stage == Stage.COMPLETE
+    assert controller._state.latest_observations["transfer_readiness"]["ready"] is True
+    assert controller._state.run_metadata["manipulation_result"]["ok"] is True
+    assert controller._state.run_metadata["equipment_handoff"]["status"] == "ready_for_analysis"
+    assert controller._state.latest_analysis["cae_result"]["ok"] is True
+    roles = [message["role"] for message in controller.planning_snapshot()["messages"]]
+    assert "vision_ai" in roles
+    assert "manipulation_ai" in roles
+    assert "equipment_ai" in roles
+    assert "analysis_ai" in roles
+    assert "knowledge_ai" in roles
+    assert "bo_ai" in roles
+    assert "guardian" in roles
+    assert controller._state.run_metadata["bo_agent"]["knowledge_context"]
+
+
+@pytest.mark.asyncio
+async def test_specimen_retry_merges_result_before_loop_tail(monkeypatch: pytest.MonkeyPatch) -> None:
+    controller = load_runtime()
+    controller._state.mode = Mode.LIVE
+    spec = controller._build_planning_spec(
+        base_spec={
+            "candidate_id": "cand-retry-tail",
+            "geometry_type": "gyroid",
+            "specimen_size_mm": [30, 30, 30],
+        },
+        constraints={
+            "geometry_type": "gyroid",
+            "specimen_size_mm": [30, 30, 30],
+            "test_mode_autofill": True,
+            "test_mode_llm_generated": True,
+            "printer_test_path": "virtual_bridge",
+        },
+    )
+    controller._state.current_experiment_spec = spec
+
+    class FakeSpecimenAgent:
+        name = "specimen_agent"
+
+        async def run(self, state, ctx):  # noqa: ANN001
+            return AgentResult(
+                success=True,
+                summary="fake specimen ready",
+                data={
+                    "protocol_note": "fake specimen",
+                    "specimen_result": {
+                        "ok": True,
+                        "candidate_id": spec["candidate_id"],
+                        "specimen_id": spec["specimen_id"],
+                        "handoff_status": "ready",
+                        "printer_prepare_status": "simulated_printed",
+                        "printer_path": "virtual_prusalink",
+                        "stl_path": "/tmp/specimen-retry-tail.stl",
+                        "sliced_path": "/tmp/specimen-retry-tail.gcode",
+                    },
+                },
+            )
+
+    async def fake_loop_tail(experiment_spec: dict, **_: object) -> dict:
+        specimen = controller._state.run_metadata.get("specimen_result")
+        assert isinstance(specimen, dict)
+        assert specimen["specimen_id"] == spec["specimen_id"]
+        return {"ok": True, "message": "tail completed", "decision": "continue"}
+
+    controller._deps.agent_registry.register(FakeSpecimenAgent())
+    monkeypatch.setattr(controller, "_run_planning_loop_tail", fake_loop_tail)
+
+    result = await controller._run_specimen_guardian_tail(spec)
+
+    assert result["ok"] is True
+    system_messages = [message["content"] for message in controller.planning_snapshot()["messages"] if message["role"] == "system"]
+    assert "SYSTEM_EVENT: HANDOFF\nfrom=OperatorInput\nto=SpecimenMakingAgent\nstatus=retry" in system_messages
+    assert all("원래" not in content for content in system_messages)
+    assert all("Handoff:" not in content for content in system_messages)
+
+
+def test_planning_system_handoff_message_is_structured() -> None:
+    content = load_runtime()._planning_stage_handoff_text("Specimen Making Agent", Stage.VISION)
+
+    assert content == "SYSTEM_EVENT: HANDOFF\nfrom=Specimen Making Agent\nto=Vision Agent\nstatus=started"
+
+
+@pytest.mark.asyncio
+async def test_first_live_gui_test_design_cycle_uses_single_artifact() -> None:
+    controller = load_runtime()
+    controller._state.mode = Mode.LIVE
+
+    spec = await controller._run_planning_design_stage(
+        previous_spec={},
+        design_constraints={
+            "geometry_type": "gyroid",
+            "specimen_size_mm": [30, 30, 30],
+            "test_mode_autofill": True,
+            "test_mode_llm_generated": True,
+            "printer_test_path": "virtual_bridge",
+        },
+        cycle_index=1,
+        total_cycles=5,
+        emit_handoff=False,
+    )
+
+    design_message = [message for message in controller.planning_snapshot()["messages"] if message["role"] == "design_ai"][-1]
+
+    assert spec["specimen_id"]
+    assert "artifact_pair" not in design_message
+    assert design_message.get("artifacts", {}).get("stl_url")
+    assert "생성된 형상" in design_message["content"]
+    assert "이전 형상" not in design_message["content"]
+
+
+@pytest.mark.asyncio
+async def test_live_gui_test_planning_series_runs_five_design_cycles(monkeypatch: pytest.MonkeyPatch) -> None:
+    controller = load_runtime()
+    controller._state.mode = Mode.LIVE
+    spec = controller._build_planning_spec(
+        base_spec={
+            "candidate_id": "cand-series-1",
+            "geometry_type": "gyroid",
+            "specimen_size_mm": [30, 30, 30],
+        },
+        constraints={
+            "geometry_type": "gyroid",
+            "specimen_size_mm": [30, 30, 30],
+            "test_mode_autofill": True,
+            "test_mode_llm_generated": True,
+            "printer_test_path": "virtual_bridge",
+        },
+    )
+    controller._state.current_experiment_spec = spec
+    controller._state.run_metadata["specimen_result"] = {
+        "ok": True,
+        "candidate_id": spec["candidate_id"],
+        "specimen_id": spec["specimen_id"],
+        "handoff_status": "ready",
+        "stl_path": "/tmp/specimen-series-1.stl",
+    }
+
+    async def fake_specimen_stage(experiment_spec: dict, *, emit_handoff: bool = True) -> dict:
+        controller._merge_planning_agent_data(
+            Stage.SPECIMEN,
+            {
+                "specimen_result": {
+                    "ok": True,
+                    "candidate_id": experiment_spec["candidate_id"],
+                    "specimen_id": experiment_spec["specimen_id"],
+                    "handoff_status": "ready",
+                    "stl_path": f"/tmp/{experiment_spec['specimen_id']}.stl",
+                }
+            },
+        )
+        return {"pending": False}
+
+    monkeypatch.setattr(controller, "_run_planning_specimen_stage", fake_specimen_stage)
+
+    result = await controller._run_planning_cycle_series(
+        first_spec=spec,
+        design_constraints={**dict(spec.get("constraints", {})), **spec},
+        start_cycle=1,
+    )
+
+    assert result["ok"] is True
+    assert controller._state.loop_count == 5
+    design_messages = [message for message in controller.planning_snapshot()["messages"] if message["role"] == "design_ai"]
+    assert len(design_messages) == 4
+    assert all(message.get("artifact_pair", {}).get("previous") for message in design_messages)
+    assert all(message.get("artifact_pair", {}).get("next") for message in design_messages)
+    signatures = {
+        (
+            message["experiment_spec"].get("relative_density"),
+            message["experiment_spec"].get("wall_thickness_mm"),
+            message["experiment_spec"].get("orientation_deg"),
+            message["experiment_spec"].get("anisotropy_ratio"),
+            message["experiment_spec"].get("tpms_thickness"),
+        )
+        for message in design_messages
+    }
+    assert len(signatures) > 1
+    assert controller._state.run_metadata["bo_agent"]["knowledge_context"]
+    assert controller._state.current_experiment_spec["cell_size_mm"] == spec["cell_size_mm"]
+    assert controller._state.current_experiment_spec["top_bottom_cap"] is False
+    assert controller._state.current_experiment_spec["test_loop_surface_caps_disabled"] is True
+    assert "cell_size_mm" not in controller._state.run_metadata["bo_recommended_constraints"]
+    bo_messages = [message for message in controller.planning_snapshot()["messages"] if message["role"] == "bo_ai"]
+    assert bo_messages
+    bo_trace = bo_messages[-1]["bo_result"]["benchmark"]["strategies"]["bo"]["surrogate_trace"]
+    assert bo_trace
+    assert bo_trace[-1]["selected"]["candidate_id"]
+    analysis_messages = [message for message in controller.planning_snapshot()["messages"] if message["role"] == "analysis_ai"]
+    assert any(message.get("fem_artifacts", {}).get("contour_url") for message in analysis_messages)
 
 
 @pytest.mark.asyncio

@@ -61,6 +61,7 @@ Top-Level Architecture
 [LangGraph Orchestrator]
         |
         +--> [Design Agent]
+        +--> [BO Agent]
         +--> [Knowledge Agent]
         +--> [Analysis Agent]
         +--> [Guardian Agent]
@@ -183,21 +184,41 @@ Purpose
 - Respect constraints and cost
 - Emit candidates that can be wrapped as `ExperimentCandidate`
 
+3.2.1 BO Agent
+Purpose
+- Provide advisory Bayesian Optimization / model-based optimization over the current experiment objective.
+- Compare random/grid/BO candidate proposal behavior through `experiment.benchmark`.
+- Expose acquisition controls through the dedicated `/bo` workspace.
+- Recommend candidate parameters for later Design Agent constraint merging.
+
+Modes
+- test/virtual mode by default; no hardware writes.
+- live mode remains advisory unless a downstream agent explicitly executes the selected experiment.
+
+Important rule
+- BO Agent is not yet a mandatory RunLoop stage.
+- BO Agent must not generate STL, slice G-code, move robots, or start prints.
+
 Modes
 - live mode
 - test mode with synthetic candidate generation
 
 3.3 Analysis Agent
 Purpose
-- Parse experiment outputs
-- Compute features/objectives
-- Estimate uncertainty
+- Parse UTM compression/tensile output curves from Lab Equipment Agent
+- Compute UTM features/objectives: peak force, stiffness, strength, modulus, strain at peak, energy absorption, and specific energy absorption
+- Run CAE closed-loop analysis through `cae.run_static_analysis` when available
+- Use bottom fixed support and top cyclic loading as the default CAE boundary/loading setup
+- Estimate uncertainty from data source and curve quality
 - Produce compact summaries for GUI and memory
 - Consume `ExperimentEvaluationResult` records when available
+- In test mode, generate a deterministic synthetic UTM curve only when no UTM data file/inline curve is available.
+- In test mode, use deterministic equivalent CAE metrics as an additional closed-loop scoring signal.
+- In live mode, require real UTM data from `equipment_result.utm_data` or a readable `result_file`/CSV/JSON path; missing data must block analysis instead of fabricating metrics.
 
 Modes
-- live mode from real experiment files
-- test mode from synthetic experiment data
+- live mode from real UTM experiment files or inline bridge data
+- test mode from real/saved UTM data when provided, otherwise deterministic synthetic UTM data plus deterministic equivalent CAE data
 
 3.4 Knowledge Agent
 Purpose
@@ -243,6 +264,8 @@ Purpose
 - Estimate pose/alignment
 - Detect visible anomalies
 - Provide observations to Manipulation Agent and Guardian
+- After Specimen Making, perform the lightweight 3DP output-area pickup check.
+- Return `pose_estimate`, `pickup_target`, and `transfer_readiness` so the robot policy does not start without a current observation.
 
 Modes
 - live camera mode
@@ -253,6 +276,11 @@ Purpose
 - Execute pick / place / alignment / transfer tasks
 - Use VLA policy as execution logic
 - Include SARM submodule
+- After a ready 3DP specimen and Vision observation, default to Pi0.5 LeRobot rollout for `3dp_output_area -> utm_fixture`.
+- Keep `fixed_kinematic` available as an explicit compatibility strategy.
+- Use `lerobot.rollout.start`; do not construct LeRobot shell commands inside the agent.
+- The `/lerobot` GUI is the Manipulation Agent management surface. Its bridge panel may run the actual Manipulation Agent with selected policy/profile/specimen/observation options.
+- The bridge panel must provide `Save Agent Defaults` and `Test Agent Bridge`. Saved defaults live in `memory/manipulation_agent_bridge.json` and are read by the live/test loop before each Manipulation Agent run; explicit experiment spec fields override saved defaults.
 
 SARM submodule responsibilities
 - progress scoring
@@ -260,8 +288,8 @@ SARM submodule responsibilities
 - recovery trigger suggestion
 
 Modes
-- live robot mode
-- test mode using robot simulator / stub responses
+- live robot mode with saved LeRobot profile, camera identities, policy path/repo, and `confirm_live_execute=true`
+- test mode through deterministic LeRobot rollout session using `fake_omx_ai` and `fake://pi05_policy`
 
 3.9 Lab Equipment Agent
 Purpose
@@ -269,10 +297,30 @@ Purpose
 - Start/stop test protocols
 - Capture raw result files
 - Report run state
+- Use Windows PyAutoGUI Bridge as the primary macro-control path for Windows-hosted equipment software.
+- Run after Manipulation Agent and before Analysis Agent in the main loop.
+- Return `equipment_result`, `protocol_note`, and `equipment_handoff`.
+- Failed PyAutoGUI bridge results must block stage progression and trigger retry/error rather than silently continuing to Analysis.
 
 Modes
 - live macro bridge
 - test equipment simulator
+
+3.10 CAE Analysis Tool
+Purpose
+- Provide simulation-side mechanical checks for generated specimens
+- Expose a dedicated CAE workspace GUI at `/cae`
+- Return `cae_metrics` for Analysis Agent, Knowledge, Guardian, and BO-style closed-loop evaluation
+
+Default setup
+- bottom face fixed support
+- top face cyclic compression loading
+- CalculiX/ccx solver family
+- Gmsh mesher family
+
+Modes
+- test mode deterministic equivalent CAE, no external solver required
+- live mode solver preflight and gated solver execution path
 
 ==================================================
 4. Test Mode Requirements
@@ -421,6 +469,7 @@ GUI requirements
    - robot status
    - camera status
    - UTM status
+   - CAE solver/bridge status
    - simulator status if in test mode
 
 4. Run control panel

@@ -33,6 +33,11 @@ Tool entry points:
 - `experiment.benchmark`
 - `experiment.queue.status`
 
+Agent/UI entry points:
+
+- `bo_agent`
+- `/bo` BO Workspace
+
 ## Naming
 
 Use system-native names in user-facing docs and GUI:
@@ -123,6 +128,15 @@ generation.
 - `random`
 - `grid`
 - `bo`
+
+`bo_agent` wraps this benchmark tool with system-specific settings:
+
+- strategy: `random`, `grid`, `bo`, `mbo`
+- acquisition: `expected_improvement`, `upper_confidence_bound`,
+  `probability_of_improvement`, `uncertainty_sampling`, `exploitation`,
+  `exploration`
+- recommendation: candidate parameter payload that can later be merged into
+  Design Agent constraints.
 
 The benchmark output includes per-strategy:
 

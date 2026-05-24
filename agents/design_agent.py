@@ -67,11 +67,15 @@ class DesignAgent(BaseAgent):
         "cell_size_mm": 5.0,
         "wall_thickness_mm": 1.2,
         "relative_density": 0.32,
+        "anisotropy_ratio": 1.0,
+        "orientation_deg": 0.0,
+        "defect_ratio": 0.0,
         "skin_thickness_mm": 0.8,
         "top_cap_enabled": False,
         "bottom_cap_enabled": True,
         "top_bottom_cap": True,
         "skirt_enabled": False,
+        "tpms_thickness": 0.0,
         "tpms_resolution": 72,
         "preferred_geometry_type": "",
     }
@@ -116,6 +120,12 @@ class DesignAgent(BaseAgent):
             preferred_pool = [item for item in valid_pool if str(item.get("geometry_type")) == preferred]
             if preferred_pool:
                 valid_pool = preferred_pool
+            else:
+                fallback = self._safe_seed_candidate(state=state, constraints=constraints)
+                fallback["validation_warnings"] = [
+                    f"preferred geometry '{preferred}' had no valid generated candidate; conservative preferred-geometry seed used"
+                ]
+                valid_pool = [fallback]
         ranked = sorted(valid_pool, key=lambda item: item["expected_objective_proxy_score"], reverse=True)
         selected = dict(ranked[0])
         selected.update(self._legacy_compat_fields(state.loop_count))
@@ -169,6 +179,19 @@ class DesignAgent(BaseAgent):
             for key in constraints:
                 if key in item and item[key] not in (None, "", []):
                     constraints[key] = item[key]
+        bo_recommended = {}
+        if isinstance(state.run_metadata, dict):
+            raw_bo = state.run_metadata.get("bo_recommended_constraints")
+            bo_recommended = raw_bo if isinstance(raw_bo, dict) else {}
+        for key, value in bo_recommended.items():
+            if value in (None, "", []):
+                continue
+            if key == "cell_size_mm":
+                continue
+            if key in constraints:
+                constraints[key] = value
+            elif key == "geometry_type":
+                constraints["preferred_geometry_type"] = value
         explicit_top_cap = any(isinstance(item, dict) and "top_cap_enabled" in item for item in (source, nested))
         explicit_bottom_cap = any(isinstance(item, dict) and "bottom_cap_enabled" in item for item in (source, nested))
         explicit_legacy_cap = any(isinstance(item, dict) and "top_bottom_cap" in item for item in (source, nested))
@@ -184,6 +207,13 @@ class DesignAgent(BaseAgent):
                     break
             if preferred_geometry:
                 break
+        if not preferred_geometry:
+            preferred_geometry = str(
+                bo_recommended.get("preferred_geometry_type")
+                or bo_recommended.get("geometry_type")
+                or constraints.get("preferred_geometry_type")
+                or ""
+            )
         if state.mode == Mode.TEST and not preferred_geometry:
             preferred_geometry = self.TEST_DEFAULT_GEOMETRY
         constraints["preferred_geometry_type"] = self._normalize_geometry_type(preferred_geometry)
@@ -203,10 +233,16 @@ class DesignAgent(BaseAgent):
             "cell_size_mm",
             "wall_thickness_mm",
             "relative_density",
+            "anisotropy_ratio",
+            "orientation_deg",
+            "defect_ratio",
             "skin_thickness_mm",
+            "tpms_thickness",
             "tpms_resolution",
         ):
             constraints[key] = float(constraints[key])
+        if constraints["preferred_geometry_type"] == "gyroid":
+            constraints["relative_density"] = max(0.20, float(constraints["relative_density"]))
         legacy_cap = bool(constraints["top_bottom_cap"])
         if explicit_top_cap or explicit_bottom_cap:
             constraints["top_cap_enabled"] = bool(constraints.get("top_cap_enabled", False))
@@ -586,6 +622,10 @@ class DesignAgent(BaseAgent):
                     "specimen_size_mm": candidate["specimen_size_mm"],
                     "cell_size_mm": candidate["cell_size_mm"],
                     "wall_thickness_mm": candidate["wall_thickness_mm"],
+                    "relative_density": candidate.get("relative_density"),
+                    "anisotropy_ratio": candidate.get("anisotropy_ratio"),
+                    "orientation_deg": candidate.get("orientation_deg"),
+                    "tpms_thickness": candidate.get("tpms_thickness"),
                 },
                 sort_keys=True,
             ).encode("utf-8")

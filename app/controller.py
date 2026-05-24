@@ -46,7 +46,9 @@ from mcp_tools.tpms_geometry import (
 )
 from orchestrator.graph import OrchestrationGraph
 from orchestrator.run_loop import RunLoop
+from orchestrator.router import stage_to_agent
 from orchestrator.state import Mode, OrchestratorState, Stage
+from policies.validation_policy import validate_agent_output
 from utils.ids import make_experiment_id, make_run_id
 from utils.printer_profile import load_prusa_print_profile
 
@@ -69,6 +71,31 @@ class MainController:
     """Stateful controller for orchestrator execution and event fanout."""
 
     TEST_MODE_FIXED_GEOMETRY = "gyroid"
+    TEST_MODE_LOOP_CYCLES = 5
+    CLOSED_LOOP_FREE_SHAPE_KEYS = {
+        "candidate_id",
+        "specimen_id",
+        "wall_thickness_mm",
+        "relative_density",
+        "porosity",
+        "anisotropy_ratio",
+        "orientation_deg",
+        "defect_seed",
+        "defect_ratio",
+        "tpms_thickness",
+        "expected_mass_g",
+        "expected_volume_mm3",
+        "expected_print_time_min",
+        "expected_manufacturability_score",
+        "expected_objective_proxy_score",
+        "generation_strategy",
+        "generation_reason",
+        "validation_warnings",
+        "candidate_pool_summary",
+        "prior_results_summary",
+        "failure_memory_summary",
+        "model_note",
+    }
 
     def __init__(self, deps: ControllerDeps) -> None:
         self._deps = deps
@@ -899,7 +926,7 @@ class MainController:
             "If operator_message already contains one of those choices, set constraints.printer_test_path accordingly so Specimen Making Agent can continue without asking again.\n"
             "Do not add runtime-safety disclaimers; focus on generated values and handoff.\n"
             "Do not use LaTeX math notation. Use plain text arrows like '->' for routes.\n"
-            "Remember the planning handoff chain is DesignAgent -> Specimen Making Agent -> Guardian.\n"
+            "Runtime pipeline after DesignAgent handoff: DesignAgent -> Specimen Making Agent -> Vision Agent -> Manipulation Agent -> Lab Equipment Agent -> Analysis Agent -> Knowledge Agent -> Guardian Agent.\n"
             "Respond in concise Korean and include a fenced JSON block at the end with this schema:\n"
             "```json\n"
             "{\n"
@@ -1691,6 +1718,300 @@ class MainController:
         }
         return normalized if normalized in supported else ""
 
+    def _planning_cycle_limit(self, payload: dict[str, Any]) -> int:
+        """Return planned Live GUI cycle count for test-mode handoffs."""
+        return self.TEST_MODE_LOOP_CYCLES if self._is_planning_test_spec(payload) else 1
+
+    def _design_constraints_for_cycle(self, base_constraints: dict[str, Any]) -> dict[str, Any]:
+        """Merge BO recommendation into DesignAgent constraints for the next cycle."""
+        constraints = dict(base_constraints)
+        bo_update = self._state.run_metadata.get("bo_recommended_constraints")
+        if isinstance(bo_update, dict):
+            for key, value in bo_update.items():
+                if key == "cell_size_mm":
+                    continue
+                if value not in (None, "", []):
+                    constraints[key] = value
+            geometry = self._normalize_planning_geometry_type(
+                bo_update.get("geometry_type") or bo_update.get("preferred_geometry_type")
+            )
+            if geometry:
+                constraints["geometry_type"] = geometry
+                constraints["preferred_geometry_type"] = geometry
+        geometry = self._normalize_planning_geometry_type(
+            constraints.get("geometry_type") or constraints.get("preferred_geometry_type")
+        )
+        if geometry == "gyroid":
+            try:
+                density = float(constraints.get("relative_density", 0.32))
+            except (TypeError, ValueError):
+                density = 0.32
+            constraints["relative_density"] = max(0.20, density)
+        return constraints
+
+    @classmethod
+    def _closed_loop_static_design_constraints(cls, constraints: dict[str, Any]) -> dict[str, Any]:
+        """Keep operator/static settings while freeing shape variables for BO/design updates."""
+
+        def clean_mapping(source: dict[str, Any]) -> dict[str, Any]:
+            cleaned: dict[str, Any] = {}
+            for key, value in source.items():
+                if key in cls.CLOSED_LOOP_FREE_SHAPE_KEYS:
+                    continue
+                if key == "constraints":
+                    continue
+                cleaned[key] = value
+            nested = source.get("constraints")
+            if isinstance(nested, dict):
+                nested_clean = {
+                    key: value
+                    for key, value in nested.items()
+                    if key not in cls.CLOSED_LOOP_FREE_SHAPE_KEYS and key != "constraints"
+                }
+                if nested_clean:
+                    cleaned["constraints"] = nested_clean
+            return cleaned
+
+        return clean_mapping(constraints if isinstance(constraints, dict) else {})
+
+    @staticmethod
+    def _design_reference_spec(previous_spec: dict[str, Any] | None, next_spec: dict[str, Any]) -> dict[str, Any]:
+        """Return a previous-shape reference so each test cycle can display two shapes."""
+        if isinstance(previous_spec, dict) and previous_spec.get("specimen_id"):
+            return dict(previous_spec)
+        reference = dict(next_spec)
+        candidate_id = str(next_spec.get("candidate_id", "candidate"))
+        reference["candidate_id"] = f"baseline-before-{candidate_id}"
+        reference["specimen_id"] = f"specimen-baseline-before-{candidate_id}"
+        reference["generation_strategy"] = "baseline_reference_before_first_test_cycle"
+        return reference
+
+    def _artifact_pair_payload(
+        self,
+        *,
+        previous_spec: dict[str, Any] | None,
+        next_spec: dict[str, Any],
+        next_artifacts: dict[str, str],
+    ) -> dict[str, Any]:
+        previous_display = self._design_reference_spec(previous_spec, next_spec)
+        previous_artifacts = self._write_planning_artifacts(previous_display)
+        return {
+            "previous": {
+                "label": "Previous shape",
+                "experiment_spec": previous_display,
+                "artifacts": previous_artifacts,
+            },
+            "next": {
+                "label": "Next shape",
+                "experiment_spec": next_spec,
+                "artifacts": next_artifacts,
+            },
+        }
+
+    def _format_design_cycle_message(
+        self,
+        *,
+        experiment_spec: dict[str, Any],
+        previous_spec: dict[str, Any] | None,
+        cycle_index: int,
+        total_cycles: int,
+    ) -> str:
+        bo_update = self._state.run_metadata.get("bo_recommended_constraints")
+        bo_note = json.dumps(bo_update, ensure_ascii=False) if isinstance(bo_update, dict) and bo_update else "n/a"
+        if cycle_index <= 1:
+            return (
+                f"Design Agent가 cycle {cycle_index}/{total_cycles} 첫 후보 시편 설계를 생성했습니다.\n\n"
+                "생성된 형상:\n"
+                f"- specimen_id: {experiment_spec['specimen_id']}\n"
+                f"- geometry_type: {experiment_spec['geometry_type']}\n"
+                f"- specimen_size_mm: {experiment_spec['specimen_size_mm']}\n"
+                f"- cell_size_mm: {experiment_spec['cell_size_mm']}\n"
+                f"- wall_thickness_mm: {experiment_spec['wall_thickness_mm']}\n"
+                f"- relative_density: {experiment_spec['relative_density']}\n"
+                f"- expected_mass_g: {experiment_spec['expected_mass_g']}\n"
+                f"- expected_print_time_min: {experiment_spec['expected_print_time_min']}\n"
+                f"- BO recommendation applied: {bo_note}"
+            )
+
+        previous_display = self._design_reference_spec(previous_spec, experiment_spec)
+        return (
+            f"Design Agent가 cycle {cycle_index}/{total_cycles} 후보 시편 설계를 생성했습니다.\n\n"
+            "이전 형상:\n"
+            f"- specimen_id: {self._runtime_value(previous_display.get('specimen_id'))}\n"
+            f"- geometry_type: {self._runtime_value(previous_display.get('geometry_type'))}\n"
+            f"- cell_size_mm: {self._runtime_value(previous_display.get('cell_size_mm'))}\n"
+            f"- wall_thickness_mm: {self._runtime_value(previous_display.get('wall_thickness_mm'))}\n\n"
+            "다음 형상:\n"
+            f"- specimen_id: {experiment_spec['specimen_id']}\n"
+            f"- geometry_type: {experiment_spec['geometry_type']}\n"
+            f"- specimen_size_mm: {experiment_spec['specimen_size_mm']}\n"
+            f"- cell_size_mm: {experiment_spec['cell_size_mm']}\n"
+            f"- wall_thickness_mm: {experiment_spec['wall_thickness_mm']}\n"
+            f"- relative_density: {experiment_spec['relative_density']}\n"
+            f"- expected_mass_g: {experiment_spec['expected_mass_g']}\n"
+            f"- expected_print_time_min: {experiment_spec['expected_print_time_min']}\n"
+            f"- BO recommendation applied: {bo_note}"
+        )
+
+    async def _run_planning_design_stage(
+        self,
+        *,
+        previous_spec: dict[str, Any] | None,
+        design_constraints: dict[str, Any],
+        cycle_index: int,
+        total_cycles: int,
+        emit_handoff: bool,
+    ) -> dict[str, Any]:
+        if emit_handoff:
+            await self._append_planning_message(
+                {
+                    "role": "system",
+                    "content": f"SYSTEM_EVENT: HANDOFF\nfrom=GuardianAgent\nto=DesignAgent\ncycle={cycle_index}\nstatus=started",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "ok": True,
+                },
+                event_type="planning_handoff",
+                message="Planning handoff to DesignAgent started.",
+            )
+        effective_constraints = self._design_constraints_for_cycle(design_constraints)
+        previous_constraints = previous_spec.get("constraints") if isinstance(previous_spec, dict) and isinstance(previous_spec.get("constraints"), dict) else {}
+        self._state.stage = Stage.DESIGN
+        self._state.current_experiment_spec = {
+            **(previous_spec if isinstance(previous_spec, dict) else {}),
+            **{key: value for key, value in effective_constraints.items() if key in {"geometry_type", "specimen_size_mm"}},
+            "constraints": {**previous_constraints, **effective_constraints},
+        }
+        design_agent = self._deps.agent_registry.get("design_agent")
+        result = await design_agent.run(self._state, self._deps.agent_context)
+        if not result.success:
+            raise RuntimeError(f"DesignAgent failed: {result.summary}")
+        base_spec = dict(result.data.get("experiment_spec", {}))
+        if not base_spec:
+            raise RuntimeError("DesignAgent did not return experiment_spec.")
+        design_model = result.data.get("experiment_spec", {}).get("model_note", "design_agent")
+        experiment_spec = self._build_planning_spec(base_spec=base_spec, constraints=effective_constraints)
+        experiment_spec = self._apply_test_cycle_surface_cap_policy(
+            experiment_spec,
+            cycle_index=cycle_index,
+        )
+        self._state.current_experiment_spec = experiment_spec
+        self._merge_planning_agent_data(Stage.DESIGN, {"experiment_spec": experiment_spec})
+        artifact = self._write_planning_artifacts(experiment_spec)
+        message_payload: dict[str, Any] = {
+            "role": "design_ai",
+            "content": self._format_design_cycle_message(
+                experiment_spec=experiment_spec,
+                previous_spec=previous_spec,
+                cycle_index=cycle_index,
+                total_cycles=total_cycles,
+            ),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "model": design_model,
+            "ok": True,
+            "cycle_index": cycle_index,
+            "total_cycles": total_cycles,
+            "experiment_spec": experiment_spec,
+            "artifacts": artifact,
+        }
+        if cycle_index > 1:
+            message_payload["artifact_pair"] = self._artifact_pair_payload(
+                previous_spec=previous_spec,
+                next_spec=experiment_spec,
+                next_artifacts=artifact,
+            )
+        await self._append_planning_message(
+            message_payload,
+            event_type="planning_design_result",
+            message="DesignAgent generated planning artifacts.",
+        )
+        return experiment_spec
+
+    async def _run_planning_specimen_stage(self, experiment_spec: dict[str, Any], *, emit_handoff: bool = True) -> dict[str, Any]:
+        if emit_handoff:
+            await self._append_planning_message(
+                {
+                    "role": "system",
+                    "content": "SYSTEM_EVENT: HANDOFF\nfrom=DesignAgent\nto=SpecimenMakingAgent\nstatus=started",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "ok": True,
+                },
+                event_type="planning_handoff",
+                message="Planning handoff to Specimen Making Agent started.",
+            )
+        self._state.stage = Stage.SPECIMEN
+        self._state.current_experiment_spec = experiment_spec
+        specimen_agent = self._deps.agent_registry.get("specimen_agent")
+        specimen_result = await specimen_agent.run(self._state, self._deps.agent_context)
+        if not specimen_result.success:
+            raise RuntimeError(f"SpecimenMakingAgent failed: {specimen_result.summary}")
+        specimen_payload = specimen_result.data.get("specimen_result", {})
+        if not isinstance(specimen_payload, dict):
+            raise RuntimeError("SpecimenMakingAgent did not return specimen_result.")
+        if specimen_payload.get("requires_operator_input"):
+            await self._record_pending_specimen_input(specimen_payload)
+            return {"pending": True, "specimen": specimen_payload}
+        self._merge_planning_agent_data(Stage.SPECIMEN, specimen_result.data)
+        specimen_artifacts = self._write_planning_artifacts(experiment_spec, specimen_result=specimen_payload)
+        await self._append_planning_message(
+            {
+                "role": "printer_ai",
+                "content": self._format_specimen_runtime_message(experiment_spec, specimen_payload),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "model": "specimen_agent",
+                "ok": True,
+                "specimen": specimen_payload,
+                "specimen_artifacts": specimen_artifacts,
+                "render_artifacts": False,
+            },
+            event_type="planning_specimen_result",
+            message="SpecimenMakingAgent completed Specimen Making Agent handoff preparation.",
+        )
+        return {"pending": False, "specimen": specimen_payload}
+
+    async def _run_planning_cycle_series(
+        self,
+        *,
+        first_spec: dict[str, Any],
+        design_constraints: dict[str, Any],
+        start_cycle: int = 1,
+    ) -> dict[str, Any]:
+        total_cycles = self._planning_cycle_limit(first_spec)
+        static_design_constraints = self._closed_loop_static_design_constraints(design_constraints)
+        current_spec = first_spec
+        previous_spec: dict[str, Any] | None = None if start_cycle == 1 else dict(first_spec)
+        last_tail: dict[str, Any] = {"ok": True, "decision": "continue", "message": "Planning cycle started."}
+
+        for cycle_index in range(start_cycle, total_cycles + 1):
+            if cycle_index > start_cycle:
+                current_spec = await self._run_planning_design_stage(
+                    previous_spec=previous_spec,
+                    design_constraints=static_design_constraints,
+                    cycle_index=cycle_index,
+                    total_cycles=total_cycles,
+                    emit_handoff=True,
+                )
+                specimen = await self._run_planning_specimen_stage(current_spec)
+                if specimen.get("pending"):
+                    return {
+                        "ok": True,
+                        "message": "SpecimenMakingAgent waiting for operator input.",
+                        "decision": "pending_operator_input",
+                    }
+
+            last_tail = await self._run_planning_loop_tail(
+                current_spec,
+                cycle_index=cycle_index,
+                total_cycles=total_cycles,
+            )
+            if not bool(last_tail.get("ok", False)):
+                return last_tail
+            decision = str(last_tail.get("decision", "continue"))
+            if decision in {"stop", "error"}:
+                return last_tail
+            previous_spec = dict(current_spec)
+
+        return last_tail
+
     async def _handoff_planning_to_design(
         self,
         *,
@@ -1702,7 +2023,7 @@ class MainController:
         await self._append_planning_message(
             {
                 "role": "orchestrator",
-                "content": "승인 키워드를 확인했습니다. DesignAgent → Specimen Making Agent → Guardian 순서로 workflow를 실행합니다.",
+                "content": "SYSTEM_EVENT: WORKFLOW_TRIGGER_ACCEPTED\nstatus=started",
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "model": "orchestrator_plan",
                 "ok": True,
@@ -1713,7 +2034,7 @@ class MainController:
         await self._append_planning_message(
             {
                 "role": "system",
-                "content": "Handoff: OrchestratorAgent -> DesignAgent. Design Agent가 시편 후보를 생성하고 Specimen Making Agent로 실행 인계를 전달합니다.",
+                "content": "SYSTEM_EVENT: HANDOFF\nfrom=OrchestratorAgent\nto=DesignAgent\nstatus=started",
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "ok": True,
             },
@@ -1730,158 +2051,30 @@ class MainController:
                     design_constraints.get("preferred_geometry_type") or geometry_hint
                 ) or geometry_hint
             previous_spec = dict(self._state.current_experiment_spec or {})
-            previous_constraints = previous_spec.get("constraints") if isinstance(previous_spec.get("constraints"), dict) else {}
-            self._state.current_experiment_spec = {
-                **previous_spec,
-                **{key: value for key, value in design_constraints.items() if key in {"geometry_type", "specimen_size_mm"}},
-                "constraints": {**previous_constraints, **design_constraints},
-            }
-            design_agent = self._deps.agent_registry.get("design_agent")
-            result = await design_agent.run(self._state, self._deps.agent_context)
-            if not result.success:
-                raise RuntimeError(f"DesignAgent failed: {result.summary}")
-            base_spec = dict(result.data.get("experiment_spec", {}))
-            if not base_spec:
-                raise RuntimeError("DesignAgent did not return experiment_spec.")
-            design_model = result.data.get("experiment_spec", {}).get("model_note", "design_agent")
-            experiment_spec = self._build_planning_spec(base_spec=base_spec, constraints=design_constraints)
-            self._state.current_experiment_spec = experiment_spec
-            artifact = self._write_planning_artifacts(experiment_spec)
-
-            design_message = (
-                "Design Agent가 후보 시편 설계를 생성했습니다.\n\n"
-                f"- specimen_id: {experiment_spec['specimen_id']}\n"
-                f"- geometry_type: {experiment_spec['geometry_type']}\n"
-                f"- specimen_size_mm: {experiment_spec['specimen_size_mm']}\n"
-                f"- wall_thickness_mm: {experiment_spec['wall_thickness_mm']}\n"
-                f"- cell_size_mm: {experiment_spec['cell_size_mm']}\n"
-                f"- expected_mass_g: {experiment_spec['expected_mass_g']}\n"
-                f"- expected_print_time_min: {experiment_spec['expected_print_time_min']}\n\n"
-                "시편 설계안과 실행용 입력값을 생성했습니다. 다음 단계는 Specimen Making Agent와 Guardian 검증입니다."
+            total_cycles = self._planning_cycle_limit(design_constraints)
+            experiment_spec = await self._run_planning_design_stage(
+                previous_spec=previous_spec,
+                design_constraints=design_constraints,
+                cycle_index=1,
+                total_cycles=total_cycles,
+                emit_handoff=False,
             )
-            await self._append_planning_message(
-                {
-                    "role": "design_ai",
-                    "content": design_message,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                    "model": design_model,
-                    "ok": True,
-                    "experiment_spec": experiment_spec,
-                    "artifacts": artifact,
-                },
-                event_type="planning_design_result",
-                message="DesignAgent generated planning artifacts.",
-            )
-            await self._append_planning_message(
-                {
-                    "role": "system",
-                    "content": "Handoff: DesignAgent -> Specimen Making Agent. 시편 출력을 위한 준비 패키지 작성과 프린터 호출을 수행합니다.",
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                    "ok": True,
-                },
-                event_type="planning_handoff",
-                message="Planning handoff to Specimen Making Agent started.",
-            )
-            specimen_agent = self._deps.agent_registry.get("specimen_agent")
-            specimen_result = await specimen_agent.run(self._state, self._deps.agent_context)
-            if not specimen_result.success:
-                raise RuntimeError(f"SpecimenMakingAgent failed: {specimen_result.summary}")
-
-            specimen_payload = specimen_result.data.get("specimen_result", {})
-            if not isinstance(specimen_payload, dict):
-                raise RuntimeError("SpecimenMakingAgent did not return specimen_result.")
-            if specimen_payload.get("requires_operator_input"):
-                await self._record_pending_specimen_input(specimen_payload)
+            specimen = await self._run_planning_specimen_stage(experiment_spec)
+            if specimen.get("pending"):
                 self._schedule_post_run_vllm_transition()
                 return {
                     "ok": True,
                     "message": "SpecimenMakingAgent waiting for operator input.",
                     "session": self.planning_snapshot(),
                 }
-            specimen_artifacts = self._write_planning_artifacts(experiment_spec, specimen_result=specimen_payload)
-            specimen_message = self._format_specimen_runtime_message(experiment_spec, specimen_payload)
-            await self._append_planning_message(
-                {
-                    "role": "printer_ai",
-                    "content": specimen_message,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                    "model": "specimen_agent",
-                    "ok": True,
-                    "specimen": specimen_payload,
-                    "specimen_artifacts": specimen_artifacts,
-                    "render_artifacts": False,
-                },
-                event_type="planning_specimen_result",
-                message="SpecimenMakingAgent completed Specimen Making Agent handoff preparation.",
+
+            tail = await self._run_planning_cycle_series(
+                first_spec=experiment_spec,
+                design_constraints=design_constraints,
+                start_cycle=1,
             )
-
-            guardian_agent = self._deps.agent_registry.get("guardian_agent")
-            guardian_result = await guardian_agent.run(self._state, self._deps.agent_context)
-            guardian_payload = (
-                guardian_result.data.get("guardian", {})
-                if isinstance(guardian_result.data.get("guardian", {}), dict)
-                else {}
-            )
-            self._state.run_metadata["guardian"] = guardian_payload
-
-            decision = str(guardian_payload.get("decision", "continue")).strip() or "continue"
-            action = str(guardian_payload.get("action", "")).strip()
-            reason = str(guardian_payload.get("reason", "")).strip()
-            precursor = guardian_payload.get("precursor", "")
-            design_validation = guardian_payload.get("design_validation", {})
-            health_validation = guardian_payload.get("health_validation", {})
-            consistency = guardian_payload.get("consistency", {})
-
-            guardian_content = (
-                "Guardian Agent 검증 결과:\n\n"
-                f"- decision: {decision}\n"
-                f"- action: {action or 'continue'}\n"
-                f"- reason: {reason or 'n/a'}\n"
-                f"- precursor: {precursor}\n"
-                f"- design_validation: {json.dumps(design_validation, ensure_ascii=False)}\n"
-                f"- health_validation: {json.dumps(health_validation, ensure_ascii=False)}\n"
-                f"- consistency: {json.dumps(consistency, ensure_ascii=False)}"
-            )
-            await self._append_planning_message(
-                {
-                    "role": "guardian",
-                    "content": guardian_content,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                    "model": "guardian_agent",
-                    "ok": bool(guardian_result.success),
-                    "guardian": guardian_payload,
-                },
-                event_type="planning_guardian_result",
-                message="GuardianAgent validation completed.",
-                level="INFO" if guardian_result.success else "ERROR",
-            )
-
-            if decision in {"stop", "error"}:
-                await self._append_planning_message(
-                    {
-                        "role": "system",
-                        "content": "Guardian 판정으로 다음 단계 진행이 중단되었습니다. 조건을 수정한 뒤 다시 요청하세요.",
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
-                        "ok": decision != "error",
-                    },
-                    event_type="planning_handoff",
-                    message="Planning flow halted by Guardian decision.",
-                    level="WARNING" if decision == "stop" else "ERROR",
-                )
-            else:
-                await self._append_planning_message(
-                    {
-                        "role": "system",
-                        "content": "Guardian 통과. 필요하면 이어서 다음 실험 계획/수행을 요청하세요.",
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
-                        "ok": True,
-                    },
-                    event_type="planning_handoff",
-                    message="Planning flow passed Guardian validation.",
-                )
-
-            ok = bool(guardian_result.success) and decision != "error"
-            message = "Planning handoff to DesignAgent -> Specimen Making Agent -> GuardianAgent completed."
+            ok = bool(tail.get("ok", False))
+            message = str(tail.get("message", "Planning handoff chain completed."))
         except Exception as exc:
             await self._append_planning_message(
                 {
@@ -2087,16 +2280,10 @@ class MainController:
                 {
                     "role": "system",
                     "content": (
-                        "Specimen Making Agent 입력을 반영했습니다. "
-                        + (
-                            "테스트 시편을 실제 PrusaSlicer -> PrusaLink upload/start 경로로 출력합니다."
-                            if choice == "physical_print"
-                            else (
-                                "설치 프린터 PrusaLink read-only 통신 테스트로 재시도합니다."
-                                if choice == "installed_printer"
-                                else "가상 PrusaLink 브릿지로 재시도합니다."
-                            )
-                        )
+                        "SYSTEM_EVENT: OPERATOR_INPUT_APPLIED\n"
+                        "agent=SpecimenMakingAgent\n"
+                        f"printer_path={choice}\n"
+                        "status=retry"
                     ),
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                     "ok": True,
@@ -2259,112 +2446,425 @@ class MainController:
         self._schedule_post_run_vllm_transition()
         return {"ok": ok, "message": message, "session": self.planning_snapshot(session_id=session_id)}
 
+    @staticmethod
+    def _is_planning_test_spec(experiment_spec: dict[str, Any]) -> bool:
+        """Return whether Live GUI handoff represents test-mode execution."""
+        return bool(
+            experiment_spec.get("test_mode_autofill")
+            or experiment_spec.get("test_mode_llm_generated")
+            or experiment_spec.get("printer_test_path")
+            or experiment_spec.get("test_printer_path")
+            or experiment_spec.get("printer_bridge_mode")
+            or experiment_spec.get("printer_test_mode")
+        )
+
+    def _apply_test_cycle_surface_cap_policy(
+        self,
+        experiment_spec: dict[str, Any],
+        *,
+        cycle_index: int,
+    ) -> dict[str, Any]:
+        """Disable generated-model cap skins from cycle 2 onward in test-mode series."""
+        if cycle_index < 2 or not self._is_planning_test_spec(experiment_spec):
+            return experiment_spec
+        updated = dict(experiment_spec)
+        updated["top_cap_enabled"] = False
+        updated["bottom_cap_enabled"] = False
+        updated["top_bottom_cap"] = False
+        updated["skin_thickness_mm"] = 0.0
+        updated["require_flat_compression_faces"] = False
+        updated["test_loop_surface_caps_disabled"] = True
+        updated["analysis_platen_policy"] = {
+            "top": True,
+            "bottom": True,
+            "applies_to": "cae_only_not_generated_stl",
+        }
+        constraints = updated.get("constraints") if isinstance(updated.get("constraints"), dict) else {}
+        updated["constraints"] = {
+            **constraints,
+            "top_cap_enabled": False,
+            "bottom_cap_enabled": False,
+            "top_bottom_cap": False,
+            "skin_thickness_mm": 0.0,
+            "require_flat_compression_faces": False,
+            "test_loop_surface_caps_disabled": True,
+        }
+        return updated
+
+    def _merge_planning_agent_data(self, stage: Stage, data: dict[str, Any]) -> None:
+        """Mirror RunLoop state merging for Live GUI's manual handoff chain."""
+        if "experiment_spec" in data:
+            self._state.current_experiment_spec = data["experiment_spec"]
+        if "experiment_objective" in data:
+            self._state.current_experiment_objective = data["experiment_objective"]
+        if "experiment_evaluation" in data and isinstance(data["experiment_evaluation"], dict):
+            self._state.experiment_evaluations.append(data["experiment_evaluation"])
+        specimen_result = data.get("specimen_result") if isinstance(data.get("specimen_result"), dict) else {}
+        if specimen_result:
+            self._state.run_metadata["specimen_result"] = specimen_result
+        if isinstance(specimen_result.get("experiment_evaluation"), dict):
+            self._state.experiment_evaluations.append(specimen_result["experiment_evaluation"])
+        if "observation" in data:
+            self._state.latest_observations = data["observation"]
+        if "analysis" in data:
+            self._state.latest_analysis.update(data["analysis"])
+        if "sarm" in data:
+            self._state.latest_analysis["sarm"] = data["sarm"]
+        if "manipulation" in data:
+            manipulation = data["manipulation"] if isinstance(data["manipulation"], dict) else {}
+            self._state.run_metadata["manipulation_result"] = manipulation
+            self._state.latest_analysis["last_grasp_score"] = float(manipulation.get("grasp_score", 0.0))
+            if "sarm" in data:
+                self._state.latest_analysis["sarm"] = data["sarm"]
+        if "equipment_result" in data:
+            equipment_result = data["equipment_result"] if isinstance(data["equipment_result"], dict) else {}
+            self._state.run_metadata["equipment_result"] = equipment_result
+            if "equipment_handoff" in data:
+                self._state.run_metadata["equipment_handoff"] = data["equipment_handoff"]
+            self._state.latest_analysis["equipment_ok"] = bool(equipment_result.get("ok", False))
+            self._state.latest_analysis["equipment_status"] = str(equipment_result.get("status") or "")
+            self._state.latest_analysis["equipment_program_id"] = str(equipment_result.get("program_id") or "")
+            failure_code = equipment_result.get("failure_code")
+            if failure_code:
+                self._state.latest_analysis["equipment_failure_code"] = str(failure_code)
+        if "knowledge" in data:
+            self._state.run_metadata["knowledge"] = data["knowledge"]
+        if "bo_result" in data:
+            self._state.run_metadata["bo_agent"] = data["bo_result"]
+        if "experiment_spec_update" in data and isinstance(data["experiment_spec_update"], dict):
+            update = {
+                key: value
+                for key, value in data["experiment_spec_update"].items()
+                if key != "cell_size_mm"
+            }
+            self._state.run_metadata["bo_recommended_constraints"] = update
+        if "guardian" in data:
+            self._state.run_metadata["guardian"] = data["guardian"]
+        self._state.run_metadata["last_stage_payload"] = {"stage": stage.value, "data": data}
+
+    @staticmethod
+    def _planning_stage_role(stage: Stage) -> str:
+        return {
+            Stage.VISION: "vision_ai",
+            Stage.MANIPULATION: "manipulation_ai",
+            Stage.EQUIPMENT: "equipment_ai",
+            Stage.ANALYSIS: "analysis_ai",
+            Stage.KNOWLEDGE: "knowledge_ai",
+            Stage.GUARDIAN: "guardian",
+        }.get(stage, "system")
+
+    @staticmethod
+    def _planning_stage_handoff_text(previous: str, stage: Stage) -> str:
+        labels = {
+            Stage.VISION: "Vision Agent",
+            Stage.MANIPULATION: "Manipulation Agent",
+            Stage.EQUIPMENT: "Lab Equipment Agent",
+            Stage.ANALYSIS: "Analysis Agent",
+            Stage.KNOWLEDGE: "Knowledge Agent",
+            Stage.GUARDIAN: "Guardian Agent",
+        }
+        return f"SYSTEM_EVENT: HANDOFF\nfrom={previous}\nto={labels.get(stage, stage.value)}\nstatus=started"
+
+    def _format_planning_stage_message(self, stage: Stage, data: dict[str, Any], summary: str) -> str:
+        if stage == Stage.VISION:
+            observation = data.get("observation") if isinstance(data.get("observation"), dict) else {}
+            readiness = observation.get("transfer_readiness") if isinstance(observation.get("transfer_readiness"), dict) else {}
+            pose = observation.get("pose_estimate") if isinstance(observation.get("pose_estimate"), dict) else {}
+            return (
+                "Vision Agent가 3DP 출력물 픽업 상태를 확인했습니다.\n\n"
+                f"- summary: {self._runtime_value(observation.get('summary'))}\n"
+                f"- camera_key: {self._runtime_value(observation.get('camera_key'))}\n"
+                f"- ready: {self._runtime_value(readiness.get('ready'))}\n"
+                f"- pose_confidence: {self._runtime_value(pose.get('confidence'))}\n"
+                f"- anomaly: {self._runtime_value(observation.get('anomaly'))}"
+            )
+        if stage == Stage.MANIPULATION:
+            manipulation = data.get("manipulation") if isinstance(data.get("manipulation"), dict) else {}
+            sarm = data.get("sarm") if isinstance(data.get("sarm"), dict) else {}
+            transfer = manipulation.get("transfer_task") if isinstance(manipulation.get("transfer_task"), dict) else {}
+            return (
+                "Manipulation Agent가 3DP 출력물 이송 단계를 실행했습니다.\n\n"
+                f"- strategy: {self._runtime_value(manipulation.get('strategy'))}\n"
+                f"- status: {self._runtime_value(manipulation.get('status'))}\n"
+                f"- completion_status: {self._runtime_value(manipulation.get('completion_status'))}\n"
+                f"- source -> target: {self._runtime_value(transfer.get('source'))} -> {self._runtime_value(transfer.get('target'))}\n"
+                f"- grasp_score: {self._runtime_value(manipulation.get('grasp_score'))}\n"
+                f"- sarm_progress: {self._runtime_value(sarm.get('progress_score'))}\n"
+                f"- recovery_hint: {self._runtime_value(sarm.get('recovery_hint'))}"
+            )
+        if stage == Stage.EQUIPMENT:
+            equipment = data.get("equipment_result") if isinstance(data.get("equipment_result"), dict) else {}
+            handoff = data.get("equipment_handoff") if isinstance(data.get("equipment_handoff"), dict) else {}
+            return (
+                "Lab Equipment Agent가 장비/UTM 측정 단계를 실행했습니다.\n\n"
+                f"- tool: {self._runtime_value(equipment.get('tool'))}\n"
+                f"- status: {self._runtime_value(equipment.get('status'))}\n"
+                f"- program_id: {self._runtime_value(equipment.get('program_id'))}\n"
+                f"- handoff: {self._runtime_value(handoff.get('status'))}\n"
+                f"- failure_code: {self._runtime_value(equipment.get('failure_code'))}\n"
+                "적용 중인 단계:\n"
+                + "\n".join(self._runtime_step_lines(equipment.get("step_trace")))
+            )
+        if stage == Stage.ANALYSIS:
+            analysis = data.get("analysis") if isinstance(data.get("analysis"), dict) else {}
+            utm = analysis.get("utm_metrics") if isinstance(analysis.get("utm_metrics"), dict) else {}
+            cae = analysis.get("cae_metrics") if isinstance(analysis.get("cae_metrics"), dict) else {}
+            cae_result = analysis.get("cae_result") if isinstance(analysis.get("cae_result"), dict) else {}
+            platens = cae_result.get("analysis_platens") if isinstance(cae_result.get("analysis_platens"), dict) else {}
+            generated_caps = cae_result.get("generated_model_caps") if isinstance(cae_result.get("generated_model_caps"), dict) else {}
+            return (
+                "Analysis Agent가 UTM/CAE closed-loop 분석을 완료했습니다.\n\n"
+                f"- objective_score: {self._runtime_value(analysis.get('objective_score'))}\n"
+                f"- uncertainty: {self._runtime_value(analysis.get('uncertainty'))}\n"
+                f"- peak_force_N: {self._runtime_value(utm.get('peak_force_N'))}\n"
+                f"- compressive_strength_MPa: {self._runtime_value(utm.get('compressive_strength_MPa'))}\n"
+                f"- CAE max_von_mises_MPa: {self._runtime_value(cae.get('max_von_mises_MPa'))}\n"
+                f"- CAE effective_modulus_MPa: {self._runtime_value(cae.get('effective_modulus_MPa'))}\n"
+                f"- CAE structural_score: {self._runtime_value(cae.get('structural_score'))}\n"
+                f"- CAE platens: top={self._runtime_value(platens.get('top'))}, bottom={self._runtime_value(platens.get('bottom'))}, applies_to={self._runtime_value(platens.get('applies_to'))}\n"
+                f"- generated_model_caps: {json.dumps(generated_caps, ensure_ascii=False)}\n"
+                f"- closed_loop_sources: {self._runtime_value(analysis.get('closed_loop_sources'))}"
+            )
+        if stage == Stage.KNOWLEDGE:
+            knowledge = data.get("knowledge") if isinstance(data.get("knowledge"), dict) else {}
+            return (
+                "Knowledge Agent가 실험 결과를 메모리/RAG 컨텍스트에 반영했습니다.\n\n"
+                f"- retrieval_coverage: {self._runtime_value(knowledge.get('retrieval_coverage'))}\n"
+                f"- local_chunks: {self._runtime_value(knowledge.get('local_chunks'))}\n"
+                f"- web_results: {self._runtime_value(knowledge.get('web_results'))}\n"
+                f"- memory_summary: {self._runtime_value(knowledge.get('memory_summary'))}"
+            )
+        if stage == Stage.GUARDIAN:
+            guardian = data.get("guardian") if isinstance(data.get("guardian"), dict) else {}
+            decision = str(guardian.get("decision", "continue")).strip() or "continue"
+            action = str(guardian.get("action", "")).strip()
+            reason = str(guardian.get("reason", "")).strip()
+            return (
+                "Guardian Agent 검증 결과:\n\n"
+                f"- decision: {decision}\n"
+                f"- action: {action or 'continue'}\n"
+                f"- reason: {reason or 'n/a'}\n"
+                f"- precursor: {self._runtime_value(guardian.get('precursor'))}\n"
+                f"- design_validation: {json.dumps(guardian.get('design_validation', {}), ensure_ascii=False)}\n"
+                f"- health_validation: {json.dumps(guardian.get('health_validation', {}), ensure_ascii=False)}\n"
+                f"- consistency: {json.dumps(guardian.get('consistency', {}), ensure_ascii=False)}"
+            )
+        return summary
+
+    def _format_planning_bo_message(self, data: dict[str, Any]) -> str:
+        bo_result = data.get("bo_result") if isinstance(data.get("bo_result"), dict) else {}
+        recommendation = bo_result.get("recommendation") if isinstance(bo_result.get("recommendation"), dict) else {}
+        knowledge = bo_result.get("knowledge_context") if isinstance(bo_result.get("knowledge_context"), dict) else {}
+        return (
+            "BO Agent가 Knowledge Agent 컨텍스트를 반영해 다음 설계 후보를 추천했습니다.\n\n"
+            f"- strategy: {self._runtime_value(bo_result.get('strategy'))}\n"
+            f"- acquisition: {self._runtime_value(bo_result.get('acquisition'))}\n"
+            f"- recommended_candidate: {self._runtime_value(recommendation.get('candidate_id'))}\n"
+            f"- recommended_parameters: {json.dumps(recommendation.get('parameters', {}), ensure_ascii=False)}\n"
+            f"- knowledge_coverage: {self._runtime_value(knowledge.get('retrieval_coverage'))}\n"
+            f"- knowledge_summary: {self._runtime_value(knowledge.get('memory_summary'))}"
+        )
+
+    async def _run_planning_bo_agent(self, previous_label: str, cycle_index: int) -> str:
+        await self._append_planning_message(
+            {
+                "role": "system",
+                "content": f"SYSTEM_EVENT: HANDOFF\nfrom={previous_label}\nto=BOAgent\ncycle={cycle_index}\nstatus=started",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "ok": True,
+            },
+            event_type="planning_handoff",
+            message="Planning handoff to BOAgent started.",
+        )
+        bo_agent = self._deps.agent_registry.get("bo_agent")
+        result = await bo_agent.run(self._state, self._deps.agent_context)
+        if not result.success:
+            raise RuntimeError(f"bo_agent failed: {result.summary}")
+        self._merge_planning_agent_data(Stage.KNOWLEDGE, result.data)
+        await self._append_planning_message(
+            {
+                "role": "bo_ai",
+                "content": self._format_planning_bo_message(result.data),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "model": "bo_agent",
+                "ok": True,
+                "bo_result": result.data.get("bo_result", {}),
+            },
+            event_type="planning_bo_result",
+            message="BOAgent completed next design recommendation.",
+        )
+        return "BO Agent"
+
+    async def _run_planning_loop_tail(
+        self,
+        experiment_spec: dict[str, Any],
+        *,
+        cycle_index: int = 1,
+        total_cycles: int = 1,
+    ) -> dict[str, Any]:
+        """Continue Live GUI handoff through the runtime loop tail after Specimen."""
+        stage_sequence = (
+            Stage.VISION,
+            Stage.MANIPULATION,
+            Stage.EQUIPMENT,
+            Stage.ANALYSIS,
+            Stage.KNOWLEDGE,
+            Stage.GUARDIAN,
+        )
+        previous_label = "Specimen Making Agent"
+        original_mode = self._state.mode
+        effective_mode = Mode.TEST if self._is_planning_test_spec(experiment_spec) else original_mode
+        guardian_payload: dict[str, Any] = {}
+        try:
+            self._state.mode = effective_mode
+            for stage in stage_sequence:
+                agent_name = stage_to_agent(stage)
+                if not agent_name:
+                    raise RuntimeError(f"No agent routing for stage={stage.value}")
+                self._state.stage = stage
+                await self._append_planning_message(
+                    {
+                        "role": "system",
+                        "content": self._planning_stage_handoff_text(previous_label, stage),
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "ok": True,
+                    },
+                    event_type="planning_handoff",
+                    message=f"Planning handoff to {agent_name} started.",
+                )
+                agent = self._deps.agent_registry.get(agent_name)
+                result = await agent.run(self._state, self._deps.agent_context)
+                if not result.success:
+                    raise RuntimeError(f"{agent_name} failed: {result.summary}")
+                ok, validation_msg = validate_agent_output(stage.value, result.data)
+                if not ok:
+                    raise ValueError(validation_msg)
+                self._merge_planning_agent_data(stage, result.data)
+                content = self._format_planning_stage_message(stage, result.data, result.summary)
+                message_payload: dict[str, Any] = {
+                    "role": self._planning_stage_role(stage),
+                    "content": content,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "model": agent_name,
+                    "ok": True,
+                    stage.value: result.data.get(stage.value, result.data),
+                }
+                if stage == Stage.ANALYSIS:
+                    fem_artifacts = self._write_planning_fem_artifacts(experiment_spec, result.data)
+                    if fem_artifacts:
+                        message_payload["fem_artifacts"] = fem_artifacts
+                        message_payload["artifacts"] = {
+                            "preview_url": fem_artifacts.get("contour_url", ""),
+                            "experiment_spec_url": fem_artifacts.get("report_url", ""),
+                        }
+                        message_payload["experiment_spec"] = experiment_spec
+                await self._append_planning_message(
+                    message_payload,
+                    event_type=f"planning_{stage.value}_result",
+                    message=f"{agent_name} completed.",
+                )
+                previous_label = {
+                    Stage.VISION: "Vision Agent",
+                    Stage.MANIPULATION: "Manipulation Agent",
+                    Stage.EQUIPMENT: "Lab Equipment Agent",
+                    Stage.ANALYSIS: "Analysis Agent",
+                    Stage.KNOWLEDGE: "Knowledge Agent",
+                    Stage.GUARDIAN: "Guardian Agent",
+                }[stage]
+                if stage == Stage.KNOWLEDGE:
+                    previous_label = await self._run_planning_bo_agent(previous_label, cycle_index)
+                if stage == Stage.GUARDIAN:
+                    guardian_payload = (
+                        result.data.get("guardian", {})
+                        if isinstance(result.data.get("guardian", {}), dict)
+                        else {}
+                    )
+                    self._state.loop_count += 1
+            decision = str(guardian_payload.get("decision", "continue")).strip() or "continue"
+            planned_final_stop = (
+                decision == "stop"
+                and effective_mode == Mode.TEST
+                and cycle_index >= total_cycles
+            )
+            if decision == "error":
+                self._state.stage = Stage.ERROR
+                await self._append_planning_message(
+                    {
+                        "role": "system",
+                        "content": f"SYSTEM_EVENT: WORKFLOW_HALTED\nagent=GuardianAgent\ndecision={decision}",
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "ok": False,
+                    },
+                    event_type="planning_handoff",
+                    message="Planning loop tail halted by Guardian decision.",
+                    level="ERROR",
+                )
+            elif planned_final_stop or cycle_index >= total_cycles:
+                self._state.stage = Stage.COMPLETE
+                await self._append_planning_message(
+                    {
+                        "role": "system",
+                        "content": f"SYSTEM_EVENT: WORKFLOW_COMPLETE\nstatus=passed_guardian\ncycle={cycle_index}\ntotal_cycles={total_cycles}",
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "ok": True,
+                    },
+                    event_type="planning_handoff",
+                    message="Planning loop tail completed.",
+                )
+            elif decision == "stop":
+                self._state.stage = Stage.COMPLETE
+                await self._append_planning_message(
+                    {
+                        "role": "system",
+                        "content": f"SYSTEM_EVENT: WORKFLOW_HALTED\nagent=GuardianAgent\ndecision={decision}\ncycle={cycle_index}",
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "ok": True,
+                    },
+                    event_type="planning_handoff",
+                    message="Planning loop tail halted by Guardian decision.",
+                    level="WARNING",
+                )
+            else:
+                self._state.stage = Stage.DESIGN
+                await self._append_planning_message(
+                    {
+                        "role": "system",
+                        "content": f"SYSTEM_EVENT: CYCLE_COMPLETE\ncycle={cycle_index}\ntotal_cycles={total_cycles}\nstatus=next_design",
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "ok": True,
+                    },
+                    event_type="planning_handoff",
+                    message="Planning cycle completed; next design cycle queued.",
+                )
+            return {
+                "ok": decision != "error",
+                "decision": decision,
+                "message": f"Planning handoff cycle {cycle_index}/{total_cycles} completed.",
+            }
+        finally:
+            self._state.mode = original_mode
+
     async def _run_specimen_guardian_tail(self, experiment_spec: dict[str, Any]) -> dict[str, Any]:
         await self._append_planning_message(
             {
                 "role": "system",
-                "content": "Handoff: Operator input -> Specimen Making Agent. 기존 설계안을 유지하고 프린터 경로 선택값만 반영해 재시도합니다.",
+                "content": "SYSTEM_EVENT: HANDOFF\nfrom=OperatorInput\nto=SpecimenMakingAgent\nstatus=retry",
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "ok": True,
             },
             event_type="planning_handoff",
             message="Planning handoff back to Specimen Making Agent started.",
         )
-        specimen_agent = self._deps.agent_registry.get("specimen_agent")
-        specimen_result = await specimen_agent.run(self._state, self._deps.agent_context)
-        if not specimen_result.success:
-            raise RuntimeError(f"SpecimenMakingAgent failed: {specimen_result.summary}")
-        specimen_payload = specimen_result.data.get("specimen_result", {})
-        if not isinstance(specimen_payload, dict):
-            raise RuntimeError("SpecimenMakingAgent did not return specimen_result.")
-        if specimen_payload.get("requires_operator_input"):
-            await self._record_pending_specimen_input(specimen_payload)
+        specimen = await self._run_planning_specimen_stage(experiment_spec, emit_handoff=False)
+        if specimen.get("pending"):
             return {"ok": True, "message": "SpecimenMakingAgent waiting for operator input."}
 
-        specimen_artifacts = self._write_planning_artifacts(experiment_spec, specimen_result=specimen_payload)
-        specimen_message = self._format_specimen_runtime_message(experiment_spec, specimen_payload)
-        await self._append_planning_message(
-            {
-                "role": "printer_ai",
-                "content": specimen_message,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "model": "specimen_agent",
-                "ok": True,
-                "specimen": specimen_payload,
-                "specimen_artifacts": specimen_artifacts,
-                "render_artifacts": False,
-            },
-            event_type="planning_specimen_result",
-            message="SpecimenMakingAgent completed Specimen Making Agent handoff preparation.",
+        constraints = experiment_spec.get("constraints") if isinstance(experiment_spec.get("constraints"), dict) else {}
+        return await self._run_planning_cycle_series(
+            first_spec=experiment_spec,
+            design_constraints={**constraints, **experiment_spec},
+            start_cycle=1,
         )
-
-        guardian_agent = self._deps.agent_registry.get("guardian_agent")
-        guardian_result = await guardian_agent.run(self._state, self._deps.agent_context)
-        guardian_payload = (
-            guardian_result.data.get("guardian", {})
-            if isinstance(guardian_result.data.get("guardian", {}), dict)
-            else {}
-        )
-        self._state.run_metadata["guardian"] = guardian_payload
-        decision = str(guardian_payload.get("decision", "continue")).strip() or "continue"
-        action = str(guardian_payload.get("action", "")).strip()
-        reason = str(guardian_payload.get("reason", "")).strip()
-        precursor = guardian_payload.get("precursor", "")
-        design_validation = guardian_payload.get("design_validation", {})
-        health_validation = guardian_payload.get("health_validation", {})
-        consistency = guardian_payload.get("consistency", {})
-
-        guardian_content = (
-            "Guardian Agent 검증 결과:\n\n"
-            f"- decision: {decision}\n"
-            f"- action: {action or 'continue'}\n"
-            f"- reason: {reason or 'n/a'}\n"
-            f"- precursor: {precursor}\n"
-            f"- design_validation: {json.dumps(design_validation, ensure_ascii=False)}\n"
-            f"- health_validation: {json.dumps(health_validation, ensure_ascii=False)}\n"
-            f"- consistency: {json.dumps(consistency, ensure_ascii=False)}"
-        )
-        await self._append_planning_message(
-            {
-                "role": "guardian",
-                "content": guardian_content,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "model": "guardian_agent",
-                "ok": bool(guardian_result.success),
-                "guardian": guardian_payload,
-            },
-            event_type="planning_guardian_result",
-            message="GuardianAgent validation completed.",
-            level="INFO" if guardian_result.success else "ERROR",
-        )
-
-        if decision in {"stop", "error"}:
-            await self._append_planning_message(
-                {
-                    "role": "system",
-                    "content": "Guardian 판정으로 다음 단계 진행이 중단되었습니다. 조건을 수정한 뒤 다시 요청하세요.",
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                    "ok": decision != "error",
-                },
-                event_type="planning_handoff",
-                message="Planning flow halted by Guardian decision.",
-                level="WARNING" if decision == "stop" else "ERROR",
-            )
-        else:
-            await self._append_planning_message(
-                {
-                    "role": "system",
-                    "content": "Guardian 통과. 필요하면 이어서 다음 실험 계획/수행을 요청하세요.",
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                    "ok": True,
-                },
-                event_type="planning_handoff",
-                message="Planning flow passed Guardian validation.",
-            )
-        return {
-            "ok": bool(guardian_result.success) and decision != "error",
-            "message": "Planning handoff to Specimen Making Agent -> GuardianAgent completed.",
-        }
 
     def _build_planning_spec(
         self,
@@ -2396,6 +2896,7 @@ class MainController:
             or self._normalize_planning_geometry_type(base_spec.get("geometry_type"))
             or (self.TEST_MODE_FIXED_GEOMETRY if self._state.mode == Mode.TEST else "gyroid")
         )
+        base_geometry_type = self._normalize_planning_geometry_type(base_spec.get("geometry_type"))
         digest = hashlib.sha1(
             json.dumps(
                 {
@@ -2403,11 +2904,21 @@ class MainController:
                     "geometry_type": geometry_type,
                     "size": specimen_size,
                     "run_id": self._state.run_id,
+                    "cell_size_mm": pick("cell_size_mm", default_cell_size_mm),
+                    "wall_thickness_mm": pick("wall_thickness_mm", 1.0),
+                    "relative_density": pick("relative_density", 0.35),
+                    "anisotropy_ratio": pick("anisotropy_ratio", 1.0),
+                    "orientation_deg": pick("orientation_deg", 0.0),
+                    "tpms_thickness": pick("tpms_thickness", base_spec.get("tpms_thickness")),
                 },
                 sort_keys=True,
             ).encode("utf-8")
         ).hexdigest()[:8]
-        specimen_id = str(base_spec.get("specimen_id") or f"specimen-{candidate_id}-{digest}")
+        base_specimen_id = str(base_spec.get("specimen_id") or "")
+        if base_specimen_id and (not base_geometry_type or base_geometry_type == geometry_type):
+            specimen_id = base_specimen_id
+        else:
+            specimen_id = f"specimen-{candidate_id}-{geometry_type}-{digest}"
         planning_spec = {
             **base_spec,
             "candidate_id": candidate_id,
@@ -2494,6 +3005,10 @@ class MainController:
             planning_spec["top_cap_enabled"] = bool(validated_defaults.get("top_cap_enabled", False))
             planning_spec["bottom_cap_enabled"] = bool(validated_defaults.get("bottom_cap_enabled", True))
         planning_spec["top_bottom_cap"] = bool(planning_spec["top_cap_enabled"] or planning_spec["bottom_cap_enabled"])
+        if planning_spec["geometry_type"] == "gyroid" and planning_spec["relative_density"] < 0.20:
+            planning_spec["relative_density"] = 0.20
+            nested_constraints = planning_spec.get("constraints") if isinstance(planning_spec.get("constraints"), dict) else {}
+            planning_spec["constraints"] = {**nested_constraints, "relative_density": 0.20}
         if planning_spec["top_bottom_cap"]:
             planning_spec["skin_thickness_mm"] = max(0.2, float(planning_spec.get("skin_thickness_mm") or 0.8))
             planning_spec["require_flat_compression_faces"] = bool(
@@ -2583,6 +3098,35 @@ class MainController:
             "stl_url": f"{base}/specimen.stl",
             "preview_url": f"{base}/specimen_preview.svg",
             "experiment_spec_url": f"{base}/experiment_spec.json",
+        }
+
+    def _write_planning_fem_artifacts(
+        self,
+        experiment_spec: dict[str, Any],
+        analysis_data: dict[str, Any],
+    ) -> dict[str, str]:
+        """Copy CAE/FEM contour artifacts into the planning artifact directory."""
+        analysis = analysis_data.get("analysis") if isinstance(analysis_data.get("analysis"), dict) else {}
+        cae_result = analysis.get("cae_result") if isinstance(analysis.get("cae_result"), dict) else {}
+        artifacts = cae_result.get("artifacts") if isinstance(cae_result.get("artifacts"), dict) else {}
+        source_contour = Path(str(artifacts.get("contour_svg_path") or "")).expanduser()
+        if not source_contour.exists():
+            return {}
+        specimen_id = self._safe_artifact_segment(str(experiment_spec["specimen_id"]))
+        artifact_dir = self._deps.run_root / self._state.run_id / "planning" / specimen_id
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        contour_path = artifact_dir / "fem_contour.svg"
+        shutil.copy2(source_contour, contour_path)
+        source_report = Path(str(artifacts.get("report_path") or "")).expanduser()
+        report_path = artifact_dir / "cae_report.json"
+        if source_report.exists():
+            shutil.copy2(source_report, report_path)
+        base = f"/api/planning/artifacts/{self._state.run_id}/{specimen_id}"
+        return {
+            "contour_svg_path": str(contour_path),
+            "contour_url": f"{base}/fem_contour.svg",
+            "report_path": str(report_path) if report_path.exists() else "",
+            "report_url": f"{base}/cae_report.json" if report_path.exists() else "",
         }
 
     @staticmethod
@@ -2876,6 +3420,10 @@ class MainController:
         specimen_id = str(experiment_spec.get("specimen_id", "specimen"))
         geometry = str(experiment_spec.get("geometry_type", "geometry"))
         size = experiment_spec.get("specimen_size_mm", [30, 30, 30])
+        density = max(0.05, min(0.85, float(experiment_spec.get("relative_density", 0.32) or 0.32)))
+        wall = max(0.05, float(experiment_spec.get("wall_thickness_mm", 1.2) or 1.2))
+        orientation = float(experiment_spec.get("orientation_deg", 0.0) or 0.0)
+        tpms_t = float(experiment_spec.get("tpms_thickness", 0.0) or 0.0)
         if geometry.startswith("lattice"):
             internal = """
   <g stroke="#1436b3" stroke-width="3" opacity="0.72">
@@ -2897,14 +3445,17 @@ class MainController:
   </g>
 """
         elif geometry == "gyroid":
-            internal = """
-  <g stroke="#1436b3" stroke-width="3" opacity="0.78" fill="none">
-    <path d="M92 128 C138 78 184 178 230 128 S320 78 366 128"/>
-    <path d="M92 180 C138 130 184 230 230 180 S320 130 366 180"/>
-    <path d="M92 232 C138 182 184 282 230 232 S320 182 366 232"/>
-    <path d="M112 108 C168 164 252 74 312 130 S388 230 430 168"/>
-    <path d="M128 270 C186 214 250 304 318 244 S392 144 430 210"/>
-    <path d="M345 126 C384 96 406 178 430 148 M345 190 C384 160 406 242 430 212 M345 252 C384 222 406 304 430 274"/>
+            stroke = round(1.8 + density * 5.0 + min(1.6, wall * 0.25), 2)
+            amp = round(34.0 + density * 34.0 + min(12.0, tpms_t * 18.0), 2)
+            phase = round((orientation % 90.0) / 90.0 * 42.0, 2)
+            internal = f"""
+  <g stroke="#1436b3" stroke-width="{stroke}" opacity="0.78" fill="none" stroke-linecap="round">
+    <path d="M92 {128 - phase * 0.20:.1f} C138 {128 - amp:.1f} 184 {128 + amp:.1f} 230 {128 - phase * 0.10:.1f} S320 {128 - amp:.1f} 366 {128 + phase * 0.15:.1f}"/>
+    <path d="M92 {180 + phase * 0.08:.1f} C138 {180 - amp * 0.82:.1f} 184 {180 + amp * 0.82:.1f} 230 {180 + phase * 0.10:.1f} S320 {180 - amp * 0.82:.1f} 366 {180 - phase * 0.12:.1f}"/>
+    <path d="M92 {232 + phase * 0.18:.1f} C138 {232 - amp * 0.72:.1f} 184 {232 + amp * 0.72:.1f} 230 {232 + phase * 0.16:.1f} S320 {232 - amp * 0.72:.1f} 366 {232 - phase * 0.20:.1f}"/>
+    <path d="M112 {108 + phase * 0.28:.1f} C168 {164 - amp * 0.22:.1f} 252 {74 + phase * 0.20:.1f} 312 {130 + amp * 0.15:.1f} S388 {230 - phase * 0.18:.1f} 430 {168 + phase * 0.24:.1f}"/>
+    <path d="M128 {270 - phase * 0.25:.1f} C186 {214 + amp * 0.12:.1f} 250 {304 - phase * 0.16:.1f} 318 {244 - amp * 0.10:.1f} S392 {144 + phase * 0.18:.1f} 430 {210 - phase * 0.20:.1f}"/>
+    <path d="M345 {126 + phase * 0.18:.1f} C384 {96 + amp * 0.08:.1f} 406 {178 - phase * 0.18:.1f} 430 {148 + phase * 0.12:.1f} M345 {190 - phase * 0.14:.1f} C384 {160 + amp * 0.08:.1f} 406 {242 - phase * 0.14:.1f} 430 {212 + phase * 0.10:.1f} M345 {252 + phase * 0.10:.1f} C384 {222 + amp * 0.08:.1f} 406 {304 - phase * 0.10:.1f} 430 {274 - phase * 0.08:.1f}"/>
   </g>
 """
         else:
@@ -2918,7 +3469,8 @@ class MainController:
   <text x="470" y="135" font-family="monospace" font-size="22" fill="#1436b3">{geometry}</text>
   <text x="470" y="176" font-family="monospace" font-size="16" fill="#091225">{specimen_id}</text>
   <text x="470" y="215" font-family="monospace" font-size="16" fill="#5a6883">size={size}</text>
-  <text x="470" y="252" font-family="monospace" font-size="16" fill="#5a6883">planning STL artifact</text>
+  <text x="470" y="252" font-family="monospace" font-size="16" fill="#5a6883">rho={density:.3f} wall={wall:.3f}</text>
+  <text x="470" y="289" font-family="monospace" font-size="16" fill="#5a6883">orient={orientation:.1f} tpms={tpms_t:.3f}</text>
 </svg>
 """
 
@@ -2927,7 +3479,7 @@ class MainController:
         safe_run = self._safe_artifact_segment(run_id)
         safe_specimen = self._safe_artifact_segment(specimen_id)
         safe_filename = self._safe_artifact_segment(filename)
-        allowed = {"specimen.stl", "specimen_preview.svg", "experiment_spec.json"}
+        allowed = {"specimen.stl", "specimen_preview.svg", "experiment_spec.json", "fem_contour.svg", "cae_report.json"}
         if safe_filename not in allowed:
             raise ValueError(f"Unsupported planning artifact: {filename}")
         run_root = self._deps.run_root.resolve()

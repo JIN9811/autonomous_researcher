@@ -156,6 +156,30 @@ devices:
     mode: simulator
     endpoint: local
 
+  cae:
+    enabled: true
+    mode: test                    # test | live
+    provider: calculix
+    solver: calculix
+    mesher: gmsh
+    require_solver_in_live: true
+    artifact_dir: artifacts/cae
+    default_material:
+      elastic_modulus_mpa: 1800.0
+      poisson_ratio: 0.35
+      yield_strength_mpa: 35.0
+    default_boundary:
+      bottom: fixed_support
+      top: cyclic_loading
+    default_loading:
+      load_type: cyclic_compression
+      load_max_n: 500.0
+      load_min_ratio: 0.1
+      cycles: 10
+      frequency_hz: 1.0
+    mesh:
+      default_mesh_size_mm: 2.0
+
   equipment:
     mode: simulator              # simulator | live
     provider: windows_pyautogui

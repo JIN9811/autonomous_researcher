@@ -1,0 +1,208 @@
+# CAE Analysis Runtime Guideline
+
+Status: implementation guideline
+Last reviewed: 2026-05-24
+Scope: Open-source CAE bridge, GUI control surface, and Analysis Agent closed-loop use.
+
+## 1. Purpose
+
+CAE Analysis provides a simulation-side mechanical check that can be used before
+or alongside physical UTM data.
+
+Default mechanical setup:
+
+- bottom face: fixed support
+- top face: cyclic compression loading
+- CAE-only platen: bottom and top plates are applied for load/boundary transfer
+- default solver family: CalculiX
+- default mesher family: Gmsh
+
+The CAE result is not a replacement for live UTM data. It is an additional
+closed-loop signal for ranking and risk estimation.
+
+## 2. Tool Contract
+
+Registered MCP-style tools:
+
+- `cae.health`
+- `cae.run_static_analysis`
+
+Minimal payload for `cae.run_static_analysis`:
+
+```json
+{
+  "runtime_mode": "test",
+  "specimen_id": "specimen-001",
+  "stl_path": "/path/to/specimen.stl",
+  "specimen_size_mm": [20.0, 20.0, 20.0],
+  "mesh_size_mm": 2.0,
+  "material": {
+    "elastic_modulus_mpa": 1800.0,
+    "poisson_ratio": 0.35,
+    "yield_strength_mpa": 35.0
+  },
+  "loading": {
+    "load_type": "cyclic_compression",
+    "load_max_n": 500.0,
+    "load_min_ratio": 0.1,
+    "cycles": 10,
+    "frequency_hz": 1.0
+  },
+  "boundary": {
+    "bottom": "fixed_support",
+    "top": "cyclic_loading"
+  },
+  "boundary_condition": "bottom_fixed_support",
+  "loading_mode": "top_cyclic_loading",
+  "analysis_platens": {
+    "bottom": true,
+    "top": true,
+    "thickness_mm": 1.0,
+    "applies_to": "cae_only_not_generated_stl"
+  }
+}
+```
+
+Typical response keys:
+
+- `ok`
+- `tool`
+- `mode`
+- `solver`
+- `mesher`
+- `solver_mode`
+- `boundary_condition`
+- `loading_mode`
+- `metrics`
+- `cae_metrics`
+- `artifacts`
+- `step_trace`
+- `closed_loop_source`
+
+## 3. Test Mode
+
+Test mode must run without external solver installation.
+
+Behavior:
+
+- Use deterministic equivalent CAE calculation.
+- Keep the same physical interpretation as the real solver path:
+  bottom fixed support and top cyclic loading.
+- Normalize both label-style fields (`boundary_condition=bottom_fixed_support`,
+  `loading_mode=top_cyclic_loading`) and solver-style fields
+  (`boundary.bottom=fixed_support`, `boundary.top=cyclic_loading`) to the same
+  internal boundary condition.
+- Apply top/bottom platens inside CAE only. Do not modify the STL or printed
+  model to add these plates.
+- Generate `fem_contour.svg` / `*_cae.contour.svg` artifacts for Live GUI chat
+  display.
+- Write JSON input/report artifacts under `artifacts/cae`.
+- Return `cae_metrics` for Analysis Agent closed-loop scoring.
+
+Computed test metrics include:
+
+- `max_von_mises_MPa`
+- `max_displacement_mm`
+- `apparent_stiffness_N_per_mm`
+- `nominal_top_stress_MPa`
+- `stress_concentration_factor`
+- `load_max_N`
+- `load_min_N`
+- `fatigue_damage_proxy`
+- `safety_factor_yield`
+- `structural_score`
+
+Test-mode closed loop:
+
+- Analysis Agent still uses real/synthetic UTM data as the primary mechanical
+  curve source.
+- CAE `structural_score` is blended into `objective_score` as an additional
+  risk/performance term.
+- `analysis.closed_loop_sources` must include `cae.run_static_analysis` when
+  the CAE bridge succeeds.
+
+## 4. Live Mode
+
+Live mode is solver-gated by default.
+
+Behavior:
+
+- If `require_solver_in_live=true` and no CalculiX/ccx executable is available,
+  return `ok=false` with `failure_code=CAE_SOLVER_REQUIRED`.
+- Do not block live UTM analysis only because CAE is unavailable unless the
+  experiment explicitly requires CAE.
+- Keep the CAE failure visible in `analysis.cae_result`.
+
+Current implementation status:
+
+- The live path performs solver availability preflight and uses the deterministic
+  equivalent result shape when permitted.
+- Full mesh generation and external solver execution can replace the equivalent
+  calculation behind the same `cae.run_static_analysis` contract later.
+
+## 5. Dedicated GUI
+
+Route:
+
+```text
+/cae
+```
+
+Main dashboard launcher:
+
+```text
+Device Workspaces -> CAE Analysis -> Open CAE Workspace
+```
+
+GUI fields:
+
+- mode: test/live
+- solver
+- mesher
+- specimen ID
+- STL path
+- specimen size X/Y/Z
+- mesh size
+- elastic modulus
+- Poisson ratio
+- yield strength
+- top load max
+- load min ratio
+- cycles
+- frequency
+- live solver requirement checkbox
+- Save Settings button
+
+GUI output:
+
+- bridge health and solver availability
+- max von Mises stress
+- max displacement
+- fatigue proxy
+- structural score
+- equivalent FEM contour SVG
+- step trace
+- raw JSON result
+
+Settings persistence:
+
+- `GET /api/cae/config` must return the current defaults, bridge health, supported options, and saved workspace settings under `saved`.
+- `POST /api/cae/config` must persist the current CAE Workspace settings to `memory/cae_workspace_settings.json`.
+- A newly opened CAE Workspace window must apply the saved solver, mesher, model, material, loading, and live-solver requirement values before the user runs analysis.
+- Saving CAE settings must not run a solver or move any hardware; it is configuration-only.
+
+## 6. Safety Rules
+
+- Do not claim real finite-element validation in test mode; label it as
+  deterministic equivalent CAE.
+- Do not fabricate live UTM data from CAE.
+- Keep bottom fixed/top cyclic defaults stable unless the operator or experiment
+  spec explicitly overrides them.
+- AnalysisAgent should send explicit `boundary_condition`, `loading_mode`, and
+  `boundary` fields so downstream GUI, Knowledge, Guardian, and BO traces can
+  verify the mechanical setup without inferring it from free text.
+- AnalysisAgent should also send `analysis_platens` and `generated_model_caps`
+  so operators can distinguish CAE-only fixtures from actual generated STL cap
+  skins.
+- Preserve `cae_metrics`, `objective_score`, and `uncertainty` because Knowledge,
+  Guardian, and BO can consume those keys.

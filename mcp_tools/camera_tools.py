@@ -27,5 +27,12 @@ def register_camera_tools(registry: ToolRegistry) -> None:
     """Register camera capture tool."""
     registry.register(
         "camera.capture",
-        lambda payload: {"ok": True, "tool": "camera.capture", "frame_id": payload.get("frame_id", "mock")},
+        lambda payload: {
+            "ok": True,
+            "tool": "camera.capture",
+            "frame_id": payload.get("frame_id", "mock"),
+            "camera_key": payload.get("camera_key", "top"),
+            "source": "simulator",
+            "anomaly": False,
+        },
     )

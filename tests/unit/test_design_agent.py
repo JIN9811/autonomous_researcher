@@ -129,3 +129,38 @@ async def test_design_agent_respects_state_constraints() -> None:
     assert spec["specimen_size_mm"] == [20.0, 22.0, 24.0]
     assert spec["expected_mass_g"] <= 20
     assert spec["expected_print_time_min"] <= 90
+
+
+@pytest.mark.asyncio
+async def test_design_agent_keeps_preferred_geometry_when_bo_candidate_is_invalid() -> None:
+    agent = DesignAgent()
+    state = OrchestratorState(
+        run_id="run-test",
+        experiment_id="exp-test",
+        mode=Mode.TEST,
+        stage=Stage.DESIGN,
+        active_goal="closed loop gyroid specimen",
+        current_experiment_spec={
+            "constraints": {
+                "geometry_type": "gyroid",
+                "preferred_geometry_type": "gyroid",
+                "cell_size_mm": 10.0,
+            }
+        },
+        run_metadata={
+            "bo_recommended_constraints": {
+                "geometry_type": "gyroid",
+                "relative_density": 0.18,
+                "cell_size_mm": 5.0,
+            }
+        },
+    )
+
+    result = await agent.run(state, _DeterministicCtxStub())
+    spec = result.data["experiment_spec"]
+
+    assert result.success is True
+    assert spec["geometry_type"] == "gyroid"
+    assert spec["cell_size_mm"] == 10.0
+    assert spec["relative_density"] >= 0.20
+    assert "honeycomb" not in spec["specimen_id"]

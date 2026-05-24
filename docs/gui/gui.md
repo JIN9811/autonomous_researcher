@@ -4,7 +4,7 @@ Web dashboard panels:
 - global run metrics
 - run control buttons
 - current NemoClaw/vLLM model cells with per-model Loading/Unloading controls and status dots
-- Device Workspaces panel with dedicated launchers for Prusa MK4S 3DP Printer GUI, Windows PyAutoGUI Bridge GUI, and LeRobot / ROBOTIS GUI
+- Device Workspaces panel with dedicated launchers for Prusa MK4S 3DP Printer GUI, Windows PyAutoGUI Bridge GUI, LeRobot / ROBOTIS GUI, BO Workspace, and CAE Analysis Workspace
 - live loop timeline
 - agent status
 - device health
@@ -75,10 +75,29 @@ Windows PyAutoGUI Bridge GUI route:
 - The Live GUI no longer contains a Windows Bridge button; hardware workspace entry points live under Main GUI Device Workspaces.
 - Saved bridge candidates are still persisted in `memory/windows_pyautogui_connection.json` and are shared by all GUI windows.
 
+CAE Analysis GUI route:
+- Main dashboard button: `Open CAE Workspace`
+- Route: `/cae`
+- API surface: `/api/cae/config` and `/api/cae/run`.
+- The workspace has a `Save Settings` control. Saved settings are persisted in `memory/cae_workspace_settings.json` and are reapplied when a new CAE GUI window is opened.
+- The default analysis setup is bottom fixed support and top cyclic compression loading.
+- Test mode runs deterministic equivalent CAE and returns `cae_metrics` for closed-loop Analysis Agent scoring.
+- Live mode performs solver preflight. If `require_solver_in_live=true` and CalculiX/ccx is unavailable, the run is blocked with `CAE_SOLVER_REQUIRED`.
+- The GUI exposes solver, mesher, STL path, specimen size, mesh size, material properties, load max, load min ratio, cycle count, frequency, and live solver requirement controls.
+- Result cards show max von Mises stress, max displacement, fatigue proxy, structural score, step trace, and raw JSON.
+
+BO Workspace GUI route:
+- Main dashboard button: `Open BO Workspace`
+- Route: `/bo`
+- API surface: `/api/bo/config`, `/api/bo/benchmark`, and `/api/bo/run`.
+- The workspace has a `Save Settings` control. Saved settings are persisted in `memory/bo_workspace_settings.json` and are reapplied when a new BO GUI window is opened.
+- Saved BO settings include mode, objective, strategy, acquisition function, budget, seed, exploration/exploitation controls, and parameter-space bounds.
+- Benchmark and BO Agent actions remain virtual optimization controls only; the BO GUI does not directly start printer or robot hardware.
+
 LeRobot GUI route:
 - Main dashboard button: `Open LeRobot GUI`
 - Route: `/lerobot`
-- API surface: `/api/lerobot/config`, `/api/lerobot/ports`, `/api/lerobot/ports/*`, `/api/lerobot/camera/test`, `/api/lerobot/teleoperate/*`, `/api/lerobot/record/*`, `/api/lerobot/train/*`, `/api/lerobot/rollout/*`, `/api/lerobot/dataset/inspect`, `/api/lerobot/sessions`.
+- API surface: `/api/lerobot/config`, `/api/lerobot/ports`, `/api/lerobot/ports/*`, `/api/lerobot/camera/test`, `/api/lerobot/teleoperate/*`, `/api/lerobot/record/*`, `/api/lerobot/train/*`, `/api/lerobot/rollout/*`, `/api/lerobot/manipulation-agent/*`, `/api/lerobot/dataset/inspect`, `/api/lerobot/sessions`.
 - The route is a control/configuration workspace for ROBOTIS/LeRobot manipulation workflows.
 - Opening the route does not start robot motion. Actions require explicit button calls.
 - Test mode shows deterministic fake sessions, fake ports, command previews, and step traces.
@@ -111,6 +130,9 @@ LeRobot GUI route:
 - Rollout has a default-enabled Safe Action Clamp checkbox. When enabled, the command includes `--robot.max_relative_target=<limit>` with GUI default `5`, limiting per-step target jumps in the LeRobot follower.
 - Rollout/evaluation output dataset repo names are automatically normalized to `eval_*` by the bridge. GUI input may be `jin/pick_and_place_cube_rollout`, but the executed LeRobot repo id becomes `jin/eval_pick_and_place_cube_rollout`.
 - Training GUI exposes the LeRobot CLI fields needed for practical local training: dataset repo/root, policy type, policy repo ID, output dir, job name, device, batch size, steps, num workers, eval/log/save frequencies, checkpoint saving, resume, AMP, optimizer, scheduler, policy chunk/action/observation windows, WandB controls, and one-safe-arg-per-line advanced CLI options.
+- The LeRobot workspace also acts as the Manipulation Agent management GUI. Its `Manipulation Agent Bridge` panel calls `/api/lerobot/manipulation-agent/run`, which runs the actual `ManipulationAgent` with selected strategy, Pi0.5/generic policy type, profile, policy checkpoint/repo, source/target locations, specimen handoff metadata, and vision observation JSON.
+- Manipulation Agent Bridge has `Save Agent Defaults` and `Test Agent Bridge` actions. Save persists live/test loop defaults in `memory/manipulation_agent_bridge.json`; Test forces the same agent-mediated execution path through `mode=test` so the operator can validate payload/profile/policy wiring before live orchestration.
+- Policy paths for Manipulation Agent Bridge must be selectable through the same local browse mechanism used by rollout. This keeps operator selection consistent between direct LeRobot rollout and agent-mediated manipulation.
 - The current ROBOTIS OMX default GUI training shape maps to `lerobot-train --dataset.repo_id=<dataset> --dataset.root=<root> --policy.type=<policy> --output_dir=<output> --job_name=<job> --policy.device=<device> --policy.repo_id=<repo> --batch_size=<n> --steps=<n> --num_workers=<n>` plus explicit eval/log/save and optimizer/scheduler fields.
 - ACT training defaults follow Hugging Face LeRobot defaults: `batch_size=8`, `steps=100000`, `num_workers=4`, `eval_freq=20000`, `log_freq=200`, `save_freq=20000`, `policy.n_obs_steps=1`, `policy.chunk_size=100`, and `policy.n_action_steps=100`.
 - Pi0.5 training is routed to the dedicated conda environment `lerobot-pi05`, worktree `/home/jin/lerobot_pi05`, and Hugging Face cache `/home/jin/.cache/huggingface_pi05`. Select policy type `pi05 (Pi0.5)` and use `Train Source Policy / HF Base=lerobot/pi05_base`; the bridge command includes `--policy.type=pi05` and `--policy.pretrained_path=lerobot/pi05_base`.

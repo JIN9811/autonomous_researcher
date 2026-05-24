@@ -106,3 +106,9 @@ def test_benchmark_runs_random_grid_bo() -> None:
         assert len(strategy["results"]) == 3
         assert len(strategy["curve"]) == 3
         assert strategy["best_score"] is not None
+    bo_trace = result["strategies"]["bo"]["surrogate_trace"]
+    assert len(bo_trace) == 3
+    assert bo_trace[0]["candidates"]
+    assert bo_trace[0]["selected"]["candidate_id"]
+    assert bo_trace[0]["selected"]["acquisition_value"] is not None
+    assert bo_trace[0]["x_axis"] == "candidate_pool_index"

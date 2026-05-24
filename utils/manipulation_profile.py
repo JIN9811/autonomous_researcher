@@ -1,0 +1,167 @@
+"""
+File purpose:
+- Persist operator-controlled Manipulation Agent bridge defaults for live/test loops.
+
+Key classes/functions:
+- load_manipulation_agent_profile
+- save_manipulation_agent_profile
+
+Inputs/outputs:
+- Input: JSON-compatible GUI payload fields
+- Output: normalized profile stored under memory/manipulation_agent_bridge.json
+
+Dependencies:
+- utils.paths.resolve_path
+
+Modification guide:
+- Safe places to edit: default values and allowed profile keys.
+- Risky places to edit: field names consumed by ManipulationAgent and web/static/lerobot.js.
+"""
+
+from __future__ import annotations
+
+import json
+from typing import Any
+
+from utils.paths import resolve_path
+
+
+MANIPULATION_AGENT_PROFILE_PATH = resolve_path("memory/manipulation_agent_bridge.json")
+
+DEFAULT_MANIPULATION_AGENT_PROFILE: dict[str, Any] = {
+    "manipulation_strategy": "pi05_lerobot_policy",
+    "profile_id": "robotis_omx_ai",
+    "policy_type": "pi05",
+    "policy_path": "",
+    "policy_checkpoint_path": "",
+    "policy_repo_id": "",
+    "dataset_root": "",
+    "dataset_repo_id": "jin/3dp_to_utm_pi05_rollout",
+    "device": "cuda",
+    "fps": 30,
+    "source_location": "3dp_output_area",
+    "target_location": "utm_fixture",
+    "task_instruction": "",
+    "camera_enabled": True,
+    "display_data": False,
+    "continuous_rollout": True,
+    "rollout_action_clamp": True,
+    "rollout_max_relative_target": 5,
+    "rollout_temporal_ensemble": True,
+    "rollout_temporal_ensemble_coeff": 0.01,
+    "rollout_inference_type": "rtc",
+}
+
+_STRING_LIMITS = {
+    "manipulation_strategy": 80,
+    "profile_id": 120,
+    "policy_type": 40,
+    "policy_path": 1000,
+    "policy_checkpoint_path": 1000,
+    "policy_repo_id": 240,
+    "dataset_root": 1000,
+    "dataset_repo_id": 240,
+    "device": 40,
+    "source_location": 120,
+    "target_location": 120,
+    "task_instruction": 2000,
+    "rollout_inference_type": 40,
+}
+
+
+def _clean_string(value: Any, default: str, *, max_len: int) -> str:
+    text = str(value if value is not None else default).strip()
+    return (text or default)[:max_len]
+
+
+def _clean_bool(value: Any, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+    if value is None:
+        return default
+    return bool(value)
+
+
+def _clean_int(value: Any, default: int, *, min_value: int, max_value: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = int(default)
+    if parsed < min_value or parsed > max_value:
+        return int(default)
+    return parsed
+
+
+def _clean_float(value: Any, default: float, *, min_value: float, max_value: float) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        parsed = float(default)
+    if parsed < min_value or parsed > max_value:
+        return float(default)
+    return parsed
+
+
+def normalize_manipulation_agent_profile(raw: dict[str, Any] | None) -> dict[str, Any]:
+    """Normalize GUI-supplied Manipulation Agent defaults."""
+    source = raw if isinstance(raw, dict) else {}
+    profile = dict(DEFAULT_MANIPULATION_AGENT_PROFILE)
+    profile.update({key: value for key, value in source.items() if key in profile})
+
+    for key, max_len in _STRING_LIMITS.items():
+        profile[key] = _clean_string(profile.get(key), str(DEFAULT_MANIPULATION_AGENT_PROFILE[key]), max_len=max_len)
+
+    profile["fps"] = _clean_int(profile.get("fps"), 30, min_value=1, max_value=240)
+    profile["rollout_max_relative_target"] = _clean_int(
+        profile.get("rollout_max_relative_target"),
+        5,
+        min_value=1,
+        max_value=180,
+    )
+    profile["rollout_temporal_ensemble_coeff"] = _clean_float(
+        profile.get("rollout_temporal_ensemble_coeff"),
+        0.01,
+        min_value=0.0,
+        max_value=1.0,
+    )
+    for key in (
+        "camera_enabled",
+        "display_data",
+        "continuous_rollout",
+        "rollout_action_clamp",
+        "rollout_temporal_ensemble",
+    ):
+        profile[key] = _clean_bool(profile.get(key), bool(DEFAULT_MANIPULATION_AGENT_PROFILE[key]))
+
+    if profile["manipulation_strategy"] not in {"pi05_lerobot_policy", "lerobot_policy", "fixed_kinematic"}:
+        profile["manipulation_strategy"] = DEFAULT_MANIPULATION_AGENT_PROFILE["manipulation_strategy"]
+    if profile["policy_type"] not in {"pi05", "act"}:
+        profile["policy_type"] = DEFAULT_MANIPULATION_AGENT_PROFILE["policy_type"]
+    if profile["rollout_inference_type"] not in {"", "sync", "rtc"}:
+        profile["rollout_inference_type"] = DEFAULT_MANIPULATION_AGENT_PROFILE["rollout_inference_type"]
+    return profile
+
+
+def load_manipulation_agent_profile() -> dict[str, Any]:
+    """Load saved Manipulation Agent defaults, falling back to safe defaults."""
+    if not MANIPULATION_AGENT_PROFILE_PATH.exists():
+        return dict(DEFAULT_MANIPULATION_AGENT_PROFILE)
+    try:
+        raw = json.loads(MANIPULATION_AGENT_PROFILE_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        raw = {}
+    return normalize_manipulation_agent_profile(raw if isinstance(raw, dict) else {})
+
+
+def save_manipulation_agent_profile(raw: dict[str, Any] | None) -> dict[str, Any]:
+    """Persist normalized Manipulation Agent defaults."""
+    profile = normalize_manipulation_agent_profile(raw)
+    MANIPULATION_AGENT_PROFILE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    MANIPULATION_AGENT_PROFILE_PATH.write_text(json.dumps(profile, indent=2, ensure_ascii=False), encoding="utf-8")
+    return profile

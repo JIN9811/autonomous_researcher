@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 import app.main as main_module
 from device_bridges.lerobot_bridge import LeRobotBridge, LeRobotBridgeConfig
 from utils.config_loader import load_all_configs
+import utils.manipulation_profile as manipulation_profile_module
 from utils.paths import resolve_path
 
 
@@ -24,6 +25,9 @@ def test_lerobot_gui_and_test_mode_api_workflow(tmp_path: Path, monkeypatch: Any
     cfg["policy_root"] = str(tmp_path / "outputs")
     cfg["session_log_root"] = str(tmp_path / "logs")
     monkeypatch.setattr(main_module, "_LEROBOT_BRIDGE", LeRobotBridge(LeRobotBridgeConfig.from_config(cfg, repo_root=tmp_path)))
+    manipulation_profile_path = tmp_path / "memory" / "manipulation_agent_bridge.json"
+    monkeypatch.setattr(manipulation_profile_module, "MANIPULATION_AGENT_PROFILE_PATH", manipulation_profile_path)
+    monkeypatch.setattr(main_module, "MANIPULATION_AGENT_PROFILE_PATH", manipulation_profile_path)
     client = TestClient(main_module.app)
 
     page = client.get("/lerobot")
@@ -36,10 +40,14 @@ def test_lerobot_gui_and_test_mode_api_workflow(tmp_path: Path, monkeypatch: Any
     assert "lerobot-action-status" in page.text
     assert "Batch Size" in page.text
     assert "Additional Train CLI Args" in page.text
+    assert "Manipulation Agent Bridge" in page.text
+    assert "Save Agent Defaults" in page.text
+    assert "Test Agent Bridge" in page.text
 
     home = client.get("/")
     assert home.status_code == 200
     assert "Open LeRobot GUI" in home.text
+    assert "Manipulation Agent" in home.text
 
     config = client.get("/api/lerobot/config").json()
     assert config["ok"] is True
@@ -127,6 +135,91 @@ def test_lerobot_gui_and_test_mode_api_workflow(tmp_path: Path, monkeypatch: Any
     ).json()
     assert rollout["ok"] is True
     assert rollout["workflow"] == "rollout"
+
+    manipulation_config = client.get("/api/lerobot/manipulation-agent/config").json()
+    assert manipulation_config["ok"] is True
+    assert manipulation_config["profile"]["manipulation_strategy"] == "pi05_lerobot_policy"
+
+    manipulation_save = client.post(
+        "/api/lerobot/manipulation-agent/config",
+        json={
+            "mode": "test",
+            "profile_id": "fake_omx_ai",
+            "manipulation_strategy": "pi05_lerobot_policy",
+            "policy_type": "pi05",
+            "policy_path": "fake://pi05_policy_saved",
+            "task_instruction": "Saved 3DP to UTM manipulation default",
+            "source_location": "3dp_output_area",
+            "target_location": "utm_fixture",
+            "camera_enabled": True,
+            "continuous_rollout": True,
+        },
+    ).json()
+    assert manipulation_save["ok"] is True
+    assert manipulation_save["tool"] == "manipulation_agent.config.save"
+    assert manipulation_save["profile"]["policy_path"] == "fake://pi05_policy_saved"
+    assert manipulation_profile_path.exists()
+
+    manipulation_test = client.post(
+        "/api/lerobot/manipulation-agent/test",
+        json={
+            "mode": "live",
+            "profile_id": "fake_omx_ai",
+            "manipulation_strategy": "pi05_lerobot_policy",
+            "policy_type": "pi05",
+            "policy_path": "fake://pi05_policy",
+            "task_instruction": "Test 3DP to UTM manipulation bridge",
+            "source_location": "3dp_output_area",
+            "target_location": "utm_fixture",
+            "camera_enabled": True,
+            "continuous_rollout": True,
+            "specimen_result": {
+                "ok": True,
+                "specimen_id": "specimen-test-001",
+                "candidate_id": "candidate-test-001",
+                "handoff_status": "ready",
+            },
+        },
+    ).json()
+    assert manipulation_test["ok"] is True
+    assert manipulation_test["tool"] == "manipulation_agent.test"
+    assert manipulation_test["test_mode_forced"] is True
+    assert manipulation_test["mode"] == "test"
+    assert manipulation_test["manipulation"]["strategy"] == "pi05_lerobot_policy"
+    assert "--policy.type=pi05" in manipulation_test["manipulation"]["command_preview"]
+
+    manipulation = client.post(
+        "/api/lerobot/manipulation-agent/run",
+        json={
+            "mode": "test",
+            "profile_id": "fake_omx_ai",
+            "manipulation_strategy": "pi05_lerobot_policy",
+            "policy_type": "pi05",
+            "policy_path": "fake://pi05_policy",
+            "task_instruction": "Move test specimen from 3DP to UTM",
+            "source_location": "3dp_output_area",
+            "target_location": "utm_fixture",
+            "camera_enabled": True,
+            "continuous_rollout": True,
+            "specimen_result": {
+                "ok": True,
+                "specimen_id": "specimen-api-001",
+                "candidate_id": "candidate-api-001",
+                "handoff_status": "ready",
+            },
+            "observation": {
+                "observation_id": "obs-api-001",
+                "anomaly": False,
+                "transfer_readiness": {"ready": True, "pose_confidence": 0.82},
+            },
+        },
+    ).json()
+    assert manipulation["ok"] is True
+    assert manipulation["tool"] == "manipulation_agent.run"
+    assert manipulation["manipulation"]["strategy"] == "pi05_lerobot_policy"
+    assert manipulation["manipulation"]["transfer_task"]["source"] == "3dp_output_area"
+    assert manipulation["manipulation"]["transfer_task"]["target"] == "utm_fixture"
+    assert "--policy.type=pi05" in manipulation["manipulation"]["command_preview"]
 
     sessions = client.get("/api/lerobot/sessions").json()
     assert sessions["ok"] is True

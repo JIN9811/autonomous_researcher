@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<!--
+File purpose:
+- Dedicated BO / MBO workspace GUI.
+
+Key classes/functions:
+- Consumed by web/static/bo.js
+
+Inputs/outputs:
+- Input: /api/bo/config, /api/bo/benchmark, /api/bo/run
+- Output: operator-tuned BO settings and advisory candidate recommendation
+
+Dependencies:
+- /static/styles.css
+- /static/bo.js
+
+Modification guide:
+- Safe places to edit: labels, layout, non-critical copy.
+- Risky places to edit: element IDs consumed by bo.js.
+-->
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{ title }}</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="page equipment-setup-page printer-page bo-page">
+      <section class="hero panel">
+        <div class="hero-copy">
+          <p class="eyebrow">Optimization Workspace</p>
+          <h1>BO Workspace</h1>
+          <p class="subhead">
+            Acquisition function, BO/MBO strategy, parameter space, and benchmark budget을 조정합니다.
+            이 화면은 후보 제안과 virtual benchmark만 수행하며 프린터/로봇을 직접 구동하지 않습니다.
+          </p>
+        </div>
+        <article class="status-card">
+          <div class="status-head">
+            <span class="status-title">BO Agent</span>
+            <span id="bo-status-dot" class="status-dot idle"></span>
+          </div>
+          <strong id="bo-status-label">Loading</strong>
+          <p id="bo-status-detail">Reading BO defaults.</p>
+        </article>
+      </section>
+
+      <section class="panel equipment-setup-grid printer-setup-grid">
+        <article>
+          <h2>1. Optimizer Settings</h2>
+          <div class="lerobot-form-grid">
+            <label>
+              Strategy
+              <select id="bo-strategy-input" class="text-input">
+                <option value="bo">bo</option>
+                <option value="mbo">mbo</option>
+                <option value="random">random</option>
+                <option value="grid">grid</option>
+              </select>
+            </label>
+            <label>
+              Acquisition Function
+              <select id="bo-acquisition-input" class="text-input">
+                <option value="expected_improvement">expected_improvement</option>
+                <option value="upper_confidence_bound">upper_confidence_bound</option>
+                <option value="probability_of_improvement">probability_of_improvement</option>
+                <option value="uncertainty_sampling">uncertainty_sampling</option>
+                <option value="exploitation">exploitation</option>
+                <option value="exploration">exploration</option>
+              </select>
+            </label>
+            <label>
+              Budget
+              <input id="bo-budget-input" class="text-input" type="number" min="1" max="100" step="1" value="8" />
+            </label>
+            <label>
+              Random Seed
+              <input id="bo-seed-input" class="text-input" type="number" step="1" value="7" />
+            </label>
+            <label>
+              UCB Kappa
+              <input id="bo-kappa-input" class="text-input" type="number" min="0" step="0.1" value="2.0" />
+            </label>
+            <label>
+              EI/PI Xi
+              <input id="bo-xi-input" class="text-input" type="number" min="0" step="0.001" value="0.01" />
+            </label>
+            <label>
+              Exploration Weight
+              <input id="bo-exploration-input" class="text-input" type="number" min="0" max="1" step="0.05" value="0.35" />
+            </label>
+            <label>
+              Exploitation Weight
+              <input id="bo-exploitation-input" class="text-input" type="number" min="0" max="1" step="0.05" value="0.65" />
+            </label>
+          </div>
+          <label class="planning-message-label">
+            Objective JSON
+            <textarea id="bo-objective-input" class="text-input" rows="7"></textarea>
+          </label>
+          <label class="planning-message-label">
+            Parameter Space JSON
+            <textarea id="bo-parameter-space-input" class="text-input" rows="12"></textarea>
+          </label>
+          <div class="button-row">
+            <button id="btn-bo-benchmark" class="btn">Run Benchmark</button>
+            <button id="btn-bo-run" class="btn primary">Run BO Agent</button>
+            <button id="btn-bo-save" class="btn">Save Settings</button>
+            <button id="btn-bo-reset" class="btn">Reset Defaults</button>
+          </div>
+        </article>
+
+        <article>
+          <h2>2. Result</h2>
+          <div class="printer-status-grid">
+            <div>
+              <span class="hint">Recommendation</span>
+              <strong id="bo-recommendation-label">No run yet</strong>
+            </div>
+            <div>
+              <span class="hint">Best Score</span>
+              <strong id="bo-best-score-label">n/a</strong>
+            </div>
+          </div>
+          <div class="printer-subsection">
+            <h3>Best-So-Far</h3>
+            <div id="bo-curve-table" class="log-viewer compact-log"></div>
+          </div>
+          <div class="printer-subsection">
+            <h3>Surrogate / Acquisition Trace</h3>
+            <p class="hint">
+              각 BO step에서 현재까지 평가한 점으로 surrogate mean과 acquisition curve를 계산하고, 선택된 다음 후보를 표시합니다.
+            </p>
+            <div id="bo-surrogate-plot" class="bo-plot-stack">No BO trace yet.</div>
+            <div id="bo-selected-points" class="bo-selected-points"></div>
+          </div>
+          <div class="printer-subsection">
+            <h3>Raw Result</h3>
+            <pre id="bo-result-json" class="log-viewer compact-log">{}</pre>
+          </div>
+        </article>
+      </section>
+    </main>
+    <script src="/static/bo.js"></script>
+  </body>
+</html>

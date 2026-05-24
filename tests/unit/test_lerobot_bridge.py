@@ -927,6 +927,37 @@ def test_rollout_uses_eval_dataset_name_and_manual_stop_duration(tmp_path: Path)
     assert result["dataset_path"].endswith("jin/eval_pick_and_place_cube_rollout")
 
 
+def test_pi05_rollout_uses_dedicated_runtime_and_rtc_command(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+
+    result = bridge.rollout_start(
+        {
+            "mode": "test",
+            "profile_id": "fake_omx_ai",
+            "policy_path": "fake://pi05_policy",
+            "policy_type": "pi05",
+            "device": "cuda",
+            "task_instruction": "Move specimen from 3DP to UTM",
+            "continuous_rollout": True,
+            "camera_enabled": True,
+        }
+    )
+
+    assert result["ok"] is True
+    assert "-n" in result["command_preview"]
+    assert result["command_preview"][result["command_preview"].index("-n") + 1] == "lerobot-pi05"
+    assert "lerobot-rollout" in result["command_preview"]
+    assert "--policy.path=fake://pi05_policy" in result["command_preview"]
+    assert "--policy.type=pi05" in result["command_preview"]
+    assert "--device=cuda" in result["command_preview"]
+    assert "--policy.device=cuda" not in result["command_preview"]
+    assert "--inference.type=rtc" in result["command_preview"]
+    assert "--strategy.type=base" in result["command_preview"]
+    assert "--task=Move specimen from 3DP to UTM" in result["command_preview"]
+    assert "--duration=0" in result["command_preview"]
+    assert any(item.startswith("--robot.cameras=") for item in result["command_preview"])
+
+
 def test_rollout_action_clamp_can_be_disabled(tmp_path: Path) -> None:
     bridge = _bridge(tmp_path)
 

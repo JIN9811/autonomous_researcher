@@ -70,6 +70,7 @@ Modification guide:
         <a href="#visualization-card">Visualize</a>
         <a href="#training-card">Train</a>
         <a href="#rollout-card">Rollout</a>
+        <a href="#manipulation-agent-card">Manipulation Agent</a>
         <a href="#session-output">Logs</a>
       </nav>
 
@@ -603,6 +604,86 @@ Modification guide:
           </div>
           <div id="lerobot-rollout-action-status" class="lerobot-action-status idle">Waiting for rollout action.</div>
         </article>
+
+        <article id="manipulation-agent-card" class="panel lerobot-workflow-card">
+          <div class="panel-title-row">
+            <h2>Manipulation Agent Bridge</h2>
+            <span class="hint">agent-level 3DP to UTM policy execution</span>
+          </div>
+          <p class="lerobot-card-note">
+            This panel calls the actual Manipulation Agent. It builds the same LeRobot rollout payload used by the autonomous pipeline, including specimen handoff, vision observation, and Pi0.5 policy settings.
+          </p>
+          <div class="lerobot-form-grid">
+            <label>
+              Agent Strategy
+              <select id="lerobot-manipulation-strategy-input">
+                <option value="pi05_lerobot_policy" selected>Pi0.5 LeRobot Policy</option>
+                <option value="lerobot_policy">Generic LeRobot Policy</option>
+                <option value="fixed_kinematic">Fixed Kinematic Compatibility</option>
+              </select>
+            </label>
+            <label>
+              Policy Type
+              <select id="lerobot-manipulation-policy-type-input">
+                <option value="pi05" selected>pi05</option>
+                <option value="act">act</option>
+              </select>
+            </label>
+            <label>
+              Source Location
+              <input id="lerobot-manipulation-source-input" type="text" value="3dp_output_area" />
+            </label>
+            <label>
+              Target Location
+              <input id="lerobot-manipulation-target-input" type="text" value="utm_fixture" />
+            </label>
+            <label>
+              Specimen ID
+              <input id="lerobot-manipulation-specimen-id-input" type="text" value="manual-specimen" />
+            </label>
+            <label>
+              Candidate ID
+              <input id="lerobot-manipulation-candidate-id-input" type="text" value="manual-candidate" />
+            </label>
+            <label>
+              Manipulation Policy Checkpoint / Repo
+              <span class="input-action-row">
+                <input id="lerobot-manipulation-policy-input" type="text" placeholder="outputs/train/.../checkpoints/last/pretrained_model, model.safetensors, or HF repo id" />
+                <button id="btn-browse-manipulation-policy" class="btn mini" type="button">Browse</button>
+                <button id="btn-manipulation-use-rollout-policy" class="btn mini" type="button">Use Rollout Policy</button>
+              </span>
+            </label>
+            <label>
+              STL Path / Printed Specimen Artifact
+              <span class="input-action-row">
+                <input id="lerobot-manipulation-stl-input" type="text" placeholder="optional: generated specimen STL path" />
+                <button id="btn-browse-manipulation-stl" class="btn mini" type="button">Browse</button>
+              </span>
+            </label>
+            <label class="planning-message-label train-extra-args">
+              Agent Task Instruction
+              <textarea id="lerobot-manipulation-task-input" rows="3">Move the printed specimen from the 3D printer pickup area to the UTM fixture, place it on the fixture datum, release safely, then report transfer complete.</textarea>
+            </label>
+            <label class="planning-message-label train-extra-args">
+              Vision Observation JSON
+              <textarea id="lerobot-manipulation-observation-input" rows="4">{"observation_id":"manual-transfer","anomaly":false,"transfer_readiness":{"ready":true,"pose_confidence":0.82}}</textarea>
+            </label>
+          </div>
+          <div class="lerobot-inline-options">
+            <label class="checkbox-line"><input id="lerobot-manipulation-camera-input" type="checkbox" checked /> Pass saved cameras to policy</label>
+            <label class="checkbox-line"><input id="lerobot-manipulation-display-input" type="checkbox" /> Display LeRobot data stream</label>
+            <label class="checkbox-line"><input id="lerobot-manipulation-continuous-input" type="checkbox" checked /> Run until Stop Rollout</label>
+          </div>
+          <div class="button-row compact">
+            <button id="btn-manipulation-save" class="btn">Save Agent Defaults</button>
+            <button id="btn-manipulation-test" class="btn">Test Agent Bridge</button>
+            <button id="btn-manipulation-preview" class="btn">Preview Agent Payload</button>
+            <button id="btn-manipulation-run" class="btn primary">Run Manipulation Agent</button>
+            <button id="btn-manipulation-rollout-stop" class="btn danger">Stop Agent Rollout</button>
+            <button id="btn-manipulation-rollout-status" class="btn">Agent Rollout Status</button>
+          </div>
+          <div id="lerobot-manipulation-action-status" class="lerobot-action-status idle">Waiting for Manipulation Agent action.</div>
+        </article>
       </section>
 
       <section id="session-output" class="split lerobot-output-split">
@@ -622,6 +703,6 @@ Modification guide:
         </article>
       </section>
     </main>
-    <script src="/static/lerobot.js?v=20260507-vizhtml" defer></script>
+    <script src="/static/lerobot.js?v=20260524-manipulation-agent-save-test" defer></script>
   </body>
 </html>

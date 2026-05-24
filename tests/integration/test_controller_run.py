@@ -28,4 +28,11 @@ async def test_controller_completes_test_run() -> None:
         await asyncio.sleep(0.1)
 
     assert snapshot["state"]["stage"] == Stage.COMPLETE.value
-    assert snapshot["state"]["loop_count"] >= 1
+    assert snapshot["state"]["loop_count"] == 5
+    assert snapshot["state"]["run_metadata"]["bo_agent"]["tool"] == "bo.agent"
+    assert snapshot["state"]["run_metadata"]["bo_agent"]["knowledge_context"]
+    assert snapshot["state"]["run_metadata"]["equipment_result"]["tool"] == "equipment.pyautogui.run"
+    assert snapshot["state"]["run_metadata"]["equipment_handoff"]["status"] == "ready_for_analysis"
+    assert snapshot["state"]["latest_analysis"]["equipment_ok"] is True
+    assert snapshot["state"]["latest_analysis"]["cae_result"]["ok"] is True
+    assert snapshot["state"]["latest_analysis"]["cae_result"]["boundary_condition"] == "bottom_fixed_support"

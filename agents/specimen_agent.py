@@ -90,6 +90,58 @@ class SpecimenMakingAgent(BaseAgent):
         )
 
     @staticmethod
+    def _should_disable_test_surface_caps(
+        state: OrchestratorState,
+        spec: dict[str, Any],
+        *,
+        live_gui_test_spec: bool,
+    ) -> bool:
+        """Keep physical/test STL open after the first closed-loop cycle; CAE handles platens separately."""
+        if bool(spec.get("test_loop_surface_caps_disabled")):
+            return True
+        test_like = state.mode == Mode.TEST or live_gui_test_spec
+        return bool(test_like and state.loop_count >= 1)
+
+    @staticmethod
+    def _without_surface_caps(spec: dict[str, Any]) -> dict[str, Any]:
+        """Return a copy with generated-model cap skins disabled."""
+        effective = dict(spec)
+        effective["top_cap_enabled"] = False
+        effective["bottom_cap_enabled"] = False
+        effective["top_bottom_cap"] = False
+        effective["skin_thickness_mm"] = 0.0
+        effective["require_flat_compression_faces"] = False
+        effective["test_loop_surface_caps_disabled"] = True
+        constraints = effective.get("constraints") if isinstance(effective.get("constraints"), dict) else {}
+        effective["constraints"] = {
+            **constraints,
+            "top_cap_enabled": False,
+            "bottom_cap_enabled": False,
+            "top_bottom_cap": False,
+            "skin_thickness_mm": 0.0,
+            "require_flat_compression_faces": False,
+        }
+        return effective
+
+    @staticmethod
+    def _enforce_fdm_gyroid_hard_rules(spec: dict[str, Any]) -> dict[str, Any]:
+        """Clamp generated gyroid specs to hard FDM manufacturability rules before tool calls."""
+        geometry = str(spec.get("geometry_type", "")).strip().lower()
+        if geometry != "gyroid":
+            return spec
+        try:
+            density = float(spec.get("relative_density", 0.32))
+        except (TypeError, ValueError):
+            density = 0.32
+        if density >= 0.20:
+            return spec
+        effective = dict(spec)
+        effective["relative_density"] = 0.20
+        constraints = effective.get("constraints") if isinstance(effective.get("constraints"), dict) else {}
+        effective["constraints"] = {**constraints, "relative_density": 0.20}
+        return effective
+
+    @staticmethod
     def _normalize_printer_test_path(value: Any) -> str:
         text = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
         compact = text.replace("_", "")
@@ -157,6 +209,11 @@ class SpecimenMakingAgent(BaseAgent):
         printer_test_path = self._printer_test_path(spec)
         if live_gui_test_spec and not printer_test_path:
             return self._printer_path_choice_result(candidate, specimen_id)
+        if self._should_disable_test_surface_caps(state, spec, live_gui_test_spec=live_gui_test_spec):
+            spec = self._without_surface_caps(spec)
+            state.current_experiment_spec = spec
+        spec = self._enforce_fdm_gyroid_hard_rules(spec)
+        state.current_experiment_spec = spec
 
         constraints = spec.get("constraints") if isinstance(spec.get("constraints"), dict) else {}
         output_dir = self._artifact_dir(state, specimen_id)
@@ -393,6 +450,14 @@ class SpecimenMakingAgent(BaseAgent):
             "preview_image_path": geometry_result.get("preview_image_path"),
             "handoff_package_path": handoff_result.get("handoff_package_path"),
             "geometry_hash": geometry_result.get("geometry_hash"),
+            "geometry_report": geometry_result.get("geometry_report", {}),
+            "surface_cap_policy": {
+                "generated_model_caps_disabled": bool(spec.get("test_loop_surface_caps_disabled", False)),
+                "analysis_uses_top_bottom_platens": True,
+                "top_cap_enabled": top_cap_enabled,
+                "bottom_cap_enabled": bottom_cap_enabled,
+                "skin_thickness_mm": geometry_payload["skin_thickness_mm"],
+            },
             "expected_mass_g": manufacturability_result.get("expected_mass_g"),
             "expected_print_time_min": manufacturability_result.get("expected_print_time_min"),
             "slicer_settings": response.get("slicer_settings", {}),
