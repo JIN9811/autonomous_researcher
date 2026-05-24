@@ -394,6 +394,36 @@ async def test_live_gui_test_mode_inline_printer_choice_handoffs_without_prompt(
     physical: bool,
 ) -> None:
     controller = load_runtime()
+    monkeypatch.setattr(
+        "app.controller.load_prusa_print_profile",
+        lambda: {
+            "material": "PLA",
+            "printer_model": "Prusa MK4S",
+            "printer_profile": "prusa_mk4s_pla_0p4_nozzle",
+            "slicer_profile_hint": "0.2mm_quality",
+            "nozzle_diameter_mm": 0.4,
+            "layer_height_mm": 0.2,
+            "first_layer_height_mm": 0.2,
+            "slow_first_layer_enabled": True,
+            "first_layer_speed_mm_s": 10.0,
+            "bed_temperature_c": 60.0,
+            "first_layer_bed_temperature_c": 60.0,
+            "storage": "usb",
+            "max_print_time_min": 120.0,
+            "overwrite": True,
+            "start_immediately_live": True,
+            "allow_ejection": False,
+            "skirt_enabled": False,
+            "top_cap_enabled": False,
+            "bottom_cap_enabled": True,
+            "top_bottom_cap": True,
+            "skin_thickness_mm": 0.8,
+            "require_flat_compression_faces": False,
+            "test_specimen_size_mm": [30.0, 30.0, 30.0],
+            "test_unit_cell_size_mm": 10.0,
+            "notes": "",
+        },
+    )
     controller._state.mode = Mode.LIVE
     controller._state.current_experiment_spec = {}
     controller._state.run_metadata.pop("pending_specimen_input", None)

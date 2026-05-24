@@ -50,6 +50,7 @@ from knowledge.experiment_db import ExperimentDB
 from knowledge.failure_memory import FailureMemory
 from knowledge.rag import HybridRAG, LocalRAGIndex, WebRetriever
 from mcp_tools.equipment_tools import register_equipment_tools
+from mcp_tools.experiment_tools import register_experiment_tools
 from mcp_tools.lerobot_tools import register_lerobot_tools
 from mcp_tools.mock_tools import register_mock_tools
 from mcp_tools.printer_tools import register_printer_tools
@@ -247,6 +248,7 @@ def load_runtime() -> MainController:
     register_printer_tools(tools, cfg.get("devices", {}), repo_root=resolve_path("."))
     register_equipment_tools(tools, cfg.get("devices", {}), repo_root=resolve_path("."))
     register_lerobot_tools(tools, cfg.get("lerobot", {}), repo_root=resolve_path("."))
+    register_experiment_tools(tools, cfg.get("devices", {}))
 
     agent_context = AgentContext(
         model_router=router,

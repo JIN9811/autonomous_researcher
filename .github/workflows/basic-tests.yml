@@ -1,0 +1,49 @@
+name: Basic Tests
+
+on:
+  push:
+    branches: ["main", "feature-*"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Syntax check
+        run: |
+          python -m py_compile \
+            experiments/*.py \
+            mcp_tools/*.py \
+            agents/*.py \
+            orchestrator/*.py \
+            app/*.py
+
+      - name: Lightweight unit tests
+        env:
+          AUTONOMOUS_USE_REAL_LLM_IN_TEST: "0"
+          AUTONOMOUS_ALLOW_MOCK_FALLBACK: "1"
+          AUTONOMOUS_BACKEND: "ollama"
+          OLLAMA_BASE_URL: "http://127.0.0.1:9"
+        run: |
+          pytest \
+            tests/unit/test_experiment_runtime.py \
+            tests/unit/test_model_router.py \
+            tests/unit/test_printer_tools.py \
+            tests/unit/test_printer_profile.py \
+            tests/unit/test_guardian_agent.py

@@ -43,7 +43,7 @@ def register_equipment_tools(
 
     registry.register("equipment.pyautogui.health", lambda payload: bridge.health(dict(payload or {})))
     registry.register("equipment.pyautogui.list_programs", lambda payload: bridge.list_programs(dict(payload or {})))
-    registry.register("equipment.pyautogui.run", lambda payload: bridge.run(dict(payload or {})))
+    registry.register("equipment.pyautogui.run", lambda payload: bridge.run(dict(payload or {})), device="equipment:windows_pyautogui")
     registry.register("equipment.pyautogui.connection_status", lambda payload: bridge.connection_status())
     registry.register("equipment.pyautogui.save_connection", lambda payload: bridge.save_connection(dict(payload or {})))
     registry.register("equipment.pyautogui.select_candidate", lambda payload: bridge.select_candidate(dict(payload or {})))

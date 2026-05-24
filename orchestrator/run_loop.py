@@ -114,6 +114,13 @@ class RunLoop:
     def _merge_agent_data(self, stage: Stage, data: dict[str, Any]) -> None:
         if "experiment_spec" in data:
             self._state.current_experiment_spec = data["experiment_spec"]
+        if "experiment_objective" in data:
+            self._state.current_experiment_objective = data["experiment_objective"]
+        if "experiment_evaluation" in data and isinstance(data["experiment_evaluation"], dict):
+            self._state.experiment_evaluations.append(data["experiment_evaluation"])
+        specimen_result = data.get("specimen_result") if isinstance(data.get("specimen_result"), dict) else {}
+        if isinstance(specimen_result.get("experiment_evaluation"), dict):
+            self._state.experiment_evaluations.append(specimen_result["experiment_evaluation"])
         if "observation" in data:
             self._state.latest_observations = data["observation"]
         if "analysis" in data:

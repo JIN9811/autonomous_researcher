@@ -6,6 +6,7 @@ Role-based documentation layout:
   - Project-level guide and repository structure.
 - `runtime/`
   - Runtime architecture, agent/tool contracts, test mode, and logging contracts.
+  - Autonomous Experiment Runtime standard interface, benchmark mode, and device job queue contract.
 - `agents/`
   - Agent-specific implementation guidelines.
 - `hardware/`
@@ -18,6 +19,8 @@ Role-based documentation layout:
   - Operator GUI, Live GUI behavior, and dedicated LeRobot GUI route behavior.
 - `process/`
   - Codex implementation workflow and development process.
+- `tutorials/`
+  - Operator-facing first autonomous run guide.
 - `strategy/`
   - Higher-level improvement roadmap and research-system guidance.
 - `../install/`
@@ -27,6 +30,7 @@ Primary entry points:
 
 - `project/Project_guide.txt`
 - `runtime/agent_program_baseline.md`
+- `runtime/autonomous_experiment_runtime.md`
 - `runtime/lerobot_dataset_policy_naming.md`
   - Includes the isolated Pi0.5 training runtime contract for `lerobot-pi05`, `/home/jin/lerobot_pi05`, and `/home/jin/.cache/huggingface_pi05`.
 - `agents/specimen_design_existing_runtime_guideline.txt`
@@ -37,3 +41,4 @@ Primary entry points:
 - `hardware/windows_pyautogui_equipment_agent_guideline.md`
 - `hardware/windows_pyautogui_bridge_windows_setup.md`
 - `../install/README.md`
+- `tutorials/first_autonomous_run.md`

@@ -5,6 +5,7 @@ Local-first multi-agent autonomous research framework designed for DGX Spark-sty
 - OpenShell/NemoClaw-aligned secure runtime assumptions
 - LangGraph-style explicit state graph
 - MCP-style tool abstraction
+- Autonomous Experiment Runtime API for common objective/evaluation records
 - Full test-mode dry-run support
 - Real-time web GUI for loop visualization
 
@@ -64,6 +65,10 @@ Alternative without installing the launcher:
 - `http://localhost:7860/docs` for API docs
 
 Full terminal command usage is documented in `./install/README.md`.
+
+First end-to-end operator tutorial:
+
+- `./docs/tutorials/first_autonomous_run.md`
 
 ## LeRobot Pi0.5 Training
 
@@ -133,8 +138,12 @@ This repository currently implements Phase 1 plus foundational parts of Phase 2:
 - LangGraph-style orchestrator loop
 - local RAG over `docs/project/Project_guide.txt` + optional web RAG fallback
 - mock MCP tools and simulated device mode
+- `experiment.evaluate` common API for virtual/test/live experiment evaluation
+- `experiment.benchmark` random/grid/BO comparison mode
+- per-device job/session metadata for hardware-facing actions
 - modern real-time web GUI
 - unit/integration tests for core flow
+- GitHub Actions basic syntax/unit-test workflow
 
 ## Notes
 
@@ -142,6 +151,7 @@ This repository currently implements Phase 1 plus foundational parts of Phase 2:
 - If internet RAG is needed, set `TAVILY_API_KEY` or `SERPER_API_KEY`.
 - NemoClaw-aligned vLLM inference is the default backend (`AUTONOMOUS_BACKEND=vllm`) and serves the Gemma4 aliases from NVFP4 ModelOpt FP4 deployments with Gemma4 MTP speculative decoding. On the GB10 host, the deployments force `VLLM_NVFP4_GEMM_BACKEND=marlin` to avoid incompatible FlashInfer/CUTLASS FP4 kernels.
 - Hardware bridges are currently simulation-first and can be extended per bridge module.
+- Common experiment API contract is documented in `./docs/runtime/autonomous_experiment_runtime.md`.
 
 ## Agent Program Baseline
 

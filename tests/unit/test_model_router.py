@@ -19,7 +19,7 @@ def test_model_router_selects_task_role() -> None:
     assert selection.fallback == "b"
 
 
-def test_vllm_orchestrator_defaults_to_e4b() -> None:
+def test_vllm_orchestrator_defaults_to_31b() -> None:
     cfg = load_yaml(resolve_path("configs/models.yaml"))
     vllm_cfg = dict(cfg)
     vllm_cfg["models"] = dict(cfg["backend_models"]["vllm"])
@@ -27,5 +27,5 @@ def test_vllm_orchestrator_defaults_to_e4b() -> None:
 
     selection = router.select("orchestrator_plan")
 
-    assert selection.primary == "gemma4:e4b-it-nvfp4"
-    assert selection.fallback == "gemma4:31b"
+    assert selection.primary == "gemma4:31b"
+    assert selection.fallback == "gemma4:e4b-it-nvfp4"

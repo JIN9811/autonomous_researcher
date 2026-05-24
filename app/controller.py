@@ -100,6 +100,7 @@ class MainController:
         return OrchestratorState(
             run_id=self._logger_bundle.run_dir.name,
             experiment_id=make_experiment_id(),
+            active_session_id=self._logger_bundle.run_dir.name,
             mode=mode,
             stage=Stage.IDLE,
             active_goal="Build and run autonomous AI researcher loop",

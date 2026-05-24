@@ -683,6 +683,19 @@ class LeRobotBridge:
         unsafe = self._unsafe_arguments([request.policy_checkpoint_path, request.policy_path, request.policy_repo_id])
         if unsafe:
             return self._error("lerobot.rollout.start", request.runtime_mode or request.mode, request.profile_id, "LEROBOT_UNSAFE_ARGUMENT", f"Unsafe command argument rejected: {unsafe}")
+        mode = request.runtime_mode or request.mode
+        profile = self._profile(request.profile_id)
+        if profile is None:
+            return self._error("lerobot.rollout.start", mode, request.profile_id, "LEROBOT_PROFILE_NOT_FOUND", "Robot profile not found.")
+        blocked = self._live_block_if_needed(
+            tool="lerobot.rollout.start",
+            mode=mode,
+            profile=profile,
+            workflow="rollout",
+            allow_key="allow_policy_rollout",
+        )
+        if blocked:
+            return blocked
         try:
             request = self._rollout_request_with_local_policy(request)
             request = self._rollout_request_with_eval_dataset(request)

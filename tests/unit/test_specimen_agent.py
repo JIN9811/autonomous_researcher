@@ -15,6 +15,7 @@ import pytest
 from agents.specimen_agent import SpecimenMakingAgent
 from device_bridges.prusa_bridge import PrusaSlicerRunner
 from mcp_tools.mock_tools import register_mock_tools
+from mcp_tools.experiment_tools import register_experiment_tools
 from mcp_tools.printer_tools import register_printer_tools
 from mcp_tools.tool_registry import ToolRegistry
 from orchestrator.state import Mode, OrchestratorState, Stage
@@ -70,6 +71,7 @@ class _CtxStub:
     def __init__(self) -> None:
         tools = ToolRegistry()
         register_mock_tools(tools)
+        register_experiment_tools(tools)
         self.tools = tools
 
     async def complete(self, task_type: str, prompt: str, timeout_s: float | None = None) -> Any:
@@ -316,6 +318,7 @@ async def test_specimen_agent_uses_phase1_printer_prepare_schema(tmp_path: Path,
         },
         repo_root=tmp_path,
     )
+    register_experiment_tools(tools)
     ctx = _CtxStub()
     ctx.tools = tools
 
@@ -337,6 +340,8 @@ async def test_specimen_agent_uses_phase1_printer_prepare_schema(tmp_path: Path,
     assert specimen_result["slicer_settings"]["printer_profile"] == "prusa_mk4s_pla_0p4_nozzle"
     assert specimen_result["gcode_validation"]["ok"] is True
     assert specimen_result["operator_messages"]
+    assert specimen_result["experiment_evaluation"]["bridge"] == "printer"
+    assert specimen_result["experiment_evaluation"]["job"]["device"] == "printer:prusa_mk4s"
 
 
 @pytest.mark.asyncio
@@ -399,6 +404,7 @@ async def test_specimen_agent_live_gui_test_mode_virtual_choice_runs_virtual_bri
         },
         repo_root=tmp_path,
     )
+    register_experiment_tools(tools)
     ctx = _CtxStub()
     ctx.tools = tools
 

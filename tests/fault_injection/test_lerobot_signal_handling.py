@@ -13,14 +13,14 @@ def _bridge(tmp_path: Path) -> LeRobotBridge:
     return LeRobotBridge(LeRobotBridgeConfig.from_config(cfg.get("lerobot", {}), repo_root=tmp_path))
 
 
-def test_live_rollout_is_blocked_by_default_gate(tmp_path: Path) -> None:
+def test_live_rollout_is_blocked_without_saved_live_ports(tmp_path: Path) -> None:
     bridge = _bridge(tmp_path)
 
     result = bridge.rollout_start({"mode": "live", "profile_id": "fake_omx_ai", "policy_path": "fake://policy"})
 
     assert result["ok"] is False
     assert result["status"] == "blocked"
-    assert result["failure_code"] == "LEROBOT_WORKFLOW_GATE_DISABLED"
+    assert result["failure_code"] == "LEROBOT_DEVICE_PORT_UNAVAILABLE"
 
 
 def test_command_argument_injection_is_rejected(tmp_path: Path) -> None:

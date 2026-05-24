@@ -337,11 +337,48 @@ class SpecimenMakingAgent(BaseAgent):
 
             printer_payload["_event_callback"] = emit_tool_event
 
-        response = await asyncio.to_thread(ctx.tools.call, "printer.prepare", printer_payload)
+        experiment_response = await asyncio.to_thread(
+            ctx.tools.call,
+            "experiment.evaluate",
+            {
+                "run_id": state.run_id,
+                "experiment_id": state.experiment_id,
+                "session_id": state.run_id,
+                "objective": {
+                    "objective_id": f"specimen-print-{specimen_id}",
+                    "name": "Specimen print preparation",
+                    "description": "Evaluate generated specimen through the unified experiment runtime.",
+                    "metric_name": "printability_score",
+                    "direction": "maximize",
+                    "constraints": constraints,
+                    "tags": ["specimen", "printer", "fdm"],
+                },
+                "candidate": {
+                    "candidate_id": candidate,
+                    "source_agent": self.name,
+                    "experiment_spec": spec,
+                    "parameters": printer_payload,
+                },
+                "execution": {
+                    "mode": printer_runtime_mode,
+                    "bridge": "printer",
+                    "requested_tool": "printer.prepare",
+                    "dry_run": not bool((printer_payload.get("print") or {}).get("start_immediately", False)),
+                    "allow_physical": printer_runtime_mode == "live" or bool(printer_payload.get("allow_test_printer_live")),
+                },
+                "metadata": {
+                    "stage": state.stage.value,
+                    "live_gui_test_spec": live_gui_test_spec,
+                    "printer_test_path": printer_test_path,
+                },
+            },
+        )
+        response = experiment_response.get("bridge_result") if isinstance(experiment_response.get("bridge_result"), dict) else experiment_response
 
         specimen_result = {
             "ok": True,
             "tool": "printer.prepare",
+            "experiment_evaluation": experiment_response,
             "candidate_id": candidate,
             "specimen_id": specimen_id,
             "geometry_status": "generated",

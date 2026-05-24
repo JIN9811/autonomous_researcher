@@ -8,6 +8,7 @@ Build a modular, maintainable, local-first autonomous research framework that ru
 - NVIDIA NemoClaw / OpenShell-style secure runtime assumptions
 - Ollama-based local model serving
 - MCP-compatible tool interfaces
+- Autonomous Experiment Runtime for common objective/evaluation records
 - LangGraph-based orchestration
 - Test mode for every hardware-facing subsystem
 - Central GUI for monitoring full system state
@@ -33,6 +34,7 @@ Core Design Principles
    - Every device-facing subsystem must support a test mode.
    - Test mode must be executable from the main orchestration loop.
    - The framework must be runnable without real hardware for development, debugging, and demo purposes.
+   - Test, virtual, and live execution should share the same public Experiment Evaluation API.
 
 5. Maintainability
    - Every file must include clear maintenance comments.
@@ -68,6 +70,14 @@ Top-Level Architecture
         +--> [Lab Equipment Agent]
         |
         v
+[Autonomous Experiment Runtime]
+        |
+        +--> [ExperimentObjective / ExperimentCandidate / ExperimentExecution]
+        +--> [experiment.evaluate]
+        +--> [experiment.benchmark: random / grid / BO]
+        +--> [Device Job Queue + Session/Experiment ID]
+        |
+        v
 [MCP Tool / Device Interface Layer]
         |
         +--> [Ollama Local Models]
@@ -86,6 +96,13 @@ Important rule
   - progress scoring
   - failure precursor detection
   - recovery triggering support
+
+Autonomous Experiment Runtime rule
+- The runtime layer improves the current system rather than replacing it.
+- Existing agents and MCP tools remain the owner of their domain-specific logic.
+- `experiment.evaluate` is the standard API for executing/evaluating a candidate.
+- `experiment.benchmark` is the standard API for comparing random/grid/BO proposal strategies.
+- Hardware-facing tools must attach device job/session metadata when they perform queued work.
 
 ==================================================
 2. Model Allocation Policy
@@ -164,6 +181,7 @@ Purpose
 - Propose next experiment
 - Support DOE / Bayesian Optimization / Active Learning
 - Respect constraints and cost
+- Emit candidates that can be wrapped as `ExperimentCandidate`
 
 Modes
 - live mode
@@ -175,6 +193,7 @@ Purpose
 - Compute features/objectives
 - Estimate uncertainty
 - Produce compact summaries for GUI and memory
+- Consume `ExperimentEvaluationResult` records when available
 
 Modes
 - live mode from real experiment files
@@ -205,7 +224,7 @@ Modes
 3.6 Specimen Making Agent
 Purpose
 - Trigger specimen creation/preparation workflow
-- Delegate print/ejection preparation through printer.prepare
+- Delegate print/ejection preparation through `experiment.evaluate -> printer.prepare`
 - Cache existing specimens if possible
 - Surface PrusaSlicer settings, G-code output path, PrusaLink storage readiness, upload/start result, transport/endpoints, and printer.prepare step trace to Live GUI
 - Do not duplicate Design Agent STL preview rendering

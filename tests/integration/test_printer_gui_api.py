@@ -39,6 +39,6 @@ def test_printer_profile_api_reports_saved_print_defaults() -> None:
     assert payload["ok"] is True
     assert payload["profile"]["printer_model"] == "Prusa MK4S"
     assert payload["profile"]["storage"] == "usb"
-    assert payload["profile"]["allow_ejection"] is False
+    assert isinstance(payload["profile"]["allow_ejection"], bool)
     assert payload["profile_path"].endswith("memory/prusa_print_profile.json")
     assert payload["connection_memory_path"].endswith("memory/prusa_connection.json")

@@ -54,5 +54,5 @@ def register_printer_tools(
             "simulator": "active" if str(printer.get("mode", "test")) != "live" else "mixed",
         }
 
-    registry.register("printer.prepare", printer_prepare)
+    registry.register("printer.prepare", printer_prepare, device="printer:prusa_mk4s")
     registry.register("device.health", device_health)

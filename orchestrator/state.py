@@ -75,6 +75,9 @@ class OrchestratorState(BaseModel):
     active_goal: str = "Bootstrap autonomous researcher loop"
     device_health: dict[str, str] = Field(default_factory=dict)
     current_experiment_spec: dict[str, Any] = Field(default_factory=dict)
+    current_experiment_objective: dict[str, Any] = Field(default_factory=dict)
+    experiment_evaluations: list[dict[str, Any]] = Field(default_factory=list)
+    active_session_id: str = ""
     latest_observations: dict[str, Any] = Field(default_factory=dict)
     latest_analysis: dict[str, Any] = Field(default_factory=dict)
     retry_counters: dict[str, int] = Field(default_factory=dict)
