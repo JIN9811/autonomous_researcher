@@ -240,7 +240,7 @@ After cloning on a new machine:
 
 ## Version-Control Workflow Requirement
 
-Use branch-first development. Do not edit `main` directly for normal work.
-Create a branch, test the change, then merge to `main` only after the program
-works correctly. See `docs/repository/github_version_control.md` for the exact
-workflow.
+Use branches when the operator requests branch work or when a change is risky.
+Keep `main` as the latest known-good version. Avoid unnecessary branch
+proliferation for small, safe edits. See `docs/repository/github_version_control.md`
+for the exact workflow.

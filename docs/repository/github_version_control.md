@@ -59,12 +59,25 @@ Before pushing to GitHub:
 3. Confirm large generated artifacts are not staged.
 4. Commit only source, docs, reusable config, templates, and lightweight assets.
 
-## Branch-First Development Policy
+## Branch Use Policy
 
-Do not modify `main` directly for feature work, experiments, hardware workflow
-changes, model-serving changes, or GUI refactors.
+Avoid unnecessary branch proliferation. Use a branch when the operator explicitly
+asks for branch work, when a change is risky, or when a change may take multiple
+iterations before it is known-good.
 
-Required workflow:
+Use branch workflow for:
+
+- operator request such as "make a branch", "work on a branch", or "do this separately"
+- large GUI refactors
+- hardware-control workflow changes
+- model-serving / vLLM / Docker / Kubernetes changes
+- experimental algorithm changes
+- changes that may need rollback or comparison
+
+Small documentation edits, typo fixes, and clearly safe single-file changes may
+be committed directly on `main` after inspection.
+
+Branch workflow:
 
 1. Start from a clean `main`.
 2. Create a dedicated branch before editing:
@@ -75,7 +88,7 @@ Required workflow:
    git checkout -b <work-branch-name>
    ```
 
-3. Make changes only on that branch.
+3. Make changes on that branch.
 4. Run the relevant tests or live checks.
 5. Commit the branch work:
 
@@ -107,4 +120,5 @@ Recommended branch names:
 - `fix-<short-topic>`
 - `experiment-<short-topic>`
 
-Use `main` as the latest known-good version.
+Use `main` as the latest known-good version. If the operator explicitly says to
+use a branch, create one before editing.
