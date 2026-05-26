@@ -3,7 +3,7 @@
 Local-first multi-agent autonomous research framework designed for DGX Spark-style lab orchestration with:
 - NemoClaw/k3s vLLM as default inference backend
 - OpenShell/NemoClaw-aligned secure runtime assumptions
-- LangGraph-style explicit state graph
+- LangGraph-backed config-driven state graph
 - MCP-style tool abstraction
 - Autonomous Experiment Runtime API for common objective/evaluation records
 - Full test-mode dry-run support
@@ -135,14 +135,15 @@ This repository currently implements Phase 1 plus foundational parts of Phase 2:
 - structured logging subsystem
 - NemoClaw/k3s vLLM backend, Ollama proxy backend, local Ollama backend, and mock backend
 - model router
-- LangGraph-style orchestrator loop
+- LangGraph-backed config-driven orchestrator runtime, including Live GUI planning handoff stage execution
 - local RAG over `docs/project/Project_guide.txt` + optional web RAG fallback
 - mock MCP tools and simulated device mode
 - `experiment.evaluate` common API for virtual/test/live experiment evaluation
 - `experiment.benchmark` random/grid/BO comparison mode
 - `/bo` BO Workspace with acquisition, BO/MBO, budget, and parameter-space controls
-- per-device job/session metadata for hardware-facing actions
+- per-device job/session metadata and Runtime IDE-compatible workspace events for hardware-facing actions
 - modern real-time web GUI
+- `/ide` Runtime IDE for multi-graph LangGraph graph/module validation, compiled graph summaries, dry-run, YAML import/export, handler allowlist editing, SVG node icons, run timeline, artifact preview, and workspace graph template debugging
 - unit/integration tests for core flow
 - GitHub Actions basic syntax/unit-test workflow
 
@@ -153,6 +154,7 @@ This repository currently implements Phase 1 plus foundational parts of Phase 2:
 - NemoClaw-aligned vLLM inference is the default backend (`AUTONOMOUS_BACKEND=vllm`) and serves the Gemma4 aliases from NVFP4 ModelOpt FP4 deployments with Gemma4 MTP speculative decoding. On the GB10 host, the deployments force `VLLM_NVFP4_GEMM_BACKEND=marlin` to avoid incompatible FlashInfer/CUTLASS FP4 kernels.
 - Hardware bridges are currently simulation-first and can be extended per bridge module.
 - Common experiment API contract is documented in `./docs/runtime/autonomous_experiment_runtime.md`.
+- LangGraph runtime details are documented in `./docs/runtime/langgraph_runtime.md`, including the primary `atr_closed_loop` graph and printer/LeRobot/UTM workspace graph templates.
 
 ## Agent Program Baseline
 

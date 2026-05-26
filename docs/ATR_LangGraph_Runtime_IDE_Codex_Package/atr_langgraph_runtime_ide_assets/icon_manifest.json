@@ -1,0 +1,52 @@
+{
+  "style": "ATR Runtime IDE neon dark theme based on supplied concept image",
+  "default_icon_size_px": 24,
+  "node_icon_container_px": 34,
+  "node_min_width_px": 136,
+  "node_height_px": 58,
+  "graph_grid": {
+    "gap_px": 16,
+    "snap_grid": [
+      16,
+      16
+    ],
+    "background": "radial dot grid"
+  },
+  "colors": {
+    "orchestrator": "#38bdf8",
+    "guardian_agent": "#ff3864",
+    "design_agent": "#9b5cff",
+    "specimen_maker": "#b855f7",
+    "vision_agent": "#20d6a3",
+    "manipulation_agent": "#ffd438",
+    "equipment_agent": "#ff8c2a",
+    "analysis_agent": "#2b8cff",
+    "knowledge_agent": "#22c55e",
+    "bo_agent": "#ff4dcc",
+    "mcp_tools": "#14b8a6",
+    "nemoclaw_ollama": "#a78bfa",
+    "memory_logs": "#43e6d5",
+    "device_bridges": "#9a7bff",
+    "complete": "#22c55e",
+    "error": "#ff3864",
+    "play": "#2b8cff",
+    "pause": "#a78bfa",
+    "stop": "#ff3864",
+    "settings": "#cbd5e1",
+    "artifact": "#f97316"
+  },
+  "recommended_libraries": [
+    "React",
+    "Vite",
+    "TypeScript",
+    "React Flow",
+    "Zustand",
+    "FastAPI",
+    "SSE/WebSocket",
+    "LangGraph"
+  ],
+  "files": {
+    "svg_dir": "icons/",
+    "png_dir": "icons_png/"
+  }
+}

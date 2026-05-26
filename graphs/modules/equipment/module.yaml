@@ -1,0 +1,33 @@
+module:
+  id: equipment
+  label: Lab Equipment Agent Module
+  handler: agent.equipment_agent
+  llm_role: tool_formatting
+  editable: true
+  safety:
+    live_requires_validation: true
+    dry_run_supported: true
+  tools:
+  - equipment.pyautogui.health
+  - equipment.pyautogui.list_programs
+  - equipment.pyautogui.run
+  - utm.run_protocol
+  internal_graph:
+    - id: 01_check_windows_bridge
+      label: Check Windows Bridge
+      kind: internal_step
+    - id: 02_select_program
+      label: Select Program
+      kind: internal_step
+    - id: 03_run_utm_macro
+      label: Run Utm Macro
+      kind: internal_step
+    - id: 04_handoff_analysis
+      label: Handoff Analysis
+      kind: internal_step
+  io_contract:
+    input: OrchestratorState
+    output: AgentResult.data merged into OrchestratorState
+  notes: >-
+    GUI/module editor may edit this module config, but execution remains bound to
+    allowlisted Python handlers. Python source is not modified by the GUI.

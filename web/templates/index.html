@@ -24,7 +24,7 @@ Modification guide:
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>{{ title }}</title>
-    <link rel="stylesheet" href="/static/styles.css" />
+    <link rel="stylesheet" href="/static/styles.css?v=atr-ui-20260525-7" />
   </head>
   <body>
     <main class="page">
@@ -266,9 +266,16 @@ Modification guide:
           <span><i class="legend-dot visited"></i>Visited</span>
           <span><i class="legend-dot idle"></i>Idle</span>
         </div>
+        <div class="runtime-map-actions">
+          <div>
+            <strong>Runtime IDE</strong>
+            <span>LangGraph graph/module config, validation, dry-run, version activation</span>
+          </div>
+          <a class="btn primary runtime-map-ide-btn" href="/ide" target="_blank" rel="noopener">Open Runtime IDE</a>
+        </div>
       </section>
     </main>
 
-    <script src="/static/app.js" defer></script>
+    <script src="/static/app.js?v=atr-ui-20260525-7" defer></script>
   </body>
 </html>

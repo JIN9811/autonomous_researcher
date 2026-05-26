@@ -76,3 +76,4 @@ task_routes:
   guardian_reasoning: e4b
   tool_formatting: e2b
   gui_helper: e2b
+  module_designer: orchestrator

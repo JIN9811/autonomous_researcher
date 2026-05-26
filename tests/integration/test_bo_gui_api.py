@@ -70,6 +70,12 @@ def test_bo_benchmark_endpoint_runs_virtual_bo() -> None:
     assert len(payload["benchmark"]["strategies"]["bo"]["curve"]) == 3
     assert len(payload["benchmark"]["strategies"]["bo"]["surrogate_trace"]) == 3
     assert payload["benchmark"]["strategies"]["bo"]["surrogate_trace"][0]["selected"]["parameters"]
+    assert any(
+        event.get("type") == "tool.completed"
+        and event.get("node_id") == "bo"
+        and event.get("payload", {}).get("workspace") == "bo"
+        for event in app_main.controller.recent_events()
+    )
 
 
 def test_bo_run_endpoint_returns_recommendation() -> None:
@@ -89,3 +95,19 @@ def test_bo_run_endpoint_returns_recommendation() -> None:
     assert payload["ok"] is True
     assert payload["data"]["bo_result"]["recommendation"]["candidate_id"]
     assert payload["data"]["bo_result"]["recommendation"]["parameters"]
+    assert any(
+        event.get("type") == "node.completed"
+        and event.get("node_id") == "bo"
+        and event.get("payload", {}).get("module_runtime", {}).get("direct_workspace_api") is True
+        for event in app_main.controller.recent_events()
+    )
+    run_id = payload["snapshot"]["state"]["run_id"]
+    artifacts = client.get(f"/api/runs/{run_id}/artifacts").json()["artifacts"]
+    artifact_paths = {item["path"] for item in artifacts}
+    assert any(path.startswith("workspace/bo/") and path.endswith("_result.json") for path in artifact_paths)
+    assert any(path.startswith("workspace/bo/") and path.endswith("_bo_progress.svg") for path in artifact_paths)
+    assert any(
+        event.get("type") == "artifact.created"
+        and event.get("payload", {}).get("artifact", {}).get("path") in artifact_paths
+        for event in app_main.controller.recent_events()
+    )

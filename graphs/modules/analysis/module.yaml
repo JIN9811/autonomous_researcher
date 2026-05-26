@@ -1,0 +1,30 @@
+module:
+  id: analysis
+  label: Analysis Agent Module
+  handler: agent.analysis_agent
+  llm_role: analysis_reasoning
+  editable: true
+  safety:
+    live_requires_validation: true
+    dry_run_supported: true
+  tools:
+  - cae.run_static_analysis
+  internal_graph:
+    - id: 01_parse_utm_curve
+      label: Parse Utm Curve
+      kind: internal_step
+    - id: 02_compute_mechanical_metrics
+      label: Compute Mechanical Metrics
+      kind: internal_step
+    - id: 03_run_cae_if_available
+      label: Run Cae If Available
+      kind: internal_step
+    - id: 04_emit_objective_score
+      label: Emit Objective Score
+      kind: internal_step
+  io_contract:
+    input: OrchestratorState
+    output: AgentResult.data merged into OrchestratorState
+  notes: >-
+    GUI/module editor may edit this module config, but execution remains bound to
+    allowlisted Python handlers. Python source is not modified by the GUI.

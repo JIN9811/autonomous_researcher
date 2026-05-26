@@ -54,11 +54,23 @@ Usage:
   atr status
   atr events
   atr backend [vllm|nemoclaw|ollama]
+  atr graphs
+  atr graph show|validate|compile|dry-run|gate|versions <graph-id>
+  atr graph version <graph-id> <version-id>
+  atr graph export-yaml <graph-id> [output-file]
+  atr graph import-yaml <graph-id> <yaml-file>
+  atr graph save-yaml <graph-id> <yaml-file> [--no-activate]
+  atr graph run <graph-id> [test|live|replay|fault-injection] [goal text...]
   atr run start [test|live|replay|fault-injection] [goal text...]
   atr run pause|resume|stop|safe-stop
   atr gpu clear
   atr models
   atr model load|unload <e4b|e2b|31b|model-alias>
+  atr modules
+  atr module show|validate|dry-run|load|unload|versions|register-generated <module-id>
+  atr module version <module-id> <version-id>
+  atr module save-yaml <module-id> <yaml-file> [--no-activate]
+  atr module create <python-file> [module-id] [label text...]
   atr chat "message"
   atr chat bootstrap [goal text...]
 
@@ -71,6 +83,20 @@ Commands:
   status      Print /api/state.
   events      Print recent structured events.
   backend     Show current state, or switch inference backend when an argument is given.
+  graphs      List Runtime IDE graph configs from /api/graphs.
+  graph show  Print one active graph payload.
+  graph validate
+              Validate active graph handlers/modules/routes.
+  graph compile
+              Compile-check active graph without starting agents or hardware.
+  graph dry-run
+              Run non-device transition simulation and record active dry-run gate.
+  graph gate  Show live dry-run gate status for the active graph.
+  graph versions|version
+              List/read saved graph versions.
+  graph export-yaml|import-yaml|save-yaml
+              Round-trip graph YAML through the same Runtime IDE API. save-yaml validates, versions, and activates unless --no-activate is passed.
+  graph run   Start a specific saved active graph through /api/graphs/{graph_id}/run.
   run start   Start a workflow through /api/run/start. Default mode is test.
   run pause   Pause the current run.
   run resume  Resume the current run.
@@ -82,6 +108,24 @@ Commands:
   model load  Load one managed vLLM model.
   model unload
               Unload one managed vLLM model.
+  modules     List Runtime IDE module catalog entries.
+  module show Print one module.yaml payload through the API.
+  module validate
+              Validate one module payload without executing devices.
+  module dry-run
+              Show configured internal module step order.
+  module load|unload
+              Load or unload a module in the Module Management workspace state without deleting files.
+  module versions|version
+              List/read saved module.yaml versions.
+  module save-yaml
+              Validate, dry-run, version, and activate a module YAML file unless --no-activate is passed.
+  module register-generated
+              Approve a Module Designer handler.py after static safety checks and activate module.generated_adapter.
+  module create
+              Upload a Python file to Module Designer; Gemma 31B converts it to ATR protocol and catalogs it.
+  Graph CUI commands intentionally use the same /api/graphs endpoints as Runtime IDE, so GUI/CUI state is cross-reflected after reload.
+  Module CUI commands intentionally use the same /api/modules endpoints as Module Management Tool, so GUI/CUI state is cross-reflected after reload.
   chat        Send a message to the Live GUI orchestrator session.
   chat bootstrap
               Trigger Live GUI orchestrator bootstrap from the terminal.
@@ -131,6 +175,20 @@ api_post() {
   local path="\${1}"
   local body="\${2}"
   curl -fsS -X POST "\${BASE_URL}\${path}" -H "Content-Type: application/json" -d "\${body}" | pretty_json
+  printf '\n'
+}
+
+api_put() {
+  local path="\${1}"
+  local body="\${2}"
+  curl -fsS -X PUT "\${BASE_URL}\${path}" -H "Content-Type: application/json" -d "\${body}" | pretty_json
+  printf '\n'
+}
+
+api_post_text() {
+  local path="\${1}"
+  local body="\${2}"
+  curl -fsS -X POST "\${BASE_URL}\${path}" -H "Content-Type: application/json" -d "\${body}"
   printf '\n'
 }
 
@@ -363,9 +421,43 @@ json_model() {
   ATR_MODEL_VALUE="\${1}" "\${py}" -c 'import json, os; print(json.dumps({"model": os.environ["ATR_MODEL_VALUE"]}))'
 }
 
+json_module_create() {
+  local py="\$(require_python)"
+  ATR_MODULE_FILE="\${1}" ATR_MODULE_ID="\${2}" ATR_MODULE_LABEL="\${3}" ATR_MODULE_CATEGORY_VALUE="\${ATR_MODULE_CATEGORY:-}" ATR_MODULE_HANDLER_VALUE="\${ATR_MODULE_HANDLER:-runtime.step_complete}" "\${py}" -c 'import json, os, pathlib
+path = pathlib.Path(os.environ["ATR_MODULE_FILE"])
+module_id = os.environ["ATR_MODULE_ID"] or path.stem.replace("-", "_")
+label = os.environ["ATR_MODULE_LABEL"] or module_id.replace("_", " ").title()
+print(json.dumps({"module_id": module_id, "label": label, "category": os.environ.get("ATR_MODULE_CATEGORY_VALUE", ""), "handler": os.environ.get("ATR_MODULE_HANDLER_VALUE", "runtime.step_complete"), "source_filename": path.name, "source_text": path.read_text(encoding="utf-8"), "notes": "Created from atr module create", "transform_with_llm": True, "transform_model": "gemma4:31b"}, ensure_ascii=False))'
+}
+
+json_module_save_yaml() {
+  local py="\$(require_python)"
+  ATR_MODULE_YAML_FILE="\${1}" ATR_MODULE_ACTIVATE="\${2}" "\${py}" -c 'import json, os, pathlib, yaml; path=pathlib.Path(os.environ["ATR_MODULE_YAML_FILE"]); raw=yaml.safe_load(path.read_text(encoding="utf-8")) or {}; module=raw.get("module", raw) if isinstance(raw, dict) else raw; print(json.dumps({"module": module, "reason": "atr module save-yaml", "author": "atr-cli", "activate": os.environ["ATR_MODULE_ACTIVATE"] != "0"}, ensure_ascii=False))'
+}
+
 json_run_start() {
   local py="\$(require_python)"
   ATR_MODE_VALUE="\${1}" ATR_GOAL_VALUE="\${2}" ATR_BACKEND_VALUE="\${3}" "\${py}" -c 'import json, os; print(json.dumps({"mode": os.environ["ATR_MODE_VALUE"], "goal": os.environ["ATR_GOAL_VALUE"], "backend": os.environ["ATR_BACKEND_VALUE"], "fault": "none", "fault_stage": ""}, ensure_ascii=False))'
+}
+
+json_graph_dry_run() {
+  local py="\$(require_python)"
+  ATR_START_STAGE_VALUE="\${1}" ATR_MAX_STEPS_VALUE="\${2}" "\${py}" -c 'import json, os; print(json.dumps({"start_stage": os.environ["ATR_START_STAGE_VALUE"], "max_steps": int(os.environ["ATR_MAX_STEPS_VALUE"])}))'
+}
+
+json_graph_run() {
+  local py="\$(require_python)"
+  ATR_MODE_VALUE="\${1}" ATR_GOAL_VALUE="\${2}" ATR_BACKEND_VALUE="\${3}" "\${py}" -c 'import json, os; print(json.dumps({"mode": os.environ["ATR_MODE_VALUE"], "goal": os.environ["ATR_GOAL_VALUE"], "backend": os.environ["ATR_BACKEND_VALUE"], "fault": "none", "fault_stage": ""}, ensure_ascii=False))'
+}
+
+json_graph_yaml_import() {
+  local py="\$(require_python)"
+  ATR_GRAPH_YAML_FILE="\${1}" "\${py}" -c 'import json, os, pathlib; print(json.dumps({"yaml_text": pathlib.Path(os.environ["ATR_GRAPH_YAML_FILE"]).read_text(encoding="utf-8")}, ensure_ascii=False))'
+}
+
+json_graph_save_yaml() {
+  local py="\$(require_python)"
+  ATR_GRAPH_YAML_FILE="\${1}" ATR_GRAPH_ACTIVATE="\${2}" "\${py}" -c 'import json, os, pathlib, yaml; path=pathlib.Path(os.environ["ATR_GRAPH_YAML_FILE"]); raw=yaml.safe_load(path.read_text(encoding="utf-8")) or {}; graph=raw.get("graph", raw) if isinstance(raw, dict) else raw; print(json.dumps({"graph": graph, "reason": "atr graph save-yaml", "author": "atr-cli", "activate": os.environ["ATR_GRAPH_ACTIVATE"] != "0"}, ensure_ascii=False))'
 }
 
 json_chat_message() {
@@ -432,6 +524,96 @@ case "\${1:-}" in
     fi
     exit 0
     ;;
+  graphs)
+    api_get "/api/graphs"
+    exit 0
+    ;;
+  graph)
+    case "\${2:-}" in
+      show)
+        [[ -n "\${3:-}" && "\$#" -eq 3 ]] || { usage; exit 2; }
+        api_get "/api/graphs/\${3}"
+        exit 0
+        ;;
+      validate)
+        [[ -n "\${3:-}" && "\$#" -eq 3 ]] || { usage; exit 2; }
+        api_post "/api/graphs/\${3}/validate" "{}"
+        exit 0
+        ;;
+      compile)
+        [[ -n "\${3:-}" && "\$#" -eq 3 ]] || { usage; exit 2; }
+        api_post "/api/graphs/\${3}/compile" "{}"
+        exit 0
+        ;;
+      dry-run)
+        [[ -n "\${3:-}" ]] || { usage; exit 2; }
+        start_stage="\${4:-idle}"
+        max_steps="\${5:-24}"
+        [[ "\$#" -le 5 ]] || { usage; exit 2; }
+        api_post "/api/graphs/\${3}/dry-run" "\$(json_graph_dry_run "\${start_stage}" "\${max_steps}")"
+        exit 0
+        ;;
+      gate)
+        [[ -n "\${3:-}" && "\$#" -eq 3 ]] || { usage; exit 2; }
+        api_get "/api/graphs/\${3}/dry-run-gate"
+        exit 0
+        ;;
+      versions)
+        [[ -n "\${3:-}" && "\$#" -eq 3 ]] || { usage; exit 2; }
+        api_get "/api/graphs/\${3}/versions"
+        exit 0
+        ;;
+      version)
+        [[ -n "\${3:-}" && -n "\${4:-}" && "\$#" -eq 4 ]] || { usage; exit 2; }
+        api_get "/api/graphs/\${3}/versions/\${4}"
+        exit 0
+        ;;
+      export-yaml)
+        [[ -n "\${3:-}" ]] || { usage; exit 2; }
+        [[ "\$#" -le 4 ]] || { usage; exit 2; }
+        if [[ -n "\${4:-}" ]]; then
+          curl -fsS -X POST "\${BASE_URL}/api/graphs/\${3}/export-yaml" -H "Content-Type: application/json" -d "{}" -o "\${4}"
+          echo "Wrote graph YAML: \${4}"
+        else
+          api_post_text "/api/graphs/\${3}/export-yaml" "{}"
+        fi
+        exit 0
+        ;;
+      import-yaml)
+        [[ -n "\${3:-}" && -n "\${4:-}" && "\$#" -eq 4 ]] || { usage; exit 2; }
+        api_post "/api/graphs/\${3}/import-yaml" "\$(json_graph_yaml_import "\${4}")"
+        exit 0
+        ;;
+      save-yaml)
+        [[ -n "\${3:-}" && -n "\${4:-}" ]] || { usage; exit 2; }
+        [[ "\$#" -le 5 ]] || { usage; exit 2; }
+        activate="1"
+        if [[ "\${5:-}" == "--no-activate" ]]; then
+          activate="0"
+        elif [[ -n "\${5:-}" ]]; then
+          usage
+          exit 2
+        fi
+        api_put "/api/graphs/\${3}" "\$(json_graph_save_yaml "\${4}" "\${activate}")"
+        exit 0
+        ;;
+      run)
+        [[ -n "\${3:-}" ]] || { usage; exit 2; }
+        mode="\${4:-test}"
+        if [[ "\$#" -ge 5 ]]; then
+          goal="\${*:5}"
+        else
+          goal=""
+        fi
+        api_post "/api/graphs/\${3}/run" "\$(json_graph_run "\${mode}" "\${goal}" "\${DEFAULT_BACKEND}")"
+        exit 0
+        ;;
+      *)
+        usage
+        exit 2
+        ;;
+    esac
+    ;;
   run)
     case "\${2:-}" in
       start)
@@ -481,6 +663,83 @@ case "\${1:-}" in
       api_post "/api/runtime/models/unload" "\$(json_model "\$(model_alias "\${3}")")"
       exit 0
     fi
+    ;;
+  modules)
+    api_get "/api/modules"
+    exit 0
+    ;;
+  module)
+    case "\${2:-}" in
+      show)
+        [[ -n "\${3:-}" && "\$#" -eq 3 ]] || { usage; exit 2; }
+        api_get "/api/modules/\${3}"
+        exit 0
+        ;;
+      validate)
+        [[ -n "\${3:-}" && "\$#" -eq 3 ]] || { usage; exit 2; }
+        api_post "/api/modules/\${3}/validate" "{}"
+        exit 0
+        ;;
+      dry-run)
+        [[ -n "\${3:-}" && "\$#" -eq 3 ]] || { usage; exit 2; }
+        api_post "/api/modules/\${3}/dry-run" "{}"
+        exit 0
+        ;;
+      load)
+        [[ -n "\${3:-}" && "\$#" -eq 3 ]] || { usage; exit 2; }
+        api_post "/api/modules/\${3}/load" "{}"
+        exit 0
+        ;;
+      unload)
+        [[ -n "\${3:-}" && "\$#" -eq 3 ]] || { usage; exit 2; }
+        api_post "/api/modules/\${3}/unload" "{}"
+        exit 0
+        ;;
+      versions)
+        [[ -n "\${3:-}" && "\$#" -eq 3 ]] || { usage; exit 2; }
+        api_get "/api/modules/\${3}/versions"
+        exit 0
+        ;;
+      version)
+        [[ -n "\${3:-}" && -n "\${4:-}" && "\$#" -eq 4 ]] || { usage; exit 2; }
+        api_get "/api/modules/\${3}/versions/\${4}"
+        exit 0
+        ;;
+      save-yaml)
+        [[ -n "\${3:-}" && -n "\${4:-}" ]] || { usage; exit 2; }
+        [[ "\$#" -le 5 ]] || { usage; exit 2; }
+        activate="1"
+        if [[ "\${5:-}" == "--no-activate" ]]; then
+          activate="0"
+        elif [[ -n "\${5:-}" ]]; then
+          usage
+          exit 2
+        fi
+        api_put "/api/modules/\${3}" "\$(json_module_save_yaml "\${4}" "\${activate}")"
+        exit 0
+        ;;
+      register-generated)
+        [[ -n "\${3:-}" && "\$#" -eq 3 ]] || { usage; exit 2; }
+        api_post "/api/modules/\${3}/register-generated" "{}"
+        exit 0
+        ;;
+      create)
+        [[ -n "\${3:-}" ]] || { usage; exit 2; }
+        file="\${3}"
+        module_id="\${4:-}"
+        if [[ "\$#" -ge 5 ]]; then
+          label="\${*:5}"
+        else
+          label=""
+        fi
+        api_post "/api/modules" "\$(json_module_create "\${file}" "\${module_id}" "\${label}")"
+        exit 0
+        ;;
+      *)
+        usage
+        exit 2
+        ;;
+    esac
     ;;
   chat)
     if [[ "\${2:-}" == "bootstrap" ]]; then

@@ -37,6 +37,7 @@ import httpx
 
 from agents.base_agent import AgentContext
 from agents.registry import AgentRegistry
+from logging_system.event_logger import log_system_event
 from logging_system.logger_factory import LoggerBundle, build_logger_bundle
 from logging_system.run_trace import RunTrace
 from mcp_tools.tpms_geometry import (
@@ -44,13 +45,15 @@ from mcp_tools.tpms_geometry import (
     normalize_geometry_type as normalize_tpms_geometry_type,
     write_smooth_gyroid_stl,
 )
-from orchestrator.graph import OrchestrationGraph
+from graphs import load_graph_config
 from orchestrator.run_loop import RunLoop
-from orchestrator.router import stage_to_agent
 from orchestrator.state import Mode, OrchestratorState, Stage
 from policies.validation_policy import validate_agent_output
-from utils.ids import make_experiment_id, make_run_id
+from utils.ids import make_event_id, make_experiment_id, make_run_id
 from utils.printer_profile import load_prusa_print_profile
+
+
+WORKSPACE_ARTIFACT_COPY_LIMIT_BYTES = 50 * 1024 * 1024
 
 
 @dataclass(slots=True)
@@ -60,7 +63,6 @@ class ControllerDeps:
     agent_registry: AgentRegistry
     orchestrator_agent_name: str
     agent_context: AgentContext
-    graph: OrchestrationGraph
     run_root: Path
     logging_config: dict[str, Any]
     system_config: dict[str, Any]
@@ -102,6 +104,8 @@ class MainController:
         self._trace = RunTrace(max_events=int(deps.system_config.get("event_buffer_size", 300)))
         self._event_queues: set[asyncio.Queue[dict[str, Any]]] = set()
         self._run_task: asyncio.Task[None] | None = None
+        self._active_graph_id = "atr_closed_loop"
+        self._active_graph_config_path: Path | None = None
 
         self._logger_bundle = self._new_logger_bundle()
         self._state = self._new_state(mode=Mode(deps.system_config.get("default_mode", "test")))
@@ -218,6 +222,31 @@ class MainController:
         self._deps.agent_context.set_active_backend(clean_backend)
         self._state.run_metadata = self._runtime_profile()
 
+    def _log_controller_event(self, event: dict[str, Any]) -> None:
+        """Persist controller-origin Runtime IDE events to the structured run log."""
+        try:
+            payload = dict(event.get("payload", {})) if isinstance(event.get("payload"), dict) else {}
+            payload.setdefault("runtime_event_type", event.get("type", event.get("event_type", "")))
+            payload.setdefault("graph_id", event.get("graph_id", ""))
+            payload.setdefault("node_id", event.get("node_id", ""))
+            payload.setdefault("module_id", event.get("module_id", ""))
+            payload.setdefault("status", event.get("status", ""))
+            log_system_event(
+                self._logger_bundle.logger,
+                run_id=str(event.get("run_id") or self._state.run_id),
+                level=str(event.get("level") or event.get("severity") or "INFO"),
+                event_type=str(event.get("type") or event.get("event_type") or "runtime.event"),
+                message=str(event.get("message") or "Runtime event"),
+                payload=payload,
+            )
+        except Exception:
+            return
+
+    async def _broadcast_controller_event(self, event: dict[str, Any]) -> None:
+        """Persist and broadcast a controller-origin Runtime IDE event."""
+        self._log_controller_event(event)
+        await self._broadcast_event(event)
+
     async def _broadcast_event(self, event: dict[str, Any]) -> None:
         self._trace.add(event)
         stale: list[asyncio.Queue[dict[str, Any]]] = []
@@ -229,25 +258,478 @@ class MainController:
         for queue in stale:
             self._event_queues.discard(queue)
 
+    def _workspace_artifact_payloads(self, result: dict[str, Any]) -> list[dict[str, Any]]:
+        """Extract artifact-like workspace outputs for Runtime IDE lineage."""
+        artifacts: list[dict[str, Any]] = []
+
+        def walk(value: Any, path: str) -> None:
+            if isinstance(value, dict):
+                key = path.split(".")[-1]
+                has_artifact_fields = any(
+                    field in value
+                    for field in {
+                        "path",
+                        "url",
+                        "preview_url",
+                        "download_url",
+                        "stl_path",
+                        "sliced_path",
+                        "gcode_path",
+                        "log_path",
+                        "dataset_path",
+                        "checkpoint_path",
+                        "output_dir",
+                        "report_url",
+                        "contour_url",
+                    }
+                )
+                if key in {"artifact", "artifacts", "specimen_artifacts", "fem_artifacts"} or has_artifact_fields:
+                    artifacts.append({"key": path or "result", "value": value})
+                for child_key, child in value.items():
+                    walk(child, f"{path}.{child_key}" if path else str(child_key))
+            elif isinstance(value, list):
+                for index, child in enumerate(value):
+                    walk(child, f"{path}[{index}]")
+
+        walk(result, "result")
+        return artifacts
+
+
+    @staticmethod
+    def _safe_workspace_artifact_segment(value: str, fallback: str = "artifact") -> str:
+        """Return a filesystem-safe path segment for workspace artifacts."""
+        clean = re.sub(r"[^A-Za-z0-9._-]+", "_", str(value or "").strip()).strip("._-")
+        return clean[:120] or fallback
+
+    def _workspace_artifact_dir(self, workspace: str) -> Path:
+        """Return the run-local directory used for dedicated workspace artifacts."""
+        safe_workspace = self._safe_workspace_artifact_segment(workspace, "workspace")
+        output_dir = self._logger_bundle.run_dir / "workspace" / safe_workspace
+        output_dir.mkdir(parents=True, exist_ok=True)
+        return output_dir
+
+    def _workspace_artifact_relpath(self, path: Path) -> str:
+        """Return a run-relative artifact path for Runtime IDE file APIs."""
+        try:
+            return path.resolve().relative_to(self._logger_bundle.run_dir.resolve()).as_posix()
+        except ValueError:
+            return path.name
+
+    def _write_workspace_result_artifact(self, *, workspace: str, tool: str, result: dict[str, Any]) -> dict[str, Any] | None:
+        """Persist the raw workspace result as a run artifact for replay/debug evidence."""
+        try:
+            output_dir = self._workspace_artifact_dir(workspace)
+            stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+            safe_tool = self._safe_workspace_artifact_segment(tool.replace(".", "_"), "tool")
+            path = output_dir / f"{stamp}_{safe_tool}_result.json"
+            path.write_text(json.dumps(result, indent=2, ensure_ascii=True, default=str), encoding="utf-8")
+            return {
+                "key": "workspace.result",
+                "path": self._workspace_artifact_relpath(path),
+                "name": path.name,
+                "source": "workspace_result",
+                "workspace": workspace,
+                "tool": tool,
+            }
+        except Exception as exc:
+            return {
+                "key": "workspace.result",
+                "path": "",
+                "name": "",
+                "source": "workspace_result",
+                "workspace": workspace,
+                "tool": tool,
+                "error": f"{exc.__class__.__name__}: {exc}",
+            }
+
+    @staticmethod
+    def _iter_workspace_file_candidates(value: Any, path: str = "result") -> list[tuple[str, str]]:
+        """Return likely local file paths embedded in a workspace result."""
+        path_keys = {
+            "path",
+            "stl_path",
+            "sliced_path",
+            "gcode_path",
+            "log_path",
+            "dataset_path",
+            "checkpoint_path",
+            "input_path",
+            "report_path",
+            "contour_svg_path",
+            "artifact_path",
+            "result_file",
+        }
+        candidates: list[tuple[str, str]] = []
+        if isinstance(value, dict):
+            for key, child in value.items():
+                child_path = f"{path}.{key}" if path else str(key)
+                if key in path_keys and isinstance(child, str) and child.strip():
+                    candidates.append((child_path, child.strip()))
+                candidates.extend(MainController._iter_workspace_file_candidates(child, child_path))
+        elif isinstance(value, list):
+            for index, child in enumerate(value):
+                candidates.extend(MainController._iter_workspace_file_candidates(child, f"{path}[{index}]"))
+        return candidates
+
+    def _resolve_workspace_source_path(self, value: str) -> Path:
+        """Resolve an artifact source path relative to the project root when needed."""
+        source = Path(value).expanduser()
+        if source.is_absolute():
+            return source.resolve()
+        return (self._deps.run_root.parent / source).resolve()
+
+    def _copy_workspace_file_artifact(self, *, workspace: str, key: str, source_value: str) -> dict[str, Any] | None:
+        """Copy a workspace-produced file into the current run directory, or store a pointer for large files."""
+        try:
+            source = self._resolve_workspace_source_path(source_value)
+            if not source.exists() or not source.is_file():
+                return None
+            output_dir = self._workspace_artifact_dir(workspace)
+            digest = hashlib.sha1(str(source).encode("utf-8")).hexdigest()[:10]
+            safe_key = self._safe_workspace_artifact_segment(key.replace(".", "_").replace("[", "_").replace("]", ""), "file")
+            target_name = f"{safe_key}_{digest}_{source.name}"
+            target = output_dir / target_name
+            size = source.stat().st_size
+            if size <= WORKSPACE_ARTIFACT_COPY_LIMIT_BYTES:
+                if source.resolve() != target.resolve():
+                    shutil.copy2(source, target)
+                copied = True
+            else:
+                target = output_dir / f"{target_name}.pointer.json"
+                target.write_text(
+                    json.dumps(
+                        {
+                            "source_path": str(source),
+                            "source_size_bytes": size,
+                            "reason": "source file exceeded workspace artifact copy limit",
+                            "copy_limit_bytes": WORKSPACE_ARTIFACT_COPY_LIMIT_BYTES,
+                        },
+                        indent=2,
+                        ensure_ascii=True,
+                    ),
+                    encoding="utf-8",
+                )
+                copied = False
+            return {
+                "key": key,
+                "path": self._workspace_artifact_relpath(target),
+                "name": target.name,
+                "source_path": str(source),
+                "source_size_bytes": size,
+                "copied": copied,
+                "workspace": workspace,
+            }
+        except Exception as exc:
+            return {
+                "key": key,
+                "path": "",
+                "name": "",
+                "source_path": source_value,
+                "workspace": workspace,
+                "error": f"{exc.__class__.__name__}: {exc}",
+            }
+
+    @staticmethod
+    def _bo_strategies_from_result(result: dict[str, Any]) -> dict[str, Any]:
+        """Extract benchmark strategy payloads from BO workspace result shapes."""
+        if isinstance(result.get("strategies"), dict):
+            return result["strategies"]
+        benchmark = result.get("benchmark") if isinstance(result.get("benchmark"), dict) else {}
+        if isinstance(benchmark.get("strategies"), dict):
+            return benchmark["strategies"]
+        data = result.get("data") if isinstance(result.get("data"), dict) else {}
+        bo_result = data.get("bo_result") if isinstance(data.get("bo_result"), dict) else {}
+        benchmark = bo_result.get("benchmark") if isinstance(bo_result.get("benchmark"), dict) else {}
+        if isinstance(benchmark.get("strategies"), dict):
+            return benchmark["strategies"]
+        return {}
+
+    def _write_bo_plot_artifact(self, *, workspace: str, result: dict[str, Any]) -> dict[str, Any] | None:
+        """Write a compact BO progress/acquisition SVG for Runtime IDE artifact lineage."""
+        strategies = self._bo_strategies_from_result(result)
+        if not strategies:
+            return None
+        colors = ["#1d4ed8", "#047857", "#b45309", "#be123c"]
+        width, height = 760, 360
+        margin_left, margin_right, margin_top, margin_bottom = 70, 30, 48, 64
+        plot_w = width - margin_left - margin_right
+        plot_h = height - margin_top - margin_bottom
+        series: list[tuple[str, list[tuple[float, float]]]] = []
+        values: list[float] = []
+        max_step = 1.0
+        for name, payload in strategies.items():
+            if not isinstance(payload, dict):
+                continue
+            points: list[tuple[float, float]] = []
+            for item in payload.get("curve", []):
+                if not isinstance(item, dict) or item.get("best_score") is None:
+                    continue
+                try:
+                    step = float(item.get("step", len(points) + 1))
+                    score = float(item["best_score"])
+                except (TypeError, ValueError):
+                    continue
+                points.append((step, score))
+                values.append(score)
+                max_step = max(max_step, step)
+            if points:
+                series.append((str(name), points))
+        if not series or not values:
+            return None
+        min_value = min(values)
+        max_value = max(values)
+        span = max(max_value - min_value, 1e-9)
+
+        def sx(step: float) -> float:
+            return margin_left + ((step - 1.0) / max(max_step - 1.0, 1.0)) * plot_w
+
+        def sy(score: float) -> float:
+            return margin_top + (1.0 - ((score - min_value) / span)) * plot_h
+
+        paths: list[str] = []
+        legends: list[str] = []
+        for idx, (name, points) in enumerate(series):
+            color = colors[idx % len(colors)]
+            commands = " ".join(f"{'M' if point_idx == 0 else 'L'} {sx(step):.2f} {sy(score):.2f}" for point_idx, (step, score) in enumerate(points))
+            circles = "\n".join(
+                f'<circle cx="{sx(step):.2f}" cy="{sy(score):.2f}" r="4.2" fill="{color}" stroke="#ffffff" stroke-width="1.5"/>'
+                for step, score in points
+            )
+            paths.append(f'<path d="{commands}" fill="none" stroke="{color}" stroke-width="2.8"/>\n{circles}')
+            legends.append(
+                f'<g transform="translate({margin_left + idx * 150}, 326)"><rect width="14" height="14" rx="3" fill="{color}"/>'
+                f'<text x="22" y="12" font-family="Arial, sans-serif" font-size="13" fill="#334155">{name}</text></g>'
+            )
+        latest_trace = ""
+        bo_payload = strategies.get("bo") if isinstance(strategies.get("bo"), dict) else {}
+        surrogate = bo_payload.get("surrogate_trace") if isinstance(bo_payload.get("surrogate_trace"), list) else []
+        if surrogate:
+            last = surrogate[-1] if isinstance(surrogate[-1], dict) else {}
+            selected = last.get("selected") if isinstance(last.get("selected"), dict) else {}
+            latest_trace = (
+                f"latest acquisition={last.get('acquisition', '')}, "
+                f"selected={selected.get('candidate_id', '')}, "
+                f"value={selected.get('acquisition_value', '')}"
+            )
+        svg = (
+            f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">\n'
+            '<rect width="100%" height="100%" fill="#ffffff"/>\n'
+            '<text x="28" y="30" font-family="Arial, sans-serif" font-size="20" font-weight="700" fill="#0f172a">BO progress and acquisition trace</text>\n'
+            f'<text x="28" y="52" font-family="Arial, sans-serif" font-size="13" fill="#475569">{latest_trace}</text>\n'
+            f'<rect x="{margin_left}" y="{margin_top}" width="{plot_w}" height="{plot_h}" fill="#f8fafc" stroke="#cbd5e1"/>\n'
+            f'<line x1="{margin_left}" y1="{margin_top + plot_h}" x2="{margin_left + plot_w}" y2="{margin_top + plot_h}" stroke="#334155"/>\n'
+            f'<line x1="{margin_left}" y1="{margin_top}" x2="{margin_left}" y2="{margin_top + plot_h}" stroke="#334155"/>\n'
+            f'<text x="{margin_left}" y="{height - 22}" font-family="Arial, sans-serif" font-size="12" fill="#475569">iteration</text>\n'
+            f'<text x="18" y="{margin_top + 12}" font-family="Arial, sans-serif" font-size="12" fill="#475569">best score</text>\n'
+            f'<text x="{margin_left - 54}" y="{margin_top + 8}" font-family="Arial, sans-serif" font-size="11" fill="#64748b">{max_value:.3f}</text>\n'
+            f'<text x="{margin_left - 54}" y="{margin_top + plot_h}" font-family="Arial, sans-serif" font-size="11" fill="#64748b">{min_value:.3f}</text>\n'
+            f"{''.join(paths)}\n{''.join(legends)}\n"
+            "</svg>\n"
+        )
+        try:
+            output_dir = self._workspace_artifact_dir(workspace)
+            stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+            path = output_dir / f"{stamp}_bo_progress.svg"
+            path.write_text(svg, encoding="utf-8")
+            return {
+                "key": "workspace.bo_plot",
+                "path": self._workspace_artifact_relpath(path),
+                "name": path.name,
+                "source": "bo_workspace_plot",
+                "workspace": workspace,
+            }
+        except Exception as exc:
+            return {
+                "key": "workspace.bo_plot",
+                "path": "",
+                "name": "",
+                "source": "bo_workspace_plot",
+                "workspace": workspace,
+                "error": f"{exc.__class__.__name__}: {exc}",
+            }
+
+    def _register_workspace_artifacts(self, *, workspace: str, tool: str, result: dict[str, Any]) -> list[dict[str, Any]]:
+        """Materialize workspace evidence under the active run directory."""
+        records: list[dict[str, Any]] = []
+        result_record = self._write_workspace_result_artifact(workspace=workspace, tool=tool, result=result)
+        if result_record:
+            records.append(result_record)
+        if workspace == "bo":
+            bo_plot = self._write_bo_plot_artifact(workspace=workspace, result=result)
+            if bo_plot:
+                records.append(bo_plot)
+        seen_sources: set[str] = set()
+        for key, value in self._iter_workspace_file_candidates(result):
+            source_path = str(value)
+            if source_path in seen_sources:
+                continue
+            seen_sources.add(source_path)
+            record = self._copy_workspace_file_artifact(workspace=workspace, key=key, source_value=source_path)
+            if record:
+                records.append(record)
+        return records
+
+    async def emit_workspace_result(
+        self,
+        *,
+        workspace: str,
+        tool: str,
+        result: dict[str, Any],
+        stage: Stage | None = None,
+        module_id: str = "",
+        agent: str = "",
+        workflow: str = "",
+        node_event: bool = False,
+        event_type: str = "workspace_tool_result",
+    ) -> None:
+        """Broadcast dedicated workspace actions using the Runtime IDE event schema."""
+        if not isinstance(result, dict):
+            return
+        ok = bool(result.get("ok", False))
+        status = str(result.get("status") or ("done" if ok else "error"))
+        node_id = stage.value if isinstance(stage, Stage) else workspace
+        resolved_module = module_id or node_id
+        module_runtime = {
+            "module_id": resolved_module,
+            "handler": f"agent.{agent}" if agent else "",
+            "workspace": workspace,
+            "workflow": workflow or str(result.get("workflow") or result.get("tool") or tool),
+            "tool": tool,
+            "direct_workspace_api": True,
+        }
+        base_payload = {
+            "workspace": workspace,
+            "tool": tool,
+            "workflow": workflow or result.get("workflow", ""),
+            "result": result,
+            "node_id": node_id,
+            "module_id": resolved_module,
+            "agent": agent,
+            "status": status,
+            "module_runtime": module_runtime,
+        }
+        registered_artifacts = self._register_workspace_artifacts(workspace=workspace, tool=tool, result=result)
+        if registered_artifacts:
+            base_payload["runtime_artifacts"] = registered_artifacts
+        level = "INFO" if ok else "ERROR"
+        severity = level.lower()
+        runtime_type = "tool.completed" if ok else "tool.failed"
+        await self._broadcast_controller_event(
+            {
+                "event_id": make_event_id(),
+                "run_id": self._state.run_id,
+                "experiment_id": self._state.experiment_id,
+                "event_type": event_type,
+                "type": runtime_type,
+                "severity": severity,
+                "level": level,
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "graph_id": "atr_closed_loop",
+                "node_id": node_id,
+                "module_id": resolved_module,
+                "agent": agent,
+                "status": status,
+                "message": f"{workspace} workspace {tool} {status}",
+                "payload": base_payload,
+                "state": self._state.model_dump(mode="json"),
+            }
+        )
+        if node_event:
+            await self._broadcast_controller_event(
+                {
+                    "event_id": make_event_id(),
+                    "run_id": self._state.run_id,
+                    "experiment_id": self._state.experiment_id,
+                    "event_type": "workspace_node_result",
+                    "type": "node.completed" if ok else "node.failed",
+                    "severity": severity,
+                    "level": level,
+                    "ts": datetime.now(timezone.utc).isoformat(),
+                    "graph_id": "atr_closed_loop",
+                    "node_id": node_id,
+                    "module_id": resolved_module,
+                    "agent": agent,
+                    "status": status,
+                    "message": f"{agent or workspace} workspace node {status}",
+                    "payload": base_payload,
+                    "state": self._state.model_dump(mode="json"),
+                }
+            )
+        for artifact in registered_artifacts:
+            if not artifact.get("path"):
+                continue
+            await self._broadcast_controller_event(
+                {
+                    "event_id": make_event_id(),
+                    "run_id": self._state.run_id,
+                    "experiment_id": self._state.experiment_id,
+                    "event_type": "workspace_artifact_file_created",
+                    "type": "artifact.created",
+                    "severity": "info",
+                    "level": "INFO",
+                    "ts": datetime.now(timezone.utc).isoformat(),
+                    "graph_id": "atr_closed_loop",
+                    "node_id": node_id,
+                    "module_id": resolved_module,
+                    "agent": agent,
+                    "status": "done",
+                    "message": f"{workspace} workspace artifact file: {artifact['path']}",
+                    "payload": {**base_payload, "artifact": artifact},
+                    "state": self._state.model_dump(mode="json"),
+                }
+            )
+        for artifact in self._workspace_artifact_payloads(result):
+            await self._broadcast_controller_event(
+                {
+                    "event_id": make_event_id(),
+                    "run_id": self._state.run_id,
+                    "experiment_id": self._state.experiment_id,
+                    "event_type": "workspace_artifact_created",
+                    "type": "artifact.created",
+                    "severity": "info",
+                    "level": "INFO",
+                    "ts": datetime.now(timezone.utc).isoformat(),
+                    "graph_id": "atr_closed_loop",
+                    "node_id": node_id,
+                    "module_id": resolved_module,
+                    "agent": agent,
+                    "status": "done",
+                    "message": f"{workspace} workspace artifact: {artifact['key']}",
+                    "payload": {**base_payload, "artifact": artifact},
+                    "state": self._state.model_dump(mode="json"),
+                }
+            )
+        events = self._state.run_metadata.setdefault("workspace_runtime_events", [])
+        if isinstance(events, list):
+            events.append(
+                {
+                    "workspace": workspace,
+                    "tool": tool,
+                    "node_id": node_id,
+                    "module_id": resolved_module,
+                    "agent": agent,
+                    "status": status,
+                    "ts": datetime.now(timezone.utc).isoformat(),
+                }
+            )
+            del events[:-50]
+
     async def emit_lerobot_result(self, result: dict[str, Any]) -> None:
         """Broadcast a LeRobot GUI/tool result and stream its steps into Live GUI when active."""
         if not isinstance(result, dict):
             return
         tool = str(result.get("tool") or "lerobot")
         status = str(result.get("status") or ("ok" if result.get("ok") else "failed"))
-        level = "INFO" if bool(result.get("ok", False)) else "ERROR"
-        event_id_seed = f"{tool}-{len(self._trace.snapshot()) + 1}"
-        await self._broadcast_event(
-            {
-                "event_id": f"evt-lerobot-{hashlib.sha1(event_id_seed.encode()).hexdigest()[:10]}",
-                "run_id": self._state.run_id,
-                "experiment_id": self._state.experiment_id,
-                "event_type": "lerobot_step",
-                "level": level,
-                "message": f"{tool} {status}",
-                "payload": {"result": result},
-                "state": self._state.model_dump(mode="json"),
-            }
+        await self.emit_workspace_result(
+            workspace="lerobot",
+            tool=tool,
+            result=result,
+            stage=Stage.MANIPULATION,
+            module_id="manipulation",
+            agent="manipulation_agent",
+            workflow=str(result.get("workflow") or tool),
+            node_event=tool.startswith("manipulation_agent."),
+            event_type="lerobot_step",
         )
         for item in result.get("step_trace", []):
             if not isinstance(item, dict):
@@ -281,6 +763,92 @@ class MainController:
     def recent_events(self) -> list[dict[str, Any]]:
         """Return buffered recent events."""
         return self._trace.snapshot()
+
+    async def emit_runtime_event(
+        self,
+        *,
+        event_type: str,
+        message: str,
+        payload: dict[str, Any] | None = None,
+        level: str = "INFO",
+        run_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Emit a standard Runtime IDE event through the shared event bus."""
+        payload = dict(payload or {})
+        ts = datetime.now(timezone.utc).isoformat()
+        state_json = self._state.model_dump(mode="json")
+        event = {
+            "event_id": make_event_id(),
+            "run_id": run_id or self._state.run_id,
+            "experiment_id": self._state.experiment_id,
+            "timestamp_stage": state_json.get("stage", ""),
+            "event_type": event_type,
+            "level": level,
+            "message": message,
+            "payload": payload,
+            "state": state_json,
+            "ts": ts,
+            "type": event_type,
+            "severity": level.lower(),
+            "graph_id": payload.get("graph_id", "atr_closed_loop"),
+            "node_id": payload.get("node_id", payload.get("stage", state_json.get("stage", ""))),
+            "module_id": payload.get("module_id", ""),
+            "agent": payload.get("agent", ""),
+            "status": payload.get("status", "ok" if level != "ERROR" else "failed"),
+        }
+        await self._broadcast_controller_event(event)
+        return event
+
+    def apply_runtime_approval_resolution(
+        self,
+        *,
+        approval_id: str,
+        decision: str,
+        operator: str = "operator",
+        note: str = "",
+    ) -> dict[str, Any]:
+        """Apply a Runtime IDE approval decision to the active OrchestratorState."""
+        approvals = self._state.run_metadata.setdefault("runtime_approvals", {})
+        if not isinstance(approvals, dict):
+            approvals = {}
+            self._state.run_metadata["runtime_approvals"] = approvals
+        matched: dict[str, Any] | None = None
+        matched_key = ""
+        for key, item in approvals.items():
+            if isinstance(item, dict) and str(item.get("approval_id") or "") == approval_id:
+                matched = item
+                matched_key = str(key)
+                break
+        if matched is None:
+            return {"matched": False, "approval_id": approval_id, "decision": decision}
+
+        normalized_decision = decision if decision in {"approved", "rejected", "cancelled"} else "cancelled"
+        matched.update(
+            {
+                "status": normalized_decision,
+                "decision": normalized_decision,
+                "operator": operator,
+                "note": note,
+                "resolved_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+        self._state.run_metadata["runtime_approvals"][matched_key] = matched
+        if normalized_decision == "approved":
+            self._state.is_paused = False
+            if self._state.run_metadata.get("approval_blocked_stage", {}).get("approval_id") == approval_id:
+                self._state.run_metadata.pop("approval_blocked_stage", None)
+        else:
+            self._state.is_paused = False
+            self._state.stage = Stage.ERROR
+            self._state.run_metadata["approval_rejection"] = {
+                "approval_id": approval_id,
+                "decision": normalized_decision,
+                "operator": operator,
+                "note": note,
+                "gate_key": matched_key,
+            }
+        return {"matched": True, "approval_id": approval_id, "decision": normalized_decision, "gate_key": matched_key}
+
 
     async def switch_inference_backend(self, backend: str) -> dict[str, Any]:
         """Switch active inference backend for future agent/model calls."""
@@ -390,7 +958,7 @@ class MainController:
 
     async def _emit_control_event(self, event_type: str, message: str) -> None:
         """Emit control-plane events when run loop task is cancelled externally."""
-        await self._broadcast_event(
+        await self._broadcast_controller_event(
             {
                 "event_id": f"evt-control-{event_type}",
                 "run_id": self._state.run_id,
@@ -409,11 +977,11 @@ class MainController:
             agent_registry=self._deps.agent_registry,
             orchestrator_agent_name=self._deps.orchestrator_agent_name,
             ctx=self._deps.agent_context,
-            graph=self._deps.graph,
             logger=self._logger_bundle.logger,
             max_retry_per_stage=int(self._deps.system_config.get("max_retry_per_stage", 2)),
             interval_seconds=float(self._deps.system_config.get("loop_interval_seconds", 1.25)),
             on_event=self._broadcast_event,
+            graph_config_path=self._active_graph_config_path,
         )
         try:
             await loop.run()
@@ -458,6 +1026,8 @@ class MainController:
         backend: str | None = None,
         fault: str = "none",
         fault_stage: str = "",
+        graph_id: str = "atr_closed_loop",
+        graph_config_path: str | Path | None = None,
     ) -> dict[str, Any]:
         """Start a new run if idle."""
         if self._run_task and not self._run_task.done():
@@ -469,12 +1039,32 @@ class MainController:
             return {"ok": False, "message": str(exc)}
         self._cancel_pending_vllm_transition()
 
+        self._active_graph_id = graph_id or "atr_closed_loop"
+        self._active_graph_config_path = Path(graph_config_path) if graph_config_path else None
         self._trace = RunTrace(max_events=int(self._deps.system_config.get("event_buffer_size", 300)))
         self._logger_bundle = self._new_logger_bundle()
         self._state = self._new_state(mode=mode)
+        self._state.run_metadata["runtime_graph"] = {
+            "graph_id": self._active_graph_id,
+            "config_path": str(self._active_graph_config_path or ""),
+            "primary": self._active_graph_id == "atr_closed_loop",
+        }
         if goal:
             self._state.active_goal = goal
         self._state.fault_injection = {"fault": fault, "stage": fault_stage}
+
+        await self.emit_runtime_event(
+            event_type="run.created",
+            message=f"Run created in mode={mode.value}",
+            payload={
+                "graph_id": self._active_graph_id,
+                "node_id": self._state.stage.value,
+                "status": "created",
+                "mode": mode.value,
+                "goal": self._state.active_goal,
+                "graph_config_path": str(self._active_graph_config_path or ""),
+            },
+        )
 
         if mode == Mode.REPLAY:
             self._run_task = asyncio.create_task(self._run_replay())
@@ -484,6 +1074,8 @@ class MainController:
             "ok": True,
             "message": f"Run started in mode={mode.value}",
             "run_id": self._state.run_id,
+            "graph_id": self._active_graph_id,
+            "graph_config_path": str(self._active_graph_config_path or ""),
             "startup_vllm": {"enabled": False, "manual_loading_required": True},
         }
 
@@ -926,7 +1518,7 @@ class MainController:
             "If operator_message already contains one of those choices, set constraints.printer_test_path accordingly so Specimen Making Agent can continue without asking again.\n"
             "Do not add runtime-safety disclaimers; focus on generated values and handoff.\n"
             "Do not use LaTeX math notation. Use plain text arrows like '->' for routes.\n"
-            "Runtime pipeline after DesignAgent handoff: DesignAgent -> Specimen Making Agent -> Vision Agent -> Manipulation Agent -> Lab Equipment Agent -> Analysis Agent -> Knowledge Agent -> Guardian Agent.\n"
+            f"Runtime pipeline after DesignAgent handoff: {self._active_graph_stage_route_text(Stage.DESIGN, stop_at=Stage.GUARDIAN)}.\n"
             "Respond in concise Korean and include a fenced JSON block at the end with this schema:\n"
             "```json\n"
             "{\n"
@@ -973,13 +1565,12 @@ class MainController:
             f"default_constraints={constraints}\n"
         )
 
-    @staticmethod
-    def _live_runtime_contract_context() -> str:
+    def _live_runtime_contract_context(self) -> str:
         """Compact docs-derived contract for Live GUI prompts."""
+        route = self._active_graph_stage_route_text(Stage.DESIGN, stop_at=Stage.GUARDIAN)
         return (
-            "Project contract: Orchestrator routes existing stages only. Stage order is "
-            "Design Agent -> Specimen Making Agent -> Vision Agent -> Manipulation Agent -> "
-            "Lab Equipment Agent -> Analysis Agent -> Knowledge Agent -> Guardian Agent. "
+            "Project contract: Orchestrator routes existing graph-configured stages only. "
+            f"Active graph stage order is {route}. "
             "Design Agent chooses metamaterial parameters; deterministic geometry tools create STL; "
             "Specimen Making Agent owns printer.prepare and printer/ejection preparation. "
             "Validated live printer path is Prusa MK4S -> PrusaSlicer -> PrusaLink Digest auth -> USB storage -> upload/start. "
@@ -1853,6 +2444,33 @@ class MainController:
             f"- BO recommendation applied: {bo_note}"
         )
 
+    async def _run_planning_langgraph_stage(
+        self,
+        stage: Stage,
+        *,
+        emit_runtime_events: bool = True,
+        run_orchestrator_before_design: bool = False,
+    ) -> None:
+        """Execute one Live GUI planning stage through the configured LangGraph runtime."""
+        loop = RunLoop(
+            state=self._state,
+            agent_registry=self._deps.agent_registry,
+            orchestrator_agent_name=self._deps.orchestrator_agent_name,
+            ctx=self._deps.agent_context,
+            logger=self._logger_bundle.logger,
+            max_retry_per_stage=int(self._deps.system_config.get("max_retry_per_stage", 2)),
+            interval_seconds=0.0,
+            on_event=self._broadcast_event if emit_runtime_events else None,
+            graph_config_path=self._active_graph_config_path,
+            run_orchestrator_before_design=run_orchestrator_before_design,
+        )
+        self._state.stage = stage
+        await loop.step()
+        if self._state.is_paused:
+            raise RuntimeError(f"Planning LangGraph stage={stage.value} paused for approval.")
+        if self._state.stage == Stage.ERROR:
+            raise RuntimeError(f"Planning LangGraph stage={stage.value} failed; see runtime events for details.")
+
     async def _run_planning_design_stage(
         self,
         *,
@@ -1881,14 +2499,14 @@ class MainController:
             **{key: value for key, value in effective_constraints.items() if key in {"geometry_type", "specimen_size_mm"}},
             "constraints": {**previous_constraints, **effective_constraints},
         }
-        design_agent = self._deps.agent_registry.get("design_agent")
-        result = await design_agent.run(self._state, self._deps.agent_context)
-        if not result.success:
-            raise RuntimeError(f"DesignAgent failed: {result.summary}")
-        base_spec = dict(result.data.get("experiment_spec", {}))
+        await self._run_planning_langgraph_stage(
+            Stage.DESIGN,
+            run_orchestrator_before_design=False,
+        )
+        base_spec = dict(self._state.current_experiment_spec or {})
         if not base_spec:
             raise RuntimeError("DesignAgent did not return experiment_spec.")
-        design_model = result.data.get("experiment_spec", {}).get("model_note", "design_agent")
+        design_model = base_spec.get("model_note", "design_agent")
         experiment_spec = self._build_planning_spec(base_spec=base_spec, constraints=effective_constraints)
         experiment_spec = self._apply_test_cycle_surface_cap_policy(
             experiment_spec,
@@ -1940,17 +2558,14 @@ class MainController:
             )
         self._state.stage = Stage.SPECIMEN
         self._state.current_experiment_spec = experiment_spec
-        specimen_agent = self._deps.agent_registry.get("specimen_agent")
-        specimen_result = await specimen_agent.run(self._state, self._deps.agent_context)
-        if not specimen_result.success:
-            raise RuntimeError(f"SpecimenMakingAgent failed: {specimen_result.summary}")
-        specimen_payload = specimen_result.data.get("specimen_result", {})
+        await self._run_planning_langgraph_stage(Stage.SPECIMEN)
+        specimen_payload = self._state.run_metadata.get("specimen_result", {})
         if not isinstance(specimen_payload, dict):
             raise RuntimeError("SpecimenMakingAgent did not return specimen_result.")
         if specimen_payload.get("requires_operator_input"):
+            self._state.stage = Stage.SPECIMEN
             await self._record_pending_specimen_input(specimen_payload)
             return {"pending": True, "specimen": specimen_payload}
-        self._merge_planning_agent_data(Stage.SPECIMEN, specimen_result.data)
         specimen_artifacts = self._write_planning_artifacts(experiment_spec, specimen_result=specimen_payload)
         await self._append_planning_message(
             {
@@ -2553,17 +3168,139 @@ class MainController:
             Stage.GUARDIAN: "guardian",
         }.get(stage, "system")
 
-    @staticmethod
-    def _planning_stage_handoff_text(previous: str, stage: Stage) -> str:
-        labels = {
+    def _active_graph_config_for_labels(self):
+        """Compatibility wrapper for label lookups."""
+        return self._active_graph_config()
+
+    def _active_graph_config(self):
+        """Load the active runtime graph config used by Live GUI planning."""
+        path = self._active_graph_config_path or (Path(__file__).resolve().parent.parent / "graphs" / "configs" / "atr_closed_loop.yaml")
+        try:
+            return load_graph_config(path)
+        except Exception:
+            return None
+
+    def _graph_node_for_stage(self, stage: Stage):
+        """Return the graph node bound to a runtime stage, if present."""
+        config = self._active_graph_config()
+        if config is None:
+            return None
+        for node in config.nodes:
+            if node.stage == stage.value:
+                return node
+        return None
+
+    def _next_configured_stage_after(self, stage: Stage, *, fallback: Stage | None = None) -> Stage | None:
+        """Resolve the next stage from the active graph transitions."""
+        config = self._active_graph_config()
+        if config is not None:
+            try:
+                return Stage(config.next_stage(stage.value))
+            except ValueError:
+                return fallback
+        return fallback
+
+    def _active_graph_stage_sequence(
+        self,
+        start: Stage,
+        *,
+        stop_at: Stage | None = None,
+        include_start: bool = True,
+        max_steps: int = 64,
+    ) -> list[Stage]:
+        """Follow active graph transitions and return a bounded stage sequence."""
+        config = self._active_graph_config()
+        if config is None:
+            fallback = [
+                Stage.DESIGN,
+                Stage.SPECIMEN,
+                Stage.VISION,
+                Stage.MANIPULATION,
+                Stage.EQUIPMENT,
+                Stage.ANALYSIS,
+                Stage.KNOWLEDGE,
+                Stage.BO,
+                Stage.GUARDIAN,
+            ]
+            if start in fallback:
+                fallback = fallback[fallback.index(start):]
+            if stop_at in fallback:
+                fallback = fallback[: fallback.index(stop_at) + 1]
+            return fallback if include_start else fallback[1:]
+
+        sequence: list[Stage] = []
+        current = start
+        visited_edges: set[tuple[str, str]] = set()
+        for index in range(max_steps):
+            if include_start or index > 0:
+                sequence.append(current)
+            if stop_at is not None and current == stop_at:
+                break
+            if current in {Stage.COMPLETE, Stage.ERROR}:
+                break
+            try:
+                next_stage = Stage(config.next_stage(current.value))
+            except ValueError:
+                break
+            edge = (current.value, next_stage.value)
+            if edge in visited_edges:
+                break
+            visited_edges.add(edge)
+            current = next_stage
+        return sequence
+
+    def _active_graph_stage_route_text(self, start: Stage, *, stop_at: Stage | None = None) -> str:
+        """Return a user-facing route string from the active graph config."""
+        stages = self._active_graph_stage_sequence(start, stop_at=stop_at, include_start=True)
+        if not stages:
+            stages = [start]
+        return " -> ".join(self._planning_stage_label(stage) for stage in stages)
+
+    def _planning_tail_start_stage(self) -> Stage | None:
+        """Return the configured stage after Specimen for Live GUI planning tail."""
+        return self._next_configured_stage_after(Stage.SPECIMEN, fallback=Stage.VISION)
+
+    def _planning_tail_stages(self, start: Stage) -> set[Stage]:
+        """Return active graph stages handled by the post-Specimen planning tail."""
+        stages = self._active_graph_stage_sequence(start, stop_at=Stage.GUARDIAN, include_start=True)
+        return {stage for stage in stages if stage not in {Stage.IDLE, Stage.DESIGN, Stage.SPECIMEN, Stage.COMPLETE, Stage.ERROR}}
+
+    def _planning_stage_label(self, stage: Stage, module_runtime: dict[str, Any] | None = None) -> str:
+        """Resolve a user-facing stage label from module/graph config, then fallback to display text."""
+        module_runtime = module_runtime if isinstance(module_runtime, dict) else {}
+        label = str(module_runtime.get("label") or "").strip()
+        if label:
+            return label
+        config = self._active_graph_config_for_labels()
+        if config is not None:
+            for node in config.nodes:
+                if node.stage == stage.value and node.label:
+                    return node.label
+        return {
             Stage.VISION: "Vision Agent",
             Stage.MANIPULATION: "Manipulation Agent",
             Stage.EQUIPMENT: "Lab Equipment Agent",
             Stage.ANALYSIS: "Analysis Agent",
             Stage.KNOWLEDGE: "Knowledge Agent",
+            Stage.BO: "BO Agent",
             Stage.GUARDIAN: "Guardian Agent",
-        }
-        return f"SYSTEM_EVENT: HANDOFF\nfrom={previous}\nto={labels.get(stage, stage.value)}\nstatus=started"
+        }.get(stage, stage.value)
+
+    @staticmethod
+    def _planning_agent_from_payload(payload: dict[str, Any]) -> str:
+        """Resolve event agent identity from runtime event/module config only."""
+        agent = str(payload.get("agent") or "").strip()
+        if agent:
+            return agent
+        module_runtime = payload.get("module_runtime") if isinstance(payload.get("module_runtime"), dict) else {}
+        for key in ("effective_handler", "handler"):
+            handler = str(module_runtime.get(key) or "").strip()
+            if handler.startswith("agent."):
+                return handler.removeprefix("agent.")
+        return ""
+
+    def _planning_stage_handoff_text(self, previous: str, stage: Stage, module_runtime: dict[str, Any] | None = None) -> str:
+        return f"SYSTEM_EVENT: HANDOFF\nfrom={previous}\nto={self._planning_stage_label(stage, module_runtime)}\nstatus=started"
 
     def _format_planning_stage_message(self, stage: Stage, data: dict[str, Any], summary: str) -> str:
         if stage == Stage.VISION:
@@ -2665,36 +3402,6 @@ class MainController:
             f"- knowledge_summary: {self._runtime_value(knowledge.get('memory_summary'))}"
         )
 
-    async def _run_planning_bo_agent(self, previous_label: str, cycle_index: int) -> str:
-        await self._append_planning_message(
-            {
-                "role": "system",
-                "content": f"SYSTEM_EVENT: HANDOFF\nfrom={previous_label}\nto=BOAgent\ncycle={cycle_index}\nstatus=started",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "ok": True,
-            },
-            event_type="planning_handoff",
-            message="Planning handoff to BOAgent started.",
-        )
-        bo_agent = self._deps.agent_registry.get("bo_agent")
-        result = await bo_agent.run(self._state, self._deps.agent_context)
-        if not result.success:
-            raise RuntimeError(f"bo_agent failed: {result.summary}")
-        self._merge_planning_agent_data(Stage.KNOWLEDGE, result.data)
-        await self._append_planning_message(
-            {
-                "role": "bo_ai",
-                "content": self._format_planning_bo_message(result.data),
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "model": "bo_agent",
-                "ok": True,
-                "bo_result": result.data.get("bo_result", {}),
-            },
-            event_type="planning_bo_result",
-            message="BOAgent completed next design recommendation.",
-        )
-        return "BO Agent"
-
     async def _run_planning_loop_tail(
         self,
         experiment_spec: dict[str, Any],
@@ -2702,91 +3409,160 @@ class MainController:
         cycle_index: int = 1,
         total_cycles: int = 1,
     ) -> dict[str, Any]:
-        """Continue Live GUI handoff through the runtime loop tail after Specimen."""
-        stage_sequence = (
-            Stage.VISION,
-            Stage.MANIPULATION,
-            Stage.EQUIPMENT,
-            Stage.ANALYSIS,
-            Stage.KNOWLEDGE,
-            Stage.GUARDIAN,
-        )
-        previous_label = "Specimen Making Agent"
+        """Continue Live GUI handoff through the configured LangGraph runtime after Specimen."""
         original_mode = self._state.mode
         effective_mode = Mode.TEST if self._is_planning_test_spec(experiment_spec) else original_mode
         guardian_payload: dict[str, Any] = {}
-        try:
-            self._state.mode = effective_mode
-            for stage in stage_sequence:
-                agent_name = stage_to_agent(stage)
-                if not agent_name:
-                    raise RuntimeError(f"No agent routing for stage={stage.value}")
-                self._state.stage = stage
+        previous_label = self._planning_stage_label(Stage.SPECIMEN)
+        tail_start = self._planning_tail_start_stage()
+        if tail_start is None or tail_start in {Stage.COMPLETE, Stage.ERROR}:
+            self._state.stage = Stage.COMPLETE if tail_start != Stage.ERROR else Stage.ERROR
+            return {
+                "ok": tail_start != Stage.ERROR,
+                "decision": "complete" if tail_start != Stage.ERROR else "error",
+                "message": "Planning graph has no post-Specimen tail to execute.",
+            }
+        planning_stages = self._planning_tail_stages(tail_start)
+        if not planning_stages:
+            planning_stages = {tail_start}
+
+        async def planning_runtime_event(event: dict[str, Any]) -> None:
+            nonlocal previous_label, guardian_payload
+            await self._broadcast_event(event)
+            event_type = str(event.get("type") or event.get("event_type") or "")
+            payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+            raw_stage = str(payload.get("node_id") or event.get("node_id") or "")
+            try:
+                stage = Stage(raw_stage)
+            except ValueError:
+                return
+            if stage not in planning_stages:
+                return
+
+            module_runtime = payload.get("module_runtime") if isinstance(payload.get("module_runtime"), dict) else {}
+            agent_name = self._planning_agent_from_payload(payload)
+            if event_type == "node.started":
                 await self._append_planning_message(
                     {
                         "role": "system",
-                        "content": self._planning_stage_handoff_text(previous_label, stage),
+                        "content": self._planning_stage_handoff_text(previous_label, stage, module_runtime),
                         "timestamp": datetime.now(timezone.utc).isoformat(),
                         "ok": True,
+                        "graph_id": event.get("graph_id", ""),
+                        "module_runtime": module_runtime,
                     },
                     event_type="planning_handoff",
-                    message=f"Planning handoff to {agent_name} started.",
+                    message=f"Planning LangGraph handoff to {agent_name or stage.value} started.",
                 )
-                agent = self._deps.agent_registry.get(agent_name)
-                result = await agent.run(self._state, self._deps.agent_context)
-                if not result.success:
-                    raise RuntimeError(f"{agent_name} failed: {result.summary}")
-                ok, validation_msg = validate_agent_output(stage.value, result.data)
-                if not ok:
-                    raise ValueError(validation_msg)
-                self._merge_planning_agent_data(stage, result.data)
-                content = self._format_planning_stage_message(stage, result.data, result.summary)
-                message_payload: dict[str, Any] = {
-                    "role": self._planning_stage_role(stage),
-                    "content": content,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                    "model": agent_name,
-                    "ok": True,
-                    stage.value: result.data.get(stage.value, result.data),
-                }
-                if stage == Stage.ANALYSIS:
-                    fem_artifacts = self._write_planning_fem_artifacts(experiment_spec, result.data)
-                    if fem_artifacts:
-                        message_payload["fem_artifacts"] = fem_artifacts
-                        message_payload["artifacts"] = {
-                            "preview_url": fem_artifacts.get("contour_url", ""),
-                            "experiment_spec_url": fem_artifacts.get("report_url", ""),
-                        }
-                        message_payload["experiment_spec"] = experiment_spec
+                return
+
+            if event_type == "node.failed":
                 await self._append_planning_message(
-                    message_payload,
-                    event_type=f"planning_{stage.value}_result",
-                    message=f"{agent_name} completed.",
+                    {
+                        "role": "system",
+                        "content": (
+                            "SYSTEM_EVENT: NODE_FAILED\n"
+                            f"stage={stage.value}\n"
+                            f"agent={agent_name or 'unknown'}\n"
+                            f"error={payload.get('error') or event.get('message') or 'unknown'}"
+                        ),
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "ok": False,
+                        "graph_id": event.get("graph_id", ""),
+                        "module_runtime": module_runtime,
+                    },
+                    event_type="planning_handoff",
+                    level="ERROR",
+                    message=f"Planning LangGraph node failed at {stage.value}.",
                 )
-                previous_label = {
-                    Stage.VISION: "Vision Agent",
-                    Stage.MANIPULATION: "Manipulation Agent",
-                    Stage.EQUIPMENT: "Lab Equipment Agent",
-                    Stage.ANALYSIS: "Analysis Agent",
-                    Stage.KNOWLEDGE: "Knowledge Agent",
-                    Stage.GUARDIAN: "Guardian Agent",
-                }[stage]
-                if stage == Stage.KNOWLEDGE:
-                    previous_label = await self._run_planning_bo_agent(previous_label, cycle_index)
-                if stage == Stage.GUARDIAN:
-                    guardian_payload = (
-                        result.data.get("guardian", {})
-                        if isinstance(result.data.get("guardian", {}), dict)
-                        else {}
-                    )
-                    self._state.loop_count += 1
-            decision = str(guardian_payload.get("decision", "continue")).strip() or "continue"
-            planned_final_stop = (
-                decision == "stop"
-                and effective_mode == Mode.TEST
-                and cycle_index >= total_cycles
+                return
+
+            if event_type != "node.completed":
+                return
+            data = payload.get("result") if isinstance(payload.get("result"), dict) else {}
+            if not data:
+                return
+
+            if stage == Stage.BO:
+                await self._append_planning_message(
+                    {
+                        "role": "bo_ai",
+                        "content": self._format_planning_bo_message(data),
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "model": agent_name or "bo_agent",
+                        "ok": True,
+                        "bo_result": data.get("bo_result", {}),
+                        "graph_id": event.get("graph_id", ""),
+                        "module_runtime": module_runtime,
+                    },
+                    event_type="planning_bo_result",
+                    message="BOAgent completed next design recommendation through LangGraph runtime.",
+                )
+                previous_label = self._planning_stage_label(stage, module_runtime)
+                return
+
+            content = self._format_planning_stage_message(stage, data, str(event.get("message") or ""))
+            message_payload: dict[str, Any] = {
+                "role": self._planning_stage_role(stage),
+                "content": content,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "model": agent_name or stage.value,
+                "ok": True,
+                "graph_id": event.get("graph_id", ""),
+                "module_runtime": module_runtime,
+                stage.value: data.get(stage.value, data),
+            }
+            if stage == Stage.ANALYSIS:
+                fem_artifacts = self._write_planning_fem_artifacts(experiment_spec, data)
+                if fem_artifacts:
+                    message_payload["fem_artifacts"] = fem_artifacts
+                    message_payload["artifacts"] = {
+                        "preview_url": fem_artifacts.get("contour_url", ""),
+                        "experiment_spec_url": fem_artifacts.get("report_url", ""),
+                    }
+                    message_payload["experiment_spec"] = experiment_spec
+            if stage == Stage.GUARDIAN:
+                guardian_payload = data.get("guardian", {}) if isinstance(data.get("guardian", {}), dict) else {}
+            await self._append_planning_message(
+                message_payload,
+                event_type=f"planning_{stage.value}_result",
+                message=f"{agent_name or stage.value} completed through LangGraph runtime.",
             )
-            if decision == "error":
+            previous_label = self._planning_stage_label(stage, module_runtime)
+
+        try:
+            self._state.mode = effective_mode
+            self._state.current_experiment_spec = experiment_spec
+            self._state.stage = tail_start
+            loop = RunLoop(
+                state=self._state,
+                agent_registry=self._deps.agent_registry,
+                orchestrator_agent_name=self._deps.orchestrator_agent_name,
+                ctx=self._deps.agent_context,
+                logger=self._logger_bundle.logger,
+                max_retry_per_stage=int(self._deps.system_config.get("max_retry_per_stage", 2)),
+                interval_seconds=0.0,
+                graph_config_path=self._active_graph_config_path,
+                on_event=planning_runtime_event,
+            )
+            max_steps = max(16, len(planning_stages) * 4)
+            for _ in range(max_steps):
+                before_stage = self._state.stage
+                await loop.step()
+                if self._state.is_paused:
+                    return {
+                        "ok": True,
+                        "decision": "pending_operator_approval",
+                        "message": "Planning LangGraph tail is waiting for runtime approval.",
+                    }
+                if (Stage.GUARDIAN in planning_stages and before_stage == Stage.GUARDIAN) or self._state.stage in {Stage.DESIGN, Stage.COMPLETE, Stage.ERROR}:
+                    break
+            else:
+                raise RuntimeError("Planning LangGraph tail exceeded max_steps without reaching Guardian/terminal stage.")
+
+            decision = str(guardian_payload.get("decision", "continue")).strip() or "continue"
+            planned_final_stop = decision == "stop" and effective_mode == Mode.TEST and cycle_index >= total_cycles
+            if self._state.stage == Stage.ERROR or decision == "error":
                 self._state.stage = Stage.ERROR
                 await self._append_planning_message(
                     {
@@ -2796,7 +3572,7 @@ class MainController:
                         "ok": False,
                     },
                     event_type="planning_handoff",
-                    message="Planning loop tail halted by Guardian decision.",
+                    message="Planning LangGraph tail halted by Guardian decision.",
                     level="ERROR",
                 )
             elif planned_final_stop or cycle_index >= total_cycles:
@@ -2809,7 +3585,7 @@ class MainController:
                         "ok": True,
                     },
                     event_type="planning_handoff",
-                    message="Planning loop tail completed.",
+                    message="Planning LangGraph tail completed.",
                 )
             elif decision == "stop":
                 self._state.stage = Stage.COMPLETE
@@ -2821,7 +3597,7 @@ class MainController:
                         "ok": True,
                     },
                     event_type="planning_handoff",
-                    message="Planning loop tail halted by Guardian decision.",
+                    message="Planning LangGraph tail halted by Guardian decision.",
                     level="WARNING",
                 )
             else:
@@ -2834,12 +3610,12 @@ class MainController:
                         "ok": True,
                     },
                     event_type="planning_handoff",
-                    message="Planning cycle completed; next design cycle queued.",
+                    message="Planning LangGraph cycle completed; next design cycle queued.",
                 )
             return {
-                "ok": decision != "error",
+                "ok": decision != "error" and self._state.stage != Stage.ERROR,
                 "decision": decision,
-                "message": f"Planning handoff cycle {cycle_index}/{total_cycles} completed.",
+                "message": f"Planning LangGraph handoff cycle {cycle_index}/{total_cycles} completed.",
             }
         finally:
             self._state.mode = original_mode

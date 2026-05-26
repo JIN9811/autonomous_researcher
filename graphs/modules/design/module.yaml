@@ -1,0 +1,37 @@
+module:
+  id: design
+  label: Design Agent Module
+  handler: agent.design_agent
+  llm_role: design_reasoning
+  editable: true
+  safety:
+    live_requires_validation: true
+    dry_run_supported: true
+  tools: []
+  pre_execution:
+    - id: orchestrator_plan
+      label: Orchestrator Planning
+      kind: pre_stage
+      handler: agent.orchestrator_agent
+      output_key: orchestrator_plan
+      event_type: orchestrator_plan
+      enabled: true
+  internal_graph:
+    - id: 01_intake_constraints
+      label: Intake Constraints
+      kind: internal_step
+    - id: 02_generate_candidate_spec
+      label: Generate Candidate Spec
+      kind: internal_step
+    - id: 03_validate_fdm_printability
+      label: Validate Fdm Printability
+      kind: internal_step
+    - id: 04_handoff_specimen
+      label: Handoff Specimen
+      kind: internal_step
+  io_contract:
+    input: OrchestratorState
+    output: AgentResult.data merged into OrchestratorState
+  notes: >-
+    GUI/module editor may edit this module config, but execution remains bound to
+    allowlisted Python handlers. Python source is not modified by the GUI.

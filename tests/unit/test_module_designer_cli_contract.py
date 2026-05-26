@@ -1,0 +1,313 @@
+"""Tests for Runtime IDE Module Designer and atr CLI command contract."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from fastapi.testclient import TestClient
+
+import app.main as app_main
+
+
+def test_module_designer_create_without_llm_writes_active_module_store(tmp_path, monkeypatch) -> None:
+    module_root = tmp_path / "modules"
+    version_root = tmp_path / "module_versions"
+    monkeypatch.setattr(app_main, "RUNTIME_MODULE_ROOT", module_root)
+    monkeypatch.setattr(app_main, "RUNTIME_MODULE_VERSION_ROOT", version_root)
+    app_main._RUNTIME_MODULE_MANAGEMENT_LOADED.clear()
+    client = TestClient(app_main.app)
+
+    source_text = """
+def calculate(value):
+    return value + 1
+""".strip()
+    created = client.post(
+        "/api/modules",
+        json={
+            "module_id": "unit_designer_module",
+            "label": "Unit Designer Module",
+            "category": "analysis",
+            "handler": "runtime.step_complete",
+            "source_filename": "demo module.py",
+            "source_text": source_text,
+            "notes": "Unit test module designer artifact.",
+            "transform_with_llm": False,
+        },
+    ).json()
+
+    assert created["ok"] is True
+    assert created["module_id"] == "unit_designer_module"
+    assert created["transform"]["model"] == "disabled"
+    assert created["transform"]["pending_handler_registration"] is True
+    assert any("LLM transform was disabled" in item for item in created["warnings"])
+    module = created["module"]["module"]
+    assert module["id"] == "unit_designer_module"
+    assert module["handler"] == "runtime.step_complete"
+    assert module["category"] == "analysis"
+    assert module["metadata"]["pending_handler_registration"] is True
+    assert module["metadata"]["source_filename"] == "demo_module.py"
+    assert module["metadata"]["transformed_by_model"] == "operator_disabled_llm_transform"
+    assert module["safety"]["requires_human_approval"] is True
+    assert created["dry_run"]["summary"]["step_count"] == 3
+    assert created["dry_run"]["summary"]["internal_graph_count"] == 3
+    assert created["dry_run"]["summary"]["handlers"] == ["runtime.step_complete"]
+
+    module_dir = module_root / "unit_designer_module"
+    assert (module_dir / "module.yaml").exists()
+    assert (module_dir / "handler.py").read_text(encoding="utf-8").strip() == source_text
+    assert (module_dir / "demo_module.py").read_text(encoding="utf-8").strip() == source_text
+    assert (version_root / "unit_designer_module" / f"{created['version']['version_id']}.yaml").exists()
+
+    listed = client.get("/api/modules").json()
+    assert listed["ok"] is True
+    assert any(item["id"] == "unit_designer_module" and item["category"] == "analysis" for item in listed["modules"])
+
+    loaded = client.post("/api/modules/unit_designer_module/load").json()
+    assert loaded["ok"] is True
+    assert "unit_designer_module" in loaded["loaded_module_ids"]
+    management = client.get("/api/modules/management-state").json()
+    assert "unit_designer_module" in management["loaded_module_ids"]
+
+    fetched = client.get("/api/modules/unit_designer_module").json()
+    assert fetched["ok"] is True
+    assert fetched["module"]["module"]["metadata"]["transformed_python_source_path"].endswith("handler.py")
+    assert fetched["loaded"] is True
+
+    unloaded = client.post("/api/modules/unit_designer_module/unload").json()
+    assert unloaded["ok"] is True
+    assert unloaded["loaded"] is False
+    assert "unit_designer_module" not in unloaded["loaded_module_ids"]
+
+    validation = client.post("/api/modules/unit_designer_module/validate").json()
+    assert validation == {"ok": True, "module_id": "unit_designer_module", "errors": []}
+    dry_run = client.post("/api/modules/unit_designer_module/dry-run").json()
+    assert dry_run["ok"] is True
+    assert dry_run["summary"]["ordered_step_ids"] == ["01_review_inputs", "02_execute_protocol_adapter", "03_emit_agent_result"]
+
+    draft_payload = fetched["module"]
+    draft_payload["module"]["notes"] = "Saved through Runtime module API contract test."
+    saved = client.put(
+        "/api/modules/unit_designer_module",
+        json={"module": draft_payload, "reason": "unit_cli_contract_save", "author": "unit-test", "activate": False},
+    ).json()
+    assert saved["ok"] is True
+    assert saved["activated"] is False
+    assert saved["dry_run"]["ok"] is True
+    assert saved["version"]["reason"] == "unit_cli_contract_save"
+
+    versions = client.get("/api/modules/unit_designer_module/versions").json()
+    assert versions["ok"] is True
+    version_ids = [item["version_id"] for item in versions["versions"]]
+    assert created["version"]["version_id"] in version_ids
+    assert saved["version"]["version_id"] in version_ids
+    version = client.get(f"/api/modules/unit_designer_module/versions/{created['version']['version_id']}").json()
+    assert version["ok"] is True
+    assert version["version"]["module"]["module"]["id"] == "unit_designer_module"
+
+
+def test_module_designer_create_then_register_generated_adapter(tmp_path, monkeypatch) -> None:
+    module_root = tmp_path / "modules"
+    version_root = tmp_path / "module_versions"
+    monkeypatch.setattr(app_main, "RUNTIME_MODULE_ROOT", module_root)
+    monkeypatch.setattr(app_main, "RUNTIME_MODULE_VERSION_ROOT", version_root)
+    app_main._RUNTIME_MODULE_MANAGEMENT_LOADED.clear()
+    client = TestClient(app_main.app)
+
+    source_text = """
+from agents.base_agent import AgentResult
+
+async def run(state, ctx):
+    return AgentResult(
+        success=True,
+        summary='browser-style generated adapter ok',
+        data={'analysis': {'generated_adapter_contract': True}},
+    )
+""".strip()
+    created = client.post(
+        "/api/modules",
+        json={
+            "module_id": "create_register_generated",
+            "label": "Create Register Generated",
+            "category": "analysis",
+            "handler": "runtime.step_complete",
+            "source_filename": "generated_adapter.py",
+            "source_text": source_text,
+            "notes": "Create-to-register contract test.",
+            "transform_with_llm": False,
+        },
+    ).json()
+
+    assert created["ok"] is True
+    assert created["transform"]["pending_handler_registration"] is True
+    assert created["module"]["module"]["handler"] == "runtime.step_complete"
+    assert created["module"]["module"]["metadata"]["generated_adapter_approved"] is False
+    assert (module_root / "create_register_generated" / "handler.py").read_text(encoding="utf-8").strip() == source_text
+
+    before_validation = client.post("/api/modules/create_register_generated/validate").json()
+    before_dry_run = client.post("/api/modules/create_register_generated/dry-run").json()
+    assert before_validation["ok"] is True
+    assert before_dry_run["ok"] is True
+    assert before_dry_run["summary"]["handlers"] == ["runtime.step_complete"]
+
+    registered = client.post("/api/modules/create_register_generated/register-generated").json()
+
+    assert registered["ok"] is True
+    assert registered["registered"] is True
+    assert registered["handler"] == "module.generated_adapter"
+    assert registered["dry_run"]["ok"] is True
+    assert registered["dry_run"]["summary"]["handlers"] == ["module.generated_adapter"]
+    assert (version_root / "create_register_generated" / f"{registered['version']['version_id']}.yaml").exists()
+
+    active = client.get("/api/modules/create_register_generated").json()["module"]["module"]
+    assert active["handler"] == "module.generated_adapter"
+    assert active["metadata"]["pending_handler_registration"] is False
+    assert active["metadata"]["generated_adapter_approved"] is True
+    assert active["metadata"]["generated_adapter_path"].endswith("handler.py")
+    assert all(step.get("handler") != "runtime.step_complete" for step in active.get("internal_graph", []))
+
+    listed = client.get("/api/modules").json()["modules"]
+    item = next(module for module in listed if module["id"] == "create_register_generated")
+    assert item["handler"] == "module.generated_adapter"
+    assert item["generated_adapter_approved"] is True
+    assert item["pending_handler_registration"] is False
+
+    loaded = client.post("/api/modules/create_register_generated/load").json()
+    assert loaded["ok"] is True
+    assert "create_register_generated" in loaded["loaded_module_ids"]
+
+    after_validation = client.post("/api/modules/create_register_generated/validate").json()
+    after_dry_run = client.post("/api/modules/create_register_generated/dry-run").json()
+    assert after_validation["ok"] is True
+    assert after_dry_run["ok"] is True
+    assert after_dry_run["summary"]["ordered_step_ids"] == ["01_review_inputs", "02_execute_protocol_adapter", "03_emit_agent_result"]
+
+
+def test_install_cli_exposes_module_management_commands() -> None:
+    install_script = Path("install/install_cli.sh").read_text(encoding="utf-8")
+
+    assert "atr modules" in install_script
+    assert "atr module show|validate|dry-run|load|unload|versions|register-generated <module-id>" in install_script
+    assert "atr module version <module-id> <version-id>" in install_script
+    assert "atr module save-yaml <module-id> <yaml-file> [--no-activate]" in install_script
+    assert "atr module create <python-file> [module-id] [label text...]" in install_script
+    assert 'api_get "/api/modules"' in install_script
+    assert r'api_get "/api/modules/\${3}"' in install_script
+    assert r'api_post "/api/modules/\${3}/validate" "{}"' in install_script
+    assert r'api_post "/api/modules/\${3}/dry-run" "{}"' in install_script
+    assert r'api_post "/api/modules/\${3}/load" "{}"' in install_script
+    assert r'api_post "/api/modules/\${3}/unload" "{}"' in install_script
+    assert r'api_get "/api/modules/\${3}/versions"' in install_script
+    assert r'api_get "/api/modules/\${3}/versions/\${4}"' in install_script
+    assert r'api_put "/api/modules/\${3}" "\$(json_module_save_yaml' in install_script
+    assert r'api_post "/api/modules/\${3}/register-generated" "{}"' in install_script
+    assert 'os.environ["ATR_MODULE_ACTIVATE"] != "0"' in install_script
+    assert r'api_post "/api/modules" "\$(json_module_create' in install_script
+    assert '"transform_with_llm": True' in install_script
+    assert '"transform_model": "gemma4:31b"' in install_script
+    assert "Module CUI commands intentionally use the same /api/modules endpoints as Module Management Tool" in install_script
+
+
+def test_install_cli_exposes_runtime_graph_management_commands() -> None:
+    install_script = Path("install/install_cli.sh").read_text(encoding="utf-8")
+
+    assert "atr graphs" in install_script
+    assert "atr graph show|validate|compile|dry-run|gate|versions <graph-id>" in install_script
+    assert "atr graph export-yaml <graph-id> [output-file]" in install_script
+    assert "atr graph import-yaml <graph-id> <yaml-file>" in install_script
+    assert "atr graph save-yaml <graph-id> <yaml-file> [--no-activate]" in install_script
+    assert "atr graph run <graph-id> [test|live|replay|fault-injection] [goal text...]" in install_script
+    assert 'api_get "/api/graphs"' in install_script
+    assert r'api_get "/api/graphs/\${3}"' in install_script
+    assert r'api_post "/api/graphs/\${3}/validate" "{}"' in install_script
+    assert r'api_post "/api/graphs/\${3}/compile" "{}"' in install_script
+    assert r'api_post "/api/graphs/\${3}/dry-run" "\$(json_graph_dry_run' in install_script
+    assert r'api_get "/api/graphs/\${3}/dry-run-gate"' in install_script
+    assert r'api_post_text "/api/graphs/\${3}/export-yaml" "{}"' in install_script
+    assert r'api_post "/api/graphs/\${3}/import-yaml" "\$(json_graph_yaml_import' in install_script
+    assert r'api_put "/api/graphs/\${3}" "\$(json_graph_save_yaml' in install_script
+    assert 'os.environ["ATR_GRAPH_ACTIVATE"] != "0"' in install_script
+    assert "Graph CUI commands intentionally use the same /api/graphs endpoints as Runtime IDE" in install_script
+
+
+
+def test_register_generated_module_marks_adapter_executable(tmp_path, monkeypatch) -> None:
+    module_root = tmp_path / "modules"
+    version_root = tmp_path / "module_versions"
+    module_dir = module_root / "generated_unit"
+    module_dir.mkdir(parents=True)
+    monkeypatch.setattr(app_main, "RUNTIME_MODULE_ROOT", module_root)
+    monkeypatch.setattr(app_main, "RUNTIME_MODULE_VERSION_ROOT", version_root)
+    app_main._RUNTIME_MODULE_MANAGEMENT_LOADED.clear()
+
+    (module_dir / "handler.py").write_text(
+        "from agents.base_agent import AgentResult\n\n"
+        "async def run(state, ctx):\n"
+        "    return AgentResult(success=True, summary='generated ok', data={'analysis': {'generated': True}})\n",
+        encoding="utf-8",
+    )
+    (module_dir / "module.yaml").write_text(
+        """
+module:
+  id: generated_unit
+  label: Generated Unit
+  handler: runtime.step_complete
+  metadata:
+    pending_handler_registration: true
+    transformed_python_source_path: handler.py
+  safety:
+    live_requires_validation: true
+    dry_run_supported: true
+    requires_human_approval: false
+  internal_graph:
+    - id: 01_execute
+      label: Execute generated adapter
+      kind: internal_step
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    client = TestClient(app_main.app)
+    registered = client.post("/api/modules/generated_unit/register-generated").json()
+
+    assert registered["ok"] is True
+    assert registered["registered"] is True
+    assert registered["handler"] == "module.generated_adapter"
+    assert registered["dry_run"]["ok"] is True
+    active = client.get("/api/modules/generated_unit").json()["module"]
+    assert active["module"]["handler"] == "module.generated_adapter"
+    assert active["module"]["metadata"]["pending_handler_registration"] is False
+    assert active["module"]["metadata"]["generated_adapter_approved"] is True
+    assert (version_root / "generated_unit" / f"{registered['version']['version_id']}.yaml").exists()
+
+
+def test_register_generated_module_rejects_blocked_import(tmp_path, monkeypatch) -> None:
+    module_root = tmp_path / "modules"
+    module_dir = module_root / "bad_generated"
+    module_dir.mkdir(parents=True)
+    monkeypatch.setattr(app_main, "RUNTIME_MODULE_ROOT", module_root)
+    monkeypatch.setattr(app_main, "RUNTIME_MODULE_VERSION_ROOT", tmp_path / "module_versions")
+
+    (module_dir / "handler.py").write_text(
+        "import subprocess\n\nasync def run(state, ctx):\n    return {'success': True, 'summary': 'bad', 'data': {}}\n",
+        encoding="utf-8",
+    )
+    (module_dir / "module.yaml").write_text(
+        """
+module:
+  id: bad_generated
+  label: Bad Generated
+  handler: runtime.step_complete
+  metadata:
+    pending_handler_registration: true
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    client = TestClient(app_main.app)
+    registered = client.post("/api/modules/bad_generated/register-generated").json()
+
+    assert registered["ok"] is False
+    assert registered["registered"] is False
+    assert any("blocked import" in error for error in registered["errors"])

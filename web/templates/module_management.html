@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<!--
+File purpose:
+- Standalone Module Management Tool for creating, loading, unloading, validating, and dry-running runtime modules.
+
+Inputs/outputs:
+- Input: /api/modules, /api/modules/{id}, /api/modules/{id}/load, /api/modules/{id}/unload, /api/modules POST
+- Output: module management workspace state and module creation requests
+-->
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{ title }}</title>
+    <link rel="stylesheet" href="/static/styles.css?v=atr-ui-20260525-11" />
+    <link rel="stylesheet" href="/static/runtime_ide.css?v=atr-ui-20260526-82" />
+  </head>
+  <body class="runtime-ide-body module-management-body">
+    <main class="page equipment-setup-page runtime-ide-page module-management-page">
+      <section class="hero panel runtime-ide-hero module-management-hero">
+        <div class="hero-copy">
+          <p class="eyebrow">Module Operations</p>
+          <h1>Module Management Tool</h1>
+          <p class="subhead">
+            모듈 생성, 관리용 로딩/언로딩, validate, dry-run을 별도 workspace에서 처리합니다.
+            Module Configuration Workspace까지 이 화면에 통합되어 module lifecycle과 config 편집을 함께 처리합니다.
+          </p>
+        </div>
+        <article class="status-card">
+          <div class="status-head">
+            <span class="status-title">Management State</span>
+            <span id="mm-status-dot" class="status-dot idle"></span>
+          </div>
+          <strong id="mm-status-label">Loading</strong>
+          <p id="mm-status-detail">Reading module registry.</p>
+        </article>
+      </section>
+
+      <section class="panel module-management-toolbar">
+        <div>
+          <strong>Module workspace</strong>
+          <small class="hint">load/unload here does not delete module.yaml or change graph config.</small>
+        </div>
+        <div class="button-row compact-row">
+          <button id="mm-refresh-btn" class="btn">Refresh</button>
+          <button id="mm-open-ide-btn" class="btn">Open Runtime IDE</button>
+        </div>
+      </section>
+
+      <section class="module-management-grid">
+        <aside class="panel module-management-library">
+          <div class="panel-title-row">
+            <h2>Module Library</h2>
+            <span id="mm-module-count" class="hint">0 modules</span>
+          </div>
+          <input id="mm-search" class="text-input" type="search" placeholder="Search module, handler, category" />
+          <div id="mm-loaded-strip" class="module-management-loaded-strip"></div>
+          <div id="mm-module-list" class="runtime-ide-output compact-output module-management-list"></div>
+        </aside>
+
+        <section class="panel module-management-workbench">
+          <div class="panel-title-row">
+            <div>
+              <h2>Loaded Module Workbench</h2>
+              <small class="hint">inspect selected module, edit config below, then validate/dry-run before Save Version</small>
+            </div>
+            <span id="mm-active-module" class="badge idle">none</span>
+          </div>
+          <div id="mm-workbench" class="runtime-ide-output module-management-output"></div>
+          <div class="button-row compact-row module-management-workbench-actions">
+            <button id="mm-load-btn" class="btn primary">Load Selected</button>
+            <button id="mm-unload-btn" class="btn danger">Unload Selected</button>
+            <button id="mm-validate-btn" class="btn">Validate</button>
+            <button id="mm-dry-run-btn" class="btn">Dry Run</button>
+            <button id="mm-save-config-quick-btn" class="btn warning">Save Config</button>
+            <button id="mm-register-generated-btn" class="btn">Register Generated</button>
+            <button id="mm-versions-btn" class="btn">Versions</button>
+          </div>
+          <div id="mm-action-output" class="runtime-ide-output compact-output module-management-action-output"></div>
+          <details class="module-management-version-panel">
+            <summary>
+              <span>Module Version History</span>
+              <small>load saved module.yaml into draft, then validate/dry-run/save</small>
+            </summary>
+            <div id="mm-version-output" class="runtime-ide-output module-management-version-output"></div>
+          </details>
+        </section>
+
+        <aside class="panel module-management-designer">
+          <div class="panel-title-row">
+            <div>
+              <h2>New Module Designer</h2>
+              <small class="hint">Python file -> Gemma 31B ATR adapter</small>
+            </div>
+          </div>
+          <label class="runtime-handler-select-label">Module ID
+            <input id="mm-designer-module-id" class="text-input" placeholder="custom_internal_module" />
+          </label>
+          <label class="runtime-handler-select-label">Label
+            <input id="mm-designer-label" class="text-input" placeholder="Custom Internal Module" />
+          </label>
+          <label class="runtime-handler-select-label">Category
+            <input id="mm-designer-category" class="text-input" placeholder="auto by Gemma 31B" />
+          </label>
+          <label class="runtime-handler-select-label">Execution Handler
+            <select id="mm-designer-handler" class="text-input"></select>
+          </label>
+          <label class="runtime-handler-select-label">LLM Role
+            <input id="mm-designer-llm-role" class="text-input" placeholder="optional task route" />
+          </label>
+          <label class="runtime-handler-select-label">Python Source File
+            <input id="mm-designer-python-file" class="text-input" type="file" accept=".py,text/x-python,text/plain" />
+          </label>
+          <label class="runtime-handler-select-label">Operator Notes
+            <textarea id="mm-designer-notes" class="runtime-module-small-textarea" spellcheck="false" placeholder="Expected inputs/outputs, tool constraints, runtime behavior"></textarea>
+          </label>
+          <button id="mm-create-btn" class="btn primary" type="button">Create + Load Module</button>
+          <div id="mm-designer-status" class="runtime-ide-output compact-output module-management-designer-status">Ready.</div>
+        </aside>
+      </section>
+
+      <details class="panel runtime-ide-module-drawer runtime-module-editor-expanded module-management-config-workspace" open>
+        <summary>
+          <span>Module Configuration Workspace</span>
+          <small>handler, prompt, tools, safety, runtime steps, raw JSON</small>
+        </summary>
+        <div class="runtime-module-editor-head module-management-config-head">
+          <div>
+            <p class="eyebrow">Agent Behavior Layer</p>
+            <h2>Module Configuration Workspace</h2>
+            <p class="hint">선택한 module의 실행 조건과 내부 step을 Module Management Tool 안에서 바로 편집합니다.</p>
+          </div>
+          <div class="runtime-module-editor-actions">
+            <label class="runtime-handler-select-label">Active Module
+              <select id="mm-config-module-select" class="text-input"></select>
+            </label>
+            <div class="button-row compact-row">
+              <button id="mm-config-apply-btn" class="btn primary" type="button">Apply Draft</button>
+              <button id="mm-config-validate-btn" class="btn" type="button">Validate</button>
+              <button id="mm-config-dry-run-btn" class="btn" type="button">Dry Run</button>
+              <button id="mm-save-config-btn" class="btn warning" type="button">Save Version</button>
+            </div>
+            <span id="mm-config-status" class="hint module-management-config-status">config ready</span>
+          </div>
+        </div>
+        <div id="mm-config-tabs" class="runtime-module-tabs" aria-label="Module config quick switch tabs"></div>
+        <nav class="module-management-config-nav" aria-label="Module configuration section shortcuts">
+          <button class="btn tiny" type="button" data-mm-config-jump="#mm-config-summary">Summary</button>
+          <button class="btn tiny" type="button" data-mm-config-jump="#mm-config-steps">Steps</button>
+          <button class="btn tiny" type="button" data-mm-config-jump="#mm-dry-run-evidence">Evidence</button>
+          <button class="btn tiny" type="button" data-mm-config-jump=".module-management-config-raw">Raw JSON</button>
+        </nav>
+        <section class="runtime-ide-grid runtime-ide-module-grid runtime-module-editor-grid module-management-config-grid">
+          <article class="runtime-module-main-pane module-management-config-main">
+            <div id="mm-config-summary" class="runtime-ide-output runtime-module-summary-output"></div>
+            <div class="panel-title-row runtime-ide-subtitle">
+              <h2>Module Runtime Steps</h2>
+              <span class="hint">pre-execution + internal graph</span>
+            </div>
+            <div id="mm-config-steps" class="runtime-module-graph"></div>
+            <div class="panel-title-row runtime-ide-subtitle module-management-evidence-title">
+              <h2>Dry-run Evidence</h2>
+              <span class="hint">draft sequence + graph impact</span>
+            </div>
+            <div id="mm-dry-run-evidence" class="runtime-ide-output compact-output module-management-dry-run-evidence"></div>
+          </article>
+          <article class="runtime-module-raw-pane module-management-config-raw">
+            <details class="runtime-module-raw-json">
+              <summary>
+                <span>Advanced Raw Module JSON</span>
+                <small>applies on blur/change</small>
+              </summary>
+              <textarea id="mm-config-json" class="runtime-ide-textarea" spellcheck="false"></textarea>
+            </details>
+          </article>
+        </section>
+      </details>
+
+    </main>
+    <script src="/static/module_management.js?v=atr-ui-20260526-82" defer></script>
+  </body>
+</html>

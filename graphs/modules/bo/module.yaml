@@ -1,0 +1,30 @@
+module:
+  id: bo
+  label: BO Agent Module
+  handler: agent.bo_agent
+  llm_role: bo_policy
+  editable: true
+  safety:
+    live_requires_validation: true
+    dry_run_supported: true
+  tools:
+  - experiment.benchmark
+  internal_graph:
+    - id: 01_load_objective_history
+      label: Load Objective History
+      kind: internal_step
+    - id: 02_fit_surrogate
+      label: Fit Surrogate
+      kind: internal_step
+    - id: 03_evaluate_acquisition
+      label: Evaluate Acquisition
+      kind: internal_step
+    - id: 04_recommend_next_constraints
+      label: Recommend Next Constraints
+      kind: internal_step
+  io_contract:
+    input: OrchestratorState
+    output: AgentResult.data merged into OrchestratorState
+  notes: >-
+    GUI/module editor may edit this module config, but execution remains bound to
+    allowlisted Python handlers. Python source is not modified by the GUI.

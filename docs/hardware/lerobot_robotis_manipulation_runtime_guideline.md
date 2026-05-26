@@ -34,13 +34,13 @@ FastAPI Controller
             -> Web GUI
 ```
 
-Stage order:
+Stage order is graph-configured in `graphs/configs/*.yaml`. The default closed-loop graph is:
 
 ```text
-design -> specimen -> vision -> manipulation -> equipment -> analysis -> knowledge -> guardian
+design -> specimen -> vision -> manipulation -> equipment -> analysis -> knowledge -> bo -> guardian
 ```
 
-Guardian routing:
+Guardian routing in the default graph:
 
 - `guardian=continue` routes back to `design`.
 - `guardian=stop` routes to `complete`.

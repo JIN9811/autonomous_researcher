@@ -1,0 +1,29 @@
+module:
+  id: knowledge
+  label: Knowledge Agent Module
+  handler: agent.knowledge_agent
+  llm_role: knowledge_synthesis
+  editable: true
+  safety:
+    live_requires_validation: true
+    dry_run_supported: true
+  tools: []
+  internal_graph:
+    - id: 01_retrieve_prior_runs
+      label: Retrieve Prior Runs
+      kind: internal_step
+    - id: 02_summarize_failures
+      label: Summarize Failures
+      kind: internal_step
+    - id: 03_write_memory
+      label: Write Memory
+      kind: internal_step
+    - id: 04_handoff_bo
+      label: Handoff Bo
+      kind: internal_step
+  io_contract:
+    input: OrchestratorState
+    output: AgentResult.data merged into OrchestratorState
+  notes: >-
+    GUI/module editor may edit this module config, but execution remains bound to
+    allowlisted Python handlers. Python source is not modified by the GUI.

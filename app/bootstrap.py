@@ -57,7 +57,6 @@ from mcp_tools.lerobot_tools import register_lerobot_tools
 from mcp_tools.mock_tools import register_mock_tools
 from mcp_tools.printer_tools import register_printer_tools
 from mcp_tools.tool_registry import ToolRegistry
-from orchestrator.graph import OrchestrationGraph
 from utils.config_loader import load_all_configs
 from utils.paths import resolve_path
 
@@ -287,7 +286,6 @@ def load_runtime() -> MainController:
         agent_registry=agent_registry,
         orchestrator_agent_name="orchestrator_agent",
         agent_context=agent_context,
-        graph=OrchestrationGraph(),
         run_root=Path(run_root),
         logging_config=logging_cfg,
         system_config=system_cfg,

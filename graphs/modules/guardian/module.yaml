@@ -1,0 +1,28 @@
+module:
+  id: guardian
+  label: Guardian Agent Module
+  handler: agent.guardian_agent
+  llm_role: guardian_review
+  editable: true
+  safety:
+    live_requires_validation: true
+    dry_run_supported: true
+  tools:
+  - device.health
+  - experiment.queue.status
+  internal_graph:
+    - id: 01_check_safety_gates
+      label: Check Safety Gates
+      kind: internal_step
+    - id: 02_review_recent_failures
+      label: Review Recent Failures
+      kind: internal_step
+    - id: 03_decide_continue_stop_error
+      label: Decide Continue Stop Error
+      kind: internal_step
+  io_contract:
+    input: OrchestratorState
+    output: AgentResult.data merged into OrchestratorState
+  notes: >-
+    GUI/module editor may edit this module config, but execution remains bound to
+    allowlisted Python handlers. Python source is not modified by the GUI.

@@ -220,6 +220,12 @@ def test_lerobot_gui_and_test_mode_api_workflow(tmp_path: Path, monkeypatch: Any
     assert manipulation["manipulation"]["transfer_task"]["source"] == "3dp_output_area"
     assert manipulation["manipulation"]["transfer_task"]["target"] == "utm_fixture"
     assert "--policy.type=pi05" in manipulation["manipulation"]["command_preview"]
+    assert any(
+        event.get("type") == "node.completed"
+        and event.get("node_id") == "manipulation"
+        and event.get("payload", {}).get("workspace") == "lerobot"
+        for event in main_module.controller.recent_events()
+    )
 
     sessions = client.get("/api/lerobot/sessions").json()
     assert sessions["ok"] is True

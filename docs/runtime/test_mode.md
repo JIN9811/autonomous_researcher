@@ -30,7 +30,7 @@ Printer behavior in test mode:
   - `installed_printer`: run real PrusaSlicer slicing, then perform real PrusaLink read-only communication testing when connection info exists.
   - `physical_print`: run real PrusaSlicer slicing, then upload/start the test-generated specimen on the real printer.
 - Live GUI also accepts one-shot commands: `테스트 모드, 가상 브릿지`, `테스트 모드, 설치 프린터`, and `테스트 모드, 실제 출력`. These set `printer_test_path` during orchestration so the workflow proceeds without a second Specimen Making Agent path prompt.
-- The `테스트 모드, 실제 출력` route returns the GUI request immediately and continues the long DesignAgent -> Specimen Making Agent -> PrusaLink upload/start work in the background; progress is reflected through planning events/session refresh.
+- The `테스트 모드, 실제 출력` route returns the GUI request immediately and continues the long active-graph Design/Specimen/PrusaLink upload-start work in the background; progress is reflected through planning events/session refresh.
 - `physical_print` uses the saved 3DP GUI cap profile. The default is bottom-only: `bottom_cap_enabled=true`, `top_cap_enabled=false`, `top_bottom_cap=true`, and `skin_thickness_mm=0.8`; disabling both cap options sets `top_bottom_cap=false`, clears `require_flat_compression_faces`, and uses `skin_thickness_mm=0.0` for bare TPMS gyroid specimens.
 - Test mode must not upload, start print, or eject on real hardware unless `physical_print` is explicitly selected and the live upload/start gates are enabled.
 - Even in virtual mode, the GUI should show slicer settings, G-code output path, endpoint shape, and step trace so the boundary immediately before real printer action can be inspected.

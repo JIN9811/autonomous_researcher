@@ -1,0 +1,107 @@
+graph:
+  id: lerobot_pick_place
+  name: LeRobot Pick-and-Place Graph
+  version: 0.1.0
+  entry_node: dispatch
+  finish_nodes:
+  - step_complete
+  nodes:
+  - id: dispatch
+    label: Runtime Dispatch
+    handler: runtime.dispatch
+    stage: null
+    kind: runtime
+    description: Routes LeRobot workspace state into observation and manipulation.
+    module_id: null
+    metadata: {icon: orchestrator}
+    position: {x: 32, y: 112}
+  - id: idle
+    label: Idle
+    handler: runtime.idle
+    stage: idle
+    kind: runtime
+    description: Starts LeRobot pick-and-place flow.
+    module_id: null
+    metadata: {icon: play}
+    position: {x: 224, y: 112}
+  - id: vision
+    label: Vision Agent
+    handler: agent.vision_agent
+    stage: vision
+    kind: agent
+    description: Captures output-area observation and transfer readiness.
+    module_id: modules/vision
+    metadata: {icon: vision_agent}
+    position: {x: 416, y: 64}
+  - id: manipulation
+    label: Manipulation Agent
+    handler: agent.manipulation_agent
+    stage: manipulation
+    kind: agent
+    description: Runs LeRobot rollout or compatible pick-place bridge.
+    module_id: modules/manipulation
+    metadata: {icon: manipulation_agent}
+    position: {x: 608, y: 64}
+  - id: complete
+    label: Complete
+    handler: runtime.terminal
+    stage: complete
+    kind: terminal
+    description: Robot transfer finished.
+    module_id: null
+    metadata: {icon: complete}
+    position: {x: 800, y: 64}
+  - id: error
+    label: Error
+    handler: runtime.terminal
+    stage: error
+    kind: terminal
+    description: Robot transfer failed.
+    module_id: null
+    metadata: {icon: error}
+    position: {x: 800, y: 192}
+  - id: step_complete
+    label: Step Complete
+    handler: runtime.step_complete
+    stage: null
+    kind: runtime
+    description: One-step boundary for runtime invocation.
+    module_id: null
+    metadata: {icon: artifact}
+    position: {x: 32, y: 304}
+  edges:
+  - {source: dispatch, target: idle, condition: idle, label: current stage is idle, metadata: {}}
+  - {source: dispatch, target: vision, condition: vision, label: '', metadata: {}}
+  - {source: dispatch, target: manipulation, condition: manipulation, label: '', metadata: {}}
+  - {source: dispatch, target: complete, condition: complete, label: '', metadata: {}}
+  - {source: dispatch, target: error, condition: error, label: '', metadata: {}}
+  - {source: idle, target: step_complete, condition: null, label: '', metadata: {}}
+  - {source: vision, target: step_complete, condition: null, label: '', metadata: {}}
+  - {source: manipulation, target: step_complete, condition: null, label: '', metadata: {}}
+  - {source: complete, target: step_complete, condition: null, label: '', metadata: {}}
+  - {source: error, target: step_complete, condition: null, label: '', metadata: {}}
+  - {source: step_complete, target: step_complete, condition: null, label: '', metadata: {}}
+  - source: idle
+    target: vision
+    condition: null
+    label: 'configured transition: idle -> vision'
+    metadata: {runtime_edge: logical_transition, from_stage: idle, to_stage: vision}
+  - source: vision
+    target: manipulation
+    condition: null
+    label: 'configured transition: vision -> manipulation'
+    metadata: {runtime_edge: logical_transition, from_stage: vision, to_stage: manipulation}
+  - source: manipulation
+    target: complete
+    condition: null
+    label: 'configured transition: manipulation -> complete'
+    metadata: {runtime_edge: logical_transition, from_stage: manipulation, to_stage: complete}
+  stage_dispatch: {idle: idle, vision: vision, manipulation: manipulation, complete: complete, error: error}
+  transitions: {idle: vision, vision: manipulation, manipulation: complete}
+  terminal_stages: [complete, error]
+  metadata:
+    runtime: langgraph
+    template: lerobot_pick_place
+    workspace: lerobot
+    executable_from_runtime_ide: false
+    safety: {guardian_required: false, live_device_dry_run_required_before_execution: true}

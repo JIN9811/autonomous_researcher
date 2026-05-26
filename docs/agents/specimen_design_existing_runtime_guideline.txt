@@ -19,9 +19,9 @@ Source Basis:
 ============================================================
 
 This repository already has the target Topology implemented for Phase 1:
-- Stage routing remains fixed: design -> specimen -> vision -> manipulation -> equipment -> analysis -> knowledge -> guardian.
-- BO Agent is not a new Stage enum value, but it is now executed as a runtime sidecar after KnowledgeAgent and before GuardianAgent.
-- MainLoop keeps full-cycle execution, and Guardian continue/stop/error transitions are already wired.
+- Stage routing is defined by the active LangGraph config in `graphs/configs/*.yaml`; the default closed-loop route is design -> specimen -> vision -> manipulation -> equipment -> analysis -> knowledge -> bo -> guardian.
+- BO Agent is a real configured LangGraph stage after KnowledgeAgent and before GuardianAgent.
+- MainLoop keeps full-cycle execution through `LangGraphRunLoop`, and Guardian continue/stop/error transitions are graph-configured.
 - `orchestrator_plan` LLM calls are only for discussion-level orchestration in Live GUI, not stage execution logic.
 - No new top-level stage nodes are required for the downloaded algorithm.
 
@@ -31,12 +31,12 @@ Design/Specimen contract currently used:
 - `guardian` still owns stop/recover decisions and returns `guardian`.
 
 Phase 1 execution contract:
-- Live GUI planning route follows the runtime stage order after the operator trigger.
-- Test-mode planning handoff runs 5 cycles. Each cycle must execute Design -> Specimen -> Vision -> Manipulation -> Equipment -> Analysis -> Knowledge -> BO -> Guardian.
+- Live GUI planning route follows the active graph transition order after the operator trigger.
+- Test-mode planning handoff runs 5 cycles. In the default graph each cycle executes Design -> Specimen -> Vision -> Manipulation -> Equipment -> Analysis -> Knowledge -> BO -> Guardian. If the active graph changes, the Live GUI route text and post-Specimen tail must change with it.
 - For every test-mode design cycle, the Design Agent message must show two visual artifacts: the previous shape and the next shape. Cycle 1 uses a baseline reference when no previous physical/specimen result exists.
 - From cycle 2 onward in test-mode closed-loop runs, generated STL models must not include physical top/bottom cap skins. CAE still applies top/bottom platens internally for boundary conditions; those platens are analysis-only and must not be added to the printed/generated specimen.
 - Trigger `실험 수행` for operator-confirmed execution and trigger `테스트 모드` / `테스트모드` for LLM-assisted test-value generation.
-- After trigger, enforce exact handoff chain in planning conversation:
+- After trigger, emit the planning conversation in active graph order. Default graph order is:
   1) DesignAgent (produces `experiment_spec`)
   2) SpecimenMakingAgent (builds STL + mesh/manufacturability + `specimen_result`)
   3) VisionAgent (observes the 3DP output pickup area)
@@ -46,7 +46,7 @@ Phase 1 execution contract:
   7) KnowledgeAgent (writes memory/RAG summary)
   8) BOAgent (uses KnowledgeAgent memory/RAG context and experiment evaluations to recommend next-cycle design constraints)
   9) GuardianAgent (validates and decides continue/stop/error)
-- The planning transcript should emit `design_ai`, `printer_ai`, `vision_ai`, `manipulation_ai`, `equipment_ai`, `analysis_ai`, `knowledge_ai`, `bo_ai`, and `guardian` messages in that order.
+- In the default graph, the planning transcript should emit `design_ai`, `printer_ai`, `vision_ai`, `manipulation_ai`, `equipment_ai`, `analysis_ai`, `knowledge_ai`, `bo_ai`, and `guardian` messages in that order; if the active graph changes, transcript order follows the graph.
 - Keep test/hardstop safety behavior unchanged: if any agent fails, stop chain and expose failure reason.
 
 Live GUI (planning route) behavior currently expected:
@@ -119,7 +119,7 @@ Do not change these unless a separate full-runtime migration is explicitly reque
    - analysis
    - knowledge
    - guardian
-   - guardian=continue routes back to design
+   - default graph guardian=continue routes back to design
    - guardian=stop routes to complete
    - guardian=error routes to error
 

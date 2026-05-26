@@ -71,3 +71,20 @@ def test_cae_run_endpoint_returns_closed_loop_metrics() -> None:
     assert result["loading_mode"] == "top_cyclic_loading"
     assert result["cae_metrics"]["max_von_mises_MPa"] > 0
     assert result["closed_loop_source"] is True
+    assert any(
+        event.get("type") == "node.completed"
+        and event.get("node_id") == "analysis"
+        and event.get("payload", {}).get("workspace") == "cae"
+        for event in app_main.controller.recent_events()
+    )
+    run_id = payload["snapshot"]["state"]["run_id"]
+    artifacts = client.get(f"/api/runs/{run_id}/artifacts").json()["artifacts"]
+    artifact_paths = {item["path"] for item in artifacts}
+    assert any(path.startswith("workspace/cae/") and path.endswith("_result.json") for path in artifact_paths)
+    assert any(path.startswith("workspace/cae/") and path.endswith(".contour.svg") for path in artifact_paths)
+    assert any(path.startswith("workspace/cae/") and path.endswith(".report.json") for path in artifact_paths)
+    assert any(
+        event.get("type") == "artifact.created"
+        and event.get("payload", {}).get("artifact", {}).get("path") in artifact_paths
+        for event in app_main.controller.recent_events()
+    )

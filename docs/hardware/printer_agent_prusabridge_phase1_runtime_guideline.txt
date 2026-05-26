@@ -23,9 +23,9 @@ Source Basis:
 ============================================================
 
 Current repository state after Phase 1 alignment:
-- Stage routing already exists and must remain:
-  - design -> specimen -> vision -> manipulation -> equipment -> analysis -> knowledge -> guardian
-  - guardian=continue routes back to design
+- Stage routing is owned by the active LangGraph config and must not be duplicated inside printer code:
+  - default closed-loop route: design -> specimen -> vision -> manipulation -> equipment -> analysis -> knowledge -> bo -> guardian
+  - default guardian=continue routes back to design
   - guardian=stop routes to complete
   - guardian=error routes to error
 - `SpecimenMakingAgent` already performs the correct high-level sequence:

@@ -5,7 +5,7 @@ Use it when replacing mock logic with production device/program logic in each ag
 
 ## Scope
 
-- Runtime: `FastAPI + RunLoop + LangGraph-style stage transitions`
+- Runtime: `FastAPI + LangGraphRunLoop + config-driven LangGraph stage transitions`
 - Control plane: GUI and API endpoints in `app/main.py`
 - Agent contract: `BaseAgent.run(state, ctx) -> AgentResult`
 - Model hierarchy: `orchestrator (31B primary, E4B fallback) + e2b`
@@ -16,9 +16,11 @@ Use it when replacing mock logic with production device/program logic in each ag
 ```text
 User/GUI
   -> MainController
-    -> RunLoop
+    -> LangGraphRunLoop
+      -> selected graphs/configs/*.yaml
+      -> Compiled LangGraph node
       -> (design stage only) OrchestratorAgent
-      -> Stage Agent (design/specimen/vision/manipulation/equipment/analysis/knowledge/guardian)
+      -> Stage Agent (design/specimen/vision/manipulation/equipment/analysis/knowledge/bo/guardian)
         -> ToolRegistry / RAG / DB / FailureMemory / Backends
 ```
 
@@ -31,16 +33,17 @@ Cycle order:
 5. `equipment`
 6. `analysis`
 7. `knowledge`
-8. `guardian`
-9. `guardian=continue` routes back to `design`
-10. `guardian=stop` routes to `complete`, `guardian=error` routes to `error`
+8. `bo`
+9. `guardian`
+10. `guardian=continue` routes back to `design`
+11. `guardian=stop` routes to `complete`, `guardian=error` routes to `error`
 
 ## Hard Contracts (Do Not Break)
 
 ### 1) Stage and state names
 
 - Stage enum values in `orchestrator/state.py` are API/GUI/test-facing contracts.
-- Do not rename existing stages without updating run loop, GUI map, and tests together.
+- Do not rename existing stages without updating graph config, GUI map, and tests together.
 
 ### 2) Agent interface
 
@@ -98,7 +101,8 @@ When replacing internals with real programs, keep these output keys stable.
 Notes:
 
 - SARM remains a submodule under `manipulation_agent` (not top-level stage).
-- Orchestrator head (`orchestrator_agent`) runs once at cycle start (`design`) and writes plan metadata.
+- Design-stage orchestrator planning is declared as `module.pre_execution` in `graphs/modules/design/module.yaml` (`orchestrator_plan -> agent.orchestrator_agent`) and writes plan metadata to `state.run_metadata.orchestrator_plan`; it must not be reintroduced as a hard-coded run-loop special case.
+- Live GUI planning may skip that pre-execution step only after the chat orchestrator has already approved the same Design handoff, to avoid duplicate model calls.
 
 ## Model Hierarchy Baseline
 
@@ -383,9 +387,14 @@ Frequently written by run loop merge:
 - `docs/process/codex_workflow.md`
 - `orchestrator/run_loop.py`
 - `orchestrator/state.py`
-- `orchestrator/transitions.py`
-- `orchestrator/router.py`
+- `graphs/configs/*.yaml` is the runtime transition source of truth. `orchestrator/transitions.py` is compatibility-only and delegates to graph config.
+- `orchestrator/router.py` is compatibility-only and resolves stage handlers from graph/module config, not from an internal stage map.
 - `agents/*.py`
 - `configs/models.yaml`
 - `mcp_tools/tool_registry.py`
 - `app/main.py`
+
+
+## Runtime Event Contract
+
+LangGraphRunLoop emits legacy `event_type` keys plus Runtime IDE `type` aliases such as `node.started`, `node.completed`, `edge.traversed`, and `run.completed`. Runtime IDE consumers should depend on the alias fields while existing GUI code may continue reading the legacy keys.
