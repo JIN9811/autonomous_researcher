@@ -164,6 +164,7 @@ let availableHandlerMetadata = new Map();
 let latestStateSnapshot = null;
 let nodeSearchQuery = "";
 let selectedNodeId = "";
+let canvasAutoSelectNode = true;
 let visitedRuntimeStages = new Set();
 let activeRuntimeStage = "";
 let activeRuntimeEdge = null;
@@ -2864,6 +2865,7 @@ function activateGraphTab(tabId) {
   if (!tab) return;
   activeGraphTabId = tab.id;
   selectedNodeId = "";
+  canvasAutoSelectNode = true;
   activeRuntimeEdge = null;
   edgeConnectDraft = null;
   edgeConnectSource = "";
@@ -3179,6 +3181,34 @@ function handleTransitionSourceChange() {
   updateTransitionConditionPlaceholder();
 }
 
+
+function isBlankGraphCanvasClick(event) {
+  const target = event.target;
+  if (!target || !graphCanvas?.contains(target)) return false;
+  if (target.closest?.("[data-node-id], [data-port-node], [data-edge-source], button, a, input, select, textarea, summary")) return false;
+  return target === graphCanvas
+    || Boolean(target.closest?.(".runtime-ide-canvas-world"))
+    || Boolean(target.closest?.(".runtime-ide-edge-layer"));
+}
+
+function clearGraphCanvasSelection() {
+  selectedNodeId = "";
+  activeRuntimeEdge = null;
+  edgeConnectMode = false;
+  edgeConnectSource = "";
+  edgeConnectDraft = null;
+  edgeDragHoverNodeId = "";
+  canvasAutoSelectNode = false;
+  clearTimeout(nodeClickTimer);
+  renderGraph(parseGraphEditor());
+  updateEdgeEditStatus();
+}
+
+function handleGraphCanvasBlankClick(event) {
+  if (!isBlankGraphCanvasClick(event)) return;
+  clearGraphCanvasSelection();
+}
+
 function renderGraph(graph) {
   activeGraph = normalizeNodePositions(graph);
   const tab = activeGraphTab();
@@ -3190,7 +3220,10 @@ function renderGraph(graph) {
   renderGraphTabs();
   const nodes = Array.isArray(activeGraph.nodes) ? activeGraph.nodes : [];
   const selectedNodeExists = nodes.some((node) => node.id === selectedNodeId);
-  if ((!selectedNodeId || !selectedNodeExists) && nodes.length) {
+  if (selectedNodeId && !selectedNodeExists) {
+    selectedNodeId = "";
+  }
+  if (!selectedNodeId && canvasAutoSelectNode && nodes.length) {
     selectedNodeId = nodes[0].id;
   }
   const transitions = activeGraph.transitions || {};
@@ -3311,6 +3344,7 @@ function renderGraph(graph) {
   });
   graphCanvas.querySelectorAll("[data-edge-source]").forEach((el) => {
     el.addEventListener("click", () => {
+      canvasAutoSelectNode = true;
       const source = el.getAttribute("data-edge-source") || "";
       const target = el.getAttribute("data-edge-target") || "";
       transitionSource.value = source;
@@ -3779,6 +3813,7 @@ function renderMiniMap(graph, bounds) {
 }
 
 function handleGraphNodeClick(nodeId) {
+  canvasAutoSelectNode = true;
   const graph = parseGraphEditor();
   normalizeNodePositions(graph);
   const node = graph.nodes.find((item) => item.id === nodeId);
@@ -4432,6 +4467,7 @@ function focusGraphNodeInCanvas(nodeId) {
 }
 
 function selectNode(nodeId, options = {}) {
+  canvasAutoSelectNode = true;
   selectedNodeId = nodeId;
   renderGraph(parseGraphEditor());
   if (options.focus !== false) requestAnimationFrame(() => focusGraphNodeInCanvas(nodeId));
@@ -4555,6 +4591,7 @@ async function loadGraph(graphId = "") {
   const useUrlFocus = !graphId || graphId === urlGraphId;
   const deepLinkedNodeId = useUrlFocus ? resolveGraphNodeRef(graph.graph, deepLinkNodeRef()) : "";
   selectedNodeId = deepLinkedNodeId || "";
+  canvasAutoSelectNode = true;
   activeRuntimeEdge = null;
   edgeConnectMode = false;
   edgeConnectSource = "";
@@ -4754,6 +4791,7 @@ async function loadGraphVersionDraft(versionId) {
   const draft = result.version?.graph;
   if (!draft || typeof draft !== "object") throw new Error(`Graph version payload is missing: ${versionId}`);
   selectedNodeId = "";
+  canvasAutoSelectNode = true;
   activeRuntimeEdge = null;
   setGraphJson(draft);
   const tab = activeGraphTab();
@@ -4874,6 +4912,7 @@ async function importGraphYamlText(yamlText) {
     return;
   }
   selectedNodeId = "";
+  canvasAutoSelectNode = true;
   activeRuntimeEdge = null;
   const tab = activeGraphTab();
   if (tab) {
@@ -7027,6 +7066,7 @@ function openModuleManagementTool(event) {
   return false;
 }
 
+graphCanvas?.addEventListener("click", handleGraphCanvasBlankClick);
 document.addEventListener("click", (event) => {
   const trigger = event.target?.closest?.("[data-open-module-management]");
   if (trigger) {
