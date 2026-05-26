@@ -37,6 +37,7 @@ DEFAULT_MAX_TOKENS_BY_TASK = {
     "guardian_reasoning": 256,
     "tool_formatting": 96,
     "gui_helper": 96,
+    "module_designer": 1400,
 }
 
 

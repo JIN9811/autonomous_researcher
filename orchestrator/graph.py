@@ -1,6 +1,7 @@
 """
 File purpose:
-- LangGraph-style explicit node execution and stage transition wrapper.
+- Backward-compatible transition wrapper retained for old imports only.
+- Runtime execution now uses graphs/configs/*.yaml through LangGraphRunLoop.
 
 Key classes/functions:
 - OrchestrationGraph
@@ -13,20 +14,28 @@ Dependencies:
 - orchestrator.transitions.default_next_stage
 
 Modification guide:
-- Safe places to edit: transition policies and branch logic
-- Risky places to edit: terminal stage handling
-- Related files: orchestrator/run_loop.py, orchestrator/transitions.py
+- Do not add new runtime behavior here. Update graphs/configs/*.yaml and module configs instead.
+- Related files: graphs/configs/*.yaml, orchestrator/langgraph_runtime.py
 """
 
 from __future__ import annotations
+
+from pathlib import Path
 
 from orchestrator.state import Stage
 from orchestrator.transitions import default_next_stage
 
 
 class OrchestrationGraph:
-    """Explicit transition graph for the autonomous loop."""
+    """Compatibility shim; it delegates to graph-config-derived transitions."""
+
+    def __init__(self, graph_config_path: str | Path | None = None) -> None:
+        self.graph_config_path = graph_config_path
 
     def next_stage(self, current: Stage, guardian_decision: str = "continue") -> Stage:
-        """Compute next stage deterministically from current stage and decisions."""
-        return default_next_stage(current=current, guardian_decision=guardian_decision)
+        """Compute next stage through the configured graph transition table."""
+        return default_next_stage(
+            current=current,
+            guardian_decision=guardian_decision,
+            graph_config_path=self.graph_config_path,
+        )

@@ -1,0 +1,16 @@
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="specimen_maker">
+  <defs>
+    <filter id="glow" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="3.2" result="blur"/>
+      <feColorMatrix in="blur" type="matrix" values="0 0 0 0 0.7216 0 0 0 0 0.3333 0 0 0 0 0.9686 0 0 0 .9 0" result="coloredBlur"/>
+      <feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <radialGradient id="bg" cx="50%" cy="35%" r="70%">
+      <stop offset="0" stop-color="#b855f7" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#06112b" stop-opacity="0.88"/>
+    </radialGradient>
+  </defs>
+  <rect x="7" y="7" width="50" height="50" rx="15" fill="url(#bg)" stroke="#b855f7" stroke-opacity="0.85"/>
+  <path d="M20 46 L32 14 L44 46 Z M25 38 H39 M29 30 H35" stroke="#b855f7" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" filter="url(#glow)"/>
+  <circle cx="13.5" cy="13.5" r="2.6" fill="#b855f7" filter="url(#glow)"/>
+</svg>

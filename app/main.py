@@ -24,8 +24,18 @@ Modification guide:
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
+import mimetypes
+import re
+import shutil
+import subprocess
+import time
+from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import quote
+
+import yaml
 from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Request
@@ -37,6 +47,8 @@ from pydantic import BaseModel, Field
 from agents.manipulation_agent import ManipulationAgent
 from agents.bo_agent import BOAgent
 from app.bootstrap import load_runtime
+from graphs import ATRLangGraphCompiler, GraphConfig, GraphVersionStore, HandlerRegistry, ModuleConfig, ModuleConfigStore, load_graph_config
+from graphs.generated_adapter import GENERATED_MODULE_HANDLER_ID, generated_adapter_enabled, generated_adapter_path, validate_generated_adapter_file
 from device_bridges.lerobot_bridge import LeRobotBridge, LeRobotBridgeConfig
 from device_bridges.prusa_bridge import PrusaBridgeConfig, PrinterAgenticWorkflow
 from device_bridges.windows_pyautogui_bridge import (
@@ -51,6 +63,7 @@ from utils.manipulation_profile import (
     load_manipulation_agent_profile,
     save_manipulation_agent_profile,
 )
+from utils.ids import make_event_id
 from utils.paths import resolve_path
 from utils.printer_profile import PRUSA_PRINT_PROFILE_PATH, load_prusa_print_profile, save_prusa_print_profile
 
@@ -62,6 +75,15 @@ controller = load_runtime()
 AGENT_BASELINE_DOC_PATH = resolve_path("docs/runtime/agent_program_baseline.md")
 BO_WORKSPACE_SETTINGS_PATH = resolve_path("memory/bo_workspace_settings.json")
 CAE_WORKSPACE_SETTINGS_PATH = resolve_path("memory/cae_workspace_settings.json")
+PRIMARY_RUNTIME_GRAPH_ID = "atr_closed_loop"
+RUNTIME_GRAPH_CONFIG_ROOT = resolve_path("graphs/configs")
+RUNTIME_GRAPH_CONFIG_PATH = RUNTIME_GRAPH_CONFIG_ROOT / f"{PRIMARY_RUNTIME_GRAPH_ID}.yaml"
+RUNTIME_GRAPH_VERSION_ROOT = resolve_path("memory/graph_versions")
+RUNTIME_MODULE_ROOT = resolve_path("graphs/modules")
+RUNTIME_MODULE_VERSION_ROOT = resolve_path("memory/module_versions")
+_RUNTIME_GRAPH_DRY_RUN_RECORDS: dict[str, dict[str, object]] = {}
+_SYSTEM_RESOURCE_CACHE: dict[str, object] = {"updated_at_monotonic": 0.0, "payload": {}}
+_RUNTIME_MODULE_MANAGEMENT_LOADED: set[str] = set()
 _LEROBOT_BRIDGE: LeRobotBridge | None = None
 _LEROBOT_CONFIG_MTIME_NS: int = -1
 
@@ -129,6 +151,54 @@ class BackendSwitchRequest(BaseModel):
     """Request body for one-click inference backend switching."""
 
     backend: Literal["nemoclaw", "ollama", "vllm"]
+
+
+class RuntimeGraphSaveRequest(BaseModel):
+    """Request body for saving a validated Runtime IDE graph config."""
+
+    graph: dict[str, object] = Field(default_factory=dict)
+    reason: str = "runtime_ide_save"
+    author: str = "operator"
+    activate: bool = True
+
+
+class RuntimeGraphYamlImportRequest(BaseModel):
+    """Request body for importing a graph YAML draft into the Runtime IDE."""
+
+    yaml_text: str = Field(..., min_length=1)
+
+
+class RuntimeModuleSaveRequest(BaseModel):
+    """Request body for saving Runtime IDE module config."""
+
+    module: dict[str, object] = Field(default_factory=dict)
+    reason: str = "runtime_module_save"
+    author: str = "operator"
+    activate: bool = True
+
+
+class RuntimeModuleCreateRequest(BaseModel):
+    """Request body for creating a cataloged Runtime IDE module."""
+
+    module_id: str = Field(..., min_length=1)
+    label: str = Field(..., min_length=1)
+    category: str = ""
+    handler: str = "runtime.step_complete"
+    llm_role: str = ""
+    tools: list[str] = Field(default_factory=list)
+    source_filename: str = ""
+    source_text: str = ""
+    notes: str = ""
+    transform_with_llm: bool = True
+    transform_model: str = "gemma4:31b"
+
+
+class RuntimeGraphDryRunRequest(BaseModel):
+    """Request body for graph dry-run simulation options."""
+
+    start_stage: str = "idle"
+    max_steps: int = 24
+    graph: dict[str, object] = Field(default_factory=dict)
 
 
 class RuntimeModelRequest(BaseModel):
@@ -395,6 +465,25 @@ class LeRobotVisualizationFileRequest(BaseModel):
     path: str = Field(..., min_length=1)
 
 
+class RuntimeApprovalCreateRequest(BaseModel):
+    """Request body for creating a runtime human-approval request event."""
+
+    title: str = Field(default="Human approval required", min_length=1)
+    reason: str = ""
+    stage: str = ""
+    safety_class: str = "operator_review"
+    requester: str = "runtime_ide"
+    payload: dict[str, object] = Field(default_factory=dict)
+
+
+class RuntimeApprovalResolveRequest(BaseModel):
+    """Request body for resolving a runtime human-approval request."""
+
+    decision: Literal["approved", "rejected", "cancelled"] = "approved"
+    note: str = ""
+    operator: str = "operator"
+
+
 def _load_agent_baseline_markdown() -> str:
     """Read baseline markdown for agent program integration."""
     if not AGENT_BASELINE_DOC_PATH.exists():
@@ -506,6 +595,26 @@ async def cae_gui(request: Request) -> HTMLResponse:
     )
 
 
+@app.get("/ide", response_class=HTMLResponse)
+async def runtime_ide(request: Request) -> HTMLResponse:
+    """Serve config-driven LangGraph Runtime IDE."""
+    return templates.TemplateResponse(
+        request=request,
+        name="runtime_ide.html",
+        context={"title": "ATR Runtime IDE"},
+    )
+
+
+@app.get("/module-management", response_class=HTMLResponse)
+async def module_management_tool(request: Request) -> HTMLResponse:
+    """Serve the standalone Module Management Tool GUI."""
+    return templates.TemplateResponse(
+        request=request,
+        name="module_management.html",
+        context={"title": "Module Management Tool"},
+    )
+
+
 @app.get("/planning", response_class=HTMLResponse)
 async def planning(request: Request) -> HTMLResponse:
     """Serve the live-mode GUI workspace (legacy planning route)."""
@@ -537,10 +646,1713 @@ async def windows_equipment_gui(request: Request) -> HTMLResponse:
     )
 
 
+def _bytes_to_gb(value: int | float | None) -> float | None:
+    """Convert bytes to GiB with stable rounding for UI display."""
+    if value is None:
+        return None
+    return round(float(value) / (1024 ** 3), 2)
+
+
+def _read_ram_snapshot() -> dict[str, object]:
+    """Read host RAM from /proc/meminfo without adding a psutil dependency."""
+    values: dict[str, int] = {}
+    try:
+        for line in Path("/proc/meminfo").read_text(encoding="utf-8").splitlines():
+            key, _, rest = line.partition(":")
+            if key in {"MemTotal", "MemAvailable", "MemFree"}:
+                values[key] = int(rest.strip().split()[0]) * 1024
+    except (OSError, ValueError, IndexError):
+        return {"status": "unknown", "message": "RAM metrics unavailable"}
+    total = values.get("MemTotal")
+    available = values.get("MemAvailable", values.get("MemFree", 0))
+    if not total:
+        return {"status": "unknown", "message": "RAM total unavailable"}
+    used = max(total - available, 0)
+    used_percent = round((used / total) * 100, 1)
+    status = "error" if used_percent >= 92 else "warn" if used_percent >= 82 else "ready"
+    return {
+        "status": status,
+        "total_bytes": total,
+        "available_bytes": available,
+        "used_bytes": used,
+        "total_gb": _bytes_to_gb(total),
+        "available_gb": _bytes_to_gb(available),
+        "used_gb": _bytes_to_gb(used),
+        "used_percent": used_percent,
+    }
+
+
+def _float_or_none(value: str) -> float | None:
+    """Parse nvidia-smi numeric fields while tolerating N/A tokens."""
+    clean = str(value or "").strip().replace("[", "").replace("]", "")
+    if not clean or clean.upper() == "N/A":
+        return None
+    try:
+        return float(clean)
+    except ValueError:
+        return None
+
+
+def _read_nvidia_process_memory_mb(nvidia_smi: str) -> dict[str, float]:
+    """Fallback GPU memory view for devices whose aggregate memory is reported as N/A."""
+    try:
+        result = subprocess.run([nvidia_smi], check=False, capture_output=True, text=True, timeout=1.5)
+    except (OSError, subprocess.TimeoutExpired):
+        return {}
+    memory_by_gpu: dict[str, float] = {}
+    for line in result.stdout.splitlines():
+        match = re.search(r"^\|\s*(\d+)\s+.*?\s+(\d+)MiB\s*\|$", line)
+        if not match:
+            continue
+        gpu_index, memory_mib = match.groups()
+        memory_by_gpu[gpu_index] = memory_by_gpu.get(gpu_index, 0.0) + float(memory_mib)
+    return memory_by_gpu
+
+
+def _read_gpu_snapshot() -> dict[str, object]:
+    """Read GPU/VRAM through nvidia-smi when present; degrade safely otherwise."""
+    nvidia_smi = shutil.which("nvidia-smi")
+    if not nvidia_smi:
+        return {"status": "unavailable", "message": "nvidia-smi not found", "gpus": []}
+    query = "index,name,memory.total,memory.used,utilization.gpu,temperature.gpu"
+    try:
+        result = subprocess.run(
+            [nvidia_smi, f"--query-gpu={query}", "--format=csv,noheader,nounits"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=1.5,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return {"status": "unknown", "message": f"nvidia-smi failed: {exc}", "gpus": []}
+    if result.returncode != 0:
+        message = (result.stderr or result.stdout or "nvidia-smi returned non-zero").strip().splitlines()[0]
+        return {"status": "unknown", "message": message, "gpus": []}
+    process_memory = _read_nvidia_process_memory_mb(nvidia_smi)
+    gpus: list[dict[str, object]] = []
+    for line in result.stdout.splitlines():
+        parts = [part.strip() for part in line.split(",")]
+        if len(parts) < 6:
+            continue
+        index, name, mem_total, mem_used, util, temp = parts[:6]
+        total_mb = _float_or_none(mem_total)
+        used_mb = _float_or_none(mem_used)
+        if used_mb is None:
+            used_mb = process_memory.get(index)
+        util_percent = _float_or_none(util)
+        temp_c = _float_or_none(temp)
+        used_percent = round((used_mb / total_mb) * 100, 1) if total_mb and used_mb is not None else None
+        status = "error" if used_percent is not None and used_percent >= 94 else "warn" if used_percent is not None and used_percent >= 86 else "ready"
+        item: dict[str, object] = {
+            "index": index,
+            "name": name,
+            "status": status,
+            "memory_total_mb": round(total_mb, 1) if total_mb is not None else None,
+            "memory_used_mb": round(used_mb, 1) if used_mb is not None else None,
+            "memory_total_gb": round(total_mb / 1024, 2) if total_mb is not None else None,
+            "memory_used_gb": round(used_mb / 1024, 2) if used_mb is not None else None,
+            "memory_used_percent": used_percent,
+            "utilization_percent": util_percent,
+            "temperature_c": temp_c,
+            "memory_source": "query" if _float_or_none(mem_used) is not None else "process_table" if used_mb is not None else "unavailable",
+        }
+        gpus.append(item)
+    if not gpus:
+        return {"status": "unknown", "message": "No GPU rows parsed from nvidia-smi", "gpus": []}
+    worst = "error" if any(gpu["status"] == "error" for gpu in gpus) else "warn" if any(gpu["status"] == "warn" for gpu in gpus) else "ready"
+    total_values = [float(gpu["memory_total_mb"]) for gpu in gpus if gpu.get("memory_total_mb") is not None]
+    used_values = [float(gpu["memory_used_mb"]) for gpu in gpus if gpu.get("memory_used_mb") is not None]
+    total_mb = sum(total_values) if total_values else None
+    used_mb = sum(used_values) if used_values else None
+    util_values = [float(gpu["utilization_percent"]) for gpu in gpus if gpu.get("utilization_percent") is not None]
+    aggregate: dict[str, object] = {
+        "memory_total_gb": round(total_mb / 1024, 2) if total_mb is not None else None,
+        "memory_used_gb": round(used_mb / 1024, 2) if used_mb is not None else None,
+        "memory_used_percent": round((used_mb / total_mb) * 100, 1) if total_mb and used_mb is not None else None,
+        "utilization_percent": round(sum(util_values) / len(util_values), 1) if util_values else None,
+    }
+    return {
+        "status": worst,
+        "message": f"{len(gpus)} NVIDIA GPU(s)",
+        "gpus": gpus,
+        "aggregate": aggregate,
+    }
+
+
+def _system_resource_snapshot() -> dict[str, object]:
+    """Return a short-lived cached host/GPU resource snapshot for Runtime IDE panels."""
+    now = time.monotonic()
+    cached_at = float(_SYSTEM_RESOURCE_CACHE.get("updated_at_monotonic") or 0.0)
+    if now - cached_at < 2.0 and isinstance(_SYSTEM_RESOURCE_CACHE.get("payload"), dict):
+        return dict(_SYSTEM_RESOURCE_CACHE["payload"])
+    payload = {
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "ram": _read_ram_snapshot(),
+        "gpu": _read_gpu_snapshot(),
+    }
+    _SYSTEM_RESOURCE_CACHE["updated_at_monotonic"] = now
+    _SYSTEM_RESOURCE_CACHE["payload"] = payload
+    return payload
+
+
 @app.get("/api/state")
 async def get_state() -> dict[str, object]:
-    """Return current controller state."""
-    return controller.snapshot()
+    """Return current controller state plus host/GPU resource telemetry."""
+    snapshot = controller.snapshot()
+    snapshot["system_resources"] = _system_resource_snapshot()
+    return snapshot
+
+
+def _graph_config_items() -> list[tuple[str, Path, GraphConfig]]:
+    """Return all discoverable graph configs, with the main closed-loop graph first."""
+    items: list[tuple[str, Path, GraphConfig]] = []
+    for path in sorted(RUNTIME_GRAPH_CONFIG_ROOT.glob("*.yaml")):
+        try:
+            config = load_graph_config(path)
+        except Exception:
+            continue
+        items.append((config.id, path, config))
+    return sorted(items, key=lambda item: (item[0] != PRIMARY_RUNTIME_GRAPH_ID, item[0]))
+
+
+def _graph_config_path(graph_id: str) -> Path:
+    """Resolve one graph id to its config file."""
+    for item_id, path, _config in _graph_config_items():
+        if item_id == graph_id:
+            return path
+    raise HTTPException(status_code=404, detail=f"Unknown graph_id={graph_id}")
+
+
+def _load_runtime_graph_config(graph_id: str) -> GraphConfig:
+    """Load one runtime graph config by graph id."""
+    return load_graph_config(_graph_config_path(graph_id))
+
+
+def _graph_version_store(graph_id: str = PRIMARY_RUNTIME_GRAPH_ID) -> GraphVersionStore:
+    """Return the file-backed graph version store for one graph config."""
+    return GraphVersionStore(
+        active_config_path=_graph_config_path(graph_id),
+        version_root=RUNTIME_GRAPH_VERSION_ROOT,
+    )
+
+
+def _module_config_store() -> ModuleConfigStore:
+    """Return the file-backed module config store."""
+    return ModuleConfigStore(
+        module_root=RUNTIME_MODULE_ROOT,
+        version_root=RUNTIME_MODULE_VERSION_ROOT,
+    )
+
+
+def _graph_config_payload(graph_id: str = PRIMARY_RUNTIME_GRAPH_ID) -> dict[str, object]:
+    """Return one config-driven LangGraph definition as JSON-safe data."""
+    config = _load_runtime_graph_config(graph_id)
+    return config.model_dump(mode="json")
+
+
+def _graph_config_digest(config: GraphConfig) -> str:
+    """Return a stable digest for dry-run gating against the active graph payload."""
+    payload = json.dumps(config.model_dump(mode="json"), ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _record_graph_dry_run(
+    *,
+    config: GraphConfig,
+    options: RuntimeGraphDryRunRequest,
+    sequence: list[dict[str, object]],
+    compiled_graph: dict[str, object],
+) -> dict[str, object]:
+    """Store the latest successful active-config dry-run evidence for live run gates."""
+    record = {
+        "graph_id": config.id,
+        "digest": _graph_config_digest(config),
+        "dry_run_at": datetime.now(timezone.utc).isoformat(),
+        "start_stage": options.start_stage,
+        "max_steps": options.max_steps,
+        "step_count": len(sequence),
+        "compiled_graph": compiled_graph,
+        "live_gate_recorded": True,
+    }
+    _RUNTIME_GRAPH_DRY_RUN_RECORDS[config.id] = record
+    return record
+
+
+def _graph_dry_run_evidence(
+    *,
+    config: GraphConfig,
+    compiled_graph: dict[str, object],
+    options: RuntimeGraphDryRunRequest | None = None,
+    record_live_gate: bool = False,
+) -> dict[str, object]:
+    """Build non-device graph dry-run evidence, optionally recording the live gate."""
+    run_options = options or RuntimeGraphDryRunRequest(start_stage="idle", max_steps=24)
+    sequence = _graph_dry_run_sequence(config, max_steps=run_options.max_steps, start_stage=run_options.start_stage)
+    if record_live_gate:
+        dry_run_record = _record_graph_dry_run(
+            config=config,
+            options=run_options,
+            sequence=sequence,
+            compiled_graph=compiled_graph,
+        )
+    else:
+        dry_run_record = {
+            "graph_id": config.id,
+            "digest": _graph_config_digest(config),
+            "dry_run_at": datetime.now(timezone.utc).isoformat(),
+            "start_stage": run_options.start_stage,
+            "max_steps": run_options.max_steps,
+            "step_count": len(sequence),
+            "compiled_graph": compiled_graph,
+            "draft": True,
+            "live_gate_recorded": False,
+        }
+    return {
+        "ok": True,
+        "graph_id": config.id,
+        "errors": [],
+        "start_stage": run_options.start_stage,
+        "sequence": sequence,
+        "compiled_graph": compiled_graph,
+        "dry_run_record": dry_run_record,
+    }
+
+
+def _graph_live_dry_run_gate(config: GraphConfig) -> tuple[bool, dict[str, object]]:
+    """Return whether the active graph has a matching dry-run record for live execution."""
+    record = _RUNTIME_GRAPH_DRY_RUN_RECORDS.get(config.id, {})
+    if not record:
+        return False, {}
+    return record.get("digest") == _graph_config_digest(config), record
+
+
+def _graph_list_item(config: GraphConfig, path: Path) -> dict[str, object]:
+    """Return one graph list entry for Runtime IDE selection."""
+    metadata = config.metadata if isinstance(config.metadata, dict) else {}
+    return {
+        "id": config.id,
+        "name": config.name,
+        "version": config.version,
+        "path": str(path),
+        "primary": config.id == PRIMARY_RUNTIME_GRAPH_ID,
+        "workspace": metadata.get("workspace", ""),
+        "template": metadata.get("template", config.id != PRIMARY_RUNTIME_GRAPH_ID),
+        "executable_from_runtime_ide": bool(
+            metadata.get("executable_from_runtime_ide", config.id == PRIMARY_RUNTIME_GRAPH_ID)
+        ),
+        "node_count": len(config.nodes),
+        "transition_count": len(config.transitions),
+    }
+
+
+def _module_config_payload(module_id: str) -> dict[str, object]:
+    """Read one allowlisted module config by id."""
+    safe_module = module_id.strip().replace("/", "_").replace("..", "_")
+    module_path = RUNTIME_MODULE_ROOT / safe_module / "module.yaml"
+    if not module_path.exists():
+        raise HTTPException(status_code=404, detail=f"Unknown module_id={module_id}")
+    raw = yaml.safe_load(module_path.read_text(encoding="utf-8")) or {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def _module_category(module: dict[str, Any]) -> str:
+    """Return an operator-facing module category for catalog grouping."""
+    metadata = module.get("metadata") if isinstance(module.get("metadata"), dict) else {}
+    explicit = str(module.get("category") or metadata.get("category") or "").strip()
+    if explicit:
+        return explicit
+    module_id = str(module.get("id") or "").strip().lower()
+    id_categories = {
+        "orchestrator": "orchestration",
+        "design": "design",
+        "specimen": "fabrication",
+        "specimen_making": "fabrication",
+        "vision": "vision",
+        "manipulation": "manipulation",
+        "equipment": "equipment",
+        "analysis": "analysis",
+        "bo": "optimization",
+        "knowledge": "knowledge",
+        "guardian": "guardian",
+    }
+    if module_id in id_categories:
+        return id_categories[module_id]
+    handler = str(module.get("handler") or "")
+    tools = module.get("tools") if isinstance(module.get("tools"), list) else []
+    if any(str(tool).startswith("printer.") or str(tool).startswith("geometry.") for tool in tools):
+        return "fabrication"
+    if any(str(tool).startswith("lerobot.") or str(tool).startswith("robot.") for tool in tools):
+        return "robotics"
+    if any(str(tool).startswith("equipment.") or str(tool).startswith("utm.") for tool in tools):
+        return "lab-equipment"
+    if any(str(tool).startswith("cae.") or str(tool).startswith("experiment.") for tool in tools):
+        return "analysis-optimization"
+    return "runtime"
+
+
+def _module_list_item(path: Path) -> dict[str, object]:
+    """Return one catalog item for Runtime IDE module listing."""
+    try:
+        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError):
+        raw = {}
+    module = raw.get("module", {}) if isinstance(raw, dict) else {}
+    module = module if isinstance(module, dict) else {}
+    metadata = module.get("metadata") if isinstance(module.get("metadata"), dict) else {}
+    internal_graph = module.get("internal_graph") if isinstance(module.get("internal_graph"), list) else []
+    pre_execution = module.get("pre_execution") if isinstance(module.get("pre_execution"), list) else []
+    tools = module.get("tools") if isinstance(module.get("tools"), list) else []
+    return {
+        "id": module.get("id", path.parent.name),
+        "label": module.get("label", path.parent.name),
+        "handler": module.get("handler", ""),
+        "category": _module_category(module),
+        "path": str(path),
+        "tools": tools,
+        "tool_count": len(tools),
+        "pre_execution_count": len(pre_execution),
+        "internal_graph_count": len(internal_graph),
+        "source_path": metadata.get("python_source_path", ""),
+        "source_filename": metadata.get("source_filename", ""),
+        "pending_handler_registration": bool(metadata.get("pending_handler_registration", False)),
+        "generated_adapter_approved": bool(metadata.get("generated_adapter_approved", False)),
+        "generated_adapter_handler_id": metadata.get("generated_adapter_handler_id", ""),
+        "generated_adapter_path": metadata.get("transformed_python_source_path") or metadata.get("transformed_source_path") or "",
+    }
+
+
+def _safe_source_filename(filename: str) -> str:
+    """Return a safe Python source filename for module designer uploads."""
+    clean = Path(str(filename or "handler.py")).name.strip() or "handler.py"
+    safe = "".join(ch if ch.isalnum() or ch in {"-", "_", "."} else "_" for ch in clean)
+    if not safe.endswith(".py"):
+        safe += ".py"
+    return safe
+
+
+def _extract_json_object(text: str) -> dict[str, Any]:
+    """Extract the first JSON object from an LLM response."""
+    clean = str(text or "").strip()
+    if not clean:
+        raise ValueError("empty LLM response")
+    fence = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", clean, re.DOTALL | re.IGNORECASE)
+    if fence:
+        clean = fence.group(1).strip()
+    else:
+        start = clean.find("{")
+        end = clean.rfind("}")
+        if start >= 0 and end > start:
+            clean = clean[start : end + 1]
+    data = json.loads(clean)
+    if not isinstance(data, dict):
+        raise ValueError("LLM response JSON must be an object")
+    return data
+
+
+def _module_designer_category(value: str) -> str:
+    """Normalize LLM/user category names for catalog grouping."""
+    clean = re.sub(r"[^a-z0-9_-]+", "-", str(value or "").strip().lower()).strip("-")
+    aliases = {
+        "3dp": "fabrication",
+        "printer": "fabrication",
+        "printing": "fabrication",
+        "robot": "manipulation",
+        "robotics": "manipulation",
+        "lab-equipment": "equipment",
+        "lab": "equipment",
+        "cae": "analysis",
+        "bo": "optimization",
+        "mbo": "optimization",
+        "safety": "guardian",
+    }
+    return aliases.get(clean, clean or "custom")
+
+
+def _registered_tool_names() -> set[str]:
+    """Return tool registry names without letting registry failures break module design."""
+    try:
+        return set(controller._deps.agent_context.tools.list_tools())
+    except Exception:
+        return set()
+
+
+def _safe_step_id(value: str, fallback: str) -> str:
+    """Return a module-step-safe id."""
+    clean = re.sub(r"[^A-Za-z0-9_-]+", "_", str(value or "").strip()).strip("_")
+    return clean or fallback
+
+
+def _normalize_designer_steps(
+    raw_steps: Any,
+    *,
+    default_handler: str,
+    handler_registry: set[str],
+) -> list[dict[str, object]]:
+    """Normalize LLM-generated internal steps into ModuleStep-compatible dictionaries."""
+    if not isinstance(raw_steps, list):
+        raw_steps = []
+    steps: list[dict[str, object]] = []
+    for index, item in enumerate(raw_steps[:8], start=1):
+        if not isinstance(item, dict):
+            continue
+        step_id = _safe_step_id(str(item.get("id") or item.get("name") or ""), f"step_{index:02d}")
+        label = str(item.get("label") or item.get("name") or step_id).strip() or step_id
+        kind = str(item.get("kind") or "internal_step").strip() or "internal_step"
+        step: dict[str, object] = {"id": step_id, "label": label, "kind": kind}
+        handler = str(item.get("handler") or "").strip()
+        if handler and handler in handler_registry:
+            step["handler"] = handler
+        steps.append(step)
+    if steps:
+        return steps
+    return [
+        {"id": "01_review_inputs", "label": "Review Inputs", "kind": "internal_step"},
+        {"id": "02_execute_protocol_adapter", "label": "Execute Protocol Adapter", "kind": "internal_step", "handler": default_handler},
+        {"id": "03_emit_agent_result", "label": "Emit AgentResult", "kind": "internal_step"},
+    ]
+
+
+def _module_designer_system_prompt() -> str:
+    """Return the fixed system prompt used by Gemma 31B module designer."""
+    return (
+        "You are the ATR Runtime IDE Module Designer. Convert one uploaded Python module "
+        "into an Autonomous Researcher internal module adapter. Return only strict JSON. "
+        "The generated file must respect the ATR communication contract: async run(state: "
+        "OrchestratorState, ctx: AgentContext) -> AgentResult, no top-level side effects, no "
+        "hardware/network action during import, structured errors, and all tool/device work routed "
+        "through ctx.tools or existing allowlisted handlers. Classify the module category. "
+        "Do not invent unregistered handler ids; if execution needs new Python registration, keep "
+        "handler as runtime.step_complete and explain pending_handler_registration in notes."
+    )
+
+
+def _module_designer_user_prompt(
+    *,
+    req: RuntimeModuleCreateRequest,
+    safe_id: str,
+    source_excerpt: str,
+    source_truncated: bool,
+    handler_names: list[str],
+    tool_names: list[str],
+) -> str:
+    """Build the bounded Gemma 31B prompt for Python-to-ATR module conversion."""
+    return json.dumps(
+        {
+            "task": "convert_python_file_to_atr_internal_module",
+            "module_id": safe_id,
+            "requested_label": req.label,
+            "requested_category": req.category,
+            "requested_handler": req.handler,
+            "requested_llm_role": req.llm_role,
+            "operator_notes": req.notes,
+            "source_filename": req.source_filename,
+            "source_truncated_for_prompt": source_truncated,
+            "atr_protocol_contract": {
+                "adapter_signature": "async run(state: OrchestratorState, ctx: AgentContext) -> AgentResult",
+                "return_type": "agents.base_agent.AgentResult",
+                "state_type": "orchestrator.state.OrchestratorState",
+                "tool_access": "ctx.tools.call(tool_name, payload)",
+                "no_import_side_effects": True,
+                "output_rule": "AgentResult.data must be JSON-serializable and merge-safe",
+            },
+            "allowed_handlers": handler_names[:64],
+            "registered_tools": tool_names[:160],
+            "required_json_schema": {
+                "label": "short operator label",
+                "category": "one of orchestration/design/fabrication/vision/manipulation/equipment/analysis/optimization/knowledge/guardian/runtime/custom or a concise custom slug",
+                "handler": "one allowed handler id, usually runtime.step_complete unless an existing agent handler is appropriate",
+                "llm_role": "optional task route hint",
+                "tools": ["registered tool names only"],
+                "internal_graph": [{"id": "01_step", "label": "Step label", "kind": "internal_step", "handler": "optional allowed handler"}],
+                "notes": "operator-facing transformation summary",
+                "transformed_source": "complete Python source for the ATR adapter file",
+            },
+            "uploaded_python_source": source_excerpt,
+        },
+        ensure_ascii=False,
+    )
+
+
+async def _transform_module_source_with_gemma31b(req: RuntimeModuleCreateRequest, safe_id: str) -> dict[str, Any]:
+    """Use Gemma 31B directly, without fallback, to transform uploaded Python into ATR module JSON."""
+    source_text = str(req.source_text or "")
+    if not source_text.strip():
+        raise HTTPException(status_code=400, detail="Module Designer requires a Python source file.")
+
+    model = str(req.transform_model or "gemma4:31b").strip() or "gemma4:31b"
+    if model != "gemma4:31b":
+        raise HTTPException(status_code=400, detail="Module Designer is locked to gemma4:31b for protocol conversion.")
+
+    ctx = controller._deps.agent_context
+    backend = ctx.primary_backends.get("vllm") or ctx.primary_backend
+    prepare_model = getattr(backend, "prepare_model", None)
+    if prepare_model is not None:
+        await prepare_model(model)
+
+    source_limit = 7200
+    source_excerpt = source_text[:source_limit]
+    source_truncated = len(source_text) > source_limit
+    handlers = sorted(_runtime_graph_handler_registry().names())
+    tools = sorted(_registered_tool_names())
+    try:
+        response = await backend.complete(
+            model=model,
+            system_prompt=_module_designer_system_prompt(),
+            user_prompt=_module_designer_user_prompt(
+                req=req,
+                safe_id=safe_id,
+                source_excerpt=source_excerpt,
+                source_truncated=source_truncated,
+                handler_names=handlers,
+                tool_names=tools,
+            ),
+            metadata={"task_type": "module_designer", "role": "orchestrator", "max_tokens": 1400},
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Gemma 31B module transform failed: {exc}") from exc
+
+    try:
+        payload = _extract_json_object(response.text)
+    except Exception as exc:
+        snippet = response.text[:1200] if response.text else ""
+        raise HTTPException(status_code=502, detail=f"Gemma 31B returned invalid module JSON: {exc}; response={snippet}") from exc
+
+    transformed_source = str(payload.get("transformed_source") or "").strip()
+    if not transformed_source:
+        raise HTTPException(status_code=502, detail="Gemma 31B response did not include transformed_source.")
+    payload["_model"] = response.model
+    payload["_source_truncated_for_prompt"] = source_truncated
+    return payload
+
+
+def _module_id_from_graph_node_module_id(module_id: str | None) -> str:
+    """Normalize a graph node module reference such as modules/design to design."""
+    if not module_id:
+        return ""
+    return Path(str(module_id).strip()).name
+
+
+def _module_runtime_summary(module_id: str) -> dict[str, object]:
+    """Return the editable module runtime metadata exposed by dry-run APIs."""
+    if not module_id:
+        return {}
+    try:
+        payload = _module_config_payload(module_id)
+    except HTTPException:
+        return {"module_id": module_id, "missing": True}
+    normalized = ModuleConfigStore.normalize_payload(dict(payload))
+    module = normalized.get("module", {}) if isinstance(normalized, dict) else {}
+    if not isinstance(module, dict):
+        return {"module_id": module_id, "missing": True}
+    try:
+        module = ModuleConfig.model_validate(module).model_dump(mode="json", exclude_none=True)
+    except Exception as exc:
+        return {"module_id": module_id, "schema_error": str(exc)}
+    sequence = _module_dry_run_sequence(module_id, {"module": module})
+    pre_execution = [item for item in sequence if item.get("phase") == "pre_execution"]
+    internal_graph = [item for item in sequence if item.get("phase") == "internal_graph"]
+    return {
+        "module_id": module.get("id", module_id),
+        "label": module.get("label", ""),
+        "handler": module.get("handler", ""),
+        "effective_handler": module.get("handler", ""),
+        "llm_role": module.get("llm_role", ""),
+        "tool_count": len(module.get("tools", [])) if isinstance(module.get("tools"), list) else 0,
+        "pre_execution_count": len(pre_execution),
+        "internal_graph_count": len(internal_graph),
+        "sequence": sequence,
+    }
+
+
+def _validate_module_payload(module_id: str, payload: dict[str, Any]) -> list[str]:
+    """Validate editable module config without executing Python source."""
+    errors: list[str] = []
+    normalized = ModuleConfigStore.normalize_payload(dict(payload))
+    module = normalized.get("module", {}) if isinstance(normalized, dict) else {}
+    if not isinstance(module, dict):
+        return ["module payload must contain an object"]
+    try:
+        ModuleConfig.model_validate(module)
+    except Exception as exc:
+        errors.append(f"module schema validation failed: {exc}")
+    if module.get("id") != module_id:
+        errors.append(f"module_id path/body mismatch: {module_id} != {module.get('id')}")
+    handler_registry = _runtime_graph_handler_registry().names()
+    handler = str(module.get("handler", ""))
+    if handler not in handler_registry:
+        errors.append(f"unregistered handler: {handler}")
+    llm_role = module.get("llm_role", "")
+    if llm_role is not None and not isinstance(llm_role, str):
+        errors.append("llm_role must be a string")
+    llm = module.get("llm", {})
+    if llm and not isinstance(llm, dict):
+        errors.append("llm must be an object")
+    elif isinstance(llm, dict):
+        for key in ("backend", "model", "primary", "fallback"):
+            if key in llm and not isinstance(llm[key], str):
+                errors.append(f"llm.{key} must be a string")
+        for key in ("temperature", "top_p"):
+            if key in llm and not isinstance(llm[key], int | float):
+                errors.append(f"llm.{key} must be numeric")
+        if "max_tokens" in llm and (not isinstance(llm["max_tokens"], int) or int(llm["max_tokens"]) < 1):
+            errors.append("llm.max_tokens must be a positive integer")
+    timeout = module.get("timeout_s")
+    if timeout is not None and (not isinstance(timeout, int | float) or float(timeout) < 0):
+        errors.append("timeout_s must be a non-negative number")
+    retry = module.get("retry", {})
+    if retry and not isinstance(retry, dict):
+        errors.append("retry must be an object")
+    elif isinstance(retry, dict):
+        max_attempts = retry.get("max_attempts")
+        if max_attempts is not None and (not isinstance(max_attempts, int) or not 0 <= max_attempts <= 10):
+            errors.append("retry.max_attempts must be an integer between 0 and 10")
+        backoff_s = retry.get("backoff_s")
+        if backoff_s is not None and (not isinstance(backoff_s, int | float) or float(backoff_s) < 0):
+            errors.append("retry.backoff_s must be a non-negative number")
+    prompt = module.get("prompt", {})
+    if prompt and not isinstance(prompt, (dict, str)):
+        errors.append("prompt must be an object or string")
+    elif isinstance(prompt, dict):
+        for key in ("path", "system", "developer", "user_template"):
+            if key in prompt and not isinstance(prompt[key], str):
+                errors.append(f"prompt.{key} must be a string")
+    pre_execution = module.get("pre_execution", [])
+    if pre_execution and not isinstance(pre_execution, list):
+        errors.append("pre_execution must be a list")
+    elif isinstance(pre_execution, list):
+        pre_ids = [str(step.get("id", "")) for step in pre_execution if isinstance(step, dict)]
+        for index, step in enumerate(pre_execution, start=1):
+            if not isinstance(step, dict):
+                errors.append(f"pre_execution contains non-object step at {index}")
+                continue
+            if not str(step.get("id", "")).strip():
+                errors.append(f"pre_execution step at {index} must have id")
+            handler_id = str(step.get("handler") or "").strip()
+            if not handler_id:
+                errors.append(f"pre_execution step at {index} must have handler")
+            elif handler_id not in handler_registry:
+                errors.append(f"unregistered pre_execution handler at {index}: {handler_id}")
+            if "enabled" in step and not isinstance(step["enabled"], bool):
+                errors.append(f"pre_execution.enabled at {index} must be boolean")
+            for key in ("output_key", "event_type", "label", "kind"):
+                if key in step and not isinstance(step[key], str):
+                    errors.append(f"pre_execution.{key} at {index} must be a string")
+        for step_id in sorted({step_id for step_id in pre_ids if step_id and pre_ids.count(step_id) > 1}):
+            errors.append(f"duplicate pre_execution step id: {step_id}")
+    internal_graph = module.get("internal_graph", [])
+    if not isinstance(internal_graph, list):
+        errors.append("internal_graph must be a list")
+    else:
+        step_ids = [str(step.get("id", "")) for step in internal_graph if isinstance(step, dict)]
+        missing_id_count = sum(1 for step_id in step_ids if not step_id.strip())
+        if missing_id_count:
+            errors.append(f"internal_graph contains {missing_id_count} step(s) without id")
+        malformed_step_count = sum(1 for step in internal_graph if not isinstance(step, dict))
+        if malformed_step_count:
+            errors.append(f"internal_graph contains {malformed_step_count} non-object step(s)")
+        duplicates = sorted({step_id for step_id in step_ids if step_id and step_ids.count(step_id) > 1})
+        for step_id in duplicates:
+            errors.append(f"duplicate internal_graph step id: {step_id}")
+        for index, step in enumerate(internal_graph, start=1):
+            if not isinstance(step, dict):
+                continue
+            step_handler = step.get("handler")
+            if step_handler and str(step_handler) not in handler_registry:
+                errors.append(f"unregistered internal_graph step handler at {index}: {step_handler}")
+    safety = module.get("safety", {})
+    if safety and not isinstance(safety, dict):
+        errors.append("safety must be an object")
+    elif isinstance(safety, dict):
+        for key in ("live_requires_validation", "dry_run_supported", "requires_human_approval"):
+            if key in safety and not isinstance(safety[key], bool):
+                errors.append(f"safety.{key} must be boolean")
+    registered_tools: set[str] = set()
+    try:
+        registered_tools = set(controller._deps.agent_context.tools.list_tools())
+    except Exception:
+        registered_tools = set()
+    tools = module.get("tools", [])
+    if tools and not isinstance(tools, list):
+        errors.append("tools must be a list")
+    elif isinstance(tools, list):
+        for index, tool in enumerate(tools, start=1):
+            if not isinstance(tool, str) or not tool.strip():
+                errors.append(f"tools[{index}] must be a non-empty string")
+                continue
+            if registered_tools and tool.strip() not in registered_tools:
+                errors.append(f"unregistered tool: {tool.strip()}")
+    return errors
+
+
+def _module_dry_run_sequence(module_id: str, payload: dict[str, Any] | None = None) -> list[dict[str, object]]:
+    """Return the configured internal module step order without executing handlers/tools."""
+    module_payload = payload or _module_config_payload(module_id)
+    normalized = ModuleConfigStore.normalize_payload(dict(module_payload))
+    module = normalized.get("module", {}) if isinstance(normalized, dict) else {}
+    if not isinstance(module, dict):
+        return []
+    try:
+        module = ModuleConfig.model_validate(module).model_dump(mode="json", exclude_none=True)
+    except Exception:
+        return []
+    internal_graph = module.get("internal_graph", [])
+    if not isinstance(internal_graph, list):
+        return []
+    sequence: list[dict[str, object]] = []
+    pre_execution = module.get("pre_execution", []) if isinstance(module, dict) else []
+    if isinstance(pre_execution, list):
+        for index, step in enumerate(pre_execution, start=1):
+            item = step if isinstance(step, dict) else {}
+            if item.get("enabled", True) is False:
+                continue
+            handler = str(item.get("handler") or "").strip()
+            sequence.append(
+                {
+                    "step": len(sequence) + 1,
+                    "id": item.get("id", f"pre_step_{index}"),
+                    "label": item.get("label", item.get("id", f"pre_step_{index}")),
+                    "handler": handler,
+                    "kind": item.get("kind", "pre_stage"),
+                    "phase": "pre_execution",
+                    "handler_configured": bool(handler),
+                    "executable": handler.startswith("agent."),
+                }
+            )
+    for index, step in enumerate(internal_graph, start=1):
+        item = step if isinstance(step, dict) else {}
+        configured_handler = str(item.get("handler") or "").strip()
+        display_handler = configured_handler or str(module.get("handler", ""))
+        sequence.append(
+            {
+                "step": len(sequence) + 1,
+                "id": item.get("id", f"step_{index}"),
+                "label": item.get("label", item.get("id", f"step_{index}")),
+                "handler": display_handler,
+                "kind": item.get("kind", "internal_step"),
+                "phase": "internal_graph",
+                "handler_configured": bool(configured_handler),
+                "executable": configured_handler.startswith("agent."),
+            }
+        )
+    return sequence
+
+
+def _module_dry_run_summary(sequence: list[dict[str, object]]) -> dict[str, object]:
+    """Summarize draft module dry-run sequence for operator evidence panels."""
+    pre = [item for item in sequence if item.get("phase") == "pre_execution"]
+    internal = [item for item in sequence if item.get("phase") == "internal_graph"]
+    executable = [item for item in sequence if item.get("executable")]
+    checkpoints = [item for item in sequence if not item.get("executable")]
+    handlers = sorted({str(item.get("handler") or "") for item in sequence if item.get("handler")})
+    return {
+        "step_count": len(sequence),
+        "pre_execution_count": len(pre),
+        "internal_graph_count": len(internal),
+        "executable_count": len(executable),
+        "checkpoint_count": len(checkpoints),
+        "handler_count": len(handlers),
+        "handlers": handlers,
+        "ordered_step_ids": [str(item.get("id") or "") for item in sequence],
+        "first_step_id": str(sequence[0].get("id") or "") if sequence else "",
+        "last_step_id": str(sequence[-1].get("id") or "") if sequence else "",
+    }
+
+
+def _module_dry_run_evidence(module_id: str, payload: dict[str, Any]) -> dict[str, object]:
+    """Build reusable non-device dry-run evidence for module API save/create responses."""
+    sequence = _module_dry_run_sequence(module_id, payload)
+    return {
+        "ok": True,
+        "module_id": module_id,
+        "sequence": sequence,
+        "summary": _module_dry_run_summary(sequence),
+    }
+
+
+def _safe_run_dir(run_id: str) -> Path:
+    """Resolve a run directory under run_root without allowing path traversal."""
+    safe = "".join(ch if ch.isalnum() or ch in {"-", "_", "."} else "-" for ch in run_id).strip(".-")
+    if not safe:
+        raise HTTPException(status_code=400, detail="run_id cannot be empty")
+    root = controller._deps.run_root.resolve()
+    run_dir = (root / safe).resolve()
+    try:
+        run_dir.relative_to(root)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="run_id escapes run root") from exc
+    return run_dir
+
+
+def _safe_run_artifact_path(run_id: str, artifact_path: str) -> Path:
+    """Resolve one artifact path under a safe run directory."""
+    run_dir = _safe_run_dir(run_id)
+    artifact = (run_dir / artifact_path).resolve()
+    try:
+        artifact.relative_to(run_dir)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="artifact path escapes run directory") from exc
+    if not artifact.exists() or not artifact.is_file():
+        raise HTTPException(status_code=404, detail="Run artifact not found")
+    return artifact
+
+
+def _artifact_preview_kind(path: Path) -> str:
+    """Classify artifact preview behavior for Runtime IDE."""
+    suffix = path.suffix.lower()
+    if suffix in {".svg", ".png", ".jpg", ".jpeg", ".webp", ".gif"}:
+        return "image"
+    if suffix in {".json", ".md", ".txt", ".csv", ".log", ".yaml", ".yml", ".gcode"}:
+        return "text"
+    if suffix in {".stl"}:
+        return "mesh"
+    return "download"
+
+
+def _current_run_id() -> str:
+    """Return current controller run id."""
+    snapshot = controller.snapshot()
+    state = snapshot.get("state", {}) if isinstance(snapshot.get("state"), dict) else {}
+    return str(state.get("run_id") or "")
+
+
+def _require_current_run(run_id: str) -> None:
+    """Ensure a mutating run command targets the active run."""
+    current = _current_run_id()
+    if run_id != current:
+        raise HTTPException(status_code=404, detail=f"Unknown active run_id={run_id}")
+
+
+def _approval_id_from_event(event: dict[str, Any]) -> str:
+    """Return the stable approval id associated with one approval event."""
+    payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+    return str(payload.get("approval_id") or payload.get("id") or event.get("event_id") or "")
+
+
+def _approval_events_for_run(run_id: str) -> dict[str, list[dict[str, object]]]:
+    """Build pending/resolved approval queues from buffered runtime events."""
+    events = [event for event in controller.recent_events() if event.get("run_id") == run_id]
+    requested: list[dict[str, Any]] = []
+    resolved: dict[str, dict[str, Any]] = {}
+    for event in events:
+        event_type = str(event.get("type") or event.get("event_type") or "")
+        payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+        is_request = (
+            event_type == "approval.requested"
+            or bool(payload.get("requires_human_approval"))
+            or bool(payload.get("requires_approval"))
+            or str(payload.get("status") or "") == "waiting_approval"
+        )
+        if is_request:
+            requested.append(event)
+        if event_type == "approval.resolved":
+            approval_id = _approval_id_from_event(event)
+            if approval_id:
+                resolved[approval_id] = event
+    approvals: list[dict[str, object]] = []
+    for event in requested:
+        payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+        approval_id = _approval_id_from_event(event)
+        resolved_event = resolved.get(approval_id)
+        approvals.append(
+            {
+                "approval_id": approval_id,
+                "status": "resolved" if resolved_event else "pending",
+                "title": payload.get("title") or event.get("message") or "Approval required",
+                "reason": payload.get("reason") or payload.get("failure_code") or "",
+                "stage": payload.get("stage") or event.get("timestamp_stage") or event.get("node_id") or "",
+                "safety_class": payload.get("safety_class", "operator_review"),
+                "request_event_id": event.get("event_id", ""),
+                "requested_at": event.get("ts") or event.get("timestamp") or "",
+                "resolved_event_id": resolved_event.get("event_id", "") if resolved_event else "",
+                "resolved_at": resolved_event.get("ts", "") if resolved_event else "",
+                "decision": (resolved_event.get("payload", {}) if isinstance(resolved_event, dict) else {}).get("decision", "") if resolved_event else "",
+                "operator": (resolved_event.get("payload", {}) if isinstance(resolved_event, dict) else {}).get("operator", "") if resolved_event else "",
+                "payload": payload,
+            }
+        )
+    pending = [item for item in approvals if item["status"] == "pending"]
+    resolved_items = [item for item in approvals if item["status"] == "resolved"]
+    return {"approvals": approvals, "pending": pending, "resolved": resolved_items}
+
+
+def _runtime_graph_handler_registry() -> HandlerRegistry:
+    """Build the Runtime IDE handler allowlist from registered runtime agents."""
+    registry = HandlerRegistry()
+
+    async def _noop(runtime_state: dict[str, object]) -> dict[str, object]:
+        return runtime_state
+
+    for handler_id in {"runtime.dispatch", "runtime.idle", "runtime.terminal", "runtime.step_complete", GENERATED_MODULE_HANDLER_ID}:
+        registry.register(handler_id, _noop)
+    for agent_name in controller._deps.agent_registry.names():
+        registry.register(f"agent.{agent_name}", _noop)
+    return registry
+
+
+def _runtime_module_ids() -> set[str]:
+    """Return module ids available to graph/module validation."""
+    ids: set[str] = set()
+    for path in RUNTIME_MODULE_ROOT.glob("*/module.yaml"):
+        try:
+            raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        except (OSError, yaml.YAMLError):
+            ids.add(path.parent.name)
+            continue
+        module = raw.get("module", raw) if isinstance(raw, dict) else {}
+        if isinstance(module, dict):
+            ids.add(str(module.get("id") or path.parent.name))
+        else:
+            ids.add(path.parent.name)
+    return ids
+
+
+def _runtime_graph_compiler(config: GraphConfig) -> ATRLangGraphCompiler:
+    """Build a compiler with current handler and module allowlists."""
+    return ATRLangGraphCompiler(config, _runtime_graph_handler_registry(), module_ids=_runtime_module_ids())
+
+
+async def _emit_graph_validation_failed(
+    *,
+    graph_id: str,
+    action: str,
+    errors: list[str],
+) -> None:
+    """Emit a standard Runtime IDE graph validation failure event."""
+    await controller.emit_runtime_event(
+        event_type="graph.validation_failed",
+        message=f"Runtime graph {graph_id} validation failed during {action}.",
+        level="ERROR",
+        payload={
+            "graph_id": graph_id,
+            "node_id": "runtime_ide",
+            "status": "failed",
+            "action": action,
+            "errors": list(errors),
+        },
+    )
+
+
+async def _emit_graph_compiled(
+    *,
+    graph_id: str,
+    action: str,
+    compiled_graph: dict[str, object],
+) -> None:
+    """Emit a standard Runtime IDE graph compiled event."""
+    await controller.emit_runtime_event(
+        event_type="graph.compiled",
+        message=f"Runtime graph {graph_id} compiled for {action}.",
+        payload={
+            "graph_id": graph_id,
+            "node_id": "runtime_ide",
+            "status": "compiled",
+            "action": action,
+            "compiled_graph": compiled_graph,
+        },
+    )
+
+
+def _graph_dry_run_sequence(
+    config: GraphConfig,
+    max_steps: int = 24,
+    *,
+    start_stage: str = "idle",
+) -> list[dict[str, object]]:
+    """Simulate configured stage transitions without calling agents or device tools."""
+    stage = start_stage or "idle"
+    if stage not in config.stage_dispatch and stage not in config.terminal_stages:
+        raise HTTPException(status_code=400, detail=f"Unknown dry-run start_stage={stage}")
+    sequence: list[dict[str, object]] = []
+    seen: set[str] = set()
+    nodes_by_id = {node.id: node for node in config.nodes}
+    for step_index in range(max_steps):
+        node_id = config.node_for_stage(stage)
+        node = nodes_by_id.get(node_id or "")
+        module_id = _module_id_from_graph_node_module_id(node.module_id if node else None)
+        module_runtime = _module_runtime_summary(module_id) if module_id else {}
+        graph_handler = str(node.handler) if node else ""
+        module_handler = str(module_runtime.get("handler") or "") if module_runtime else ""
+        effective_handler = module_handler or graph_handler
+        transition_candidates = config.transition_candidates(stage)
+        next_stage = config.next_stage(stage, guardian_decision="continue", state_metadata={})
+        selected_transition = next((candidate for candidate in transition_candidates if str(candidate.get("to_stage")) == next_stage), {})
+        sequence.append(
+            {
+                "step": step_index + 1,
+                "stage": stage,
+                "node_id": node_id,
+                "node_label": node.label if node else "",
+                "node_kind": node.kind if node else "",
+                "graph_handler": graph_handler,
+                "module_id": module_id,
+                "module_handler": module_handler,
+                "effective_handler": effective_handler,
+                "module_runtime": module_runtime,
+                "next_stage": next_stage,
+                "transition_candidates": transition_candidates,
+                "selected_transition": selected_transition,
+            }
+        )
+        if stage == "guardian" and next_stage == "design":
+            break
+        if next_stage in config.terminal_stages:
+            break
+        if next_stage in seen:
+            break
+        seen.add(stage)
+        stage = next_stage
+    return sequence
+
+
+@app.get("/api/graphs")
+async def get_runtime_graphs() -> dict[str, object]:
+    """List runtime graph configs exposed to the GUI/IDE."""
+    graphs = [_graph_list_item(config, path) for _graph_id, path, config in _graph_config_items()]
+    return {"ok": True, "active_graph_id": PRIMARY_RUNTIME_GRAPH_ID, "graphs": graphs}
+
+
+@app.get("/api/graphs/{graph_id}")
+async def get_runtime_graph(graph_id: str) -> dict[str, object]:
+    """Return one runtime graph config."""
+    return {"ok": True, "graph": _graph_config_payload(graph_id)}
+
+
+@app.get("/api/handlers")
+async def get_runtime_handlers() -> dict[str, object]:
+    """Return allowlisted graph handler ids and runtime-call metadata."""
+    registry = _runtime_graph_handler_registry()
+    return {"ok": True, "handlers": registry.names(), "handler_metadata": registry.metadata_all()}
+
+
+@app.get("/api/tools")
+async def get_runtime_tools() -> dict[str, object]:
+    """Return registered ToolRegistry names for module allowlist editing."""
+    tools = sorted(_registered_tool_names())
+    return {"ok": True, "tools": tools, "count": len(tools)}
+
+
+@app.get("/api/modules")
+async def get_runtime_modules() -> dict[str, object]:
+    """List editable module configs exposed to the Runtime IDE."""
+    modules = [_module_list_item(path) for path in sorted(RUNTIME_MODULE_ROOT.glob("*/module.yaml"))]
+    categories: dict[str, int] = {}
+    for module in modules:
+        category = str(module.get("category") or "runtime")
+        categories[category] = categories.get(category, 0) + 1
+    return {"ok": True, "modules": modules, "categories": categories, "loaded_module_ids": sorted(_RUNTIME_MODULE_MANAGEMENT_LOADED)}
+
+
+@app.get("/api/modules/management-state")
+async def get_runtime_module_management_state() -> dict[str, object]:
+    """Return module management workspace load state."""
+    modules = [_module_list_item(path) for path in sorted(RUNTIME_MODULE_ROOT.glob("*/module.yaml"))]
+    known_ids = {str(module.get("id")) for module in modules}
+    _RUNTIME_MODULE_MANAGEMENT_LOADED.intersection_update(known_ids)
+    return {"ok": True, "loaded_module_ids": sorted(_RUNTIME_MODULE_MANAGEMENT_LOADED), "modules": modules}
+
+
+@app.post("/api/modules")
+async def create_runtime_module(req: RuntimeModuleCreateRequest) -> dict[str, object]:
+    """Create a cataloged Runtime IDE module from an uploaded Python file via Gemma 31B."""
+    if controller.snapshot().get("is_running"):
+        raise HTTPException(status_code=409, detail="Cannot create runtime module while a run is active.")
+    try:
+        safe_id = ModuleConfigStore.safe_module_id(req.module_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    module_dir = RUNTIME_MODULE_ROOT / safe_id
+    module_path = module_dir / "module.yaml"
+    if module_path.exists():
+        raise HTTPException(status_code=409, detail=f"Module already exists: {safe_id}")
+
+    handler_registry = set(_runtime_graph_handler_registry().names())
+    registered_tools = _registered_tool_names()
+    warnings: list[str] = []
+    transform_payload: dict[str, Any] = {}
+    transformed_source = ""
+
+    if req.transform_with_llm:
+        transform_payload = await _transform_module_source_with_gemma31b(req, safe_id)
+        transformed_source = str(transform_payload.get("transformed_source") or "").strip()
+    else:
+        transformed_source = str(req.source_text or "").strip()
+        if not transformed_source:
+            raise HTTPException(status_code=400, detail="source_text is required when transform_with_llm is false.")
+        warnings.append("LLM transform was disabled; module is stored as a protocol-pending source artifact.")
+
+    requested_handler = str(req.handler or "").strip()
+    suggested_handler = str(transform_payload.get("handler") or "").strip()
+    if requested_handler and requested_handler != "runtime.step_complete" and requested_handler in handler_registry:
+        handler = requested_handler
+    elif suggested_handler in handler_registry:
+        handler = suggested_handler
+    elif requested_handler in handler_registry:
+        handler = requested_handler
+    else:
+        handler = "runtime.step_complete"
+        if requested_handler or suggested_handler:
+            warnings.append(f"Unsupported handler ignored: requested={requested_handler or '-'} suggested={suggested_handler or '-'}")
+
+    category = _module_designer_category(str(transform_payload.get("category") or req.category or "custom"))
+    label = str(transform_payload.get("label") or req.label or safe_id).strip() or safe_id
+    llm_role = str(req.llm_role or transform_payload.get("llm_role") or "").strip()
+    notes = str(transform_payload.get("notes") or req.notes or "Created from Runtime IDE Module Designer.").strip()
+
+    suggested_tools = transform_payload.get("tools") if isinstance(transform_payload.get("tools"), list) else []
+    raw_tools = [*req.tools, *[str(tool) for tool in suggested_tools]]
+    tools: list[str] = []
+    rejected_tools: list[str] = []
+    for tool in raw_tools:
+        clean = str(tool).strip()
+        if not clean or clean in tools:
+            continue
+        if registered_tools and clean not in registered_tools:
+            rejected_tools.append(clean)
+            continue
+        tools.append(clean)
+    if rejected_tools:
+        warnings.append(f"Unregistered tools omitted: {', '.join(rejected_tools[:8])}")
+
+    internal_graph = _normalize_designer_steps(
+        transform_payload.get("internal_graph"),
+        default_handler=handler,
+        handler_registry=handler_registry,
+    )
+
+    module_dir.mkdir(parents=True, exist_ok=True)
+    original_source_name = _safe_source_filename(req.source_filename or f"{safe_id}_original.py")
+    if original_source_name == "handler.py":
+        original_source_name = "source_original.py"
+    original_path = module_dir / original_source_name
+    if req.source_text.strip():
+        original_path.write_text(req.source_text, encoding="utf-8")
+
+    transformed_path = module_dir / "handler.py"
+    transformed_path.write_text(transformed_source + ("\n" if not transformed_source.endswith("\n") else ""), encoding="utf-8")
+
+    metadata: dict[str, object] = {
+        "category": category,
+        "created_from": "runtime_ide_module_designer",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "source_filename": original_source_name,
+        "python_source_path": str(original_path) if req.source_text.strip() else "",
+        "transformed_python_source_path": str(transformed_path),
+        "transformed_by_model": "gemma4:31b" if req.transform_with_llm else "operator_disabled_llm_transform",
+        "source_truncated_for_prompt": bool(transform_payload.get("_source_truncated_for_prompt", False)),
+        "pending_handler_registration": handler == "runtime.step_complete",
+        "generated_adapter_approved": False,
+        "generated_adapter_handler_id": GENERATED_MODULE_HANDLER_ID,
+        "protocol_contract": "AgentResult / OrchestratorState / AgentContext / ToolRegistry",
+        "warnings": warnings,
+    }
+    if rejected_tools:
+        metadata["rejected_tools"] = rejected_tools
+
+    payload = {
+        "module": {
+            "id": safe_id,
+            "label": label,
+            "handler": handler,
+            "llm_role": llm_role,
+            "editable": True,
+            "category": category,
+            "metadata": metadata,
+            "safety": {"live_requires_validation": True, "dry_run_supported": True, "requires_human_approval": handler == "runtime.step_complete"},
+            "tools": tools,
+            "pre_execution": [],
+            "internal_graph": internal_graph,
+            "io_contract": {
+                "input": "OrchestratorState",
+                "output": "AgentResult.data merged into OrchestratorState",
+                "adapter_signature": "async run(state: OrchestratorState, ctx: AgentContext) -> AgentResult",
+            },
+            "notes": notes,
+        }
+    }
+    errors = _validate_module_payload(safe_id, payload)
+    if errors:
+        return {"ok": False, "module_id": safe_id, "errors": errors, "warnings": warnings, "module": payload}
+
+    store = _module_config_store()
+    dry_run = _module_dry_run_evidence(safe_id, payload)
+    version = store.save_version(safe_id, payload, reason="runtime_ide_module_designer_create", author="runtime_ide")
+    store.write_active(safe_id, payload)
+    return {
+        "ok": True,
+        "module_id": safe_id,
+        "errors": [],
+        "warnings": warnings,
+        "version": version,
+        "module": payload,
+        "dry_run": dry_run,
+        "catalog_item": _module_list_item(module_path),
+        "transform": {
+            "model": "gemma4:31b" if req.transform_with_llm else "disabled",
+            "category": category,
+            "handler": handler,
+            "transformed_source_path": str(transformed_path),
+            "pending_handler_registration": handler == "runtime.step_complete",
+            "generated_adapter_approved": False,
+            "generated_adapter_handler_id": GENERATED_MODULE_HANDLER_ID,
+        },
+    }
+
+
+@app.get("/api/modules/{module_id}")
+async def get_runtime_module(module_id: str) -> dict[str, object]:
+    """Return one editable module config."""
+    return {"ok": True, "module": _module_config_payload(module_id), "loaded": module_id in _RUNTIME_MODULE_MANAGEMENT_LOADED}
+
+
+@app.post("/api/modules/{module_id}/register-generated")
+async def register_generated_runtime_module(module_id: str) -> dict[str, object]:
+    """Approve and activate a Module Designer-generated adapter after static validation."""
+    if controller.snapshot().get("is_running"):
+        raise HTTPException(status_code=409, detail="Cannot register generated module while a run is active.")
+    payload = ModuleConfigStore.normalize_payload(dict(_module_config_payload(module_id)))
+    module = payload.get("module", {}) if isinstance(payload, dict) else {}
+    if not isinstance(module, dict):
+        raise HTTPException(status_code=400, detail="Invalid module payload.")
+    safe_id = ModuleConfigStore.safe_module_id(module_id)
+    adapter_path = generated_adapter_path(RUNTIME_MODULE_ROOT, safe_id)
+    errors = validate_generated_adapter_file(adapter_path)
+    if errors:
+        return {"ok": False, "module_id": safe_id, "registered": False, "errors": errors, "adapter_path": str(adapter_path)}
+    metadata = module.setdefault("metadata", {})
+    if not isinstance(metadata, dict):
+        metadata = {}
+        module["metadata"] = metadata
+    module["handler"] = GENERATED_MODULE_HANDLER_ID
+    for step in module.get("internal_graph", []) if isinstance(module.get("internal_graph"), list) else []:
+        if isinstance(step, dict) and str(step.get("handler") or "").strip() == "runtime.step_complete":
+            step.pop("handler", None)
+    safety = module.setdefault("safety", {})
+    if isinstance(safety, dict):
+        safety["requires_human_approval"] = True
+        safety["live_requires_validation"] = True
+        safety["dry_run_supported"] = True
+    metadata["pending_handler_registration"] = False
+    metadata["generated_adapter_approved"] = True
+    metadata["generated_adapter_handler_id"] = GENERATED_MODULE_HANDLER_ID
+    metadata["generated_adapter_registered_at"] = datetime.now(timezone.utc).isoformat()
+    metadata["generated_adapter_path"] = str(adapter_path)
+    normalized = {"module": module}
+    enabled, enable_errors = generated_adapter_enabled(safe_id, normalized, RUNTIME_MODULE_ROOT)
+    if not enabled:
+        return {"ok": False, "module_id": safe_id, "registered": False, "errors": enable_errors, "adapter_path": str(adapter_path)}
+    errors = _validate_module_payload(safe_id, normalized)
+    if errors:
+        return {"ok": False, "module_id": safe_id, "registered": False, "errors": errors, "adapter_path": str(adapter_path)}
+    dry_run = _module_dry_run_evidence(safe_id, normalized)
+    version = _module_config_store().save_version(
+        safe_id,
+        normalized,
+        reason="runtime_module_register_generated_adapter",
+        author="runtime_ide",
+    )
+    _module_config_store().write_active(safe_id, normalized)
+    return {
+        "ok": True,
+        "module_id": safe_id,
+        "registered": True,
+        "handler": GENERATED_MODULE_HANDLER_ID,
+        "adapter_path": str(adapter_path),
+        "version": version,
+        "dry_run": dry_run,
+        "module": normalized,
+    }
+
+
+@app.post("/api/modules/{module_id}/load")
+async def load_runtime_module_into_management(module_id: str) -> dict[str, object]:
+    """Load a module into the standalone management workspace without changing runtime config."""
+    payload = _module_config_payload(module_id)
+    _RUNTIME_MODULE_MANAGEMENT_LOADED.add(module_id)
+    return {
+        "ok": True,
+        "module_id": module_id,
+        "loaded": True,
+        "loaded_module_ids": sorted(_RUNTIME_MODULE_MANAGEMENT_LOADED),
+        "module": payload,
+    }
+
+
+@app.post("/api/modules/{module_id}/unload")
+async def unload_runtime_module_from_management(module_id: str) -> dict[str, object]:
+    """Unload a module from the management workspace without deleting module.yaml."""
+    _module_config_payload(module_id)
+    _RUNTIME_MODULE_MANAGEMENT_LOADED.discard(module_id)
+    return {"ok": True, "module_id": module_id, "loaded": False, "loaded_module_ids": sorted(_RUNTIME_MODULE_MANAGEMENT_LOADED)}
+
+
+@app.get("/api/modules/{module_id}/versions")
+async def get_runtime_module_versions(module_id: str) -> dict[str, object]:
+    """List saved versions for one module config."""
+    _module_config_payload(module_id)
+    return {"ok": True, "module_id": module_id, "versions": _module_config_store().list_versions(module_id)}
+
+
+@app.get("/api/modules/{module_id}/versions/{version_id}")
+async def get_runtime_module_version(module_id: str, version_id: str) -> dict[str, object]:
+    """Return one saved module config version without activating it."""
+    _module_config_payload(module_id)
+    try:
+        version = _module_config_store().read_version(module_id, version_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, "module_id": module_id, "version": version}
+
+
+@app.post("/api/modules/{module_id}/validate")
+async def validate_runtime_module(module_id: str, req: RuntimeModuleSaveRequest | None = None) -> dict[str, object]:
+    """Validate an active or draft module config without writing it."""
+    payload = dict(req.module) if req and req.module else _module_config_payload(module_id)
+    errors = _validate_module_payload(module_id, payload)
+    return {"ok": not errors, "module_id": module_id, "errors": errors}
+
+
+@app.post("/api/modules/{module_id}/dry-run")
+async def dry_run_runtime_module(module_id: str, req: RuntimeModuleSaveRequest | None = None) -> dict[str, object]:
+    """Simulate the configured internal module step order without calling tools/devices."""
+    payload = dict(req.module) if req and req.module else _module_config_payload(module_id)
+    errors = _validate_module_payload(module_id, payload)
+    if errors:
+        return {"ok": False, "module_id": module_id, "errors": errors, "sequence": [], "summary": _module_dry_run_summary([])}
+    sequence = _module_dry_run_sequence(module_id, payload)
+    return {"ok": True, "module_id": module_id, "errors": [], "sequence": sequence, "summary": _module_dry_run_summary(sequence)}
+
+
+@app.put("/api/modules/{module_id}")
+async def save_runtime_module(module_id: str, req: RuntimeModuleSaveRequest) -> dict[str, object]:
+    """Validate, version, and optionally activate one module config."""
+    if controller.snapshot().get("is_running"):
+        raise HTTPException(status_code=409, detail="Cannot modify runtime module while a run is active.")
+    if not req.module:
+        raise HTTPException(status_code=400, detail="Missing module payload.")
+    payload = ModuleConfigStore.normalize_payload(dict(req.module))
+    errors = _validate_module_payload(module_id, payload)
+    if errors:
+        return {
+            "ok": False,
+            "module_id": module_id,
+            "errors": errors,
+            "version": None,
+            "dry_run": {"ok": False, "module_id": module_id, "sequence": [], "summary": _module_dry_run_summary([])},
+        }
+    dry_run = _module_dry_run_evidence(module_id, payload)
+    version = _module_config_store().save_version(module_id, payload, reason=req.reason, author=req.author)
+    if req.activate:
+        _module_config_store().write_active(module_id, payload)
+    return {
+        "ok": True,
+        "module_id": module_id,
+        "errors": [],
+        "version": version,
+        "activated": req.activate,
+        "dry_run": dry_run,
+    }
+
+
+@app.post("/api/graphs/{graph_id}/validate")
+async def validate_runtime_graph(graph_id: str) -> dict[str, object]:
+    """Validate the runtime graph against the current handler allowlist."""
+    config = _load_runtime_graph_config(graph_id)
+    compiler = _runtime_graph_compiler(config)
+    errors = compiler.validate()
+    if errors:
+        await _emit_graph_validation_failed(graph_id=graph_id, action="validate", errors=errors)
+    return {"ok": not errors, "graph_id": graph_id, "errors": errors}
+
+
+@app.post("/api/graphs/{graph_id}/validate-draft")
+async def validate_runtime_graph_draft(graph_id: str, req: RuntimeGraphSaveRequest) -> dict[str, object]:
+    """Validate and compile-check a draft graph payload without writing a version."""
+    if not req.graph:
+        raise HTTPException(status_code=400, detail="Missing graph payload.")
+    try:
+        config = GraphConfig.model_validate(req.graph)
+    except Exception as exc:
+        errors = [str(exc)]
+        await _emit_graph_validation_failed(graph_id=graph_id, action="validate-draft", errors=errors)
+        return {"ok": False, "graph_id": graph_id, "errors": errors, "compiled": False}
+    if graph_id != config.id:
+        raise HTTPException(status_code=400, detail=f"graph_id path/body mismatch: {graph_id} != {config.id}")
+    compiler = _runtime_graph_compiler(config)
+    errors = compiler.validate()
+    if errors:
+        await _emit_graph_validation_failed(graph_id=graph_id, action="validate-draft", errors=errors)
+        return {"ok": False, "graph_id": graph_id, "errors": errors, "compiled": False}
+    compiler.compile()
+    compiled_graph = compiler.summary()
+    await _emit_graph_compiled(graph_id=graph_id, action="validate-draft", compiled_graph=compiled_graph)
+    return {"ok": True, "graph_id": graph_id, "errors": [], "compiled": True, "compiled_graph": compiled_graph}
+
+
+@app.post("/api/graphs/{graph_id}/compile")
+async def compile_runtime_graph(graph_id: str) -> dict[str, object]:
+    """Compile the active graph without starting agents or hardware."""
+    config = _load_runtime_graph_config(graph_id)
+    compiler = _runtime_graph_compiler(config)
+    errors = compiler.validate()
+    if errors:
+        await _emit_graph_validation_failed(graph_id=graph_id, action="compile", errors=errors)
+        return {"ok": False, "graph_id": graph_id, "errors": errors, "compiled": False}
+    compiler.compile()
+    compiled_graph = compiler.summary()
+    await _emit_graph_compiled(graph_id=graph_id, action="compile", compiled_graph=compiled_graph)
+    return {"ok": True, "graph_id": graph_id, "errors": [], "compiled": True, "compiled_graph": compiled_graph}
+
+
+@app.post("/api/graphs/{graph_id}/export-yaml", response_class=PlainTextResponse)
+async def export_runtime_graph_yaml(graph_id: str, req: RuntimeGraphSaveRequest | None = None) -> PlainTextResponse:
+    """Export an active or draft graph payload as canonical YAML."""
+    payload = dict(req.graph) if req and req.graph else _graph_config_payload(graph_id)
+    try:
+        config = GraphConfig.model_validate(payload)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid graph payload: {exc}") from exc
+    if graph_id != config.id:
+        raise HTTPException(status_code=400, detail=f"graph_id path/body mismatch: {graph_id} != {config.id}")
+    body = yaml.safe_dump({"graph": config.model_dump(mode="json")}, sort_keys=False, allow_unicode=True)
+    return PlainTextResponse(
+        content=body,
+        media_type="application/x-yaml",
+        headers={"Content-Disposition": f'attachment; filename="{config.id}.yaml"'},
+    )
+
+
+@app.post("/api/graphs/{graph_id}/import-yaml")
+async def import_runtime_graph_yaml(graph_id: str, req: RuntimeGraphYamlImportRequest) -> dict[str, object]:
+    """Parse, validate, and compile-check an imported graph YAML draft without activation."""
+    try:
+        raw = yaml.safe_load(req.yaml_text) or {}
+    except yaml.YAMLError as exc:
+        errors = [f"YAML parse error: {exc}"]
+        await _emit_graph_validation_failed(graph_id=graph_id, action="import-yaml", errors=errors)
+        return {"ok": False, "graph_id": graph_id, "errors": errors, "compiled": False, "graph": None}
+    if not isinstance(raw, dict):
+        errors = ["YAML root must be an object"]
+        await _emit_graph_validation_failed(graph_id=graph_id, action="import-yaml", errors=errors)
+        return {"ok": False, "graph_id": graph_id, "errors": errors, "compiled": False, "graph": None}
+    graph_payload = raw.get("graph", raw)
+    try:
+        config = GraphConfig.model_validate(graph_payload)
+    except Exception as exc:
+        errors = [str(exc)]
+        await _emit_graph_validation_failed(graph_id=graph_id, action="import-yaml", errors=errors)
+        return {"ok": False, "graph_id": graph_id, "errors": errors, "compiled": False, "graph": None}
+    if graph_id != config.id:
+        errors = [f"graph_id path/body mismatch: {graph_id} != {config.id}"]
+        await _emit_graph_validation_failed(graph_id=graph_id, action="import-yaml", errors=errors)
+        raise HTTPException(status_code=400, detail=errors[0])
+    compiler = _runtime_graph_compiler(config)
+    errors = compiler.validate()
+    if errors:
+        await _emit_graph_validation_failed(graph_id=graph_id, action="import-yaml", errors=errors)
+        return {
+            "ok": False,
+            "graph_id": graph_id,
+            "errors": errors,
+            "compiled": False,
+            "compiled_graph": None,
+            "graph": config.model_dump(mode="json"),
+        }
+    compiler.compile()
+    compiled_graph = compiler.summary()
+    await _emit_graph_compiled(graph_id=graph_id, action="import-yaml", compiled_graph=compiled_graph)
+    return {
+        "ok": True,
+        "graph_id": graph_id,
+        "errors": [],
+        "compiled": True,
+        "compiled_graph": compiled_graph,
+        "graph": config.model_dump(mode="json"),
+    }
+
+
+@app.get("/api/graphs/{graph_id}/versions")
+async def get_runtime_graph_versions(graph_id: str) -> dict[str, object]:
+    """List saved graph config versions."""
+    _graph_config_payload(graph_id)
+    return {"ok": True, "graph_id": graph_id, "versions": _graph_version_store(graph_id).list_versions(graph_id)}
+
+
+@app.get("/api/graphs/{graph_id}/versions/{version_id}")
+async def get_runtime_graph_version(graph_id: str, version_id: str) -> dict[str, object]:
+    """Return one saved graph config version without activating it."""
+    _graph_config_payload(graph_id)
+    try:
+        version = _graph_version_store(graph_id).read_version(graph_id, version_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, "graph_id": graph_id, "version": version}
+
+
+@app.put("/api/graphs/{graph_id}")
+async def save_runtime_graph(graph_id: str, req: RuntimeGraphSaveRequest) -> dict[str, object]:
+    """Validate, version, and optionally activate a Runtime IDE graph config."""
+    if controller.snapshot().get("is_running"):
+        raise HTTPException(status_code=409, detail="Cannot modify runtime graph while a run is active.")
+    if not req.graph:
+        raise HTTPException(status_code=400, detail="Missing graph payload.")
+    try:
+        config = GraphConfig.model_validate(req.graph)
+    except Exception as exc:
+        errors = [str(exc)]
+        await _emit_graph_validation_failed(graph_id=graph_id, action="save", errors=errors)
+        return {"ok": False, "graph_id": graph_id, "errors": errors, "version": None, "dry_run": {"ok": False, "sequence": [], "dry_run_record": {}}}
+    if graph_id != config.id:
+        errors = [f"graph_id path/body mismatch: {graph_id} != {config.id}"]
+        await _emit_graph_validation_failed(graph_id=graph_id, action="save", errors=errors)
+        raise HTTPException(status_code=400, detail=errors[0])
+    compiler = _runtime_graph_compiler(config)
+    errors = compiler.validate()
+    if errors:
+        await _emit_graph_validation_failed(graph_id=graph_id, action="save", errors=errors)
+        return {"ok": False, "graph_id": graph_id, "errors": errors, "version": None, "dry_run": {"ok": False, "sequence": [], "dry_run_record": {}}}
+    compiler.compile()
+    compiled_graph = compiler.summary()
+    dry_run = _graph_dry_run_evidence(config=config, compiled_graph=compiled_graph, record_live_gate=False)
+    await _emit_graph_compiled(graph_id=graph_id, action="save", compiled_graph=compiled_graph)
+    payload = config.model_dump(mode="json")
+    version = _graph_version_store(graph_id).save_version(graph_id, payload, reason=req.reason, author=req.author)
+    if req.activate:
+        _graph_version_store(graph_id).write_active(payload)
+        dry_run["dry_run_record"] = _record_graph_dry_run(
+            config=config,
+            options=RuntimeGraphDryRunRequest(start_stage=str(dry_run.get("start_stage") or "idle"), max_steps=24),
+            sequence=dry_run.get("sequence", []),
+            compiled_graph=compiled_graph,
+        )
+    return {
+        "ok": True,
+        "graph_id": graph_id,
+        "errors": [],
+        "version": version,
+        "activated": req.activate,
+        "compiled_graph": compiled_graph,
+        "dry_run": dry_run,
+        "dry_run_record": dry_run.get("dry_run_record", {}),
+    }
+
+
+@app.post("/api/graphs/{graph_id}/dry-run")
+async def dry_run_runtime_graph(graph_id: str, req: RuntimeGraphDryRunRequest | None = None) -> dict[str, object]:
+    """Run a non-device transition simulation for the active graph or a supplied draft graph."""
+    options = req or RuntimeGraphDryRunRequest()
+    draft_mode = bool(options.graph)
+    if draft_mode:
+        try:
+            config = GraphConfig.model_validate(options.graph)
+        except Exception as exc:
+            errors = [str(exc)]
+            await _emit_graph_validation_failed(graph_id=graph_id, action="dry-run-draft", errors=errors)
+            return {"ok": False, "graph_id": graph_id, "errors": errors, "sequence": [], "draft": True}
+        if graph_id != config.id:
+            raise HTTPException(status_code=400, detail=f"graph_id path/body mismatch: {graph_id} != {config.id}")
+    else:
+        config = _load_runtime_graph_config(graph_id)
+    compiler = _runtime_graph_compiler(config)
+    errors = compiler.validate()
+    if errors:
+        await _emit_graph_validation_failed(graph_id=graph_id, action="dry-run-draft" if draft_mode else "dry-run", errors=errors)
+        return {"ok": False, "graph_id": graph_id, "errors": errors, "sequence": [], "draft": draft_mode}
+    compiler.compile()
+    compiled_graph = compiler.summary()
+    sequence = _graph_dry_run_sequence(config, max_steps=options.max_steps, start_stage=options.start_stage)
+    if draft_mode:
+        dry_run_record = {
+            "graph_id": config.id,
+            "digest": _graph_config_digest(config),
+            "dry_run_at": datetime.now(timezone.utc).isoformat(),
+            "start_stage": options.start_stage,
+            "max_steps": options.max_steps,
+            "step_count": len(sequence),
+            "compiled_graph": compiled_graph,
+            "draft": True,
+            "live_gate_recorded": False,
+        }
+    else:
+        dry_run_record = _record_graph_dry_run(config=config, options=options, sequence=sequence, compiled_graph=compiled_graph)
+    await _emit_graph_compiled(graph_id=graph_id, action="dry-run-draft" if draft_mode else "dry-run", compiled_graph=compiled_graph)
+    return {
+        "ok": True,
+        "graph_id": graph_id,
+        "errors": [],
+        "start_stage": options.start_stage,
+        "sequence": sequence,
+        "compiled_graph": compiled_graph,
+        "dry_run_record": dry_run_record,
+        "draft": draft_mode,
+    }
+
+
+@app.get("/api/graphs/{graph_id}/dry-run-gate")
+async def get_runtime_graph_dry_run_gate(graph_id: str) -> dict[str, object]:
+    """Return active-config dry-run gate status for live Runtime IDE execution."""
+    config = _load_runtime_graph_config(graph_id)
+    dry_run_ok, dry_run_record = _graph_live_dry_run_gate(config)
+    return {
+        "ok": True,
+        "graph_id": graph_id,
+        "gate_ok": dry_run_ok,
+        "has_record": bool(dry_run_record),
+        "dry_run_record": dry_run_record,
+    }
+
+
+@app.post("/api/graphs/{graph_id}/run")
+async def run_runtime_graph(graph_id: str, req: StartRunRequest) -> dict[str, object]:
+    """Compile-check one graph config and start it through the shared LangGraph run loop."""
+    config_path = _graph_config_path(graph_id)
+    config = load_graph_config(config_path)
+    compiler = _runtime_graph_compiler(config)
+    errors = compiler.validate()
+    if errors:
+        await _emit_graph_validation_failed(graph_id=graph_id, action="run", errors=errors)
+        return {"ok": False, "graph_id": graph_id, "errors": errors, "run": None}
+    compiler.compile()
+    compiled_graph = compiler.summary()
+    metadata = config.metadata if isinstance(config.metadata, dict) else {}
+    if graph_id != PRIMARY_RUNTIME_GRAPH_ID and req.mode == "live" and not bool(metadata.get("executable_from_runtime_ide")):
+        raise HTTPException(
+            status_code=400,
+            detail="Workspace template graph live run is disabled by graph metadata; use test/replay/fault-injection or set executable_from_runtime_ide=true after validation.",
+        )
+    dry_run_ok, dry_run_record = _graph_live_dry_run_gate(config)
+    if req.mode == "live" and not dry_run_ok:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "GRAPH_DRY_RUN_REQUIRED",
+                "message": "Run graph dry-run on the active graph config before live execution.",
+                "graph_id": graph_id,
+                "has_record": bool(dry_run_record),
+            },
+        )
+    run = await controller.start(
+        mode=Mode(req.mode),
+        goal=req.goal,
+        backend=req.backend,
+        fault=req.fault,
+        fault_stage=req.fault_stage,
+        graph_id=graph_id,
+        graph_config_path=config_path,
+    )
+    await _emit_graph_compiled(graph_id=graph_id, action="run", compiled_graph=compiled_graph)
+    return {
+        "ok": bool(run.get("ok")),
+        "graph_id": graph_id,
+        "errors": [],
+        "run": run,
+        "compiled_graph": compiled_graph,
+        "dry_run_record": dry_run_record if req.mode == "live" else _RUNTIME_GRAPH_DRY_RUN_RECORDS.get(graph_id, {}),
+    }
 
 
 @app.get("/api/bo/config")
@@ -614,6 +2426,15 @@ async def post_bo_benchmark(req: BOAgentRequest) -> dict[str, object]:
             },
         },
     )
+    await controller.emit_workspace_result(
+        workspace="bo",
+        tool="experiment.benchmark",
+        result=result,
+        stage=Stage.BO,
+        module_id="bo",
+        agent="bo_agent",
+        workflow="benchmark",
+    )
     return {"ok": bool(result.get("ok", False)), "warnings": warnings, "benchmark": result}
 
 
@@ -625,6 +2446,17 @@ async def post_bo_run(req: BOAgentRequest) -> dict[str, object]:
         state.mode = Mode(req.mode)
     agent = controller._deps.agent_registry.get("bo_agent")
     result = await agent.run_with_settings(state, controller._deps.agent_context, req.model_dump())
+    workspace_result = {"ok": bool(result.success), "summary": result.summary, "data": result.data}
+    await controller.emit_workspace_result(
+        workspace="bo",
+        tool="bo_agent.run_with_settings",
+        result=workspace_result,
+        stage=Stage.BO,
+        module_id="bo",
+        agent="bo_agent",
+        workflow="bo_agent_run",
+        node_event=True,
+    )
     return {
         "ok": bool(result.success),
         "summary": result.summary,
@@ -698,6 +2530,16 @@ async def post_cae_run(req: CAEAnalysisRequest) -> dict[str, object]:
     if result.get("ok"):
         controller._state.latest_analysis["cae_result"] = result
         controller._state.latest_analysis["cae_metrics"] = result.get("cae_metrics") or result.get("metrics") or {}
+    await controller.emit_workspace_result(
+        workspace="cae",
+        tool="cae.run_static_analysis",
+        result=result,
+        stage=Stage.ANALYSIS,
+        module_id="analysis",
+        agent="analysis_agent",
+        workflow="cae_static_analysis",
+        node_event=True,
+    )
     return {"ok": bool(result.get("ok")), "result": result, "snapshot": controller.snapshot()}
 
 
@@ -878,7 +2720,17 @@ async def post_printer_autoejection_test(req: PrinterAutoejectionTestRequest) ->
         "storage": profile.get("storage", "usb"),
         "ejection": {"enabled": True},
     }
-    return workflow.run_autoejection_test(payload)
+    result = workflow.run_autoejection_test(payload)
+    await controller.emit_workspace_result(
+        workspace="printer",
+        tool="printer.autoejection_test",
+        result=result,
+        stage=Stage.SPECIMEN,
+        module_id="specimen",
+        agent="specimen_agent",
+        workflow="autoejection_test",
+    )
+    return result
 
 
 @app.post("/api/equipment/windows/discover")
@@ -922,7 +2774,17 @@ async def post_windows_equipment_test() -> dict[str, object]:
     bridge = _equipment_bridge()
     health = bridge.health({"runtime_mode": "live", "force_live_bridge": True})
     programs = bridge.list_programs({"runtime_mode": "live", "force_live_bridge": True}) if health.get("ok") else {}
-    return {"ok": bool(health.get("ok")), "health": health, "programs": programs}
+    result = {"ok": bool(health.get("ok")), "health": health, "programs": programs}
+    await controller.emit_workspace_result(
+        workspace="equipment",
+        tool="equipment.pyautogui.health",
+        result=result,
+        stage=Stage.EQUIPMENT,
+        module_id="equipment",
+        agent="equipment_agent",
+        workflow="windows_bridge_test",
+    )
+    return result
 
 
 @app.post("/api/equipment/windows/run-program")
@@ -931,7 +2793,7 @@ async def post_windows_equipment_run_program(req: WindowsBridgeRunProgramRequest
     if not req.confirm_execute:
         raise HTTPException(status_code=400, detail="confirm_execute=true is required for setup GUI macro tests")
     bridge = _equipment_bridge()
-    return bridge.run(
+    result = bridge.run(
         {
             "runtime_mode": "live",
             "force_live_bridge": True,
@@ -941,6 +2803,17 @@ async def post_windows_equipment_run_program(req: WindowsBridgeRunProgramRequest
             "command": req.command or f"{req.program_id} 실행",
         }
     )
+    await controller.emit_workspace_result(
+        workspace="equipment",
+        tool="equipment.pyautogui.run",
+        result=result,
+        stage=Stage.EQUIPMENT,
+        module_id="equipment",
+        agent="equipment_agent",
+        workflow="windows_run_program",
+        node_event=True,
+    )
+    return result
 
 
 @app.get("/api/lerobot/config")
@@ -1236,9 +3109,9 @@ async def _run_manipulation_agent_bridge(req: ManipulationAgentBridgeRequest, *,
     manipulation = result.data.get("manipulation") if isinstance(result.data.get("manipulation"), dict) else {}
     if manipulation:
         await controller.emit_lerobot_result(manipulation)
-    return {
+    response = {
         "ok": bool(result.success),
-        "tool": "manipulation_agent.run",
+        "tool": "manipulation_agent.test" if force_test else "manipulation_agent.run",
         "mode": mode.value,
         "summary": result.summary,
         "data": result.data,
@@ -1247,6 +3120,17 @@ async def _run_manipulation_agent_bridge(req: ManipulationAgentBridgeRequest, *,
         "next_hint": result.next_hint,
         "state": state.model_dump(mode="json"),
     }
+    await controller.emit_workspace_result(
+        workspace="lerobot",
+        tool=str(response["tool"]),
+        result=response,
+        stage=Stage.MANIPULATION,
+        module_id="manipulation",
+        agent="manipulation_agent",
+        workflow="manipulation_agent_bridge",
+        node_event=True,
+    )
+    return response
 
 
 @app.get("/api/lerobot/manipulation-agent/config")
@@ -1383,6 +3267,24 @@ async def get_planning_artifact(run_id: str, specimen_id: str, filename: str) ->
 @app.post("/api/run/start")
 async def start_run(req: StartRunRequest) -> dict[str, object]:
     """Start a new orchestration run."""
+    if req.mode == "live":
+        config = _load_runtime_graph_config(PRIMARY_RUNTIME_GRAPH_ID)
+        compiler = _runtime_graph_compiler(config)
+        errors = compiler.validate()
+        if errors:
+            return {"ok": False, "graph_id": PRIMARY_RUNTIME_GRAPH_ID, "errors": errors, "run": None}
+        compiler.compile()
+        dry_run_ok, dry_run_record = _graph_live_dry_run_gate(config)
+        if not dry_run_ok:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "GRAPH_DRY_RUN_REQUIRED",
+                    "message": "Run graph dry-run on the active graph config before live execution.",
+                    "graph_id": PRIMARY_RUNTIME_GRAPH_ID,
+                    "has_record": bool(dry_run_record),
+                },
+            )
     return await controller.start(
         mode=Mode(req.mode),
         goal=req.goal,
@@ -1414,6 +3316,162 @@ async def stop_run() -> dict[str, object]:
 async def safe_stop_run() -> dict[str, object]:
     """Request safe stop."""
     return await controller.safe_stop()
+
+
+@app.get("/api/runs/{run_id}")
+async def get_runtime_run(run_id: str) -> dict[str, object]:
+    """Return current run snapshot or persisted run directory metadata."""
+    snapshot = controller.snapshot()
+    current = _current_run_id()
+    run_dir = _safe_run_dir(run_id)
+    if run_id == current:
+        return {"ok": True, "run_id": run_id, "active": True, "snapshot": snapshot, "run_dir": str(run_dir)}
+    if not run_dir.exists():
+        raise HTTPException(status_code=404, detail=f"Unknown run_id={run_id}")
+    return {"ok": True, "run_id": run_id, "active": False, "snapshot": None, "run_dir": str(run_dir)}
+
+
+@app.post("/api/runs/{run_id}/pause")
+async def pause_runtime_run(run_id: str) -> dict[str, object]:
+    """Pause the active run addressed by run_id."""
+    _require_current_run(run_id)
+    return await controller.pause()
+
+
+@app.post("/api/runs/{run_id}/resume")
+async def resume_runtime_run(run_id: str) -> dict[str, object]:
+    """Resume the active run addressed by run_id."""
+    _require_current_run(run_id)
+    return await controller.resume()
+
+
+@app.post("/api/runs/{run_id}/stop")
+async def stop_runtime_run(run_id: str) -> dict[str, object]:
+    """Stop the active run addressed by run_id."""
+    _require_current_run(run_id)
+    return await controller.stop()
+
+
+@app.get("/api/runs/{run_id}/approvals")
+async def get_runtime_approvals(run_id: str) -> dict[str, object]:
+    """Return pending/resolved human approval items derived from runtime events."""
+    if run_id != _current_run_id() and not _safe_run_dir(run_id).exists():
+        raise HTTPException(status_code=404, detail=f"Unknown run_id={run_id}")
+    queues = _approval_events_for_run(run_id)
+    return {"ok": True, "run_id": run_id, **queues}
+
+
+@app.post("/api/runs/{run_id}/approvals")
+async def request_runtime_approval(run_id: str, req: RuntimeApprovalCreateRequest) -> dict[str, object]:
+    """Create a standard approval.requested event for the active run."""
+    _require_current_run(run_id)
+    approval_id = make_event_id().replace("evt-", "approval-", 1)
+    payload: dict[str, object] = {
+        **req.payload,
+        "approval_id": approval_id,
+        "title": req.title,
+        "reason": req.reason,
+        "stage": req.stage or controller.snapshot().get("state", {}).get("stage", ""),
+        "safety_class": req.safety_class,
+        "requester": req.requester,
+        "requires_human_approval": True,
+        "status": "waiting_approval",
+    }
+    event = await controller.emit_runtime_event(
+        event_type="approval.requested",
+        message=req.title,
+        payload=payload,
+        level="WARNING",
+        run_id=run_id,
+    )
+    queues = _approval_events_for_run(run_id)
+    return {"ok": True, "run_id": run_id, "approval_id": approval_id, "event": event, **queues}
+
+
+@app.post("/api/runs/{run_id}/approvals/{approval_id}/resolve")
+async def resolve_runtime_approval(run_id: str, approval_id: str, req: RuntimeApprovalResolveRequest) -> dict[str, object]:
+    """Resolve one pending human approval request and broadcast approval.resolved."""
+    _require_current_run(run_id)
+    queues = _approval_events_for_run(run_id)
+    pending_ids = {str(item.get("approval_id")) for item in queues["pending"]}
+    if approval_id not in pending_ids:
+        raise HTTPException(status_code=404, detail=f"Unknown pending approval_id={approval_id}")
+    resolution_state = controller.apply_runtime_approval_resolution(
+        approval_id=approval_id,
+        decision=req.decision,
+        operator=req.operator,
+        note=req.note,
+    )
+    payload = {
+        "approval_id": approval_id,
+        "decision": req.decision,
+        "note": req.note,
+        "operator": req.operator,
+        "status": "resolved",
+        "resolved_at": datetime.now(timezone.utc).isoformat(),
+        "runtime_gate": resolution_state,
+    }
+    level = "INFO" if req.decision == "approved" else "WARNING"
+    event = await controller.emit_runtime_event(
+        event_type="approval.resolved",
+        message=f"Approval {req.decision}: {approval_id}",
+        payload=payload,
+        level=level,
+        run_id=run_id,
+    )
+    updated = _approval_events_for_run(run_id)
+    return {"ok": True, "run_id": run_id, "approval_id": approval_id, "event": event, **updated}
+
+
+@app.get("/api/runs/{run_id}/events")
+async def get_runtime_run_events(run_id: str) -> dict[str, object]:
+    """Return buffered events for one run id."""
+    events = [event for event in controller.recent_events() if event.get("run_id") == run_id]
+    if not events and run_id != _current_run_id() and not _safe_run_dir(run_id).exists():
+        raise HTTPException(status_code=404, detail=f"Unknown run_id={run_id}")
+    return {"ok": True, "run_id": run_id, "events": events}
+
+
+@app.get("/api/runs/{run_id}/artifacts")
+async def get_runtime_run_artifacts(run_id: str) -> dict[str, object]:
+    """List artifact files created under one run directory."""
+    run_dir = _safe_run_dir(run_id)
+    if not run_dir.exists():
+        raise HTTPException(status_code=404, detail=f"Unknown run_id={run_id}")
+    artifacts: list[dict[str, object]] = []
+    for item in sorted(run_dir.rglob("*")):
+        if not item.is_file():
+            continue
+        rel = item.relative_to(run_dir).as_posix()
+        encoded = quote(rel, safe="/")
+        preview_kind = _artifact_preview_kind(item)
+        artifacts.append(
+            {
+                "path": rel,
+                "name": item.name,
+                "suffix": item.suffix,
+                "size_bytes": item.stat().st_size,
+                "kind": "artifact",
+                "preview_kind": preview_kind,
+                "previewable": preview_kind in {"image", "text"},
+                "url": f"/api/runs/{run_id}/artifact-file/{encoded}",
+                "download_url": f"/api/runs/{run_id}/artifact-file/{encoded}?download=1",
+            }
+        )
+    return {"ok": True, "run_id": run_id, "run_dir": str(run_dir), "artifacts": artifacts}
+
+
+@app.get("/api/runs/{run_id}/artifact-file/{artifact_path:path}")
+async def get_runtime_run_artifact_file(run_id: str, artifact_path: str, download: bool = False) -> FileResponse:
+    """Preview or download one artifact file under a run directory."""
+    path = _safe_run_artifact_path(run_id, artifact_path)
+    media_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+    return FileResponse(
+        path,
+        media_type=media_type,
+        filename=path.name if download else None,
+        content_disposition_type="attachment" if download else "inline",
+    )
 
 
 @app.post("/api/runtime/gpu-clear")

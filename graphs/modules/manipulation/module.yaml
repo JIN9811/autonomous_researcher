@@ -1,0 +1,31 @@
+module:
+  id: manipulation
+  label: Manipulation Agent Module
+  handler: agent.manipulation_agent
+  llm_role: manipulation_plan
+  editable: true
+  safety:
+    live_requires_validation: true
+    dry_run_supported: true
+  tools:
+  - lerobot.rollout.start
+  - robot.pick_place
+  internal_graph:
+    - id: 01_load_policy_profile
+      label: Load Policy Profile
+      kind: internal_step
+    - id: 02_check_robot_bridge
+      label: Check Robot Bridge
+      kind: internal_step
+    - id: 03_execute_transfer_rollout
+      label: Execute Transfer Rollout
+      kind: internal_step
+    - id: 04_handoff_equipment
+      label: Handoff Equipment
+      kind: internal_step
+  io_contract:
+    input: OrchestratorState
+    output: AgentResult.data merged into OrchestratorState
+  notes: >-
+    GUI/module editor may edit this module config, but execution remains bound to
+    allowlisted Python handlers. Python source is not modified by the GUI.

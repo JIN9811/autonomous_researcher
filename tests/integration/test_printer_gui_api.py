@@ -1,5 +1,6 @@
 from fastapi.testclient import TestClient
 
+from app import main as app_main
 from app.main import app
 
 
@@ -42,3 +43,23 @@ def test_printer_profile_api_reports_saved_print_defaults() -> None:
     assert isinstance(payload["profile"]["allow_ejection"], bool)
     assert payload["profile_path"].endswith("memory/prusa_print_profile.json")
     assert payload["connection_memory_path"].endswith("memory/prusa_connection.json")
+
+
+def test_printer_autoejection_test_emits_runtime_workspace_event() -> None:
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/printer/autoejection-test",
+        json={"mode": "test", "position": "center", "start_immediately": False, "object_size_mm": [10, 10, 5]},
+    )
+    payload = response.json()
+
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert payload["tool"] == "printer.autoejection_test"
+    assert any(
+        event.get("type") == "tool.completed"
+        and event.get("node_id") == "specimen"
+        and event.get("payload", {}).get("workspace") == "printer"
+        for event in app_main.controller.recent_events()
+    )

@@ -318,12 +318,19 @@ function polyline(points) {
   return points.map(([x, y]) => `${numberText(x, 2)},${numberText(y, 2)}`).join(" ");
 }
 
+function compactBoParamValue(value) {
+  const num = Number(value);
+  if (Number.isFinite(num)) return numberText(num, 4);
+  if (value === null || value === undefined || value === "") return "n/a";
+  return String(value);
+}
+
 function compactBoParams(params) {
   const p = params || {};
   const keys = ["geometry_type", "relative_density", "wall_thickness_mm", "cell_size_mm", "tpms_thickness", "orientation_deg", "anisotropy_ratio"];
   return keys
     .filter((key) => p[key] !== undefined && p[key] !== null)
-    .map((key) => `${key}=${numberText(p[key], 4)}`)
+    .map((key) => `${key}=${compactBoParamValue(p[key])}`)
     .join(", ");
 }
 

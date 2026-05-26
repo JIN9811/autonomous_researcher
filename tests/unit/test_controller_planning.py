@@ -3,12 +3,16 @@ Unit tests for Live GUI planning handoff adaptation.
 """
 
 import asyncio
+from pathlib import Path
 from types import SimpleNamespace
+
+import yaml
 
 import pytest
 
 from agents.base_agent import AgentResult
 from app.bootstrap import load_runtime
+from graphs import load_graph_config
 from orchestrator.state import Mode, Stage
 
 
@@ -556,6 +560,13 @@ async def test_planning_tail_continues_original_loop_after_specimen() -> None:
     assert "bo_ai" in roles
     assert "guardian" in roles
     assert controller._state.run_metadata["bo_agent"]["knowledge_context"]
+    events = controller.recent_events()
+    assert any(event.get("type") == "node.completed" and event.get("node_id") == "bo" for event in events)
+    assert any(event.get("type") == "module.step.planned" and event.get("node_id") == "vision" for event in events)
+    assert any(
+        message.get("module_runtime", {}).get("module_id") == "vision"
+        for message in controller.planning_snapshot()["messages"]
+    )
 
 
 @pytest.mark.asyncio
@@ -616,12 +627,53 @@ async def test_specimen_retry_merges_result_before_loop_tail(monkeypatch: pytest
     assert "SYSTEM_EVENT: HANDOFF\nfrom=OperatorInput\nto=SpecimenMakingAgent\nstatus=retry" in system_messages
     assert all("원래" not in content for content in system_messages)
     assert all("Handoff:" not in content for content in system_messages)
+    assert any(
+        event.get("type") == "node.completed" and event.get("node_id") == "specimen"
+        for event in controller.recent_events()
+    )
 
 
 def test_planning_system_handoff_message_is_structured() -> None:
     content = load_runtime()._planning_stage_handoff_text("Specimen Making Agent", Stage.VISION)
 
     assert content == "SYSTEM_EVENT: HANDOFF\nfrom=Specimen Making Agent\nto=Vision Agent\nstatus=started"
+
+
+def _write_graph_with_transition(tmp_path: Path, source: str, target: str) -> Path:
+    config = load_graph_config("graphs/configs/atr_closed_loop.yaml")
+    payload = config.model_dump(mode="json")
+    payload["transitions"][source] = target
+    graph_path = tmp_path / f"atr_{source}_to_{target}.yaml"
+    graph_path.write_text(yaml.safe_dump({"graph": payload}, sort_keys=False), encoding="utf-8")
+    return graph_path
+
+
+def test_live_gui_planning_route_text_uses_active_graph_config(tmp_path: Path) -> None:
+    controller = load_runtime()
+    controller._active_graph_config_path = _write_graph_with_transition(tmp_path, "specimen", "analysis")
+
+    route = controller._active_graph_stage_route_text(Stage.DESIGN, stop_at=Stage.GUARDIAN)
+    contract = controller._live_runtime_contract_context()
+
+    assert "Design Agent -> Specimen Making Agent -> Analysis Agent" in route
+    assert "Vision Agent" not in route
+    assert f"Active graph stage order is {route}." in contract
+    assert controller._planning_tail_start_stage() == Stage.ANALYSIS
+
+
+@pytest.mark.asyncio
+async def test_live_gui_test_prompt_uses_active_graph_config_route(tmp_path: Path) -> None:
+    controller = load_runtime()
+    controller._active_graph_config_path = _write_graph_with_transition(tmp_path, "specimen", "analysis")
+
+    prompt = await controller._build_test_mode_orchestrator_prompt(
+        operator_message="테스트 모드",
+        goal="unit test",
+        constraints={},
+    )
+
+    assert "Runtime pipeline after DesignAgent handoff: Design Agent -> Specimen Making Agent -> Analysis Agent" in prompt
+    assert "Specimen Making Agent -> Vision Agent" not in prompt
 
 
 @pytest.mark.asyncio
@@ -650,6 +702,10 @@ async def test_first_live_gui_test_design_cycle_uses_single_artifact() -> None:
     assert design_message.get("artifacts", {}).get("stl_url")
     assert "생성된 형상" in design_message["content"]
     assert "이전 형상" not in design_message["content"]
+    assert any(
+        event.get("type") == "node.completed" and event.get("node_id") == "design"
+        for event in controller.recent_events()
+    )
 
 
 @pytest.mark.asyncio

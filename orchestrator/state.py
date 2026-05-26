@@ -50,6 +50,7 @@ class Stage(str, Enum):
     EQUIPMENT = "equipment"
     ANALYSIS = "analysis"
     KNOWLEDGE = "knowledge"
+    BO = "bo"
     GUARDIAN = "guardian"
     COMPLETE = "complete"
     ERROR = "error"

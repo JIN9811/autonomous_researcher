@@ -19,7 +19,7 @@ Core Design Principles
 1. Orchestrator-centric architecture
    - The top-level system is centered on the Autonomous Researcher Architecture, not on SARM alone.
    - SARM is included only as a submodule inside the Manipulation Agent.
-   - The primary control flow is driven by a LangGraph-style orchestrator.
+   - The primary control flow is driven by the config-driven LangGraph runtime.
 
 2. Local-first execution
    - All reasoning and orchestration should run with local models via Ollama.
@@ -196,7 +196,7 @@ Modes
 - live mode remains advisory unless a downstream agent explicitly executes the selected experiment.
 
 Important rule
-- BO Agent is not yet a mandatory RunLoop stage.
+- BO Agent is a mandatory LangGraph runtime stage after Knowledge Agent and before Guardian Agent.
 - BO Agent must not generate STL, slice G-code, move robots, or start prints.
 
 Modes
@@ -425,10 +425,15 @@ MCP usage
 - Model-side tool calling must not directly depend on raw hardware code.
 
 LangGraph usage
-- The orchestrator must be implemented in a LangGraph style:
-  - explicit state object
-  - explicit node functions
-  - explicit transitions
+- The orchestrator must be implemented with the LangGraph-backed runtime:
+  - explicit typed state object
+  - config-driven graph nodes
+  - allowlisted handler registry
+  - validated graph transitions
+  - module-declared pre-execution steps for any pre-stage agent calls; do not hide Design/Orchestrator coupling in Python run-loop conditionals
+  - Live GUI route text, prompt route descriptions, and post-Specimen planning tails must be derived from the active graph transitions, not duplicated as hard-coded Python lists
+  - legacy compatibility helpers such as stage-to-agent and default-next-stage must delegate to graph/module config instead of carrying separate hard-coded maps
+  - dry-run compile before live execution
   - resumable execution support
   - easy debugging of branch paths
 
@@ -730,7 +735,7 @@ Phase 1
 - structured logging system
 - Ollama backend
 - model router
-- LangGraph-style state + orchestrator loop
+- LangGraph-backed state + config-driven orchestrator runtime
 - mock MCP tools
 - main GUI shell
 - test mode end-to-end dry run
@@ -767,7 +772,7 @@ Phase 4
 - Test mode must exist for all device-facing components.
 - Test mode must be launchable from main orchestration and GUI.
 - Logging must be implemented as its own subsystem.
-- MCP and LangGraph style must be reflected in architecture.
+- MCP and actual LangGraph runtime must be reflected in architecture.
 - 31B handles top orchestration by default, with E4B retained as the fast fallback/design model.
 - E4B and E2B-class models handle subordinate protocol tasks.
 - Every file must include maintenance-oriented comments.
@@ -777,3 +782,6 @@ Phase 4
 - Code generation and validation should support Codex iterative agent-loop execution.
 
 End of guide.
+
+
+LangGraph Runtime IDE update: graph edits must validate/compile before activation, transition edits must update YAML logical edges and actual runtime transitions, and module edits must expose both `pre_execution` and `internal_graph` step lists and use module validate/dry-run endpoints before live use. Python source editing remains forbidden from the Runtime IDE.

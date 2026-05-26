@@ -1,0 +1,16 @@
+/* ATR Runtime IDE starter effects */
+:root{--bg-0:#050816;--bg-1:#08112a;--panel:rgba(8,14,35,.86);--border:rgba(96,165,250,.22);--text:#e5edff;--muted:#8ea0c8;--blue:#2b8cff;--cyan:#38bdf8;--purple:#9b5cff;--green:#22c55e;--amber:#ffd438;--red:#ff3864;}
+.runtime-shell{min-height:100vh;background:radial-gradient(circle at 20% 10%,rgba(43,140,255,.18),transparent 32%),radial-gradient(circle at 80% 30%,rgba(155,92,255,.14),transparent 28%),linear-gradient(180deg,var(--bg-1),var(--bg-0));color:var(--text);}
+.graph-canvas{background-image:radial-gradient(rgba(96,165,250,.22) 1px,transparent 1px);background-size:16px 16px;}
+.glass-panel{background:var(--panel);border:1px solid var(--border);box-shadow:0 18px 48px rgba(0,0,0,.35);backdrop-filter:blur(12px);border-radius:14px;}
+.graph-node{position:relative;background:linear-gradient(180deg,rgba(12,18,42,.95),rgba(5,8,22,.96));border:1px solid rgba(96,165,250,.38);box-shadow:0 0 0 1px rgba(59,130,246,.08),0 12px 36px rgba(0,0,0,.35);border-radius:12px;transition:transform .16s ease,box-shadow .16s ease,border-color .16s ease;}
+.graph-node:hover{transform:translateY(-1px) scale(1.015);}
+.graph-node.running{border-color:rgba(59,130,246,.95);box-shadow:0 0 18px rgba(59,130,246,.62),0 0 52px rgba(59,130,246,.20);}
+.graph-node.failed{border-color:rgba(255,56,100,.95);box-shadow:0 0 18px rgba(255,56,100,.55);}
+.node-pulse{position:absolute;inset:-6px;border-radius:16px;border:1px solid currentColor;animation:pulseRing 1.6s ease-out infinite;pointer-events:none;}
+@keyframes pulseRing{0%{opacity:.7;transform:scale(.98)}100%{opacity:0;transform:scale(1.08)}}
+.edge-running{stroke-dasharray:8 8;animation:dashMove .8s linear infinite;filter:drop-shadow(0 0 6px rgba(56,189,248,.85));}
+@keyframes dashMove{to{stroke-dashoffset:-16}}
+.neon-button{background:linear-gradient(135deg,#6d28d9,#9333ea,#2563eb);box-shadow:0 0 18px rgba(147,51,234,.45);border:1px solid rgba(216,180,254,.45);}
+.status-pill{border:1px solid rgba(96,165,250,.24);border-radius:999px;padding:4px 10px;background:rgba(15,23,42,.8);}
+.status-pill.healthy{color:#86efac;background:rgba(34,197,94,.12);border-color:rgba(34,197,94,.28)}

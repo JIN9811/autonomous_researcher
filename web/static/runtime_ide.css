@@ -1,0 +1,6922 @@
+/*
+File purpose:
+- Reference-image aligned Runtime IDE visual layer.
+- Loaded after global styles.css to avoid being hidden by the main dashboard theme.
+
+Reference:
+- docs/ATR_LangGraph_Runtime_IDE_Codex_Package/atr_langgraph_runtime_ide_assets/atr_runtime_ide_concept_reference.png
+*/
+
+:root {
+  --ide-bg-0: #050816;
+  --ide-bg-1: #08112a;
+  --ide-panel: rgba(8, 14, 35, 0.86);
+  --ide-panel-strong: rgba(12, 18, 42, 0.94);
+  --ide-border: rgba(96, 165, 250, 0.24);
+  --ide-border-hot: rgba(56, 189, 248, 0.72);
+  --ide-text: #e5edff;
+  --ide-muted: #8ea0c8;
+  --ide-blue: #2b8cff;
+  --ide-cyan: #38bdf8;
+  --ide-purple: #9b5cff;
+  --ide-green: #22c55e;
+  --ide-amber: #ffd438;
+  --ide-red: #ff3864;
+}
+
+body.runtime-ide-body {
+  background:
+    radial-gradient(circle at 20% 10%, rgba(43, 140, 255, 0.18), transparent 32%),
+    radial-gradient(circle at 80% 30%, rgba(155, 92, 255, 0.14), transparent 28%),
+    linear-gradient(180deg, var(--ide-bg-1), var(--ide-bg-0)) !important;
+  color: var(--ide-text) !important;
+}
+
+body.runtime-ide-body::before {
+  background-image: radial-gradient(rgba(96, 165, 250, 0.12) 1px, transparent 1px);
+  background-size: 22px 22px;
+  content: "";
+  inset: 0;
+  pointer-events: none;
+  position: fixed;
+  z-index: 0;
+}
+
+body.runtime-ide-body .runtime-ide-page {
+  max-width: min(1840px, calc(100vw - 24px));
+  padding: 12px;
+  gap: 10px;
+}
+
+body.runtime-ide-body .panel,
+body.runtime-ide-body .status-card {
+  background: var(--ide-panel) !important;
+  border: 1px solid var(--ide-border) !important;
+  border-radius: 14px !important;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.055) !important;
+  backdrop-filter: blur(12px);
+}
+
+body.runtime-ide-body .runtime-ide-hero {
+  align-items: center;
+  background:
+    linear-gradient(135deg, rgba(8, 14, 35, 0.96), rgba(12, 18, 42, 0.84)),
+    radial-gradient(circle at 68% 12%, rgba(56, 189, 248, 0.18), transparent 38%) !important;
+  grid-template-columns: minmax(0, 1.8fr) 290px;
+  margin: 0;
+  min-height: 112px;
+  padding: 16px 18px;
+}
+
+body.runtime-ide-body .eyebrow {
+  color: var(--ide-cyan) !important;
+}
+
+body.runtime-ide-body h1 {
+  color: #f2f7ff;
+  font-size: clamp(2rem, 2.7vw, 3.2rem);
+  line-height: 0.96;
+}
+
+body.runtime-ide-body h2,
+body.runtime-ide-body strong {
+  color: #f2f7ff;
+}
+
+body.runtime-ide-body .subhead,
+body.runtime-ide-body .hint,
+body.runtime-ide-body .status-title,
+body.runtime-ide-body .status-card p,
+body.runtime-ide-body small,
+body.runtime-ide-body .runtime-status-row span,
+body.runtime-ide-body .runtime-status-row small,
+body.runtime-ide-body .runtime-metric-card span,
+body.runtime-ide-body .runtime-metric-card small,
+body.runtime-ide-body .runtime-handler-select-label,
+body.runtime-ide-body .runtime-module-step span,
+body.runtime-ide-body .runtime-module-empty,
+body.runtime-ide-body .runtime-module-step-enabled {
+  color: rgba(202, 213, 236, 0.78) !important;
+}
+
+body.runtime-ide-body .runtime-ide-hero .subhead {
+  font-size: 0.9rem;
+  margin-top: 8px;
+  max-width: 88ch;
+}
+
+body.runtime-ide-body .runtime-ide-topbar {
+  align-items: center;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(250px, 1fr) minmax(420px, 1.6fr) auto;
+  margin: 0;
+  padding: 12px 14px;
+}
+
+body.runtime-ide-body .runtime-ide-topbar-metrics {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+body.runtime-ide-body .runtime-ide-topbar-metrics div,
+body.runtime-ide-body .runtime-explorer-node,
+body.runtime-ide-body .runtime-template-item,
+body.runtime-ide-body .runtime-infra-item,
+body.runtime-ide-body .runtime-infra-models > div,
+body.runtime-ide-body .runtime-status-row,
+body.runtime-ide-body .runtime-approval-item,
+body.runtime-ide-body .runtime-approval-empty,
+body.runtime-ide-body .runtime-metric-card,
+body.runtime-ide-body .runtime-module-step,
+body.runtime-ide-body .runtime-module-step-section,
+body.runtime-ide-body .runtime-module-graph,
+body.runtime-ide-body .runtime-compiled-summary,
+body.runtime-ide-body .runtime-timeline-item,
+body.runtime-ide-body .runtime-artifact-item {
+  background: rgba(12, 18, 42, 0.82) !important;
+  border-color: rgba(96, 165, 250, 0.16) !important;
+  color: var(--ide-text) !important;
+}
+
+body.runtime-ide-body .runtime-ide-toolbar {
+  align-items: center;
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 8px;
+  margin: 0;
+  overflow-x: auto;
+  padding: 10px 12px;
+}
+
+body.runtime-ide-body .runtime-ide-toolbar .runtime-graph-select {
+  flex: 0 0 300px;
+  max-width: 320px;
+  min-width: 260px;
+  width: auto !important;
+}
+
+body.runtime-ide-body .runtime-ide-toolbar .btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+body.runtime-ide-body .runtime-ide-shell {
+  align-items: start;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 245px minmax(0, 1fr) 300px;
+  margin-top: 0;
+}
+
+body.runtime-ide-body .runtime-ide-sidebar,
+body.runtime-ide-body .runtime-ide-right-panel {
+  position: sticky;
+  top: 10px;
+}
+
+body.runtime-ide-body .runtime-ide-output,
+body.runtime-ide-body .runtime-ide-textarea,
+body.runtime-ide-body .runtime-ide-canvas,
+body.runtime-ide-body .runtime-ide-minimap {
+  background:
+    radial-gradient(rgba(96, 165, 250, 0.2) 1px, transparent 1px),
+    linear-gradient(180deg, rgba(12, 18, 42, 0.96), rgba(5, 8, 22, 0.94)) !important;
+  background-size: 16px 16px, auto !important;
+  border: 1px solid rgba(96, 165, 250, 0.2) !important;
+  color: var(--ide-text) !important;
+  scrollbar-color: rgba(56, 189, 248, 0.35) rgba(8, 14, 35, 0.9);
+}
+
+body.runtime-ide-body .runtime-ide-grid.runtime-ide-graph-panel {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(0, 1.65fr) minmax(270px, 0.5fr);
+}
+
+body.runtime-ide-body .runtime-ide-grid.runtime-ide-graph-panel .runtime-ide-canvas {
+  height: 360px !important;
+  max-height: 360px !important;
+  min-height: 360px !important;
+  overflow: auto;
+}
+
+body.runtime-ide-body .runtime-ide-grid.runtime-ide-graph-panel .runtime-ide-textarea {
+  height: 360px;
+  min-height: 360px;
+}
+
+body.runtime-ide-body .runtime-ide-node {
+  background: linear-gradient(180deg, rgba(12, 18, 42, 0.97), rgba(5, 8, 22, 0.96)) !important;
+  border: 1px solid rgba(96, 165, 250, 0.38) !important;
+  border-radius: 12px;
+  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.08), 0 12px 36px rgba(0, 0, 0, 0.35) !important;
+  color: var(--ide-text) !important;
+}
+
+body.runtime-ide-body .runtime-ide-node:hover,
+body.runtime-ide-body .runtime-ide-node.selected {
+  border-color: rgba(56, 189, 248, 0.86) !important;
+  box-shadow: 0 0 18px rgba(56, 189, 248, 0.34), 0 0 54px rgba(56, 189, 248, 0.12) !important;
+  transform: translateY(-1px) scale(1.015);
+}
+
+body.runtime-ide-body .runtime-ide-node.active {
+  border-color: rgba(59, 130, 246, 0.98) !important;
+  box-shadow: 0 0 20px rgba(59, 130, 246, 0.7), 0 0 58px rgba(59, 130, 246, 0.22) !important;
+}
+
+body.runtime-ide-body .runtime-ide-node.active::after {
+  animation: ide-node-pulse-ring 1.6s ease-out infinite;
+  border: 1px solid rgba(56, 189, 248, 0.7);
+  border-radius: 18px;
+  content: "";
+  inset: -6px;
+  pointer-events: none;
+  position: absolute;
+}
+
+@keyframes ide-node-pulse-ring {
+  0% { opacity: 0.72; transform: scale(0.98); }
+  100% { opacity: 0; transform: scale(1.1); }
+}
+
+body.runtime-ide-body .runtime-ide-node-icon {
+  background: rgba(56, 189, 248, 0.1) !important;
+  border: 1px solid rgba(56, 189, 248, 0.24);
+  color: var(--ide-cyan);
+}
+
+body.runtime-ide-body .runtime-ide-edge-layer {
+  color: rgba(56, 189, 248, 0.48) !important;
+}
+
+body.runtime-ide-body .runtime-ide-edge:hover,
+body.runtime-ide-body .runtime-ide-edge.edge-active {
+  color: rgba(56, 189, 248, 0.96) !important;
+  filter: drop-shadow(0 0 8px rgba(56, 189, 248, 0.8));
+}
+
+body.runtime-ide-body .runtime-ide-graph-aux-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
+  margin-top: 12px;
+}
+
+body.runtime-ide-body .runtime-ide-graph-aux-grid .runtime-ide-subtitle {
+  margin-top: 0;
+}
+
+body.runtime-ide-body .runtime-ide-graph-aux-grid .runtime-ide-output,
+body.runtime-ide-body .runtime-ide-graph-aux-grid .runtime-ide-minimap {
+  max-height: 128px;
+  min-height: 98px;
+}
+
+body.runtime-ide-body .runtime-ide-module-drawer {
+  padding: 0 !important;
+}
+
+body.runtime-ide-body .runtime-ide-module-drawer summary {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  list-style: none;
+  padding: 14px 16px;
+}
+
+body.runtime-ide-body .runtime-ide-module-drawer summary::-webkit-details-marker {
+  display: none;
+}
+
+body.runtime-ide-body .runtime-ide-module-drawer summary::after {
+  color: var(--ide-cyan);
+  content: "Open";
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+body.runtime-ide-body .runtime-ide-module-drawer[open] summary::after {
+  content: "Close";
+}
+
+body.runtime-ide-body .runtime-ide-module-drawer summary span {
+  color: #f2f7ff;
+  font-weight: 800;
+}
+
+body.runtime-ide-body .runtime-ide-module-grid {
+  padding: 0 16px 16px;
+}
+
+body.runtime-ide-body .text-input,
+body.runtime-ide-body select,
+body.runtime-ide-body input,
+body.runtime-ide-body textarea {
+  background: rgba(5, 8, 22, 0.72) !important;
+  border-color: rgba(96, 165, 250, 0.22) !important;
+  color: var(--ide-text) !important;
+}
+
+body.runtime-ide-body .btn,
+body.runtime-ide-body a.btn {
+  background: rgba(12, 18, 42, 0.86) !important;
+  border-color: rgba(96, 165, 250, 0.28) !important;
+  color: var(--ide-text) !important;
+}
+
+body.runtime-ide-body .btn:hover,
+body.runtime-ide-body a.btn:hover {
+  border-color: rgba(56, 189, 248, 0.7) !important;
+  box-shadow: 0 0 18px rgba(56, 189, 248, 0.18) !important;
+}
+
+body.runtime-ide-body .btn.primary,
+body.runtime-ide-body a.btn.primary {
+  background: linear-gradient(135deg, #6d28d9, #9333ea, #2563eb) !important;
+  border-color: rgba(216, 180, 254, 0.45) !important;
+  box-shadow: 0 0 18px rgba(147, 51, 234, 0.34) !important;
+}
+
+body.runtime-ide-body .btn.warning,
+body.runtime-ide-body a.btn.warning {
+  background: rgba(255, 212, 56, 0.12) !important;
+  border-color: rgba(255, 212, 56, 0.36) !important;
+  color: #fde68a !important;
+}
+
+body.runtime-ide-body .btn.danger,
+body.runtime-ide-body a.btn.danger {
+  background: rgba(255, 56, 100, 0.12) !important;
+  border-color: rgba(255, 56, 100, 0.36) !important;
+  color: #fda4af !important;
+}
+
+body.runtime-ide-body .runtime-status-pill {
+  background: rgba(15, 23, 42, 0.8) !important;
+  border-color: rgba(96, 165, 250, 0.24) !important;
+  color: #93c5fd !important;
+}
+
+body.runtime-ide-body .runtime-status-pill.running,
+body.runtime-ide-body .runtime-status-row.ok,
+body.runtime-ide-body .runtime-metric-card.ok {
+  background: rgba(34, 197, 94, 0.12) !important;
+  border-color: rgba(34, 197, 94, 0.28) !important;
+  color: #86efac !important;
+}
+
+body.runtime-ide-body .runtime-status-pill.failed,
+body.runtime-ide-body .runtime-status-pill.stopping,
+body.runtime-ide-body .runtime-status-row.error,
+body.runtime-ide-body .runtime-metric-card.error,
+body.runtime-ide-body .runtime-approval-item {
+  background: rgba(255, 56, 100, 0.12) !important;
+  border-color: rgba(255, 56, 100, 0.28) !important;
+  color: #fda4af !important;
+}
+
+body.runtime-ide-body .runtime-status-pill.paused,
+body.runtime-ide-body .runtime-status-row.warn,
+body.runtime-ide-body .runtime-metric-card.warn {
+  background: rgba(255, 212, 56, 0.12) !important;
+  border-color: rgba(255, 212, 56, 0.28) !important;
+  color: #fde68a !important;
+}
+
+body.runtime-ide-body .runtime-ide-bottom-dock {
+  margin-top: 0;
+}
+
+body.runtime-ide-body .runtime-ide-bottom-grid article,
+body.runtime-ide-body .runtime-ide-bottom-grid.secondary article {
+  padding: 14px;
+}
+
+body.runtime-ide-body .runtime-ide-bottom-grid .runtime-ide-output {
+  max-height: 170px;
+  min-height: 96px;
+}
+
+@media (max-width: 1380px) {
+  body.runtime-ide-body .runtime-ide-shell {
+    grid-template-columns: 230px minmax(0, 1fr);
+  }
+
+  body.runtime-ide-body .runtime-ide-right-panel {
+    grid-column: 1 / -1;
+    position: static;
+  }
+}
+
+@media (max-width: 1060px) {
+  body.runtime-ide-body .runtime-ide-hero,
+  body.runtime-ide-body .runtime-ide-topbar,
+  body.runtime-ide-body .runtime-ide-grid,
+  body.runtime-ide-body .runtime-ide-grid.runtime-ide-graph-panel,
+  body.runtime-ide-body .runtime-ide-shell {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 760px) {
+  body.runtime-ide-body .runtime-ide-toolbar {
+    flex-wrap: wrap;
+  }
+
+  body.runtime-ide-body .runtime-ide-toolbar .runtime-graph-select,
+  body.runtime-ide-body .runtime-ide-toolbar .btn {
+    flex: 1 1 100%;
+    max-width: none;
+    width: 100% !important;
+  }
+
+  body.runtime-ide-body .runtime-ide-graph-aux-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* v5: make the page behave like the concept workbench instead of a long form page. */
+body.runtime-ide-body .runtime-ide-page {
+  min-height: 100vh;
+}
+
+body.runtime-ide-body .runtime-ide-hero {
+  grid-template-columns: minmax(0, 1fr) 230px;
+  min-height: 76px;
+  padding: 12px 16px;
+}
+
+body.runtime-ide-body .runtime-ide-hero h1 {
+  font-size: clamp(1.7rem, 2.25vw, 2.6rem);
+}
+
+body.runtime-ide-body .runtime-ide-hero .subhead {
+  font-size: 0.8rem;
+  max-width: 96ch;
+}
+
+body.runtime-ide-body .runtime-ide-hero .status-card {
+  padding: 10px 12px;
+}
+
+body.runtime-ide-body .runtime-ide-topbar {
+  grid-template-columns: minmax(230px, 0.9fr) minmax(360px, 1.6fr) auto;
+  padding: 10px 12px;
+}
+
+body.runtime-ide-body .runtime-ide-topbar-metrics div {
+  padding: 6px 8px;
+}
+
+body.runtime-ide-body .runtime-ide-toolbar {
+  padding: 8px 10px;
+}
+
+body.runtime-ide-body .runtime-ide-shell {
+  grid-template-columns: 245px minmax(0, 1fr) 320px;
+}
+
+body.runtime-ide-body .runtime-ide-main-column {
+  gap: 10px;
+}
+
+body.runtime-ide-body .runtime-ide-graph-panel {
+  padding: 14px;
+}
+
+body.runtime-ide-body .runtime-ide-graph-workbench {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+body.runtime-ide-body .runtime-ide-graph-panel .runtime-ide-canvas {
+  height: 470px !important;
+  max-height: 470px !important;
+  min-height: 470px !important;
+}
+
+body.runtime-ide-body .runtime-ide-json-drawer,
+body.runtime-ide-body .runtime-ide-module-drawer {
+  background: rgba(12, 18, 42, 0.72) !important;
+  border: 1px solid rgba(96, 165, 250, 0.16) !important;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+body.runtime-ide-body .runtime-ide-json-drawer summary,
+body.runtime-ide-body .runtime-ide-module-drawer summary {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  list-style: none;
+  padding: 10px 12px;
+}
+
+body.runtime-ide-body .runtime-ide-json-drawer summary::-webkit-details-marker,
+body.runtime-ide-body .runtime-ide-module-drawer summary::-webkit-details-marker {
+  display: none;
+}
+
+body.runtime-ide-body .runtime-ide-json-drawer summary::after,
+body.runtime-ide-body .runtime-ide-module-drawer summary::after {
+  color: var(--ide-cyan);
+  content: "Open";
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+body.runtime-ide-body .runtime-ide-json-drawer[open] summary::after,
+body.runtime-ide-body .runtime-ide-module-drawer[open] summary::after {
+  content: "Close";
+}
+
+body.runtime-ide-body .runtime-ide-json-drawer summary span,
+body.runtime-ide-body .runtime-ide-module-drawer summary span {
+  color: #f2f7ff;
+  font-weight: 800;
+}
+
+body.runtime-ide-body .runtime-ide-json-drawer .runtime-ide-textarea {
+  border: 0 !important;
+  border-radius: 0 !important;
+  height: 280px;
+  min-height: 280px;
+}
+
+body.runtime-ide-body .runtime-ide-bottom-dock {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(220px, 1fr));
+  gap: 10px;
+  max-height: 245px;
+  overflow: auto;
+  padding: 12px;
+}
+
+body.runtime-ide-body .runtime-ide-bottom-grid,
+body.runtime-ide-body .runtime-ide-bottom-grid.secondary,
+body.runtime-ide-body .runtime-ide-bottom-grid.secondary.wide {
+  display: contents;
+}
+
+body.runtime-ide-body .runtime-ide-bottom-dock article {
+  min-height: 0;
+  padding: 12px !important;
+}
+
+body.runtime-ide-body .runtime-ide-bottom-dock .runtime-ide-output {
+  min-height: 86px;
+  max-height: 132px;
+}
+
+@media (max-width: 1380px) {
+  body.runtime-ide-body .runtime-ide-shell {
+    grid-template-columns: 230px minmax(0, 1fr);
+  }
+
+  body.runtime-ide-body .runtime-ide-right-panel {
+    grid-column: 1 / -1;
+    display: grid;
+    gap: 12px;
+    grid-template-columns: minmax(0, 1fr) minmax(260px, 0.6fr);
+  }
+}
+
+@media (max-width: 1060px) {
+  body.runtime-ide-body .runtime-ide-hero,
+  body.runtime-ide-body .runtime-ide-topbar,
+  body.runtime-ide-body .runtime-ide-shell,
+  body.runtime-ide-body .runtime-ide-right-panel {
+    grid-template-columns: 1fr;
+  }
+
+  body.runtime-ide-body .runtime-ide-graph-panel .runtime-ide-canvas {
+    height: 380px !important;
+    max-height: 380px !important;
+    min-height: 380px !important;
+  }
+}
+
+/* v6: first-screen operational layout, closer to the reference image proportions. */
+body.runtime-ide-body .runtime-ide-page {
+  gap: 8px;
+  padding: 10px;
+}
+
+body.runtime-ide-body .runtime-ide-hero {
+  grid-template-columns: minmax(0, 1fr) 220px;
+  min-height: 58px;
+  padding: 8px 12px;
+}
+
+body.runtime-ide-body .runtime-ide-hero .eyebrow {
+  font-size: 0.62rem;
+  margin-bottom: 2px;
+}
+
+body.runtime-ide-body .runtime-ide-hero h1 {
+  font-size: clamp(1.45rem, 1.9vw, 2.15rem);
+  line-height: 0.96;
+}
+
+body.runtime-ide-body .runtime-ide-hero .subhead {
+  display: none;
+}
+
+body.runtime-ide-body .runtime-ide-hero .status-card {
+  min-height: 0;
+  padding: 8px 10px;
+}
+
+body.runtime-ide-body .runtime-ide-hero .status-head {
+  margin-bottom: 3px;
+}
+
+body.runtime-ide-body .runtime-ide-hero .status-card strong {
+  font-size: 0.84rem;
+}
+
+body.runtime-ide-body .runtime-ide-hero .status-card p {
+  font-size: 0.68rem;
+  margin-top: 2px;
+}
+
+body.runtime-ide-body .runtime-ide-topbar {
+  grid-template-columns: minmax(210px, 0.8fr) minmax(360px, 1.7fr) auto;
+  min-height: 54px;
+  padding: 8px 10px;
+}
+
+body.runtime-ide-body .runtime-ide-topbar-main {
+  gap: 9px;
+}
+
+body.runtime-ide-body .runtime-status-pill {
+  font-size: 0.66rem;
+  min-width: 74px;
+  padding: 5px 8px;
+}
+
+body.runtime-ide-body .runtime-ide-topbar-main strong {
+  font-size: 0.84rem;
+}
+
+body.runtime-ide-body .runtime-ide-topbar-main small,
+body.runtime-ide-body .runtime-ide-topbar-metrics span {
+  font-size: 0.66rem;
+}
+
+body.runtime-ide-body .runtime-ide-topbar-metrics {
+  gap: 6px;
+}
+
+body.runtime-ide-body .runtime-ide-topbar-metrics div {
+  gap: 1px;
+  padding: 5px 7px;
+}
+
+body.runtime-ide-body .runtime-ide-topbar-metrics strong {
+  font-size: 0.76rem;
+}
+
+body.runtime-ide-body .runtime-ide-topbar-actions {
+  gap: 5px;
+}
+
+body.runtime-ide-body .runtime-ide-toolbar {
+  min-height: 44px;
+  padding: 7px 9px;
+}
+
+body.runtime-ide-body .runtime-ide-toolbar .runtime-graph-select {
+  flex-basis: 280px;
+  min-height: 32px;
+  padding: 6px 9px;
+}
+
+body.runtime-ide-body .runtime-ide-toolbar .btn,
+body.runtime-ide-body .btn.tiny,
+body.runtime-ide-body a.btn.tiny {
+  min-height: 30px;
+  padding: 5px 8px;
+}
+
+body.runtime-ide-body .runtime-ide-shell {
+  gap: 10px;
+  grid-template-columns: 220px minmax(0, 1fr) 290px;
+}
+
+body.runtime-ide-body .runtime-ide-sidebar,
+body.runtime-ide-body .runtime-ide-right-panel,
+body.runtime-ide-body .runtime-ide-graph-panel {
+  padding: 12px;
+}
+
+body.runtime-ide-body .panel-title-row {
+  margin-bottom: 8px;
+}
+
+body.runtime-ide-body .panel-title-row h2 {
+  font-size: 0.92rem;
+}
+
+body.runtime-ide-body .runtime-ide-subtitle {
+  margin-top: 10px;
+}
+
+body.runtime-ide-body .runtime-ide-sidebar .runtime-ide-output.compact-output,
+body.runtime-ide-body .runtime-ide-right-panel .runtime-ide-output.compact-output {
+  max-height: 105px;
+  min-height: 68px;
+}
+
+body.runtime-ide-body .runtime-ide-graph-panel .runtime-ide-canvas {
+  height: 330px !important;
+  max-height: 330px !important;
+  min-height: 330px !important;
+}
+
+body.runtime-ide-body .runtime-ide-graph-aux-grid {
+  gap: 10px;
+  margin-top: 10px;
+}
+
+body.runtime-ide-body .runtime-ide-graph-aux-grid .runtime-ide-output,
+body.runtime-ide-body .runtime-ide-graph-aux-grid .runtime-ide-minimap {
+  min-height: 78px;
+  max-height: 96px;
+}
+
+body.runtime-ide-body .runtime-ide-json-drawer summary,
+body.runtime-ide-body .runtime-ide-module-drawer summary {
+  padding: 8px 10px;
+}
+
+body.runtime-ide-body .runtime-ide-json-drawer summary small,
+body.runtime-ide-body .runtime-ide-module-drawer summary small {
+  display: none;
+}
+
+body.runtime-ide-body .runtime-ide-bottom-dock {
+  grid-template-columns: repeat(5, minmax(190px, 1fr));
+  max-height: 185px;
+  padding: 10px;
+}
+
+body.runtime-ide-body .runtime-ide-bottom-dock article {
+  padding: 10px !important;
+}
+
+body.runtime-ide-body .runtime-ide-bottom-dock .runtime-ide-output {
+  min-height: 72px;
+  max-height: 100px;
+  padding: 9px;
+}
+
+@media (max-width: 1380px) {
+  body.runtime-ide-body .runtime-ide-shell {
+    grid-template-columns: 210px minmax(0, 1fr);
+  }
+}
+
+/* v7: keep the full operational map plus dock inside a 1024px reference viewport. */
+body.runtime-ide-body .runtime-ide-hero {
+  height: 68px;
+  min-height: 68px;
+  overflow: hidden;
+  padding: 7px 12px;
+}
+
+body.runtime-ide-body .runtime-ide-hero .status-card p {
+  display: none;
+}
+
+body.runtime-ide-body .runtime-ide-hero .status-card {
+  align-self: stretch;
+  display: grid;
+  align-content: center;
+  padding: 7px 10px;
+}
+
+body.runtime-ide-body .runtime-ide-topbar {
+  min-height: 52px;
+  padding: 7px 10px;
+}
+
+body.runtime-ide-body .runtime-ide-toolbar {
+  min-height: 42px;
+  padding: 6px 9px;
+}
+
+body.runtime-ide-body .runtime-ide-sidebar,
+body.runtime-ide-body .runtime-ide-right-panel,
+body.runtime-ide-body .runtime-ide-graph-panel {
+  padding: 10px;
+}
+
+body.runtime-ide-body .runtime-ide-graph-panel .runtime-ide-canvas {
+  height: 292px !important;
+  max-height: 292px !important;
+  min-height: 292px !important;
+}
+
+body.runtime-ide-body .runtime-ide-graph-aux-grid .runtime-ide-output,
+body.runtime-ide-body .runtime-ide-graph-aux-grid .runtime-ide-minimap {
+  min-height: 70px;
+  max-height: 78px;
+}
+
+body.runtime-ide-body .runtime-ide-sidebar .runtime-ide-output.compact-output,
+body.runtime-ide-body .runtime-ide-right-panel .runtime-ide-output.compact-output {
+  max-height: 92px;
+  min-height: 58px;
+}
+
+body.runtime-ide-body .runtime-ide-json-drawer summary,
+body.runtime-ide-body .runtime-ide-module-drawer summary {
+  padding: 7px 9px;
+}
+
+body.runtime-ide-body .runtime-ide-bottom-dock {
+  max-height: 170px;
+  padding: 9px;
+}
+
+body.runtime-ide-body .runtime-ide-bottom-dock .runtime-ide-output {
+  min-height: 64px;
+  max-height: 88px;
+}
+
+/* v8: browser-tab graph workspace + four-side node ports + overlap guard. */
+body.runtime-ide-body .runtime-hidden-control {
+  display: none !important;
+}
+
+body.runtime-ide-body .runtime-ide-tab-toolbar {
+  align-items: center;
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 10px;
+  overflow: hidden;
+}
+
+body.runtime-ide-body .runtime-ide-toolbar-left {
+  min-width: 0;
+  overflow: hidden;
+}
+
+body.runtime-ide-body .runtime-ide-command-row {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  gap: 7px;
+  justify-content: flex-end;
+  min-width: max-content;
+}
+
+body.runtime-ide-body .runtime-ide-tabs {
+  align-items: end;
+  display: flex;
+  gap: 6px;
+  max-width: 100%;
+  min-height: 35px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 1px 2px 0;
+  scrollbar-width: thin;
+}
+
+body.runtime-ide-body .runtime-ide-tab {
+  align-items: center;
+  appearance: none;
+  background: rgba(5, 8, 22, 0.74) !important;
+  border: 1px solid rgba(96, 165, 250, 0.24) !important;
+  border-bottom-color: rgba(96, 165, 250, 0.12) !important;
+  border-radius: 13px 13px 7px 7px;
+  color: var(--ide-text) !important;
+  cursor: pointer;
+  display: grid;
+  flex: 0 0 220px;
+  gap: 1px;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  max-width: 228px;
+  min-height: 34px;
+  padding: 6px 8px;
+  position: relative;
+  text-align: left;
+}
+
+body.runtime-ide-body .runtime-ide-tab.active {
+  background: linear-gradient(180deg, rgba(30, 64, 175, 0.48), rgba(12, 18, 42, 0.94)) !important;
+  border-color: rgba(56, 189, 248, 0.72) !important;
+  box-shadow: 0 -2px 18px rgba(56, 189, 248, 0.16), inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
+}
+
+body.runtime-ide-body .runtime-ide-tab.dirty::before {
+  background: var(--ide-amber);
+  border-radius: 999px;
+  box-shadow: 0 0 10px rgba(255, 212, 56, 0.65);
+  content: "";
+  height: 7px;
+  left: 7px;
+  position: absolute;
+  top: 7px;
+  width: 7px;
+}
+
+body.runtime-ide-body .runtime-ide-tab strong,
+body.runtime-ide-body .runtime-ide-tab small {
+  grid-column: 1;
+  min-width: 0;
+  overflow: hidden;
+  padding-left: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.runtime-ide-body .runtime-ide-tab strong {
+  font-size: 0.78rem;
+  line-height: 1.05;
+}
+
+body.runtime-ide-body .runtime-ide-tab small {
+  color: rgba(202, 213, 236, 0.68) !important;
+  font-size: 0.62rem;
+}
+
+body.runtime-ide-body .runtime-ide-tab-state {
+  align-self: center;
+  border: 1px solid rgba(56, 189, 248, 0.28);
+  border-radius: 999px;
+  color: rgba(191, 219, 254, 0.88);
+  font-size: 0.52rem;
+  font-style: normal;
+  font-weight: 900;
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  letter-spacing: 0.08em;
+  padding: 3px 6px;
+  text-transform: uppercase;
+}
+
+body.runtime-ide-body .runtime-ide-tab-state.dirty {
+  border-color: rgba(255, 212, 56, 0.35);
+  color: rgba(254, 240, 138, 0.9);
+}
+
+body.runtime-ide-body .runtime-ide-tab-close {
+  align-self: center;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  grid-column: 3;
+  grid-row: 1 / span 2;
+  border-radius: 999px;
+  color: rgba(226, 232, 240, 0.7);
+  display: inline-grid;
+  font-size: 0.68rem;
+  font-weight: 800;
+  height: 18px;
+  line-height: 1;
+  place-items: center;
+  width: 18px;
+}
+
+body.runtime-ide-body .runtime-ide-tab-close:hover {
+  background: rgba(255, 56, 100, 0.14);
+  border-color: rgba(255, 56, 100, 0.38);
+  color: #fecdd3;
+}
+
+body.runtime-ide-body .runtime-ide-graph-panel .runtime-ide-canvas {
+  height: 352px !important;
+  max-height: 352px !important;
+  min-height: 352px !important;
+  overflow: auto;
+}
+
+body.runtime-ide-body .runtime-ide-canvas-world {
+  min-width: 100%;
+  min-height: 100%;
+}
+
+body.runtime-ide-body .runtime-ide-canvas .runtime-ide-node {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr);
+  min-height: 76px;
+  overflow: visible;
+  padding: 11px 14px 11px 10px;
+  width: 184px;
+  z-index: 2;
+}
+
+body.runtime-ide-body .runtime-ide-node-copy {
+  display: grid;
+  gap: 3px;
+  grid-column: 2;
+  min-width: 0;
+}
+
+body.runtime-ide-body .runtime-ide-canvas .runtime-ide-node strong,
+body.runtime-ide-body .runtime-ide-canvas .runtime-ide-node small {
+  grid-column: auto;
+  line-height: 1.15;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.runtime-ide-body .runtime-ide-canvas .runtime-ide-node strong {
+  font-size: 0.79rem;
+}
+
+body.runtime-ide-body .runtime-ide-canvas .runtime-ide-node small {
+  color: rgba(202, 213, 236, 0.68) !important;
+  font-size: 0.62rem;
+}
+
+body.runtime-ide-body .runtime-ide-node-icon {
+  grid-column: 1;
+  grid-row: 1 / span 1;
+  height: 33px;
+  width: 33px;
+}
+
+body.runtime-ide-body .runtime-ide-port {
+  background: rgba(56, 189, 248, 0.82);
+  border: 2px solid rgba(8, 14, 35, 0.94);
+  border-radius: 999px;
+  box-shadow: 0 0 0 1px rgba(125, 211, 252, 0.5), 0 0 12px rgba(56, 189, 248, 0.34);
+  cursor: crosshair;
+  height: 12px;
+  position: absolute;
+  width: 12px;
+  z-index: 5;
+}
+
+body.runtime-ide-body .runtime-ide-port:hover {
+  background: #e0f2fe;
+  box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.22), 0 0 18px rgba(56, 189, 248, 0.72);
+  transform: scale(1.18);
+}
+
+body.runtime-ide-body .runtime-ide-port-top {
+  left: 50%;
+  top: -8px;
+  transform: translateX(-50%);
+}
+
+body.runtime-ide-body .runtime-ide-port-right {
+  right: -8px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+body.runtime-ide-body .runtime-ide-port-bottom {
+  bottom: -8px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+body.runtime-ide-body .runtime-ide-port-left {
+  left: -8px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+body.runtime-ide-body .runtime-ide-edge-layer {
+  overflow: visible;
+  pointer-events: none;
+  z-index: 1;
+}
+
+body.runtime-ide-body .runtime-ide-edge {
+  pointer-events: stroke;
+  stroke-width: 2.6;
+}
+
+body.runtime-ide-body .runtime-ide-node.connect-source .runtime-ide-port,
+body.runtime-ide-body .runtime-ide-node.connect-source {
+  border-color: rgba(255, 212, 56, 0.72) !important;
+  box-shadow: 0 0 16px rgba(255, 212, 56, 0.32), 0 0 42px rgba(255, 212, 56, 0.14) !important;
+}
+
+body.runtime-ide-body .runtime-ide-node.connect-target {
+  border-color: rgba(34, 197, 94, 0.86) !important;
+  box-shadow: 0 0 18px rgba(34, 197, 94, 0.42), 0 0 56px rgba(34, 197, 94, 0.14) !important;
+}
+
+body.runtime-ide-body .runtime-ide-node.connect-target .runtime-ide-port {
+  background: #bbf7d0 !important;
+  box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.22), 0 0 22px rgba(34, 197, 94, 0.72) !important;
+}
+
+body.runtime-ide-body .panel-title-row,
+body.runtime-ide-body .runtime-status-row,
+body.runtime-ide-body .runtime-template-item,
+body.runtime-ide-body .runtime-explorer-node,
+body.runtime-ide-body .runtime-infra-item,
+body.runtime-ide-body .runtime-metric-card,
+body.runtime-ide-body .runtime-timeline-item,
+body.runtime-ide-body .runtime-artifact-item,
+body.runtime-ide-body .runtime-compiled-summary {
+  min-width: 0;
+  overflow: hidden;
+}
+
+body.runtime-ide-body .panel-title-row h2,
+body.runtime-ide-body .runtime-status-row span,
+body.runtime-ide-body .runtime-status-row strong,
+body.runtime-ide-body .runtime-status-row small,
+body.runtime-ide-body .runtime-template-item strong,
+body.runtime-ide-body .runtime-template-item small,
+body.runtime-ide-body .runtime-explorer-node strong,
+body.runtime-ide-body .runtime-explorer-node small,
+body.runtime-ide-body .runtime-infra-item strong,
+body.runtime-ide-body .runtime-infra-item small,
+body.runtime-ide-body .runtime-metric-card span,
+body.runtime-ide-body .runtime-metric-card strong,
+body.runtime-ide-body .runtime-metric-card small,
+body.runtime-ide-body .runtime-timeline-item strong,
+body.runtime-ide-body .runtime-timeline-item span,
+body.runtime-ide-body .runtime-timeline-item small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.runtime-ide-body .runtime-ide-output,
+body.runtime-ide-body .runtime-ide-output pre {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+body.runtime-ide-body .runtime-ide-transition-editor {
+  grid-template-columns: 1fr 1fr;
+}
+
+body.runtime-ide-body .runtime-ide-transition-editor .btn,
+body.runtime-ide-body .runtime-ide-transition-editor .hint {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 1280px) {
+  body.runtime-ide-body .runtime-ide-tab-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  body.runtime-ide-body .runtime-ide-command-row {
+    justify-content: flex-start;
+    overflow-x: auto;
+  }
+}
+
+/* v9: separate bottom dock sections so Live Runtime and Run Timeline never collide. */
+body.runtime-ide-body .runtime-ide-bottom-dock {
+  display: grid !important;
+  gap: 18px !important;
+  grid-template-columns: 1fr !important;
+  max-height: none !important;
+  overflow: visible !important;
+  padding: 12px !important;
+}
+
+body.runtime-ide-body .runtime-ide-bottom-grid,
+body.runtime-ide-body .runtime-ide-bottom-grid.secondary,
+body.runtime-ide-body .runtime-ide-bottom-grid.secondary.wide {
+  display: grid !important;
+  gap: 14px !important;
+  margin-top: 0 !important;
+  min-width: 0;
+}
+
+body.runtime-ide-body .runtime-ide-bottom-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+}
+
+body.runtime-ide-body .runtime-ide-bottom-grid.secondary.wide {
+  border-top: 1px solid rgba(96, 165, 250, 0.18);
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  padding-top: 16px;
+}
+
+body.runtime-ide-body .runtime-ide-bottom-grid.secondary {
+  border-top: 1px solid rgba(96, 165, 250, 0.18);
+  grid-template-columns: 1fr !important;
+  padding-top: 16px;
+}
+
+body.runtime-ide-body .runtime-ide-bottom-dock article {
+  min-height: 0;
+  overflow: hidden;
+  padding: 12px !important;
+}
+
+body.runtime-ide-body .runtime-ide-bottom-dock .runtime-ide-subtitle {
+  margin-top: 0 !important;
+}
+
+body.runtime-ide-body .runtime-ide-bottom-dock .runtime-ide-output {
+  max-height: 118px !important;
+  min-height: 74px !important;
+}
+
+body.runtime-ide-body #ide-run-timeline,
+body.runtime-ide-body #ide-artifact-lineage,
+body.runtime-ide-body #ide-artifact-preview,
+body.runtime-ide-body #ide-replay-output {
+  max-height: 142px !important;
+  min-height: 92px !important;
+}
+
+@media (max-width: 1280px) {
+  body.runtime-ide-body .runtime-ide-bottom-grid,
+  body.runtime-ide-body .runtime-ide-bottom-grid.secondary.wide {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (max-width: 760px) {
+  body.runtime-ide-body .runtime-ide-bottom-grid,
+  body.runtime-ide-body .runtime-ide-bottom-grid.secondary.wide {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* v10: minimap visibility + true drag/drop connection feedback. */
+body.runtime-ide-body .runtime-ide-graph-aux-grid {
+  grid-template-columns: minmax(240px, 0.9fr) minmax(0, 1.1fr) !important;
+}
+
+body.runtime-ide-body .runtime-ide-graph-aux-grid .runtime-ide-minimap {
+  align-items: center;
+  display: flex;
+  justify-content: center;
+  max-height: none !important;
+  min-height: 154px !important;
+  overflow: hidden !important;
+  padding: 8px !important;
+}
+
+body.runtime-ide-body .runtime-ide-minimap-world {
+  flex: 0 0 auto;
+  max-width: 100%;
+  max-height: 100%;
+  transform-origin: center center;
+}
+
+body.runtime-ide-body .runtime-ide-graph-aux-grid .runtime-ide-output {
+  max-height: 154px !important;
+  min-height: 154px !important;
+}
+
+body.runtime-ide-body .runtime-ide-connection-preview {
+  fill: none;
+  pointer-events: none;
+  stroke: rgba(255, 212, 56, 0.96);
+  stroke-dasharray: 8 7;
+  stroke-linecap: round;
+  stroke-width: 3.4;
+  filter: drop-shadow(0 0 8px rgba(255, 212, 56, 0.72));
+  animation: ide-edge-dash 0.8s linear infinite;
+}
+
+body.runtime-ide-body .runtime-ide-port {
+  cursor: grab;
+}
+
+body.runtime-ide-body .runtime-ide-port:active {
+  cursor: grabbing;
+}
+
+body.runtime-ide-body .runtime-ide-node.connect-source::before {
+  border: 1px dashed rgba(255, 212, 56, 0.78);
+  border-radius: 15px;
+  content: "";
+  inset: -7px;
+  pointer-events: none;
+  position: absolute;
+}
+
+/* v11: connection UX is drag/drop from ports; hide legacy click-connect button. */
+body.runtime-ide-body #ide-edge-connect-btn {
+  display: none !important;
+}
+
+/* v12: production module catalog, Gemma 31B module designer, and trash-drop editing. */
+body.runtime-ide-body .runtime-module-catalog {
+  max-height: 225px !important;
+  overflow: auto;
+  padding: 8px !important;
+}
+
+body.runtime-ide-body .runtime-module-catalog-group {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+body.runtime-ide-body .runtime-module-catalog-heading {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+body.runtime-ide-body .runtime-module-catalog-heading strong {
+  color: rgba(226, 232, 240, 0.88) !important;
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+body.runtime-ide-body .runtime-module-catalog-item {
+  align-items: center;
+  appearance: none;
+  background: rgba(12, 18, 42, 0.82) !important;
+  border: 1px solid rgba(96, 165, 250, 0.18) !important;
+  border-radius: 10px;
+  color: var(--ide-text) !important;
+  cursor: grab;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 30px minmax(0, 1fr);
+  min-width: 0;
+  padding: 7px;
+  text-align: left;
+  width: 100%;
+}
+
+body.runtime-ide-body .runtime-module-catalog-item:hover {
+  border-color: rgba(56, 189, 248, 0.62) !important;
+  box-shadow: 0 0 14px rgba(56, 189, 248, 0.14) !important;
+}
+
+body.runtime-ide-body .runtime-module-catalog-item:active {
+  cursor: grabbing;
+}
+
+body.runtime-ide-body .runtime-module-catalog-item .runtime-ide-node-icon {
+  height: 28px;
+  width: 28px;
+}
+
+body.runtime-ide-body .runtime-module-catalog-item span {
+  display: grid;
+  min-width: 0;
+}
+
+body.runtime-ide-body .runtime-module-catalog-item strong,
+body.runtime-ide-body .runtime-module-catalog-item small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.runtime-ide-body .runtime-module-catalog-item strong {
+  font-size: 0.72rem;
+}
+
+body.runtime-ide-body .runtime-module-catalog-item small {
+  color: rgba(202, 213, 236, 0.64) !important;
+  font-size: 0.58rem;
+}
+
+body.runtime-ide-body .runtime-ide-trash-zone {
+  align-items: center;
+  background: rgba(255, 56, 100, 0.1);
+  border: 1px dashed rgba(255, 56, 100, 0.52);
+  border-radius: 12px;
+  color: #fecdd3;
+  display: none;
+  font-size: 0.78rem;
+  font-weight: 800;
+  justify-content: center;
+  letter-spacing: 0.02em;
+  margin-top: 8px;
+  min-height: 40px;
+  text-align: center;
+  transition: background 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+}
+
+body.runtime-ide-body .runtime-ide-trash-zone.visible {
+  display: flex;
+}
+
+body.runtime-ide-body .runtime-ide-trash-zone.active {
+  background: rgba(255, 56, 100, 0.2);
+  border-color: rgba(255, 56, 100, 0.9);
+  box-shadow: 0 0 24px rgba(255, 56, 100, 0.22);
+  transform: translateY(-1px);
+}
+
+body.runtime-ide-body .runtime-module-designer {
+  background: rgba(5, 8, 22, 0.54) !important;
+  border: 1px solid rgba(96, 165, 250, 0.16) !important;
+  border-radius: 12px;
+  margin: 8px 0;
+  overflow: hidden;
+}
+
+body.runtime-ide-body .runtime-module-designer summary {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  list-style: none;
+  padding: 9px 10px;
+}
+
+body.runtime-ide-body .runtime-module-designer summary::-webkit-details-marker {
+  display: none;
+}
+
+body.runtime-ide-body .runtime-module-designer summary::after {
+  color: var(--ide-cyan);
+  content: "Open";
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+body.runtime-ide-body .runtime-module-designer[open] summary::after {
+  content: "Close";
+}
+
+body.runtime-ide-body .runtime-module-designer summary span {
+  color: #f2f7ff;
+  font-weight: 800;
+}
+
+body.runtime-ide-body .runtime-module-designer-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding: 0 10px 8px;
+}
+
+body.runtime-ide-body .runtime-module-designer-notes {
+  grid-column: 1 / -1;
+}
+
+body.runtime-ide-body .runtime-module-designer .compact-row {
+  padding: 0 10px 10px;
+}
+
+body.runtime-ide-body .runtime-module-designer-status.ok {
+  color: #86efac !important;
+}
+
+body.runtime-ide-body .runtime-module-designer-status.warn,
+body.runtime-ide-body .runtime-module-designer-status.busy {
+  color: #fde68a !important;
+}
+
+body.runtime-ide-body .runtime-module-designer-status.error {
+  color: #fda4af !important;
+}
+
+@media (max-width: 760px) {
+  body.runtime-ide-body .runtime-module-designer-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+
+/* Runtime IDE multi-edge readability overrides. */
+body.runtime-ide-body .runtime-ide-graph-panel .runtime-ide-canvas {
+  height: 460px !important;
+  max-height: 460px !important;
+  min-height: 460px !important;
+}
+
+body.runtime-ide-body .runtime-ide-edge-layer {
+  color: #8ec5ff;
+}
+
+body.runtime-ide-body .runtime-ide-edge {
+  fill: none;
+  marker-end: url(#ide-arrow);
+  opacity: 0.9;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-width: 3.1;
+}
+
+body.runtime-ide-body .runtime-ide-edge.edge-candidate {
+  opacity: 0.72;
+  stroke-dasharray: 8 7;
+}
+
+body.runtime-ide-body .runtime-ide-edge.edge-default {
+  opacity: 0.96;
+}
+
+body.runtime-ide-body .runtime-ide-edge.edge-active,
+body.runtime-ide-body .runtime-ide-edge:hover {
+  color: #facc15;
+  opacity: 1;
+  stroke-width: 3.8;
+}
+
+body.runtime-ide-body .runtime-ide-edge-label {
+  pointer-events: none;
+}
+
+body.runtime-ide-body .runtime-ide-edge-label rect {
+  fill: rgba(5, 8, 22, 0.88);
+  stroke: rgba(125, 211, 252, 0.32);
+  stroke-width: 1;
+}
+
+body.runtime-ide-body .runtime-ide-edge-label text {
+  fill: #d9ecff;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-anchor: middle;
+}
+
+body.runtime-ide-body .runtime-ide-edge-label.edge-candidate text {
+  fill: #b8c7dc;
+}
+
+/* v14: full-width agent behavior editor directly above Live Runtime dock. */
+body.runtime-ide-body .runtime-module-editor-expanded {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 0 !important;
+  overflow: hidden;
+}
+
+body.runtime-ide-body .runtime-module-editor-expanded > summary {
+  align-items: center;
+  background:
+    linear-gradient(90deg, rgba(56, 189, 248, 0.13), rgba(43, 140, 255, 0.06) 42%, rgba(5, 8, 22, 0.02)),
+    rgba(8, 14, 35, 0.68);
+  border-bottom: 1px solid rgba(96, 165, 250, 0.18);
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  list-style: none;
+  padding: 15px 18px;
+}
+
+body.runtime-ide-body .runtime-module-editor-expanded > summary::-webkit-details-marker {
+  display: none;
+}
+
+body.runtime-ide-body .runtime-module-editor-expanded > summary::after {
+  color: rgba(56, 189, 248, 0.9);
+  content: "expand";
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+body.runtime-ide-body .runtime-module-editor-expanded[open] > summary::after {
+  content: "collapse";
+}
+
+body.runtime-ide-body .runtime-module-editor-expanded > summary span {
+  color: #f2f7ff;
+  font-size: 1.02rem;
+  font-weight: 900;
+  letter-spacing: 0.01em;
+}
+
+body.runtime-ide-body .runtime-module-editor-expanded > summary small {
+  color: rgba(202, 213, 236, 0.72) !important;
+  font-size: 0.72rem;
+}
+
+body.runtime-ide-body .runtime-module-editor-head {
+  align-items: end;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 1fr) minmax(420px, 0.58fr);
+  padding: 18px 18px 12px;
+}
+
+body.runtime-ide-body .runtime-module-editor-head h2 {
+  font-size: clamp(1.35rem, 1.8vw, 2.05rem);
+  margin: 0 0 4px;
+}
+
+body.runtime-ide-body .runtime-module-editor-actions {
+  align-items: end;
+  display: grid;
+  gap: 8px;
+  justify-items: stretch;
+}
+
+body.runtime-ide-body .runtime-module-tabs {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 0 18px 14px;
+  scrollbar-color: rgba(56, 189, 248, 0.32) rgba(8, 14, 35, 0.78);
+}
+
+body.runtime-ide-body .runtime-module-tab,
+body.runtime-ide-body .runtime-module-tab-empty {
+  background: rgba(12, 18, 42, 0.74);
+  border: 1px solid rgba(96, 165, 250, 0.18);
+  border-radius: 13px;
+  color: var(--ide-text);
+  cursor: pointer;
+  display: grid;
+  flex: 0 0 190px;
+  gap: 4px;
+  min-height: 58px;
+  padding: 10px 12px;
+  text-align: left;
+}
+
+body.runtime-ide-body .runtime-module-tab strong {
+  font-size: 0.78rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.runtime-ide-body .runtime-module-tab small {
+  color: rgba(202, 213, 236, 0.62) !important;
+  font-size: 0.63rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.runtime-ide-body .runtime-module-tab:hover,
+body.runtime-ide-body .runtime-module-tab.active {
+  background: linear-gradient(180deg, rgba(43, 140, 255, 0.18), rgba(8, 14, 35, 0.82));
+  border-color: rgba(56, 189, 248, 0.56);
+  box-shadow: 0 0 18px rgba(56, 189, 248, 0.18);
+}
+
+body.runtime-ide-body .runtime-module-editor-grid {
+  align-items: stretch;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(260px, 0.62fr) minmax(640px, 1.7fr) minmax(300px, 0.72fr);
+  padding: 0 18px 18px;
+}
+
+body.runtime-ide-body .runtime-module-side-pane,
+body.runtime-ide-body .runtime-module-main-pane,
+body.runtime-ide-body .runtime-module-raw-pane,
+body.runtime-ide-body .runtime-module-config-card,
+body.runtime-ide-body .runtime-module-operator-note {
+  background: rgba(12, 18, 42, 0.66) !important;
+  border: 1px solid rgba(96, 165, 250, 0.16) !important;
+  border-radius: 14px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.045);
+}
+
+body.runtime-ide-body .runtime-module-side-pane,
+body.runtime-ide-body .runtime-module-main-pane,
+body.runtime-ide-body .runtime-module-raw-pane {
+  min-width: 0;
+  padding: 13px;
+}
+
+body.runtime-ide-body .runtime-module-main-pane {
+  display: grid;
+  gap: 12px;
+}
+
+body.runtime-ide-body .runtime-module-summary-output {
+  background: transparent !important;
+  border: 0 !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+}
+
+body.runtime-ide-body .runtime-module-agent-head {
+  align-items: center;
+  background:
+    radial-gradient(circle at 92% 20%, rgba(56, 189, 248, 0.16), transparent 28%),
+    linear-gradient(135deg, rgba(43, 140, 255, 0.15), rgba(12, 18, 42, 0.82));
+  border: 1px solid rgba(96, 165, 250, 0.18);
+  border-radius: 14px;
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px;
+}
+
+body.runtime-ide-body .runtime-module-agent-head h3 {
+  color: #f2f7ff;
+  font-size: 1.16rem;
+  margin: 7px 0 3px;
+}
+
+body.runtime-ide-body .runtime-module-agent-head p {
+  color: rgba(202, 213, 236, 0.72);
+  font-size: 0.74rem;
+  margin: 0;
+}
+
+body.runtime-ide-body .runtime-module-id-pill {
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.32);
+  border-radius: 999px;
+  color: #bae6fd;
+  display: inline-flex;
+  font-size: 0.66rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  padding: 4px 9px;
+  text-transform: uppercase;
+}
+
+body.runtime-ide-body .runtime-module-health-strip {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(3, 72px);
+}
+
+body.runtime-ide-body .runtime-module-health-strip span {
+  background: rgba(5, 8, 22, 0.58);
+  border: 1px solid rgba(96, 165, 250, 0.16);
+  border-radius: 12px;
+  display: grid;
+  gap: 2px;
+  padding: 8px;
+  text-align: center;
+}
+
+body.runtime-ide-body .runtime-module-health-strip strong {
+  color: #e0f2fe;
+  font-size: 1rem;
+}
+
+body.runtime-ide-body .runtime-module-health-strip small {
+  color: rgba(202, 213, 236, 0.62) !important;
+  font-size: 0.62rem;
+}
+
+body.runtime-ide-body .runtime-module-config-cards {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 12px;
+}
+
+body.runtime-ide-body .runtime-module-config-card {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+body.runtime-ide-body .runtime-module-config-card.wide {
+  grid-column: span 3;
+}
+
+body.runtime-ide-body .runtime-module-card-title {
+  align-items: baseline;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+body.runtime-ide-body .runtime-module-card-title strong {
+  font-size: 0.83rem;
+}
+
+body.runtime-ide-body .runtime-module-card-title small {
+  color: rgba(202, 213, 236, 0.58) !important;
+  font-size: 0.62rem;
+}
+
+body.runtime-ide-body .runtime-module-two-col {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+body.runtime-ide-body .runtime-module-tool-groups {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  max-height: 230px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+body.runtime-ide-body .runtime-module-tool-group {
+  background: rgba(5, 8, 22, 0.42);
+  border: 1px solid rgba(96, 165, 250, 0.12);
+  border-radius: 12px;
+  display: grid;
+  gap: 8px;
+  padding: 9px;
+}
+
+body.runtime-ide-body .runtime-module-tool-group > strong {
+  color: #bae6fd;
+  font-size: 0.72rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+body.runtime-ide-body .runtime-module-tool-list {
+  display: grid;
+  gap: 6px;
+}
+
+body.runtime-ide-body .runtime-module-tool-chip {
+  align-items: center;
+  background: rgba(12, 18, 42, 0.68);
+  border: 1px solid rgba(96, 165, 250, 0.1);
+  border-radius: 9px;
+  color: rgba(226, 232, 240, 0.82);
+  display: grid;
+  font-size: 0.66rem;
+  gap: 6px;
+  grid-template-columns: auto minmax(0, 1fr);
+  padding: 6px 7px;
+}
+
+body.runtime-ide-body .runtime-module-tool-chip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.runtime-ide-body .runtime-module-custom-tools,
+body.runtime-ide-body .runtime-module-raw-json {
+  border: 1px solid rgba(96, 165, 250, 0.14);
+  border-radius: 12px;
+  margin-top: 10px;
+  overflow: hidden;
+}
+
+body.runtime-ide-body .runtime-module-custom-tools summary,
+body.runtime-ide-body .runtime-module-raw-json summary {
+  align-items: center;
+  background: rgba(5, 8, 22, 0.46);
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  list-style: none;
+  padding: 9px 11px;
+}
+
+body.runtime-ide-body .runtime-module-custom-tools summary::-webkit-details-marker,
+body.runtime-ide-body .runtime-module-raw-json summary::-webkit-details-marker {
+  display: none;
+}
+
+body.runtime-ide-body .prompt-card .runtime-module-small-textarea {
+  min-height: 112px;
+}
+
+body.runtime-ide-body .runtime-module-config-footer {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+body.runtime-ide-body .runtime-module-operator-note {
+  display: grid;
+  gap: 5px;
+  margin-top: 12px;
+  padding: 12px;
+}
+
+body.runtime-ide-body .runtime-module-operator-note strong {
+  color: #e0f2fe;
+  font-size: 0.8rem;
+}
+
+body.runtime-ide-body .runtime-module-operator-note small {
+  color: rgba(202, 213, 236, 0.7) !important;
+  line-height: 1.45;
+}
+
+body.runtime-ide-body .runtime-module-raw-pane .runtime-ide-textarea {
+  height: 560px;
+  min-height: 560px;
+}
+
+body.runtime-ide-body .runtime-module-graph {
+  max-height: 560px;
+  overflow: auto;
+}
+
+body.runtime-ide-body .runtime-module-step-fields {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+@media (max-width: 1320px) {
+  body.runtime-ide-body .runtime-module-editor-head,
+  body.runtime-ide-body .runtime-module-editor-grid,
+  body.runtime-ide-body .runtime-module-config-cards,
+  body.runtime-ide-body .runtime-module-tool-groups,
+  body.runtime-ide-body .runtime-module-two-col {
+    grid-template-columns: 1fr;
+  }
+  body.runtime-ide-body .runtime-module-config-card.wide {
+    grid-column: span 1;
+  }
+  body.runtime-ide-body .runtime-module-health-strip {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+/* v15: separate Module Management Tool from config editing. */
+body.runtime-ide-body .runtime-module-management-open {
+  margin-top: 10px;
+  width: 100%;
+}
+
+body.runtime-ide-body .runtime-module-editor-grid.config-only {
+  grid-template-columns: minmax(220px, 0.38fr) minmax(650px, 1.65fr) minmax(300px, 0.65fr);
+}
+
+body.runtime-ide-body .runtime-module-config-scope-pane {
+  align-self: stretch;
+  display: flex;
+}
+
+body.runtime-ide-body .runtime-module-config-note {
+  align-content: start;
+  display: grid;
+  gap: 10px;
+  width: 100%;
+}
+
+body.module-management-body .module-management-page {
+  max-width: min(1840px, calc(100vw - 24px));
+}
+
+body.module-management-body .module-management-hero {
+  grid-template-columns: minmax(0, 1fr) 310px;
+}
+
+body.runtime-ide-body .module-management-toolbar {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  padding: 12px 14px;
+}
+
+body.runtime-ide-body .module-management-toolbar > div:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+body.runtime-ide-body .module-management-grid {
+  align-items: stretch;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(280px, 0.55fr) minmax(620px, 1.45fr) minmax(340px, 0.72fr);
+}
+
+body.runtime-ide-body .module-management-library,
+body.runtime-ide-body .module-management-workbench,
+body.runtime-ide-body .module-management-designer {
+  min-width: 0;
+  padding: 14px;
+}
+
+body.runtime-ide-body .module-management-library,
+body.runtime-ide-body .module-management-designer {
+  position: sticky;
+  top: 10px;
+}
+
+body.runtime-ide-body .module-management-loaded-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 10px 0;
+}
+
+body.runtime-ide-body .module-management-loaded-chip {
+  background: rgba(34, 197, 94, 0.12);
+  border: 1px solid rgba(34, 197, 94, 0.26);
+  border-radius: 999px;
+  color: #bbf7d0;
+  cursor: pointer;
+  font-size: 0.68rem;
+  font-weight: 800;
+  padding: 5px 9px;
+}
+
+body.runtime-ide-body .module-management-list {
+  max-height: 720px;
+  overflow: auto;
+}
+
+body.runtime-ide-body .module-management-item {
+  align-items: center;
+  background: rgba(12, 18, 42, 0.72);
+  border: 1px solid rgba(96, 165, 250, 0.14);
+  border-radius: 12px;
+  color: var(--ide-text);
+  cursor: pointer;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  margin-bottom: 8px;
+  padding: 10px;
+  text-align: left;
+  width: 100%;
+}
+
+body.runtime-ide-body .module-management-item:hover,
+body.runtime-ide-body .module-management-item.active {
+  border-color: rgba(56, 189, 248, 0.55);
+  box-shadow: 0 0 18px rgba(56, 189, 248, 0.14);
+}
+
+body.runtime-ide-body .module-management-item span {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+body.runtime-ide-body .module-management-item strong,
+body.runtime-ide-body .module-management-item small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.runtime-ide-body .module-management-state-badge {
+  border-radius: 999px;
+  font-size: 0.62rem;
+  font-style: normal;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  padding: 4px 8px;
+  text-transform: uppercase;
+}
+
+body.runtime-ide-body .module-management-state-badge.loaded {
+  background: rgba(34, 197, 94, 0.14);
+  border: 1px solid rgba(34, 197, 94, 0.28);
+  color: #bbf7d0;
+}
+
+body.runtime-ide-body .module-management-state-badge.unloaded {
+  background: rgba(148, 163, 184, 0.1);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  color: rgba(226, 232, 240, 0.7);
+}
+
+body.runtime-ide-body .module-management-output {
+  min-height: 560px;
+}
+
+body.runtime-ide-body .module-management-detail-head {
+  align-items: center;
+  background:
+    radial-gradient(circle at 94% 18%, rgba(56, 189, 248, 0.15), transparent 26%),
+    rgba(12, 18, 42, 0.78);
+  border: 1px solid rgba(96, 165, 250, 0.16);
+  border-radius: 14px;
+  display: flex;
+  justify-content: space-between;
+  padding: 14px;
+}
+
+body.runtime-ide-body .module-management-detail-head h3 {
+  color: #f2f7ff;
+  font-size: 1.25rem;
+  margin: 7px 0 4px;
+}
+
+body.runtime-ide-body .module-management-detail-head p {
+  color: rgba(202, 213, 236, 0.72);
+  margin: 0;
+}
+
+body.runtime-ide-body .module-management-kpis {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 12px 0;
+}
+
+body.runtime-ide-body .module-management-kpis span,
+body.runtime-ide-body .module-management-section,
+body.runtime-ide-body .module-management-json-preview {
+  background: rgba(5, 8, 22, 0.42);
+  border: 1px solid rgba(96, 165, 250, 0.12);
+  border-radius: 12px;
+  padding: 10px;
+}
+
+body.runtime-ide-body .module-management-kpis span {
+  display: grid;
+  gap: 3px;
+  text-align: center;
+}
+
+body.runtime-ide-body .module-management-kpis strong {
+  color: #e0f2fe;
+  font-size: 1.08rem;
+}
+
+body.runtime-ide-body .module-management-section {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+body.runtime-ide-body .module-management-json-preview {
+  margin-top: 10px;
+}
+
+body.runtime-ide-body .module-management-json-preview summary {
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+}
+
+body.runtime-ide-body .module-management-json-preview pre {
+  max-height: 320px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+body.runtime-ide-body .module-management-workbench-actions {
+  margin-top: 12px;
+}
+
+body.runtime-ide-body .module-management-action-output,
+body.runtime-ide-body .module-management-designer-status {
+  margin-top: 12px;
+  min-height: 72px;
+}
+
+body.runtime-ide-body .module-management-designer {
+  display: grid;
+  gap: 10px;
+}
+
+body.runtime-ide-body .module-management-empty {
+  color: rgba(202, 213, 236, 0.66);
+  font-size: 0.72rem;
+  padding: 8px 0;
+}
+
+@media (max-width: 1320px) {
+  body.runtime-ide-body .runtime-module-editor-grid.config-only,
+  body.runtime-ide-body .module-management-grid {
+    grid-template-columns: 1fr;
+  }
+  body.runtime-ide-body .module-management-library,
+  body.runtime-ide-body .module-management-designer {
+    position: static;
+  }
+}
+
+/* v16: taller module library and icon-first module references. */
+body.runtime-ide-body .runtime-ide-shell {
+  align-items: stretch;
+}
+
+body.runtime-ide-body .runtime-ide-sidebar {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 170px);
+  min-height: min(760px, calc(100vh - 170px));
+  overflow: hidden;
+}
+
+body.runtime-ide-body #ide-node-list,
+body.runtime-ide-body #ide-infra-list {
+  flex: 0 0 auto;
+}
+
+body.runtime-ide-body #ide-template-list.runtime-module-catalog {
+  flex: 1 1 auto;
+  max-height: none !important;
+  min-height: 360px;
+  overflow: auto;
+}
+
+body.runtime-ide-body .runtime-module-management-open {
+  flex: 0 0 auto;
+}
+
+body.runtime-ide-body .runtime-module-tab {
+  align-items: center;
+  grid-template-columns: 30px minmax(0, 1fr);
+  min-height: 62px;
+}
+
+body.runtime-ide-body .runtime-module-tab .runtime-ide-node-icon {
+  height: 28px;
+  width: 28px;
+}
+
+body.runtime-ide-body .runtime-module-tab-copy,
+body.runtime-ide-body .module-management-item-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+body.runtime-ide-body .runtime-module-agent-title,
+body.runtime-ide-body .module-management-title-wrap {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  min-width: 0;
+}
+
+body.runtime-ide-body .runtime-module-agent-title > .runtime-ide-node-icon,
+body.runtime-ide-body .module-management-title-wrap > .runtime-ide-node-icon {
+  flex: 0 0 42px;
+  height: 42px;
+  width: 42px;
+}
+
+body.runtime-ide-body .module-management-loaded-chip {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+}
+
+body.runtime-ide-body .module-management-loaded-chip .runtime-ide-node-icon {
+  flex: 0 0 18px;
+  height: 18px;
+  width: 18px;
+}
+
+body.runtime-ide-body .module-management-loaded-chip .runtime-ide-node-icon img {
+  height: 13px;
+  width: 13px;
+}
+
+body.runtime-ide-body .module-management-item {
+  grid-template-columns: 32px minmax(0, 1fr);
+}
+
+body.runtime-ide-body .module-management-item .runtime-ide-node-icon {
+  align-self: center;
+  display: inline-flex;
+  height: 30px;
+  justify-content: center;
+  width: 30px;
+}
+
+body.runtime-ide-body .module-management-item .runtime-ide-node-icon img {
+  height: 21px;
+  width: 21px;
+}
+
+body.runtime-ide-body .module-management-detail-head .runtime-ide-node-icon img,
+body.runtime-ide-body .runtime-module-agent-title .runtime-ide-node-icon img {
+  height: 28px;
+  width: 28px;
+}
+
+/* v17: reduce Runtime IDE module list one notch and host config editing in Module Management Tool. */
+body.runtime-ide-body .runtime-ide-sidebar {
+  max-height: none;
+  min-height: auto;
+  overflow: visible;
+}
+
+body.runtime-ide-body #ide-template-list.runtime-module-catalog {
+  flex: 0 0 auto;
+  max-height: 318px !important;
+  min-height: 300px;
+  overflow: auto;
+}
+
+body.runtime-ide-body .runtime-module-catalog-item strong,
+body.runtime-ide-body .runtime-module-catalog-item small,
+body.runtime-ide-body .module-management-item strong,
+body.runtime-ide-body .module-management-item small,
+body.runtime-ide-body .runtime-module-tab strong,
+body.runtime-ide-body .runtime-module-tab small {
+  line-height: 1.25;
+}
+
+body.runtime-ide-body .runtime-module-catalog-item small,
+body.runtime-ide-body .module-management-item small {
+  white-space: normal;
+}
+
+body.runtime-ide-body .module-management-list {
+  min-height: 520px;
+  max-height: min(760px, calc(100vh - 300px));
+}
+
+body.runtime-ide-body .module-management-config-workspace {
+  margin-top: 12px;
+}
+
+body.runtime-ide-body .module-management-config-grid {
+  grid-template-columns: minmax(680px, 1.55fr) minmax(360px, 0.75fr) !important;
+}
+
+body.runtime-ide-body .module-management-config-head {
+  grid-template-columns: minmax(0, 1fr) minmax(520px, 0.72fr);
+}
+
+body.runtime-ide-body .module-management-config-main,
+body.runtime-ide-body .module-management-config-raw {
+  min-width: 0;
+}
+
+body.runtime-ide-body .module-management-config-raw .runtime-ide-textarea {
+  height: 680px;
+  min-height: 680px;
+}
+
+body.runtime-ide-body .module-management-config-status.ok {
+  color: #86efac !important;
+}
+
+body.runtime-ide-body .module-management-config-status.warn {
+  color: #fde68a !important;
+}
+
+body.runtime-ide-body .module-management-tool-groups {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+@media (max-width: 1320px) {
+  body.runtime-ide-body .module-management-config-grid,
+  body.runtime-ide-body .module-management-config-head {
+    grid-template-columns: 1fr !important;
+  }
+
+  body.runtime-ide-body .module-management-list {
+    max-height: 560px;
+  }
+}
+
+/* v18: practical runtime inspection and module impact panels. */
+body.runtime-ide-body .runtime-node-inspector-grid {
+  display: grid;
+  gap: 10px;
+}
+
+body.runtime-ide-body .runtime-node-inspector-card {
+  background: rgba(5, 8, 22, 0.42);
+  border: 1px solid rgba(96, 165, 250, 0.14);
+  border-radius: 12px;
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+}
+
+body.runtime-ide-body .runtime-node-inspector-card h3 {
+  color: #e0f2fe;
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+body.runtime-ide-body .runtime-node-inspector-card dl {
+  display: grid;
+  gap: 6px 10px;
+  grid-template-columns: 74px minmax(0, 1fr);
+  margin: 0;
+}
+
+body.runtime-ide-body .runtime-node-inspector-card dt {
+  color: rgba(148, 163, 184, 0.86);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+}
+
+body.runtime-ide-body .runtime-node-inspector-card dd {
+  color: rgba(241, 245, 249, 0.94);
+  font-size: 0.76rem;
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+body.runtime-ide-body .runtime-node-inspector-card details {
+  background: rgba(15, 23, 42, 0.58);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 10px;
+  padding: 8px;
+}
+
+body.runtime-ide-body .runtime-node-inspector-card summary {
+  color: rgba(226, 232, 240, 0.86);
+  cursor: pointer;
+  font-size: 0.74rem;
+  font-weight: 800;
+}
+
+body.runtime-ide-body .runtime-node-inspector-card pre {
+  background: transparent !important;
+  border: 0 !important;
+  color: rgba(203, 213, 225, 0.9);
+  font-size: 0.7rem;
+  margin: 8px 0 0;
+  max-height: 190px;
+  overflow: auto;
+  padding: 0;
+  white-space: pre-wrap;
+}
+
+body.runtime-ide-body .runtime-node-status-pill {
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 0.62rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  padding: 3px 7px;
+  text-transform: uppercase;
+}
+
+body.runtime-ide-body .runtime-node-status-pill.running {
+  background: rgba(56, 189, 248, 0.16);
+  border: 1px solid rgba(56, 189, 248, 0.42);
+  color: #bae6fd;
+}
+
+body.runtime-ide-body .runtime-node-status-pill.done {
+  background: rgba(34, 197, 94, 0.14);
+  border: 1px solid rgba(34, 197, 94, 0.34);
+  color: #bbf7d0;
+}
+
+body.runtime-ide-body .runtime-node-status-pill.failed {
+  background: rgba(248, 113, 113, 0.14);
+  border: 1px solid rgba(248, 113, 113, 0.38);
+  color: #fecaca;
+}
+
+body.runtime-ide-body .runtime-node-status-pill.idle,
+body.runtime-ide-body .runtime-node-status-pill.pending {
+  background: rgba(148, 163, 184, 0.1);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  color: rgba(226, 232, 240, 0.78);
+}
+
+body.runtime-ide-body .runtime-node-event-list {
+  display: grid;
+  gap: 5px;
+}
+
+body.runtime-ide-body .runtime-node-event-row {
+  align-items: center;
+  background: rgba(15, 23, 42, 0.5);
+  border: 1px solid rgba(96, 165, 250, 0.1);
+  border-radius: 9px;
+  display: grid;
+  gap: 6px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 6px 8px;
+}
+
+body.runtime-ide-body .runtime-node-event-row small {
+  color: rgba(148, 163, 184, 0.76);
+  grid-column: 1 / -1;
+  overflow-wrap: anywhere;
+}
+
+body.runtime-ide-body .runtime-node-event-row.empty {
+  color: rgba(203, 213, 225, 0.68);
+  display: block;
+}
+
+body.runtime-ide-body .module-management-kpis {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+body.runtime-ide-body .module-management-usage-list {
+  display: grid;
+  gap: 8px;
+}
+
+body.runtime-ide-body .module-management-usage-item {
+  align-items: start;
+  background: rgba(15, 23, 42, 0.52);
+  border: 1px solid rgba(96, 165, 250, 0.12);
+  border-radius: 10px;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 0.9fr) auto;
+  padding: 9px;
+}
+
+body.runtime-ide-body .module-management-usage-item span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+body.runtime-ide-body .module-management-usage-item strong,
+body.runtime-ide-body .module-management-usage-item small {
+  overflow-wrap: anywhere;
+}
+
+body.runtime-ide-body .module-management-usage-item small {
+  color: rgba(148, 163, 184, 0.84);
+}
+
+@media (max-width: 1320px) {
+  body.runtime-ide-body .module-management-usage-item {
+    grid-template-columns: 1fr;
+  }
+}
+
+body.runtime-ide-body #ide-node-inspector.runtime-ide-output.compact-output {
+  max-height: 620px !important;
+  min-height: 420px !important;
+  overflow: auto;
+}
+
+body.runtime-ide-body .runtime-ide-right-panel {
+  min-width: 320px;
+}
+
+body.runtime-ide-body .runtime-ide-shell {
+  grid-template-columns: 220px minmax(0, 1fr) minmax(320px, 0.48fr);
+}
+
+/* v19: timeline event detail, replay context, and artifact lineage grouping. */
+body.runtime-ide-body .runtime-ide-bottom-grid.secondary.runtime-ide-runtime-detail-grid {
+  grid-template-columns: minmax(420px, 1.1fr) minmax(360px, 0.95fr) minmax(360px, 0.95fr) !important;
+}
+
+body.runtime-ide-body #ide-event-detail,
+body.runtime-ide-body #ide-replay-output,
+body.runtime-ide-body #ide-log-output {
+  max-height: 360px !important;
+  min-height: 220px !important;
+  overflow: auto;
+}
+
+body.runtime-ide-body #ide-run-timeline,
+body.runtime-ide-body #ide-artifact-lineage {
+  max-height: 320px !important;
+  min-height: 220px !important;
+  overflow: auto;
+}
+
+body.runtime-ide-body .runtime-timeline-summary,
+body.runtime-ide-body .runtime-artifact-summary {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  margin-bottom: 10px;
+}
+
+body.runtime-ide-body .runtime-artifact-summary {
+  grid-template-columns: 0.55fr 0.55fr minmax(0, 1.4fr);
+}
+
+body.runtime-ide-body .runtime-timeline-summary span,
+body.runtime-ide-body .runtime-artifact-summary span {
+  background: rgba(15, 23, 42, 0.58);
+  border: 1px solid rgba(96, 165, 250, 0.12);
+  border-radius: 10px;
+  display: grid;
+  gap: 2px;
+  padding: 7px;
+  text-align: center;
+}
+
+body.runtime-ide-body .runtime-timeline-summary span.ok strong,
+body.runtime-ide-body .runtime-node-status-pill.ok {
+  color: #bbf7d0;
+}
+
+body.runtime-ide-body .runtime-timeline-summary span.warn strong,
+body.runtime-ide-body .runtime-node-status-pill.warn {
+  color: #fde68a;
+}
+
+body.runtime-ide-body .runtime-timeline-summary span.error strong,
+body.runtime-ide-body .runtime-node-status-pill.error {
+  color: #fecaca;
+}
+
+body.runtime-ide-body .runtime-timeline-list,
+body.runtime-ide-body .runtime-artifact-lineage-groups {
+  display: grid;
+  gap: 8px;
+}
+
+body.runtime-ide-body .runtime-timeline-item {
+  align-items: center;
+  display: grid;
+  gap: 5px 8px;
+  grid-template-columns: 10px minmax(0, 1fr) auto;
+  text-align: left;
+}
+
+body.runtime-ide-body .runtime-timeline-item small {
+  grid-column: 2 / -1;
+}
+
+body.runtime-ide-body .runtime-timeline-severity-dot {
+  border-radius: 999px;
+  height: 8px;
+  width: 8px;
+}
+
+body.runtime-ide-body .runtime-timeline-severity-dot.ok {
+  background: #22c55e;
+  box-shadow: 0 0 10px rgba(34, 197, 94, 0.58);
+}
+
+body.runtime-ide-body .runtime-timeline-severity-dot.warn {
+  background: #f59e0b;
+  box-shadow: 0 0 10px rgba(245, 158, 11, 0.48);
+}
+
+body.runtime-ide-body .runtime-timeline-severity-dot.error {
+  background: #ef4444;
+  box-shadow: 0 0 10px rgba(239, 68, 68, 0.55);
+}
+
+body.runtime-ide-body .runtime-timeline-severity-dot.idle {
+  background: rgba(148, 163, 184, 0.9);
+}
+
+body.runtime-ide-body .runtime-timeline-item.ok {
+  border-color: rgba(34, 197, 94, 0.18);
+}
+
+body.runtime-ide-body .runtime-timeline-item.warn {
+  border-color: rgba(245, 158, 11, 0.24);
+}
+
+body.runtime-ide-body .runtime-timeline-item.error {
+  border-color: rgba(248, 113, 113, 0.28);
+}
+
+body.runtime-ide-body .runtime-event-detail-head,
+body.runtime-ide-body .runtime-event-detail-grid,
+body.runtime-ide-body .runtime-event-json-block,
+body.runtime-ide-body .runtime-replay-preamble,
+body.runtime-ide-body .runtime-artifact-group {
+  background: rgba(15, 23, 42, 0.58);
+  border: 1px solid rgba(96, 165, 250, 0.12);
+  border-radius: 12px;
+  padding: 9px;
+}
+
+body.runtime-ide-body .runtime-event-detail-head {
+  align-items: start;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+body.runtime-ide-body .runtime-event-detail-head > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+body.runtime-ide-body .runtime-event-detail-head strong,
+body.runtime-ide-body .runtime-event-detail-head span,
+body.runtime-ide-body .runtime-event-detail-head small {
+  overflow-wrap: anywhere;
+}
+
+body.runtime-ide-body .runtime-event-detail-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-bottom: 8px;
+}
+
+body.runtime-ide-body .runtime-event-detail-grid span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+body.runtime-ide-body .runtime-event-summary,
+body.runtime-ide-body .runtime-event-detail-empty {
+  color: rgba(203, 213, 225, 0.82);
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
+body.runtime-ide-body .runtime-event-json-block {
+  margin-top: 8px;
+}
+
+body.runtime-ide-body .runtime-event-json-block summary {
+  cursor: pointer;
+  font-size: 0.74rem;
+  font-weight: 800;
+}
+
+body.runtime-ide-body .runtime-event-json-block pre,
+body.runtime-ide-body #ide-event-detail pre,
+body.runtime-ide-body #ide-replay-output pre {
+  background: transparent !important;
+  border: 0 !important;
+  color: rgba(203, 213, 225, 0.88);
+  font-size: 0.68rem;
+  margin: 8px 0 0;
+  max-height: 180px;
+  overflow: auto;
+  padding: 0;
+  white-space: pre-wrap;
+}
+
+body.runtime-ide-body .runtime-artifact-group-title {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+body.runtime-ide-body .runtime-artifact-group-title strong {
+  color: #e0f2fe;
+  text-transform: uppercase;
+}
+
+@media (max-width: 1280px) {
+  body.runtime-ide-body .runtime-ide-bottom-grid.secondary.runtime-ide-runtime-detail-grid,
+  body.runtime-ide-body .runtime-event-detail-grid {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* v20: graph/module version history draft loading surfaces. */
+body.runtime-ide-body .runtime-version-history-panel,
+body.runtime-ide-body .module-management-version-panel {
+  margin-top: 12px;
+  padding: 0 !important;
+}
+
+body.runtime-ide-body .runtime-version-history-panel summary,
+body.runtime-ide-body .module-management-version-panel summary {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  padding: 12px 14px;
+}
+
+body.runtime-ide-body .runtime-version-history-panel summary span,
+body.runtime-ide-body .module-management-version-panel summary span {
+  color: #e0f2fe;
+  font-weight: 900;
+}
+
+body.runtime-ide-body .runtime-version-output,
+body.runtime-ide-body .module-management-version-output {
+  border-radius: 0 0 14px 14px !important;
+  max-height: 320px !important;
+  min-height: 120px !important;
+  overflow: auto;
+}
+
+body.runtime-ide-body .runtime-version-item {
+  align-items: center;
+  background: rgba(15, 23, 42, 0.58);
+  border: 1px solid rgba(96, 165, 250, 0.13);
+  border-radius: 12px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  margin-bottom: 8px;
+  padding: 10px;
+}
+
+body.runtime-ide-body .runtime-version-item > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+body.runtime-ide-body .runtime-version-item strong,
+body.runtime-ide-body .runtime-version-item small,
+body.runtime-ide-body .runtime-version-item span {
+  overflow-wrap: anywhere;
+}
+
+body.runtime-ide-body .runtime-version-item small,
+body.runtime-ide-body .runtime-version-item span {
+  color: rgba(203, 213, 225, 0.74);
+  font-size: 0.72rem;
+}
+
+body.runtime-ide-body .runtime-version-draft-note {
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.28);
+  border-radius: 12px;
+  color: #fde68a;
+  margin-bottom: 10px;
+  padding: 10px;
+}
+
+@media (max-width: 760px) {
+  body.runtime-ide-body .runtime-version-item {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* v21: activation checklist for validation/compile/draft dry-run/save evidence. */
+body.runtime-ide-body .runtime-activation-panel {
+  margin-bottom: 12px;
+}
+
+body.runtime-ide-body .runtime-activation-checklist {
+  display: grid;
+  gap: 10px;
+}
+
+body.runtime-ide-body .runtime-activation-context {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 0.7fr) minmax(0, 0.9fr);
+}
+
+body.runtime-ide-body .runtime-activation-context span,
+body.runtime-ide-body .runtime-activation-step {
+  background: rgba(15, 23, 42, 0.58);
+  border: 1px solid rgba(96, 165, 250, 0.13);
+  border-radius: 12px;
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px;
+}
+
+body.runtime-ide-body .runtime-activation-context strong,
+body.runtime-ide-body .runtime-activation-context small,
+body.runtime-ide-body .runtime-activation-step strong,
+body.runtime-ide-body .runtime-activation-step span,
+body.runtime-ide-body .runtime-activation-step small {
+  overflow-wrap: anywhere;
+}
+
+body.runtime-ide-body .runtime-activation-context small,
+body.runtime-ide-body .runtime-activation-step span,
+body.runtime-ide-body .runtime-activation-step small {
+  color: rgba(203, 213, 225, 0.76);
+  font-size: 0.72rem;
+}
+
+body.runtime-ide-body .runtime-activation-steps {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+body.runtime-ide-body .runtime-activation-step.ok {
+  border-color: rgba(34, 197, 94, 0.32);
+  box-shadow: inset 3px 0 0 rgba(34, 197, 94, 0.8);
+}
+
+body.runtime-ide-body .runtime-activation-step.warn {
+  border-color: rgba(245, 158, 11, 0.3);
+  box-shadow: inset 3px 0 0 rgba(245, 158, 11, 0.78);
+}
+
+body.runtime-ide-body .runtime-activation-step.error {
+  border-color: rgba(248, 113, 113, 0.34);
+  box-shadow: inset 3px 0 0 rgba(248, 113, 113, 0.82);
+}
+
+body.runtime-ide-body .runtime-activation-step.ok strong {
+  color: #bbf7d0;
+}
+
+body.runtime-ide-body .runtime-activation-step.warn strong {
+  color: #fde68a;
+}
+
+body.runtime-ide-body .runtime-activation-step.error strong {
+  color: #fecaca;
+}
+
+@media (max-width: 1280px) {
+  body.runtime-ide-body .runtime-activation-context,
+  body.runtime-ide-body .runtime-activation-steps {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  body.runtime-ide-body .runtime-activation-context,
+  body.runtime-ide-body .runtime-activation-steps {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* v22: Runtime IDE run launcher for test/live graph execution. */
+body.runtime-ide-body .runtime-run-launcher-panel {
+  margin-bottom: 12px;
+}
+
+body.runtime-ide-body .runtime-run-launcher-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+body.runtime-ide-body .runtime-run-goal {
+  background: rgba(5, 8, 22, 0.62);
+  border: 1px solid rgba(96, 165, 250, 0.18);
+  border-radius: 12px;
+  color: var(--ide-text);
+  min-height: 72px;
+  padding: 10px;
+  resize: vertical;
+  width: 100%;
+}
+
+body.runtime-ide-body .runtime-run-launcher-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0;
+}
+
+body.runtime-ide-body .runtime-live-confirm {
+  align-items: center;
+  background: rgba(248, 113, 113, 0.09);
+  border: 1px solid rgba(248, 113, 113, 0.2);
+  border-radius: 999px;
+  color: #fecaca;
+  display: inline-flex;
+  font-size: 0.72rem;
+  font-weight: 800;
+  gap: 6px;
+  padding: 7px 10px;
+}
+
+body.runtime-ide-body .runtime-run-launch-output {
+  max-height: 220px !important;
+  min-height: 86px !important;
+  overflow: auto;
+}
+
+body.runtime-ide-body .runtime-run-result {
+  background: rgba(15, 23, 42, 0.58);
+  border: 1px solid rgba(96, 165, 250, 0.13);
+  border-radius: 12px;
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+}
+
+body.runtime-ide-body .runtime-run-result.ok {
+  border-color: rgba(34, 197, 94, 0.3);
+}
+
+body.runtime-ide-body .runtime-run-result.warn {
+  border-color: rgba(245, 158, 11, 0.3);
+}
+
+body.runtime-ide-body .runtime-run-result strong,
+body.runtime-ide-body .runtime-run-result span,
+body.runtime-ide-body .runtime-run-result small {
+  overflow-wrap: anywhere;
+}
+
+body.runtime-ide-body .runtime-run-launch-output pre {
+  background: transparent !important;
+  border: 0 !important;
+  color: rgba(203, 213, 225, 0.86);
+  font-size: 0.68rem;
+  margin: 8px 0 0;
+  padding: 0;
+  white-space: pre-wrap;
+}
+
+@media (max-width: 1280px) {
+  body.runtime-ide-body .runtime-run-launcher-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  body.runtime-ide-body .runtime-run-launcher-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* v23: structured EventLog with all/info/warn/error filtering. */
+body.runtime-ide-body .runtime-event-filter {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  justify-content: flex-end;
+}
+
+body.runtime-ide-body .runtime-event-filter button {
+  background: rgba(15, 23, 42, 0.56);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 999px;
+  color: rgba(203, 213, 225, 0.78);
+  cursor: pointer;
+  font-size: 0.64rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  padding: 4px 8px;
+  text-transform: uppercase;
+}
+
+body.runtime-ide-body .runtime-event-filter button.active {
+  background: rgba(56, 189, 248, 0.14);
+  border-color: rgba(56, 189, 248, 0.42);
+  color: #e0f2fe;
+  box-shadow: 0 0 12px rgba(56, 189, 248, 0.12);
+}
+
+body.runtime-ide-body .runtime-event-console-summary {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-bottom: 9px;
+}
+
+body.runtime-ide-body .runtime-event-console-summary span {
+  background: rgba(15, 23, 42, 0.58);
+  border: 1px solid rgba(96, 165, 250, 0.12);
+  border-radius: 10px;
+  display: grid;
+  gap: 2px;
+  padding: 7px;
+  text-align: center;
+}
+
+body.runtime-ide-body .runtime-event-console-summary span.info strong {
+  color: #bfdbfe;
+}
+
+body.runtime-ide-body .runtime-event-console-summary span.warn strong {
+  color: #fde68a;
+}
+
+body.runtime-ide-body .runtime-event-console-summary span.error strong {
+  color: #fecaca;
+}
+
+body.runtime-ide-body .runtime-event-console-list {
+  display: grid;
+  gap: 7px;
+}
+
+body.runtime-ide-body .runtime-event-console-row {
+  align-items: start;
+  background: rgba(15, 23, 42, 0.46);
+  border: 1px solid rgba(96, 165, 250, 0.1);
+  border-radius: 12px;
+  display: grid;
+  gap: 7px;
+  grid-template-columns: auto 10px minmax(0, 1fr);
+  padding: 8px;
+}
+
+body.runtime-ide-body .runtime-event-console-row.warn {
+  border-color: rgba(245, 158, 11, 0.24);
+}
+
+body.runtime-ide-body .runtime-event-console-row.error {
+  border-color: rgba(248, 113, 113, 0.28);
+}
+
+body.runtime-ide-body .runtime-event-source {
+  border-radius: 999px;
+  color: rgba(226, 232, 240, 0.8);
+  font-size: 0.6rem;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+  padding: 3px 6px;
+  text-transform: uppercase;
+}
+
+body.runtime-ide-body .runtime-event-source.runtime {
+  background: rgba(34, 211, 238, 0.13);
+  border: 1px solid rgba(34, 211, 238, 0.24);
+}
+
+body.runtime-ide-body .runtime-event-source.ide {
+  background: rgba(168, 85, 247, 0.13);
+  border: 1px solid rgba(168, 85, 247, 0.24);
+}
+
+body.runtime-ide-body .runtime-event-console-row strong,
+body.runtime-ide-body .runtime-event-console-row small,
+body.runtime-ide-body .runtime-event-console-row p {
+  overflow-wrap: anywhere;
+}
+
+body.runtime-ide-body .runtime-event-console-row strong {
+  color: #e0f2fe;
+  display: block;
+  font-size: 0.74rem;
+}
+
+body.runtime-ide-body .runtime-event-console-row small {
+  color: rgba(148, 163, 184, 0.9);
+  display: block;
+  font-size: 0.64rem;
+  margin-top: 2px;
+}
+
+body.runtime-ide-body .runtime-event-console-row p,
+body.runtime-ide-body .runtime-event-console-empty {
+  color: rgba(203, 213, 225, 0.82);
+  font-size: 0.68rem;
+  line-height: 1.42;
+  margin: 4px 0 0;
+}
+
+/* v24: Node Inspector I/O contract and read-only code mapping evidence. */
+body.runtime-ide-body .runtime-schema-status {
+  border: 1px solid rgba(96, 165, 250, 0.14);
+  border-radius: 12px;
+  margin: 8px 0;
+  padding: 8px 10px;
+}
+
+body.runtime-ide-body .runtime-schema-status strong {
+  display: block;
+  font-size: 0.72rem;
+  margin-bottom: 5px;
+  text-transform: uppercase;
+}
+
+body.runtime-ide-body .runtime-schema-status ul {
+  color: rgba(203, 213, 225, 0.82);
+  font-size: 0.68rem;
+  line-height: 1.42;
+  margin: 0;
+  padding-left: 16px;
+}
+
+body.runtime-ide-body .runtime-schema-status.ok {
+  background: rgba(34, 197, 94, 0.08);
+  border-color: rgba(34, 197, 94, 0.18);
+}
+
+body.runtime-ide-body .runtime-schema-status.ok strong {
+  color: #bbf7d0;
+}
+
+body.runtime-ide-body .runtime-schema-status.warn,
+body.runtime-ide-body .runtime-schema-status.idle {
+  background: rgba(245, 158, 11, 0.08);
+  border-color: rgba(245, 158, 11, 0.2);
+}
+
+body.runtime-ide-body .runtime-schema-status.warn strong,
+body.runtime-ide-body .runtime-schema-status.idle strong {
+  color: #fde68a;
+}
+
+body.runtime-ide-body .runtime-schema-status.error {
+  background: rgba(239, 68, 68, 0.08);
+  border-color: rgba(248, 113, 113, 0.24);
+}
+
+body.runtime-ide-body .runtime-schema-status.error strong {
+  color: #fecaca;
+}
+
+body.runtime-ide-body .runtime-node-inspector-card .btn.tiny[data-node-dry-run-stage] {
+  margin-top: 8px;
+  width: 100%;
+}
+
+/* v26: Module Management dry-run evidence for internal graph edits. */
+body.runtime-ide-body .module-management-evidence-title {
+  margin-top: 14px;
+}
+
+body.runtime-ide-body .module-management-dry-run-evidence {
+  min-height: 180px;
+}
+
+body.runtime-ide-body .module-management-evidence-head {
+  display: grid;
+  gap: 7px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-bottom: 8px;
+}
+
+body.runtime-ide-body .module-management-evidence-head span,
+body.runtime-ide-body .module-management-evidence-impact,
+body.runtime-ide-body .module-management-evidence-step,
+body.runtime-ide-body .module-management-evidence-empty,
+body.runtime-ide-body .module-management-evidence-stale,
+body.runtime-ide-body .module-management-action-summary {
+  background: rgba(15, 23, 42, 0.58);
+  border: 1px solid rgba(96, 165, 250, 0.12);
+  border-radius: 12px;
+  padding: 8px;
+}
+
+body.runtime-ide-body .module-management-evidence-head.ok span {
+  border-color: rgba(34, 197, 94, 0.18);
+}
+
+body.runtime-ide-body .module-management-evidence-head.warn span,
+body.runtime-ide-body .module-management-evidence-stale {
+  border-color: rgba(245, 158, 11, 0.24);
+}
+
+body.runtime-ide-body .module-management-evidence-head.error span {
+  border-color: rgba(248, 113, 113, 0.28);
+}
+
+body.runtime-ide-body .module-management-evidence-head span,
+body.runtime-ide-body .module-management-action-summary span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  text-align: center;
+}
+
+body.runtime-ide-body .module-management-evidence-head strong,
+body.runtime-ide-body .module-management-evidence-head small,
+body.runtime-ide-body .module-management-evidence-step strong,
+body.runtime-ide-body .module-management-evidence-step span,
+body.runtime-ide-body .module-management-evidence-step small,
+body.runtime-ide-body .module-management-evidence-impact strong,
+body.runtime-ide-body .module-management-evidence-impact small {
+  overflow-wrap: anywhere;
+}
+
+body.runtime-ide-body .module-management-evidence-sequence {
+  display: grid;
+  gap: 7px;
+  margin-top: 8px;
+}
+
+body.runtime-ide-body .module-management-evidence-step.executable {
+  border-color: rgba(34, 197, 94, 0.2);
+}
+
+body.runtime-ide-body .module-management-evidence-step.checkpoint {
+  border-color: rgba(148, 163, 184, 0.15);
+}
+
+body.runtime-ide-body .module-management-evidence-step strong,
+body.runtime-ide-body .module-management-evidence-impact strong {
+  color: #e0f2fe;
+  display: block;
+  font-size: 0.72rem;
+}
+
+body.runtime-ide-body .module-management-evidence-step span,
+body.runtime-ide-body .module-management-evidence-step small,
+body.runtime-ide-body .module-management-evidence-impact small,
+body.runtime-ide-body .module-management-evidence-empty,
+body.runtime-ide-body .module-management-evidence-stale,
+body.runtime-ide-body .module-management-action-summary span {
+  color: rgba(203, 213, 225, 0.82);
+  display: block;
+  font-size: 0.66rem;
+  line-height: 1.38;
+}
+
+body.runtime-ide-body .module-management-evidence-impact {
+  display: grid;
+  gap: 5px;
+  margin-top: 8px;
+}
+
+body.runtime-ide-body .module-management-action-summary {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-top: 8px;
+}
+
+/* v27: Runtime IDE module step trace tied to live/test run events. */
+body.runtime-ide-body .runtime-module-trace-panel {
+  background: rgba(15, 23, 42, 0.58);
+  border: 1px solid rgba(96, 165, 250, 0.12);
+  border-radius: 12px;
+  margin: 8px 0;
+  padding: 9px;
+}
+
+body.runtime-ide-body .runtime-module-trace-head {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  margin-bottom: 8px;
+}
+
+body.runtime-ide-body .runtime-module-trace-head span {
+  background: rgba(12, 18, 42, 0.78);
+  border: 1px solid rgba(96, 165, 250, 0.12);
+  border-radius: 10px;
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 6px;
+  text-align: center;
+}
+
+body.runtime-ide-body .runtime-module-trace-head span.ok strong {
+  color: #bbf7d0;
+}
+
+body.runtime-ide-body .runtime-module-trace-head span.error strong {
+  color: #fecaca;
+}
+
+body.runtime-ide-body .runtime-module-trace-list {
+  display: grid;
+  gap: 6px;
+}
+
+body.runtime-ide-body .runtime-module-trace-row {
+  align-items: start;
+  background: rgba(12, 18, 42, 0.58);
+  border: 1px solid rgba(148, 163, 184, 0.13);
+  border-radius: 10px;
+  display: grid;
+  gap: 7px;
+  grid-template-columns: 10px minmax(0, 1fr);
+  padding: 7px;
+}
+
+body.runtime-ide-body .runtime-module-trace-row.ok {
+  border-color: rgba(34, 197, 94, 0.18);
+}
+
+body.runtime-ide-body .runtime-module-trace-row.warn {
+  border-color: rgba(245, 158, 11, 0.24);
+}
+
+body.runtime-ide-body .runtime-module-trace-row.error {
+  border-color: rgba(248, 113, 113, 0.28);
+}
+
+body.runtime-ide-body .runtime-module-trace-row.selected {
+  border-color: rgba(56, 189, 248, 0.48);
+  box-shadow: 0 0 16px rgba(56, 189, 248, 0.12);
+}
+
+body.runtime-ide-body .runtime-module-trace-row strong,
+body.runtime-ide-body .runtime-module-trace-row small,
+body.runtime-ide-body .runtime-module-trace-row em {
+  display: block;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+body.runtime-ide-body .runtime-module-trace-row strong {
+  color: #e0f2fe;
+  font-size: 0.72rem;
+}
+
+body.runtime-ide-body .runtime-module-trace-row small,
+body.runtime-ide-body .runtime-module-trace-row em {
+  color: rgba(203, 213, 225, 0.78);
+  font-size: 0.64rem;
+  font-style: normal;
+  line-height: 1.35;
+}
+
+/* v35: selected edge route preview for operator-safe conditional routing. */
+body.runtime-ide-body .runtime-edge-route-preview {
+  background: rgba(8, 14, 35, 0.72) !important;
+  border: 1px solid rgba(96, 165, 250, 0.2) !important;
+  border-radius: 12px !important;
+  color: rgba(226, 232, 240, 0.86) !important;
+  display: grid !important;
+  gap: 8px !important;
+  grid-column: 1 / -1;
+  line-height: 1.35;
+  padding: 10px !important;
+}
+
+body.runtime-ide-body .runtime-edge-route-preview-grid {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+body.runtime-ide-body .runtime-edge-route-preview span {
+  background: rgba(15, 23, 42, 0.58);
+  border: 1px solid rgba(96, 165, 250, 0.14);
+  border-radius: 9px;
+  display: grid;
+  gap: 2px;
+  padding: 7px 8px;
+}
+
+body.runtime-ide-body .runtime-edge-route-preview strong {
+  color: #bae6fd;
+  font-size: 0.78rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.runtime-ide-body .runtime-edge-route-preview small,
+body.runtime-ide-body .runtime-edge-route-preview p,
+body.runtime-ide-body .runtime-edge-route-preview li {
+  color: rgba(202, 213, 236, 0.72);
+  font-size: 0.72rem;
+}
+
+body.runtime-ide-body .runtime-edge-route-preview p,
+body.runtime-ide-body .runtime-edge-route-preview ul {
+  margin: 0;
+}
+
+body.runtime-ide-body .runtime-edge-route-preview ul {
+  padding-left: 16px;
+}
+
+/* v36: actionable activation evidence for validate/compile/dry-run/save gates. */
+body.runtime-ide-body .runtime-activation-evidence {
+  display: grid;
+  gap: 10px;
+}
+
+body.runtime-ide-body .runtime-activation-evidence.empty {
+  background: rgba(15, 23, 42, 0.44);
+  border: 1px dashed rgba(148, 163, 184, 0.28);
+  border-radius: 12px;
+  color: rgba(203, 213, 225, 0.74);
+  padding: 10px;
+}
+
+body.runtime-ide-body .runtime-activation-evidence-row {
+  background: rgba(5, 8, 22, 0.52);
+  border: 1px solid rgba(96, 165, 250, 0.16);
+  border-radius: 13px;
+  overflow: hidden;
+}
+
+body.runtime-ide-body .runtime-activation-evidence-row summary {
+  align-items: center;
+  cursor: pointer;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: auto minmax(150px, 0.42fr) minmax(0, 1fr);
+  list-style: none;
+  padding: 10px 12px;
+}
+
+body.runtime-ide-body .runtime-activation-evidence-row summary::-webkit-details-marker {
+  display: none;
+}
+
+body.runtime-ide-body .runtime-activation-evidence-row summary::before {
+  color: rgba(148, 163, 184, 0.82);
+  content: "+";
+  font-weight: 800;
+  margin-right: 6px;
+}
+
+body.runtime-ide-body .runtime-activation-evidence-row[open] summary::before {
+  content: "-";
+}
+
+body.runtime-ide-body .runtime-activation-evidence-row summary strong,
+body.runtime-ide-body .runtime-activation-evidence-row summary span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+body.runtime-ide-body .runtime-activation-evidence-row summary span {
+  color: rgba(203, 213, 225, 0.74);
+  font-size: 0.73rem;
+}
+
+body.runtime-ide-body .runtime-activation-evidence-row.ok {
+  border-color: rgba(34, 197, 94, 0.32);
+}
+
+body.runtime-ide-body .runtime-activation-evidence-row.error {
+  border-color: rgba(248, 113, 113, 0.36);
+}
+
+body.runtime-ide-body .runtime-activation-evidence-body {
+  border-top: 1px solid rgba(96, 165, 250, 0.12);
+  display: grid;
+  gap: 10px;
+  padding: 10px 12px 12px;
+}
+
+body.runtime-ide-body .runtime-activation-kv-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+body.runtime-ide-body .runtime-activation-kv-grid span,
+body.runtime-ide-body .runtime-activation-route-list,
+body.runtime-ide-body .runtime-activation-detail-note {
+  background: rgba(15, 23, 42, 0.58);
+  border: 1px solid rgba(96, 165, 250, 0.12);
+  border-radius: 11px;
+  min-width: 0;
+  padding: 8px;
+}
+
+body.runtime-ide-body .runtime-activation-kv-grid small,
+body.runtime-ide-body .runtime-activation-route-list small,
+body.runtime-ide-body .runtime-activation-overflow {
+  color: rgba(148, 163, 184, 0.78);
+  font-size: 0.68rem;
+}
+
+body.runtime-ide-body .runtime-activation-kv-grid strong,
+body.runtime-ide-body .runtime-activation-route-list span {
+  display: block;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+body.runtime-ide-body .runtime-activation-kv-grid strong {
+  color: rgba(226, 232, 240, 0.96);
+  font-size: 0.8rem;
+  margin-top: 3px;
+}
+
+body.runtime-ide-body .runtime-activation-route-list {
+  display: grid;
+  gap: 5px;
+}
+
+body.runtime-ide-body .runtime-activation-route-list strong {
+  color: rgba(226, 232, 240, 0.96);
+  font-size: 0.74rem;
+}
+
+body.runtime-ide-body .runtime-activation-route-list span {
+  color: rgba(203, 213, 225, 0.82);
+  font-size: 0.72rem;
+}
+
+body.runtime-ide-body .runtime-activation-route-list span.muted {
+  color: rgba(148, 163, 184, 0.66);
+}
+
+body.runtime-ide-body .runtime-activation-detail-note.ok {
+  border-color: rgba(34, 197, 94, 0.24);
+  color: #bbf7d0;
+}
+
+body.runtime-ide-body .runtime-activation-detail-note.warn {
+  border-color: rgba(245, 158, 11, 0.24);
+  color: #fde68a;
+}
+
+body.runtime-ide-body .runtime-activation-detail-note.error {
+  border-color: rgba(248, 113, 113, 0.28);
+  color: #fecaca;
+}
+
+body.runtime-ide-body .runtime-activation-table-wrap {
+  overflow-x: auto;
+}
+
+body.runtime-ide-body .runtime-activation-table {
+  border-collapse: collapse;
+  min-width: 620px;
+  width: 100%;
+}
+
+body.runtime-ide-body .runtime-activation-table th,
+body.runtime-ide-body .runtime-activation-table td {
+  border-bottom: 1px solid rgba(96, 165, 250, 0.11);
+  color: rgba(203, 213, 225, 0.78);
+  font-size: 0.68rem;
+  max-width: 210px;
+  overflow-wrap: anywhere;
+  padding: 6px 7px;
+  text-align: left;
+  vertical-align: top;
+}
+
+body.runtime-ide-body .runtime-activation-table th {
+  color: rgba(226, 232, 240, 0.86);
+  font-weight: 750;
+}
+
+@media (max-width: 1280px) {
+  body.runtime-ide-body .runtime-activation-kv-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  body.runtime-ide-body .runtime-activation-evidence-row summary {
+    grid-template-columns: auto 1fr;
+  }
+
+  body.runtime-ide-body .runtime-activation-evidence-row summary span {
+    grid-column: 2;
+  }
+
+  body.runtime-ide-body .runtime-activation-kv-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* v37: graph viewport fit controls and visibility feedback. */
+body.runtime-ide-body .runtime-ide-canvas-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+body.runtime-ide-body .runtime-canvas-view-hint {
+  background: rgba(15, 23, 42, 0.68);
+  border: 1px solid rgba(96, 165, 250, 0.16);
+  border-radius: 999px;
+  color: rgba(203, 213, 225, 0.78);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  padding: 5px 8px;
+  white-space: nowrap;
+}
+
+body.runtime-ide-body .runtime-canvas-view-hint.warn {
+  border-color: rgba(245, 158, 11, 0.36);
+  color: #fde68a;
+}
+
+body.runtime-ide-body .runtime-canvas-view-hint.ok {
+  border-color: rgba(34, 197, 94, 0.28);
+  color: #bbf7d0;
+}
+
+body.runtime-ide-body #ide-fit-graph-btn {
+  min-width: 74px;
+}
+
+body.runtime-ide-body .runtime-ide-canvas-world {
+  transform-origin: top left;
+}
+
+/* v38: active-baseline route diff evidence for graph edits. */
+body.runtime-ide-body .runtime-route-diff {
+  background: rgba(15, 23, 42, 0.58);
+  border: 1px solid rgba(96, 165, 250, 0.14);
+  border-radius: 12px;
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+}
+
+body.runtime-ide-body .runtime-route-diff.changed {
+  border-color: rgba(245, 158, 11, 0.34);
+  box-shadow: inset 3px 0 0 rgba(245, 158, 11, 0.72);
+}
+
+body.runtime-ide-body .runtime-route-diff.clean {
+  border-color: rgba(34, 197, 94, 0.22);
+}
+
+body.runtime-ide-body .runtime-route-diff-head,
+body.runtime-ide-body .runtime-route-diff-columns {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+body.runtime-ide-body .runtime-route-diff-head strong,
+body.runtime-ide-body .runtime-route-diff-head span,
+body.runtime-ide-body .runtime-route-diff-columns span,
+body.runtime-ide-body .runtime-route-diff-columns small,
+body.runtime-ide-body .runtime-route-diff-columns em,
+body.runtime-ide-body .runtime-route-diff p {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+body.runtime-ide-body .runtime-route-diff-head span,
+body.runtime-ide-body .runtime-route-diff p,
+body.runtime-ide-body .runtime-route-diff-columns small,
+body.runtime-ide-body .runtime-route-diff-columns em {
+  color: rgba(203, 213, 225, 0.72);
+  font-size: 0.72rem;
+}
+
+body.runtime-ide-body .runtime-route-diff-columns > div {
+  background: rgba(5, 8, 22, 0.42);
+  border: 1px solid rgba(96, 165, 250, 0.1);
+  border-radius: 10px;
+  display: grid;
+  gap: 5px;
+  padding: 8px;
+}
+
+body.runtime-ide-body .runtime-route-diff-columns span {
+  display: block;
+  font-size: 0.72rem;
+}
+
+body.runtime-ide-body .runtime-route-diff-columns .added {
+  color: #bbf7d0;
+}
+
+body.runtime-ide-body .runtime-route-diff-columns .removed {
+  color: #fecaca;
+}
+
+body.runtime-ide-body .runtime-route-diff-columns .muted {
+  color: rgba(148, 163, 184, 0.62);
+}
+
+@media (max-width: 760px) {
+  body.runtime-ide-body .runtime-route-diff-head,
+  body.runtime-ide-body .runtime-route-diff-columns {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* v39: live run preflight gate visibility. */
+body.runtime-ide-body .runtime-live-preflight {
+  margin-top: 10px;
+}
+
+body.runtime-ide-body .runtime-live-preflight-card {
+  background: rgba(15, 23, 42, 0.58);
+  border: 1px solid rgba(96, 165, 250, 0.14);
+  border-radius: 13px;
+  display: grid;
+  gap: 9px;
+  padding: 10px;
+}
+
+body.runtime-ide-body .runtime-live-preflight-card.ok {
+  border-color: rgba(34, 197, 94, 0.3);
+  box-shadow: inset 3px 0 0 rgba(34, 197, 94, 0.72);
+}
+
+body.runtime-ide-body .runtime-live-preflight-card.warn {
+  border-color: rgba(245, 158, 11, 0.34);
+  box-shadow: inset 3px 0 0 rgba(245, 158, 11, 0.72);
+}
+
+body.runtime-ide-body .runtime-live-preflight-head,
+body.runtime-ide-body .runtime-live-preflight-items {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+body.runtime-ide-body .runtime-live-preflight-head strong,
+body.runtime-ide-body .runtime-live-preflight-head span,
+body.runtime-ide-body .runtime-live-preflight-items span,
+body.runtime-ide-body .runtime-live-preflight-card li,
+body.runtime-ide-body .runtime-live-preflight-card p {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+body.runtime-ide-body .runtime-live-preflight-head strong {
+  grid-column: span 2;
+}
+
+body.runtime-ide-body .runtime-live-preflight-head span {
+  color: rgba(203, 213, 225, 0.7);
+  font-size: 0.72rem;
+  text-align: right;
+}
+
+body.runtime-ide-body .runtime-live-preflight-items span {
+  background: rgba(5, 8, 22, 0.42);
+  border: 1px solid rgba(96, 165, 250, 0.1);
+  border-radius: 10px;
+  display: grid;
+  gap: 3px;
+  padding: 8px;
+}
+
+body.runtime-ide-body .runtime-live-preflight-items span.ok {
+  border-color: rgba(34, 197, 94, 0.22);
+}
+
+body.runtime-ide-body .runtime-live-preflight-items span.warn {
+  border-color: rgba(245, 158, 11, 0.26);
+}
+
+body.runtime-ide-body .runtime-live-preflight-items strong {
+  color: #e5edff;
+  font-size: 0.7rem;
+}
+
+body.runtime-ide-body .runtime-live-preflight-items span.ok strong {
+  color: #bbf7d0;
+}
+
+body.runtime-ide-body .runtime-live-preflight-items span.warn strong {
+  color: #fde68a;
+}
+
+body.runtime-ide-body .runtime-live-preflight-items small,
+body.runtime-ide-body .runtime-live-preflight-items em,
+body.runtime-ide-body .runtime-live-preflight-card li,
+body.runtime-ide-body .runtime-live-preflight-card p {
+  color: rgba(203, 213, 225, 0.74);
+  font-size: 0.72rem;
+  font-style: normal;
+}
+
+body.runtime-ide-body .runtime-live-preflight-card ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+@media (max-width: 760px) {
+  body.runtime-ide-body .runtime-live-preflight-head,
+  body.runtime-ide-body .runtime-live-preflight-items {
+    grid-template-columns: 1fr;
+  }
+
+  body.runtime-ide-body .runtime-live-preflight-head strong {
+    grid-column: auto;
+  }
+
+  body.runtime-ide-body .runtime-live-preflight-head span {
+    text-align: left;
+  }
+}
+
+/* v40: run preflight applies to test/replay/fault/live, not only live. */
+body.runtime-ide-body .runtime-live-preflight-items.standard {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+body.runtime-ide-body .runtime-live-preflight-items.live {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+/* v43: module management save preflight evidence. */
+body.runtime-ide-body .module-management-preflight {
+  background: rgba(8, 14, 35, 0.76) !important;
+  border: 1px solid rgba(96, 165, 250, 0.22) !important;
+  border-radius: 14px !important;
+  display: grid !important;
+  gap: 10px !important;
+  margin-bottom: 12px !important;
+  padding: 12px !important;
+}
+
+body.runtime-ide-body .module-management-preflight.warn {
+  border-color: rgba(250, 204, 21, 0.42) !important;
+  box-shadow: 0 0 18px rgba(250, 204, 21, 0.12) !important;
+}
+
+body.runtime-ide-body .module-management-preflight.ok {
+  border-color: rgba(34, 197, 94, 0.36) !important;
+}
+
+body.runtime-ide-body .module-management-preflight-head {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+body.runtime-ide-body .module-management-preflight-head strong {
+  color: #e0f2fe;
+  font-size: 0.86rem;
+}
+
+body.runtime-ide-body .module-management-preflight-head span {
+  color: rgba(202, 213, 236, 0.72);
+  font-size: 0.68rem;
+}
+
+body.runtime-ide-body .module-management-preflight-items {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+body.runtime-ide-body .module-management-preflight-items span {
+  background: rgba(15, 23, 42, 0.62);
+  border: 1px solid rgba(96, 165, 250, 0.14);
+  border-radius: 10px;
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 8px;
+}
+
+body.runtime-ide-body .module-management-preflight-items span.ok {
+  border-color: rgba(34, 197, 94, 0.24);
+}
+
+body.runtime-ide-body .module-management-preflight-items span.warn {
+  border-color: rgba(250, 204, 21, 0.28);
+}
+
+body.runtime-ide-body .module-management-preflight-items strong {
+  color: #bae6fd;
+  font-size: 0.68rem;
+  letter-spacing: 0.05em;
+}
+
+body.runtime-ide-body .module-management-preflight-items small,
+body.runtime-ide-body .module-management-preflight-items em,
+body.runtime-ide-body .module-management-preflight p,
+body.runtime-ide-body .module-management-preflight li {
+  color: rgba(202, 213, 236, 0.74);
+  font-size: 0.68rem;
+  font-style: normal;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 1320px) {
+  body.runtime-ide-body .module-management-preflight-items {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* v45: deep-link focus from Module Management graph usage. */
+body.runtime-ide-body .runtime-ide-node.deep-link-focus {
+  animation: ide-deep-link-focus 1.2s ease-out 2;
+  border-color: rgba(250, 204, 21, 0.95) !important;
+  box-shadow: 0 0 22px rgba(250, 204, 21, 0.62), 0 0 64px rgba(250, 204, 21, 0.22) !important;
+}
+
+@keyframes ide-deep-link-focus {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.045); }
+  100% { transform: scale(1); }
+}
+
+body.runtime-ide-body .module-management-usage-actions {
+  align-items: center;
+  display: flex;
+  justify-content: flex-end;
+}
+
+body.runtime-ide-body .module-management-usage-open {
+  font-size: 0.64rem !important;
+  min-height: 30px !important;
+  padding: 6px 9px !important;
+  text-decoration: none !important;
+  white-space: nowrap;
+}
+
+/* v46: Module Management internal graph step editor is drag-sortable and operator-readable. */
+body.runtime-ide-body .runtime-module-step-section-head {
+  align-items: start;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+body.runtime-ide-body .runtime-module-step-section-actions {
+  justify-content: flex-end;
+}
+
+body.runtime-ide-body .runtime-module-step-lane {
+  display: grid;
+  gap: 8px;
+}
+
+body.runtime-ide-body .runtime-module-step {
+  border-color: rgba(96, 165, 250, 0.18) !important;
+  padding: 0 !important;
+  overflow: hidden;
+}
+
+body.runtime-ide-body .runtime-module-step.dragging {
+  opacity: 0.58;
+  transform: scale(0.995);
+}
+
+body.runtime-ide-body .runtime-module-step.drag-over,
+body.runtime-ide-body .runtime-module-step-section.drag-over {
+  border-color: rgba(56, 189, 248, 0.7) !important;
+  box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.2), 0 0 20px rgba(56, 189, 248, 0.16) !important;
+}
+
+body.runtime-ide-body .runtime-module-step.executable {
+  border-left: 4px solid rgba(34, 197, 94, 0.72) !important;
+}
+
+body.runtime-ide-body .runtime-module-step.checkpoint {
+  border-left: 4px solid rgba(148, 163, 184, 0.58) !important;
+}
+
+body.runtime-ide-body .runtime-module-step.disabled {
+  border-left: 4px solid rgba(100, 116, 139, 0.5) !important;
+  opacity: 0.68;
+}
+
+body.runtime-ide-body .runtime-module-step.invalid,
+body.runtime-ide-body .runtime-module-step.missing-handler {
+  border-left: 4px solid rgba(248, 113, 113, 0.78) !important;
+}
+
+body.runtime-ide-body .runtime-module-step-shell {
+  align-items: center;
+  display: grid;
+  gap: 9px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  padding: 9px 10px;
+}
+
+body.runtime-ide-body .runtime-module-step-drag-handle {
+  align-items: center;
+  background: rgba(15, 23, 42, 0.92);
+  border: 1px solid rgba(96, 165, 250, 0.24);
+  border-radius: 10px;
+  color: #bae6fd;
+  cursor: grab;
+  display: inline-flex;
+  font-size: 0.72rem;
+  font-weight: 850;
+  height: 34px;
+  justify-content: center;
+  min-width: 34px;
+  padding: 0 8px;
+}
+
+body.runtime-ide-body .runtime-module-step-drag-handle:active {
+  cursor: grabbing;
+}
+
+body.runtime-ide-body .runtime-module-step-main {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+body.runtime-ide-body .runtime-module-step-topline {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+body.runtime-ide-body .runtime-module-step-topline strong {
+  font-size: 0.82rem;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.runtime-ide-body .runtime-module-step-status {
+  border: 1px solid rgba(96, 165, 250, 0.16);
+  border-radius: 999px;
+  color: rgba(226, 232, 240, 0.78) !important;
+  flex: 0 0 auto;
+  font-size: 0.58rem !important;
+  font-weight: 850;
+  letter-spacing: 0.055em;
+  padding: 3px 7px;
+  text-transform: uppercase;
+}
+
+body.runtime-ide-body .runtime-module-step-status.executable {
+  border-color: rgba(34, 197, 94, 0.28);
+  color: #bbf7d0 !important;
+}
+
+body.runtime-ide-body .runtime-module-step-status.checkpoint {
+  border-color: rgba(148, 163, 184, 0.24);
+  color: rgba(203, 213, 225, 0.8) !important;
+}
+
+body.runtime-ide-body .runtime-module-step-status.disabled {
+  border-color: rgba(100, 116, 139, 0.28);
+  color: rgba(148, 163, 184, 0.72) !important;
+}
+
+body.runtime-ide-body .runtime-module-step-status.missing-handler,
+body.runtime-ide-body .runtime-module-step-issue {
+  border-color: rgba(248, 113, 113, 0.3);
+  color: #fecaca !important;
+}
+
+body.runtime-ide-body .runtime-module-step-issue {
+  display: block;
+  font-size: 0.66rem;
+  font-style: normal;
+  font-weight: 750;
+}
+
+body.runtime-ide-body .runtime-module-step-details {
+  border-top: 1px solid rgba(96, 165, 250, 0.12);
+  padding: 0 10px 10px;
+}
+
+body.runtime-ide-body .runtime-module-step-details summary {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  list-style: none;
+  padding: 8px 0;
+}
+
+body.runtime-ide-body .runtime-module-step-details summary::-webkit-details-marker {
+  display: none;
+}
+
+body.runtime-ide-body .runtime-module-step-details summary span {
+  color: #bae6fd !important;
+  font-size: 0.7rem;
+  font-weight: 800;
+}
+
+body.runtime-ide-body .runtime-module-step-details summary small {
+  color: rgba(202, 213, 236, 0.66) !important;
+  font-size: 0.66rem;
+  overflow-wrap: anywhere;
+}
+
+body.runtime-ide-body .runtime-module-step-details summary::before {
+  color: rgba(148, 163, 184, 0.78);
+  content: "+";
+  font-weight: 900;
+}
+
+body.runtime-ide-body .runtime-module-step-details[open] summary::before {
+  content: "-";
+}
+
+@media (max-width: 960px) {
+  body.runtime-ide-body .runtime-module-step-section-head,
+  body.runtime-ide-body .runtime-module-step-shell {
+    grid-template-columns: 1fr;
+  }
+
+  body.runtime-ide-body .runtime-module-step-actions,
+  body.runtime-ide-body .runtime-module-step-section-actions {
+    justify-content: flex-start;
+  }
+}
+
+body.runtime-ide-body .module-management-impact-row {
+  align-items: center;
+  background: rgba(15, 23, 42, 0.48);
+  border: 1px solid rgba(96, 165, 250, 0.12);
+  border-radius: 10px;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  margin-top: 6px;
+  padding: 7px;
+}
+
+body.runtime-ide-body .module-management-impact-row.compact {
+  padding: 6px 7px;
+}
+
+body.runtime-ide-body .module-management-impact-row span {
+  color: rgba(203, 213, 225, 0.8) !important;
+  font-size: 0.66rem;
+  line-height: 1.35;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 760px) {
+  body.runtime-ide-body .module-management-impact-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* v47: Runtime route inventory and easier edge selection hit targets. */
+body.runtime-ide-body .runtime-ide-edge-hitbox {
+  fill: none;
+  marker-end: none;
+  opacity: 0;
+  pointer-events: stroke;
+  stroke: transparent;
+  stroke-linecap: round;
+  stroke-width: 18;
+}
+
+body.runtime-ide-body .runtime-ide-edge-hitbox:hover + .runtime-ide-edge {
+  color: #facc15;
+  opacity: 1;
+  stroke-width: 3.8;
+}
+
+body.runtime-ide-body .runtime-ide-edge-label {
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+body.runtime-ide-body .runtime-ide-edge-label:hover rect {
+  fill: rgba(15, 23, 42, 0.98);
+  stroke: rgba(250, 204, 21, 0.72);
+}
+
+body.runtime-ide-body .runtime-edge-route-inventory {
+  background: rgba(5, 8, 22, 0.42);
+  border: 1px solid rgba(96, 165, 250, 0.12);
+  border-radius: 12px;
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+}
+
+body.runtime-ide-body .runtime-edge-route-inventory.empty {
+  border-style: dashed;
+}
+
+body.runtime-ide-body .runtime-edge-route-inventory-head {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+body.runtime-ide-body .runtime-edge-route-inventory-head strong,
+body.runtime-ide-body .runtime-edge-route-inventory-head small {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+body.runtime-ide-body .runtime-edge-route-inventory-head strong {
+  color: #e0f2fe;
+  font-size: 0.74rem;
+}
+
+body.runtime-ide-body .runtime-edge-route-inventory-head small {
+  color: rgba(203, 213, 225, 0.7);
+  font-size: 0.66rem;
+}
+
+body.runtime-ide-body .runtime-edge-route-row {
+  align-items: center;
+  appearance: none;
+  background: rgba(15, 23, 42, 0.54);
+  border: 1px solid rgba(96, 165, 250, 0.12);
+  border-radius: 10px;
+  color: rgba(226, 232, 240, 0.9);
+  cursor: pointer;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 7px 8px;
+  text-align: left;
+  width: 100%;
+}
+
+body.runtime-ide-body .runtime-edge-route-row:hover,
+body.runtime-ide-body .runtime-edge-route-row.selected {
+  border-color: rgba(56, 189, 248, 0.52);
+  box-shadow: 0 0 14px rgba(56, 189, 248, 0.12);
+}
+
+body.runtime-ide-body .runtime-edge-route-row.default {
+  border-left: 3px solid rgba(34, 197, 94, 0.72);
+}
+
+body.runtime-ide-body .runtime-edge-route-row.candidate {
+  border-left: 3px solid rgba(148, 163, 184, 0.58);
+}
+
+body.runtime-ide-body .runtime-edge-route-row span,
+body.runtime-ide-body .runtime-edge-route-row strong,
+body.runtime-ide-body .runtime-edge-route-row small {
+  display: block;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+body.runtime-ide-body .runtime-edge-route-row strong {
+  color: #f2f7ff;
+  font-size: 0.72rem;
+}
+
+body.runtime-ide-body .runtime-edge-route-row small {
+  color: rgba(203, 213, 225, 0.66);
+  font-size: 0.63rem;
+  line-height: 1.35;
+}
+
+body.runtime-ide-body .runtime-edge-route-row em {
+  border: 1px solid rgba(96, 165, 250, 0.18);
+  border-radius: 999px;
+  color: rgba(203, 213, 225, 0.84);
+  font-size: 0.6rem;
+  font-style: normal;
+  font-weight: 850;
+  letter-spacing: 0.04em;
+  max-width: 150px;
+  overflow: hidden;
+  padding: 4px 7px;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+body.runtime-ide-body .runtime-edge-route-row.default em {
+  border-color: rgba(34, 197, 94, 0.26);
+  color: #bbf7d0;
+}
+
+@media (max-width: 760px) {
+  body.runtime-ide-body .runtime-edge-route-inventory-head,
+  body.runtime-ide-body .runtime-edge-route-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* v48: event-to-node/replay/artifact trace actions. */
+body.runtime-ide-body .runtime-event-action-row,
+body.runtime-ide-body .runtime-artifact-preview-head,
+body.runtime-ide-body .runtime-artifact-related-head {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin: 8px 0;
+}
+
+body.runtime-ide-body .runtime-event-action-row {
+  border-bottom: 1px solid rgba(96, 165, 250, 0.1);
+  padding-bottom: 8px;
+}
+
+body.runtime-ide-body .runtime-event-action-row .btn[disabled] {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+body.runtime-ide-body .runtime-artifact-preview-head {
+  justify-content: space-between;
+}
+
+body.runtime-ide-body .runtime-artifact-preview-head strong,
+body.runtime-ide-body .runtime-artifact-related-head strong {
+  color: #e0f2fe;
+  font-size: 0.78rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+body.runtime-ide-body .runtime-artifact-related-head small {
+  color: rgba(203, 213, 225, 0.68);
+  font-size: 0.68rem;
+}
+
+body.runtime-ide-body .runtime-artifact-related-list {
+  display: grid;
+  gap: 7px;
+}
+
+body.runtime-ide-body .runtime-artifact-related-item {
+  appearance: none;
+  background: rgba(15, 23, 42, 0.58);
+  border: 1px solid rgba(96, 165, 250, 0.14);
+  border-radius: 10px;
+  color: rgba(226, 232, 240, 0.9);
+  cursor: pointer;
+  display: grid;
+  gap: 3px;
+  padding: 8px;
+  text-align: left;
+  width: 100%;
+}
+
+body.runtime-ide-body .runtime-artifact-related-item:hover {
+  border-color: rgba(56, 189, 248, 0.48);
+  box-shadow: 0 0 14px rgba(56, 189, 248, 0.12);
+}
+
+body.runtime-ide-body .runtime-artifact-related-item strong,
+body.runtime-ide-body .runtime-artifact-related-item span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+body.runtime-ide-body .runtime-artifact-related-item strong {
+  color: #f2f7ff;
+  font-size: 0.72rem;
+}
+
+body.runtime-ide-body .runtime-artifact-related-item span {
+  color: rgba(203, 213, 225, 0.68);
+  font-size: 0.66rem;
+}
+
+/* v49: keep the Runtime IDE graph-first by folding heavyweight run/preflight panels. */
+body.runtime-ide-body .runtime-ide-operator-drawers {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+}
+
+body.runtime-ide-body .runtime-ide-compact-drawer {
+  margin: 0 !important;
+  overflow: hidden;
+  padding: 0 !important;
+}
+
+body.runtime-ide-body .runtime-ide-compact-drawer > summary {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  list-style: none;
+  min-height: 52px;
+  padding: 10px 12px;
+}
+
+body.runtime-ide-body .runtime-ide-compact-drawer > summary::-webkit-details-marker {
+  display: none;
+}
+
+body.runtime-ide-body .runtime-ide-compact-drawer > summary::after {
+  background: rgba(15, 23, 42, 0.72);
+  border: 1px solid rgba(96, 165, 250, 0.18);
+  border-radius: 999px;
+  color: var(--ide-cyan);
+  content: "Open";
+  flex: 0 0 auto;
+  font-size: 0.68rem;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  padding: 5px 8px;
+  text-transform: uppercase;
+}
+
+body.runtime-ide-body .runtime-ide-compact-drawer[open] > summary::after {
+  content: "Close";
+}
+
+body.runtime-ide-body .runtime-ide-compact-drawer > summary h2 {
+  margin: 0;
+}
+
+body.runtime-ide-body .runtime-ide-compact-drawer > summary .badge {
+  margin-left: auto;
+}
+
+body.runtime-ide-body .runtime-ide-compact-drawer > :not(summary) {
+  margin: 0 12px 12px;
+}
+
+body.runtime-ide-body .runtime-ide-shell {
+  margin-top: 2px;
+}
+
+body.runtime-ide-body .runtime-ide-graph-panel .runtime-ide-canvas {
+  height: 540px !important;
+  max-height: 620px !important;
+  min-height: 540px !important;
+}
+
+body.runtime-ide-body .runtime-ide-edge-hitbox,
+body.runtime-ide-body .runtime-ide-edge-label {
+  pointer-events: auto;
+}
+
+body.runtime-ide-body .runtime-ide-edge-label text,
+body.runtime-ide-body .runtime-ide-edge-label rect {
+  pointer-events: auto;
+}
+
+@media (max-width: 1060px) {
+  body.runtime-ide-body .runtime-ide-operator-drawers {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* v49b: closed details must hide children even when component classes define display:grid/flex later. */
+body.runtime-ide-body .runtime-module-editor-expanded:not([open]) > :not(summary),
+body.runtime-ide-body .runtime-ide-compact-drawer:not([open]) > :not(summary),
+body.runtime-ide-body .runtime-ide-json-drawer:not([open]) > :not(summary) {
+  display: none !important;
+}
+
+/* v50: keep the graph shell compact by making side inspectors internally scrollable. */
+body.runtime-ide-body .runtime-ide-sidebar,
+body.runtime-ide-body .runtime-ide-right-panel {
+  align-self: start !important;
+  max-height: min(900px, calc(100vh - 44px)) !important;
+  overflow: auto !important;
+}
+
+body.runtime-ide-body .runtime-ide-graph-panel,
+body.runtime-ide-body .runtime-ide-main-column {
+  align-self: start !important;
+  height: auto !important;
+}
+
+body.runtime-ide-body #ide-node-inspector.runtime-ide-output.compact-output {
+  max-height: 420px !important;
+  min-height: 300px !important;
+}
+
+body.runtime-ide-body .runtime-ide-transition-editor {
+  max-height: 390px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+body.runtime-ide-body .runtime-edge-route-preview {
+  max-height: 260px;
+  overflow: auto;
+}
+
+body.runtime-ide-body .runtime-edge-route-inventory {
+  max-height: 180px;
+  overflow: auto;
+}
+
+body.runtime-ide-body #ide-handlers-output.runtime-ide-output.compact-output {
+  max-height: 78px !important;
+  min-height: 54px !important;
+}
+
+/* v51: compact bottom dock so timeline/artifact/replay stay near the graph. */
+body.runtime-ide-body .runtime-ide-bottom-dock {
+  gap: 12px !important;
+  padding: 10px !important;
+}
+
+body.runtime-ide-body .runtime-ide-bottom-grid,
+body.runtime-ide-body .runtime-ide-bottom-grid.secondary,
+body.runtime-ide-body .runtime-ide-bottom-grid.secondary.wide {
+  gap: 10px !important;
+}
+
+body.runtime-ide-body .runtime-ide-bottom-grid.secondary,
+body.runtime-ide-body .runtime-ide-bottom-grid.secondary.wide {
+  padding-top: 12px !important;
+}
+
+body.runtime-ide-body .runtime-ide-bottom-dock article {
+  padding: 10px !important;
+}
+
+body.runtime-ide-body .runtime-ide-bottom-dock .runtime-ide-output {
+  max-height: 98px !important;
+  min-height: 62px !important;
+}
+
+body.runtime-ide-body #ide-run-timeline,
+body.runtime-ide-body #ide-artifact-lineage,
+body.runtime-ide-body #ide-artifact-preview {
+  max-height: 210px !important;
+  min-height: 150px !important;
+}
+
+body.runtime-ide-body #ide-event-detail,
+body.runtime-ide-body #ide-replay-output,
+body.runtime-ide-body #ide-log-output {
+  max-height: 240px !important;
+  min-height: 165px !important;
+}
+
+body.runtime-ide-body .runtime-ide-runtime-detail-grid {
+  grid-template-columns: minmax(390px, 1.1fr) minmax(320px, 0.9fr) minmax(320px, 0.9fr) !important;
+}
+
+/* v55: show module graph validation and dry-run evidence in the central Dry-run Trace panel. */
+body.runtime-ide-body .runtime-module-evidence-card {
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.92), rgba(8, 13, 31, 0.94));
+  border: 1px solid rgba(96, 165, 250, 0.24);
+  border-radius: 14px;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.24);
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+body.runtime-ide-body .runtime-module-evidence-card.ok {
+  border-color: rgba(34, 197, 94, 0.38);
+}
+
+body.runtime-ide-body .runtime-module-evidence-card.error {
+  border-color: rgba(255, 56, 100, 0.45);
+}
+
+body.runtime-ide-body .runtime-module-evidence-head {
+  align-items: start;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+body.runtime-ide-body .runtime-module-evidence-head strong {
+  color: #f8fbff;
+  font-size: 0.78rem;
+  letter-spacing: 0.02em;
+}
+
+body.runtime-ide-body .runtime-module-evidence-head small,
+body.runtime-ide-body .runtime-module-evidence-card p,
+body.runtime-ide-body .runtime-module-evidence-card li {
+  color: rgba(203, 213, 225, 0.72);
+  font-size: 0.68rem;
+  line-height: 1.45;
+}
+
+body.runtime-ide-body .runtime-module-evidence-metrics {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+body.runtime-ide-body .runtime-module-evidence-metrics span {
+  background: rgba(15, 23, 42, 0.72);
+  border: 1px solid rgba(96, 165, 250, 0.14);
+  border-radius: 10px;
+  display: grid;
+  gap: 2px;
+  padding: 8px;
+}
+
+body.runtime-ide-body .runtime-module-evidence-metrics strong {
+  color: var(--ide-cyan);
+  font-size: 0.88rem;
+}
+
+body.runtime-ide-body .runtime-module-evidence-metrics small {
+  color: rgba(203, 213, 225, 0.62);
+  font-size: 0.62rem;
+  text-transform: uppercase;
+}
+
+body.runtime-ide-body .runtime-module-evidence-steps {
+  display: grid;
+  gap: 7px;
+  max-height: 180px;
+  overflow: auto;
+  padding-right: 3px;
+}
+
+body.runtime-ide-body .runtime-module-evidence-step {
+  background: rgba(2, 6, 23, 0.44);
+  border: 1px solid rgba(96, 165, 250, 0.12);
+  border-radius: 10px;
+  display: grid;
+  gap: 3px;
+  padding: 8px;
+}
+
+body.runtime-ide-body .runtime-module-evidence-step strong,
+body.runtime-ide-body .runtime-module-evidence-step small {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+body.runtime-ide-body .runtime-module-evidence-step strong {
+  color: rgba(241, 245, 249, 0.94);
+  font-size: 0.7rem;
+}
+
+body.runtime-ide-body .runtime-module-evidence-step small {
+  color: rgba(148, 163, 184, 0.76);
+  font-size: 0.64rem;
+}
+
+/* v56: module save gate evidence rows. */
+body.runtime-ide-body .runtime-module-save-gate-list {
+  display: grid;
+  gap: 7px;
+}
+
+body.runtime-ide-body .runtime-module-save-gate-list span {
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(96, 165, 250, 0.14);
+  border-radius: 999px;
+  color: rgba(226, 232, 240, 0.84);
+  font-size: 0.68rem;
+  font-weight: 760;
+  padding: 7px 9px;
+}
+
+body.runtime-ide-body .runtime-module-save-gate-list span.ok {
+  border-color: rgba(34, 197, 94, 0.36);
+  color: rgba(187, 247, 208, 0.92);
+}
+
+body.runtime-ide-body .runtime-module-save-gate-list span.warn {
+  border-color: rgba(251, 191, 36, 0.36);
+  color: rgba(254, 240, 138, 0.92);
+}
+
+/* v59: keep route maps readable by hiding noisy simple-default labels and surfacing multi-route nodes. */
+body.runtime-ide-body .runtime-ide-edge.edge-simple-default {
+  opacity: 0.78;
+}
+
+body.runtime-ide-body .runtime-ide-edge-label.edge-default rect {
+  fill: rgba(8, 14, 35, 0.92);
+  stroke: rgba(56, 189, 248, 0.46);
+}
+
+body.runtime-ide-body .runtime-ide-node-route-count {
+  background: rgba(250, 204, 21, 0.16);
+  border: 1px solid rgba(250, 204, 21, 0.36);
+  border-radius: 999px;
+  color: #fde68a;
+  font-size: 0.56rem;
+  font-style: normal;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+  line-height: 1;
+  padding: 4px 6px;
+  position: absolute;
+  right: 8px;
+  text-transform: uppercase;
+  top: 7px;
+  z-index: 6;
+}
+
+body.runtime-ide-body .runtime-version-draft-note.danger {
+  background: rgba(255, 56, 100, 0.12);
+  border-color: rgba(255, 56, 100, 0.34);
+  color: #fecdd3;
+}
+
+/* v60: explicit run-target strip and button state sync for saved-active-graph execution. */
+body.runtime-ide-body .runtime-run-target-strip {
+  display: grid;
+  gap: 7px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+body.runtime-ide-body .runtime-run-target-strip span {
+  background: rgba(5, 8, 22, 0.38);
+  border: 1px solid rgba(96, 165, 250, 0.12);
+  border-radius: 10px;
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 8px;
+}
+
+body.runtime-ide-body .runtime-run-target-strip.ok span {
+  border-color: rgba(34, 197, 94, 0.2);
+}
+
+body.runtime-ide-body .runtime-run-target-strip.warn span {
+  border-color: rgba(245, 158, 11, 0.24);
+}
+
+body.runtime-ide-body .runtime-run-target-strip strong {
+  color: rgba(226, 232, 240, 0.72);
+  font-size: 0.62rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+body.runtime-ide-body .runtime-run-target-strip em {
+  color: #e5edff;
+  font-size: 0.76rem;
+  font-style: normal;
+  font-weight: 800;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.runtime-ide-body .runtime-run-launcher-actions .btn:disabled {
+  cursor: not-allowed;
+  filter: grayscale(0.42);
+  opacity: 0.48;
+}
+
+@media (max-width: 920px) {
+  body.runtime-ide-body .runtime-run-target-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 620px) {
+  body.runtime-ide-body .runtime-run-target-strip {
+    grid-template-columns: 1fr;
+  }
+}
+
+body.runtime-ide-body .runtime-run-message {
+  background: rgba(5, 8, 22, 0.46);
+  border: 1px solid rgba(96, 165, 250, 0.16);
+  border-radius: 10px;
+  color: rgba(226, 232, 240, 0.86);
+  font-size: 0.76rem;
+  padding: 8px 10px;
+}
+
+body.runtime-ide-body .runtime-run-message.warn {
+  border-color: rgba(245, 158, 11, 0.28);
+  color: #fde68a;
+}
+
+body.runtime-ide-body .runtime-run-message.ok {
+  border-color: rgba(34, 197, 94, 0.24);
+  color: #bbf7d0;
+}
+
+/* v63: selected runtime event decision strip for operator-ready timeline inspection. */
+body.runtime-ide-body .runtime-event-decision-strip {
+  display: grid;
+  gap: 7px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  margin: 8px 0;
+}
+
+body.runtime-ide-body .runtime-event-decision-strip span {
+  background: rgba(8, 14, 35, 0.72);
+  border: 1px solid rgba(96, 165, 250, 0.14);
+  border-radius: 11px;
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 8px;
+}
+
+body.runtime-ide-body .runtime-event-decision-strip.ok span {
+  border-color: rgba(34, 197, 94, 0.2);
+}
+
+body.runtime-ide-body .runtime-event-decision-strip.warn span {
+  border-color: rgba(245, 158, 11, 0.24);
+}
+
+body.runtime-ide-body .runtime-event-decision-strip.error span {
+  border-color: rgba(248, 113, 113, 0.28);
+}
+
+body.runtime-ide-body .runtime-event-decision-strip small,
+body.runtime-ide-body .runtime-event-decision-strip strong,
+body.runtime-ide-body .runtime-event-decision-strip em {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+body.runtime-ide-body .runtime-event-decision-strip small {
+  color: rgba(148, 163, 184, 0.74);
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+body.runtime-ide-body .runtime-event-decision-strip strong {
+  color: rgba(226, 232, 240, 0.95);
+  font-size: 0.72rem;
+}
+
+body.runtime-ide-body .runtime-event-decision-strip.ok strong {
+  color: #bbf7d0;
+}
+
+body.runtime-ide-body .runtime-event-decision-strip.warn strong {
+  color: #fde68a;
+}
+
+body.runtime-ide-body .runtime-event-decision-strip.error strong {
+  color: #fecaca;
+}
+
+body.runtime-ide-body .runtime-event-decision-strip em {
+  color: rgba(203, 213, 225, 0.68);
+  font-size: 0.64rem;
+  font-style: normal;
+  line-height: 1.32;
+}
+
+@media (max-width: 1280px) {
+  body.runtime-ide-body .runtime-event-decision-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  body.runtime-ide-body .runtime-event-decision-strip {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* v64: artifact provenance and replay-from-producer controls. */
+body.runtime-ide-body .runtime-artifact-preview-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+body.runtime-ide-body .runtime-artifact-provenance-strip {
+  display: grid;
+  gap: 7px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  margin: 8px 0;
+}
+
+body.runtime-ide-body .runtime-artifact-provenance-strip span {
+  background: rgba(8, 14, 35, 0.72);
+  border: 1px solid rgba(96, 165, 250, 0.14);
+  border-radius: 11px;
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 8px;
+}
+
+body.runtime-ide-body .runtime-artifact-provenance-strip.linked span {
+  border-color: rgba(34, 197, 94, 0.18);
+}
+
+body.runtime-ide-body .runtime-artifact-provenance-strip.unlinked span {
+  border-color: rgba(245, 158, 11, 0.22);
+}
+
+body.runtime-ide-body .runtime-artifact-provenance-strip small,
+body.runtime-ide-body .runtime-artifact-provenance-strip strong,
+body.runtime-ide-body .runtime-artifact-provenance-strip em {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+body.runtime-ide-body .runtime-artifact-provenance-strip small {
+  color: rgba(148, 163, 184, 0.74);
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+body.runtime-ide-body .runtime-artifact-provenance-strip strong {
+  color: rgba(226, 232, 240, 0.95);
+  font-size: 0.72rem;
+}
+
+body.runtime-ide-body .runtime-artifact-provenance-strip.linked strong {
+  color: #bbf7d0;
+}
+
+body.runtime-ide-body .runtime-artifact-provenance-strip.unlinked strong {
+  color: #fde68a;
+}
+
+body.runtime-ide-body .runtime-artifact-provenance-strip em {
+  color: rgba(203, 213, 225, 0.68);
+  font-size: 0.64rem;
+  font-style: normal;
+  line-height: 1.32;
+}
+
+@media (max-width: 1280px) {
+  body.runtime-ide-body .runtime-artifact-provenance-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  body.runtime-ide-body .runtime-artifact-provenance-strip {
+    grid-template-columns: 1fr;
+  }
+
+  body.runtime-ide-body .runtime-artifact-preview-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  body.runtime-ide-body .runtime-artifact-preview-actions {
+    justify-content: flex-start;
+  }
+}
+
+/* v65: replay validation compares selected runtime event with dry-run replay output. */
+body.runtime-ide-body .runtime-replay-validation {
+  background: rgba(15, 23, 42, 0.62);
+  border: 1px solid rgba(96, 165, 250, 0.14);
+  border-radius: 12px;
+  display: grid;
+  gap: 8px;
+  margin: 8px 0;
+  padding: 9px;
+}
+
+body.runtime-ide-body .runtime-replay-validation.ok {
+  border-color: rgba(34, 197, 94, 0.26);
+  box-shadow: inset 3px 0 0 rgba(34, 197, 94, 0.68);
+}
+
+body.runtime-ide-body .runtime-replay-validation.warn {
+  border-color: rgba(245, 158, 11, 0.28);
+  box-shadow: inset 3px 0 0 rgba(245, 158, 11, 0.68);
+}
+
+body.runtime-ide-body .runtime-replay-validation-head {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+body.runtime-ide-body .runtime-replay-validation-head strong,
+body.runtime-ide-body .runtime-replay-validation-head span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+body.runtime-ide-body .runtime-replay-validation-head strong {
+  color: #e0f2fe;
+  font-size: 0.78rem;
+}
+
+body.runtime-ide-body .runtime-replay-validation-head span {
+  color: rgba(203, 213, 225, 0.68);
+  font-size: 0.66rem;
+  text-align: right;
+}
+
+body.runtime-ide-body .runtime-replay-validation-grid {
+  display: grid;
+  gap: 7px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+body.runtime-ide-body .runtime-replay-validation-grid span {
+  background: rgba(8, 14, 35, 0.68);
+  border: 1px solid rgba(96, 165, 250, 0.12);
+  border-radius: 10px;
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 8px;
+}
+
+body.runtime-ide-body .runtime-replay-validation-grid span.ok {
+  border-color: rgba(34, 197, 94, 0.2);
+}
+
+body.runtime-ide-body .runtime-replay-validation-grid span.warn {
+  border-color: rgba(245, 158, 11, 0.24);
+}
+
+body.runtime-ide-body .runtime-replay-validation-grid span.error {
+  border-color: rgba(248, 113, 113, 0.28);
+}
+
+body.runtime-ide-body .runtime-replay-validation-grid small,
+body.runtime-ide-body .runtime-replay-validation-grid strong,
+body.runtime-ide-body .runtime-replay-validation-grid em {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+body.runtime-ide-body .runtime-replay-validation-grid small {
+  color: rgba(148, 163, 184, 0.74);
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+body.runtime-ide-body .runtime-replay-validation-grid strong {
+  color: rgba(226, 232, 240, 0.95);
+  font-size: 0.72rem;
+}
+
+body.runtime-ide-body .runtime-replay-validation-grid span.ok strong {
+  color: #bbf7d0;
+}
+
+body.runtime-ide-body .runtime-replay-validation-grid span.warn strong {
+  color: #fde68a;
+}
+
+body.runtime-ide-body .runtime-replay-validation-grid span.error strong {
+  color: #fecaca;
+}
+
+body.runtime-ide-body .runtime-replay-validation-grid em {
+  color: rgba(203, 213, 225, 0.68);
+  font-size: 0.64rem;
+  font-style: normal;
+  line-height: 1.32;
+}
+
+@media (max-width: 1280px) {
+  body.runtime-ide-body .runtime-replay-validation-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  body.runtime-ide-body .runtime-replay-validation-head {
+    align-items: start;
+    flex-direction: column;
+  }
+
+  body.runtime-ide-body .runtime-replay-validation-head span {
+    text-align: left;
+  }
+
+  body.runtime-ide-body .runtime-replay-validation-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* v66: error/warning remediation and Event Log inspect linkage. */
+body.runtime-ide-body .runtime-event-console-row {
+  grid-template-columns: auto 10px minmax(0, 1fr) auto;
+}
+
+body.runtime-ide-body .runtime-event-console-inspect {
+  align-self: center;
+  white-space: nowrap;
+}
+
+body.runtime-ide-body .runtime-event-remediation {
+  background: rgba(15, 23, 42, 0.62);
+  border: 1px solid rgba(96, 165, 250, 0.14);
+  border-radius: 12px;
+  display: grid;
+  gap: 8px;
+  margin: 8px 0;
+  padding: 9px;
+}
+
+body.runtime-ide-body .runtime-event-remediation.warn {
+  border-color: rgba(245, 158, 11, 0.3);
+  box-shadow: inset 3px 0 0 rgba(245, 158, 11, 0.72);
+}
+
+body.runtime-ide-body .runtime-event-remediation.error {
+  border-color: rgba(248, 113, 113, 0.32);
+  box-shadow: inset 3px 0 0 rgba(248, 113, 113, 0.72);
+}
+
+body.runtime-ide-body .runtime-event-remediation-head {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+body.runtime-ide-body .runtime-event-remediation-head strong,
+body.runtime-ide-body .runtime-event-remediation-head span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+body.runtime-ide-body .runtime-event-remediation-head strong {
+  color: #e0f2fe;
+  font-size: 0.78rem;
+}
+
+body.runtime-ide-body .runtime-event-remediation-head span {
+  color: rgba(203, 213, 225, 0.68);
+  font-size: 0.66rem;
+  text-align: right;
+}
+
+body.runtime-ide-body .runtime-event-remediation-grid {
+  display: grid;
+  gap: 7px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+body.runtime-ide-body .runtime-event-remediation-grid span,
+body.runtime-ide-body .runtime-event-remediation-actions {
+  background: rgba(8, 14, 35, 0.68);
+  border: 1px solid rgba(96, 165, 250, 0.12);
+  border-radius: 10px;
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 8px;
+}
+
+body.runtime-ide-body .runtime-event-remediation-grid small,
+body.runtime-ide-body .runtime-event-remediation-grid strong,
+body.runtime-ide-body .runtime-event-remediation-actions small,
+body.runtime-ide-body .runtime-event-remediation-actions p {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+body.runtime-ide-body .runtime-event-remediation-grid small,
+body.runtime-ide-body .runtime-event-remediation-actions small {
+  color: rgba(148, 163, 184, 0.74);
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+body.runtime-ide-body .runtime-event-remediation-grid strong {
+  color: rgba(226, 232, 240, 0.95);
+  font-size: 0.7rem;
+  line-height: 1.34;
+}
+
+body.runtime-ide-body .runtime-event-remediation.warn .runtime-event-remediation-grid strong {
+  color: #fde68a;
+}
+
+body.runtime-ide-body .runtime-event-remediation.error .runtime-event-remediation-grid strong {
+  color: #fecaca;
+}
+
+body.runtime-ide-body .runtime-event-remediation-actions p {
+  color: rgba(203, 213, 225, 0.78);
+  font-size: 0.66rem;
+  line-height: 1.35;
+  margin: 0;
+}
+
+body.runtime-ide-body .runtime-event-remediation-actions p::before {
+  color: var(--ide-cyan);
+  content: "-> ";
+  font-weight: 900;
+}
+
+@media (max-width: 1280px) {
+  body.runtime-ide-body .runtime-event-remediation-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 760px) {
+  body.runtime-ide-body .runtime-event-console-row {
+    grid-template-columns: auto 10px minmax(0, 1fr);
+  }
+
+  body.runtime-ide-body .runtime-event-console-inspect {
+    grid-column: 3;
+    justify-self: start;
+  }
+
+  body.runtime-ide-body .runtime-event-remediation-head {
+    align-items: start;
+    flex-direction: column;
+  }
+
+  body.runtime-ide-body .runtime-event-remediation-head span {
+    text-align: left;
+  }
+}
+
+/* v67: remediation-to-approval queue focus. */
+body.runtime-ide-body .runtime-event-remediation-head .runtime-remediation-focus-approval {
+  flex: 0 0 auto;
+}
+
+body.runtime-ide-body .runtime-approval-item.focused {
+  animation: approvalFocusPulse 1.1s ease-in-out infinite alternate;
+  border-color: rgba(56, 189, 248, 0.78) !important;
+  box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.38), 0 0 22px rgba(56, 189, 248, 0.24) !important;
+}
+
+@keyframes approvalFocusPulse {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(-1px);
+  }
+}
+
+@media (max-width: 760px) {
+  body.runtime-ide-body .runtime-event-remediation-head .runtime-remediation-focus-approval {
+    align-self: flex-start;
+  }
+}
+
+
+/* v68: approval resolution state in remediation cards. */
+body.runtime-ide-body .runtime-event-approval-status {
+  border-color: rgba(245, 158, 11, 0.36);
+  background: linear-gradient(180deg, rgba(245, 158, 11, 0.12), rgba(245, 158, 11, 0.045));
+}
+
+body.runtime-ide-body .runtime-event-approval-status.ok {
+  border-color: rgba(34, 197, 94, 0.42);
+  background: linear-gradient(180deg, rgba(34, 197, 94, 0.14), rgba(34, 197, 94, 0.05));
+}
+
+body.runtime-ide-body .runtime-event-approval-status.warn {
+  border-color: rgba(245, 158, 11, 0.42);
+  background: linear-gradient(180deg, rgba(245, 158, 11, 0.14), rgba(245, 158, 11, 0.05));
+}
+
+body.runtime-ide-body .runtime-event-approval-status em {
+  color: rgba(197, 211, 235, 0.78);
+  font-size: 10px;
+  font-style: normal;
+  line-height: 1.25;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+
+/* v69: module management library rows are select-only. */
+body.runtime-ide-body .module-management-loaded-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+body.runtime-ide-body .module-management-loaded-title strong {
+  color: var(--text);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+body.runtime-ide-body .module-management-loaded-title small {
+  color: var(--muted);
+  font-size: 10px;
+  text-align: right;
+}
+
+body.runtime-ide-body .module-management-loaded-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+body.runtime-ide-body .module-management-list-state {
+  align-self: center;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 999px;
+  color: rgba(197, 211, 235, 0.72);
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-style: normal;
+  letter-spacing: 0.03em;
+  padding: 4px 7px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+body.runtime-ide-body .module-management-list-state.loaded {
+  border-color: rgba(34, 197, 94, 0.44);
+  color: rgba(187, 247, 208, 0.92);
+  background: rgba(34, 197, 94, 0.10);
+}
+
+body.runtime-ide-body .module-management-list-state.select-only {
+  border-color: rgba(56, 189, 248, 0.26);
+  color: rgba(186, 230, 253, 0.80);
+  background: rgba(56, 189, 248, 0.07);
+}
+
+@media (max-width: 760px) {
+  body.runtime-ide-body .module-management-loaded-title {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  body.runtime-ide-body .module-management-loaded-title small {
+    text-align: left;
+  }
+
+  body.runtime-ide-body .module-management-item {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  body.runtime-ide-body .module-management-list-state {
+    grid-column: 2;
+    justify-self: start;
+  }
+}
+
+
+/* v70: node inspector route audit. */
+body.runtime-ide-body .runtime-node-route-audit {
+  border-color: rgba(56, 189, 248, 0.18);
+}
+
+body.runtime-ide-body .runtime-node-route-summary {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+body.runtime-ide-body .runtime-node-route-summary span {
+  background: rgba(15, 23, 42, 0.56);
+  border: 1px solid rgba(96, 165, 250, 0.12);
+  border-radius: 10px;
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 7px 8px;
+}
+
+body.runtime-ide-body .runtime-node-route-summary strong,
+body.runtime-ide-body .runtime-node-route-summary small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.runtime-ide-body .runtime-node-route-summary strong {
+  color: #f8fbff;
+  font-size: 0.74rem;
+}
+
+body.runtime-ide-body .runtime-node-route-summary small {
+  color: rgba(148, 163, 184, 0.84);
+  font-size: 0.62rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+body.runtime-ide-body .runtime-node-route-columns {
+  display: grid;
+  gap: 8px;
+}
+
+body.runtime-ide-body .runtime-node-route-column-head {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+body.runtime-ide-body .runtime-node-route-column-head strong {
+  color: #e0f2fe;
+  font-size: 0.74rem;
+}
+
+body.runtime-ide-body .runtime-node-route-column-head small {
+  color: rgba(203, 213, 225, 0.68);
+  font-size: 0.64rem;
+}
+
+body.runtime-ide-body .runtime-node-route-row {
+  background: rgba(15, 23, 42, 0.54);
+  border: 1px solid rgba(96, 165, 250, 0.12);
+  border-left: 3px solid rgba(148, 163, 184, 0.54);
+  border-radius: 10px;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  margin-bottom: 7px;
+  padding: 8px;
+}
+
+body.runtime-ide-body .runtime-node-route-row.default {
+  border-left-color: rgba(34, 197, 94, 0.72);
+}
+
+body.runtime-ide-body .runtime-node-route-row strong,
+body.runtime-ide-body .runtime-node-route-row small,
+body.runtime-ide-body .runtime-node-route-row p {
+  display: block;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+body.runtime-ide-body .runtime-node-route-row strong {
+  color: #f2f7ff;
+  font-size: 0.72rem;
+}
+
+body.runtime-ide-body .runtime-node-route-row small,
+body.runtime-ide-body .runtime-node-route-row p {
+  color: rgba(203, 213, 225, 0.68);
+  font-size: 0.63rem;
+  line-height: 1.35;
+  margin: 2px 0 0;
+}
+
+body.runtime-ide-body .runtime-node-route-actions {
+  align-content: start;
+  display: grid;
+  gap: 6px;
+  justify-items: end;
+}
+
+body.runtime-ide-body .runtime-node-route-actions em {
+  border: 1px solid rgba(96, 165, 250, 0.18);
+  border-radius: 999px;
+  color: rgba(203, 213, 225, 0.84);
+  font-size: 0.58rem;
+  font-style: normal;
+  font-weight: 850;
+  letter-spacing: 0.04em;
+  max-width: 132px;
+  overflow: hidden;
+  padding: 4px 7px;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+body.runtime-ide-body .runtime-node-route-row.default .runtime-node-route-actions em {
+  border-color: rgba(34, 197, 94, 0.26);
+  color: #bbf7d0;
+}
+
+body.runtime-ide-body .runtime-node-route-empty {
+  border: 1px dashed rgba(148, 163, 184, 0.22);
+  border-radius: 10px;
+  color: rgba(203, 213, 225, 0.70);
+  font-size: 0.68rem;
+  padding: 8px;
+}
+
+@media (max-width: 760px) {
+  body.runtime-ide-body .runtime-node-route-row {
+    grid-template-columns: 1fr;
+  }
+
+  body.runtime-ide-body .runtime-node-route-actions {
+    justify-items: start;
+  }
+}
+
+
+/* v71: drag connection tooltip. */
+body.runtime-ide-body .runtime-ide-connection-tooltip {
+  background: linear-gradient(180deg, rgba(8, 14, 35, 0.96), rgba(5, 8, 22, 0.96));
+  border: 1px solid rgba(245, 158, 11, 0.48);
+  border-radius: 12px;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.34), 0 0 24px rgba(245, 158, 11, 0.18);
+  color: rgba(226, 232, 240, 0.94);
+  display: grid;
+  gap: 2px;
+  max-width: 250px;
+  min-width: 190px;
+  padding: 9px 10px;
+  pointer-events: none;
+  position: absolute;
+  z-index: 18;
+}
+
+body.runtime-ide-body .runtime-ide-connection-tooltip strong,
+body.runtime-ide-body .runtime-ide-connection-tooltip span,
+body.runtime-ide-body .runtime-ide-connection-tooltip small {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+body.runtime-ide-body .runtime-ide-connection-tooltip strong {
+  color: #fef3c7;
+  font-size: 0.74rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+body.runtime-ide-body .runtime-ide-connection-tooltip span {
+  color: #f8fbff;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+body.runtime-ide-body .runtime-ide-connection-tooltip small {
+  color: rgba(203, 213, 225, 0.76);
+  font-size: 0.64rem;
+}
+
+body.runtime-ide-body .runtime-ide-connection-tooltip.valid.default {
+  border-color: rgba(34, 197, 94, 0.58);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.34), 0 0 24px rgba(34, 197, 94, 0.20);
+}
+
+body.runtime-ide-body .runtime-ide-connection-tooltip.valid.default strong {
+  color: #bbf7d0;
+}
+
+body.runtime-ide-body .runtime-ide-connection-tooltip.valid.candidate {
+  border-color: rgba(56, 189, 248, 0.58);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.34), 0 0 24px rgba(56, 189, 248, 0.20);
+}
+
+body.runtime-ide-body .runtime-ide-connection-tooltip.valid.candidate strong {
+  color: #bae6fd;
+}
+
+body.runtime-ide-body .runtime-ide-connection-tooltip.invalid {
+  border-color: rgba(248, 113, 113, 0.52);
+}
+
+body.runtime-ide-body .runtime-ide-connection-tooltip.invalid strong {
+  color: #fecaca;
+}
+
+/* v72: always-visible draft safety strip for graph/module operational gates. */
+body.runtime-ide-body .runtime-draft-safety-strip {
+  align-items: stretch;
+  background: linear-gradient(135deg, rgba(15, 23, 42, 0.82), rgba(8, 13, 32, 0.78));
+  border: 1px solid rgba(96, 165, 250, 0.18);
+  border-radius: 16px;
+  box-shadow: inset 3px 0 0 rgba(96, 165, 250, 0.38), 0 14px 34px rgba(0, 0, 0, 0.18);
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(180px, 0.9fr) minmax(280px, 2fr) minmax(180px, 0.8fr);
+  margin: 10px 0 12px;
+  padding: 10px;
+}
+
+body.runtime-ide-body .runtime-draft-safety-strip.ok {
+  border-color: rgba(34, 197, 94, 0.26);
+  box-shadow: inset 3px 0 0 rgba(34, 197, 94, 0.72), 0 14px 34px rgba(0, 0, 0, 0.18);
+}
+
+body.runtime-ide-body .runtime-draft-safety-strip.warn {
+  border-color: rgba(245, 158, 11, 0.34);
+  box-shadow: inset 3px 0 0 rgba(245, 158, 11, 0.76), 0 14px 34px rgba(0, 0, 0, 0.18);
+}
+
+body.runtime-ide-body .runtime-draft-safety-strip.error {
+  border-color: rgba(248, 113, 113, 0.36);
+  box-shadow: inset 3px 0 0 rgba(248, 113, 113, 0.82), 0 14px 34px rgba(0, 0, 0, 0.18);
+}
+
+body.runtime-ide-body .runtime-draft-safety-head,
+body.runtime-ide-body .runtime-draft-safety-next {
+  background: rgba(5, 8, 22, 0.36);
+  border: 1px solid rgba(96, 165, 250, 0.1);
+  border-radius: 12px;
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 9px 10px;
+}
+
+body.runtime-ide-body .runtime-draft-safety-head span {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+body.runtime-ide-body .runtime-draft-safety-head strong,
+body.runtime-ide-body .runtime-draft-safety-next strong,
+body.runtime-ide-body .runtime-draft-safety-item strong {
+  color: #e5edff;
+  font-size: 0.78rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+body.runtime-ide-body .runtime-draft-safety-head small,
+body.runtime-ide-body .runtime-draft-safety-head em,
+body.runtime-ide-body .runtime-draft-safety-next small,
+body.runtime-ide-body .runtime-draft-safety-item small,
+body.runtime-ide-body .runtime-draft-safety-item em {
+  color: rgba(203, 213, 225, 0.68);
+  font-size: 0.66rem;
+  font-style: normal;
+  line-height: 1.25;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+body.runtime-ide-body .runtime-draft-safety-head em {
+  align-self: end;
+  background: rgba(59, 130, 246, 0.12);
+  border: 1px solid rgba(96, 165, 250, 0.16);
+  border-radius: 999px;
+  color: var(--ide-cyan);
+  justify-self: start;
+  letter-spacing: 0.08em;
+  padding: 3px 7px;
+  text-transform: uppercase;
+}
+
+body.runtime-ide-body .runtime-draft-safety-items {
+  align-content: start;
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  min-width: 0;
+}
+
+body.runtime-ide-body .runtime-draft-safety-item {
+  background: rgba(15, 23, 42, 0.42);
+  border: 1px solid rgba(96, 165, 250, 0.1);
+  border-radius: 11px;
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 7px 8px;
+}
+
+body.runtime-ide-body .runtime-draft-safety-item.ok {
+  border-color: rgba(34, 197, 94, 0.3);
+  box-shadow: inset 2px 0 0 rgba(34, 197, 94, 0.55);
+}
+
+body.runtime-ide-body .runtime-draft-safety-item.warn {
+  border-color: rgba(245, 158, 11, 0.34);
+  box-shadow: inset 2px 0 0 rgba(245, 158, 11, 0.62);
+}
+
+body.runtime-ide-body .runtime-draft-safety-item.error {
+  border-color: rgba(248, 113, 113, 0.36);
+  box-shadow: inset 2px 0 0 rgba(248, 113, 113, 0.68);
+}
+
+body.runtime-ide-body .runtime-draft-safety-next {
+  border-color: rgba(56, 189, 248, 0.16);
+}
+
+body.runtime-ide-body .runtime-draft-safety-next strong {
+  color: #bae6fd;
+}
+
+@media (max-width: 1280px) {
+  body.runtime-ide-body .runtime-draft-safety-strip {
+    grid-template-columns: 1fr;
+  }
+
+  body.runtime-ide-body .runtime-draft-safety-items {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  body.runtime-ide-body .runtime-draft-safety-items {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* v73: primary operator action inside the draft safety strip. */
+body.runtime-ide-body .runtime-draft-safety-next {
+  align-items: center;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+body.runtime-ide-body .runtime-draft-safety-next span {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+body.runtime-ide-body .runtime-draft-safety-action {
+  align-self: center;
+  border-color: rgba(56, 189, 248, 0.36);
+  box-shadow: 0 0 18px rgba(56, 189, 248, 0.16);
+  min-width: 124px;
+  white-space: nowrap;
+}
+
+@media (max-width: 760px) {
+  body.runtime-ide-body .runtime-draft-safety-next {
+    grid-template-columns: 1fr;
+  }
+
+  body.runtime-ide-body .runtime-draft-safety-action {
+    justify-self: stretch;
+    width: 100%;
+  }
+}
+
+/* v74: explicit saved-active-graph execution summary in Run Launcher. */
+body.runtime-ide-body .runtime-run-target-summary {
+  margin-bottom: 10px;
+}
+
+body.runtime-ide-body .runtime-run-target-summary-card {
+  background: linear-gradient(135deg, rgba(15, 23, 42, 0.76), rgba(5, 8, 22, 0.72));
+  border: 1px solid rgba(96, 165, 250, 0.16);
+  border-radius: 16px;
+  box-shadow: inset 3px 0 0 rgba(96, 165, 250, 0.42);
+  display: grid;
+  gap: 10px;
+  padding: 11px;
+}
+
+body.runtime-ide-body .runtime-run-target-summary-card.ok {
+  border-color: rgba(34, 197, 94, 0.26);
+  box-shadow: inset 3px 0 0 rgba(34, 197, 94, 0.72);
+}
+
+body.runtime-ide-body .runtime-run-target-summary-card.warn {
+  border-color: rgba(245, 158, 11, 0.34);
+  box-shadow: inset 3px 0 0 rgba(245, 158, 11, 0.78);
+}
+
+body.runtime-ide-body .runtime-run-target-summary-head {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+body.runtime-ide-body .runtime-run-target-summary-head span {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+body.runtime-ide-body .runtime-run-target-summary-head strong,
+body.runtime-ide-body .runtime-run-target-summary-grid strong {
+  color: #e5edff;
+  font-size: 0.78rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+body.runtime-ide-body .runtime-run-target-summary-head small,
+body.runtime-ide-body .runtime-run-target-summary-grid small,
+body.runtime-ide-body .runtime-run-target-summary-card p {
+  color: rgba(203, 213, 225, 0.7);
+  font-size: 0.66rem;
+  line-height: 1.35;
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+body.runtime-ide-body .runtime-run-target-summary-head em {
+  background: rgba(59, 130, 246, 0.12);
+  border: 1px solid rgba(96, 165, 250, 0.16);
+  border-radius: 999px;
+  color: var(--ide-cyan);
+  flex: 0 0 auto;
+  font-size: 0.66rem;
+  font-style: normal;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  padding: 5px 8px;
+  text-transform: uppercase;
+}
+
+body.runtime-ide-body .runtime-run-target-summary-card.warn .runtime-run-target-summary-head em {
+  color: #fde68a;
+}
+
+body.runtime-ide-body .runtime-run-target-summary-grid {
+  display: grid;
+  gap: 7px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+body.runtime-ide-body .runtime-run-target-summary-grid span {
+  background: rgba(5, 8, 22, 0.34);
+  border: 1px solid rgba(96, 165, 250, 0.09);
+  border-radius: 10px;
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 8px;
+}
+
+@media (max-width: 1280px) {
+  body.runtime-ide-body .runtime-run-target-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  body.runtime-ide-body .runtime-run-target-summary-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  body.runtime-ide-body .runtime-run-target-summary-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* v75: Node Inspector recovery card for node-scoped runtime failures and warnings. */
+body.runtime-ide-body .runtime-node-recovery {
+  background: linear-gradient(135deg, rgba(15, 23, 42, 0.66), rgba(5, 8, 22, 0.62));
+  border-color: rgba(96, 165, 250, 0.16);
+  box-shadow: inset 3px 0 0 rgba(96, 165, 250, 0.38);
+}
+
+body.runtime-ide-body .runtime-node-recovery.ok {
+  border-color: rgba(34, 197, 94, 0.26);
+  box-shadow: inset 3px 0 0 rgba(34, 197, 94, 0.7);
+}
+
+body.runtime-ide-body .runtime-node-recovery.warn {
+  border-color: rgba(245, 158, 11, 0.34);
+  box-shadow: inset 3px 0 0 rgba(245, 158, 11, 0.76);
+}
+
+body.runtime-ide-body .runtime-node-recovery.error {
+  border-color: rgba(248, 113, 113, 0.36);
+  box-shadow: inset 3px 0 0 rgba(248, 113, 113, 0.78);
+}
+
+body.runtime-ide-body .runtime-node-recovery-head {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+body.runtime-ide-body .runtime-node-recovery-head span {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+body.runtime-ide-body .runtime-node-recovery-head h3 {
+  margin: 0;
+}
+
+body.runtime-ide-body .runtime-node-recovery-head small,
+body.runtime-ide-body .runtime-node-recovery-grid small,
+body.runtime-ide-body .runtime-node-recovery-next small,
+body.runtime-ide-body .runtime-node-recovery-next p,
+body.runtime-ide-body .runtime-node-recovery-issues p {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+body.runtime-ide-body .runtime-node-recovery-head small,
+body.runtime-ide-body .runtime-node-recovery-grid small,
+body.runtime-ide-body .runtime-node-recovery-next small {
+  color: rgba(203, 213, 225, 0.66);
+  font-size: 0.64rem;
+}
+
+body.runtime-ide-body .runtime-node-recovery-head em {
+  background: rgba(59, 130, 246, 0.12);
+  border: 1px solid rgba(96, 165, 250, 0.16);
+  border-radius: 999px;
+  color: var(--ide-cyan);
+  flex: 0 0 auto;
+  font-size: 0.66rem;
+  font-style: normal;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  padding: 5px 8px;
+}
+
+body.runtime-ide-body .runtime-node-recovery.warn .runtime-node-recovery-head em {
+  color: #fde68a;
+}
+
+body.runtime-ide-body .runtime-node-recovery.error .runtime-node-recovery-head em {
+  color: #fecaca;
+}
+
+body.runtime-ide-body .runtime-node-recovery-grid {
+  display: grid;
+  gap: 7px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+body.runtime-ide-body .runtime-node-recovery-grid span,
+body.runtime-ide-body .runtime-node-recovery-next,
+body.runtime-ide-body .runtime-node-recovery-issues {
+  background: rgba(8, 14, 35, 0.58);
+  border: 1px solid rgba(96, 165, 250, 0.1);
+  border-radius: 10px;
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 8px;
+}
+
+body.runtime-ide-body .runtime-node-recovery-grid strong {
+  color: rgba(226, 232, 240, 0.96);
+  font-size: 0.72rem;
+  overflow-wrap: anywhere;
+}
+
+body.runtime-ide-body .runtime-node-recovery-issues p,
+body.runtime-ide-body .runtime-node-recovery-next p {
+  color: rgba(203, 213, 225, 0.78);
+  font-size: 0.66rem;
+  line-height: 1.35;
+  margin: 0;
+}
+
+body.runtime-ide-body .runtime-node-recovery-issues p.error {
+  color: #fecaca;
+}
+
+body.runtime-ide-body .runtime-node-recovery-issues p.warn {
+  color: #fde68a;
+}
+
+body.runtime-ide-body .runtime-node-recovery-issues p.ok {
+  color: #bbf7d0;
+}
+
+body.runtime-ide-body .runtime-node-recovery-next p::before {
+  color: var(--ide-cyan);
+  content: "-> ";
+  font-weight: 900;
+}
+
+body.runtime-ide-body .runtime-node-recovery-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+body.runtime-ide-body .runtime-node-recovery-actions .btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.46;
+}
+
+@media (max-width: 1280px) {
+  body.runtime-ide-body .runtime-node-recovery-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  body.runtime-ide-body .runtime-node-recovery-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  body.runtime-ide-body .runtime-node-recovery-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* v76: whole-graph runtime readiness summary for operator-grade execution checks. */
+body.runtime-ide-body .runtime-readiness-panel {
+  background: linear-gradient(180deg, rgba(10, 18, 42, 0.95), rgba(7, 11, 28, 0.96));
+  border: 1px solid rgba(96, 165, 250, 0.2);
+  border-radius: 18px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 18px 44px rgba(0, 0, 0, 0.24);
+  overflow: hidden;
+  padding: 12px !important;
+}
+
+body.runtime-ide-body .runtime-readiness-output {
+  max-height: none !important;
+  min-height: 0 !important;
+  overflow: visible !important;
+}
+
+body.runtime-ide-body .runtime-readiness-card {
+  display: grid;
+  gap: 10px;
+}
+
+body.runtime-ide-body .runtime-readiness-head {
+  align-items: start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+body.runtime-ide-body .runtime-readiness-head strong {
+  color: #f8fbff;
+  display: block;
+  font-size: 0.9rem;
+  letter-spacing: 0.01em;
+}
+
+body.runtime-ide-body .runtime-readiness-head small {
+  color: #9caed4;
+  display: block;
+  font-size: 0.72rem;
+  margin-top: 2px;
+}
+
+body.runtime-ide-body .runtime-readiness-head em {
+  border: 1px solid rgba(96, 165, 250, 0.24);
+  border-radius: 999px;
+  color: #cfe4ff;
+  font-size: 0.66rem;
+  font-style: normal;
+  letter-spacing: 0.08em;
+  padding: 5px 8px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+body.runtime-ide-body .runtime-readiness-card.ok .runtime-readiness-head em {
+  border-color: rgba(34, 197, 94, 0.42);
+  color: #b6f7cf;
+}
+
+body.runtime-ide-body .runtime-readiness-card.warn .runtime-readiness-head em {
+  border-color: rgba(255, 212, 56, 0.42);
+  color: #ffe9a3;
+}
+
+body.runtime-ide-body .runtime-readiness-card.error .runtime-readiness-head em {
+  border-color: rgba(255, 56, 100, 0.5);
+  color: #ffc0cc;
+}
+
+body.runtime-ide-body .runtime-readiness-kpis {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+body.runtime-ide-body .runtime-readiness-kpi {
+  background: rgba(15, 23, 42, 0.72);
+  border: 1px solid rgba(96, 165, 250, 0.18);
+  border-radius: 12px;
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 9px 10px;
+}
+
+body.runtime-ide-body .runtime-readiness-kpi.ok {
+  border-color: rgba(34, 197, 94, 0.32);
+}
+
+body.runtime-ide-body .runtime-readiness-kpi.warn {
+  border-color: rgba(255, 212, 56, 0.36);
+}
+
+body.runtime-ide-body .runtime-readiness-kpi.error {
+  border-color: rgba(255, 56, 100, 0.4);
+}
+
+body.runtime-ide-body .runtime-readiness-kpi small,
+body.runtime-ide-body .runtime-readiness-kpi em {
+  color: #8ea0c8;
+  font-size: 0.65rem;
+  font-style: normal;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.runtime-ide-body .runtime-readiness-kpi strong {
+  color: #f8fbff;
+  font-size: 0.8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.runtime-ide-body .runtime-readiness-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+body.runtime-ide-body .runtime-readiness-issues {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+body.runtime-ide-body .runtime-readiness-issue {
+  align-items: center;
+  background: rgba(15, 23, 42, 0.64);
+  border: 1px solid rgba(96, 165, 250, 0.14);
+  border-radius: 10px;
+  color: #e5edff;
+  cursor: pointer;
+  display: grid;
+  gap: 7px;
+  grid-template-columns: auto minmax(120px, 0.55fr) minmax(0, 1fr);
+  min-width: 0;
+  padding: 7px 8px;
+  text-align: left;
+}
+
+body.runtime-ide-body .runtime-readiness-issue:hover {
+  border-color: rgba(56, 189, 248, 0.48);
+  transform: translateY(-1px);
+}
+
+body.runtime-ide-body .runtime-readiness-issue strong,
+body.runtime-ide-body .runtime-readiness-issue small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.runtime-ide-body .runtime-readiness-issue strong {
+  color: #f8fbff;
+  font-size: 0.72rem;
+}
+
+body.runtime-ide-body .runtime-readiness-issue small {
+  color: #9caed4;
+  font-size: 0.66rem;
+}
+
+body.runtime-ide-body .runtime-readiness-empty {
+  border: 1px solid rgba(34, 197, 94, 0.28);
+  border-radius: 10px;
+  color: #b6f7cf;
+  font-size: 0.72rem;
+  padding: 8px 10px;
+}
+
+@media (max-width: 1280px) {
+  body.runtime-ide-body .runtime-readiness-kpis,
+  body.runtime-ide-body .runtime-readiness-issues {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  body.runtime-ide-body .runtime-readiness-head {
+    display: grid;
+  }
+  body.runtime-ide-body .runtime-readiness-kpis,
+  body.runtime-ide-body .runtime-readiness-issues {
+    grid-template-columns: 1fr;
+  }
+  body.runtime-ide-body .runtime-readiness-issue {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  body.runtime-ide-body .runtime-readiness-issue small {
+    grid-column: 2;
+  }
+}
+
+/* v77: node-level readiness overlay so graph problems are visible on the canvas. */
+body.runtime-ide-body .runtime-ide-node.readiness-error {
+  border-color: rgba(255, 56, 100, 0.72) !important;
+  box-shadow: 0 0 0 1px rgba(255, 56, 100, 0.18), 0 12px 30px rgba(255, 56, 100, 0.14), 0 14px 34px rgba(0, 0, 0, 0.3) !important;
+}
+
+body.runtime-ide-body .runtime-ide-node.readiness-warn {
+  border-color: rgba(255, 212, 56, 0.68) !important;
+  box-shadow: 0 0 0 1px rgba(255, 212, 56, 0.16), 0 12px 30px rgba(255, 212, 56, 0.12), 0 14px 34px rgba(0, 0, 0, 0.3) !important;
+}
+
+body.runtime-ide-body .runtime-ide-node.readiness-error .runtime-ide-node-icon {
+  border-color: rgba(255, 56, 100, 0.5);
+}
+
+body.runtime-ide-body .runtime-ide-node.readiness-warn .runtime-ide-node-icon {
+  border-color: rgba(255, 212, 56, 0.5);
+}
+
+body.runtime-ide-body .runtime-node-readiness-badge {
+  border: 1px solid rgba(96, 165, 250, 0.2);
+  border-radius: 999px;
+  bottom: -9px;
+  color: #e5edff;
+  font-size: 0.58rem;
+  font-style: normal;
+  font-weight: 800;
+  left: 10px;
+  letter-spacing: 0.03em;
+  line-height: 1;
+  max-width: 132px;
+  overflow: hidden;
+  padding: 4px 6px;
+  pointer-events: none;
+  position: absolute;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+  z-index: 8;
+}
+
+body.runtime-ide-body .runtime-node-readiness-badge.error {
+  background: rgba(96, 10, 32, 0.94);
+  border-color: rgba(255, 56, 100, 0.62);
+  color: #ffd0da;
+}
+
+body.runtime-ide-body .runtime-node-readiness-badge.warn {
+  background: rgba(92, 65, 6, 0.94);
+  border-color: rgba(255, 212, 56, 0.6);
+  color: #ffefb8;
+}
+
+body.runtime-ide-body .runtime-ide-node.readiness-error::before,
+body.runtime-ide-body .runtime-ide-node.readiness-warn::before {
+  border-radius: 16px;
+  content: "";
+  inset: -5px;
+  pointer-events: none;
+  position: absolute;
+  z-index: -1;
+}
+
+body.runtime-ide-body .runtime-ide-node.readiness-error::before {
+  border: 1px solid rgba(255, 56, 100, 0.32);
+}
+
+body.runtime-ide-body .runtime-ide-node.readiness-warn::before {
+  border: 1px solid rgba(255, 212, 56, 0.3);
+}
+
+/* v78: readiness issue click target focus feedback. */
+body.runtime-ide-body .runtime-readiness-focus {
+  animation: runtimeReadinessFocusPulse 1.6s ease-out 1;
+  outline: 2px solid rgba(56, 189, 248, 0.78) !important;
+  outline-offset: 4px;
+}
+
+body.runtime-ide-body .runtime-readiness-issue em {
+  color: #7dd3fc;
+  font-size: 0.6rem;
+  font-style: normal;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+@keyframes runtimeReadinessFocusPulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(56, 189, 248, 0.55);
+  }
+  100% {
+    box-shadow: 0 0 0 18px rgba(56, 189, 248, 0);
+  }
+}
+
+/* v80: Module Management operator navigation and stable library row geometry. */
+body.runtime-ide-body .module-management-workbench .hint {
+  color: rgba(202, 213, 236, 0.78);
+}
+
+body.runtime-ide-body .module-management-config-nav {
+  align-items: center;
+  background: rgba(5, 8, 22, 0.52);
+  border: 1px solid rgba(96, 165, 250, 0.14);
+  border-radius: 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-start;
+  margin: 10px 0 12px;
+  padding: 10px;
+  position: sticky;
+  top: 8px;
+  z-index: 8;
+}
+
+body.runtime-ide-body .module-management-config-nav::before {
+  color: rgba(202, 213, 236, 0.72);
+  content: "Config sections";
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  margin-right: 4px;
+  text-transform: uppercase;
+}
+
+body.runtime-ide-body .module-management-config-raw .runtime-ide-textarea {
+  height: 520px;
+  min-height: 520px;
+}
+
+body.runtime-ide-body .module-management-jump-focus {
+  animation: moduleManagementJumpFocus 1.5s ease-out 1;
+  outline: 2px solid rgba(56, 189, 248, 0.5);
+  outline-offset: 4px;
+}
+
+@keyframes moduleManagementJumpFocus {
+  0% { box-shadow: 0 0 0 rgba(56, 189, 248, 0); }
+  25% { box-shadow: 0 0 0 5px rgba(56, 189, 248, 0.18), 0 0 26px rgba(56, 189, 248, 0.18); }
+  100% { box-shadow: 0 0 0 rgba(56, 189, 248, 0); }
+}
+
+@media (max-width: 760px) {
+  body.runtime-ide-body .module-management-config-nav {
+    position: static;
+  }
+}
+
+/* v81: keep module list state badges under the text column so labels remain readable. */
+body.runtime-ide-body .module-management-item {
+  grid-template-columns: 32px minmax(0, 1fr) !important;
+}
+
+body.runtime-ide-body .module-management-list-state {
+  grid-column: 2 !important;
+  justify-self: start !important;
+}
+
+/* v89: Runtime Readiness is an operational gate, so do not clip issue/action rows. */
+body.runtime-ide-body .runtime-readiness-panel .runtime-readiness-output {
+  max-height: none !important;
+  min-height: 128px !important;
+  overflow: visible !important;
+}
+
+body.runtime-ide-body .runtime-readiness-panel {
+  overflow: visible !important;
+}
+
+
+/* v90: keep selected-node recovery actions discoverable at the top of the inspector. */
+body.runtime-ide-body .runtime-node-quick-actions {
+  background: linear-gradient(135deg, rgba(8, 14, 35, 0.72), rgba(15, 23, 42, 0.58));
+  border-color: rgba(56, 189, 248, 0.22);
+  box-shadow: inset 3px 0 0 rgba(56, 189, 248, 0.5);
+}
+
+body.runtime-ide-body .runtime-node-quick-actions > span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+body.runtime-ide-body .runtime-node-quick-actions small {
+  color: rgba(203, 213, 225, 0.68);
+  font-size: 0.64rem;
+  overflow-wrap: anywhere;
+}
+
+body.runtime-ide-body .runtime-node-quick-action-row {
+  display: grid;
+  gap: 7px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+body.runtime-ide-body .runtime-node-quick-action-row .btn {
+  justify-content: center;
+  min-width: 0;
+  width: 100%;
+}
+
+@media (max-width: 1280px) {
+  body.runtime-ide-body .runtime-node-quick-action-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* v108: minimap is an operational navigator, not only a static overview. */
+body.runtime-ide-body .runtime-ide-minimap-world {
+  cursor: crosshair;
+  overflow: hidden;
+  position: relative;
+}
+
+body.runtime-ide-body .runtime-ide-minimap-viewport {
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.82);
+  border-radius: 6px;
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.65), 0 0 18px rgba(56, 189, 248, 0.22);
+  pointer-events: none;
+  position: absolute;
+  z-index: 1;
+}
+
+body.runtime-ide-body .runtime-ide-minimap-node {
+  z-index: 2;
+}
+
+/* v83: handler signature evidence from the allowlisted runtime registry. */
+body.runtime-ide-body .runtime-handler-row {
+  border: 1px solid rgba(96, 165, 250, 0.14);
+  border-radius: 10px;
+  display: grid;
+  gap: 2px;
+  margin-bottom: 6px;
+  padding: 6px 8px;
+}
+
+body.runtime-ide-body .runtime-handler-row strong {
+  color: rgba(226, 232, 240, 0.96);
+  font-size: 0.72rem;
+  overflow-wrap: anywhere;
+}
+
+body.runtime-ide-body .runtime-handler-row span {
+  color: #bbf7d0;
+  font-size: 0.62rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+body.runtime-ide-body .runtime-handler-row small {
+  color: rgba(148, 163, 184, 0.84);
+  font-family: "JetBrains Mono", "IBM Plex Mono", monospace;
+  font-size: 0.62rem;
+  overflow-wrap: anywhere;
+}
+
+body.runtime-ide-body .runtime-handler-row.error {
+  background: rgba(239, 68, 68, 0.08);
+  border-color: rgba(248, 113, 113, 0.24);
+}
+
+body.runtime-ide-body .runtime-handler-row.error span {
+  color: #fecaca;
+}
+
+body.runtime-ide-body .runtime-handler-signature {
+  background: rgba(15, 23, 42, 0.72);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 8px;
+  color: rgba(226, 232, 240, 0.94);
+  display: inline-block;
+  font-family: "JetBrains Mono", "IBM Plex Mono", monospace;
+  font-size: 0.68rem;
+  line-height: 1.35;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  padding: 3px 6px;
+}
+
+body.runtime-ide-body .runtime-handler-error-list {
+  color: #fecaca;
+  font-size: 0.68rem;
+  margin: 6px 0 0;
+  padding-left: 16px;
+}
+
+/* v117: keep the graph canvas above the fold by compressing the always-visible draft gate. */
+body.runtime-ide-body .runtime-draft-safety-strip {
+  gap: 7px !important;
+  grid-template-columns: minmax(160px, 0.78fr) minmax(300px, 2fr) minmax(160px, 0.76fr) !important;
+  margin: 6px 0 8px !important;
+  padding: 7px 8px !important;
+}
+
+body.runtime-ide-body .runtime-draft-safety-head,
+body.runtime-ide-body .runtime-draft-safety-next {
+  gap: 2px !important;
+  padding: 6px 8px !important;
+}
+
+body.runtime-ide-body .runtime-draft-safety-head span,
+body.runtime-ide-body .runtime-draft-safety-next span {
+  gap: 1px !important;
+}
+
+body.runtime-ide-body .runtime-draft-safety-head strong,
+body.runtime-ide-body .runtime-draft-safety-next strong {
+  font-size: 0.7rem !important;
+  line-height: 1.2 !important;
+}
+
+body.runtime-ide-body .runtime-draft-safety-head small,
+body.runtime-ide-body .runtime-draft-safety-next small {
+  font-size: 0.58rem !important;
+  line-height: 1.15 !important;
+}
+
+body.runtime-ide-body .runtime-draft-safety-head em {
+  font-size: 0.56rem !important;
+  padding: 2px 6px !important;
+}
+
+body.runtime-ide-body .runtime-draft-safety-items {
+  align-content: stretch !important;
+  gap: 4px !important;
+  grid-template-columns: repeat(6, minmax(0, 1fr)) !important;
+}
+
+body.runtime-ide-body .runtime-draft-safety-item {
+  gap: 1px !important;
+  min-height: 0 !important;
+  padding: 5px 6px !important;
+}
+
+body.runtime-ide-body .runtime-draft-safety-item small {
+  font-size: 0.54rem !important;
+  letter-spacing: 0.035em;
+  line-height: 1.05 !important;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+body.runtime-ide-body .runtime-draft-safety-item strong {
+  font-size: 0.64rem !important;
+  line-height: 1.05 !important;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.runtime-ide-body .runtime-draft-safety-item em {
+  display: none !important;
+}
+
+body.runtime-ide-body .runtime-draft-safety-action {
+  min-width: 104px !important;
+}
+
+@media (max-width: 1180px) {
+  body.runtime-ide-body .runtime-draft-safety-strip {
+    grid-template-columns: 1fr !important;
+  }
+
+  body.runtime-ide-body .runtime-draft-safety-items {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  }
+}
+
+/* v118: prevent the canvas toolbar and draft gate from turning into tall form rows. */
+body.runtime-ide-body .runtime-ide-graph-workbench > .panel-title-row {
+  align-items: center !important;
+  gap: 8px !important;
+  margin-bottom: 6px !important;
+  min-height: 34px !important;
+}
+
+body.runtime-ide-body .runtime-ide-graph-workbench > .panel-title-row > div:first-child small {
+  display: none !important;
+}
+
+body.runtime-ide-body .runtime-ide-canvas-actions {
+  flex-wrap: nowrap !important;
+  gap: 5px !important;
+  max-width: min(100%, 430px) !important;
+  overflow-x: auto !important;
+  padding-bottom: 2px;
+  scrollbar-width: thin;
+}
+
+body.runtime-ide-body .runtime-canvas-view-hint {
+  max-width: 142px !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+body.runtime-ide-body .runtime-draft-safety-strip {
+  align-items: center !important;
+  min-height: 48px !important;
+}
+
+body.runtime-ide-body .runtime-draft-safety-head,
+body.runtime-ide-body .runtime-draft-safety-next {
+  min-height: 0 !important;
+}
+
+body.runtime-ide-body .runtime-draft-safety-head small,
+body.runtime-ide-body .runtime-draft-safety-head em,
+body.runtime-ide-body .runtime-draft-safety-next small {
+  display: none !important;
+}
+
+body.runtime-ide-body .runtime-draft-safety-head strong,
+body.runtime-ide-body .runtime-draft-safety-next strong {
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+body.runtime-ide-body .runtime-draft-safety-items {
+  align-items: stretch !important;
+}
+
+body.runtime-ide-body .runtime-draft-safety-item {
+  align-items: center !important;
+  display: flex !important;
+  justify-content: space-between !important;
+}
+
+body.runtime-ide-body .runtime-draft-safety-item small,
+body.runtime-ide-body .runtime-draft-safety-item strong {
+  display: block;
+  min-width: 0;
+}
+
+body.runtime-ide-body .runtime-draft-safety-item small {
+  flex: 1 1 auto;
+  margin-right: 3px;
+}
+
+body.runtime-ide-body .runtime-draft-safety-item strong {
+  flex: 0 1 auto;
+  max-width: 52%;
+}
+
+/* v119: closed operator drawers are launch controls, so keep them thinner than the graph editor. */
+body.runtime-ide-body .runtime-ide-compact-drawer > summary {
+  min-height: 42px !important;
+  padding: 6px 10px !important;
+}
+
+body.runtime-ide-body .runtime-ide-compact-drawer > summary h2 {
+  font-size: 0.82rem !important;
+}
+
+body.runtime-ide-body .runtime-ide-compact-drawer > summary small {
+  display: none !important;
+}
+
+body.runtime-ide-body .runtime-ide-compact-drawer > summary::after {
+  font-size: 0.58rem !important;
+  padding: 3px 7px !important;
+}
+
+body.runtime-ide-body .runtime-version-history-panel {
+  margin-top: 4px !important;
+}
+
+body.runtime-ide-body .runtime-version-history-panel summary {
+  min-height: 32px !important;
+  padding: 6px 10px !important;
+}
+
+body.runtime-ide-body .runtime-version-history-panel summary small {
+  display: none !important;
+}
+
+/* v120: make agent internal module graph connections explicit and auditable. */
+body.runtime-ide-body .runtime-ide-edge.edge-module-flow {
+  color: rgba(125, 211, 252, 0.98);
+  opacity: 1;
+  stroke-width: 3.6;
+  filter: drop-shadow(0 0 7px rgba(56, 189, 248, 0.32));
+}
+
+body.runtime-ide-body .runtime-ide-edge.edge-module-flow.edge-simple-default {
+  opacity: 0.96;
+}
+
+body.runtime-ide-body .runtime-ide-edge-label.edge-module-flow rect {
+  fill: rgba(8, 14, 35, 0.96);
+  stroke: rgba(125, 211, 252, 0.72);
+  stroke-width: 1.2;
+}
+
+body.runtime-ide-body .runtime-ide-edge-label.edge-module-flow text {
+  fill: #e6f7ff;
+  font-size: 10.5px;
+  font-weight: 850;
+}
+
+/* v121: tighten module-flow arrow alignment and give internal step labels enough room. */
+body.runtime-ide-body .runtime-ide-edge.edge-module-flow {
+  marker-end: url(#ide-arrow-module);
+  stroke-linejoin: round;
+}
+
+body.runtime-ide-body .runtime-ide-edge-label.edge-module-flow rect {
+  filter: drop-shadow(0 2px 8px rgba(2, 6, 23, 0.52));
+}
+
+body.runtime-ide-body .runtime-ide-edge-label.edge-module-flow text {
+  dominant-baseline: middle;
+  font-size: 11px;
+  paint-order: stroke;
+  stroke: rgba(2, 6, 23, 0.72);
+  stroke-width: 2px;
+}
+
+/* v83: Module Management owns module config editing; Runtime IDE keeps only hidden compatibility DOM. */
+body.runtime-ide-body .runtime-ide-compat-module-config[hidden] {
+  display: none !important;
+}
+
+body.module-management-body .module-management-page {
+  max-width: min(1920px, calc(100vw - 20px));
+}
+
+body.module-management-body .module-management-config-workspace {
+  padding: 16px !important;
+}
+
+body.module-management-body .module-management-config-workspace > summary {
+  font-size: 1rem;
+  min-height: 52px;
+  padding: 14px 16px !important;
+}
+
+body.module-management-body .module-management-config-head {
+  align-items: center;
+  grid-template-columns: minmax(0, 1fr) minmax(560px, 0.78fr) !important;
+  padding: 6px 2px 10px;
+}
+
+body.module-management-body .module-management-config-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 1fr) !important;
+  padding: 0 !important;
+}
+
+body.module-management-body .module-management-config-main {
+  gap: 16px;
+  padding: 16px !important;
+}
+
+body.module-management-body #mm-config-summary.runtime-module-summary-output {
+  min-height: 460px !important;
+}
+
+body.module-management-body #mm-config-summary .runtime-module-agent-head {
+  padding: 18px;
+}
+
+body.module-management-body #mm-config-summary .runtime-module-agent-head h3 {
+  font-size: 1.38rem;
+}
+
+body.module-management-body #mm-config-summary .runtime-module-agent-head p,
+body.module-management-body #mm-config-summary .runtime-handler-select-label,
+body.module-management-body #mm-config-summary .runtime-module-card-title small {
+  font-size: 0.78rem;
+}
+
+body.module-management-body #mm-config-summary .runtime-module-config-cards {
+  gap: 14px;
+  grid-template-columns: repeat(3, minmax(260px, 1fr));
+}
+
+body.module-management-body #mm-config-summary .runtime-module-config-card {
+  gap: 12px;
+  min-height: 154px;
+  padding: 16px;
+}
+
+body.module-management-body #mm-config-summary .runtime-module-config-card.wide {
+  grid-column: span 3;
+}
+
+body.module-management-body #mm-config-summary .runtime-module-card-title strong {
+  font-size: 0.94rem;
+}
+
+body.module-management-body #mm-config-summary .runtime-module-small-textarea {
+  min-height: 110px;
+}
+
+body.module-management-body #mm-config-steps.runtime-module-graph {
+  min-height: 560px;
+  padding: 14px;
+}
+
+body.module-management-body .module-management-config-raw {
+  padding: 14px !important;
+}
+
+body.module-management-body .module-management-config-raw .runtime-module-raw-json:not([open]) + * {
+  display: none;
+}
+
+body.module-management-body .module-management-config-raw .runtime-ide-textarea {
+  height: 420px !important;
+  min-height: 420px !important;
+}
+
+@media (max-width: 1180px) {
+  body.module-management-body .module-management-config-head,
+  body.module-management-body #mm-config-summary .runtime-module-config-cards {
+    grid-template-columns: 1fr !important;
+  }
+
+  body.module-management-body #mm-config-summary .runtime-module-config-card.wide {
+    grid-column: auto;
+  }
+}
+
+/* v88: secondary draft safety actions such as Discard Draft. */
+body.runtime-ide-body .runtime-draft-safety-actions {
+  display: flex !important;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  min-width: max-content;
+}
+
+@media (max-width: 760px) {
+  body.runtime-ide-body .runtime-draft-safety-actions {
+    justify-content: stretch;
+    width: 100%;
+  }
+}

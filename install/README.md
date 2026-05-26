@@ -113,6 +113,45 @@ atr chat "테스트 모드"
 atr chat "실험 수행"
 ```
 
+Runtime graph management:
+
+```bash
+atr graphs
+atr graph show atr_closed_loop
+atr graph validate atr_closed_loop
+atr graph compile atr_closed_loop
+atr graph dry-run atr_closed_loop
+atr graph gate atr_closed_loop
+atr graph export-yaml atr_closed_loop /tmp/atr_closed_loop.yaml
+atr graph import-yaml atr_closed_loop /tmp/atr_closed_loop.yaml
+atr graph save-yaml atr_closed_loop /tmp/atr_closed_loop.yaml
+atr graph save-yaml atr_closed_loop /tmp/atr_closed_loop.yaml --no-activate
+atr graph run atr_closed_loop test "candidate route smoke"
+```
+
+Runtime graph commands call the same `/api/graphs` endpoints used by the Runtime IDE. A graph edited in the browser is visible from `atr graph show`; a graph saved from `atr graph save-yaml` is versioned and reflected in the browser after reload. `save-yaml` validates, stores a version under `memory/runtime_graph_versions/<graph-id>/`, and activates the graph unless `--no-activate` is passed.
+
+Runtime module management:
+
+```bash
+atr modules
+atr module show design
+atr module validate design
+atr module dry-run design
+atr module load design
+atr module unload design
+atr module versions design
+atr module version design 20260526T000000000000Z
+atr module save-yaml design graphs/modules/design/module.yaml
+atr module save-yaml design graphs/modules/design/module.yaml --no-activate
+atr module register-generated my_internal_module
+atr module create ./my_internal_module.py my_internal_module "My Internal Module"
+```
+
+Module management commands call the same `/api/modules` endpoints used by the Module Management Tool. `load` and `unload` only change the management workspace state; they do not delete files or modify the executable graph. `save-yaml` validates the module payload, performs the non-device module dry-run, saves a version under `memory/module_versions/<module-id>/`, and activates the YAML unless `--no-activate` is passed. `register-generated` is the explicit approval step for Module Designer output: it statically checks `handler.py`, flips the module handler to `module.generated_adapter`, removes staging-only `runtime.step_complete` internal-step handlers, records a version, and enables runtime execution through the generated adapter wrapper.
+
+`atr module create` sends the Python file to the same `/api/modules` Module Designer endpoint used by the GUI. By default the API asks Gemma 31B (`gemma4:31b`) to convert the uploaded source into an ATR protocol adapter, writes `graphs/modules/<module-id>/handler.py`, stores the original source beside it for audit, writes `module.yaml`, saves a version under `memory/module_versions/<module-id>/`, then leaves execution bound to an allowlisted handler. If the generated handler is not registered yet, the module remains `pending_handler_registration` and uses `runtime.step_complete` until explicit `atr module register-generated <module-id>` approval.
+
 Windows PyAutoGUI bridge helper:
 
 ```text

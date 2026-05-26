@@ -2,7 +2,7 @@
 
 ## 1. 현재 프로젝트 기준선
 
-현재 제공된 프로젝트 문서 기준으로 런타임은 `FastAPI Controller -> RunLoop -> Stage Agent -> MCP Tool -> State Update -> Event Stream -> Web GUI` 구조를 유지해야 한다. 단계 순서는 `design -> specimen -> vision -> manipulation -> equipment -> analysis -> knowledge -> guardian`이며, `guardian=continue`는 다시 design으로, stop/error는 complete/error로 라우팅된다.
+현재 제공된 프로젝트 문서 기준으로 런타임은 `FastAPI Controller -> LangGraphRunLoop -> Stage Agent -> MCP Tool -> State Update -> Event Stream -> Web GUI` 구조를 유지해야 한다. 단계 순서는 active `graphs/configs/*.yaml` 전이에 의해 결정되며, 기본 closed-loop는 `design -> specimen -> vision -> manipulation -> equipment -> analysis -> knowledge -> bo -> guardian`이다. 기본 guardian=continue는 다시 design으로, stop/error는 complete/error로 라우팅된다.
 
 SARM은 최상위 agent가 아니라 Manipulation Agent 내부의 submodule로 유지해야 한다. 기존 agent contract는 `BaseAgent.run(state, ctx) -> AgentResult`이고, tool access는 `ToolRegistry.call(name, payload)` 형태의 MCP-style contract를 따른다.
 

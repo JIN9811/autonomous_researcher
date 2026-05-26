@@ -34,10 +34,10 @@ FastAPI Controller
             -> Web GUI
 ```
 
-Stage order:
+Stage order is graph-configured in `graphs/configs/*.yaml`. Default closed-loop order:
 
 ```text
-design -> specimen -> vision -> manipulation -> equipment -> analysis -> knowledge -> guardian
+design -> specimen -> vision -> manipulation -> equipment -> analysis -> knowledge -> bo -> guardian
 ```
 
 Do not create new top-level stages for LeRobot or SARM.

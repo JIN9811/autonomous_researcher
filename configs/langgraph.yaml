@@ -1,22 +1,25 @@
 # File purpose:
-# - Graph node and transition metadata for orchestrator introspection.
+# - Graph node and transition metadata for LangGraph runtime introspection.
 #
 # Key classes/functions:
-# - Used as documentation and future dynamic graph wiring input.
+# - Mirrors graphs/configs/atr_closed_loop.yaml for lightweight GUI/runtime panels.
 #
 # Inputs/outputs:
 # - Input: ordered stage list and transition hints
 # - Output: graph metadata
 #
 # Dependencies:
-# - orchestrator/transitions.py
+# - graphs/configs/atr_closed_loop.yaml
 #
 # Modification guide:
 # - Safe places to edit: stage descriptions
 # - Risky places to edit: node ids mismatched with runtime stage enums
-# - Related files: orchestrator/state.py, orchestrator/graph.py
+# - Related files: orchestrator/state.py, graphs/configs/atr_closed_loop.yaml
 
 graph:
+  id: atr_closed_loop
+  runtime: langgraph
+  config_path: graphs/configs/atr_closed_loop.yaml
   nodes:
     - design
     - specimen
@@ -25,8 +28,18 @@ graph:
     - equipment
     - analysis
     - knowledge
+    - bo
     - guardian
   transitions:
+    idle: design
+    design: specimen
+    specimen: vision
+    vision: manipulation
+    manipulation: equipment
+    equipment: analysis
+    analysis: knowledge
+    knowledge: bo
+    bo: guardian
     guardian_continue: design
     guardian_stop: complete
     guardian_error: error

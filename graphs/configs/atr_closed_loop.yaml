@@ -1,0 +1,484 @@
+graph:
+  id: atr_closed_loop
+  name: ATR Closed-Loop Autonomous Research Graph
+  version: 0.2.0
+  entry_node: dispatch
+  finish_nodes:
+  - step_complete
+  nodes:
+  - id: dispatch
+    label: Runtime Dispatch
+    handler: runtime.dispatch
+    stage: null
+    kind: runtime
+    description: Routes the current OrchestratorState stage to the matching executable
+      node.
+    module_id: null
+    position:
+      x: 32.0
+      y: 224.0
+    metadata:
+      icon: orchestrator
+  - id: idle
+    label: Idle
+    handler: runtime.idle
+    stage: idle
+    kind: runtime
+    description: Starts one closed-loop cycle by entering the design stage.
+    module_id: null
+    position:
+      x: 336.0
+      y: 224.0
+    metadata:
+      icon: play
+  - id: design
+    label: Design Agent
+    handler: agent.design_agent
+    stage: design
+    kind: agent
+    description: ''
+    module_id: modules/design
+    position:
+      x: 672.0
+      y: 48.0
+    metadata:
+      icon: design_agent
+  - id: specimen
+    label: Specimen Making Agent
+    handler: agent.specimen_agent
+    stage: specimen
+    kind: agent
+    description: ''
+    module_id: modules/specimen
+    position:
+      x: 1008.0
+      y: 48.0
+    metadata:
+      icon: specimen_maker
+  - id: vision
+    label: Vision Agent
+    handler: agent.vision_agent
+    stage: vision
+    kind: agent
+    description: ''
+    module_id: modules/vision
+    position:
+      x: 1344.0
+      y: 48.0
+    metadata:
+      icon: vision_agent
+  - id: manipulation
+    label: Manipulation Agent
+    handler: agent.manipulation_agent
+    stage: manipulation
+    kind: agent
+    description: ''
+    module_id: modules/manipulation
+    position:
+      x: 1680.0
+      y: 48.0
+    metadata:
+      icon: manipulation_agent
+  - id: equipment
+    label: Lab Equipment Agent
+    handler: agent.equipment_agent
+    stage: equipment
+    kind: agent
+    description: ''
+    module_id: modules/equipment
+    position:
+      x: 2016.0
+      y: 48.0
+    metadata:
+      icon: equipment_agent
+  - id: analysis
+    label: Analysis Agent
+    handler: agent.analysis_agent
+    stage: analysis
+    kind: agent
+    description: ''
+    module_id: modules/analysis
+    position:
+      x: 672.0
+      y: 384.0
+    metadata:
+      icon: analysis_agent
+  - id: knowledge
+    label: Knowledge Agent
+    handler: agent.knowledge_agent
+    stage: knowledge
+    kind: agent
+    description: ''
+    module_id: modules/knowledge
+    position:
+      x: 1008.0
+      y: 384.0
+    metadata:
+      icon: knowledge_agent
+  - id: bo
+    label: BO Agent
+    handler: agent.bo_agent
+    stage: bo
+    kind: agent
+    description: ''
+    module_id: modules/bo
+    position:
+      x: 1344.0
+      y: 384.0
+    metadata:
+      icon: bo_agent
+  - id: guardian
+    label: Guardian Agent
+    handler: agent.guardian_agent
+    stage: guardian
+    kind: agent
+    description: ''
+    module_id: modules/guardian
+    position:
+      x: 1680.0
+      y: 384.0
+    metadata:
+      icon: guardian_agent
+  - id: complete
+    label: Complete
+    handler: runtime.terminal
+    stage: complete
+    kind: terminal
+    description: ''
+    module_id: null
+    position:
+      x: 2016.0
+      y: 384.0
+    metadata:
+      icon: complete
+  - id: error
+    label: Error
+    handler: runtime.terminal
+    stage: error
+    kind: terminal
+    description: ''
+    module_id: null
+    position:
+      x: 2016.0
+      y: 640.0
+    metadata:
+      icon: error
+  - id: step_complete
+    label: Step Complete
+    handler: runtime.step_complete
+    stage: null
+    kind: runtime
+    description: ''
+    module_id: null
+    position:
+      x: 32.0
+      y: 640.0
+    metadata:
+      icon: artifact
+  edges:
+  - source: dispatch
+    target: idle
+    condition: idle
+    label: current stage is idle
+    metadata: {}
+  - source: dispatch
+    target: design
+    condition: design
+    label: ''
+    metadata: {}
+  - source: dispatch
+    target: specimen
+    condition: specimen
+    label: ''
+    metadata: {}
+  - source: dispatch
+    target: vision
+    condition: vision
+    label: ''
+    metadata: {}
+  - source: dispatch
+    target: manipulation
+    condition: manipulation
+    label: ''
+    metadata: {}
+  - source: dispatch
+    target: equipment
+    condition: equipment
+    label: ''
+    metadata: {}
+  - source: dispatch
+    target: analysis
+    condition: analysis
+    label: ''
+    metadata: {}
+  - source: dispatch
+    target: knowledge
+    condition: knowledge
+    label: ''
+    metadata: {}
+  - source: dispatch
+    target: bo
+    condition: bo
+    label: ''
+    metadata: {}
+  - source: dispatch
+    target: guardian
+    condition: guardian
+    label: ''
+    metadata: {}
+  - source: dispatch
+    target: complete
+    condition: complete
+    label: ''
+    metadata: {}
+  - source: dispatch
+    target: error
+    condition: error
+    label: ''
+    metadata: {}
+  - source: idle
+    target: step_complete
+    condition: null
+    label: ''
+    metadata: {}
+  - source: design
+    target: step_complete
+    condition: null
+    label: ''
+    metadata: {}
+  - source: specimen
+    target: step_complete
+    condition: null
+    label: ''
+    metadata: {}
+  - source: vision
+    target: step_complete
+    condition: null
+    label: ''
+    metadata: {}
+  - source: manipulation
+    target: step_complete
+    condition: null
+    label: ''
+    metadata: {}
+  - source: equipment
+    target: step_complete
+    condition: null
+    label: ''
+    metadata: {}
+  - source: analysis
+    target: step_complete
+    condition: null
+    label: ''
+    metadata: {}
+  - source: knowledge
+    target: step_complete
+    condition: null
+    label: ''
+    metadata: {}
+  - source: bo
+    target: step_complete
+    condition: null
+    label: ''
+    metadata: {}
+  - source: guardian
+    target: step_complete
+    condition: null
+    label: ''
+    metadata: {}
+  - source: complete
+    target: step_complete
+    condition: null
+    label: ''
+    metadata: {}
+  - source: error
+    target: step_complete
+    condition: null
+    label: ''
+    metadata: {}
+  - source: step_complete
+    target: step_complete
+    condition: null
+    label: ''
+    metadata: {}
+  - source: idle
+    target: design
+    condition: null
+    label: 'default transition: idle -> design'
+    metadata:
+      runtime_edge: logical_transition
+      from_stage: idle
+      to_stage: design
+      condition: default
+      transition_condition: default
+      default_transition: true
+      auto_ports: true
+  - source: design
+    target: specimen
+    condition: null
+    label: 'default transition: design -> specimen'
+    metadata:
+      runtime_edge: logical_transition
+      from_stage: design
+      to_stage: specimen
+      condition: default
+      transition_condition: default
+      default_transition: true
+      auto_ports: true
+  - source: specimen
+    target: vision
+    condition: null
+    label: 'default transition: specimen -> vision'
+    metadata:
+      runtime_edge: logical_transition
+      from_stage: specimen
+      to_stage: vision
+      condition: default
+      transition_condition: default
+      default_transition: true
+      auto_ports: true
+  - source: vision
+    target: manipulation
+    condition: null
+    label: 'default transition: vision -> manipulation'
+    metadata:
+      runtime_edge: logical_transition
+      from_stage: vision
+      to_stage: manipulation
+      condition: default
+      transition_condition: default
+      default_transition: true
+      auto_ports: true
+  - source: manipulation
+    target: equipment
+    condition: null
+    label: 'default transition: manipulation -> equipment'
+    metadata:
+      runtime_edge: logical_transition
+      from_stage: manipulation
+      to_stage: equipment
+      condition: default
+      transition_condition: default
+      default_transition: true
+      auto_ports: true
+  - source: equipment
+    target: analysis
+    condition: null
+    label: 'default transition: equipment -> analysis'
+    metadata:
+      runtime_edge: logical_transition
+      from_stage: equipment
+      to_stage: analysis
+      condition: default
+      transition_condition: default
+      default_transition: true
+      auto_ports: true
+  - source: analysis
+    target: knowledge
+    condition: null
+    label: 'default transition: analysis -> knowledge'
+    metadata:
+      runtime_edge: logical_transition
+      from_stage: analysis
+      to_stage: knowledge
+      condition: default
+      transition_condition: default
+      default_transition: true
+      auto_ports: true
+  - source: knowledge
+    target: bo
+    condition: null
+    label: 'default transition: knowledge -> bo'
+    metadata:
+      runtime_edge: logical_transition
+      from_stage: knowledge
+      to_stage: bo
+      condition: default
+      transition_condition: default
+      default_transition: true
+      auto_ports: true
+  - source: bo
+    target: guardian
+    condition: null
+    label: 'default transition: bo -> guardian'
+    metadata:
+      runtime_edge: logical_transition
+      from_stage: bo
+      to_stage: guardian
+      condition: default
+      transition_condition: default
+      default_transition: true
+      auto_ports: true
+  - source: guardian
+    target: design
+    condition: null
+    label: 'default transition: guardian continue -> design'
+    metadata:
+      runtime_edge: logical_transition
+      from_stage: guardian
+      to_stage: design
+      condition: guardian_decision:continue
+      transition_condition: guardian_decision:continue
+      default_transition: true
+      auto_ports: true
+  - source: guardian
+    target: complete
+    condition: guardian_decision:stop
+    label: 'conditional transition: guardian stop -> complete'
+    metadata:
+      runtime_edge: logical_transition
+      from_stage: guardian
+      to_stage: complete
+      condition: guardian_decision:stop
+      transition_condition: guardian_decision:stop
+      default_transition: false
+      auto_ports: true
+  - source: guardian
+    target: error
+    condition: guardian_decision:error
+    label: 'conditional transition: guardian error -> error'
+    metadata:
+      runtime_edge: logical_transition
+      from_stage: guardian
+      to_stage: error
+      condition: guardian_decision:error
+      transition_condition: guardian_decision:error
+      default_transition: false
+      auto_ports: true
+  stage_dispatch:
+    idle: idle
+    design: design
+    specimen: specimen
+    vision: vision
+    manipulation: manipulation
+    equipment: equipment
+    analysis: analysis
+    knowledge: knowledge
+    bo: bo
+    guardian: guardian
+    complete: complete
+    error: error
+  transitions:
+    idle: design
+    design: specimen
+    specimen: vision
+    vision: manipulation
+    manipulation: equipment
+    equipment: analysis
+    analysis: knowledge
+    knowledge: bo
+    bo: guardian
+    guardian: design
+  terminal_stages:
+  - complete
+  - error
+  metadata:
+    runtime: langgraph
+    mode_support:
+    - test
+    - live
+    - replay
+    - fault-injection
+    safety:
+      guardian_required: true
+      live_device_dry_run_required_before_execution: true

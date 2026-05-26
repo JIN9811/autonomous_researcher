@@ -1,0 +1,30 @@
+module:
+  id: vision
+  label: Vision Agent Module
+  handler: agent.vision_agent
+  llm_role: vision_observation
+  editable: true
+  safety:
+    live_requires_validation: true
+    dry_run_supported: true
+  tools:
+  - camera.capture
+  internal_graph:
+    - id: 01_capture_output_area
+      label: Capture Output Area
+      kind: internal_step
+    - id: 02_estimate_pose
+      label: Estimate Pose
+      kind: internal_step
+    - id: 03_check_transfer_readiness
+      label: Check Transfer Readiness
+      kind: internal_step
+    - id: 04_handoff_manipulation
+      label: Handoff Manipulation
+      kind: internal_step
+  io_contract:
+    input: OrchestratorState
+    output: AgentResult.data merged into OrchestratorState
+  notes: >-
+    GUI/module editor may edit this module config, but execution remains bound to
+    allowlisted Python handlers. Python source is not modified by the GUI.
