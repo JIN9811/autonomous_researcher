@@ -1,0 +1,205 @@
+# ATR Self-Evolution Engine — Codex Implementation Instructions
+
+## 0. Goal
+Implement an ATR-native self-evolution layer inspired by NousResearch/hermes-agent-self-evolution, but adapted to this repository's Autonomous Researcher / ATR runtime.
+
+Do not copy Hermes Agent architecture directly. Use its pattern:
+execution traces -> reflective diagnosis -> candidate variants -> evaluation -> constraint gate -> versioned activation.
+
+In this ATR repository, self-evolution must improve:
+- agent prompts
+- tool descriptions
+- handoff prompts
+- report templates
+- retry/recovery policies
+- LangGraph routing/configs
+- optional Python handler patches, only through diff/PR/test gates
+
+The system must never directly self-modify live hardware-control code without validation, dry-run, simulation, Guardian safety check, and explicit human approval.
+
+## 1. Reference Principle
+Hermes self-evolution optimizes textual and code artifacts using DSPy + GEPA. The ATR adaptation must focus on trace-guided improvement of the experimental runtime.
+
+ATR interpretation:
+Run traces + artifacts + errors + metrics + human feedback -> trace mining -> candidate generation -> offline evaluation -> constraint/safety gate -> version registry -> optional activation for next run.
+
+## 2. Optimization Objective
+Use a multi-objective score for candidate selection.
+
+J(theta) = E_{tau ~ D} [ w_Q Q(tau, theta) - w_C C(tau, theta) - w_T T(tau, theta) - w_R R(tau, theta) ]
+
+Where:
+- theta: candidate variant, e.g. prompt/config/tool/graph/policy/code patch
+- tau: historical or synthetic execution trace
+- D: evaluation trace set
+- Q: task quality / experimental success / report quality
+- C: token/API/computational cost
+- T: latency / wall time
+- R: safety/regression/risk penalty
+
+Gate constraint:
+Gate(theta) = AND_i g_i(theta) = 1
+
+Required gates:
+- schema validity
+- unit tests pass
+- dry-run pass
+- simulation pass for hardware-affecting changes
+- Guardian safety pass
+- no unsafe live hardware activation
+- human approval for live mode activation
+- rollback available
+
+## 3. Architecture
+Add a new top-level module:
+
+self_evolution/
+  __init__.py
+  models.py
+  trace_collector.py
+  trace_miner.py
+  candidate_generator.py
+  evaluator.py
+  constraint_gate.py
+  variant_registry.py
+  prompt_evolver.py
+  tool_evolver.py
+  graph_evolver.py
+  report_evolver.py
+  policy_evolver.py
+  code_patch_evolver.py
+  activation.py
+  api.py
+
+Optional:
+self_evolution/dspy_gepa_adapter.py
+self_evolution/benchmarks.py
+self_evolution/replay.py
+
+## 4. Evolution Targets
+
+### 4.1 Prompt Target
+- agent system prompts
+- agent instruction blocks
+- handoff prompts
+- Guardian safety prompt
+- Orchestrator planning prompt
+
+Storage: configs/evolution/prompts/<agent_id>/<version>.yaml
+
+### 4.2 Tool Description Target
+- MCP tool descriptions
+- device bridge tool descriptions
+- tool argument guidance
+- tool selection instructions
+
+Storage: configs/evolution/tools/<tool_id>/<version>.yaml
+
+### 4.3 Graph Config Target
+- LangGraph node order
+- edges
+- conditional routing
+- retry/recovery edges
+- Guardian pre-check insertion
+- human approval insertion
+
+Storage: graphs/configs/<graph_id>_candidate_<version>.yaml
+
+### 4.4 Report Template Target
+- academic report section layout
+- agent report fields
+- summary style
+- handoff summary format
+
+Storage: configs/evolution/reports/<agent_id>/<version>.yaml
+
+### 4.5 Policy Target
+- retry policy
+- recovery policy
+- human approval trigger rule
+- safe stop thresholds
+- dry-run selection policy
+
+Storage: configs/evolution/policies/<policy_id>/<version>.yaml
+
+### 4.6 Code Patch Target
+Only implement as reviewable diffs. Never auto-apply directly.
+
+Storage: evolution_candidates/code_patches/<candidate_id>.diff
+
+Required:
+- pytest pass
+- static import check
+- schema compatibility
+- dry-run
+- human approval
+- PR/export path
+
+## 5. Runtime Data Flow
+1. Trace Collection: run_id, graph_id, graph_version, agent_id, node_id, input/output JSON, LLM messages, prompts, tool calls, errors, artifacts, latency, token usage, device status, Guardian decisions, human feedback, result metrics.
+2. Trace Mining: failure patterns, tool selection mistakes, missing required fields, repeated retries, latency bottlenecks, unsafe proposals, low-quality reports, graph dead-ends.
+3. Candidate Generation: LLM reflection, DSPy + GEPA if available, deterministic fallback templates, user-selected traces as seeds.
+4. Evaluation: historical replay, synthetic test tasks, dry-run, simulation, unit tests, score metrics, cost/latency/risk metrics.
+5. Constraint Gate: reject if any required gate fails.
+6. Registry: store immutable variants with lineage, source traces, scores, gate results, body/diff, timestamp, activation status.
+7. Activation: draft -> evaluated -> approved -> active_next_run -> active; reject/rollback supported.
+
+## 6. Backend API
+Add FastAPI routes under /api/evolution.
+
+GET /api/evolution/targets
+POST /api/evolution/tasks
+GET /api/evolution/tasks/{task_id}
+POST /api/evolution/tasks/{task_id}/run
+GET /api/evolution/tasks/{task_id}/variants
+POST /api/evolution/variants/{variant_id}/validate
+POST /api/evolution/variants/{variant_id}/approve
+POST /api/evolution/variants/{variant_id}/activate
+POST /api/evolution/variants/{variant_id}/rollback
+GET /api/evolution/lineage/{target_id}
+
+## 7. Frontend: Evolution Lab
+Add an Evolution Lab view to the existing ATR UI.
+
+Required panels:
+1. Target selector
+2. Source runs
+3. Evolution pipeline diagram
+4. Candidate leaderboard
+5. Variant diff viewer
+6. Gate result checklist
+7. Version lineage
+8. Activation controls
+
+## 8. Integration With LangGraph Config
+Do not mutate graph runtime directly from UI. Evolution generates candidate graph_config YAML/JSON.
+
+candidate graph config -> graph schema validation -> compiler dry-run -> route/cycle check -> node handler availability check -> mock execution -> Guardian safety check -> user approval -> activate as next-run graph version.
+
+## 9. Integration With Agentic Binder / Live Research Notebook
+Evolution events must appear in Agentic Binder unread badges, Evolution Lab, Runtime Timeline, Knowledge Agent report, and Guardian report.
+
+The persistent Runtime Chat must be able to explain candidates, compare versions, show source traces, apply to dry-run only, and rollback.
+
+## 10. Safety Rules
+- no live hardware execution from unapproved evolved variants
+- no direct write to production Python files
+- no auto-commit to main branch
+- code patch evolution creates diff only
+- every activation must be versioned
+- every activation must have rollback
+- Guardian must evaluate safety-critical changes
+- human approval required before live-mode activation
+
+## 11. Definition of Done
+- Evolution Lab page exists.
+- Backend APIs exist.
+- Trace collector can read run traces.
+- At least prompt evolution and graph config evolution are implemented.
+- Candidate variants are versioned and scored.
+- Gates block unsafe activation.
+- Existing ATR live GUI remains functional.
+- Persistent Runtime Chat remains mounted.
+- Graph Editor can load evolved graph candidates.
+- Rollback works.
+- All code has test-mode support.

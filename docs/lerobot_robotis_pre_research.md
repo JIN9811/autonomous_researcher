@@ -49,4 +49,4 @@ ROBOTIS software page는 OMX가 ROS 2 Jazzy, ros2_control, 100 Hz joint control,
 
 ## 5. Codex 파일
 
-Codex용 상세 프롬프트는 `codex_lerobot_robotis_gui_prompt.txt`에 작성되어 있다.
+Codex용 상세 프롬프트는 `docs/system/codex_lerobot_robotis_gui_prompt.txt`에 작성되어 있다.
