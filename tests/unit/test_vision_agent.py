@@ -18,7 +18,7 @@ class _CtxStub:
         self.tools = tools
 
     async def complete(self, task_type: str, prompt: str, timeout_s: float | None = None) -> Any:
-        return SimpleNamespace(text="capture top camera and estimate pickup readiness", raw={}, model="mock-e2b")
+        return SimpleNamespace(text="capture top camera and estimate pickup readiness", raw={}, model="mock-e4b")
 
 
 def _state() -> OrchestratorState:

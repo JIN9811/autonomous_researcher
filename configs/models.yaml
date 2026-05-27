@@ -32,10 +32,6 @@ models:
   e4b:
     primary: gemma4:e4b-it-nvfp4
     fallback: gemma4:31b
-  e2b:
-    primary: gemma4:e2b-it-nvfp4
-    fallback: gemma4:e4b-it-nvfp4
-
 backend_models:
   nemoclaw:
     orchestrator:
@@ -44,9 +40,6 @@ backend_models:
     e4b:
       primary: gemma4:e4b-it-bf16
       fallback: gemma4:31b
-    e2b:
-      primary: gemma4:e2b-it-bf16
-      fallback: gemma4:e4b-it-bf16
   ollama:
     orchestrator:
       primary: gemma4:e4b-it-bf16
@@ -54,9 +47,6 @@ backend_models:
     e4b:
       primary: gemma4:e4b-it-bf16
       fallback: gemma4:31b
-    e2b:
-      primary: gemma4:e2b-it-bf16
-      fallback: gemma4:e4b-it-bf16
   vllm:
     orchestrator:
       primary: gemma4:31b
@@ -64,9 +54,6 @@ backend_models:
     e4b:
       primary: gemma4:e4b-it-nvfp4
       fallback: gemma4:31b
-    e2b:
-      primary: gemma4:e2b-it-nvfp4
-      fallback: gemma4:e4b-it-nvfp4
 
 task_routes:
   orchestrator_plan: orchestrator
@@ -74,6 +61,6 @@ task_routes:
   analysis_reasoning: e4b
   knowledge_query: e4b
   guardian_reasoning: e4b
-  tool_formatting: e2b
-  gui_helper: e2b
+  tool_formatting: e4b
+  gui_helper: e4b
   module_designer: orchestrator

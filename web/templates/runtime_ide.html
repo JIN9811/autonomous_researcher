@@ -25,7 +25,7 @@ Modification guide:
     <title>{{ title }}</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
     <link rel="stylesheet" href="/static/styles.css?v=atr-ui-20260525-11" />
-    <link rel="stylesheet" href="/static/runtime_ide.css?v=atr-ui-20260526-84" />
+    <link rel="stylesheet" href="/static/runtime_ide.css?v=atr-ui-20260526-82" />
   </head>
   <body class="runtime-ide-body">
     <main class="page equipment-setup-page runtime-ide-page">
@@ -33,7 +33,10 @@ Modification guide:
         <div class="hero-copy">
           <p class="eyebrow">LangGraph Runtime</p>
           <h1>ATR Runtime IDE</h1>
-          <p class="subhead" title="Graph/module validation, compile, dry-run, version save, and runtime monitoring.">Graph / module control · validate · dry-run · save.</p>
+          <p class="subhead">
+            실행 graph와 내부 세부 module을 직접 확인하고 validate, compile, dry-run, version save를 수행합니다.
+            Module Management Tool은 module 생성, 로딩, 언로딩을 별도 창에서 처리하고 이 화면은 graph/config 편집에 집중합니다.
+          </p>
         </div>
         <article class="status-card">
           <div class="status-head">
@@ -41,7 +44,7 @@ Modification guide:
             <span id="ide-status-dot" class="status-dot idle"></span>
           </div>
           <strong id="ide-status-label">Loading</strong>
-          <p id="ide-status-detail">Loading config.</p>
+          <p id="ide-status-detail">Reading graph config.</p>
         </article>
       </section>
 
@@ -54,16 +57,16 @@ Modification guide:
           </div>
         </div>
         <div class="runtime-ide-topbar-metrics">
-          <div title="Elapsed runtime"><span>Time</span><strong id="ide-elapsed">00:00</strong></div>
-          <div title="Active runtime agent"><span>Agent</span><strong id="ide-active-agent">none</strong></div>
-          <div title="Current graph stage"><span>Stage</span><strong id="ide-current-stage">idle</strong></div>
-          <div title="Runtime health / memory"><span>Health</span><strong id="ide-runtime-health">loading</strong></div>
+          <div><span>Elapsed</span><strong id="ide-elapsed">00:00</strong></div>
+          <div><span>Active Agent</span><strong id="ide-active-agent">none</strong></div>
+          <div><span>Current Stage</span><strong id="ide-current-stage">idle</strong></div>
+          <div><span>Health</span><strong id="ide-runtime-health">loading</strong></div>
         </div>
         <div class="runtime-ide-topbar-actions">
-          <button id="ide-pause-run-btn" class="btn tiny icon-btn" type="button" title="Pause run" aria-label="Pause run">II</button>
-          <button id="ide-resume-run-btn" class="btn tiny icon-btn" type="button" title="Resume run" aria-label="Resume run">Run</button>
-          <button id="ide-stop-run-btn" class="btn tiny danger icon-btn" type="button" title="Stop run" aria-label="Stop run">Stop</button>
-          <button id="ide-settings-btn" class="btn tiny icon-btn" type="button" title="Runtime settings" aria-label="Runtime settings">Cfg</button>
+          <button id="ide-pause-run-btn" class="btn tiny" type="button">Pause</button>
+          <button id="ide-resume-run-btn" class="btn tiny" type="button">Resume</button>
+          <button id="ide-stop-run-btn" class="btn tiny danger" type="button">Stop</button>
+          <button id="ide-settings-btn" class="btn tiny" type="button">Settings</button>
         </div>
       </section>
 
@@ -74,13 +77,13 @@ Modification guide:
           <button id="ide-load-btn" class="btn primary runtime-hidden-control" type="button">Load Graph</button>
         </div>
         <div class="runtime-ide-command-row">
-          <button id="ide-validate-btn" class="btn" title="Validate graph">VLD</button>
-          <button id="ide-compile-btn" class="btn" title="Compile graph">CMP</button>
-          <button id="ide-dry-run-btn" class="btn" title="Dry-run without hardware">DRY</button>
-          <button id="ide-export-yaml-btn" class="btn" title="Export graph YAML">EX</button>
-          <button id="ide-import-yaml-btn" class="btn" title="Import graph YAML">IM</button>
-          <button id="ide-save-btn" class="btn warning" title="Save graph version">SAVE</button>
-          <button id="ide-versions-btn" class="btn" title="Open version history">VER</button>
+          <button id="ide-validate-btn" class="btn">Validate</button>
+          <button id="ide-compile-btn" class="btn">Compile</button>
+          <button id="ide-dry-run-btn" class="btn">Dry Run</button>
+          <button id="ide-export-yaml-btn" class="btn">Export YAML</button>
+          <button id="ide-import-yaml-btn" class="btn">Import YAML</button>
+          <button id="ide-save-btn" class="btn warning">Save Version</button>
+          <button id="ide-versions-btn" class="btn">Versions</button>
         </div>
         <input id="ide-yaml-import-file" type="file" accept=".yaml,.yml,text/yaml,text/plain" hidden />
       </section>
@@ -89,7 +92,8 @@ Modification guide:
         <details class="panel runtime-activation-panel runtime-ide-compact-drawer">
           <summary>
             <div>
-              <h2 title="Validate, compile, dry-run, and save evidence before live execution">Checklist</h2>
+              <h2>Activation Checklist</h2>
+              <small class="hint">validate, compile, dry-run, and save evidence before live execution</small>
             </div>
             <span id="ide-activation-overall" class="badge idle">draft</span>
           </summary>
@@ -99,13 +103,14 @@ Modification guide:
         <details id="ide-run-launcher-drawer" class="panel runtime-run-launcher-panel runtime-ide-compact-drawer">
           <summary>
             <div>
-              <h2 title="Start the saved active graph">Launcher</h2>
+              <h2>Run Launcher</h2>
+              <small class="hint">start the saved active graph; open only when launching a run</small>
             </div>
             <span id="ide-run-launcher-badge" class="badge idle">ready</span>
           </summary>
-          <div id="ide-run-target-summary" class="runtime-run-target-summary">Checking target...</div>
+          <div id="ide-run-target-summary" class="runtime-run-target-summary">Checking saved active graph execution target...</div>
           <div class="runtime-run-launcher-grid">
-            <label class="runtime-handler-select-label">Mode
+            <label class="runtime-handler-select-label">Run Mode
               <select id="ide-run-mode" class="text-input">
                 <option value="test" selected>test</option>
                 <option value="replay">replay</option>
@@ -115,28 +120,28 @@ Modification guide:
             </label>
             <label class="runtime-handler-select-label">Backend
               <select id="ide-run-backend" class="text-input">
-                <option value="">default</option>
+                <option value="">inherit controller default</option>
                 <option value="vllm">vLLM</option>
                 <option value="nemoclaw">NemoClaw</option>
                 <option value="ollama">Ollama</option>
               </select>
             </label>
             <label class="runtime-handler-select-label">Fault Stage
-              <input id="ide-run-fault-stage" class="text-input" placeholder="optional" />
+              <input id="ide-run-fault-stage" class="text-input" placeholder="optional for fault-injection" />
             </label>
-            <label class="runtime-handler-select-label">Fault
+            <label class="runtime-handler-select-label">Fault Name
               <input id="ide-run-fault" class="text-input" value="none" />
             </label>
           </div>
-          <label class="runtime-handler-select-label">Goal
-            <textarea id="ide-run-goal" class="runtime-run-goal" spellcheck="false" placeholder="Optional objective"></textarea>
+          <label class="runtime-handler-select-label">Run Goal / Objective
+            <textarea id="ide-run-goal" class="runtime-run-goal" spellcheck="false" placeholder="Optional objective passed to runtime graph start"></textarea>
           </label>
-          <div id="ide-live-preflight" class="runtime-live-preflight">Preflight...</div>
+          <div id="ide-live-preflight" class="runtime-live-preflight">Checking run preflight...</div>
           <div class="runtime-run-launcher-actions">
-            <button id="ide-record-live-gate-btn" class="btn" type="button" title="Record active dry-run gate">Gate</button>
-            <button id="ide-run-test-btn" class="btn primary" type="button" title="Run saved test graph">Test</button>
-            <label class="runtime-live-confirm" title="Required before live device execution"><input id="ide-run-live-confirm" type="checkbox" /> live confirm</label>
-            <button id="ide-run-live-btn" class="btn danger" type="button" title="Run saved live graph">Live</button>
+            <button id="ide-record-live-gate-btn" class="btn" type="button">Record Active Dry-run Gate</button>
+            <button id="ide-run-test-btn" class="btn primary" type="button">Run Saved Test</button>
+            <label class="runtime-live-confirm"><input id="ide-run-live-confirm" type="checkbox" /> confirm live device execution</label>
+            <button id="ide-run-live-btn" class="btn danger" type="button">Run Saved Live</button>
           </div>
           <div id="ide-run-launch-output" class="runtime-ide-output compact-output runtime-run-launch-output"></div>
         </details>
@@ -144,7 +149,8 @@ Modification guide:
 
       <details class="panel runtime-version-history-panel" id="ide-version-panel">
         <summary>
-          <span title="Load saved versions into draft">Versions</span>
+          <span>Graph Version History</span>
+          <small>load saved versions into draft, then validate/dry-run/save before activation</small>
         </summary>
         <div id="ide-version-output" class="runtime-ide-output runtime-version-output"></div>
       </details>
@@ -152,19 +158,22 @@ Modification guide:
       <section class="runtime-ide-shell">
         <aside class="panel runtime-ide-sidebar">
           <div class="panel-title-row">
-            <h2 title="Graph config map">Explorer</h2>
+            <h2>Graph Explorer</h2>
+            <span class="hint">config map</span>
           </div>
-          <input id="ide-node-search" class="text-input" type="search" placeholder="Search node/stage" />
+          <input id="ide-node-search" class="text-input" type="search" placeholder="Search node or stage" />
           <div id="ide-node-list" class="runtime-ide-output compact-output"></div>
           <div class="panel-title-row runtime-ide-subtitle">
-            <h2 title="Runtime endpoints">Infra</h2>
+            <h2>Infra</h2>
+            <span class="hint">runtime endpoints</span>
           </div>
           <div id="ide-infra-list" class="runtime-ide-output compact-output"></div>
           <div class="panel-title-row runtime-ide-subtitle">
-            <h2 title="Drag modules onto canvas">Modules</h2>
+            <h2>Module Library</h2>
+            <span class="hint">drag modules onto canvas</span>
           </div>
           <div id="ide-template-list" class="runtime-ide-output compact-output runtime-module-catalog"></div>
-          <button id="ide-module-management-open-btn" class="btn primary runtime-module-management-open" type="button" data-open-module-management="1" title="Open Module Management Tool">Module Tool</button>
+          <button id="ide-module-management-open-btn" class="btn primary runtime-module-management-open" type="button" data-open-module-management="1">Open Module Management Tool</button>
         </aside>
 
         <div class="runtime-ide-main-column">
@@ -172,42 +181,46 @@ Modification guide:
             <article class="runtime-ide-graph-workbench">
               <div class="panel-title-row">
                 <div>
-                  <h2 title="Main System is fixed. Double-click an agent to open its internal graph tab.">Canvas</h2>
+                  <h2>Graph Canvas</h2>
+                  <small class="hint">Main System is fixed. Double-click an agent to open its internal graph tab.</small>
                 </div>
                 <div class="runtime-ide-canvas-actions">
-                  <button id="ide-zoom-out-btn" class="btn tiny icon-btn" type="button" title="Zoom out" aria-label="Zoom out">-</button>
-                  <button id="ide-fit-graph-btn" class="btn tiny primary icon-btn" type="button" title="Fit graph" aria-label="Fit graph">Fit</button>
-                  <button id="ide-zoom-reset-btn" class="btn tiny icon-btn" type="button" title="Reset zoom" aria-label="Reset zoom">100%</button>
-                  <button id="ide-zoom-in-btn" class="btn tiny icon-btn" type="button" title="Zoom in" aria-label="Zoom in">+</button>
-                  <span id="ide-canvas-view-hint" class="runtime-canvas-view-hint" title="Canvas viewport state">view...</span>
+                  <button id="ide-zoom-out-btn" class="btn tiny" type="button">Zoom -</button>
+                  <button id="ide-fit-graph-btn" class="btn tiny primary" type="button">Fit Graph</button>
+                  <button id="ide-zoom-reset-btn" class="btn tiny" type="button">100%</button>
+                  <button id="ide-zoom-in-btn" class="btn tiny" type="button">Zoom +</button>
+                  <span id="ide-canvas-view-hint" class="runtime-canvas-view-hint">view: loading</span>
                   <span id="ide-graph-id" class="badge idle">graph</span>
                 </div>
               </div>
               <div id="ide-draft-safety-strip" class="runtime-draft-safety-strip" aria-live="polite">
                 <div class="runtime-draft-safety-head">
-                  <strong>Draft</strong>
-                  <span>evidence...</span>
+                  <strong>Draft safety</strong>
+                  <span>loading graph evidence</span>
                 </div>
               </div>
               <div id="ide-graph-canvas" class="runtime-ide-canvas"></div>
-              <div id="ide-trash-zone" class="runtime-ide-trash-zone" aria-hidden="true">Drop to remove</div>
+              <div id="ide-trash-zone" class="runtime-ide-trash-zone" aria-hidden="true">Drop node here to remove from draft graph</div>
               <div class="runtime-ide-graph-aux-grid">
                 <div>
                   <div class="panel-title-row runtime-ide-subtitle">
-                    <h2 title="16px grid overview">Map</h2>
+                    <h2>Mini Map</h2>
+                    <span class="hint">16px grid</span>
                   </div>
                   <div id="ide-minimap" class="runtime-ide-minimap"></div>
                 </div>
                 <div>
                   <div class="panel-title-row runtime-ide-subtitle">
-                    <h2 title="Dry-run trace, no hardware">Dry-run</h2>
+                    <h2>Dry-run Trace</h2>
+                    <span class="hint">no hardware</span>
                   </div>
                   <div id="ide-dry-run-output" class="runtime-ide-output"></div>
                 </div>
               </div>
               <details class="runtime-ide-json-drawer">
                 <summary>
-                  <span title="Validated before activation">JSON</span>
+                  <span>Graph JSON Draft</span>
+                  <small>validated before activation</small>
                 </summary>
                 <textarea id="ide-graph-json" class="runtime-ide-textarea" spellcheck="false"></textarea>
               </details>
@@ -225,15 +238,15 @@ Modification guide:
             <div id="ide-node-inspector" class="runtime-ide-output compact-output"></div>
             <div class="runtime-ide-transition-editor">
               <label>
-                Source
+                Source Stage
                 <select id="ide-transition-source" class="text-input"></select>
               </label>
               <label>
-                Target
+                Target Stage
                 <select id="ide-transition-target" class="text-input"></select>
               </label>
               <label>
-                Route
+                Route Condition
                 <select id="ide-transition-condition-preset" class="text-input">
                   <option value="default">Default transition</option>
                   <option value="next_stage">Request next stage</option>
@@ -243,18 +256,19 @@ Modification guide:
                 </select>
               </label>
               <label>
-                Value
+                Condition Value
                 <input id="ide-transition-condition" class="text-input" placeholder="next_stage:guardian" />
               </label>
-              <button id="ide-transition-apply-btn" class="btn" title="Apply edge route">Apply</button>
-              <button id="ide-edge-connect-btn" class="btn" type="button" title="Connect selected nodes/ports">Connect</button>
-              <button id="ide-edge-delete-btn" class="btn danger" type="button" title="Delete selected edge">Delete</button>
-              <div id="ide-edge-route-preview" class="runtime-edge-route-preview">Select edge/source/target.</div>
-              <span id="ide-edge-edit-status" class="hint">edge ready</span>
+              <button id="ide-transition-apply-btn" class="btn">Apply Edge</button>
+              <button id="ide-edge-connect-btn" class="btn" type="button">Click Connect</button>
+              <button id="ide-edge-delete-btn" class="btn danger" type="button">Delete Edge</button>
+              <div id="ide-edge-route-preview" class="runtime-edge-route-preview">Select an edge or source/target to preview route behavior.</div>
+              <span id="ide-edge-edit-status" class="hint">select or connect edges</span>
             </div>
           </div>
           <div class="panel-title-row runtime-ide-subtitle">
-            <h2 title="Allowed runtime handlers">Handlers</h2>
+            <h2>Handlers</h2>
+            <span class="hint">allowlist</span>
           </div>
           <div id="ide-handlers-output" class="runtime-ide-output compact-output"></div>
         </aside>
@@ -316,32 +330,37 @@ Modification guide:
       <section class="panel runtime-ide-bottom-dock">
         <article class="runtime-readiness-panel">
           <div class="panel-title-row">
-            <h2 title="Graph / module / live gate readiness">Readiness</h2>
+            <h2>Runtime Readiness</h2>
+            <span class="hint">graph / module / live gate readiness</span>
           </div>
-          <div id="ide-runtime-readiness" class="runtime-ide-output runtime-readiness-output">Checking readiness...</div>
+          <div id="ide-runtime-readiness" class="runtime-ide-output runtime-readiness-output">Checking graph readiness...</div>
         </article>
         <div class="runtime-ide-bottom-grid">
           <article>
             <div class="panel-title-row">
-              <h2 title="SSE node events">Live</h2>
+              <h2>Live Runtime</h2>
+              <span class="hint">SSE node events</span>
             </div>
             <div id="ide-live-status" class="runtime-ide-output compact-output"></div>
           </article>
           <article>
             <div class="panel-title-row">
-              <h2 title="Per-agent state">Agents</h2>
+              <h2>Agent Status</h2>
+              <span class="hint">per-agent state</span>
             </div>
             <div id="ide-agent-status" class="runtime-ide-output compact-output"></div>
           </article>
           <article>
             <div class="panel-title-row">
-              <h2 title="Bridges / backend">Devices</h2>
+              <h2>Device Status</h2>
+              <span class="hint">bridges / backend</span>
             </div>
             <div id="ide-device-status" class="runtime-ide-output compact-output"></div>
           </article>
           <article>
             <div class="panel-title-row">
-              <h2 title="Objective / latency">Metrics</h2>
+              <h2>Metrics</h2>
+              <span class="hint">objective / latency</span>
             </div>
             <div id="ide-metrics-panel" class="runtime-ide-output compact-output"></div>
           </article>
@@ -349,25 +368,29 @@ Modification guide:
         <div class="runtime-ide-bottom-grid secondary wide">
           <article>
             <div class="panel-title-row runtime-ide-subtitle">
-              <h2 title="Live safety gates">Approvals</h2>
+              <h2>Human Approval Queue</h2>
+              <span class="hint">live safety gates</span>
             </div>
             <div id="ide-approval-queue" class="runtime-ide-output compact-output"></div>
           </article>
           <article>
             <div class="panel-title-row runtime-ide-subtitle">
-              <h2 title="Click event for snapshot view">Timeline</h2>
+              <h2>Run Timeline</h2>
+              <span class="hint">click event for snapshot view</span>
             </div>
             <div id="ide-run-timeline" class="runtime-ide-output"></div>
           </article>
           <article>
             <div class="panel-title-row runtime-ide-subtitle">
-              <h2 title="Current run files">Artifacts</h2>
+              <h2>Artifact Lineage</h2>
+              <span class="hint">current run files</span>
             </div>
             <div id="ide-artifact-lineage" class="runtime-ide-output"></div>
           </article>
           <article>
             <div class="panel-title-row runtime-ide-subtitle">
-              <h2 title="Safe run-file preview/download">Preview</h2>
+              <h2>Artifact Preview</h2>
+              <span class="hint">safe run-file preview/download</span>
             </div>
             <div id="ide-artifact-preview" class="runtime-ide-output compact-output"></div>
           </article>
@@ -375,13 +398,15 @@ Modification guide:
         <div class="runtime-ide-bottom-grid secondary runtime-ide-runtime-detail-grid">
           <article>
             <div class="panel-title-row runtime-ide-subtitle">
-              <h2 title="Raw state / payload">Event Detail</h2>
+              <h2>Selected Event Detail</h2>
+              <span class="hint">raw state / payload</span>
             </div>
             <div id="ide-event-detail" class="runtime-ide-output"></div>
           </article>
           <article>
             <div class="panel-title-row runtime-ide-subtitle">
-              <h2 title="Dry-run from selected snapshot">Replay</h2>
+              <h2>Replay Preview</h2>
+              <span class="hint">dry-run from selected snapshot</span>
             </div>
             <div id="ide-replay-output" class="runtime-ide-output compact-output"></div>
           </article>
@@ -400,6 +425,6 @@ Modification guide:
         </div>
       </section>
     </main>
-    <script src="/static/runtime_ide.js?v=atr-ui-20260526-83" defer></script>
+    <script src="/static/runtime_ide.js?v=atr-ui-20260526-82" defer></script>
   </body>
 </html>

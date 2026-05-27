@@ -40,8 +40,7 @@ const nemoclawStatusDotEl = document.getElementById("nemoclaw-status-dot");
 const nemoclawStatusLabelEl = document.getElementById("nemoclaw-status-label");
 const nemoclawStatusDetailEl = document.getElementById("nemoclaw-status-detail");
 const modelOrchestratorChipEl = document.getElementById("model-orchestrator-chip");
-const model31BChipEl = document.getElementById("model-31b-chip");
-const modelE2BChipEl = document.getElementById("model-e2b-chip");
+const modelE4BChipEl = document.getElementById("model-e4b-chip");
 const modelLoadButtons = Array.from(document.querySelectorAll(".model-load-btn"));
 const modelUnloadButtons = Array.from(document.querySelectorAll(".model-unload-btn"));
 const modelLoadDots = Array.from(document.querySelectorAll("[data-model-dot]"));
@@ -514,10 +513,8 @@ function renderRuntimeStatus(snapshot, state, isRunning) {
   }
 
   const stage = String(state.stage || "idle");
-  const e4bStages = new Set(["design", "analysis", "knowledge", "guardian"]);
-  const e2bStages = new Set(["specimen", "vision", "manipulation", "equipment"]);
+  const e4bStages = new Set(["design", "analysis", "knowledge", "guardian", "specimen", "vision", "manipulation", "equipment"]);
   const e4bActive = isRunning && e4bStages.has(stage);
-  const e2bActive = isRunning && e2bStages.has(stage);
 
   setDotState(nemoclawStatusDotEl, backendActive ? "active" : "idle");
   if (nemoclawStatusLabelEl) {
@@ -537,8 +534,7 @@ function renderRuntimeStatus(snapshot, state, isRunning) {
 
   const chipBindings = [
     [modelOrchestratorChipEl, models.orchestrator?.primary, isRunning],
-    [model31BChipEl, "gemma4:31b", false],
-    [modelE2BChipEl, models.e2b?.primary, e2bActive],
+    [modelE4BChipEl, models.e4b?.primary, e4bActive],
   ];
   for (const [chip, model, active] of chipBindings) {
     if (!chip || !model) continue;
@@ -570,7 +566,7 @@ function renderModelStatuses(payload) {
     if (item && item.model) byModel.set(String(item.model), item);
   }
 
-  const chips = [modelOrchestratorChipEl, model31BChipEl, modelE2BChipEl].filter(Boolean);
+  const chips = [modelOrchestratorChipEl, modelE4BChipEl].filter(Boolean);
   for (const chip of chips) {
     const model = chip.dataset.model || chip.querySelector("strong")?.textContent || "";
     const status = byModel.get(model);

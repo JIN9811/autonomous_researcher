@@ -169,6 +169,8 @@ let visitedRuntimeStages = new Set();
 let activeRuntimeStage = "";
 let activeRuntimeEdge = null;
 let recentRuntimeEvents = [];
+let runtimeIdeRenderQueued = false;
+let runtimeIdeGraphRenderQueued = false;
 let currentRunId = "";
 let currentArtifacts = [];
 let currentApprovals = { approvals: [], pending: [], resolved: [] };
@@ -821,9 +823,8 @@ function updateCanvasViewHint(bounds) {
   const context = tab?.kind === "module"
     ? `module: ${tab.moduleId || activeGraph?.metadata?.module_id || "internal"}`
     : "main system";
-  const action = needsFit ? (canImproveWithFit ? "Fit" : "Map") : "Ready";
-  hint.textContent = `V${percent}% · Z${zoomPercent}%${needsFit ? ` · ${action}` : ""}`;
-  hint.title = `${context} · view ${percent}% · zoom ${zoomPercent}% · ${needsFit ? action : "ready"}`;
+  const action = needsFit ? (canImproveWithFit ? "use Fit" : "scroll/map") : "ready";
+  hint.textContent = `${context} · view: ${percent}% · zoom: ${zoomPercent}%${needsFit ? ` · ${action}` : ""}`;
   hint.className = `runtime-canvas-view-hint${needsFit ? " warn" : " ok"}`;
 }
 
@@ -6956,6 +6957,28 @@ function mergeRuntimeEventState(event) {
   };
 }
 
+function renderRuntimeIdeLivePanels(options = {}) {
+  renderRuntimeHeader();
+  renderGraphExplorer(activeGraph);
+  renderDashboardPanels();
+  renderLiveStatus();
+  renderRunTimeline();
+  renderEventLog();
+  if (options.graph && activeGraph) renderGraph(parseGraphEditor());
+}
+
+function scheduleRuntimeIdeLiveRender(options = {}) {
+  runtimeIdeGraphRenderQueued = runtimeIdeGraphRenderQueued || Boolean(options.graph);
+  if (runtimeIdeRenderQueued) return;
+  runtimeIdeRenderQueued = true;
+  window.requestAnimationFrame(() => {
+    runtimeIdeRenderQueued = false;
+    const renderGraphNow = runtimeIdeGraphRenderQueued;
+    runtimeIdeGraphRenderQueued = false;
+    renderRuntimeIdeLivePanels({ graph: renderGraphNow });
+  });
+}
+
 function eventUpdatesRuntimeState(event) {
   const type = eventTypeName(event);
   if (type.startsWith("graph.") || type.startsWith("ide.")) return false;
@@ -6985,16 +7008,10 @@ function consumeRuntimeEvent(event) {
   if (["run_complete", "run_error", "run_stop"].includes(eventType)) {
     activeRuntimeStage = event?.state?.stage || activeRuntimeStage;
   }
-  renderRuntimeHeader();
-  renderGraphExplorer(activeGraph);
-  renderDashboardPanels();
-  renderLiveStatus();
-  renderRunTimeline();
-  renderEventLog();
+  scheduleRuntimeIdeLiveRender({ graph: true });
   if (["artifact.created", "approval.requested", "approval.resolved"].includes(event.type || event.event_type) && currentRunId) {
     loadRunContext().catch((err) => log(String(err), "error"));
   }
-  if (activeGraph) renderGraph(parseGraphEditor());
 }
 
 async function loadRecentEvents() {

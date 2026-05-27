@@ -116,6 +116,9 @@ let liveRefreshInFlight = null;
 const LIVE_AUTO_REFRESH_MS = 5000;
 const LIVE_SYNC_STALE_MS = 15000;
 const LIVE_SYNC_ERROR_MS = 60000;
+let liveRuntimeRenderQueued = false;
+let liveRuntimeRenderQueuedSession = null;
+const liveCenterRenderKeys = new Map();
 
 let queryGoal = "Design and validate a live-mode specimen plan before hardware execution.";
 let queryBackend = "vllm";
@@ -264,6 +267,8 @@ const LIVE_TOOLTIP_SELECTOR = [
   ".live-timeline-item",
   ".binder-tab",
   ".runtime-chip",
+  ".runtime-chip[title]",
+  ".live-runtime-metrics span[title]",
   ".live-runtime-metrics span",
   ".planning-composer-actions .btn",
   ".planning-trigger-hint",
@@ -1856,7 +1861,29 @@ function renderAgentBinder(session) {
   }).join("");
 }
 
-function setLiveView(view) {
+function liveCenterRenderKey(session = liveLastSession) {
+  const snapshot = liveLastSnapshot || {};
+  const state = session?.state || snapshot.state || {};
+  const runId = state.run_id || liveCurrentRunId() || "none";
+  const stage = state.stage || "idle";
+  const messageCount = Array.isArray(session?.messages) ? session.messages.length : planningMessagesCache.length;
+  const approvalCount = (liveApprovals.pending || []).length + (liveApprovals.resolved || []).length;
+  return [runId, stage, liveSelectedAgent, liveRunEvents.length, liveRecentEvents.length, liveRunArtifacts.length, messageCount, approvalCount].join("|");
+}
+
+function renderActiveLiveCenterPanel(session = liveLastSession, options = {}) {
+  if (!session) return;
+  const key = liveCenterRenderKey(session);
+  if (!options.force && liveCenterRenderKeys.get(liveCurrentView) === key) return;
+  if (liveCurrentView === "report") renderReportPanel(session);
+  else if (liveCurrentView === "backend") renderBackendPanel(session);
+  else if (liveCurrentView === "graph") renderGraphMiniPanel(session);
+  else if (liveCurrentView === "artifacts") renderArtifactPanel();
+  else if (liveCurrentView === "timeline") renderTimelinePanels();
+  liveCenterRenderKeys.set(liveCurrentView, key);
+}
+
+function setLiveView(view, options = {}) {
   liveCurrentView = LIVE_VIEW_IDS.has(view) ? view : "report";
   const panelByView = {
     report: "live-report-panel",
@@ -1869,6 +1896,7 @@ function setLiveView(view) {
   liveViewTabs.forEach((button) => button.classList.toggle("active", button.dataset.liveView === liveCurrentView));
   renderLiveChatContextStrip();
   persistLiveUiState();
+  if (options.render !== false) renderActiveLiveCenterPanel(liveLastSession);
 }
 
 
@@ -3791,11 +3819,6 @@ function renderLiveRuntime(session) {
   setCompactTextWithTitle(liveActiveAgentChip, `A:${liveAgentShort(activeAgent)}`, `Active agent: ${liveAgentLabel(activeAgent)}`);
   if (liveCenterTitle) liveCenterTitle.textContent = `${liveAgentLabel(liveSelectedAgent)} · ${liveCurrentView}`;
   renderAgentBinder(session);
-  renderReportPanel(session);
-  renderBackendPanel(session);
-  renderGraphMiniPanel(session);
-  renderArtifactPanel();
-  renderTimelinePanels();
   renderApprovalPanel(session);
   renderDeviceStrip(session);
   updateLiveFaultChip();
@@ -3804,7 +3827,8 @@ function renderLiveRuntime(session) {
   renderLiveFocusStrip();
   updateLiveTokenChip(session);
   setLiveBottomCollapsed(liveBottomCollapsed, { persist: false });
-  setLiveView(liveCurrentView);
+  setLiveView(liveCurrentView, { render: false });
+  renderActiveLiveCenterPanel(session);
   setLiveQuickActionBusy(liveQuickActionBusy);
   persistLiveUiState();
 }
@@ -4027,7 +4051,7 @@ function schedulePlanningRefresh() {
     } catch (err) {
       setChatStatus("SYNC ERROR", "warning");
     }
-  }, 120);
+  }, 300);
 }
 
 async function sendPlanningMessage(message) {
@@ -4860,7 +4884,7 @@ if (btnPlanningSend) {
 
 if (planningMessageInput) {
   planningMessageInput.addEventListener("keydown", (event) => {
-    if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+    if (event.key === "Enter" && (event.ctrlKey || event.metaKey) && !event.isComposing) {
       event.preventDefault();
       sendPlanningMessage(planningMessageInput.value);
     }

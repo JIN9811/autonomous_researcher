@@ -43,7 +43,7 @@ class ModelRouter:
 
     def select(self, task_type: str) -> ModelSelection:
         """Resolve model role and model ids for the given task type."""
-        role = str(self._task_routes.get(task_type, "e2b"))
+        role = str(self._task_routes.get(task_type, "e4b"))
         role_cfg = self._models.get(role, {})
         primary = str(role_cfg.get("primary", "qwen2.5:3b"))
         fallback = role_cfg.get("fallback")

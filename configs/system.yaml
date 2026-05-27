@@ -27,7 +27,7 @@ system:
   vllm_startup_task_types:
     - orchestrator_plan
   vllm_background_startup_models:
-    - gemma4:e2b-it-nvfp4
+    - gemma4:e4b-it-nvfp4
     - gemma4:31b
   prewarm_vllm_on_server_start: false
   force_real_llm_in_test: true
@@ -62,7 +62,6 @@ vllm:
   model_base_urls:
     gemma4:31b: http://127.0.0.1:8001/v1
     gemma4:e4b-it-nvfp4: http://127.0.0.1:8002/v1
-    gemma4:e2b-it-nvfp4: http://127.0.0.1:8003/v1
   nemoclaw_k8s:
     enabled: true
     cluster_container: openshell-cluster-nemoclaw
@@ -90,16 +89,6 @@ vllm:
         speculative_method: mtp
         assistant_repo: google/gemma-4-E4B-it-assistant
         num_speculative_tokens: 4
-        nvfp4_gemm_backend: marlin
-      gemma4:e2b-it-nvfp4:
-        deployment: vllm-gemma4-e2b
-        node_port: 31003
-        persistent: true
-        hf_repo: bg-digitalservices/Gemma-4-E2B-it-NVFP4
-        quantization: modelopt_fp4
-        speculative_method: mtp
-        assistant_repo: google/gemma-4-E2B-it-assistant
-        num_speculative_tokens: 2
         nvfp4_gemm_backend: marlin
 
 server:

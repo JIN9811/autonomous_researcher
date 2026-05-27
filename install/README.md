@@ -98,10 +98,8 @@ GPU/model control:
 atr gpu clear
 atr models
 atr model load e4b
-atr model load e2b
 atr model load 31b
 atr model unload e4b
-atr model unload e2b
 atr model unload 31b
 ```
 

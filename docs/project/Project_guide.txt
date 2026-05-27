@@ -136,8 +136,8 @@ Model roles
      - Knowledge Agent query reasoning
      - Guardian policy explanation / structured reasoning
 
-4. E2B model
-   - Use for lightweight, repeated sub-protocol tasks
+4. Auxiliary E4B model
+   - Use a single subordinate reasoning model for lightweight repeated sub-protocol tasks
    - Suggested responsibilities:
      - structured parsing
      - device command templating
@@ -768,13 +768,13 @@ Phase 4
 ==================================================
 
 - NemoClaw/vLLM must be the default inference backend; Ollama remains an optional compatibility branch.
-- NemoClaw/vLLM managed models must support simultaneous residency for the active 31B orchestrator, E4B fallback/design model, and E2B tool-formatting model.
+- NemoClaw/vLLM managed models must support simultaneous residency for the active 31B orchestrator and the E4B subordinate model.
 - Test mode must exist for all device-facing components.
 - Test mode must be launchable from main orchestration and GUI.
 - Logging must be implemented as its own subsystem.
 - MCP and actual LangGraph runtime must be reflected in architecture.
 - 31B handles top orchestration by default, with E4B retained as the fast fallback/design model.
-- E4B and E2B-class models handle subordinate protocol tasks.
+- The E4B subordinate model handles subordinate protocol tasks.
 - Every file must include maintenance-oriented comments.
 - All files must live in structured folders.
 - Main must include a full-system GUI.

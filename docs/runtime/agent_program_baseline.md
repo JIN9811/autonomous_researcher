@@ -8,7 +8,7 @@ Use it when replacing mock logic with production device/program logic in each ag
 - Runtime: `FastAPI + LangGraphRunLoop + config-driven LangGraph stage transitions`
 - Control plane: GUI and API endpoints in `app/main.py`
 - Agent contract: `BaseAgent.run(state, ctx) -> AgentResult`
-- Model hierarchy: `orchestrator (31B primary, E4B fallback) + e2b`
+- Model hierarchy: `orchestrator (31B primary, E4B fallback) + e4b subordinate`
 - Tool contract: `ToolRegistry.call(name, payload)`
 
 ## Canonical Runtime Topology
@@ -110,15 +110,14 @@ Configured defaults (`configs/models.yaml`):
 
 - `orchestrator`: `gemma4:31b` (fallback `gemma4:e4b-it-nvfp4`)
 - `e4b`: `gemma4:e4b-it-nvfp4` (fallback `gemma4:31b`)
-- `e2b`: `gemma4:e2b-it-nvfp4` (fallback `gemma4:e4b-it-nvfp4`)
+- `e4b subordinate`: `gemma4:e4b-it-nvfp4` (fallback `gemma4:31b`)
 
 NemoClaw/vLLM deployment repos:
 
 - `gemma4:31b`: `nvidia/Gemma-4-31B-IT-NVFP4`
 - `gemma4:e4b-it-nvfp4`: `bg-digitalservices/Gemma-4-E4B-it-NVFP4`
-- `gemma4:e2b-it-nvfp4`: `bg-digitalservices/Gemma-4-E2B-it-NVFP4`
 
-All three vLLM deployments use `modelopt_fp4` quantization. The vLLM branch uses `*-nvfp4` aliases for E4B/E2B so runtime status reflects the actual served checkpoint. The `ollama` and `nemoclaw` proxy branches keep their installed local Ollama tags.
+The vLLM branch uses `*-nvfp4` aliases so runtime status reflects the actual served checkpoint. The `ollama` and `nemoclaw` proxy branches keep their installed local Ollama tags.
 
 Gemma4 MTP speculative decoding is enabled only in the NemoClaw/vLLM deployments. Use a vLLM image that includes Gemma4 MTP support (`vllm/vllm-openai:v0.21.0-cu129-ubuntu2404` or newer). Older local `vllm/vllm-openai:latest` / `latest-cu130` images around vLLM `0.20.0` do not include the Gemma4 MTP path. The earlier `gemma4-0505-cu130` tag has the MTP path but failed local verification with assistant weight shape mismatch, so it is not used.
 
@@ -127,26 +126,24 @@ GB10/NVFP4 backend requirement:
 - Set `VLLM_NVFP4_GEMM_BACKEND=marlin` on every Gemma4 NVFP4 deployment.
 - Do not use the automatic FlashInfer FP4 path on this host; it fails with `CUDA error: no kernel image is available for execution on the device`.
 - Do not force `cutlass` on this host; it reaches the vLLM CUTLASS path but fails during profile run with `cutlass_scaled_fp4_mm` internal errors.
-- Verified working path: `MarlinNvFp4LinearKernel` + Gemma4 MTP assistant, tested on `gemma4:e2b-it-nvfp4`, `gemma4:e4b-it-nvfp4`, and `gemma4:31b` via `/v1/chat/completions`.
+- Verified working path: `MarlinNvFp4LinearKernel` + Gemma4 MTP assistant, tested on `gemma4:e4b-it-nvfp4` and `gemma4:31b` via `/v1/chat/completions`.
 
 MTP assistant mapping:
 
 - `gemma4:31b`: `google/gemma-4-31B-it-assistant`, `num_speculative_tokens=4`
 - `gemma4:e4b-it-nvfp4`: `google/gemma-4-E4B-it-assistant`, `num_speculative_tokens=4`
-- `gemma4:e2b-it-nvfp4`: `google/gemma-4-E2B-it-assistant`, `num_speculative_tokens=2`
 
 NemoClaw/vLLM GPU residency profile:
 
 - `gemma4:31b`: `--gpu-memory-utilization 0.37`
 - `gemma4:e4b-it-nvfp4`: `--gpu-memory-utilization 0.20`
-- `gemma4:e2b-it-nvfp4`: `--gpu-memory-utilization 0.12`
 - This profile is intentionally asymmetric so all three managed deployments can remain resident on the 120 GB class GPU.
-- Do not raise E4B/E2B to `0.30` while 31B remains resident; two small deployments would reserve roughly 70 GB before 31B starts, causing 31B startup to fail with insufficient free memory.
+- Do not raise E4B to `0.30` while 31B remains resident; two small deployments would reserve roughly 70 GB before 31B starts, causing 31B startup to fail with insufficient free memory.
 
 Live GUI startup policy:
 
 - No automatic NemoClaw/vLLM model loading is performed by server startup, Live GUI open, backend switching, run start, or planning bootstrap.
-- Operators manually load the required model through the main dashboard per-model Loading buttons or `atr model load <e4b|e2b|31b>`.
+- Operators manually load the required model through the main dashboard per-model Loading buttons or `atr model load <e4b|31b>`.
 - Model-backed requests assume the target vLLM deployment is already loaded. If it is not loaded, the request should fail visibly instead of issuing hidden Kubernetes scale-up commands.
 - The main dashboard exposes per-model Loading/Unloading controls and deployment status dots for the managed NemoClaw/vLLM models.
 
@@ -157,7 +154,7 @@ Task routing baseline:
 - `analysis_reasoning -> e4b`
 - `knowledge_query -> e4b`
 - `guardian_reasoning -> e4b`
-- `tool_formatting -> e2b`
+- `tool_formatting -> e4b`
 
 ## Live GUI Runtime Event Baseline
 

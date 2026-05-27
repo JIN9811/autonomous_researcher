@@ -87,14 +87,13 @@ def _normalize_backend_name(value: str | None, default: str = "vllm") -> str:
 def _apply_model_env_overrides(models_cfg: dict[str, Any], *, backend_name: str = "") -> dict[str, Any]:
     cfg = dict(models_cfg)
     models = dict(cfg.get("models", {}))
-    for role in ("orchestrator", "e4b", "e2b"):
+    for role in ("orchestrator", "e4b"):
         models[role] = dict(models.get(role, {}))
 
     prefix = f"AUTONOMOUS_{backend_name.upper()}_" if backend_name else ""
     override_map = {
         "orchestrator": os.getenv(f"{prefix}ORCHESTRATOR_MODEL") or os.getenv("AUTONOMOUS_ORCHESTRATOR_MODEL"),
         "e4b": os.getenv(f"{prefix}E4B_MODEL") or os.getenv("AUTONOMOUS_E4B_MODEL"),
-        "e2b": os.getenv(f"{prefix}E2B_MODEL") or os.getenv("AUTONOMOUS_E2B_MODEL"),
     }
     for role, value in override_map.items():
         if value:
@@ -164,7 +163,6 @@ def _build_runtime_profile(
     role_routes = {
         "orchestrator": "orchestrator_plan",
         "e4b": "design_reasoning",
-        "e2b": "tool_formatting",
     }
     selected_models: dict[str, dict[str, str | None]] = {}
     for role, task_type in role_routes.items():

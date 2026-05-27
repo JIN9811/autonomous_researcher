@@ -44,8 +44,8 @@ class _PreparedBackend(BaseLLMBackend):
 def _router() -> ModelRouter:
     return ModelRouter(
         {
-            "models": {"e2b": {"primary": "gemma4:e2b-it-nvfp4", "fallback": None}},
-            "task_routes": {"tool_formatting": "e2b"},
+            "models": {"e4b": {"primary": "gemma4:e4b-it-nvfp4", "fallback": None}},
+            "task_routes": {"tool_formatting": "e4b"},
         }
     )
 
@@ -122,11 +122,6 @@ async def test_nemoclaw_vllm_runtime_reports_model_statuses(monkeypatch: pytest.
                 node_port=31002,
                 persistent=True,
             ),
-            "gemma4:e2b-it-nvfp4": ManagedVLLMModel(
-                deployment="vllm-gemma4-e2b",
-                node_port=31003,
-                persistent=True,
-            ),
         },
     )
 
@@ -141,7 +136,6 @@ async def test_nemoclaw_vllm_runtime_reports_model_statuses(monkeypatch: pytest.
 
     by_model = {item["model"]: item for item in result["models"]}
     assert by_model["gemma4:e4b-it-nvfp4"]["state"] == "loaded"
-    assert by_model["gemma4:e2b-it-nvfp4"]["state"] == "loading"
 
 
 @pytest.mark.asyncio
@@ -162,11 +156,6 @@ async def test_nemoclaw_vllm_runtime_scales_down_other_worker_before_switch(monk
                 node_port=31002,
                 depends_on=("gemma4:31b",),
             ),
-            "gemma4:e2b-it-nvfp4": ManagedVLLMModel(
-                deployment="vllm-gemma4-e2b",
-                node_port=31003,
-                depends_on=("gemma4:31b",),
-            ),
         },
     )
     scaled_down: list[str] = []
@@ -184,9 +173,9 @@ async def test_nemoclaw_vllm_runtime_scales_down_other_worker_before_switch(monk
     monkeypatch.setattr(runtime, "_scale_down_model", scale_down_model)
     monkeypatch.setattr(runtime, "_ensure_model", ensure_model)
 
-    await runtime.ensure_model("gemma4:e2b-it-nvfp4")
+    await runtime.ensure_model("gemma4:e4b-it-nvfp4")
 
-    assert scaled_down == ["gemma4:e4b-it-nvfp4:vllm-gemma4-e4b"]
+    assert scaled_down == []
 
 
 def test_vllm_backend_bounds_common_task_tokens() -> None:
@@ -212,5 +201,4 @@ def test_nemoclaw_vllm_deployment_memory_profile_allows_three_resident_models() 
     assert memory_profile == {
         "vllm-gemma4-31b": "0.37",
         "vllm-gemma4-e4b": "0.20",
-        "vllm-gemma4-e2b": "0.12",
     }

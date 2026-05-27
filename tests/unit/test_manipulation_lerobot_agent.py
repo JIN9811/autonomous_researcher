@@ -25,7 +25,7 @@ class _CtxStub:
 
     async def complete(self, task_type: str, prompt: str, timeout_s: float | None = None) -> Any:
         self.prompts.append(prompt)
-        return SimpleNamespace(text="policy rollout command ready", raw={}, model="mock-e2b")
+        return SimpleNamespace(text="policy rollout command ready", raw={}, model="mock-e4b")
 
     def on_tool_event(self, event: dict[str, Any]) -> None:
         self.events.append(event)

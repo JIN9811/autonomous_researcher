@@ -7843,3 +7843,190 @@ body.planning-live-body #btn-live-safe-stop.is-armed {
   letter-spacing: 0.06em;
   line-height: 1;
 }
+
+/* v20260527 Runtime Chat containment final: input, quick rail, and module artifacts fit the chat pane. */
+body.planning-live-body .live-chat-panel {
+  grid-template-columns: minmax(0, 1fr) 30px !important;
+  grid-template-rows: minmax(28px, auto) 18px auto minmax(0, 1fr) minmax(58px, auto) !important;
+  grid-template-areas:
+    "chat-head chat-head"
+    "chat-context chat-context"
+    "chat-approval chat-approval"
+    "chat-log chat-actions"
+    "chat-composer chat-composer" !important;
+  overflow: hidden;
+}
+
+body.planning-live-body .live-quick-actions {
+  align-self: start !important;
+  justify-self: center !important;
+  width: 30px !important;
+  max-width: 30px !important;
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  flex: 0 0 auto;
+  overflow: visible !important;
+  box-sizing: border-box;
+}
+
+body.planning-live-body .live-quick-actions .btn {
+  flex: 0 0 auto;
+}
+
+body.planning-live-body .planning-chat-log,
+body.planning-live-body .live-chat-panel .planning-chat-window {
+  min-width: 0 !important;
+  min-height: 0 !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  height: 100% !important;
+  max-height: 100% !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  align-content: start;
+  box-sizing: border-box;
+}
+
+body.planning-live-body .planning-chat-item {
+  width: auto !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  box-sizing: border-box;
+  overflow: visible !important;
+  overflow-wrap: anywhere !important;
+  word-break: break-word !important;
+}
+
+body.planning-live-body .planning-chat-item.operator {
+  max-width: min(92%, 720px) !important;
+}
+
+body.planning-live-body .planning-chat-item .message-content,
+body.planning-live-body .planning-chat-item small,
+body.planning-live-body .planning-chat-item code,
+body.planning-live-body .planning-chat-item pre {
+  width: auto !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere !important;
+  word-break: break-word !important;
+}
+
+body.planning-live-body .planning-composer {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  grid-template-columns: minmax(0, 1fr) 34px !important;
+  gap: 6px !important;
+  margin-top: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+body.planning-live-body .planning-message-label {
+  min-width: 0;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body.planning-live-body .planning-composer textarea {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+body.planning-live-body .planning-composer-actions {
+  width: 34px !important;
+  min-width: 34px !important;
+  max-width: 34px !important;
+  align-self: start;
+}
+
+body.planning-live-body .planning-chat-item .artifact-card,
+body.planning-live-body .planning-chat-item .bo-live-card,
+body.planning-live-body .planning-chat-item .fem-contour-card {
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+body.planning-live-body .planning-chat-item .artifact-card {
+  grid-template-columns: minmax(0, min(230px, 34%)) minmax(0, 1fr) !important;
+  align-items: start;
+}
+
+body.planning-live-body .planning-chat-item .artifact-pair {
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 10px;
+  box-sizing: border-box;
+}
+
+body.planning-live-body .planning-chat-item .artifact-pair .artifact-card {
+  grid-template-columns: minmax(0, 1fr) !important;
+}
+
+body.planning-live-body .artifact-preview,
+body.planning-live-body .fem-contour-preview,
+body.planning-live-body .bo-trace-svg,
+body.planning-live-body .planning-chat-item svg,
+body.planning-live-body .planning-chat-item img {
+  display: block;
+  width: 100% !important;
+  max-width: 100% !important;
+  height: auto !important;
+  box-sizing: border-box;
+}
+
+body.planning-live-body .stl-viewer-wrap {
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  grid-column: 1 / -1;
+  box-sizing: border-box;
+}
+
+body.planning-live-body .stl-viewer {
+  width: 100% !important;
+  max-width: 100% !important;
+  height: min(340px, 42vh) !important;
+  box-sizing: border-box;
+}
+
+body.planning-live-body .bo-plot-stack,
+body.planning-live-body .bo-trace-card,
+body.planning-live-body .bo-selected-points,
+body.planning-live-body .printer-status-grid,
+body.planning-live-body .runtime-steps {
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  box-sizing: border-box;
+  overflow-x: auto;
+}
+
+body.planning-live-body .planning-chat-item table {
+  width: 100%;
+  max-width: 100%;
+  display: block;
+  overflow-x: auto;
+  border-collapse: collapse;
+}
+
+@media (max-width: 980px) {
+  body.planning-live-body .planning-chat-item .artifact-card,
+  body.planning-live-body .planning-chat-item .artifact-pair {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}
+

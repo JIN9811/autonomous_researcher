@@ -65,7 +65,7 @@ Usage:
   atr run pause|resume|stop|safe-stop
   atr gpu clear
   atr models
-  atr model load|unload <e4b|e2b|31b|model-alias>
+  atr model load|unload <e4b|31b|model-alias>
   atr modules
   atr module show|validate|dry-run|load|unload|versions|register-generated <module-id>
   atr module version <module-id> <version-id>
@@ -405,7 +405,6 @@ print("Stopped autonomous_researcher LeRobot live subprocess(es): " + detail)
 model_alias() {
   case "\${1}" in
     orchestrator|e4b) printf '%s\n' "gemma4:e4b-it-nvfp4" ;;
-    e2b) printf '%s\n' "gemma4:e2b-it-nvfp4" ;;
     31b) printf '%s\n' "gemma4:31b" ;;
     *) printf '%s\n' "\${1}" ;;
   esac

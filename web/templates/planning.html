@@ -118,20 +118,20 @@ Modification guide:
         <footer class="planning-composer">
           <input id="planning-goal-input" type="hidden" />
           <label class="planning-message-label" for="planning-message-input" title="Runtime chat message input">
-            Input
+            메시지
             <textarea
               id="planning-message-input"
-              rows="4"
-              placeholder="목표/조건 입력"
+              rows="2"
+              placeholder="실험 목표, 시편 조건, 출력 조건을 적어주세요. 모르는 값은 비워도 됩니다."
             ></textarea>
           </label>
           <div class="button-row planning-composer-actions">
             <button id="btn-planning-refresh" class="btn" title="Refresh runtime state (Alt+Shift+U)" aria-label="Refresh runtime state" aria-keyshortcuts="Alt+Shift+U">↻</button>
             <button id="btn-planning-generate" class="btn" title="Draft Plan" aria-label="Draft Plan">Draft</button>
-            <button id="btn-planning-send" class="btn primary" title="Send message (Ctrl+Enter)" aria-label="Send message" aria-keyshortcuts="Control+Enter">Send</button>
+            <button id="btn-planning-send" class="btn primary" title="Send message" aria-label="Send message" aria-keyshortcuts="Control+Enter">Send</button>
           </div>
-          <p class="hint planning-trigger-hint" title="실험 수행: live workflow / 테스트 모드: LLM-generated test workflow">
-            <code>실험 수행</code><code>테스트 모드</code>
+          <p class="hint planning-trigger-hint" title="실험 목표, 시편 조건, 출력 조건을 적고 Send를 누르세요. 모르는 값은 비워도 됩니다.">
+            실험 목표, 시편 조건, 출력 조건을 적어주세요. 모르는 값은 비워도 됩니다. 부족한 값은 오케스트레이터가 다시 물어봅니다.
           </p>
         </footer>
       </section>
@@ -164,6 +164,7 @@ Modification guide:
 
       <div id="planning-spec-summary" hidden></div>
       <div id="live-hover-tooltip" class="live-hover-tooltip" role="tooltip" hidden></div>
+      <div id="live-binder-context-menu" class="live-binder-context-menu" role="menu" hidden></div>
       <div id="live-shortcut-overlay" class="live-shortcut-overlay" role="dialog" aria-modal="false" aria-label="Live GUI shortcuts" hidden>
         <div class="live-shortcut-card">
           <div class="live-shortcut-head">
@@ -179,6 +180,7 @@ Modification guide:
             <div><dt>Alt+Shift+P/O</dt><dd>Pause / Resume</dd></div>
             <div><dt>Alt+Shift+X</dt><dd>Safe Stop</dd></div>
             <div><dt>Ctrl+Enter</dt><dd>Send chat</dd></div>
+            <div><dt>Enter</dt><dd>New line</dd></div>
           </dl>
         </div>
       </div>
