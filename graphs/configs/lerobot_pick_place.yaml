@@ -80,7 +80,6 @@ graph:
   - {source: manipulation, target: step_complete, condition: null, label: '', metadata: {}}
   - {source: complete, target: step_complete, condition: null, label: '', metadata: {}}
   - {source: error, target: step_complete, condition: null, label: '', metadata: {}}
-  - {source: step_complete, target: step_complete, condition: null, label: '', metadata: {}}
   - source: idle
     target: vision
     condition: null

@@ -296,11 +296,6 @@ graph:
     condition: null
     label: ''
     metadata: {}
-  - source: step_complete
-    target: step_complete
-    condition: null
-    label: ''
-    metadata: {}
   - source: idle
     target: design
     condition: null
