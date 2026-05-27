@@ -1,4 +1,6 @@
 # GUI
+> [Runtime Closed-Loop/페이지/에이전트 실행 레퍼런스](../runtime/closed_loop_and_pages_reference.md)
+
 
 Web dashboard panels:
 - global run metrics

@@ -1,15 +1,19 @@
 # Autonomous Researcher Framework
 
-## Documentation Language Selector
+Choose a documentation language:
 
 - [English Guide](README.en.md)
 - [한국어 가이드](README.ko.md)
 
-## Quick Links
+Fast entry points:
 
-- [Docs Index](docs/README.md)
+- [Documentation Index](docs/README.md)
+- [Complete User Manual KR](docs/tutorials/user_manual.ko.md)
+- [Complete User Manual EN](docs/tutorials/user_manual.en.md)
+- [Closed Loop / Page / Agent Reference](docs/runtime/closed_loop_and_pages_reference.md)
+- [Requirements](REQUIREMENTS.md)
 - [API Docs](http://localhost:7860/docs)
 - [Live GUI](http://localhost:7860/live)
 - [Runtime IDE](http://localhost:7860/ide)
 
-Choose your preferred language above for full installation and operating instructions.
+The root guides and complete manuals describe the actual repository layout, GUI pages, closed-loop stage flow, agents, runtime modes, operation sequence, troubleshooting, and developer extension rules.
