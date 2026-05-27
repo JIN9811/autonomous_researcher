@@ -62,7 +62,7 @@
 
 ## 7. 워크플로우/튜토리얼
 
-- [`tutorials/first_autonomous_run.md`](tutorials/first_autonomous_run.md)
+- [`tutorials/first_autonomous_run.en.md`](tutorials/first_autonomous_run.en.md) / [`tutorials/first_autonomous_run.ko.md`](tutorials/first_autonomous_run.ko.md)
   - 첫 번째 운영 실행 가이드.
 - [`process/codex_workflow.md`](process/codex_workflow.md)
   - Codex 기반 개발 절차와 변경 관리 방식.
@@ -86,7 +86,7 @@
 4. `runtime/agent_program_baseline.md`
 5. `hardware/lerobot_robotis_manipulation_runtime_guideline.md` 또는 `hardware/printer_agent_prusabridge_phase1_runtime_guideline.txt`
 6. `gui/live_gui_evolution_plan.md`
-7. `tutorials/first_autonomous_run.md`
+7. `tutorials/first_autonomous_run.en.md` 또는 `tutorials/first_autonomous_run.ko.md`
 
 ## 문서 유지 규칙
 
