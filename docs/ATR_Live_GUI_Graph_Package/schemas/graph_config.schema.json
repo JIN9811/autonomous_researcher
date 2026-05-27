@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "GraphConfig",
+  "type": "object",
+  "required": ["graph_id", "version", "entry_node", "nodes", "edges"],
+  "properties": {
+    "graph_id": {"type": "string"},
+    "version": {"type": "string"},
+    "entry_node": {"type": "string"},
+    "nodes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "label", "handler"],
+        "properties": {
+          "id": {"type": "string"},
+          "label": {"type": "string"},
+          "module": {"type": "string"},
+          "handler": {"type": "string"},
+          "input_schema": {"type": "string"},
+          "output_schema": {"type": "string"},
+          "model_route": {"type": "string"},
+          "tool_permissions": {"type": "array", "items": {"type": "string"}},
+          "position": {"type": "object"}
+        }
+      }
+    },
+    "edges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["from", "to"],
+        "properties": {
+          "from": {"type": "string"},
+          "to": {"type": "string"},
+          "type": {"type": "string", "enum": ["normal", "conditional", "error", "approval", "handoff"]},
+          "condition": {"type": "string"},
+          "label": {"type": "string"}
+        }
+      }
+    },
+    "safety_rules": {"type": "array", "items": {"type": "object"}}
+  },
+  "additionalProperties": true
+}

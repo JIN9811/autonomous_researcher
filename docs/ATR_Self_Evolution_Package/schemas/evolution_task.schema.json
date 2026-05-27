@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "EvolutionTask",
+  "type": "object",
+  "required": [
+    "task_id",
+    "target_type",
+    "target_id",
+    "status"
+  ],
+  "properties": {
+    "task_id": {
+      "type": "string"
+    },
+    "target_type": {
+      "enum": [
+        "prompt",
+        "tool",
+        "graph",
+        "report",
+        "policy",
+        "code_patch"
+      ]
+    },
+    "target_id": {
+      "type": "string"
+    },
+    "source_run_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "objective": {
+      "type": "string"
+    },
+    "constraints": {
+      "type": "object"
+    },
+    "status": {
+      "enum": [
+        "draft",
+        "running",
+        "evaluated",
+        "failed",
+        "complete"
+      ]
+    }
+  }
+}

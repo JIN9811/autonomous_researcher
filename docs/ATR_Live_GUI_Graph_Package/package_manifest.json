@@ -1,0 +1,32 @@
+{
+  "package_name": "ATR_Live_GUI_Graph_Package",
+  "purpose": "Codex-ready design and implementation instructions for ATR Live GUI, Agentic Binder, Runtime Chat, and LangGraph integration.",
+  "reference_images": [
+    "assets/reference/main_live_gui_reference.png",
+    "assets/reference/graph_editor_reference.png"
+  ],
+  "main_instruction_file": "ATR_Live_GUI_and_LangGraph_Codex_Instructions.txt",
+  "docs": [
+    "docs/UI_SPEC.md",
+    "docs/UX_SPEC.md",
+    "docs/BACKEND_API_SPEC.md",
+    "docs/GRAPH_INTEGRATION_SPEC.md",
+    "docs/PACKAGING_README.md"
+  ],
+  "schemas": [
+    "schemas/runtime_event.schema.json",
+    "schemas/agent_report.schema.json",
+    "schemas/graph_config.schema.json"
+  ],
+  "frontend": [
+    "frontend/design_tokens.css",
+    "frontend/component_map.json"
+  ],
+  "backend": [
+    "backend/runtime_event_types.py"
+  ],
+  "assets": [
+    "assets/icons/*.svg",
+    "assets/icons/icon_manifest.json"
+  ]
+}

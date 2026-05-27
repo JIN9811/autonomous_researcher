@@ -1,0 +1,34 @@
+{
+  "recommended_size_px": {
+    "binder_icon": 28,
+    "header_icon": 32,
+    "report_section_icon": 24,
+    "graph_node_icon": 28,
+    "button_icon": 18
+  },
+  "effects": {
+    "running": "cyan/violet glow + 1.8s breathing pulse",
+    "unread": "amber exclamation badge top-right",
+    "waiting": "amber pulse dot",
+    "error": "red border + subtle shake",
+    "done": "green check badge"
+  },
+  "icons": [
+    "objective.svg",
+    "orchestrator.svg",
+    "design_agent.svg",
+    "specimen_agent.svg",
+    "vision_agent.svg",
+    "manipulation_agent.svg",
+    "equipment_agent.svg",
+    "analysis_agent.svg",
+    "knowledge_agent.svg",
+    "bo_agent.svg",
+    "guardian_agent.svg",
+    "backend.svg",
+    "chat.svg",
+    "approval.svg",
+    "artifact.svg",
+    "safe_stop.svg"
+  ]
+}

@@ -3733,3 +3733,4113 @@ body.runtime-ide-body .runtime-ide-grid.runtime-ide-graph-panel .runtime-ide-can
   min-height: 360px;
   max-height: 360px;
 }
+
+/* v20260526: Live GUI Runtime IDE surface. */
+.planning-runtime-shell {
+  width: 100%;
+  min-height: 100vh;
+  padding: 16px;
+  display: grid;
+  grid-template-columns: 104px minmax(500px, 1fr) minmax(460px, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    "header header header"
+    "binder center chat"
+    "bottom bottom bottom";
+  gap: 14px;
+}
+
+.live-runtime-header {
+  grid-area: header;
+  display: grid;
+  grid-template-columns: minmax(360px, 1fr) minmax(520px, auto);
+  align-items: center;
+  gap: 16px;
+  padding: 16px 18px;
+}
+
+.live-runtime-title h1,
+.live-chat-header h2 {
+  margin: 0;
+  color: var(--primary);
+}
+
+.live-runtime-title .subhead {
+  max-width: 780px;
+}
+
+.live-runtime-metrics {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--muted);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.72rem;
+}
+
+.runtime-chip {
+  border: 1px solid rgba(20, 54, 179, 0.14);
+  border-radius: 999px;
+  background: rgba(241, 246, 255, 0.84);
+  color: #1d2f6f;
+  padding: 6px 9px;
+}
+
+.live-agent-binder {
+  grid-area: binder;
+  padding: 12px 8px;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 10px;
+}
+
+.binder-title {
+  text-align: center;
+  color: var(--muted);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.7rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.binder-list {
+  display: grid;
+  align-content: start;
+  gap: 9px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.binder-tab {
+  position: relative;
+  width: 100%;
+  min-height: 58px;
+  display: grid;
+  place-items: center;
+  gap: 2px;
+  border: 1px solid rgba(20, 54, 179, 0.14);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.84);
+  color: var(--muted);
+  cursor: pointer;
+  transition: transform 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.binder-tab:hover,
+.binder-tab.active {
+  transform: translateY(-1px);
+  border-color: rgba(20, 54, 179, 0.48);
+  box-shadow: 0 10px 24px rgba(20, 54, 179, 0.12);
+}
+
+.binder-icon {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: rgba(20, 54, 179, 0.08);
+  color: var(--primary);
+  font-weight: 800;
+  font-size: 0.82rem;
+}
+
+.binder-short {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.66rem;
+  font-weight: 700;
+}
+
+.binder-state-dot {
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--idle);
+}
+
+.binder-tab.status-running .binder-state-dot,
+.binder-tab.status-running .binder-icon {
+  background: var(--secondary);
+  color: #fff;
+  box-shadow: 0 0 18px rgba(47, 114, 255, 0.56);
+}
+
+.binder-tab.status-done .binder-state-dot {
+  background: var(--ok);
+}
+
+.binder-tab.status-waiting .binder-state-dot {
+  background: var(--warn);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+.binder-tab.status-error .binder-state-dot {
+  background: var(--danger);
+}
+
+.binder-unread {
+  position: absolute;
+  right: 6px;
+  top: 5px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--warn);
+  color: #fff;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.62rem;
+  font-weight: 800;
+}
+
+.live-center-panel {
+  grid-area: center;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 12px;
+}
+
+.live-panel-title-row {
+  align-items: center;
+}
+
+.live-view-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.live-view-tab.active {
+  color: #fff;
+  background: var(--primary);
+  border-color: var(--primary);
+}
+
+.live-center-view {
+  min-height: 0;
+  display: none;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.live-center-view.active {
+  display: block;
+}
+
+.live-chat-panel {
+  grid-area: chat;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto auto auto auto minmax(0, 1fr) auto;
+}
+
+.live-chat-header {
+  display: grid;
+  grid-template-columns: 1fr minmax(260px, 0.9fr);
+  align-items: end;
+}
+
+.live-chat-context-controls {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.compact-input {
+  min-height: 38px;
+  padding: 8px 10px;
+  font-size: 0.78rem;
+}
+
+.live-chat-panel .planning-chat-window {
+  min-height: 0;
+  max-height: none;
+}
+
+.live-report-page,
+.live-backend-view,
+.live-artifact-grid,
+.live-timeline-detail {
+  display: grid;
+  gap: 12px;
+}
+
+.live-report-head {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: start;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid rgba(20, 54, 179, 0.13);
+  border-radius: 18px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(241, 246, 255, 0.82));
+}
+
+.live-report-head h3 {
+  margin: 0 0 6px;
+  color: var(--primary);
+}
+
+.live-report-head p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.live-report-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.live-report-message {
+  margin-top: 10px;
+  padding: 12px;
+  border: 1px solid rgba(20, 54, 179, 0.12);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.76);
+}
+
+.live-report-message small,
+.live-timeline-detail-item small,
+.live-backend-event summary span,
+.live-backend-event summary em {
+  color: var(--muted);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.7rem;
+}
+
+.live-report-message p {
+  margin: 8px 0 0;
+  color: var(--text);
+  line-height: 1.55;
+}
+
+.live-backend-list {
+  display: grid;
+  gap: 8px;
+}
+
+.live-backend-event {
+  border: 1px solid rgba(20, 54, 179, 0.12);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.82);
+  overflow: hidden;
+}
+
+.live-backend-event summary {
+  cursor: pointer;
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) auto auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+}
+
+.live-backend-event pre {
+  margin: 0;
+  max-height: 420px;
+  overflow: auto;
+  padding: 12px;
+  background: rgba(9, 18, 37, 0.04);
+  color: #1d2f6f;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.72rem;
+  white-space: pre-wrap;
+}
+
+.live-file-artifact-list {
+  display: grid;
+  gap: 8px;
+}
+
+.live-file-artifact {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid rgba(20, 54, 179, 0.12);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.8);
+}
+
+.live-file-artifact span {
+  color: var(--muted);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.72rem;
+  overflow-wrap: anywhere;
+}
+
+.live-planning-artifact h4 {
+  margin: 0 0 8px;
+  color: var(--primary);
+}
+
+.live-approval-panel {
+  border: 1px solid rgba(217, 140, 18, 0.28);
+  border-radius: 16px;
+  background: rgba(255, 248, 232, 0.94);
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.live-approval-head {
+  display: flex;
+  justify-content: space-between;
+  color: #9a5f00;
+}
+
+.live-approval-card {
+  border: 1px solid rgba(217, 140, 18, 0.2);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.78);
+  padding: 10px;
+}
+
+.live-approval-card p {
+  margin: 6px 0 10px;
+  color: var(--muted);
+}
+
+.live-runtime-bottom {
+  grid-area: bottom;
+  display: grid;
+  grid-template-columns: minmax(420px, 1fr) minmax(420px, 1fr);
+  gap: 14px;
+}
+
+.live-timeline-strip {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.live-timeline-item {
+  min-width: 190px;
+  text-align: left;
+  display: grid;
+  gap: 4px;
+  border: 1px solid rgba(20, 54, 179, 0.14);
+  border-left: 4px solid var(--secondary);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.86);
+  padding: 9px;
+  cursor: pointer;
+}
+
+.live-timeline-item.severity-error {
+  border-left-color: var(--danger);
+}
+
+.live-timeline-item.severity-warning,
+.live-timeline-item.severity-warn {
+  border-left-color: var(--warn);
+}
+
+.live-timeline-item span,
+.live-timeline-item em {
+  color: var(--muted);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.68rem;
+  font-style: normal;
+}
+
+.live-timeline-item strong {
+  color: var(--primary);
+  font-size: 0.78rem;
+}
+
+.live-timeline-detail-item {
+  padding: 12px;
+  border-left: 4px solid var(--secondary);
+  border-radius: 0 12px 12px 0;
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.live-timeline-detail-item strong {
+  display: block;
+  color: var(--primary);
+  margin: 4px 0;
+}
+
+.live-timeline-detail-item p {
+  margin: 0;
+  color: var(--text);
+}
+
+.live-device-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.live-device-card {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+  border: 1px solid rgba(20, 54, 179, 0.14);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.86);
+  padding: 10px;
+}
+
+.live-device-card span,
+.live-device-card em {
+  color: var(--muted);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.68rem;
+  font-style: normal;
+  overflow-wrap: anywhere;
+}
+
+.live-device-card strong {
+  color: var(--primary);
+  overflow-wrap: anywhere;
+}
+
+
+.live-quick-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+  margin: 10px 0;
+}
+
+.live-quick-actions .btn {
+  min-height: 34px;
+  padding: 7px 8px;
+  font-size: 0.68rem;
+  white-space: normal;
+}
+
+.live-backend-structured {
+  display: grid;
+  gap: 10px;
+  padding: 10px 12px 12px;
+}
+
+.backend-trace-section {
+  border: 1px solid rgba(20, 54, 179, 0.13);
+  border-radius: 12px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.backend-trace-section h5 {
+  margin: 0;
+  padding: 8px 10px;
+  color: var(--primary);
+  background: rgba(20, 54, 179, 0.06);
+  font-size: 0.76rem;
+  letter-spacing: 0.02em;
+}
+
+.backend-trace-section.raw-error {
+  border-color: rgba(196, 45, 63, 0.28);
+}
+
+.backend-trace-section.raw-error h5 {
+  color: var(--danger);
+  background: rgba(196, 45, 63, 0.06);
+}
+
+.live-full-json {
+  border-top: 1px solid rgba(20, 54, 179, 0.1);
+}
+
+.live-full-json summary {
+  padding: 8px 12px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.live-graph-mini-wrap {
+  display: grid;
+  grid-template-rows: auto minmax(460px, 1fr);
+  gap: 12px;
+  min-height: 100%;
+}
+
+.live-graph-mini-canvas {
+  position: relative;
+  min-height: 460px;
+  border: 1px solid rgba(20, 54, 179, 0.14);
+  border-radius: 22px;
+  background:
+    radial-gradient(circle at 20% 18%, rgba(47, 114, 255, 0.14), transparent 24%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(241, 246, 255, 0.78));
+  overflow: hidden;
+}
+
+.live-graph-mini-canvas::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(20, 54, 179, 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(20, 54, 179, 0.055) 1px, transparent 1px);
+  background-size: 36px 36px;
+  pointer-events: none;
+}
+
+.live-graph-mini-edges {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.live-graph-mini-edges path,
+.live-graph-mini-edges line {
+  stroke: rgba(20, 54, 179, 0.38);
+  stroke-width: 0.6;
+  fill: none;
+  vector-effect: non-scaling-stroke;
+}
+
+.live-graph-mini-edges marker path {
+  fill: rgba(20, 54, 179, 0.45);
+}
+
+.live-graph-mini-node {
+  position: absolute;
+  z-index: 2;
+  width: 142px;
+  min-height: 58px;
+  transform: translate(-50%, -50%);
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 8px;
+  row-gap: 2px;
+  align-items: center;
+  text-align: left;
+  border: 1px solid rgba(20, 54, 179, 0.18);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--text);
+  padding: 9px 10px;
+  cursor: pointer;
+  box-shadow: 0 14px 28px rgba(20, 54, 179, 0.1);
+}
+
+.live-graph-mini-node strong,
+.live-graph-mini-node em {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.live-graph-mini-node strong {
+  color: var(--primary);
+  font-size: 0.78rem;
+}
+
+.live-graph-mini-node em {
+  grid-column: 2;
+  color: var(--muted);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.64rem;
+  font-style: normal;
+}
+
+.live-graph-mini-node .node-light {
+  grid-row: 1 / span 2;
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  background: var(--idle);
+  box-shadow: 0 0 0 rgba(47, 114, 255, 0);
+}
+
+.live-graph-mini-node.node-active {
+  border-color: rgba(47, 114, 255, 0.64);
+  box-shadow: 0 0 0 2px rgba(47, 114, 255, 0.12), 0 18px 34px rgba(47, 114, 255, 0.24);
+}
+
+.live-graph-mini-node.node-active .node-light {
+  background: var(--secondary);
+  box-shadow: 0 0 18px rgba(47, 114, 255, 0.75);
+  animation: pulse 1.3s ease-in-out infinite;
+}
+
+.live-graph-mini-node.node-error {
+  border-color: rgba(196, 45, 63, 0.58);
+}
+
+.live-graph-mini-node.node-error .node-light {
+  background: var(--danger);
+}
+
+.live-graph-mini-node.node-terminal .node-light {
+  background: var(--ok);
+}
+
+.live-graph-mini-node.node-secondary .node-light {
+  background: var(--warn);
+}
+
+
+.live-report-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 7px;
+  max-width: 360px;
+}
+
+.live-report-actions .btn {
+  min-height: 32px;
+  padding: 7px 9px;
+  font-size: 0.68rem;
+}
+
+
+.live-context-title {
+  padding: 6px 8px;
+  color: var(--primary);
+  font-weight: 800;
+  font-size: 0.78rem;
+}
+
+.live-context-action {
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  padding: 7px 8px;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.live-context-action:hover {
+  background: rgba(20, 54, 179, 0.08);
+  color: var(--primary);
+}
+
+.live-timeline-title-row {
+  gap: 10px;
+}
+
+.live-timeline-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  justify-content: flex-end;
+}
+
+.live-timeline-filter {
+  min-height: 28px;
+  padding: 5px 7px;
+  font-size: 0.64rem;
+}
+
+.live-timeline-filter.active {
+  color: #fff;
+  background: var(--primary);
+  border-color: var(--primary);
+}
+
+.live-timeline-item.severity-tool {
+  border-left-color: #7c3aed;
+}
+
+.live-timeline-item.severity-artifact {
+  border-left-color: #0891b2;
+}
+
+.live-timeline-item.severity-handoff {
+  border-left-color: #2563eb;
+}
+
+.live-graph-mini-body {
+  display: grid;
+  grid-template-columns: minmax(420px, 1fr) minmax(260px, 0.38fr);
+  gap: 12px;
+  min-height: 460px;
+}
+
+.live-selected-node-view {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(20, 54, 179, 0.14);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.86);
+}
+
+.live-selected-node-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.live-selected-node-head h4,
+.live-selected-node-head strong {
+  margin: 0;
+}
+
+.live-selected-node-head strong {
+  display: block;
+  color: var(--primary);
+  margin-top: 4px;
+}
+
+.live-selected-node-actions {
+  margin-top: 4px;
+}
+
+.live-graph-mini-node.node-selected {
+  outline: 2px solid rgba(217, 140, 18, 0.72);
+  outline-offset: 2px;
+}
+
+.live-device-card dl {
+  display: grid;
+  gap: 5px;
+  margin: 2px 0 0;
+}
+
+.live-device-field {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 6px;
+  align-items: start;
+}
+
+.live-device-field dt,
+.live-device-field dd {
+  margin: 0;
+  min-width: 0;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.62rem;
+  overflow-wrap: anywhere;
+}
+
+.live-device-field dt {
+  color: var(--muted);
+}
+
+.live-device-field dd {
+  color: var(--text);
+}
+
+.live-device-card.status-error {
+  border-color: rgba(196, 45, 63, 0.36);
+}
+
+.live-device-card.status-waiting {
+  border-color: rgba(217, 140, 18, 0.34);
+}
+
+.live-device-card.status-active {
+  border-color: rgba(30, 152, 93, 0.28);
+}
+
+
+.live-report-academic-grid {
+  align-items: stretch;
+}
+
+.live-report-section {
+  min-height: 178px;
+}
+
+.live-report-list {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 7px;
+  color: var(--text);
+  line-height: 1.45;
+}
+
+.live-report-list li {
+  overflow-wrap: anywhere;
+}
+
+.live-pinned-findings {
+  border-color: rgba(217, 140, 18, 0.24);
+  background: rgba(255, 248, 232, 0.72);
+}
+
+.live-pinned-list {
+  display: grid;
+  gap: 8px;
+}
+
+.live-pinned-list article {
+  display: grid;
+  gap: 4px;
+  border: 1px solid rgba(217, 140, 18, 0.2);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.75);
+  padding: 10px;
+}
+
+.live-pinned-list strong {
+  color: #9a5f00;
+}
+
+.live-pinned-list small {
+  color: var(--muted);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.66rem;
+}
+
+.live-pinned-list p {
+  margin: 0;
+  color: var(--text);
+  line-height: 1.45;
+}
+
+.live-pinned-compare {
+  border-color: rgba(217, 140, 18, 0.26);
+  background: linear-gradient(180deg, rgba(255, 250, 238, 0.96), rgba(255, 248, 232, 0.7));
+}
+
+.live-pinned-compare-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: flex-start;
+  margin-bottom: 10px;
+}
+
+.live-pinned-compare-head h4 {
+  margin: 0 0 3px;
+}
+
+.live-pinned-compare-head .badge {
+  white-space: nowrap;
+}
+
+.live-pinned-compare-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.live-pinned-compare-card {
+  display: grid;
+  gap: 5px;
+  border-radius: 12px;
+  padding: 10px;
+  border: 1px solid rgba(217, 140, 18, 0.18);
+  background: rgba(255, 255, 255, 0.8);
+}
+
+.live-pinned-compare-card.current {
+  border-color: rgba(20, 54, 179, 0.18);
+}
+
+.live-pinned-compare-card.pinned {
+  border-color: rgba(154, 95, 0, 0.22);
+}
+
+.live-pinned-compare-card small {
+  color: var(--muted);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.live-pinned-compare-card strong {
+  color: var(--text);
+}
+
+.live-pinned-compare-card span,
+.live-pinned-compare-card p {
+  margin: 0;
+  color: var(--text);
+  line-height: 1.42;
+}
+
+.live-pinned-compare-card p em {
+  color: #9a5f00;
+  font-style: normal;
+}
+
+.live-pinned-finding-action {
+  justify-self: start;
+  min-width: 0;
+}
+
+
+.live-timeline-item.selected,
+.live-timeline-detail-item.selected {
+  border-color: rgba(217, 140, 18, 0.48);
+  box-shadow: 0 0 0 2px rgba(217, 140, 18, 0.12), 0 14px 28px rgba(217, 140, 18, 0.12);
+}
+
+.live-selected-event-card {
+  border-color: rgba(20, 54, 179, 0.22);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(241, 246, 255, 0.84));
+}
+
+.live-selected-event-card.empty {
+  border-style: dashed;
+}
+
+.live-selected-event-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: flex-start;
+  margin-bottom: 8px;
+}
+
+.live-selected-event-head h4,
+.live-selected-event-head strong {
+  margin: 0;
+}
+
+.live-selected-event-head strong {
+  display: block;
+  margin-top: 4px;
+  color: var(--primary);
+  overflow-wrap: anywhere;
+}
+
+.live-selected-event-card p {
+  margin: 0 0 10px;
+  color: var(--text);
+  line-height: 1.45;
+}
+
+.live-selected-event-actions {
+  margin-top: 10px;
+}
+
+
+.live-question-card {
+  border-color: rgba(20, 54, 179, 0.2);
+  background: rgba(241, 246, 255, 0.82);
+}
+
+.live-question-card small {
+  color: var(--muted);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.66rem;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 1320px) {
+  .planning-runtime-shell {
+    grid-template-columns: 92px minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      "header header"
+      "binder chat"
+      "center center"
+      "bottom bottom";
+  }
+  .live-runtime-header,
+  .live-chat-header,
+  .live-runtime-bottom {
+    grid-template-columns: 1fr;
+  }
+  .live-runtime-metrics {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 760px) {
+  .planning-runtime-shell {
+    padding: 10px;
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "header"
+      "binder"
+      "chat"
+      "center"
+      "bottom";
+  }
+  .live-agent-binder {
+    min-height: auto;
+  }
+  .binder-list {
+    grid-template-columns: repeat(6, minmax(54px, 1fr));
+    overflow: visible;
+  }
+  .binder-tab {
+    min-height: 52px;
+  }
+  .live-report-grid,
+  .live-chat-context-controls,
+  .live-device-strip {
+    grid-template-columns: 1fr;
+  }
+  .live-view-tabs {
+    justify-content: flex-start;
+  }
+}
+
+/* Self-Evolution Lab operational review panels */
+.badge.ok {
+  color: #0f5c32;
+  background: rgba(29, 145, 80, 0.14);
+  border-color: rgba(29, 145, 80, 0.28);
+}
+
+.badge.busy {
+  color: #102575;
+  background: rgba(47, 114, 255, 0.13);
+  border-color: rgba(47, 114, 255, 0.28);
+}
+
+.btn.tiny {
+  padding: 5px 8px;
+  border-radius: 8px;
+  font-size: 0.68rem;
+  line-height: 1.1;
+}
+
+.state-pill.ok {
+  color: #0f5c32;
+  background: rgba(29, 145, 80, 0.13);
+}
+
+.state-pill.warning {
+  color: #8d5a00;
+  background: rgba(217, 140, 18, 0.14);
+}
+
+.evolution-page .printer-status-output,
+.evolution-page .printer-log-output,
+.evolution-pipeline-output {
+  border: 1px solid rgba(20, 54, 179, 0.14);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.86);
+  color: var(--text);
+  padding: 12px;
+  overflow: auto;
+}
+
+.evolution-pipeline-output {
+  min-height: 144px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.evolution-pipeline-step {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 9px;
+  align-items: start;
+  min-height: 74px;
+  border: 1px solid rgba(109, 127, 159, 0.18);
+  border-radius: 14px;
+  background: rgba(250, 252, 255, 0.9);
+  padding: 10px;
+}
+
+.evolution-pipeline-step::after {
+  content: "";
+  position: absolute;
+  left: calc(100% - 3px);
+  top: 50%;
+  width: 13px;
+  height: 2px;
+  background: rgba(95, 122, 172, 0.28);
+}
+
+.evolution-pipeline-step:nth-child(3n)::after,
+.evolution-pipeline-step:last-child::after {
+  display: none;
+}
+
+.evolution-pipeline-step strong,
+.evolution-history-card strong,
+.evolution-leaderboard-row strong {
+  display: block;
+  font-size: 0.84rem;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.evolution-pipeline-step small,
+.evolution-history-card small,
+.evolution-leaderboard-row small,
+.evolution-gate-item small {
+  display: block;
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.38;
+}
+
+.evolution-pipeline-node,
+.evolution-rank {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--idle);
+  background: rgba(109, 127, 159, 0.1);
+  border: 1px solid rgba(109, 127, 159, 0.2);
+}
+
+.evolution-pipeline-step.done {
+  border-color: rgba(29, 145, 80, 0.28);
+  background: rgba(239, 255, 247, 0.88);
+}
+
+.evolution-pipeline-step.done .evolution-pipeline-node {
+  color: #0f5c32;
+  background: rgba(29, 145, 80, 0.16);
+  border-color: rgba(29, 145, 80, 0.28);
+}
+
+.evolution-pipeline-step.active {
+  border-color: rgba(47, 114, 255, 0.42);
+  background: rgba(239, 247, 255, 0.95);
+  box-shadow: 0 0 0 2px rgba(47, 114, 255, 0.08), 0 0 22px rgba(47, 114, 255, 0.18);
+  animation: evolution-step-pulse 1.35s ease-in-out infinite;
+}
+
+.evolution-pipeline-step.active .evolution-pipeline-node {
+  color: #102575;
+  background: rgba(47, 114, 255, 0.16);
+  border-color: rgba(47, 114, 255, 0.34);
+}
+
+.evolution-pipeline-step.error {
+  border-color: rgba(200, 76, 59, 0.38);
+  background: rgba(255, 236, 233, 0.92);
+}
+
+.evolution-pipeline-step.error .evolution-pipeline-node {
+  color: #9d3629;
+  background: rgba(200, 76, 59, 0.15);
+  border-color: rgba(200, 76, 59, 0.28);
+}
+
+.evolution-pipeline-step.warning {
+  border-color: rgba(217, 140, 18, 0.38);
+  background: rgba(255, 248, 232, 0.94);
+}
+
+@keyframes evolution-step-pulse {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-1px); }
+}
+
+.evolution-candidate-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.evolution-candidate-head small {
+  display: block;
+  color: var(--muted);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.7rem;
+  overflow-wrap: anywhere;
+}
+
+.evolution-gate-list,
+.evolution-lineage-active,
+.evolution-lineage-variants {
+  display: grid;
+  gap: 8px;
+}
+
+.evolution-gate-item {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 9px;
+  align-items: start;
+  border: 1px solid rgba(109, 127, 159, 0.16);
+  border-radius: 12px;
+  padding: 8px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.evolution-gate-item.passed {
+  border-color: rgba(29, 145, 80, 0.22);
+}
+
+.evolution-gate-item.failed {
+  border-color: rgba(200, 76, 59, 0.28);
+  background: rgba(255, 236, 233, 0.72);
+}
+
+.evolution-gate-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 42px;
+  border-radius: 999px;
+  padding: 3px 7px;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.64rem;
+  font-weight: 700;
+}
+
+.evolution-gate-item.passed .evolution-gate-badge {
+  color: #0f5c32;
+  background: rgba(29, 145, 80, 0.13);
+}
+
+.evolution-gate-item.failed .evolution-gate-badge {
+  color: #9d3629;
+  background: rgba(200, 76, 59, 0.13);
+}
+
+.evolution-history-card,
+.evolution-leaderboard-row {
+  border: 1px solid rgba(20, 54, 179, 0.13);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.78);
+  padding: 10px;
+  margin-bottom: 8px;
+}
+
+.evolution-history-card.selected,
+.evolution-leaderboard-row.selected {
+  border-color: rgba(47, 114, 255, 0.52);
+  box-shadow: 0 0 0 2px rgba(47, 114, 255, 0.09), 0 12px 24px rgba(24, 45, 98, 0.08);
+}
+
+.evolution-history-card.active,
+.evolution-leaderboard-row.active {
+  border-color: rgba(29, 145, 80, 0.38);
+  background: rgba(239, 255, 247, 0.86);
+}
+
+.evolution-leaderboard-row.unreviewed:not(.selected) {
+  border-color: rgba(217, 140, 18, 0.32);
+  background: rgba(255, 248, 232, 0.82);
+}
+
+.evolution-history-card p,
+.evolution-leaderboard-row p {
+  margin: 6px 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.42;
+  overflow-wrap: anywhere;
+}
+
+.evolution-leaderboard-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+}
+
+.evolution-leaderboard-copy {
+  min-width: 0;
+}
+
+.evolution-lineage-active h4,
+.evolution-lineage-variants h4 {
+  margin: 6px 0 4px;
+  color: var(--primary);
+  font-size: 0.82rem;
+}
+
+.evolution-lineage-active p {
+  margin: 0 0 6px;
+  border-radius: 12px;
+  border: 1px dashed rgba(29, 145, 80, 0.24);
+  background: rgba(239, 255, 247, 0.78);
+  padding: 8px;
+}
+
+.evolution-page .hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+@media (max-width: 960px) {
+  .evolution-pipeline-output {
+    grid-template-columns: 1fr;
+  }
+
+  .evolution-pipeline-step::after {
+    display: none;
+  }
+
+  .evolution-leaderboard-row {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .evolution-leaderboard-row .btn {
+    grid-column: 1 / -1;
+  }
+}
+
+/* v20260526 visual audit: Live GUI dark Runtime IDE theme aligned with reference assets. */
+body.planning-live-body {
+  --bg: #050816;
+  --bg-soft: #081126;
+  --surface: rgba(8, 17, 38, 0.9);
+  --surface-strong: #0b1630;
+  --line: rgba(110, 160, 255, 0.24);
+  --line-strong: rgba(66, 183, 255, 0.68);
+  --text: #e8f0ff;
+  --muted: #8fa3c7;
+  --primary: #42b7ff;
+  --secondary: #8b5cf6;
+  --accent: #22d3ee;
+  --warn: #f59e0b;
+  --danger: #ef4444;
+  --ok: #22c55e;
+  --idle: #64748b;
+  --shadow: 0 24px 72px rgba(0, 0, 0, 0.34);
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 16% 8%, rgba(66, 183, 255, 0.18), transparent 26%),
+    radial-gradient(circle at 74% 18%, rgba(139, 92, 246, 0.16), transparent 28%),
+    linear-gradient(135deg, #03050d 0%, #050816 45%, #081126 100%);
+  color: var(--text);
+}
+
+body.planning-live-body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(110, 160, 255, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(110, 160, 255, 0.045) 1px, transparent 1px);
+  background-size: 38px 38px;
+  mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.92), rgba(0, 0, 0, 0.18));
+  z-index: 0;
+}
+
+body.planning-live-body .planning-runtime-shell {
+  position: relative;
+  z-index: 1;
+}
+
+body.planning-live-body .panel,
+body.planning-live-body .live-report-head,
+body.planning-live-body .live-report-message,
+body.planning-live-body .live-backend-event,
+body.planning-live-body .live-file-artifact,
+body.planning-live-body .live-approval-card,
+body.planning-live-body .live-timeline-item,
+body.planning-live-body .live-timeline-detail-item,
+body.planning-live-body .live-device-card,
+body.planning-live-body .runtime-card-section,
+body.planning-live-body .backend-trace-section,
+body.planning-live-body .live-selected-node-view,
+body.planning-live-body .live-selected-event-card,
+
+body.planning-live-body .live-runtime-header {
+  background:
+    radial-gradient(circle at 10% 18%, rgba(66, 183, 255, 0.16), transparent 32%),
+    linear-gradient(135deg, rgba(8, 17, 38, 0.96), rgba(11, 22, 48, 0.88));
+}
+
+body.planning-live-body .eyebrow,
+body.planning-live-body .live-runtime-title h1,
+body.planning-live-body .live-chat-header h2,
+body.planning-live-body .live-report-head h3,
+body.planning-live-body .live-planning-artifact h4,
+body.planning-live-body .live-timeline-item strong,
+body.planning-live-body .live-timeline-detail-item strong,
+body.planning-live-body .live-device-card strong,
+body.planning-live-body .runtime-row strong,
+body.planning-live-body .backend-trace-section h5,
+body.planning-live-body .live-selected-node-head strong,
+body.planning-live-body .live-context-title,
+body.planning-live-body .planning-trigger-hint code {
+  color: var(--primary);
+}
+
+body.planning-live-body .subhead,
+body.planning-live-body .hint,
+body.planning-live-body label,
+body.planning-live-body .binder-title,
+body.planning-live-body .live-report-head p,
+body.planning-live-body .live-approval-card p,
+body.planning-live-body .live-file-artifact span,
+body.planning-live-body .live-timeline-item span,
+body.planning-live-body .live-timeline-item em,
+body.planning-live-body .live-device-card span,
+body.planning-live-body .live-device-field dt,
+body.planning-live-body .planning-chat-item small,
+body.planning-live-body .runtime-row span {
+  color: var(--muted);
+}
+
+body.planning-live-body input,
+body.planning-live-body select,
+body.planning-live-body textarea,
+body.planning-live-body .text-input {
+  background: rgba(3, 8, 23, 0.72);
+  color: var(--text);
+  border-color: rgba(110, 160, 255, 0.28);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+body.planning-live-body input::placeholder,
+body.planning-live-body textarea::placeholder {
+  color: rgba(143, 163, 199, 0.68);
+}
+
+body.planning-live-body .btn,
+body.planning-live-body a.btn {
+  background: rgba(8, 17, 38, 0.84);
+  color: var(--text);
+  border-color: rgba(110, 160, 255, 0.28);
+  box-shadow: 0 0 0 rgba(66, 183, 255, 0);
+}
+
+body.planning-live-body .btn:hover,
+body.planning-live-body a.btn:hover {
+  border-color: rgba(66, 183, 255, 0.68);
+  box-shadow: 0 0 18px rgba(66, 183, 255, 0.14);
+}
+
+body.planning-live-body .btn.primary,
+body.planning-live-body .live-view-tab.active,
+body.planning-live-body .live-timeline-filter.active {
+  background: linear-gradient(120deg, #0ea5e9, #7c3aed);
+  color: #f8fbff;
+  border-color: rgba(66, 183, 255, 0.5);
+}
+
+body.planning-live-body .btn.warning {
+  color: #ffe4a3;
+  background: rgba(245, 158, 11, 0.13);
+  border-color: rgba(245, 158, 11, 0.34);
+}
+
+body.planning-live-body .btn.danger {
+  color: #ffe4e6;
+  background: rgba(239, 68, 68, 0.18);
+  border-color: rgba(239, 68, 68, 0.5);
+  box-shadow: 0 0 22px rgba(239, 68, 68, 0.12);
+}
+
+body.planning-live-body .runtime-chip,
+body.planning-live-body .badge,
+body.planning-live-body .badge.idle,
+body.planning-live-body .badge.running,
+body.planning-live-body .badge.warning {
+  background: rgba(3, 8, 23, 0.62);
+  color: var(--text);
+  border-color: rgba(110, 160, 255, 0.24);
+}
+
+body.planning-live-body .badge.running,
+body.planning-live-body .badge.ok {
+  color: #b7f7cf;
+  border-color: rgba(34, 197, 94, 0.38);
+}
+
+body.planning-live-body .badge.warning,
+body.planning-live-body .badge.busy {
+  color: #ffe4a3;
+  border-color: rgba(245, 158, 11, 0.4);
+}
+
+body.planning-live-body .binder-tab {
+  background: rgba(8, 17, 38, 0.78);
+  border-color: rgba(110, 160, 255, 0.2);
+  color: var(--muted);
+}
+
+body.planning-live-body .binder-tab:hover,
+body.planning-live-body .binder-tab.active {
+  border-color: rgba(66, 183, 255, 0.72);
+  box-shadow: 0 0 0 1px rgba(66, 183, 255, 0.12), 0 14px 32px rgba(66, 183, 255, 0.1);
+}
+
+body.planning-live-body .binder-icon {
+  background: rgba(66, 183, 255, 0.12);
+  color: var(--primary);
+}
+
+body.planning-live-body .planning-chat-log {
+  background: linear-gradient(180deg, rgba(3, 8, 23, 0.68), rgba(8, 17, 38, 0.74));
+  border-color: rgba(110, 160, 255, 0.22);
+}
+
+body.planning-live-body .planning-chat-item {
+  background: rgba(8, 17, 38, 0.88);
+  border-color: rgba(110, 160, 255, 0.22);
+  color: var(--text);
+  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.18);
+}
+
+body.planning-live-body .planning-chat-item.operator {
+  background: rgba(71, 45, 11, 0.72);
+  border-color: rgba(245, 158, 11, 0.32);
+}
+
+body.planning-live-body .planning-chat-item.design_ai {
+  background: rgba(6, 55, 37, 0.64);
+  border-color: rgba(34, 197, 94, 0.28);
+}
+
+body.planning-live-body .planning-chat-item.specimen_ai,
+body.planning-live-body .planning-chat-item.printer_ai,
+body.planning-live-body .planning-chat-item.equipment_ai {
+  background: rgba(8, 35, 66, 0.72);
+  border-color: rgba(66, 183, 255, 0.28);
+}
+
+body.planning-live-body .planning-chat-item.system {
+  background: rgba(15, 23, 42, 0.72);
+  border-color: rgba(110, 160, 255, 0.22);
+}
+
+body.planning-live-body .live-approval-panel {
+  background: rgba(71, 45, 11, 0.58);
+  border-color: rgba(245, 158, 11, 0.42);
+}
+
+body.planning-live-body .live-approval-head {
+  color: #ffe4a3;
+}
+
+body.planning-live-body .live-timeline-item,
+body.planning-live-body .live-timeline-detail-item {
+  border-left-color: var(--secondary);
+}
+
+body.planning-live-body .live-graph-mini-canvas {
+  background:
+    radial-gradient(circle at 24% 18%, rgba(66, 183, 255, 0.14), transparent 24%),
+    radial-gradient(circle at 76% 74%, rgba(139, 92, 246, 0.14), transparent 26%),
+    linear-gradient(135deg, rgba(3, 8, 23, 0.96), rgba(8, 17, 38, 0.84));
+  border-color: rgba(110, 160, 255, 0.28);
+}
+
+body.planning-live-body .live-graph-mini-canvas::before {
+  background-image:
+    linear-gradient(rgba(110, 160, 255, 0.07) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(110, 160, 255, 0.07) 1px, transparent 1px);
+}
+
+body.planning-live-body .live-graph-mini-node {
+  background: rgba(8, 17, 38, 0.92);
+  color: var(--text);
+  border-color: rgba(110, 160, 255, 0.28);
+  box-shadow: 0 16px 34px rgba(0, 0, 0, 0.24);
+}
+
+body.planning-live-body .live-graph-mini-edges path,
+body.planning-live-body .live-graph-mini-edges line {
+  stroke: rgba(66, 183, 255, 0.56);
+}
+
+body.planning-live-body .live-graph-mini-edges marker path {
+  fill: rgba(66, 183, 255, 0.68);
+}
+
+body.planning-live-body .backend-trace-section h5 {
+  background: rgba(66, 183, 255, 0.08);
+}
+
+body.planning-live-body .live-backend-event pre,
+body.planning-live-body .runtime-command {
+  background: rgba(3, 8, 23, 0.72);
+  color: #c7d2fe;
+}
+
+body.planning-live-body .live-context-action {
+  color: var(--text);
+}
+
+body.planning-live-body .live-context-action:hover {
+  background: rgba(66, 183, 255, 0.12);
+  color: var(--primary);
+}
+
+body.planning-live-body .binder-icon img {
+  width: 20px;
+  height: 20px;
+  display: block;
+  object-fit: contain;
+  filter: drop-shadow(0 0 8px rgba(66, 183, 255, 0.28));
+}
+
+body.planning-live-body .binder-tab.status-running .binder-icon img {
+  filter: drop-shadow(0 0 12px rgba(66, 183, 255, 0.72));
+}
+
+/* v20260526 compact operations pass: keep /live controllable at 1920x1080. */
+body.planning-live-body .planning-runtime-shell {
+  height: 100vh;
+  min-height: 100vh;
+  overflow: hidden;
+  padding: 10px 12px;
+  gap: 10px;
+  grid-template-columns: 88px minmax(620px, 1.08fr) minmax(520px, 0.92fr);
+  grid-template-rows: 58px minmax(0, 1fr) 178px;
+}
+
+body.planning-live-body .panel {
+  border-radius: 16px;
+}
+
+body.planning-live-body .live-runtime-header {
+  grid-template-columns: minmax(210px, 0.42fr) minmax(620px, 1fr);
+  gap: 10px;
+  padding: 8px 12px;
+  min-height: 0;
+}
+
+body.planning-live-body .live-runtime-title h1 {
+  font-size: 1.18rem;
+  line-height: 1.05;
+}
+
+body.planning-live-body .live-runtime-title .subhead {
+  display: none;
+}
+
+body.planning-live-body .eyebrow {
+  margin-bottom: 2px;
+  font-size: 0.62rem;
+  letter-spacing: 0.12em;
+}
+
+body.planning-live-body .live-runtime-metrics {
+  gap: 5px;
+  font-size: 0.64rem;
+}
+
+body.planning-live-body .live-runtime-metrics > span {
+  max-width: 168px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.planning-live-body #planning-run-detail {
+  max-width: 220px;
+}
+
+body.planning-live-body #live-resource-chip {
+  max-width: 210px;
+}
+
+body.planning-live-body .runtime-chip,
+body.planning-live-body .badge {
+  padding: 4px 7px;
+  min-height: 24px;
+}
+
+body.planning-live-body #btn-live-safe-stop {
+  min-height: 30px;
+  padding: 5px 10px;
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+body.planning-live-body .live-agent-binder {
+  padding: 8px 6px;
+  gap: 6px;
+}
+
+body.planning-live-body .binder-title {
+  font-size: 0.58rem;
+}
+
+body.planning-live-body .binder-list {
+  gap: 6px;
+}
+
+body.planning-live-body .binder-tab {
+  min-height: 44px;
+  border-radius: 14px;
+}
+
+body.planning-live-body .binder-icon {
+  width: 21px;
+  height: 21px;
+}
+
+body.planning-live-body .binder-icon img {
+  width: 17px;
+  height: 17px;
+}
+
+body.planning-live-body .binder-short {
+  font-size: 0.56rem;
+}
+
+body.planning-live-body .binder-state-dot {
+  left: 6px;
+  top: 6px;
+  width: 7px;
+  height: 7px;
+}
+
+body.planning-live-body .binder-unread {
+  right: 4px;
+  top: 4px;
+  min-width: 15px;
+  height: 15px;
+  font-size: 0.52rem;
+}
+
+body.planning-live-body .live-center-panel,
+body.planning-live-body .live-report-page,
+body.planning-live-body .live-backend-view,
+body.planning-live-body .live-artifact-grid,
+body.planning-live-body .live-timeline-detail {
+  gap: 8px;
+}
+
+body.planning-live-body .live-panel-title-row {
+  gap: 8px;
+}
+
+body.planning-live-body .live-panel-title-row h2,
+body.planning-live-body .live-chat-header h2,
+body.planning-live-body .live-runtime-bottom h2 {
+  font-size: 0.94rem;
+  line-height: 1.1;
+}
+
+body.planning-live-body .live-view-tabs {
+  gap: 4px;
+}
+
+body.planning-live-body .live-view-tab,
+body.planning-live-body .live-timeline-filter {
+  position: relative;
+  width: 30px;
+  min-width: 30px;
+  min-height: 26px;
+  padding: 0;
+  display: inline-grid;
+  place-items: center;
+  font-size: 0.62rem;
+}
+
+body.planning-live-body .live-filter-icon {
+  font-family: "IBM Plex Mono", monospace;
+  font-weight: 800;
+  line-height: 1;
+}
+
+body.planning-live-body .live-timeline-filter-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+body.planning-live-body .live-chat-panel {
+  grid-template-rows: auto auto auto auto minmax(0, 1fr) auto;
+}
+
+body.planning-live-body .live-chat-header {
+  grid-template-columns: 120px minmax(0, 1fr);
+  gap: 8px;
+  align-items: end;
+}
+
+body.planning-live-body .live-chat-context-controls {
+  gap: 6px;
+}
+
+body.planning-live-body .live-chat-context-controls label {
+  font-size: 0.58rem;
+}
+
+body.planning-live-body .compact-input {
+  min-height: 30px;
+  padding: 5px 7px;
+  font-size: 0.68rem;
+}
+
+body.planning-live-body .live-quick-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: 6px 0;
+}
+
+body.planning-live-body .live-quick-actions .btn {
+  position: relative;
+  width: 34px;
+  min-width: 34px;
+  height: 32px;
+  min-height: 32px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+body.planning-live-body .live-quick-icon {
+  font-family: "IBM Plex Mono", monospace;
+  font-weight: 800;
+  line-height: 1;
+}
+
+body.planning-live-body .live-quick-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+body.planning-live-body .live-approval-panel {
+  max-height: 136px;
+  overflow: auto;
+  padding: 7px;
+  gap: 6px;
+}
+
+body.planning-live-body .live-approval-card {
+  padding: 7px;
+}
+
+body.planning-live-body .live-approval-card p {
+  margin: 4px 0 7px;
+  line-height: 1.35;
+}
+
+body.planning-live-body .planning-chat-item {
+  padding: 8px 9px;
+}
+
+body.planning-live-body .planning-composer {
+  gap: 6px;
+  padding-top: 6px;
+}
+
+body.planning-live-body .planning-composer textarea {
+  min-height: 58px;
+  max-height: 82px;
+  padding: 8px 9px;
+  font-size: 0.78rem;
+}
+
+body.planning-live-body .planning-composer-actions {
+  gap: 6px;
+}
+
+body.planning-live-body .planning-composer-actions .btn {
+  min-height: 30px;
+  padding: 5px 9px;
+  font-size: 0.68rem;
+}
+
+body.planning-live-body .planning-trigger-hint {
+  margin: 0;
+  font-size: 0.66rem;
+}
+
+body.planning-live-body .live-runtime-bottom {
+  grid-template-columns: minmax(560px, 1.05fr) minmax(520px, 0.95fr);
+  gap: 10px;
+  overflow: hidden;
+}
+
+body.planning-live-body .live-runtime-bottom > section {
+  min-width: 0;
+  overflow: hidden;
+}
+
+body.planning-live-body .live-timeline-title-row {
+  gap: 6px;
+}
+
+body.planning-live-body .live-timeline-filters {
+  gap: 4px;
+}
+
+body.planning-live-body .live-timeline-strip {
+  gap: 5px;
+  padding-bottom: 2px;
+}
+
+body.planning-live-body .live-timeline-item {
+  min-width: 136px;
+  max-width: 168px;
+  padding: 6px;
+  gap: 2px;
+  border-radius: 10px;
+  border-left-width: 3px;
+}
+
+body.planning-live-body .live-timeline-item strong {
+  font-size: 0.66rem;
+}
+
+body.planning-live-body .live-timeline-item span,
+body.planning-live-body .live-timeline-item em {
+  font-size: 0.56rem;
+}
+
+body.planning-live-body .live-timeline-item em {
+  display: none;
+}
+
+body.planning-live-body .live-device-strip {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 5px;
+}
+
+body.planning-live-body .live-device-card {
+  position: relative;
+  min-height: 48px;
+  padding: 6px;
+  gap: 2px;
+  border-radius: 10px;
+}
+
+body.planning-live-body .live-device-card span {
+  font-size: 0.56rem;
+}
+
+body.planning-live-body .live-device-card strong {
+  font-size: 0.68rem;
+}
+
+body.planning-live-body .live-device-card dl {
+  display: none;
+}
+
+body.planning-live-body .live-device-card:hover dl,
+body.planning-live-body .live-device-card:focus-within dl {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 6px);
+  z-index: 90;
+  width: min(260px, 72vw);
+  display: grid;
+  padding: 8px;
+  border: 1px solid rgba(66, 183, 255, 0.36);
+  border-radius: 12px;
+  background: rgba(3, 8, 23, 0.96);
+  box-shadow: 0 18px 38px rgba(0, 0, 0, 0.34);
+}
+
+body.planning-live-body .live-device-field {
+  grid-template-columns: 68px minmax(0, 1fr);
+}
+
+body.planning-live-body .live-report-head,
+body.planning-live-body .live-report-message,
+body.planning-live-body .live-report-section,
+body.planning-live-body .live-backend-event,
+body.planning-live-body .runtime-card-section,
+body.planning-live-body .backend-trace-section,
+body.planning-live-body .live-file-artifact {
+  border-radius: 12px;
+}
+
+body.planning-live-body .live-report-head,
+body.planning-live-body .live-report-message,
+body.planning-live-body .runtime-card-section,
+body.planning-live-body .backend-trace-section {
+  padding: 9px;
+}
+
+/* v20260526 compact report controls: keep center-panel controls icon-first. */
+body.planning-live-body .live-tab-label,
+body.planning-live-body .live-report-action-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+body.planning-live-body .live-view-tab {
+  position: relative;
+  width: 34px;
+  min-width: 34px;
+  height: 30px;
+  min-height: 30px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+}
+
+body.planning-live-body .live-tab-icon,
+body.planning-live-body .live-report-action-icon {
+  font-family: "IBM Plex Mono", monospace;
+  font-weight: 800;
+  line-height: 1;
+}
+
+body.planning-live-body .live-report-head {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  padding: 8px 9px;
+}
+
+body.planning-live-body .live-report-head h3 {
+  margin-bottom: 2px;
+  font-size: 0.92rem;
+}
+
+body.planning-live-body .live-report-head p {
+  max-height: 2.7em;
+  overflow: hidden;
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
+body.planning-live-body .live-report-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 5px;
+  max-width: 288px;
+}
+
+body.planning-live-body .live-report-actions .btn,
+body.planning-live-body .live-report-action {
+  position: relative;
+  width: 32px;
+  min-width: 32px;
+  height: 30px;
+  min-height: 30px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  font-size: 0.76rem;
+}
+
+/* v20260526 compact secondary card actions: selected trace/node/question controls. */
+body.planning-live-body .live-card-action-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+body.planning-live-body .live-selected-event-actions,
+body.planning-live-body .live-selected-node-actions,
+body.planning-live-body .live-question-actions,
+body.planning-live-body .live-fault-actions {
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+body.planning-live-body .live-selected-event-action,
+body.planning-live-body .live-selected-node-action,
+body.planning-live-body .live-question-action,
+body.planning-live-body .live-fault-action {
+  position: relative;
+  width: 32px;
+  min-width: 32px;
+  height: 30px;
+  min-height: 30px;
+  padding: 0;
+  display: inline-grid;
+  place-items: center;
+  font-size: 0.76rem;
+}
+
+body.planning-live-body .live-card-action-icon {
+  font-family: "IBM Plex Mono", monospace;
+  font-weight: 800;
+  line-height: 1;
+}
+
+body.planning-live-body .live-selected-event-card p,
+body.planning-live-body .live-approval-card p {
+  line-height: 1.32;
+}
+
+
+/* v20260526 compact live tooltips: replace visible helper text with hover/focus details. */
+body.planning-live-body .live-hover-tooltip {
+  position: fixed;
+  z-index: 140;
+  max-width: 280px;
+  padding: 7px 9px;
+  border: 1px solid rgba(66, 183, 255, 0.46);
+  border-radius: 10px;
+  background: rgba(3, 8, 23, 0.96);
+  color: rgba(232, 240, 255, 0.94);
+  font-size: 0.68rem;
+  line-height: 1.35;
+  letter-spacing: 0.01em;
+  pointer-events: none;
+  box-shadow: 0 16px 34px rgba(0, 0, 0, 0.34), 0 0 22px rgba(66, 183, 255, 0.12);
+}
+
+body.planning-live-body .live-hover-tooltip[hidden] {
+  display: none;
+}
+
+/* v20260526 live keyboard help: compact operator shortcut overlay. */
+body.planning-live-body .live-shortcut-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 130;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(3, 8, 23, 0.38);
+  backdrop-filter: blur(4px);
+}
+
+body.planning-live-body .live-shortcut-overlay[hidden] {
+  display: none;
+}
+
+body.planning-live-body .live-shortcut-card {
+  width: min(520px, 92vw);
+  max-height: min(620px, 88vh);
+  overflow: auto;
+  padding: 14px;
+  border: 1px solid rgba(66, 183, 255, 0.36);
+  border-radius: 18px;
+  background: rgba(4, 10, 26, 0.96);
+  color: var(--text);
+  box-shadow: 0 26px 70px rgba(0, 0, 0, 0.46), 0 0 34px rgba(66, 183, 255, 0.12);
+}
+
+body.planning-live-body .live-shortcut-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+body.planning-live-body .live-shortcut-head strong {
+  color: var(--primary);
+  font-size: 0.95rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+body.planning-live-body .live-shortcut-head .btn {
+  width: 30px;
+  min-width: 30px;
+  min-height: 28px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+}
+
+body.planning-live-body .live-shortcut-card dl {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+}
+
+body.planning-live-body .live-shortcut-card dl > div {
+  display: grid;
+  grid-template-columns: minmax(118px, 0.44fr) minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  padding: 7px 8px;
+  border: 1px solid rgba(110, 160, 255, 0.16);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+body.planning-live-body .live-shortcut-card dt {
+  margin: 0;
+  color: rgba(232, 240, 255, 0.92);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+body.planning-live-body .live-shortcut-card dd {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
+/* v20260526 live connection state: make stream/sync freshness visible. */
+body.planning-live-body .runtime-chip.ok {
+  color: #b7f7cf;
+  border-color: rgba(34, 197, 94, 0.38);
+}
+
+body.planning-live-body .runtime-chip.warning {
+  color: #ffe4a3;
+  border-color: rgba(245, 158, 11, 0.42);
+}
+
+body.planning-live-body .runtime-chip.error {
+  color: #fecdd3;
+  border-color: rgba(239, 68, 68, 0.48);
+}
+
+body.planning-live-body .runtime-chip.running {
+  color: #bfdbfe;
+  border-color: rgba(59, 130, 246, 0.42);
+}
+
+/* v20260526 compact live copy pass: shorter visible labels, full meaning in tooltips. */
+body.planning-live-body #btn-live-safe-stop {
+  min-width: 78px;
+}
+
+body.planning-live-body .planning-message-label {
+  font-size: 0;
+  gap: 0;
+}
+
+body.planning-live-body .planning-message-label textarea {
+  font-size: 0.78rem;
+}
+
+body.planning-live-body .live-runtime-title h1 {
+  letter-spacing: 0.16em;
+}
+
+body.planning-live-body .binder-title {
+  letter-spacing: 0.18em;
+}
+
+/* v20260526 compact3: reduce live visible copy while keeping meaning in titles. */
+body.planning-live-body .live-chat-context-controls label {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  align-items: center;
+  gap: 4px;
+}
+
+body.planning-live-body .live-chat-context-controls label > span {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.62rem;
+  font-weight: 800;
+  color: var(--primary);
+  text-align: center;
+}
+
+body.planning-live-body .planning-trigger-hint {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+body.planning-live-body .planning-trigger-hint code {
+  padding: 1px 5px;
+  font-size: 0.58rem;
+}
+
+body.planning-live-body #live-event-count {
+  min-width: 32px;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.6rem;
+  text-align: right;
+}
+
+
+/* v20260526 chat context strip: compact selected-runtime context for persistent chat. */
+body.planning-live-body .live-chat-context-strip {
+  min-width: 0;
+  margin-top: 4px;
+  padding: 4px 7px;
+  border: 1px solid rgba(110, 160, 255, 0.2);
+  border-radius: 999px;
+  background: rgba(3, 8, 23, 0.42);
+  color: rgba(199, 210, 254, 0.82);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.58rem;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+
+/* v20260526 live visual polish pass: reference-style dense control room surface. */
+body.planning-live-body .live-runtime-title .eyebrow {
+  display: none;
+}
+
+body.planning-live-body .live-runtime-title {
+  align-self: center;
+}
+
+body.planning-live-body .live-runtime-header {
+  position: relative;
+  overflow: hidden;
+}
+
+body.planning-live-body .live-runtime-header::after {
+  content: "";
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(66, 183, 255, 0.5), rgba(139, 92, 246, 0.34), transparent);
+  pointer-events: none;
+}
+
+body.planning-live-body .live-timeline-strip {
+  display: grid;
+  grid-auto-flow: column;
+  grid-template-rows: repeat(2, minmax(58px, 1fr));
+  grid-auto-columns: minmax(154px, 184px);
+  align-content: start;
+  gap: 6px;
+  max-height: 128px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 2px 2px 6px;
+}
+
+body.planning-live-body .live-timeline-item {
+  min-width: 0;
+  max-width: none;
+  min-height: 56px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  align-content: center;
+  column-gap: 6px;
+  row-gap: 2px;
+  background: linear-gradient(135deg, rgba(8, 17, 38, 0.9), rgba(13, 30, 68, 0.72));
+  border: 1px solid rgba(110, 160, 255, 0.18);
+  border-left-width: 3px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.035), 0 10px 22px rgba(0,0,0,0.18);
+}
+
+body.planning-live-body .live-timeline-item span {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.54rem;
+  color: rgba(199, 210, 254, 0.72);
+  white-space: nowrap;
+}
+
+body.planning-live-body .live-timeline-item strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.63rem;
+}
+
+body.planning-live-body .live-timeline-item em {
+  display: block;
+  grid-column: 1 / -1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgba(143, 163, 199, 0.86);
+  font-size: 0.55rem;
+  font-style: normal;
+}
+
+body.planning-live-body .live-timeline-item.selected {
+  border-color: rgba(66, 183, 255, 0.62);
+  box-shadow: 0 0 0 1px rgba(66, 183, 255, 0.16), 0 12px 28px rgba(66, 183, 255, 0.12);
+}
+
+
+/* v20260526 live visual polish pass 2: remove stray top overlay and tighten reference-style header. */
+body.planning-live-body::before {
+  display: none;
+}
+
+body.planning-live-body .planning-runtime-shell {
+  padding: 14px 16px 12px;
+  gap: 12px;
+}
+
+body.planning-live-body .live-runtime-header {
+  grid-template-columns: 132px minmax(0, 1fr);
+  min-height: 74px;
+  padding: 12px 14px;
+  background: linear-gradient(135deg, rgba(5, 11, 28, 0.94), rgba(8, 19, 45, 0.88));
+  border-color: rgba(66, 183, 255, 0.24);
+}
+
+body.planning-live-body .live-runtime-title h1 {
+  display: inline-grid;
+  place-items: center;
+  min-width: 94px;
+  min-height: 42px;
+  border: 1px solid rgba(66, 183, 255, 0.34);
+  border-radius: 14px;
+  background: linear-gradient(135deg, rgba(66, 183, 255, 0.14), rgba(139, 92, 246, 0.09));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 14px 30px rgba(0,0,0,0.22);
+  font-size: clamp(1.05rem, 1.7vw, 1.55rem);
+}
+
+body.planning-live-body .live-runtime-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 6px;
+}
+
+body.planning-live-body .live-runtime-metrics > span,
+body.planning-live-body .live-runtime-metrics > button {
+  min-height: 28px;
+}
+
+body.planning-live-body .live-runtime-bottom {
+  align-items: stretch;
+}
+
+body.planning-live-body .live-timeline-strip::-webkit-scrollbar {
+  height: 6px;
+}
+
+body.planning-live-body .live-timeline-strip::-webkit-scrollbar-thumb {
+  background: rgba(66, 183, 255, 0.32);
+  border-radius: 999px;
+}
+
+
+/* v20260526 live visual polish pass 3: keep the top-left title unobstructed. */
+body.planning-live-body .live-runtime-header::after {
+  display: none;
+}
+
+body.planning-live-body .live-runtime-title {
+  position: relative;
+  z-index: 2;
+  overflow: visible;
+  padding-left: 2px;
+}
+
+body.planning-live-body .live-runtime-title h1 {
+  display: block;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  line-height: 1;
+  text-shadow: 0 0 18px rgba(66, 183, 255, 0.26);
+}
+
+/* v20260526 agent-specific report specialization. */
+body.planning-live-body .live-agent-specific-report {
+  border-color: rgba(66, 183, 255, 0.34);
+  background:
+    linear-gradient(135deg, rgba(66, 183, 255, 0.09), rgba(8, 17, 38, 0.86)),
+    linear-gradient(145deg, rgba(8, 17, 38, 0.94), rgba(11, 22, 48, 0.82));
+}
+
+body.planning-live-body .live-agent-specific-report h4 {
+  color: #dbeafe;
+}
+
+body.planning-live-body .live-agent-specific-summary {
+  margin: 0 0 8px;
+  color: rgba(199, 210, 254, 0.88);
+  font-size: 0.74rem;
+  line-height: 1.45;
+}
+
+body.planning-live-body .live-agent-specific-checklist {
+  margin-top: 8px;
+  padding-top: 7px;
+  border-top: 1px solid rgba(110, 160, 255, 0.18);
+}
+
+body.planning-live-body .live-report-role-tag {
+  color: #bfdbfe;
+  font-weight: 800;
+}
+
+/* v20260526 collapsible Live bottom Event/IO dock. */
+body.planning-live-body .live-runtime-bottom {
+  position: relative;
+}
+
+body.planning-live-body .live-bottom-collapse {
+  position: absolute;
+  right: 10px;
+  top: 8px;
+  z-index: 5;
+  min-height: 26px;
+  padding: 4px 9px;
+  font-size: 0.62rem;
+  border-color: rgba(66, 183, 255, 0.32);
+  background: rgba(3, 8, 23, 0.72);
+  color: #bfdbfe;
+}
+
+body.planning-live-body .planning-runtime-shell.live-bottom-collapsed {
+  grid-template-rows: auto minmax(0, 1fr) 42px;
+}
+
+body.planning-live-body .planning-runtime-shell.live-bottom-collapsed .live-runtime-bottom {
+  min-height: 42px;
+  max-height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  overflow: hidden;
+  padding: 7px 10px;
+}
+
+body.planning-live-body .planning-runtime-shell.live-bottom-collapsed .live-runtime-bottom::before {
+  content: "Event / IO dock collapsed";
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: rgba(199, 210, 254, 0.72);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.62rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+body.planning-live-body .planning-runtime-shell.live-bottom-collapsed .live-runtime-bottom > section {
+  display: none;
+}
+
+body.planning-live-body .planning-runtime-shell.live-bottom-collapsed .live-bottom-collapse {
+  position: static;
+  margin-left: auto;
+}
+
+/* v20260526 IDE-effect unification for Live GUI stateful controls. */
+body.planning-live-body .live-agent-binder,
+body.planning-live-body .live-center-panel,
+body.planning-live-body .live-chat-panel,
+body.planning-live-body .live-runtime-bottom {
+  backdrop-filter: blur(12px);
+  isolation: isolate;
+  overflow: hidden;
+  position: relative;
+}
+
+body.planning-live-body .live-agent-binder > *,
+body.planning-live-body .live-center-panel > *,
+body.planning-live-body .live-chat-panel > *,
+body.planning-live-body .live-runtime-bottom > * {
+  position: relative;
+  z-index: 1;
+}
+
+body.planning-live-body .live-center-panel,
+body.planning-live-body .live-chat-panel,
+body.planning-live-body .live-runtime-bottom {
+  background:
+    radial-gradient(rgba(96, 165, 250, 0.14) 1px, transparent 1px),
+    linear-gradient(145deg, rgba(8, 17, 38, 0.94), rgba(11, 22, 48, 0.84));
+  background-size: 18px 18px, auto;
+}
+
+body.planning-live-body .live-center-panel::after,
+body.planning-live-body .live-chat-panel::after,
+body.planning-live-body .live-runtime-bottom::after {
+  content: none;
+  display: none;
+}
+
+@keyframes live-ide-sheen {
+  0%, 42% { transform: translateX(-120%); }
+  68%, 100% { transform: translateX(120%); }
+}
+
+body.planning-live-body .binder-tab.status-running {
+  border-color: rgba(56, 189, 248, 0.82);
+  box-shadow: 0 0 18px rgba(56, 189, 248, 0.34), 0 0 54px rgba(56, 189, 248, 0.12);
+}
+
+body.planning-live-body .binder-tab.status-running::after,
+body.planning-live-body .live-graph-mini-node.node-active::after {
+  content: none;
+  display: none;
+}
+
+@keyframes live-ide-pulse-ring {
+  0% { opacity: 0.72; transform: scale(0.98); }
+  100% { opacity: 0; transform: scale(1.08); }
+}
+
+body.planning-live-body .live-graph-edge.edge-active {
+  stroke: rgba(56, 189, 248, 0.96);
+  stroke-width: 1.2;
+  stroke-dasharray: 8 8;
+  filter: drop-shadow(0 0 8px rgba(56, 189, 248, 0.74));
+}
+
+@keyframes live-ide-edge-dash {
+  to { stroke-dashoffset: -16; }
+}
+
+body.planning-live-body .live-view-tab:hover,
+body.planning-live-body .live-view-tab.active,
+body.planning-live-body .live-quick-action:hover,
+body.planning-live-body .live-report-action:hover,
+body.planning-live-body .live-selected-event-action:hover,
+body.planning-live-body .live-selected-node-action:hover {
+  transform: translateY(-1px) scale(1.02);
+}
+
+body.planning-live-body .live-view-tab.active,
+body.planning-live-body .live-timeline-filter.active,
+body.planning-live-body .live-report-action:focus-visible,
+body.planning-live-body .live-quick-action:focus-visible,
+body.planning-live-body .live-selected-event-action:focus-visible,
+body.planning-live-body .live-selected-node-action:focus-visible {
+  box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.2), 0 0 18px rgba(56, 189, 248, 0.24);
+}
+
+body.planning-live-body .runtime-chip.running,
+body.planning-live-body .runtime-chip.ok,
+body.planning-live-body .runtime-chip.warning,
+body.planning-live-body .runtime-chip.error {
+  overflow: hidden;
+  position: relative;
+}
+
+body.planning-live-body .runtime-chip.running::before {
+  animation: live-ide-chip-sweep 1.8s linear infinite;
+  background: linear-gradient(90deg, transparent, rgba(56, 189, 248, 0.34), transparent);
+  content: "";
+  inset: 0;
+  pointer-events: none;
+  position: absolute;
+  transform: translateX(-120%);
+}
+
+@keyframes live-ide-chip-sweep {
+  to { transform: translateX(120%); }
+}
+
+body.planning-live-body .live-graph-mini-node.node-selected {
+  border-color: rgba(255, 212, 56, 0.72);
+  box-shadow: 0 0 16px rgba(255, 212, 56, 0.28), 0 0 42px rgba(255, 212, 56, 0.12);
+}
+
+body.planning-live-body .live-graph-mini-node.node-selected::before {
+  border: 1px dashed rgba(255, 212, 56, 0.72);
+  border-radius: 18px;
+  content: "";
+  inset: -7px;
+  pointer-events: none;
+  position: absolute;
+}
+
+body.planning-live-body .live-timeline-item.selected,
+body.planning-live-body .live-selected-event-card:not(.empty),
+body.planning-live-body .live-selected-node-view {
+  box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.16), 0 14px 32px rgba(56, 189, 248, 0.1);
+}
+
+body.planning-live-body .live-approval-card {
+  box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.12), 0 12px 32px rgba(245, 158, 11, 0.08);
+}
+
+body.planning-live-body .live-report-action[data-report-action="backend"],
+body.planning-live-body .live-selected-event-action[data-event-action="open_backend"],
+body.planning-live-body .live-selected-node-action[data-context-action="open_backend"] {
+  border-color: rgba(56, 189, 248, 0.52);
+  box-shadow: 0 0 14px rgba(56, 189, 248, 0.16);
+}
+
+body.planning-live-body #btn-live-safe-stop,
+body.planning-live-body .live-quick-action[data-quick-action="safe_stop"] {
+  box-shadow: 0 0 18px rgba(239, 68, 68, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+body.planning-live-body .live-file-artifact:hover,
+body.planning-live-body .live-report-message:hover,
+body.planning-live-body .live-timeline-item:hover {
+  transform: translateY(-1px);
+  border-color: rgba(56, 189, 248, 0.46);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body.planning-live-body .live-center-panel::after,
+  body.planning-live-body .live-chat-panel::after,
+  body.planning-live-body .live-runtime-bottom::after,
+  body.planning-live-body .runtime-chip.running::before,
+  body.planning-live-body .binder-tab.status-running::after,
+  body.planning-live-body .live-graph-mini-node.node-active::after,
+  body.planning-live-body .live-graph-edge.edge-active,
+  body.planning-live-body .binder-tab.status-waiting .binder-state-dot,
+  body.planning-live-body .live-graph-mini-node.node-active .node-light {
+    animation: none !important;
+  }
+}
+
+/* v20260527 Live report common section body separation. */
+body.planning-live-body .live-report-section-body {
+  display: block;
+  min-width: 0;
+}
+
+body.planning-live-body .live-report-section-body > :first-child {
+  margin-top: 0;
+}
+
+body.planning-live-body .live-report-section-body > :last-child {
+  margin-bottom: 0;
+}
+
+/* v20260527 Live report section selection for context-aware Runtime Chat. */
+body.planning-live-body .live-report-section[data-report-section-title] {
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+}
+
+body.planning-live-body .live-report-section[data-report-section-title]:hover,
+body.planning-live-body .live-report-section[data-report-section-title]:focus-visible {
+  border-color: rgba(56, 189, 248, 0.54);
+  box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.16), 0 12px 28px rgba(56, 189, 248, 0.1);
+  transform: translateY(-1px);
+}
+
+body.planning-live-body .live-report-section.selected {
+  border-color: rgba(255, 212, 56, 0.72);
+  box-shadow: 0 0 0 1px rgba(255, 212, 56, 0.22), 0 0 28px rgba(255, 212, 56, 0.11);
+}
+
+body.planning-live-body .live-report-section.selected h4::after {
+  content: "SELECTED";
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 6px;
+  border: 1px solid rgba(255, 212, 56, 0.36);
+  border-radius: 999px;
+  color: #fde68a;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.54rem;
+  letter-spacing: 0.08em;
+  vertical-align: middle;
+}
+
+/* v20260527 Live GUI pulls the Runtime IDE effect language into operator chat. */
+body.planning-live-body {
+  --live-ide-blue: #2b8cff;
+  --live-ide-cyan: #38bdf8;
+  --live-ide-purple: #9b5cff;
+  --live-ide-amber: #ffd438;
+}
+
+body.planning-live-body .live-runtime-header,
+body.planning-live-body .live-agent-binder,
+body.planning-live-body .live-center-panel,
+body.planning-live-body .live-chat-panel,
+body.planning-live-body .live-runtime-bottom {
+  border-color: rgba(96, 165, 250, 0.24);
+  box-shadow:
+    0 18px 48px rgba(0, 0, 0, 0.34),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 0 0 1px rgba(59, 130, 246, 0.04);
+}
+
+body.planning-live-body .live-runtime-header::before,
+body.planning-live-body .live-agent-binder::after,
+body.planning-live-body .live-center-panel::before,
+body.planning-live-body .live-chat-panel::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, rgba(56, 189, 248, 0.12), transparent 22%, transparent 78%, rgba(155, 92, 255, 0.1)),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.06), transparent 18%);
+  opacity: 0.52;
+  z-index: 0;
+}
+
+body.planning-live-body .live-runtime-header > *,
+body.planning-live-body .live-agent-binder > *,
+body.planning-live-body .live-center-panel > *,
+body.planning-live-body .live-chat-panel > * {
+  position: relative;
+  z-index: 1;
+}
+
+body.planning-live-body .live-runtime-title h1::after {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-left: 7px;
+  border-radius: 999px;
+  background: var(--live-ide-cyan);
+  box-shadow: 0 0 12px rgba(56, 189, 248, 0.84);
+  vertical-align: 0.18em;
+}
+
+body.planning-live-body .btn.primary,
+body.planning-live-body #btn-planning-send,
+body.planning-live-body .live-view-tab.active {
+  background: linear-gradient(135deg, #2563eb, #2b8cff 42%, #9b5cff);
+  border-color: rgba(216, 180, 254, 0.42);
+  box-shadow:
+    0 0 18px rgba(43, 140, 255, 0.22),
+    0 0 28px rgba(155, 92, 255, 0.14);
+}
+
+body.planning-live-body .live-quick-action[data-quick-action="dry_run"],
+body.planning-live-body .live-quick-action[data-quick-action="run_node_test"],
+body.planning-live-body .live-quick-action[data-quick-action="rewrite_report_section"] {
+  border-color: rgba(56, 189, 248, 0.4);
+  background:
+    radial-gradient(circle at 35% 18%, rgba(56, 189, 248, 0.2), transparent 46%),
+    rgba(8, 17, 38, 0.84);
+}
+
+body.planning-live-body .live-quick-action[data-quick-action="open_evolution"] {
+  border-color: rgba(155, 92, 255, 0.46);
+  box-shadow: 0 0 16px rgba(155, 92, 255, 0.18);
+}
+
+body.planning-live-body .planning-chat-item {
+  position: relative;
+  overflow: hidden;
+}
+
+body.planning-live-body .planning-chat-item::before {
+  content: none;
+}
+
+body.planning-live-body .planning-chat-item.orchestrator {
+  border-color: rgba(56, 189, 248, 0.28);
+}
+
+body.planning-live-body .planning-chat-item.operator {
+  border-color: rgba(255, 212, 56, 0.3);
+  box-shadow: 0 10px 26px rgba(255, 212, 56, 0.08);
+}
+
+body.planning-live-body .reasoning-pending .reasoning-spinner {
+  filter: drop-shadow(0 0 8px rgba(56, 189, 248, 0.7));
+}
+
+body.planning-live-body .live-report-section.selected {
+  position: relative;
+}
+
+body.planning-live-body .live-report-section.selected::before {
+  content: none;
+  display: none;
+}
+
+@keyframes live-ide-selected-ring {
+  0% { opacity: 0.62; transform: scale(0.99); }
+  100% { opacity: 0; transform: scale(1.035); }
+}
+
+body.planning-live-body .live-timeline-item.selected::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(90deg, rgba(56, 189, 248, 0.14), transparent 36%);
+  opacity: 0.58;
+}
+
+body.planning-live-body .binder-tab.active .binder-icon,
+body.planning-live-body .binder-tab.status-running .binder-icon {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    0 0 18px rgba(56, 189, 248, 0.28);
+}
+
+body.planning-live-body .binder-tab.status-error {
+  border-color: rgba(255, 56, 100, 0.76);
+  box-shadow: 0 0 18px rgba(255, 56, 100, 0.24);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body.planning-live-body .live-runtime-title h1::after,
+  body.planning-live-body .planning-chat-item,
+  body.planning-live-body .planning-chat-item:last-child::before,
+  body.planning-live-body .live-report-section.selected::before {
+    animation: none !important;
+  }
+}
+
+/* v20260527 Live IDE effect guardrails: keep selected timeline glow inside the card. */
+body.planning-live-body .live-timeline-item {
+  position: relative;
+  overflow: hidden;
+}
+
+/* v20260527 Live header repair and right-chat action rail. */
+body.planning-live-body .planning-runtime-shell {
+  grid-template-rows: 76px minmax(0, 1fr) 178px;
+}
+
+body.planning-live-body .live-runtime-header {
+  min-height: 0;
+  height: 100%;
+  grid-template-columns: 112px minmax(0, 1fr);
+  align-items: center;
+  padding: 9px 12px;
+  overflow: hidden;
+}
+
+body.planning-live-body .live-runtime-header::before {
+  opacity: 0.34;
+}
+
+body.planning-live-body .live-runtime-title {
+  min-width: 0;
+  align-self: center;
+}
+
+body.planning-live-body .live-runtime-title h1 {
+  max-width: 104px;
+  overflow: hidden;
+  white-space: nowrap;
+  font-size: clamp(1rem, 1.25vw, 1.32rem);
+  letter-spacing: 0.12em;
+}
+
+body.planning-live-body .live-runtime-title h1::after {
+  width: 6px;
+  height: 6px;
+  margin-left: 5px;
+}
+
+body.planning-live-body .live-runtime-metrics {
+  min-width: 0;
+  max-height: 58px;
+  overflow: hidden;
+  justify-content: flex-end;
+  align-content: center;
+  row-gap: 4px;
+}
+
+body.planning-live-body .live-runtime-metrics > span,
+body.planning-live-body .live-runtime-metrics > button {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 158px;
+}
+
+body.planning-live-body #planning-run-detail {
+  max-width: 176px;
+}
+
+body.planning-live-body #live-resource-chip {
+  max-width: 184px;
+}
+
+body.planning-live-body .live-chat-panel {
+  grid-template-columns: 38px minmax(0, 1fr);
+  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    "chat-head chat-head"
+    "chat-context chat-context"
+    "chat-approval chat-approval"
+    "chat-actions chat-log"
+    "chat-composer chat-composer";
+  column-gap: 8px;
+  row-gap: 6px;
+}
+
+body.planning-live-body .live-chat-header {
+  grid-area: chat-head;
+}
+
+body.planning-live-body .live-chat-context-strip {
+  grid-area: chat-context;
+  margin-top: 0;
+}
+
+body.planning-live-body .live-approval-panel {
+  grid-area: chat-approval;
+}
+
+body.planning-live-body .live-quick-actions {
+  grid-area: chat-actions;
+  display: flex;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: center;
+  align-self: stretch;
+  gap: 5px;
+  min-height: 0;
+  max-height: 100%;
+  margin: 0;
+  padding: 3px 2px;
+  overflow: hidden auto;
+  border: 1px solid rgba(110, 160, 255, 0.18);
+  border-radius: 14px;
+  background: rgba(3, 8, 23, 0.28);
+}
+
+body.planning-live-body .live-quick-actions .btn {
+  width: 31px;
+  min-width: 31px;
+  height: 30px;
+  min-height: 30px;
+  flex: 0 0 auto;
+  border-radius: 10px;
+}
+
+body.planning-live-body .live-quick-action[data-quick-action="explain_current_node"],
+body.planning-live-body .live-quick-action[data-quick-action="rewrite_report_section"],
+body.planning-live-body .live-quick-action[data-quick-action="open_graph"],
+body.planning-live-body .live-quick-action[data-quick-action="open_evolution"] {
+  display: none;
+}
+
+body.planning-live-body .live-chat-panel .planning-chat-window {
+  grid-area: chat-log;
+  height: 100%;
+  min-height: 0;
+  max-height: none;
+}
+
+body.planning-live-body .planning-composer {
+  grid-area: chat-composer;
+}
+
+body.planning-live-body .planning-runtime-shell.live-bottom-collapsed {
+  grid-template-rows: 76px minmax(0, 1fr) 42px;
+}
+
+@media (max-width: 1320px) {
+  body.planning-live-body .planning-runtime-shell,
+  body.planning-live-body .planning-runtime-shell.live-bottom-collapsed {
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
+  }
+
+  body.planning-live-body .live-chat-panel {
+    grid-template-columns: 34px minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 760px) {
+  body.planning-live-body .live-chat-panel {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "chat-head"
+      "chat-context"
+      "chat-approval"
+      "chat-actions"
+      "chat-log"
+      "chat-composer";
+  }
+
+  body.planning-live-body .live-quick-actions {
+    flex-direction: row;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+}
+
+/* v20260527 Runtime Chat vertical-space pass: compact composer and approvals. */
+body.planning-live-body .live-approval-panel {
+  max-height: 108px;
+}
+
+body.planning-live-body .planning-composer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 42px;
+  grid-template-areas:
+    "composer-input composer-actions";
+  align-items: stretch;
+  gap: 6px;
+  padding-top: 4px;
+}
+
+body.planning-live-body .planning-message-label {
+  grid-area: composer-input;
+  min-width: 0;
+}
+
+body.planning-live-body .planning-composer textarea {
+  min-height: 48px;
+  max-height: 64px;
+  height: 54px;
+  resize: vertical;
+}
+
+body.planning-live-body .planning-composer-actions {
+  grid-area: composer-actions;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 4px;
+  align-content: stretch;
+}
+
+body.planning-live-body .planning-composer-actions .btn {
+  width: 42px;
+  min-width: 42px;
+  min-height: 24px;
+  padding: 0;
+  font-size: 0.66rem;
+}
+
+body.planning-live-body #btn-planning-generate,
+body.planning-live-body .planning-trigger-hint {
+  display: none;
+}
+
+@media (max-width: 760px) {
+  body.planning-live-body .planning-composer {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "composer-input"
+      "composer-actions";
+  }
+
+  body.planning-live-body .planning-composer-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  body.planning-live-body .planning-composer-actions .btn {
+    width: auto;
+  }
+}
+
+/* v20260527 Safe Stop confirmation hardening. */
+body.planning-live-body #btn-live-safe-stop.is-armed,
+body.planning-live-body .live-quick-action[data-quick-action="safe_stop"].is-armed {
+  border-color: rgba(251, 146, 60, 0.82);
+  color: #fed7aa;
+  background: linear-gradient(135deg, rgba(127, 29, 29, 0.92), rgba(124, 45, 18, 0.86));
+  box-shadow: 0 0 0 1px rgba(251, 146, 60, 0.28), 0 0 24px rgba(251, 146, 60, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  animation: liveSafeStopArmPulse 1s ease-in-out infinite alternate;
+}
+
+body.planning-live-body #btn-live-safe-stop.is-armed {
+  min-width: 96px;
+  letter-spacing: 0.08em;
+}
+
+@keyframes liveSafeStopArmPulse {
+  from { filter: saturate(1); }
+  to { filter: saturate(1.35) brightness(1.08); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body.planning-live-body #btn-live-safe-stop.is-armed,
+  body.planning-live-body .live-quick-action[data-quick-action="safe_stop"].is-armed {
+    animation: none;
+  }
+}
+
+/* v20260527 Live Graph gate controls: validate/compile/save-version without in-live mutation. */
+body.planning-live-body .live-graph-gate-card {
+  display: grid;
+  gap: 9px;
+}
+
+body.planning-live-body .live-graph-gate-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+body.planning-live-body .live-graph-gate-head h4,
+body.planning-live-body .live-graph-gate-head p {
+  margin: 0;
+}
+
+body.planning-live-body .live-graph-gate-actions {
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+body.planning-live-body .live-graph-action {
+  position: relative;
+  width: 32px;
+  min-width: 32px;
+  height: 30px;
+  min-height: 30px;
+  padding: 0;
+  display: inline-grid;
+  place-items: center;
+  border-color: rgba(56, 189, 248, 0.34);
+}
+
+body.planning-live-body .live-graph-action:disabled {
+  opacity: 0.58;
+  cursor: wait;
+}
+
+body.planning-live-body .live-graph-action-status {
+  display: grid;
+  gap: 5px;
+  padding: 8px;
+  border-radius: 12px;
+  border: 1px solid rgba(110, 160, 255, 0.18);
+  background: rgba(3, 8, 23, 0.22);
+  color: rgba(226, 232, 240, 0.9);
+}
+
+body.planning-live-body .live-graph-action-status.ok {
+  border-color: rgba(34, 197, 94, 0.38);
+  box-shadow: 0 0 18px rgba(34, 197, 94, 0.08);
+}
+
+body.planning-live-body .live-graph-action-status.warning {
+  border-color: rgba(245, 158, 11, 0.4);
+  box-shadow: 0 0 18px rgba(245, 158, 11, 0.08);
+}
+
+/* v20260527 Runtime fault visibility: header chip + compact chat fault cards. */
+body.planning-live-body #live-fault-chip.error {
+  border-color: rgba(248, 113, 113, 0.52);
+  color: #fecaca;
+  background: rgba(127, 29, 29, 0.42);
+  box-shadow: 0 0 18px rgba(248, 113, 113, 0.18);
+}
+
+body.planning-live-body #live-fault-chip.warning {
+  border-color: rgba(245, 158, 11, 0.46);
+  color: #fde68a;
+  background: rgba(120, 53, 15, 0.36);
+}
+
+body.planning-live-body .live-fault-card {
+  border-color: rgba(248, 113, 113, 0.28);
+  background: linear-gradient(135deg, rgba(69, 10, 10, 0.38), rgba(15, 23, 42, 0.42));
+  box-shadow: 0 0 0 1px rgba(248, 113, 113, 0.08), 0 12px 28px rgba(248, 113, 113, 0.08);
+}
+
+body.planning-live-body .live-fault-card.severity-warning {
+  border-color: rgba(245, 158, 11, 0.34);
+  background: linear-gradient(135deg, rgba(69, 39, 10, 0.34), rgba(15, 23, 42, 0.42));
+}
+
+body.planning-live-body .live-fault-card small {
+  color: rgba(226, 232, 240, 0.7);
+  display: block;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.62rem;
+  overflow-wrap: anywhere;
+}
+
+body.planning-live-body .live-fault-actions {
+  margin-top: 7px;
+}
+
+/* v20260527 Runtime Chat essential rail compact pass. */
+body.planning-live-body .live-chat-panel {
+  grid-template-columns: 32px minmax(0, 1fr);
+  column-gap: 6px;
+  row-gap: 4px;
+}
+
+body.planning-live-body .live-chat-header {
+  min-height: 0;
+  padding-block: 5px;
+}
+
+body.planning-live-body .live-chat-context-strip {
+  min-height: 22px;
+  padding: 3px 7px;
+  font-size: 0.62rem;
+}
+
+body.planning-live-body .live-quick-actions {
+  gap: 4px;
+  padding: 2px;
+  border-radius: 12px;
+}
+
+body.planning-live-body .live-quick-actions .btn {
+  width: 27px;
+  min-width: 27px;
+  height: 27px;
+  min-height: 27px;
+  border-radius: 9px;
+  font-size: 0.7rem;
+}
+
+body.planning-live-body .live-approval-panel {
+  max-height: 96px;
+}
+
+body.planning-live-body .planning-composer {
+  grid-template-columns: minmax(0, 1fr) 38px;
+  gap: 5px;
+  padding-top: 2px;
+}
+
+body.planning-live-body .planning-composer textarea {
+  min-height: 42px;
+  max-height: 56px;
+  height: 46px;
+}
+
+body.planning-live-body .planning-composer-actions .btn {
+  width: 38px;
+  min-width: 38px;
+  min-height: 22px;
+  font-size: 0.62rem;
+}
+
+@media (max-width: 1320px) {
+  body.planning-live-body .live-chat-panel {
+    grid-template-columns: 30px minmax(0, 1fr);
+  }
+}
+
+/* v20260527 Live header control-room repair: remove broken overlays and pin metrics. */
+body.planning-live-body .live-runtime-header {
+  display: grid;
+  grid-template-columns: 118px minmax(0, 1fr);
+  align-items: stretch;
+  height: 100%;
+  min-height: 0;
+  padding: 8px 12px;
+  gap: 10px;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 7% 18%, rgba(56, 189, 248, 0.18), transparent 34%),
+    linear-gradient(135deg, rgba(5, 11, 28, 0.98), rgba(8, 19, 45, 0.9));
+}
+
+body.planning-live-body .live-runtime-header::before,
+body.planning-live-body .live-runtime-header::after {
+  display: none !important;
+  content: none !important;
+}
+
+body.planning-live-body .live-runtime-title {
+  display: grid;
+  grid-template-rows: 16px minmax(0, 1fr);
+  align-items: center;
+  min-width: 0;
+  padding: 5px 7px 6px;
+  border: 1px solid rgba(56, 189, 248, 0.24);
+  border-radius: 13px;
+  background: linear-gradient(145deg, rgba(3, 8, 23, 0.76), rgba(14, 30, 62, 0.42));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+body.planning-live-body .live-runtime-title .eyebrow {
+  display: block;
+  max-width: 100%;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgba(199, 210, 254, 0.68);
+  font-size: 0.46rem;
+  letter-spacing: 0.11em;
+  line-height: 1;
+}
+
+body.planning-live-body .live-runtime-title h1 {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
+  margin: 0;
+  overflow: hidden;
+  color: #67d4ff;
+  font-size: clamp(0.98rem, 1.15vw, 1.2rem);
+  letter-spacing: 0.1em;
+  line-height: 1;
+  text-shadow: 0 0 16px rgba(56, 189, 248, 0.34);
+}
+
+body.planning-live-body .live-runtime-title h1::after {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  margin-left: 6px;
+}
+
+/* v20260527 final header cleanup: remove remaining top-left bar/overlay artifacts. */
+body.planning-live-body .live-runtime-header::before,
+body.planning-live-body .live-runtime-header::after,
+body.planning-live-body .live-runtime-title::before,
+body.planning-live-body .live-runtime-title::after,
+body.planning-live-body .live-runtime-title h1::before,
+body.planning-live-body .live-runtime-title h1::after {
+  content: none !important;
+  display: none !important;
+  animation: none !important;
+}
+
+body.planning-live-body .live-runtime-title {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+}
+
+body.planning-live-body .live-runtime-title h1 {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  min-height: 0 !important;
+}
+
+body.planning-live-body .live-runtime-metrics {
+  display: grid;
+  grid-template-columns: minmax(54px, max-content) minmax(58px, max-content) minmax(116px, 176px) minmax(48px, max-content) minmax(54px, max-content) minmax(58px, max-content) 82px;
+  grid-template-rows: repeat(2, 26px);
+  grid-auto-flow: row;
+  grid-auto-rows: 26px;
+  align-content: center;
+  justify-content: end;
+  align-items: center;
+  gap: 4px 5px;
+  min-width: 0;
+  max-height: 58px;
+  overflow: hidden;
+}
+
+body.planning-live-body .live-runtime-metrics > span,
+body.planning-live-body .live-runtime-metrics > button {
+  min-width: 0;
+  max-width: 100%;
+  height: 24px;
+  min-height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1;
+}
+
+body.planning-live-body .live-runtime-metrics .status-dot {
+  width: 9px;
+  height: 9px;
+  min-width: 9px;
+  justify-self: center;
+  padding: 0;
+  border-radius: 999px;
+}
+
+body.planning-live-body #planning-run-detail {
+  justify-content: flex-start;
+  max-width: 176px;
+}
+
+body.planning-live-body #live-resource-chip {
+  max-width: 184px;
+}
+
+body.planning-live-body #btn-live-safe-stop {
+  grid-column: 7;
+  grid-row: 1 / span 2;
+  align-self: stretch;
+  width: 82px;
+  min-width: 82px;
+  max-width: 82px;
+  height: 56px;
+  min-height: 56px;
+  padding: 0 8px;
+  border-radius: 14px;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+}
+
+body.planning-live-body #btn-live-safe-stop.is-armed {
+  width: 82px;
+  min-width: 82px;
+  max-width: 82px;
+  padding-inline: 5px;
+  font-size: 0.62rem;
+}
+
+@media (max-width: 1320px) {
+  body.planning-live-body .live-runtime-header {
+    grid-template-columns: 104px minmax(0, 1fr);
+  }
+
+  body.planning-live-body .live-runtime-metrics {
+    grid-template-columns: minmax(44px, max-content) minmax(46px, max-content) minmax(88px, 132px) minmax(40px, max-content) minmax(46px, max-content) minmax(46px, max-content) 74px;
+  }
+
+  body.planning-live-body #btn-live-safe-stop {
+    width: 74px;
+    min-width: 74px;
+    max-width: 74px;
+  }
+
+  body.planning-live-body #btn-live-safe-stop.is-armed {
+    width: 74px;
+    min-width: 74px;
+    max-width: 74px;
+    font-size: 0.56rem;
+  }
+}
+
+/* v20260527 Runtime Chat side-rail pass: keep essential controls attached to the LLM transcript. */
+body.planning-live-body .live-chat-panel {
+  grid-template-columns: minmax(0, 1fr) 30px;
+  grid-template-rows: minmax(34px, auto) 20px auto minmax(0, 1fr) minmax(44px, auto);
+  grid-template-areas:
+    "chat-head chat-head"
+    "chat-context chat-context"
+    "chat-approval chat-approval"
+    "chat-log chat-actions"
+    "chat-composer chat-composer";
+  column-gap: 4px;
+  row-gap: 4px;
+}
+
+body.planning-live-body .live-chat-header {
+  grid-template-columns: minmax(74px, 0.34fr) minmax(0, 1fr);
+  gap: 6px;
+  padding-block: 3px;
+}
+
+body.planning-live-body .live-chat-context-controls {
+  gap: 4px;
+}
+
+body.planning-live-body .live-chat-context-controls label {
+  grid-template-columns: 14px minmax(0, 1fr);
+  gap: 4px;
+}
+
+body.planning-live-body .live-chat-context-controls label > span {
+  font-size: 0.54rem;
+}
+
+body.planning-live-body .compact-input {
+  min-height: 26px;
+  padding: 4px 6px;
+  font-size: 0.64rem;
+}
+
+body.planning-live-body .live-chat-context-strip {
+  min-height: 20px;
+  padding: 2px 7px;
+  font-size: 0.6rem;
+}
+
+body.planning-live-body .live-quick-actions {
+  justify-self: stretch;
+  align-self: stretch;
+  width: 30px;
+  max-width: 30px;
+  gap: 3px;
+  padding: 2px 1px;
+  border-radius: 10px 14px 14px 10px;
+  border-color: rgba(103, 212, 255, 0.24);
+  background:
+    linear-gradient(180deg, rgba(8, 18, 38, 0.84), rgba(3, 8, 23, 0.58)),
+    rgba(3, 8, 23, 0.4);
+}
+
+body.planning-live-body .live-quick-actions .btn {
+  width: 26px;
+  min-width: 26px;
+  height: 26px;
+  min-height: 26px;
+  border-radius: 8px;
+  font-size: 0.68rem;
+}
+
+body.planning-live-body .live-chat-panel .planning-chat-window {
+  min-height: 0;
+  height: 100%;
+}
+
+body.planning-live-body .live-approval-panel {
+  max-height: 84px;
+}
+
+body.planning-live-body .planning-composer {
+  grid-template-columns: minmax(0, 1fr) 34px;
+  gap: 4px;
+  padding-top: 2px;
+}
+
+body.planning-live-body .planning-message-label {
+  margin-top: 0;
+}
+
+body.planning-live-body .planning-composer textarea {
+  min-height: 40px;
+  max-height: 52px;
+  height: 44px;
+  padding: 6px 8px;
+}
+
+body.planning-live-body .planning-composer-actions {
+  gap: 3px;
+}
+
+body.planning-live-body .planning-composer-actions .btn {
+  width: 34px;
+  min-width: 34px;
+  min-height: 20px;
+  height: 20px;
+  font-size: 0.58rem;
+}
+
+@media (max-width: 1320px) {
+  body.planning-live-body .live-chat-panel {
+    grid-template-columns: minmax(0, 1fr) 28px;
+  }
+
+  body.planning-live-body .live-quick-actions {
+    width: 28px;
+    max-width: 28px;
+  }
+
+  body.planning-live-body .live-quick-actions .btn {
+    width: 24px;
+    min-width: 24px;
+    height: 24px;
+    min-height: 24px;
+  }
+}
+
+@media (max-width: 760px) {
+  body.planning-live-body .live-chat-panel {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "chat-head"
+      "chat-context"
+      "chat-approval"
+      "chat-actions"
+      "chat-log"
+      "chat-composer";
+  }
+
+  body.planning-live-body .live-quick-actions {
+    width: auto;
+    max-width: none;
+    flex-direction: row;
+  }
+}
+
+/* v20260527 Live bottom dock containment: keep Event/IO inside the 1920x1080 control room. */
+body.planning-live-body .live-runtime-bottom {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+  grid-template-rows: minmax(0, 1fr);
+  align-items: stretch;
+  gap: 10px;
+  padding: 10px 12px;
+  overflow: hidden;
+}
+
+body.planning-live-body .live-runtime-bottom > section {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 6px;
+  overflow: hidden;
+}
+
+body.planning-live-body .live-bottom-collapse {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  z-index: 6;
+  width: auto;
+  min-width: 0;
+  max-width: 88px;
+  height: auto;
+  min-height: 24px;
+  padding: 4px 8px;
+  align-self: auto;
+  justify-self: auto;
+  white-space: nowrap;
+}
+
+body.planning-live-body .live-timeline-strip {
+  min-height: 0;
+  height: 100%;
+  max-height: 100%;
+}
+
+body.planning-live-body .live-device-strip {
+  min-height: 0;
+  max-height: 100%;
+  overflow: hidden auto;
+}
+
+/* v20260527 Runtime Chat operator rail compression: give transcript more vertical room. */
+body.planning-live-body .planning-runtime-shell {
+  padding: 12px 14px 10px;
+  gap: 10px;
+  grid-template-rows: 64px minmax(0, 1fr) 150px;
+}
+
+body.planning-live-body .planning-runtime-shell.live-bottom-collapsed {
+  grid-template-rows: 64px minmax(0, 1fr) 36px;
+}
+
+body.planning-live-body .live-runtime-header {
+  grid-template-columns: 104px minmax(0, 1fr);
+  padding: 6px 10px;
+  gap: 8px;
+}
+
+body.planning-live-body .live-runtime-title {
+  grid-template-rows: 12px minmax(0, 1fr);
+  padding: 4px 6px;
+  border-radius: 11px;
+}
+
+body.planning-live-body .live-runtime-title .eyebrow {
+  font-size: 0.42rem;
+}
+
+body.planning-live-body .live-runtime-title h1 {
+  font-size: clamp(0.92rem, 1vw, 1.08rem);
+  letter-spacing: 0.09em;
+}
+
+body.planning-live-body .live-runtime-metrics {
+  grid-template-rows: repeat(2, 22px);
+  grid-auto-rows: 22px;
+  max-height: 48px;
+  gap: 3px 4px;
+}
+
+body.planning-live-body .live-runtime-metrics > span,
+body.planning-live-body .live-runtime-metrics > button {
+  height: 21px;
+  min-height: 21px;
+  padding-block: 0;
+  font-size: 0.58rem;
+}
+
+body.planning-live-body #btn-live-safe-stop {
+  height: 46px;
+  min-height: 46px;
+  width: 76px;
+  min-width: 76px;
+  max-width: 76px;
+  border-radius: 12px;
+  font-size: 0.64rem;
+}
+
+body.planning-live-body #btn-live-safe-stop.is-armed {
+  width: 76px;
+  min-width: 76px;
+  max-width: 76px;
+  font-size: 0.56rem;
+}
+
+body.planning-live-body .live-chat-panel {
+  grid-template-columns: minmax(0, 1fr) 28px;
+  grid-template-rows: minmax(28px, auto) 18px auto minmax(0, 1fr) minmax(40px, auto);
+  column-gap: 3px;
+  row-gap: 3px;
+}
+
+body.planning-live-body .live-chat-header {
+  min-height: 28px;
+  padding-block: 1px;
+  grid-template-columns: minmax(54px, 0.22fr) minmax(0, 1fr);
+}
+
+body.planning-live-body .live-chat-header .eyebrow {
+  display: none;
+}
+
+body.planning-live-body .live-chat-header h2 {
+  font-size: 0.86rem;
+  letter-spacing: 0.08em;
+}
+
+body.planning-live-body .live-chat-context-controls label {
+  grid-template-columns: 12px minmax(0, 1fr);
+  gap: 3px;
+}
+
+body.planning-live-body .live-chat-context-controls label > span {
+  font-size: 0.5rem;
+}
+
+body.planning-live-body .compact-input {
+  min-height: 22px;
+  padding: 2px 5px;
+  font-size: 0.6rem;
+}
+
+body.planning-live-body .live-chat-context-strip {
+  min-height: 18px;
+  padding: 2px 6px;
+  font-size: 0.56rem;
+}
+
+body.planning-live-body .live-approval-panel {
+  max-height: 72px;
+}
+
+body.planning-live-body .live-quick-actions {
+  width: 28px;
+  max-width: 28px;
+  gap: 3px;
+  padding: 2px 1px;
+}
+
+body.planning-live-body .live-quick-actions .btn {
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  min-height: 24px;
+  font-size: 0.62rem;
+}
+
+body.planning-live-body .planning-composer {
+  grid-template-columns: minmax(0, 1fr) 32px;
+  gap: 3px;
+  padding-top: 1px;
+}
+
+body.planning-live-body .planning-composer textarea {
+  min-height: 34px;
+  max-height: 46px;
+  height: 38px;
+  padding: 5px 7px;
+}
+
+body.planning-live-body .planning-composer-actions {
+  gap: 2px;
+}
+
+body.planning-live-body .planning-composer-actions .btn {
+  width: 32px;
+  min-width: 32px;
+  height: 18px;
+  min-height: 18px;
+  font-size: 0.52rem;
+}
+
+body.planning-live-body .live-runtime-bottom {
+  gap: 8px;
+  padding: 8px 10px;
+}
+
+body.planning-live-body .live-runtime-bottom > section {
+  gap: 4px;
+}
+
+body.planning-live-body .live-bottom-collapse {
+  top: 6px;
+  right: 8px;
+  min-height: 20px;
+  max-width: 76px;
+  padding: 3px 6px;
+  font-size: 0.56rem;
+}
+
+body.planning-live-body .live-timeline-strip {
+  grid-template-rows: repeat(2, minmax(48px, 1fr));
+  grid-auto-columns: minmax(142px, 166px);
+  gap: 5px;
+}
+
+body.planning-live-body .live-timeline-item {
+  min-height: 46px;
+  row-gap: 1px;
+}
+
+body.planning-live-body .live-device-card {
+  min-height: 46px;
+  padding: 6px 7px;
+}
+
+body.planning-live-body .live-device-card strong {
+  font-size: 0.62rem;
+}
+
+@media (max-width: 1320px) {
+  body.planning-live-body .planning-runtime-shell,
+  body.planning-live-body .planning-runtime-shell.live-bottom-collapsed {
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
+  }
+
+  body.planning-live-body .live-runtime-header {
+    grid-template-columns: 96px minmax(0, 1fr);
+  }
+
+  body.planning-live-body #btn-live-safe-stop,
+  body.planning-live-body #btn-live-safe-stop.is-armed {
+    width: 70px;
+    min-width: 70px;
+    max-width: 70px;
+  }
+}
+
+/* v20260527 Runtime Chat compression audit fix: keep emergency stop visibly tappable. */
+body.planning-live-body #btn-live-safe-stop,
+body.planning-live-body #btn-live-safe-stop.is-armed {
+  height: 52px;
+  min-height: 52px;
+}
+
+
+/* v20260527 Runtime Focus Strip: visible selected context before operator actions. */
+body.planning-live-body .live-center-panel {
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 6px;
+}
+
+body.planning-live-body .live-focus-strip {
+  min-width: 0;
+  min-height: 24px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow: hidden;
+  padding: 3px 5px;
+  border: 1px solid rgba(103, 212, 255, 0.18);
+  border-radius: 12px;
+  background:
+    linear-gradient(90deg, rgba(3, 8, 23, 0.5), rgba(8, 18, 38, 0.34)),
+    rgba(3, 8, 23, 0.28);
+}
+
+body.planning-live-body .live-focus-chip {
+  min-width: 0;
+  max-width: 156px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px;
+  border: 1px solid rgba(110, 160, 255, 0.16);
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.42);
+  color: rgba(226, 232, 240, 0.84);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.54rem;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+body.planning-live-body .live-focus-chip em {
+  flex: 0 0 auto;
+  color: rgba(148, 163, 184, 0.86);
+  font-style: normal;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+body.planning-live-body .live-focus-chip strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: rgba(241, 245, 249, 0.94);
+  font-weight: 800;
+}
+
+body.planning-live-body .live-focus-chip.primary {
+  border-color: rgba(103, 212, 255, 0.36);
+  background: rgba(14, 116, 144, 0.22);
+}
+
+body.planning-live-body .live-focus-chip.running {
+  border-color: rgba(52, 211, 153, 0.34);
+  background: rgba(6, 95, 70, 0.24);
+}
+
+body.planning-live-body .live-focus-chip.idle {
+  border-color: rgba(148, 163, 184, 0.2);
+}
+
+@media (max-width: 1320px) {
+  body.planning-live-body .live-focus-chip {
+    max-width: 118px;
+  }
+}
+
+
+/* v20260527 Device trace focus: device cards become backend-trace entry points. */
+body.planning-live-body .live-device-card.has-event {
+  cursor: pointer;
+  outline: none;
+}
+
+body.planning-live-body .live-device-card.has-event::after {
+  content: "↗";
+  position: absolute;
+  top: 5px;
+  right: 7px;
+  color: rgba(103, 212, 255, 0.78);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.58rem;
+  opacity: 0.72;
+}
+
+body.planning-live-body .live-device-card.has-event:hover,
+body.planning-live-body .live-device-card.has-event:focus-visible {
+  border-color: rgba(103, 212, 255, 0.44);
+  box-shadow: 0 0 0 1px rgba(103, 212, 255, 0.16), 0 10px 22px rgba(34, 211, 238, 0.1);
+}
+
+
+/* v20260527 header stop button shrink: keep SAFE STOP inside the top bar. */
+body.planning-live-body .live-runtime-metrics {
+  grid-auto-rows: 20px;
+  row-gap: 3px;
+}
+
+body.planning-live-body #btn-live-safe-stop,
+body.planning-live-body #btn-live-safe-stop.is-armed {
+  grid-column: 7;
+  grid-row: 1 / span 2;
+  align-self: center;
+  width: 66px !important;
+  min-width: 66px !important;
+  max-width: 66px !important;
+  height: 34px !important;
+  min-height: 34px !important;
+  padding: 0 6px !important;
+  border-radius: 10px !important;
+  font-size: 0.56rem !important;
+  letter-spacing: 0.06em;
+  line-height: 1;
+}

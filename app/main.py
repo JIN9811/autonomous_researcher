@@ -33,7 +33,7 @@ import subprocess
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 import yaml
 from typing import Any, Literal
@@ -43,6 +43,9 @@ from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, Str
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
+
+from self_evolution import EvolutionTaskCreate, SelfEvolutionService
+from self_evolution.models import EvolutionActivationRequest, EvolutionRollbackRequest
 
 from agents.manipulation_agent import ManipulationAgent
 from agents.bo_agent import BOAgent
@@ -71,10 +74,18 @@ app = FastAPI(title="Autonomous Researcher")
 templates = Jinja2Templates(directory=str(resolve_path("web/templates")))
 app.mount("/static", StaticFiles(directory=str(resolve_path("web/static"))), name="static")
 
+
+@app.get("/favicon.ico", include_in_schema=False)
+@app.head("/favicon.ico", include_in_schema=False)
+async def favicon() -> FileResponse:
+    """Serve the ATR GUI favicon for browser default icon requests."""
+    return FileResponse(resolve_path("web/static/favicon.svg"), media_type="image/svg+xml")
+
 controller = load_runtime()
 AGENT_BASELINE_DOC_PATH = resolve_path("docs/runtime/agent_program_baseline.md")
 BO_WORKSPACE_SETTINGS_PATH = resolve_path("memory/bo_workspace_settings.json")
 CAE_WORKSPACE_SETTINGS_PATH = resolve_path("memory/cae_workspace_settings.json")
+SELF_EVOLUTION_ROOT = resolve_path("memory/evolution")
 PRIMARY_RUNTIME_GRAPH_ID = "atr_closed_loop"
 RUNTIME_GRAPH_CONFIG_ROOT = resolve_path("graphs/configs")
 RUNTIME_GRAPH_CONFIG_PATH = RUNTIME_GRAPH_CONFIG_ROOT / f"{PRIMARY_RUNTIME_GRAPH_ID}.yaml"
@@ -86,6 +97,133 @@ _SYSTEM_RESOURCE_CACHE: dict[str, object] = {"updated_at_monotonic": 0.0, "paylo
 _RUNTIME_MODULE_MANAGEMENT_LOADED: set[str] = set()
 _LEROBOT_BRIDGE: LeRobotBridge | None = None
 _LEROBOT_CONFIG_MTIME_NS: int = -1
+
+LIVE_AGENT_DEFINITIONS: list[dict[str, str]] = [
+    {"agent_id": "objective", "label": "Objective", "stage": "idle", "module_id": "objective"},
+    {"agent_id": "orchestrator", "label": "Orchestrator", "stage": "orchestrator", "module_id": "orchestrator"},
+    {"agent_id": "design", "label": "Design Agent", "stage": "design", "module_id": "design"},
+    {"agent_id": "specimen", "label": "Specimen Agent", "stage": "specimen", "module_id": "specimen"},
+    {"agent_id": "vision", "label": "Vision Agent", "stage": "vision", "module_id": "vision"},
+    {"agent_id": "manipulation", "label": "Manipulation Agent", "stage": "manipulation", "module_id": "manipulation"},
+    {"agent_id": "equipment", "label": "Lab Equipment Agent", "stage": "equipment", "module_id": "equipment"},
+    {"agent_id": "analysis", "label": "Analysis Agent", "stage": "analysis", "module_id": "analysis"},
+    {"agent_id": "knowledge", "label": "Knowledge Agent", "stage": "knowledge", "module_id": "knowledge"},
+    {"agent_id": "bo", "label": "BO Agent", "stage": "bo", "module_id": "bo"},
+    {"agent_id": "guardian", "label": "Guardian Agent", "stage": "guardian", "module_id": "guardian"},
+]
+
+LIVE_AGENT_REPORT_PROFILES: dict[str, dict[str, object]] = {
+    "objective": {
+        "title": "Objective Intake / Experiment Contract",
+        "summary": "Tracks operator intent, required specimen constraints, missing values, and the trigger condition for starting the workflow.",
+        "focus_rows": [
+            {"label": "Intent", "value": "experiment objective, target metric, and material domain"},
+            {"label": "Required inputs", "value": "specimen size, material, print mode, evaluation target, safety gates"},
+            {"label": "Start gate", "value": "workflow starts only after explicit execution intent or a configured test-mode command"},
+        ],
+        "checklist": ["Confirm missing parameters", "Keep examples visible", "Preserve operator trigger wording"],
+    },
+    "orchestrator": {
+        "title": "Orchestration Plan / Handoff Control",
+        "summary": "Coordinates stage order, missing-input questions, handoff messages, and safe workflow continuation.",
+        "focus_rows": [
+            {"label": "Route", "value": "Objective -> Design -> Specimen -> Vision -> Manipulation -> Equipment -> Analysis -> Knowledge -> BO -> Guardian"},
+            {"label": "Decision gate", "value": "ask for missing required values instead of fabricating live parameters"},
+            {"label": "Context", "value": "session memory, selected chat target, selected trace, and active graph stage"},
+        ],
+        "checklist": ["Validate required inputs", "Emit system handoff messages", "Stop on unresolved approval"],
+    },
+    "design": {
+        "title": "Design Geometry / Manufacturability",
+        "summary": "Converts approved requirements into printable TPMS/FDM specimen geometry with traceable parameters.",
+        "focus_rows": [
+            {"label": "Geometry", "value": "gyroid TPMS with cell size, unit-cell count, shell thickness, and cap settings"},
+            {"label": "Manufacturability", "value": "single connected body, FDM constraints, slicer-safe dimensions"},
+            {"label": "Artifacts", "value": "STL preview, parameter JSON, and design candidate metadata"},
+        ],
+        "checklist": ["Check connected components", "Record final parameters", "Expose STL artifact"],
+    },
+    "specimen": {
+        "title": "Print Preparation / Prusa Bridge",
+        "summary": "Transforms the selected STL into slicer settings, upload/start commands, and printer bridge evidence.",
+        "focus_rows": [
+            {"label": "Bridge", "value": "PrusaLink host/auth, virtual bridge, installed-printer test, or real print mode"},
+            {"label": "Slicer", "value": "layer height, bed/nozzle temperature, skirt/cap options, first-layer settings"},
+            {"label": "Execution", "value": "upload, start, auto-ejection option, ready-state recovery, and logs"},
+        ],
+        "checklist": ["Show slicer parameters", "Confirm bridge mode", "Log upload/start result"],
+    },
+    "vision": {
+        "title": "Vision Capture / Pickup Observation",
+        "summary": "Captures the printed specimen and reports pickup-ready pose, visibility, and confidence.",
+        "focus_rows": [
+            {"label": "Inputs", "value": "camera bridge state, image frame, printer bed region, specimen id"},
+            {"label": "Detection", "value": "object presence, estimated pose, occlusion, and pickup risk"},
+            {"label": "Handoff", "value": "pose and confidence metadata for manipulation"},
+        ],
+        "checklist": ["Verify camera heartbeat", "Attach observation artifact", "Flag low confidence"],
+    },
+    "manipulation": {
+        "title": "Robot Policy / Transfer Execution",
+        "summary": "Runs or tests the selected LeRobot/Pi0.5 policy for moving the printed specimen to the next station.",
+        "focus_rows": [
+            {"label": "Policy", "value": "policy path, robot profile, camera config, and rollout safety settings"},
+            {"label": "Motion", "value": "teleop/record/inference readiness, action clamp, stop condition"},
+            {"label": "Result", "value": "transfer completion, log path, and failure reason if blocked"},
+        ],
+        "checklist": ["Confirm robot bridge", "Use safe rollout limits", "Record session log"],
+    },
+    "equipment": {
+        "title": "Lab Equipment / Bridge Commands",
+        "summary": "Controls external lab equipment through registered bridges such as Windows PyAutoGUI and UTM interfaces.",
+        "focus_rows": [
+            {"label": "Bridge", "value": "saved device alias, token-validated endpoint, heartbeat, and command catalog"},
+            {"label": "Command", "value": "macro/program request, dry-run/live mode, command id, and result log"},
+            {"label": "Safety", "value": "connection validation, timeout, and explicit error propagation"},
+        ],
+        "checklist": ["Select saved bridge", "Log command result", "Do not hide bridge errors"],
+    },
+    "analysis": {
+        "title": "UTM / FEM / Objective Evaluation",
+        "summary": "Processes measurement or simulation output into force/displacement features and objective scores.",
+        "focus_rows": [
+            {"label": "Data", "value": "UTM curve, CAE contour, boundary conditions, and specimen metadata"},
+            {"label": "Metrics", "value": "stiffness, energy absorption, peak force, mass-normalized score"},
+            {"label": "Evidence", "value": "plots, contour SVG, tabular summary, and objective JSON"},
+        ],
+        "checklist": ["Validate boundary conditions", "Attach quantitative metrics", "Prepare BO observation"],
+    },
+    "knowledge": {
+        "title": "Knowledge Memory / Evidence Update",
+        "summary": "Writes validated outcomes into session/project knowledge so BO and later reports use observed evidence.",
+        "focus_rows": [
+            {"label": "Memory", "value": "experiment id, specimen id, final parameters, metrics, and artifacts"},
+            {"label": "Quality", "value": "provenance, duplicate detection, uncertainty, and failed-run notes"},
+            {"label": "Consumers", "value": "BO candidate selection and final report generation"},
+        ],
+        "checklist": ["Store observed data", "Link artifacts", "Expose BO-ready row"],
+    },
+    "bo": {
+        "title": "Bayesian Optimization / Candidate Selection",
+        "summary": "Updates surrogate/acquisition state from knowledge observations and proposes the next candidate.",
+        "focus_rows": [
+            {"label": "Observation", "value": "latest design parameters and objective value from Knowledge Agent"},
+            {"label": "Acquisition", "value": "EI/UCB/PI or benchmark mode, plotted sampled points, next candidate"},
+            {"label": "Loop", "value": "candidate handoff to Design Agent with graph/event evidence"},
+        ],
+        "checklist": ["Plot surrogate/acquisition", "Log selected candidate", "Preserve parameter bounds"],
+    },
+    "guardian": {
+        "title": "Safety Gate / Continue-Stop Decision",
+        "summary": "Checks live/test gate results, hardware risk, and operator approvals before continuation.",
+        "focus_rows": [
+            {"label": "Gate", "value": "safe/hold/retry/replan/stop decision with reason"},
+            {"label": "Risk", "value": "device errors, missing approvals, unsafe bridge state, failed validation"},
+            {"label": "Action", "value": "continue workflow, request operator input, or trigger safe stop"},
+        ],
+        "checklist": ["Require approval when needed", "Surface blocking errors", "Record final decision"],
+    },
+}
 
 
 def _read_workspace_settings(path: Path) -> dict[str, Any]:
@@ -160,6 +298,15 @@ class RuntimeGraphSaveRequest(BaseModel):
     reason: str = "runtime_ide_save"
     author: str = "operator"
     activate: bool = True
+
+
+class RuntimeGraphSaveVersionRequest(BaseModel):
+    """Compatibility request body for package graph save-version calls."""
+
+    graph: dict[str, object] = Field(default_factory=dict)
+    reason: str = "package_save_version"
+    author: str = "operator"
+    activate: bool = False
 
 
 class RuntimeGraphYamlImportRequest(BaseModel):
@@ -484,6 +631,31 @@ class RuntimeApprovalResolveRequest(BaseModel):
     operator: str = "operator"
 
 
+class RuntimeAgentMessageRequest(BaseModel):
+    """Compatibility request body for context-aware agent messages."""
+
+    message: str = Field(..., min_length=1)
+    goal: str | None = None
+    backend: Literal["nemoclaw", "ollama", "vllm"] | None = None
+    mode: Literal["ask", "command", "approval", "edit_report"] = "ask"
+    constraints: dict[str, object] = Field(default_factory=dict)
+    session_id: str | None = None
+
+
+class RuntimeOperatorEventRequest(BaseModel):
+    """Request body for recording an operator UI action into the runtime event stream."""
+
+    event_type: str = Field(default="operator.event", min_length=1, max_length=160)
+    message: str = ""
+    action: str = ""
+    agent_id: str = ""
+    node_id: str = ""
+    trace_id: str = ""
+    event_key: str = ""
+    level: Literal["INFO", "WARNING", "ERROR"] = "INFO"
+    payload: dict[str, object] = Field(default_factory=dict)
+
+
 def _load_agent_baseline_markdown() -> str:
     """Read baseline markdown for agent program integration."""
     if not AGENT_BASELINE_DOC_PATH.exists():
@@ -612,6 +784,16 @@ async def module_management_tool(request: Request) -> HTMLResponse:
         request=request,
         name="module_management.html",
         context={"title": "Module Management Tool"},
+    )
+
+
+@app.get("/evolution-lab", response_class=HTMLResponse)
+async def evolution_lab(request: Request) -> HTMLResponse:
+    """Serve the Self-Evolution Lab GUI."""
+    return templates.TemplateResponse(
+        request=request,
+        name="evolution_lab.html",
+        context={"title": "ATR Self-Evolution Lab"},
     )
 
 
@@ -803,6 +985,106 @@ async def get_state() -> dict[str, object]:
     return snapshot
 
 
+@app.get("/api/runtime/state")
+async def get_runtime_state_compat() -> dict[str, object]:
+    """Compatibility alias for the package-specified runtime state endpoint."""
+    snapshot = await get_state()
+    return {"ok": True, "compatibility": "atr_live_gui_package", **snapshot}
+
+
+@app.get("/api/devices/state")
+async def get_devices_state_compat() -> dict[str, object]:
+    """Compatibility endpoint exposing device/resource state for Live GUI consumers."""
+    return _device_state_payload()
+
+
+@app.get("/api/agents")
+async def get_agents_compat() -> dict[str, object]:
+    """Compatibility endpoint listing Live GUI agent tabs and runtime aliases."""
+    snapshot = controller.snapshot()
+    state = snapshot.get("state", {}) if isinstance(snapshot.get("state"), dict) else {}
+    active_stage = str(state.get("stage") or "")
+    agents = []
+    for item in LIVE_AGENT_DEFINITIONS:
+        agents.append({
+            **item,
+            "status": "running" if item["stage"] == active_stage and snapshot.get("is_running") else "idle",
+            "report_url": f"/api/agents/{item['agent_id']}/report",
+            "backend_trace_url": f"/api/agents/{item['agent_id']}/backend-trace",
+        })
+    return {"ok": True, "agents": agents, "active_stage": active_stage}
+
+
+@app.get("/api/agents/{agent_id}/report")
+async def get_agent_report_compat(agent_id: str, run_id: str | None = None) -> dict[str, object]:
+    """Compatibility endpoint returning a structured agent report payload."""
+    return {"ok": True, "report": _agent_report_payload(agent_id, run_id=run_id)}
+
+
+@app.get("/api/agents/{agent_id}/backend-trace")
+async def get_agent_backend_trace_compat(agent_id: str, run_id: str | None = None) -> dict[str, object]:
+    """Compatibility endpoint returning raw runtime trace events for one agent."""
+    definition, events = _events_for_agent(agent_id, run_id=run_id)
+    return {"ok": True, "agent": definition, "run_id": run_id or _current_run_id(), "events": events}
+
+
+@app.post("/api/agents/{agent_id}/message")
+async def post_agent_message_compat(agent_id: str, req: RuntimeAgentMessageRequest) -> dict[str, object]:
+    """Compatibility endpoint routing agent-targeted messages through Runtime Chat."""
+    definition = _agent_definition(agent_id)
+    constraints = dict(req.constraints)
+    constraints.update({
+        "live_chat_target": definition["agent_id"],
+        "live_chat_mode": req.mode,
+        "live_selected_agent": definition["agent_id"],
+        "compatibility_endpoint": f"/api/agents/{definition['agent_id']}/message",
+    })
+    return await controller.planning_message(
+        message=req.message,
+        goal=req.goal,
+        backend=req.backend,
+        constraints=constraints,
+        session_id=req.session_id,
+    )
+
+
+async def _emit_runtime_operator_event(req: RuntimeOperatorEventRequest, run_id: str | None = None) -> dict[str, object]:
+    """Record a frontend operator action as auditable runtime evidence."""
+    clean_event_type = re.sub(r"[^a-zA-Z0-9_.:-]+", "_", req.event_type.strip())[:160] or "operator.event"
+    payload = dict(req.payload)
+    payload.update({
+        "action": req.action or clean_event_type,
+        "agent_id": req.agent_id,
+        "agent": req.agent_id,
+        "node_id": req.node_id or req.agent_id,
+        "trace_id": req.trace_id,
+        "event_key": req.event_key,
+        "operator_source": "live_gui",
+        "status": "recorded" if req.level != "ERROR" else "failed",
+    })
+    event = await controller.emit_runtime_event(
+        event_type=clean_event_type,
+        message=req.message or f"Operator action recorded: {req.action or clean_event_type}",
+        payload=payload,
+        level=req.level,
+        run_id=run_id,
+    )
+    return {"ok": True, "event": event}
+
+
+@app.post("/api/runtime/operator-event")
+async def post_runtime_operator_event(req: RuntimeOperatorEventRequest) -> dict[str, object]:
+    """Record a Live GUI operator action against the current runtime session."""
+    return await _emit_runtime_operator_event(req)
+
+
+@app.post("/api/runs/{run_id}/operator-events")
+async def post_runtime_run_operator_event(run_id: str, req: RuntimeOperatorEventRequest) -> dict[str, object]:
+    """Record a Live GUI operator action against the addressed active run."""
+    _require_current_run(run_id)
+    return await _emit_runtime_operator_event(req, run_id=run_id)
+
+
 def _graph_config_items() -> list[tuple[str, Path, GraphConfig]]:
     """Return all discoverable graph configs, with the main closed-loop graph first."""
     items: list[tuple[str, Path, GraphConfig]] = []
@@ -844,6 +1126,18 @@ def _module_config_store() -> ModuleConfigStore:
     )
 
 
+def _self_evolution_service() -> SelfEvolutionService:
+    """Return the file-backed ATR self-evolution service."""
+    return SelfEvolutionService(
+        root=SELF_EVOLUTION_ROOT,
+        run_root=resolve_path("runs"),
+        graph_config_root=RUNTIME_GRAPH_CONFIG_ROOT,
+        graph_version_root=RUNTIME_GRAPH_VERSION_ROOT,
+        module_root=RUNTIME_MODULE_ROOT,
+        module_version_root=RUNTIME_MODULE_VERSION_ROOT,
+    )
+
+
 def _graph_config_payload(graph_id: str = PRIMARY_RUNTIME_GRAPH_ID) -> dict[str, object]:
     """Return one config-driven LangGraph definition as JSON-safe data."""
     config = _load_runtime_graph_config(graph_id)
@@ -854,6 +1148,35 @@ def _graph_config_digest(config: GraphConfig) -> str:
     """Return a stable digest for dry-run gating against the active graph payload."""
     payload = json.dumps(config.model_dump(mode="json"), ensure_ascii=True, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _graph_version_evidence(graph_id: str, config: GraphConfig) -> dict[str, object]:
+    """Return traceable graph version/hash evidence for run and event payloads."""
+    graph_hash = _graph_config_digest(config)
+    matched_version: dict[str, object] = {}
+    for item in _graph_version_store(graph_id).list_versions(graph_id):
+        version_id = str(item.get("version_id") or "")
+        if not version_id:
+            continue
+        try:
+            version = _graph_version_store(graph_id).read_version(graph_id, version_id)
+            version_graph = GraphConfig.model_validate(version.get("graph") or {})
+        except Exception:
+            continue
+        if _graph_config_digest(version_graph) == graph_hash:
+            matched_version = version
+            break
+    metadata = matched_version.get("metadata") if isinstance(matched_version.get("metadata"), dict) else {}
+    return {
+        "graph_id": graph_id,
+        "graph_hash": graph_hash,
+        "graph_version": str(matched_version.get("version_id") or metadata.get("version_id") or "active"),
+        "graph_version_id": str(matched_version.get("version_id") or metadata.get("version_id") or ""),
+        "graph_version_path": str(matched_version.get("path") or ""),
+        "graph_version_created_at": str(metadata.get("created_at") or ""),
+        "graph_version_author": str(metadata.get("author") or ""),
+        "graph_version_reason": str(metadata.get("reason") or ""),
+    }
 
 
 def _record_graph_dry_run(
@@ -1515,6 +1838,232 @@ def _current_run_id() -> str:
     return str(state.get("run_id") or "")
 
 
+def _artifact_items_for_run(run_id: str) -> tuple[Path, list[dict[str, object]]]:
+    """Return run artifacts with both native and package-compatibility ids."""
+    run_dir = _safe_run_dir(run_id)
+    if not run_dir.exists():
+        raise HTTPException(status_code=404, detail=f"Unknown run_id={run_id}")
+    artifacts: list[dict[str, object]] = []
+    for item in sorted(run_dir.rglob("*")):
+        if not item.is_file():
+            continue
+        rel = item.relative_to(run_dir).as_posix()
+        encoded_rel = quote(rel, safe="/")
+        artifact_id = f"{run_id}::{quote(rel, safe='')}"
+        preview_kind = _artifact_preview_kind(item)
+        artifacts.append(
+            {
+                "artifact_id": artifact_id,
+                "run_id": run_id,
+                "path": rel,
+                "name": item.name,
+                "suffix": item.suffix,
+                "size_bytes": item.stat().st_size,
+                "kind": "artifact",
+                "preview_kind": preview_kind,
+                "previewable": preview_kind in {"image", "text"},
+                "url": f"/api/runs/{run_id}/artifact-file/{encoded_rel}",
+                "download_url": f"/api/runs/{run_id}/artifact-file/{encoded_rel}?download=1",
+                "compat_url": f"/api/artifacts/{quote(artifact_id, safe='')}",
+            }
+        )
+    return run_dir, artifacts
+
+
+def _parse_artifact_id(artifact_id: str, run_id: str | None = None) -> tuple[str, str]:
+    """Decode a package-compatibility artifact id into run id and artifact path."""
+    raw = unquote(str(artifact_id or "").strip())
+    if "::" in raw:
+        decoded_run_id, encoded_path = raw.split("::", 1)
+        return decoded_run_id, unquote(encoded_path)
+    if raw.startswith("run-") and ":" in raw:
+        decoded_run_id, encoded_path = raw.split(":", 1)
+        return decoded_run_id, unquote(encoded_path)
+    if raw.startswith("run-") and "/" in raw:
+        decoded_run_id, artifact_path = raw.split("/", 1)
+        return decoded_run_id, artifact_path
+    return run_id or _current_run_id(), raw
+
+
+def _agent_definition(agent_id: str) -> dict[str, str]:
+    """Return one Live GUI agent definition by canonical id or module/stage alias."""
+    normalized = str(agent_id or "").strip().lower().replace("-", "_")
+    for item in LIVE_AGENT_DEFINITIONS:
+        aliases = {item["agent_id"], item["stage"], item["module_id"]}
+        if normalized in aliases:
+            return item
+    raise HTTPException(status_code=404, detail=f"Unknown agent_id={agent_id}")
+
+
+def _event_payload(event: dict[str, Any]) -> dict[str, Any]:
+    """Return event payload as a dict."""
+    payload = event.get("payload")
+    return payload if isinstance(payload, dict) else {}
+
+
+def _event_matches_agent(event: dict[str, Any], definition: dict[str, str]) -> bool:
+    """Match a runtime event to a Live GUI agent without relying on one backend shape."""
+    payload = _event_payload(event)
+    tokens = {
+        str(event.get("agent") or "").lower(),
+        str(event.get("agent_id") or "").lower(),
+        str(event.get("node_id") or "").lower(),
+        str(event.get("module_id") or "").lower(),
+        str(event.get("timestamp_stage") or "").lower(),
+        str(payload.get("agent") or "").lower(),
+        str(payload.get("agent_id") or "").lower(),
+        str(payload.get("node_id") or "").lower(),
+        str(payload.get("module_id") or "").lower(),
+        str(payload.get("stage") or "").lower(),
+    }
+    aliases = {definition["agent_id"], definition["stage"], definition["module_id"]}
+    if tokens.intersection(aliases):
+        return True
+    event_type = str(event.get("event_type") or event.get("type") or "").lower()
+    message = str(event.get("message") or "").lower()
+    return definition["agent_id"] in event_type or definition["agent_id"] in message
+
+
+def _events_for_agent(agent_id: str, run_id: str | None = None) -> tuple[dict[str, str], list[dict[str, Any]]]:
+    """Return recent runtime events filtered for one Live GUI agent."""
+    definition = _agent_definition(agent_id)
+    events = controller.recent_events()
+    if run_id:
+        events = [event for event in events if str(event.get("run_id") or "") == run_id]
+    return definition, [event for event in events if _event_matches_agent(event, definition)]
+
+
+def _agent_report_payload(agent_id: str, run_id: str | None = None) -> dict[str, object]:
+    """Build a lightweight academic-report payload for compatibility consumers."""
+    definition, events = _events_for_agent(agent_id, run_id=run_id)
+    snapshot = controller.planning_snapshot()
+    state = snapshot.get("state", {}) if isinstance(snapshot.get("state"), dict) else {}
+    messages = [msg for msg in snapshot.get("messages", []) if isinstance(msg, dict)]
+    role_aliases = {definition["agent_id"], definition["stage"], definition["module_id"]}
+    agent_messages = [msg for msg in messages if str(msg.get("role") or "").lower() in role_aliases]
+    warning_events = [event for event in events if str(event.get("level") or event.get("severity") or "").lower() in {"warning", "error", "critical"}]
+    status = "running" if str(state.get("stage") or "") == definition["stage"] and controller.snapshot().get("is_running") else "idle"
+    if warning_events:
+        status = "warning"
+    if events and str(events[-1].get("level") or "").lower() == "error":
+        status = "error"
+    summary = events[-1].get("message") if events else f"No runtime events recorded for {definition['label']} yet."
+    role_specific = LIVE_AGENT_REPORT_PROFILES.get(definition["agent_id"], {
+        "title": f"{definition['label']} Runtime Role",
+        "summary": f"Runtime evidence and follow-up context for {definition['label']}.",
+        "focus_rows": [],
+        "checklist": ["Review messages", "Inspect backend trace", "Confirm next action"],
+    })
+    process_steps = [
+        {
+            "timestamp": event.get("ts") or event.get("timestamp") or "",
+            "event_type": event.get("event_type") or event.get("type") or "runtime.event",
+            "message": event.get("message") or "",
+            "node_id": event.get("node_id") or _event_payload(event).get("node_id") or "",
+            "trace_id": event.get("trace_id") or _event_payload(event).get("trace_id") or "",
+        }
+        for event in events[-20:]
+    ]
+    tool_calls = [
+        {
+            "timestamp": event.get("ts") or event.get("timestamp") or "",
+            "event_type": event.get("event_type") or event.get("type") or "tool",
+            "message": event.get("message") or "",
+            "payload": _event_payload(event),
+        }
+        for event in events[-50:]
+        if "tool" in str(event.get("event_type") or event.get("type") or "").lower()
+        or bool(_event_payload(event).get("tool_calls"))
+        or bool(_event_payload(event).get("tool_call"))
+    ]
+    artifacts = []
+    for event in events[-50:]:
+        payload = _event_payload(event)
+        artifact_ids = event.get("artifact_ids") or payload.get("artifact_ids") or payload.get("artifacts") or []
+        if isinstance(artifact_ids, (str, bytes)):
+            artifact_ids = [artifact_ids]
+        if isinstance(artifact_ids, list):
+            for artifact_id in artifact_ids:
+                artifacts.append({
+                    "artifact_id": str(artifact_id),
+                    "event_id": str(event.get("event_id") or event.get("id") or ""),
+                    "event_type": str(event.get("event_type") or event.get("type") or ""),
+                })
+    next_action = "Inspect backend trace, answer pending questions, or continue the active run." if events else "Wait for runtime activity."
+    return {
+        "agent_id": definition["agent_id"],
+        "label": definition["label"],
+        "run_id": run_id or _current_run_id(),
+        "status": status,
+        "summary": summary,
+        "role_specific": role_specific,
+        "inputs": agent_messages[-12:],
+        "decisions": [],
+        "process_steps": process_steps,
+        "tool_calls": tool_calls,
+        "artifacts": artifacts,
+        "warnings": warning_events[-12:],
+        "handoff": {
+            "current_stage": str(state.get("stage") or ""),
+            "agent_stage": definition["stage"],
+            "next_action": next_action,
+        },
+        "next_action": next_action,
+        "sections": {
+            "overview": summary,
+            "role_specific": role_specific,
+            "messages": agent_messages[-12:],
+            "events": events[-50:],
+            "process_steps": process_steps,
+            "tool_calls": tool_calls,
+            "artifacts": artifacts,
+            "warnings": warning_events[-12:],
+            "handoff": {
+                "current_stage": str(state.get("stage") or ""),
+                "agent_stage": definition["stage"],
+                "next_action": next_action,
+            },
+            "next_action": next_action,
+        },
+        "backend_refs": {
+            "trace_id": str(events[-1].get("trace_id") or _event_payload(events[-1]).get("trace_id") or "") if events else "",
+            "node_id": str(events[-1].get("node_id") or "") if events else definition["stage"],
+            "graph_version": str(events[-1].get("graph_version") or "") if events else "",
+        },
+    }
+
+
+def _device_state_payload() -> dict[str, object]:
+    """Build package-compatible device state from controller health and resources."""
+    snapshot = controller.snapshot()
+    state = snapshot.get("state", {}) if isinstance(snapshot.get("state"), dict) else {}
+    health = state.get("device_health", {}) if isinstance(state.get("device_health"), dict) else {}
+    resources = _system_resource_snapshot()
+    devices: list[dict[str, object]] = []
+    for device_id, bridge_state in sorted(health.items()):
+        status = str(bridge_state or "unknown")
+        devices.append({
+            "device_id": str(device_id),
+            "name": str(device_id).replace("_", " ").title(),
+            "bridge_state": status,
+            "last_command": "runtime snapshot",
+            "last_heartbeat": datetime.now(timezone.utc).isoformat(),
+            "safe_state": "unsafe/review" if status.lower() in {"error", "failed", "unsafe"} else "safe/ready",
+            "status": status,
+        })
+    devices.append({
+        "device_id": "gpu",
+        "name": "GPU / vLLM",
+        "bridge_state": resources.get("gpu", {}).get("status", "unknown") if isinstance(resources.get("gpu"), dict) else "unknown",
+        "last_command": "resource telemetry",
+        "last_heartbeat": resources.get("updated_at", ""),
+        "safe_state": "resource monitor",
+        "status": resources.get("gpu", {}).get("status", "unknown") if isinstance(resources.get("gpu"), dict) else "unknown",
+        "payload": resources.get("gpu", {}),
+    })
+    return {"ok": True, "run_id": _current_run_id(), "devices": devices, "system_resources": resources}
+
+
 def _require_current_run(run_id: str) -> None:
     """Ensure a mutating run command targets the active run."""
     current = _current_run_id()
@@ -1637,6 +2186,7 @@ async def _emit_graph_compiled(
     graph_id: str,
     action: str,
     compiled_graph: dict[str, object],
+    graph_evidence: dict[str, object] | None = None,
 ) -> None:
     """Emit a standard Runtime IDE graph compiled event."""
     await controller.emit_runtime_event(
@@ -1648,6 +2198,7 @@ async def _emit_graph_compiled(
             "status": "compiled",
             "action": action,
             "compiled_graph": compiled_graph,
+            **dict(graph_evidence or {}),
         },
     )
 
@@ -2087,7 +2638,7 @@ async def validate_runtime_graph_draft(graph_id: str, req: RuntimeGraphSaveReque
         return {"ok": False, "graph_id": graph_id, "errors": errors, "compiled": False}
     compiler.compile()
     compiled_graph = compiler.summary()
-    await _emit_graph_compiled(graph_id=graph_id, action="validate-draft", compiled_graph=compiled_graph)
+    await _emit_graph_compiled(graph_id=graph_id, action="validate-draft", compiled_graph=compiled_graph, graph_evidence=_graph_version_evidence(graph_id, config))
     return {"ok": True, "graph_id": graph_id, "errors": [], "compiled": True, "compiled_graph": compiled_graph}
 
 
@@ -2102,7 +2653,7 @@ async def compile_runtime_graph(graph_id: str) -> dict[str, object]:
         return {"ok": False, "graph_id": graph_id, "errors": errors, "compiled": False}
     compiler.compile()
     compiled_graph = compiler.summary()
-    await _emit_graph_compiled(graph_id=graph_id, action="compile", compiled_graph=compiled_graph)
+    await _emit_graph_compiled(graph_id=graph_id, action="compile", compiled_graph=compiled_graph, graph_evidence=_graph_version_evidence(graph_id, config))
     return {"ok": True, "graph_id": graph_id, "errors": [], "compiled": True, "compiled_graph": compiled_graph}
 
 
@@ -2162,7 +2713,7 @@ async def import_runtime_graph_yaml(graph_id: str, req: RuntimeGraphYamlImportRe
         }
     compiler.compile()
     compiled_graph = compiler.summary()
-    await _emit_graph_compiled(graph_id=graph_id, action="import-yaml", compiled_graph=compiled_graph)
+    await _emit_graph_compiled(graph_id=graph_id, action="import-yaml", compiled_graph=compiled_graph, graph_evidence=_graph_version_evidence(graph_id, config))
     return {
         "ok": True,
         "graph_id": graph_id,
@@ -2218,7 +2769,7 @@ async def save_runtime_graph(graph_id: str, req: RuntimeGraphSaveRequest) -> dic
     compiler.compile()
     compiled_graph = compiler.summary()
     dry_run = _graph_dry_run_evidence(config=config, compiled_graph=compiled_graph, record_live_gate=False)
-    await _emit_graph_compiled(graph_id=graph_id, action="save", compiled_graph=compiled_graph)
+    await _emit_graph_compiled(graph_id=graph_id, action="save", compiled_graph=compiled_graph, graph_evidence=_graph_version_evidence(graph_id, config))
     payload = config.model_dump(mode="json")
     version = _graph_version_store(graph_id).save_version(graph_id, payload, reason=req.reason, author=req.author)
     if req.activate:
@@ -2239,6 +2790,41 @@ async def save_runtime_graph(graph_id: str, req: RuntimeGraphSaveRequest) -> dic
         "dry_run": dry_run,
         "dry_run_record": dry_run.get("dry_run_record", {}),
     }
+
+
+@app.post("/api/graphs/{graph_id}/save-version")
+async def save_runtime_graph_version_compat(graph_id: str, req: RuntimeGraphSaveVersionRequest | None = None) -> dict[str, object]:
+    """Compatibility endpoint for package-specified graph version saves.
+
+    Unlike the Runtime IDE PUT endpoint, this package endpoint defaults to
+    version-only writes. Activation still requires an explicit activate=true.
+    """
+    payload = req or RuntimeGraphSaveVersionRequest()
+    graph_payload = dict(payload.graph) if payload.graph else _graph_config_payload(graph_id)
+    result = await save_runtime_graph(
+        graph_id,
+        RuntimeGraphSaveRequest(
+            graph=graph_payload,
+            reason=payload.reason,
+            author=payload.author,
+            activate=payload.activate,
+        ),
+    )
+    if result.get("ok"):
+        await controller.emit_runtime_event(
+            event_type="graph_version_saved",
+            message=f"Graph version saved: {graph_id}",
+            payload={
+                "graph_id": graph_id,
+                "version": result.get("version"),
+                "activated": result.get("activated"),
+                "compatibility_endpoint": f"/api/graphs/{graph_id}/save-version",
+            },
+            level="INFO",
+        )
+    result["compatibility"] = "atr_live_gui_package"
+    result["save_version_endpoint"] = True
+    return result
 
 
 @app.post("/api/graphs/{graph_id}/dry-run")
@@ -2279,7 +2865,7 @@ async def dry_run_runtime_graph(graph_id: str, req: RuntimeGraphDryRunRequest | 
         }
     else:
         dry_run_record = _record_graph_dry_run(config=config, options=options, sequence=sequence, compiled_graph=compiled_graph)
-    await _emit_graph_compiled(graph_id=graph_id, action="dry-run-draft" if draft_mode else "dry-run", compiled_graph=compiled_graph)
+    await _emit_graph_compiled(graph_id=graph_id, action="dry-run-draft" if draft_mode else "dry-run", compiled_graph=compiled_graph, graph_evidence=_graph_version_evidence(graph_id, config))
     return {
         "ok": True,
         "graph_id": graph_id,
@@ -2335,6 +2921,7 @@ async def run_runtime_graph(graph_id: str, req: StartRunRequest) -> dict[str, ob
                 "has_record": bool(dry_run_record),
             },
         )
+    graph_evidence = _graph_version_evidence(graph_id, config)
     run = await controller.start(
         mode=Mode(req.mode),
         goal=req.goal,
@@ -2343,11 +2930,18 @@ async def run_runtime_graph(graph_id: str, req: StartRunRequest) -> dict[str, ob
         fault_stage=req.fault_stage,
         graph_id=graph_id,
         graph_config_path=config_path,
+        graph_hash=str(graph_evidence.get("graph_hash") or ""),
+        graph_version=str(graph_evidence.get("graph_version") or ""),
+        graph_version_id=str(graph_evidence.get("graph_version_id") or ""),
+        graph_version_path=str(graph_evidence.get("graph_version_path") or ""),
     )
-    await _emit_graph_compiled(graph_id=graph_id, action="run", compiled_graph=compiled_graph)
+    await _emit_graph_compiled(graph_id=graph_id, action="run", compiled_graph=compiled_graph, graph_evidence=graph_evidence)
     return {
         "ok": bool(run.get("ok")),
         "graph_id": graph_id,
+        "graph_hash": graph_evidence.get("graph_hash", ""),
+        "graph_version": graph_evidence.get("graph_version", ""),
+        "graph_version_id": graph_evidence.get("graph_version_id", ""),
         "errors": [],
         "run": run,
         "compiled_graph": compiled_graph,
@@ -3198,10 +3792,242 @@ async def post_lerobot_policy_download(req: LeRobotAPIRequest) -> dict[str, obje
     return await _publish_lerobot_result(result)
 
 
+@app.get("/api/evolution/targets")
+async def get_evolution_targets() -> dict[str, object]:
+    """List self-evolution targets mapped to current graph/module configs."""
+    return {"ok": True, "targets": _self_evolution_service().list_targets()}
+
+
+@app.get("/api/evolution/traces")
+async def get_evolution_traces(limit: int = 12) -> dict[str, object]:
+    """List recent run traces available for self-evolution."""
+    return {"ok": True, "traces": _self_evolution_service().latest_traces(limit=limit)}
+
+
+@app.get("/api/evolution/tasks")
+async def get_evolution_tasks() -> dict[str, object]:
+    """List self-evolution tasks."""
+    tasks = [task.model_dump(mode="json") for task in _self_evolution_service().list_tasks()]
+    return {"ok": True, "tasks": tasks}
+
+
+@app.post("/api/evolution/tasks")
+async def create_evolution_task(req: EvolutionTaskCreate) -> dict[str, object]:
+    """Create a self-evolution task without executing devices."""
+    task = _self_evolution_service().create_task(req)
+    await controller.emit_runtime_event(
+        event_type="evolution.task.created",
+        message=f"Self-evolution task created: {task.target_type}:{task.target_id}",
+        payload={"task": task.model_dump(mode="json")},
+        level="INFO",
+    )
+    return {"ok": True, "task": task.model_dump(mode="json")}
+
+
+@app.get("/api/evolution/tasks/{task_id}")
+async def get_evolution_task(task_id: str) -> dict[str, object]:
+    """Return one self-evolution task."""
+    try:
+        task = _self_evolution_service().read_task(task_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"ok": True, "task": task.model_dump(mode="json")}
+
+
+@app.post("/api/evolution/tasks/{task_id}/run")
+async def run_evolution_task(task_id: str) -> dict[str, object]:
+    """Generate and gate a candidate variant from selected closed-loop traces."""
+    result = _self_evolution_service().run_task(task_id, handler_registry=_runtime_graph_handler_registry())
+    level = "INFO" if result.get("ok") else "ERROR"
+    await controller.emit_runtime_event(
+        event_type="evolution.task.completed" if result.get("ok") else "evolution.task.failed",
+        message=f"Self-evolution task {task_id} {'completed' if result.get('ok') else 'failed'}",
+        payload=result,
+        level=level,
+    )
+    return result
+
+
+@app.get("/api/evolution/tasks/{task_id}/variants")
+async def get_evolution_task_variants(task_id: str) -> dict[str, object]:
+    """List variants generated for one task."""
+    variants = [variant.model_dump(mode="json") for variant in _self_evolution_service().list_variants(task_id)]
+    return {"ok": True, "task_id": task_id, "variants": variants}
+
+
+@app.get("/api/evolution/variants")
+async def get_evolution_variants(task_id: str | None = None, target_type: str | None = None, target_id: str | None = None) -> dict[str, object]:
+    """List self-evolution variants for history/leaderboard views."""
+    variants = _self_evolution_service().list_variants(task_id)
+    if target_type:
+        variants = [variant for variant in variants if variant.target_type == target_type]
+    if target_id:
+        variants = [variant for variant in variants if variant.target_id == target_id]
+    payload = [variant.model_dump(mode="json") for variant in variants]
+    return {"ok": True, "task_id": task_id or "", "target_type": target_type or "", "target_id": target_id or "", "variants": payload}
+
+
+@app.get("/api/evolution/variants/{variant_id}")
+async def get_evolution_variant(variant_id: str) -> dict[str, object]:
+    """Return one self-evolution variant."""
+    try:
+        variant = _self_evolution_service().read_variant(variant_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"ok": True, "variant": variant.model_dump(mode="json")}
+
+
+@app.post("/api/evolution/variants/{variant_id}/validate")
+async def validate_evolution_variant(variant_id: str) -> dict[str, object]:
+    """Re-run schema/compiler/dry-run gates for one variant."""
+    try:
+        variant = _self_evolution_service().evaluate_variant(variant_id, handler_registry=_runtime_graph_handler_registry())
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await controller.emit_runtime_event(
+        event_type="evolution.variant.validated",
+        message=f"Self-evolution variant validated: {variant_id}",
+        payload={"variant": variant.model_dump(mode="json")},
+        level="INFO" if all(gate.passed for gate in variant.gate_results) else "WARNING",
+    )
+    return {"ok": True, "variant": variant.model_dump(mode="json")}
+
+
+@app.post("/api/evolution/variants/{variant_id}/approve")
+async def approve_evolution_variant(variant_id: str, req: EvolutionActivationRequest | None = None) -> dict[str, object]:
+    """Approve a gate-passed variant for optional next-run activation."""
+    payload = req or EvolutionActivationRequest()
+    try:
+        variant = _self_evolution_service().approve_variant(variant_id, operator=payload.operator, note=payload.note)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    await controller.emit_runtime_event(
+        event_type="evolution.variant.approved",
+        message=f"Self-evolution variant approved: {variant_id}",
+        payload={"variant": variant.model_dump(mode="json")},
+        level="INFO",
+    )
+    return {"ok": True, "variant": variant.model_dump(mode="json")}
+
+
+@app.post("/api/evolution/variants/{variant_id}/activate")
+async def activate_evolution_variant(variant_id: str, req: EvolutionActivationRequest | None = None) -> dict[str, object]:
+    """Activate an approved variant for the next closed-loop run."""
+    if controller.snapshot().get("is_running"):
+        raise HTTPException(status_code=409, detail="Cannot activate self-evolution variant while a run is active.")
+    payload = req or EvolutionActivationRequest()
+    try:
+        variant = _self_evolution_service().activate_variant(
+            variant_id,
+            operator=payload.operator,
+            note=payload.note,
+            activate_runtime=payload.activate_runtime,
+            handler_registry=_runtime_graph_handler_registry(),
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    await controller.emit_runtime_event(
+        event_type="evolution.variant.activated",
+        message=f"Self-evolution variant active for next run: {variant_id}",
+        payload={"variant": variant.model_dump(mode="json")},
+        level="WARNING" if payload.activate_runtime else "INFO",
+    )
+    return {"ok": True, "variant": variant.model_dump(mode="json")}
+
+
+@app.post("/api/evolution/variants/{variant_id}/rollback")
+async def rollback_evolution_variant(variant_id: str, req: EvolutionRollbackRequest | None = None) -> dict[str, object]:
+    """Mark a self-evolution variant as rolled back in the evolution registry."""
+    payload = req or EvolutionRollbackRequest()
+    try:
+        variant = _self_evolution_service().rollback_variant(variant_id, operator=payload.operator, note=payload.note)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await controller.emit_runtime_event(
+        event_type="evolution.variant.rolled_back",
+        message=f"Self-evolution variant rolled back: {variant_id}",
+        payload={"variant": variant.model_dump(mode="json")},
+        level="WARNING",
+    )
+    return {"ok": True, "variant": variant.model_dump(mode="json")}
+
+
+@app.get("/api/evolution/lineage/{target_id}")
+async def get_evolution_lineage(target_id: str) -> dict[str, object]:
+    """Return active variant lineage for one target id."""
+    return {"ok": True, **_self_evolution_service().lineage(target_id)}
+
+
 @app.get("/api/events/recent")
 async def get_recent_events() -> dict[str, object]:
     """Return recent buffered events."""
     return {"events": controller.recent_events()}
+
+
+_PACKAGE_EVENT_TYPE_ALIASES = {
+    "run.created": "run_started",
+    "run_safe_stop": "safe_stop_triggered",
+    "graph.compiled": "graph_compiled",
+    "graph_version_saved": "graph_version_saved",
+    "tool_call_completed": "tool_call_completed",
+    "handoff_created": "handoff_created",
+    "agent_question": "agent_question",
+    "user_reply": "user_reply",
+    "approval.requested": "approval_requested",
+}
+
+
+def _package_runtime_event_type(event: dict[str, object]) -> str:
+    """Return the package-level RuntimeEventType while preserving internal event names elsewhere."""
+    raw_type = str(event.get("event_type") or event.get("type") or "runtime.event")
+    if raw_type == "approval.resolved":
+        payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+        decision = str(payload.get("decision") or "").lower()
+        if decision == "approved":
+            return "approval_granted"
+        if decision in {"rejected", "cancelled", "canceled"}:
+            return "approval_rejected"
+        return "approval_resolved"
+    if raw_type in _PACKAGE_EVENT_TYPE_ALIASES:
+        return _PACKAGE_EVENT_TYPE_ALIASES[raw_type]
+    return re.sub(r"[^a-zA-Z0-9]+", "_", raw_type).strip("_").lower() or "runtime_event"
+
+
+def _package_runtime_event(event: dict[str, object]) -> dict[str, object]:
+    """Normalize an internal runtime event for the imported Live GUI package contract."""
+    normalized = dict(event)
+    payload = dict(event.get("payload") or {}) if isinstance(event.get("payload"), dict) else {}
+    state = event.get("state") if isinstance(event.get("state"), dict) else {}
+    package_type = _package_runtime_event_type(event)
+    internal_type = str(event.get("event_type") or event.get("type") or package_type)
+    artifact_ids = event.get("artifact_ids") or payload.get("artifact_ids") or payload.get("artifacts") or []
+    if isinstance(artifact_ids, dict):
+        artifact_ids = [artifact_ids.get("artifact_id") or artifact_ids.get("id") or artifact_ids.get("path") or artifact_ids.get("url") or ""]
+    if not isinstance(artifact_ids, list):
+        artifact_ids = [artifact_ids]
+    unread_targets = event.get("unread_targets") or payload.get("unread_targets") or []
+    if isinstance(unread_targets, str):
+        unread_targets = [unread_targets]
+    if not isinstance(unread_targets, list):
+        unread_targets = []
+    normalized.update({
+        "event_type": internal_type,
+        "event_type_internal": internal_type,
+        "type": package_type,
+        "timestamp": event.get("timestamp") or event.get("ts") or datetime.now(timezone.utc).isoformat(),
+        "stage": event.get("stage") or payload.get("stage") or event.get("timestamp_stage") or state.get("stage", ""),
+        "agent_id": event.get("agent_id") or payload.get("agent_id") or payload.get("agent") or event.get("agent") or "",
+        "graph_id": event.get("graph_id") or payload.get("graph_id") or "atr_closed_loop",
+        "graph_version": event.get("graph_version") or payload.get("graph_version") or payload.get("version_id") or payload.get("graph_hash") or "",
+        "severity": str(event.get("severity") or event.get("level") or "info").lower(),
+        "artifact_ids": [str(item) for item in artifact_ids if str(item)],
+        "unread_targets": [str(item) for item in unread_targets if str(item)],
+    })
+    return normalized
 
 
 @app.get("/api/events/stream")
@@ -3209,12 +4035,77 @@ async def stream_events() -> StreamingResponse:
     """SSE stream endpoint for real-time GUI updates."""
     queue = controller.subscribe()
 
+    def sse_payload(event: dict[str, object]) -> str:
+        payload = json.dumps(event, ensure_ascii=True)
+        return f"event: update\ndata: {payload}\n\n"
+
     async def generator():
         try:
+            yield sse_payload(
+                {
+                    "event_id": make_event_id(),
+                    "event_type": "stream.connected",
+                    "level": "INFO",
+                    "message": "Runtime event stream connected",
+                    "ts": datetime.now(timezone.utc).isoformat(),
+                    "payload": {"heartbeat_interval_s": 15},
+                }
+            )
             while True:
-                event = await queue.get()
-                payload = json.dumps(event, ensure_ascii=True)
-                yield f"event: update\ndata: {payload}\n\n"
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=15.0)
+                except asyncio.TimeoutError:
+                    event = {
+                        "event_id": make_event_id(),
+                        "event_type": "stream.heartbeat",
+                        "level": "INFO",
+                        "message": "Runtime event stream heartbeat",
+                        "ts": datetime.now(timezone.utc).isoformat(),
+                        "payload": {"heartbeat": True},
+                    }
+                yield sse_payload(event)
+        except asyncio.CancelledError:
+            raise
+        finally:
+            controller.unsubscribe(queue)
+
+    return StreamingResponse(generator(), media_type="text/event-stream")
+
+
+@app.get("/api/runtime/events")
+async def stream_runtime_events_compat() -> StreamingResponse:
+    """Compatibility SSE stream using the imported package runtime event contract."""
+    queue = controller.subscribe()
+
+    def sse_payload(event: dict[str, object]) -> str:
+        payload = json.dumps(_package_runtime_event(event), ensure_ascii=True)
+        return f"event: update\ndata: {payload}\n\n"
+
+    async def generator():
+        try:
+            yield sse_payload(
+                {
+                    "event_id": make_event_id(),
+                    "event_type": "stream.connected",
+                    "level": "INFO",
+                    "message": "Runtime event stream connected",
+                    "ts": datetime.now(timezone.utc).isoformat(),
+                    "payload": {"heartbeat_interval_s": 15},
+                }
+            )
+            while True:
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=15.0)
+                except asyncio.TimeoutError:
+                    event = {
+                        "event_id": make_event_id(),
+                        "event_type": "stream.heartbeat",
+                        "level": "INFO",
+                        "message": "Runtime event stream heartbeat",
+                        "ts": datetime.now(timezone.utc).isoformat(),
+                        "payload": {"heartbeat": True},
+                    }
+                yield sse_payload(event)
         except asyncio.CancelledError:
             raise
         finally:
@@ -3315,6 +4206,36 @@ async def stop_run() -> dict[str, object]:
 @app.post("/api/run/safe-stop")
 async def safe_stop_run() -> dict[str, object]:
     """Request safe stop."""
+    return await controller.safe_stop()
+
+
+@app.post("/api/runtime/start")
+async def start_runtime_compat(req: StartRunRequest) -> dict[str, object]:
+    """Compatibility alias for package-specified runtime start."""
+    return await start_run(req)
+
+
+@app.post("/api/runtime/pause")
+async def pause_runtime_compat() -> dict[str, object]:
+    """Compatibility alias for package-specified runtime pause."""
+    return await controller.pause()
+
+
+@app.post("/api/runtime/resume")
+async def resume_runtime_compat() -> dict[str, object]:
+    """Compatibility alias for package-specified runtime resume."""
+    return await controller.resume()
+
+
+@app.post("/api/runtime/stop")
+async def stop_runtime_compat() -> dict[str, object]:
+    """Compatibility alias for package-specified runtime stop."""
+    return await controller.stop()
+
+
+@app.post("/api/runtime/safe-stop")
+async def safe_stop_runtime_compat() -> dict[str, object]:
+    """Compatibility alias for package-specified runtime safe-stop."""
     return await controller.safe_stop()
 
 
@@ -3423,6 +4344,34 @@ async def resolve_runtime_approval(run_id: str, approval_id: str, req: RuntimeAp
     return {"ok": True, "run_id": run_id, "approval_id": approval_id, "event": event, **updated}
 
 
+async def _resolve_approval_compat(approval_id: str, decision: Literal["approved", "rejected", "cancelled"], req: RuntimeApprovalResolveRequest | None) -> dict[str, object]:
+    """Resolve an approval through the package-level approval endpoint aliases."""
+    run_id = _current_run_id()
+    if not run_id:
+        raise HTTPException(status_code=404, detail="No active runtime run_id")
+    payload = req or RuntimeApprovalResolveRequest(decision=decision)
+    payload.decision = decision
+    return await resolve_runtime_approval(run_id, approval_id, payload)
+
+
+@app.post("/api/approvals/{approval_id}/approve")
+async def approve_runtime_approval_compat(approval_id: str, req: RuntimeApprovalResolveRequest | None = None) -> dict[str, object]:
+    """Compatibility endpoint for package-specified approval approval."""
+    return await _resolve_approval_compat(approval_id, "approved", req)
+
+
+@app.post("/api/approvals/{approval_id}/reject")
+async def reject_runtime_approval_compat(approval_id: str, req: RuntimeApprovalResolveRequest | None = None) -> dict[str, object]:
+    """Compatibility endpoint for package-specified approval rejection."""
+    return await _resolve_approval_compat(approval_id, "rejected", req)
+
+
+@app.post("/api/approvals/{approval_id}/revise")
+async def revise_runtime_approval_compat(approval_id: str, req: RuntimeApprovalResolveRequest | None = None) -> dict[str, object]:
+    """Compatibility endpoint for package-specified approval revision requests."""
+    return await _resolve_approval_compat(approval_id, "cancelled", req)
+
+
 @app.get("/api/runs/{run_id}/events")
 async def get_runtime_run_events(run_id: str) -> dict[str, object]:
     """Return buffered events for one run id."""
@@ -3435,29 +4384,7 @@ async def get_runtime_run_events(run_id: str) -> dict[str, object]:
 @app.get("/api/runs/{run_id}/artifacts")
 async def get_runtime_run_artifacts(run_id: str) -> dict[str, object]:
     """List artifact files created under one run directory."""
-    run_dir = _safe_run_dir(run_id)
-    if not run_dir.exists():
-        raise HTTPException(status_code=404, detail=f"Unknown run_id={run_id}")
-    artifacts: list[dict[str, object]] = []
-    for item in sorted(run_dir.rglob("*")):
-        if not item.is_file():
-            continue
-        rel = item.relative_to(run_dir).as_posix()
-        encoded = quote(rel, safe="/")
-        preview_kind = _artifact_preview_kind(item)
-        artifacts.append(
-            {
-                "path": rel,
-                "name": item.name,
-                "suffix": item.suffix,
-                "size_bytes": item.stat().st_size,
-                "kind": "artifact",
-                "preview_kind": preview_kind,
-                "previewable": preview_kind in {"image", "text"},
-                "url": f"/api/runs/{run_id}/artifact-file/{encoded}",
-                "download_url": f"/api/runs/{run_id}/artifact-file/{encoded}?download=1",
-            }
-        )
+    run_dir, artifacts = _artifact_items_for_run(run_id)
     return {"ok": True, "run_id": run_id, "run_dir": str(run_dir), "artifacts": artifacts}
 
 
@@ -3472,6 +4399,21 @@ async def get_runtime_run_artifact_file(run_id: str, artifact_path: str, downloa
         filename=path.name if download else None,
         content_disposition_type="attachment" if download else "inline",
     )
+
+
+@app.get("/api/artifacts")
+async def get_artifacts_compat(run_id: str | None = None) -> dict[str, object]:
+    """Compatibility endpoint listing artifacts for a run or the active run."""
+    selected_run_id = run_id or _current_run_id()
+    run_dir, artifacts = _artifact_items_for_run(selected_run_id)
+    return {"ok": True, "run_id": selected_run_id, "run_dir": str(run_dir), "artifacts": artifacts}
+
+
+@app.get("/api/artifacts/{artifact_id:path}")
+async def get_artifact_compat(artifact_id: str, run_id: str | None = None, download: bool = False) -> FileResponse:
+    """Compatibility endpoint serving one artifact by artifact_id."""
+    decoded_run_id, artifact_path = _parse_artifact_id(artifact_id, run_id=run_id)
+    return await get_runtime_run_artifact_file(decoded_run_id, artifact_path, download=download)
 
 
 @app.post("/api/runtime/gpu-clear")

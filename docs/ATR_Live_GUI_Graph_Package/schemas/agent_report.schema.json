@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AgentReport",
+  "type": "object",
+  "required": ["agent_id", "run_id", "status", "summary"],
+  "properties": {
+    "agent_id": {"type": "string"},
+    "run_id": {"type": "string"},
+    "status": {"type": "string", "enum": ["idle", "pending", "running", "done", "waiting", "warning", "error"]},
+    "summary": {"type": "string"},
+    "inputs": {"type": "array", "items": {"type": "object"}},
+    "decisions": {"type": "array", "items": {"type": "object"}},
+    "process_steps": {"type": "array", "items": {"type": "object"}},
+    "tool_calls": {"type": "array", "items": {"type": "object"}},
+    "artifacts": {"type": "array", "items": {"type": "object"}},
+    "warnings": {"type": "array", "items": {"type": "object"}},
+    "handoff": {"type": "object"},
+    "next_action": {"type": "string"},
+    "backend_refs": {
+      "type": "object",
+      "properties": {
+        "trace_id": {"type": "string"},
+        "prompt_id": {"type": "string"},
+        "handler": {"type": "string"},
+        "graph_version": {"type": "string"}
+      }
+    }
+  },
+  "additionalProperties": true
+}

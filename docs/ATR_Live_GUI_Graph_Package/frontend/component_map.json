@@ -1,0 +1,59 @@
+{
+  "shell": [
+    "LiveRuntimeShell",
+    "RuntimeHeader",
+    "AgenticBinder",
+    "CenterWorkspace",
+    "PersistentRuntimeChat",
+    "RuntimeTimeline",
+    "DeviceStatusStrip"
+  ],
+  "binder": [
+    "AgentBinderTab",
+    "BinderUnreadBadge",
+    "BinderContextMenu",
+    "AgentStateIcon"
+  ],
+  "center": [
+    "AgentReportPage",
+    "ReportSectionCard",
+    "ArtifactCard",
+    "BackendTraceDrawer",
+    "GraphMiniView",
+    "TimelineDetailView"
+  ],
+  "chat": [
+    "RuntimeChatPanel",
+    "ChatTargetSelector",
+    "ChatModeSelector",
+    "ApprovalCard",
+    "ChatQuickActions"
+  ],
+  "graph": [
+    "GraphEditorPage",
+    "GraphNodeCard",
+    "GraphEdgeInspector",
+    "NodeInspector",
+    "GraphValidationPanel",
+    "ModuleInternalGraph"
+  ],
+  "hooks": [
+    "useRuntimeEvents",
+    "useRuntimeState",
+    "useAgentReports",
+    "useBinderState",
+    "usePersistentChat",
+    "useGraphConfig",
+    "useApprovals"
+  ],
+  "stores": [
+    "runtimeStore",
+    "binderStore",
+    "reportStore",
+    "chatStore",
+    "graphStore",
+    "artifactStore",
+    "deviceStore",
+    "approvalStore"
+  ]
+}

@@ -956,18 +956,31 @@ class MainController:
         """Remove event subscription queue."""
         self._event_queues.discard(queue)
 
-    async def _emit_control_event(self, event_type: str, message: str) -> None:
-        """Emit control-plane events when run loop task is cancelled externally."""
+    async def _emit_control_event(self, event_type: str, message: str, payload: dict[str, Any] | None = None, level: str = "INFO") -> None:
+        """Emit auditable control-plane events for GUI/runtime action tracking."""
+        state_json = self._state.model_dump(mode="json")
+        event_payload = dict(payload or {})
+        event_payload.setdefault("source", "controller")
+        event_payload.setdefault("stage", state_json.get("stage", ""))
         await self._broadcast_controller_event(
             {
-                "event_id": f"evt-control-{event_type}",
+                "event_id": make_event_id(),
                 "run_id": self._state.run_id,
                 "experiment_id": self._state.experiment_id,
+                "timestamp_stage": state_json.get("stage", ""),
                 "event_type": event_type,
-                "level": "INFO",
+                "level": level,
                 "message": message,
-                "payload": {},
-                "state": self._state.model_dump(mode="json"),
+                "payload": event_payload,
+                "state": state_json,
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "type": event_type,
+                "severity": level.lower(),
+                "graph_id": event_payload.get("graph_id", "atr_closed_loop"),
+                "node_id": event_payload.get("node_id", event_payload.get("stage", state_json.get("stage", ""))),
+                "module_id": event_payload.get("module_id", ""),
+                "agent": event_payload.get("agent", ""),
+                "status": event_payload.get("status", "ok" if level != "ERROR" else "failed"),
             }
         )
 
@@ -1028,6 +1041,10 @@ class MainController:
         fault_stage: str = "",
         graph_id: str = "atr_closed_loop",
         graph_config_path: str | Path | None = None,
+        graph_hash: str = "",
+        graph_version: str = "",
+        graph_version_id: str = "",
+        graph_version_path: str = "",
     ) -> dict[str, Any]:
         """Start a new run if idle."""
         if self._run_task and not self._run_task.done():
@@ -1048,6 +1065,10 @@ class MainController:
             "graph_id": self._active_graph_id,
             "config_path": str(self._active_graph_config_path or ""),
             "primary": self._active_graph_id == "atr_closed_loop",
+            "graph_hash": graph_hash,
+            "graph_version": graph_version,
+            "graph_version_id": graph_version_id,
+            "graph_version_path": graph_version_path,
         }
         if goal:
             self._state.active_goal = goal
@@ -1063,6 +1084,10 @@ class MainController:
                 "mode": mode.value,
                 "goal": self._state.active_goal,
                 "graph_config_path": str(self._active_graph_config_path or ""),
+                "graph_hash": graph_hash,
+                "graph_version": graph_version,
+                "graph_version_id": graph_version_id,
+                "graph_version_path": graph_version_path,
             },
         )
 
@@ -1076,18 +1101,24 @@ class MainController:
             "run_id": self._state.run_id,
             "graph_id": self._active_graph_id,
             "graph_config_path": str(self._active_graph_config_path or ""),
+            "graph_hash": graph_hash,
+            "graph_version": graph_version,
+            "graph_version_id": graph_version_id,
+            "graph_version_path": graph_version_path,
             "startup_vllm": {"enabled": False, "manual_loading_required": True},
         }
 
     async def pause(self) -> dict[str, Any]:
         """Pause the active run loop."""
         self._state.is_paused = True
-        return {"ok": True, "message": "Paused"}
+        await self._emit_control_event("run_pause", "Run paused by operator", {"status": "paused", "control": "pause", "operator_action": True})
+        return {"ok": True, "message": "Paused", "state": self._state.model_dump(mode="json")}
 
     async def resume(self) -> dict[str, Any]:
         """Resume paused run loop."""
         self._state.is_paused = False
-        return {"ok": True, "message": "Resumed"}
+        await self._emit_control_event("run_resume", "Run resumed by operator", {"status": "resumed", "control": "resume", "operator_action": True})
+        return {"ok": True, "message": "Resumed", "state": self._state.model_dump(mode="json")}
 
     async def stop(self) -> dict[str, Any]:
         """Request stop for active run."""
@@ -1107,7 +1138,13 @@ class MainController:
     async def safe_stop(self) -> dict[str, Any]:
         """Request safe stop for active run."""
         self._state.safe_stop_requested = True
-        return {"ok": True, "message": "Safe stop requested"}
+        await self._emit_control_event(
+            "run_safe_stop",
+            "Safe stop requested by operator",
+            {"status": "safe_stop_requested", "control": "safe_stop", "operator_action": True},
+            level="WARNING",
+        )
+        return {"ok": True, "message": "Safe stop requested", "state": self._state.model_dump(mode="json")}
 
     async def planning_message(
         self,
@@ -1162,6 +1199,65 @@ class MainController:
             "constraints": constraints,
         }
         self._planning_messages.append(user_entry)
+        target_agent = str(
+            constraints.get("live_chat_target_resolved")
+            or constraints.get("live_chat_target")
+            or constraints.get("live_selected_agent")
+            or "operator"
+        )
+        selected_agent = str(constraints.get("live_selected_agent") or "")
+        selected_node = str(
+            constraints.get("live_selected_node_id")
+            or constraints.get("live_selected_graph_node_id")
+            or selected_agent
+            or target_agent
+            or self._state.stage.value
+        )
+        selected_trace_id = str(constraints.get("live_selected_trace_id") or "")
+        selected_event_key = str(constraints.get("live_selected_event_key") or "")
+        selected_report_section_text = str(constraints.get("live_selected_report_section_text") or "")
+        chat_mode = str(constraints.get("live_chat_mode") or "ask")
+        run_context = {
+            "run_id": constraints.get("live_run_id") or self._state.run_id,
+            "mode": constraints.get("live_mode") or self._state.mode.value,
+            "stage": constraints.get("live_stage") or self._state.stage.value,
+            "is_running": bool(constraints.get("live_is_running", bool(self._run_task and not self._run_task.done()))),
+            "active_goal": constraints.get("live_active_goal") or self._state.active_goal,
+        }
+        await self.emit_runtime_event(
+            event_type="user_reply",
+            message="Operator reply submitted from Live GUI.",
+            payload={
+                "latest": user_entry,
+                "session_id": session_id or self._planning_session_id or "",
+                "agent_id": target_agent,
+                "target_agent_id": target_agent,
+                "selected_agent_id": selected_agent,
+                "stage": selected_node,
+                "node_id": selected_node,
+                "selected_node_id": selected_node,
+                "selected_graph_node_id": constraints.get("live_selected_graph_node_id") or "",
+                "trace_id": selected_trace_id,
+                "selected_trace_id": selected_trace_id,
+                "event_key": selected_event_key,
+                "selected_event_key": selected_event_key,
+                "selected_event_id": constraints.get("live_selected_event_id") or "",
+                "selected_event_type": constraints.get("live_selected_event_type") or "",
+                "selected_report_section": constraints.get("live_selected_report_section") or "",
+                "selected_report_section_text": selected_report_section_text,
+                "selected_report_section_text_excerpt": selected_report_section_text[:600],
+                "run_context": run_context,
+                "live_run_id": run_context["run_id"],
+                "live_mode": run_context["mode"],
+                "live_stage": run_context["stage"],
+                "live_is_running": run_context["is_running"],
+                "live_active_goal": run_context["active_goal"],
+                "chat_mode": chat_mode,
+                "chat_target_mode": constraints.get("live_chat_target_mode") or "",
+                "source": "live_gui",
+            },
+            level="INFO",
+        )
 
         if self._should_trigger_test_design(message):
             return await self._run_test_mode_planning(goal=goal, constraints=constraints, operator_message=message)
@@ -1196,6 +1292,7 @@ class MainController:
                 "role": "orchestrator",
                 "content": response.text,
                 "reasoning": self._extract_reasoning(response.raw),
+                "token_usage": self._extract_token_usage(response.raw),
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "model": response.model,
                 "ok": True,
@@ -1276,6 +1373,7 @@ class MainController:
                     "role": "orchestrator",
                     "content": response.text,
                     "reasoning": self._extract_reasoning(response.raw),
+                    "token_usage": self._extract_token_usage(response.raw),
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                     "model": response.model,
                     "ok": True,
@@ -1344,6 +1442,7 @@ class MainController:
                     "```"
                 ),
                 "reasoning": self._extract_reasoning(response.raw),
+                "token_usage": self._extract_token_usage(response.raw),
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "model": response.model,
                 "ok": True,
@@ -1640,6 +1739,46 @@ class MainController:
         if last_error is not None:
             raise last_error
         raise RuntimeError("Live GUI orchestrator_plan call failed without an exception.")
+
+    @staticmethod
+    def _extract_token_usage(raw: dict[str, Any]) -> dict[str, int]:
+        """Extract token usage from OpenAI/vLLM or Ollama-style responses."""
+        if not isinstance(raw, dict):
+            return {}
+
+        def as_int(value: Any) -> int:
+            try:
+                number = int(float(value))
+            except (TypeError, ValueError):
+                return 0
+            return number if number >= 0 else 0
+
+        usage = raw.get("usage") if isinstance(raw.get("usage"), dict) else {}
+        prompt_tokens = as_int(
+            usage.get("prompt_tokens")
+            or usage.get("input_tokens")
+            or raw.get("prompt_eval_count")
+            or raw.get("prompt_tokens")
+            or raw.get("input_tokens")
+        )
+        completion_tokens = as_int(
+            usage.get("completion_tokens")
+            or usage.get("output_tokens")
+            or raw.get("eval_count")
+            or raw.get("completion_tokens")
+            or raw.get("output_tokens")
+        )
+        total_tokens = as_int(
+            usage.get("total_tokens")
+            or raw.get("total_tokens")
+            or (prompt_tokens + completion_tokens if prompt_tokens or completion_tokens else 0)
+        )
+        result = {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": total_tokens,
+        }
+        return {key: value for key, value in result.items() if value}
 
     @staticmethod
     def _extract_reasoning(raw: dict[str, Any]) -> str:

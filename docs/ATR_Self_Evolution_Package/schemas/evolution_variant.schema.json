@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "EvolutionVariant",
+  "type": "object",
+  "required": [
+    "variant_id",
+    "task_id",
+    "target_type",
+    "score",
+    "status"
+  ],
+  "properties": {
+    "variant_id": {
+      "type": "string"
+    },
+    "task_id": {
+      "type": "string"
+    },
+    "parent_version": {
+      "type": "string"
+    },
+    "target_type": {
+      "enum": [
+        "prompt",
+        "tool",
+        "graph",
+        "report",
+        "policy",
+        "code_patch"
+      ]
+    },
+    "body": {
+      "type": "object"
+    },
+    "diff": {
+      "type": "string"
+    },
+    "score": {
+      "type": "number"
+    },
+    "metrics": {
+      "type": "object"
+    },
+    "gate_results": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "status": {
+      "enum": [
+        "draft",
+        "generated",
+        "evaluated",
+        "gate_passed",
+        "approved",
+        "active_next_run",
+        "active",
+        "rejected",
+        "rolled_back"
+      ]
+    }
+  }
+}

@@ -24,6 +24,7 @@ Modification guide:
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>{{ title }}</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
     <link rel="stylesheet" href="/static/styles.css?v=atr-ui-20260525-7" />
   </head>
   <body>
@@ -200,6 +201,15 @@ Modification guide:
             <strong>CalculiX · bottom fixed · top cyclic</strong>
             <p id="cae-workspace-detail">Reading CAE bridge status.</p>
             <a id="btn-open-cae" class="btn primary" href="/cae" target="_blank" rel="noopener">Open CAE Workspace</a>
+          </article>
+          <article class="workspace-card">
+            <div class="status-head">
+              <span class="status-title">Self-Evolution Lab</span>
+              <span class="status-dot idle"></span>
+            </div>
+            <strong>Trace mining · candidate gates · next-run activation</strong>
+            <p>Closed-loop run traces를 기반으로 prompt/graph/report/policy 후보를 검증합니다.</p>
+            <a id="btn-open-evolution" class="btn primary" href="/evolution-lab" target="_blank" rel="noopener">Open Evolution Lab</a>
           </article>
         </div>
       </section>

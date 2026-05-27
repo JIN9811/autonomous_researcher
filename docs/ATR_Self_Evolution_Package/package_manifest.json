@@ -1,0 +1,20 @@
+{
+  "package": "ATR_Self_Evolution_Package",
+  "created": "2026-05-25T18:27:24.826558Z",
+  "purpose": "Codex-ready implementation guidance for ATR Self-Evolution Engine inspired by Hermes Agent Self-Evolution",
+  "files": [
+    "ATR_Self_Evolution_Codex_Instructions.txt",
+    "assets/reference/atr_self_evolution_reference.png",
+    "backend/api_routes_reference.py",
+    "backend/self_evolution_models.py",
+    "docs/EVOLUTION_LAB_UI_SPEC.md",
+    "docs/EVOLUTION_SAFETY_POLICY.md",
+    "docs/HERMES_ADAPTATION_NOTES.md",
+    "docs/SELF_EVOLUTION_SPEC.md",
+    "frontend/evolution_lab_tokens.css",
+    "schemas/evolution_gate_result.schema.json",
+    "schemas/evolution_task.schema.json",
+    "schemas/evolution_trace.schema.json",
+    "schemas/evolution_variant.schema.json"
+  ]
+}

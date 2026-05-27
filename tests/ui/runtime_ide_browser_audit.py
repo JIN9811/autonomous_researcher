@@ -13,12 +13,16 @@ from __future__ import annotations
 import argparse
 import base64
 import json
+import os
 import sys
 import time
 import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any
+
+
+WEBDRIVER_HTTP_TIMEOUT_S = float(os.environ.get("ATR_WEBDRIVER_HTTP_TIMEOUT_S", "90"))
 
 
 class WebDriverAudit:
@@ -36,7 +40,7 @@ class WebDriverAudit:
             method=method,
             headers={"Content-Type": "application/json"},
         )
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, timeout=WEBDRIVER_HTTP_TIMEOUT_S) as resp:
             data = resp.read().decode("utf-8")
         return json.loads(data)["value"]
 
@@ -173,8 +177,19 @@ return {
     canvas = result["boxes"].get("ide-graph-canvas") or {}
     assert_true(result["title"] == "ATR Runtime IDE", "unexpected page title", failures)
     assert_true(result["activeGraph"] == "atr_closed_loop", "primary graph did not load", failures)
+    viewport = result.get("viewport") or {}
+    viewport_w = float(viewport.get("w") or 0)
+    viewport_h = float(viewport.get("h") or 0)
     assert_true(float(canvas.get("y", 9999)) <= 520.0, f"graph canvas starts too low: y={canvas.get('y')}", failures)
-    assert_true(float((result.get("draftSafety") or {}).get("h", 9999)) <= 80.0, "draft safety strip is too tall", failures)
+    if viewport_w >= 1900:
+        minimap = result["boxes"].get("ide-minimap") or {}
+        assert_true(float(canvas.get("y", 9999)) <= 360.0, f"1920px workbench canvas should start near first-screen top: y={canvas.get('y')}", failures)
+        assert_true(float(canvas.get("w", 0)) >= 1200.0, f"1920px workbench canvas is too narrow: w={canvas.get('w')}", failures)
+        assert_true(float(minimap.get("y", 9999)) < viewport_h, f"minimap should be visible in first 1080px viewport: y={minimap.get('y')} viewport={viewport_h}", failures)
+    if viewport_w >= 2400:
+        assert_true(float(canvas.get("w", 0)) >= 1650.0, f"large-screen canvas did not expand: w={canvas.get('w')}", failures)
+        assert_true(float(canvas.get("h", 0)) >= 720.0, f"large-screen canvas did not grow vertically: h={canvas.get('h')}", failures)
+    assert_true(float((result.get("draftSafety") or {}).get("h", 9999)) <= 42.0, "draft safety strip is too tall", failures)
     assert_true(float((result.get("operatorDrawers") or {}).get("h", 9999)) <= 60.0, "closed operator drawers are too tall", failures)
     compat = result.get("compatModuleConfig") or {}
     assert_true(bool(compat.get("exists")), "Runtime IDE compatibility module config host is missing", failures)

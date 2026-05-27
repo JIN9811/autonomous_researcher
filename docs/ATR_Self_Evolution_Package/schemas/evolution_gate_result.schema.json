@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "EvolutionGateResult",
+  "type": "object",
+  "required": [
+    "gate_id",
+    "passed"
+  ],
+  "properties": {
+    "gate_id": {
+      "type": "string"
+    },
+    "passed": {
+      "type": "boolean"
+    },
+    "score": {
+      "type": "number"
+    },
+    "message": {
+      "type": "string"
+    },
+    "details": {
+      "type": "object"
+    }
+  }
+}

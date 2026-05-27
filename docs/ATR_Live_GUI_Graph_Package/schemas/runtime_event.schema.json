@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RuntimeEvent",
+  "type": "object",
+  "required": ["event_id", "timestamp", "run_id", "type", "severity", "message"],
+  "properties": {
+    "event_id": {"type": "string"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "run_id": {"type": "string"},
+    "graph_id": {"type": "string"},
+    "graph_version": {"type": "string"},
+    "graph_hash": {"type": "string"},
+    "stage": {"type": "string"},
+    "agent_id": {"type": "string"},
+    "node_id": {"type": "string"},
+    "type": {
+      "type": "string",
+      "enum": [
+        "run_started", "run_completed", "run_failed", "stage_changed",
+        "agent_started", "agent_completed", "agent_failed", "agent_question",
+        "user_reply", "approval_requested", "approval_granted", "approval_rejected",
+        "tool_call_started", "tool_call_completed", "artifact_created", "handoff_created",
+        "graph_validated", "graph_compiled", "graph_version_saved", "device_state_changed",
+        "safe_stop_triggered"
+      ]
+    },
+    "severity": {"type": "string", "enum": ["debug", "info", "warning", "error", "critical"]},
+    "message": {"type": "string"},
+    "payload": {"type": "object"},
+    "trace_id": {"type": "string"},
+    "artifact_ids": {"type": "array", "items": {"type": "string"}},
+    "unread_targets": {"type": "array", "items": {"type": "string"}}
+  },
+  "additionalProperties": true
+}

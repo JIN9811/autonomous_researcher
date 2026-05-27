@@ -906,7 +906,7 @@ def test_runtime_ide_page_and_main_entry_render() -> None:
     assert ide.status_code == 200
     assert "ATR Runtime IDE" in ide.text
     assert "/static/runtime_ide.js" in ide.text
-    assert "runtime_ide.js?v=atr-ui-20260526-82" in ide.text
+    assert "runtime_ide.js?v=atr-ui-20260526-83" in ide.text
     assert "ide-run-status" in ide.text
     assert "ide-run-id" in ide.text
     assert "ide-active-agent" in ide.text
@@ -915,8 +915,8 @@ def test_runtime_ide_page_and_main_entry_render() -> None:
     assert "ide-node-list" in ide.text
     assert "ide-infra-list" in ide.text
     assert "ide-template-list" in ide.text
-    assert "Module Library" in ide.text
-    assert "runtime_ide.css?v=atr-ui-20260526-82" in ide.text
+    assert "Modules" in ide.text
+    assert "runtime_ide.css?v=atr-ui-20260526-84" in ide.text
     assert "ide-module-management-open-btn" in ide.text
     assert "data-open-module-management" in ide.text
     assert "Open Module Management Tool" in ide.text
@@ -924,7 +924,7 @@ def test_runtime_ide_page_and_main_entry_render() -> None:
     assert "ide-device-status" in ide.text
     assert "ide-metrics-panel" in ide.text
     assert "ide-approval-queue" in ide.text
-    assert "Human Approval Queue" in ide.text
+    assert "Approvals" in ide.text
     assert "ide-pause-run-btn" in ide.text
     assert "ide-resume-run-btn" in ide.text
     assert "ide-stop-run-btn" in ide.text
@@ -939,15 +939,15 @@ def test_runtime_ide_page_and_main_entry_render() -> None:
     assert "ide-edge-delete-btn" in ide.text
     assert "ide-live-status" in ide.text
     assert "ide-runtime-readiness" in ide.text
-    assert "Runtime Readiness" in ide.text
+    assert "Readiness" in ide.text
     assert "ide-minimap" in ide.text
     assert "ide-zoom-in-btn" in ide.text
     assert "ide-fit-graph-btn" in ide.text
     assert "ide-draft-safety-strip" in ide.text
     assert "ide-run-launcher-drawer" in ide.text
     assert "ide-run-target-summary" in ide.text
-    assert "Run Saved Test" in ide.text
-    assert "Run Saved Live" in ide.text
+    assert "Run saved test graph" in ide.text
+    assert "Run saved live graph" in ide.text
     assert "runtime-draft-safety-strip" in ide.text
     assert "ide-canvas-view-hint" in ide.text
     assert "ide-export-yaml-btn" in ide.text
@@ -956,7 +956,7 @@ def test_runtime_ide_page_and_main_entry_render() -> None:
     assert "ide-live-preflight" in ide.text
     assert "ide-run-timeline" in ide.text
     assert "ide-event-detail" in ide.text
-    assert "Selected Event Detail" in ide.text
+    assert "Event Detail" in ide.text
     assert "runtime-ide-runtime-detail-grid" in ide.text
     assert "ide-artifact-lineage" in ide.text
     assert "ide-artifact-preview" in ide.text
@@ -1237,7 +1237,7 @@ def test_runtime_ide_page_and_main_entry_render() -> None:
     assert "graphConfigFingerprint" in js
     assert "activeDraftConfigDiff" in js
     assert "readableFitMinZoom" in js
-    assert "scroll/map" in js
+    assert '`V${percent}%' in js
     assert "Fit graph viewport to readable" in js
     assert "runtime-ide-minimap-viewport" in js
     assert "centerCanvasOnWorldPoint" in js

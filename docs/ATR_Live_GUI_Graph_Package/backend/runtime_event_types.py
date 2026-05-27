@@ -1,0 +1,40 @@
+from enum import Enum
+
+class RuntimeEventType(str, Enum):
+    RUN_STARTED = "run_started"
+    RUN_COMPLETED = "run_completed"
+    RUN_FAILED = "run_failed"
+    STAGE_CHANGED = "stage_changed"
+    AGENT_STARTED = "agent_started"
+    AGENT_COMPLETED = "agent_completed"
+    AGENT_FAILED = "agent_failed"
+    AGENT_QUESTION = "agent_question"
+    USER_REPLY = "user_reply"
+    APPROVAL_REQUESTED = "approval_requested"
+    APPROVAL_GRANTED = "approval_granted"
+    APPROVAL_REJECTED = "approval_rejected"
+    TOOL_CALL_STARTED = "tool_call_started"
+    TOOL_CALL_COMPLETED = "tool_call_completed"
+    ARTIFACT_CREATED = "artifact_created"
+    HANDOFF_CREATED = "handoff_created"
+    GRAPH_VALIDATED = "graph_validated"
+    GRAPH_COMPILED = "graph_compiled"
+    GRAPH_VERSION_SAVED = "graph_version_saved"
+    DEVICE_STATE_CHANGED = "device_state_changed"
+    SAFE_STOP_TRIGGERED = "safe_stop_triggered"
+
+class RuntimeSeverity(str, Enum):
+    DEBUG = "debug"
+    INFO = "info"
+    WARNING = "warning"
+    ERROR = "error"
+    CRITICAL = "critical"
+
+class AgentState(str, Enum):
+    IDLE = "idle"
+    PENDING = "pending"
+    RUNNING = "running"
+    DONE = "done"
+    WAITING = "waiting"
+    WARNING = "warning"
+    ERROR = "error"

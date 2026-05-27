@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<!--
+File purpose:
+- Self-Evolution Lab GUI for trace-guided prompt/graph/report/policy variants.
+
+Inputs/outputs:
+- Input: /api/evolution/*
+- Output: candidate variants, gate checklist, approval/activation controls
+-->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{ title }}</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="page equipment-setup-page evolution-page">
+      <section class="hero panel">
+        <div class="hero-copy">
+          <p class="eyebrow">Trace-Guided Meta Runtime</p>
+          <h1>ATR Self-Evolution Lab</h1>
+          <p class="subhead">
+            Closed-loop run trace를 기반으로 prompt, graph config, report template, recovery policy 후보를 만들고
+            schema/compile/dry-run/approval gate를 통과한 후보만 다음 run에 반영합니다.
+          </p>
+          <div class="hero-badges">
+            <span class="hero-badge">no direct hardware execution</span>
+            <span class="hero-badge">versioned activation</span>
+            <span class="hero-badge">rollback-aware</span>
+          </div>
+        </div>
+        <article class="status-card">
+          <div class="status-head">
+            <span class="status-title">Evolution Runtime</span>
+            <span id="evolution-status-dot" class="status-dot idle"></span>
+          </div>
+          <strong id="evolution-status-label">Loading</strong>
+          <p id="evolution-status-detail">Reading targets and traces.</p>
+        </article>
+      </section>
+
+      <section class="panel equipment-setup-grid printer-setup-grid">
+        <article>
+          <h2>1. Evolution Task</h2>
+          <div class="lerobot-form-grid">
+            <label>
+              Target
+              <select id="evolution-target-input" class="text-input"></select>
+            </label>
+            <label>
+              Source Run
+              <select id="evolution-run-input" class="text-input"></select>
+            </label>
+          </div>
+          <label class="planning-message-label">
+            Objective
+            <textarea id="evolution-objective-input" class="text-input" rows="5">Improve next closed-loop run reliability by reducing missing handoff fields and surfacing failed gates before hardware execution.</textarea>
+          </label>
+          <div class="button-row">
+            <button id="btn-evolution-refresh" class="btn">Refresh</button>
+            <button id="btn-evolution-create-run" class="btn primary">Create + Run Task</button>
+          </div>
+        </article>
+
+        <article>
+          <h2>2. Candidate Gate</h2>
+          <div id="evolution-candidate-summary" class="printer-status-output compact-output">No candidate yet.</div>
+          <div class="button-row">
+            <button id="btn-evolution-validate" class="btn">Validate Gates</button>
+            <button id="btn-evolution-approve" class="btn">Approve</button>
+            <button id="btn-evolution-activate" class="btn warning">Activate Next Run</button>
+            <button id="btn-evolution-rollback" class="btn danger">Rollback Mark</button>
+          </div>
+        </article>
+      </section>
+
+      <section class="panel equipment-setup-grid printer-setup-grid">
+        <article>
+          <h2>3. Evolution Pipeline</h2>
+          <div id="evolution-pipeline-output" class="evolution-pipeline-output">No pipeline activity yet.</div>
+        </article>
+        <article>
+          <h2>4. Candidate Leaderboard</h2>
+          <div id="evolution-leaderboard-output" class="printer-status-output compact-output">No candidates loaded.</div>
+        </article>
+      </section>
+
+      <section class="panel equipment-setup-grid printer-setup-grid">
+        <article>
+          <h2>5. Task / Variant History</h2>
+          <div id="evolution-history-output" class="printer-status-output compact-output">No task history loaded.</div>
+        </article>
+        <article>
+          <h2>6. Target Lineage</h2>
+          <div id="evolution-lineage-output" class="printer-status-output compact-output">No lineage loaded.</div>
+        </article>
+      </section>
+
+      <section class="panel">
+        <div class="panel-title-row">
+          <h2>Variant Diff / Body</h2>
+          <span id="evolution-active-variant" class="badge idle">none</span>
+        </div>
+        <pre id="evolution-output" class="printer-log-output compact-output">Waiting for candidate generation.</pre>
+      </section>
+    </main>
+    <script src="/static/evolution_lab.js" defer></script>
+  </body>
+</html>

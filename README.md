@@ -1,165 +1,105 @@
 # Autonomous Researcher Framework
 
-Local-first multi-agent autonomous research framework designed for DGX Spark-style lab orchestration with:
-- NemoClaw/k3s vLLM as default inference backend
-- OpenShell/NemoClaw-aligned secure runtime assumptions
-- LangGraph-backed config-driven state graph
-- MCP-style tool abstraction
-- Autonomous Experiment Runtime API for common objective/evaluation records
-- Full test-mode dry-run support
-- Real-time web GUI for loop visualization
+Autonomous Researcher Framework는 실험 계획-실행-평가 루프를 하나로 묶는 멀티 에이전트 시스템입니다.
+LangGraph 기반 런타임, Live GUI, 장비 브릿지(Prusa/LeRobot/Windows), BO/CAE/분석 파이프라인을 포함합니다.
 
-## Quick Start
+## 1) 한눈에 보기
 
-See `REQUIREMENTS.md` for OS tools, Docker/NemoClaw, vLLM model checkpoints,
-LeRobot, PrusaSlicer, and Windows bridge setup requirements.
+- 주 엔트리: `cd /home/jin/autonomous_researcher`
+- 실행: `atr up`
+- 정지: `atr down`
+- 문서 허브: [`docs/README.md`](docs/README.md)
+- API 문서: `http://localhost:7860/docs`
+- Live GUI: `http://localhost:7860/live`
 
-Development rule: keep `main` as the latest known-good version. Use a branch
-when requested or when the change is risky, then merge only after it works.
-
-1. Create environment and install dependencies:
+## 2) 설치 순서
 
 ```bash
 cd /home/jin/autonomous_researcher
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-```
-
-2. (Optional) Copy `.env.example` to `.env` and edit values.
-
-3. Install the terminal launcher:
-
-```bash
 bash install/install_cli.sh
 ```
 
-If this is the first time `~/.local/bin` was added to PATH, open a new terminal or run:
+`source ~/.bashrc` 또는 새 터미널을 열어 `atr` 명령을 PATH에 반영합니다.
 
-```bash
-source ~/.bashrc
-```
+Alternative(임시): ` .venv/bin/python -m app.serve `
 
-4. Run the web app from any terminal:
+## 3) 실행 모드
 
-```bash
-atr up
-```
+- `live`
+  - 실제 장비 연동(Prusa/LeRobot/Windows)
+  - `experiment.evaluate`, 장비 큐, 안전 게이트 적용
+- `test`
+  - 시뮬레이션/드라이런 + dry-run 기반 검증
+- `virtual`
+  - 물리 액션 없이 평가/벤치마크 중심 실행
 
-Stop the installed GUI server from any terminal:
+실행 모드는 런타임 계약(`runtime/autonomous_experiment_runtime.md`)에 따라 일관된 인터페이스로 처리됩니다.
 
-```bash
-atr down
-```
+## 4) 핵심 아키텍처
 
-During clean shutdown, the server releases LeRobot live subprocesses tied to this checkout so stale teleoperation/recording jobs do not keep cameras or serial ports open.
+- Runtime: LangGraph config-driven execution
+- 실행 게이트: graph validate/dry-run/compile/version
+- 장비 제어: 브릿지 모듈 + MCP tool registry + job queue
+- 추적: 이벤트 트레이스, run artifact lineage, approval 로그
+- GUI: `/live`, `/ide`, `/bo`, `/printer`, `/lerobot`, `/module-management`
 
-Alternative without installing the launcher:
+## 5) 빠른 문서 맵
 
-```bash
-.venv/bin/python -m app.serve
-```
+### 운영/핵심
 
-5. Open:
-- `http://localhost:7860` for the GUI
-- `http://localhost:7860/docs` for API docs
+- [`docs/project/Project_guide.txt`](docs/project/Project_guide.txt)
+- [`docs/runtime/langgraph_runtime.md`](docs/runtime/langgraph_runtime.md)
+- [`docs/runtime/autonomous_experiment_runtime.md`](docs/runtime/autonomous_experiment_runtime.md)
+- [`docs/runtime/agent_program_baseline.md`](docs/runtime/agent_program_baseline.md)
+- [`docs/runtime/architecture.md`](docs/runtime/architecture.md)
+- [`docs/gui/live_gui_evolution_plan.md`](docs/gui/live_gui_evolution_plan.md)
 
-Full terminal command usage is documented in `./install/README.md`.
+### 장비 연동
 
-First end-to-end operator tutorial:
+- [`docs/hardware/lerobot_robotis_manipulation_runtime_guideline.md`](docs/hardware/lerobot_robotis_manipulation_runtime_guideline.md)
+- [`docs/hardware/printer_agent_prusabridge_phase1_runtime_guideline.txt`](docs/hardware/printer_agent_prusabridge_phase1_runtime_guideline.txt)
+- [`docs/hardware/windows_pyautogui_equipment_agent_guideline.md`](docs/hardware/windows_pyautogui_equipment_agent_guideline.md)
 
-- `./docs/tutorials/first_autonomous_run.md`
+### 에이전트 워크플로우
 
-## LeRobot Pi0.5 Training
+- [`docs/agents/specimen_design_existing_runtime_guideline.txt`](docs/agents/specimen_design_existing_runtime_guideline.txt)
+- [`docs/agents/bo_agent_runtime_guideline.txt`](docs/agents/bo_agent_runtime_guideline.txt)
+- [`docs/agents/vision_pickup_observation_runtime_guideline.txt`](docs/agents/vision_pickup_observation_runtime_guideline.txt)
+- [`docs/agents/manipulation_pi05_transfer_runtime_guideline.txt`](docs/agents/manipulation_pi05_transfer_runtime_guideline.txt)
+- [`docs/agents/analysis_utm_runtime_guideline.txt`](docs/agents/analysis_utm_runtime_guideline.txt)
+- [`docs/agents/cae_analysis_runtime_guideline.txt`](docs/agents/cae_analysis_runtime_guideline.txt)
 
-Pi0.5 training uses a separate LeRobot checkout and conda environment so the ROBOTIS OMX live robot runtime stays on `/home/jin/lerobot` + `lerobot`.
+### 데스크탑/로컬 작업
 
-Current Pi0.5 setup:
+- [`REQUIREMENTS.md`](/home/jin/autonomous_researcher/REQUIREMENTS.md)
+- [`install/README.md`](install/README.md)
+- [`docs/tutorials/first_autonomous_run.md`](docs/tutorials/first_autonomous_run.md)
 
-```bash
-cd /home/jin
-git -C /home/jin/lerobot worktree add /home/jin/lerobot_pi05 upstream/feat/add-pi05
-conda create -y -n lerobot-pi05 --clone lerobot
-conda run -n lerobot-pi05 pip install -e '/home/jin/lerobot_pi05[pi]'
-```
+## 6) 추천 실행 흐름
 
-Prefetch the Pi0.5 base model into the GUI training cache:
+1. 설치 완료 후 `atr up`
+2. Live GUI에서 초기 세션 생성 및 상태 확인
+3. 테스트 모드로 기본 파이프라인 실행
+4. 장비 브릿지 설정 및 연결 체크(Prusa/LeRobot/Windows)
+5. 실험 후보를 BO/모듈 평가 후 실제 실행 전 dry-run 확인
+6. 승인 후 live run 실행
 
-```bash
-mkdir -p /home/jin/.cache/huggingface_pi05
-HF_HOME=/home/jin/.cache/huggingface_pi05 HF_HUB_CACHE=/home/jin/.cache/huggingface_pi05/hub HF_HUB_DISABLE_XET=1 conda run -n lerobot-pi05 hf download lerobot/pi05_base --max-workers 1
-```
+## 7) 기여/운영 규칙
 
-Verify:
+- 기본 브랜치는 동작 보장 상태를 유지합니다.
+- 중요 변경은 브랜치에서 검증 후 병합.
+- 신규 장비/프로토콜 연동은 기존 규격을 먼저 문서화하고, 그 다음 코드 변경.
 
-```bash
-conda run -n lerobot-pi05 python -c "from lerobot.policies.pi05.configuration_pi05 import PI05Config; print(PI05Config().type)"
-```
+## 8) Pi0.5 워크플로우(참조)
 
-In the GUI, open `/lerobot`, set Training `Policy Type` to `pi05 (Pi0.5)`, keep `Train Source Policy / HF Base` as `lerobot/pi05_base`, then start training. The bridge runs Pi0.5 training through `conda run -n lerobot-pi05 lerobot-train`, adds `--policy.pretrained_path=lerobot/pi05_base`, and sets `HF_HOME=/home/jin/.cache/huggingface_pi05` plus `HF_HUB_DISABLE_XET=1` for the live train process.
+Pi0.5는 별도 LeRobot checkout/conda 환경에서 운영합니다.
+상세 절차는 `docs/runtime/lerobot_dataset_policy_naming.md` 와 `docs/hardware/lerobot_robotis_manipulation_runtime_guideline.md`에 정리되어 있으며,
+실행 전용 체크리스트/커맨드는 문서 기준으로 수행합니다.
 
-Pi0.5 requires LeRobot dataset format `v3.0`. ROBOTIS/LeRobot 0.3 recordings are usually `v2.1`, so the GUI bridge keeps the original recording untouched and creates a Pi0.5-only converted copy under:
+## 9) 참고
 
-```text
-/home/jin/.cache/huggingface/lerobot/local-pi05-v30/<dataset-slug>
-```
-
-For the current local recording, the converted dataset is:
-
-```text
-repo_id: local-pi05-v30/jin-record-test-20260512t063639z
-path:    /home/jin/.cache/huggingface/lerobot/local-pi05-v30/jin-record-test-20260512t063639z
-```
-
-Manual conversion command shape, if needed:
-
-```bash
-conda run --no-capture-output -n lerobot-pi05 python -m lerobot.datasets.v30.convert_dataset_v21_to_v30 \
-  --repo-id=local-pi05-v30/jin-record-test-20260512t063639z \
-  --root=/home/jin/.cache/huggingface/lerobot \
-  --push-to-hub=false \
-  --force-conversion
-```
-
-Training defaults follow Hugging Face LeRobot docs:
-
-- ACT default GUI values: `batch_size=8`, `steps=100000`, `num_workers=4`, `eval_freq=20000`, `log_freq=200`, `save_freq=20000`, `policy.n_obs_steps=1`, `policy.chunk_size=100`, `policy.n_action_steps=100`.
-- Pi0.5 default GUI values: `batch_size=32`, `steps=3000`, `policy.n_obs_steps=1`, `policy.chunk_size=50`, `policy.n_action_steps=50`, `policy.compile_model=true`, `policy.gradient_checkpointing=true`, `policy.dtype=bfloat16`, `policy.freeze_vision_encoder=false`, `policy.train_expert_only=false`.
-- References: https://huggingface.co/docs/lerobot/act and https://huggingface.co/docs/lerobot/pi05.
-
-## Current Scope
-
-This repository currently implements Phase 1 plus foundational parts of Phase 2:
-- modular project skeleton
-- YAML config loader
-- structured logging subsystem
-- NemoClaw/k3s vLLM backend, Ollama proxy backend, local Ollama backend, and mock backend
-- model router
-- LangGraph-backed config-driven orchestrator runtime, including Live GUI planning handoff stage execution
-- local RAG over `docs/project/Project_guide.txt` + optional web RAG fallback
-- mock MCP tools and simulated device mode
-- `experiment.evaluate` common API for virtual/test/live experiment evaluation
-- `experiment.benchmark` random/grid/BO comparison mode
-- `/bo` BO Workspace with acquisition, BO/MBO, budget, and parameter-space controls
-- per-device job/session metadata and Runtime IDE-compatible workspace events for hardware-facing actions
-- modern real-time web GUI
-- `/ide` Runtime IDE for multi-graph LangGraph graph/module validation, compiled graph summaries, dry-run, YAML import/export, handler allowlist editing, SVG node icons, run timeline, artifact preview, and workspace graph template debugging
-- unit/integration tests for core flow
-- GitHub Actions basic syntax/unit-test workflow
-
-## Notes
-
-- Default guide path is `./docs/project/Project_guide.txt`.
-- If internet RAG is needed, set `TAVILY_API_KEY` or `SERPER_API_KEY`.
-- NemoClaw-aligned vLLM inference is the default backend (`AUTONOMOUS_BACKEND=vllm`) and serves the Gemma4 aliases from NVFP4 ModelOpt FP4 deployments with Gemma4 MTP speculative decoding. On the GB10 host, the deployments force `VLLM_NVFP4_GEMM_BACKEND=marlin` to avoid incompatible FlashInfer/CUTLASS FP4 kernels.
-- Hardware bridges are currently simulation-first and can be extended per bridge module.
-- Common experiment API contract is documented in `./docs/runtime/autonomous_experiment_runtime.md`.
-- LangGraph runtime details are documented in `./docs/runtime/langgraph_runtime.md`, including the primary `atr_closed_loop` graph and printer/LeRobot/UTM workspace graph templates.
-
-## Agent Program Baseline
-
-- Baseline markdown for integrating real programs into agents:
-  - `./docs/runtime/agent_program_baseline.md`
-- API docs exposure (`http://localhost:7860/docs`):
-  - `GET /api/docs/agent-baseline` (JSON + markdown content)
-  - `GET /api/docs/agent-baseline.md` (raw markdown)
+현재 레포리퍼토리는 고속 실험 반복을 위한 통합 운영 레벨에서 설계되어 있으며,
+구성요소별 세부 항목(브릿지 파라미터, 모델 전략, 보안 정책)은 하위 문서에서 계속 갱신됩니다.

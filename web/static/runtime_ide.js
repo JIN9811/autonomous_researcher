@@ -821,8 +821,9 @@ function updateCanvasViewHint(bounds) {
   const context = tab?.kind === "module"
     ? `module: ${tab.moduleId || activeGraph?.metadata?.module_id || "internal"}`
     : "main system";
-  const action = needsFit ? (canImproveWithFit ? "use Fit" : "scroll/map") : "ready";
-  hint.textContent = `${context} · view: ${percent}% · zoom: ${zoomPercent}%${needsFit ? ` · ${action}` : ""}`;
+  const action = needsFit ? (canImproveWithFit ? "Fit" : "Map") : "Ready";
+  hint.textContent = `V${percent}% · Z${zoomPercent}%${needsFit ? ` · ${action}` : ""}`;
+  hint.title = `${context} · view ${percent}% · zoom ${zoomPercent}% · ${needsFit ? action : "ready"}`;
   hint.className = `runtime-canvas-view-hint${needsFit ? " warn" : " ok"}`;
 }
 

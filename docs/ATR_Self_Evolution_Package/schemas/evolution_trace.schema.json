@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "EvolutionTrace",
+  "type": "object",
+  "required": [
+    "trace_id",
+    "run_id",
+    "events"
+  ],
+  "properties": {
+    "trace_id": {
+      "type": "string"
+    },
+    "run_id": {
+      "type": "string"
+    },
+    "graph_id": {
+      "type": "string"
+    },
+    "graph_version": {
+      "type": "string"
+    },
+    "events": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "metrics": {
+      "type": "object"
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "human_feedback": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    }
+  }
+}
