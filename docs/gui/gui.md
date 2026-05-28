@@ -58,7 +58,7 @@ Live GUI chat route:
 - Physical TPMS gyroid output uses the operator/profile-controlled cap setting. The default profile generates a 0.8 mm bottom cap for bed adhesion and leaves the top cap off to avoid unsupported FDM sag; the operator may enable the top cap only when a flat upper compression face is required.
 - Main GUI `test` runs must remain dry-run/virtual at the printer boundary. Main GUI `live` opens the Live GUI so the operator can provide values and trigger actual printing from the chat.
 - The 3DP GUI provides standalone autoejection test buttons for left/center/right assumed object positions. These buttons do not print a specimen. They generate the same bed-sweep ejection program used by the normal autoeject path, inject synthetic object bounds for the selected position, then upload/start that ejection-only G-code through PrusaLink live upload/start gates.
-- Design Agent messages may render STL/preview artifacts and the browser STL viewer.
+- Design Agent messages render preview images and experiment-spec links only; direct STL links and browser STL viewer canvases are disabled for Design Agent cards to avoid heavy WebGL/DOM state in Live GUI refreshes.
 - Specimen Making Agent messages must focus on manufacturing runtime state, not STL preview duplication.
 - Specimen Making Agent runtime cards show:
   - PrusaSlicer profile/material/layer/nozzle settings
@@ -95,6 +95,7 @@ BO Workspace GUI route:
 - The workspace has a `Save Settings` control. Saved settings are persisted in `memory/bo_workspace_settings.json` and are reapplied when a new BO GUI window is opened.
 - Saved BO settings include mode, objective, strategy, acquisition function, budget, seed, exploration/exploitation controls, and parameter-space bounds.
 - Benchmark and BO Agent actions remain virtual optimization controls only; the BO GUI does not directly start printer or robot hardware.
+- Live GUI BO Agent messages render surrogate/acquisition graphs in a collapsed state by default. The collapsed card shows only strategy/acquisition/budget/latest candidate/recommendation metadata; SVG trace graphs and selected-point rows are created only when the operator clicks `그래프 보기`, and removed again by `그래프 접기`.
 
 LeRobot GUI route:
 - Main dashboard button: `Open LeRobot GUI`

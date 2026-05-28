@@ -97,19 +97,28 @@ def scenario_live_planning_render(audit: WebDriverAudit, base_url: str, out_dir:
           }
           renderPlanningMessages(arguments[0]);
           const log = document.querySelector('#planning-chat-log');
-          const boSvg = Array.from(document.querySelectorAll('.bo-trace-svg'));
           const boCard = document.querySelector('.bo-live-card');
+          const boToggle = document.querySelector('.bo-graph-toggle');
+          const collapsedBefore = document.querySelectorAll('.bo-plot-collapsed').length;
+          const boSvgBefore = document.querySelectorAll('.bo-trace-svg').length;
+          const selectedRowsBefore = document.querySelectorAll('.bo-selected-row').length;
+          if (boToggle) boToggle.click();
+          const boSvgAfter = document.querySelectorAll('.bo-trace-svg').length;
+          const selectedRowsAfter = document.querySelectorAll('.bo-selected-row').length;
           const femCard = document.querySelector('.fem-contour-card');
           const femImg = document.querySelector('.fem-contour-preview');
-          const selectedRows = document.querySelectorAll('.bo-selected-row');
           const atBottom = log ? (log.scrollTop + log.clientHeight >= log.scrollHeight - 4) : false;
           return {
             ok: true,
-            boSvgCount: boSvg.length,
+            boSvgCount: boSvgAfter,
+            boSvgBefore,
             boCard: Boolean(boCard),
+            boToggle: Boolean(boToggle),
+            collapsedBefore,
             femCard: Boolean(femCard),
             femSrc: femImg ? femImg.getAttribute('src') : '',
-            selectedRows: selectedRows.length,
+            selectedRows: selectedRowsAfter,
+            selectedRowsBefore,
             atBottom,
             text: log ? (log.innerText || log.textContent || '') : '',
             textContent: log ? (log.textContent || '') : '',
@@ -124,12 +133,16 @@ def scenario_live_planning_render(audit: WebDriverAudit, base_url: str, out_dir:
     )
     if not rendered.get("ok"):
         raise AssertionError(rendered.get("error") or "planning render failed")
+    if rendered.get("boSvgBefore") != 0 or rendered.get("collapsedBefore") < 1 or not rendered.get("boToggle"):
+        raise AssertionError(f"BO plot did not start collapsed: {rendered}")
     if rendered.get("boSvgCount") != 1 or not rendered.get("boCard"):
-        raise AssertionError(f"BO plot did not render: {rendered}")
+        raise AssertionError(f"BO plot did not render after toggle: {rendered}")
     if not rendered.get("femCard") or not str(rendered.get("femSrc", "")).startswith("/api/planning/artifacts/"):
         raise AssertionError(f"FEM contour card did not render: {rendered}")
+    if rendered.get("selectedRowsBefore") != 0:
+        raise AssertionError(f"BO selected rows rendered while collapsed: {rendered}")
     if rendered.get("selectedRows") < 1:
-        raise AssertionError(f"BO selected candidate rows missing: {rendered}")
+        raise AssertionError(f"BO selected candidate rows missing after toggle: {rendered}")
     bo_text = "\n".join(str(rendered.get(key, "")) for key in ("text", "textContent", "boText"))
     fem_text = "\n".join(str(rendered.get(key, "")) for key in ("text", "textContent", "femText"))
     if "bo surrogate / acquisition trace" not in bo_text.lower():

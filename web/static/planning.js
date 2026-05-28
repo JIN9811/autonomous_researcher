@@ -123,6 +123,25 @@ const liveCenterRenderKeys = new Map();
 let queryGoal = "Design and validate a live-mode specimen plan before hardware execution.";
 let queryBackend = "vllm";
 let planningMessagesCache = [];
+const BO_EXPANDED_STORAGE_KEY = "atr_live_bo_expanded_cards";
+function loadExpandedBoCards() {
+  try {
+    const raw = sessionStorage.getItem(BO_EXPANDED_STORAGE_KEY);
+    const list = raw ? JSON.parse(raw) : [];
+    return new Set(Array.isArray(list) ? list.filter((item) => typeof item === "string") : []);
+  } catch (_err) {
+    return new Set();
+  }
+}
+function saveExpandedBoCards() {
+  try {
+    liveExpandedBoCards = new Set([...liveExpandedBoCards].slice(-40));
+    sessionStorage.setItem(BO_EXPANDED_STORAGE_KEY, JSON.stringify([...liveExpandedBoCards]));
+  } catch (_err) {
+    // Session storage can be unavailable in hardened browser contexts.
+  }
+}
+let liveExpandedBoCards = loadExpandedBoCards();
 let planningSessionId = "";
 let planningThinkingCount = 0;
 let liveQuickActionBusy = false;
@@ -779,11 +798,13 @@ function roleLabel(role) {
   return labels[role] || role || "Orchestrator";
 }
 
-function renderSingleArtifactCard(artifacts, spec, label = "") {
+function renderSingleArtifactCard(artifacts, spec, label = "", options = {}) {
   const previewUrl = safeUrl(artifacts.preview_url);
   const stlUrl = safeUrl(artifacts.stl_url);
   const specUrl = safeUrl(artifacts.experiment_spec_url);
   if (!previewUrl && !stlUrl && !specUrl) return "";
+  const showStlViewer = options.showStlViewer !== false;
+  const showStlLink = options.showStlLink !== false;
 
   const specimenId = escapeHtml(spec.specimen_id || "specimen");
   const geometry = escapeHtml(spec.geometry_type || "geometry");
@@ -797,11 +818,11 @@ function renderSingleArtifactCard(artifacts, spec, label = "") {
         <strong>${specimenId}</strong>
         <span>${geometry} / size=${size}</span>
         <div class="artifact-links">
-          ${stlUrl ? `<a href="${escapeHtml(stlUrl)}" target="_blank" rel="noreferrer">Open STL</a>` : ""}
+          ${stlUrl && showStlLink ? `<a href="${escapeHtml(stlUrl)}" target="_blank" rel="noreferrer">Open STL</a>` : ""}
           ${specUrl ? `<a href="${escapeHtml(specUrl)}" target="_blank" rel="noreferrer">experiment_spec.json</a>` : ""}
         </div>
       </div>
-      ${stlUrl ? `
+      ${stlUrl && showStlViewer ? `
         <div class="stl-viewer-wrap">
           <canvas class="stl-viewer" data-stl-url="${escapeHtml(stlUrl)}" width="720" height="420"></canvas>
           <div class="stl-viewer-hint">drag to rotate / wheel to zoom</div>
@@ -814,6 +835,7 @@ function renderSingleArtifactCard(artifacts, spec, label = "") {
 function renderArtifactCard(msg) {
   if (msg.render_artifacts === false || msg.role === "printer_ai") return "";
   if (msg.role === "analysis_ai" && msg.fem_artifacts) return "";
+  const artifactOptions = { showStlViewer: msg.role !== "design_ai", showStlLink: msg.role !== "design_ai" };
   const pair = msg.artifact_pair || {};
   if (pair.previous || pair.next) {
     const previous = pair.previous || {};
@@ -821,16 +843,18 @@ function renderArtifactCard(msg) {
     const previousCard = renderSingleArtifactCard(
       previous.artifacts || {},
       previous.experiment_spec || {},
-      previous.label || "Previous shape"
+      previous.label || "Previous shape",
+      artifactOptions
     );
     const nextCard = renderSingleArtifactCard(
       next.artifacts || {},
       next.experiment_spec || msg.experiment_spec || {},
-      next.label || "Next shape"
+      next.label || "Next shape",
+      artifactOptions
     );
     return `<div class="artifact-pair">${previousCard}${nextCard}</div>`;
   }
-  return renderSingleArtifactCard(msg.artifacts || {}, msg.experiment_spec || {});
+  return renderSingleArtifactCard(msg.artifacts || {}, msg.experiment_spec || {}, "", artifactOptions);
 }
 
 function renderFemContourCard(msg) {
@@ -984,14 +1008,25 @@ function renderBoTraceSvg(trace) {
   `;
 }
 
-function renderBoResultCard(msg) {
+function boCardKey(msg, index = "") {
   const boResult = msg.bo_result && typeof msg.bo_result === "object" ? msg.bo_result : {};
-  if (msg.role !== "bo_ai" || !Object.keys(boResult).length) return "";
   const benchmark = boResult.benchmark || {};
   const strategyPayload = boStrategyFromBenchmark(benchmark);
   const trace = strategyPayload && Array.isArray(strategyPayload.surrogate_trace) ? strategyPayload.surrogate_trace : [];
-  const visibleTrace = trace.length > 12 ? trace.slice(-12) : trace;
   const recommendation = boResult.recommendation && typeof boResult.recommendation === "object" ? boResult.recommendation : {};
+  const parts = [
+    index,
+    msg.created_at || msg.timestamp || msg.run_id || "",
+    boResult.strategy || "",
+    boResult.acquisition || "",
+    recommendation.candidate_id || "",
+    trace.length,
+  ];
+  return parts.map((item) => String(item || "").replace(/[^a-zA-Z0-9_.:-]+/g, "-")).join("::");
+}
+
+function renderBoExpandedBody(trace) {
+  const visibleTrace = trace.length > 12 ? trace.slice(-12) : trace;
   const selectedRows = trace
     .map((item) => {
       const selected = item.selected || {};
@@ -1007,24 +1042,58 @@ function renderBoResultCard(msg) {
     .join("");
 
   return `
-    <div class="bo-live-card">
-      <div class="runtime-card-section">
-        <h4>BO Surrogate / Acquisition Trace</h4>
+    <div class="bo-plot-stack">
+      ${trace.length > visibleTrace.length ? `<p class="hint">최근 ${visibleTrace.length}/${trace.length} step만 표시합니다.</p>` : ""}
+      ${visibleTrace.length
+        ? visibleTrace.map((item) => `<article class="bo-trace-card">${renderBoTraceSvg(item)}</article>`).join("")
+        : `<div class="bo-plot-empty">BO surrogate/acquisition trace가 없습니다. BO/MBO strategy 결과가 들어오면 여기에 표시됩니다.</div>`}
+    </div>
+    ${selectedRows ? `<div class="bo-selected-points">${selectedRows}</div>` : ""}
+  `;
+}
+
+function renderBoCollapsedBody(trace, latestSelected) {
+  return `
+    <div class="bo-plot-collapsed">
+      <strong>그래프 접힘</strong>
+      <span>BO surrogate/acquisition 그래프 ${escapeHtml(trace.length || 0)}개는 메모리 절약을 위해 아직 렌더링하지 않았습니다.</span>
+      ${latestSelected && latestSelected.candidate_id ? `<code>latest=${escapeHtml(latestSelected.candidate_id)} · ${escapeHtml(compactBoParams(latestSelected.parameters))}</code>` : ""}
+    </div>
+  `;
+}
+
+function renderBoResultCard(msg, index = "") {
+  const boResult = msg.bo_result && typeof msg.bo_result === "object" ? msg.bo_result : {};
+  if (msg.role !== "bo_ai" || !Object.keys(boResult).length) return "";
+  const benchmark = boResult.benchmark || {};
+  const strategyPayload = boStrategyFromBenchmark(benchmark);
+  const trace = strategyPayload && Array.isArray(strategyPayload.surrogate_trace) ? strategyPayload.surrogate_trace : [];
+  const recommendation = boResult.recommendation && typeof boResult.recommendation === "object" ? boResult.recommendation : {};
+  const latestTrace = trace.length ? trace[trace.length - 1] : {};
+  const latestSelected = latestTrace.selected || {};
+  const cardKey = boCardKey(msg, index);
+  const expanded = liveExpandedBoCards.has(cardKey);
+
+  return `
+    <div class="bo-live-card" data-bo-card-key="${escapeHtml(cardKey)}">
+      <div class="runtime-card-section bo-card-summary">
+        <div class="bo-card-head">
+          <h4>BO Surrogate / Acquisition Trace</h4>
+          <button class="btn small bo-graph-toggle" type="button" data-bo-card-key="${escapeHtml(cardKey)}" aria-expanded="${expanded ? "true" : "false"}">${expanded ? "그래프 접기" : "그래프 보기"}</button>
+        </div>
         ${runtimeRows([
           ["strategy", boResult.strategy],
           ["acquisition", boResult.acquisition],
           ["budget", boResult.budget],
+          ["trace_steps", trace.length],
+          ["latest_candidate", latestSelected.candidate_id],
           ["recommended_candidate", recommendation.candidate_id],
           ["recommended_score", recommendation.objective_score],
         ])}
       </div>
-      <div class="bo-plot-stack">
-        ${trace.length > visibleTrace.length ? `<p class="hint">최근 ${visibleTrace.length}/${trace.length} step만 표시합니다.</p>` : ""}
-        ${visibleTrace.length
-          ? visibleTrace.map((item) => `<article class="bo-trace-card">${renderBoTraceSvg(item)}</article>`).join("")
-          : `<div class="bo-plot-empty">BO surrogate/acquisition trace가 없습니다. BO/MBO strategy 결과가 들어오면 여기에 표시됩니다.</div>`}
+      <div class="bo-graph-body">
+        ${expanded ? renderBoExpandedBody(trace) : renderBoCollapsedBody(trace, latestSelected)}
       </div>
-      ${selectedRows ? `<div class="bo-selected-points">${selectedRows}</div>` : ""}
     </div>
   `;
 }
@@ -1221,7 +1290,7 @@ function renderPlanningMessages(messages) {
   }
 
   planningChatLog.innerHTML = "";
-  for (const msg of messages) {
+  for (const [messageIndex, msg] of messages.entries()) {
     const item = document.createElement("article");
     const role = msg.role || "orchestrator";
     item.className = `planning-chat-item ${role}`;
@@ -1237,7 +1306,7 @@ function renderPlanningMessages(messages) {
       ${content ? `<div class="message-content">${content}</div>` : ""}
       ${renderSpecimenRuntimeCard(msg)}
       ${renderFemContourCard(msg)}
-      ${renderBoResultCard(msg)}
+      ${renderBoResultCard(msg, `chat-${messageIndex}`)}
       ${renderArtifactCard(msg)}
     `;
     planningChatLog.appendChild(item);
@@ -2838,14 +2907,14 @@ function renderReportPanel(session) {
   const agentLabel = liveAgentLabel(liveSelectedAgent);
   const status = eventStatusForAgent(liveSelectedAgent, report.state, liveRunningFlag(session, liveLastSnapshot || {}, report.state));
   const profile = agentSpecificReportProfile(report, status, agentLabel);
-  const messageCards = messages.slice(-4).map((msg) => `
+  const messageCards = messages.slice(-4).map((msg, index) => `
     <article class="live-report-message">
       <small>${escapeHtml(formatTime(msg.timestamp))} · ${escapeHtml(roleLabel(msg.role))}${msg.model ? ` · ${escapeHtml(msg.model)}` : ""}</small>
       ${renderReasoningBlock(msg)}
       <p>${escapeHtml(compactText(msg.content || "", 720)).replaceAll("\n", "<br />")}</p>
       ${renderArtifactCard(msg)}
       ${renderFemContourCard(msg)}
-      ${renderBoResultCard(msg)}
+      ${renderBoResultCard(msg, `report-card-${index}`)}
     </article>
   `).join("");
   liveReportPanel.innerHTML = `
@@ -3330,7 +3399,7 @@ function renderGraphMiniPanel(session) {
 
 function planningArtifactSummaries() {
   return planningMessagesCache
-    .map((msg) => ({ msg, html: renderArtifactCard(msg) + renderFemContourCard(msg) + renderBoResultCard(msg) }))
+    .map((msg, index) => ({ msg, html: renderArtifactCard(msg) + renderFemContourCard(msg) + renderBoResultCard(msg, `artifact-${index}`) }))
     .filter((item) => item.html.trim());
 }
 
@@ -4681,6 +4750,19 @@ if (btnLiveShortcutsClose) {
 }
 
 document.addEventListener("click", (event) => {
+  const boToggle = event.target.closest(".bo-graph-toggle[data-bo-card-key]");
+  if (boToggle) {
+    closeBinderContextMenu();
+    const key = boToggle.dataset.boCardKey || "";
+    if (key) {
+      if (liveExpandedBoCards.has(key)) liveExpandedBoCards.delete(key);
+      else liveExpandedBoCards.add(key);
+      saveExpandedBoCards();
+      renderPlanningMessages(planningMessagesCache);
+      if (liveLastSession) renderLiveRuntime(liveLastSession);
+    }
+    return;
+  }
   const questionButton = event.target.closest(".live-question-action[data-question-action]");
   if (questionButton) {
     closeBinderContextMenu();

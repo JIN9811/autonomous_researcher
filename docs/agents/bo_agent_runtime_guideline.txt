@@ -221,6 +221,10 @@ GUI requirements
   - include mode, objective, strategy, acquisition, budget, seed, acquisition hyperparameters, and parameter-space bounds
 - GUI must not trigger printer/robot hardware directly.
 - GUI must call API endpoints that use BO Agent / experiment.benchmark only.
+- Live GUI BO Agent chat cards must default to collapsed graph mode to avoid repeatedly creating large SVG/DOM trees during periodic Live GUI refresh.
+- Collapsed Live GUI cards show strategy, acquisition, budget, trace step count, latest candidate, recommended candidate, and recommended score.
+- Surrogate/acquisition trace SVGs and selected/evaluated point history rows are rendered only after the operator selects `그래프 보기`.
+- Selecting `그래프 접기` removes those graph/history DOM nodes while preserving the underlying `bo_result` payload in session state.
 
 API requirements
 - `GET /bo`

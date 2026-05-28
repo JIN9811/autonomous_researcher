@@ -1039,7 +1039,9 @@ def test_runtime_ide_page_and_main_entry_render() -> None:
     assert "runtime-module-agent-title" in js
     assert "compactBoParamValue" in planning_js
     assert "renderBoTraceSvg" in planning_js
-    assert "renderBoResultCard(msg)" in planning_js
+    assert "renderBoCollapsedBody" in planning_js
+    assert "bo-graph-toggle" in planning_js
+    assert "renderBoResultCard(msg, `chat-${messageIndex}`)" in planning_js
     assert "renderFemContourCard(msg)" in planning_js
     assert "BO Surrogate / Acquisition Trace" in planning_js
     assert "FEM / CAE Contour" in planning_js

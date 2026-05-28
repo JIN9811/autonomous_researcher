@@ -1411,6 +1411,48 @@ textarea {
   font-size: 0.76rem;
 }
 
+.bo-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.bo-card-head h4 {
+  margin: 0;
+}
+
+.bo-graph-toggle {
+  flex: 0 0 auto;
+  min-height: 30px;
+  padding: 6px 10px;
+  font-size: 0.72rem;
+}
+
+.bo-plot-collapsed {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+  border: 1px dashed rgba(20, 54, 179, 0.22);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--muted);
+  padding: 12px 14px;
+  font-size: 0.78rem;
+}
+
+.bo-plot-collapsed strong {
+  color: var(--text);
+}
+
+.bo-plot-collapsed code {
+  color: var(--muted);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.72rem;
+  word-break: break-word;
+}
+
 .bo-plot-stack {
   display: grid;
   gap: 14px;
