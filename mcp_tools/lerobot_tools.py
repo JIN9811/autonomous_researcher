@@ -36,6 +36,7 @@ def register_lerobot_tools(
 ) -> LeRobotBridge:
     """Register LeRobot tools and return the bridge instance."""
     bridge = LeRobotBridge(LeRobotBridgeConfig.from_config(lerobot_config or {}, repo_root=repo_root))
+    registry.register_resource("lerobot.bridge", bridge)
 
     registry.register("lerobot.profiles.list", lambda payload: bridge.profiles_list(dict(payload or {})))
     registry.register("lerobot.profiles.validate", lambda payload: bridge.profiles_validate(dict(payload or {})))

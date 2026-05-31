@@ -59,6 +59,8 @@ task_routes:
   orchestrator_plan: orchestrator
   design_reasoning: e4b
   analysis_reasoning: e4b
+  analysis_fem_planning: e4b
+  bo_policy: e4b
   knowledge_query: e4b
   guardian_reasoning: e4b
   tool_formatting: e4b

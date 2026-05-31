@@ -105,7 +105,7 @@ dispatch -> idle -> design -> specimen -> vision -> manipulation -> equipment ->
 | 라이브 오케스트레이션 | `/live` | `planning.html` | 채팅 기반 실험 지시, planning handoff, stage 메시지/아티팩트 표시 | `/api/planning/bootstrap`, `/api/planning/message`, `/api/planning/session`, `/api/planning/artifacts/{...}` |
 | 라이브(레거시) | `/planning` | `planning.html` | `/live` 별칭 | 동일 |
 | 3DP/Printer GUI | `/printer` | `printer.html` | 프린터/PrusaLink 프로파일 및 오토이젝션, 테스트 옵션, 상태 확인 | `/api/printer/profile`, `/api/printer/status`, `/api/printer/connection`, `/api/printer/autoejection-test` |
-| BO Workspace | `/bo` | `bo.html` | BO 벤치마크/최적화 제안/기록 | `/api/bo/config`, `/api/bo/benchmark`, `/api/bo/run` |
+| BO Workspace | `/bo` | `bo.html` | BO/MBO/LLM preference 전략 설정, reasoning audit, candidate ranking, next-design handoff | `/api/bo/config`, `/api/bo/benchmark`, `/api/bo/run` |
 | CAE Workspace | `/cae` | `cae.html` | 정적 CAE 분석 실행, 파라미터 저장, 결과 라인업 | `/api/cae/config`, `/api/cae/run` |
 | Runtime IDE | `/ide` | `runtime_ide.html` | 그래프/에지/모듈 편집, validate/dry-run/실행, 버전관리 | `/api/graphs*`, `/api/modules*`, `/api/handlers` |
 | Module Management | `/module-management` | `module_management.html` | 모듈 로드·언로드·검증·버전 저장(standalone) | `/api/modules*`, `/api/handlers`, `/api/graphs/{id}/run` |
@@ -148,18 +148,24 @@ dispatch -> idle -> design -> specimen -> vision -> manipulation -> equipment ->
 - **필수 결과 키**: `equipment_result`, `protocol_note`
 
 ### Analysis Agent (`modules/analysis`, `agent.analysis_agent`)
-- **목적**: 관측/제조 결과에서 구조·목표 점수 지표 계산
-- **핵심 툴**: `cae.run_static_analysis`
-- **주요 결과**: `analysis` (UTM/CAE 지표, objective_score)
+- **목적**: Lab Equipment raw UTM artifact를 표준 분석 기록과 BO-ready handoff로 변환
+- **핵심 툴**: `cae.run_static_analysis`, `fenicsx.health`, `fenicsx.run_linear_elasticity`
+- **주요 결과**: `analysis`, `bo_observation`, `bo_handoff`, `experiment_evaluation`, `knowledge_payload`
+- **주요 아티팩트**: `canonical_curve.csv`, `quality_report.json`, `metrics.json`, `fem_result.json`, `fem_agentic_loop.json`, `fem_utm_comparison.json`, `experiment_evaluation.json`, `bo_handoff.json`
+- **FEniCSx loop**: `analysis_fem_planning` LLM이 tutorial-style FEM 계획을 만들고, Agent가 sanitization 후 `fenicsx.health`/`fenicsx.run_linear_elasticity`를 반복 호출한다. 실제 solve는 bridge의 `runtime_solver_enabled=true`일 때 `scripts/fenicsx_linear_elasticity_template.py`가 conda/docker FEniCSx에서 수행한다. 기본 TEST loop는 빠른 deterministic bridge를 쓴다.
+- **주의**: UTM은 `utm_high` 실측값이고 FEniCSx/CAE는 `fem_low` simulation evidence다. FEM 예측을 실측 BO observation처럼 넣지 않는다. LLM이 임의 solver 코드를 실행하지 않는다.
 
 ### Knowledge Agent (`modules/knowledge`, `agent.knowledge_agent`)
 - **목적**: 실패/성능 이력 요약 후 다음 후보/지침 반영
 - **주요 결과**: `knowledge` (메모리 갱신, 실패 패턴, 최근 결과 요약)
 
 ### BO Agent (`modules/bo`, `agent.bo_agent`)
-- **목적**: 전략 기반 후보 추천(랜덤/그리드/BO/MBO), 획득함수 업데이트
+- **목적**: Analysis/Knowledge evidence와 실패 memory를 읽고 numeric BO + LLM reasoning soft prior로 다음 Design 후보를 추천
 - **핵심 툴**: `experiment.benchmark`
-- **주요 결과**: `bo_result`(다음 제약/후보군 점수/샘플링 근거)
+- **LLM 역할**: `bo_policy` strict JSON reasoning(`bo_reasoning_v1`)을 생성하되 최종 후보 결정권은 numeric acquisition/validator/failure penalty에 둠
+- **주요 결과**: `bo_result`, `candidate_pool`, `candidate_ranking`, `next_design_request.v1`, `run_metadata["bo_recommended_constraints"]`
+- **GUI 표시**: Live GUI와 `/bo`에서 evidence intake, hypotheses, strategy, candidate ranking, recommendation, reasoning/artifact 경로를 표시
+- **주의**: BO Agent는 printer/robot/equipment를 직접 실행하지 않으며, 추천 후보는 Design Agent와 Guardian의 후속 검증 대상임
 
 ### Guardian Agent (`modules/guardian`, `agent.guardian_agent`)
 - **목적**: 안전성/진행성 검증 후 다음 액션 결정

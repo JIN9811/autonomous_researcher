@@ -180,6 +180,32 @@ devices:
     mesh:
       default_mesh_size_mm: 2.0
 
+
+  fenicsx:
+    enabled: true
+    mode: test                    # test | live
+    provider: dolfinx
+    execution_backend: auto       # auto | deterministic | conda | docker
+    runtime_solver_enabled: false # false: fast deterministic bridge, true: call conda/docker FEniCSx
+    require_runtime_in_live: false
+    conda_env: fenicsx
+    docker_image: dolfinx/dolfinx:stable
+    artifact_dir: artifacts/fenicsx
+    solver_script_path: scripts/fenicsx_linear_elasticity_template.py
+    timeout_sec: 120
+    allow_deterministic_fallback: true
+    template_version: atr_linear_elasticity_template_v1
+    default_material:
+      elastic_modulus_mpa: 1800.0
+      poisson_ratio: 0.35
+      yield_strength_mpa: 35.0
+    default_loading:
+      load_type: cyclic_compression
+      load_max_n: 500.0
+      load_min_ratio: 0.1
+      cycles: 10
+      frequency_hz: 1.0
+
   equipment:
     mode: simulator              # simulator | live
     provider: windows_pyautogui
@@ -188,17 +214,26 @@ devices:
       bridge_url_env: WINDOWS_PYAUTOGUI_BRIDGE_URL
       token_env: WINDOWS_PYAUTOGUI_BRIDGE_TOKEN
       token_header: X-Bridge-Token
-      request_timeout_sec: 10
+      request_timeout_sec: 60
       discovery_timeout_sec: 0.45
       discovery_port: 8765
       allow_live_execute: false
       allow_screenshot: true
       artifact_dir: artifacts/equipment
       connection_memory_path: memory/windows_pyautogui_connection.json
+      utm_profile_memory_path: memory/equipment_utm_profile.json
       allowed_actions:
         - health
         - screenshot
         - locate_image
+        - focus_window
+        - assert_visible
+        - assert_text
+        - wait_until
+        - wait_until_image
+        - wait_until_text
+        - wait_for_file
+        - type_path
         - wait
         - move_to
         - click
@@ -236,6 +271,7 @@ devices:
           description: "Connectivity demo: bounded mouse wiggle and completion log."
           requires_pyautogui: true
           safe_test: true
+          program_type: connectivity_demo
           sequence:
             - action: health
             - action: demo_mouse_wiggle
@@ -243,3 +279,62 @@ devices:
               distance_px: 20
             - action: log
               message: "program1 completed"
+
+        utm_compression_start_v1:
+          description: "UTM compression protocol: focus/assert/start/complete, save/export CSV, and expose artifact metadata."
+          requires_pyautogui: true
+          safe_test: true
+          program_type: utm_protocol
+          target_app: "UTM software"
+          target_window: "main_window_title_or_regex"
+          locator_backend: image
+          max_retries: 1
+          require_screen_assertions: false
+          export_glob: "*.csv"
+          artifact_timeout_s: 60
+          stable_for_sec: 2.0
+          locators:
+            ready_state:
+              image_path: "memory/equipment_locators/utm_ready_state.png"
+              confidence: 0.80
+            start_button:
+              image_path: "memory/equipment_locators/utm_start_button.png"
+              confidence: 0.80
+            running_state:
+              image_path: "memory/equipment_locators/utm_running_state.png"
+              confidence: 0.80
+            complete_state:
+              image_path: "memory/equipment_locators/utm_complete_state.png"
+              confidence: 0.80
+          sequence:
+            - action: health
+            - action: focus_window
+              window: main
+            - action: assert_visible
+              target: ready_state
+            - action: click
+              target: start_button
+            - action: wait_until
+              target: running_state
+              timeout_s: 10
+            - action: wait_until
+              target: complete_state
+              timeout_s: 300
+            - action: wait_for_file
+              pattern: "C:/ATR/utm_exports/{run_id}/{specimen_id}*.csv"
+              timeout_s: 20
+        utm_export_csv_v1:
+          description: "UTM CSV export protocol after test completion."
+          requires_pyautogui: true
+          safe_test: true
+          program_type: utm_export
+        utm_manual_save_csv_v1:
+          description: "Manual Save As fallback for UTM CSV data."
+          requires_pyautogui: true
+          safe_test: true
+          program_type: utm_export
+        utm_stop_or_abort_v1:
+          description: "Safe UTM stop/abort macro for recovery."
+          requires_pyautogui: true
+          safe_test: true
+          program_type: utm_abort

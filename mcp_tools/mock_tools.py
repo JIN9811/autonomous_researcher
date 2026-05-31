@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from datetime import datetime, timedelta, timezone
 from random import Random
 import re
 from pathlib import Path
@@ -29,6 +30,7 @@ from typing import Any
 
 from mcp_tools.tpms_geometry import generate_gyroid_stl_text, normalize_geometry_type, write_smooth_gyroid_stl
 from mcp_tools.tool_registry import ToolRegistry
+from mcp_tools.utm_tools import run_utm_protocol
 
 _rng = Random(42)
 
@@ -96,13 +98,100 @@ def _printer_prepare(payload: dict[str, Any]) -> dict[str, Any]:
 
 def _camera_capture(payload: dict[str, Any]) -> dict[str, Any]:
     frame_id = payload.get("frame_id", f"frame-{_rng.randint(1000, 9999)}")
+    specimen_id = str(payload.get("specimen_id") or "")
+    timestamp = datetime.now(timezone.utc).isoformat()
+    confidence = float(payload.get("confidence", 0.86))
     return {
         "ok": True,
         "tool": "camera.capture",
         "frame_id": frame_id,
+        "observation_id": f"obs-{frame_id}",
         "camera_key": payload.get("camera_key", "top"),
+        "purpose": payload.get("purpose", "3dp_output_pickup_check"),
         "source": "simulator",
+        "timestamp": timestamp,
+        "stable_for_ms": int(payload.get("stable_for_ms", 1200)),
+        "confidence": confidence,
+        "pose_confidence": confidence,
         "anomaly": False,
+        "zones": {
+            "printer_bed": {"specimen_present": False, "confidence": 0.74, "state": "clear"},
+            "ejection_basket": {"specimen_present": bool(specimen_id), "object_count": 1 if specimen_id else 0, "confidence": confidence, "state": "loaded" if specimen_id else "empty_or_unknown"},
+            "robot_workspace": {"clear": True, "confidence": 0.82, "state": "clear"},
+        },
+        "detections": [
+            {
+                "label": "printed_specimen",
+                "zone": "ejection_basket",
+                "specimen_id": specimen_id,
+                "bbox_xyxy": [210, 120, 420, 310],
+                "confidence": confidence,
+                "source": "simulator",
+            }
+        ] if specimen_id else [],
+    }
+
+
+def _vision_equipment_cross_check(payload: dict[str, Any]) -> dict[str, Any]:
+    checks = payload.get("checks") if isinstance(payload.get("checks"), list) else []
+    run_id = str(payload.get("run_id") or "run-test")
+    mode = str(payload.get("runtime_mode") or payload.get("mode") or "test")
+    confidence = float(payload.get("confidence", 0.9 if mode != "live" else 0.0))
+    force_ok = payload.get("force_ok")
+    if force_ok is None:
+        force_ok = mode != "live"
+    ttl_ms = int(payload.get("freshness_ttl_ms") or payload.get("ttl_ms") or 5000)
+    timestamp = datetime.now(timezone.utc)
+    expires_at = timestamp + timedelta(milliseconds=max(1, ttl_ms))
+    results = []
+    for item in checks:
+        if not isinstance(item, dict):
+            continue
+        check_id = str(item.get("check_id") or "").strip()
+        if not check_id:
+            continue
+        ok = bool(force_ok)
+        if check_id == "utm_pre_start":
+            signals = {
+                "specimen_on_utm_fixture": ok,
+                "robot_clear_of_utm": ok,
+                "compression_flatten_occupied": ok,
+                "human_intrusion": False,
+            }
+        elif check_id == "utm_motion_confirm":
+            signals = {
+                "utm_crosshead_motion": ok,
+                "specimen_on_fixture": ok,
+                "robot_clear_of_utm": ok,
+                "anomaly": False,
+            }
+        else:
+            signals = {
+                "utm_crosshead_stopped": ok,
+                "fixture_safe_to_access": ok,
+                "specimen_tested_or_crushed": ok,
+                "anomaly": False,
+            }
+        results.append(
+            {
+                "agent_signal_type": "equipment_vision_check_result",
+                "check_id": check_id,
+                "ok": ok,
+                "confidence": confidence if ok else 0.0,
+                "signals": signals,
+                "evidence": {"observation_id": f"obs-{run_id}-{check_id}", "frame_ids": [f"frame-{check_id}"] if ok else []},
+                "timestamp": timestamp.isoformat(),
+                "expires_at": expires_at.isoformat(),
+                "freshness_ttl_ms": ttl_ms,
+                "source": "simulator" if mode != "live" else "live_required_external_vision",
+            }
+        )
+    return {
+        "ok": all(item.get("ok") for item in results) if results else False,
+        "tool": "vision.equipment_cross_check",
+        "runtime_mode": mode,
+        "results": results,
+        "failure_code": None if results and all(item.get("ok") for item in results) else "VISION_EQUIPMENT_CROSS_CHECK_REQUIRED",
     }
 
 
@@ -111,7 +200,7 @@ def _robot_pick_place(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _utm_run(payload: dict[str, Any]) -> dict[str, Any]:
-    return {"ok": True, "tool": "utm.run_protocol", "result_file": "result/mock_result.csv", "cycles": 1}
+    return run_utm_protocol(payload)
 
 
 def _device_health(_: dict[str, Any]) -> dict[str, Any]:
@@ -666,6 +755,7 @@ def register_mock_tools(registry: ToolRegistry) -> None:
     registry.register("geometry.check_manufacturability", _check_manufacturability)
     registry.register("artifact.create_specimen_handoff", _create_specimen_handoff)
     registry.register("camera.capture", _camera_capture)
+    registry.register("vision.equipment_cross_check", _vision_equipment_cross_check)
     registry.register("robot.pick_place", _robot_pick_place)
     registry.register("utm.run_protocol", _utm_run)
     registry.register("device.health", _device_health)

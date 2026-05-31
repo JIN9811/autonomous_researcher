@@ -21,6 +21,7 @@ def test_register_lerobot_tools_exposes_runtime_contract(tmp_path: Path) -> None
     assert "lerobot.camera.test" in names
     assert "lerobot.rollout.start" in names
     assert bridge.config_status()["ok"] is True
+    assert tools.resource("lerobot.bridge") is bridge
 
 
 def test_lerobot_rollout_tool_runs_in_test_mode(tmp_path: Path) -> None:

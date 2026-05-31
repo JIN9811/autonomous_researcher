@@ -48,10 +48,15 @@ const rolloutActionClampInput = $("lerobot-rollout-action-clamp-input");
 const rolloutMaxRelativeTargetInput = $("lerobot-rollout-max-relative-target-input");
 const rolloutTemporalEnsembleInput = $("lerobot-rollout-temporal-ensemble-input");
 const rolloutTemporalCoeffInput = $("lerobot-rollout-temporal-coeff-input");
+const manipulationTaskIdInput = $("lerobot-manipulation-task-id-input");
 const manipulationStrategyInput = $("lerobot-manipulation-strategy-input");
+const manipulationPolicyBackendInput = $("lerobot-manipulation-policy-backend-input");
 const manipulationPolicyTypeInput = $("lerobot-manipulation-policy-type-input");
 const manipulationSourceInput = $("lerobot-manipulation-source-input");
 const manipulationTargetInput = $("lerobot-manipulation-target-input");
+const manipulationMaxDurationInput = $("lerobot-manipulation-max-duration-input");
+const manipulationRtcHorizonInput = $("lerobot-manipulation-rtc-horizon-input");
+const manipulationRtcGuidanceInput = $("lerobot-manipulation-rtc-guidance-input");
 const manipulationSpecimenIdInput = $("lerobot-manipulation-specimen-id-input");
 const manipulationCandidateIdInput = $("lerobot-manipulation-candidate-id-input");
 const manipulationPolicyInput = $("lerobot-manipulation-policy-input");
@@ -61,6 +66,7 @@ const manipulationObservationInput = $("lerobot-manipulation-observation-input")
 const manipulationCameraInput = $("lerobot-manipulation-camera-input");
 const manipulationDisplayInput = $("lerobot-manipulation-display-input");
 const manipulationContinuousInput = $("lerobot-manipulation-continuous-input");
+const manipulationReportEl = $("lerobot-manipulation-report");
 const policySelect = $("lerobot-policy-select");
 const jobNameInput = $("lerobot-job-name-input");
 const trainSourcePolicyInput = $("lerobot-train-source-policy-input");
@@ -460,34 +466,79 @@ function rolloutPayload(overrides = {}) {
   return payload;
 }
 
+const MANIPULATION_TASK_PRESETS = {
+  transfer_to_utm: {
+    source: "3dp_output_area",
+    target: "utm_fixture",
+    instruction: "Move the printed specimen from the 3D printer pickup area to the UTM fixture datum, release safely, retreat to standby_clear_of_utm, then wait for Vision verification.",
+    observation: { observation_id: "manual-transfer", anomaly: false, transfer_readiness: { ready: true, pose_confidence: 0.82 } },
+  },
+  clear_utm_to_disposal: {
+    source: "utm_fixture",
+    target: "discard_bin",
+    instruction: "After the UTM test is complete and the fixture is safe, move the tested specimen from the UTM fixture to the discard bin, release fully, retreat to standby_clear_of_utm, then wait for Vision verification.",
+    observation: { observation_id: "manual-clear-utm", anomaly: false, transfer_readiness: { ready: true, pose_confidence: 0.82 } },
+  },
+};
+
+function selectedManipulationTaskId() {
+  const value = manipulationTaskIdInput ? manipulationTaskIdInput.value : "transfer_to_utm";
+  return MANIPULATION_TASK_PRESETS[value] ? value : "transfer_to_utm";
+}
+
+function syncManipulationTaskPreset(force = false) {
+  const taskId = selectedManipulationTaskId();
+  const preset = MANIPULATION_TASK_PRESETS[taskId] || MANIPULATION_TASK_PRESETS.transfer_to_utm;
+  const sourceDefault = Object.values(MANIPULATION_TASK_PRESETS).some((item) => manipulationSourceInput && manipulationSourceInput.value === item.source);
+  const targetDefault = Object.values(MANIPULATION_TASK_PRESETS).some((item) => manipulationTargetInput && manipulationTargetInput.value === item.target);
+  if (manipulationSourceInput && (force || !manipulationSourceInput.value.trim() || sourceDefault)) manipulationSourceInput.value = preset.source;
+  if (manipulationTargetInput && (force || !manipulationTargetInput.value.trim() || targetDefault)) manipulationTargetInput.value = preset.target;
+  if (manipulationTaskInput && (force || !manipulationTaskInput.value.trim())) manipulationTaskInput.value = preset.instruction;
+  if (manipulationObservationInput && (force || !manipulationObservationInput.value.trim())) {
+    manipulationObservationInput.value = JSON.stringify(preset.observation);
+  }
+}
+
+function manipulationDefaultInstruction(taskId, specimenId, sourceLocation, targetLocation) {
+  const preset = MANIPULATION_TASK_PRESETS[taskId] || MANIPULATION_TASK_PRESETS.transfer_to_utm;
+  if (taskId === "clear_utm_to_disposal") {
+    return `Move ${specimenId} from ${sourceLocation} to ${targetLocation}, release it into the discard bin, retreat to standby_clear_of_utm, then request Vision verification.`;
+  }
+  return `Move ${specimenId} from ${sourceLocation} to ${targetLocation}, place the flat compression face on the UTM datum, release, retreat to standby_clear_of_utm, then request Vision verification.`;
+}
+
 function manipulationAgentPayload(overrides = {}) {
   const payload = rolloutPayload(overrides);
   const policy = policyFields(manipulationPolicyInput || rolloutPolicyInput || policyInput);
+  const taskId = selectedManipulationTaskId();
+  const preset = MANIPULATION_TASK_PRESETS[taskId] || MANIPULATION_TASK_PRESETS.transfer_to_utm;
   const policyType = manipulationPolicyTypeInput ? manipulationPolicyTypeInput.value || "pi05" : "pi05";
   const strategy = manipulationStrategyInput ? manipulationStrategyInput.value || "pi05_lerobot_policy" : "pi05_lerobot_policy";
   const specimenId = manipulationSpecimenIdInput ? manipulationSpecimenIdInput.value.trim() || "manual-specimen" : "manual-specimen";
   const candidateId = manipulationCandidateIdInput ? manipulationCandidateIdInput.value.trim() || "manual-candidate" : "manual-candidate";
-  const sourceLocation = manipulationSourceInput ? manipulationSourceInput.value.trim() || "3dp_output_area" : "3dp_output_area";
-  const targetLocation = manipulationTargetInput ? manipulationTargetInput.value.trim() || "utm_fixture" : "utm_fixture";
+  const sourceLocation = manipulationSourceInput ? manipulationSourceInput.value.trim() || preset.source : preset.source;
+  const targetLocation = manipulationTargetInput ? manipulationTargetInput.value.trim() || preset.target : preset.target;
   payload.policy_path = policy.policy_path;
   payload.policy_checkpoint_path = policy.policy_checkpoint_path;
   payload.policy_repo_id = policy.policy_path ? "" : policy.policy_repo_id;
   payload.policy_type = policyType;
   payload.rollout_inference_type = policyType === "pi05" ? "rtc" : "";
   payload.manipulation_strategy = strategy;
+  payload.task_id = taskId;
+  payload.skill_id = taskId;
+  payload.policy_backend = manipulationPolicyBackendInput ? manipulationPolicyBackendInput.value || "lerobot_cli" : "lerobot_cli";
+  payload.max_duration_s = numberValue(manipulationMaxDurationInput, 30);
+  payload.rollout_rtc_execution_horizon = numberValue(manipulationRtcHorizonInput, 10);
+  payload.rollout_rtc_max_guidance_weight = numberValue(manipulationRtcGuidanceInput, 1.0);
   payload.task_instruction = manipulationTaskInput && manipulationTaskInput.value.trim()
     ? manipulationTaskInput.value.trim()
-    : `Move ${specimenId} from ${sourceLocation} to ${targetLocation}.`;
+    : manipulationDefaultInstruction(taskId, specimenId, sourceLocation, targetLocation);
   payload.camera_enabled = manipulationCameraInput ? boolValue(manipulationCameraInput) : true;
   payload.display_data = manipulationDisplayInput ? boolValue(manipulationDisplayInput) : false;
   payload.continuous_rollout = manipulationContinuousInput ? boolValue(manipulationContinuousInput) : true;
   payload.source_location = sourceLocation;
   payload.target_location = targetLocation;
-  payload.observation = parseJsonText(manipulationObservationInput, {
-    observation_id: "manual-transfer",
-    anomaly: false,
-    transfer_readiness: { ready: true, pose_confidence: 0.82 },
-  });
+  payload.observation = parseJsonText(manipulationObservationInput, preset.observation);
   payload.specimen_result = {
     ok: true,
     specimen_id: specimenId,
@@ -516,10 +567,15 @@ function applyManipulationProfile(profile, force = false) {
     const hasProfile = Array.from(profileSelect.options || []).some((opt) => opt.value === profile.profile_id);
     if (hasProfile) profileSelect.value = profile.profile_id;
   }
+  setInputValue(manipulationTaskIdInput, profile.task_id || profile.skill_id);
   setInputValue(manipulationStrategyInput, profile.manipulation_strategy);
+  setInputValue(manipulationPolicyBackendInput, profile.policy_backend);
   setInputValue(manipulationPolicyTypeInput, profile.policy_type);
   setInputValue(manipulationSourceInput, profile.source_location);
   setInputValue(manipulationTargetInput, profile.target_location);
+  setInputValue(manipulationMaxDurationInput, profile.max_duration_s);
+  setInputValue(manipulationRtcHorizonInput, profile.rollout_rtc_execution_horizon);
+  setInputValue(manipulationRtcGuidanceInput, profile.rollout_rtc_max_guidance_weight);
   setInputValue(
     manipulationPolicyInput,
     profile.policy_path || profile.policy_checkpoint_path || profile.policy_repo_id || "",
@@ -682,6 +738,137 @@ function escapeHtml(value) {
     .replaceAll("'", "&#39;");
 }
 
+function compactValue(value) {
+  if (value === undefined || value === null || value === "") return "-";
+  if (Array.isArray(value)) return value.length ? value.join(", ") : "-";
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
+}
+
+function reportRowsHtml(rows) {
+  return rows.map(([label, value]) => `
+    <div class="lerobot-report-row">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(compactValue(value))}</strong>
+    </div>
+  `).join("");
+}
+
+function reportListHtml(items) {
+  const clean = Array.isArray(items) ? items.filter(Boolean) : [];
+  if (!clean.length) return `<span class="hint">none</span>`;
+  return `<ul class="lerobot-report-list">${clean.map((item) => `<li>${escapeHtml(typeof item === "object" ? JSON.stringify(item) : item)}</li>`).join("")}</ul>`;
+}
+
+function manipulationReportFromResponse(data) {
+  if (!data || typeof data !== "object") return null;
+  if (data.manipulation_report && typeof data.manipulation_report === "object") return data.manipulation_report;
+  if (data.data && data.data.manipulation_report && typeof data.data.manipulation_report === "object") return data.data.manipulation_report;
+  return null;
+}
+
+function robotTaskResultFromResponse(data, report = null) {
+  if (!data || typeof data !== "object") return report && report.handoff_packet ? report.handoff_packet : null;
+  if (data.robot_task_result && typeof data.robot_task_result === "object") return data.robot_task_result;
+  if (data.data && data.data.robot_task_result && typeof data.data.robot_task_result === "object") return data.data.robot_task_result;
+  return report && report.handoff_packet ? report.handoff_packet : null;
+}
+
+function renderManipulationAgentReport(data) {
+  if (!manipulationReportEl) return;
+  const report = manipulationReportFromResponse(data);
+  if (!report) return;
+  const packet = robotTaskResultFromResponse(data, report) || {};
+  const task = report.task || {};
+  const policy = report.policy_plan || {};
+  const preflight = report.preflight || {};
+  const vision = report.vision_context || {};
+  const stage = report.stage_machine || {};
+  const sarm = report.sarm || {};
+  const decision = report.decision || {};
+  const runtime = report.rollout_runtime || {};
+  const evidence = packet.evidence_refs || (report.knowledge_payload && report.knowledge_payload.evidence_paths) || [];
+  const preflightState = String(preflight.status || "unknown");
+  const handoffState = String(packet.handoff_status || decision.handoff_status || "unknown");
+  manipulationReportEl.innerHTML = `
+    <article class="lerobot-report-card wide">
+      <div class="lerobot-report-card-title">
+        <strong>Skill Episode Board</strong>
+        <span class="state-pill ${escapeHtml(handoffState === "blocked" ? "warning" : handoffState.includes("ready") ? "ok" : "")}">${escapeHtml(handoffState)}</span>
+      </div>
+      ${reportRowsHtml([
+        ["Task", task.task_id],
+        ["Skill", packet.skill_id || task.task_id],
+        ["Episode", packet.episode_id || report.session_id],
+        ["Specimen", task.specimen_id],
+        ["Route", `${task.source_location || "-"} -> ${task.target_location || "-"}`],
+        ["Terminal Pose", packet.terminal_pose || task.intended_terminal_pose],
+      ])}
+    </article>
+    <article class="lerobot-report-card">
+      <div class="lerobot-report-card-title"><strong>Preflight</strong><span class="state-pill ${escapeHtml(preflightState === "pass" ? "ok" : preflightState === "fail" ? "warning" : "")}">${escapeHtml(preflightState)}</span></div>
+      ${reportRowsHtml([
+        ["Profile", preflight.profile_id],
+        ["Robot Ready", preflight.robot_ready],
+        ["Camera Ready", preflight.camera_ready],
+        ["Policy Ready", preflight.policy_ready],
+        ["Operator Confirmed", preflight.operator_confirmed],
+        ["RTC", preflight.rtc_enabled],
+        ["Action Clamp", preflight.action_clamp_enabled],
+      ])}
+      <div class="lerobot-report-subtitle">Warnings / blockers</div>
+      ${reportListHtml([...(preflight.blocking_reasons || []), ...(preflight.warnings || [])])}
+    </article>
+    <article class="lerobot-report-card">
+      <div class="lerobot-report-card-title"><strong>Pi0.5 / Policy Runtime</strong></div>
+      ${reportRowsHtml([
+        ["Backend", policy.policy_backend],
+        ["Policy Type", policy.policy_type],
+        ["Policy Ref", policy.policy_ref],
+        ["Inference", policy.inference_type],
+        ["RTC Horizon", policy.rtc_execution_horizon],
+        ["RTC Guidance", policy.rtc_max_guidance_weight],
+        ["Max Duration", policy.max_duration_s],
+        ["Rollout Status", runtime.status],
+        ["Session", runtime.session_id],
+      ])}
+    </article>
+    <article class="lerobot-report-card">
+      <div class="lerobot-report-card-title"><strong>Vision Dependency</strong></div>
+      ${reportRowsHtml([
+        ["Observation", vision.observation_id],
+        ["Camera", vision.camera],
+        ["Pickup Ready", vision.pickup_target_ready],
+        ["Fixture Visible", vision.fixture_visible],
+        ["Anomaly", vision.anomaly],
+        ["Freshness", vision.freshness && vision.freshness.reason],
+      ])}
+    </article>
+    <article class="lerobot-report-card">
+      <div class="lerobot-report-card-title"><strong>SARM Stage Progress</strong></div>
+      ${reportRowsHtml([
+        ["Current Stage", stage.current_stage],
+        ["Next Expected", stage.next_expected_stage],
+        ["Completed", (stage.completed_stages || []).length],
+        ["Progress", sarm.progress_score],
+        ["Failure Precursor", sarm.failure_precursor],
+        ["Recovery", sarm.recovery_suggested],
+      ])}
+    </article>
+    <article class="lerobot-report-card wide">
+      <div class="lerobot-report-card-title"><strong>Decision / Handoff</strong></div>
+      ${reportRowsHtml([
+        ["Completion", packet.completion_status || decision.completion_status],
+        ["Next Agent", packet.next_action || decision.recommended_next_agent],
+        ["Reason", decision.reason],
+        ["Verification", decision.verification && decision.verification.reason],
+      ])}
+      <div class="lerobot-report-subtitle">Evidence</div>
+      ${reportListHtml(Array.isArray(evidence) ? evidence.map((item) => item.path || item) : [])}
+    </article>
+  `;
+}
+
 function actionStatusFromEvent(event) {
   const el = event && event.currentTarget ? event.currentTarget : null;
   const scope = el ? el.closest(".lerobot-device-card, .lerobot-port-panel, .lerobot-workflow-card, .lerobot-visualization-panel, .lerobot-config-panel") : null;
@@ -690,6 +877,14 @@ function actionStatusFromEvent(event) {
 
 function actionSummary(data) {
   if (!data) return "No response.";
+  if (data.hardware_alert) {
+    const alert = data.hardware_alert;
+    const severity = String(alert.severity || "alert").toUpperCase();
+    const target = [alert.device, alert.component].filter(Boolean).join(" / ") || "hardware";
+    const reason = alert.message || alert.failure_code || data.status || "hardware issue";
+    const recovery = alert.recovery_hint ? ` · ${alert.recovery_hint}` : "";
+    return `${severity} · ${target} · ${reason}${recovery}`;
+  }
   if (data.failure_code) return `${data.failure_code}: ${data.message || data.error || data.status || "failed"}`;
   if (data.error) return String(data.error);
   if (data.training) {
@@ -1418,5 +1613,7 @@ if (policySelect) {
   });
 }
 if (policyTypeInput) policyTypeInput.addEventListener("change", applyPolicyTypeDefaults);
+if (manipulationTaskIdInput) manipulationTaskIdInput.addEventListener("change", () => syncManipulationTaskPreset(true));
+syncManipulationTaskPreset(false);
 applyPolicyTypeDefaults();
 refreshConfig();

@@ -39,7 +39,7 @@ Direct startup without the launcher:
 | Module Management | `http://localhost:7860/module-management` | `web/templates/module_management.html`, `web/static/module_management.js` | Module loading, validation, versioning, generated adapter management |
 | 3DP Workspace | `http://localhost:7860/printer` | `web/templates/printer.html`, `web/static/printer.js` | PrusaLink, slicing options, auto-ejection, test-print settings |
 | LeRobot Workspace | `http://localhost:7860/lerobot` | `web/templates/lerobot.html`, `web/static/lerobot.js` | Port detection, teleop, recording, training, visualization, rollout |
-| BO Workspace | `http://localhost:7860/bo` | `web/templates/bo.html`, `web/static/bo.js` | BO/MBO/random/grid benchmark, acquisition settings, candidate selection |
+| BO Workspace | `http://localhost:7860/bo` | `web/templates/bo.html`, `web/static/bo.js` | BO/MBO/LLM preference strategy, lightweight/BoTorch optional backend, reasoning audit, candidate ranking/selection |
 | CAE Workspace | `http://localhost:7860/cae` | `web/templates/cae.html`, `web/static/cae.js` | STL analysis, bottom fixed/top cyclic load settings, result review |
 | Windows Equipment | `http://localhost:7860/equipment/windows` | `web/templates/windows_equipment.html`, `web/static/windows_equipment.js` | Windows PyAutoGUI bridge discovery, saved targets, tests, program launch |
 | Self-Evolution Lab | `http://localhost:7860/evolution-lab` | `web/templates/evolution_lab.html`, `web/static/evolution_lab.js` | Prompt/module/graph variants, validation, approval, rollback |
@@ -91,7 +91,7 @@ Useful APIs:
 | `equipment` | `graphs/modules/equipment` | Execute UTM/Windows bridge/equipment commands | equipment result, protocol note |
 | `analysis` | `graphs/modules/analysis` | Compute UTM/CAE/FEM metrics and objective score | metrics, contour artifact, objective_score |
 | `knowledge` | `graphs/modules/knowledge` | Summarize evidence into memory and inform next optimization | memory update, evidence summary |
-| `bo` | `graphs/modules/bo` | Select next candidate using acquisition/surrogate/benchmark logic | `bo_result`, next candidate |
+| `bo` | `graphs/modules/bo` | Select next candidate using Analysis/Knowledge evidence, numeric BO, and LLM reasoning as a soft prior | `bo_result`, `candidate_ranking`, `next_design_request` |
 | `guardian` | `graphs/modules/guardian` | Enforce safety, approval, continue/stop/error decision | guardian decision |
 
 The older top-level `agents/` directory is an implementation/compatibility layer. The active runtime contract is primarily defined by `graphs/modules/*/module.yaml` and `graphs/configs/*.yaml`.

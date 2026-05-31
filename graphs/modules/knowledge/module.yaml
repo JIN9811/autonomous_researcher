@@ -9,21 +9,61 @@ module:
     dry_run_supported: true
   tools: []
   internal_graph:
-    - id: 01_retrieve_prior_runs
-      label: Retrieve Prior Runs
+    - id: 01_collect_run_artifacts
+      label: Collect Run Artifacts
       kind: internal_step
-    - id: 02_summarize_failures
-      label: Summarize Failures
+    - id: 02_normalize_provenance
+      label: Normalize Provenance
       kind: internal_step
-    - id: 03_write_memory
-      label: Write Memory
+    - id: 03_ingest_agent_reports
+      label: Ingest Agent Reports
       kind: internal_step
-    - id: 04_handoff_bo
-      label: Handoff Bo
+    - id: 04_write_experiment_knowledge_record
+      label: Write Experiment Knowledge Record
+      kind: internal_step
+    - id: 05_update_failure_patterns
+      label: Update Failure Patterns
+      kind: internal_step
+    - id: 06_update_success_patterns
+      label: Update Success Patterns
+      kind: internal_step
+    - id: 07_update_agent_performance_ledger
+      label: Update Agent Performance Ledger
+      kind: internal_step
+    - id: 08_build_bo_context
+      label: Build BO Context
+      kind: internal_step
+    - id: 09_rank_self_evolution_targets
+      label: Rank Self-Evolution Targets
+      kind: internal_step
+    - id: 10_build_evolution_evidence_packs
+      label: Build Evolution Evidence Packs
+      kind: internal_step
+    - id: 11_emit_knowledge_report
+      label: Emit Knowledge Report
+      kind: internal_step
+    - id: 12_emit_evolution_lab_prefill
+      label: Emit Evolution Lab Prefill
       kind: internal_step
   io_contract:
     input: OrchestratorState
-    output: AgentResult.data merged into OrchestratorState
+    output: AgentResult.data with knowledge_context.v1 and evolution_proposal.v1
+  output_contracts:
+    - knowledge_context.v1
+    - evolution_proposal.v1
+    - knowledge_report.v1
+    - experiment_knowledge_v1
+    - agent_performance_v1
+    - failure_pattern_v1
+    - success_pattern_v1
+    - evolution_evidence_pack_v1
+  transition_conditions:
+    - knowledge_record exists
+    - provenance.used is non-empty
+    - agent_performance_records exist for completed stages
+    - bo_context exists or explicit no_bo_context_needed reason exists
+    - evolution_evidence_packs exists or explicit no_evolution_needed reason exists
   notes: >-
-    GUI/module editor may edit this module config, but execution remains bound to
-    allowlisted Python handlers. Python source is not modified by the GUI.
+    Knowledge is the research memory and self-evolution evidence owner. It writes
+    typed run artifacts plus memory/knowledge JSONL records. It recommends
+    evolution targets but never activates prompt/graph/tool variants directly.

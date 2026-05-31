@@ -1,95 +1,101 @@
 BO Agent Runtime Guideline
 
 Purpose
-- Add a dedicated Bayesian Optimization Agent to the Autonomous Researcher system.
-- The BO Agent must improve the current system rather than replace the existing Design Agent, Analysis Agent, or Experiment Runtime.
-- The agent chooses the next candidate or benchmark strategy using existing experiment memory, the standard ExperimentObjective / ExperimentCandidate / ExperimentEvaluationResult contract, and operator-tunable BO settings.
+- BO Agent is the optimization scientist in the Autonomous Researcher closed loop.
+- It does not fabricate specimens, slice G-code, move robots, run UTM equipment, or override Guardian.
+- It reads measured evidence, Knowledge memory, failure patterns, and operator BO settings, then recommends the next Design Agent constraints.
+- LLM reasoning is visible and auditable, but it is only a soft preference layer. Numeric acquisition, schema/range checks, failure memory, and downstream manufacturability validation decide the final candidate.
 
 External reference scope
 - Reference repository: https://github.com/sparks-baird/self-driving-lab-demo
-- Only reuse the concepts:
-  - one thin experiment evaluation interface
-  - grid/random/Bayesian optimization comparison
-  - best-so-far objective trace
-  - operator-readable optimization tutorial structure
-- Do not copy RGB/optics/MQTT/cloud demo code.
+- Reused concepts only:
+  - standard experiment objective/evaluation interface
+  - random/grid/BO comparison
+  - best-so-far trace
+  - operator-readable optimization tutorial/report style
 - Do not import the reference project as a dependency.
-- Adapt all names and behavior to this repository's Autonomous Experiment Runtime.
+- Do not copy optics/RGB/MQTT/cloud demo code.
 
-System-native name
-- User-facing name: BO Workspace
-- Agent name: `bo_agent`
-- Runtime tool path: `experiment.benchmark`
-- Result key: `bo_result`
-- State metadata key: `run_metadata["bo_agent"]`
+Runtime identity
+- User-facing page: BO Workspace
+- Route: /bo
+- Agent name: bo_agent
+- Module: graphs/modules/bo/module.yaml
+- LLM task route: bo_policy
+- Runtime tool path: experiment.benchmark
+- Primary result key: bo_result
+- State metadata key: run_metadata["bo_agent"]
+- Next-design state key: run_metadata["bo_recommended_constraints"]
+- Next-design handoff key: run_metadata["next_design_request"]
 
-Role in the system
-- BO Agent is an advisory optimization agent and a runtime sidecar.
-- It runs after KnowledgeAgent and before GuardianAgent in the loop. It is intentionally not a new `Stage` enum value.
-- It must consume `run_metadata["knowledge"]` and accumulated `experiment_evaluations` before recommending next-cycle DesignAgent constraints.
-- It must store the full result in `run_metadata["bo_agent"]` and next-cycle design parameters in `run_metadata["bo_recommended_constraints"]`.
-- It must not own STL generation, slicing, printing, robot control, or Guardian safety.
-- Design Agent remains the concrete specimen-spec generator.
-- Specimen Making Agent remains the physical fabrication handoff owner.
-- Analysis Agent remains the owner of measured data parsing and objective calculation.
-- Guardian Agent remains the final safety/consistency decision point.
+Closed-loop position
+- Default closed loop:
+  design -> specimen -> vision -> manipulation -> equipment -> analysis -> knowledge -> bo -> guardian -> design|complete|error
+- BO consumes Analysis/Knowledge results and proposes the next Design constraints.
+- Guardian still performs final loop decision and safety/consistency review.
 
-Primary responsibilities
-1. Normalize the active objective.
-2. Normalize the design parameter space.
-3. Select an optimization strategy:
-   - random
-   - grid
-   - bo
-   - mbo
-4. Select acquisition behavior:
-   - expected_improvement
-   - upper_confidence_bound
-   - probability_of_improvement
-   - uncertainty_sampling
-   - exploitation
-   - exploration
-5. Evaluate candidate proposal quality through `experiment.benchmark`.
-6. Return best-so-far curves and a recommended candidate parameter payload.
-7. Preserve a compact record in state for GUI/reporting.
-8. Attach KnowledgeAgent context to `bo_result.knowledge_context`.
-9. Return `experiment_spec_update` so the next DesignAgent cycle can generate the next shape.
+Core responsibilities
+1. Normalize objective and parameter space.
+2. Lock operator-controlled/test-option parameters, especially cell_size_mm.
+3. Ingest Analysis bo_handoff / bo_observation / experiment_evaluation before generic priors.
+4. Separate failed priors into failure_model instead of successful BO observations.
+5. Ask the LLM for strict JSON reasoning when llm_preference_enabled=true.
+6. Sanitize LLM JSON into bo_reasoning_v1.
+7. Run experiment.benchmark with random/grid/bo-compatible strategy values.
+8. Build and rank candidate_pool using numeric acquisition + LLM preference - risk/constraint penalties.
+9. Write auditable artifacts.
+10. Emit next_design_request.v1 for Design Agent.
 
-Definitions
-- BO: Bayesian optimization over one current objective using a surrogate/acquisition rule.
-- MBO: model-based optimization. In this project, MBO means "use prior ExperimentEvaluationResult records and surrogate-style predictions to bias candidate selection." It is not a separate external package by default.
-- Acquisition function: a deterministic policy for scoring candidate proposals.
-- Best-so-far: the best objective score observed up to each iteration, respecting direction.
+Supported strategy values
+- random
+- grid
+- bo
+- mbo
+- llm_warmstart
+- llm_preference_bo
+- safe_constrained_bo
+- multi_objective_pareto
+- multi_fidelity_bo
 
-Inputs
-- `OrchestratorState.run_id`
-- `OrchestratorState.experiment_id`
-- `OrchestratorState.mode`
-- `OrchestratorState.active_goal`
-- `OrchestratorState.current_experiment_spec`
-- `OrchestratorState.current_experiment_objective`
-- `OrchestratorState.experiment_evaluations`
-- `OrchestratorState.run_metadata["knowledge"]`
-- optional payload supplied by GUI/API:
-  - strategy
-  - acquisition
-  - budget
-  - random_seed
-  - exploration_weight
-  - exploitation_weight
-  - kappa
-  - xi
-  - parameter_space
-  - objective
-  - execution
+Benchmark backend mapping
+- experiment.benchmark currently supports random, grid, bo strategy payloads.
+- Higher-level reasoning strategies map to the bo benchmark strategy:
+  - llm_warmstart -> bo
+  - llm_preference_bo -> bo
+  - safe_constrained_bo -> bo
+  - multi_objective_pareto -> bo
+  - multi_fidelity_bo -> bo
+- The original requested strategy is preserved in bo_result.strategy.
+- The actual benchmark strategy is stored in bo_result.benchmark_strategy.
 
-Default objective
-- name: "Specimen printability and performance proxy"
-- metric_name: "objective_score"
-- direction: "maximize"
-- constraints: merge active Design Agent / 3DP printer constraints when available.
+Numeric backend options
+- lightweight_pool
+  - Default. No heavy dependency.
+  - Uses deterministic candidate-pool proxy mean, uncertainty, and acquisition formulas.
+- botorch_optional
+  - Default dependency. Installed through requirements.txt / pyproject default dependencies.
+  - Uses BoTorch SingleTaskGP posterior scoring over the existing candidate pool.
+  - Keeps categorical/boolean/fixed manufacturing variables inside the repository candidate-pool and validator contract.
+  - Does not run unconstrained continuous optimize_acqf by default.
+  - If torch/botorch/gpytorch import fails, data is insufficient, or GP fitting fails, it falls back to lightweight_pool and records backend_warnings.
 
-Default parameter space for current TPMS specimen work
+Backend result fields
+- bo_result.bo_backend: requested numeric backend from operator/API.
+- bo_result.benchmark.bo_backend_requested: requested backend passed to experiment.benchmark.
+- bo_result.benchmark.backend_warnings: global backend fallback warnings.
+- bo_result.benchmark.strategies.bo.backend_requested: requested backend for bo strategy.
+- bo_result.benchmark.strategies.bo.backend_active: actual backend used for at least one BO step, usually lightweight_pool or botorch_optional.
+- bo_result.benchmark.strategies.bo.surrogate_trace[*].backend_active: backend used for that specific step.
+
+Supported acquisition values
+- expected_improvement
+- upper_confidence_bound
+- probability_of_improvement
+- uncertainty_sampling
+- exploitation
+- exploration
+
+Default parameter space
 - geometry_type: ["gyroid"]
 - relative_density: [0.20, 0.48]
 - wall_thickness_mm: [1.2, 2.0]
@@ -102,164 +108,269 @@ Default parameter space for current TPMS specimen work
 - top_cap_enabled: [false]
 - skirt_enabled: [false]
 
-Loop-stable parameters:
-- `cell_size_mm` is operator/test-option controlled during the closed-loop specimen series.
-- If `current_experiment_spec.cell_size_mm` or `current_experiment_spec.constraints.cell_size_mm` exists, BO must lock the benchmark parameter space to that single value.
-- BO may recommend `relative_density`, `wall_thickness_mm`, `tpms_thickness`, `orientation_deg`, `anisotropy_ratio`, cap flags, skirt flags, and preferred geometry, but it must not change the saved/test-selected cell size between cycles.
-- For gyroid TPMS, BO must not recommend `relative_density < 0.20`; that violates the FDM continuous-shell rule and would stop SpecimenMakingAgent manufacturability validation.
-- `experiment_spec_update` may include the locked `cell_size_mm` for traceability, but runtime merge logic must not let BO overwrite the active cell-size constraint.
-- BO must pass current/prior ExperimentEvaluationResult points into `experiment.benchmark` as prior evaluations. The benchmark acquisition must treat prior/current specimens as already-seen points so repeated shape recommendations are penalized.
-- In closed-loop test series, only static/operator constraints should be carried to the next DesignAgent cycle. Previous-cycle shape values such as `relative_density`, `wall_thickness_mm`, `orientation_deg`, `anisotropy_ratio`, and `tpms_thickness` must remain free unless BO explicitly recommends them.
+Loop-stable parameters
+- cell_size_mm is operator/test-option controlled.
+- If current_experiment_spec.cell_size_mm or current_experiment_spec.constraints.cell_size_mm exists, BO must lock benchmark and recommendation to that value.
+- BO may recommend relative_density, wall_thickness_mm, tpms_thickness, orientation_deg, anisotropy_ratio, cap flags, skirt flags, and preferred geometry.
+- BO must not silently change saved/test-selected cell size between cycles.
+- For gyroid TPMS, relative_density < 0.20 is invalid for FDM continuous-shell generation.
 
-Supported strategy values
-- `random`
-  - Sample candidates from parameter space with seed.
-  - Useful as baseline.
-- `grid`
-  - Enumerate midpoint/edge values.
-  - Useful for small discrete spaces and debugging.
-- `bo`
-  - Use benchmark BO path and acquisition settings.
-  - Default for iterative candidate selection.
-- `mbo`
-  - Use available prior evaluations to bias candidate scoring.
-  - If prior data is missing, degrade to `bo` with a clear warning.
+Input evidence priority
+1. state.latest_analysis.bo_handoff
+2. state.latest_analysis.bo_observation
+3. state.latest_analysis.experiment_evaluation
+4. state.run_metadata["analysis"].bo_handoff / bo_observation / experiment_evaluation
+5. state.run_metadata direct bo_handoff / bo_observation / experiment_evaluation
+6. current_experiment_spec for duplicate avoidance
+7. state.experiment_evaluations
 
-Supported acquisition values
-- `expected_improvement`
-  - Default BO acquisition.
-  - Balances best observed score and predicted improvement.
-- `upper_confidence_bound`
-  - Uses `mean + kappa * uncertainty`.
-  - Higher kappa means more exploration.
-- `probability_of_improvement`
-  - Uses probability-like improvement over the current best.
-  - Uses `xi` as a minimum improvement margin.
-- `uncertainty_sampling`
-  - Prioritizes uncertain regions.
-  - Useful when model confidence is poor.
-- `exploitation`
-  - Prioritizes high predicted score.
-  - Risk: can converge early.
-- `exploration`
-  - Prioritizes coverage/uncertainty.
-  - Risk: can waste physical experiments.
+BO-ready prior format
+- source
+- candidate_id
+- parameters
+- score
+- uncertainty
+- quality_score
+- ok_for_bo
+- failure_tags
+- artifact_refs
 
-Output schema
-AgentResult.data must include:
-- `bo_result`
-  - ok: bool
-  - tool: "bo.agent"
-  - run_id: str
-  - experiment_id: str
-  - strategy: str
-  - acquisition: str
-  - budget: int
-  - parameter_space: dict
-  - objective: dict
-  - benchmark: dict
-  - recommendation: dict
-  - best_so_far: list[dict]
-  - warnings: list[str]
-  - metadata: dict
-- `bo_result.benchmark.strategies.bo.surrogate_trace`
-  - step: int
-  - acquisition: str
-  - x_axis: "candidate_pool_index"
-  - selected: selected candidate with score, surrogate_mean, uncertainty, acquisition_value, and compact parameters
-  - evaluated_points: prior/current/evaluated points with score and compact parameters
-  - candidates: candidate landscape with surrogate_mean, uncertainty, acquisition_value, and evaluated/duplicate marker
-- `experiment_objective`
-  - normalized objective dict
-- `experiment_spec_update`
-  - candidate parameter update to merge into Design Agent constraints if used
+Failed prior rule
+- ok_for_bo=false, failure_tags, failed/blocked status, missing parameter vector, or poor quality gates must not be treated as successful BO observations.
+- Failed priors feed failure_model.risk_patterns and forbidden_regions.
+- Failure data must be preserved, not discarded.
 
-Recommendation schema
-- candidate_id: str
-- parameters: dict
-- objective_score: float | null
-- source_strategy: str
-- reason: str
+LLM reasoning contract
+- Task route: bo_policy
+- Prompt registry entry: backends/prompt_registry.py -> bo_policy
+- Model route: configs/models.yaml -> bo_policy
+- LLM output must be strict JSON. Free prose is rejected and deterministic fallback reasoning is used.
+- Required schema: bo_reasoning_v1
+
+LLM output keys
+- schema_version
+- hypotheses
+- strategy_recommendation
+- search_space_patch
+- preference_regions
+- risk_flags
+- operator_summary
+
+LLM may do
+- Interpret objective and constraints.
+- Summarize evidence/failure patterns.
+- Propose hypotheses.
+- Suggest search-space narrow/expand/lock/forbid operations.
+- Suggest acquisition/exploration/exploitation direction.
+- Provide preference regions and operator-facing rationale.
+
+LLM must not do
+- Execute hardware.
+- Invent unsupported parameter keys.
+- Override numeric acquisition or validators.
+- Override measured evidence with intuition.
+- Bypass Guardian or manufacturability validation.
+- Write raw objective_score.
+
+Candidate scoring
+combined_score =
+  normalized_numeric_acquisition_score
+  + llm_weight * llm_preference_score
+  - failure_risk_penalty
+  - constraint_violation_penalty
+  - duplicate_penalty
+
+Default llm_weight policy
+- If llm_candidate_weight is numeric, clamp to [0.0, 0.45].
+- If llm_candidate_weight="auto":
+  - prior_count/loop_count <= 3: 0.25
+  - <= 10: 0.15
+  - > 10: 0.08
+- As real measured evidence grows, LLM influence decreases.
+
+Condition grammar for LLM preference/risk regions
+- Numeric range: relative_density between 0.30 and 0.42
+- Numeric comparison: wall_thickness_mm >= 1.2
+- Boolean equality: bottom_cap_enabled = true
+- String equality: geometry_type = gyroid
+- Multiple clauses: condition A and condition B, or A && B
+
+bo_result schema
+bo_result includes:
+- ok
+- tool: bo.agent
+- run_id
+- experiment_id
+- strategy
+- benchmark_strategy
+- acquisition
+- budget
+- parameter_space
+- objective
+- benchmark
+- prior_summary
+- failure_model
+- reasoning
+- candidate_pool
+- candidate_ranking
+- recommendation
+- next_design_request
+- best_so_far
+- knowledge_context
+- warnings
+- artifacts
+- metadata
+
+prior_summary fields
+- prior_count
+- measured_count
+- failed_count
+- best_score
+- best_candidate_id
+
+candidate_pool / candidate_ranking item fields
+- candidate_id
+- parameters
+- numeric.surrogate_mean
+- numeric.uncertainty
+- numeric.acquisition_value
+- llm.preference_score
+- llm.matched_regions
+- llm.weight
+- constraints.valid
+- constraints.risk_score
+- constraints.warnings
+- constraints.already_evaluated
+- combined_score
+- source_strategy
+
+recommendation fields
+- candidate_id
+- parameters
+- objective_score
+- source_strategy
+- reason
+- why_this_candidate
+- why_not_best_exploitation_only
+- expected_information_gain
+- risk_assessment
+- bo_hypothesis_ids
+- why_not_chosen
+- combined_score
+
+next_design_request.v1
+- schema: next_design_request.v1
+- run_id
+- experiment_id
+- producer_agent: bo_agent
+- consumer_agent: design_agent
+- status
+- candidate_id
+- constraints
+- rationale
+- reasoning_ref
+- guardian_status: not_checked
+- decisions
+- warnings
+- next_action
+- created_at
+
+Artifacts written per run
+- runs/<run_id>/bo/bo_reasoning_report.json
+- runs/<run_id>/bo/candidate_pool.json
+- runs/<run_id>/bo/bo_next_candidate.json
+- Workspace/runtime progress SVGs may also be materialized by controller artifact handling.
 
 Mode behavior
 - Test mode:
-  - Must not call physical hardware.
-  - Use `execution.mode=virtual` and `bridge=virtual`.
-  - Must be deterministic for fixed seed.
+  - No physical hardware.
+  - execution.mode=virtual and bridge=virtual.
+  - Deterministic for fixed seed.
 - Live mode:
-  - BO Agent itself should still evaluate virtually unless explicitly told to run a live experiment.
-  - Physical execution remains downstream of Design Agent and Specimen Making Agent.
+  - BO Agent itself still evaluates virtually unless a future explicit live experiment API is added.
+  - Physical execution remains downstream through Design, Specimen Making, Vision, Manipulation, Equipment, Analysis, Guardian.
 - Live GUI:
-  - BO configuration may be edited in BO Workspace.
-  - Live GUI may consume the latest BO recommendation as design constraints.
+  - BO chat card displays strategy, acquisition, prior counts, recommendation, reasoning summary, and candidate ranking.
+  - Heavy surrogate plots remain collapsible to avoid DOM/memory growth.
 
-GUI requirements
-- Add dedicated route: `/bo`
-- Add main GUI Device Workspaces card: "BO Workspace"
-- BO Workspace must expose:
-  - strategy selector: random / grid / bo / mbo
-  - acquisition selector
-  - budget input
-  - random seed input
-  - kappa input
-  - xi input
-  - exploration_weight input
-  - exploitation_weight input
-  - parameter-space editor for current specimen variables
-  - run benchmark button
-  - run BO Agent button
-  - JSON/result status panel
-  - best-so-far table or simple chart data
-  - surrogate/acquisition trace plot for BO/MBO runs
-  - selected/evaluated point list with compact parameter values
-  - recommended candidate panel
-  - Save Settings button
-- BO Workspace saved settings:
-  - persist to `memory/bo_workspace_settings.json`
-  - are returned by `GET /api/bo/config` under `saved`
-  - are reapplied by the GUI when a new BO Workspace window is opened
-  - include mode, objective, strategy, acquisition, budget, seed, acquisition hyperparameters, and parameter-space bounds
-- GUI must not trigger printer/robot hardware directly.
-- GUI must call API endpoints that use BO Agent / experiment.benchmark only.
-- Live GUI BO Agent chat cards must default to collapsed graph mode to avoid repeatedly creating large SVG/DOM trees during periodic Live GUI refresh.
-- Collapsed Live GUI cards show strategy, acquisition, budget, trace step count, latest candidate, recommended candidate, and recommended score.
-- Surrogate/acquisition trace SVGs and selected/evaluated point history rows are rendered only after the operator selects `그래프 보기`.
-- Selecting `그래프 접기` removes those graph/history DOM nodes while preserving the underlying `bo_result` payload in session state.
+BO Workspace GUI requirements
+- Route: /bo
+- Config endpoints:
+  - GET /api/bo/config
+  - POST /api/bo/config
+- Execution endpoints:
+  - POST /api/bo/benchmark
+  - POST /api/bo/run
+- Exposed controls:
+  - strategy
+  - acquisition
+  - budget
+  - random_seed
+  - kappa
+  - xi
+  - exploration_weight
+  - exploitation_weight
+  - llm_preference_enabled
+  - llm_candidate_weight
+  - top_k
+  - bo_backend / Numeric Backend
+  - objective JSON
+  - parameter_space JSON
+- Result panels:
+  - recommendation / next-design handoff
+  - evidence intake/prior summary
+  - LLM reasoning audit
+  - candidate ranking
+  - best-so-far
+  - surrogate/acquisition trace
+  - raw JSON
+- GUI must not trigger printer/robot/equipment hardware directly.
 
-API requirements
-- `GET /bo`
-  - Serve dedicated BO Workspace.
-- `GET /api/bo/config`
-  - Return defaults, supported strategies, supported acquisitions, and recent BO state.
-- `POST /api/bo/config`
-  - Validate and persist BO Workspace settings.
-  - Return normalized settings, warnings, and the saved settings path.
-- `POST /api/bo/benchmark`
-  - Run benchmark with supplied settings.
-- `POST /api/bo/run`
-  - Run BO Agent with supplied settings and return `bo_result`.
+LangGraph module requirements
+- graphs/modules/bo/module.yaml must expose the reasoning/acquisition loop as internal_graph steps:
+  01_load_analysis_handoff
+  02_filter_valid_priors
+  03_summarize_evidence_table
+  04_llm_reasoning_hypothesis_pass
+  05_validate_reasoning_patch
+  06_update_search_space
+  07_generate_candidate_pool
+  08_score_numeric_acquisition
+  09_score_llm_preference
+  10_apply_constraint_and_failure_penalties
+  11_rank_top_k_candidates
+  12_llm_top_k_critique
+  13_select_recommendation
+  14_write_bo_artifacts
+  15_handoff_design_constraints
 
-Implementation rules
-- Keep BO Agent additive.
-- Do not add BO as a mandatory stage in the main RunLoop until explicitly requested.
-- Register BO Agent in `app/bootstrap.py` so API and future orchestrator paths can retrieve it.
-- Do not modify existing MCP protocol names.
-- Do not change Design Agent required output schema.
-- If BO recommendation is consumed by Design Agent later, merge it through `current_experiment_spec["constraints"]`.
-- When merging BO recommendations into DesignAgent constraints, filter out `cell_size_mm`; the current operator/test-option cell size remains authoritative.
+Design Agent consumption rule
+- Design Agent may read run_metadata["bo_recommended_constraints"] or run_metadata["next_design_request"].
+- It must run its own manufacturability and schema validation again.
+- BO recommendation is a next experiment candidate, not fabrication approval.
+- cell_size_mm must remain operator/test-option authoritative.
 
 Validation requirements
 - Unit tests:
-  - BO Agent returns valid `bo_result`.
-  - Strategy/acquisition normalization works.
-  - Test mode is deterministic.
-  - `mbo` without priors degrades safely.
-  - API benchmark endpoint returns random/grid/bo results.
-- Existing full test suite must pass.
+  - BO Agent returns valid bo_result.
+  - normalize_settings fallback works.
+  - MBO without priors degrades safely.
+  - cell_size lock is preserved.
+  - prior/current specimen is penalized to avoid repeat recommendations.
+  - bo_result emits reasoning, candidate ranking, next_design_request, and artifacts.
+  - LLM preference regions affect ranking as a soft score.
+- Integration tests:
+  - /api/bo/config reports defaults and persists saved settings.
+  - /api/bo/benchmark runs virtual BO and emits workspace events.
+  - Higher-level reasoning strategies map to bo backend for benchmark.
+  - /api/bo/run returns recommendation and artifacts.
 
 Failure behavior
-- Invalid parameter space returns structured error in API.
-- Unknown strategy falls back to `bo` with warning.
-- Unknown acquisition falls back to `expected_improvement` with warning.
-- Empty benchmark budget coerces to 1.
-- Missing prior evaluations in MBO does not fail; degrade to BO with warning.
+- Unknown strategy falls back to bo with warning.
+- Unknown acquisition falls back to expected_improvement with warning.
+- Empty/invalid budget coerces to at least 1.
+- Missing prior evaluations in MBO degrades to BO with warning.
+- Non-JSON or failed LLM reasoning uses deterministic fallback and records a warning.
+- Invalid/failure-prone LLM preference regions only add risk/penalty; they do not force a candidate.
+- botorch_optional import/fit failure falls back to lightweight_pool and records backend_warnings.
+- If no valid recommendation exists, next_design_request.status becomes blocked.

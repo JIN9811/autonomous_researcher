@@ -2,29 +2,91 @@ module:
   id: analysis
   label: Analysis Agent Module
   handler: agent.analysis_agent
-  llm_role: analysis_reasoning
+  llm_role: ""
   editable: true
   safety:
     live_requires_validation: true
     dry_run_supported: true
   tools:
   - cae.run_static_analysis
+  - fenicsx.health
+  - fenicsx.run_linear_elasticity
+  - fenicsx.run_fem
   internal_graph:
-    - id: 01_parse_utm_curve
-      label: Parse Utm Curve
+    - id: 01_receive_equipment_artifact
+      label: Receive Equipment Artifact
       kind: internal_step
-    - id: 02_compute_mechanical_metrics
-      label: Compute Mechanical Metrics
+    - id: 02_fingerprint_input_file
+      label: Fingerprint Input File
       kind: internal_step
-    - id: 03_run_cae_if_available
-      label: Run Cae If Available
+    - id: 03_detect_format_and_parser
+      label: Detect Format And Parser
       kind: internal_step
-    - id: 04_emit_objective_score
-      label: Emit Objective Score
+    - id: 04_parse_raw_table
+      label: Parse Raw Table
+      kind: internal_step
+    - id: 05_resolve_columns_and_units
+      label: Resolve Columns And Units
+      kind: internal_step
+    - id: 06_build_canonical_curve
+      label: Build Canonical Curve
+      kind: internal_step
+    - id: 07_preprocess_curve
+      label: Preprocess Curve
+      kind: internal_step
+    - id: 08_validate_curve_quality
+      label: Validate Curve Quality
+      kind: internal_step
+    - id: 09_compute_utm_metrics
+      label: Compute UTM Metrics
+      kind: internal_step
+    - id: 10_prepare_fem_problem
+      label: Prepare FEM Problem
+      kind: internal_step
+    - id: 11_llm_plan_fenicsx_tutorial_loop
+      label: LLM Plan FEniCSx Tutorial Loop
+      kind: internal_step
+    - id: 12_probe_fenicsx_runtime
+      label: Probe FEniCSx Runtime
+      kind: internal_step
+    - id: 13_run_fenicsx_mesh_iteration
+      label: Run FEniCSx Mesh Iteration
+      kind: internal_step
+    - id: 14_compare_iteration_with_utm
+      label: Compare Iteration With UTM
+      kind: internal_step
+    - id: 15_accept_or_refine_fem
+      label: Accept Or Refine FEM
+      kind: internal_step
+    - id: 16_run_cae_if_available
+      label: Run CAE If Available
+      kind: internal_step
+    - id: 17_compare_fem_with_utm
+      label: Compare FEM With UTM
+      kind: internal_step
+    - id: 18_compute_objective_and_uncertainty
+      label: Compute Objective And Uncertainty
+      kind: internal_step
+    - id: 19_compare_with_previous_experiments
+      label: Compare With Previous Experiments
+      kind: internal_step
+    - id: 20_write_analysis_artifacts
+      label: Write Analysis Artifacts
+      kind: internal_step
+    - id: 21_emit_experiment_evaluation
+      label: Emit Experiment Evaluation
+      kind: internal_step
+    - id: 22_emit_bo_handoff
+      label: Emit BO Handoff
       kind: internal_step
   io_contract:
     input: OrchestratorState
     output: AgentResult.data merged into OrchestratorState
   notes: >-
     GUI/module editor may edit this module config, but execution remains bound to
-    allowlisted Python handlers. Python source is not modified by the GUI.
+    allowlisted Python handlers. This module leaves llm_role empty so Python
+    task routes such as analysis_reasoning and analysis_fem_planning remain
+    distinct inside the agent. The FEniCSx agentic loop lets the LLM plan
+    tutorial-style mesh/function-space/boundary/solve/postprocess steps, but
+    execution is restricted to registered fenicsx.* tools and validated payloads.
+    Python source is not modified by the GUI or LLM.

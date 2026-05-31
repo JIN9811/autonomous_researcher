@@ -6,6 +6,7 @@ from pathlib import Path
 
 from experiments.api import evaluate_experiment
 from experiments.benchmark import run_benchmark
+from learning.botorch_backend import is_available as botorch_available
 from mcp_tools.experiment_tools import register_experiment_tools
 from mcp_tools.printer_tools import register_printer_tools
 from mcp_tools.tool_registry import ToolRegistry
@@ -112,3 +113,42 @@ def test_benchmark_runs_random_grid_bo() -> None:
     assert bo_trace[0]["selected"]["candidate_id"]
     assert bo_trace[0]["selected"]["acquisition_value"] is not None
     assert bo_trace[0]["x_axis"] == "candidate_pool_index"
+
+
+def test_benchmark_accepts_optional_botorch_backend() -> None:
+    result = run_benchmark(
+        {
+            "budget": 3,
+            "strategies": ["bo"],
+            "bo_backend": "botorch_optional",
+            "parameter_space": {
+                "geometry_type": ["gyroid"],
+                "relative_density": [0.2, 0.4],
+                "wall_thickness_mm": [1.2, 2.0],
+                "cell_size_mm": [5.0, 8.0],
+            },
+            "prior_evaluations": [
+                {
+                    "candidate_id": "prior-1",
+                    "parameters": {"geometry_type": "gyroid", "relative_density": 0.24, "wall_thickness_mm": 1.2, "cell_size_mm": 5.0},
+                    "score": 0.52,
+                },
+                {
+                    "candidate_id": "prior-2",
+                    "parameters": {"geometry_type": "gyroid", "relative_density": 0.36, "wall_thickness_mm": 1.8, "cell_size_mm": 8.0},
+                    "score": 0.68,
+                },
+            ],
+            "objective": {"name": "compare botorch optional backend", "metric_name": "score"},
+        }
+    )
+
+    bo = result["strategies"]["bo"]
+    assert result["ok"] is True
+    assert result["bo_backend_requested"] == "botorch_optional"
+    assert bo["backend_requested"] == "botorch_optional"
+    assert bo["backend_active"] in {"lightweight_pool", "botorch_optional"}
+    assert bo["surrogate_trace"][0]["backend_requested"] == "botorch_optional"
+    assert bo["surrogate_trace"][0]["backend_active"] in {"lightweight_pool", "botorch_optional"}
+    if not botorch_available():
+        assert result["backend_warnings"]

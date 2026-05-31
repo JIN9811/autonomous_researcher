@@ -10,21 +10,57 @@ module:
   tools:
   - experiment.benchmark
   internal_graph:
-    - id: 01_load_objective_history
-      label: Load Objective History
+    - id: 01_load_analysis_handoff
+      label: Load Analysis Handoff
       kind: internal_step
-    - id: 02_fit_surrogate
-      label: Fit Surrogate
+    - id: 02_filter_valid_priors
+      label: Filter Valid Priors
       kind: internal_step
-    - id: 03_evaluate_acquisition
-      label: Evaluate Acquisition
+    - id: 03_summarize_evidence_table
+      label: Summarize Evidence Table
       kind: internal_step
-    - id: 04_recommend_next_constraints
-      label: Recommend Next Constraints
+    - id: 04_llm_reasoning_hypothesis_pass
+      label: LLM Reasoning Hypothesis Pass
+      kind: internal_step
+    - id: 05_validate_reasoning_patch
+      label: Validate Reasoning Patch
+      kind: internal_step
+    - id: 06_update_search_space
+      label: Update Search Space
+      kind: internal_step
+    - id: 07_generate_candidate_pool
+      label: Generate Candidate Pool
+      kind: internal_step
+    - id: 08_score_numeric_acquisition
+      label: Score Numeric Acquisition
+      kind: internal_step
+    - id: 09_score_llm_preference
+      label: Score LLM Preference
+      kind: internal_step
+    - id: 10_apply_constraint_and_failure_penalties
+      label: Apply Constraint And Failure Penalties
+      kind: internal_step
+    - id: 11_rank_top_k_candidates
+      label: Rank Top-K Candidates
+      kind: internal_step
+    - id: 12_llm_top_k_critique
+      label: LLM Top-K Critique
+      kind: internal_step
+    - id: 13_select_recommendation
+      label: Select Recommendation
+      kind: internal_step
+    - id: 14_write_bo_artifacts
+      label: Write BO Artifacts
+      kind: internal_step
+    - id: 15_handoff_design_constraints
+      label: Handoff Design Constraints
       kind: internal_step
   io_contract:
     input: OrchestratorState
     output: AgentResult.data merged into OrchestratorState
   notes: >-
     GUI/module editor may edit this module config, but execution remains bound to
-    allowlisted Python handlers. Python source is not modified by the GUI.
+    allowlisted Python handlers. Python source is not modified by the GUI. BO
+    reasoning is advisory: numeric acquisition and validator gates decide the
+    handoff candidate, and hardware execution remains downstream of Design,
+    Specimen, Manipulation, Equipment, and Guardian.

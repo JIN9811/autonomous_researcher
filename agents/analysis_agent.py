@@ -22,8 +22,10 @@ Modification guide:
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 import math
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -43,6 +45,27 @@ _DISPLACEMENT_KEYS = (
 )
 _FORCE_KEYS = ("force_n", "load_n", "force", "load", "force_N", "load_N")
 _TIME_KEYS = ("time_s", "time_sec", "seconds", "time")
+_LOCAL_FILE_KEYS = (
+    "result_file",
+    "result_path",
+    "csv_path",
+    "utm_result_file",
+    "utm_csv_path",
+    "artifact_path",
+    "linux_path",
+    "local_path",
+    "path",
+)
+_FILE_CONTAINER_KEYS = (
+    "equipment_report",
+    "utm_data_ready",
+    "equipment_handoff",
+    "data_acquisition",
+    "data_integrity",
+    "artifact",
+    "output_artifacts",
+    "artifacts",
+)
 
 
 class AnalysisAgent(BaseAgent):
@@ -67,6 +90,84 @@ class AnalysisAgent(BaseAgent):
         return list(default)
 
     @staticmethod
+    def _header_role_unit(header: Any) -> tuple[str | None, float, str]:
+        text = str(header or "").strip()
+        lowered = text.lower().replace("_", " ").replace("-", " ")
+        compact = "".join(ch for ch in lowered if ch.isalnum())
+        unit = ""
+        multiplier = 1.0
+        role: str | None = None
+        if any(token in compact for token in ("force", "load", "loadcell", "axialforce", "standardforce")):
+            role = "force_N"
+            unit = "N"
+            if "kgf" in compact:
+                multiplier = 9.80665
+                unit = "kgf"
+            elif "kn" in compact or "kilonewton" in compact:
+                multiplier = 1000.0
+                unit = "kN"
+        elif any(token in compact for token in ("displacement", "extension", "stroke", "crosshead", "position", "travel", "compression")):
+            role = "displacement_mm"
+            unit = "mm"
+            if "inch" in compact or compact.endswith("in") or "inches" in compact:
+                multiplier = 25.4
+                unit = "in"
+        elif any(token in compact for token in ("times", "timesec", "elapsedtime", "second", "seconds")) or compact in {"time", "t", "sec", "s", "min"}:
+            role = "time_s"
+            unit = "s"
+            if "min" in compact and "admin" not in compact:
+                multiplier = 60.0
+                unit = "min"
+        elif "stress" in compact:
+            role = "stress_MPa"
+            unit = "MPa"
+            if "kpa" in compact:
+                multiplier = 0.001
+                unit = "kPa"
+            elif "psi" in compact:
+                multiplier = 0.00689476
+                unit = "psi"
+        elif "strain" in compact:
+            role = "strain"
+            unit = "mm/mm"
+            if "percent" in compact or "%" in lowered:
+                multiplier = 0.01
+                unit = "%"
+        return role, multiplier, unit
+
+    @classmethod
+    def _column_mapping_report(cls, headers: Any) -> dict[str, Any]:
+        mapping: dict[str, Any] = {}
+        roles: dict[str, str] = {}
+        if not headers:
+            return {
+                "schema": "analysis_column_mapping.v1",
+                "mappings": {},
+                "column_mapping_confidence": 0.0,
+                "unit_mapping_confidence": 0.0,
+                "warnings": ["no_headers"],
+            }
+        for header in headers:
+            role, multiplier, unit = cls._header_role_unit(header)
+            if not role:
+                continue
+            mapping[str(header)] = {"canonical": role, "multiplier": multiplier, "unit": unit}
+            roles[role] = str(header)
+        required = {"displacement_mm", "force_N"}
+        has_required = required.issubset(set(roles))
+        confidence = 0.95 if has_required else 0.55 if roles else 0.0
+        unit_confidence = 0.92 if has_required else 0.50 if roles else 0.0
+        warnings = [] if has_required else ["missing_force_or_displacement_mapping"]
+        return {
+            "schema": "analysis_column_mapping.v1",
+            "mappings": mapping,
+            "roles": roles,
+            "column_mapping_confidence": confidence,
+            "unit_mapping_confidence": unit_confidence,
+            "warnings": warnings,
+        }
+
+    @staticmethod
     def _first_number(row: dict[str, Any], keys: tuple[str, ...]) -> float | None:
         lowered = {str(key).strip().lower(): value for key, value in row.items()}
         for key in keys:
@@ -75,6 +176,18 @@ class AnalysisAgent(BaseAgent):
             low_key = key.lower()
             if low_key in lowered:
                 return AnalysisAgent._safe_float(lowered[low_key], math.nan)
+        target_role = ""
+        if keys == _FORCE_KEYS:
+            target_role = "force_N"
+        elif keys == _DISPLACEMENT_KEYS:
+            target_role = "displacement_mm"
+        elif keys == _TIME_KEYS:
+            target_role = "time_s"
+        for header, value in row.items():
+            role, multiplier, _unit = AnalysisAgent._header_role_unit(header)
+            if role == target_role:
+                parsed = AnalysisAgent._safe_float(value, math.nan)
+                return parsed * multiplier if math.isfinite(parsed) else math.nan
         return None
 
     def _specimen_geometry(self, state: OrchestratorState) -> dict[str, float | list[float]]:
@@ -191,16 +304,348 @@ class AnalysisAgent(BaseAgent):
                 "message": f"{exc.__class__.__name__}: {exc}",
             }
 
+    def _fem_payload(self, state: OrchestratorState, geometry: dict[str, Any]) -> dict[str, Any]:
+        payload = self._cae_payload(state, geometry)
+        payload.update(
+            {
+                "schema": "fem_request.v1",
+                "run_id": state.run_id,
+                "experiment_id": state.experiment_id,
+                "runtime_mode": state.mode.value,
+                "mode": state.mode.value,
+                "source": "analysis_agent",
+            }
+        )
+        return payload
+
+    def _run_fem(self, state: OrchestratorState, ctx: AgentContext, geometry: dict[str, Any]) -> dict[str, Any] | None:
+        tools = getattr(ctx, "tools", None)
+        if tools is None:
+            return None
+        try:
+            available = tools.list_tools() if hasattr(tools, "list_tools") else []
+            if available and "fenicsx.run_linear_elasticity" not in available:
+                return None
+            return tools.call("fenicsx.run_linear_elasticity", self._fem_payload(state, geometry))
+        except KeyError:
+            return None
+        except Exception as exc:
+            return {
+                "ok": False,
+                "tool": "fenicsx.run_linear_elasticity",
+                "status": "error",
+                "failure_code": "FENICSX_TOOL_ERROR",
+                "message": f"{exc.__class__.__name__}: {exc}",
+            }
+
+    @staticmethod
+    def _extract_json_object(text: str) -> dict[str, Any]:
+        raw = str(text or "").strip()
+        if not raw:
+            return {}
+        start = raw.find("{")
+        end = raw.rfind("}")
+        if start < 0 or end <= start:
+            return {}
+        try:
+            value = json.loads(raw[start : end + 1])
+        except json.JSONDecodeError:
+            return {}
+        return value if isinstance(value, dict) else {}
+
+    @staticmethod
+    def _fenicsx_tutorial_contract() -> dict[str, Any]:
+        """Return the fixed tutorial-derived FEM workflow the LLM may plan around."""
+        return {
+            "schema": "fenicsx_tutorial_contract.v1",
+            "source": "artifacts/external/fenicsx/sources/dolfinx-tutorial/chapter2/linearelasticity_code.py",
+            "problem_family": "small_strain_linear_elasticity",
+            "tutorial_steps": [
+                "create 3D mesh from specimen bounding box or STL-derived envelope",
+                "define vector Lagrange function space with three displacement components",
+                "apply Dirichlet boundary condition on the bottom fixture face",
+                "apply top cyclic compression load/traction as validated loading data",
+                "define epsilon(u), sigma(u), bilinear form a(u,v), and linear form L(v)",
+                "solve the linear variational problem with a PETSc-backed validated template",
+                "postprocess displacement, reaction force, Von Mises stress, stiffness, and structural score",
+                "compare low-fidelity FEM prediction with high-fidelity UTM measurement",
+            ],
+            "allowed_tools": ["fenicsx.health", "fenicsx.run_linear_elasticity", "fenicsx.run_fem"],
+            "safety_rule": "LLM may plan and judge validated steps, but must not generate or execute arbitrary solver code.",
+        }
+
+    def _default_fem_agentic_plan(self, state: OrchestratorState, geometry: dict[str, Any]) -> dict[str, Any]:
+        spec = state.current_experiment_spec if isinstance(state.current_experiment_spec, dict) else {}
+        size = self._vector3(geometry.get("specimen_size_mm"), [20.0, 20.0, 20.0])
+        base_mesh = self._safe_float(spec.get("fem_agentic_mesh_size_mm") or spec.get("cae_mesh_size_mm") or spec.get("mesh_size_mm"), 2.0)
+        base_mesh = max(0.25, min(base_mesh, max(min(size) / 3.0, 0.25)))
+        return {
+            "schema": "analysis_fem_agentic_plan.v1",
+            "problem_family": "small_strain_linear_elasticity",
+            "max_iterations": int(max(1, min(self._safe_float(spec.get("fem_agentic_max_iterations"), 3.0), 3))),
+            "mesh_sweep_mm": [round(base_mesh, 6), round(max(base_mesh * 0.75, 0.25), 6), round(max(base_mesh * 0.5, 0.25), 6)],
+            "acceptance": {
+                "min_agreement_score": self._safe_float(spec.get("fem_agentic_min_agreement_score"), 0.60),
+                "require_solver_converged": True,
+            },
+            "decision_policy": "accept first converged run whose FEM/UTM agreement passes threshold; otherwise keep best available run",
+            "tutorial_basis": self._fenicsx_tutorial_contract()["tutorial_steps"],
+        }
+
+    def _sanitize_fem_agentic_plan(self, raw_plan: dict[str, Any], state: OrchestratorState, geometry: dict[str, Any]) -> dict[str, Any]:
+        default = self._default_fem_agentic_plan(state, geometry)
+        plan = dict(default)
+        if isinstance(raw_plan, dict):
+            if str(raw_plan.get("problem_family") or "").strip():
+                plan["problem_family"] = str(raw_plan["problem_family"]).strip()[:80]
+            acceptance = raw_plan.get("acceptance") if isinstance(raw_plan.get("acceptance"), dict) else {}
+            if "min_agreement_score" in acceptance:
+                plan["acceptance"]["min_agreement_score"] = max(0.35, min(self._safe_float(acceptance.get("min_agreement_score"), 0.60), 0.95))
+            if "max_iterations" in raw_plan:
+                plan["max_iterations"] = int(max(1, min(self._safe_float(raw_plan.get("max_iterations"), plan["max_iterations"]), 3)))
+            meshes = raw_plan.get("mesh_sweep_mm")
+            if isinstance(meshes, list) and meshes:
+                cleaned: list[float] = []
+                for value in meshes[:5]:
+                    mesh_size = self._safe_float(value, math.nan)
+                    if math.isfinite(mesh_size) and mesh_size > 0:
+                        cleaned.append(round(max(0.20, min(mesh_size, 10.0)), 6))
+                if cleaned:
+                    plan["mesh_sweep_mm"] = cleaned
+            if str(raw_plan.get("decision_policy") or "").strip():
+                plan["decision_policy"] = str(raw_plan["decision_policy"]).strip()[:240]
+        plan["mesh_sweep_mm"] = list(dict.fromkeys(plan["mesh_sweep_mm"]))[: max(1, int(plan["max_iterations"]))]
+        plan["tutorial_contract"] = self._fenicsx_tutorial_contract()
+        return plan
+
+    async def _llm_fem_agentic_plan(
+        self,
+        state: OrchestratorState,
+        ctx: AgentContext,
+        geometry: dict[str, Any],
+        metrics: dict[str, Any],
+        source_meta: dict[str, Any],
+    ) -> dict[str, Any]:
+        use_llm = state.mode.value == "live" or getattr(ctx, "force_real_llm_in_test", False)
+        default = self._default_fem_agentic_plan(state, geometry)
+        if not use_llm:
+            return {"ok": True, "source": "deterministic_default", "plan": default, "raw_text": ""}
+        contract = self._fenicsx_tutorial_contract()
+        prompt = (
+            "Create a JSON-only FEniCSx analysis plan for this autonomous materials experiment. "
+            "Follow the DOLFINx linear elasticity tutorial sequence: mesh, vector function space, bottom Dirichlet support, top compression loading, "
+            "variational form, solve, Von Mises/reaction-force postprocess, and FEM-vs-UTM comparison. "
+            "You may only choose validated tool-loop settings; do not generate executable solver code. "
+            "Return JSON with keys: problem_family, mesh_sweep_mm, max_iterations, acceptance.min_agreement_score, decision_policy. "
+            f"tutorial_contract={json.dumps(contract, ensure_ascii=True)}\n"
+            f"geometry={json.dumps(geometry, ensure_ascii=True, default=str)}\n"
+            f"utm_metrics={json.dumps(metrics, ensure_ascii=True, default=str)[:1200]}\n"
+            f"source={json.dumps(source_meta, ensure_ascii=True, default=str)[:900]}"
+        )
+        try:
+            response = await ctx.complete("analysis_fem_planning", prompt, timeout_s=60.0 if state.mode == Mode.TEST else None)
+            parsed = self._extract_json_object(response.text)
+            sanitized = self._sanitize_fem_agentic_plan(parsed, state, geometry)
+            return {
+                "ok": bool(parsed),
+                "source": "llm" if parsed else "llm_invalid_json_fallback",
+                "plan": sanitized,
+                "raw_text": str(response.text or "")[:1200],
+            }
+        except Exception as exc:
+            return {
+                "ok": False,
+                "source": "llm_error_fallback",
+                "plan": self._sanitize_fem_agentic_plan(default, state, geometry),
+                "raw_text": f"{exc.__class__.__name__}: {exc}",
+            }
+
+    def _fem_agentic_iteration_payload(
+        self,
+        state: OrchestratorState,
+        geometry: dict[str, Any],
+        metrics: dict[str, Any],
+        plan: dict[str, Any],
+        *,
+        mesh_size_mm: float,
+        iteration_index: int,
+    ) -> dict[str, Any]:
+        payload = self._fem_payload(state, geometry)
+        peak_force = self._safe_float(metrics.get("peak_force_N"), 0.0)
+        if peak_force > 0:
+            loading = dict(payload.get("loading") if isinstance(payload.get("loading"), dict) else {})
+            loading["load_max_n"] = peak_force
+            payload["loading"] = loading
+        payload.update(
+            {
+                "mesh_size_mm": mesh_size_mm,
+                "agentic_loop": True,
+                "agentic_iteration": iteration_index,
+                "tutorial_contract": plan.get("tutorial_contract", self._fenicsx_tutorial_contract()),
+                "analysis_method": "dolfinx_tutorial_linear_elasticity_validated_tool_loop",
+            }
+        )
+        return payload
+
+    async def _run_fem_agentic_loop(
+        self,
+        state: OrchestratorState,
+        ctx: AgentContext,
+        geometry: dict[str, Any],
+        metrics: dict[str, Any],
+        source_meta: dict[str, Any],
+    ) -> dict[str, Any]:
+        tools = getattr(ctx, "tools", None)
+        if tools is None:
+            return {"schema": "analysis_fenicsx_agentic_loop.v1", "status": "skipped", "reason": "tool_registry_unavailable", "iterations": []}
+        try:
+            available = tools.list_tools() if hasattr(tools, "list_tools") else []
+        except Exception:
+            available = []
+        if available and "fenicsx.run_linear_elasticity" not in available:
+            return {"schema": "analysis_fenicsx_agentic_loop.v1", "status": "skipped", "reason": "fenicsx_tool_unavailable", "available_tools": available, "iterations": []}
+
+        llm_plan = await self._llm_fem_agentic_plan(state, ctx, geometry, metrics, source_meta)
+        plan = llm_plan.get("plan") if isinstance(llm_plan.get("plan"), dict) else self._default_fem_agentic_plan(state, geometry)
+        threshold = self._safe_float((plan.get("acceptance") or {}).get("min_agreement_score"), 0.60)
+        health: dict[str, Any] = {}
+        try:
+            if not available or "fenicsx.health" in available:
+                health = tools.call("fenicsx.health", {"source": "analysis_agent", "agentic_loop": True})
+        except Exception as exc:
+            health = {"ok": False, "tool": "fenicsx.health", "status": "error", "message": f"{exc.__class__.__name__}: {exc}"}
+
+        iterations: list[dict[str, Any]] = []
+        selected: dict[str, Any] | None = None
+        best_score = -1.0
+        for index, mesh_size in enumerate(plan.get("mesh_sweep_mm") or [2.0], start=1):
+            payload = self._fem_agentic_iteration_payload(
+                state,
+                geometry,
+                metrics,
+                plan,
+                mesh_size_mm=self._safe_float(mesh_size, 2.0),
+                iteration_index=index,
+            )
+            try:
+                result = tools.call("fenicsx.run_linear_elasticity", payload)
+            except Exception as exc:
+                result = {
+                    "ok": False,
+                    "tool": "fenicsx.run_linear_elasticity",
+                    "status": "error",
+                    "failure_code": "FENICSX_TOOL_ERROR",
+                    "message": f"{exc.__class__.__name__}: {exc}",
+                }
+            comparison = self._fem_utm_comparison(metrics, result if isinstance(result, dict) else None, None)
+            agreement = self._safe_float(comparison.get("agreement_score"), 0.0) if isinstance(comparison, dict) else 0.0
+            solver_ok = bool(result.get("ok") and (result.get("fem_metrics", result.get("metrics", {})) or {}).get("solver_converged", True)) if isinstance(result, dict) else False
+            accepted = bool(solver_ok and agreement >= threshold)
+            record = {
+                "iteration": index,
+                "mesh_size_mm": payload.get("mesh_size_mm"),
+                "status": result.get("status", "unknown") if isinstance(result, dict) else "unknown",
+                "ok": bool(result.get("ok")) if isinstance(result, dict) else False,
+                "cache_status": result.get("cache_status") if isinstance(result, dict) else None,
+                "solver_backend": result.get("solver_backend") if isinstance(result, dict) else None,
+                "agreement_score": agreement,
+                "accepted": accepted,
+                "comparison": comparison,
+                "tool_result": result,
+            }
+            iterations.append(record)
+            if solver_ok and agreement >= best_score:
+                best_score = agreement
+                selected = result
+            if accepted:
+                record["stop_reason"] = "agreement_threshold_met"
+                break
+        if selected is None and iterations:
+            for record in reversed(iterations):
+                result = record.get("tool_result") if isinstance(record.get("tool_result"), dict) else {}
+                if result.get("ok"):
+                    selected = result
+                    break
+        status = "completed" if isinstance(selected, dict) and selected.get("ok") else "blocked" if iterations else "skipped"
+        selected_iteration = None
+        selected_cache = None
+        if isinstance(selected, dict):
+            selected_key = selected.get("cache_key")
+            for record in iterations:
+                result = record.get("tool_result") if isinstance(record.get("tool_result"), dict) else {}
+                if selected_key and result.get("cache_key") == selected_key:
+                    selected_iteration = record.get("iteration")
+                    selected_cache = result.get("cache_status")
+                    break
+        public_iterations = [
+            {key: value for key, value in record.items() if key != "tool_result"}
+            for record in iterations
+        ]
+        return {
+            "schema": "analysis_fenicsx_agentic_loop.v1",
+            "status": status,
+            "tutorial_reference": self._fenicsx_tutorial_contract(),
+            "llm_plan": llm_plan,
+            "sanitized_plan": plan,
+            "health": health,
+            "iterations": public_iterations,
+            "selected_iteration": selected_iteration,
+            "selected_cache_status": selected_cache,
+            "selected_result": selected or {},
+            "acceptance_threshold": threshold,
+            "tool_sequence": ["fenicsx.health", "fenicsx.run_linear_elasticity"],
+            "safety_rule": "agentic loop plans and evaluates only; FEniCSx execution remains inside registered validated tools",
+        }
+
     @staticmethod
     def _equipment_result(state: OrchestratorState) -> dict[str, Any]:
+        """Collect Equipment handoff data from result, report, packet, and last-stage payloads."""
         metadata = state.run_metadata if isinstance(state.run_metadata, dict) else {}
-        result = metadata.get("equipment_result") if isinstance(metadata.get("equipment_result"), dict) else {}
-        if result:
-            return dict(result)
+        sources: list[dict[str, Any]] = [metadata]
         last_payload = metadata.get("last_stage_payload") if isinstance(metadata.get("last_stage_payload"), dict) else {}
         data = last_payload.get("data") if isinstance(last_payload.get("data"), dict) else {}
-        result = data.get("equipment_result") if isinstance(data.get("equipment_result"), dict) else {}
-        return dict(result)
+        if data:
+            sources.append(data)
+
+        merged: dict[str, Any] = {}
+        for source in sources:
+            result = source.get("equipment_result") if isinstance(source.get("equipment_result"), dict) else {}
+            if result:
+                merged.update(dict(result))
+            for key in ("equipment_report", "utm_data_ready", "equipment_handoff"):
+                value = source.get(key) if isinstance(source.get(key), dict) else {}
+                if value and key not in merged:
+                    merged[key] = dict(value)
+        return merged
+
+    @staticmethod
+    def _file_path_candidates(source: Any, *, prefix: str = "equipment_result") -> list[tuple[str, Any]]:
+        """Return local file candidates from Equipment result/report/packet structures."""
+        candidates: list[tuple[str, Any]] = []
+        if isinstance(source, dict):
+            for key in _LOCAL_FILE_KEYS:
+                value = source.get(key)
+                if value:
+                    candidates.append((f"{prefix}.{key}", value))
+            for key in _FILE_CONTAINER_KEYS:
+                value = source.get(key)
+                if isinstance(value, dict):
+                    candidates.extend(AnalysisAgent._file_path_candidates(value, prefix=f"{prefix}.{key}"))
+                elif isinstance(value, list):
+                    for index, item in enumerate(value):
+                        candidates.extend(AnalysisAgent._file_path_candidates(item, prefix=f"{prefix}.{key}[{index}]"))
+        elif isinstance(source, list):
+            for index, item in enumerate(source):
+                candidates.extend(AnalysisAgent._file_path_candidates(item, prefix=f"{prefix}[{index}]"))
+        seen: set[str] = set()
+        unique: list[tuple[str, Any]] = []
+        for label, value in candidates:
+            token = f"{label}:{value}"
+            if token in seen:
+                continue
+            seen.add(token)
+            unique.append((label, value))
+        return unique
 
     @staticmethod
     def _nested_candidates(source: dict[str, Any]) -> list[Any]:
@@ -222,7 +667,7 @@ class AnalysisAgent(BaseAgent):
                 candidates.extend(AnalysisAgent._nested_candidates(nested))
         return candidates
 
-    def _curve_from_rows(self, rows: Any) -> list[dict[str, float]]:
+    def _curve_points_from_rows(self, rows: Any, *, sort_by_displacement: bool) -> list[dict[str, float]]:
         if not isinstance(rows, list):
             return []
         curve: list[dict[str, float]] = []
@@ -241,12 +686,76 @@ class AnalysisAgent(BaseAgent):
                 continue
             if not math.isfinite(displacement) or not math.isfinite(force):
                 continue
-            point = {"displacement_mm": float(displacement), "force_N": max(0.0, float(force))}
+            # UTM compression exports may use either positive or negative force sign.
+            point = {"displacement_mm": float(displacement), "force_N": abs(float(force))}
             if time_s is not None and math.isfinite(time_s):
                 point["time_s"] = float(time_s)
             curve.append(point)
-        curve.sort(key=lambda item: item["displacement_mm"])
+        if sort_by_displacement:
+            curve.sort(key=lambda item: item["displacement_mm"])
         return curve
+
+    def _curve_from_rows(self, rows: Any) -> list[dict[str, float]]:
+        return self._curve_points_from_rows(rows, sort_by_displacement=True)
+
+    @staticmethod
+    def _file_fingerprint(path: Path) -> dict[str, Any]:
+        if not path.exists() or not path.is_file():
+            return {"exists": False, "path": str(path)}
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        stat = path.stat()
+        return {
+            "artifact_id": f"utm_raw_{digest.hexdigest()[:16]}",
+            "path": str(path),
+            "exists": True,
+            "suffix": path.suffix.lower(),
+            "size_bytes": stat.st_size,
+            "sha256": digest.hexdigest(),
+            "modified_at": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
+        }
+
+    @staticmethod
+    def _curve_signal_quality(curve: list[dict[str, float]]) -> dict[str, Any]:
+        if not curve:
+            return {"ok": False, "failure_code": "UTM_DATA_REQUIRED", "message": "No UTM curve points were parsed.", "point_count": 0}
+        eps = 1e-9
+        force_values = [float(point.get("force_N", 0.0)) for point in curve]
+        displacement_values = [float(point.get("displacement_mm", 0.0)) for point in curve]
+        time_values = [float(point["time_s"]) for point in curve if "time_s" in point and math.isfinite(float(point["time_s"]))]
+        force_range = max(force_values) - min(force_values)
+        displacement_range = max(displacement_values) - min(displacement_values)
+        force_nonzero = any(abs(value) > eps for value in force_values)
+        force_changes = force_range > eps
+        displacement_changes = displacement_range > eps
+        time_monotonic = True
+        if len(time_values) >= 2:
+            time_monotonic = all((b - a) >= -eps for a, b in zip(time_values, time_values[1:], strict=False))
+        quality = {
+            "ok": True,
+            "point_count": len(curve),
+            "force_nonzero": force_nonzero,
+            "force_changes": force_changes,
+            "force_range_N": force_range,
+            "force_min_N": min(force_values),
+            "force_max_N": max(force_values),
+            "displacement_changes": displacement_changes,
+            "displacement_range_mm": displacement_range,
+            "displacement_min_mm": min(displacement_values),
+            "displacement_max_mm": max(displacement_values),
+            "time_monotonic_non_decreasing": time_monotonic,
+        }
+        if len(curve) < 2:
+            quality.update({"ok": False, "failure_code": "UTM_DATA_PARSE_FAILED", "message": "UTM curve must contain at least two points."})
+        elif not time_monotonic:
+            quality.update({"ok": False, "failure_code": "UTM_DATA_NON_MONOTONIC_TIME", "message": "UTM time_s values are not monotonic non-decreasing."})
+        elif not displacement_changes:
+            quality.update({"ok": False, "failure_code": "UTM_DATA_NO_DISPLACEMENT_SIGNAL", "message": "UTM displacement_mm does not change across samples."})
+        elif not force_nonzero or not force_changes:
+            quality.update({"ok": False, "failure_code": "UTM_DATA_NO_FORCE_SIGNAL", "message": "UTM force_N has no nonzero changing load signal."})
+        return quality
 
     def _read_curve_file(self, path_value: Any) -> tuple[list[dict[str, float]], dict[str, Any]]:
         raw_path = str(path_value or "").strip()
@@ -255,10 +764,11 @@ class AnalysisAgent(BaseAgent):
         path = Path(raw_path).expanduser()
         if not path.is_absolute():
             path = resolve_path(raw_path)
-        meta = {"path": str(path), "exists": path.exists()}
+        meta = {"path": str(path), "exists": path.exists(), "fingerprint": self._file_fingerprint(path)}
         if not path.exists() or not path.is_file():
             return [], meta
         suffix = path.suffix.lower()
+        meta.update({"suffix": suffix, "parser_probe": {"attempted": True}})
         try:
             if suffix in {".json", ".jsonl"}:
                 if suffix == ".jsonl":
@@ -268,51 +778,120 @@ class AnalysisAgent(BaseAgent):
                     rows = data.get("samples") if isinstance(data, dict) else data
                     if isinstance(data, dict):
                         for candidate in self._nested_candidates(data):
-                            parsed = self._curve_from_rows(candidate)
-                            if parsed:
+                            raw_curve = self._curve_points_from_rows(candidate, sort_by_displacement=False)
+                            if raw_curve:
+                                parsed = sorted(raw_curve, key=lambda item: item["displacement_mm"])
                                 meta["format"] = "json"
+                                meta["parser_id"] = "analysis.parsers.json_curve"
+                                meta["column_mapping"] = self._column_mapping_report(raw_curve[0].keys() if raw_curve else [])
+                                meta["signal_quality_probe"] = self._curve_signal_quality(raw_curve)
                                 return parsed, meta
+                raw_curve = self._curve_points_from_rows(rows, sort_by_displacement=False)
                 meta["format"] = "json"
-                return self._curve_from_rows(rows), meta
+                meta["parser_id"] = "analysis.parsers.json_curve" if suffix == ".json" else "analysis.parsers.jsonl_curve"
+                meta["column_mapping"] = self._column_mapping_report(raw_curve[0].keys() if raw_curve else [])
+                meta["signal_quality_probe"] = self._curve_signal_quality(raw_curve)
+                return sorted(raw_curve, key=lambda item: item["displacement_mm"]), meta
             with path.open("r", encoding="utf-8", newline="") as handle:
                 sample = handle.read(2048)
                 handle.seek(0)
                 has_header = csv.Sniffer().has_header(sample) if sample.strip() else False
                 if has_header:
                     rows = list(csv.DictReader(handle))
+                    raw_curve = self._curve_points_from_rows(rows, sort_by_displacement=False)
                     meta["format"] = "csv_header"
-                    return self._curve_from_rows(rows), meta
+                    meta["parser_id"] = "analysis.parsers.csv_header"
+                    meta["column_mapping"] = self._column_mapping_report(rows[0].keys() if rows else [])
+                    meta["signal_quality_probe"] = self._curve_signal_quality(raw_curve)
+                    return sorted(raw_curve, key=lambda item: item["displacement_mm"]), meta
                 rows = []
                 for row in csv.reader(handle):
                     if len(row) >= 2:
                         rows.append(row)
+                raw_curve = self._curve_points_from_rows(rows, sort_by_displacement=False)
                 meta["format"] = "csv_numeric"
-                return self._curve_from_rows(rows), meta
+                meta["parser_id"] = "analysis.parsers.csv_numeric"
+                meta["column_mapping"] = {"schema": "analysis_column_mapping.v1", "mappings": {"col[-2]": {"canonical": "displacement_mm", "multiplier": 1.0, "unit": "mm"}, "col[-1]": {"canonical": "force_N", "multiplier": 1.0, "unit": "N"}}, "column_mapping_confidence": 0.75, "unit_mapping_confidence": 0.70, "warnings": ["numeric_csv_no_header"]}
+                meta["signal_quality_probe"] = self._curve_signal_quality(raw_curve)
+                return sorted(raw_curve, key=lambda item: item["displacement_mm"]), meta
         except Exception as exc:
             meta["error"] = f"{exc.__class__.__name__}: {exc}"
             return [], meta
+
+    @staticmethod
+    def _live_equipment_handoff_gate(equipment_result: dict[str, Any]) -> tuple[bool, dict[str, Any]]:
+        """Defensively block live Analysis if Equipment handoff evidence is not ready."""
+        equipment_report = equipment_result.get("equipment_report") if isinstance(equipment_result.get("equipment_report"), dict) else {}
+        equipment_handoff = equipment_result.get("equipment_handoff") if isinstance(equipment_result.get("equipment_handoff"), dict) else {}
+        utm_packet = equipment_result.get("utm_data_ready") if isinstance(equipment_result.get("utm_data_ready"), dict) else {}
+        live_audit = equipment_report.get("live_evidence_audit") if isinstance(equipment_report.get("live_evidence_audit"), dict) else {}
+        decision = equipment_report.get("decision") if isinstance(equipment_report.get("decision"), dict) else {}
+        cross_checks = equipment_report.get("cross_checks") if isinstance(equipment_report.get("cross_checks"), dict) else {}
+        required_for_handoff = bool(live_audit.get("required_for_handoff"))
+        bridge_report = equipment_report.get("bridge") if isinstance(equipment_report.get("bridge"), dict) else {}
+        is_windows_utm = str(
+            equipment_result.get("bridge")
+            or bridge_report.get("provider")
+            or equipment_report.get("equipment_bridge")
+            or ""
+        ).lower() == "windows_pyautogui"
+        control_plan = equipment_report.get("control_plan") if isinstance(equipment_report.get("control_plan"), dict) else {}
+        program_id = str(equipment_result.get("program_id") or control_plan.get("program_id") or "")
+        if program_id.startswith("utm_") and (equipment_report or equipment_handoff or utm_packet):
+            required_for_handoff = True if is_windows_utm or required_for_handoff else required_for_handoff
+        if not (required_for_handoff or equipment_handoff or utm_packet):
+            return True, {"ok": True, "status": "not_required"}
+
+        blockers: list[str] = []
+        handoff_status = str(equipment_handoff.get("status") or decision.get("handoff_status") or "")
+        if handoff_status != "ready_for_analysis":
+            blockers.append(str(equipment_handoff.get("failure_code") or decision.get("failure_code") or "EQUIPMENT_HANDOFF_NOT_READY"))
+        if utm_packet and str(utm_packet.get("status") or "") != "ready":
+            blockers.append(str(utm_packet.get("failure_code") or "UTM_DATA_READY_PACKET_NOT_READY"))
+        if required_for_handoff:
+            required_checks = (
+                "screen_started",
+                "physical_motion_started",
+                "save_completed",
+                "data_file_created",
+                "data_parse_probe_ok",
+                "save_export_responsibility_ok",
+                "screen_evidence_complete",
+                "linux_artifact_pulled",
+                "vision_evidence_complete",
+                "request_audit_log_available",
+                "request_audit_execute_identity_match",
+            )
+            missing = [name for name in required_checks if cross_checks.get(name) is not True]
+            if missing:
+                blockers.append("EQUIPMENT_LIVE_EVIDENCE_INCOMPLETE:" + ",".join(missing))
+            audit_decision = live_audit.get("decision") if isinstance(live_audit.get("decision"), dict) else {}
+            if audit_decision.get("blocking_reasons") and isinstance(audit_decision.get("blocking_reasons"), list):
+                blockers.extend(str(item) for item in audit_decision["blocking_reasons"] if str(item or "").strip())
+        blockers = list(dict.fromkeys(item for item in blockers if item and item != "None"))
+        return (not blockers), {
+            "ok": not blockers,
+            "status": "ready_for_analysis" if not blockers else "blocked",
+            "failure_code": blockers[0] if blockers else None,
+            "blockers": blockers,
+            "handoff_status": handoff_status,
+            "required_for_handoff": required_for_handoff,
+        }
 
     def _curve_from_equipment(self, equipment_result: dict[str, Any]) -> tuple[list[dict[str, float]], dict[str, Any]]:
         for candidate in self._nested_candidates(equipment_result):
             parsed = self._curve_from_rows(candidate)
             if parsed:
                 return parsed, {"source": "equipment_result.inline"}
-        for key in (
-            "result_file",
-            "result_path",
-            "csv_path",
-            "utm_result_file",
-            "utm_csv_path",
-            "artifact_path",
-        ):
-            if key in equipment_result:
-                curve, meta = self._read_curve_file(equipment_result.get(key))
-                if curve:
-                    meta["source"] = f"equipment_result.{key}"
-                    return curve, meta
-                if meta:
-                    return [], {"source": f"equipment_result.{key}", **meta}
-        return [], {"source": "none"}
+        first_meta: dict[str, Any] = {}
+        for label, path_value in self._file_path_candidates(equipment_result):
+            curve, meta = self._read_curve_file(path_value)
+            if curve:
+                meta["source"] = label
+                return curve, meta
+            if meta and not first_meta:
+                first_meta = {"source": label, **meta}
+        return [], first_meta or {"source": "none"}
 
     def _synthetic_curve(self, state: OrchestratorState, geometry: dict[str, Any]) -> tuple[list[dict[str, float]], dict[str, Any]]:
         spec = state.current_experiment_spec if isinstance(state.current_experiment_spec, dict) else {}
@@ -503,6 +1082,541 @@ class AnalysisAgent(BaseAgent):
             preview = [curve[index] for index in indices]
         return {"point_count": len(curve), "preview": preview}
 
+    @staticmethod
+    def _safe_slug(value: Any, default: str = "item") -> str:
+        text = str(value or default)
+        slug = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in text).strip("_")
+        return slug[:120] or default
+
+    def _analysis_artifact_dir(self, state: OrchestratorState) -> Path:
+        spec = state.current_experiment_spec if isinstance(state.current_experiment_spec, dict) else {}
+        specimen_id = str(spec.get("specimen_id") or state.experiment_id or "specimen")
+        path = resolve_path("runs") / self._safe_slug(state.run_id, "run") / "analysis" / self._safe_slug(specimen_id, "specimen")
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    @staticmethod
+    def _write_json(path: Path, payload: dict[str, Any]) -> str:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload, indent=2, ensure_ascii=True, default=str), encoding="utf-8")
+        return str(path)
+
+    @staticmethod
+    def _canonical_curve(curve: list[dict[str, float]], geometry: dict[str, Any]) -> list[dict[str, Any]]:
+        area = max(AnalysisAgent._safe_float(geometry.get("cross_section_area_mm2"), 400.0), 1e-6)
+        gauge = max(AnalysisAgent._safe_float(geometry.get("gauge_length_mm"), 20.0), 1e-6)
+        force_offset = float(curve[0].get("force_N", 0.0)) if curve else 0.0
+        disp_offset = float(curve[0].get("displacement_mm", 0.0)) if curve else 0.0
+        canonical: list[dict[str, Any]] = []
+        for index, point in enumerate(curve):
+            displacement = max(0.0, float(point.get("displacement_mm", 0.0)) - disp_offset)
+            force = max(0.0, float(point.get("force_N", 0.0)) - force_offset)
+            canonical.append(
+                {
+                    "source_row_index": index,
+                    "time_s": point.get("time_s"),
+                    "displacement_mm": round(displacement, 9),
+                    "force_N": round(force, 9),
+                    "stress_MPa": round(force / area, 9),
+                    "strain": round(displacement / gauge, 9),
+                    "segment": "post_contact" if force > max(2.0, 0.01 * max((p.get("force_N", 0.0) for p in curve), default=0.0)) else "pre_contact",
+                }
+            )
+        return canonical
+
+    @staticmethod
+    def _write_canonical_csv(path: Path, canonical_curve: list[dict[str, Any]]) -> str:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fields = ["source_row_index", "time_s", "displacement_mm", "force_N", "stress_MPa", "strain", "segment"]
+        with path.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=fields)
+            writer.writeheader()
+            for row in canonical_curve:
+                writer.writerow({key: row.get(key, "") for key in fields})
+        return str(path)
+
+    @staticmethod
+    def _preprocessing_report(curve: list[dict[str, float]], canonical_curve: list[dict[str, Any]]) -> dict[str, Any]:
+        peak = max((float(point.get("force_N", 0.0)) for point in curve), default=0.0)
+        contact_threshold = max(2.0, 0.01 * peak)
+        contact_index = None
+        for row in canonical_curve:
+            if float(row.get("force_N", 0.0) or 0.0) > contact_threshold:
+                contact_index = int(row.get("source_row_index", 0))
+                break
+        return {
+            "schema": "analysis_preprocessing.v1",
+            "numeric_coercion": True,
+            "unit_conversion_applied": True,
+            "sorted_by_displacement": True,
+            "force_zero_offset_N": float(curve[0].get("force_N", 0.0)) if curve else 0.0,
+            "displacement_zero_offset_mm": float(curve[0].get("displacement_mm", 0.0)) if curve else 0.0,
+            "smoothing": {"method": "none", "window": 0},
+            "contact_detection": {
+                "method": "first_force_above_max_2N_or_1pct_peak",
+                "threshold_N": round(contact_threshold, 6),
+                "contact_index": contact_index,
+            },
+            "input_rows": len(curve),
+            "output_rows": len(canonical_curve),
+            "dropped_rows": max(0, len(curve) - len(canonical_curve)),
+        }
+
+    @staticmethod
+    def _quality_gate(signal_quality: dict[str, Any], metrics: dict[str, Any], source_meta: dict[str, Any], analysis_ok: bool) -> dict[str, Any]:
+        column_mapping = source_meta.get("column_mapping") if isinstance(source_meta.get("column_mapping"), dict) else {}
+        curve_quality = metrics.get("curve_quality") if isinstance(metrics.get("curve_quality"), dict) else {}
+        checks = {
+            "min_row_count": int(signal_quality.get("point_count") or 0) >= 2,
+            "finite_numeric_values": bool(signal_quality.get("ok", False)),
+            "monotonic_displacement": float(curve_quality.get("monotonic_displacement_ratio", 1.0) or 0.0) >= 0.95,
+            "positive_force_detected": bool(signal_quality.get("force_nonzero", False)),
+            "peak_not_at_boundary": "peak_at_curve_boundary" not in (curve_quality.get("warnings") or []),
+            "unit_mapping_confident": float(column_mapping.get("unit_mapping_confidence", 0.9 if not column_mapping else 0.0) or 0.0) >= 0.70,
+            "column_mapping_confident": float(column_mapping.get("column_mapping_confidence", 0.9 if not column_mapping else 0.0) or 0.0) >= 0.70,
+            "equipment_handoff_verified": True,
+        }
+        warnings = list(curve_quality.get("warnings") or []) + list(column_mapping.get("warnings") or [])
+        ok_for_metrics = bool(analysis_ok and signal_quality.get("ok", False) and checks["positive_force_detected"] and checks["min_row_count"])
+        ok_for_bo = bool(ok_for_metrics and checks["unit_mapping_confident"] and checks["column_mapping_confident"] and checks["peak_not_at_boundary"])
+        score = sum(1 for value in checks.values() if value) / max(len(checks), 1)
+        failure_code = None if ok_for_metrics else str(signal_quality.get("failure_code") or "ANALYSIS_QUALITY_GATE_FAILED")
+        return {
+            "schema": "analysis_quality_gate.v1",
+            "ok_for_metrics": ok_for_metrics,
+            "ok_for_bo": ok_for_bo,
+            "score": round(score, 4),
+            "checks": checks,
+            "warnings": sorted(set(str(item) for item in warnings if item)),
+            "failure_code": failure_code,
+        }
+
+    def _comparison(self, state: OrchestratorState, objective_score: float, metrics: dict[str, Any]) -> dict[str, Any]:
+        prior = [item for item in state.experiment_evaluations if isinstance(item, dict) and item.get("objective_score") is not None]
+        if not prior:
+            return {
+                "schema": "analysis_comparison.v1",
+                "mode": "first_loop",
+                "previous_loop": None,
+                "best_so_far": None,
+                "nearest_neighbor": None,
+                "summary": "No prior measured experiment available.",
+            }
+        previous = prior[-1]
+        best = max(prior, key=lambda item: self._safe_float(item.get("objective_score"), float("-inf")))
+        prev_score = self._safe_float(previous.get("objective_score"), 0.0)
+        best_score = self._safe_float(best.get("objective_score"), 0.0)
+        return {
+            "schema": "analysis_comparison.v1",
+            "mode": "has_prior",
+            "previous_loop": {
+                "experiment_id": previous.get("experiment_id", ""),
+                "objective_score": prev_score,
+                "delta_objective": round(objective_score - prev_score, 6),
+                "delta_percent": round(((objective_score - prev_score) / max(abs(prev_score), 1e-9)) * 100.0, 3),
+            },
+            "best_so_far": {
+                "experiment_id": best.get("experiment_id", ""),
+                "objective_score": best_score,
+                "is_new_best": objective_score > best_score,
+                "margin": round(objective_score - best_score, 6),
+            },
+            "nearest_neighbor": None,
+            "summary": "Compared against previous and best measured evaluations.",
+        }
+
+    def _fem_utm_comparison(self, metrics: dict[str, Any], fem_result: dict[str, Any] | None, cae_result: dict[str, Any] | None) -> dict[str, Any]:
+        simulation = fem_result if isinstance(fem_result, dict) and fem_result.get("ok") else cae_result
+        sim_metrics = {}
+        if isinstance(simulation, dict):
+            sim_metrics = simulation.get("fem_metrics") if isinstance(simulation.get("fem_metrics"), dict) else simulation.get("cae_metrics") if isinstance(simulation.get("cae_metrics"), dict) else simulation.get("metrics", {})
+        if not isinstance(sim_metrics, dict) or not sim_metrics:
+            return {"schema": "fem_utm_comparison.v1", "available": False, "reason": "no_simulation_metrics"}
+        utm_peak = self._safe_float(metrics.get("peak_force_N"), 0.0)
+        utm_stiffness = self._safe_float(metrics.get("initial_stiffness_N_per_mm"), 0.0)
+        pred_peak = self._safe_float(sim_metrics.get("predicted_peak_force_N") or sim_metrics.get("load_max_N"), 0.0)
+        pred_stiffness = self._safe_float(sim_metrics.get("predicted_initial_stiffness_N_per_mm") or sim_metrics.get("apparent_stiffness_N_per_mm"), 0.0)
+        peak_error = abs(pred_peak - utm_peak) / max(abs(utm_peak), 1e-9) * 100.0 if utm_peak > 0 and pred_peak > 0 else None
+        stiffness_error = abs(pred_stiffness - utm_stiffness) / max(abs(utm_stiffness), 1e-9) * 100.0 if utm_stiffness > 0 and pred_stiffness > 0 else None
+        numeric_errors = [item for item in (peak_error, stiffness_error) if item is not None]
+        agreement = 1.0 / (1.0 + (sum(numeric_errors) / max(len(numeric_errors), 1)) / 100.0) if numeric_errors else 0.0
+        tags = []
+        if peak_error is not None and peak_error > 40.0:
+            tags.append("peak_force_discrepancy_high")
+        if stiffness_error is not None and stiffness_error > 40.0:
+            tags.append("stiffness_discrepancy_high")
+        if not tags:
+            tags.append("acceptable" if agreement >= 0.65 else "needs_more_samples_for_calibration")
+        return {
+            "schema": "fem_utm_comparison.v1",
+            "available": True,
+            "simulation_tool": simulation.get("tool") if isinstance(simulation, dict) else "",
+            "peak_force_error_pct": round(peak_error, 6) if peak_error is not None else None,
+            "stiffness_error_pct": round(stiffness_error, 6) if stiffness_error is not None else None,
+            "agreement_score": round(agreement, 6),
+            "discrepancy_tags": tags,
+        }
+
+    def _write_analysis_artifacts(
+        self,
+        *,
+        state: OrchestratorState,
+        curve: list[dict[str, float]],
+        source_meta: dict[str, Any],
+        metrics: dict[str, Any],
+        analysis: dict[str, Any],
+        handoff: dict[str, Any],
+        fem_result: dict[str, Any] | None,
+        cae_result: dict[str, Any] | None,
+    ) -> dict[str, str]:
+        base = self._analysis_artifact_dir(state)
+        canonical = self._canonical_curve(curve, analysis.get("specimen_geometry", {})) if curve else []
+        preprocessing = self._preprocessing_report(curve, canonical) if curve else {"schema": "analysis_preprocessing.v1", "input_rows": 0, "output_rows": 0}
+        paths: dict[str, str] = {}
+        paths["raw_input_sidecar"] = self._write_json(base / "raw_input_sidecar.json", {"schema": "raw_input_sidecar.v1", "source": source_meta, "fingerprint": source_meta.get("fingerprint", {})})
+        paths["parse_report"] = self._write_json(base / "parse_report.json", {"schema": "analysis_parse_report.v1", "source": source_meta, "parser_id": source_meta.get("parser_id"), "column_mapping": source_meta.get("column_mapping", {})})
+        if canonical:
+            paths["canonical_curve"] = self._write_canonical_csv(base / "canonical_curve.csv", canonical)
+        paths["preprocessing_report"] = self._write_json(base / "preprocessing_report.json", preprocessing)
+        paths["quality_report"] = self._write_json(base / "quality_report.json", analysis.get("quality_gate", analysis.get("data_quality_gate", {})))
+        paths["metrics"] = self._write_json(base / "metrics.json", metrics)
+        if isinstance(fem_result, dict):
+            paths["fem_result"] = self._write_json(base / "fem_result.json", fem_result)
+            if isinstance(fem_result.get("request"), dict):
+                paths["fem_request"] = self._write_json(base / "fem_request.json", fem_result["request"])
+            if fem_result.get("artifacts") and isinstance(fem_result.get("artifacts"), dict) and fem_result["artifacts"].get("fem_cache_manifest"):
+                paths["fem_cache_manifest"] = str(fem_result["artifacts"]["fem_cache_manifest"])
+        elif isinstance(cae_result, dict):
+            paths["fem_result"] = self._write_json(base / "fem_result.json", {"schema": "fem_result.v1", "source": "cae.run_static_analysis", "result": cae_result})
+        if analysis.get("fem_agentic_loop"):
+            paths["fem_agentic_loop"] = self._write_json(base / "fem_agentic_loop.json", analysis["fem_agentic_loop"])
+        if analysis.get("fem_utm_comparison"):
+            paths["fem_utm_comparison"] = self._write_json(base / "fem_utm_comparison.json", analysis["fem_utm_comparison"])
+        if analysis.get("comparison"):
+            paths["comparison"] = self._write_json(base / "comparison.json", analysis["comparison"])
+        paths["analysis_report"] = self._write_json(base / "analysis_report.json", analysis)
+        if handoff.get("experiment_evaluation"):
+            paths["experiment_evaluation"] = self._write_json(base / "experiment_evaluation.json", handoff["experiment_evaluation"])
+        if handoff.get("bo_handoff"):
+            paths["bo_handoff"] = self._write_json(base / "bo_handoff.json", handoff["bo_handoff"])
+        trace_path = base / "analysis_trace.jsonl"
+        events = [
+            {"event": "analysis.file_discovered", "source": source_meta, "created_at": datetime.now(timezone.utc).isoformat()},
+            {"event": "analysis.metrics_computed", "metrics": metrics, "created_at": datetime.now(timezone.utc).isoformat()},
+            {"event": "analysis.fem_agentic_loop_completed", "status": analysis.get("fem_agentic_loop", {}).get("status"), "selected_iteration": analysis.get("fem_agentic_loop", {}).get("selected_iteration"), "created_at": datetime.now(timezone.utc).isoformat()},
+            {"event": "analysis.bo_handoff_created", "ok_for_bo": handoff.get("bo_handoff", {}).get("ok_for_bo"), "created_at": datetime.now(timezone.utc).isoformat()},
+        ]
+        trace_path.write_text("".join(json.dumps(item, ensure_ascii=True, default=str) + "\n" for item in events), encoding="utf-8")
+        paths["analysis_trace"] = str(trace_path)
+        return paths
+
+    @staticmethod
+    def _artifact_refs(equipment_result: dict[str, Any], source_meta: dict[str, Any], cae_result: dict[str, Any] | None) -> list[dict[str, Any]]:
+        refs: list[dict[str, Any]] = []
+
+        def add_ref(kind: str, *, path: Any = "", artifact_id: Any = "", source: str = "") -> None:
+            path_text = str(path or "").strip()
+            artifact_text = str(artifact_id or "").strip()
+            if not path_text and not artifact_text:
+                return
+            item: dict[str, Any] = {"kind": kind or "artifact"}
+            if path_text:
+                item["path"] = path_text
+            if artifact_text:
+                item["artifact_id"] = artifact_text
+            if source:
+                item["source"] = source
+            refs.append(item)
+
+        if source_meta.get("path"):
+            add_ref("utm_csv", path=source_meta["path"], source=str(source_meta.get("source") or "utm"))
+
+        def default_kind_for_key(key: str) -> str:
+            if "screen" in key:
+                return "screen_evidence"
+            if "data" in key or "csv" in key:
+                return "utm_csv"
+            if "failure" in key:
+                return "failure_evidence"
+            return "equipment_artifact"
+
+        def collect_item(item: Any, *, default_kind: str, source: str, depth: int) -> None:
+            if depth > 5:
+                return
+            if isinstance(item, dict):
+                kind = str(item.get("kind") or item.get("type") or default_kind)
+                path_value = (
+                    item.get("local_path")
+                    or item.get("linux_path")
+                    or item.get("path")
+                    or item.get("file_path")
+                    or item.get("filename")
+                    or item.get("windows_path")
+                    or item.get("href")
+                    or item.get("file")
+                )
+                artifact_value = item.get("artifact_id") or item.get("id") or item.get("ref") or item.get("artifact")
+                add_ref(kind, path=path_value, artifact_id=artifact_value, source=source)
+                for nested_key in (
+                    "artifact_refs",
+                    "evidence_refs",
+                    "screen_evidence_refs",
+                    "data_evidence_refs",
+                    "raw_artifact_refs",
+                    "output_artifacts",
+                    "artifacts",
+                ):
+                    nested = item.get(nested_key)
+                    if isinstance(nested, list):
+                        for nested_item in nested:
+                            collect_item(nested_item, default_kind=default_kind_for_key(nested_key), source=f"{source}.{nested_key}", depth=depth + 1)
+                for nested_key in ("equipment_report", "utm_data_ready", "equipment_handoff", "data_acquisition", "live_evidence_audit", "manifest", "source_packets"):
+                    nested = item.get(nested_key)
+                    if isinstance(nested, dict):
+                        collect_item(nested, default_kind=default_kind, source=f"{source}.{nested_key}", depth=depth + 1)
+            elif isinstance(item, (str, Path)):
+                add_ref(default_kind, path=item, source=source)
+
+        collect_item(equipment_result, default_kind="equipment_artifact", source="equipment_result", depth=0)
+        if isinstance(cae_result, dict):
+            for key in ("contour_svg", "report_path", "artifact_path"):
+                value = cae_result.get(key)
+                if value:
+                    add_ref(f"cae_{key}", path=value, source="cae.run_static_analysis")
+        seen: set[tuple[str, str, str, str]] = set()
+        unique: list[dict[str, Any]] = []
+        for item in refs:
+            token = (
+                str(item.get("kind") or ""),
+                str(item.get("path") or ""),
+                str(item.get("artifact_id") or ""),
+                str(item.get("source") or ""),
+            )
+            if token in seen:
+                continue
+            seen.add(token)
+            unique.append(item)
+        return unique
+
+    @staticmethod
+    def _failure_tags(source_meta: dict[str, Any], metrics: dict[str, Any], equipment_result: dict[str, Any], cae_result: dict[str, Any] | None) -> list[str]:
+        tags: list[str] = []
+        if source_meta.get("error"):
+            tags.append("utm_source_read_error")
+        if source_meta.get("failure_code"):
+            tags.append(str(source_meta["failure_code"]))
+        if str(source_meta.get("source") or "").startswith("synthetic"):
+            tags.append("synthetic_utm_curve")
+        quality = metrics.get("curve_quality") if isinstance(metrics.get("curve_quality"), dict) else {}
+        tags.extend(str(item) for item in quality.get("warnings", []) if item)
+        for quality_source in (source_meta.get("signal_quality_probe"), metrics.get("data_quality")):
+            if isinstance(quality_source, dict) and quality_source.get("failure_code"):
+                tags.append(str(quality_source["failure_code"]))
+        failure_code = equipment_result.get("failure_code")
+        if failure_code:
+            tags.append(str(failure_code))
+        for key in ("equipment_handoff", "utm_data_ready", "equipment_report"):
+            packet = equipment_result.get(key) if isinstance(equipment_result.get(key), dict) else {}
+            if packet.get("failure_code"):
+                tags.append(str(packet["failure_code"]))
+            decision = packet.get("decision") if isinstance(packet.get("decision"), dict) else {}
+            if decision.get("failure_code"):
+                tags.append(str(decision["failure_code"]))
+        if isinstance(cae_result, dict) and cae_result.get("failure_code"):
+            tags.append(str(cae_result["failure_code"]))
+        return sorted(set(str(item) for item in tags if str(item or "").strip()))
+
+    def _handoff_payloads(
+        self,
+        *,
+        state: OrchestratorState,
+        analysis: dict[str, Any],
+        metrics: dict[str, Any],
+        source_meta: dict[str, Any],
+        equipment_result: dict[str, Any],
+        cae_result: dict[str, Any] | None,
+        fem_result: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        artifact_refs = self._artifact_refs(equipment_result, source_meta, cae_result)
+        analysis_artifacts = analysis.get("analysis_artifacts") if isinstance(analysis.get("analysis_artifacts"), dict) else {}
+        for kind, path in analysis_artifacts.items():
+            if path:
+                artifact_refs.append({"kind": str(kind), "path": str(path), "source": "analysis_agent"})
+        failure_tags = self._failure_tags(source_meta, metrics, equipment_result, cae_result)
+        extra_failure_tags: list[str] = []
+
+        def add_failure_tag(value: Any) -> None:
+            text = str(value or "").strip()
+            if text:
+                extra_failure_tags.append(text)
+
+        add_failure_tag(analysis.get("failure_code"))
+        data_quality = analysis.get("data_quality") if isinstance(analysis.get("data_quality"), dict) else {}
+        add_failure_tag(data_quality.get("failure_code"))
+        handoff_gate = analysis.get("equipment_handoff_gate") if isinstance(analysis.get("equipment_handoff_gate"), dict) else {}
+        add_failure_tag(handoff_gate.get("failure_code"))
+        blockers = handoff_gate.get("blockers") if isinstance(handoff_gate.get("blockers"), list) else []
+        for blocker in blockers:
+            add_failure_tag(blocker)
+        failure_tags = sorted(set(failure_tags + extra_failure_tags))
+        parameters = {
+            key: state.current_experiment_spec.get(key)
+            for key in ("geometry_type", "relative_density", "wall_thickness_mm", "cell_size_mm", "tpms_thickness")
+            if isinstance(state.current_experiment_spec, dict) and key in state.current_experiment_spec
+        }
+        quality_gate = analysis.get("quality_gate") if isinstance(analysis.get("quality_gate"), dict) else analysis.get("data_quality_gate", {})
+        fem_metrics = analysis.get("fem_metrics") if isinstance(analysis.get("fem_metrics"), dict) else {}
+        simulation_metrics = {
+            "cae": analysis.get("cae_metrics", {}),
+            "fem": fem_metrics,
+        }
+        fem_comparison = analysis.get("fem_utm_comparison") if isinstance(analysis.get("fem_utm_comparison"), dict) else {}
+        bo_ready = bool(analysis.get("ok") and (quality_gate.get("ok_for_bo", True) is True))
+        bo_observation = {
+            "schema": "bo_observation.v1",
+            "run_id": state.run_id,
+            "experiment_id": state.experiment_id,
+            "producer_agent": self.name,
+            "consumer_agent": "bo_agent",
+            "status": "ready" if bo_ready else "blocked",
+            "objective_score": analysis.get("objective_score", 0.0),
+            "uncertainty": analysis.get("uncertainty", 1.0),
+            "observed_metrics": metrics,
+            "simulation_metrics": simulation_metrics,
+            "simulation_residual": fem_comparison,
+            "data_quality": quality_gate or metrics.get("curve_quality", {}),
+            "parameters": parameters,
+            "artifact_refs": artifact_refs,
+            "failure_tags": failure_tags,
+            "source": source_meta,
+        }
+        objective = state.current_experiment_objective if isinstance(state.current_experiment_objective, dict) else {}
+        experiment_evaluation = {
+            "schema": "experiment_evaluation.v1",
+            "ok": bool(analysis.get("ok")),
+            "tool": "analysis.agent",
+            "run_id": state.run_id,
+            "experiment_id": state.experiment_id,
+            "session_id": state.active_session_id or state.run_id,
+            "evaluation_id": f"eval-analysis-{state.experiment_id}",
+            "objective": {
+                "objective_id": objective.get("objective_id") or "bo-specimen-objective",
+                "name": objective.get("name") or "Compression performance",
+                "metric_name": objective.get("metric_name") or "objective_score",
+                "direction": objective.get("direction") or "maximize",
+                "constraints": objective.get("constraints") if isinstance(objective.get("constraints"), dict) else {},
+            },
+            "candidate_id": parameters.get("candidate_id") or state.current_experiment_spec.get("specimen_id", state.experiment_id),
+            "mode": state.mode.value,
+            "bridge": "analysis",
+            "status": "measured_analysis_complete" if analysis.get("ok") else "analysis_blocked",
+            "objective_score": analysis.get("objective_score", 0.0),
+            "uncertainty": analysis.get("uncertainty", 1.0),
+            "metrics": {**parameters, **metrics, "quality_score": quality_gate.get("score"), "fem_utm_agreement_score": fem_comparison.get("agreement_score")},
+            "fidelity_records": {
+                "utm_high": "metrics",
+                "fem_low": (fem_result or {}).get("artifacts", {}).get("fem_result") if isinstance(fem_result, dict) else None,
+                "agreement": analysis_artifacts.get("fem_utm_comparison"),
+            },
+            "artifacts": analysis_artifacts,
+            "artifact_refs": artifact_refs,
+            "bridge_result": {
+                "analysis_source": source_meta.get("source"),
+                "parser_id": source_meta.get("parser_id"),
+                "quality_gate": "passed" if quality_gate.get("ok_for_metrics") else "blocked",
+            },
+            "failure_tags": failure_tags,
+            "source": "analysis_agent",
+            "failure_code": analysis.get("failure_code"),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        bo_handoff = {
+            "schema_version": "analysis_bo_handoff_v1",
+            "ok_for_bo": bo_ready,
+            "run_id": state.run_id,
+            "experiment_id": state.experiment_id,
+            "candidate_id": experiment_evaluation["candidate_id"],
+            "parameters": parameters,
+            "objective": {
+                "metric_name": "objective_score",
+                "direction": experiment_evaluation["objective"].get("direction", "maximize"),
+                "score": analysis.get("objective_score", 0.0),
+                "uncertainty": analysis.get("uncertainty", 1.0),
+            },
+            "metrics": metrics,
+            "fidelity": {
+                "mode": "single_high_fidelity_with_low_fidelity_context",
+                "utm_high": {"objective_source": True, "artifact": analysis_artifacts.get("metrics")},
+                "fem_low": {
+                    "used_for_objective": False,
+                    "artifact": analysis_artifacts.get("fem_result") or ((fem_result or {}).get("artifacts", {}).get("fem_result") if isinstance(fem_result, dict) else None),
+                    "cache_status": (fem_result or {}).get("cache_status") if isinstance(fem_result, dict) else None,
+                },
+            },
+            "quality": quality_gate,
+            "comparison": analysis.get("comparison", {}),
+            "artifacts": analysis_artifacts,
+            "failure_tags": failure_tags,
+        }
+        knowledge_payload = {
+            "schema": "analysis_knowledge_payload.v1",
+            "run_id": state.run_id,
+            "experiment_id": state.experiment_id,
+            "summary": analysis.get("summary", ""),
+            "raw_artifact_refs": artifact_refs,
+            "metrics": metrics,
+            "parameters": parameters,
+            "quality": quality_gate,
+            "artifact_refs": analysis_artifacts,
+            "failure_tags": failure_tags,
+            "source": source_meta,
+        }
+        return {
+            "bo_observation": bo_observation,
+            "bo_handoff": bo_handoff,
+            "experiment_evaluation": experiment_evaluation,
+            "knowledge_payload": knowledge_payload,
+            "artifact_refs": artifact_refs,
+            "failure_tags": failure_tags,
+        }
+
+    def _blocked_result(
+        self,
+        *,
+        state: OrchestratorState,
+        summary: str,
+        analysis: dict[str, Any],
+        metrics: dict[str, Any],
+        source_meta: dict[str, Any],
+        equipment_result: dict[str, Any],
+        cae_result: dict[str, Any] | None,
+    ) -> AgentResult:
+        handoff = self._handoff_payloads(
+            state=state,
+            analysis=analysis,
+            metrics=metrics,
+            source_meta=source_meta,
+            equipment_result=equipment_result,
+            cae_result=cae_result,
+        )
+        analysis["artifact_refs"] = handoff["artifact_refs"]
+        analysis["failure_tags"] = handoff["failure_tags"]
+        analysis["bo_observation"] = handoff["bo_observation"]
+        analysis["knowledge_payload"] = handoff["knowledge_payload"]
+        return AgentResult(
+            success=False,
+            summary=summary,
+            data={
+                "analysis": analysis,
+                "bo_observation": handoff["bo_observation"],
+                "bo_handoff": handoff["bo_handoff"],
+                "experiment_evaluation": handoff["experiment_evaluation"],
+                "knowledge_payload": handoff["knowledge_payload"],
+                "metrics": metrics,
+                "handoff_packet": handoff["bo_observation"],
+            },
+        )
+
     async def _summary(self, state: OrchestratorState, ctx: AgentContext, analysis: dict[str, Any]) -> str:
         metrics = analysis.get("utm_metrics", {})
         cae_metrics = analysis.get("cae_metrics", {})
@@ -535,14 +1649,53 @@ class AnalysisAgent(BaseAgent):
     async def run(self, state: OrchestratorState, ctx: AgentContext) -> AgentResult:
         geometry = self._specimen_geometry(state)
         cae_result = self._run_cae(state, ctx, geometry)
+        fem_result: dict[str, Any] | None = None
+        fem_agentic_loop: dict[str, Any] = {"schema": "analysis_fenicsx_agentic_loop.v1", "status": "not_started", "iterations": []}
         cae_metrics = {}
         if isinstance(cae_result, dict):
             raw_cae_metrics = cae_result.get("cae_metrics") if isinstance(cae_result.get("cae_metrics"), dict) else cae_result.get("metrics")
             cae_metrics = dict(raw_cae_metrics) if isinstance(raw_cae_metrics, dict) else {}
+        fem_metrics = {}
         equipment_result = self._equipment_result(state)
         curve, source_meta = self._curve_from_equipment(equipment_result)
+        live_handoff_ok = True
+        live_handoff_gate: dict[str, Any] = {"ok": True, "status": "not_required"}
+        if state.mode == Mode.LIVE:
+            live_handoff_ok, live_handoff_gate = self._live_equipment_handoff_gate(equipment_result)
         if not curve and state.mode != Mode.LIVE:
             curve, source_meta = self._synthetic_curve(state, geometry)
+        if state.mode == Mode.LIVE and curve and not live_handoff_ok:
+            signal_quality = self._curve_signal_quality(curve)
+            source_meta["signal_quality_probe"] = signal_quality
+            blocked_metrics = {"data_quality": signal_quality}
+            analysis = {
+                "ok": False,
+                "failure_code": live_handoff_gate.get("failure_code") or "EQUIPMENT_HANDOFF_NOT_READY",
+                "summary": "Live UTM data was present, but Equipment proof/handoff gates were not ready for Analysis.",
+                "objective_score": 0.0,
+                "uncertainty": 0.9,
+                "source": source_meta,
+                "specimen_geometry": geometry,
+                "cae_result": cae_result or {},
+                "cae_metrics": cae_metrics,
+                "fem_result": fem_result or {},
+                "fem_metrics": fem_metrics,
+                "equipment_handoff_gate": live_handoff_gate,
+                "equipment_result": {
+                    "tool": equipment_result.get("tool", ""),
+                    "status": equipment_result.get("status", ""),
+                    "failure_code": equipment_result.get("failure_code"),
+                },
+            }
+            return self._blocked_result(
+                state=state,
+                summary="Analysis blocked: Equipment handoff not ready",
+                analysis=analysis,
+                metrics=blocked_metrics,
+                source_meta=source_meta,
+                equipment_result=equipment_result,
+                cae_result=cae_result,
+            )
         if not curve:
             analysis = {
                 "ok": False,
@@ -554,17 +1707,76 @@ class AnalysisAgent(BaseAgent):
                 "specimen_geometry": geometry,
                 "cae_result": cae_result or {},
                 "cae_metrics": cae_metrics,
+                "fem_result": fem_result or {},
+                "fem_metrics": fem_metrics,
+                "equipment_result": {
+                    "tool": equipment_result.get("tool", ""),
+                    "status": equipment_result.get("status", ""),
+                    "failure_code": equipment_result.get("failure_code"),
+                },
+                "equipment_handoff_gate": live_handoff_gate,
+            }
+            return self._blocked_result(
+                state=state,
+                summary="Analysis blocked: UTM data required",
+                analysis=analysis,
+                metrics={},
+                source_meta=source_meta,
+                equipment_result=equipment_result,
+                cae_result=cae_result,
+            )
+
+        signal_quality = source_meta.get("signal_quality_probe") if isinstance(source_meta.get("signal_quality_probe"), dict) else self._curve_signal_quality(curve)
+        source_meta["signal_quality_probe"] = signal_quality
+        if not signal_quality.get("ok", False):
+            failure_code = str(signal_quality.get("failure_code") or "UTM_DATA_PARSE_FAILED")
+            analysis = {
+                "ok": False,
+                "failure_code": failure_code,
+                "summary": str(signal_quality.get("message") or "UTM curve failed signal-quality validation before Analysis."),
+                "objective_score": 0.0,
+                "uncertainty": 0.9,
+                "source": source_meta,
+                "specimen_geometry": geometry,
+                "cae_result": cae_result or {},
+                "cae_metrics": cae_metrics,
+                "fem_result": fem_result or {},
+                "fem_metrics": fem_metrics,
+                "data_quality": signal_quality,
+                "equipment_handoff_gate": live_handoff_gate,
                 "equipment_result": {
                     "tool": equipment_result.get("tool", ""),
                     "status": equipment_result.get("status", ""),
                     "failure_code": equipment_result.get("failure_code"),
                 },
             }
-            return AgentResult(success=False, summary="Analysis blocked: UTM data required", data={"analysis": analysis})
+            return self._blocked_result(
+                state=state,
+                summary=f"Analysis blocked: {failure_code}",
+                analysis=analysis,
+                metrics={"data_quality": signal_quality},
+                source_meta=source_meta,
+                equipment_result=equipment_result,
+                cae_result=cae_result,
+            )
 
         metrics = self._metrics(curve, geometry)
-        objective = self._objective_score(metrics, state, cae_result)
-        uncertainty = self._uncertainty(source_meta, metrics, state, cae_result)
+        fem_agentic_loop = await self._run_fem_agentic_loop(state, ctx, geometry, metrics, source_meta)
+        selected_fem = fem_agentic_loop.get("selected_result") if isinstance(fem_agentic_loop.get("selected_result"), dict) else {}
+        fem_result = selected_fem if selected_fem else None
+        if isinstance(fem_result, dict):
+            raw_fem_metrics = fem_result.get("fem_metrics") if isinstance(fem_result.get("fem_metrics"), dict) else fem_result.get("metrics")
+            fem_metrics = dict(raw_fem_metrics) if isinstance(raw_fem_metrics, dict) else {}
+        objective_simulation = cae_result if isinstance(cae_result, dict) and cae_result.get("ok") else fem_result
+        objective = self._objective_score(metrics, state, objective_simulation)
+        uncertainty = self._uncertainty(source_meta, metrics, state, objective_simulation)
+        quality_gate = self._quality_gate(signal_quality, metrics, source_meta, True)
+        comparison = self._comparison(state, objective, metrics)
+        fem_utm_comparison = self._fem_utm_comparison(metrics, fem_result, cae_result)
+        closed_loop_sources = [source_meta.get("source", "utm")]
+        closed_loop_sources.append("cae.run_static_analysis" if isinstance(cae_result, dict) and cae_result.get("ok") else "cae.unavailable")
+        closed_loop_sources.append("fenicsx.agentic_loop" if fem_agentic_loop.get("status") in {"completed", "blocked"} else "fenicsx.unavailable")
+        closed_loop_sources.append("fenicsx.run_linear_elasticity" if isinstance(fem_result, dict) and fem_result.get("ok") else "fenicsx.unavailable")
         analysis = {
             "ok": True,
             "source": source_meta,
@@ -572,12 +1784,16 @@ class AnalysisAgent(BaseAgent):
             "uncertainty": uncertainty,
             "utm_metrics": metrics,
             "utm_curve": self._curve_preview(curve),
+            "data_quality_gate": signal_quality,
+            "quality_gate": quality_gate,
+            "comparison": comparison,
+            "fem_utm_comparison": fem_utm_comparison,
             "cae_result": cae_result or {},
             "cae_metrics": cae_metrics,
-            "closed_loop_sources": [
-                source_meta.get("source", "utm"),
-                "cae.run_static_analysis" if isinstance(cae_result, dict) and cae_result.get("ok") else "cae.unavailable",
-            ],
+            "fem_result": fem_result or {},
+            "fem_metrics": fem_metrics,
+            "fem_agentic_loop": fem_agentic_loop,
+            "closed_loop_sources": closed_loop_sources,
             "specimen_geometry": geometry,
             "equipment_result": {
                 "tool": equipment_result.get("tool", ""),
@@ -586,13 +1802,63 @@ class AnalysisAgent(BaseAgent):
                 "sequence_id": equipment_result.get("sequence_id", ""),
                 "result_file": equipment_result.get("result_file", ""),
             },
+            "equipment_handoff_gate": live_handoff_gate,
             "recommendation": "ready_for_knowledge_guardian"
-            if uncertainty <= 0.35
+            if uncertainty <= 0.35 and quality_gate.get("ok_for_bo")
             else "review_utm_curve_quality_before_model_update",
         }
         analysis["summary"] = await self._summary(state, ctx, analysis)
+        handoff = self._handoff_payloads(
+            state=state,
+            analysis=analysis,
+            metrics=metrics,
+            source_meta=source_meta,
+            equipment_result=equipment_result,
+            cae_result=cae_result,
+            fem_result=fem_result,
+        )
+        analysis["analysis_artifacts"] = self._write_analysis_artifacts(
+            state=state,
+            curve=curve,
+            source_meta=source_meta,
+            metrics=metrics,
+            analysis=analysis,
+            handoff=handoff,
+            fem_result=fem_result,
+            cae_result=cae_result,
+        )
+        handoff = self._handoff_payloads(
+            state=state,
+            analysis=analysis,
+            metrics=metrics,
+            source_meta=source_meta,
+            equipment_result=equipment_result,
+            cae_result=cae_result,
+            fem_result=fem_result,
+        )
+        analysis["artifact_refs"] = handoff["artifact_refs"]
+        analysis["failure_tags"] = handoff["failure_tags"]
+        analysis["bo_observation"] = handoff["bo_observation"]
+        analysis["bo_handoff"] = handoff["bo_handoff"]
+        analysis["knowledge_payload"] = handoff["knowledge_payload"]
+        # Rewrite final handoff/report files after analysis_artifacts has been attached.
+        final_artifacts = analysis.get("analysis_artifacts") if isinstance(analysis.get("analysis_artifacts"), dict) else {}
+        if final_artifacts.get("bo_handoff"):
+            self._write_json(Path(str(final_artifacts["bo_handoff"])), handoff["bo_handoff"])
+        if final_artifacts.get("experiment_evaluation"):
+            self._write_json(Path(str(final_artifacts["experiment_evaluation"])), handoff["experiment_evaluation"])
+        if final_artifacts.get("analysis_report"):
+            self._write_json(Path(str(final_artifacts["analysis_report"])), analysis)
         return AgentResult(
             success=True,
             summary="UTM analysis complete",
-            data={"analysis": analysis},
+            data={
+                "analysis": analysis,
+                "bo_observation": handoff["bo_observation"],
+                "bo_handoff": handoff["bo_handoff"],
+                "experiment_evaluation": handoff["experiment_evaluation"],
+                "knowledge_payload": handoff["knowledge_payload"],
+                "metrics": metrics,
+                "handoff_packet": handoff["bo_observation"],
+            },
         )

@@ -63,6 +63,79 @@ TraceCollector + SelfEvolutionService + EvolutionRegistry
 
 Not yet split into standalone files from the draft (`trace_miner.py`, `candidate_generator.py`, `evaluator.py`, `constraint_gate.py`, etc.). That split is an internal refactor target, not a blocker for current operation, because the API, gate lifecycle, activation safety boundary, and registry behavior are already implemented.
 
+
+## Knowledge Evidence Pack Integration
+
+Self-evolution now uses Knowledge Agent evidence packs instead of relying only on trace event counts. Knowledge Agent writes typed evidence to:
+
+```text
+runs/<run_id>/knowledge/evolution_evidence_packs.json
+memory/knowledge/evolution_evidence_packs.jsonl
+```
+
+`SelfEvolutionService` loads matching packs for the selected `target_type` and `target_id`. If a task constraint includes `knowledge_evidence_pack_id`, only that pack is used. Generated guidance includes evidence objective, target rationale, recommended changes, and safety constraints.
+
+This changes the meta-runtime loop to:
+
+```text
+run reports/artifacts/metrics
+  -> Knowledge typed memory and provenance
+  -> failure/success pattern mining
+  -> EvolutionEvidencePack
+  -> SelfEvolutionService candidate generation
+  -> schema/compile/dry-run gates
+  -> operator approval
+  -> next-run activation
+```
+
+Knowledge still cannot activate a variant. It only builds the evidence and task prefill.
+
+Additional Knowledge API endpoints:
+
+- `GET /api/knowledge/evolution-packs?target_type=&target_id=&limit=`
+- `GET /api/knowledge/agent-performance?agent_id=&limit=`
+- `GET /api/knowledge/failure-patterns?agent_id=&stage=&limit=`
+- `GET /api/knowledge/success-patterns?agent_id=&limit=`
+- `GET /api/knowledge/evolution-outcomes?target_id=&limit=`
+- `POST /api/knowledge/evolution-outcomes`
+- `GET /api/knowledge/run-context?agent_id=&run_id=`
+- `GET /api/knowledge/bo-context?objective_id=&limit=`
+- `GET /api/knowledge/safety-context?stage=&limit=`
+
+Evolution Lab displays a Knowledge Evidence Pack panel and passes the selected pack id into task constraints.
+
+## Replay / Held-Out Evaluation
+
+Self-evolution includes a deterministic replay/eval harness in `self_evolution/evaluator.py`.
+
+The evaluator does not execute hardware, call tools, or call an LLM. It replays source or held-out trace metadata against a candidate variant and appends reviewable gate results:
+
+- `replay_cases_present`
+- `replay_schema_validity`
+- `replay_contract_completeness`
+- `replay_groundedness_to_trace`
+- `replay_safety_preservation`
+- `replay_no_forbidden_behavior`
+
+`SelfEvolutionService.evaluate_variant_object(...)` stores the summary under:
+
+```text
+variant.metrics.replay_eval
+```
+
+The summary includes source trace count, held-out trace count, replay trace ids, aggregated event/error/warning/missing-field counts, gate pass count, and replay score.
+
+Evolution Lab displays this as a `Replay / Held-out Evaluation` card in the candidate gate panel and in candidate leaderboard rows. This is an offline safety and regression screen, not causal proof that a variant improves live performance.
+
+When an approved active variant is used in a later run, Knowledge Agent records conservative post-activation attribution as `EvolutionOutcomeRecord` under:
+
+```text
+runs/<run_id>/knowledge/evolution_outcomes.json
+memory/knowledge/evolution_outcomes.jsonl
+```
+
+The record compares the active target with the current run's `AgentPerformanceRecord` signals and exposes rollback/observe/keep-review status through `/api/knowledge/evolution-outcomes` and the Knowledge report.
+
 ## Runtime API
 
 Implemented endpoints:
@@ -125,6 +198,7 @@ It is deliberately operational rather than decorative: every button calls `/api/
 
 - Add Runtime IDE panel integration so variants can be opened directly as graph/module drafts.
 - Add Guardian review as a formal gate result for safety-critical target types.
-- Add replay-based scoring using held-out run traces.
+- Expand the current replay/eval harness with domain-specific held-out cases and causal before/after benchmarks.
 - Add richer trace mining for repeated missing fields, latency bottlenecks, and failed tool calls.
+- Add statistical trend analysis over accumulated `EvolutionOutcomeRecord` rows before promoting keep/rollback decisions.
 - Add report-template rendering preview for report variants.

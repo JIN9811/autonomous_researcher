@@ -28,6 +28,7 @@ from typing import Any
 from experiments.api import evaluate_experiment
 from experiments.schemas import ExperimentEvaluationRequest
 from learning.bo_engine import propose_next
+from learning.botorch_backend import BoTorchBackendUnavailable, score_candidate_pool as score_botorch_candidate_pool
 
 Evaluator = Callable[[dict[str, Any]], dict[str, Any]]
 
@@ -233,6 +234,8 @@ def _bo_landscape(
     xi: float,
     exploration_weight: float,
     exploitation_weight: float,
+    posterior_scores: list[dict[str, float]] | None = None,
+    backend_active: str = "lightweight_pool",
 ) -> list[dict[str, Any]]:
     """Return per-candidate surrogate/acquisition values for plotting."""
     seen_signatures = {_vector_signature(vector) for vector in evaluated_vectors}
@@ -240,19 +243,25 @@ def _bo_landscape(
     for index, candidate in enumerate(candidates, start=1):
         vector = vectors[index - 1]
         signature = _vector_signature(vector)
-        uncertainty = _uncertainty(vector, evaluated_vectors)
-        mean = _candidate_proxy(candidate)
-        acquisition_value = _acquisition_value(
-            candidate=candidate,
-            vector=vector,
-            seen_vectors=evaluated_vectors,
-            scores=scores,
-            acquisition=acquisition,
-            kappa=kappa,
-            xi=xi,
-            exploration_weight=exploration_weight,
-            exploitation_weight=exploitation_weight,
-        )
+        posterior = posterior_scores[index - 1] if posterior_scores and index - 1 < len(posterior_scores) else {}
+        if posterior:
+            uncertainty = float(posterior.get("uncertainty", 0.0))
+            mean = float(posterior.get("surrogate_mean", _candidate_proxy(candidate)))
+            acquisition_value = float(posterior.get("acquisition_value", mean))
+        else:
+            uncertainty = _uncertainty(vector, evaluated_vectors)
+            mean = _candidate_proxy(candidate)
+            acquisition_value = _acquisition_value(
+                candidate=candidate,
+                vector=vector,
+                seen_vectors=evaluated_vectors,
+                scores=scores,
+                acquisition=acquisition,
+                kappa=kappa,
+                xi=xi,
+                exploration_weight=exploration_weight,
+                exploitation_weight=exploitation_weight,
+            )
         landscape.append(
             {
                 "candidate_id": str(candidate.get("candidate_id") or f"candidate-{index:03d}"),
@@ -261,6 +270,7 @@ def _bo_landscape(
                 "uncertainty": round(uncertainty, 6),
                 "acquisition_value": round(acquisition_value, 6),
                 "already_evaluated": signature in seen_signatures,
+                "backend": backend_active,
                 "parameters": _compact_parameters(candidate),
                 "vector_signature": list(signature),
             }
@@ -337,6 +347,11 @@ def run_benchmark(
         else {}
     )
     acquisition = str(payload.get("acquisition") or metadata.get("acquisition") or "expected_improvement").strip().lower()
+    bo_backend = str(payload.get("bo_backend") or payload.get("backend") or metadata.get("bo_backend") or "lightweight_pool").strip().lower()
+    backend_warnings: list[str] = []
+    if bo_backend not in {"lightweight_pool", "botorch_optional"}:
+        backend_warnings.append(f"unknown bo_backend '{bo_backend}' fell back to lightweight_pool")
+        bo_backend = "lightweight_pool"
     kappa = float(payload.get("kappa", metadata.get("kappa", 2.0)) or 2.0)
     xi = float(payload.get("xi", metadata.get("xi", 0.01)) or 0.01)
     exploration_weight = float(payload.get("exploration_weight", metadata.get("exploration_weight", 0.35)) or 0.35)
@@ -354,6 +369,8 @@ def run_benchmark(
         "budget": budget,
         "strategies": {},
         "parameter_space": parameter_space,
+        "bo_backend_requested": bo_backend,
+        "backend_warnings": backend_warnings,
     }
     for strategy in strategies:
         name = str(strategy).strip().lower()
@@ -370,10 +387,33 @@ def run_benchmark(
             evaluated_vectors: list[list[float]] = list(prior_vectors)
             evaluated_records: list[dict[str, Any]] = [dict(item) for item in prior_records]
             surrogate_trace: list[dict[str, Any]] = []
+            backend_warning_reported = False
+            backend_used = "lightweight_pool"
             for idx in range(min(budget, len(candidates))):
                 available_indexes = [i for i in range(len(vectors)) if i not in seen]
                 if not available_indexes:
                     break
+                posterior_scores = None
+                active_backend = "lightweight_pool"
+                if bo_backend == "botorch_optional" and len(evaluated_vectors) >= 2 and len(scores) >= 2:
+                    try:
+                        posterior_scores = score_botorch_candidate_pool(
+                            candidates=candidates,
+                            vectors=vectors,
+                            evaluated_vectors=evaluated_vectors,
+                            scores=scores,
+                            acquisition=acquisition,
+                            kappa=kappa,
+                            xi=xi,
+                            exploration_weight=exploration_weight,
+                            exploitation_weight=exploitation_weight,
+                        )
+                        active_backend = "botorch_optional"
+                        backend_used = "botorch_optional"
+                    except (BoTorchBackendUnavailable, Exception) as exc:
+                        if not backend_warning_reported:
+                            backend_warnings.append(f"botorch_optional unavailable; lightweight_pool used: {exc.__class__.__name__}: {exc}")
+                            backend_warning_reported = True
                 landscape = _bo_landscape(
                     candidates=candidates,
                     vectors=vectors,
@@ -384,6 +424,8 @@ def run_benchmark(
                     xi=xi,
                     exploration_weight=exploration_weight,
                     exploitation_weight=exploitation_weight,
+                    posterior_scores=posterior_scores,
+                    backend_active=active_backend,
                 )
                 if not scores:
                     pick = 0
@@ -403,6 +445,8 @@ def run_benchmark(
                             exploitation_weight=exploitation_weight,
                         ),
                     )
+                    if posterior_scores:
+                        pick = max(available_indexes, key=lambda item: landscape[item].get("acquisition_value", float("-inf")))
                 seen.add(pick)
                 result = _evaluate_candidate(
                     base_request=base_request,
@@ -436,6 +480,8 @@ def run_benchmark(
                         "x_axis": "candidate_pool_index",
                         "candidate_count": len(candidates),
                         "selected": selected_trace,
+                        "backend_requested": bo_backend,
+                        "backend_active": active_backend,
                         "evaluated_points": observed_records,
                         "candidates": landscape,
                     }
@@ -458,5 +504,8 @@ def run_benchmark(
         payload = {"results": results, **_curve_summary(results)}
         if name == "bo":
             payload["surrogate_trace"] = surrogate_trace
+            payload["backend_requested"] = bo_backend
+            payload["backend_active"] = backend_used
+            payload["backend_warnings"] = list(backend_warnings)
         output["strategies"][name] = payload
     return output

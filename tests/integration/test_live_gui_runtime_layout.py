@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 
 from app.main import app, controller, _package_runtime_event
+
+
+TINY_PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"atr-test-screen-evidence"
 
 
 def test_live_gui_runtime_shell_contains_operational_panels() -> None:
@@ -58,8 +62,10 @@ def test_live_gui_runtime_shell_contains_operational_panels() -> None:
         assert label in script_text
     for role_label in [
         "Orchestration Plan / Handoff Control",
-        "Design Geometry / Manufacturability",
-        "Print Preparation / Prusa Bridge",
+        "Design Decision / Candidate Evidence",
+        "Manufacturing Digital Thread / Printer Runtime",
+        "Lab Perception Signal Bus / Visual Evidence",
+        "Lab Equipment / UTM Visual Control",
         "Bayesian Optimization / Candidate Selection",
         "Safety Gate / Continue-Stop Decision",
     ]:
@@ -403,6 +409,8 @@ def test_evolution_lab_supports_live_gui_query_prefill() -> None:
     assert "evolution-leaderboard-output" in response.text
     assert "evolution-history-output" in response.text
     assert "evolution-lineage-output" in response.text
+    assert "evolution-evidence-output" in response.text
+    assert "Knowledge Evidence Pack" in response.text
     assert "Candidate Leaderboard" in response.text
 
     script = client.get("/static/evolution_lab.js").text
@@ -413,8 +421,14 @@ def test_evolution_lab_supports_live_gui_query_prefill() -> None:
         "renderLineage",
         "renderPipeline",
         "renderLeaderboard",
+        "renderEvidencePacks",
+        "refreshEvidencePacks",
+        "knowledge_evidence_pack_id",
         "refreshVariantsForTarget",
         "gateChecklistMarkup",
+        "replayEvalMarkup",
+        "Replay / Held-out Evaluation",
+        "replay_eval",
         "loadTaskVariants",
         "loadVariant",
         "target_type",
@@ -424,11 +438,29 @@ def test_evolution_lab_supports_live_gui_query_prefill() -> None:
     ]:
         assert symbol in script
 
+    packs = client.get("/api/knowledge/evolution-packs?target_type=prompt&target_id=design").json()
+    assert packs["ok"] is True
+    assert packs["target_type"] == "prompt"
+    assert packs["target_id"] == "design"
+    assert isinstance(packs["packs"], list)
+
     variants = client.get("/api/evolution/variants?target_type=prompt&target_id=design").json()
     assert variants["ok"] is True
     assert variants["target_type"] == "prompt"
     assert variants["target_id"] == "design"
     assert isinstance(variants["variants"], list)
+
+    planning_script = client.get("/static/planning.js").text
+    for symbol in [
+        "renderKnowledgeReportDetails",
+        "latestKnowledgeReport",
+        "Knowledge Memory / Self-Evolution Evidence",
+        "Self-Evolution Evidence Packs",
+        "Agent Performance Ledger",
+        "Evolution Outcome Attribution",
+    ]:
+        assert symbol in planning_script
+
 
 
 def test_live_gui_package_compatibility_endpoints_expose_existing_runtime_contract() -> None:
@@ -490,8 +522,21 @@ def test_live_gui_package_compatibility_endpoints_expose_existing_runtime_contra
     assert isinstance(report["report"]["artifacts"], list)
     assert report["report"]["handoff"]["agent_stage"] == "design"
 
+    orchestrator_report = client.get("/api/agents/orchestrator/report").json()["report"]
+    assert orchestrator_report["role_specific"]["title"] == "Orchestration Supervisor / Follow-up Control"
+    assert "followup_timeline" in orchestrator_report["role_specific"]
+    assert "decision_register" in orchestrator_report["role_specific"]
+    assert "handoff_registry" in orchestrator_report["role_specific"]
+
     specimen_report = client.get("/api/agents/specimen/report").json()["report"]
-    assert specimen_report["role_specific"]["title"] == "Print Preparation / Prusa Bridge"
+    assert specimen_report["role_specific"]["title"] == "Manufacturing Digital Thread / Printer Runtime"
+    vision_report = client.get("/api/agents/vision/report").json()["report"]
+    assert vision_report["role_specific"]["title"] == "Lab Perception Signal Bus / Visual Evidence"
+    assert "vision_report" in vision_report["sections"]
+    manipulation_report = client.get("/api/agents/manipulation/report").json()["report"]
+    assert manipulation_report["role_specific"]["title"] == "Manipulation Agent / Pi0.5 Skill Supervision"
+    assert "manipulation_report" in manipulation_report["sections"]
+    assert "robot_task_result" in manipulation_report["sections"]
     bo_report = client.get("/api/agents/bo/report").json()["report"]
     assert bo_report["role_specific"]["title"] == "Bayesian Optimization / Candidate Selection"
     guardian_report = client.get("/api/agents/guardian/report").json()["report"]
@@ -785,3 +830,2077 @@ def test_live_gui_operator_reply_separates_target_agent_from_selected_context() 
         and (item.get("payload") or {}).get("trace_id") == "trace-specimen-question"
         for item in trace["events"]
     )
+
+
+def test_live_gui_equipment_report_recovers_incident_from_hardware_alert() -> None:
+    client = TestClient(app)
+    original_metadata = dict(controller._state.run_metadata)
+    incident = {
+        "schema": "incident_record.v1",
+        "incident_id": "incident-live-report-001",
+        "device_class": "utm",
+        "component": "utm_data_export",
+        "failure_code": "UTM_DATA_TIMEOUT",
+        "corrective_action": "Verify UTM CSV export and retry.",
+    }
+    alert = {
+        "schema": "hardware_alert.v1",
+        "alert_id": "alert-live-report-001",
+        "device_class": "utm",
+        "component": "utm_data_export",
+        "severity": "blocking",
+        "failure_code": "UTM_DATA_TIMEOUT",
+        "status": "blocked",
+        "blocks_workflow": True,
+        "requires_ack": True,
+        "guardian_route_hint": "stop",
+        "guardian_decision": {
+            "schema": "guardian_decision.v1",
+            "decision": "safe_stop",
+            "requires_human_approval": True,
+            "risk_score": 0.91,
+        },
+        "guardian_contract": {"ok_for_next_stage": False, "requires_human_approval": True, "risk_flags": ["data_timeout"]},
+        "incident_record": incident,
+    }
+    try:
+        controller._state.run_metadata.update(
+            {
+                "hardware_alerts": [],
+                "incident_records": [],
+                "guardian_gates": [],
+                "latest_guardian_gate": {},
+                "latest_guardian_gate_decision": {},
+                "equipment_result": {
+                    "tool": "equipment.pyautogui.run",
+                    "status": "blocked",
+                    "program_id": "utm_compression_start_v1",
+                    "failure_code": "UTM_DATA_TIMEOUT",
+                },
+                "equipment_report": {
+                    "schema": "equipment_report.v1",
+                    "bridge": {"provider": "windows_pyautogui", "connection_status": "ready"},
+                    "control_plan": {"program_id": "utm_compression_start_v1"},
+                    "screen_checks": [],
+                    "vision_cross_checks": {"all_required_ok": False},
+                    "physical_checks": {},
+                    "data_acquisition": {"status": "timeout"},
+                    "cross_checks": {"data_parse_probe_ok": False, "save_export_responsibility_ok": False},
+                    "decision": {
+                        "equipment_status": "blocked",
+                        "handoff_status": "blocked",
+                        "failure_code": "UTM_DATA_TIMEOUT",
+                        "blocking_reasons": ["UTM_DATA_TIMEOUT"],
+                    },
+                    "hardware_alert": alert,
+                },
+                "utm_data_ready": {"schema": "utm_data_ready.v1", "status": "blocked", "guardian_status": "block"},
+                "equipment_handoff": {"schema": "utm_data_ready.v1", "status": "blocked"},
+            }
+        )
+
+        response = client.get("/api/agents/equipment/report")
+        assert response.status_code == 200
+        role_specific = response.json()["report"]["role_specific"]
+        safety_gate = role_specific["safety_gate"]
+        assert safety_gate["guardian_status"] == "block"
+        assert safety_gate["hardware_alert_count"] == 1
+        assert safety_gate["incident_count"] == 1
+        assert safety_gate["incident_records"][0]["incident_id"] == "incident-live-report-001"
+        assert safety_gate["blocks_workflow"] is True
+        assert safety_gate["emergency_stop_evidence"]["corrective_action"] == "Verify UTM CSV export and retry."
+    finally:
+        controller._state.run_metadata.clear()
+        controller._state.run_metadata.update(original_metadata)
+
+
+def test_live_gui_equipment_report_exposes_utm_visual_control_contract() -> None:
+    client = TestClient(app)
+    original_metadata = dict(controller._state.run_metadata)
+    csv_path = Path("/tmp/atr/utm.csv")
+    try:
+        controller._state.run_metadata.update(
+            {
+                "hardware_alerts": [],
+                "incident_records": [],
+                "guardian_gates": [],
+                "latest_guardian_gate": {},
+                "latest_guardian_gate_decision": {},
+                "equipment_result": {
+                    "tool": "equipment.pyautogui.run",
+                    "status": "verified_complete",
+                    "program_id": "utm_compression_start_v1",
+                    "result_file": str(csv_path),
+                },
+                "equipment_report": {
+                    "schema": "equipment_report.v1",
+                    "report_version": "lab_equipment_utm_visual_control_v1",
+                    "task_id": "utm_compression_test",
+                    "bridge": {
+                        "provider": "windows_pyautogui",
+                        "connection_status": "ready",
+                        "pyautogui_available": True,
+                        "live_execute_enabled": True,
+                    },
+                    "preconditions": {"fixture_ready": True},
+                    "control_plan": {
+                        "program_id": "utm_compression_start_v1",
+                        "macro_version": "v1",
+                        "locator_backend": "image",
+                        "profile": {
+                            "program_id": "utm_compression_start_v1",
+                            "profile_memory_path": "memory/equipment_utm_profile.json",
+                            "profile_memory_applied": True,
+                            "locator_count": 4,
+                        },
+                    },
+                    "vision_requests": [{"check_id": "utm_pre_start"}],
+                    "vision_cross_checks": {
+                        "required": ["utm_pre_start", "utm_motion_confirm", "utm_test_complete"],
+                        "checks": {
+                            "utm_pre_start": {"ok": True, "source": "test"},
+                            "utm_motion_confirm": {"ok": True, "source": "test"},
+                            "utm_test_complete": {"ok": True, "source": "test"},
+                        },
+                        "all_required_ok": True,
+                        "blocking_reasons": [],
+                        "evidence_frame_ids": ["frame-1"],
+                    },
+                    "screen_checks": [
+                        {"checkpoint": "before_start", "ok": True, "state": "ready", "screenshot_artifact": "screen-before"},
+                        {"checkpoint": "after_start", "ok": True, "state": "running", "screenshot_artifact": "screen-running"},
+                        {"checkpoint": "after_complete", "ok": True, "state": "complete", "screenshot_artifact": "screen-complete"},
+                    ],
+                    "artifact_records": [
+                        {"kind": "screen_png", "artifact_id": "screen-before", "local_path": "artifacts/equipment/run-test/screens/before.png"},
+                        {"kind": "screen_png", "artifact_id": "screen-running", "local_path": "artifacts/equipment/run-test/screens/running.png"},
+                        {"kind": "utm_csv", "artifact_id": "utm-csv-1", "local_path": str(csv_path), "row_count_probe": 80},
+                    ],
+                    "artifact_refs": ["artifacts/equipment/run-test/screens/before.png", "artifacts/equipment/run-test/screens/running.png", str(csv_path)],
+                    "screen_evidence_refs": ["artifacts/equipment/run-test/screens/before.png", "artifacts/equipment/run-test/screens/running.png"],
+                    "data_evidence_refs": [str(csv_path)],
+                    "live_evidence_audit": {
+                        "required_for_handoff": True,
+                        "screen_evidence": {
+                            "ok": True,
+                            "required_checkpoints": ["before_start", "after_start", "after_complete"],
+                            "observed_checkpoints": ["before_start", "after_start", "after_complete"],
+                            "missing_checkpoints": [],
+                        },
+                        "linux_artifact_pull": {
+                            "ok": True,
+                            "status": "pulled_to_linux",
+                            "linux_path": str(csv_path),
+                            "data_path_exists": True,
+                            "parse_probe_ok": True,
+                        },
+                        "save_export": {
+                            "ok": True,
+                            "save_method": "windows_export_watch",
+                            "save_attempted_by_agent": True,
+                            "save_confirmation_screen_ok": True,
+                            "windows_path": "C:/ATR/utm_exports/specimen.csv",
+                            "linux_path": str(csv_path),
+                            "recognized_save_method": True,
+                        },
+                        "vision_evidence": {
+                            "ok": True,
+                            "all_required_ok": True,
+                            "evidence_frame_ids": ["frame-1"],
+                        },
+                        "request_audit_log": {
+                            "ok": True,
+                            "path": "C:/ATR/bridge_artifacts/bridge_requests.jsonl",
+                            "event_count": 4,
+                            "recent_paths": ["/health", "/programs", "/execute", "/request-log"],
+                            "execute_event_seen": True,
+                            "execute_event_count": 1,
+                            "execute_payload_event_count": 1,
+                            "execute_run_ids": [controller._state.run_id],
+                            "execute_sequence_ids": ["seq-live-utm"],
+                            "execute_specimen_ids": ["specimen-test"],
+                            "execute_program_ids": ["utm_compression_start_v1"],
+                            "execute_identity_required": True,
+                            "execute_identity_present": True,
+                            "execute_identity_match": True,
+                            "last_execute_at": "2026-05-30T00:00:00Z",
+                        },
+                    },
+                    "failure_retry_table": [
+                        {"step": "SAVE_EXPORT", "status": "warning", "detail": "checked", "fallback_macro": "utm_manual_save_csv_v1", "recommended_action": "none"}
+                    ],
+                    "recovery": {
+                        "status": "not_required",
+                        "retry_count": 1,
+                        "fallback_macros": ["utm_manual_save_csv_v1"],
+                        "operator_intervention_required": False,
+                        "recommended_action": "analysis_agent"
+                    },
+                    "physical_checks": {
+                        "vision_motion_confirmed": True,
+                        "specimen_alignment_ok": True,
+                        "fixture_safe_to_access": True,
+                        "evidence_frame_ids": ["frame-1"],
+                    },
+                    "data_acquisition": {
+                        "status": "pulled_to_linux",
+                        "save_method": "windows_export_watch",
+                        "save_attempted_by_agent": True,
+                        "save_confirmation_screen_ok": True,
+                        "windows_path": "C:/ATR/utm_exports/specimen.csv",
+                        "linux_path": str(csv_path),
+                        "sha256": "abc123",
+                        "size_bytes": 1234,
+                        "row_count_probe": 80,
+                        "columns_probe": ["time_s", "displacement_mm", "force_N"],
+                    },
+                    "cross_checks": {
+                        "screen_started": True,
+                        "physical_motion_started": True,
+                        "save_completed": True,
+                        "data_file_created": True,
+                        "data_parse_probe_ok": True,
+                        "save_export_responsibility_ok": True,
+                    },
+                    "decision": {
+                        "equipment_status": "verified_complete",
+                        "handoff_status": "ready_for_analysis",
+                        "failure_code": None,
+                        "blocking_reasons": [],
+                        "recommended_next_agent": "analysis_agent",
+                    },
+                },
+                "utm_data_ready": {
+                    "schema": "utm_data_ready.v1",
+                    "status": "ready",
+                    "guardian_status": "allow",
+                    "result_file": str(csv_path),
+                    "evidence_refs": [str(csv_path)],
+                },
+                "equipment_handoff": {
+                    "schema": "utm_data_ready.v1",
+                    "status": "ready_for_analysis",
+                    "program_id": "utm_compression_start_v1",
+                    "result_file": str(csv_path),
+                },
+            }
+        )
+
+        response = client.get("/api/agents/equipment/report")
+        assert response.status_code == 200
+        role_specific = response.json()["report"]["role_specific"]
+        assert role_specific["title"] == "Lab Equipment / UTM Visual Control"
+        assert role_specific["control_trace"]["program_id"] == "utm_compression_start_v1"
+        assert role_specific["visual_assertion"]["screen_checks_passed"] == 3
+        assert role_specific["physical_verification"]["all_required_ok"] is True
+        assert role_specific["data_ledger"]["linux_path"] == str(csv_path)
+        assert role_specific["data_ledger"]["parse_ready"] is True
+        assert role_specific["data_ledger"]["save_export_responsibility_ok"] is True
+        assert role_specific["data_ledger"]["save_attempted_by_agent"] is True
+        assert role_specific["data_ledger"]["save_confirmation_screen_ok"] is True
+        assert role_specific["handoff_gate"]["handoff_status"] == "ready_for_analysis"
+        assert role_specific["handoff_gate"]["save_export_responsibility_ok"] is True
+        assert role_specific["artifact_ledger"]["screen_evidence_count"] == 2
+        assert role_specific["artifact_ledger"]["data_evidence_refs"] == [str(csv_path)]
+        assert role_specific["live_evidence_audit"]["screen_evidence"]["ok"] is True
+        assert role_specific["handoff_gate"]["live_evidence_audit"]["linux_artifact_pull"]["ok"] is True
+        assert role_specific["failure_recovery"]["retry_count"] == 1
+        assert role_specific["failure_recovery"]["fallback_macros"] == ["utm_manual_save_csv_v1"]
+        assert role_specific["safety_gate"]["guardian_status"] == "allow"
+        assert role_specific["safety_gate"]["hardware_alert_count"] == 0
+        assert role_specific["safety_gate"]["blocks_workflow"] is False
+        assert role_specific["live_evidence_audit"]["request_audit_log"]["execute_event_seen"] is True
+        assert role_specific["live_evidence_audit"]["save_export"]["ok"] is True
+
+        script = client.get("/static/planning.js").text
+        for token in [
+            "latestEquipmentReport",
+            "renderEquipmentReportDetails",
+            "renderEquipmentRuntimeCard",
+            "Lab Equipment Runtime Event",
+            "Macro Command",
+            "Visual Assertion",
+            "Data Acquisition",
+            "target_ui",
+            "screenshot_artifact",
+            "failure_code",
+            "artifact_pull_status",
+            "Screen-State Assertions",
+            "Vision Physical Cross-Checks",
+            "UTM Data Ledger",
+            "Handoff Gate / Blocking Reasons",
+            "Safety Gate / Guardian",
+            "Artifact / Evidence Ledger",
+            "Failure / Recovery",
+            "Live Evidence Audit",
+            "screen_evidence_complete",
+            "live_evidence_audit",
+            "screen_evidence_refs",
+            "failure_retry_table",
+            "request_log_execute_seen",
+            "request_log_last_execute_at",
+            "bridge_host",
+            "remote_server_version",
+            "remote_script_version",
+            "client_latency_ms",
+            "pyautogui_failsafe",
+            "pyautogui_pause",
+            "data_parse_probe_ok",
+            "save_export_responsibility_ok",
+            "save_export_ok",
+            "Save/Export",
+            "renderGuardianReportDetails",
+            "liveGuardianStatusPayload",
+            "guardian_status_report.v1",
+            "/guardian/status",
+            "Graph-Wide Risk Map",
+            "Safety Budget",
+            "Live Device Heartbeat",
+            "Safe-Stop Verification",
+            "Evidence Completeness",
+            "Self-Evolution Gate",
+            "guardian_safety_budget.v1",
+            "guardian_safe_stop_verification.v1",
+            "guardian_evidence_completeness.v1",
+            "guardian_self_evolution_gate.v1",
+            "/guardian/incidents/",
+            "Blocked Actions",
+            "Approval Queue",
+            "Incident / Near-Miss Ledger",
+            "Policy / Version Panel",
+            "Device / Data Integrity",
+            "live-guardian-note-action",
+        ]:
+            assert token in script
+        css = client.get("/static/styles.css").text
+        for token in [
+            "live-guardian-risk-grid",
+            "live-guardian-risk-card",
+            "live-guardian-incident-card",
+        ]:
+            assert token in css
+    finally:
+        controller._state.run_metadata.clear()
+        controller._state.run_metadata.update(original_metadata)
+
+
+def test_windows_equipment_gui_exposes_utm_calibration_controls() -> None:
+    client = TestClient(app)
+    response = client.get("/equipment/windows")
+
+    assert response.status_code == 200
+    html = response.text
+    for element_id in [
+        "equipment-action-dot",
+        "equipment-action-label",
+        "equipment-action-detail",
+        "equipment-command-banner",
+        "equipment-command-title",
+        "equipment-command-detail",
+        "equipment-command-pill",
+        "equipment-proof-dashboard",
+        "equipment-gate-windows-bridge",
+        "equipment-gate-windows-bridge-status",
+        "equipment-gate-windows-bridge-detail",
+        "equipment-gate-utm-program",
+        "equipment-gate-utm-program-status",
+        "equipment-gate-utm-program-detail",
+        "equipment-gate-vision-preconditions",
+        "equipment-gate-vision-preconditions-status",
+        "equipment-gate-vision-preconditions-detail",
+        "equipment-gate-screen-state",
+        "equipment-gate-screen-state-status",
+        "equipment-gate-screen-state-detail",
+        "equipment-gate-physical-crosscheck",
+        "equipment-gate-physical-crosscheck-status",
+        "equipment-gate-physical-crosscheck-detail",
+        "equipment-gate-data-artifact",
+        "equipment-gate-data-artifact-status",
+        "equipment-gate-data-artifact-detail",
+        "equipment-gate-analysis-handoff",
+        "equipment-gate-analysis-handoff-status",
+        "equipment-gate-analysis-handoff-detail",
+        "equipment-utm-export-glob",
+        "equipment-utm-timeout",
+        "equipment-utm-stable-sec",
+        "equipment-utm-expected-export-path",
+        "equipment-utm-target-window",
+        "equipment-utm-require-focus",
+        "equipment-utm-manual-save",
+        "equipment-utm-require-screen",
+        "equipment-utm-simulate",
+        "equipment-utm-locators",
+        "equipment-locator-program",
+        "equipment-locator-name",
+        "equipment-locator-confidence",
+        "equipment-locator-x",
+        "equipment-locator-y",
+        "equipment-locator-width",
+        "equipment-locator-height",
+        "btn-equipment-screenshot",
+        "btn-equipment-list-locators",
+        "btn-equipment-capture-locator",
+        "btn-equipment-load-utm-profile",
+        "btn-equipment-save-utm-profile",
+        "btn-equipment-open-bridge-gui",
+        "btn-equipment-readiness",
+        "btn-equipment-live-preflight",
+        "btn-equipment-live-validation",
+        "btn-equipment-vision-proof-draft",
+        "btn-equipment-live-physical-validation",
+        "equipment-live-preflight-screenshot",
+        "equipment-live-physical-safe",
+        "equipment-live-vision-proof",
+        "equipment-utm-profile-status",
+        "equipment-utm-readiness-card",
+        "equipment-utm-readiness-status",
+        "equipment-utm-readiness-detail",
+        "equipment-utm-live-validation-card",
+        "equipment-utm-live-validation-status",
+        "equipment-utm-live-validation-detail",
+        "equipment-utm-live-validation-gates",
+        "equipment-utm-evidence-card",
+        "equipment-utm-evidence-status",
+        "equipment-utm-evidence-detail",
+        "equipment-utm-proof-checklist",
+        "btn-equipment-evidence-audit",
+        "btn-equipment-proof-package",
+        "btn-equipment-verify-proof-package",
+        "btn-equipment-completion-audit",
+        "equipment-proof-verify-card",
+        "equipment-proof-verify-status",
+        "equipment-proof-verify-detail",
+        "equipment-completion-audit-card",
+        "equipment-completion-audit-status",
+        "equipment-completion-audit-detail",
+        "equipment-request-audit-card",
+        "equipment-request-audit-status",
+        "equipment-request-audit-detail",
+        "btn-equipment-request-log",
+        "btn-equipment-utm",
+        "btn-equipment-abort",
+    ]:
+        assert f'id="{element_id}"' in html
+    for proxy_target in [
+        "btn-equipment-scan",
+        "btn-equipment-readiness",
+        "btn-equipment-live-preflight",
+        "btn-equipment-live-validation",
+        "btn-equipment-utm",
+        "btn-equipment-evidence-audit",
+        "btn-equipment-abort",
+    ]:
+        assert f'data-equipment-proxy="{proxy_target}"' in html
+    for label in [
+        "UTM Proof Gates",
+    ]:
+        assert label in html
+    script = client.get("/static/windows_equipment.js").text
+    for token in [
+        "require_screen_assertions",
+        "simulate_utm_protocol",
+        "export_glob",
+        "artifact_timeout_s",
+        "stable_for_sec",
+        "expected_export_path",
+        "require_window_focus",
+        "manual_save_required_if_no_artifact",
+        "target_window",
+        "target_window_regex",
+        "missing_required_locators",
+        "required_locator_names",
+        "required_locators_complete",
+        "locators",
+        "/api/equipment/windows/screenshot",
+        "/api/equipment/windows/locators",
+        "/api/equipment/windows/capture-locator",
+        "/api/equipment/windows/utm-profile",
+        "/api/equipment/windows/readiness",
+        "/api/equipment/windows/live-preflight",
+        "/api/equipment/windows/live-validation",
+        "/api/equipment/windows/vision-proof-draft",
+        "/api/equipment/windows/evidence-audit",
+        "/api/equipment/windows/proof-package",
+        "/api/equipment/windows/proof-package/verify",
+        "/api/equipment/windows/completion-audit",
+        "/api/equipment/windows/request-log",
+        "runLivePreflight",
+        "buildLiveValidationReport",
+        "loadVisionProofDraft",
+        "renderVisionProofDraft",
+        "latestVisionProofDraft",
+        "renderUtmLiveValidation",
+        "latestUtmLiveValidation",
+        "confirm_non_actuating",
+        "confirm_live_execute",
+        "confirm_physical_setup_safe",
+        "collectLiveValidationPayload",
+        "runPhysicalLiveValidation",
+        "checkRequestLog",
+        "renderRequestAudit",
+        "checkEvidenceAudit",
+        "buildProofPackage",
+        "verifyProofPackage",
+        "renderProofPackageVerification",
+        "runCompletionAudit",
+        "renderCompletionAudit",
+        "latestCompletionAudit",
+        "latestProofPackagePath",
+        "package_artifact",
+        "proof_package",
+        "renderUtmEvidenceAudit",
+        "confirm_preflight",
+        "include_request_log",
+        "request_audit_log_available",
+        "execute_event_seen",
+        "proof_checklist",
+        "proof_ready",
+        "utmProofChecklist",
+        "collectUtmProfilePayload",
+        "hydrateUtmProfile",
+        "openSelectedBridgeGui",
+        "selectedBridgeUrl",
+        "PYAUTOGUI_BRIDGE_GUI_URL_MISSING",
+        "mergeLocatorOverride",
+        "renderUtmReadiness",
+        "checkReadiness",
+        "data-equipment-proxy",
+        "commandBanner",
+        "commandPill",
+        "proofGates",
+        "updateProofDashboard",
+        "setProofGate",
+        "physical_motion_started",
+        "runUtmAbort",
+        "utm_stop_or_abort_v1",
+    ]:
+        assert token in script
+
+
+
+def test_windows_equipment_vision_proof_draft_api_contract() -> None:
+    client = TestClient(app)
+    original_metadata = dict(controller._state.run_metadata)
+    original_observations = dict(controller._state.latest_observations)
+    try:
+        controller._state.run_metadata.clear()
+        controller._state.latest_observations.clear()
+
+        missing = client.post(
+            "/api/equipment/windows/vision-proof-draft",
+            json={"run_id": "vision-run-001", "specimen_id": "specimen-001"},
+        )
+        assert missing.status_code == 200
+        missing_payload = missing.json()
+        assert missing_payload["tool"] == "equipment.pyautogui.vision_proof_draft"
+        assert missing_payload["non_actuating"] is True
+        assert missing_payload["ok"] is False
+        assert missing_payload["status"] == "incomplete"
+        assert "VISION_FRAME_IDS_REQUIRED" in missing_payload["blockers"]
+        assert missing_payload["vision_proof"]["ok"] is False
+        assert missing_payload["vision_proof"]["run_id"] == "vision-run-001"
+        assert missing_payload["vision_proof"]["specimen_id"] == "specimen-001"
+        assert missing_payload["vision_proof"]["checks"]["utm_pre_start"]["ok"] is False
+
+        controller._state.run_metadata["latest_vision_observation"] = {
+            "equipment_vision_check_results": [
+                {
+                    "check_id": "utm_pre_start",
+                    "ok": True,
+                    "confidence": 0.95,
+                    "run_id": "vision-run-001",
+                    "specimen_id": "specimen-001",
+                    "evidence": {"frame_ids": ["frame-pre-001"]},
+                },
+                {
+                    "check_id": "utm_motion_confirm",
+                    "ok": True,
+                    "confidence": 0.91,
+                    "run_id": "vision-run-001",
+                    "specimen_id": "specimen-001",
+                    "evidence": {"frame_ids": ["frame-motion-001"]},
+                },
+                {
+                    "check_id": "utm_test_complete",
+                    "ok": True,
+                    "confidence": 0.9,
+                    "run_id": "vision-run-001",
+                    "specimen_id": "specimen-001",
+                    "evidence": {"frame_ids": ["frame-complete-001"]},
+                },
+            ]
+        }
+        ready = client.post(
+            "/api/equipment/windows/vision-proof-draft",
+            json={"run_id": "vision-run-001", "specimen_id": "specimen-001"},
+        )
+        assert ready.status_code == 200
+        payload = ready.json()
+        assert payload["ok"] is True
+        assert payload["status"] == "ready"
+        assert payload["vision_proof"]["ok"] is True
+        assert payload["vision_proof"]["checks"]["utm_pre_start"]["source"].endswith("check_id")
+        assert payload["vision_proof"]["evidence"]["frame_ids"] == ["frame-pre-001", "frame-motion-001", "frame-complete-001"]
+        assert payload["candidate_counts"]["utm_motion_confirm"] >= 1
+        assert controller._state.run_metadata["last_windows_utm_vision_proof_draft"]["status"] == "ready"
+
+        config = client.get("/api/equipment/windows/config").json()
+
+
+        controller._state.run_metadata["latest_vision_observation"] = {
+            "equipment_vision_check_results": [
+                {"check_id": "utm_pre_start", "ok": True, "confidence": 0.95, "run_id": "vision-run-001", "specimen_id": "specimen-001", "evidence": {"frame_ids": ["same-frame"]}},
+                {"check_id": "utm_motion_confirm", "ok": True, "confidence": 0.91, "run_id": "vision-run-001", "specimen_id": "specimen-001", "evidence": {"frame_ids": ["same-frame"]}},
+                {"check_id": "utm_test_complete", "ok": True, "confidence": 0.9, "run_id": "vision-run-001", "specimen_id": "specimen-001", "evidence": {"frame_ids": ["same-frame"]}},
+            ]
+        }
+        duplicate_frame_draft = client.post(
+            "/api/equipment/windows/vision-proof-draft",
+            json={"run_id": "vision-run-001", "specimen_id": "specimen-001"},
+        ).json()
+        assert duplicate_frame_draft["ok"] is False
+        assert duplicate_frame_draft["status"] == "incomplete"
+        assert "VISION_FRAME_IDS_REQUIRED" in duplicate_frame_draft["blockers"]
+        assert duplicate_frame_draft["vision_proof"]["evidence"]["frame_ids"] == ["same-frame"]
+        assert config["utm_vision_proof_draft"]["status"] == "ready"
+    finally:
+        controller._state.run_metadata.clear()
+        controller._state.run_metadata.update(original_metadata)
+        controller._state.latest_observations.clear()
+        controller._state.latest_observations.update(original_observations)
+
+
+def test_windows_equipment_evidence_audit_api_contract(tmp_path: Path) -> None:
+    client = TestClient(app)
+    original_metadata = dict(controller._state.run_metadata)
+    created_proof_package_paths: list[Path] = []
+    csv_path = tmp_path / "utm.csv"
+    csv_path.write_text("time_s,displacement_mm,force_N\n0,0,0\n1,0.2,310\n", encoding="utf-8")
+    screen_paths = []
+    for name in ("before", "running", "complete"):
+        path = tmp_path / f"{name}.png"
+        path.write_bytes(TINY_PNG_BYTES)
+        screen_paths.append(path)
+    try:
+        controller._state.run_metadata.clear()
+        missing = client.get("/api/equipment/windows/evidence-audit")
+        assert missing.status_code == 200
+        assert missing.json()["status"] == "missing"
+        assert "EQUIPMENT_REPORT_NOT_AVAILABLE" in missing.json()["blockers"]
+        missing_completion = client.post("/api/equipment/windows/completion-audit", json={"use_current": False}).json()
+        assert missing_completion["ok"] is False
+        assert missing_completion["status"] == "incomplete"
+        assert "PROOF_PACKAGE_PATH_REQUIRED" in missing_completion["blockers"]
+
+        controller._state.run_metadata.update(
+            {
+                "equipment_result": {"status": "verified_complete", "program_id": "utm_compression_start_v1"},
+                "equipment_report": {
+                    "schema": "equipment_report.v1",
+                    "run_id": controller._state.run_id,
+                    "specimen_id": "specimen-test",
+                    "sequence_id": "seq-live-utm",
+                    "bridge": {
+                        "provider": "windows_pyautogui",
+                        "request_log_path": "C:/ATR/bridge_artifacts/bridge_requests.jsonl",
+                        "request_log_event_count": 3,
+                        "request_log_recent_paths": ["/health", "/execute"],
+                    },
+                    "control_plan": {"program_id": "utm_compression_start_v1"},
+                    "cross_checks": {
+                        "screen_started": True,
+                        "physical_motion_started": True,
+                        "save_completed": True,
+                        "data_file_created": True,
+                        "data_parse_probe_ok": True,
+                        "screen_evidence_complete": True,
+                        "linux_artifact_pulled": True,
+                        "save_export_responsibility_ok": True,
+                        "vision_evidence_complete": True,
+                    },
+                    "data_acquisition": {
+                        "status": "pulled_to_linux",
+                        "linux_path": str(csv_path),
+                        "local_path": str(csv_path),
+                        "save_method": "windows_export_watch",
+                        "save_attempted_by_agent": True,
+                        "save_confirmation_screen_ok": True,
+                        "windows_path": "C:/ATR/utm_exports/run-test/specimen-test.csv",
+                        "row_count_probe": 2,
+                    },
+                    "artifact_records": [
+                        {"kind": "screen_png", "artifact_id": "screen-before", "local_path": str(screen_paths[0])},
+                        {"kind": "screen_png", "artifact_id": "screen-running", "local_path": str(screen_paths[1])},
+                        {"kind": "screen_png", "artifact_id": "screen-complete", "local_path": str(screen_paths[2])},
+                        {"kind": "utm_csv", "artifact_id": "utm-csv", "local_path": str(csv_path), "row_count_probe": 2},
+                    ],
+                    "screen_evidence_refs": [str(path) for path in screen_paths],
+                    "data_evidence_refs": [str(csv_path)],
+                    "artifact_refs": [*[str(path) for path in screen_paths], str(csv_path)],
+                    "live_evidence_audit": {
+                        "required_for_handoff": True,
+                        "screen_evidence": {"ok": True, "missing_checkpoints": []},
+                        "linux_artifact_pull": {"ok": True},
+                        "save_export": {
+                            "ok": True,
+                            "save_method": "windows_export_watch",
+                            "save_attempted_by_agent": True,
+                            "save_confirmation_screen_ok": True,
+                            "windows_path": "C:/ATR/utm_exports/run-test/specimen-test.csv",
+                            "linux_path": str(csv_path),
+                            "recognized_save_method": True,
+                        },
+                        "vision_evidence": {"ok": True, "evidence_frame_ids": ["fixture-frame-001", "motion-frame-001", "complete-frame-001"]},
+                        "request_audit_log": {
+                            "ok": True,
+                            "path": "C:/ATR/bridge_artifacts/bridge_requests.jsonl",
+                            "event_count": 3,
+                            "recent_paths": ["/health", "/execute"],
+                            "execute_event_seen": True,
+                            "execute_event_count": 1,
+                            "execute_payload_event_count": 1,
+                            "execute_run_ids": [controller._state.run_id],
+                            "execute_sequence_ids": ["seq-live-utm"],
+                            "execute_specimen_ids": ["specimen-test"],
+                            "execute_program_ids": ["utm_compression_start_v1"],
+                            "execute_identity_required": True,
+                            "execute_identity_present": True,
+                            "execute_identity_match": True,
+                        },
+                    },
+                    "decision": {"handoff_status": "ready_for_analysis", "equipment_status": "verified_complete", "blocking_reasons": []},
+                },
+                "equipment_handoff": {"status": "ready_for_analysis", "program_id": "utm_compression_start_v1", "sequence_id": "seq-live-utm", "specimen_id": "specimen-test"},
+                "utm_data_ready": {"specimen_id": "specimen-test"},
+            }
+        )
+        ready = client.get("/api/equipment/windows/evidence-audit")
+        assert ready.status_code == 200
+        payload = ready.json()
+        assert payload["ok"] is False
+        assert payload["status"] == "blocked"
+        assert "UTM_PHYSICAL_LIVE_EXECUTE_REQUIRED" in payload["blockers"]
+        assert payload["gates"]["physical_live_execute"] is False
+
+        physical_validation_packet = {
+            "schema": "lab_equipment_utm_live_validation.v1",
+            "ok": True,
+            "status": "verified_complete",
+            "run_id": controller._state.run_id,
+            "sequence_id": "seq-live-utm",
+            "specimen_id": "specimen-test",
+            "program_id": "utm_compression_start_v1",
+            "requested_physical_execute": True,
+            "execute_sent": True,
+            "non_actuating": False,
+        }
+        missing_identity_packet = dict(physical_validation_packet)
+        missing_identity_packet.pop("program_id")
+        controller._state.run_metadata["last_windows_utm_physical_validation"] = missing_identity_packet
+        missing_identity = client.get("/api/equipment/windows/evidence-audit").json()
+        assert missing_identity["ok"] is False
+        assert "UTM_PHYSICAL_LIVE_EXECUTE_IDENTITY_REQUIRED" in missing_identity["blockers"]
+        assert missing_identity["gates"]["physical_live_execute"] is False
+        missing_identity_package = client.get("/api/equipment/windows/proof-package").json()
+        assert missing_identity_package["manifest"]["physical_execution"]["ok"] is False
+        assert "program_id" in missing_identity_package["manifest"]["physical_execution"]["missing_identity_fields"]
+
+        mismatched_identity_packet = dict(physical_validation_packet)
+        mismatched_identity_packet["program_id"] = "wrong_program"
+        controller._state.run_metadata["last_windows_utm_physical_validation"] = mismatched_identity_packet
+        mismatched_identity = client.get("/api/equipment/windows/evidence-audit").json()
+        assert mismatched_identity["ok"] is False
+        assert "UTM_PHYSICAL_LIVE_EXECUTE_IDENTITY_MISMATCH" in mismatched_identity["blockers"]
+        assert mismatched_identity["gates"]["physical_live_execute"] is False
+        mismatched_identity_package = client.get("/api/equipment/windows/proof-package").json()
+        assert mismatched_identity_package["manifest"]["physical_execution"]["ok"] is False
+        assert "program_id" in mismatched_identity_package["manifest"]["physical_execution"]["mismatched_identity_fields"]
+
+        controller._state.run_metadata["last_windows_utm_physical_validation"] = physical_validation_packet
+        ready = client.get("/api/equipment/windows/evidence-audit")
+        assert ready.status_code == 200
+        payload = ready.json()
+        assert payload["ok"] is True
+        assert payload["status"] == "ready_for_analysis"
+        assert payload["gates"]["linux_artifact_pulled"] is True
+        assert payload["gates"]["save_export_responsibility_ok"] is True
+        assert payload["gates"]["request_audit_log_available"] is True
+        assert payload["gates"]["physical_live_execute"] is True
+        assert payload["request_audit_log"]["path"].endswith("bridge_requests.jsonl")
+        assert payload["request_audit_log"]["execute_event_seen"] is True
+        assert payload["proof_ready"] is True
+        checklist_by_id = {item["id"]: item for item in payload["proof_checklist"]}
+        assert checklist_by_id["request_log_execute"]["ok"] is True
+        assert checklist_by_id["physical_live_execute"]["ok"] is True
+        assert checklist_by_id["screen_evidence"]["ok"] is True
+        assert checklist_by_id["linux_artifact_pull"]["ok"] is True
+        assert checklist_by_id["save_export_responsibility"]["ok"] is True
+        assert payload["screen_evidence_refs"] == [str(path) for path in screen_paths]
+
+        screen_paths[1].write_text("not an image", encoding="utf-8")
+        invalid_screen_audit = client.get("/api/equipment/windows/evidence-audit").json()
+        assert invalid_screen_audit["ok"] is False
+        assert "UTM_SCREEN_EVIDENCE_FILES_REQUIRED" in invalid_screen_audit["blockers"]
+        assert invalid_screen_audit["gates"]["screen_evidence_complete"] is False
+        screen_paths[1].write_bytes(TINY_PNG_BYTES)
+
+        csv_path.unlink()
+        missing_data_audit = client.get("/api/equipment/windows/evidence-audit").json()
+        assert missing_data_audit["ok"] is False
+        assert "UTM_DATA_EVIDENCE_FILES_REQUIRED" in missing_data_audit["blockers"]
+        assert missing_data_audit["gates"]["linux_artifact_pulled"] is False
+        csv_path.write_text("time_s,displacement_mm,force_N\n0,0,0\n1,0.2,310\n", encoding="utf-8")
+
+        csv_path.write_text("time_s,displacement_mm,force_N\n0,0,0\n1,0.2,0\n2,0.4,0\n", encoding="utf-8")
+        bad_signal_audit = client.get("/api/equipment/windows/evidence-audit").json()
+        assert bad_signal_audit["ok"] is False
+        assert "UTM_DATA_NO_FORCE_SIGNAL" in bad_signal_audit["blockers"]
+        assert bad_signal_audit["gates"]["data_parse_probe_ok"] is False
+        csv_path.write_text("time_s,displacement_mm,force_N\n0,0,0\n1,0.2,310\n", encoding="utf-8")
+
+        report = controller._state.run_metadata["equipment_report"]
+        report["live_evidence_audit"]["request_audit_log"]["recent_paths"] = ["/health", "/request-log"]
+        report["live_evidence_audit"]["request_audit_log"]["execute_event_seen"] = True
+        report["live_evidence_audit"]["request_audit_log"]["execute_event_count"] = 1
+        report["live_evidence_audit"]["request_audit_log"]["execute_payload_event_count"] = 1
+        report["live_evidence_audit"]["request_audit_log"]["execute_run_ids"] = [controller._state.run_id]
+        report["live_evidence_audit"]["request_audit_log"]["execute_sequence_ids"] = ["seq-live-utm"]
+        report["live_evidence_audit"]["request_audit_log"]["execute_specimen_ids"] = ["specimen-test"]
+        report["live_evidence_audit"]["request_audit_log"]["execute_program_ids"] = ["utm_compression_start_v1"]
+        report["live_evidence_audit"]["request_audit_log"]["execute_identity_match"] = True
+        report["live_evidence_audit"]["request_audit_log"]["last_execute_at"] = "2026-05-30T00:00:00Z"
+        summary_ready = client.get("/api/equipment/windows/evidence-audit").json()
+        assert summary_ready["ok"] is True
+        assert summary_ready["request_audit_log"]["execute_event_seen"] is True
+        assert summary_ready["request_audit_log"]["execute_event_count"] == 1
+        assert summary_ready["request_audit_log"]["last_execute_at"] == "2026-05-30T00:00:00Z"
+        assert summary_ready["proof_ready"] is True
+
+        config = client.get("/api/equipment/windows/config").json()
+        assert config["utm_evidence_audit"]["status"] == "ready_for_analysis"
+
+        proof_package = client.get("/api/equipment/windows/proof-package").json()
+        assert proof_package["tool"] == "equipment.pyautogui.live_proof_package"
+        assert proof_package["ok"] is True
+        assert proof_package["ready_for_analysis"] is True
+        assert proof_package["status"] == "ready_for_analysis"
+        assert proof_package["proof_ready"] is True
+        assert proof_package["missing_required_item_count"] == 0
+        assert proof_package["manifest"]["screen_evidence_count"] == 3
+        assert proof_package["manifest"]["data_evidence_count"] == 1
+        assert proof_package["manifest"]["physical_execution"]["ok"] is True
+        assert proof_package["manifest"]["physical_execution"]["dispatch_ok"] is True
+        assert proof_package["manifest"]["physical_execution"]["identity_ok"] is True
+        assert proof_package["manifest"]["physical_execution"]["execute_sent"] is True
+        assert proof_package["manifest"]["physical_execution"]["non_actuating"] is False
+        assert proof_package["manifest"]["request_log"]["execute_event_seen"] is True
+        assert proof_package["manifest"]["request_log"]["execute_identity_match"] is True
+        assert proof_package["manifest"]["save_export"]["ok"] is True
+        assert proof_package["manifest"]["save_export"]["save_method"] == "windows_export_watch"
+        assert proof_package["evidence_audit"]["status"] == "ready_for_analysis"
+        assert "passive_readiness" in proof_package
+        package_artifact = proof_package["package_artifact"]
+        assert package_artifact["kind"] == "windows_utm_proof_package"
+        assert package_artifact["content_type"] == "application/json"
+        proof_path = Path(package_artifact["path"])
+        created_proof_package_paths.append(proof_path)
+        assert proof_path.exists()
+        persisted = json.loads(proof_path.read_text(encoding="utf-8"))
+        assert persisted["tool"] == "equipment.pyautogui.live_proof_package"
+        assert persisted["manifest"]["proof_package_path"] == str(proof_path)
+        verification = client.post("/api/equipment/windows/proof-package/verify", json={"path": str(proof_path)}).json()
+        assert verification["tool"] == "equipment.pyautogui.live_proof_package.verify"
+        assert verification["ok"] is True
+        assert verification["status"] == "verified"
+        assert verification["csv_probe"]["row_count"] == 2
+        assert verification["csv_probe"]["has_force_column"] is True
+        assert verification["csv_probe"]["has_displacement_column"] is True
+        gate_summary = {item["key"]: item for item in verification["gate_summary"]}
+        assert set(gate_summary) == {
+            "windows_bridge",
+            "utm_program",
+            "vision_preconditions",
+            "physical_execution",
+            "screen_state",
+            "physical_crosscheck",
+            "data_artifact",
+            "analysis_handoff",
+        }
+        assert all(item["ok"] is True for item in gate_summary.values())
+        assert gate_summary["windows_bridge"]["label"] == "Windows Bridge"
+        assert gate_summary["physical_execution"]["label"] == "Physical Execute"
+        assert gate_summary["data_artifact"]["label"] == "Data Artifact"
+        assert any(item["name"] == "request_log_execute" and item["status"] == "ok" for item in verification["checks"])
+        assert any(item["name"] == "request_log_execute_identity" and item["status"] == "ok" for item in verification["checks"])
+        assert any(item["name"] == "save_export_responsibility" and item["status"] == "ok" for item in verification["checks"])
+        assert any(item["name"] == "screen_evidence_files" and item["status"] == "ok" for item in verification["checks"])
+        assert any(item["name"] == "vision_frame_refs" and item["status"] == "ok" for item in verification["checks"])
+        assert controller._state.run_metadata["last_windows_utm_proof_package_verification"]["status"] == "verified"
+
+        completion = client.post("/api/equipment/windows/completion-audit", json={"path": str(proof_path), "use_current": False}).json()
+        assert completion["tool"] == "equipment.pyautogui.improvement05_completion_audit"
+        assert completion["ok"] is True
+        assert completion["status"] == "complete_evidence_verified"
+        assert completion["verification"]["status"] == "verified"
+        assert completion["proof_package_path"] == str(proof_path)
+        completion_path = Path(completion["audit_artifact"]["path"])
+        created_proof_package_paths.append(completion_path)
+        assert completion_path.exists()
+        persisted_completion = json.loads(completion_path.read_text(encoding="utf-8"))
+        assert persisted_completion["status"] == "complete_evidence_verified"
+        assert persisted_completion["audit_artifact"]["kind"] == "windows_utm_completion_audit"
+        assert controller._state.run_metadata["last_windows_utm_completion_audit"]["status"] == "complete_evidence_verified"
+        assert controller._state.run_metadata["last_windows_utm_completion_audit"]["audit_artifact"]["path"] == str(completion_path)
+
+        csv_path.write_text("time_s,displacement_mm,force_N\n0,0,0\n1,0.2,0\n2,0.4,0\n", encoding="utf-8")
+        bad_signal_verification = client.post("/api/equipment/windows/proof-package/verify", json={"path": str(proof_path)}).json()
+        assert bad_signal_verification["ok"] is False
+        assert bad_signal_verification["status"] == "blocked"
+        assert bad_signal_verification["csv_probe"]["failure_code"] == "UTM_DATA_NO_FORCE_SIGNAL"
+        assert bad_signal_verification["csv_probe"]["data_quality"]["force_changes"] is False
+        assert "UTM_DATA_NO_FORCE_SIGNAL" in bad_signal_verification["blockers"]
+        bad_signal_gates = {item["key"]: item for item in bad_signal_verification["gate_summary"]}
+        assert bad_signal_gates["data_artifact"]["ok"] is False
+        assert bad_signal_gates["analysis_handoff"]["ok"] is False
+        assert any(item["name"] == "linux_csv_parse_probe" and item["status"] == "blocked" and item.get("code") == "UTM_DATA_NO_FORCE_SIGNAL" for item in bad_signal_verification["checks"])
+        csv_path.write_text("time_s,displacement_mm,force_N\n0,0,0\n1,0.2,310\n", encoding="utf-8")
+
+        screen_paths[0].unlink()
+        missing_screen_verification = client.post("/api/equipment/windows/proof-package/verify", json={"path": str(proof_path)}).json()
+        assert missing_screen_verification["ok"] is False
+        assert "UTM_SCREEN_EVIDENCE_FILES_REQUIRED" in missing_screen_verification["blockers"]
+        screen_paths[0].write_bytes(TINY_PNG_BYTES)
+
+        screen_paths[1].write_bytes(b"not-an-image")
+        invalid_screen_verification = client.post("/api/equipment/windows/proof-package/verify", json={"path": str(proof_path)}).json()
+        assert invalid_screen_verification["ok"] is False
+        assert "UTM_SCREEN_EVIDENCE_FILES_REQUIRED" in invalid_screen_verification["blockers"]
+        assert "invalid_image" in next(item["detail"] for item in invalid_screen_verification["checks"] if item["name"] == "screen_evidence_files")
+        screen_paths[1].write_bytes(TINY_PNG_BYTES)
+
+        duplicate_screen_package = json.loads(proof_path.read_text(encoding="utf-8"))
+        duplicate_screen_package["manifest"]["screen_evidence_refs"] = [str(screen_paths[0]), str(screen_paths[0]), str(screen_paths[0])]
+        duplicate_screen_package["manifest"]["screen_evidence_count"] = 3
+        duplicate_screen_path = proof_path.parent / "duplicate_screen_proof_package.json"
+        duplicate_screen_path.write_text(json.dumps(duplicate_screen_package, ensure_ascii=False, indent=2), encoding="utf-8")
+        created_proof_package_paths.append(duplicate_screen_path)
+        duplicate_screen_verification = client.post("/api/equipment/windows/proof-package/verify", json={"path": str(duplicate_screen_path)}).json()
+        assert duplicate_screen_verification["ok"] is False
+        assert "UTM_SCREEN_EVIDENCE_FILES_REQUIRED" in duplicate_screen_verification["blockers"]
+        assert "duplicate screen files" in next(item["detail"] for item in duplicate_screen_verification["checks"] if item["name"] == "screen_evidence_files")
+
+        missing_physical_source_package = json.loads(proof_path.read_text(encoding="utf-8"))
+        missing_physical_source_package["source_packets"]["last_windows_utm_physical_validation"] = {}
+        missing_physical_source_path = proof_path.parent / "missing_physical_source_proof_package.json"
+        missing_physical_source_path.write_text(json.dumps(missing_physical_source_package, ensure_ascii=False, indent=2), encoding="utf-8")
+        created_proof_package_paths.append(missing_physical_source_path)
+        missing_physical_source_verification = client.post("/api/equipment/windows/proof-package/verify", json={"path": str(missing_physical_source_path)}).json()
+        assert missing_physical_source_verification["ok"] is False
+        assert "UTM_PHYSICAL_LIVE_EXECUTE_REQUIRED" in missing_physical_source_verification["blockers"]
+        assert "source_ok=False" in next(item["detail"] for item in missing_physical_source_verification["checks"] if item["name"] == "physical_live_execute")
+
+        mismatched_physical_source_package = json.loads(proof_path.read_text(encoding="utf-8"))
+        mismatched_physical_source_package["source_packets"]["last_windows_utm_physical_validation"]["program_id"] = "wrong_utm_program"
+        mismatched_physical_source_path = proof_path.parent / "mismatched_physical_source_proof_package.json"
+        mismatched_physical_source_path.write_text(json.dumps(mismatched_physical_source_package, ensure_ascii=False, indent=2), encoding="utf-8")
+        created_proof_package_paths.append(mismatched_physical_source_path)
+        mismatched_physical_source_verification = client.post("/api/equipment/windows/proof-package/verify", json={"path": str(mismatched_physical_source_path)}).json()
+        assert mismatched_physical_source_verification["ok"] is False
+        assert "UTM_PHYSICAL_LIVE_EXECUTE_REQUIRED" in mismatched_physical_source_verification["blockers"]
+        assert "identity_match=False" in next(item["detail"] for item in mismatched_physical_source_verification["checks"] if item["name"] == "physical_live_execute")
+
+        report = controller._state.run_metadata["equipment_report"]
+        report["cross_checks"]["save_export_responsibility_ok"] = False
+        report["live_evidence_audit"]["save_export"]["ok"] = False
+        missing_save = client.get("/api/equipment/windows/evidence-audit").json()
+        assert missing_save["ok"] is False
+        assert missing_save["gates"]["save_export_responsibility_ok"] is False
+        assert "UTM_SAVE_EXPORT_RESPONSIBILITY_REQUIRED" in missing_save["blockers"]
+        missing_save_checklist = {item["id"]: item for item in missing_save["proof_checklist"]}
+        assert missing_save_checklist["save_export_responsibility"]["ok"] is False
+        missing_save_package = client.get("/api/equipment/windows/proof-package").json()
+        assert missing_save_package["manifest"]["save_export"]["ok"] is False
+        assert any(item["id"] == "save_export_responsibility" for item in missing_save_package["missing_required_items"])
+        missing_save_path = Path(missing_save_package["package_artifact"]["path"])
+        created_proof_package_paths.append(missing_save_path)
+        missing_save_verification = client.post("/api/equipment/windows/proof-package/verify", json={"path": str(missing_save_path)}).json()
+        assert "UTM_SAVE_EXPORT_RESPONSIBILITY_REQUIRED" in missing_save_verification["blockers"]
+        missing_save_completion = client.post("/api/equipment/windows/completion-audit", json={"path": str(missing_save_path), "use_current": False}).json()
+        assert missing_save_completion["ok"] is False
+        assert missing_save_completion["status"] == "incomplete"
+        assert "UTM_SAVE_EXPORT_RESPONSIBILITY_REQUIRED" in missing_save_completion["blockers"]
+        missing_save_completion_path = Path(missing_save_completion["audit_artifact"]["path"])
+        created_proof_package_paths.append(missing_save_completion_path)
+        assert missing_save_completion_path.exists()
+        missing_save_gates = {item["key"]: item for item in missing_save_verification["gate_summary"]}
+        assert missing_save_gates["data_artifact"]["ok"] is False
+        assert missing_save_gates["analysis_handoff"]["ok"] is False
+        report["cross_checks"]["save_export_responsibility_ok"] = True
+        report["live_evidence_audit"]["save_export"]["ok"] = True
+
+        report["bridge"]["request_log_recent_paths"] = ["/health", "/programs", "/request-log"]
+        report["live_evidence_audit"]["request_audit_log"].pop("execute_event_seen", None)
+        report["live_evidence_audit"]["request_audit_log"].pop("execute_event_count", None)
+        report["live_evidence_audit"]["request_audit_log"].pop("last_execute_at", None)
+        report["live_evidence_audit"]["request_audit_log"]["recent_paths"] = ["/health", "/programs", "/request-log"]
+        missing_execute = client.get("/api/equipment/windows/evidence-audit")
+        assert missing_execute.status_code == 200
+        blocked_payload = missing_execute.json()
+        assert blocked_payload["ok"] is False
+        assert blocked_payload["status"] == "blocked"
+        assert blocked_payload["gates"]["request_audit_log_available"] is False
+        assert blocked_payload["request_audit_log"]["execute_event_seen"] is False
+        assert blocked_payload["proof_ready"] is False
+        assert "UTM_REQUEST_LOG_EXECUTE_EVENT_REQUIRED" in blocked_payload["blockers"]
+        blocked_package = client.get("/api/equipment/windows/proof-package").json()
+        assert blocked_package["ok"] is False
+        assert blocked_package["status"] == "incomplete"
+        assert blocked_package["missing_required_item_count"] >= 1
+        assert any(item["id"] == "request_log_execute" for item in blocked_package["missing_required_items"])
+        assert "UTM_REQUEST_LOG_EXECUTE_EVENT_REQUIRED" in blocked_package["blockers"]
+        blocked_proof_path = Path(blocked_package["package_artifact"]["path"])
+        created_proof_package_paths.append(blocked_proof_path)
+        assert blocked_proof_path.exists()
+        blocked_verification = client.post("/api/equipment/windows/proof-package/verify", json={"path": str(blocked_proof_path)}).json()
+        assert blocked_verification["ok"] is False
+        assert blocked_verification["status"] == "blocked"
+        assert "UTM_REQUEST_LOG_EXECUTE_EVENT_REQUIRED" in blocked_verification["blockers"]
+        blocked_gates = {item["key"]: item for item in blocked_verification["gate_summary"]}
+        assert blocked_gates["windows_bridge"]["ok"] is False
+        assert blocked_gates["analysis_handoff"]["ok"] is False
+    finally:
+        for proof_path in created_proof_package_paths:
+            proof_path.unlink(missing_ok=True)
+        controller._state.run_metadata.clear()
+        controller._state.run_metadata.update(original_metadata)
+
+
+def test_windows_equipment_run_program_updates_raw_utm_evidence_audit(monkeypatch, tmp_path: Path) -> None:
+    import app.main as app_main
+
+    csv_path = tmp_path / "utm.csv"
+    csv_path.write_text("time_s,displacement_mm,force_N\n0,0,0\n1,0.1,2.5\n", encoding="utf-8")
+
+    class _FakeBridge:
+        def connection_status(self):
+            return {"selected": True, "token_configured": True}
+
+        def list_programs(self, payload):
+            return {"ok": True, "programs": [{"program_id": "utm_compression_start_v1"}]}
+
+        def health(self, payload):
+            return {"ok": True, "status": "ready", "pyautogui": {"available": True, "failsafe": True}}
+
+        def list_locators(self, payload):
+            return {
+                "ok": True,
+                "locators": [
+                    {"name": "ready_state"},
+                    {"name": "start_button"},
+                    {"name": "running_state"},
+                    {"name": "complete_state"},
+                ],
+            }
+
+        def request_log(self, payload):
+            return {
+                "ok": True,
+                "request_log": "C:/ATR/bridge_artifacts/bridge_requests.jsonl",
+                "event_count": 4,
+                "recent_paths": ["/health", "/execute", "/request-log"],
+                "execute_event_seen": True,
+                "execute_event_count": 1,
+                "execute_payload_event_count": 1,
+                "execute_run_ids": [controller._state.run_id],
+                "execute_sequence_ids": ["setup-utm_compression_start_v1"],
+                "execute_specimen_ids": ["specimen-test"],
+                "execute_program_ids": ["utm_compression_start_v1"],
+                "last_execute_context": {
+                    "audit_kind": "execute_payload",
+                    "run_id": controller._state.run_id,
+                    "sequence_id": "setup-utm_compression_start_v1",
+                    "specimen_id": "specimen-test",
+                    "program_id": "utm_compression_start_v1",
+                },
+                "last_execute_at": "2026-05-30T00:00:00Z",
+            }
+
+        def utm_profile_status(self):
+            return {
+                "source": "memory",
+                "profile": {
+                    "program_id": "utm_compression_start_v1",
+                    "export_glob": "*.csv",
+                    "require_screen_assertions": True,
+                    "simulate_utm_protocol": False,
+                    "locators": {
+                        "ready_state": {"image_path": "ready.png"},
+                        "start_button": {"image_path": "start.png"},
+                        "running_state": {"image_path": "running.png"},
+                        "complete_state": {"image_path": "complete.png"},
+                    },
+                },
+            }
+
+        def run(self, payload):
+            return {
+                "ok": True,
+                "tool": "equipment.pyautogui.run",
+                "status": "verified_complete",
+                "bridge": "windows_pyautogui",
+                "program_id": "utm_compression_start_v1",
+                "sequence_id": "setup-utm_compression_start_v1",
+                "result_file": str(csv_path),
+                "utm_csv_path": str(csv_path),
+                "screen_checks": [
+                    {"checkpoint": "before_start", "ok": True, "state": "ready", "screenshot_artifact": "screen-before"},
+                    {"checkpoint": "after_start", "ok": True, "state": "running", "screenshot_artifact": "screen-running"},
+                    {"checkpoint": "after_complete", "ok": True, "state": "complete", "screenshot_artifact": "screen-complete"},
+                ],
+                "output_artifacts": [
+                    {"kind": "screen_png", "artifact_id": "screen-before", "local_path": "before.png"},
+                    {"kind": "screen_png", "artifact_id": "screen-running", "local_path": "running.png"},
+                    {"kind": "screen_png", "artifact_id": "screen-complete", "local_path": "complete.png"},
+                    {"kind": "utm_csv", "artifact_id": "utm-csv", "local_path": str(csv_path), "row_count_probe": 2},
+                ],
+                "data_acquisition": {
+                    "status": "pulled_to_linux",
+                    "linux_path": str(csv_path),
+                    "local_path": str(csv_path),
+                    "row_count_probe": 2,
+                    "save_method": "windows_export_watch",
+                    "save_attempted_by_agent": True,
+                    "save_confirmation_screen_ok": True,
+                    "windows_path": "C:/ATR/utm_exports/run-test/specimen-test.csv",
+                },
+                "bridge_request_log_ref": "C:/ATR/bridge_artifacts/bridge_requests.jsonl",
+                "request_log_event_count": 4,
+                "request_log_recent_paths": ["/health", "/programs", "/execute", "/request-log"],
+                "cross_checks": {
+                    "screen_started": True,
+                    "physical_motion_started": True,
+                    "save_completed": True,
+                    "data_file_created": True,
+                    "data_parse_probe_ok": True,
+                    "save_export_responsibility_ok": True,
+                },
+            }
+
+    original_metadata = dict(controller._state.run_metadata)
+    monkeypatch.setattr(app_main, "_equipment_bridge", lambda: _FakeBridge())
+    client = TestClient(app)
+    try:
+        controller._state.run_metadata.clear()
+        response = client.post(
+            "/api/equipment/windows/run-program",
+            json={"program_id": "utm_compression_start_v1", "confirm_execute": True, "require_screen_assertions": True},
+        )
+        assert response.status_code == 200
+        result_payload = response.json()
+        assert result_payload["pre_execution_preflight"]["non_actuating"] is True
+        assert result_payload["pre_execution_preflight"]["ready_for_autonomous_profile"] is True
+        assert controller._state.run_metadata["last_windows_utm_protocol_result"]["program_id"] == "utm_compression_start_v1"
+
+        audit = client.get("/api/equipment/windows/evidence-audit").json()
+        assert audit["status"] == "blocked"
+        assert audit["gates"]["screen_evidence_complete"] is True
+        assert audit["gates"]["linux_artifact_pulled"] is True
+        assert audit["gates"]["vision_evidence_complete"] is False
+        assert audit["request_audit_log"]["path"].endswith("bridge_requests.jsonl")
+        assert audit["request_audit_log"]["execute_event_seen"] is True
+        assert audit["gates"]["request_audit_log_available"] is True
+        assert audit["gates"]["save_export_responsibility_ok"] is True
+        assert audit["proof_ready"] is False
+        raw_checklist = {item["id"]: item for item in audit["proof_checklist"]}
+        assert raw_checklist["request_log_execute"]["ok"] is True
+        assert raw_checklist["save_export_responsibility"]["ok"] is True
+        assert raw_checklist["vision_evidence_frames"]["ok"] is False
+        assert "UTM_VISION_EVIDENCE_FRAMES_REQUIRED" in audit["blockers"]
+        assert audit["data_evidence_refs"] == [str(csv_path)]
+        assert len(audit["screen_evidence_refs"]) == 3
+    finally:
+        controller._state.run_metadata.clear()
+        controller._state.run_metadata.update(original_metadata)
+
+
+def test_windows_equipment_run_program_passes_utm_export_controls(monkeypatch) -> None:
+    import app.main as app_main
+
+    captured = {}
+
+    class _FakeBridge:
+        def connection_status(self):
+            return {"selected": True, "token_configured": True}
+
+        def list_programs(self, payload):
+            return {"ok": True, "programs": [{"program_id": "utm_compression_start_v1"}]}
+
+        def health(self, payload):
+            return {"ok": True, "status": "ready", "pyautogui": {"available": True, "failsafe": True}}
+
+        def list_locators(self, payload):
+            return {
+                "ok": True,
+                "locators": [
+                    {"name": "ready_state"},
+                    {"name": "start_button"},
+                    {"name": "running_state"},
+                    {"name": "complete_state"},
+                ],
+            }
+
+        def request_log(self, payload):
+            return {
+                "ok": True,
+                "request_log": "C:/ATR/bridge_artifacts/bridge_requests.jsonl",
+                "event_count": 2,
+                "recent_paths": ["/health", "/request-log"],
+                "execute_event_seen": False,
+            }
+
+        def utm_profile_status(self):
+            return {
+                "source": "memory",
+                "profile": {
+                    "program_id": "utm_compression_start_v1",
+                    "export_glob": "*.csv",
+                    "require_screen_assertions": True,
+                    "simulate_utm_protocol": False,
+                    "locators": {
+                        "ready_state": {"image_path": "ready.png"},
+                        "start_button": {"image_path": "start.png"},
+                        "running_state": {"image_path": "running.png"},
+                        "complete_state": {"image_path": "complete.png"},
+                    },
+                },
+            }
+
+        def run(self, payload):
+            captured.update(payload)
+            return {
+                "ok": True,
+                "tool": "equipment.pyautogui.run",
+                "status": "verified_complete",
+                "bridge": "windows_pyautogui",
+                "program_id": payload.get("program_id"),
+                "sequence_id": payload.get("sequence_id"),
+                "step_trace": [],
+            }
+
+    monkeypatch.setattr(app_main, "_equipment_bridge", lambda: _FakeBridge())
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/equipment/windows/run-program",
+        json={
+            "program_id": "utm_compression_start_v1",
+            "command": "Run UTM compression protocol and export CSV",
+            "confirm_execute": True,
+            "export_glob": "specimen*.csv",
+            "artifact_timeout_s": 123,
+            "stable_for_sec": 3.5,
+            "expected_export_path": "C:/ATR/utm_exports/run/specimen.csv",
+            "require_window_focus": True,
+            "manual_save_required_if_no_artifact": False,
+            "target_window_regex": ".*UTM.*",
+            "require_screen_assertions": True,
+            "simulate_utm_protocol": False,
+        },
+    )
+
+    assert response.status_code == 200
+    assert captured["runtime_mode"] == "live"
+    assert captured["force_live_bridge"] is True
+    assert captured["export_glob"] == "specimen*.csv"
+    assert captured["artifact_timeout_s"] == 123
+    assert captured["stable_for_sec"] == 3.5
+    assert captured["expected_export_path"].endswith("specimen.csv")
+    assert captured["require_window_focus"] is True
+    assert captured["manual_save_required_if_no_artifact"] is False
+    assert captured["target_window_regex"] == ".*UTM.*"
+    assert captured["require_screen_assertions"] is True
+    assert response.json()["pre_execution_preflight"]["ready_for_autonomous_profile"] is True
+
+
+def test_windows_equipment_utm_abort_bypasses_readiness_and_preflight(monkeypatch) -> None:
+    import app.main as app_main
+
+    calls = {"run": 0, "health": 0, "list_programs": 0, "list_locators": 0}
+
+    class _AbortBridge:
+        def connection_status(self):
+            return {"selected": True, "token_configured": True}
+
+        def list_programs(self, payload):
+            calls["list_programs"] += 1
+            raise AssertionError("abort recovery must not require program-readiness listing before run")
+
+        def health(self, payload):
+            calls["health"] += 1
+            raise AssertionError("abort recovery must not require live preflight health before run")
+
+        def list_locators(self, payload):
+            calls["list_locators"] += 1
+            raise AssertionError("abort recovery must not require locator readiness before run")
+
+        def request_log(self, payload):
+            return {
+                "ok": True,
+                "request_log": "C:/ATR/bridge_artifacts/bridge_requests.jsonl",
+                "event_count": 1,
+                "recent_paths": ["/execute"],
+                "execute_event_seen": True,
+                "execute_event_count": 1,
+            }
+
+        def run(self, payload):
+            calls["run"] += 1
+            return {
+                "ok": True,
+                "tool": "equipment.pyautogui.run",
+                "status": "recovery_macro_dispatched",
+                "program_id": payload.get("program_id"),
+                "sequence_id": payload.get("sequence_id"),
+                "step_trace": [{"step": "RECOVERY_ABORT_MACRO", "status": "ok", "detail": "dispatched"}],
+            }
+
+    monkeypatch.setattr(app_main, "_equipment_bridge", lambda: _AbortBridge())
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/equipment/windows/run-program",
+        json={"program_id": "utm_stop_or_abort_v1", "confirm_execute": True, "require_screen_assertions": False},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ok"] is True
+    assert payload["program_id"] == "utm_stop_or_abort_v1"
+    assert payload["recovery_macro"] is True
+    assert payload["pre_execution_readiness"]["status"] == "bypassed_for_recovery_macro"
+    assert payload["request_audit_log"]["execute_event_seen"] is True
+    assert calls == {"run": 1, "health": 0, "list_programs": 0, "list_locators": 0}
+
+
+def test_windows_equipment_run_program_blocks_utm_when_live_preflight_fails(monkeypatch) -> None:
+    import app.main as app_main
+
+    called = {"run": False}
+
+    class _PreflightBlockedBridge:
+        def connection_status(self):
+            return {"selected": True, "token_configured": True}
+
+        def list_programs(self, payload):
+            return {"ok": True, "programs": [{"program_id": "utm_compression_start_v1"}]}
+
+        def health(self, payload):
+            return {"ok": False, "failure_code": "LIVE_BRIDGE_UNREACHABLE", "message": "offline"}
+
+        def list_locators(self, payload):
+            return {"ok": True, "locators": []}
+
+        def request_log(self, payload):
+            return {"ok": False, "failure_code": "REQUEST_LOG_UNREACHABLE"}
+
+        def utm_profile_status(self):
+            return {
+                "source": "memory",
+                "profile": {
+                    "program_id": "utm_compression_start_v1",
+                    "export_glob": "*.csv",
+                    "require_screen_assertions": True,
+                    "simulate_utm_protocol": False,
+                    "locators": {
+                        "ready_state": {"image_path": "ready.png"},
+                        "start_button": {"image_path": "start.png"},
+                        "running_state": {"image_path": "running.png"},
+                        "complete_state": {"image_path": "complete.png"},
+                    },
+                },
+            }
+
+        def run(self, payload):  # pragma: no cover - this must remain uncalled
+            called["run"] = True
+            return {"ok": True}
+
+    monkeypatch.setattr(app_main, "_equipment_bridge", lambda: _PreflightBlockedBridge())
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/equipment/windows/run-program",
+        json={
+            "program_id": "utm_compression_start_v1",
+            "confirm_execute": True,
+            "require_screen_assertions": True,
+            "simulate_utm_protocol": False,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ok"] is False
+    assert payload["status"] == "blocked"
+    assert payload["failure_code"] == "UTM_LIVE_PREFLIGHT_BLOCKED"
+    assert payload["bridge_not_called"] is True
+    assert payload["non_actuating"] is True
+    assert payload["required_gate"] == "live_preflight.ready_for_autonomous_profile"
+    assert "LIVE_BRIDGE_HEALTH_FAILED" in payload["preflight"]["blockers"]
+    assert "UTM_LIVE_PREFLIGHT_NOT_READY" in payload["blockers"]
+    assert called["run"] is False
+
+
+def test_windows_equipment_run_program_blocks_utm_when_readiness_incomplete(monkeypatch) -> None:
+    import app.main as app_main
+
+    called = {"run": False}
+
+    class _BlockedBridge:
+        def connection_status(self):
+            return {"selected": True, "token_configured": True}
+
+        def list_programs(self, payload):
+            return {"ok": True, "programs": [{"program_id": "utm_compression_start_v1"}]}
+
+        def health(self, payload):
+            return {"ok": True, "status": "ready", "pyautogui": {"available": True, "failsafe": True}}
+
+        def list_locators(self, payload):
+            return {
+                "ok": True,
+                "locators": [
+                    {"name": "ready_state"},
+                    {"name": "start_button"},
+                    {"name": "running_state"},
+                    {"name": "complete_state"},
+                ],
+            }
+
+        def request_log(self, payload):
+            return {
+                "ok": True,
+                "request_log": "C:/ATR/bridge_artifacts/bridge_requests.jsonl",
+                "event_count": 2,
+                "recent_paths": ["/health", "/request-log"],
+                "execute_event_seen": False,
+            }
+
+        def utm_profile_status(self):
+            return {
+                "source": "memory",
+                "profile": {
+                    "program_id": "utm_compression_start_v1",
+                    "export_glob": "*.csv",
+                    "require_screen_assertions": True,
+                    "simulate_utm_protocol": False,
+                    "locators": {"ready_state": {"image_path": "ready.png"}},
+                },
+            }
+
+        def run(self, payload):  # pragma: no cover - this must remain uncalled
+            called["run"] = True
+            return {"ok": True}
+
+    monkeypatch.setattr(app_main, "_equipment_bridge", lambda: _BlockedBridge())
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/equipment/windows/run-program",
+        json={
+            "program_id": "utm_compression_start_v1",
+            "confirm_execute": True,
+            "require_screen_assertions": True,
+            "simulate_utm_protocol": False,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ok"] is False
+    assert payload["status"] == "blocked"
+    assert payload["failure_code"] == "UTM_PRE_EXECUTION_READINESS_BLOCKED"
+    assert payload["bridge_not_called"] is True
+    assert payload["non_actuating"] is True
+    assert payload["required_gate"] == "ready_for_autonomous_profile"
+    assert "UTM_REQUIRED_LOCATORS_MISSING" in payload["readiness"]["blockers"]
+    assert "UTM_AUTONOMOUS_PROFILE_NOT_READY" in payload["blockers"]
+    assert called["run"] is False
+
+
+def test_windows_equipment_locator_calibration_api_contracts(monkeypatch, tmp_path: Path) -> None:
+    import app.main as app_main
+    from device_bridges.windows_pyautogui_bridge import WindowsPyAutoGUIBridge, WindowsPyAutoGUIBridgeConfig
+
+    cfg = WindowsPyAutoGUIBridgeConfig.from_devices_config(
+        {
+            "devices": {
+                "equipment": {
+                    "mode": "live",
+                    "windows_pyautogui": {"connection_memory_path": str(tmp_path / "empty_windows_bridge.json")},
+                }
+            }
+        },
+        repo_root=tmp_path,
+    )
+    monkeypatch.delenv("WINDOWS_PYAUTOGUI_BRIDGE_URL", raising=False)
+    monkeypatch.delenv("WINDOWS_PYAUTOGUI_BRIDGE_TOKEN", raising=False)
+    monkeypatch.setattr(app_main, "_equipment_bridge", lambda: WindowsPyAutoGUIBridge(cfg))
+    client = TestClient(app)
+
+    locators = client.get("/api/equipment/windows/locators")
+    assert locators.status_code == 200
+    assert locators.json()["tool"] == "equipment.pyautogui.list_locators"
+
+    profile = client.get("/api/equipment/windows/utm-profile")
+    assert profile.status_code == 200
+    assert profile.json()["tool"] == "equipment.pyautogui.utm_profile"
+
+    saved_profile = client.post(
+        "/api/equipment/windows/utm-profile",
+        json={
+            "program_id": "utm_compression_start_v1",
+            "export_glob": "contract*.csv",
+            "artifact_timeout_s": 33,
+            "stable_for_sec": 1.5,
+            "require_screen_assertions": True,
+            "locators": {"ready_state": {"image_path": "C:/ATR/locators/ready.png", "confidence": 0.8}},
+        },
+    )
+    assert saved_profile.status_code == 200
+    assert saved_profile.json()["tool"] == "equipment.pyautogui.save_utm_profile"
+    assert saved_profile.json()["profile"]["export_glob"] == "contract*.csv"
+
+    readiness_blocked = client.get("/api/equipment/windows/readiness")
+    assert readiness_blocked.status_code == 200
+    assert readiness_blocked.json()["tool"] == "equipment.pyautogui.utm_readiness"
+    assert readiness_blocked.json()["status"] == "blocked"
+    assert "PYAUTOGUI_BRIDGE_NOT_SELECTED" in readiness_blocked.json()["blockers"]
+
+    saved_connection = client.post(
+        "/api/equipment/windows/connect",
+        json={
+            "candidate_alias": "utm_pc",
+            "bridge_url": "http://192.168.50.58:8765",
+            "token": "test-token",
+        },
+    )
+    assert saved_connection.status_code == 200
+
+    readiness_incomplete = client.get("/api/equipment/windows/readiness")
+    assert readiness_incomplete.status_code == 200
+    incomplete_payload = readiness_incomplete.json()
+    assert incomplete_payload["status"] == "blocked"
+    assert incomplete_payload["ready_for_setup_test"] is False
+    assert incomplete_payload["ready_for_autonomous_profile"] is False
+    assert "UTM_REQUIRED_LOCATORS_MISSING" in incomplete_payload["blockers"]
+    assert incomplete_payload["gates"]["locator_count"] == 1
+    assert incomplete_payload["gates"]["required_locator_names"] == ["ready_state", "start_button", "running_state", "complete_state"]
+    assert incomplete_payload["gates"]["missing_required_locators"] == ["start_button", "running_state", "complete_state"]
+
+    full_profile = client.post(
+        "/api/equipment/windows/utm-profile",
+        json={
+            "program_id": "utm_compression_start_v1",
+            "export_glob": "contract*.csv",
+            "artifact_timeout_s": 33,
+            "stable_for_sec": 1.5,
+            "require_screen_assertions": True,
+            "locators": {
+                "ready_state": {"image_path": "C:/ATR/locators/ready.png", "confidence": 0.8},
+                "start_button": {"image_path": "C:/ATR/locators/start.png", "confidence": 0.8},
+                "running_state": {"image_path": "C:/ATR/locators/running.png", "confidence": 0.8},
+                "complete_state": {"image_path": "C:/ATR/locators/complete.png", "confidence": 0.8},
+            },
+        },
+    )
+    assert full_profile.status_code == 200
+
+    readiness_ready = client.get("/api/equipment/windows/readiness")
+    assert readiness_ready.status_code == 200
+    assert readiness_ready.json()["status"] == "ready"
+    assert readiness_ready.json()["ready_for_setup_test"] is True
+    assert readiness_ready.json()["ready_for_autonomous_profile"] is True
+    assert readiness_ready.json()["gates"]["locator_count"] == 4
+    assert readiness_ready.json()["gates"]["missing_required_locators"] == []
+    assert readiness_ready.json()["gates"]["required_locators_complete"] is True
+
+    missing_confirm = client.post("/api/equipment/windows/screenshot", json={"checkpoint": "manual"})
+    assert missing_confirm.status_code == 400
+
+    screenshot = client.post(
+        "/api/equipment/windows/screenshot",
+        json={"checkpoint": "manual", "run_id": "contract-test", "confirm_capture": True},
+    )
+    assert screenshot.status_code == 200
+    assert screenshot.json()["tool"] == "equipment.pyautogui.screenshot"
+
+    missing_capture_confirm = client.post(
+        "/api/equipment/windows/capture-locator",
+        json={"program_id": "utm_compression_start_v1", "name": "ready_state", "region": [0, 0, 10, 10]},
+    )
+    assert missing_capture_confirm.status_code == 400
+
+    invalid_region = client.post(
+        "/api/equipment/windows/capture-locator",
+        json={"program_id": "utm_compression_start_v1", "name": "ready_state", "confirm_capture": True},
+    )
+    assert invalid_region.status_code == 200
+    assert invalid_region.json()["failure_code"] == "PYAUTOGUI_LOCATOR_REGION_REQUIRED"
+
+
+def test_windows_equipment_live_preflight_api_contract(monkeypatch) -> None:
+    import app.main as app_main
+
+    class FakeWindowsBridge:
+        def connection_status(self) -> dict[str, object]:
+            return {
+                "ok": True,
+                "selected": True,
+                "token_configured": True,
+                "selected_candidate": "utm_pc",
+                "bridge_url": "http://192.168.50.58:8765",
+            }
+
+        def utm_profile_status(self) -> dict[str, object]:
+            return {
+                "ok": True,
+                "tool": "equipment.pyautogui.utm_profile",
+                "status": "ready",
+                "source": "memory",
+                "profile_memory_path": "memory/equipment_utm_profile.json",
+                "profile": {
+                    "program_id": "utm_compression_start_v1",
+                    "export_glob": "*.csv",
+                    "artifact_timeout_s": 60,
+                    "stable_for_sec": 2.0,
+                    "require_screen_assertions": True,
+                    "simulate_utm_protocol": False,
+                    "locators": {
+                        "ready_state": {"image_path": "C:/ATR/locators/ready.png"},
+                        "start_button": {"image_path": "C:/ATR/locators/start.png"},
+                        "running_state": {"image_path": "C:/ATR/locators/running.png"},
+                        "complete_state": {"image_path": "C:/ATR/locators/complete.png"},
+                    },
+                },
+            }
+
+        def list_programs(self, payload: dict[str, object] | None = None) -> dict[str, object]:
+            return {
+                "ok": True,
+                "tool": "equipment.pyautogui.list_programs",
+                "status": "ready",
+                "programs": [{"program_id": "utm_compression_start_v1", "program_type": "utm_protocol"}],
+            }
+
+        def health(self, payload: dict[str, object] | None = None) -> dict[str, object]:
+            return {
+                "ok": True,
+                "tool": "equipment.pyautogui.health",
+                "mode": "live",
+                "status": "ready",
+                "pyautogui": {"available": True, "failsafe": True},
+            }
+
+        def list_locators(self, payload: dict[str, object] | None = None) -> dict[str, object]:
+            return {
+                "ok": True,
+                "tool": "equipment.pyautogui.list_locators",
+                "mode": "live",
+                "status": "ready",
+                "locators": [
+                    {"program_id": "utm_compression_start_v1", "name": "ready_state"},
+                    {"program_id": "utm_compression_start_v1", "name": "start_button"},
+                    {"program_id": "utm_compression_start_v1", "name": "running_state"},
+                    {"program_id": "utm_compression_start_v1", "name": "complete_state"},
+                ],
+            }
+
+        def request_log(self, payload: dict[str, object] | None = None) -> dict[str, object]:
+            return {
+                "ok": True,
+                "tool": "equipment.pyautogui.request_log",
+                "mode": "live",
+                "status": "ready",
+                "request_log": "C:/ATR/bridge_artifacts/bridge_requests.jsonl",
+                "event_count": 2,
+                "events": [
+                    {"path": "/health", "token_header_present": True, "auth_ok": True},
+                    {"path": "/programs", "token_auth_enabled": True, "auth_ok": True},
+                ],
+            }
+
+        def screenshot(self, payload: dict[str, object] | None = None) -> dict[str, object]:
+            return {
+                "ok": True,
+                "tool": "equipment.pyautogui.screenshot",
+                "mode": "live",
+                "status": "captured",
+                "artifact_path": "/tmp/atr/preflight.png",
+            }
+
+    monkeypatch.setattr(app_main, "_equipment_bridge", lambda: FakeWindowsBridge())
+    client = TestClient(app)
+
+    missing_confirm = client.post("/api/equipment/windows/live-preflight", json={})
+    assert missing_confirm.status_code == 400
+
+    preflight = client.post(
+        "/api/equipment/windows/live-preflight",
+        json={"confirm_preflight": True, "include_locators": True, "include_screenshot": True},
+    )
+    assert preflight.status_code == 200
+    data = preflight.json()
+    assert data["tool"] == "equipment.pyautogui.live_preflight"
+    assert data["status"] == "ready"
+    assert data["non_actuating"] is True
+    assert data["ready_for_autonomous_profile"] is True
+    assert "/execute" not in data["touched_endpoints"]
+    assert data["touched_endpoints"] == ["/health", "/programs", "/locators", "/request-log", "/screenshot"]
+    assert data["request_audit_log"]["ok"] is True
+    assert data["request_audit_log"]["path"].endswith("bridge_requests.jsonl")
+    assert data["checks"][-1]["name"] == "preflight_screenshot"
+    assert data["evidence_refs"] == ["/tmp/atr/preflight.png"]
+
+
+def test_windows_equipment_live_validation_api_contract(monkeypatch) -> None:
+    import app.main as app_main
+
+    class FakeWindowsBridge:
+        def health(self, payload: dict[str, object] | None = None) -> dict[str, object]:
+            assert payload is not None
+            assert payload.get("runtime_mode") == "live"
+            assert payload.get("force_live_bridge") is True
+            return {
+                "ok": True,
+                "tool": "equipment.pyautogui.health",
+                "mode": "live",
+                "status": "ready",
+                "bridge_url": "http://192.168.50.58:8765",
+                "bridge_host": "192.168.50.58",
+                "pyautogui": {"available": True, "failsafe": True},
+            }
+
+        def list_programs(self, payload: dict[str, object] | None = None) -> dict[str, object]:
+            assert payload is not None
+            assert payload.get("runtime_mode") == "live"
+            assert payload.get("force_live_bridge") is True
+            return {
+                "ok": True,
+                "tool": "equipment.pyautogui.list_programs",
+                "mode": "live",
+                "status": "ready",
+                "programs": [{"program_id": "utm_compression_start_v1", "program_type": "utm_protocol"}],
+            }
+
+        def request_log(self, payload: dict[str, object] | None = None) -> dict[str, object]:
+            assert payload is not None
+            assert payload.get("runtime_mode") == "live"
+            assert payload.get("force_live_bridge") is True
+            return {
+                "ok": True,
+                "tool": "equipment.pyautogui.request_log",
+                "mode": "live",
+                "status": "ready",
+                "request_log": "C:/ATR/bridge_artifacts/bridge_requests.jsonl",
+                "event_count": 2,
+                "events": [
+                    {"path": "/health", "token_header_present": True, "auth_ok": True},
+                    {"path": "/programs", "token_auth_enabled": True, "auth_ok": True},
+                ],
+            }
+
+    monkeypatch.setattr(app_main, "_equipment_bridge", lambda: FakeWindowsBridge())
+    client = TestClient(app)
+
+    blocked = client.post("/api/equipment/windows/live-validation", json={})
+    assert blocked.status_code == 400
+
+    response = client.post(
+        "/api/equipment/windows/live-validation",
+        json={
+            "confirm_non_actuating": True,
+            "run_id": "unit-live-validation",
+            "sequence_id": "unit-live-validation",
+            "specimen_id": "specimen-unit",
+            "program_id": "utm_compression_start_v1",
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["tool"] == "equipment.pyautogui.live_validation"
+    assert data["schema"] == "lab_equipment_utm_live_validation.v1"
+    assert data["status"] == "preflight_passed"
+    assert data["non_actuating"] is True
+    assert data["ready_for_physical_live_run"] is True
+    assert "/execute" not in data["touched_endpoints"]
+    assert data["report_artifact"]["path"].endswith("lab_equipment_utm_live_validation.json")
+    assert any(item["name"] == "execution_not_sent" and item["required"] is False for item in data["gates"])
+
+
+def test_windows_equipment_physical_live_validation_api_contract(monkeypatch, tmp_path: Path) -> None:
+    import app.main as app_main
+
+    csv_path = tmp_path / "utm_live.csv"
+    csv_path.write_text("time_s,displacement_mm,force_N\n0,0,0\n1,0.2,320\n", encoding="utf-8")
+    screen_paths = []
+    for name in ("before", "running", "complete"):
+        path = tmp_path / f"utm_live_{name}.png"
+        path.write_bytes(TINY_PNG_BYTES)
+        screen_paths.append(path)
+
+    class FakeWindowsBridge:
+        def __init__(self) -> None:
+            self.executed = False
+
+        def connection_status(self) -> dict[str, object]:
+            return {
+                "ok": True,
+                "selected": True,
+                "token_configured": True,
+                "selected_candidate": "utm_pc",
+                "bridge_url": "http://192.168.50.58:8765",
+            }
+
+        def utm_profile_status(self) -> dict[str, object]:
+            return {
+                "ok": True,
+                "status": "ready",
+                "source": "memory",
+                "profile_memory_path": "memory/equipment_utm_profile.json",
+                "profile": {
+                    "program_id": "utm_compression_start_v1",
+                    "export_glob": "*.csv",
+                    "require_screen_assertions": True,
+                    "simulate_utm_protocol": False,
+                    "locators": {
+                        "ready_state": {"image_path": "C:/ATR/locators/ready.png"},
+                        "start_button": {"image_path": "C:/ATR/locators/start.png"},
+                        "running_state": {"image_path": "C:/ATR/locators/running.png"},
+                        "complete_state": {"image_path": "C:/ATR/locators/complete.png"},
+                    },
+                },
+            }
+
+        def health(self, payload: dict[str, object] | None = None) -> dict[str, object]:
+            return {
+                "ok": True,
+                "tool": "equipment.pyautogui.health",
+                "mode": "live",
+                "status": "ready",
+                "bridge_url": "http://192.168.50.58:8765",
+                "bridge_host": "192.168.50.58",
+                "pyautogui": {"available": True, "failsafe": True},
+            }
+
+        def list_programs(self, payload: dict[str, object] | None = None) -> dict[str, object]:
+            return {
+                "ok": True,
+                "tool": "equipment.pyautogui.list_programs",
+                "mode": (payload or {}).get("runtime_mode", "test"),
+                "status": "ready",
+                "programs": [{"program_id": "utm_compression_start_v1", "program_type": "utm_protocol"}],
+            }
+
+        def list_locators(self, payload: dict[str, object] | None = None) -> dict[str, object]:
+            return {
+                "ok": True,
+                "tool": "equipment.pyautogui.list_locators",
+                "mode": "live",
+                "status": "ready",
+                "locators": [
+                    {"program_id": "utm_compression_start_v1", "name": "ready_state"},
+                    {"program_id": "utm_compression_start_v1", "name": "start_button"},
+                    {"program_id": "utm_compression_start_v1", "name": "running_state"},
+                    {"program_id": "utm_compression_start_v1", "name": "complete_state"},
+                ],
+            }
+
+        def request_log(self, payload: dict[str, object] | None = None) -> dict[str, object]:
+            events = [{"path": "/health", "auth_ok": True}]
+            result: dict[str, object] = {
+                "ok": True,
+                "tool": "equipment.pyautogui.request_log",
+                "mode": "live",
+                "status": "ready",
+                "request_log": "C:/ATR/bridge_artifacts/bridge_requests.jsonl",
+                "event_count": len(events),
+                "events": events,
+            }
+            if self.executed:
+                execute_event = {
+                    "path": "/execute",
+                    "audit_kind": "execute_payload",
+                    "run_id": "unit-physical-validation",
+                    "sequence_id": "unit-physical-validation",
+                    "specimen_id": "specimen-unit",
+                    "program_id": "utm_compression_start_v1",
+                }
+                events.append(execute_event)
+                result.update(
+                    {
+                        "event_count": len(events),
+                        "execute_event_seen": True,
+                        "execute_event_count": 1,
+                        "execute_run_ids": ["unit-physical-validation"],
+                        "execute_sequence_ids": ["unit-physical-validation"],
+                        "execute_specimen_ids": ["specimen-unit"],
+                        "execute_program_ids": ["utm_compression_start_v1"],
+                    }
+                )
+            return result
+
+        def run(self, payload: dict[str, object]) -> dict[str, object]:
+            assert payload["confirm_setup_gui_execute"] is True
+            assert payload["run_id"] == "unit-physical-validation"
+            self.executed = True
+            return {
+                "ok": True,
+                "tool": "equipment.pyautogui.run",
+                "status": "verified_complete",
+                "run_id": "unit-physical-validation",
+                "sequence_id": "unit-physical-validation",
+                "specimen_id": "specimen-unit",
+                "program_id": "utm_compression_start_v1",
+                "result_file": str(csv_path),
+                "utm_csv_path": str(csv_path),
+                "screen_checks": [
+                    {"checkpoint": "before_start", "ok": True, "screenshot_artifact": "screen-before"},
+                    {"checkpoint": "after_start", "ok": True, "screenshot_artifact": "screen-running"},
+                    {"checkpoint": "after_complete", "ok": True, "screenshot_artifact": "screen-complete"},
+                ],
+                "artifact_records": [
+                    {"kind": "screen_png", "artifact_id": "screen-before", "local_path": str(screen_paths[0])},
+                    {"kind": "screen_png", "artifact_id": "screen-running", "local_path": str(screen_paths[1])},
+                    {"kind": "screen_png", "artifact_id": "screen-complete", "local_path": str(screen_paths[2])},
+                ],
+                "data_acquisition": {
+                    "status": "pulled_to_linux",
+                    "save_method": "manual_save_dialog",
+                    "save_attempted_by_agent": True,
+                    "save_confirmation_screen_ok": True,
+                    "windows_path": "C:/ATR/utm_exports/unit/specimen.csv",
+                    "linux_path": str(csv_path),
+                    "row_count_probe": 2,
+                    "columns_probe": ["time_s", "displacement_mm", "force_N"],
+                    "local_parse_ok": True,
+                },
+                "artifact_pull": {"status": "complete", "data_artifact_pulled": True, "data_artifact_parse_ok": True},
+                "cross_checks": {"save_export_responsibility_ok": True, "data_parse_probe_ok": True},
+                "step_trace": [{"step": "DONE", "status": "ok"}],
+            }
+
+    bridge = FakeWindowsBridge()
+    monkeypatch.setattr(app_main, "_equipment_bridge", lambda: bridge)
+    client = TestClient(app)
+    original_metadata = dict(controller._state.run_metadata)
+    controller._state.run_metadata.clear()
+
+    missing_safety = client.post("/api/equipment/windows/live-validation", json={"confirm_live_execute": True})
+    assert missing_safety.status_code == 400
+
+    try:
+        response = client.post(
+        "/api/equipment/windows/live-validation",
+        json={
+            "confirm_live_execute": True,
+            "confirm_physical_setup_safe": True,
+            "run_id": "unit-physical-validation",
+            "sequence_id": "unit-physical-validation",
+            "specimen_id": "specimen-unit",
+            "program_id": "utm_compression_start_v1",
+            "require_screen_assertions": True,
+            "vision_proof": {
+                "ok": True,
+                "run_id": "unit-physical-validation",
+                "specimen_id": "specimen-unit",
+                "checks": {
+                    "utm_pre_start": {"ok": True, "evidence": {"frame_ids": ["frame-pre-unit"]}},
+                    "utm_motion_confirm": {"ok": True, "evidence": {"frame_ids": ["frame-motion-unit"]}},
+                    "utm_test_complete": {"ok": True, "evidence": {"frame_ids": ["frame-complete-unit"]}},
+                },
+                "evidence": {"frame_ids": ["frame-pre-unit", "frame-motion-unit", "frame-complete-unit"]},
+            },
+        },
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["ok"] is True
+        assert data["status"] == "verified_complete"
+        assert data["requested_physical_execute"] is True
+        assert data["execute_sent"] is True
+        assert data["non_actuating"] is False
+        assert "/execute" in data["touched_endpoints"]
+        assert data["summary"]["physical_live_evidence_captured"] is True
+        assert data["report_artifact"]["path"].endswith("lab_equipment_utm_live_validation.json")
+        gate_names = {item["name"] for item in data["gates"]}
+        assert {"pre_execution_readiness", "pre_execution_live_preflight", "physical_setup_confirmation", "vision_physical_cross_check", "utm_csv_parse_probe"} <= gate_names
+
+        audit = client.get("/api/equipment/windows/evidence-audit").json()
+        assert audit["status"] == "ready_for_analysis"
+        assert audit["source_live_validation_report"]["execute_sent"] is True
+        assert audit["gates"]["vision_evidence_complete"] is True
+        assert audit["proof_ready"] is True
+
+        proof_package = client.get("/api/equipment/windows/proof-package").json()
+        assert proof_package["status"] == "ready_for_analysis"
+        assert proof_package["ready_for_analysis"] is True
+        assert proof_package["last_windows_utm_physical_validation"]["execute_sent"] is True
+        assert proof_package["source_packets"]["last_windows_utm_physical_validation"]["execute_sent"] is True
+
+        assert data["runtime_promotion"]["verified"] is True
+        assert data["runtime_promotion"]["analysis_handoff_status"] == "ready_for_analysis"
+        metadata = controller._state.run_metadata
+        assert metadata["equipment_result"]["result_file"] == str(csv_path)
+        assert metadata["equipment_result"]["utm_csv_path"] == str(csv_path)
+        assert metadata["equipment_result"]["equipment_report"]["live_evidence_audit"]["required_for_handoff"] is True
+        assert metadata["equipment_report"]["cross_checks"]["request_audit_execute_identity_match"] is True
+        assert metadata["equipment_handoff"]["status"] == "ready_for_analysis"
+        assert metadata["equipment_handoff"]["result_file"] == str(csv_path)
+        assert metadata["utm_data_ready"]["status"] == "ready"
+        assert metadata["utm_data_ready"]["result_file"] == str(csv_path)
+        assert metadata["last_windows_utm_runtime_promotion"]["verified"] is True
+    finally:
+        controller._state.run_metadata.clear()
+        controller._state.run_metadata.update(original_metadata)
+
+
+def test_windows_equipment_request_log_api_contract(monkeypatch) -> None:
+    import app.main as app_main
+
+    class FakeWindowsBridge:
+        def request_log(self, payload: dict[str, object] | None = None) -> dict[str, object]:
+            assert payload is not None
+            assert payload.get("runtime_mode") == "live"
+            assert payload.get("force_live_bridge") is True
+            return {
+                "ok": True,
+                "tool": "equipment.pyautogui.request_log",
+                "mode": "live",
+                "status": "ready",
+                "request_log": "C:/ATR/bridge_artifacts/bridge_requests.jsonl",
+                "event_count": 1,
+                "events": [
+                    {
+                        "path": "/execute",
+                        "auth_ok": True,
+                        "token_header_present": True,
+                        "token_value": "secret-should-not-return",
+                    }
+                ],
+            }
+
+    monkeypatch.setattr(app_main, "_equipment_bridge", lambda: FakeWindowsBridge())
+    client = TestClient(app)
+
+    blocked = client.post("/api/equipment/windows/request-log", json={"runtime_mode": "live"})
+    assert blocked.status_code == 200
+    assert blocked.json()["failure_code"] == "PYAUTOGUI_REQUEST_LOG_CONFIRMATION_REQUIRED"
+
+    response = client.post("/api/equipment/windows/request-log", json={"runtime_mode": "live", "confirm_live": True})
+    assert response.status_code == 200
+    data = response.json()
+    assert data["ok"] is True
+    assert data["non_actuating"] is True
+    assert data["request_log"].endswith("bridge_requests.jsonl")
+    assert data["events"][0]["token_header_present"] is True
+    assert "token_value" not in data["events"][0]

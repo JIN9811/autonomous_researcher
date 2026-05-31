@@ -51,12 +51,15 @@ from knowledge.experiment_db import ExperimentDB
 from knowledge.failure_memory import FailureMemory
 from knowledge.rag import HybridRAG, LocalRAGIndex, WebRetriever
 from mcp_tools.cae_tools import register_cae_tools
+from mcp_tools.camera_tools import register_camera_tools
 from mcp_tools.equipment_tools import register_equipment_tools
 from mcp_tools.experiment_tools import register_experiment_tools
+from mcp_tools.fenicsx_tools import register_fenicsx_tools
 from mcp_tools.lerobot_tools import register_lerobot_tools
 from mcp_tools.mock_tools import register_mock_tools
 from mcp_tools.printer_tools import register_printer_tools
 from mcp_tools.tool_registry import ToolRegistry
+from mcp_tools.utm_tools import register_utm_tools
 from utils.config_loader import load_all_configs
 from utils.paths import resolve_path
 
@@ -244,10 +247,13 @@ def load_runtime() -> MainController:
 
     tools = ToolRegistry()
     register_mock_tools(tools)
+    register_utm_tools(tools, repo_root=resolve_path("."))
+    register_camera_tools(tools)
     register_printer_tools(tools, cfg.get("devices", {}), repo_root=resolve_path("."))
     register_equipment_tools(tools, cfg.get("devices", {}), repo_root=resolve_path("."))
     register_lerobot_tools(tools, cfg.get("lerobot", {}), repo_root=resolve_path("."))
     register_cae_tools(tools, cfg.get("devices", {}), repo_root=resolve_path("."))
+    register_fenicsx_tools(tools, cfg.get("devices", {}), repo_root=resolve_path("."))
     register_experiment_tools(tools, cfg.get("devices", {}))
 
     agent_context = AgentContext(

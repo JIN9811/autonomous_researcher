@@ -39,7 +39,7 @@ atr down
 | Module Management | `http://localhost:7860/module-management` | `web/templates/module_management.html`, `web/static/module_management.js` | 모듈 로드/검증/버전 관리, 생성 어댑터 관리 |
 | 3DP Workspace | `http://localhost:7860/printer` | `web/templates/printer.html`, `web/static/printer.js` | PrusaLink, 슬라이싱 옵션, 오토이젝션, 테스트 출력 설정 |
 | LeRobot Workspace | `http://localhost:7860/lerobot` | `web/templates/lerobot.html`, `web/static/lerobot.js` | 포트 탐색, teleop, recording, training, visualization, rollout |
-| BO Workspace | `http://localhost:7860/bo` | `web/templates/bo.html`, `web/static/bo.js` | BO/MBO/random/grid benchmark, acquisition 설정, 후보 추천 |
+| BO Workspace | `http://localhost:7860/bo` | `web/templates/bo.html`, `web/static/bo.js` | BO/MBO/LLM preference 전략, lightweight/BoTorch optional backend, reasoning audit, 후보 ranking/추천 |
 | CAE Workspace | `http://localhost:7860/cae` | `web/templates/cae.html`, `web/static/cae.js` | STL 기반 해석 설정, bottom fixed/top cyclic load, 결과 확인 |
 | Windows Equipment | `http://localhost:7860/equipment/windows` | `web/templates/windows_equipment.html`, `web/static/windows_equipment.js` | Windows PyAutoGUI bridge 검색, 저장, 테스트, 프로그램 실행 |
 | Self-Evolution Lab | `http://localhost:7860/evolution-lab` | `web/templates/evolution_lab.html`, `web/static/evolution_lab.js` | 프롬프트/모듈/그래프 변형, 검증, 승인, rollback |
@@ -91,7 +91,7 @@ guardian -> error: error
 | `equipment` | `graphs/modules/equipment` | UTM/Windows bridge/장비 명령 실행 | equipment result, protocol note |
 | `analysis` | `graphs/modules/analysis` | UTM/CAE/FEM 기반 성능 지표와 objective score 산출 | metrics, contour artifact, objective_score |
 | `knowledge` | `graphs/modules/knowledge` | 실험 결과를 메모리/근거로 정리해 다음 최적화에 전달 | memory update, evidence summary |
-| `bo` | `graphs/modules/bo` | acquisition/surrogate/benchmark 기반 다음 후보 선택 | `bo_result`, next candidate |
+| `bo` | `graphs/modules/bo` | Analysis/Knowledge evidence 기반 numeric BO + LLM reasoning soft prior로 다음 후보 선택 | `bo_result`, `candidate_ranking`, `next_design_request` |
 | `guardian` | `graphs/modules/guardian` | 안전 게이트, 승인 상태, continue/stop/error 결정 | guardian decision |
 
 기존 단독 `agents/` 폴더는 agent 구현/호환 레이어이고, 현재 runtime loop에서 우선 보는 실행 계약은 `graphs/modules/*/module.yaml`과 `graphs/configs/*.yaml`입니다.

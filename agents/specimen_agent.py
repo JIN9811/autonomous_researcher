@@ -23,7 +23,10 @@ Modification guide:
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
+import hashlib
 import inspect
+import json
 from pathlib import Path
 from typing import Any
 
@@ -168,13 +171,458 @@ class SpecimenMakingAgent(BaseAgent):
         return ""
 
     @staticmethod
-    def _printer_path_choice_result(candidate: str, specimen_id: str) -> AgentResult:
+    def _safe_float(value: Any, default: float | None = None) -> float | None:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
+    def _stable_digest(value: Any, length: int = 12) -> str:
+        payload = json.dumps(value, sort_keys=True, default=str, ensure_ascii=True)
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:length]
+
+    @staticmethod
+    def _dict_value(*values: Any) -> dict[str, Any]:
+        for value in values:
+            if isinstance(value, dict):
+                return value
+        return {}
+
+    @staticmethod
+    def _first_value(*values: Any, default: Any = None) -> Any:
+        for value in values:
+            if value not in (None, "", []):
+                return value
+        return default
+
+    @staticmethod
+    def _gate(gate: str, status: str, evidence: dict[str, Any] | None = None, repair: Any = None) -> dict[str, Any]:
+        return {
+            "gate": gate,
+            "status": status,
+            "evidence": evidence or {},
+            "repair": repair,
+        }
+
+    @staticmethod
+    def _gate_status_from_result(result: dict[str, Any], *, ok_key: str = "ok", status_key: str = "status") -> str:
+        if not result:
+            return "warn"
+        if result.get(ok_key) is True:
+            return "pass"
+        status = str(result.get(status_key) or "").lower()
+        if status in {"pass", "ready", "prepared", "queued", "virtual_finished", "uploaded", "started", "ok"}:
+            return "pass"
+        if status in {"blocked", "connection_info_required", "not_started", "disabled"}:
+            return "blocked"
+        if result.get("failure_code"):
+            return "fail"
+        return "warn"
+
+    @staticmethod
+    def _storage_gate_status(printer: dict[str, Any], prusalink: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        storage = printer.get("storage") if isinstance(printer.get("storage"), dict) else {}
+        evidence = {
+            "selected_storage": prusalink.get("storage"),
+            "transport": prusalink.get("transport"),
+            "storage": storage,
+        }
+        if not storage:
+            return "warn", evidence
+        if storage.get("ok") is True:
+            return "pass", evidence
+        return "blocked", evidence
+
+    def _build_pending_fabrication_report(
+        self,
+        *,
+        state: OrchestratorState | None,
+        spec: dict[str, Any],
+        candidate: str,
+        specimen_id: str,
+        request_type: str,
+        prompt: str,
+    ) -> dict[str, Any]:
+        printer_path = self._printer_test_path(spec) or "operator_selection_required"
+        return {
+            "schema": "fabrication_report.v1",
+            "fabrication_intent": {
+                "mode": state.mode.value if state is not None else "unknown",
+                "physical_intent": False,
+                "printer_path": printer_path,
+                "specimen_purpose": str(spec.get("specimen_purpose") or spec.get("purpose") or "mechanical_test"),
+                "operator_input_required": request_type,
+            },
+            "digital_thread": {
+                "candidate_id": candidate,
+                "specimen_id": specimen_id,
+                "design_hash": str(spec.get("candidate_fingerprint") or self._stable_digest(spec)),
+                "geometry_hash": "",
+                "stl_path": "",
+                "gcode_path": "",
+                "handoff_package_path": "",
+                "printer_profile": str(spec.get("printer_profile") or ""),
+                "slicer_profile_hint": str(spec.get("slicer_profile_hint") or ""),
+                "material": str(spec.get("material") or ""),
+                "graph_version": "",
+                "run_id": state.run_id if state is not None else "",
+            },
+            "process_plan": {},
+            "quality_gates": [
+                self._gate("required_fields", "pass", {"missing": []}),
+                self._gate("execution_gate", "blocked", {"request_type": request_type}, "operator_input_required"),
+            ],
+            "monitoring_plan": {
+                "observe_prusalink_status": False,
+                "observe_transfer_idle": False,
+                "observe_camera_after_print": True,
+                "layerwise_monitoring_available": False,
+                "defect_classes": ["warping", "stringing", "under_extrusion", "layer_adhesion"],
+            },
+            "fabrication_outcome": {
+                "status": "blocked",
+                "location": "unknown",
+                "warnings": [prompt],
+                "failure_code": request_type,
+            },
+            "feedback_to_design": {
+                "do_not_repeat": [],
+                "recommended_parameter_adjustments": {},
+                "quality_score": None,
+                "uncertainty": 1.0,
+            },
+        }
+
+    def _build_fabrication_report(
+        self,
+        *,
+        state: OrchestratorState,
+        spec: dict[str, Any],
+        candidate: str,
+        specimen_id: str,
+        geometry_result: dict[str, Any],
+        mesh_result: dict[str, Any],
+        manufacturability_result: dict[str, Any],
+        handoff_result: dict[str, Any],
+        experiment_response: dict[str, Any],
+        printer_response: dict[str, Any],
+        printer_payload: dict[str, Any],
+        protocol_note: str,
+        live_gui_test_spec: bool,
+        printer_test_path: str,
+        top_cap_enabled: bool,
+        bottom_cap_enabled: bool,
+        geometry_payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        tool_result = printer_response
+        settings = self._dict_value(tool_result.get("slicer_settings"), tool_result.get("settings"))
+        slicer_result = self._dict_value(tool_result.get("slicer_result"))
+        gcode_validation = self._dict_value(tool_result.get("gcode_validation"))
+        printer = self._dict_value(tool_result.get("printer"))
+        prusalink = self._dict_value(tool_result.get("prusalink"))
+        print_result = self._dict_value(tool_result.get("print_result"))
+        ejection_result = self._dict_value(tool_result.get("ejection_result"))
+        print_request = self._dict_value(printer_payload.get("print"))
+        ejection_request = self._dict_value(printer_payload.get("ejection"))
+        graph = state.run_metadata.get("runtime_graph") if isinstance(state.run_metadata, dict) else {}
+        graph_version = ""
+        if isinstance(graph, dict):
+            graph_version = str(graph.get("graph_version") or graph.get("graph_hash") or graph.get("graph_id") or "")
+        physical_intent = bool(
+            print_request.get("physical_intent")
+            or print_request.get("confirm_physical_print")
+            or print_request.get("start_immediately")
+            or (state.mode == Mode.LIVE and not live_gui_test_spec)
+            or printer_test_path == "physical_print"
+        )
+        printer_path = str(tool_result.get("printer_path") or printer_test_path or ("live" if state.mode == Mode.LIVE else "virtual_bridge"))
+        remote_path = self._first_value(
+            print_result.get("remote_path"),
+            print_result.get("upload", {}).get("remote_path") if isinstance(print_result.get("upload"), dict) else None,
+            default="",
+        )
+        gcode_path = self._first_value(tool_result.get("sliced_path"), settings.get("output_gcode_path"), default="")
+        design_hash = str(spec.get("candidate_fingerprint") or self._stable_digest({"candidate_id": candidate, "spec": spec}))
+        digital_thread = {
+            "candidate_id": candidate,
+            "specimen_id": specimen_id,
+            "design_hash": design_hash,
+            "geometry_hash": str(geometry_result.get("geometry_hash") or self._stable_digest(geometry_result)),
+            "stl_path": str(geometry_result.get("stl_path") or ""),
+            "gcode_path": str(gcode_path or ""),
+            "remote_gcode_path": str(remote_path or ""),
+            "handoff_package_path": str(handoff_result.get("handoff_package_path") or ""),
+            "printer_profile": str(self._first_value(settings.get("printer_profile"), spec.get("printer_profile"), default="")),
+            "slicer_profile_hint": str(self._first_value(settings.get("slicer_profile_hint"), spec.get("slicer_profile_hint"), default="")),
+            "material": str(self._first_value(settings.get("material"), spec.get("material"), default="")),
+            "graph_version": graph_version,
+            "run_id": state.run_id,
+            "printer_job_id": self._first_value(
+                print_result.get("job_id"),
+                print_result.get("start", {}).get("job_id") if isinstance(print_result.get("start"), dict) else None,
+                print_result.get("start", {}).get("job", {}).get("job_id") if isinstance(print_result.get("start"), dict) and isinstance(print_result.get("start", {}).get("job"), dict) else None,
+                default="",
+            ),
+        }
+        cap_policy = {
+            "top_cap_enabled": top_cap_enabled,
+            "bottom_cap_enabled": bottom_cap_enabled,
+            "top_bottom_cap": bool(top_cap_enabled or bottom_cap_enabled),
+            "skin_thickness_mm": self._safe_float(geometry_payload.get("skin_thickness_mm"), 0.0),
+            "generated_model_caps_disabled": bool(spec.get("test_loop_surface_caps_disabled", False)),
+        }
+        adhesion_policy = {
+            "skirt_enabled": self._first_value(settings.get("skirt_enabled"), spec.get("skirt_enabled"), default=False),
+            "brim_enabled": self._first_value(settings.get("brim_enabled"), spec.get("brim_enabled"), default=False),
+            "raft_enabled": self._first_value(settings.get("raft_enabled"), spec.get("raft_enabled"), default=False),
+            "slow_first_layer_enabled": self._first_value(settings.get("slow_first_layer_enabled"), spec.get("slow_first_layer_enabled"), default=True),
+            "first_layer_speed_mm_s": self._first_value(settings.get("first_layer_speed_mm_s"), spec.get("first_layer_speed_mm_s"), default=None),
+        }
+        ejection_policy = {
+            "requested": bool(ejection_request.get("enabled") or ejection_request.get("allow_ejection") or spec.get("allow_ejection")),
+            "status": ejection_result.get("status", "disabled"),
+            "failure_code": ejection_result.get("failure_code"),
+            "policy_source": "3dp_gui_or_experiment_spec",
+        }
+        process_plan = {
+            "layer_height_mm": self._safe_float(self._first_value(settings.get("layer_height_mm"), spec.get("layer_height_mm")), None),
+            "first_layer_height_mm": self._safe_float(self._first_value(settings.get("first_layer_height_mm"), spec.get("first_layer_height_mm")), None),
+            "nozzle_diameter_mm": self._safe_float(self._first_value(settings.get("nozzle_diameter_mm"), spec.get("nozzle_diameter_mm")), None),
+            "bed_temperature_c": self._safe_float(self._first_value(settings.get("bed_temperature_c"), spec.get("bed_temperature_c")), None),
+            "first_layer_bed_temperature_c": self._safe_float(self._first_value(settings.get("first_layer_bed_temperature_c"), spec.get("first_layer_bed_temperature_c")), None),
+            "adhesion_policy": adhesion_policy,
+            "cap_skin_policy": cap_policy,
+            "ejection_policy": ejection_policy,
+            "estimated_mass_g": self._safe_float(self._first_value(settings.get("expected_mass_g"), manufacturability_result.get("expected_mass_g"), spec.get("expected_mass_g")), None),
+            "estimated_print_time_min": self._safe_float(self._first_value(settings.get("expected_print_time_min"), manufacturability_result.get("expected_print_time_min"), spec.get("expected_print_time_min")), None),
+            "slicer_command": settings.get("resolved_command", []),
+        }
+        storage_status, storage_evidence = self._storage_gate_status(printer, prusalink)
+        quality_gates = [
+            self._gate("required_fields", "pass", {"missing": []}),
+            self._gate("geometry", "pass" if geometry_result.get("ok") else "fail", {"geometry_hash": digital_thread["geometry_hash"], "stl_path": digital_thread["stl_path"]}),
+            self._gate("mesh", "pass" if mesh_result.get("ok") and mesh_result.get("mesh_status") == "pass" else "fail", {"mesh_status": mesh_result.get("mesh_status"), "warnings": mesh_result.get("warnings", [])}),
+            self._gate("manufacturability", "pass" if manufacturability_result.get("ok") and manufacturability_result.get("manufacturability_status") == "pass" else "fail", {"status": manufacturability_result.get("manufacturability_status"), "warnings": manufacturability_result.get("warnings", [])}),
+            self._gate("slicer", self._gate_status_from_result(slicer_result), {"sliced_path": digital_thread["gcode_path"], "failure_code": slicer_result.get("failure_code")}),
+            self._gate("gcode", self._gate_status_from_result(gcode_validation), {"failure_code": gcode_validation.get("failure_code"), "violations": gcode_validation.get("violations", [])}),
+            self._gate("printer_storage", storage_status, storage_evidence),
+            self._gate("execution_gate", "pass" if tool_result.get("ok") else ("blocked" if tool_result.get("requires_connection_info") else "fail"), {"physical_intent": physical_intent, "printer_path": printer_path, "status": tool_result.get("status"), "failure_code": tool_result.get("failure_code")}),
+            self._gate("ejection", "pass" if str(ejection_result.get("status", "disabled")) in {"disabled", "appended_to_print_gcode", "simulated_verified_ejected", "virtual_ack", "started"} else "warn", {"status": ejection_result.get("status"), "failure_code": ejection_result.get("failure_code")}),
+        ]
+        warnings = [
+            *[str(item) for item in mesh_result.get("warnings", [])],
+            *[str(item) for item in manufacturability_result.get("warnings", [])],
+            *[str(item) for item in tool_result.get("warnings", []) if str(item).strip()],
+        ]
+        failure_code = self._first_value(
+            tool_result.get("failure_code"),
+            print_result.get("failure_code"),
+            slicer_result.get("failure_code"),
+            gcode_validation.get("failure_code"),
+            default=None,
+        )
+        if tool_result.get("requires_connection_info"):
+            outcome_status = "blocked"
+            location = "unknown"
+        elif not tool_result.get("ok", False):
+            outcome_status = "failed"
+            location = "unknown"
+        elif printer_path == "virtual_prusalink" or str(tool_result.get("mode", "")).startswith("test"):
+            outcome_status = "virtual_finished"
+            location = "virtual_bridge"
+        elif physical_intent:
+            outcome_status = "ready_for_vision"
+            location = "printer_bed"
+        else:
+            outcome_status = "ready_for_vision"
+            location = "printer_bed" if state.mode == Mode.LIVE else "virtual_bridge"
+        passed = sum(1 for gate in quality_gates if gate.get("status") == "pass")
+        blocked_or_failed = [gate for gate in quality_gates if gate.get("status") in {"blocked", "fail"}]
+        quality_score = round(passed / max(len(quality_gates), 1), 4)
+        adjustments: dict[str, Any] = {}
+        if any(gate.get("gate") == "manufacturability" and gate.get("status") != "pass" for gate in quality_gates):
+            adjustments.update({"increase_wall_thickness_mm": 0.2, "reduce_print_risk": True})
+        if gcode_validation.get("failure_code"):
+            adjustments["review_slicer_profile"] = True
+        if ejection_result.get("failure_code"):
+            adjustments["disable_or_retest_ejection"] = True
+        return {
+            "schema": "fabrication_report.v1",
+            "fabrication_intent": {
+                "mode": printer_payload.get("runtime_mode") or state.mode.value,
+                "physical_intent": physical_intent,
+                "printer_path": printer_path,
+                "specimen_purpose": str(spec.get("specimen_purpose") or spec.get("purpose") or "mechanical_test"),
+                "live_gui_test_spec": live_gui_test_spec,
+                "printer_test_path": printer_test_path,
+            },
+            "digital_thread": digital_thread,
+            "process_plan": process_plan,
+            "quality_gates": quality_gates,
+            "monitoring_plan": {
+                "observe_prusalink_status": bool(prusalink or printer),
+                "observe_transfer_idle": bool(print_result.get("transfer_wait")),
+                "observe_camera_after_print": True,
+                "layerwise_monitoring_available": False,
+                "defect_classes": ["warping", "stringing", "under_extrusion", "layer_adhesion"],
+                "expected_location": location,
+                "after_print_consumer": "vision_agent",
+            },
+            "printer_runtime": {
+                "prepare_status": tool_result.get("status"),
+                "mode": tool_result.get("mode"),
+                "path": printer_path,
+                "step_trace": tool_result.get("step_trace", []),
+                "operator_messages": tool_result.get("operator_messages", []),
+                "upload": print_result.get("upload", {}),
+                "transfer_wait": print_result.get("transfer_wait", {}),
+                "start": print_result.get("start", {}),
+                "ejection": ejection_result,
+            },
+            "fabrication_outcome": {
+                "status": outcome_status,
+                "location": location,
+                "warnings": warnings,
+                "failure_code": failure_code,
+                "requires_after_print_confirmation": bool(physical_intent),
+            },
+            "feedback_to_design": {
+                "do_not_repeat": [str(gate.get("gate")) for gate in blocked_or_failed],
+                "recommended_parameter_adjustments": adjustments,
+                "quality_score": quality_score,
+                "uncertainty": round(0.15 + 0.1 * len(blocked_or_failed) + (0.2 if physical_intent else 0.0), 4),
+            },
+            "protocol_note": protocol_note,
+            "experiment_evaluation_ref": experiment_response.get("job", {}) if isinstance(experiment_response, dict) else {},
+        }
+
+    def _fabrication_decisions(self, report: dict[str, Any]) -> list[dict[str, Any]]:
+        intent = report.get("fabrication_intent", {}) if isinstance(report.get("fabrication_intent"), dict) else {}
+        outcome = report.get("fabrication_outcome", {}) if isinstance(report.get("fabrication_outcome"), dict) else {}
+        failed_gates = [gate for gate in report.get("quality_gates", []) if isinstance(gate, dict) and gate.get("status") in {"blocked", "fail"}]
+        return [
+            {
+                "decision_id": "specimen.intent.resolved",
+                "status": "ok",
+                "rationale": f"Fabrication path resolved as {intent.get('printer_path', '-')}; physical_intent={intent.get('physical_intent', False)}.",
+            },
+            {
+                "decision_id": "specimen.digital_thread.initialized",
+                "status": "ok",
+                "rationale": "Design, geometry, slicer, printer, and handoff artifacts were linked into one digital thread.",
+            },
+            {
+                "decision_id": "specimen.quality_gates.evaluated",
+                "status": "blocked" if failed_gates else "ok",
+                "rationale": f"{len(report.get('quality_gates', []))} manufacturing gates evaluated; blocked_or_failed={len(failed_gates)}.",
+            },
+            {
+                "decision_id": "specimen.handoff.prepared",
+                "status": "ok" if outcome.get("status") in {"ready_for_vision", "virtual_finished", "printed"} else "blocked",
+                "rationale": "Stage completion means a specimen fabrication record is ready for Vision/Manipulation inspection, not merely an STL exists.",
+            },
+        ]
+
+    def _fabrication_metrics(self, report: dict[str, Any]) -> dict[str, Any]:
+        gates = [gate for gate in report.get("quality_gates", []) if isinstance(gate, dict)]
+        return {
+            "quality_gate_count": len(gates),
+            "quality_gate_pass_count": sum(1 for gate in gates if gate.get("status") == "pass"),
+            "quality_gate_blocked_count": sum(1 for gate in gates if gate.get("status") == "blocked"),
+            "quality_gate_fail_count": sum(1 for gate in gates if gate.get("status") == "fail"),
+            "fabrication_quality_score": (report.get("feedback_to_design", {}) or {}).get("quality_score") if isinstance(report.get("feedback_to_design"), dict) else None,
+            "estimated_mass_g": (report.get("process_plan", {}) or {}).get("estimated_mass_g") if isinstance(report.get("process_plan"), dict) else None,
+            "estimated_print_time_min": (report.get("process_plan", {}) or {}).get("estimated_print_time_min") if isinstance(report.get("process_plan"), dict) else None,
+        }
+
+    def _fabrication_evidence_refs(self, report: dict[str, Any]) -> list[dict[str, Any]]:
+        thread = report.get("digital_thread", {}) if isinstance(report.get("digital_thread"), dict) else {}
+        refs: list[dict[str, Any]] = []
+        for key, label in (
+            ("stl_path", "stl"),
+            ("gcode_path", "gcode"),
+            ("handoff_package_path", "handoff_package"),
+        ):
+            value = thread.get(key)
+            if value:
+                refs.append({"type": label, "path": str(value)})
+        return refs
+
+    def _build_specimen_fabricated_packet(
+        self,
+        *,
+        state: OrchestratorState,
+        candidate: str,
+        specimen_id: str,
+        report: dict[str, Any],
+        decisions: list[dict[str, Any]],
+        evidence_refs: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        outcome = report.get("fabrication_outcome", {}) if isinstance(report.get("fabrication_outcome"), dict) else {}
+        intent = report.get("fabrication_intent", {}) if isinstance(report.get("fabrication_intent"), dict) else {}
+        thread = report.get("digital_thread", {}) if isinstance(report.get("digital_thread"), dict) else {}
+        gates = [gate for gate in report.get("quality_gates", []) if isinstance(gate, dict)]
+        status = "ready" if outcome.get("status") in {"ready_for_vision", "virtual_finished", "printed"} else "blocked"
+        return {
+            "schema": "specimen_fabricated.v1",
+            "run_id": state.run_id,
+            "loop_id": f"loop-{state.loop_count}",
+            "specimen_id": specimen_id,
+            "candidate_id": candidate,
+            "producer_agent": self.name,
+            "consumer_agent": ["vision_agent", "manipulation_agent", "knowledge_agent", "bo_agent"],
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "status": status,
+            "evidence_refs": evidence_refs,
+            "guardian_status": "not_checked",
+            "decisions": decisions,
+            "warnings": outcome.get("warnings", []),
+            "next_action": "vision_after_print_inspection" if status == "ready" else "operator_or_guardian_review",
+            "fabrication_report_ref": "run_metadata.fabrication_report",
+            "fabrication_summary": {
+                "schema": report.get("schema"),
+                "physical_intent": intent.get("physical_intent"),
+                "printer_path": intent.get("printer_path"),
+                "stl_path": thread.get("stl_path"),
+                "gcode_path": thread.get("gcode_path"),
+                "outcome_status": outcome.get("status"),
+                "quality_gate_count": len(gates),
+                "quality_gate_pass_count": sum(1 for gate in gates if gate.get("status") == "pass"),
+                "quality_gate_blocked_or_failed": [
+                    str(gate.get("gate")) for gate in gates if gate.get("status") in {"blocked", "fail"}
+                ],
+            },
+            "physical_location": outcome.get("location", "unknown"),
+            "pickup_pose_hint": {"source": "vision_agent_required", "status": "pending"},
+        }
+
+    def _printer_path_choice_result(self, state: OrchestratorState, spec: dict[str, Any], candidate: str, specimen_id: str) -> AgentResult:
         prompt = (
             "Specimen Making Agent가 테스트 프린터 경로 선택을 기다립니다.\n\n"
             "- 가상 브릿지: 실제 PrusaSlicer로 슬라이싱한 뒤 PrusaLink 형태의 가상 통신으로 upload/start 경계까지 검증합니다.\n"
             "- 설치 프린터 통신 테스트: 실제 PrusaSlicer로 슬라이싱한 뒤 저장된 PrusaLink 연결정보로 실제 프린터 read-only 상태 통신을 확인합니다.\n"
             "- 실제 출력: 테스트 모드에서 생성한 시편을 실제 PrusaSlicer -> PrusaLink upload/start 경로로 출력합니다.\n\n"
             "답변은 `가상 브릿지`, `설치 프린터`, `실제 출력` 중 하나로 보내주세요."
+        )
+        fabrication_report = self._build_pending_fabrication_report(
+            state=state,
+            spec=spec,
+            candidate=candidate,
+            specimen_id=specimen_id,
+            request_type="printer_test_path_choice",
+            prompt=prompt,
+        )
+        decisions = self._fabrication_decisions(fabrication_report)
+        metrics = self._fabrication_metrics(fabrication_report)
+        evidence_refs = self._fabrication_evidence_refs(fabrication_report)
+        handoff_packet = self._build_specimen_fabricated_packet(
+            state=state,
+            candidate=candidate,
+            specimen_id=specimen_id,
+            report=fabrication_report,
+            decisions=decisions,
+            evidence_refs=evidence_refs,
         )
         specimen_result = {
             "ok": False,
@@ -190,11 +638,22 @@ class SpecimenMakingAgent(BaseAgent):
             "operator_messages": [prompt],
             "reject_reasons": [],
             "warnings": [],
+            "fabrication_report": fabrication_report,
+            "specimen_fabricated": handoff_packet,
         }
         return AgentResult(
             success=True,
             summary="Specimen Making Agent waiting for printer test path selection",
-            data={"specimen_result": specimen_result, "protocol_note": "waiting_for_printer_test_path"},
+            data={
+                "specimen_result": specimen_result,
+                "fabrication_report": fabrication_report,
+                "handoff_packet": handoff_packet,
+                "specimen_fabricated": handoff_packet,
+                "decisions": decisions,
+                "metrics": metrics,
+                "evidence_refs": evidence_refs,
+                "protocol_note": "waiting_for_printer_test_path",
+            },
             next_hint="operator_input_required",
         )
 
@@ -208,7 +667,7 @@ class SpecimenMakingAgent(BaseAgent):
         live_gui_test_spec = self._is_live_gui_test_spec(state, spec)
         printer_test_path = self._printer_test_path(spec)
         if live_gui_test_spec and not printer_test_path:
-            return self._printer_path_choice_result(candidate, specimen_id)
+            return self._printer_path_choice_result(state, spec, candidate, specimen_id)
         if self._should_disable_test_surface_caps(state, spec, live_gui_test_spec=live_gui_test_spec):
             spec = self._without_surface_caps(spec)
             state.current_experiment_spec = spec
@@ -432,6 +891,37 @@ class SpecimenMakingAgent(BaseAgent):
         )
         response = experiment_response.get("bridge_result") if isinstance(experiment_response.get("bridge_result"), dict) else experiment_response
 
+        fabrication_report = self._build_fabrication_report(
+            state=state,
+            spec=spec,
+            candidate=candidate,
+            specimen_id=specimen_id,
+            geometry_result=geometry_result,
+            mesh_result=mesh_result,
+            manufacturability_result=manufacturability_result,
+            handoff_result=handoff_result,
+            experiment_response=experiment_response,
+            printer_response=response,
+            printer_payload=printer_payload,
+            protocol_note=protocol_note,
+            live_gui_test_spec=live_gui_test_spec,
+            printer_test_path=printer_test_path,
+            top_cap_enabled=top_cap_enabled,
+            bottom_cap_enabled=bottom_cap_enabled,
+            geometry_payload=geometry_payload,
+        )
+        decisions = self._fabrication_decisions(fabrication_report)
+        metrics = self._fabrication_metrics(fabrication_report)
+        evidence_refs = self._fabrication_evidence_refs(fabrication_report)
+        handoff_packet = self._build_specimen_fabricated_packet(
+            state=state,
+            candidate=candidate,
+            specimen_id=specimen_id,
+            report=fabrication_report,
+            decisions=decisions,
+            evidence_refs=evidence_refs,
+        )
+
         specimen_result = {
             "ok": True,
             "tool": "printer.prepare",
@@ -475,6 +965,11 @@ class SpecimenMakingAgent(BaseAgent):
                 *[str(item) for item in manufacturability_result.get("warnings", [])],
             ],
             "tool_result": response,
+            "fabrication_report": fabrication_report,
+            "specimen_fabricated": handoff_packet,
+            "decisions": decisions,
+            "metrics": metrics,
+            "evidence_refs": evidence_refs,
         }
         if response.get("requires_connection_info"):
             prompt = (
@@ -493,7 +988,16 @@ class SpecimenMakingAgent(BaseAgent):
             return AgentResult(
                 success=True,
                 summary="Specimen Making Agent waiting for PrusaLink connection info",
-                data={"specimen_result": specimen_result, "protocol_note": protocol_note},
+                data={
+                    "specimen_result": specimen_result,
+                    "fabrication_report": fabrication_report,
+                    "handoff_packet": handoff_packet,
+                    "specimen_fabricated": handoff_packet,
+                    "decisions": decisions,
+                    "metrics": metrics,
+                    "evidence_refs": evidence_refs,
+                    "protocol_note": protocol_note,
+                },
                 next_hint="operator_input_required",
             )
         if not bool(response.get("ok")):
@@ -503,5 +1007,14 @@ class SpecimenMakingAgent(BaseAgent):
         return AgentResult(
             success=True,
             summary=f"Specimen preparation executed{summary_suffix}",
-            data={"specimen_result": specimen_result, "protocol_note": protocol_note},
+            data={
+                "specimen_result": specimen_result,
+                "fabrication_report": fabrication_report,
+                "handoff_packet": handoff_packet,
+                "specimen_fabricated": handoff_packet,
+                "decisions": decisions,
+                "metrics": metrics,
+                "evidence_refs": evidence_refs,
+                "protocol_note": protocol_note,
+            },
         )

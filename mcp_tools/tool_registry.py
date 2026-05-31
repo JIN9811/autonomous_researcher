@@ -33,6 +33,7 @@ class ToolRegistry:
     def __init__(self, job_queue: DeviceJobQueue | None = None) -> None:
         self._tools: dict[str, ToolHandler] = {}
         self._tool_devices: dict[str, str] = {}
+        self._resources: dict[str, Any] = {}
         self._job_queue = job_queue or DeviceJobQueue()
 
     def register(self, name: str, handler: ToolHandler, *, device: str | None = None) -> None:
@@ -42,6 +43,14 @@ class ToolRegistry:
             self._tool_devices[name] = device
         else:
             self._tool_devices.pop(name, None)
+
+    def register_resource(self, name: str, resource: Any) -> None:
+        """Expose a shared runtime resource without making it an executable tool."""
+        self._resources[name] = resource
+
+    def resource(self, name: str) -> Any | None:
+        """Return a shared runtime resource registered by a tool package."""
+        return self._resources.get(name)
 
     def call(self, name: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         """Call a registered tool by name."""

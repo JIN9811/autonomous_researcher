@@ -67,6 +67,9 @@ Usage:
   atr models
   atr model load|unload <e4b|31b|model-alias>
   atr modules
+  atr knowledge graph health|import|query|neo4j-start|neo4j-stop|print-env [options]
+  atr knowledge graphify-scan [options]
+  atr knowledge graphify-import [options]
   atr module show|validate|dry-run|load|unload|versions|register-generated <module-id>
   atr module version <module-id> <version-id>
   atr module save-yaml <module-id> <yaml-file> [--no-activate]
@@ -109,6 +112,12 @@ Commands:
   model unload
               Unload one managed vLLM model.
   modules     List Runtime IDE module catalog entries.
+  knowledge graph
+              Operate optional Knowledge graph backend. Supports health, import, query, neo4j-start, neo4j-stop, and print-env.
+  knowledge graphify-scan
+              Build Graphify-compatible project graph artifacts under memory/knowledge/graphify.
+  knowledge graphify-import
+              Import project graph artifacts into the optional Knowledge graph backend.
   module show Print one module.yaml payload through the API.
   module validate
               Validate one module payload without executing devices.
@@ -666,6 +675,28 @@ case "\${1:-}" in
   modules)
     api_get "/api/modules"
     exit 0
+    ;;
+  knowledge)
+    if [[ "\${2:-}" == "graph" && "\$#" -ge 3 ]]; then
+      py="\$(require_python)"
+      shift 2
+      cd "\${PROJECT_DIR}"
+      exec "\${py}" "\${PROJECT_DIR}/scripts/knowledge_graph_cli.py" "\$@"
+    fi
+    if [[ "\${2:-}" == "graphify-scan" && "\$#" -ge 2 ]]; then
+      py="\$(require_python)"
+      shift 2
+      cd "\${PROJECT_DIR}"
+      exec "\${py}" "\${PROJECT_DIR}/scripts/knowledge_graphify_scan.py" "\$@"
+    fi
+    if [[ "\${2:-}" == "graphify-import" || "\${2:-}" == "graph-import" ]]; then
+      py="\$(require_python)"
+      shift 2
+      cd "\${PROJECT_DIR}"
+      exec "\${py}" "\${PROJECT_DIR}/scripts/knowledge_graph_import.py" "\$@"
+    fi
+    usage
+    exit 2
     ;;
   module)
     case "\${2:-}" in

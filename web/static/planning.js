@@ -99,6 +99,7 @@ let liveGraphSelectionCleared = false;
 let liveSelectedReportSectionTitle = "Overview / Summary";
 let liveTimelineFilter = "all";
 let liveApprovals = { approvals: [], pending: [], resolved: [] };
+let liveGuardianStatus = null;
 let liveResolvedApprovalIds = new Set();
 let liveReadQuestionKeys = {};
 let liveReadFaultKeys = {};
@@ -1082,14 +1083,17 @@ function renderBoResultCard(msg, index = "") {
           <button class="btn small bo-graph-toggle" type="button" data-bo-card-key="${escapeHtml(cardKey)}" aria-expanded="${expanded ? "true" : "false"}">${expanded ? "그래프 접기" : "그래프 보기"}</button>
         </div>
         ${runtimeRows([
-          ["strategy", boResult.strategy],
+          ["strategy", `${boResult.strategy || "-"} / benchmark=${boResult.benchmark_strategy || "-"}`],
           ["acquisition", boResult.acquisition],
           ["budget", boResult.budget],
           ["trace_steps", trace.length],
           ["latest_candidate", latestSelected.candidate_id],
           ["recommended_candidate", recommendation.candidate_id],
+          ["combined_score", recommendation.combined_score],
           ["recommended_score", recommendation.objective_score],
+          ["reasoning", boResult.reasoning && boResult.reasoning.operator_summary ? boResult.reasoning.operator_summary : "-"],
         ])}
+        ${Array.isArray(boResult.candidate_ranking) && boResult.candidate_ranking.length ? `<div class="bo-candidate-mini-list">${boResult.candidate_ranking.slice(0, 5).map((item) => `<div><strong>${escapeHtml(item.candidate_id || "candidate")}</strong><span>score=${escapeHtml(numberText(item.combined_score, 5))}</span><code>${escapeHtml(compactBoParams(item.parameters || {}))}</code></div>`).join("")}</div>` : ""}
       </div>
       <div class="bo-graph-body">
         ${expanded ? renderBoExpandedBody(trace) : renderBoCollapsedBody(trace, latestSelected)}
@@ -1137,9 +1141,106 @@ function renderStepTrace(trace) {
   `;
 }
 
+function renderEquipmentRuntimeCard(msg) {
+  if (msg.role !== "equipment_ai" && msg.model !== "equipment_agent") return "";
+  const event = msg.equipment_runtime_event || {};
+  const macro = msg.macro_command || {};
+  const visual = msg.visual_assertion || {};
+  const physical = msg.physical_cross_check || {};
+  const data = msg.data_acquisition || {};
+  const recovery = msg.recovery || {};
+  const hasCard = Object.keys(event).length || Object.keys(macro).length || Object.keys(visual).length || Object.keys(physical).length || Object.keys(data).length || Object.keys(recovery).length || msg.command_id || msg.data_file_ref;
+  if (!hasCard) return "";
+  return `
+    <div class="printer-runtime-card equipment-runtime-card">
+      <div class="runtime-card-section">
+        <h4>Lab Equipment Runtime Event</h4>
+        ${runtimeRows([
+          ["message_type", msg.message_type],
+          ["tool", msg.tool || event.tool],
+          ["command_id", msg.command_id || event.sequence_id],
+          ["program_id", msg.program_id || event.program_id],
+          ["windows_host", msg.windows_host || event.bridge_host || event.host],
+          ["step", event.step],
+          ["status", event.status],
+        ])}
+      </div>
+      ${Object.keys(macro).length ? `
+        <div class="runtime-card-section">
+          <h4>Macro Command</h4>
+          ${runtimeRows([
+            ["command_id", macro.command_id || msg.command_id],
+            ["program_id", macro.program_id || msg.program_id || event.program_id],
+            ["target_ui", macro.target_ui],
+            ["step", macro.step],
+            ["status", macro.status],
+            ["detail", macro.detail],
+          ])}
+        </div>` : ""}
+      ${Object.keys(visual).length ? `
+        <div class="runtime-card-section">
+          <h4>Visual Assertion</h4>
+          ${runtimeRows([
+            ["checkpoint", visual.checkpoint],
+            ["status", visual.status],
+            ["ok", visual.ok],
+            ["target_ui", visual.target_ui],
+            ["confidence", visual.confidence],
+            ["screenshot_artifact", visual.screenshot_artifact],
+            ["detail", visual.detail],
+          ])}
+        </div>` : ""}
+      ${Object.keys(physical).length ? `
+        <div class="runtime-card-section">
+          <h4>Physical Cross-Check</h4>
+          ${runtimeRows([
+            ["status", physical.status],
+            ["ok", physical.ok],
+            ["check_id", physical.check_id],
+            ["target_ui", physical.target_ui],
+            ["detail", physical.detail],
+          ])}
+        </div>` : ""}
+      ${Object.keys(data).length || msg.data_file_ref ? `
+        <div class="runtime-card-section">
+          <h4>Data Acquisition</h4>
+          ${runtimeRows([
+            ["status", data.status],
+            ["artifact_or_path", data.artifact_or_path || msg.data_file_ref],
+            ["windows_path", data.windows_path],
+            ["linux_path", data.linux_path],
+            ["sha256", data.sha256],
+            ["row_count_probe", data.row_count_probe],
+            ["save_method", data.save_method],
+            ["artifact_pull_status", data.artifact_pull_status],
+            ["parse_probe", data.parse_probe],
+            ["detail", data.detail],
+          ])}
+        </div>` : ""}
+      ${Object.keys(recovery).length ? `
+        <div class="runtime-card-section runtime-card-wide">
+          <h4>Recovery</h4>
+          ${runtimeRows([
+            ["status", recovery.status],
+            ["failure_step", recovery.failure_step],
+            ["failure_code", recovery.failure_code],
+            ["failure_detail", recovery.failure_detail],
+            ["recommended_action", recovery.recommended_action],
+          ])}
+        </div>` : ""}
+    </div>
+  `;
+}
+
 function renderSpecimenRuntimeCard(msg) {
   if (msg.role !== "printer_ai" && msg.role !== "specimen_ai") return "";
   const specimen = msg.specimen || {};
+  const fabricationReport = specimen.fabrication_report || {};
+  const fabricationIntent = fabricationReport.fabrication_intent || {};
+  const digitalThread = fabricationReport.digital_thread || {};
+  const processPlan = fabricationReport.process_plan || {};
+  const fabricationOutcome = fabricationReport.fabrication_outcome || {};
+  const qualityGates = Array.isArray(fabricationReport.quality_gates) ? fabricationReport.quality_gates : [];
   const toolResult = specimen.tool_result || {};
   const settings = specimen.slicer_settings || toolResult.slicer_settings || {};
   const prusalink = specimen.prusalink || toolResult.prusalink || {};
@@ -1153,11 +1254,33 @@ function renderSpecimenRuntimeCard(msg) {
   const startResult = printResult.start || {};
   const ejectionResult = specimen.ejection_result || toolResult.ejection_result || {};
   const trace = specimen.step_trace || toolResult.step_trace || [];
-  if (!Object.keys(settings).length && !trace.length) return "";
+  if (!Object.keys(settings).length && !trace.length && !Object.keys(fabricationReport).length) return "";
 
   const command = Array.isArray(settings.resolved_command) ? settings.resolved_command.join(" ") : "";
+  const gateSummary = qualityGates.length
+    ? `${qualityGates.filter((gate) => gate.status === "pass").length}/${qualityGates.length} pass · blocked=${qualityGates.filter((gate) => gate.status === "blocked").length} · fail=${qualityGates.filter((gate) => gate.status === "fail").length}`
+    : "-";
+  const gateItems = qualityGates.slice(0, 9).map((gate) => `<li>${escapeHtml(gate.gate || "gate")} · <strong>${escapeHtml(gate.status || "unknown")}</strong>${gate.repair ? ` · ${escapeHtml(renderRuntimeValue(gate.repair))}` : ""}</li>`).join("");
   return `
     <div class="printer-runtime-card">
+      <div class="runtime-card-section runtime-card-wide">
+        <h4>Fabrication Digital Thread</h4>
+        ${runtimeRows([
+          ["fabrication_schema", fabricationReport.schema],
+          ["intent", `${fabricationIntent.mode || "-"} / ${fabricationIntent.printer_path || specimen.printer_path || "-"}`],
+          ["physical_intent", fabricationIntent.physical_intent],
+          ["specimen_id", digitalThread.specimen_id || specimen.specimen_id],
+          ["design_hash", digitalThread.design_hash],
+          ["geometry_hash", digitalThread.geometry_hash || specimen.geometry_hash],
+          ["stl_path", digitalThread.stl_path || specimen.stl_path],
+          ["gcode_path", digitalThread.gcode_path || specimen.sliced_path],
+          ["handoff_package", digitalThread.handoff_package_path || specimen.handoff_package_path],
+          ["outcome", fabricationOutcome.status],
+          ["location", fabricationOutcome.location],
+          ["quality_gates", gateSummary],
+        ])}
+        ${gateItems ? `<ul class="report-list compact">${gateItems}</ul>` : ""}
+      </div>
       <div class="runtime-card-section">
         <h4>PrusaSlicer Settings</h4>
         ${runtimeRows([
@@ -1305,6 +1428,7 @@ function renderPlanningMessages(messages) {
       ${renderReasoningBlock(msg)}
       ${content ? `<div class="message-content">${content}</div>` : ""}
       ${renderSpecimenRuntimeCard(msg)}
+      ${renderEquipmentRuntimeCard(msg)}
       ${renderFemContourCard(msg)}
       ${renderBoResultCard(msg, `chat-${messageIndex}`)}
       ${renderArtifactCard(msg)}
@@ -1937,7 +2061,12 @@ function liveCenterRenderKey(session = liveLastSession) {
   const stage = state.stage || "idle";
   const messageCount = Array.isArray(session?.messages) ? session.messages.length : planningMessagesCache.length;
   const approvalCount = (liveApprovals.pending || []).length + (liveApprovals.resolved || []).length;
-  return [runId, stage, liveSelectedAgent, liveRunEvents.length, liveRecentEvents.length, liveRunArtifacts.length, messageCount, approvalCount].join("|");
+  const guardianStatus = liveGuardianStatusPayload({ state });
+  const guardianSummary = guardianStatus && guardianStatus.summary ? guardianStatus.summary : {};
+  const guardianKey = guardianStatus
+    ? [guardianStatus.status || "", guardianSummary.risk_score || 0, guardianSummary.gate_count || 0, guardianSummary.incident_count || 0, guardianSummary.blocked_action_count || 0, guardianSummary.pending_approval_count || 0].join(":")
+    : "no-guardian-status";
+  return [runId, stage, liveSelectedAgent, liveRunEvents.length, liveRecentEvents.length, liveRunArtifacts.length, messageCount, approvalCount, guardianKey].join("|");
 }
 
 function renderActiveLiveCenterPanel(session = liveLastSession, options = {}) {
@@ -1979,11 +2108,266 @@ function reportEventText(event, limit = 180) {
   return compactText(`${reportEventLabel(event)}${tail ? ` · ${tail}` : ""}`, limit);
 }
 
-function renderReportList(items, emptyText = "No evidence.") {
-  const clean = (items || []).filter(Boolean).slice(0, 8);
+function renderReportList(items, emptyText = "No evidence.", limit = 8) {
+  const filtered = (items || []).filter(Boolean);
+  const clean = Number.isFinite(limit) && limit > 0 ? filtered.slice(0, limit) : filtered;
   if (!clean.length) return `<p class="hint">${escapeHtml(emptyText)}</p>`;
   const rows = clean.map((item) => `    <li>${escapeHtml(item)}</li>`).join("\n");
   return `<ul class="live-report-list">\n${rows}\n  </ul>`;
+}
+
+
+function normalizeGuardianStatusPayload(payload) {
+  return payload && typeof payload === "object" && payload.schema === "guardian_status_report.v1" ? payload : null;
+}
+
+function liveGuardianStatusPayload(report = null) {
+  const snapshot = liveLastSnapshot || {};
+  const state = (report && report.state) || (liveLastSession && liveLastSession.state) || snapshot.state || {};
+  return normalizeGuardianStatusPayload(liveGuardianStatus)
+    || normalizeGuardianStatusPayload(snapshot.guardian_status)
+    || normalizeGuardianStatusPayload(state.guardian_status)
+    || normalizeGuardianStatusPayload(report && report.guardian_status)
+    || null;
+}
+
+function guardianRiskLevel(score) {
+  const value = Number(score) || 0;
+  if (value >= 0.9) return "critical";
+  if (value >= 0.75) return "blocked";
+  if (value >= 0.55) return "approval";
+  if (value >= 0.35) return "warning";
+  return "allow";
+}
+
+function renderGuardianRiskMap(status) {
+  const risks = Array.isArray(status && status.graph_wide_risk_map) ? status.graph_wide_risk_map : [];
+  if (!risks.length) return `<p class="hint">No graph-wide Guardian risk map is available yet.</p>`;
+  return `
+    <div class="live-guardian-risk-grid">
+      ${risks.map((item) => {
+        const score = Math.max(0, Math.min(1, Number(item.score) || 0));
+        const percent = Math.round(score * 100);
+        const level = guardianRiskLevel(score);
+        return `
+          <article class="live-guardian-risk-card risk-${escapeHtml(level)}">
+            <div class="live-guardian-risk-head"><strong>${escapeHtml(item.risk_class || "risk")}</strong><span>${percent}%</span></div>
+            <div class="live-guardian-risk-meter" aria-label="${escapeHtml(item.risk_class || "risk")} risk ${percent}%"><span style="width:${percent}%"></span></div>
+            <p>${escapeHtml(item.stage || "-")} · ${escapeHtml(item.phase || "-")} · ${escapeHtml(item.decision || "allow")}</p>
+            <small>${escapeHtml(item.reason_code || "OK")}</small>
+          </article>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function renderGuardianApprovalQueue(status) {
+  const queue = status && status.approval_queue && typeof status.approval_queue === "object" ? status.approval_queue : {};
+  const pending = Array.isArray(queue.pending) ? queue.pending : [];
+  const resolved = Array.isArray(queue.resolved) ? queue.resolved : [];
+  const runId = status.run_id || liveCurrentRunId();
+  const pendingMarkup = pending.slice(-8).reverse().map((item) => `
+    <article class="live-guardian-approval-card">
+      <strong>${escapeHtml(item.title || item.stage || "Approval required")}</strong>
+      <p>${escapeHtml(item.reason || item.reason_code || item.status || "Operator review required.")}</p>
+      <div class="button-row">
+        <button class="btn primary live-approval-action" data-run-id="${escapeHtml(runId)}" data-approval-id="${escapeHtml(item.approval_id || "")}" data-decision="approved" ${item.approval_id ? "" : "disabled"}>Approve</button>
+        <button class="btn live-approval-action" data-run-id="${escapeHtml(runId)}" data-approval-id="${escapeHtml(item.approval_id || "")}" data-decision="cancelled" ${item.approval_id ? "" : "disabled"}>Revise</button>
+        <button class="btn warning live-approval-action" data-run-id="${escapeHtml(runId)}" data-approval-id="${escapeHtml(item.approval_id || "")}" data-decision="rejected" ${item.approval_id ? "" : "disabled"}>Reject</button>
+      </div>
+    </article>
+  `).join("");
+  const resolvedItems = resolved.slice(-6).reverse().map((item) => `${item.approval_id || "approval"} · ${item.status || item.decision || "resolved"}`);
+  return `
+    ${pendingMarkup || `<p class="hint">No pending Guardian approval interrupts.</p>`}
+    <h5>Resolved Approval History</h5>
+    ${renderReportList(resolvedItems, "No resolved approvals recorded.", 6)}
+  `;
+}
+
+function renderGuardianBlockedActions(status) {
+  const blocked = status && status.blocked_actions && typeof status.blocked_actions === "object" ? status.blocked_actions : {};
+  const gates = Array.isArray(blocked.gates) ? blocked.gates : [];
+  const tools = Array.isArray(blocked.tool_calls) ? blocked.tool_calls : [];
+  const hardware = Array.isArray(blocked.hardware_alerts) ? blocked.hardware_alerts : [];
+  const gateItems = gates.slice(-10).reverse().map((item) => `${item.stage || "stage"}.${item.phase || "gate"} · ${item.decision || "blocked"} · ${item.reason_code || "-"} · risk=${renderRuntimeValue(item.risk_score)}`);
+  const toolItems = tools.slice(-10).reverse().map((item) => `${item.stage || "stage"} · ${item.tool || "tool"} · ${item.status || "failed"} · ${item.failure_code || item.guardian_reason_code || "-"}`);
+  const hardwareItems = hardware.slice(-10).reverse().map((item) => `${item.stage || "stage"} · ${item.device_class || "device"}/${item.component || "component"} · ${item.severity || ""} · ${item.failure_code || "-"}`);
+  return `
+    <h5>Blocked Gate Decisions</h5>
+    ${renderReportList(gateItems, "No blocked Guardian gate decisions.", 10)}
+    <h5>Blocked Tool Calls</h5>
+    ${renderReportList(toolItems, "No blocked tool-call records.", 10)}
+    <h5>Hardware Alerts</h5>
+    ${renderReportList(hardwareItems, "No blocking hardware alerts.", 10)}
+  `;
+}
+
+function renderGuardianIncidentLedger(status) {
+  const ledger = status && status.incident_ledger && typeof status.incident_ledger === "object" ? status.incident_ledger : {};
+  const records = Array.isArray(ledger.records) ? ledger.records : [];
+  if (!records.length) return `<p class="hint">No incident or near-miss records have been written for this run.</p>`;
+  return records.slice(-10).reverse().map((item) => {
+    const incidentId = item.incident_id || item.id || "incident";
+    return `
+      <article class="live-guardian-incident-card">
+        <div><strong>${escapeHtml(incidentId)}</strong><span>${escapeHtml(item.severity || "near_miss")}</span></div>
+        <p>${escapeHtml(item.message || item.summary || item.reason_code || "Guardian incident recorded.")}</p>
+        <small>${escapeHtml(item.stage || "-")} · ${escapeHtml(item.risk_class || item.component || "-")} · ${escapeHtml(item.corrective_action || item.recommended_action || "No corrective action recorded.")}</small>
+        <button class="btn live-guardian-note-action" type="button" data-incident-id="${escapeHtml(incidentId)}" data-reason-code="${escapeHtml(item.reason_code || item.failure_code || "")}">Add Note</button>
+      </article>
+    `;
+  }).join("");
+}
+
+function renderGuardianSafetyBudget(status) {
+  const budget = status && status.safety_budget && typeof status.safety_budget === "object" ? status.safety_budget : {};
+  const items = Array.isArray(budget.items) ? budget.items : [];
+  const rows = items.map((item) => {
+    const used = renderRuntimeValue(item.used);
+    const limit = renderRuntimeValue(item.limit);
+    const unit = item.unit || "";
+    const pct = Math.round((Number(item.used_ratio) || 0) * 100);
+    return `${item.resource || "budget"} · ${used}/${limit} ${unit} · ${pct}% · ${item.status || "within_budget"}`;
+  });
+  return `
+    ${runtimeRows([
+      ["schema", budget.schema || "guardian_safety_budget.v1"],
+      ["status", budget.status || "within_budget"],
+      ["source", budget.source || "runtime"],
+    ])}
+    ${renderReportList(rows, "No safety budget items have been computed yet.", 10)}
+  `;
+}
+
+function renderGuardianLiveHeartbeat(status) {
+  const deviceData = status && status.device_data_integrity && typeof status.device_data_integrity === "object" ? status.device_data_integrity : {};
+  const heartbeats = Array.isArray(deviceData.live_device_heartbeat) ? deviceData.live_device_heartbeat : [];
+  const rows = heartbeats.map((item) => `${item.device_id || "device"} · ${item.heartbeat_status || "review"} · ${item.bridge_state || "unknown"} · ${item.last_command || "runtime snapshot"}`);
+  return renderReportList(rows, "No device heartbeat rows are available yet.", 12);
+}
+
+function renderGuardianSafeStopVerification(status) {
+  const safeStop = status && status.safe_stop_verification && typeof status.safe_stop_verification === "object" ? status.safe_stop_verification : {};
+  const latestGate = safeStop.latest_gate && typeof safeStop.latest_gate === "object" ? safeStop.latest_gate : {};
+  return runtimeRows([
+    ["schema", safeStop.schema || "guardian_safe_stop_verification.v1"],
+    ["requested", safeStop.requested === undefined ? false : safeStop.requested],
+    ["verified", safeStop.verified === undefined ? false : safeStop.verified],
+    ["status", safeStop.status || "not_requested"],
+    ["verification_basis", safeStop.verification_basis || "none"],
+    ["latest_gate", latestGate.gate_id || "-"],
+  ]);
+}
+
+function renderGuardianEvidenceCompleteness(status) {
+  const evidence = status && status.evidence_completeness && typeof status.evidence_completeness === "object" ? status.evidence_completeness : {};
+  return runtimeRows([
+    ["schema", evidence.schema || "guardian_evidence_completeness.v1"],
+    ["status", evidence.status || "missing"],
+    ["score", evidence.score ?? "-"],
+    ["artifact_ref_count", evidence.artifact_ref_count ?? 0],
+    ["provenance_ref_count", evidence.provenance_ref_count ?? 0],
+    ["checks", evidence.checks || {}],
+  ]);
+}
+
+function renderGuardianSelfEvolutionGate(status) {
+  const gate = status && status.self_evolution_gate && typeof status.self_evolution_gate === "object" ? status.self_evolution_gate : {};
+  const pending = Array.isArray(gate.pending_variants) ? gate.pending_variants : [];
+  const active = Array.isArray(gate.active_variants) ? gate.active_variants : [];
+  const pendingItems = pending.slice(-8).reverse().map((item) => `${item.variant_id || "variant"} · ${item.target_type || "target"}:${item.target_id || "-"} · ${item.status || "pending"}`);
+  const activeItems = active.slice(-8).reverse().map((item) => `${item.variant_id || "variant"} · ${item.target_type || "target"}:${item.target_id || "-"} · ${item.status || "active"}`);
+  return `
+    ${runtimeRows([
+      ["schema", gate.schema || "guardian_self_evolution_gate.v1"],
+      ["status", gate.status || "idle"],
+      ["variant_count", gate.variant_count ?? 0],
+      ["error", gate.error || "-"],
+    ])}
+    <h5>Pending Variants</h5>
+    ${renderReportList(pendingItems, "No self-evolution variants pending Guardian activation gate.", 8)}
+    <h5>Active / Next-Run Variants</h5>
+    ${renderReportList(activeItems, "No active self-evolution variants recorded.", 8)}
+  `;
+}
+
+function renderGuardianReportDetails(report) {
+  const status = liveGuardianStatusPayload(report);
+  if (!status) return `<p class="hint">Guardian status report is not available yet. Refresh the active run state after a run starts.</p>`;
+  const summary = status.summary && typeof status.summary === "object" ? status.summary : {};
+  const deviceData = status.device_data_integrity && typeof status.device_data_integrity === "object" ? status.device_data_integrity : {};
+  const policy = status.policy_version_panel && typeof status.policy_version_panel === "object" ? status.policy_version_panel : {};
+  const handoff = status.handoff_packet && typeof status.handoff_packet === "object" ? status.handoff_packet : {};
+  const latestDecision = handoff.latest_guardian_decision && typeof handoff.latest_guardian_decision === "object" ? handoff.latest_guardian_decision : {};
+  const latestContract = handoff.latest_guardian_contract && typeof handoff.latest_guardian_contract === "object" ? handoff.latest_guardian_contract : {};
+  const corrective = Array.isArray(handoff.corrective_actions) ? handoff.corrective_actions : [];
+  const correctiveItems = corrective.slice(-8).reverse().map((item) => `${item.action_id || item.action || "corrective_action"} · ${item.status || "open"} · ${item.description || item.message || item.owner || "-"}`);
+  return `
+    <div class="live-agent-specific-guardian-details">
+      <h5>Graph-Wide Risk Map</h5>
+      ${renderGuardianRiskMap(status)}
+      <h5>Guardian Status Summary</h5>
+      ${runtimeRows([
+        ["schema", status.schema || "guardian_status_report.v1"],
+        ["run_id", status.run_id || "-"],
+        ["stage", status.stage || "-"],
+        ["status", status.status || "-"],
+        ["risk_score", summary.risk_score ?? "-"],
+        ["dominant_risks", summary.dominant_risks || []],
+        ["gate_count", summary.gate_count ?? "-"],
+        ["incident_count", summary.incident_count ?? "-"],
+        ["blocked_action_count", summary.blocked_action_count ?? "-"],
+        ["pending_approval_count", summary.pending_approval_count ?? "-"],
+        ["safety_budget_status", summary.safety_budget_status || "-"],
+        ["safe_stop_status", summary.safe_stop_status || "-"],
+        ["evidence_completeness_status", summary.evidence_completeness_status || "-"],
+        ["self_evolution_gate_status", summary.self_evolution_gate_status || "-"],
+        ["latest_decision", latestDecision.decision || "-"],
+        ["latest_reason", latestDecision.reason_code || latestContract.failure_code || "-"],
+        ["ok_for_next_stage", latestContract.ok_for_next_stage === undefined ? "-" : latestContract.ok_for_next_stage],
+        ["ok_for_bo", latestContract.ok_for_bo === undefined ? "-" : latestContract.ok_for_bo],
+      ])}
+      <h5>Safety Budget</h5>
+      ${renderGuardianSafetyBudget(status)}
+      <h5>Live Device Heartbeat</h5>
+      ${renderGuardianLiveHeartbeat(status)}
+      <h5>Safe-Stop Verification</h5>
+      ${renderGuardianSafeStopVerification(status)}
+      <h5>Evidence Completeness</h5>
+      ${renderGuardianEvidenceCompleteness(status)}
+      <h5>Self-Evolution Gate</h5>
+      ${renderGuardianSelfEvolutionGate(status)}
+      <h5>Gate Timeline</h5>
+      ${renderReportList((Array.isArray(status.gate_timeline) ? status.gate_timeline : []).slice(-14).reverse().map((item) => `${item.stage || "stage"}.${item.phase || "gate"}${item.tool ? `/${item.tool}` : ""} · ${item.decision || "allow"} · ${item.reason_code || "OK"} · risk=${renderRuntimeValue(item.risk_score)}`), "No Guardian gate timeline recorded.", 14)}
+      <h5>Blocked Actions</h5>
+      ${renderGuardianBlockedActions(status)}
+      <h5>Approval Queue</h5>
+      ${renderGuardianApprovalQueue(status)}
+      <h5>Incident / Near-Miss Ledger</h5>
+      ${renderGuardianIncidentLedger(status)}
+      <h5>Policy / Version Panel</h5>
+      ${runtimeRows([
+        ["guardian_gate_schema", policy.guardian_gate_schema || "-"],
+        ["contract_schema", policy.contract_schema || "-"],
+        ["decision_schema", policy.decision_schema || "-"],
+        ["incident_schema", policy.incident_schema || "-"],
+        ["tool_call_schema", policy.tool_call_schema || "-"],
+        ["source_doc", policy.source_doc || "-"],
+      ])}
+      <h5>Device / Data Integrity</h5>
+      ${runtimeRows([
+        ["device_health", deviceData.device_health || {}],
+        ["live_device_heartbeat", deviceData.live_device_heartbeat || []],
+        ["hardware_alert_count", deviceData.hardware_alert_count ?? "-"],
+        ["tool_call_counts", deviceData.tool_call_counts || {}],
+        ["data_related_incident_count", deviceData.data_related_incident_count ?? "-"],
+      ])}
+      <h5>Corrective Actions</h5>
+      ${renderReportList(correctiveItems, "No corrective actions recorded.", 8)}
+    </div>
+  `;
 }
 
 function reportSectionKey(title) {
@@ -2117,6 +2501,16 @@ function selectedReportModel(session) {
 
 function latestReportPayload(report, keys) {
   const sources = [];
+  const state = report && report.state ? report.state : {};
+  const metadata = state && typeof state.run_metadata === "object" && state.run_metadata ? state.run_metadata : {};
+  if (metadata) {
+    sources.push(metadata);
+    if (metadata.last_stage_payload) sources.push(metadata.last_stage_payload);
+    if (metadata.last_stage_payload && metadata.last_stage_payload.data) sources.push(metadata.last_stage_payload.data);
+    for (const value of Object.values(metadata)) {
+      if (value && typeof value === "object" && !Array.isArray(value)) sources.push(value);
+    }
+  }
   for (const msg of report.messages || []) sources.push(msg);
   for (const event of report.events || []) sources.push(eventPayload(event));
   for (let index = sources.length - 1; index >= 0; index -= 1) {
@@ -2124,6 +2518,207 @@ function latestReportPayload(report, keys) {
     if (value !== null && value !== undefined && value !== "") return value;
   }
   return null;
+}
+
+function latestDesignReport(report) {
+  const state = report && report.state ? report.state : {};
+  const metadata = state && typeof state.run_metadata === "object" && state.run_metadata ? state.run_metadata : {};
+  const direct = metadata.design_report;
+  if (direct && typeof direct === "object") return direct;
+  const designPayload = metadata.design_agent_payload;
+  if (designPayload && typeof designPayload === "object" && designPayload.design_report) return designPayload.design_report;
+  return latestReportPayload(report, ["design_report", "data.design_report", "latest.design_report"]);
+}
+
+function latestSpecimenFabricationReport(report) {
+  const state = report && report.state ? report.state : {};
+  const metadata = state && typeof state.run_metadata === "object" && state.run_metadata ? state.run_metadata : {};
+  if (metadata.fabrication_report && typeof metadata.fabrication_report === "object") return metadata.fabrication_report;
+  if (metadata.specimen_fabrication_report && typeof metadata.specimen_fabrication_report === "object") return metadata.specimen_fabrication_report;
+  const specimen = metadata.specimen_result;
+  if (specimen && typeof specimen === "object" && specimen.fabrication_report) return specimen.fabrication_report;
+  const payload = metadata.specimen_agent_payload;
+  if (payload && typeof payload === "object") {
+    if (payload.fabrication_report) return payload.fabrication_report;
+    if (payload.specimen_result && payload.specimen_result.fabrication_report) return payload.specimen_result.fabrication_report;
+  }
+  return latestReportPayload(report, ["fabrication_report", "specimen_result.fabrication_report", "data.fabrication_report", "latest.fabrication_report"]);
+}
+
+function latestSpecimenFabricatedPacket(report) {
+  const state = report && report.state ? report.state : {};
+  const metadata = state && typeof state.run_metadata === "object" && state.run_metadata ? state.run_metadata : {};
+  if (metadata.specimen_fabricated && typeof metadata.specimen_fabricated === "object") return metadata.specimen_fabricated;
+  const specimen = metadata.specimen_result;
+  if (specimen && typeof specimen === "object" && specimen.specimen_fabricated) return specimen.specimen_fabricated;
+  const payload = metadata.specimen_agent_payload;
+  if (payload && typeof payload === "object") {
+    if (payload.specimen_fabricated) return payload.specimen_fabricated;
+    if (payload.handoff_packet) return payload.handoff_packet;
+  }
+  return latestReportPayload(report, ["specimen_fabricated", "handoff_packet", "specimen_result.specimen_fabricated"]);
+}
+
+function latestVisionReport(report) {
+  const state = report && report.state ? report.state : {};
+  const metadata = state && typeof state.run_metadata === "object" && state.run_metadata ? state.run_metadata : {};
+  if (metadata.vision_report && typeof metadata.vision_report === "object") return metadata.vision_report;
+  if (metadata.latest_vision_observation && typeof metadata.latest_vision_observation === "object" && metadata.latest_vision_observation.vision_report) return metadata.latest_vision_observation.vision_report;
+  if (state.latest_observations && typeof state.latest_observations === "object" && state.latest_observations.vision_report) return state.latest_observations.vision_report;
+  const payload = metadata.vision_agent_payload;
+  if (payload && typeof payload === "object") {
+    if (payload.vision_report) return payload.vision_report;
+    if (payload.observation && payload.observation.vision_report) return payload.observation.vision_report;
+  }
+  return latestReportPayload(report, ["vision_report", "observation.vision_report", "latest_vision_observation.vision_report", "sections.vision_report"]);
+}
+
+function latestVisionSignalPacket(report) {
+  const state = report && report.state ? report.state : {};
+  const metadata = state && typeof state.run_metadata === "object" && state.run_metadata ? state.run_metadata : {};
+  if (metadata.vision_signal && typeof metadata.vision_signal === "object") return metadata.vision_signal;
+  if (metadata.latest_vision_observation && typeof metadata.latest_vision_observation === "object" && metadata.latest_vision_observation.vision_signal) return metadata.latest_vision_observation.vision_signal;
+  if (state.latest_observations && typeof state.latest_observations === "object" && state.latest_observations.vision_signal) return state.latest_observations.vision_signal;
+  const payload = metadata.vision_agent_payload;
+  if (payload && typeof payload === "object") {
+    if (payload.vision_signal) return payload.vision_signal;
+    if (payload.handoff_packet) return payload.handoff_packet;
+  }
+  return latestReportPayload(report, ["vision_signal", "handoff_packet", "observation.vision_signal"]);
+}
+
+function latestManipulationReport(report) {
+  const state = report && report.state ? report.state : {};
+  const metadata = state && typeof state.run_metadata === "object" && state.run_metadata ? state.run_metadata : {};
+  if (metadata.manipulation_report && typeof metadata.manipulation_report === "object") return metadata.manipulation_report;
+  const payload = metadata.manipulation_agent_payload;
+  if (payload && typeof payload === "object" && payload.manipulation_report) return payload.manipulation_report;
+  if (metadata.last_stage_payload && metadata.last_stage_payload.data && metadata.last_stage_payload.data.manipulation_report) return metadata.last_stage_payload.data.manipulation_report;
+  return latestReportPayload(report, ["manipulation_report", "data.manipulation_report", "sections.manipulation_report"]);
+}
+
+function latestRobotTaskResult(report) {
+  const state = report && report.state ? report.state : {};
+  const metadata = state && typeof state.run_metadata === "object" && state.run_metadata ? state.run_metadata : {};
+  if (metadata.robot_task_result && typeof metadata.robot_task_result === "object") return metadata.robot_task_result;
+  const payload = metadata.manipulation_agent_payload;
+  if (payload && typeof payload === "object") {
+    if (payload.robot_task_result) return payload.robot_task_result;
+    if (payload.handoff_packet) return payload.handoff_packet;
+  }
+  if (metadata.last_stage_payload && metadata.last_stage_payload.data) {
+    const data = metadata.last_stage_payload.data;
+    if (data.robot_task_result) return data.robot_task_result;
+    if (data.handoff_packet) return data.handoff_packet;
+  }
+  return latestReportPayload(report, ["robot_task_result", "handoff_packet", "data.robot_task_result", "sections.robot_task_result"]);
+}
+
+
+function latestEquipmentReport(report) {
+  const state = report && report.state ? report.state : {};
+  const metadata = state && typeof state.run_metadata === "object" && state.run_metadata ? state.run_metadata : {};
+  if (metadata.equipment_report && typeof metadata.equipment_report === "object") return metadata.equipment_report;
+  const payload = metadata.equipment_agent_payload;
+  if (payload && typeof payload === "object" && payload.equipment_report) return payload.equipment_report;
+  if (metadata.last_stage_payload && metadata.last_stage_payload.data && metadata.last_stage_payload.data.equipment_report) return metadata.last_stage_payload.data.equipment_report;
+  return latestReportPayload(report, ["equipment_report", "data.equipment_report", "sections.equipment_report"]);
+}
+
+function latestEquipmentResult(report) {
+  const state = report && report.state ? report.state : {};
+  const metadata = state && typeof state.run_metadata === "object" && state.run_metadata ? state.run_metadata : {};
+  if (metadata.equipment_result && typeof metadata.equipment_result === "object") return metadata.equipment_result;
+  const payload = metadata.equipment_agent_payload;
+  if (payload && typeof payload === "object" && payload.equipment_result) return payload.equipment_result;
+  if (metadata.last_stage_payload && metadata.last_stage_payload.data && metadata.last_stage_payload.data.equipment_result) return metadata.last_stage_payload.data.equipment_result;
+  return latestReportPayload(report, ["equipment_result", "data.equipment_result"]);
+}
+
+function latestUtmDataReadyPacket(report) {
+  const state = report && report.state ? report.state : {};
+  const metadata = state && typeof state.run_metadata === "object" && state.run_metadata ? state.run_metadata : {};
+  if (metadata.utm_data_ready && typeof metadata.utm_data_ready === "object") return metadata.utm_data_ready;
+  const payload = metadata.equipment_agent_payload;
+  if (payload && typeof payload === "object" && payload.utm_data_ready) return payload.utm_data_ready;
+  if (metadata.last_stage_payload && metadata.last_stage_payload.data && metadata.last_stage_payload.data.utm_data_ready) return metadata.last_stage_payload.data.utm_data_ready;
+  return latestReportPayload(report, ["utm_data_ready", "data.utm_data_ready"]);
+}
+
+function latestEquipmentHandoffPacket(report) {
+  const state = report && report.state ? report.state : {};
+  const metadata = state && typeof state.run_metadata === "object" && state.run_metadata ? state.run_metadata : {};
+  if (metadata.equipment_handoff && typeof metadata.equipment_handoff === "object") return metadata.equipment_handoff;
+  const payload = metadata.equipment_agent_payload;
+  if (payload && typeof payload === "object") {
+    if (payload.equipment_handoff) return payload.equipment_handoff;
+    if (payload.handoff_packet) return payload.handoff_packet;
+  }
+  if (metadata.last_stage_payload && metadata.last_stage_payload.data) {
+    const data = metadata.last_stage_payload.data;
+    if (data.equipment_handoff) return data.equipment_handoff;
+    if (data.handoff_packet) return data.handoff_packet;
+  }
+  return latestReportPayload(report, ["equipment_handoff", "handoff_packet", "data.equipment_handoff"]);
+}
+
+function latestAnalysisPayload(report) {
+  const state = report && report.state ? report.state : {};
+  if (state.latest_analysis && typeof state.latest_analysis === "object" && Object.keys(state.latest_analysis).length) return state.latest_analysis;
+  const metadata = state && typeof state.run_metadata === "object" && state.run_metadata ? state.run_metadata : {};
+  if (metadata.latest_analysis && typeof metadata.latest_analysis === "object") return metadata.latest_analysis;
+  const payload = metadata.last_stage_payload && metadata.last_stage_payload.data ? metadata.last_stage_payload.data : {};
+  if (payload && typeof payload === "object" && payload.analysis) return payload.analysis;
+  return latestReportPayload(report, ["analysis", "data.analysis", "latest_analysis", "sections.analysis"]);
+}
+
+function latestAnalysisBoHandoff(report) {
+  const analysis = latestAnalysisPayload(report) || {};
+  if (analysis.bo_handoff && typeof analysis.bo_handoff === "object") return analysis.bo_handoff;
+  return latestReportPayload(report, ["bo_handoff", "data.bo_handoff", "analysis.bo_handoff"]);
+}
+
+
+function latestKnowledgePayload(report) {
+  const state = report && report.state ? report.state : {};
+  const metadata = state && typeof state.run_metadata === "object" && state.run_metadata ? state.run_metadata : {};
+  if (metadata.knowledge && typeof metadata.knowledge === "object") return metadata.knowledge;
+  const payload = metadata.knowledge_agent_payload;
+  if (payload && typeof payload === "object") {
+    if (payload.knowledge && typeof payload.knowledge === "object") return payload.knowledge;
+    return payload;
+  }
+  if (metadata.last_stage_payload && metadata.last_stage_payload.data) {
+    const data = metadata.last_stage_payload.data;
+    if (data.knowledge && typeof data.knowledge === "object") return data.knowledge;
+  }
+  return latestReportPayload(report, ["knowledge", "data.knowledge", "sections.knowledge"] ) || {};
+}
+
+function latestKnowledgeReport(report) {
+  const payload = latestKnowledgePayload(report) || {};
+  if (payload.knowledge_report && typeof payload.knowledge_report === "object") return payload.knowledge_report;
+  return latestReportPayload(report, ["knowledge_report", "sections.knowledge_report", "data.knowledge_report"] ) || {};
+}
+
+function latestKnowledgeContext(report) {
+  const payload = latestKnowledgePayload(report) || {};
+  if (payload.knowledge_context && typeof payload.knowledge_context === "object") return payload.knowledge_context;
+  return latestReportPayload(report, ["knowledge_context", "data.knowledge_context"] ) || {};
+}
+
+function latestKnowledgeEvolutionProposal(report) {
+  const payload = latestKnowledgePayload(report) || {};
+  const knowledgeReport = latestKnowledgeReport(report) || {};
+  const reportEvolution = knowledgeReport.self_evolution && typeof knowledgeReport.self_evolution === "object" ? knowledgeReport.self_evolution : null;
+  const payloadEvolution = payload.evolution_proposal && typeof payload.evolution_proposal === "object" ? payload.evolution_proposal : null;
+  const reportPacks = reportEvolution && Array.isArray(reportEvolution.evidence_packs) ? reportEvolution.evidence_packs.length : 0;
+  const payloadPacks = payloadEvolution && Array.isArray(payloadEvolution.evidence_packs) ? payloadEvolution.evidence_packs.length : 0;
+  if (reportPacks || !payloadPacks) {
+    if (reportEvolution) return reportEvolution;
+  }
+  if (payloadEvolution) return payloadEvolution;
+  return latestReportPayload(report, ["evolution_proposal", "self_evolution", "data.evolution_proposal"] ) || {};
 }
 
 function latestReportBoResult(report) {
@@ -2154,6 +2749,9 @@ function agentSpecificReportProfile(report, status, agentLabel) {
   const spec = report.spec || {};
   const boResult = latestReportBoResult(report) || {};
   const boRecommendation = boResult.recommendation || boResult.selected || {};
+  const boReasoning = boResult.reasoning || {};
+  const boPriorSummary = boResult.prior_summary || {};
+  const boCandidateRanking = Array.isArray(boResult.candidate_ranking) ? boResult.candidate_ranking : Array.isArray(boResult.candidate_pool) ? boResult.candidate_pool.slice(0, 5) : [];
   const artifacts = latestReportArtifacts(report);
   const latestTool = report.toolItems && report.toolItems.length ? report.toolItems[report.toolItems.length - 1] : "not recorded";
   const latestWarning = report.warnings && report.warnings.length ? report.warnings[report.warnings.length - 1] : "none recorded";
@@ -2163,6 +2761,79 @@ function agentSpecificReportProfile(report, status, agentLabel) {
     ["evidence_events", report.events.length],
     ["latest_tool", latestTool],
   ];
+  const designReport = latestDesignReport(report) || {};
+  const designObjective = designReport.objective || {};
+  const designHypothesis = designReport.hypothesis || {};
+  const designGeneration = designReport.candidate_generation || {};
+  const designEvaluation = designReport.candidate_evaluation || {};
+  const designPrior = designReport.prior_context || {};
+  const designHandoff = designReport.handoff_to_specimen || {};
+  const specimenFabricationReport = latestSpecimenFabricationReport(report) || {};
+  const specimenPacket = latestSpecimenFabricatedPacket(report) || {};
+  const specimenIntent = specimenFabricationReport.fabrication_intent || {};
+  const specimenThread = specimenFabricationReport.digital_thread || {};
+  const specimenPlan = specimenFabricationReport.process_plan || {};
+  const specimenOutcome = specimenFabricationReport.fabrication_outcome || {};
+  const specimenFeedback = specimenFabricationReport.feedback_to_design || {};
+  const specimenGates = Array.isArray(specimenFabricationReport.quality_gates) ? specimenFabricationReport.quality_gates : [];
+  const specimenGateSummary = specimenGates.length
+    ? `${specimenGates.filter((gate) => gate.status === "pass").length}/${specimenGates.length} pass · blocked=${specimenGates.filter((gate) => gate.status === "blocked").length} · fail=${specimenGates.filter((gate) => gate.status === "fail").length}`
+    : "-";
+  const visionReport = latestVisionReport(report) || {};
+  const visionPacket = latestVisionSignalPacket(report) || {};
+  const visionCamera = visionReport.camera_source || {};
+  const visionSignals = Array.isArray(visionReport.signal_board) ? visionReport.signal_board : Array.isArray(visionReport.agent_signals) ? visionReport.agent_signals : [];
+  const visionZones = visionReport.scene_map || visionReport.zones || {};
+  const visionZoneCount = visionZones && typeof visionZones === "object" ? Object.keys(visionZones).length : 0;
+  const pickupSignal = visionSignals.find((signal) => signal.signal === "pickup_ready") || {};
+  const visionAnomaly = visionReport.safety_anomaly || {};
+  const manipulationReport = latestManipulationReport(report) || {};
+  const robotTaskResult = latestRobotTaskResult(report) || {};
+  const manipulationTask = manipulationReport.task || {};
+  const manipulationPolicy = manipulationReport.policy_plan || {};
+  const manipulationPreflight = manipulationReport.preflight || {};
+  const manipulationVision = manipulationReport.vision_context || {};
+  const manipulationStage = manipulationReport.stage_machine || {};
+  const manipulationSarm = manipulationReport.sarm || {};
+  const manipulationDecision = manipulationReport.decision || {};
+  const equipmentReport = latestEquipmentReport(report) || {};
+  const equipmentResult = latestEquipmentResult(report) || {};
+  const equipmentPacket = latestUtmDataReadyPacket(report) || {};
+  const equipmentHandoff = latestEquipmentHandoffPacket(report) || {};
+  const equipmentBridge = equipmentReport.bridge || {};
+  const equipmentControlPlan = equipmentReport.control_plan || {};
+  const equipmentControlProfile = equipmentControlPlan.profile || {};
+  const equipmentScreenChecks = Array.isArray(equipmentReport.screen_checks) ? equipmentReport.screen_checks : [];
+  const equipmentScreenPassed = equipmentScreenChecks.filter((item) => item && item.ok).length;
+  const equipmentVisionChecks = equipmentReport.vision_cross_checks || {};
+  const equipmentPhysical = equipmentReport.physical_checks || {};
+  const equipmentData = equipmentReport.data_acquisition || {};
+  const equipmentCross = equipmentReport.cross_checks || {};
+  const equipmentDecision = equipmentReport.decision || {};
+  const equipmentLinuxPath = equipmentData.linux_path || equipmentResult.result_file || equipmentResult.utm_csv_path || equipmentPacket.result_file || equipmentHandoff.result_file || "";
+  const equipmentFailure = equipmentDecision.failure_code || equipmentResult.failure_code || equipmentHandoff.failure_code || "";
+  const analysisPayload = latestAnalysisPayload(report) || {};
+  const analysisMetrics = analysisPayload.utm_metrics || {};
+  const analysisQuality = analysisPayload.quality_gate || analysisPayload.data_quality_gate || {};
+  const analysisComparison = analysisPayload.fem_utm_comparison || {};
+  const analysisArtifacts = analysisPayload.analysis_artifacts || {};
+  const analysisFemLoop = analysisPayload.fem_agentic_loop || {};
+  const analysisBoHandoff = latestAnalysisBoHandoff(report) || {};
+  const knowledgePayload = latestKnowledgePayload(report) || {};
+  const knowledgeReport = latestKnowledgeReport(report) || {};
+  const knowledgeContext = latestKnowledgeContext(report) || {};
+  const knowledgeEvolution = latestKnowledgeEvolutionProposal(report) || {};
+  const knowledgeMemoryIntake = knowledgeReport.memory_intake || {};
+  const knowledgeEvidenceQuality = knowledgeReport.evidence_quality || knowledgeContext.evidence_quality || {};
+  const knowledgeFailures = Array.isArray(knowledgeReport.failure_patterns) ? knowledgeReport.failure_patterns : [];
+  const knowledgeSuccesses = Array.isArray(knowledgeReport.success_patterns) ? knowledgeReport.success_patterns : [];
+  const knowledgePerformance = Array.isArray(knowledgeReport.agent_performance_records) ? knowledgeReport.agent_performance_records : [];
+  const knowledgePacks = Array.isArray(knowledgeEvolution.evidence_packs) ? knowledgeEvolution.evidence_packs : [];
+  const knowledgeOutcomes = Array.isArray(knowledgeEvolution.outcomes) ? knowledgeEvolution.outcomes : Array.isArray(knowledgeReport.evolution_outcomes) ? knowledgeReport.evolution_outcomes : [];
+  const guardianStatus = liveGuardianStatusPayload(report);
+  const guardianSummary = guardianStatus && guardianStatus.summary ? guardianStatus.summary : {};
+  const guardianLatestDecisionRaw = latestReportPayload(report, ["latest_guardian_decision", "guardian_decision", "data.guardian_decision"]);
+  const guardianLatestDecision = guardianLatestDecisionRaw && typeof guardianLatestDecisionRaw === "object" ? guardianLatestDecisionRaw : {};
   const profiles = {
     objective: {
       title: "Objective Intake / Experiment Contract",
@@ -2176,118 +2847,178 @@ function agentSpecificReportProfile(report, status, agentLabel) {
       checklist: ["Confirm objective", "Check required variables", "Lock trigger phrase / operator approval"],
     },
     orchestrator: {
-      title: "Orchestration Plan / Handoff Control",
-      summary: "Shows the active closed-loop route, missing operator inputs, and next handoff decision before downstream agents execute.",
+      title: "Orchestration Supervisor / Follow-up Control",
+      summary: "Shows mission contract, supervisor follow-up opinions, route decisions, handoff registry, and loop reflection for the active autonomous run.",
       rows: [
         ["current_stage", state.stage || "-"],
         ["next_action", report.nextAction],
-        ["handoffs", report.handoffs.length],
+        ["plan_route", (state.run_metadata && state.run_metadata.latest_orchestration_plan && Array.isArray(state.run_metadata.latest_orchestration_plan.route)) ? state.run_metadata.latest_orchestration_plan.route.length : 0],
+        ["parallel_check_status", (state.run_metadata && state.run_metadata.latest_orchestrator_parallel_checks) ? state.run_metadata.latest_orchestrator_parallel_checks.status || "unknown" : "not_run"],
+        ["followups", (state.run_metadata && Array.isArray(state.run_metadata.orchestrator_followups)) ? state.run_metadata.orchestrator_followups.length : 0],
+        ["decisions", (state.run_metadata && Array.isArray(state.run_metadata.orchestrator_decision_register)) ? state.run_metadata.orchestrator_decision_register.length : 0],
+        ["handoffs", (state.run_metadata && Array.isArray(state.run_metadata.orchestrator_handoff_packets)) ? state.run_metadata.orchestrator_handoff_packets.length : report.handoffs.length],
+        ["loop_reflections", (state.run_metadata && Array.isArray(state.run_metadata.loop_reflections)) ? state.run_metadata.loop_reflections.length : 0],
         ["pending_warnings", report.warnings.length],
       ],
-      checklist: ["Validate objective completeness", "Select next agent", "Preserve live/test safety gates", "Ask user before running incomplete plans"],
+      checklist: ["Check mission contract", "Review latest follow-up", "Confirm next handoff packet", "Resolve operator questions", "Preserve Guardian authority"],
     },
     design: {
-      title: "Design Geometry / Manufacturability",
-      summary: "Focuses on specimen geometry, TPMS/lattice parameters, printable bounds, and generated design artifacts.",
+      title: "Design Decision / Candidate Evidence",
+      summary: "Shows objective contract, hypothesis, candidate pool, deterministic selection rationale, rejected/repair log, and Specimen Agent handoff readiness.",
       rows: [
+        ["objective", designObjective.primary_metric || spec.objective_type || "-"],
+        ["direction", designObjective.direction || spec.objective_direction || "-"],
+        ["hypothesis", designHypothesis.statement || "-"],
         ["geometry_type", spec.geometry_type || spec.structure_type || "-"],
-        ["specimen_size_mm", spec.specimen_size_mm || spec.size_mm || "-"],
         ["cell_size_mm", spec.cell_size_mm || "-"],
-        ["unit_cells", spec.unit_cells || spec.cell_num || "-"],
         ["relative_density", spec.relative_density || "-"],
-        ["stl_artifacts", artifacts.length],
+        ["candidate_count", designGeneration.candidate_count || (spec.candidate_pool_summary && spec.candidate_pool_summary.generated_count) || "-"],
+        ["valid/rejected", `${designGeneration.valid_count || 0}/${designGeneration.rejected_count || 0}`],
+        ["selected_score", designEvaluation.selected_score || spec.expected_objective_proxy_score || "-"],
+        ["uncertainty", designEvaluation.uncertainty || spec.uncertainty || "-"],
+        ["info_gain", designEvaluation.information_gain_score || spec.information_gain_score || "-"],
+        ["risk", designEvaluation.risk_score || spec.risk_score || "-"],
+        ["prior_count", designPrior.prior_count || 0],
+        ["handoff_ready", designHandoff.required_fields_present === undefined ? "-" : designHandoff.required_fields_present],
       ],
-      checklist: ["Validate geometry parameters", "Check FDM printability", "Generate/update STL preview", "Prepare BO-controllable variables"],
+      checklist: ["Review objective/hypothesis", "Inspect candidate ledger", "Check rejected/repair reasons", "Confirm experiment_spec handoff"],
     },
     specimen: {
-      title: "Print Preparation / Prusa Bridge",
-      summary: "Tracks slicing settings, PrusaLink/virtual bridge mode, upload/start readiness, and print safety options.",
+      title: "Manufacturing Digital Thread / Printer Runtime",
+      summary: "Tracks fabrication intent, STL-to-G-code digital thread, process plan, quality gates, PrusaLink runtime evidence, monitoring handoff, and feedback to the next loop.",
       rows: [
-        ["bridge_mode", latestReportPayload(report, ["bridge_mode", "printer_path", "mode"]) || "operator selection required if missing"],
-        ["printer_profile", latestReportPayload(report, ["printer_profile", "printer_model", "profile"]) || "Prusa MK4S default"],
-        ["layer_height_mm", spec.layer_height_mm || latestReportPayload(report, ["layer_height_mm"]) || "-"],
-        ["gcode_path", latestReportPayload(report, ["gcode_path", "output_gcode", "gcode"]) || "-"],
-        ["autoeject", latestReportPayload(report, ["autoeject", "auto_eject", "allow_ejection"]) || "configured in 3DP GUI"],
+        ["fabrication_schema", specimenFabricationReport.schema || "-"],
+        ["intent", `${specimenIntent.mode || "-"} / ${specimenIntent.printer_path || latestReportPayload(report, ["printer_path", "mode"]) || "-"}`],
+        ["physical_intent", specimenIntent.physical_intent === undefined ? "-" : specimenIntent.physical_intent],
+        ["specimen_id", specimenThread.specimen_id || spec.specimen_id || "-"],
+        ["stl_path", specimenThread.stl_path || latestReportPayload(report, ["stl_path"]) || "-"],
+        ["gcode_path", specimenThread.gcode_path || latestReportPayload(report, ["sliced_path", "gcode_path", "output_gcode"]) || "-"],
+        ["printer_profile", specimenThread.printer_profile || spec.printer_profile || "Prusa MK4S default"],
+        ["layer/nozzle", `${specimenPlan.layer_height_mm || spec.layer_height_mm || "-"} / ${specimenPlan.nozzle_diameter_mm || spec.nozzle_diameter_mm || "-"}`],
+        ["quality_gates", specimenGateSummary],
+        ["outcome", specimenOutcome.status || "-"],
+        ["location", specimenOutcome.location || "-"],
+        ["handoff_packet", specimenPacket.schema || "-"],
+        ["feedback_score", specimenFeedback.quality_score === undefined ? "-" : specimenFeedback.quality_score],
       ],
-      checklist: ["Slice with current print profile", "Show PrusaSlicer settings", "Upload or virtual-bridge verify", "Report start/ready state"],
+      checklist: ["Confirm fabrication intent", "Inspect digital thread", "Review quality gates", "Check printer runtime trace", "Confirm Vision/Manipulation handoff"],
     },
     vision: {
-      title: "Vision Capture / Pickup Observation",
-      summary: "Summarizes camera readiness, captured observations, localization confidence, and whether the object is safe to hand off.",
+      title: "Lab Perception Signal Bus / Visual Evidence",
+      summary: "Shows camera source, lab zone states, freshness-bounded agent signals, visual evidence artifacts, and downstream safety handoff context.",
       rows: [
-        ["camera_status", latestReportPayload(report, ["camera_status", "camera", "capture_status"]) || "-"],
-        ["observation", latestReportPayload(report, ["observation", "detection", "vision_result"]) || "-"],
-        ["confidence", latestReportPayload(report, ["confidence", "score", "detection_confidence"]) || "-"],
-        ["artifacts", artifacts.length],
+        ["vision_schema", visionReport.schema || "-"],
+        ["task", visionReport.task || "-"],
+        ["camera", `${visionCamera.camera_key || "-"} / ${visionCamera.source || "-"}`],
+        ["frame_age_ms", visionCamera.frame_age_ms === undefined ? "-" : visionCamera.frame_age_ms],
+        ["zones", visionZoneCount],
+        ["signals", visionSignals.length],
+        ["pickup_ready", pickupSignal.status ? `${pickupSignal.status} · conf=${renderRuntimeValue(pickupSignal.confidence)} · ttl=${renderRuntimeValue(pickupSignal.expires_at)}` : "-"],
+        ["anomaly", visionAnomaly.anomaly === undefined ? "-" : visionAnomaly.anomaly],
+        ["handoff_packet", visionPacket.schema || "-"],
       ],
-      checklist: ["Confirm camera stream", "Detect printed specimen", "Estimate pickup pose", "Gate manipulation handoff"],
+      checklist: ["Check camera heartbeat", "Inspect zone state", "Verify signal freshness", "Review visual evidence", "Gate manipulation handoff"],
     },
     manipulation: {
-      title: "Robot Policy / Transfer Execution",
-      summary: "Shows robot profile, policy path, rollout state, and transfer completion evidence for 3DP-to-UTM movement.",
+      title: "Manipulation Agent / Pi0.5 Skill Supervision",
+      summary: "Shows bounded manipulation task selection, Pi0.5/LeRobot execution boundary, preflight gates, SARM-lite stage/risk state, Vision dependency, and robot_task_result handoff.",
       rows: [
-        ["robot_profile", latestReportPayload(report, ["robot_profile", "profile_id", "robot_id"]) || "-"],
-        ["policy_path", latestReportPayload(report, ["policy_path", "checkpoint_path", "policy_repo_id"]) || "-"],
-        ["rollout_status", latestReportPayload(report, ["rollout_status", "status", "session_status"]) || "-"],
-        ["safety_limit", latestReportPayload(report, ["max_relative_target", "speed_limit", "action_clamp"]) || "-"],
+        ["task", manipulationTask.task_id || robotTaskResult.task_id || "-"],
+        ["route", `${manipulationTask.source_location || "-"} -> ${manipulationTask.target_location || "-"}`],
+        ["policy_backend", manipulationPolicy.policy_backend || "-"],
+        ["policy_type", manipulationPolicy.policy_type || latestReportPayload(report, ["policy_type"]) || "-"],
+        ["policy_ref", manipulationPolicy.policy_ref || latestReportPayload(report, ["policy_path", "checkpoint_path", "policy_repo_id"]) || "-"],
+        ["preflight", manipulationPreflight.status || "-"],
+        ["current_stage", manipulationStage.current_stage || "-"],
+        ["sarm_progress", manipulationSarm.progress_score === undefined ? "-" : manipulationSarm.progress_score],
+        ["failure_precursor", manipulationSarm.failure_precursor === undefined ? "-" : manipulationSarm.failure_precursor],
+        ["handoff_status", robotTaskResult.handoff_status || manipulationDecision.handoff_status || "-"],
+        ["next_agent", robotTaskResult.next_action || manipulationDecision.recommended_next_agent || "-"],
       ],
-      checklist: ["Resolve robot/camera ports", "Start policy rollout", "Monitor safe motion", "Confirm placement before UTM"],
+      checklist: ["Confirm Vision signal freshness", "Check robot/profile/policy preflight", "Run bounded LeRobot/Pi0.5 rollout", "Use SARM risk/recovery gate", "Require post-place Vision verification"],
     },
     equipment: {
-      title: "Lab Equipment / Bridge Commands",
-      summary: "Collects UTM, printer, Windows PyAutoGUI bridge, and device command status in one equipment-control report.",
+      title: "Lab Equipment / UTM Visual Control",
+      summary: "Shows registered UTM protocol execution, Windows screen-state assertions, Vision physical cross-checks, exported CSV artifact ledger, and the Analysis handoff gate.",
       rows: [
-        ["device", latestReportPayload(report, ["device", "equipment", "tool"]) || "-"],
-        ["bridge", latestReportPayload(report, ["bridge", "bridge_name", "connection", "host"]) || "-"],
-        ["command_status", latestReportPayload(report, ["command_status", "status", "result"]) || "-"],
-        ["safety_state", latestReportPayload(report, ["safety_state", "gate", "allow_start_print", "allow_ejection"]) || "-"],
+        ["program_id", equipmentControlPlan.program_id || equipmentResult.program_id || equipmentHandoff.program_id || "-"],
+        ["bridge", `${equipmentBridge.provider || "-"} / ${equipmentBridge.connection_status || "unknown"}`],
+        ["control_profile", equipmentControlProfile.program_id ? `${equipmentControlProfile.program_id} · locators=${renderRuntimeValue(equipmentControlProfile.locator_count, "0")}` : "-"],
+        ["screen_assertions", `${equipmentScreenPassed}/${equipmentScreenChecks.length} passed · screen_started=${renderRuntimeValue(equipmentCross.screen_started)}`],
+        ["vision_physical_gate", `${equipmentVisionChecks.all_required_ok === true ? "ok" : "blocked/unknown"} · motion=${renderRuntimeValue(equipmentPhysical.vision_motion_confirmed)}`],
+        ["data_artifact", `${equipmentData.status || equipmentResult.status || "-"} · rows=${renderRuntimeValue(equipmentData.row_count_probe, "0")} · parse=${renderRuntimeValue(equipmentCross.data_parse_probe_ok)}`],
+        ["save_export", `${equipmentData.save_method || "-"} · responsibility=${renderRuntimeValue(equipmentCross.save_export_responsibility_ok)}`],
+        ["linux_csv", equipmentLinuxPath || "-"],
+        ["handoff_gate", `${equipmentDecision.handoff_status || equipmentHandoff.status || "-"}${equipmentFailure ? ` · ${equipmentFailure}` : ""}`],
       ],
-      checklist: ["Check bridge health", "Issue device command", "Log response", "Block unsafe equipment state"],
+      checklist: ["Confirm registered UTM profile", "Verify screen state transitions", "Verify Vision physical motion/alignment checks", "Confirm pulled CSV checksum and parse probe", "Only hand off when all gates pass"],
     },
     analysis: {
-      title: "UTM / FEM / Objective Evaluation",
-      summary: "Highlights measured or simulated response, contour artifacts, objective score, and whether the result is usable for BO.",
+      title: "Analysis Agent / UTM-FEM-BO Handoff",
+      summary: "Shows raw UTM ingestion, canonical curve artifacts, quality gate, FEniCSx/CAE simulation evidence, FEM-UTM residuals, and BO-ready handoff status.",
       rows: [
-        ["objective_score", latestReportPayload(report, ["objective_score", "score", "utility"]) || "-"],
-        ["utm_result", latestReportPayload(report, ["utm_result", "force_displacement", "stress_strain"]) || "-"],
-        ["fem_artifacts", latestReportPayload(report, ["fem_artifacts", "contour_url", "cae_report"]) || "-"],
-        ["validation", report.validationItems.length],
+        ["objective_score", analysisPayload.objective_score ?? latestReportPayload(report, ["objective_score", "score", "utility"]) ?? "-"],
+        ["uncertainty", analysisPayload.uncertainty ?? "-"],
+        ["peak_force_N", analysisMetrics.peak_force_N ?? "-"],
+        ["strength_MPa", analysisMetrics.compressive_strength_MPa ?? "-"],
+        ["quality_ok_for_bo", analysisQuality.ok_for_bo === undefined ? "-" : analysisQuality.ok_for_bo],
+        ["quality_score", analysisQuality.score === undefined ? "-" : analysisQuality.score],
+        ["fem_agreement", analysisComparison.agreement_score === undefined ? "-" : analysisComparison.agreement_score],
+        ["fem_agentic_loop", analysisFemLoop.status || "-"],
+        ["fem_selected_iteration", analysisFemLoop.selected_iteration === undefined ? "-" : analysisFemLoop.selected_iteration],
+        ["bo_handoff", analysisBoHandoff.ok_for_bo === undefined ? "-" : analysisBoHandoff.ok_for_bo],
+        ["canonical_curve", analysisArtifacts.canonical_curve || "-"],
+        ["fem_result", analysisArtifacts.fem_result || "-"],
+        ["experiment_evaluation", analysisArtifacts.experiment_evaluation || "-"],
       ],
-      checklist: ["Load UTM/FEM data", "Compute metrics", "Generate contour/evidence", "Package objective for knowledge/BO"],
+      checklist: ["Verify raw file fingerprint", "Check column/unit confidence", "Review quality gate", "Inspect FEM/UTM comparison", "Confirm BO handoff provenance"],
     },
     knowledge: {
-      title: "Knowledge Memory / Evidence Update",
-      summary: "Shows what was written to short-term/long-term memory and which evidence should inform the next optimization step.",
+      title: "Knowledge Memory / Self-Evolution Evidence",
+      summary: "Shows typed research memory, provenance health, failure/success patterns, agent performance ledger, and evidence packs prepared for Self-Evolution review.",
       rows: [
-        ["memory_update", latestReportPayload(report, ["memory_update", "memory", "knowledge_entry"]) || "-"],
-        ["retrieval", latestReportPayload(report, ["retrieval", "query", "similar_cases"]) || "-"],
-        ["evidence_count", report.events.length + report.messages.length],
-        ["handoff_to_bo", report.handoffs.length ? "ready" : "not recorded"],
+        ["experiment_record", knowledgeMemoryIntake.experiment_record_id || "-"],
+        ["agent_performance", knowledgeMemoryIntake.agent_performance_count ?? knowledgePerformance.length ?? "-"],
+        ["failure/success_patterns", `${knowledgeMemoryIntake.failure_pattern_count ?? knowledgeFailures.length ?? 0}/${knowledgeMemoryIntake.success_pattern_count ?? knowledgeSuccesses.length ?? 0}`],
+        ["evolution_packs", knowledgeMemoryIntake.evolution_pack_count ?? knowledgePacks.length ?? "-"],
+        ["evolution_outcomes", knowledgeMemoryIntake.evolution_outcome_count ?? knowledgeOutcomes.length ?? "-"],
+        ["retrieval_coverage", knowledgePayload.retrieval_coverage ?? knowledgeContext.retrieval?.coverage ?? "-"],
+        ["artifact_coverage", knowledgeEvidenceQuality.artifact_link_coverage ?? "-"],
+        ["top_evolution_target", knowledgePacks[0] ? `${knowledgePacks[0].target_type || "target"}:${knowledgePacks[0].target_id || "unknown"}` : "not recorded"],
       ],
-      checklist: ["Summarize experiment evidence", "Update memory", "Retrieve comparable cases", "Pass structured data to BO"],
+      checklist: ["Write provenance-backed memory", "Update failure/success pattern library", "Refresh agent performance ledger", "Prepare evidence packs", "Keep activation behind Self-Evolution/Guardian/operator gates"],
     },
     bo: {
       title: "Bayesian Optimization / Candidate Selection",
-      summary: "Shows the surrogate/acquisition state, evaluated points, and the next candidate proposed for the closed loop.",
+      summary: "Shows measured priors, failure-memory penalties, numeric acquisition, LLM preference reasoning, top-k candidate ranking, and the next Design Agent handoff.",
       rows: [
-        ["strategy", boResult.strategy || "-"],
+        ["strategy", `${boResult.strategy || "-"} / benchmark=${boResult.benchmark_strategy || "-"}`],
         ["acquisition", boResult.acquisition || latestReportPayload(report, ["acquisition", "acquisition_function"]) || "-"],
         ["budget", boResult.budget || "-"],
+        ["priors", `measured=${renderRuntimeValue(boPriorSummary.measured_count, "0")} failed=${renderRuntimeValue(boPriorSummary.failed_count, "0")}`],
+        ["reasoning_source", boReasoning.source || "-"],
+        ["ranked_candidates", boCandidateRanking.length],
         ["recommended_candidate", boRecommendation.candidate_id || boRecommendation.id || "-"],
+        ["combined_score", boRecommendation.combined_score || "-"],
         ["objective_score", boRecommendation.objective_score || boRecommendation.score || "-"],
       ],
-      checklist: ["Update surrogate", "Plot acquisition trace", "Select next candidate", "Record benchmark/evidence"],
+      checklist: ["Ingest Analysis handoff", "Run LLM reasoning pass", "Score numeric acquisition", "Apply failure/constraint penalties", "Hand off next_design_request.v1"],
     },
     guardian: {
-      title: "Safety Gate / Continue-Stop Decision",
-      summary: "Summarizes approval state, recent warnings/errors, and whether the autonomous loop may continue, stop, or recover.",
+      title: "Graph-Wide Guardian Safety Monitor",
+      summary: "Shows graph-wide risk, gate timeline, blocked actions, approval interrupts, incidents, policy schema, and device/data integrity for the active run.",
       rows: [
-        ["warnings", report.warnings.length],
-        ["latest_warning", latestWarning],
-        ["approval_state", latestReportPayload(report, ["approval", "approval_status", "requires_human_approval", "status"]) || "-"],
-        ["decision", latestReportPayload(report, ["guardian_decision", "decision", "next_stage"]) || report.nextAction],
+        ["guardian_status", guardianStatus ? guardianStatus.status || "-" : "not_loaded"],
+        ["risk_score", guardianSummary.risk_score ?? "-"],
+        ["dominant_risks", guardianSummary.dominant_risks || []],
+        ["gate_count", guardianSummary.gate_count ?? "-"],
+        ["blocked_actions", guardianSummary.blocked_action_count ?? "-"],
+        ["pending_approvals", guardianSummary.pending_approval_count ?? "-"],
+        ["incidents", guardianSummary.incident_count ?? "-"],
+        ["latest_decision", guardianLatestDecision.decision || latestReportPayload(report, ["guardian_decision", "decision", "next_stage"]) || report.nextAction],
+        ["latest_reason", guardianLatestDecision.reason_code || latestWarning],
       ],
-      checklist: ["Review safety gates", "Check device faults", "Require human approval when needed", "Decide continue/stop/error"],
+      checklist: ["Review graph-wide risk map", "Resolve approval queue before physical actions", "Inspect incidents and corrective actions", "Verify device/data integrity", "Confirm loop continue/recover/stop decision"],
     },
   };
   const profile = profiles[liveSelectedAgent] || {
@@ -2302,15 +3033,777 @@ function agentSpecificReportProfile(report, status, agentLabel) {
   };
 }
 
+
+
+function renderOrchestratorReportDetails(report) {
+  const state = report && report.state ? report.state : {};
+  const metadata = state && typeof state.run_metadata === "object" && state.run_metadata ? state.run_metadata : {};
+  const followups = Array.isArray(metadata.orchestrator_followups) ? metadata.orchestrator_followups.slice(-12) : [];
+  const decisions = Array.isArray(metadata.orchestrator_decision_register) ? metadata.orchestrator_decision_register.slice(-12) : [];
+  const handoffs = Array.isArray(metadata.orchestrator_handoff_packets) ? metadata.orchestrator_handoff_packets.slice(-12) : [];
+  const reflections = Array.isArray(metadata.loop_reflections) ? metadata.loop_reflections.slice(-5) : [];
+  const latestFollowup = metadata.latest_orchestrator_followup || followups[followups.length - 1] || {};
+  const latestHandoff = metadata.latest_orchestrator_handoff || handoffs[handoffs.length - 1] || {};
+  const orchestrationPlan = metadata.latest_orchestration_plan && typeof metadata.latest_orchestration_plan === "object" ? metadata.latest_orchestration_plan : {};
+  const missionContract = metadata.latest_mission_contract && typeof metadata.latest_mission_contract === "object" ? metadata.latest_mission_contract : metadata.mission_contract && typeof metadata.mission_contract === "object" ? metadata.mission_contract : {};
+  const routeItems = Array.isArray(orchestrationPlan.route) ? orchestrationPlan.route.map((item) => `${item.order || "-"}. ${item.stage || "-"} · ${item.agent || "-"} · ${item.status || "pending"}`) : [];
+  const parallelItems = Array.isArray(orchestrationPlan.parallelizable_checks) ? orchestrationPlan.parallelizable_checks : [];
+  const latestParallelChecks = metadata.latest_orchestrator_parallel_checks && typeof metadata.latest_orchestrator_parallel_checks === "object" ? metadata.latest_orchestrator_parallel_checks : {};
+  const parallelResultItems = Array.isArray(latestParallelChecks.checks) ? latestParallelChecks.checks.map((item) => `${item.name || "check"} · ${item.status || "unknown"} · ${item.summary || ""}`) : [];
+  const serialItems = Array.isArray(orchestrationPlan.serial_physical_actions) ? orchestrationPlan.serial_physical_actions : [];
+  const artifactItems = Array.isArray(orchestrationPlan.expected_artifacts) ? orchestrationPlan.expected_artifacts : [];
+  const followupItems = followups.map((item) => `${item.stage || "-"} · ${item.trigger || "-"} · conf=${renderRuntimeValue(item.confidence)} · ${item.recommendation || item.opinion || ""}`);
+  const decisionItems = decisions.map((item) => `${item.stage || "-"} · ${item.decision || "decision"} -> ${renderRuntimeValue(item.selected)} · ${item.reason || ""}`);
+  const handoffItems = handoffs.map((item) => `${item.from_stage || "-"} -> ${item.to_stage || "-"} · ${item.consumer_agent || "-"} · ${item.packet_id || ""}`);
+  const reflectionItems = reflections.map((item) => `${item.loop_id ?? "-"} · ${item.guardian_decision || "-"} · ${item.next_loop_recommendation || item.operator_visible_summary || ""}`);
+  return `
+    <div class="live-agent-specific-report-detail live-agent-specific-orchestrator-details">
+      <h5>Mission Contract</h5>
+      ${runtimeRows([
+        ["mission_id", missionContract.mission_id || "-"],
+        ["run_id", missionContract.run_id || state.run_id || "-"],
+        ["mode", missionContract.mode || state.mode || "-"],
+        ["stage", missionContract.stage || state.stage || "-"],
+        ["operator_intent", missionContract.operator_intent || "-"],
+        ["active_goal", missionContract.goal || state.active_goal || "-"],
+        ["loop_count", missionContract.loop_id ?? state.loop_count ?? "-"],
+        ["specimen_id", missionContract.specimen_id || (state.current_experiment_spec || {}).specimen_id || "-"],
+        ["requires_guardian_gate", missionContract.requires_guardian_gate === undefined ? true : missionContract.requires_guardian_gate],
+      ])}
+      <h5>Orchestration Plan</h5>
+      ${runtimeRows([
+        ["plan_id", orchestrationPlan.plan_id || "-"],
+        ["graph_id", orchestrationPlan.graph_id || "atr_closed_loop"],
+        ["current_stage", orchestrationPlan.current_stage || state.stage || "-"],
+        ["next_recommended_stage", orchestrationPlan.next_recommended_stage || "-"],
+      ])}
+      ${renderReportList(routeItems, "No compiled Orchestrator route recorded yet.", 16)}
+      <h5>Parallel Read-only Checks</h5>
+      ${renderReportList(parallelItems, "No parallelizable check plan recorded yet.", 12)}
+      <h5>Latest Parallel Check Results</h5>
+      ${runtimeRows([
+        ["batch_id", latestParallelChecks.batch_id || "-"],
+        ["status", latestParallelChecks.status || "not_run"],
+        ["execution_mode", latestParallelChecks.execution_mode || "-"],
+        ["check_count", latestParallelChecks.check_count ?? "-"],
+        ["status_counts", latestParallelChecks.status_counts || {}],
+      ])}
+      ${renderReportList(parallelResultItems, "No executed parallel check results recorded yet.", 12)}
+      <h5>Serial Physical Actions</h5>
+      ${renderReportList(serialItems, "No serial physical action plan recorded yet.", 12)}
+      <h5>Expected Artifacts</h5>
+      ${renderReportList(artifactItems, "No expected artifact ledger recorded yet.", 12)}
+      <h5>Latest Supervisor Opinion</h5>
+      ${runtimeRows([
+        ["stage", latestFollowup.stage || "-"],
+        ["trigger", latestFollowup.trigger || "-"],
+        ["opinion", latestFollowup.opinion || "-"],
+        ["recommendation", latestFollowup.recommendation || "-"],
+        ["concerns", latestFollowup.concerns || []],
+        ["requires_response", latestFollowup.requires_response === undefined ? false : latestFollowup.requires_response],
+      ])}
+      <h5>Follow-up Timeline</h5>
+      ${renderReportList(followupItems, "No Orchestrator follow-up recorded yet.", 16)}
+      <h5>Decision Register</h5>
+      ${renderReportList(decisionItems, "No Orchestrator decisions recorded yet.", 16)}
+      <h5>Handoff Registry</h5>
+      ${runtimeRows([
+        ["latest_from", latestHandoff.from_stage || "-"],
+        ["latest_to", latestHandoff.to_stage || "-"],
+        ["consumer", latestHandoff.consumer_agent || "-"],
+        ["required_outputs", latestHandoff.required_outputs || []],
+      ])}
+      ${renderReportList(handoffItems, "No Orchestrator handoff packet recorded yet.", 14)}
+      <h5>Loop Reflection</h5>
+      ${renderReportList(reflectionItems, "No loop reflection recorded yet.", 12)}
+    </div>
+  `;
+}
+
+function renderDesignReportDetails(report) {
+  const designReport = latestDesignReport(report);
+  if (!designReport || typeof designReport !== "object") return "";
+  const hypothesis = designReport.hypothesis || {};
+  const objective = designReport.objective || {};
+  const generation = designReport.candidate_generation || {};
+  const evaluation = designReport.candidate_evaluation || {};
+  const prior = designReport.prior_context || {};
+  const handoff = designReport.handoff_to_specimen || {};
+  const topCandidates = Array.isArray(generation.top_candidates) ? generation.top_candidates.slice(0, 5) : [];
+  const rejected = Array.isArray(designReport.rejected_candidates) ? designReport.rejected_candidates.slice(0, 6) : [];
+  const decisions = Array.isArray(designReport.decision_register) ? designReport.decision_register.slice(0, 6) : [];
+  const topList = topCandidates.map((item) => `${item.candidate_id || "candidate"} · ${item.geometry_type || "-"} · score=${renderRuntimeValue(item.expected_objective_proxy_score || item.predicted_objective)} · risk=${renderRuntimeValue(item.risk_score)}`);
+  const rejectedList = rejected.map((item) => `${item.candidate_id || "candidate"} · ${item.reason || "rejected"}`);
+  const decisionList = decisions.map((item) => `${item.decision_id || item.decision || "decision"} · ${item.status || "-"} · ${item.rationale || ""}`);
+  return `
+    <div class="live-agent-specific-design-details">
+      ${runtimeRows([
+        ["report_id", designReport.report_id || "-"],
+        ["primary_metric", objective.primary_metric || "-"],
+        ["direction", objective.direction || "-"],
+        ["variables", hypothesis.variables_under_test || "-"],
+        ["selected_candidate", evaluation.selected_candidate_id || "-"],
+        ["manufacturability", evaluation.manufacturability_score || "-"],
+        ["knowledge_prior", prior.knowledge_summary || "-"],
+        ["bo_recommendation", prior.bo_recommendation || "-"],
+        ["handoff_missing", handoff.missing_required_fields || []],
+      ])}
+      <h5>Candidate Board</h5>
+      ${renderReportList(topList, "No candidate board recorded.")}
+      <h5>Rejected / Repair Log</h5>
+      ${renderReportList(rejectedList, "No rejected candidates recorded.")}
+      <h5>Decision Register</h5>
+      ${renderReportList(decisionList, "No design decisions recorded.")}
+    </div>
+  `;
+}
+
+function renderSpecimenReportDetails(report) {
+  const fabricationReport = latestSpecimenFabricationReport(report);
+  if (!fabricationReport || typeof fabricationReport !== "object") return "";
+  const packet = latestSpecimenFabricatedPacket(report) || {};
+  const intent = fabricationReport.fabrication_intent || {};
+  const thread = fabricationReport.digital_thread || {};
+  const plan = fabricationReport.process_plan || {};
+  const cap = plan.cap_skin_policy || {};
+  const adhesion = plan.adhesion_policy || {};
+  const ejection = plan.ejection_policy || {};
+  const monitoring = fabricationReport.monitoring_plan || {};
+  const runtime = fabricationReport.printer_runtime || {};
+  const outcome = fabricationReport.fabrication_outcome || {};
+  const feedback = fabricationReport.feedback_to_design || {};
+  const gates = Array.isArray(fabricationReport.quality_gates) ? fabricationReport.quality_gates : [];
+  const gateItems = gates.map((gate) => `${gate.gate || "gate"} · ${gate.status || "unknown"}${gate.repair ? ` · repair=${renderRuntimeValue(gate.repair)}` : ""}`);
+  const defectClasses = Array.isArray(monitoring.defect_classes) ? monitoring.defect_classes.join(", ") : "-";
+  return `
+    <div class="live-agent-specific-specimen-details">
+      <h5>Fabrication Intent</h5>
+      ${runtimeRows([
+        ["mode", intent.mode || "-"],
+        ["printer_path", intent.printer_path || "-"],
+        ["physical_intent", intent.physical_intent === undefined ? "-" : intent.physical_intent],
+        ["specimen_purpose", intent.specimen_purpose || "-"],
+        ["live_gui_test_spec", intent.live_gui_test_spec === undefined ? "-" : intent.live_gui_test_spec],
+      ])}
+      <h5>Digital Thread</h5>
+      ${runtimeRows([
+        ["candidate_id", thread.candidate_id || "-"],
+        ["specimen_id", thread.specimen_id || "-"],
+        ["design_hash", thread.design_hash || "-"],
+        ["geometry_hash", thread.geometry_hash || "-"],
+        ["stl_path", thread.stl_path || "-"],
+        ["gcode_path", thread.gcode_path || "-"],
+        ["handoff_package_path", thread.handoff_package_path || "-"],
+        ["printer_job_id", thread.printer_job_id || "-"],
+      ])}
+      <h5>Process Plan</h5>
+      ${runtimeRows([
+        ["material", thread.material || "-"],
+        ["printer_profile", thread.printer_profile || "-"],
+        ["slicer_profile_hint", thread.slicer_profile_hint || "-"],
+        ["layer_height_mm", plan.layer_height_mm || "-"],
+        ["first_layer_height_mm", plan.first_layer_height_mm || "-"],
+        ["nozzle_diameter_mm", plan.nozzle_diameter_mm || "-"],
+        ["bed_temperature_c", plan.bed_temperature_c || "-"],
+        ["first_layer_bed_temperature_c", plan.first_layer_bed_temperature_c || "-"],
+        ["slow_first_layer", adhesion.slow_first_layer_enabled === undefined ? "-" : adhesion.slow_first_layer_enabled],
+        ["first_layer_speed_mm_s", adhesion.first_layer_speed_mm_s || "-"],
+        ["cap_skin", `top=${renderRuntimeValue(cap.top_cap_enabled)} bottom=${renderRuntimeValue(cap.bottom_cap_enabled)} thickness=${renderRuntimeValue(cap.skin_thickness_mm)}`],
+        ["ejection_policy", `${ejection.status || "-"} requested=${renderRuntimeValue(ejection.requested)}`],
+        ["estimated_mass_g", plan.estimated_mass_g || "-"],
+        ["estimated_print_time_min", plan.estimated_print_time_min || "-"],
+      ])}
+      <h5>Quality Gates</h5>
+      ${renderReportList(gateItems, "No manufacturing quality gates recorded.")}
+      <h5>Printer Runtime</h5>
+      ${runtimeRows([
+        ["prepare_status", runtime.prepare_status || "-"],
+        ["mode", runtime.mode || "-"],
+        ["path", runtime.path || "-"],
+        ["upload", runtime.upload && (runtime.upload.status || runtime.upload.failure_code || (runtime.upload.ok ? "ok" : "-"))],
+        ["transfer_wait", runtime.transfer_wait && (runtime.transfer_wait.status || runtime.transfer_wait.failure_code || (runtime.transfer_wait.ok ? "ok" : "-"))],
+        ["start", runtime.start && (runtime.start.status || runtime.start.failure_code || (runtime.start.ok ? "ok" : "-"))],
+        ["ejection", runtime.ejection && (runtime.ejection.status || runtime.ejection.failure_code || "-")],
+      ])}
+      ${Array.isArray(runtime.step_trace) && runtime.step_trace.length ? renderStepTrace(runtime.step_trace) : ""}
+      <h5>Monitoring / Feedback</h5>
+      ${runtimeRows([
+        ["observe_prusalink_status", monitoring.observe_prusalink_status],
+        ["observe_transfer_idle", monitoring.observe_transfer_idle],
+        ["observe_camera_after_print", monitoring.observe_camera_after_print],
+        ["layerwise_monitoring_available", monitoring.layerwise_monitoring_available],
+        ["defect_classes", defectClasses],
+        ["outcome", outcome.status || "-"],
+        ["location", outcome.location || "-"],
+        ["failure_code", outcome.failure_code || "-"],
+        ["quality_score", feedback.quality_score === undefined ? "-" : feedback.quality_score],
+        ["uncertainty", feedback.uncertainty === undefined ? "-" : feedback.uncertainty],
+        ["packet", packet.schema || "-"],
+        ["next_action", packet.next_action || "-"],
+      ])}
+    </div>
+  `;
+}
+
+function renderVisionReportDetails(report) {
+  const visionReport = latestVisionReport(report);
+  if (!visionReport || typeof visionReport !== "object") return "";
+  const packet = latestVisionSignalPacket(report) || {};
+  const camera = visionReport.camera_source || {};
+  const backend = visionReport.model_backend || {};
+  const zones = visionReport.scene_map || visionReport.zones || {};
+  const zoneItems = Object.entries(zones).map(([zoneId, zone]) => {
+    const item = zone && typeof zone === "object" ? zone : {};
+    const state = item.state || (item.specimen_present ? "present" : item.clear ? "clear" : "unknown");
+    return `${zoneId} · ${state} · conf=${renderRuntimeValue(item.confidence)}`;
+  });
+  const signals = Array.isArray(visionReport.signal_board) ? visionReport.signal_board : Array.isArray(visionReport.agent_signals) ? visionReport.agent_signals : [];
+  const signalItems = signals.map((signal) => `${signal.signal || "signal"} · ${signal.status || "-"} · ${signal.zone_id || "-"} · conf=${renderRuntimeValue(signal.confidence)} · expires=${renderRuntimeValue(signal.expires_at)}${signal.blocking_reason ? ` · ${signal.blocking_reason}` : ""}`);
+  const events = Array.isArray(visionReport.events) ? visionReport.events : [];
+  const eventItems = events.map((event) => `${event.event_type || "event"} · ${event.status || "-"} · conf=${renderRuntimeValue(event.confidence)}${event.blocking ? " · blocking" : ""}`);
+  const detections = Array.isArray(visionReport.detections) ? visionReport.detections : [];
+  const detectionItems = detections.map((det) => `${det.label || "object"} · ${det.zone || "-"} · conf=${renderRuntimeValue(det.confidence)} · bbox=${renderRuntimeValue(det.bbox_xyxy || [])}`);
+  const artifacts = visionReport.artifacts || {};
+  const safety = visionReport.safety_anomaly || {};
+  const dataset = visionReport.dataset_ledger || {};
+  const knowledge = visionReport.knowledge_payload || {};
+  return `
+    <div class="live-agent-specific-vision-details">
+      <h5>Scene Task / Camera Source</h5>
+      ${runtimeRows([
+        ["task", visionReport.task || "-"],
+        ["camera_key", camera.camera_key || "-"],
+        ["source", camera.source || "-"],
+        ["frame_id", camera.frame_id || "-"],
+        ["timestamp", camera.timestamp || "-"],
+        ["calibration_id", camera.calibration_id || "-"],
+        ["model_backend", `${backend.mode || "-"} / detector=${backend.detector || "-"} / pose=${backend.pose_backend || "-"}`],
+      ])}
+      <h5>Zone State</h5>
+      ${renderReportList(zoneItems, "No zone states recorded.")}
+      <h5>Detection / Tracking</h5>
+      ${renderReportList(detectionItems, "No detections recorded.")}
+      <h5>Agent Signal Board</h5>
+      ${renderReportList(signalItems, "No agent signals recorded.", 32)}
+      <h5>Evidence Timeline</h5>
+      ${renderReportList(eventItems, "No visual events recorded.")}
+      <h5>Evidence Artifacts / Dataset Ledger</h5>
+      ${runtimeRows([
+        ["annotated_frame_path", artifacts.annotated_frame_path || "-"],
+        ["detection_json_path", artifacts.detection_json_path || "-"],
+        ["episode_id", dataset.episode_id || "-"],
+        ["candidate_for_lerobot_dataset", dataset.candidate_for_lerobot_dataset === undefined ? "-" : dataset.candidate_for_lerobot_dataset],
+        ["success_labels", knowledge.success_labels || []],
+        ["failure_labels", knowledge.failure_labels || []],
+      ])}
+      <h5>Safety / Handoff</h5>
+      ${runtimeRows([
+        ["anomaly", safety.anomaly === undefined ? "-" : safety.anomaly],
+        ["low_confidence", safety.low_confidence === undefined ? "-" : safety.low_confidence],
+        ["blocking_reason", safety.blocking_reason || "-"],
+        ["packet", packet.schema || "-"],
+        ["primary_signal", packet.signal_id || "-"],
+        ["next_action", packet.next_action || "-"],
+      ])}
+    </div>
+  `;
+}
+
+function renderManipulationReportDetails(report) {
+  const manipulationReport = latestManipulationReport(report);
+  if (!manipulationReport || typeof manipulationReport !== "object") return "";
+  const packet = latestRobotTaskResult(report) || manipulationReport.handoff_packet || {};
+  const task = manipulationReport.task || {};
+  const policy = manipulationReport.policy_plan || {};
+  const preflight = manipulationReport.preflight || {};
+  const vision = manipulationReport.vision_context || {};
+  const runtime = manipulationReport.rollout_runtime || {};
+  const stage = manipulationReport.stage_machine || {};
+  const sarm = manipulationReport.sarm || {};
+  const decision = manipulationReport.decision || {};
+  const knowledge = manipulationReport.knowledge_payload || {};
+  const blockers = [...(preflight.blocking_reasons || []), ...(preflight.warnings || [])];
+  const completedStages = Array.isArray(stage.completed_stages) ? stage.completed_stages : [];
+  const taxonomy = Array.isArray(stage.stage_taxonomy) ? stage.stage_taxonomy : [];
+  const runtimeEvents = Array.isArray(runtime.events) ? runtime.events.slice(-8).map((event) => `${event.step || event.event_type || "event"} · ${event.status || "-"}${event.detail ? ` · ${event.detail}` : ""}`) : [];
+  const evidencePaths = Array.isArray(knowledge.evidence_paths) ? knowledge.evidence_paths : Array.isArray(packet.evidence_refs) ? packet.evidence_refs.map((ref) => ref.path || ref.type || JSON.stringify(ref)) : [];
+  return `
+    <div class="live-agent-specific-manipulation-details">
+      <h5>Skill Episode Board</h5>
+      ${runtimeRows([
+        ["task_id", task.task_id || packet.task_id || "-"],
+        ["skill_id", packet.skill_id || task.task_id || "-"],
+        ["episode_id", packet.episode_id || manipulationReport.session_id || "-"],
+        ["specimen_id", task.specimen_id || packet.specimen_id || "-"],
+        ["route", `${task.source_location || "-"} -> ${task.target_location || "-"}`],
+        ["terminal_pose", packet.terminal_pose || task.intended_terminal_pose || "-"],
+      ])}
+      <h5>Pi0.5 / LeRobot Boundary</h5>
+      ${runtimeRows([
+        ["policy_backend", policy.policy_backend || "-"],
+        ["policy_type", policy.policy_type || "-"],
+        ["policy_ref", policy.policy_ref || "-"],
+        ["device", policy.device || "-"],
+        ["inference", policy.inference_type || "-"],
+        ["rtc_horizon", policy.rtc_execution_horizon === undefined ? "-" : policy.rtc_execution_horizon],
+        ["rtc_guidance", policy.rtc_max_guidance_weight === undefined ? "-" : policy.rtc_max_guidance_weight],
+        ["max_duration_s", policy.max_duration_s === undefined ? "-" : policy.max_duration_s],
+      ])}
+      <h5>Preflight / Vision Dependency</h5>
+      ${runtimeRows([
+        ["preflight_status", preflight.status || "-"],
+        ["robot_ready", preflight.robot_ready === undefined ? "-" : preflight.robot_ready],
+        ["camera_ready", preflight.camera_ready === undefined ? "-" : preflight.camera_ready],
+        ["policy_ready", preflight.policy_ready === undefined ? "-" : preflight.policy_ready],
+        ["operator_confirmed", preflight.operator_confirmed === undefined ? "-" : preflight.operator_confirmed],
+        ["vision_observation", vision.observation_id || "-"],
+        ["vision_freshness", vision.freshness && vision.freshness.reason ? vision.freshness.reason : "-"],
+        ["pickup_ready", vision.pickup_target_ready === undefined ? "-" : vision.pickup_target_ready],
+        ["fixture_visible", vision.fixture_visible === undefined ? "-" : vision.fixture_visible],
+      ])}
+      <h5>Blocking / Warning Signals</h5>
+      ${renderReportList(blockers, "No Manipulation preflight blockers recorded.", 16)}
+      <h5>SARM-lite Stage Machine</h5>
+      ${runtimeRows([
+        ["current_stage", stage.current_stage || "-"],
+        ["completed", `${completedStages.length}/${taxonomy.length || "?"}`],
+        ["next_expected", stage.next_expected_stage || "-"],
+        ["progress_score", sarm.progress_score === undefined ? "-" : sarm.progress_score],
+        ["failure_precursor", sarm.failure_precursor === undefined ? "-" : sarm.failure_precursor],
+        ["recovery", sarm.recovery_suggested === undefined ? "-" : sarm.recovery_suggested],
+      ])}
+      <h5>Rollout Runtime / Evidence</h5>
+      ${runtimeRows([
+        ["tool", runtime.tool || "-"],
+        ["status", runtime.status || "-"],
+        ["session_id", runtime.session_id || "-"],
+        ["duration_s", runtime.duration_s === undefined ? "-" : runtime.duration_s],
+        ["handoff", packet.handoff_status || decision.handoff_status || "-"],
+        ["next_agent", packet.next_action || decision.recommended_next_agent || "-"],
+        ["reason", decision.reason || "-"],
+      ])}
+      ${renderReportList(runtimeEvents, "No rollout event trace recorded.", 12)}
+      <h5>Knowledge / Dataset Evidence</h5>
+      ${renderReportList(evidencePaths, "No rollout evidence path recorded.", 12)}
+    </div>
+  `;
+}
+
+
+function renderEquipmentReportDetails(report) {
+  const equipmentReport = latestEquipmentReport(report);
+  if (!equipmentReport || typeof equipmentReport !== "object") return "";
+  const equipmentResult = latestEquipmentResult(report) || {};
+  const packet = latestUtmDataReadyPacket(report) || {};
+  const handoff = latestEquipmentHandoffPacket(report) || {};
+  const bridge = equipmentReport.bridge || {};
+  const preconditions = equipmentReport.preconditions || {};
+  const control = equipmentReport.control_plan || {};
+  const profile = control.profile || {};
+  const vision = equipmentReport.vision_cross_checks || {};
+  const physical = equipmentReport.physical_checks || {};
+  const data = equipmentReport.data_acquisition || {};
+  const cross = equipmentReport.cross_checks || {};
+  const decision = equipmentReport.decision || {};
+  const screenChecks = Array.isArray(equipmentReport.screen_checks) ? equipmentReport.screen_checks : [];
+  const artifactRecords = Array.isArray(equipmentReport.artifact_records) ? equipmentReport.artifact_records : [];
+  const screenEvidenceRefs = Array.isArray(equipmentReport.screen_evidence_refs) ? equipmentReport.screen_evidence_refs : [];
+  const dataEvidenceRefs = Array.isArray(equipmentReport.data_evidence_refs) ? equipmentReport.data_evidence_refs : [];
+  const artifactRefs = Array.isArray(equipmentReport.artifact_refs) ? equipmentReport.artifact_refs : [];
+  const failureRetryTable = Array.isArray(equipmentReport.failure_retry_table) ? equipmentReport.failure_retry_table : [];
+  const recovery = equipmentReport.recovery && typeof equipmentReport.recovery === "object" ? equipmentReport.recovery : {};
+  const liveAudit = equipmentReport.live_evidence_audit && typeof equipmentReport.live_evidence_audit === "object" ? equipmentReport.live_evidence_audit : {};
+  const liveScreenAudit = liveAudit.screen_evidence && typeof liveAudit.screen_evidence === "object" ? liveAudit.screen_evidence : {};
+  const livePullAudit = liveAudit.linux_artifact_pull && typeof liveAudit.linux_artifact_pull === "object" ? liveAudit.linux_artifact_pull : {};
+  const liveVisionAudit = liveAudit.vision_evidence && typeof liveAudit.vision_evidence === "object" ? liveAudit.vision_evidence : {};
+  const liveSaveAudit = liveAudit.save_export && typeof liveAudit.save_export === "object" ? liveAudit.save_export : {};
+  const liveRequestAudit = liveAudit.request_audit_log && typeof liveAudit.request_audit_log === "object" ? liveAudit.request_audit_log : {};
+  const hardwareAlert = equipmentReport.hardware_alert && typeof equipmentReport.hardware_alert === "object" ? equipmentReport.hardware_alert : packet.hardware_alert && typeof packet.hardware_alert === "object" ? packet.hardware_alert : equipmentResult.hardware_alert && typeof equipmentResult.hardware_alert === "object" ? equipmentResult.hardware_alert : {};
+  const guardianDecision = hardwareAlert.guardian_decision && typeof hardwareAlert.guardian_decision === "object" ? hardwareAlert.guardian_decision : {};
+  const guardianContract = hardwareAlert.guardian_contract && typeof hardwareAlert.guardian_contract === "object" ? hardwareAlert.guardian_contract : {};
+  const incidentRecords = Array.isArray(equipmentReport.incident_records) ? equipmentReport.incident_records : hardwareAlert.incident_record ? [hardwareAlert.incident_record] : [];
+  const screenItems = screenChecks.map((item) => `${item.checkpoint || "screen"} · ok=${renderRuntimeValue(item.ok)} · state=${item.state || "-"} · artifact=${item.screenshot_artifact || "-"}`);
+  const artifactItems = artifactRecords.map((item) => {
+    const kind = item.kind || "artifact";
+    const artifactId = item.artifact_id || "-";
+    const ref = item.local_path || item.linux_path || item.path || item.windows_path || "-";
+    const rows = item.row_count_probe === undefined ? "" : ` · rows=${renderRuntimeValue(item.row_count_probe)}`;
+    return `${kind} · id=${artifactId} · ref=${ref}${rows}`;
+  });
+  const retryItems = failureRetryTable.map((item) => {
+    const fallback = item.fallback_macro ? ` · fallback=${item.fallback_macro}` : "";
+    return `${item.step || "step"} · status=${item.status || "-"} · code=${item.failure_code || "-"}${fallback} · action=${item.recommended_action || "-"}`;
+  });
+  const visionChecks = vision.checks && typeof vision.checks === "object" ? Object.entries(vision.checks) : [];
+  const visionItems = visionChecks.map(([checkId, item]) => {
+    const check = item && typeof item === "object" ? item : {};
+    return `${checkId} · ok=${renderRuntimeValue(check.ok)} · source=${check.source || "-"} · conf=${renderRuntimeValue(check.confidence)}`;
+  });
+  const blockingReasons = Array.isArray(decision.blocking_reasons) ? decision.blocking_reasons : Array.isArray(vision.blocking_reasons) ? vision.blocking_reasons : [];
+  const riskFlags = Array.isArray(guardianContract.risk_flags) ? guardianContract.risk_flags : Array.isArray(hardwareAlert.risk_flags) ? hardwareAlert.risk_flags : [];
+  const evidenceRefs = Array.isArray(packet.evidence_refs) ? packet.evidence_refs : [];
+  return `
+    <div class="live-agent-specific-equipment-details">
+      <h5>Bridge / Protocol Profile</h5>
+      ${runtimeRows([
+        ["schema", equipmentReport.schema || "-"],
+        ["report_version", equipmentReport.report_version || "-"],
+        ["task_id", equipmentReport.task_id || "-"],
+        ["provider", bridge.provider || "-"],
+        ["connection_status", bridge.connection_status || "-"],
+        ["bridge_host", bridge.bridge_url_host || bridge.host || "-"],
+        ["remote_server_version", bridge.remote_server_version || "-"],
+        ["remote_script_version", bridge.remote_script_version || "-"],
+        ["client_latency_ms", bridge.client_latency_ms === undefined || bridge.client_latency_ms === "" ? "-" : bridge.client_latency_ms],
+        ["pyautogui_available", bridge.pyautogui_available === undefined ? "-" : bridge.pyautogui_available],
+        ["pyautogui_failsafe", bridge.pyautogui_failsafe === undefined || bridge.pyautogui_failsafe === "" ? "-" : bridge.pyautogui_failsafe],
+        ["pyautogui_pause", bridge.pyautogui_pause === undefined || bridge.pyautogui_pause === "" ? "-" : bridge.pyautogui_pause],
+        ["pyautogui_error", bridge.pyautogui_error || "-"],
+        ["live_execute_enabled", bridge.live_execute_enabled === undefined ? "-" : bridge.live_execute_enabled],
+        ["program_id", control.program_id || equipmentResult.program_id || handoff.program_id || "-"],
+        ["macro_version", control.macro_version || "-"],
+        ["locator_backend", control.locator_backend || "-"],
+        ["profile_memory", profile.profile_memory_path || "-"],
+        ["profile_applied", profile.profile_memory_applied === undefined ? "-" : profile.profile_memory_applied],
+        ["locator_count", profile.locator_count === undefined ? "-" : profile.locator_count],
+      ])}
+      <h5>Preconditions</h5>
+      ${runtimeRows(Object.entries(preconditions))}
+      <h5>Screen-State Assertions</h5>
+      ${renderReportList(screenItems, "No UTM screen checks recorded.", 24)}
+      <h5>Vision Physical Cross-Checks</h5>
+      ${runtimeRows([
+        ["all_required_ok", vision.all_required_ok === undefined ? "-" : vision.all_required_ok],
+        ["required", vision.required || []],
+        ["vision_motion_confirmed", physical.vision_motion_confirmed === undefined ? "-" : physical.vision_motion_confirmed],
+        ["specimen_alignment_ok", physical.specimen_alignment_ok === undefined ? "-" : physical.specimen_alignment_ok],
+        ["fixture_safe_to_access", physical.fixture_safe_to_access === undefined ? "-" : physical.fixture_safe_to_access],
+        ["evidence_frame_ids", physical.evidence_frame_ids || vision.evidence_frame_ids || []],
+      ])}
+      ${renderReportList(visionItems, "No Vision cross-check result recorded.", 24)}
+      <h5>UTM Data Ledger</h5>
+      ${runtimeRows([
+        ["status", data.status || equipmentResult.status || "-"],
+        ["save_method", data.save_method || "-"],
+        ["save_attempted_by_agent", data.save_attempted_by_agent === undefined ? "-" : data.save_attempted_by_agent],
+        ["save_confirmation_screen_ok", data.save_confirmation_screen_ok === undefined ? "-" : data.save_confirmation_screen_ok],
+        ["save_export_responsibility_ok", cross.save_export_responsibility_ok === undefined ? (liveSaveAudit.ok === undefined ? "-" : liveSaveAudit.ok) : cross.save_export_responsibility_ok],
+        ["recognized_save_method", liveSaveAudit.recognized_save_method === undefined ? "-" : liveSaveAudit.recognized_save_method],
+        ["windows_path", data.windows_path || liveSaveAudit.windows_path || "-"],
+        ["linux_path", data.linux_path || liveSaveAudit.linux_path || equipmentResult.result_file || equipmentResult.utm_csv_path || packet.result_file || handoff.result_file || "-"],
+        ["sha256", data.sha256 || "-"],
+        ["size_bytes", data.size_bytes === undefined ? "-" : data.size_bytes],
+        ["row_count_probe", data.row_count_probe === undefined ? "-" : data.row_count_probe],
+        ["columns_probe", data.columns_probe || []],
+      ])}
+      <h5>Save/Export Responsibility</h5>
+      ${runtimeRows([
+        ["responsibility_ok", cross.save_export_responsibility_ok === undefined ? (liveSaveAudit.ok === undefined ? "-" : liveSaveAudit.ok) : cross.save_export_responsibility_ok],
+        ["save_method", data.save_method || liveSaveAudit.save_method || "-"],
+        ["save_attempted_by_agent", data.save_attempted_by_agent === undefined ? (liveSaveAudit.save_attempted_by_agent === undefined ? "-" : liveSaveAudit.save_attempted_by_agent) : data.save_attempted_by_agent],
+        ["save_confirmation_screen_ok", data.save_confirmation_screen_ok === undefined ? (liveSaveAudit.save_confirmation_screen_ok === undefined ? "-" : liveSaveAudit.save_confirmation_screen_ok) : data.save_confirmation_screen_ok],
+        ["recognized_save_method", liveSaveAudit.recognized_save_method === undefined ? "-" : liveSaveAudit.recognized_save_method],
+        ["windows_path", data.windows_path || liveSaveAudit.windows_path || "-"],
+        ["linux_path", data.linux_path || liveSaveAudit.linux_path || equipmentResult.result_file || equipmentResult.utm_csv_path || packet.result_file || handoff.result_file || "-"],
+      ])}
+      <h5>Handoff Gate / Blocking Reasons</h5>
+      ${runtimeRows([
+        ["screen_started", cross.screen_started === undefined ? "-" : cross.screen_started],
+        ["physical_motion_started", cross.physical_motion_started === undefined ? "-" : cross.physical_motion_started],
+        ["save_completed", cross.save_completed === undefined ? "-" : cross.save_completed],
+        ["data_file_created", cross.data_file_created === undefined ? "-" : cross.data_file_created],
+        ["data_parse_probe_ok", cross.data_parse_probe_ok === undefined ? "-" : cross.data_parse_probe_ok],
+        ["screen_evidence_complete", cross.screen_evidence_complete === undefined ? "-" : cross.screen_evidence_complete],
+        ["linux_artifact_pulled", cross.linux_artifact_pulled === undefined ? "-" : cross.linux_artifact_pulled],
+        ["save_export_responsibility_ok", cross.save_export_responsibility_ok === undefined ? (liveSaveAudit.ok === undefined ? "-" : liveSaveAudit.ok) : cross.save_export_responsibility_ok],
+        ["vision_evidence_complete", cross.vision_evidence_complete === undefined ? "-" : cross.vision_evidence_complete],
+        ["equipment_status", decision.equipment_status || equipmentResult.status || "-"],
+        ["handoff_status", decision.handoff_status || handoff.status || packet.status || "-"],
+        ["failure_code", decision.failure_code || equipmentResult.failure_code || handoff.failure_code || "-"],
+        ["next_agent", decision.recommended_next_agent || packet.next_action || "-"],
+      ])}
+      ${renderReportList(blockingReasons, "No blocking reasons recorded.", 24)}
+      <h5>Safety Gate / Guardian</h5>
+      ${runtimeRows([
+        ["guardian_status", packet.guardian_status || (hardwareAlert.failure_code ? "block" : "-")],
+        ["blocks_workflow", hardwareAlert.blocks_workflow === undefined ? (guardianContract.ok_for_next_stage === false ? true : "-") : hardwareAlert.blocks_workflow],
+        ["requires_human_approval", hardwareAlert.requires_ack === undefined ? (guardianDecision.requires_human_approval === undefined ? guardianContract.requires_human_approval ?? "-" : guardianDecision.requires_human_approval) : hardwareAlert.requires_ack],
+        ["guardian_route_hint", hardwareAlert.guardian_route_hint || guardianDecision.recommended_action || "-"],
+        ["guardian_decision", guardianDecision.decision || "-"],
+        ["risk_score", hardwareAlert.risk_score === undefined ? guardianDecision.risk_score ?? "-" : hardwareAlert.risk_score],
+        ["active_failure_code", hardwareAlert.failure_code || decision.failure_code || equipmentResult.failure_code || "-"],
+        ["incident_count", incidentRecords.length],
+      ])}
+      ${renderReportList(riskFlags, "No Guardian risk flags recorded.", 16)}
+      <h5>Live Evidence Audit</h5>
+      ${runtimeRows([
+        ["required_for_handoff", liveAudit.required_for_handoff === undefined ? "-" : liveAudit.required_for_handoff],
+        ["screen_evidence_ok", liveScreenAudit.ok === undefined ? "-" : liveScreenAudit.ok],
+        ["missing_screen_checkpoints", liveScreenAudit.missing_checkpoints || []],
+        ["linux_artifact_pull_ok", livePullAudit.ok === undefined ? "-" : livePullAudit.ok],
+        ["linux_pull_status", livePullAudit.status || "-"],
+        ["linux_path", livePullAudit.linux_path || "-"],
+        ["save_export_ok", liveSaveAudit.ok === undefined ? "-" : liveSaveAudit.ok],
+        ["save_export_method", liveSaveAudit.save_method || "-"],
+        ["save_export_windows_path", liveSaveAudit.windows_path || "-"],
+        ["vision_evidence_ok", liveVisionAudit.ok === undefined ? "-" : liveVisionAudit.ok],
+        ["vision_frame_ids", liveVisionAudit.evidence_frame_ids || []],
+        ["request_log_ok", liveRequestAudit.ok === undefined ? "-" : liveRequestAudit.ok],
+        ["request_log_path", liveRequestAudit.path || "-"],
+        ["request_log_execute_seen", liveRequestAudit.execute_event_seen === undefined ? "-" : liveRequestAudit.execute_event_seen],
+        ["request_log_execute_count", liveRequestAudit.execute_event_count === undefined ? "-" : liveRequestAudit.execute_event_count],
+        ["request_log_last_execute_at", liveRequestAudit.last_execute_at || "-"],
+      ])}
+      <h5>Artifact / Evidence Ledger</h5>
+      ${runtimeRows([
+        ["artifact_refs", artifactRefs.length ? artifactRefs : evidenceRefs],
+        ["screen_evidence_refs", screenEvidenceRefs],
+        ["data_evidence_refs", dataEvidenceRefs],
+      ])}
+      ${renderReportList(artifactItems, "No bridge artifacts recorded.", 24)}
+      <h5>Failure / Recovery</h5>
+      ${runtimeRows([
+        ["status", recovery.status || "-"],
+        ["operator_intervention_required", recovery.operator_intervention_required === undefined ? "-" : recovery.operator_intervention_required],
+        ["retry_count", recovery.retry_count === undefined ? "-" : recovery.retry_count],
+        ["fallback_macros", recovery.fallback_macros || []],
+        ["recommended_action", recovery.recommended_action || "-"],
+      ])}
+      ${renderReportList(retryItems, "No failure or retry table recorded.", 24)}
+      <h5>Evidence Refs</h5>
+      ${renderReportList(evidenceRefs, "No UTM data evidence refs recorded.", 12)}
+    </div>
+  `;
+}
+
+function renderAnalysisReportDetails(report) {
+  const analysis = latestAnalysisPayload(report) || {};
+  const source = analysis.source || {};
+  const fingerprint = source.fingerprint || {};
+  const columnMapping = source.column_mapping || {};
+  const metrics = analysis.utm_metrics || {};
+  const quality = analysis.quality_gate || analysis.data_quality_gate || {};
+  const comparison = analysis.comparison || {};
+  const femComparison = analysis.fem_utm_comparison || {};
+  const femResult = analysis.fem_result || {};
+  const femMetrics = analysis.fem_metrics || {};
+  const femLoop = analysis.fem_agentic_loop || {};
+  const caeResult = analysis.cae_result || {};
+  const artifacts = analysis.analysis_artifacts || {};
+  const boHandoff = latestAnalysisBoHandoff(report) || {};
+  const failureTags = Array.isArray(analysis.failure_tags) ? analysis.failure_tags : [];
+  const closedLoopSources = Array.isArray(analysis.closed_loop_sources) ? analysis.closed_loop_sources : [];
+  const artifactRows = Object.entries(artifacts).map(([key, value]) => `${key} · ${renderRuntimeValue(value)}`);
+  return `
+    <div class="live-agent-specific-report-detail">
+      <h5>Raw Data Ledger</h5>
+      ${runtimeRows([
+        ["source", source.source || "-"],
+        ["parser_id", source.parser_id || source.format || "-"],
+        ["path", source.path || "-"],
+        ["sha256", fingerprint.sha256 || "-"],
+        ["size_bytes", fingerprint.size_bytes === undefined ? "-" : fingerprint.size_bytes],
+        ["column_mapping_confidence", columnMapping.column_mapping_confidence === undefined ? "-" : columnMapping.column_mapping_confidence],
+        ["unit_mapping_confidence", columnMapping.unit_mapping_confidence === undefined ? "-" : columnMapping.unit_mapping_confidence],
+      ])}
+      <h5>UTM Metrics / Quality Gate</h5>
+      ${runtimeRows([
+        ["peak_force_N", metrics.peak_force_N ?? "-"],
+        ["initial_stiffness_N_per_mm", metrics.initial_stiffness_N_per_mm ?? "-"],
+        ["compressive_strength_MPa", metrics.compressive_strength_MPa ?? "-"],
+        ["apparent_modulus_MPa", metrics.apparent_modulus_MPa ?? "-"],
+        ["energy_absorption_mJ", metrics.energy_absorption_mJ ?? "-"],
+        ["specific_energy_absorption_J_per_g", metrics.specific_energy_absorption_J_per_g ?? "-"],
+        ["ok_for_metrics", quality.ok_for_metrics === undefined ? "-" : quality.ok_for_metrics],
+        ["ok_for_bo", quality.ok_for_bo === undefined ? "-" : quality.ok_for_bo],
+        ["quality_score", quality.score === undefined ? "-" : quality.score],
+        ["quality_warnings", quality.warnings || []],
+      ])}
+      <h5>FEM / FEniCSx / CAE Evidence</h5>
+      ${runtimeRows([
+        ["closed_loop_sources", closedLoopSources],
+        ["fenicsx_status", femResult.status || "-"],
+        ["fenicsx_backend", femResult.solver_backend || "-"],
+        ["fem_cache", femResult.cache_status || "-"],
+        ["predicted_peak_force_N", femMetrics.predicted_peak_force_N ?? "-"],
+        ["predicted_stiffness_N_per_mm", femMetrics.predicted_initial_stiffness_N_per_mm ?? "-"],
+        ["cae_status", caeResult.status || "-"],
+        ["fem_utm_agreement", femComparison.agreement_score === undefined ? "-" : femComparison.agreement_score],
+        ["fem_utm_tags", femComparison.discrepancy_tags || []],
+      ])}
+      <h5>LLM Agentic FEM Loop</h5>
+      ${runtimeRows([
+        ["loop_status", femLoop.status || "-"],
+        ["llm_plan_source", femLoop.llm_plan && femLoop.llm_plan.source ? femLoop.llm_plan.source : "-"],
+        ["selected_iteration", femLoop.selected_iteration === undefined ? "-" : femLoop.selected_iteration],
+        ["acceptance_threshold", femLoop.acceptance_threshold === undefined ? "-" : femLoop.acceptance_threshold],
+        ["tool_sequence", femLoop.tool_sequence || []],
+        ["safety_rule", femLoop.safety_rule || "-"],
+      ])}
+      ${renderReportList((femLoop.iterations || []).map((item) => `iter=${item.iteration} · mesh=${item.mesh_size_mm} mm · agreement=${renderRuntimeValue(item.agreement_score)} · accepted=${renderRuntimeValue(item.accepted)} · cache=${item.cache_status || "-"}`), "No FEM agentic iterations recorded.", 12)}
+      <h5>BO Handoff / Loop Comparison</h5>
+      ${runtimeRows([
+        ["bo_schema", boHandoff.schema_version || "-"],
+        ["ok_for_bo", boHandoff.ok_for_bo === undefined ? "-" : boHandoff.ok_for_bo],
+        ["objective", boHandoff.objective || {}],
+        ["comparison_mode", comparison.mode || "-"],
+        ["comparison_summary", comparison.summary || "-"],
+        ["failure_tags", failureTags],
+      ])}
+      <h5>Analysis Artifact Ledger</h5>
+      ${renderReportList(artifactRows, "No Analysis artifact paths recorded.", 28)}
+    </div>
+  `;
+}
+
+
+function renderKnowledgeReportDetails(report) {
+  const payload = latestKnowledgePayload(report) || {};
+  const knowledgeReport = latestKnowledgeReport(report) || {};
+  const context = latestKnowledgeContext(report) || {};
+  const evolution = latestKnowledgeEvolutionProposal(report) || {};
+  const intake = knowledgeReport.memory_intake || {};
+  const quality = knowledgeReport.evidence_quality || context.evidence_quality || {};
+  const dataQuality = knowledgeReport.data_quality_map || {};
+  const failures = Array.isArray(knowledgeReport.failure_patterns) ? knowledgeReport.failure_patterns : [];
+  const successes = Array.isArray(knowledgeReport.success_patterns) ? knowledgeReport.success_patterns : [];
+  const performance = Array.isArray(knowledgeReport.agent_performance_records) ? knowledgeReport.agent_performance_records : [];
+  const packs = Array.isArray(evolution.evidence_packs) ? evolution.evidence_packs : [];
+  const prefill = Array.isArray(evolution.prefill_tasks) ? evolution.prefill_tasks : [];
+  const outcomes = Array.isArray(evolution.outcomes) ? evolution.outcomes : Array.isArray(knowledgeReport.evolution_outcomes) ? knowledgeReport.evolution_outcomes : [];
+  const graphStatus = knowledgeReport.graph_backend_status || context.graph_backend_status || payload.graph_backend_status || {};
+  const memoryRows = runtimeRows([
+    ["experiment_record_id", intake.experiment_record_id || "-"],
+    ["agent_performance_count", intake.agent_performance_count ?? performance.length ?? 0],
+    ["failure_pattern_count", intake.failure_pattern_count ?? failures.length ?? 0],
+    ["success_pattern_count", intake.success_pattern_count ?? successes.length ?? 0],
+    ["evolution_pack_count", intake.evolution_pack_count ?? packs.length ?? 0],
+    ["retrieval_coverage", payload.retrieval_coverage ?? context.retrieval?.coverage ?? "-"],
+    ["artifact_link_coverage", quality.artifact_link_coverage ?? "-"],
+    ["agent_report_coverage", quality.agent_report_coverage ?? "-"],
+  ]);
+  const failureItems = failures.map((item) => `${item.pattern_id || item.failure_type || "failure"} · recurrence=${renderRuntimeValue(item.recurrence_count, "1")} · ${compactText(item.root_cause_hypothesis || item.failure_type || "", 160)}`);
+  const successItems = successes.map((item) => `${item.skill_id || item.scope || "success"} · agent=${item.agent_id || "-"} · ${compactText(item.procedure_summary || item.scope || "", 160)}`);
+  const performanceItems = performance.map((item) => `${item.agent_id || item.stage || "agent"} · status=${item.status || "-"} · score=${renderRuntimeValue(item.score)} · missing=${renderRuntimeValue((item.signals || {}).missing_required_fields || [])}`);
+  const packItems = packs.map((pack) => `${pack.pack_id || "pack"} · ${pack.target_type || "target"}:${pack.target_id || "-"} · priority=${renderRuntimeValue(pack.priority)} · ${compactText(pack.objective || (pack.why_this_target || []).join("; "), 180)}`);
+  const prefillItems = prefill.map((task) => `${task.target_type || "target"}:${task.target_id || "-"} · ${compactText(task.objective || renderRuntimeValue(task.constraints || {}), 180)}`);
+  const outcomeItems = outcomes.map((item) => `${item.variant_id || item.outcome_id || "variant"} · ${item.target_type || "target"}:${item.target_id || "-"} · verdict=${item.verdict || "observe"} · rollback=${renderRuntimeValue(item.rollback_recommended)}`);
+  const missingArtifacts = Array.isArray(dataQuality.missing_artifacts) ? dataQuality.missing_artifacts : [];
+  return `
+    <div class="live-agent-specific-report-detail live-agent-specific-knowledge-details">
+      <h5>Memory Ledger</h5>
+      ${memoryRows}
+      <h5>Failure Pattern Memory</h5>
+      ${renderReportList(failureItems, "No failure pattern recorded.", 12)}
+      <h5>Success / Skill Library</h5>
+      ${renderReportList(successItems, "No reusable success pattern recorded.", 12)}
+      <h5>Agent Performance Ledger</h5>
+      ${renderReportList(performanceItems, "No agent performance record available.", 16)}
+      <h5>Self-Evolution Evidence Packs</h5>
+      ${renderReportList(packItems, "No evidence pack prepared.", 10)}
+      <h5>Evolution Lab Prefill</h5>
+      ${renderReportList(prefillItems, "No Evolution Lab prefill task prepared.", 8)}
+      <h5>Evolution Outcome Attribution</h5>
+      ${renderReportList(outcomeItems, "No activated variant outcome attribution recorded yet.", 8)}
+      <h5>Optional Graph Backend</h5>
+      ${runtimeRows([
+        ["enabled", graphStatus.enabled === undefined ? false : graphStatus.enabled],
+        ["backend", graphStatus.backend || "disabled"],
+        ["ok", graphStatus.ok === undefined ? "-" : graphStatus.ok],
+        ["nodes_written", graphStatus.nodes_written ?? graphStatus.node_count ?? "-"],
+        ["edges_written", graphStatus.edges_written ?? graphStatus.edge_count ?? "-"],
+        ["error", graphStatus.error || ""],
+      ])}
+      <h5>Data Quality / Missing Evidence</h5>
+      ${renderReportList(missingArtifacts.map((item) => renderRuntimeValue(item)), "No missing artifact recorded.", 12)}
+    </div>
+  `;
+}
+
+function renderBoReportDetails(report) {
+  const boResult = latestReportBoResult(report) || {};
+  if (!boResult || typeof boResult !== "object" || !Object.keys(boResult).length) return "";
+  const reasoning = boResult.reasoning || {};
+  const strategy = reasoning.strategy_recommendation || {};
+  const recommendation = boResult.recommendation || {};
+  const nextDesign = boResult.next_design_request || {};
+  const prior = boResult.prior_summary || {};
+  const hypotheses = Array.isArray(reasoning.hypotheses) ? reasoning.hypotheses.slice(0, 6) : [];
+  const ranking = Array.isArray(boResult.candidate_ranking) ? boResult.candidate_ranking.slice(0, 8) : Array.isArray(boResult.candidate_pool) ? boResult.candidate_pool.slice(0, 8) : [];
+  const artifacts = boResult.artifacts || {};
+  const hypothesisItems = hypotheses.map((item) => `${item.id || "h"} · conf=${renderRuntimeValue(item.confidence)} · ${item.claim || ""}`);
+  const rankingItems = ranking.map((item) => {
+    const constraints = item.constraints || {};
+    const llm = item.llm || {};
+    return `${item.candidate_id || "candidate"} · combined=${renderRuntimeValue(item.combined_score)} · acq=${renderRuntimeValue((item.numeric || {}).acquisition_value)} · llm=${renderRuntimeValue(llm.preference_score)} · risk=${renderRuntimeValue(constraints.risk_score)} · valid=${renderRuntimeValue(constraints.valid)} · ${compactBoParams(item.parameters || {})}`;
+  });
+  const artifactRows = Object.entries(artifacts).map(([key, value]) => `${key} · ${renderRuntimeValue(value)}`);
+  return `
+    <div class="live-agent-specific-report-detail live-agent-specific-bo-details">
+      <h5>Evidence / Prior Intake</h5>
+      ${runtimeRows([
+        ["prior_count", prior.prior_count ?? "-"],
+        ["measured_count", prior.measured_count ?? "-"],
+        ["failed_count", prior.failed_count ?? "-"],
+        ["best_score", prior.best_score ?? "-"],
+        ["knowledge_context", boResult.knowledge_context || {}],
+      ])}
+      <h5>Reasoning Audit</h5>
+      ${runtimeRows([
+        ["reasoning_schema", reasoning.schema_version || "-"],
+        ["source", reasoning.source || "-"],
+        ["strategy_recommendation", `${strategy.strategy || "-"} / ${strategy.acquisition || "-"}`],
+        ["explore_exploit", `${renderRuntimeValue(strategy.exploration_weight)} / ${renderRuntimeValue(strategy.exploitation_weight)}`],
+        ["operator_summary", reasoning.operator_summary || "-"],
+      ])}
+      ${renderReportList(hypothesisItems, "No BO hypotheses recorded.", 12)}
+      <h5>Candidate Ranking</h5>
+      ${renderReportList(rankingItems, "No candidate ranking recorded.", 16)}
+      <h5>Recommendation / Handoff</h5>
+      ${runtimeRows([
+        ["candidate_id", recommendation.candidate_id || "-"],
+        ["combined_score", recommendation.combined_score ?? "-"],
+        ["why_this_candidate", recommendation.why_this_candidate || recommendation.reason || "-"],
+        ["why_not_best_exploitation_only", recommendation.why_not_best_exploitation_only || "-"],
+        ["next_design_schema", nextDesign.schema || "-"],
+        ["next_design_status", nextDesign.status || "-"],
+        ["constraints", nextDesign.constraints || recommendation.parameters || {}],
+      ])}
+      <h5>Artifacts</h5>
+      ${renderReportList(artifactRows, "No BO artifact paths recorded.", 8)}
+    </div>
+  `;
+}
+
 function renderAgentSpecificReportSection(report, status, agentLabel) {
   const profile = agentSpecificReportProfile(report, status, agentLabel);
   const rows = runtimeRows(profile.rows || []);
   const checklist = renderReportList(profile.checklist || [], "No role-specific checklist recorded.");
+  const orchestratorDetails = liveSelectedAgent === "orchestrator" ? renderOrchestratorReportDetails(report) : "";
+  const designDetails = liveSelectedAgent === "design" ? renderDesignReportDetails(report) : "";
+  const specimenDetails = liveSelectedAgent === "specimen" ? renderSpecimenReportDetails(report) : "";
+  const visionDetails = liveSelectedAgent === "vision" ? renderVisionReportDetails(report) : "";
+  const manipulationDetails = liveSelectedAgent === "manipulation" ? renderManipulationReportDetails(report) : "";
+  const equipmentDetails = liveSelectedAgent === "equipment" ? renderEquipmentReportDetails(report) : "";
+  const analysisDetails = liveSelectedAgent === "analysis" ? renderAnalysisReportDetails(report) : "";
+  const knowledgeDetails = liveSelectedAgent === "knowledge" ? renderKnowledgeReportDetails(report) : "";
+  const boDetails = liveSelectedAgent === "bo" ? renderBoReportDetails(report) : "";
+  const guardianDetails = liveSelectedAgent === "guardian" ? renderGuardianReportDetails(report) : "";
   return `
     <section class="runtime-card-section live-report-section live-agent-specific-report">
       <h4>${escapeHtml(profile.title)}</h4>
       <p class="live-agent-specific-summary">${escapeHtml(profile.summary || "")}</p>
       ${rows}
+      ${orchestratorDetails}
+      ${designDetails}
+      ${specimenDetails}
+      ${visionDetails}
+      ${manipulationDetails}
+      ${equipmentDetails}
+      ${analysisDetails}
+      ${knowledgeDetails}
+      ${boDetails}
+      ${guardianDetails}
       <div class="live-agent-specific-checklist">${checklist}</div>
     </section>
   `;
@@ -2907,6 +4400,21 @@ function renderReportPanel(session) {
   const agentLabel = liveAgentLabel(liveSelectedAgent);
   const status = eventStatusForAgent(liveSelectedAgent, report.state, liveRunningFlag(session, liveLastSnapshot || {}, report.state));
   const profile = agentSpecificReportProfile(report, status, agentLabel);
+  const designEvidence = liveSelectedAgent === "design" ? latestDesignReport(report) : null;
+  const specimenEvidence = liveSelectedAgent === "specimen" ? latestSpecimenFabricationReport(report) : null;
+  const visionEvidence = liveSelectedAgent === "vision" ? latestVisionReport(report) : null;
+  const manipulationEvidence = liveSelectedAgent === "manipulation" ? latestManipulationReport(report) : null;
+  const reportSubtitle = latestMessage
+    ? ` · ${compactText(latestMessage.content, 220)}`
+    : designEvidence
+      ? " · Candidate evidence, selection rationale, and handoff packet are available."
+      : specimenEvidence
+        ? " · Fabrication digital thread, process plan, quality gates, and handoff evidence are available."
+        : visionEvidence
+          ? " · Scene map, signal board, visual evidence, and freshness-gated handoff are available."
+          : manipulationEvidence
+            ? " · Pi0.5/LeRobot preflight, SARM progress, and robot_task_result handoff are available."
+            : " · No report yet. Backend/Timeline remain available.";
   const messageCards = messages.slice(-4).map((msg, index) => `
     <article class="live-report-message">
       <small>${escapeHtml(formatTime(msg.timestamp))} · ${escapeHtml(roleLabel(msg.role))}${msg.model ? ` · ${escapeHtml(msg.model)}` : ""}</small>
@@ -2922,7 +4430,7 @@ function renderReportPanel(session) {
       <div class="live-report-head">
         <div>
           <h3>${escapeHtml(agentLabel)} Report</h3>
-          <p><span class="live-report-role-tag">${escapeHtml(profile.title)}</span>${escapeHtml(latestMessage ? ` · ${compactText(latestMessage.content, 220)}` : " · No report yet. Backend/Timeline remain available.")}</p>
+          <p><span class="live-report-role-tag">${escapeHtml(profile.title)}</span>${escapeHtml(reportSubtitle)}</p>
         </div>
         <div class="live-report-actions" aria-label="report actions">
           <button class="btn live-report-action" data-report-action="backend" type="button" title="Open backend trace" aria-label="Open backend trace"><span class="live-report-action-icon" aria-hidden="true">{}</span><span class="live-report-action-label">BACKEND</span></button>
@@ -2948,6 +4456,18 @@ function backendField(payload, keys) {
   if (!payload || typeof payload !== "object") return null;
   for (const key of keys) {
     if (payload[key] !== undefined && payload[key] !== null && payload[key] !== "") return payload[key];
+    if (typeof key === "string" && key.includes(".")) {
+      let cursor = payload;
+      let found = true;
+      for (const part of key.split(".")) {
+        if (!cursor || typeof cursor !== "object" || cursor[part] === undefined || cursor[part] === null || cursor[part] === "") {
+          found = false;
+          break;
+        }
+        cursor = cursor[part];
+      }
+      if (found) return cursor;
+    }
   }
   return null;
 }
@@ -3557,7 +5077,7 @@ function isRuntimeFaultEvent(event) {
   const payload = eventPayload(event);
   const kind = eventTimelineKind(event);
   const text = `${event.event_type || event.type || ""} ${event.message || ""} ${event.status || ""} ${event.level || event.severity || ""} ${payload.device || ""} ${payload.tool || ""} ${payload.failure_code || ""} ${JSON.stringify(payload)}`.toLowerCase();
-  const devicePattern = /device|printer|prusa|slicer|gcode|robot|lerobot|teleop|rollout|camera|vision|utm|bridge|windows|pyautogui|equipment|gpu|llm|stream|sync|sensor|fault|unsafe|failed|error|timeout|connection|disconnect/;
+  const devicePattern = /guardian|incident|gate|device|printer|prusa|slicer|gcode|robot|lerobot|teleop|rollout|camera|vision|utm|bridge|windows|pyautogui|equipment|gpu|llm|stream|sync|sensor|fault|unsafe|failed|error|timeout|connection|disconnect/;
   if (kind === "error") return true;
   return kind === "warning" && devicePattern.test(text);
 }
@@ -3902,6 +5422,18 @@ function renderLiveRuntime(session) {
   persistLiveUiState();
 }
 
+async function requestLiveGuardianStatus(runId, options = {}) {
+  const endpoint = runId ? `/api/runs/${encodeURIComponent(runId)}/guardian/status` : "/api/guardian/status";
+  try {
+    const payload = await fetchJsonOrThrow(endpoint);
+    liveGuardianStatus = normalizeGuardianStatusPayload(payload) || liveGuardianStatus;
+    return liveGuardianStatus;
+  } catch (err) {
+    if (!options.silent) setChatStatus(`GUARDIAN STATUS ERROR: ${err}`, "warning");
+    return null;
+  }
+}
+
 async function refreshLiveRunDetails(session) {
   const state = session.state || {};
   const runId = state.run_id || "";
@@ -3913,8 +5445,9 @@ async function refreshLiveRunDetails(session) {
     fetch(`/api/runs/${encodeURIComponent(runId)}/events`).then((res) => (res.ok ? res.json() : { events: [] })).catch(() => ({ events: [] })),
     fetch(`/api/runs/${encodeURIComponent(runId)}/artifacts`).then((res) => (res.ok ? res.json() : { artifacts: [] })).catch(() => ({ artifacts: [] })),
     fetch(`/api/runs/${encodeURIComponent(runId)}/approvals`).then((res) => (res.ok ? res.json() : { approvals: [], pending: [], resolved: [] })).catch(() => ({ approvals: [], pending: [], resolved: [] })),
+    fetch(`/api/runs/${encodeURIComponent(runId)}/guardian/status`).then((res) => (res.ok ? res.json() : null)).catch(() => null),
   ];
-  const [events, artifacts, approvals] = await Promise.all(endpoints);
+  const [events, artifacts, approvals, guardianStatus] = await Promise.all(endpoints);
   liveRunEvents = Array.isArray(events.events) ? events.events : [];
   syncOperatorReportStateFromEvents({ preserveLocal: false });
   liveRunArtifacts = Array.isArray(artifacts.artifacts) ? artifacts.artifacts : [];
@@ -3923,6 +5456,7 @@ async function refreshLiveRunDetails(session) {
     pending: Array.isArray(approvals.pending) ? approvals.pending : [],
     resolved: Array.isArray(approvals.resolved) ? approvals.resolved : [],
   });
+  liveGuardianStatus = normalizeGuardianStatusPayload(guardianStatus) || normalizeGuardianStatusPayload(liveLastSnapshot.guardian_status) || liveGuardianStatus;
   renderLiveRuntime(session);
 }
 
@@ -3988,6 +5522,7 @@ function tickLiveRuntimeClock() {
 function setLiveGuiDebugState(payload = {}) {
   const session = payload.session || liveLastSession || {};
   liveLastSnapshot = payload.snapshot || liveLastSnapshot || {};
+  liveGuardianStatus = normalizeGuardianStatusPayload(payload.guardian_status) || normalizeGuardianStatusPayload(liveLastSnapshot.guardian_status) || liveGuardianStatus;
   liveRunEvents = Array.isArray(payload.events) ? payload.events : liveRunEvents;
   liveRunArtifacts = Array.isArray(payload.artifacts) ? payload.artifacts : liveRunArtifacts;
   liveGraphPayload = payload.graph || liveGraphPayload;
@@ -4013,6 +5548,7 @@ window.__liveGuiDebugSnapshot = function liveGuiDebugSnapshot() {
     reviewed_agents: liveReviewedAgents,
     operator_report_state_run_id: liveOperatorReportStateRunId,
     approvals: liveApprovals,
+    guardian_status: liveGuardianStatusPayload(),
     graph_loaded: Boolean(liveGraphPayload),
     stream_state: liveStreamState,
     sync_state: liveSyncState,
@@ -4091,6 +5627,7 @@ async function refreshPlanningState(options = {}) {
       if (!sessionRes.ok) throw new Error(`session HTTP ${sessionRes.status}`);
       const session = await sessionRes.json();
       liveLastSnapshot = snapshotRes.ok ? await snapshotRes.json() : {};
+      liveGuardianStatus = normalizeGuardianStatusPayload(liveLastSnapshot.guardian_status) || liveGuardianStatus;
       const recentPayload = eventsRes.ok ? await eventsRes.json() : { events: [] };
       await refreshLiveGraphPayload();
       liveRecentEvents = Array.isArray(recentPayload.events) ? recentPayload.events : [];
@@ -4254,7 +5791,7 @@ function connectPlanningEventStream() {
         liveRecentEvents.push(data);
         liveRecentEvents = liveRecentEvents.slice(-160);
       }
-      if (eventType.startsWith("planning_") || eventType === "planning_message" || eventType.startsWith("approval.") || eventType.includes("agent") || eventType.includes("run") || eventType.includes("device") || eventType.includes("evolution")) {
+      if (eventType.startsWith("planning_") || eventType === "planning_message" || eventType.startsWith("approval.") || eventType.includes("agent") || eventType.includes("run") || eventType.includes("device") || eventType.includes("guardian") || eventType.includes("incident") || eventType.includes("evolution")) {
         schedulePlanningRefresh();
       } else {
         renderLiveRuntime(liveLastSession);
@@ -4882,6 +6419,41 @@ document.addEventListener("click", (event) => {
   if (backendButton) {
     setLiveView("backend");
     renderLiveRuntime(liveLastSession);
+    return;
+  }
+  const guardianNoteButton = event.target.closest(".live-guardian-note-action");
+  if (guardianNoteButton) {
+    const incidentId = guardianNoteButton.dataset.incidentId || "incident";
+    const reasonCode = guardianNoteButton.dataset.reasonCode || "";
+    liveSelectedAgent = "guardian";
+    setLiveChatTargetMode(liveChatTargetForAgent("guardian"));
+    const noteText = window.prompt(`Guardian incident note for ${incidentId}${reasonCode ? ` (${reasonCode})` : ""}`, "");
+    if (noteText && noteText.trim()) {
+      const runId = liveCurrentRunId();
+      const endpoint = runId
+        ? `/api/runs/${encodeURIComponent(runId)}/guardian/incidents/${encodeURIComponent(incidentId)}/notes`
+        : `/api/guardian/incidents/${encodeURIComponent(incidentId)}/notes`;
+      fetchJsonOrThrow(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ note: noteText.trim(), operator: "live_gui", source: "guardian_report" }),
+      })
+        .then((data) => {
+          if (data.event) liveRunEvents.push(data.event);
+          setChatStatus("GUARDIAN NOTE SAVED", "ok");
+          requestLiveGuardianStatus(liveCurrentRunId(), { silent: true }).finally(() => renderLiveRuntime(liveLastSession));
+        })
+        .catch((err) => setChatStatus(`GUARDIAN NOTE ERROR: ${err}`, "warning"));
+    } else {
+      draftRuntimeChat(`Guardian incident note for ${incidentId}${reasonCode ? ` (${reasonCode})` : ""}: `, "guardian_note");
+      recordLiveOperatorEvent(
+        "incident_note_requested",
+        `Guardian incident note requested for ${incidentId}.`,
+        { incident_id: incidentId, reason_code: reasonCode, source_action: "guardian.incident_note" },
+        "operator.guardian"
+      ).catch(() => {});
+      setChatStatus("GUARDIAN NOTE", "idle");
+    }
     return;
   }
   const approvalButton = event.target.closest(".live-approval-action");

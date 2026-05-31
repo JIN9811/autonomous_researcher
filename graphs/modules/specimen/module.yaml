@@ -15,20 +15,38 @@ module:
   - experiment.evaluate
   - printer.prepare
   internal_graph:
-    - id: 01_resolve_print_profile
-      label: Resolve Print Profile
+    - id: 01_spec_intake
+      label: Spec Intake / Required Field Gate
       kind: internal_step
-    - id: 02_generate_tpms_stl
-      label: Generate Tpms Stl
+    - id: 02_resolve_fabrication_intent
+      label: Resolve Fabrication Intent
       kind: internal_step
-    - id: 03_slice_gcode
-      label: Slice Gcode
+    - id: 03_initialize_digital_thread
+      label: Initialize Manufacturing Digital Thread
       kind: internal_step
-    - id: 04_upload_or_virtual_bridge
-      label: Upload Or Virtual Bridge
+    - id: 04_generate_geometry_stl
+      label: Generate Geometry STL
       kind: internal_step
-    - id: 05_handoff_vision
-      label: Handoff Vision
+    - id: 05_mesh_dimensional_qa
+      label: Mesh and Dimensional QA
+      kind: internal_step
+    - id: 06_printability_process_plan
+      label: Printability and Process Planning
+      kind: internal_step
+    - id: 07_slice_gcode_qa
+      label: Slicing and G-code QA
+      kind: internal_step
+    - id: 08_execution_gate
+      label: Execution Gate / Virtual or Live Bridge
+      kind: internal_step
+    - id: 09_fabrication_monitoring
+      label: Fabrication Monitoring Evidence
+      kind: internal_step
+    - id: 10_repair_or_stop_decision
+      label: Repair or Stop Decision
+      kind: internal_step
+    - id: 11_handoff_vision_manipulation
+      label: Specimen Fabricated Handoff
       kind: internal_step
   io_contract:
     input: OrchestratorState

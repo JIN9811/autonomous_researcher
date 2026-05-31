@@ -138,3 +138,91 @@ Manipulation Agent consumes:
 The Manipulation Agent may block, reduce confidence, or request recovery when
 `transfer_readiness.ready=false` or `anomaly=true`.
 
+
+---
+
+## 2026-05-29 Vision Agent Lab Perception Signal Loop Update
+
+This guideline is upgraded from a lightweight pickup observation contract to the
+`vision_report.v1` / `vision_signal.v1` lab perception signal contract described
+in `개선안/03_vision_agent_lab_perception_signal_loop_research.md`.
+
+The legacy downstream keys remain authoritative for compatibility:
+
+- `observation.pose_estimate`
+- `observation.pickup_target`
+- `observation.transfer_readiness`
+- `observation.anomaly`
+- `protocol_note`
+
+New runtime outputs:
+
+- `vision_report`: `vision_report.v1` human/report-facing perception record.
+- `vision_signal`: `vision_signal.v1` downstream handoff packet and signal bus record.
+- `handoff_packet`: same `vision_signal.v1` packet for the generic runtime packet registry.
+- `decisions`: task resolve, capture acceptance, signal arbitration, and handoff-readiness decisions.
+- `metrics`: zone/detection/signal counts, confidence range, transfer readiness, anomaly state, freshness TTL.
+- `evidence_refs`: annotated scene SVG and detection JSON evidence paths.
+
+`vision_report.v1` sections:
+
+- `task`: post-ejection, pickup, UTM fixture, reset, or other observation objective.
+- `model_backend`: simulator/rule backend now, optional DINOv3/Grounding-DINO/SAM2/FoundationPose metadata later.
+- `camera_source`: camera key, source, frame id, timestamp, calibration id, frame age.
+- `scene_map` / `zones`: printer bed, ejection basket, robot workspace, robot gripper, UTM platen, UTM screen state.
+- `detections`: label, zone, bbox/mask path when available, confidence, source.
+- `events`: visual transition events such as `printer_bed_clear`, `specimen_ejected_to_basket`, `basket_contains_specimen`, or `anomaly_detected`.
+- `signal_board` / `agent_signals`: freshness-bounded signals including `printer_output_visible`, `specimen_ejected_to_basket`, `basket_contains_specimen`, `pickup_ready`, `basket_empty_after_pick`, `gripper_holding_specimen`, `specimen_on_utm_platen`, `fixture_alignment_ok`, `utm_motion_observed`, `utm_home_restored`, `equipment_screen_state`, `robot_workspace_clear`, `visual_test_evidence_ready`, `data_quality_low`, and `anomaly_detected`. Signals that are outside the current observation stage are emitted as `not_checked` rather than silently omitted.
+- `artifacts`: raw frame path when supplied, generated annotated scene SVG, detection JSON, before/after path when supplied.
+- `dataset_ledger`: LeRobot/data-reuse metadata for future policy improvement.
+- `knowledge_payload`: success/failure labels and visual notes for Knowledge Agent memory.
+- `cross_agent_contract`: explicit statement that Vision observes only and downstream agents execute actions.
+- `freshness_policy`: signal TTL and stale-signal blocking rule.
+
+`vision_signal.v1` required freshness fields:
+
+- `signal_id`
+- `zone_id`
+- `value`
+- `confidence`
+- `stable_for_ms`
+- `timestamp`
+- `expires_at`
+- `consumer_agents`
+- `evidence_refs`
+
+Downstream invariant:
+
+- Manipulation must not use an expired Vision signal. Current `ManipulationAgent`
+  checks `transfer_readiness.expires_at` / `vision_signal.expires_at` and blocks
+  with `failure_code=STALE_VISION_SIGNAL` when the signal is stale or malformed.
+- Equipment and future cross-check handlers must follow the same rule when UTM,
+  screen, or fixture signals become live action preconditions.
+
+Safety boundary:
+
+- Vision Agent never starts robot rollout, printer jobs, UTM commands, or
+  PyAutoGUI actions. It only emits `vision_signal.v1` and visual evidence.
+- If confidence is low, the camera fails, or anomaly is detected, the signal board
+  must expose a blocking reason and Guardian/operator review path.
+
+Current implementation scope:
+
+- Test mode and camera unavailable paths use deterministic simulator/rule output.
+- When the LeRobot bridge is available, test mode can attach `/api/lerobot/camera/test` frame evidence; live mode requires explicit camera/live confirmation before any camera test is called.
+- DINOv3/Grounding DINO/SAM2/FoundationPose are represented as optional backend
+  metadata, not assumed live dependencies.
+- The runtime writes Vision evidence artifacts and registers nested visual
+  evidence paths in the event/artifact stream.
+
+Live GUI chat message contract:
+
+- Planning/runtime Vision completion messages should be emitted as
+  `live_chat_message.v1` with `message_type=signal` when the planning loop is
+  driving the workflow.
+- The human-readable content must include camera source, zone-state summary,
+  primary `pickup_ready` status/confidence, `expires_at`, anomaly state, and at
+  least one visual evidence path when available.
+- The structured message payload should carry `signal_id`, `zone_id`,
+  `confidence`, `stability_ms`, `vision_report`, `vision_signal`, and
+  `agent_signals` so the Live GUI chat and report view stay consistent.

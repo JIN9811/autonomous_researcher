@@ -31,6 +31,7 @@ def test_bo_config_endpoint_saves_workspace_settings(tmp_path, monkeypatch) -> N
             "acquisition": "upper_confidence_bound",
             "budget": 6,
             "random_seed": 17,
+            "bo_backend": "botorch_optional",
             "parameter_space": {"geometry_type": ["gyroid"], "relative_density": [0.22, 0.42]},
             "objective": {"objective_id": "saved-bo", "metric_name": "objective_score", "direction": "maximize"},
         },
@@ -42,6 +43,7 @@ def test_bo_config_endpoint_saves_workspace_settings(tmp_path, monkeypatch) -> N
     assert payload["ok"] is True
     assert config["saved"]["acquisition"] == "upper_confidence_bound"
     assert config["saved"]["budget"] == 6
+    assert config["saved"]["bo_backend"] == "botorch_optional"
     assert config["saved"]["objective"]["objective_id"] == "saved-bo"
 
 
@@ -76,6 +78,36 @@ def test_bo_benchmark_endpoint_runs_virtual_bo() -> None:
         and event.get("payload", {}).get("workspace") == "bo"
         for event in app_main.controller.recent_events()
     )
+
+
+def test_bo_benchmark_endpoint_maps_reasoning_strategy_to_bo_backend() -> None:
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/bo/benchmark",
+        json={
+            "strategy": "llm_preference_bo",
+            "acquisition": "upper_confidence_bound",
+            "budget": 2,
+            "bo_backend": "botorch_optional",
+            "llm_preference_enabled": True,
+            "llm_candidate_weight": "auto",
+            "top_k": 4,
+            "parameter_space": {
+                "geometry_type": ["gyroid"],
+                "relative_density": [0.2, 0.42],
+                "wall_thickness_mm": [1.2, 1.8],
+                "cell_size_mm": [10.0],
+            },
+        },
+    )
+    payload = response.json()
+
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert set(payload["benchmark"]["strategies"]) == {"bo"}
+    assert payload["benchmark"]["bo_backend_requested"] == "botorch_optional"
+    assert payload["benchmark"]["strategies"]["bo"]["surrogate_trace"][0]["acquisition"] == "upper_confidence_bound"
 
 
 def test_bo_run_endpoint_returns_recommendation() -> None:

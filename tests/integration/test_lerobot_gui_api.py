@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import json
 from pathlib import Path
 from typing import Any
 
@@ -41,6 +42,9 @@ def test_lerobot_gui_and_test_mode_api_workflow(tmp_path: Path, monkeypatch: Any
     assert "Batch Size" in page.text
     assert "Additional Train CLI Args" in page.text
     assert "Manipulation Agent Bridge" in page.text
+    assert "lerobot-manipulation-task-id-input" in page.text
+    assert "Pi0.5 RTC Execution Horizon" in page.text
+    assert "Manipulation Agent Runtime Report" in page.text
     assert "Save Agent Defaults" in page.text
     assert "Test Agent Bridge" in page.text
 
@@ -146,8 +150,14 @@ def test_lerobot_gui_and_test_mode_api_workflow(tmp_path: Path, monkeypatch: Any
             "mode": "test",
             "profile_id": "fake_omx_ai",
             "manipulation_strategy": "pi05_lerobot_policy",
+            "task_id": "transfer_to_utm",
+            "skill_id": "transfer_to_utm",
+            "policy_backend": "lerobot_cli",
             "policy_type": "pi05",
             "policy_path": "fake://pi05_policy_saved",
+            "rollout_rtc_execution_horizon": 10,
+            "rollout_rtc_max_guidance_weight": 1.0,
+            "max_duration_s": 30,
             "task_instruction": "Saved 3DP to UTM manipulation default",
             "source_location": "3dp_output_area",
             "target_location": "utm_fixture",
@@ -158,6 +168,9 @@ def test_lerobot_gui_and_test_mode_api_workflow(tmp_path: Path, monkeypatch: Any
     assert manipulation_save["ok"] is True
     assert manipulation_save["tool"] == "manipulation_agent.config.save"
     assert manipulation_save["profile"]["policy_path"] == "fake://pi05_policy_saved"
+    assert manipulation_save["profile"]["task_id"] == "transfer_to_utm"
+    assert manipulation_save["profile"]["policy_backend"] == "lerobot_cli"
+    assert manipulation_save["profile"]["rollout_rtc_execution_horizon"] == 10
     assert manipulation_profile_path.exists()
 
     manipulation_test = client.post(
@@ -166,8 +179,13 @@ def test_lerobot_gui_and_test_mode_api_workflow(tmp_path: Path, monkeypatch: Any
             "mode": "live",
             "profile_id": "fake_omx_ai",
             "manipulation_strategy": "pi05_lerobot_policy",
+            "task_id": "transfer_to_utm",
+            "policy_backend": "lerobot_cli",
             "policy_type": "pi05",
             "policy_path": "fake://pi05_policy",
+            "rollout_rtc_execution_horizon": 10,
+            "rollout_rtc_max_guidance_weight": 1.0,
+            "max_duration_s": 30,
             "task_instruction": "Test 3DP to UTM manipulation bridge",
             "source_location": "3dp_output_area",
             "target_location": "utm_fixture",
@@ -186,6 +204,9 @@ def test_lerobot_gui_and_test_mode_api_workflow(tmp_path: Path, monkeypatch: Any
     assert manipulation_test["test_mode_forced"] is True
     assert manipulation_test["mode"] == "test"
     assert manipulation_test["manipulation"]["strategy"] == "pi05_lerobot_policy"
+    assert manipulation_test["manipulation_report"]["schema"] == "manipulation_report.v1"
+    assert manipulation_test["robot_task_result"]["schema"] == "robot_task_result.v1"
+    assert manipulation_test["robot_task_result"]["handoff_status"] == "needs_post_place_vision"
     assert "--policy.type=pi05" in manipulation_test["manipulation"]["command_preview"]
 
     manipulation = client.post(
@@ -194,8 +215,13 @@ def test_lerobot_gui_and_test_mode_api_workflow(tmp_path: Path, monkeypatch: Any
             "mode": "test",
             "profile_id": "fake_omx_ai",
             "manipulation_strategy": "pi05_lerobot_policy",
+            "task_id": "transfer_to_utm",
+            "policy_backend": "lerobot_cli",
             "policy_type": "pi05",
             "policy_path": "fake://pi05_policy",
+            "rollout_rtc_execution_horizon": 10,
+            "rollout_rtc_max_guidance_weight": 1.0,
+            "max_duration_s": 30,
             "task_instruction": "Move test specimen from 3DP to UTM",
             "source_location": "3dp_output_area",
             "target_location": "utm_fixture",
@@ -219,6 +245,9 @@ def test_lerobot_gui_and_test_mode_api_workflow(tmp_path: Path, monkeypatch: Any
     assert manipulation["manipulation"]["strategy"] == "pi05_lerobot_policy"
     assert manipulation["manipulation"]["transfer_task"]["source"] == "3dp_output_area"
     assert manipulation["manipulation"]["transfer_task"]["target"] == "utm_fixture"
+    assert manipulation["manipulation_report"]["task"]["task_id"] == "transfer_to_utm"
+    assert manipulation["manipulation_report"]["policy_plan"]["rtc_execution_horizon"] == 10
+    assert manipulation["robot_task_result"]["terminal_pose"] == "standby_clear_of_utm"
     assert "--policy.type=pi05" in manipulation["manipulation"]["command_preview"]
     assert any(
         event.get("type") == "node.completed"
@@ -245,3 +274,85 @@ def test_lerobot_gui_and_test_mode_api_workflow(tmp_path: Path, monkeypatch: Any
     ).json()
     assert visual["ok"] is True
     assert visual["tool"] == "lerobot.dataset.visualize"
+
+
+def test_lerobot_rollout_api_hardware_alert_is_guardian_ready(monkeypatch: Any) -> None:
+    def fake_call(name: str, payload: dict[str, object]) -> dict[str, object]:
+        return {
+            "ok": False,
+            "tool": name,
+            "mode": payload.get("mode", "live"),
+            "profile_id": payload.get("profile_id", "robotis_omx_ai"),
+            "session_id": "",
+            "workflow": "rollout",
+            "status": "blocked",
+            "failure_code": "LEROBOT_DEVICE_PORT_REQUIRED",
+            "message": "Save required LeRobot device ports before live rollout: follower",
+            "command_preview": [],
+            "step_trace": [{"step": "PRECHECK", "status": "blocked", "detail": "LEROBOT_DEVICE_PORT_REQUIRED"}],
+            "events": [{"step": "PRECHECK", "status": "blocked", "detail": "LEROBOT_DEVICE_PORT_REQUIRED"}],
+        }
+
+    monkeypatch.setattr(main_module.controller._deps.agent_context.tools, "call", fake_call)
+    client = TestClient(main_module.app)
+
+    result = client.post(
+        "/api/lerobot/rollout/start",
+        json={"mode": "live", "profile_id": "robotis_omx_ai", "policy_path": "fake://pi05"},
+    ).json()
+
+    assert result["ok"] is False
+    alert = result["hardware_alert"]
+    assert alert["schema"] == "hardware_alert.v1"
+    assert alert["device_class"] == "robot"
+    assert alert["component"] == "robot_io_port"
+    assert alert["reason_code"] == "MISSING_REQUIRED_INPUT"
+    assert alert["blocks_workflow"] is True
+    assert alert["requires_ack"] is True
+    assert alert["guardian_contract"]["schema_version"] == "guardian_contract.v1"
+    assert alert["guardian_contract"]["ok_for_next_stage"] is False
+    assert alert["guardian_decision"]["schema"] == "guardian_decision.v1"
+    assert alert["guardian_decision"]["decision"] == "block"
+    assert alert["incident_record"]["schema"] == "incident_record.v1"
+
+    guardian_log = main_module.controller._logger_bundle.run_dir / "guardian_events.jsonl"
+    assert guardian_log.exists()
+    records = [json.loads(line) for line in guardian_log.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert any(record.get("incident_id") == alert["alert_id"] for record in records)
+    assert any(
+        event.get("event_type") == "hardware.alert"
+        and event.get("payload", {}).get("hardware_alert", {}).get("alert_id") == alert["alert_id"]
+        for event in main_module.controller.recent_events()
+    )
+
+
+def test_lerobot_rollout_api_uses_backend_tool_registry(monkeypatch: Any) -> None:
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    def fake_call(name: str, payload: dict[str, object]) -> dict[str, object]:
+        calls.append((name, payload))
+        return {
+            "ok": True,
+            "tool": name,
+            "mode": payload.get("mode", "test"),
+            "profile_id": payload.get("profile_id", ""),
+            "session_id": "lr-rollout-api-registry",
+            "workflow": "rollout",
+            "status": "POLICY_ACTIVE",
+            "command_preview": ["backend-tool-registry"],
+            "step_trace": [{"step": "QUEUE", "status": "ok", "detail": "backend tool registry"}],
+            "events": [{"step": "QUEUE", "status": "ok", "detail": "backend tool registry"}],
+        }
+
+    monkeypatch.setattr(main_module.controller._deps.agent_context.tools, "call", fake_call)
+    client = TestClient(main_module.app)
+
+    result = client.post(
+        "/api/lerobot/rollout/start",
+        json={"mode": "test", "profile_id": "fake_omx_ai", "policy_path": "fake://policy"},
+    ).json()
+
+    assert result["ok"] is True
+    assert result["command_preview"] == ["backend-tool-registry"]
+    assert calls and calls[0][0] == "lerobot.rollout.start"
+    assert calls[0][1]["policy_path"] == "fake://policy"

@@ -164,3 +164,98 @@ async def test_design_agent_keeps_preferred_geometry_when_bo_candidate_is_invali
     assert spec["cell_size_mm"] == 10.0
     assert spec["relative_density"] >= 0.20
     assert "honeycomb" not in spec["specimen_id"]
+
+
+@pytest.mark.asyncio
+async def test_design_agent_returns_structured_design_report_and_handoff_packet() -> None:
+    agent = DesignAgent()
+    state = OrchestratorState(
+        run_id="run-report",
+        experiment_id="exp-report",
+        mode=Mode.TEST,
+        stage=Stage.DESIGN,
+        active_goal="maximize compression energy absorption per unit mass",
+    )
+
+    result = await agent.run(state, _DeterministicCtxStub())
+    data = result.data
+    spec = data["experiment_spec"]
+    report = data["design_report"]
+    handoff = data["handoff_packet"]
+
+    assert report["schema"] == "design_report.v1"
+    assert handoff["schema"] == "design_candidate.v1"
+    assert handoff["experiment_spec"] == spec
+    assert handoff["status"] == "ready"
+    assert report["handoff_to_specimen"]["required_fields_present"] is True
+    assert report["candidate_evaluation"]["selected_candidate_id"] == spec["candidate_id"]
+    assert report["candidate_evaluation"]["selected_candidate_fingerprint"] == spec["candidate_fingerprint"]
+    assert report["hypothesis"]["statement"]
+    assert report["objective"]["primary_metric"] == "energy_absorption_per_mass"
+    assert report["candidate_generation"]["candidate_count"] == 12
+    assert report["candidate_generation"]["valid_count"] >= 1
+    assert len(report["candidate_generation"]["candidate_ledger"]) >= 12
+    assert data["metrics"]["selected_score"] == spec["expected_objective_proxy_score"]
+    assert data["decisions"] == report["decision_register"]
+
+
+class _ExperimentRecord:
+    run_id = "prior-run"
+    experiment_id = "prior-exp"
+    score = 0.83
+    uncertainty = 0.12
+    summary = "Prior gyroid showed stable compression response."
+
+
+class _ExperimentDbStub:
+    def list_recent(self, limit: int = 20):
+        return [_ExperimentRecord()]
+
+
+class _FailureRecord:
+    failure_type = "print_detached"
+    context = {"geometry_type": "random_voronoi"}
+
+
+class _FailureMemoryWithRecord:
+    def recent(self, limit: int = 10):
+        return [_FailureRecord()]
+
+
+class _FeedbackCtxStub(_DeterministicCtxStub):
+    experiment_db = _ExperimentDbStub()
+    failure_memory = _FailureMemoryWithRecord()
+
+
+@pytest.mark.asyncio
+async def test_design_agent_records_bo_knowledge_and_failure_feedback_context() -> None:
+    agent = DesignAgent()
+    state = OrchestratorState(
+        run_id="run-feedback",
+        experiment_id="exp-feedback",
+        mode=Mode.TEST,
+        stage=Stage.DESIGN,
+        active_goal="explore compression metamaterial design space",
+        run_metadata={
+            "knowledge": {"summary": "Avoid disconnected Voronoi specimens after bed adhesion failures."},
+            "bo_agent": {
+                "strategy": "single_objective_ei",
+                "acquisition": "expected_improvement",
+                "recommendation": {"geometry_type": "gyroid", "relative_density": 0.34},
+            },
+            "bo_recommended_constraints": {"geometry_type": "gyroid", "relative_density": 0.34},
+        },
+    )
+
+    result = await agent.run(state, _FeedbackCtxStub())
+    report = result.data["design_report"]
+    prior = report["prior_context"]
+
+    assert prior["prior_count"] == 1
+    assert prior["best_prior"]["score"] == 0.83
+    assert prior["knowledge_summary"]["available"] is True
+    assert prior["bo_recommendation"]["available"] is True
+    assert prior["bo_recommendation"]["acquisition"] == "expected_improvement"
+    assert "random_voronoi" in prior["failure_memory"]["failed_geometry_types"]
+    assert result.data["experiment_spec"]["geometry_type"] == "gyroid"
+    assert result.data["experiment_spec"]["relative_density"] == 0.34

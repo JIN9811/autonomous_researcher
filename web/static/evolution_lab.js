@@ -11,6 +11,7 @@ const pipelineOutput = $("evolution-pipeline-output");
 const leaderboardOutput = $("evolution-leaderboard-output");
 const historyOutput = $("evolution-history-output");
 const lineageOutput = $("evolution-lineage-output");
+const evidenceOutput = $("evolution-evidence-output");
 const output = $("evolution-output");
 const activeBadge = $("evolution-active-variant");
 let currentTaskId = "";
@@ -20,6 +21,8 @@ let latestTasks = [];
 let latestTargets = [];
 let latestTraces = [];
 let latestVariants = [];
+let latestEvidencePacks = [];
+let currentEvidencePackId = "";
 const queryParams = new URLSearchParams(window.location.search);
 let queryPrefillApplied = false;
 
@@ -102,6 +105,32 @@ function gateChecklistMarkup(variant) {
   `).join("")}</div>`;
 }
 
+
+function replayEvalSummary(variant) {
+  const replay = variant?.metrics && typeof variant.metrics === "object" ? variant.metrics.replay_eval || {} : {};
+  return replay && typeof replay === "object" ? replay : {};
+}
+
+function replayEvalMarkup(variant) {
+  const replay = replayEvalSummary(variant);
+  if (!Object.keys(replay).length) return `<p class="hint">No replay/eval summary recorded.</p>`;
+  const traceIds = Array.isArray(replay.replay_trace_ids) ? replay.replay_trace_ids.slice(0, 5).join(", ") : "";
+  const metrics = replay.trace_metrics && typeof replay.trace_metrics === "object" ? replay.trace_metrics : {};
+  return `
+    <div class="evolution-replay-eval-card">
+      <div class="evolution-replay-kpis">
+        <span>score=${escapeHtml(replay.score ?? "-")}</span>
+        <span>gates=${escapeHtml(replay.gate_passed ?? "-")}/${escapeHtml(replay.gate_total ?? "-")}</span>
+        <span>source=${escapeHtml(replay.source_trace_count ?? 0)}</span>
+        <span>held-out=${escapeHtml(replay.heldout_trace_count ?? 0)}</span>
+        <span>used=${escapeHtml(replay.replay_trace_count ?? 0)}</span>
+      </div>
+      <small>traces: ${escapeHtml(traceIds || "none")}</small>
+      <small>events=${escapeHtml(metrics.event_count ?? 0)} · errors=${escapeHtml(metrics.error_count ?? 0)} · warnings=${escapeHtml(metrics.warning_count ?? 0)} · missing_fields=${escapeHtml(metrics.missing_field_count ?? 0)}</small>
+    </div>
+  `;
+}
+
 function pipelineState(variant) {
   const status = variant?.status || "";
   const gates = gateSummary(variant);
@@ -173,7 +202,7 @@ function renderLeaderboard(variants = latestVariants) {
         <div class="evolution-rank">#${index + 1}</div>
         <div class="evolution-leaderboard-copy">
           <strong>${escapeHtml(variant.variant_id || "variant")}</strong>
-          <small>${escapeHtml(variant.status || "unknown")} · score=${escapeHtml(variant.score ?? "-")} · gates=${gates.passed}/${gates.total}</small>
+          <small>${escapeHtml(variant.status || "unknown")} · score=${escapeHtml(variant.score ?? "-")} · gates=${gates.passed}/${gates.total} · replay=${escapeHtml(replayEvalSummary(variant).score ?? "-")}</small>
           <p>${escapeHtml(compact(variant.diff || "No diff summary", 110))}</p>
         </div>
         <button class="btn tiny evolution-variant-action" data-variant-id="${escapeHtml(variant.variant_id)}">Open</button>
@@ -232,12 +261,61 @@ function setVariant(variant) {
         <span class="state-pill">score=${escapeHtml(variant.score ?? "-")}</span>
         <span class="state-pill ${gates.failed ? "warning" : "ok"}">gates=${gates.passed}/${gates.total}</span>
       </div>
+      <h4>Replay / Held-out Evaluation</h4>
+      ${replayEvalMarkup(variant)}
       ${gateChecklistMarkup(variant)}
     `;
   }
   renderPipeline(variant);
   renderLeaderboard(latestVariants);
-  write({ variant_id: variant.variant_id, status: variant.status, score: variant.score, diff: variant.diff, body: variant.body, gates: variant.gate_results, activation: variant.activation });
+  write({ variant_id: variant.variant_id, status: variant.status, score: variant.score, diff: variant.diff, body: variant.body, gates: variant.gate_results, replay_eval: replayEvalSummary(variant), activation: variant.activation });
+}
+
+
+function renderEvidencePacks(packs = latestEvidencePacks) {
+  if (!evidenceOutput) return;
+  if (!packs.length) {
+    const { targetType, targetId } = selectedTargetParts();
+    evidenceOutput.innerHTML = `<p class="hint">No Knowledge evidence pack for ${escapeHtml(targetType)}:${escapeHtml(targetId)}. Create a closed-loop run through Knowledge Agent first.</p>`;
+    currentEvidencePackId = "";
+    return;
+  }
+  evidenceOutput.innerHTML = packs.slice(0, 8).map((pack, index) => {
+    const selected = pack.pack_id === currentEvidencePackId || (!currentEvidencePackId && index === 0);
+    if (selected && !currentEvidencePackId) currentEvidencePackId = pack.pack_id || "";
+    const why = Array.isArray(pack.why_this_target) ? pack.why_this_target.slice(0, 3).join(" · ") : "";
+    const changes = Array.isArray(pack.recommended_changes) ? pack.recommended_changes.slice(0, 2).join(" · ") : "";
+    return `
+      <article class="evolution-history-card ${selected ? "selected" : ""}">
+        <small>${escapeHtml(pack.target_type || "target")} · priority=${escapeHtml(pack.priority ?? 0)}</small>
+        <strong>${escapeHtml(pack.pack_id || "evidence-pack")}</strong>
+        <p>${escapeHtml(compact(pack.objective || "No objective", 130))}</p>
+        <small>${escapeHtml(compact(why || changes || "No evidence summary", 150))}</small>
+        <div class="button-row">
+          <button class="btn tiny evolution-evidence-action" data-pack-id="${escapeHtml(pack.pack_id)}">Use Pack</button>
+        </div>
+      </article>
+    `;
+  }).join("");
+}
+
+function selectedEvidencePack() {
+  return (latestEvidencePacks || []).find((pack) => pack.pack_id === currentEvidencePackId) || null;
+}
+
+async function refreshEvidencePacks() {
+  const { targetType, targetId } = selectedTargetParts();
+  const result = await requestJson(`/api/knowledge/evolution-packs?target_type=${encodeURIComponent(targetType)}&target_id=${encodeURIComponent(targetId)}&limit=20`);
+  latestEvidencePacks = result.packs || [];
+  if (!latestEvidencePacks.some((pack) => pack.pack_id === currentEvidencePackId)) {
+    currentEvidencePackId = latestEvidencePacks[0]?.pack_id || "";
+  }
+  renderEvidencePacks(latestEvidencePacks);
+  const pack = selectedEvidencePack();
+  if (pack?.objective && objectiveInput && !queryParams.get("objective")) {
+    objectiveInput.value = pack.objective;
+  }
+  return latestEvidencePacks;
 }
 
 function renderTaskHistory(tasks) {
@@ -328,21 +406,29 @@ async function refresh() {
   }
   applyQueryPrefill();
   await refreshHistoryAndLineage();
-  setStatus("idle", "Ready", `${latestTargets.length} targets · ${latestTraces.length} traces · ${latestTasks.length} tasks · ${latestVariants.length} variants`);
+  await refreshEvidencePacks();
+  setStatus("idle", "Ready", `${latestTargets.length} targets · ${latestTraces.length} traces · ${latestTasks.length} tasks · ${latestVariants.length} variants · ${latestEvidencePacks.length} evidence packs`);
 }
 
 async function createAndRunTask() {
   const { targetType, targetId } = selectedTargetParts();
   const runId = String(runInput?.value || "").trim();
   setStatus("busy", "Running", `Generating candidate for ${targetType}:${targetId}.`);
+  const pack = selectedEvidencePack();
+  const packRunIds = Array.isArray(pack?.provenance?.was_derived_from) ? pack.provenance.was_derived_from.filter(Boolean) : [];
   const created = await requestJson("/api/evolution/tasks", {
     method: "POST",
     body: JSON.stringify({
       target_type: targetType,
       target_id: targetId,
-      source_run_ids: runId ? [runId] : [],
-      objective: objectiveInput?.value || "Improve next closed-loop run reliability.",
-      constraints: { require_human_approval: true, no_live_hardware_execution: true },
+      source_run_ids: runId ? [runId] : packRunIds,
+      objective: objectiveInput?.value || pack?.objective || "Improve next closed-loop run reliability.",
+      constraints: {
+        require_human_approval: true,
+        no_live_hardware_execution: true,
+        knowledge_evidence_pack_id: pack?.pack_id || "",
+        ...(pack?.constraints || {}),
+      },
     }),
   });
   currentTaskId = created.task.task_id;
@@ -431,11 +517,20 @@ if (targetInput) {
   targetInput.addEventListener("change", () => {
     currentVariant = null;
     currentVariantId = "";
-    refreshHistoryAndLineage().catch((err) => { setStatus("error", "Error", err.message); write({ ok: false, error: err.message }); });
+    refreshHistoryAndLineage().then(refreshEvidencePacks).catch((err) => { setStatus("error", "Error", err.message); write({ ok: false, error: err.message }); });
   });
 }
 
 document.addEventListener("click", (event) => {
+  const evidenceButton = event.target.closest(".evolution-evidence-action[data-pack-id]");
+  if (evidenceButton) {
+    currentEvidencePackId = evidenceButton.dataset.packId || "";
+    const pack = selectedEvidencePack();
+    if (pack?.objective && objectiveInput) objectiveInput.value = pack.objective;
+    renderEvidencePacks(latestEvidencePacks);
+    write({ ok: true, selected_evidence_pack: pack });
+    return;
+  }
   const taskButton = event.target.closest(".evolution-task-action[data-task-id]");
   if (taskButton) {
     loadTaskVariants(taskButton.dataset.taskId || "").catch((err) => { setStatus("error", "Error", err.message); write({ ok: false, error: err.message }); });

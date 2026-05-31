@@ -120,6 +120,10 @@ class LeRobotSessionRequest(LeRobotBaseRequest):
     rollout_temporal_ensemble: bool = True
     rollout_temporal_ensemble_coeff: float = 0.01
     rollout_inference_type: str = ""
+    task_id: str = ""
+    skill_id: str = ""
+    policy_backend: str = "lerobot_cli"
+    max_duration_s: float | None = None
     rollout_rtc_execution_horizon: int | None = None
     rollout_rtc_max_guidance_weight: float | None = None
     camera_enabled: bool = False

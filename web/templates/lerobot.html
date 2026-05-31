@@ -616,11 +616,26 @@ Modification guide:
           </p>
           <div class="lerobot-form-grid">
             <label>
+              Manipulation Task
+              <select id="lerobot-manipulation-task-id-input">
+                <option value="transfer_to_utm" selected>Transfer printed specimen to UTM fixture</option>
+                <option value="clear_utm_to_disposal">Clear tested specimen to discard bin</option>
+              </select>
+            </label>
+            <label>
               Agent Strategy
               <select id="lerobot-manipulation-strategy-input">
                 <option value="pi05_lerobot_policy" selected>Pi0.5 LeRobot Policy</option>
                 <option value="lerobot_policy">Generic LeRobot Policy</option>
                 <option value="fixed_kinematic">Fixed Kinematic Compatibility</option>
+              </select>
+            </label>
+            <label>
+              Policy Backend
+              <select id="lerobot-manipulation-policy-backend-input">
+                <option value="lerobot_cli" selected>LeRobot CLI boundary</option>
+                <option value="openpi_server">OpenPI server (reserved)</option>
+                <option value="fixed_kinematic">Fixed kinematic compatibility</option>
               </select>
             </label>
             <label>
@@ -637,6 +652,18 @@ Modification guide:
             <label>
               Target Location
               <input id="lerobot-manipulation-target-input" type="text" value="utm_fixture" />
+            </label>
+            <label>
+              Max Duration Seconds
+              <input id="lerobot-manipulation-max-duration-input" type="number" min="1" step="1" value="30" />
+            </label>
+            <label>
+              Pi0.5 RTC Execution Horizon
+              <input id="lerobot-manipulation-rtc-horizon-input" type="number" min="1" max="200" step="1" value="10" />
+            </label>
+            <label>
+              Pi0.5 RTC Max Guidance Weight
+              <input id="lerobot-manipulation-rtc-guidance-input" type="number" min="0" max="20" step="0.1" value="1.0" />
             </label>
             <label>
               Specimen ID
@@ -684,6 +711,12 @@ Modification guide:
             <button id="btn-manipulation-rollout-status" class="btn">Agent Rollout Status</button>
           </div>
           <div id="lerobot-manipulation-action-status" class="lerobot-action-status idle">Waiting for Manipulation Agent action.</div>
+          <details class="lerobot-details" open>
+            <summary>Manipulation Agent Runtime Report</summary>
+            <div id="lerobot-manipulation-report" class="lerobot-agent-report-grid">
+              <div class="lerobot-report-empty">Run Save, Test, Preview, or Run to inspect task, preflight, Pi0.5/SARM state, and handoff packet.</div>
+            </div>
+          </details>
         </article>
       </section>
 
@@ -704,6 +737,6 @@ Modification guide:
         </article>
       </section>
     </main>
-    <script src="/static/lerobot.js?v=20260524-manipulation-agent-save-test" defer></script>
+    <script src="/static/lerobot.js?v=20260529-manipulation-pi05-sarm" defer></script>
   </body>
 </html>

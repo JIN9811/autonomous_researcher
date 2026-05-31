@@ -70,6 +70,74 @@ def test_live_gui_regenerates_specimen_id_when_geometry_is_overridden() -> None:
     assert "gyroid" in spec["specimen_id"]
 
 
+def test_equipment_alert_merge_persists_incident_records_and_guardian_event() -> None:
+    controller = load_runtime()
+    original_metadata = dict(controller._state.run_metadata)
+    original_health = dict(controller._state.device_health)
+    incident_id = "incident-equipment-merge-001"
+    incident = {
+        "schema": "incident_record.v1",
+        "incident_id": incident_id,
+        "device_class": "utm",
+        "component": "utm_data_export",
+        "failure_code": "UTM_DATA_TIMEOUT",
+        "corrective_action": "Check Windows UTM export folder and retry the protocol.",
+    }
+    alert = {
+        "schema": "hardware_alert.v1",
+        "alert_id": "alert-equipment-merge-001",
+        "device_class": "utm",
+        "component": "utm_data_export",
+        "severity": "blocking",
+        "failure_code": "UTM_DATA_TIMEOUT",
+        "status": "blocked",
+        "blocks_workflow": True,
+        "requires_ack": True,
+        "guardian_decision": {
+            "schema": "guardian_decision.v1",
+            "decision": "safe_stop",
+            "requires_human_approval": True,
+            "risk_score": 0.82,
+        },
+        "incident_record": incident,
+    }
+    try:
+        controller._state.run_metadata.pop("incident_records", None)
+        controller._state.run_metadata.pop("hardware_alerts", None)
+        controller._merge_planning_agent_data(
+            Stage.EQUIPMENT,
+            {
+                "equipment_result": {
+                    "ok": False,
+                    "status": "blocked",
+                    "program_id": "utm_compression_start_v1",
+                    "failure_code": "UTM_DATA_TIMEOUT",
+                },
+                "equipment_report": {
+                    "schema": "equipment_report.v1",
+                    "decision": {"handoff_status": "blocked", "failure_code": "UTM_DATA_TIMEOUT"},
+                },
+                "utm_data_ready": {"schema": "utm_data_ready.v1", "status": "blocked", "guardian_status": "block"},
+                "hardware_alerts": [alert],
+                "incident_records": [incident],
+            },
+        )
+
+        stored_incidents = controller._state.run_metadata["incident_records"]
+        assert [item["incident_id"] for item in stored_incidents if item.get("incident_id") == incident_id] == [incident_id]
+        assert controller._state.run_metadata["hardware_alerts"][0]["alert_id"] == "alert-equipment-merge-001"
+        assert controller._state.run_metadata["latest_guardian_decision"]["schema"] == "guardian_decision.v1"
+        assert controller._state.device_health["utm"] == "blocking:UTM_DATA_TIMEOUT"
+        guardian_log = controller._logger_bundle.run_dir / "guardian_events.jsonl"
+        assert guardian_log.exists()
+        assert incident_id in guardian_log.read_text(encoding="utf-8")
+    finally:
+        controller._state.run_metadata.clear()
+        controller._state.run_metadata.update(original_metadata)
+        controller._state.device_health.clear()
+        controller._state.device_health.update(original_health)
+
+
 def test_live_gui_test_defaults_use_3dp_gui_saved_test_size(monkeypatch: pytest.MonkeyPatch) -> None:
     controller = load_runtime()
 
@@ -859,3 +927,176 @@ async def test_live_gui_experiment_trigger_uses_session_values(monkeypatch: pyte
     assert constraints["nozzle_diameter_mm"] == 0.4
     assert constraints["layer_height_mm"] == 0.2
     assert constraints["storage"] == "usb"
+
+
+def test_planning_vision_stage_message_summarizes_signal_board() -> None:
+    controller = load_runtime()
+    content = controller._format_planning_stage_message(
+        Stage.VISION,
+        {
+            "observation": {
+                "camera_key": "top",
+                "source": "simulator",
+                "anomaly": False,
+                "transfer_readiness": {"ready": True, "pose_confidence": 0.86},
+            },
+            "vision_report": {
+                "task": "post_ejection_basket_check",
+                "camera_source": {"camera_key": "top", "source": "simulator"},
+                "scene_map": {
+                    "ejection_basket": {"state": "loaded", "confidence": 0.86},
+                    "robot_workspace": {"state": "clear", "confidence": 0.82},
+                },
+                "signal_board": [
+                    {
+                        "signal": "pickup_ready",
+                        "status": "ready",
+                        "confidence": 0.86,
+                        "expires_at": "2026-05-29T00:00:05+00:00",
+                    }
+                ],
+                "artifacts": {"annotated_frame_path": "runs/run/vision/scene_map.svg"},
+            },
+            "vision_signal": {"expires_at": "2026-05-29T00:00:05+00:00"},
+        },
+        "Vision completed",
+    )
+
+    assert "lab perception signal" in content
+    assert "zone_state" in content
+    assert "pickup_ready: ready" in content
+    assert "expires_at" in content
+    assert "scene_map.svg" in content
+
+@pytest.mark.asyncio
+async def test_planning_equipment_pyautogui_tool_event_carries_visual_data_recovery_metadata() -> None:
+    controller = load_runtime()
+    controller._planning_bootstrapped = True
+
+    await controller._on_tool_event(
+        {
+            "tool": "equipment.pyautogui.run",
+            "step": "SCREEN_ASSERT_RUNNING",
+            "status": "ok",
+            "detail": "running_state",
+            "sequence_id": "equipment-run-001",
+            "program_id": "utm_compression_start_v1",
+            "bridge_host": "192.168.50.58",
+            "target_window": "UTM Controller",
+            "confidence": 0.93,
+            "screenshot_artifact": "screen-after-start",
+        }
+    )
+
+    latest = controller.planning_snapshot()["messages"][-1]
+    assert latest["schema"] == "live_chat_message.v1"
+    assert latest["role"] == "equipment_ai"
+    assert latest["message_type"] == "signal"
+    assert latest["command_id"] == "equipment-run-001"
+    assert latest["program_id"] == "utm_compression_start_v1"
+    assert latest["windows_host"] == "192.168.50.58"
+    assert latest["macro_command"]["program_id"] == "utm_compression_start_v1"
+    assert latest["macro_command"]["target_ui"] == "UTM Controller"
+    assert latest["visual_assertion"]["checkpoint"] == "running_state"
+    assert latest["visual_assertion"]["confidence"] == 0.93
+    assert latest["visual_assertion"]["screenshot_artifact"] == "screen-after-start"
+    assert latest["visual_assertion"]["ok"] is True
+    assert "화면 상태 검증" in latest["content"]
+
+    await controller._on_tool_event(
+        {
+            "tool": "equipment.pyautogui.run",
+            "step": "PULL_ARTIFACT",
+            "status": "blocked",
+            "detail": "C:/ATR/utm_exports/run-001/specimen.csv",
+            "sequence_id": "equipment-run-001",
+            "program_id": "utm_compression_start_v1",
+            "data_file_ref": "/home/jin/autonomous_researcher/artifacts/equipment/run-001/utm/specimen.csv",
+            "windows_path": "C:/ATR/utm_exports/run-001/specimen.csv",
+            "linux_path": "/home/jin/autonomous_researcher/artifacts/equipment/run-001/utm/specimen.csv",
+            "sha256": "abc123",
+            "row_count_probe": 80,
+            "save_method": "manual_save_dialog",
+            "artifact_pull_status": "pulled_parse_failed",
+            "failure_code": "UTM_DATA_PARSE_FAILED",
+        }
+    )
+
+    latest = controller.planning_snapshot()["messages"][-1]
+    assert latest["message_type"] == "warning"
+    assert latest["data_file_ref"].endswith("artifacts/equipment/run-001/utm/specimen.csv")
+    assert latest["data_acquisition"]["artifact_or_path"].endswith("specimen.csv")
+    assert latest["data_acquisition"]["windows_path"] == "C:/ATR/utm_exports/run-001/specimen.csv"
+    assert latest["data_acquisition"]["linux_path"].endswith("artifacts/equipment/run-001/utm/specimen.csv")
+    assert latest["data_acquisition"]["sha256"] == "abc123"
+    assert latest["data_acquisition"]["row_count_probe"] == 80
+    assert latest["data_acquisition"]["save_method"] == "manual_save_dialog"
+    assert latest["data_acquisition"]["artifact_pull_status"] == "pulled_parse_failed"
+    assert latest["recovery"]["status"] == "operator_review_required"
+    assert latest["recovery"]["failure_code"] == "UTM_DATA_PARSE_FAILED"
+    assert latest["ok"] is False
+
+
+@pytest.mark.asyncio
+async def test_planning_equipment_vision_tool_event_becomes_live_chat_message() -> None:
+    controller = load_runtime()
+    controller._planning_bootstrapped = True
+
+    await controller._on_tool_event(
+        {
+            "tool": "vision.equipment_cross_check",
+            "step": "VISION_CHECK:utm_motion_confirm",
+            "status": "ok",
+            "detail": "confidence=0.91; frames=frame-utm-motion",
+            "check_id": "utm_motion_confirm",
+            "check_result": {"ok": True, "confidence": 0.91},
+        }
+    )
+
+    latest = controller.planning_snapshot()["messages"][-1]
+    assert latest["schema"] == "live_chat_message.v1"
+    assert latest["role"] == "equipment_ai"
+    assert latest["message_type"] == "signal"
+    assert latest["check_id"] == "utm_motion_confirm"
+    assert latest["vision_cross_check_event"]["tool"] == "vision.equipment_cross_check"
+    assert "Vision 물리검증" in latest["content"]
+
+
+@pytest.mark.asyncio
+async def test_planning_guardian_tool_shield_event_becomes_live_chat_message() -> None:
+    controller = load_runtime()
+    controller._planning_bootstrapped = True
+
+    await controller._on_tool_event(
+        {
+            "tool": "guardian.tool_shield",
+            "shielded_tool": "lerobot.rollout.start",
+            "step": "pre_tool_call",
+            "status": "approval_required",
+            "decision": "require_human_approval",
+            "reason_code": "HUMAN_APPROVAL_REQUIRED",
+            "risk_score": 0.45,
+            "requires_human_approval": True,
+            "blocks_workflow": True,
+            "guardian_gate": {"schema": "guardian_gate_result.v1", "decision": "require_human_approval", "risk_score": 0.45},
+        }
+    )
+
+    latest = controller.planning_snapshot()["messages"][-1]
+    assert latest["schema"] == "live_chat_message.v1"
+    assert latest["role"] == "guardian_ai"
+    assert latest["message_type"] == "approval"
+    assert latest["shielded_tool"] == "lerobot.rollout.start"
+    assert latest["requires_human_approval"] is True
+    assert latest["blocks_workflow"] is True
+    assert "Guardian action shield" in latest["content"]
+
+
+def test_live_gui_design_trigger_uses_operator_intent_state_machine() -> None:
+    controller = load_runtime()
+
+    assert controller._should_trigger_design("실험 수행") is True
+    assert controller._should_trigger_design("설계 수행") is True
+    assert controller._should_trigger_design("테스트 모드") is False
+    assert controller._should_trigger_test_design("테스트 모드") is True
+    assert controller._should_trigger_design("상태만 알려줘") is False

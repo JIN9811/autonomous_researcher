@@ -50,6 +50,9 @@ class GuardianAgent(BaseAgent):
         "unknown",
         "emergency",
         "stopped",
+        "blocked",
+        "blocking",
+        "critical",
     }
 
     async def run(self, state: OrchestratorState, ctx: AgentContext) -> AgentResult:
@@ -72,6 +75,7 @@ class GuardianAgent(BaseAgent):
             uncertainty=uncertainty,
             retry_pressure=retry_pressure,
         )
+        graph_gate_pressure = self._resolve_graph_gate_pressure(state)
 
         live_mode = state.mode.value == "live"
         stop_threshold = 0.85 if live_mode else 0.92
@@ -93,6 +97,7 @@ class GuardianAgent(BaseAgent):
                     f"safe_stop_requested={state.safe_stop_requested}\n"
                     f"design_validation={design_validation}\n"
                     f"health_validation={health_validation}\n"
+                    f"graph_gate_pressure={graph_gate_pressure}\n"
                     f"consistency={consistency}\n"
                 ),
                 timeout_s=timeout_s,
@@ -143,6 +148,28 @@ class GuardianAgent(BaseAgent):
                     },
                 )
             )
+        elif graph_gate_pressure["status"] == "fail" and graph_gate_pressure.get("recommended_action") == "safe_stop":
+            decision = "stop"
+            action = "safe_stop"
+            reason = f"Guardian graph-wide gate requested safe stop: {graph_gate_pressure.get('primary_reason') or 'gate_blocked'}"
+            ctx.failure_memory.add(
+                FailureRecord(
+                    stage="guardian",
+                    failure_type="guardian_gate_safe_stop",
+                    context={
+                        "active_gates": graph_gate_pressure.get("active_gates", [])[:5],
+                        "loop_count": state.loop_count,
+                    },
+                )
+            )
+        elif state.mode.value == "test" and state.loop_count >= self.TEST_LOOP_CYCLE_LIMIT - 1:
+            decision = "stop"
+            action = "safe_stop"
+            reason = f"Test run reached planned {self.TEST_LOOP_CYCLE_LIMIT}-cycle loop cap."
+        elif graph_gate_pressure["status"] == "fail":
+            decision = "continue"
+            action = "recover"
+            reason = f"Guardian graph-wide gate blocked progression: {graph_gate_pressure.get('primary_reason') or 'gate_blocked'}"
         elif precursor > stop_threshold or (anomaly_detected and precursor >= max(recover_threshold, 0.7)):
             decision = "stop"
             action = "safe_stop"
@@ -154,10 +181,6 @@ class GuardianAgent(BaseAgent):
                     context={"precursor": precursor, "loop_count": state.loop_count},
                 )
             )
-        elif state.mode.value == "test" and state.loop_count >= self.TEST_LOOP_CYCLE_LIMIT - 1:
-            decision = "stop"
-            action = "safe_stop"
-            reason = f"Test run reached planned {self.TEST_LOOP_CYCLE_LIMIT}-cycle loop cap."
         elif consistency["status"] == "fail":
             decision = "continue"
             action = "recover"
@@ -184,6 +207,7 @@ class GuardianAgent(BaseAgent):
                     "retry_pressure": retry_pressure,
                     "design_validation": design_validation,
                     "health_validation": health_validation,
+                    "graph_gate_pressure": graph_gate_pressure,
                     "consistency": consistency,
                 }
             },
@@ -209,6 +233,71 @@ class GuardianAgent(BaseAgent):
             return out
         return list(default)
 
+    @staticmethod
+    def _resolve_graph_gate_pressure(state: OrchestratorState) -> dict[str, Any]:
+        """Summarize graph-wide Guardian gates emitted by all agents/stages."""
+        metadata = state.run_metadata if isinstance(state.run_metadata, dict) else {}
+        gates = metadata.get("guardian_gates") if isinstance(metadata.get("guardian_gates"), list) else []
+        incidents = metadata.get("incident_records") if isinstance(metadata.get("incident_records"), list) else []
+        active_gates: list[dict[str, Any]] = []
+        warning_gates: list[dict[str, Any]] = []
+        for gate in gates[-30:]:
+            if not isinstance(gate, dict):
+                continue
+            decision = str(gate.get("decision") or gate.get("status") or "").lower()
+            stage = str(gate.get("stage") or "").lower()
+            if stage == "guardian" and decision in {"allow", "allow_with_warning"}:
+                continue
+            summary = {
+                "gate_id": gate.get("gate_id", ""),
+                "stage": stage,
+                "phase": gate.get("phase", ""),
+                "decision": decision,
+                "reason_code": gate.get("reason_code", ""),
+                "risk_score": gate.get("risk_score", 0.0),
+            }
+            if decision in {"block", "safe_stop"}:
+                active_gates.append(summary)
+            elif decision in {"require_human_approval", "allow_with_warning"}:
+                warning_gates.append(summary)
+        active_incidents = []
+        for incident in incidents[-30:]:
+            if not isinstance(incident, dict):
+                continue
+            status = str(incident.get("status") or "open").lower()
+            severity = str(incident.get("severity") or incident.get("risk_class") or "").lower()
+            if status in {"resolved", "closed", "dismissed"}:
+                continue
+            if severity in {"critical", "blocking", "hardware", "robot", "equipment"} or incident.get("reason_code"):
+                active_incidents.append(
+                    {
+                        "incident_id": incident.get("incident_id") or incident.get("id") or "",
+                        "stage": incident.get("stage", ""),
+                        "reason_code": incident.get("reason_code") or incident.get("failure_code") or "",
+                        "severity": incident.get("severity", ""),
+                    }
+                )
+        primary = active_gates[0] if active_gates else warning_gates[0] if warning_gates else active_incidents[0] if active_incidents else {}
+        recommended_action = "continue"
+        if any(str(item.get("decision")) == "safe_stop" for item in active_gates):
+            recommended_action = "safe_stop"
+        elif active_gates:
+            recommended_action = "recover"
+        elif warning_gates or active_incidents:
+            recommended_action = "continue_with_warning"
+        status = "fail" if active_gates else "warning" if warning_gates or active_incidents else "pass"
+        return {
+            "status": status,
+            "recommended_action": recommended_action,
+            "primary_reason": primary.get("reason_code", "") if isinstance(primary, dict) else "",
+            "active_gate_count": len(active_gates),
+            "warning_gate_count": len(warning_gates),
+            "active_incident_count": len(active_incidents),
+            "active_gates": active_gates[-10:],
+            "warning_gates": warning_gates[-10:],
+            "active_incidents": active_incidents[-10:],
+        }
+
     def _resolve_device_health(self, state: OrchestratorState, ctx: AgentContext) -> dict[str, Any]:
         snapshot = dict(state.device_health or {})
         try:
@@ -223,12 +312,26 @@ class GuardianAgent(BaseAgent):
         unhealthy: list[str] = []
         for device, raw_status in snapshot.items():
             status = str(raw_status).strip().lower()
-            if status in self._UNHEALTHY_DEVICE_STATES:
+            status_head = status.split(":", 1)[0]
+            if status in self._UNHEALTHY_DEVICE_STATES or status_head in self._UNHEALTHY_DEVICE_STATES:
                 unhealthy.append(f"{device}:{status}")
+
+        active_alerts: list[dict[str, Any]] = []
+        metadata_alerts = state.run_metadata.get("hardware_alerts", []) if isinstance(state.run_metadata, dict) else []
+        if isinstance(metadata_alerts, list):
+            for alert in metadata_alerts[-10:]:
+                if isinstance(alert, dict) and bool(alert.get("blocks_workflow", False)):
+                    active_alerts.append(alert)
+                    device = str(alert.get("device_class") or "hardware")
+                    code = str(alert.get("failure_code") or alert.get("status") or "alert")
+                    entry = f"{device}:{code}"
+                    if entry not in unhealthy:
+                        unhealthy.append(entry)
         return {
             "status": "fail" if unhealthy else "pass",
             "snapshot": snapshot,
             "unhealthy_devices": unhealthy,
+            "active_hardware_alerts": active_alerts,
         }
 
     def _validate_design_spec(
@@ -347,6 +450,10 @@ class GuardianAgent(BaseAgent):
         warnings: list[str] = []
 
         objective = GuardianAgent._safe_float(latest_analysis.get("objective_score"), -1.0)
+        analysis_ok = latest_analysis.get("ok")
+        analysis_failure_code = str(latest_analysis.get("failure_code") or "").strip()
+        failure_tags = latest_analysis.get("failure_tags") if isinstance(latest_analysis.get("failure_tags"), list) else []
+        handoff_gate = latest_analysis.get("equipment_handoff_gate") if isinstance(latest_analysis.get("equipment_handoff_gate"), dict) else {}
         progress = GuardianAgent._safe_float(
             latest_analysis.get("sarm", {}).get("progress_score") if isinstance(latest_analysis.get("sarm"), dict) else None,
             -1.0,
@@ -354,6 +461,14 @@ class GuardianAgent(BaseAgent):
         anomaly = bool(latest_observations.get("anomaly", False))
         expected_proxy = GuardianAgent._safe_float(spec.get("expected_objective_proxy_score"), -1.0) if isinstance(spec, dict) else -1.0
 
+        if analysis_ok is False:
+            issues.append(f"analysis blocked: {analysis_failure_code or 'unknown_failure'}.")
+        if str(handoff_gate.get("status") or "").lower() == "blocked":
+            blockers = handoff_gate.get("blockers") if isinstance(handoff_gate.get("blockers"), list) else []
+            detail = str(handoff_gate.get("failure_code") or (blockers[0] if blockers else "equipment_handoff_gate"))
+            issues.append(f"equipment handoff gate blocked: {detail}.")
+        if any(str(item).startswith(("UTM_DATA_", "EQUIPMENT_LIVE_EVIDENCE_INCOMPLETE", "UTM_SAVE_EXPORT_")) for item in failure_tags):
+            warnings.append("analysis failure tags contain UTM data/evidence gate failures.")
         if progress >= 0.85 and precursor >= 0.85:
             issues.append("high progress but also high failure precursor.")
         if objective >= 0.0 and objective < 0.45 and precursor >= 0.7:

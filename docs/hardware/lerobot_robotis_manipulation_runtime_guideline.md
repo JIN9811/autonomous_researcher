@@ -1093,3 +1093,72 @@ Unverified until local installation/hardware test:
 - Do not log tokens or secrets.
 - Do not allow policy rollout while teleoperation is active unless a verified workflow explicitly permits it.
 - Do not treat SARM recovery hints as final decisions unless Guardian policy escalates them.
+
+## 2026-05-29 Manipulation Agent Pi0.5/SARM Update
+
+The current implementation treats LeRobot/Pi0.5 as an execution backend inside
+Manipulation Agent, not as a standalone planner.
+
+Runtime rules now implemented:
+
+- The GUI and live loop use the same `ManipulationAgent` path for Save/Test/Run.
+- The bridge boundary remains `lerobot.rollout.start`; Manipulation Agent does
+  not construct shell commands directly.
+- Supported bounded tasks are `transfer_to_utm` and `clear_utm_to_disposal`.
+- Pi0.5 defaults use `policy_type=pi05`, `rollout_inference_type=rtc`,
+  `rollout_rtc_execution_horizon=10`, `rollout_rtc_max_guidance_weight=1.0`,
+  `rollout_action_clamp=true`, and `rollout_max_relative_target=5`.
+- `memory/manipulation_agent_bridge.json` stores task, policy backend, RTC,
+  timeout, profile, policy, route, and UI defaults.
+- The agent emits `manipulation_report.v1` and `robot_task_result.v1` while
+  preserving legacy `manipulation`, `sarm`, and `protocol_note` keys.
+- Rollout success without Vision confirmation is reported as
+  `needs_post_place_vision` or `needs_post_disposal_vision`, not as a final
+  verified physical handoff.
+- Guardian remains the recovery/stop authority and may consume SARM precursor
+  scores, preflight blockers, and robot_task_result warnings.
+
+LeRobot GUI `/lerobot` now includes a Manipulation Agent Bridge management panel
+with task selector, policy backend, RTC settings, max duration, and a structured
+runtime report board for skill episode, preflight, Pi0.5 policy runtime, Vision
+dependency, SARM progress, decision, handoff, and evidence.
+
+
+## 2026-05-29 Rollout Queue And Pi0.5 RTC Execution Update
+
+LeRobot execution endpoints in the GUI must not directly instantiate or call a separate bridge for live execution. Start/stop/status for teleoperation, recording, training, visualization, and rollout must pass through the backend `ToolRegistry` so device queue metadata, shared sessions, and bridge guards are applied consistently. The registered LeRobot bridge is exposed as the shared `lerobot.bridge` resource for read/status endpoints that need the same session state.
+
+Rollout guard rule:
+
+- `lerobot.rollout.start` is registered on the `robot:lerobot` device queue.
+- The bridge also blocks duplicate live rollout starts while an active rollout session exists.
+- If the same active `session_id` is passed again, the bridge returns the existing session idempotently instead of launching another process.
+- If a different/no `session_id` is passed while rollout is active, the bridge returns `LEROBOT_ROLLOUT_ALREADY_ACTIVE` and requires `lerobot.rollout.stop` before the next inference session.
+
+Pi0.5 rollout execution rule:
+
+- The local `lerobot-pi05` environment does not provide a `lerobot-rollout` executable.
+- Pi0.5 real-robot inference is routed through `scripts/lerobot_pi05_rollout_wrapper.py`, which delegates to `/home/jin/lerobot_pi05/examples/rtc/eval_with_real_robot.py` after registering the ROBOTIS OMX robot class.
+- Pi0.5 RTC arguments use the installed script contract: `--rtc.enabled`, `--rtc.execution_horizon`, `--rtc.max_guidance_weight`, `--duration`, `--fps`, and `--task`.
+- ACT-specific rollout smoothing such as `--policy.temporal_ensemble_coeff` is not injected for Pi0.5 rollout.
+- If `max_duration_s` is set, it becomes the Pi0.5 run duration. If it is blank and continuous rollout is requested, the bridge maps the run to a long duration so the operator can stop it with `Stop Rollout`.
+
+## Guardian-Ready Hardware Alerts
+
+LeRobot/Pi0.5 failures must not be shown only as generic GUI errors. When rollout, teleoperation, recording, camera, policy, calibration, or port checks fail, the backend attaches a `hardware_alert.v1` object to the API result and emits a `hardware.alert` runtime event.
+
+Required fields:
+
+- `device_class`: `robot` for LeRobot/Pi0.5 bridge failures.
+- `component`: one of `robot_io_port`, `camera`, `policy_runtime`, `calibration`, `rollout_scheduler`, `pi05_runtime`, or `lerobot_bridge`.
+- `reason_code`: Guardian taxonomy value such as `MISSING_REQUIRED_INPUT`, `DEVICE_UNHEALTHY`, `HEARTBEAT_LOST`, `ROBOT_POLICY_UNAPPROVED`, or `HUMAN_APPROVAL_REQUIRED`.
+- `guardian_contract`: `guardian_contract.v1` envelope with `ok_for_next_stage` and `requires_human_approval`.
+- `guardian_decision`: `guardian_decision.v1` with risk score/vector and recommended action.
+- `incident_record`: `incident_record.v1` appended to `runs/<run_id>/guardian_events.jsonl`.
+
+Current behavior:
+
+- Missing saved follower/leader/camera ports block workflow and route to Guardian recovery.
+- Concurrent live rollout requests produce a warning/blocking scheduler alert depending on the underlying bridge result.
+- Policy/runtime/calibration errors are preserved in the original `log_tail` but summarized as hardware-specific alerts for GUI and Guardian.
+- Guardian loop review reads `run_metadata.hardware_alerts` and `device_health` prefixes so later stages do not ignore a blocked robot state.

@@ -21,6 +21,7 @@ const boStatusDot = document.getElementById("bo-status-dot");
 const boStatusLabel = document.getElementById("bo-status-label");
 const boStatusDetail = document.getElementById("bo-status-detail");
 const strategyInput = document.getElementById("bo-strategy-input");
+const backendInput = document.getElementById("bo-backend-input");
 const acquisitionInput = document.getElementById("bo-acquisition-input");
 const budgetInput = document.getElementById("bo-budget-input");
 const seedInput = document.getElementById("bo-seed-input");
@@ -28,6 +29,9 @@ const kappaInput = document.getElementById("bo-kappa-input");
 const xiInput = document.getElementById("bo-xi-input");
 const explorationInput = document.getElementById("bo-exploration-input");
 const exploitationInput = document.getElementById("bo-exploitation-input");
+const llmPreferenceInput = document.getElementById("bo-llm-preference-input");
+const llmWeightInput = document.getElementById("bo-llm-weight-input");
+const topKInput = document.getElementById("bo-top-k-input");
 const objectiveInput = document.getElementById("bo-objective-input");
 const parameterSpaceInput = document.getElementById("bo-parameter-space-input");
 const btnBenchmark = document.getElementById("btn-bo-benchmark");
@@ -39,6 +43,10 @@ const bestScoreLabel = document.getElementById("bo-best-score-label");
 const curveTable = document.getElementById("bo-curve-table");
 const surrogatePlot = document.getElementById("bo-surrogate-plot");
 const selectedPoints = document.getElementById("bo-selected-points");
+const priorSummaryPanel = document.getElementById("bo-prior-summary");
+const reasoningPanel = document.getElementById("bo-reasoning-panel");
+const candidateRankingPanel = document.getElementById("bo-candidate-ranking");
+const recommendationPanel = document.getElementById("bo-recommendation-panel");
 const resultJson = document.getElementById("bo-result-json");
 
 let defaults = {};
@@ -76,6 +84,14 @@ function numberText(value, digits = 4) {
   return String(Number(num.toFixed(digits)));
 }
 
+function boolValue(el, fallback = true) {
+  if (!el) return fallback;
+  const value = String(el.value ?? fallback).trim().toLowerCase();
+  if (["true", "1", "yes", "on", "enabled"].includes(value)) return true;
+  if (["false", "0", "no", "off", "disabled"].includes(value)) return false;
+  return fallback;
+}
+
 function parseJsonField(el, fallback) {
   try {
     const text = (el && el.value ? el.value : "").trim();
@@ -88,6 +104,7 @@ function parseJsonField(el, fallback) {
 function settingsPayload() {
   return {
     strategy: strategyInput.value,
+    bo_backend: backendInput ? backendInput.value : "lightweight_pool",
     acquisition: acquisitionInput.value,
     budget: Number(budgetInput.value || 1),
     random_seed: Number(seedInput.value || 7),
@@ -95,6 +112,9 @@ function settingsPayload() {
     xi: Number(xiInput.value || 0.01),
     exploration_weight: Number(explorationInput.value || 0.35),
     exploitation_weight: Number(exploitationInput.value || 0.65),
+    llm_preference_enabled: boolValue(llmPreferenceInput, true),
+    llm_candidate_weight: (llmWeightInput.value || "auto").trim() || "auto",
+    top_k: Number(topKInput.value || 5),
     objective: parseJsonField(objectiveInput, {}),
     parameter_space: parseJsonField(parameterSpaceInput, defaults.parameter_space || {}),
     mode: "test",
@@ -104,6 +124,7 @@ function settingsPayload() {
 function applyDefaults(data) {
   defaults = data.defaults || {};
   strategyInput.value = defaults.strategy || "bo";
+  if (backendInput) backendInput.value = defaults.bo_backend || "lightweight_pool";
   acquisitionInput.value = defaults.acquisition || "expected_improvement";
   budgetInput.value = defaults.budget || 8;
   seedInput.value = defaults.random_seed || 7;
@@ -111,6 +132,9 @@ function applyDefaults(data) {
   xiInput.value = defaults.xi || 0.01;
   explorationInput.value = defaults.exploration_weight || 0.35;
   exploitationInput.value = defaults.exploitation_weight || 0.65;
+  if (llmPreferenceInput) llmPreferenceInput.value = String(defaults.llm_preference_enabled ?? true);
+  if (llmWeightInput) llmWeightInput.value = defaults.llm_candidate_weight ?? "auto";
+  if (topKInput) topKInput.value = defaults.top_k || 5;
   parameterSpaceInput.value = pretty(defaults.parameter_space || {});
   objectiveInput.value = pretty({
     objective_id: "bo-workspace-objective",
@@ -124,6 +148,7 @@ function applyDefaults(data) {
 function applySettings(settings) {
   if (!settings || typeof settings !== "object") return;
   if (settings.strategy) strategyInput.value = settings.strategy;
+  if (settings.bo_backend && backendInput) backendInput.value = settings.bo_backend;
   if (settings.acquisition) acquisitionInput.value = settings.acquisition;
   if (settings.budget !== undefined) budgetInput.value = settings.budget;
   if (settings.random_seed !== undefined) seedInput.value = settings.random_seed;
@@ -131,6 +156,9 @@ function applySettings(settings) {
   if (settings.xi !== undefined) xiInput.value = settings.xi;
   if (settings.exploration_weight !== undefined) explorationInput.value = settings.exploration_weight;
   if (settings.exploitation_weight !== undefined) exploitationInput.value = settings.exploitation_weight;
+  if (settings.llm_preference_enabled !== undefined && llmPreferenceInput) llmPreferenceInput.value = String(settings.llm_preference_enabled);
+  if (settings.llm_candidate_weight !== undefined && llmWeightInput) llmWeightInput.value = settings.llm_candidate_weight;
+  if (settings.top_k !== undefined && topKInput) topKInput.value = settings.top_k;
   if (settings.parameter_space && typeof settings.parameter_space === "object") {
     parameterSpaceInput.value = pretty(settings.parameter_space);
   }
@@ -316,13 +344,133 @@ function renderSurrogateTrace(benchmark) {
     .join("");
 }
 
+function paramsHtml(params) {
+  const entries = Object.entries(params || {}).filter(([, value]) => value !== undefined && value !== null && value !== "");
+  if (!entries.length) return `<span class="hint">No parameters.</span>`;
+  return `<div class="bo-param-grid">${entries
+    .map(([key, value]) => `<div><span>${escapeHtml(key)}</span><strong>${escapeHtml(typeof value === "number" ? numberText(value, 5) : value)}</strong></div>`)
+    .join("")}</div>`;
+}
+
+function renderPriorSummary(summary) {
+  if (!priorSummaryPanel) return;
+  if (!summary || typeof summary !== "object") {
+    priorSummaryPanel.innerHTML = "No prior evidence loaded.";
+    return;
+  }
+  priorSummaryPanel.innerHTML = `
+    <div class="bo-kpi-grid">
+      <div><span>prior</span><strong>${escapeHtml(summary.prior_count ?? 0)}</strong></div>
+      <div><span>measured</span><strong>${escapeHtml(summary.measured_count ?? 0)}</strong></div>
+      <div><span>failed</span><strong>${escapeHtml(summary.failed_count ?? 0)}</strong></div>
+      <div><span>best score</span><strong>${escapeHtml(numberText(summary.best_score, 5))}</strong></div>
+      <div><span>best candidate</span><strong>${escapeHtml(summary.best_candidate_id || "n/a")}</strong></div>
+    </div>
+  `;
+}
+
+function renderReasoning(reasoning, failureModel) {
+  if (!reasoningPanel) return;
+  if (!reasoning || typeof reasoning !== "object") {
+    reasoningPanel.innerHTML = "No reasoning artifact yet.";
+    return;
+  }
+  const strategy = reasoning.strategy_recommendation || {};
+  const hypotheses = Array.isArray(reasoning.hypotheses) ? reasoning.hypotheses : [];
+  const regions = Array.isArray(reasoning.preference_regions) ? reasoning.preference_regions : [];
+  const risks = Array.isArray(failureModel?.risk_patterns) ? failureModel.risk_patterns : [];
+  reasoningPanel.innerHTML = `
+    <div class="bo-reasoning-head">
+      <span>source: <strong>${escapeHtml(reasoning.source || "unknown")}</strong></span>
+      <span>strategy: <strong>${escapeHtml(strategy.strategy || "n/a")}</strong></span>
+      <span>acquisition: <strong>${escapeHtml(strategy.acquisition || "n/a")}</strong></span>
+    </div>
+    <p class="bo-reasoning-summary">${escapeHtml(reasoning.operator_summary || strategy.reason || "No operator summary.")}</p>
+    <div class="bo-two-column">
+      <div>
+        <h4>Hypotheses</h4>
+        ${hypotheses.length ? `<ol class="bo-compact-list">${hypotheses.map((item) => `
+          <li><strong>${escapeHtml(item.id || "h")}</strong> ${escapeHtml(item.claim || "")}
+            <em>confidence=${escapeHtml(numberText(item.confidence, 2))}</em>
+          </li>`).join("")}</ol>` : `<p class="hint">No hypothesis entries.</p>`}
+      </div>
+      <div>
+        <h4>Preference / Failure Regions</h4>
+        ${regions.length ? `<ol class="bo-compact-list">${regions.slice(0, 6).map((item) => `
+          <li><strong>${escapeHtml(numberText(item.preference_score, 2))}</strong> ${escapeHtml(item.condition || "")}</li>`).join("")}</ol>` : `<p class="hint">No preference regions.</p>`}
+        ${risks.length ? `<p class="hint">Failure risk patterns: ${escapeHtml(risks.length)}</p>` : ""}
+      </div>
+    </div>
+  `;
+}
+
+function renderCandidateRanking(ranking) {
+  if (!candidateRankingPanel) return;
+  const rows = Array.isArray(ranking) ? ranking.slice(0, 8) : [];
+  if (!rows.length) {
+    candidateRankingPanel.innerHTML = "No ranked candidates yet.";
+    return;
+  }
+  candidateRankingPanel.innerHTML = rows
+    .map((item, idx) => {
+      const numeric = item.numeric || {};
+      const llm = item.llm || {};
+      const constraints = item.constraints || {};
+      const warnings = Array.isArray(constraints.warnings) ? constraints.warnings : [];
+      return `
+        <article class="bo-candidate-card ${constraints.valid === false ? "warn" : ""}">
+          <div class="bo-candidate-head">
+            <strong>#${idx + 1} ${escapeHtml(item.candidate_id || "candidate")}</strong>
+            <span>combined=${escapeHtml(numberText(item.combined_score, 5))}</span>
+          </div>
+          <div class="bo-candidate-metrics">
+            <span>acq ${escapeHtml(numberText(numeric.acquisition_value, 5))}</span>
+            <span>mean ${escapeHtml(numberText(numeric.surrogate_mean, 5))}</span>
+            <span>unc ${escapeHtml(numberText(numeric.uncertainty, 5))}</span>
+            <span>llm ${escapeHtml(numberText(llm.preference_score, 3))}</span>
+            <span>risk ${escapeHtml(numberText(constraints.risk_score, 3))}</span>
+          </div>
+          ${paramsHtml(item.parameters || {})}
+          ${warnings.length ? `<p class="bo-warning">${escapeHtml(warnings.join("; "))}</p>` : ""}
+        </article>
+      `;
+    })
+    .join("");
+}
+
+function renderRecommendationPanel(recommendation, nextDesignRequest) {
+  if (!recommendationPanel) return;
+  if (!recommendation || typeof recommendation !== "object" || !recommendation.candidate_id) {
+    recommendationPanel.innerHTML = "Run BO Agent to generate a next-design handoff.";
+    return;
+  }
+  recommendationPanel.innerHTML = `
+    <div class="bo-recommendation-title">
+      <strong>${escapeHtml(recommendation.candidate_id)}</strong>
+      <span>${escapeHtml(recommendation.source_strategy || "bo")}</span>
+    </div>
+    <p>${escapeHtml(recommendation.why_this_candidate || recommendation.reason || "Recommended by candidate ranking.")}</p>
+    ${paramsHtml(recommendation.parameters || {})}
+    <div class="bo-handoff-note">
+      <span>handoff: ${escapeHtml(nextDesignRequest?.schema || "next_design_request.v1")}</span>
+      <span>status: ${escapeHtml(nextDesignRequest?.status || "ready")}</span>
+    </div>
+  `;
+}
+
 function renderResult(data) {
   const boResult = data?.data?.bo_result || data?.bo_result || null;
   const benchmark = boResult ? boResult.benchmark : data.benchmark;
   const recommendation = boResult ? boResult.recommendation || {} : {};
-  const score = recommendation.objective_score ?? (benchmark?.strategies ? Object.values(benchmark.strategies)[0]?.best_score : "n/a");
+  const strategyPayload = benchmark?.strategies ? Object.values(benchmark.strategies)[0] || {} : {};
+  const backendNote = boResult ? ` · backend=${boResult.bo_backend || "lightweight_pool"}/${strategyPayload.backend_active || "lightweight_pool"}` : "";
+  const score = recommendation.objective_score ?? (benchmark?.strategies ? strategyPayload.best_score : "n/a");
   recommendationLabel.textContent = recommendation.candidate_id || "benchmark only";
-  bestScoreLabel.textContent = score ?? "n/a";
+  bestScoreLabel.textContent = `${score ?? "n/a"}${backendNote}`;
+  renderRecommendationPanel(recommendation, boResult ? boResult.next_design_request : null);
+  renderPriorSummary(boResult ? boResult.prior_summary : null);
+  renderReasoning(boResult ? boResult.reasoning : null, boResult ? boResult.failure_model : null);
+  renderCandidateRanking(boResult ? boResult.candidate_ranking || boResult.candidate_pool : []);
   renderCurve(boResult ? boResult.best_so_far || [] : firstCurveFromBenchmark(benchmark));
   renderSurrogateTrace(benchmark);
   resultJson.textContent = pretty(data);

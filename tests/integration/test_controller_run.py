@@ -25,7 +25,7 @@ async def test_controller_completes_test_run() -> None:
     log_records = [json.loads(line) for line in json_log_path.read_text(encoding="utf-8").splitlines() if line.strip()]
     assert any(record["event_type"] == "run.created" for record in log_records)
 
-    timeout_s = 8.0
+    timeout_s = 240.0
     start = asyncio.get_running_loop().time()
     while True:
         snapshot = controller.snapshot()
@@ -41,10 +41,28 @@ async def test_controller_completes_test_run() -> None:
     assert snapshot["state"]["run_metadata"]["bo_agent"]["tool"] == "bo.agent"
     assert snapshot["state"]["run_metadata"]["bo_agent"]["knowledge_context"]
     assert snapshot["state"]["run_metadata"]["equipment_result"]["tool"] == "equipment.pyautogui.run"
+    assert snapshot["state"]["run_metadata"]["equipment_result"]["status"] == "verified_complete"
     assert snapshot["state"]["run_metadata"]["equipment_handoff"]["status"] == "ready_for_analysis"
+    assert snapshot["state"]["run_metadata"]["equipment_report"]["schema"] == "equipment_report.v1"
+    assert snapshot["state"]["run_metadata"]["utm_data_ready"]["schema"] == "utm_data_ready.v1"
+    assert snapshot["state"]["run_metadata"]["equipment_report"]["cross_checks"]["data_parse_probe_ok"] is True
+    assert snapshot["state"]["run_metadata"].get("hardware_alerts", []) == []
+    assert any(packet["packet"]["schema"] == "utm_data_ready.v1" for packet in snapshot["state"]["run_metadata"]["handoff_packets"])
     assert snapshot["state"]["latest_analysis"]["equipment_ok"] is True
+    assert snapshot["state"]["latest_analysis"]["equipment_result_file"]
     assert snapshot["state"]["latest_analysis"]["cae_result"]["ok"] is True
     assert snapshot["state"]["latest_analysis"]["cae_result"]["boundary_condition"] == "bottom_fixed_support"
+    assert snapshot["state"]["latest_analysis"]["bo_observation"]["schema"] == "bo_observation.v1"
+    assert any(
+        item.get("schema") == "experiment_evaluation.v1" and item.get("source") == "analysis_agent"
+        for item in snapshot["state"].get("experiment_evaluations", [])
+    )
+    assert snapshot["state"]["latest_observations"]["vision_report"]["schema"] == "vision_report.v1"
+    assert snapshot["state"]["latest_observations"]["vision_signal"]["schema"] == "vision_signal.v1"
+    assert snapshot["state"]["run_metadata"]["vision_report"]["schema"] == "vision_report.v1"
+    assert snapshot["state"]["run_metadata"]["vision_signal"]["schema"] == "vision_signal.v1"
+    assert snapshot["state"]["run_metadata"]["vision_handoff_packet"]["schema"] == "vision_signal.v1"
+    assert any(packet["packet"]["schema"] == "vision_signal.v1" for packet in snapshot["state"]["run_metadata"]["handoff_packets"])
 
     run_dir = json_log_path.parent
     artifact_paths = {item.relative_to(run_dir).as_posix() for item in run_dir.rglob("*") if item.is_file()}
@@ -53,6 +71,8 @@ async def test_controller_completes_test_run() -> None:
     assert any(path.startswith("runtime/bo/") and path.endswith("_bo_progress.svg") for path in artifact_paths)
     assert any(path.startswith("runtime/analysis/") and path.endswith(".contour.svg") for path in artifact_paths)
     assert any(path.startswith("runtime/analysis/") and path.endswith(".report.json") for path in artifact_paths)
+    assert any(path.startswith("vision/") and path.endswith("detection.json") for path in artifact_paths)
+    assert any(path.startswith("vision/") and path.endswith("scene_map.svg") for path in artifact_paths)
     assert any(path.startswith("runtime/bo/") and path.endswith("_bo_progress.svg") for path in runtime_artifact_paths)
     assert any(path.startswith("runtime/analysis/") and path.endswith(".contour.svg") for path in runtime_artifact_paths)
 

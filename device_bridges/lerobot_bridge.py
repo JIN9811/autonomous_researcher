@@ -687,6 +687,9 @@ class LeRobotBridge:
         profile = self._profile(request.profile_id)
         if profile is None:
             return self._error("lerobot.rollout.start", mode, request.profile_id, "LEROBOT_PROFILE_NOT_FOUND", "Robot profile not found.")
+        active_guard = self._rollout_active_guard(request, mode)
+        if active_guard:
+            return active_guard
         blocked = self._live_block_if_needed(
             tool="lerobot.rollout.start",
             mode=mode,
@@ -707,19 +710,28 @@ class LeRobotBridge:
         if not policy_ref and (request.runtime_mode or request.mode) == "live":
             return self._error("lerobot.rollout.start", "live", request.profile_id, "LEROBOT_POLICY_PATH_REQUIRED", "Live rollout requires policy_path, policy_checkpoint_path, or policy_repo_id.")
         policy_type = self._canonical_policy_type(request.policy_type or "act")
+        is_pi05 = self._is_pi05_policy(policy_type)
         policy_args = [f"--policy.path={policy_ref or str(self.config.fake_checkpoint_root / 'policy.ckpt')}"]
-        if self._is_pi05_policy(policy_type):
+        if is_pi05:
             policy_args.append("--policy.type=pi05")
         device_override = str(raw_payload.get("device") or "").strip()
         if device_override:
-            if self._is_pi05_policy(policy_type):
+            if is_pi05:
                 policy_args.append(f"--device={device_override}")
+                policy_args.append(f"--policy.device={device_override}")
             else:
                 policy_args.append(f"--policy.device={device_override}")
         inference_type = str(request.rollout_inference_type or "").strip().lower()
-        if self._is_pi05_policy(policy_type) and not inference_type:
+        if is_pi05 and not inference_type:
             inference_type = "rtc"
-        if inference_type:
+        if is_pi05:
+            rtc_enabled = inference_type != "sync"
+            policy_args.append(f"--rtc.enabled={_bool_arg(rtc_enabled)}")
+            if rtc_enabled and request.rollout_rtc_execution_horizon is not None:
+                policy_args.append(f"--rtc.execution_horizon={int(request.rollout_rtc_execution_horizon)}")
+            if rtc_enabled and request.rollout_rtc_max_guidance_weight is not None:
+                policy_args.append(f"--rtc.max_guidance_weight={float(request.rollout_rtc_max_guidance_weight)}")
+        elif inference_type:
             policy_args.append(f"--inference.type={inference_type}")
             if inference_type == "rtc":
                 if request.rollout_rtc_execution_horizon is not None:
@@ -728,20 +740,20 @@ class LeRobotBridge:
                     policy_args.append(f"--inference.rtc.max_guidance_weight={float(request.rollout_rtc_max_guidance_weight)}")
         if "policy_use_amp" in raw_payload:
             policy_args.append(f"--policy.use_amp={_bool_arg(request.policy_use_amp)}")
-        if request.rollout_temporal_ensemble:
+        if request.rollout_temporal_ensemble and not is_pi05:
             coeff = float(request.rollout_temporal_ensemble_coeff or 0.01)
             policy_args.append(f"--policy.temporal_ensemble_coeff={coeff}")
             policy_args.append("--policy.n_action_steps=1")
         if request.rollout_action_clamp:
             max_relative_target = max(1, int(round(float(request.rollout_max_relative_target or 5))))
             policy_args.append(f"--robot.max_relative_target={max_relative_target}")
-        if self._is_pi05_policy(policy_type):
-            duration = 0 if request.continuous_rollout else max(1, int(round(float(request.episode_s or 1))))
+        if is_pi05:
+            duration_source = request.max_duration_s if request.max_duration_s and request.max_duration_s > 0 else request.episode_s
+            duration = max(1, int(round(float(duration_source or 1))))
             rollout_extra_args = policy_args + [
-                "--strategy.type=base",
+                f"--fps={request.fps or profile.fps or 30}",
                 f"--task={request.task_instruction}",
                 f"--duration={duration}",
-                f"--display_data={_bool_arg(request.display_data)}",
             ]
         else:
             rollout_extra_args = policy_args + [
@@ -768,6 +780,50 @@ class LeRobotBridge:
             allow_key="allow_policy_rollout",
             extra_args=rollout_extra_args,
             event_payload=payload or {},
+        )
+
+    def _rollout_active_guard(self, request: LeRobotSessionRequest, mode: str) -> dict[str, Any] | None:
+        """Prevent duplicate live rollout/inference processes from sharing robot IO."""
+        if mode != "live":
+            return None
+        active = self._latest_active_session("rollout")
+        if active is None:
+            return None
+        active_session_id = str(active.get("session_id") or "")
+        if request.session_id and request.session_id == active_session_id:
+            step_trace = [
+                {
+                    "step": "ROLLOUT_ACTIVE_GUARD",
+                    "status": "ok",
+                    "detail": f"rollout session already active: {active_session_id}",
+                }
+            ]
+            return self._session_response(
+                "lerobot.rollout.start",
+                mode,
+                active,
+                step_trace,
+                idempotent=True,
+                message="Rollout is already active; returning the existing session instead of starting another process.",
+            )
+        step_trace = [
+            {
+                "step": "ROLLOUT_ACTIVE_GUARD",
+                "status": "blocked",
+                "detail": f"active_session_id={active_session_id} profile={active.get('profile_id', '')}",
+            }
+        ]
+        return self._session_response(
+            "lerobot.rollout.start",
+            mode,
+            active,
+            step_trace,
+            ok=False,
+            failure_code="LEROBOT_ROLLOUT_ALREADY_ACTIVE",
+            guard_status="blocked",
+            blocked_by_session_id=active_session_id,
+            message="Another LeRobot rollout is already active. Stop the active rollout before starting a new inference session.",
+            error="Another LeRobot rollout is already active. Stop the active rollout before starting a new inference session.",
         )
 
     def rollout_stop(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -1559,7 +1615,7 @@ class LeRobotBridge:
         mode = request.runtime_mode or request.mode
         command = [self.config.conda_executable, "run", "--no-capture-output", "-n", self._workflow_conda_env_name(workflow, request)]
         if workflow == "rollout" and self._is_pi05_policy(request.policy_type):
-            command.append("lerobot-rollout")
+            command.extend(["python", str(self.config.repo_root / "scripts" / "lerobot_pi05_rollout_wrapper.py")])
         else:
             command.extend(self._workflow_entrypoint(profile, workflow))
         if workflow in {"teleoperate", "record", "rollout"}:

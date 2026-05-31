@@ -16,6 +16,8 @@ Default mechanical setup:
 - CAE-only platen: bottom and top plates are applied for load/boundary transfer
 - default solver family: CalculiX
 - default mesher family: Gmsh
+- optional FEM backend: FEniCSx/DOLFINx, prepared as an Analysis Agent
+  simulation backend and documented in `docs/agents/fenicsx_analysis_runtime_assets.md`
 
 The CAE result is not a replacement for live UTM data. It is an additional
 closed-loop signal for ranking and risk estimation.

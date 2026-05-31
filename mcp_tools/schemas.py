@@ -46,6 +46,9 @@ class CameraCaptureInput(BaseModel):
     """Input schema for camera.capture."""
 
     frame_id: str = Field(default="frame-mock")
+    camera_key: str = Field(default="top")
+    purpose: str = Field(default="3dp_output_pickup_check")
+    specimen_id: str = Field(default="")
 
 
 class RobotPickPlaceInput(BaseModel):
@@ -58,3 +61,12 @@ class UTMRunInput(BaseModel):
     """Input schema for utm.run_protocol."""
 
     profile: str = Field(default="default")
+    runtime_mode: str = Field(default="test")
+    run_id: str = Field(default="run-test")
+    experiment_id: str = Field(default="")
+    specimen_id: str = Field(default="specimen-test")
+    program_id: str = Field(default="utm_compression_start_v1")
+    result_file: str = Field(default="")
+    utm_csv_path: str = Field(default="")
+    direct_backend_configured: bool = Field(default=False)
+    allow_live_direct_backend: bool = Field(default=False)

@@ -93,8 +93,8 @@ BO Workspace GUI route:
 - Route: `/bo`
 - API surface: `/api/bo/config`, `/api/bo/benchmark`, and `/api/bo/run`.
 - The workspace has a `Save Settings` control. Saved settings are persisted in `memory/bo_workspace_settings.json` and are reapplied when a new BO GUI window is opened.
-- Saved BO settings include mode, objective, strategy, acquisition function, budget, seed, exploration/exploitation controls, and parameter-space bounds.
-- Benchmark and BO Agent actions remain virtual optimization controls only; the BO GUI does not directly start printer or robot hardware.
+- Saved BO settings include mode, objective, strategy, numeric backend (`lightweight_pool` or `botorch_optional`), acquisition function, budget, seed, exploration/exploitation controls, LLM preference enable/weight, top-k, and parameter-space bounds.
+- Benchmark and BO Agent actions remain virtual optimization controls only; the BO GUI does not directly start printer or robot hardware. `/api/bo/run` shows evidence intake, LLM reasoning audit, candidate ranking, and `next_design_request.v1` handoff.
 - Live GUI BO Agent messages render surrogate/acquisition graphs in a collapsed state by default. The collapsed card shows only strategy/acquisition/budget/latest candidate/recommendation metadata; SVG trace graphs and selected-point rows are created only when the operator clicks `그래프 보기`, and removed again by `그래프 접기`.
 
 LeRobot GUI route:
@@ -158,3 +158,173 @@ Runtime IDE graph workspace:
 - Module Designer accepts a Python file and sends it to Gemma 31B (`gemma4:31b`) for ATR protocol conversion. The result is saved as `graphs/modules/<module_id>/handler.py` plus `module.yaml` metadata, category, tool allowlist, internal steps, and version history. The generated handler remains pending until it is registered in the allowlisted runtime handler registry; the GUI never executes arbitrary uploaded Python directly.
 - GUI and CUI are cross-compatible: both read/write the same `graphs/modules/*/module.yaml` files through `/api/modules`, and the `atr modules` / `atr module show|validate|dry-run|create` commands use the same Runtime API.
 - Node labels, tab labels, status cards, and output rows are constrained with ellipsis/overflow guards to prevent text overlap in the reference 1536x1024 Runtime IDE layout.
+
+Design Agent report surface:
+- The Live GUI selected-agent report for Design Agent reads `state.run_metadata.design_report`, latest message `design_report`, or event payload `design_report`.
+- The Design report card shows objective metric/direction, hypothesis, candidate counts, valid/rejected counts, selected score, uncertainty, information gain, risk, prior count, and handoff readiness.
+- The expanded Design detail area shows candidate board, rejected/repair log, decision register, Knowledge/BO/failure prior context, and missing handoff fields.
+- The Agent Report API `/api/agents/design/report` returns the same structured report under `sections.design_report`, plus role-specific `candidate_board`, `manufacturability`, `decision_register`, and `handoff_packet` fields.
+
+
+2026-05-29 Specimen Making report update:
+- The Specimen Agent report is now `Manufacturing Digital Thread / Printer Runtime`.
+- Live GUI Specimen cards must surface `fabrication_report.v1`: fabrication intent, digital thread, process plan, quality gates, printer runtime, monitoring plan, fabrication outcome, and feedback to Design/Knowledge/BO.
+- `specimen_fabricated.v1` is the downstream handoff packet; Vision/Manipulation should treat its location/readiness as pending physical confirmation when `requires_after_print_confirmation=true`. The packet exposes a compact `fabrication_summary`; the report view reads the full `fabrication_report.v1`.
+- Report view should summarize manufacturing evidence. Raw printer payloads, full command arrays, and raw logs remain backend-trace material.
+
+2026-05-29 Vision Agent report update:
+- The Vision Agent report is now `Lab Perception Signal Bus / Visual Evidence`.
+- Live GUI Vision cards must surface `vision_report.v1`: scene task, camera
+  source, zone state, detection/tracking evidence, signal board, evidence
+  timeline, dataset ledger, safety/anomaly, and `vision_signal.v1` handoff.
+- The report view should show confidence, `expires_at`, and blocking reasons in
+  human-readable rows. Raw capture payloads remain backend-trace material.
+- Vision report does not imply action execution. Robot/printer/equipment actions
+  remain owned by downstream agents and Guardian gates.
+
+Vision chat card requirement:
+- During planning/live handoff, Vision completion messages are represented as
+  `live_chat_message.v1` / `message_type=signal` entries. The card text should
+  summarize camera source, zone state, pickup-ready confidence, expiry time,
+  anomaly state, and visual evidence path without exposing raw JSON.
+
+2026-05-29 Manipulation Agent / Pi0.5 GUI update:
+- The LeRobot workspace `Manipulation Agent Bridge` panel now exposes the two bounded tasks used by the live loop: `transfer_to_utm` and `clear_utm_to_disposal`.
+- Task selection updates the default source, target, task instruction, and Vision observation template; operators may still override those fields.
+- The panel includes Policy Backend, Policy Type, Pi0.5 RTC Execution Horizon, Pi0.5 RTC Max Guidance Weight, Max Duration Seconds, Safe Action Clamp, camera/display, and continuous-rollout controls.
+- `Save Agent Defaults` persists these values to `memory/manipulation_agent_bridge.json`; `Test Agent Bridge` runs the same Manipulation Agent path in forced test mode; `Run Manipulation Agent` runs the actual agent-mediated path for the selected GUI mode.
+- The Manipulation runtime report panel summarizes Skill Episode Board, Preflight, Pi0.5/Policy Runtime, Vision Dependency, SARM Stage Progress, Decision/Handoff, and Evidence. It is a human-readable report surface; raw JSON remains in backend trace/output.
+- Live GUI selected-agent report for Manipulation Agent reads `state.run_metadata.manipulation_report` and `state.run_metadata.robot_task_result`, then renders the same task, policy, preflight, Vision, SARM, rollout, decision, and evidence sections.
+
+GUI browser inspection requirement:
+- Use Selenium from the main `.venv` when GUI layout, report rendering, route wiring, Runtime IDE canvas behavior, or Live GUI chat/report surfaces are changed.
+- Preferred local stack: Firefox + `/snap/bin/geckodriver` + `selenium` from `requirements.txt`.
+- Standard inspection flow:
+  1. Start a temporary FastAPI server, for example `.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 7862`.
+  2. Use Selenium to open the changed route at a fixed viewport such as 1920x1080.
+  3. Check that required labels/buttons/panels exist in the DOM and that key report content renders without raw JSON dumps where a human report is expected.
+  4. Save screenshots to `runs/` or `artifacts/` for audit evidence.
+  5. Stop the temporary server and any headless browser/geckodriver process.
+- For quick route-specific checks, a one-off Selenium script is acceptable. For repeatable UI contracts, add or update a script under `tests/ui/` and reference it from the relevant test notes.
+
+
+
+2026-05-29 LeRobot rollout queue / Pi0.5 note:
+- LeRobot GUI execution buttons call backend ToolRegistry tools, not a separate direct bridge, so rollout/record/train/teleop execution observes the same device queue and session state as the live loop.
+- Live rollout has an active-session guard. A second rollout request is blocked with `LEROBOT_ROLLOUT_ALREADY_ACTIVE` until the operator stops the active rollout.
+- Pi0.5 rollout uses the local RTC wrapper `scripts/lerobot_pi05_rollout_wrapper.py` in the `lerobot-pi05` conda environment, because that environment exposes `lerobot-eval` and RTC examples rather than a `lerobot-rollout` binary.
+
+2026-05-30 Lab Equipment report surface update:
+- The Live GUI selected-agent report for Lab Equipment is now `Lab Equipment / UTM Visual Control`, not a generic bridge-command summary.
+- The report reads `state.run_metadata.equipment_report`, `equipment_result`, `utm_data_ready`, and `equipment_handoff`.
+- The front-end summary rows show registered UTM `program_id`, bridge/provider state, saved control profile, screen assertion count, Vision physical gate, CSV data artifact status, Linux CSV path, and Analysis handoff gate.
+- The expanded detail area must render: Bridge / Protocol Profile, Preconditions, Screen-State Assertions, Vision Physical Cross-Checks, UTM Data Ledger, Handoff Gate / Blocking Reasons, and Evidence Refs.
+- Raw bridge payloads and command logs remain backend-trace material; the report surface is for operator-readable evidence that screen, physical, save/export, file, and parse gates were actually satisfied before Analysis.
+
+2026-05-30 Equipment report browser audit:
+- Repeatable browser audit script: `tests/ui/equipment_report_browser_audit.py`.
+- The script launches headless Firefox through Selenium/geckodriver, injects a representative `equipment_report.v1` debug payload into `/live`, selects the Equipment report view, and verifies the 1920x1080 DOM contains the UTM visual-control report sections without horizontal overflow.
+- Required visible sections are Bridge / Protocol Profile, Preconditions, Screen-State Assertions, Vision Physical Cross-Checks, UTM Data Ledger, Handoff Gate / Blocking Reasons, Safety Gate / Guardian, Live Evidence Audit, Artifact / Evidence Ledger, Failure / Recovery, and Evidence Refs.
+- Latest audit evidence screenshot path: `artifacts/ui/equipment_report_browser_audit.png`.
+- Latest 1920px browser audit result: PASS, `scrollWidth=1920`, `clientWidth=1920`, screenshot `1920x994`.
+
+2026-05-30 Windows Bridge GUI browser audit:
+- Repeatable browser audit script: `tests/ui/windows_bridge_gui_browser_audit.py`.
+- The script opens the standalone Windows PyAutoGUI bridge root page, injects a non-actuating fake `step_trace`, verifies Run Timeline rendering, checks required operator panels, and enforces no horizontal overflow at 1920px.
+- Required visible sections include Local Operator Console, Payload Preview, Run Timeline, UTM Protocol, Preflight + Run Live UTM, Stop / Abort, Live Proof Checklist, Request Audit, Bridge Files, Step Trace, Artifacts, Artifact Preview, and Operator Log.
+- Latest audit evidence screenshot path: `artifacts/ui/windows_bridge_gui_browser_audit.png`.
+- Latest 1920px browser audit result: PASS for both `install/windows_pyautogui_bridge_server.py` and `Pyautogui_server_for_window/bridge/windows_pyautogui_bridge_server.py`, `scrollWidth=1908`, `clientWidth=1908`, screenshot `1920x994`.
+
+2026-05-30 Windows Equipment live preflight:
+- The Windows PyAutoGUI Bridge GUI exposes a `Live Preflight` button next to UTM profile/readiness controls.
+- The action calls `/api/equipment/windows/live-preflight` with explicit confirmation and displays the structured result in the Result Log.
+- The preflight is non-actuating: it may check bridge health, program registry, locator listing, and optionally capture one screenshot, but it must not call `/execute`.
+- Operators should use this after `Save UTM Profile` and before `Run UTM Protocol Test` or an autonomous Lab Equipment run.
+
+## 2026-05-30 Live GUI Lab Equipment Evidence/Recovery Surface
+
+The Live GUI Equipment selected-agent report now exposes the additional Lab Equipment failure-memory contract:
+
+- `Artifact / Evidence Ledger`: all artifact refs, screen evidence refs, data evidence refs, and normalized bridge artifact records.
+- `Failure / Recovery`: recovery status, operator intervention flag, retry count, fallback macros, recommended action, and failure/retry rows.
+- `Handoff Gate / Blocking Reasons`: remains the workflow gate; screen evidence does not replace the UTM CSV required for Analysis.
+
+This gives operators a visible path from Windows PyAutoGUI screen evidence to Guardian/Knowledge failure review without confusing screenshots with UTM curve data.
+
+## 2026-05-30 Lab Equipment Report Safety Gate
+
+The Live GUI Equipment report includes a dedicated `Safety Gate / Guardian` section. It surfaces Guardian/hardware-alert evidence next to UTM handoff gates so operators can distinguish these cases:
+
+- UTM is ready and Guardian status is `allow`;
+- UTM data/screen/Vision evidence is incomplete and workflow is blocked;
+- Guardian requires human approval or safe-stop/recovery before retry.
+
+The Equipment report also displays request-audit details under Live Evidence Audit, including whether the Windows bridge request log proves the live `/execute` command.
+
+## 2026-05-30 Windows PyAutoGUI Bridge Local GUI Proof Checklist
+
+The Windows-side bridge page at `http://<windows-bridge>:8765/` now includes a `Live Proof Checklist` panel.
+
+- `Refresh Evidence` calls only passive endpoints: `/health`, `/readiness`, and `/request-log`.
+- `Auto-refresh request audit` polls `/request-log` every 5 seconds while the page is visible.
+- The checklist shows Health + PyAutoGUI, UTM locator readiness, local live-safety confirmation, request-log `/execute`, screen evidence, and CSV parse-probe state.
+- The panel is for local operator awareness; Linux-side workflow gates remain authoritative for autonomous handoff.
+
+## 2026-05-30 Windows Equipment Evidence Proof Checklist
+
+The Linux-side Windows Equipment workspace now renders a proof checklist from `/api/equipment/windows/evidence-audit`.
+
+- API fields: `proof_checklist[]` and `proof_ready`.
+- Required proof items: Windows bridge `/execute` audit, UTM screen-state evidence, physical UTM motion cross-check, Linux UTM artifact pull, CSV parse probe, and Vision frame evidence.
+- The UI shows the open proof item IDs in the UTM Evidence Audit card so operators can see why Analysis handoff is blocked, including save/export responsibility and `/execute` identity-audit failures.
+- The request-audit parser accepts both recent request paths and Windows bridge summary fields such as `execute_event_seen`, `execute_event_count`, and `last_execute_at`.
+
+## 2026-05-30 Windows Equipment UTM Pre-Execution Gate
+
+The Windows Equipment workspace now blocks UTM live execution before contacting Windows `/execute` when setup readiness is incomplete.
+
+- A UTM `Run UTM Protocol Test` request first evaluates passive readiness with the exact payload overrides from the GUI.
+- Non-simulated UTM control requires `ready_for_autonomous_profile=true`.
+- If blocked, the Result Log shows `UTM_PRE_EXECUTION_READINESS_BLOCKED`, `bridge_not_called=true`, and the readiness blockers. This is intentionally non-actuating.
+- Simulation-mode UTM requests use the weaker `ready_for_setup_test` gate.
+
+
+### Windows Equipment Proof Package
+
+The Windows Equipment workspace exposes `Build Proof Package` for the Lab Equipment/UTM stage. The button calls `/api/equipment/windows/proof-package` and renders a single JSON package containing readiness, live preflight summary, evidence audit, proof checklist, request-log `/execute` proof, screen/data evidence refs, Vision frame IDs, blockers, warnings, and next actions. `Verify Proof Package` re-checks the persisted package and re-runs the Linux UTM CSV signal-quality gate, so flat/all-zero force or displacement files remain blocked even if the summary claimed a parseable CSV. This is a non-actuating review/export path; it must not call the Windows bridge `/execute` endpoint.
+
+### Windows Equipment Proof Package Artifact
+
+The Windows Equipment workspace `Build Proof Package` action now saves a JSON artifact for the current run. The file is written under `artifacts/equipment/<run_id>/utm/` and is returned as `package_artifact` from `/api/equipment/windows/proof-package`. This makes the operator-visible proof checklist reproducible after page refresh, server restart, or later audit.
+
+### Windows Equipment Browser Audit
+
+The Linux-side `/equipment/windows` workspace now has a repeatable Selenium browser audit: `tests/ui/windows_equipment_browser_audit.py`.
+
+- The audit opens `/equipment/windows`, injects passive readiness/evidence/proof payloads into the browser-side renderers, and verifies the operator can see readiness, preflight, UTM run, evidence, abort, request audit, proof package, and proof verification controls.
+- It checks blocked proof states such as `UTM_SAVE_EXPORT_RESPONSIBILITY_REQUIRED` and `UTM_DATA_NO_FORCE_SIGNAL` are visible without reading backend JSON first.
+- Latest local 1920px audit result: PASS, `scrollWidth=1908`, `clientWidth=1908`, screenshot `artifacts/ui/windows_equipment_browser_audit.png` (`1920x994`).
+
+### Windows Standalone Bridge Proof Gates
+
+The Windows bridge root GUI now includes a compact seven-gate proof strip in the Live Proof Checklist. It summarizes the same gate state used by the detailed checklist: bridge health, UTM locators, local safety confirmation, `/execute` request-log proof, screen evidence, save/export responsibility, and CSV parse readiness. This is verified by `tests/ui/windows_bridge_gui_browser_audit.py`, which checks the new gate DOM ids and the 1920px layout without horizontal overflow.
+
+### Windows PyAutoGUI Bridge Field Runbook
+
+The standalone Windows bridge GUI includes a `Field Runbook` in the left connection column. The four cards summarize the operator path for live UTM work: connect the bridge, calibrate UTM locators, execute only a registered protocol, and verify handoff evidence. The cards update from the same proof-state logic as the Windows `Live Proof Checklist`, so they are not decorative status badges.
+
+Use this page on the Windows workstation when calibrating or checking the PyAutoGUI bridge directly. Use the Linux `/equipment/windows` page for bridge discovery, saved profile management, Linux artifact pull verification, and autonomous Lab Equipment Agent handoff checks.
+
+## 2026-05-30 Windows PyAutoGUI Bridge GUI Update
+
+The standalone Windows PyAutoGUI bridge page now includes a `Bridge Command Kit` in the Connection panel. It copies Linux curl health, Windows PowerShell health, and curl `/execute` commands from the same URL/token/payload shown in the browser. This keeps GUI and CUI operation comparable during equipment debugging.
+
+The page also waits for an entered bridge token before auto-running authenticated checks, widens the sticky live command rail for 1920x1080 operator displays, and color-codes Step Trace rows by status. The command banner includes `Recommended next action`, which follows the first open Live Proof Checklist gate and jumps to the appropriate token, Health, Readiness, safety confirmation, screenshot, evidence refresh, or Live UTM control.
+
+2026-05-31 Orchestrator Supervisor report update:
+- The Orchestrator report is now `Orchestration Supervisor / Follow-up Control`.
+- Live GUI Orchestrator cards surface mission contract, compiled orchestration plan, route map, planned parallel read-only checks, latest executed parallel check batch, serial physical actions, expected artifacts, latest supervisor opinion, follow-up timeline, decision register, handoff registry, and loop reflection.
+- Runtime chat receives `orchestrator.followup` as a concise supervisor message: current stage, trigger, judgment, concerns, recommendation, optional choices, and whether operator response is required.
+- The report reads the same server state as the runtime: `state.run_metadata.latest_mission_contract`, `latest_orchestration_plan`, `latest_orchestrator_parallel_checks`, `orchestrator_followups`, `orchestrator_decision_register`, `orchestrator_handoff_packets`, and `loop_reflections`.
+- Agent-produced packets remain visible in each agent report; Orchestrator handoff packets are the cross-agent broker layer and should not replace Design/Specimen/Vision/Equipment/Analysis/BO packets.
+- Raw prompt/tool JSON remains backend trace material. The report view should show the operator-facing decision narrative and compact evidence links.

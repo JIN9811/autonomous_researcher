@@ -7,24 +7,52 @@ module:
   safety:
     live_requires_validation: true
     dry_run_supported: true
+    stale_signal_blocks_downstream: true
   tools:
   - camera.capture
   internal_graph:
-    - id: 01_capture_output_area
-      label: Capture Output Area
+    - id: 01_observation_task_resolve
+      label: Observation Task Resolve
       kind: internal_step
-    - id: 02_estimate_pose
-      label: Estimate Pose
+    - id: 02_zone_registry_load
+      label: Zone Registry Load
       kind: internal_step
-    - id: 03_check_transfer_readiness
-      label: Check Transfer Readiness
+    - id: 03_capture_scene
+      label: Capture Scene
       kind: internal_step
-    - id: 04_handoff_manipulation
-      label: Handoff Manipulation
+    - id: 04_perception_backend
+      label: Perception Backend / Simulator Degrade
+      kind: internal_step
+    - id: 05_estimate_scene_state
+      label: Estimate Scene State
+      kind: internal_step
+    - id: 06_detect_temporal_events
+      label: Detect Temporal Events
+      kind: internal_step
+    - id: 07_arbitrate_agent_signals
+      label: Arbitrate Agent Signals
+      kind: internal_step
+    - id: 08_package_visual_evidence
+      label: Package Visual Evidence
+      kind: internal_step
+    - id: 09_handoff_signal_bus
+      label: Handoff vision_signal.v1
       kind: internal_step
   io_contract:
     input: OrchestratorState
     output: AgentResult.data merged into OrchestratorState
+    preserves:
+    - observation.pose_estimate
+    - observation.pickup_target
+    - observation.transfer_readiness
+    produces:
+    - vision_report.v1
+    - vision_signal.v1
+    - decisions
+    - metrics
+    - evidence_refs
   notes: >-
-    GUI/module editor may edit this module config, but execution remains bound to
-    allowlisted Python handlers. Python source is not modified by the GUI.
+    Vision Agent observes and emits freshness-bounded lab perception signals. It
+    never directly commands printer, robot, UTM, or PyAutoGUI actions. Downstream
+    agents must reject stale `vision_signal.v1` signals whose `expires_at` has
+    passed.

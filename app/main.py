@@ -24,6 +24,7 @@ Modification guide:
 from __future__ import annotations
 
 import asyncio
+import csv
 import hashlib
 import json
 import mimetypes
@@ -49,9 +50,15 @@ from self_evolution.models import EvolutionActivationRequest, EvolutionRollbackR
 
 from agents.manipulation_agent import ManipulationAgent
 from agents.bo_agent import BOAgent
+from agents.equipment_agent import LabEquipmentAgent
 from app.bootstrap import load_runtime
 from graphs import ATRLangGraphCompiler, GraphConfig, GraphVersionStore, HandlerRegistry, ModuleConfig, ModuleConfigStore, load_graph_config
 from graphs.generated_adapter import GENERATED_MODULE_HANDLER_ID, generated_adapter_enabled, generated_adapter_path, validate_generated_adapter_file
+from knowledge.graph_backend import graph_backend_from_env
+from knowledge.graph_importer import import_store_to_graph
+from knowledge.graphify_bridge import import_project_graph, scan_project_graph
+from knowledge.schemas import EvolutionOutcomeRecord
+from knowledge.stores import JsonlKnowledgeStore
 from device_bridges.lerobot_bridge import LeRobotBridge, LeRobotBridgeConfig
 from device_bridges.prusa_bridge import PrusaBridgeConfig, PrinterAgenticWorkflow
 from device_bridges.windows_pyautogui_bridge import (
@@ -60,6 +67,8 @@ from device_bridges.windows_pyautogui_bridge import (
     discover_windows_pyautogui_bridges,
 )
 from orchestrator.state import Mode, OrchestratorState, Stage
+from orchestrator.supervisor import build_mission_contract, build_orchestration_plan
+from policies.guardian_gate import gate_blocks_execution, guardian_gate
 from utils.config_loader import load_all_configs
 from utils.manipulation_profile import (
     MANIPULATION_AGENT_PROFILE_PATH,
@@ -86,6 +95,7 @@ AGENT_BASELINE_DOC_PATH = resolve_path("docs/runtime/agent_program_baseline.md")
 BO_WORKSPACE_SETTINGS_PATH = resolve_path("memory/bo_workspace_settings.json")
 CAE_WORKSPACE_SETTINGS_PATH = resolve_path("memory/cae_workspace_settings.json")
 SELF_EVOLUTION_ROOT = resolve_path("memory/evolution")
+KNOWLEDGE_MEMORY_ROOT = resolve_path("memory/knowledge")
 PRIMARY_RUNTIME_GRAPH_ID = "atr_closed_loop"
 RUNTIME_GRAPH_CONFIG_ROOT = resolve_path("graphs/configs")
 RUNTIME_GRAPH_CONFIG_PATH = RUNTIME_GRAPH_CONFIG_ROOT / f"{PRIMARY_RUNTIME_GRAPH_ID}.yaml"
@@ -144,44 +154,48 @@ LIVE_AGENT_REPORT_PROFILES: dict[str, dict[str, object]] = {
         "checklist": ["Check connected components", "Record final parameters", "Expose STL artifact"],
     },
     "specimen": {
-        "title": "Print Preparation / Prusa Bridge",
-        "summary": "Transforms the selected STL into slicer settings, upload/start commands, and printer bridge evidence.",
+        "title": "Manufacturing Digital Thread / Printer Runtime",
+        "summary": "Transforms the selected STL into a fabrication digital thread with slicer settings, quality gates, printer runtime evidence, monitoring handoff, and feedback to the next loop.",
         "focus_rows": [
-            {"label": "Bridge", "value": "PrusaLink host/auth, virtual bridge, installed-printer test, or real print mode"},
-            {"label": "Slicer", "value": "layer height, bed/nozzle temperature, skirt/cap options, first-layer settings"},
-            {"label": "Execution", "value": "upload, start, auto-ejection option, ready-state recovery, and logs"},
+            {"label": "Digital thread", "value": "design candidate -> STL -> G-code -> printer job -> Vision/Manipulation handoff"},
+            {"label": "Process plan", "value": "material, profile, layer/nozzle/temp, adhesion, cap skin, and ejection policy"},
+            {"label": "Quality gates", "value": "required fields, mesh, manufacturability, slicer, G-code, storage, live execution, and ejection"},
+            {"label": "Runtime evidence", "value": "PrusaLink upload/start/transfer trace, operator messages, outcome, and feedback to Design/Knowledge/BO"},
         ],
-        "checklist": ["Show slicer parameters", "Confirm bridge mode", "Log upload/start result"],
+        "checklist": ["Confirm fabrication intent", "Inspect digital thread", "Review quality gates", "Log printer runtime", "Prepare Vision handoff"],
     },
     "vision": {
-        "title": "Vision Capture / Pickup Observation",
-        "summary": "Captures the printed specimen and reports pickup-ready pose, visibility, and confidence.",
+        "title": "Lab Perception Signal Bus / Visual Evidence",
+        "summary": "Converts camera or screenshot evidence into zone states, freshness-bounded agent signals, visual evidence, and downstream handoff gates.",
         "focus_rows": [
-            {"label": "Inputs", "value": "camera bridge state, image frame, printer bed region, specimen id"},
-            {"label": "Detection", "value": "object presence, estimated pose, occlusion, and pickup risk"},
-            {"label": "Handoff", "value": "pose and confidence metadata for manipulation"},
+            {"label": "Scene task", "value": "post-ejection, pickup, UTM fixture, or reset observation task with current specimen context"},
+            {"label": "Signal board", "value": "pickup_ready, visual_evidence_ready, anomaly_detected, and future equipment cross-check signals with confidence/freshness"},
+            {"label": "Evidence", "value": "frame/annotated scene, detection JSON, zone states, and Knowledge memory payload"},
+            {"label": "Safety", "value": "Vision observes only; robot/printer/equipment actions remain gated by downstream agents and Guardian"},
         ],
-        "checklist": ["Verify camera heartbeat", "Attach observation artifact", "Flag low confidence"],
+        "checklist": ["Check camera heartbeat", "Review zone state", "Verify signal freshness", "Inspect visual evidence", "Gate manipulation handoff"],
     },
     "manipulation": {
-        "title": "Robot Policy / Transfer Execution",
-        "summary": "Runs or tests the selected LeRobot/Pi0.5 policy for moving the printed specimen to the next station.",
+        "title": "Manipulation Agent / Pi0.5 Skill Supervision",
+        "summary": "Supervises bounded LeRobot/Pi0.5 skills, preflight readiness, SARM-lite progress/risk, Vision verification dependency, and robot_task_result handoff.",
         "focus_rows": [
-            {"label": "Policy", "value": "policy path, robot profile, camera config, and rollout safety settings"},
-            {"label": "Motion", "value": "teleop/record/inference readiness, action clamp, stop condition"},
-            {"label": "Result", "value": "transfer completion, log path, and failure reason if blocked"},
+            {"label": "Task", "value": "transfer_to_utm or clear_utm_to_disposal with source/target/terminal pose"},
+            {"label": "Policy boundary", "value": "LeRobot bridge executes; Manipulation Agent supervises stage, safety, and handoff"},
+            {"label": "SARM/Vision gate", "value": "stage progress, failure precursor, recovery hint, and post-place verification"},
         ],
-        "checklist": ["Confirm robot bridge", "Use safe rollout limits", "Record session log"],
+        "checklist": ["Confirm Vision freshness", "Validate robot/profile/policy preflight", "Run bounded rollout", "Check SARM risk", "Require post-place Vision verification"],
     },
     "equipment": {
-        "title": "Lab Equipment / Bridge Commands",
-        "summary": "Controls external lab equipment through registered bridges such as Windows PyAutoGUI and UTM interfaces.",
+        "title": "Lab Equipment / UTM Visual Control",
+        "summary": "Shows Windows/UTM control trace, screen-state assertions, Vision physical cross-checks, data artifact ledger, and Analysis handoff gate evidence.",
         "focus_rows": [
-            {"label": "Bridge", "value": "saved device alias, token-validated endpoint, heartbeat, and command catalog"},
-            {"label": "Command", "value": "macro/program request, dry-run/live mode, command id, and result log"},
-            {"label": "Safety", "value": "connection validation, timeout, and explicit error propagation"},
+            {"label": "Control trace", "value": "registered UTM program, macro version, locator backend, bridge provider, and tool result sequence"},
+            {"label": "Visual assertion", "value": "before/running/complete screen checks and state-transition evidence"},
+            {"label": "Physical check", "value": "Vision-backed fixture, crosshead motion, alignment, and safe-access confirmation"},
+            {"label": "Data ledger", "value": "Windows export path, Linux pulled CSV path, checksum, row count, columns, and parse probe"},
+            {"label": "Handoff gate", "value": "ready_for_analysis only when screen, physical, save, file, and parse gates all pass"},
         ],
-        "checklist": ["Select saved bridge", "Log command result", "Do not hide bridge errors"],
+        "checklist": ["Confirm bridge/profile readiness", "Verify screen assertions", "Verify Vision physical checks", "Confirm CSV artifact pull", "Gate Analysis handoff"],
     },
     "analysis": {
         "title": "UTM / FEM / Objective Evaluation",
@@ -365,6 +379,10 @@ class BOAgentRequest(BaseModel):
     xi: float = 0.01
     exploration_weight: float = 0.35
     exploitation_weight: float = 0.65
+    llm_preference_enabled: bool = True
+    llm_candidate_weight: float | str = "auto"
+    top_k: int = 5
+    bo_backend: str = "lightweight_pool"
     parameter_space: dict[str, object] = Field(default_factory=dict)
     objective: dict[str, object] = Field(default_factory=dict)
     mode: Literal["test", "live", "virtual", "replay"] = "test"
@@ -477,6 +495,118 @@ class WindowsBridgeRunProgramRequest(BaseModel):
     program_id: str = Field(default="program1", min_length=1)
     command: str = ""
     confirm_execute: bool = False
+    require_screen_assertions: bool = False
+    simulate_utm_protocol: bool = False
+    export_glob: str = ""
+    artifact_timeout_s: float | None = None
+    stable_for_sec: float | None = None
+    expected_export_path: str = ""
+    require_window_focus: bool = False
+    manual_save_required_if_no_artifact: bool = True
+    target_window: str = ""
+    target_window_regex: str = ""
+    locators: dict[str, object] = Field(default_factory=dict)
+    sequence: list[dict[str, object]] = Field(default_factory=list)
+
+
+class WindowsBridgeScreenshotRequest(BaseModel):
+    """Request body for manual Windows bridge screenshot capture."""
+
+    checkpoint: str = "manual"
+    run_id: str = "locator-calibration"
+    confirm_capture: bool = False
+
+
+class WindowsBridgeUtmProfileRequest(BaseModel):
+    """Request body for persisting UTM protocol GUI calibration into autonomous runs."""
+
+    program_id: str = Field(default="utm_compression_start_v1", min_length=1)
+    export_glob: str = "*.csv"
+    artifact_timeout_s: float | None = None
+    stable_for_sec: float | None = None
+    expected_export_path: str = ""
+    require_window_focus: bool = False
+    manual_save_required_if_no_artifact: bool = True
+    target_window: str = ""
+    target_window_regex: str = ""
+    require_screen_assertions: bool = False
+    simulate_utm_protocol: bool = False
+    locators: dict[str, object] = Field(default_factory=dict)
+    sequence: list[dict[str, object]] = Field(default_factory=list)
+
+
+class WindowsBridgeLocatorCaptureRequest(BaseModel):
+    """Request body for Windows bridge image-locator calibration."""
+
+    program_id: str = Field(default="utm_compression_start_v1", min_length=1)
+    name: str = Field(default="ready_state", min_length=1)
+    region: list[float] = Field(default_factory=list)
+    confidence: float = 0.8
+    confirm_capture: bool = False
+
+
+class WindowsBridgeLivePreflightRequest(BaseModel):
+    """Request body for non-actuating live UTM bridge preflight."""
+
+    confirm_preflight: bool = False
+    include_locators: bool = True
+    include_screenshot: bool = False
+    include_request_log: bool = True
+
+
+class WindowsBridgeLiveValidationRequest(BaseModel):
+    """Request body for live UTM validation report generation."""
+
+    confirm_non_actuating: bool = False
+    confirm_live_execute: bool = False
+    confirm_physical_setup_safe: bool = False
+    run_id: str = ""
+    sequence_id: str = ""
+    specimen_id: str = "specimen-live-validation"
+    program_id: str = "utm_compression_start_v1"
+    command: str = "Run UTM compression protocol and export CSV"
+    include_screenshot: bool = False
+    require_screen_assertions: bool = False
+    require_window_focus: bool = False
+    manual_save_required_if_no_artifact: bool = True
+    export_glob: str = ""
+    artifact_timeout_s: float | None = None
+    stable_for_sec: float | None = None
+    expected_export_path: str = ""
+    target_window: str = ""
+    target_window_regex: str = ""
+    locators: dict[str, object] = Field(default_factory=dict)
+    sequence: list[dict[str, object]] = Field(default_factory=list)
+    vision_proof: dict[str, object] = Field(default_factory=dict)
+
+
+class WindowsBridgeRequestLogRequest(BaseModel):
+    """Request body for retrieving Windows bridge request-audit events."""
+
+    runtime_mode: Literal["test", "live"] = "live"
+    confirm_live: bool = False
+
+
+class WindowsBridgeProofPackageVerifyRequest(BaseModel):
+    """Request body for verifying a persisted Windows UTM proof package."""
+
+    path: str = ""
+    use_current: bool = True
+
+
+class WindowsBridgeCompletionAuditRequest(BaseModel):
+    """Request body for strict Improvement 05 completion audit."""
+
+    path: str = ""
+    use_current: bool = True
+    latest: bool = False
+
+
+class WindowsBridgeVisionProofDraftRequest(BaseModel):
+    """Request body for building a non-actuating Vision proof draft."""
+
+    run_id: str = ""
+    specimen_id: str = ""
 
 
 class LeRobotConfigRequest(BaseModel):
@@ -543,6 +673,10 @@ class LeRobotAPIRequest(BaseModel):
     rollout_temporal_ensemble: bool = True
     rollout_temporal_ensemble_coeff: float = 0.01
     rollout_inference_type: str = ""
+    rollout_rtc_execution_horizon: int | None = None
+    rollout_rtc_max_guidance_weight: float | None = None
+    max_duration_s: float | None = None
+    policy_backend: str = "lerobot_cli"
     camera_enabled: bool = False
     display_data: bool = False
     resume: bool = False
@@ -567,6 +701,8 @@ class ManipulationAgentBridgeRequest(LeRobotAPIRequest):
     """Request body for running the actual Manipulation Agent from the LeRobot GUI."""
 
     manipulation_strategy: str = "pi05_lerobot_policy"
+    task_id: str = "transfer_to_utm"
+    skill_id: str = ""
     source_location: str = "3dp_output_area"
     target_location: str = "utm_fixture"
     specimen_result: dict[str, object] = Field(default_factory=dict)
@@ -656,6 +792,14 @@ class RuntimeOperatorEventRequest(BaseModel):
     payload: dict[str, object] = Field(default_factory=dict)
 
 
+class GuardianIncidentNoteRequest(BaseModel):
+    """Request body for attaching an operator note to a Guardian incident."""
+
+    note: str = Field(..., min_length=1, max_length=4000)
+    operator: str = "operator"
+    source: str = "live_gui"
+
+
 def _load_agent_baseline_markdown() -> str:
     """Read baseline markdown for agent program integration."""
     if not AGENT_BASELINE_DOC_PATH.exists():
@@ -695,9 +839,24 @@ def _redacted_printer_connection(workflow: PrinterAgenticWorkflow) -> dict[str, 
     }
 
 
+def _registered_lerobot_bridge() -> LeRobotBridge | None:
+    """Return the LeRobot bridge owned by the backend ToolRegistry when available."""
+    resource_getter = getattr(controller._deps.agent_context.tools, "resource", None)
+    if callable(resource_getter):
+        bridge = resource_getter("lerobot.bridge")
+        if isinstance(bridge, LeRobotBridge):
+            return bridge
+    return None
+
+
 def _lerobot_bridge() -> LeRobotBridge:
-    """Return one shared LeRobot bridge for all GUI windows."""
+    """Return the shared LeRobot bridge used by registered backend tools."""
     global _LEROBOT_BRIDGE, _LEROBOT_CONFIG_MTIME_NS
+    if _LEROBOT_BRIDGE is not None:
+        return _LEROBOT_BRIDGE
+    bridge = _registered_lerobot_bridge()
+    if bridge is not None:
+        return bridge
     config_path = resolve_path("configs/lerobot.yaml")
     try:
         config_mtime_ns = config_path.stat().st_mtime_ns
@@ -714,6 +873,17 @@ def _lerobot_bridge() -> LeRobotBridge:
 async def _publish_lerobot_result(result: dict[str, object]) -> dict[str, object]:
     """Broadcast LeRobot tool results into the shared runtime event stream."""
     await controller.emit_lerobot_result(result)
+    return result
+
+
+async def _call_lerobot_backend_tool(tool_name: str, payload: dict[str, object], *, publish: bool = True) -> dict[str, object]:
+    """Call LeRobot through the backend ToolRegistry so device queues and guards apply."""
+    try:
+        result = await asyncio.to_thread(controller._deps.agent_context.tools.call, tool_name, payload)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if publish:
+        return await _publish_lerobot_result(result)
     return result
 
 
@@ -977,12 +1147,435 @@ def _system_resource_snapshot() -> dict[str, object]:
     return payload
 
 
+def _guardian_status_payload(run_id: str | None = None, *, snapshot: dict[str, object] | None = None) -> dict[str, object]:
+    """Build a graph-wide Guardian monitor payload for Live GUI and Runtime IDE consumers."""
+    snapshot = snapshot if isinstance(snapshot, dict) else controller.snapshot()
+    state = snapshot.get("state", {}) if isinstance(snapshot.get("state"), dict) else {}
+    active_run_id = str(state.get("run_id") or _current_run_id() or "")
+    requested_run_id = str(run_id or active_run_id)
+    if requested_run_id and requested_run_id != active_run_id and not _safe_run_dir(requested_run_id).exists():
+        raise HTTPException(status_code=404, detail=f"Unknown run_id={requested_run_id}")
+    metadata = state.get("run_metadata", {}) if isinstance(state.get("run_metadata"), dict) else {}
+
+    gates = [dict(item) for item in metadata.get("guardian_gates", []) if isinstance(item, dict)] if isinstance(metadata.get("guardian_gates"), list) else []
+    incidents = [dict(item) for item in metadata.get("incident_records", []) if isinstance(item, dict)] if isinstance(metadata.get("incident_records"), list) else []
+    hardware_alerts = [dict(item) for item in metadata.get("hardware_alerts", []) if isinstance(item, dict)] if isinstance(metadata.get("hardware_alerts"), list) else []
+    tool_records = [dict(item) for item in metadata.get("tool_call_records", []) if isinstance(item, dict)] if isinstance(metadata.get("tool_call_records"), list) else []
+    corrective_actions = [dict(item) for item in metadata.get("corrective_actions", []) if isinstance(item, dict)] if isinstance(metadata.get("corrective_actions"), list) else []
+    contracts = [dict(item) for item in metadata.get("guardian_contracts", []) if isinstance(item, dict)] if isinstance(metadata.get("guardian_contracts"), list) else []
+    current_spec = state.get("current_experiment_spec", {}) if isinstance(state.get("current_experiment_spec"), dict) else {}
+    constraints = current_spec.get("constraints", {}) if isinstance(current_spec.get("constraints"), dict) else {}
+    objective = state.get("current_experiment_objective", {}) if isinstance(state.get("current_experiment_objective"), dict) else {}
+
+    def safe_float(value: object, default: float | None = None) -> float | None:
+        try:
+            if value in (None, ""):
+                return default
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    def first_number(*values: object, default: float | None = None) -> float | None:
+        for value in values:
+            resolved = safe_float(value, None)
+            if resolved is not None:
+                return resolved
+        return default
+
+    def first_int(*values: object, default: int = 0) -> int:
+        resolved = first_number(*values, default=float(default))
+        try:
+            return int(resolved if resolved is not None else default)
+        except (TypeError, ValueError):
+            return default
+
+    def tool_name(item: dict[str, object]) -> str:
+        return str(item.get("tool") or item.get("name") or item.get("requested_tool") or "").lower()
+
+    def count_tool_records(*needles: str) -> int:
+        lowered = tuple(str(item).lower() for item in needles)
+        return sum(1 for item in tool_records if any(needle in tool_name(item) for needle in lowered))
+
+    risk_classes = ["hardware", "vision", "robot", "equipment", "data", "optimization", "self_evolution", "operator"]
+    risk_map: dict[str, dict[str, object]] = {
+        key: {"risk_class": key, "score": 0.0, "stage": "", "decision": "allow", "reason_code": "OK", "gate_id": ""}
+        for key in risk_classes
+    }
+    for gate in gates:
+        vector = gate.get("risk_vector") if isinstance(gate.get("risk_vector"), dict) else {}
+        for key in risk_classes:
+            try:
+                score = float(vector.get(key, 0.0) or 0.0)
+            except (TypeError, ValueError):
+                score = 0.0
+            if score >= float(risk_map[key]["score"] or 0.0):
+                risk_map[key] = {
+                    "risk_class": key,
+                    "score": round(score, 4),
+                    "stage": str(gate.get("stage") or ""),
+                    "phase": str(gate.get("phase") or ""),
+                    "decision": str(gate.get("decision") or "allow"),
+                    "reason_code": str(gate.get("reason_code") or "OK"),
+                    "gate_id": str(gate.get("gate_id") or ""),
+                }
+    max_score = max((float(item.get("score", 0.0) or 0.0) for item in risk_map.values()), default=0.0)
+    dominant_risks = [key for key, item in risk_map.items() if float(item.get("score", 0.0) or 0.0) >= max(0.5, max_score)] if max_score else []
+
+    def gate_row(gate: dict[str, object]) -> dict[str, object]:
+        return {
+            "gate_id": gate.get("gate_id", ""),
+            "stage": gate.get("stage", ""),
+            "phase": gate.get("phase", ""),
+            "tool": gate.get("tool", ""),
+            "action": gate.get("action", ""),
+            "decision": gate.get("decision", ""),
+            "reason_code": gate.get("reason_code", ""),
+            "risk_score": gate.get("risk_score", 0.0),
+            "created_at": gate.get("created_at", ""),
+        }
+
+    gate_timeline = [gate_row(gate) for gate in gates[-80:]]
+    blocked_gate_rows = [row for row in gate_timeline if str(row.get("decision") or "") in {"block", "safe_stop", "require_human_approval"}]
+    blocked_tool_rows = [
+        {
+            "call_id": item.get("call_id", ""),
+            "stage": item.get("stage", ""),
+            "tool": item.get("tool", ""),
+            "status": item.get("status", ""),
+            "failure_code": item.get("failure_code", ""),
+            "guardian_decision": item.get("guardian_decision", ""),
+            "guardian_reason_code": item.get("guardian_reason_code", ""),
+            "created_at": item.get("created_at", ""),
+        }
+        for item in tool_records[-80:]
+        if str(item.get("status") or "") in {"blocked", "approval_required", "failed"}
+    ]
+    blocked_hardware_rows = [
+        {
+            "alert_id": item.get("alert_id", ""),
+            "stage": item.get("stage") or item.get("workspace") or "",
+            "device_class": item.get("device_class", ""),
+            "component": item.get("component", ""),
+            "status": item.get("status", ""),
+            "failure_code": item.get("failure_code", ""),
+            "severity": item.get("severity", ""),
+        }
+        for item in hardware_alerts[-80:]
+        if bool(item.get("blocks_workflow")) or str(item.get("severity") or "") in {"blocking", "critical"}
+    ]
+
+    severity_counts: dict[str, int] = {}
+    class_counts: dict[str, int] = {}
+    for incident in incidents:
+        severity = str(incident.get("severity") or "unknown")
+        risk_class = str(incident.get("risk_class") or incident.get("class") or "unknown")
+        severity_counts[severity] = severity_counts.get(severity, 0) + 1
+        class_counts[risk_class] = class_counts.get(risk_class, 0) + 1
+
+    approvals = _approval_events_for_run(requested_run_id or active_run_id) if (requested_run_id or active_run_id) else {"approvals": [], "pending": [], "resolved": []}
+    metadata_queue = [dict(item) for item in metadata.get("guardian_approval_queue", []) if isinstance(item, dict)] if isinstance(metadata.get("guardian_approval_queue"), list) else []
+    pending_ids = {str(item.get("approval_id") or "") for item in approvals.get("pending", []) if isinstance(item, dict)}
+    merged_pending = [dict(item) for item in approvals.get("pending", []) if isinstance(item, dict)]
+    for item in metadata_queue:
+        approval_id = str(item.get("approval_id") or "")
+        if approval_id and approval_id not in pending_ids and str(item.get("status") or "pending") == "pending":
+            merged_pending.append(item)
+            pending_ids.add(approval_id)
+
+    latest_gate = gates[-1] if gates else {}
+    latest_contract = contracts[-1] if contracts else metadata.get("latest_guardian_gate", {}).get("guardian_contract", {}) if isinstance(metadata.get("latest_guardian_gate"), dict) else {}
+    latest_decision = metadata.get("latest_guardian_gate_decision") if isinstance(metadata.get("latest_guardian_gate_decision"), dict) else latest_gate.get("guardian_decision", {}) if isinstance(latest_gate.get("guardian_decision"), dict) else {}
+    handoff_packets = [dict(item) for item in metadata.get("handoff_packets", []) if isinstance(item, dict)] if isinstance(metadata.get("handoff_packets"), list) else []
+
+    tool_counts: dict[str, int] = {}
+    for item in tool_records:
+        status = str(item.get("status") or "unknown")
+        tool_counts[status] = tool_counts.get(status, 0) + 1
+
+    budget_config = metadata.get("safety_budget") if isinstance(metadata.get("safety_budget"), dict) else {}
+    if not budget_config:
+        budget_config = metadata.get("risk_budget") if isinstance(metadata.get("risk_budget"), dict) else {}
+    loop_count = first_int(state.get("loop_count"), default=0)
+    max_loop_count = first_int(
+        budget_config.get("max_loop_count"),
+        budget_config.get("max_loops"),
+        objective.get("max_loop_count"),
+        objective.get("max_loops"),
+        default=5 if str(state.get("mode") or "").lower() == "test" else 1,
+    )
+    expected_print_time = first_number(
+        current_spec.get("expected_print_time_min"),
+        current_spec.get("print_time_min"),
+        budget_config.get("expected_print_time_min"),
+        default=0.0,
+    )
+    max_print_time = first_number(
+        budget_config.get("max_print_time_min"),
+        constraints.get("max_print_time_min"),
+        current_spec.get("max_print_time_min"),
+        default=120.0,
+    )
+    expected_load = first_number(
+        current_spec.get("target_load_n"),
+        current_spec.get("expected_load_n"),
+        current_spec.get("load_n"),
+        objective.get("target_load_n"),
+        default=0.0,
+    )
+    load_range = constraints.get("allowed_load_range_n") or constraints.get("load_range_n") or []
+    range_max_load = load_range[-1] if isinstance(load_range, list) and load_range else None
+    max_load = first_number(
+        budget_config.get("max_load_n"),
+        constraints.get("max_load_n"),
+        constraints.get("max_force_n"),
+        range_max_load,
+        default=0.0,
+    )
+    robot_rollout_count = count_tool_records("lerobot.rollout", "robot.pick_place")
+    max_robot_rollouts = first_int(budget_config.get("max_robot_live_rollouts"), budget_config.get("max_robot_rollouts"), default=3)
+    physical_print_count = count_tool_records("printer.start", "printer.auto_eject", "experiment.evaluate")
+    max_physical_prints = first_int(budget_config.get("max_physical_prints"), budget_config.get("max_print_jobs"), default=1)
+
+    def budget_item(resource: str, used: float | int | None, limit: float | int | None, unit: str) -> dict[str, object]:
+        used_value = float(used or 0.0)
+        limit_value = float(limit or 0.0)
+        ratio = (used_value / limit_value) if limit_value > 0 else 0.0
+        status_value = "exceeded" if limit_value > 0 and ratio > 1.0 else "near_limit" if limit_value > 0 and ratio >= 0.85 else "within_budget"
+        return {
+            "resource": resource,
+            "used": round(used_value, 4),
+            "limit": round(limit_value, 4),
+            "unit": unit,
+            "used_ratio": round(ratio, 4),
+            "status": status_value,
+        }
+
+    safety_budget_items = [
+        budget_item("loop_count", loop_count, max_loop_count, "cycles"),
+        budget_item("print_time", expected_print_time, max_print_time, "min"),
+        budget_item("load", expected_load, max_load, "N"),
+        budget_item("robot_live_rollouts", robot_rollout_count, max_robot_rollouts, "calls"),
+        budget_item("physical_prints", physical_print_count, max_physical_prints, "jobs"),
+    ]
+    safety_budget_status = "exceeded" if any(item["status"] == "exceeded" for item in safety_budget_items) else "near_limit" if any(item["status"] == "near_limit" for item in safety_budget_items) else "within_budget"
+    safety_budget = {
+        "schema": "guardian_safety_budget.v1",
+        "status": safety_budget_status,
+        "items": safety_budget_items,
+        "source": "run_metadata.safety_budget|current_experiment_spec.constraints|runtime_counts",
+    }
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    device_health = state.get("device_health", {}) if isinstance(state.get("device_health"), dict) else {}
+    heartbeat_rows: list[dict[str, object]] = []
+    for device_id, bridge_state in sorted(device_health.items()):
+        device_key = str(device_id)
+        latest_alert = next(
+            (
+                item
+                for item in reversed(hardware_alerts)
+                if str(item.get("device_class") or item.get("device_id") or item.get("workspace") or "").lower() == device_key.lower()
+            ),
+            {},
+        )
+        latest_tool = next(
+            (
+                item
+                for item in reversed(tool_records)
+                if device_key.lower() in str(item.get("tool") or item.get("stage") or "").lower()
+                or (device_key.lower() == "robot" and "lerobot" in tool_name(item))
+                or (device_key.lower() == "printer" and "printer" in tool_name(item))
+                or (device_key.lower() == "utm" and ("utm" in tool_name(item) or "pyautogui" in tool_name(item)))
+            ),
+            {},
+        )
+        status_text = str(bridge_state or "unknown")
+        alert_blocks = isinstance(latest_alert, dict) and bool(latest_alert.get("blocks_workflow"))
+        heartbeat_status = (
+            "blocked"
+            if alert_blocks or any(token in status_text.lower() for token in ("block", "critical", "failed", "error", "unhealthy"))
+            else "ready"
+            if status_text.lower() in {"ready", "ok", "healthy"}
+            else "review"
+        )
+        heartbeat_rows.append(
+            {
+                "device_id": device_key,
+                "bridge_state": status_text,
+                "heartbeat_status": heartbeat_status,
+                "last_heartbeat": str(latest_alert.get("created_at") or latest_tool.get("created_at") or now_iso) if isinstance(latest_alert, dict) else now_iso,
+                "last_command": str(latest_tool.get("tool") or latest_alert.get("tool") or latest_alert.get("component") or "runtime snapshot") if isinstance(latest_tool, dict) else "runtime snapshot",
+                "last_alert_id": str(latest_alert.get("alert_id") or "") if isinstance(latest_alert, dict) else "",
+            }
+        )
+    if not heartbeat_rows:
+        heartbeat_rows.append(
+            {
+                "device_id": "runtime",
+                "bridge_state": "unknown",
+                "heartbeat_status": "review",
+                "last_heartbeat": now_iso,
+                "last_command": "runtime snapshot",
+                "last_alert_id": "",
+            }
+        )
+
+    safe_stop_gates = [gate for gate in gates if str(gate.get("decision") or "") in {"safe_stop", "safe_stop_verified"}]
+    safe_stop_requested = bool(state.get("safe_stop_requested") or state.get("stop_requested") or any(str(gate.get("decision") or "") == "safe_stop" for gate in safe_stop_gates))
+    explicit_safe_stop_verified = bool(metadata.get("safe_stop_verified") or metadata.get("safe_stop_confirmed"))
+    inferred_safe_stop_verified = bool(safe_stop_requested and not bool(snapshot.get("is_running")) and str(state.get("stage") or "").lower() in {"complete", "idle", "guardian", "error"})
+    safe_stop_verified = explicit_safe_stop_verified or inferred_safe_stop_verified or any(str(gate.get("decision") or "") == "safe_stop_verified" for gate in safe_stop_gates)
+    safe_stop_verification = {
+        "schema": "guardian_safe_stop_verification.v1",
+        "requested": safe_stop_requested,
+        "verified": safe_stop_verified,
+        "status": "verified" if safe_stop_requested and safe_stop_verified else "requested_unverified" if safe_stop_requested else "not_requested",
+        "latest_gate": gate_row(safe_stop_gates[-1]) if safe_stop_gates else {},
+        "verification_basis": "explicit_metadata" if explicit_safe_stop_verified else "controller_not_running" if inferred_safe_stop_verified else "guardian_gate" if safe_stop_verified else "none",
+    }
+
+    latest_contract_artifacts = latest_contract.get("artifact_refs", []) if isinstance(latest_contract, dict) and isinstance(latest_contract.get("artifact_refs"), list) else []
+    latest_contract_provenance = latest_contract.get("provenance_refs", []) if isinstance(latest_contract, dict) and isinstance(latest_contract.get("provenance_refs"), list) else []
+    evidence_checks = {
+        "guardian_gate_present": bool(latest_gate),
+        "contract_present": bool(latest_contract),
+        "artifact_refs_present": bool(latest_contract_artifacts),
+        "provenance_refs_present": bool(latest_contract_provenance),
+        "tool_or_incident_evidence_present": bool(tool_records or incidents or hardware_alerts),
+    }
+    evidence_score = sum(1 for value in evidence_checks.values() if value) / max(1, len(evidence_checks))
+    evidence_completeness = {
+        "schema": "guardian_evidence_completeness.v1",
+        "score": round(evidence_score, 4),
+        "status": "complete" if evidence_score >= 0.8 else "partial" if evidence_score >= 0.4 else "missing",
+        "checks": evidence_checks,
+        "artifact_ref_count": len(latest_contract_artifacts),
+        "provenance_ref_count": len(latest_contract_provenance),
+    }
+
+    try:
+        variants = [variant.model_dump(mode="json") for variant in _self_evolution_service().list_variants()]
+    except Exception as exc:
+        variants = []
+        evolution_error = str(exc)
+    else:
+        evolution_error = ""
+    pending_variants = [
+        item
+        for item in variants
+        if str(item.get("status") or "") in {"gate_passed", "approved", "evaluated"}
+    ][-20:]
+    active_variants = [
+        item
+        for item in variants
+        if str(item.get("status") or "") in {"active", "active_next_run"}
+    ][-20:]
+    activation_gate_status = (
+        "active_next_run"
+        if active_variants
+        else "ready_for_activation"
+        if any(str(item.get("status") or "") == "approved" for item in pending_variants)
+        else "pending_operator_approval"
+        if pending_variants
+        else "idle"
+    )
+    self_evolution_gate = {
+        "schema": "guardian_self_evolution_gate.v1",
+        "status": activation_gate_status if not evolution_error else "unavailable",
+        "pending_variants": pending_variants,
+        "active_variants": active_variants,
+        "variant_count": len(variants),
+        "error": evolution_error,
+    }
+
+    status = "safe_stop" if any(row.get("decision") == "safe_stop" for row in blocked_gate_rows) else "blocked" if blocked_gate_rows or blocked_tool_rows or blocked_hardware_rows else "approval_required" if merged_pending else "warning" if incidents or max_score >= 0.35 else "allow"
+    return {
+        "ok": True,
+        "schema": "guardian_status_report.v1",
+        "run_id": requested_run_id or active_run_id,
+        "experiment_id": state.get("experiment_id", ""),
+        "stage": state.get("stage", ""),
+        "status": status,
+        "summary": {
+            "risk_score": round(max_score, 4),
+            "dominant_risks": dominant_risks,
+            "gate_count": len(gates),
+            "incident_count": len(incidents),
+            "pending_approval_count": len(merged_pending),
+            "blocked_action_count": len(blocked_gate_rows) + len(blocked_tool_rows) + len(blocked_hardware_rows),
+            "tool_call_record_count": len(tool_records),
+            "safety_budget_status": safety_budget_status,
+            "safe_stop_status": safe_stop_verification["status"],
+            "evidence_completeness_status": evidence_completeness["status"],
+            "self_evolution_gate_status": self_evolution_gate["status"],
+        },
+        "safety_budget": safety_budget,
+        "evidence_completeness": evidence_completeness,
+        "self_evolution_gate": self_evolution_gate,
+        "graph_wide_risk_map": list(risk_map.values()),
+        "gate_timeline": gate_timeline,
+        "blocked_actions": {
+            "gates": blocked_gate_rows[-40:],
+            "tool_calls": blocked_tool_rows[-40:],
+            "hardware_alerts": blocked_hardware_rows[-40:],
+        },
+        "approval_queue": {
+            "pending": merged_pending[-50:],
+            "resolved": [dict(item) for item in approvals.get("resolved", []) if isinstance(item, dict)][-50:],
+            "approvals": [dict(item) for item in approvals.get("approvals", []) if isinstance(item, dict)][-80:],
+        },
+        "incident_ledger": {
+            "records": incidents[-80:],
+            "severity_counts": severity_counts,
+            "class_counts": class_counts,
+        },
+        "policy_version_panel": {
+            "guardian_gate_schema": "guardian_gate_result.v1",
+            "contract_schema": "guardian_contract.v1",
+            "decision_schema": "guardian_decision.v1",
+            "incident_schema": "incident_record.v1",
+            "tool_call_schema": "tool_call_record.v1",
+            "source_doc": "docs/runtime/guardian_graphwide_safety.md",
+        },
+        "device_data_integrity": {
+            "device_health": state.get("device_health", {}),
+            "live_device_heartbeat": heartbeat_rows,
+            "hardware_alert_count": len(hardware_alerts),
+            "tool_call_counts": tool_counts,
+            "latest_contract_ok_for_next_stage": latest_contract.get("ok_for_next_stage") if isinstance(latest_contract, dict) else None,
+            "latest_contract_ok_for_bo": latest_contract.get("ok_for_bo") if isinstance(latest_contract, dict) else None,
+            "data_related_incident_count": sum(1 for item in incidents if str(item.get("risk_class") or item.get("class") or "").lower() in {"data", "data_integrity"}),
+        },
+        "safe_stop_verification": safe_stop_verification,
+        "handoff_packet": {
+            "latest_guardian_gate": gate_row(latest_gate) if latest_gate else {},
+            "latest_guardian_decision": latest_decision if isinstance(latest_decision, dict) else {},
+            "latest_guardian_contract": latest_contract if isinstance(latest_contract, dict) else {},
+            "latest_handoff_packet": handoff_packets[-1] if handoff_packets else {},
+            "corrective_actions": corrective_actions[-40:],
+        },
+    }
+
+
 @app.get("/api/state")
 async def get_state() -> dict[str, object]:
     """Return current controller state plus host/GPU resource telemetry."""
     snapshot = controller.snapshot()
     snapshot["system_resources"] = _system_resource_snapshot()
+    snapshot["guardian_status"] = _guardian_status_payload(snapshot=snapshot)
     return snapshot
+
+
+@app.get("/api/guardian/status")
+async def get_guardian_status(run_id: str | None = None) -> dict[str, object]:
+    """Return a Guardian graph-wide safety monitor/report payload."""
+    return _guardian_status_payload(run_id=run_id)
+
+
+@app.get("/api/runs/{run_id}/guardian/status")
+async def get_run_guardian_status(run_id: str) -> dict[str, object]:
+    """Return Guardian monitor/report payload for the requested run."""
+    return _guardian_status_payload(run_id=run_id)
 
 
 @app.get("/api/runtime/state")
@@ -1085,6 +1678,19 @@ async def post_runtime_run_operator_event(run_id: str, req: RuntimeOperatorEvent
     return await _emit_runtime_operator_event(req, run_id=run_id)
 
 
+@app.post("/api/guardian/incidents/{incident_id}/notes")
+async def post_guardian_incident_note(incident_id: str, req: GuardianIncidentNoteRequest) -> dict[str, object]:
+    """Attach an operator note to a Guardian incident in the active run."""
+    return await _attach_guardian_incident_note(incident_id, req)
+
+
+@app.post("/api/runs/{run_id}/guardian/incidents/{incident_id}/notes")
+async def post_run_guardian_incident_note(run_id: str, incident_id: str, req: GuardianIncidentNoteRequest) -> dict[str, object]:
+    """Attach an operator note to a Guardian incident in the addressed active run."""
+    _require_current_run(run_id)
+    return await _attach_guardian_incident_note(incident_id, req, run_id=run_id)
+
+
 def _graph_config_items() -> list[tuple[str, Path, GraphConfig]]:
     """Return all discoverable graph configs, with the main closed-loop graph first."""
     items: list[tuple[str, Path, GraphConfig]] = []
@@ -1126,6 +1732,20 @@ def _module_config_store() -> ModuleConfigStore:
     )
 
 
+def _knowledge_store() -> JsonlKnowledgeStore:
+    """Return the file-backed Knowledge memory store."""
+    return JsonlKnowledgeStore(memory_root=KNOWLEDGE_MEMORY_ROOT, run_root=resolve_path("runs"))
+
+
+def _knowledge_graph_backend():
+    """Return optional Knowledge graph backend from environment.
+
+    Neo4j is optional. If disabled or unavailable with fail-open enabled, the
+    backend returns disabled/JSON fallback status and does not break runtime APIs.
+    """
+    return graph_backend_from_env(resolve_path("."))
+
+
 def _self_evolution_service() -> SelfEvolutionService:
     """Return the file-backed ATR self-evolution service."""
     return SelfEvolutionService(
@@ -1135,7 +1755,106 @@ def _self_evolution_service() -> SelfEvolutionService:
         graph_version_root=RUNTIME_GRAPH_VERSION_ROOT,
         module_root=RUNTIME_MODULE_ROOT,
         module_version_root=RUNTIME_MODULE_VERSION_ROOT,
+        knowledge_memory_root=KNOWLEDGE_MEMORY_ROOT,
     )
+
+
+def _store_api_guardian_gate(gate: dict[str, Any]) -> dict[str, Any] | None:
+    """Persist a controller/API-origin Guardian gate into current runtime metadata."""
+    metadata = controller._state.run_metadata
+    gates = metadata.setdefault("guardian_gates", [])
+    if not isinstance(gates, list):
+        gates = []
+        metadata["guardian_gates"] = gates
+    gates.append(gate)
+    del gates[:-200]
+    metadata["latest_guardian_gate"] = gate
+    decision = gate.get("guardian_decision") if isinstance(gate.get("guardian_decision"), dict) else {}
+    if decision:
+        metadata["latest_guardian_gate_decision"] = decision
+    contract = gate.get("guardian_contract") if isinstance(gate.get("guardian_contract"), dict) else {}
+    if contract:
+        contracts = metadata.setdefault("guardian_contracts", [])
+        if isinstance(contracts, list):
+            contracts.append(contract)
+            del contracts[:-200]
+    incidents = [dict(item) for item in gate.get("incident_records", []) if isinstance(item, dict)] if isinstance(gate.get("incident_records"), list) else []
+    if incidents and hasattr(controller, "_record_incident_records"):
+        controller._record_incident_records(incidents)
+    else:
+        incident_records = metadata.setdefault("incident_records", [])
+        if not isinstance(incident_records, list):
+            incident_records = []
+            metadata["incident_records"] = incident_records
+        for incident in incidents:
+            incident_records.append(dict(incident))
+        del incident_records[:-100]
+    if str(gate.get("decision") or "") != "require_human_approval":
+        return None
+    approvals = metadata.setdefault("runtime_approvals", {})
+    if not isinstance(approvals, dict):
+        approvals = {}
+        metadata["runtime_approvals"] = approvals
+    gate_id = str(gate.get("gate_id") or make_event_id())
+    gate_key = f"guardian:{gate.get('stage', 'self_evolution')}:{gate.get('phase', '')}:{gate.get('tool') or gate.get('agent') or 'runtime'}:{gate_id}"
+    record = {
+        "approval_id": gate_id.replace("guardian-gate-", "approval-", 1) if gate_id.startswith("guardian-gate-") else make_event_id().replace("evt-", "approval-", 1),
+        "gate_key": gate_key,
+        "source": "guardian_gate",
+        "stage": gate.get("stage", "self_evolution"),
+        "phase": gate.get("phase", "evolution_review"),
+        "tool": gate.get("tool", ""),
+        "agent": gate.get("agent", "self_evolution_service"),
+        "status": "pending",
+        "reason": gate.get("reason_code", "HUMAN_APPROVAL_REQUIRED"),
+        "guardian_gate_id": gate_id,
+        "guardian_gate": gate,
+        "requested_at": datetime.now(timezone.utc).isoformat(),
+    }
+    approvals[gate_key] = record
+    queue = metadata.setdefault("guardian_approval_queue", [])
+    if isinstance(queue, list):
+        queue.append(record)
+        del queue[:-100]
+    return record
+
+
+async def _emit_self_evolution_guardian_gate(
+    *,
+    action: str,
+    variant_id: str,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    """Create, persist, and emit a Guardian gate for self-evolution control actions."""
+    tool_name = "self_evolution.rollback" if action == "rollback_variant" else "self_evolution.activate"
+    gate = guardian_gate(
+        state=controller._state,
+        stage="self_evolution",
+        phase="evolution_review",
+        payload={"variant_id": variant_id, **payload},
+        agent="self_evolution_service",
+        tool=tool_name,
+        action=action,
+    )
+    approval_record = _store_api_guardian_gate(gate)
+    await controller.emit_runtime_event(
+        event_type="guardian.gate",
+        message=f"Guardian self-evolution gate {gate.get('decision')} for {action}: {variant_id}",
+        payload={
+            "agent": "guardian_agent",
+            "node_id": "self_evolution",
+            "module_id": "guardian",
+            "status": gate.get("status", ""),
+            "guardian_gate": gate,
+            "guardian_decision": gate.get("guardian_decision", {}),
+            "guardian_contract": gate.get("guardian_contract", {}),
+            "approval_request": approval_record if isinstance(approval_record, dict) else {},
+            "risk_score": gate.get("risk_score", 0.0),
+            "reason_code": gate.get("reason_code", ""),
+        },
+        level="ERROR" if gate_blocks_execution(gate) else "WARNING" if gate.get("decision") in {"require_human_approval", "allow_with_warning"} else "INFO",
+    )
+    return gate
 
 
 def _graph_config_payload(graph_id: str = PRIMARY_RUNTIME_GRAPH_ID) -> dict[str, object]:
@@ -1948,12 +2667,460 @@ def _agent_report_payload(agent_id: str, run_id: str | None = None) -> dict[str,
     if events and str(events[-1].get("level") or "").lower() == "error":
         status = "error"
     summary = events[-1].get("message") if events else f"No runtime events recorded for {definition['label']} yet."
-    role_specific = LIVE_AGENT_REPORT_PROFILES.get(definition["agent_id"], {
+    role_specific = dict(LIVE_AGENT_REPORT_PROFILES.get(definition["agent_id"], {
         "title": f"{definition['label']} Runtime Role",
         "summary": f"Runtime evidence and follow-up context for {definition['label']}.",
         "focus_rows": [],
         "checklist": ["Review messages", "Inspect backend trace", "Confirm next action"],
-    })
+    }))
+    metadata = state.get("run_metadata", {}) if isinstance(state.get("run_metadata"), dict) else {}
+    agent_payload = metadata.get(f"{definition['stage']}_agent_payload") if isinstance(metadata.get(f"{definition['stage']}_agent_payload"), dict) else {}
+    design_report = None
+    report_decisions: list[object] = []
+    report_metrics: dict[str, object] = {}
+    if definition["agent_id"] == "orchestrator":
+        followups = [dict(item) for item in metadata.get("orchestrator_followups", []) if isinstance(item, dict)] if isinstance(metadata.get("orchestrator_followups"), list) else []
+        decisions = [dict(item) for item in metadata.get("orchestrator_decision_register", []) if isinstance(item, dict)] if isinstance(metadata.get("orchestrator_decision_register"), list) else []
+        handoffs = [dict(item) for item in metadata.get("orchestrator_handoff_packets", []) if isinstance(item, dict)] if isinstance(metadata.get("orchestrator_handoff_packets"), list) else []
+        reflections = [dict(item) for item in metadata.get("loop_reflections", []) if isinstance(item, dict)] if isinstance(metadata.get("loop_reflections"), list) else []
+        latest_followup = metadata.get("latest_orchestrator_followup") if isinstance(metadata.get("latest_orchestrator_followup"), dict) else (followups[-1] if followups else {})
+        latest_handoff = metadata.get("latest_orchestrator_handoff") if isinstance(metadata.get("latest_orchestrator_handoff"), dict) else (handoffs[-1] if handoffs else {})
+        parallel_batches = [dict(item) for item in metadata.get("orchestrator_parallel_checks", []) if isinstance(item, dict)] if isinstance(metadata.get("orchestrator_parallel_checks"), list) else []
+        latest_parallel_checks = metadata.get("latest_orchestrator_parallel_checks") if isinstance(metadata.get("latest_orchestrator_parallel_checks"), dict) else (parallel_batches[-1] if parallel_batches else {})
+        latest_reflection = metadata.get("latest_loop_reflection") if isinstance(metadata.get("latest_loop_reflection"), dict) else (reflections[-1] if reflections else {})
+        latest_mission_contract = metadata.get("latest_mission_contract") if isinstance(metadata.get("latest_mission_contract"), dict) else metadata.get("mission_contract") if isinstance(metadata.get("mission_contract"), dict) else {}
+        latest_orchestration_plan = metadata.get("latest_orchestration_plan") if isinstance(metadata.get("latest_orchestration_plan"), dict) else {}
+        if not latest_mission_contract or not latest_orchestration_plan:
+            try:
+                report_state = OrchestratorState.model_validate(state)
+                latest_mission_contract = latest_mission_contract or build_mission_contract(state=report_state)
+                latest_orchestration_plan = latest_orchestration_plan or build_orchestration_plan(state=report_state)
+            except Exception:
+                pass
+        role_specific.update(
+            {
+                "title": "Orchestration Supervisor / Follow-up Control",
+                "summary": "Mission contract, graph route, context handoff registry, intermediate follow-up opinions, decision register, Guardian/operator coordination, and loop reflection.",
+                "mission_contract": latest_mission_contract or {
+                    "run_id": state.get("run_id", ""),
+                    "mode": state.get("mode", ""),
+                    "stage": state.get("stage", ""),
+                    "active_goal": state.get("active_goal", ""),
+                    "current_specimen_id": (state.get("current_experiment_spec") or {}).get("specimen_id") if isinstance(state.get("current_experiment_spec"), dict) else "",
+                    "loop_count": state.get("loop_count", 0),
+                },
+                "orchestration_plan": latest_orchestration_plan,
+                "route_map": {
+                    "active_graph": latest_orchestration_plan.get("graph_id") or metadata.get("active_graph_id", "atr_closed_loop"),
+                    "current_stage": latest_orchestration_plan.get("current_stage") or state.get("stage", ""),
+                    "route": latest_orchestration_plan.get("route", []),
+                    "parallelizable_checks": latest_orchestration_plan.get("parallelizable_checks", []),
+                    "serial_physical_actions": latest_orchestration_plan.get("serial_physical_actions", []),
+                    "expected_artifacts": latest_orchestration_plan.get("expected_artifacts", []),
+                    "latest_handoff_to": latest_handoff.get("to_stage", ""),
+                    "latest_handoff_from": latest_handoff.get("from_stage", ""),
+                },
+                "followup_timeline": followups[-20:],
+                "handoff_registry": handoffs[-20:],
+                "decision_register": decisions[-30:],
+                "parallel_check_batches": parallel_batches[-20:],
+                "latest_parallel_checks": latest_parallel_checks,
+                "loop_reflections": reflections[-10:],
+                "open_questions": [item for item in followups[-20:] if item.get("requires_response")],
+                "latest_followup": latest_followup,
+                "latest_loop_reflection": latest_reflection,
+                "run_health": {
+                    "followup_count": len(followups),
+                    "decision_count": len(decisions),
+                    "handoff_count": len(handoffs),
+                    "parallel_check_batch_count": len(parallel_batches),
+                    "latest_parallel_check_status": latest_parallel_checks.get("status", "not_run") if latest_parallel_checks else "not_run",
+                    "reflection_count": len(reflections),
+                    "warning_followup_count": sum(1 for item in followups if item.get("concerns")),
+                },
+            }
+        )
+        report_decisions = decisions
+        report_metrics = role_specific["run_health"]
+    if definition["agent_id"] == "design":
+        if isinstance(metadata.get("design_report"), dict):
+            design_report = metadata["design_report"]
+        elif isinstance(agent_payload.get("design_report"), dict):
+            design_report = agent_payload["design_report"]
+        if isinstance(design_report, dict):
+            candidate_generation = design_report.get("candidate_generation") if isinstance(design_report.get("candidate_generation"), dict) else {}
+            candidate_evaluation = design_report.get("candidate_evaluation") if isinstance(design_report.get("candidate_evaluation"), dict) else {}
+            manufacturability = design_report.get("manufacturability") if isinstance(design_report.get("manufacturability"), dict) else {}
+            handoff_packet = design_report.get("handoff_to_specimen") if isinstance(design_report.get("handoff_to_specimen"), dict) else {}
+            role_specific["summary"] = "Traceable objective, hypothesis, candidate pool, selection rationale, rejected/repair log, and Specimen Agent handoff evidence."
+            role_specific["candidate_board"] = {
+                "candidate_count": candidate_generation.get("candidate_count"),
+                "valid_count": candidate_generation.get("valid_count"),
+                "rejected_count": candidate_generation.get("rejected_count"),
+                "top_candidates": candidate_generation.get("top_candidates", []),
+                "candidate_ledger": candidate_generation.get("candidate_ledger", []),
+            }
+            role_specific["manufacturability"] = manufacturability
+            role_specific["decision_register"] = design_report.get("decision_register", [])
+            role_specific["handoff_packet"] = handoff_packet
+            role_specific["objective"] = design_report.get("objective", {})
+            role_specific["hypothesis"] = design_report.get("hypothesis", {})
+            role_specific["prior_context"] = design_report.get("prior_context", {})
+            report_decisions = design_report.get("decision_register", []) if isinstance(design_report.get("decision_register"), list) else []
+            report_metrics = candidate_evaluation
+    specimen_fabrication_report = None
+    if definition["agent_id"] == "specimen":
+        specimen_result = metadata.get("specimen_result") if isinstance(metadata.get("specimen_result"), dict) else {}
+        if not specimen_result and isinstance(agent_payload.get("specimen_result"), dict):
+            specimen_result = agent_payload["specimen_result"]
+        if isinstance(metadata.get("fabrication_report"), dict):
+            specimen_fabrication_report = metadata["fabrication_report"]
+        elif isinstance(specimen_result.get("fabrication_report"), dict):
+            specimen_fabrication_report = specimen_result["fabrication_report"]
+        elif isinstance(agent_payload.get("fabrication_report"), dict):
+            specimen_fabrication_report = agent_payload["fabrication_report"]
+        specimen_packet = metadata.get("specimen_fabricated") if isinstance(metadata.get("specimen_fabricated"), dict) else {}
+        if not specimen_packet and isinstance(agent_payload.get("specimen_fabricated"), dict):
+            specimen_packet = agent_payload["specimen_fabricated"]
+        if isinstance(specimen_fabrication_report, dict):
+            role_specific["summary"] = "Manufacturing digital thread, process plan, quality gates, printer runtime evidence, monitoring handoff, and feedback to Design/Knowledge/BO."
+            role_specific["fabrication_intent"] = specimen_fabrication_report.get("fabrication_intent", {})
+            role_specific["digital_thread"] = specimen_fabrication_report.get("digital_thread", {})
+            role_specific["process_plan"] = specimen_fabrication_report.get("process_plan", {})
+            role_specific["quality_gates"] = specimen_fabrication_report.get("quality_gates", [])
+            role_specific["monitoring_plan"] = specimen_fabrication_report.get("monitoring_plan", {})
+            role_specific["printer_runtime"] = specimen_fabrication_report.get("printer_runtime", {})
+            role_specific["fabrication_outcome"] = specimen_fabrication_report.get("fabrication_outcome", {})
+            role_specific["feedback_to_design"] = specimen_fabrication_report.get("feedback_to_design", {})
+            role_specific["handoff_packet"] = specimen_packet
+            report_decisions = specimen_packet.get("decisions", []) if isinstance(specimen_packet.get("decisions"), list) else agent_payload.get("decisions", []) if isinstance(agent_payload.get("decisions"), list) else []
+            report_metrics = metadata.get("specimen_metrics") if isinstance(metadata.get("specimen_metrics"), dict) else agent_payload.get("metrics", {}) if isinstance(agent_payload.get("metrics"), dict) else {}
+    vision_report = None
+    knowledge_report = None
+    manipulation_report = None
+    robot_task_result = None
+    if definition["agent_id"] == "vision":
+        latest_observation = state.get("latest_observations") if isinstance(state.get("latest_observations"), dict) else {}
+        if not latest_observation and isinstance(metadata.get("latest_vision_observation"), dict):
+            latest_observation = metadata["latest_vision_observation"]
+        if isinstance(metadata.get("vision_report"), dict):
+            vision_report = metadata["vision_report"]
+        elif isinstance(latest_observation.get("vision_report"), dict):
+            vision_report = latest_observation["vision_report"]
+        elif isinstance(agent_payload.get("vision_report"), dict):
+            vision_report = agent_payload["vision_report"]
+        vision_packet = metadata.get("vision_signal") if isinstance(metadata.get("vision_signal"), dict) else {}
+        if not vision_packet and isinstance(latest_observation.get("vision_signal"), dict):
+            vision_packet = latest_observation["vision_signal"]
+        if not vision_packet and isinstance(agent_payload.get("vision_signal"), dict):
+            vision_packet = agent_payload["vision_signal"]
+        if isinstance(vision_report, dict):
+            role_specific["summary"] = "Lab perception signal board with zone states, freshness-bounded signals, visual evidence artifacts, and Knowledge/Guardian handoff context."
+            role_specific["scene_map"] = vision_report.get("scene_map", vision_report.get("zones", {}))
+            role_specific["signal_board"] = vision_report.get("signal_board", vision_report.get("agent_signals", []))
+            role_specific["evidence_timeline"] = vision_report.get("events", [])
+            role_specific["dataset_ledger"] = vision_report.get("dataset_ledger", {})
+            role_specific["model_backend"] = vision_report.get("model_backend", {})
+            role_specific["camera_source"] = vision_report.get("camera_source", {})
+            role_specific["safety_anomaly"] = vision_report.get("safety_anomaly", {})
+            role_specific["knowledge_payload"] = vision_report.get("knowledge_payload", {})
+            role_specific["handoff_packet"] = vision_packet
+            report_decisions = vision_packet.get("decisions", []) if isinstance(vision_packet.get("decisions"), list) else agent_payload.get("decisions", []) if isinstance(agent_payload.get("decisions"), list) else []
+            report_metrics = metadata.get("vision_metrics") if isinstance(metadata.get("vision_metrics"), dict) else agent_payload.get("metrics", {}) if isinstance(agent_payload.get("metrics"), dict) else {}
+    if definition["agent_id"] == "equipment":
+        equipment_report = metadata.get("equipment_report") if isinstance(metadata.get("equipment_report"), dict) else {}
+        if not equipment_report and isinstance(agent_payload.get("equipment_report"), dict):
+            equipment_report = agent_payload["equipment_report"]
+        equipment_result = metadata.get("equipment_result") if isinstance(metadata.get("equipment_result"), dict) else agent_payload.get("equipment_result", {}) if isinstance(agent_payload.get("equipment_result"), dict) else {}
+        utm_packet = metadata.get("utm_data_ready") if isinstance(metadata.get("utm_data_ready"), dict) else agent_payload.get("utm_data_ready", {}) if isinstance(agent_payload.get("utm_data_ready"), dict) else {}
+        equipment_handoff = metadata.get("equipment_handoff") if isinstance(metadata.get("equipment_handoff"), dict) else agent_payload.get("equipment_handoff", {}) if isinstance(agent_payload.get("equipment_handoff"), dict) else {}
+        if isinstance(equipment_report, dict) and equipment_report:
+            role_specific["summary"] = "Windows bridge control trace, UTM screen assertions, Vision physical cross-checks, exported data ledger, and Analysis handoff gate evidence."
+            bridge = equipment_report.get("bridge", {}) if isinstance(equipment_report.get("bridge"), dict) else {}
+            control_plan = equipment_report.get("control_plan", {}) if isinstance(equipment_report.get("control_plan"), dict) else {}
+            vision_cross_checks = equipment_report.get("vision_cross_checks", {}) if isinstance(equipment_report.get("vision_cross_checks"), dict) else {}
+            screen_checks = equipment_report.get("screen_checks", []) if isinstance(equipment_report.get("screen_checks"), list) else []
+            physical_checks = equipment_report.get("physical_checks", {}) if isinstance(equipment_report.get("physical_checks"), dict) else {}
+            data_acquisition = equipment_report.get("data_acquisition", {}) if isinstance(equipment_report.get("data_acquisition"), dict) else {}
+            cross_checks = equipment_report.get("cross_checks", {}) if isinstance(equipment_report.get("cross_checks"), dict) else {}
+            decision = equipment_report.get("decision", {}) if isinstance(equipment_report.get("decision"), dict) else {}
+            artifact_records = equipment_report.get("artifact_records", []) if isinstance(equipment_report.get("artifact_records"), list) else []
+            artifact_refs = equipment_report.get("artifact_refs", []) if isinstance(equipment_report.get("artifact_refs"), list) else []
+            screen_evidence_refs = equipment_report.get("screen_evidence_refs", []) if isinstance(equipment_report.get("screen_evidence_refs"), list) else []
+            data_evidence_refs = equipment_report.get("data_evidence_refs", []) if isinstance(equipment_report.get("data_evidence_refs"), list) else []
+            failure_retry_table = equipment_report.get("failure_retry_table", []) if isinstance(equipment_report.get("failure_retry_table"), list) else []
+            recovery = equipment_report.get("recovery", {}) if isinstance(equipment_report.get("recovery"), dict) else {}
+            live_evidence_audit = equipment_report.get("live_evidence_audit", {}) if isinstance(equipment_report.get("live_evidence_audit"), dict) else {}
+            save_export_audit = live_evidence_audit.get("save_export", {}) if isinstance(live_evidence_audit.get("save_export"), dict) else {}
+            hardware_alert = equipment_report.get("hardware_alert") if isinstance(equipment_report.get("hardware_alert"), dict) else metadata.get("hardware_alert") if isinstance(metadata.get("hardware_alert"), dict) else agent_payload.get("hardware_alert") if isinstance(agent_payload.get("hardware_alert"), dict) else {}
+            hardware_alerts = metadata.get("hardware_alerts") if isinstance(metadata.get("hardware_alerts"), list) else agent_payload.get("hardware_alerts") if isinstance(agent_payload.get("hardware_alerts"), list) else []
+            hardware_alerts = [dict(item) for item in hardware_alerts if isinstance(item, dict)]
+            if hardware_alert and not any(item.get("alert_id") == hardware_alert.get("alert_id") for item in hardware_alerts):
+                hardware_alerts.insert(0, hardware_alert)
+            incident_records = metadata.get("incident_records") if isinstance(metadata.get("incident_records"), list) else agent_payload.get("incident_records") if isinstance(agent_payload.get("incident_records"), list) else []
+            incident_records = [dict(item) for item in incident_records if isinstance(item, dict)]
+            report_incidents = equipment_report.get("incident_records") if isinstance(equipment_report.get("incident_records"), list) else []
+            for incident in report_incidents:
+                if isinstance(incident, dict):
+                    incident_records.append(dict(incident))
+            hardware_incident = hardware_alert.get("incident_record") if isinstance(hardware_alert.get("incident_record"), dict) else {}
+            if hardware_incident:
+                incident_records.append(dict(hardware_incident))
+            seen_incident_ids: set[str] = set()
+            unique_incidents: list[dict[str, Any]] = []
+            for incident in incident_records:
+                incident_id = str(incident.get("incident_id") or incident.get("id") or json.dumps(incident, sort_keys=True, default=str))
+                if incident_id in seen_incident_ids:
+                    continue
+                seen_incident_ids.add(incident_id)
+                unique_incidents.append(incident)
+            incident_records = unique_incidents
+            guardian_decision = hardware_alert.get("guardian_decision") if isinstance(hardware_alert.get("guardian_decision"), dict) else {}
+            guardian_contract = hardware_alert.get("guardian_contract") if isinstance(hardware_alert.get("guardian_contract"), dict) else {}
+            screen_passed = sum(1 for item in screen_checks if isinstance(item, dict) and item.get("ok"))
+            role_specific["bridge"] = bridge
+            role_specific["preconditions"] = equipment_report.get("preconditions", {})
+            role_specific["control_plan"] = control_plan
+            role_specific["vision_requests"] = equipment_report.get("vision_requests", [])
+            role_specific["vision_cross_checks"] = vision_cross_checks
+            role_specific["screen_checks"] = screen_checks
+            role_specific["physical_checks"] = physical_checks
+            role_specific["data_acquisition"] = data_acquisition
+            role_specific["cross_checks"] = cross_checks
+            role_specific["decision"] = decision
+            role_specific["control_trace"] = {
+                "bridge_provider": bridge.get("provider", ""),
+                "connection_status": bridge.get("connection_status", ""),
+                "program_id": control_plan.get("program_id", equipment_result.get("program_id", "")),
+                "macro_version": control_plan.get("macro_version", ""),
+                "locator_backend": control_plan.get("locator_backend", ""),
+                "tool_result_count": len(agent_payload.get("tool_results", [])) if isinstance(agent_payload.get("tool_results"), list) else 0,
+            }
+            role_specific["visual_assertion"] = {
+                "screen_checks_passed": screen_passed,
+                "screen_checks_total": len(screen_checks),
+                "screen_started": bool(cross_checks.get("screen_started")),
+                "checkpoints": [item.get("checkpoint") for item in screen_checks if isinstance(item, dict)],
+            }
+            role_specific["physical_verification"] = {
+                "all_required_ok": bool(vision_cross_checks.get("all_required_ok")),
+                "vision_motion_confirmed": bool(physical_checks.get("vision_motion_confirmed")),
+                "specimen_alignment_ok": bool(physical_checks.get("specimen_alignment_ok")),
+                "fixture_safe_to_access": bool(physical_checks.get("fixture_safe_to_access")),
+                "evidence_frame_ids": physical_checks.get("evidence_frame_ids", []),
+            }
+            role_specific["data_ledger"] = {
+                "status": data_acquisition.get("status", ""),
+                "save_method": data_acquisition.get("save_method", ""),
+                "save_attempted_by_agent": data_acquisition.get("save_attempted_by_agent", save_export_audit.get("save_attempted_by_agent", "")),
+                "save_confirmation_screen_ok": data_acquisition.get("save_confirmation_screen_ok", save_export_audit.get("save_confirmation_screen_ok", "")),
+                "save_export_responsibility_ok": bool(cross_checks.get("save_export_responsibility_ok", save_export_audit.get("ok", False))),
+                "recognized_save_method": save_export_audit.get("recognized_save_method", ""),
+                "windows_path": data_acquisition.get("windows_path") or save_export_audit.get("windows_path", ""),
+                "linux_path": data_acquisition.get("linux_path") or save_export_audit.get("linux_path") or equipment_result.get("result_file") or equipment_result.get("utm_csv_path") or "",
+                "sha256": data_acquisition.get("sha256", ""),
+                "size_bytes": data_acquisition.get("size_bytes", 0),
+                "row_count_probe": data_acquisition.get("row_count_probe", 0),
+                "columns_probe": data_acquisition.get("columns_probe", []),
+                "parse_ready": bool(cross_checks.get("data_parse_probe_ok")),
+            }
+            role_specific["artifact_ledger"] = {
+                "artifact_records": artifact_records,
+                "artifact_refs": artifact_refs,
+                "screen_evidence_refs": screen_evidence_refs,
+                "data_evidence_refs": data_evidence_refs,
+                "screen_evidence_count": len(screen_evidence_refs),
+                "data_evidence_count": len(data_evidence_refs),
+            }
+            role_specific["failure_recovery"] = {
+                "recovery": recovery,
+                "failure_retry_table": failure_retry_table,
+                "operator_intervention_required": bool(recovery.get("operator_intervention_required")),
+                "retry_count": recovery.get("retry_count", 0),
+                "fallback_macros": recovery.get("fallback_macros", []),
+            }
+            blocked_commands = list(decision.get("blocking_reasons", [])) if isinstance(decision.get("blocking_reasons"), list) else []
+            role_specific["safety_gate"] = {
+                "guardian_status": (utm_packet or {}).get("guardian_status", "") or ("block" if hardware_alerts or decision.get("failure_code") else "allow" if (decision.get("handoff_status") or equipment_handoff.get("status")) == "ready_for_analysis" else "not_checked"),
+                "hardware_alert_count": len(hardware_alerts),
+                "active_hardware_alert": hardware_alert,
+                "incident_records": incident_records,
+                "incident_count": len(incident_records),
+                "requires_human_approval": bool(hardware_alert.get("requires_ack") or guardian_decision.get("requires_human_approval") or guardian_contract.get("requires_human_approval")),
+                "blocks_workflow": bool(hardware_alert.get("blocks_workflow") or guardian_contract.get("ok_for_next_stage") is False or (decision.get("handoff_status") or equipment_handoff.get("status")) == "blocked"),
+                "guardian_route_hint": hardware_alert.get("guardian_route_hint", guardian_decision.get("recommended_action", "")),
+                "guardian_decision": guardian_decision.get("decision", ""),
+                "risk_score": hardware_alert.get("risk_score", guardian_decision.get("risk_score", "")),
+                "risk_flags": guardian_contract.get("risk_flags", hardware_alert.get("risk_flags", [])),
+                "blocked_commands": blocked_commands,
+                "emergency_stop_evidence": {
+                    "safe_stop_recommended": guardian_decision.get("decision") == "safe_stop" or hardware_alert.get("guardian_route_hint") == "stop",
+                    "route_hint": hardware_alert.get("guardian_route_hint", ""),
+                    "corrective_action": (hardware_alert.get("incident_record") or {}).get("corrective_action", "") if isinstance(hardware_alert.get("incident_record"), dict) else "",
+                },
+            }
+            role_specific["live_evidence_audit"] = live_evidence_audit
+            role_specific["handoff_gate"] = {
+                "handoff_status": decision.get("handoff_status") or equipment_handoff.get("status"),
+                "equipment_status": decision.get("equipment_status") or equipment_result.get("status"),
+                "failure_code": decision.get("failure_code") or equipment_result.get("failure_code"),
+                "guardian_status": (utm_packet or {}).get("guardian_status", ""),
+                "required_gates": cross_checks,
+                "save_export_responsibility_ok": bool(cross_checks.get("save_export_responsibility_ok", save_export_audit.get("ok", False))),
+                "live_evidence_audit": live_evidence_audit,
+            }
+            role_specific["handoff_packet"] = utm_packet or equipment_handoff
+            role_specific["equipment_result"] = {
+                "status": equipment_result.get("status", ""),
+                "program_id": equipment_result.get("program_id", ""),
+                "failure_code": equipment_result.get("failure_code"),
+                "result_file": equipment_result.get("result_file") or equipment_result.get("utm_csv_path"),
+            }
+            report_decisions = [equipment_report.get("decision", {})] if isinstance(equipment_report.get("decision"), dict) else agent_payload.get("decisions", []) if isinstance(agent_payload.get("decisions"), list) else []
+            report_metrics = metadata.get("equipment_metrics") if isinstance(metadata.get("equipment_metrics"), dict) else agent_payload.get("metrics", {}) if isinstance(agent_payload.get("metrics"), dict) else {}
+    if definition["agent_id"] == "manipulation":
+        if isinstance(metadata.get("manipulation_report"), dict):
+            manipulation_report = metadata["manipulation_report"]
+        elif isinstance(agent_payload.get("manipulation_report"), dict):
+            manipulation_report = agent_payload["manipulation_report"]
+        if isinstance(metadata.get("robot_task_result"), dict):
+            robot_task_result = metadata["robot_task_result"]
+        elif isinstance(agent_payload.get("robot_task_result"), dict):
+            robot_task_result = agent_payload["robot_task_result"]
+        if isinstance(manipulation_report, dict):
+            task = manipulation_report.get("task") if isinstance(manipulation_report.get("task"), dict) else {}
+            role_specific["summary"] = "Bounded Pi0.5/LeRobot skill execution, preflight readiness, SARM-lite progress/risk state, Vision dependency, and robot_task_result handoff evidence."
+            role_specific["task"] = task
+            role_specific["skill_episode_board"] = {
+                "task_id": task.get("task_id", ""),
+                "skill_id": robot_task_result.get("skill_id", "") if isinstance(robot_task_result, dict) else "",
+                "episode_id": robot_task_result.get("episode_id", "") if isinstance(robot_task_result, dict) else manipulation_report.get("session_id", ""),
+                "terminal_pose": robot_task_result.get("terminal_pose", "") if isinstance(robot_task_result, dict) else "",
+                "handoff_status": robot_task_result.get("handoff_status", "") if isinstance(robot_task_result, dict) else "",
+                "completion_status": robot_task_result.get("completion_status", "") if isinstance(robot_task_result, dict) else "",
+            }
+            role_specific["policy_plan"] = manipulation_report.get("policy_plan", {})
+            role_specific["preflight"] = manipulation_report.get("preflight", {})
+            role_specific["vision_context"] = manipulation_report.get("vision_context", {})
+            role_specific["rollout_runtime"] = manipulation_report.get("rollout_runtime", {})
+            role_specific["stage_machine"] = manipulation_report.get("stage_machine", {})
+            role_specific["sarm"] = manipulation_report.get("sarm", {})
+            role_specific["decision"] = manipulation_report.get("decision", {})
+            role_specific["knowledge_payload"] = manipulation_report.get("knowledge_payload", {})
+            role_specific["handoff_packet"] = robot_task_result if isinstance(robot_task_result, dict) else manipulation_report.get("handoff_packet", {})
+            report_decisions = robot_task_result.get("decisions", []) if isinstance(robot_task_result, dict) and isinstance(robot_task_result.get("decisions"), list) else agent_payload.get("decisions", []) if isinstance(agent_payload.get("decisions"), list) else []
+            report_metrics = metadata.get("manipulation_metrics") if isinstance(metadata.get("manipulation_metrics"), dict) else agent_payload.get("metrics", {}) if isinstance(agent_payload.get("metrics"), dict) else {}
+    if definition["agent_id"] == "knowledge":
+        knowledge_payload = metadata.get("knowledge") if isinstance(metadata.get("knowledge"), dict) else {}
+        knowledge_report = knowledge_payload.get("knowledge_report") if isinstance(knowledge_payload.get("knowledge_report"), dict) else {}
+        knowledge_context = knowledge_payload.get("knowledge_context") if isinstance(knowledge_payload.get("knowledge_context"), dict) else {}
+        evolution_proposal = knowledge_payload.get("evolution_proposal") if isinstance(knowledge_payload.get("evolution_proposal"), dict) else {}
+        if knowledge_report:
+            memory_intake = knowledge_report.get("memory_intake") if isinstance(knowledge_report.get("memory_intake"), dict) else {}
+            self_evolution = knowledge_report.get("self_evolution") if isinstance(knowledge_report.get("self_evolution"), dict) else evolution_proposal
+            packs = self_evolution.get("evidence_packs") if isinstance(self_evolution.get("evidence_packs"), list) else []
+            performance = knowledge_report.get("agent_performance_records") if isinstance(knowledge_report.get("agent_performance_records"), list) else []
+            role_specific["summary"] = "Research memory board with provenance, failure/success pattern memory, agent performance ledger, and self-evolution evidence packs."
+            role_specific["memory_ledger"] = {
+                "experiment_record_id": memory_intake.get("experiment_record_id", ""),
+                "agent_performance_count": memory_intake.get("agent_performance_count", 0),
+                "failure_pattern_count": memory_intake.get("failure_pattern_count", 0),
+                "success_pattern_count": memory_intake.get("success_pattern_count", 0),
+                "evolution_pack_count": memory_intake.get("evolution_pack_count", len(packs)),
+                "artifact_paths": knowledge_payload.get("artifact_paths", {}),
+            }
+            role_specific["retrieval_panel"] = {
+                "coverage": knowledge_payload.get("retrieval_coverage", 0.0),
+                "local_chunks": knowledge_payload.get("local_chunks", 0),
+                "web_results": knowledge_payload.get("web_results", 0),
+                "sources": (knowledge_report.get("data_quality_map") or {}).get("retrieval_sources", {}) if isinstance(knowledge_report.get("data_quality_map"), dict) else {},
+            }
+            role_specific["failure_success_library"] = {
+                "failure_patterns": knowledge_report.get("failure_patterns", []),
+                "success_patterns": knowledge_report.get("success_patterns", []),
+            }
+            role_specific["self_evolution_board"] = {
+                "status": self_evolution.get("status", ""),
+                "top_packs": packs[:5],
+                "prefill_tasks": self_evolution.get("prefill_tasks", []),
+                "outcomes": self_evolution.get("outcomes", knowledge_report.get("evolution_outcomes", [])),
+                "no_evolution_needed_reason": self_evolution.get("no_evolution_needed_reason", ""),
+            }
+            role_specific["data_quality_map"] = knowledge_report.get("data_quality_map", {})
+            role_specific["graph_backend_status"] = knowledge_report.get("graph_backend_status", knowledge_context.get("graph_backend_status", {}))
+            role_specific["agent_performance_memory"] = performance
+            role_specific["handoff_packet"] = {
+                "knowledge_context": knowledge_context,
+                "evolution_proposal": evolution_proposal,
+            }
+            report_decisions = [
+                {
+                    "decision": "prepare_self_evolution_evidence_pack",
+                    "target_type": pack.get("target_type", ""),
+                    "target_id": pack.get("target_id", ""),
+                    "priority": pack.get("priority", 0.0),
+                    "rationale": "; ".join(pack.get("why_this_target", [])[:2]) if isinstance(pack, dict) else "",
+                }
+                for pack in packs[:8]
+                if isinstance(pack, dict)
+            ] or [{"decision": "no_evolution_needed", "rationale": self_evolution.get("no_evolution_needed_reason", "No evidence pack generated.")}]
+            report_metrics = knowledge_report.get("evidence_quality", {}) if isinstance(knowledge_report.get("evidence_quality"), dict) else knowledge_context.get("evidence_quality", {}) if isinstance(knowledge_context.get("evidence_quality"), dict) else {}
+    if definition["agent_id"] == "bo":
+        bo_result = metadata.get("bo_agent") if isinstance(metadata.get("bo_agent"), dict) else {}
+        if not bo_result and isinstance(agent_payload.get("bo_result"), dict):
+            bo_result = agent_payload["bo_result"]
+        if isinstance(bo_result, dict) and bo_result:
+            reasoning = bo_result.get("reasoning") if isinstance(bo_result.get("reasoning"), dict) else {}
+            recommendation = bo_result.get("recommendation") if isinstance(bo_result.get("recommendation"), dict) else {}
+            candidate_ranking = bo_result.get("candidate_ranking") if isinstance(bo_result.get("candidate_ranking"), list) else bo_result.get("candidate_pool", []) if isinstance(bo_result.get("candidate_pool"), list) else []
+            next_design_request = bo_result.get("next_design_request") if isinstance(bo_result.get("next_design_request"), dict) else metadata.get("next_design_request") if isinstance(metadata.get("next_design_request"), dict) else {}
+            benchmark = bo_result.get("benchmark") if isinstance(bo_result.get("benchmark"), dict) else {}
+            strategies = benchmark.get("strategies") if isinstance(benchmark.get("strategies"), dict) else {}
+            benchmark_strategy = bo_result.get("benchmark_strategy") or bo_result.get("strategy") or "bo"
+            strategy_payload = strategies.get(benchmark_strategy) if isinstance(strategies.get(benchmark_strategy), dict) else strategies.get("bo") if isinstance(strategies.get("bo"), dict) else {}
+            surrogate_trace = strategy_payload.get("surrogate_trace") if isinstance(strategy_payload.get("surrogate_trace"), list) else []
+            latest_trace = surrogate_trace[-1] if surrogate_trace and isinstance(surrogate_trace[-1], dict) else {}
+            latest_selected = latest_trace.get("selected") if isinstance(latest_trace.get("selected"), dict) else {}
+            role_specific["summary"] = "Reasoning-augmented BO cockpit: measured evidence, Knowledge/failure priors, surrogate/acquisition scoring, LLM preference audit, and Design handoff."
+            role_specific["surrogate_panel"] = {
+                "strategy": bo_result.get("strategy", ""),
+                "benchmark_strategy": benchmark_strategy,
+                "acquisition": bo_result.get("acquisition", ""),
+                "budget": bo_result.get("budget", ""),
+                "trace_step_count": len(surrogate_trace),
+                "latest_selected": latest_selected,
+                "prior_summary": bo_result.get("prior_summary", {}),
+            }
+            role_specific["candidate_ranking"] = candidate_ranking[:10]
+            role_specific["reasoning_audit"] = {
+                "schema_version": reasoning.get("schema_version", ""),
+                "source": reasoning.get("source", ""),
+                "operator_summary": reasoning.get("operator_summary", ""),
+                "strategy_recommendation": reasoning.get("strategy_recommendation", {}),
+                "hypotheses": reasoning.get("hypotheses", []),
+                "preference_regions": reasoning.get("preference_regions", []),
+                "risk_flags": reasoning.get("risk_flags", []),
+            }
+            role_specific["decision_register"] = [
+                {
+                    "decision": "select_next_design_candidate",
+                    "candidate_id": recommendation.get("candidate_id", ""),
+                    "source_strategy": recommendation.get("source_strategy", ""),
+                    "combined_score": recommendation.get("combined_score", ""),
+                    "rationale": recommendation.get("why_this_candidate") or recommendation.get("reason", ""),
+                }
+            ]
+            role_specific["recommendation"] = recommendation
+            role_specific["handoff_packet"] = next_design_request
+            role_specific["failure_model"] = bo_result.get("failure_model", {})
+            role_specific["artifacts"] = bo_result.get("artifacts", {})
+            report_decisions = role_specific["decision_register"]
+            report_metrics = {
+                "prior_summary": bo_result.get("prior_summary", {}),
+                "best_so_far_count": len(bo_result.get("best_so_far", [])) if isinstance(bo_result.get("best_so_far"), list) else 0,
+                "candidate_count": len(bo_result.get("candidate_pool", [])) if isinstance(bo_result.get("candidate_pool"), list) else len(candidate_ranking),
+                "recommended_score": recommendation.get("objective_score"),
+            }
     process_steps = [
         {
             "timestamp": event.get("ts") or event.get("timestamp") or "",
@@ -1998,7 +3165,8 @@ def _agent_report_payload(agent_id: str, run_id: str | None = None) -> dict[str,
         "summary": summary,
         "role_specific": role_specific,
         "inputs": agent_messages[-12:],
-        "decisions": [],
+        "decisions": report_decisions,
+        "metrics": report_metrics,
         "process_steps": process_steps,
         "tool_calls": tool_calls,
         "artifacts": artifacts,
@@ -2012,6 +3180,14 @@ def _agent_report_payload(agent_id: str, run_id: str | None = None) -> dict[str,
         "sections": {
             "overview": summary,
             "role_specific": role_specific,
+            "design_report": design_report if definition["agent_id"] == "design" else None,
+            "fabrication_report": specimen_fabrication_report if definition["agent_id"] == "specimen" else None,
+            "vision_report": vision_report if definition["agent_id"] == "vision" else None,
+            "manipulation_report": manipulation_report if definition["agent_id"] == "manipulation" else None,
+            "robot_task_result": robot_task_result if definition["agent_id"] == "manipulation" else None,
+            "knowledge_report": knowledge_report if definition["agent_id"] == "knowledge" else None,
+            "bo_result": metadata.get("bo_agent") if definition["agent_id"] == "bo" else None,
+            "metrics": report_metrics,
             "messages": agent_messages[-12:],
             "events": events[-50:],
             "process_steps": process_steps,
@@ -2075,6 +3251,72 @@ def _approval_id_from_event(event: dict[str, Any]) -> str:
     """Return the stable approval id associated with one approval event."""
     payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
     return str(payload.get("approval_id") or payload.get("id") or event.get("event_id") or "")
+
+
+async def _attach_guardian_incident_note(incident_id: str, req: GuardianIncidentNoteRequest, *, run_id: str | None = None) -> dict[str, object]:
+    """Attach an operator note to one Guardian incident and emit auditable evidence."""
+    clean_incident_id = str(incident_id or "").strip()
+    if not clean_incident_id:
+        raise HTTPException(status_code=400, detail="incident_id cannot be empty")
+    note_text = str(req.note or "").strip()
+    if not note_text:
+        raise HTTPException(status_code=400, detail="note cannot be empty")
+    effective_run_id = run_id or _current_run_id()
+    note_record = {
+        "schema": "guardian_incident_note.v1",
+        "note_id": make_event_id().replace("evt-", "guardian-note-", 1),
+        "incident_id": clean_incident_id,
+        "run_id": effective_run_id,
+        "operator": req.operator or "operator",
+        "source": req.source or "live_gui",
+        "note": note_text,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    metadata = controller._state.run_metadata
+    notes = metadata.setdefault("guardian_incident_notes", [])
+    if not isinstance(notes, list):
+        notes = []
+        metadata["guardian_incident_notes"] = notes
+    notes.append(note_record)
+    del notes[:-200]
+
+    matched = False
+    incidents = metadata.get("incident_records") if isinstance(metadata.get("incident_records"), list) else []
+    for incident in incidents:
+        if not isinstance(incident, dict):
+            continue
+        if str(incident.get("incident_id") or incident.get("id") or "") != clean_incident_id:
+            continue
+        incident_notes = incident.setdefault("operator_notes", [])
+        if not isinstance(incident_notes, list):
+            incident_notes = []
+            incident["operator_notes"] = incident_notes
+        incident_notes.append(note_record)
+        incident["last_operator_note_at"] = note_record["created_at"]
+        matched = True
+        break
+
+    try:
+        controller._append_guardian_event(note_record)
+    except Exception:
+        pass
+    event = await controller.emit_runtime_event(
+        event_type="operator.guardian.incident_note_attached",
+        message=f"Guardian incident note attached: {clean_incident_id}",
+        payload={
+            "agent": "guardian_agent",
+            "agent_id": "guardian",
+            "node_id": "guardian",
+            "status": "recorded",
+            "incident_id": clean_incident_id,
+            "note_id": note_record["note_id"],
+            "matched_incident": matched,
+            "guardian_incident_note": note_record,
+        },
+        level="INFO",
+        run_id=effective_run_id,
+    )
+    return {"ok": True, "matched_incident": matched, "note": note_record, "event": event}
 
 
 def _approval_events_for_run(run_id: str) -> dict[str, list[dict[str, object]]]:
@@ -2995,7 +4237,7 @@ async def post_bo_benchmark(req: BOAgentRequest) -> dict[str, object]:
         "direction": "maximize",
         "tags": ["bo", "workspace"],
     }
-    strategies = ["random", "grid", "bo"] if settings["strategy"] == "mbo" else [settings["strategy"]]
+    strategies = ["random", "grid", "bo"] if settings["strategy"] == "mbo" else [settings["benchmark_strategy"]]
     result = controller._deps.agent_context.tools.call(
         "experiment.benchmark",
         {
@@ -3004,6 +4246,13 @@ async def post_bo_benchmark(req: BOAgentRequest) -> dict[str, object]:
             "seed": settings["random_seed"],
             "parameter_space": settings["parameter_space"],
             "objective": objective,
+            "acquisition": settings["acquisition"],
+            "kappa": settings["kappa"],
+            "xi": settings["xi"],
+            "exploration_weight": settings["exploration_weight"],
+            "exploitation_weight": settings["exploitation_weight"],
+            "bo_backend": settings["bo_backend"],
+            "prior_evaluations": BOAgent._prior_evaluations_from_state(controller._state),
             "request": {
                 "run_id": controller.snapshot()["state"]["run_id"],
                 "experiment_id": controller.snapshot()["state"]["experiment_id"],
@@ -3016,6 +4265,7 @@ async def post_bo_benchmark(req: BOAgentRequest) -> dict[str, object]:
                     "xi": settings["xi"],
                     "exploration_weight": settings["exploration_weight"],
                     "exploitation_weight": settings["exploitation_weight"],
+                    "bo_backend": settings["bo_backend"],
                 },
             },
         },
@@ -3161,13 +4411,2928 @@ async def post_runtime_model_unload(req: RuntimeModelRequest) -> dict[str, objec
     return await controller.unload_runtime_model(req.model)
 
 
+def _request_audit_log_gate(payload: dict[str, object]) -> tuple[dict[str, object], str | None]:
+    """Return strict request-audit evidence for a live Windows UTM command path."""
+    audit = payload.get("request_audit_log") if isinstance(payload.get("request_audit_log"), dict) else {}
+    path = str(
+        audit.get("path")
+        or audit.get("request_log")
+        or payload.get("request_log_path")
+        or payload.get("bridge_request_log_ref")
+        or payload.get("request_log")
+        or ""
+    )
+
+    def as_int(value: object) -> int:
+        try:
+            return int(value or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    raw_count = audit.get("event_count")
+    if raw_count in (None, ""):
+        raw_count = payload.get("request_log_event_count")
+    if raw_count in (None, ""):
+        raw_count = payload.get("event_count")
+    event_count = as_int(raw_count)
+    execute_event_count = as_int(
+        audit.get("execute_event_count")
+        or payload.get("request_log_execute_count")
+        or payload.get("execute_event_count")
+    )
+    execute_payload_event_count = as_int(
+        audit.get("execute_payload_event_count")
+        or payload.get("request_log_execute_payload_event_count")
+        or payload.get("execute_payload_event_count")
+    )
+    execute_result_event_count = as_int(
+        audit.get("execute_result_event_count")
+        or payload.get("request_log_execute_result_event_count")
+        or payload.get("execute_result_event_count")
+    )
+    if event_count <= 0 and execute_event_count > 0:
+        event_count = execute_event_count
+
+    recent_paths = audit.get("recent_paths") if isinstance(audit.get("recent_paths"), list) else []
+    if not recent_paths and isinstance(payload.get("request_log_recent_paths"), list):
+        recent_paths = payload.get("request_log_recent_paths")  # type: ignore[assignment]
+    if not recent_paths and isinstance(payload.get("events"), list):
+        recent_paths = [item.get("path") for item in payload["events"] if isinstance(item, dict)]
+    recent_paths = [str(item) for item in recent_paths if str(item or "").strip()]
+    execute_from_paths = any(item == "/execute" or item.endswith("/execute") for item in recent_paths)
+    execute_event_seen = bool(
+        audit.get("execute_event_seen") is True
+        or payload.get("request_log_execute_seen") is True
+        or payload.get("execute_event_seen") is True
+        or execute_event_count > 0
+        or execute_from_paths
+    )
+    last_execute_at = str(
+        audit.get("last_execute_at")
+        or payload.get("request_log_last_execute_at")
+        or payload.get("last_execute_at")
+        or ""
+    )
+
+    def string_list(*values: object) -> list[str]:
+        output: list[str] = []
+        for value in values:
+            if isinstance(value, list):
+                for item in value:
+                    text = str(item or "").strip()
+                    if text and text not in output:
+                        output.append(text)
+            else:
+                text = str(value or "").strip()
+                if text and text not in output:
+                    output.append(text)
+        return output
+
+    last_context = audit.get("last_execute_context") if isinstance(audit.get("last_execute_context"), dict) else payload.get("request_log_last_execute_context") if isinstance(payload.get("request_log_last_execute_context"), dict) else {}
+    execute_run_ids = string_list(audit.get("execute_run_ids"), payload.get("request_log_execute_run_ids"), payload.get("execute_run_ids"), last_context.get("run_id") if isinstance(last_context, dict) else "")
+    execute_sequence_ids = string_list(audit.get("execute_sequence_ids"), payload.get("request_log_execute_sequence_ids"), payload.get("execute_sequence_ids"), last_context.get("sequence_id") if isinstance(last_context, dict) else "")
+    execute_specimen_ids = string_list(audit.get("execute_specimen_ids"), payload.get("request_log_execute_specimen_ids"), payload.get("execute_specimen_ids"), last_context.get("specimen_id") if isinstance(last_context, dict) else "")
+    execute_program_ids = string_list(audit.get("execute_program_ids"), payload.get("request_log_execute_program_ids"), payload.get("execute_program_ids"), last_context.get("program_id") if isinstance(last_context, dict) else "")
+    expected_identity = {
+        "run_id": str(payload.get("expected_run_id") or audit.get("expected_run_id") or ""),
+        "sequence_id": str(payload.get("expected_sequence_id") or audit.get("expected_sequence_id") or ""),
+        "specimen_id": str(payload.get("expected_specimen_id") or audit.get("expected_specimen_id") or ""),
+        "program_id": str(payload.get("expected_program_id") or audit.get("expected_program_id") or ""),
+    }
+    identity_required = bool(payload.get("require_execute_identity_match") or audit.get("require_execute_identity_match") or any(expected_identity.values()))
+    identity_present = bool(execute_payload_event_count > 0 or execute_run_ids or execute_specimen_ids or execute_program_ids)
+
+    def contains(expected: str, observed: list[str]) -> bool:
+        return not expected or expected in observed
+
+    identity_match = bool(
+        (not identity_required)
+        or (
+            identity_present
+            and contains(expected_identity["run_id"], execute_run_ids)
+            and contains(expected_identity["program_id"], execute_program_ids)
+            and contains(expected_identity["specimen_id"], execute_specimen_ids)
+        )
+    )
+    ok = bool(path and event_count > 0 and execute_event_seen and identity_match)
+    failure_code = None
+    if not ok:
+        if path and event_count > 0 and execute_event_seen and not identity_match:
+            failure_code = "UTM_REQUEST_LOG_EXECUTE_IDENTITY_REQUIRED"
+        else:
+            failure_code = "UTM_REQUEST_LOG_EXECUTE_EVENT_REQUIRED" if path and event_count > 0 else "UTM_REQUEST_LOG_REQUIRED"
+    return (
+        {
+            "ok": ok,
+            "path": path,
+            "event_count": event_count,
+            "recent_paths": recent_paths,
+            "execute_event_seen": execute_event_seen,
+            "execute_event_count": execute_event_count,
+            "execute_payload_event_count": execute_payload_event_count,
+            "execute_result_event_count": execute_result_event_count,
+            "execute_run_ids": execute_run_ids,
+            "execute_sequence_ids": execute_sequence_ids,
+            "execute_specimen_ids": execute_specimen_ids,
+            "execute_program_ids": execute_program_ids,
+            "last_execute_context": last_context,
+            "last_execute_at": last_execute_at,
+            "execute_identity_required": identity_required,
+            "execute_identity_present": identity_present,
+            "execute_identity_match": identity_match,
+            "execute_identity_detail": {
+                "expected": expected_identity,
+                "observed": {
+                    "run_ids": execute_run_ids,
+                    "sequence_ids": execute_sequence_ids,
+                    "specimen_ids": execute_specimen_ids,
+                    "program_ids": execute_program_ids,
+                },
+            },
+        },
+        failure_code,
+    )
+
+
+def _windows_utm_proof_checklist(
+    *,
+    gates: dict[str, object],
+    request_audit_log: dict[str, object],
+    screen_refs: list[object],
+    data_refs: list[object],
+    data_acquisition: dict[str, object],
+    blockers: list[str],
+    source: str,
+) -> tuple[list[dict[str, object]], bool]:
+    """Build an operator-readable proof checklist for Windows UTM handoff evidence."""
+    screen_ref_count = len([item for item in screen_refs if str(item or "").strip()])
+    data_ref_count = len([item for item in data_refs if str(item or "").strip()])
+    linux_path = str(data_acquisition.get("linux_path") or data_acquisition.get("local_path") or "")
+    row_count = data_acquisition.get("row_count_probe")
+    try:
+        row_count_int = int(row_count or 0)
+    except (TypeError, ValueError):
+        row_count_int = 0
+    checklist = [
+        {
+            "id": "request_log_execute",
+            "label": "Windows bridge /execute audit",
+            "ok": bool(request_audit_log.get("ok") and request_audit_log.get("execute_event_seen") and request_audit_log.get("execute_identity_match") is not False),
+            "required": True,
+            "detail": f"events={request_audit_log.get('event_count', 0)}; execute_count={request_audit_log.get('execute_event_count', 0)}; identity_match={request_audit_log.get('execute_identity_match', '-')}; last_execute_at={request_audit_log.get('last_execute_at', '') or '-'}",
+        },
+        {
+            "id": "physical_live_execute",
+            "label": "Physical live /execute dispatch",
+            "ok": bool(gates.get("physical_live_execute")),
+            "required": True,
+            "detail": "The proof must come from a live physical validation run, not preflight, simulator, or a copied report.",
+        },
+        {
+            "id": "screen_evidence",
+            "label": "UTM screen-state evidence",
+            "ok": bool(gates.get("screen_evidence_complete")),
+            "required": True,
+            "detail": f"screen_refs={screen_ref_count}; expected before_start/after_start/after_complete screenshots",
+        },
+        {
+            "id": "physical_motion",
+            "label": "Physical UTM motion cross-check",
+            "ok": bool(gates.get("physical_motion_started")),
+            "required": True,
+            "detail": "Vision or data-stream evidence must confirm motion; screen running alone is not sufficient.",
+        },
+        {
+            "id": "linux_artifact_pull",
+            "label": "Linux-side UTM artifact pull",
+            "ok": bool(gates.get("linux_artifact_pulled")),
+            "required": True,
+            "detail": linux_path or "Linux-local UTM CSV path is not recorded.",
+        },
+        {
+            "id": "save_export_responsibility",
+            "label": "UTM save/export responsibility",
+            "ok": bool(gates.get("save_export_responsibility_ok")),
+            "required": True,
+            "detail": f"save_method={data_acquisition.get('save_method', '') or '-'}; save_attempted={bool(data_acquisition.get('save_attempted_by_agent'))}; confirmation={bool(data_acquisition.get('save_confirmation_screen_ok'))}",
+        },
+        {
+            "id": "data_parse_probe",
+            "label": "UTM CSV parse probe",
+            "ok": bool(gates.get("data_parse_probe_ok")),
+            "required": True,
+            "detail": f"data_refs={data_ref_count}; row_count_probe={row_count_int}",
+        },
+        {
+            "id": "vision_evidence_frames",
+            "label": "Vision frame evidence",
+            "ok": bool(gates.get("vision_evidence_complete")),
+            "required": True,
+            "detail": "Frame IDs must prove fixture/motion/complete physical states before Analysis handoff.",
+        },
+    ]
+    blockers_set = set(blockers)
+    if blockers_set:
+        checklist.append(
+            {
+                "id": "blocking_reason_review",
+                "label": "Blocking reason review",
+                "ok": False,
+                "required": False,
+                "detail": ", ".join(sorted(blockers_set)[:8]),
+            }
+        )
+    proof_ready = all(bool(item.get("ok")) for item in checklist if item.get("required") is not False)
+    for item in checklist:
+        item["source"] = source
+    return checklist, proof_ready
+
+
+def _windows_utm_evidence_audit_from_raw_result(result: dict[str, object], *, run_id: str = "") -> dict[str, object]:
+    """Audit a direct /equipment/windows UTM protocol-test result without hardware calls."""
+    screen_checks = result.get("screen_checks") if isinstance(result.get("screen_checks"), list) else []
+    artifacts = result.get("output_artifacts") if isinstance(result.get("output_artifacts"), list) else []
+    data_acquisition = result.get("data_acquisition") if isinstance(result.get("data_acquisition"), dict) else {}
+    cross_checks = result.get("cross_checks") if isinstance(result.get("cross_checks"), dict) else {}
+    request_audit_log, request_audit_failure = _request_audit_log_gate({
+        **result,
+        "expected_run_id": str(run_id or result.get("run_id") or ""),
+        "expected_sequence_id": str(result.get("sequence_id") or ""),
+        "expected_specimen_id": str(result.get("specimen_id") or ""),
+        "expected_program_id": str(result.get("program_id") or ""),
+        "require_execute_identity_match": True,
+    })
+
+    required_checkpoints = ["before_start", "after_start", "after_complete"]
+    screen_by_checkpoint = {
+        str(item.get("checkpoint") or ""): item
+        for item in screen_checks
+        if isinstance(item, dict)
+    }
+    missing_checkpoints = [
+        checkpoint
+        for checkpoint in required_checkpoints
+        if not (
+            isinstance(screen_by_checkpoint.get(checkpoint), dict)
+            and bool(screen_by_checkpoint[checkpoint].get("ok"))
+            and bool(str(screen_by_checkpoint[checkpoint].get("screenshot_artifact") or "").strip())
+        )
+    ]
+
+    screen_ids = {
+        str(item.get("screenshot_artifact") or "")
+        for item in screen_checks
+        if isinstance(item, dict) and item.get("screenshot_artifact")
+    }
+    screen_refs: list[str] = []
+    data_refs: list[str] = []
+    artifact_refs: list[str] = []
+    data_row_count_probe = data_acquisition.get("row_count_probe")
+    for artifact in artifacts:
+        if not isinstance(artifact, dict):
+            continue
+        ref = str(artifact.get("local_path") or artifact.get("linux_path") or artifact.get("path") or artifact.get("artifact_id") or artifact.get("windows_path") or "")
+        if ref:
+            artifact_refs.append(ref)
+        kind = str(artifact.get("kind") or "")
+        artifact_id = str(artifact.get("artifact_id") or "")
+        if kind == "screen_png" or artifact_id in screen_ids:
+            screen_refs.append(ref)
+        if kind == "utm_csv":
+            data_refs.append(ref)
+            if data_row_count_probe in (None, 0, "") and artifact.get("row_count_probe") not in (None, 0, ""):
+                data_row_count_probe = artifact.get("row_count_probe")
+    result_file = str(result.get("result_file") or result.get("utm_csv_path") or data_acquisition.get("linux_path") or data_acquisition.get("local_path") or "")
+    if result_file:
+        data_refs.insert(0, result_file)
+        artifact_refs.insert(0, result_file)
+
+    screen_evidence_complete = not missing_checkpoints
+    linux_artifact_pulled = bool(
+        str(data_acquisition.get("status") or "") == "pulled_to_linux"
+        and bool(result_file)
+        and bool(data_acquisition.get("linux_path") or data_acquisition.get("local_path") or result.get("result_file"))
+    )
+    data_parse_probe_ok = bool(cross_checks.get("data_parse_probe_ok", result_file and data_row_count_probe not in (None, 0, "")))
+    save_completed = bool(cross_checks.get("save_completed", data_acquisition.get("save_confirmation_screen_ok") or linux_artifact_pulled))
+    data_file_created = bool(cross_checks.get("data_file_created", bool(result_file)))
+    save_method = str(data_acquisition.get("save_method") or "").strip()
+    recognized_save_methods = {"windows_export_watch", "manual_save_dialog", "export_menu", "simulated_bridge_export", "simulated_auto_export", "synthetic_test_export"}
+    save_export_responsibility_ok = bool(
+        cross_checks.get(
+            "save_export_responsibility_ok",
+            linux_artifact_pulled
+            and data_parse_probe_ok
+            and save_method in recognized_save_methods
+            and (bool(data_acquisition.get("save_attempted_by_agent")) or save_method in {"windows_export_watch", "simulated_bridge_export", "simulated_auto_export"})
+            and (bool(data_acquisition.get("save_confirmation_screen_ok")) or bool(data_acquisition.get("windows_path")) or bool(result_file)),
+        )
+    )
+
+    gate_values = {
+        "screen_started": bool(cross_checks.get("screen_started", screen_evidence_complete)),
+        "physical_motion_started": bool(cross_checks.get("physical_motion_started", False)),
+        "save_completed": save_completed,
+        "data_file_created": data_file_created,
+        "data_parse_probe_ok": data_parse_probe_ok,
+        "screen_evidence_complete": bool(screen_evidence_complete),
+        "linux_artifact_pulled": bool(linux_artifact_pulled),
+        "save_export_responsibility_ok": bool(save_export_responsibility_ok),
+        "vision_evidence_complete": False,
+        "request_audit_log_available": bool(request_audit_log.get("ok")),
+        "physical_live_execute": False,
+    }
+    blockers: list[str] = []
+    for gate, ok in gate_values.items():
+        if not ok:
+            if gate == "request_audit_log_available" and request_audit_failure:
+                blockers.append(request_audit_failure)
+            elif gate == "save_export_responsibility_ok":
+                blockers.append("UTM_SAVE_EXPORT_RESPONSIBILITY_REQUIRED")
+            else:
+                blockers.append(f"{gate.upper()}_REQUIRED")
+    if not data_refs:
+        blockers.append("UTM_DATA_EVIDENCE_REF_REQUIRED")
+    if len(screen_refs) < 3:
+        blockers.append("UTM_SCREEN_EVIDENCE_REFS_INCOMPLETE")
+    if request_audit_failure:
+        blockers.append(request_audit_failure)
+    blockers.append("UTM_VISION_EVIDENCE_FRAMES_REQUIRED")
+    if result.get("failure_code"):
+        blockers.append(str(result["failure_code"]))
+    blockers = list(dict.fromkeys(item for item in blockers if item))
+
+    live_evidence_audit = {
+        "required_for_handoff": True,
+        "source": "windows_equipment_run_program",
+        "screen_evidence": {
+            "ok": bool(screen_evidence_complete),
+            "required_checkpoints": required_checkpoints,
+            "observed_checkpoints": [checkpoint for checkpoint in required_checkpoints if checkpoint not in missing_checkpoints],
+            "missing_checkpoints": missing_checkpoints,
+        },
+        "linux_artifact_pull": {
+            "ok": bool(linux_artifact_pulled),
+            "status": data_acquisition.get("status", ""),
+            "linux_path": result_file,
+            "parse_probe_ok": bool(data_parse_probe_ok),
+        },
+        "save_export": {
+            "ok": bool(save_export_responsibility_ok),
+            "save_method": save_method,
+            "save_attempted_by_agent": bool(data_acquisition.get("save_attempted_by_agent")),
+            "save_confirmation_screen_ok": bool(data_acquisition.get("save_confirmation_screen_ok")),
+            "windows_path": str(data_acquisition.get("windows_path") or ""),
+            "linux_path": result_file,
+            "recognized_save_method": save_method in recognized_save_methods,
+        },
+        "vision_evidence": {
+            "ok": False,
+            "all_required_ok": False,
+            "evidence_frame_ids": [],
+        },
+        "request_audit_log": request_audit_log,
+    }
+    proof_checklist, proof_ready = _windows_utm_proof_checklist(
+        gates=gate_values,
+        request_audit_log=request_audit_log,
+        screen_refs=list(screen_refs),
+        data_refs=list(data_refs),
+        data_acquisition=data_acquisition,
+        blockers=blockers,
+        source="windows_equipment_run_program",
+    )
+
+    return {
+        "ok": False,
+        "tool": "equipment.pyautogui.live_evidence_audit",
+        "status": "blocked",
+        "run_id": run_id or str(result.get("run_id") or result.get("sequence_id") or ""),
+        "bridge": str(result.get("bridge") or "windows_pyautogui"),
+        "program_id": str(result.get("program_id") or ""),
+        "handoff_status": "blocked",
+        "equipment_status": str(result.get("status") or ""),
+        "failure_code": blockers[0] if blockers else None,
+        "required_for_handoff": True,
+        "gates": gate_values,
+        "live_evidence_audit": live_evidence_audit,
+        "request_audit_log": request_audit_log,
+        "proof_checklist": proof_checklist,
+        "proof_ready": proof_ready,
+        "decision": {
+            "handoff_status": "blocked",
+            "equipment_status": str(result.get("status") or ""),
+            "blocking_reasons": blockers,
+            "recommended_next_agent": "equipment_agent",
+        },
+        "data_acquisition": data_acquisition,
+        "evidence_refs": list(dict.fromkeys(str(item) for item in artifact_refs if str(item or "").strip())),
+        "screen_evidence_refs": list(dict.fromkeys(str(item) for item in screen_refs if str(item or "").strip())),
+        "data_evidence_refs": list(dict.fromkeys(str(item) for item in data_refs if str(item or "").strip())),
+        "blockers": blockers,
+        "warnings": ["WINDOWS_GUI_PROTOCOL_TEST_REQUIRES_LABEQUIPMENT_AGENT_VISION_PACKAGE_FOR_ANALYSIS_HANDOFF"],
+        "next_actions": [
+            "Use the full Lab Equipment Agent stage to add Vision frame evidence before Analysis handoff.",
+            "If this was a setup test, review screen and CSV pull gates, then run the autonomous equipment stage.",
+        ] + (
+            ["Inspect the Windows bridge request log and confirm the live /execute request was recorded."]
+            if request_audit_failure
+            else []
+        ),
+    }
+
+
+
+def _physical_validation_identity_gate(
+    source: dict[str, object],
+    *,
+    expected_run_id: str = "",
+    expected_sequence_id: str = "",
+    expected_specimen_id: str = "",
+    expected_program_id: str = "",
+) -> tuple[bool, dict[str, object]]:
+    """Require the physical validation packet itself to identify the live UTM command."""
+    expected = {
+        "run_id": str(expected_run_id or "").strip(),
+        "sequence_id": str(expected_sequence_id or "").strip(),
+        "specimen_id": str(expected_specimen_id or "").strip(),
+        "program_id": str(expected_program_id or "").strip(),
+    }
+    observed = {key: str(source.get(key) or "").strip() for key in expected}
+    missing = [key for key, value in observed.items() if not value]
+    mismatched = [key for key, value in expected.items() if value and observed.get(key) and observed.get(key) != value]
+    dispatch_ok = bool(
+        source.get("requested_physical_execute") is True
+        and source.get("execute_sent") is True
+        and source.get("non_actuating") is False
+        and str(source.get("status") or "") == "verified_complete"
+    )
+    identity_ok = bool(not missing and not mismatched)
+    evidence = {
+        "dispatch_ok": dispatch_ok,
+        "identity_ok": identity_ok,
+        "expected": expected,
+        "observed": observed,
+        "missing_identity_fields": missing,
+        "mismatched_identity_fields": mismatched,
+        "requested_physical_execute": bool(source.get("requested_physical_execute")),
+        "execute_sent": bool(source.get("execute_sent")),
+        "non_actuating": bool(source.get("non_actuating", True)),
+        "status": str(source.get("status") or ""),
+    }
+    return bool(dispatch_ok and identity_ok), evidence
+
+
+
+def _windows_utm_intermediate_file_evidence_gate(
+    screen_refs: list[str],
+    data_refs: list[str],
+    *artifact_sources: object,
+) -> dict[str, object]:
+    """Verify local screen/data evidence before the final proof-package audit."""
+    package = {
+        "source_packets": {
+            f"source_{index}": value
+            for index, value in enumerate(artifact_sources)
+            if isinstance(value, dict)
+        }
+    }
+    artifact_records = _windows_proof_artifact_records(package)
+
+    verified_screen_files: list[str] = []
+    missing_screen_files: list[str] = []
+    invalid_screen_files: list[str] = []
+    unresolved_screen_refs: list[str] = []
+    for ref in screen_refs:
+        path, source = _windows_proof_resolved_ref_path(ref, artifact_records)
+        if path is None:
+            unresolved_screen_refs.append(str(ref))
+            continue
+        if path.exists() and path.is_file():
+            image_ok, image_detail = _windows_proof_image_signature(path)
+            if image_ok:
+                verified_screen_files.append(str(path))
+            else:
+                invalid_screen_files.append(f"{path} ({image_detail}; {source})")
+        else:
+            missing_screen_files.append(f"{path} ({source})")
+    unique_screen_files = sorted(set(verified_screen_files))
+    duplicate_screen_files = len(unique_screen_files) != len(verified_screen_files)
+    screen_ok = bool(
+        len(screen_refs) >= 3
+        and len(unique_screen_files) >= 3
+        and not missing_screen_files
+        and not invalid_screen_files
+        and not unresolved_screen_refs
+        and not duplicate_screen_files
+    )
+
+    verified_data_files: list[str] = []
+    missing_data_files: list[str] = []
+    unresolved_data_refs: list[str] = []
+    for ref in data_refs:
+        path, source = _windows_proof_resolved_ref_path(ref, artifact_records)
+        if path is None:
+            unresolved_data_refs.append(str(ref))
+            continue
+        if path.exists() and path.is_file():
+            verified_data_files.append(str(path))
+        else:
+            missing_data_files.append(f"{path} ({source})")
+    unique_data_files = sorted(set(verified_data_files))
+    csv_probes = [_windows_proof_csv_probe(Path(item)) for item in unique_data_files]
+    failed_csv_probes = [probe for probe in csv_probes if not bool(probe.get("ok"))]
+    data_ok = bool(data_refs and unique_data_files and not missing_data_files and not unresolved_data_refs)
+    data_probe_ok = bool(data_ok and csv_probes and not failed_csv_probes)
+
+    blockers: list[str] = []
+    if not screen_ok:
+        blockers.append("UTM_SCREEN_EVIDENCE_FILES_REQUIRED")
+    if not data_ok:
+        blockers.append("UTM_DATA_EVIDENCE_FILES_REQUIRED")
+    if data_ok and not data_probe_ok:
+        for probe in failed_csv_probes:
+            code = str(probe.get("failure_code") or "UTM_CSV_PARSE_PROBE_FAILED")
+            if code not in blockers:
+                blockers.append(code)
+    return {
+        "screen_ok": screen_ok,
+        "data_ok": data_ok,
+        "data_probe_ok": data_probe_ok,
+        "verified_screen_files": unique_screen_files,
+        "verified_data_files": unique_data_files,
+        "csv_probes": csv_probes,
+        "failed_csv_probes": failed_csv_probes,
+        "missing_screen_files": missing_screen_files,
+        "invalid_screen_files": invalid_screen_files,
+        "unresolved_screen_refs": unresolved_screen_refs,
+        "duplicate_screen_files": duplicate_screen_files,
+        "missing_data_files": missing_data_files,
+        "unresolved_data_refs": unresolved_data_refs,
+        "blockers": blockers,
+    }
+
+
+def _windows_utm_evidence_audit_from_live_validation_report(report: dict[str, object], *, run_id: str = "") -> dict[str, object]:
+    """Convert a lab_equipment_utm_live_validation.v1 report into the proof-package audit contract."""
+    evidence = report.get("evidence") if isinstance(report.get("evidence"), dict) else {}
+    execution = evidence.get("execution") if isinstance(evidence.get("execution"), dict) else {}
+    data_acquisition = execution.get("data_acquisition") if isinstance(execution.get("data_acquisition"), dict) else {}
+    request_audit_source = report.get("request_audit_log") if isinstance(report.get("request_audit_log"), dict) else evidence.get("request_log_after") if isinstance(evidence.get("request_log_after"), dict) else {}
+    expected_run_id = str(report.get("run_id") or run_id or execution.get("run_id") or "")
+    expected_sequence_id = str(report.get("sequence_id") or execution.get("sequence_id") or "")
+    expected_specimen_id = str(report.get("specimen_id") or execution.get("specimen_id") or "")
+    expected_program_id = str(report.get("program_id") or execution.get("program_id") or "")
+    request_audit_log, request_audit_failure = _request_audit_log_gate({
+        **dict(request_audit_source),
+        "request_audit_log": request_audit_source,
+        "expected_run_id": expected_run_id,
+        "expected_sequence_id": expected_sequence_id,
+        "expected_specimen_id": expected_specimen_id,
+        "expected_program_id": expected_program_id,
+        "require_execute_identity_match": True,
+    })
+
+    gates_by_name = {
+        str(item.get("name") or ""): item
+        for item in report.get("gates", [])
+        if isinstance(item, dict)
+    }
+
+    def gate_ok(name: str) -> bool:
+        return bool(isinstance(gates_by_name.get(name), dict) and gates_by_name[name].get("ok") is True)
+
+    screen_gate = gates_by_name.get("screen_state_evidence") if isinstance(gates_by_name.get("screen_state_evidence"), dict) else {}
+    screen_evidence = screen_gate.get("evidence") if isinstance(screen_gate.get("evidence"), dict) else {}
+    observed_screens = screen_evidence.get("observed") if isinstance(screen_evidence.get("observed"), list) else execution.get("screen_checks") if isinstance(execution.get("screen_checks"), list) else []
+    screen_refs = [
+        str(item.get("screenshot_artifact") or item.get("artifact") or item.get("path") or "")
+        for item in observed_screens
+        if isinstance(item, dict) and str(item.get("screenshot_artifact") or item.get("artifact") or item.get("path") or "").strip()
+    ]
+
+    data_refs: list[str] = []
+    result_file = str(execution.get("result_file") or execution.get("utm_csv_path") or data_acquisition.get("linux_path") or data_acquisition.get("local_path") or "").strip()
+    if result_file:
+        data_refs.append(result_file)
+    artifacts = execution.get("output_artifacts") if isinstance(execution.get("output_artifacts"), list) else []
+    artifact_refs: list[str] = []
+    for artifact in artifacts:
+        if not isinstance(artifact, dict):
+            continue
+        ref = str(artifact.get("local_path") or artifact.get("linux_path") or artifact.get("path") or artifact.get("artifact_id") or artifact.get("windows_path") or "").strip()
+        if ref:
+            artifact_refs.append(ref)
+            if str(artifact.get("kind") or "") == "utm_csv":
+                data_refs.append(ref)
+    report_artifact = report.get("report_artifact") if isinstance(report.get("report_artifact"), dict) else report.get("artifact") if isinstance(report.get("artifact"), dict) else {}
+    if report_artifact.get("path"):
+        artifact_refs.append(str(report_artifact["path"]))
+
+    file_evidence = _windows_utm_intermediate_file_evidence_gate(
+        list(dict.fromkeys(screen_refs)),
+        list(dict.fromkeys(data_refs)),
+        execution,
+        report,
+        evidence,
+    )
+
+    physical_execute_ok, physical_execute_evidence = _physical_validation_identity_gate(
+        report,
+        expected_run_id=expected_run_id,
+        expected_sequence_id=expected_sequence_id,
+        expected_specimen_id=expected_specimen_id,
+        expected_program_id=expected_program_id,
+    )
+    gate_values = {
+        "physical_live_execute": physical_execute_ok,
+        "screen_started": gate_ok("screen_state_evidence"),
+        "physical_motion_started": gate_ok("vision_physical_cross_check"),
+        "save_completed": gate_ok("save_export_responsibility"),
+        "data_file_created": bool(gate_ok("linux_data_artifact") and file_evidence["data_ok"]),
+        "data_parse_probe_ok": bool(gate_ok("utm_csv_parse_probe") and file_evidence["data_probe_ok"]),
+        "screen_evidence_complete": bool(gate_ok("screen_state_evidence") and file_evidence["screen_ok"]),
+        "linux_artifact_pulled": bool(gate_ok("linux_data_artifact") and file_evidence["data_ok"]),
+        "save_export_responsibility_ok": gate_ok("save_export_responsibility"),
+        "vision_evidence_complete": gate_ok("vision_physical_cross_check"),
+        "request_audit_log_available": bool(request_audit_log.get("ok")),
+        "request_audit_execute_identity_match": bool(request_audit_log.get("execute_identity_match")),
+    }
+    blockers: list[str] = []
+    for item in report.get("blockers", []):
+        if isinstance(item, dict):
+            blockers.append(str(item.get("failure_code") or item.get("name") or item.get("detail") or ""))
+        elif str(item or "").strip():
+            blockers.append(str(item))
+    if request_audit_failure:
+        blockers.append(request_audit_failure)
+    if not physical_execute_ok:
+        blockers.append("UTM_PHYSICAL_LIVE_EXECUTE_REQUIRED")
+        if physical_execute_evidence.get("missing_identity_fields"):
+            blockers.append("UTM_PHYSICAL_LIVE_EXECUTE_IDENTITY_REQUIRED")
+        if physical_execute_evidence.get("mismatched_identity_fields"):
+            blockers.append("UTM_PHYSICAL_LIVE_EXECUTE_IDENTITY_MISMATCH")
+    if not data_refs:
+        blockers.append("UTM_DATA_EVIDENCE_REF_REQUIRED")
+    if len(screen_refs) < 3:
+        blockers.append("UTM_SCREEN_EVIDENCE_REFS_INCOMPLETE")
+    blockers.extend(str(item) for item in file_evidence.get("blockers", []) if str(item or "").strip())
+    blockers = list(dict.fromkeys(item for item in blockers if str(item or "").strip()))
+
+    vision_gate = gates_by_name.get("vision_physical_cross_check") if isinstance(gates_by_name.get("vision_physical_cross_check"), dict) else {}
+    vision_evidence = vision_gate.get("evidence") if isinstance(vision_gate.get("evidence"), dict) else evidence.get("vision_proof") if isinstance(evidence.get("vision_proof"), dict) else {}
+    vision_frame_ids = _windows_utm_vision_frame_ids(vision_evidence)
+
+    live_evidence_audit = {
+        "required_for_handoff": True,
+        "source": "lab_equipment_utm_live_validation",
+        "screen_evidence": {
+            "ok": bool(gate_values["screen_evidence_complete"]),
+            "observed_checkpoints": [str(item.get("checkpoint") or "") for item in observed_screens if isinstance(item, dict)],
+            "screen_refs": list(dict.fromkeys(screen_refs)),
+            "file_evidence": file_evidence,
+        },
+        "linux_artifact_pull": {
+            "ok": bool(gate_values["linux_artifact_pulled"]),
+            "status": data_acquisition.get("status", ""),
+            "linux_path": result_file,
+            "parse_probe_ok": bool(gate_values["data_parse_probe_ok"]),
+            "file_evidence": {
+                "ok": bool(file_evidence["data_ok"]),
+                "verified_data_files": file_evidence.get("verified_data_files", []),
+                "csv_probes": file_evidence.get("csv_probes", []),
+                "failed_csv_probes": file_evidence.get("failed_csv_probes", []),
+                "missing_data_files": file_evidence.get("missing_data_files", []),
+                "unresolved_data_refs": file_evidence.get("unresolved_data_refs", []),
+            },
+        },
+        "save_export": {
+            "ok": bool(gate_values["save_export_responsibility_ok"]),
+            "save_method": str(data_acquisition.get("save_method") or ""),
+            "save_attempted_by_agent": bool(data_acquisition.get("save_attempted_by_agent")),
+            "save_confirmation_screen_ok": bool(data_acquisition.get("save_confirmation_screen_ok")),
+            "windows_path": str(data_acquisition.get("windows_path") or ""),
+            "linux_path": result_file,
+            "recognized_save_method": bool(gate_values["save_export_responsibility_ok"]),
+        },
+        "vision_evidence": {
+            "ok": bool(gate_values["vision_evidence_complete"]),
+            "all_required_ok": bool(gate_values["vision_evidence_complete"]),
+            "evidence_frame_ids": list(dict.fromkeys(vision_frame_ids)),
+            "source_report_gate": vision_evidence,
+        },
+        "request_audit_log": request_audit_log,
+        "physical_execution": physical_execute_evidence,
+    }
+    proof_checklist, proof_ready = _windows_utm_proof_checklist(
+        gates=gate_values,
+        request_audit_log=request_audit_log,
+        screen_refs=list(screen_refs),
+        data_refs=list(data_refs),
+        data_acquisition=data_acquisition,
+        blockers=blockers,
+        source="lab_equipment_utm_live_validation",
+    )
+    ready_for_analysis = bool(report.get("ok") is True and str(report.get("status") or "") == "verified_complete" and proof_ready and not blockers)
+    status = "ready_for_analysis" if ready_for_analysis else "blocked"
+    return {
+        "ok": ready_for_analysis,
+        "tool": "equipment.pyautogui.live_evidence_audit",
+        "status": status,
+        "run_id": expected_run_id,
+        "bridge": "windows_pyautogui",
+        "program_id": expected_program_id,
+        "handoff_status": "ready_for_analysis" if ready_for_analysis else "blocked",
+        "equipment_status": str(report.get("status") or ""),
+        "failure_code": blockers[0] if blockers else None,
+        "required_for_handoff": True,
+        "gates": gate_values,
+        "live_evidence_audit": live_evidence_audit,
+        "request_audit_log": request_audit_log,
+        "proof_checklist": proof_checklist,
+        "proof_ready": proof_ready,
+        "decision": {
+            "handoff_status": "ready_for_analysis" if ready_for_analysis else "blocked",
+            "equipment_status": str(report.get("status") or ""),
+            "blocking_reasons": blockers,
+            "recommended_next_agent": "analysis_agent" if ready_for_analysis else "equipment_agent",
+        },
+        "data_acquisition": data_acquisition,
+        "evidence_refs": list(dict.fromkeys([*artifact_refs, *screen_refs, *data_refs])),
+        "screen_evidence_refs": list(dict.fromkeys(screen_refs)),
+        "data_evidence_refs": list(dict.fromkeys(data_refs)),
+        "source_live_validation_report": report,
+        "blockers": blockers,
+        "warnings": [] if ready_for_analysis else ["LIVE_VALIDATION_REPORT_NOT_READY_FOR_ANALYSIS"],
+        "next_actions": ["Proof package can be built for Analysis handoff review."] if ready_for_analysis else ["Resolve blocked live validation gates, then rerun physical validation."],
+    }
+
+
+def _windows_utm_runtime_metadata_from_live_validation_report(report: dict[str, object], *, run_id: str = "") -> dict[str, object]:
+    """Promote a successful physical live-validation report into Analysis-readable runtime packets."""
+    audit = _windows_utm_evidence_audit_from_live_validation_report(report, run_id=run_id)
+    evidence = report.get("evidence") if isinstance(report.get("evidence"), dict) else {}
+    execution = evidence.get("execution") if isinstance(evidence.get("execution"), dict) else {}
+    data_acquisition = execution.get("data_acquisition") if isinstance(execution.get("data_acquisition"), dict) else {}
+    request_audit_log = audit.get("request_audit_log") if isinstance(audit.get("request_audit_log"), dict) else {}
+    live_evidence_audit = audit.get("live_evidence_audit") if isinstance(audit.get("live_evidence_audit"), dict) else {}
+    cross_checks = audit.get("gates") if isinstance(audit.get("gates"), dict) else {}
+    decision = audit.get("decision") if isinstance(audit.get("decision"), dict) else {}
+    run_id_value = str(report.get("run_id") or run_id or execution.get("run_id") or "").strip()
+    sequence_id = str(report.get("sequence_id") or execution.get("sequence_id") or "").strip()
+    specimen_id = str(report.get("specimen_id") or execution.get("specimen_id") or "").strip()
+    program_id = str(report.get("program_id") or execution.get("program_id") or "").strip()
+    created_at = str(report.get("created_at") or datetime.now(timezone.utc).isoformat())
+    result_file = str(
+        execution.get("result_file")
+        or execution.get("utm_csv_path")
+        or data_acquisition.get("linux_path")
+        or data_acquisition.get("local_path")
+        or ""
+    ).strip()
+    artifact_refs = [str(item) for item in audit.get("evidence_refs", []) if str(item or "").strip()] if isinstance(audit.get("evidence_refs"), list) else []
+    screen_refs = [str(item) for item in audit.get("screen_evidence_refs", []) if str(item or "").strip()] if isinstance(audit.get("screen_evidence_refs"), list) else []
+    data_refs = [str(item) for item in audit.get("data_evidence_refs", []) if str(item or "").strip()] if isinstance(audit.get("data_evidence_refs"), list) else []
+    if result_file and result_file not in data_refs:
+        data_refs.append(result_file)
+    if result_file and result_file not in artifact_refs:
+        artifact_refs.append(result_file)
+
+    vision_evidence = live_evidence_audit.get("vision_evidence") if isinstance(live_evidence_audit.get("vision_evidence"), dict) else {}
+    evidence_frame_ids = (
+        [str(item) for item in vision_evidence.get("evidence_frame_ids", []) if str(item or "").strip()]
+        if isinstance(vision_evidence.get("evidence_frame_ids"), list)
+        else []
+    )
+    screen_evidence = live_evidence_audit.get("screen_evidence") if isinstance(live_evidence_audit.get("screen_evidence"), dict) else {}
+    save_export = live_evidence_audit.get("save_export") if isinstance(live_evidence_audit.get("save_export"), dict) else {}
+    verified = bool(audit.get("ok") is True and audit.get("status") == "ready_for_analysis" and result_file)
+    status = "ready_for_analysis" if verified else "blocked"
+    equipment_status = "verified_complete" if verified else "blocked"
+    failure_code = None if verified else str(audit.get("failure_code") or "LIVE_VALIDATION_NOT_READY_FOR_ANALYSIS")
+
+    physical_checks = {
+        "vision_motion_confirmed": bool(cross_checks.get("physical_motion_started")),
+        "specimen_alignment_ok": bool(cross_checks.get("vision_evidence_complete")),
+        "fixture_safe_to_access": bool(cross_checks.get("vision_evidence_complete")),
+        "evidence_frame_ids": evidence_frame_ids,
+    }
+    visual_verification = {
+        "screen_started": bool(cross_checks.get("screen_started")),
+        "screen_evidence_complete": bool(cross_checks.get("screen_evidence_complete")),
+        "screen_evidence_refs": screen_refs,
+        "observed_checkpoints": screen_evidence.get("observed_checkpoints", []),
+    }
+    physical_verification = {
+        "all_required_ok": bool(cross_checks.get("vision_evidence_complete")),
+        **physical_checks,
+        "checks": vision_evidence.get("source_report_gate", {}),
+    }
+    data_ledger = {
+        "status": data_acquisition.get("status", ""),
+        "save_method": data_acquisition.get("save_method", ""),
+        "save_attempted_by_agent": bool(data_acquisition.get("save_attempted_by_agent")),
+        "save_confirmation_screen_ok": bool(data_acquisition.get("save_confirmation_screen_ok")),
+        "save_export_responsibility_ok": bool(cross_checks.get("save_export_responsibility_ok")),
+        "recognized_save_method": bool(save_export.get("recognized_save_method")),
+        "windows_path": data_acquisition.get("windows_path", ""),
+        "linux_path": result_file,
+        "row_count_probe": data_acquisition.get("row_count_probe", 0),
+        "columns_probe": data_acquisition.get("columns_probe", []),
+        "parse_ready": bool(cross_checks.get("data_parse_probe_ok")),
+        "data_evidence_refs": data_refs,
+    }
+    handoff_gate = {
+        "handoff_status": status,
+        "equipment_status": equipment_status,
+        "failure_code": failure_code,
+        "ready_for_analysis": verified,
+        "required_gates": dict(cross_checks),
+        "blocking_reasons": list(decision.get("blocking_reasons", [])) if isinstance(decision.get("blocking_reasons"), list) else [],
+        "recommended_next_agent": "analysis_agent" if verified else "guardian_agent",
+        "live_evidence_audit": live_evidence_audit,
+    }
+    safety_gate = {
+        "guardian_status": "allow" if verified else "block",
+        "blocks_workflow": not verified,
+        "requires_human_approval": not verified,
+        "hardware_alert_count": 0,
+        "active_hardware_alert": {},
+        "incident_records": [],
+        "blocked_commands": [] if verified else [failure_code],
+    }
+    bridge_report = {
+        "provider": "windows_pyautogui",
+        "connection_status": "ready" if verified else "blocked",
+        "live_execute_enabled": True,
+        "request_log_path": request_audit_log.get("path", ""),
+        "request_log_event_count": request_audit_log.get("event_count", 0),
+        "request_log_recent_paths": request_audit_log.get("recent_paths", []),
+        "request_log_execute_seen": bool(request_audit_log.get("execute_event_seen")),
+        "request_log_execute_count": request_audit_log.get("execute_event_count", 0),
+        "request_log_execute_payload_event_count": request_audit_log.get("execute_payload_event_count", 0),
+        "request_log_execute_result_event_count": request_audit_log.get("execute_result_event_count", 0),
+        "request_log_execute_run_ids": request_audit_log.get("execute_run_ids", []),
+        "request_log_execute_sequence_ids": request_audit_log.get("execute_sequence_ids", []),
+        "request_log_execute_specimen_ids": request_audit_log.get("execute_specimen_ids", []),
+        "request_log_execute_program_ids": request_audit_log.get("execute_program_ids", []),
+        "request_log_last_execute_context": request_audit_log.get("last_execute_context", {}),
+        "request_log_last_execute_at": request_audit_log.get("last_execute_at", ""),
+        "request_log_execute_identity_required": bool(request_audit_log.get("execute_identity_required")),
+        "request_log_execute_identity_present": bool(request_audit_log.get("execute_identity_present")),
+        "request_log_execute_identity_match": bool(request_audit_log.get("execute_identity_match")),
+        "request_log_execute_identity_detail": request_audit_log.get("execute_identity_detail", {}),
+    }
+    report_packet = {
+        "schema": "equipment_report.v1",
+        "report_version": "lab_equipment_utm_visual_control_v1",
+        "source": "lab_equipment_utm_live_validation",
+        "run_id": run_id_value,
+        "mode": "live",
+        "task_id": "utm_compression_test",
+        "bridge": bridge_report,
+        "control_plan": {
+            "program_id": program_id,
+            "macro_version": "v1" if program_id else "",
+            "profile": report.get("execution_payload_preview") if isinstance(report.get("execution_payload_preview"), dict) else {},
+        },
+        "screen_checks": execution.get("screen_checks") if isinstance(execution.get("screen_checks"), list) else [],
+        "physical_checks": physical_checks,
+        "data_acquisition": data_acquisition,
+        "cross_checks": dict(cross_checks),
+        "artifact_refs": artifact_refs,
+        "screen_evidence_refs": screen_refs,
+        "data_evidence_refs": data_refs,
+        "artifact_pull": execution.get("artifact_pull") if isinstance(execution.get("artifact_pull"), dict) else {},
+        "live_evidence_audit": live_evidence_audit,
+        "visual_verification": visual_verification,
+        "physical_verification": physical_verification,
+        "data_ledger": data_ledger,
+        "handoff_gate": handoff_gate,
+        "safety_gate": safety_gate,
+        "decision": {
+            "equipment_status": equipment_status,
+            "handoff_status": status,
+            "failure_code": failure_code,
+            "blocking_reasons": handoff_gate["blocking_reasons"],
+            "recommended_next_agent": "analysis_agent" if verified else "guardian_agent",
+        },
+    }
+    packet = {
+        "schema": "utm_data_ready.v1",
+        "run_id": run_id_value,
+        "specimen_id": specimen_id,
+        "producer_agent": "lab_equipment_agent",
+        "consumer_agent": "analysis_agent",
+        "created_at": created_at,
+        "status": "ready" if verified else "blocked",
+        "evidence_refs": artifact_refs,
+        "data_evidence_refs": data_refs,
+        "screen_evidence_refs": screen_refs,
+        "live_evidence_audit": live_evidence_audit,
+        "save_export_responsibility_ok": bool(cross_checks.get("save_export_responsibility_ok")),
+        "save_export": save_export,
+        "artifact_pull": execution.get("artifact_pull") if isinstance(execution.get("artifact_pull"), dict) else {},
+        "bridge_request_log_ref": request_audit_log.get("path", ""),
+        "bridge_request_log_execute_event_seen": bool(request_audit_log.get("execute_event_seen")),
+        "bridge_request_log_execute_run_ids": request_audit_log.get("execute_run_ids", []),
+        "bridge_request_log_execute_sequence_ids": request_audit_log.get("execute_sequence_ids", []),
+        "bridge_request_log_execute_specimen_ids": request_audit_log.get("execute_specimen_ids", []),
+        "bridge_request_log_execute_program_ids": request_audit_log.get("execute_program_ids", []),
+        "bridge_request_log_execute_identity_match": bool(request_audit_log.get("execute_identity_match")),
+        "bridge_request_log_execute_identity_detail": request_audit_log.get("execute_identity_detail", {}),
+        "guardian_status": "allow" if verified else "block",
+        "decisions": [report_packet["decision"]],
+        "warnings": [] if verified else [failure_code],
+        "next_action": "analysis_agent" if verified else "guardian_review",
+        "equipment_report": report_packet,
+        "control_trace": {
+            "bridge_provider": "windows_pyautogui",
+            "connection_status": bridge_report["connection_status"],
+            "program_id": program_id,
+            "sequence_id": sequence_id,
+            "macro_version": report_packet["control_plan"]["macro_version"],
+            "source": "lab_equipment_utm_live_validation",
+        },
+        "visual_verification": visual_verification,
+        "physical_verification": physical_verification,
+        "data_ledger": data_ledger,
+        "handoff_gate": handoff_gate,
+        "safety_gate": safety_gate,
+        "result_file": result_file,
+        "utm_csv_path": result_file,
+    }
+    handoff = {
+        "schema": "utm_data_ready.v1",
+        "status": status,
+        "bridge": "windows_pyautogui",
+        "program_id": program_id,
+        "sequence_id": sequence_id,
+        "result_file": result_file,
+        "utm_csv_path": result_file,
+        "failure_code": failure_code,
+        "data_parse_probe_ok": bool(cross_checks.get("data_parse_probe_ok")),
+        "artifact_refs": artifact_refs,
+        "screen_evidence_refs": screen_refs,
+        "data_evidence_refs": data_refs,
+        "live_evidence_audit": live_evidence_audit,
+        "save_export_responsibility_ok": bool(cross_checks.get("save_export_responsibility_ok")),
+        "save_export": save_export,
+        "data_ledger": data_ledger,
+        "handoff_gate": handoff_gate,
+        "safety_gate": safety_gate,
+        "bridge_request_log_ref": request_audit_log.get("path", ""),
+        "bridge_request_log_execute_event_seen": bool(request_audit_log.get("execute_event_seen")),
+        "bridge_request_log_execute_run_ids": request_audit_log.get("execute_run_ids", []),
+        "bridge_request_log_execute_sequence_ids": request_audit_log.get("execute_sequence_ids", []),
+        "bridge_request_log_execute_specimen_ids": request_audit_log.get("execute_specimen_ids", []),
+        "bridge_request_log_execute_program_ids": request_audit_log.get("execute_program_ids", []),
+        "bridge_request_log_execute_identity_match": bool(request_audit_log.get("execute_identity_match")),
+        "bridge_request_log_execute_identity_detail": request_audit_log.get("execute_identity_detail", {}),
+    }
+    equipment_result = dict(execution)
+    equipment_result.update(
+        {
+            "ok": verified,
+            "tool": str(execution.get("tool") or "equipment.pyautogui.run"),
+            "status": equipment_status,
+            "failure_code": failure_code,
+            "bridge": "windows_pyautogui",
+            "program_id": program_id,
+            "sequence_id": sequence_id,
+            "result_file": result_file,
+            "utm_csv_path": result_file,
+            "data_acquisition": data_acquisition,
+            "cross_checks": dict(cross_checks),
+            "equipment_report": report_packet,
+            "utm_data_ready": packet,
+            "equipment_handoff": handoff,
+        }
+    )
+    return {
+        "verified": verified,
+        "equipment_result": equipment_result,
+        "equipment_report": report_packet,
+        "utm_data_ready": packet,
+        "equipment_handoff": handoff,
+        "evidence_audit": audit,
+    }
+
+
+def _windows_utm_evidence_audit_from_metadata(metadata: dict[str, object], *, run_id: str = "") -> dict[str, object]:
+    """Return post-run UTM evidence gates without touching live hardware."""
+    equipment_report = metadata.get("equipment_report") if isinstance(metadata.get("equipment_report"), dict) else {}
+    equipment_result = metadata.get("equipment_result") if isinstance(metadata.get("equipment_result"), dict) else {}
+    equipment_handoff = metadata.get("equipment_handoff") if isinstance(metadata.get("equipment_handoff"), dict) else {}
+    utm_packet = metadata.get("utm_data_ready") if isinstance(metadata.get("utm_data_ready"), dict) else {}
+
+    if not equipment_report:
+        physical_validation = metadata.get("last_windows_utm_physical_validation") if isinstance(metadata.get("last_windows_utm_physical_validation"), dict) else {}
+        if physical_validation and physical_validation.get("execute_sent") is True:
+            return _windows_utm_evidence_audit_from_live_validation_report(physical_validation, run_id=run_id)
+        raw_result = metadata.get("last_windows_utm_protocol_result") if isinstance(metadata.get("last_windows_utm_protocol_result"), dict) else metadata.get("last_windows_equipment_run_result") if isinstance(metadata.get("last_windows_equipment_run_result"), dict) else {}
+        if raw_result and str(raw_result.get("program_id") or "").startswith("utm_"):
+            return _windows_utm_evidence_audit_from_raw_result(raw_result, run_id=run_id)
+        return {
+            "ok": False,
+            "tool": "equipment.pyautogui.live_evidence_audit",
+            "status": "missing",
+            "run_id": run_id,
+            "bridge": "windows_pyautogui",
+            "blockers": ["EQUIPMENT_REPORT_NOT_AVAILABLE"],
+            "warnings": [],
+            "gates": {},
+            "live_evidence_audit": {},
+            "proof_checklist": [],
+            "proof_ready": False,
+            "decision": {},
+            "evidence_refs": [],
+            "next_actions": ["Run the Lab Equipment Agent stage or load a completed run with equipment_report.v1."],
+        }
+
+    bridge = equipment_report.get("bridge") if isinstance(equipment_report.get("bridge"), dict) else {}
+    cross_checks = equipment_report.get("cross_checks") if isinstance(equipment_report.get("cross_checks"), dict) else {}
+    decision = equipment_report.get("decision") if isinstance(equipment_report.get("decision"), dict) else {}
+    audit = equipment_report.get("live_evidence_audit") if isinstance(equipment_report.get("live_evidence_audit"), dict) else {}
+    data_acquisition = equipment_report.get("data_acquisition") if isinstance(equipment_report.get("data_acquisition"), dict) else {}
+    request_audit_source = audit.get("request_audit_log") if isinstance(audit.get("request_audit_log"), dict) else {}
+    if not request_audit_source and isinstance(bridge, dict) and bridge.get("request_log_path"):
+        request_audit_source = {
+            "path": str(bridge.get("request_log_path") or ""),
+            "event_count": bridge.get("request_log_event_count", 0),
+            "recent_paths": bridge.get("request_log_recent_paths", []),
+        }
+    expected_specimen_id = str(
+        equipment_handoff.get("specimen_id")
+        or utm_packet.get("specimen_id")
+        or equipment_report.get("specimen_id")
+        or ""
+    )
+    request_audit_log, request_audit_failure = _request_audit_log_gate({
+        **dict(request_audit_source),
+        "request_audit_log": request_audit_source,
+        "expected_run_id": str(equipment_report.get("run_id") or run_id or ""),
+        "expected_sequence_id": str(equipment_handoff.get("sequence_id") or equipment_report.get("sequence_id") or ""),
+        "expected_specimen_id": expected_specimen_id,
+        "expected_program_id": str(equipment_handoff.get("program_id") or (equipment_report.get("control_plan") if isinstance(equipment_report.get("control_plan"), dict) else {}).get("program_id") or ""),
+        "require_execute_identity_match": bool(audit.get("required_for_handoff")),
+    })
+    screen_refs = equipment_report.get("screen_evidence_refs") if isinstance(equipment_report.get("screen_evidence_refs"), list) else []
+    data_refs = equipment_report.get("data_evidence_refs") if isinstance(equipment_report.get("data_evidence_refs"), list) else []
+    artifact_refs = equipment_report.get("artifact_refs") if isinstance(equipment_report.get("artifact_refs"), list) else []
+
+    blockers: list[str] = [str(item) for item in decision.get("blocking_reasons", []) if str(item or "").strip()] if isinstance(decision.get("blocking_reasons"), list) else []
+    warnings: list[str] = []
+    required_for_handoff = bool(audit.get("required_for_handoff"))
+
+    save_export_audit = audit.get("save_export") if isinstance(audit.get("save_export"), dict) else {}
+    source_live_validation_report = metadata.get("last_windows_utm_physical_validation") if isinstance(metadata.get("last_windows_utm_physical_validation"), dict) else {}
+    file_evidence = _windows_utm_intermediate_file_evidence_gate(
+        [str(item) for item in screen_refs],
+        [str(item) for item in data_refs],
+        equipment_report,
+        equipment_result,
+        source_live_validation_report,
+    )
+    required_screen_files_ok = bool(file_evidence["screen_ok"]) if required_for_handoff else True
+    required_data_files_ok = bool(file_evidence["data_ok"]) if required_for_handoff else True
+    physical_execute_ok, physical_execute_evidence = _physical_validation_identity_gate(
+        source_live_validation_report,
+        expected_run_id=str(equipment_report.get("run_id") or run_id or ""),
+        expected_sequence_id=str(equipment_handoff.get("sequence_id") or equipment_report.get("sequence_id") or ""),
+        expected_specimen_id=expected_specimen_id,
+        expected_program_id=str(equipment_handoff.get("program_id") or (equipment_report.get("control_plan") if isinstance(equipment_report.get("control_plan"), dict) else {}).get("program_id") or ""),
+    )
+    gate_values = {
+        "physical_live_execute": physical_execute_ok,
+        "screen_started": bool(cross_checks.get("screen_started")),
+        "physical_motion_started": bool(cross_checks.get("physical_motion_started")),
+        "save_completed": bool(cross_checks.get("save_completed")),
+        "data_file_created": bool(cross_checks.get("data_file_created") and required_data_files_ok),
+        "data_parse_probe_ok": bool(cross_checks.get("data_parse_probe_ok") and (not required_for_handoff or file_evidence["data_probe_ok"])),
+        "screen_evidence_complete": bool(cross_checks.get("screen_evidence_complete", not required_for_handoff) and required_screen_files_ok),
+        "linux_artifact_pulled": bool(cross_checks.get("linux_artifact_pulled", not required_for_handoff) and required_data_files_ok),
+        "save_export_responsibility_ok": bool(cross_checks.get("save_export_responsibility_ok", save_export_audit.get("ok", not required_for_handoff))),
+        "vision_evidence_complete": bool(cross_checks.get("vision_evidence_complete", not required_for_handoff)),
+        "request_audit_log_available": bool(request_audit_log.get("ok")),
+        "request_audit_execute_identity_match": bool(request_audit_log.get("execute_identity_match")),
+    }
+    if required_for_handoff:
+        for gate, ok in gate_values.items():
+            if not ok:
+                if gate == "request_audit_log_available" and request_audit_failure:
+                    blockers.append(request_audit_failure)
+                elif gate == "save_export_responsibility_ok":
+                    blockers.append("UTM_SAVE_EXPORT_RESPONSIBILITY_REQUIRED")
+                else:
+                    blockers.append(f"{gate.upper()}_REQUIRED")
+        if str(data_acquisition.get("status") or "") != "pulled_to_linux":
+            blockers.append("UTM_LINUX_ARTIFACT_PULL_REQUIRED")
+        if not data_refs:
+            blockers.append("UTM_DATA_EVIDENCE_REF_REQUIRED")
+        if len(screen_refs) < 3:
+            blockers.append("UTM_SCREEN_EVIDENCE_REFS_INCOMPLETE")
+        blockers.extend(str(item) for item in file_evidence.get("blockers", []) if str(item or "").strip())
+        if not physical_execute_ok:
+            blockers.append("UTM_PHYSICAL_LIVE_EXECUTE_REQUIRED")
+            if physical_execute_evidence.get("missing_identity_fields"):
+                blockers.append("UTM_PHYSICAL_LIVE_EXECUTE_IDENTITY_REQUIRED")
+            if physical_execute_evidence.get("mismatched_identity_fields"):
+                blockers.append("UTM_PHYSICAL_LIVE_EXECUTE_IDENTITY_MISMATCH")
+    else:
+        warnings.append("LIVE_WINDOWS_UTM_AUDIT_NOT_REQUIRED_FOR_THIS_REPORT")
+
+    handoff_status = str(decision.get("handoff_status") or equipment_handoff.get("status") or "")
+    equipment_status = str(decision.get("equipment_status") or equipment_result.get("status") or "")
+    failure_code = str(decision.get("failure_code") or equipment_result.get("failure_code") or "")
+    blockers = list(dict.fromkeys(item for item in blockers if item))
+    status = "ready_for_analysis" if not blockers and handoff_status == "ready_for_analysis" else "blocked" if blockers else handoff_status or equipment_status or "unknown"
+
+    proof_checklist, proof_ready = _windows_utm_proof_checklist(
+        gates=gate_values,
+        request_audit_log=request_audit_log,
+        screen_refs=list(screen_refs),
+        data_refs=list(data_refs),
+        data_acquisition=data_acquisition,
+        blockers=blockers,
+        source="equipment_report",
+    )
+
+    next_actions = []
+    if "UTM_SCREEN_EVIDENCE_INCOMPLETE" in blockers or "SCREEN_EVIDENCE_COMPLETE_REQUIRED" in blockers or "UTM_SCREEN_EVIDENCE_REFS_INCOMPLETE" in blockers:
+        next_actions.append("Verify UTM locators and rerun the protocol until before/start/complete screenshots are captured.")
+    if "UTM_LINUX_ARTIFACT_PULL_REQUIRED" in blockers or "LINUX_ARTIFACT_PULLED_REQUIRED" in blockers or "UTM_DATA_EVIDENCE_REF_REQUIRED" in blockers:
+        next_actions.append("Pull the UTM CSV through the Windows artifact endpoint and confirm a Linux-local path is recorded.")
+    if "UTM_SAVE_EXPORT_RESPONSIBILITY_REQUIRED" in blockers or "SAVE_EXPORT_RESPONSIBILITY_OK_REQUIRED" in blockers:
+        next_actions.append("Confirm the UTM save/export method, save attempt, and Windows/Linux export paths before Analysis handoff.")
+    if "UTM_VISION_EVIDENCE_FRAMES_REQUIRED" in blockers or "VISION_EVIDENCE_COMPLETE_REQUIRED" in blockers:
+        next_actions.append("Refresh Vision cross-checks and preserve frame IDs for pre-start, motion, and complete states.")
+    if "UTM_REQUEST_LOG_REQUIRED" in blockers or "UTM_REQUEST_LOG_EXECUTE_EVENT_REQUIRED" in blockers:
+        next_actions.append("Inspect the Windows bridge request log and confirm the live /execute request was recorded.")
+    if failure_code and not next_actions:
+        next_actions.append("Review the Equipment report failure/recovery table before retrying.")
+
+    return {
+        "ok": not blockers and status == "ready_for_analysis",
+        "tool": "equipment.pyautogui.live_evidence_audit",
+        "status": status,
+        "run_id": run_id,
+        "bridge": bridge.get("provider", "windows_pyautogui"),
+        "program_id": (equipment_report.get("control_plan") or {}).get("program_id", equipment_result.get("program_id", "")) if isinstance(equipment_report.get("control_plan"), dict) else equipment_result.get("program_id", ""),
+        "handoff_status": handoff_status,
+        "equipment_status": equipment_status,
+        "failure_code": failure_code or None,
+        "required_for_handoff": required_for_handoff,
+        "gates": gate_values,
+        "live_evidence_audit": audit,
+        "request_audit_log": request_audit_log,
+        "physical_execution": physical_execute_evidence,
+        "file_evidence": file_evidence,
+        "proof_checklist": proof_checklist,
+        "proof_ready": proof_ready,
+        "decision": decision,
+        "data_acquisition": data_acquisition,
+        "evidence_refs": list(dict.fromkeys(str(item) for item in [*artifact_refs, *screen_refs, *data_refs] if str(item or "").strip())),
+        "screen_evidence_refs": [str(item) for item in screen_refs],
+        "data_evidence_refs": [str(item) for item in data_refs],
+        "source_live_validation_report": source_live_validation_report,
+        "blockers": blockers,
+        "warnings": warnings,
+        "next_actions": next_actions,
+    }
+
+
+_DEFAULT_REQUIRED_UTM_LOCATORS = ("ready_state", "start_button", "running_state", "complete_state")
+
+
+def _required_utm_locator_names(runtime_profile: dict[str, object]) -> list[str]:
+    """Infer screen-control locator names required by the configured UTM protocol."""
+    sequence = runtime_profile.get("sequence") if isinstance(runtime_profile.get("sequence"), list) else []
+    names: list[str] = []
+    for action in sequence:
+        if not isinstance(action, dict):
+            continue
+        action_name = str(action.get("action") or "").strip()
+        if action_name not in {"assert_visible", "wait_until", "click"}:
+            continue
+        target = str(action.get("target") or action.get("name") or "").strip()
+        if target and target not in names:
+            names.append(target)
+    if not names:
+        names = list(_DEFAULT_REQUIRED_UTM_LOCATORS)
+    return names
+
+
+def _configured_locator_names(locators: object) -> list[str]:
+    if isinstance(locators, dict):
+        return sorted(str(name) for name, value in locators.items() if isinstance(value, dict))
+    return []
+
+
+def _windows_utm_readiness_from_bridge(
+    bridge: WindowsPyAutoGUIBridge,
+    runtime_overrides: dict[str, object] | None = None,
+) -> dict[str, object]:
+    """Return passive UTM readiness without touching live hardware endpoints."""
+    overrides = runtime_overrides if isinstance(runtime_overrides, dict) else {}
+    connection = bridge.connection_status()
+    programs = bridge.list_programs({"runtime_mode": "test"})
+    profile_status = bridge.utm_profile_status()
+    profile = profile_status.get("profile") if isinstance(profile_status.get("profile"), dict) else {}
+    program_id = str(overrides.get("program_id") or profile.get("program_id") or "utm_compression_start_v1")
+    program_list = programs.get("programs") if isinstance(programs.get("programs"), list) else []
+    program_ids = {str(item.get("program_id")) for item in program_list if isinstance(item, dict) and item.get("program_id")}
+    runtime_profile: dict[str, object]
+    runtime_payload_builder = getattr(bridge, "_runtime_program_payload", None)
+    if callable(runtime_payload_builder):
+        runtime_profile = runtime_payload_builder({"program_id": program_id, "runtime_mode": "live"})
+    else:
+        runtime_profile = dict(profile)
+        runtime_profile.setdefault("program_id", program_id)
+    for key, value in overrides.items():
+        if key in {"sequence", "locators"}:
+            if value:
+                runtime_profile[key] = value
+            continue
+        if value not in (None, ""):
+            runtime_profile[key] = value
+    locators = runtime_profile.get("locators") if isinstance(runtime_profile.get("locators"), dict) else {}
+    export_glob = str(runtime_profile.get("export_glob") or profile.get("export_glob") or "").strip()
+    require_screen = bool(runtime_profile.get("require_screen_assertions", profile.get("require_screen_assertions", False)))
+    simulate = bool(runtime_profile.get("simulate_utm_protocol", profile.get("simulate_utm_protocol", False)))
+    required_locator_names = _required_utm_locator_names(runtime_profile)
+    configured_locator_names = _configured_locator_names(locators)
+    missing_required_locators = [name for name in required_locator_names if name not in set(configured_locator_names)]
+
+    blockers: list[str] = []
+    warnings: list[str] = []
+    if not bool(connection.get("selected")):
+        blockers.append("PYAUTOGUI_BRIDGE_NOT_SELECTED")
+    if not bool(connection.get("token_configured")):
+        blockers.append("PYAUTOGUI_TOKEN_MISSING")
+    if program_id not in program_ids:
+        blockers.append("UTM_PROGRAM_NOT_REGISTERED")
+    if not export_glob:
+        blockers.append("UTM_EXPORT_GLOB_MISSING")
+    if require_screen and missing_required_locators:
+        blockers.append("UTM_REQUIRED_LOCATORS_MISSING")
+    if profile_status.get("source") != "memory":
+        warnings.append("UTM_PROFILE_USING_REGISTERED_DEFAULTS")
+    if not locators:
+        warnings.append("UTM_LOCATORS_NOT_CAPTURED")
+    elif missing_required_locators:
+        warnings.append("UTM_LOCATOR_SET_INCOMPLETE")
+    if not require_screen:
+        warnings.append("UTM_SCREEN_ASSERTIONS_NOT_REQUIRED")
+    if simulate:
+        warnings.append("UTM_PROFILE_SIMULATION_ENABLED")
+
+    status = "blocked" if blockers else "warning" if warnings else "ready"
+    next_actions = [
+        "Select a token-verified Windows bridge candidate." if "PYAUTOGUI_BRIDGE_NOT_SELECTED" in blockers else "",
+        "Save the bridge token with the selected candidate." if "PYAUTOGUI_TOKEN_MISSING" in blockers else "",
+        f"Register program {program_id}." if "UTM_PROGRAM_NOT_REGISTERED" in blockers else "",
+        "Set the UTM export glob for the CSV file." if "UTM_EXPORT_GLOB_MISSING" in blockers else "",
+        f"Capture required UTM locators: {', '.join(missing_required_locators)}." if "UTM_REQUIRED_LOCATORS_MISSING" in blockers else "",
+        "Capture UTM screen locators and enable screen assertions before live autonomous UTM." if "UTM_LOCATORS_NOT_CAPTURED" in warnings or "UTM_SCREEN_ASSERTIONS_NOT_REQUIRED" in warnings else "",
+        "Disable bench simulation before live UTM." if "UTM_PROFILE_SIMULATION_ENABLED" in warnings else "",
+    ]
+    return {
+        "ok": not blockers,
+        "tool": "equipment.pyautogui.utm_readiness",
+        "status": status,
+        "bridge": "windows_pyautogui",
+        "program_id": program_id,
+        "ready_for_setup_test": not blockers,
+        "ready_for_autonomous_profile": not blockers and require_screen and bool(locators) and not missing_required_locators and not simulate,
+        "runtime_overrides_applied": bool(overrides),
+        "blockers": blockers,
+        "warnings": warnings,
+        "gates": {
+            "connection_saved": bool(connection.get("selected")),
+            "token_configured": bool(connection.get("token_configured")),
+            "utm_program_registered": program_id in program_ids,
+            "export_glob_configured": bool(export_glob),
+            "locator_count": len(locators),
+            "locator_names": configured_locator_names,
+            "required_locator_names": required_locator_names,
+            "missing_required_locators": missing_required_locators,
+            "required_locators_complete": not missing_required_locators,
+            "require_screen_assertions": require_screen,
+            "simulate_utm_protocol": simulate,
+            "profile_source": str(profile_status.get("source") or ""),
+            "profile_memory_path": str(profile_status.get("profile_memory_path") or ""),
+        },
+        "next_actions": [item for item in next_actions if item],
+    }
+
+
+def _windows_bridge_request_log_from_bridge(
+    bridge: WindowsPyAutoGUIBridge,
+    *,
+    runtime_mode: str = "live",
+    confirm_live: bool = False,
+) -> dict[str, object]:
+    """Retrieve bridge request-audit events; live mode is non-actuating but explicit."""
+    mode = "live" if str(runtime_mode).strip().lower() == "live" else "test"
+    if mode == "live" and not confirm_live:
+        return {
+            "ok": False,
+            "tool": "equipment.pyautogui.request_log",
+            "status": "blocked",
+            "bridge": "windows_pyautogui",
+            "failure_code": "PYAUTOGUI_REQUEST_LOG_CONFIRMATION_REQUIRED",
+            "message": "confirm_live=true is required before contacting the live Windows bridge request-log endpoint.",
+            "events": [],
+            "event_count": 0,
+        }
+    payload = {"runtime_mode": mode}
+    if mode == "live":
+        payload["force_live_bridge"] = True
+    result = bridge.request_log(payload)
+    events = result.get("events") if isinstance(result.get("events"), list) else []
+    sanitized_events: list[dict[str, object]] = []
+    for event in events[-100:]:
+        if not isinstance(event, dict):
+            continue
+        sanitized_events.append(
+            {
+                key: value
+                for key, value in event.items()
+                if "token" not in str(key).lower() or str(key).lower() in {"token_auth_enabled", "token_header_present"}
+            }
+        )
+    result["events"] = sanitized_events
+    result["event_count"] = int(result.get("event_count") or len(sanitized_events))
+    result.setdefault("request_log", result.get("request_log") or "")
+    result.setdefault("non_actuating", True)
+    return result
+
+
+
+def _windows_utm_proof_package_from_metadata(
+    metadata: dict[str, object],
+    *,
+    run_id: str = "",
+    passive_readiness: dict[str, object] | None = None,
+) -> dict[str, object]:
+    """Build a single operator/audit package for live Windows UTM proof review."""
+    evidence_audit = _windows_utm_evidence_audit_from_metadata(metadata, run_id=run_id)
+    checklist = evidence_audit.get("proof_checklist") if isinstance(evidence_audit.get("proof_checklist"), list) else []
+    required_items = [item for item in checklist if isinstance(item, dict) and item.get("required") is not False]
+    missing_items = [item for item in required_items if item.get("ok") is not True]
+    evidence_refs = [str(item) for item in evidence_audit.get("evidence_refs", []) if str(item or "").strip()] if isinstance(evidence_audit.get("evidence_refs"), list) else []
+    screen_refs = [str(item) for item in evidence_audit.get("screen_evidence_refs", []) if str(item or "").strip()] if isinstance(evidence_audit.get("screen_evidence_refs"), list) else []
+    data_refs = [str(item) for item in evidence_audit.get("data_evidence_refs", []) if str(item or "").strip()] if isinstance(evidence_audit.get("data_evidence_refs"), list) else []
+    live_audit = evidence_audit.get("live_evidence_audit") if isinstance(evidence_audit.get("live_evidence_audit"), dict) else {}
+    vision_evidence = live_audit.get("vision_evidence") if isinstance(live_audit.get("vision_evidence"), dict) else {}
+    vision_frame_ids = [str(item) for item in vision_evidence.get("evidence_frame_ids", []) if str(item or "").strip()] if isinstance(vision_evidence.get("evidence_frame_ids"), list) else []
+    request_audit = evidence_audit.get("request_audit_log") if isinstance(evidence_audit.get("request_audit_log"), dict) else {}
+    save_export = live_audit.get("save_export") if isinstance(live_audit.get("save_export"), dict) else {}
+    data_acquisition = evidence_audit.get("data_acquisition") if isinstance(evidence_audit.get("data_acquisition"), dict) else {}
+    blockers = [str(item) for item in evidence_audit.get("blockers", []) if str(item or "").strip()] if isinstance(evidence_audit.get("blockers"), list) else []
+    warnings = [str(item) for item in evidence_audit.get("warnings", []) if str(item or "").strip()] if isinstance(evidence_audit.get("warnings"), list) else []
+    proof_ready = bool(evidence_audit.get("proof_ready"))
+    ready_for_analysis = proof_ready and str(evidence_audit.get("status") or "") == "ready_for_analysis"
+    last_preflight = metadata.get("last_windows_live_preflight_result") if isinstance(metadata.get("last_windows_live_preflight_result"), dict) else {}
+    last_result = metadata.get("last_windows_utm_protocol_result") if isinstance(metadata.get("last_windows_utm_protocol_result"), dict) else metadata.get("last_windows_equipment_run_result") if isinstance(metadata.get("last_windows_equipment_run_result"), dict) else {}
+    last_live_validation = metadata.get("last_windows_utm_live_validation") if isinstance(metadata.get("last_windows_utm_live_validation"), dict) else {}
+    last_physical_validation = metadata.get("last_windows_utm_physical_validation") if isinstance(metadata.get("last_windows_utm_physical_validation"), dict) else {}
+    source_packets = {
+        "equipment_report": metadata.get("equipment_report") if isinstance(metadata.get("equipment_report"), dict) else {},
+        "utm_data_ready": metadata.get("utm_data_ready") if isinstance(metadata.get("utm_data_ready"), dict) else {},
+        "equipment_handoff": metadata.get("equipment_handoff") if isinstance(metadata.get("equipment_handoff"), dict) else {},
+        "last_windows_utm_live_validation": last_live_validation,
+        "last_windows_utm_physical_validation": last_physical_validation,
+    }
+    physical_evidence = evidence_audit.get("physical_execution") if isinstance(evidence_audit.get("physical_execution"), dict) else {}
+    physical_execution_ok = bool(physical_evidence.get("dispatch_ok") is True and physical_evidence.get("identity_ok") is True)
+    physical_execution = {
+        "ok": physical_execution_ok,
+        "source": "last_windows_utm_physical_validation" if last_physical_validation else "missing",
+        "requested_physical_execute": bool(last_physical_validation.get("requested_physical_execute")),
+        "execute_sent": bool(last_physical_validation.get("execute_sent")),
+        "non_actuating": bool(last_physical_validation.get("non_actuating", True)),
+        "status": str(last_physical_validation.get("status") or ""),
+        "run_id": str(last_physical_validation.get("run_id") or ""),
+        "sequence_id": str(last_physical_validation.get("sequence_id") or ""),
+        "specimen_id": str(last_physical_validation.get("specimen_id") or ""),
+        "program_id": str(last_physical_validation.get("program_id") or ""),
+        "dispatch_ok": bool(physical_evidence.get("dispatch_ok")),
+        "identity_ok": bool(physical_evidence.get("identity_ok")),
+        "expected_identity": physical_evidence.get("expected", {}),
+        "observed_identity": physical_evidence.get("observed", {}),
+        "missing_identity_fields": physical_evidence.get("missing_identity_fields", []),
+        "mismatched_identity_fields": physical_evidence.get("mismatched_identity_fields", []),
+    }
+    if not physical_execution_ok and "UTM_PHYSICAL_LIVE_EXECUTE_REQUIRED" not in blockers:
+        blockers.append("UTM_PHYSICAL_LIVE_EXECUTE_REQUIRED")
+    if physical_execution.get("missing_identity_fields") and "UTM_PHYSICAL_LIVE_EXECUTE_IDENTITY_REQUIRED" not in blockers:
+        blockers.append("UTM_PHYSICAL_LIVE_EXECUTE_IDENTITY_REQUIRED")
+    if physical_execution.get("mismatched_identity_fields") and "UTM_PHYSICAL_LIVE_EXECUTE_IDENTITY_MISMATCH" not in blockers:
+        blockers.append("UTM_PHYSICAL_LIVE_EXECUTE_IDENTITY_MISMATCH")
+    physical_item = {
+        "id": "physical_live_execute",
+        "label": "Physical live /execute dispatch",
+        "ok": physical_execution_ok,
+        "required": True,
+        "detail": "requires Run Physical Validation with execute_sent=true, non_actuating=false, status=verified_complete, and matching run/sequence/specimen/program identity",
+        "source": "proof_package_manifest",
+    }
+    checklist = [physical_item, *[item for item in checklist if not (isinstance(item, dict) and item.get("id") == "physical_live_execute")]]
+    required_items = [item for item in checklist if isinstance(item, dict) and item.get("required") is not False]
+    missing_items = [item for item in required_items if item.get("ok") is not True]
+    proof_ready = bool(proof_ready and physical_execution_ok)
+    ready_for_analysis = bool(ready_for_analysis and physical_execution_ok and not blockers)
+    manifest = {
+        "physical_execution": physical_execution,
+        "request_log": {
+            "path": str(request_audit.get("path") or request_audit.get("request_log") or ""),
+            "event_count": int(request_audit.get("event_count") or 0),
+            "execute_event_seen": bool(request_audit.get("execute_event_seen")),
+            "execute_event_count": int(request_audit.get("execute_event_count") or 0),
+            "last_execute_at": str(request_audit.get("last_execute_at") or ""),
+            "execute_payload_event_count": int(request_audit.get("execute_payload_event_count") or 0),
+            "execute_result_event_count": int(request_audit.get("execute_result_event_count") or 0),
+            "execute_run_ids": request_audit.get("execute_run_ids", []),
+            "execute_sequence_ids": request_audit.get("execute_sequence_ids", []),
+            "execute_specimen_ids": request_audit.get("execute_specimen_ids", []),
+            "execute_program_ids": request_audit.get("execute_program_ids", []),
+            "execute_identity_required": bool(request_audit.get("execute_identity_required")),
+            "execute_identity_present": bool(request_audit.get("execute_identity_present")),
+            "execute_identity_match": bool(request_audit.get("execute_identity_match")),
+            "execute_identity_detail": request_audit.get("execute_identity_detail", {}),
+        },
+        "screen_evidence_refs": screen_refs,
+        "screen_evidence_count": len(screen_refs),
+        "data_evidence_refs": data_refs,
+        "data_evidence_count": len(data_refs),
+        "evidence_refs": list(dict.fromkeys(evidence_refs + screen_refs + data_refs)),
+        "linux_data_path": str(data_acquisition.get("linux_path") or data_acquisition.get("local_path") or ""),
+        "data_status": str(data_acquisition.get("status") or ""),
+        "row_count_probe": data_acquisition.get("row_count_probe"),
+        "save_export": {
+            "ok": bool(save_export.get("ok")),
+            "save_method": str(save_export.get("save_method") or data_acquisition.get("save_method") or ""),
+            "save_attempted_by_agent": bool(save_export.get("save_attempted_by_agent", data_acquisition.get("save_attempted_by_agent"))),
+            "save_confirmation_screen_ok": bool(save_export.get("save_confirmation_screen_ok", data_acquisition.get("save_confirmation_screen_ok"))),
+            "windows_path": str(save_export.get("windows_path") or data_acquisition.get("windows_path") or ""),
+            "linux_path": str(save_export.get("linux_path") or data_acquisition.get("linux_path") or data_acquisition.get("local_path") or ""),
+            "recognized_save_method": bool(save_export.get("recognized_save_method")),
+        },
+        "vision_frame_ids": vision_frame_ids,
+        "vision_frame_count": len(vision_frame_ids),
+    }
+    next_actions = [str(item) for item in evidence_audit.get("next_actions", []) if str(item or "").strip()] if isinstance(evidence_audit.get("next_actions"), list) else []
+    if missing_items:
+        next_actions = [
+            "Resolve missing proof checklist items before Analysis handoff: " + ", ".join(str(item.get("id") or item.get("label") or "proof") for item in missing_items),
+            *next_actions,
+        ]
+    elif ready_for_analysis:
+        next_actions = ["Proof package is ready for Analysis handoff review.", *next_actions]
+    return {
+        "ok": ready_for_analysis,
+        "tool": "equipment.pyautogui.live_proof_package",
+        "status": "ready_for_analysis" if ready_for_analysis else "incomplete",
+        "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "run_id": run_id,
+        "bridge": "windows_pyautogui",
+        "ready_for_analysis": ready_for_analysis,
+        "proof_ready": proof_ready,
+        "required_item_count": len(required_items),
+        "missing_required_item_count": len(missing_items),
+        "missing_required_items": [
+            {
+                "id": str(item.get("id") or ""),
+                "label": str(item.get("label") or item.get("id") or ""),
+                "detail": str(item.get("detail") or ""),
+            }
+            for item in missing_items
+        ],
+        "proof_checklist": checklist,
+        "evidence_audit": evidence_audit,
+        "passive_readiness": passive_readiness or {},
+        "last_live_preflight": last_preflight,
+        "last_windows_utm_result": last_result,
+        "last_windows_utm_live_validation": last_live_validation,
+        "last_windows_utm_physical_validation": last_physical_validation,
+        "source_packets": source_packets,
+        "manifest": manifest,
+        "blockers": blockers,
+        "warnings": warnings,
+        "next_actions": list(dict.fromkeys(next_actions)),
+    }
+
+
+
+def _persist_windows_utm_proof_package(package: dict[str, object]) -> dict[str, object]:
+    """Persist the Windows UTM proof package as a run-local JSON artifact."""
+    run_id = str(package.get("run_id") or controller._state.run_id or "run").strip() or "run"
+    safe_run_id = re.sub(r"[^A-Za-z0-9_.-]+", "_", run_id).strip("._-")[:96] or "run"
+    artifact_dir = resolve_path("artifacts/equipment") / safe_run_id / "utm"
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    path = artifact_dir / f"windows_utm_proof_package_{stamp}.json"
+    artifact = {
+        "kind": "windows_utm_proof_package",
+        "content_type": "application/json",
+        "filename": path.name,
+        "path": str(path),
+        "local_path": str(path),
+        "run_id": run_id,
+        "ready_for_analysis": bool(package.get("ready_for_analysis")),
+        "proof_ready": bool(package.get("proof_ready")),
+        "missing_required_item_count": int(package.get("missing_required_item_count") or 0),
+    }
+    package = dict(package)
+    package["package_artifact"] = artifact
+    manifest = package.get("manifest") if isinstance(package.get("manifest"), dict) else {}
+    manifest = dict(manifest)
+    manifest["proof_package_path"] = str(path)
+    manifest["proof_package_filename"] = path.name
+    package["manifest"] = manifest
+    path.write_text(json.dumps(package, ensure_ascii=False, indent=2, default=str) + "\n", encoding="utf-8")
+    try:
+        artifact["size_bytes"] = path.stat().st_size
+    except OSError:
+        artifact["size_bytes"] = 0
+    package["package_artifact"] = artifact
+    path.write_text(json.dumps(package, ensure_ascii=False, indent=2, default=str) + "\n", encoding="utf-8")
+    return package
+
+
+
+_WINDOWS_UTM_VISION_REQUIRED_CHECKS = ("utm_pre_start", "utm_motion_confirm", "utm_test_complete")
+_WINDOWS_UTM_VISION_SIGNAL_TO_CHECK = {
+    "specimen_on_utm_platen": "utm_pre_start",
+    "fixture_alignment_ok": "utm_pre_start",
+    "utm_motion_observed": "utm_motion_confirm",
+    "utm_home_restored": "utm_test_complete",
+}
+
+
+def _windows_utm_vision_frame_ids(value: object) -> list[str]:
+    """Collect frame-like evidence ids from a Vision payload without validating the files."""
+    frames: list[str] = []
+
+    def collect(item: object, depth: int = 0) -> None:
+        if depth > 10:
+            return
+        if isinstance(item, dict):
+            for key in ("frame_ids", "evidence_frame_ids", "frames"):
+                values = item.get(key)
+                if isinstance(values, list):
+                    frames.extend(str(value) for value in values if str(value or "").strip())
+                elif isinstance(values, str) and values.strip():
+                    frames.append(values.strip())
+            for key in ("frame_id", "observation_id", "image_id", "artifact_id"):
+                value = item.get(key)
+                if isinstance(value, str) and value.strip():
+                    frames.append(value.strip())
+            for value in item.values():
+                collect(value, depth + 1)
+        elif isinstance(item, list):
+            for value in item:
+                collect(value, depth + 1)
+
+    collect(value)
+    return list(dict.fromkeys(frames))
+
+
+def _windows_utm_vision_truthy(value: object) -> bool:
+    if value is True:
+        return True
+    if not isinstance(value, dict):
+        return False
+    if "ok" in value:
+        return value.get("ok") is True
+    if "ready" in value:
+        return value.get("ready") is True
+    status = str(value.get("status") or value.get("state") or "").strip().lower()
+    return status in {"ok", "ready", "verified", "complete", "completed", "observed", "passed"}
+
+
+def _windows_utm_vision_identity(value: object, *, run_id: str, specimen_id: str) -> dict[str, object]:
+    payload = value if isinstance(value, dict) else {}
+    nested = payload.get("identity") if isinstance(payload.get("identity"), dict) else {}
+    observed = {
+        "run_id": str(payload.get("run_id") or nested.get("run_id") or "").strip(),
+        "specimen_id": str(payload.get("specimen_id") or nested.get("specimen_id") or "").strip(),
+    }
+    expected = {"run_id": str(run_id or "").strip(), "specimen_id": str(specimen_id or "").strip()}
+    mismatched = [key for key, expected_value in expected.items() if expected_value and observed.get(key) and observed[key] != expected_value]
+    missing = [key for key, expected_value in expected.items() if expected_value and not observed.get(key)]
+    return {
+        "expected": expected,
+        "observed": observed,
+        "match": not mismatched,
+        "missing_fields": missing,
+        "mismatched_fields": mismatched,
+    }
+
+
+def _windows_utm_normalize_vision_candidate(check_id: str, value: object, *, source: str, run_id: str, specimen_id: str) -> dict[str, object]:
+    payload = value if isinstance(value, dict) else {"ok": value}
+    confidence_value = payload.get("confidence") if isinstance(payload, dict) else None
+    confidence: float | None = None
+    if confidence_value not in (None, ""):
+        try:
+            confidence = float(confidence_value)
+        except Exception:
+            confidence = None
+    identity = _windows_utm_vision_identity(payload, run_id=run_id, specimen_id=specimen_id)
+    ok = _windows_utm_vision_truthy(payload)
+    if confidence is not None and confidence < 0.6:
+        ok = False
+    if identity.get("missing_fields") or identity.get("mismatched_fields"):
+        ok = False
+    evidence = payload.get("evidence") if isinstance(payload.get("evidence"), dict) else {}
+    frame_ids = _windows_utm_vision_frame_ids(payload)
+    normalized: dict[str, object] = {
+        "ok": bool(ok),
+        "source": source,
+        "confidence": confidence if confidence is not None else payload.get("confidence", ""),
+        "identity": identity,
+        "evidence": evidence,
+        "frame_ids": frame_ids,
+    }
+    for key in ("timestamp", "expires_at", "freshness_ttl_ms", "signals", "status", "state", "message"):
+        if isinstance(payload, dict) and key in payload:
+            normalized[key] = payload[key]
+    return normalized
+
+
+def _windows_utm_vision_proof_draft(
+    metadata: dict[str, object],
+    *,
+    observations: dict[str, object] | None = None,
+    run_id: str = "",
+    specimen_id: str = "",
+) -> dict[str, object]:
+    """Build a non-actuating Vision proof JSON draft from current runtime evidence."""
+    observations = observations if isinstance(observations, dict) else {}
+
+    def nested_value(payload: object, *keys: str) -> str:
+        current = payload
+        for key in keys:
+            if not isinstance(current, dict):
+                return ""
+            current = current.get(key)
+        return str(current or "").strip()
+
+    resolved_run_id = str(run_id or controller._state.run_id or nested_value(metadata.get("equipment_report"), "run_id") or "utm-live-validation").strip() or "utm-live-validation"
+    resolved_specimen_id = str(
+        specimen_id
+        or nested_value(metadata.get("equipment_report"), "specimen_id")
+        or nested_value(metadata.get("equipment_handoff"), "specimen_id")
+        or nested_value(metadata.get("utm_data_ready"), "specimen_id")
+        or nested_value(metadata.get("last_windows_utm_physical_validation"), "specimen_id")
+        or "specimen-live-validation"
+    ).strip() or "specimen-live-validation"
+
+    candidates: dict[str, list[dict[str, object]]] = {check_id: [] for check_id in _WINDOWS_UTM_VISION_REQUIRED_CHECKS}
+
+    def add_candidate(check_id: str, value: object, source: str) -> None:
+        if check_id not in candidates:
+            return
+        candidates[check_id].append(
+            _windows_utm_normalize_vision_candidate(
+                check_id,
+                value,
+                source=source,
+                run_id=resolved_run_id,
+                specimen_id=resolved_specimen_id,
+            )
+        )
+
+    def scan(value: object, source: str, depth: int = 0) -> None:
+        if depth > 10:
+            return
+        if isinstance(value, dict):
+            checks = value.get("checks")
+            if isinstance(checks, dict):
+                for check_id in _WINDOWS_UTM_VISION_REQUIRED_CHECKS:
+                    if check_id in checks:
+                        add_candidate(check_id, checks[check_id], f"{source}.checks.{check_id}")
+            check_id = str(value.get("check_id") or "").strip()
+            if check_id in candidates:
+                add_candidate(check_id, value, f"{source}.check_id")
+            signal = str(value.get("signal") or value.get("signal_id") or "").strip()
+            mapped = _WINDOWS_UTM_VISION_SIGNAL_TO_CHECK.get(signal)
+            if mapped:
+                add_candidate(mapped, value, f"{source}.signal.{signal}")
+            for check_id in _WINDOWS_UTM_VISION_REQUIRED_CHECKS:
+                if check_id in value:
+                    add_candidate(check_id, value[check_id], f"{source}.{check_id}")
+            for key, child in value.items():
+                scan(child, f"{source}.{key}", depth + 1)
+        elif isinstance(value, list):
+            for index, child in enumerate(value):
+                scan(child, f"{source}[{index}]", depth + 1)
+
+    scan(metadata, "run_metadata")
+    scan(observations, "latest_observations")
+
+    selected_checks: dict[str, dict[str, object]] = {}
+    blockers: list[str] = []
+    warnings: list[str] = []
+    all_frame_ids: list[str] = []
+    candidate_counts: dict[str, int] = {}
+    for check_id in _WINDOWS_UTM_VISION_REQUIRED_CHECKS:
+        values = candidates.get(check_id, [])
+        candidate_counts[check_id] = len(values)
+        values.sort(
+            key=lambda item: (
+                item.get("ok") is True,
+                len(item.get("frame_ids", [])) if isinstance(item.get("frame_ids"), list) else 0,
+                float(item.get("confidence") or 0.0) if str(item.get("confidence") or "").replace(".", "", 1).isdigit() else 0.0,
+            ),
+            reverse=True,
+        )
+        selected = dict(values[0]) if values else {"ok": False, "source": "missing", "confidence": "", "identity": {}, "evidence": {}, "frame_ids": []}
+        selected_checks[check_id] = selected
+        frame_ids = selected.get("frame_ids") if isinstance(selected.get("frame_ids"), list) else []
+        all_frame_ids.extend(str(frame_id) for frame_id in frame_ids if str(frame_id or "").strip())
+        if selected.get("ok") is not True:
+            blockers.append(f"VISION_{check_id.upper()}_REQUIRED")
+        identity = selected.get("identity") if isinstance(selected.get("identity"), dict) else {}
+        missing_identity = identity.get("missing_fields") if isinstance(identity.get("missing_fields"), list) else []
+        if missing_identity and selected.get("source") != "missing":
+            warnings.append(f"VISION_{check_id.upper()}_IDENTITY_FIELDS_NOT_PRESENT: {', '.join(str(item) for item in missing_identity)}")
+
+    all_frame_ids = list(dict.fromkeys(all_frame_ids or _windows_utm_vision_frame_ids({"metadata": metadata, "observations": observations})))
+    if len(all_frame_ids) < len(_WINDOWS_UTM_VISION_REQUIRED_CHECKS):
+        blockers.append("VISION_FRAME_IDS_REQUIRED")
+
+    blockers = list(dict.fromkeys(blockers))
+    warnings = list(dict.fromkeys(warnings))
+    ready = not blockers
+    vision_proof = {
+        "ok": ready,
+        "run_id": resolved_run_id,
+        "specimen_id": resolved_specimen_id,
+        "checks": selected_checks,
+        "evidence": {"frame_ids": all_frame_ids},
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "source": "runtime_vision_proof_draft",
+    }
+    return {
+        "ok": ready,
+        "tool": "equipment.pyautogui.vision_proof_draft",
+        "status": "ready" if ready else "incomplete",
+        "non_actuating": True,
+        "run_id": resolved_run_id,
+        "specimen_id": resolved_specimen_id,
+        "required_checks": list(_WINDOWS_UTM_VISION_REQUIRED_CHECKS),
+        "candidate_counts": candidate_counts,
+        "vision_proof": vision_proof,
+        "blockers": blockers,
+        "warnings": warnings,
+        "next_actions": ["Paste the generated vision_proof into physical live validation."] if ready else ["Attach real Vision Agent evidence for every required UTM check before physical validation."],
+    }
+
+
+
+def _persist_windows_utm_completion_audit(result: dict[str, object]) -> dict[str, object]:
+    """Persist the Improvement 05 completion audit as a run-local JSON artifact."""
+    verification = result.get("verification") if isinstance(result.get("verification"), dict) else {}
+    run_id = str(verification.get("run_id") or controller._state.run_id or result.get("run_id") or "run").strip() or "run"
+    safe_run_id = re.sub(r"[^A-Za-z0-9_.-]+", "_", run_id).strip("._-")[:96] or "run"
+    artifact_dir = resolve_path("artifacts/equipment") / safe_run_id / "utm"
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    path = artifact_dir / f"windows_utm_completion_audit_{stamp}.json"
+    artifact = {
+        "kind": "windows_utm_completion_audit",
+        "content_type": "application/json",
+        "filename": path.name,
+        "path": str(path),
+        "local_path": str(path),
+        "run_id": run_id,
+        "status": str(result.get("status") or ""),
+        "ok": bool(result.get("ok")),
+        "blocker_count": len(result.get("blockers", [])) if isinstance(result.get("blockers"), list) else 0,
+    }
+    persisted = dict(result)
+    persisted["audit_artifact"] = artifact
+    persisted["artifact"] = artifact
+    path.write_text(json.dumps(persisted, ensure_ascii=False, indent=2, default=str) + "\n", encoding="utf-8")
+    try:
+        artifact["size_bytes"] = path.stat().st_size
+    except OSError:
+        artifact["size_bytes"] = 0
+    persisted["audit_artifact"] = artifact
+    persisted["artifact"] = artifact
+    path.write_text(json.dumps(persisted, ensure_ascii=False, indent=2, default=str) + "\n", encoding="utf-8")
+    return persisted
+
+
+def _persist_windows_utm_live_validation(report: dict[str, object]) -> dict[str, object]:
+    """Persist the non-actuating Windows UTM live validation report as a JSON artifact."""
+    run_id = str(report.get("run_id") or controller._state.run_id or "run").strip() or "run"
+    safe_run_id = re.sub(r"[^A-Za-z0-9_.-]+", "_", run_id).strip("._-")[:96] or "run"
+    artifact_dir = resolve_path("artifacts/equipment") / safe_run_id / "live_validation"
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    path = artifact_dir / "lab_equipment_utm_live_validation.json"
+    artifact = {
+        "kind": "lab_equipment_utm_live_validation",
+        "content_type": "application/json",
+        "filename": path.name,
+        "path": str(path),
+        "local_path": str(path),
+        "run_id": run_id,
+        "status": str(report.get("status") or ""),
+        "non_actuating": bool(report.get("non_actuating", True)),
+    }
+    persisted = dict(report)
+    persisted["report_artifact"] = artifact
+    persisted["artifact"] = artifact
+    path.write_text(json.dumps(persisted, ensure_ascii=False, indent=2, default=str) + "\n", encoding="utf-8")
+    try:
+        artifact["size_bytes"] = path.stat().st_size
+    except OSError:
+        artifact["size_bytes"] = 0
+    persisted["report_artifact"] = artifact
+    persisted["artifact"] = artifact
+    path.write_text(json.dumps(persisted, ensure_ascii=False, indent=2, default=str) + "\n", encoding="utf-8")
+    return persisted
+
+
+def _windows_proof_checkable_path(value: object) -> Path | None:
+    """Return a local filesystem path only for refs that are meant to be checkable on Linux."""
+    raw = str(value or "").strip()
+    if not raw or "://" in raw:
+        return None
+    if re.match(r"^[A-Za-z]:[\\/]", raw):
+        return None
+    if raw.startswith("/") or raw.startswith("~"):
+        return Path(raw).expanduser()
+    if raw.startswith("artifacts/") or raw.startswith("./artifacts/"):
+        return resolve_path(raw[2:] if raw.startswith("./") else raw)
+    return None
+
+
+def _windows_proof_image_signature(path: Path) -> tuple[bool, str]:
+    """Check that a screen evidence file looks like an actual image artifact."""
+    try:
+        header = path.read_bytes()[:16]
+    except OSError as exc:
+        return False, str(exc)
+    if header.startswith(b"\x89PNG\r\n\x1a\n"):
+        return True, "png"
+    if header.startswith(b"\xff\xd8\xff"):
+        return True, "jpeg"
+    if header.startswith(b"BM"):
+        return True, "bmp"
+    if header.startswith((b"GIF87a", b"GIF89a")):
+        return True, "gif"
+    return False, "unsupported image signature"
+
+
+def _windows_proof_csv_probe(path: Path) -> dict[str, object]:
+    """Re-run the Equipment Agent UTM signal-quality gate for proof packages."""
+    probe = dict(LabEquipmentAgent._probe_csv_file(str(path)))
+    columns = [str(item) for item in probe.get("columns_probe", [])] if isinstance(probe.get("columns_probe"), list) else []
+    probe.setdefault("path", str(path))
+    probe["row_count"] = int(probe.get("row_count_probe") or 0)
+    probe["headers"] = columns
+    probe["has_force_column"] = "force_N" in columns
+    probe["has_displacement_column"] = "displacement_mm" in columns
+    return probe
+
+
+
+
+def _windows_proof_artifact_records(package: dict[str, object]) -> list[dict[str, object]]:
+    """Collect artifact records from all proof-package source packets."""
+    records: list[dict[str, object]] = []
+
+    def absorb(payload: object) -> None:
+        if not isinstance(payload, dict):
+            return
+        for key in ("artifact_records", "output_artifacts", "artifacts"):
+            values = payload.get(key)
+            if isinstance(values, list):
+                records.extend([dict(item) for item in values if isinstance(item, dict)])
+        nested = payload.get("equipment_report")
+        if isinstance(nested, dict):
+            absorb(nested)
+
+    absorb(package.get("evidence_audit"))
+    absorb(package.get("last_windows_utm_result"))
+    source_packets = package.get("source_packets") if isinstance(package.get("source_packets"), dict) else {}
+    for value in source_packets.values():
+        absorb(value)
+    seen: set[str] = set()
+    unique: list[dict[str, object]] = []
+    for record in records:
+        key = str(record.get("artifact_id") or record.get("local_path") or record.get("linux_path") or record.get("path") or record.get("filename") or record)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(record)
+    return unique
+
+
+def _windows_proof_resolved_ref_path(ref: object, artifact_records: list[dict[str, object]]) -> tuple[Path | None, str]:
+    """Resolve an evidence ref to a Linux-local file path when the proof package carries one."""
+    direct = _windows_proof_checkable_path(ref)
+    if direct is not None:
+        return direct, "direct"
+    ref_text = str(ref or "").strip()
+    if not ref_text:
+        return None, "empty"
+    for record in artifact_records:
+        candidates = [
+            record.get("artifact_id"),
+            record.get("filename"),
+            record.get("local_path"),
+            record.get("linux_path"),
+            record.get("path"),
+        ]
+        if ref_text not in {str(item) for item in candidates if item not in (None, "")}:
+            continue
+        for key in ("local_path", "linux_path", "path"):
+            path = _windows_proof_checkable_path(record.get(key))
+            if path is not None:
+                return path, f"artifact_record.{key}"
+    return None, "unresolved"
+
+def _latest_windows_utm_proof_package_path() -> Path | None:
+    """Return the newest persisted Windows UTM proof package under artifacts/equipment."""
+    root = resolve_path("artifacts/equipment")
+    if not root.exists():
+        return None
+    candidates = sorted(
+        root.glob("*/utm/windows_utm_proof_package_*.json"),
+        key=lambda item: item.stat().st_mtime if item.exists() else 0.0,
+        reverse=True,
+    )
+    return candidates[0] if candidates else None
+
+
+def _windows_utm_completion_audit(path_value: str = "", *, use_current: bool = True, latest: bool = False) -> dict[str, object]:
+    """Strict final audit for Improvement 05 physical UTM completion evidence."""
+    selected_path = str(path_value or "").strip()
+    latest_path: Path | None = None
+    if not selected_path and latest:
+        latest_path = _latest_windows_utm_proof_package_path()
+        selected_path = str(latest_path or "")
+        use_current = False
+    package, load_info = _load_windows_utm_proof_package_for_verify(selected_path, use_current=use_current)
+    verification = _verify_windows_utm_proof_package(package, load_info=load_info)
+    blockers = [str(item) for item in verification.get("blockers", []) if str(item or "").strip()] if isinstance(verification.get("blockers"), list) else []
+    ok = bool(verification.get("ok") and verification.get("status") == "verified")
+    if not selected_path and not use_current:
+        blockers = list(dict.fromkeys([*blockers, "PROOF_PACKAGE_PATH_REQUIRED"]))
+        ok = False
+    result = {
+        "ok": ok,
+        "tool": "equipment.pyautogui.improvement05_completion_audit",
+        "status": "complete_evidence_verified" if ok else "incomplete",
+        "objective": "05_lab_equipment_agent_utm_visual_control_data_loop",
+        "proof_package_path": selected_path,
+        "latest_search_used": bool(latest and latest_path is not None),
+        "runtime_state_used": bool(not selected_path and use_current),
+        "completion_rule": "Only status=verified from equipment.pyautogui.live_proof_package.verify can satisfy Improvement 05 physical UTM proof.",
+        "verification": verification,
+        "blockers": blockers,
+        "warnings": verification.get("warnings", []) if isinstance(verification.get("warnings"), list) else [],
+        "next_actions": ["Improvement 05 physical UTM evidence is verified for this proof package."]
+        if ok
+        else [
+            "Resolve blockers in verification.blockers.",
+            "Run real UTM physical validation, build a proof package, then rerun Completion Audit.",
+            "Do not mark Improvement 05 complete until this audit status is complete_evidence_verified.",
+        ],
+    }
+    if not selected_path and not use_current:
+        result["next_actions"] = [
+            "Run /equipment/windows -> Run Physical Validation with real UTM hardware.",
+            "Build /api/equipment/windows/proof-package after validation.",
+            "Rerun Completion Audit with latest=true or a specific proof package path.",
+        ]
+    return result
+
+
+def _load_windows_utm_proof_package_for_verify(path_value: str = "", *, use_current: bool = True) -> tuple[dict[str, object], dict[str, object]]:
+    """Load a proof package from an artifact path or the active runtime state."""
+    load_info: dict[str, object] = {"source": "none", "path": "", "blockers": [], "warnings": []}
+    raw_path = str(path_value or "").strip()
+    if raw_path:
+        candidate = Path(raw_path).expanduser()
+        try:
+            resolved = candidate.resolve()
+            repo_root = resolve_path(".").resolve()
+        except Exception as exc:
+            load_info["blockers"] = ["PROOF_PACKAGE_PATH_INVALID"]
+            load_info["message"] = str(exc)
+            return {}, load_info
+        if repo_root not in resolved.parents and resolved != repo_root:
+            load_info["blockers"] = ["PROOF_PACKAGE_PATH_OUTSIDE_PROJECT"]
+            load_info["path"] = str(resolved)
+            return {}, load_info
+        if not resolved.exists():
+            load_info["blockers"] = ["PROOF_PACKAGE_FILE_MISSING"]
+            load_info["path"] = str(resolved)
+            return {}, load_info
+        try:
+            package = json.loads(resolved.read_text(encoding="utf-8"))
+        except Exception as exc:
+            load_info["blockers"] = ["PROOF_PACKAGE_JSON_INVALID"]
+            load_info["path"] = str(resolved)
+            load_info["message"] = str(exc)
+            return {}, load_info
+        if not isinstance(package, dict):
+            load_info["blockers"] = ["PROOF_PACKAGE_JSON_NOT_OBJECT"]
+            load_info["path"] = str(resolved)
+            return {}, load_info
+        load_info["source"] = "path"
+        load_info["path"] = str(resolved)
+        return package, load_info
+    if use_current:
+        package = controller._state.run_metadata.get("last_windows_utm_proof_package")
+        if isinstance(package, dict):
+            load_info["source"] = "runtime_state"
+            artifact = package.get("package_artifact") if isinstance(package.get("package_artifact"), dict) else {}
+            load_info["path"] = str(artifact.get("path") or "")
+            return dict(package), load_info
+    load_info["blockers"] = ["PROOF_PACKAGE_NOT_AVAILABLE"]
+    return {}, load_info
+
+
+def _verify_windows_utm_proof_package(package: dict[str, object], *, load_info: dict[str, object] | None = None) -> dict[str, object]:
+    """Re-verify package metadata and local artifacts before Analysis handoff."""
+    load_info = load_info or {}
+    blockers: list[str] = [str(item) for item in load_info.get("blockers", []) if str(item or "").strip()] if isinstance(load_info.get("blockers"), list) else []
+    warnings: list[str] = [str(item) for item in load_info.get("warnings", []) if str(item or "").strip()] if isinstance(load_info.get("warnings"), list) else []
+    checks: list[dict[str, object]] = []
+
+    def add_check(name: str, status: str, detail: str = "", *, code: str = "") -> None:
+        item: dict[str, object] = {"name": name, "status": status}
+        if detail:
+            item["detail"] = detail
+        if code:
+            item["code"] = code
+        checks.append(item)
+
+    def add_blocker(code: str, name: str, detail: str = "") -> None:
+        if code not in blockers:
+            blockers.append(code)
+        add_check(name, "blocked", detail or code, code=code)
+
+    def add_warning(code: str, name: str, detail: str = "") -> None:
+        if code not in warnings:
+            warnings.append(code)
+        add_check(name, "warning", detail or code, code=code)
+
+    if not package:
+        add_blocker("PROOF_PACKAGE_NOT_AVAILABLE", "package_loaded", "No proof package was provided or cached.")
+        return {
+            "ok": False,
+            "tool": "equipment.pyautogui.live_proof_package.verify",
+            "status": "blocked",
+            "verified_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "load_info": load_info,
+            "checks": checks,
+            "blockers": blockers,
+            "warnings": warnings,
+        }
+
+    if str(package.get("tool") or "") == "equipment.pyautogui.live_proof_package":
+        add_check("package_schema", "ok", "equipment.pyautogui.live_proof_package")
+    else:
+        add_blocker("PROOF_PACKAGE_SCHEMA_INVALID", "package_schema", str(package.get("tool") or "missing tool"))
+
+    manifest = package.get("manifest") if isinstance(package.get("manifest"), dict) else {}
+    artifact = package.get("package_artifact") if isinstance(package.get("package_artifact"), dict) else {}
+    artifact_path = str(artifact.get("path") or manifest.get("proof_package_path") or load_info.get("path") or "")
+    if artifact_path:
+        local_path = _windows_proof_checkable_path(artifact_path)
+        if local_path and local_path.exists():
+            add_check("package_artifact_file", "ok", str(local_path))
+        elif local_path:
+            add_blocker("PROOF_PACKAGE_ARTIFACT_FILE_MISSING", "package_artifact_file", str(local_path))
+        else:
+            add_warning("PROOF_PACKAGE_ARTIFACT_PATH_NOT_LOCAL", "package_artifact_file", artifact_path)
+    else:
+        add_warning("PROOF_PACKAGE_ARTIFACT_PATH_MISSING", "package_artifact_file", "package path not recorded")
+
+    if bool(package.get("ready_for_analysis")) and bool(package.get("proof_ready")):
+        add_check("ready_for_analysis_claim", "ok", "package claims proof_ready and ready_for_analysis")
+    else:
+        add_blocker("PROOF_PACKAGE_NOT_READY_FOR_ANALYSIS", "ready_for_analysis_claim", f"status={package.get('status')}")
+
+    source_packets = package.get("source_packets") if isinstance(package.get("source_packets"), dict) else {}
+    physical_source = source_packets.get("last_windows_utm_physical_validation") if isinstance(source_packets.get("last_windows_utm_physical_validation"), dict) else {}
+    physical_execution = manifest.get("physical_execution") if isinstance(manifest.get("physical_execution"), dict) else {}
+    physical_execution_ok = bool(
+        physical_execution.get("ok") is True
+        and physical_execution.get("requested_physical_execute") is True
+        and physical_execution.get("execute_sent") is True
+        and physical_execution.get("non_actuating") is False
+        and str(physical_execution.get("status") or "") == "verified_complete"
+    )
+    physical_source_ok = bool(
+        physical_source.get("requested_physical_execute") is True
+        and physical_source.get("execute_sent") is True
+        and physical_source.get("non_actuating") is False
+        and str(physical_source.get("status") or "") == "verified_complete"
+    )
+    identity_keys = ("run_id", "sequence_id", "specimen_id", "program_id")
+    physical_identity_present = all(
+        str(physical_execution.get(key) or "").strip() and str(physical_source.get(key) or "").strip()
+        for key in identity_keys
+    )
+    physical_identity_match = bool(
+        physical_identity_present
+        and all(str(physical_execution.get(key) or "") == str(physical_source.get(key) or "") for key in identity_keys)
+    )
+    if physical_execution_ok and physical_source_ok and physical_identity_match:
+        add_check("physical_live_execute", "ok", f"source={physical_execution.get('source', '-')}; sequence={physical_execution.get('sequence_id', '-')}")
+    else:
+        add_blocker(
+            "UTM_PHYSICAL_LIVE_EXECUTE_REQUIRED",
+            "physical_live_execute",
+            f"manifest_ok={physical_execution_ok}; source_ok={physical_source_ok}; identity_present={physical_identity_present}; identity_match={physical_identity_match}; requested={physical_execution.get('requested_physical_execute')}; execute_sent={physical_execution.get('execute_sent')}; non_actuating={physical_execution.get('non_actuating')}; status={physical_execution.get('status') or '-'}",
+        )
+
+    request_log = manifest.get("request_log") if isinstance(manifest.get("request_log"), dict) else {}
+    if bool(request_log.get("execute_event_seen")):
+        add_check("request_log_execute", "ok", f"execute_event_count={request_log.get('execute_event_count', 1)}")
+    else:
+        add_blocker("UTM_REQUEST_LOG_EXECUTE_EVENT_REQUIRED", "request_log_execute", "no live /execute event in proof manifest")
+    if bool(request_log.get("execute_identity_match")):
+        add_check("request_log_execute_identity", "ok", "run/specimen/program identity matched")
+    else:
+        add_blocker("UTM_REQUEST_LOG_EXECUTE_IDENTITY_REQUIRED", "request_log_execute_identity", "live /execute identity did not match proof manifest run/specimen/program")
+
+    save_export = manifest.get("save_export") if isinstance(manifest.get("save_export"), dict) else {}
+    recognized_live_save_methods = {"windows_export_watch", "manual_save_dialog", "export_menu"}
+    save_method = str(save_export.get("save_method") or "").strip()
+    save_attempted = bool(save_export.get("save_attempted_by_agent")) or save_method == "windows_export_watch"
+    save_confirmed = bool(save_export.get("save_confirmation_screen_ok"))
+    save_path_present = bool(str(save_export.get("windows_path") or save_export.get("linux_path") or "").strip())
+    save_export_ok = bool(
+        save_export.get("ok")
+        and save_method in recognized_live_save_methods
+        and save_attempted
+        and save_confirmed
+        and save_path_present
+    )
+    if save_export_ok:
+        add_check(
+            "save_export_responsibility",
+            "ok",
+            f"method={save_method}; attempted={save_attempted}; confirmed={save_confirmed}; path_present={save_path_present}",
+        )
+    else:
+        add_blocker(
+            "UTM_SAVE_EXPORT_RESPONSIBILITY_REQUIRED",
+            "save_export_responsibility",
+            f"method={save_method or '-'}; recognized={save_method in recognized_live_save_methods}; save_attempted={save_attempted}; confirmation={save_confirmed}; path_present={save_path_present}; ok_claim={bool(save_export.get('ok'))}",
+        )
+
+    artifact_records = _windows_proof_artifact_records(package)
+    screen_refs = manifest.get("screen_evidence_refs") if isinstance(manifest.get("screen_evidence_refs"), list) else []
+    data_refs = manifest.get("data_evidence_refs") if isinstance(manifest.get("data_evidence_refs"), list) else []
+
+    screen_count = int(manifest.get("screen_evidence_count") or 0)
+    verified_screen_files: list[str] = []
+    missing_screen_files: list[str] = []
+    invalid_screen_files: list[str] = []
+    unresolved_screen_refs: list[str] = []
+    for ref in screen_refs:
+        path, source = _windows_proof_resolved_ref_path(ref, artifact_records)
+        if path is None:
+            unresolved_screen_refs.append(str(ref))
+            continue
+        if path.exists() and path.is_file():
+            image_ok, image_detail = _windows_proof_image_signature(path)
+            if image_ok:
+                verified_screen_files.append(str(path))
+            else:
+                invalid_screen_files.append(f"{path} ({image_detail}; {source})")
+        else:
+            missing_screen_files.append(f"{path} ({source})")
+    unique_screen_files = sorted(set(verified_screen_files))
+    duplicate_screen_files = len(unique_screen_files) != len(verified_screen_files)
+    if screen_count >= 3 and len(unique_screen_files) >= 3 and not missing_screen_files and not invalid_screen_files and not duplicate_screen_files:
+        add_check("screen_evidence_files", "ok", f"verified_screen_files={len(unique_screen_files)}")
+    else:
+        detail = f"screen_evidence_count={screen_count}; verified_files={len(verified_screen_files)}; unique_files={len(unique_screen_files)}"
+        if duplicate_screen_files:
+            detail += "; duplicate screen files"
+        if invalid_screen_files:
+            detail += f"; invalid_image={', '.join(invalid_screen_files[:3])}"
+        if missing_screen_files:
+            detail += f"; missing={', '.join(missing_screen_files[:3])}"
+        if unresolved_screen_refs:
+            detail += f"; unresolved={', '.join(unresolved_screen_refs[:3])}"
+        add_blocker("UTM_SCREEN_EVIDENCE_FILES_REQUIRED", "screen_evidence_files", detail)
+
+    data_count = int(manifest.get("data_evidence_count") or 0)
+    verified_data_files: list[str] = []
+    missing_data_files: list[str] = []
+    unresolved_data_refs: list[str] = []
+    for ref in data_refs:
+        path, source = _windows_proof_resolved_ref_path(ref, artifact_records)
+        if path is None:
+            unresolved_data_refs.append(str(ref))
+            continue
+        if path.exists() and path.is_file():
+            verified_data_files.append(str(path))
+        else:
+            missing_data_files.append(f"{path} ({source})")
+    unique_data_files = sorted(set(verified_data_files))
+    if data_count >= 1 and unique_data_files and not missing_data_files:
+        add_check("data_evidence_files", "ok", f"verified_data_files={len(unique_data_files)}")
+    else:
+        detail = f"data_evidence_count={data_count}; verified_files={len(verified_data_files)}; unique_files={len(unique_data_files)}"
+        if missing_data_files:
+            detail += f"; missing={', '.join(missing_data_files[:3])}"
+        if unresolved_data_refs:
+            detail += f"; unresolved={', '.join(unresolved_data_refs[:3])}"
+        add_blocker("UTM_DATA_EVIDENCE_FILES_REQUIRED", "data_evidence_files", detail)
+
+    csv_probe: dict[str, object] = {}
+    linux_data_path = str(manifest.get("linux_data_path") or "").strip()
+    local_csv_path = _windows_proof_checkable_path(linux_data_path)
+    if local_csv_path:
+        if local_csv_path.exists():
+            csv_probe = _windows_proof_csv_probe(local_csv_path)
+            if bool(csv_probe.get("ok")):
+                add_check("linux_csv_parse_probe", "ok", f"rows={csv_probe.get('row_count')} path={local_csv_path}")
+            else:
+                failure_code = str(csv_probe.get("failure_code") or "UTM_CSV_PARSE_PROBE_FAILED")
+                add_blocker(failure_code, "linux_csv_parse_probe", str(csv_probe.get("message") or csv_probe))
+        else:
+            add_blocker("UTM_LINUX_CSV_FILE_MISSING", "linux_csv_parse_probe", str(local_csv_path))
+    elif linux_data_path:
+        add_warning("UTM_LINUX_DATA_PATH_NOT_LOCAL", "linux_csv_parse_probe", linux_data_path)
+    else:
+        add_blocker("UTM_LINUX_DATA_PATH_MISSING", "linux_csv_parse_probe", "manifest.linux_data_path is empty")
+
+    vision_count = int(manifest.get("vision_frame_count") or 0)
+    if vision_count >= 3:
+        add_check("vision_frame_refs", "ok", f"vision_frame_count={vision_count}")
+    else:
+        add_blocker("VISION_FRAME_IDS_REQUIRED", "vision_frame_refs", f"vision_frame_count={vision_count}; expected fixture/motion/complete frames")
+
+    checks_by_name = {str(item.get("name") or ""): item for item in checks if isinstance(item, dict)}
+    checklist = package.get("proof_checklist") if isinstance(package.get("proof_checklist"), list) else []
+    checklist_by_id = {str(item.get("id") or ""): item for item in checklist if isinstance(item, dict)}
+
+    def check_ok(name: str) -> bool:
+        item = checks_by_name.get(name)
+        return bool(item and item.get("status") == "ok")
+
+    def checklist_ok(item_id: str) -> bool:
+        item = checklist_by_id.get(item_id)
+        return bool(item and item.get("ok") is True)
+
+    def gate_item(key: str, label: str, ok_value: bool, detail: str) -> dict[str, object]:
+        return {"key": key, "label": label, "ok": bool(ok_value), "status": "ok" if ok_value else "blocked", "detail": detail}
+
+    gate_summary = [
+        gate_item(
+            "windows_bridge",
+            "Windows Bridge",
+            check_ok("request_log_execute") and check_ok("request_log_execute_identity"),
+            "requires live /execute request and matching run/specimen/program identity",
+        ),
+        gate_item(
+            "utm_program",
+            "UTM Program",
+            check_ok("package_schema") and bool(str((package.get("evidence_audit") if isinstance(package.get("evidence_audit"), dict) else {}).get("program_id") or "").startswith("utm_")),
+            "requires a UTM protocol evidence package rather than a demo macro",
+        ),
+        gate_item(
+            "vision_preconditions",
+            "Vision Preconditions",
+            check_ok("vision_frame_refs"),
+            "requires fixture/motion/complete Vision frame references",
+        ),
+        gate_item(
+            "physical_execution",
+            "Physical Execute",
+            check_ok("physical_live_execute"),
+            "requires guarded live physical validation dispatch, not preflight or simulator evidence",
+        ),
+        gate_item(
+            "screen_state",
+            "Screen State",
+            check_ok("screen_evidence_files"),
+            "requires before_start, after_start, and after_complete screen evidence files",
+        ),
+        gate_item(
+            "physical_crosscheck",
+            "Physical Cross-check",
+            check_ok("vision_frame_refs") and checklist_ok("physical_motion"),
+            "requires physical motion proof beyond a successful GUI click",
+        ),
+        gate_item(
+            "data_artifact",
+            "Data Artifact",
+            check_ok("data_evidence_files") and check_ok("linux_csv_parse_probe") and check_ok("save_export_responsibility"),
+            "requires Linux-local CSV, save/export responsibility, and parse probe",
+        ),
+    ]
+
+    ok = not blockers
+    gate_summary.append(
+        gate_item(
+            "analysis_handoff",
+            "Analysis Handoff",
+            ok and check_ok("ready_for_analysis_claim"),
+            "allowed only after every required proof gate verifies",
+        )
+    )
+
+    return {
+        "ok": ok,
+        "tool": "equipment.pyautogui.live_proof_package.verify",
+        "status": "verified" if ok else "blocked",
+        "verified_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "run_id": str(package.get("run_id") or ""),
+        "bridge": "windows_pyautogui",
+        "load_info": load_info,
+        "package_artifact": artifact,
+        "ready_for_analysis_claimed": bool(package.get("ready_for_analysis")),
+        "proof_ready_claimed": bool(package.get("proof_ready")),
+        "checks": checks,
+        "gate_summary": gate_summary,
+        "csv_probe": csv_probe,
+        "blockers": blockers,
+        "warnings": warnings,
+        "next_actions": ["Proceed to Analysis handoff only after this verification is status=verified."] if ok else ["Resolve blockers, rebuild the proof package, then run Verify Proof Package again."],
+    }
+
+def _windows_utm_live_preflight_from_bridge(
+    bridge: WindowsPyAutoGUIBridge,
+    *,
+    include_locators: bool = True,
+    include_screenshot: bool = False,
+    include_request_log: bool = True,
+    runtime_overrides: dict[str, object] | None = None,
+) -> dict[str, object]:
+    """Actively verify live Windows UTM setup without executing UTM controls."""
+    passive = _windows_utm_readiness_from_bridge(bridge, runtime_overrides=runtime_overrides)
+    passive_gates = passive.get("gates") if isinstance(passive.get("gates"), dict) else {}
+    program_id = str(passive.get("program_id") or "utm_compression_start_v1")
+    require_screen = bool(passive_gates.get("require_screen_assertions"))
+    blockers = [str(item) for item in passive.get("blockers", []) if item]
+    warnings = [str(item) for item in passive.get("warnings", []) if item]
+    checks: list[dict[str, object]] = []
+    touched_endpoints: list[str] = []
+    evidence_refs: list[str] = []
+
+    def add_check(name: str, status: str, detail: str = "", *, code: str = "") -> None:
+        item: dict[str, object] = {"name": name, "status": status}
+        if detail:
+            item["detail"] = detail
+        if code:
+            item["code"] = code
+        checks.append(item)
+
+    def add_blocker(code: str, name: str, detail: str = "") -> None:
+        if code not in blockers:
+            blockers.append(code)
+        add_check(name, "blocked", detail or code, code=code)
+
+    def add_warning(code: str, name: str, detail: str = "") -> None:
+        if code not in warnings:
+            warnings.append(code)
+        add_check(name, "warning", detail or code, code=code)
+
+    def locator_count(payload: object) -> int:
+        if isinstance(payload, dict):
+            locators = payload.get("locators")
+            if isinstance(locators, dict):
+                return len(locators)
+            if isinstance(locators, list):
+                return len(locators)
+        return 0
+
+    add_check(
+        "passive_readiness",
+        str(passive.get("status") or "unknown"),
+        f"setup gates: {', '.join(blockers + warnings) if blockers or warnings else 'ready'}",
+    )
+
+    touched_endpoints.append("/health")
+    health = bridge.health({"runtime_mode": "live", "force_live_bridge": True})
+    if not bool(health.get("ok")):
+        add_blocker("LIVE_BRIDGE_HEALTH_FAILED", "bridge_health", str(health.get("failure_code") or health.get("message") or "health failed"))
+        programs: dict[str, object] = {}
+        locators: dict[str, object] = {}
+        screenshot: dict[str, object] = {}
+        request_log: dict[str, object] = {}
+    else:
+        add_check("bridge_health", "ok", str(health.get("status") or "ready"))
+        pyautogui = health.get("pyautogui") if isinstance(health.get("pyautogui"), dict) else {}
+        if isinstance(pyautogui, dict) and pyautogui.get("available") is False:
+            add_blocker("LIVE_PYAUTOGUI_UNAVAILABLE", "pyautogui_import", "Windows bridge reports PyAutoGUI unavailable.")
+        elif isinstance(pyautogui, dict):
+            add_check("pyautogui_import", "ok", "PyAutoGUI available")
+        else:
+            add_warning("LIVE_PYAUTOGUI_STATUS_UNKNOWN", "pyautogui_import", "Health response did not include PyAutoGUI status.")
+
+        touched_endpoints.append("/programs")
+        programs = bridge.list_programs({"runtime_mode": "live", "force_live_bridge": True})
+        program_list = programs.get("programs") if isinstance(programs.get("programs"), list) else []
+        live_program_ids = {
+            str(item.get("program_id"))
+            for item in program_list
+            if isinstance(item, dict) and item.get("program_id")
+        }
+        if not bool(programs.get("ok")):
+            add_blocker("LIVE_PROGRAM_REGISTRY_FAILED", "program_registry", str(programs.get("failure_code") or programs.get("message") or "program registry failed"))
+        elif program_id not in live_program_ids:
+            add_blocker("LIVE_UTM_PROGRAM_NOT_REGISTERED", "utm_program", f"{program_id} missing from live Windows /programs response")
+        else:
+            add_check("utm_program", "ok", f"{program_id} registered")
+
+        locators = {}
+        if include_locators:
+            touched_endpoints.append("/locators")
+            locators = bridge.list_locators({"runtime_mode": "live", "force_live_bridge": True})
+            live_locator_count = locator_count(locators)
+            profile_locator_count = int(passive_gates.get("locator_count") or 0)
+            if not bool(locators.get("ok")):
+                add_warning("LIVE_LOCATOR_LIST_FAILED", "locator_library", str(locators.get("failure_code") or locators.get("message") or "locator listing failed"))
+            elif require_screen and live_locator_count == 0 and profile_locator_count == 0:
+                add_blocker("LIVE_UTM_LOCATORS_NOT_AVAILABLE", "locator_library", "screen assertions are required but no locator profile/library is available")
+            elif live_locator_count == 0:
+                add_warning("LIVE_LOCATOR_LIBRARY_EMPTY", "locator_library", "Windows locator library returned no stored locator entries")
+            else:
+                add_check("locator_library", "ok", f"{live_locator_count} Windows-side locator(s) visible")
+
+        request_log: dict[str, object] = {}
+        if include_request_log:
+            touched_endpoints.append("/request-log")
+            request_log = _windows_bridge_request_log_from_bridge(bridge, runtime_mode="live", confirm_live=True)
+            if bool(request_log.get("ok")):
+                add_check("request_audit_log", "ok", f"events={request_log.get('event_count', 0)}")
+            else:
+                add_warning("LIVE_REQUEST_LOG_UNAVAILABLE", "request_audit_log", str(request_log.get("failure_code") or request_log.get("message") or "request log unavailable"))
+
+        screenshot = {}
+        if include_screenshot:
+            touched_endpoints.append("/screenshot")
+            screenshot = bridge.screenshot(
+                {
+                    "runtime_mode": "live",
+                    "force_live_bridge": True,
+                    "run_id": "live-preflight",
+                    "checkpoint": "preflight",
+                }
+            )
+            if not bool(screenshot.get("ok")):
+                add_blocker("LIVE_SCREENSHOT_FAILED", "preflight_screenshot", str(screenshot.get("failure_code") or screenshot.get("message") or "screenshot failed"))
+            else:
+                add_check("preflight_screenshot", "ok", str(screenshot.get("artifact_path") or screenshot.get("path") or "captured"))
+                for key in ("artifact_path", "path", "local_path"):
+                    if screenshot.get(key):
+                        evidence_refs.append(str(screenshot[key]))
+                        break
+
+    status = "blocked" if blockers else "warning" if warnings else "ready"
+    return {
+        "ok": not blockers,
+        "tool": "equipment.pyautogui.live_preflight",
+        "status": status,
+        "bridge": "windows_pyautogui",
+        "program_id": program_id,
+        "non_actuating": True,
+        "touched_endpoints": touched_endpoints,
+        "passive_readiness": passive,
+        "health": health,
+        "programs": programs,
+        "locators": locators,
+        "screenshot": screenshot,
+        "request_log": request_log,
+        "request_audit_log": {
+            "ok": bool(request_log.get("ok")) if isinstance(request_log, dict) else False,
+            "path": str(request_log.get("request_log") or "") if isinstance(request_log, dict) else "",
+            "event_count": int(request_log.get("event_count") or 0) if isinstance(request_log, dict) else 0,
+        },
+        "checks": checks,
+        "blockers": blockers,
+        "warnings": warnings,
+        "ready_for_setup_test": not blockers,
+        "ready_for_autonomous_profile": not blockers and bool(passive.get("ready_for_autonomous_profile")),
+        "evidence_refs": evidence_refs,
+        "next_actions": passive.get("next_actions", []),
+    }
+
+
+@app.post("/api/equipment/windows/live-preflight")
+async def post_windows_equipment_live_preflight(req: WindowsBridgeLivePreflightRequest) -> dict[str, object]:
+    """Actively check live Windows UTM readiness without starting equipment motion."""
+    if not req.confirm_preflight:
+        raise HTTPException(status_code=400, detail="confirm_preflight=true is required for live Windows preflight")
+    bridge = _equipment_bridge()
+    result = _windows_utm_live_preflight_from_bridge(
+        bridge,
+        include_locators=req.include_locators,
+        include_screenshot=req.include_screenshot,
+        include_request_log=req.include_request_log,
+    )
+    await controller.emit_workspace_result(
+        workspace="equipment",
+        tool="equipment.pyautogui.live_preflight",
+        result=result,
+        stage=Stage.EQUIPMENT,
+        module_id="equipment",
+        agent="equipment_agent",
+        workflow="windows_live_preflight",
+        node_event=True,
+    )
+    return result
+
+
+@app.post("/api/equipment/windows/live-validation")
+async def post_windows_equipment_live_validation(req: WindowsBridgeLiveValidationRequest) -> dict[str, object]:
+    """Build live UTM validation reports, optionally sending /execute after explicit physical confirmation."""
+    execute_requested = bool(req.confirm_live_execute)
+    if execute_requested:
+        if not req.confirm_physical_setup_safe:
+            raise HTTPException(status_code=400, detail="confirm_physical_setup_safe=true is required before physical live UTM validation")
+    elif not req.confirm_non_actuating:
+        raise HTTPException(status_code=400, detail="confirm_non_actuating=true or confirm_live_execute=true is required for Windows UTM validation")
+    from scripts.lab_equipment_live_utm_validation import evaluate_live_validation, gate
+
+    bridge = _equipment_bridge()
+    run_id = str(req.run_id or controller._state.run_id or "utm-live-validation").strip() or "utm-live-validation"
+    sequence_id = str(req.sequence_id or run_id).strip() or run_id
+    specimen_id = str(req.specimen_id or "specimen-live-validation").strip() or "specimen-live-validation"
+    program_id = str(req.program_id or "utm_compression_start_v1").strip() or "utm_compression_start_v1"
+    common = {"runtime_mode": "live", "force_live_bridge": True}
+    payload: dict[str, object] = {
+        **common,
+        "confirm_setup_gui_execute": True,
+        "run_id": run_id,
+        "sequence_id": sequence_id,
+        "specimen_id": specimen_id,
+        "program_id": program_id,
+        "command": req.command or "Run UTM compression protocol and export CSV",
+        "require_screen_assertions": req.require_screen_assertions,
+        "require_window_focus": req.require_window_focus,
+        "manual_save_required_if_no_artifact": req.manual_save_required_if_no_artifact,
+        "simulate_utm_protocol": False,
+    }
+    if req.export_glob.strip():
+        payload["export_glob"] = req.export_glob.strip()
+    if req.artifact_timeout_s is not None:
+        payload["artifact_timeout_s"] = req.artifact_timeout_s
+    if req.stable_for_sec is not None:
+        payload["stable_for_sec"] = req.stable_for_sec
+    if req.expected_export_path.strip():
+        payload["expected_export_path"] = req.expected_export_path.strip()
+    if req.target_window.strip():
+        payload["target_window"] = req.target_window.strip()
+    if req.target_window_regex.strip():
+        payload["target_window_regex"] = req.target_window_regex.strip()
+    if req.locators:
+        payload["locators"] = req.locators
+    if req.sequence:
+        payload["sequence"] = req.sequence
+
+    touched_endpoints = ["/request-log", "/health"]
+    request_log_before = _windows_bridge_request_log_from_bridge(bridge, runtime_mode="live", confirm_live=True)
+    health = bridge.health(common)
+    if bool(health.get("ok")):
+        touched_endpoints.append("/programs")
+        programs = bridge.list_programs(common)
+    else:
+        programs = {
+            "ok": False,
+            "tool": "equipment.pyautogui.list_programs",
+            "status": "skipped",
+            "failure_code": "LIVE_BRIDGE_HEALTH_FAILED",
+            "programs": [],
+        }
+
+    readiness: dict[str, object] = {}
+    preflight: dict[str, object] = {}
+    execution: dict[str, object] | None = None
+    execute_sent = False
+    extra_gates: list[dict[str, object]] = []
+    if execute_requested:
+        readiness = _windows_utm_readiness_from_bridge(bridge, runtime_overrides=payload)
+        preflight = _windows_utm_live_preflight_from_bridge(
+            bridge,
+            include_locators=True,
+            include_screenshot=False,
+            include_request_log=True,
+            runtime_overrides=payload,
+        )
+        for endpoint in preflight.get("touched_endpoints", []) if isinstance(preflight.get("touched_endpoints"), list) else []:
+            if isinstance(endpoint, str) and endpoint not in touched_endpoints:
+                touched_endpoints.append(endpoint)
+        readiness_ok = bool(readiness.get("ready_for_autonomous_profile"))
+        preflight_ok = bool(preflight.get("ready_for_autonomous_profile"))
+        extra_gates.extend(
+            [
+                gate(
+                    "pre_execution_readiness",
+                    readiness_ok,
+                    f"status={readiness.get('status', '-')}; blockers={', '.join(str(item) for item in readiness.get('blockers', []) if str(item or '').strip()) or '-'}",
+                    evidence=readiness,
+                ),
+                gate(
+                    "pre_execution_live_preflight",
+                    preflight_ok,
+                    f"status={preflight.get('status', '-')}; blockers={', '.join(str(item) for item in preflight.get('blockers', []) if str(item or '').strip()) or '-'}",
+                    evidence={"ready_for_autonomous_profile": preflight.get("ready_for_autonomous_profile"), "checks": preflight.get("checks", [])},
+                ),
+                gate(
+                    "physical_setup_confirmation",
+                    bool(req.confirm_physical_setup_safe),
+                    "operator confirmed physical UTM setup safe before /execute",
+                    evidence={"confirm_physical_setup_safe": bool(req.confirm_physical_setup_safe)},
+                ),
+            ]
+        )
+        if readiness_ok and preflight_ok:
+            touched_endpoints.append("/execute")
+            execution = bridge.run(payload)
+            execute_sent = True
+        else:
+            execution = {
+                "ok": False,
+                "tool": "equipment.pyautogui.run",
+                "status": "blocked",
+                "failure_code": "UTM_PHYSICAL_VALIDATION_PREFLIGHT_BLOCKED",
+                "message": "Physical UTM validation did not send /execute because readiness or live preflight gates are incomplete.",
+                "bridge_not_called": True,
+                "non_actuating": True,
+                "run_id": run_id,
+                "sequence_id": sequence_id,
+                "specimen_id": specimen_id,
+                "program_id": program_id,
+                "readiness": readiness,
+                "preflight": preflight,
+                "step_trace": [
+                    {"step": "READINESS_PRECHECK", "status": "ok" if readiness_ok else "blocked", "detail": str(readiness.get("status") or "unknown")},
+                    {"step": "LIVE_PREFLIGHT", "status": "ok" if preflight_ok else "blocked", "detail": str(preflight.get("status") or "unknown")},
+                ],
+            }
+
+    touched_endpoints.append("/request-log")
+    request_log_after = _windows_bridge_request_log_from_bridge(bridge, runtime_mode="live", confirm_live=True)
+    vision_proof = req.vision_proof if isinstance(req.vision_proof, dict) else {}
+    report = evaluate_live_validation(
+        run_id=run_id,
+        sequence_id=sequence_id,
+        specimen_id=specimen_id,
+        program_id=program_id,
+        health=health,
+        programs=programs,
+        request_log_before=request_log_before,
+        execution=execution,
+        request_log_after=request_log_after,
+        vision_proof=vision_proof,
+        executed=execute_sent,
+    )
+    if extra_gates:
+        report_gates = list(extra_gates) + [item for item in report.get("gates", []) if isinstance(item, dict)]
+        blockers = [item for item in report_gates if item.get("required") and item.get("ok") is not True]
+        summary = report.get("summary") if isinstance(report.get("summary"), dict) else {}
+        summary = dict(summary)
+        summary["required_gate_count"] = len([item for item in report_gates if item.get("required")])
+        summary["passed_required_gate_count"] = len([item for item in report_gates if item.get("required") and item.get("ok") is True])
+        summary["blocker_count"] = len(blockers)
+        summary["physical_live_evidence_captured"] = execute_sent and not blockers
+        report["gates"] = report_gates
+        report["blockers"] = blockers
+        report["summary"] = summary
+        report["ok"] = not blockers
+        if blockers:
+            report["status"] = "blocked"
+    report["tool"] = "equipment.pyautogui.live_validation"
+    report["touched_endpoints"] = list(dict.fromkeys(touched_endpoints))
+    report["request_audit_log"] = request_log_after
+    report["requested_physical_execute"] = execute_requested
+    report["execute_sent"] = execute_sent
+    report["ready_for_physical_live_run"] = (not execute_requested) and bool(report.get("ok"))
+    report["pre_execution_readiness"] = readiness
+    report["pre_execution_preflight"] = preflight
+    report["execution_payload_preview"] = {key: value for key, value in payload.items() if key not in {"locators", "sequence"}}
+    if req.include_screenshot and not execute_sent:
+        touched_endpoints.append("/screenshot")
+        screenshot = bridge.screenshot(
+            {
+                "runtime_mode": "live",
+                "force_live_bridge": True,
+                "run_id": run_id,
+                "checkpoint": "live_validation_pre_execute",
+            }
+        )
+        evidence = report.get("evidence") if isinstance(report.get("evidence"), dict) else {}
+        evidence = dict(evidence)
+        evidence["non_actuating_screenshot"] = screenshot
+        report["evidence"] = evidence
+        report["screenshot"] = screenshot
+        report["touched_endpoints"] = list(dict.fromkeys(touched_endpoints))
+    report = _persist_windows_utm_live_validation(report)
+    runtime_promotion: dict[str, object] = {}
+    if execute_requested:
+        runtime_promotion = _windows_utm_runtime_metadata_from_live_validation_report(report, run_id=run_id)
+        promotion_summary = {
+            "verified": bool(runtime_promotion.get("verified")),
+            "promoted_keys": [
+                key
+                for key in ("equipment_result", "equipment_report", "utm_data_ready", "equipment_handoff")
+                if isinstance(runtime_promotion.get(key), dict)
+            ],
+            "result_file": str(
+                runtime_promotion.get("equipment_result", {}).get("result_file", "")
+                if isinstance(runtime_promotion.get("equipment_result"), dict)
+                else ""
+            ),
+            "analysis_handoff_status": str(
+                runtime_promotion.get("equipment_handoff", {}).get("status", "")
+                if isinstance(runtime_promotion.get("equipment_handoff"), dict)
+                else ""
+            ),
+        }
+        report["runtime_promotion"] = promotion_summary
+        if runtime_promotion.get("verified") is True:
+            for key in ("equipment_result", "equipment_report", "utm_data_ready", "equipment_handoff"):
+                value = runtime_promotion.get(key)
+                if isinstance(value, dict):
+                    controller._state.run_metadata[key] = value
+            controller._state.run_metadata["last_windows_utm_runtime_promotion"] = runtime_promotion
+        report = _persist_windows_utm_live_validation(report)
+    controller._state.run_metadata["last_windows_utm_live_validation"] = report
+    if execute_requested:
+        controller._state.run_metadata["last_windows_utm_physical_validation"] = report
+    await controller.emit_workspace_result(
+        workspace="equipment",
+        tool="equipment.pyautogui.live_validation",
+        result=report,
+        stage=Stage.EQUIPMENT,
+        module_id="equipment",
+        agent="equipment_agent",
+        workflow="windows_utm_physical_live_validation" if execute_requested else "windows_utm_live_validation",
+        node_event=True,
+    )
+    return report
+
+
 @app.get("/api/equipment/windows/config")
 async def get_windows_equipment_config() -> dict[str, object]:
     """Return saved Windows PyAutoGUI bridge configuration status."""
     bridge = _equipment_bridge()
     status = bridge.connection_status()
     programs = bridge.list_programs({"runtime_mode": "test"})
-    return {"ok": True, "connection": status, "programs": programs.get("programs", [])}
+    profile = bridge.utm_profile_status()
+    readiness = _windows_utm_readiness_from_bridge(bridge)
+    evidence_audit = _windows_utm_evidence_audit_from_metadata(dict(controller._state.run_metadata), run_id=controller._state.run_id)
+    request_audit = _windows_bridge_request_log_from_bridge(bridge, runtime_mode="test", confirm_live=False)
+    live_validation = controller._state.run_metadata.get("last_windows_utm_live_validation")
+    if not isinstance(live_validation, dict):
+        live_validation = {}
+    completion_audit = controller._state.run_metadata.get("last_windows_utm_completion_audit")
+    if not isinstance(completion_audit, dict):
+        completion_audit = {}
+    vision_proof_draft = controller._state.run_metadata.get("last_windows_utm_vision_proof_draft")
+    if not isinstance(vision_proof_draft, dict):
+        vision_proof_draft = {}
+    return {
+        "ok": True,
+        "connection": status,
+        "programs": programs.get("programs", []),
+        "utm_profile": profile,
+        "utm_readiness": readiness,
+        "utm_evidence_audit": evidence_audit,
+        "utm_live_validation": live_validation,
+        "utm_completion_audit": completion_audit,
+        "utm_vision_proof_draft": vision_proof_draft,
+        "request_audit": request_audit,
+    }
+
+
+@app.get("/api/equipment/windows/readiness")
+async def get_windows_equipment_readiness() -> dict[str, object]:
+    """Return passive UTM readiness gates for the Equipment workspace."""
+    return _windows_utm_readiness_from_bridge(_equipment_bridge())
+
+
+@app.get("/api/equipment/windows/evidence-audit")
+async def get_windows_equipment_evidence_audit() -> dict[str, object]:
+    """Return post-run UTM evidence gates from current runtime metadata."""
+    return _windows_utm_evidence_audit_from_metadata(dict(controller._state.run_metadata), run_id=controller._state.run_id)
+
+
+@app.get("/api/equipment/windows/proof-package")
+async def get_windows_equipment_proof_package() -> dict[str, object]:
+    """Return a consolidated non-actuating proof package for the current Windows UTM run."""
+    bridge = _equipment_bridge()
+    readiness = _windows_utm_readiness_from_bridge(bridge)
+    package = _windows_utm_proof_package_from_metadata(
+        dict(controller._state.run_metadata),
+        run_id=controller._state.run_id,
+        passive_readiness=readiness,
+    )
+    package = _persist_windows_utm_proof_package(package)
+    controller._state.run_metadata["last_windows_utm_proof_package"] = package
+    await controller.emit_workspace_result(
+        workspace="equipment",
+        tool="equipment.pyautogui.live_proof_package",
+        result=package,
+        stage=Stage.EQUIPMENT,
+        module_id="equipment",
+        agent="equipment_agent",
+        workflow="windows_utm_proof_package",
+        node_event=False,
+    )
+    return package
+
+
+@app.post("/api/equipment/windows/proof-package/verify")
+async def post_windows_equipment_verify_proof_package(req: WindowsBridgeProofPackageVerifyRequest) -> dict[str, object]:
+    """Re-verify a persisted Windows UTM proof package and its local artifacts."""
+    package, load_info = _load_windows_utm_proof_package_for_verify(req.path, use_current=req.use_current)
+    result = _verify_windows_utm_proof_package(package, load_info=load_info)
+    controller._state.run_metadata["last_windows_utm_proof_package_verification"] = result
+    await controller.emit_workspace_result(
+        workspace="equipment",
+        tool="equipment.pyautogui.live_proof_package.verify",
+        result=result,
+        stage=Stage.EQUIPMENT,
+        module_id="equipment",
+        agent="equipment_agent",
+        workflow="windows_utm_proof_package_verify",
+        node_event=False,
+    )
+    return result
+
+
+@app.post("/api/equipment/windows/completion-audit")
+async def post_windows_equipment_completion_audit(req: WindowsBridgeCompletionAuditRequest) -> dict[str, object]:
+    """Run the strict final Improvement 05 completion audit against a proof package."""
+    result = _windows_utm_completion_audit(req.path, use_current=req.use_current, latest=req.latest)
+    result = _persist_windows_utm_completion_audit(result)
+    controller._state.run_metadata["last_windows_utm_completion_audit"] = result
+    await controller.emit_workspace_result(
+        workspace="equipment",
+        tool="equipment.pyautogui.improvement05_completion_audit",
+        result=result,
+        stage=Stage.EQUIPMENT,
+        module_id="equipment",
+        agent="equipment_agent",
+        workflow="windows_utm_completion_audit",
+        node_event=False,
+    )
+    return result
+
+
+@app.post("/api/equipment/windows/vision-proof-draft")
+async def post_windows_equipment_vision_proof_draft(req: WindowsBridgeVisionProofDraftRequest) -> dict[str, object]:
+    """Build a non-actuating Vision proof JSON draft from current runtime evidence."""
+    result = _windows_utm_vision_proof_draft(
+        dict(controller._state.run_metadata),
+        observations=dict(controller._state.latest_observations),
+        run_id=req.run_id,
+        specimen_id=req.specimen_id,
+    )
+    controller._state.run_metadata["last_windows_utm_vision_proof_draft"] = result
+    await controller.emit_workspace_result(
+        workspace="equipment",
+        tool="equipment.pyautogui.vision_proof_draft",
+        result=result,
+        stage=Stage.EQUIPMENT,
+        module_id="equipment",
+        agent="equipment_agent",
+        workflow="windows_utm_vision_proof_draft",
+        node_event=False,
+    )
+    return result
+
+
+@app.post("/api/equipment/windows/request-log")
+async def post_windows_equipment_request_log(req: WindowsBridgeRequestLogRequest) -> dict[str, object]:
+    """Return Windows bridge request-audit events for setup/live evidence review."""
+    result = _windows_bridge_request_log_from_bridge(
+        _equipment_bridge(),
+        runtime_mode=req.runtime_mode,
+        confirm_live=req.confirm_live,
+    )
+    await controller.emit_workspace_result(
+        workspace="equipment",
+        tool="equipment.pyautogui.request_log",
+        result=result,
+        stage=Stage.EQUIPMENT,
+        module_id="equipment",
+        agent="equipment_agent",
+        workflow="windows_request_audit",
+        node_event=True,
+    )
+    return result
 
 
 @app.get("/api/printer/status")
@@ -3381,22 +7546,200 @@ async def post_windows_equipment_test() -> dict[str, object]:
     return result
 
 
+@app.get("/api/equipment/windows/utm-profile")
+async def get_windows_equipment_utm_profile() -> dict[str, object]:
+    """Return the persisted UTM protocol profile merged into autonomous Equipment runs."""
+    bridge = _equipment_bridge()
+    return bridge.utm_profile_status()
+
+
+@app.post("/api/equipment/windows/utm-profile")
+async def post_windows_equipment_utm_profile(req: WindowsBridgeUtmProfileRequest) -> dict[str, object]:
+    """Persist UTM protocol calibration settings for GUI, CUI, and agent-loop reuse."""
+    bridge = _equipment_bridge()
+    result = bridge.save_utm_profile(req.model_dump())
+    await controller.emit_workspace_result(
+        workspace="equipment",
+        tool="equipment.pyautogui.save_utm_profile",
+        result=result,
+        stage=Stage.EQUIPMENT,
+        module_id="equipment",
+        agent="equipment_agent",
+        workflow="windows_utm_profile",
+        node_event=True,
+    )
+    return result
+
+
 @app.post("/api/equipment/windows/run-program")
 async def post_windows_equipment_run_program(req: WindowsBridgeRunProgramRequest) -> dict[str, object]:
     """Run an explicit setup-GUI macro test such as program1."""
     if not req.confirm_execute:
         raise HTTPException(status_code=400, detail="confirm_execute=true is required for setup GUI macro tests")
     bridge = _equipment_bridge()
-    result = bridge.run(
-        {
-            "runtime_mode": "live",
-            "force_live_bridge": True,
-            "confirm_setup_gui_execute": True,
-            "sequence_id": f"setup-{req.program_id}",
-            "program_id": req.program_id,
-            "command": req.command or f"{req.program_id} 실행",
-        }
+    specimen_result = controller._state.run_metadata.get("specimen_result") if isinstance(controller._state.run_metadata.get("specimen_result"), dict) else {}
+    setup_specimen_id = str(
+        specimen_result.get("specimen_id")
+        or controller._state.current_experiment_spec.get("specimen_id")
+        or "specimen-test"
     )
+    payload: dict[str, object] = {
+        "runtime_mode": "live",
+        "force_live_bridge": True,
+        "confirm_setup_gui_execute": True,
+        "sequence_id": f"setup-{req.program_id}",
+        "run_id": controller._state.run_id,
+        "specimen_id": setup_specimen_id,
+        "program_id": req.program_id,
+        "command": req.command or f"{req.program_id} 실행",
+        "require_screen_assertions": req.require_screen_assertions,
+        "simulate_utm_protocol": req.simulate_utm_protocol,
+    }
+    if req.export_glob.strip():
+        payload["export_glob"] = req.export_glob.strip()
+    if req.artifact_timeout_s is not None:
+        payload["artifact_timeout_s"] = req.artifact_timeout_s
+    if req.stable_for_sec is not None:
+        payload["stable_for_sec"] = req.stable_for_sec
+    if req.expected_export_path.strip():
+        payload["expected_export_path"] = req.expected_export_path.strip()
+    if req.target_window.strip():
+        payload["target_window"] = req.target_window.strip()
+    if req.target_window_regex.strip():
+        payload["target_window_regex"] = req.target_window_regex.strip()
+    payload["require_window_focus"] = req.require_window_focus
+    payload["manual_save_required_if_no_artifact"] = req.manual_save_required_if_no_artifact
+    if req.locators:
+        payload["locators"] = req.locators
+    if req.sequence:
+        payload["sequence"] = req.sequence
+    is_utm_program = str(req.program_id or "").startswith("utm_")
+    is_utm_recovery_program = str(req.program_id or "") == "utm_stop_or_abort_v1"
+    if is_utm_program and not is_utm_recovery_program:
+        readiness = _windows_utm_readiness_from_bridge(bridge, runtime_overrides=payload)
+        required_gate = "ready_for_setup_test" if req.simulate_utm_protocol else "ready_for_autonomous_profile"
+        if not bool(readiness.get(required_gate)):
+            blockers = [str(item) for item in readiness.get("blockers", []) if str(item or "").strip()]
+            warnings = [str(item) for item in readiness.get("warnings", []) if str(item or "").strip()]
+            gate_blocker = "UTM_AUTONOMOUS_PROFILE_NOT_READY" if required_gate == "ready_for_autonomous_profile" else "UTM_SETUP_PROFILE_NOT_READY"
+            if gate_blocker not in blockers:
+                blockers.append(gate_blocker)
+            result = {
+                "ok": False,
+                "tool": "equipment.pyautogui.run",
+                "status": "blocked",
+                "bridge": "windows_pyautogui",
+                "program_id": req.program_id,
+                "sequence_id": payload["sequence_id"],
+                "failure_code": "UTM_PRE_EXECUTION_READINESS_BLOCKED",
+                "message": "UTM execution was blocked before contacting /execute because readiness gates are incomplete.",
+                "non_actuating": True,
+                "bridge_not_called": True,
+                "required_gate": required_gate,
+                "readiness": readiness,
+                "blockers": blockers,
+                "warnings": warnings,
+                "step_trace": [
+                    {"step": "READINESS_PRECHECK", "status": "blocked", "detail": ", ".join(blockers) or required_gate},
+                ],
+            }
+            controller._state.run_metadata["last_windows_equipment_run_result"] = result
+            controller._state.run_metadata["last_windows_utm_protocol_result"] = result
+            await controller.emit_workspace_result(
+                workspace="equipment",
+                tool="equipment.pyautogui.run",
+                result=result,
+                stage=Stage.EQUIPMENT,
+                module_id="equipment",
+                agent="equipment_agent",
+                workflow="windows_run_program_precheck_blocked",
+                node_event=True,
+            )
+            return result
+        if not req.simulate_utm_protocol:
+            preflight = _windows_utm_live_preflight_from_bridge(
+                bridge,
+                include_locators=True,
+                include_screenshot=False,
+                include_request_log=True,
+                runtime_overrides=payload,
+            )
+            controller._state.run_metadata["last_windows_live_preflight_result"] = preflight
+            if not bool(preflight.get("ready_for_autonomous_profile")):
+                blockers = [str(item) for item in preflight.get("blockers", []) if str(item or "").strip()]
+                warnings = [str(item) for item in preflight.get("warnings", []) if str(item or "").strip()]
+                if "UTM_LIVE_PREFLIGHT_NOT_READY" not in blockers:
+                    blockers.append("UTM_LIVE_PREFLIGHT_NOT_READY")
+                result = {
+                    "ok": False,
+                    "tool": "equipment.pyautogui.run",
+                    "status": "blocked",
+                    "bridge": "windows_pyautogui",
+                    "program_id": req.program_id,
+                    "sequence_id": payload["sequence_id"],
+                    "failure_code": "UTM_LIVE_PREFLIGHT_BLOCKED",
+                    "message": "UTM execution was blocked before /execute because live preflight gates are incomplete.",
+                    "non_actuating": True,
+                    "bridge_not_called": True,
+                    "required_gate": "live_preflight.ready_for_autonomous_profile",
+                    "readiness": readiness,
+                    "preflight": preflight,
+                    "blockers": blockers,
+                    "warnings": warnings,
+                    "step_trace": [
+                        {"step": "READINESS_PRECHECK", "status": "ok", "detail": required_gate},
+                        {"step": "LIVE_PREFLIGHT", "status": "blocked", "detail": ", ".join(blockers) or "live_preflight"},
+                    ],
+                }
+                controller._state.run_metadata["last_windows_equipment_run_result"] = result
+                controller._state.run_metadata["last_windows_utm_protocol_result"] = result
+                await controller.emit_workspace_result(
+                    workspace="equipment",
+                    tool="equipment.pyautogui.run",
+                    result=result,
+                    stage=Stage.EQUIPMENT,
+                    module_id="equipment",
+                    agent="equipment_agent",
+                    workflow="windows_run_program_live_preflight_blocked",
+                    node_event=True,
+                )
+                return result
+    result = bridge.run(payload)
+    if is_utm_program:
+        request_log_after_execute = _windows_bridge_request_log_from_bridge(bridge, runtime_mode="live", confirm_live=True)
+        result["request_audit_log"] = request_log_after_execute
+        for key in (
+            "request_log",
+            "event_count",
+            "recent_paths",
+            "execute_event_seen",
+            "execute_event_count",
+            "execute_payload_event_count",
+            "execute_result_event_count",
+            "execute_run_ids",
+            "execute_sequence_ids",
+            "execute_specimen_ids",
+            "execute_program_ids",
+            "last_execute_context",
+            "last_execute_at",
+        ):
+            if key in request_log_after_execute and key not in result:
+                result[key] = request_log_after_execute[key]
+        if is_utm_recovery_program:
+            result["recovery_macro"] = True
+            result["pre_execution_readiness"] = {
+                "ok": True,
+                "status": "bypassed_for_recovery_macro",
+                "non_actuating": False,
+                "reason": "utm_stop_or_abort_v1 must remain callable even when UTM setup locators are incomplete.",
+            }
+        else:
+            result["pre_execution_readiness"] = readiness
+            if not req.simulate_utm_protocol:
+                result["pre_execution_preflight"] = controller._state.run_metadata.get("last_windows_live_preflight_result", {})
+    controller._state.run_metadata["last_windows_equipment_run_result"] = result
+    if str(result.get("program_id") or req.program_id or "").startswith("utm_"):
+        controller._state.run_metadata["last_windows_utm_protocol_result"] = result
     await controller.emit_workspace_result(
         workspace="equipment",
         tool="equipment.pyautogui.run",
@@ -3404,7 +7747,72 @@ async def post_windows_equipment_run_program(req: WindowsBridgeRunProgramRequest
         stage=Stage.EQUIPMENT,
         module_id="equipment",
         agent="equipment_agent",
-        workflow="windows_run_program",
+        workflow="windows_utm_recovery_macro" if is_utm_recovery_program else "windows_run_program",
+        node_event=True,
+    )
+    return result
+
+
+@app.get("/api/equipment/windows/locators")
+async def get_windows_equipment_locators() -> dict[str, object]:
+    """List Windows-side locator images captured for equipment protocols."""
+    bridge = _equipment_bridge()
+    return bridge.list_locators({"runtime_mode": "live", "force_live_bridge": True})
+
+
+@app.post("/api/equipment/windows/screenshot")
+async def post_windows_equipment_screenshot(req: WindowsBridgeScreenshotRequest) -> dict[str, object]:
+    """Capture a full Windows bridge screenshot for UTM UI calibration."""
+    if not req.confirm_capture:
+        raise HTTPException(status_code=400, detail="confirm_capture=true is required for Windows screenshot capture")
+    bridge = _equipment_bridge()
+    result = bridge.screenshot(
+        {
+            "runtime_mode": "live",
+            "force_live_bridge": True,
+            "run_id": req.run_id or "locator-calibration",
+            "checkpoint": req.checkpoint or "manual",
+        }
+    )
+    await controller.emit_workspace_result(
+        workspace="equipment",
+        tool="equipment.pyautogui.screenshot",
+        result=result,
+        stage=Stage.EQUIPMENT,
+        module_id="equipment",
+        agent="equipment_agent",
+        workflow="windows_locator_calibration",
+        node_event=True,
+    )
+    return result
+
+
+@app.post("/api/equipment/windows/capture-locator")
+async def post_windows_equipment_capture_locator(req: WindowsBridgeLocatorCaptureRequest) -> dict[str, object]:
+    """Capture a selected Windows screen region as an image locator for UTM protocol assertions."""
+    if not req.confirm_capture:
+        raise HTTPException(status_code=400, detail="confirm_capture=true is required for locator capture")
+    bridge = _equipment_bridge()
+    result = bridge.capture_locator(
+        {
+            "runtime_mode": "live",
+            "force_live_bridge": True,
+            "confirm_setup_gui_execute": True,
+            "program_id": req.program_id,
+            "name": req.name,
+            "target": req.name,
+            "region": req.region,
+            "confidence": req.confidence,
+        }
+    )
+    await controller.emit_workspace_result(
+        workspace="equipment",
+        tool="equipment.pyautogui.capture_locator",
+        result=result,
+        stage=Stage.EQUIPMENT,
+        module_id="equipment",
+        agent="equipment_agent",
+        workflow="windows_locator_calibration",
         node_event=True,
     )
     return result
@@ -3424,9 +7832,20 @@ async def post_lerobot_config(req: LeRobotConfigRequest) -> dict[str, object]:
 
 @app.get("/api/lerobot/sessions")
 async def get_lerobot_sessions() -> dict[str, object]:
-    """Return recent LeRobot sessions."""
-    bridge = _lerobot_bridge()
-    return {"ok": True, "sessions": bridge.sessions_recent()}
+    """Return recent LeRobot sessions across the backend-owned bridge."""
+    sessions: list[dict[str, object]] = []
+    seen: set[str] = set()
+    for bridge in (_lerobot_bridge(), _registered_lerobot_bridge()):
+        if bridge is None:
+            continue
+        for session in bridge.sessions_recent():
+            session_id = str(session.get("session_id") or "")
+            if session_id and session_id in seen:
+                continue
+            if session_id:
+                seen.add(session_id)
+            sessions.append(session)
+    return {"ok": True, "sessions": sessions}
 
 
 @app.get("/api/lerobot/policies")
@@ -3457,21 +7876,19 @@ async def post_lerobot_visualize_dataset(req: LeRobotAPIRequest) -> dict[str, ob
 @app.post("/api/lerobot/visualize/start")
 async def post_lerobot_visualize_start(req: LeRobotAPIRequest) -> dict[str, object]:
     """Start LeRobot's dataset visualizer."""
-    result = _lerobot_bridge().visualize_start(req.model_dump())
-    return await _publish_lerobot_result(result)
+    return await _call_lerobot_backend_tool("lerobot.visualize.start", req.model_dump())
 
 
 @app.post("/api/lerobot/visualize/stop")
 async def post_lerobot_visualize_stop(req: LeRobotAPIRequest) -> dict[str, object]:
     """Stop a LeRobot dataset visualizer session."""
-    result = _lerobot_bridge().visualize_stop(req.model_dump())
-    return await _publish_lerobot_result(result)
+    return await _call_lerobot_backend_tool("lerobot.visualize.stop", req.model_dump())
 
 
 @app.post("/api/lerobot/visualize/status")
 async def post_lerobot_visualize_status(req: LeRobotAPIRequest) -> dict[str, object]:
     """Return LeRobot dataset visualizer status."""
-    return _lerobot_bridge().visualize_status(req.model_dump())
+    return await _call_lerobot_backend_tool("lerobot.visualize.status", req.model_dump(), publish=False)
 
 
 @app.get("/api/lerobot/visualization/file")
@@ -3541,68 +7958,61 @@ async def post_lerobot_profile_validate(req: LeRobotAPIRequest) -> dict[str, obj
 @app.post("/api/lerobot/teleoperate/start")
 async def post_lerobot_teleoperate_start(req: LeRobotAPIRequest) -> dict[str, object]:
     """Start LeRobot teleoperation."""
-    result = _lerobot_bridge().teleoperate_start(req.model_dump())
-    return await _publish_lerobot_result(result)
+    return await _call_lerobot_backend_tool("lerobot.teleoperate.start", req.model_dump())
 
 
 @app.post("/api/lerobot/teleoperate/stop")
 async def post_lerobot_teleoperate_stop(req: LeRobotAPIRequest) -> dict[str, object]:
     """Stop LeRobot teleoperation."""
-    result = _lerobot_bridge().teleoperate_stop(req.model_dump())
-    return await _publish_lerobot_result(result)
+    return await _call_lerobot_backend_tool("lerobot.teleoperate.stop", req.model_dump())
 
 
 @app.post("/api/lerobot/teleoperate/status")
 async def post_lerobot_teleoperate_status(req: LeRobotAPIRequest) -> dict[str, object]:
     """Return LeRobot teleoperation status."""
-    return _lerobot_bridge().teleoperate_status(req.model_dump())
+    return await _call_lerobot_backend_tool("lerobot.teleoperate.status", req.model_dump(), publish=False)
 
 
 @app.post("/api/lerobot/record/start")
 async def post_lerobot_record_start(req: LeRobotAPIRequest) -> dict[str, object]:
     """Start LeRobot dataset recording."""
-    result = _lerobot_bridge().record_start(req.model_dump())
-    return await _publish_lerobot_result(result)
+    return await _call_lerobot_backend_tool("lerobot.record.start", req.model_dump())
 
 
 @app.post("/api/lerobot/record/control")
 async def post_lerobot_record_control(req: LeRobotRecordControlAPIRequest) -> dict[str, object]:
     """Apply a LeRobot recording control action."""
-    result = _lerobot_bridge().record_control(req.model_dump())
-    return await _publish_lerobot_result(result)
+    return await _call_lerobot_backend_tool("lerobot.record.control", req.model_dump())
 
 
 @app.post("/api/lerobot/record/status")
 async def post_lerobot_record_status(req: LeRobotAPIRequest) -> dict[str, object]:
     """Return LeRobot recording status."""
-    return _lerobot_bridge().record_status(req.model_dump())
+    return await _call_lerobot_backend_tool("lerobot.record.status", req.model_dump(), publish=False)
 
 
 @app.post("/api/lerobot/train/start")
 async def post_lerobot_train_start(req: LeRobotAPIRequest) -> dict[str, object]:
     """Start LeRobot policy training."""
-    result = _lerobot_bridge().train_start(req.model_dump(exclude_unset=True))
-    return await _publish_lerobot_result(result)
+    return await _call_lerobot_backend_tool("lerobot.train.start", req.model_dump(exclude_unset=True))
 
 
 @app.post("/api/lerobot/train/cancel")
 async def post_lerobot_train_cancel(req: LeRobotAPIRequest) -> dict[str, object]:
     """Cancel LeRobot policy training."""
-    result = _lerobot_bridge().train_cancel(req.model_dump())
-    return await _publish_lerobot_result(result)
+    return await _call_lerobot_backend_tool("lerobot.train.cancel", req.model_dump())
 
 
 @app.post("/api/lerobot/train/status")
 async def post_lerobot_train_status(req: LeRobotAPIRequest) -> dict[str, object]:
     """Return LeRobot training status."""
-    return _lerobot_bridge().train_status(req.model_dump())
+    return await _call_lerobot_backend_tool("lerobot.train.status", req.model_dump(), publish=False)
 
 
 @app.post("/api/lerobot/rollout/start")
 async def post_lerobot_rollout_start(req: LeRobotAPIRequest) -> dict[str, object]:
     """Start LeRobot policy rollout/inference."""
-    result = _lerobot_bridge().rollout_start(req.model_dump())
-    return await _publish_lerobot_result(result)
+    return await _call_lerobot_backend_tool("lerobot.rollout.start", req.model_dump())
 
 
 def _manipulation_profile_from_request(req: ManipulationAgentBridgeRequest) -> dict[str, object]:
@@ -3617,9 +8027,12 @@ def _manipulation_profile_from_request(req: ManipulationAgentBridgeRequest) -> d
         "profile_id": req.profile_id,
         "dataset_repo_id": req.dataset_repo_id,
         "dataset_root": req.dataset_root,
+        "task_id": req.task_id or req.skill_id,
+        "skill_id": req.skill_id or req.task_id,
         "task_instruction": req.task_instruction,
         "source_location": req.source_location,
         "target_location": req.target_location,
+        "policy_backend": req.policy_backend,
         "device": req.device,
         "fps": req.fps,
         "camera_enabled": req.camera_enabled,
@@ -3630,6 +8043,9 @@ def _manipulation_profile_from_request(req: ManipulationAgentBridgeRequest) -> d
         "rollout_temporal_ensemble": req.rollout_temporal_ensemble,
         "rollout_temporal_ensemble_coeff": req.rollout_temporal_ensemble_coeff,
         "rollout_inference_type": req.rollout_inference_type,
+        "rollout_rtc_execution_horizon": req.rollout_rtc_execution_horizon,
+        "rollout_rtc_max_guidance_weight": req.rollout_rtc_max_guidance_weight,
+        "max_duration_s": req.max_duration_s,
     }
 
 
@@ -3653,9 +8069,13 @@ def _manipulation_spec_from_request(req: ManipulationAgentBridgeRequest) -> dict
         "dataset_repo_id": profile.get("dataset_repo_id"),
         "lerobot_dataset_root": profile.get("dataset_root"),
         "dataset_root": profile.get("dataset_root"),
+        "manipulation_task_id": profile.get("task_id"),
+        "task_id": profile.get("task_id"),
+        "skill_id": profile.get("skill_id"),
         "task_instruction": profile.get("task_instruction"),
         "source_location": profile.get("source_location"),
         "target_location": profile.get("target_location"),
+        "policy_backend": profile.get("policy_backend"),
         "lerobot_device": profile.get("device"),
         "device": profile.get("device"),
         "fps": profile.get("fps"),
@@ -3670,6 +8090,9 @@ def _manipulation_spec_from_request(req: ManipulationAgentBridgeRequest) -> dict
         "rollout_temporal_ensemble": profile.get("rollout_temporal_ensemble"),
         "rollout_temporal_ensemble_coeff": profile.get("rollout_temporal_ensemble_coeff"),
         "rollout_inference_type": profile.get("rollout_inference_type"),
+        "rollout_rtc_execution_horizon": profile.get("rollout_rtc_execution_horizon"),
+        "rollout_rtc_max_guidance_weight": profile.get("rollout_rtc_max_guidance_weight"),
+        "max_duration_s": profile.get("max_duration_s"),
     }
 
 
@@ -3711,6 +8134,8 @@ async def _run_manipulation_agent_bridge(req: ManipulationAgentBridgeRequest, *,
         "data": result.data,
         "manipulation": manipulation,
         "sarm": result.data.get("sarm", {}),
+        "manipulation_report": result.data.get("manipulation_report", {}),
+        "robot_task_result": result.data.get("robot_task_result", {}),
         "next_hint": result.next_hint,
         "state": state.model_dump(mode="json"),
     }
@@ -3768,14 +8193,13 @@ async def post_lerobot_manipulation_agent_run(req: ManipulationAgentBridgeReques
 @app.post("/api/lerobot/rollout/stop")
 async def post_lerobot_rollout_stop(req: LeRobotAPIRequest) -> dict[str, object]:
     """Stop LeRobot policy rollout/inference."""
-    result = _lerobot_bridge().rollout_stop(req.model_dump())
-    return await _publish_lerobot_result(result)
+    return await _call_lerobot_backend_tool("lerobot.rollout.stop", req.model_dump())
 
 
 @app.post("/api/lerobot/rollout/status")
 async def post_lerobot_rollout_status(req: LeRobotAPIRequest) -> dict[str, object]:
     """Return LeRobot rollout status."""
-    return _lerobot_bridge().rollout_status(req.model_dump())
+    return await _call_lerobot_backend_tool("lerobot.rollout.status", req.model_dump(), publish=False)
 
 
 @app.post("/api/lerobot/dataset/inspect")
@@ -3790,6 +8214,196 @@ async def post_lerobot_policy_download(req: LeRobotAPIRequest) -> dict[str, obje
     """Dry-run or gated LeRobot policy download."""
     result = _lerobot_bridge().policy_download(req.model_dump())
     return await _publish_lerobot_result(result)
+
+
+@app.get("/api/knowledge/evolution-packs")
+async def get_knowledge_evolution_packs(target_type: str | None = None, target_id: str | None = None, limit: int = 20) -> dict[str, object]:
+    """List Knowledge-built evidence packs for Self-Evolution prefill."""
+    packs = _knowledge_store().list_evolution_packs(target_type=target_type, target_id=target_id, limit=limit)
+    return {"ok": True, "target_type": target_type or "", "target_id": target_id or "", "packs": [pack.model_dump(mode="json") for pack in packs]}
+
+
+@app.get("/api/knowledge/agent-performance")
+async def get_knowledge_agent_performance(agent_id: str | None = None, limit: int = 50) -> dict[str, object]:
+    """List Knowledge Agent performance ledger entries."""
+    records = _knowledge_store().list_agent_performance(agent_id=agent_id, limit=limit)
+    return {"ok": True, "agent_id": agent_id or "", "records": [record.model_dump(mode="json") for record in records]}
+
+
+@app.get("/api/knowledge/failure-patterns")
+async def get_knowledge_failure_patterns(agent_id: str | None = None, stage: str | None = None, limit: int = 50) -> dict[str, object]:
+    """List repeated/current failure patterns known to Knowledge Agent."""
+    records = _knowledge_store().list_failure_patterns(limit=limit * 4)
+    if agent_id:
+        records = [record for record in records if agent_id in record.affected_agents]
+    if stage:
+        records = [record for record in records if stage in record.affected_agents]
+    return {"ok": True, "records": [record.model_dump(mode="json") for record in records[-limit:]]}
+
+
+@app.get("/api/knowledge/success-patterns")
+async def get_knowledge_success_patterns(agent_id: str | None = None, limit: int = 50) -> dict[str, object]:
+    """List reusable success/skill cards known to Knowledge Agent."""
+    records = _knowledge_store().list_success_patterns(limit=limit * 4)
+    if agent_id:
+        records = [record for record in records if record.agent_id == agent_id]
+    return {"ok": True, "agent_id": agent_id or "", "records": [record.model_dump(mode="json") for record in records[-limit:]]}
+
+
+@app.get("/api/knowledge/evolution-outcomes")
+async def get_knowledge_evolution_outcomes(target_id: str | None = None, limit: int = 50) -> dict[str, object]:
+    """List before/after attribution records for activated variants."""
+    records = _knowledge_store().list_evolution_outcomes(target_id=target_id, limit=limit)
+    return {"ok": True, "target_id": target_id or "", "records": [record.model_dump(mode="json") for record in records]}
+
+
+@app.post("/api/knowledge/evolution-outcomes")
+async def post_knowledge_evolution_outcome(payload: dict[str, object]) -> dict[str, object]:
+    """Append an operator/replay-reviewed evolution outcome record."""
+    try:
+        record = EvolutionOutcomeRecord.model_validate(payload)
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    _knowledge_store().append_evolution_outcome(record)
+    await controller.emit_runtime_event(
+        event_type="knowledge.evolution_outcome.recorded",
+        message=f"Evolution outcome recorded: {record.target_type}:{record.target_id}",
+        payload={"record": record.model_dump(mode="json")},
+        level="INFO",
+    )
+    return {"ok": True, "record": record.model_dump(mode="json")}
+
+
+@app.get("/api/knowledge/graph/health")
+async def get_knowledge_graph_health() -> dict[str, object]:
+    """Return optional Knowledge graph backend health.
+
+    The graph backend is a mirror/index. JSONL memory remains authoritative.
+    """
+    backend = _knowledge_graph_backend()
+    try:
+        return backend.health()
+    finally:
+        backend.close()
+
+
+@app.post("/api/knowledge/graph/import")
+async def post_knowledge_graph_import(payload: dict[str, object] | None = None) -> dict[str, object]:
+    """Import recent file-backed Knowledge memory into the optional graph backend."""
+    payload = payload or {}
+    try:
+        limit = max(1, min(int(payload.get("limit") or 500), 5000))
+    except Exception:
+        limit = 500
+    backend = _knowledge_graph_backend()
+    try:
+        result = import_store_to_graph(_knowledge_store(), backend, limit=limit)
+    finally:
+        backend.close()
+    await controller.emit_runtime_event(
+        event_type="knowledge.graph_import.completed",
+        message=f"Knowledge graph import completed: backend={result.get('backend')} records={result.get('records', 0)}",
+        payload={"result": result},
+        level="INFO" if result.get("ok", True) else "WARNING",
+    )
+    return result
+
+
+@app.get("/api/knowledge/graph/query")
+async def get_knowledge_graph_query(
+    kind: str = "summary",
+    node_id: str = "",
+    target_type: str = "",
+    target_id: str = "",
+    q: str = "",
+    limit: int = 50,
+    include_properties: bool = False,
+) -> dict[str, object]:
+    """Query optional Knowledge graph backend with safe high-level query modes."""
+    backend = _knowledge_graph_backend()
+    try:
+        result = backend.query({"kind": kind, "node_id": node_id, "target_type": target_type, "target_id": target_id, "q": q, "limit": limit, "include_properties": include_properties})
+    finally:
+        backend.close()
+    return result
+
+
+@app.post("/api/knowledge/graphify/scan")
+async def post_knowledge_graphify_scan(payload: dict[str, object] | None = None) -> dict[str, object]:
+    """Create Graphify-compatible project graph artifacts for the current ATR checkout."""
+    payload = payload or {}
+    sources = payload.get("sources") if isinstance(payload.get("sources"), list) else None
+    source_paths = [str(item) for item in sources] if sources else None
+    max_file_bytes = max(1024, min(int(payload.get("max_file_bytes") or 256_000), 5_000_000))
+    out_dir_raw = str(payload.get("out_dir") or "memory/knowledge/graphify")
+    out_dir = resolve_path(out_dir_raw) if not Path(out_dir_raw).is_absolute() else Path(out_dir_raw)
+    result = scan_project_graph(
+        resolve_path("."),
+        out_dir=out_dir,
+        source_paths=source_paths,
+        max_file_bytes=max_file_bytes,
+        run_external_graphify=bool(payload.get("external_graphify", False)),
+    )
+    await controller.emit_runtime_event(
+        event_type="knowledge.graphify_scan.completed",
+        message=f"Knowledge Graphify scan completed: nodes={result.get('node_count', 0)} edges={result.get('edge_count', 0)}",
+        payload={"result": result},
+        level="INFO" if result.get("ok", True) else "WARNING",
+    )
+    return result
+
+
+@app.post("/api/knowledge/graphify/import")
+async def post_knowledge_graphify_import(payload: dict[str, object] | None = None) -> dict[str, object]:
+    """Import Graphify-compatible project graph artifacts into the optional graph backend."""
+    payload = payload or {}
+    graph_raw = str(payload.get("graphify_json") or "memory/knowledge/graphify/project_graph.json")
+    graph_json = resolve_path(graph_raw) if not Path(graph_raw).is_absolute() else Path(graph_raw)
+    if not graph_json.exists():
+        return {"ok": False, "error": f"graphify JSON not found: {graph_json}", "hint": "run /api/knowledge/graphify/scan first"}
+    runtime_limit = max(1, min(int(payload.get("runtime_limit") or 500), 5000))
+    include_runtime = bool(payload.get("include_runtime_memory", True))
+    backend = _knowledge_graph_backend()
+    try:
+        result = import_project_graph(backend, graph_json, include_runtime_memory=include_runtime, store=_knowledge_store() if include_runtime else None, runtime_limit=runtime_limit)
+    finally:
+        backend.close()
+    await controller.emit_runtime_event(
+        event_type="knowledge.graphify_import.completed",
+        message=f"Knowledge Graphify import completed: backend={result.get('backend')} project_nodes={result.get('project_nodes', 0)}",
+        payload={"result": result},
+        level="INFO" if result.get("ok", True) else "WARNING",
+    )
+    return result
+
+
+@app.get("/api/knowledge/run-context")
+async def get_knowledge_run_context(agent_id: str = "", run_id: str | None = None) -> dict[str, object]:
+    """Return the latest per-run Knowledge report context when available."""
+    selected_run = run_id or _current_run_id()
+    try:
+        report = _knowledge_store().read_run_artifact(selected_run, "knowledge_report")
+    except Exception:
+        report = {}
+    return {"ok": True, "agent_id": agent_id, "run_id": selected_run, "knowledge_report": report}
+
+
+@app.get("/api/knowledge/bo-context")
+async def get_knowledge_bo_context(objective_id: str | None = None, limit: int = 20) -> dict[str, object]:
+    """Return Knowledge memory useful for BO/Design context."""
+    store = _knowledge_store()
+    failures = [record.model_dump(mode="json") for record in store.list_failure_patterns(limit=limit)]
+    successes = [record.model_dump(mode="json") for record in store.list_success_patterns(limit=limit)]
+    return {"ok": True, "objective_id": objective_id or "", "failure_patterns": failures, "success_patterns": successes}
+
+
+@app.get("/api/knowledge/safety-context")
+async def get_knowledge_safety_context(stage: str | None = None, limit: int = 20) -> dict[str, object]:
+    """Return Knowledge memory useful for Guardian/safety gates."""
+    records = _knowledge_store().list_failure_patterns(limit=limit * 3)
+    if stage:
+        records = [record for record in records if stage in record.affected_agents]
+    return {"ok": True, "stage": stage or "", "risk_patterns": [record.model_dump(mode="json") for record in records[-limit:]]}
 
 
 @app.get("/api/evolution/targets")
@@ -3903,21 +8517,65 @@ async def approve_evolution_variant(variant_id: str, req: EvolutionActivationReq
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    gate = await _emit_self_evolution_guardian_gate(
+        action="approve_variant",
+        variant_id=variant_id,
+        payload={
+            "variant": variant.model_dump(mode="json"),
+            "human_approved": bool(payload.operator),
+            "requires_human_approval": not bool(payload.operator),
+            "approved": True,
+            "approval_resolved": True,
+            "activate_runtime": False,
+        },
+    )
     await controller.emit_runtime_event(
         event_type="evolution.variant.approved",
         message=f"Self-evolution variant approved: {variant_id}",
-        payload={"variant": variant.model_dump(mode="json")},
+        payload={"variant": variant.model_dump(mode="json"), "guardian_gate": gate},
         level="INFO",
     )
-    return {"ok": True, "variant": variant.model_dump(mode="json")}
+    return {"ok": True, "variant": variant.model_dump(mode="json"), "guardian_gate": gate}
 
 
 @app.post("/api/evolution/variants/{variant_id}/activate")
 async def activate_evolution_variant(variant_id: str, req: EvolutionActivationRequest | None = None) -> dict[str, object]:
     """Activate an approved variant for the next closed-loop run."""
-    if controller.snapshot().get("is_running"):
-        raise HTTPException(status_code=409, detail="Cannot activate self-evolution variant while a run is active.")
     payload = req or EvolutionActivationRequest()
+    if controller.snapshot().get("is_running"):
+        gate = await _emit_self_evolution_guardian_gate(
+            action="activate_variant",
+            variant_id=variant_id,
+            payload={
+                "status": "blocked",
+                "failure_code": "SELF_EVOLUTION_GATE_FAILED",
+                "message": "Cannot activate self-evolution variant while a run is active.",
+                "human_approved": bool(payload.operator),
+                "requires_human_approval": not bool(payload.operator),
+                "activate_runtime": payload.activate_runtime,
+            },
+        )
+        raise HTTPException(status_code=409, detail={"message": "Cannot activate self-evolution variant while a run is active.", "guardian_gate": gate})
+    try:
+        candidate_variant = _self_evolution_service().read_variant(variant_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    gate = await _emit_self_evolution_guardian_gate(
+        action="activate_variant",
+        variant_id=variant_id,
+        payload={
+            "variant": candidate_variant.model_dump(mode="json"),
+            "human_approved": bool(payload.operator),
+            "requires_human_approval": not bool(payload.operator),
+            "approved": candidate_variant.status in {"approved", "active_next_run", "active"},
+            "approval_resolved": bool(payload.operator),
+            "activate_runtime": payload.activate_runtime,
+            "failure_code": "" if candidate_variant.status in {"approved", "active_next_run", "active"} else "SELF_EVOLUTION_GATE_FAILED",
+            "message": "variant approved for activation" if candidate_variant.status in {"approved", "active_next_run", "active"} else "variant must be approved before activation",
+        },
+    )
+    if gate_blocks_execution(gate) or str(gate.get("decision") or "") == "require_human_approval":
+        raise HTTPException(status_code=409, detail={"message": "Guardian blocked self-evolution activation.", "guardian_gate": gate})
     try:
         variant = _self_evolution_service().activate_variant(
             variant_id,
@@ -3926,17 +8584,27 @@ async def activate_evolution_variant(variant_id: str, req: EvolutionActivationRe
             activate_runtime=payload.activate_runtime,
             handler_registry=_runtime_graph_handler_registry(),
         )
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        failure_gate = await _emit_self_evolution_guardian_gate(
+            action="activate_variant",
+            variant_id=variant_id,
+            payload={
+                "status": "blocked",
+                "failure_code": "SELF_EVOLUTION_GATE_FAILED",
+                "message": str(exc),
+                "human_approved": bool(payload.operator),
+                "requires_human_approval": not bool(payload.operator),
+                "activate_runtime": payload.activate_runtime,
+            },
+        )
+        raise HTTPException(status_code=409, detail={"message": str(exc), "guardian_gate": failure_gate}) from exc
     await controller.emit_runtime_event(
         event_type="evolution.variant.activated",
         message=f"Self-evolution variant active for next run: {variant_id}",
-        payload={"variant": variant.model_dump(mode="json")},
+        payload={"variant": variant.model_dump(mode="json"), "guardian_gate": gate},
         level="WARNING" if payload.activate_runtime else "INFO",
     )
-    return {"ok": True, "variant": variant.model_dump(mode="json")}
+    return {"ok": True, "variant": variant.model_dump(mode="json"), "guardian_gate": gate}
 
 
 @app.post("/api/evolution/variants/{variant_id}/rollback")
@@ -3944,16 +8612,30 @@ async def rollback_evolution_variant(variant_id: str, req: EvolutionRollbackRequ
     """Mark a self-evolution variant as rolled back in the evolution registry."""
     payload = req or EvolutionRollbackRequest()
     try:
-        variant = _self_evolution_service().rollback_variant(variant_id, operator=payload.operator, note=payload.note)
+        candidate_variant = _self_evolution_service().read_variant(variant_id)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    gate = await _emit_self_evolution_guardian_gate(
+        action="rollback_variant",
+        variant_id=variant_id,
+        payload={
+            "variant": candidate_variant.model_dump(mode="json"),
+            "human_approved": bool(payload.operator),
+            "requires_human_approval": not bool(payload.operator),
+            "approval_resolved": bool(payload.operator),
+            "approved": True,
+        },
+    )
+    if gate_blocks_execution(gate) or str(gate.get("decision") or "") == "require_human_approval":
+        raise HTTPException(status_code=409, detail={"message": "Guardian blocked self-evolution rollback.", "guardian_gate": gate})
+    variant = _self_evolution_service().rollback_variant(variant_id, operator=payload.operator, note=payload.note)
     await controller.emit_runtime_event(
         event_type="evolution.variant.rolled_back",
         message=f"Self-evolution variant rolled back: {variant_id}",
-        payload={"variant": variant.model_dump(mode="json")},
+        payload={"variant": variant.model_dump(mode="json"), "guardian_gate": gate},
         level="WARNING",
     )
-    return {"ok": True, "variant": variant.model_dump(mode="json")}
+    return {"ok": True, "variant": variant.model_dump(mode="json"), "guardian_gate": gate}
 
 
 @app.get("/api/evolution/lineage/{target_id}")

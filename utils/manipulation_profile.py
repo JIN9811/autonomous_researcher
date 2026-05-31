@@ -39,9 +39,12 @@ DEFAULT_MANIPULATION_AGENT_PROFILE: dict[str, Any] = {
     "dataset_repo_id": "jin/3dp_to_utm_pi05_rollout",
     "device": "cuda",
     "fps": 30,
+    "task_id": "transfer_to_utm",
+    "skill_id": "transfer_to_utm",
     "source_location": "3dp_output_area",
     "target_location": "utm_fixture",
     "task_instruction": "",
+    "policy_backend": "lerobot_cli",
     "camera_enabled": True,
     "display_data": False,
     "continuous_rollout": True,
@@ -50,6 +53,9 @@ DEFAULT_MANIPULATION_AGENT_PROFILE: dict[str, Any] = {
     "rollout_temporal_ensemble": True,
     "rollout_temporal_ensemble_coeff": 0.01,
     "rollout_inference_type": "rtc",
+    "rollout_rtc_execution_horizon": 10,
+    "rollout_rtc_max_guidance_weight": 1.0,
+    "max_duration_s": 30.0,
 }
 
 _STRING_LIMITS = {
@@ -62,9 +68,12 @@ _STRING_LIMITS = {
     "dataset_root": 1000,
     "dataset_repo_id": 240,
     "device": 40,
+    "task_id": 80,
+    "skill_id": 80,
     "source_location": 120,
     "target_location": 120,
     "task_instruction": 2000,
+    "policy_backend": 80,
     "rollout_inference_type": 40,
 }
 
@@ -130,6 +139,24 @@ def normalize_manipulation_agent_profile(raw: dict[str, Any] | None) -> dict[str
         min_value=0.0,
         max_value=1.0,
     )
+    profile["rollout_rtc_execution_horizon"] = _clean_int(
+        profile.get("rollout_rtc_execution_horizon"),
+        10,
+        min_value=1,
+        max_value=200,
+    ) if profile.get("rollout_rtc_execution_horizon") not in (None, "") else None
+    profile["rollout_rtc_max_guidance_weight"] = _clean_float(
+        profile.get("rollout_rtc_max_guidance_weight"),
+        1.0,
+        min_value=0.0,
+        max_value=20.0,
+    ) if profile.get("rollout_rtc_max_guidance_weight") not in (None, "") else None
+    profile["max_duration_s"] = _clean_float(
+        profile.get("max_duration_s"),
+        30.0,
+        min_value=1.0,
+        max_value=86400.0,
+    ) if profile.get("max_duration_s") not in (None, "") else None
     for key in (
         "camera_enabled",
         "display_data",
@@ -141,8 +168,14 @@ def normalize_manipulation_agent_profile(raw: dict[str, Any] | None) -> dict[str
 
     if profile["manipulation_strategy"] not in {"pi05_lerobot_policy", "lerobot_policy", "fixed_kinematic"}:
         profile["manipulation_strategy"] = DEFAULT_MANIPULATION_AGENT_PROFILE["manipulation_strategy"]
+    if profile["task_id"] not in {"transfer_to_utm", "clear_utm_to_disposal"}:
+        profile["task_id"] = DEFAULT_MANIPULATION_AGENT_PROFILE["task_id"]
+    if profile["skill_id"] not in {"transfer_to_utm", "clear_utm_to_disposal"}:
+        profile["skill_id"] = profile["task_id"]
     if profile["policy_type"] not in {"pi05", "act"}:
         profile["policy_type"] = DEFAULT_MANIPULATION_AGENT_PROFILE["policy_type"]
+    if profile["policy_backend"] not in {"lerobot_cli", "openpi_server", "fixed_kinematic", "act_policy"}:
+        profile["policy_backend"] = DEFAULT_MANIPULATION_AGENT_PROFILE["policy_backend"]
     if profile["rollout_inference_type"] not in {"", "sync", "rtc"}:
         profile["rollout_inference_type"] = DEFAULT_MANIPULATION_AGENT_PROFILE["rollout_inference_type"]
     return profile

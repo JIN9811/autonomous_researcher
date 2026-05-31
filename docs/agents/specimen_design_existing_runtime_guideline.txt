@@ -105,10 +105,11 @@ Do not change these unless a separate full-runtime migration is explicitly reque
    - equipment
    - analysis
    - knowledge
+   - bo
    - guardian
    - complete
    - error
-   BO Agent must remain a sidecar between `knowledge` and `guardian`; do not add a new `bo` Stage enum unless a separate graph migration is requested.
+   BO Agent is now a configured graph stage between `knowledge` and `guardian`; do not add extra BO-like top-level stages.
 
 2. Keep existing stage order:
    - design
@@ -118,6 +119,7 @@ Do not change these unless a separate full-runtime migration is explicitly reque
    - equipment
    - analysis
    - knowledge
+   - bo
    - guardian
    - default graph guardian=continue routes back to design
    - guardian=stop routes to complete
@@ -855,3 +857,105 @@ Before merge:
 - All generated artifact paths are inside the configured run root.
 
 End of guideline.
+
+============================================================
+2026-05-29 Update: Design Agent Agentic Loop Contract
+============================================================
+
+DesignAgent is now the first decision node of the experiment design loop, not only a single printable-spec generator.
+The existing `experiment_spec` remains the authoritative downstream handoff. The new structured fields are explanatory and auditable evidence around that handoff.
+
+DesignAgent AgentResult.data now includes:
+- `experiment_spec`: authoritative selected candidate consumed by SpecimenMakingAgent.
+- `rationale`: short execution rationale and LLM review/degraded note.
+- `design_report`: `design_report.v1` structured report.
+- `design_candidate`: `design_candidate.v1` handoff packet to SpecimenMakingAgent.
+- `handoff_packet`: same design handoff packet, retained for generic runtime consumers.
+- `candidate_ledger`: candidate pool ledger copied from `design_report.candidate_generation.candidate_ledger`.
+- `decisions`: design decision register copied from `design_report.decision_register`.
+- `metrics`: selected-candidate evaluation copied from `design_report.candidate_evaluation`.
+
+LLM boundary:
+- The LLM may interpret the objective, explain the hypothesis, and review risk/strategy notes.
+- The LLM must not be the final optimizer, must not directly create STL vertices, and must not override hard constraints.
+- Candidate generation, constraint filtering, scoring, repair fallback, and selection remain deterministic/statistical code paths.
+
+`design_report.v1` required structure:
+- `hypothesis`: statement, variables_under_test, expected_tradeoffs, falsification_signal.
+- `objective`: experiment_objective.v1 with primary_metric, direction, secondary_metrics, constraints, success_criteria, and stop_criteria.
+- `prior_context`: prior_count, best_prior, knowledge_summary, bo_recommendation, failure_memory.
+- `candidate_generation`: strategy, budget, design_space, candidate_count, valid_count, rejected_count, repaired_count, candidate_ledger, top_candidates.
+- `candidate_evaluation`: selected_candidate_id, selected_score, predicted_objective, uncertainty, manufacturability_score, information_gain_score, risk_score, constraint_margin_score.
+- `rejected_candidates`: candidate_id, candidate_fingerprint, geometry_type, reason, reasons, repair_attempted, repair_result, status.
+- `repaired_candidates`: any conservative fallback candidates created after hard constraint rejection.
+- `manufacturability`: printer/material/FDM summary and warnings.
+- `decision_register`: objective normalization, constraint gate, candidate selection, and handoff readiness decisions.
+- `handoff_to_specimen`: required_fields_present, missing_required_fields, manufacturing_notes, known_risks, authoritative_specimen_id, authoritative_candidate_id.
+
+Feedback inputs:
+- KnowledgeAgent context is read from `state.run_metadata["knowledge"]` and summarized under `design_report.prior_context.knowledge_summary`.
+- BOAgent output is read from `state.run_metadata["bo_agent"]` and `state.run_metadata["bo_recommended_constraints"]` and summarized under `design_report.prior_context.bo_recommendation`.
+- Failure memory is read through `ctx.failure_memory.recent(...)` and summarized under `design_report.prior_context.failure_memory`.
+- Experiment history is read through `ctx.experiment_db.list_recent(...)` and summarized under `design_report.prior_context.best_prior`.
+
+Runtime state persistence:
+- `LangGraphRunLoop._merge_agent_data` stores each stage payload under `state.run_metadata["<stage>_agent_payload"]`.
+- Design reports are additionally stored under `state.run_metadata["design_report"]` and handoff packets under `state.run_metadata["design_candidate"]` / `state.run_metadata["design_handoff_packet"]`.
+- Live GUI manual planning uses the same preservation path through `MainController._merge_planning_agent_data`.
+
+Live GUI/report behavior:
+- Design Agent report pages and Live GUI selected-agent reports should show Objective, Hypothesis, Candidate Board, Selected Candidate metrics, Rejected/Repair Log, Prior Feedback, Specimen Handoff, and Risk.
+- Design Agent chat messages carry `design_report` and `design_candidate` when available, in addition to `experiment_spec` and artifacts.
+- SpecimenMakingAgent still uses `experiment_spec` as the source of truth; `design_report` is for traceability, not for manufacturing execution.
+
+
+============================================================
+2026-05-29 Update: Specimen Making Autonomous Fabrication Loop
+============================================================
+
+SpecimenMakingAgent is now a fabrication-execution planning agent, not only an STL/printer.prepare caller. The existing tool chain remains unchanged and safe:
+
+experiment_spec -> geometry.generate_metamaterial_stl -> geometry.check_mesh_quality -> geometry.check_manufacturability -> artifact.create_specimen_handoff -> experiment.evaluate -> printer.prepare
+
+The new contract preserves the existing `specimen_result` and `protocol_note`, and adds structured manufacturing evidence:
+
+- `fabrication_report`: `fabrication_report.v1` reportable manufacturing record.
+- `specimen_fabricated`: `specimen_fabricated.v1` downstream handoff packet. It carries `fabrication_report_ref` and a compact `fabrication_summary`; the full report stays in `fabrication_report` / `state.run_metadata.fabrication_report` to avoid duplicating large runtime payloads.
+- `handoff_packet`: same specimen handoff packet for generic runtime packet registry.
+- `decisions`: manufacturing decision register.
+- `metrics`: quality-gate and process-plan metrics.
+- `evidence_refs`: STL, G-code, and handoff package references.
+
+`fabrication_report.v1` sections:
+
+- `fabrication_intent`: mode, printer path, physical intent, live-gui-test flag, specimen purpose.
+- `digital_thread`: candidate/specimen ids, design hash, geometry hash, STL path, G-code path, remote G-code path, handoff package path, printer profile, material, graph/run ids, printer job id when available.
+- `process_plan`: layer height, first-layer height, nozzle, bed temperatures, adhesion policy, cap-skin policy, ejection policy, estimated mass/time, slicer command.
+- `quality_gates`: required fields, geometry, mesh, manufacturability, slicer, G-code, printer storage, execution gate, and ejection gate with pass/warn/fail/blocked status.
+- `monitoring_plan`: PrusaLink status, transfer-idle check, after-print camera handoff, explicit `layerwise_monitoring_available=false`, defect classes for future Vision/quality loops.
+- `printer_runtime`: printer.prepare status, mode/path, step_trace, upload/transfer/start/ejection summaries, operator messages.
+- `fabrication_outcome`: ready/virtual/blocked/failed status, expected location, warnings, failure code, after-print confirmation requirement.
+- `feedback_to_design`: do-not-repeat gates, recommended parameter adjustments, quality score, uncertainty.
+
+Safety boundaries:
+
+- `printer.prepare` remains the only printer boundary. Do not add a direct printer-control path inside SpecimenMakingAgent.
+- The LLM may summarize intent, explain process reasoning, and suggest repair actions. It must not generate or patch G-code directly.
+- Live physical action requires existing printer bridge gates, explicit operator/Live GUI intent, and Guardian/runtime safety checks.
+- Active layer-wise defect correction, pause/cancel/retry, and auto corrective G-code changes are not enabled by this contract. They remain future extensions unless Guardian/operator gates are added.
+
+Live GUI behavior:
+
+- Specimen report title: `Manufacturing Digital Thread / Printer Runtime`.
+- Specimen chat/runtime card shows Fabrication Digital Thread before PrusaSlicer/PrusaLink details.
+- Specimen report must show Fabrication Intent, Digital Thread, Process Plan, Quality Gates, Printer Runtime, Monitoring/Feedback, and Handoff Packet.
+- STL visual preview remains Design Agent territory. Specimen Agent surfaces manufacturing runtime visibility: slicer settings, G-code path, PrusaLink storage/readiness, upload/start/transfer/ejection, step trace, and handoff readiness.
+
+Runtime persistence:
+
+- `RunLoop._merge_agent_data` and `MainController._merge_planning_agent_data` preserve `fabrication_report`, `specimen_fabricated`, `specimen_handoff_packet`, `specimen_decision_register`, and `specimen_metrics` under `state.run_metadata`.
+- `handoff_packets` receives the `specimen_fabricated.v1` packet, so Vision/Manipulation/Knowledge/BO can consume the same manufacturing evidence.
+
+Completion semantics:
+
+- Specimen stage completion means a fabrication digital thread and inspection-ready handoff exists. It does not mean that a physical print has necessarily completed unless `fabrication_outcome.status` and printer runtime evidence prove it.

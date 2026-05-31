@@ -10,6 +10,7 @@
 | 초보자/상급자 통합 매뉴얼 | [tutorials/user_manual.ko.md](tutorials/user_manual.ko.md), [tutorials/user_manual.en.md](tutorials/user_manual.en.md) |
 | 실제 닫힌 루프, 페이지, 에이전트 | [runtime/closed_loop_and_pages_reference.md](runtime/closed_loop_and_pages_reference.md) |
 | LangGraph 실행 계약 | [runtime/langgraph_runtime.md](runtime/langgraph_runtime.md) |
+| Guardian safety/alarm 계약 | [runtime/guardian_graphwide_safety.md](runtime/guardian_graphwide_safety.md) |
 | Experiment API 계약 | [runtime/autonomous_experiment_runtime.md](runtime/autonomous_experiment_runtime.md) |
 | Live GUI 운영 | [gui/gui.md](gui/gui.md) |
 | 첫 실행 튜토리얼 | [tutorials/first_autonomous_run.ko.md](tutorials/first_autonomous_run.ko.md), [tutorials/first_autonomous_run.en.md](tutorials/first_autonomous_run.en.md) |
@@ -45,10 +46,10 @@ Live GUI에서 보이는 상태는 다음 소스에서 옵니다.
 | Module Management | `/module-management` | `web/templates/module_management.html`, `web/static/module_management.js` | [runtime/agent_program_baseline.md](runtime/agent_program_baseline.md) |
 | 3DP Workspace | `/printer` | `web/templates/printer.html`, `web/static/printer.js` | [hardware/printer_agent_prusabridge_phase1_runtime_guideline.txt](hardware/printer_agent_prusabridge_phase1_runtime_guideline.txt) |
 | LeRobot Workspace | `/lerobot` | `web/templates/lerobot.html`, `web/static/lerobot.js` | [hardware/lerobot_robotis_manipulation_runtime_guideline.md](hardware/lerobot_robotis_manipulation_runtime_guideline.md) |
-| BO Workspace | `/bo` | `web/templates/bo.html`, `web/static/bo.js` | [agents/bo_agent_runtime_guideline.txt](agents/bo_agent_runtime_guideline.txt) |
+| BO Workspace | `/bo` | `web/templates/bo.html`, `web/static/bo.js` | [agents/bo_agent_runtime_guideline.txt](agents/bo_agent_runtime_guideline.txt) - BO/MBO/LLM preference 설정, lightweight/BoTorch optional backend, reasoning audit, candidate ranking |
 | CAE Workspace | `/cae` | `web/templates/cae.html`, `web/static/cae.js` | [agents/cae_analysis_runtime_guideline.txt](agents/cae_analysis_runtime_guideline.txt) |
 | Windows Equipment | `/equipment/windows` | `web/templates/windows_equipment.html`, `web/static/windows_equipment.js` | [hardware/windows_pyautogui_equipment_agent_guideline.md](hardware/windows_pyautogui_equipment_agent_guideline.md) |
-| Self-Evolution Lab | `/evolution-lab` | `web/templates/evolution_lab.html`, `web/static/evolution_lab.js` | [runtime/self_evolution.md](runtime/self_evolution.md) |
+| Self-Evolution Lab | `/evolution-lab` | `web/templates/evolution_lab.html`, `web/static/evolution_lab.js` | [runtime/self_evolution.md](runtime/self_evolution.md), [agents/knowledge_agent_self_evolution_runtime_guideline.md](agents/knowledge_agent_self_evolution_runtime_guideline.md), [runtime/knowledge_graphify_graph_backend_plan.md](runtime/knowledge_graphify_graph_backend_plan.md) |
 
 ## 4. 에이전트별 문서 맵
 
@@ -58,11 +59,11 @@ Live GUI에서 보이는 상태는 다음 소스에서 옵니다.
 | Specimen Making | `graphs/modules/specimen` | [hardware/printer_agent_prusabridge_phase1_runtime_guideline.txt](hardware/printer_agent_prusabridge_phase1_runtime_guideline.txt) |
 | Vision | `graphs/modules/vision` | [agents/vision_pickup_observation_runtime_guideline.txt](agents/vision_pickup_observation_runtime_guideline.txt) |
 | Manipulation | `graphs/modules/manipulation` | [agents/manipulation_pi05_transfer_runtime_guideline.txt](agents/manipulation_pi05_transfer_runtime_guideline.txt) |
-| Lab Equipment | `graphs/modules/equipment` | [hardware/windows_pyautogui_equipment_agent_guideline.md](hardware/windows_pyautogui_equipment_agent_guideline.md) |
-| Analysis | `graphs/modules/analysis` | [agents/analysis_utm_runtime_guideline.txt](agents/analysis_utm_runtime_guideline.txt), [agents/cae_analysis_runtime_guideline.txt](agents/cae_analysis_runtime_guideline.txt) |
-| Knowledge | `graphs/modules/knowledge` | [runtime/agent_program_baseline.md](runtime/agent_program_baseline.md) |
+| Lab Equipment | `graphs/modules/equipment` | [hardware/windows_pyautogui_equipment_agent_guideline.md](hardware/windows_pyautogui_equipment_agent_guideline.md), [hardware/lab_equipment_utm_visual_control_completion_audit.md](hardware/lab_equipment_utm_visual_control_completion_audit.md) |
+| Analysis | `graphs/modules/analysis` | [agents/analysis_utm_runtime_guideline.txt](agents/analysis_utm_runtime_guideline.txt), [agents/cae_analysis_runtime_guideline.txt](agents/cae_analysis_runtime_guideline.txt), [agents/fenicsx_analysis_runtime_assets.md](agents/fenicsx_analysis_runtime_assets.md) |
+| Knowledge | `graphs/modules/knowledge` | [agents/knowledge_agent_self_evolution_runtime_guideline.md](agents/knowledge_agent_self_evolution_runtime_guideline.md), [runtime/self_evolution.md](runtime/self_evolution.md), [runtime/knowledge_graphify_graph_backend_plan.md](runtime/knowledge_graphify_graph_backend_plan.md) |
 | BO | `graphs/modules/bo` | [agents/bo_agent_runtime_guideline.txt](agents/bo_agent_runtime_guideline.txt) |
-| Guardian | `graphs/modules/guardian` | [runtime/agent_program_baseline.md](runtime/agent_program_baseline.md) |
+| Guardian | `graphs/modules/guardian` | [runtime/agent_program_baseline.md](runtime/agent_program_baseline.md), [runtime/guardian_graphwide_safety.md](runtime/guardian_graphwide_safety.md) |
 
 ## 5. 폴더별 책임
 
@@ -77,10 +78,11 @@ Live GUI에서 보이는 상태는 다음 소스에서 옵니다.
 | `orchestrator/` | Live planning, handoff, 오케스트레이션 로직 |
 | `backends/` | Ollama/vLLM/Nemoclaw LLM 연결 |
 | `self_evolution/` | variant 생성, 검증, 승인, rollback |
-| `memory/` | 로컬 설정, 장비 연결 정보, graph/module version memory |
+| `memory/` | 로컬 설정, 장비 연결 정보, graph/module version memory, Knowledge JSONL memory |
 | `runs/` | 실행별 로그와 아티팩트 |
 | `artifacts/` | STL, G-code, CAE, UI audit 등 산출물 |
 | `tests/` | pytest, integration, UI audit |
+| `scripts/` | live 검증 runner와 운영 보조 스크립트. 예: `lab_equipment_live_utm_validation.py` |
 | `install/` | CLI 설치와 외부 프로그램 설치 보조 |
 | `image/` | 발표/논문용 시스템 diagram prompt와 렌더 결과 |
 | `user_files/` | 사용자가 넣는 데이터/작업 파일 |
@@ -112,6 +114,7 @@ Live GUI에서 보이는 상태는 다음 소스에서 옵니다.
 ## 8. 문서 유지 규칙
 
 - runtime loop나 API를 바꾸면 `runtime/closed_loop_and_pages_reference.md`를 같이 갱신합니다.
+- Knowledge memory/evidence schema나 Evolution Lab prefill을 바꾸면 `agents/knowledge_agent_self_evolution_runtime_guideline.md`와 `runtime/self_evolution.md`를 같이 갱신합니다.
 - GUI route/버튼/API가 바뀌면 `gui/gui.md`와 이 인덱스의 페이지 맵을 같이 갱신합니다.
 - agent module 계약이 바뀌면 해당 `docs/agents/*` 또는 `docs/hardware/*`를 같이 갱신합니다.
 - 설치 의존성이 바뀌면 루트 [REQUIREMENTS.md](../REQUIREMENTS.md)를 갱신합니다.

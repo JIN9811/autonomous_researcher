@@ -248,6 +248,8 @@ Purpose
 - Delegate print/ejection preparation through `experiment.evaluate -> printer.prepare`
 - Cache existing specimens if possible
 - Surface PrusaSlicer settings, G-code output path, PrusaLink storage readiness, upload/start result, transport/endpoints, and printer.prepare step trace to Live GUI
+- Produce `fabrication_report.v1` with fabrication intent, digital thread, process plan, quality gates, printer runtime, monitoring plan, outcome, and feedback to Design/Knowledge/BO
+- Produce `specimen_fabricated.v1` as the downstream handoff packet for Vision, Manipulation, Knowledge, and BO
 - Do not duplicate Design Agent STL preview rendering
 
 Modes
@@ -276,11 +278,15 @@ Purpose
 - Execute pick / place / alignment / transfer tasks
 - Use VLA policy as execution logic
 - Include SARM submodule
-- After a ready 3DP specimen and Vision observation, default to Pi0.5 LeRobot rollout for `3dp_output_area -> utm_fixture`.
+- Support two bounded short skills: `transfer_to_utm` (`3dp_output_area -> utm_fixture`) and `clear_utm_to_disposal` (`utm_fixture -> discard_bin`).
+- After a ready 3DP specimen and Vision observation, default to Pi0.5 LeRobot rollout for `transfer_to_utm`.
 - Keep `fixed_kinematic` available as an explicit compatibility strategy.
 - Use `lerobot.rollout.start`; do not construct LeRobot shell commands inside the agent.
-- The `/lerobot` GUI is the Manipulation Agent management surface. Its bridge panel may run the actual Manipulation Agent with selected policy/profile/specimen/observation options.
+- Treat Pi0.5 as the low-level VLA executor only. Manipulation Agent owns preflight, task stage, SARM-lite progress/risk state, Vision verification dependency, and Guardian/next-agent handoff.
+- Emit `manipulation_report.v1` and `robot_task_result.v1` while preserving legacy `manipulation`, `sarm`, and `protocol_note` keys.
+- The `/lerobot` GUI is the Manipulation Agent management surface. Its bridge panel may run the actual Manipulation Agent with selected task, policy/profile/specimen/observation/RTC options.
 - The bridge panel must provide `Save Agent Defaults` and `Test Agent Bridge`. Saved defaults live in `memory/manipulation_agent_bridge.json` and are read by the live/test loop before each Manipulation Agent run; explicit experiment spec fields override saved defaults.
+- Successful rollout without Vision verification must be surfaced as `needs_post_place_vision` or `needs_post_disposal_vision`, not silently treated as final verified handoff.
 
 SARM submodule responsibilities
 - progress scoring
@@ -785,3 +791,13 @@ End of guide.
 
 
 LangGraph Runtime IDE update: graph edits must validate/compile before activation, transition edits must update YAML logical edges and actual runtime transitions, and module edits must expose both `pre_execution` and `internal_graph` step lists and use module validate/dry-run endpoints before live use. Python source editing remains forbidden from the Runtime IDE.
+
+2026-05-29 Vision Agent upgrade:
+- Vision Agent emits `vision_report.v1` and `vision_signal.v1` while preserving
+  legacy `observation.pose_estimate`, `pickup_target`, and `transfer_readiness`.
+- Vision signals include freshness (`timestamp`, `expires_at`, `stable_for_ms`),
+  confidence, zone id, consumer agents, and evidence refs.
+- Manipulation must block expired Vision signals and request refreshed perception
+  instead of using stale pickup/fixture state.
+- Vision observes only; it does not directly command robot, printer, UTM, or
+  PyAutoGUI equipment.

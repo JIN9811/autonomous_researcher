@@ -1,0 +1,5 @@
+# Optional Knowledge graph backend dependencies.
+# Install only when using Graphify/Neo4j graph memory.
+neo4j>=5.28.0
+networkx>=3.2.0
+graphifyy==0.4.4

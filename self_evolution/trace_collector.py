@@ -48,6 +48,9 @@ class TraceCollector:
         graph_id = self._first_string(events, "graph_id") or self._first_payload_string(events, "graph_id")
         graph_version = self._first_string(events, "graph_version") or self._first_payload_string(events, "graph_version")
         metrics = self._metrics(events, artifacts)
+        knowledge_packs = self._knowledge_evidence_packs(run_dir)
+        metrics["knowledge_evidence_pack_count"] = len(knowledge_packs)
+        metrics["knowledge_evidence_pack_ids"] = [str(item.get("pack_id") or "") for item in knowledge_packs if isinstance(item, dict)]
         return EvolutionTrace(
             trace_id=f"trace-{run_id}",
             run_id=run_id,
@@ -58,6 +61,22 @@ class TraceCollector:
             artifacts=artifacts,
             human_feedback=human_feedback,
         )
+
+
+    @staticmethod
+    def _knowledge_evidence_packs(run_dir: Path) -> list[dict[str, Any]]:
+        path = run_dir / "knowledge" / "evolution_evidence_packs.json"
+        if not path.exists():
+            return []
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return []
+        if isinstance(raw, list):
+            return [item for item in raw if isinstance(item, dict)]
+        if isinstance(raw, dict) and isinstance(raw.get("evidence_packs"), list):
+            return [item for item in raw["evidence_packs"] if isinstance(item, dict)]
+        return []
 
     @staticmethod
     def _safe_run_id(run_id: str) -> str:

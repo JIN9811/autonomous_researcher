@@ -946,16 +946,48 @@ def test_pi05_rollout_uses_dedicated_runtime_and_rtc_command(tmp_path: Path) -> 
     assert result["ok"] is True
     assert "-n" in result["command_preview"]
     assert result["command_preview"][result["command_preview"].index("-n") + 1] == "lerobot-pi05"
-    assert "lerobot-rollout" in result["command_preview"]
+    assert "scripts/lerobot_pi05_rollout_wrapper.py" in " ".join(result["command_preview"])
     assert "--policy.path=fake://pi05_policy" in result["command_preview"]
     assert "--policy.type=pi05" in result["command_preview"]
     assert "--device=cuda" in result["command_preview"]
-    assert "--policy.device=cuda" not in result["command_preview"]
-    assert "--inference.type=rtc" in result["command_preview"]
-    assert "--strategy.type=base" in result["command_preview"]
+    assert "--policy.device=cuda" in result["command_preview"]
+    assert "--rtc.enabled=true" in result["command_preview"]
     assert "--task=Move specimen from 3DP to UTM" in result["command_preview"]
-    assert "--duration=0" in result["command_preview"]
+    assert f"--duration={int(86400.0)}" in result["command_preview"]
     assert any(item.startswith("--robot.cameras=") for item in result["command_preview"])
+
+
+def test_live_rollout_guard_blocks_duplicate_active_session(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    policy_dir = tmp_path / "outputs" / "train" / "job" / "checkpoints" / "last" / "pretrained_model"
+    _make_policy_checkpoint(policy_dir)
+    follower_port = tmp_path / "follower-port"
+    follower_port.touch()
+    bridge.ports_save({"mode": "live", "profile_id": "fake_omx_ai", "device_role": "follower", "port": str(follower_port)})
+    bridge._live_block_if_needed = lambda **_: None  # type: ignore[method-assign]
+    bridge._refresh_process_status = lambda session: None  # type: ignore[method-assign]
+
+    def fake_start_live_process(**kwargs: object) -> dict[str, object]:
+        return {"ok": True, "session_updates": {"pid": 1234, "log_path": "", "returncode": None}}
+
+    bridge._start_live_process = fake_start_live_process  # type: ignore[method-assign]
+    payload = {
+        "mode": "live",
+        "runtime_mode": "live",
+        "profile_id": "fake_omx_ai",
+        "policy_path": str(policy_dir),
+        "confirm_live_execute": True,
+    }
+
+    first = bridge.rollout_start(payload)
+    second = bridge.rollout_start(payload)
+
+    assert first["ok"] is True
+    assert first["workflow"] == "rollout"
+    assert second["ok"] is False
+    assert second["failure_code"] == "LEROBOT_ROLLOUT_ALREADY_ACTIVE"
+    assert second["blocked_by_session_id"] == first["session_id"]
+    assert second["guard_status"] == "blocked"
 
 
 def test_rollout_action_clamp_can_be_disabled(tmp_path: Path) -> None:

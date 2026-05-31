@@ -108,8 +108,11 @@ async def test_manipulation_agent_calls_lerobot_rollout(tmp_path: Path, monkeypa
     assert "--policy.temporal_ensemble_coeff=0.01" in result.data["manipulation"]["command_preview"]
     assert "--policy.n_action_steps=1" in result.data["manipulation"]["command_preview"]
     assert "--robot.max_relative_target=5" in result.data["manipulation"]["command_preview"]
-    assert result.data["sarm"]["stage_name"] == "policy_rollout"
+    assert result.data["sarm"]["stage_name"] == "post_place_verify"
     assert result.data["sarm"]["failure_precursor"] >= 0
+    assert result.data["manipulation_report"]["schema"] == "manipulation_report.v1"
+    assert result.data["robot_task_result"]["schema"] == "robot_task_result.v1"
+    assert result.data["robot_task_result"]["handoff_status"] == "needs_post_place_vision"
     assert ctx.events
     assert ctx.events[0]["tool"] == "lerobot.rollout.start"
 
@@ -130,9 +133,35 @@ async def test_manipulation_agent_defaults_to_pi05_transfer_after_specimen(tmp_p
     assert manipulation["transfer_task"]["target"] == "utm_fixture"
     assert manipulation["transfer_task"]["specimen_id"] == "specimen-transfer-001"
     assert manipulation["completion_status"] == "reported_complete"
+    assert manipulation["handoff_status"] == "needs_post_place_vision"
+    assert result.data["manipulation_report"]["task"]["task_id"] == "transfer_to_utm"
+    assert result.data["manipulation_report"]["policy_plan"]["policy_type"] == "pi05"
+    assert result.data["robot_task_result"]["terminal_pose"] == "standby_clear_of_utm"
     assert "-n" in manipulation["command_preview"]
     assert manipulation["command_preview"][manipulation["command_preview"].index("-n") + 1] == "lerobot-pi05"
-    assert "lerobot-rollout" in manipulation["command_preview"]
+    assert "scripts/lerobot_pi05_rollout_wrapper.py" in " ".join(manipulation["command_preview"])
     assert "--policy.type=pi05" in manipulation["command_preview"]
-    assert "--inference.type=rtc" in manipulation["command_preview"]
+    assert "--rtc.enabled=true" in manipulation["command_preview"]
     assert any(item.startswith("--task=Move specimen-transfer-001") for item in manipulation["command_preview"])
+
+
+@pytest.mark.asyncio
+async def test_manipulation_agent_blocks_expired_vision_signal(tmp_path: Path, monkeypatch: Any) -> None:
+    _isolate_manipulation_profile(tmp_path, monkeypatch)
+    state = _post_specimen_state()
+    state.latest_observations["transfer_readiness"]["expires_at"] = "2000-01-01T00:00:00+00:00"
+    state.latest_observations["vision_signal"] = {
+        "schema": "vision_signal.v1",
+        "signal_id": "sig-expired",
+        "expires_at": "2000-01-01T00:00:00+00:00",
+    }
+    ctx = _CtxStub(_tools(tmp_path))
+
+    result = await ManipulationAgent().run(state, ctx)
+
+    assert result.success is False
+    assert result.data["manipulation"]["failure_code"] == "STALE_VISION_SIGNAL"
+    assert result.data["manipulation"]["freshness"]["reason"] == "stale_vision_signal"
+    assert result.data["sarm"]["stage_name"] == "vision_signal_gate"
+    assert result.data["manipulation_report"]["preflight"]["status"] == "fail"
+    assert result.data["robot_task_result"]["handoff_status"] == "blocked"

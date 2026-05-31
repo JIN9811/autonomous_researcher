@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import shutil
 from pathlib import Path
 
@@ -11,9 +12,13 @@ import yaml
 from fastapi.testclient import TestClient
 
 import app.main as app_main
+from agents.registry import AgentRegistry
 from graphs import ATRLangGraphCompiler, GraphConfig, HandlerRegistry, ModuleConfig, load_graph_config, load_module_config
+from logging_system.structured_logger import StructuredLogger
+from orchestrator.langgraph_runtime import LangGraphRunLoop
 from orchestrator.graph import OrchestrationGraph
 from orchestrator.router import stage_to_agent
+from orchestrator.state import Mode, OrchestratorState, Stage
 from orchestrator.transitions import default_next_stage, ordered_stages
 
 
@@ -93,6 +98,85 @@ def _add_graph_transition_candidate(
             },
         }
     )
+
+
+def test_langgraph_runtime_tool_call_snapshot_persists_blackbox_record(tmp_path: Path) -> None:
+    state = OrchestratorState(run_id="run-runtime-tool", experiment_id="exp-runtime-tool", mode=Mode.TEST)
+    logger = StructuredLogger(tmp_path / "runtime.jsonl", tmp_path / "summary.log")
+    runtime = LangGraphRunLoop(
+        state=state,
+        agent_registry=AgentRegistry(),
+        orchestrator_agent_name="orchestrator",
+        ctx=object(),
+        logger=logger,
+        graph_config_path="graphs/configs/atr_closed_loop.yaml",
+    )
+    record = {
+        "schema": "tool_call_record.v1",
+        "record_id": "tool-record-001",
+        "call_id": "tool-call-001",
+        "run_id": state.run_id,
+        "stage": "specimen",
+        "tool": "printer.prepare",
+        "status": "completed",
+    }
+
+    runtime._record_tool_call_snapshot(record)
+
+    assert state.run_metadata["tool_call_records"] == [record]
+    guardian_events = tmp_path / "guardian_events.jsonl"
+    assert guardian_events.exists()
+    lines = [json.loads(line) for line in guardian_events.read_text(encoding="utf-8").splitlines()]
+    assert lines[-1]["schema"] == "tool_call_record.v1"
+    assert lines[-1]["call_id"] == "tool-call-001"
+
+
+def test_langgraph_runtime_equipment_alert_merge_persists_incident_records(tmp_path: Path) -> None:
+    state = OrchestratorState(run_id="run-runtime-incident", experiment_id="exp-runtime-incident", mode=Mode.TEST)
+    logger = StructuredLogger(tmp_path / "runtime.jsonl", tmp_path / "summary.log")
+    runtime = LangGraphRunLoop(
+        state=state,
+        agent_registry=AgentRegistry(),
+        orchestrator_agent_name="orchestrator",
+        ctx=object(),
+        logger=logger,
+        graph_config_path="graphs/configs/atr_closed_loop.yaml",
+    )
+    incident = {
+        "schema": "incident_record.v1",
+        "incident_id": "incident-runtime-001",
+        "device_class": "utm",
+        "component": "utm_data_export",
+        "failure_code": "UTM_DATA_TIMEOUT",
+    }
+    alert = {
+        "schema": "hardware_alert.v1",
+        "alert_id": "alert-runtime-001",
+        "device_class": "utm",
+        "component": "utm_data_export",
+        "severity": "blocking",
+        "failure_code": "UTM_DATA_TIMEOUT",
+        "status": "blocked",
+        "guardian_decision": {"schema": "guardian_decision.v1", "decision": "safe_stop"},
+        "incident_record": incident,
+    }
+
+    runtime._merge_agent_data(
+        Stage.EQUIPMENT,
+        {
+            "equipment_result": {"ok": False, "status": "blocked", "failure_code": "UTM_DATA_TIMEOUT"},
+            "hardware_alert": alert,
+            "incident_records": [incident],
+        },
+    )
+
+    assert state.run_metadata["hardware_alerts"][0]["alert_id"] == "alert-runtime-001"
+    assert state.run_metadata["incident_records"][0]["incident_id"] == "incident-runtime-001"
+    assert state.run_metadata["latest_guardian_decision"]["schema"] == "guardian_decision.v1"
+    assert state.device_health["utm"] == "blocking:UTM_DATA_TIMEOUT"
+    guardian_log = tmp_path / "guardian_events.jsonl"
+    assert guardian_log.exists()
+    assert "incident-runtime-001" in guardian_log.read_text(encoding="utf-8")
 
 
 def test_atr_graph_config_validates_and_compiles() -> None:
@@ -457,8 +541,8 @@ def test_graph_runtime_api_exposes_handlers_modules_and_compile() -> None:
     assert module_dry_run["sequence"][0]["phase"] == "pre_execution"
     assert module_dry_run["sequence"][0]["executable"] is True
     assert [item["id"] for item in module_dry_run["sequence"][1:3]] == [
-        "01_intake_constraints",
-        "02_generate_candidate_spec",
+        "01_receive_objective_context",
+        "02_normalize_objective_contract",
     ]
     assert module_dry_run["sequence"][1]["handler_configured"] is False
     assert module_dry_run["sequence"][1]["executable"] is False
@@ -784,7 +868,7 @@ def test_activated_module_version_changes_runtime_handler(tmp_path, monkeypatch)
 
     assert saved["ok"] is True
     assert saved["activated"] is True
-    assert saved["dry_run"]["summary"]["internal_graph_count"] == 4
+    assert saved["dry_run"]["summary"]["internal_graph_count"] == 12
     active = client.get("/api/modules/design").json()["module"]
     assert active["module"]["handler"] == "agent.guardian_agent"
     assert "agent.guardian_agent" in (module_root / "design" / "module.yaml").read_text(encoding="utf-8")
@@ -915,7 +999,7 @@ def test_runtime_ide_page_and_main_entry_render() -> None:
     assert "ide-node-list" in ide.text
     assert "ide-infra-list" in ide.text
     assert "ide-template-list" in ide.text
-    assert "Modules" in ide.text
+    assert "Module Library" in ide.text
     assert "runtime_ide.css?v=atr-ui-20260526-84" in ide.text
     assert "ide-module-management-open-btn" in ide.text
     assert "data-open-module-management" in ide.text
@@ -924,7 +1008,7 @@ def test_runtime_ide_page_and_main_entry_render() -> None:
     assert "ide-device-status" in ide.text
     assert "ide-metrics-panel" in ide.text
     assert "ide-approval-queue" in ide.text
-    assert "Approvals" in ide.text
+    assert "Human Approval Queue" in ide.text
     assert "ide-pause-run-btn" in ide.text
     assert "ide-resume-run-btn" in ide.text
     assert "ide-stop-run-btn" in ide.text
@@ -946,8 +1030,8 @@ def test_runtime_ide_page_and_main_entry_render() -> None:
     assert "ide-draft-safety-strip" in ide.text
     assert "ide-run-launcher-drawer" in ide.text
     assert "ide-run-target-summary" in ide.text
-    assert "Run saved test graph" in ide.text
-    assert "Run saved live graph" in ide.text
+    assert "Run Saved Test" in ide.text
+    assert "Run Saved Live" in ide.text
     assert "runtime-draft-safety-strip" in ide.text
     assert "ide-canvas-view-hint" in ide.text
     assert "ide-export-yaml-btn" in ide.text
@@ -1239,7 +1323,7 @@ def test_runtime_ide_page_and_main_entry_render() -> None:
     assert "graphConfigFingerprint" in js
     assert "activeDraftConfigDiff" in js
     assert "readableFitMinZoom" in js
-    assert '`V${percent}%' in js
+    assert 'view: ${percent}%' in js
     assert "Fit graph viewport to readable" in js
     assert "runtime-ide-minimap-viewport" in js
     assert "centerCanvasOnWorldPoint" in js
@@ -1578,7 +1662,29 @@ async def test_saved_transition_candidate_routes_actual_langgraph_run_loop(tmp_p
 async def test_workspace_template_graph_executes_through_langgraph_run_loop(tmp_path) -> None:
     registry = AgentRegistry()
     registry.register(_StaticAgent("orchestrator_agent", {}))
-    specimen = _StaticAgent("specimen_agent", {"specimen_result": {"ok": True, "status": "prepared"}})
+    fabrication_report = {
+        "schema": "fabrication_report.v1",
+        "digital_thread": {"specimen_id": "sp-1", "stl_path": "sp-1.stl", "gcode_path": "sp-1.gcode"},
+        "quality_gates": [{"gate": "slicer", "status": "pass", "evidence": {}, "repair": None}],
+        "fabrication_outcome": {"status": "virtual_finished", "location": "virtual_bridge", "warnings": [], "failure_code": None},
+    }
+    specimen_packet = {
+        "schema": "specimen_fabricated.v1",
+        "specimen_id": "sp-1",
+        "status": "ready",
+        "fabrication_report": fabrication_report,
+    }
+    specimen = _StaticAgent(
+        "specimen_agent",
+        {
+            "specimen_result": {"ok": True, "status": "prepared", "fabrication_report": fabrication_report},
+            "fabrication_report": fabrication_report,
+            "specimen_fabricated": specimen_packet,
+            "handoff_packet": specimen_packet,
+            "decisions": [{"decision_id": "specimen.handoff.prepared", "status": "ok"}],
+            "metrics": {"quality_gate_count": 1},
+        },
+    )
     registry.register(specimen)
     bundle = build_logger_bundle(run_id="run-langgraph-printer-template", run_root=tmp_path / "runs", logging_config={})
     state = OrchestratorState(
@@ -1605,6 +1711,12 @@ async def test_workspace_template_graph_executes_through_langgraph_run_loop(tmp_
 
     assert specimen.run_count == 1
     assert state.stage == Stage.COMPLETE
+    assert state.run_metadata["fabrication_report"]["schema"] == "fabrication_report.v1"
+    assert state.run_metadata["specimen_fabricated"]["schema"] == "specimen_fabricated.v1"
+    assert state.run_metadata["specimen_handoff_packet"]["schema"] == "specimen_fabricated.v1"
+    assert state.run_metadata["specimen_decision_register"][0]["decision_id"] == "specimen.handoff.prepared"
+    assert state.run_metadata["specimen_metrics"]["quality_gate_count"] == 1
+    assert any(packet["packet"]["schema"] == "specimen_fabricated.v1" for packet in state.run_metadata["handoff_packets"])
     assert any(event["graph_id"] == "printer_pipeline" for event in events)
     assert any(event["type"] == "node.completed" and event["node_id"] == "specimen" for event in events)
 
@@ -1648,6 +1760,14 @@ async def test_module_retry_policy_zero_attempts_fails_without_retry(tmp_path) -
     assert state.stage == Stage.ERROR
     assert state.retry_counters.get("design", 0) == 0
     assert not [event for event in events if event["type"] == "node.retrying"]
+    exception_gates = [
+        gate
+        for gate in state.run_metadata.get("guardian_gates", [])
+        if gate.get("phase") == "exception" and gate.get("agent") == "design_agent"
+    ]
+    assert exception_gates
+    assert exception_gates[-1]["schema"] == "guardian_gate_result.v1"
+    assert exception_gates[-1]["reason_code"] == "RUNTIMEERROR"
 
 
 def _approval_test_loop(tmp_path: Path) -> tuple[RunLoop, OrchestratorState, _StaticAgent, list[dict[str, object]]]:
@@ -2050,6 +2170,20 @@ async def test_configured_transition_changes_actual_langgraph_runtime(tmp_path) 
     assert state.stage == Stage.COMPLETE
     assert state.loop_count == 1
     assert "specimen_agent" not in state.agent_status
+    assert state.run_metadata["orchestrator_decision_register"]
+    assert state.run_metadata["orchestrator_handoff_packets"]
+    assert state.run_metadata["orchestrator_followups"]
+    assert state.run_metadata["loop_reflections"][-1]["schema"] == "loop_reflection.v1"
+    assert state.run_metadata["latest_orchestrator_handoff"]["schema"] == "handoff_packet.v1"
+    assert state.run_metadata["latest_orchestrator_followup"]["schema"] == "orchestrator_followup.v1"
+    assert state.run_metadata["latest_orchestration_plan"]["schema"] == "orchestration_plan.v1"
+    assert state.run_metadata["latest_orchestration_plan"]["parallelizable_checks"]
+    assert state.run_metadata["latest_orchestrator_parallel_checks"]["schema"] == "orchestrator_parallel_checks.v1"
+    assert state.run_metadata["latest_orchestrator_parallel_checks"]["execution_mode"] == "asyncio.gather/read_only"
+    assert any(event["event_type"] == "orchestrator.followup" for event in events)
+    assert any(event["event_type"] == "orchestrator.decision" for event in events)
+    assert any(event["event_type"] == "orchestrator.parallel_checks" for event in events)
+    assert any(event["event_type"] == "orchestrator.loop_reflection" for event in events)
     event_types = [event["type"] for event in events]
     assert "node.started" in event_types
     assert "edge.traversed" in event_types
@@ -2264,3 +2398,65 @@ module:
     assert started[-1]["payload"]["module_runtime"]["effective_handler"] == "module.generated_adapter"
     completed = [event for event in events if event["type"] == "node.completed" and event["node_id"] == "design"]
     assert completed[-1]["agent"] == "generated:design"
+
+@pytest.mark.asyncio
+async def test_module_runtime_context_preserves_python_task_when_llm_role_empty() -> None:
+    backend = _CaptureBackend()
+    base_ctx = _FakeAgentContext(backend)
+    module_ctx = ModuleRuntimeContext(
+        base_ctx,  # type: ignore[arg-type]
+        {
+            "id": "analysis",
+            "llm_role": "",
+            "llm": {"backend": "vllm", "model": "analysis-model"},
+            "prompt": {},
+        },
+        Stage.ANALYSIS,
+    )
+
+    response = await module_ctx.complete("analysis_fem_planning", "plan FEM loop")
+
+    assert response.model == "analysis-model"
+    assert backend.calls[-1]["metadata"]["task_type"] == "analysis_fem_planning"
+    assert backend.calls[-1]["metadata"]["requested_task_type"] == "analysis_fem_planning"
+    assert base_ctx.model_call_events[-1] == {
+        "task_type": "analysis_fem_planning",
+        "model": "analysis-model",
+        "role": "e4b",
+        "backend": "vllm",
+    }
+
+
+def test_langgraph_run_records_pre_run_guardian_gate(tmp_path: Path) -> None:
+    bundle = build_logger_bundle(run_id="run-pre-run-gate", run_root=tmp_path / "runs", logging_config={})
+    state = OrchestratorState(
+        run_id=bundle.run_dir.name,
+        experiment_id="exp-pre-run-gate",
+        mode=Mode.TEST,
+        stage=Stage.COMPLETE,
+    )
+    events: list[dict[str, object]] = []
+    loop = RunLoop(
+        state=state,
+        agent_registry=AgentRegistry(),
+        orchestrator_agent_name="orchestrator_agent",
+        ctx=object(),
+        logger=bundle.logger,
+        interval_seconds=0,
+        graph_config_path="graphs/configs/atr_closed_loop.yaml",
+        on_event=events.append,
+    )
+
+    asyncio.run(loop.run())
+
+    gates = state.run_metadata.get("guardian_gates", [])
+    assert gates
+    assert gates[0]["schema"] == "guardian_gate_result.v1"
+    assert gates[0]["phase"] == "pre_run"
+    assert gates[0]["guardian_contract"]["schema_version"] == "guardian_contract.v1"
+    guardian_events = [event for event in events if event.get("type") == "guardian.gate"]
+    assert guardian_events
+    assert guardian_events[0]["payload"]["guardian_gate"]["phase"] == "pre_run"
+    run_start = [event for event in events if event.get("type") == "run.started"]
+    assert run_start
+    assert run_start[0]["payload"]["guardian_gate"]["phase"] == "pre_run"

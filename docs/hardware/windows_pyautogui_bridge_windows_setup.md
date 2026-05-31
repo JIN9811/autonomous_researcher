@@ -52,6 +52,19 @@ Linux-side setup GUI:
 - Use Select for quick connection and Delete to remove a saved candidate.
 - Use Test Health + Programs before running any macro demo.
 - Use Run program1 Demo only when the operator is physically ready for the mouse movement.
+- Use UTM Profile, Readiness, Live Preflight, and Evidence Audit panels to verify screen evidence, Linux CSV pull, and Vision frame readiness before Analysis handoff.
+- In the UTM Profile/Test panel, tune the real UTM export contract: `export_glob`, `artifact_timeout_s`, `stable_for_sec`, optional `expected_export_path`, `target_window` or `regex:<target_window_regex>`, required window focus, manual-save fallback, screen assertions, and bench simulation.
+
+Windows-side local Web GUI:
+
+- Open `http://127.0.0.1:8765/` on the Windows PC running the bridge.
+- The GUI provides workflow status for Auth, GUI Driver, Program, Evidence, and Artifact.
+- `Last Run Summary` shows the active program/run id, CSV/artifact reference, and the next required gate.
+- `Step Trace` and `Artifacts` provide operator-visible evidence for UTM macro execution.
+- `Live UTM situation matrix` summarizes Bridge, Locators, Request Audit, Export, and Live Gate state above the operator console.
+- `Readiness locator shortcuts` turn readiness results into clickable missing/captured locator chips for faster calibration.
+- `Recent live execute identity` shows the latest run/specimen/program ids that Linux will audit before handoff.
+- Live UTM remains guarded by a physical safety confirmation checkbox.
 
 The Windows PC must not:
 
@@ -104,6 +117,22 @@ Optional for image matching with `confidence`:
 py -m pip install opencv-python
 ```
 
+Optional and recommended when the UTM software exposes Windows UI Automation controls:
+
+```powershell
+py -m pip install pywinauto
+```
+
+With `pywinauto` installed, locators can use UIA selectors such as `locator_backend: uia`, `auto_id`, `title`/`name`, `control_type`, `class_name`, and `best_match`. The bridge evaluates UIA locators before PyAutoGUI image matching and before fixed coordinates.
+
+Optional for OCR/text status checks with `assert_text` and `wait_until_text`:
+
+```powershell
+py -m pip install pytesseract Pillow
+```
+
+`pytesseract` also requires the Tesseract OCR executable to be installed on Windows and visible on `PATH`. If OCR is not installed, required text checks fail closed instead of being treated as successful.
+
 Verify PyAutoGUI import:
 
 ```powershell
@@ -151,6 +180,9 @@ Required bridge behavior:
 - Keep a small pause, for example `pyautogui.PAUSE = 0.1`.
 - Return structured JSON with `ok`, `status`, `failure_code`, and `step_trace`.
 - Log accepted action names and timestamps.
+- Append request audit entries to `bridge_requests.jsonl` without storing token values. Required fields: timestamp, client, method, path, token header presence, auth result.
+- Expose `GET /request-log` and a Windows-side Web GUI `Request Log` control so operators can inspect recent audit entries without opening the filesystem manually.
+- Show artifact root, request log path, locator root, and UTM export root in the Windows-side Web GUI.
 - Never accept raw Python, shell, PowerShell, or eval strings.
 - Lazy-import PyAutoGUI so `/health` can still answer when PyAutoGUI is missing.
 
@@ -235,6 +267,8 @@ Allowed:
 - `health`
 - `screenshot`
 - `locate_image`
+- `assert_text`
+- `wait_until_text`
 - `wait`
 - `move_to`
 - `click`
@@ -637,6 +671,7 @@ Recommended failure codes:
 - `PYAUTOGUI_IMAGE_NOT_FOUND`
 - `PYAUTOGUI_TIMEOUT`
 - `PYAUTOGUI_INTERNAL_ERROR`
+- `UTM_SAVE_DIALOG_TIMEOUT`
 
 Failure handling:
 
@@ -676,17 +711,588 @@ Recommended:
 
 As of this document:
 
-- The project guideline exists for the Linux/server side.
-- This document defines the Windows-side setup and operating contract.
-- The Windows-side contract now includes macro discovery through `/programs` and demo macro execution with `program_id: "program1"`.
-- The bridge should support communication and dependency reporting even before PyAutoGUI is installed.
-- The actual Windows bridge server implementation has not yet been added.
-- The current `equipment_agent` still uses the existing UTM-style tool until the next implementation phase.
+- The Linux-side bridge client exists in `device_bridges/windows_pyautogui_bridge.py`.
+- MCP tool registration exists through `mcp_tools/equipment_tools.py`.
+- The Windows helper exists in `install/windows_pyautogui_bridge_server.py`.
+- `/health`, `/programs`, `/execute`, `/artifacts`, and `/artifacts/{artifact_id}` are supported by the helper.
+- `program1` remains only a connectivity demo and must not be treated as UTM completion.
+- `utm_compression_start_v1` is the registered UTM protocol used by Equipment Agent for Analysis handoff.
+- Live UTM success now requires an exported CSV artifact unless `WINDOWS_PYAUTOGUI_ALLOW_SIMULATED_UTM=1` or `simulate_utm_protocol=true` is explicitly set for bench/demo testing.
 
 Next implementation phase:
 
-1. Add `device_bridges/windows_pyautogui_bridge.py`.
-2. Add `mcp_tools/equipment_tools.py`.
-3. Add simulator and live mode unit tests.
-4. Add optional `install/windows_pyautogui_bridge_server.py`.
-5. Update `equipment_agent` to prefer `equipment.pyautogui.run`.
+1. Add real UTM software locator templates or UIA selectors.
+2. Add protocol-specific Save/Export macro steps for the installed UTM software.
+3. Tune `WINDOWS_PYAUTOGUI_UTM_EXPORT_DIR` and file naming with the real UTM export path.
+4. Connect Vision Agent responses to `utm_pre_start`, `utm_motion_confirm`, and `utm_test_complete`.
+5. Add screenshots/OCR artifacts for before/running/complete state assertions.
+
+============================================================
+8. UTM Protocol And Artifact Endpoints
+============================================================
+
+The bundled Windows bridge helper now exposes UTM-oriented registered programs in addition to `program1`:
+
+- `utm_compression_start_v1`: focus/assert/start/complete/export UTM compression protocol.
+- `utm_export_csv_v1`: export CSV after completion.
+- `utm_manual_save_csv_v1`: manual Save As fallback.
+- `utm_stop_or_abort_v1`: stop/abort recovery macro.
+
+The bridge also exposes artifact endpoints for Linux-side pull:
+
+```text
+GET /artifacts
+GET /artifacts/{artifact_id}
+```
+
+`POST /execute` for `utm_compression_start_v1` returns `output_artifacts[]`. The Linux client calls `/artifacts/{artifact_id}`, writes the payload under `artifacts/equipment/<run_id>/utm/`, and passes that local CSV path to Analysis Agent through `equipment_result.result_file` and `equipment_result.utm_csv_path`.
+
+For real UTM software integration, the helper does not create a synthetic CSV by default. It watches the configured export path and returns success only after the file is stable and parseable.
+
+Live UTM export settings:
+
+- `WINDOWS_PYAUTOGUI_UTM_EXPORT_DIR`: default `C:\ATR\utm_exports`.
+- `WINDOWS_PYAUTOGUI_UTM_EXPORT_GLOB`: default `*.csv`.
+- `WINDOWS_PYAUTOGUI_UTM_FILE_STABLE_SEC`: default `2.0`.
+- `WINDOWS_PYAUTOGUI_ALLOW_SIMULATED_UTM`: default `0`; set to `1` only for bench/demo testing.
+- `WINDOWS_PYAUTOGUI_REQUIRE_UTM_SCREEN_ASSERTIONS`: default `0`; set to `1` when UIA/image locator checks are configured and must be enforced.
+
+The returned artifact response fields must stay stable: `artifact_id`, `kind=utm_csv`, `filename`, `size_bytes`, `sha256`, `row_count_probe`, and `columns_probe`. Required CSV columns are `time_s`, `displacement_mm`, and `force_N`.
+
+For live UTM protocol runs, the helper also attempts to save `screen_png` artifacts for `before_start` and `after_complete`. These are evidence artifacts only; `ready_for_analysis` still depends on the UTM CSV parse probe.
+
+Screen/action sequence behavior:
+
+- `utm_compression_start_v1` carries a default protocol sequence: health, focus, ready assertion, start click, running wait, complete wait, export wait.
+- The helper accepts payload `sequence[]` to override or specialize that protocol.
+- `assert_visible`, `wait_until`, and `click` use payload `locators` or per-action UIA selector / `image_path` / `target_image` / `x` / `y`.
+- Locator priority is UIA/pywinauto first when selector fields are present, then PyAutoGUI image matching, optional OCR/text assertion through `assert_text`/`wait_until_text`, then explicit coordinates only when configured.
+- If `WINDOWS_PYAUTOGUI_REQUIRE_UTM_SCREEN_ASSERTIONS=1` or `require_screen_assertions=true`, missing locator/image match blocks instead of faking success. Pre-start locator misses use `UI_LOCATOR_NOT_FOUND`; a clicked start button followed by missing `running_state` uses `CLICK_NO_STATE_CHANGE` and also reports `timeout_failure_code=UTM_RUNNING_STATE_TIMEOUT`; missing completion state uses `UTM_TEST_COMPLETE_TIMEOUT`.
+- Configured popup/error locators such as `error_popup`, `error_dialog`, `warning_dialog`, `communication_error`, or `save_error` are watched before actions, during `wait_until`, and immediately after clicks. If found, the protocol blocks with `UTM_ERROR_POPUP_DETECTED`.
+- If screen assertions are not required, missing locators are recorded as warnings, not as proof of screen success. The CSV artifact gate still decides whether Analysis can run.
+- The Linux runtime may call `vision.equipment_cross_check` before `/execute`; the Windows helper is still only responsible for GUI control and artifact serving, not physical scene judgment.
+- Linux-side `device_bridges/windows_pyautogui_bridge.py` merges each registered program profile into `/execute` payloads. `sequence`, `locators`, `export_glob`, `artifact_timeout_s`, `stable_for_sec`, and `require_screen_assertions` can be defined in `configs/devices.yaml` under `devices.equipment.windows_pyautogui.registered_programs.<program_id>`.
+- `/equipment/windows` exposes UTM Protocol Test controls for export glob, timeout, stable-file seconds, expected export path, target window/title regex, window-focus enforcement, manual-save fallback, screen-assertion enforcement, bench simulation, and locator JSON override. These controls are for setup/calibration before using the same program in the autonomous loop.
+
+============================================================
+9. UTM Locator Calibration Endpoints
+============================================================
+
+The Windows helper now exposes calibration endpoints in addition to `/execute` and artifact pull:
+
+```text
+POST /screenshot
+GET  /locators
+POST /locators/capture
+```
+
+Use these endpoints from `/equipment/windows` before enforcing `require_screen_assertions=true`:
+
+1. Select the saved Windows bridge candidate.
+2. Open the UTM software on the Windows PC and put it in the expected state.
+3. Click `Capture Screen` to record the current full screen as evidence.
+4. Enter a locator name such as `ready_state`, `start_button`, `running_state`, or `complete_state`.
+5. Enter `x`, `y`, `width`, and `height` for the visible UI region.
+6. Click `Capture Locator`.
+7. The returned locator is merged into the GUI `Locator JSON override` field.
+8. Run `Check Readiness`; it must show all required locators complete before live UTM execution.
+9. Run `UTM Protocol Test` with `Require screen assertions` enabled only after the captured locator images/selectors are correct.
+
+Captured locator files are stored on the Windows bridge host under:
+
+```text
+%WINDOWS_PYAUTOGUI_LOCATOR_ROOT%\<program_id>\<locator_name>.png
+```
+
+Default root:
+
+```text
+C:\ATR\equipment_locators
+```
+
+The Linux client pulls screenshot/locator artifacts through `/artifacts/{artifact_id}` and stores them under `artifacts/equipment/<run_id>/screenshots/` or `artifacts/equipment/<run_id>/locators/` for operator review. These artifacts are calibration/evidence artifacts. They do not replace the required UTM CSV artifact gate for Analysis handoff.
+
+Security rule: screenshot and locator capture require explicit GUI confirmation on the Linux side. They must not be triggered automatically by an LLM without a human setup/calibration action.
+
+============================================================
+10. Persistent UTM Profile for Autonomous Runs
+============================================================
+
+After locator capture and export-path tuning, save the settings from the Linux `/equipment/windows` page with `Save UTM Profile`.
+
+The saved profile path is:
+
+```text
+memory/equipment_utm_profile.json
+```
+
+The profile can contain:
+
+```json
+{
+  "program_id": "utm_compression_start_v1",
+  "export_glob": "*.csv",
+  "artifact_timeout_s": 60.0,
+  "stable_for_sec": 2.0,
+  "expected_export_path": "C:/ATR/utm_exports/<run_id>/<specimen_id>.csv",
+  "target_window": "UTM Controller",
+  "target_window_regex": "",
+  "require_window_focus": true,
+  "manual_save_required_if_no_artifact": true,
+  "require_screen_assertions": true,
+  "simulate_utm_protocol": false,
+  "locators": {
+    "ready_state": {"locator_backend": "uia", "auto_id": "readyStatus", "control_type": "Text"},
+    "start_button": {"image_path": "C:/ATR/equipment_locators/utm_compression_start_v1/start_button.png", "confidence": 0.8}
+  }
+}
+```
+
+The Linux bridge client merges this profile into the registered UTM program before `/execute` is called. This means the same saved calibration is used by:
+
+- UTM Protocol Test in `/equipment/windows`.
+- MCP/tool calls through `equipment.pyautogui.run`.
+- The autonomous Lab Equipment Agent stage in the closed-loop workflow.
+
+If the UTM screen changes, recapture the affected locator, save the profile again, and rerun the protocol test before enabling a live experiment run.
+
+============================================================
+11. Non-Actuating Live Preflight
+============================================================
+
+Before running the real UTM protocol, use the Linux `/equipment/windows` page and click `Live Preflight`.
+
+The preflight is intentionally safe:
+
+```text
+POST /api/equipment/windows/live-preflight
+```
+
+It requires `confirm_preflight=true` and calls only read/calibration endpoints on the Windows bridge:
+
+```text
+GET  /health
+GET  /programs
+GET  /locators
+POST /screenshot   # only when Capture screen is checked
+```
+
+It never calls `/execute`, so it must not start the UTM program, move the mouse through the UTM start action, or generate a fake UTM result.
+
+The response is `equipment.pyautogui.live_preflight` and contains:
+
+- `non_actuating=true`
+- `touched_endpoints` so the operator can confirm `/execute` was not used
+- passive setup gates from `/api/equipment/windows/readiness`
+- live `/health` and PyAutoGUI availability
+- live `/programs` registry check for `utm_compression_start_v1`
+- live locator-library status
+- optional screenshot evidence path
+- blockers/warnings and next actions
+
+Use this sequence before a physical UTM run:
+
+1. Scan/select the Windows bridge candidate.
+2. Capture or enter required UTM locators.
+3. Save the UTM profile.
+4. Run `Check Readiness`.
+5. Run `Live Preflight`.
+6. Only then run `UTM Protocol Test` or allow the autonomous Lab Equipment Agent stage to call the real protocol.
+
+Manual save/export fallback behavior:
+
+- `utm_compression_start_v1` first watches `WINDOWS_PYAUTOGUI_UTM_EXPORT_DIR` for a stable parseable CSV.
+- If no CSV appears, the helper runs `utm_manual_save_csv_v1` automatically by default.
+- The fallback writes to `WINDOWS_PYAUTOGUI_UTM_EXPORT_DIR\<run_id>\<specimen_id>.csv`, then runs the same stable-file and parse-probe checks.
+- Set request payload `manual_save_required_if_no_artifact=false` only when the installed UTM software should never receive an automated Save As fallback.
+- Success via fallback is visible as `data_acquisition.save_method=manual_save_dialog`; failure remains blocked with the original export/parse failure code.
+
+============================================================
+12. Linux Pull Ledger After Windows Export
+============================================================
+
+When a UTM run succeeds on the Windows bridge, the response must expose a pullable `utm_csv` artifact. The Linux bridge then calls:
+
+```text
+GET /artifacts/<artifact_id>
+```
+
+The Linux side stores the CSV under `artifacts/equipment/<run_id>/utm/` and updates the handoff ledger:
+
+```json
+{
+  "result_file": "artifacts/equipment/<run_id>/utm/<file>.csv",
+  "utm_csv_path": "artifacts/equipment/<run_id>/utm/<file>.csv",
+  "data_acquisition": {
+    "status": "pulled_to_linux",
+    "windows_path": "C:/ATR/utm_exports/<run_id>/<file>.csv",
+    "linux_path": "artifacts/equipment/<run_id>/utm/<file>.csv",
+    "local_path": "artifacts/equipment/<run_id>/utm/<file>.csv",
+    "sha256": "...",
+    "row_count_probe": 80,
+    "columns_probe": ["time_s", "displacement_mm", "force_N"]
+  }
+}
+```
+
+Windows paths are evidence/provenance only. `AnalysisAgent` requires the Linux-local file path and parse-probe metadata before processing UTM data. If the file cannot be pulled or parsed, the workflow must remain blocked instead of fabricating live data.
+
+============================================================
+13. Required Screen Assertions
+============================================================
+
+When `WINDOWS_PYAUTOGUI_REQUIRE_UTM_SCREEN_ASSERTIONS=1` or a request sets `require_screen_assertions=true`, the Windows bridge must execute the registered protocol's locator assertions directly. It should not require a caller-provided `screen_assertions_verified` flag.
+
+Expected behavior:
+
+1. capture the pre-start screen artifact when screenshots are available;
+2. run `assert_visible` for `ready_state`;
+3. locate and click `start_button`;
+4. run `wait_until` for `running_state` and `complete_state`;
+5. block with `UI_LOCATOR_NOT_FOUND` if any required locator cannot be found;
+6. continue to export watching/manual save only after the screen-control sequence passes.
+
+This keeps the proof of GUI state transition inside the Windows bridge executor, where the actual screen is visible.
+
+============================================================
+14. Screen-State Evidence Artifacts
+============================================================
+
+For `utm_compression_start_v1`, the bridge records screen evidence at state transition checkpoints:
+
+- `before_start`: captured before running the registered sequence;
+- `after_start`: captured when `wait_until running_state` succeeds;
+- `after_complete`: captured when `wait_until complete_state` succeeds, or as a fallback after export success if no complete-state screenshot was captured earlier.
+
+The response `screen_checks` must include the artifact IDs:
+
+```json
+[
+  {"checkpoint": "before_start", "state": "ready", "screenshot_artifact": "screen_before_start_..."},
+  {"checkpoint": "after_start", "state": "running", "screenshot_artifact": "screen_after_start_..."},
+  {"checkpoint": "after_complete", "state": "complete", "screenshot_artifact": "screen_after_complete_..."}
+]
+```
+
+These artifacts are separate from the UTM CSV artifact. They prove GUI state observation, while the CSV artifact proves data acquisition.
+
+============================================================
+15. Failure Evidence Retention
+============================================================
+
+A blocked UTM response should still be useful for debugging and Guardian/Knowledge memory. The Windows bridge therefore returns screen evidence on failure paths:
+
+- sequence failure: keep `before_start`, capture `failure`, return `output_artifacts` and `screen_checks`;
+- export/save failure: keep any observed `after_start` / `after_complete` artifacts, capture `failure`, return `output_artifacts` and `screen_checks`;
+- no synthetic CSV is generated in live mode just to make the failure look successful.
+
+The Linux side should treat these artifacts as failure evidence, not as Analysis input. Only a pulled parseable `utm_csv` artifact can satisfy the data handoff gate.
+
+============================================================
+16. Target Window Focus and Windows Operator GUI
+============================================================
+
+The packaged Windows bridge GUI at `http://127.0.0.1:8765/` is now the preferred local setup panel for the Windows UTM workstation. It provides token health, program registry inspection, screenshot capture, locator capture, UTM simulation, guarded live UTM execution, result JSON, step trace, and artifact ledger in one page.
+
+Use it for Windows-side setup only. The autonomous Linux workflow still requires the saved bridge candidate, saved UTM profile, Vision physical cross-checks, pulled CSV, parse probe, Guardian failure reporting, and Analysis handoff.
+
+`focus_window` now activates the real UTM application window before image assertions/clicks when a selector is configured. The payload or registered program may provide `target_window`, `target_window_regex`, `window_title`, `title`, or `target_app`. Placeholder values such as `main` and `main_window_title_or_regex` are ignored as real titles.
+
+Recommended live payload fields:
+
+```json
+{
+  "program_id": "utm_compression_start_v1",
+  "target_window": "<real UTM software title substring>",
+  "require_window_focus": true,
+  "require_screen_assertions": true,
+  "manual_save_required_if_no_artifact": true
+}
+```
+
+If the target window cannot be activated and focus is required, the Windows bridge must block with `PYAUTOGUI_WINDOW_NOT_FOUND`. This prevents a live UTM macro from clicking a wrong active window.
+
+============================================================
+17. Live Evidence Audit Handoff Gate
+============================================================
+
+A Windows-side UTM CSV export is not enough to enter Analysis. The Linux Lab Equipment Agent now treats the following as separate live gates for `windows_pyautogui` UTM runs:
+
+```text
+screen_evidence_complete  -> before_start, after_start, after_complete screenshots observed
+linux_artifact_pulled     -> CSV pulled from Windows artifact endpoint to a Linux-local path
+vision_evidence_complete  -> required Vision checks passed with frame evidence IDs
+```
+
+A valid live Windows UTM handoff should therefore show:
+
+```json
+{
+  "data_acquisition": {
+    "status": "pulled_to_linux",
+    "linux_path": "artifacts/equipment/<run_id>/utm/<file>.csv"
+  },
+  "cross_checks": {
+    "screen_evidence_complete": true,
+    "linux_artifact_pulled": true,
+    "vision_evidence_complete": true
+  },
+  "live_evidence_audit": {
+    "required_for_handoff": true,
+    "screen_evidence": {"ok": true, "missing_checkpoints": []},
+    "linux_artifact_pull": {"ok": true},
+    "vision_evidence": {"ok": true}
+  }
+}
+```
+
+If the Windows server reports only `exported_on_windows`, the run remains blocked with `UTM_LINUX_ARTIFACT_PULL_REQUIRED`. This prevents Analysis from consuming a path that only exists on the Windows workstation.
+
+============================================================
+18. Windows Equipment Post-Run Evidence Audit
+============================================================
+
+The Linux `/equipment/windows` page now exposes `Audit Last Run Evidence`. This is a passive check of the current runtime metadata and does not call the Windows bridge.
+
+Endpoint:
+
+```text
+GET /api/equipment/windows/evidence-audit
+```
+
+Use it after a Lab Equipment stage or UTM protocol test. It answers whether the last run has enough evidence to enter Analysis:
+
+- complete screen evidence refs;
+- Linux-local CSV pull;
+- Vision frame evidence;
+- parse-probe success;
+- no blocking reasons from `equipment_report.decision`.
+
+The same payload is included in `/api/equipment/windows/config` as `utm_evidence_audit` so the GUI reflects the latest post-run state when reopened.
+
+============================================================
+19. Setup-GUI UTM Protocol Test vs Full Agent Handoff
+============================================================
+
+When an operator clicks `Run UTM Protocol Test` on `/equipment/windows`, the endpoint stores the raw Windows run result as runtime metadata. `Audit Last Run Evidence` can inspect this raw result immediately.
+
+Important distinction:
+
+- setup-GUI UTM protocol test can verify Windows screen evidence and Linux CSV pull;
+- it does not replace the full Lab Equipment Agent stage;
+- it does not provide Vision frame evidence by itself;
+- therefore the post-run audit remains blocked for Analysis with `UTM_VISION_EVIDENCE_FRAMES_REQUIRED` until the autonomous Equipment Agent packages Vision cross-check evidence into `equipment_report.v1`.
+
+This prevents a setup/calibration test from being mistaken for a complete physical autonomous experiment.
+
+## 2026-05-30 Windows GUI UTM Export Controls
+
+The Windows-side bridge GUI now exposes the same data-acquisition controls that the UTM registered protocol consumes:
+
+- `Export Glob`: sent as `export_glob`; used when searching `WINDOWS_PYAUTOGUI_UTM_EXPORT_DIR` for the UTM CSV.
+- `Artifact Timeout Sec`: sent as `artifact_timeout_s`; maximum wait budget for the exported CSV to appear and become stable.
+- `Stable File Sec`: sent as `stable_for_sec`; the file size must remain stable for this duration before the bridge treats it as complete.
+- `Expected Export Path`: sent as `expected_export_path`; optional exact file path when the operator already knows where the UTM software will save the CSV.
+
+These controls are available in both the install helper server and the packaged `Pyautogui_server_for_window` server. `Fill UTM JSON`, `Run UTM Simulation`, and `Run Live UTM` all include these fields in the `/execute` payload. This keeps operator GUI behavior aligned with the Linux Lab Equipment Agent data-recovery gate: Windows export is not enough; the Linux side must still pull the artifact and parse-probe it before Analysis handoff.
+
+Required readiness locator gate:
+
+- Default required locator names: `ready_state`, `start_button`, `running_state`, `complete_state`.
+- If the saved UTM profile overrides `sequence`, required names are inferred from `assert_visible`, `click`, and `wait_until` action targets.
+- `/api/equipment/windows/readiness` blocks with `UTM_REQUIRED_LOCATORS_MISSING` when screen assertions are required but one or more required locators are missing.
+- `/equipment/windows` shows `missing_required_locators` so the operator can capture the exact missing locator before live preflight or UTM protocol execution.
+
+## 2026-05-30 Windows-Side Readiness Button
+
+The packaged Windows bridge GUI and the install helper GUI now include a `Readiness` button.
+
+Behavior:
+
+- Calls `GET /readiness` with the same token authentication as `/health`, `/programs`, and `/execute`.
+- Does not execute any UTM macro and does not move the machine.
+- Reads the registered `utm_compression_start_v1` protocol and derives required locator names from `assert_visible`, `click`, and `wait_until` steps.
+- Defaults to `ready_state`, `start_button`, `running_state`, and `complete_state` when no sequence-derived names are available.
+- Reports `configured_locator_names`, `missing_required_locators`, and `required_locators_complete`.
+- Blocks with `UTM_REQUIRED_LOCATORS_MISSING` when the Windows locator library is incomplete.
+
+Operator use:
+
+1. Open the UTM software on the Windows PC.
+2. Capture `ready_state`, `start_button`, `running_state`, and `complete_state` locators under the same program ID.
+3. Click `Readiness`.
+4. Proceed to Linux live preflight only when the Windows GUI shows no missing required locators.
+
+## 2026-05-30 Request Audit Gate for Live Handoff
+
+The Linux Lab Equipment Agent now requires request-audit evidence before a live Windows UTM run can hand off to Analysis.
+
+Required live evidence:
+
+- `bridge_requests.jsonl` path is known.
+- `/request-log` returns one or more events, or the run result carries `request_log_event_count`.
+- Recent request paths include `/execute` when recent paths are available.
+- The `/execute` identity matches the expected `run_id`, `sequence_id`, `specimen_id`, and `program_id`.
+
+Blocking codes:
+
+- `UTM_REQUEST_LOG_REQUIRED`: no usable request log path/event evidence.
+- `UTM_REQUEST_LOG_EXECUTE_EVENT_REQUIRED`: request log exists but does not show the live `/execute` call.
+- `UTM_REQUEST_LOG_EXECUTE_IDENTITY_REQUIRED`: `/execute` is present but the run/sequence/specimen/program identity does not match the Linux request.
+
+This gate is independent from screen evidence, Vision evidence, and CSV parse evidence. All gates must pass for `equipment_handoff.status=ready_for_analysis`.
+
+Linux Equipment GUI alignment:
+
+- `/api/equipment/windows/evidence-audit` uses this same strict rule; the GUI Evidence Audit card reports `request_log=execute-ok` only when `/execute` is visible in recent request paths.
+- A request-log file path plus event count is still blocked if the recent path list does not prove the live `/execute` command.
+- This keeps the Windows setup helper, Linux Equipment workspace, and Lab Equipment Agent handoff gate consistent.
+
+## 2026-05-30 Windows GUI Request Audit Card
+
+The Windows-side bridge GUI now includes a `Request Audit` card in addition to the raw JSON result panel. The card summarizes:
+
+- total request-log events,
+- whether a live `/execute` request has been seen,
+- recent request paths,
+- the current handoff gate message.
+
+`GET /request-log` now returns `recent_paths`, `execute_event_seen`, `execute_event_count`, and `last_execute_at`. Token values remain excluded from the log. For a live UTM run, `execute_event_seen=true` is required before the Linux Equipment workspace and Lab Equipment Agent can treat the request-audit gate as satisfied.
+
+Request-log summary compatibility:
+
+- Linux no longer requires the full `events[]` array to prove request-audit readiness. The Windows bridge may return summary-only fields when log size or privacy policy requires it.
+- Required summary fields are `event_count`, `recent_paths`, `execute_event_seen`, `execute_event_count`, and `last_execute_at`.
+- `execute_event_seen=true` is accepted only as proof that `/execute` appeared in the Windows request audit path; all other live gates still apply.
+
+============================================================
+Windows-Side GUI Update: Live Proof Checklist
+============================================================
+
+The Windows bridge local Web GUI now includes a `Live Proof Checklist` card.
+
+Purpose:
+
+- Show the operator whether the Windows-side evidence is sufficient for a live UTM handoff.
+- Keep the Windows PC operator view aligned with the Linux Equipment Agent request-audit gate.
+- Avoid treating a visible bridge page or a health check as proof that a live `/execute` command actually reached the Windows bridge.
+
+Checklist items:
+
+- `Health + PyAutoGUI`: requires `/health` to show PyAutoGUI as available.
+- `UTM Locators`: requires `/readiness` to report all required UTM locators captured.
+- `Live Safety Confirmed`: requires the local operator safety checkbox before `Run Live UTM`.
+- `Request Log /execute`: requires `/request-log` to show an actual `/execute` event.
+- `Screen Evidence`: expects before-start, after-start, and after-complete UTM screenshots from the live run.
+- `CSV + Parse Probe`: expects a verified UTM CSV/data artifact with a parse probe.
+
+GUI controls:
+
+- `Refresh Evidence` calls `/health`, `/readiness`, and `/request-log` in sequence.
+- `Auto-refresh request audit` polls `/request-log` every 5 seconds while the page is visible.
+- The checklist preserves the latest health/readiness/audit state while the operator inspects result JSON or artifacts.
+
+Operational rule:
+
+- The checklist is a local operator aid. It does not bypass the Linux-side Equipment Agent, Guardian, Vision evidence, Linux CSV pull, or Analysis handoff gates.
+
+## 2026-05-30 Linux `/equipment/windows` Operator Rail
+
+The Linux-side Windows Equipment setup page now mirrors the Windows-side operator-console concept with a five-step command rail:
+
+1. `Scan`: discover token-verified bridge candidates.
+2. `Readiness`: validate saved connection and UTM profile readiness.
+3. `Preflight`: perform non-actuating live bridge checks.
+4. `UTM Run`: execute the configured UTM protocol or simulation through the existing run handler.
+5. `Evidence`: verify the latest handoff proof before Analysis consumes UTM data.
+
+The command rail does not introduce new backend privileges. It clicks the existing controls and keeps the detailed forms visible for subnet/token setup, UTM profile editing, locator calibration, proof-package creation, and request-log audit.
+
+Registered UTM protocols listed by the Linux client now include public protocol contract fields such as preconditions, expected screen states, save policy, output artifacts, and safe-abort metadata. Use this output to confirm that Linux and Windows agree on the protocol before a live run.
+
+## 2026-05-30 UTM Stop/Abort from Linux Equipment GUI
+
+The Linux `/equipment/windows` page includes a dedicated `Abort` rail action and `Run UTM Stop/Abort` button for `utm_stop_or_abort_v1`.
+
+This recovery macro intentionally bypasses the normal UTM locator/readiness/live-preflight checks. The purpose is to keep a safe stop path available even if the UTM software is in an unexpected screen state. It still requires explicit operator confirmation and uses the selected Windows bridge token/session. After dispatch, check Request Audit to confirm that `/execute` was recorded.
+
+Do not use the stop/abort response as evidence of a completed test. It is recovery evidence only.
+
+## 2026-05-30 Windows-Side GUI Recovery Rail Update
+
+The Windows-side bridge page now exposes `Stop / Abort` in both the UTM protocol control row and the top command rail.
+
+Behavior:
+
+- The button sends the registered `utm_stop_or_abort_v1` payload to `/execute`.
+- It does not run the normal live UTM preflight first, because the recovery macro must remain available when UTM locators, screen state, or the live run are stuck.
+- It still records the request in `bridge_requests.jsonl`, so the Linux side can audit that `/execute` reached the Windows bridge.
+- After using recovery, run `Request Log` and `Refresh Evidence` before retrying a normal UTM protocol.
+
+The Linux `/equipment/windows` page also includes `Open Windows GUI`, which opens the selected bridge URL in a new tab. Use it after saving/selecting a token-verified candidate so the Windows operator can inspect local health, locator readiness, evidence, and recovery controls directly.
+
+## 2026-05-30 Windows GUI Operator Console and Payload Preview
+
+The Windows-side bridge GUI now includes a `Local Operator Console` above the runtime overview.
+
+Purpose:
+- Show the exact `/execute` payload before a Windows GUI command is sent.
+- Distinguish `Simulation`, `Live UTM`, and `Stop / Abort` intent locally on the Windows PC.
+- Validate required command identity and numeric artifact timing fields before the browser starts live preflight.
+- Keep the registered `Stop / Abort` recovery button available even while another GUI command is marked busy.
+
+Operator flow:
+1. Confirm `Health` and token reachability.
+2. Fill `Run ID`, `Specimen ID`, export glob, artifact timeout, stable-file time, and optional target window.
+3. Use `Preview Sim`, `Preview Live`, or `Preview Abort` to inspect the exact payload envelope.
+4. Use `Safe Preflight` before live control.
+5. Use `Preflight + Run Live UTM` only after physical setup confirmation.
+6. If the UTM GUI becomes stuck, use `Stop / Abort`; it dispatches `utm_stop_or_abort_v1` without requiring the normal live preflight gate.
+
+Validation behavior:
+- Empty `Run ID` or `Specimen ID` blocks browser-side command submission.
+- `Artifact Timeout Sec` and `Stable File Sec` must be positive numeric values.
+- On validation failure, the GUI renders `WINDOWS_GUI_INPUT_INVALID` and does not call `/health`, `/readiness`, `/request-log`, or `/execute` for that command.
+
+This is a local operator safeguard. The Linux Lab Equipment Agent still performs its own bridge audit, request-log audit, screen-state evidence checks, physical cross-check, and UTM data artifact pull before handing off to Analysis.
+
+## 2026-05-30 Bridge Health Version Metadata
+
+The Windows bridge `/health` response now reports:
+
+```json
+{
+  "server_version": "WindowsPyAutoGUIBridge/0.1",
+  "script_version": "windows_pyautogui_bridge_server.py:utm_visual_control_v1",
+  "pyautogui": {
+    "available": true,
+    "failsafe": true,
+    "pause": 0.1
+  }
+}
+```
+
+The Linux bridge client adds live-call metadata before the Equipment Agent packages the report:
+
+```json
+{
+  "bridge_url": "http://<windows-ip>:8765",
+  "bridge_host": "<windows-ip>",
+  "client_latency_ms": 1.23
+}
+```
+
+Use these fields when debugging mismatched Windows hosts, stale helper scripts, PyAutoGUI import failures, or unexpected network latency.
+
+## Operator JSON Safety Note
+
+The Windows bridge `/execute` endpoint is fail-closed for unsupported `sequence[]` actions. Direct use of the Windows Web GUI `Run JSON` panel does not bypass the action contract: an unknown action such as `shell` returns `PYAUTOGUI_ACTION_NOT_ALLOWED` and the sequence is blocked. Use registered programs for UTM work and use custom JSON only for bounded calibration/debug actions.
+
+## 2026-05-30 Compact Windows Operator GUI
+
+The Windows bridge page has a compact operations layout for live UTM work.
+
+- `Overview` is shown before the payload console and timeline so the operator sees bridge status, proof gates, request audit, and data/export state first.
+- The overview area uses two columns on wide monitors and keeps proof/evidence cards full-width for readability.
+- Connection, diagnostics, UTM protocol, locator capture, and operator log sections have `Collapse` / `Expand` controls. These preferences are local to the browser.
+- The GUI layout is only an operator convenience layer. Live control remains blocked unless token auth, safe preflight, locator readiness, physical safety confirmation, and `/execute` audit requirements are satisfied.

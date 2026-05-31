@@ -19,7 +19,7 @@
 system:
   app_name: autonomous_researcher
   default_mode: test
-  event_buffer_size: 300
+  event_buffer_size: 5000
   loop_interval_seconds: 0.05
   max_retry_per_stage: 2
   planning_timeout_seconds: 600

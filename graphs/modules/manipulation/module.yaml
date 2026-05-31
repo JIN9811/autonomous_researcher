@@ -7,25 +7,104 @@ module:
   safety:
     live_requires_validation: true
     dry_run_supported: true
+    execution_boundary: lerobot_bridge_only
+    guardian_stop_authority: true
   tools:
   - lerobot.rollout.start
   - robot.pick_place
+  runtime_contract:
+    policy_executor: pi05_or_lerobot_policy
+    supervisor: manipulation_agent
+    progress_monitor: sarm_lite
+    live_bridge_boundary: LeRobotBridge
+    direct_shell_generation_allowed: false
+  supported_tasks:
+  - id: transfer_to_utm
+    label: Printed specimen to UTM fixture
+    source_location: 3dp_output_area
+    target_location: utm_fixture
+    terminal_pose: standby_clear_of_utm
+    verification_signal: specimen_on_utm_platen
+    verified_next_agent: lab_equipment_agent
+  - id: clear_utm_to_disposal
+    label: Tested specimen to discard bin
+    source_location: utm_fixture
+    target_location: discard_bin
+    terminal_pose: standby_clear_of_utm
+    verification_signal: utm_home_restored
+    verified_next_agent: knowledge_agent
   internal_graph:
-    - id: 01_load_policy_profile
-      label: Load Policy Profile
+    - id: 01_resolve_transfer_task
+      label: Resolve bounded manipulation task
       kind: internal_step
-    - id: 02_check_robot_bridge
-      label: Check Robot Bridge
+      emits:
+      - task_id
+      - skill_id
+    - id: 02_collect_vision_and_specimen_context
+      label: Collect Vision signal and specimen handoff context
       kind: internal_step
-    - id: 03_execute_transfer_rollout
-      label: Execute Transfer Rollout
+      consumes:
+      - vision_signal
+      - specimen_result
+    - id: 03_validate_policy_profile_and_live_gates
+      label: Validate robot profile, policy ref, Vision freshness, and live confirmation
       kind: internal_step
-    - id: 04_handoff_equipment
-      label: Handoff Equipment
+      emits:
+      - preflight
+    - id: 04_select_policy_backend
+      label: Select LeRobot/Pi0.5 backend without bypassing bridge boundary
       kind: internal_step
+      emits:
+      - policy_plan
+    - id: 05_start_bounded_rollout
+      label: Start bounded LeRobot rollout or compatibility pick-place
+      kind: tool_step
+      tool: lerobot.rollout.start
+    - id: 06_monitor_rollout_events
+      label: Capture rollout session, logs, and event trace
+      kind: internal_step
+      emits:
+      - rollout_runtime
+    - id: 07_score_sarm_stage_progress
+      label: Score SARM-lite stage progress, precursor risk, and recovery hint
+      kind: internal_step
+      emits:
+      - sarm
+      - stage_machine
+    - id: 08_request_post_place_vision_verification
+      label: Request Vision verification before downstream physical handoff
+      kind: handoff_gate
+      emits:
+      - verification_status
+    - id: 09_decide_recover_stop_or_handoff
+      label: Decide recover, stop, Vision verify, or verified downstream handoff
+      kind: internal_step
+      emits:
+      - decision
+    - id: 10_package_manipulation_report
+      label: Package manipulation_report.v1 and robot_task_result.v1
+      kind: internal_step
+      emits:
+      - manipulation_report
+      - robot_task_result
+    - id: 11_store_rollout_evidence
+      label: Attach rollout log/dataset/checkpoint evidence for Knowledge and Guardian
+      kind: internal_step
+      emits:
+      - evidence_refs
   io_contract:
-    input: OrchestratorState
-    output: AgentResult.data merged into OrchestratorState
+    input: OrchestratorState with specimen_result, latest Vision observation, and manipulation profile
+    output:
+    - manipulation
+    - sarm
+    - manipulation_report.v1
+    - robot_task_result.v1
+    - handoff_packet
+    - decisions
+    - metrics
   notes: >-
     GUI/module editor may edit this module config, but execution remains bound to
-    allowlisted Python handlers. Python source is not modified by the GUI.
+    allowlisted Python handlers. Manipulation supervises short Pi0.5/LeRobot
+    skills; Pi0.5 is not a planner and direct shell command generation is not
+    allowed. Post-place Vision verification is represented as a handoff gate
+    until the graph includes an explicit second Vision node after Manipulation.

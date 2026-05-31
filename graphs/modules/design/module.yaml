@@ -17,21 +17,47 @@ module:
       event_type: orchestrator_plan
       enabled: true
   internal_graph:
-    - id: 01_intake_constraints
-      label: Intake Constraints
+    - id: 01_receive_objective_context
+      label: Receive Objective and Runtime Context
       kind: internal_step
-    - id: 02_generate_candidate_spec
-      label: Generate Candidate Spec
+    - id: 02_normalize_objective_contract
+      label: Normalize Objective Contract
       kind: internal_step
-    - id: 03_validate_fdm_printability
-      label: Validate Fdm Printability
+    - id: 03_collect_prior_bo_knowledge_failure
+      label: Collect Prior BO Knowledge Failure Context
       kind: internal_step
-    - id: 04_handoff_specimen
-      label: Handoff Specimen
+    - id: 04_form_hypothesis
+      label: Form Hypothesis and Test Variables
+      kind: internal_step
+    - id: 05_construct_design_space
+      label: Construct Constrained Design Space
+      kind: internal_step
+    - id: 06_generate_candidate_pool
+      label: Generate Deterministic Candidate Pool
+      kind: internal_step
+    - id: 07_apply_constraint_gate
+      label: Apply FDM Fixture Failure Constraint Gate
+      kind: internal_step
+    - id: 08_repair_or_reject_candidates
+      label: Repair or Reject Invalid Candidates
+      kind: internal_step
+    - id: 09_score_uncertainty_information_risk
+      label: Score Objective Uncertainty Information Risk
+      kind: internal_step
+    - id: 10_select_authoritative_candidate
+      label: Select Authoritative Candidate
+      kind: internal_step
+    - id: 11_emit_design_report
+      label: Emit Design Report and Decision Register
+      kind: internal_step
+    - id: 12_handoff_specimen
+      label: Handoff Experiment Spec to Specimen Agent
       kind: internal_step
   io_contract:
-    input: OrchestratorState
-    output: AgentResult.data merged into OrchestratorState
+    input: OrchestratorState with objective, constraints, prior_context, bo_result, knowledge, and failure_memory
+    output: AgentResult.data with experiment_spec, design_report, design_candidate, candidate_ledger, decisions, metrics, and handoff_packet
   notes: >-
     GUI/module editor may edit this module config, but execution remains bound to
-    allowlisted Python handlers. Python source is not modified by the GUI.
+    allowlisted Python handlers. The LLM reviews rationale only; deterministic
+    candidate ranking and hard constraints remain the source of the selected
+    experiment_spec.

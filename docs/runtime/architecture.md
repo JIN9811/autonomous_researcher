@@ -31,7 +31,7 @@ and `ExperimentEvaluationResult` so test, virtual, and live bridge paths remain 
 - `printer.prepare`: internal PrusaSlicer/PrusaLink boundary for slicing, upload/start gates, and ejection gates.
 - `vision_agent`: lightweight 3DP output-area observation owner. It combines `camera.capture` with the latest `specimen_result` and emits `pose_estimate`, `pickup_target`, and `transfer_readiness` for the robot transfer stage.
 - `manipulation_agent`: robot manipulation owner. The compatibility path keeps `robot.pick_place`; the LeRobot path calls `lerobot.rollout.start`. After a ready `specimen_result`, the default transfer strategy is Pi0.5 LeRobot rollout from `3dp_output_area` to `utm_fixture` unless the spec explicitly requests `fixed_kinematic`. Operator-saved Manipulation Agent defaults are loaded from `memory/manipulation_agent_bridge.json` before each live/test loop execution, with explicit experiment fields taking precedence.
-- `equipment_agent`: Lab Equipment owner. It uses `equipment.pyautogui.health`, `equipment.pyautogui.list_programs`, and `equipment.pyautogui.run` through the Windows PyAutoGUI Bridge, then hands `equipment_result` and `equipment_handoff` to Analysis.
+- `equipment_agent`: Lab Equipment owner. It uses `equipment.pyautogui.health`, `equipment.pyautogui.list_programs`, `equipment.pyautogui.run`, and `equipment.pyautogui.request_log` through the Windows PyAutoGUI Bridge, then hands `equipment_result`, `equipment_report.v1`, `utm_data_ready.v1`, and `equipment_handoff` to Analysis with screen/data/vision/request-audit evidence refs.
 - `analysis_agent`: UTM-data analysis owner. It extracts force/displacement curves from `equipment_result` inline data or CSV/JSON files, computes mechanical metrics and objective score, calls `cae.run_static_analysis` when available, uses deterministic synthetic UTM/CAE data only in test mode, and blocks live analysis when real UTM data is missing.
 - `device_bridges/cae_bridge.py`: CAE bridge for CalculiX/Gmsh preflight plus deterministic equivalent bottom-fixed/top-cyclic analysis used by test-mode closed-loop scoring.
 - `device_bridges/lerobot_bridge.py`: LeRobot / ROBOTIS bridge with deterministic test sessions, command previews, step traces, and live gates.
@@ -77,3 +77,14 @@ Module YAML is now bound into execution through `ModuleRuntimeContext`. Stage ag
 - Runtime IDE supports graph YAML export/import. Imports are parsed, schema-validated, and compile-checked as drafts; activation still requires an explicit versioned save.
 - Runtime IDE supports module internal graph step reordering/add/delete, handler dropdown edits, prompt path/override edits, tool list edits, LLM backend/model hints, timeout/retry policy, and safety flags as module config edits only; Python source remains immutable from the IDE and handler values come from the registry allowlist.
 - Runtime IDE validation must include hands-on feature exercise: graph selection across primary/workspace templates, Top Bar state/control buttons, Graph Explorer search/select, Agent/Device/Metrics/Approval panels, approval request/resolve API flow, node drag, edge edit/connect/delete, YAML export/import, module handler/step edit, module prompt/tool/LLM/backend config edit, live timeline, replay, artifact preview, workspace API calls, debugging of failures found during exercise, and full regression tests.
+
+### 2026-05-29 Vision signal bus update
+
+`vision_agent` now acts as a lab perception signal bus. It still provides the
+legacy pickup observation consumed by Manipulation, but also emits
+`vision_report.v1` and `vision_signal.v1` with zone state, confidence,
+freshness, visual evidence paths, and Knowledge/Guardian handoff context.
+
+### 2026-05-30 Windows bridge request-audit GUI update
+
+`/equipment/windows` now surfaces Windows PyAutoGUI bridge request-audit evidence directly in the Linux GUI. The page includes a Bridge Request Audit card backed by `POST /api/equipment/windows/request-log`, and live preflight includes `/request-log` by default while remaining non-actuating. The audit payload is sanitized before returning to the browser so token values are not exposed. Missing or identity-mismatched request-audit evidence is a hard live Equipment -> Analysis handoff gate together with screen-state evidence, Vision evidence, save/export responsibility, Linux UTM artifact pull, and parse probes.

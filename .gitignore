@@ -65,3 +65,15 @@ Thumbs.db
 *.swo
 .idea/
 .vscode/
+
+# Windows bridge local/generated artifacts
+/C:*
+/C:
+/C:\ATR\bridge_artifacts/
+/C:\ATR\equipment_locators/
+/bridge_requests.jsonl
+/Pyautogui_server_for_window/artifacts/
+/Pyautogui_server_for_window/bridge/artifacts/
+/Pyautogui_server_for_window/tmp*/
+/Pyautogui_server_for_window/bridge_requests.jsonl
+/Pyautogui_server_for_window/.bridge_token

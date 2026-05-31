@@ -174,3 +174,154 @@ async def test_guardian_stops_on_unhealthy_device() -> None:
     assert guardian["decision"] == "stop"
     assert guardian["action"] == "safe_stop"
     assert guardian["health_validation"]["status"] == "fail"
+
+@pytest.mark.asyncio
+async def test_guardian_stops_on_blocking_hardware_alert_metadata() -> None:
+    agent = GuardianAgent()
+    ctx = _CtxStub()
+    state = _state(mode=Mode.LIVE)
+    state.run_metadata["hardware_alerts"] = [
+        {
+            "schema": "hardware_alert.v1",
+            "device_class": "robot",
+            "component": "robot_io_port",
+            "failure_code": "LEROBOT_DEVICE_PORT_REQUIRED",
+            "blocks_workflow": True,
+        }
+    ]
+    state.device_health["robot"] = "blocking:LEROBOT_DEVICE_PORT_REQUIRED"
+
+    result = await agent.run(state, ctx)
+    guardian = result.data["guardian"]
+
+    assert guardian["decision"] == "stop"
+    assert guardian["action"] == "safe_stop"
+    assert guardian["health_validation"]["status"] == "fail"
+    assert guardian["health_validation"]["active_hardware_alerts"][0]["component"] == "robot_io_port"
+
+@pytest.mark.asyncio
+async def test_guardian_recovers_when_analysis_blocks_utm_data_quality() -> None:
+    agent = GuardianAgent()
+    ctx = _CtxStub()
+    state = _state(mode=Mode.LIVE, objective_score=0.0, uncertainty=0.2, precursor=0.2)
+    state.latest_analysis.update(
+        {
+            "ok": False,
+            "failure_code": "UTM_DATA_NO_FORCE_SIGNAL",
+            "failure_tags": ["UTM_DATA_NO_FORCE_SIGNAL"],
+            "equipment_handoff_gate": {"status": "ready_for_analysis", "blockers": []},
+        }
+    )
+
+    result = await agent.run(state, ctx)
+    guardian = result.data["guardian"]
+
+    assert guardian["decision"] == "continue"
+    assert guardian["action"] == "recover"
+    assert guardian["consistency"]["status"] == "fail"
+    assert any("analysis blocked" in item for item in guardian["consistency"]["issues"])
+    assert any("UTM data/evidence" in item for item in guardian["consistency"]["warnings"])
+
+
+@pytest.mark.asyncio
+async def test_guardian_recovers_when_equipment_handoff_gate_blocked() -> None:
+    agent = GuardianAgent()
+    ctx = _CtxStub()
+    state = _state(mode=Mode.LIVE, objective_score=0.0, uncertainty=0.2, precursor=0.2)
+    state.latest_analysis.update(
+        {
+            "ok": False,
+            "failure_code": "EQUIPMENT_HANDOFF_NOT_READY",
+            "failure_tags": ["EQUIPMENT_LIVE_EVIDENCE_INCOMPLETE:request_audit_log_available"],
+            "equipment_handoff_gate": {
+                "status": "blocked",
+                "failure_code": "EQUIPMENT_LIVE_EVIDENCE_INCOMPLETE:request_audit_log_available",
+                "blockers": ["EQUIPMENT_LIVE_EVIDENCE_INCOMPLETE:request_audit_log_available"],
+            },
+        }
+    )
+
+    result = await agent.run(state, ctx)
+    guardian = result.data["guardian"]
+
+    assert guardian["decision"] == "continue"
+    assert guardian["action"] == "recover"
+    assert guardian["consistency"]["status"] == "fail"
+    assert any("equipment handoff gate blocked" in item for item in guardian["consistency"]["issues"])
+
+@pytest.mark.asyncio
+async def test_guardian_recovers_on_blocking_graph_gate_metadata() -> None:
+    agent = GuardianAgent()
+    ctx = _CtxStub()
+    state = _state(mode=Mode.LIVE, precursor=0.2, uncertainty=0.1)
+    state.run_metadata["guardian_gates"] = [
+        {
+            "schema": "guardian_gate_result.v1",
+            "gate_id": "gate-blocked-001",
+            "stage": "analysis",
+            "phase": "post",
+            "decision": "block",
+            "status": "blocked",
+            "reason_code": "DATA_QUALITY_LOW",
+            "risk_score": 0.78,
+        }
+    ]
+
+    result = await agent.run(state, ctx)
+    guardian = result.data["guardian"]
+
+    assert guardian["decision"] == "continue"
+    assert guardian["action"] == "recover"
+    assert guardian["graph_gate_pressure"]["status"] == "fail"
+    assert guardian["graph_gate_pressure"]["active_gate_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_guardian_safe_stops_on_graph_gate_safe_stop() -> None:
+    agent = GuardianAgent()
+    ctx = _CtxStub()
+    state = _state(mode=Mode.LIVE, precursor=0.2, uncertainty=0.1)
+    state.run_metadata["guardian_gates"] = [
+        {
+            "schema": "guardian_gate_result.v1",
+            "gate_id": "gate-stop-001",
+            "stage": "manipulation",
+            "phase": "action",
+            "decision": "safe_stop",
+            "status": "blocked",
+            "reason_code": "OPERATOR_STOP_REQUESTED",
+            "risk_score": 0.93,
+        }
+    ]
+
+    result = await agent.run(state, ctx)
+    guardian = result.data["guardian"]
+
+    assert guardian["decision"] == "stop"
+    assert guardian["action"] == "safe_stop"
+    assert any(item.failure_type == "guardian_gate_safe_stop" for item in ctx.failure_memory.recent(10))
+
+@pytest.mark.asyncio
+async def test_guardian_test_loop_cap_overrides_recoverable_graph_gate_pressure() -> None:
+    agent = GuardianAgent()
+    ctx = _CtxStub()
+    state = _state(mode=Mode.TEST, loop_count=GuardianAgent.TEST_LOOP_CYCLE_LIMIT - 1, precursor=0.2, uncertainty=0.1)
+    state.run_metadata["guardian_gates"] = [
+        {
+            "schema": "guardian_gate_result.v1",
+            "gate_id": "gate-recoverable-001",
+            "stage": "analysis",
+            "phase": "post",
+            "decision": "block",
+            "status": "blocked",
+            "reason_code": "DATA_QUALITY_LOW",
+            "risk_score": 0.78,
+        }
+    ]
+
+    result = await agent.run(state, ctx)
+    guardian = result.data["guardian"]
+
+    assert guardian["decision"] == "stop"
+    assert guardian["action"] == "safe_stop"
+    assert "5-cycle loop cap" in guardian["reason"]

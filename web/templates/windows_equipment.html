@@ -45,6 +45,95 @@ Modification guide:
           <strong id="equipment-connection-label">Loading</strong>
           <p id="equipment-connection-detail">Reading saved PyAutoGUI bridge candidates.</p>
         </article>
+        <article class="status-card equipment-action-status-card">
+          <div class="status-head">
+            <span class="status-title">Current Action</span>
+            <span id="equipment-action-dot" class="status-dot idle"></span>
+          </div>
+          <strong id="equipment-action-label">Idle</strong>
+          <p id="equipment-action-detail">Scan, select, preflight, run, then verify evidence before Analysis handoff.</p>
+        </article>
+      </section>
+
+      <section class="panel equipment-command-panel" aria-label="Windows bridge operator command rail">
+        <div class="equipment-command-banner" id="equipment-command-banner">
+          <div>
+            <span class="eyebrow">Operator Console</span>
+            <strong id="equipment-command-title">Ready for Windows bridge setup</strong>
+            <p id="equipment-command-detail">Scan and save a token-verified Windows PC, then run readiness, preflight, simulation, and evidence checks from left to right.</p>
+          </div>
+          <span id="equipment-command-pill" class="badge idle">idle</span>
+        </div>
+        <div class="equipment-command-rail">
+          <button class="equipment-command-card" data-equipment-proxy="btn-equipment-scan" title="Scan the selected subnet and show token-verified Windows bridge candidates.">
+            <span>01</span><strong>Scan</strong><small>find bridge PC</small>
+          </button>
+          <button class="equipment-command-card" data-equipment-proxy="btn-equipment-readiness" title="Check saved bridge, UTM profile, token, locators, and screen assertion readiness.">
+            <span>02</span><strong>Readiness</strong><small>passive gate</small>
+          </button>
+          <button class="equipment-command-card" data-equipment-proxy="btn-equipment-live-preflight" title="Run non-actuating live preflight against the selected Windows bridge.">
+            <span>03</span><strong>Preflight</strong><small>no motion</small>
+          </button>
+          <button class="equipment-command-card" data-equipment-proxy="btn-equipment-live-validation" title="Build the live UTM validation report without sending /execute.">
+            <span>04</span><strong>Validation</strong><small>report</small>
+          </button>
+          <button class="equipment-command-card" data-equipment-proxy="btn-equipment-utm" title="Run the configured UTM protocol. Use simulation mode unless the Windows PC and UTM fixture are physically ready.">
+            <span>05</span><strong>UTM Run</strong><small>protocol</small>
+          </button>
+          <button class="equipment-command-card" data-equipment-proxy="btn-equipment-evidence-audit" title="Audit latest screen evidence, CSV pull, request log, and proof checklist before Analysis handoff.">
+            <span>06</span><strong>Evidence</strong><small>handoff proof</small>
+          </button>
+          <button class="equipment-command-card equipment-command-danger" data-equipment-proxy="btn-equipment-abort" title="Dispatch the registered UTM stop/abort recovery macro. This bypasses locator readiness but still requires explicit confirmation.">
+            <span>07</span><strong>Abort</strong><small>safe recovery</small>
+          </button>
+        </div>
+      </section>
+
+      <section class="panel equipment-proof-dashboard-panel" aria-label="UTM visual-control proof dashboard">
+        <div class="equipment-proof-dashboard-head">
+          <div>
+            <span class="eyebrow">UTM Proof Gates</span>
+            <h2>Analysis handoff evidence dashboard</h2>
+          </div>
+          <p class="hint">Macro success alone is not enough. These gates must close before Lab Equipment hands UTM data to Analysis.</p>
+        </div>
+        <div id="equipment-proof-dashboard" class="equipment-proof-dashboard">
+          <article id="equipment-gate-windows-bridge" class="equipment-proof-gate idle">
+            <span>Windows Bridge</span>
+            <strong id="equipment-gate-windows-bridge-status">not checked</strong>
+            <p id="equipment-gate-windows-bridge-detail">Saved candidate, token, and request audit are not loaded yet.</p>
+          </article>
+          <article id="equipment-gate-utm-program" class="equipment-proof-gate idle">
+            <span>UTM Program</span>
+            <strong id="equipment-gate-utm-program-status">not checked</strong>
+            <p id="equipment-gate-utm-program-detail">Registered UTM protocol and locator readiness are not loaded yet.</p>
+          </article>
+          <article id="equipment-gate-vision-preconditions" class="equipment-proof-gate idle">
+            <span>Vision Preconditions</span>
+            <strong id="equipment-gate-vision-preconditions-status">waiting</strong>
+            <p id="equipment-gate-vision-preconditions-detail">Fixture occupancy, robot-clear, and motion frames are required.</p>
+          </article>
+          <article id="equipment-gate-screen-state" class="equipment-proof-gate idle">
+            <span>Screen State</span>
+            <strong id="equipment-gate-screen-state-status">waiting</strong>
+            <p id="equipment-gate-screen-state-detail">before_start, after_start, and after_complete screenshots are required.</p>
+          </article>
+          <article id="equipment-gate-physical-crosscheck" class="equipment-proof-gate idle">
+            <span>Physical Cross-check</span>
+            <strong id="equipment-gate-physical-crosscheck-status">waiting</strong>
+            <p id="equipment-gate-physical-crosscheck-detail">UTM motion must be confirmed by Vision or data-stream evidence.</p>
+          </article>
+          <article id="equipment-gate-data-artifact" class="equipment-proof-gate idle">
+            <span>Data Artifact</span>
+            <strong id="equipment-gate-data-artifact-status">waiting</strong>
+            <p id="equipment-gate-data-artifact-detail">Linux CSV pull, save/export responsibility, and parse probe must pass.</p>
+          </article>
+          <article id="equipment-gate-analysis-handoff" class="equipment-proof-gate idle">
+            <span>Analysis Handoff</span>
+            <strong id="equipment-gate-analysis-handoff-status">blocked</strong>
+            <p id="equipment-gate-analysis-handoff-detail">Proof package is not ready for Analysis.</p>
+          </article>
+        </div>
       </section>
 
       <section class="panel equipment-setup-grid">
@@ -84,11 +173,147 @@ Modification guide:
           <h2>4. Test Selected Bridge</h2>
           <p class="hint">
             Health와 program registry를 먼저 확인합니다. PyAutoGUI가 아직 없으면 bridge 통신은 성공해도
-            <code>PYAUTOGUI_NOT_INSTALLED</code>가 나올 수 있습니다.
+            <code>PYAUTOGUI_NOT_INSTALLED</code>가 나올 수 있습니다. UTM Protocol Test는 screen assertion, save/export, artifact metadata까지 확인합니다.
           </p>
+          <div class="equipment-utm-options">
+            <label class="planning-message-label">
+              Export Glob
+              <input id="equipment-utm-export-glob" class="text-input" value="*.csv" placeholder="예: *.csv 또는 specimen*.csv" />
+            </label>
+            <label class="planning-message-label">
+              Artifact Timeout Seconds
+              <input id="equipment-utm-timeout" class="text-input" value="60" />
+            </label>
+            <label class="planning-message-label">
+              Stable File Seconds
+              <input id="equipment-utm-stable-sec" class="text-input" value="2.0" />
+            </label>
+            <label class="planning-message-label">
+              Expected Export Path
+              <input id="equipment-utm-expected-export-path" class="text-input" value="" placeholder="optional C:/ATR/utm_exports/run/specimen.csv" />
+            </label>
+            <label class="planning-message-label">
+              Target Window / Regex
+              <input id="equipment-utm-target-window" class="text-input" value="" placeholder="UTM Controller or regex:.*UTM.*" />
+            </label>
+            <label class="planning-message-label inline-check">
+              <input id="equipment-utm-require-focus" type="checkbox" checked />
+              Require target window focus
+            </label>
+            <label class="planning-message-label inline-check">
+              <input id="equipment-utm-manual-save" type="checkbox" checked />
+              Manual Save As fallback
+            </label>
+            <label class="planning-message-label inline-check">
+              <input id="equipment-utm-require-screen" type="checkbox" />
+              Require screen assertions
+            </label>
+            <label class="planning-message-label inline-check">
+              <input id="equipment-utm-simulate" type="checkbox" />
+              Bench simulate UTM protocol
+            </label>
+            <label class="planning-message-label">
+              Locator JSON override
+              <textarea id="equipment-utm-locators" class="text-input equipment-json-input" rows="7" spellcheck="false" placeholder='{ "ready_state": {"locator_backend": "uia", "auto_id": "readyStatus", "control_type": "Text"}, "start_button": {"image_path": "C:/ATR/locators/start.png", "confidence": 0.8} }'></textarea>
+            </label>
+            <div class="button-row">
+              <button id="btn-equipment-load-utm-profile" class="btn">Load UTM Profile</button>
+              <button id="btn-equipment-save-utm-profile" class="btn primary">Save UTM Profile</button>
+              <button id="btn-equipment-open-bridge-gui" class="btn">Open Windows GUI</button>
+              <button id="btn-equipment-readiness" class="btn">Check Readiness</button>
+              <button id="btn-equipment-live-preflight" class="btn">Live Preflight</button>
+              <button id="btn-equipment-live-validation" class="btn">Live Validation Report</button>
+              <button id="btn-equipment-live-physical-validation" class="btn danger">Run Physical Validation</button>
+              <label class="planning-message-label inline-check compact-check">
+                <input id="equipment-live-preflight-screenshot" type="checkbox" />
+                Capture screen
+              </label>
+              <label class="planning-message-label inline-check compact-check">
+                <input id="equipment-live-physical-safe" type="checkbox" />
+                Physical UTM setup safe
+              </label>
+              <span id="equipment-utm-profile-status" class="hint">Profile not loaded.</span>
+            </div>
+            <div id="equipment-utm-readiness-card" class="equipment-readiness-card">
+              <strong id="equipment-utm-readiness-status">UTM readiness not checked.</strong>
+              <p id="equipment-utm-readiness-detail" class="hint">저장된 bridge, token, UTM program, export glob, locator, screen assertion 상태를 확인합니다.</p>
+            </div>
+            <div id="equipment-utm-live-validation-card" class="equipment-readiness-card">
+              <strong id="equipment-utm-live-validation-status">UTM live validation report not built.</strong>
+              <p id="equipment-utm-live-validation-detail" class="hint">Live bridge health, program registry, and request audit are checked without sending /execute unless physical validation is explicitly confirmed.</p>
+              <div id="equipment-utm-live-validation-gates" class="hint">Validation gates not loaded.</div>
+              <label class="planning-message-label">
+                Vision Proof JSON for physical validation
+                <textarea id="equipment-live-vision-proof" class="text-input equipment-json-input" rows="5" spellcheck="false" placeholder='{ "run_id": "...", "specimen_id": "...", "checks": {"utm_pre_start": {"ok": true}, "utm_motion_confirm": {"ok": true}, "utm_test_complete": {"ok": true}} }'></textarea>
+              </label>
+              <div class="button-row compact-row">
+                <button id="btn-equipment-vision-proof-draft" class="btn">Load Vision Proof Draft</button>
+                <span class="hint">현재 runtime Vision evidence에서 물리 검증용 JSON 초안을 채웁니다. 장비는 호출하지 않습니다.</span>
+              </div>
+            </div>
+            <div id="equipment-utm-evidence-card" class="equipment-readiness-card">
+              <strong id="equipment-utm-evidence-status">UTM evidence audit not checked.</strong>
+              <p id="equipment-utm-evidence-detail" class="hint">마지막 Lab Equipment run의 screen evidence, Linux CSV pull, Vision frame evidence, bridge request audit를 확인합니다.</p>
+              <div id="equipment-utm-proof-checklist" class="hint">Proof checklist not loaded.</div>
+              <div class="button-row compact-row">
+                <button id="btn-equipment-evidence-audit" class="btn">Audit Last Run Evidence</button>
+                <button id="btn-equipment-proof-package" class="btn">Build Proof Package</button>
+                <button id="btn-equipment-verify-proof-package" class="btn">Verify Proof Package</button>
+                <button id="btn-equipment-completion-audit" class="btn primary">Completion Audit</button>
+              </div>
+              <div id="equipment-proof-verify-card" class="equipment-readiness-card compact-proof-card">
+                <strong id="equipment-proof-verify-status">Proof package verification not run.</strong>
+                <p id="equipment-proof-verify-detail" class="hint">Build a proof package, then verify that the persisted JSON, request audit, local CSV, and evidence references are still checkable.</p>
+              </div>
+              <div id="equipment-completion-audit-card" class="equipment-readiness-card compact-proof-card">
+                <strong id="equipment-completion-audit-status">Improvement 05 completion audit not run.</strong>
+                <p id="equipment-completion-audit-detail" class="hint">실제 UTM proof package가 완전 검증될 때만 완료 가능 상태가 됩니다. Preflight나 simulator 결과는 완료로 처리하지 않습니다.</p>
+              </div>
+            </div>
+            <div id="equipment-request-audit-card" class="equipment-readiness-card">
+              <strong id="equipment-request-audit-status">Bridge request audit not loaded.</strong>
+              <p id="equipment-request-audit-detail" class="hint">Windows bridge의 최근 API/auth 요청 로그를 확인합니다. 토큰 값은 표시하지 않습니다.</p>
+              <div class="button-row compact-row">
+                <button id="btn-equipment-request-log" class="btn">Load Bridge Request Log</button>
+              </div>
+            </div>
+            <div class="equipment-locator-calibration">
+              <div class="equipment-locator-head">
+                <strong>UTM Locator Calibration</strong>
+                <span class="hint">Image locator를 캡처하거나 JSON override에 UIA selector(auto_id/title/control_type)를 입력합니다.</span>
+              </div>
+              <div class="equipment-locator-grid">
+                <label class="planning-message-label">
+                  Program ID
+                  <input id="equipment-locator-program" class="text-input" value="utm_compression_start_v1" />
+                </label>
+                <label class="planning-message-label">
+                  Locator Name
+                  <input id="equipment-locator-name" class="text-input" value="ready_state" placeholder="ready_state, start_button, running_state" />
+                </label>
+                <label class="planning-message-label">
+                  Confidence
+                  <input id="equipment-locator-confidence" class="text-input" value="0.8" />
+                </label>
+              </div>
+              <div class="equipment-region-grid">
+                <label class="planning-message-label">X <input id="equipment-locator-x" class="text-input" value="0" /></label>
+                <label class="planning-message-label">Y <input id="equipment-locator-y" class="text-input" value="0" /></label>
+                <label class="planning-message-label">Width <input id="equipment-locator-width" class="text-input" value="120" /></label>
+                <label class="planning-message-label">Height <input id="equipment-locator-height" class="text-input" value="60" /></label>
+              </div>
+              <div class="button-row">
+                <button id="btn-equipment-screenshot" class="btn">Capture Screen</button>
+                <button id="btn-equipment-list-locators" class="btn">List Locators</button>
+                <button id="btn-equipment-capture-locator" class="btn primary">Capture Locator</button>
+              </div>
+            </div>
+          </div>
           <div class="button-row">
             <button id="btn-equipment-test" class="btn">Test Health + Programs</button>
-            <button id="btn-equipment-program1" class="btn primary">Run program1 Demo</button>
+            <button id="btn-equipment-program1" class="btn">Run program1 Demo</button>
+            <button id="btn-equipment-utm" class="btn primary">Run UTM Protocol Test</button>
+            <button id="btn-equipment-abort" class="btn danger">Run UTM Stop/Abort</button>
           </div>
         </article>
         <article>

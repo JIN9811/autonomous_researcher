@@ -20,13 +20,26 @@ dependencies = [
   "numpy>=1.26.0",
   "scikit-image>=0.23.0",
   "trimesh>=4.4.0",
+  "botorch>=0.17.0",
+  "gpytorch>=1.14.0",
 ]
 
 [project.optional-dependencies]
 dev = [
   "pytest>=8.0.0",
   "pytest-asyncio>=0.23.0",
+  "selenium>=4.44.0",
   "ruff>=0.6.0",
+]
+bo = [
+  # Kept for compatibility with older setup notes; BoTorch is now part of the default dependencies.
+  "botorch>=0.17.0",
+  "gpytorch>=1.14.0",
+]
+graph = [
+  "neo4j>=5.28.0",
+  "networkx>=3.2.0",
+  "graphifyy==0.4.4",
 ]
 
 [tool.pytest.ini_options]

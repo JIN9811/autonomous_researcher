@@ -100,6 +100,13 @@ async def test_analysis_agent_reads_utm_csv_file(tmp_path: Path) -> None:
     assert analysis["ok"] is True
     assert analysis["source"]["source"] == "equipment_result.result_file"
     assert analysis["utm_metrics"]["peak_force_N"] == 240.0
+    assert result.data["bo_observation"]["schema"] == "bo_observation.v1"
+    assert result.data["bo_observation"]["observed_metrics"]["peak_force_N"] == 240.0
+    assert result.data["experiment_evaluation"]["schema"] == "experiment_evaluation.v1"
+    assert result.data["experiment_evaluation"]["metrics"]["peak_force_N"] == 240.0
+    assert result.data["knowledge_payload"]["schema"] == "analysis_knowledge_payload.v1"
+    assert result.data["knowledge_payload"]["raw_artifact_refs"][0]["path"] == str(csv_path)
+    assert analysis["bo_observation"]["artifact_refs"][0]["kind"] == "utm_csv"
 
 
 @pytest.mark.asyncio
@@ -114,6 +121,7 @@ async def test_analysis_agent_uses_synthetic_curve_in_test_without_utm_data() ->
     assert analysis["source"]["source"] == "synthetic_test_utm_curve"
     assert analysis["utm_curve"]["point_count"] == 80
     assert analysis["uncertainty"] >= 0.28
+    assert "synthetic_utm_curve" in result.data["bo_observation"]["failure_tags"]
 
 
 @pytest.mark.asyncio
@@ -150,3 +158,477 @@ async def test_analysis_agent_blocks_live_without_utm_data() -> None:
     assert result.success is False
     assert analysis["ok"] is False
     assert analysis["failure_code"] == "UTM_DATA_REQUIRED"
+
+@pytest.mark.asyncio
+async def test_analysis_agent_reads_utm_csv_from_equipment_report_data_acquisition(tmp_path: Path) -> None:
+    csv_path = tmp_path / "utm_report_result.csv"
+    csv_path.write_text(
+        "time_s,displacement_mm,force_N\n"
+        "0,0,0\n"
+        "1,1,90\n"
+        "2,2,260\n"
+        "3,3,230\n",
+        encoding="utf-8",
+    )
+    state = _state(
+        equipment_result={"ok": True, "tool": "equipment.pyautogui.run", "status": "verified_complete"}
+    )
+    state.run_metadata["equipment_report"] = {
+        "schema": "equipment_report.v1",
+        "data_acquisition": {
+            "status": "pulled_to_linux",
+            "linux_path": str(csv_path),
+            "row_count_probe": 4,
+            "columns_probe": ["time_s", "displacement_mm", "force_N"],
+        },
+    }
+
+    result = await AnalysisAgent().run(state, _CtxStub())
+
+    analysis = result.data["analysis"]
+    assert result.success is True
+    assert analysis["ok"] is True
+    assert analysis["source"]["source"] == "equipment_result.equipment_report.data_acquisition.linux_path"
+    assert analysis["utm_metrics"]["peak_force_N"] == 260.0
+
+
+@pytest.mark.asyncio
+async def test_analysis_agent_reads_utm_csv_from_utm_packet_when_equipment_result_has_no_file(tmp_path: Path) -> None:
+    csv_path = tmp_path / "utm_packet_result.csv"
+    csv_path.write_text(
+        "time_s,displacement_mm,force_N\n"
+        "0,0,0\n"
+        "1,1,110\n"
+        "2,2,300\n",
+        encoding="utf-8",
+    )
+    state = _state(equipment_result={"ok": True, "tool": "equipment.pyautogui.run", "status": "verified_complete"})
+    state.run_metadata["utm_data_ready"] = {
+        "schema": "utm_data_ready.v1",
+        "status": "ready",
+        "result_file": str(csv_path),
+    }
+
+    result = await AnalysisAgent().run(state, _CtxStub())
+
+    analysis = result.data["analysis"]
+    assert result.success is True
+    assert analysis["source"]["source"] == "equipment_result.utm_data_ready.result_file"
+    assert analysis["utm_metrics"]["peak_force_N"] == 300.0
+@pytest.mark.asyncio
+async def test_analysis_agent_blocks_live_csv_when_equipment_handoff_not_ready(tmp_path: Path) -> None:
+    csv_path = tmp_path / "utm_live_blocked.csv"
+    csv_path.write_text(
+        "time_s,displacement_mm,force_N\n"
+        "0,0,0\n"
+        "1,1,120\n"
+        "2,2,280\n",
+        encoding="utf-8",
+    )
+    state = _state(
+        mode=Mode.LIVE,
+        equipment_result={
+            "ok": True,
+            "tool": "equipment.pyautogui.run",
+            "status": "verified_complete",
+            "bridge": "windows_pyautogui",
+            "program_id": "utm_compression_start_v1",
+            "result_file": str(csv_path),
+        },
+    )
+    state.run_metadata["equipment_report"] = {
+        "schema": "equipment_report.v1",
+        "bridge": {"provider": "windows_pyautogui"},
+        "control_plan": {"program_id": "utm_compression_start_v1"},
+        "live_evidence_audit": {"required_for_handoff": True},
+        "decision": {"handoff_status": "blocked", "failure_code": "UTM_REQUEST_LOG_EXECUTE_EVENT_REQUIRED"},
+        "cross_checks": {
+            "screen_started": True,
+            "physical_motion_started": True,
+            "save_completed": True,
+            "data_file_created": True,
+            "data_parse_probe_ok": True,
+            "save_export_responsibility_ok": True,
+            "screen_evidence_complete": True,
+            "linux_artifact_pulled": True,
+            "vision_evidence_complete": True,
+            "request_audit_log_available": False,
+            "request_audit_execute_identity_match": True,
+        },
+    }
+    state.run_metadata["equipment_handoff"] = {"status": "blocked", "failure_code": "UTM_REQUEST_LOG_EXECUTE_EVENT_REQUIRED"}
+
+    result = await AnalysisAgent().run(state, _CtxStub(text="live summary"))
+
+    analysis = result.data["analysis"]
+    assert result.success is False
+    assert analysis["ok"] is False
+    assert analysis["failure_code"] == "UTM_REQUEST_LOG_EXECUTE_EVENT_REQUIRED"
+    assert analysis["equipment_handoff_gate"]["status"] == "blocked"
+    assert "EQUIPMENT_LIVE_EVIDENCE_INCOMPLETE:request_audit_log_available" in analysis["equipment_handoff_gate"]["blockers"]
+    assert result.data["knowledge_payload"]["schema"] == "analysis_knowledge_payload.v1"
+    assert result.data["knowledge_payload"]["raw_artifact_refs"][0]["path"] == str(csv_path)
+    assert "UTM_REQUEST_LOG_EXECUTE_EVENT_REQUIRED" in result.data["knowledge_payload"]["failure_tags"]
+    assert "EQUIPMENT_LIVE_EVIDENCE_INCOMPLETE:request_audit_log_available" in result.data["knowledge_payload"]["failure_tags"]
+    assert result.data["bo_observation"]["status"] == "blocked"
+    assert analysis["knowledge_payload"] == result.data["knowledge_payload"]
+
+
+@pytest.mark.asyncio
+async def test_analysis_agent_blocks_live_csv_when_save_export_responsibility_missing(tmp_path: Path) -> None:
+    csv_path = tmp_path / "utm_live_missing_save_responsibility.csv"
+    csv_path.write_text(
+        "time_s,displacement_mm,force_N\n"
+        "0,0,0\n"
+        "1,1,125\n"
+        "2,2,285\n",
+        encoding="utf-8",
+    )
+    state = _state(
+        mode=Mode.LIVE,
+        equipment_result={
+            "ok": True,
+            "tool": "equipment.pyautogui.run",
+            "status": "verified_complete",
+            "bridge": "windows_pyautogui",
+            "program_id": "utm_compression_start_v1",
+            "result_file": str(csv_path),
+        },
+    )
+    state.run_metadata["equipment_report"] = {
+        "schema": "equipment_report.v1",
+        "bridge": {"provider": "windows_pyautogui"},
+        "control_plan": {"program_id": "utm_compression_start_v1"},
+        "live_evidence_audit": {"required_for_handoff": True},
+        "decision": {"handoff_status": "ready_for_analysis", "equipment_status": "verified_complete", "blocking_reasons": []},
+        "cross_checks": {
+            "screen_started": True,
+            "physical_motion_started": True,
+            "save_completed": True,
+            "data_file_created": True,
+            "data_parse_probe_ok": True,
+            "save_export_responsibility_ok": False,
+            "screen_evidence_complete": True,
+            "linux_artifact_pulled": True,
+            "vision_evidence_complete": True,
+            "request_audit_log_available": True,
+            "request_audit_execute_identity_match": True,
+        },
+    }
+    state.run_metadata["equipment_handoff"] = {"status": "ready_for_analysis"}
+    state.run_metadata["utm_data_ready"] = {"schema": "utm_data_ready.v1", "status": "ready", "result_file": str(csv_path)}
+
+    result = await AnalysisAgent().run(state, _CtxStub(text="live summary"))
+
+    analysis = result.data["analysis"]
+    assert result.success is False
+    assert analysis["ok"] is False
+    assert analysis["failure_code"] == "EQUIPMENT_LIVE_EVIDENCE_INCOMPLETE:save_export_responsibility_ok"
+    assert analysis["equipment_handoff_gate"]["status"] == "blocked"
+    assert "EQUIPMENT_LIVE_EVIDENCE_INCOMPLETE:save_export_responsibility_ok" in analysis["equipment_handoff_gate"]["blockers"]
+    assert result.data["knowledge_payload"]["raw_artifact_refs"][0]["path"] == str(csv_path)
+    assert "EQUIPMENT_LIVE_EVIDENCE_INCOMPLETE:save_export_responsibility_ok" in result.data["knowledge_payload"]["failure_tags"]
+
+
+@pytest.mark.asyncio
+async def test_analysis_agent_allows_live_csv_when_equipment_handoff_ready(tmp_path: Path) -> None:
+    csv_path = tmp_path / "utm_live_ready.csv"
+    csv_path.write_text(
+        "time_s,displacement_mm,force_N\n"
+        "0,0,0\n"
+        "1,1,130\n"
+        "2,2,310\n",
+        encoding="utf-8",
+    )
+    state = _state(
+        mode=Mode.LIVE,
+        equipment_result={
+            "ok": True,
+            "tool": "equipment.pyautogui.run",
+            "status": "verified_complete",
+            "bridge": "windows_pyautogui",
+            "program_id": "utm_compression_start_v1",
+            "result_file": str(csv_path),
+        },
+    )
+    state.run_metadata["equipment_report"] = {
+        "schema": "equipment_report.v1",
+        "bridge": {"provider": "windows_pyautogui"},
+        "control_plan": {"program_id": "utm_compression_start_v1"},
+        "live_evidence_audit": {"required_for_handoff": True},
+        "decision": {"handoff_status": "ready_for_analysis", "equipment_status": "verified_complete", "blocking_reasons": []},
+        "cross_checks": {
+            "screen_started": True,
+            "physical_motion_started": True,
+            "save_completed": True,
+            "data_file_created": True,
+            "data_parse_probe_ok": True,
+            "save_export_responsibility_ok": True,
+            "screen_evidence_complete": True,
+            "linux_artifact_pulled": True,
+            "vision_evidence_complete": True,
+            "request_audit_log_available": True,
+            "request_audit_execute_identity_match": True,
+        },
+    }
+    state.run_metadata["equipment_handoff"] = {"status": "ready_for_analysis"}
+    state.run_metadata["utm_data_ready"] = {"schema": "utm_data_ready.v1", "status": "ready", "result_file": str(csv_path)}
+
+    result = await AnalysisAgent().run(state, _CtxStub(text="live summary"))
+
+    analysis = result.data["analysis"]
+    assert result.success is True
+    assert analysis["ok"] is True
+    assert analysis["source"]["source"] == "equipment_result.result_file"
+    assert analysis["equipment_handoff_gate"]["status"] == "ready_for_analysis"
+    assert analysis["utm_metrics"]["peak_force_N"] == 310.0
+
+
+@pytest.mark.asyncio
+async def test_analysis_agent_blocks_zero_force_csv_even_when_equipment_handoff_ready(tmp_path: Path) -> None:
+    csv_path = tmp_path / "utm_live_zero_force.csv"
+    csv_path.write_text(
+        "time_s,displacement_mm,force_N\n"
+        "0,0,0\n"
+        "1,1,0\n"
+        "2,2,0\n",
+        encoding="utf-8",
+    )
+    state = _state(
+        mode=Mode.LIVE,
+        equipment_result={
+            "ok": True,
+            "tool": "equipment.pyautogui.run",
+            "status": "verified_complete",
+            "bridge": "windows_pyautogui",
+            "program_id": "utm_compression_start_v1",
+            "result_file": str(csv_path),
+        },
+    )
+    state.run_metadata["equipment_report"] = {
+        "schema": "equipment_report.v1",
+        "bridge": {"provider": "windows_pyautogui"},
+        "control_plan": {"program_id": "utm_compression_start_v1"},
+        "live_evidence_audit": {"required_for_handoff": True},
+        "decision": {"handoff_status": "ready_for_analysis", "equipment_status": "verified_complete", "blocking_reasons": []},
+        "cross_checks": {
+            "screen_started": True,
+            "physical_motion_started": True,
+            "save_completed": True,
+            "data_file_created": True,
+            "data_parse_probe_ok": True,
+            "save_export_responsibility_ok": True,
+            "screen_evidence_complete": True,
+            "linux_artifact_pulled": True,
+            "vision_evidence_complete": True,
+            "request_audit_log_available": True,
+            "request_audit_execute_identity_match": True,
+        },
+    }
+    state.run_metadata["equipment_handoff"] = {"status": "ready_for_analysis"}
+    state.run_metadata["utm_data_ready"] = {"schema": "utm_data_ready.v1", "status": "ready", "result_file": str(csv_path)}
+
+    result = await AnalysisAgent().run(state, _CtxStub(text="live summary"))
+
+    analysis = result.data["analysis"]
+    assert result.success is False
+    assert analysis["ok"] is False
+    assert analysis["failure_code"] == "UTM_DATA_NO_FORCE_SIGNAL"
+    assert analysis["data_quality"]["force_nonzero"] is False
+    assert analysis["source"]["signal_quality_probe"]["force_changes"] is False
+    assert result.data["knowledge_payload"]["raw_artifact_refs"][0]["path"] == str(csv_path)
+    assert "UTM_DATA_NO_FORCE_SIGNAL" in result.data["knowledge_payload"]["failure_tags"]
+
+
+@pytest.mark.asyncio
+async def test_analysis_agent_blocked_live_without_data_preserves_equipment_report_artifacts(tmp_path: Path) -> None:
+    screen_path = tmp_path / "before_start.png"
+    screen_path.write_bytes(b"fake-png")
+    state = _state(
+        mode=Mode.LIVE,
+        equipment_result={
+            "ok": False,
+            "tool": "equipment.pyautogui.run",
+            "status": "blocked",
+            "bridge": "windows_pyautogui",
+            "program_id": "utm_compression_start_v1",
+            "failure_code": "UTM_EXPORT_FILE_MISSING",
+        },
+    )
+    state.run_metadata["equipment_report"] = {
+        "schema": "equipment_report.v1",
+        "bridge": {"provider": "windows_pyautogui"},
+        "control_plan": {"program_id": "utm_compression_start_v1"},
+        "live_evidence_audit": {"required_for_handoff": True},
+        "artifact_refs": [{"kind": "screen_png", "path": str(screen_path), "artifact_id": "screen-before-start"}],
+        "screen_evidence_refs": [{"kind": "screen_png", "path": str(screen_path), "artifact_id": "screen-before-start"}],
+        "data_acquisition": {"status": "missing", "failure_code": "UTM_EXPORT_FILE_MISSING"},
+        "decision": {"handoff_status": "blocked", "failure_code": "UTM_EXPORT_FILE_MISSING"},
+        "cross_checks": {
+            "screen_started": True,
+            "physical_motion_started": False,
+            "save_completed": False,
+            "data_file_created": False,
+            "data_parse_probe_ok": False,
+            "save_export_responsibility_ok": False,
+            "screen_evidence_complete": False,
+            "linux_artifact_pulled": False,
+            "vision_evidence_complete": False,
+            "request_audit_log_available": True,
+            "request_audit_execute_identity_match": True,
+        },
+    }
+    state.run_metadata["equipment_handoff"] = {"status": "blocked", "failure_code": "UTM_EXPORT_FILE_MISSING"}
+
+    result = await AnalysisAgent().run(state, _CtxStub(text="live summary"))
+
+    analysis = result.data["analysis"]
+    assert result.success is False
+    assert analysis["failure_code"] == "UTM_DATA_REQUIRED"
+    refs = result.data["knowledge_payload"]["raw_artifact_refs"]
+    assert any(item.get("path") == str(screen_path) and item.get("artifact_id") == "screen-before-start" for item in refs)
+    assert "UTM_DATA_REQUIRED" in result.data["knowledge_payload"]["failure_tags"]
+    assert "UTM_EXPORT_FILE_MISSING" in result.data["knowledge_payload"]["failure_tags"]
+
+
+@pytest.mark.asyncio
+async def test_analysis_agent_accepts_negative_force_sign_convention(tmp_path: Path) -> None:
+    csv_path = tmp_path / "utm_negative_force.csv"
+    csv_path.write_text(
+        "time_s,displacement_mm,force_N\n"
+        "0,0,0\n"
+        "1,1,-130\n"
+        "2,2,-310\n",
+        encoding="utf-8",
+    )
+    equipment = {"ok": True, "tool": "equipment.pyautogui.run", "result_file": str(csv_path)}
+
+    result = await AnalysisAgent().run(_state(equipment_result=equipment), _CtxStub())
+
+    analysis = result.data["analysis"]
+    assert result.success is True
+    assert analysis["ok"] is True
+    assert analysis["utm_metrics"]["peak_force_N"] == 310.0
+    assert analysis["data_quality_gate"]["force_nonzero"] is True
+    assert analysis["data_quality_gate"]["force_changes"] is True
+
+from mcp_tools.fenicsx_tools import register_fenicsx_tools
+
+
+@pytest.mark.asyncio
+async def test_analysis_agent_emits_improvement06_artifacts_bo_handoff_and_fenicsx(tmp_path: Path) -> None:
+    csv_path = tmp_path / "utm_units.csv"
+    csv_path.write_text(
+        "Time (s),Extension (mm),Load (kN)\n"
+        "0,0,0\n"
+        "1,1,0.10\n"
+        "2,2,0.24\n"
+        "3,3,0.21\n",
+        encoding="utf-8",
+    )
+    tools = ToolRegistry()
+    register_fenicsx_tools(
+        tools,
+        {
+            "devices": {
+                "fenicsx": {
+                    "enabled": True,
+                    "mode": "test",
+                    "execution_backend": "deterministic",
+                    "artifact_dir": str(tmp_path / "fenicsx"),
+                }
+            }
+        },
+        repo_root=tmp_path,
+    )
+    state = _state(equipment_result={"ok": True, "tool": "equipment.pyautogui.run", "result_file": str(csv_path)})
+    state.run_id = "run-analysis-improvement06"
+    state.experiment_id = "exp-analysis-improvement06"
+    state.current_experiment_spec.update({"geometry_type": "gyroid", "cell_size_mm": 5.0, "tpms_thickness": 0.35})
+
+    result = await AnalysisAgent().run(state, _CtxStub(tools=tools))
+
+    analysis = result.data["analysis"]
+    assert result.success is True
+    assert analysis["utm_metrics"]["peak_force_N"] == 240.0
+    assert analysis["source"]["parser_id"] == "analysis.parsers.csv_header"
+    assert analysis["source"]["column_mapping"]["mappings"]["Load (kN)"]["multiplier"] == 1000.0
+    assert analysis["quality_gate"]["ok_for_metrics"] is True
+    assert "fenicsx.run_linear_elasticity" in analysis["closed_loop_sources"]
+    assert analysis["fem_result"]["schema"] == "fem_result.v1"
+    assert analysis["fem_agentic_loop"]["schema"] == "analysis_fenicsx_agentic_loop.v1"
+    assert analysis["fem_agentic_loop"]["status"] == "completed"
+    assert analysis["fem_agentic_loop"]["tutorial_reference"]["problem_family"] == "small_strain_linear_elasticity"
+    assert analysis["fem_agentic_loop"]["iterations"]
+    assert analysis["fem_utm_comparison"]["schema"] == "fem_utm_comparison.v1"
+    assert result.data["bo_handoff"]["schema_version"] == "analysis_bo_handoff_v1"
+    assert result.data["bo_handoff"]["fidelity"]["utm_high"]["objective_source"] is True
+    artifacts = analysis["analysis_artifacts"]
+    for key in (
+        "raw_input_sidecar",
+        "parse_report",
+        "canonical_curve",
+        "preprocessing_report",
+        "quality_report",
+        "metrics",
+        "fem_result",
+        "fem_request",
+        "fem_agentic_loop",
+        "fem_utm_comparison",
+        "comparison",
+        "analysis_report",
+        "experiment_evaluation",
+        "bo_handoff",
+        "analysis_trace",
+    ):
+        assert Path(artifacts[key]).exists(), key
+    assert result.data["experiment_evaluation"]["fidelity_records"]["utm_high"] == "metrics"
+
+
+@pytest.mark.asyncio
+async def test_analysis_agent_uses_llm_fenicsx_agentic_plan_when_enabled(tmp_path: Path) -> None:
+    csv_path = tmp_path / "utm_llm_plan.csv"
+    csv_path.write_text(
+        "time_s,displacement_mm,force_N\n"
+        "0,0,0\n"
+        "1,1,120\n"
+        "2,2,260\n"
+        "3,3,240\n",
+        encoding="utf-8",
+    )
+    tools = ToolRegistry()
+    register_fenicsx_tools(
+        tools,
+        {
+            "devices": {
+                "fenicsx": {
+                    "enabled": True,
+                    "mode": "test",
+                    "execution_backend": "deterministic",
+                    "artifact_dir": str(tmp_path / "fenicsx"),
+                }
+            }
+        },
+        repo_root=tmp_path,
+    )
+    llm_json = (
+        '{"problem_family":"small_strain_linear_elasticity",'
+        '"mesh_sweep_mm":[2.5,1.25],'
+        '"max_iterations":2,'
+        '"acceptance":{"min_agreement_score":0.35},'
+        '"decision_policy":"accept first validated run then compare with UTM"}'
+    )
+    ctx = _CtxStub(force_real_llm_in_test=True, text=llm_json, tools=tools)
+    state = _state(equipment_result={"ok": True, "tool": "equipment.pyautogui.run", "result_file": str(csv_path)})
+
+    result = await AnalysisAgent().run(state, ctx)
+
+    analysis = result.data["analysis"]
+    loop = analysis["fem_agentic_loop"]
+    assert result.success is True
+    assert ctx.prompts[0][0] == "analysis_fem_planning"
+    assert loop["llm_plan"]["source"] == "llm"
+    assert loop["sanitized_plan"]["mesh_sweep_mm"] == [2.5, 1.25]
+    assert loop["selected_result"]["request"]["loading"]["load_max_n"] == analysis["utm_metrics"]["peak_force_N"]
+    assert "create 3D mesh" in " ".join(loop["tutorial_reference"]["tutorial_steps"])
+    assert Path(analysis["analysis_artifacts"]["fem_agentic_loop"]).exists()

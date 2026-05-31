@@ -408,6 +408,29 @@ async def test_specimen_agent_uses_phase1_printer_prepare_schema(tmp_path: Path,
     assert specimen_result["experiment_evaluation"]["bridge"] == "printer"
     assert specimen_result["experiment_evaluation"]["job"]["device"] == "printer:prusa_mk4s"
 
+    fabrication_report = specimen_result["fabrication_report"]
+    assert fabrication_report["schema"] == "fabrication_report.v1"
+    assert fabrication_report["digital_thread"]["candidate_id"] == "cand-1-01"
+    assert fabrication_report["digital_thread"]["specimen_id"] == "specimen-cand-1-01-gyroid"
+    assert fabrication_report["digital_thread"]["stl_path"] == specimen_result["stl_path"]
+    assert fabrication_report["digital_thread"]["gcode_path"] == specimen_result["sliced_path"]
+    assert fabrication_report["process_plan"]["layer_height_mm"] == 0.2
+    assert fabrication_report["process_plan"]["nozzle_diameter_mm"] == 0.4
+    assert fabrication_report["process_plan"]["cap_skin_policy"]["bottom_cap_enabled"] is True
+    gate_names = {gate["gate"] for gate in fabrication_report["quality_gates"]}
+    assert {"required_fields", "geometry", "mesh", "manufacturability", "slicer", "gcode", "printer_storage", "execution_gate", "ejection"} <= gate_names
+    assert fabrication_report["monitoring_plan"]["observe_camera_after_print"] is True
+    assert fabrication_report["monitoring_plan"]["layerwise_monitoring_available"] is False
+    assert fabrication_report["fabrication_outcome"]["status"] in {"virtual_finished", "ready_for_vision"}
+    assert isinstance(fabrication_report["feedback_to_design"], dict)
+    assert result.data["handoff_packet"]["schema"] == "specimen_fabricated.v1"
+    assert result.data["handoff_packet"]["fabrication_report_ref"] == "run_metadata.fabrication_report"
+    assert result.data["handoff_packet"]["fabrication_summary"]["stl_path"] == specimen_result["stl_path"]
+    assert result.data["handoff_packet"]["fabrication_summary"]["outcome_status"] == fabrication_report["fabrication_outcome"]["status"]
+    assert result.data["handoff_packet"]["consumer_agent"] == ["vision_agent", "manipulation_agent", "knowledge_agent", "bo_agent"]
+    assert result.data["metrics"]["quality_gate_count"] >= 8
+    assert result.data["decisions"]
+
 
 @pytest.mark.asyncio
 async def test_specimen_agent_live_gui_test_mode_asks_for_printer_path() -> None:
@@ -433,6 +456,10 @@ async def test_specimen_agent_live_gui_test_mode_asks_for_printer_path() -> None
     assert "가상 브릿지" in specimen_result["input_request"]["prompt"]
     assert "실제 출력" in specimen_result["input_request"]["prompt"]
     assert "physical_print" in specimen_result["input_request"]["choices"]
+    assert specimen_result["fabrication_report"]["schema"] == "fabrication_report.v1"
+    assert specimen_result["fabrication_report"]["fabrication_outcome"]["status"] == "blocked"
+    assert result.data["handoff_packet"]["schema"] == "specimen_fabricated.v1"
+    assert result.data["handoff_packet"]["status"] == "blocked"
 
 
 @pytest.mark.asyncio

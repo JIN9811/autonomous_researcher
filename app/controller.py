@@ -48,6 +48,14 @@ from mcp_tools.tpms_geometry import (
 from graphs import load_graph_config
 from orchestrator.run_loop import RunLoop
 from orchestrator.state import Mode, OrchestratorState, Stage
+from orchestrator.supervisor import (
+    build_decision_record,
+    build_mission_contract,
+    build_orchestration_plan,
+    build_orchestrator_followup,
+    build_orchestrator_handoff_packet,
+    normalize_operator_intent,
+)
 from policies.validation_policy import validate_agent_output
 from utils.ids import make_event_id, make_experiment_id, make_run_id
 from utils.printer_profile import load_prusa_print_profile
@@ -150,23 +158,475 @@ class MainController:
             return dict(profile)
         return dict(self._deps.runtime_profile)
 
+    @staticmethod
+    def _first_failure_code(payload: Any) -> str:
+        if isinstance(payload, dict):
+            value = payload.get("failure_code") or payload.get("error_code") or payload.get("code")
+            if value:
+                return str(value)
+            for item in payload.values():
+                found = MainController._first_failure_code(item)
+                if found:
+                    return found
+        if isinstance(payload, list):
+            for item in payload:
+                found = MainController._first_failure_code(item)
+                if found:
+                    return found
+        return ""
+
+    @staticmethod
+    def _hardware_alert_component(workspace: str, tool: str, failure_code: str, message: str) -> tuple[str, str, str]:
+        code = failure_code.upper()
+        text = f"{tool} {message}".lower()
+        if workspace == "lerobot" or code.startswith("LEROBOT"):
+            if "CAMERA" in code or "camera" in text:
+                return "robot", "camera", "Robot camera stream/capture path"
+            if "POLICY" in code:
+                return "robot", "policy_runtime", "Pi0.5/LeRobot policy checkpoint/runtime"
+            if "CALIBRATION" in code:
+                return "robot", "calibration", "ROBOTIS leader/follower calibration"
+            if "ROLLOUT_ALREADY_ACTIVE" in code:
+                return "robot", "rollout_scheduler", "LeRobot rollout concurrency guard"
+            if "PORT" in code:
+                return "robot", "robot_io_port", "ROBOTIS follower/leader serial port"
+            if "PROCESS" in code or "RUNTIME" in code:
+                return "robot", "pi05_runtime", "Pi0.5 conda/runtime process"
+            return "robot", "lerobot_bridge", "LeRobot bridge"
+        if workspace == "printer" or code.startswith("PRINTER") or code.startswith("SLICER") or code.startswith("GCODE"):
+            if code.startswith("SLICER"):
+                return "printer", "slicer", "PrusaSlicer pipeline"
+            if code.startswith("GCODE"):
+                return "printer", "gcode_safety", "Prusa MK4S G-code safety gate"
+            if "STORAGE" in code or "UPLOAD" in code:
+                return "printer", "prusabridge_storage", "PrusaLink storage/upload path"
+            if "START" in code or "READY" in code or "JOB" in code:
+                return "printer", "prusabridge_job", "PrusaLink print job state"
+            return "printer", "prusalink", "Prusa MK4S bridge"
+        if workspace == "equipment" or code.startswith("PYAUTOGUI"):
+            if "TOKEN" in code or "URL" in code or "UNREACHABLE" in code:
+                return "equipment", "windows_pyautogui_bridge", "Windows PyAutoGUI bridge connection"
+            return "equipment", "lab_equipment_program", "Lab equipment macro/program bridge"
+        if workspace == "cae" or code.startswith("CAE"):
+            return "analysis", "cae_solver", "CAE/FEM solver bridge"
+        if code.startswith("UTM"):
+            return "equipment", "utm_bridge", "UTM data/acquisition bridge"
+        return workspace or "hardware", "device_bridge", "Hardware bridge"
+
+    @staticmethod
+    def _hardware_alert_severity(failure_code: str, status: str) -> str:
+        code = failure_code.upper()
+        clean_status = status.lower()
+        if any(token in code for token in ("UNSAFE", "EMERGENCY", "STOP_FAILED", "COLLISION")):
+            return "critical"
+        if "ALREADY_ACTIVE" in code or clean_status in {"busy", "retryable", "waiting"}:
+            return "warning"
+        if failure_code or clean_status in {"blocked", "failed", "error", "not_enabled"}:
+            return "blocking"
+        return "warning"
+
+    @staticmethod
+    def _hardware_alert_recovery_hint(device_class: str, component: str, failure_code: str) -> str:
+        code = failure_code.upper()
+        if component == "robot_io_port":
+            return "Reconnect/check ROBOTIS follower/leader USB, rerun port detection, then retry the same stage."
+        if component == "camera":
+            return "Check camera cable/index/by-id mapping, run camera test, then refresh Vision/Manipulation readiness."
+        if component == "policy_runtime":
+            return "Select a valid local policy checkpoint or policy repo, then rerun rollout preflight."
+        if component == "calibration":
+            return "Run LeRobot calibration interactively in terminal, then retry GUI rollout/teleoperation."
+        if component == "rollout_scheduler":
+            return "Stop the active rollout session before starting another inference request."
+        if component == "pi05_runtime":
+            return "Inspect the Pi0.5 session log, conda env, CUDA availability, and policy compatibility."
+        if device_class == "printer":
+            return "Check PrusaLink status, connection memory, storage, slicer/G-code gate, then rerun printer preflight."
+        if device_class == "equipment":
+            return "Check the selected equipment bridge host/token/program list, then rerun the bridge test."
+        if device_class == "analysis":
+            return "Check solver installation/input mesh/BC settings, then rerun CAE analysis."
+        if "REQUIRED" in code:
+            return "Fill the required configuration field and rerun preflight."
+        return "Inspect the hardware workspace status and rerun the affected device preflight."
+
+    @staticmethod
+    def _guardian_reason_code(device_class: str, component: str, failure_code: str, status: str) -> str:
+        code = failure_code.upper()
+        clean_status = status.lower()
+        if "REQUIRED" in code:
+            return "MISSING_REQUIRED_INPUT"
+        if component == "policy_runtime":
+            return "ROBOT_POLICY_UNAPPROVED"
+        if component in {"robot_io_port", "camera", "windows_pyautogui_bridge", "prusalink", "prusabridge_storage"}:
+            return "HEARTBEAT_LOST" if "UNREACHABLE" in code or "LOST" in code else "DEVICE_UNHEALTHY"
+        if component == "rollout_scheduler":
+            return "HUMAN_APPROVAL_REQUIRED" if "ALREADY_ACTIVE" in code else "ROBOT_ACTION_OUT_OF_BOUNDS"
+        if component == "lab_equipment_program":
+            return "UTM_MACRO_MISMATCH"
+        if device_class == "printer":
+            return "DEVICE_UNHEALTHY"
+        if device_class == "analysis":
+            return "DATA_QUALITY_LOW"
+        if clean_status in {"blocked", "failed", "error", "not_enabled"}:
+            return "DEVICE_UNHEALTHY"
+        return "CONTRACT_SCHEMA_INVALID"
+
+    @staticmethod
+    def _guardian_risk_score(severity: str) -> float:
+        if severity == "critical":
+            return 0.93
+        if severity == "blocking":
+            return 0.78
+        if severity == "warning":
+            return 0.45
+        return 0.25
+
+    @staticmethod
+    def _guardian_action_for_severity(severity: str) -> str:
+        if severity == "critical":
+            return "safe_stop"
+        if severity == "blocking":
+            return "block"
+        if severity == "warning":
+            return "allow_with_warning"
+        return "allow"
+
+    @staticmethod
+    def _guardian_risk_vector(device_class: str, severity: str) -> dict[str, float]:
+        base = MainController._guardian_risk_score(severity)
+        vector = {
+            "hardware": min(base, 1.0),
+            "vision": 0.0,
+            "robot": 0.0,
+            "equipment": 0.0,
+            "data": 0.0,
+            "optimization": 0.0,
+            "self_evolution": 0.0,
+            "operator": 0.0,
+        }
+        if device_class == "robot":
+            vector["robot"] = min(base, 1.0)
+        elif device_class == "equipment":
+            vector["equipment"] = min(base, 1.0)
+        elif device_class == "printer":
+            vector["hardware"] = min(max(base, 0.55), 1.0)
+            vector["equipment"] = max(vector["equipment"], min(base * 0.6, 1.0))
+        elif device_class == "analysis":
+            vector["data"] = min(base, 1.0)
+        else:
+            vector["hardware"] = min(base, 1.0)
+        return vector
+
+    def _hardware_alert_for_result(
+        self,
+        *,
+        workspace: str,
+        tool: str,
+        result: dict[str, Any],
+        stage: Stage | None,
+        agent: str,
+        workflow: str,
+        status: str,
+    ) -> dict[str, Any] | None:
+        failure_code = self._first_failure_code(result)
+        if bool(result.get("ok", False)) and not failure_code:
+            return None
+        if not failure_code and status.lower() not in {"blocked", "failed", "error", "not_enabled"}:
+            return None
+        message = str(result.get("message") or result.get("error") or result.get("status") or failure_code or "hardware alert")
+        device_class, component, hardware = self._hardware_alert_component(workspace, tool, failure_code, message)
+        severity = self._hardware_alert_severity(failure_code, status)
+        blocks_workflow = severity in {"blocking", "critical"}
+        reason_code = self._guardian_reason_code(device_class, component, failure_code, status)
+        guardian_decision = self._guardian_action_for_severity(severity)
+        risk_score = self._guardian_risk_score(severity)
+        risk_vector = self._guardian_risk_vector(device_class, severity)
+        alert_id = make_event_id()
+        stage_value = stage.value if isinstance(stage, Stage) else workspace
+        created_at = datetime.now(timezone.utc).isoformat()
+        contract = {
+            "schema_version": "guardian_contract.v1",
+            "run_id": self._state.run_id,
+            "loop_id": int(self._state.loop_count),
+            "stage": stage_value,
+            "status": "blocked" if blocks_workflow else "warning",
+            "confidence": 1.0,
+            "artifact_refs": [],
+            "provenance_refs": [alert_id],
+            "requires_human_approval": blocks_workflow,
+            "ok_for_next_stage": not blocks_workflow,
+            "ok_for_bo": False,
+            "failure_code": failure_code or status,
+            "risk_flags": [reason_code, device_class, component],
+        }
+        decision_record = {
+            "schema": "guardian_decision.v1",
+            "decision_id": alert_id,
+            "decision": guardian_decision,
+            "reason_code": reason_code,
+            "risk_score": risk_score,
+            "risk_vector": risk_vector,
+            "dominant_risks": [key for key, value in risk_vector.items() if value >= 0.5],
+            "requires_human_approval": blocks_workflow,
+            "recommended_action": guardian_decision,
+        }
+        recovery_hint = self._hardware_alert_recovery_hint(device_class, component, failure_code)
+        incident_record = {
+            "schema": "incident_record.v1",
+            "incident_id": alert_id,
+            "run_id": self._state.run_id,
+            "experiment_id": self._state.experiment_id,
+            "stage": stage_value,
+            "source": "hardware_alert",
+            "risk_class": device_class,
+            "component": component,
+            "severity": severity,
+            "reason_code": reason_code,
+            "failure_code": failure_code or status,
+            "message": message,
+            "detected_by": ["controller", "guardian_sidecar"],
+            "guardian_decision": guardian_decision,
+            "corrective_action": recovery_hint,
+            "created_at": created_at,
+        }
+        return {
+            "schema": "hardware_alert.v1",
+            "alert_id": alert_id,
+            "device_class": device_class,
+            "device": hardware,
+            "component": component,
+            "workspace": workspace,
+            "tool": tool,
+            "agent": agent,
+            "stage": stage_value,
+            "workflow": workflow or str(result.get("workflow") or tool),
+            "severity": severity,
+            "failure_code": failure_code or status,
+            "status": status,
+            "message": message,
+            "blocks_workflow": blocks_workflow,
+            "requires_ack": blocks_workflow,
+            "guardian_route_hint": "stop" if severity == "critical" else "recover" if blocks_workflow else "continue_with_warning",
+            "reason_code": reason_code,
+            "risk_score": risk_score,
+            "risk_vector": risk_vector,
+            "guardian_contract": contract,
+            "guardian_decision": decision_record,
+            "incident_record": incident_record,
+            "recovery_hint": recovery_hint,
+            "created_at": created_at,
+        }
+
+    def _append_guardian_event(self, event: dict[str, Any]) -> None:
+        """Append Guardian-readable incidents without relying only on in-memory state."""
+        try:
+            path = self._logger_bundle.run_dir / "guardian_events.jsonl"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(event, ensure_ascii=True, default=str) + "\n")
+        except Exception:
+            return
+
+    def _record_incident_records(self, records: list[dict[str, Any]] | tuple[dict[str, Any], ...]) -> None:
+        stored = self._state.run_metadata.setdefault("incident_records", [])
+        if not isinstance(stored, list):
+            stored = []
+            self._state.run_metadata["incident_records"] = stored
+        seen = {str(item.get("incident_id") or item.get("id") or "") for item in stored if isinstance(item, dict)}
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            copied = dict(record)
+            incident_id = str(copied.get("incident_id") or copied.get("id") or "")
+            if incident_id and incident_id in seen:
+                continue
+            stored.append(copied)
+            if incident_id:
+                seen.add(incident_id)
+            self._append_guardian_event(copied)
+        del stored[:-100]
+
+    def _record_hardware_alert(self, alert: dict[str, Any]) -> None:
+        alerts = self._state.run_metadata.setdefault("hardware_alerts", [])
+        if not isinstance(alerts, list):
+            alerts = []
+            self._state.run_metadata["hardware_alerts"] = alerts
+        alerts.append(alert)
+        del alerts[:-50]
+        guardian_decision = alert.get("guardian_decision")
+        if isinstance(guardian_decision, dict):
+            self._state.run_metadata["latest_guardian_decision"] = guardian_decision
+        incident_record = alert.get("incident_record")
+        if isinstance(incident_record, dict):
+            self._record_incident_records([incident_record])
+        device_class = str(alert.get("device_class") or "hardware")
+        failure_code = str(alert.get("failure_code") or alert.get("status") or "alert")
+        severity = str(alert.get("severity") or "warning")
+        if device_class:
+            self._state.device_health[device_class] = f"{severity}:{failure_code}"
+
     async def _on_model_call(self, *, task_type: str, model: str, role: str, backend: str) -> None:
         """Keep active vLLM deployments warm while a Live GUI/run workflow is progressing."""
         if backend != "vllm" or self._deps.agent_context.active_backend != "vllm":
             return
         self._cancel_pending_vllm_transition()
 
+    @staticmethod
+    def _equipment_step_message_type(step: str, status: str) -> str:
+        step_upper = str(step or "").upper()
+        status_lower = str(status or "").lower()
+        if status_lower in {"blocked", "failed", "error"}:
+            return "warning"
+        if any(token in step_upper for token in ("PULL_ARTIFACT", "PARSE_PROBE", "SAVE_EXPORT", "WAIT_FOR_EXPORT")):
+            return "artifact"
+        if "SCREEN" in step_upper or "ASSERT" in step_upper:
+            return "signal"
+        if "DONE" in step_upper:
+            return "handoff"
+        return "tool_call"
+
+    @staticmethod
+    def _equipment_step_label(step: str) -> str:
+        step_upper = str(step or "").upper()
+        if "SCREEN" in step_upper or "ASSERT" in step_upper:
+            return "화면 상태 검증"
+        if "PHYSICAL" in step_upper or "MOTION" in step_upper:
+            return "물리 동작 검증"
+        if "SAVE" in step_upper or "EXPORT" in step_upper:
+            return "저장/내보내기"
+        if "PULL_ARTIFACT" in step_upper:
+            return "Linux 데이터 회수"
+        if "PARSE" in step_upper:
+            return "데이터 파싱 검증"
+        if "FOCUS" in step_upper:
+            return "UTM 창 포커스"
+        if "START" in step_upper or "EXECUTE" in step_upper:
+            return "등록 프로토콜 실행"
+        if "DONE" in step_upper:
+            return "장비 단계 완료"
+        return "장비 제어"
+
+    @staticmethod
+    def _equipment_event_metadata(event: dict[str, Any]) -> dict[str, Any]:
+        step = str(event.get("step") or "")
+        step_upper = step.upper()
+        status = str(event.get("status") or "unknown")
+        detail = str(event.get("detail") or "")
+        command_id = str(event.get("command_id") or event.get("sequence_id") or "")
+        program_id = str(event.get("program_id") or "")
+        target_ui = str(
+            event.get("target_ui")
+            or event.get("target_window")
+            or event.get("window_title")
+            or event.get("target_app")
+            or ("UTM software" if program_id.startswith("utm_") else "")
+        )
+        data_file_ref = str(event.get("data_file_ref") or event.get("linux_path") or event.get("local_path") or event.get("windows_path") or detail or "")
+        failure_code = str(event.get("failure_code") or event.get("code") or "")
+        metadata: dict[str, Any] = {
+            "command_id": command_id,
+            "program_id": program_id,
+            "windows_host": str(event.get("windows_host") or event.get("bridge_host") or event.get("host") or ""),
+            "macro_command": {
+                "command_id": command_id,
+                "program_id": program_id,
+                "step": step,
+                "status": status,
+                "target_ui": target_ui,
+                "detail": detail,
+            },
+        }
+        if "SCREEN" in step_upper or "ASSERT" in step_upper:
+            metadata["visual_assertion"] = {
+                "step": step,
+                "status": status,
+                "detail": detail,
+                "checkpoint": str(event.get("checkpoint") or detail or step),
+                "confidence": event.get("confidence"),
+                "screenshot_artifact": event.get("screenshot_artifact") or event.get("artifact_id"),
+                "target_ui": target_ui,
+                "ok": status not in {"blocked", "failed", "error"},
+            }
+        if "PHYSICAL" in step_upper or "MOTION" in step_upper:
+            metadata["physical_cross_check"] = {
+                "step": step,
+                "status": status,
+                "detail": detail,
+                "check_id": event.get("check_id"),
+                "target_ui": target_ui,
+                "ok": status not in {"blocked", "failed", "error"},
+            }
+        if any(token in step_upper for token in ("SAVE", "EXPORT", "PULL_ARTIFACT", "PARSE", "WAIT_FOR_FILE")):
+            metadata["data_file_ref"] = data_file_ref
+            metadata["data_acquisition"] = {
+                "step": step,
+                "status": status,
+                "detail": detail,
+                "artifact_or_path": data_file_ref,
+                "windows_path": event.get("windows_path"),
+                "linux_path": event.get("linux_path") or event.get("local_path"),
+                "sha256": event.get("sha256"),
+                "size_bytes": event.get("size_bytes"),
+                "row_count_probe": event.get("row_count_probe"),
+                "columns_probe": event.get("columns_probe"),
+                "save_method": event.get("save_method"),
+                "artifact_pull_status": event.get("artifact_pull_status"),
+                "parse_probe": "PARSE" in step_upper,
+            }
+        if status in {"blocked", "failed", "error"}:
+            metadata["recovery"] = {
+                "status": "operator_review_required",
+                "failure_step": step,
+                "failure_code": failure_code,
+                "failure_detail": detail,
+                "recommended_action": "장비 화면, Windows bridge log, Vision cross-check, UTM export artifact를 확인한 뒤 재시도하세요.",
+            }
+        return {key: value for key, value in metadata.items() if value not in (None, "", {}, [])}
+
     async def _on_tool_event(self, event: dict[str, Any]) -> None:
         """Stream hardware tool step progress into the Live GUI conversation."""
         if not self._planning_bootstrapped or not isinstance(event, dict):
             return
         tool = str(event.get("tool", ""))
-        if tool not in {"printer.prepare", "equipment.pyautogui.run"} and not tool.startswith("lerobot."):
+        if tool not in {"printer.prepare", "equipment.pyautogui.run", "vision.equipment_cross_check", "guardian.tool_shield"} and not tool.startswith("lerobot."):
             return
         step = str(event.get("step", "STEP"))
         status = str(event.get("status", "unknown"))
         detail = event.get("detail")
         suffix = f" ({detail})" if detail not in (None, "") else ""
+        if tool == "guardian.tool_shield":
+            shielded_tool = str(event.get("shielded_tool") or "runtime tool")
+            decision = str(event.get("decision") or status)
+            reason_code = str(event.get("reason_code") or detail or "")
+            gate = event.get("guardian_gate") if isinstance(event.get("guardian_gate"), dict) else {}
+            message_type = "approval" if event.get("requires_human_approval") else "warning" if status in {"warning", "approval_required"} else "incident" if status in {"blocked", "failed", "error"} else "status"
+            await self._append_planning_message(
+                {
+                    "schema": "live_chat_message.v1",
+                    "role": "guardian_ai",
+                    "message_type": message_type,
+                    "content": f"Guardian action shield: {shielded_tool} -> {decision}{suffix}",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "model": "guardian_agent",
+                    "ok": status not in {"blocked", "failed", "error", "approval_required"},
+                    "tool": tool,
+                    "shielded_tool": shielded_tool,
+                    "decision": decision,
+                    "reason_code": reason_code,
+                    "risk_score": event.get("risk_score", gate.get("risk_score", 0.0)),
+                    "guardian_gate": gate,
+                    "guardian_decision": event.get("guardian_decision", gate.get("guardian_decision", {})),
+                    "guardian_contract": event.get("guardian_contract", gate.get("guardian_contract", {})),
+                    "requires_human_approval": bool(event.get("requires_human_approval")),
+                    "blocks_workflow": bool(event.get("blocks_workflow")),
+                    "guardian_runtime_event": event,
+                },
+                event_type="planning_guardian_tool_shield",
+                message=f"guardian.tool_shield {shielded_tool} {decision}",
+                level="ERROR" if status in {"blocked", "failed", "error"} else "WARNING" if status in {"warning", "approval_required"} else "INFO",
+            )
+            return
         if tool.startswith("lerobot."):
             await self._append_planning_message(
                 {
@@ -182,19 +642,48 @@ class MainController:
                 level="ERROR" if status in {"blocked", "failed", "error"} else "INFO",
             )
             return
-        if tool == "equipment.pyautogui.run":
+        if tool == "vision.equipment_cross_check":
+            check_id = str(event.get("check_id") or "")
+            check_suffix = f" · check={check_id}" if check_id else ""
             await self._append_planning_message(
                 {
+                    "schema": "live_chat_message.v1",
                     "role": "equipment_ai",
-                    "content": f"Equipment Agent 단계 진행: {step} -> {status}{suffix}",
+                    "message_type": "signal" if step.startswith("VISION_CHECK:") else "status",
+                    "content": f"Equipment Agent Vision 물리검증: {step} -> {status}{check_suffix}{suffix}",
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                     "model": "equipment_agent",
-                    "ok": status not in {"blocked", "failed"},
+                    "ok": status not in {"blocked", "failed", "error"},
+                    "tool": tool,
+                    "check_id": check_id,
                     "equipment_runtime_event": event,
+                    "vision_cross_check_event": event,
+                },
+                event_type="planning_equipment_vision_check",
+                message=f"vision.equipment_cross_check step {step} {status}",
+                level="ERROR" if status in {"blocked", "failed", "error"} else "INFO",
+            )
+            return
+        if tool == "equipment.pyautogui.run":
+            semantic_label = self._equipment_step_label(step)
+            metadata = self._equipment_event_metadata(event)
+            message_type = self._equipment_step_message_type(step, status)
+            await self._append_planning_message(
+                {
+                    "schema": "live_chat_message.v1",
+                    "role": "equipment_ai",
+                    "message_type": message_type,
+                    "content": f"Equipment Agent {semantic_label}: {step} -> {status}{suffix}",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "model": "equipment_agent",
+                    "ok": status not in {"blocked", "failed", "error"},
+                    "tool": tool,
+                    "equipment_runtime_event": event,
+                    **metadata,
                 },
                 event_type="planning_equipment_step",
                 message=f"equipment.pyautogui.run step {step} {status}",
-                level="ERROR" if status in {"blocked", "failed"} else "INFO",
+                level="ERROR" if status in {"blocked", "failed", "error"} else "INFO",
             )
             return
         await self._append_planning_message(
@@ -215,12 +704,18 @@ class MainController:
         """Switch the central inference backend without touching individual agents."""
         clean_backend = str(backend or "").strip().lower()
         if not clean_backend:
-            self._state.run_metadata = self._runtime_profile()
+            self._merge_runtime_profile_metadata()
             return
         if self._run_task and not self._run_task.done():
             raise RuntimeError("Cannot switch inference backend while a run is active.")
         self._deps.agent_context.set_active_backend(clean_backend)
-        self._state.run_metadata = self._runtime_profile()
+        self._merge_runtime_profile_metadata()
+
+    def _merge_runtime_profile_metadata(self) -> None:
+        """Refresh backend/model metadata without discarding run evidence."""
+        runtime_profile = self._runtime_profile()
+        existing = self._state.run_metadata if isinstance(self._state.run_metadata, dict) else {}
+        self._state.run_metadata = {**existing, **runtime_profile}
 
     def _log_controller_event(self, event: dict[str, Any]) -> None:
         """Persist controller-origin Runtime IDE events to the structured run log."""
@@ -608,6 +1103,19 @@ class MainController:
             "status": status,
             "module_runtime": module_runtime,
         }
+        hardware_alert = self._hardware_alert_for_result(
+            workspace=workspace,
+            tool=tool,
+            result=result,
+            stage=stage,
+            agent=agent,
+            workflow=workflow,
+            status=status,
+        )
+        if hardware_alert:
+            result["hardware_alert"] = hardware_alert
+            base_payload["hardware_alert"] = hardware_alert
+            self._record_hardware_alert(hardware_alert)
         registered_artifacts = self._register_workspace_artifacts(workspace=workspace, tool=tool, result=result)
         if registered_artifacts:
             base_payload["runtime_artifacts"] = registered_artifacts
@@ -634,6 +1142,28 @@ class MainController:
                 "state": self._state.model_dump(mode="json"),
             }
         )
+        if hardware_alert:
+            alert_level = "ERROR" if hardware_alert.get("severity") in {"blocking", "critical"} else "WARNING"
+            await self._broadcast_controller_event(
+                {
+                    "event_id": make_event_id(),
+                    "run_id": self._state.run_id,
+                    "experiment_id": self._state.experiment_id,
+                    "event_type": "hardware.alert",
+                    "type": "hardware.alert",
+                    "severity": str(hardware_alert.get("severity") or "warning"),
+                    "level": alert_level,
+                    "ts": datetime.now(timezone.utc).isoformat(),
+                    "graph_id": "atr_closed_loop",
+                    "node_id": node_id,
+                    "module_id": resolved_module,
+                    "agent": agent,
+                    "status": status,
+                    "message": str(hardware_alert.get("message") or hardware_alert.get("failure_code") or "hardware alert"),
+                    "payload": {**base_payload, "hardware_alert": hardware_alert},
+                    "state": self._state.model_dump(mode="json"),
+                }
+            )
         if node_event:
             await self._broadcast_controller_event(
                 {
@@ -746,8 +1276,30 @@ class MainController:
                 }
             )
 
+    def _ensure_orchestrator_supervisor_baseline(self) -> None:
+        """Keep Live GUI snapshots populated with the current supervisor contract and plan."""
+        metadata = self._state.run_metadata if isinstance(self._state.run_metadata, dict) else {}
+        mission = metadata.get("latest_mission_contract") if isinstance(metadata.get("latest_mission_contract"), dict) else {}
+        plan = metadata.get("latest_orchestration_plan") if isinstance(metadata.get("latest_orchestration_plan"), dict) else {}
+        stale_mission = mission.get("run_id") != self._state.run_id or mission.get("stage") != self._state.stage.value
+        stale_plan = plan.get("run_id") != self._state.run_id or plan.get("current_stage") != self._state.stage.value
+        if stale_mission:
+            mission = build_mission_contract(state=self._state)
+            self._state.run_metadata["mission_contract"] = mission
+            self._state.run_metadata["latest_mission_contract"] = mission
+        if stale_plan:
+            plan = build_orchestration_plan(state=self._state)
+            plans = self._state.run_metadata.get("orchestration_plans")
+            if not isinstance(plans, list):
+                plans = []
+            if not plans or plans[-1].get("plan_id") != plan.get("plan_id"):
+                plans.append(plan)
+            self._state.run_metadata["orchestration_plans"] = plans[-20:]
+            self._state.run_metadata["latest_orchestration_plan"] = plan
+
     def snapshot(self) -> dict[str, Any]:
         """Return current state plus logging metadata."""
+        self._ensure_orchestrator_supervisor_baseline()
         return {
             "state": self._state.model_dump(mode="json"),
             "runtime": self._runtime_profile(),
@@ -875,6 +1427,7 @@ class MainController:
         """Return current live-planning conversation and runtime context."""
         self._bind_planning_session(session_id)
         self._ensure_planning_intro()
+        self._ensure_orchestrator_supervisor_baseline()
         return {
             "messages": list(self._planning_messages),
             "state": self._state.model_dump(mode="json"),
@@ -946,6 +1499,121 @@ class MainController:
             }
         )
 
+    def _append_orchestrator_metadata(self, key: str, record: dict[str, Any], *, limit: int = 200) -> None:
+        records = self._state.run_metadata.setdefault(key, [])
+        if not isinstance(records, list):
+            records = []
+            self._state.run_metadata[key] = records
+        records.append(record)
+        del records[:-limit]
+
+    @staticmethod
+    def _format_orchestrator_followup_message(followup: dict[str, Any]) -> str:
+        concerns = followup.get("concerns") if isinstance(followup.get("concerns"), list) else []
+        concerns_text = ", ".join(str(item) for item in concerns[:4]) if concerns else "none"
+        options = followup.get("options") if isinstance(followup.get("options"), list) else []
+        options_text = ""
+        if options:
+            options_text = "\n- options: " + "; ".join(
+                str(item.get("label") or item.get("id") or item) for item in options[:3] if isinstance(item, dict)
+            )
+        return (
+            "Orchestrator supervisor follow-up\n"
+            f"- stage: {followup.get('stage', '-')} / trigger: {followup.get('trigger', '-')}\n"
+            f"- 판단: {followup.get('opinion', '-')}\n"
+            f"- 우려: {concerns_text}\n"
+            f"- 추천: {followup.get('recommendation', '-')}"
+            f"{options_text}"
+        )
+
+    async def _record_planning_orchestrator_followup(
+        self,
+        *,
+        stage: Stage,
+        trigger: str,
+        payload: dict[str, Any] | None = None,
+        next_stage: Stage | None = None,
+        guardian_context: dict[str, Any] | None = None,
+        level: str = "INFO",
+    ) -> dict[str, Any]:
+        followup = build_orchestrator_followup(
+            state=self._state,
+            stage=stage,
+            trigger=trigger,
+            payload=payload or {},
+            next_stage=next_stage,
+            guardian_context=guardian_context,
+        )
+        self._append_orchestrator_metadata("orchestrator_followups", followup)
+        self._state.run_metadata["latest_orchestrator_followup"] = followup
+        await self._append_planning_message(
+            {
+                "schema": "live_chat_message.v1",
+                "role": "orchestrator",
+                "message_type": "warning" if followup.get("concerns") else "decision",
+                "content": self._format_orchestrator_followup_message(followup),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "model": "orchestrator_supervisor",
+                "ok": followup.get("status") != "error",
+                "orchestrator_followup": followup,
+                "requires_response": bool(followup.get("requires_response")),
+                "evidence_refs": followup.get("evidence_refs", []),
+            },
+            event_type="planning_orchestrator_followup",
+            level=level,
+            message=f"Orchestrator supervisor follow-up recorded for {stage.value}.",
+        )
+        return followup
+
+    async def _record_planning_orchestrator_transition(
+        self,
+        *,
+        from_stage: Stage,
+        to_stage: Stage,
+        payload: dict[str, Any] | None = None,
+        selected_transition: dict[str, Any] | None = None,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        result_payload = payload or {}
+        decision = build_decision_record(
+            state=self._state,
+            stage=from_stage,
+            decision="planning_route_next_stage",
+            selected=to_stage.value,
+            alternatives=[to_stage.value],
+            reason="Live GUI planning chain selected the next graph stage.",
+            authority="orchestrator",
+        )
+        handoff = build_orchestrator_handoff_packet(
+            state=self._state,
+            from_stage=from_stage,
+            to_stage=to_stage,
+            result_payload=result_payload,
+            selected_transition=selected_transition or {"to_stage": to_stage.value, "source": "planning_chain"},
+        )
+        self._append_orchestrator_metadata("orchestrator_decision_register", decision)
+        self._append_orchestrator_metadata("orchestrator_handoff_packets", handoff)
+        self._state.run_metadata["latest_orchestrator_decision"] = decision
+        self._state.run_metadata["latest_orchestrator_handoff"] = handoff
+        mission_contract = build_mission_contract(state=self._state)
+        orchestration_plan = build_orchestration_plan(state=self._state)
+        self._state.run_metadata["mission_contract"] = mission_contract
+        self._state.run_metadata["latest_mission_contract"] = mission_contract
+        self._append_orchestrator_metadata("orchestration_plans", orchestration_plan, limit=20)
+        self._state.run_metadata["latest_orchestration_plan"] = orchestration_plan
+        await self.emit_runtime_event(
+            event_type="orchestrator.decision",
+            message=f"Orchestrator planning route {from_stage.value} -> {to_stage.value}",
+            payload={
+                "agent": "orchestrator",
+                "node_id": from_stage.value,
+                "module_id": "orchestrator",
+                "decision": decision,
+                "handoff_packet": handoff,
+                "status": "ok",
+            },
+        )
+        return decision, handoff
+
     def subscribe(self, queue_size: int = 200) -> asyncio.Queue[dict[str, Any]]:
         """Create a new event subscription queue."""
         queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=queue_size)
@@ -985,6 +1653,7 @@ class MainController:
         )
 
     async def _run_live_or_test(self) -> None:
+        configured_interval = float(self._deps.system_config.get("loop_interval_seconds", 1.25))
         loop = RunLoop(
             state=self._state,
             agent_registry=self._deps.agent_registry,
@@ -992,7 +1661,7 @@ class MainController:
             ctx=self._deps.agent_context,
             logger=self._logger_bundle.logger,
             max_retry_per_stage=int(self._deps.system_config.get("max_retry_per_stage", 2)),
-            interval_seconds=float(self._deps.system_config.get("loop_interval_seconds", 1.25)),
+            interval_seconds=0.0 if self._state.mode == Mode.TEST else configured_interval,
             on_event=self._broadcast_event,
             graph_config_path=self._active_graph_config_path,
         )
@@ -1191,12 +1860,14 @@ class MainController:
     ) -> dict[str, Any]:
         """Handle one operator message while the Live GUI planning lock is held."""
         now = datetime.now(timezone.utc).isoformat()
+        operator_intent = normalize_operator_intent(message)
         user_entry = {
             "role": "operator",
             "content": message,
             "timestamp": now,
             "goal": goal or self._state.active_goal,
             "constraints": constraints,
+            "operator_intent": operator_intent,
         }
         self._planning_messages.append(user_entry)
         target_agent = str(
@@ -1254,6 +1925,7 @@ class MainController:
                 "live_active_goal": run_context["active_goal"],
                 "chat_mode": chat_mode,
                 "chat_target_mode": constraints.get("live_chat_target_mode") or "",
+                "operator_intent": operator_intent,
                 "source": "live_gui",
             },
             level="INFO",
@@ -1550,8 +2222,10 @@ class MainController:
             "Use this compact project contract as the authoritative instruction basis.\n"
             f"{self._live_runtime_contract_context()}\n"
             "Use the conversation_memory as short-lived session memory; do not assume it persists after this Live GUI session.\n"
-            "Do not create new top-level stages. Operator approval is expressed by the `실험 수행` keyword.\n"
-            "Do not add runtime-safety disclaimers. Focus on missing design values and the next handoff.\n"
+            "Do not create new top-level stages. Use the controller intent state machine before keyword fallback.\n"
+            "Intent classes are ask_question, revise_goal, set_constraint, approve_plan, start_dry_run, start_live_run, pause, resume, stop, request_status, select_option, operator_note.\n"
+            "Treat `실험 수행` as start_live_run only when required design values are complete; otherwise ask for missing values.\n"
+            "Do not add runtime-safety disclaimers. Focus on mission contract, missing values, and the next handoff.\n"
             "Do not use LaTeX math notation. Use plain text arrows like '->' for routes.\n"
             "For normal Live GUI execution, `실험 수행` means generate the design and proceed to actual Prusa MK4S print upload/start through Specimen Making Agent.\n"
             "For `테스트 모드`, keep printer actions virtual/read-only unless Specimen Making Agent later asks for the printer path and the operator explicitly chooses `실제 출력`.\n"
@@ -1829,9 +2503,8 @@ class MainController:
 
     def _should_trigger_design(self, message: str) -> bool:
         """Detect operator intent to move from orchestration discussion into design generation."""
-        normalized = re.sub(r"\s+", "", message.lower())
-        triggers = {"실험수행", "실험진행", "설계수행", "디자인수행", "runexperiment", "startexperiment"}
-        return any(trigger in normalized for trigger in triggers)
+        intent = normalize_operator_intent(message)
+        return bool(intent.get("requires_design_handoff") and intent.get("intent") == "start_live_run")
 
     @staticmethod
     def _is_generic_planning_goal(value: Any) -> bool:
@@ -2642,6 +3315,11 @@ class MainController:
             Stage.DESIGN,
             run_orchestrator_before_design=False,
         )
+        design_stage_payload = self._state.run_metadata.get("design_agent_payload")
+        if not isinstance(design_stage_payload, dict):
+            last_stage_payload = self._state.run_metadata.get("last_stage_payload")
+            last_stage_data = last_stage_payload.get("data") if isinstance(last_stage_payload, dict) else {}
+            design_stage_payload = last_stage_data if isinstance(last_stage_data, dict) else {}
         base_spec = dict(self._state.current_experiment_spec or {})
         if not base_spec:
             raise RuntimeError("DesignAgent did not return experiment_spec.")
@@ -2652,7 +3330,62 @@ class MainController:
             cycle_index=cycle_index,
         )
         self._state.current_experiment_spec = experiment_spec
-        self._merge_planning_agent_data(Stage.DESIGN, {"experiment_spec": experiment_spec})
+        design_report = dict(design_stage_payload.get("design_report") or {}) if isinstance(design_stage_payload.get("design_report"), dict) else {}
+        if design_report:
+            handoff_to_specimen = dict(design_report.get("handoff_to_specimen") or {}) if isinstance(design_report.get("handoff_to_specimen"), dict) else {}
+            required = [
+                "candidate_id",
+                "specimen_id",
+                "geometry_type",
+                "specimen_size_mm",
+                "cell_size_mm",
+                "wall_thickness_mm",
+                "relative_density",
+                "material",
+                "printer_profile",
+                "slicer_profile_hint",
+                "layer_height_mm",
+                "expected_mass_g",
+                "expected_print_time_min",
+            ]
+            missing = [field for field in required if experiment_spec.get(field) in (None, "", [])]
+            handoff_to_specimen.update({
+                "required_fields_present": not missing,
+                "missing_required_fields": missing,
+                "authoritative_specimen_id": experiment_spec.get("specimen_id"),
+                "authoritative_candidate_id": experiment_spec.get("candidate_id"),
+            })
+            design_report["handoff_to_specimen"] = handoff_to_specimen
+            design_report["selected_experiment_spec"] = {key: experiment_spec.get(key) for key in required if key in experiment_spec}
+        design_candidate = dict(design_stage_payload.get("design_candidate") or design_stage_payload.get("handoff_packet") or {}) if isinstance(design_stage_payload.get("design_candidate") or design_stage_payload.get("handoff_packet"), dict) else {}
+        if design_candidate:
+            design_candidate.update({
+                "experiment_spec": experiment_spec,
+                "candidate_id": experiment_spec.get("candidate_id"),
+                "specimen_id": experiment_spec.get("specimen_id"),
+                "status": "ready" if not (design_report.get("handoff_to_specimen", {}) or {}).get("missing_required_fields") else "blocked",
+            })
+        merge_payload = {"experiment_spec": experiment_spec}
+        if design_report:
+            merge_payload["design_report"] = design_report
+        if design_candidate:
+            merge_payload["design_candidate"] = design_candidate
+            merge_payload["handoff_packet"] = design_candidate
+        for key in ("candidate_ledger", "decisions", "metrics"):
+            if key in design_stage_payload:
+                merge_payload[key] = design_stage_payload[key]
+        self._merge_planning_agent_data(Stage.DESIGN, merge_payload)
+        await self._record_planning_orchestrator_transition(
+            from_stage=Stage.DESIGN,
+            to_stage=Stage.SPECIMEN,
+            payload=merge_payload,
+        )
+        await self._record_planning_orchestrator_followup(
+            stage=Stage.DESIGN,
+            trigger="post_stage",
+            payload=merge_payload,
+            next_stage=Stage.SPECIMEN,
+        )
         artifact = self._write_planning_artifacts(experiment_spec)
         message_payload: dict[str, Any] = {
             "role": "design_ai",
@@ -2670,6 +3403,10 @@ class MainController:
             "experiment_spec": experiment_spec,
             "artifacts": artifact,
         }
+        if design_report:
+            message_payload["design_report"] = design_report
+        if design_candidate:
+            message_payload["design_candidate"] = design_candidate
         if cycle_index > 1:
             message_payload["artifact_pair"] = self._artifact_pair_payload(
                 previous_spec=previous_spec,
@@ -2704,7 +3441,26 @@ class MainController:
         if specimen_payload.get("requires_operator_input"):
             self._state.stage = Stage.SPECIMEN
             await self._record_pending_specimen_input(specimen_payload)
+            await self._record_planning_orchestrator_followup(
+                stage=Stage.SPECIMEN,
+                trigger="missing_input",
+                payload=specimen_payload,
+                next_stage=Stage.SPECIMEN,
+                level="WARNING",
+            )
             return {"pending": True, "specimen": specimen_payload}
+        next_stage = self._planning_tail_start_stage() or Stage.COMPLETE
+        await self._record_planning_orchestrator_transition(
+            from_stage=Stage.SPECIMEN,
+            to_stage=next_stage,
+            payload=specimen_payload,
+        )
+        await self._record_planning_orchestrator_followup(
+            stage=Stage.SPECIMEN,
+            trigger="post_stage",
+            payload=specimen_payload,
+            next_stage=next_stage,
+        )
         specimen_artifacts = self._write_planning_artifacts(experiment_spec, specimen_result=specimen_payload)
         await self._append_planning_message(
             {
@@ -2794,6 +3550,17 @@ class MainController:
             },
             event_type="planning_handoff",
             message="Planning handoff to DesignAgent started.",
+        )
+        await self._record_planning_orchestrator_transition(
+            from_stage=self._state.stage if self._state.stage not in {Stage.COMPLETE, Stage.ERROR} else Stage.IDLE,
+            to_stage=Stage.DESIGN,
+            payload={"goal": self._state.active_goal, "constraints": constraints},
+        )
+        await self._record_planning_orchestrator_followup(
+            stage=Stage.IDLE,
+            trigger="mission_intake_complete",
+            payload={"goal": self._state.active_goal, "constraints": constraints},
+            next_stage=Stage.DESIGN,
         )
 
         try:
@@ -3247,6 +4014,49 @@ class MainController:
 
     def _merge_planning_agent_data(self, stage: Stage, data: dict[str, Any]) -> None:
         """Mirror RunLoop state merging for Live GUI's manual handoff chain."""
+        if isinstance(data, dict):
+            self._state.run_metadata[f"{stage.value}_agent_payload"] = data
+            if isinstance(data.get("design_report"), dict):
+                self._state.run_metadata["design_report"] = data["design_report"]
+            if isinstance(data.get("design_candidate"), dict):
+                self._state.run_metadata["design_candidate"] = data["design_candidate"]
+            if isinstance(data.get("handoff_packet"), dict):
+                self._state.run_metadata[f"{stage.value}_handoff_packet"] = data["handoff_packet"]
+                packets = self._state.run_metadata.get("handoff_packets")
+                if not isinstance(packets, list):
+                    packets = []
+                packets.append({"stage": stage.value, "packet": data["handoff_packet"]})
+                self._state.run_metadata["handoff_packets"] = packets[-20:]
+            if isinstance(data.get("decisions"), list):
+                self._state.run_metadata[f"{stage.value}_decision_register"] = data["decisions"]
+            if isinstance(data.get("metrics"), dict):
+                self._state.run_metadata[f"{stage.value}_metrics"] = data["metrics"]
+            if isinstance(data.get("mission_contract"), dict):
+                self._state.run_metadata["mission_contract"] = data["mission_contract"]
+                self._state.run_metadata["latest_mission_contract"] = data["mission_contract"]
+            if isinstance(data.get("orchestration_plan"), dict):
+                plans = self._state.run_metadata.get("orchestration_plans")
+                if not isinstance(plans, list):
+                    plans = []
+                plans.append(data["orchestration_plan"])
+                self._state.run_metadata["orchestration_plans"] = plans[-20:]
+                self._state.run_metadata["latest_orchestration_plan"] = data["orchestration_plan"]
+            if isinstance(data.get("fabrication_report"), dict):
+                self._state.run_metadata["fabrication_report"] = data["fabrication_report"]
+                self._state.run_metadata[f"{stage.value}_fabrication_report"] = data["fabrication_report"]
+            if isinstance(data.get("specimen_fabricated"), dict):
+                self._state.run_metadata["specimen_fabricated"] = data["specimen_fabricated"]
+            if isinstance(data.get("vision_report"), dict):
+                self._state.run_metadata["vision_report"] = data["vision_report"]
+                self._state.run_metadata[f"{stage.value}_vision_report"] = data["vision_report"]
+            if isinstance(data.get("vision_signal"), dict):
+                self._state.run_metadata["vision_signal"] = data["vision_signal"]
+            if isinstance(data.get("manipulation_report"), dict):
+                self._state.run_metadata["manipulation_report"] = data["manipulation_report"]
+                self._state.run_metadata[f"{stage.value}_manipulation_report"] = data["manipulation_report"]
+            if isinstance(data.get("robot_task_result"), dict):
+                self._state.run_metadata["robot_task_result"] = data["robot_task_result"]
+                self._state.run_metadata[f"{stage.value}_robot_task_result"] = data["robot_task_result"]
         if "experiment_spec" in data:
             self._state.current_experiment_spec = data["experiment_spec"]
         if "experiment_objective" in data:
@@ -3260,6 +4070,8 @@ class MainController:
             self._state.experiment_evaluations.append(specimen_result["experiment_evaluation"])
         if "observation" in data:
             self._state.latest_observations = data["observation"]
+            if isinstance(data["observation"], dict):
+                self._state.run_metadata["latest_vision_observation"] = data["observation"]
         if "analysis" in data:
             self._state.latest_analysis.update(data["analysis"])
         if "sarm" in data:
@@ -3273,14 +4085,55 @@ class MainController:
         if "equipment_result" in data:
             equipment_result = data["equipment_result"] if isinstance(data["equipment_result"], dict) else {}
             self._state.run_metadata["equipment_result"] = equipment_result
+            if isinstance(data.get("equipment_report"), dict):
+                self._state.run_metadata["equipment_report"] = data["equipment_report"]
+            if isinstance(data.get("utm_data_ready"), dict):
+                self._state.run_metadata["utm_data_ready"] = data["utm_data_ready"]
             if "equipment_handoff" in data:
                 self._state.run_metadata["equipment_handoff"] = data["equipment_handoff"]
             self._state.latest_analysis["equipment_ok"] = bool(equipment_result.get("ok", False))
             self._state.latest_analysis["equipment_status"] = str(equipment_result.get("status") or "")
             self._state.latest_analysis["equipment_program_id"] = str(equipment_result.get("program_id") or "")
+            result_file = equipment_result.get("result_file") or equipment_result.get("utm_csv_path")
+            if result_file:
+                self._state.latest_analysis["equipment_result_file"] = str(result_file)
             failure_code = equipment_result.get("failure_code")
             if failure_code:
                 self._state.latest_analysis["equipment_failure_code"] = str(failure_code)
+        hardware_alerts_raw = data.get("hardware_alerts") if isinstance(data.get("hardware_alerts"), list) else []
+        hardware_alert_single = data.get("hardware_alert") if isinstance(data.get("hardware_alert"), dict) else None
+        hardware_alerts = [dict(item) for item in hardware_alerts_raw if isinstance(item, dict)]
+        if hardware_alert_single:
+            hardware_alerts.append(dict(hardware_alert_single))
+        incident_records_raw = data.get("incident_records") if isinstance(data.get("incident_records"), list) else []
+        incident_records = [dict(item) for item in incident_records_raw if isinstance(item, dict)]
+        if hardware_alerts:
+            stored_alerts = self._state.run_metadata.setdefault("hardware_alerts", [])
+            if not isinstance(stored_alerts, list):
+                stored_alerts = []
+                self._state.run_metadata["hardware_alerts"] = stored_alerts
+            seen_alert_ids = {str(item.get("alert_id")) for item in stored_alerts if isinstance(item, dict)}
+            for alert in hardware_alerts:
+                alert_id = str(alert.get("alert_id") or "")
+                if alert_id and alert_id in seen_alert_ids:
+                    incident = alert.get("incident_record")
+                    if isinstance(incident, dict):
+                        incident_records.append(dict(incident))
+                    continue
+                stored_alerts.append(alert)
+                guardian_decision = alert.get("guardian_decision")
+                if isinstance(guardian_decision, dict):
+                    self._state.run_metadata["latest_guardian_decision"] = guardian_decision
+                incident = alert.get("incident_record")
+                if isinstance(incident, dict):
+                    incident_records.append(dict(incident))
+                device_class = str(alert.get("device_class") or "hardware")
+                failure = str(alert.get("failure_code") or alert.get("status") or "alert")
+                severity = str(alert.get("severity") or "warning")
+                self._state.device_health[device_class] = f"{severity}:{failure}"
+            del stored_alerts[:-50]
+        if incident_records:
+            self._record_incident_records(incident_records)
         if "knowledge" in data:
             self._state.run_metadata["knowledge"] = data["knowledge"]
         if "bo_result" in data:
@@ -3444,15 +4297,28 @@ class MainController:
     def _format_planning_stage_message(self, stage: Stage, data: dict[str, Any], summary: str) -> str:
         if stage == Stage.VISION:
             observation = data.get("observation") if isinstance(data.get("observation"), dict) else {}
+            report = data.get("vision_report") if isinstance(data.get("vision_report"), dict) else observation.get("vision_report", {}) if isinstance(observation.get("vision_report"), dict) else {}
+            packet = data.get("vision_signal") if isinstance(data.get("vision_signal"), dict) else observation.get("vision_signal", {}) if isinstance(observation.get("vision_signal"), dict) else {}
             readiness = observation.get("transfer_readiness") if isinstance(observation.get("transfer_readiness"), dict) else {}
-            pose = observation.get("pose_estimate") if isinstance(observation.get("pose_estimate"), dict) else {}
+            camera = report.get("camera_source") if isinstance(report.get("camera_source"), dict) else {}
+            zones = report.get("scene_map") if isinstance(report.get("scene_map"), dict) else report.get("zones", {}) if isinstance(report.get("zones"), dict) else {}
+            signals = report.get("signal_board") if isinstance(report.get("signal_board"), list) else report.get("agent_signals", []) if isinstance(report.get("agent_signals"), list) else []
+            pickup = next((signal for signal in signals if isinstance(signal, dict) and signal.get("signal") == "pickup_ready"), {})
+            zone_summary = ", ".join(
+                f"{zone_id}={zone.get('state') or ('present' if zone.get('specimen_present') else 'unknown')}"
+                for zone_id, zone in list(zones.items())[:4]
+                if isinstance(zone, dict)
+            )
+            artifacts = report.get("artifacts") if isinstance(report.get("artifacts"), dict) else {}
             return (
-                "Vision Agent가 3DP 출력물 픽업 상태를 확인했습니다.\n\n"
-                f"- summary: {self._runtime_value(observation.get('summary'))}\n"
-                f"- camera_key: {self._runtime_value(observation.get('camera_key'))}\n"
-                f"- ready: {self._runtime_value(readiness.get('ready'))}\n"
-                f"- pose_confidence: {self._runtime_value(pose.get('confidence'))}\n"
-                f"- anomaly: {self._runtime_value(observation.get('anomaly'))}"
+                "Vision Agent가 lab perception signal을 발행했습니다.\n\n"
+                f"- task: {self._runtime_value(report.get('task') or 'post_ejection_basket_check')}\n"
+                f"- camera: {self._runtime_value(camera.get('camera_key') or observation.get('camera_key'))} / {self._runtime_value(camera.get('source') or observation.get('source'))}\n"
+                f"- zone_state: {self._runtime_value(zone_summary or 'not recorded')}\n"
+                f"- pickup_ready: {self._runtime_value(pickup.get('status') or readiness.get('ready'))}, confidence={self._runtime_value(pickup.get('confidence') or readiness.get('pose_confidence'))}\n"
+                f"- expires_at: {self._runtime_value(pickup.get('expires_at') or packet.get('expires_at'))}\n"
+                f"- anomaly: {self._runtime_value(observation.get('anomaly'))}\n"
+                f"- evidence: {self._runtime_value(artifacts.get('annotated_frame_path') or artifacts.get('detection_json_path'))}"
             )
         if stage == Stage.MANIPULATION:
             manipulation = data.get("manipulation") if isinstance(data.get("manipulation"), dict) else {}
@@ -3471,13 +4337,23 @@ class MainController:
         if stage == Stage.EQUIPMENT:
             equipment = data.get("equipment_result") if isinstance(data.get("equipment_result"), dict) else {}
             handoff = data.get("equipment_handoff") if isinstance(data.get("equipment_handoff"), dict) else {}
+            report = data.get("equipment_report") if isinstance(data.get("equipment_report"), dict) else {}
+            cross = report.get("cross_checks") if isinstance(report.get("cross_checks"), dict) else equipment.get("cross_checks", {}) if isinstance(equipment.get("cross_checks"), dict) else {}
+            vision_cross = report.get("vision_cross_checks") if isinstance(report.get("vision_cross_checks"), dict) else equipment.get("vision_cross_checks", {}) if isinstance(equipment.get("vision_cross_checks"), dict) else {}
+            vision_blocking = vision_cross.get("blocking_reasons") if isinstance(vision_cross.get("blocking_reasons"), list) else []
+            data_acq = report.get("data_acquisition") if isinstance(report.get("data_acquisition"), dict) else equipment.get("data_acquisition", {}) if isinstance(equipment.get("data_acquisition"), dict) else {}
+            decision = report.get("decision") if isinstance(report.get("decision"), dict) else {}
             return (
-                "Lab Equipment Agent가 장비/UTM 측정 단계를 실행했습니다.\n\n"
+                "Lab Equipment Agent가 UTM 장비 제어/검증 단계를 실행했습니다.\n\n"
                 f"- tool: {self._runtime_value(equipment.get('tool'))}\n"
                 f"- status: {self._runtime_value(equipment.get('status'))}\n"
                 f"- program_id: {self._runtime_value(equipment.get('program_id'))}\n"
                 f"- handoff: {self._runtime_value(handoff.get('status'))}\n"
-                f"- failure_code: {self._runtime_value(equipment.get('failure_code'))}\n"
+                f"- screen/physical/data: {self._runtime_value(cross.get('screen_started'))} / {self._runtime_value(cross.get('physical_motion_started'))} / {self._runtime_value(cross.get('data_parse_probe_ok'))}\n"
+                f"- vision_gate: {self._runtime_value(vision_cross.get('all_required_ok'))}, blocking={self._runtime_value(vision_blocking)}\n"
+                f"- result_file: {self._runtime_value(data_acq.get('linux_path') or handoff.get('result_file'))}\n"
+                f"- rows: {self._runtime_value(data_acq.get('row_count_probe'))}, columns: {self._runtime_value(data_acq.get('columns_probe'))}\n"
+                f"- failure_code: {self._runtime_value(decision.get('failure_code') or equipment.get('failure_code'))}\n"
                 "적용 중인 단계:\n"
                 + "\n".join(self._runtime_step_lines(equipment.get("step_trace")))
             )
@@ -3503,12 +4379,20 @@ class MainController:
             )
         if stage == Stage.KNOWLEDGE:
             knowledge = data.get("knowledge") if isinstance(data.get("knowledge"), dict) else {}
+            context = knowledge.get("knowledge_context") if isinstance(knowledge.get("knowledge_context"), dict) else {}
+            evidence_quality = context.get("evidence_quality") if isinstance(context.get("evidence_quality"), dict) else {}
+            proposal = knowledge.get("evolution_proposal") if isinstance(knowledge.get("evolution_proposal"), dict) else {}
+            packs = proposal.get("evidence_packs") if isinstance(proposal.get("evidence_packs"), list) else []
+            top_pack = packs[0] if packs and isinstance(packs[0], dict) else {}
             return (
-                "Knowledge Agent가 실험 결과를 메모리/RAG 컨텍스트에 반영했습니다.\n\n"
+                "Knowledge Agent가 연구 기억과 self-evolution 증거팩을 갱신했습니다.\n\n"
                 f"- retrieval_coverage: {self._runtime_value(knowledge.get('retrieval_coverage'))}\n"
-                f"- local_chunks: {self._runtime_value(knowledge.get('local_chunks'))}\n"
-                f"- web_results: {self._runtime_value(knowledge.get('web_results'))}\n"
-                f"- memory_summary: {self._runtime_value(knowledge.get('memory_summary'))}"
+                f"- memory_summary: {self._runtime_value(knowledge.get('memory_summary'))}\n"
+                f"- agent_performance_records: {self._runtime_value(knowledge.get('agent_performance_count'))}\n"
+                f"- failure/success_patterns: {self._runtime_value(knowledge.get('failure_pattern_count'))} / {self._runtime_value(knowledge.get('success_pattern_count'))}\n"
+                f"- evolution_evidence_packs: {self._runtime_value(knowledge.get('evolution_pack_count'))}\n"
+                f"- artifact_link_coverage: {self._runtime_value(evidence_quality.get('artifact_link_coverage'))}\n"
+                f"- top_evolution_target: {self._runtime_value(top_pack.get('target_id'))} ({self._runtime_value(top_pack.get('target_type'))})"
             )
         if stage == Stage.GUARDIAN:
             guardian = data.get("guardian") if isinstance(data.get("guardian"), dict) else {}
@@ -3531,14 +4415,19 @@ class MainController:
         bo_result = data.get("bo_result") if isinstance(data.get("bo_result"), dict) else {}
         recommendation = bo_result.get("recommendation") if isinstance(bo_result.get("recommendation"), dict) else {}
         knowledge = bo_result.get("knowledge_context") if isinstance(bo_result.get("knowledge_context"), dict) else {}
+        reasoning = bo_result.get("reasoning") if isinstance(bo_result.get("reasoning"), dict) else {}
+        prior_summary = bo_result.get("prior_summary") if isinstance(bo_result.get("prior_summary"), dict) else {}
         return (
-            "BO Agent가 Knowledge Agent 컨텍스트를 반영해 다음 설계 후보를 추천했습니다.\n\n"
-            f"- strategy: {self._runtime_value(bo_result.get('strategy'))}\n"
+            "BO Agent가 측정 evidence, Knowledge memory, acquisition score, reasoning preference를 결합해 다음 설계 후보를 추천했습니다.\n\n"
+            f"- strategy: {self._runtime_value(bo_result.get('strategy'))} / benchmark={self._runtime_value(bo_result.get('benchmark_strategy'))}\n"
             f"- acquisition: {self._runtime_value(bo_result.get('acquisition'))}\n"
+            f"- priors: measured={self._runtime_value(prior_summary.get('measured_count'))}, failed={self._runtime_value(prior_summary.get('failed_count'))}\n"
             f"- recommended_candidate: {self._runtime_value(recommendation.get('candidate_id'))}\n"
+            f"- combined_score: {self._runtime_value(recommendation.get('combined_score'))}\n"
+            f"- why: {self._runtime_value(recommendation.get('why_this_candidate') or recommendation.get('reason'))}\n"
             f"- recommended_parameters: {json.dumps(recommendation.get('parameters', {}), ensure_ascii=False)}\n"
-            f"- knowledge_coverage: {self._runtime_value(knowledge.get('retrieval_coverage'))}\n"
-            f"- knowledge_summary: {self._runtime_value(knowledge.get('memory_summary'))}"
+            f"- reasoning_summary: {self._runtime_value(reasoning.get('operator_summary'))}\n"
+            f"- knowledge_coverage: {self._runtime_value(knowledge.get('retrieval_coverage'))}"
         )
 
     async def _run_planning_loop_tail(
@@ -3570,6 +4459,52 @@ class MainController:
             await self._broadcast_event(event)
             event_type = str(event.get("type") or event.get("event_type") or "")
             payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+            if event_type == "orchestrator.followup":
+                followup = payload.get("orchestrator_followup") if isinstance(payload.get("orchestrator_followup"), dict) else {}
+                if followup:
+                    await self._append_planning_message(
+                        {
+                            "schema": "live_chat_message.v1",
+                            "role": "orchestrator",
+                            "message_type": "warning" if followup.get("concerns") else "decision",
+                            "content": self._format_orchestrator_followup_message(followup),
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                            "model": "orchestrator_supervisor",
+                            "ok": followup.get("status") != "error",
+                            "graph_id": event.get("graph_id", ""),
+                            "orchestrator_followup": followup,
+                            "requires_response": bool(followup.get("requires_response")),
+                            "evidence_refs": followup.get("evidence_refs", []),
+                        },
+                        event_type="planning_orchestrator_followup",
+                        level=str(event.get("level") or "INFO"),
+                        message="Orchestrator supervisor follow-up streamed from LangGraph runtime.",
+                    )
+                return
+            if event_type == "orchestrator.loop_reflection":
+                reflection = payload.get("loop_reflection") if isinstance(payload.get("loop_reflection"), dict) else {}
+                if reflection:
+                    await self._append_planning_message(
+                        {
+                            "schema": "live_chat_message.v1",
+                            "role": "orchestrator",
+                            "message_type": "decision",
+                            "content": (
+                                "Orchestrator loop reflection\n"
+                                f"- summary: {reflection.get('operator_visible_summary', '-')}\n"
+                                f"- next: {reflection.get('next_loop_recommendation', '-')}\n"
+                                f"- near_miss: {self._runtime_value(reflection.get('what_failed_or_nearly_failed'))}"
+                            ),
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                            "model": "orchestrator_supervisor",
+                            "ok": True,
+                            "graph_id": event.get("graph_id", ""),
+                            "loop_reflection": reflection,
+                        },
+                        event_type="planning_orchestrator_reflection",
+                        message="Orchestrator loop reflection streamed from LangGraph runtime.",
+                    )
+                return
             raw_stage = str(payload.get("node_id") or event.get("node_id") or "")
             try:
                 stage = Stage(raw_stage)
@@ -3651,6 +4586,44 @@ class MainController:
                 "module_runtime": module_runtime,
                 stage.value: data.get(stage.value, data),
             }
+            if stage == Stage.VISION:
+                observation = data.get("observation") if isinstance(data.get("observation"), dict) else {}
+                vision_report = data.get("vision_report") if isinstance(data.get("vision_report"), dict) else observation.get("vision_report", {}) if isinstance(observation.get("vision_report"), dict) else {}
+                vision_signal = data.get("vision_signal") if isinstance(data.get("vision_signal"), dict) else observation.get("vision_signal", {}) if isinstance(observation.get("vision_signal"), dict) else {}
+                message_payload["schema"] = "live_chat_message.v1"
+                message_payload["message_type"] = "signal"
+                message_payload["signal_id"] = vision_signal.get("signal_id", "")
+                message_payload["zone_id"] = vision_signal.get("zone_id", "")
+                message_payload["confidence"] = vision_signal.get("confidence", None)
+                message_payload["stability_ms"] = vision_signal.get("stable_for_ms", None)
+                message_payload["vision_report"] = vision_report
+                message_payload["vision_signal"] = vision_signal
+                message_payload["agent_signals"] = vision_report.get("signal_board", []) if isinstance(vision_report.get("signal_board"), list) else []
+            if stage == Stage.EQUIPMENT:
+                equipment_report = data.get("equipment_report") if isinstance(data.get("equipment_report"), dict) else {}
+                equipment_result = data.get("equipment_result") if isinstance(data.get("equipment_result"), dict) else {}
+                utm_packet = data.get("utm_data_ready") if isinstance(data.get("utm_data_ready"), dict) else {}
+                handoff_packet = data.get("equipment_handoff") if isinstance(data.get("equipment_handoff"), dict) else {}
+                decision = equipment_report.get("decision") if isinstance(equipment_report.get("decision"), dict) else {}
+                bridge = equipment_report.get("bridge") if isinstance(equipment_report.get("bridge"), dict) else {}
+                data_ledger = equipment_report.get("data_ledger") if isinstance(equipment_report.get("data_ledger"), dict) else equipment_report.get("data_acquisition", {}) if isinstance(equipment_report.get("data_acquisition"), dict) else {}
+                message_payload.update(
+                    {
+                        "schema": "live_chat_message.v1",
+                        "message_type": "handoff" if decision.get("handoff_status") == "ready_for_analysis" else "warning",
+                        "command_id": equipment_result.get("sequence_id") or handoff_packet.get("sequence_id") or "",
+                        "windows_host": bridge.get("bridge_url_host") or bridge.get("host") or bridge.get("provider") or "",
+                        "visual_assertion": equipment_report.get("visual_verification", {}),
+                        "physical_cross_check": equipment_report.get("physical_verification", {}),
+                        "data_file_ref": data_ledger.get("linux_path") or handoff_packet.get("result_file") or utm_packet.get("result_file") or "",
+                        "data_ledger": data_ledger,
+                        "recovery": equipment_report.get("recovery", {}),
+                        "handoff_packet": utm_packet or handoff_packet,
+                        "equipment_report": equipment_report,
+                        "equipment_result": equipment_result,
+                        "evidence_refs": utm_packet.get("evidence_refs", []) if isinstance(utm_packet.get("evidence_refs"), list) else [],
+                    }
+                )
             if stage == Stage.ANALYSIS:
                 fem_artifacts = self._write_planning_fem_artifacts(experiment_spec, data)
                 if fem_artifacts:

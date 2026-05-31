@@ -56,8 +56,20 @@ Modification guide:
               <select id="bo-strategy-input" class="text-input">
                 <option value="bo">bo</option>
                 <option value="mbo">mbo</option>
+                <option value="llm_warmstart">llm_warmstart</option>
+                <option value="llm_preference_bo">llm_preference_bo</option>
+                <option value="safe_constrained_bo">safe_constrained_bo</option>
+                <option value="multi_objective_pareto">multi_objective_pareto</option>
+                <option value="multi_fidelity_bo">multi_fidelity_bo</option>
                 <option value="random">random</option>
                 <option value="grid">grid</option>
+              </select>
+            </label>
+            <label>
+              Numeric Backend
+              <select id="bo-backend-input" class="text-input">
+                <option value="lightweight_pool">lightweight_pool</option>
+                <option value="botorch_optional">botorch_optional</option>
               </select>
             </label>
             <label>
@@ -95,6 +107,21 @@ Modification guide:
               Exploitation Weight
               <input id="bo-exploitation-input" class="text-input" type="number" min="0" max="1" step="0.05" value="0.65" />
             </label>
+            <label>
+              LLM Preference
+              <select id="bo-llm-preference-input" class="text-input">
+                <option value="true">enabled</option>
+                <option value="false">disabled</option>
+              </select>
+            </label>
+            <label>
+              LLM Candidate Weight
+              <input id="bo-llm-weight-input" class="text-input" type="text" value="auto" />
+            </label>
+            <label>
+              Top-K Candidates
+              <input id="bo-top-k-input" class="text-input" type="number" min="1" max="12" step="1" value="5" />
+            </label>
           </div>
           <label class="planning-message-label">
             Objective JSON
@@ -123,6 +150,22 @@ Modification guide:
               <span class="hint">Best Score</span>
               <strong id="bo-best-score-label">n/a</strong>
             </div>
+          </div>
+          <div class="printer-subsection">
+            <h3>Recommendation / Design Handoff</h3>
+            <div id="bo-recommendation-panel" class="bo-insight-panel">Run BO Agent to generate a next-design handoff.</div>
+          </div>
+          <div class="printer-subsection">
+            <h3>Evidence Intake</h3>
+            <div id="bo-prior-summary" class="bo-insight-panel">No prior evidence loaded.</div>
+          </div>
+          <div class="printer-subsection">
+            <h3>LLM Reasoning Audit</h3>
+            <div id="bo-reasoning-panel" class="bo-insight-panel">No reasoning artifact yet.</div>
+          </div>
+          <div class="printer-subsection">
+            <h3>Candidate Ranking</h3>
+            <div id="bo-candidate-ranking" class="bo-candidate-ranking">No ranked candidates yet.</div>
           </div>
           <div class="printer-subsection">
             <h3>Best-So-Far</h3>

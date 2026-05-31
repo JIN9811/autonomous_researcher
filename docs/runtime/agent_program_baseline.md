@@ -92,7 +92,7 @@ When replacing internals with real programs, keep these output keys stable.
 | `design` | `experiment_spec` | `experiment_spec`, `rationale` | protocol/candidate generation service |
 | `specimen` | none | `specimen_result`, `protocol_note` | geometry handoff + PrusaSlicer/PrusaLink runtime pipeline |
 | `vision` | `observation` | `observation`, `protocol_note` | 3DP output pickup observation via `camera.capture` |
-| `manipulation` | none | `manipulation`, `sarm`, `protocol_note` | robot control runtime: `robot.pick_place` or Pi0.5/LeRobot rollout |
+| `manipulation` | none | `manipulation`, `sarm`, `manipulation_report`, `robot_task_result`, `handoff_packet`, `protocol_note` | bounded robot skills through `robot.pick_place` or Pi0.5/LeRobot rollout |
 | `equipment` | `equipment_result`, `protocol_note` | `equipment_result`, `protocol_note`, `equipment_handoff` | Windows PyAutoGUI bridge macro runner or legacy UTM runner |
 | `analysis` | `analysis` | `analysis` | UTM curve feature extraction + CAE closed-loop objective/uncertainty post-processor |
 | `knowledge` | none | `knowledge` | local+web RAG and memory writer |
@@ -101,6 +101,7 @@ When replacing internals with real programs, keep these output keys stable.
 Notes:
 
 - SARM remains a submodule under `manipulation_agent` (not top-level stage).
+- Manipulation emits `manipulation_report.v1` and `robot_task_result.v1`; downstream agents and GUI reports must consume those structured packets rather than scraping raw rollout logs.
 - Design-stage orchestrator planning is declared as `module.pre_execution` in `graphs/modules/design/module.yaml` (`orchestrator_plan -> agent.orchestrator_agent`) and writes plan metadata to `state.run_metadata.orchestrator_plan`; it must not be reintroduced as a hard-coded run-loop special case.
 - Live GUI planning may skip that pre-execution step only after the chat orchestrator has already approved the same Design handoff, to avoid duplicate model calls.
 
@@ -218,7 +219,7 @@ Payload baseline:
 | `printer.prepare` | `specimen_id`, optional `stl_path` | `ok`, `tool`, `specimen_id`, `status`, `printer_path`, `printer_mode`, `sliced_path`, `slicer_settings`, `slicer_result`, `gcode_validation`, `printer`, `prusalink`, `print_result`, `ejection_result`, `step_trace` |
 | `camera.capture` | `frame_id`, optional `camera_key`, `purpose`, `specimen_id` | `ok`, `tool`, `frame_id`, `camera_key`, `source`, `anomaly` |
 | `robot.pick_place` | `task` | `ok`, `tool`, `grasp_score`, `task` |
-| `utm.run_protocol` | `profile` | `ok`, `tool`, `result_file`, `cycles` |
+| `utm.run_protocol` | `profile`, `runtime_mode`, optional `run_id`, `specimen_id`, `result_file`, `direct_backend_configured` | test: parseable `result_file`/`utm_csv_path`, `data_acquisition`, `cross_checks`; live without explicit direct backend: `ok=false`, `failure_code=UTM_DIRECT_BACKEND_NOT_CONFIGURED` |
 | `equipment.pyautogui.health` | none | `ok`, `tool`, `status`, `screen`, `pyautogui` |
 | `equipment.pyautogui.list_programs` | none | `ok`, `tool`, `programs` |
 | `equipment.pyautogui.run` | `program_id` or `sequence` | `ok`, `tool`, `status`, `program_id`, `program_log`, `step_trace`, `failure_code` |
@@ -276,6 +277,7 @@ LeRobot-specific integration rule:
 - Local rollout policy paths are preferred over Hub repo IDs. If the GUI selects `model.safetensors` or another recognized policy output file under `outputs/train`, the bridge resolves it to the parent `pretrained_model` checkpoint folder before building the live command.
 - Rollout output dataset names are normalized to `eval_*` by the bridge, while teleoperation/training datasets keep their original names. Blank GUI rollout duration means manual-stop mode and is converted to a long one-episode LeRobot run.
 - Manipulation Agent switches to `lerobot.rollout.start` when `current_experiment_spec.manipulation_strategy` contains `lerobot`/`policy`, or when LeRobot policy/profile fields are present.
+- Manipulation Agent supports bounded tasks `transfer_to_utm` and `clear_utm_to_disposal`, stores defaults in `memory/manipulation_agent_bridge.json`, and uses Pi0.5 RTC/action-clamp fields from the LeRobot GUI/profile when present.
 
 ## State Fields Commonly Read/Written
 
@@ -395,3 +397,67 @@ Frequently written by run loop merge:
 ## Runtime Event Contract
 
 LangGraphRunLoop emits legacy `event_type` keys plus Runtime IDE `type` aliases such as `node.started`, `node.completed`, `edge.traversed`, and `run.completed`. Runtime IDE consumers should depend on the alias fields while existing GUI code may continue reading the legacy keys.
+
+### 2026-05-29 Vision Agent baseline update
+
+The Vision stage output is now:
+
+- `observation` for backward compatibility.
+- `vision_report.v1` for report/GUI use.
+- `vision_signal.v1` as `handoff_packet` for downstream agents.
+- `decisions`, `metrics`, and `evidence_refs` for runtime trace and reports.
+
+`camera.capture` may now include optional `camera_key`, `purpose`, `specimen_id`,
+`timestamp`, `confidence`, `zones`, `detections`, and artifact path fields. The
+agent tolerates missing optional fields and degrades to simulator/rule evidence.
+
+## 2026-05-30 Lab Equipment Failure Evidence Contract
+
+For UTM visual-control runs, Lab Equipment reports must preserve both data and non-data evidence:
+
+- `equipment_report.artifact_records`: normalized Windows/Linux artifact metadata from bridge output.
+- `equipment_report.artifact_refs`: all known artifact references.
+- `equipment_report.screen_evidence_refs`: screen PNG evidence for ready/running/complete/failure states.
+- `equipment_report.data_evidence_refs`: parseable UTM CSV references only.
+- `utm_data_ready.evidence_refs`: broad evidence package for Guardian/Knowledge review.
+- `equipment_handoff.result_file` / `utm_csv_path`: Analysis input; do not replace these with screen artifacts.
+- `equipment_report.failure_retry_table`: warning/blocked/retry/fallback steps for operator recovery.
+
+This separates recovery evidence from Analysis data while keeping blocked runs debuggable.
+
+### 2026-05-30 Analysis Live Equipment Handoff Gate
+
+In live mode, Analysis does not treat a readable UTM CSV as sufficient by itself when the run carries Windows/UTM Equipment handoff metadata. If `equipment_report.live_evidence_audit.required_for_handoff=true`, `equipment_handoff`, or `utm_data_ready` is present, `AnalysisAgent` rechecks that the handoff is `ready_for_analysis`, the UTM packet is `ready`, and the required screen/physical/save/file/parse/Linux-pull/Vision/request-audit cross-checks are true. Otherwise the analysis result is blocked with `EQUIPMENT_HANDOFF_NOT_READY` or the specific Equipment failure code.
+
+### Lab Equipment Vision Freshness Requirement
+
+For live UTM handoff, Lab Equipment treats Vision physical evidence as freshness-bounded data. A positive `equipment_vision_check_result` or Vision signal-board entry is not consumable unless it carries a valid ISO-8601 `expires_at` value and that value is still in the future. Missing live freshness metadata blocks with `VISION_UTM_*_FRESHNESS_REQUIRED`; expired metadata blocks with `VISION_UTM_*_STALE`; absent evidence remains `VISION_UTM_*_REQUIRED`.
+
+This distinction is intentional:
+
+- `REQUIRED`: the physical UTM check was never observed.
+- `FRESHNESS_REQUIRED`: the check was observed but not bounded by a validity window.
+- `STALE`: the check had a validity window but it has expired.
+
+Test mode may still use deterministic simulated checks. Live mode must refresh Vision before retrying Equipment handoff when any of these blockers appear.
+
+## Lab Equipment Vision Identity Requirement
+
+For live Lab Equipment / UTM handoff, Vision evidence consumed by `LabEquipmentAgent` must include current-run identity. `equipment_vision_check_result` and Equipment-targeted `vision_signal_item.v1` entries must carry `run_id`, `specimen_id`, and `expires_at`. Freshness alone is not sufficient: stale, identity-missing, or identity-mismatched Vision evidence blocks `ready_for_analysis` and routes to Guardian/operator review.
+
+## Analysis Blocked-Handoff Evidence Payload
+
+Live Lab Equipment failures are still analysis events, even when they are not accepted as valid mechanical results. `AnalysisAgent` now emits the same downstream evidence envelope for blocked paths as it does for successful analysis:
+
+- `analysis.artifact_refs` and top-level `knowledge_payload.raw_artifact_refs` preserve UTM CSV paths, screen evidence, bridge artifact IDs, and nested `equipment_report` / `utm_data_ready` evidence refs.
+- `analysis.failure_tags` and `knowledge_payload.failure_tags` include the Analysis failure code, Equipment handoff failure code, signal-quality failure code, and live handoff blockers.
+- `analysis.knowledge_payload` is populated for `EQUIPMENT_HANDOFF_NOT_READY`, `UTM_DATA_REQUIRED`, and `UTM_DATA_*` signal-quality blocks so Knowledge/Guardian/Self-Evolution can learn from failed runs instead of losing provenance.
+- Blocked payloads do not mark the experiment as Analysis-ready. `bo_observation.status` is `blocked`, and `equipment_handoff_gate.status` remains `blocked` when Equipment proof gates are incomplete.
+
+This implements the Improvement 05 rule that data success, save/export success, and analysis success are separate gates. A failed handoff must remain traceable through raw artifacts and failure tags, not disappear because Analysis refused to compute objective metrics.
+
+## Guardian Review of Blocked Analysis
+
+`GuardianAgent` now treats blocked UTM analysis as a consistency signal. If `latest_analysis.ok=false`, `latest_analysis.failure_code` is set, or `latest_analysis.equipment_handoff_gate.status=blocked`, Guardian records a consistency issue and routes toward recovery unless a higher-priority stop condition is active. UTM/data/evidence failure tags such as `UTM_DATA_*`, `UTM_SAVE_EXPORT_*`, and `EQUIPMENT_LIVE_EVIDENCE_INCOMPLETE:*` are surfaced as Guardian warnings.
+
+This keeps Improvement 05 failure modes visible to the loop policy: rejected UTM CSVs, missing Linux artifact pulls, save/export responsibility failures, and request-audit evidence failures are not silently treated as ordinary low objective scores.

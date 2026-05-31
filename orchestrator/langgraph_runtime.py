@@ -42,8 +42,19 @@ from graphs.generated_adapter import GENERATED_MODULE_HANDLER_ID, generated_adap
 from logging_system.error_logger import log_error
 from logging_system.event_logger import log_agent_event, log_system_event
 from logging_system.structured_logger import StructuredLogger
-from orchestrator.state import AgentRuntimeStatus, OrchestratorState, Stage
+from orchestrator.state import AgentRuntimeStatus, Mode, OrchestratorState, Stage
+from orchestrator.supervisor import (
+    build_decision_record,
+    build_loop_reflection,
+    build_mission_contract,
+    build_orchestration_plan,
+    build_orchestrator_followup,
+    build_orchestrator_handoff_packet,
+    build_orchestrator_parallel_check,
+    build_orchestrator_parallel_check_batch,
+)
 from policies.recovery_policy import recovery_action
+from policies.guardian_gate import gate_blocks_execution, guardian_gate, tool_requires_action_shield
 from policies.retry_policy import bump_retry, should_retry
 from policies.safe_stop_policy import safe_stop_reason
 from policies.validation_policy import validate_agent_output
@@ -85,9 +96,23 @@ class GeneratedModuleRuntimeAdapter:
 class ModuleToolRegistryProxy:
     """Stage-scoped tool allowlist view over the shared ToolRegistry."""
 
-    def __init__(self, base_tools: Any, allowed_tools: list[str], stage: Stage) -> None:
+    def __init__(
+        self,
+        base_tools: Any,
+        allowed_tools: list[str],
+        stage: Stage,
+        *,
+        state: OrchestratorState | None = None,
+        gate_recorder: Callable[[dict[str, Any]], None] | None = None,
+        tool_event_emitter: Callable[[dict[str, Any]], None] | None = None,
+        tool_call_recorder: Callable[[dict[str, Any]], None] | None = None,
+    ) -> None:
         self._base = base_tools
         self._stage = stage
+        self._state = state
+        self._gate_recorder = gate_recorder
+        self._tool_event_emitter = tool_event_emitter
+        self._tool_call_recorder = tool_call_recorder
         self._allowed = {str(tool).strip() for tool in allowed_tools if str(tool).strip()}
 
     def __getattr__(self, name: str) -> Any:
@@ -98,10 +123,202 @@ class ModuleToolRegistryProxy:
             allowed = ", ".join(sorted(self._allowed))
             raise PermissionError(f"Tool not allowed for stage={self._stage.value}: {name}. allowed={allowed}")
 
+    def _record_gate(self, gate: dict[str, Any]) -> None:
+        if not callable(self._gate_recorder):
+            return
+        try:
+            self._gate_recorder(gate)
+        except Exception:
+            return
+
+    @staticmethod
+    def _tool_payload_digest(payload: dict[str, Any]) -> str:
+        try:
+            raw = json.dumps(payload, ensure_ascii=True, sort_keys=True, default=str).encode("utf-8")
+        except Exception:
+            raw = str(payload).encode("utf-8", errors="replace")
+        return hashlib.sha256(raw).hexdigest()
+
+    def _record_tool_call(
+        self,
+        *,
+        call_id: str,
+        tool: str,
+        status: str,
+        payload: dict[str, Any] | None = None,
+        result: dict[str, Any] | None = None,
+        gate: dict[str, Any] | None = None,
+    ) -> None:
+        payload = dict(payload or {})
+        result = dict(result or {})
+        gate = dict(gate or {})
+        state = self._state
+        record = {
+            "schema": "tool_call_record.v1",
+            "record_id": make_event_id(),
+            "call_id": call_id,
+            "run_id": str(getattr(state, "run_id", "")) if state is not None else "",
+            "experiment_id": str(getattr(state, "experiment_id", "")) if state is not None else "",
+            "loop_id": int(getattr(state, "loop_count", 0) or 0) if state is not None else 0,
+            "stage": self._stage.value,
+            "tool": tool,
+            "status": status,
+            "payload_sha256": self._tool_payload_digest(payload) if payload else "",
+            "payload_keys": sorted(str(key) for key in payload.keys())[:64],
+            "result_ok": result.get("ok") if result else None,
+            "result_status": str(result.get("status") or "") if result else "",
+            "failure_code": str(result.get("failure_code") or result.get("error_code") or "") if result else "",
+            "guardian_gate_id": str(gate.get("gate_id") or ""),
+            "guardian_decision": str(gate.get("decision") or ""),
+            "guardian_reason_code": str(gate.get("reason_code") or ""),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        if callable(self._tool_call_recorder):
+            try:
+                self._tool_call_recorder(record)
+                return
+            except Exception:
+                pass
+        if state is None:
+            return
+        metadata = getattr(state, "run_metadata", None)
+        if not isinstance(metadata, dict):
+            return
+        records = metadata.setdefault("tool_call_records", [])
+        if not isinstance(records, list):
+            records = []
+            metadata["tool_call_records"] = records
+        records.append(record)
+        del records[:-200]
+
+    def _emit_tool_shield_event(self, *, tool: str, gate: dict[str, Any], status: str, detail: str = "") -> None:
+        if not callable(self._tool_event_emitter):
+            return
+        try:
+            self._tool_event_emitter(
+                {
+                    "tool": "guardian.tool_shield",
+                    "shielded_tool": tool,
+                    "step": str(gate.get("action") or "GUARDIAN_TOOL_SHIELD"),
+                    "status": status,
+                    "detail": detail or gate.get("reason_code", ""),
+                    "stage": self._stage.value,
+                    "decision": gate.get("decision", ""),
+                    "reason_code": gate.get("reason_code", ""),
+                    "risk_score": gate.get("risk_score", 0.0),
+                    "guardian_gate": gate,
+                    "guardian_decision": gate.get("guardian_decision", {}),
+                    "guardian_contract": gate.get("guardian_contract", {}),
+                    "requires_human_approval": str(gate.get("decision") or "") == "require_human_approval",
+                    "blocks_workflow": str(gate.get("decision") or "") in {"block", "safe_stop", "require_human_approval"},
+                }
+            )
+        except Exception:
+            return
+
+    @staticmethod
+    def _blocked_tool_result(name: str, gate: dict[str, Any]) -> dict[str, Any]:
+        decision = str(gate.get("decision") or "block")
+        approval_required = decision == "require_human_approval"
+        failure_code = "GUARDIAN_TOOL_APPROVAL_REQUIRED" if approval_required else "GUARDIAN_TOOL_SHIELD_BLOCKED"
+        return {
+            "ok": False,
+            "tool": name,
+            "status": "approval_required" if approval_required else "blocked",
+            "failure_code": failure_code,
+            "message": f"Guardian action shield blocked {name}: {gate.get('reason_code') or decision}",
+            "requires_human_approval": approval_required,
+            "blocks_workflow": True,
+            "guardian_gate": gate,
+            "guardian_contract": gate.get("guardian_contract", {}),
+            "guardian_decision": gate.get("guardian_decision", {}),
+            "incident_records": gate.get("incident_records", []),
+            "corrective_actions": gate.get("corrective_actions", []),
+            "step_trace": [
+                {
+                    "step": "GUARDIAN_PRE_TOOL_SHIELD",
+                    "status": "approval_required" if approval_required else "blocked",
+                    "detail": gate.get("reason_code") or decision,
+                }
+            ],
+        }
+
     def call(self, name: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
-        """Call only tools declared by the active module config."""
+        """Call only tools declared by the active module config, after Guardian sidecar checks."""
         self._ensure_allowed(name)
-        return self._base.call(name, payload)
+        normalized = dict(payload or {})
+        call_id = make_event_id().replace("evt-", "tool-call-", 1)
+        self._record_tool_call(call_id=call_id, tool=name, status="requested", payload=normalized)
+        if not tool_requires_action_shield(name):
+            try:
+                result = self._base.call(name, normalized)
+            except Exception as exc:
+                self._record_tool_call(
+                    call_id=call_id,
+                    tool=name,
+                    status="failed",
+                    payload=normalized,
+                    result={"ok": False, "status": "failed", "failure_code": exc.__class__.__name__},
+                )
+                raise
+            result_payload = result if isinstance(result, dict) else {"ok": False, "status": "failed", "failure_code": "TOOL_RESULT_NON_DICT"}
+            result_status = "completed" if result_payload.get("ok", True) is not False and str(result_payload.get("status") or "").lower() not in {"blocked", "failed", "error"} else "failed"
+            self._record_tool_call(call_id=call_id, tool=name, status=result_status, payload=normalized, result=result_payload)
+            return result
+
+        pre_gate = guardian_gate(
+            state=self._state,
+            stage=self._stage.value,
+            phase="action",
+            payload=normalized,
+            tool=name,
+            action="pre_tool_call",
+        )
+        self._record_gate(pre_gate)
+        decision = str(pre_gate.get("decision") or "allow")
+        if decision in {"block", "safe_stop", "require_human_approval"}:
+            status = "approval_required" if decision == "require_human_approval" else "blocked"
+            self._emit_tool_shield_event(tool=name, gate=pre_gate, status=status)
+            blocked = self._blocked_tool_result(name, pre_gate)
+            self._record_tool_call(call_id=call_id, tool=name, status=status, payload=normalized, result=blocked, gate=pre_gate)
+            return blocked
+        if decision == "modify":
+            patch = pre_gate.get("modified_payload_patch") if isinstance(pre_gate.get("modified_payload_patch"), dict) else {}
+            if patch:
+                normalized.update(patch)
+            self._emit_tool_shield_event(tool=name, gate=pre_gate, status="modified", detail="guardian_payload_patch")
+            self._record_tool_call(
+                call_id=call_id,
+                tool=name,
+                status="modified",
+                payload=normalized,
+                result={"ok": True, "status": "modified", "guardian_payload_patch": patch},
+                gate=pre_gate,
+            )
+        elif decision == "allow_with_warning":
+            self._emit_tool_shield_event(tool=name, gate=pre_gate, status="warning")
+
+        try:
+            result = self._base.call(name, normalized)
+        except Exception as exc:
+            failed = {"ok": False, "status": "failed", "failure_code": exc.__class__.__name__}
+            self._record_tool_call(call_id=call_id, tool=name, status="failed", payload=normalized, result=failed, gate=pre_gate)
+            raise
+        post_payload = result if isinstance(result, dict) else {"ok": False, "status": "failed", "failure_code": "TOOL_RESULT_NON_DICT"}
+        post_gate = guardian_gate(
+            state=self._state,
+            stage=self._stage.value,
+            phase="action",
+            payload=post_payload,
+            tool=name,
+            action="post_tool_call",
+        )
+        self._record_gate(post_gate)
+        result_status = "completed" if post_payload.get("ok", True) is not False and str(post_payload.get("status") or "").lower() not in {"blocked", "failed", "error"} else "failed"
+        self._record_tool_call(call_id=call_id, tool=name, status=result_status, payload=normalized, result=post_payload, gate=post_gate)
+        if str(post_gate.get("decision") or "allow") != "allow":
+            self._emit_tool_shield_event(tool=name, gate=post_gate, status=str(post_gate.get("status") or "warning"), detail="post_tool_result")
+        return result
 
     def list_tools(self) -> list[str]:
         """Expose only declared tools that are available in the shared registry."""
@@ -155,10 +372,17 @@ class ModuleRuntimeContext:
         module_config: dict[str, Any],
         stage: Stage,
         active_internal_step: dict[str, Any] | None = None,
+        *,
+        state: OrchestratorState | None = None,
+        gate_recorder: Callable[[dict[str, Any]], None] | None = None,
+        tool_call_recorder: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
         self._base = base
         self._module = module_config
         self._stage = stage
+        self._state = state
+        self._gate_recorder = gate_recorder
+        self._tool_call_recorder = tool_call_recorder
         self._active_internal_step = dict(active_internal_step or {})
         self._llm = module_config.get("llm") if isinstance(module_config.get("llm"), dict) else {}
         self._prompt = module_config.get("prompt") if isinstance(module_config.get("prompt"), dict) else {}
@@ -168,7 +392,53 @@ class ModuleRuntimeContext:
         self.active_backend = str(self._llm.get("backend") or base.active_backend).strip() or base.active_backend
         base_tools = getattr(base, "tools", None)
         if base_tools is not None and self._allowed_tools:
-            self.tools = ModuleToolRegistryProxy(base_tools, self._allowed_tools, stage)
+            self.tools = ModuleToolRegistryProxy(
+                base_tools,
+                self._allowed_tools,
+                stage,
+                state=state,
+                gate_recorder=gate_recorder,
+                tool_event_emitter=self._tool_event_dispatcher(),
+                tool_call_recorder=tool_call_recorder,
+            )
+
+    def _tool_event_dispatcher(self) -> Callable[[dict[str, Any]], None] | None:
+        """Return a thread-safe dispatcher for tool events emitted inside worker threads."""
+        callback = getattr(self._base, "on_tool_event", None)
+        if not callable(callback):
+            return None
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        def emit(event: dict[str, Any]) -> None:
+            event_payload = dict(event)
+
+            def notify() -> None:
+                try:
+                    result = callback(event_payload)
+                    if inspect.isawaitable(result):
+                        asyncio.create_task(result)
+                except Exception:
+                    return
+
+            def close_or_run_without_loop() -> None:
+                try:
+                    result = callback(event_payload)
+                    if inspect.isawaitable(result):
+                        close = getattr(result, "close", None)
+                        if callable(close):
+                            close()
+                except Exception:
+                    return
+
+            if loop is not None and loop.is_running():
+                loop.call_soon_threadsafe(notify)
+            else:
+                close_or_run_without_loop()
+
+        return emit
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._base, name)
@@ -369,7 +639,15 @@ class LangGraphRunLoop:
         module = self._module_config_for_stage(stage)
         if not module or not isinstance(self._ctx, AgentContext):
             return self._ctx
-        return ModuleRuntimeContext(self._ctx, module, stage, active_internal_step=active_internal_step)
+        return ModuleRuntimeContext(
+            self._ctx,
+            module,
+            stage,
+            active_internal_step=active_internal_step,
+            state=self._state,
+            gate_recorder=self._record_guardian_gate_snapshot,
+            tool_call_recorder=self._record_tool_call_snapshot,
+        )
 
     def _module_runtime_payload(self, stage: Stage) -> dict[str, Any]:
         """Return sanitized module config details for events/state metadata."""
@@ -436,6 +714,77 @@ class LangGraphRunLoop:
             "internal_graph": internal_steps,
             "pre_execution": pre_steps,
         }
+
+    def _graph_config_digest(self) -> str:
+        """Return a stable digest for the active runtime graph config."""
+        payload = json.dumps(self._graph_config.model_dump(mode="json"), ensure_ascii=True, sort_keys=True, default=str)
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    def _pre_run_gate_payload(self) -> dict[str, Any]:
+        """Build the graph-wide Guardian pre-run contract payload."""
+        metadata = self._graph_config.metadata if isinstance(self._graph_config.metadata, dict) else {}
+        safety = metadata.get("safety") if isinstance(metadata.get("safety"), dict) else {}
+        mode_support = [str(item) for item in metadata.get("mode_support", [])] if isinstance(metadata.get("mode_support"), list) else []
+        runtime_graph = self._state.run_metadata.get("runtime_graph") if isinstance(self._state.run_metadata.get("runtime_graph"), dict) else {}
+        module_versions = []
+        for stage, module in sorted(self._module_configs.items()):
+            if not isinstance(module, dict):
+                continue
+            module_versions.append(
+                {
+                    "stage": stage,
+                    "module_id": str(module.get("id") or stage),
+                    "handler": str(module.get("handler") or ""),
+                    "version": str(module.get("version") or module.get("module_version") or ""),
+                    "tools": module.get("tools", []) if isinstance(module.get("tools"), list) else [],
+                }
+            )
+        payload: dict[str, Any] = {
+            "schema_version": "guardian_pre_run.v1",
+            "status": "ok",
+            "graph": {
+                "graph_id": self._graph_config.id,
+                "graph_name": self._graph_config.name,
+                "graph_version": self._graph_config.version,
+                "graph_hash": runtime_graph.get("graph_hash") or self._graph_config_digest(),
+                "runtime_graph": runtime_graph,
+            },
+            "mode": self._state.mode.value,
+            "mode_support": mode_support,
+            "safety_policy": safety,
+            "module_versions": module_versions,
+            "device_heartbeat": dict(self._state.device_health or {}),
+            "operator_approval_status": self._state.run_metadata.get("runtime_approvals", {}),
+            "required_user_inputs_present": bool(self._state.current_experiment_spec or self._state.current_experiment_objective),
+            "risk_budget": self._state.run_metadata.get("safety_budget") or self._state.run_metadata.get("risk_budget") or {},
+        }
+        warnings: list[str] = []
+        blockers: list[str] = []
+        if mode_support and self._state.mode.value not in mode_support:
+            payload["failure_code"] = "CONTRACT_SCHEMA_INVALID"
+            blockers.append(f"mode={self._state.mode.value} is not supported by graph metadata")
+        if self._state.mode == Mode.LIVE and bool(safety.get("live_device_dry_run_required_before_execution")):
+            if not runtime_graph.get("graph_hash"):
+                warnings.append("live dry-run evidence is not attached to runtime_graph metadata")
+        if blockers:
+            payload["status"] = "blocked"
+            payload["blocking_reasons"] = blockers
+        if warnings:
+            payload["warnings"] = warnings
+        return payload
+
+    async def _emit_pre_run_guardian_gate(self) -> dict[str, Any]:
+        """Record the graph-wide Guardian pre-run gate before executing any stage."""
+        gate = guardian_gate(
+            state=self._state,
+            stage="runtime",
+            phase="pre_run",
+            payload=self._pre_run_gate_payload(),
+            agent="guardian_agent",
+            action="pre_run",
+        )
+        await self._record_guardian_gate_result(gate)
+        return gate
 
     def _build_handler_registry(self) -> HandlerRegistry:
         """Register only allowlisted runtime/agent handlers."""
@@ -538,6 +887,168 @@ class LangGraphRunLoop:
         }
         await self._dispatch_event(event)
 
+    def _append_metadata_record(self, key: str, record: dict[str, Any], *, limit: int = 200) -> None:
+        records = self._state.run_metadata.setdefault(key, [])
+        if not isinstance(records, list):
+            records = []
+            self._state.run_metadata[key] = records
+        records.append(record)
+        del records[:-limit]
+
+    async def _record_orchestrator_followup(
+        self,
+        *,
+        stage: Stage,
+        trigger: str,
+        payload: dict[str, Any] | None = None,
+        next_stage: Stage | None = None,
+        guardian_context: dict[str, Any] | None = None,
+        level: str = "INFO",
+    ) -> dict[str, Any]:
+        followup = build_orchestrator_followup(
+            state=self._state,
+            stage=stage,
+            trigger=trigger,
+            payload=payload or {},
+            next_stage=next_stage,
+            guardian_context=guardian_context,
+        )
+        self._append_metadata_record("orchestrator_followups", followup)
+        self._state.run_metadata["latest_orchestrator_followup"] = followup
+        await self._emit(
+            event_type="orchestrator.followup",
+            message=f"Orchestrator follow-up for {stage.value}: {followup.get('recommendation', '')}",
+            payload={
+                "agent": "orchestrator",
+                "node_id": stage.value,
+                "module_id": "orchestrator",
+                "status": followup.get("status", "ok"),
+                "orchestrator_followup": followup,
+            },
+            level=level,
+        )
+        return followup
+
+    async def _record_orchestrator_transition(
+        self,
+        *,
+        stage: Stage,
+        next_stage: Stage,
+        result_data: dict[str, Any],
+        selected_transition: dict[str, Any],
+        transition_candidates: list[dict[str, Any]],
+        guardian_context: dict[str, Any] | None = None,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        evidence_refs: list[str] = []
+        if isinstance(result_data.get("handoff_packet"), dict):
+            refs = result_data["handoff_packet"].get("evidence_refs")
+            if isinstance(refs, list):
+                evidence_refs = [str(item) for item in refs if str(item or "").strip()]
+        decision = build_decision_record(
+            state=self._state,
+            stage=stage,
+            decision="route_next_stage",
+            selected=next_stage.value,
+            alternatives=[str(item.get("to_stage")) for item in transition_candidates if isinstance(item, dict)],
+            reason=f"Graph transition selected after {stage.value} result and Guardian post-gate review.",
+            authority="orchestrator",
+            evidence_refs=evidence_refs,
+        )
+        handoff = build_orchestrator_handoff_packet(
+            state=self._state,
+            from_stage=stage,
+            to_stage=next_stage,
+            result_payload=result_data,
+            selected_transition=selected_transition,
+            guardian_context=guardian_context,
+        )
+        self._append_metadata_record("orchestrator_decision_register", decision)
+        self._append_metadata_record("orchestrator_handoff_packets", handoff)
+        self._state.run_metadata["latest_orchestrator_decision"] = decision
+        self._state.run_metadata["latest_orchestrator_handoff"] = handoff
+        mission_contract = build_mission_contract(state=self._state)
+        orchestration_plan = build_orchestration_plan(state=self._state, graph_id=self._graph_config.id)
+        self._state.run_metadata["mission_contract"] = mission_contract
+        self._state.run_metadata["latest_mission_contract"] = mission_contract
+        self._append_metadata_record("orchestration_plans", orchestration_plan, limit=20)
+        self._state.run_metadata["latest_orchestration_plan"] = orchestration_plan
+        await self._record_orchestrator_parallel_checks(plan=orchestration_plan, stage=stage)
+        await self._emit(
+            event_type="orchestrator.decision",
+            message=f"Orchestrator selected route {stage.value} -> {next_stage.value}",
+            payload={
+                "agent": "orchestrator",
+                "node_id": stage.value,
+                "module_id": "orchestrator",
+                "status": "ok",
+                "decision": decision,
+                "handoff_packet": handoff,
+            },
+        )
+        return decision, handoff
+
+    async def _record_orchestrator_loop_reflection(
+        self,
+        *,
+        guardian_payload: dict[str, Any] | None = None,
+        next_stage: Stage | None = None,
+    ) -> dict[str, Any]:
+        reflection = build_loop_reflection(
+            state=self._state,
+            guardian_payload=guardian_payload,
+            next_stage=next_stage,
+        )
+        self._append_metadata_record("loop_reflections", reflection)
+        self._state.run_metadata["latest_loop_reflection"] = reflection
+        await self._emit(
+            event_type="orchestrator.loop_reflection",
+            message=str(reflection.get("operator_visible_summary") or "Orchestrator loop reflection recorded."),
+            payload={
+                "agent": "orchestrator",
+                "node_id": Stage.GUARDIAN.value,
+                "module_id": "orchestrator",
+                "status": "ok",
+                "loop_reflection": reflection,
+            },
+        )
+        return reflection
+
+    async def _record_orchestrator_parallel_checks(
+        self,
+        *,
+        plan: dict[str, Any],
+        stage: Stage,
+    ) -> dict[str, Any]:
+        check_names = plan.get("parallelizable_checks") if isinstance(plan.get("parallelizable_checks"), list) else []
+        if not check_names:
+            return {}
+        tasks = [
+            asyncio.to_thread(
+                build_orchestrator_parallel_check,
+                state=self._state,
+                check_id=str(check_name),
+                plan_id=str(plan.get("plan_id") or ""),
+            )
+            for check_name in check_names
+        ]
+        checks = await asyncio.gather(*tasks)
+        batch = build_orchestrator_parallel_check_batch(state=self._state, plan=plan, checks=list(checks), stage=stage)
+        self._append_metadata_record("orchestrator_parallel_checks", batch, limit=100)
+        self._state.run_metadata["latest_orchestrator_parallel_checks"] = batch
+        await self._emit(
+            event_type="orchestrator.parallel_checks",
+            message=f"Orchestrator executed {batch.get('check_count', 0)} read-only parallel planning checks for {stage.value}.",
+            payload={
+                "agent": "orchestrator",
+                "node_id": stage.value,
+                "module_id": "orchestrator",
+                "status": batch.get("status", "ok"),
+                "parallel_checks": batch,
+            },
+            level="WARNING" if batch.get("status") in {"warning", "blocked"} else "INFO",
+        )
+        return batch
+
     @staticmethod
     def _agent_now_iso(agent: Any) -> str:
         """Return agent timestamp with a safe fallback for adapter/test agents."""
@@ -555,6 +1066,49 @@ class LangGraphRunLoop:
         return self._state.agent_status[name]
 
     def _merge_agent_data(self, stage: Stage, data: dict[str, Any]) -> None:
+        if isinstance(data, dict):
+            self._state.run_metadata[f"{stage.value}_agent_payload"] = data
+            if isinstance(data.get("design_report"), dict):
+                self._state.run_metadata["design_report"] = data["design_report"]
+            if isinstance(data.get("design_candidate"), dict):
+                self._state.run_metadata["design_candidate"] = data["design_candidate"]
+            if isinstance(data.get("handoff_packet"), dict):
+                self._state.run_metadata[f"{stage.value}_handoff_packet"] = data["handoff_packet"]
+                packets = self._state.run_metadata.get("handoff_packets")
+                if not isinstance(packets, list):
+                    packets = []
+                packets.append({"stage": stage.value, "packet": data["handoff_packet"]})
+                self._state.run_metadata["handoff_packets"] = packets[-20:]
+            if isinstance(data.get("decisions"), list):
+                self._state.run_metadata[f"{stage.value}_decision_register"] = data["decisions"]
+            if isinstance(data.get("metrics"), dict):
+                self._state.run_metadata[f"{stage.value}_metrics"] = data["metrics"]
+            if isinstance(data.get("mission_contract"), dict):
+                self._state.run_metadata["mission_contract"] = data["mission_contract"]
+                self._state.run_metadata["latest_mission_contract"] = data["mission_contract"]
+            if isinstance(data.get("orchestration_plan"), dict):
+                plans = self._state.run_metadata.get("orchestration_plans")
+                if not isinstance(plans, list):
+                    plans = []
+                plans.append(data["orchestration_plan"])
+                self._state.run_metadata["orchestration_plans"] = plans[-20:]
+                self._state.run_metadata["latest_orchestration_plan"] = data["orchestration_plan"]
+            if isinstance(data.get("fabrication_report"), dict):
+                self._state.run_metadata["fabrication_report"] = data["fabrication_report"]
+                self._state.run_metadata[f"{stage.value}_fabrication_report"] = data["fabrication_report"]
+            if isinstance(data.get("specimen_fabricated"), dict):
+                self._state.run_metadata["specimen_fabricated"] = data["specimen_fabricated"]
+            if isinstance(data.get("vision_report"), dict):
+                self._state.run_metadata["vision_report"] = data["vision_report"]
+                self._state.run_metadata[f"{stage.value}_vision_report"] = data["vision_report"]
+            if isinstance(data.get("vision_signal"), dict):
+                self._state.run_metadata["vision_signal"] = data["vision_signal"]
+            if isinstance(data.get("manipulation_report"), dict):
+                self._state.run_metadata["manipulation_report"] = data["manipulation_report"]
+                self._state.run_metadata[f"{stage.value}_manipulation_report"] = data["manipulation_report"]
+            if isinstance(data.get("robot_task_result"), dict):
+                self._state.run_metadata["robot_task_result"] = data["robot_task_result"]
+                self._state.run_metadata[f"{stage.value}_robot_task_result"] = data["robot_task_result"]
         if "experiment_spec" in data:
             self._state.current_experiment_spec = data["experiment_spec"]
         if "experiment_objective" in data:
@@ -568,6 +1122,8 @@ class LangGraphRunLoop:
             self._state.experiment_evaluations.append(specimen_result["experiment_evaluation"])
         if "observation" in data:
             self._state.latest_observations = data["observation"]
+            if isinstance(data["observation"], dict):
+                self._state.run_metadata["latest_vision_observation"] = data["observation"]
         if "analysis" in data:
             self._state.latest_analysis.update(data["analysis"])
         if "sarm" in data:
@@ -580,14 +1136,55 @@ class LangGraphRunLoop:
         if "equipment_result" in data:
             equipment_result = data["equipment_result"] if isinstance(data["equipment_result"], dict) else {}
             self._state.run_metadata["equipment_result"] = equipment_result
+            if isinstance(data.get("equipment_report"), dict):
+                self._state.run_metadata["equipment_report"] = data["equipment_report"]
+            if isinstance(data.get("utm_data_ready"), dict):
+                self._state.run_metadata["utm_data_ready"] = data["utm_data_ready"]
             if "equipment_handoff" in data:
                 self._state.run_metadata["equipment_handoff"] = data["equipment_handoff"]
             self._state.latest_analysis["equipment_ok"] = bool(equipment_result.get("ok", False))
             self._state.latest_analysis["equipment_status"] = str(equipment_result.get("status") or "")
             self._state.latest_analysis["equipment_program_id"] = str(equipment_result.get("program_id") or "")
+            result_file = equipment_result.get("result_file") or equipment_result.get("utm_csv_path")
+            if result_file:
+                self._state.latest_analysis["equipment_result_file"] = str(result_file)
             failure_code = equipment_result.get("failure_code")
             if failure_code:
                 self._state.latest_analysis["equipment_failure_code"] = str(failure_code)
+        hardware_alerts_raw = data.get("hardware_alerts") if isinstance(data.get("hardware_alerts"), list) else []
+        hardware_alert_single = data.get("hardware_alert") if isinstance(data.get("hardware_alert"), dict) else None
+        hardware_alerts = [dict(item) for item in hardware_alerts_raw if isinstance(item, dict)]
+        if hardware_alert_single:
+            hardware_alerts.append(dict(hardware_alert_single))
+        incident_records_raw = data.get("incident_records") if isinstance(data.get("incident_records"), list) else []
+        incident_records = [dict(item) for item in incident_records_raw if isinstance(item, dict)]
+        if hardware_alerts:
+            stored_alerts = self._state.run_metadata.setdefault("hardware_alerts", [])
+            if not isinstance(stored_alerts, list):
+                stored_alerts = []
+                self._state.run_metadata["hardware_alerts"] = stored_alerts
+            seen_alert_ids = {str(item.get("alert_id")) for item in stored_alerts if isinstance(item, dict)}
+            for alert in hardware_alerts:
+                alert_id = str(alert.get("alert_id") or "")
+                if alert_id and alert_id in seen_alert_ids:
+                    incident = alert.get("incident_record")
+                    if isinstance(incident, dict):
+                        incident_records.append(dict(incident))
+                    continue
+                stored_alerts.append(alert)
+                guardian_decision = alert.get("guardian_decision")
+                if isinstance(guardian_decision, dict):
+                    self._state.run_metadata["latest_guardian_decision"] = guardian_decision
+                incident = alert.get("incident_record")
+                if isinstance(incident, dict):
+                    incident_records.append(dict(incident))
+                device_class = str(alert.get("device_class") or "hardware")
+                failure = str(alert.get("failure_code") or alert.get("status") or "alert")
+                severity = str(alert.get("severity") or "warning")
+                self._state.device_health[device_class] = f"{severity}:{failure}"
+            del stored_alerts[:-50]
+        if incident_records:
+            self._record_incident_records(incident_records)
         if "knowledge" in data:
             self._state.run_metadata["knowledge"] = data["knowledge"]
         if "bo_result" in data:
@@ -613,6 +1210,199 @@ class LangGraphRunLoop:
             return Path(log_path).expanduser().resolve().parent
         return (Path(__file__).resolve().parent.parent / "runs" / self._state.run_id).resolve()
 
+    def _append_guardian_event(self, event: dict[str, Any]) -> None:
+        """Persist Guardian-readable incident evidence for replay and report recovery."""
+        try:
+            path = self._run_dir() / "guardian_events.jsonl"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(event, ensure_ascii=True, default=str) + "\n")
+        except Exception:
+            return
+
+    def _record_incident_records(self, records: list[dict[str, Any]] | tuple[dict[str, Any], ...]) -> None:
+        stored = self._state.run_metadata.setdefault("incident_records", [])
+        if not isinstance(stored, list):
+            stored = []
+            self._state.run_metadata["incident_records"] = stored
+        seen = {str(item.get("incident_id") or item.get("id") or "") for item in stored if isinstance(item, dict)}
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            copied = dict(record)
+            incident_id = str(copied.get("incident_id") or copied.get("id") or "")
+            if incident_id and incident_id in seen:
+                continue
+            stored.append(copied)
+            if incident_id:
+                seen.add(incident_id)
+            self._append_guardian_event(copied)
+        del stored[:-100]
+
+    @staticmethod
+    def _guardian_gate_event_level(gate: dict[str, Any]) -> str:
+        decision = str(gate.get("decision") or "")
+        if decision in {"block", "safe_stop"}:
+            return "ERROR"
+        if decision in {"allow_with_warning", "require_human_approval"}:
+            return "WARNING"
+        return "INFO"
+
+    def _queue_guardian_approval(self, gate: dict[str, Any]) -> dict[str, Any] | None:
+        """Persist an approval interrupt record for Guardian decisions needing an operator."""
+        if str(gate.get("decision") or "") != "require_human_approval":
+            return None
+        approvals = self._state.run_metadata.setdefault("runtime_approvals", {})
+        if not isinstance(approvals, dict):
+            approvals = {}
+            self._state.run_metadata["runtime_approvals"] = approvals
+        gate_id = str(gate.get("gate_id") or make_event_id())
+        gate_key = f"guardian:{gate.get('stage', self._state.stage.value)}:{gate.get('phase', '')}:{gate.get('tool') or gate.get('agent') or 'runtime'}:{gate_id}"
+        existing = approvals.get(gate_key) if isinstance(approvals.get(gate_key), dict) else None
+        if existing:
+            return existing
+        approval_id = gate_id.replace("guardian-gate-", "approval-", 1) if gate_id.startswith("guardian-gate-") else make_event_id().replace("evt-", "approval-", 1)
+        record = {
+            "approval_id": approval_id,
+            "gate_key": gate_key,
+            "source": "guardian_gate",
+            "stage": gate.get("stage", self._state.stage.value),
+            "phase": gate.get("phase", ""),
+            "tool": gate.get("tool", ""),
+            "agent": gate.get("agent", "guardian_agent"),
+            "action": gate.get("action", ""),
+            "status": "pending",
+            "title": f"Guardian approval required: {gate.get('tool') or gate.get('stage')}",
+            "reason": gate.get("reason_code", "HUMAN_APPROVAL_REQUIRED"),
+            "risk_score": gate.get("risk_score", 0.0),
+            "guardian_gate_id": gate_id,
+            "guardian_gate": gate,
+            "requested_at": datetime.now(timezone.utc).isoformat(),
+        }
+        approvals[gate_key] = record
+        queue = self._state.run_metadata.setdefault("guardian_approval_queue", [])
+        if not isinstance(queue, list):
+            queue = []
+            self._state.run_metadata["guardian_approval_queue"] = queue
+        queue.append(record)
+        del queue[:-100]
+        return record
+
+    def _record_tool_call_snapshot(self, record: dict[str, Any]) -> None:
+        """Persist a Guardian-readable tool call request/result record."""
+        if not isinstance(record, dict):
+            return
+        copied = dict(record)
+        records = self._state.run_metadata.setdefault("tool_call_records", [])
+        if not isinstance(records, list):
+            records = []
+            self._state.run_metadata["tool_call_records"] = records
+        records.append(copied)
+        del records[:-200]
+        self._append_guardian_event(copied)
+
+    def _record_guardian_gate_snapshot(self, gate: dict[str, Any]) -> None:
+        """Persist a Guardian gate from synchronous tool-call sidecars."""
+        gates = self._state.run_metadata.setdefault("guardian_gates", [])
+        if not isinstance(gates, list):
+            gates = []
+            self._state.run_metadata["guardian_gates"] = gates
+        gates.append(gate)
+        del gates[:-200]
+        self._state.run_metadata["latest_guardian_gate"] = gate
+        decision = gate.get("guardian_decision")
+        if isinstance(decision, dict):
+            self._state.run_metadata["latest_guardian_gate_decision"] = decision
+        contract = gate.get("guardian_contract")
+        if isinstance(contract, dict):
+            contracts = self._state.run_metadata.setdefault("guardian_contracts", [])
+            if not isinstance(contracts, list):
+                contracts = []
+                self._state.run_metadata["guardian_contracts"] = contracts
+            contracts.append(contract)
+            del contracts[:-200]
+        corrective_actions = gate.get("corrective_actions") if isinstance(gate.get("corrective_actions"), list) else []
+        if corrective_actions:
+            stored_actions = self._state.run_metadata.setdefault("corrective_actions", [])
+            if not isinstance(stored_actions, list):
+                stored_actions = []
+                self._state.run_metadata["corrective_actions"] = stored_actions
+            stored_actions.extend(item for item in corrective_actions if isinstance(item, dict))
+            del stored_actions[:-200]
+        incidents = gate.get("incident_records") if isinstance(gate.get("incident_records"), list) else []
+        incident_records = [item for item in incidents if isinstance(item, dict)]
+        if incident_records:
+            self._record_incident_records(incident_records)
+        self._queue_guardian_approval(gate)
+
+    async def _record_guardian_gate_result(self, gate: dict[str, Any]) -> None:
+        """Persist and emit one Guardian graph-wide gate decision."""
+        gates = self._state.run_metadata.setdefault("guardian_gates", [])
+        if not isinstance(gates, list):
+            gates = []
+            self._state.run_metadata["guardian_gates"] = gates
+        gates.append(gate)
+        del gates[:-200]
+        self._state.run_metadata["latest_guardian_gate"] = gate
+        decision = gate.get("guardian_decision")
+        if isinstance(decision, dict):
+            self._state.run_metadata["latest_guardian_gate_decision"] = decision
+        contract = gate.get("guardian_contract")
+        if isinstance(contract, dict):
+            contracts = self._state.run_metadata.setdefault("guardian_contracts", [])
+            if not isinstance(contracts, list):
+                contracts = []
+                self._state.run_metadata["guardian_contracts"] = contracts
+            contracts.append(contract)
+            del contracts[:-200]
+        corrective_actions = gate.get("corrective_actions") if isinstance(gate.get("corrective_actions"), list) else []
+        if corrective_actions:
+            stored_actions = self._state.run_metadata.setdefault("corrective_actions", [])
+            if not isinstance(stored_actions, list):
+                stored_actions = []
+                self._state.run_metadata["corrective_actions"] = stored_actions
+            stored_actions.extend(item for item in corrective_actions if isinstance(item, dict))
+            del stored_actions[:-200]
+        incidents = gate.get("incident_records") if isinstance(gate.get("incident_records"), list) else []
+        incident_records = [item for item in incidents if isinstance(item, dict)]
+        if incident_records:
+            self._record_incident_records(incident_records)
+        approval_record = self._queue_guardian_approval(gate)
+
+        level = self._guardian_gate_event_level(gate)
+        await self._emit(
+            event_type="guardian.gate",
+            message=f"Guardian {gate.get('phase', 'gate')} gate {gate.get('decision', 'allow')} for stage={gate.get('stage', '')}",
+            payload={
+                "agent": "guardian_agent",
+                "node_id": str(gate.get("stage") or self._state.stage.value),
+                "module_id": "guardian",
+                "status": gate.get("status", ""),
+                "guardian_gate": gate,
+                "guardian_decision": decision if isinstance(decision, dict) else {},
+                "guardian_contract": contract if isinstance(contract, dict) else {},
+                "incident_count": len(incident_records),
+                "approval_request": approval_record if isinstance(approval_record, dict) else {},
+                "risk_score": gate.get("risk_score", 0.0),
+                "reason_code": gate.get("reason_code", ""),
+            },
+            level=level,
+        )
+        for incident in incident_records:
+            await self._emit(
+                event_type="incident.recorded",
+                message=f"Guardian incident recorded: {incident.get('summary') or incident.get('failure_code') or incident.get('incident_id')}",
+                payload={
+                    "agent": "guardian_agent",
+                    "node_id": str(incident.get("stage") or gate.get("stage") or self._state.stage.value),
+                    "module_id": "guardian",
+                    "status": incident.get("status", "open"),
+                    "incident_record": incident,
+                    "guardian_gate_id": gate.get("gate_id", ""),
+                },
+                level=level,
+            )
+
     @staticmethod
     def _safe_artifact_segment(value: str, fallback: str = "artifact") -> str:
         """Return a filesystem-safe path segment for run artifacts."""
@@ -634,7 +1424,7 @@ class LangGraphRunLoop:
 
     def _write_stage_result_artifact(self, stage: Stage, agent_name: str, data: dict[str, Any]) -> dict[str, Any] | None:
         """Persist key stage result payloads so closed-loop runs have replayable evidence."""
-        if stage not in {Stage.BO, Stage.ANALYSIS}:
+        if stage not in {Stage.BO, Stage.ANALYSIS, Stage.VISION}:
             return None
         try:
             output_dir = self._runtime_artifact_dir(stage)
@@ -677,6 +1467,11 @@ class LangGraphRunLoop:
             "contour_svg_path",
             "artifact_path",
             "result_file",
+            "frame_path",
+            "annotated_frame_path",
+            "before_after_path",
+            "detection_json_path",
+            "mask_path",
         }
         candidates: list[tuple[str, str]] = []
         if isinstance(value, dict):
@@ -1066,7 +1861,7 @@ class LangGraphRunLoop:
                         "executable": bool(step_agent_name),
                         "handler_configured": handler_configured,
                         "summary": summary,
-                        "result_keys": sorted(result_data.keys()),
+                        "result_keys": self._public_result_keys(result_data),
                     },
                 )
             except Exception as exc:
@@ -1095,6 +1890,12 @@ class LangGraphRunLoop:
                 self._state.run_metadata.pop("active_module_step", None)
 
 
+    @staticmethod
+    def _public_result_keys(result_data: dict[str, Any]) -> list[str]:
+        """Return user-facing result keys without Guardian sidecar metadata."""
+        hidden = {"guardian_gate", "guardian_contract", "guardian_decision", "corrective_actions", "incident_records"}
+        return sorted(key for key in result_data.keys() if key not in hidden)
+
     async def _emit_module_graph_completed(
         self,
         stage: Stage,
@@ -1116,7 +1917,7 @@ class LangGraphRunLoop:
                 "status": "done",
                 "module_runtime": module_runtime,
                 "step_count": len(steps),
-                "result_keys": sorted(result_data.keys()),
+                "result_keys": self._public_result_keys(result_data),
             },
         )
 
@@ -1314,6 +2115,26 @@ class LangGraphRunLoop:
                 raise
             output_key = str(step.get("output_key") or step.get("id") or "pre_execution")
             self._state.run_metadata[output_key] = result.data
+            if isinstance(result.data, dict):
+                followup = result.data.get("orchestrator_followup")
+                if isinstance(followup, dict):
+                    self._append_metadata_record("orchestrator_followups", followup)
+                    self._state.run_metadata["latest_orchestrator_followup"] = followup
+                decisions = result.data.get("decisions")
+                if isinstance(decisions, list):
+                    for decision in decisions:
+                        if isinstance(decision, dict) and decision.get("schema") == "decision_register.v1":
+                            self._append_metadata_record("orchestrator_decision_register", decision)
+                            self._state.run_metadata["latest_orchestrator_decision"] = decision
+                mission_contract = result.data.get("mission_contract")
+                if isinstance(mission_contract, dict):
+                    self._state.run_metadata["mission_contract"] = mission_contract
+                    self._state.run_metadata["latest_mission_contract"] = mission_contract
+                orchestration_plan = result.data.get("orchestration_plan")
+                if isinstance(orchestration_plan, dict):
+                    self._append_metadata_record("orchestration_plans", orchestration_plan, limit=20)
+                    self._state.run_metadata["latest_orchestration_plan"] = orchestration_plan
+                    await self._record_orchestrator_parallel_checks(plan=orchestration_plan, stage=stage)
             completed_payload = {
                 "agent": agent_name,
                 "node_id": stage.value,
@@ -1324,11 +2145,37 @@ class LangGraphRunLoop:
                 "result": result.data,
                 **result.data,
             }
+            pre_step_gate = guardian_gate(
+                state=self._state,
+                stage=stage.value,
+                phase="action",
+                payload=completed_payload,
+                agent=agent_name,
+                tool=handler,
+                action=str(step.get("id") or "pre_execution"),
+            )
+            completed_payload["guardian_gate"] = pre_step_gate
+            completed_payload["guardian_contract"] = pre_step_gate.get("guardian_contract", {})
+            await self._record_guardian_gate_result(pre_step_gate)
+            if gate_blocks_execution(pre_step_gate):
+                raise RuntimeError(str(pre_step_gate.get("reason_code") or "guardian_pre_step_gate_blocked"))
             await self._emit(
                 event_type="module_pre_step_completed",
                 message=f"{agent_name}: pre-execution step {step.get('id')} completed",
                 payload=completed_payload,
             )
+            if isinstance(result.data, dict) and isinstance(result.data.get("orchestrator_followup"), dict):
+                await self._emit(
+                    event_type="orchestrator.followup",
+                    message=f"Orchestrator pre-stage follow-up for {stage.value}",
+                    payload={
+                        "agent": "orchestrator",
+                        "node_id": stage.value,
+                        "module_id": "orchestrator",
+                        "status": result.data["orchestrator_followup"].get("status", "ok"),
+                        "orchestrator_followup": result.data["orchestrator_followup"],
+                    },
+                )
             event_type = str(step.get("event_type") or "").strip()
             if event_type and event_type != "module_pre_step_completed":
                 await self._emit(
@@ -1406,6 +2253,43 @@ class LangGraphRunLoop:
 
         if module_runtime:
             self._state.run_metadata.setdefault("module_runtime", {})[stage.value] = module_runtime
+        pre_gate = guardian_gate(
+            state=self._state,
+            stage=stage.value,
+            phase="pre",
+            payload={"module_runtime": module_runtime},
+            agent=agent_name,
+        )
+        await self._record_guardian_gate_result(pre_gate)
+        if stage != Stage.GUARDIAN and gate_blocks_execution(pre_gate):
+            status.state = "blocked"
+            status.last_result = str(pre_gate.get("reason_code") or pre_gate.get("decision") or "guardian_gate_blocked")
+            status.last_run_time = self._agent_now_iso(agent)
+            status.success = False
+            target_stage = Stage.COMPLETE if str(pre_gate.get("decision")) == "safe_stop" else Stage.GUARDIAN
+            self._state.stage = target_stage
+            await self._emit(
+                event_type="stage_transition",
+                message=f"Guardian pre-gate routed {stage.value} -> {target_stage.value}",
+                payload={
+                    "agent": "guardian_agent",
+                    "node_id": stage.value,
+                    "status": "blocked",
+                    "from_stage": stage.value,
+                    "to_stage": target_stage.value,
+                    "guardian_gate": pre_gate,
+                },
+                level="WARNING",
+            )
+            await self._record_orchestrator_followup(
+                stage=stage,
+                trigger="guardian_pre_gate_block",
+                payload={"guardian_gate": pre_gate, "status": "blocked"},
+                next_stage=target_stage,
+                guardian_context=pre_gate,
+                level="WARNING",
+            )
+            return
         if not await self._module_approval_ready(stage=stage, agent_name=agent_name, module_runtime=module_runtime, status=status):
             return
         await self._emit(
@@ -1420,11 +2304,49 @@ class LangGraphRunLoop:
             await self._execute_module_internal_steps(stage=stage, agent_name=agent_name, module_runtime=module_runtime)
             ctx = self._context_for_stage(stage)
             result = await agent.run(self._state, ctx)
-            ok, validation_msg = validate_agent_output(stage.value, result.data)
+            result_data = result.data if isinstance(result.data, dict) else {}
+            gate_payload = dict(result_data)
+            if result.success is False:
+                gate_payload.setdefault("failure_code", "AGENT_RESULT_FAILED")
+            ok, validation_msg = validate_agent_output(stage.value, result_data)
             if not ok:
+                gate_payload["failure_code"] = "CONTRACT_SCHEMA_INVALID"
+                existing_blockers = gate_payload.get("blocking_reasons")
+                if isinstance(existing_blockers, list):
+                    existing_blockers.append(validation_msg)
+                elif existing_blockers:
+                    gate_payload["blocking_reasons"] = [str(existing_blockers), validation_msg]
+                else:
+                    gate_payload["blocking_reasons"] = [validation_msg]
+                validation_gate = guardian_gate(
+                    state=self._state,
+                    stage=stage.value,
+                    phase="post",
+                    payload=gate_payload,
+                    agent=agent_name,
+                )
+                result_data["guardian_gate"] = validation_gate
+                result_data["guardian_contract"] = validation_gate.get("guardian_contract", {})
+                result_data.setdefault("incident_records", []).extend(validation_gate.get("incident_records", []))
+                result_data.setdefault("corrective_actions", []).extend(validation_gate.get("corrective_actions", []))
+                await self._record_guardian_gate_result(validation_gate)
                 raise ValueError(validation_msg)
 
-            self._merge_agent_data(stage, result.data)
+            post_gate = guardian_gate(
+                state=self._state,
+                stage=stage.value,
+                phase="post",
+                payload=gate_payload,
+                agent=agent_name,
+            )
+            result_data["guardian_gate"] = post_gate
+            result_data["guardian_contract"] = post_gate.get("guardian_contract", {})
+            if post_gate.get("incident_records"):
+                result_data.setdefault("incident_records", []).extend(post_gate.get("incident_records", []))
+            if post_gate.get("corrective_actions"):
+                result_data.setdefault("corrective_actions", []).extend(post_gate.get("corrective_actions", []))
+            self._merge_agent_data(stage, result_data)
+            await self._record_guardian_gate_result(post_gate)
             status.state = "idle"
             status.last_result = result.summary
             status.last_run_time = self._agent_now_iso(agent)
@@ -1444,8 +2366,34 @@ class LangGraphRunLoop:
                 message=f"{agent_name}: {result.summary}",
                 payload={"agent": agent_name, "node_id": stage.value, "status": "done", "module_runtime": module_runtime, "result": result.data},
             )
-            await self._emit_module_graph_completed(stage, agent_name, module_runtime, result.data)
-            await self._emit_artifact_events(stage, agent_name, result.data)
+            await self._emit_module_graph_completed(stage, agent_name, module_runtime, result_data)
+            await self._emit_artifact_events(stage, agent_name, result_data)
+
+            if stage != Stage.GUARDIAN and gate_blocks_execution(post_gate):
+                target_stage = Stage.COMPLETE if str(post_gate.get("decision")) == "safe_stop" else Stage.GUARDIAN
+                self._state.stage = target_stage
+                await self._emit(
+                    event_type="stage_transition",
+                    message=f"Guardian post-gate routed {stage.value} -> {target_stage.value}",
+                    payload={
+                        "agent": "guardian_agent",
+                        "node_id": stage.value,
+                        "status": "blocked",
+                        "from_stage": stage.value,
+                        "to_stage": target_stage.value,
+                        "guardian_gate": post_gate,
+                    },
+                    level="WARNING",
+                )
+                await self._record_orchestrator_followup(
+                    stage=stage,
+                    trigger="guardian_post_gate_block",
+                    payload=result_data,
+                    next_stage=target_stage,
+                    guardian_context=post_gate,
+                    level="WARNING",
+                )
+                return
 
             guardian_decision = "continue"
             if stage == Stage.GUARDIAN:
@@ -1464,6 +2412,26 @@ class LangGraphRunLoop:
                 (candidate for candidate in candidates if str(candidate.get("to_stage")) == next_stage.value),
                 {},
             )
+            await self._record_orchestrator_transition(
+                stage=stage,
+                next_stage=next_stage,
+                result_data=result_data,
+                selected_transition=selected_candidate,
+                transition_candidates=candidates,
+                guardian_context=post_gate,
+            )
+            await self._record_orchestrator_followup(
+                stage=stage,
+                trigger="post_stage",
+                payload=result_data,
+                next_stage=next_stage,
+                guardian_context=post_gate,
+            )
+            if stage == Stage.GUARDIAN:
+                await self._record_orchestrator_loop_reflection(
+                    guardian_payload=result.data.get("guardian", {}) if isinstance(result.data, dict) else {},
+                    next_stage=next_stage,
+                )
             self._state.stage = next_stage
 
             await self._emit(
@@ -1476,9 +2444,26 @@ class LangGraphRunLoop:
                     "to_stage": self._state.stage.value,
                     "transition_candidates": candidates,
                     "selected_transition": selected_candidate,
+                    "orchestrator_decision": self._state.run_metadata.get("latest_orchestrator_decision", {}),
+                    "orchestrator_handoff": self._state.run_metadata.get("latest_orchestrator_handoff", {}),
+                    "orchestrator_followup": self._state.run_metadata.get("latest_orchestrator_followup", {}),
                 },
             )
         except Exception as exc:
+            exception_gate = guardian_gate(
+                state=self._state,
+                stage=stage.value,
+                phase="exception",
+                payload={
+                    "status": "failed",
+                    "failure_code": exc.__class__.__name__,
+                    "error": str(exc),
+                    "agent_exception": True,
+                    "module_runtime": module_runtime,
+                },
+                agent=agent_name,
+            )
+            await self._record_guardian_gate_result(exception_gate)
             status.state = "error"
             status.last_result = str(exc)
             status.last_run_time = self._agent_now_iso(agent)
@@ -1510,7 +2495,16 @@ class LangGraphRunLoop:
                         "module_runtime": module_runtime,
                         "retry_policy": {"max_attempts": max_attempts, "backoff_s": backoff_s},
                         "retry_count": retry_count,
+                        "guardian_gate": exception_gate,
                     },
+                    level="WARNING",
+                )
+                await self._record_orchestrator_followup(
+                    stage=stage,
+                    trigger="retry",
+                    payload={"status": "retry", "error": str(exc), "recovery": action, "guardian_gate": exception_gate},
+                    next_stage=stage,
+                    guardian_context=exception_gate,
                     level="WARNING",
                 )
                 if backoff_s > 0:
@@ -1527,7 +2521,16 @@ class LangGraphRunLoop:
                         "error": str(exc),
                         "module_runtime": module_runtime,
                         "retry_policy": {"max_attempts": max_attempts, "backoff_s": backoff_s},
+                        "guardian_gate": exception_gate,
                     },
+                    level="ERROR",
+                )
+                await self._record_orchestrator_followup(
+                    stage=stage,
+                    trigger="fatal_error",
+                    payload={"status": "error", "error": str(exc), "guardian_gate": exception_gate},
+                    next_stage=Stage.ERROR,
+                    guardian_context=exception_gate,
                     level="ERROR",
                 )
 
@@ -1547,11 +2550,14 @@ class LangGraphRunLoop:
 
     async def run(self) -> OrchestratorState:
         """Run until complete/error/stop_requested using the compiled LangGraph runtime."""
+        pre_run_gate = await self._emit_pre_run_guardian_gate()
         await self._emit(
             event_type="run_start",
             message="LangGraph orchestration run started",
-            payload={"node_id": self._state.stage.value, "status": "running"},
+            payload={"node_id": self._state.stage.value, "status": "running", "guardian_gate": pre_run_gate},
         )
+        if gate_blocks_execution(pre_run_gate):
+            self._state.stage = Stage.COMPLETE if str(pre_run_gate.get("decision")) == "safe_stop" else Stage.ERROR
         while True:
             if self._state.stop_requested:
                 self._state.stage = Stage.COMPLETE

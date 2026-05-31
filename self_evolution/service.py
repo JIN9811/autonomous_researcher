@@ -19,6 +19,9 @@ import yaml
 
 from graphs import ATRLangGraphCompiler, GraphConfig, GraphVersionStore, HandlerRegistry, ModuleConfig, ModuleConfigStore, load_graph_config
 
+from knowledge.schemas import EvolutionEvidencePack
+
+from .evaluator import EvolutionReplayEvaluator
 from .models import EvolutionTask, EvolutionTaskCreate, EvolutionTrace, EvolutionVariant, GateResult, TargetType
 from .registry import EvolutionRegistry
 from .trace_collector import TraceCollector
@@ -32,13 +35,19 @@ class SelfEvolutionService:
     graph_version_root: Path
     module_root: Path
     module_version_root: Path
+    knowledge_memory_root: Path | None = None
     registry: EvolutionRegistry = field(init=False)
     trace_collector: TraceCollector = field(init=False)
+    replay_evaluator: EvolutionReplayEvaluator = field(init=False)
 
     def __post_init__(self) -> None:
         self.root.mkdir(parents=True, exist_ok=True)
+        if self.knowledge_memory_root is None:
+            self.knowledge_memory_root = self.root.parent / "knowledge"
+        self.knowledge_memory_root.mkdir(parents=True, exist_ok=True)
         self.registry = EvolutionRegistry(self.root)
         self.trace_collector = TraceCollector(self.run_root)
+        self.replay_evaluator = EvolutionReplayEvaluator()
 
     def list_targets(self) -> list[dict[str, Any]]:
         targets: list[dict[str, Any]] = []
@@ -102,8 +111,9 @@ class SelfEvolutionService:
             traces = self.trace_collector.collect(task.source_run_ids)
             for trace in traces:
                 self.registry.save_trace(trace)
-            variant = self._generate_variant(task, traces)
-            variant = self.evaluate_variant_object(variant, handler_registry=handler_registry)
+            evidence_packs = self._collect_evidence_packs(task, traces)
+            variant = self._generate_variant(task, traces, evidence_packs=evidence_packs)
+            variant = self.evaluate_variant_object(variant, handler_registry=handler_registry, replay_traces=traces)
             task.status = "complete" if all(gate.passed for gate in variant.gate_results) else "evaluated"
             task.trace_ids = [trace.trace_id for trace in traces]
             if variant.variant_id not in task.variant_ids:
@@ -130,7 +140,13 @@ class SelfEvolutionService:
         variant = self.evaluate_variant_object(variant, handler_registry=handler_registry)
         return self.registry.save_variant(variant)
 
-    def evaluate_variant_object(self, variant: EvolutionVariant, *, handler_registry: HandlerRegistry | None = None) -> EvolutionVariant:
+    def evaluate_variant_object(
+        self,
+        variant: EvolutionVariant,
+        *,
+        handler_registry: HandlerRegistry | None = None,
+        replay_traces: list[EvolutionTrace] | None = None,
+    ) -> EvolutionVariant:
         gates: list[GateResult] = [
             GateResult(gate_id="schema_presence", passed=bool(variant.body), message="variant body exists"),
             GateResult(gate_id="source_trace_present", passed=bool(variant.source_trace_ids), message="source trace lineage recorded"),
@@ -145,6 +161,15 @@ class SelfEvolutionService:
             gates.append(GateResult(gate_id="code_patch_not_auto_applied", passed=True, message="code patch variants remain diff-only"))
         else:
             gates.append(GateResult(gate_id="text_config_safe", passed=True, message=f"{variant.target_type} variant is stored as inert config until activated"))
+        source_replay_traces = replay_traces if replay_traces is not None else self._source_traces_for_variant(variant)
+        heldout_traces = self._heldout_traces_for_variant(variant, source_replay_traces)
+        replay_result = self.replay_evaluator.evaluate(
+            variant=variant,
+            source_traces=source_replay_traces,
+            heldout_traces=heldout_traces,
+        )
+        gates.extend(replay_result.gates)
+        variant.metrics["replay_eval"] = replay_result.summary
         passed = sum(1 for gate in gates if gate.passed)
         variant.gate_results = gates
         variant.score = round(passed / max(1, len(gates)), 4)
@@ -227,9 +252,44 @@ class SelfEvolutionService:
             "variants": [variant.model_dump(mode="json") for variant in variants],
         }
 
-    def _generate_variant(self, task: EvolutionTask, traces: list[EvolutionTrace]) -> EvolutionVariant:
+
+    def _source_traces_for_variant(self, variant: EvolutionVariant) -> list[EvolutionTrace]:
+        traces: list[EvolutionTrace] = []
+        for trace_id in variant.source_trace_ids:
+            run_id = str(trace_id or "")
+            if run_id.startswith("trace-"):
+                run_id = run_id.removeprefix("trace-")
+            if not run_id:
+                continue
+            try:
+                traces.append(self.trace_collector.collect_one(run_id))
+            except Exception:
+                continue
+        return traces
+
+    def _heldout_traces_for_variant(self, variant: EvolutionVariant, source_traces: list[EvolutionTrace], *, limit: int = 3) -> list[EvolutionTrace]:
+        source_run_ids = {trace.run_id for trace in source_traces}
+        for trace_id in variant.source_trace_ids:
+            raw = str(trace_id or "")
+            source_run_ids.add(raw.removeprefix("trace-") if raw.startswith("trace-") else raw)
+        heldout: list[EvolutionTrace] = []
+        for run_id in self.trace_collector.latest_run_ids(limit=limit + len(source_run_ids) + 5):
+            if run_id in source_run_ids:
+                continue
+            try:
+                trace = self.trace_collector.collect_one(run_id)
+            except Exception:
+                continue
+            heldout.append(trace)
+            if len(heldout) >= limit:
+                break
+        return heldout
+
+    def _generate_variant(self, task: EvolutionTask, traces: list[EvolutionTrace], *, evidence_packs: list[EvolutionEvidencePack] | None = None) -> EvolutionVariant:
         now = self._now()
         trace_metrics = self._aggregate_trace_metrics(traces)
+        trace_metrics["knowledge_evidence_packs"] = [pack.model_dump(mode="json") for pack in (evidence_packs or [])]
+        trace_metrics["knowledge_evidence_pack_count"] = len(evidence_packs or [])
         variant_id = f"evo-var-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')}-{task.target_type}-{task.target_id}"
         body: dict[str, Any]
         diff = ""
@@ -334,14 +394,84 @@ class SelfEvolutionService:
     def _trace_guidance(self, task: EvolutionTask, metrics: dict[str, Any]) -> str:
         stage_counts = metrics.get("stage_counts") if isinstance(metrics.get("stage_counts"), dict) else {}
         hot_stages = ", ".join(list(stage_counts.keys())[:5]) or "none"
+        pack_lines = self._knowledge_pack_guidance(metrics)
         return (
             "Self-evolution guidance for next closed-loop run:\n"
             f"- Objective: {task.objective}\n"
             f"- Source trace events: {metrics.get('event_count', 0)}, errors: {metrics.get('error_count', 0)}, warnings: {metrics.get('warning_count', 0)}.\n"
             f"- High-activity stages: {hot_stages}.\n"
+            f"- Knowledge evidence packs: {metrics.get('knowledge_evidence_pack_count', 0)}.\n"
+            f"{pack_lines}"
             "- Preserve strict JSON/tool contracts and include missing required fields before handoff.\n"
             "- Surface uncertainty, failed gates, and recovery choices explicitly for Guardian review."
         )
+
+    @staticmethod
+    def _knowledge_pack_guidance(metrics: dict[str, Any]) -> str:
+        packs = metrics.get("knowledge_evidence_packs") if isinstance(metrics.get("knowledge_evidence_packs"), list) else []
+        lines: list[str] = []
+        for pack in packs[:3]:
+            if not isinstance(pack, dict):
+                continue
+            objective = str(pack.get("objective") or "").strip()
+            why = pack.get("why_this_target") if isinstance(pack.get("why_this_target"), list) else []
+            changes = pack.get("recommended_changes") if isinstance(pack.get("recommended_changes"), list) else []
+            if objective:
+                lines.append(f"- Evidence objective: {objective}\n")
+            for item in why[:3]:
+                lines.append(f"  - Why: {item}\n")
+            for item in changes[:4]:
+                lines.append(f"  - Recommended change: {item}\n")
+        return "".join(lines)
+
+    def _collect_evidence_packs(self, task: EvolutionTask, traces: list[EvolutionTrace]) -> list[EvolutionEvidencePack]:
+        """Read Knowledge evidence packs from per-run artifacts and long-term memory."""
+        packs: list[EvolutionEvidencePack] = []
+        seen: set[str] = set()
+        requested_pack = str(task.constraints.get("knowledge_evidence_pack_id") or "") if isinstance(task.constraints, dict) else ""
+
+        def _maybe_add(payload: Any) -> None:
+            try:
+                pack = EvolutionEvidencePack.model_validate(payload)
+            except Exception:
+                return
+            if requested_pack and pack.pack_id != requested_pack:
+                return
+            if pack.target_type != task.target_type or pack.target_id != task.target_id:
+                return
+            if pack.pack_id in seen:
+                return
+            seen.add(pack.pack_id)
+            packs.append(pack)
+
+        for trace in traces:
+            try:
+                run_dir = self.trace_collector.run_dir(trace.run_id)
+            except Exception:
+                continue
+            path = run_dir / "knowledge" / "evolution_evidence_packs.json"
+            if path.exists():
+                try:
+                    raw = json.loads(path.read_text(encoding="utf-8"))
+                except Exception:
+                    raw = []
+                if isinstance(raw, list):
+                    for item in raw:
+                        _maybe_add(item)
+                elif isinstance(raw, dict):
+                    for item in raw.get("evidence_packs", []) if isinstance(raw.get("evidence_packs"), list) else []:
+                        _maybe_add(item)
+        memory_path = (self.knowledge_memory_root or (self.root.parent / "knowledge")) / "evolution_evidence_packs.jsonl"
+        if memory_path.exists():
+            for line in memory_path.read_text(encoding="utf-8", errors="replace").splitlines()[-200:]:
+                if not line.strip():
+                    continue
+                try:
+                    _maybe_add(json.loads(line))
+                except Exception:
+                    continue
+        packs.sort(key=lambda item: (item.priority, item.created_at), reverse=True)
+        return packs[:5]
 
     def _graph_gates(self, variant: EvolutionVariant, *, handler_registry: HandlerRegistry | None) -> list[GateResult]:
         gates: list[GateResult] = []

@@ -31,8 +31,58 @@ Install the tracked Python dependencies from:
 pip install -r requirements.txt
 ```
 
-The main dependency file covers FastAPI, HTTP clients, YAML parsing, testing, and
-the TPMS/STL geometry stack (`numpy`, `scikit-image`, `trimesh`).
+The main dependency file covers FastAPI, HTTP clients, YAML parsing, testing,
+browser-based GUI inspection, and the TPMS/STL geometry stack (`numpy`,
+`scikit-image`, `trimesh`).
+
+Selenium is included for GUI browser inspection and screenshot audits. Use it
+when a GUI route, layout, report panel, Runtime IDE canvas, or Live GUI chat
+surface changes and visual verification is required. The current local audit
+path uses Firefox plus geckodriver:
+
+```bash
+# Example: start a temporary server in one terminal
+.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 7862
+
+# Example: run a Selenium/Firefox inspection script from the main venv
+.venv/bin/python tests/ui/live_runtime_ide_browser_audit.py
+```
+
+If a one-off inspection script is used, keep screenshots under `runs/` or
+`artifacts/` and stop the temporary server/browser processes after the audit.
+
+## BoTorch BO Backend
+
+BoTorch/GPyTorch are part of the default Python dependency set because the BO
+Workspace exposes `Numeric Backend = botorch_optional` as a first-class backend.
+Install the main environment with:
+
+```bash
+.venv/bin/pip install -r requirements.txt
+```
+
+Tracked compatibility file:
+
+```text
+requirements-bo.txt
+```
+
+`requirements-bo.txt` remains as a focused installer for older checkouts or
+repair installs, but the canonical dependency path is now `requirements.txt` and
+`pyproject.toml` default dependencies. Installing BoTorch pulls in PyTorch and
+CUDA-related wheels on this aarch64/Linux host, so expect a large download.
+
+If BoTorch import or GP fitting fails at runtime, `botorch_optional` falls back to
+`lightweight_pool` and records the reason in `benchmark.backend_warnings` and
+`bo_result.benchmark.strategies.bo.backend_warnings`.
+
+Implementation boundary:
+
+- `learning/botorch_backend.py` uses BoTorch `SingleTaskGP` posterior scoring over
+  the existing candidate pool.
+- It does not bypass Design/Specimen/Guardian validation.
+- It does not perform unconstrained continuous optimization over categorical or
+  boolean manufacturing parameters.
 
 ## Terminal Launcher
 
@@ -170,6 +220,181 @@ conda run -n lerobot-pi05 hf download lerobot/pi05_base --max-workers 1
 The Pi0.5 worktree, conda env, datasets, and model cache are not part of this
 Git repository.
 
+## FEniCSx / DOLFINx FEM Runtime
+
+Optional for Analysis Agent FEM/CAE enhancement and improvement 06.
+
+FEniCSx is intentionally not installed into the main `.venv` and is not listed
+in `requirements.txt`, because DOLFINx depends on MPI/PETSc/native solver
+libraries. Use a dedicated conda environment or the official Docker image.
+
+The main application registers FEniCSx through the device bridge layer, not by
+importing DOLFINx directly into the FastAPI process:
+
+```text
+device_bridges/fenicsx_bridge.py
+mcp_tools/fenicsx_tools.py
+```
+
+Registered tools:
+
+```text
+fenicsx.health
+fenicsx.run_linear_elasticity
+fenicsx.run_fem
+```
+
+The production execution path uses a fixed DOLFINx linear-elasticity template:
+
+```text
+scripts/fenicsx_linear_elasticity_template.py
+```
+
+This template is executed in the dedicated `fenicsx` conda environment or in the
+configured Docker image. It performs a real DOLFINx solve on a homogenized
+specimen envelope with bottom fixed support and top compression traction, then
+returns displacement, stiffness, Von Mises stress, mesh metadata, and XDMF output.
+The deterministic path is retained only as an explicit fallback/smoke mode.
+
+Runtime configuration is stored in `configs/devices.yaml`:
+
+```yaml
+devices:
+  fenicsx:
+    enabled: true
+    mode: test
+    provider: dolfinx
+    execution_backend: auto       # auto | deterministic | conda | docker
+    runtime_solver_enabled: false # false: fast bridge mode, true: call conda/docker FEniCSx
+    require_runtime_in_live: false
+    conda_env: fenicsx
+    docker_image: dolfinx/dolfinx:stable
+    artifact_dir: artifacts/fenicsx
+    solver_script_path: scripts/fenicsx_linear_elasticity_template.py
+    timeout_sec: 120
+    allow_deterministic_fallback: true
+    template_version: atr_linear_elasticity_template_v1
+```
+
+Use `runtime_solver_enabled=false` for fast deterministic bridge mode during repeated TEST loops. Use `runtime_solver_enabled=true` with `execution_backend=auto|conda|docker` for real DOLFINx execution. The same setting can be changed at runtime through `fenicsx.set_runtime_solver` without editing code. Set `require_runtime_in_live=true` only when live Analysis must block unless the FEniCSx runtime probe succeeds.
+
+Verified local conda environment:
+
+```bash
+conda run -n fenicsx python -c "import dolfinx, basix, ufl, ffcx"
+conda run -n fenicsx python artifacts/external/fenicsx/examples/poisson_smoke.py
+```
+
+Verified local package versions:
+
+```text
+dolfinx=0.10.0
+basix=0.10.0
+ufl=2025.2.1
+ffcx=0.10.0
+```
+
+Verified Docker runtime:
+
+```bash
+docker pull dolfinx/dolfinx:stable
+docker run --rm --entrypoint python3 \
+  -v "$PWD/artifacts/external/fenicsx/examples:/work/examples:ro" \
+  -w /work \
+  dolfinx/dolfinx:stable \
+  examples/poisson_smoke.py
+```
+
+Downloaded source, tutorial, and documentation assets are stored locally under:
+
+```text
+artifacts/external/fenicsx/
+```
+
+Local bundle contents:
+
+- `sources/dolfinx`
+- `sources/basix`
+- `sources/ffcx`
+- `sources/ufl`
+- `sources/fenics-docs`
+- `sources/dolfinx-tutorial`
+- `docs/html`
+- `docs/pdf/dolfinx-tutorial-latest.pdf`
+- `examples/poisson_smoke.py`
+- `manifests/fenicsx_sources_manifest.txt`
+
+These files are intentionally under `artifacts/` and should not be committed.
+Recreate/update them with shallow official source checkouts and official docs
+snapshots when needed.
+
+Analysis Agent usage rule:
+
+- Treat FEniCSx/FEM as `fem_low` simulation evidence.
+- Treat physical UTM data as `utm_high` measured evidence.
+- Do not insert FEM predictions into BO as measured observations.
+- Use validated FEM templates, cache manifests, and UTM/FEM comparison artifacts
+  before BO handoff.
+- The LLM agentic FEM loop may plan tutorial-style steps, mesh sweeps, and
+  acceptance criteria, but execution must stay inside registered `fenicsx.*`
+  tools and validated payloads. Do not run arbitrary LLM-generated solver code.
+
+LLM route used by the FEM planning loop:
+
+```text
+analysis_fem_planning -> e4b
+```
+
+Expected FEniCSx bridge artifacts:
+
+```text
+artifacts/fenicsx/<run_id>/<specimen_id>/*_fem_request.json
+artifacts/fenicsx/<run_id>/<specimen_id>/*_fem_result.json
+artifacts/fenicsx/<run_id>/<specimen_id>/*_fenicsx_solver_output.json
+artifacts/fenicsx/<run_id>/<specimen_id>/*.xdmf
+artifacts/fenicsx/<run_id>/<specimen_id>/*.h5
+artifacts/fenicsx/<run_id>/<specimen_id>/*_fem_cache_manifest.json
+```
+
+Expected Analysis Agent improvement 06 artifacts:
+
+```text
+runs/<run_id>/analysis/<specimen_id>/raw_input_sidecar.json
+runs/<run_id>/analysis/<specimen_id>/parse_report.json
+runs/<run_id>/analysis/<specimen_id>/canonical_curve.csv
+runs/<run_id>/analysis/<specimen_id>/preprocessing_report.json
+runs/<run_id>/analysis/<specimen_id>/quality_report.json
+runs/<run_id>/analysis/<specimen_id>/metrics.json
+runs/<run_id>/analysis/<specimen_id>/fem_request.json
+runs/<run_id>/analysis/<specimen_id>/fem_result.json
+runs/<run_id>/analysis/<specimen_id>/fem_agentic_loop.json
+runs/<run_id>/analysis/<specimen_id>/fem_utm_comparison.json
+runs/<run_id>/analysis/<specimen_id>/comparison.json
+runs/<run_id>/analysis/<specimen_id>/analysis_report.json
+runs/<run_id>/analysis/<specimen_id>/experiment_evaluation.json
+runs/<run_id>/analysis/<specimen_id>/bo_handoff.json
+runs/<run_id>/analysis/<specimen_id>/analysis_trace.jsonl
+```
+
+Regression checks:
+
+```bash
+.venv/bin/python -m pytest tests/unit/test_fenicsx_bridge.py tests/unit/test_analysis_agent.py -q
+.venv/bin/python -m pytest tests/unit/test_bo_agent.py tests/unit/test_langgraph_runtime.py tests/integration/test_controller_run.py -q
+conda run -n fenicsx python scripts/fenicsx_linear_elasticity_template.py <request.json> <result.json>
+```
+
+Official references:
+
+- `https://docs.fenicsproject.org/`
+- `https://docs.fenicsproject.org/dolfinx/main/python/installation.html`
+- `https://github.com/FEniCS/dolfinx`
+- `https://github.com/FEniCS/basix`
+- `https://github.com/FEniCS/ffcx`
+- `https://github.com/FEniCS/ufl`
+- `https://jsdokken.com/dolfinx-tutorial/`
+- `https://github.com/jorgensd/dolfinx-tutorial`
+
 ## Windows PyAutoGUI Bridge
 
 Required when controlling Windows GUI/macros from the Equipment Agent:
@@ -181,6 +406,22 @@ Required when controlling Windows GUI/macros from the Equipment Agent:
 ```powershell
 py -m pip install pyautogui
 ```
+
+Optional but recommended for UTM software that exposes Windows UI Automation selectors:
+
+```powershell
+py -m pip install pywinauto
+```
+
+When `pywinauto` is installed, UTM locators may use `locator_backend: uia` with `auto_id`, `title`/`name`, `control_type`, `class_name`, or `best_match`. The bridge tries UIA first, then falls back to PyAutoGUI image matching or explicit coordinates when configured.
+
+Optional for OCR/text state checks used by `assert_text` and `wait_until_text`:
+
+```powershell
+py -m pip install pytesseract Pillow
+```
+
+`pytesseract` requires the Tesseract OCR executable on Windows. Without it, required text checks fail closed and the Equipment Agent will not promote the run to Analysis.
 
 Run the tracked bridge server on Windows:
 
@@ -201,6 +442,95 @@ tokens or saved connection details:
 WINDOWS_PYAUTOGUI_BRIDGE_TOKEN
 memory/windows_pyautogui_connection.json
 ```
+
+## Optional Knowledge Graph Backend
+
+The default Knowledge memory remains file-backed JSON/JSONL and requires no graph database.
+Neo4j/Graphify support is optional and should be installed only when using the Knowledge graph mirror/index layer.
+
+Install optional dependencies:
+
+```bash
+.venv/bin/pip install -r requirements-graph.txt
+# or, from pyproject extras:
+.venv/bin/pip install -e '.[graph]'
+```
+
+Optional packages:
+
+```text
+neo4j        # Neo4j Python driver for optional graph DB mirror
+networkx     # local graph artifact/query fallback
+graphifyy==0.4.4  # Graphify CLI/package; command name is graphify
+```
+
+Enable the graph backend through environment variables. If disabled or unavailable, ATR continues using JSONL memory.
+
+```bash
+export ATR_KNOWLEDGE_GRAPH_ENABLED=1
+export ATR_KNOWLEDGE_GRAPH_BACKEND=json
+```
+
+For Neo4j:
+
+```bash
+export ATR_KNOWLEDGE_GRAPH_ENABLED=1
+export ATR_KNOWLEDGE_GRAPH_BACKEND=neo4j
+export ATR_NEO4J_URI=bolt://127.0.0.1:7687
+export ATR_NEO4J_USERNAME=neo4j
+export ATR_NEO4J_PASSWORD='<local-password>'
+export ATR_NEO4J_DATABASE=neo4j
+export ATR_KNOWLEDGE_GRAPH_FAIL_OPEN=1
+```
+
+Graph memory API endpoints:
+
+```text
+GET  /api/knowledge/graph/health
+POST /api/knowledge/graph/import
+GET  /api/knowledge/graph/query
+POST /api/knowledge/graphify/scan
+POST /api/knowledge/graphify/import
+```
+
+The CLI also supports `--json-path` for routing the local JSON graph fallback to a specific file during tests or audits.
+The graph query endpoint supports `project_context` for project code/docs/module graph retrieval separate from runtime experiment memory.
+The installed `graphify` command is also exposed through `/home/jin/.local/bin/graphify`; ATR uses the installed Graphify Python API when `atr knowledge graphify-scan --external-graphify` is used.
+For `graphify query`, use the raw Graphify node-link file at `memory/knowledge/graphify/external_raw/graph.json`; use `memory/knowledge/graphify/project_graph.json` for ATR JSON/Neo4j import.
+
+Operational CLI commands:
+
+```bash
+atr knowledge graphify-scan
+ATR_KNOWLEDGE_GRAPH_ENABLED=1 ATR_KNOWLEDGE_GRAPH_BACKEND=json \
+  atr knowledge graphify-import --no-runtime-memory
+
+atr knowledge graph neo4j-start --wait
+atr knowledge graph print-env
+ATR_KNOWLEDGE_GRAPH_ENABLED=1 ATR_KNOWLEDGE_GRAPH_BACKEND=neo4j \
+ATR_KNOWLEDGE_GRAPH_FAIL_OPEN=0 ATR_NEO4J_URI=bolt://127.0.0.1:7687 \
+ATR_NEO4J_USERNAME=neo4j ATR_NEO4J_PASSWORD=atr-knowledge-graph ATR_NEO4J_DATABASE=neo4j \
+  atr knowledge graph import --limit 500
+ATR_KNOWLEDGE_GRAPH_ENABLED=1 ATR_KNOWLEDGE_GRAPH_BACKEND=neo4j \
+ATR_KNOWLEDGE_GRAPH_FAIL_OPEN=0 ATR_NEO4J_URI=bolt://127.0.0.1:7687 \
+ATR_NEO4J_USERNAME=neo4j ATR_NEO4J_PASSWORD=atr-knowledge-graph ATR_NEO4J_DATABASE=neo4j \
+  atr knowledge graph query --kind target_context --target-type prompt --target-id analysis --limit 10
+```
+
+Stop local Neo4j when not needed:
+
+```bash
+atr knowledge graph neo4j-stop
+```
+
+Generated graph artifacts should stay local by default:
+
+```text
+memory/knowledge/graphify/
+memory/knowledge/graph_backend/
+```
+
+Do not scan or import credentials, `.env`, device passwords, Windows bridge tokens, PrusaLink connection files, raw generated hardware logs, model caches, or user-private files into Graphify/Neo4j.
 
 ## Local User Files and Generated Outputs
 

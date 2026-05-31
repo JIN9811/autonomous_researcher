@@ -161,7 +161,7 @@ idle
 
 The Live GUI planning handoff also uses the configured LangGraph runtime for stage execution. Design and Specimen stages are executed with `RunLoop.step()` in a planning single-step mode, and the post-specimen tail is derived from the active `graphs/configs/*.yaml` transition table instead of a hard-coded stage list. In the default graph this tail is `vision -> manipulation -> equipment -> analysis -> knowledge -> bo -> guardian`. This preserves the chat-specific planning messages while ensuring module handler selection, LLM/prompt overrides, tool allowlists, retry policy, human approval gates, module `pre_execution`, and standard runtime events are applied consistently. Planning may pass `run_orchestrator_before_design=False` only when the chat handoff has already obtained an orchestrator-approved plan, preventing duplicate Design pre-stage calls while keeping the default runtime config-owned.
 
-Live GUI planning messages have a renderer contract in addition to the backend event contract. `analysis_ai` messages that include `fem_artifacts.contour_url` render the CAE/FEM contour card directly in the chat, and `bo_ai` messages that include `bo_result.benchmark.strategies.<strategy>.surrogate_trace` render the BO surrogate/acquisition SVG plot plus selected candidate rows. The controller copies CAE contour/report files into `/api/planning/artifacts/{run_id}/{specimen_id}/...` before appending the analysis message, and the BO message carries the plot-ready `bo_result` payload produced after Knowledge Agent context is merged. `tests/ui/planning_browser_audit.py` opens `/live` in a real browser and verifies both cards are present, so regressions where the loop computes BO/CAE data but the chat fails to display it are caught before merge.
+Live GUI planning messages have a renderer contract in addition to the backend event contract. `analysis_ai` messages that include `fem_artifacts.contour_url` render the CAE/FEM contour card directly in the chat. `bo_ai` messages render both the compact optimizer summary and the reasoning-augmented payload: evidence/prior counts, LLM reasoning source and operator summary, top candidate ranking, next Design handoff, and optional surrogate/acquisition SVG plot plus selected candidate rows. The controller copies CAE contour/report files into `/api/planning/artifacts/{run_id}/{specimen_id}/...` before appending the analysis message, and the BO message carries the plot-ready `bo_result` payload produced after Knowledge Agent context is merged. `tests/ui/planning_browser_audit.py` opens `/live` in a real browser and verifies both cards are present, so regressions where the loop computes BO/CAE data but the chat fails to display it are caught before merge.
 
 Dedicated workspace APIs such as `/api/bo/run`, `/api/cae/*`, `/api/lerobot/*`, `/api/printer/*`, and `/api/equipment/windows/*` remain direct device/workspace controls; they are not the main closed-loop run path. They now emit Runtime IDE-compatible events through `MainController.emit_workspace_result(...)` so direct workspace actions still appear in the same run trace, timeline, and artifact lineage model as graph runs. Each workspace execution also writes a run-local `workspace/<workspace>/*_result.json` evidence file under the current run directory. Local file paths returned by tools, such as CAE input/report/contour files, are copied into that same run-local workspace folder when they are small enough to preview; oversized files are represented by pointer JSON rather than silently disappearing from lineage.
 
@@ -169,7 +169,7 @@ Dedicated workspace APIs such as `/api/bo/run`, `/api/cae/*`, `/api/lerobot/*`, 
 
 Direct workspace APIs preserve their existing response shapes, but execution-like actions emit standard runtime aliases:
 
-- BO benchmark/run: `tool.completed` and, for agent-mediated BO, `node.completed` with `node_id=bo` and `module_id=bo`. BO workspace runs additionally create a compact `workspace/bo/*_bo_progress.svg` artifact from best-score curves and the latest acquisition trace so the Runtime IDE can preview BO progress without opening raw JSON.
+- BO benchmark/run: `tool.completed` and, for agent-mediated BO, `node.completed` with `node_id=bo` and `module_id=bo`. BO workspace runs additionally create a compact `workspace/bo/*_bo_progress.svg` artifact from best-score curves and the latest acquisition trace so the Runtime IDE can preview BO progress without opening raw JSON. Agent-mediated BO also stores `bo_reasoning_report.json`, `candidate_pool.json`, and `bo_next_candidate.json`, and exposes `bo_result.reasoning`, `candidate_ranking`, `failure_model`, and `next_design_request.v1` in the event payload.
 - CAE run: `tool.completed` plus `node.completed` with `node_id=analysis` and `module_id=analysis`. CAE input/report/contour files are copied from `artifacts/cae` into `runs/<run-id>/workspace/cae/` and linked by `artifact.created` events.
 - LeRobot and Manipulation Agent bridge actions: `tool.completed` and, for agent bridge run/test, `node.completed` with `node_id=manipulation`.
 - Printer autoejection test: `tool.completed` with `node_id=specimen`.
@@ -354,3 +354,25 @@ Before merging Runtime IDE changes, exercise these controls against the running 
 ### Live GUI Graph Run Evidence Update
 
 Live GUI graph runs now preserve graph identity beyond `graph_id`. Before `/api/graphs/{graph_id}/run` starts the shared run loop, the backend computes a stable hash of the active graph payload and resolves the newest saved graph version with a matching payload when available. The run start response, `state.run_metadata.runtime_graph`, `run.created`, and `graph.compiled` events now include `graph_hash`, `graph_version`, `graph_version_id`, and `graph_version_path` where available. This makes Runtime IDE and Live GUI runs auditable against the exact graph configuration used for execution, while retaining the existing validation/compile/live dry-run gates.
+
+## Design Agent Structured Decision Payload
+
+The Design stage now emits a structured decision payload while preserving the legacy `experiment_spec` contract. `LangGraphRunLoop._merge_agent_data` stores the full result under `state.run_metadata["design_agent_payload"]`, stores the report under `state.run_metadata["design_report"]`, and stores the generic handoff packet under `state.run_metadata["design_handoff_packet"]` plus the bounded `handoff_packets` list.
+
+The report contract is `design_report.v1` and includes objective contract, hypothesis, prior/BO/Knowledge/failure context, candidate ledger, rejected/repair log, deterministic selected-candidate metrics, decision register, and `handoff_to_specimen`. Runtime routing still uses graph/module YAML; this payload is state evidence and does not create a new stage.
+
+Live GUI planning single-step execution preserves the same payload through `MainController._merge_planning_agent_data`. When the planning controller rebuilds the final `experiment_spec` for GUI/test profile settings, it updates the report handoff fields so `design_report.handoff_to_specimen.authoritative_specimen_id` and `design_candidate.experiment_spec` match the actual downstream specimen spec.
+
+### 2026-05-29 Manipulation Module Runtime Notes
+
+`graphs/modules/manipulation/module.yaml` now describes the internal Manipulation
+Agent flow as bounded task resolution, Vision/specimen context collection,
+policy/profile/live-gate preflight, backend selection, bounded LeRobot rollout,
+rollout-event capture, SARM-lite stage scoring, post-place Vision verification
+request, recover/stop/handoff decision, report packaging, and evidence storage.
+
+The executable handler remains `agent.manipulation_agent`; Runtime IDE/module
+edits alter the module metadata and graph contract but do not execute arbitrary
+uploaded Python. The runtime merge stores `manipulation_report.v1` and
+`robot_task_result.v1` in `run_metadata` so Live GUI report panes, backend trace,
+and downstream agents see the same state after page refresh or new GUI window.

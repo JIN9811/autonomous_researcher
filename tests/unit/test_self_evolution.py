@@ -170,3 +170,78 @@ def test_registry_rejects_unsafe_task_and_variant_ids(tmp_path: Path) -> None:
         registry.read_task("../bad")
     with pytest.raises(ValueError):
         registry.read_variant("bad/id")
+
+def test_prompt_evolution_uses_knowledge_evidence_pack_guidance(tmp_path: Path) -> None:
+    svc = _service(tmp_path)
+    registry = _registry_for_handlers({"agent.design_agent"})
+    run_dir = tmp_path / "runs" / "run-self-evolution-smoke" / "knowledge"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    pack = {
+        "schema_version": "evolution_evidence_pack_v1",
+        "pack_id": "evo-pack-test-design",
+        "created_by": "knowledge_agent",
+        "target_type": "prompt",
+        "target_id": "design",
+        "priority": 0.92,
+        "objective": "Reduce missing design-to-specimen handoff fields.",
+        "why_this_target": ["design handoff omitted required manufacturing fields"],
+        "supporting_records": {"failure_patterns": ["design-missing-required-fields"]},
+        "recommended_changes": ["Emit required fields before handoff: design_candidate, handoff_to_specimen."],
+        "constraints": {"require_human_approval": True, "no_live_hardware_execution": True},
+        "eval_metrics": {"primary": "contract_validity_delta"},
+        "blocked": False,
+        "provenance": {"was_generated_by": "knowledge_agent", "used": ["knowledge_report.json"], "was_associated_with": ["design", "knowledge_agent"], "was_derived_from": ["run-self-evolution-smoke"], "artifact_fingerprints": {}},
+        "created_at": "2026-05-30T00:00:00+00:00",
+    }
+    (run_dir / "evolution_evidence_packs.json").write_text(json.dumps([pack]), encoding="utf-8")
+    task = svc.create_task(
+        EvolutionTaskCreate(
+            target_type="prompt",
+            target_id="design",
+            source_run_ids=["run-self-evolution-smoke"],
+            objective="Improve design handoff contract reliability.",
+            constraints={"knowledge_evidence_pack_id": "evo-pack-test-design"},
+        )
+    )
+
+    result = svc.run_task(task.task_id, handler_registry=registry)
+
+    assert result["ok"] is True
+    variant = svc.read_variant(result["variant"]["variant_id"])
+    guidance = variant.body["module"]["prompt"]["developer"]
+    assert "Knowledge evidence packs: 1" in guidance
+    assert "Evidence objective: Reduce missing design-to-specimen handoff fields" in guidance
+    assert "Recommended change: Emit required fields before handoff" in guidance
+    assert variant.metrics["trace_metrics"]["knowledge_evidence_pack_count"] == 1
+    assert variant.metrics["replay_eval"]["gate_passed"] == variant.metrics["replay_eval"]["gate_total"]
+
+
+def test_prompt_evolution_replay_eval_uses_heldout_trace_gate(tmp_path: Path) -> None:
+    svc = _service(tmp_path)
+    _write_run_trace(svc.run_root, "run-self-evolution-heldout")
+    registry = _registry_for_handlers({"agent.design_agent"})
+    task = svc.create_task(
+        EvolutionTaskCreate(
+            target_type="prompt",
+            target_id="design",
+            source_run_ids=["run-self-evolution-smoke"],
+            objective="Improve design handoff robustness against held-out trace failures.",
+        )
+    )
+
+    result = svc.run_task(task.task_id, handler_registry=registry)
+
+    assert result["ok"] is True
+    variant = svc.read_variant(result["variant"]["variant_id"])
+    gate_ids = {gate.gate_id for gate in variant.gate_results}
+    assert "replay_cases_present" in gate_ids
+    assert "replay_contract_completeness" in gate_ids
+    assert "replay_groundedness_to_trace" in gate_ids
+    assert "replay_safety_preservation" in gate_ids
+    assert "replay_no_forbidden_behavior" in gate_ids
+    replay = variant.metrics["replay_eval"]
+    assert replay["source_trace_count"] == 1
+    assert replay["heldout_trace_count"] >= 1
+    assert replay["replay_trace_count"] >= 1
+    assert replay["gate_passed"] == replay["gate_total"]
+    assert variant.status == "gate_passed"
