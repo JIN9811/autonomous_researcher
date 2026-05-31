@@ -57,6 +57,7 @@ Codex Goal은 구현 전에 아래 순서대로 읽어야 한다.
 - `개선안/08_knowledge_agent_self_evolution_memory_rag_research.md`
 - `개선안/09_guardian_agent_graphwide_safety_incident_loop_research.md`
 - `개선안/10_orchestration_agent_supervisor_followup_loop_research.md`
+- `개선안/11_live_gui_control_surface_upgrade_plan.md`
 
 ### 1.4 구현 대상 코드
 
