@@ -25,7 +25,7 @@ Modification guide:
     <title>{{ title }}</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
     <link rel="stylesheet" href="/static/styles.css?v=atr-ui-20260525-11" />
-    <link rel="stylesheet" href="/static/runtime_ide.css?v=atr-ui-20260526-84" />
+    <link rel="stylesheet" href="/static/runtime_ide.css?v=atr-ui-20260531-zoom-actions-1" />
   </head>
   <body class="runtime-ide-body">
     <main class="page equipment-setup-page runtime-ide-page">
@@ -155,6 +155,17 @@ Modification guide:
         <div id="ide-version-output" class="runtime-ide-output runtime-version-output"></div>
       </details>
 
+      <details class="panel runtime-top-handlers-panel runtime-ide-compact-drawer" aria-label="Runtime handlers" open>
+        <summary>
+          <div>
+            <h2>Handlers</h2>
+            <small class="hint">runtime allowlist</small>
+          </div>
+          <span class="badge idle">allowlist</span>
+        </summary>
+        <div id="ide-handlers-output" class="runtime-ide-output compact-output"></div>
+      </details>
+
       <section class="runtime-ide-shell">
         <aside class="panel runtime-ide-sidebar">
           <div class="panel-title-row">
@@ -168,6 +179,11 @@ Modification guide:
             <span class="hint">runtime endpoints</span>
           </div>
           <div id="ide-infra-list" class="runtime-ide-output compact-output"></div>
+          <div class="panel-title-row runtime-ide-subtitle">
+            <h2>Runtime Contract</h2>
+            <span class="hint">actual graph/module/bridge contract</span>
+          </div>
+          <div id="ide-runtime-contract-map" class="runtime-ide-output compact-output runtime-contract-map"></div>
           <div class="panel-title-row runtime-ide-subtitle">
             <h2>Module Library</h2>
             <span class="hint">drag modules onto canvas</span>
@@ -186,9 +202,9 @@ Modification guide:
                 </div>
                 <div class="runtime-ide-canvas-actions">
                   <button id="ide-zoom-out-btn" class="btn tiny" type="button">Zoom -</button>
-                  <button id="ide-fit-graph-btn" class="btn tiny primary" type="button">Fit Graph</button>
-                  <button id="ide-zoom-reset-btn" class="btn tiny" type="button">100%</button>
                   <button id="ide-zoom-in-btn" class="btn tiny" type="button">Zoom +</button>
+                  <button id="ide-zoom-reset-btn" class="btn tiny" type="button">100%</button>
+                  <button id="ide-fit-graph-btn" class="btn tiny primary" type="button">Fit Graph</button>
                   <span id="ide-canvas-view-hint" class="runtime-canvas-view-hint">view: loading</span>
                   <span id="ide-graph-id" class="badge idle">graph</span>
                 </div>
@@ -229,49 +245,6 @@ Modification guide:
 
         </div>
 
-        <aside class="panel runtime-ide-right-panel">
-          <div class="runtime-ide-inspector">
-            <div class="panel-title-row">
-              <h2>Node Inspector</h2>
-              <span id="ide-selected-node" class="badge idle">none</span>
-            </div>
-            <div id="ide-node-inspector" class="runtime-ide-output compact-output"></div>
-            <div class="runtime-ide-transition-editor">
-              <label>
-                Source Stage
-                <select id="ide-transition-source" class="text-input"></select>
-              </label>
-              <label>
-                Target Stage
-                <select id="ide-transition-target" class="text-input"></select>
-              </label>
-              <label>
-                Route Condition
-                <select id="ide-transition-condition-preset" class="text-input">
-                  <option value="default">Default transition</option>
-                  <option value="next_stage">Request next stage</option>
-                  <option value="decision">Decision value</option>
-                  <option value="guardian_decision">Guardian decision</option>
-                  <option value="custom">Custom condition</option>
-                </select>
-              </label>
-              <label>
-                Condition Value
-                <input id="ide-transition-condition" class="text-input" placeholder="next_stage:guardian" />
-              </label>
-              <button id="ide-transition-apply-btn" class="btn">Apply Edge</button>
-              <button id="ide-edge-connect-btn" class="btn" type="button">Click Connect</button>
-              <button id="ide-edge-delete-btn" class="btn danger" type="button">Delete Edge</button>
-              <div id="ide-edge-route-preview" class="runtime-edge-route-preview">Select an edge or source/target to preview route behavior.</div>
-              <span id="ide-edge-edit-status" class="hint">select or connect edges</span>
-            </div>
-          </div>
-          <div class="panel-title-row runtime-ide-subtitle">
-            <h2>Handlers</h2>
-            <span class="hint">allowlist</span>
-          </div>
-          <div id="ide-handlers-output" class="runtime-ide-output compact-output"></div>
-        </aside>
       </section>
 
       <details class="panel runtime-ide-module-drawer runtime-module-editor-expanded runtime-ide-compat-module-config" hidden aria-hidden="true">
@@ -328,14 +301,64 @@ Modification guide:
 
 
       <section class="panel runtime-ide-bottom-dock">
-        <article class="runtime-readiness-panel">
-          <div class="panel-title-row">
-            <h2>Runtime Readiness</h2>
-            <span class="hint">graph / module / live gate readiness</span>
-          </div>
-          <div id="ide-runtime-readiness" class="runtime-ide-output runtime-readiness-output">Checking graph readiness...</div>
-        </article>
-        <div class="runtime-ide-bottom-grid">
+        <details class="runtime-dock-drawer runtime-node-inspector-drawer" open>
+          <summary class="runtime-dock-summary">
+            <span>
+              <strong>Node Inspector</strong>
+              <small>selected node and route editor</small>
+            </span>
+            <span id="ide-selected-node" class="badge idle">none</span>
+          </summary>
+          <article class="runtime-ide-inspector runtime-ide-bottom-inspector">
+              <div id="ide-node-inspector" class="runtime-ide-output compact-output"></div>
+              <div class="runtime-ide-transition-editor">
+                <label>
+                  Source Stage
+                  <select id="ide-transition-source" class="text-input"></select>
+                </label>
+                <label>
+                  Target Stage
+                  <select id="ide-transition-target" class="text-input"></select>
+                </label>
+                <label>
+                  Route Condition
+                  <select id="ide-transition-condition-preset" class="text-input">
+                    <option value="default">Default transition</option>
+                    <option value="next_stage">Request next stage</option>
+                    <option value="decision">Decision value</option>
+                    <option value="guardian_decision">Guardian decision</option>
+                    <option value="custom">Custom condition</option>
+                  </select>
+                </label>
+                <label>
+                  Condition Value
+                  <input id="ide-transition-condition" class="text-input" placeholder="next_stage:guardian" />
+                </label>
+                <button id="ide-transition-apply-btn" class="btn">Apply Edge</button>
+                <button id="ide-edge-connect-btn" class="btn" type="button">Click Connect</button>
+                <button id="ide-edge-delete-btn" class="btn danger" type="button">Delete Edge</button>
+                <div id="ide-edge-route-preview" class="runtime-edge-route-preview">Select an edge or source/target to preview route behavior.</div>
+                <span id="ide-edge-edit-status" class="hint">select or connect edges</span>
+              </div>
+          </article>
+        </details>
+        <details class="runtime-dock-drawer runtime-runtime-panels-drawer" open>
+          <summary class="runtime-dock-summary">
+            <span>
+              <strong>Runtime Panels</strong>
+              <small>readiness, live state, artifacts, and event log</small>
+            </span>
+            <span class="badge idle">readiness to event log</span>
+          </summary>
+          <div class="runtime-runtime-panels-body">
+            <article class="runtime-readiness-panel">
+              <div class="panel-title-row">
+                <h2>Runtime Readiness</h2>
+                <span class="hint">graph / module / live gate readiness</span>
+              </div>
+              <div id="ide-runtime-readiness" class="runtime-ide-output runtime-readiness-output">Checking graph readiness...</div>
+            </article>
+            <div class="runtime-ide-bottom-grid">
           <article>
             <div class="panel-title-row">
               <h2>Live Runtime</h2>
@@ -423,8 +446,11 @@ Modification guide:
             <div id="ide-log-output" class="runtime-ide-output"></div>
           </article>
         </div>
+          </div>
+        </details>
       </section>
     </main>
-    <script src="/static/runtime_ide.js?v=atr-ui-20260526-83" defer></script>
+    <script src="/static/runtime_graph_geometry.js?v=atr-ui-20260531-graph-geometry-3"></script>
+    <script src="/static/runtime_ide.js?v=atr-ui-20260531-zoom-actions-1" defer></script>
   </body>
 </html>

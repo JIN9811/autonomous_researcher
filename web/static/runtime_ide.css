@@ -6920,3 +6920,1291 @@ body.runtime-ide-body .runtime-draft-safety-actions {
     width: 100%;
   }
 }
+
+/* v20260531: actual runtime contract overlays from graph/module/device backend. */
+body.runtime-ide-body .runtime-ide-edge.edge-type-control-overlay {
+  color: #fbbf24;
+  opacity: 0.58;
+  stroke-dasharray: 12 9;
+  stroke-width: 2.4;
+}
+
+body.runtime-ide-body .runtime-ide-edge.edge-type-device-bridge {
+  color: #38bdf8;
+  opacity: 0.72;
+  stroke-dasharray: 4 6;
+  stroke-width: 3;
+}
+
+body.runtime-ide-body .runtime-ide-edge.edge-type-evidence-flow {
+  color: #34d399;
+  opacity: 0.64;
+  stroke-dasharray: 2 7;
+  stroke-width: 2.6;
+}
+
+body.runtime-ide-body .runtime-ide-edge.edge-type-runtime-sidecar {
+  color: #c084fc;
+  opacity: 0.66;
+  stroke-dasharray: 10 5 2 5;
+  stroke-width: 2.8;
+}
+
+body.runtime-ide-body .runtime-ide-edge-label.edge-type-control-overlay rect,
+body.runtime-ide-body .runtime-ide-edge-label.edge-type-device-bridge rect,
+body.runtime-ide-body .runtime-ide-edge-label.edge-type-evidence-flow rect,
+body.runtime-ide-body .runtime-ide-edge-label.edge-type-runtime-sidecar rect {
+  fill: rgba(8, 13, 32, 0.92);
+  stroke-width: 1.2;
+}
+
+body.runtime-ide-body .runtime-ide-edge-label.edge-type-control-overlay rect { stroke: rgba(251, 191, 36, 0.48); }
+body.runtime-ide-body .runtime-ide-edge-label.edge-type-device-bridge rect { stroke: rgba(56, 189, 248, 0.52); }
+body.runtime-ide-body .runtime-ide-edge-label.edge-type-evidence-flow rect { stroke: rgba(52, 211, 153, 0.52); }
+body.runtime-ide-body .runtime-ide-edge-label.edge-type-runtime-sidecar rect { stroke: rgba(192, 132, 252, 0.52); }
+
+body.runtime-ide-body .runtime-ide-node.kind-sidecar,
+body.runtime-ide-body .runtime-ide-node.kind-bridge,
+body.runtime-ide-body .runtime-ide-node.kind-evidence-plane {
+  background: linear-gradient(135deg, rgba(18, 25, 52, 0.96), rgba(23, 31, 63, 0.88));
+  border-style: dashed;
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.28), inset 0 0 0 1px rgba(148, 163, 184, 0.08);
+}
+
+body.runtime-ide-body .runtime-ide-node.plane-orchestration-supervisor { border-color: rgba(251, 191, 36, 0.58); }
+body.runtime-ide-body .runtime-ide-node.plane-guardian-graphwide-gate { border-color: rgba(248, 113, 113, 0.58); }
+body.runtime-ide-body .runtime-ide-node.plane-device-bridge-plane { border-color: rgba(56, 189, 248, 0.62); }
+body.runtime-ide-body .runtime-ide-node.plane-knowledge-memory-evolution { border-color: rgba(52, 211, 153, 0.56); }
+
+body.runtime-ide-body .runtime-node-plane-badge,
+body.runtime-ide-body .runtime-node-output-badge {
+  border-radius: 999px;
+  color: #dff7ff;
+  font-size: 0.54rem;
+  font-style: normal;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  padding: 2px 6px;
+  position: absolute;
+  right: 8px;
+  text-transform: uppercase;
+  top: -9px;
+  z-index: 6;
+}
+
+body.runtime-ide-body .runtime-node-plane-badge {
+  background: rgba(15, 23, 42, 0.96);
+  border: 1px solid rgba(125, 211, 252, 0.46);
+}
+
+body.runtime-ide-body .runtime-node-output-badge {
+  background: rgba(20, 83, 45, 0.94);
+  border: 1px solid rgba(74, 222, 128, 0.44);
+  right: auto;
+  left: 46px;
+}
+
+body.runtime-ide-body .runtime-contract-map {
+  display: grid;
+  gap: 8px;
+}
+
+body.runtime-ide-body .runtime-contract-summary,
+body.runtime-ide-body .runtime-contract-row {
+  background: rgba(10, 16, 35, 0.66);
+  border: 1px solid rgba(125, 211, 252, 0.15);
+  border-radius: 12px;
+  display: grid;
+  gap: 2px;
+  padding: 8px 9px;
+}
+
+body.runtime-ide-body .runtime-contract-summary span,
+body.runtime-ide-body .runtime-contract-section-title {
+  color: rgba(203, 213, 225, 0.72);
+  font-size: 0.62rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+body.runtime-ide-body .runtime-contract-summary strong,
+body.runtime-ide-body .runtime-contract-row strong {
+  color: #e6f6ff;
+  font-size: 0.78rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.runtime-ide-body .runtime-contract-summary small,
+body.runtime-ide-body .runtime-contract-row small {
+  color: rgba(190, 205, 226, 0.72);
+  font-size: 0.62rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.runtime-ide-body .runtime-contract-row.bridge {
+  border-color: rgba(56, 189, 248, 0.24);
+}
+
+body.runtime-ide-body .runtime-contract-chip-row,
+body.runtime-ide-body .runtime-contract-card dd {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+body.runtime-ide-body .runtime-contract-chip {
+  background: rgba(30, 41, 59, 0.88);
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 999px;
+  color: #dbeafe;
+  display: inline-flex;
+  font-size: 0.64rem;
+  font-weight: 800;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 3px 7px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.runtime-ide-body .runtime-contract-card dl {
+  grid-template-columns: minmax(92px, 0.35fr) minmax(0, 1fr);
+}
+
+/* v20260531b: final contract-overlay layout pass for 1920x1080 operator view. */
+body.runtime-ide-body .runtime-ide-shell {
+  grid-template-columns: 220px minmax(0, 1fr) 300px !important;
+}
+
+body.runtime-ide-body .runtime-ide-graph-panel .runtime-ide-canvas {
+  height: 430px !important;
+  max-height: 430px !important;
+  min-height: 430px !important;
+}
+
+body.runtime-ide-body .runtime-draft-safety-strip {
+  min-height: 42px !important;
+  padding: 5px 7px !important;
+}
+
+body.runtime-ide-body .runtime-draft-safety-head,
+body.runtime-ide-body .runtime-draft-safety-next,
+body.runtime-ide-body .runtime-draft-safety-item {
+  padding: 4px 6px !important;
+}
+
+body.runtime-ide-body .runtime-draft-safety-head strong,
+body.runtime-ide-body .runtime-draft-safety-next strong,
+body.runtime-ide-body .runtime-draft-safety-item strong {
+  font-size: 0.61rem !important;
+}
+
+body.runtime-ide-body .runtime-draft-safety-item small {
+  font-size: 0.5rem !important;
+}
+
+body.runtime-ide-body .runtime-ide-graph-aux-grid {
+  margin-top: 8px !important;
+}
+
+body.runtime-ide-body .runtime-ide-graph-aux-grid .runtime-ide-output,
+body.runtime-ide-body .runtime-ide-graph-aux-grid .runtime-ide-minimap {
+  max-height: 88px !important;
+  min-height: 72px !important;
+}
+
+/* v20260531c: keep draft gate compact enough for first-screen graph inspection. */
+body.runtime-ide-body .runtime-draft-safety-strip {
+  height: 42px !important;
+  max-height: 42px !important;
+  overflow: hidden !important;
+}
+
+body.runtime-ide-body .runtime-draft-safety-items {
+  gap: 3px !important;
+}
+
+body.runtime-ide-body .runtime-draft-safety-next {
+  display: none !important;
+}
+
+body.runtime-ide-body .runtime-draft-safety-strip {
+  grid-template-columns: minmax(150px, 0.42fr) minmax(0, 1.58fr) !important;
+}
+
+/* v20260531d: remove remaining vertical slack above canvas. */
+body.runtime-ide-body .runtime-draft-safety-strip {
+  margin: 3px 0 4px !important;
+}
+
+body.runtime-ide-body .runtime-ide-graph-workbench > .panel-title-row {
+  margin-bottom: 4px !important;
+  min-height: 30px !important;
+}
+
+/* v20260531e: make closed launch/version controls icon-strip height. */
+body.runtime-ide-body .runtime-ide-compact-drawer > summary {
+  min-height: 32px !important;
+  padding: 4px 8px !important;
+}
+
+body.runtime-ide-body .runtime-ide-compact-drawer > summary h2 {
+  font-size: 0.72rem !important;
+}
+
+body.runtime-ide-body .runtime-ide-compact-drawer > summary .badge,
+body.runtime-ide-body .runtime-ide-compact-drawer > summary::after {
+  font-size: 0.5rem !important;
+  padding: 2px 5px !important;
+}
+
+body.runtime-ide-body .runtime-version-history-panel summary {
+  min-height: 26px !important;
+  padding: 4px 8px !important;
+}
+
+body.runtime-ide-body .runtime-version-history-panel summary span {
+  font-size: 0.72rem !important;
+}
+
+/* v20260531f: compact header stack so Runtime IDE remains graph-first at 1920x1080. */
+body.runtime-ide-body .runtime-ide-hero {
+  min-height: 50px !important;
+  padding: 5px 10px !important;
+}
+
+body.runtime-ide-body .runtime-ide-hero h1 {
+  font-size: 1.15rem !important;
+  line-height: 1.1 !important;
+  margin: 0 !important;
+}
+
+body.runtime-ide-body .runtime-ide-hero .subhead,
+body.runtime-ide-body .runtime-ide-hero .eyebrow,
+body.runtime-ide-body .runtime-ide-hero .status-card p {
+  display: none !important;
+}
+
+body.runtime-ide-body .runtime-ide-hero .status-card {
+  min-height: 40px !important;
+  padding: 6px 10px !important;
+}
+
+body.runtime-ide-body .runtime-ide-topbar {
+  min-height: 42px !important;
+  padding: 5px 8px !important;
+}
+
+body.runtime-ide-body .runtime-ide-topbar-metrics div {
+  padding: 4px 6px !important;
+}
+
+body.runtime-ide-body .runtime-ide-toolbar {
+  min-height: 40px !important;
+  padding: 4px 7px !important;
+}
+
+body.runtime-ide-body .runtime-ide-toolbar .btn {
+  padding: 5px 8px !important;
+}
+
+/* v20260531g: final graph workbench internal compacting. */
+body.runtime-ide-body .runtime-ide-graph-workbench > .panel-title-row {
+  min-height: 24px !important;
+  margin-bottom: 2px !important;
+}
+
+body.runtime-ide-body .runtime-ide-graph-workbench > .panel-title-row h2 {
+  font-size: 0.78rem !important;
+}
+
+body.runtime-ide-body .runtime-ide-canvas-actions .btn,
+body.runtime-ide-body .runtime-canvas-view-hint,
+body.runtime-ide-body #ide-graph-id {
+  font-size: 0.58rem !important;
+  padding: 3px 6px !important;
+}
+
+body.runtime-ide-body .runtime-draft-safety-strip {
+  height: 32px !important;
+  max-height: 32px !important;
+  min-height: 32px !important;
+  margin: 2px 0 3px !important;
+  padding: 3px 5px !important;
+}
+
+body.runtime-ide-body .runtime-draft-safety-head,
+body.runtime-ide-body .runtime-draft-safety-item {
+  padding: 2px 5px !important;
+}
+
+/* v20260531h: keep launch/version drawers accessible but out of document flow. */
+body.runtime-ide-body .runtime-ide-page {
+  position: relative !important;
+}
+
+body.runtime-ide-body .runtime-ide-operator-drawers {
+  position: absolute !important;
+  right: 18px !important;
+  top: 196px !important;
+  width: min(720px, calc(100vw - 560px)) !important;
+  z-index: 20 !important;
+}
+
+body.runtime-ide-body .runtime-version-history-panel {
+  position: absolute !important;
+  right: 18px !important;
+  top: 236px !important;
+  width: min(460px, calc(100vw - 780px)) !important;
+  z-index: 21 !important;
+}
+
+/* v20260531i: make non-executable runtime planes visibly connected, not floating blocks. */
+body.runtime-ide-body .runtime-ide-edge.edge-type-control-overlay,
+body.runtime-ide-body .runtime-ide-edge.edge-type-device-bridge,
+body.runtime-ide-body .runtime-ide-edge.edge-type-evidence-flow,
+body.runtime-ide-body .runtime-ide-edge.edge-type-runtime-sidecar {
+  opacity: 0.94 !important;
+  marker-end: url(#ide-arrow) !important;
+  filter: drop-shadow(0 0 5px color-mix(in srgb, currentColor 42%, transparent));
+}
+
+body.runtime-ide-body .runtime-ide-edge.edge-type-control-overlay {
+  color: #f59e0b !important;
+  stroke-dasharray: 14 8 !important;
+  stroke-width: 3.2 !important;
+}
+
+body.runtime-ide-body .runtime-ide-edge.edge-type-device-bridge {
+  color: #06b6d4 !important;
+  stroke-dasharray: 7 5 !important;
+  stroke-width: 3.5 !important;
+}
+
+body.runtime-ide-body .runtime-ide-edge.edge-type-evidence-flow {
+  color: #10b981 !important;
+  stroke-dasharray: 5 5 !important;
+  stroke-width: 3.2 !important;
+}
+
+body.runtime-ide-body .runtime-ide-edge.edge-type-runtime-sidecar {
+  color: #a855f7 !important;
+  stroke-dasharray: 12 5 3 5 !important;
+  stroke-width: 3.2 !important;
+}
+
+body.runtime-ide-body .runtime-ide-edge-label.edge-type-control-overlay,
+body.runtime-ide-body .runtime-ide-edge-label.edge-type-device-bridge,
+body.runtime-ide-body .runtime-ide-edge-label.edge-type-evidence-flow,
+body.runtime-ide-body .runtime-ide-edge-label.edge-type-runtime-sidecar {
+  opacity: 0.92;
+}
+
+body.runtime-ide-body .runtime-ide-edge-label.edge-type-control-overlay text,
+body.runtime-ide-body .runtime-ide-edge-label.edge-type-device-bridge text,
+body.runtime-ide-body .runtime-ide-edge-label.edge-type-evidence-flow text,
+body.runtime-ide-body .runtime-ide-edge-label.edge-type-runtime-sidecar text {
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+}
+
+body.runtime-ide-body .runtime-ide-node.kind-sidecar,
+body.runtime-ide-body .runtime-ide-node.kind-bridge,
+body.runtime-ide-body .runtime-ide-node.kind-evidence-plane {
+  border-width: 2px !important;
+  box-shadow: 0 14px 34px rgba(2, 6, 23, 0.24), 0 0 0 1px rgba(255, 255, 255, 0.05) inset !important;
+}
+
+/* v20260531 graph-first Runtime IDE layout: inspector moved below canvas. */
+body.runtime-ide-body .runtime-ide-shell {
+  grid-template-columns: 220px minmax(0, 1fr) 168px !important;
+  align-items: start !important;
+}
+
+body.runtime-ide-body .runtime-ide-right-panel {
+  min-width: 0 !important;
+  max-width: 168px !important;
+  padding: 10px !important;
+}
+
+body.runtime-ide-body .runtime-ide-right-panel .runtime-ide-subtitle {
+  margin-top: 0 !important;
+}
+
+body.runtime-ide-body #ide-handlers-output.runtime-ide-output.compact-output {
+  max-height: 150px !important;
+  min-height: 96px !important;
+}
+
+body.runtime-ide-body .runtime-ide-graph-panel .runtime-ide-canvas {
+  height: 560px !important;
+  max-height: 640px !important;
+  min-height: 560px !important;
+}
+
+body.runtime-ide-body .runtime-ide-bottom-dock {
+  display: grid;
+  gap: 12px;
+}
+
+body.runtime-ide-body .runtime-ide-bottom-inspector {
+  background: linear-gradient(180deg, rgba(10, 18, 42, 0.95), rgba(7, 11, 28, 0.96));
+  border: 1px solid rgba(96, 165, 250, 0.2);
+  border-radius: 18px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 18px 44px rgba(0, 0, 0, 0.2);
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+body.runtime-ide-body .runtime-ide-bottom-inspector #ide-node-inspector.runtime-ide-output.compact-output {
+  max-height: 340px !important;
+  min-height: 190px !important;
+  overflow: auto !important;
+}
+
+body.runtime-ide-body .runtime-ide-bottom-inspector .runtime-ide-transition-editor {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) auto auto auto;
+  max-height: none !important;
+  overflow: visible !important;
+  padding-right: 0 !important;
+}
+
+body.runtime-ide-body .runtime-ide-bottom-inspector .runtime-edge-route-preview,
+body.runtime-ide-body .runtime-ide-bottom-inspector #ide-edge-edit-status {
+  grid-column: 1 / -1;
+}
+
+body.runtime-ide-body .runtime-ide-bottom-inspector .runtime-edge-route-preview {
+  max-height: 150px !important;
+}
+
+@media (max-width: 1420px) {
+  body.runtime-ide-body .runtime-ide-shell {
+    grid-template-columns: 210px minmax(0, 1fr) 150px !important;
+  }
+
+  body.runtime-ide-body .runtime-ide-bottom-inspector .runtime-ide-transition-editor {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 1060px) {
+  body.runtime-ide-body .runtime-ide-shell {
+    grid-template-columns: 1fr !important;
+  }
+
+  body.runtime-ide-body .runtime-ide-right-panel {
+    max-width: none !important;
+  }
+}
+
+/* v20260531 runtime utility repair: restore readable operator/version/handler cards. */
+body.runtime-ide-body .runtime-ide-operator-drawers {
+  display: grid !important;
+  gap: 10px !important;
+  grid-template-columns: repeat(2, minmax(280px, 1fr)) !important;
+  margin: 8px 0 10px !important;
+  position: static !important;
+  right: auto !important;
+  top: auto !important;
+  width: 100% !important;
+  z-index: auto !important;
+}
+
+body.runtime-ide-body .runtime-version-history-panel {
+  margin: 0 0 10px !important;
+  position: static !important;
+  right: auto !important;
+  top: auto !important;
+  width: 100% !important;
+  z-index: auto !important;
+}
+
+body.runtime-ide-body .runtime-ide-compact-drawer > summary,
+body.runtime-ide-body .runtime-version-history-panel summary {
+  align-items: center !important;
+  display: flex !important;
+  gap: 10px !important;
+  min-height: 46px !important;
+  padding: 8px 12px !important;
+}
+
+body.runtime-ide-body .runtime-ide-compact-drawer > summary h2,
+body.runtime-ide-body .runtime-version-history-panel summary span {
+  color: #f2f7ff !important;
+  font-size: 0.86rem !important;
+  line-height: 1.15 !important;
+  margin: 0 !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+body.runtime-ide-body .runtime-ide-compact-drawer > summary small,
+body.runtime-ide-body .runtime-version-history-panel summary small {
+  color: rgba(202, 213, 236, 0.72) !important;
+  display: block !important;
+  font-size: 0.62rem !important;
+  line-height: 1.2 !important;
+  max-width: 100% !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+body.runtime-ide-body .runtime-ide-compact-drawer > summary > div,
+body.runtime-ide-body .runtime-version-history-panel summary > span,
+body.runtime-ide-body .runtime-version-history-panel summary > small {
+  min-width: 0 !important;
+}
+
+body.runtime-ide-body .runtime-ide-compact-drawer > summary .badge,
+body.runtime-ide-body .runtime-ide-compact-drawer > summary::after {
+  flex: 0 0 auto !important;
+  font-size: 0.58rem !important;
+  padding: 3px 7px !important;
+}
+
+body.runtime-ide-body .runtime-ide-shell {
+  grid-template-columns: 220px minmax(0, 1fr) 240px !important;
+}
+
+body.runtime-ide-body .runtime-ide-right-panel {
+  max-width: 240px !important;
+  min-width: 220px !important;
+  overflow: visible !important;
+  padding: 12px !important;
+}
+
+body.runtime-ide-body .runtime-ide-right-panel .runtime-ide-subtitle {
+  align-items: center !important;
+  display: flex !important;
+  gap: 8px !important;
+  justify-content: space-between !important;
+  margin: 0 0 8px !important;
+}
+
+body.runtime-ide-body .runtime-ide-right-panel .runtime-ide-subtitle h2 {
+  font-size: 0.86rem !important;
+  line-height: 1.15 !important;
+  margin: 0 !important;
+}
+
+body.runtime-ide-body #ide-handlers-output.runtime-ide-output.compact-output {
+  max-height: 180px !important;
+  min-height: 112px !important;
+  overflow: auto !important;
+}
+
+@media (max-width: 1320px) {
+  body.runtime-ide-body .runtime-ide-operator-drawers {
+    grid-template-columns: 1fr !important;
+  }
+
+  body.runtime-ide-body .runtime-ide-shell {
+    grid-template-columns: 210px minmax(0, 1fr) !important;
+  }
+
+  body.runtime-ide-body .runtime-ide-right-panel {
+    max-width: none !important;
+    min-width: 0 !important;
+  }
+}
+
+/* v20260531 handlers-top layout: remove right rail and expand graph canvas. */
+body.runtime-ide-body .runtime-top-handlers-panel {
+  margin: 0 0 10px !important;
+  padding: 10px 12px !important;
+}
+
+body.runtime-ide-body .runtime-top-handlers-panel .runtime-ide-subtitle {
+  align-items: center !important;
+  display: flex !important;
+  gap: 10px !important;
+  justify-content: space-between !important;
+  margin: 0 0 8px !important;
+}
+
+body.runtime-ide-body .runtime-top-handlers-panel .runtime-ide-subtitle h2 {
+  font-size: 0.86rem !important;
+  line-height: 1.15 !important;
+  margin: 0 !important;
+}
+
+body.runtime-ide-body .runtime-top-handlers-panel #ide-handlers-output.runtime-ide-output.compact-output {
+  max-height: 118px !important;
+  min-height: 74px !important;
+  overflow: auto !important;
+}
+
+body.runtime-ide-body .runtime-ide-shell {
+  grid-template-columns: 220px minmax(0, 1fr) !important;
+}
+
+body.runtime-ide-body .runtime-ide-main-column {
+  min-width: 0 !important;
+}
+
+body.runtime-ide-body .runtime-ide-graph-panel .runtime-ide-canvas {
+  height: 580px !important;
+  max-height: 680px !important;
+  min-height: 580px !important;
+}
+
+@media (max-width: 1320px) {
+  body.runtime-ide-body .runtime-ide-shell {
+    grid-template-columns: 210px minmax(0, 1fr) !important;
+  }
+}
+
+@media (max-width: 1060px) {
+  body.runtime-ide-body .runtime-ide-shell {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* v20260531 legend-current-page: draggable line legend and stronger main/module routes. */
+body.runtime-ide-body .runtime-ide-graph-panel .runtime-ide-canvas {
+  position: relative !important;
+}
+
+body.runtime-ide-body .runtime-ide-edge-legend {
+  backdrop-filter: blur(12px);
+  background: linear-gradient(180deg, rgba(7, 12, 30, 0.94), rgba(10, 18, 42, 0.91));
+  border: 1px solid rgba(125, 211, 252, 0.34);
+  border-radius: 14px;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  color: #e7f3ff;
+  max-width: 260px;
+  min-width: 218px;
+  padding: 9px;
+  pointer-events: auto;
+  position: absolute;
+  user-select: none;
+  z-index: 28;
+}
+
+body.runtime-ide-body .runtime-ide-edge-legend.dragging {
+  border-color: rgba(250, 204, 21, 0.72);
+  box-shadow: 0 18px 46px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(250, 204, 21, 0.2), 0 0 28px rgba(250, 204, 21, 0.16);
+}
+
+body.runtime-ide-body .runtime-ide-edge-legend-head {
+  align-items: center;
+  cursor: grab;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  padding: 1px 2px 8px;
+}
+
+body.runtime-ide-body .runtime-ide-edge-legend.dragging .runtime-ide-edge-legend-head {
+  cursor: grabbing;
+}
+
+body.runtime-ide-body .runtime-ide-edge-legend-head strong {
+  color: #f8fbff;
+  font-size: 0.74rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+body.runtime-ide-body .runtime-ide-edge-legend-head small {
+  color: rgba(202, 213, 236, 0.68);
+  font-size: 0.57rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+body.runtime-ide-body .runtime-ide-edge-legend-list {
+  display: grid;
+  gap: 6px;
+}
+
+body.runtime-ide-body .runtime-ide-edge-legend-row {
+  align-items: center;
+  background: rgba(15, 23, 42, 0.46);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 10px;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 40px minmax(0, 1fr);
+  padding: 6px 7px;
+}
+
+body.runtime-ide-body .runtime-ide-edge-legend-row span:last-child {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+body.runtime-ide-body .runtime-ide-edge-legend-row strong,
+body.runtime-ide-body .runtime-ide-edge-legend-row small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.runtime-ide-body .runtime-ide-edge-legend-row strong {
+  color: #ecf7ff;
+  font-size: 0.68rem;
+  font-weight: 900;
+}
+
+body.runtime-ide-body .runtime-ide-edge-legend-row small {
+  color: rgba(203, 213, 225, 0.64);
+  font-size: 0.54rem;
+  font-weight: 700;
+}
+
+body.runtime-ide-body .runtime-ide-edge-legend-swatch {
+  border-radius: 999px;
+  display: inline-block;
+  height: 0;
+  justify-self: center;
+  opacity: 0.96;
+  position: relative;
+  width: 34px;
+}
+
+body.runtime-ide-body .runtime-ide-edge-legend-swatch::before {
+  border-top: 4px solid #9ccfff;
+  content: "";
+  left: 0;
+  position: absolute;
+  right: 0;
+  top: -2px;
+}
+
+body.runtime-ide-body .runtime-ide-edge-legend-swatch.edge-candidate::before {
+  border-top-style: dashed;
+  border-top-color: #9db4d3;
+}
+
+body.runtime-ide-body .runtime-ide-edge-legend-swatch.edge-type-control-overlay::before {
+  border-top-color: #f59e0b;
+  border-top-style: dashed;
+}
+
+body.runtime-ide-body .runtime-ide-edge-legend-swatch.edge-type-device-bridge::before {
+  border-top-color: #06b6d4;
+  border-top-style: dashed;
+}
+
+body.runtime-ide-body .runtime-ide-edge-legend-swatch.edge-type-evidence-flow::before {
+  border-top-color: #10b981;
+  border-top-style: dotted;
+}
+
+body.runtime-ide-body .runtime-ide-edge-legend-swatch.edge-type-runtime-sidecar::before {
+  border-top-color: #a855f7;
+  border-top-style: dashed;
+}
+
+body.runtime-ide-body .runtime-ide-edge {
+  stroke-width: 3.65 !important;
+  filter: drop-shadow(0 0 4px rgba(125, 211, 252, 0.18));
+}
+
+body.runtime-ide-body .runtime-ide-edge.edge-default {
+  opacity: 0.98 !important;
+  stroke-width: 3.95 !important;
+}
+
+body.runtime-ide-body .runtime-ide-edge.edge-candidate {
+  opacity: 0.86 !important;
+  stroke-width: 3.45 !important;
+}
+
+body.runtime-ide-body .runtime-ide-edge.edge-simple-default {
+  opacity: 0.9 !important;
+}
+
+body.runtime-ide-body .runtime-ide-edge.edge-active,
+body.runtime-ide-body .runtime-ide-edge:hover,
+body.runtime-ide-body .runtime-ide-edge-hitbox:hover + .runtime-ide-edge {
+  stroke-width: 4.35 !important;
+}
+
+body.runtime-ide-body .runtime-ide-edge.edge-module-flow {
+  stroke-width: 4 !important;
+}
+
+body.runtime-ide-body .runtime-ide-edge.edge-type-control-overlay,
+body.runtime-ide-body .runtime-ide-edge.edge-type-evidence-flow,
+body.runtime-ide-body .runtime-ide-edge.edge-type-runtime-sidecar {
+  stroke-width: 3.6 !important;
+}
+
+body.runtime-ide-body .runtime-ide-edge.edge-type-device-bridge {
+  stroke-width: 3.85 !important;
+}
+
+/* v20260531 legend-compact: keep the movable legend useful without covering the graph. */
+body.runtime-ide-body .runtime-ide-edge-legend {
+  max-height: min(250px, calc(100% - 28px));
+  overflow: auto;
+  scrollbar-color: rgba(125, 211, 252, 0.42) rgba(8, 14, 35, 0.72);
+}
+
+body.runtime-ide-body .runtime-ide-edge-legend-row {
+  gap: 7px;
+  grid-template-columns: 38px minmax(0, 1fr);
+  padding: 5px 6px;
+}
+
+/* v20260531 legend-right-bottom: show three line rows, then scroll. */
+body.runtime-ide-body .runtime-ide-edge-legend {
+  max-height: 188px !important;
+  max-width: 248px !important;
+  min-width: 224px !important;
+  overflow: hidden !important;
+}
+
+body.runtime-ide-body .runtime-ide-edge-legend-list {
+  max-height: 126px !important;
+  overflow: auto !important;
+  padding-right: 2px;
+  scrollbar-color: rgba(125, 211, 252, 0.42) rgba(8, 14, 35, 0.72);
+}
+
+body.runtime-ide-body .runtime-ide-edge-legend-row {
+  min-height: 34px;
+}
+
+/* v20260531 collision/readability: wider left rail, readable sidebar text, and collapsible bottom dock. */
+body.runtime-ide-body .runtime-ide-shell {
+  grid-template-columns: 270px minmax(0, 1fr) !important;
+}
+
+body.runtime-ide-body .runtime-ide-sidebar {
+  min-width: 270px !important;
+  overflow: auto !important;
+}
+
+body.runtime-ide-body .runtime-explorer-node,
+body.runtime-ide-body .runtime-infra-item,
+body.runtime-ide-body .runtime-infra-models > div,
+body.runtime-ide-body .runtime-contract-summary,
+body.runtime-ide-body .runtime-contract-row,
+body.runtime-ide-body .runtime-module-catalog-item {
+  min-height: auto !important;
+  overflow: visible !important;
+  padding: 8px 10px !important;
+}
+
+body.runtime-ide-body .runtime-explorer-node strong,
+body.runtime-ide-body .runtime-explorer-node small,
+body.runtime-ide-body .runtime-infra-item strong,
+body.runtime-ide-body .runtime-infra-item small,
+body.runtime-ide-body .runtime-infra-models strong,
+body.runtime-ide-body .runtime-infra-models small,
+body.runtime-ide-body .runtime-contract-summary strong,
+body.runtime-ide-body .runtime-contract-summary small,
+body.runtime-ide-body .runtime-contract-row strong,
+body.runtime-ide-body .runtime-contract-row small,
+body.runtime-ide-body .runtime-module-catalog-item strong,
+body.runtime-ide-body .runtime-module-catalog-item small {
+  line-height: 1.25 !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  overflow-wrap: anywhere !important;
+  text-overflow: clip !important;
+  white-space: normal !important;
+  word-break: break-word !important;
+}
+
+body.runtime-ide-body .runtime-explorer-node small,
+body.runtime-ide-body .runtime-infra-item small,
+body.runtime-ide-body .runtime-contract-row small,
+body.runtime-ide-body .runtime-module-catalog-item small {
+  color: rgba(202, 213, 236, 0.72) !important;
+  display: -webkit-box !important;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden !important;
+}
+
+body.runtime-ide-body .runtime-explorer-node strong,
+body.runtime-ide-body .runtime-infra-item strong,
+body.runtime-ide-body .runtime-contract-row strong,
+body.runtime-ide-body .runtime-module-catalog-item strong {
+  display: -webkit-box !important;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden !important;
+}
+
+body.runtime-ide-body #ide-node-list.runtime-ide-output.compact-output,
+body.runtime-ide-body #ide-infra-list.runtime-ide-output.compact-output,
+body.runtime-ide-body #ide-runtime-contract-map.runtime-ide-output.compact-output {
+  max-height: 220px !important;
+  min-height: 94px !important;
+  overflow: auto !important;
+}
+
+body.runtime-ide-body #ide-template-list.runtime-module-catalog {
+  max-height: 360px !important;
+  min-height: 240px !important;
+}
+
+body.runtime-ide-body .runtime-ide-bottom-dock {
+  display: grid !important;
+  gap: 12px !important;
+  max-height: none !important;
+  overflow: visible !important;
+  padding: 12px !important;
+}
+
+body.runtime-ide-body .runtime-dock-drawer {
+  background: rgba(10, 16, 35, 0.68);
+  border: 1px solid rgba(96, 165, 250, 0.18);
+  border-radius: 14px;
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+}
+
+body.runtime-ide-body .runtime-dock-drawer > summary {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  list-style: none;
+  min-height: 34px;
+  padding: 0 2px;
+}
+
+body.runtime-ide-body .runtime-dock-drawer > summary::-webkit-details-marker {
+  display: none;
+}
+
+body.runtime-ide-body .runtime-dock-drawer > summary::after {
+  background: rgba(15, 23, 42, 0.72);
+  border: 1px solid rgba(125, 211, 252, 0.24);
+  border-radius: 999px;
+  color: rgba(226, 242, 255, 0.82);
+  content: "Hide";
+  flex: 0 0 auto;
+  font-size: 0.58rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  padding: 4px 8px;
+  text-transform: uppercase;
+}
+
+body.runtime-ide-body .runtime-dock-drawer:not([open]) > summary::after {
+  content: "Show";
+}
+
+body.runtime-ide-body .runtime-dock-drawer > summary > span:first-child {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+body.runtime-ide-body .runtime-dock-drawer > summary strong {
+  color: #f2f7ff;
+  font-size: 0.9rem;
+  font-weight: 900;
+}
+
+body.runtime-ide-body .runtime-dock-drawer > summary small {
+  color: rgba(202, 213, 236, 0.68);
+  font-size: 0.62rem;
+  font-weight: 800;
+}
+
+body.runtime-ide-body .runtime-dock-drawer:not([open]) > :not(summary) {
+  display: none !important;
+}
+
+body.runtime-ide-body .runtime-node-inspector-drawer .runtime-ide-bottom-inspector {
+  display: grid !important;
+  gap: 10px !important;
+  grid-template-columns: minmax(300px, 0.9fr) minmax(0, 1.7fr) !important;
+  padding: 0 !important;
+}
+
+body.runtime-ide-body .runtime-runtime-panels-body {
+  display: grid;
+  gap: 12px;
+}
+
+body.runtime-ide-body .runtime-runtime-panels-drawer:not([open]) .runtime-runtime-panels-body {
+  display: none !important;
+}
+
+body.runtime-ide-body .runtime-runtime-panels-body .runtime-readiness-panel,
+body.runtime-ide-body .runtime-runtime-panels-body .runtime-ide-bottom-grid article,
+body.runtime-ide-body .runtime-runtime-panels-body .runtime-ide-bottom-grid.secondary article {
+  min-width: 0;
+}
+
+@media (max-width: 1320px) {
+  body.runtime-ide-body .runtime-ide-shell {
+    grid-template-columns: 250px minmax(0, 1fr) !important;
+  }
+
+  body.runtime-ide-body .runtime-ide-sidebar {
+    min-width: 250px !important;
+  }
+
+  body.runtime-ide-body .runtime-node-inspector-drawer .runtime-ide-bottom-inspector {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* v20260531 dock-visibility: closed dock drawers hide all descendant content, not just direct layout boxes. */
+body.runtime-ide-body .runtime-node-inspector-drawer:not([open]) .runtime-ide-bottom-inspector,
+body.runtime-ide-body .runtime-runtime-panels-drawer:not([open]) .runtime-runtime-panels-body {
+  display: none !important;
+  visibility: hidden !important;
+}
+
+/* v20260531 sidebar-oneline: keep section titles visible, remove stacked descriptions from left lists. */
+body.runtime-ide-body .runtime-ide-sidebar .panel-title-row,
+body.runtime-ide-body .runtime-ide-sidebar .runtime-ide-subtitle {
+  align-items: center !important;
+  display: flex !important;
+  gap: 8px !important;
+  justify-content: space-between !important;
+  margin: 10px 0 7px !important;
+  min-height: 28px !important;
+  overflow: visible !important;
+}
+
+body.runtime-ide-body .runtime-ide-sidebar .panel-title-row h2,
+body.runtime-ide-body .runtime-ide-sidebar .runtime-ide-subtitle h2 {
+  color: #f2f7ff !important;
+  display: block !important;
+  font-size: 0.88rem !important;
+  font-weight: 900 !important;
+  letter-spacing: 0.02em !important;
+  line-height: 1.1 !important;
+  margin: 0 !important;
+  overflow: visible !important;
+  text-transform: none !important;
+  white-space: nowrap !important;
+}
+
+body.runtime-ide-body .runtime-ide-sidebar .panel-title-row .hint,
+body.runtime-ide-body .runtime-ide-sidebar .runtime-ide-subtitle .hint {
+  display: none !important;
+}
+
+body.runtime-ide-body .runtime-explorer-node,
+body.runtime-ide-body .runtime-infra-item,
+body.runtime-ide-body .runtime-infra-models > div,
+body.runtime-ide-body .runtime-contract-summary,
+body.runtime-ide-body .runtime-contract-row,
+body.runtime-ide-body .runtime-module-catalog-item {
+  align-items: center !important;
+  min-height: 34px !important;
+  overflow: hidden !important;
+  padding: 7px 10px !important;
+}
+
+body.runtime-ide-body .runtime-explorer-node,
+body.runtime-ide-body .runtime-infra-item,
+body.runtime-ide-body .runtime-infra-models > div,
+body.runtime-ide-body .runtime-contract-row {
+  display: block !important;
+}
+
+body.runtime-ide-body .runtime-module-catalog-item {
+  display: grid !important;
+  gap: 8px !important;
+  grid-template-columns: 28px minmax(0, 1fr) !important;
+}
+
+body.runtime-ide-body .runtime-contract-summary {
+  display: grid !important;
+  gap: 8px !important;
+  grid-template-columns: auto minmax(0, 1fr) !important;
+}
+
+body.runtime-ide-body .runtime-contract-summary span {
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+body.runtime-ide-body .runtime-explorer-node strong,
+body.runtime-ide-body .runtime-infra-item strong,
+body.runtime-ide-body .runtime-infra-models strong,
+body.runtime-ide-body .runtime-contract-summary strong,
+body.runtime-ide-body .runtime-contract-row strong,
+body.runtime-ide-body .runtime-module-catalog-item strong {
+  display: block !important;
+  line-height: 1.15 !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  overflow: hidden !important;
+  overflow-wrap: normal !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+  word-break: normal !important;
+}
+
+body.runtime-ide-body .runtime-explorer-node small,
+body.runtime-ide-body .runtime-infra-item small,
+body.runtime-ide-body .runtime-infra-models small,
+body.runtime-ide-body .runtime-contract-summary small,
+body.runtime-ide-body .runtime-contract-row small,
+body.runtime-ide-body .runtime-module-catalog-item small {
+  display: none !important;
+}
+
+body.runtime-ide-body #ide-node-list.runtime-ide-output.compact-output,
+body.runtime-ide-body #ide-infra-list.runtime-ide-output.compact-output,
+body.runtime-ide-body #ide-runtime-contract-map.runtime-ide-output.compact-output {
+  max-height: 190px !important;
+  min-height: 82px !important;
+}
+
+body.runtime-ide-body #ide-template-list.runtime-module-catalog {
+  max-height: 340px !important;
+  min-height: 230px !important;
+}
+
+/* v20260531 contract-readable: shrink module library slightly and make Runtime Contract legible. */
+body.runtime-ide-body #ide-runtime-contract-map.runtime-ide-output.compact-output {
+  max-height: 250px !important;
+  min-height: 148px !important;
+  padding: 8px !important;
+}
+
+body.runtime-ide-body #ide-template-list.runtime-module-catalog {
+  max-height: 285px !important;
+  min-height: 180px !important;
+}
+
+body.runtime-ide-body #ide-runtime-contract-map .runtime-contract-summary,
+body.runtime-ide-body #ide-runtime-contract-map .runtime-contract-row {
+  border-color: rgba(125, 211, 252, 0.24) !important;
+  min-height: 36px !important;
+  padding: 8px 9px !important;
+}
+
+body.runtime-ide-body #ide-runtime-contract-map .runtime-contract-summary strong,
+body.runtime-ide-body #ide-runtime-contract-map .runtime-contract-row strong {
+  color: #f3fbff !important;
+  font-size: 0.76rem !important;
+  font-weight: 900 !important;
+  letter-spacing: 0.005em !important;
+}
+
+body.runtime-ide-body #ide-runtime-contract-map .runtime-contract-summary span,
+body.runtime-ide-body #ide-runtime-contract-map .runtime-contract-section-title {
+  color: rgba(211, 226, 247, 0.86) !important;
+  display: block !important;
+  font-size: 0.62rem !important;
+  font-weight: 950 !important;
+  letter-spacing: 0.07em !important;
+  line-height: 1.15 !important;
+  margin: 4px 1px 2px !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+body.runtime-ide-body #ide-runtime-contract-map .runtime-contract-chip-row {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  gap: 4px !important;
+  max-height: 54px !important;
+  overflow: auto !important;
+  padding: 1px 0 3px !important;
+}
+
+body.runtime-ide-body #ide-runtime-contract-map .runtime-contract-chip {
+  color: #e7f5ff !important;
+  font-size: 0.58rem !important;
+  font-weight: 900 !important;
+  line-height: 1.15 !important;
+  max-width: 100% !important;
+  padding: 3px 6px !important;
+}
+
+body.runtime-ide-body #ide-runtime-contract-map .runtime-status-row small {
+  color: rgba(211, 226, 247, 0.78) !important;
+  display: block !important;
+  font-size: 0.62rem !important;
+  line-height: 1.2 !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+/* v20260531 handlers-hide: make the top handler allowlist collapsible like other operator drawers. */
+body.runtime-ide-body .runtime-top-handlers-panel > summary {
+  cursor: pointer;
+}
+
+body.runtime-ide-body .runtime-top-handlers-panel > summary h2 {
+  color: #f2f7ff;
+  font-size: 0.78rem;
+  font-weight: 950;
+  margin: 0;
+}
+
+body.runtime-ide-body .runtime-top-handlers-panel > summary .hint {
+  color: rgba(202, 213, 236, 0.62);
+  font-size: 0.56rem;
+  font-weight: 800;
+}
+
+body.runtime-ide-body .runtime-top-handlers-panel:not([open]) #ide-handlers-output {
+  display: none !important;
+}
+
+/* v20260531 zoom-actions: keep graph zoom controls on one row in the requested order. */
+body.runtime-ide-body .runtime-ide-graph-workbench > .panel-title-row {
+  display: grid !important;
+  gap: 12px !important;
+  grid-template-columns: minmax(150px, 1fr) minmax(560px, auto) !important;
+}
+
+body.runtime-ide-body .runtime-ide-canvas-actions {
+  display: flex !important;
+  flex: 0 0 auto !important;
+  flex-wrap: nowrap !important;
+  gap: 6px !important;
+  justify-content: flex-end !important;
+  max-width: none !important;
+  min-width: 560px !important;
+  overflow: visible !important;
+  white-space: nowrap !important;
+}
+
+body.runtime-ide-body .runtime-ide-canvas-actions .btn {
+  min-width: 64px !important;
+  white-space: nowrap !important;
+}
+
+body.runtime-ide-body #ide-fit-graph-btn {
+  min-width: 82px !important;
+}
+
+body.runtime-ide-body .runtime-canvas-view-hint {
+  flex: 0 1 128px !important;
+}
+
+body.runtime-ide-body #ide-graph-id {
+  flex: 0 0 auto !important;
+}

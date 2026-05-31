@@ -1563,6 +1563,7 @@ async def get_state() -> dict[str, object]:
     snapshot = controller.snapshot()
     snapshot["system_resources"] = _system_resource_snapshot()
     snapshot["guardian_status"] = _guardian_status_payload(snapshot=snapshot)
+    snapshot["runtime_ide_contract"] = _runtime_ide_contract_payload(snapshot)
     return snapshot
 
 
@@ -1863,6 +1864,72 @@ def _graph_config_payload(graph_id: str = PRIMARY_RUNTIME_GRAPH_ID) -> dict[str,
     return config.model_dump(mode="json")
 
 
+def _runtime_ide_contract_payload(snapshot: dict[str, Any] | None = None) -> dict[str, object]:
+    """Expose the actual runtime graph/module/bridge contract consumed by Runtime IDE."""
+    snapshot = snapshot or {}
+    state = snapshot.get("state", {}) if isinstance(snapshot.get("state"), dict) else {}
+    run_metadata = state.get("run_metadata", {}) if isinstance(state.get("run_metadata"), dict) else {}
+    try:
+        config = _load_runtime_graph_config(PRIMARY_RUNTIME_GRAPH_ID)
+        graph_payload = config.model_dump(mode="json")
+        graph_metadata = graph_payload.get("metadata", {}) if isinstance(graph_payload.get("metadata"), dict) else {}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc), "graph_id": PRIMARY_RUNTIME_GRAPH_ID}
+
+    module_contracts: list[dict[str, object]] = []
+    for module_path in sorted(RUNTIME_MODULE_ROOT.glob("*/module.yaml")):
+        try:
+            item = _module_list_item(module_path)
+            module_payload = _module_config_payload(str(item.get("id") or module_path.parent.name))
+        except Exception as exc:
+            module_contracts.append({"module_id": module_path.parent.name, "error": str(exc), "path": str(module_path)})
+            continue
+        module = module_payload.get("module", {}) if isinstance(module_payload.get("module"), dict) else {}
+        metadata = module.get("metadata") if isinstance(module.get("metadata"), dict) else {}
+        module_contracts.append({
+            "module_id": str(module.get("id") or item.get("id") or module_path.parent.name),
+            "label": str(module.get("label") or item.get("label") or module_path.parent.name),
+            "handler": str(module.get("handler") or item.get("handler") or ""),
+            "category": item.get("category", _module_category(module)),
+            "llm_role": str(module.get("llm_role") or ""),
+            "tools": list(module.get("tools") or []),
+            "runtime_contract": module.get("runtime_contract", {}) if isinstance(module.get("runtime_contract"), dict) else {},
+            "device_bridge_contracts": module.get("device_bridge_contracts", []) if isinstance(module.get("device_bridge_contracts"), list) else [],
+            "output_contracts": module.get("output_contracts", []) if isinstance(module.get("output_contracts"), list) else [],
+            "io_contract": module.get("io_contract", {}) if isinstance(module.get("io_contract"), dict) else {},
+            "safety": module.get("safety", {}) if isinstance(module.get("safety"), dict) else {},
+            "source_path": str(metadata.get("python_source_path") or metadata.get("source_path") or ""),
+            "path": str(module_path),
+        })
+
+    supervisor_evidence_keys = [
+        "latest_mission_contract",
+        "latest_orchestration_plan",
+        "latest_orchestrator_parallel_checks",
+        "latest_orchestrator_followup",
+        "orchestrator_decision_register",
+        "latest_orchestrator_handoff",
+        "latest_loop_reflection",
+    ]
+    supervisor_evidence = {key: run_metadata.get(key) for key in supervisor_evidence_keys if key in run_metadata}
+    bridge_health = state.get("device_health", {}) if isinstance(state.get("device_health"), dict) else {}
+
+    return {
+        "ok": True,
+        "graph_id": graph_payload.get("id", PRIMARY_RUNTIME_GRAPH_ID),
+        "graph_version": graph_payload.get("version", ""),
+        "runtime_planes": graph_metadata.get("runtime_planes", []),
+        "device_bridges": graph_metadata.get("device_bridges", []),
+        "runtime_contract_map": graph_metadata.get("runtime_contract_map", {}),
+        "module_contracts": module_contracts,
+        "supervisor_evidence": supervisor_evidence,
+        "device_health": bridge_health,
+        "active_stage": state.get("stage", ""),
+        "run_id": snapshot.get("run_id") or state.get("run_id") or _current_run_id(),
+        "source_endpoints": ["/api/graphs/atr_closed_loop", "/api/modules", "/api/state", "/api/devices/state", "/api/guardian/status"],
+    }
+
+
 def _graph_config_digest(config: GraphConfig) -> str:
     """Return a stable digest for dry-run gating against the active graph payload."""
     payload = json.dumps(config.model_dump(mode="json"), ensure_ascii=True, sort_keys=True, separators=(",", ":"))
@@ -2060,6 +2127,10 @@ def _module_list_item(path: Path) -> dict[str, object]:
         "generated_adapter_approved": bool(metadata.get("generated_adapter_approved", False)),
         "generated_adapter_handler_id": metadata.get("generated_adapter_handler_id", ""),
         "generated_adapter_path": metadata.get("transformed_python_source_path") or metadata.get("transformed_source_path") or "",
+        "runtime_contract": module.get("runtime_contract", {}) if isinstance(module.get("runtime_contract"), dict) else {},
+        "device_bridge_contracts": module.get("device_bridge_contracts", []) if isinstance(module.get("device_bridge_contracts"), list) else [],
+        "output_contracts": module.get("output_contracts", []) if isinstance(module.get("output_contracts"), list) else [],
+        "io_contract": module.get("io_contract", {}) if isinstance(module.get("io_contract"), dict) else {},
     }
 
 
@@ -2303,6 +2374,11 @@ def _module_runtime_summary(module_id: str) -> dict[str, object]:
         "pre_execution_count": len(pre_execution),
         "internal_graph_count": len(internal_graph),
         "sequence": sequence,
+        "runtime_contract": module.get("runtime_contract", {}) if isinstance(module.get("runtime_contract"), dict) else {},
+        "device_bridge_contracts": module.get("device_bridge_contracts", []) if isinstance(module.get("device_bridge_contracts"), list) else [],
+        "output_contracts": module.get("output_contracts", []) if isinstance(module.get("output_contracts"), list) else [],
+        "io_contract": module.get("io_contract", {}) if isinstance(module.get("io_contract"), dict) else {},
+        "safety": module.get("safety", {}) if isinstance(module.get("safety"), dict) else {},
     }
 
 
@@ -3237,7 +3313,18 @@ def _device_state_payload() -> dict[str, object]:
         "status": resources.get("gpu", {}).get("status", "unknown") if isinstance(resources.get("gpu"), dict) else "unknown",
         "payload": resources.get("gpu", {}),
     })
-    return {"ok": True, "run_id": _current_run_id(), "devices": devices, "system_resources": resources}
+    try:
+        runtime_contract = _runtime_ide_contract_payload(snapshot)
+        bridge_contracts = runtime_contract.get("device_bridges", []) if isinstance(runtime_contract, dict) else []
+    except Exception:
+        bridge_contracts = []
+    return {
+        "ok": True,
+        "run_id": _current_run_id(),
+        "devices": devices,
+        "bridge_contracts": bridge_contracts,
+        "system_resources": resources,
+    }
 
 
 def _require_current_run(run_id: str) -> None:

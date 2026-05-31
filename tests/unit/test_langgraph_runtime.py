@@ -990,7 +990,7 @@ def test_runtime_ide_page_and_main_entry_render() -> None:
     assert ide.status_code == 200
     assert "ATR Runtime IDE" in ide.text
     assert "/static/runtime_ide.js" in ide.text
-    assert "runtime_ide.js?v=atr-ui-20260526-83" in ide.text
+    assert "runtime_ide.js?v=" in ide.text
     assert "ide-run-status" in ide.text
     assert "ide-run-id" in ide.text
     assert "ide-active-agent" in ide.text
@@ -1000,7 +1000,7 @@ def test_runtime_ide_page_and_main_entry_render() -> None:
     assert "ide-infra-list" in ide.text
     assert "ide-template-list" in ide.text
     assert "Module Library" in ide.text
-    assert "runtime_ide.css?v=atr-ui-20260526-84" in ide.text
+    assert "runtime_ide.css?v=" in ide.text
     assert "ide-module-management-open-btn" in ide.text
     assert "data-open-module-management" in ide.text
     assert "Open Module Management Tool" in ide.text

@@ -313,6 +313,19 @@ Module Designer converts uploaded Python files into ATR internal module artifact
 
 GUI/CUI cross-compatibility is file/API based. Runtime graph editing uses the same `/api/graphs` endpoints from the browser and `atr graphs` / `atr graph show|validate|compile|dry-run|gate|export-yaml|import-yaml|save-yaml|run`, so graph YAML edits, validation gates, dry-run gates, version history, and active graph launches are reflected after reload. Module management uses the same `/api/modules` endpoints from the GUI and `atr modules` / `atr module show|validate|dry-run|load|unload|versions|version|save-yaml|register-generated|create`, so module workspace load state, active module YAML, generated-adapter approval, validation/dry-run evidence, and version history also appear after reload without a separate import/export step. Current smoke evidence should include `atr graph validate atr_closed_loop`, `atr graph compile atr_closed_loop`, `atr graph dry-run atr_closed_loop`, `atr graph gate atr_closed_loop`, `atr module validate design`, `atr module dry-run design`, `atr module load design`, and `atr module unload design` against the running server.
 
+### Runtime Contract Overlay Rendering
+
+Runtime IDE renders two classes of graph content. Executable nodes and edges are compiled into the LangGraph `StateGraph`; non-executable runtime overlays describe real control planes and bridge boundaries without changing the one-stage-per-step execution contract. The supported non-executable edge types are `control_overlay`, `device_bridge`, `evidence_flow`, and `runtime_sidecar`. They are valid graph config because the validator/compiler explicitly exclude them from executable reachability and compilation, but the browser still draws them so operators can see which supervisor, safety gate, bridge, or evidence plane is involved in a node.
+
+The active closed-loop graph declares these runtime planes:
+
+- `orchestrator_supervisor`: `agent.orchestrator_agent` sidecar that exposes mission contract, orchestration plan, handoff packet, decision register, and loop reflection contracts.
+- `safety_gate_plane`: Guardian graph-wide gate that exposes safety/continue-stop decisions without replacing the executable Guardian stage.
+- `device_bridge_plane`: hardware/software boundary for PrusaLink, LeRobot/Pi0.5, Windows PyAutoGUI/UTM, FEniCSx/CAE, and camera/UTM evidence tools.
+- `memory_evidence_plane`: Knowledge/Graphify/BO evidence plane for experiment evidence, BO observations, and self-evolution proposals.
+
+`/api/state` includes `runtime_ide_contract` with `runtime_planes`, `device_bridges`, `module_contracts`, `supervisor_evidence`, and `device_health`. The IDE sidebar `Runtime Contract`, the `Device Status` panel, and the selected-node `Runtime Contract` inspector all read this payload. Route editing and readiness checks still use only `logical_transition` edges, so overlay lines cannot accidentally become executable routes. Double-clicking `Orchestrator Supervisor` opens `graphs/modules/orchestrator/module.yaml`, making supervisor internals inspectable like other agent modules.
+
 ### Verified Runtime IDE Evidence
 
 The current 2026-05-26 smoke set against `http://127.0.0.1:7860` passed the following checks:

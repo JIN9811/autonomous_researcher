@@ -148,6 +148,7 @@ LeRobot GUI route:
 Runtime IDE graph workspace:
 - Route: `/ide`.
 - The Runtime IDE graph canvas uses a fixed `Main System` tab for the active orchestration graph. The old visible graph dropdown and `Load Graph` button are intentionally hidden from the operator surface.
+- Runtime IDE graph canvas must show the actual backend runtime contract: executable stage nodes, non-executable Orchestrator/Guardian/device/evidence overlay planes, declared bridge contracts from graph metadata, and module contracts loaded from `graphs/modules/*/module.yaml`. Overlay edges are informational only; route editing and readiness checks remain bound to `logical_transition` edges.
 - Double-clicking an agent node opens that agent module as a browser-style internal graph tab beside `Main System`. Module tabs are closable; `Main System` is fixed.
 - Main graph edits update the graph JSON draft and are applied through `Validate`, `Dry Run`, and `Save Version`.
 - Module internal graph edits update `module.yaml` draft state. `Save Version` on a module tab routes to the module save API and changes the executable module step order/config used by the runtime.

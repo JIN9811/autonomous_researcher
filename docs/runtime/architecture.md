@@ -52,6 +52,8 @@ The executable graph is documented in `runtime/langgraph_runtime.md`.
 The runtime exposes graph/module configuration endpoints for the `/ide` Runtime IDE.
 Graph edits are validated, compiled, versioned, and only then activated. Module edits are limited to `graphs/modules/*/module.yaml` and must keep handlers inside the registered allowlist, which is generated from runtime control handlers plus all currently registered `AgentRegistry` entries.
 
+Runtime IDE is required to reflect the actual runtime contract, not an approximate concept map. The active graph `graphs/configs/atr_closed_loop.yaml` now includes non-executable control-plane nodes for `orchestrator_supervisor`, `safety_gate_plane`, `device_bridge_plane`, and `memory_evidence_plane`. `graphs.validator` and `graphs.compiler` exclude those nodes and their `control_overlay`, `device_bridge`, `evidence_flow`, and `runtime_sidecar` edges from executable LangGraph compilation, while `/ide` renders them as runtime overlays. `/api/state` also returns `runtime_ide_contract`, built from the active graph metadata plus every `graphs/modules/*/module.yaml`, so the IDE can show declared runtime planes, output contracts, module contracts, and device bridge boundaries from the same files used by the backend.
+
 
 
 ### Module Runtime Binding

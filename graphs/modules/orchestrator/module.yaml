@@ -1,0 +1,103 @@
+module:
+  id: orchestrator
+  label: Orchestrator Supervisor Module
+  handler: agent.orchestrator_agent
+  llm_role: orchestrator_supervisor
+  editable: true
+  safety:
+    live_requires_validation: true
+    dry_run_supported: true
+    requires_human_approval: false
+    guardian_stop_authority: false
+  tools: []
+  runtime_contract:
+    plane: orchestration_supervisor
+    authority: workflow_coordination
+    safety_authority: guardian_agent
+    direct_device_execution_allowed: false
+    handoff_protocol: handoff_packet.v1
+  output_contracts:
+  - operator_intent.v1
+  - experiment_contract.v1
+  - mission_contract.v1
+  - orchestration_plan.v1
+  - orchestrator_parallel_checks.v1
+  - orchestrator_followup.v1
+  - decision_register.v1
+  - handoff_packet.v1
+  - loop_reflection.v1
+  pre_execution:
+  - id: 01_receive_operator_intent
+    label: Receive operator intent and session memory
+    kind: pre_stage
+    emits:
+    - operator_intent.v1
+    handler: agent.orchestrator_agent
+  - id: 02_check_missing_required_values
+    label: Check required experiment inputs before execution trigger
+    kind: pre_stage
+    emits:
+    - missing_input_request.v1
+    handler: agent.orchestrator_agent
+  - id: 03_build_mission_contract
+    label: Build mission contract from accepted values
+    kind: pre_stage
+    emits:
+    - mission_contract.v1
+    handler: agent.orchestrator_agent
+  internal_graph:
+  - id: 01_intent_state_machine
+    label: Intent state machine
+    kind: internal_step
+    emits:
+    - operator_intent.v1
+  - id: 02_compile_orchestration_plan
+    label: Compile stage plan and handoff order
+    kind: internal_step
+    emits:
+    - orchestration_plan.v1
+  - id: 03_parallel_read_only_checks
+    label: Run parallel read-only checks
+    kind: internal_step
+    emits:
+    - orchestrator_parallel_checks.v1
+  - id: 04_build_context_pack
+    label: Build bounded context pack for next agent
+    kind: internal_step
+    emits:
+    - context_pack.v1
+  - id: 05_emit_handoff_packet
+    label: Emit handoff packet to active agent
+    kind: internal_step
+    emits:
+    - handoff_packet.v1
+  - id: 06_followup_opinion
+    label: Collect follow-up concerns after agent result
+    kind: internal_step
+    emits:
+    - orchestrator_followup.v1
+  - id: 07_decision_register
+    label: Record continue, ask, retry, or stop decision
+    kind: internal_step
+    emits:
+    - decision_register.v1
+  - id: 08_loop_reflection
+    label: Summarize loop reflection for Knowledge and BO
+    kind: internal_step
+    emits:
+    - loop_reflection.v1
+  - id: 09_translate_guardian_result
+    label: Translate Guardian gate result into next route
+    kind: internal_step
+    emits:
+    - route_decision.v1
+  io_contract:
+    input: Live chat message, OrchestratorState, session memory, graph stage state
+    output:
+    - mission_contract.v1
+    - orchestration_plan.v1
+    - handoff_packet.v1
+    - decision_register.v1
+  notes: The Orchestrator is a supervisor/control-plane module. It plans and hands
+    off work but does not directly execute device tools; Guardian remains the safety
+    authority.

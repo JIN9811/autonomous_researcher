@@ -103,6 +103,7 @@ const settingsBtn = document.getElementById("ide-settings-btn");
 const nodeSearchInput = document.getElementById("ide-node-search");
 const nodeListOutput = document.getElementById("ide-node-list");
 const infraListOutput = document.getElementById("ide-infra-list");
+const runtimeContractMapOutput = document.getElementById("ide-runtime-contract-map");
 const templateListOutput = document.getElementById("ide-template-list");
 const moduleManagementOpenBtn = document.getElementById("ide-module-management-open-btn");
 const moduleManagementInlineBtn = document.getElementById("ide-module-management-inline-btn");
@@ -120,6 +121,8 @@ const designerStatus = document.getElementById("ide-designer-status");
 const GRAPH_GRID = 16;
 const GRAPH_NODE_WIDTH = 184;
 const GRAPH_NODE_HEIGHT = 76;
+const GRAPH_NODE_COLLISION_GAP_X = 44;
+const GRAPH_NODE_COLLISION_GAP_Y = 34;
 const MODULE_GRAPH_COLUMN_GAP = 560;
 const MODULE_GRAPH_ROW_GAP = 256;
 const MODULE_GRAPH_START_X = 56;
@@ -127,7 +130,17 @@ const MODULE_GRAPH_PRE_Y = 64;
 const MODULE_GRAPH_INTERNAL_Y = 220;
 const MAIN_GRAPH_TAB_ID = "main-system";
 const MODULE_TAB_PREFIX = "module:";
+const DISPLAY_EDGE_TYPES = new Set(["logical_transition", "control_overlay", "device_bridge", "evidence_flow", "runtime_sidecar"]);
 const PORT_SIDES = ["top", "right", "bottom", "left"];
+const GRAPH_GEOMETRY = window.ATRRuntimeGraphGeometry;
+const EDGE_LEGEND_META = {
+  default_route: { label: "Default route", detail: "primary executable transition", swatchClass: "edge-default edge-type-logical-transition" },
+  candidate_route: { label: "Candidate route", detail: "conditional alternate transition", swatchClass: "edge-candidate edge-type-logical-transition" },
+  control_overlay: { label: "Guardian / control", detail: "graph-wide validation or control gate", swatchClass: "edge-type-control-overlay" },
+  device_bridge: { label: "Device bridge", detail: "hardware or bridge interaction", swatchClass: "edge-type-device-bridge" },
+  evidence_flow: { label: "Evidence flow", detail: "artifact, data, or result propagation", swatchClass: "edge-type-evidence-flow" },
+  runtime_sidecar: { label: "Runtime sidecar", detail: "support service or memory plane", swatchClass: "edge-type-runtime-sidecar" },
+};
 
 const ICON_MAP = {
   orchestrator: "/static/runtime_icons/orchestrator.svg",
@@ -185,6 +198,8 @@ let edgeConnectDraft = null;
 let edgeDrag = null;
 let edgeDragHoverNodeId = "";
 let nodeClickTimer = null;
+let graphLegendDrag = null;
+let graphLegendPositions = new Map();
 let activationEvidence = { validation: null, compile: null, dry_run: null, save: null, dirty: false, reason: "initial" };
 let modulePreflightEvidence = new Map();
 let liveGateSnapshot = { graph_id: "", gate_ok: false, has_record: false, dry_run_record: {}, checking: false };
@@ -519,13 +534,52 @@ function normalizeNodePositions(graph) {
       y: snapToGrid(source.y ?? fallback.y),
     };
   });
-  return graph;
+  return resolveNodeCollisions(graph);
 }
 
 function graphBounds(nodes) {
   const maxX = Math.max(...nodes.map((node, index) => (node.position?.x ?? defaultNodePosition(index).x) + GRAPH_NODE_WIDTH), GRAPH_NODE_WIDTH);
   const maxY = Math.max(...nodes.map((node, index) => (node.position?.y ?? defaultNodePosition(index).y) + GRAPH_NODE_HEIGHT), GRAPH_NODE_HEIGHT);
   return { width: maxX + 96, height: maxY + 96 };
+}
+
+function nodeCollisionRect(node = {}) {
+  const x = Number(node.position?.x || 0);
+  const y = Number(node.position?.y || 0);
+  return {
+    left: x,
+    top: y,
+    right: x + GRAPH_NODE_WIDTH + GRAPH_NODE_COLLISION_GAP_X,
+    bottom: y + GRAPH_NODE_HEIGHT + GRAPH_NODE_COLLISION_GAP_Y,
+  };
+}
+
+function nodeRectsCollide(a, b) {
+  return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+}
+
+function resolveNodeCollisions(graph) {
+  const nodes = Array.isArray(graph.nodes) ? graph.nodes : [];
+  if (nodes.length < 2) return graph;
+  const ordered = [...nodes].sort((a, b) => Number(a.position?.y || 0) - Number(b.position?.y || 0) || Number(a.position?.x || 0) - Number(b.position?.x || 0));
+  for (let pass = 0; pass < 5; pass += 1) {
+    let changed = false;
+    for (let index = 0; index < ordered.length; index += 1) {
+      const node = ordered[index];
+      for (let prevIndex = 0; prevIndex < index; prevIndex += 1) {
+        const previous = ordered[prevIndex];
+        if (!nodeRectsCollide(nodeCollisionRect(previous), nodeCollisionRect(node))) continue;
+        node.position = {
+          x: snapToGrid(Number(node.position?.x || 0)),
+          y: snapToGrid(Number(previous.position?.y || 0) + GRAPH_NODE_HEIGHT + GRAPH_NODE_COLLISION_GAP_Y),
+        };
+        changed = true;
+      }
+    }
+    ordered.sort((a, b) => Number(a.position?.y || 0) - Number(b.position?.y || 0) || Number(a.position?.x || 0) - Number(b.position?.x || 0));
+    if (!changed) break;
+  }
+  return graph;
 }
 
 function nodeStage(node) {
@@ -541,39 +595,52 @@ function nodeMapByStageOrId(nodes) {
   return map;
 }
 
-function inferPortPair(source, target) {
-  const sourceSides = PORT_SIDES || ["top", "right", "bottom", "left"];
-  const targetSides = PORT_SIDES || ["top", "right", "bottom", "left"];
-  const point = (node, side) => {
-    const x = Number(node?.position?.x || 0);
-    const y = Number(node?.position?.y || 0);
-    if (side === "left") return { x, y: y + GRAPH_NODE_HEIGHT / 2 };
-    if (side === "right") return { x: x + GRAPH_NODE_WIDTH, y: y + GRAPH_NODE_HEIGHT / 2 };
-    if (side === "top") return { x: x + GRAPH_NODE_WIDTH / 2, y };
-    if (side === "bottom") return { x: x + GRAPH_NODE_WIDTH / 2, y: y + GRAPH_NODE_HEIGHT };
-    return { x: x + GRAPH_NODE_WIDTH, y: y + GRAPH_NODE_HEIGHT / 2 };
-  };
-  let best = { sourceSide: "right", targetSide: "left", distance: Number.POSITIVE_INFINITY };
-  for (const sourceSide of sourceSides) {
-    const sourcePoint = point(source, sourceSide);
-    for (const targetSide of targetSides) {
-      const targetPoint = point(target, targetSide);
-      const distance = Math.hypot(targetPoint.x - sourcePoint.x, targetPoint.y - sourcePoint.y);
-      if (distance < best.distance) best = { sourceSide, targetSide, distance };
-    }
+function classToken(value, fallback = "item") {
+  return String(value || fallback).trim().toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "") || fallback;
+}
+
+function edgeRuntimeType(edge = {}) {
+  return String(edge.runtimeEdgeType || edge.metadata?.runtime_edge || "logical_transition").trim() || "logical_transition";
+}
+
+function nodeRuntimePlane(node = {}) {
+  return String(node.metadata?.plane || node.metadata?.runtime_node || node.kind || "runtime").trim();
+}
+
+function asArray(value) {
+  if (Array.isArray(value)) return value;
+  if (value === undefined || value === null || value === "") return [];
+  return [value];
+}
+
+function compactJson(value, fallback = "n/a") {
+  if (value === undefined || value === null || value === "") return fallback;
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value);
+  } catch (_error) {
+    return fallback;
   }
-  return { sourceSide: best.sourceSide, targetSide: best.targetSide };
+}
+
+function graphGeometryOptions() {
+  return {
+    nodeWidth: GRAPH_NODE_WIDTH,
+    nodeHeight: GRAPH_NODE_HEIGHT,
+    edgeSpacing: 14,
+    parallelSpacing: 26,
+    handlePercent: 0.28,
+    outwardOffset: 8,
+  };
+}
+
+function inferPortPair(source, target) {
+  return GRAPH_GEOMETRY.inferPorts(source, target, graphGeometryOptions());
 }
 
 
 function portPoint(node, side = "right") {
-  const x = Number(node?.position?.x || 0);
-  const y = Number(node?.position?.y || 0);
-  if (side === "left") return { x, y: y + GRAPH_NODE_HEIGHT / 2 };
-  if (side === "right") return { x: x + GRAPH_NODE_WIDTH, y: y + GRAPH_NODE_HEIGHT / 2 };
-  if (side === "top") return { x: x + GRAPH_NODE_WIDTH / 2, y };
-  if (side === "bottom") return { x: x + GRAPH_NODE_WIDTH / 2, y: y + GRAPH_NODE_HEIGHT };
-  return { x: x + GRAPH_NODE_WIDTH, y: y + GRAPH_NODE_HEIGHT / 2 };
+  return GRAPH_GEOMETRY.portPoint(node, side, 0, 0, graphGeometryOptions());
 }
 
 
@@ -586,6 +653,11 @@ function stageDisplayLabel(stage = "") {
 }
 
 function edgeDisplayLabel(edge = {}) {
+  const type = edgeRuntimeType(edge);
+  const metadata = edge.metadata || {};
+  if (type !== "logical_transition") {
+    return String(metadata.overlay_relation || metadata.bridge || metadata.condition || type).replace(/_/g, " ");
+  }
   const raw = String(edge.condition || "").trim();
   if (!raw || raw === "default" || raw === "continue" || raw === "always") return "default";
   if (raw.startsWith("next_stage:")) return `next:${raw.split(":", 2)[1] || edge.targetStage || "stage"}`;
@@ -595,9 +667,131 @@ function edgeDisplayLabel(edge = {}) {
 }
 
 function edgeTitle(edge = {}) {
-  const condition = String(edge.condition || "default").trim() || "default";
-  const kind = edge.isDefault ? "default" : "candidate";
+  const condition = String(edge.condition || edge.metadata?.condition || "default").trim() || "default";
+  const type = edgeRuntimeType(edge);
+  const kind = edge.isDefault ? "default" : type === "logical_transition" ? "candidate" : type;
   return `${kind} ${edge.sourceStage || edge.source?.id || "source"} -> ${edge.targetStage || edge.target?.id || "target"} · ${condition}`;
+}
+
+function edgeLegendKey(edge = {}) {
+  const type = edgeRuntimeType(edge);
+  if (type === "logical_transition") return edge.isDefault ? "default_route" : "candidate_route";
+  return EDGE_LEGEND_META[type] ? type : "";
+}
+
+function edgeLegendEntries(edges = []) {
+  const seen = new Set();
+  const entries = [];
+  for (const edge of edges) {
+    const key = edgeLegendKey(edge);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    const meta = EDGE_LEGEND_META[key];
+    entries.push({ key, ...meta });
+  }
+  return entries;
+}
+
+function graphLegendTabKey() {
+  return normalizeGraphTabId(activeGraphTabId || MAIN_GRAPH_TAB_ID);
+}
+
+function edgeLegendMarkup(edges = [], moduleGraph = false) {
+  const entries = edgeLegendEntries(edges);
+  if (!entries.length) return "";
+  const scope = moduleGraph ? "module internal" : "current graph";
+  return `
+    <aside class="runtime-ide-edge-legend" data-edge-legend="1" data-legend-scope="${escapeHtml(scope)}" aria-label="Visible edge legend">
+      <div class="runtime-ide-edge-legend-head" data-edge-legend-drag="1" title="Drag legend">
+        <strong>Legend</strong>
+        <small>${escapeHtml(scope)} · ${escapeHtml(entries.length)} line type${entries.length > 1 ? "s" : ""}</small>
+      </div>
+      <div class="runtime-ide-edge-legend-list">
+        ${entries.map((entry) => `
+          <div class="runtime-ide-edge-legend-row" data-edge-legend-key="${escapeHtml(entry.key)}">
+            <span class="runtime-ide-edge-legend-swatch ${escapeHtml(entry.swatchClass)}" aria-hidden="true"></span>
+            <span><strong>${escapeHtml(entry.label)}</strong><small>${escapeHtml(entry.detail)}</small></span>
+          </div>
+        `).join("")}
+      </div>
+    </aside>
+  `;
+}
+
+function clampGraphLegendPosition(position, legend) {
+  const margin = 12;
+  const width = Number(legend?.offsetWidth || 220);
+  const height = Number(legend?.offsetHeight || 120);
+  const maxLeft = Math.max(margin, Number(graphCanvas?.offsetWidth || graphCanvas?.clientWidth || width + margin * 2) - width - margin);
+  const maxTop = Math.max(margin, Number(graphCanvas?.offsetHeight || graphCanvas?.clientHeight || height + margin * 2) - height - margin);
+  return {
+    left: Math.max(margin, Math.min(maxLeft, Number(position?.left ?? margin))),
+    top: Math.max(margin, Math.min(maxTop, Number(position?.top ?? margin))),
+  };
+}
+
+function defaultGraphLegendPosition(legend) {
+  return clampGraphLegendPosition({
+    left: Number(graphCanvas?.offsetWidth || graphCanvas?.clientWidth || 0) - Number(legend?.offsetWidth || 232) - 14,
+    top: Number(graphCanvas?.offsetHeight || graphCanvas?.clientHeight || 580) - Number(legend?.offsetHeight || 168) - 14,
+  }, legend);
+}
+
+function applyGraphLegendPosition() {
+  const legend = graphCanvas?.querySelector?.("[data-edge-legend]");
+  if (!legend || !graphCanvas) return;
+  const key = graphLegendTabKey();
+  const stored = graphLegendPositions.get(key);
+  const viewportPosition = clampGraphLegendPosition(stored || defaultGraphLegendPosition(legend), legend);
+  if (stored) graphLegendPositions.set(key, viewportPosition);
+  legend.style.left = `${viewportPosition.left}px`;
+  legend.style.top = `${viewportPosition.top}px`;
+}
+
+function beginGraphLegendDrag(event) {
+  const legend = event.currentTarget?.closest?.("[data-edge-legend]");
+  if (!legend || !graphCanvas) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const key = graphLegendTabKey();
+  const canvasRect = graphCanvas.getBoundingClientRect();
+  const legendRect = legend.getBoundingClientRect();
+  const current = clampGraphLegendPosition({ left: legendRect.left - canvasRect.left, top: legendRect.top - canvasRect.top }, legend);
+  graphLegendDrag = {
+    key,
+    startX: event.clientX,
+    startY: event.clientY,
+    originLeft: current.left,
+    originTop: current.top,
+  };
+  graphLegendPositions.set(key, current);
+  legend.classList.add("dragging");
+  window.addEventListener("pointermove", dragGraphLegend);
+  window.addEventListener("pointerup", endGraphLegendDrag, { once: true });
+}
+
+function dragGraphLegend(event) {
+  if (!graphLegendDrag) return;
+  const legend = graphCanvas?.querySelector?.("[data-edge-legend]");
+  const next = clampGraphLegendPosition({
+    left: graphLegendDrag.originLeft + event.clientX - graphLegendDrag.startX,
+    top: graphLegendDrag.originTop + event.clientY - graphLegendDrag.startY,
+  }, legend);
+  graphLegendPositions.set(graphLegendDrag.key, next);
+  applyGraphLegendPosition();
+}
+
+function endGraphLegendDrag() {
+  window.removeEventListener("pointermove", dragGraphLegend);
+  graphCanvas?.querySelector?.("[data-edge-legend]")?.classList.remove("dragging");
+  graphLegendDrag = null;
+}
+
+function bindGraphLegendDrag() {
+  const handle = graphCanvas?.querySelector?.("[data-edge-legend-drag]");
+  if (!handle) return;
+  handle.addEventListener("pointerdown", beginGraphLegendDrag);
+  requestAnimationFrame(applyGraphLegendPosition);
 }
 
 function logicalGraphEdges(graph) {
@@ -608,17 +802,20 @@ function logicalGraphEdges(graph) {
   const seen = new Set();
   const pushEdge = (sourceStage, targetStage, source, target, metadata = {}, label = "", condition = "", sourceNodeId = "", targetNodeId = "") => {
     if (!source || !target) return;
-    const cleanCondition = String(condition || metadata.condition || metadata.transition_condition || "").trim();
+    const runtimeEdgeType = String(metadata.runtime_edge || (graph.metadata?.ide_tab_kind === "module" ? "logical_transition" : "logical_transition")).trim() || "logical_transition";
+    const rawCondition = String(condition || metadata.condition || metadata.transition_condition || metadata.overlay_relation || metadata.bridge || "").trim();
+    const cleanCondition = rawCondition || (runtimeEdgeType === "logical_transition" ? "" : runtimeEdgeType);
     const conditionDefaultLike = ["", "default", "continue", "always"].includes(cleanCondition || "");
     const metadataDefault = metadata.default_transition === true;
-    const isDefault = Boolean(transitions[sourceStage]) && transitions[sourceStage] === targetStage && (metadataDefault || conditionDefaultLike);
-    const displayCondition = cleanCondition || (isDefault ? "default" : "candidate");
-    const key = `${sourceNodeId || source.id}:${targetNodeId || target.id}:${sourceStage}->${targetStage}:${displayCondition}`;
+    const isDefault = runtimeEdgeType === "logical_transition" && Boolean(transitions[sourceStage]) && transitions[sourceStage] === targetStage && (metadataDefault || conditionDefaultLike);
+    const displayCondition = cleanCondition || (isDefault ? "default" : runtimeEdgeType === "logical_transition" ? "candidate" : runtimeEdgeType);
+    const key = `${sourceNodeId || source.id}:${targetNodeId || target.id}:${sourceStage}->${targetStage}:${runtimeEdgeType}:${displayCondition}`;
     if (seen.has(key)) return;
     seen.add(key);
     const inferred = inferPortPair(source, target);
     const autoPorts = metadata.auto_ports !== false && metadata.lock_ports !== true;
     edges.push({
+      key,
       sourceStage,
       targetStage,
       source,
@@ -626,6 +823,7 @@ function logicalGraphEdges(graph) {
       label,
       condition: displayCondition,
       isDefault,
+      runtimeEdgeType,
       sourceSide: autoPorts ? inferred.sourceSide : (metadata.source_port || metadata.source_side || inferred.sourceSide),
       targetSide: autoPorts ? inferred.targetSide : (metadata.target_port || metadata.target_side || inferred.targetSide),
       metadata,
@@ -635,12 +833,14 @@ function logicalGraphEdges(graph) {
   };
 
   for (const edge of Array.isArray(graph.edges) ? graph.edges : []) {
-    if (edge?.metadata?.runtime_edge !== "logical_transition" && graph.metadata?.ide_tab_kind !== "module") continue;
+    const runtimeEdgeType = String(edge?.metadata?.runtime_edge || "").trim();
+    if (graph.metadata?.ide_tab_kind !== "module" && !DISPLAY_EDGE_TYPES.has(runtimeEdgeType)) continue;
     const source = nodeByKey.get(edge.source);
     const target = nodeByKey.get(edge.target);
-    const sourceStage = edge.metadata?.from_stage || nodeStage(source);
-    const targetStage = edge.metadata?.to_stage || nodeStage(target);
-    pushEdge(sourceStage, targetStage, source, target, edge.metadata || {}, edge.label || "", edge.condition || edge.metadata?.condition || edge.metadata?.transition_condition || "", edge.source, edge.target);
+    const sourceStage = edge.metadata?.from_stage || nodeStage(source) || edge.source;
+    const targetStage = edge.metadata?.to_stage || nodeStage(target) || edge.target;
+    const edgeCondition = edge.condition || edge.metadata?.condition || edge.metadata?.transition_condition || edge.metadata?.overlay_relation || edge.metadata?.bridge || (runtimeEdgeType === "logical_transition" ? "" : runtimeEdgeType) || "";
+    pushEdge(sourceStage, targetStage, source, target, edge.metadata || {}, edge.label || "", edgeCondition, edge.source, edge.target);
   }
 
   for (const [sourceStage, targetStage] of Object.entries(transitions)) {
@@ -651,69 +851,24 @@ function logicalGraphEdges(graph) {
     pushEdge(sourceStage, targetStage, source, target, { default_transition: true, auto_ports: true }, `default transition: ${sourceStage} -> ${targetStage}`, "default");
   }
 
-  const groups = new Map();
-  for (const edge of edges) {
-    const groupKey = `${edge.source.id}->${edge.target.id}`;
-    if (!groups.has(groupKey)) groups.set(groupKey, []);
-    groups.get(groupKey).push(edge);
-  }
-  for (const group of groups.values()) {
-    group.forEach((edge, index) => {
-      edge.parallelIndex = index;
-      edge.parallelTotal = group.length;
-    });
-  }
-  return edges;
+  return GRAPH_GEOMETRY.assignOffsets(edges, graphGeometryOptions());
 }
 
-
-function offsetPointForParallel(point, edge, axis = "target") {
-  const total = Number(edge.parallelTotal || 1);
-  if (total <= 1) return point;
-  const index = Number(edge.parallelIndex || 0);
-  const offset = (index - (total - 1) / 2) * 18;
-  const sourcePoint = portPoint(edge.source, edge.sourceSide);
-  const targetPoint = portPoint(edge.target, edge.targetSide);
-  const dx = targetPoint.x - sourcePoint.x;
-  const dy = targetPoint.y - sourcePoint.y;
-  const length = Math.max(1, Math.hypot(dx, dy));
-  const nx = -dy / length;
-  const ny = dx / length;
-  return { x: point.x + nx * offset, y: point.y + ny * offset };
+function logicalTransitionEdges(graph) {
+  return logicalGraphEdges(graph).filter((edge) => edgeRuntimeType(edge) === "logical_transition");
 }
+
 
 function edgeControlPoints(edge) {
-  const rawSourcePoint = portPoint(edge.source, edge.sourceSide);
-  const rawTargetPoint = portPoint(edge.target, edge.targetSide);
-  const sourcePoint = offsetPointForParallel(rawSourcePoint, edge, "source");
-  const targetPoint = offsetPointForParallel(rawTargetPoint, edge, "target");
-  const horizontal = edge.sourceSide === "left" || edge.sourceSide === "right" || edge.targetSide === "left" || edge.targetSide === "right";
-  const dx = Math.abs(targetPoint.x - sourcePoint.x);
-  const dy = Math.abs(targetPoint.y - sourcePoint.y);
-  const bend = Math.max(54, Math.min(220, (horizontal ? dx : dy) / 2));
-  if (edge.sourceSide === "top" || edge.sourceSide === "bottom" || edge.targetSide === "top" || edge.targetSide === "bottom") {
-    const syBend = sourcePoint.y + (edge.sourceSide === "top" ? -bend : edge.sourceSide === "bottom" ? bend : 0);
-    const tyBend = targetPoint.y + (edge.targetSide === "top" ? -bend : edge.targetSide === "bottom" ? bend : 0);
-    return { sourcePoint, targetPoint, c1: { x: sourcePoint.x, y: syBend }, c2: { x: targetPoint.x, y: tyBend } };
-  }
-  const sxBend = sourcePoint.x + (edge.sourceSide === "left" ? -bend : bend);
-  const txBend = targetPoint.x + (edge.targetSide === "left" ? -bend : bend);
-  return { sourcePoint, targetPoint, c1: { x: sxBend, y: sourcePoint.y }, c2: { x: txBend, y: targetPoint.y } };
+  return GRAPH_GEOMETRY.controlPoints(edge, graphGeometryOptions());
 }
 
 function edgePath(edge) {
-  const { sourcePoint, targetPoint, c1, c2 } = edgeControlPoints(edge);
-  return `M ${sourcePoint.x} ${sourcePoint.y} C ${c1.x} ${c1.y}, ${c2.x} ${c2.y}, ${targetPoint.x} ${targetPoint.y}`;
+  return GRAPH_GEOMETRY.path(edge, graphGeometryOptions());
 }
 
 function edgeLabelPoint(edge) {
-  const { sourcePoint, targetPoint, c1, c2 } = edgeControlPoints(edge);
-  const t = 0.5;
-  const mt = 1 - t;
-  return {
-    x: mt ** 3 * sourcePoint.x + 3 * mt ** 2 * t * c1.x + 3 * mt * t ** 2 * c2.x + t ** 3 * targetPoint.x,
-    y: mt ** 3 * sourcePoint.y + 3 * mt ** 2 * t * c1.y + 3 * mt * t ** 2 * c2.y + t ** 3 * targetPoint.y,
-  };
+  return GRAPH_GEOMETRY.labelPoint(edge, graphGeometryOptions());
 }
 
 
@@ -864,9 +1019,8 @@ function renderGraphExplorer(graph = activeGraph) {
         const stage = node.stage || node.id;
         const stateClass = stage === activeRuntimeStage ? " active" : visitedRuntimeStages.has(stage) ? " visited" : "";
         return `
-          <button type="button" class="runtime-explorer-node${stateClass}" data-explorer-node="${escapeHtml(node.id)}">
+          <button type="button" class="runtime-explorer-node${stateClass}" data-explorer-node="${escapeHtml(node.id)}" title="${escapeHtml(stage)} · ${escapeHtml(node.handler || "no-handler")}">
             <strong>${escapeHtml(node.label || node.id)}</strong>
-            <small>${escapeHtml(stage)} · ${escapeHtml(node.handler || "no-handler")}</small>
           </button>
         `;
       }).join("")
@@ -900,11 +1054,10 @@ function renderModuleCatalog() {
         ${modules
           .sort((a, b) => String(a.label || a.id).localeCompare(String(b.label || b.id)))
           .map((module) => `
-            <button type="button" draggable="true" class="runtime-module-catalog-item" data-module-catalog-id="${escapeHtml(module.id)}">
+            <button type="button" draggable="true" class="runtime-module-catalog-item" data-module-catalog-id="${escapeHtml(module.id)}" title="${escapeHtml(module.handler || "runtime.step_complete")} · tools ${escapeHtml(module.tool_count || 0)}${module.pending_handler_registration ? " · registration pending" : ""}">
               ${runtimeNodeIconMarkup(moduleIconName(module))}
               <span>
                 <strong>${escapeHtml(module.label || module.id)}</strong>
-                <small>${escapeHtml(module.handler || "runtime.step_complete")} · tools ${escapeHtml(module.tool_count || 0)}${module.pending_handler_registration ? " · registration pending" : ""}</small>
               </span>
             </button>
           `)
@@ -1912,13 +2065,14 @@ function renderInfraList(snapshot = latestStateSnapshot) {
   const models = runtime.models || state.run_metadata?.models || {};
   const modelLines = Object.entries(models).slice(0, 4).map(([key, value]) => {
     const item = value || {};
-    return `<div><strong>${escapeHtml(key)}</strong><small>${escapeHtml(item.primary || "n/a")}</small></div>`;
+    return `<div title="${escapeHtml(item.primary || "n/a")}"><strong>${escapeHtml(key)}</strong></div>`;
   }).join("");
+  const bridgeDetail = (snapshot.runtime_ide_contract?.device_bridges || []).map((item) => item.id || item.label).filter(Boolean).join(" · ") || Object.entries(health).map(([k, v]) => `${k}:${v}`).join(" · ") || "n/a";
   infraListOutput.innerHTML = `
-    <div class="runtime-infra-item"><strong>Backend</strong><small>${escapeHtml(backend.label || backend.name || "n/a")}</small></div>
-    <div class="runtime-infra-item"><strong>MCP Tools</strong><small>ToolRegistry / agent context</small></div>
-    <div class="runtime-infra-item"><strong>Memory / Logs</strong><small>${escapeHtml(snapshot.logs?.run_dir || "n/a")}</small></div>
-    <div class="runtime-infra-item"><strong>Device Bridges</strong><small>${escapeHtml(Object.entries(health).map(([k, v]) => `${k}:${v}`).join(" · ") || "n/a")}</small></div>
+    <div class="runtime-infra-item" title="${escapeHtml(backend.label || backend.name || "n/a")}"><strong>Backend</strong></div>
+    <div class="runtime-infra-item" title="ToolRegistry / agent context"><strong>MCP Tools</strong></div>
+    <div class="runtime-infra-item" title="${escapeHtml(snapshot.logs?.run_dir || "n/a")}"><strong>Memory / Logs</strong></div>
+    <div class="runtime-infra-item" title="${escapeHtml(bridgeDetail)}"><strong>Device Bridges</strong></div>
     <div class="runtime-infra-models">${modelLines}</div>
   `;
 }
@@ -2635,7 +2789,7 @@ function routeInventoryMarkup(graph, source = "") {
   if (!source) return "";
   let outgoing = [];
   try {
-    outgoing = logicalGraphEdges(graph).filter((edge) => edge.sourceStage === source);
+    outgoing = logicalTransitionEdges(graph).filter((edge) => edge.sourceStage === source);
   } catch (_err) {
     outgoing = [];
   }
@@ -2772,7 +2926,7 @@ function runtimeIdeStateSnapshot() {
       active: item.id === activeGraphTabId,
     })),
     nodeCount: Array.isArray(activeGraph?.nodes) ? activeGraph.nodes.length : 0,
-    logicalRouteCount: logicalGraphEdges(activeGraph || {}).length,
+    logicalRouteCount: logicalTransitionEdges(activeGraph || {}).length,
   };
 }
 
@@ -3238,6 +3392,7 @@ function renderGraph(graph) {
     .map((edge, index) => {
       const activeClass = activeRuntimeEdge?.source === edge.sourceStage && activeRuntimeEdge?.target === edge.targetStage && (!activeRuntimeEdge.condition || activeRuntimeEdge.condition === edge.condition) ? " edge-active" : "";
       const defaultClass = edge.isDefault ? " edge-default" : " edge-candidate";
+      const typeClass = ` edge-type-${classToken(edgeRuntimeType(edge))}`;
       const moduleClass = moduleGraph ? " edge-module-flow" : "";
       const path = edgePath(edge);
       const labelPoint = edgeLabelPoint(edge);
@@ -3253,10 +3408,10 @@ function renderGraph(graph) {
       const edgeData = `data-edge-index="${index}" data-edge-source="${escapeHtml(edge.sourceStage)}" data-edge-target="${escapeHtml(edge.targetStage)}" data-edge-condition="${escapeHtml(edge.condition || "")}" data-edge-default="${edge.isDefault ? "true" : "false"}"`;
       return `
         <path class="runtime-ide-edge-hitbox" d="${path}" ${edgeData} />
-        <path class="runtime-ide-edge${activeClass}${defaultClass}${moduleClass}${simpleDefaultLabel ? " edge-simple-default" : ""}" d="${path}" ${edgeData}>
+        <path class="runtime-ide-edge${activeClass}${defaultClass}${typeClass}${moduleClass}${simpleDefaultLabel ? " edge-simple-default" : ""}" d="${path}" ${edgeData}>
           <title>${escapeHtml(edgeTitle(edge))}</title>
         </path>
-        ${showLabel ? `<g class="runtime-ide-edge-label${activeClass}${defaultClass}${moduleGraph ? " edge-module-flow" : ""}" ${edgeData}>
+        ${showLabel ? `<g class="runtime-ide-edge-label${activeClass}${defaultClass}${typeClass}${moduleGraph ? " edge-module-flow" : ""}" ${edgeData}>
           <title>${escapeHtml(edgeTitle(edge))}</title>
           <rect x="${labelPoint.x - labelWidth / 2}" y="${labelPoint.y - labelHeight / 2}" width="${labelWidth}" height="${labelHeight}" rx="9"></rect>
           <text x="${labelPoint.x}" y="${labelPoint.y + 4}">${escapeHtml(labelText)}</text>
@@ -3283,16 +3438,24 @@ function renderGraph(graph) {
           : node.handler;
       const routeBadge = outgoing.length > 1 ? `<em class="runtime-ide-node-route-count" title="${escapeHtml(outgoing.length)} outgoing runtime routes">${escapeHtml(outgoing.length)} routes</em>` : "";
       const readinessBadge = readinessIssue ? `<em class="runtime-node-readiness-badge ${escapeHtml(readinessIssue.level)}" title="${escapeHtml(runtimeReadinessIssueTitle(readinessIssue))}">${escapeHtml(runtimeReadinessIssueLabel(readinessIssue))}</em>` : "";
+      const runtimePlane = nodeRuntimePlane(node);
+      const nodeKindClass = ` kind-${classToken(node.kind || "runtime")}`;
+      const nodePlaneClass = ` plane-${classToken(runtimePlane)}`;
+      const nonExecutableBadge = node.metadata?.runtime_node ? `<em class="runtime-node-plane-badge" title="${escapeHtml(node.description || runtimePlane)}">${escapeHtml(node.metadata.runtime_node)}</em>` : "";
+      const outputCount = asArray(node.metadata?.outputs).length;
+      const outputBadge = outputCount ? `<em class="runtime-node-output-badge" title="${escapeHtml(asArray(node.metadata?.outputs).join(", "))}">${escapeHtml(outputCount)} out</em>` : "";
       const icon = node.metadata?.icon || node.kind || "node";
       const x = Number(node.position?.x || 0);
       const y = Number(node.position?.y || 0);
       const ports = PORT_SIDES.map((side) => `<span class="runtime-ide-port runtime-ide-port-${side}" data-port-node="${escapeHtml(node.id)}" data-port-stage="${escapeHtml(stage)}" data-port-side="${side}" title="${escapeHtml(stage)} ${side} port"></span>`).join("");
       return `
-        <button class="runtime-ide-node${stateClass}${selectedClass}${edgeActiveClass}${connectSourceClass}${readinessClass}" data-node-id="${escapeHtml(node.id)}" data-node-stage="${escapeHtml(stage)}" type="button" style="left:${x}px;top:${y}px;">
+        <button class="runtime-ide-node${stateClass}${selectedClass}${edgeActiveClass}${connectSourceClass}${readinessClass}${nodeKindClass}${nodePlaneClass}" data-node-id="${escapeHtml(node.id)}" data-node-stage="${escapeHtml(stage)}" type="button" style="left:${x}px;top:${y}px;">
           ${ports}
           ${runtimeNodeIconMarkup(icon)}
           ${routeBadge}
           ${readinessBadge}
+          ${nonExecutableBadge}
+          ${outputBadge}
           <span class="runtime-ide-node-copy">
             <strong>${escapeHtml(node.label || node.id)}</strong>
             <small>${escapeHtml(edge)}</small>
@@ -3316,8 +3479,10 @@ function renderGraph(graph) {
       </svg>
       ${nodeMarkup}
     </div>
+    ${edgeLegendMarkup(edges, moduleGraph)}
   `;
   graphCanvas.style.minHeight = `${Math.max(460, Math.min(680, bounds.height * graphZoom + 96))}px`;
+  bindGraphLegendDrag();
   updateCanvasViewHint(bounds);
   graphCanvas.querySelectorAll("[data-node-id]").forEach((el) => {
     const nodeId = el.getAttribute("data-node-id") || "";
@@ -4103,7 +4268,7 @@ function nodeRouteAudit(node, graph = activeGraph) {
   const stage = nodeStage(node);
   let routes = [];
   try {
-    routes = logicalGraphEdges(graph || {});
+    routes = logicalTransitionEdges(graph || {});
   } catch (_err) {
     routes = [];
   }
@@ -4294,6 +4459,53 @@ function bindNodeRouteAuditActions() {
   });
 }
 
+function contractListMarkup(title, values) {
+  const items = asArray(values).filter((item) => item !== undefined && item !== null && item !== "");
+  if (!items.length) return `<dt>${escapeHtml(title)}</dt><dd>not declared</dd>`;
+  return `<dt>${escapeHtml(title)}</dt><dd>${items.map((item) => `<span class="runtime-contract-chip">${escapeHtml(compactJson(item))}</span>`).join("")}</dd>`;
+}
+
+function nodeRuntimeContractMarkup(node, module) {
+  const meta = node?.metadata || {};
+  const runtimeContract = module?.runtime_contract && typeof module.runtime_contract === "object" ? module.runtime_contract : {};
+  const ioContract = module?.io_contract && typeof module.io_contract === "object" ? module.io_contract : {};
+  const moduleDeviceContracts = Array.isArray(module?.device_bridge_contracts) ? module.device_bridge_contracts : [];
+  const declaredBridgeRefs = asArray(meta.bridges);
+  const runtimeBridgeContracts = Array.isArray(latestStateSnapshot?.runtime_ide_contract?.device_bridges)
+    ? latestStateSnapshot.runtime_ide_contract.device_bridges
+    : [];
+  const graphBridgeContracts = Array.isArray(activeGraph?.metadata?.device_bridges) ? activeGraph.metadata.device_bridges : [];
+  const knownBridgeContracts = runtimeBridgeContracts.length ? runtimeBridgeContracts : graphBridgeContracts;
+  const resolvedBridgeContracts = declaredBridgeRefs.map((ref) => {
+    const cleanRef = String(ref || "").toLowerCase();
+    return knownBridgeContracts.find((bridge) => {
+      const id = String(bridge?.id || "").toLowerCase();
+      const label = String(bridge?.label || "").toLowerCase();
+      return id === cleanRef || label === cleanRef || id.includes(cleanRef.replace(/\s+/g, "_")) || label.includes(cleanRef);
+    }) || ref;
+  });
+  const deviceContracts = moduleDeviceContracts.length ? moduleDeviceContracts : resolvedBridgeContracts;
+  const outputContracts = Array.isArray(module?.output_contracts) ? module.output_contracts : asArray(meta.outputs);
+  const tools = Array.isArray(module?.tools) ? module.tools : [];
+  const hasContract = Object.keys(runtimeContract).length || Object.keys(ioContract).length || deviceContracts.length || outputContracts.length || tools.length || meta.runtime_node || meta.plane;
+  if (!hasContract) return "";
+  return `
+    <section class="runtime-node-inspector-card wide runtime-contract-card">
+      <h3>Runtime Contract</h3>
+      <dl>
+        <dt>Plane</dt><dd>${escapeHtml(meta.plane || runtimeContract.plane || node?.kind || "runtime")}</dd>
+        <dt>Runtime node</dt><dd>${escapeHtml(meta.runtime_node || "executable")}</dd>
+        <dt>Authority</dt><dd>${escapeHtml(runtimeContract.authority || runtimeContract.supervisor || "module handler")}</dd>
+        <dt>Live source</dt><dd>${escapeHtml(meta.live_source || runtimeContract.live_bridge_boundary || "configured handler")}</dd>
+        ${contractListMarkup("Output contracts", outputContracts)}
+        ${contractListMarkup("Tools", tools)}
+        ${contractListMarkup("Bridge contracts", deviceContracts)}
+        <dt>I/O</dt><dd>${escapeHtml(compactJson(ioContract, "not declared"))}</dd>
+      </dl>
+    </section>
+  `;
+}
+
 function renderNodeInspector() {
   const node = findNodeById(selectedNodeId);
   selectedNodeBadge.textContent = node?.id || "none";
@@ -4374,6 +4586,7 @@ function renderNodeInspector() {
         ${moduleTraceEventsForStage(stage, moduleId).length ? "" : `<div class="runtime-event-detail-empty">No module step events captured for this node yet.</div>`}
       </section>
       ${nodeRouteAuditMarkup(node, activeGraph)}
+      ${nodeRuntimeContractMarkup(node, module)}
       <section class="runtime-node-inspector-card">
         <h3>Config</h3>
         <dl>
@@ -4503,13 +4716,13 @@ function routeRepairTargetForStage(graph = activeGraph, stage = "") {
   const baselineDefault = baseline?.transitions?.[cleanStage] || "";
   if (baselineDefault && transitionTargetOptionExists(baselineDefault)) return baselineDefault;
   try {
-    const defaultEdge = logicalGraphEdges(baseline || {}).find((edge) => edge.sourceStage === cleanStage && edge.isDefault);
+    const defaultEdge = logicalTransitionEdges(baseline || {}).find((edge) => edge.sourceStage === cleanStage && edge.isDefault);
     if (defaultEdge?.targetStage && transitionTargetOptionExists(defaultEdge.targetStage)) return defaultEdge.targetStage;
   } catch (_err) {
     // Baseline may be unavailable while graph data is loading; fall through to draft candidates.
   }
   try {
-    const candidate = logicalGraphEdges(graph || {}).find((edge) => edge.sourceStage === cleanStage)?.targetStage || "";
+    const candidate = logicalTransitionEdges(graph || {}).find((edge) => edge.sourceStage === cleanStage)?.targetStage || "";
     if (candidate && transitionTargetOptionExists(candidate)) return candidate;
   } catch (_err) {
     return "";
@@ -6474,6 +6687,17 @@ function renderDeviceStatusPanel(snapshot = latestStateSnapshot) {
   const ram = resources.ram || {};
   const gpu = resources.gpu || {};
   const baseRows = Object.entries(health).map(([name, status]) => ({ name, status, detail: "device bridge" }));
+  const contractBridgeRows = Array.isArray(snapshot?.runtime_ide_contract?.device_bridges)
+    ? snapshot.runtime_ide_contract.device_bridges.map((bridge) => {
+        const id = String(bridge.id || bridge.label || "bridge");
+        const healthStatus = health[id] || health[id.replace(/_bridge$/, "")] || "configured";
+        return {
+          name: bridge.label || id,
+          status: healthStatus,
+          detail: `${bridge.workspace || "workspace n/a"} · ${asArray(bridge.tools).slice(0, 3).join(", ") || "contract"}`,
+        };
+      })
+    : [];
   const backendRows = [
     { name: "vLLM / backend", status: backend.active ? "ready" : "idle", detail: backend.label || backend.name || "not selected" },
     { name: "Ollama / NemoClaw", status: backend.name === "ollama" || backend.name === "nemoclaw" ? "ready" : "idle", detail: backend.name || "inactive" },
@@ -6487,7 +6711,7 @@ function renderDeviceStatusPanel(snapshot = latestStateSnapshot) {
         detail: `${item.name || "NVIDIA"} · ${formatGb(item.memory_used_gb)} / ${formatGb(item.memory_total_gb)} · util ${formatResourcePercent(item.utilization_percent)}`,
       }))
     : [];
-  const rows = [...baseRows, ...backendRows, ...gpuRows];
+  const rows = [...contractBridgeRows, ...baseRows, ...backendRows, ...gpuRows];
   deviceStatusOutput.innerHTML = rows.length
     ? rows.map((row) => `
         <div class="runtime-status-row ${statusBadgeClass(row.status)}">
@@ -6592,7 +6816,7 @@ function runtimeReadinessStatus(graph = activeGraph, snapshot = latestStateSnaps
   const moduleCatalogReady = availableModules.length > 0;
   let routes = [];
   try {
-    routes = logicalGraphEdges(draft);
+    routes = logicalTransitionEdges(draft);
   } catch (_err) {
     routes = [];
   }
@@ -6914,7 +7138,46 @@ function renderApprovalQueue(snapshot = latestStateSnapshot) {
   });
 }
 
+function renderRuntimeContractMap(snapshot = latestStateSnapshot) {
+  if (!runtimeContractMapOutput) return;
+  const contract = snapshot?.runtime_ide_contract || {};
+  if (!contract?.ok) {
+    runtimeContractMapOutput.innerHTML = `<div class="runtime-status-row warn"><span>contract</span><strong>unavailable</strong><small>${escapeHtml(contract?.error || "waiting for /api/state")}</small></div>`;
+    return;
+  }
+  const planes = Array.isArray(contract.runtime_planes) ? contract.runtime_planes : [];
+  const bridges = Array.isArray(contract.device_bridges) ? contract.device_bridges : [];
+  const modules = Array.isArray(contract.module_contracts) ? contract.module_contracts : [];
+  const moduleCounts = modules.reduce((acc, item) => {
+    const key = String(item.category || "runtime");
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {});
+  const planeMarkup = planes.slice(0, 5).map((plane) => `
+    <div class="runtime-contract-row" title="${escapeHtml(asArray(plane.contract).join(" · ") || plane.source || "contract")}">
+      <strong>${escapeHtml(plane.id || plane.node_id || "plane")}</strong>
+    </div>`).join("");
+  const bridgeMarkup = bridges.slice(0, 6).map((bridge) => {
+    const status = contract.device_health?.[bridge.id] || contract.device_health?.[String(bridge.id || "").replace(/_bridge$/, "")] || "configured";
+    return `
+      <div class="runtime-contract-row bridge" title="${escapeHtml(status)} · ${escapeHtml(asArray(bridge.tools).slice(0, 3).join(", "))}">
+        <strong>${escapeHtml(bridge.label || bridge.id || "bridge")}</strong>
+      </div>`;
+  }).join("");
+  runtimeContractMapOutput.innerHTML = `
+    <div class="runtime-contract-summary" title="version ${escapeHtml(contract.graph_version || "n/a")}">
+      <span>graph</span><strong>${escapeHtml(contract.graph_id || "n/a")}</strong>
+    </div>
+    <div class="runtime-contract-chip-row">${Object.entries(moduleCounts).map(([key, count]) => `<span class="runtime-contract-chip">${escapeHtml(key)}:${escapeHtml(count)}</span>`).join("")}</div>
+    <div class="runtime-contract-section-title">Runtime planes</div>
+    ${planeMarkup || `<div class="runtime-contract-row empty">No runtime planes declared.</div>`}
+    <div class="runtime-contract-section-title">Device bridges</div>
+    ${bridgeMarkup || `<div class="runtime-contract-row empty">No device bridge contracts declared.</div>`}
+  `;
+}
+
 function renderDashboardPanels(snapshot = latestStateSnapshot) {
+  renderRuntimeContractMap(snapshot);
   renderRuntimeReadinessPanel(snapshot);
   renderAgentStatusPanel(snapshot);
   renderDeviceStatusPanel(snapshot);
@@ -7176,6 +7439,7 @@ graphCanvas?.addEventListener("dragover", (event) => {
   }
 });
 graphCanvas?.addEventListener("drop", handleCanvasCatalogDrop);
+graphCanvas?.addEventListener("scroll", applyGraphLegendPosition);
 designerPythonFileInput?.addEventListener("change", () => fillDesignerFromFile(designerPythonFileInput.files?.[0]));
 designerCreateBtn?.addEventListener("click", () => createModuleFromDesigner().catch((err) => {
   setDesignerStatus(String(err), "error");

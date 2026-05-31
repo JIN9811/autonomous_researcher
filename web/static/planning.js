@@ -2847,7 +2847,7 @@ function agentSpecificReportProfile(report, status, agentLabel) {
       checklist: ["Confirm objective", "Check required variables", "Lock trigger phrase / operator approval"],
     },
     orchestrator: {
-      title: "Orchestration Supervisor / Follow-up Control",
+      title: "Orchestration Plan / Handoff Control",
       summary: "Shows mission contract, supervisor follow-up opinions, route decisions, handoff registry, and loop reflection for the active autonomous run.",
       rows: [
         ["current_stage", state.stage || "-"],
@@ -3005,7 +3005,7 @@ function agentSpecificReportProfile(report, status, agentLabel) {
       checklist: ["Ingest Analysis handoff", "Run LLM reasoning pass", "Score numeric acquisition", "Apply failure/constraint penalties", "Hand off next_design_request.v1"],
     },
     guardian: {
-      title: "Graph-Wide Guardian Safety Monitor",
+      title: "Safety Gate / Continue-Stop Decision",
       summary: "Shows graph-wide risk, gate timeline, blocked actions, approval interrupts, incidents, policy schema, and device/data integrity for the active run.",
       rows: [
         ["guardian_status", guardianStatus ? guardianStatus.status || "-" : "not_loaded"],

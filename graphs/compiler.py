@@ -26,6 +26,16 @@ from typing import Any
 
 from graphs.registry import HandlerRegistry
 from graphs.schema import GraphConfig
+
+
+NON_EXECUTABLE_EDGE_TYPES = {"logical_transition", "control_overlay", "device_bridge", "evidence_flow", "runtime_sidecar"}
+NON_EXECUTABLE_NODE_KINDS = {"sidecar", "control_plane", "bridge", "evidence_plane"}
+
+
+def _is_non_executable_node(node) -> bool:
+    """Return whether a graph node is an IDE/control-plane overlay rather than executable LangGraph work."""
+    marker = str(getattr(node, "metadata", {}).get("runtime_node") or getattr(node, "metadata", {}).get("ide_node") or "").strip().lower()
+    return getattr(node, "kind", "") in NON_EXECUTABLE_NODE_KINDS or marker in {"sidecar", "overlay", "bridge", "evidence", "ide_only"}
 from graphs.validator import validate_graph_config
 
 
@@ -61,7 +71,7 @@ class ATRLangGraphCompiler:
                 "label": edge.label,
             }
             for edge in self.config.edges
-            if edge.metadata.get("runtime_edge") != "logical_transition"
+            if edge.metadata.get("runtime_edge") not in NON_EXECUTABLE_EDGE_TYPES
         ]
         logical_edges = [
             {
@@ -101,6 +111,8 @@ class ATRLangGraphCompiler:
                     "stage": node.stage,
                     "module_id": node.module_id,
                     "kind": node.kind,
+                    "non_executable": _is_non_executable_node(node),
+                    "runtime_node": node.metadata.get("runtime_node", ""),
                 }
                 for node in self.config.nodes
             ],
@@ -125,14 +137,19 @@ class ATRLangGraphCompiler:
             ) from exc
 
         builder = StateGraph(dict)
+        executable_node_ids = {node.id for node in self.config.nodes if not _is_non_executable_node(node)}
         for node in self.config.nodes:
+            if node.id not in executable_node_ids:
+                continue
             builder.add_node(node.id, self.handlers.get(node.handler))
 
         builder.set_entry_point(self.config.entry_node)
 
         conditional_by_source: dict[str, dict[str, str]] = {}
         for edge in self.config.edges:
-            if edge.metadata.get("runtime_edge") == "logical_transition":
+            if edge.metadata.get("runtime_edge") in NON_EXECUTABLE_EDGE_TYPES:
+                continue
+            if edge.source not in executable_node_ids or edge.target not in executable_node_ids:
                 continue
             if edge.condition:
                 conditional_by_source.setdefault(edge.source, {})[edge.condition] = edge.target

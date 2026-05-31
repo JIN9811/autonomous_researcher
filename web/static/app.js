@@ -33,6 +33,8 @@ const levelFilterEl = document.getElementById("log-level-filter");
 const graphStageIndicatorEl = document.getElementById("graph-stage-indicator");
 const langGraphNodesEl = document.getElementById("langgraph-nodes");
 const langGraphCellsEl = document.getElementById("langgraph-cells");
+const langGraphShellEl = document.querySelector(".langgraph-shell");
+const runtimeMapLegendEl = document.getElementById("runtime-map-legend");
 const backendStatusDotEl = document.getElementById("backend-status-dot");
 const backendStatusLabelEl = document.getElementById("backend-status-label");
 const backendStatusDetailEl = document.getElementById("backend-status-detail");
@@ -216,6 +218,227 @@ const STAGE_ACTIVE_PATHS = {
 };
 
 const graphNodeMap = new Map(GRAPH_NODES.map((node) => [node.id, node]));
+const RUNTIME_MAP_EDGE_TYPES = new Set(["logical_transition", "control_overlay", "device_bridge", "evidence_flow", "runtime_sidecar"]);
+const RUNTIME_MAP_NODE_WIDTH = 184;
+const RUNTIME_MAP_NODE_HEIGHT = 76;
+const RUNTIME_MAP_EDGE_SPACING = 14;
+const RUNTIME_MAP_PARALLEL_SPACING = 26;
+const RUNTIME_MAP_GEOMETRY = window.ATRRuntimeGraphGeometry;
+let runtimeGraphConfig = null;
+let runtimeGraphNodeMap = new Map();
+let runtimeGraphEdges = [];
+let runtimeGraphBounds = { width: 0, height: 0 };
+let runtimeMapResizeObserver = null;
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll("\"", "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function runtimeMapClassToken(value, fallback = "item") {
+  return String(value || fallback).trim().toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "") || fallback;
+}
+
+function runtimeMapNodeStage(node = {}) {
+  if (node.id === "orchestrator_supervisor" || node.metadata?.plane === "orchestration_supervisor") {
+    return "orchestrator";
+  }
+  return String(node.stage || node.id || "").trim();
+}
+
+function runtimeMapEdgeType(edge = {}) {
+  return String(edge.runtimeEdgeType || edge.metadata?.runtime_edge || "logical_transition").trim() || "logical_transition";
+}
+
+function runtimeMapNodeLookup(nodes = []) {
+  const map = new Map();
+  for (const node of nodes) {
+    map.set(node.id, node);
+    const stage = runtimeMapNodeStage(node);
+    if (stage) map.set(stage, node);
+  }
+  return map;
+}
+
+function runtimeMapGeometryOptions() {
+  return {
+    nodeWidth: RUNTIME_MAP_NODE_WIDTH,
+    nodeHeight: RUNTIME_MAP_NODE_HEIGHT,
+    edgeSpacing: RUNTIME_MAP_EDGE_SPACING,
+    parallelSpacing: RUNTIME_MAP_PARALLEL_SPACING,
+    handlePercent: 0.28,
+    outwardOffset: 8,
+  };
+}
+
+function runtimeMapPortPoint(node, side = "right", alongOffset = 0, outwardOffset = 0) {
+  return RUNTIME_MAP_GEOMETRY.portPoint(node, side, alongOffset, outwardOffset, runtimeMapGeometryOptions());
+}
+
+function runtimeMapInferPorts(source, target) {
+  return RUNTIME_MAP_GEOMETRY.inferPorts(source, target, runtimeMapGeometryOptions());
+}
+
+function runtimeMapAssignEdgeOffsets(edges) {
+  return RUNTIME_MAP_GEOMETRY.assignOffsets(edges, runtimeMapGeometryOptions());
+}
+
+function runtimeMapEdgePath(edge) {
+  return RUNTIME_MAP_GEOMETRY.path(edge, runtimeMapGeometryOptions());
+}
+
+function runtimeMapEdges(graph = {}) {
+  const nodes = Array.isArray(graph.nodes) ? graph.nodes : [];
+  const lookup = runtimeMapNodeLookup(nodes);
+  const edges = [];
+  const seen = new Set();
+  for (const item of Array.isArray(graph.edges) ? graph.edges : []) {
+    const type = String(item?.metadata?.runtime_edge || "").trim();
+    if (!RUNTIME_MAP_EDGE_TYPES.has(type)) continue;
+    const source = lookup.get(item.source);
+    const target = lookup.get(item.target);
+    if (!source || !target) continue;
+    const sourceStage = item.metadata?.from_stage || runtimeMapNodeStage(source) || item.source;
+    const targetStage = item.metadata?.to_stage || runtimeMapNodeStage(target) || item.target;
+    const condition = String(item.condition || item.metadata?.condition || item.metadata?.transition_condition || item.metadata?.overlay_relation || item.metadata?.bridge || type).trim();
+    const key = `${item.source}->${item.target}:${type}:${condition}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const ports = runtimeMapInferPorts(source, target);
+    edges.push({
+      key,
+      source,
+      target,
+      sourceStage,
+      targetStage,
+      condition,
+      label: item.label || condition,
+      runtimeEdgeType: type,
+      sourceSide: ports.sourceSide,
+      targetSide: ports.targetSide,
+      metadata: item.metadata || {},
+    });
+  }
+  return runtimeMapAssignEdgeOffsets(edges);
+}
+
+function runtimeMapBounds(nodes = []) {
+  const maxX = Math.max(...nodes.map((node) => Number(node.position?.x || 0) + RUNTIME_MAP_NODE_WIDTH), RUNTIME_MAP_NODE_WIDTH);
+  const maxY = Math.max(...nodes.map((node) => Number(node.position?.y || 0) + RUNTIME_MAP_NODE_HEIGHT), RUNTIME_MAP_NODE_HEIGHT);
+  return { width: maxX + 96, height: maxY + 96 };
+}
+
+function runtimeMapEdgeLabel(edge = {}) {
+  const type = runtimeMapEdgeType(edge);
+  if (type === "logical_transition") return "route";
+  if (type === "control_overlay") return "guardian/control";
+  if (type === "device_bridge") return edge.metadata?.bridge || "bridge";
+  if (type === "evidence_flow") return "evidence";
+  if (type === "runtime_sidecar") return "sidecar";
+  return type;
+}
+
+const RUNTIME_MAP_LEGEND_LABELS = {
+  logical_transition: { title: "Route", detail: "main graph transition" },
+  control_overlay: { title: "Guardian", detail: "control / approval gate" },
+  device_bridge: { title: "Device", detail: "hardware bridge" },
+  evidence_flow: { title: "Evidence", detail: "log / memory flow" },
+  runtime_sidecar: { title: "Sidecar", detail: "runtime support plane" },
+};
+
+function renderRuntimeMapLegend(edges = runtimeGraphEdges) {
+  if (!runtimeMapLegendEl) return;
+  const types = Array.from(new Set((edges || []).map((edge) => runtimeMapEdgeType(edge)).filter(Boolean)));
+  const orderedTypes = ["logical_transition", "control_overlay", "device_bridge", "evidence_flow", "runtime_sidecar"].filter((type) => types.includes(type));
+  const fallbackTypes = orderedTypes.length ? orderedTypes : ["logical_transition", "control_overlay", "device_bridge", "evidence_flow"];
+  runtimeMapLegendEl.innerHTML = `
+    <div class="runtime-map-legend-head">
+      <strong>Legend</strong>
+      <span>${escapeHtml(String((edges || []).length))} edge(s)</span>
+    </div>
+    <div class="runtime-map-legend-list">
+      ${fallbackTypes.map((type) => {
+        const meta = RUNTIME_MAP_LEGEND_LABELS[type] || { title: type, detail: "runtime edge" };
+        return `
+          <div class="runtime-map-legend-row" title="${escapeHtml(meta.detail)}">
+            <span class="runtime-map-legend-line edge-type-${runtimeMapClassToken(type)}" aria-hidden="true"></span>
+            <span><strong>${escapeHtml(meta.title)}</strong><small>${escapeHtml(meta.detail)}</small></span>
+          </div>`;
+      }).join("")}
+    </div>
+  `;
+}
+
+function fitRuntimeGraphCanvas() {
+  if (!langGraphShellEl || !langGraphCellsEl || !langGraphNodesEl || !runtimeGraphBounds.width) return;
+  const availableWidth = Math.max(320, langGraphShellEl.clientWidth - 24);
+  const scale = Math.min(1, availableWidth / runtimeGraphBounds.width);
+  const fittedHeight = Math.ceil(runtimeGraphBounds.height * scale + 20);
+  for (const layer of [langGraphCellsEl, langGraphNodesEl]) {
+    layer.style.transformOrigin = "0 0";
+    layer.style.transform = `scale(${scale})`;
+  }
+  langGraphShellEl.style.height = `${Math.max(430, fittedHeight)}px`;
+  langGraphShellEl.style.minHeight = `${Math.max(430, fittedHeight)}px`;
+  langGraphShellEl.dataset.fitScale = String(scale.toFixed(3));
+}
+
+function renderRuntimeGraphCanvas(graph = runtimeGraphConfig) {
+  if (!langGraphShellEl || !langGraphNodesEl || !langGraphCellsEl || !graph) return false;
+  const normalizedGraph = RUNTIME_MAP_GEOMETRY.normalizeNodePositions(graph, { grid: 16 });
+  runtimeGraphConfig = normalizedGraph;
+  const nodes = Array.isArray(normalizedGraph.nodes) ? normalizedGraph.nodes : [];
+  runtimeGraphNodeMap = runtimeMapNodeLookup(nodes);
+  runtimeGraphEdges = runtimeMapEdges(normalizedGraph);
+  runtimeGraphBounds = runtimeMapBounds(nodes);
+  langGraphShellEl.classList.add("runtime-readonly-map");
+  langGraphCellsEl.style.width = `${runtimeGraphBounds.width}px`;
+  langGraphCellsEl.style.height = `${runtimeGraphBounds.height}px`;
+  langGraphNodesEl.style.width = `${runtimeGraphBounds.width}px`;
+  langGraphNodesEl.style.height = `${runtimeGraphBounds.height}px`;
+  const edgeMarkup = runtimeGraphEdges.map((edge) => {
+    const type = runtimeMapEdgeType(edge);
+    return `<path class="runtime-map-edge edge-type-${runtimeMapClassToken(type)}" data-edge="${escapeHtml(edge.key)}" d="${runtimeMapEdgePath(edge)}"><title>${escapeHtml(edge.sourceStage)} -&gt; ${escapeHtml(edge.targetStage)} · ${escapeHtml(runtimeMapEdgeLabel(edge))}</title></path>`;
+  }).join("");
+  langGraphCellsEl.innerHTML = `
+    <svg class="runtime-map-edge-svg" viewBox="0 0 ${runtimeGraphBounds.width} ${runtimeGraphBounds.height}" aria-hidden="true">
+      <defs>
+        <marker id="main-runtime-arrow" markerWidth="12" markerHeight="10" refX="9" refY="5" orient="auto" markerUnits="userSpaceOnUse" overflow="visible">
+          <path d="M0,0 L10,5 L0,10 L2.6,5 z" fill="context-stroke" stroke="none"></path>
+        </marker>
+      </defs>
+      ${edgeMarkup}
+    </svg>`;
+  renderRuntimeMapLegend(runtimeGraphEdges);
+  langGraphNodesEl.innerHTML = nodes.map((node) => {
+    const stage = runtimeMapNodeStage(node);
+    const kind = runtimeMapClassToken(node.kind || "runtime");
+    const runtimeNode = runtimeMapClassToken(node.metadata?.runtime_node || "executable");
+    const label = node.label || node.id;
+    const sub = node.metadata?.plane || node.handler || stage;
+    return `
+      <div class="graph-node runtime-map-node kind-${kind} runtime-${runtimeNode}" data-stage="${escapeHtml(stage)}" data-node-id="${escapeHtml(node.id)}" style="left:${Number(node.position?.x || 0)}px;top:${Number(node.position?.y || 0)}px;">
+        <span class="node-light"></span>
+        <span class="node-copy"><strong>${escapeHtml(label)}</strong><small>${escapeHtml(sub)}</small></span>
+      </div>`;
+  }).join("");
+  fitRuntimeGraphCanvas();
+  if (window.ResizeObserver && !runtimeMapResizeObserver) {
+    runtimeMapResizeObserver = new ResizeObserver(fitRuntimeGraphCanvas);
+    runtimeMapResizeObserver.observe(langGraphShellEl);
+  }
+  return true;
+}
+
+function runtimeMapConnectedEdgeKeys(stage) {
+  const clean = String(stage || "");
+  if (!runtimeGraphEdges.length) return new Set(STAGE_ACTIVE_PATHS[clean] || []);
+  return new Set(runtimeGraphEdges.filter((edge) => edge.sourceStage === clean || edge.targetStage === clean).map((edge) => edge.key));
+}
 
 async function postJson(url, body = {}) {
   const res = await fetch(url, {
@@ -330,10 +553,10 @@ function captureVisitedStage(state, isRunning = false) {
     visitedEdges = new Set(["controller->orchestrator"]);
   }
   const stage = String(state.stage || "idle");
-  if (graphNodeMap.has(stage)) {
+  if (runtimeGraphNodeMap.has(stage) || graphNodeMap.has(stage)) {
     visitedStages.add(stage);
   }
-  for (const edge of STAGE_ACTIVE_PATHS[stage] || []) {
+  for (const edge of runtimeMapConnectedEdgeKeys(stage)) {
     visitedEdges.add(edge);
   }
   if (isRunning) {
@@ -348,50 +571,21 @@ function captureVisitedStage(state, isRunning = false) {
   }
 }
 
-function initLangGraph() {
+async function initLangGraph() {
   if (!langGraphNodesEl || !langGraphCellsEl) return;
-
   langGraphNodesEl.innerHTML = "";
   langGraphCellsEl.innerHTML = "";
-
-  for (const [from, to] of GRAPH_EDGES) {
-    const src = graphNodeMap.get(from);
-    const dst = graphNodeMap.get(to);
-    if (!src || !dst) continue;
-    for (const seg of edgeSegments(src, dst)) {
-      const el = document.createElement("div");
-      el.className = `edge-segment edge-${seg.axis}`;
-      el.setAttribute("data-edge", `${from}->${to}`);
-      if (seg.axis === "horizontal") {
-        el.style.left = `${seg.x1}%`;
-        el.style.top = `${seg.y1}%`;
-        el.style.width = `${Math.max(0.2, seg.x2 - seg.x1)}%`;
-      } else {
-        el.style.left = `${seg.x1}%`;
-        el.style.top = `${seg.y1}%`;
-        el.style.height = `${Math.max(0.2, seg.y2 - seg.y1)}%`;
-      }
-      langGraphCellsEl.appendChild(el);
+  try {
+    const response = await fetch("/api/graphs/atr_closed_loop");
+    const payload = await response.json();
+    runtimeGraphConfig = payload.graph || null;
+    if (!runtimeGraphConfig || !renderRuntimeGraphCanvas(runtimeGraphConfig)) {
+      throw new Error("Runtime graph payload is empty");
     }
-  }
-
-  for (const node of GRAPH_NODES) {
-    const el = document.createElement("div");
-    el.className = "graph-node";
-    if (node.accent) {
-      el.classList.add(`node-${node.accent}`);
-    }
-    if (node.terminal) {
-      el.classList.add("node-terminal");
-    }
-    el.dataset.stage = node.id;
-    el.style.gridColumn = String(node.col);
-    el.style.gridRow = String(node.row);
-    el.innerHTML = `
-      <span class="node-light"></span>
-      <span class="node-label">${node.label}</span>
-    `;
-    langGraphNodesEl.appendChild(el);
+    renderLangGraph("idle", false);
+  } catch (err) {
+    langGraphShellEl?.classList.add("runtime-readonly-map", "runtime-map-error");
+    langGraphCellsEl.innerHTML = `<div class="runtime-map-load-error">Runtime graph load failed: ${escapeHtml(err.message || String(err))}</div>`;
   }
 }
 
@@ -444,7 +638,7 @@ function edgeSegments(src, dst) {
 function renderLangGraph(activeStage, isRunning = false) {
   if (!langGraphNodesEl || !langGraphCellsEl) return;
   const stage = String(activeStage || "idle");
-  const activeEdges = new Set(STAGE_ACTIVE_PATHS[stage] || []);
+  const activeEdges = runtimeMapConnectedEdgeKeys(stage);
 
   const nodeElements = langGraphNodesEl.querySelectorAll(".graph-node");
   nodeElements.forEach((el) => {
@@ -461,7 +655,7 @@ function renderLangGraph(activeStage, isRunning = false) {
     }
   });
 
-  const segments = langGraphCellsEl.querySelectorAll(".edge-segment");
+  const segments = langGraphCellsEl.querySelectorAll(".edge-segment, .runtime-map-edge");
   segments.forEach((seg) => {
     const edge = seg.getAttribute("data-edge") || "";
     seg.classList.remove("edge-active", "edge-visited");
@@ -954,7 +1148,7 @@ for (const button of modelUnloadButtons) {
 }
 
 async function bootstrap() {
-  initLangGraph();
+  await initLangGraph();
   await refreshState();
   await refreshModelStatuses();
   await refreshPrinterWorkspaceStatus();

@@ -15,8 +15,8 @@ graph:
       node.
     module_id: null
     position:
-      x: 32.0
-      y: 224.0
+      x: 48.0
+      y: 208.0
     metadata:
       icon: orchestrator
   - id: idle
@@ -27,8 +27,8 @@ graph:
     description: Starts one closed-loop cycle by entering the design stage.
     module_id: null
     position:
-      x: 336.0
-      y: 224.0
+      x: 48.0
+      y: 384.0
     metadata:
       icon: play
   - id: design
@@ -39,8 +39,8 @@ graph:
     description: ''
     module_id: modules/design
     position:
-      x: 672.0
-      y: 48.0
+      x: 368.0
+      y: 240.0
     metadata:
       icon: design_agent
   - id: specimen
@@ -51,8 +51,8 @@ graph:
     description: ''
     module_id: modules/specimen
     position:
-      x: 1008.0
-      y: 48.0
+      x: 672.0
+      y: 240.0
     metadata:
       icon: specimen_maker
   - id: vision
@@ -63,8 +63,8 @@ graph:
     description: ''
     module_id: modules/vision
     position:
-      x: 1344.0
-      y: 48.0
+      x: 992.0
+      y: 240.0
     metadata:
       icon: vision_agent
   - id: manipulation
@@ -75,8 +75,8 @@ graph:
     description: ''
     module_id: modules/manipulation
     position:
-      x: 1680.0
-      y: 48.0
+      x: 1296.0
+      y: 240.0
     metadata:
       icon: manipulation_agent
   - id: equipment
@@ -87,8 +87,8 @@ graph:
     description: ''
     module_id: modules/equipment
     position:
-      x: 2016.0
-      y: 48.0
+      x: 1616.0
+      y: 384.0
     metadata:
       icon: equipment_agent
   - id: analysis
@@ -99,8 +99,8 @@ graph:
     description: ''
     module_id: modules/analysis
     position:
-      x: 672.0
-      y: 384.0
+      x: 1296.0
+      y: 560.0
     metadata:
       icon: analysis_agent
   - id: knowledge
@@ -111,8 +111,8 @@ graph:
     description: ''
     module_id: modules/knowledge
     position:
-      x: 1008.0
-      y: 384.0
+      x: 992.0
+      y: 560.0
     metadata:
       icon: knowledge_agent
   - id: bo
@@ -123,8 +123,8 @@ graph:
     description: ''
     module_id: modules/bo
     position:
-      x: 1344.0
-      y: 384.0
+      x: 672.0
+      y: 560.0
     metadata:
       icon: bo_agent
   - id: guardian
@@ -135,8 +135,8 @@ graph:
     description: ''
     module_id: modules/guardian
     position:
-      x: 1680.0
-      y: 384.0
+      x: 368.0
+      y: 560.0
     metadata:
       icon: guardian_agent
   - id: complete
@@ -147,8 +147,8 @@ graph:
     description: ''
     module_id: null
     position:
-      x: 2016.0
-      y: 384.0
+      x: 48.0
+      y: 560.0
     metadata:
       icon: complete
   - id: error
@@ -159,8 +159,8 @@ graph:
     description: ''
     module_id: null
     position:
-      x: 2016.0
-      y: 640.0
+      x: 48.0
+      y: 736.0
     metadata:
       icon: error
   - id: step_complete
@@ -171,10 +171,92 @@ graph:
     description: ''
     module_id: null
     position:
-      x: 32.0
-      y: 640.0
+      x: 368.0
+      y: 736.0
     metadata:
       icon: artifact
+  - id: orchestrator_supervisor
+    label: Orchestrator Supervisor
+    handler: agent.orchestrator_agent
+    stage: null
+    kind: sidecar
+    description: Control-plane supervisor that builds mission contracts, orchestration
+      plans, and handoff packets for each executable stage.
+    module_id: modules/orchestrator
+    position:
+      x: 368.0
+      y: 48.0
+    metadata:
+      icon: orchestrator
+      runtime_node: sidecar
+      plane: orchestration_supervisor
+      outputs:
+      - mission_contract.v1
+      - orchestration_plan.v1
+      - handoff_packet.v1
+      - decision_register.v1
+      live_source: orchestrator.supervisor + controller planning_message
+  - id: safety_gate_plane
+    label: Guardian Safety Gate
+    handler: agent.guardian_agent
+    stage: null
+    kind: sidecar
+    description: Graph-wide safety/readiness gate that can hold, stop, retry, or allow
+      continuation.
+    module_id: modules/guardian
+    position:
+      x: 992.0
+      y: 48.0
+    metadata:
+      icon: guardian_agent
+      runtime_node: sidecar
+      plane: guardian_graphwide_gate
+      outputs:
+      - guardian_report.v1
+      - safety_decision.v1
+      live_source: /api/guardian/status
+  - id: device_bridge_plane
+    label: Device Bridge Plane
+    handler: runtime.step_complete
+    stage: null
+    kind: bridge
+    description: Hardware/software bridge boundary for printer, robot, UTM/Windows,
+      cameras, CAE, and FEniCSx tools.
+    module_id: null
+    position:
+      x: 1616.0
+      y: 48.0
+    metadata:
+      icon: device_bridges
+      runtime_node: bridge
+      plane: device_bridge_plane
+      bridges:
+      - prusa_bridge
+      - lerobot_bridge
+      - windows_pyautogui_bridge
+      - fenicsx_cae_bridge
+      - camera_utm_bridge
+      live_source: /api/devices/state
+  - id: memory_evidence_plane
+    label: Knowledge / Evidence Plane
+    handler: agent.knowledge_agent
+    stage: null
+    kind: evidence_plane
+    description: Persistent evidence memory and graph/RAG layer used by Knowledge
+      and BO candidate selection.
+    module_id: modules/knowledge
+    position:
+      x: 992.0
+      y: 736.0
+    metadata:
+      icon: knowledge_agent
+      runtime_node: evidence
+      plane: knowledge_memory_evolution
+      outputs:
+      - experiment_evidence.v1
+      - bo_observation.v1
+      - evolution_proposal.v1
+      live_source: memory/knowledge + optional Neo4j/Graphify
   edges:
   - source: dispatch
     target: idle
@@ -440,6 +522,235 @@ graph:
       transition_condition: guardian_decision:error
       default_transition: false
       auto_ports: true
+  - source: orchestrator_supervisor
+    target: design
+    condition: null
+    label: orchestrator supervisor context / handoff
+    metadata:
+      runtime_edge: control_overlay
+      overlay_relation: supervises_handoff
+      condition: handoff_packet.v1
+  - source: orchestrator_supervisor
+    target: specimen
+    condition: null
+    label: orchestrator supervisor context / handoff
+    metadata:
+      runtime_edge: control_overlay
+      overlay_relation: supervises_handoff
+      condition: handoff_packet.v1
+  - source: orchestrator_supervisor
+    target: vision
+    condition: null
+    label: orchestrator supervisor context / handoff
+    metadata:
+      runtime_edge: control_overlay
+      overlay_relation: supervises_handoff
+      condition: handoff_packet.v1
+  - source: orchestrator_supervisor
+    target: manipulation
+    condition: null
+    label: orchestrator supervisor context / handoff
+    metadata:
+      runtime_edge: control_overlay
+      overlay_relation: supervises_handoff
+      condition: handoff_packet.v1
+  - source: orchestrator_supervisor
+    target: equipment
+    condition: null
+    label: orchestrator supervisor context / handoff
+    metadata:
+      runtime_edge: control_overlay
+      overlay_relation: supervises_handoff
+      condition: handoff_packet.v1
+  - source: orchestrator_supervisor
+    target: analysis
+    condition: null
+    label: orchestrator supervisor context / handoff
+    metadata:
+      runtime_edge: control_overlay
+      overlay_relation: supervises_handoff
+      condition: handoff_packet.v1
+  - source: orchestrator_supervisor
+    target: knowledge
+    condition: null
+    label: orchestrator supervisor context / handoff
+    metadata:
+      runtime_edge: control_overlay
+      overlay_relation: supervises_handoff
+      condition: handoff_packet.v1
+  - source: orchestrator_supervisor
+    target: bo
+    condition: null
+    label: orchestrator supervisor context / handoff
+    metadata:
+      runtime_edge: control_overlay
+      overlay_relation: supervises_handoff
+      condition: handoff_packet.v1
+  - source: orchestrator_supervisor
+    target: guardian
+    condition: null
+    label: orchestrator supervisor context / handoff
+    metadata:
+      runtime_edge: control_overlay
+      overlay_relation: supervises_handoff
+      condition: handoff_packet.v1
+  - source: safety_gate_plane
+    target: design
+    condition: null
+    label: Guardian readiness gate
+    metadata:
+      runtime_edge: control_overlay
+      overlay_relation: pre_post_guardian_gate
+      condition: safety_decision.v1
+  - source: safety_gate_plane
+    target: specimen
+    condition: null
+    label: Guardian readiness gate
+    metadata:
+      runtime_edge: control_overlay
+      overlay_relation: pre_post_guardian_gate
+      condition: safety_decision.v1
+  - source: safety_gate_plane
+    target: vision
+    condition: null
+    label: Guardian readiness gate
+    metadata:
+      runtime_edge: control_overlay
+      overlay_relation: pre_post_guardian_gate
+      condition: safety_decision.v1
+  - source: safety_gate_plane
+    target: manipulation
+    condition: null
+    label: Guardian readiness gate
+    metadata:
+      runtime_edge: control_overlay
+      overlay_relation: pre_post_guardian_gate
+      condition: safety_decision.v1
+  - source: safety_gate_plane
+    target: equipment
+    condition: null
+    label: Guardian readiness gate
+    metadata:
+      runtime_edge: control_overlay
+      overlay_relation: pre_post_guardian_gate
+      condition: safety_decision.v1
+  - source: safety_gate_plane
+    target: analysis
+    condition: null
+    label: Guardian readiness gate
+    metadata:
+      runtime_edge: control_overlay
+      overlay_relation: pre_post_guardian_gate
+      condition: safety_decision.v1
+  - source: safety_gate_plane
+    target: knowledge
+    condition: null
+    label: Guardian readiness gate
+    metadata:
+      runtime_edge: control_overlay
+      overlay_relation: pre_post_guardian_gate
+      condition: safety_decision.v1
+  - source: safety_gate_plane
+    target: bo
+    condition: null
+    label: Guardian readiness gate
+    metadata:
+      runtime_edge: control_overlay
+      overlay_relation: pre_post_guardian_gate
+      condition: safety_decision.v1
+  - source: device_bridge_plane
+    target: specimen
+    condition: null
+    label: prusa_bridge boundary
+    metadata:
+      runtime_edge: device_bridge
+      overlay_relation: device_tool_boundary
+      bridge: prusa_bridge
+      condition: tool_call_bridge_contract
+  - source: device_bridge_plane
+    target: vision
+    condition: null
+    label: camera_bridge boundary
+    metadata:
+      runtime_edge: device_bridge
+      overlay_relation: device_tool_boundary
+      bridge: camera_bridge
+      condition: tool_call_bridge_contract
+  - source: device_bridge_plane
+    target: manipulation
+    condition: null
+    label: lerobot_bridge boundary
+    metadata:
+      runtime_edge: device_bridge
+      overlay_relation: device_tool_boundary
+      bridge: lerobot_bridge
+      condition: tool_call_bridge_contract
+  - source: device_bridge_plane
+    target: equipment
+    condition: null
+    label: windows_pyautogui_bridge boundary
+    metadata:
+      runtime_edge: device_bridge
+      overlay_relation: device_tool_boundary
+      bridge: windows_pyautogui_bridge
+      condition: tool_call_bridge_contract
+  - source: device_bridge_plane
+    target: analysis
+    condition: null
+    label: fenicsx_cae_utm_bridge boundary
+    metadata:
+      runtime_edge: device_bridge
+      overlay_relation: device_tool_boundary
+      bridge: fenicsx_cae_utm_bridge
+      condition: tool_call_bridge_contract
+  - source: analysis
+    target: memory_evidence_plane
+    condition: null
+    label: analysis evidence write
+    metadata:
+      runtime_edge: evidence_flow
+      overlay_relation: evidence_memory_flow
+      condition: validated_evidence
+  - source: knowledge
+    target: memory_evidence_plane
+    condition: null
+    label: knowledge memory write
+    metadata:
+      runtime_edge: evidence_flow
+      overlay_relation: evidence_memory_flow
+      condition: validated_evidence
+  - source: memory_evidence_plane
+    target: bo
+    condition: null
+    label: BO reads evidence table
+    metadata:
+      runtime_edge: evidence_flow
+      overlay_relation: evidence_memory_flow
+      condition: validated_evidence
+  - source: memory_evidence_plane
+    target: design
+    condition: null
+    label: Design reads prior loop evidence
+    metadata:
+      runtime_edge: evidence_flow
+      overlay_relation: evidence_memory_flow
+      condition: validated_evidence
+  - source: bo
+    target: orchestrator_supervisor
+    condition: null
+    label: BO candidate returned to supervisor
+    metadata:
+      runtime_edge: runtime_sidecar
+      overlay_relation: next_candidate_control
+      condition: candidate_handoff.v1
+  - source: guardian
+    target: orchestrator_supervisor
+    condition: null
+    label: Guardian route decision returned to supervisor
+    metadata:
+      runtime_edge: runtime_sidecar
+      overlay_relation: route_decision_control
+      condition: guardian_decision.v1
   stage_dispatch:
     idle: idle
     design: design
@@ -477,3 +788,89 @@ graph:
     safety:
       guardian_required: true
       live_device_dry_run_required_before_execution: true
+    runtime_planes:
+    - id: orchestration_supervisor
+      node_id: orchestrator_supervisor
+      source: agents/orchestrator_agent.py + orchestrator/supervisor.py + app/controller.py
+      contract:
+      - mission_contract.v1
+      - orchestration_plan.v1
+      - handoff_packet.v1
+      - decision_register.v1
+    - id: guardian_graphwide_gate
+      node_id: safety_gate_plane
+      source: policies/guardian_gate.py + agents/guardian_agent.py
+      contract:
+      - guardian_report.v1
+      - safety_decision.v1
+    - id: device_bridge_plane
+      node_id: device_bridge_plane
+      source: device_bridges/* + mcp_tools/*
+      contract:
+      - printer.prepare
+      - lerobot.rollout.start
+      - equipment.pyautogui.run
+      - fenicsx.run_linear_elasticity
+      - cae.run_static_analysis
+    - id: knowledge_memory_evolution
+      node_id: memory_evidence_plane
+      source: knowledge/* + self_evolution/* + memory/knowledge
+      contract:
+      - experiment_evidence.v1
+      - bo_observation.v1
+      - evolution_proposal.v1
+    device_bridges:
+    - id: prusa_bridge
+      label: Prusa MK4S / PrusaLink
+      workspace: /printer
+      tools:
+      - printer.prepare
+      config: memory/prusa_connection.json + memory/prusa_print_profile.json
+      live_boundary: upload/start/status/ejection through PrusaLink and PrusaSlicer
+        bridge
+    - id: lerobot_bridge
+      label: LeRobot / Pi0.5 Rollout
+      workspace: /lerobot
+      tools:
+      - lerobot.teleoperate.start
+      - lerobot.record.start
+      - lerobot.rollout.start
+      - lerobot.camera.test
+      config: memory/lerobot/profiles
+      live_boundary: robot policy process and camera capture via LeRobot bridge
+    - id: windows_pyautogui_bridge
+      label: Windows PyAutoGUI / UTM Bridge
+      workspace: /windows-equipment
+      tools:
+      - equipment.pyautogui.health
+      - equipment.pyautogui.run
+      - equipment.pyautogui.screenshot
+      config: memory/windows_pyautogui_connection.json
+      live_boundary: Windows host macro execution with token-gated bridge server
+    - id: fenicsx_cae_bridge
+      label: FEniCSx / CAE Bridge
+      workspace: /cae
+      tools:
+      - fenicsx.health
+      - fenicsx.run_linear_elasticity
+      - cae.run_static_analysis
+      config: memory/cae_workspace_settings.json
+      live_boundary: simulation subprocess/container bridge with artifact outputs
+    - id: camera_utm_bridge
+      label: Camera / UTM Evidence Tools
+      workspace: /lerobot
+      tools:
+      - lerobot.camera.test
+      - vision.equipment_cross_check
+      - utm.run_protocol
+      config: memory/lerobot + equipment profiles
+      live_boundary: visual verification and UTM result artifact handoff
+    runtime_contract_map:
+      actual_runtime_source:
+      - graphs/configs/atr_closed_loop.yaml
+      - graphs/modules/*/module.yaml
+      - /api/state
+      - /api/devices/state
+      - /api/guardian/status
+      ide_rule: Runtime IDE must render executable stages, non-executable control
+        planes, bridge boundaries, and evidence flow from this contract.

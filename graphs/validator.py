@@ -23,6 +23,22 @@ from __future__ import annotations
 from graphs.schema import GraphConfig, GraphEdge, GraphNode
 
 
+NON_EXECUTABLE_EDGE_TYPES = {
+    "logical_transition",
+    "control_overlay",
+    "device_bridge",
+    "evidence_flow",
+    "runtime_sidecar",
+}
+NON_EXECUTABLE_NODE_KINDS = {"sidecar", "control_plane", "bridge", "evidence_plane"}
+
+
+def _is_non_executable_node(node: GraphNode) -> bool:
+    """Return whether a node is a Runtime IDE/control-plane overlay, not a LangGraph node."""
+    marker = str(node.metadata.get("runtime_node") or node.metadata.get("ide_node") or "").strip().lower()
+    return node.kind in NON_EXECUTABLE_NODE_KINDS or marker in {"sidecar", "overlay", "bridge", "evidence", "ide_only"}
+
+
 def validate_graph_config(
     config: GraphConfig,
     *,
@@ -45,6 +61,8 @@ def validate_graph_config(
             errors.append(f"finish node is not defined as a node: {finish_node}")
 
     for node in config.nodes:
+        if _is_non_executable_node(node):
+            continue
         if node.handler not in registered_handlers:
             errors.append(f"node={node.id} references unregistered handler={node.handler}")
         if registered_modules is not None and node.module_id:
@@ -111,6 +129,8 @@ def _validate_stage_dispatch_contract(config: GraphConfig, node_ids: set[str]) -
     for node in config.nodes:
         if node.stage and node.stage not in config.stage_dispatch:
             errors.append(f"node={node.id} declares stage={node.stage} but stage is not in stage_dispatch")
+        if _is_non_executable_node(node):
+            continue
         if node.kind == "agent":
             if not node.stage:
                 errors.append(f"agent node={node.id} must declare a stage")
@@ -125,8 +145,8 @@ def _validate_stage_dispatch_contract(config: GraphConfig, node_ids: set[str]) -
 
 
 def _runtime_edges(config: GraphConfig) -> list[GraphEdge]:
-    """Return executable LangGraph edges, excluding visual/logical transition edges."""
-    return [edge for edge in config.edges if edge.metadata.get("runtime_edge") != "logical_transition"]
+    """Return executable LangGraph edges, excluding visual/logical/overlay transition edges."""
+    return [edge for edge in config.edges if edge.metadata.get("runtime_edge") not in NON_EXECUTABLE_EDGE_TYPES]
 
 
 def _validate_dispatch_runtime_edges(config: GraphConfig) -> list[str]:
@@ -233,9 +253,12 @@ def _validate_reachability(config: GraphConfig, node_ids: set[str]) -> list[str]
     """Ensure executable graph nodes are reachable from the entry node."""
     if config.entry_node not in node_ids:
         return []
-    adjacency: dict[str, set[str]] = {node_id: set() for node_id in node_ids}
+    non_executable_nodes = {node.id for node in config.nodes if _is_non_executable_node(node)}
+    adjacency: dict[str, set[str]] = {node_id: set() for node_id in node_ids - non_executable_nodes}
     for edge in config.edges:
-        if edge.metadata.get("runtime_edge") == "logical_transition":
+        if edge.metadata.get("runtime_edge") in NON_EXECUTABLE_EDGE_TYPES:
+            continue
+        if edge.source in non_executable_nodes or edge.target in non_executable_nodes:
             continue
         if edge.source in node_ids and edge.target in node_ids:
             adjacency.setdefault(edge.source, set()).add(edge.target)
@@ -248,7 +271,7 @@ def _validate_reachability(config: GraphConfig, node_ids: set[str]) -> list[str]
         reachable.add(current)
         stack.extend(sorted(adjacency.get(current, set()) - reachable))
     ignored = set(config.finish_nodes) - node_ids
-    disconnected = sorted(node_ids - reachable - ignored)
+    disconnected = sorted(node_ids - non_executable_nodes - reachable - ignored)
     return [f"node is disconnected from entry_node: {node_id}" for node_id in disconnected]
 
 

@@ -8722,3 +8722,317 @@ body.planning-live-body .live-guardian-note-action {
   padding: 3px 8px;
   font-size: 0.62rem;
 }
+
+
+/* Main dashboard read-only LangGraph canvas, rendered from /api/graphs/atr_closed_loop. */
+.runtime-map-layer-labels {
+  display: none !important;
+}
+
+.langgraph-shell.runtime-readonly-map {
+  background:
+    radial-gradient(circle at 18% 10%, rgba(43, 140, 255, 0.18), transparent 32%),
+    radial-gradient(circle at 80% 20%, rgba(155, 92, 255, 0.13), transparent 34%),
+    linear-gradient(135deg, rgba(7, 12, 31, 0.96), rgba(12, 28, 65, 0.94));
+  border-color: rgba(56, 189, 248, 0.26);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 18px 42px rgba(20, 54, 179, 0.14);
+  overflow: hidden;
+}
+
+.langgraph-shell.runtime-readonly-map::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(96, 165, 250, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(96, 165, 250, 0.08) 1px, transparent 1px);
+  background-size: 32px 32px;
+  pointer-events: none;
+}
+
+.langgraph-shell.runtime-readonly-map .langgraph-cells,
+.langgraph-shell.runtime-readonly-map .langgraph-nodes {
+  inset: auto;
+  left: 0;
+  position: absolute;
+  top: 0;
+  will-change: transform;
+}
+
+.langgraph-shell.runtime-readonly-map .langgraph-nodes {
+  display: block;
+  padding: 0;
+}
+
+.runtime-map-edge-svg {
+  display: block;
+  height: 100%;
+  overflow: visible;
+  width: 100%;
+}
+
+.runtime-map-edge {
+  fill: none;
+  marker-end: url(#main-runtime-arrow);
+  opacity: 0.74;
+  stroke: #7aa7ff;
+  stroke-linecap: round;
+  stroke-width: 2.1px;
+  transition: opacity 0.2s ease, stroke-width 0.2s ease, filter 0.2s ease;
+  vector-effect: non-scaling-stroke;
+}
+
+.runtime-map-edge.edge-type-logical-transition {
+  stroke: #7aa7ff;
+  stroke-width: 2.4px;
+}
+
+.runtime-map-edge.edge-type-control-overlay {
+  stroke: #f59e0b;
+  stroke-dasharray: 10 8;
+}
+
+.runtime-map-edge.edge-type-device-bridge {
+  stroke: #06b6d4;
+  stroke-dasharray: 6 5;
+  stroke-width: 2.2px;
+}
+
+.runtime-map-edge.edge-type-evidence-flow {
+  stroke: #10b981;
+  stroke-dasharray: 5 6;
+}
+
+.runtime-map-edge.edge-type-runtime-sidecar {
+  stroke: #a855f7;
+  stroke-dasharray: 12 5 3 5;
+}
+
+.runtime-map-edge.edge-visited {
+  filter: drop-shadow(0 0 4px currentColor);
+  opacity: 0.94;
+}
+
+.runtime-map-edge.edge-active {
+  filter: drop-shadow(0 0 8px currentColor);
+  opacity: 1;
+  stroke-width: 3.2px;
+}
+
+.langgraph-shell.runtime-readonly-map .graph-node.runtime-map-node {
+  align-items: center;
+  background: rgba(9, 18, 45, 0.96);
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 17px;
+  box-shadow: 0 14px 30px rgba(2, 6, 23, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  color: #e5edff;
+  display: flex;
+  gap: 8px;
+  height: 76px;
+  justify-content: flex-start;
+  min-width: 0;
+  padding: 9px 12px;
+  position: absolute;
+  text-align: left;
+  width: 184px;
+}
+
+.langgraph-shell.runtime-readonly-map .graph-node.runtime-map-node .node-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.langgraph-shell.runtime-readonly-map .graph-node.runtime-map-node strong,
+.langgraph-shell.runtime-readonly-map .graph-node.runtime-map-node small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.langgraph-shell.runtime-readonly-map .graph-node.runtime-map-node strong {
+  color: #f8fbff;
+  font-size: 0.78rem;
+}
+
+.langgraph-shell.runtime-readonly-map .graph-node.runtime-map-node small {
+  color: rgba(226, 232, 240, 0.66);
+  font-size: 0.62rem;
+}
+
+.langgraph-shell.runtime-readonly-map .graph-node.runtime-map-node .node-light {
+  background: #38bdf8;
+  box-shadow: 0 0 0 4px rgba(56, 189, 248, 0.14), 0 0 14px rgba(56, 189, 248, 0.38);
+  flex: 0 0 auto;
+}
+
+.langgraph-shell.runtime-readonly-map .graph-node.runtime-map-node.runtime-sidecar,
+.langgraph-shell.runtime-readonly-map .graph-node.runtime-map-node.kind-bridge,
+.langgraph-shell.runtime-readonly-map .graph-node.runtime-map-node.kind-evidence-plane {
+  border-style: dashed;
+}
+
+.langgraph-shell.runtime-readonly-map .graph-node.runtime-map-node.kind-sidecar {
+  border-color: rgba(245, 158, 11, 0.72);
+}
+
+.langgraph-shell.runtime-readonly-map .graph-node.runtime-map-node.kind-bridge {
+  border-color: rgba(6, 182, 212, 0.72);
+}
+
+.langgraph-shell.runtime-readonly-map .graph-node.runtime-map-node.kind-evidence-plane {
+  border-color: rgba(16, 185, 129, 0.72);
+}
+
+.langgraph-shell.runtime-readonly-map .graph-node.node-active {
+  background: rgba(14, 34, 78, 0.98);
+  border-color: rgba(56, 189, 248, 0.96);
+  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.18), 0 0 24px rgba(56, 189, 248, 0.34), 0 14px 28px rgba(2, 6, 23, 0.32);
+  transform: scale(1.035);
+}
+
+.langgraph-shell.runtime-readonly-map .graph-node.node-visited:not(.node-active) {
+  background: rgba(14, 34, 78, 0.96);
+  border-color: rgba(96, 165, 250, 0.5);
+}
+
+.runtime-map-load-error {
+  color: #fecaca;
+  font-size: 0.86rem;
+  padding: 20px;
+}
+
+/* v20260531 main-runtime-map-legend: in-canvas legend for edge semantics. */
+.runtime-map-legend {
+  background: rgba(7, 13, 32, 0.84);
+  border: 1px solid rgba(125, 211, 252, 0.24);
+  border-radius: 14px;
+  bottom: 12px;
+  box-shadow: 0 14px 30px rgba(2, 6, 23, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  color: #eaf4ff;
+  display: grid;
+  gap: 7px;
+  max-height: 158px;
+  min-width: 218px;
+  overflow: hidden;
+  padding: 8px;
+  pointer-events: auto;
+  position: absolute;
+  right: 12px;
+  z-index: 8;
+}
+
+.runtime-map-legend-head {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.runtime-map-legend-head strong {
+  color: #f7fbff;
+  font-size: 0.68rem;
+  font-weight: 950;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.runtime-map-legend-head span {
+  color: rgba(203, 213, 225, 0.72);
+  font-size: 0.56rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.runtime-map-legend-list {
+  display: grid;
+  gap: 5px;
+  max-height: 116px;
+  overflow: auto;
+  padding-right: 2px;
+  scrollbar-color: rgba(125, 211, 252, 0.42) rgba(8, 14, 35, 0.72);
+}
+
+.runtime-map-legend-row {
+  align-items: center;
+  background: rgba(15, 23, 42, 0.58);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 10px;
+  display: grid;
+  gap: 7px;
+  grid-template-columns: 42px minmax(0, 1fr);
+  min-height: 32px;
+  padding: 5px 7px;
+}
+
+.runtime-map-legend-row strong,
+.runtime-map-legend-row small {
+  display: block;
+  line-height: 1.1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runtime-map-legend-row strong {
+  color: #eef7ff;
+  font-size: 0.64rem;
+  font-weight: 900;
+}
+
+.runtime-map-legend-row small {
+  color: rgba(203, 213, 225, 0.66);
+  font-size: 0.52rem;
+  font-weight: 750;
+}
+
+.runtime-map-legend-line {
+  border-radius: 999px;
+  display: block;
+  height: 0;
+  opacity: 0.96;
+  position: relative;
+  width: 38px;
+}
+
+.runtime-map-legend-line::before {
+  border-top: 4px solid #7aa7ff;
+  content: "";
+  left: 0;
+  position: absolute;
+  right: 0;
+  top: -2px;
+}
+
+.runtime-map-legend-line.edge-type-logical-transition::before {
+  border-top-color: #7aa7ff;
+}
+
+.runtime-map-legend-line.edge-type-control-overlay::before {
+  border-top-color: #f59e0b;
+  border-top-style: dashed;
+}
+
+.runtime-map-legend-line.edge-type-device-bridge::before {
+  border-top-color: #06b6d4;
+  border-top-style: dashed;
+}
+
+.runtime-map-legend-line.edge-type-evidence-flow::before {
+  border-top-color: #10b981;
+  border-top-style: dotted;
+}
+
+.runtime-map-legend-line.edge-type-runtime-sidecar::before {
+  border-top-color: #a855f7;
+  border-top-style: dashed;
+}
+
+@media (max-width: 900px) {
+  .runtime-map-legend {
+    left: 12px;
+    max-height: 122px;
+    min-width: 0;
+    right: 12px;
+  }
+}

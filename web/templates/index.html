@@ -25,7 +25,7 @@ Modification guide:
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>{{ title }}</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
-    <link rel="stylesheet" href="/static/styles.css?v=atr-ui-20260525-7" />
+    <link rel="stylesheet" href="/static/styles.css?v=atr-ui-20260531-main-runtime-legend-1" />
   </head>
   <body>
     <main class="page">
@@ -247,17 +247,12 @@ Modification guide:
           <span id="graph-stage-indicator" class="badge idle">STAGE: IDLE</span>
         </div>
         <p class="graph-subhead">
-          Top-down orchestration graph with feedback routing. Active stage and active communication links glow in real time.
+          Read-only canvas rendered from the active LangGraph config. Edit routes and modules in Runtime IDE.
         </p>
-        <div class="graph-layer-labels" aria-hidden="true">
-          <span>Controller</span>
-          <span>Planning & Intelligence</span>
-          <span>Execution Agents</span>
-          <span>Tools, Memory & Exit</span>
-        </div>
-        <div class="langgraph-shell">
+        <div class="langgraph-shell runtime-readonly-map" aria-label="Read-only LangGraph runtime canvas">
           <div id="langgraph-cells" class="langgraph-cells" aria-hidden="true"></div>
           <div id="langgraph-nodes" class="langgraph-nodes"></div>
+          <aside id="runtime-map-legend" class="runtime-map-legend" aria-label="Runtime map legend"></aside>
         </div>
         <div class="graph-legend">
           <span><i class="legend-dot active"></i>Active</span>
@@ -274,6 +269,7 @@ Modification guide:
       </section>
     </main>
 
-    <script src="/static/app.js?v=atr-ui-20260525-7" defer></script>
+    <script src="/static/runtime_graph_geometry.js?v=atr-ui-20260531-graph-geometry-3"></script>
+    <script src="/static/app.js?v=atr-ui-20260531-main-runtime-legend-1" defer></script>
   </body>
 </html>
