@@ -47,6 +47,7 @@ from mcp_tools.tpms_geometry import (
 )
 from graphs import load_graph_config
 from orchestrator.run_loop import RunLoop
+from orchestrator.langgraph_runtime import compact_runtime_payload, trim_runtime_memory
 from orchestrator.state import Mode, OrchestratorState, Stage
 from orchestrator.supervisor import (
     build_decision_record,
@@ -62,6 +63,9 @@ from utils.printer_profile import load_prusa_print_profile
 
 
 WORKSPACE_ARTIFACT_COPY_LIMIT_BYTES = 50 * 1024 * 1024
+PLANNING_TRANSCRIPT_MEMORY_LIMIT = 50
+PLANNING_TRANSCRIPT_PAGE_LIMIT = 160
+PLANNING_TRANSCRIPT_MAX_PAGE_LIMIT = 240
 
 
 @dataclass(slots=True)
@@ -119,6 +123,7 @@ class MainController:
         self._state = self._new_state(mode=Mode(deps.system_config.get("default_mode", "test")))
         self._last_completed_trace: list[dict[str, Any]] = []
         self._planning_messages: list[dict[str, Any]] = []
+        self._planning_message_total = 0
         self._planning_session_id: str | None = None
         self._planning_bootstrapped = False
         self._planning_request_lock = asyncio.Lock()
@@ -742,12 +747,68 @@ class MainController:
         self._log_controller_event(event)
         await self._broadcast_event(event)
 
+    @staticmethod
+    def _compact_event_payload_for_display(payload: Any) -> dict[str, Any]:
+        """Return a tiny event payload for high-frequency Live GUI polling."""
+        if not isinstance(payload, dict):
+            return {}
+        keep = {
+            "agent", "agent_id", "node_id", "module_id", "stage", "status", "ok",
+            "tool", "tool_name", "requested_tool", "program_id", "check_id",
+            "failure_code", "reason_code", "decision", "risk_score", "title", "reason",
+            "requires_human_approval", "requires_approval", "safety_class", "approval_id",
+            "artifact_id", "artifact_path", "report_url", "preview_url", "stl_url",
+            "graph_id", "run_id", "experiment_id", "summary", "message",
+        }
+        out: dict[str, Any] = {}
+        for key, value in payload.items():
+            key_text = str(key)
+            if key_text in keep:
+                if isinstance(value, (str, int, float, bool)) or value is None:
+                    text = str(value) if isinstance(value, str) else value
+                    out[key_text] = text[:500] if isinstance(text, str) else text
+                elif isinstance(value, list):
+                    out[key_text] = value[:8]
+                elif isinstance(value, dict):
+                    out[key_text] = {str(k): v for k, v in list(value.items())[:12] if isinstance(v, (str, int, float, bool)) or v is None}
+            elif key_text in {"guardian_gate", "guardian_decision", "guardian_contract"} and isinstance(value, dict):
+                out[key_text] = {
+                    str(k): value.get(k)
+                    for k in ("gate_id", "stage", "phase", "decision", "reason_code", "risk_score", "ok_for_next_stage", "ok_for_bo")
+                    if k in value
+                }
+        return out
+
+    def _compact_event_for_buffer(self, event: dict[str, Any]) -> dict[str, Any]:
+        """Store display-sized events in RAM; durable evidence remains in logs/artifacts."""
+        compact = {
+            "event_id": event.get("event_id", ""),
+            "run_id": event.get("run_id", ""),
+            "experiment_id": event.get("experiment_id", ""),
+            "timestamp_stage": event.get("timestamp_stage", ""),
+            "event_type": event.get("event_type", event.get("type", "")),
+            "type": event.get("type", event.get("event_type", "")),
+            "level": event.get("level", event.get("severity", "INFO")),
+            "severity": event.get("severity", str(event.get("level", "INFO")).lower()),
+            "message": str(event.get("message", ""))[:600],
+            "ts": event.get("ts", event.get("timestamp", "")),
+            "timestamp": event.get("timestamp", event.get("ts", "")),
+            "graph_id": event.get("graph_id", "atr_closed_loop"),
+            "node_id": event.get("node_id", ""),
+            "module_id": event.get("module_id", ""),
+            "agent": event.get("agent", ""),
+            "status": event.get("status", ""),
+            "payload": self._compact_event_payload_for_display(event.get("payload", {})),
+        }
+        return {key: value for key, value in compact.items() if value not in (None, "")}
+
     async def _broadcast_event(self, event: dict[str, Any]) -> None:
-        self._trace.add(event)
+        compact_event = self._compact_event_for_buffer(event)
+        self._trace.add(compact_event)
         stale: list[asyncio.Queue[dict[str, Any]]] = []
         for queue in self._event_queues:
             try:
-                queue.put_nowait(event)
+                queue.put_nowait(compact_event)
             except asyncio.QueueFull:
                 stale.append(queue)
         for queue in stale:
@@ -1313,8 +1374,8 @@ class MainController:
         }
 
     def recent_events(self) -> list[dict[str, Any]]:
-        """Return buffered recent events."""
-        return self._trace.snapshot()
+        """Return buffered recent events in display-sized form."""
+        return [self._compact_event_for_buffer(event) for event in self._trace.snapshot()]
 
     async def emit_runtime_event(
         self,
@@ -1423,14 +1484,1001 @@ class MainController:
         )
         return {"ok": True, "message": "Inference backend switched.", "snapshot": self.snapshot()}
 
-    def planning_snapshot(self, *, session_id: str | None = None) -> dict[str, Any]:
-        """Return current live-planning conversation and runtime context."""
+    def _planning_transcript_path(self) -> Path:
+        """Return the append-only Live GUI transcript file for this run."""
+        return self._logger_bundle.run_dir / "live_planning_transcript.jsonl"
+
+    @staticmethod
+    def _select_runtime_fields(source: Any, keys: tuple[str, ...] | list[str]) -> dict[str, Any]:
+        """Select only operator-facing fields from a bulky runtime object."""
+        if not isinstance(source, dict):
+            return {}
+        return {key: compact_runtime_payload(source.get(key)) for key in keys if key in source and source.get(key) is not None}
+
+    @classmethod
+    def _planning_display_slicer_settings(cls, settings: Any) -> dict[str, Any]:
+        return cls._select_runtime_fields(
+            settings,
+            (
+                "printer_profile",
+                "material",
+                "slicer_profile_hint",
+                "layer_height_mm",
+                "first_layer_height_mm",
+                "nozzle_diameter_mm",
+                "bed_temperature_c",
+                "first_layer_bed_temperature_c",
+                "slow_first_layer_enabled",
+                "first_layer_speed_mm_s",
+                "wall_thickness_mm",
+                "cell_size_mm",
+                "relative_density",
+                "skirt_enabled",
+                "bottom_cap_enabled",
+                "top_cap_enabled",
+                "top_bottom_cap",
+                "skin_thickness_mm",
+                "expected_mass_g",
+                "input_model_path",
+                "output_gcode_path",
+                "simulated",
+                "resolved_command",
+            ),
+        )
+
+    @classmethod
+    def _planning_display_fabrication_report(cls, report: Any) -> dict[str, Any]:
+        if not isinstance(report, dict):
+            return {}
+        compact = cls._select_runtime_fields(
+            report,
+            (
+                "schema",
+                "fabrication_intent",
+                "digital_thread",
+                "fabrication_outcome",
+                "quality_gates",
+                "experiment_evaluation_ref",
+            ),
+        )
+        if isinstance(compact.get("quality_gates"), list):
+            compact["quality_gates"] = compact["quality_gates"][:12]
+        return compact
+
+    @classmethod
+    def _planning_display_specimen_result(cls, specimen: Any) -> dict[str, Any]:
+        """Keep Specimen Making details shown in Live GUI without raw geometry/report payloads."""
+        if not isinstance(specimen, dict):
+            return {}
+        tool_result = specimen.get("tool_result") if isinstance(specimen.get("tool_result"), dict) else {}
+        printer = specimen.get("printer") if isinstance(specimen.get("printer"), dict) else tool_result.get("printer", {})
+        prusalink = specimen.get("prusalink") if isinstance(specimen.get("prusalink"), dict) else tool_result.get("prusalink", {})
+        print_result = specimen.get("print_result") if isinstance(specimen.get("print_result"), dict) else tool_result.get("print_result", {})
+        compact = cls._select_runtime_fields(
+            specimen,
+            (
+                "specimen_id",
+                "candidate_id",
+                "geometry_hash",
+                "stl_path",
+                "sliced_path",
+                "handoff_package_path",
+                "printer_prepare_status",
+                "printer_mode",
+                "printer_path",
+                "expected_mass_g",
+                "expected_print_time_min",
+            ),
+        )
+        compact.update(
+            {
+                "fabrication_report": cls._planning_display_fabrication_report(specimen.get("fabrication_report")),
+                "slicer_settings": cls._planning_display_slicer_settings(specimen.get("slicer_settings") or tool_result.get("slicer_settings")),
+                "prusalink": cls._select_runtime_fields(prusalink, ("transport", "storage", "upload_endpoint", "start_endpoint", "remote_path")),
+                "printer": cls._select_runtime_fields(printer, ("state", "status", "provider", "storage", "transfer", "job", "host_configured")),
+                "slicer_result": cls._select_runtime_fields(specimen.get("slicer_result") or tool_result.get("slicer_result"), ("ok", "failure_code", "elapsed_sec", "simulated", "sliced_path")),
+                "gcode_validation": cls._select_runtime_fields(specimen.get("gcode_validation") or tool_result.get("gcode_validation"), ("ok", "failure_code", "violations")),
+                "print_result": cls._select_runtime_fields(print_result, ("status", "failure_code", "set_ready", "upload", "transfer_wait", "start")),
+                "ejection_result": cls._select_runtime_fields(specimen.get("ejection_result") or tool_result.get("ejection_result"), ("status", "failure_code", "method", "resolved", "object_bounds", "attempts")),
+                "step_trace": compact_runtime_payload((specimen.get("step_trace") or tool_result.get("step_trace") or [])[-16:]),
+            }
+        )
+        return {key: value for key, value in compact.items() if value not in ({}, [], None)}
+
+    @classmethod
+    def _planning_display_equipment_fields(cls, entry: dict[str, Any]) -> dict[str, Any]:
+        """Flatten Lab Equipment runtime evidence into the fields consumed by the chat card."""
+        equipment = entry.get("equipment") if isinstance(entry.get("equipment"), dict) else {}
+        report = entry.get("equipment_report") if isinstance(entry.get("equipment_report"), dict) else equipment.get("equipment_report", {})
+        result = entry.get("equipment_result") if isinstance(entry.get("equipment_result"), dict) else equipment.get("equipment_result", {})
+        data_ledger = entry.get("data_ledger") if isinstance(entry.get("data_ledger"), dict) else report.get("data_ledger", {})
+        data_acquisition = entry.get("data_acquisition") if isinstance(entry.get("data_acquisition"), dict) else report.get("data_acquisition", {})
+        if not data_acquisition and isinstance(data_ledger, dict):
+            data_acquisition = data_ledger
+        compact: dict[str, Any] = {
+            "equipment_runtime_event": cls._select_runtime_fields(
+                entry.get("equipment_runtime_event") or result,
+                ("tool", "sequence_id", "program_id", "bridge", "mode", "status", "step", "host", "bridge_host"),
+            ),
+            "macro_command": cls._select_runtime_fields(entry.get("macro_command") or report.get("control_trace"), ("command_id", "program_id", "target_ui", "step", "status", "detail")),
+            "visual_assertion": cls._select_runtime_fields(entry.get("visual_assertion") or report.get("visual_verification"), ("checkpoint", "status", "ok", "target_ui", "confidence", "screenshot_artifact", "detail", "screen_checks_passed", "screen_checks_total")),
+            "physical_cross_check": cls._select_runtime_fields(entry.get("physical_cross_check") or report.get("physical_verification"), ("status", "ok", "check_id", "target_ui", "detail", "all_required_ok", "vision_motion_confirmed", "specimen_alignment_ok", "fixture_safe_to_access")),
+            "data_acquisition": cls._select_runtime_fields(data_acquisition, ("status", "artifact_or_path", "windows_path", "linux_path", "sha256", "row_count_probe", "save_method", "artifact_pull_status", "parse_probe", "detail")),
+            "recovery": cls._select_runtime_fields(entry.get("recovery") or report.get("recovery"), ("status", "failure_step", "failure_code", "failure_detail", "recommended_action")),
+            "command_id": entry.get("command_id") or result.get("sequence_id"),
+            "data_file_ref": entry.get("data_file_ref") or result.get("result_file") or (data_ledger.get("linux_path") if isinstance(data_ledger, dict) else None),
+            "windows_host": entry.get("windows_host"),
+        }
+        return {key: value for key, value in compact.items() if value not in ({}, [], None, "")}
+
+    @staticmethod
+    def _planning_agent_id_for_role(role: str) -> str:
+        mapping = {
+            "operator": "Operator",
+            "orchestrator": "OrchestratorAgent",
+            "design_ai": "DesignAgent",
+            "printer_ai": "SpecimenMakingAgent",
+            "specimen_ai": "SpecimenMakingAgent",
+            "vision_ai": "VisionAgent",
+            "manipulation_ai": "ManipulationAgent",
+            "equipment_ai": "LabEquipmentAgent",
+            "analysis_ai": "AnalysisAgent",
+            "knowledge_ai": "KnowledgeAgent",
+            "bo_ai": "BOAgent",
+            "guardian": "GuardianAgent",
+            "system": "System",
+        }
+        clean_role = str(role or "").strip().lower()
+        return mapping.get(clean_role, clean_role or "System")
+
+    @staticmethod
+    def _planning_parse_system_event(content: str) -> tuple[str, dict[str, str]]:
+        """Parse legacy SYSTEM_EVENT blocks without changing the stored content."""
+        text = str(content or "").strip()
+        if not text.startswith("SYSTEM_EVENT:"):
+            return "", {}
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        event_name = lines[0].split(":", 1)[1].strip() if lines else ""
+        fields: dict[str, str] = {}
+        for line in lines[1:]:
+            if "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            clean_key = re.sub(r"[^a-zA-Z0-9_]+", "_", key.strip()).strip("_").lower()
+            if clean_key:
+                fields[clean_key] = value.strip()
+        return event_name, fields
+
+    @classmethod
+    def _classify_planning_message(cls, entry: dict[str, Any]) -> dict[str, Any]:
+        """Assign display routing metadata for Live GUI chat/report/backend surfaces."""
+        if not isinstance(entry, dict):
+            return {
+                "message_class": "system_event",
+                "surface": ["backend"],
+                "visibility": "internal",
+                "agent_id": "System",
+            }
+        role = str(entry.get("role") or "system").strip().lower()
+        content = str(entry.get("content") or "")
+        message_type = str(entry.get("message_type") or "").strip().lower()
+        agent_id = str(entry.get("agent_id") or cls._planning_agent_id_for_role(role))
+        severity = str(entry.get("severity") or entry.get("level") or "").strip().lower()
+        system_event_name, system_event_fields = cls._planning_parse_system_event(content)
+        has_artifacts = any(
+            key in entry
+            for key in (
+                "artifacts",
+                "specimen_artifacts",
+                "fem_artifacts",
+                "artifact_pair",
+                "bo_result",
+            )
+        )
+        has_report_payload = has_artifacts or any(
+            key in entry
+            for key in (
+                "experiment_spec",
+                "specimen",
+                "analysis",
+                "knowledge",
+                "equipment_runtime_event",
+                "equipment_result",
+                "vision_signal",
+            )
+        )
+        requires_user_action = bool(
+            entry.get("requires_response")
+            or entry.get("pending_operator_input")
+            or entry.get("requires_design_inputs")
+            or entry.get("requires_connection_info")
+            or entry.get("requires_human_approval")
+        )
+        classification: dict[str, Any] = {
+            "agent_id": agent_id,
+            "severity": severity or ("warning" if message_type in {"warning", "approval", "incident"} else "info"),
+        }
+        if system_event_name:
+            event_key = re.sub(r"[^a-zA-Z0-9_.:-]+", "_", system_event_name.strip().lower()).strip("_") or "system"
+            is_handoff = "handoff" in event_key
+            is_timeline = is_handoff or any(token in event_key for token in ("cycle", "workflow", "trigger", "node_failed", "halted", "complete"))
+            classification.update(
+                {
+                    "message_class": "handoff_event" if is_handoff else "system_event",
+                    "surface": ["timeline", "backend"] if is_timeline else ["backend"],
+                    "visibility": "internal",
+                    "event_type": f"planning.{event_key}",
+                    "event_fields": system_event_fields,
+                }
+            )
+            return classification
+        if role == "operator":
+            classification.update({"message_class": "operator_input", "surface": ["chat"], "visibility": "user"})
+            return classification
+        if role == "system":
+            classification.update({"message_class": "system_event", "surface": ["backend"], "visibility": "internal"})
+            return classification
+        if message_type in {"approval", "warning", "incident"} or severity in {"warning", "error", "failed"}:
+            surfaces = ["chat", "backend"]
+            if role in {"printer_ai", "specimen_ai", "equipment_ai", "manipulation_ai", "vision_ai"}:
+                surfaces.append("io")
+            if has_report_payload:
+                surfaces.append("report")
+            classification.update(
+                {
+                    "message_class": "guardian_event" if role == "guardian" else "error_event" if severity in {"error", "failed"} else "agent_chat",
+                    "surface": list(dict.fromkeys(surfaces)),
+                    "visibility": "user" if requires_user_action or role == "guardian" else "mixed",
+                }
+            )
+            return classification
+        if entry.get("pendingReasoning"):
+            classification.update({"message_class": "agent_chat", "surface": ["chat"], "visibility": "user"})
+            return classification
+        surfaces = ["chat"] if content.strip() else []
+        if has_report_payload:
+            surfaces.append("report")
+        if has_artifacts:
+            surfaces.append("artifacts")
+        if role in {"printer_ai", "specimen_ai", "equipment_ai", "manipulation_ai", "vision_ai"} and has_report_payload:
+            surfaces.append("io")
+        if not surfaces:
+            surfaces = ["backend"]
+        classification.update(
+            {
+                "message_class": "agent_chat" if "chat" in surfaces else "agent_report",
+                "surface": list(dict.fromkeys(surfaces)),
+                "visibility": "user" if "chat" in surfaces else "internal",
+            }
+        )
+        return classification
+
+    def _compact_planning_message_for_storage(self, entry: dict[str, Any]) -> dict[str, Any]:
+        """Keep transcript messages useful while dropping bulky runtime internals."""
+        if not isinstance(entry, dict):
+            return {}
+        entry = {**entry, **self._classify_planning_message(entry)}
+        scalar_keys = (
+            "role",
+            "content",
+            "timestamp",
+            "model",
+            "ok",
+            "schema",
+            "message_type",
+            "message_class",
+            "surface",
+            "visibility",
+            "event_type",
+            "event_fields",
+            "agent_id",
+            "severity",
+            "cycle_index",
+            "total_cycles",
+            "requires_response",
+            "requires_design_inputs",
+            "missing_design_inputs",
+            "requires_connection_info",
+            "blocks_workflow",
+            "pendingReasoning",
+            "pending_operator_input",
+            "reasoning",
+            "goal",
+            "constraints",
+            "operator_intent",
+            "command_id",
+            "program_id",
+            "check_id",
+            "shielded_tool",
+            "decision",
+            "reason_code",
+            "risk_score",
+            "requires_human_approval",
+            "signal_id",
+            "zone_id",
+            "confidence",
+            "stability_ms",
+            "windows_host",
+            "data_file_ref",
+            "failure_code",
+        )
+        compact = {key: compact_runtime_payload(entry.get(key)) for key in scalar_keys if key in entry}
+        if "content" in entry:
+            compact["content"] = str(entry.get("content") or "")
+        if "experiment_spec" in entry:
+            compact["experiment_spec"] = self._planning_display_spec(entry.get("experiment_spec"))
+        if "artifacts" in entry:
+            compact["artifacts"] = self._planning_display_artifacts(entry.get("artifacts"))
+        if "specimen_artifacts" in entry:
+            compact["specimen_artifacts"] = self._planning_display_artifacts(entry.get("specimen_artifacts"))
+        if "fem_artifacts" in entry:
+            compact["fem_artifacts"] = self._planning_display_artifacts(entry.get("fem_artifacts"))
+        if "artifact_pair" in entry:
+            compact["artifact_pair"] = self._planning_display_artifact_pair(entry.get("artifact_pair"))
+        if "design_candidate" in entry and "experiment_spec" not in compact:
+            compact["experiment_spec"] = self._planning_display_spec(entry.get("design_candidate"))
+        if "specimen" in entry:
+            compact["specimen"] = self._planning_display_specimen_result(entry.get("specimen"))
+        if entry.get("role") == "equipment_ai" or "equipment" in entry or "equipment_result" in entry:
+            compact.update(self._planning_display_equipment_fields(entry))
+        if "analysis" in entry:
+            analysis = entry.get("analysis") if isinstance(entry.get("analysis"), dict) else {}
+            compact["analysis"] = self._select_runtime_fields(
+                analysis,
+                ("ok", "objective_score", "uncertainty", "recommendation", "summary", "utm_metrics", "fem_metrics", "cae_metrics", "quality_gate", "fem_utm_comparison"),
+            )
+        if "vision_signal" in entry:
+            compact["vision_signal"] = compact_runtime_payload(entry.get("vision_signal"))
+        if "knowledge" in entry:
+            knowledge = entry.get("knowledge") if isinstance(entry.get("knowledge"), dict) else {}
+            compact["knowledge"] = self._select_runtime_fields(
+                knowledge,
+                (
+                    "retrieval_coverage",
+                    "local_chunks",
+                    "web_results",
+                    "failure_pattern_count",
+                    "success_pattern_count",
+                    "agent_performance_count",
+                    "evolution_pack_count",
+                    "graph_backend_status",
+                    "artifact_paths",
+                ),
+            )
+        if "bo_result" in entry:
+            compact["bo_result"] = self._planning_display_bo_result(entry.get("bo_result"))
+        for key in ("module_runtime", "module_step_trace", "vision_cross_check_event", "guardian_gate"):
+            value = entry.get(key)
+            if isinstance(value, dict):
+                compact[key] = compact_runtime_payload(value)
+            elif isinstance(value, list):
+                compact[key] = compact_runtime_payload(value[:12])
+        return {key: value for key, value in compact.items() if value not in ({}, [], None)}
+
+    def _json_safe_planning_message(self, entry: dict[str, Any]) -> dict[str, Any]:
+        """Detach planning messages from large live objects and make them JSONL-safe."""
+        compact_entry = self._compact_planning_message_for_storage(entry)
+        try:
+            return json.loads(json.dumps(compact_entry, ensure_ascii=False, default=str))
+        except Exception:
+            return {
+                "role": str(entry.get("role") or "system"),
+                "content": str(entry.get("content") or ""),
+                "timestamp": str(entry.get("timestamp") or datetime.now(timezone.utc).isoformat()),
+                "serialization_error": True,
+            }
+
+    def _seed_planning_transcript_count(self) -> None:
+        """Initialize transcript count from disk when a running server reuses a file."""
+        if self._planning_message_total:
+            return
+        path = self._planning_transcript_path()
+        if not path.exists():
+            return
+        try:
+            with path.open("r", encoding="utf-8") as handle:
+                self._planning_message_total = sum(1 for line in handle if line.strip())
+        except OSError:
+            self._planning_message_total = max(self._planning_message_total, len(self._planning_messages))
+
+    def _reset_planning_transcript(self) -> None:
+        """Clear the active Live GUI transcript for an explicit fresh session."""
+        self._planning_messages = []
+        self._planning_message_total = 0
+        try:
+            self._planning_transcript_path().unlink(missing_ok=True)
+        except OSError:
+            return
+
+    def _record_planning_message(self, entry: dict[str, Any]) -> dict[str, Any]:
+        """Persist the full chat message to disk and keep only a recent memory window."""
+        self._seed_planning_transcript_count()
+        stored = self._json_safe_planning_message(entry)
+        index = self._planning_message_total
+        stored.setdefault("message_id", f"planning-msg-{index + 1:06d}")
+        stored["transcript_index"] = index
+        path = self._planning_transcript_path()
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(stored, ensure_ascii=False, default=str) + "\n")
+            self._planning_message_total = index + 1
+        except OSError:
+            # Keep the GUI usable even if disk persistence is temporarily unavailable.
+            self._planning_message_total = max(self._planning_message_total, index + 1)
+        self._planning_messages.append(stored)
+        if len(self._planning_messages) > PLANNING_TRANSCRIPT_MEMORY_LIMIT:
+            del self._planning_messages[: len(self._planning_messages) - PLANNING_TRANSCRIPT_MEMORY_LIMIT]
+        return stored
+
+    def _compact_planning_message_for_event(self, entry: dict[str, Any]) -> dict[str, Any]:
+        """Keep SSE/recent-event payloads small; full messages are in the transcript file."""
+        entry = {**entry, **self._classify_planning_message(entry)}
+        compact_keys = {
+            "role",
+            "content",
+            "timestamp",
+            "model",
+            "ok",
+            "schema",
+            "message_type",
+            "message_class",
+            "surface",
+            "visibility",
+            "event_type",
+            "event_fields",
+            "agent_id",
+            "severity",
+            "message_id",
+            "transcript_index",
+            "pendingReasoning",
+            "pending_operator_input",
+            "requires_response",
+        }
+        compact = {key: entry.get(key) for key in compact_keys if key in entry}
+        compact["has_full_transcript_record"] = True
+        compact["has_artifacts"] = any(
+            key in entry
+            for key in (
+                "artifacts",
+                "specimen_artifacts",
+                "fem_artifacts",
+                "bo_result",
+                "equipment",
+                "vision",
+                "analysis",
+                "knowledge",
+            )
+        )
+        return compact
+
+    @staticmethod
+    def _planning_display_spec(spec: Any) -> dict[str, Any]:
+        """Return only specimen/design fields needed for Live GUI cards."""
+        if not isinstance(spec, dict):
+            return {}
+        keys = (
+            "candidate_id",
+            "specimen_id",
+            "geometry_type",
+            "structure_type",
+            "specimen_size_mm",
+            "cell_size_mm",
+            "wall_thickness_mm",
+            "relative_density",
+            "porosity",
+            "expected_mass_g",
+            "expected_print_time_min",
+            "expected_objective_proxy_score",
+            "predicted_objective",
+            "uncertainty",
+            "risk_score",
+            "tpms_surface",
+            "tpms_thickness",
+            "orientation_deg",
+            "top_cap_enabled",
+            "bottom_cap_enabled",
+            "skirt_enabled",
+        )
+        return {key: spec.get(key) for key in keys if key in spec}
+
+    @classmethod
+    def _planning_display_artifacts(cls, artifacts: Any) -> dict[str, Any]:
+        """Keep artifact links but drop filesystem/debug payloads from chat snapshots."""
+        if not isinstance(artifacts, dict):
+            return {}
+        keys = (
+            "preview_url",
+            "stl_url",
+            "experiment_spec_url",
+            "contour_url",
+            "report_url",
+            "gcode_url",
+            "download_url",
+            "preview_path",
+            "stl_path",
+            "experiment_spec_path",
+        )
+        compact = {key: artifacts.get(key) for key in keys if artifacts.get(key)}
+        return compact
+
+    @classmethod
+    def _planning_display_artifact_pair(cls, pair: Any) -> dict[str, Any]:
+        if not isinstance(pair, dict):
+            return {}
+        compact: dict[str, Any] = {}
+        for key in ("previous", "next"):
+            item = pair.get(key) if isinstance(pair.get(key), dict) else {}
+            if not item:
+                continue
+            compact[key] = {
+                "label": item.get("label") or ("Previous shape" if key == "previous" else "Next shape"),
+                "artifacts": cls._planning_display_artifacts(item.get("artifacts")),
+                "experiment_spec": cls._planning_display_spec(item.get("experiment_spec")),
+            }
+        return compact
+
+    @classmethod
+    def _planning_display_bo_result(cls, bo_result: Any) -> dict[str, Any]:
+        """Keep only BO fields needed for operator-facing Live GUI summaries."""
+        if not isinstance(bo_result, dict):
+            return {}
+        compact: dict[str, Any] = {}
+        for key in ("strategy", "benchmark_strategy", "acquisition", "status", "summary", "budget", "bo_backend"):
+            if key in bo_result:
+                value = bo_result.get(key)
+                compact[key] = value[:500] if isinstance(value, str) else value
+        for key in ("recommendation", "next_design_request", "prior_summary"):
+            if isinstance(bo_result.get(key), dict):
+                compact[key] = cls._planning_scalar_summary(bo_result.get(key))
+        reasoning = bo_result.get("reasoning") if isinstance(bo_result.get("reasoning"), dict) else {}
+        if reasoning:
+            compact["reasoning"] = cls._planning_scalar_summary(reasoning, keys=("source", "preference", "rationale", "recommendation"))
+        artifacts = bo_result.get("artifacts") if isinstance(bo_result.get("artifacts"), dict) else {}
+        if artifacts:
+            compact["artifacts"] = cls._planning_scalar_summary(artifacts)
+        benchmark = bo_result.get("benchmark") if isinstance(bo_result.get("benchmark"), dict) else {}
+        if benchmark:
+            compact["benchmark"] = cls._planning_scalar_summary(benchmark, keys=("strategy", "acquisition", "best_score", "iteration_count", "budget", "ok"))
+        ranking = bo_result.get("candidate_ranking")
+        if isinstance(ranking, list):
+            compact["candidate_ranking"] = [cls._planning_scalar_summary(item) for item in ranking[:3] if isinstance(item, dict)]
+        return compact
+
+    @classmethod
+    def _compact_planning_message_for_display(cls, entry: dict[str, Any]) -> dict[str, Any]:
+        """Build the small message object returned to the browser on every refresh."""
+        if not isinstance(entry, dict):
+            return {}
+        entry = {**entry, **cls._classify_planning_message(entry)}
+        scalar_keys = (
+            "role",
+            "content",
+            "timestamp",
+            "ok",
+            "schema",
+            "message_type",
+            "message_class",
+            "surface",
+            "visibility",
+            "event_type",
+            "event_fields",
+            "agent_id",
+            "severity",
+            "message_id",
+            "transcript_index",
+            "cycle_index",
+            "total_cycles",
+            "requires_response",
+            "requires_design_inputs",
+            "missing_design_inputs",
+            "requires_connection_info",
+            "blocks_workflow",
+            "pendingReasoning",
+            "pending_operator_input",
+            "reasoning",
+            "command_id",
+            "program_id",
+            "check_id",
+            "shielded_tool",
+            "decision",
+            "reason_code",
+            "risk_score",
+            "requires_human_approval",
+            "signal_id",
+            "zone_id",
+            "confidence",
+            "stability_ms",
+            "windows_host",
+            "data_file_ref",
+            "failure_code",
+        )
+        compact = {key: entry.get(key) for key in scalar_keys if key in entry}
+        if isinstance(compact.get("content"), str) and len(compact["content"]) > 1800:
+            compact["content"] = compact["content"][:1800] + "..."
+        if isinstance(compact.get("reasoning"), str) and len(compact["reasoning"]) > 1200:
+            compact["reasoning"] = compact["reasoning"][:1200] + "..."
+        model = str(entry.get("model") or "")
+        if model:
+            compact["model"] = model.splitlines()[0][:140]
+        if "experiment_spec" in entry:
+            compact["experiment_spec"] = cls._planning_display_spec(entry.get("experiment_spec"))
+        if "artifacts" in entry:
+            compact["artifacts"] = cls._planning_display_artifacts(entry.get("artifacts"))
+        if "specimen_artifacts" in entry:
+            compact["specimen_artifacts"] = cls._planning_display_artifacts(entry.get("specimen_artifacts"))
+        if "fem_artifacts" in entry:
+            compact["fem_artifacts"] = cls._planning_display_artifacts(entry.get("fem_artifacts"))
+        if "artifact_pair" in entry:
+            compact["artifact_pair"] = cls._planning_display_artifact_pair(entry.get("artifact_pair"))
+        if "specimen" in entry:
+            compact["specimen"] = cls._planning_display_specimen_result(entry.get("specimen"))
+        if "bo_result" in entry:
+            compact["bo_result"] = cls._planning_display_bo_result(entry.get("bo_result"))
+        # Agent reports can use state.run_metadata; avoid shipping bulky per-message internals every poll.
+        for key in ("equipment_runtime_event", "macro_command", "equipment_result", "data_ledger", "data_acquisition", "visual_assertion", "physical_cross_check", "recovery", "handoff_packet", "vision_signal", "vision_cross_check_event", "guardian_gate"):
+            value = entry.get(key)
+            if isinstance(value, dict):
+                compact[key] = compact_runtime_payload(value)
+            elif isinstance(value, list):
+                compact[key] = compact_runtime_payload(value[:12])
+        return compact
+
+    def planning_messages_page(
+        self,
+        *,
+        session_id: str | None = None,
+        before: int | None = None,
+        limit: int = PLANNING_TRANSCRIPT_PAGE_LIMIT,
+    ) -> dict[str, Any]:
+        """Return a page of transcript messages without loading the full chat history."""
         self._bind_planning_session(session_id)
         self._ensure_planning_intro()
         self._ensure_orchestrator_supervisor_baseline()
+        try:
+            clean_limit = max(1, min(int(limit), PLANNING_TRANSCRIPT_MAX_PAGE_LIMIT))
+        except (TypeError, ValueError):
+            clean_limit = PLANNING_TRANSCRIPT_PAGE_LIMIT
+        clean_before: int | None
+        try:
+            clean_before = int(before) if before is not None else None
+        except (TypeError, ValueError):
+            clean_before = None
+
+        path = self._planning_transcript_path()
+        records: list[dict[str, Any]] = []
+        total = 0
+        if path.exists():
+            try:
+                with path.open("r", encoding="utf-8") as handle:
+                    for line_number, line in enumerate(handle):
+                        raw = line.strip()
+                        if not raw:
+                            continue
+                        try:
+                            message = json.loads(raw)
+                        except json.JSONDecodeError:
+                            continue
+                        if not isinstance(message, dict):
+                            continue
+                        index = int(message.get("transcript_index", line_number))
+                        message["transcript_index"] = index
+                        total = max(total, index + 1)
+                        if clean_before is not None and index >= clean_before:
+                            continue
+                        records.append(message)
+                        if len(records) > clean_limit:
+                            del records[0]
+            except OSError:
+                records = list(self._planning_messages[-clean_limit:])
+                total = max(self._planning_message_total, len(records))
+        else:
+            records = list(self._planning_messages[-clean_limit:])
+            total = max(self._planning_message_total, len(records))
+        self._planning_message_total = max(self._planning_message_total, total)
+        first_index = int(records[0].get("transcript_index", 0)) if records else 0
+        display_records = [self._compact_planning_message_for_display(record) for record in records]
         return {
-            "messages": list(self._planning_messages),
-            "state": self._state.model_dump(mode="json"),
+            "messages": display_records,
+            "message_total": total,
+            "messages_loaded": len(records),
+            "message_limit": clean_limit,
+            "message_before": clean_before,
+            "has_more_messages": bool(records and first_index > 0),
+            "next_before": first_index if records and first_index > 0 else None,
+            "transcript_path": str(path),
+        }
+
+    @classmethod
+    def _compact_planning_payload(cls, value: Any, *, depth: int = 0) -> Any:
+        """Trim bulky nested runtime payloads before sending repeated Live GUI snapshots."""
+        large_context_keys = {
+            "source_stage_context",
+            "handoff_packet",
+            "utm_data_ready",
+            "prior_evaluations",
+            "raw_trace",
+            "raw_events",
+            "full_payload",
+            "full_context",
+        }
+        if depth >= 6:
+            if isinstance(value, dict):
+                return {"_truncated": "depth_limit", "keys": list(value.keys())[:16]}
+            if isinstance(value, list):
+                return {"_truncated": "depth_limit", "items": len(value)}
+            text = str(value)
+            return text[:300] + "..." if len(text) > 300 else value
+        if isinstance(value, dict):
+            compact: dict[str, Any] = {}
+            for key, child in value.items():
+                key_text = str(key)
+                if key_text in large_context_keys:
+                    compact[key_text] = {
+                        "_omitted": "large_runtime_context",
+                        "type": type(child).__name__,
+                        "keys": list(child.keys())[:16] if isinstance(child, dict) else None,
+                        "items": len(child) if isinstance(child, (dict, list)) else None,
+                    }
+                    continue
+                compact[key_text] = cls._compact_planning_payload(child, depth=depth + 1)
+            return compact
+        if isinstance(value, list):
+            limit = 24
+            items = [cls._compact_planning_payload(item, depth=depth + 1) for item in value[:limit]]
+            if len(value) > limit:
+                items.append({"_truncated_items": len(value) - limit})
+            return items
+        if isinstance(value, str) and len(value) > 4000:
+            return value[:4000] + "..."
+        return value
+
+    @classmethod
+    def _planning_scalar_summary(cls, value: Any, *, keys: tuple[str, ...] = ()) -> dict[str, Any]:
+        if not isinstance(value, dict):
+            return {}
+        default_keys = (
+            "schema", "status", "ok", "summary", "decision", "reason", "reason_code",
+            "failure_code", "candidate_id", "specimen_id", "geometry_type", "objective_score",
+            "uncertainty", "score", "risk_score", "created_at", "artifact_path", "report_url",
+            "preview_url", "stl_url", "gcode_path", "result_file", "linux_path",
+        )
+        out: dict[str, Any] = {}
+        for key in (*default_keys, *keys):
+            if key not in value:
+                continue
+            item = value.get(key)
+            if isinstance(item, str):
+                out[key] = item[:500]
+            elif isinstance(item, (int, float, bool)) or item is None:
+                out[key] = item
+            elif isinstance(item, list):
+                out[key] = item[:6]
+            elif isinstance(item, dict):
+                out[key] = {str(k): v for k, v in list(item.items())[:12] if isinstance(v, (str, int, float, bool)) or v is None}
+        return out
+
+    @classmethod
+    def _planning_list_summary(cls, value: Any, limit: int = 4) -> list[Any]:
+        if not isinstance(value, list):
+            return []
+        return [cls._planning_scalar_summary(item) if isinstance(item, dict) else item for item in value[-limit:]]
+
+    @classmethod
+    def _compact_planning_run_metadata(cls, metadata: Any) -> dict[str, Any]:
+        """Return a Live-GUI-sized run_metadata allowlist.
+
+        The full runtime metadata can contain repeated STL/FEM/BO/history payloads.
+        Live polling must never serialize those raw structures on every refresh.
+        """
+        if not isinstance(metadata, dict):
+            return {}
+
+        skip_keys = {
+            "latest_vision_observation",
+            "vision_vision_report",
+            "manipulation_manipulation_report",
+            "specimen_fabrication_report",
+            "equipment_handoff_packet",
+            "module_runtime",
+            "module_step_trace",
+            "module_step_results",
+            "workspace_runtime_events",
+            "runtime_artifacts",
+            "raw_trace",
+            "raw_events",
+            "source_stage_context",
+            "full_context",
+            "full_payload",
+            "raw_input_sidecar",
+            "stl_text",
+            "stl_bytes",
+            "mesh_vertices",
+            "mesh_faces",
+        }
+        allow_keys = {
+            "pending_specimen_input",
+            "mission_contract",
+            "latest_mission_contract",
+            "latest_orchestration_plan",
+            "latest_orchestrator_followup",
+            "latest_orchestrator_decision",
+            "latest_orchestrator_handoff",
+            "latest_orchestrator_parallel_checks",
+            "latest_operator_followup",
+            "operator_followup_context",
+            "latest_loop_reflection",
+            "design_report",
+            "design_candidate",
+            "fabrication_report",
+            "specimen_result",
+            "specimen_fabricated",
+            "vision_report",
+            "vision_signal",
+            "manipulation_report",
+            "manipulation_result",
+            "robot_task_result",
+            "equipment_report",
+            "equipment_result",
+            "equipment_handoff",
+            "utm_data_ready",
+            "latest_analysis",
+            "knowledge",
+            "knowledge_report",
+            "knowledge_context",
+            "bo_agent",
+            "bo_recommended_constraints",
+            "next_design_request",
+            "guardian",
+            "latest_guardian_gate",
+            "latest_guardian_gate_decision",
+            "latest_guardian_decision",
+            "safe_stop_verified",
+            "safe_stop_confirmed",
+            "safety_budget",
+            "risk_budget",
+            "runtime_approvals",
+            "approval_blocked_stage",
+            "approval_rejection",
+            "active_module_step",
+            "runtime_graph",
+            "backend",
+            "mode",
+            "active_models",
+            "inference_backend",
+        }
+        list_limits = {
+            "orchestration_plans": 4,
+            "handoff_packets": 3,
+            "orchestrator_handoff_packets": 3,
+            "orchestrator_followups": 4,
+            "orchestrator_decision_register": 4,
+            "loop_reflections": 6,
+            "orchestrator_parallel_checks": 4,
+            "operator_followup_queue": 8,
+            "operator_followups": 8,
+            "tool_call_records": 6,
+            "incident_records": 6,
+            "hardware_alerts": 6,
+            "corrective_actions": 12,
+            "guardian_contracts": 4,
+            "guardian_gates": 6,
+            "guardian_approval_queue": 20,
+        }
+
+        compact: dict[str, Any] = {}
+        for key, value in metadata.items():
+            key_text = str(key)
+            if key_text in skip_keys or key_text.endswith("_agent_payload"):
+                continue
+            include = key_text in allow_keys or key_text in list_limits or key_text.endswith("_handoff_packet") or key_text.endswith("_decision_register") or key_text.endswith("_metrics")
+            if not include:
+                continue
+            if key_text in list_limits and isinstance(value, list):
+                compact[key_text] = cls._planning_list_summary(value, limit=list_limits[key_text])
+                continue
+            if key_text in {
+                "design_report", "fabrication_report", "vision_report", "manipulation_report",
+                "equipment_report", "equipment_result", "equipment_handoff", "utm_data_ready",
+                "latest_analysis", "guardian", "latest_guardian_gate", "latest_guardian_gate_decision",
+                "latest_guardian_decision", "runtime_graph", "latest_orchestrator_parallel_checks",
+            } and isinstance(value, dict):
+                compact[key_text] = cls._planning_scalar_summary(value)
+                continue
+            compact[key_text] = compact_runtime_payload(value)
+
+        if isinstance(compact.get("last_stage_payload"), dict):
+            payload = compact["last_stage_payload"]
+            data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+            compact["last_stage_payload"] = {
+                "stage": payload.get("stage"),
+                "data_keys": sorted(str(key) for key in data.keys())[:40],
+            }
+        if isinstance(metadata.get("last_stage_payload"), dict) and "last_stage_payload" not in compact:
+            payload = metadata.get("last_stage_payload") or {}
+            data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+            compact["last_stage_payload"] = {
+                "stage": payload.get("stage"),
+                "data_keys": sorted(str(key) for key in data.keys())[:40],
+            }
+        if isinstance(metadata.get("specimen_result"), dict):
+            compact["specimen_result"] = cls._planning_display_specimen_result(metadata.get("specimen_result"))
+        if isinstance(metadata.get("bo_agent"), dict):
+            compact["bo_agent"] = cls._planning_display_bo_result(metadata.get("bo_agent"))
+        if isinstance(metadata.get("knowledge"), dict):
+            knowledge = metadata.get("knowledge")
+            compact["knowledge"] = cls._select_runtime_fields(
+                compact_runtime_payload(knowledge),
+                (
+                    "retrieval_coverage",
+                    "local_chunks",
+                    "web_results",
+                    "failure_pattern_count",
+                    "success_pattern_count",
+                    "agent_performance_count",
+                    "evolution_pack_count",
+                    "graph_backend_status",
+                    "artifact_paths",
+                    "knowledge_report",
+                    "evolution_proposal",
+                ),
+            )
+        if isinstance(metadata.get("guardian_gates"), list):
+            compact["guardian_gates"] = [
+                cls._select_runtime_fields(item, ("stage", "phase", "decision", "reason_code", "risk_score", "ok_for_next_stage", "created_at"))
+                for item in metadata["guardian_gates"][-20:]
+                if isinstance(item, dict)
+            ]
+        return compact
+
+    @classmethod
+    def _compact_planning_state_for_display(cls, state_json: Any) -> dict[str, Any]:
+        """Return only the state fields the Live GUI needs on frequent refreshes."""
+        if not isinstance(state_json, dict):
+            return {}
+        metadata = state_json.get("run_metadata") if isinstance(state_json.get("run_metadata"), dict) else {}
+        evaluations = state_json.get("experiment_evaluations") if isinstance(state_json.get("experiment_evaluations"), list) else []
+        agent_status = state_json.get("agent_status") if isinstance(state_json.get("agent_status"), dict) else {}
+        return {
+            "run_id": state_json.get("run_id", ""),
+            "experiment_id": state_json.get("experiment_id", ""),
+            "mode": state_json.get("mode", ""),
+            "stage": state_json.get("stage", ""),
+            "active_goal": state_json.get("active_goal", ""),
+            "device_health": compact_runtime_payload(state_json.get("device_health", {})),
+            "current_experiment_spec": cls._planning_display_spec(state_json.get("current_experiment_spec")),
+            "current_experiment_objective": compact_runtime_payload(state_json.get("current_experiment_objective", {})),
+            "experiment_evaluations": cls._planning_list_summary(evaluations, limit=3),
+            "active_session_id": state_json.get("active_session_id", ""),
+            "latest_observations": cls._planning_scalar_summary(state_json.get("latest_observations", {})),
+            "latest_analysis": cls._planning_scalar_summary(state_json.get("latest_analysis", {})),
+            "retry_counters": compact_runtime_payload(state_json.get("retry_counters", {})),
+            "run_metadata": cls._compact_planning_run_metadata(metadata),
+            "agent_status": compact_runtime_payload(agent_status),
+            "fault_injection": compact_runtime_payload(state_json.get("fault_injection", {})),
+            "is_paused": bool(state_json.get("is_paused", False)),
+            "stop_requested": bool(state_json.get("stop_requested", False)),
+            "safe_stop_requested": bool(state_json.get("safe_stop_requested", False)),
+            "loop_count": state_json.get("loop_count", 0),
+        }
+
+    def _planning_state_payload(self) -> dict[str, Any]:
+        """Return a compact state payload for high-frequency Live GUI refreshes."""
+        state_json = self._state.model_dump(mode="json")
+        return self._compact_planning_state_for_display(state_json)
+
+    def planning_snapshot(self, *, session_id: str | None = None) -> dict[str, Any]:
+        """Return current live-planning context with only the latest transcript page."""
+        page = self.planning_messages_page(session_id=session_id, limit=PLANNING_TRANSCRIPT_PAGE_LIMIT)
+        return {
+            "messages": page["messages"],
+            "message_total": page["message_total"],
+            "messages_loaded": page["messages_loaded"],
+            "message_limit": page["message_limit"],
+            "has_more_messages": page["has_more_messages"],
+            "next_before": page["next_before"],
+            "transcript_path": page["transcript_path"],
+            "state": self._planning_state_payload(),
             "runtime": self._runtime_profile(),
             "is_running": bool(self._run_task and not self._run_task.done()) or self._planning_handoff_active(),
             "is_planning_busy": self._planning_request_lock.locked() or self._planning_handoff_active(),
@@ -1452,7 +2500,7 @@ class MainController:
         if goal:
             self._state.active_goal = goal
         if reset:
-            self._planning_messages = []
+            self._reset_planning_transcript()
             self._planning_session_id = None
             self._planning_bootstrapped = False
         self._ensure_planning_intro()
@@ -1484,18 +2532,18 @@ class MainController:
         level: str = "INFO",
         message: str = "Live GUI planning message updated.",
     ) -> None:
-        """Append one Live GUI message and broadcast it immediately for incremental display."""
-        self._planning_messages.append(entry)
+        """Append one Live GUI message and broadcast a compact event for incremental display."""
+        stored_entry = self._record_planning_message(entry)
         await self._broadcast_event(
             {
-                "event_id": f"evt-planning-{len(self._planning_messages)}",
+                "event_id": f"evt-planning-{stored_entry.get('transcript_index', 0)}",
                 "run_id": self._state.run_id,
                 "experiment_id": self._state.experiment_id,
                 "event_type": event_type,
                 "level": level,
                 "message": message,
-                "payload": {"latest": entry},
-                "state": self._state.model_dump(mode="json"),
+                "payload": {"latest": self._compact_planning_message_for_event(stored_entry)},
+                "state": self._planning_state_context(),
             }
         )
 
@@ -1564,6 +2612,181 @@ class MainController:
             message=f"Orchestrator supervisor follow-up recorded for {stage.value}.",
         )
         return followup
+
+    def _runtime_followup_is_active(self, constraints: dict[str, Any]) -> bool:
+        """Return True when a Live GUI chat message should be routed into the active runtime loop."""
+        if bool(constraints.get("live_runtime_followup_queue_only")):
+            return True
+        if bool(constraints.get("live_is_running")):
+            return True
+        if self._run_task and not self._run_task.done():
+            return True
+        return self._planning_handoff_active()
+
+    def _operator_followup_record(
+        self,
+        *,
+        message: str,
+        goal: str | None,
+        constraints: dict[str, Any],
+        session_id: str | None,
+        user_entry: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        now = datetime.now(timezone.utc).isoformat()
+        target_agent = str(
+            constraints.get("live_chat_target_resolved")
+            or constraints.get("live_chat_target")
+            or constraints.get("live_selected_agent")
+            or "orchestrator"
+        )
+        selected_agent = str(constraints.get("live_selected_agent") or "")
+        selected_node = str(
+            constraints.get("live_selected_node_id")
+            or constraints.get("live_selected_graph_node_id")
+            or selected_agent
+            or target_agent
+            or self._state.stage.value
+        )
+        run_context = {
+            "run_id": constraints.get("live_run_id") or self._state.run_id,
+            "mode": constraints.get("live_mode") or self._state.mode.value,
+            "stage": constraints.get("live_stage") or self._state.stage.value,
+            "is_running": bool(constraints.get("live_is_running", bool(self._run_task and not self._run_task.done()))),
+            "active_goal": constraints.get("live_active_goal") or self._state.active_goal,
+        }
+        record = {
+            "schema": "operator_runtime_followup.v1",
+            "followup_id": make_event_id(),
+            "status": "queued",
+            "message": message,
+            "goal": goal or self._state.active_goal,
+            "session_id": session_id or self._planning_session_id or "",
+            "run_id": self._state.run_id,
+            "experiment_id": self._state.experiment_id,
+            "loop_id": self._state.loop_count,
+            "stage_at_submit": self._state.stage.value,
+            "target_agent": target_agent,
+            "target_agent_mode": str(constraints.get("live_chat_target_mode") or ""),
+            "selected_agent": selected_agent,
+            "selected_node": selected_node,
+            "chat_mode": str(constraints.get("live_chat_mode") or "ask"),
+            "operator_intent": normalize_operator_intent(message),
+            "run_context": run_context,
+            "transcript_message_id": user_entry.get("message_id") if isinstance(user_entry, dict) else "",
+            "transcript_index": user_entry.get("transcript_index") if isinstance(user_entry, dict) else None,
+            "created_at": now,
+        }
+        queue = self._state.run_metadata.setdefault("operator_followup_queue", [])
+        if not isinstance(queue, list):
+            queue = []
+            self._state.run_metadata["operator_followup_queue"] = queue
+        queue.append(record)
+        del queue[:-50]
+        history = self._state.run_metadata.setdefault("operator_followups", [])
+        if not isinstance(history, list):
+            history = []
+            self._state.run_metadata["operator_followups"] = history
+        history.append(record)
+        del history[:-200]
+        self._state.run_metadata["latest_operator_followup"] = record
+        return record
+
+    async def _queue_runtime_operator_followup(
+        self,
+        *,
+        message: str,
+        goal: str | None,
+        constraints: dict[str, Any],
+        session_id: str | None,
+        user_entry: dict[str, Any] | None = None,
+        append_ack: bool = False,
+    ) -> dict[str, Any]:
+        record = self._operator_followup_record(
+            message=message,
+            goal=goal,
+            constraints=constraints,
+            session_id=session_id,
+            user_entry=user_entry,
+        )
+        await self.emit_runtime_event(
+            event_type="operator.followup_queued",
+            message="Operator follow-up queued for Orchestrator runtime.",
+            payload={
+                "agent": "orchestrator",
+                "node_id": record.get("stage_at_submit") or self._state.stage.value,
+                "module_id": "orchestrator",
+                "status": "queued",
+                "operator_followup": record,
+                "target_agent_id": record.get("target_agent", ""),
+                "chat_mode": record.get("chat_mode", "ask"),
+                "source": "live_gui_chat",
+            },
+        )
+        if append_ack:
+            await self._append_planning_message(
+                {
+                    "schema": "live_chat_message.v1",
+                    "role": "orchestrator",
+                    "message_type": "decision",
+                    "content": (
+                        "실행 중 입력을 받았습니다. 현재 동작을 끊지 않고 다음 안전한 stage boundary에서 "
+                        "오케스트레이터가 이 내용을 반영합니다."
+                    ),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "model": "orchestrator_supervisor",
+                    "ok": True,
+                    "operator_followup": record,
+                    "requires_response": False,
+                },
+                event_type="planning_operator_followup_queued",
+                message="Operator follow-up queued for active runtime.",
+            )
+        return record
+
+    async def _queue_runtime_operator_followup_message(
+        self,
+        *,
+        message: str,
+        goal: str | None,
+        constraints: dict[str, Any],
+        session_id: str | None,
+    ) -> dict[str, Any]:
+        now = datetime.now(timezone.utc).isoformat()
+        operator_intent = normalize_operator_intent(message)
+        user_entry = self._record_planning_message(
+            {
+                "role": "operator",
+                "content": message,
+                "timestamp": now,
+                "goal": goal or self._state.active_goal,
+                "constraints": constraints,
+                "operator_intent": operator_intent,
+            }
+        )
+        await self.emit_runtime_event(
+            event_type="user_reply",
+            message="Operator follow-up submitted from Live GUI while runtime was busy.",
+            payload={
+                "latest": user_entry,
+                "session_id": session_id or self._planning_session_id or "",
+                "agent_id": constraints.get("live_chat_target_resolved") or constraints.get("live_chat_target") or "orchestrator",
+                "target_agent_id": constraints.get("live_chat_target_resolved") or constraints.get("live_chat_target") or "orchestrator",
+                "stage": constraints.get("live_stage") or self._state.stage.value,
+                "node_id": constraints.get("live_stage") or self._state.stage.value,
+                "operator_intent": operator_intent,
+                "chat_mode": constraints.get("live_chat_mode") or "ask",
+                "source": "live_gui",
+            },
+        )
+        await self._queue_runtime_operator_followup(
+            message=message,
+            goal=goal,
+            constraints=constraints,
+            session_id=session_id,
+            user_entry=user_entry,
+            append_ack=True,
+        )
+        return {"ok": True, "message": "Runtime follow-up queued.", "session": self.planning_snapshot(session_id=session_id)}
 
     async def _record_planning_orchestrator_transition(
         self,
@@ -1832,10 +3055,18 @@ class MainController:
         self._cancel_pending_vllm_transition()
         self._bind_planning_session(session_id)
         self._ensure_planning_intro()
+        constraints = constraints or {}
         clean_message = message.strip()
         if not clean_message:
             return {"ok": False, "message": "Planning message is empty.", "session": self.planning_snapshot(session_id=session_id)}
         if self._planning_request_lock.locked():
+            if self._runtime_followup_is_active(constraints):
+                return await self._queue_runtime_operator_followup_message(
+                    message=clean_message,
+                    goal=goal,
+                    constraints=constraints,
+                    session_id=session_id,
+                )
             return {
                 "ok": False,
                 "message": "Live GUI orchestrator is still reasoning.",
@@ -1846,7 +3077,7 @@ class MainController:
             return await self._planning_message_locked(
                 message=clean_message,
                 goal=goal,
-                constraints=constraints or {},
+                constraints=constraints,
                 session_id=session_id,
             )
 
@@ -1869,7 +3100,7 @@ class MainController:
             "constraints": constraints,
             "operator_intent": operator_intent,
         }
-        self._planning_messages.append(user_entry)
+        user_entry = self._record_planning_message(user_entry)
         target_agent = str(
             constraints.get("live_chat_target_resolved")
             or constraints.get("live_chat_target")
@@ -1931,17 +3162,30 @@ class MainController:
             level="INFO",
         )
 
-        if self._should_trigger_test_design(message):
+        runtime_followup_active = self._runtime_followup_is_active(constraints)
+        if runtime_followup_active:
+            await self._queue_runtime_operator_followup(
+                message=message,
+                goal=goal,
+                constraints=constraints,
+                session_id=session_id,
+                user_entry=user_entry,
+                append_ack=bool(constraints.get("live_runtime_followup_queue_only")),
+            )
+            if bool(constraints.get("live_runtime_followup_queue_only")):
+                return {"ok": True, "message": "Runtime follow-up queued.", "session": self.planning_snapshot(session_id=session_id)}
+
+        if not runtime_followup_active and self._should_trigger_test_design(message):
             return await self._run_test_mode_planning(goal=goal, constraints=constraints, operator_message=message)
 
-        if self._should_route_specimen_printer_choice(message):
+        if not runtime_followup_active and self._should_route_specimen_printer_choice(message):
             self._ensure_pending_specimen_printer_choice()
             return await self._handle_pending_specimen_operator_input(message=message, session_id=session_id)
 
-        if self._state.run_metadata.get("pending_specimen_input"):
+        if not runtime_followup_active and self._state.run_metadata.get("pending_specimen_input"):
             return await self._handle_pending_specimen_operator_input(message=message, session_id=session_id)
 
-        if self._should_trigger_design(message):
+        if not runtime_followup_active and self._should_trigger_design(message):
             readiness = self._planning_design_handoff_readiness(goal=goal, constraints=constraints)
             if readiness["missing"]:
                 return await self._request_missing_design_values(readiness, session_id=session_id)
@@ -2124,7 +3368,7 @@ class MainController:
                 level="INFO",
                 message=response_message,
             )
-            if inline_printer_choice == "physical_print":
+            if inline_printer_choice:
                 return await self._start_planning_handoff_background(goal=test_goal, constraints=test_constraints)
             return await self._handoff_planning_to_design(goal=test_goal, constraints=test_constraints)
         except Exception as exc:
@@ -2150,7 +3394,7 @@ class MainController:
         return bool(task and not task.done())
 
     async def _start_planning_handoff_background(self, *, goal: str | None, constraints: dict[str, Any]) -> dict[str, Any]:
-        """Return the Live GUI request before long physical-print upload/start work blocks fetch."""
+        """Return the Live GUI request before the full test/live planning loop blocks fetch."""
         if self._planning_handoff_active():
             await self._append_planning_message(
                 {
@@ -2165,15 +3409,29 @@ class MainController:
             )
             return {"ok": False, "message": "Planning handoff already active.", "session": self.planning_snapshot()}
 
+        printer_path = str(constraints.get("printer_test_path") or constraints.get("test_printer_path") or "").strip()
+        if printer_path == "physical_print":
+            background_content = "테스트 모드 실제 출력 workflow를 시작했습니다. 슬라이싱, G-code 업로드, 출력 시작은 시간이 걸릴 수 있어 백그라운드에서 계속 진행하고 이 창에 단계별 결과를 갱신합니다."
+            schedule_message = "Physical-print planning handoff scheduled in background."
+        elif printer_path == "installed_printer":
+            background_content = "테스트 모드 설치 프린터 통신 검증 workflow를 시작했습니다. Specimen Making 이후 Vision, Manipulation, Equipment, Analysis, Knowledge, BO, Guardian까지 백그라운드 closed-loop로 진행하고 단계별 결과를 이 창에 갱신합니다."
+            schedule_message = "Installed-printer test planning handoff scheduled in background."
+        elif printer_path == "virtual_bridge":
+            background_content = "테스트 모드 가상 브릿지 workflow를 시작했습니다. Specimen Making의 virtual PrusaLink boundary를 통과한 뒤 Vision, Manipulation, Equipment, Analysis, Knowledge, BO, Guardian까지 백그라운드 closed-loop로 진행하고 단계별 결과를 이 창에 갱신합니다."
+            schedule_message = "Virtual-bridge test planning handoff scheduled in background."
+        else:
+            background_content = "Live GUI workflow를 시작했습니다. 전체 agent closed-loop는 백그라운드에서 진행하고 이 창에 단계별 결과를 갱신합니다."
+            schedule_message = "Planning handoff scheduled in background."
+
         await self._append_planning_message(
             {
                 "role": "system",
-                "content": "테스트 모드 실제 출력 workflow를 시작했습니다. 슬라이싱, G-code 업로드, 출력 시작은 시간이 걸릴 수 있어 백그라운드에서 계속 진행하고 이 창에 단계별 결과를 갱신합니다.",
+                "content": background_content,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "ok": True,
             },
             event_type="planning_handoff",
-            message="Physical-print planning handoff scheduled in background.",
+            message=schedule_message,
         )
 
         async def _runner() -> dict[str, Any]:
@@ -2205,7 +3463,7 @@ class MainController:
                 pass
 
         task.add_done_callback(_clear)
-        return {"ok": True, "message": "Physical-print planning handoff started.", "session": self.planning_snapshot()}
+        return {"ok": True, "message": "Planning handoff started in background.", "session": self.planning_snapshot()}
 
     async def _build_live_orchestrator_prompt(
         self,
@@ -2778,7 +4036,22 @@ class MainController:
         merged_constraints: dict[str, Any] = {}
         detected_goal = "" if self._is_generic_planning_goal(goal) else str(goal or "").strip()
 
-        for entry in self._planning_messages:
+        history_page = self.planning_messages_page(limit=PLANNING_TRANSCRIPT_MAX_PAGE_LIMIT)
+        history_entries = list(history_page.get("messages", []))
+        seen_history_keys = {
+            str(entry.get("message_id") or entry.get("transcript_index") or id(entry))
+            for entry in history_entries
+            if isinstance(entry, dict)
+        }
+        for entry in self._planning_messages[-PLANNING_TRANSCRIPT_MAX_PAGE_LIMIT:]:
+            if not isinstance(entry, dict):
+                continue
+            key = str(entry.get("message_id") or entry.get("transcript_index") or id(entry))
+            if key in seen_history_keys:
+                continue
+            history_entries.append(entry)
+            seen_history_keys.add(key)
+        for entry in history_entries:
             if not isinstance(entry, dict) or entry.get("role") != "operator":
                 continue
             entry_constraints = entry.get("constraints") if isinstance(entry.get("constraints"), dict) else {}
@@ -4148,6 +5421,17 @@ class MainController:
         if "guardian" in data:
             self._state.run_metadata["guardian"] = data["guardian"]
         self._state.run_metadata["last_stage_payload"] = {"stage": stage.value, "data": data}
+        self._compact_planning_runtime_state()
+
+    def _compact_planning_runtime_state(self) -> None:
+        """Keep Live GUI handoff state bounded after agent payload merges."""
+        self._state.run_metadata = self._compact_planning_run_metadata(self._state.run_metadata)
+        self._state.current_experiment_spec = compact_runtime_payload(self._state.current_experiment_spec)
+        self._state.current_experiment_objective = compact_runtime_payload(self._state.current_experiment_objective)
+        self._state.latest_observations = compact_runtime_payload(self._state.latest_observations)
+        self._state.latest_analysis = compact_runtime_payload(self._state.latest_analysis)
+        self._state.experiment_evaluations = compact_runtime_payload(self._state.experiment_evaluations)
+        trim_runtime_memory()
 
     @staticmethod
     def _planning_stage_role(stage: Stage) -> str:

@@ -1,0 +1,398 @@
+{
+  "package_name": "autonomous_researcher_live_gui_uiux_package_v2",
+  "generated_at": "2026-05-31T14:55:41.549835+00:00",
+  "description": "Separated UI/UX implementation package with reference images, crops, tokens, component specs, screen specs, data contracts, prompts, and implementation guides.",
+  "assets": [
+    {
+      "path": "00_references/user_supplied/00_current_live_gui_original.png",
+      "source_filename": "93f60ac0-e2e6-4b0f-97cb-d4ac0f86ae74.png",
+      "bytes": 1115186,
+      "md5": "329324d4288407136e61a311670b3a34"
+    },
+    {
+      "path": "00_references/user_supplied/01_dashboard_style_reference_hiring_overview.png",
+      "source_filename": "cd12b094-98b9-482c-90d1-1f91726a80c5.png",
+      "bytes": 123238,
+      "md5": "35df46a087090384a6f64b750fbfaf86"
+    },
+    {
+      "path": "00_references/user_supplied/02_live_gui_upgrade_plan.md",
+      "source_filename": "11_live_gui_control_surface_upgrade_plan.md",
+      "bytes": 32374,
+      "md5": "338e0ab6818032302b2e5d21f02cd432"
+    },
+    {
+      "path": "00_references/generated_full_screens/00_overall_live_gui_layout.png",
+      "source_filename": "실시간_미션_대시보드_ui.png",
+      "bytes": 1541938,
+      "md5": "986409e62e7c4ae20b2285b424291bba"
+    },
+    {
+      "path": "00_references/generated_full_screens/01_orchestrator_agent_report.png",
+      "source_filename": "자율_연구_대시보드_ui.png",
+      "bytes": 1539889,
+      "md5": "7a0382a72f9305876a37985201b5b77a"
+    },
+    {
+      "path": "00_references/generated_full_screens/02_design_agent_report.png",
+      "source_filename": "디자인_에이전트_대시보드_보고서.png",
+      "bytes": 1635471,
+      "md5": "a75c67bef116100f97f063d4f325b621"
+    },
+    {
+      "path": "00_references/generated_full_screens/03_specimen_making_agent_report.png",
+      "source_filename": "3d_프린팅_대시보드_ui.png",
+      "bytes": 1637039,
+      "md5": "5bb5e58be90f9a37d930182c259de050"
+    },
+    {
+      "path": "00_references/generated_full_screens/04_vision_agent_report.png",
+      "source_filename": "미래형_비전_검사_대시보드_ui.png",
+      "bytes": 1599541,
+      "md5": "f36828cce482c11cf5342f7582bd3b97"
+    },
+    {
+      "path": "00_references/generated_full_screens/05_manipulation_agent_report.png",
+      "source_filename": "자율_연구_대시보드_실시간_모니터링.png",
+      "bytes": 1606306,
+      "md5": "49c4fcc6fbff2a26871e01fbad07ebb2"
+    },
+    {
+      "path": "00_references/generated_full_screens/06_lab_equipment_agent_report.png",
+      "source_filename": "실험실_장비_대시보드_보고서.png",
+      "bytes": 1559395,
+      "md5": "920cf25d242b7565b094691192d25bbf"
+    },
+    {
+      "path": "00_references/generated_full_screens/07_analysis_agent_report.png",
+      "source_filename": "분석_에이전트_대시보드_ui.png",
+      "bytes": 1571513,
+      "md5": "e5e86ccdf8751002bc26713320f39641"
+    },
+    {
+      "path": "00_references/generated_full_screens/08_bayesian_optimization_agent_report.png",
+      "source_filename": "자율_연구_대시보드_보고서.png",
+      "bytes": 1671061,
+      "md5": "b0679f02168246399d56d89ff23199a9"
+    },
+    {
+      "path": "00_references/generated_full_screens/09_uiux_design_system_board.png",
+      "source_filename": "자율_연구자_gui_디자인_시스템.png",
+      "bytes": 1594711,
+      "md5": "47ac38538667ae938264215c9b9de03e"
+    },
+    {
+      "path": "00_references/component_crops_from_design_system/00_header_brand_principles.png",
+      "derived_from": "09_uiux_design_system_board.png",
+      "crop_box_1672x941": [
+        0,
+        0,
+        1672,
+        78
+      ]
+    },
+    {
+      "path": "00_references/component_crops_from_design_system/01_color_palette.png",
+      "derived_from": "09_uiux_design_system_board.png",
+      "crop_box_1672x941": [
+        28,
+        72,
+        357,
+        274
+      ]
+    },
+    {
+      "path": "00_references/component_crops_from_design_system/02_typography.png",
+      "derived_from": "09_uiux_design_system_board.png",
+      "crop_box_1672x941": [
+        360,
+        72,
+        568,
+        274
+      ]
+    },
+    {
+      "path": "00_references/component_crops_from_design_system/03_spacing_grid.png",
+      "derived_from": "09_uiux_design_system_board.png",
+      "crop_box_1672x941": [
+        574,
+        72,
+        839,
+        274
+      ]
+    },
+    {
+      "path": "00_references/component_crops_from_design_system/04_card_anatomy.png",
+      "derived_from": "09_uiux_design_system_board.png",
+      "crop_box_1672x941": [
+        846,
+        72,
+        1149,
+        274
+      ]
+    },
+    {
+      "path": "00_references/component_crops_from_design_system/05_button_hierarchy_states.png",
+      "derived_from": "09_uiux_design_system_board.png",
+      "crop_box_1672x941": [
+        1158,
+        72,
+        1642,
+        274
+      ]
+    },
+    {
+      "path": "00_references/component_crops_from_design_system/06_form_elements.png",
+      "derived_from": "09_uiux_design_system_board.png",
+      "crop_box_1672x941": [
+        28,
+        280,
+        357,
+        493
+      ]
+    },
+    {
+      "path": "00_references/component_crops_from_design_system/07_agent_status_chips.png",
+      "derived_from": "09_uiux_design_system_board.png",
+      "crop_box_1672x941": [
+        360,
+        280,
+        568,
+        493
+      ]
+    },
+    {
+      "path": "00_references/component_crops_from_design_system/08_icon_style.png",
+      "derived_from": "09_uiux_design_system_board.png",
+      "crop_box_1672x941": [
+        574,
+        280,
+        839,
+        493
+      ]
+    },
+    {
+      "path": "00_references/component_crops_from_design_system/09_alert_notice_states.png",
+      "derived_from": "09_uiux_design_system_board.png",
+      "crop_box_1672x941": [
+        846,
+        280,
+        1050,
+        493
+      ]
+    },
+    {
+      "path": "00_references/component_crops_from_design_system/10_chart_styles.png",
+      "derived_from": "09_uiux_design_system_board.png",
+      "crop_box_1672x941": [
+        1056,
+        280,
+        1412,
+        493
+      ]
+    },
+    {
+      "path": "00_references/component_crops_from_design_system/11_artifact_card.png",
+      "derived_from": "09_uiux_design_system_board.png",
+      "crop_box_1672x941": [
+        1418,
+        280,
+        1642,
+        493
+      ]
+    },
+    {
+      "path": "00_references/component_crops_from_design_system/12_primary_user_flow.png",
+      "derived_from": "09_uiux_design_system_board.png",
+      "crop_box_1672x941": [
+        28,
+        502,
+        1642,
+        590
+      ]
+    },
+    {
+      "path": "00_references/component_crops_from_design_system/13_mini_overall_dashboard.png",
+      "derived_from": "09_uiux_design_system_board.png",
+      "crop_box_1672x941": [
+        28,
+        596,
+        400,
+        884
+      ]
+    },
+    {
+      "path": "00_references/component_crops_from_design_system/14_mini_report_view.png",
+      "derived_from": "09_uiux_design_system_board.png",
+      "crop_box_1672x941": [
+        404,
+        596,
+        690,
+        884
+      ]
+    },
+    {
+      "path": "00_references/component_crops_from_design_system/15_mini_backend_trace.png",
+      "derived_from": "09_uiux_design_system_board.png",
+      "crop_box_1672x941": [
+        692,
+        596,
+        994,
+        884
+      ]
+    },
+    {
+      "path": "00_references/component_crops_from_design_system/16_mini_approval_modal.png",
+      "derived_from": "09_uiux_design_system_board.png",
+      "crop_box_1672x941": [
+        998,
+        596,
+        1264,
+        884
+      ]
+    },
+    {
+      "path": "00_references/component_crops_from_design_system/17_mini_artifact_viewer.png",
+      "derived_from": "09_uiux_design_system_board.png",
+      "crop_box_1672x941": [
+        1268,
+        596,
+        1642,
+        884
+      ]
+    },
+    {
+      "path": "00_references/layout_crops_from_overall/00_top_mission_status_bar.png",
+      "derived_from": "00_overall_live_gui_layout.png",
+      "crop_box_1672x941": [
+        0,
+        0,
+        1672,
+        68
+      ]
+    },
+    {
+      "path": "00_references/layout_crops_from_overall/01_left_agent_rail.png",
+      "derived_from": "00_overall_live_gui_layout.png",
+      "crop_box_1672x941": [
+        8,
+        70,
+        214,
+        724
+      ]
+    },
+    {
+      "path": "00_references/layout_crops_from_overall/02_center_orchestrator_report_area.png",
+      "derived_from": "00_overall_live_gui_layout.png",
+      "crop_box_1672x941": [
+        218,
+        70,
+        1143,
+        724
+      ]
+    },
+    {
+      "path": "00_references/layout_crops_from_overall/03_right_operator_console_chat.png",
+      "derived_from": "00_overall_live_gui_layout.png",
+      "crop_box_1672x941": [
+        1148,
+        70,
+        1664,
+        724
+      ]
+    },
+    {
+      "path": "00_references/layout_crops_from_overall/04_bottom_events_devices_logs_artifacts_dock.png",
+      "derived_from": "00_overall_live_gui_layout.png",
+      "crop_box_1672x941": [
+        8,
+        727,
+        1664,
+        926
+      ]
+    },
+    {
+      "path": "00_references/layout_crops_from_overall/05_mission_contract_card.png",
+      "derived_from": "00_overall_live_gui_layout.png",
+      "crop_box_1672x941": [
+        230,
+        160,
+        540,
+        390
+      ]
+    },
+    {
+      "path": "00_references/layout_crops_from_overall/06_decision_register_card.png",
+      "derived_from": "00_overall_live_gui_layout.png",
+      "crop_box_1672x941": [
+        770,
+        160,
+        1130,
+        390
+      ]
+    },
+    {
+      "path": "00_references/layout_crops_from_overall/07_route_graph_card.png",
+      "derived_from": "00_overall_live_gui_layout.png",
+      "crop_box_1672x941": [
+        230,
+        398,
+        760,
+        700
+      ]
+    },
+    {
+      "path": "00_references/layout_crops_from_overall/08_experiment_setup_form.png",
+      "derived_from": "00_overall_live_gui_layout.png",
+      "crop_box_1672x941": [
+        1160,
+        110,
+        1632,
+        340
+      ]
+    },
+    {
+      "path": "00_references/layout_crops_from_overall/09_artifact_strip.png",
+      "derived_from": "00_overall_live_gui_layout.png",
+      "crop_box_1672x941": [
+        1034,
+        758,
+        1638,
+        914
+      ]
+    }
+  ],
+  "components": [
+    "layout_shell",
+    "top_mission_bar",
+    "agent_rail",
+    "report_card",
+    "status_chip",
+    "operator_chat",
+    "approval_card",
+    "artifact_card",
+    "bottom_dock",
+    "backend_trace_panel",
+    "route_graph",
+    "chart_card"
+  ],
+  "screens": [
+    "overall_dashboard",
+    "orchestrator_agent_report",
+    "design_agent_report",
+    "specimen_making_agent_report",
+    "vision_agent_report",
+    "manipulation_agent_report",
+    "lab_equipment_agent_report",
+    "analysis_agent_report",
+    "bayesian_optimization_agent_report",
+    "uiux_design_system"
+  ],
+  "entry_points": {
+    "readme": "README_KR.md",
+    "preview_html": "07_preview/index.html",
+    "design_tokens_css": "01_design_tokens/design_tokens.css",
+    "design_tokens_json": "01_design_tokens/design_tokens.json",
+    "implementation_mapping": "06_implementation_guides/implementation_mapping.md"
+  }
+}

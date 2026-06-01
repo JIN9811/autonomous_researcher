@@ -1,0 +1,26 @@
+{
+  "title": "Manipulation Agent Report",
+  "agent_id": "manipulation",
+  "image": "../00_references/generated_full_screens/05_manipulation_agent_report.png",
+  "sections": [
+    "success_metrics",
+    "grasp_plan",
+    "waypoint_sequence",
+    "motion_execution",
+    "robot_workspace",
+    "reachability_map",
+    "collision_safety",
+    "object_pose_handoff",
+    "motion_trajectory",
+    "reaction_timeline",
+    "camera_views",
+    "key_artifacts"
+  ],
+  "primary_visuals": [
+    "robot workspace",
+    "trajectory line chart",
+    "reachability heatmap",
+    "grasp score donut",
+    "camera thumbnails"
+  ]
+}

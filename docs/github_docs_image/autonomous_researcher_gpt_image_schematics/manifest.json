@@ -1,0 +1,96 @@
+{
+  "package": "autonomous_researcher_gpt_image_schematics",
+  "created_at": "2026-05-31T14:53:04.617339+00:00",
+  "image_format": "PNG",
+  "slide_aspect_ratio": "16:9",
+  "files": [
+    {
+      "filename": "images_16x9_png/00_autonomous_researcher_overview.png",
+      "source_filename": "자율_연구_시스템_아키텍처.png",
+      "description": "Autonomous Researcher flagship architecture overview",
+      "width": 1672,
+      "height": 941,
+      "sha256": "e09444a2140e0a854af4f3033212f0084c503ba7195d410430a43e7eb2aa3cf7"
+    },
+    {
+      "filename": "images_16x9_png/01_design_agent_schematic.png",
+      "source_filename": "디자인_에이전트_시스템_아키텍처.png",
+      "description": "Design Agent schematic",
+      "width": 1672,
+      "height": 941,
+      "sha256": "a6c33c81e4a379ae3519800fb947282ea8bff86bdf13a6d33d0f8ef7f80a8fb0"
+    },
+    {
+      "filename": "images_16x9_png/02_specimen_making_agent_schematic.png",
+      "source_filename": "자율_제작_시스템_다이어그램.png",
+      "description": "Specimen Making Agent schematic",
+      "width": 1672,
+      "height": 941,
+      "sha256": "da5d2907d0e5f8e2e8afd84094ecf3676bb2e75ef76a9442b9813d789c7cb7c4"
+    },
+    {
+      "filename": "images_16x9_png/03_vision_agent_schematic.png",
+      "source_filename": "비전_에이전트_아키텍처_다이어그램.png",
+      "description": "Vision Agent schematic",
+      "width": 1672,
+      "height": 941,
+      "sha256": "f94833f61e1b3308d191266972c236afa1d633cf97dae9532fa0bcd8241c1358"
+    },
+    {
+      "filename": "images_16x9_png/04_manipulation_agent_schematic.png",
+      "source_filename": "조작_에이전트_시스템_아키텍처.png",
+      "description": "Manipulation Agent schematic",
+      "width": 1672,
+      "height": 941,
+      "sha256": "e98bb8f2970f437b4ce1beaf959877c9a9098c9ea96ad3ff5c655e94841e7d40"
+    },
+    {
+      "filename": "images_16x9_png/05_lab_equipment_agent_schematic.png",
+      "source_filename": "실험_장비_에이전트_흐름도.png",
+      "description": "Lab Equipment Agent schematic",
+      "width": 1672,
+      "height": 941,
+      "sha256": "d9ecc00d677cf4c81772a4ec339294574e66ee16c060a14dd3281eb0d5c4722d"
+    },
+    {
+      "filename": "images_16x9_png/06_analysis_agent_schematic.png",
+      "source_filename": "분석_에이전트_데이터_파이프라인.png",
+      "description": "Analysis Agent schematic",
+      "width": 1672,
+      "height": 941,
+      "sha256": "0506f0d4e2bea75986e4b49b70d26ff3d4397fed33612839878c17a385c958ec"
+    },
+    {
+      "filename": "images_16x9_png/07_bo_agent_schematic.png",
+      "source_filename": "bo_에이전트_시스템_흐름도.png",
+      "description": "BO Agent schematic",
+      "width": 1672,
+      "height": 941,
+      "sha256": "c3fd8d0c59b265b618e636cfa3c9e62065b849e15de1adee16534df67cf254d2"
+    },
+    {
+      "filename": "images_16x9_png/08_knowledge_agent_schematic.png",
+      "source_filename": "지식_에이전트_시스템_다이어그램.png",
+      "description": "Knowledge Agent schematic",
+      "width": 1672,
+      "height": 941,
+      "sha256": "ded7907b93626fd54771f8f36e7ecc89ce975fa2678263ccac102ba644ad8b8a"
+    },
+    {
+      "filename": "images_16x9_png/09_guardian_agent_schematic.png",
+      "source_filename": "거버넌스_에이전트_시스템_다이어그램.png",
+      "description": "Guardian Agent schematic",
+      "width": 1672,
+      "height": 941,
+      "sha256": "e19f95607c144f0f65c3383a4a205965ba7cd18e65c365f6848d2c79e02691fb"
+    },
+    {
+      "filename": "images_16x9_png/10_orchestration_agent_schematic.png",
+      "source_filename": "오케스트레이션_에이전트_시스템_아키텍처.png",
+      "description": "Orchestration Agent schematic",
+      "width": 1672,
+      "height": 941,
+      "sha256": "6b31f06b4084ee92443eed6c358019ee5569e94b0051226c9b877237c7d1538f"
+    }
+  ]
+}

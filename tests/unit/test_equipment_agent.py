@@ -195,6 +195,32 @@ async def test_equipment_agent_test_mode_falls_back_to_safe_plan(tmp_path: Path)
 
 
 @pytest.mark.asyncio
+async def test_equipment_agent_live_gui_test_mode_uses_safe_plan_on_non_json(tmp_path: Path) -> None:
+    ctx = _CtxStub(_tools(tmp_path), "not-json")
+    state = _state(
+        mode=Mode.LIVE,
+        active_goal="테스트 모드, 가상 브릿지",
+        experiment_spec={
+            "test_mode_autofill": True,
+            "test_mode_llm_generated": True,
+            "printer_test_path": "virtual_bridge",
+        },
+    )
+
+    result = await LabEquipmentAgent().run(state, ctx)
+
+    assert result.success is True
+    assert result.data["equipment_result"]["program_id"] == "utm_compression_start_v1"
+    assert result.data["equipment_handoff"]["status"] == "ready_for_analysis"
+    assert result.data["utm_data_ready"]["status"] == "ready"
+    assert result.data["hardware_alerts"] == []
+    assert "using safe equipment tool plan" in result.data["protocol_note"]
+    assert result.data["equipment_report"]["mode"] == "test"
+    assert result.data["equipment_report"]["physical_verification"]["all_required_ok"] is True
+    assert result.data["equipment_report"]["data_ledger"]["parse_ready"] is True
+
+
+@pytest.mark.asyncio
 async def test_equipment_agent_stops_before_run_when_health_fails() -> None:
     tools = ToolRegistry()
     tools.register(

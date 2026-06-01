@@ -1,0 +1,137 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autonomous-researcher.local/schemas/live_chat_message.v1.schema.json",
+  "title": "live_chat_message.v1",
+  "type": "object",
+  "required": [
+    "schema",
+    "agent_id",
+    "message_type",
+    "headline",
+    "content",
+    "timestamp",
+    "run_id"
+  ],
+  "properties": {
+    "schema": {
+      "const": "live_chat_message.v1"
+    },
+    "agent_id": {
+      "enum": [
+        "objective",
+        "orchestrator",
+        "design",
+        "specimen",
+        "vision",
+        "manipulation",
+        "equipment",
+        "analysis",
+        "bo",
+        "knowledge",
+        "guardian",
+        "system"
+      ]
+    },
+    "role": {
+      "type": "string"
+    },
+    "message_type": {
+      "enum": [
+        "status",
+        "question",
+        "decision",
+        "warning",
+        "handoff",
+        "artifact",
+        "approval",
+        "incident",
+        "signal",
+        "tool_call"
+      ]
+    },
+    "headline": {
+      "type": "string",
+      "minLength": 1
+    },
+    "content": {
+      "type": "string"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "stage": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "node_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "run_id": {
+      "type": "string"
+    },
+    "requires_response": {
+      "type": "boolean",
+      "default": false
+    },
+    "actions": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "approve",
+          "reject",
+          "revise",
+          "edit",
+          "retry",
+          "pause",
+          "resume",
+          "open_report",
+          "open_backend",
+          "open_artifact",
+          "open_graph",
+          "safe_stop"
+        ]
+      }
+    },
+    "evidence_refs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "artifact_refs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "risk": {
+      "type": "object",
+      "properties": {
+        "score": {
+          "type": "number"
+        },
+        "class": {
+          "enum": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "critical"
+          ]
+        }
+      }
+    },
+    "payload_ref": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  }
+}

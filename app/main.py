@@ -1149,7 +1149,7 @@ def _system_resource_snapshot() -> dict[str, object]:
 
 def _guardian_status_payload(run_id: str | None = None, *, snapshot: dict[str, object] | None = None) -> dict[str, object]:
     """Build a graph-wide Guardian monitor payload for Live GUI and Runtime IDE consumers."""
-    snapshot = snapshot if isinstance(snapshot, dict) else controller.snapshot()
+    snapshot = snapshot if isinstance(snapshot, dict) else controller.planning_snapshot()
     state = snapshot.get("state", {}) if isinstance(snapshot.get("state"), dict) else {}
     active_run_id = str(state.get("run_id") or _current_run_id() or "")
     requested_run_id = str(run_id or active_run_id)
@@ -8887,6 +8887,16 @@ async def stream_runtime_events_compat() -> StreamingResponse:
 async def get_planning_session(session_id: str | None = None) -> dict[str, object]:
     """Return planning conversation state without starting hardware."""
     return controller.planning_snapshot(session_id=session_id)
+
+
+@app.get("/api/planning/messages")
+async def get_planning_messages(
+    session_id: str | None = None,
+    before: int | None = None,
+    limit: int = 80,
+) -> dict[str, object]:
+    """Return one lazy-loaded page from the file-backed Live GUI transcript."""
+    return controller.planning_messages_page(session_id=session_id, before=before, limit=limit)
 
 
 @app.post("/api/planning/bootstrap")

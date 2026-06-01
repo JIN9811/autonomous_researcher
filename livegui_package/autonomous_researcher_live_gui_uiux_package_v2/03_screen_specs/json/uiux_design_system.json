@@ -1,0 +1,25 @@
+{
+  "title": "UI/UX Design System Board",
+  "agent_id": "system",
+  "image": "../00_references/generated_full_screens/09_uiux_design_system_board.png",
+  "sections": [
+    "color_palette",
+    "typography",
+    "spacing_grid",
+    "card_anatomy",
+    "buttons",
+    "forms",
+    "status_chips",
+    "icons",
+    "alerts",
+    "chart_styles",
+    "artifact_card",
+    "primary_user_flow",
+    "mini_mockups"
+  ],
+  "primary_visuals": [
+    "design tokens",
+    "component states",
+    "screen miniatures"
+  ]
+}

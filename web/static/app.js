@@ -29,6 +29,7 @@ const runIndicatorEl = document.getElementById("run-indicator");
 const metricStageEl = document.getElementById("metric-stage");
 const metricModeEl = document.getElementById("metric-mode");
 const metricLoopEl = document.getElementById("metric-loop");
+const metricCycleEl = document.getElementById("metric-cycle");
 const levelFilterEl = document.getElementById("log-level-filter");
 const graphStageIndicatorEl = document.getElementById("graph-stage-indicator");
 const langGraphNodesEl = document.getElementById("langgraph-nodes");
@@ -859,12 +860,24 @@ function renderDeviceStatus(deviceHealth) {
   }
 }
 
+function formatRuntimeCycleLabel(state = {}, isRunning = false) {
+  const mode = String(state.mode || "test").toLowerCase();
+  const stage = String(state.stage || "idle").toLowerCase();
+  const completed = Number(state.loop_count || 0);
+  const active = Boolean(isRunning && !["complete", "error", "idle"].includes(stage));
+  const current = Math.max(active ? completed + 1 : completed, 0);
+  if (mode === "test") return `C:${current}/5`;
+  if (mode === "live") return current > 0 ? `C:${current}` : "C:0";
+  return `C:${current}`;
+}
+
 function updateIndicators(snapshot) {
   const state = snapshot.state || {};
   captureVisitedStage(state, Boolean(snapshot.is_running));
   if (metricStageEl) metricStageEl.textContent = state.stage || "idle";
   if (metricModeEl) metricModeEl.textContent = state.mode || "test";
   if (metricLoopEl) metricLoopEl.textContent = String(state.loop_count || 0);
+  if (metricCycleEl) metricCycleEl.textContent = formatRuntimeCycleLabel(state, Boolean(snapshot.is_running));
   if (snapshot.is_running) {
     runIndicatorEl.textContent = "RUNNING";
     runIndicatorEl.className = "badge running";

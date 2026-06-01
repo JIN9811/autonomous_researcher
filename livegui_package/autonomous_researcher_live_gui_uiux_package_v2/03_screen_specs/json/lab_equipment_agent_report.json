@@ -1,0 +1,23 @@
+{
+  "title": "Lab Equipment Agent Report",
+  "agent_id": "equipment",
+  "image": "../00_references/generated_full_screens/06_lab_equipment_agent_report.png",
+  "sections": [
+    "equipment_readiness",
+    "live_test_status",
+    "load_displacement_preview",
+    "test_recipe",
+    "sensor_channels",
+    "environmental_conditions",
+    "safety_interlocks",
+    "event_log",
+    "control_approval"
+  ],
+  "primary_visuals": [
+    "readiness gauges",
+    "load-displacement chart",
+    "sensor sparklines",
+    "temperature/humidity mini charts",
+    "safety checklist"
+  ]
+}

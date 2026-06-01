@@ -46,6 +46,27 @@ class LabEquipmentAgent(BaseAgent):
     _UTM_DEFAULT_PROGRAM = "utm_compression_start_v1"
     _RESULT_FILE_KEYS = ("result_file", "result_path", "csv_path", "utm_result_file", "utm_csv_path", "artifact_path")
 
+    @staticmethod
+    def _is_live_gui_test_spec(state: OrchestratorState) -> bool:
+        spec = state.current_experiment_spec if isinstance(state.current_experiment_spec, dict) else {}
+        return bool(
+            spec.get("test_mode_autofill")
+            or spec.get("test_mode_llm_generated")
+            or spec.get("test_printer_path")
+            or spec.get("printer_test_path")
+            or spec.get("printer_bridge_mode")
+            or spec.get("printer_test_mode")
+        )
+
+    @classmethod
+    def _test_like_mode(cls, state: OrchestratorState) -> bool:
+        """Treat Live GUI test handoffs as test mode for deterministic equipment execution."""
+        return state.mode == Mode.TEST or cls._is_live_gui_test_spec(state)
+
+    @classmethod
+    def _effective_runtime_mode(cls, state: OrchestratorState) -> str:
+        return "test" if cls._test_like_mode(state) else state.mode.value
+
     def _program_hint(self, state: OrchestratorState) -> str:
         spec = state.current_experiment_spec if isinstance(state.current_experiment_spec, dict) else {}
         candidates: list[Any] = [
@@ -103,6 +124,30 @@ class LabEquipmentAgent(BaseAgent):
             return [dict(item) for item in raw if isinstance(item, dict)]
         return []
 
+    def _has_explicit_equipment_plan(self, state: OrchestratorState) -> bool:
+        """Return true only when the experiment spec intentionally selects equipment control."""
+        spec = state.current_experiment_spec if isinstance(state.current_experiment_spec, dict) else {}
+        direct_keys = (
+            "lab_equipment_program_id",
+            "equipment_pyautogui_program_id",
+            "pyautogui_program_id",
+            "equipment_program_id",
+            "program_id",
+            "equipment_command",
+            "command",
+            "lab_equipment_sequence",
+            "equipment_pyautogui_sequence",
+            "equipment_sequence",
+            "pyautogui_sequence",
+        )
+        if any(spec.get(key) for key in direct_keys):
+            return True
+        for key in ("lab_equipment", "equipment", "pyautogui"):
+            nested = spec.get(key) if isinstance(spec.get(key), dict) else {}
+            if any(nested.get(child_key) for child_key in ("program_id", "command", "pyautogui_sequence", "sequence")):
+                return True
+        return False
+
     def _tool_plan_prompt(self, state: OrchestratorState, tools: list[str]) -> str:
         spec = state.current_experiment_spec if isinstance(state.current_experiment_spec, dict) else {}
         program_hint = self._program_hint(state)
@@ -115,7 +160,7 @@ class LabEquipmentAgent(BaseAgent):
             "Never output raw Python, shell, PowerShell, or unregistered tool names.\n"
             "Return strict JSON only with keys: note, calls.\n"
             "calls is a list of {tool, payload}. Prefer health -> list_programs -> run for macro commands.\n\n"
-            f"mode={state.mode.value}\n"
+            f"mode={self._effective_runtime_mode(state)}\n"
             f"active_goal={state.active_goal}\n"
             f"program_hint={program_hint}\n"
             f"sequence_hint={json.dumps(sequence_hint, ensure_ascii=True)}\n"
@@ -201,7 +246,7 @@ class LabEquipmentAgent(BaseAgent):
     def _base_run_payload(self, state: OrchestratorState) -> dict[str, Any]:
         return {
             "sequence_id": f"equipment-{state.run_id}",
-            "runtime_mode": state.mode.value,
+            "runtime_mode": self._effective_runtime_mode(state),
             "run_id": state.run_id,
             "experiment_id": state.experiment_id,
             "active_goal": state.active_goal,
@@ -788,10 +833,11 @@ class LabEquipmentAgent(BaseAgent):
         signal = vision.get("vision_signal") if isinstance(vision.get("vision_signal"), dict) else {}
         blocking: list[str] = []
         manipulation_status = str(manipulation.get("completion_status") or manipulation.get("handoff_status") or "unknown")
-        specimen_present = bool(transfer.get("ready", state.mode == Mode.TEST)) or bool(signal.get("value", False)) or state.mode == Mode.TEST
+        test_like = self._test_like_mode(state)
+        specimen_present = bool(transfer.get("ready", test_like)) or bool(signal.get("value", False)) or test_like
         robot_clear = not bool(vision.get("robot_in_utm_path", False))
         anomaly = bool(vision.get("anomaly", False))
-        if state.mode == Mode.LIVE:
+        if state.mode == Mode.LIVE and not test_like:
             if not specimen_present:
                 blocking.append("VISION_SPECIMEN_ON_FIXTURE_REQUIRED")
             if not robot_clear:
@@ -802,7 +848,7 @@ class LabEquipmentAgent(BaseAgent):
             "manipulation_handoff_status": manipulation_status,
             "vision_fixture_object_present": specimen_present,
             "vision_robot_clear": robot_clear,
-            "utm_app_ready": True if state.mode == Mode.TEST else "unknown",
+            "utm_app_ready": True if test_like else "unknown",
             "blocking_reasons": blocking,
         }
 
@@ -929,7 +975,7 @@ class LabEquipmentAgent(BaseAgent):
         )
 
     def _equipment_vision_cross_checks(self, *, state: OrchestratorState, source_stage_context: dict[str, Any]) -> dict[str, Any]:
-        if state.mode == Mode.TEST:
+        if self._test_like_mode(state):
             checks = {
                 "utm_pre_start": {"ok": True, "source": "test_mode_simulated", "confidence": 1.0},
                 "utm_motion_confirm": {"ok": True, "source": "test_mode_simulated", "confidence": 1.0},
@@ -1124,7 +1170,8 @@ class LabEquipmentAgent(BaseAgent):
             return None
         code = str(failure_code or (blocking_reasons[0] if blocking_reasons else "EQUIPMENT_VERIFICATION_FAILED"))
         device_class, component, device = self._equipment_alert_component(code, is_utm=is_utm)
-        severity = "critical" if state.mode == Mode.LIVE and code in {"UTM_NO_MOTION_AFTER_START", "VISION_UTM_MOTION_CONFIRM_REQUIRED"} else "blocking"
+        test_like = self._test_like_mode(state)
+        severity = "critical" if state.mode == Mode.LIVE and not test_like and code in {"UTM_NO_MOTION_AFTER_START", "VISION_UTM_MOTION_CONFIRM_REQUIRED"} else "blocking"
         alert_id_seed = f"{state.run_id}:{state.loop_count}:{component}:{code}"
         alert_id = "equipment-alert-" + hashlib.sha1(alert_id_seed.encode("utf-8")).hexdigest()[:12]
         created_at = datetime.now(timezone.utc).isoformat()
@@ -1230,11 +1277,12 @@ class LabEquipmentAgent(BaseAgent):
         expected_request_specimen_id = str(source_specimen.get("specimen_id") or state.current_experiment_spec.get("specimen_id") or "")
         expected_request_program_id = program_id
         is_utm = self._is_utm_program(program_id) or str(run_payload.get("program_type") or "") == "utm_protocol"
+        test_like = self._test_like_mode(state)
         preconditions = self._equipment_preconditions(state=state, source_stage_context=source_stage_context)
         vision_requests = self._equipment_vision_requests(state=state, source_stage_context=source_stage_context)
         vision_cross_checks = self._equipment_vision_cross_checks(state=state, source_stage_context=source_stage_context)
         data_path = self._result_file_path(equipment_result)
-        if state.mode == Mode.TEST and is_utm and bool(equipment_result.get("ok", False)) and not data_path:
+        if test_like and is_utm and bool(equipment_result.get("ok", False)) and not data_path:
             specimen = source_stage_context.get("specimen") if isinstance(source_stage_context.get("specimen"), dict) else {}
             artifact = self._write_test_utm_csv(
                 state=state,
@@ -1279,18 +1327,18 @@ class LabEquipmentAgent(BaseAgent):
         physical_checks = equipment_result.get("physical_checks") if isinstance(equipment_result.get("physical_checks"), dict) else {}
         if not physical_checks:
             physical_checks = {
-                "vision_motion_confirmed": bool(state.mode == Mode.TEST and is_utm),
-                "specimen_alignment_ok": bool(state.mode == Mode.TEST and is_utm),
-                "fixture_safe_to_access": bool(state.mode == Mode.TEST and is_utm),
+                "vision_motion_confirmed": bool(test_like and is_utm),
+                "specimen_alignment_ok": bool(test_like and is_utm),
+                "fixture_safe_to_access": bool(test_like and is_utm),
                 "evidence_frame_ids": [],
-                "simulated": state.mode == Mode.TEST and is_utm,
+                "simulated": test_like and is_utm,
             }
         if is_utm:
             physical_checks["vision_cross_checks"] = vision_cross_checks
             physical_checks["evidence_frame_ids"] = sorted(
                 set([str(item) for item in physical_checks.get("evidence_frame_ids", [])] + vision_cross_checks.get("evidence_frame_ids", []))
             )
-            if state.mode == Mode.LIVE:
+            if state.mode == Mode.LIVE and not test_like:
                 physical_checks["vision_motion_confirmed"] = bool(vision_cross_checks["checks"].get("utm_motion_confirm", {}).get("ok"))
                 physical_checks["specimen_alignment_ok"] = bool(vision_cross_checks["checks"].get("utm_pre_start", {}).get("ok"))
                 physical_checks["fixture_safe_to_access"] = bool(vision_cross_checks["checks"].get("utm_test_complete", {}).get("ok"))
@@ -1326,7 +1374,7 @@ class LabEquipmentAgent(BaseAgent):
         cross_checks = equipment_result.get("cross_checks") if isinstance(equipment_result.get("cross_checks"), dict) else {}
         screen_started = bool(cross_checks.get("screen_started", any(item.get("ok") for item in screen_checks if isinstance(item, dict))))
         physical_started = bool(cross_checks.get("physical_motion_started", physical_checks.get("vision_motion_confirmed")))
-        if state.mode == Mode.LIVE and is_utm:
+        if state.mode == Mode.LIVE and not test_like and is_utm:
             physical_started = bool(vision_cross_checks.get("all_required_ok"))
         cross_checks = {
             "screen_started": screen_started,
@@ -1335,7 +1383,7 @@ class LabEquipmentAgent(BaseAgent):
             "data_file_created": bool(cross_checks.get("data_file_created", bool(data_path and Path(data_path).exists()))),
             "data_parse_probe_ok": bool(probe.get("ok")) and cross_checks.get("data_parse_probe_ok") is not False,
         }
-        windows_gui_live = bool(is_utm and state.mode == Mode.LIVE and bridge_provider == "windows_pyautogui")
+        windows_gui_live = bool(is_utm and state.mode == Mode.LIVE and not test_like and bridge_provider == "windows_pyautogui")
         required_screen_checkpoints = ["before_start", "after_start", "after_complete"]
         screen_by_checkpoint = {
             str(item.get("checkpoint") or ""): item
@@ -1524,9 +1572,9 @@ class LabEquipmentAgent(BaseAgent):
             blocking_reasons.append("UTM_PROTOCOL_REQUIRED")
         if is_utm and not cross_checks["data_parse_probe_ok"]:
             blocking_reasons.append(str(probe.get("failure_code") or "UTM_DATA_PARSE_FAILED"))
-        if is_utm and state.mode == Mode.LIVE and not vision_cross_checks.get("all_required_ok"):
+        if is_utm and state.mode == Mode.LIVE and not test_like and not vision_cross_checks.get("all_required_ok"):
             blocking_reasons.extend(str(item) for item in vision_cross_checks.get("blocking_reasons", []))
-        if is_utm and state.mode == Mode.LIVE and not cross_checks["physical_motion_started"]:
+        if is_utm and state.mode == Mode.LIVE and not test_like and not cross_checks["physical_motion_started"]:
             blocking_reasons.append("UTM_NO_MOTION_AFTER_START")
         if windows_gui_live and not screen_evidence_complete:
             blocking_reasons.append("UTM_SCREEN_EVIDENCE_INCOMPLETE")
@@ -1586,7 +1634,7 @@ class LabEquipmentAgent(BaseAgent):
             "schema": "equipment_report.v1",
             "report_version": "lab_equipment_utm_visual_control_v1",
             "run_id": state.run_id,
-            "mode": state.mode.value,
+            "mode": self._effective_runtime_mode(state),
             "task_id": "utm_compression_test" if is_utm else "equipment_macro_setup",
             "bridge": {
                 "provider": bridge_provider,
@@ -1602,7 +1650,7 @@ class LabEquipmentAgent(BaseAgent):
                 "pyautogui_pause": bridge_artifact_context.get("pyautogui_pause", ""),
                 "pyautogui_simulated": bridge_artifact_context.get("pyautogui_simulated", ""),
                 "pyautogui_error": bridge_artifact_context.get("pyautogui_error", ""),
-                "live_execute_enabled": state.mode == Mode.LIVE and (bridge_provider == "windows_pyautogui" or bool(equipment_result.get("ok"))),
+                "live_execute_enabled": state.mode == Mode.LIVE and not test_like and (bridge_provider == "windows_pyautogui" or bool(equipment_result.get("ok"))),
                 "bridge_url": bridge_artifact_context.get("bridge_url", ""),
                 "bridge_url_host": bridge_artifact_context.get("bridge_host", ""),
                 "remote_server_version": bridge_artifact_context.get("server_version", ""),
@@ -1922,8 +1970,9 @@ class LabEquipmentAgent(BaseAgent):
         return payload
 
     async def _legacy_utm(self, state: OrchestratorState, ctx: AgentContext) -> AgentResult:
-        profile = "test_profile" if state.mode.value != "live" else "live_profile"
-        timeout_s = 30.0 if state.mode == Mode.TEST else None
+        test_like = self._test_like_mode(state)
+        profile = "test_profile" if test_like or state.mode.value != "live" else "live_profile"
+        timeout_s = 30.0 if test_like else None
         try:
             protocol = await ctx.complete(
                 "tool_formatting",
@@ -1932,7 +1981,7 @@ class LabEquipmentAgent(BaseAgent):
             )
             protocol_note = protocol.text[:220]
         except Exception as exc:
-            if state.mode == Mode.TEST:
+            if test_like:
                 protocol_note = f"E2B degraded in test mode: {exc.__class__.__name__}"
             else:
                 protocol_note = f"Direct UTM live path blocked before LLM formatting completed: {exc.__class__.__name__}"
@@ -1942,7 +1991,7 @@ class LabEquipmentAgent(BaseAgent):
         direct_config = self._direct_utm_config_from_spec(state)
         payload = {
             "profile": str(direct_config.get("profile") or profile),
-            "runtime_mode": state.mode.value,
+            "runtime_mode": self._effective_runtime_mode(state),
             "run_id": state.run_id,
             "experiment_id": state.experiment_id,
             "specimen_id": str(specimen.get("specimen_id") or state.current_experiment_spec.get("specimen_id") or "specimen-test"),
@@ -1994,8 +2043,10 @@ class LabEquipmentAgent(BaseAgent):
         if "equipment.pyautogui.run" not in available_tools:
             return await self._legacy_utm(state, ctx)
 
-        timeout_s = 30.0 if state.mode == Mode.TEST else None
+        test_like = self._test_like_mode(state)
+        timeout_s = 30.0 if test_like else None
         raw_plan: dict[str, Any] | None = None
+        force_safe_test_plan = test_like and not self._has_explicit_equipment_plan(state)
         try:
             response = await ctx.complete(
                 "tool_formatting",
@@ -2006,11 +2057,14 @@ class LabEquipmentAgent(BaseAgent):
             if raw_plan is None:
                 raise ValueError("Equipment tool planner returned non-JSON output.")
         except Exception as exc:
-            if state.mode == Mode.TEST:
+            if test_like:
                 raw_plan = self._fallback_tool_plan(state)
                 raw_plan["note"] = f"E2B degraded in test mode: {exc.__class__.__name__}; using safe equipment tool plan"
             else:
                 raise
+        if force_safe_test_plan:
+            raw_plan = self._fallback_tool_plan(state)
+            raw_plan["note"] = "using safe equipment tool plan; no explicit equipment program was provided, so UTM bridge plan is enforced"
 
         protocol_note, calls = self._normalize_plan(raw_plan or {}, state)
         base_payload = self._base_run_payload(state)
@@ -2037,13 +2091,13 @@ class LabEquipmentAgent(BaseAgent):
         if (
             "vision.equipment_cross_check" in available_tools
             and self._planned_utm_program(calls, state)
-            and (state.mode == Mode.TEST or not self._has_equipment_vision_results(source_stage_context))
+            and (test_like or not self._has_equipment_vision_results(source_stage_context))
         ):
             vision_checks = self._equipment_vision_requests(state=state, source_stage_context=source_stage_context)
             vision_payload = {
                 "run_id": state.run_id,
                 "experiment_id": state.experiment_id,
-                "runtime_mode": state.mode.value,
+                "runtime_mode": self._effective_runtime_mode(state),
                 "checks": vision_checks,
                 "source_stage_context": source_stage_context,
             }
@@ -2111,7 +2165,7 @@ class LabEquipmentAgent(BaseAgent):
                         result = {
                             "ok": False,
                             "tool": "equipment.pyautogui.run",
-                            "mode": state.mode.value,
+                            "mode": self._effective_runtime_mode(state),
                             "bridge": "windows_pyautogui",
                             "status": "blocked",
                             "program_id": program_id,
@@ -2154,7 +2208,7 @@ class LabEquipmentAgent(BaseAgent):
             None,
         )
         if run_tool_result is not None and "equipment.pyautogui.request_log" in available_tools:
-            audit_payload = {"runtime_mode": state.mode.value}
+            audit_payload = {"runtime_mode": self._effective_runtime_mode(state)}
             audit_result = await self._call_tool(ctx, "equipment.pyautogui.request_log", audit_payload)
             tool_results.append({"tool": "equipment.pyautogui.request_log", "result": audit_result})
 

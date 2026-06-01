@@ -86,9 +86,11 @@ vllm:
         persistent: true
         hf_repo: bg-digitalservices/Gemma-4-E4B-it-NVFP4
         quantization: modelopt_fp4
-        speculative_method: mtp
-        assistant_repo: google/gemma-4-E4B-it-assistant
-        num_speculative_tokens: 4
+        # e4b + NVFP4 + MTP repeatedly triggered CUDA device-side asserts in vLLM.
+        # Keep e4b on stable target-only serving; 31B still uses MTP.
+        speculative_method: disabled
+        assistant_repo: ""
+        num_speculative_tokens: 0
         nvfp4_gemm_backend: marlin
 
 server:

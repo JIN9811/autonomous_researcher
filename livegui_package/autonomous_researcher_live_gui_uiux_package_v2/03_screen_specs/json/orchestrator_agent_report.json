@@ -1,0 +1,22 @@
+{
+  "title": "Orchestrator Agent Report",
+  "agent_id": "orchestrator",
+  "image": "../00_references/generated_full_screens/01_orchestrator_agent_report.png",
+  "sections": [
+    "mission_contract",
+    "route_state",
+    "missing_inputs",
+    "decision_register",
+    "followup_questions",
+    "approval_summary",
+    "risk_register",
+    "task_queue",
+    "next_action"
+  ],
+  "primary_visuals": [
+    "route graph",
+    "decision donut",
+    "stage progress",
+    "task queue table"
+  ]
+}

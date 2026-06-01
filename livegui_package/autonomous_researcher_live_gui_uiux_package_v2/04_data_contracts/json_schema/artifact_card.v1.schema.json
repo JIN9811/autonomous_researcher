@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "artifact_card.v1",
+  "type": "object",
+  "required": [
+    "artifact_id",
+    "filename",
+    "type",
+    "agent_id",
+    "created_at"
+  ],
+  "properties": {
+    "artifact_id": {
+      "type": "string"
+    },
+    "filename": {
+      "type": "string"
+    },
+    "type": {
+      "type": "string"
+    },
+    "agent_id": {
+      "enum": [
+        "objective",
+        "orchestrator",
+        "design",
+        "specimen",
+        "vision",
+        "manipulation",
+        "equipment",
+        "analysis",
+        "bo",
+        "knowledge",
+        "guardian",
+        "system"
+      ]
+    },
+    "created_at": {
+      "type": "string"
+    },
+    "size_bytes": {
+      "type": "integer"
+    },
+    "preview_url": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "download_url": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "metadata": {
+      "type": "object"
+    }
+  }
+}

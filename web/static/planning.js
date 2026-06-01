@@ -25,11 +25,13 @@ const planningMaterialInput = document.getElementById("planning-material-input")
 const planningSizeInput = document.getElementById("planning-size-input");
 const planningTimeInput = document.getElementById("planning-time-input");
 const planningStageLabel = document.getElementById("planning-stage-label");
+const planningCycleLabel = document.getElementById("planning-cycle-label");
 const planningRunDetail = document.getElementById("planning-run-detail");
 const planningStateDot = document.getElementById("planning-state-dot");
 const planningSpecSummary = document.getElementById("planning-spec-summary");
 const planningChatLog = document.getElementById("planning-chat-log");
 const planningChatStatus = document.getElementById("planning-chat-status");
+const liveRuntimeTitle = document.querySelector(".live-runtime-title");
 const planningMessageInput = document.getElementById("planning-message-input");
 const btnPlanningRefresh = document.getElementById("btn-planning-refresh");
 const btnPlanningGenerate = document.getElementById("btn-planning-generate");
@@ -49,7 +51,6 @@ const liveTimelineFilters = Array.from(document.querySelectorAll(".live-timeline
 const liveChatTarget = document.getElementById("live-chat-target");
 const liveChatMode = document.getElementById("live-chat-mode");
 const liveChatContextStrip = document.getElementById("live-chat-context-strip");
-const liveApprovalPanel = document.getElementById("live-approval-panel");
 const liveTimelineStrip = document.getElementById("live-timeline-strip");
 const liveDeviceStrip = document.getElementById("live-device-strip");
 const liveActiveAgentChip = document.getElementById("live-active-agent-chip");
@@ -67,11 +68,25 @@ const liveHoverTooltip = document.getElementById("live-hover-tooltip");
 const liveShortcutOverlay = document.getElementById("live-shortcut-overlay");
 const btnLiveShortcutsClose = document.getElementById("btn-live-shortcuts-close");
 const LIVE_UI_STATE_KEY = "autonomousLiveGuiUiState";
+const LIVE_SESSION_CACHE_KEY_PREFIX = "autonomousLivePlanningSessionCache:v2:";
+const LIVE_BOX_CACHE_IDS = [
+  "live-agent-binder-list",
+  "live-focus-strip",
+  "live-report-panel",
+  "live-backend-panel",
+  "live-graph-panel",
+  "live-artifact-panel",
+  "live-timeline-detail-panel",
+  "live-timeline-strip",
+  "live-device-strip",
+];
+const LIVE_BOX_CACHE_MAX_ITEM_CHARS = 220000;
+const LIVE_BOX_CACHE_MAX_TOTAL_CHARS = 700000;
 const LIVE_VIEW_IDS = new Set(["report", "backend", "graph", "artifacts", "timeline"]);
 const LIVE_TIMELINE_FILTER_IDS = new Set(["all", "info", "warning", "error", "tool", "artifact", "handoff"]);
 
 const LIVE_AGENTS = [
-  { id: "objective", label: "Objective", short: "OBJ", stage: "idle", icon: "◎", iconPath: "/static/live_gui_icons/objective.svg" },
+  { id: "objective", label: "Objective", short: "OBJ", stage: "idle", icon: "◎", iconPath: "/static/live_gui_icons/objective.svg?v=20260602-objective-contract-1" },
   { id: "orchestrator", label: "Orchestrator", short: "ORC", stage: "orchestrator", icon: "◇", iconPath: "/static/live_gui_icons/orchestrator.svg" },
   { id: "design", label: "Design Agent", short: "DSN", stage: "design", icon: "D", iconPath: "/static/live_gui_icons/design_agent.svg" },
   { id: "specimen", label: "Specimen Agent", short: "SPC", stage: "specimen", icon: "S", iconPath: "/static/live_gui_icons/specimen_agent.svg" },
@@ -85,7 +100,9 @@ const LIVE_AGENTS = [
 ];
 
 let liveSelectedAgent = "orchestrator";
+let liveOrchestratorReady = false;
 let liveCurrentView = "report";
+let liveReportPage = "agent";
 let liveLastSession = {};
 let liveLastSnapshot = {};
 let liveRecentEvents = [];
@@ -96,6 +113,8 @@ let liveGraphActionStatus = null;
 let liveSelectedGraphNodeId = "";
 let liveSelectedEventKey = "";
 let liveGraphSelectionCleared = false;
+let liveGraphFocusPending = false;
+let liveGraphLastFocusKey = "";
 let liveSelectedReportSectionTitle = "Overview / Summary";
 let liveTimelineFilter = "all";
 let liveApprovals = { approvals: [], pending: [], resolved: [] };
@@ -114,6 +133,7 @@ let liveLastSyncAt = null;
 let liveLastEventAt = null;
 let liveSyncFailureCount = 0;
 let liveRefreshInFlight = null;
+let liveAuxRefreshInFlight = null;
 const LIVE_AUTO_REFRESH_MS = 5000;
 const LIVE_SYNC_STALE_MS = 15000;
 const LIVE_SYNC_ERROR_MS = 60000;
@@ -124,6 +144,19 @@ const liveCenterRenderKeys = new Map();
 let queryGoal = "Design and validate a live-mode specimen plan before hardware execution.";
 let queryBackend = "vllm";
 let planningMessagesCache = [];
+let planningDisplayedMessages = [];
+const planningDisplayedMessageKeys = new Set();
+const planningDisplayedChatItemKeys = new Set();
+let planningMessageRevealQueue = [];
+let planningMessageRevealTimer = null;
+let planningDisplayInitialized = false;
+const planningExpandedChatGroups = new Set();
+const PLANNING_RENDER_CACHE_LIMIT = 240;
+const PLANNING_PERSIST_CACHE_MESSAGE_LIMIT = 80;
+const PLANNING_STORAGE_CACHE_MAX_CHARS = 1200000;
+const PLANNING_MESSAGE_REVEAL_DELAY_MS = 500;
+const PLANNING_MESSAGE_REVEAL_MAX_QUEUE = 8;
+const PLANNING_MESSAGE_REVEAL_TAIL_COUNT = 4;
 const BO_EXPANDED_STORAGE_KEY = "atr_live_bo_expanded_cards";
 function loadExpandedBoCards() {
   try {
@@ -145,15 +178,22 @@ function saveExpandedBoCards() {
 let liveExpandedBoCards = loadExpandedBoCards();
 let planningSessionId = "";
 let planningThinkingCount = 0;
+let planningMessageSubmitInFlight = false;
 let liveQuickActionBusy = false;
 let liveSafeStopArmedUntil = 0;
 let liveSafeStopArmTimer = null;
+let liveEmergencyStopArmedUntil = 0;
+let liveEmergencyStopArmTimer = null;
 let liveBackendPlanningBusy = false;
 let liveBottomCollapsed = false;
 let planningBootstrapStarted = false;
 let planningRefreshTimer = null;
 let planningFreshSessionInitialized = false;
 let planningPendingSpecimenInput = null;
+let planningHistoryHasMore = false;
+let planningHistoryTotal = 0;
+let planningHistoryLoading = false;
+let planningHistorySessionId = "";
 
 function liveSessionStorage() {
   try {
@@ -225,6 +265,7 @@ function liveUiStatePayload() {
   return {
     selectedAgent: knownLiveAgent(liveSelectedAgent) ? liveSelectedAgent : "orchestrator",
     currentView: LIVE_VIEW_IDS.has(liveCurrentView) ? liveCurrentView : "report",
+    reportPage: liveReportPage === "attention" ? "attention" : "agent",
     selectedGraphNodeId: String(liveSelectedGraphNodeId || ""),
     selectedEventKey: String(liveSelectedEventKey || ""),
     graphSelectionCleared: Boolean(liveGraphSelectionCleared),
@@ -233,6 +274,7 @@ function liveUiStatePayload() {
     chatTarget: liveChatTarget && validLiveChatTarget(liveChatTarget.value) ? String(liveChatTarget.value) : "selected_agent",
     chatMode: liveChatMode ? String(liveChatMode.value || "ask") : "ask",
     bottomCollapsed: Boolean(liveBottomCollapsed),
+    expandedChatGroups: Array.from(planningExpandedChatGroups).slice(-120),
     planningSessionId: planningSessionId || "",
     updatedAt: new Date().toISOString(),
   };
@@ -248,6 +290,237 @@ function persistLiveUiState() {
   }
 }
 
+function collectLiveBoxCache() {
+  const boxes = {};
+  let totalChars = 0;
+  LIVE_BOX_CACHE_IDS.forEach((id) => {
+    const element = document.getElementById(id);
+    if (!element) return;
+    const html = String(element.innerHTML || "");
+    if (!html.trim() || html.length > LIVE_BOX_CACHE_MAX_ITEM_CHARS) return;
+    if (totalChars + html.length > LIVE_BOX_CACHE_MAX_TOTAL_CHARS) return;
+    totalChars += html.length;
+    boxes[id] = {
+      html,
+      hidden: Boolean(element.hidden),
+      scrollTop: Number(element.scrollTop || 0),
+    };
+  });
+  return {
+    version: 1,
+    savedAt: new Date().toISOString(),
+    currentView: LIVE_VIEW_IDS.has(liveCurrentView) ? liveCurrentView : "report",
+    selectedAgent: knownLiveAgent(liveSelectedAgent) ? liveSelectedAgent : "orchestrator",
+    expandedChatGroups: Array.from(planningExpandedChatGroups).slice(-120),
+    boxes,
+  };
+}
+
+function trimLiveBoxCache(boxCache) {
+  if (!boxCache || typeof boxCache !== "object") return null;
+  const boxes = boxCache.boxes && typeof boxCache.boxes === "object" ? boxCache.boxes : {};
+  const orderedIds = [
+    liveCurrentView === "report" ? "live-report-panel" : "",
+    liveCurrentView === "backend" ? "live-backend-panel" : "",
+    liveCurrentView === "graph" ? "live-graph-panel" : "",
+    liveCurrentView === "artifacts" ? "live-artifact-panel" : "",
+    liveCurrentView === "timeline" ? "live-timeline-detail-panel" : "",
+    "live-agent-binder-list",
+    "live-focus-strip",
+    "live-timeline-strip",
+    "live-device-strip",
+  ].filter(Boolean);
+  const kept = {};
+  let totalChars = 0;
+  orderedIds.forEach((id) => {
+    const item = boxes[id];
+    if (!item || typeof item.html !== "string") return;
+    if (item.html.length > LIVE_BOX_CACHE_MAX_ITEM_CHARS) return;
+    if (totalChars + item.html.length > Math.floor(LIVE_BOX_CACHE_MAX_TOTAL_CHARS / 2)) return;
+    totalChars += item.html.length;
+    kept[id] = item;
+  });
+  return { ...boxCache, boxes: kept };
+}
+
+function applyCachedExpandedChatGroups(saved = {}) {
+  if (!Array.isArray(saved.expandedChatGroups)) return;
+  planningExpandedChatGroups.clear();
+  saved.expandedChatGroups.forEach((key) => {
+    const clean = String(key || "").trim();
+    if (clean) planningExpandedChatGroups.add(clean);
+  });
+}
+
+function restoreLiveBoxCache(boxCache) {
+  if (!boxCache || typeof boxCache !== "object") return false;
+  const boxes = boxCache.boxes && typeof boxCache.boxes === "object" ? boxCache.boxes : {};
+  let restored = false;
+  applyCachedExpandedChatGroups(boxCache);
+  Object.entries(boxes).forEach(([id, item]) => {
+    const element = document.getElementById(id);
+    if (!element || !item || typeof item.html !== "string") return;
+    element.innerHTML = item.html;
+    const scrollTop = Number(item.scrollTop || 0);
+    if (Number.isFinite(scrollTop) && scrollTop > 0) {
+      window.requestAnimationFrame(() => { element.scrollTop = scrollTop; });
+    }
+    restored = true;
+  });
+  if (LIVE_VIEW_IDS.has(boxCache.currentView)) liveCurrentView = boxCache.currentView;
+  if (knownLiveAgent(boxCache.selectedAgent)) liveSelectedAgent = boxCache.selectedAgent;
+  liveReportPage = boxCache.reportPage === "attention" ? "attention" : "agent";
+  setLiveView(liveCurrentView, { render: false });
+  syncLiveTooltipAttributes(document);
+  return restored;
+}
+
+function planningSessionCacheKey(sessionId = "") {
+  const clean = String(sessionId || planningSessionId || "").trim();
+  return clean ? `${LIVE_SESSION_CACHE_KEY_PREFIX}${clean}` : "";
+}
+
+function compactPlanningStateForStorage(state = {}) {
+  if (!state || typeof state !== "object") return {};
+  const metadata = state.run_metadata && typeof state.run_metadata === "object" ? state.run_metadata : {};
+  const compactMetadata = {};
+  [
+    "pending_specimen_input",
+    "latest_orchestrator_followup",
+    "latest_orchestrator_decision",
+    "latest_orchestrator_handoff",
+    "latest_mission_contract",
+    "latest_orchestration_plan",
+    "design_report",
+    "design_candidate",
+    "fabrication_report",
+    "specimen_result",
+    "vision_report",
+    "vision_signal",
+    "manipulation_report",
+    "robot_task_result",
+    "equipment_report",
+    "equipment_result",
+    "utm_data_ready",
+    "equipment_handoff",
+    "bo_agent",
+    "bo_recommended_constraints",
+    "knowledge",
+    "guardian",
+    "latest_guardian_decision",
+  ].forEach((key) => {
+    if (metadata[key] !== undefined) compactMetadata[key] = metadata[key];
+  });
+  return {
+    run_id: state.run_id || "",
+    experiment_id: state.experiment_id || "",
+    mode: state.mode || "",
+    stage: state.stage || "",
+    active_goal: state.active_goal || "",
+    current_experiment_spec: state.current_experiment_spec || {},
+    current_experiment_objective: state.current_experiment_objective || {},
+    is_paused: Boolean(state.is_paused),
+    stop_requested: Boolean(state.stop_requested),
+    safe_stop_requested: Boolean(state.safe_stop_requested),
+    loop_count: Number(state.loop_count || 0),
+    run_metadata: compactMetadata,
+  };
+}
+
+function compactPlanningSessionForStorage(session = {}) {
+  const source = session && typeof session === "object" ? session : {};
+  return {
+    planning_session_id: source.planning_session_id || planningSessionId || "",
+    message_total: Number(source.message_total || 0),
+    messages_loaded: Number(source.messages_loaded || 0),
+    message_limit: Number(source.message_limit || 0),
+    has_more_messages: Boolean(source.has_more_messages),
+    next_before: source.next_before ?? null,
+    transcript_path: source.transcript_path || "",
+    is_running: Boolean(source.is_running),
+    is_planning_busy: Boolean(source.is_planning_busy),
+    messages: Array.isArray(source.messages) ? source.messages.slice(-PLANNING_PERSIST_CACHE_MESSAGE_LIMIT) : [],
+    state: compactPlanningStateForStorage(source.state || {}),
+    runtime: source.runtime && typeof source.runtime === "object" ? { backend: source.runtime.backend, mode: source.runtime.mode, active_models: source.runtime.active_models } : {},
+  };
+}
+
+function persistLivePlanningCache(session = liveLastSession) {
+  const storage = liveSessionStorage();
+  if (!storage) return;
+  const sessionId = (session && session.planning_session_id) || planningSessionId || "";
+  const key = planningSessionCacheKey(sessionId);
+  if (!key) return;
+  const cachedSession = compactPlanningSessionForStorage(session);
+  const payload = {
+    savedAt: new Date().toISOString(),
+    planningSessionId: sessionId,
+    session: cachedSession,
+    snapshot: {
+      state: cachedSession.state || {},
+      runtime: cachedSession.runtime || {},
+    },
+    guardianStatus: typeof liveGuardianStatusPayload === "function" ? liveGuardianStatusPayload() : liveGuardianStatus,
+    recentEvents: Array.isArray(liveRecentEvents) ? liveRecentEvents.slice(-30) : [],
+    graph: null,
+    boxes: collectLiveBoxCache(),
+    ui: liveUiStatePayload(),
+  };
+  try {
+    let serialized = JSON.stringify(payload);
+    if (serialized.length > PLANNING_STORAGE_CACHE_MAX_CHARS) {
+      payload.boxes = trimLiveBoxCache(payload.boxes);
+      serialized = JSON.stringify(payload);
+    }
+    if (serialized.length > PLANNING_STORAGE_CACHE_MAX_CHARS) {
+      payload.session.messages = payload.session.messages.slice(-20);
+      payload.snapshot = { state: compactPlanningStateForStorage(payload.session.state || {}), runtime: payload.session.runtime || {} };
+      payload.recentEvents = [];
+      payload.boxes = trimLiveBoxCache(payload.boxes);
+      serialized = JSON.stringify(payload);
+    }
+    storage.setItem(key, serialized);
+  } catch (err) {
+    try {
+      payload.recentEvents = [];
+      payload.graph = null;
+      storage.setItem(key, JSON.stringify(payload));
+    } catch (fallbackErr) {
+      // Cache is opportunistic; never block Live GUI operation on storage quota.
+    }
+  }
+}
+
+function restoreCachedPlanningState() {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get("fresh") === "1") return false;
+  const storage = liveSessionStorage();
+  const key = planningSessionCacheKey(ensurePlanningSessionId());
+  if (!storage || !key) return false;
+  try {
+    const raw = storage.getItem(key) || "";
+    if (!raw) return false;
+    if (raw.length > PLANNING_STORAGE_CACHE_MAX_CHARS) {
+      storage.removeItem(key);
+      return false;
+    }
+    const payload = JSON.parse(raw);
+    if (!payload || typeof payload !== "object" || !payload.session) return false;
+    liveLastSnapshot = payload.snapshot || liveLastSnapshot || {};
+    liveGuardianStatus = normalizeGuardianStatusPayload(payload.guardianStatus) || liveGuardianStatus;
+    liveRecentEvents = Array.isArray(payload.recentEvents) ? payload.recentEvents : liveRecentEvents;
+    liveGraphPayload = payload.graph || liveGraphPayload;
+    applyCachedExpandedChatGroups(payload.ui || {});
+    applyPlanningSession(payload.session || {});
+    const restoredBoxes = restoreLiveBoxCache(payload.boxes || null);
+    if (restoredBoxes) persistLivePlanningCache(liveLastSession);
+    setChatStatus("RESTORED", "idle", "Last browser-cached Live GUI state restored; server sync is running.");
+    return true;
+  } catch (err) {
+    return false;
+  }
+}
+
 function restoreLiveUiState() {
   const params = new URLSearchParams(window.location.search);
   const storage = liveSessionStorage();
@@ -260,11 +533,13 @@ function restoreLiveUiState() {
     const saved = JSON.parse(storage.getItem(LIVE_UI_STATE_KEY) || "{}");
     if (knownLiveAgent(saved.selectedAgent)) liveSelectedAgent = saved.selectedAgent;
     if (LIVE_VIEW_IDS.has(saved.currentView)) liveCurrentView = saved.currentView;
+    liveReportPage = saved.reportPage === "attention" ? "attention" : "agent";
     if (LIVE_TIMELINE_FILTER_IDS.has(saved.timelineFilter)) liveTimelineFilter = saved.timelineFilter;
     liveSelectedGraphNodeId = String(saved.selectedGraphNodeId || "");
     liveSelectedEventKey = String(saved.selectedEventKey || "");
     liveGraphSelectionCleared = Boolean(saved.graphSelectionCleared);
     liveSelectedReportSectionTitle = String(saved.selectedReportSectionTitle || liveSelectedReportSectionTitle || "Overview / Summary");
+    applyCachedExpandedChatGroups(saved);
     if (liveChatMode && saved.chatMode) liveChatMode.value = String(saved.chatMode);
     if (liveChatTarget && validLiveChatTarget(saved.chatTarget)) liveChatTarget.value = saved.chatTarget;
     setLiveBottomCollapsed(Boolean(saved.bottomCollapsed), { persist: false });
@@ -560,14 +835,26 @@ function collectOptionalConstraints() {
   return constraints;
 }
 
-function collectPlanningPayload(message) {
+function collectPlanningPayload(message, options = {}) {
+  const constraints = collectOptionalConstraints();
+  if (options.runtimeFollowupQueueOnly) {
+    constraints.live_runtime_followup_queue_only = true;
+    constraints.live_followup_source = "live_gui_busy_chat";
+  }
   return {
     message,
     goal: planningGoalInput ? planningGoalInput.value : queryGoal,
     backend: queryBackend,
     session_id: ensurePlanningSessionId(),
-    constraints: collectOptionalConstraints(),
+    constraints,
   };
+}
+
+function setLiveOrchestratorReady(isReady) {
+  if (!isReady || liveOrchestratorReady) return;
+  liveOrchestratorReady = true;
+  document.body?.classList.add("live-orchestrator-ready");
+  liveRuntimeTitle?.classList.add("orchestrator-ready");
 }
 
 function setChatStatus(label, cls = "idle", title = null) {
@@ -575,6 +862,10 @@ function setChatStatus(label, cls = "idle", title = null) {
   planningChatStatus.textContent = label;
   planningChatStatus.className = `badge ${cls}`;
   planningChatStatus.title = title || label;
+  const normalizedLabel = String(label || "").trim().toUpperCase();
+  if (normalizedLabel === "READY" && cls !== "warning" && cls !== "error") {
+    setLiveOrchestratorReady(true);
+  }
 }
 
 function relativeTimeLabel(value) {
@@ -654,14 +945,16 @@ function markLiveStreamState(state, eventTs = null) {
 }
 
 function updatePlanningControls() {
-  const isBusy = planningThinkingCount > 0 || liveQuickActionBusy || liveBackendPlanningBusy;
+  const runtimeBusy = planningThinkingCount > 0 || liveQuickActionBusy || liveBackendPlanningBusy;
   if (btnPlanningSend) {
-    btnPlanningSend.disabled = isBusy;
-    btnPlanningSend.title = liveBackendPlanningBusy ? "Backend orchestrator is still reasoning in this session" : "Send message (Ctrl+Enter)";
+    btnPlanningSend.disabled = planningMessageSubmitInFlight;
+    btnPlanningSend.title = runtimeBusy
+      ? "Queue an Orchestrator follow-up for the running loop"
+      : "Send message (Ctrl+Enter)";
   }
   if (btnPlanningGenerate) {
-    btnPlanningGenerate.disabled = isBusy;
-    btnPlanningGenerate.title = liveBackendPlanningBusy ? "Backend orchestrator is still reasoning in this session" : "Draft Plan";
+    btnPlanningGenerate.disabled = runtimeBusy;
+    btnPlanningGenerate.title = runtimeBusy ? "Backend orchestrator is still reasoning in this session" : "Draft Plan";
   }
 }
 
@@ -694,12 +987,6 @@ function resetLiveSafeStopArm() {
     window.clearTimeout(liveSafeStopArmTimer);
     liveSafeStopArmTimer = null;
   }
-  if (btnLiveSafeStop) {
-    btnLiveSafeStop.classList.remove("is-armed");
-    btnLiveSafeStop.textContent = "STOP";
-    btnLiveSafeStop.title = "Safe Stop (Alt+Shift+X)";
-    btnLiveSafeStop.setAttribute("aria-label", "Safe Stop");
-  }
   liveQuickActionButtons.forEach((button) => {
     if (button.dataset.quickAction === "safe_stop") {
       button.classList.remove("is-armed");
@@ -713,12 +1000,6 @@ function armLiveSafeStop() {
   liveSafeStopArmedUntil = Date.now() + 6000;
   if (liveSafeStopArmTimer) window.clearTimeout(liveSafeStopArmTimer);
   liveSafeStopArmTimer = window.setTimeout(resetLiveSafeStopArm, 6000);
-  if (btnLiveSafeStop) {
-    btnLiveSafeStop.classList.add("is-armed");
-    btnLiveSafeStop.textContent = "CONFIRM";
-    btnLiveSafeStop.title = "Safe Stop armed. Click again within 6 seconds to request safe stop.";
-    btnLiveSafeStop.setAttribute("aria-label", "Confirm Safe Stop");
-  }
   liveQuickActionButtons.forEach((button) => {
     if (button.dataset.quickAction === "safe_stop") {
       button.classList.add("is-armed");
@@ -797,6 +1078,590 @@ function roleLabel(role) {
     system: "System",
   };
   return labels[role] || role || "Orchestrator";
+}
+
+function messageSurfaces(msg) {
+  const value = msg && (msg.surface || msg.surfaces);
+  if (Array.isArray(value)) return value.map((item) => String(item || "").toLowerCase()).filter(Boolean);
+  if (typeof value === "string") return value.split(/[\s,]+/).map((item) => item.toLowerCase()).filter(Boolean);
+  return [];
+}
+
+function parsePlanningSystemEvent(content) {
+  const text = String(content || "").trim();
+  if (!text.startsWith("SYSTEM_EVENT:")) return null;
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const name = lines.length ? lines[0].split(":").slice(1).join(":").trim() : "SYSTEM_EVENT";
+  const fields = {};
+  for (const line of lines.slice(1)) {
+    const index = line.indexOf("=");
+    if (index < 0) continue;
+    const key = line.slice(0, index).trim().replace(/[^a-zA-Z0-9_]+/g, "_").replace(/^_+|_+$/g, "").toLowerCase();
+    if (key) fields[key] = line.slice(index + 1).trim();
+  }
+  return { name: name || "SYSTEM_EVENT", fields };
+}
+
+function isPlanningSystemMessage(msg) {
+  return Boolean(parsePlanningSystemEvent(msg && msg.content));
+}
+
+function isChatSurfaceMessage(msg) {
+  if (!msg || typeof msg !== "object") return false;
+  if (msg.pendingReasoning) return true;
+  if (isPlanningSystemMessage(msg)) return true;
+  const role = String(msg.role || "").toLowerCase();
+  const messageClass = String(msg.message_class || "").toLowerCase();
+  const surfaces = messageSurfaces(msg);
+  if (surfaces.length) return surfaces.includes("chat");
+  if (role === "system" && !isPlanningSystemMessage(msg)) return false;
+  if (["system_event", "handoff_event", "tool_event", "artifact_event"].includes(messageClass)) return false;
+  return Boolean(String(msg.content || "").trim()) || role === "operator";
+}
+
+function isOperatorPlanningMessage(msg) {
+  const role = String(msg?.role || "").toLowerCase();
+  return ["operator", "user", "human", "client"].includes(role);
+}
+
+function planningMessageEventFields(msg) {
+  if (!msg || typeof msg !== "object") return {};
+  if (msg.event_fields && typeof msg.event_fields === "object") return msg.event_fields;
+  const parsed = parsePlanningSystemEvent(msg.content || "");
+  return parsed && parsed.fields ? parsed.fields : {};
+}
+
+function planningMessageCycleIndex(msg) {
+  if (!msg || typeof msg !== "object") return 0;
+  const direct = Number(msg.cycle_index || msg.cycle || 0);
+  if (Number.isFinite(direct) && direct > 0) return Math.floor(direct);
+  const fields = planningMessageEventFields(msg);
+  const fieldCycle = Number(fields.cycle_index || fields.cycle || 0);
+  if (Number.isFinite(fieldCycle) && fieldCycle > 0) return Math.floor(fieldCycle);
+  const text = String(msg.content || "");
+  const match = text.match(/\bcycle\s*[=:]?\s*(\d+)\s*(?:\/\s*(\d+))?/i);
+  if (match) {
+    const value = Number(match[1]);
+    if (Number.isFinite(value) && value > 0) return Math.floor(value);
+  }
+  return 0;
+}
+
+function planningMessageTotalCycles(msg) {
+  if (!msg || typeof msg !== "object") return 0;
+  const direct = Number(msg.total_cycles || 0);
+  if (Number.isFinite(direct) && direct > 0) return Math.floor(direct);
+  const fields = planningMessageEventFields(msg);
+  const fieldTotal = Number(fields.total_cycles || fields.total || 0);
+  if (Number.isFinite(fieldTotal) && fieldTotal > 0) return Math.floor(fieldTotal);
+  const text = String(msg.content || "");
+  const match = text.match(/\bcycle\s*[=:]?\s*\d+\s*\/\s*(\d+)/i);
+  if (match) {
+    const value = Number(match[1]);
+    if (Number.isFinite(value) && value > 0) return Math.floor(value);
+  }
+  return 0;
+}
+
+function planningLoopOrdinal(cycle) {
+  const value = Math.max(1, Math.floor(Number(cycle || 1)));
+  const mod100 = value % 100;
+  if (mod100 >= 11 && mod100 <= 13) return `${value}th`;
+  const mod10 = value % 10;
+  if (mod10 === 1) return `${value}st`;
+  if (mod10 === 2) return `${value}nd`;
+  if (mod10 === 3) return `${value}rd`;
+  return `${value}th`;
+}
+
+function annotatePlanningChatCycles(chatMessages, cycleStartIndex = 0) {
+  let currentCycle = 0;
+  let latestCycle = 0;
+  let totalCycles = 0;
+  const startIndex = Math.max(0, Number(cycleStartIndex || 0));
+  const annotated = (chatMessages || []).map((msg, index) => {
+    if (index < startIndex) return { msg, index, cycle: 0, totalCycles: 0 };
+    const explicitCycle = planningMessageCycleIndex(msg);
+    if (explicitCycle > 0) currentCycle = explicitCycle;
+    const explicitTotal = planningMessageTotalCycles(msg);
+    if (explicitTotal > 0) totalCycles = Math.max(totalCycles, explicitTotal);
+    const cycle = explicitCycle || currentCycle || 0;
+    if (cycle > 0) latestCycle = Math.max(latestCycle, cycle);
+    return { msg, index, cycle, totalCycles: explicitTotal || totalCycles || 0 };
+  });
+  return { annotated, latestCycle, totalCycles, cycleStartIndex: startIndex };
+}
+
+function planningWorkflowCompleteAfter(chatMessages, cycleStartIndex = 0) {
+  const startIndex = Math.max(0, Number(cycleStartIndex || 0));
+  return (chatMessages || []).some((msg, index) => {
+    if (index < startIndex) return false;
+    const parsed = parsePlanningSystemEvent(msg && msg.content);
+    if (!parsed) return false;
+    const eventName = String(parsed.name || "").trim().toUpperCase();
+    return eventName === "WORKFLOW_COMPLETE";
+  });
+}
+
+function planningLoopSummaryAgentNames(messages) {
+  const seen = new Set();
+  (messages || []).forEach((msg) => {
+    const agent = agentIdFromMessage(msg);
+    if (agent && agent !== "objective") seen.add(liveAgentShort(agent));
+  });
+  return Array.from(seen).filter(Boolean).slice(0, 6).join(" -> ");
+}
+
+function shouldShowChatReportHint(msg) {
+  if (!isChatSurfaceMessage(msg)) return false;
+  const surfaces = messageSurfaces(msg);
+  return surfaces.includes("report") || surfaces.includes("artifacts") || surfaces.includes("io");
+}
+
+function renderChatReportHint(msg) {
+  if (!shouldShowChatReportHint(msg)) return "";
+  const parts = [];
+  const surfaces = messageSurfaces(msg);
+  if (surfaces.includes("report")) parts.push("Report");
+  if (surfaces.includes("artifacts")) parts.push("Artifacts");
+  if (surfaces.includes("io")) parts.push("IO");
+  const text = parts.length ? `상세 내용은 ${parts.join(", ")} 영역에 정리됩니다.` : "상세 내용은 Report 영역에 정리됩니다.";
+  return `<p class="planning-chat-route-hint">${escapeHtml(text)}</p>`;
+}
+
+function chatGroupKeyForMessage(msg) {
+  if (!msg || typeof msg !== "object") return "orchestrator";
+  const role = String(msg.role || "orchestrator").toLowerCase();
+  if (role === "specimen_ai" || role === "printer_ai") return "specimen_ai";
+  if (isPlanningSystemMessage(msg)) return "system";
+  return role || "orchestrator";
+}
+
+function groupPlanningChatMessages(messages) {
+  const groups = [];
+  let current = null;
+  for (const msg of messages || []) {
+    const baseKey = chatGroupKeyForMessage(msg);
+    if (!current || current.baseKey !== baseKey) {
+      current = {
+        key: makePlanningChatGroupKey(baseKey, msg, groups.length),
+        baseKey,
+        role: msg.role || baseKey,
+        messages: [],
+      };
+      groups.push(current);
+    }
+    current.messages.push(msg);
+    if (!current.latest || Number(msg.transcript_index || 0) >= Number(current.latest.transcript_index || 0)) {
+      current.latest = msg;
+      current.role = msg.role || current.role;
+    }
+  }
+  return groups;
+}
+
+function makePlanningChatGroupKey(baseKey, msg, fallbackIndex) {
+  const stablePart = msg?.transcript_index ?? msg?.timestamp ?? msg?.id ?? fallbackIndex;
+  const safeBase = String(baseKey || "agent").replace(/[^a-zA-Z0-9_-]+/g, "_").slice(0, 32) || "agent";
+  const safeStable = String(stablePart ?? fallbackIndex).replace(/[^a-zA-Z0-9_-]+/g, "_").slice(0, 48) || String(fallbackIndex);
+  return `${safeBase}:${safeStable}`;
+}
+
+function buildPlanningChatItems(chatMessages) {
+  const sourceMessages = Array.isArray(chatMessages) ? chatMessages : [];
+  const latestOperatorIndex = sourceMessages.reduce((latest, msg, index) => (
+    isOperatorPlanningMessage(msg) ? index : latest
+  ), -1);
+  const cycleStartIndex = latestOperatorIndex >= 0 ? latestOperatorIndex + 1 : 0;
+  const items = [];
+  let currentGroup = null;
+  const loopGroups = new Map();
+  const { annotated, latestCycle, totalCycles } = annotatePlanningChatCycles(sourceMessages, cycleStartIndex);
+  const workflowComplete = planningWorkflowCompleteAfter(sourceMessages, cycleStartIndex);
+  const flushGroup = () => {
+    if (currentGroup) {
+      items.push({ type: "group", group: currentGroup });
+      currentGroup = null;
+    }
+  };
+
+  const appendLoopSummary = (entry) => {
+    flushGroup();
+    const cycle = Math.max(1, Number(entry.cycle || 1));
+    let group = loopGroups.get(cycle);
+    if (!group) {
+      group = {
+        key: `loop:${cycleStartIndex}:${cycle}`,
+        baseKey: "loop_summary",
+        role: "loop_summary",
+        kind: "loop_summary",
+        loopCycle: cycle,
+        totalCycles: entry.totalCycles || totalCycles || 0,
+        messages: [],
+      };
+      loopGroups.set(cycle, group);
+      items.push({ type: "group", group });
+    }
+    group.messages.push(entry.msg);
+    group.totalCycles = Math.max(Number(group.totalCycles || 0), Number(entry.totalCycles || totalCycles || 0));
+    if (!group.latest || Number(entry.msg.transcript_index || 0) >= Number(group.latest.transcript_index || 0)) {
+      group.latest = entry.msg;
+    }
+  };
+
+  annotated.forEach((entry) => {
+    const msg = entry.msg;
+    if (isOperatorPlanningMessage(msg)) {
+      flushGroup();
+      items.push({ type: "operator", msg, index: entry.index });
+      return;
+    }
+
+    // A Live run starts after the latest operator message. While running, the
+    // latest loop stays detailed. Once WORKFLOW_COMPLETE is emitted, the final
+    // loop is also archived as an expandable Loop Complete bubble.
+    const completedLoop = entry.cycle > 0 && latestCycle > 0 && (
+      entry.cycle < latestCycle || (workflowComplete && entry.cycle <= latestCycle)
+    );
+    if (entry.index >= cycleStartIndex && completedLoop) {
+      appendLoopSummary(entry);
+      return;
+    }
+
+    const baseKey = chatGroupKeyForMessage(msg);
+    if (!currentGroup || currentGroup.baseKey !== baseKey) {
+      flushGroup();
+      currentGroup = {
+        key: makePlanningChatGroupKey(baseKey, msg, entry.index),
+        baseKey,
+        role: msg.role || baseKey,
+        messages: [],
+      };
+    }
+    currentGroup.messages.push(msg);
+    if (!currentGroup.latest || Number(msg.transcript_index || 0) >= Number(currentGroup.latest.transcript_index || 0)) {
+      currentGroup.latest = msg;
+      currentGroup.role = msg.role || currentGroup.role;
+    }
+  });
+  flushGroup();
+  return items;
+}
+function planningChatItemRevealKey(item) {
+  if (!item || typeof item !== "object") return "item:unknown";
+  if (item.type === "operator") return `operator:${planningMessageKey(item.msg, item.index)}`;
+  const group = item.group || {};
+  return `group:${group.key || group.baseKey || group.role || "agent"}`;
+}
+
+function flattenPlanningChatItems(items) {
+  const out = [];
+  (items || []).forEach((item) => {
+    if (!item || typeof item !== "object") return;
+    if (item.type === "operator") {
+      if (item.msg) out.push(item.msg);
+      return;
+    }
+    const messages = item.group && Array.isArray(item.group.messages) ? item.group.messages : [];
+    out.push(...messages);
+  });
+  return out;
+}
+
+function syncPlanningDisplayedMessageKeys(messages = planningDisplayedMessages) {
+  planningDisplayedMessageKeys.clear();
+  (messages || []).forEach((msg, index) => planningDisplayedMessageKeys.add(planningMessageKey(msg, index)));
+}
+
+
+function chatMessageSummaryLine(msg) {
+  if (!msg) return "대기 중";
+  if (msg.pendingReasoning) return "응답을 준비하고 있습니다.";
+  const parsedSystem = parsePlanningSystemEvent(msg.content);
+  if (parsedSystem) {
+    const fields = parsedSystem.fields || {};
+    const name = String(parsedSystem.name || "event").toLowerCase().replace(/_/g, " ");
+    const route = fields.from && fields.to ? `${fields.from} -> ${fields.to}` : (fields.to || fields.from || "");
+    return [name, route, fields.status].filter(Boolean).join(" / ");
+  }
+  const text = normalizeDisplayText(msg.content || "").replace(/\s+/g, " ").trim();
+  if (text) return compactText(text, 52);
+  const surfaces = messageSurfaces(msg);
+  if (surfaces.includes("report") || surfaces.includes("artifacts")) return "상세 결과가 Report 영역에 정리되었습니다.";
+  return "새 메시지가 있습니다.";
+}
+
+function chatGroupProgress(group) {
+  if (!group || !Array.isArray(group.messages) || !group.messages.length) return null;
+  if (group.kind === "loop_summary" || group.baseKey === "loop_summary") {
+    return { percent: 100, status: `${planningLoopOrdinal(group.loopCycle)} loop archived` };
+  }
+  const latest = group.latest || group.messages[group.messages.length - 1] || {};
+  const totals = group.messages.map((msg) => Number(msg.total_cycles || 0)).filter((value) => Number.isFinite(value) && value > 0);
+  const cycles = group.messages.map((msg) => Number(msg.cycle_index || 0)).filter((value) => Number.isFinite(value) && value > 0);
+  const total = totals.length ? Math.max(...totals) : 0;
+  const cycle = cycles.length ? Math.max(...cycles) : 0;
+  const hasPending = group.messages.some((msg) => msg.pendingReasoning);
+  const hasStages = total > 0 || group.messages.length > 1 || hasPending;
+  if (!hasStages) return null;
+  let percent = 0;
+  if (total > 0) {
+    percent = Math.max(0, Math.min(100, (Math.max(cycle, hasPending ? 1 : 0) / total) * 100));
+  } else {
+    percent = hasPending ? 55 : 100;
+  }
+  const status = hasPending
+    ? "응답을 준비하고 있습니다."
+    : compactText(normalizeDisplayText(latest.message_type || latest.event_type || latest.content || "상태 갱신").replace(/\s+/g, " "), 44);
+  return { percent, status };
+}
+
+function renderChatGroupProgress(group) {
+  const progress = chatGroupProgress(group);
+  if (!progress) return "";
+  const percent = Number.isFinite(progress.percent) ? Math.max(0, Math.min(100, progress.percent)) : 0;
+  return `
+    <div class="planning-agent-chat-progress" aria-label="${escapeHtml(progress.status)}">
+      <div class="planning-agent-chat-progress-head">
+        <small>${escapeHtml(progress.status)}</small>
+      </div>
+      <div class="planning-agent-chat-progress-track" aria-hidden="true"><span style="width:${percent.toFixed(1)}%"></span></div>
+    </div>
+  `;
+}
+
+function chatGroupAgentDescriptor(group, role) {
+  const cleanRole = String(role || group?.role || group?.key || "orchestrator").toLowerCase();
+  const roleToAgent = {
+    operator: "objective",
+    orchestrator: "orchestrator",
+    design_ai: "design",
+    specimen_ai: "specimen",
+    printer_ai: "specimen",
+    vision_ai: "vision",
+    manipulation_ai: "manipulation",
+    equipment_ai: "equipment",
+    analysis_ai: "analysis",
+    knowledge_ai: "knowledge",
+    bo_ai: "bo",
+    loop_summary: "guardian",
+    guardian: "guardian",
+    guardian_ai: "guardian",
+  };
+  const agentId = roleToAgent[cleanRole] || group?.baseKey || group?.key || "orchestrator";
+  return LIVE_AGENTS.find((agent) => agent.id === agentId || agent.stage === agentId) || {
+    id: agentId,
+    label: roleLabel(cleanRole),
+    short: String(roleLabel(cleanRole) || "AGT").slice(0, 3).toUpperCase(),
+    icon: "A",
+    iconPath: "",
+  };
+}
+
+function renderChatGroupIcon(agent) {
+  const fallback = escapeHtml(agent.short || agent.icon || "AGT");
+  if (!agent.iconPath) return `<span>${fallback}</span>`;
+  return `<img src="${escapeHtml(agent.iconPath)}" alt="" aria-hidden="true" loading="lazy" onerror="this.replaceWith(document.createTextNode('${fallback}'))">`;
+}
+
+function renderPlanningChatMessageDetail(msg, messageIndex) {
+  const role = msg.role || "orchestrator";
+  const model = msg.model ? ` / ${msg.model}` : "";
+  const content = msg.content
+    ? escapeHtml(normalizeDisplayText(msg.content)).replaceAll("\n", "<br />")
+    : msg.pendingReasoning
+      ? "응답을 준비하고 있습니다."
+      : "";
+  return `
+    <div class="planning-agent-chat-message ${escapeHtml(role)}" data-message-index="${escapeHtml(String(messageIndex))}">
+      <small>${escapeHtml(formatTime(msg.timestamp))} / ${escapeHtml(roleLabel(role))}${escapeHtml(model)}</small>
+      ${renderReasoningBlock(msg)}
+      ${content ? `<div class="message-content">${content}</div>` : ""}
+      ${renderChatReportHint(msg)}
+    </div>
+  `;
+}
+
+function renderOperatorPlanningMessage(msg, messageIndex) {
+  const content = msg.content
+    ? escapeHtml(normalizeDisplayText(msg.content)).replaceAll("\n", "<br />")
+    : "";
+  return `
+    <article class="planning-chat-item operator planning-chat-operator-direct" data-chat-item-type="operator" data-message-index="${escapeHtml(String(messageIndex))}">
+      <div class="planning-chat-operator-cell">
+        <small>${escapeHtml(formatTime(msg.timestamp))} / Operator</small>
+        ${content ? `<div class="message-content">${content}</div>` : ""}
+      </div>
+    </article>
+  `;
+}
+
+function renderPlanningChatGroup(group, groupIndex) {
+  const latest = group.latest || group.messages[group.messages.length - 1] || {};
+  const role = group.role || latest.role || group.key || "orchestrator";
+  const baseKey = group.baseKey || group.key;
+  const isSystem = baseKey === "system" || String(role || "").toLowerCase() === "system";
+  const isLoopSummary = group.kind === "loop_summary" || baseKey === "loop_summary";
+  const expanded = !isSystem && planningExpandedChatGroups.has(group.key);
+  const loopLabel = isLoopSummary ? `${planningLoopOrdinal(group.loopCycle)} Loop Complete` : "";
+  const loopAgents = isLoopSummary ? planningLoopSummaryAgentNames(group.messages) : "";
+  const summary = isLoopSummary
+    ? `${loopLabel} · ${group.messages.length} updates${loopAgents ? ` · ${loopAgents}` : ""}`
+    : chatMessageSummaryLine(latest);
+  const agent = isLoopSummary
+    ? { label: loopLabel, short: "LOOP", icon: "L", iconPath: "" }
+    : chatGroupAgentDescriptor(group, role);
+  const time = formatTime(latest.timestamp);
+  const detailMessages = isLoopSummary
+    ? group.messages.filter((msg) => !isPlanningSystemMessage(msg) && String(msg.visibility || "").toLowerCase() !== "internal")
+    : group.messages;
+  const messageHtml = detailMessages.length
+    ? detailMessages.map((msg, index) => renderPlanningChatMessageDetail(msg, index)).join("")
+    : `<div class="planning-agent-chat-message loop-summary-note"><small>Loop archive</small><div class="message-content">시스템 이벤트는 Backend/Event 영역에 보관되었습니다.</div></div>`;
+  return `
+    <article class="planning-chat-item planning-agent-chat-group ${escapeHtml(role)} ${isLoopSummary ? "loop-summary" : ""} ${expanded ? "is-expanded" : "is-collapsed"}" data-chat-group-key="${escapeHtml(group.key)}" data-chat-group-index="${escapeHtml(String(groupIndex))}">
+      <button class="planning-agent-chat-collapsed planning-agent-chat-open" type="button" data-chat-group-key="${escapeHtml(group.key)}" ${isSystem ? "disabled" : ""}>
+        <span class="planning-agent-chat-icon">${renderChatGroupIcon(agent)}</span>
+        <span class="planning-agent-chat-time">${escapeHtml(time)}</span>
+        <span class="planning-agent-chat-title">${escapeHtml(agent.label || roleLabel(role))}</span>
+        <span class="planning-agent-chat-summary">${escapeHtml(summary)}</span>
+        <span class="planning-agent-chat-state">${isSystem ? "event" : (expanded ? "hide" : "show")}</span>
+        ${renderChatGroupProgress(group)}
+      </button>
+      <div class="planning-agent-chat-body">
+        <div class="planning-agent-chat-expanded-tools">
+          <button class="planning-agent-chat-hide" type="button" data-chat-group-key="${escapeHtml(group.key)}">hide</button>
+        </div>
+        ${messageHtml}
+      </div>
+    </article>
+  `;
+}
+
+
+function syncPlanningChatBubbleHeights() {
+  if (!planningChatLog) return;
+  // Chat bubbles must stay in normal document flow. Do not pin measured heights:
+  // long operator messages, expanded agent groups, images, and tables can resize after render.
+  planningChatLog.querySelectorAll(".planning-chat-item").forEach((bubble) => {
+    bubble.style.removeProperty("--planning-bubble-height");
+    bubble.style.removeProperty("height");
+    bubble.style.removeProperty("min-height");
+  });
+}
+
+function schedulePlanningChatLayoutSync({ scrollToBottom = false } = {}) {
+  if (!planningChatLog) return;
+  window.requestAnimationFrame(() => {
+    syncPlanningChatBubbleHeights();
+    window.requestAnimationFrame(() => {
+      syncPlanningChatBubbleHeights();
+      if (scrollToBottom) scrollPlanningChatToBottom();
+    });
+  });
+}
+
+function bindPlanningChatHeightTriggers() {
+  if (!planningChatLog) return;
+  planningChatLog.querySelectorAll("details.reasoning-block").forEach((details) => {
+    details.addEventListener("toggle", () => schedulePlanningChatLayoutSync({ scrollToBottom: false }));
+  });
+  planningChatLog.querySelectorAll("img, svg, canvas, table").forEach((node) => {
+    node.addEventListener?.("load", () => schedulePlanningChatLayoutSync({ scrollToBottom: false }), { once: true });
+  });
+}
+
+function bindPlanningChatGroupToggles() {
+  if (!planningChatLog) return;
+  planningChatLog.querySelectorAll(".planning-agent-chat-open[data-chat-group-key]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      const key = button.dataset.chatGroupKey || "";
+      if (!key || button.disabled) return;
+      // Accordion behavior: opening one chat/loop bubble closes the others.
+      planningExpandedChatGroups.clear();
+      planningExpandedChatGroups.add(key);
+      renderPlanningMessages(planningMessagesCache, { scrollToBottom: false });
+      persistLiveUiState();
+      persistLivePlanningCache(liveLastSession);
+    });
+  });
+  planningChatLog.querySelectorAll(".planning-agent-chat-hide[data-chat-group-key]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const key = button.dataset.chatGroupKey || "";
+      if (!key) return;
+      planningExpandedChatGroups.delete(key);
+      renderPlanningMessages(planningMessagesCache, { scrollToBottom: false });
+      persistLiveUiState();
+      persistLivePlanningCache(liveLastSession);
+    });
+  });
+}
+
+
+function planningMessageToEvent(msg) {
+  if (!msg || typeof msg !== "object") return null;
+  const surfaces = messageSurfaces(msg);
+  const messageClass = String(msg.message_class || "").toLowerCase();
+  const parsed = parsePlanningSystemEvent(msg.content);
+  const shouldRoute = parsed || surfaces.includes("timeline") || surfaces.includes("backend") || ["system_event", "handoff_event", "tool_event", "error_event"].includes(messageClass);
+  if (!shouldRoute) return null;
+  const fields = (msg.event_fields && typeof msg.event_fields === "object") ? msg.event_fields : (parsed ? parsed.fields : {});
+  const name = String(msg.event_type || (parsed ? `planning.${parsed.name.toLowerCase().replace(/[^a-zA-Z0-9_.:-]+/g, "_")}` : messageClass || "planning.message"));
+  const from = fields.from || fields.source || "";
+  const to = fields.to || fields.target || "";
+  const status = fields.status || msg.status || "";
+  const agentText = to || from || msg.agent_id || msg.role || "system";
+  const summary = parsed
+    ? [parsed.name, from && `from=${from}`, to && `to=${to}`, status && `status=${status}`].filter(Boolean).join(" ")
+    : compactText(msg.content || name, 180);
+  return {
+    event_id: `planning-message-${msg.message_id || msg.transcript_index || summary}`,
+    event_type: name,
+    type: name,
+    level: msg.severity || (messageClass === "error_event" ? "ERROR" : "INFO"),
+    severity: msg.severity || "info",
+    ts: msg.timestamp,
+    timestamp: msg.timestamp,
+    node_id: agentText,
+    agent_id: msg.agent_id || agentText,
+    message: summary,
+    payload: {
+      source: "planning_transcript",
+      message_class: msg.message_class || "",
+      surface: messageSurfaces(msg),
+      event_fields: fields,
+      planning_message: msg,
+    },
+  };
+}
+
+function planningDerivedEvents() {
+  const seen = new Set();
+  const events = [];
+  for (const msg of planningMessagesCache || []) {
+    const event = planningMessageToEvent(msg);
+    if (!event) continue;
+    const key = eventStableKey(event);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    events.push(event);
+  }
+  return events;
+}
+
+function liveEventSources() {
+  const base = liveRunEvents.length ? liveRunEvents : liveRecentEvents;
+  const combined = [...base, ...planningDerivedEvents()];
+  const seen = new Set();
+  return combined.filter((event) => {
+    const key = eventStableKey(event);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function renderSingleArtifactCard(artifacts, spec, label = "", options = {}) {
@@ -1398,49 +2263,254 @@ function scrollPlanningChatToBottom() {
   });
 }
 
-function renderPlanningMessages(messages) {
+function isPlanningChatNearBottom(threshold = 160) {
+  if (!planningChatLog) return true;
+  const distance = planningChatLog.scrollHeight - planningChatLog.scrollTop - planningChatLog.clientHeight;
+  return distance <= threshold;
+}
+
+function planningMessageKey(msg, fallbackIndex = 0) {
+  if (!msg || typeof msg !== "object") return `fallback:${fallbackIndex}`;
+  if (msg.message_id) return `id:${msg.message_id}`;
+  if (msg.transcript_index !== undefined && msg.transcript_index !== null) return `idx:${msg.transcript_index}`;
+  const role = String(msg.role || "");
+  const timestamp = String(msg.timestamp || "");
+  const model = String(msg.model || msg.agent || "");
+  const content = String(msg.content || "").slice(0, 128);
+  if (timestamp || model || content) return `fallback:${role}:${timestamp}:${model}:${content}`;
+  return `fallback:${fallbackIndex}:${role}`;
+}
+
+function limitPlanningMessageCache(messages, limit = PLANNING_RENDER_CACHE_LIMIT) {
+  if (!Array.isArray(messages) || messages.length <= limit) return Array.isArray(messages) ? messages : [];
+  return messages.slice(messages.length - limit);
+}
+
+function mergePlanningMessages(...messageLists) {
+  const merged = new Map();
+  for (const list of messageLists) {
+    if (!Array.isArray(list)) continue;
+    list.forEach((msg, index) => {
+      if (!msg || typeof msg !== "object") return;
+      merged.set(planningMessageKey(msg, index), msg);
+    });
+  }
+  const sorted = [...merged.values()].sort((a, b) => {
+    const ai = Number(a.transcript_index);
+    const bi = Number(b.transcript_index);
+    if (Number.isFinite(ai) && Number.isFinite(bi)) return ai - bi;
+    return String(a.timestamp || "").localeCompare(String(b.timestamp || ""));
+  });
+  return limitPlanningMessageCache(sorted);
+}
+
+async function loadOlderPlanningMessages() {
+  if (planningHistoryLoading || !planningHistoryHasMore || !planningChatLog) return;
+  const firstIndexed = planningMessagesCache.find((msg) => Number.isFinite(Number(msg.transcript_index)));
+  const before = firstIndexed ? Number(firstIndexed.transcript_index) : Number.NaN;
+  if (!Number.isFinite(before) || before <= 0) return;
+  planningHistoryLoading = true;
+  const previousHeight = planningChatLog.scrollHeight;
+  const previousTop = planningChatLog.scrollTop;
+  try {
+    const sessionId = encodeURIComponent(ensurePlanningSessionId());
+    const res = await fetch(`/api/planning/messages?session_id=${sessionId}&before=${before}&limit=80`);
+    if (!res.ok) throw new Error(`history HTTP ${res.status}`);
+    const payload = await res.json();
+    const older = Array.isArray(payload.messages) ? payload.messages : [];
+    planningHistoryHasMore = Boolean(payload.has_more_messages);
+    planningHistoryTotal = Number(payload.message_total || planningHistoryTotal || 0);
+    renderPlanningMessages(mergePlanningMessages(older, planningMessagesCache), { scrollToBottom: false });
+    const heightDelta = planningChatLog.scrollHeight - previousHeight;
+    planningChatLog.scrollTop = previousTop + heightDelta;
+  } catch (err) {
+    renderPlanningMessages([
+      ...planningMessagesCache,
+      { role: "system", content: `이전 대화 로딩 실패: ${err.message || err}` },
+    ]);
+  } finally {
+    planningHistoryLoading = false;
+  }
+}
+
+function resetPlanningMessageDisplayState() {
+  planningMessagesCache = [];
+  planningDisplayedMessages = [];
+  planningDisplayedMessageKeys.clear();
+  planningDisplayedChatItemKeys.clear();
+  planningMessageRevealQueue = [];
+  planningDisplayInitialized = false;
+  if (planningMessageRevealTimer) {
+    window.clearTimeout(planningMessageRevealTimer);
+    planningMessageRevealTimer = null;
+  }
+}
+
+function renderPlanningMessageDom(messages, options = {}) {
   if (!planningChatLog) return;
-  planningMessagesCache = Array.isArray(messages) ? messages : [];
-  if (!messages || !messages.length) {
+  const shouldScrollToBottom = options.scrollToBottom === true;
+  const chatMessages = (Array.isArray(messages) ? messages : []).filter(isChatSurfaceMessage);
+  if (!chatMessages.length) {
     planningChatLog.innerHTML = `
-      <article class="planning-chat-item orchestrator">
-        <small>Orchestrator</small>
-        <div>실험 목표, 시편 조건, Design Agent 설계 후 Specimen Making Agent handoff 및 Guardian 확인을 여기서 정리하세요.</div>
+      <article class="planning-chat-item planning-agent-chat-group orchestrator is-collapsed">
+        <button class="planning-agent-chat-collapsed" type="button" disabled>
+          <span class="planning-agent-chat-icon"><img src="/static/live_gui_icons/orchestrator.svg" alt="" aria-hidden="true" loading="lazy"></span>
+          <span class="planning-agent-chat-time">-</span>
+          <span class="planning-agent-chat-title">Orchestrator</span>
+          <span class="planning-agent-chat-summary">실험 조건을 입력하면 필요한 값 확인부터 실행까지 진행합니다.</span>
+          <span class="planning-agent-chat-state">ready</span>
+        </button>
       </article>
     `;
-    scrollPlanningChatToBottom();
+    schedulePlanningChatLayoutSync({ scrollToBottom: shouldScrollToBottom });
     return;
   }
 
-  planningChatLog.innerHTML = "";
-  for (const [messageIndex, msg] of messages.entries()) {
-    const item = document.createElement("article");
-    const role = msg.role || "orchestrator";
-    item.className = `planning-chat-item ${role}`;
-    const model = msg.model ? ` • ${msg.model}` : "";
-    const content = msg.content
-      ? escapeHtml(normalizeDisplayText(msg.content)).replaceAll("\n", "<br />")
-      : msg.pendingReasoning
-        ? "응답을 준비하고 있습니다."
-        : "";
-    item.innerHTML = `
-      <small>${escapeHtml(roleLabel(role))}${escapeHtml(model)}</small>
-      ${renderReasoningBlock(msg)}
-      ${content ? `<div class="message-content">${content}</div>` : ""}
-      ${renderSpecimenRuntimeCard(msg)}
-      ${renderEquipmentRuntimeCard(msg)}
-      ${renderFemContourCard(msg)}
-      ${renderBoResultCard(msg, `chat-${messageIndex}`)}
-      ${renderArtifactCard(msg)}
-    `;
-    planningChatLog.appendChild(item);
+  const chatItems = buildPlanningChatItems(chatMessages).map((item, index) => {
+    if (item.type === "operator") return renderOperatorPlanningMessage(item.msg, item.index);
+    return renderPlanningChatGroup(item.group, index);
+  }).join("");
+
+  planningChatLog.innerHTML = chatItems;
+  bindPlanningChatGroupToggles();
+  bindPlanningChatHeightTriggers();
+  schedulePlanningChatLayoutSync({ scrollToBottom: shouldScrollToBottom });
+}
+
+function schedulePlanningMessageReveal() {
+  if (planningMessageRevealTimer || !planningMessageRevealQueue.length) return;
+  const first = planningMessageRevealQueue[0];
+  const firstMessage = first && Array.isArray(first.messages) ? first.messages[0] : null;
+  const delay = isOperatorPlanningMessage(firstMessage) && !planningDisplayedMessages.length ? 0 : PLANNING_MESSAGE_REVEAL_DELAY_MS;
+  planningMessageRevealTimer = window.setTimeout(() => {
+    planningMessageRevealTimer = null;
+    const next = planningMessageRevealQueue.shift();
+    if (next && Array.isArray(next.messages)) {
+      planningDisplayedChatItemKeys.add(next.key);
+      planningDisplayedMessages = limitPlanningMessageCache([...planningDisplayedMessages, ...next.messages]);
+      syncPlanningDisplayedMessageKeys();
+      renderPlanningMessageDom(planningDisplayedMessages, { scrollToBottom: true });
+    }
+    schedulePlanningMessageReveal();
+  }, delay);
+}
+
+function flushPlanningRevealEntries(entries) {
+  if (!Array.isArray(entries) || !entries.length) return;
+  const appended = [];
+  entries.forEach((entry) => {
+    if (!entry || !Array.isArray(entry.messages)) return;
+    if (entry.key) planningDisplayedChatItemKeys.add(entry.key);
+    appended.push(...entry.messages);
+  });
+  if (appended.length) {
+    planningDisplayedMessages = limitPlanningMessageCache([...planningDisplayedMessages, ...appended]);
+    syncPlanningDisplayedMessageKeys();
   }
-  scrollPlanningChatToBottom();
-  initStlViewers();
+}
+
+function compactPlanningRevealBacklog(unseenItems) {
+  let nextItems = Array.isArray(unseenItems) ? unseenItems : [];
+  const queued = Array.isArray(planningMessageRevealQueue) ? planningMessageRevealQueue : [];
+  const totalBacklog = queued.length + nextItems.length;
+  if (totalBacklog <= PLANNING_MESSAGE_REVEAL_MAX_QUEUE) return nextItems;
+
+  const keepCount = Math.max(1, PLANNING_MESSAGE_REVEAL_TAIL_COUNT);
+  const merged = [
+    ...queued,
+    ...nextItems.map((item) => ({
+      key: planningChatItemRevealKey(item),
+      messages: flattenPlanningChatItems([item]),
+    })),
+  ];
+  const immediate = merged.slice(0, Math.max(0, merged.length - keepCount));
+  const tail = merged.slice(Math.max(0, merged.length - keepCount));
+  planningMessageRevealQueue = tail;
+  flushPlanningRevealEntries(immediate);
+  return [];
+}
+
+function updatePlanningDisplayedMessages(messages, options = {}) {
+  const canonical = limitPlanningMessageCache(Array.isArray(messages) ? messages : []);
+  const canonicalItems = buildPlanningChatItems(canonical);
+  // Session restore/page refresh should hydrate the existing transcript immediately.
+  // Only messages that arrive after the chat surface is initialized use the reveal queue.
+  const immediate = Boolean(options.immediate || options.scrollToBottom === false || planningHistoryLoading || !planningDisplayInitialized);
+  if (immediate) {
+    planningDisplayedMessages = canonical;
+    syncPlanningDisplayedMessageKeys(canonical);
+    planningDisplayedChatItemKeys.clear();
+    canonicalItems.forEach((item) => planningDisplayedChatItemKeys.add(planningChatItemRevealKey(item)));
+    planningMessageRevealQueue = [];
+    if (planningMessageRevealTimer) {
+      window.clearTimeout(planningMessageRevealTimer);
+      planningMessageRevealTimer = null;
+    }
+    planningDisplayInitialized = true;
+    return planningDisplayedMessages;
+  }
+
+  const canonicalItemKeys = new Set(canonicalItems.map(planningChatItemRevealKey));
+  for (const key of Array.from(planningDisplayedChatItemKeys)) {
+    if (!canonicalItemKeys.has(key)) planningDisplayedChatItemKeys.delete(key);
+  }
+  planningMessageRevealQueue = planningMessageRevealQueue.filter((entry) => canonicalItemKeys.has(entry.key));
+  for (const key of Array.from(planningExpandedChatGroups)) {
+    if (!canonicalItemKeys.has(key)) planningExpandedChatGroups.delete(key);
+  }
+
+  // Refresh already visible bubbles from the newest canonical transcript. This lets
+  // an active agent append step details inside the same bubble without creating a backlog.
+  let displayedItems = canonicalItems.filter((item) => planningDisplayedChatItemKeys.has(planningChatItemRevealKey(item)));
+  const completedLoopItems = canonicalItems.filter((item) => item?.group?.kind === "loop_summary");
+  if (completedLoopItems.length) {
+    const mergedByKey = new Map(displayedItems.map((item) => [planningChatItemRevealKey(item), item]));
+    completedLoopItems.forEach((item) => mergedByKey.set(planningChatItemRevealKey(item), item));
+    displayedItems = canonicalItems.filter((item) => mergedByKey.has(planningChatItemRevealKey(item)));
+    completedLoopItems.forEach((item) => planningDisplayedChatItemKeys.add(planningChatItemRevealKey(item)));
+    planningMessageRevealQueue = planningMessageRevealQueue.filter((entry) => !mergedByKey.has(entry.key));
+  }
+  planningDisplayedMessages = limitPlanningMessageCache(flattenPlanningChatItems(displayedItems));
+  syncPlanningDisplayedMessageKeys();
+
+  const queuedKeys = new Set(planningMessageRevealQueue.map((entry) => entry.key));
+  let unseenItems = canonicalItems.filter((item) => {
+    const key = planningChatItemRevealKey(item);
+    return !planningDisplayedChatItemKeys.has(key) && !queuedKeys.has(key);
+  });
+  unseenItems = compactPlanningRevealBacklog(unseenItems);
+  unseenItems.forEach((item) => {
+    const key = planningChatItemRevealKey(item);
+    if (planningDisplayedChatItemKeys.has(key) || queuedKeys.has(key)) return;
+    planningMessageRevealQueue.push({ key, messages: flattenPlanningChatItems([item]) });
+    queuedKeys.add(key);
+  });
+  planningDisplayInitialized = true;
+  schedulePlanningMessageReveal();
+  return planningDisplayedMessages;
+}
+
+function renderPlanningMessages(messages, options = {}) {
+  if (!planningChatLog) return;
+  const wasNearBottom = isPlanningChatNearBottom();
+  const previousTail = planningDisplayedMessages.length
+    ? planningMessageKey(planningDisplayedMessages[planningDisplayedMessages.length - 1], planningDisplayedMessages.length - 1)
+    : "";
+  planningMessagesCache = limitPlanningMessageCache(Array.isArray(messages) ? messages : []);
+  const chatMessages = planningMessagesCache.filter(isChatSurfaceMessage);
+  const displayMessages = updatePlanningDisplayedMessages(chatMessages, options);
+  const nextTail = displayMessages.length
+    ? planningMessageKey(displayMessages[displayMessages.length - 1], displayMessages.length - 1)
+    : "";
+  const hasNewTail = Boolean(nextTail && nextTail !== previousTail);
+  const shouldScrollToBottom = options.scrollToBottom === true
+    || (options.scrollToBottom !== false && hasNewTail && wasNearBottom);
+  renderPlanningMessageDom(displayMessages, { scrollToBottom: shouldScrollToBottom });
 }
 
 const planningChatAutoScrollObserver = new MutationObserver(() => {
-  scrollPlanningChatToBottom();
+  // Rendering/layout recalculation alone must not pull the operator back to the bottom.
+  // Explicit scroll decisions are handled by renderPlanningMessages/schedulePlanningMessageReveal.
 });
 
 function parseAsciiStlVertices(text) {
@@ -1878,8 +2948,7 @@ function selectedMessages() {
 }
 
 function selectedEvents() {
-  const events = liveRunEvents.length ? liveRunEvents : liveRecentEvents;
-  return events.filter((event) => agentIdFromEvent(event) === liveSelectedAgent);
+  return liveEventSources().filter((event) => agentIdFromEvent(event) === liveSelectedAgent);
 }
 
 function formatTime(value) {
@@ -1905,6 +2974,17 @@ function compactRunId(value) {
 function liveAgentShort(agentId) {
   const agent = LIVE_AGENTS.find((item) => item.id === agentId || item.stage === agentId);
   return agent ? agent.short : compactText(agentId || "-", 8);
+}
+
+function formatPlanningCycleLabel(state = {}, running = false) {
+  const mode = String(state.mode || "test").toLowerCase();
+  const stage = String(state.stage || "idle").toLowerCase();
+  const completed = Number(state.loop_count || 0);
+  const active = Boolean(running && !["complete", "error", "idle"].includes(stage));
+  const current = Math.max(active ? completed + 1 : completed, 0);
+  if (mode === "test") return `C:${current}/5`;
+  if (mode === "live") return current > 0 ? `C:${current}` : "C:0";
+  return `C:${current}`;
 }
 
 function setCompactTextWithTitle(element, text, title) {
@@ -2015,9 +3095,12 @@ function eventStatusForAgent(agentId, state, running) {
 }
 
 function liveAgentIconHtml(agent) {
-  const fallback = escapeHtml(agent.icon || agent.short || "?");
-  if (!agent.iconPath) return fallback;
-  return `<img src="${escapeHtml(agent.iconPath)}" alt="" aria-hidden="true" loading="lazy" onerror="this.replaceWith(document.createTextNode('${fallback}'))">`;
+  const fallback = escapeHtml(agent.short || agent.icon || "?");
+  if (!agent.iconPath) return `<span class="binder-icon-fallback" aria-hidden="true">${fallback}</span>`;
+  return `
+    <img src="${escapeHtml(agent.iconPath)}" alt="" aria-hidden="true" loading="lazy" onerror="this.classList.add('is-broken'); this.nextElementSibling?.classList.add('is-visible');">
+    <span class="binder-icon-fallback" aria-hidden="true">${fallback}</span>
+  `;
 }
 
 function renderAgentBinder(session) {
@@ -2039,19 +3122,44 @@ function renderAgentBinder(session) {
     `;
     liveChatTarget.value = validLiveChatTarget(current) ? current : "selected_agent";
   }
-  liveAgentBinderList.innerHTML = LIVE_AGENTS.map((agent) => {
+  const attention = liveAttentionCounts();
+  const attentionTone = attention.errors ? "error" : attention.total ? "warning" : "idle";
+  let objectiveTab = "";
+  const agentTabs = [];
+  LIVE_AGENTS.forEach((agent) => {
     const status = eventStatusForAgent(agent.id, state, running);
     const count = counts[agent.id] || 0;
     const unread = Math.max(0, count - (liveReadMarkers[agent.id] || 0));
-    return `
-      <button class="binder-tab ${agent.id === liveSelectedAgent ? "active" : ""} status-${status}" data-agent-id="${agent.id}" title="${escapeHtml(`${agent.label} · click report · double-click backend · Ctrl/Cmd-click pin`)}">
+    const tabHtml = `
+      <button class="binder-tab ${agent.id === liveSelectedAgent && liveReportPage !== "attention" ? "active" : ""} status-${status}" data-agent-id="${agent.id}" title="${escapeHtml(`${agent.label} · click report · double-click backend · Ctrl/Cmd-click pin`)}">
         <span class="binder-icon">${liveAgentIconHtml(agent)}</span>
         <span class="binder-short">${escapeHtml(agent.short)}</span>
         <span class="binder-state-dot" aria-label="${status}"></span>
         ${unread ? `<span class="binder-unread">${unread > 9 ? "9+" : unread}</span>` : ""}
       </button>
     `;
-  }).join("");
+    if (agent.id === "objective") objectiveTab = tabHtml;
+    else agentTabs.push(tabHtml);
+  });
+  liveAgentBinderList.innerHTML = `
+    <div class="binder-objective-group">
+      <div class="binder-title binder-title-obj" title="Objective context">OBJ</div>
+      ${objectiveTab}
+    </div>
+    <div class="binder-agent-group">
+      <div class="binder-title binder-title-inline" title="Agent group">AGT</div>
+      ${agentTabs.join("")}
+    </div>
+    <div class="binder-attention-group">
+      <div class="binder-title binder-title-att" title="Operator Attention">ATT</div>
+      <button class="binder-tab binder-attention-tab ${liveCurrentView === "report" && liveReportPage === "attention" ? "active" : ""} status-${attentionTone}" data-attention-action="open" title="Operator Attention · approvals ${attention.approvals}, questions ${attention.questions}, faults ${attention.faults}" aria-label="Operator Attention">
+        <span class="binder-icon binder-attention-icon" aria-hidden="true">!</span>
+        <span class="binder-short">${attention.errors ? "ERR" : attention.total ? "ATT" : "OK"}</span>
+        <span class="binder-state-dot" aria-label="${attentionTone}"></span>
+        ${attention.total ? `<span class="binder-unread">${attention.total > 9 ? "9+" : attention.total}</span>` : ""}
+      </button>
+    </div>
+  `;
 }
 
 function liveCenterRenderKey(session = liveLastSession) {
@@ -2066,7 +3174,7 @@ function liveCenterRenderKey(session = liveLastSession) {
   const guardianKey = guardianStatus
     ? [guardianStatus.status || "", guardianSummary.risk_score || 0, guardianSummary.gate_count || 0, guardianSummary.incident_count || 0, guardianSummary.blocked_action_count || 0, guardianSummary.pending_approval_count || 0].join(":")
     : "no-guardian-status";
-  return [runId, stage, liveSelectedAgent, liveRunEvents.length, liveRecentEvents.length, liveRunArtifacts.length, messageCount, approvalCount, guardianKey].join("|");
+  return [runId, stage, liveSelectedAgent, liveReportPage, liveRunEvents.length, liveRecentEvents.length, liveRunArtifacts.length, messageCount, approvalCount, guardianKey].join("|");
 }
 
 function renderActiveLiveCenterPanel(session = liveLastSession, options = {}) {
@@ -2082,7 +3190,12 @@ function renderActiveLiveCenterPanel(session = liveLastSession, options = {}) {
 }
 
 function setLiveView(view, options = {}) {
+  const previousView = liveCurrentView;
   liveCurrentView = LIVE_VIEW_IDS.has(view) ? view : "report";
+  if (liveCurrentView === "graph" && previousView !== "graph") {
+    syncLiveGraphSelectionFromAgent(liveSelectedAgent);
+    liveGraphFocusPending = true;
+  }
   const panelByView = {
     report: "live-report-panel",
     backend: "live-backend-panel",
@@ -4003,6 +5116,7 @@ function liveChatContextSummary() {
     selected_agent: contextAgent,
     selected_agent_label: liveAgentLabel(contextAgent),
     selected_view: liveCurrentView,
+    selected_report_page: liveReportPage,
     selected_graph_node_id: liveSelectedGraphNodeId,
     selected_event_key: liveSelectedEventKey,
     selected_event_id: event ? (event.event_id || event.id || payload.event_id || "") : "",
@@ -4394,6 +5508,10 @@ function renderAcademicReportSections(session, report, status, agentLabel) {
 
 function renderReportPanel(session) {
   if (!liveReportPanel) return;
+  if (liveReportPage === "attention") {
+    liveReportPanel.innerHTML = renderAttentionReportPage(session);
+    return;
+  }
   const report = selectedReportModel(session);
   const messages = report.messages;
   const latestMessage = report.latestMessage;
@@ -4644,6 +5762,105 @@ function renderBackendPanel(session) {
   `;
 }
 
+const LIVE_RUNTIME_MAP_EDGE_TYPES = new Set(["logical_transition", "control_overlay", "device_bridge", "evidence_flow", "runtime_sidecar"]);
+const LIVE_RUNTIME_MAP_NODE_WIDTH = 184;
+const LIVE_RUNTIME_MAP_NODE_HEIGHT = 76;
+const LIVE_RUNTIME_MAP_EDGE_SPACING = 14;
+const LIVE_RUNTIME_MAP_PARALLEL_SPACING = 26;
+const LIVE_RUNTIME_MAP_ZOOM_STEP = 1.32;
+const LIVE_RUNTIME_MAP_MAX_SCALE = 1.36;
+const LIVE_RUNTIME_MAP_GEOMETRY = window.ATRRuntimeGraphGeometry;
+
+function liveRuntimeMapClassToken(value, fallback = "item") {
+  return String(value || fallback).trim().toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "") || fallback;
+}
+
+function liveRuntimeMapNodeStage(node = {}) {
+  if (node.id === "orchestrator_supervisor" || node.metadata?.plane === "orchestration_supervisor") return "orchestrator";
+  return String(node.stage || node.id || "").trim();
+}
+
+function liveRuntimeMapEdgeType(edge = {}) {
+  return String(edge.runtimeEdgeType || edge.metadata?.runtime_edge || "logical_transition").trim() || "logical_transition";
+}
+
+function liveRuntimeMapNodeLookup(nodes = []) {
+  const map = new Map();
+  for (const node of nodes) {
+    map.set(node.id, node);
+    const stage = liveRuntimeMapNodeStage(node);
+    if (stage) map.set(stage, node);
+  }
+  return map;
+}
+
+function liveRuntimeMapGeometryOptions() {
+  return {
+    nodeWidth: LIVE_RUNTIME_MAP_NODE_WIDTH,
+    nodeHeight: LIVE_RUNTIME_MAP_NODE_HEIGHT,
+    edgeSpacing: LIVE_RUNTIME_MAP_EDGE_SPACING,
+    parallelSpacing: LIVE_RUNTIME_MAP_PARALLEL_SPACING,
+    handlePercent: 0.28,
+    outwardOffset: 8,
+  };
+}
+
+function liveRuntimeMapEdges(graph = {}) {
+  if (!LIVE_RUNTIME_MAP_GEOMETRY) return [];
+  const nodes = Array.isArray(graph.nodes) ? graph.nodes : [];
+  const lookup = liveRuntimeMapNodeLookup(nodes);
+  const edges = [];
+  const seen = new Set();
+  for (const item of Array.isArray(graph.edges) ? graph.edges : []) {
+    const type = String(item?.metadata?.runtime_edge || "").trim();
+    if (!LIVE_RUNTIME_MAP_EDGE_TYPES.has(type)) continue;
+    const source = lookup.get(item.source);
+    const target = lookup.get(item.target);
+    if (!source || !target) continue;
+    const sourceStage = item.metadata?.from_stage || liveRuntimeMapNodeStage(source) || item.source;
+    const targetStage = item.metadata?.to_stage || liveRuntimeMapNodeStage(target) || item.target;
+    const condition = String(item.condition || item.metadata?.condition || item.metadata?.transition_condition || item.metadata?.overlay_relation || item.metadata?.bridge || type).trim();
+    const key = `${item.source}->${item.target}:${type}:${condition}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const ports = LIVE_RUNTIME_MAP_GEOMETRY.inferPorts(source, target, liveRuntimeMapGeometryOptions());
+    edges.push({
+      key,
+      source,
+      target,
+      sourceStage,
+      targetStage,
+      condition,
+      label: item.label || condition,
+      runtimeEdgeType: type,
+      sourceSide: ports.sourceSide,
+      targetSide: ports.targetSide,
+      metadata: item.metadata || {},
+    });
+  }
+  return LIVE_RUNTIME_MAP_GEOMETRY.assignOffsets(edges, liveRuntimeMapGeometryOptions());
+}
+
+function liveRuntimeMapBounds(nodes = []) {
+  const maxX = Math.max(...nodes.map((node) => Number(node.position?.x || 0) + LIVE_RUNTIME_MAP_NODE_WIDTH), LIVE_RUNTIME_MAP_NODE_WIDTH);
+  const maxY = Math.max(...nodes.map((node) => Number(node.position?.y || 0) + LIVE_RUNTIME_MAP_NODE_HEIGHT), LIVE_RUNTIME_MAP_NODE_HEIGHT);
+  return { width: maxX + 96, height: maxY + 96 };
+}
+
+function liveRuntimeMapEdgePath(edge) {
+  return LIVE_RUNTIME_MAP_GEOMETRY.path(edge, liveRuntimeMapGeometryOptions());
+}
+
+function liveRuntimeMapEdgeLabel(edge = {}) {
+  const type = liveRuntimeMapEdgeType(edge);
+  if (type === "logical_transition") return "route";
+  if (type === "control_overlay") return "guardian/control";
+  if (type === "device_bridge") return edge.metadata?.bridge || "bridge";
+  if (type === "evidence_flow") return "evidence";
+  if (type === "runtime_sidecar") return "sidecar";
+  return type;
+}
+
 function liveGraphNodeClass(node, state) {
   const activeStage = String(state.stage || "").toLowerCase();
   const nodeStage = String(node.stage || node.id || "").toLowerCase();
@@ -4859,43 +6076,72 @@ async function runLiveGraphGateAction(action) {
 function renderGraphMiniPanel(session) {
   if (!liveGraphPanel) return;
   const state = session.state || {};
-  const graph = (liveGraphPayload && liveGraphPayload.graph) || liveGraphPayload || {};
+  const graphSource = (liveGraphPayload && liveGraphPayload.graph) || liveGraphPayload || {};
+  const graph = LIVE_RUNTIME_MAP_GEOMETRY
+    ? LIVE_RUNTIME_MAP_GEOMETRY.normalizeNodePositions(graphSource, { grid: 16 })
+    : graphSource;
   const nodes = Array.isArray(graph.nodes) ? graph.nodes : [];
   const activeStage = String(state.stage || "").toLowerCase();
   if (!liveSelectedGraphNodeId && !liveGraphSelectionCleared) {
     const activeNode = nodes.find((node) => String(node.stage || node.id || "").toLowerCase() === activeStage) || nodes[0];
     liveSelectedGraphNodeId = activeNode ? activeNode.id : "";
   }
-  const nodesById = {};
-  nodes.forEach((node, index) => {
-    nodesById[node.id] = { ...graphNodePosition(node, index, nodes.length), node };
-  });
   const graphId = graph.id || "atr_closed_loop";
   const ideNodeRef = liveSelectedGraphNodeId || state.stage || "";
   const runtimeIdeHref = `/ide?graph=${encodeURIComponent(graphId)}${ideNodeRef ? `&node=${encodeURIComponent(ideNodeRef)}` : ""}&source=live_graph`;
-  const nodeHtml = nodes.map((node, index) => {
-    const pos = nodesById[node.id] || graphNodePosition(node, index, nodes.length);
-    const stage = node.stage || node.id;
+  const edges = LIVE_RUNTIME_MAP_GEOMETRY ? liveRuntimeMapEdges(graph) : [];
+  const bounds = liveRuntimeMapBounds(nodes);
+  const graphPanelWidth = liveGraphPanel.clientWidth || 1180;
+  const availableWidth = Math.max(560, graphPanelWidth - 32);
+  const fitScale = Math.min(1, availableWidth / Math.max(1, bounds.width));
+  const scale = Math.min(LIVE_RUNTIME_MAP_MAX_SCALE, Math.max(0.42, fitScale * LIVE_RUNTIME_MAP_ZOOM_STEP));
+  const scaledWidth = Math.ceil(bounds.width * scale);
+  const scaledHeight = Math.ceil(bounds.height * scale);
+  const canvasViewportHeight = Math.round(Math.min(720, Math.max(560, (window.innerHeight || 900) * 0.58)));
+  const canvasHeight = Math.min(Math.max(560, scaledHeight + 40), canvasViewportHeight);
+  const activeEdges = new Set(edges.filter((edge) => {
+    const ids = [edge.sourceStage, edge.targetStage, edge.source?.id, edge.target?.id].map((value) => String(value || "").toLowerCase());
+    return activeStage && ids.includes(activeStage);
+  }).map((edge) => edge.key));
+  const edgeMarkup = edges.map((edge) => {
+    const type = liveRuntimeMapEdgeType(edge);
+    const activeClass = activeEdges.has(edge.key) ? " edge-active" : "";
+    return `<path class="runtime-map-edge edge-type-${liveRuntimeMapClassToken(type)}${activeClass}" data-edge="${escapeHtml(edge.key)}" d="${liveRuntimeMapEdgePath(edge)}"><title>${escapeHtml(edge.sourceStage)} -&gt; ${escapeHtml(edge.targetStage)} · ${escapeHtml(liveRuntimeMapEdgeLabel(edge))}</title></path>`;
+  }).join("");
+  const nodeHtml = nodes.map((node) => {
+    const stage = liveRuntimeMapNodeStage(node);
+    const kind = liveRuntimeMapClassToken(node.kind || "runtime");
+    const runtimeNode = liveRuntimeMapClassToken(node.metadata?.runtime_node || "executable");
     const selectedClass = node.id === liveSelectedGraphNodeId ? "node-selected" : "";
+    const nodeClass = liveGraphNodeClass(node, state);
+    const label = node.label || node.id;
+    const sub = node.metadata?.plane || node.handler || stage;
     return `
-      <button class="live-graph-mini-node ${selectedClass} ${liveGraphNodeClass(node, state)}" style="left:${pos.left}%; top:${pos.top}%" data-agent-id="${escapeHtml(agentIdFromStage(stage))}" data-graph-node-id="${escapeHtml(node.id)}" title="${escapeHtml(node.handler || "")}">
+      <button class="graph-node runtime-map-node live-graph-mini-node ${selectedClass} ${nodeClass} kind-${kind} runtime-${runtimeNode}" data-agent-id="${escapeHtml(agentIdFromStage(stage))}" data-graph-node-id="${escapeHtml(node.id)}" data-stage="${escapeHtml(stage)}" style="left:${Number(node.position?.x || 0)}px;top:${Number(node.position?.y || 0)}px;" title="${escapeHtml(node.handler || stage || "")}">
         <span class="node-light"></span>
-        <strong>${escapeHtml(node.label || node.id)}</strong>
-        <em>${escapeHtml(stage || node.kind || "node")}</em>
+        <span class="node-copy"><strong>${escapeHtml(label)}</strong><small>${escapeHtml(sub)}</small></span>
       </button>
     `;
   }).join("");
+  const legendTypes = ["logical_transition", "control_overlay", "device_bridge", "evidence_flow", "runtime_sidecar"].filter((type) => edges.some((edge) => liveRuntimeMapEdgeType(edge) === type));
+  const activeNode = nodes.find((node) => String(node.stage || node.id || "").toLowerCase() === activeStage) || null;
+  const selectedNodeForFocus = liveGraphSelectionCleared ? activeNode : (nodes.find((node) => node.id === liveSelectedGraphNodeId) || activeNode || nodes[0] || null);
+  const focusNodeId = selectedNodeForFocus ? selectedNodeForFocus.id : "";
+  const focusKey = `${focusNodeId}|${state.stage || ""}`;
+  const shouldFocusGraph = Boolean(focusNodeId && liveGraphFocusPending);
+
   liveGraphPanel.innerHTML = `
     <div class="live-graph-mini-wrap">
-      <div class="runtime-card-section">
+      <div class="runtime-card-section live-graph-summary-card">
         <h4>Active Graph</h4>
         ${runtimeRows([
           ["graph_id", graphId],
           ["version", graph.version],
           ["entry_node", graph.entry_node],
           ["current_stage", state.stage],
+          ["cycle", formatPlanningCycleLabel(state, liveRunningFlag(liveLastSession, liveLastSnapshot || {}, state))],
           ["nodes", nodes.length],
-          ["logical_edges", (graph.edges || []).filter((edge) => edge.metadata && edge.metadata.runtime_edge === "logical_transition").length],
+          ["runtime_edges", edges.length],
         ])}
         <div class="artifact-links">
           <a data-live-ide-link href="${escapeHtml(runtimeIdeHref)}" target="_blank" rel="noreferrer" title="Open Runtime IDE focused on graph=${escapeHtml(graphId)} node=${escapeHtml(ideNodeRef || "")}">Open Runtime IDE</a>
@@ -4904,17 +6150,41 @@ function renderGraphMiniPanel(session) {
       </div>
       ${renderGraphGateControls(graph)}
       <div class="live-graph-mini-body">
-        <div class="live-graph-mini-canvas">
-          <svg class="live-graph-mini-edges" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-            <defs><marker id="live-arrow" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 Z"></path></marker></defs>
-            ${renderGraphEdges(graph, nodesById, state)}
-          </svg>
-          ${nodeHtml || "<p class='hint'>Graph not loaded.</p>"}
+        <div class="live-graph-mini-canvas langgraph-shell runtime-readonly-map live-runtime-map-lite" data-live-graph-scale="${scale}" data-live-graph-focus-node="${escapeHtml(focusNodeId)}" style="height:${canvasHeight}px;min-height:${canvasHeight}px;">
+          <div class="live-graph-scroll-world" style="width:${scaledWidth}px;height:${scaledHeight}px;">
+            <div class="langgraph-cells" style="width:${bounds.width}px;height:${bounds.height}px;transform:scale(${scale});transform-origin:0 0;">
+              <svg class="runtime-map-edge-svg" viewBox="0 0 ${bounds.width} ${bounds.height}" aria-hidden="true">
+                <defs>
+                  <marker id="main-runtime-arrow" markerWidth="12" markerHeight="10" refX="9" refY="5" orient="auto" markerUnits="userSpaceOnUse" overflow="visible">
+                    <path d="M0,0 L10,5 L0,10 L2.6,5 z" fill="context-stroke" stroke="none"></path>
+                  </marker>
+                </defs>
+                ${edgeMarkup}
+              </svg>
+            </div>
+            <div class="langgraph-nodes" style="width:${bounds.width}px;height:${bounds.height}px;transform:scale(${scale});transform-origin:0 0;">
+              ${nodeHtml || "<p class='hint'>Graph not loaded.</p>"}
+            </div>
+            <aside class="runtime-map-legend live-runtime-map-legend" aria-label="Live runtime map legend">
+              <div class="runtime-map-legend-head"><strong>Legend</strong><span>${escapeHtml(String(edges.length))} edge(s)</span></div>
+              <div class="runtime-map-legend-list">
+                ${(legendTypes.length ? legendTypes : ["logical_transition"]).slice(0, 5).map((type) => `<div class="runtime-map-legend-row"><span class="runtime-map-legend-line edge-type-${liveRuntimeMapClassToken(type)}" aria-hidden="true"></span><span><strong>${escapeHtml(liveRuntimeMapEdgeLabel({ runtimeEdgeType: type, metadata: {} }))}</strong></span></div>`).join("")}
+              </div>
+            </aside>
+          </div>
         </div>
         ${renderSelectedGraphNodeView(graph, state)}
       </div>
     </div>
   `;
+  if (shouldFocusGraph) {
+    window.requestAnimationFrame(() => {
+      if (focusLiveGraphNode(focusNodeId, { instant: liveGraphLastFocusKey === "" })) {
+        liveGraphLastFocusKey = focusKey;
+        liveGraphFocusPending = false;
+      }
+    });
+  }
 }
 
 function planningArtifactSummaries() {
@@ -4957,7 +6227,7 @@ function renderArtifactPanel() {
 }
 
 function timelineSourceEvents() {
-  return (liveRunEvents.length ? liveRunEvents : liveRecentEvents).slice(-80);
+  return liveEventSources().slice(-80);
 }
 
 function eventTimelineKind(event) {
@@ -5181,6 +6451,73 @@ function handleFaultAction(action, key) {
   }
 }
 
+function liveAttentionCounts() {
+  const approvals = (liveApprovals.pending || []).length;
+  const questions = pendingAgentQuestions().length;
+  const faults = pendingRuntimeFaults().length;
+  const errors = pendingRuntimeFaults().filter((event) => eventTimelineKind(event) === "error").length;
+  return {
+    approvals,
+    questions,
+    faults,
+    errors,
+    total: approvals + questions + faults,
+  };
+}
+
+function renderAttentionApprovalCard(item, runId = "") {
+  return `
+    <article class="live-approval-card live-attention-card live-attention-approval-card">
+      <strong>${escapeHtml(item.title || "Approval required")}</strong>
+      <p>${escapeHtml(item.reason || item.stage || "Operator review required.")}</p>
+      <small>${escapeHtml(item.stage || "approval")} · ${escapeHtml(item.approval_id || "-")}</small>
+      <div class="button-row">
+        <button class="btn primary live-approval-action" data-run-id="${escapeHtml(runId)}" data-approval-id="${escapeHtml(item.approval_id || "")}" data-decision="approved" ${item.approval_id ? "" : "disabled"}>Approve</button>
+        <button class="btn live-approval-action" data-run-id="${escapeHtml(runId)}" data-approval-id="${escapeHtml(item.approval_id || "")}" data-decision="cancelled" ${item.approval_id ? "" : "disabled"}>Revise</button>
+        <button class="btn warning live-approval-action" data-run-id="${escapeHtml(runId)}" data-approval-id="${escapeHtml(item.approval_id || "")}" data-decision="rejected" ${item.approval_id ? "" : "disabled"}>Reject</button>
+      </div>
+    </article>
+  `;
+}
+
+function renderAttentionReportPage(session = liveLastSession) {
+  const state = (session && session.state) || {};
+  const runId = state.run_id || "";
+  const pending = liveApprovals.pending || [];
+  const questions = pendingAgentQuestions();
+  const faults = pendingRuntimeFaults();
+  const counts = liveAttentionCounts();
+  const resolved = (liveApprovals.resolved || []).slice(-6).reverse();
+  const empty = !counts.total;
+  const resolvedItems = resolved.map((item) => `${item.approval_id || "approval"} · ${item.decision || item.status || "resolved"}`);
+  return `
+    <div class="live-report-page live-attention-report-page">
+      <div class="live-report-head live-attention-report-head">
+        <div>
+          <h3>Operator Attention</h3>
+          <p><span class="live-report-role-tag attention">ATT</span> ${empty ? "No pending operator attention." : `${counts.approvals} approvals · ${counts.questions} questions · ${counts.faults} faults`}</p>
+        </div>
+        <div class="live-attention-score ${counts.errors ? "error" : counts.total ? "warning" : "idle"}">
+          <strong>${counts.total}</strong>
+          <span>${counts.errors ? `${counts.errors} error` : counts.total ? "pending" : "clear"}</span>
+        </div>
+      </div>
+      <div class="live-attention-overview">
+        <article class="live-attention-metric"><strong>${counts.approvals}</strong><span>Approvals</span></article>
+        <article class="live-attention-metric"><strong>${counts.questions}</strong><span>Questions</span></article>
+        <article class="live-attention-metric"><strong>${counts.faults}</strong><span>Faults</span></article>
+        <article class="live-attention-metric"><strong>${counts.errors}</strong><span>Errors</span></article>
+      </div>
+      <div class="live-report-grid live-report-academic-grid live-attention-grid">
+        ${renderReportSection("Pending Approvals", pending.length ? pending.map((item) => renderAttentionApprovalCard(item, runId)).join("") : "<p class='hint'>No pending approvals.</p>", { wide: true })}
+        ${renderReportSection("Agent Questions", questions.length ? questions.map(renderQuestionCard).join("") : "<p class='hint'>No agent questions waiting for operator input.</p>", { wide: true })}
+        ${renderReportSection("Runtime Faults / Warnings", faults.length ? faults.map(renderFaultCard).join("") : "<p class='hint'>No unread runtime faults.</p>", { wide: true })}
+        ${renderReportSection("Recently Resolved", renderReportList(resolvedItems, "No resolved approvals recorded yet."))}
+      </div>
+    </div>
+  `;
+}
+
 function applyLiveAttentionStatus() {
   if (!planningChatStatus) return;
   if (planningThinkingCount > 0 || liveBackendPlanningBusy || liveQuickActionBusy) return;
@@ -5212,34 +6549,8 @@ function applyLiveAttentionStatus() {
   }
 }
 
-function renderApprovalPanel(session) {
-  if (!liveApprovalPanel) return;
-  const pending = liveApprovals.pending || [];
-  const questions = pendingAgentQuestions();
-  const faults = pendingRuntimeFaults();
-  if (!pending.length && !questions.length && !faults.length) {
-    liveApprovalPanel.hidden = true;
-    liveApprovalPanel.innerHTML = "";
-    return;
-  }
-  liveApprovalPanel.hidden = false;
-  const runId = (session.state || {}).run_id || "";
-  liveApprovalPanel.innerHTML = `
-    <div class="live-approval-head"><strong>Operator Attention</strong><span>${pending.length} approvals · ${questions.length} questions · ${faults.length} faults</span></div>
-    ${pending.map((item) => `
-      <article class="live-approval-card">
-        <strong>${escapeHtml(item.title || "Approval required")}</strong>
-        <p>${escapeHtml(item.reason || item.stage || "Operator review required.")}</p>
-        <div class="button-row">
-          <button class="btn primary live-approval-action" data-run-id="${escapeHtml(runId)}" data-approval-id="${escapeHtml(item.approval_id)}" data-decision="approved">Approve</button>
-          <button class="btn live-approval-action" data-run-id="${escapeHtml(runId)}" data-approval-id="${escapeHtml(item.approval_id)}" data-decision="cancelled">Revise</button>
-          <button class="btn warning live-approval-action" data-run-id="${escapeHtml(runId)}" data-approval-id="${escapeHtml(item.approval_id)}" data-decision="rejected">Reject</button>
-        </div>
-      </article>
-    `).join("")}
-    ${questions.map(renderQuestionCard).join("")}
-    ${faults.map(renderFaultCard).join("")}
-  `;
+function renderApprovalPanel(_session) {
+  // Operator Attention is opened from the ATT binder/report page, not rendered in the top header.
 }
 
 function answerAgentQuestion(key) {
@@ -5406,7 +6717,7 @@ function renderLiveRuntime(session) {
   ensureOperatorReportStateRun(state.run_id || liveCurrentRunId());
   const activeAgent = agentIdFromStage(state.stage || "");
   setCompactTextWithTitle(liveActiveAgentChip, `A:${liveAgentShort(activeAgent)}`, `Active agent: ${liveAgentLabel(activeAgent)}`);
-  if (liveCenterTitle) liveCenterTitle.textContent = `${liveAgentLabel(liveSelectedAgent)} · ${liveCurrentView}`;
+  if (liveCenterTitle) liveCenterTitle.textContent = liveCurrentView === "report" && liveReportPage === "attention" ? "Operator Attention · Report" : `${liveAgentLabel(liveSelectedAgent)} · ${liveCurrentView}`;
   renderAgentBinder(session);
   renderApprovalPanel(session);
   renderDeviceStrip(session);
@@ -5420,6 +6731,7 @@ function renderLiveRuntime(session) {
   renderActiveLiveCenterPanel(session);
   setLiveQuickActionBusy(liveQuickActionBusy);
   persistLiveUiState();
+  persistLivePlanningCache(session);
 }
 
 async function requestLiveGuardianStatus(runId, options = {}) {
@@ -5537,6 +6849,7 @@ window.__liveGuiDebugSnapshot = function liveGuiDebugSnapshot() {
   return {
     selected_agent: liveSelectedAgent,
     current_view: liveCurrentView,
+    report_page: liveReportPage,
     selected_event_key: liveSelectedEventKey,
     selected_report_section: liveSelectedReportSectionTitle,
     planning_session_id: planningSessionId,
@@ -5590,14 +6903,28 @@ function applyPlanningSession(session) {
   const runId = String(state.run_id || "-");
   const modeLabel = String(state.mode || "-");
   setCompactTextWithTitle(planningStageLabel, `S:${stageLabel}`, `Stage: ${stageLabel}`);
+  const cycleLabel = formatPlanningCycleLabel(state, running);
+  setCompactTextWithTitle(planningCycleLabel, cycleLabel, `Cycle: ${cycleLabel}`);
   setCompactTextWithTitle(
     planningRunDetail,
     `${compactRunId(runId)} · ${modeLabel} · ${running ? "on" : "idle"}`,
     `run=${runId} mode=${modeLabel} running=${running}`
   );
   renderSpecSummary(state);
-  renderPlanningMessages(liveLastSession.messages || []);
+  const activeSessionId = liveLastSession.planning_session_id || planningSessionId || "";
+  if (planningHistorySessionId && activeSessionId && planningHistorySessionId !== activeSessionId) {
+    resetPlanningMessageDisplayState();
+  }
+  planningHistorySessionId = activeSessionId;
+  planningHistoryHasMore = Boolean(liveLastSession.has_more_messages);
+  planningHistoryTotal = Number(liveLastSession.message_total || 0);
+  const incomingMessages = Array.isArray(liveLastSession.messages) ? liveLastSession.messages : [];
+  if (planningHistoryTotal && planningMessagesCache.length > planningHistoryTotal) {
+    resetPlanningMessageDisplayState();
+  }
+  renderPlanningMessages(mergePlanningMessages(planningMessagesCache, incomingMessages));
   renderLiveRuntime(liveLastSession);
+  persistLivePlanningCache(liveLastSession);
 }
 
 async function refreshLiveGraphPayload() {
@@ -5612,6 +6939,41 @@ async function refreshLiveGraphPayload() {
   return liveGraphPayload;
 }
 
+async function refreshPlanningAuxiliaryState(session) {
+  if (liveAuxRefreshInFlight) return liveAuxRefreshInFlight;
+  liveAuxRefreshInFlight = (async () => {
+    try {
+      const [guardianResult, eventsResult] = await Promise.allSettled([
+        fetch("/api/guardian/status"),
+        fetch("/api/events/recent"),
+      ]);
+      let guardianPayload = null;
+      if (guardianResult.status === "fulfilled" && guardianResult.value.ok) {
+        guardianPayload = await guardianResult.value.json();
+        liveGuardianStatus = normalizeGuardianStatusPayload(guardianPayload) || liveGuardianStatus;
+      }
+      if (eventsResult.status === "fulfilled" && eventsResult.value.ok) {
+        const recentPayload = await eventsResult.value.json();
+        liveRecentEvents = Array.isArray(recentPayload.events) ? recentPayload.events : [];
+      }
+      liveLastSnapshot = {
+        state: (session && session.state) || (liveLastSession && liveLastSession.state) || {},
+        runtime: (session && session.runtime) || (liveLastSession && liveLastSession.runtime) || {},
+        guardian_status: guardianPayload || liveGuardianStatus,
+      };
+      await refreshLiveGraphPayload();
+      await refreshLiveRunDetails(session || liveLastSession || {});
+      renderLiveRuntime(liveLastSession);
+      persistLivePlanningCache(liveLastSession);
+    } catch (err) {
+      markLiveSyncError(err);
+    } finally {
+      liveAuxRefreshInFlight = null;
+    }
+  })();
+  return liveAuxRefreshInFlight;
+}
+
 async function refreshPlanningState(options = {}) {
   if (liveRefreshInFlight) return liveRefreshInFlight;
   const background = Boolean(options.background);
@@ -5619,23 +6981,19 @@ async function refreshPlanningState(options = {}) {
   liveRefreshInFlight = (async () => {
     try {
       const sessionId = encodeURIComponent(ensurePlanningSessionId());
-      const [sessionRes, snapshotRes, eventsRes] = await Promise.all([
-        fetch(`/api/planning/session?session_id=${sessionId}`),
-        fetch("/api/state"),
-        fetch("/api/events/recent"),
-      ]);
+      const sessionRes = await fetch(`/api/planning/session?session_id=${sessionId}`);
       if (!sessionRes.ok) throw new Error(`session HTTP ${sessionRes.status}`);
       const session = await sessionRes.json();
-      liveLastSnapshot = snapshotRes.ok ? await snapshotRes.json() : {};
-      liveGuardianStatus = normalizeGuardianStatusPayload(liveLastSnapshot.guardian_status) || liveGuardianStatus;
-      const recentPayload = eventsRes.ok ? await eventsRes.json() : { events: [] };
-      await refreshLiveGraphPayload();
-      liveRecentEvents = Array.isArray(recentPayload.events) ? recentPayload.events : [];
-      markLiveSyncComplete();
+      liveLastSnapshot = {
+        state: session.state || {},
+        runtime: session.runtime || {},
+        guardian_status: liveGuardianStatus,
+      };
       if (!session.state && liveLastSnapshot.state) session.state = liveLastSnapshot.state;
       if (!session.runtime && liveLastSnapshot.runtime) session.runtime = liveLastSnapshot.runtime;
       applyPlanningSession(session);
-      await refreshLiveRunDetails(session);
+      markLiveSyncComplete();
+      refreshPlanningAuxiliaryState(session);
       return session;
     } catch (err) {
       markLiveSyncError(err);
@@ -5663,16 +7021,19 @@ function schedulePlanningRefresh() {
 async function sendPlanningMessage(message) {
   const clean = String(message || "").trim();
   if (!clean) return;
-  if (planningThinkingCount > 0 || liveBackendPlanningBusy) {
-    setChatStatus("BUSY", "running");
+  if (planningMessageSubmitInFlight) {
+    setChatStatus("SENDING", "running");
     return;
   }
+  const queueOnly = Boolean(liveBackendPlanningBusy || planningThinkingCount > 0 || liveQuickActionBusy);
+  planningMessageSubmitInFlight = true;
+  updatePlanningControls();
   if (planningMessageInput) planningMessageInput.value = "";
 
   const baseMessages = [...planningMessagesCache];
-  const pendingRole = planningPendingSpecimenInput ? "printer_ai" : "orchestrator";
-  const pendingModel = planningPendingSpecimenInput ? "specimen_agent" : "orchestrator_plan";
-  setChatStatus("REASONING", "running");
+  const pendingRole = queueOnly ? "orchestrator" : (planningPendingSpecimenInput ? "printer_ai" : "orchestrator");
+  const pendingModel = queueOnly ? "orchestrator_supervisor" : (planningPendingSpecimenInput ? "specimen_agent" : "orchestrator_plan");
+  setChatStatus(queueOnly ? "QUEUING" : "REASONING", "running");
   pushPlanningThinking();
   renderPlanningMessages([
     ...baseMessages,
@@ -5692,7 +7053,7 @@ async function sendPlanningMessage(message) {
     const res = await fetch("/api/planning/message", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(collectPlanningPayload(clean)),
+      body: JSON.stringify(collectPlanningPayload(clean, { runtimeFollowupQueueOnly: queueOnly })),
     });
     const data = await res.json();
     applyPlanningSession(data.session || {});
@@ -5716,6 +7077,7 @@ async function sendPlanningMessage(message) {
       ]);
     }
   } finally {
+    planningMessageSubmitInFlight = false;
     popPlanningThinking();
   }
 }
@@ -5771,6 +7133,19 @@ async function bootstrapLiveOrchestrator() {
   }
 }
 
+function shouldRefreshPlanningForRuntimeEvent(eventType, data = {}) {
+  const type = String(eventType || data.event_type || data.type || "").toLowerCase();
+  if (!type || type === "stream.heartbeat") return false;
+  if (type.startsWith("operator.")) return false;
+  if (type.startsWith("planning_") || type.startsWith("planning.")) return true;
+  if (type.startsWith("module_step_") || type.startsWith("module_graph_")) return true;
+  if (["stage_transition", "agent_started", "agent_result", "workflow_complete", "artifact.created"].includes(type)) return true;
+  if (type.includes("handoff") || type.includes("guardian") || type.includes("incident") || type.includes("approval")) return true;
+  if (type.includes("agent") || type.includes("device") || type.includes("run") || type.includes("evolution")) return true;
+  const payload = data && typeof data.payload === "object" ? data.payload : {};
+  return Boolean(payload.stage || payload.agent || payload.node_id || payload.module_id || payload.status);
+}
+
 function connectPlanningEventStream() {
   if (!window.EventSource) {
     markLiveStreamState("unsupported");
@@ -5791,7 +7166,7 @@ function connectPlanningEventStream() {
         liveRecentEvents.push(data);
         liveRecentEvents = liveRecentEvents.slice(-160);
       }
-      if (eventType.startsWith("planning_") || eventType === "planning_message" || eventType.startsWith("approval.") || eventType.includes("agent") || eventType.includes("run") || eventType.includes("device") || eventType.includes("guardian") || eventType.includes("incident") || eventType.includes("evolution")) {
+      if (shouldRefreshPlanningForRuntimeEvent(eventType, data)) {
         schedulePlanningRefresh();
       } else {
         renderLiveRuntime(liveLastSession);
@@ -5822,6 +7197,56 @@ function graphNodeIdForAgent(agentId) {
   return node ? node.id : "";
 }
 
+
+function syncLiveGraphSelectionFromAgent(agentId = liveSelectedAgent) {
+  const nodeId = graphNodeIdForAgent(agentId);
+  if (!nodeId) return "";
+  liveSelectedGraphNodeId = nodeId;
+  liveGraphSelectionCleared = false;
+  return nodeId;
+}
+
+function requestLiveGraphFocusForAgent(agentId = liveSelectedAgent) {
+  const nodeId = syncLiveGraphSelectionFromAgent(agentId);
+  if (nodeId) liveGraphFocusPending = true;
+  return nodeId;
+}
+
+function focusLiveGraphNode(nodeId = "", options = {}) {
+  if (!liveGraphPanel || liveCurrentView !== "graph") return false;
+  const canvas = liveGraphPanel.querySelector(".live-graph-mini-canvas");
+  if (!canvas) return false;
+  const nodes = Array.from(canvas.querySelectorAll(".live-graph-mini-node[data-graph-node-id]"));
+  const node = nodes.find((item) => item.dataset.graphNodeId === nodeId) || canvas.querySelector(".live-graph-mini-node.node-selected") || canvas.querySelector(".live-graph-mini-node.node-active");
+  if (!node) return false;
+  const scale = Number.parseFloat(canvas.dataset.liveGraphScale || "1") || 1;
+  const x = Number.parseFloat(node.style.left || "0") || 0;
+  const y = Number.parseFloat(node.style.top || "0") || 0;
+  const margin = 56;
+  const nodeLeft = x * scale;
+  const nodeTop = y * scale;
+  const nodeRight = (x + LIVE_RUNTIME_MAP_NODE_WIDTH) * scale;
+  const nodeBottom = (y + LIVE_RUNTIME_MAP_NODE_HEIGHT) * scale;
+  const viewLeft = canvas.scrollLeft;
+  const viewTop = canvas.scrollTop;
+  const viewRight = viewLeft + canvas.clientWidth;
+  const viewBottom = viewTop + canvas.clientHeight;
+  const alreadyVisible = nodeLeft >= viewLeft + margin
+    && nodeRight <= viewRight - margin
+    && nodeTop >= viewTop + margin
+    && nodeBottom <= viewBottom - margin;
+  if (!options.force && alreadyVisible) return true;
+  const targetLeft = Math.max(0, (x + LIVE_RUNTIME_MAP_NODE_WIDTH / 2) * scale - canvas.clientWidth / 2);
+  const targetTop = Math.max(0, (y + LIVE_RUNTIME_MAP_NODE_HEIGHT / 2) * scale - canvas.clientHeight / 2);
+  if (Math.abs(canvas.scrollLeft - targetLeft) < 8 && Math.abs(canvas.scrollTop - targetTop) < 8) return true;
+  canvas.scrollTo({
+    left: targetLeft,
+    top: targetTop,
+    behavior: options.instant ? "auto" : "smooth",
+  });
+  return true;
+}
+
 function recordLiveContextAction(action, agentId, payload = {}) {
   return recordLiveOperatorEvent(
     action,
@@ -5833,6 +7258,8 @@ function recordLiveContextAction(action, agentId, payload = {}) {
 
 function handleContextAction(action, agentId) {
   liveSelectedAgent = agentId || liveSelectedAgent;
+  liveReportPage = "agent";
+  requestLiveGraphFocusForAgent(liveSelectedAgent);
   setLiveChatTargetMode(liveChatTargetForAgent(liveSelectedAgent));
   closeBinderContextMenu();
   recordLiveContextAction(action, liveSelectedAgent).catch(() => {});
@@ -5895,9 +7322,18 @@ async function pinAgentReportFromBinder(agentId) {
 
 if (liveAgentBinderList) {
   liveAgentBinderList.addEventListener("click", (event) => {
+    const attentionButton = event.target.closest(".binder-attention-tab[data-attention-action]");
+    if (attentionButton) {
+      liveReportPage = "attention";
+      setLiveView("report");
+      renderLiveRuntime(liveLastSession);
+      return;
+    }
     const button = event.target.closest("[data-agent-id]");
     if (!button) return;
     liveSelectedAgent = button.dataset.agentId || "orchestrator";
+    liveReportPage = "agent";
+    requestLiveGraphFocusForAgent(liveSelectedAgent);
     markLiveAgentRead(liveSelectedAgent, liveLastSession);
     setLiveChatTargetMode(liveChatTargetForAgent(liveSelectedAgent));
     if (event.ctrlKey || event.metaKey) {
@@ -5921,6 +7357,8 @@ if (liveAgentBinderList) {
     const button = event.target.closest("[data-agent-id]");
     if (!button) return;
     liveSelectedAgent = button.dataset.agentId || "orchestrator";
+    liveReportPage = "agent";
+    requestLiveGraphFocusForAgent(liveSelectedAgent);
     markLiveAgentRead(liveSelectedAgent, liveLastSession);
     setLiveChatTargetMode(liveChatTargetForAgent(liveSelectedAgent));
     setLiveView("backend");
@@ -5933,6 +7371,8 @@ if (liveChatTarget) {
     const target = liveChatTarget.value || "selected_agent";
     if (knownLiveAgent(target)) {
       liveSelectedAgent = target;
+      liveReportPage = "agent";
+      requestLiveGraphFocusForAgent(liveSelectedAgent);
       markLiveAgentRead(liveSelectedAgent, liveLastSession);
     }
     renderLiveChatContextStrip();
@@ -5948,7 +7388,9 @@ if (btnLiveBottomCollapse) {
 
 liveViewTabs.forEach((button) => {
   button.addEventListener("click", () => {
-    setLiveView(button.dataset.liveView || "report");
+    const nextView = button.dataset.liveView || "report";
+    if (nextView === "report") liveReportPage = "agent";
+    setLiveView(nextView);
     renderLiveRuntime(liveLastSession);
   });
 });
@@ -6116,7 +7558,7 @@ ${sectionText}` : ""}`;
     return;
   }
   if (action === "safe_stop") {
-    if (btnLiveSafeStop) btnLiveSafeStop.click();
+    await confirmOrRequestLiveSafeStop();
     return;
   }
   if (action === "pause_run") {
@@ -6373,6 +7815,7 @@ document.addEventListener("click", (event) => {
   const graphActionButton = event.target.closest(".live-graph-action[data-graph-action]");
   if (graphActionButton) {
     closeBinderContextMenu();
+    liveGraphFocusPending = true;
     graphActionButton.disabled = true;
     runLiveGraphGateAction(graphActionButton.dataset.graphAction || "").catch((err) => {
       setChatStatus("GRAPH ERROR", "warning");
@@ -6398,6 +7841,7 @@ document.addEventListener("click", (event) => {
     liveSelectedAgent = graphNode.dataset.agentId || liveSelectedAgent;
     liveSelectedGraphNodeId = graphNode.dataset.graphNodeId || liveSelectedGraphNodeId;
     liveGraphSelectionCleared = false;
+    liveGraphFocusPending = true;
     setLiveChatTargetMode(liveChatTargetForAgent(liveSelectedAgent));
     setLiveView("graph");
     renderLiveRuntime(liveLastSession);
@@ -6500,11 +7944,64 @@ async function confirmOrRequestLiveSafeStop() {
   }
 }
 
+function resetLiveEmergencyStopArm() {
+  liveEmergencyStopArmedUntil = 0;
+  if (liveEmergencyStopArmTimer) {
+    window.clearTimeout(liveEmergencyStopArmTimer);
+    liveEmergencyStopArmTimer = null;
+  }
+  if (!btnLiveSafeStop) return;
+  btnLiveSafeStop.classList.remove("is-armed");
+  btnLiveSafeStop.textContent = "E-STOP";
+  btnLiveSafeStop.title = "Emergency Stop: force terminate the active runtime";
+  btnLiveSafeStop.setAttribute("aria-label", "Emergency Stop");
+}
+
+function armLiveEmergencyStop() {
+  liveEmergencyStopArmedUntil = Date.now() + 6000;
+  if (liveEmergencyStopArmTimer) window.clearTimeout(liveEmergencyStopArmTimer);
+  liveEmergencyStopArmTimer = window.setTimeout(resetLiveEmergencyStopArm, 6000);
+  if (btnLiveSafeStop) {
+    btnLiveSafeStop.classList.add("is-armed");
+    btnLiveSafeStop.textContent = "CONFIRM";
+    btnLiveSafeStop.title = "Emergency Stop armed. Click again within 6 seconds to force terminate the active runtime.";
+    btnLiveSafeStop.setAttribute("aria-label", "Confirm Emergency Stop");
+  }
+  setChatStatus("EMERGENCY?", "warning");
+}
+
+async function confirmOrRequestLiveEmergencyStop() {
+  const now = Date.now();
+  if (!liveEmergencyStopArmedUntil || now > liveEmergencyStopArmedUntil) {
+    armLiveEmergencyStop();
+    return;
+  }
+  resetLiveEmergencyStopArm();
+  try {
+    const state = (liveLastSession && liveLastSession.state) || (liveLastSnapshot && liveLastSnapshot.state) || {};
+    const endpoint = state.run_id ? `/api/runs/${encodeURIComponent(state.run_id)}/stop` : "/api/run/stop";
+    setChatStatus("EMERGENCY STOP", "warning");
+    await recordLiveIntentEvent("runtime_command_requested", "emergency_stop", "Live GUI emergency stop confirmed and forced runtime termination requested.", { command: "emergency_stop", confirmation: "double_click_within_6s", endpoint });
+    await fetchJsonOrThrow(endpoint, { method: "POST" });
+    await refreshPlanningState();
+    setChatStatus("EMERGENCY STOPPED", "warning");
+  } catch (err) {
+    appendLiveRuntimeEvent({
+      event_type: "run_emergency_stop_failed",
+      level: "ERROR",
+      node_id: liveSelectedAgent || "guardian",
+      message: `Emergency stop failed: ${String(err)}`,
+      payload: { error: String(err) },
+    });
+    setChatStatus("EMERGENCY ERROR", "warning");
+  }
+}
+
 document.addEventListener("click", (event) => {
   if (!event.target.closest || !event.target.closest("#btn-live-safe-stop")) return;
   event.preventDefault();
   event.stopImmediatePropagation();
-  confirmOrRequestLiveSafeStop().catch((err) => setChatStatus(`SAFE STOP ERROR: ${err}`, "warning"));
+  confirmOrRequestLiveEmergencyStop().catch((err) => setChatStatus(`EMERGENCY ERROR: ${err}`, "warning"));
 }, true);
 
 setInterval(() => {
@@ -6548,9 +8045,15 @@ if (planningMessageInput) {
 applyQueryGoal();
 ensurePlanningSessionId();
 restoreLiveUiState();
+restoreCachedPlanningState();
 if (planningChatLog && !planningChatLog.dataset.autoScrollObserved) {
   planningChatLog.dataset.autoScrollObserved = "1";
   planningChatAutoScrollObserver.observe(planningChatLog, { childList: true, subtree: false });
+}
+if (!window.__atrPlanningChatResizeSyncBound) {
+  window.__atrPlanningChatResizeSyncBound = true;
+  window.addEventListener("resize", () => schedulePlanningChatLayoutSync({ scrollToBottom: false }), { passive: true });
+  document.fonts?.ready?.then(() => schedulePlanningChatLayoutSync({ scrollToBottom: false })).catch?.(() => {});
 }
 connectPlanningEventStream();
 refreshPlanningState()

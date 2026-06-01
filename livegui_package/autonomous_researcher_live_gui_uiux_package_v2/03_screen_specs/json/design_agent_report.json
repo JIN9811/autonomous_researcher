@@ -1,0 +1,23 @@
+{
+  "title": "Design Agent Report",
+  "agent_id": "design",
+  "image": "../00_references/generated_full_screens/02_design_agent_report.png",
+  "sections": [
+    "design_brief",
+    "candidate_board",
+    "candidate_ranking",
+    "parameter_sweep",
+    "expected_performance",
+    "manufacturability",
+    "material_notes",
+    "handoff_to_specimen",
+    "artifact_ledger"
+  ],
+  "primary_visuals": [
+    "CAD candidate cards",
+    "ranking bar chart",
+    "heatmap",
+    "scatter plot",
+    "radar chart"
+  ]
+}

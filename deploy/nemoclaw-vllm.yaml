@@ -137,8 +137,6 @@ spec:
             - "0.20"
             - --generation-config
             - vllm
-            - --speculative-config
-            - '{"method":"mtp","model":"google/gemma-4-E4B-it-assistant","num_speculative_tokens":4}'
             - --safetensors-load-strategy
             - prefetch
           ports:

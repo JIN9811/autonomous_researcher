@@ -23,9 +23,12 @@ Modification guide:
 from __future__ import annotations
 
 import asyncio
+import ctypes
+import gc
 import hashlib
 import inspect
 import json
+import os
 import re
 import shutil
 from datetime import datetime, timezone
@@ -62,6 +65,85 @@ from utils.ids import make_event_id
 
 EventCallback = Callable[[dict[str, Any]], Awaitable[None] | None]
 RUNTIME_ARTIFACT_COPY_LIMIT_BYTES = 50 * 1024 * 1024
+RUNTIME_PAYLOAD_MAX_DEPTH = 8
+RUNTIME_PAYLOAD_LIST_LIMIT = 80
+RUNTIME_PAYLOAD_STRING_LIMIT = 3000
+RUNTIME_PAYLOAD_LARGE_KEYS = {
+    "raw_trace",
+    "raw_events",
+    "source_stage_context",
+    "full_context",
+    "full_payload",
+    "raw_input_sidecar",
+    "canonical_curve",
+    "mesh_vertices",
+    "mesh_faces",
+    "stl_text",
+    "stl_bytes",
+}
+
+
+def compact_runtime_payload(value: Any, *, depth: int = 0, seen: set[int] | None = None) -> Any:
+    """Return a recursion-safe, UI-sized runtime payload for in-memory state/events."""
+    if seen is None:
+        seen = set()
+    if depth >= RUNTIME_PAYLOAD_MAX_DEPTH:
+        if isinstance(value, dict):
+            return {"_truncated": "depth_limit", "keys": list(value.keys())[:24]}
+        if isinstance(value, (list, tuple, set)):
+            return {"_truncated": "depth_limit", "items": len(value)}
+        text = str(value)
+        return text[:RUNTIME_PAYLOAD_STRING_LIMIT] + "..." if len(text) > RUNTIME_PAYLOAD_STRING_LIMIT else value
+    if isinstance(value, dict):
+        obj_id = id(value)
+        if obj_id in seen:
+            return {"_omitted": "recursive_ref", "type": type(value).__name__}
+        seen.add(obj_id)
+        try:
+            compact: dict[str, Any] = {}
+            for key, child in value.items():
+                key_text = str(key)
+                if key_text in RUNTIME_PAYLOAD_LARGE_KEYS:
+                    compact[key_text] = {
+                        "_omitted": "large_runtime_payload",
+                        "type": type(child).__name__,
+                        "items": len(child) if isinstance(child, (dict, list, tuple, set)) else None,
+                    }
+                    continue
+                compact[key_text] = compact_runtime_payload(child, depth=depth + 1, seen=seen)
+            return compact
+        finally:
+            seen.remove(obj_id)
+    if isinstance(value, (list, tuple, set)):
+        obj_id = id(value)
+        if obj_id in seen:
+            return {"_omitted": "recursive_ref", "type": type(value).__name__}
+        seen.add(obj_id)
+        try:
+            seq = list(value)
+            items = [compact_runtime_payload(item, depth=depth + 1, seen=seen) for item in seq[:RUNTIME_PAYLOAD_LIST_LIMIT]]
+            if len(seq) > RUNTIME_PAYLOAD_LIST_LIMIT:
+                items.append({"_truncated_items": len(seq) - RUNTIME_PAYLOAD_LIST_LIMIT})
+            return items
+        finally:
+            seen.remove(obj_id)
+    if isinstance(value, str) and len(value) > RUNTIME_PAYLOAD_STRING_LIMIT:
+        return value[:RUNTIME_PAYLOAD_STRING_LIMIT] + "..."
+    return value
+
+
+def trim_runtime_memory() -> None:
+    """Release Python/c-lib heap pages after mesh/FEM/BO-heavy runtime stages."""
+    try:
+        gc.collect()
+    except Exception:
+        return
+    if os.name != "posix":
+        return
+    try:
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except Exception:
+        return
 
 
 class GeneratedModuleRuntimeAdapter:
@@ -929,6 +1011,71 @@ class LangGraphRunLoop:
         )
         return followup
 
+    async def _drain_operator_followups(self, *, stage: Stage, phase: str) -> list[dict[str, Any]]:
+        """Consume Live GUI operator follow-ups at safe stage boundaries."""
+        queue = self._state.run_metadata.get("operator_followup_queue")
+        if not isinstance(queue, list) or not queue:
+            return []
+        now = datetime.now(timezone.utc).isoformat()
+        pending: list[dict[str, Any]] = []
+        remaining: list[dict[str, Any]] = []
+        for item in queue:
+            if not isinstance(item, dict):
+                continue
+            status = str(item.get("status") or "queued")
+            if status == "queued":
+                consumed = dict(item)
+                consumed.update(
+                    {
+                        "status": "consumed",
+                        "consumed_at": now,
+                        "consumed_stage": stage.value,
+                        "consumed_phase": phase,
+                    }
+                )
+                pending.append(consumed)
+            else:
+                remaining.append(item)
+        self._state.run_metadata["operator_followup_queue"] = remaining[-50:]
+        if not pending:
+            return []
+
+        context = self._state.run_metadata.setdefault("operator_followup_context", [])
+        if not isinstance(context, list):
+            context = []
+            self._state.run_metadata["operator_followup_context"] = context
+        history = self._state.run_metadata.setdefault("operator_followups", [])
+        if not isinstance(history, list):
+            history = []
+            self._state.run_metadata["operator_followups"] = history
+        for record in pending:
+            context.append(compact_runtime_payload(record))
+            history.append(record)
+            self._state.run_metadata["latest_operator_followup"] = record
+            await self._emit(
+                event_type="operator.followup_consumed",
+                message=f"Operator follow-up consumed at {stage.value} boundary",
+                payload={
+                    "agent": "orchestrator",
+                    "node_id": stage.value,
+                    "module_id": "orchestrator",
+                    "status": "consumed",
+                    "phase": phase,
+                    "operator_followup": record,
+                    "target_agent_id": record.get("target_agent", ""),
+                    "chat_mode": record.get("chat_mode", "ask"),
+                },
+            )
+            await self._record_orchestrator_followup(
+                stage=stage,
+                trigger="operator_followup",
+                payload={"operator_followup": record, "status": "ok", "phase": phase},
+                next_stage=stage,
+            )
+        del context[:-20]
+        del history[:-200]
+        return pending
+
     async def _record_orchestrator_transition(
         self,
         *,
@@ -1066,82 +1213,85 @@ class LangGraphRunLoop:
         return self._state.agent_status[name]
 
     def _merge_agent_data(self, stage: Stage, data: dict[str, Any]) -> None:
+        compact_data = compact_runtime_payload(data) if isinstance(data, dict) else data
         if isinstance(data, dict):
-            self._state.run_metadata[f"{stage.value}_agent_payload"] = data
+            self._state.run_metadata[f"{stage.value}_agent_payload"] = compact_data
             if isinstance(data.get("design_report"), dict):
-                self._state.run_metadata["design_report"] = data["design_report"]
+                self._state.run_metadata["design_report"] = compact_runtime_payload(data["design_report"])
             if isinstance(data.get("design_candidate"), dict):
-                self._state.run_metadata["design_candidate"] = data["design_candidate"]
+                self._state.run_metadata["design_candidate"] = compact_runtime_payload(data["design_candidate"])
             if isinstance(data.get("handoff_packet"), dict):
-                self._state.run_metadata[f"{stage.value}_handoff_packet"] = data["handoff_packet"]
+                self._state.run_metadata[f"{stage.value}_handoff_packet"] = compact_runtime_payload(data["handoff_packet"])
                 packets = self._state.run_metadata.get("handoff_packets")
                 if not isinstance(packets, list):
                     packets = []
-                packets.append({"stage": stage.value, "packet": data["handoff_packet"]})
+                packets.append({"stage": stage.value, "packet": compact_runtime_payload(data["handoff_packet"])})
                 self._state.run_metadata["handoff_packets"] = packets[-20:]
             if isinstance(data.get("decisions"), list):
-                self._state.run_metadata[f"{stage.value}_decision_register"] = data["decisions"]
+                self._state.run_metadata[f"{stage.value}_decision_register"] = compact_runtime_payload(data["decisions"])
             if isinstance(data.get("metrics"), dict):
-                self._state.run_metadata[f"{stage.value}_metrics"] = data["metrics"]
+                self._state.run_metadata[f"{stage.value}_metrics"] = compact_runtime_payload(data["metrics"])
             if isinstance(data.get("mission_contract"), dict):
-                self._state.run_metadata["mission_contract"] = data["mission_contract"]
-                self._state.run_metadata["latest_mission_contract"] = data["mission_contract"]
+                self._state.run_metadata["mission_contract"] = compact_runtime_payload(data["mission_contract"])
+                self._state.run_metadata["latest_mission_contract"] = compact_runtime_payload(data["mission_contract"])
             if isinstance(data.get("orchestration_plan"), dict):
                 plans = self._state.run_metadata.get("orchestration_plans")
                 if not isinstance(plans, list):
                     plans = []
-                plans.append(data["orchestration_plan"])
+                plans.append(compact_runtime_payload(data["orchestration_plan"]))
                 self._state.run_metadata["orchestration_plans"] = plans[-20:]
-                self._state.run_metadata["latest_orchestration_plan"] = data["orchestration_plan"]
+                self._state.run_metadata["latest_orchestration_plan"] = compact_runtime_payload(data["orchestration_plan"])
             if isinstance(data.get("fabrication_report"), dict):
-                self._state.run_metadata["fabrication_report"] = data["fabrication_report"]
-                self._state.run_metadata[f"{stage.value}_fabrication_report"] = data["fabrication_report"]
+                self._state.run_metadata["fabrication_report"] = compact_runtime_payload(data["fabrication_report"])
+                self._state.run_metadata[f"{stage.value}_fabrication_report"] = compact_runtime_payload(data["fabrication_report"])
             if isinstance(data.get("specimen_fabricated"), dict):
-                self._state.run_metadata["specimen_fabricated"] = data["specimen_fabricated"]
+                self._state.run_metadata["specimen_fabricated"] = compact_runtime_payload(data["specimen_fabricated"])
             if isinstance(data.get("vision_report"), dict):
-                self._state.run_metadata["vision_report"] = data["vision_report"]
-                self._state.run_metadata[f"{stage.value}_vision_report"] = data["vision_report"]
+                self._state.run_metadata["vision_report"] = compact_runtime_payload(data["vision_report"])
+                self._state.run_metadata[f"{stage.value}_vision_report"] = compact_runtime_payload(data["vision_report"])
             if isinstance(data.get("vision_signal"), dict):
-                self._state.run_metadata["vision_signal"] = data["vision_signal"]
+                self._state.run_metadata["vision_signal"] = compact_runtime_payload(data["vision_signal"])
             if isinstance(data.get("manipulation_report"), dict):
-                self._state.run_metadata["manipulation_report"] = data["manipulation_report"]
-                self._state.run_metadata[f"{stage.value}_manipulation_report"] = data["manipulation_report"]
+                self._state.run_metadata["manipulation_report"] = compact_runtime_payload(data["manipulation_report"])
+                self._state.run_metadata[f"{stage.value}_manipulation_report"] = compact_runtime_payload(data["manipulation_report"])
             if isinstance(data.get("robot_task_result"), dict):
-                self._state.run_metadata["robot_task_result"] = data["robot_task_result"]
-                self._state.run_metadata[f"{stage.value}_robot_task_result"] = data["robot_task_result"]
+                self._state.run_metadata["robot_task_result"] = compact_runtime_payload(data["robot_task_result"])
+                self._state.run_metadata[f"{stage.value}_robot_task_result"] = compact_runtime_payload(data["robot_task_result"])
         if "experiment_spec" in data:
-            self._state.current_experiment_spec = data["experiment_spec"]
+            self._state.current_experiment_spec = compact_runtime_payload(data["experiment_spec"])
         if "experiment_objective" in data:
-            self._state.current_experiment_objective = data["experiment_objective"]
+            self._state.current_experiment_objective = compact_runtime_payload(data["experiment_objective"])
         if "experiment_evaluation" in data and isinstance(data["experiment_evaluation"], dict):
-            self._state.experiment_evaluations.append(data["experiment_evaluation"])
+            self._state.experiment_evaluations.append(compact_runtime_payload(data["experiment_evaluation"]))
         specimen_result = data.get("specimen_result") if isinstance(data.get("specimen_result"), dict) else {}
         if specimen_result:
-            self._state.run_metadata["specimen_result"] = specimen_result
+            self._state.run_metadata["specimen_result"] = compact_runtime_payload(specimen_result)
         if isinstance(specimen_result.get("experiment_evaluation"), dict):
-            self._state.experiment_evaluations.append(specimen_result["experiment_evaluation"])
+            self._state.experiment_evaluations.append(compact_runtime_payload(specimen_result["experiment_evaluation"]))
         if "observation" in data:
-            self._state.latest_observations = data["observation"]
+            self._state.latest_observations = compact_runtime_payload(data["observation"])
             if isinstance(data["observation"], dict):
-                self._state.run_metadata["latest_vision_observation"] = data["observation"]
+                self._state.run_metadata["latest_vision_observation"] = compact_runtime_payload(data["observation"])
         if "analysis" in data:
-            self._state.latest_analysis.update(data["analysis"])
+            analysis_payload = compact_runtime_payload(data["analysis"])
+            if isinstance(analysis_payload, dict):
+                self._state.latest_analysis.update(analysis_payload)
         if "sarm" in data:
-            self._state.latest_analysis["sarm"] = data["sarm"]
+            self._state.latest_analysis["sarm"] = compact_runtime_payload(data["sarm"])
         if "manipulation" in data:
-            self._state.run_metadata["manipulation_result"] = data["manipulation"]
+            self._state.run_metadata["manipulation_result"] = compact_runtime_payload(data["manipulation"])
             self._state.latest_analysis["last_grasp_score"] = float(data["manipulation"].get("grasp_score", 0.0))
             if "sarm" in data:
-                self._state.latest_analysis["sarm"] = data["sarm"]
+                self._state.latest_analysis["sarm"] = compact_runtime_payload(data["sarm"])
         if "equipment_result" in data:
             equipment_result = data["equipment_result"] if isinstance(data["equipment_result"], dict) else {}
-            self._state.run_metadata["equipment_result"] = equipment_result
+            self._state.run_metadata["equipment_result"] = compact_runtime_payload(equipment_result)
             if isinstance(data.get("equipment_report"), dict):
-                self._state.run_metadata["equipment_report"] = data["equipment_report"]
+                self._state.run_metadata["equipment_report"] = compact_runtime_payload(data["equipment_report"])
             if isinstance(data.get("utm_data_ready"), dict):
-                self._state.run_metadata["utm_data_ready"] = data["utm_data_ready"]
+                self._state.run_metadata["utm_data_ready"] = compact_runtime_payload(data["utm_data_ready"])
             if "equipment_handoff" in data:
-                self._state.run_metadata["equipment_handoff"] = data["equipment_handoff"]
+                self._state.run_metadata["equipment_handoff"] = compact_runtime_payload(data["equipment_handoff"])
             self._state.latest_analysis["equipment_ok"] = bool(equipment_result.get("ok", False))
             self._state.latest_analysis["equipment_status"] = str(equipment_result.get("status") or "")
             self._state.latest_analysis["equipment_program_id"] = str(equipment_result.get("program_id") or "")
@@ -1186,15 +1336,15 @@ class LangGraphRunLoop:
         if incident_records:
             self._record_incident_records(incident_records)
         if "knowledge" in data:
-            self._state.run_metadata["knowledge"] = data["knowledge"]
+            self._state.run_metadata["knowledge"] = compact_runtime_payload(data["knowledge"])
         if "bo_result" in data:
-            self._state.run_metadata["bo_agent"] = data["bo_result"]
+            self._state.run_metadata["bo_agent"] = compact_runtime_payload(data["bo_result"])
         if "experiment_spec_update" in data and isinstance(data["experiment_spec_update"], dict):
             update = {key: value for key, value in data["experiment_spec_update"].items() if key != "cell_size_mm"}
             self._state.run_metadata["bo_recommended_constraints"] = update
         if "guardian" in data:
-            self._state.run_metadata["guardian"] = data["guardian"]
-        self._state.run_metadata["last_stage_payload"] = {"stage": stage.value, "data": data}
+            self._state.run_metadata["guardian"] = compact_runtime_payload(data["guardian"])
+        self._state.run_metadata["last_stage_payload"] = {"stage": stage.value, "data": compact_data}
 
     def _apply_fault_injection(self) -> None:
         fault_stage = str(self._state.fault_injection.get("stage", ""))
@@ -2194,6 +2344,7 @@ class LangGraphRunLoop:
                 level="WARNING",
             )
             return
+        await self._drain_operator_followups(stage=stage, phase="pre_stage")
         handler = self._handler_for_stage(stage)
         module_runtime = self._module_runtime_payload(stage)
         module_id = str(module_runtime.get("module_id") or stage.value)
@@ -2305,7 +2456,9 @@ class LangGraphRunLoop:
             ctx = self._context_for_stage(stage)
             result = await agent.run(self._state, ctx)
             result_data = result.data if isinstance(result.data, dict) else {}
-            gate_payload = dict(result_data)
+            gate_payload = compact_runtime_payload(result_data)
+            if not isinstance(gate_payload, dict):
+                gate_payload = {}
             if result.success is False:
                 gate_payload.setdefault("failure_code", "AGENT_RESULT_FAILED")
             ok, validation_msg = validate_agent_output(stage.value, result_data)
@@ -2358,15 +2511,15 @@ class LangGraphRunLoop:
                 agent_name=agent_name,
                 event_type="completed",
                 message=result.summary,
-                payload=result.data,
+                payload=compact_runtime_payload(result.data),
                 experiment_id=self._state.experiment_id,
             )
             await self._emit(
                 event_type="agent_result",
                 message=f"{agent_name}: {result.summary}",
-                payload={"agent": agent_name, "node_id": stage.value, "status": "done", "module_runtime": module_runtime, "result": result.data},
+                payload={"agent": agent_name, "node_id": stage.value, "status": "done", "module_runtime": module_runtime, "result": compact_runtime_payload(result.data)},
             )
-            await self._emit_module_graph_completed(stage, agent_name, module_runtime, result_data)
+            await self._emit_module_graph_completed(stage, agent_name, module_runtime, compact_runtime_payload(result_data))
             await self._emit_artifact_events(stage, agent_name, result_data)
 
             if stage != Stage.GUARDIAN and gate_blocks_execution(post_gate):
@@ -2388,7 +2541,7 @@ class LangGraphRunLoop:
                 await self._record_orchestrator_followup(
                     stage=stage,
                     trigger="guardian_post_gate_block",
-                    payload=result_data,
+                    payload=compact_runtime_payload(result_data),
                     next_stage=target_stage,
                     guardian_context=post_gate,
                     level="WARNING",
@@ -2399,7 +2552,7 @@ class LangGraphRunLoop:
             if stage == Stage.GUARDIAN:
                 guardian_decision = str(result.data.get("guardian", {}).get("decision", "continue"))
                 self._state.loop_count += 1
-            transition_context = {**self._state.run_metadata, "agent_result": result.data}
+            transition_context = {**self._state.run_metadata, "agent_result": compact_runtime_payload(result.data)}
             next_stage = self._coerce_stage(
                 self._graph_config.next_stage(
                     stage.value,
@@ -2423,13 +2576,13 @@ class LangGraphRunLoop:
             await self._record_orchestrator_followup(
                 stage=stage,
                 trigger="post_stage",
-                payload=result_data,
+                payload=compact_runtime_payload(result_data),
                 next_stage=next_stage,
                 guardian_context=post_gate,
             )
             if stage == Stage.GUARDIAN:
                 await self._record_orchestrator_loop_reflection(
-                    guardian_payload=result.data.get("guardian", {}) if isinstance(result.data, dict) else {},
+                    guardian_payload=compact_runtime_payload(result.data.get("guardian", {})) if isinstance(result.data, dict) else {},
                     next_stage=next_stage,
                 )
             self._state.stage = next_stage
@@ -2473,7 +2626,7 @@ class LangGraphRunLoop:
                 run_id=self._state.run_id,
                 where=f"{agent_name}@{stage.value}",
                 error=exc,
-                state_snapshot=self._state.model_dump(mode="json"),
+                state_snapshot=compact_runtime_payload(self._state.model_dump(mode="json")),
             )
             await self._emit_module_graph_failed(stage, agent_name, module_runtime, exc)
 
@@ -2576,6 +2729,7 @@ class LangGraphRunLoop:
 
             self._pause_notice_emitted = False
             await self.step()
+            trim_runtime_memory()
             await asyncio.sleep(self._interval_seconds)
 
         final_event = "run_complete" if self._state.stage == Stage.COMPLETE else "run_error"

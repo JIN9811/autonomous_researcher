@@ -25,7 +25,7 @@ Modification guide:
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>{{ title }}</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
-    <link rel="stylesheet" href="/static/styles.css?v=20260527-live-focus2" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260602-live-message-label-align-1" />
   </head>
   <body class="planning-live-body">
     <main class="planning-runtime-shell" aria-label="ATR Live Runtime GUI">
@@ -34,24 +34,36 @@ Modification guide:
           <p class="eyebrow" title="ATR Runtime IDE / Live Orchestrator">ATR Runtime IDE</p>
           <h1 title="Live Runtime">LIVE</h1>
         </div>
-        <div class="live-runtime-metrics" aria-label="runtime summary">
-          <span id="planning-state-dot" class="status-dot idle"></span>
-          <span id="planning-stage-label" title="Current runtime stage">S:load</span>
-          <span id="planning-run-detail" title="Current run / mode / running state">run:-</span>
-          <span id="live-active-agent-chip" class="badge idle" title="Active agent">A:-</span>
-          <span id="planning-chat-status" class="badge idle">READY</span>
-          <span id="live-stream-chip" class="runtime-chip warning" title="Runtime event stream is connecting">SSE ...</span>
-          <span id="live-sync-chip" class="runtime-chip idle" title="No state sync completed yet">Sync -</span>
-          <span id="live-fault-chip" class="runtime-chip idle" title="No runtime faults detected">F:0</span>
-          <span id="live-runtime-clock" class="runtime-chip">00:00</span>
-          <span id="live-resource-chip" class="runtime-chip" title="GPU/RAM memory usage">GPU/RAM -</span>
-          <span id="live-token-chip" class="runtime-chip" title="LLM token usage for this Live GUI session">Tok -</span>
-          <button id="btn-live-safe-stop" class="btn danger" title="Safe Stop (Alt+Shift+X)" aria-label="Safe Stop" aria-keyshortcuts="Alt+Shift+X">STOP</button>
+        <div class="live-runtime-metrics mission-status-bar" aria-label="runtime summary">
+          <section class="mission-status-cell mission-status-primary" data-label="MISSION" title="Current runtime mission status">
+            <span id="planning-state-dot" class="status-dot idle"></span>
+            <span id="planning-stage-label" title="Current runtime stage">S:load</span>
+            <span id="planning-cycle-label" class="runtime-chip" title="Current closed-loop cycle">C:-</span>
+          </section>
+          <section class="mission-status-cell mission-status-run" data-label="RUN" title="Run id, mode, and activity state">
+            <span id="planning-run-detail" title="Current run / mode / running state">run:-</span>
+            <span id="live-runtime-clock" class="runtime-chip">00:00</span>
+          </section>
+          <section class="mission-status-cell mission-status-agent" data-label="AGENT" title="Active agent and chat state">
+            <span id="live-active-agent-chip" class="badge idle" title="Active agent">A:-</span>
+            <span id="planning-chat-status" class="badge idle">READY</span>
+          </section>
+          <section class="mission-status-cell mission-status-link" data-label="LINK" title="Runtime stream and synchronization state">
+            <span id="live-stream-chip" class="runtime-chip warning" title="Runtime event stream is connecting">SSE ...</span>
+            <span id="live-sync-chip" class="runtime-chip idle" title="No state sync completed yet">Sync -</span>
+            <span id="live-fault-chip" class="runtime-chip idle" title="No runtime faults detected">F:0</span>
+          </section>
+          <section class="mission-status-cell mission-status-resource" data-label="RESOURCE" title="Runtime compute and token usage">
+            <span id="live-resource-chip" class="runtime-chip" title="GPU/RAM memory usage">GPU/RAM -</span>
+            <span id="live-token-chip" class="runtime-chip" title="LLM token usage for this Live GUI session">Tok -</span>
+          </section>
+          <section class="mission-status-cell mission-status-stop" data-label="CONTROL" title="Emergency runtime control">
+            <button id="btn-live-safe-stop" class="btn danger" title="Emergency Stop: force terminate the active runtime" aria-label="Emergency Stop">E-STOP</button>
+          </section>
         </div>
       </header>
 
       <aside class="live-agent-binder panel" aria-label="agent binder">
-        <div class="binder-title" title="Agentic Binder">AGT</div>
         <div id="live-agent-binder-list" class="binder-list"></div>
       </aside>
 
@@ -112,13 +124,12 @@ Modification guide:
           <button class="btn live-quick-action" data-quick-action="dry_run" title="Dry Run current graph (Alt+Shift+D)" aria-label="Dry Run" aria-keyshortcuts="Alt+Shift+D"><span class="live-quick-icon" aria-hidden="true">◇</span><span class="live-quick-label">Dry Run</span></button>
         </div>
 
-        <div id="live-approval-panel" class="live-approval-panel" hidden></div>
         <div id="planning-chat-log" class="planning-chat-log planning-chat-window" role="log" aria-live="polite" aria-relevant="additions text" aria-label="Runtime Chat conversation stream"></div>
 
         <footer class="planning-composer">
           <input id="planning-goal-input" type="hidden" />
           <label class="planning-message-label" for="planning-message-input" title="Runtime chat message input">
-            메시지
+            <span class="planning-message-label-text">Message</span>
             <textarea
               id="planning-message-input"
               rows="2"
@@ -186,6 +197,7 @@ Modification guide:
       </div>
     </main>
 
-    <script src="/static/planning.js?v=20260527-live-focus2" defer></script>
+    <script src="/static/runtime_graph_geometry.js?v=atr-ui-20260531-graph-geometry-3"></script>
+    <script src="/static/planning.js?v=20260602-live-message-label-align-1" defer></script>
   </body>
 </html>

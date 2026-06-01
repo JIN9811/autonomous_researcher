@@ -78,6 +78,7 @@ const yamlImportFile = document.getElementById("ide-yaml-import-file");
 const runStatusLabel = document.getElementById("ide-run-status");
 const runIdLabel = document.getElementById("ide-run-id");
 const elapsedLabel = document.getElementById("ide-elapsed");
+const ideCycleLabel = document.getElementById("ide-cycle-label");
 const objectiveSummary = document.getElementById("ide-objective-summary");
 const activeAgentLabel = document.getElementById("ide-active-agent");
 const currentStageLabel = document.getElementById("ide-current-stage");
@@ -922,6 +923,17 @@ function statusFromSnapshot(snapshot) {
   return snapshot?.is_running ? "RUNNING" : "IDLE";
 }
 
+function formatRuntimeIdeCycleLabel(state = {}, isRunning = false) {
+  const mode = String(state.mode || "test").toLowerCase();
+  const stage = String(state.stage || "idle").toLowerCase();
+  const completed = Number(state.loop_count || 0);
+  const active = Boolean(isRunning && !["complete", "error", "idle"].includes(stage));
+  const current = Math.max(active ? completed + 1 : completed, 0);
+  if (mode === "test") return `C:${current}/5`;
+  if (mode === "live") return current > 0 ? `C:${current}` : "C:0";
+  return `C:${current}`;
+}
+
 function renderRuntimeHeader(snapshot = latestStateSnapshot) {
   if (!snapshot) return;
   latestStateSnapshot = snapshot;
@@ -935,6 +947,7 @@ function renderRuntimeHeader(snapshot = latestStateSnapshot) {
   }
   if (runIdLabel) runIdLabel.textContent = `run: ${runId}`;
   if (elapsedLabel) elapsedLabel.textContent = formatElapsed(runId);
+  if (ideCycleLabel) ideCycleLabel.textContent = formatRuntimeIdeCycleLabel(state, Boolean(snapshot.is_running));
   if (objectiveSummary) objectiveSummary.textContent = `objective: ${state.active_goal || "not set"}`;
   if (activeAgentLabel) activeAgentLabel.textContent = stageAgentLabel(stage);
   if (currentStageLabel) currentStageLabel.textContent = stage;

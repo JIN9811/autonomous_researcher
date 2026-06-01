@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Autonomous Researcher Live GUI UI/UX Package</title>
+<link rel="stylesheet" href="../01_design_tokens/design_tokens.css">
+<style>
+body{margin:0;padding:24px;background:var(--ar-bg);color:var(--ar-text);font-family:var(--ar-font-ui)}
+a{color:#67e8f9}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px}.thumb{border:1px solid var(--ar-border);background:var(--ar-surface-1);border-radius:16px;padding:12px;box-shadow:var(--ar-shadow-card)}.thumb img{width:100%;border-radius:12px;border:1px solid var(--ar-border)}.muted{color:var(--ar-text-muted)}code{font-family:var(--ar-font-mono);background:#111827;padding:2px 5px;border-radius:6px}</style>
+</head><body>
+<h1>Autonomous Researcher Live GUI — UI/UX Package v2</h1>
+<p class="muted">분리된 reference images, component crops, tokens, component specs, screen specs, schemas, prompts, implementation guides를 포함한다.</p>
+<h2>Full Screen References</h2><div class="grid">
+<article class="thumb"><h3>Overall Live GUI Layout</h3><img src="../00_references/generated_full_screens/00_overall_live_gui_layout.png" alt="Overall Live GUI Layout"><p class="muted">Sections: top_mission_bar, agent_rail, orchestrator_report, operator_console_chat, bottom_dock...</p></article>
+<article class="thumb"><h3>Orchestrator Agent Report</h3><img src="../00_references/generated_full_screens/01_orchestrator_agent_report.png" alt="Orchestrator Agent Report"><p class="muted">Sections: mission_contract, route_state, missing_inputs, decision_register, followup_questions...</p></article>
+<article class="thumb"><h3>Design Agent Report</h3><img src="../00_references/generated_full_screens/02_design_agent_report.png" alt="Design Agent Report"><p class="muted">Sections: design_brief, candidate_board, candidate_ranking, parameter_sweep, expected_performance...</p></article>
+<article class="thumb"><h3>Specimen Making Agent Report</h3><img src="../00_references/generated_full_screens/03_specimen_making_agent_report.png" alt="Specimen Making Agent Report"><p class="muted">Sections: slicer_configuration, printer_profile, build_queue, estimated_print_time, filament_usage...</p></article>
+<article class="thumb"><h3>Vision Agent Report</h3><img src="../00_references/generated_full_screens/04_vision_agent_report.png" alt="Vision Agent Report"><p class="muted">Sections: camera_health, calibration_summary, confidence_distribution, inspection_feed, segmentation...</p></article>
+<article class="thumb"><h3>Manipulation Agent Report</h3><img src="../00_references/generated_full_screens/05_manipulation_agent_report.png" alt="Manipulation Agent Report"><p class="muted">Sections: success_metrics, grasp_plan, waypoint_sequence, motion_execution, robot_workspace...</p></article>
+<article class="thumb"><h3>Lab Equipment Agent Report</h3><img src="../00_references/generated_full_screens/06_lab_equipment_agent_report.png" alt="Lab Equipment Agent Report"><p class="muted">Sections: equipment_readiness, live_test_status, load_displacement_preview, test_recipe, sensor_channels...</p></article>
+<article class="thumb"><h3>Analysis Agent Report</h3><img src="../00_references/generated_full_screens/07_analysis_agent_report.png" alt="Analysis Agent Report"><p class="muted">Sections: preprocessing_status, signal_overview, data_quality, extracted_features, time_series...</p></article>
+<article class="thumb"><h3>Bayesian Optimization Agent Report</h3><img src="../00_references/generated_full_screens/08_bayesian_optimization_agent_report.png" alt="Bayesian Optimization Agent Report"><p class="muted">Sections: optimization_goal, iterations, best_observed, current_regret, surrogate_model...</p></article>
+<article class="thumb"><h3>UI/UX Design System Board</h3><img src="../00_references/generated_full_screens/09_uiux_design_system_board.png" alt="UI/UX Design System Board"><p class="muted">Sections: color_palette, typography, spacing_grid, card_anatomy, buttons...</p></article>
+</div>
+<h2>Component Crops</h2><div class="grid">
+<article class="thumb"><h3>00_header_brand_principles</h3><img src="../00_references/component_crops_from_design_system/00_header_brand_principles.png" alt="00_header_brand_principles"></article>
+<article class="thumb"><h3>01_color_palette</h3><img src="../00_references/component_crops_from_design_system/01_color_palette.png" alt="01_color_palette"></article>
+<article class="thumb"><h3>02_typography</h3><img src="../00_references/component_crops_from_design_system/02_typography.png" alt="02_typography"></article>
+<article class="thumb"><h3>03_spacing_grid</h3><img src="../00_references/component_crops_from_design_system/03_spacing_grid.png" alt="03_spacing_grid"></article>
+<article class="thumb"><h3>04_card_anatomy</h3><img src="../00_references/component_crops_from_design_system/04_card_anatomy.png" alt="04_card_anatomy"></article>
+<article class="thumb"><h3>05_button_hierarchy_states</h3><img src="../00_references/component_crops_from_design_system/05_button_hierarchy_states.png" alt="05_button_hierarchy_states"></article>
+<article class="thumb"><h3>06_form_elements</h3><img src="../00_references/component_crops_from_design_system/06_form_elements.png" alt="06_form_elements"></article>
+<article class="thumb"><h3>07_agent_status_chips</h3><img src="../00_references/component_crops_from_design_system/07_agent_status_chips.png" alt="07_agent_status_chips"></article>
+<article class="thumb"><h3>08_icon_style</h3><img src="../00_references/component_crops_from_design_system/08_icon_style.png" alt="08_icon_style"></article>
+<article class="thumb"><h3>09_alert_notice_states</h3><img src="../00_references/component_crops_from_design_system/09_alert_notice_states.png" alt="09_alert_notice_states"></article>
+<article class="thumb"><h3>10_chart_styles</h3><img src="../00_references/component_crops_from_design_system/10_chart_styles.png" alt="10_chart_styles"></article>
+<article class="thumb"><h3>11_artifact_card</h3><img src="../00_references/component_crops_from_design_system/11_artifact_card.png" alt="11_artifact_card"></article>
+<article class="thumb"><h3>12_primary_user_flow</h3><img src="../00_references/component_crops_from_design_system/12_primary_user_flow.png" alt="12_primary_user_flow"></article>
+<article class="thumb"><h3>13_mini_overall_dashboard</h3><img src="../00_references/component_crops_from_design_system/13_mini_overall_dashboard.png" alt="13_mini_overall_dashboard"></article>
+<article class="thumb"><h3>14_mini_report_view</h3><img src="../00_references/component_crops_from_design_system/14_mini_report_view.png" alt="14_mini_report_view"></article>
+<article class="thumb"><h3>15_mini_backend_trace</h3><img src="../00_references/component_crops_from_design_system/15_mini_backend_trace.png" alt="15_mini_backend_trace"></article>
+<article class="thumb"><h3>16_mini_approval_modal</h3><img src="../00_references/component_crops_from_design_system/16_mini_approval_modal.png" alt="16_mini_approval_modal"></article>
+<article class="thumb"><h3>17_mini_artifact_viewer</h3><img src="../00_references/component_crops_from_design_system/17_mini_artifact_viewer.png" alt="17_mini_artifact_viewer"></article>
+</div>
+<h2>Layout Crops</h2><div class="grid">
+<article class="thumb"><h3>00_top_mission_status_bar</h3><img src="../00_references/layout_crops_from_overall/00_top_mission_status_bar.png" alt="00_top_mission_status_bar"></article>
+<article class="thumb"><h3>01_left_agent_rail</h3><img src="../00_references/layout_crops_from_overall/01_left_agent_rail.png" alt="01_left_agent_rail"></article>
+<article class="thumb"><h3>02_center_orchestrator_report_area</h3><img src="../00_references/layout_crops_from_overall/02_center_orchestrator_report_area.png" alt="02_center_orchestrator_report_area"></article>
+<article class="thumb"><h3>03_right_operator_console_chat</h3><img src="../00_references/layout_crops_from_overall/03_right_operator_console_chat.png" alt="03_right_operator_console_chat"></article>
+<article class="thumb"><h3>04_bottom_events_devices_logs_artifacts_dock</h3><img src="../00_references/layout_crops_from_overall/04_bottom_events_devices_logs_artifacts_dock.png" alt="04_bottom_events_devices_logs_artifacts_dock"></article>
+<article class="thumb"><h3>05_mission_contract_card</h3><img src="../00_references/layout_crops_from_overall/05_mission_contract_card.png" alt="05_mission_contract_card"></article>
+<article class="thumb"><h3>06_decision_register_card</h3><img src="../00_references/layout_crops_from_overall/06_decision_register_card.png" alt="06_decision_register_card"></article>
+<article class="thumb"><h3>07_route_graph_card</h3><img src="../00_references/layout_crops_from_overall/07_route_graph_card.png" alt="07_route_graph_card"></article>
+<article class="thumb"><h3>08_experiment_setup_form</h3><img src="../00_references/layout_crops_from_overall/08_experiment_setup_form.png" alt="08_experiment_setup_form"></article>
+<article class="thumb"><h3>09_artifact_strip</h3><img src="../00_references/layout_crops_from_overall/09_artifact_strip.png" alt="09_artifact_strip"></article>
+</div>
+</body></html>

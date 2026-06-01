@@ -15,11 +15,12 @@ import app.main as app_main
 from agents.registry import AgentRegistry
 from graphs import ATRLangGraphCompiler, GraphConfig, HandlerRegistry, ModuleConfig, load_graph_config, load_module_config
 from logging_system.structured_logger import StructuredLogger
-from orchestrator.langgraph_runtime import LangGraphRunLoop
+from orchestrator.langgraph_runtime import LangGraphRunLoop, compact_runtime_payload
 from orchestrator.graph import OrchestrationGraph
 from orchestrator.router import stage_to_agent
 from orchestrator.state import Mode, OrchestratorState, Stage
 from orchestrator.transitions import default_next_stage, ordered_stages
+from policies.guardian_gate import gate_blocks_execution, guardian_gate
 
 
 def _noop_registry() -> HandlerRegistry:
@@ -98,6 +99,34 @@ def _add_graph_transition_candidate(
             },
         }
     )
+
+
+def test_compact_runtime_payload_preserves_shared_empty_handoff_lists_for_guardian() -> None:
+    missing_required_fields: list[str] = []
+    payload = {
+        "experiment_spec": {"validation_warnings": ["cand-1-06: cell_size_mm below 3x wall thickness rule"]},
+        "design_report": {
+            "decision_register": [{"evidence": {"missing_required_fields": missing_required_fields}}],
+            "handoff_to_specimen": {
+                "required_fields_present": True,
+                "missing_required_fields": missing_required_fields,
+            },
+        },
+    }
+
+    compact = compact_runtime_payload(payload)
+    gate = guardian_gate(
+        state=OrchestratorState(run_id="run-compact", experiment_id="exp-compact", mode=Mode.TEST, stage=Stage.DESIGN),
+        stage="design",
+        phase="post",
+        agent="design_agent",
+        payload=compact,
+    )
+
+    assert compact["design_report"]["handoff_to_specimen"]["missing_required_fields"] == []
+    assert gate["decision"] == "allow_with_warning"
+    assert gate_blocks_execution(gate) is False
+    assert not any(alarm["reason_code"] == "MISSING_REQUIRED_INPUT" for alarm in gate["alarms"])
 
 
 def test_langgraph_runtime_tool_call_snapshot_persists_blackbox_record(tmp_path: Path) -> None:
@@ -2111,6 +2140,78 @@ async def test_module_internal_graph_emits_failure_event(tmp_path) -> None:
     assert failed[-1]["payload"]["step_count"] == 1
     assert "planned failure" in failed[-1]["payload"]["error"]
 
+
+@pytest.mark.asyncio
+async def test_langgraph_runtime_consumes_operator_followup_at_stage_boundary(tmp_path: Path) -> None:
+    config = load_graph_config("graphs/configs/atr_closed_loop.yaml")
+    payload = config.model_dump(mode="json")
+    payload["transitions"]["design"] = "guardian"
+    for edge in payload["edges"]:
+        if (
+            edge.get("metadata", {}).get("runtime_edge") == "logical_transition"
+            and edge.get("metadata", {}).get("from_stage") == "design"
+            and edge.get("metadata", {}).get("default_transition") is True
+        ):
+            edge["target"] = "guardian"
+            edge["label"] = "default transition: design -> guardian"
+            edge["metadata"]["to_stage"] = "guardian"
+            break
+    graph_path = tmp_path / "followup_graph.yaml"
+    graph_path.write_text(yaml.safe_dump({"graph": payload}, sort_keys=False), encoding="utf-8")
+
+    registry = AgentRegistry()
+    registry.register(_StaticAgent("orchestrator_agent", {}))
+    registry.register(_StaticAgent("design_agent", {"experiment_spec": {"specimen_id": "followup-spec"}}))
+    registry.register(_StaticAgent("guardian_agent", {"guardian": {"decision": "stop"}}))
+
+    bundle = build_logger_bundle(run_id="run-langgraph-followup", run_root=tmp_path / "runs", logging_config={})
+    state = OrchestratorState(
+        run_id=bundle.run_dir.name,
+        experiment_id="exp-langgraph-followup",
+        mode=Mode.TEST,
+        stage=Stage.IDLE,
+    )
+    events: list[dict[str, object]] = []
+    loop = RunLoop(
+        state=state,
+        agent_registry=registry,
+        orchestrator_agent_name="orchestrator_agent",
+        ctx=object(),
+        logger=bundle.logger,
+        interval_seconds=0,
+        graph_config_path=graph_path,
+        on_event=events.append,
+    )
+
+    await loop.step()
+    assert state.stage == Stage.DESIGN
+    state.run_metadata["operator_followup_queue"] = [
+        {
+            "schema": "operator_runtime_followup.v1",
+            "followup_id": "operator-followup-001",
+            "status": "queued",
+            "message": "다음 후보에서는 wall thickness를 낮춰줘",
+            "target_agent": "orchestrator",
+            "chat_mode": "ask",
+            "stage_at_submit": "design",
+        }
+    ]
+
+    await loop.step()
+
+    assert state.run_metadata["operator_followup_queue"] == []
+    consumed = state.run_metadata["operator_followup_context"][-1]
+    assert consumed["status"] == "consumed"
+    assert consumed["consumed_stage"] == "design"
+    assert consumed["message"].startswith("다음 후보")
+    assert any(event.get("event_type") == "operator.followup_consumed" for event in events)
+    assert any(item.get("trigger") == "operator_followup" for item in state.run_metadata["orchestrator_followups"])
+    assert any(
+        event.get("event_type") == "orchestrator.followup"
+        and isinstance(event.get("payload"), dict)
+        and event["payload"].get("orchestrator_followup", {}).get("trigger") == "operator_followup"
+        for event in events
+    )
 
 @pytest.mark.asyncio
 async def test_configured_transition_changes_actual_langgraph_runtime(tmp_path) -> None:

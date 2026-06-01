@@ -536,7 +536,22 @@ def build_orchestrator_followup(
     opinion = f"{stage_text} stage 결과를 확인했고 status={status}로 판단했습니다."
     options: list[dict[str, Any]] = []
 
-    if stage_text == Stage.DESIGN.value:
+    if trigger == "operator_followup":
+        operator_followup = _first_dict(data.get("operator_followup"))
+        target_agent = str(operator_followup.get("target_agent") or "orchestrator")
+        chat_mode = str(operator_followup.get("chat_mode") or "ask")
+        message = str(operator_followup.get("message") or "").strip()
+        excerpt = message[:120] + ("..." if len(message) > 120 else "")
+        opinion = f"Operator follow-up을 {stage_text} stage boundary에서 수신했습니다. target={target_agent}, mode={chat_mode}."
+        recommendation = "현재 물리 동작은 중단하지 않고, 이 입력을 다음 agent context와 Guardian/BO 판단 근거에 포함합니다."
+        evidence_refs = [*evidence_refs, operator_followup.get("followup_id") or "operator_followup"]
+        options = [
+            {"id": "continue_with_context", "label": "현재 loop 유지", "risk": "low"},
+            {"id": "pause_if_safety_relevant", "label": "안전 관련이면 pause/safe-stop 검토", "risk": "medium"},
+        ]
+        if excerpt:
+            concerns.append(f"operator_note={excerpt}")
+    elif stage_text == Stage.DESIGN.value:
         candidate = _first_dict(data.get("design_candidate"), data.get("handoff_packet"))
         design_handoff = _first_dict(_first_dict(data.get("design_report")).get("handoff_to_specimen"))
         missing = as_list(design_handoff.get("missing_required_fields"))
@@ -626,7 +641,7 @@ def build_orchestrator_followup(
         "next_stage": next_stage_text,
         "evidence_refs": evidence_refs[:5],
     }
-    return {
+    followup = {
         "schema": "orchestrator_followup.v1",
         "followup_id": stable_id("ofup", followup_seed),
         "run_id": state.run_id,
@@ -646,6 +661,13 @@ def build_orchestrator_followup(
         "status": "warning" if concerns else "ok",
         "created_at": now_iso(),
     }
+    if trigger == "operator_followup" and isinstance(data.get("operator_followup"), dict):
+        followup["operator_followup"] = {
+            key: data["operator_followup"].get(key)
+            for key in ("followup_id", "message", "target_agent", "chat_mode", "stage_at_submit", "consumed_stage", "created_at", "consumed_at")
+            if key in data["operator_followup"]
+        }
+    return followup
 
 
 def build_decision_record(

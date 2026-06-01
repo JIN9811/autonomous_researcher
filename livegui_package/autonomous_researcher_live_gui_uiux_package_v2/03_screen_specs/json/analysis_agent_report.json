@@ -1,0 +1,28 @@
+{
+  "title": "Analysis Agent Report",
+  "agent_id": "analysis",
+  "image": "../00_references/generated_full_screens/07_analysis_agent_report.png",
+  "sections": [
+    "preprocessing_status",
+    "signal_overview",
+    "data_quality",
+    "extracted_features",
+    "time_series",
+    "histogram",
+    "frequency_analysis",
+    "model_output",
+    "confusion_matrix",
+    "key_insights",
+    "anomaly_detection",
+    "artifacts",
+    "result_summary"
+  ],
+  "primary_visuals": [
+    "signal line plot",
+    "histogram",
+    "FFT chart",
+    "regression scatter",
+    "confusion matrix",
+    "artifact grid"
+  ]
+}

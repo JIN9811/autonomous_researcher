@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "approval_request.v1",
+  "type": "object",
+  "required": [
+    "approval_id",
+    "title",
+    "status",
+    "risk_level",
+    "requested_by",
+    "run_id"
+  ],
+  "properties": {
+    "approval_id": {
+      "type": "string"
+    },
+    "title": {
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "pending",
+        "approved",
+        "rejected",
+        "revise_requested",
+        "expired",
+        "blocked"
+      ]
+    },
+    "risk_level": {
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "critical"
+      ]
+    },
+    "requested_by": {
+      "enum": [
+        "objective",
+        "orchestrator",
+        "design",
+        "specimen",
+        "vision",
+        "manipulation",
+        "equipment",
+        "analysis",
+        "bo",
+        "knowledge",
+        "guardian",
+        "system"
+      ]
+    },
+    "run_id": {
+      "type": "string"
+    },
+    "summary": {
+      "type": "string"
+    },
+    "actions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "expires_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "evidence_refs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

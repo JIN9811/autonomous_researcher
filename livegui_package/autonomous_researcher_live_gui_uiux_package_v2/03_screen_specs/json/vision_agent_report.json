@@ -1,0 +1,25 @@
+{
+  "title": "Vision Agent Report",
+  "agent_id": "vision",
+  "image": "../00_references/generated_full_screens/04_vision_agent_report.png",
+  "sections": [
+    "camera_health",
+    "calibration_summary",
+    "confidence_distribution",
+    "inspection_feed",
+    "segmentation",
+    "defect_summary",
+    "pose_estimation",
+    "confusion_matrix",
+    "quality_metrics",
+    "evidence_review",
+    "handoff_recommendations"
+  ],
+  "primary_visuals": [
+    "image overlays",
+    "histogram",
+    "calibration line chart",
+    "segmentation panels",
+    "confusion matrix"
+  ]
+}

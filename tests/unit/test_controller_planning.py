@@ -556,11 +556,10 @@ async def test_live_gui_test_mode_inline_printer_choice_handoffs_without_prompt(
         constraints={},
         session_id="s-inline",
     )
-    if physical:
-        for _ in range(5):
-            if captured:
-                break
-            await asyncio.sleep(0)
+    for _ in range(10):
+        if captured:
+            break
+        await asyncio.sleep(0)
 
     constraints = captured["constraints"]
     assert result["ok"] is True
@@ -581,6 +580,56 @@ async def test_live_gui_test_mode_inline_printer_choice_handoffs_without_prompt(
     assert constraints["require_flat_compression_faces"] is False
     assert constraints["skin_thickness_mm"] == 0.8
     assert not controller._state.run_metadata.get("pending_specimen_input")
+
+
+@pytest.mark.asyncio
+async def test_live_gui_test_mode_virtual_bridge_handoff_returns_before_loop_finishes(monkeypatch: pytest.MonkeyPatch) -> None:
+    controller = load_runtime()
+    controller._state.mode = Mode.LIVE
+    release_handoff = asyncio.Event()
+    handoff_started = asyncio.Event()
+
+    async def fake_complete(*, prompt: str):
+        return (
+            SimpleNamespace(
+                text=(
+                    "테스트 실험값을 생성했습니다.\n"
+                    "```json\n"
+                    "{\"goal\":\"background virtual bridge test\",\"constraints\":{\"cell_size_mm\":10.0,\"geometry_type\":\"gyroid\",\"specimen_size_mm\":[30,30,30]}}\n"
+                    "```"
+                ),
+                raw={},
+                model="fake-orchestrator",
+            ),
+            "ok",
+        )
+
+    async def fake_handoff(*, goal: str | None, constraints: dict) -> dict:
+        handoff_started.set()
+        await release_handoff.wait()
+        return {"ok": True, "message": "handoff completed", "session": controller.planning_snapshot(session_id="s-bg")}
+
+    monkeypatch.setattr(controller, "_complete_live_planning_prompt", fake_complete)
+    monkeypatch.setattr(controller, "_handoff_planning_to_design", fake_handoff)
+
+    result = await asyncio.wait_for(
+        controller._planning_message_locked(
+            message="테스트 모드, 가상 브릿지",
+            goal=None,
+            constraints={},
+            session_id="s-bg",
+        ),
+        timeout=1.0,
+    )
+
+    assert result["ok"] is True
+    assert result["message"] == "Planning handoff started in background."
+    assert controller._planning_handoff_task is not None
+    await asyncio.wait_for(handoff_started.wait(), timeout=1.0)
+    assert not controller._planning_handoff_task.done()
+
+    release_handoff.set()
+    await asyncio.wait_for(controller._planning_handoff_task, timeout=1.0)
 
 
 @pytest.mark.asyncio
@@ -1092,6 +1141,45 @@ async def test_planning_guardian_tool_shield_event_becomes_live_chat_message() -
     assert "Guardian action shield" in latest["content"]
 
 
+@pytest.mark.asyncio
+async def test_live_gui_busy_runtime_message_queues_operator_followup(tmp_path: Path) -> None:
+    controller = load_runtime()
+    controller._logger_bundle.run_dir = tmp_path
+    controller._planning_messages = []
+    controller._planning_message_total = 0
+    controller._state.mode = Mode.TEST
+    controller._state.stage = Stage.DESIGN
+
+    await controller._planning_request_lock.acquire()
+    try:
+        result = await controller.planning_message(
+            message="다음 loop에서는 벽 두께를 조금 줄여서 진행해줘",
+            goal="follow-up test",
+            constraints={
+                "live_is_running": True,
+                "live_stage": "design",
+                "live_chat_target": "orchestrator",
+                "live_chat_target_resolved": "orchestrator",
+                "live_chat_mode": "ask",
+                "live_runtime_followup_queue_only": True,
+            },
+            session_id="s-followup",
+        )
+    finally:
+        controller._planning_request_lock.release()
+
+    assert result["ok"] is True
+    assert result["message"] == "Runtime follow-up queued."
+    queue = controller._state.run_metadata["operator_followup_queue"]
+    assert queue[-1]["schema"] == "operator_runtime_followup.v1"
+    assert queue[-1]["status"] == "queued"
+    assert queue[-1]["message"].startswith("다음 loop")
+    assert queue[-1]["target_agent"] == "orchestrator"
+    page = controller.planning_snapshot(session_id="s-followup")["messages"]
+    assert page[-2]["role"] == "operator"
+    assert page[-1]["role"] == "orchestrator"
+    assert "다음 안전한 stage boundary" in page[-1]["content"]
+
 def test_live_gui_design_trigger_uses_operator_intent_state_machine() -> None:
     controller = load_runtime()
 
@@ -1100,3 +1188,84 @@ def test_live_gui_design_trigger_uses_operator_intent_state_machine() -> None:
     assert controller._should_trigger_design("테스트 모드") is False
     assert controller._should_trigger_test_design("테스트 모드") is True
     assert controller._should_trigger_design("상태만 알려줘") is False
+
+
+def test_live_gui_transcript_storage_compacts_large_payloads_and_limits_memory(tmp_path: Path) -> None:
+    controller = load_runtime()
+    controller._logger_bundle.run_dir = tmp_path
+    controller._planning_messages = []
+    controller._planning_message_total = 0
+    content = "operator-visible message " * 400
+
+    stored = controller._record_planning_message(
+        {
+            "role": "bo_ai",
+            "content": content,
+            "timestamp": "2026-06-01T00:00:00Z",
+            "raw_trace": [{"blob": "x" * 1024} for _ in range(120)],
+            "bo_result": {"benchmark": {"rows": [{"value": idx} for idx in range(200)]}},
+        }
+    )
+
+    assert stored["content"] == content
+    assert "raw_trace" not in stored
+    assert stored["bo_result"]["benchmark"] == {}
+    assert controller.planning_messages_page(limit=80)["messages_loaded"] == 1
+
+    for idx in range(60):
+        controller._record_planning_message({"role": "system", "content": f"msg {idx}"})
+
+    assert len(controller._planning_messages) == 50
+    page = controller.planning_messages_page(limit=80)
+    assert page["message_total"] == 61
+    assert page["messages_loaded"] == 61
+    assert (tmp_path / "live_planning_transcript.jsonl").exists()
+
+
+def test_live_gui_message_routing_metadata_separates_chat_and_system_events(tmp_path: Path) -> None:
+    controller = load_runtime()
+    controller._logger_bundle.run_dir = tmp_path
+    controller._planning_messages = []
+    controller._planning_message_total = 0
+
+    handoff = controller._record_planning_message(
+        {
+            "role": "system",
+            "content": "SYSTEM_EVENT: HANDOFF\nfrom=DesignAgent\nto=SpecimenMakingAgent\nstatus=started",
+            "timestamp": "2026-06-01T00:00:00Z",
+        }
+    )
+    assert handoff["message_class"] == "handoff_event"
+    assert "chat" not in handoff["surface"]
+    assert handoff["surface"] == ["timeline", "backend"]
+    assert handoff["event_type"] == "planning.handoff"
+    assert handoff["event_fields"] == {"from": "DesignAgent", "to": "SpecimenMakingAgent", "status": "started"}
+
+    operator = controller._record_planning_message(
+        {
+            "role": "operator",
+            "content": "테스트 모드, 가상 브릿지",
+            "timestamp": "2026-06-01T00:00:01Z",
+        }
+    )
+    assert operator["message_class"] == "operator_input"
+    assert operator["surface"] == ["chat"]
+    assert operator["visibility"] == "user"
+
+    design = controller._record_planning_message(
+        {
+            "role": "design_ai",
+            "content": "다음 후보 형상을 생성했습니다.",
+            "timestamp": "2026-06-01T00:00:02Z",
+            "experiment_spec": {"geometry_type": "tpms_gyroid", "specimen_size_mm": [30, 30, 30]},
+            "artifacts": {"preview_url": "/api/planning/artifacts/run/design.png"},
+        }
+    )
+    assert design["message_class"] == "agent_chat"
+    assert design["surface"] == ["chat", "report", "artifacts"]
+    assert design["agent_id"] == "DesignAgent"
+
+    page = controller.planning_messages_page(limit=10)
+    display_handoff = page["messages"][0]
+    assert display_handoff["message_class"] == "handoff_event"
+    assert "timeline" in display_handoff["surface"]

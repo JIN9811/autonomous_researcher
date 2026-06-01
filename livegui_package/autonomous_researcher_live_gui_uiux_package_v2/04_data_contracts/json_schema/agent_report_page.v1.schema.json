@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autonomous-researcher.local/schemas/agent_report_page.v1.schema.json",
+  "title": "agent_report_page.v1",
+  "type": "object",
+  "required": [
+    "schema",
+    "agent_id",
+    "run_id",
+    "overview",
+    "current_status",
+    "next_action"
+  ],
+  "properties": {
+    "schema": {
+      "const": "agent_report_page.v1"
+    },
+    "agent_id": {
+      "enum": [
+        "objective",
+        "orchestrator",
+        "design",
+        "specimen",
+        "vision",
+        "manipulation",
+        "equipment",
+        "analysis",
+        "bo",
+        "knowledge",
+        "guardian",
+        "system"
+      ]
+    },
+    "run_id": {
+      "type": "string"
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "overview": {
+      "type": "object"
+    },
+    "current_status": {
+      "type": "object"
+    },
+    "decisions": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "evidence_quality": {
+      "type": "object"
+    },
+    "handoff_packets": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "next_action": {
+      "type": [
+        "object",
+        "string"
+      ]
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "backend_refs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "guardian_gate": {
+      "type": "object"
+    },
+    "sections": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  }
+}
