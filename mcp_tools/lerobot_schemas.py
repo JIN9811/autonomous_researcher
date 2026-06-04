@@ -130,6 +130,9 @@ class LeRobotSessionRequest(LeRobotBaseRequest):
     display_data: bool = False
     resume: bool = False
     push_to_hub: bool = False
+    tts_engine: str = ""
+    tts_rate: int | None = None
+    tts_voice: str = ""
     episode_index: int = 0
     visualization_tool: Literal["html", "rerun"] = "html"
     visualization_mode: Literal["local", "distant"] = "local"

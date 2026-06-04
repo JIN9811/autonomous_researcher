@@ -25,7 +25,7 @@ Modification guide:
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>{{ title }}</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
-    <link rel="stylesheet" href="/static/styles.css?v=20260507-lerobot-folded" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260603-lerobot-piper-1" />
   </head>
   <body>
     <main class="page lerobot-page">
@@ -265,6 +265,37 @@ Modification guide:
               Reset Time (s)
               <input id="lerobot-reset-time-input" type="number" min="0" value="30" />
             </label>
+            <label>
+              Voice Engine
+              <select id="lerobot-tts-engine-input">
+                <option value="piper">piper (packaged English)</option>
+                <option value="spd-say">spd-say</option>
+                <option value="espeak-ng">espeak-ng</option>
+                <option value="espeak">espeak</option>
+              </select>
+            </label>
+            <div class="lerobot-slider-field lerobot-tts-rate-field">
+              <div class="lerobot-slider-label-row">
+                <span>Voice Speed</span>
+                <span class="lerobot-slider-actions">
+                  <output id="lerobot-tts-rate-value" for="lerobot-tts-rate-input">-35</output>
+                  <button id="btn-tts-rate-default" class="btn mini lerobot-slider-default" type="button">Default</button>
+                  <button id="btn-tts-help" class="lerobot-help-icon" type="button" aria-expanded="false" aria-controls="lerobot-tts-help-popover" title="Voice cue help">?</button>
+                </span>
+              </div>
+              <input id="lerobot-tts-rate-input" type="range" min="-100" max="100" step="1" value="-35" />
+              <div id="lerobot-tts-help-popover" class="lerobot-help-popover" hidden>
+                <strong>Recording voice cues</strong>
+                <ul>
+                  <li><b>Recording episode N</b>: episode recording has started.</li>
+                  <li><b>Reset the environment</b>: recording is paused for the reset interval before the next episode.</li>
+                  <li><b>Re-record episode</b>: the current episode was rejected and will be recorded again.</li>
+                  <li><b>Stop recording</b>: recording loop is closing and devices will disconnect.</li>
+                  <li><b>Exiting</b>: LeRobot recording command has finished.</li>
+                </ul>
+                Piper uses the packaged English <b>en_US-lessac-medium</b> neural voice. Voice Engine selects the TTS backend; Voice Speed is auto-saved and applied when recording starts.
+              </div>
+            </div>
           </div>
           <div class="lerobot-inline-options">
             <label class="checkbox-line"><input id="lerobot-resume-input" type="checkbox" /> Resume dataset</label>
@@ -375,38 +406,38 @@ Modification guide:
             <label>
               Policy Type
               <select id="lerobot-policy-type-input">
-                <option value="act" selected>act</option>
+                <option value="act">act</option>
                 <option value="diffusion">diffusion</option>
                 <option value="smolvla">smolvla</option>
                 <option value="pi0">pi0</option>
-                <option value="pi05">pi05 (Pi0.5)</option>
+                <option value="pi05" selected>pi05 (Pi0.5)</option>
                 <option value="pi0fast">pi0fast</option>
                 <option value="vqbet">vqbet</option>
               </select>
             </label>
             <label>
               Train Source Policy / HF Base
-              <input id="lerobot-train-source-policy-input" type="text" placeholder="lerobot/pi05_base" />
+              <input id="lerobot-train-source-policy-input" type="text" value="lerobot/pi05_base" placeholder="lerobot/pi05_base" />
             </label>
             <label>
               Job Name
-              <input id="lerobot-job-name-input" type="text" value="atr_lerobot_act_train" />
+              <input id="lerobot-job-name-input" type="text" value="atr_lerobot_pi05_train" />
             </label>
             <label>
               Policy Repo ID
-              <input id="lerobot-train-policy-repo-input" type="text" placeholder="jin/robotis_omx_ai_act_policy" />
+              <input id="lerobot-train-policy-repo-input" type="text" placeholder="jin/robotis_omx_ai_pi05_policy" />
             </label>
             <label>
               Batch Size
-              <input id="lerobot-train-batch-size-input" type="number" min="1" value="8" />
+              <input id="lerobot-train-batch-size-input" type="number" min="1" value="32" />
             </label>
             <label>
               Steps
-              <input id="lerobot-train-steps-input" type="number" min="1" value="100000" />
+              <input id="lerobot-train-steps-input" type="number" min="1" value="3000" />
             </label>
             <label>
               Num Workers
-              <input id="lerobot-train-workers-input" type="number" min="0" value="4" />
+              <input id="lerobot-train-workers-input" type="number" min="0" value="12" />
             </label>
           </div>
 
@@ -415,7 +446,7 @@ Modification guide:
             <div class="lerobot-form-grid train-form-grid">
             <label>
               Eval Frequency
-              <input id="lerobot-train-eval-freq-input" type="number" min="1" value="20000" />
+              <input id="lerobot-train-eval-freq-input" type="number" min="1" value="500" />
             </label>
             <label>
               Log Frequency
@@ -423,7 +454,7 @@ Modification guide:
             </label>
             <label>
               Save Frequency
-              <input id="lerobot-train-save-freq-input" type="number" min="1" value="20000" />
+              <input id="lerobot-train-save-freq-input" type="number" min="1" value="500" />
             </label>
             <label>
               Seed
@@ -497,11 +528,11 @@ Modification guide:
             </label>
             <label>
               Policy chunk_size
-              <input id="lerobot-train-chunk-input" type="number" min="1" value="100" />
+              <input id="lerobot-train-chunk-input" type="number" min="1" value="50" />
             </label>
             <label>
               Policy n_action_steps
-              <input id="lerobot-train-n-action-input" type="number" min="1" value="100" />
+              <input id="lerobot-train-n-action-input" type="number" min="1" value="50" />
             </label>
             <label>
               Eval Batch Size
@@ -514,8 +545,9 @@ Modification guide:
             <label>
               WandB Mode
               <select id="lerobot-train-wandb-mode-input">
-                <option value="disabled" selected>disabled</option>
-                <option value="offline">offline</option>
+                <option value="">default</option>
+                <option value="disabled">disabled</option>
+                <option value="offline" selected>offline</option>
                 <option value="online">online</option>
               </select>
             </label>
@@ -526,7 +558,7 @@ Modification guide:
             </div>
             <div class="lerobot-inline-options">
               <label class="checkbox-line"><input id="lerobot-train-use-amp-input" type="checkbox" /> policy.use_amp</label>
-              <label class="checkbox-line"><input id="lerobot-train-wandb-input" type="checkbox" /> wandb.enable</label>
+              <label class="checkbox-line"><input id="lerobot-train-wandb-input" type="checkbox" checked /> wandb.enable</label>
             </div>
           </details>
           <div id="lerobot-train-progress" class="lerobot-training-progress hidden">
@@ -737,6 +769,6 @@ Modification guide:
         </article>
       </section>
     </main>
-    <script src="/static/lerobot.js?v=20260529-manipulation-pi05-sarm" defer></script>
+    <script src="/static/lerobot.js?v=20260603-lerobot-piper-1" defer></script>
   </body>
 </html>

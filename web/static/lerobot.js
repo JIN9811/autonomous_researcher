@@ -34,6 +34,12 @@ const datasetInput = $("lerobot-dataset-input");
 const episodesInput = $("lerobot-episodes-input");
 const episodeTimeInput = $("lerobot-episode-time-input");
 const resetTimeInput = $("lerobot-reset-time-input");
+const ttsEngineInput = $("lerobot-tts-engine-input");
+const ttsRateInput = $("lerobot-tts-rate-input");
+const ttsRateValue = $("lerobot-tts-rate-value");
+const ttsRateDefaultButton = $("btn-tts-rate-default");
+const ttsHelpButton = $("btn-tts-help");
+const ttsHelpPopover = $("lerobot-tts-help-popover");
 const teleopTimeInput = $("lerobot-teleop-time-input");
 const displayDataInput = $("lerobot-display-data-input");
 const resumeInput = $("lerobot-resume-input");
@@ -161,6 +167,59 @@ function numberValue(el, fallback = null) {
   return Number.isFinite(value) ? value : fallback;
 }
 
+const LEROBOT_TTS_RATE_STORAGE_KEY = "atr_lerobot_tts_rate_default";
+const LEROBOT_TTS_RATE_DEFAULT = -35;
+const LEROBOT_TTS_RATE_MIN = -100;
+const LEROBOT_TTS_RATE_MAX = 100;
+let lerobotTtsServerDefaultRate = LEROBOT_TTS_RATE_DEFAULT;
+
+function clampTtsRate(value, fallback = LEROBOT_TTS_RATE_DEFAULT) {
+  const numeric = Number(value);
+  const safe = Number.isFinite(numeric) ? Math.round(numeric) : fallback;
+  return Math.max(LEROBOT_TTS_RATE_MIN, Math.min(LEROBOT_TTS_RATE_MAX, safe));
+}
+
+function storedTtsRateDefault() {
+  try {
+    const raw = window.localStorage.getItem(LEROBOT_TTS_RATE_STORAGE_KEY);
+    return raw === null ? null : clampTtsRate(raw);
+  } catch (_err) {
+    return null;
+  }
+}
+
+function saveTtsRateDefault(rate) {
+  try {
+    window.localStorage.setItem(LEROBOT_TTS_RATE_STORAGE_KEY, String(clampTtsRate(rate)));
+  } catch (_err) {
+    // Browser storage can be unavailable in restricted contexts; payload still uses the visible slider value.
+  }
+}
+
+function setTtsRate(value, options = {}) {
+  const rate = clampTtsRate(value);
+  if (ttsRateInput) ttsRateInput.value = String(rate);
+  if (ttsRateValue) ttsRateValue.textContent = String(rate);
+  if (options.userEdited && ttsRateInput) ttsRateInput.dataset.userEdited = "1";
+  if (options.persist) saveTtsRateDefault(rate);
+  return rate;
+}
+
+function initializeTtsControls() {
+  const savedRate = storedTtsRateDefault();
+  if (savedRate !== null) {
+    setTtsRate(savedRate, { userEdited: true });
+  } else {
+    setTtsRate(ttsRateInput ? ttsRateInput.value : LEROBOT_TTS_RATE_DEFAULT);
+  }
+}
+
+function setTtsHelpVisible(visible) {
+  if (!ttsHelpButton || !ttsHelpPopover) return;
+  ttsHelpPopover.hidden = !visible;
+  ttsHelpButton.setAttribute("aria-expanded", visible ? "true" : "false");
+}
+
 function trainExtraArgs() {
   const raw = trainExtraArgsInput ? trainExtraArgsInput.value.trim() : "";
   if (!raw) return [];
@@ -172,12 +231,11 @@ function trainExtraArgs() {
 
 const PI05_BASE_POLICY = "lerobot/pi05_base";
 const PI05_TRAIN_EXTRA_DEFAULTS = [
-  "--policy.compile_model=true",
+  "--policy.compile_model=false",
   "--policy.gradient_checkpointing=true",
   "--policy.dtype=bfloat16",
   "--policy.freeze_vision_encoder=false",
   "--policy.train_expert_only=false",
-  '--policy.normalization_mapping={"ACTION":"MEAN_STD","STATE":"MEAN_STD","VISUAL":"IDENTITY"}',
 ];
 const PI05_TRAIN_EXTRA_KEYS = PI05_TRAIN_EXTRA_DEFAULTS.map((item) => item.split("=", 1)[0]);
 const TRAIN_DEFAULTS = {
@@ -194,35 +252,44 @@ const TRAIN_DEFAULTS = {
     n_obs_steps: "1",
     chunk_size: "100",
     n_action_steps: "100",
+    wandb_enable: false,
+    wandb_mode: "",
   },
   pi05: {
     source_policy: PI05_BASE_POLICY,
     job_name: "atr_lerobot_pi05_train",
     batch_size: "32",
     steps: "3000",
-    num_workers: "4",
-    eval_freq: "20000",
-    log_freq: "200",
-    save_freq: "20000",
+    num_workers: "12",
+    eval_freq: "500",
+    log_freq: "5",
+    save_freq: "500",
     optimizer_type: "",
     n_obs_steps: "1",
     chunk_size: "50",
     n_action_steps: "50",
+    eval_batch_size: "",
+    wandb_enable: true,
+    wandb_mode: "offline",
   },
 };
+const GENERATED_PATH_SUFFIX_RE = /-(?:\d{8}T\d{6}(?:\d{6})?Z)(?:-\d{2})?$/;
+
 const TRAIN_DEFAULT_VALUE_SETS = {
   source_policy: new Set(["", PI05_BASE_POLICY]),
   job_name: new Set(["", "atr_lerobot_train", "atr_lerobot_act_train", "atr_lerobot_pi05_train"]),
-  batch_size: new Set(["", "8", "32"]),
+  batch_size: new Set(["", "2", "4", "8", "16", "32"]),
   steps: new Set(["", "20000", "100000", "3000"]),
-  num_workers: new Set(["", "4", "16"]),
-  eval_freq: new Set(["", "2000", "20000"]),
-  log_freq: new Set(["", "100", "200"]),
-  save_freq: new Set(["", "2000", "20000"]),
+  num_workers: new Set(["", "2", "4", "12", "16", "20"]),
+  eval_freq: new Set(["", "500", "2000", "20000"]),
+  log_freq: new Set(["", "5", "100", "200"]),
+  save_freq: new Set(["", "500", "2000", "20000"]),
   optimizer_type: new Set(["", "adamw"]),
   n_obs_steps: new Set(["", "1"]),
   chunk_size: new Set(["", "100", "50"]),
   n_action_steps: new Set(["", "100", "50"]),
+  eval_batch_size: new Set(["", "1", "2", "4", "8"]),
+  wandb_mode: new Set(["", "disabled", "offline", "online"]),
 };
 
 function ensureTrainExtraArg(arg) {
@@ -239,6 +306,15 @@ function removeTrainExtraArgsByKeys(keys) {
   const next = trainExtraArgs().filter((item) => !keySet.has(item.split("=", 1)[0]));
   trainExtraArgsInput.value = next.join("\n");
 }
+
+function replaceTrainExtraArgsByDefaults(defaults) {
+  if (!trainExtraArgsInput) return;
+  const keys = defaults.map((item) => item.split("=", 1)[0]);
+  removeTrainExtraArgsByKeys(keys);
+  const current = trainExtraArgs();
+  trainExtraArgsInput.value = [...defaults, ...current].join("\n");
+}
+
 
 function applyInputDefault(input, key, value, force = false) {
   if (!input) return;
@@ -267,9 +343,18 @@ function applyPolicyTypeDefaults(options = {}) {
   applyInputDefault(trainNObsInput, "n_obs_steps", defaults.n_obs_steps, force);
   applyInputDefault(trainChunkInput, "chunk_size", defaults.chunk_size, force);
   applyInputDefault(trainNActionInput, "n_action_steps", defaults.n_action_steps, force);
+  if (defaults.eval_batch_size !== undefined) {
+    applyInputDefault(trainEvalBatchInput, "eval_batch_size", defaults.eval_batch_size, force);
+  }
+  if (defaults.wandb_mode !== undefined) {
+    applyInputDefault(trainWandbModeInput, "wandb_mode", defaults.wandb_mode, force);
+  }
+  if (trainWandbInput && defaults.wandb_enable !== undefined) {
+    trainWandbInput.checked = Boolean(defaults.wandb_enable);
+  }
 
   if (type === "pi05") {
-    PI05_TRAIN_EXTRA_DEFAULTS.forEach(ensureTrainExtraArg);
+    replaceTrainExtraArgsByDefaults(PI05_TRAIN_EXTRA_DEFAULTS);
   } else {
     removeTrainExtraArgsByKeys(PI05_TRAIN_EXTRA_KEYS);
   }
@@ -300,6 +385,26 @@ function joinPath(base, child) {
   if (!cleanBase) return cleanChild;
   if (!cleanChild) return cleanBase;
   return `${cleanBase}/${cleanChild}`;
+}
+
+function stripGeneratedNameSuffixes(name) {
+  let clean = String(name || "").trim();
+  while (GENERATED_PATH_SUFFIX_RE.test(clean)) {
+    const next = clean.replace(GENERATED_PATH_SUFFIX_RE, "");
+    if (!next || next === clean) break;
+    clean = next;
+  }
+  return clean;
+}
+
+function stripGeneratedPathSuffixes(path) {
+  const raw = String(path || "").trim().replace(/\/+$/, "");
+  if (!raw) return raw;
+  const parts = raw.split("/");
+  const name = parts.pop() || "";
+  const baseName = stripGeneratedNameSuffixes(name);
+  parts.push(baseName);
+  return parts.join("/");
 }
 
 function datasetBrowseStartPath() {
@@ -335,7 +440,10 @@ function syncFieldsFromWorkflowResponse(data) {
   if (data.tool === "lerobot.train.start") {
     const config = (data.training && data.training.config) || {};
     const nextOutput = data.output_dir || config.output_dir || "";
-    if (nextOutput && outputDirInput) outputDirInput.value = nextOutput;
+    if (nextOutput && outputDirInput) {
+      outputDirInput.dataset.lastRunOutputDir = nextOutput;
+      outputDirInput.value = stripGeneratedPathSuffixes(nextOutput);
+    }
     if (config.job_name && jobNameInput) jobNameInput.value = config.job_name;
   }
 }
@@ -411,13 +519,15 @@ function basePayload(overrides = {}) {
     policy_use_amp: boolValue(trainUseAmpInput),
     wandb_enable: boolValue(trainWandbInput),
     wandb_project: trainWandbProjectInput ? trainWandbProjectInput.value.trim() : "",
-    wandb_mode: trainWandbModeInput ? trainWandbModeInput.value || "disabled" : "disabled",
+    wandb_mode: trainWandbModeInput ? trainWandbModeInput.value || "" : "",
     train_extra_args: trainExtraArgs(),
     fps: numberValue(fpsInput, 30),
     warmup_s: 2,
     episode_s: numberValue(episodeTimeInput, 60),
     reset_s: numberValue(resetTimeInput, 30),
     num_episodes: numberValue(episodesInput, 1),
+    tts_engine: ttsEngineInput ? ttsEngineInput.value || "piper" : "piper",
+    tts_rate: numberValue(ttsRateInput, -35),
     display_data: boolValue(displayDataInput),
     camera_enabled: true,
     resume: boolValue(resumeInput),
@@ -1093,7 +1203,17 @@ function renderConfig(data) {
   if (gateLabelEl) gateLabelEl.textContent = liveEnabled ? "Live gates enabled" : "Live gates disabled";
   if (gateDetailEl) {
     const paths = data.paths || {};
-    gateDetailEl.textContent = `dataset=${paths.dataset_root || ""} · output=${paths.output_root || ""} · teleop=${Boolean(gates.allow_teleoperation)} record=${Boolean(gates.allow_recording)} train=${Boolean(gates.allow_training)} rollout=${Boolean(gates.allow_policy_rollout)}`;
+    const tts = data.tts || {};
+    gateDetailEl.textContent = `dataset=${paths.dataset_root || ""} · output=${paths.output_root || ""} · teleop=${Boolean(gates.allow_teleoperation)} record=${Boolean(gates.allow_recording)} train=${Boolean(gates.allow_training)} rollout=${Boolean(gates.allow_policy_rollout)} · voice=${tts.engine || "piper"}:${tts.rate ?? ""}`;
+  }
+  if (data.tts) {
+    if (ttsEngineInput && data.tts.engine && !ttsEngineInput.dataset.userEdited) ttsEngineInput.value = data.tts.engine;
+    if (data.tts.rate !== undefined) lerobotTtsServerDefaultRate = clampTtsRate(data.tts.rate);
+    if (ttsRateInput && !ttsRateInput.dataset.userEdited) {
+      setTtsRate(lerobotTtsServerDefaultRate);
+    } else {
+      setTtsRate(ttsRateInput ? ttsRateInput.value : lerobotTtsServerDefaultRate);
+    }
   }
   renderDeviceMemory(data);
   renderSessions(data.sessions || []);
@@ -1229,22 +1349,34 @@ function renderBrowser(data) {
   browserEl.classList.remove("hidden");
   const entries = data.entries || [];
   const rows = entries.map((entry) => `
-    <button class="browser-entry ${entry.kind}" data-path="${entry.path}" data-kind="${entry.kind}">
+    <button class="browser-entry ${escapeHtml(entry.kind)}" data-path="${escapeHtml(entry.path)}" data-kind="${escapeHtml(entry.kind)}">
       <span>${entry.kind === "dir" ? "DIR" : "FILE"}</span>
-      <strong>${entry.name}</strong>
+      <strong>${escapeHtml(entry.name)}</strong>
     </button>
   `).join("");
+  const canUseCurrent = lastBrowseTargetInput && (lastBrowseOptions.select || "directory") !== "file";
   browserEl.innerHTML = `
     <div class="browser-head">
       <button class="btn mini" id="btn-browser-parent">Parent</button>
+      ${canUseCurrent ? `<button class="btn mini primary" id="btn-browser-use-current">Use current folder</button>` : ""}
+      <button class="btn mini" id="btn-browser-native">Native picker</button>
       <button class="btn mini" id="btn-browser-refresh">Refresh</button>
       <button class="btn mini danger" id="btn-browser-close">Close</button>
-      <code>${data.path || ""}</code>
+      <code>${escapeHtml(data.path || "")}</code>
     </div>
     <div class="browser-grid">${rows || "<p>No entries.</p>"}</div>
   `;
   const parentBtn = $("btn-browser-parent");
   if (parentBtn && data.parent) parentBtn.addEventListener("click", () => browsePath(lastBrowseKind, data.parent, lastBrowseTargetInput, lastBrowseOptions));
+  const useCurrentBtn = $("btn-browser-use-current");
+  if (useCurrentBtn) {
+    useCurrentBtn.addEventListener("click", () => {
+      if (lastBrowseTargetInput) lastBrowseTargetInput.value = browseSelectionValue(data.path || "");
+      browserEl.classList.add("hidden");
+    });
+  }
+  const nativeBtn = $("btn-browser-native");
+  if (nativeBtn) nativeBtn.addEventListener("click", () => openNativePathPicker(data.path || ""));
   const refreshBtn = $("btn-browser-refresh");
   if (refreshBtn) {
     refreshBtn.addEventListener("click", async () => {
@@ -1345,26 +1477,27 @@ async function runDevicePortAction(label, url, role, overrides = {}, statusTarge
   }
 }
 
+async function openNativePathPicker(path = "") {
+  const select = lastBrowseOptions.select || "directory";
+  const includeFiles = lastBrowseOptions.include_files !== false;
+  renderResult("native path picker", { ok: true, status: "opening_native_picker" });
+  const picked = await postJson("/api/lerobot/files/pick", { kind: lastBrowseKind, path, include_files: includeFiles, select }, 300000);
+  renderResult("native path picker", picked);
+  if (picked && picked.ok && picked.selected_path) {
+    if (lastBrowseTargetInput) lastBrowseTargetInput.value = browseSelectionValue(picked.selected_path);
+    if (browserEl) browserEl.classList.add("hidden");
+  }
+  return picked;
+}
+
 async function browsePath(kind, path = "", targetInput = null, options = {}) {
   lastBrowseKind = kind || "any";
   lastBrowseTargetInput = targetInput;
   lastBrowseOptions = { include_files: true, select: "directory", ...options };
-  renderResult("native path picker", { ok: true, status: "opening_native_picker" });
-  const select = lastBrowseOptions.select || "directory";
   const includeFiles = lastBrowseOptions.include_files !== false;
-  const picked = await postJson("/api/lerobot/files/pick", { kind: lastBrowseKind, path, include_files: includeFiles, select }, 300000);
-  renderResult("native folder picker", picked);
-  if (picked && picked.ok && picked.selected_path) {
-    if (targetInput) targetInput.value = browseSelectionValue(picked.selected_path);
-    if (browserEl) browserEl.classList.add("hidden");
-    return picked;
-  }
-  if (picked && picked.failure_code === "LEROBOT_PICKER_CANCELLED") {
-    return picked;
-  }
   const data = await postJson("/api/lerobot/files/browse", { kind: lastBrowseKind, path, include_files: includeFiles });
   renderBrowser(data);
-  renderResult("browse fallback", data);
+  renderResult("browse paths", data);
   return data;
 }
 
@@ -1541,6 +1674,29 @@ bind("btn-teleop-start", (event) => runAction("teleoperate start", "/api/lerobot
 bind("btn-teleop-stop", (event) => runAction("teleoperate stop", "/api/lerobot/teleoperate/stop", sessionPayload("teleoperate"), actionStatusFromEvent(event)));
 bind("btn-teleop-status", (event) => runAction("teleoperate status", "/api/lerobot/teleoperate/status", sessionPayload("teleoperate"), actionStatusFromEvent(event)));
 
+if (ttsEngineInput) ttsEngineInput.addEventListener("change", () => { ttsEngineInput.dataset.userEdited = "1"; });
+if (ttsRateInput) {
+  ttsRateInput.addEventListener("input", () => setTtsRate(ttsRateInput.value, { persist: true, userEdited: true }));
+  ttsRateInput.addEventListener("change", () => setTtsRate(ttsRateInput.value, { persist: true, userEdited: true }));
+}
+if (ttsRateDefaultButton) {
+  ttsRateDefaultButton.addEventListener("click", (event) => {
+    event.preventDefault();
+    setTtsRate(lerobotTtsServerDefaultRate, { persist: true, userEdited: true });
+  });
+}
+if (ttsHelpButton) {
+  ttsHelpButton.addEventListener("click", (event) => {
+    event.preventDefault();
+    setTtsHelpVisible(ttsHelpButton.getAttribute("aria-expanded") !== "true");
+  });
+}
+document.addEventListener("click", (event) => {
+  if (!ttsHelpButton || !ttsHelpPopover || ttsHelpPopover.hidden) return;
+  if (ttsHelpButton.contains(event.target) || ttsHelpPopover.contains(event.target)) return;
+  setTtsHelpVisible(false);
+});
+
 bind("btn-record-start", (event) => runAction("record start", "/api/lerobot/record/start", null, actionStatusFromEvent(event)));
 async function runRecordControl(label, action, event) {
   return runAction(label, "/api/lerobot/record/control", sessionPayload("record", { action }), actionStatusFromEvent(event));
@@ -1614,6 +1770,7 @@ if (policySelect) {
 }
 if (policyTypeInput) policyTypeInput.addEventListener("change", applyPolicyTypeDefaults);
 if (manipulationTaskIdInput) manipulationTaskIdInput.addEventListener("change", () => syncManipulationTaskPreset(true));
+initializeTtsControls();
 syncManipulationTaskPreset(false);
 applyPolicyTypeDefaults();
 refreshConfig();

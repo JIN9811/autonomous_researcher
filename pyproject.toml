@@ -22,6 +22,7 @@ dependencies = [
   "trimesh>=4.4.0",
   "botorch>=0.17.0",
   "gpytorch>=1.14.0",
+  "piper-tts>=1.4.2",
 ]
 
 [project.optional-dependencies]

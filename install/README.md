@@ -165,6 +165,19 @@ py windows_pyautogui_bridge_server.py
 
 From the Live GUI, open `Windows Bridge` to scan the internal network, select the Windows PC, save the connection, and test `program1`.
 
+## Packaged Piper TTS
+
+LeRobot recording voice cues use ATR-packaged Piper English TTS by default.
+Install or repair the local runtime and voice model from the repository root:
+
+```bash
+bash install/install_piper_tts.sh
+```
+
+This installs `piper-tts` into `.venv`, downloads the `en_US-lessac-medium`
+voice to `models/tts/piper/en_US-lessac-medium`, and verifies synthesis without
+requiring the LeRobot conda environment to install Piper.
+
 ## PrusaSlicer Docker Wrapper
 
 The Prusa MK4S printer bridge can use a Dockerized PrusaSlicer when host-native PrusaSlicer is not installed.

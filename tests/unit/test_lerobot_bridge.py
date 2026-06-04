@@ -7,6 +7,7 @@ import subprocess
 from pathlib import Path
 
 from device_bridges.lerobot_bridge import LeRobotBridge, LeRobotBridgeConfig
+from mcp_tools.lerobot_schemas import LeRobotSessionRequest
 
 
 def _bridge(tmp_path: Path) -> LeRobotBridge:
@@ -69,7 +70,10 @@ def _mark_lerobot_dataset_v30(path: Path) -> None:
     info["codebase_version"] = "v3.0"
     info_path.write_text(json.dumps(info), encoding="utf-8")
     (path / "meta" / "tasks.parquet").write_bytes(b"PAR1")
-    (path / "meta" / "stats.json").write_text("{}", encoding="utf-8")
+    (path / "meta" / "stats.json").write_text(
+        json.dumps({"observation.state": {"q01": [0.0], "q99": [1.0], "count": [1]}, "action": {"q01": [0.0], "q99": [1.0], "count": [1]}}),
+        encoding="utf-8",
+    )
     for rel in (
         "meta/episodes/chunk-000/file_000.parquet",
     ):
@@ -296,7 +300,7 @@ def test_train_command_includes_runtime_parameters_and_progress(tmp_path: Path) 
     assert started["ok"] is True
     assert started["workflow"] == "train"
     assert "--dataset.repo_id=jin/record-test" in started["command_preview"]
-    assert "--dataset.video_backend=pyav" in started["command_preview"]
+    assert "--dataset.video_backend=torchcodec" in started["command_preview"]
     assert "--policy.type=act" in started["command_preview"]
     assert "--output_dir=outputs/train/robotis_omx_ai_act_record-test" in started["command_preview"]
     assert "--job_name=robotis_omx_ai_act_record-test" in started["command_preview"]
@@ -351,22 +355,95 @@ def test_pi05_train_uses_dedicated_runtime_and_hf_base_policy(tmp_path: Path) ->
 
     assert started["ok"] is True
     assert "-n" in started["command_preview"]
-    assert started["command_preview"][started["command_preview"].index("-n") + 1] == "lerobot-pi05"
+    assert started["command_preview"][started["command_preview"].index("-n") + 1] == "lerobot-pi05-torch211"
     assert "--policy.type=pi05" in started["command_preview"]
     assert "--policy.pretrained_path=lerobot/pi05_base" in started["command_preview"]
     assert "--batch_size=32" in started["command_preview"]
+    assert "--num_workers=12" in started["command_preview"]
+    assert "--eval_freq=500" in started["command_preview"]
+    assert "--save_freq=500" in started["command_preview"]
+    assert all(not arg.startswith("--eval.batch_size=") for arg in started["command_preview"])
     assert "--policy.n_obs_steps=1" in started["command_preview"]
     assert "--policy.chunk_size=50" in started["command_preview"]
     assert "--policy.n_action_steps=50" in started["command_preview"]
-    assert "--policy.compile_model=true" in started["command_preview"]
+    assert "--policy.compile_model=false" in started["command_preview"]
     assert "--policy.gradient_checkpointing=true" in started["command_preview"]
     assert "--policy.dtype=bfloat16" in started["command_preview"]
     assert "--policy.freeze_vision_encoder=false" in started["command_preview"]
     assert "--policy.train_expert_only=false" in started["command_preview"]
-    assert '--policy.normalization_mapping={"ACTION":"MEAN_STD","STATE":"MEAN_STD","VISUAL":"IDENTITY"}' in started["command_preview"]
+    assert "--wandb.enable=true" in started["command_preview"]
+    assert all(not arg.startswith("--policy.use_amp=") for arg in started["command_preview"])
+    assert "--wandb.mode=offline" in started["command_preview"]
 
 
-def test_pi05_train_recovers_shifted_gui_payload(tmp_path: Path) -> None:
+def test_pi05_train_forces_stale_wandb_request_offline(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+
+    started = bridge.train_start(
+        {
+            "mode": "test",
+            "profile_id": "fake_omx_ai",
+            "dataset_repo_id": "jin/record-test",
+            "policy_type": "pi05",
+            "wandb_enable": True,
+            "wandb_mode": "",
+        }
+    )
+
+    assert started["ok"] is True
+    assert "--wandb.enable=true" in started["command_preview"]
+    assert "--wandb.mode=offline" in started["command_preview"]
+
+
+def test_pi05_train_respects_explicit_wandb_disabled(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+
+    started = bridge.train_start(
+        {
+            "mode": "test",
+            "profile_id": "fake_omx_ai",
+            "dataset_repo_id": "jin/record-test",
+            "policy_type": "pi05",
+            "wandb_enable": False,
+            "wandb_mode": "offline",
+        }
+    )
+
+    assert started["ok"] is True
+    assert "--wandb.enable=false" in started["command_preview"]
+    assert "--wandb.mode=disabled" in started["command_preview"]
+
+
+def test_pi05_train_uses_compatible_local_base_snapshot_when_available(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    snapshots = tmp_path / "hf_home_pi05" / "hub" / "models--lerobot--pi05_base" / "snapshots"
+    stale = snapshots / "old"
+    compatible = snapshots / "new"
+    stale.mkdir(parents=True)
+    compatible.mkdir(parents=True)
+    (stale / "model.safetensors").write_bytes(b"SAFE")
+    (stale / "policy_preprocessor.json").write_text('{"steps":[{"registry_name":"relative_actions_processor"}]}', encoding="utf-8")
+    (compatible / "model.safetensors").write_bytes(b"SAFE")
+    (compatible / "config.json").write_text("{}", encoding="utf-8")
+    (compatible / "policy_postprocessor.json").write_text('{"steps":[]}', encoding="utf-8")
+    (compatible / "policy_preprocessor.json").write_text('{"steps":[{"registry_name":"normalizer_processor"}]}', encoding="utf-8")
+
+    started = bridge.train_start(
+        {
+            "mode": "test",
+            "profile_id": "fake_omx_ai",
+            "dataset_repo_id": "jin/record-test",
+            "policy_type": "pi05",
+            "policy_pretrained_path": "lerobot/pi05_base",
+        }
+    )
+
+    assert started["ok"] is True
+    assert f"--policy.pretrained_path={compatible}" in started["command_preview"]
+    assert not any(arg == "--policy.pretrained_path=lerobot/pi05_base" for arg in started["command_preview"])
+
+
+def test_pi05_train_rejects_shifted_gui_payload(tmp_path: Path) -> None:
     bridge = _bridge(tmp_path)
 
     started = bridge.train_start(
@@ -385,14 +462,42 @@ def test_pi05_train_recovers_shifted_gui_payload(tmp_path: Path) -> None:
         }
     )
 
-    assert started["ok"] is True
-    assert "--policy.pretrained_path=lerobot/pi05_base" in started["command_preview"]
-    assert "--batch_size=32" in started["command_preview"]
-    assert "--steps=3000" in started["command_preview"]
-    assert "--num_workers=4" in started["command_preview"]
-    assert "--eval_freq=20000" in started["command_preview"]
-    assert "--log_freq=200" in started["command_preview"]
-    assert all(not arg.startswith("--scheduler.") for arg in started["command_preview"])
+    assert started["ok"] is False
+    assert started["failure_code"] == "LEROBOT_TRAIN_CONFIG_INVALID"
+    assert "batch_size=3000" in started["message"]
+    assert "num_workers=20000" in started["message"]
+
+
+def test_pi05_train_rejects_stale_memory_heavy_gui_payload(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+
+    started = bridge.train_start(
+        {
+            "mode": "test",
+            "profile_id": "fake_omx_ai",
+            "dataset_repo_id": "jin/record-test",
+            "policy_type": "pi05",
+            "batch_size": 200,
+            "num_workers": 200,
+            "eval_batch_size": 50,
+            "policy_n_obs_steps": 100,
+            "policy_chunk_size": 50,
+            "policy_n_action_steps": 50,
+            "train_extra_args": [
+                "--policy.compile_model=false",
+                "--policy.freeze_vision_encoder=false",
+                "--policy.train_expert_only=true",
+                '--policy.normalization_mapping={"ACTION":"MEAN_STD","STATE":"MEAN_STD","VISUAL":"IDENTITY"}',
+            ],
+        }
+    )
+
+    assert started["ok"] is False
+    assert started["failure_code"] == "LEROBOT_TRAIN_CONFIG_INVALID"
+    assert "payload rejected" in started["message"]
+    assert "batch_size=200" in started["message"]
+    assert "num_workers=200" in started["message"]
+    assert "policy.n_obs_steps=100" in started["message"]
 
 
 def test_train_ignores_optimizer_and_scheduler_values_without_type(tmp_path: Path) -> None:
@@ -442,11 +547,11 @@ def test_pi05_live_train_uses_dedicated_hf_cache(tmp_path: Path) -> None:
 
     hf_home = tmp_path / "hf_home_pi05"
     assert started["ok"] is True
-    assert captured["env_overrides"] == {
-        "HF_HOME": str(hf_home),
-        "HF_HUB_CACHE": str(hf_home / "hub"),
-        "HF_HUB_DISABLE_XET": "1",
-    }
+    env = captured["env_overrides"]
+    assert env["HF_HOME"] == str(hf_home)
+    assert env["HF_HUB_CACHE"] == str(hf_home / "hub")
+    assert env["HF_HUB_DISABLE_XET"] == "1"
+    assert env["WANDB_MODE"] == "offline"
 
 
 def test_pi05_live_train_converts_v21_dataset_copy_to_v30(tmp_path: Path) -> None:
@@ -484,6 +589,45 @@ def test_pi05_live_train_converts_v21_dataset_copy_to_v30(tmp_path: Path) -> Non
     assert started["dataset_repo_id"] == "local-pi05-v30/jin-record-test"
     assert started["dataset_path"] == str(converted)
     assert "Pi0.5 converted jin/record-test v2.1 -> local-pi05-v30/jin-record-test v3.0" in started["step_trace"][1]["detail"]
+
+
+def test_pi05_live_train_augments_missing_quantile_stats(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    dataset = tmp_path / "hf_datasets" / "jin" / "record-test"
+    _make_trainable_lerobot_dataset(dataset)
+    bridge._live_block_if_needed = lambda **_: None  # type: ignore[method-assign]
+    bridge._live_port_block_if_needed = lambda **_: None  # type: ignore[method-assign]
+    bridge._start_live_process = lambda **_: {"ok": True, "session_updates": {"pid": 123, "log_path": "", "returncode": None}}  # type: ignore[method-assign]
+    calls: list[tuple[str, Path]] = []
+
+    def fake_convert(converted_repo_id: str, converted_root: Path) -> None:
+        converted = converted_root / converted_repo_id
+        _mark_lerobot_dataset_v30(converted)
+        (converted / "meta" / "stats.json").write_text(json.dumps({"action": {"mean": [0.0]}}), encoding="utf-8")
+
+    def fake_augment(repo_id: str, root: Path) -> None:
+        calls.append((repo_id, root))
+        stats_path = root / repo_id / "meta" / "stats.json"
+        stats_path.write_text(json.dumps({"observation.state": {"q01": [0.0], "q99": [1.0]}, "action": {"q01": [0.0], "q99": [1.0]}}), encoding="utf-8")
+
+    bridge._run_pi05_v30_dataset_conversion = fake_convert  # type: ignore[method-assign]
+    bridge._run_pi05_quantile_stats_augmentation = fake_augment  # type: ignore[method-assign]
+
+    started = bridge.train_start(
+        {
+            "mode": "live",
+            "runtime_mode": "live",
+            "profile_id": "fake_omx_ai",
+            "dataset_repo_id": "jin/record-test",
+            "dataset_root": str(tmp_path / "hf_datasets"),
+            "policy_type": "pi05",
+            "confirm_live_execute": True,
+            "steps": 1,
+        }
+    )
+
+    assert started["ok"] is True
+    assert calls == [("local-pi05-v30/jin-record-test", tmp_path / "hf_datasets")]
 
 
 def test_live_train_uses_latest_completed_local_dataset_and_exact_root(tmp_path: Path) -> None:
@@ -557,6 +701,41 @@ def test_live_train_existing_output_dir_uses_fresh_output_dir_when_resume_unchec
     assert started["training"]["config"]["output_dir"] == output_dir
     assert started["checkpoint_path"] == str(Path(output_dir) / "checkpoints" / "last" / "pretrained_model")
     assert started["step_trace"][0]["detail"].startswith("training output_dir exists; using fresh output_dir ")
+
+
+def test_live_train_strips_generated_output_suffix_before_creating_fresh_dir(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    dataset = tmp_path / "hf_datasets" / "jin" / "record-test"
+    _make_trainable_lerobot_dataset(dataset)
+    base = tmp_path / "outputs" / "train" / "atr_lerobot_train"
+    timestamped = tmp_path / "outputs" / "train" / "atr_lerobot_train-20260507T080347Z"
+    base.mkdir(parents=True)
+    timestamped.mkdir(parents=True)
+    bridge._live_block_if_needed = lambda **_: None  # type: ignore[method-assign]
+    bridge._live_port_block_if_needed = lambda **_: None  # type: ignore[method-assign]
+    bridge._start_live_process = lambda **_: {"ok": True, "session_updates": {"pid": 123, "log_path": "", "returncode": None}}  # type: ignore[method-assign]
+
+    started = bridge.train_start(
+        {
+            "mode": "live",
+            "runtime_mode": "live",
+            "profile_id": "fake_omx_ai",
+            "dataset_repo_id": "jin/record-test",
+            "dataset_root": str(tmp_path / "hf_datasets"),
+            "output_dir": str(timestamped),
+            "job_name": "atr_lerobot_train",
+            "resume": False,
+            "steps": 1,
+            "confirm_live_execute": True,
+        }
+    )
+
+    output_arg = next(arg for arg in started["command_preview"] if arg.startswith("--output_dir="))
+    output_dir = Path(output_arg.split("=", 1)[1])
+    assert started["ok"] is True
+    assert output_dir.name.startswith("atr_lerobot_train-")
+    assert "20260507T080347Z-" not in output_dir.name
+    assert not output_arg.startswith(f"--output_dir={timestamped}-")
 
 
 def test_live_train_resume_keeps_existing_output_dir(tmp_path: Path) -> None:
@@ -754,6 +933,33 @@ def test_live_record_existing_dataset_uses_fresh_dataset_when_resume_unchecked(t
     assert started["step_trace"][0]["detail"].startswith("existing dataset detected; recording to fresh dataset ")
 
 
+def test_live_record_strips_generated_dataset_suffix_before_creating_fresh_dataset(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    existing = tmp_path / "hf_datasets" / "jin" / "record-test-20260507T080347Z"
+    existing.mkdir(parents=True)
+    bridge._live_block_if_needed = lambda **_: None  # type: ignore[method-assign]
+    bridge._live_port_block_if_needed = lambda **_: None  # type: ignore[method-assign]
+    bridge._start_live_process = lambda **_: {"ok": True, "session_updates": {"pid": 123, "log_path": "", "returncode": None}}  # type: ignore[method-assign]
+
+    started = bridge.record_start(
+        {
+            "mode": "live",
+            "runtime_mode": "live",
+            "profile_id": "fake_omx_ai",
+            "dataset_repo_id": "jin/record-test-20260507T080347Z",
+            "task_instruction": "Pick up the cylinder",
+            "confirm_live_execute": True,
+        }
+    )
+
+    repo_arg = next(arg for arg in started["command_preview"] if arg.startswith("--dataset.repo_id="))
+    fresh_repo = repo_arg.split("=", 1)[1]
+    assert started["ok"] is True
+    assert fresh_repo.startswith("jin/record-test-")
+    assert "20260507T080347Z-" not in fresh_repo
+    assert started["dataset_repo_id"] == fresh_repo
+
+
 def test_live_record_control_sends_lerobot_key_without_marking_complete(tmp_path: Path) -> None:
     bridge = _bridge(tmp_path)
     started = bridge.record_start({"mode": "test", "profile_id": "fake_omx_ai", "dataset_repo_id": "jin/record-test"})
@@ -945,7 +1151,7 @@ def test_pi05_rollout_uses_dedicated_runtime_and_rtc_command(tmp_path: Path) -> 
 
     assert result["ok"] is True
     assert "-n" in result["command_preview"]
-    assert result["command_preview"][result["command_preview"].index("-n") + 1] == "lerobot-pi05"
+    assert result["command_preview"][result["command_preview"].index("-n") + 1] == "lerobot-pi05-torch211"
     assert "scripts/lerobot_pi05_rollout_wrapper.py" in " ".join(result["command_preview"])
     assert "--policy.path=fake://pi05_policy" in result["command_preview"]
     assert "--policy.type=pi05" in result["command_preview"]
@@ -1104,3 +1310,93 @@ def test_visualize_start_uses_lerobot_html_visualizer_with_dataset_root(tmp_path
     assert "--port=9091" in command
     assert result["visualization"]["viewer_url"] == "http://127.0.0.1:9091/jin/record-test/episode_2"
     assert captured["command"] == command
+
+
+def test_live_record_passes_tts_env_overrides(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    captured: dict[str, object] = {}
+    bridge._live_block_if_needed = lambda **_: None  # type: ignore[method-assign]
+    bridge._live_port_block_if_needed = lambda **_: None  # type: ignore[method-assign]
+
+    def fake_start_live_process(**kwargs: object) -> dict[str, object]:
+        captured.update(kwargs)
+        return {"ok": True, "session_updates": {"pid": 123, "log_path": "", "returncode": None}}
+
+    bridge._start_live_process = fake_start_live_process  # type: ignore[method-assign]
+
+    started = bridge.record_start(
+        {
+            "mode": "live",
+            "runtime_mode": "live",
+            "profile_id": "fake_omx_ai",
+            "dataset_repo_id": "jin/record-test",
+            "confirm_live_execute": True,
+            "tts_engine": "espeak-ng",
+            "tts_rate": -60,
+        }
+    )
+
+    assert started["ok"] is True
+    assert started["tts"] == {"engine": "espeak-ng", "rate": -60, "voice": ""}
+    assert captured["env_overrides"] == {
+        "LEROBOT_TTS_ENGINE": "espeak-ng",
+        "LEROBOT_TTS_RATE": "-60",
+    }
+
+
+def test_live_record_default_piper_passes_packaged_tts_env(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    captured: dict[str, object] = {}
+    bridge._live_block_if_needed = lambda **_: None  # type: ignore[method-assign]
+    bridge._live_port_block_if_needed = lambda **_: None  # type: ignore[method-assign]
+
+    def fake_start_live_process(**kwargs: object) -> dict[str, object]:
+        captured.update(kwargs)
+        return {"ok": True, "session_updates": {"pid": 123, "log_path": "", "returncode": None}}
+
+    bridge._start_live_process = fake_start_live_process  # type: ignore[method-assign]
+
+    started = bridge.record_start(
+        {
+            "mode": "live",
+            "runtime_mode": "live",
+            "profile_id": "fake_omx_ai",
+            "dataset_repo_id": "jin/record-test",
+            "confirm_live_execute": True,
+        }
+    )
+
+    assert started["ok"] is True
+    assert started["tts"]["engine"] == "piper"
+    assert started["tts"]["voice"] == "en_US-lessac-medium"
+    env = captured["env_overrides"]
+    assert env["LEROBOT_TTS_ENGINE"] == "piper"
+    assert env["LEROBOT_TTS_RATE"] == "-35"
+    assert env["LEROBOT_TTS_VOICE"] == "en_US-lessac-medium"
+    assert env["ATR_REPO_ROOT"] == str(tmp_path)
+    assert env["LEROBOT_TTS_PIPER_SCRIPT"] == str(tmp_path / "tools" / "tts" / "atr_piper_say.py")
+    assert env["LEROBOT_TTS_PIPER_MODEL"] == str(
+        tmp_path / "models" / "tts" / "piper" / "en_US-lessac-medium" / "en_US-lessac-medium.onnx"
+    )
+
+
+
+def test_pi05_train_env_passes_hf_token_from_token_path(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    monkeypatch.delenv("HUGGING_FACE_HUB_TOKEN", raising=False)
+    bridge = _bridge(tmp_path)
+    token_path = tmp_path / "hf_token"
+    token_path.write_text("hf_fake_token", encoding="utf-8")
+    bridge.config.hf_token_path = token_path
+
+    request = LeRobotSessionRequest.model_validate({"mode": "live", "policy_type": "pi05"})
+    env = bridge._workflow_env_overrides("train", request)
+
+    assert env["HF_HOME"] == str(bridge.config.pi05_hf_home)
+    assert env["HF_HUB_CACHE"] == str(bridge.config.pi05_hf_home / "hub")
+    assert env["TOKENIZERS_PARALLELISM"] == "false"
+    assert env["OMP_NUM_THREADS"] == "4"
+    assert env["OPENBLAS_NUM_THREADS"] == "4"
+    assert env["PYTORCH_CUDA_ALLOC_CONF"] == "expandable_segments:True"
+    assert env["HF_TOKEN"] == "hf_fake_token"
+    assert env["HUGGING_FACE_HUB_TOKEN"] == "hf_fake_token"

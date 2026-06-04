@@ -203,8 +203,10 @@ Pi0.5 training uses an isolated LeRobot worktree and conda environment:
 
 ```bash
 git -C /home/jin/lerobot worktree add /home/jin/lerobot_pi05 upstream/feat/add-pi05
-conda create -y -n lerobot-pi05 --clone lerobot
-conda run -n lerobot-pi05 pip install -e '/home/jin/lerobot_pi05[pi]'
+conda create -y -n lerobot-pi05-torch211 --clone lerobot
+conda run -n lerobot-pi05-torch211 pip install -e '/home/jin/lerobot_pi05[pi]'
+conda run -n lerobot-pi05-torch211 python -m pip install --upgrade --force-reinstall torch==2.11.0 torchvision==0.26.0 torchcodec==0.13.0
+conda run -n lerobot-pi05-torch211 python -m pip install --force-reinstall fsspec==2025.9.0 setuptools==80.10.2
 ```
 
 Optional model download:
@@ -214,11 +216,30 @@ mkdir -p /home/jin/.cache/huggingface_pi05
 HF_HOME=/home/jin/.cache/huggingface_pi05 \
 HF_HUB_CACHE=/home/jin/.cache/huggingface_pi05/hub \
 HF_HUB_DISABLE_XET=1 \
-conda run -n lerobot-pi05 hf download lerobot/pi05_base --max-workers 1
+conda run -n lerobot-pi05-torch211 hf download lerobot/pi05_base --max-workers 1
 ```
 
-The Pi0.5 worktree, conda env, datasets, and model cache are not part of this
-Git repository.
+Pi0.5 training uses local W&B offline logging by default. The GUI/bridge passes
+`--wandb.enable=true --wandb.mode=offline` and `WANDB_MODE=offline`, so training
+does not require a W&B cloud API key. Select `disabled` only when no W&B run
+metadata should be created.
+
+Pi0.5 training keeps `num_workers=4` as the safe GUI default and allows up to `num_workers=20` in the backend for faster local dataloader/video-decode throughput.
+Pi0.5 training now runs in `lerobot-pi05-torch211` with `torch==2.11.0`, `torchvision==0.26.0`, and `torchcodec==0.13.0`; the bridge prefers `torchcodec` and falls back to `pyav` when the selected conda environment cannot import TorchCodec.
+
+The bridge resolves `lerobot/pi05_base` to a compatible local snapshot under
+`~/.cache/huggingface_pi05/hub/models--lerobot--pi05_base/snapshots` when one is
+available. This avoids stale HF cache refs whose `policy_preprocessor.json` still
+references the removed `relative_actions_processor` registry step.
+
+For Pi0.5, live training datasets are converted to local LeRobot v3.0 copies under
+`~/.cache/huggingface/lerobot/local-pi05-v30/`. The bridge also runs local
+quantile-stat augmentation when `meta/stats.json` lacks `q01/q99`, because Pi0.5
+uses QUANTILES normalization. This augmentation is local-only; Hub push/tag calls
+are suppressed by the bridge.
+
+The Pi0.5 worktree, conda env, datasets, model cache, and offline W&B run files
+are not part of this Git repository.
 
 ## FEniCSx / DOLFINx FEM Runtime
 

@@ -681,6 +681,9 @@ class LeRobotAPIRequest(BaseModel):
     display_data: bool = False
     resume: bool = False
     push_to_hub: bool = False
+    tts_engine: str = ""
+    tts_rate: int | None = None
+    tts_voice: str = ""
     confirm_live_execute: bool = False
     episode_index: int = 0
     visualization_tool: Literal["html", "rerun"] = "html"

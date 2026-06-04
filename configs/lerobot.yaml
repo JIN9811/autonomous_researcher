@@ -26,10 +26,22 @@ lerobot:
   session_log_root: runs/lerobot_sessions
   conda_env_name: lerobot
   conda_executable: /home/jin/miniconda3/bin/conda
-  pi05_conda_env_name: lerobot-pi05
+  pi05_conda_env_name: lerobot-pi05-torch211
   pi05_repo_root: /home/jin/lerobot_pi05
   pi05_hf_home: /home/jin/.cache/huggingface_pi05
+  train_video_backend: torchcodec
+  train_video_backend_fallback: pyav
+  pi05_video_backend: torchcodec
+  hf_token_path: ~/.cache/huggingface/token
   pi05_base_policy: lerobot/pi05_base
+  tts_engine: piper
+  tts_rate: -35
+  tts_voice: en_US-lessac-medium
+  tts_piper_python: .venv/bin/python
+  tts_piper_script: tools/tts/atr_piper_say.py
+  tts_piper_bin: .venv/bin/piper
+  tts_piper_model: models/tts/piper/en_US-lessac-medium/en_US-lessac-medium.onnx
+  tts_piper_config: models/tts/piper/en_US-lessac-medium/en_US-lessac-medium.onnx.json
 
   policy_presets:
     - label: Manual local checkpoint path

@@ -82,37 +82,44 @@ Pi0.5 support is intentionally isolated from the ROBOTIS OMX live runtime.
 Rules:
 
 - Default robot runtime: `/home/jin/lerobot` in conda env `lerobot`.
-- Pi0.5 training runtime: `/home/jin/lerobot_pi05` in conda env `lerobot-pi05`.
+- Pi0.5 training runtime: `/home/jin/lerobot_pi05` in conda env `lerobot-pi05-torch211`.
 - Pi0.5 Hugging Face cache: `HF_HOME=/home/jin/.cache/huggingface_pi05`, `HF_HUB_CACHE=/home/jin/.cache/huggingface_pi05/hub`, `HF_HUB_DISABLE_XET=1`.
+- TorchCodec-first video decoding: training commands prefer `--dataset.video_backend=torchcodec`; live runs fall back to `pyav` if the selected conda environment does not expose `torchcodec`.
 - GUI policy type: `pi05`.
 - Default HF source policy: `lerobot/pi05_base`.
-- Bridge command for Pi0.5 training uses `conda run --no-capture-output -n lerobot-pi05 lerobot-train`.
+- Bridge command for Pi0.5 training uses `conda run --no-capture-output -n lerobot-pi05-torch211 lerobot-train`.
 - The Pi0.5 source model is passed as `--policy.pretrained_path=lerobot/pi05_base`; this differs from the older LeRobot 0.3.x `--policy.path=<repo-or-dir>` path used by some non-Pi0.5 fine-tuning flows.
 - Pi0.5 live training requires LeRobot dataset format `v3.0`. If the selected local training dataset is `v2.1`, the bridge must not mutate the original ROBOTIS/LeRobot recording. It must copy the dataset to `~/.cache/huggingface/lerobot/local-pi05-v30/<dataset-slug>`, run the v2.1 -> v3.0 converter on that generated copy, then train against the converted repo id/path.
 - Generated Pi0.5 v3.0 datasets are excluded from generic "latest local dataset" selection unless the operator explicitly selects the `local-pi05-v30/...` repo id. This prevents ACT training from accidentally picking a Pi0.5-only converted dataset.
+
+Torch 2.11/TorchCodec setup command:
+
+```bash
+conda run -n lerobot-pi05-torch211 python -m pip install --upgrade --force-reinstall torch==2.11.0 torchvision==0.26.0 torchcodec==0.13.0
+conda run -n lerobot-pi05-torch211 python -m pip install --force-reinstall fsspec==2025.9.0 setuptools==80.10.2
+```
 
 Prefetch command:
 
 ```bash
 mkdir -p /home/jin/.cache/huggingface_pi05
-HF_HOME=/home/jin/.cache/huggingface_pi05 HF_HUB_CACHE=/home/jin/.cache/huggingface_pi05/hub HF_HUB_DISABLE_XET=1 conda run -n lerobot-pi05 hf download lerobot/pi05_base --max-workers 1
+HF_HOME=/home/jin/.cache/huggingface_pi05 HF_HUB_CACHE=/home/jin/.cache/huggingface_pi05/hub HF_HUB_DISABLE_XET=1 conda run -n lerobot-pi05-torch211 hf download lerobot/pi05_base --max-workers 1
 ```
 
-Recommended additional train args for local LeRobot datasets that do not include Pi0.5 quantile stats:
+Recommended additional train args for Pi0.5 on this workstation. Quantile stats are generated automatically for `observation.state` and `action` when missing; do not override Pi0.5 normalization unless intentionally debugging a dataset.
 
 ```text
---policy.compile_model=true
+--policy.compile_model=false
 --policy.gradient_checkpointing=true
 --policy.dtype=bfloat16
 --policy.freeze_vision_encoder=false
 --policy.train_expert_only=false
---policy.normalization_mapping={"ACTION":"MEAN_STD","STATE":"MEAN_STD","VISUAL":"IDENTITY"}
 ```
 
 Manual local conversion command shape:
 
 ```bash
-conda run --no-capture-output -n lerobot-pi05 python -m lerobot.datasets.v30.convert_dataset_v21_to_v30 \
+conda run --no-capture-output -n lerobot-pi05-torch211 python -m lerobot.datasets.v30.convert_dataset_v21_to_v30 \
   --repo-id=local-pi05-v30/jin-record-test-20260512t063639z \
   --root=/home/jin/.cache/huggingface/lerobot \
   --push-to-hub=false \
@@ -124,7 +131,7 @@ conda run --no-capture-output -n lerobot-pi05 python -m lerobot.datasets.v30.con
 Policy-specific GUI defaults:
 
 - ACT follows the Hugging Face LeRobot train defaults and ACT config: `batch_size=8`, `steps=100000`, `num_workers=4`, `eval_freq=20000`, `log_freq=200`, `save_freq=20000`, `policy.n_obs_steps=1`, `policy.chunk_size=100`, `policy.n_action_steps=100`.
-- Pi0.5 follows the Hugging Face Pi0.5 fine-tuning example and Pi0.5 config: `batch_size=32`, `steps=3000`, `policy.n_obs_steps=1`, `policy.chunk_size=50`, `policy.n_action_steps=50`, plus `compile_model`, `gradient_checkpointing`, `dtype=bfloat16`, `freeze_vision_encoder=false`, and `train_expert_only=false`.
+- Pi0.5 follows the Hugging Face Pi0.5 fine-tuning example and the local workstation profile: `batch_size=32`, `steps=3000`, `num_workers=12`, `eval_freq=500`, `log_freq=5`, `save_freq=500` by default, `policy.n_obs_steps=1`, `policy.chunk_size=50`, `policy.n_action_steps=50`, plus `compile_model=false`, `gradient_checkpointing=true`, `dtype=bfloat16`, `freeze_vision_encoder=false`, and `train_expert_only=false`. The backend hard limit for Pi0.5 `num_workers` is 20 on this workstation.
 - Official references: https://huggingface.co/docs/lerobot/act and https://huggingface.co/docs/lerobot/pi05.
 
 ## ACT Temporal Ensemble Filter
@@ -165,7 +172,7 @@ Rules:
 - Manipulation Agent sends `policy_type=pi05`.
 - Test mode may use `policy_path=fake://pi05_policy`.
 - Live mode requires a real `policy_path`, `policy_checkpoint_path`, or `policy_repo_id`.
-- The LeRobot bridge runs Pi0.5 rollout in conda env `lerobot-pi05`.
+- The LeRobot bridge runs Pi0.5 rollout in conda env `lerobot-pi05-torch211`.
 - Pi0.5 rollout command preview uses `lerobot-rollout`, `--policy.type=pi05`, `--device=<device>`, and `--inference.type=rtc` by default.
 - The task text must mention the concrete transfer target: `3dp_output_area -> utm_fixture`.
 

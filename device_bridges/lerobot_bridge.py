@@ -51,6 +51,7 @@ EventCallback = Callable[[dict[str, Any]], None]
 
 
 UNSAFE_ARGUMENT_RE = re.compile(r"[;&|`]|[$][(]")
+GENERATED_PATH_SUFFIX_RE = re.compile(r"-(?:\d{8}T\d{6}(?:\d{6})?Z)(?:-\d{2})?$")
 POLICY_OUTPUT_FILE_NAMES = {"model.safetensors", "pytorch_model.bin", "policy.ckpt", "policy.pt", "policy.pth"}
 POLICY_OUTPUT_FILE_SUFFIXES = {".safetensors", ".ckpt", ".pt", ".pth", ".bin"}
 MANUAL_STOP_ROLLOUT_EPISODE_S = 86400.0
@@ -72,10 +73,22 @@ class LeRobotBridgeConfig:
     session_log_root: Path = Path("runs/lerobot_sessions")
     conda_env_name: str = "lerobot"
     conda_executable: str = "conda"
-    pi05_conda_env_name: str = "lerobot-pi05"
+    pi05_conda_env_name: str = "lerobot-pi05-torch211"
     pi05_repo_root: Path = Path("~/lerobot_pi05")
     pi05_hf_home: Path = Path("~/.cache/huggingface_pi05")
+    train_video_backend: str = "torchcodec"
+    train_video_backend_fallback: str = "pyav"
+    pi05_video_backend: str = "torchcodec"
+    hf_token_path: Path = Path("~/.cache/huggingface/token")
     pi05_base_policy: str = "lerobot/pi05_base"
+    tts_engine: str = "piper"
+    tts_rate: int = -35
+    tts_voice: str = "en_US-lessac-medium"
+    tts_piper_python: Path = Path(".venv/bin/python")
+    tts_piper_script: Path = Path("tools/tts/atr_piper_say.py")
+    tts_piper_bin: Path = Path(".venv/bin/piper")
+    tts_piper_model: Path = Path("models/tts/piper/en_US-lessac-medium/en_US-lessac-medium.onnx")
+    tts_piper_config: Path = Path("models/tts/piper/en_US-lessac-medium/en_US-lessac-medium.onnx.json")
     policy_presets: list[dict[str, str]] = field(default_factory=list)
     profiles: dict[str, dict[str, Any]] = field(default_factory=dict)
     repo_root: Path = Path(".")
@@ -96,6 +109,12 @@ class LeRobotBridgeConfig:
         session_log_root = _resolve_path(repo, str(root.get("session_log_root", "runs/lerobot_sessions")))
         pi05_repo_root = _resolve_path(repo, str(root.get("pi05_repo_root", "~/lerobot_pi05")))
         pi05_hf_home = _resolve_path(repo, str(root.get("pi05_hf_home", "~/.cache/huggingface_pi05")))
+        hf_token_path = _resolve_path(repo, str(root.get("hf_token_path", "~/.cache/huggingface/token")))
+        tts_piper_python = _resolve_path(repo, str(root.get("tts_piper_python", ".venv/bin/python")))
+        tts_piper_script = _resolve_path(repo, str(root.get("tts_piper_script", "tools/tts/atr_piper_say.py")))
+        tts_piper_bin = _resolve_path(repo, str(root.get("tts_piper_bin", ".venv/bin/piper")))
+        tts_piper_model = _resolve_path(repo, str(root.get("tts_piper_model", "models/tts/piper/en_US-lessac-medium/en_US-lessac-medium.onnx")))
+        tts_piper_config = _resolve_path(repo, str(root.get("tts_piper_config", "models/tts/piper/en_US-lessac-medium/en_US-lessac-medium.onnx.json")))
         profiles = _resolve_profiles(dict(root.get("profiles", {})))
         policy_presets = [dict(item) for item in root.get("policy_presets", []) if isinstance(item, dict)]
         return cls(
@@ -111,10 +130,22 @@ class LeRobotBridgeConfig:
             session_log_root=session_log_root,
             conda_env_name=str(root.get("conda_env_name", "lerobot")),
             conda_executable=str(Path(str(root.get("conda_executable", "conda"))).expanduser()),
-            pi05_conda_env_name=str(root.get("pi05_conda_env_name", "lerobot-pi05")),
+            pi05_conda_env_name=str(root.get("pi05_conda_env_name", "lerobot-pi05-torch211")),
             pi05_repo_root=pi05_repo_root,
             pi05_hf_home=pi05_hf_home,
+            train_video_backend=str(root.get("train_video_backend", "torchcodec")),
+            train_video_backend_fallback=str(root.get("train_video_backend_fallback", "pyav")),
+            pi05_video_backend=str(root.get("pi05_video_backend", root.get("train_video_backend", "torchcodec"))),
+            hf_token_path=hf_token_path,
             pi05_base_policy=str(root.get("pi05_base_policy", "lerobot/pi05_base")),
+            tts_engine=str(root.get("tts_engine", "piper")),
+            tts_rate=_safe_int(root.get("tts_rate", -35), -35, minimum=-100, maximum=100),
+            tts_voice=str(root.get("tts_voice", "en_US-lessac-medium")),
+            tts_piper_python=tts_piper_python,
+            tts_piper_script=tts_piper_script,
+            tts_piper_bin=tts_piper_bin,
+            tts_piper_model=tts_piper_model,
+            tts_piper_config=tts_piper_config,
             policy_presets=policy_presets,
             profiles=profiles,
             repo_root=repo,
@@ -131,6 +162,7 @@ class LeRobotBridge:
         self._log_handles: dict[str, IO[str]] = {}
         self._counter = 0
         self._selected_profile_id = config.default_profile_id
+        self._module_available_cache: dict[tuple[str, str], bool] = {}
 
     def shutdown(self) -> dict[str, Any]:
         """Stop tracked and stale LeRobot live subprocesses before the GUI server exits."""
@@ -162,6 +194,7 @@ class LeRobotBridge:
             "live_gate_summary": self._live_gate_summary(self._profile(self._selected_profile_id)),
             "paths": self._path_status(),
             "policy_presets": self._policy_presets(),
+            "tts": self._tts_config_public(),
             "environment": self._environment_status(),
             "device_memory": self._device_memory_public(),
         }
@@ -1187,6 +1220,7 @@ class LeRobotBridge:
             "log_path": "",
             "pid": None,
             "returncode": None,
+            "tts": self._tts_config_for_request(request) if workflow == "record" else {},
         }
         if workflow == "train":
             session["train_config"] = self._train_config_summary(profile, request)
@@ -1311,6 +1345,7 @@ class LeRobotBridge:
             "log_tail": self._tail_file(str(session.get("log_path", ""))),
             "pid": session.get("pid"),
             "returncode": session.get("returncode"),
+            "tts": session.get("tts", {}),
             "error": None,
         }
         if training:
@@ -1631,14 +1666,102 @@ class LeRobotBridge:
         return self.config.conda_env_name
 
     def _workflow_env_overrides(self, workflow: str, request: LeRobotSessionRequest) -> dict[str, str]:
+        env: dict[str, str] = {}
         if workflow in {"train", "rollout"} and self._is_pi05_policy(request.policy_type):
             hf_home = self.config.pi05_hf_home
-            return {
-                "HF_HOME": str(hf_home),
-                "HF_HUB_CACHE": str(hf_home / "hub"),
-                "HF_HUB_DISABLE_XET": "1",
-            }
-        return {}
+            env.update(
+                {
+                    "HF_HOME": str(hf_home),
+                    "HF_HUB_CACHE": str(hf_home / "hub"),
+                    "HF_HUB_DISABLE_XET": "1",
+                    "TOKENIZERS_PARALLELISM": "false",
+                    "OMP_NUM_THREADS": "4",
+                    "OPENBLAS_NUM_THREADS": "4",
+                    "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True",
+                }
+            )
+            hf_token = self._hf_token_for_subprocess()
+            if hf_token:
+                env["HF_TOKEN"] = hf_token
+                env["HUGGING_FACE_HUB_TOKEN"] = hf_token
+            if workflow == "train" and request.wandb_enable and str(request.wandb_mode or "").strip().lower() == "offline":
+                env["WANDB_MODE"] = "offline"
+        if workflow == "record":
+            env.update(self._tts_env_overrides(request))
+        return env
+
+    def _hf_token_for_subprocess(self) -> str:
+        for name in ("HF_TOKEN", "HUGGING_FACE_HUB_TOKEN"):
+            token = os.environ.get(name, "").strip()
+            if token:
+                return token
+        candidates = (
+            self.config.hf_token_path,
+            Path.home() / ".cache" / "huggingface" / "token",
+            Path.home() / ".huggingface" / "token",
+            self.config.pi05_hf_home / "token",
+        )
+        seen: set[Path] = set()
+        for candidate in candidates:
+            path = Path(candidate).expanduser()
+            if path in seen:
+                continue
+            seen.add(path)
+            try:
+                token = path.read_text(encoding="utf-8").strip()
+            except OSError:
+                continue
+            if token:
+                return token
+        return ""
+
+    def _tts_env_overrides(self, request: LeRobotSessionRequest) -> dict[str, str]:
+        tts = self._tts_config_for_request(request)
+        env = {
+            "LEROBOT_TTS_ENGINE": tts["engine"],
+            "LEROBOT_TTS_RATE": str(tts["rate"]),
+        }
+        if tts["voice"]:
+            env["LEROBOT_TTS_VOICE"] = tts["voice"]
+        if tts["engine"] == "piper":
+            env.update(
+                {
+                    "ATR_REPO_ROOT": str(self.config.repo_root),
+                    "LEROBOT_TTS_PIPER_PYTHON": str(self.config.tts_piper_python),
+                    "LEROBOT_TTS_PIPER_SCRIPT": str(self.config.tts_piper_script),
+                    "LEROBOT_TTS_PIPER_BIN": str(self.config.tts_piper_bin),
+                    "LEROBOT_TTS_PIPER_MODEL": str(self.config.tts_piper_model),
+                    "LEROBOT_TTS_PIPER_CONFIG": str(self.config.tts_piper_config),
+                }
+            )
+        return env
+
+    def _tts_config_for_request(self, request: LeRobotSessionRequest) -> dict[str, Any]:
+        engine = self._normalize_tts_engine(request.tts_engine or self.config.tts_engine)
+        voice_default = self.config.tts_voice if engine == "piper" else ""
+        tts = {
+            "engine": engine,
+            "rate": _safe_int(request.tts_rate, self.config.tts_rate, minimum=-100, maximum=100),
+            "voice": str(request.tts_voice or voice_default or "").strip(),
+        }
+        if tts["engine"] == "piper":
+            tts["piper_model"] = str(self.config.tts_piper_model)
+        return tts
+
+    def _tts_config_public(self) -> dict[str, Any]:
+        return {
+            "engine": self._normalize_tts_engine(self.config.tts_engine),
+            "rate": _safe_int(self.config.tts_rate, -35, minimum=-100, maximum=100),
+            "voice": str(self.config.tts_voice or "").strip(),
+            "supported_engines": ["piper", "spd-say", "espeak", "espeak-ng"],
+            "rate_range": [-100, 100],
+            "piper_model": str(self.config.tts_piper_model),
+        }
+
+    @staticmethod
+    def _normalize_tts_engine(engine: str) -> str:
+        clean = str(engine or "piper").strip().lower()
+        return clean if clean in {"piper", "spd-say", "espeak", "espeak-ng"} else "piper"
 
     def _train_args(self, profile: RobotProfile, request: LeRobotSessionRequest) -> list[str]:
         """Build this repository's LeRobot train command arguments."""
@@ -1650,17 +1773,17 @@ class LeRobotBridge:
         policy_repo = request.policy_repo_id or self._default_train_policy_repo_id(profile, request)
         policy_type = self._canonical_policy_type(request.policy_type or "act")
         pretrained_policy = str(request.policy_pretrained_path or "").strip()
+        is_pi05 = self._is_pi05_policy(policy_type)
         args = [
             f"--dataset.repo_id={dataset_repo}",
             f"--dataset.root={dataset_root}",
-            "--dataset.video_backend=pyav",
+            f"--dataset.video_backend={self._train_video_backend(policy_type, request)}",
             f"--policy.type={policy_type}",
             f"--output_dir={output_dir}",
             f"--job_name={job_name}",
             f"--policy.device={request.device or 'cuda'}",
             f"--policy.repo_id={policy_repo}",
             f"--policy.push_to_hub={_bool_arg(request.push_to_hub)}",
-            f"--policy.use_amp={_bool_arg(request.policy_use_amp)}",
             f"--batch_size={int(request.batch_size)}",
             f"--steps={int(request.steps)}",
             f"--num_workers={int(request.num_workers)}",
@@ -1671,6 +1794,8 @@ class LeRobotBridge:
             f"--resume={_bool_arg(request.resume)}",
             f"--wandb.enable={_bool_arg(request.wandb_enable)}",
         ]
+        if not is_pi05:
+            args.insert(8, f"--policy.use_amp={_bool_arg(request.policy_use_amp)}")
         if pretrained_policy:
             pretrained_key = "policy.pretrained_path" if self._is_pi05_policy(policy_type) else "policy.path"
             args.append(f"--{pretrained_key}={pretrained_policy}")
@@ -1716,7 +1841,9 @@ class LeRobotBridge:
             return request, "training config accepted"
 
         job_name = request.job_name or self._default_train_job_name(profile, request)
-        output_dir = _resolve_path(self.config.repo_root, request.output_dir or str(self.config.output_root / job_name)).resolve()
+        raw_output_dir = request.output_dir or str(self.config.output_root / job_name)
+        output_base = raw_output_dir if request.resume else self._path_without_generated_suffixes(raw_output_dir)
+        output_dir = _resolve_path(self.config.repo_root, output_base).resolve()
         if not self._is_under_allowed_roots(output_dir):
             raise ValueError(f"Training output_dir is outside allowed roots: {output_dir}")
 
@@ -1739,28 +1866,34 @@ class LeRobotBridge:
         updates: dict[str, Any] = {"policy_type": policy_type}
         if self._is_pi05_policy(policy_type):
             fields_set = set(request.model_fields_set)
-            shifted_gui_payload = (
-                int(request.batch_size) > 512
-                or int(request.num_workers) > 256
-                or (int(request.batch_size) == 3000 and int(request.steps) <= 16)
-            )
+            self._validate_pi05_train_request(request)
             pi05_defaults: dict[str, Any] = {
                 "batch_size": 32,
                 "steps": 3000,
-                "num_workers": 4,
-                "eval_freq": 20000,
-                "log_freq": 200,
-                "save_freq": 20000,
+                "num_workers": 12,
+                "eval_batch_size": None,
+                "eval_freq": 500,
+                "log_freq": 5,
+                "save_freq": 500,
+                "wandb_enable": True,
+                "wandb_mode": "offline",
                 "policy_n_obs_steps": 1,
                 "policy_chunk_size": 50,
                 "policy_n_action_steps": 50,
             }
             for field_name, value in pi05_defaults.items():
-                if field_name not in fields_set or shifted_gui_payload:
+                if field_name not in fields_set:
                     updates[field_name] = value
+            requested_wandb = bool(updates.get("wandb_enable", request.wandb_enable))
+            requested_wandb_mode = str(updates.get("wandb_mode", request.wandb_mode or "") or "").strip().lower()
+            if requested_wandb:
+                if not requested_wandb_mode or (requested_wandb_mode == "online" and not self._wandb_api_key_available()):
+                    updates["wandb_mode"] = "offline"
+            else:
+                updates["wandb_mode"] = "disabled"
             pretrained = str(request.policy_pretrained_path or "").strip()
-            if not self._is_valid_policy_source_ref(pretrained):
-                updates["policy_pretrained_path"] = self.config.pi05_base_policy
+            if not self._is_valid_policy_source_ref(pretrained) or self._is_pi05_base_policy_ref(pretrained):
+                updates["policy_pretrained_path"] = self._pi05_compatible_base_policy_ref()
         next_request = request.model_copy(update=updates)
         if self._is_pi05_policy(policy_type):
             return (
@@ -1769,20 +1902,87 @@ class LeRobotBridge:
             )
         return next_request, f"using LeRobot runtime env={self.config.conda_env_name}"
 
+    def _validate_pi05_train_request(self, request: LeRobotSessionRequest) -> None:
+        errors: list[str] = []
+        if int(request.batch_size) > 32:
+            errors.append(f"batch_size={request.batch_size} exceeds the Pi0.5 reference limit 32")
+        if int(request.num_workers) > 20:
+            errors.append(f"num_workers={request.num_workers} exceeds the local Pi0.5 limit 20")
+        if request.policy_n_obs_steps is not None and int(request.policy_n_obs_steps) > 1:
+            errors.append(f"policy.n_obs_steps={request.policy_n_obs_steps} is not a Pi0.5 default; use 1 unless you intentionally modify the policy")
+        if request.eval_batch_size is not None and int(request.eval_batch_size) > 8:
+            errors.append(f"eval.batch_size={request.eval_batch_size} exceeds the local Pi0.5 limit 8")
+        if errors:
+            raise ValueError("Pi0.5 training payload rejected: " + "; ".join(errors))
+
+    @staticmethod
+    def _wandb_api_key_available() -> bool:
+        if os.environ.get("WANDB_API_KEY", "").strip():
+            return True
+        candidates = (
+            Path.home() / ".netrc",
+            Path.home() / ".config" / "wandb" / "settings",
+            Path.home() / ".wandb" / "settings",
+        )
+        for path in candidates:
+            try:
+                text = path.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                continue
+            if "api.wandb.ai" in text or "api_key" in text:
+                return True
+        return False
+
+    def _is_pi05_base_policy_ref(self, value: str) -> bool:
+        clean = str(value or "").strip().rstrip("/")
+        configured = str(self.config.pi05_base_policy or "lerobot/pi05_base").strip().rstrip("/")
+        return clean in {"lerobot/pi05_base", configured}
+
+    def _pi05_compatible_base_policy_ref(self) -> str:
+        snapshots_root = self.config.pi05_hf_home / "hub" / "models--lerobot--pi05_base" / "snapshots"
+        candidates: list[tuple[int, int, float, str]] = []
+        try:
+            snapshots = [path for path in snapshots_root.iterdir() if path.is_dir()]
+        except OSError:
+            snapshots = []
+        for snapshot in snapshots:
+            model_path = snapshot / "model.safetensors"
+            preprocessor_path = snapshot / "policy_preprocessor.json"
+            if not model_path.exists() or not preprocessor_path.exists():
+                continue
+            try:
+                preprocessor_text = preprocessor_path.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                continue
+            if "relative_actions_processor" in preprocessor_text:
+                continue
+            has_config = 1 if (snapshot / "config.json").exists() else 0
+            has_postprocessor = 1 if (snapshot / "policy_postprocessor.json").exists() else 0
+            try:
+                modified = snapshot.stat().st_mtime
+            except OSError:
+                modified = 0.0
+            candidates.append((has_config, has_postprocessor, modified, str(snapshot)))
+        if not candidates:
+            return self.config.pi05_base_policy
+        return max(candidates)[3]
+
     def _train_extra_args_with_policy_defaults(self, request: LeRobotSessionRequest) -> list[str]:
         args = list(request.train_extra_args or [])
         if not self._is_pi05_policy(request.policy_type):
             return args
         defaults = [
-            "--policy.compile_model=true",
+            "--policy.compile_model=false",
             "--policy.gradient_checkpointing=true",
             "--policy.dtype=bfloat16",
             "--policy.freeze_vision_encoder=false",
             "--policy.train_expert_only=false",
-            '--policy.normalization_mapping={"ACTION":"MEAN_STD","STATE":"MEAN_STD","VISUAL":"IDENTITY"}',
         ]
-        keys = {str(item).split("=", 1)[0] for item in args}
-        return [item for item in defaults if item.split("=", 1)[0] not in keys] + args
+        # Match the upstream LeRobot Pi0.5 reference command. Remove stale local overrides.
+        forced_keys = {item.split("=", 1)[0] for item in defaults}
+        forced_keys.add("--policy.normalization_mapping")
+        filtered = [item for item in args if str(item).split("=", 1)[0] not in forced_keys]
+        return defaults + filtered
 
     @staticmethod
     def _canonical_policy_type(policy_type: str) -> str:
@@ -1795,6 +1995,38 @@ class LeRobotBridge:
 
     def _is_pi05_policy(self, policy_type: str) -> bool:
         return self._canonical_policy_type(policy_type) == "pi05"
+
+    def _train_video_backend(self, policy_type: str, request: LeRobotSessionRequest | None = None) -> str:
+        preferred = str(self.config.pi05_video_backend if self._is_pi05_policy(policy_type) else self.config.train_video_backend).strip() or "torchcodec"
+        fallback = str(self.config.train_video_backend_fallback or "pyav").strip() or "pyav"
+        if preferred != "torchcodec":
+            return preferred
+        if request is None or (request.runtime_mode or request.mode) != "live":
+            return preferred
+        env_name = self.config.pi05_conda_env_name if self._is_pi05_policy(policy_type) else self.config.conda_env_name
+        return preferred if self._conda_env_has_module(env_name, "torchcodec") else fallback
+
+    def _conda_env_has_module(self, env_name: str, module_name: str) -> bool:
+        cache_key = (str(env_name), str(module_name))
+        if cache_key in self._module_available_cache:
+            return self._module_available_cache[cache_key]
+        env_python = Path.home() / "miniconda3" / "envs" / str(env_name) / "bin" / "python"
+        if not env_python.exists():
+            self._module_available_cache[cache_key] = False
+            return False
+        try:
+            completed = subprocess.run(
+                [str(env_python), "-c", f"import {module_name}"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=10,
+                check=False,
+            )
+            available = completed.returncode == 0
+        except (OSError, subprocess.TimeoutExpired):
+            available = False
+        self._module_available_cache[cache_key] = available
+        return available
 
     def _is_valid_policy_source_ref(self, value: str) -> bool:
         clean = str(value or "").strip()
@@ -1825,7 +2057,7 @@ class LeRobotBridge:
             "policy_pretrained_path": request.policy_pretrained_path or "",
             "dataset_repo_id": request.dataset_repo_id or "local/fake_lerobot_dataset",
             "dataset_root": request.dataset_root or str(self.config.dataset_root),
-            "dataset_video_backend": "pyav",
+            "dataset_video_backend": self._train_video_backend(request.policy_type or "act", request),
             "output_dir": request.output_dir or str(self.config.output_root / (request.job_name or self._default_train_job_name(profile, request))),
             "job_name": request.job_name or self._default_train_job_name(profile, request),
             "policy_repo_id": request.policy_repo_id or self._default_train_policy_repo_id(profile, request),
@@ -2019,7 +2251,9 @@ class LeRobotBridge:
         dataset_path = _resolve_path(self.config.repo_root, raw_dataset_path).resolve()
         dataset_version = self._lerobot_dataset_codebase_version(dataset_path)
         if dataset_version == "v3.0":
-            return request, f"Pi0.5 dataset already v3.0 at {dataset_path}"
+            repo_id, root = self._repo_id_root_from_dataset_path(dataset_path, self.config.dataset_root.resolve())
+            self._ensure_pi05_quantile_stats(repo_id, root)
+            return request, f"Pi0.5 dataset already v3.0 at {dataset_path}; quantile stats ready"
         if dataset_version != "v2.1":
             raise ValueError(
                 "Pi0.5 live training requires a LeRobot v3.0 dataset. "
@@ -2035,6 +2269,7 @@ class LeRobotBridge:
             self._prepare_pi05_v30_dataset_copy(dataset_path, converted_repo_id, converted_root)
         if self._lerobot_dataset_codebase_version(converted_path) != "v3.0":
             raise ValueError(f"Pi0.5 dataset conversion did not produce a v3.0 dataset at {converted_path}")
+        self._ensure_pi05_quantile_stats(converted_repo_id, converted_root)
 
         return (
             self._train_request_for_dataset(request, converted_repo_id, converted_path),
@@ -2108,6 +2343,137 @@ class LeRobotBridge:
             output = (completed.stdout or "").strip()
             tail = "\n".join(output.splitlines()[-30:])
             raise ValueError(f"Pi0.5 dataset v3.0 conversion failed with returncode={completed.returncode}:\n{tail}")
+
+    def _ensure_pi05_quantile_stats(self, repo_id: str, dataset_root: Path) -> None:
+        dataset_path = (Path(dataset_root).resolve() / repo_id).resolve()
+        if self._pi05_dataset_has_quantile_stats(dataset_path):
+            return
+        self._run_pi05_quantile_stats_augmentation(repo_id, Path(dataset_root).resolve())
+        if not self._pi05_dataset_has_quantile_stats(dataset_path):
+            raise ValueError(f"Pi0.5 quantile stats augmentation did not produce q01/q99 stats at {dataset_path}")
+
+    @staticmethod
+    def _pi05_dataset_has_quantile_stats(dataset_path: Path) -> bool:
+        stats_path = Path(dataset_path) / "meta" / "stats.json"
+        try:
+            stats = json.loads(stats_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return False
+        if not isinstance(stats, dict):
+            return False
+        required_features = [feature for feature in ("observation.state", "action") if feature in stats]
+        if not required_features:
+            return False
+        for feature in required_features:
+            feature_stats = stats.get(feature)
+            if not isinstance(feature_stats, dict) or "q01" not in feature_stats or "q99" not in feature_stats:
+                return False
+        return True
+
+    def _run_pi05_quantile_stats_augmentation(self, repo_id: str, dataset_root: Path) -> None:
+        script = """
+from pathlib import Path
+import json
+import numpy as np
+import pandas as pd
+
+dataset_path = Path(__DATASET_PATH__)
+stats_path = dataset_path / "meta" / "stats.json"
+data_root = dataset_path / "data"
+
+stats = json.loads(stats_path.read_text(encoding="utf-8"))
+parquet_paths = sorted(data_root.glob("**/*.parquet"))
+if not parquet_paths:
+    raise RuntimeError(f"No parquet files found under {data_root}")
+
+quantiles = {
+    "q01": 0.01,
+    "q10": 0.10,
+    "q50": 0.50,
+    "q90": 0.90,
+    "q99": 0.99,
+}
+
+def _stack_vector_column(column):
+    rows = []
+    for value in column:
+        arr = np.asarray(value, dtype=np.float32)
+        if arr.ndim == 0:
+            arr = arr.reshape(1)
+        rows.append(arr.reshape(1, -1))
+    if not rows:
+        return None
+    return np.concatenate(rows, axis=0)
+
+updated = []
+for key in ("observation.state", "action"):
+    if key not in stats:
+        continue
+    chunks = []
+    for parquet_path in parquet_paths:
+        try:
+            frame = pd.read_parquet(parquet_path, columns=[key])
+        except Exception:
+            continue
+        if key not in frame:
+            continue
+        values = _stack_vector_column(frame[key].to_numpy())
+        if values is not None:
+            chunks.append(values)
+    if not chunks:
+        raise RuntimeError(f"No vector data found for {key}")
+    data = np.concatenate(chunks, axis=0)
+    feature_stats = dict(stats.get(key) or {})
+    for label, q in quantiles.items():
+        feature_stats[label] = np.quantile(data, q, axis=0).astype(float).tolist()
+    feature_stats["count"] = [int(data.shape[0])]
+    stats[key] = feature_stats
+    updated.append(key)
+
+if not updated:
+    raise RuntimeError("No Pi0.5 state/action stats were updated")
+
+stats_path.write_text(json.dumps(stats, indent=4), encoding="utf-8")
+print("Updated Pi0.5 quantile stats for " + ", ".join(updated))
+"""
+        dataset_path = (Path(dataset_root).resolve() / repo_id).resolve()
+        script = script.replace("__DATASET_PATH__", json.dumps(str(dataset_path)))
+        command = [
+            self.config.conda_executable,
+            "run",
+            "--no-capture-output",
+            "-n",
+            self.config.pi05_conda_env_name,
+            "python",
+            "-c",
+            script,
+        ]
+        hf_home = self.config.pi05_hf_home
+        env = {
+            **os.environ,
+            "HF_HOME": str(hf_home),
+            "HF_HUB_CACHE": str(hf_home / "hub"),
+            "HF_HUB_DISABLE_XET": "1",
+            "PYTHONUNBUFFERED": "1",
+        }
+        cwd = self.config.pi05_repo_root if self.config.pi05_repo_root.exists() else self.config.repo_root
+        try:
+            completed = subprocess.run(
+                command,
+                cwd=str(cwd),
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                env=env,
+                timeout=3600,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise ValueError("Pi0.5 quantile stats augmentation timed out after 3600 seconds.") from exc
+        if completed.returncode != 0:
+            output = (completed.stdout or "").strip()
+            tail = "\n".join(output.splitlines()[-30:])
+            raise ValueError(f"Pi0.5 quantile stats augmentation failed with returncode={completed.returncode}:\n{tail}")
 
     def _pi05_v30_dataset_is_current(self, source_path: Path, converted_path: Path) -> bool:
         if self._lerobot_dataset_codebase_version(converted_path) != "v3.0":
@@ -2638,16 +3004,45 @@ print(json.dumps({"ok": True, "key": key_name}))
         suffix = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         updates: dict[str, Any] = {"resume": False}
         if request.dataset_path:
-            updates["dataset_path"] = f"{request.dataset_path.rstrip('/')}-{suffix}"
+            base_path = self._path_without_generated_suffixes(request.dataset_path)
+            updates["dataset_path"] = f"{base_path.rstrip('/')}-{suffix}"
         else:
             repo_id = request.dataset_repo_id or "local/lerobot-record"
             updates["dataset_repo_id"] = self._dataset_repo_id_with_suffix(repo_id, suffix)
         next_request = request.model_copy(update=updates)
         return next_request, False, f"existing dataset detected; recording to fresh dataset {self._dataset_path_for(next_request)}"
 
-    @staticmethod
-    def _dataset_repo_id_with_suffix(repo_id: str, suffix: str) -> str:
+    @classmethod
+    def _strip_generated_name_suffixes(cls, name: str) -> str:
+        clean = str(name or "").strip()
+        while True:
+            next_name = GENERATED_PATH_SUFFIX_RE.sub("", clean)
+            if next_name == clean:
+                return clean
+            clean = next_name or clean
+
+    @classmethod
+    def _path_without_generated_suffixes(cls, path_value: str) -> str:
+        raw = str(path_value or "").strip().rstrip("/")
+        if not raw:
+            return raw
+        path = Path(raw)
+        base_name = cls._strip_generated_name_suffixes(path.name)
+        if base_name == path.name:
+            return raw
+        return str(path.with_name(base_name))
+
+    @classmethod
+    def _dataset_repo_id_base(cls, repo_id: str) -> str:
         clean = str(repo_id or "local/lerobot-record").strip().strip("/")
+        if "/" not in clean:
+            return cls._strip_generated_name_suffixes(clean)
+        namespace, name = clean.rsplit("/", 1)
+        return f"{namespace}/{cls._strip_generated_name_suffixes(name)}"
+
+    @classmethod
+    def _dataset_repo_id_with_suffix(cls, repo_id: str, suffix: str) -> str:
+        clean = cls._dataset_repo_id_base(repo_id)
         if "/" not in clean:
             return f"{clean}-{suffix}"
         namespace, name = clean.rsplit("/", 1)
@@ -3136,12 +3531,16 @@ finally:
             "conda_env_name": self.config.conda_env_name,
             "available": bool(conda),
             "expected_python": str(Path.home() / "miniconda3" / "envs" / self.config.conda_env_name / "bin" / "python"),
+            "train_video_backend": self.config.train_video_backend,
+            "train_video_backend_fallback": self.config.train_video_backend_fallback,
             "pi05": {
                 "conda_env_name": self.config.pi05_conda_env_name,
                 "repo_root": str(self.config.pi05_repo_root),
                 "hf_home": str(self.config.pi05_hf_home),
                 "hf_hub_cache": str(self.config.pi05_hf_home / "hub"),
                 "base_policy": self.config.pi05_base_policy,
+                "train_video_backend": self.config.pi05_video_backend,
+                "train_video_backend_fallback": self.config.train_video_backend_fallback,
                 "available": (Path.home() / "miniconda3" / "envs" / self.config.pi05_conda_env_name / "bin" / "lerobot-train").exists(),
             },
         }
@@ -3348,6 +3747,18 @@ def _resolve_path(repo_root: Path, value: str) -> Path:
 
 def _bool_arg(value: bool) -> str:
     return "true" if bool(value) else "false"
+
+
+def _safe_int(value: Any, default: int, *, minimum: int | None = None, maximum: int | None = None) -> int:
+    try:
+        result = int(value)
+    except (TypeError, ValueError):
+        result = int(default)
+    if minimum is not None:
+        result = max(int(minimum), result)
+    if maximum is not None:
+        result = min(int(maximum), result)
+    return result
 
 
 def _resolve_profiles(raw_profiles: dict[str, Any]) -> dict[str, dict[str, Any]]:

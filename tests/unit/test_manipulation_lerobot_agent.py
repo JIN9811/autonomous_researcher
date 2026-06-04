@@ -138,7 +138,7 @@ async def test_manipulation_agent_defaults_to_pi05_transfer_after_specimen(tmp_p
     assert result.data["manipulation_report"]["policy_plan"]["policy_type"] == "pi05"
     assert result.data["robot_task_result"]["terminal_pose"] == "standby_clear_of_utm"
     assert "-n" in manipulation["command_preview"]
-    assert manipulation["command_preview"][manipulation["command_preview"].index("-n") + 1] == "lerobot-pi05"
+    assert manipulation["command_preview"][manipulation["command_preview"].index("-n") + 1] == "lerobot-pi05-torch211"
     assert "scripts/lerobot_pi05_rollout_wrapper.py" in " ".join(manipulation["command_preview"])
     assert "--policy.type=pi05" in manipulation["command_preview"]
     assert "--rtc.enabled=true" in manipulation["command_preview"]
