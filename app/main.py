@@ -662,6 +662,7 @@ class LeRobotAPIRequest(BaseModel):
     wandb_mode: str = "disabled"
     train_extra_args: list[str] = Field(default_factory=list)
     fps: int | None = None
+    camera_fps: int | None = None
     teleop_time_s: float | None = None
     warmup_s: float = 2.0
     episode_s: float = 5.0
@@ -675,6 +676,7 @@ class LeRobotAPIRequest(BaseModel):
     rollout_inference_type: str = ""
     rollout_rtc_execution_horizon: int | None = None
     rollout_rtc_max_guidance_weight: float | None = None
+    rollout_action_queue_size_to_get_new_actions: int | None = None
     max_duration_s: float | None = None
     policy_backend: str = "lerobot_cli"
     camera_enabled: bool = False
@@ -8125,6 +8127,7 @@ def _manipulation_profile_from_request(req: ManipulationAgentBridgeRequest) -> d
         "policy_backend": req.policy_backend,
         "device": req.device,
         "fps": req.fps,
+        "camera_fps": req.camera_fps,
         "camera_enabled": req.camera_enabled,
         "display_data": req.display_data,
         "continuous_rollout": req.continuous_rollout,
@@ -8135,6 +8138,7 @@ def _manipulation_profile_from_request(req: ManipulationAgentBridgeRequest) -> d
         "rollout_inference_type": req.rollout_inference_type,
         "rollout_rtc_execution_horizon": req.rollout_rtc_execution_horizon,
         "rollout_rtc_max_guidance_weight": req.rollout_rtc_max_guidance_weight,
+        "rollout_action_queue_size_to_get_new_actions": req.rollout_action_queue_size_to_get_new_actions,
         "max_duration_s": req.max_duration_s,
     }
 
@@ -8169,6 +8173,7 @@ def _manipulation_spec_from_request(req: ManipulationAgentBridgeRequest) -> dict
         "lerobot_device": profile.get("device"),
         "device": profile.get("device"),
         "fps": profile.get("fps"),
+        "camera_fps": profile.get("camera_fps"),
         "camera_enabled": profile.get("camera_enabled"),
         "display_data": profile.get("display_data"),
         "confirm_live_execute": req.confirm_live_execute,
@@ -8182,6 +8187,7 @@ def _manipulation_spec_from_request(req: ManipulationAgentBridgeRequest) -> dict
         "rollout_inference_type": profile.get("rollout_inference_type"),
         "rollout_rtc_execution_horizon": profile.get("rollout_rtc_execution_horizon"),
         "rollout_rtc_max_guidance_weight": profile.get("rollout_rtc_max_guidance_weight"),
+        "rollout_action_queue_size_to_get_new_actions": profile.get("rollout_action_queue_size_to_get_new_actions"),
         "max_duration_s": profile.get("max_duration_s"),
     }
 

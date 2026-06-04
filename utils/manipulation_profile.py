@@ -39,6 +39,7 @@ DEFAULT_MANIPULATION_AGENT_PROFILE: dict[str, Any] = {
     "dataset_repo_id": "jin/3dp_to_utm_pi05_rollout",
     "device": "cuda",
     "fps": 30,
+    "camera_fps": 30,
     "task_id": "transfer_to_utm",
     "skill_id": "transfer_to_utm",
     "source_location": "3dp_output_area",
@@ -53,8 +54,9 @@ DEFAULT_MANIPULATION_AGENT_PROFILE: dict[str, Any] = {
     "rollout_temporal_ensemble": True,
     "rollout_temporal_ensemble_coeff": 0.01,
     "rollout_inference_type": "rtc",
-    "rollout_rtc_execution_horizon": 10,
+    "rollout_rtc_execution_horizon": 20,
     "rollout_rtc_max_guidance_weight": 1.0,
+    "rollout_action_queue_size_to_get_new_actions": 60,
     "max_duration_s": 30.0,
 }
 
@@ -127,6 +129,7 @@ def normalize_manipulation_agent_profile(raw: dict[str, Any] | None) -> dict[str
         profile[key] = _clean_string(profile.get(key), str(DEFAULT_MANIPULATION_AGENT_PROFILE[key]), max_len=max_len)
 
     profile["fps"] = _clean_int(profile.get("fps"), 30, min_value=1, max_value=240)
+    profile["camera_fps"] = _clean_int(profile.get("camera_fps"), 30, min_value=1, max_value=240)
     profile["rollout_max_relative_target"] = _clean_int(
         profile.get("rollout_max_relative_target"),
         5,
@@ -141,10 +144,16 @@ def normalize_manipulation_agent_profile(raw: dict[str, Any] | None) -> dict[str
     )
     profile["rollout_rtc_execution_horizon"] = _clean_int(
         profile.get("rollout_rtc_execution_horizon"),
-        10,
+        20,
         min_value=1,
         max_value=200,
     ) if profile.get("rollout_rtc_execution_horizon") not in (None, "") else None
+    profile["rollout_action_queue_size_to_get_new_actions"] = _clean_int(
+        profile.get("rollout_action_queue_size_to_get_new_actions"),
+        60,
+        min_value=1,
+        max_value=300,
+    ) if profile.get("rollout_action_queue_size_to_get_new_actions") not in (None, "") else None
     profile["rollout_rtc_max_guidance_weight"] = _clean_float(
         profile.get("rollout_rtc_max_guidance_weight"),
         1.0,

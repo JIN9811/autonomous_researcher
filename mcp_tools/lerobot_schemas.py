@@ -109,6 +109,7 @@ class LeRobotSessionRequest(LeRobotBaseRequest):
     wandb_mode: str = "disabled"
     train_extra_args: list[str] = Field(default_factory=list)
     fps: int | None = None
+    camera_fps: int | None = None
     teleop_time_s: float | None = None
     warmup_s: float = 2.0
     episode_s: float = 5.0
@@ -126,6 +127,7 @@ class LeRobotSessionRequest(LeRobotBaseRequest):
     max_duration_s: float | None = None
     rollout_rtc_execution_horizon: int | None = None
     rollout_rtc_max_guidance_weight: float | None = None
+    rollout_action_queue_size_to_get_new_actions: int | None = None
     camera_enabled: bool = False
     display_data: bool = False
     resume: bool = False

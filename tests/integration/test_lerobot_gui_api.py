@@ -41,6 +41,8 @@ def test_lerobot_gui_and_test_mode_api_workflow(tmp_path: Path, monkeypatch: Any
     assert "lerobot-action-status" in page.text
     assert "Batch Size" in page.text
     assert "Additional Train CLI Args" in page.text
+    assert "Resume dataset" in page.text
+    assert "Resume training from checkpoint" in page.text
     assert "Manipulation Agent Bridge" in page.text
     assert "lerobot-manipulation-task-id-input" in page.text
     assert "Pi0.5 RTC Execution Horizon" in page.text
@@ -157,6 +159,9 @@ def test_lerobot_gui_and_test_mode_api_workflow(tmp_path: Path, monkeypatch: Any
             "policy_path": "fake://pi05_policy_saved",
             "rollout_rtc_execution_horizon": 10,
             "rollout_rtc_max_guidance_weight": 1.0,
+            "rollout_action_queue_size_to_get_new_actions": 60,
+            "fps": 60,
+            "camera_fps": 30,
             "max_duration_s": 30,
             "task_instruction": "Saved 3DP to UTM manipulation default",
             "source_location": "3dp_output_area",
@@ -171,6 +176,9 @@ def test_lerobot_gui_and_test_mode_api_workflow(tmp_path: Path, monkeypatch: Any
     assert manipulation_save["profile"]["task_id"] == "transfer_to_utm"
     assert manipulation_save["profile"]["policy_backend"] == "lerobot_cli"
     assert manipulation_save["profile"]["rollout_rtc_execution_horizon"] == 10
+    assert manipulation_save["profile"]["rollout_action_queue_size_to_get_new_actions"] == 60
+    assert manipulation_save["profile"]["fps"] == 60
+    assert manipulation_save["profile"]["camera_fps"] == 30
     assert manipulation_profile_path.exists()
 
     manipulation_test = client.post(
@@ -185,6 +193,9 @@ def test_lerobot_gui_and_test_mode_api_workflow(tmp_path: Path, monkeypatch: Any
             "policy_path": "fake://pi05_policy",
             "rollout_rtc_execution_horizon": 10,
             "rollout_rtc_max_guidance_weight": 1.0,
+            "rollout_action_queue_size_to_get_new_actions": 60,
+            "fps": 60,
+            "camera_fps": 30,
             "max_duration_s": 30,
             "task_instruction": "Test 3DP to UTM manipulation bridge",
             "source_location": "3dp_output_area",
@@ -207,7 +218,9 @@ def test_lerobot_gui_and_test_mode_api_workflow(tmp_path: Path, monkeypatch: Any
     assert manipulation_test["manipulation_report"]["schema"] == "manipulation_report.v1"
     assert manipulation_test["robot_task_result"]["schema"] == "robot_task_result.v1"
     assert manipulation_test["robot_task_result"]["handoff_status"] == "needs_post_place_vision"
-    assert "--policy.type=pi05" in manipulation_test["manipulation"]["command_preview"]
+    assert "--policy.type=pi05" not in manipulation_test["manipulation"]["command_preview"]
+    assert "--fps=60" in manipulation_test["manipulation"]["command_preview"]
+    assert "--action_queue_size_to_get_new_actions=60" in manipulation_test["manipulation"]["command_preview"]
 
     manipulation = client.post(
         "/api/lerobot/manipulation-agent/run",
@@ -221,6 +234,9 @@ def test_lerobot_gui_and_test_mode_api_workflow(tmp_path: Path, monkeypatch: Any
             "policy_path": "fake://pi05_policy",
             "rollout_rtc_execution_horizon": 10,
             "rollout_rtc_max_guidance_weight": 1.0,
+            "rollout_action_queue_size_to_get_new_actions": 60,
+            "fps": 60,
+            "camera_fps": 30,
             "max_duration_s": 30,
             "task_instruction": "Move test specimen from 3DP to UTM",
             "source_location": "3dp_output_area",
@@ -248,13 +264,11 @@ def test_lerobot_gui_and_test_mode_api_workflow(tmp_path: Path, monkeypatch: Any
     assert manipulation["manipulation_report"]["task"]["task_id"] == "transfer_to_utm"
     assert manipulation["manipulation_report"]["policy_plan"]["rtc_execution_horizon"] == 10
     assert manipulation["robot_task_result"]["terminal_pose"] == "standby_clear_of_utm"
-    assert "--policy.type=pi05" in manipulation["manipulation"]["command_preview"]
-    assert any(
-        event.get("type") == "node.completed"
-        and event.get("node_id") == "manipulation"
-        and event.get("payload", {}).get("workspace") == "lerobot"
-        for event in main_module.controller.recent_events()
-    )
+    assert "--policy.type=pi05" not in manipulation["manipulation"]["command_preview"]
+    assert "--fps=60" in manipulation["manipulation"]["command_preview"]
+    assert "--action_queue_size_to_get_new_actions=60" in manipulation["manipulation"]["command_preview"]
+    assert manipulation["state"]["current_experiment_spec"]["rollout_action_queue_size_to_get_new_actions"] == 60
+    assert manipulation["state"]["current_experiment_spec"]["camera_fps"] == 30
 
     sessions = client.get("/api/lerobot/sessions").json()
     assert sessions["ok"] is True

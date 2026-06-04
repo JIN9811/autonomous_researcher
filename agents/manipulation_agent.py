@@ -346,7 +346,10 @@ class ManipulationAgent(BaseAgent):
             or spec.get("rollout_rtc_execution_horizon"),
             "rollout_rtc_max_guidance_weight": spec.get("lerobot_rollout_rtc_max_guidance_weight")
             or spec.get("rollout_rtc_max_guidance_weight"),
+            "rollout_action_queue_size_to_get_new_actions": spec.get("lerobot_rollout_action_queue_size_to_get_new_actions")
+            or spec.get("rollout_action_queue_size_to_get_new_actions"),
             "fps": spec.get("fps") if isinstance(spec.get("fps"), int) else None,
+            "camera_fps": spec.get("camera_fps") if isinstance(spec.get("camera_fps"), int) else None,
             "camera_enabled": self._bool_spec(spec, "camera_enabled", "lerobot_camera_enabled", default=is_pi05),
             "display_data": self._bool_spec(spec, "display_data", "lerobot_display_data", default=False),
             "confirm_live_execute": self._bool_spec(

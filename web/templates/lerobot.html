@@ -95,8 +95,12 @@ Modification guide:
             <select id="lerobot-profile-select"></select>
           </label>
           <label>
-            FPS
-            <input id="lerobot-fps-input" type="number" min="1" value="30" />
+            Control FPS
+            <input id="lerobot-fps-input" type="number" min="1" value="30" title="Policy/control loop fps. Keep camera fps separate when a camera cannot open at this rate." />
+          </label>
+          <label>
+            Camera FPS
+            <input id="lerobot-camera-fps-input" type="number" min="1" value="30" title="OpenCV camera fps. Use 30 for the current top/wrist cameras unless verified otherwise." />
           </label>
           <label>
             Device
@@ -463,6 +467,7 @@ Modification guide:
             </div>
             <div class="lerobot-inline-options">
               <label class="checkbox-line"><input id="lerobot-train-save-checkpoint-input" type="checkbox" checked /> Save checkpoints</label>
+              <label class="checkbox-line"><input id="lerobot-train-resume-input" type="checkbox" /> Resume training from checkpoint</label>
             </div>
           </details>
 
@@ -598,7 +603,7 @@ Modification guide:
             </label>
             <label>
               Rollout Task Instruction
-              <textarea id="lerobot-rollout-instruction-input" rows="3" placeholder="e.g. Pick up the cube and place it in the target area."></textarea>
+              <textarea id="lerobot-rollout-instruction-input" rows="3" placeholder="e.g. Pick up the cube and place it in the target area.">Pick up the cube and put on the metal plate</textarea>
             </label>
             <label>
               Rollout Duration Seconds (optional)
@@ -623,6 +628,18 @@ Modification guide:
                 </span>
                 <input id="lerobot-rollout-temporal-coeff-input" type="number" min="0" step="0.001" value="0.01" title="LeRobot policy.temporal_ensemble_coeff; enables policy.n_action_steps=1" />
               </span>
+            </label>
+            <label>
+              Pi0.5 RTC Execution Horizon
+              <input id="lerobot-rollout-rtc-horizon-input" type="number" min="1" max="200" step="1" value="20" title="Pi0.5 RTC execution horizon. Higher values help when inference latency is high." />
+            </label>
+            <label>
+              Pi0.5 RTC Guidance Weight
+              <input id="lerobot-rollout-rtc-guidance-input" type="number" min="0" max="20" step="0.1" value="1.0" title="Pi0.5 RTC max guidance weight." />
+            </label>
+            <label>
+              Pi0.5 Action Queue Refresh Threshold
+              <input id="lerobot-rollout-action-queue-input" type="number" min="1" max="300" step="1" value="60" title="action_queue_size_to_get_new_actions. Must be larger than inference delay plus RTC horizon." />
             </label>
             <label>
               Observation / Note JSON
@@ -690,12 +707,12 @@ Modification guide:
               <input id="lerobot-manipulation-max-duration-input" type="number" min="1" step="1" value="30" />
             </label>
             <label>
-              Pi0.5 RTC Execution Horizon
-              <input id="lerobot-manipulation-rtc-horizon-input" type="number" min="1" max="200" step="1" value="10" />
+              Agent RTC Execution Horizon
+              <input id="lerobot-manipulation-rtc-horizon-input" type="number" min="1" max="200" step="1" value="20" title="Saved fallback. Runtime uses the Rollout panel horizon when present." />
             </label>
             <label>
-              Pi0.5 RTC Max Guidance Weight
-              <input id="lerobot-manipulation-rtc-guidance-input" type="number" min="0" max="20" step="0.1" value="1.0" />
+              Agent RTC Max Guidance Weight
+              <input id="lerobot-manipulation-rtc-guidance-input" type="number" min="0" max="20" step="0.1" value="1.0" title="Saved fallback. Runtime uses the Rollout panel guidance weight when present." />
             </label>
             <label>
               Specimen ID
@@ -769,6 +786,6 @@ Modification guide:
         </article>
       </section>
     </main>
-    <script src="/static/lerobot.js?v=20260603-lerobot-piper-1" defer></script>
+    <script src="/static/lerobot.js?v=20260605-train-reconnect-progress-2" defer></script>
   </body>
 </html>

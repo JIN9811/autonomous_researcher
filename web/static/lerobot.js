@@ -22,10 +22,12 @@ Modification guide:
 */
 
 const $ = (id) => document.getElementById(id);
+const DEFAULT_PI05_ROLLOUT_TASK = "Pick up the cube and put on the metal plate";
 
 const profileSelect = $("lerobot-profile-select");
 const modeSelect = $("lerobot-mode-select");
 const fpsInput = $("lerobot-fps-input");
+const cameraFpsInput = $("lerobot-camera-fps-input");
 const deviceInput = $("lerobot-device-input");
 const confirmLiveInput = $("lerobot-confirm-live-input");
 const taskInput = $("lerobot-task-input");
@@ -43,6 +45,7 @@ const ttsHelpPopover = $("lerobot-tts-help-popover");
 const teleopTimeInput = $("lerobot-teleop-time-input");
 const displayDataInput = $("lerobot-display-data-input");
 const resumeInput = $("lerobot-resume-input");
+const trainResumeInput = $("lerobot-train-resume-input");
 const pushHubInput = $("lerobot-push-hub-input");
 const policyTypeInput = $("lerobot-policy-type-input");
 const outputDirInput = $("lerobot-output-dir-input");
@@ -54,6 +57,9 @@ const rolloutActionClampInput = $("lerobot-rollout-action-clamp-input");
 const rolloutMaxRelativeTargetInput = $("lerobot-rollout-max-relative-target-input");
 const rolloutTemporalEnsembleInput = $("lerobot-rollout-temporal-ensemble-input");
 const rolloutTemporalCoeffInput = $("lerobot-rollout-temporal-coeff-input");
+const rolloutRtcHorizonInput = $("lerobot-rollout-rtc-horizon-input");
+const rolloutRtcGuidanceInput = $("lerobot-rollout-rtc-guidance-input");
+const rolloutActionQueueInput = $("lerobot-rollout-action-queue-input");
 const manipulationTaskIdInput = $("lerobot-manipulation-task-id-input");
 const manipulationStrategyInput = $("lerobot-manipulation-strategy-input");
 const manipulationPolicyBackendInput = $("lerobot-manipulation-policy-backend-input");
@@ -149,6 +155,7 @@ let lastPortCandidates = [];
 let lastConfigData = null;
 let extraCameraKeys = [];
 let trainStatusTimer = null;
+let rolloutStatusTimer = null;
 let manipulationProfileLoaded = false;
 
 function setStatusDot(el, state) {
@@ -428,7 +435,18 @@ function browseSelectionValue(path) {
   if (lastBrowseOptions && typeof lastBrowseOptions.valueTransform === "function") {
     return lastBrowseOptions.valueTransform(path);
   }
-  return path;
+  return path || "";
+}
+
+function placeBrowserNearTarget() {
+  if (!browserEl || !lastBrowseTargetInput) return;
+  const label = lastBrowseTargetInput.closest("label");
+  if (label && label.parentNode) {
+    label.parentNode.insertBefore(browserEl, label.nextSibling);
+    return;
+  }
+  const row = lastBrowseTargetInput.closest(".input-action-row");
+  if (row && row.parentNode) row.parentNode.insertBefore(browserEl, row.nextSibling);
 }
 
 function syncFieldsFromWorkflowResponse(data) {
@@ -461,6 +479,12 @@ function policyFields(inputEl = policyInput) {
 
 function rolloutPolicyFields() {
   return policyFields(rolloutPolicyInput || policyInput);
+}
+
+function manipulationPolicyFields() {
+  if (manipulationPolicyInput && manipulationPolicyInput.value.trim()) return policyFields(manipulationPolicyInput);
+  if (rolloutPolicyInput && rolloutPolicyInput.value.trim()) return policyFields(rolloutPolicyInput);
+  return policyFields(policyInput);
 }
 
 function parseJsonText(inputEl, fallback = {}) {
@@ -522,6 +546,7 @@ function basePayload(overrides = {}) {
     wandb_mode: trainWandbModeInput ? trainWandbModeInput.value || "" : "",
     train_extra_args: trainExtraArgs(),
     fps: numberValue(fpsInput, 30),
+    camera_fps: numberValue(cameraFpsInput, 30),
     warmup_s: 2,
     episode_s: numberValue(episodeTimeInput, 60),
     reset_s: numberValue(resetTimeInput, 30),
@@ -530,7 +555,7 @@ function basePayload(overrides = {}) {
     tts_rate: numberValue(ttsRateInput, -35),
     display_data: boolValue(displayDataInput),
     camera_enabled: true,
-    resume: boolValue(resumeInput),
+    resume: false,
     push_to_hub: boolValue(pushHubInput),
     confirm_live_execute: boolValue(confirmLiveInput),
     episode_index: numberValue(episodeIndexInput, 0),
@@ -557,7 +582,7 @@ function rolloutPayload(overrides = {}) {
   payload.policy_repo_id = policy.policy_path ? "" : policy.policy_repo_id;
   payload.task_instruction = rolloutInstructionInput && rolloutInstructionInput.value.trim()
     ? rolloutInstructionInput.value.trim()
-    : payload.task_instruction;
+    : DEFAULT_PI05_ROLLOUT_TASK;
   const rolloutDurationRaw = rolloutDurationInput && rolloutDurationInput.value.trim()
     ? rolloutDurationInput.value.trim()
     : "";
@@ -573,6 +598,10 @@ function rolloutPayload(overrides = {}) {
   payload.rollout_max_relative_target = numberValue(rolloutMaxRelativeTargetInput, 5);
   payload.rollout_temporal_ensemble = rolloutTemporalEnsembleInput ? boolValue(rolloutTemporalEnsembleInput) : true;
   payload.rollout_temporal_ensemble_coeff = numberValue(rolloutTemporalCoeffInput, 0.01);
+  payload.rollout_inference_type = policyTypeInput && policyTypeInput.value === "pi05" ? "rtc" : "";
+  payload.rollout_rtc_execution_horizon = numberValue(rolloutRtcHorizonInput, 20);
+  payload.rollout_rtc_max_guidance_weight = numberValue(rolloutRtcGuidanceInput, 1.0);
+  payload.rollout_action_queue_size_to_get_new_actions = numberValue(rolloutActionQueueInput, 60);
   return payload;
 }
 
@@ -619,10 +648,15 @@ function manipulationDefaultInstruction(taskId, specimenId, sourceLocation, targ
 
 function manipulationAgentPayload(overrides = {}) {
   const payload = rolloutPayload(overrides);
-  const policy = policyFields(manipulationPolicyInput || rolloutPolicyInput || policyInput);
+  const policy = manipulationPolicyFields();
   const taskId = selectedManipulationTaskId();
   const preset = MANIPULATION_TASK_PRESETS[taskId] || MANIPULATION_TASK_PRESETS.transfer_to_utm;
-  const policyType = manipulationPolicyTypeInput ? manipulationPolicyTypeInput.value || "pi05" : "pi05";
+  const policyType = policyTypeInput && policyTypeInput.value
+    ? policyTypeInput.value
+    : manipulationPolicyTypeInput && manipulationPolicyTypeInput.value
+      ? manipulationPolicyTypeInput.value
+      : "pi05";
+  if (manipulationPolicyTypeInput) manipulationPolicyTypeInput.value = policyType;
   const strategy = manipulationStrategyInput ? manipulationStrategyInput.value || "pi05_lerobot_policy" : "pi05_lerobot_policy";
   const specimenId = manipulationSpecimenIdInput ? manipulationSpecimenIdInput.value.trim() || "manual-specimen" : "manual-specimen";
   const candidateId = manipulationCandidateIdInput ? manipulationCandidateIdInput.value.trim() || "manual-candidate" : "manual-candidate";
@@ -638,8 +672,15 @@ function manipulationAgentPayload(overrides = {}) {
   payload.skill_id = taskId;
   payload.policy_backend = manipulationPolicyBackendInput ? manipulationPolicyBackendInput.value || "lerobot_cli" : "lerobot_cli";
   payload.max_duration_s = numberValue(manipulationMaxDurationInput, 30);
-  payload.rollout_rtc_execution_horizon = numberValue(manipulationRtcHorizonInput, 10);
-  payload.rollout_rtc_max_guidance_weight = numberValue(manipulationRtcGuidanceInput, 1.0);
+  payload.fps = numberValue(fpsInput, 30);
+  payload.camera_fps = numberValue(cameraFpsInput, 30);
+  payload.rollout_action_clamp = rolloutActionClampInput ? boolValue(rolloutActionClampInput) : true;
+  payload.rollout_max_relative_target = numberValue(rolloutMaxRelativeTargetInput, 5);
+  payload.rollout_temporal_ensemble = rolloutTemporalEnsembleInput ? boolValue(rolloutTemporalEnsembleInput) : true;
+  payload.rollout_temporal_ensemble_coeff = numberValue(rolloutTemporalCoeffInput, 0.01);
+  payload.rollout_rtc_execution_horizon = numberValue(rolloutRtcHorizonInput, numberValue(manipulationRtcHorizonInput, 20));
+  payload.rollout_rtc_max_guidance_weight = numberValue(rolloutRtcGuidanceInput, numberValue(manipulationRtcGuidanceInput, 1.0));
+  payload.rollout_action_queue_size_to_get_new_actions = numberValue(rolloutActionQueueInput, 60);
   payload.task_instruction = manipulationTaskInput && manipulationTaskInput.value.trim()
     ? manipulationTaskInput.value.trim()
     : manipulationDefaultInstruction(taskId, specimenId, sourceLocation, targetLocation);
@@ -696,6 +737,7 @@ function applyManipulationProfile(profile, force = false) {
   setCheckboxValue(manipulationContinuousInput, profile.continuous_rollout);
   if (deviceInput && profile.device) deviceInput.value = profile.device;
   if (fpsInput && profile.fps) fpsInput.value = String(profile.fps);
+  if (cameraFpsInput && profile.camera_fps) cameraFpsInput.value = String(profile.camera_fps);
   if (rolloutActionClampInput && profile.rollout_action_clamp !== undefined) {
     rolloutActionClampInput.checked = Boolean(profile.rollout_action_clamp);
   }
@@ -719,6 +761,14 @@ async function refreshManipulationProfile({ force = false } = {}) {
   } catch (err) {
     return { ok: false, error: String(err) };
   }
+}
+
+function recordPayload(overrides = {}) {
+  return basePayload({ resume: boolValue(resumeInput), ...overrides });
+}
+
+function trainPayload(overrides = {}) {
+  return basePayload({ resume: boolValue(trainResumeInput), ...overrides });
 }
 
 function visualizationPayload(overrides = {}) {
@@ -825,7 +875,7 @@ function renderSessions(sessions) {
     row.className = "list-item lerobot-session-row";
     row.innerHTML = `
       <span>${session.workflow || "workflow"} · ${session.session_id || "session"}</span>
-      <span class="state-pill">${session.status || "unknown"}</span>
+      <span class="state-pill">${session.runtime_phase || session.status || "unknown"}</span>
     `;
     row.addEventListener("click", () => renderResult("session", session));
     sessionListEl.appendChild(row);
@@ -995,12 +1045,18 @@ function actionSummary(data) {
     const recovery = alert.recovery_hint ? ` · ${alert.recovery_hint}` : "";
     return `${severity} · ${target} · ${reason}${recovery}`;
   }
-  if (data.failure_code) return `${data.failure_code}: ${data.message || data.error || data.status || "failed"}`;
-  if (data.error) return String(data.error);
-  if (data.training) {
-    const t = data.training;
+  if (data.training || data.workflow === "train") {
+    const t = normalizedTrainingProgress(data) || data.training || {};
     return `${data.status || "training"} · ${t.current_step || 0}/${t.total_steps || "?"} · ${Number(t.progress_percent || 0).toFixed(1)}%`;
   }
+  if (data.runtime) {
+    const rt = data.runtime;
+    const count = rt.action_count ? ` · actions=${rt.action_count}` : "";
+    const delta = rt.max_abs_delta !== null && rt.max_abs_delta !== undefined ? ` · max_delta=${Number(rt.max_abs_delta).toFixed(3)}` : "";
+    return `${data.status || "runtime"} · ${rt.phase || "RUNNING"} · ${rt.message || "runtime active"}${count}${delta}`;
+  }
+  if (data.failure_code) return `${data.failure_code}: ${data.message || data.error || data.status || "failed"}`;
+  if (data.error) return String(data.error);
   if (data.status) return String(data.status);
   if (data.step_trace && data.step_trace.length) {
     const step = data.step_trace[data.step_trace.length - 1];
@@ -1033,8 +1089,77 @@ function formatDuration(seconds) {
   return `${s}s`;
 }
 
-function trainingProgressHtml(data) {
+function runtimeStatusHtml(data) {
+  if (data && data.workflow === "train") return "";
+  const rt = data && data.runtime ? data.runtime : null;
+  if (!rt) return "";
+  const warnings = Array.isArray(rt.warnings) && rt.warnings.length
+    ? `<div class="lerobot-runtime-warnings">${rt.warnings.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>`
+    : "";
+  const count = rt.action_count ? `${rt.action_count} actions` : "no action yet";
+  const delta = rt.max_abs_delta !== null && rt.max_abs_delta !== undefined ? `max delta ${Number(rt.max_abs_delta).toFixed(3)}` : "delta pending";
+  return `
+    <div class="lerobot-runtime-status">
+      <div><strong>${escapeHtml(rt.phase || "RUNTIME")}</strong><span>${escapeHtml(rt.message || "runtime status pending")}</span></div>
+      <small>${escapeHtml(count)} · ${escapeHtml(delta)} · pid=${escapeHtml(rt.pid || "-")}</small>
+      ${warnings}
+    </div>
+  `;
+}
+
+function parseTrainingCount(value, suffix = "") {
+  const numeric = Number(value || 0);
+  if (!Number.isFinite(numeric)) return 0;
+  const cleanSuffix = String(suffix || "").toLowerCase();
+  const multiplier = cleanSuffix === "m" ? 1000000 : cleanSuffix === "k" ? 1000 : 1;
+  return Math.round(numeric * multiplier);
+}
+
+function parseTrainingLogProgress(data, training) {
+  const log = String((data && data.log_tail) || "");
+  const countPattern = "(\\d{1,9}(?:\\.\\d+)?)([kKmM]?)";
+  let current = Number(training.current_step || 0);
+  let total = Number(training.total_steps || 0);
+  let samples = 0;
+  let lastLoss = training.last_loss;
+
+  for (const line of log.split("\n")) {
+    if (!line.includes("cfg.steps")) {
+      const stepMatch = line.match(new RegExp(`\\b(?:step|global_step)\\s*[=:]\\s*${countPattern}`, "i"));
+      if (stepMatch) current = Math.max(current, parseTrainingCount(stepMatch[1], stepMatch[2]));
+    }
+    const sampleMatch = line.match(new RegExp(`\\b(?:smpl|samples|sample)\\s*[=:]\\s*${countPattern}`, "i"));
+    if (sampleMatch) samples = Math.max(samples, parseTrainingCount(sampleMatch[1], sampleMatch[2]));
+    const lossMatch = line.match(/\b(?:loss|train_loss|l1_loss)\s*[=:]\s*([0-9]+(?:\.[0-9]+)?(?:e[-+]?\d+)?)/i);
+    if (lossMatch) lastLoss = Number(lossMatch[1]);
+  }
+
+  const batchSize = Number((training.config && training.config.batch_size) || training.batch_size || 0);
+  if (samples > 0 && batchSize > 0) current = Math.max(current, Math.floor(samples / batchSize));
+  const elapsed = Number(training.elapsed_sec || 0);
+  const rate = current > 0 && elapsed > 0 ? current / elapsed : Number(training.steps_per_sec || 0);
+  const eta = rate > 0 && total > 0 && current < total ? (total - current) / rate : training.eta_sec;
+  const percent = total > 0 ? Math.max(0, Math.min(100, (current / total) * 100)) : Number(training.progress_percent || 0);
+
+  return {
+    ...training,
+    current_step: current,
+    total_steps: total,
+    progress_percent: percent,
+    eta_sec: eta,
+    steps_per_sec: rate,
+    last_loss: Number.isFinite(lastLoss) ? lastLoss : training.last_loss,
+  };
+}
+
+function normalizedTrainingProgress(data) {
   const training = data && data.training ? data.training : null;
+  if (!training) return null;
+  return parseTrainingLogProgress(data, training);
+}
+
+function trainingProgressHtml(data) {
+  const training = normalizedTrainingProgress(data);
   if (!training) return "";
   const current = Number(training.current_step || 0);
   const total = Number(training.total_steps || 0);
@@ -1053,7 +1178,7 @@ function trainingProgressHtml(data) {
 }
 
 function renderTrainingProgress(data) {
-  const training = data && data.training ? data.training : null;
+  const training = normalizedTrainingProgress(data);
   if (!training || !trainProgressEl) return;
   trainProgressEl.classList.remove("hidden");
   const percent = Math.max(0, Math.min(100, Number(training.progress_percent || 0)));
@@ -1076,17 +1201,49 @@ function trainIsActive(data) {
   return !terminal.has(status) && (data.returncode === undefined || data.returncode === null);
 }
 
+function inferActionWorkflow(label = "", data = null) {
+  const parts = [
+    label,
+    data && data.workflow,
+    data && data.tool,
+    data && data.session_id,
+    data && data.status,
+    data && data.failure_code,
+    data && data.message,
+    data && data.error,
+    data && data.runtime && data.runtime.message,
+    data && data.log_tail,
+  ].filter(Boolean).map((item) => String(item).toLowerCase());
+  const text = parts.join(" ");
+  if (text.includes("rollout") || text.includes("inference")) return "rollout";
+  if (text.includes("train") || text.includes("training")) return "train";
+  if (text.includes("record")) return "record";
+  if (text.includes("teleoperate") || text.includes("teleop")) return "teleoperate";
+  return "";
+}
+
+function expectedWorkflowForStatusTarget(el) {
+  if (!el || !el.id) return "";
+  if (el.id === "lerobot-train-action-status") return "train";
+  if (el.id === "lerobot-rollout-action-status") return "rollout";
+  return "";
+}
+
 function setActionStatus(target, state, label, data = null) {
   if (!target) return;
   const el = typeof target === "string" ? $(target) : target;
   if (!el) return;
+  const expectedWorkflow = expectedWorkflowForStatusTarget(el);
+  const actualWorkflow = inferActionWorkflow(label, data);
+  if (expectedWorkflow && actualWorkflow && expectedWorkflow !== actualWorkflow) return;
   const normalized = state || "idle";
   const prefix = normalized === "ok" ? "OK" : normalized === "error" ? "ERROR" : normalized === "running" ? "RUNNING" : "IDLE";
   const logTail = compactLogTail(data);
   const progressHtml = trainingProgressHtml(data);
+  const runtimeHtml = runtimeStatusHtml(data);
   const logHtml = logTail ? `<pre class="lerobot-inline-log">${escapeHtml(logTail)}</pre>` : "";
   el.className = `lerobot-action-status ${normalized}`;
-  el.innerHTML = `<strong>${prefix}</strong><span>${escapeHtml(label || "action")}</span><small>${escapeHtml(actionSummary(data))}</small>${progressHtml}${logHtml}`;
+  el.innerHTML = `<strong>${prefix}</strong><span>${escapeHtml(label || "action")}</span><small>${escapeHtml(actionSummary(data))}</small>${runtimeHtml}${progressHtml}${logHtml}`;
 }
 
 function normalizeCameraKey(value) {
@@ -1217,6 +1374,17 @@ function renderConfig(data) {
   }
   renderDeviceMemory(data);
   renderSessions(data.sessions || []);
+  restoreActiveTrainingStatus(data.sessions || []);
+}
+
+function restoreActiveTrainingStatus(sessions) {
+  const activeTrain = (Array.isArray(sessions) ? sessions : []).find((session) => session && session.workflow === "train" && isActiveSession(session));
+  if (!activeTrain) return;
+  rememberWorkflowSession(activeTrain);
+  renderTrainingProgress(activeTrain);
+  const target = $("lerobot-train-action-status");
+  setActionStatus(target, "running", "train status", activeTrain);
+  startTrainStatusPolling();
 }
 
 async function refreshConfig() {
@@ -1250,23 +1418,76 @@ async function refreshPolicies() {
       const opt = document.createElement("option");
       opt.value = policy.value || policy.path || policy.repo_id || "";
       opt.textContent = `${policy.label || opt.value || "manual"} · ${policy.source || "policy"}`;
+      opt.dataset.policyType = policy.policy_type || "";
       policySelect.appendChild(opt);
     }
     if (policies.some((p) => (p.value || p.path || p.repo_id || "") === prior)) policySelect.value = prior;
   }
   if (policyListEl) {
-    policyListEl.innerHTML = policies.slice(0, 12).map((p) => `<button class="btn mini policy-chip" data-policy="${p.value || p.path || p.repo_id || ""}">${p.label || p.value || "policy"}</button>`).join("");
-    for (const button of policyListEl.querySelectorAll(".policy-chip")) {
+    const displayPolicies = policies.slice().sort((a, b) => policySortRank(a) - policySortRank(b));
+    policyListEl.innerHTML = displayPolicies.slice(0, 12).map((p) => {
+      const value = p.value || p.path || p.repo_id || "";
+      const label = p.label || value || "policy";
+      const source = p.source || "policy";
+      const policyType = p.policy_type || inferPolicyTypeFromPolicy(value, label);
+      return `
+        <div class="lerobot-policy-chip" data-policy="${escapeHtml(value)}" data-policy-type="${escapeHtml(policyType)}">
+          <div class="lerobot-policy-chip-text">
+            <strong>${escapeHtml(label)}</strong>
+            <span>${escapeHtml(source)}${policyType ? ` · ${escapeHtml(policyType)}` : ""}</span>
+          </div>
+          <button class="btn mini policy-chip-select" type="button" data-policy="${escapeHtml(value)}" data-policy-type="${escapeHtml(policyType)}" ${value ? "" : "disabled"}>Select</button>
+        </div>
+      `;
+    }).join("");
+    for (const button of policyListEl.querySelectorAll(".policy-chip-select")) {
       button.addEventListener("click", () => {
-        if (policyInput) policyInput.value = button.dataset.policy || "";
-        if (rolloutPolicyInput) rolloutPolicyInput.value = button.dataset.policy || "";
-        if (trainSourcePolicyInput) trainSourcePolicyInput.value = button.dataset.policy || "";
-        if (policySelect) policySelect.value = button.dataset.policy || "";
+        applyPolicySelection(button.dataset.policy || "", button.dataset.policyType || "");
+        setActionStatus("lerobot-train-action-status", "ok", "policy selected", { policy_path: button.dataset.policy || "" });
       });
     }
   }
   return data;
 }
+
+function inferPolicyTypeFromPolicy(value = "", label = "") {
+  const text = `${value} ${label}`.toLowerCase();
+  if (text.includes("pi0fast")) return "pi0fast";
+  if (text.includes("pi05") || text.includes("pi0.5")) return "pi05";
+  if (text.includes("pi0_base") || text.includes("/pi0") || text.includes(" pi0")) return "pi0";
+  if (text.includes("act")) return "act";
+  return "";
+}
+
+function policySortRank(policy) {
+  const source = String(policy.source || "").toLowerCase();
+  const value = policy.value || policy.path || policy.repo_id || "";
+  if (source === "local" && value) return 0;
+  if (source === "huggingface" && value) return 1;
+  if (value) return 2;
+  return 3;
+}
+
+function applyPolicySelection(value, policyType = "") {
+  const clean = String(value || "").trim();
+  const selectedOption = policySelect
+    ? Array.from(policySelect.options || []).find((opt) => opt.value === clean)
+    : null;
+  const inferredPolicyType = String(
+    policyType
+    || (selectedOption && selectedOption.dataset.policyType)
+    || inferPolicyTypeFromPolicy(clean, selectedOption ? selectedOption.textContent : ""),
+  ).trim();
+  if (policyInput) policyInput.value = clean;
+  if (rolloutPolicyInput) rolloutPolicyInput.value = clean;
+  if (trainSourcePolicyInput) trainSourcePolicyInput.value = clean;
+  if (manipulationPolicyInput && !manipulationPolicyInput.value.trim()) manipulationPolicyInput.value = clean;
+  if (policySelect) policySelect.value = clean;
+  if (inferredPolicyType && policyTypeInput) policyTypeInput.value = inferredPolicyType;
+  if (inferredPolicyType && manipulationPolicyTypeInput) manipulationPolicyTypeInput.value = inferredPolicyType;
+  return clean;
+}
+
 
 async function useLatestLocalPolicy(statusTarget = null) {
   setActionStatus(statusTarget, "running", "use latest policy", { status: "refreshing local policies" });
@@ -1277,10 +1498,9 @@ async function useLatestLocalPolicy(statusTarget = null) {
     return null;
   }
   const value = local.path || local.value || "";
-  if (rolloutPolicyInput) rolloutPolicyInput.value = value;
-  if (policyInput) policyInput.value = value;
-  if (policySelect) policySelect.value = value;
-  setActionStatus(statusTarget, "ok", "use latest policy", { policy_path: value, label: local.label });
+  const policyType = local.policy_type || inferPolicyTypeFromPolicy(value, local.label || "");
+  applyPolicySelection(value, policyType);
+  setActionStatus(statusTarget, "ok", "use latest policy", { policy_path: value, label: local.label, policy_type: policyType });
   return local;
 }
 
@@ -1292,7 +1512,6 @@ async function runAction(label, url, payload = null, statusTarget = null, timeou
     renderResult(label, data);
     setActionStatus(statusTarget, data && data.ok ? "ok" : "error", label, data);
     syncFieldsFromWorkflowResponse(data);
-    handleTrainProgressResponse(data, statusTarget);
     await refreshConfig();
     return data;
   } catch (err) {
@@ -1303,23 +1522,81 @@ async function runAction(label, url, payload = null, statusTarget = null, timeou
   }
 }
 
-function handleTrainProgressResponse(data, statusTarget = null) {
+async function runTrainAction(label, url, payload = null, timeoutMs = 30000) {
+  const statusTarget = $("lerobot-train-action-status");
+  renderResult(`${label} running`, { ok: true, workflow: "train", status: "request_sent" });
+  setActionStatus(statusTarget, "running", label, { status: "request sent", workflow: "train" });
+  try {
+    const data = await postJson(url, payload || trainPayload(), timeoutMs);
+    renderResult(label, data);
+    if (data && data.workflow && data.workflow !== "train") {
+      setActionStatus(statusTarget, "error", label, {
+        status: "workflow_mismatch",
+        error: `Expected train response, received ${data.workflow}.`,
+      });
+      return data;
+    }
+    setActionStatus(statusTarget, data && data.ok ? "ok" : "error", label, data);
+    syncFieldsFromWorkflowResponse(data);
+    handleTrainProgressResponse(data);
+    await refreshConfig();
+    return data;
+  } catch (err) {
+    const error = { ok: false, workflow: "train", status: "request_failed", error: String(err) };
+    renderResult(label, error);
+    setActionStatus(statusTarget, "error", label, error);
+    return error;
+  }
+}
+
+async function runRolloutAction(label, url, payload = null, timeoutMs = 30000) {
+  const statusTarget = $("lerobot-rollout-action-status");
+  renderResult(`${label} running`, { ok: true, workflow: "rollout", status: "request_sent" });
+  setActionStatus(statusTarget, "running", label, { status: "request sent", workflow: "rollout" });
+  try {
+    const data = await postJson(url, payload || rolloutPayload(), timeoutMs);
+    renderResult(label, data);
+    if (data && data.workflow && data.workflow !== "rollout") {
+      setActionStatus(statusTarget, "error", label, {
+        status: "workflow_mismatch",
+        error: `Expected rollout response, received ${data.workflow}.`,
+      });
+      return data;
+    }
+    setActionStatus(statusTarget, data && data.ok ? "ok" : "error", label, data);
+    syncFieldsFromWorkflowResponse(data);
+    handleRolloutProgressResponse(data);
+    await refreshConfig();
+    return data;
+  } catch (err) {
+    const error = { ok: false, workflow: "rollout", status: "request_failed", error: String(err) };
+    renderResult(label, error);
+    setActionStatus(statusTarget, "error", label, error);
+    return error;
+  }
+}
+
+function handleTrainProgressResponse(data) {
   if (!data || data.workflow !== "train") return;
   renderTrainingProgress(data);
   if (trainIsActive(data)) {
-    startTrainStatusPolling(statusTarget || $("lerobot-train-action-status"));
+    startTrainStatusPolling();
   } else {
     stopTrainStatusPolling();
   }
 }
 
-function startTrainStatusPolling(statusTarget = null) {
+function startTrainStatusPolling() {
   stopTrainStatusPolling();
-  const target = statusTarget || $("lerobot-train-action-status");
+  const target = $("lerobot-train-action-status");
   trainStatusTimer = window.setInterval(async () => {
     try {
       const data = await postJson("/api/lerobot/train/status", sessionPayload("train"));
       renderResult("train status", data);
+      if (data && data.workflow && data.workflow !== "train") {
+        stopTrainStatusPolling();
+        return;
+      }
       setActionStatus(target, data && data.ok ? "ok" : "error", "train status", data);
       renderTrainingProgress(data);
       if (!trainIsActive(data)) {
@@ -1340,6 +1617,53 @@ function stopTrainStatusPolling() {
   }
 }
 
+function rolloutIsActive(data) {
+  if (!data || data.workflow !== "rollout") return false;
+  const status = String(data.status || "").toUpperCase();
+  const terminal = new Set(["STOPPED", "FAILED", "COMPLETED", "CANCELLED"]);
+  return !terminal.has(status) && (data.returncode === undefined || data.returncode === null);
+}
+
+function handleRolloutProgressResponse(data) {
+  if (!data || data.workflow !== "rollout") return;
+  if (rolloutIsActive(data)) {
+    startRolloutStatusPolling(data.session_id || "");
+  } else {
+    stopRolloutStatusPolling();
+  }
+}
+
+function startRolloutStatusPolling(sessionId = "") {
+  stopRolloutStatusPolling();
+  const target = $("lerobot-rollout-action-status");
+  rolloutStatusTimer = window.setInterval(async () => {
+    try {
+      const payload = sessionPayload("rollout", sessionId ? { session_id: sessionId } : {});
+      const data = await postJson("/api/lerobot/rollout/status", payload);
+      renderResult("rollout status", data);
+      if (data && data.workflow && data.workflow !== "rollout") {
+        stopRolloutStatusPolling();
+        return;
+      }
+      setActionStatus(target, data && data.ok ? "ok" : "error", "rollout status", data);
+      if (!rolloutIsActive(data)) {
+        stopRolloutStatusPolling();
+        await refreshConfig();
+      }
+    } catch (err) {
+      setActionStatus(target, "error", "rollout status", { error: String(err) });
+      stopRolloutStatusPolling();
+    }
+  }, 3000);
+}
+
+function stopRolloutStatusPolling() {
+  if (rolloutStatusTimer) {
+    window.clearInterval(rolloutStatusTimer);
+    rolloutStatusTimer = null;
+  }
+}
+
 function sessionPayload(workflow, overrides = {}) {
   return basePayload({ session_id: lastSessionByWorkflow[workflow] || "", ...overrides });
 }
@@ -1354,12 +1678,11 @@ function renderBrowser(data) {
       <strong>${escapeHtml(entry.name)}</strong>
     </button>
   `).join("");
-  const canUseCurrent = lastBrowseTargetInput && (lastBrowseOptions.select || "directory") !== "file";
+  const canUseCurrent = Boolean(lastBrowseTargetInput) && ((lastBrowseOptions.select || "directory") !== "file" || lastBrowseKind === "policy");
   browserEl.innerHTML = `
     <div class="browser-head">
       <button class="btn mini" id="btn-browser-parent">Parent</button>
-      ${canUseCurrent ? `<button class="btn mini primary" id="btn-browser-use-current">Use current folder</button>` : ""}
-      <button class="btn mini" id="btn-browser-native">Native picker</button>
+      ${canUseCurrent ? `<button class="btn mini primary" id="btn-browser-use-current">Use current path</button>` : ""}
       <button class="btn mini" id="btn-browser-refresh">Refresh</button>
       <button class="btn mini danger" id="btn-browser-close">Close</button>
       <code>${escapeHtml(data.path || "")}</code>
@@ -1375,8 +1698,6 @@ function renderBrowser(data) {
       browserEl.classList.add("hidden");
     });
   }
-  const nativeBtn = $("btn-browser-native");
-  if (nativeBtn) nativeBtn.addEventListener("click", () => openNativePathPicker(data.path || ""));
   const refreshBtn = $("btn-browser-refresh");
   if (refreshBtn) {
     refreshBtn.addEventListener("click", async () => {
@@ -1400,6 +1721,7 @@ function renderBrowser(data) {
         browsePath(lastBrowseKind, path, lastBrowseTargetInput, lastBrowseOptions);
       } else if (lastBrowseTargetInput) {
         lastBrowseTargetInput.value = browseSelectionValue(path);
+        browserEl.classList.add("hidden");
       }
     });
   }
@@ -1494,11 +1816,34 @@ async function browsePath(kind, path = "", targetInput = null, options = {}) {
   lastBrowseKind = kind || "any";
   lastBrowseTargetInput = targetInput;
   lastBrowseOptions = { include_files: true, select: "directory", ...options };
+  if (browserEl) browserEl.classList.add("hidden");
+
+  try {
+    const picked = await openNativePathPicker(path || "");
+    const pickerStatus = String((picked && (picked.status || picked.failure_code)) || "").toLowerCase();
+    if (picked && (picked.ok || pickerStatus.includes("cancel"))) return picked;
+  } catch (err) {
+    renderResult("native path picker", { ok: false, status: "request_failed", error: String(err) });
+  }
+
+  placeBrowserNearTarget();
   const includeFiles = lastBrowseOptions.include_files !== false;
-  const data = await postJson("/api/lerobot/files/browse", { kind: lastBrowseKind, path, include_files: includeFiles });
-  renderBrowser(data);
-  renderResult("browse paths", data);
-  return data;
+  try {
+    const data = await postJson("/api/lerobot/files/browse", { kind: lastBrowseKind, path, include_files: includeFiles });
+    renderBrowser(data);
+    renderResult("browse paths fallback", data);
+    return data;
+  } catch (err) {
+    const error = { ok: false, tool: "lerobot.files.browse", status: "request_failed", error: String(err) };
+    renderResult("browse paths", error);
+    if (browserEl) {
+      browserEl.classList.remove("hidden");
+      browserEl.innerHTML = `<div class="browser-head"><button class="btn mini danger" id="btn-browser-close">Close</button><code>Browse failed</code></div><pre class="command-output">${escapeHtml(String(err))}</pre>`;
+      const closeBtn = $("btn-browser-close");
+      if (closeBtn) closeBtn.addEventListener("click", () => browserEl.classList.add("hidden"));
+    }
+    return error;
+  }
 }
 
 function renderVisualizationSession(data) {
@@ -1650,13 +1995,12 @@ bind("btn-browse-dataset-repo", () => browsePath("dataset", datasetBrowseStartPa
 bind("btn-browse-output-dir", () => browsePath("output", outputDirInput ? outputDirInput.value : "", outputDirInput));
 bind("btn-browse-policy", () => browsePath("policy", policyInput ? policyInput.value : "", policyInput, { select: "file", include_files: true }));
 bind("btn-browse-rollout-policy", () => {
-  const startPath = (rolloutPolicyInput && rolloutPolicyInput.value.trim()) || (outputDirInput && outputDirInput.value.trim()) || "";
+  const startPath = (rolloutPolicyInput && rolloutPolicyInput.value.trim()) || "";
   return browsePath("policy", startPath, rolloutPolicyInput || policyInput, { select: "file", include_files: true });
 });
 bind("btn-browse-manipulation-policy", () => {
   const startPath = (manipulationPolicyInput && manipulationPolicyInput.value.trim())
     || (rolloutPolicyInput && rolloutPolicyInput.value.trim())
-    || (outputDirInput && outputDirInput.value.trim())
     || "";
   return browsePath("policy", startPath, manipulationPolicyInput || rolloutPolicyInput || policyInput, { select: "file", include_files: true });
 });
@@ -1697,7 +2041,7 @@ document.addEventListener("click", (event) => {
   setTtsHelpVisible(false);
 });
 
-bind("btn-record-start", (event) => runAction("record start", "/api/lerobot/record/start", null, actionStatusFromEvent(event)));
+bind("btn-record-start", (event) => runAction("record start", "/api/lerobot/record/start", recordPayload(), actionStatusFromEvent(event)));
 async function runRecordControl(label, action, event) {
   return runAction(label, "/api/lerobot/record/control", sessionPayload("record", { action }), actionStatusFromEvent(event));
 }
@@ -1707,9 +2051,9 @@ bind("btn-record-retry", (event) => runRecordControl("record retry", "retry", ev
 bind("btn-record-next", (event) => runRecordControl("record next", "next", event));
 bind("btn-record-finish", (event) => runRecordControl("record finish", "finish", event));
 
-bind("btn-train-start", (event) => runAction("train start", "/api/lerobot/train/start", null, actionStatusFromEvent(event)));
-bind("btn-train-cancel", (event) => runAction("train cancel", "/api/lerobot/train/cancel", sessionPayload("train"), actionStatusFromEvent(event)));
-bind("btn-train-status", (event) => runAction("train status", "/api/lerobot/train/status", sessionPayload("train"), actionStatusFromEvent(event)));
+bind("btn-train-start", () => runTrainAction("train start", "/api/lerobot/train/start", trainPayload()));
+bind("btn-train-cancel", () => runTrainAction("train cancel", "/api/lerobot/train/cancel", sessionPayload("train")));
+bind("btn-train-status", () => runTrainAction("train status", "/api/lerobot/train/status", sessionPayload("train")));
 bind("btn-policy-refresh", async (event) => {
   const statusTarget = actionStatusFromEvent(event);
   setActionStatus(statusTarget, "running", "refresh policies", { status: "request sent" });
@@ -1717,9 +2061,9 @@ bind("btn-policy-refresh", async (event) => {
   setActionStatus(statusTarget, data && data.ok ? "ok" : "error", "refresh policies", data);
 });
 
-bind("btn-rollout-start", (event) => runAction("rollout start", "/api/lerobot/rollout/start", rolloutPayload(), actionStatusFromEvent(event)));
-bind("btn-rollout-stop", (event) => runAction("rollout stop", "/api/lerobot/rollout/stop", sessionPayload("rollout"), actionStatusFromEvent(event)));
-bind("btn-rollout-status", (event) => runAction("rollout status", "/api/lerobot/rollout/status", sessionPayload("rollout"), actionStatusFromEvent(event)));
+bind("btn-rollout-start", () => runRolloutAction("rollout start", "/api/lerobot/rollout/start", rolloutPayload()));
+bind("btn-rollout-stop", () => runRolloutAction("rollout stop", "/api/lerobot/rollout/stop", sessionPayload("rollout")));
+bind("btn-rollout-status", () => runRolloutAction("rollout status", "/api/lerobot/rollout/status", sessionPayload("rollout")));
 bind("btn-manipulation-save", async (event) => {
   const statusTarget = actionStatusFromEvent(event);
   setActionStatus(statusTarget, "running", "manipulation defaults save", { status: "request sent" });
@@ -1763,14 +2107,14 @@ bind("btn-dataset-preview", (event) => previewDataset(actionStatusFromEvent(even
 if (profileSelect) profileSelect.addEventListener("change", refreshConfig);
 if (policySelect) {
   policySelect.addEventListener("change", () => {
-    if (policyInput && policySelect.value) policyInput.value = policySelect.value;
-    if (rolloutPolicyInput && policySelect.value) rolloutPolicyInput.value = policySelect.value;
-    if (trainSourcePolicyInput && policySelect.value) trainSourcePolicyInput.value = policySelect.value;
+    const selectedOption = policySelect.options[policySelect.selectedIndex] || null;
+    const policyType = selectedOption
+      ? selectedOption.dataset.policyType || inferPolicyTypeFromPolicy(policySelect.value, selectedOption.textContent || "")
+      : "";
+    applyPolicySelection(policySelect.value, policyType);
   });
 }
-if (policyTypeInput) policyTypeInput.addEventListener("change", applyPolicyTypeDefaults);
 if (manipulationTaskIdInput) manipulationTaskIdInput.addEventListener("change", () => syncManipulationTaskPreset(true));
 initializeTtsControls();
 syncManipulationTaskPreset(false);
-applyPolicyTypeDefaults();
 refreshConfig();

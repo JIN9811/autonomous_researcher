@@ -2327,6 +2327,8 @@ textarea {
 }
 
 .lerobot-browser {
+  grid-column: 1 / -1;
+  width: 100%;
   margin-top: 14px;
   border: 1px solid rgba(20, 54, 179, 0.16);
   border-radius: 16px;
@@ -2386,10 +2388,50 @@ textarea {
 }
 
 .lerobot-policy-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 7px;
+  display: grid;
+  gap: 8px;
   margin-top: 12px;
+}
+
+.lerobot-policy-chip {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  padding: 9px 10px;
+  border: 1px solid rgba(20, 54, 179, 0.14);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.76);
+}
+
+.lerobot-policy-chip-text {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.lerobot-policy-chip-text strong,
+.lerobot-policy-chip-text span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lerobot-policy-chip-text strong {
+  color: var(--text);
+  font-size: 0.82rem;
+}
+
+.lerobot-policy-chip-text span {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-family: "IBM Plex Mono", monospace;
+}
+
+@media (max-width: 720px) {
+  .lerobot-policy-chip {
+    grid-template-columns: 1fr;
+  }
 }
 
 .lerobot-visualization {
@@ -12473,4 +12515,45 @@ body.planning-live-body .planning-message-label-text {
 .lerobot-help-popover b {
   color: var(--primary);
   font-weight: 850;
+}
+
+.lerobot-runtime-status {
+  display: grid;
+  gap: 0.35rem;
+  margin-top: 0.55rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid rgba(97, 153, 255, 0.22);
+  background: rgba(20, 30, 44, 0.58);
+  color: #dbeafe;
+}
+
+.lerobot-runtime-status > div:first-child {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.lerobot-runtime-status strong {
+  color: #93c5fd;
+  letter-spacing: 0.04em;
+}
+
+.lerobot-runtime-status span,
+.lerobot-runtime-status small {
+  color: #cbd5e1;
+}
+
+.lerobot-runtime-warnings {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.lerobot-runtime-warnings span {
+  padding: 0.16rem 0.38rem;
+  border: 1px solid rgba(251, 191, 36, 0.28);
+  background: rgba(251, 191, 36, 0.1);
+  color: #fde68a;
+  font-size: 0.72rem;
 }

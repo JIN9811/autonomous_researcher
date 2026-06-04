@@ -743,7 +743,9 @@ def test_live_train_resume_keeps_existing_output_dir(tmp_path: Path) -> None:
     dataset = tmp_path / "hf_datasets" / "jin" / "record-test"
     _make_trainable_lerobot_dataset(dataset)
     existing = tmp_path / "outputs" / "train" / "atr_lerobot_train"
-    existing.mkdir(parents=True)
+    resume_config = existing / "checkpoints" / "001000" / "pretrained_model" / "train_config.json"
+    resume_config.parent.mkdir(parents=True)
+    resume_config.write_text(json.dumps({"policy": {"type": "act"}}), encoding="utf-8")
     bridge._live_block_if_needed = lambda **_: None  # type: ignore[method-assign]
     bridge._live_port_block_if_needed = lambda **_: None  # type: ignore[method-assign]
     bridge._start_live_process = lambda **_: {"ok": True, "session_updates": {"pid": 123, "log_path": "", "returncode": None}}  # type: ignore[method-assign]
@@ -766,6 +768,48 @@ def test_live_train_resume_keeps_existing_output_dir(tmp_path: Path) -> None:
     assert started["ok"] is True
     assert f"--output_dir={existing}" in started["command_preview"]
     assert "--resume=true" in started["command_preview"]
+    assert f"--config_path={resume_config}" in started["command_preview"]
+
+
+def test_live_train_resume_requires_existing_train_config(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    dataset = tmp_path / "hf_datasets" / "jin" / "record-test"
+    _make_trainable_lerobot_dataset(dataset)
+    existing = tmp_path / "outputs" / "train" / "atr_lerobot_train"
+    existing.mkdir(parents=True)
+    bridge._live_block_if_needed = lambda **_: None  # type: ignore[method-assign]
+    bridge._live_port_block_if_needed = lambda **_: None  # type: ignore[method-assign]
+
+    result = bridge.train_start(
+        {
+            "mode": "live",
+            "runtime_mode": "live",
+            "profile_id": "fake_omx_ai",
+            "dataset_repo_id": "jin/record-test",
+            "dataset_root": str(tmp_path / "hf_datasets"),
+            "output_dir": str(existing),
+            "job_name": "atr_lerobot_train",
+            "resume": True,
+            "steps": 1,
+            "confirm_live_execute": True,
+        }
+    )
+
+    assert result["ok"] is False
+    assert result["failure_code"] == "LEROBOT_TRAIN_CONFIG_INVALID"
+    assert "train_config.json" in result["message"]
+
+
+def test_train_status_without_session_returns_idle(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+
+    status = bridge.train_status({"mode": "live", "profile_id": "fake_omx_ai"})
+
+    assert status["ok"] is True
+    assert status["workflow"] == "train"
+    assert status["status"] == "IDLE"
+    assert status["runtime_phase"] == "IDLE"
+    assert status["error"] is None
 
 
 def test_train_progress_parses_live_log_tail(tmp_path: Path) -> None:
@@ -819,6 +863,61 @@ def test_refresh_process_status_preserves_cancelled_status(tmp_path: Path) -> No
 
     assert session["returncode"] == -15
     assert session["status"] == "CANCELLED"
+
+
+def test_train_progress_parses_compact_k_step_log(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    log_path = tmp_path / "train.log"
+    log_path.write_text("INFO step:1K smpl:32K ep:27 loss:0.019\n", encoding="utf-8")
+    bridge._sessions["train-active"] = {
+        "session_id": "train-active",
+        "workflow": "train",
+        "mode": "live",
+        "profile_id": "fake_omx_ai",
+        "status": "TRAINING",
+        "created_at": "2026-05-06T00:00:00+00:00",
+        "command_preview": [],
+        "step_trace": [],
+        "log_path": str(log_path),
+        "pid": None,
+        "returncode": None,
+        "train_config": {"steps": 3000},
+    }
+
+    status = bridge.train_status({"mode": "live", "profile_id": "fake_omx_ai", "session_id": "train-active"})
+
+    assert status["ok"] is True
+    assert status["training"]["current_step"] == 1000
+    assert status["training"]["total_steps"] == 3000
+    assert status["training"]["progress_percent"] == 33.33
+    assert status["training"]["last_loss"] == 0.019
+
+
+def test_train_progress_uses_sample_count_when_step_is_rounded(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    log_path = tmp_path / "train.log"
+    log_path.write_text("INFO step:1K smpl:33K ep:28 loss:0.017\n", encoding="utf-8")
+    bridge._sessions["train-active"] = {
+        "session_id": "train-active",
+        "workflow": "train",
+        "mode": "live",
+        "profile_id": "fake_omx_ai",
+        "status": "TRAINING",
+        "created_at": "2026-05-06T00:00:00+00:00",
+        "command_preview": [],
+        "step_trace": [],
+        "log_path": str(log_path),
+        "pid": None,
+        "returncode": None,
+        "train_config": {"steps": 3000, "batch_size": 32},
+    }
+
+    status = bridge.train_status({"mode": "live", "profile_id": "fake_omx_ai", "session_id": "train-active"})
+
+    assert status["ok"] is True
+    assert status["training"]["current_step"] == 1031
+    assert status["training"]["progress_percent"] == 34.37
+    assert status["training"]["last_loss"] == 0.017
 
 
 def test_train_progress_ignores_config_step_summary(tmp_path: Path) -> None:
@@ -1143,6 +1242,9 @@ def test_pi05_rollout_uses_dedicated_runtime_and_rtc_command(tmp_path: Path) -> 
             "policy_path": "fake://pi05_policy",
             "policy_type": "pi05",
             "device": "cuda",
+            "rollout_rtc_execution_horizon": 20,
+            "rollout_rtc_max_guidance_weight": 1.0,
+            "rollout_action_queue_size_to_get_new_actions": 60,
             "task_instruction": "Move specimen from 3DP to UTM",
             "continuous_rollout": True,
             "camera_enabled": True,
@@ -1154,13 +1256,41 @@ def test_pi05_rollout_uses_dedicated_runtime_and_rtc_command(tmp_path: Path) -> 
     assert result["command_preview"][result["command_preview"].index("-n") + 1] == "lerobot-pi05-torch211"
     assert "scripts/lerobot_pi05_rollout_wrapper.py" in " ".join(result["command_preview"])
     assert "--policy.path=fake://pi05_policy" in result["command_preview"]
-    assert "--policy.type=pi05" in result["command_preview"]
+    assert "--policy.type=pi05" not in result["command_preview"]
     assert "--device=cuda" in result["command_preview"]
     assert "--policy.device=cuda" in result["command_preview"]
     assert "--rtc.enabled=true" in result["command_preview"]
+    assert "--rtc.execution_horizon=20" in result["command_preview"]
+    assert "--rtc.max_guidance_weight=1.0" in result["command_preview"]
+    assert "--action_queue_size_to_get_new_actions=60" in result["command_preview"]
     assert "--task=Move specimen from 3DP to UTM" in result["command_preview"]
     assert f"--duration={int(86400.0)}" in result["command_preview"]
-    assert any(item.startswith("--robot.cameras=") for item in result["command_preview"])
+    camera_arg = next(item for item in result["command_preview"] if item.startswith("--robot.cameras="))
+    cameras = json.loads(camera_arg.split("=", 1)[1])
+    assert all(camera["fps"] == 30 for camera in cameras.values())
+
+
+def test_rollout_control_fps_can_differ_from_camera_fps(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+
+    result = bridge.rollout_start(
+        {
+            "mode": "test",
+            "profile_id": "fake_omx_ai",
+            "policy_path": "fake://pi05_policy",
+            "policy_type": "pi05",
+            "fps": 60,
+            "camera_fps": 30,
+            "camera_enabled": True,
+        }
+    )
+
+    assert result["ok"] is True
+    assert "--fps=60" in result["command_preview"]
+    camera_arg = next(item for item in result["command_preview"] if item.startswith("--robot.cameras="))
+    cameras = json.loads(camera_arg.split("=", 1)[1])
+    assert cameras
+    assert all(camera["fps"] == 30 for camera in cameras.values())
 
 
 def test_live_rollout_guard_blocks_duplicate_active_session(tmp_path: Path) -> None:
@@ -1194,6 +1324,60 @@ def test_live_rollout_guard_blocks_duplicate_active_session(tmp_path: Path) -> N
     assert second["failure_code"] == "LEROBOT_ROLLOUT_ALREADY_ACTIVE"
     assert second["blocked_by_session_id"] == first["session_id"]
     assert second["guard_status"] == "blocked"
+
+
+def test_rollout_stop_resets_all_tracked_rollout_sessions(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    cleanup_called = []
+
+    bridge._cleanup_lerobot_processes = lambda workflow: cleanup_called.append(workflow) or [  # type: ignore[method-assign]
+        {"step": "CLEANUP_LEROBOT_PROCESS_GROUPS", "status": "ok", "detail": workflow}
+    ]
+    bridge._sessions["rollout-a"] = {
+        "session_id": "rollout-a",
+        "workflow": "rollout",
+        "profile_id": "fake_omx_ai",
+        "mode": "live",
+        "status": "POLICY_ACTIVE",
+        "returncode": None,
+        "pid": None,
+        "step_trace": [],
+        "created_at": "2026-06-04T00:00:00+00:00",
+    }
+    bridge._sessions["rollout-b"] = {
+        "session_id": "rollout-b",
+        "workflow": "rollout",
+        "profile_id": "fake_omx_ai",
+        "mode": "live",
+        "status": "POLICY_ACTIVE",
+        "returncode": None,
+        "pid": None,
+        "step_trace": [],
+        "created_at": "2026-06-04T00:00:01+00:00",
+    }
+    bridge._sessions["teleop-active"] = {
+        "session_id": "teleop-active",
+        "workflow": "teleoperate",
+        "profile_id": "fake_omx_ai",
+        "mode": "live",
+        "status": "TELEOP_ACTIVE",
+        "returncode": None,
+        "pid": None,
+        "step_trace": [],
+        "created_at": "2026-06-04T00:00:02+00:00",
+    }
+
+    result = bridge.rollout_stop({"mode": "live", "profile_id": "fake_omx_ai"})
+
+    assert result["ok"] is True
+    assert result["workflow"] == "rollout"
+    assert result["status"] == "STOPPED"
+    assert set(result["stopped_session_ids"]) == {"rollout-a", "rollout-b"}
+    assert bridge._sessions["rollout-a"]["status"] == "STOPPED"
+    assert bridge._sessions["rollout-b"]["status"] == "STOPPED"
+    assert bridge._sessions["teleop-active"]["status"] == "TELEOP_ACTIVE"
+    assert cleanup_called == ["rollout"]
+    assert any(item["step"] == "CLEANUP_LEROBOT_PROCESS_GROUPS" for item in result["step_trace"])
 
 
 def test_rollout_action_clamp_can_be_disabled(tmp_path: Path) -> None:
@@ -1400,3 +1584,57 @@ def test_pi05_train_env_passes_hf_token_from_token_path(tmp_path: Path, monkeypa
     assert env["PYTORCH_CUDA_ALLOC_CONF"] == "expandable_segments:True"
     assert env["HF_TOKEN"] == "hf_fake_token"
     assert env["HUGGING_FACE_HUB_TOKEN"] == "hf_fake_token"
+
+
+def test_rollout_runtime_status_is_inferred_from_action_log(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    log_path = tmp_path / "runs" / "lerobot_sessions" / "lr-rollout-test.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_path.write_text(
+        "INFO Using device: cuda\n"
+        "Loading model from: /tmp/policy\n"
+        "INFO OpenCVCamera(/dev/video0) connected.\n"
+        "INFO omx_follower_arm OmxFollower connected.\n"
+        "INFO Started actor thread\n"
+        "INFO [ATR_ACTION] count=90 max_abs_delta=2.866 goal={} present={} delta={}\n",
+        encoding="utf-8",
+    )
+    session = {
+        "session_id": "lr-rollout-test",
+        "workflow": "rollout",
+        "profile_id": "fake_omx_ai",
+        "mode": "live",
+        "status": "POLICY_ACTIVE",
+        "log_path": str(log_path),
+        "pid": 123,
+        "returncode": None,
+    }
+
+    result = bridge._session_response("lerobot.rollout.status", "live", session, [])
+
+    assert result["runtime_phase"] == "ACTION_ACTIVE"
+    assert result["runtime"]["action_count"] == 90
+    assert result["runtime"]["max_abs_delta"] == 2.866
+    assert "Robot action stream active" in result["runtime_message"]
+
+
+def test_lerobot_cleanup_marker_matching_does_not_match_gui_dom_ids() -> None:
+    markers = (
+        "lerobot-rollout",
+        "lerobot.rollout",
+        "lerobot_pi05_rollout_wrapper.py",
+        "eval_with_real_robot.py",
+        "rtc.enabled",
+    )
+
+    assert not LeRobotBridge._cmdline_matches_lerobot_marker(
+        ["python", "-", "document.getElementById('lerobot-rollout-action-status')"],
+        markers,
+    )
+    assert LeRobotBridge._cmdline_matches_lerobot_marker(["lerobot-rollout"], markers)
+    assert LeRobotBridge._cmdline_matches_lerobot_marker(["python", "-m", "lerobot.rollout"], markers)
+    assert LeRobotBridge._cmdline_matches_lerobot_marker(
+        ["python", "/home/jin/autonomous_researcher/scripts/lerobot_pi05_rollout_wrapper.py"],
+        markers,
+    )
+    assert LeRobotBridge._cmdline_matches_lerobot_marker(["python", "eval.py", "--rtc.enabled=true"], markers)

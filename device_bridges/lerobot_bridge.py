@@ -678,12 +678,13 @@ class LeRobotBridge:
             request, dataset_detail = self._train_request_with_local_dataset(request)
             request, dataset_version_detail = self._train_request_with_pi05_dataset_version(request)
             request, train_detail = self._train_request_with_output_dir(profile, request)
+            request, resume_detail = self._train_request_with_resume_config(profile, request)
             train_args = self._train_args(profile, request)
         except ValueError as exc:
             return self._error("lerobot.train.start", mode, profile.profile_id, "LEROBOT_TRAIN_CONFIG_INVALID", str(exc))
         status = "COMPLETED" if mode != "live" else "TRAINING"
         trace = [
-            ("PRECHECK", "ok", f"{train_detail}; {runtime_detail}"),
+            ("PRECHECK", "ok", f"{train_detail}; {runtime_detail}; {resume_detail}"),
             ("LOAD_DATASET", "ok", f"{dataset_detail}; {dataset_version_detail}"),
             ("TRAINING", "ok" if mode != "live" else "active", f"steps={request.steps} batch_size={request.batch_size}"),
             ("CHECKPOINT", "ok" if mode != "live" else "pending", self._train_checkpoint_path(profile, request)),
@@ -745,8 +746,8 @@ class LeRobotBridge:
         policy_type = self._canonical_policy_type(request.policy_type or "act")
         is_pi05 = self._is_pi05_policy(policy_type)
         policy_args = [f"--policy.path={policy_ref or str(self.config.fake_checkpoint_root / 'policy.ckpt')}"]
-        if is_pi05:
-            policy_args.append("--policy.type=pi05")
+        if not is_pi05:
+            policy_args.append(f"--policy.type={policy_type}")
         device_override = str(raw_payload.get("device") or "").strip()
         if device_override:
             if is_pi05:
@@ -764,6 +765,9 @@ class LeRobotBridge:
                 policy_args.append(f"--rtc.execution_horizon={int(request.rollout_rtc_execution_horizon)}")
             if rtc_enabled and request.rollout_rtc_max_guidance_weight is not None:
                 policy_args.append(f"--rtc.max_guidance_weight={float(request.rollout_rtc_max_guidance_weight)}")
+            if rtc_enabled and request.rollout_action_queue_size_to_get_new_actions is not None:
+                queue_size = max(1, int(request.rollout_action_queue_size_to_get_new_actions))
+                policy_args.append(f"--action_queue_size_to_get_new_actions={queue_size}")
         elif inference_type:
             policy_args.append(f"--inference.type={inference_type}")
             if inference_type == "rtc":
@@ -780,19 +784,20 @@ class LeRobotBridge:
         if request.rollout_action_clamp:
             max_relative_target = max(1, int(round(float(request.rollout_max_relative_target or 5))))
             policy_args.append(f"--robot.max_relative_target={max_relative_target}")
+        task_instruction = self._rollout_task_instruction(request, is_pi05=is_pi05)
         if is_pi05:
             duration_source = request.max_duration_s if request.max_duration_s and request.max_duration_s > 0 else request.episode_s
             duration = max(1, int(round(float(duration_source or 1))))
             rollout_extra_args = policy_args + [
                 f"--fps={request.fps or profile.fps or 30}",
-                f"--task={request.task_instruction}",
+                f"--task={task_instruction}",
                 f"--duration={duration}",
             ]
         else:
             rollout_extra_args = policy_args + [
                 f"--dataset.repo_id={request.dataset_repo_id or 'local/eval_lerobot_policy'}",
                 f"--dataset.root={self._dataset_path_for(request)}",
-                f"--dataset.single_task={request.task_instruction}",
+                f"--dataset.single_task={task_instruction}",
                 f"--dataset.fps={request.fps or ''}",
                 f"--dataset.episode_time_s={request.episode_s}",
                 f"--dataset.num_episodes={request.num_episodes}",
@@ -860,8 +865,8 @@ class LeRobotBridge:
         )
 
     def rollout_stop(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
-        """Stop rollout idempotently."""
-        return self._stop_session("lerobot.rollout.stop", payload or {}, "rollout")
+        """Stop all rollout/inference sessions and stale rollout subprocesses idempotently."""
+        return self._stop_all_workflow_sessions("lerobot.rollout.stop", payload or {}, "rollout")
 
     def rollout_status(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         """Return rollout status."""
@@ -980,8 +985,8 @@ class LeRobotBridge:
     def policies_list(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         """List configured, local, and likely cached policy choices."""
         mode = self._mode(payload or {})
-        policies = self._policy_presets()
-        policies.extend(self._discover_local_policies())
+        policies = self._discover_local_policies()
+        policies.extend(self._policy_presets())
         unique: dict[str, dict[str, str]] = {}
         for item in policies:
             key = item.get("value") or item.get("path") or item.get("repo_id") or item.get("label")
@@ -1312,18 +1317,121 @@ class LeRobotBridge:
         self._emit_trace(payload, tool, step_trace, profile_id, mode, session["session_id"])
         return self._session_response(tool, mode, session, step_trace, idempotent=True)
 
+    def _stop_all_workflow_sessions(
+        self,
+        tool: str,
+        payload: dict[str, Any],
+        workflow: str,
+        *,
+        stopped_status: str = "STOPPED",
+    ) -> dict[str, Any]:
+        """Stop every tracked session for a workflow, then remove stale project subprocesses."""
+        request = LeRobotBaseRequest.model_validate(payload or {})
+        mode = request.runtime_mode or request.mode
+        sessions = [session for session in self._sessions.values() if session.get("workflow") == workflow]
+        selected = self._resolve_session(request.session_id, workflow, prefer_active=True)
+        if selected is None and sessions:
+            selected = sessions[-1]
+        profile_id = str((selected or {}).get("profile_id") or request.profile_id or self._selected_profile_id)
+
+        step_trace: list[dict[str, Any]] = [{"step": "STOPPING", "status": "ok", "detail": f"{workflow}: all sessions"}]
+        stopped_session_ids: list[str] = []
+        for session in sessions:
+            session_id = str(session.get("session_id", ""))
+            process = self._processes.get(session_id)
+            if process and process.poll() is None:
+                self._terminate_live_process(process, signal.SIGTERM)
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    self._terminate_live_process(process, signal.SIGKILL)
+                    process.wait(timeout=5)
+                session["returncode"] = process.returncode
+                self._processes.pop(session_id, None)
+                step_trace.append({"step": "STOP_TRACKED_PROCESS", "status": "ok", "detail": f"session={session_id} pid={process.pid}"})
+            elif process:
+                session["returncode"] = process.returncode
+                self._processes.pop(session_id, None)
+            self._close_log_handle(session_id)
+            session["status"] = stopped_status
+            session.setdefault("step_trace", []).extend(
+                [
+                    {"step": "STOPPING", "status": "ok", "detail": workflow},
+                    {"step": stopped_status, "status": "ok", "detail": "session stopped by workflow reset"},
+                ]
+            )
+            if session_id:
+                stopped_session_ids.append(session_id)
+
+        cleanup_trace = self._cleanup_lerobot_processes(workflow)
+        step_trace.extend(cleanup_trace)
+        step_trace.append({"step": stopped_status, "status": "ok", "detail": f"{workflow}: reset complete; sessions={len(stopped_session_ids)}"})
+
+        if selected is None:
+            return {
+                "ok": True,
+                "tool": tool,
+                "mode": mode,
+                "profile_id": profile_id,
+                "session_id": request.session_id,
+                "workflow": workflow,
+                "status": stopped_status,
+                "idempotent": True,
+                "stopped_session_ids": stopped_session_ids,
+                "command_preview": [],
+                "step_trace": step_trace,
+                "events": step_trace,
+                "error": None,
+            }
+
+        selected["status"] = stopped_status
+        selected.setdefault("step_trace", []).extend(step_trace)
+        self._emit_trace(payload, tool, step_trace, profile_id, mode, str(selected.get("session_id", "")))
+        return self._session_response(tool, mode, selected, step_trace, idempotent=True, stopped_session_ids=stopped_session_ids)
+
     def _session_status(self, tool: str, payload: dict[str, Any], workflow: str) -> dict[str, Any]:
         request = LeRobotBaseRequest.model_validate(payload or {})
         mode = request.runtime_mode or request.mode
         session = self._resolve_session(request.session_id, workflow)
         profile_id = str(session.get("profile_id") if session else request.profile_id or self._selected_profile_id)
         if session is None:
-            return self._error(tool, mode, profile_id, "LEROBOT_SESSION_NOT_FOUND", "Session not found.")
+            step_trace = [{"step": "STATUS", "status": "idle", "detail": f"no active {workflow} session"}]
+            return {
+                "ok": True,
+                "tool": tool,
+                "mode": mode,
+                "profile_id": profile_id,
+                "session_id": request.session_id,
+                "workflow": workflow,
+                "status": "IDLE",
+                "runtime": {
+                    "phase": "IDLE",
+                    "message": f"No active {workflow} session.",
+                    "action_count": 0,
+                    "max_abs_delta": None,
+                    "warnings": [],
+                    "log_path": "",
+                    "pid": None,
+                    "returncode": None,
+                },
+                "runtime_phase": "IDLE",
+                "runtime_message": f"No active {workflow} session.",
+                "command_preview": [],
+                "events": step_trace,
+                "step_trace": step_trace,
+                "log_path": "",
+                "log_tail": "",
+                "pid": None,
+                "returncode": None,
+                "error": None,
+            }
         self._refresh_process_status(session)
         return self._session_response(tool, mode, session, list(session.get("step_trace", [])))
 
     def _session_response(self, tool: str, mode: str, session: dict[str, Any], step_trace: list[dict[str, Any]], **extra: Any) -> dict[str, Any]:
         training = self._training_progress(session)
+        log_tail = self._tail_file(str(session.get("log_path", "")))
+        runtime = self._runtime_status_from_log(session, log_tail)
         payload = {
             "ok": True,
             "tool": tool,
@@ -1332,6 +1440,9 @@ class LeRobotBridge:
             "session_id": session.get("session_id", ""),
             "workflow": session.get("workflow", ""),
             "status": session.get("status", ""),
+            "runtime": runtime,
+            "runtime_phase": runtime.get("phase"),
+            "runtime_message": runtime.get("message"),
             "command_preview": list(session.get("command_preview", [])),
             "events": step_trace,
             "step_trace": step_trace,
@@ -1342,7 +1453,7 @@ class LeRobotBridge:
             "job_name": session.get("job_name", ""),
             "checkpoint_path": session.get("checkpoint_path", ""),
             "log_path": session.get("log_path", ""),
-            "log_tail": self._tail_file(str(session.get("log_path", ""))),
+            "log_tail": log_tail,
             "pid": session.get("pid"),
             "returncode": session.get("returncode"),
             "tts": session.get("tts", {}),
@@ -1355,6 +1466,93 @@ class LeRobotBridge:
         payload.update(extra)
         return payload
 
+    def _runtime_status_from_log(self, session: dict[str, Any], log_tail: str) -> dict[str, Any]:
+        """Summarize live LeRobot process state from its persisted session log."""
+        status = str(session.get("status") or "").upper()
+        returncode = session.get("returncode")
+        text = str(log_tail or "")
+        phase = "PROCESS_STARTED" if session.get("pid") else "NOT_STARTED"
+        message = "Process has been requested."
+        warnings: list[str] = []
+        if "Using device:" in text:
+            phase = "LOADING_POLICY"
+            message = "Loading policy model on compute device."
+        if "Loading model from:" in text:
+            phase = "LOADING_CHECKPOINT"
+            message = "Loading policy checkpoint."
+        if "Loaded state dict" in text:
+            phase = "CHECKPOINT_LOADED"
+            message = "Policy checkpoint loaded; preparing robot runtime."
+        if "Missing key(s)" in text:
+            warnings.append("checkpoint_key_mismatch_warning")
+        if "Initializing robot:" in text:
+            phase = "INITIALIZING_ROBOT"
+            message = "Connecting robot and cameras."
+        if "OpenCVCamera" in text and " connected" in text:
+            phase = "CAMERA_CONNECTED"
+            message = "Camera stream connected; waiting for follower/actor."
+        if "OmxFollower connected" in text:
+            phase = "ROBOT_CONNECTED"
+            message = "Follower robot connected; starting action threads."
+        if "Started actor thread" in text:
+            phase = "ACTOR_READY"
+            message = "Actor thread ready; waiting for policy actions."
+        if "Preprocessor/postprocessor loaded successfully" in text:
+            phase = "POLICY_PREPROCESSOR_READY"
+            message = "Policy pre/post processors loaded; action inference active."
+        action_matches = list(re.finditer(r"\[ATR_ACTION\]\s+count=(\d+)\s+max_abs_delta=([0-9.+-]+)", text))
+        action_count = 0
+        max_abs_delta = None
+        if action_matches:
+            last = action_matches[-1]
+            action_count = int(last.group(1))
+            try:
+                max_abs_delta = float(last.group(2))
+            except ValueError:
+                max_abs_delta = None
+            phase = "ACTION_ACTIVE"
+            delta_text = f" max_delta={max_abs_delta:.3f}" if max_abs_delta is not None else ""
+            message = f"Robot action stream active: {action_count} actions sent.{delta_text}"
+        if "Relative goal position magnitude had to be clamped" in text:
+            warnings.append("safe_action_clamp_active")
+        if "ACTION_QUEUE" in text:
+            warnings.append("rtc_action_queue_timing_warning")
+        if "Actor thread shutting down" in text:
+            count_match = re.search(r"Total actions executed:\s*(\d+)", text)
+            if count_match:
+                action_count = int(count_match.group(1))
+            phase = "ACTION_STOPPED"
+            message = f"Actor stopped after {action_count} actions."
+        workflow = str(session.get("workflow") or "").lower()
+        workflow_label = "training" if workflow == "train" else "rollout" if workflow == "rollout" else workflow or "runtime"
+        if "RTC demo finished" in text or (returncode == 0 and status == "COMPLETED"):
+            phase = "COMPLETED"
+            if workflow == "rollout":
+                message = "RTC rollout completed and robot disconnected."
+            elif workflow == "train":
+                message = "Training completed successfully."
+            else:
+                message = f"{workflow_label.capitalize()} completed successfully."
+        if status in {"STOPPED", "CANCELLED"}:
+            phase = "STOPPED"
+            if workflow == "rollout":
+                message = f"Rollout stopped by operator/system after {action_count} actions."
+            else:
+                message = f"{workflow_label.capitalize()} stopped by operator/system."
+        if "Fatal exception" in text or "Traceback" in text or status == "FAILED":
+            phase = "FAILED"
+            message = f"{workflow_label.capitalize()} failed; inspect log_tail for the stack trace."
+        return {
+            "phase": phase,
+            "message": message,
+            "action_count": action_count,
+            "max_abs_delta": max_abs_delta,
+            "warnings": sorted(set(warnings)),
+            "log_path": session.get("log_path", ""),
+            "pid": session.get("pid"),
+            "returncode": returncode,
+        }
+
     def _training_progress(self, session: dict[str, Any]) -> dict[str, Any]:
         """Infer training progress/ETA from config, process status, and log tail."""
         if session.get("workflow") != "train":
@@ -1365,6 +1563,10 @@ class LeRobotBridge:
         current_step, detected_total = self._parse_training_step(log_tail)
         if detected_total:
             total_steps = detected_total
+        batch_size = int(config.get("batch_size") or 0)
+        sample_count = self._parse_training_sample_count(log_tail)
+        if batch_size > 0 and sample_count > 0:
+            current_step = max(current_step, sample_count // batch_size)
         status = str(session.get("status") or "").upper()
         synthetic_complete = status == "COMPLETED" and not log_tail and bool(total_steps)
         if status == "COMPLETED" and total_steps:
@@ -1392,16 +1594,42 @@ class LeRobotBridge:
     def _parse_training_step(log: str) -> tuple[int, int | None]:
         current = 0
         total: int | None = None
-        for match in re.finditer(r"(?<![\d.])(\d{1,9})\s*/\s*(\d{1,9})(?![\d.])", log):
-            current = max(current, int(match.group(1)))
-            total = max(total or 0, int(match.group(2)))
+        count_pattern = r"(\d{1,9}(?:\.\d+)?)([kKmM]?)"
+        for match in re.finditer(rf"(?<![\d.]){count_pattern}\s*/\s*{count_pattern}(?![\d.])", log):
+            parsed_current = LeRobotBridge._parse_training_count(match.group(1), match.group(2))
+            parsed_total = LeRobotBridge._parse_training_count(match.group(3), match.group(4))
+            current = max(current, parsed_current)
+            total = max(total or 0, parsed_total)
         for line in log.splitlines():
             if "cfg.steps" in line:
                 continue
-            match = re.search(r"\b(?:step|global_step)\s*[=:]\s*(\d{1,9})", line, flags=re.IGNORECASE)
+            match = re.search(rf"\b(?:step|global_step)\s*[=:]\s*{count_pattern}", line, flags=re.IGNORECASE)
             if match:
-                current = max(current, int(match.group(1)))
+                current = max(current, LeRobotBridge._parse_training_count(match.group(1), match.group(2)))
         return current, total
+
+    @staticmethod
+    def _parse_training_count(value: str, suffix: str = "") -> int:
+        multiplier = 1
+        clean_suffix = str(suffix or "").lower()
+        if clean_suffix == "k":
+            multiplier = 1_000
+        elif clean_suffix == "m":
+            multiplier = 1_000_000
+        try:
+            return int(round(float(value) * multiplier))
+        except (TypeError, ValueError):
+            return 0
+
+    @staticmethod
+    def _parse_training_sample_count(log: str) -> int:
+        samples = 0
+        count_pattern = r"(\d{1,9}(?:\.\d+)?)([kKmM]?)"
+        for line in log.splitlines():
+            match = re.search(rf"\b(?:smpl|samples|sample)\s*[=:]\s*{count_pattern}", line, flags=re.IGNORECASE)
+            if match:
+                samples = max(samples, LeRobotBridge._parse_training_count(match.group(1), match.group(2)))
+        return samples
 
     @staticmethod
     def _parse_training_loss(log: str) -> float | None:
@@ -1424,6 +1652,9 @@ class LeRobotBridge:
     def _resolve_session(self, session_id: str, workflow: str, *, prefer_active: bool = False) -> dict[str, Any] | None:
         if session_id and session_id in self._sessions:
             session = self._sessions[session_id]
+            if session.get("workflow") != workflow:
+                active = self._latest_active_session(workflow) if prefer_active else None
+                return active
             if not prefer_active or self._session_is_active(session):
                 return session
             active = self._latest_active_session(workflow)
@@ -1465,22 +1696,28 @@ class LeRobotBridge:
         data["live_gate_summary"] = LeRobotBridge._live_gate_summary(profile)
         return data
 
-    @staticmethod
-    def _public_session(session: dict[str, Any]) -> dict[str, Any]:
+    def _public_session(self, session: dict[str, Any]) -> dict[str, Any]:
+        log_tail = self._tail_file(str(session.get("log_path", "")))
+        runtime = self._runtime_status_from_log(session, log_tail)
+        training = self._training_progress(session)
         return {
             "session_id": session.get("session_id", ""),
             "workflow": session.get("workflow", ""),
             "profile_id": session.get("profile_id", ""),
             "mode": session.get("mode", ""),
             "status": session.get("status", ""),
+            "runtime": runtime,
+            "runtime_phase": runtime.get("phase"),
+            "runtime_message": runtime.get("message"),
             "created_at": session.get("created_at", ""),
             "command_preview": list(session.get("command_preview", [])),
             "dataset_path": session.get("dataset_path", ""),
             "checkpoint_path": session.get("checkpoint_path", ""),
             "log_path": session.get("log_path", ""),
+            "log_tail": log_tail,
             "pid": session.get("pid"),
             "returncode": session.get("returncode"),
-            "training": session.get("train_config", {}),
+            "training": {**dict(session.get("train_config", {})), **dict(training or {})},
             "visualization": session.get("visualization", {}),
         }
 
@@ -1678,6 +1915,7 @@ class LeRobotBridge:
                     "OMP_NUM_THREADS": "4",
                     "OPENBLAS_NUM_THREADS": "4",
                     "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True",
+                    "ATR_PI05_ACTION_LOG_INTERVAL": "30",
                 }
             )
             hf_token = self._hf_token_for_subprocess()
@@ -1860,6 +2098,66 @@ class LeRobotBridge:
             fresh_dir = output_dir.with_name(f"{output_dir.name}-{suffix}-{counter:02d}")
         next_request = normalized.model_copy(update={"output_dir": str(fresh_dir), "resume": False})
         return next_request, f"training output_dir exists; using fresh output_dir {fresh_dir}"
+
+    def _train_request_with_resume_config(self, profile: RobotProfile, request: LeRobotSessionRequest) -> tuple[LeRobotSessionRequest, str]:
+        """LeRobot Pi0.5 resume requires the original checkpoint train_config.json."""
+        mode = request.runtime_mode or request.mode
+        if mode != "live" or not request.resume:
+            return request, "resume disabled"
+        if any(str(arg).split("=", 1)[0] == "--config_path" for arg in request.train_extra_args or []):
+            return request, "resume config provided by user"
+
+        job_name = request.job_name or self._default_train_job_name(profile, request)
+        output_dir = _resolve_path(self.config.repo_root, request.output_dir or str(self.config.output_root / job_name)).resolve()
+        if not self._is_under_allowed_roots(output_dir):
+            raise ValueError(f"Training output_dir is outside allowed roots: {output_dir}")
+        config_path = self._latest_train_config_path(output_dir)
+        if config_path is None:
+            raise ValueError(
+                "Resume training requires an existing LeRobot checkpoint train_config.json. "
+                f"No train_config.json was found under {output_dir / 'checkpoints'}. "
+                "Start a fresh run with resume unchecked, or select an output_dir containing checkpoints/<step>/pretrained_model/train_config.json."
+            )
+        extra_args = list(request.train_extra_args or [])
+        extra_args.append(f"--config_path={config_path}")
+        return request.model_copy(update={"train_extra_args": extra_args}), f"resume config={config_path}"
+
+    @staticmethod
+    def _latest_train_config_path(output_dir: Path) -> Path | None:
+        """Return the newest LeRobot checkpoint train_config.json for resume."""
+        direct_candidates = [
+            output_dir / "checkpoints" / "last" / "pretrained_model" / "train_config.json",
+            output_dir / "checkpoints" / "last" / "train_config.json",
+            output_dir / "train_config.json",
+        ]
+        for candidate in direct_candidates:
+            if candidate.is_file():
+                return candidate.resolve()
+
+        checkpoint_root = output_dir / "checkpoints"
+        candidates: list[tuple[int, float, str, Path]] = []
+        try:
+            children = list(checkpoint_root.iterdir())
+        except OSError:
+            children = []
+        for checkpoint_dir in children:
+            if not checkpoint_dir.is_dir():
+                continue
+            config_path = checkpoint_dir / "pretrained_model" / "train_config.json"
+            if not config_path.is_file():
+                config_path = checkpoint_dir / "train_config.json"
+            if not config_path.is_file():
+                continue
+            name = checkpoint_dir.name
+            step = int(name) if name.isdigit() else -1
+            try:
+                mtime = config_path.stat().st_mtime
+            except OSError:
+                mtime = 0.0
+            candidates.append((step, mtime, name, config_path.resolve()))
+        if not candidates:
+            return None
+        return max(candidates)[3]
 
     def _train_request_with_policy_runtime(self, request: LeRobotSessionRequest) -> tuple[LeRobotSessionRequest, str]:
         policy_type = self._canonical_policy_type(request.policy_type or "act")
@@ -2638,7 +2936,7 @@ print("Updated Pi0.5 quantile stats for " + ", ".join(updated))
                 camera_port = self._device_port(profile, "camera", camera_key=camera_key, allow_fake=allow_fake)
                 if camera_port:
                     runtime_port = self._runtime_device_port(camera_port, "camera", live=mode == "live")
-                    camera_map[camera_key] = self._opencv_camera_config(runtime_port, request.fps or profile.fps)
+                    camera_map[camera_key] = self._opencv_camera_config(runtime_port, request.camera_fps or request.fps or profile.fps)
         if camera_map:
             args.append(f"--robot.cameras={json.dumps(camera_map, ensure_ascii=True)}")
         return args
@@ -2794,48 +3092,91 @@ print("Updated Pi0.5 quantile stats for " + ", ".join(updated))
             pass
 
     def _cleanup_lerobot_processes(self, workflow: str) -> list[dict[str, Any]]:
-        """Terminate stale LeRobot process groups started from this checkout."""
-        pids_by_group: dict[int, list[int]] = {}
-        for pid in self._project_lerobot_pids(workflow):
+        """Terminate stale LeRobot subprocesses without killing unrelated GUI/test processes."""
+        matched = self._project_lerobot_pids(workflow)
+        pids = self._expand_descendant_pids(matched)
+        current = {os.getpid(), os.getppid()}
+        current_pgrp = os.getpgrp()
+        safe_pids: list[int] = []
+        for pid in pids:
+            if pid in current:
+                continue
             try:
-                pgid = os.getpgid(pid)
+                if os.getpgid(pid) == current_pgrp:
+                    continue
             except ProcessLookupError:
                 continue
-            if pgid == os.getpgrp():
-                continue
-            pids_by_group.setdefault(pgid, []).append(pid)
-        if not pids_by_group:
+            safe_pids.append(pid)
+        safe_pids = sorted(set(safe_pids))
+        if not safe_pids:
             return []
 
-        for pgid in sorted(pids_by_group):
+        for pid in safe_pids:
             try:
-                os.killpg(pgid, signal.SIGTERM)
+                os.kill(pid, signal.SIGTERM)
             except ProcessLookupError:
                 pass
         deadline = time.time() + 5.0
         while time.time() < deadline:
-            remaining = [pid for pids in pids_by_group.values() for pid in pids if self._pid_alive(pid)]
+            remaining = [pid for pid in safe_pids if self._pid_alive(pid)]
             if not remaining:
                 break
             time.sleep(0.1)
-        for pgid, pids in pids_by_group.items():
-            if any(self._pid_alive(pid) for pid in pids):
+        for pid in safe_pids:
+            if self._pid_alive(pid):
                 try:
-                    os.killpg(pgid, signal.SIGKILL)
+                    os.kill(pid, signal.SIGKILL)
                 except ProcessLookupError:
                     pass
 
-        details = []
-        for pgid, pids in sorted(pids_by_group.items()):
-            details.append(f"pgid={pgid} pids={','.join(str(pid) for pid in sorted(pids))}")
-        return [{"step": "CLEANUP_LEROBOT_PROCESS_GROUPS", "status": "ok", "detail": f"{workflow}: {'; '.join(details)}"}]
+        return [
+            {
+                "step": "CLEANUP_LEROBOT_PROCESSES",
+                "status": "ok",
+                "detail": f"{workflow}: pids={','.join(str(pid) for pid in safe_pids)}",
+            }
+        ]
+
+    def _expand_descendant_pids(self, root_pids: list[int]) -> list[int]:
+        """Return root PIDs plus descendants using /proc parent links."""
+        roots = {int(pid) for pid in root_pids}
+        if not roots:
+            return []
+        children_by_parent: dict[int, list[int]] = {}
+        for name in os.listdir("/proc"):
+            if not name.isdigit():
+                continue
+            pid = int(name)
+            try:
+                stat = (Path("/proc") / name / "stat").read_text(encoding="utf-8", errors="replace")
+                after_comm = stat.rsplit(")", 1)[1].strip().split()
+                ppid = int(after_comm[1])
+            except (OSError, IndexError, ValueError):
+                continue
+            children_by_parent.setdefault(ppid, []).append(pid)
+        expanded = set(roots)
+        stack = list(roots)
+        while stack:
+            parent = stack.pop()
+            for child in children_by_parent.get(parent, []):
+                if child in expanded:
+                    continue
+                expanded.add(child)
+                stack.append(child)
+        return sorted(expanded)
 
     def _project_lerobot_pids(self, workflow: str) -> list[int]:
         markers_by_workflow = {
             "teleoperate": ("lerobot-teleoperate", "lerobot.teleoperate"),
             "record": ("lerobot-record", "lerobot.record"),
             "train": ("lerobot-train", "lerobot.train"),
-            "rollout": ("lerobot-rollout", "lerobot.rollout"),
+            "rollout": (
+                "lerobot-rollout",
+                "lerobot.rollout",
+                "lerobot_pi05_rollout_wrapper.py",
+                "eval_with_real_robot.py",
+                "rtc.enabled",
+            ),
             "visualize": ("lerobot.scripts.visualize_dataset", "lerobot.scripts.visualize_dataset_html", "visualize_dataset.py", "visualize_dataset_html.py"),
         }
         markers = markers_by_workflow.get(workflow, ("lerobot-", "lerobot."))
@@ -2857,7 +3198,7 @@ print("Updated Pi0.5 quantile stats for " + ", ".join(updated))
             if not parts:
                 continue
             cmd = " ".join(parts)
-            if not any(marker in cmd for marker in markers):
+            if not self._cmdline_matches_lerobot_marker(parts, markers):
                 continue
             try:
                 cwd = Path(os.readlink(proc_dir / "cwd")).resolve()
@@ -2866,6 +3207,32 @@ print("Updated Pi0.5 quantile stats for " + ", ".join(updated))
             if cwd == project or project in cwd.parents or str(project) in cmd:
                 pids.append(pid)
         return sorted(set(pids))
+
+    @staticmethod
+    def _cmdline_matches_lerobot_marker(parts: list[str], markers: tuple[str, ...]) -> bool:
+        """Match actual LeRobot commands without catching GUI DOM ids or test scripts."""
+        for part in parts:
+            base = Path(part).name
+            for marker in markers:
+                if marker.startswith("lerobot-"):
+                    if part == marker or base == marker:
+                        return True
+                    continue
+                if marker.startswith("lerobot."):
+                    if part == marker:
+                        return True
+                    continue
+                if marker.endswith(".py"):
+                    if base == marker or part.endswith(f"/{marker}"):
+                        return True
+                    continue
+                if marker == "rtc.enabled":
+                    if part == "--rtc.enabled=true" or part == "--rtc.enabled" or part.startswith("--rtc.enabled="):
+                        return True
+                    continue
+                if marker in part:
+                    return True
+        return False
 
     @staticmethod
     def _pid_alive(pid: int) -> bool:
@@ -3174,6 +3541,47 @@ print(json.dumps({"ok": True, "key": key_name}))
     @staticmethod
     def _policy_ref(request: LeRobotSessionRequest) -> str:
         return request.policy_checkpoint_path or request.policy_path or request.policy_repo_id
+
+    def _rollout_task_instruction(self, request: LeRobotSessionRequest, *, is_pi05: bool) -> str:
+        """Use the trained language command for known Pi0.5 local policies when safe to normalize."""
+        task = str(request.task_instruction or "").strip()
+        if not is_pi05:
+            return task or "pick and place specimen"
+        default_task = self._known_pi05_policy_task(request)
+        if not default_task:
+            return task or "pick and place specimen"
+        lowered = task.lower()
+        generic = lowered in {"", "pick and place specimen", "pick up the cube", "pick cube"}
+        same_cube_goal = "cube" in lowered and "metal plate" in lowered
+        if generic or same_cube_goal:
+            return default_task
+        return task
+
+    def _known_pi05_policy_task(self, request: LeRobotSessionRequest) -> str:
+        policy_ref = self._policy_ref(request)
+        if not policy_ref:
+            return ""
+        policy_path = _resolve_path(self.config.repo_root, policy_ref)
+        config_path = policy_path / "train_config.json" if policy_path.is_dir() else Path("")
+        dataset_repo_id = ""
+        try:
+            if config_path.is_file():
+                config = json.loads(config_path.read_text(encoding="utf-8"))
+                dataset = config.get("dataset") if isinstance(config, dict) else {}
+                if isinstance(dataset, dict):
+                    dataset_repo_id = str(dataset.get("repo_id") or "")
+        except Exception:
+            dataset_repo_id = ""
+        known_tasks = {
+            "local-pi05-v30/jin-pp-cube": "Pick up the cube and put on the metal plate",
+            "jin/pp-cube": "Pick up the cube and put on the metal plate",
+        }
+        if dataset_repo_id in known_tasks:
+            return known_tasks[dataset_repo_id]
+        if "pp_cube_train" in str(policy_path) or "jin-pp-cube" in dataset_repo_id:
+            return "Pick up the cube and put on the metal plate"
+        return ""
+
 
     def _scan_serial_ports(self) -> list[str]:
         patterns = ["/dev/ttyACM*", "/dev/ttyUSB*", "/dev/serial/by-id/*"]
@@ -3547,11 +3955,11 @@ finally:
 
     def _policy_presets(self) -> list[dict[str, str]]:
         defaults = [
-            {"label": "Manual policy path", "value": "", "source": "manual"},
-            {"label": "lerobot/act_koch_real", "value": "lerobot/act_koch_real", "repo_id": "lerobot/act_koch_real", "source": "huggingface"},
-            {"label": "Pi0.5 base", "value": self.config.pi05_base_policy, "repo_id": self.config.pi05_base_policy, "source": "huggingface"},
-            {"label": "Pi0 base", "value": "lerobot/pi0_base", "repo_id": "lerobot/pi0_base", "source": "huggingface"},
-            {"label": "Pi0FAST base", "value": "lerobot/pi0fast-base", "repo_id": "lerobot/pi0fast-base", "source": "huggingface"},
+            {"label": "Manual policy path", "value": "", "source": "manual", "policy_type": ""},
+            {"label": "lerobot/act_koch_real", "value": "lerobot/act_koch_real", "repo_id": "lerobot/act_koch_real", "source": "huggingface", "policy_type": "act"},
+            {"label": "Pi0.5 base", "value": self.config.pi05_base_policy, "repo_id": self.config.pi05_base_policy, "source": "huggingface", "policy_type": "pi05"},
+            {"label": "Pi0 base", "value": "lerobot/pi0_base", "repo_id": "lerobot/pi0_base", "source": "huggingface", "policy_type": "pi0"},
+            {"label": "Pi0FAST base", "value": "lerobot/pi0fast-base", "repo_id": "lerobot/pi0fast-base", "source": "huggingface", "policy_type": "pi0fast"},
         ]
         presets = []
         for item in self.config.policy_presets:
@@ -3563,6 +3971,7 @@ finally:
                     "path": str(item.get("path") or ""),
                     "repo_id": str(item.get("repo_id") or ""),
                     "source": str(item.get("source") or "config"),
+                    "policy_type": str(item.get("policy_type") or item.get("type") or ""),
                 }
             )
         unique: dict[str, dict[str, str]] = {}
@@ -3587,15 +3996,18 @@ finally:
             if not self._is_pretrained_policy_dir(path):
                 continue
             repo_id = ""
+            policy_type = ""
             try:
                 config = json.loads((path / "config.json").read_text(encoding="utf-8"))
                 repo_id = str(config.get("repo_id") or "")
+                policy_type = self._canonical_policy_type(str(config.get("type") or config.get("policy_type") or ""))
             except Exception:
                 repo_id = ""
+                policy_type = ""
             label = path.parent.parent.parent.name if "checkpoints" in str(path) else path.name
             if repo_id:
                 label = f"{label} ({repo_id})"
-            policies.append({"label": label, "value": str(path), "path": str(path), "repo_id": repo_id, "source": "local"})
+            policies.append({"label": label, "value": str(path), "path": str(path), "repo_id": repo_id, "source": "local", "policy_type": policy_type})
         return policies[:100]
 
     def _allowed_roots(self) -> list[Path]:
