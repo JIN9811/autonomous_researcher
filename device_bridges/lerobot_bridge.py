@@ -368,6 +368,16 @@ class LeRobotBridge:
         chosen = request.port or (candidates[0] if candidates else "")
         if not chosen:
             return self._error("lerobot.ports.detect", mode, profile.profile_id, "LEROBOT_PORT_NOT_FOUND", f"No candidate found for {request.device_role}.")
+        stable_chosen = self._stable_device_port(chosen, request.device_role) if mode == "live" else str(chosen or "").strip()
+        conflict = self._serial_role_port_conflict(profile.profile_id, request.device_role, stable_chosen, memory=memory)
+        if conflict:
+            return self._error(
+                "lerobot.ports.detect",
+                mode,
+                profile.profile_id,
+                "LEROBOT_SERIAL_ROLE_PORT_CONFLICT",
+                f"{request.device_role} port conflicts with saved {conflict} port: {stable_chosen}",
+            )
         saved = self._save_device_port(
             profile.profile_id,
             request.device_role,
@@ -409,12 +419,24 @@ class LeRobotBridge:
         port = request.port or (f"/dev/video{request.camera_index}" if request.device_role == "camera" and request.camera_index is not None else "")
         if not port:
             return self._error("lerobot.ports.save", mode, profile.profile_id, "LEROBOT_PORT_REQUIRED", "A port or camera index is required.")
+        memory = self._load_device_memory()
+        stable_port = self._stable_device_port(port, request.device_role) if mode == "live" else str(port or "").strip()
+        conflict = self._serial_role_port_conflict(profile.profile_id, request.device_role, stable_port, memory=memory)
+        if conflict:
+            return self._error(
+                "lerobot.ports.save",
+                mode,
+                profile.profile_id,
+                "LEROBOT_SERIAL_ROLE_PORT_CONFLICT",
+                f"{request.device_role} port conflicts with saved {conflict} port: {stable_port}",
+            )
         saved = self._save_device_port(
             profile.profile_id,
             request.device_role,
             port,
             camera_key=request.camera_key,
             source="manual",
+            memory=memory,
             prefer_identity_link=mode == "live",
         )
         step_trace = [{"step": "SAVE_DEVICE_PORT", "status": "ok", "detail": f"{request.device_role}={saved.get('port', port)}"}]
@@ -2180,7 +2202,7 @@ class LeRobotBridge:
                 "policy_n_action_steps": 50,
             }
             for field_name, value in pi05_defaults.items():
-                if field_name not in fields_set:
+                if field_name not in fields_set or self._is_pi05_stale_training_default(field_name, getattr(request, field_name, None)):
                     updates[field_name] = value
             requested_wandb = bool(updates.get("wandb_enable", request.wandb_enable))
             requested_wandb_mode = str(updates.get("wandb_mode", request.wandb_mode or "") or "").strip().lower()
@@ -2199,6 +2221,15 @@ class LeRobotBridge:
                 f"using Pi0.5 runtime env={self.config.pi05_conda_env_name} source={next_request.policy_pretrained_path}",
             )
         return next_request, f"using LeRobot runtime env={self.config.conda_env_name}"
+
+    @staticmethod
+    def _is_pi05_stale_training_default(field_name: str, value: Any) -> bool:
+        if field_name != "log_freq":
+            return False
+        try:
+            return int(value) == 200
+        except (TypeError, ValueError):
+            return False
 
     def _validate_pi05_train_request(self, request: LeRobotSessionRequest) -> None:
         errors: list[str] = []
@@ -3062,6 +3093,13 @@ print("Updated Pi0.5 quantile stats for " + ", ".join(updated))
         returncode = process.poll()
         session["returncode"] = returncode
         if returncode is None:
+            if str(session.get("workflow") or "").lower() == "rollout":
+                log_tail = self._tail_file(str(session.get("log_path", "")), max_chars=20000)
+                if self._rollout_log_has_fatal_runtime_failure(log_tail):
+                    session["status"] = "FAILED"
+                    session["returncode"] = -998
+                    self._terminate_live_process(process, signal.SIGTERM)
+                    return
             session["status"] = session.get("status") or "RUNNING"
             return
         self._close_log_handle(session_id)
@@ -3071,6 +3109,18 @@ print("Updated Pi0.5 quantile stats for " + ", ".join(updated))
             session["status"] = "COMPLETED"
         else:
             session["status"] = "FAILED"
+
+    @staticmethod
+    def _rollout_log_has_fatal_runtime_failure(log_tail: str) -> bool:
+        text = str(log_tail or "")
+        fatal_markers = (
+            "[ACTOR] Fatal exception",
+            "[GET_ACTIONS] Fatal exception",
+            "device reports readiness to read but returned no data",
+            "There is no status packet",
+            "Failed to open OpenCVCamera",
+        )
+        return any(marker in text for marker in fatal_markers)
 
     @staticmethod
     def _terminate_live_process(process: subprocess.Popen[str], sig: signal.Signals) -> None:
@@ -3667,6 +3717,31 @@ print(json.dumps({"ok": True, "key": key_name}))
         self._save_device_memory(data)
         return device
 
+    def _serial_role_port_conflict(self, profile_id: str, role: str, port: str, *, memory: dict[str, Any] | None = None) -> str:
+        if role not in {"follower", "leader"}:
+            return ""
+        raw = str(port or "").strip()
+        if not raw:
+            return ""
+        other_role = "leader" if role == "follower" else "follower"
+        data = memory or self._load_device_memory()
+        profile_memory = data.get("profiles", {}).get(profile_id, {})
+        devices = profile_memory.get("devices", {})
+        other = devices.get(other_role, {})
+        if not isinstance(other, dict):
+            return ""
+        other_port = str(other.get("port") or other.get("device_link") or "").strip()
+        if not other_port:
+            return ""
+        if raw == other_port:
+            return other_role
+        try:
+            if Path(raw).resolve(strict=True) == Path(other_port).resolve(strict=True):
+                return other_role
+        except Exception:
+            return ""
+        return ""
+
     def _saved_device_identity_link(self, saved: dict[str, Any], role: str) -> str:
         fallback = ""
         for key in ("device_link", "port"):
@@ -3704,18 +3779,16 @@ print(json.dumps({"ok": True, "key": key_name}))
         return bool(raw) and Path(raw).exists()
 
     def _runtime_device_port(self, port: str, role: str, *, live: bool) -> str:
-        """Resolve live serial identity links while preserving camera paths for OpenCV."""
+        """Use stable live device identity paths when available.
+
+        PySerial can open /dev/serial/by-id symlinks directly. Keeping the identity
+        path in the LeRobot command avoids baking in a transient /dev/ttyACM* name
+        after USB re-enumeration.
+        """
         raw = str(port or "").strip()
         if not raw or not live:
             return raw
-        if role == "camera":
-            return raw
-        if not self._is_device_identity_link(raw):
-            return raw
-        try:
-            return str(Path(raw).resolve(strict=True))
-        except Exception:
-            return raw
+        return raw
 
     def _stable_device_port(self, port: str, role: str) -> str:
         """Prefer persistent Linux by-id/by-path symlinks over ttyACM/video numbers."""

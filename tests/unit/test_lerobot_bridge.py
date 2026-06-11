@@ -201,6 +201,18 @@ def test_custom_udev_style_device_name_is_preserved(tmp_path: Path) -> None:
     assert "raw_port" not in saved["saved_device"]
 
 
+def test_leader_and_follower_cannot_share_same_serial_port(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+
+    follower = bridge.ports_save({"mode": "test", "profile_id": "fake_omx_ai", "device_role": "follower", "port": "/dev/ttyUSB0"})
+    leader = bridge.ports_save({"mode": "test", "profile_id": "fake_omx_ai", "device_role": "leader", "port": "/dev/ttyUSB0"})
+
+    assert follower["ok"] is True
+    assert leader["ok"] is False
+    assert leader["failure_code"] == "LEROBOT_SERIAL_ROLE_PORT_CONFLICT"
+    assert "follower" in leader["message"]
+
+
 def test_live_rollout_blocks_unavailable_saved_follower_port(tmp_path: Path) -> None:
     bridge = _bridge(tmp_path)
     policy_dir = tmp_path / "outputs" / "train" / "job" / "checkpoints" / "last" / "pretrained_model"
@@ -361,6 +373,7 @@ def test_pi05_train_uses_dedicated_runtime_and_hf_base_policy(tmp_path: Path) ->
     assert "--batch_size=32" in started["command_preview"]
     assert "--num_workers=12" in started["command_preview"]
     assert "--eval_freq=500" in started["command_preview"]
+    assert "--log_freq=5" in started["command_preview"]
     assert "--save_freq=500" in started["command_preview"]
     assert all(not arg.startswith("--eval.batch_size=") for arg in started["command_preview"])
     assert "--policy.n_obs_steps=1" in started["command_preview"]
@@ -375,6 +388,22 @@ def test_pi05_train_uses_dedicated_runtime_and_hf_base_policy(tmp_path: Path) ->
     assert all(not arg.startswith("--policy.use_amp=") for arg in started["command_preview"])
     assert "--wandb.mode=offline" in started["command_preview"]
 
+
+def test_pi05_train_replaces_stale_act_log_freq_default(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+
+    started = bridge.train_start(
+        {
+            "mode": "test",
+            "profile_id": "fake_omx_ai",
+            "dataset_repo_id": "jin/record-test",
+            "policy_type": "pi05",
+            "log_freq": 200,
+        }
+    )
+
+    assert started["ok"] is True
+    assert "--log_freq=5" in started["command_preview"]
 
 def test_pi05_train_forces_stale_wandb_request_offline(tmp_path: Path) -> None:
     bridge = _bridge(tmp_path)

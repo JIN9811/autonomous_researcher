@@ -282,6 +282,17 @@ const TRAIN_DEFAULTS = {
 };
 const GENERATED_PATH_SUFFIX_RE = /-(?:\d{8}T\d{6}(?:\d{6})?Z)(?:-\d{2})?$/;
 
+function trainDefaultNumber(field, fallback = null) {
+  const type = policyTypeInput ? String(policyTypeInput.value || "act").toLowerCase() : "act";
+  const defaults = TRAIN_DEFAULTS[type] || TRAIN_DEFAULTS.act || {};
+  const value = Number(defaults[field]);
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function trainNumberValue(el, field, fallback = null) {
+  return numberValue(el, trainDefaultNumber(field, fallback));
+}
+
 const TRAIN_DEFAULT_VALUE_SETS = {
   source_policy: new Set(["", PI05_BASE_POLICY]),
   job_name: new Set(["", "atr_lerobot_train", "atr_lerobot_act_train", "atr_lerobot_pi05_train"]),
@@ -517,12 +528,12 @@ function basePayload(overrides = {}) {
     job_name: jobNameInput ? jobNameInput.value.trim() : "atr_lerobot_train",
     device: deviceInput ? deviceInput.value || "cuda" : "cuda",
     seed: numberValue(trainSeedInput, null),
-    batch_size: numberValue(trainBatchSizeInput, 8),
-    steps: numberValue(trainStepsInput, 100000),
-    num_workers: numberValue(trainWorkersInput, 4),
-    eval_freq: numberValue(trainEvalFreqInput, 20000),
-    log_freq: numberValue(trainLogFreqInput, 200),
-    save_freq: numberValue(trainSaveFreqInput, 20000),
+    batch_size: trainNumberValue(trainBatchSizeInput, "batch_size", 8),
+    steps: trainNumberValue(trainStepsInput, "steps", 100000),
+    num_workers: trainNumberValue(trainWorkersInput, "num_workers", 4),
+    eval_freq: trainNumberValue(trainEvalFreqInput, "eval_freq", 20000),
+    log_freq: trainNumberValue(trainLogFreqInput, "log_freq", 200),
+    save_freq: trainNumberValue(trainSaveFreqInput, "save_freq", 20000),
     save_checkpoint: boolValue(trainSaveCheckpointInput),
     eval_batch_size: numberValue(trainEvalBatchInput, null),
     optimizer_type: trainOptimizerInput ? trainOptimizerInput.value || "" : "",
