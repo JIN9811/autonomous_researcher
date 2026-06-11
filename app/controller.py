@@ -771,6 +771,21 @@ class MainController:
                     out[key_text] = value[:8]
                 elif isinstance(value, dict):
                     out[key_text] = {str(k): v for k, v in list(value.items())[:12] if isinstance(v, (str, int, float, bool)) or v is None}
+            elif key_text == "hardware_alert" and isinstance(value, dict):
+                out[key_text] = {
+                    str(k): value.get(k)
+                    for k in (
+                        "alert_id",
+                        "device_class",
+                        "component",
+                        "reason_code",
+                        "severity",
+                        "blocks_workflow",
+                        "requires_ack",
+                        "message",
+                    )
+                    if k in value
+                }
             elif key_text in {"guardian_gate", "guardian_decision", "guardian_contract"} and isinstance(value, dict):
                 out[key_text] = {
                     str(k): value.get(k)
