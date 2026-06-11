@@ -6,7 +6,7 @@ Web dashboard panels:
 - global run metrics
 - run control buttons
 - current NemoClaw/vLLM model cells with per-model Loading/Unloading controls and status dots
-- Device Workspaces panel with dedicated launchers for Prusa MK4S 3DP Printer GUI, Windows PyAutoGUI Bridge GUI, LeRobot / ROBOTIS GUI, LeRobot Guided Device Bridge, BO Workspace, and CAE Analysis Workspace
+- Device Workspaces panel with dedicated launchers for Prusa MK4S 3DP Printer GUI, Windows PyAutoGUI Bridge GUI, LeRobot / ROBOTIS GUI, BO Workspace, and CAE Analysis Workspace
 - live loop timeline
 - agent status
 - device health
@@ -96,16 +96,6 @@ BO Workspace GUI route:
 - Saved BO settings include mode, objective, strategy, numeric backend (`lightweight_pool` or `botorch_optional`), acquisition function, budget, seed, exploration/exploitation controls, LLM preference enable/weight, top-k, and parameter-space bounds.
 - Benchmark and BO Agent actions remain virtual optimization controls only; the BO GUI does not directly start printer or robot hardware. `/api/bo/run` shows evidence intake, LLM reasoning audit, candidate ranking, and `next_design_request.v1` handoff.
 - Live GUI BO Agent messages render surrogate/acquisition graphs in a collapsed state by default. The collapsed card shows only strategy/acquisition/budget/latest candidate/recommendation metadata; SVG trace graphs and selected-point rows are created only when the operator clicks `그래프 보기`, and removed again by `그래프 접기`.
-
-LeRobot Guided Device Bridge route:
-- Main dashboard button: `Open Guided Device Bridge`
-- Route: `/device-bridge/lerobot`
-- API surface: `/api/device-bridge/lerobot/summary` plus the existing guarded `/api/lerobot/*` action endpoints.
-- This is a separate LeLab-inspired readiness-first control surface. It does not replace or mutate the existing `/lerobot` bridge window.
-- The page summarizes robot profile, follower/leader identity, camera readiness, policy choices, live gates, active sessions, and recent LeRobot jobs.
-- Its action buttons call the same backend-owned LeRobot bridge endpoints used by the existing GUI, CUI, and Manipulation Agent path; it must not introduce a second hardware-control backend.
-- It implements a browser-tab ownership indicator so hardware-affecting commands are intended for one owner tab while secondary tabs stay read-only for observation.
-- Use it when the operator needs a compact readiness board, policy lifecycle view, active workflow monitor, or LeLab-style launcher. Use `/lerobot` when detailed recording/training/rollout forms are required.
 
 LeRobot GUI route:
 - Main dashboard button: `Open LeRobot GUI`

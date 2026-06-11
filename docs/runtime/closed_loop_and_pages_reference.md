@@ -112,7 +112,6 @@ dispatch -> idle -> design -> specimen -> vision -> manipulation -> equipment ->
 | Self-Evolution Lab | `/evolution-lab` | `evolution_lab.html` | 실험 변형/태스크 관리, variant 승인/롤백 | `/api/evolution/*` (설정/작업/태스크/variant) |
 | Windows 장비 브릿지 | `/equipment/windows` | `windows_equipment.html` | Windows PyAutoGUI 브릿지 후보 검색/선택/프로그램 실행 | `/api/equipment/windows/config`, `/api/equipment/windows/discover`, `/api/equipment/windows/connect`, `/api/equipment/windows/select`, `/api/equipment/windows/delete`, `/api/equipment/windows/test`, `/api/equipment/windows/run-program` |
 | LeRobot GUI | `/lerobot` | `lerobot.html` | ROBOTIS teleop/record/train/rollout, 포트/카메라 구성, 조작 agent bridge, manipulation 연동 | `/api/lerobot/config`, `/api/lerobot/ports*`, `/api/lerobot/camera/test`, `/api/lerobot/teleoperate/*`, `/api/lerobot/record/*`, `/api/lerobot/train/*`, `/api/lerobot/rollout/*`, `/api/lerobot/manipulation-agent/*` |
-| LeRobot Guided Device Bridge | `/device-bridge/lerobot` | `lerobot_device_bridge.html` | LeLab-inspired readiness board, active workflow monitor, policy lifecycle, guided launcher; 기존 `/lerobot`는 변경하지 않음 | `/api/device-bridge/lerobot/summary` + guarded `/api/lerobot/*` actions |
 
 ---
 

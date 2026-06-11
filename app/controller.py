@@ -777,12 +777,6 @@ class MainController:
                     for k in ("gate_id", "stage", "phase", "decision", "reason_code", "risk_score", "ok_for_next_stage", "ok_for_bo")
                     if k in value
                 }
-            elif key_text == "hardware_alert" and isinstance(value, dict):
-                out[key_text] = {
-                    str(k): value.get(k)
-                    for k in ("alert_id", "device_class", "component", "reason_code", "severity", "blocks_workflow", "requires_ack", "message")
-                    if k in value
-                }
         return out
 
     def _compact_event_for_buffer(self, event: dict[str, Any]) -> dict[str, Any]:
