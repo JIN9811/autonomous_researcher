@@ -273,7 +273,7 @@ def checkable_local_path(value: Any) -> Path | None:
     if not raw or "://" in raw:
         return None
     if len(raw) >= 3 and raw[1] == ":" and raw[2] in {"\\", "/"}:
-        return None
+        return Path(raw).expanduser()
     candidate = Path(raw).expanduser()
     if candidate.is_absolute() or raw.startswith(".") or raw.startswith("~"):
         return candidate

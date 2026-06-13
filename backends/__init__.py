@@ -1,1 +1,1 @@
-"""Model backend package for Ollama and mock providers."""
+"""Model backend package for OpenAI API, local, and mock providers."""

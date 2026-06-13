@@ -228,6 +228,283 @@ def build_orchestration_plan(
         "created_at": now_iso(),
     }
 
+
+def _metadata_records(metadata: dict[str, Any], key: str) -> list[dict[str, Any]]:
+    value = metadata.get(key)
+    if not isinstance(value, list):
+        return []
+    return [dict(item) for item in value if isinstance(item, dict)]
+
+
+def _runtime_approval_records(metadata: dict[str, Any]) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    approvals = metadata.get("runtime_approvals")
+    if isinstance(approvals, dict):
+        records.extend(dict(item) for item in approvals.values() if isinstance(item, dict))
+    records.extend(_metadata_records(metadata, "guardian_approval_queue"))
+    seen: set[str] = set()
+    unique: list[dict[str, Any]] = []
+    for index, item in enumerate(records):
+        key = str(item.get("approval_id") or item.get("gate_key") or item.get("title") or index)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(item)
+    return unique
+
+
+def _missing_input_items(state: OrchestratorState) -> list[dict[str, Any]]:
+    spec = state.current_experiment_spec if isinstance(state.current_experiment_spec, dict) else {}
+    objective = state.current_experiment_objective if isinstance(state.current_experiment_objective, dict) else {}
+    checks = [
+        ("operator_goal", "Operator goal", state.active_goal),
+        ("specimen_geometry", "Specimen geometry", spec.get("geometry_type") or spec.get("structure_type") or spec.get("specimen_size_mm") or spec.get("size_mm")),
+        ("polymer_material", "Polymer / material", spec.get("material") or spec.get("material_family") or spec.get("polymer_grade") or spec.get("polymer")),
+        ("objective_type", "Objective type", objective.get("objective_type") or spec.get("objective_type") or spec.get("objective")),
+        ("test_protocol", "Test protocol", spec.get("test_protocol") or objective.get("test_protocol")),
+    ]
+    items: list[dict[str, Any]] = []
+    for key, label, value in checks:
+        missing = value in (None, "", [], {})
+        items.append(
+            {
+                "key": key,
+                "label": label,
+                "status": "missing" if missing else "ready",
+                "value": "" if missing else value,
+                "required": True,
+            }
+        )
+    return items
+
+
+def _route_state_from_plan(plan: dict[str, Any], state: OrchestratorState) -> dict[str, Any]:
+    route = plan.get("route") if isinstance(plan.get("route"), list) else []
+    route_steps = [dict(item) for item in route if isinstance(item, dict)]
+    completed = [item for item in route_steps if str(item.get("status") or "").lower() in {"complete", "completed", "done", "success"}]
+    blocked = [item for item in route_steps if any(token in str(item.get("status") or "").lower() for token in ("block", "fail", "error", "reject"))]
+    active = next((item for item in route_steps if any(token in str(item.get("status") or "").lower() for token in ("active", "running", "waiting"))), None)
+    if active is None and route_steps:
+        active = route_steps[0]
+    return {
+        "current_stage": plan.get("current_stage") or state.stage.value,
+        "next_recommended_stage": plan.get("next_recommended_stage") or (active or {}).get("stage", state.stage.value),
+        "route": route_steps,
+        "route_count": len(route_steps),
+        "completed_count": len(completed),
+        "blocked_count": len(blocked),
+        "active_stage": (active or {}).get("stage", state.stage.value),
+        "progress_ratio": round(len(completed) / max(1, len(route_steps)), 4),
+        "parallelizable_check_count": len(plan.get("parallelizable_checks") if isinstance(plan.get("parallelizable_checks"), list) else []),
+        "serial_physical_action_count": len(plan.get("serial_physical_actions") if isinstance(plan.get("serial_physical_actions"), list) else []),
+    }
+
+
+def _decision_register_summary(metadata: dict[str, Any]) -> dict[str, Any]:
+    decisions = _metadata_records(metadata, "orchestrator_decision_register")
+    handoffs = _metadata_records(metadata, "orchestrator_handoff_packets")
+    followups = _metadata_records(metadata, "orchestrator_followups")
+    blocked = [item for item in decisions if any(token in str(item.get("decision") or item.get("status") or "").lower() for token in ("block", "reject", "fail", "error"))]
+    return {
+        "decision_count": len(decisions),
+        "handoff_count": len(handoffs),
+        "followup_count": len(followups),
+        "blocked_count": len(blocked),
+        "latest_decision": metadata.get("latest_orchestrator_decision") if isinstance(metadata.get("latest_orchestrator_decision"), dict) else (decisions[-1] if decisions else {}),
+        "latest_handoff": metadata.get("latest_orchestrator_handoff") if isinstance(metadata.get("latest_orchestrator_handoff"), dict) else (handoffs[-1] if handoffs else {}),
+        "items": decisions[-12:],
+    }
+
+
+def _followup_questions_summary(metadata: dict[str, Any], missing_items: list[dict[str, Any]]) -> dict[str, Any]:
+    followups = _metadata_records(metadata, "orchestrator_followups")
+    operator_queue = _metadata_records(metadata, "operator_followup_queue")
+    open_followups = [item for item in followups if item.get("requires_response")]
+    synthetic_missing = [
+        {
+            "schema": "orchestrator_followup_question.v1",
+            "source": "missing_input",
+            "status": "waiting_operator",
+            "question": f"Provide {item['label']}",
+            "field": item["key"],
+            "priority": "high",
+        }
+        for item in missing_items
+        if item.get("status") == "missing"
+    ]
+    questions = operator_queue[-10:] + open_followups[-10:] + synthetic_missing
+    return {
+        "question_count": len(questions),
+        "queued_operator_count": len(operator_queue),
+        "requires_response_count": len(open_followups) + len(synthetic_missing),
+        "status": "waiting_operator" if questions else "clear",
+        "items": questions[-12:],
+    }
+
+
+def _approval_summary(metadata: dict[str, Any]) -> dict[str, Any]:
+    approvals = _runtime_approval_records(metadata)
+    pending = [item for item in approvals if str(item.get("status") or "").lower() in {"pending", "waiting", "waiting_approval", "approval_required"}]
+    approved = [item for item in approvals if str(item.get("status") or item.get("decision") or "").lower() in {"approved", "resolved", "allow", "continue"}]
+    rejected = [item for item in approvals if any(token in str(item.get("status") or item.get("decision") or "").lower() for token in ("reject", "deny", "block", "safe_stop"))]
+    return {
+        "approval_count": len(approvals),
+        "pending_count": len(pending),
+        "approved_count": len(approved),
+        "blocked_count": len(rejected),
+        "status": "pending" if pending else "clear",
+        "items": approvals[-12:],
+    }
+
+
+def _risk_register_summary(state: OrchestratorState, metadata: dict[str, Any], approval: dict[str, Any]) -> dict[str, Any]:
+    incidents = _metadata_records(metadata, "incident_records")
+    latest_gate = metadata.get("latest_guardian_gate") if isinstance(metadata.get("latest_guardian_gate"), dict) else {}
+    latest_decision = metadata.get("latest_guardian_gate_decision") if isinstance(metadata.get("latest_guardian_gate_decision"), dict) else metadata.get("latest_guardian_decision") if isinstance(metadata.get("latest_guardian_decision"), dict) else {}
+    risk_items: list[dict[str, Any]] = []
+    if latest_gate:
+        risk_items.append(
+            {
+                "source": "guardian_gate",
+                "stage": latest_gate.get("stage", state.stage.value),
+                "decision": latest_gate.get("decision", latest_decision.get("decision", "")),
+                "reason": latest_gate.get("reason_code") or latest_gate.get("reason") or latest_decision.get("reason_code", ""),
+                "risk_score": latest_gate.get("risk_score", latest_decision.get("risk_score", 0.0)),
+                "status": latest_gate.get("status") or latest_gate.get("decision") or "recorded",
+            }
+        )
+    for incident in incidents[-10:]:
+        risk_items.append(
+            {
+                "source": "incident",
+                "stage": incident.get("stage", ""),
+                "decision": incident.get("decision", ""),
+                "reason": incident.get("reason_code") or incident.get("reason") or incident.get("title", ""),
+                "risk_score": incident.get("risk_score", 0.0),
+                "status": incident.get("status", "incident"),
+            }
+        )
+    for name, value in (state.device_health or {}).items():
+        text = str(value or "")
+        if any(token in text.lower() for token in ("warning", "blocked", "failed", "error", "critical")):
+            risk_items.append(
+                {
+                    "source": "device_health",
+                    "stage": state.stage.value,
+                    "decision": "review",
+                    "reason": f"{name}: {text}",
+                    "risk_score": 0.45 if "warning" in text.lower() else 0.85,
+                    "status": text,
+                }
+            )
+    max_score = 0.0
+    for item in risk_items:
+        try:
+            max_score = max(max_score, float(item.get("risk_score") or 0.0))
+        except (TypeError, ValueError):
+            continue
+    if approval.get("pending_count", 0):
+        max_score = max(max_score, 0.35)
+    return {
+        "risk_count": len(risk_items),
+        "incident_count": len(incidents),
+        "highest_risk": risk_items[-1]["reason"] if risk_items else "",
+        "risk_score": round(max_score, 4),
+        "status": "blocked" if any(str(item.get("decision") or "").lower() in {"block", "safe_stop"} for item in risk_items) else "warning" if risk_items else "clear",
+        "items": risk_items[-12:],
+    }
+
+
+def _task_queue_from_route(route_state: dict[str, Any]) -> dict[str, Any]:
+    tasks: list[dict[str, Any]] = []
+    for item in route_state.get("route", []):
+        if not isinstance(item, dict):
+            continue
+        stage = str(item.get("stage") or "")
+        status = str(item.get("status") or "pending")
+        required_outputs = item.get("required_outputs") if isinstance(item.get("required_outputs"), list) else []
+        priority = "high" if status in {"active", "running", "waiting_approval"} else "normal" if status == "pending" else "low"
+        tasks.append(
+            {
+                "order": item.get("order", len(tasks) + 1),
+                "task": f"Run {stage or item.get('agent', 'stage')}",
+                "stage": stage,
+                "agent": item.get("agent", STAGE_AGENT.get(stage, stage)),
+                "status": status,
+                "priority": priority,
+                "required_outputs": required_outputs,
+                "required_output_count": len(required_outputs),
+                "guardian_pre_gate": item.get("guardian_pre_gate", ""),
+                "guardian_post_gate": item.get("guardian_post_gate", ""),
+            }
+        )
+    return {
+        "queued_count": sum(1 for item in tasks if item["status"] == "pending"),
+        "active_count": sum(1 for item in tasks if item["status"] in {"active", "running", "waiting_approval"}),
+        "completed_count": sum(1 for item in tasks if item["status"] in {"complete", "completed", "done", "success"}),
+        "blocked_count": sum(1 for item in tasks if any(token in item["status"] for token in ("block", "fail", "error"))),
+        "next_agent": (tasks[0]["agent"] if tasks else ""),
+        "items": tasks,
+    }
+
+
+def build_orchestrator_control_plane_snapshot(
+    *,
+    state: OrchestratorState,
+    mission_contract: dict[str, Any] | None = None,
+    orchestration_plan: dict[str, Any] | None = None,
+    next_action: str | None = None,
+) -> dict[str, Any]:
+    """Build the ORC Live GUI report contract from current supervisor state."""
+    metadata = state.run_metadata if isinstance(state.run_metadata, dict) else {}
+    mission = mission_contract if isinstance(mission_contract, dict) else build_mission_contract(state=state)
+    plan = orchestration_plan if isinstance(orchestration_plan, dict) else build_orchestration_plan(state=state)
+    missing_items = _missing_input_items(state)
+    missing_count = sum(1 for item in missing_items if item["status"] == "missing")
+    route_state = _route_state_from_plan(plan, state)
+    decision_register = _decision_register_summary(metadata)
+    followup_questions = _followup_questions_summary(metadata, missing_items)
+    approval = _approval_summary(metadata)
+    risk_register = _risk_register_summary(state, metadata, approval)
+    task_queue = _task_queue_from_route(route_state)
+    next_stage = route_state.get("next_recommended_stage") or state.stage.value
+    next_agent = STAGE_AGENT.get(str(next_stage), str(next_stage))
+    confidence = 1.0
+    if missing_items:
+        confidence -= min(0.35, missing_count / max(1, len(missing_items)) * 0.35)
+    if approval.get("pending_count", 0):
+        confidence -= 0.15
+    if risk_register.get("status") in {"warning", "blocked"}:
+        confidence -= 0.15 if risk_register.get("status") == "warning" else 0.35
+    return {
+        "schema": "orchestrator_control_plane.v1",
+        "run_id": state.run_id,
+        "experiment_id": state.experiment_id,
+        "loop_id": state.loop_count,
+        "stage": state.stage.value,
+        "mission_contract": mission,
+        "route_state": route_state,
+        "missing_inputs": {
+            "missing_count": missing_count,
+            "ready_count": len(missing_items) - missing_count,
+            "status": "complete" if missing_count == 0 else "missing_required_inputs",
+            "items": missing_items,
+        },
+        "decision_register": decision_register,
+        "followup_questions": followup_questions,
+        "approval_summary": approval,
+        "risk_register": risk_register,
+        "task_queue": task_queue,
+        "next_action": {
+            "next_stage": next_stage,
+            "next_agent": next_agent,
+            "summary": next_action or f"Continue from {state.stage.value} to {next_stage}.",
+            "confidence": round(max(0.0, min(1.0, confidence)), 4),
+            "status": "blocked" if risk_register.get("status") == "blocked" else "waiting_operator" if missing_count or approval.get("pending_count", 0) else "ready",
+        },
+        "created_at": now_iso(),
+    }
+
 def evidence_refs_from_payload(payload: dict[str, Any]) -> list[str]:
     refs: list[str] = []
 

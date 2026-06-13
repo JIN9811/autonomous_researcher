@@ -181,9 +181,12 @@ async def test_design_agent_returns_structured_design_report_and_handoff_packet(
     data = result.data
     spec = data["experiment_spec"]
     report = data["design_report"]
+    screen_report = data["design_agent_report"]
     handoff = data["handoff_packet"]
 
     assert report["schema"] == "design_report.v1"
+    assert screen_report["schema"] == "design_agent_report.v1"
+    assert screen_report["source_report_id"] == report["report_id"]
     assert handoff["schema"] == "design_candidate.v1"
     assert handoff["experiment_spec"] == spec
     assert handoff["status"] == "ready"
@@ -195,6 +198,30 @@ async def test_design_agent_returns_structured_design_report_and_handoff_packet(
     assert report["candidate_generation"]["candidate_count"] == 12
     assert report["candidate_generation"]["valid_count"] >= 1
     assert len(report["candidate_generation"]["candidate_ledger"]) >= 12
+    expected_sections = {
+        "design_brief",
+        "candidate_board",
+        "candidate_ranking",
+        "parameter_sweep",
+        "expected_performance",
+        "manufacturability",
+        "material_notes",
+        "handoff_to_specimen",
+        "artifact_ledger",
+    }
+    assert expected_sections.issubset(screen_report)
+    assert screen_report["candidate_ranking"]["rows"][0]["candidate_id"] == spec["candidate_id"]
+    assert screen_report["parameter_sweep"]["heatmap_cells"]
+    assert screen_report["expected_performance"]["scatter_points"]
+    assert screen_report["expected_performance"]["radar"]
+    assert screen_report["handoff_to_specimen"]["packet_status"] == "ready"
+    assert {item["type"] for item in screen_report["visualization_manifest"]} >= {
+        "candidate_cards",
+        "ranking_bar_chart",
+        "heatmap",
+        "scatter_plot",
+        "radar_chart",
+    }
     assert data["metrics"]["selected_score"] == spec["expected_objective_proxy_score"]
     assert data["decisions"] == report["decision_register"]
 

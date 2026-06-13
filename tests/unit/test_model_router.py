@@ -29,3 +29,11 @@ def test_vllm_orchestrator_defaults_to_31b() -> None:
 
     assert selection.primary == "gemma4:31b"
     assert selection.fallback == "gemma4:e4b-it-nvfp4"
+
+
+def test_backend_fallback_defaults_to_openai() -> None:
+    cfg = load_yaml(resolve_path("configs/models.yaml"))
+
+    assert cfg["backend"]["default"] == "vllm"
+    assert cfg["backend"]["fallback"] == "openai"
+    assert cfg["backend_models"]["openai"]["orchestrator"]["primary"] == "gpt-5.5"

@@ -16,14 +16,13 @@
 # - Risky places to edit: role keys expected by code
 # - Related files: backends/model_router.py, .env.example
 #
-# The default and vllm branches use NemoClaw/k3s vLLM NVFP4 ModelOpt FP4
-# deployments defined in configs/system.yaml and deploy/nemoclaw-vllm.yaml.
-# The ollama and nemoclaw branches intentionally keep the installed Ollama
-# tags because those backends are proxy/local-Ollama paths, not vLLM.
+# The default branch remains the local/NemoClaw vLLM route. The backend fallback
+# is OpenAI API so Windows or Linux deployments can still run with an API key
+# when local inference is unavailable or intentionally skipped.
 
 backend:
   default: vllm
-  fallback: vllm
+  fallback: openai
 
 models:
   orchestrator:
@@ -33,6 +32,11 @@ models:
     primary: gemma4:e4b-it-nvfp4
     fallback: gemma4:31b
 backend_models:
+  openai:
+    orchestrator:
+      primary: gpt-5.5
+    e4b:
+      primary: gpt-5.5
   nemoclaw:
     orchestrator:
       primary: gemma4:e4b-it-bf16

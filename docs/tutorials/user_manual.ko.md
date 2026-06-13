@@ -34,7 +34,7 @@
 필수:
 
 - Linux workstation
-- Python 3.10 이상
+- Python 3.11 이상
 - Git
 - Bash terminal
 - 이 저장소: `/home/jin/autonomous_researcher`

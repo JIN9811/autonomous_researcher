@@ -40,6 +40,7 @@ const btnPlanningSend = document.getElementById("btn-planning-send");
 const liveAgentBinderList = document.getElementById("live-agent-binder-list");
 const liveCenterTitle = document.getElementById("live-center-title");
 const liveFocusStrip = document.getElementById("live-focus-strip");
+const liveReportToolbar = document.getElementById("live-report-toolbar");
 const liveReportPanel = document.getElementById("live-report-panel");
 const liveBackendPanel = document.getElementById("live-backend-panel");
 const liveGraphPanel = document.getElementById("live-graph-panel");
@@ -51,8 +52,10 @@ const liveTimelineFilters = Array.from(document.querySelectorAll(".live-timeline
 const liveChatTarget = document.getElementById("live-chat-target");
 const liveChatMode = document.getElementById("live-chat-mode");
 const liveChatContextStrip = document.getElementById("live-chat-context-strip");
+const liveExperimentSetupPanel = document.getElementById("live-experiment-setup-panel");
 const liveTimelineStrip = document.getElementById("live-timeline-strip");
 const liveDeviceStrip = document.getElementById("live-device-strip");
+const liveMissionProgressSlim = document.getElementById("live-mission-progress-slim");
 const liveActiveAgentChip = document.getElementById("live-active-agent-chip");
 const liveStreamChip = document.getElementById("live-stream-chip");
 const liveSyncChip = document.getElementById("live-sync-chip");
@@ -62,13 +65,15 @@ const liveTokenChip = document.getElementById("live-token-chip");
 const liveRuntimeClock = document.getElementById("live-runtime-clock");
 const liveEventCount = document.getElementById("live-event-count");
 const btnLiveBottomCollapse = document.getElementById("btn-live-bottom-collapse");
+const btnLiveChatCollapse = document.getElementById("btn-live-chat-collapse");
+const btnLiveChatRestore = document.getElementById("btn-live-chat-restore");
 const btnLiveSafeStop = document.getElementById("btn-live-safe-stop");
 const liveQuickActionButtons = Array.from(document.querySelectorAll(".live-quick-action"));
 const liveHoverTooltip = document.getElementById("live-hover-tooltip");
 const liveShortcutOverlay = document.getElementById("live-shortcut-overlay");
 const btnLiveShortcutsClose = document.getElementById("btn-live-shortcuts-close");
 const LIVE_UI_STATE_KEY = "autonomousLiveGuiUiState";
-const LIVE_SESSION_CACHE_KEY_PREFIX = "autonomousLivePlanningSessionCache:v2:";
+const LIVE_SESSION_CACHE_KEY_PREFIX = "autonomousLivePlanningSessionCache:v3:";
 const LIVE_BOX_CACHE_IDS = [
   "live-agent-binder-list",
   "live-focus-strip",
@@ -79,6 +84,7 @@ const LIVE_BOX_CACHE_IDS = [
   "live-timeline-detail-panel",
   "live-timeline-strip",
   "live-device-strip",
+  "live-mission-progress-slim",
 ];
 const LIVE_BOX_CACHE_MAX_ITEM_CHARS = 220000;
 const LIVE_BOX_CACHE_MAX_TOTAL_CHARS = 700000;
@@ -139,7 +145,15 @@ const LIVE_SYNC_STALE_MS = 15000;
 const LIVE_SYNC_ERROR_MS = 60000;
 let liveRuntimeRenderQueued = false;
 let liveRuntimeRenderQueuedSession = null;
+let liveMissionMarqueeFrame = null;
+let liveMissionMarqueeAnimation = null;
+let liveMissionMarqueeSignature = null;
 const liveCenterRenderKeys = new Map();
+const liveScrollFadeTimers = new WeakMap();
+let liveOrcChartInstances = [];
+let liveOrcChartRenderFrame = null;
+let liveOrcEchartsLoadPromise = null;
+let liveOrcChartHydrationTimer = null;
 
 let queryGoal = "Design and validate a live-mode specimen plan before hardware execution.";
 let queryBackend = "vllm";
@@ -186,6 +200,11 @@ let liveEmergencyStopArmedUntil = 0;
 let liveEmergencyStopArmTimer = null;
 let liveBackendPlanningBusy = false;
 let liveBottomCollapsed = false;
+let liveChatCollapsed = false;
+let liveChatUnreadCount = 0;
+let liveChatReadWatermarkKey = "";
+let liveChatReadWatermarkCount = 0;
+let liveChatUnreadInitialized = false;
 let planningBootstrapStarted = false;
 let planningRefreshTimer = null;
 let planningFreshSessionInitialized = false;
@@ -243,6 +262,208 @@ function setLiveBottomCollapsed(collapsed, options = {}) {
   if (options.persist !== false) persistLiveUiState();
 }
 
+function liveRequestFrame(callback) {
+  if (typeof window.requestAnimationFrame === "function") return window.requestAnimationFrame(callback);
+  return window.setTimeout(() => callback(Date.now()), 16);
+}
+
+function liveCancelFrame(handle) {
+  if (!handle) return;
+  if (typeof window.cancelAnimationFrame === "function") window.cancelAnimationFrame(handle);
+  else window.clearTimeout(handle);
+}
+
+function liveScrollableAncestor(target) {
+  let element = target && target.nodeType === 1 ? target : document.body;
+  while (element && element !== document.body) {
+    const style = window.getComputedStyle(element);
+    const canScrollY = /(auto|scroll|overlay)/.test(style.overflowY || "") && element.scrollHeight > element.clientHeight + 1;
+    const canScrollX = /(auto|scroll|overlay)/.test(style.overflowX || "") && element.scrollWidth > element.clientWidth + 1;
+    if (canScrollY || canScrollX) return element;
+    element = element.parentElement;
+  }
+  return document.body;
+}
+
+function markLiveScrollActive(target) {
+  const element = target === document || target === window || target === document.documentElement ? document.body : target;
+  if (!element || !element.classList) return;
+  element.classList.add("is-scrolling");
+  const previousTimer = liveScrollFadeTimers.get(element);
+  if (previousTimer) window.clearTimeout(previousTimer);
+  const timer = window.setTimeout(() => {
+    element.classList.remove("is-scrolling");
+    liveScrollFadeTimers.delete(element);
+  }, 900);
+  liveScrollFadeTimers.set(element, timer);
+}
+
+function setupLiveScrollbarFade() {
+  document.addEventListener("scroll", (event) => {
+    markLiveScrollActive(liveScrollableAncestor(event.target || document.body));
+  }, true);
+  window.addEventListener("wheel", (event) => {
+    markLiveScrollActive(liveScrollableAncestor(event.target || document.body));
+  }, { passive: true });
+}
+
+function liveAgentNeedsChatPanel(agentId = liveSelectedAgent) {
+  if (liveReportPage === "attention") return true;
+  return new Set(["objective", "orchestrator"]).has(String(agentId || "").toLowerCase());
+}
+
+function liveChatCanManualCollapse(agentId = liveSelectedAgent) {
+  return liveAgentNeedsChatPanel(agentId);
+}
+
+function liveChatUnreadLabel(count = liveChatUnreadCount) {
+  const value = Math.max(0, Number(count) || 0);
+  if (!value) return "";
+  return value > 99 ? "99+" : String(value);
+}
+
+function isLiveUnreadChatMessage(msg) {
+  if (!isChatSurfaceMessage(msg)) return false;
+  if (isOperatorPlanningMessage(msg) || isPlanningSystemMessage(msg)) return false;
+  return Boolean(msg?.pendingReasoning || String(msg?.content || "").trim());
+}
+
+function liveUnreadChatMessages(messages = planningMessagesCache) {
+  return (messages || []).filter(isLiveUnreadChatMessage);
+}
+
+function markLiveChatMessagesRead(messages = planningMessagesCache) {
+  const chatMessages = liveUnreadChatMessages(messages);
+  liveChatReadWatermarkCount = chatMessages.length;
+  liveChatReadWatermarkKey = chatMessages.length ? planningMessageKey(chatMessages[chatMessages.length - 1], chatMessages.length - 1) : "";
+  liveChatUnreadCount = 0;
+  liveChatUnreadInitialized = true;
+  syncLiveChatUnreadIndicators();
+}
+
+function updateLiveChatUnreadFromMessages(messages = planningMessagesCache) {
+  const chatMessages = liveUnreadChatMessages(messages);
+  if (!liveChatUnreadInitialized) {
+    markLiveChatMessagesRead(messages);
+    return;
+  }
+  if (!liveChatCollapsed) {
+    markLiveChatMessagesRead(messages);
+    return;
+  }
+  const keys = chatMessages.map((msg, index) => planningMessageKey(msg, index));
+  const baselineIndex = liveChatReadWatermarkKey ? keys.lastIndexOf(liveChatReadWatermarkKey) : -1;
+  liveChatUnreadCount = baselineIndex >= 0
+    ? Math.max(0, chatMessages.length - baselineIndex - 1)
+    : Math.max(0, chatMessages.length - liveChatReadWatermarkCount);
+  syncLiveChatUnreadIndicators();
+}
+
+function syncLiveChatUnreadIndicators(root = document) {
+  const countLabel = liveChatUnreadLabel();
+  const hasUnread = Boolean(countLabel);
+  const targets = [
+    root && root.querySelector ? root.querySelector('.live-report-action[data-report-action="toggle_chat"]') : null,
+    btnLiveChatCollapse,
+    btnLiveChatRestore,
+  ].filter(Boolean);
+  targets.forEach((element) => {
+    element.classList.toggle("has-chat-unread", hasUnread);
+    element.classList.toggle("is-chat-collapsed", liveChatCollapsed);
+    element.dataset.chatUnreadCount = countLabel;
+    element.dataset.chatAlertState = hasUnread ? "unread" : liveChatCollapsed ? "collapsed" : "idle";
+    const opensAgentChat = element.dataset.chatActionMode === "open_agent";
+    const baseLabel = opensAgentChat
+      ? `Open Runtime Chat for ${element.dataset.chatAgentLabel || liveAgentLabel(liveSelectedAgent)}`
+      : element.dataset.reportAction === "toggle_chat" || element === btnLiveChatRestore
+        ? (liveChatCollapsed ? "Show Runtime Chat" : "Hide Runtime Chat")
+        : "Collapse chat panel";
+    const label = hasUnread ? `${baseLabel} (${countLabel} unread)` : baseLabel;
+    element.setAttribute("aria-label", label);
+    element.dataset.liveTooltip = label;
+  });
+}
+
+function setLiveChatCollapsed(collapsed, options = {}) {
+  const nextCollapsed = Boolean(collapsed);
+  const changed = nextCollapsed !== liveChatCollapsed;
+  liveChatCollapsed = nextCollapsed;
+  if (options.resetUnread !== false && (changed || !liveChatUnreadInitialized)) markLiveChatMessagesRead();
+  applyLiveAgentLayoutMode();
+  if (changed) scheduleLiveGraphScaleRefresh();
+  renderLiveReportToolbar();
+  renderLiveExperimentSetupPanel(liveLastSession);
+  syncLiveChatUnreadIndicators();
+  if (options.persist !== false) persistLiveUiState();
+}
+
+function applyLiveAgentLayoutMode() {
+  const agentNeedsChat = liveAgentNeedsChatPanel(liveSelectedAgent);
+  const automaticReportFocus = !agentNeedsChat;
+  const manualChatCollapsed = liveChatCollapsed && liveChatCanManualCollapse(liveSelectedAgent);
+  const reportFocus = automaticReportFocus || manualChatCollapsed;
+  const shell = document.querySelector(".planning-runtime-shell");
+  if (shell) {
+    shell.classList.toggle("live-agent-report-focus", reportFocus);
+    shell.classList.toggle("live-chat-collapsed", manualChatCollapsed);
+    shell.dataset.liveChatVisible = reportFocus ? "false" : "true";
+    shell.dataset.liveChatCollapseMode = manualChatCollapsed ? "manual" : automaticReportFocus ? "auto" : "open";
+  }
+  document.body.classList.toggle("live-agent-report-focus", reportFocus);
+  document.body.classList.toggle("live-chat-collapsed", manualChatCollapsed);
+  const chatPanel = document.querySelector(".live-chat-panel");
+  if (chatPanel) {
+    chatPanel.setAttribute("aria-hidden", automaticReportFocus && !manualChatCollapsed ? "true" : "false");
+    chatPanel.setAttribute("aria-label", manualChatCollapsed ? "experimental setup panel" : "persistent runtime chat");
+    const chatEyebrow = chatPanel.querySelector(".live-chat-header .eyebrow");
+    const chatTitle = chatPanel.querySelector(".live-chat-header h2");
+    if (chatEyebrow) chatEyebrow.textContent = manualChatCollapsed ? "Setup" : "Runtime";
+    if (chatTitle) chatTitle.textContent = manualChatCollapsed ? "Experimental Setup" : "Chat";
+    chatPanel
+      .querySelectorAll(".live-chat-context-controls, .live-chat-context-strip, .live-quick-actions, .planning-chat-window, .planning-chat-log, .planning-composer")
+      .forEach((element) => {
+        if (manualChatCollapsed) {
+          element.setAttribute("aria-hidden", "true");
+          element.style.setProperty("display", "none", "important");
+          element.style.setProperty("visibility", "hidden", "important");
+          element.style.setProperty("pointer-events", "none", "important");
+        } else {
+          element.removeAttribute("aria-hidden");
+          element.style.removeProperty("display");
+          element.style.removeProperty("visibility");
+          element.style.removeProperty("pointer-events");
+        }
+      });
+  }
+  if (btnLiveChatCollapse) {
+    const canCollapse = liveChatCanManualCollapse(liveSelectedAgent);
+    btnLiveChatCollapse.hidden = !canCollapse || manualChatCollapsed;
+    btnLiveChatCollapse.setAttribute("aria-expanded", manualChatCollapsed ? "false" : "true");
+    setCompactTextWithTitle(
+      btnLiveChatCollapse,
+      "Hide",
+      canCollapse ? "Collapse chat panel and expand current view" : "Chat panel follows agent view"
+    );
+  }
+  if (btnLiveChatRestore) {
+    btnLiveChatRestore.hidden = true;
+    btnLiveChatRestore.setAttribute("aria-hidden", "true");
+    btnLiveChatRestore.setAttribute("aria-expanded", "false");
+    setCompactTextWithTitle(btnLiveChatRestore, "", "Runtime chat is opened from the top toolbar.");
+  }
+  syncLiveChatUnreadIndicators();
+}
+
+function scheduleLiveGraphScaleRefresh() {
+  if (liveCurrentView !== "graph" || !liveLastSession) return;
+  liveGraphFocusPending = true;
+  liveCenterRenderKeys.delete("graph");
+  liveRequestFrame(() => {
+    if (liveCurrentView !== "graph" || !liveLastSession) return;
+    renderActiveLiveCenterPanel(liveLastSession, { force: true });
+  });
+}
+
 function currentRuntimeAgent() {
   const state = (liveLastSession && liveLastSession.state) || (liveLastSnapshot && liveLastSnapshot.state) || {};
   return agentIdFromStage(state.stage || "") || liveSelectedAgent || "orchestrator";
@@ -274,6 +495,7 @@ function liveUiStatePayload() {
     chatTarget: liveChatTarget && validLiveChatTarget(liveChatTarget.value) ? String(liveChatTarget.value) : "selected_agent",
     chatMode: liveChatMode ? String(liveChatMode.value || "ask") : "ask",
     bottomCollapsed: Boolean(liveBottomCollapsed),
+    chatCollapsed: Boolean(liveChatCollapsed),
     expandedChatGroups: Array.from(planningExpandedChatGroups).slice(-120),
     planningSessionId: planningSessionId || "",
     updatedAt: new Date().toISOString(),
@@ -363,7 +585,7 @@ function restoreLiveBoxCache(boxCache) {
     element.innerHTML = item.html;
     const scrollTop = Number(item.scrollTop || 0);
     if (Number.isFinite(scrollTop) && scrollTop > 0) {
-      window.requestAnimationFrame(() => { element.scrollTop = scrollTop; });
+      liveRequestFrame(() => { element.scrollTop = scrollTop; });
     }
     restored = true;
   });
@@ -543,6 +765,7 @@ function restoreLiveUiState() {
     if (liveChatMode && saved.chatMode) liveChatMode.value = String(saved.chatMode);
     if (liveChatTarget && validLiveChatTarget(saved.chatTarget)) liveChatTarget.value = saved.chatTarget;
     setLiveBottomCollapsed(Boolean(saved.bottomCollapsed), { persist: false });
+    setLiveChatCollapsed(Boolean(saved.chatCollapsed), { persist: false, resetUnread: false });
     setLiveView(liveCurrentView);
   } catch (err) {
     // Ignore malformed or stale UI state.
@@ -552,6 +775,8 @@ function restoreLiveUiState() {
 const LIVE_TOOLTIP_SELECTOR = [
   ".live-quick-action",
   ".live-report-action",
+  ".live-chat-collapse",
+  ".live-chat-restore",
   ".live-view-tab",
   ".live-selected-event-action",
   ".live-selected-node-action",
@@ -857,9 +1082,21 @@ function setLiveOrchestratorReady(isReady) {
   liveRuntimeTitle?.classList.add("orchestrator-ready");
 }
 
+function liveTopbarStatusText(label) {
+  const normalized = String(label || "").trim().toUpperCase();
+  if (!normalized) return "Ready";
+  if (normalized.includes("ERROR") || normalized.includes("ISSUE")) return "Issue";
+  if (normalized.includes("APPROVAL")) return "Approval";
+  if (normalized.includes("SAFE STOP") || normalized.includes("EMERGENCY")) return "Stop";
+  if (normalized.includes("REASONING") || normalized.includes("SENDING") || normalized.includes("QUEUING") || normalized.includes("BUSY")) return "Working";
+  if (normalized === "READY" || normalized === "RESTORED" || normalized === "GRAPH OK") return "Ready";
+  if (normalized.startsWith("SECTION:")) return "Section";
+  return compactText(liveHumanizeStatus(label, "Ready"), 16);
+}
+
 function setChatStatus(label, cls = "idle", title = null) {
   if (!planningChatStatus) return;
-  planningChatStatus.textContent = label;
+  planningChatStatus.textContent = liveTopbarStatusText(label);
   planningChatStatus.className = `badge ${cls}`;
   planningChatStatus.title = title || label;
   const normalizedLabel = String(label || "").trim().toUpperCase();
@@ -889,11 +1126,17 @@ function setRuntimeChip(chip, label, cls, title) {
 
 function updateLiveConnectionChips() {
   const streamClass = liveStreamState === "live" ? "ok" : liveStreamState === "error" ? "warning" : "idle";
-  const eventLabel = liveLastEventAt ? ` · ${relativeTimeLabel(liveLastEventAt)}` : "";
+  const streamLabel = liveStreamState === "live"
+    ? "Live"
+    : liveStreamState === "error"
+      ? "Issue"
+      : liveStreamState === "connecting"
+        ? "Connecting"
+        : "Idle";
   const streamTitle = liveLastEventAt
     ? `Runtime event stream: ${liveStreamState}. Last event ${new Date(liveLastEventAt).toLocaleString()}`
     : `Runtime event stream: ${liveStreamState}. Waiting for first event.`;
-  setRuntimeChip(liveStreamChip, `SSE ${liveStreamState}${eventLabel}`, streamClass, streamTitle);
+  setRuntimeChip(liveStreamChip, streamLabel, streamClass, streamTitle);
 
   const syncTimestamp = liveLastSyncAt ? new Date(liveLastSyncAt).getTime() : NaN;
   const syncAgeMs = Number.isFinite(syncTimestamp) ? Date.now() - syncTimestamp : Infinity;
@@ -910,7 +1153,16 @@ function updateLiveConnectionChips() {
   const syncTitle = liveLastSyncAt
     ? `Last state sync ${new Date(liveLastSyncAt).toLocaleString()}. State: ${displayedSyncState}.${failureText}`
     : `No state sync completed yet. State: ${displayedSyncState}.${failureText}`;
-  setRuntimeChip(liveSyncChip, displayedSyncState === "refreshing" ? `Sync ...` : `Sync ${syncAge}`, syncClass, syncTitle);
+  const syncLabel = displayedSyncState === "refreshing"
+    ? "Syncing"
+    : displayedSyncState === "ok"
+      ? syncAge
+      : displayedSyncState === "stale"
+        ? `Stale ${syncAge}`
+        : displayedSyncState === "error"
+          ? "Issue"
+          : "Waiting";
+  setRuntimeChip(liveSyncChip, syncLabel, syncClass, syncTitle);
 }
 
 function markLiveSyncRefreshStart() {
@@ -1030,7 +1282,7 @@ function popPlanningThinking() {
 }
 
 function escapeHtml(value) {
-  return String(value || "")
+  return String(value ?? "")
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
@@ -1478,6 +1730,7 @@ function renderPlanningChatMessageDetail(msg, messageIndex) {
       ${renderReasoningBlock(msg)}
       ${content ? `<div class="message-content">${content}</div>` : ""}
       ${renderChatReportHint(msg)}
+      ${renderBoResultCard(msg, `chat-${messageIndex}`)}
     </div>
   `;
 }
@@ -1552,9 +1805,9 @@ function syncPlanningChatBubbleHeights() {
 
 function schedulePlanningChatLayoutSync({ scrollToBottom = false } = {}) {
   if (!planningChatLog) return;
-  window.requestAnimationFrame(() => {
+  liveRequestFrame(() => {
     syncPlanningChatBubbleHeights();
-    window.requestAnimationFrame(() => {
+    liveRequestFrame(() => {
       syncPlanningChatBubbleHeights();
       if (scrollToBottom) scrollPlanningChatToBottom();
     });
@@ -2257,7 +2510,7 @@ function renderReasoningBlock(msg) {
 function scrollPlanningChatToBottom() {
   if (!planningChatLog) return;
   planningChatLog.scrollTop = planningChatLog.scrollHeight;
-  window.requestAnimationFrame(() => {
+  liveRequestFrame(() => {
     if (!planningChatLog) return;
     planningChatLog.scrollTop = planningChatLog.scrollHeight;
   });
@@ -2498,6 +2751,7 @@ function renderPlanningMessages(messages, options = {}) {
     : "";
   planningMessagesCache = limitPlanningMessageCache(Array.isArray(messages) ? messages : []);
   const chatMessages = planningMessagesCache.filter(isChatSurfaceMessage);
+  updateLiveChatUnreadFromMessages(planningMessagesCache);
   const displayMessages = updatePlanningDisplayedMessages(chatMessages, options);
   const nextTail = displayMessages.length
     ? planningMessageKey(displayMessages[displayMessages.length - 1], displayMessages.length - 1)
@@ -2864,6 +3118,7 @@ function openEvolutionLab(agentId = liveSelectedAgent) {
 
 function agentIdFromStage(stage) {
   const clean = String(stage || "").toLowerCase();
+  if (!clean || clean === "idle") return "orchestrator";
   const direct = LIVE_AGENTS.find((agent) => agent.stage === clean || agent.id === clean);
   return direct ? direct.id : clean === "complete" || clean === "error" ? "guardian" : "orchestrator";
 }
@@ -2971,6 +3226,44 @@ function compactRunId(value) {
   return `${text.slice(0, 4)}…${text.slice(-7)}`;
 }
 
+function liveHumanizeStatus(value, fallback = "-") {
+  const text = normalizeDisplayText(value).trim();
+  if (!text) return fallback;
+  return text
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/\b([a-z])/g, (match) => match.toUpperCase());
+}
+
+function liveMissionTopbarLabel(state = {}) {
+  const raw = state.mission_name || state.mission || state.active_goal || state.goal || queryGoal || "";
+  const text = normalizeDisplayText(raw).replace(/\.$/, "").trim();
+  return text || "Mission ready";
+}
+
+function liveRunTopbarLabel(runId, mode, running) {
+  const modeLabel = liveHumanizeStatus(mode, "Live");
+  if (!runId || runId === "-") return running ? `${modeLabel} running` : `${modeLabel} ready`;
+  return `${modeLabel} ${running ? "running" : "idle"}`;
+}
+
+function liveAgentTopbarLabel(agentId) {
+  const clean = String(agentId || "").toLowerCase();
+  const labels = {
+    orchestrator: "Orchestrator",
+    design: "Design",
+    specimen: "Specimen",
+    vision: "Vision",
+    manipulation: "Manipulation",
+    equipment: "Equipment",
+    analysis: "Analysis",
+    knowledge: "Knowledge",
+    bo: "BO",
+    guardian: "Guardian",
+  };
+  return labels[clean] || liveAgentLabel(agentId);
+}
+
 function liveAgentShort(agentId) {
   const agent = LIVE_AGENTS.find((item) => item.id === agentId || item.stage === agentId);
   return agent ? agent.short : compactText(agentId || "-", 8);
@@ -2982,15 +3275,99 @@ function formatPlanningCycleLabel(state = {}, running = false) {
   const completed = Number(state.loop_count || 0);
   const active = Boolean(running && !["complete", "error", "idle"].includes(stage));
   const current = Math.max(active ? completed + 1 : completed, 0);
-  if (mode === "test") return `C:${current}/5`;
-  if (mode === "live") return current > 0 ? `C:${current}` : "C:0";
-  return `C:${current}`;
+  if (mode === "test") return `Cycle ${current}/5`;
+  return `Cycle ${current}`;
 }
 
 function setCompactTextWithTitle(element, text, title) {
   if (!element) return;
   element.textContent = text;
   element.title = title || text;
+}
+
+function updateLiveMissionMarquee(retryCount = 0) {
+  if (!planningStageLabel) return;
+  const windowEl = planningStageLabel.closest(".planning-mission-marquee-window");
+  const cell = planningStageLabel.closest(".mission-status-primary");
+  if (!windowEl || !cell) return;
+  const availableWidth = Math.max(0, Math.floor(windowEl.clientWidth || 0));
+  const fullWidth = Math.ceil(planningStageLabel.scrollWidth || 0);
+  if (availableWidth <= 0 && retryCount < 8) {
+    window.setTimeout(() => updateLiveMissionMarquee(retryCount + 1), 80);
+    return;
+  }
+  const overflow = fullWidth - availableWidth;
+  const resetMarquee = () => {
+    if (liveMissionMarqueeAnimation) {
+      liveMissionMarqueeAnimation.cancel();
+      liveMissionMarqueeAnimation = null;
+    }
+    liveMissionMarqueeSignature = null;
+    planningStageLabel.classList.remove("is-marquee");
+    planningStageLabel.classList.remove("is-css-marquee");
+    cell.classList.remove("mission-marquee-active");
+    planningStageLabel.style.removeProperty("--mission-marquee-distance");
+    planningStageLabel.style.removeProperty("--mission-marquee-duration");
+  };
+  if (availableWidth <= 0 || overflow <= 8) {
+    resetMarquee();
+    return;
+  }
+  const distance = overflow + Math.min(48, Math.max(24, availableWidth * 0.18));
+  const startPauseSeconds = 3;
+  const endPauseSeconds = 3;
+  const travelSeconds = Math.min(22, Math.max(6, distance / 42));
+  const duration = startPauseSeconds + travelSeconds + endPauseSeconds;
+  const signature = {
+    text: planningStageLabel.textContent || "",
+    availableWidth,
+    fullWidth,
+    distance: Math.round(distance),
+    duration: Number(duration.toFixed(1)),
+  };
+  const motionReduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const previousSignature = liveMissionMarqueeSignature;
+  const canReuseCurrentMarquee = previousSignature
+    && previousSignature.text === signature.text
+    && Math.abs(previousSignature.availableWidth - signature.availableWidth) <= 12
+    && Math.abs(previousSignature.fullWidth - signature.fullWidth) <= 12
+    && Math.abs(previousSignature.distance - signature.distance) <= 18
+    && planningStageLabel.classList.contains("is-marquee")
+    && (liveMissionMarqueeAnimation || planningStageLabel.classList.contains("is-css-marquee") || motionReduced);
+  if (canReuseCurrentMarquee) return;
+  resetMarquee();
+  liveMissionMarqueeSignature = signature;
+  planningStageLabel.style.setProperty("--mission-marquee-distance", `${Math.round(distance)}px`);
+  planningStageLabel.style.setProperty("--mission-marquee-duration", `${duration.toFixed(1)}s`);
+  planningStageLabel.classList.add("is-marquee");
+  cell.classList.add("mission-marquee-active");
+  if (motionReduced) return;
+  if (typeof planningStageLabel.animate !== "function") {
+    planningStageLabel.classList.add("is-css-marquee");
+    return;
+  }
+  const travelEndOffset = (startPauseSeconds + travelSeconds) / duration;
+  liveMissionMarqueeAnimation = planningStageLabel.animate(
+    [
+      { transform: "translateX(0)", offset: 0 },
+      { transform: "translateX(0)", offset: startPauseSeconds / duration },
+      { transform: `translateX(-${Math.round(distance)}px)`, offset: travelEndOffset },
+      { transform: `translateX(-${Math.round(distance)}px)`, offset: 1 },
+    ],
+    {
+      duration: duration * 1000,
+      easing: "linear",
+      iterations: Infinity,
+    },
+  );
+}
+
+function scheduleLiveMissionMarquee() {
+  if (liveMissionMarqueeFrame) liveCancelFrame(liveMissionMarqueeFrame);
+  liveMissionMarqueeFrame = liveRequestFrame(() => {
+    liveMissionMarqueeFrame = null;
+    updateLiveMissionMarquee(0);
+  });
 }
 
 function liveTokenCount(value) {
@@ -3034,12 +3411,12 @@ function collectLiveTokenUsage(session = liveLastSession) {
 function updateLiveTokenChip(session = liveLastSession) {
   const usage = collectLiveTokenUsage(session);
   if (!usage.total) {
-    setCompactTextWithTitle(liveTokenChip, "Tok -", "No token usage recorded for this Live GUI session yet.");
+    setCompactTextWithTitle(liveTokenChip, "Tokens -", "No token usage recorded for this Live GUI session yet.");
     return;
   }
   setCompactTextWithTitle(
     liveTokenChip,
-    `Tok ${compactTokenCount(usage.total)}`,
+    `Tokens ${compactTokenCount(usage.total)}`,
     `LLM token usage: total=${usage.total}, prompt=${usage.prompt}, completion=${usage.completion}, calls=${usage.calls}`
   );
 }
@@ -3096,15 +3473,16 @@ function eventStatusForAgent(agentId, state, running) {
 
 function liveAgentIconHtml(agent) {
   const fallback = escapeHtml(agent.short || agent.icon || "?");
-  if (!agent.iconPath) return `<span class="binder-icon-fallback" aria-hidden="true">${fallback}</span>`;
+  if (!agent.iconPath) return `<span class="binder-icon-fallback is-visible" aria-hidden="true" data-fallback="${fallback}"></span>`;
   return `
     <img src="${escapeHtml(agent.iconPath)}" alt="" aria-hidden="true" loading="lazy" onerror="this.classList.add('is-broken'); this.nextElementSibling?.classList.add('is-visible');">
-    <span class="binder-icon-fallback" aria-hidden="true">${fallback}</span>
+    <span class="binder-icon-fallback" aria-hidden="true" data-fallback="${fallback}"></span>
   `;
 }
 
 function renderAgentBinder(session) {
   if (!liveAgentBinderList) return;
+  if (liveSelectedAgent === "objective") liveSelectedAgent = "orchestrator";
   const snapshot = liveLastSnapshot || {};
   const state = session.state || snapshot.state || {};
   const running = liveRunningFlag(session, snapshot, state);
@@ -3124,37 +3502,39 @@ function renderAgentBinder(session) {
   }
   const attention = liveAttentionCounts();
   const attentionTone = attention.errors ? "error" : attention.total ? "warning" : "idle";
-  let objectiveTab = "";
   const agentTabs = [];
-  LIVE_AGENTS.forEach((agent) => {
+  LIVE_AGENTS.filter((agent) => agent.id !== "objective").forEach((agent) => {
     const status = eventStatusForAgent(agent.id, state, running);
     const count = counts[agent.id] || 0;
     const unread = Math.max(0, count - (liveReadMarkers[agent.id] || 0));
     const tabHtml = `
       <button class="binder-tab ${agent.id === liveSelectedAgent && liveReportPage !== "attention" ? "active" : ""} status-${status}" data-agent-id="${agent.id}" title="${escapeHtml(`${agent.label} · click report · double-click backend · Ctrl/Cmd-click pin`)}">
         <span class="binder-icon">${liveAgentIconHtml(agent)}</span>
-        <span class="binder-short">${escapeHtml(agent.short)}</span>
+        <span class="binder-agent-copy">
+          <span class="binder-short">${escapeHtml(agent.short)}</span>
+          <span class="binder-label">${escapeHtml(agent.label)}</span>
+        </span>
+        <span class="binder-status-chip">${escapeHtml(status)}</span>
         <span class="binder-state-dot" aria-label="${status}"></span>
         ${unread ? `<span class="binder-unread">${unread > 9 ? "9+" : unread}</span>` : ""}
       </button>
     `;
-    if (agent.id === "objective") objectiveTab = tabHtml;
-    else agentTabs.push(tabHtml);
+    agentTabs.push(tabHtml);
   });
   liveAgentBinderList.innerHTML = `
-    <div class="binder-objective-group">
-      <div class="binder-title binder-title-obj" title="Objective context">OBJ</div>
-      ${objectiveTab}
-    </div>
     <div class="binder-agent-group">
-      <div class="binder-title binder-title-inline" title="Agent group">AGT</div>
+      <div class="binder-title binder-title-inline" title="Agent group">AGENT</div>
       ${agentTabs.join("")}
     </div>
     <div class="binder-attention-group">
-      <div class="binder-title binder-title-att" title="Operator Attention">ATT</div>
+      <div class="binder-title binder-title-att" title="Operator Attention">ATTENTION</div>
       <button class="binder-tab binder-attention-tab ${liveCurrentView === "report" && liveReportPage === "attention" ? "active" : ""} status-${attentionTone}" data-attention-action="open" title="Operator Attention · approvals ${attention.approvals}, questions ${attention.questions}, faults ${attention.faults}" aria-label="Operator Attention">
         <span class="binder-icon binder-attention-icon" aria-hidden="true">!</span>
-        <span class="binder-short">${attention.errors ? "ERR" : attention.total ? "ATT" : "OK"}</span>
+        <span class="binder-agent-copy">
+          <span class="binder-short">${attention.errors ? "ERR" : attention.total ? "ATT" : "OK"}</span>
+          <span class="binder-label">Operator Attention</span>
+        </span>
+        <span class="binder-status-chip">${escapeHtml(attentionTone)}</span>
         <span class="binder-state-dot" aria-label="${attentionTone}"></span>
         ${attention.total ? `<span class="binder-unread">${attention.total > 9 ? "9+" : attention.total}</span>` : ""}
       </button>
@@ -3174,13 +3554,32 @@ function liveCenterRenderKey(session = liveLastSession) {
   const guardianKey = guardianStatus
     ? [guardianStatus.status || "", guardianSummary.risk_score || 0, guardianSummary.gate_count || 0, guardianSummary.incident_count || 0, guardianSummary.blocked_action_count || 0, guardianSummary.pending_approval_count || 0].join(":")
     : "no-guardian-status";
-  return [runId, stage, liveSelectedAgent, liveReportPage, liveRunEvents.length, liveRecentEvents.length, liveRunArtifacts.length, messageCount, approvalCount, guardianKey].join("|");
+  const graphLayoutKey = liveCurrentView === "graph" ? `${liveGraphLayoutMode()}:${liveGraphPanelWidthKey()}` : "";
+  return [runId, stage, liveSelectedAgent, liveReportPage, liveRunEvents.length, liveRecentEvents.length, liveRunArtifacts.length, messageCount, approvalCount, guardianKey, graphLayoutKey].join("|");
+}
+
+function liveGraphLayoutMode() {
+  const shell = document.querySelector(".planning-runtime-shell");
+  const shellWidth = shell ? Math.round(shell.clientWidth || shell.getBoundingClientRect().width || 0) : Math.round(window.innerWidth || 0);
+  const isStacked = shellWidth <= 760 || Boolean(window.matchMedia && window.matchMedia("(max-width: 760px)").matches);
+  const isReportFocus = Boolean(shell && shell.classList.contains("live-agent-report-focus"));
+  if (isStacked) return isReportFocus ? "stack-expanded" : "stack-split";
+  return isReportFocus ? "expanded" : "split";
+}
+
+function liveGraphPanelWidthKey() {
+  const panel = liveGraphPanel || document.getElementById("live-graph-panel");
+  if (!panel) return 0;
+  return Math.round(panel.clientWidth || panel.getBoundingClientRect().width || 0);
 }
 
 function renderActiveLiveCenterPanel(session = liveLastSession, options = {}) {
   if (!session) return;
   const key = liveCenterRenderKey(session);
-  if (!options.force && liveCenterRenderKeys.get(liveCurrentView) === key) return;
+  if (!options.force && liveCenterRenderKeys.get(liveCurrentView) === key) {
+    if (liveCurrentView === "report") scheduleOrcEchartsRender();
+    return;
+  }
   if (liveCurrentView === "report") renderReportPanel(session);
   else if (liveCurrentView === "backend") renderBackendPanel(session);
   else if (liveCurrentView === "graph") renderGraphMiniPanel(session);
@@ -3205,9 +3604,12 @@ function setLiveView(view, options = {}) {
   };
   document.querySelectorAll(".live-center-view").forEach((panel) => panel.classList.toggle("active", panel.id === panelByView[liveCurrentView]));
   liveViewTabs.forEach((button) => button.classList.toggle("active", button.dataset.liveView === liveCurrentView));
+  renderLiveReportToolbar();
+  applyLiveAgentLayoutMode();
   renderLiveChatContextStrip();
   persistLiveUiState();
   if (options.render !== false) renderActiveLiveCenterPanel(liveLastSession);
+  else if (liveCurrentView === "report") scheduleOrcEchartsRender();
 }
 
 
@@ -3225,7 +3627,10 @@ function renderReportList(items, emptyText = "No evidence.", limit = 8) {
   const filtered = (items || []).filter(Boolean);
   const clean = Number.isFinite(limit) && limit > 0 ? filtered.slice(0, limit) : filtered;
   if (!clean.length) return `<p class="hint">${escapeHtml(emptyText)}</p>`;
-  const rows = clean.map((item) => `    <li>${escapeHtml(item)}</li>`).join("\n");
+  const rows = clean.map((item) => {
+    const full = renderRuntimeValue(item);
+    return `    <li title="${escapeHtml(full)}">${escapeHtml(renderDashboardValue(item, 132))}</li>`;
+  }).join("\n");
   return `<ul class="live-report-list">\n${rows}\n  </ul>`;
 }
 
@@ -3286,7 +3691,7 @@ function renderGuardianApprovalQueue(status) {
       <p>${escapeHtml(item.reason || item.reason_code || item.status || "Operator review required.")}</p>
       <div class="button-row">
         <button class="btn primary live-approval-action" data-run-id="${escapeHtml(runId)}" data-approval-id="${escapeHtml(item.approval_id || "")}" data-decision="approved" ${item.approval_id ? "" : "disabled"}>Approve</button>
-        <button class="btn live-approval-action" data-run-id="${escapeHtml(runId)}" data-approval-id="${escapeHtml(item.approval_id || "")}" data-decision="cancelled" ${item.approval_id ? "" : "disabled"}>Revise</button>
+        <button class="btn live-approval-action" ${item.approval_id ? "" : "disabled"} data-run-id="${escapeHtml(runId)}" data-approval-id="${escapeHtml(item.approval_id || "")}" data-decision="cancelled">Revise</button>
         <button class="btn warning live-approval-action" data-run-id="${escapeHtml(runId)}" data-approval-id="${escapeHtml(item.approval_id || "")}" data-decision="rejected" ${item.approval_id ? "" : "disabled"}>Reject</button>
       </div>
     </article>
@@ -3544,7 +3949,7 @@ function renderReportSection(title, body, options = {}) {
   const selected = sectionTitle === liveSelectedReportSectionTitle;
   const sectionKey = reportSectionKey(sectionTitle);
   return `
-    <section class="runtime-card-section live-report-section${wideClass}${selected ? " selected" : ""}" data-report-section-title="${escapeHtml(sectionTitle)}" data-report-section-key="${escapeHtml(sectionKey)}" tabindex="0" role="button" aria-selected="${selected ? "true" : "false"}" title="Select report section: ${escapeHtml(sectionTitle)}">
+    <section class="runtime-card-section live-report-section${wideClass}${selected ? " selected" : ""}" data-report-section-title="${escapeHtml(sectionTitle)}" data-report-section-key="${escapeHtml(sectionKey)}" tabindex="0" role="button" aria-selected="${selected ? "true" : "false"}" aria-label="Select report section: ${escapeHtml(sectionTitle)}">
       <h4>${escapeHtml(title)}</h4>
       <div class="live-report-section-body">
 ${content}
@@ -3643,6 +4048,16 @@ function latestDesignReport(report) {
   return latestReportPayload(report, ["design_report", "data.design_report", "latest.design_report"]);
 }
 
+function latestDesignAgentReport(report) {
+  const state = report && report.state ? report.state : {};
+  const metadata = state && typeof state.run_metadata === "object" && state.run_metadata ? state.run_metadata : {};
+  if (metadata.latest_design_agent_report && typeof metadata.latest_design_agent_report === "object") return metadata.latest_design_agent_report;
+  if (metadata.design_agent_report && typeof metadata.design_agent_report === "object") return metadata.design_agent_report;
+  const designPayload = metadata.design_agent_payload;
+  if (designPayload && typeof designPayload === "object" && designPayload.design_agent_report) return designPayload.design_agent_report;
+  return latestReportPayload(report, ["latest_design_agent_report", "design_agent_report", "data.design_agent_report", "role_specific.design_agent_report", "sections.design_agent_report"]);
+}
+
 function latestSpecimenFabricationReport(report) {
   const state = report && report.state ? report.state : {};
   const metadata = state && typeof state.run_metadata === "object" && state.run_metadata ? state.run_metadata : {};
@@ -3656,6 +4071,21 @@ function latestSpecimenFabricationReport(report) {
     if (payload.specimen_result && payload.specimen_result.fabrication_report) return payload.specimen_result.fabrication_report;
   }
   return latestReportPayload(report, ["fabrication_report", "specimen_result.fabrication_report", "data.fabrication_report", "latest.fabrication_report"]);
+}
+
+function latestSpecimenAgentReport(report) {
+  const state = report && report.state ? report.state : {};
+  const metadata = state && typeof state.run_metadata === "object" && state.run_metadata ? state.run_metadata : {};
+  if (metadata.latest_specimen_agent_report && typeof metadata.latest_specimen_agent_report === "object") return metadata.latest_specimen_agent_report;
+  if (metadata.specimen_agent_report && typeof metadata.specimen_agent_report === "object") return metadata.specimen_agent_report;
+  const specimen = metadata.specimen_result;
+  if (specimen && typeof specimen === "object" && specimen.specimen_agent_report) return specimen.specimen_agent_report;
+  const payload = metadata.specimen_agent_payload;
+  if (payload && typeof payload === "object") {
+    if (payload.specimen_agent_report) return payload.specimen_agent_report;
+    if (payload.specimen_result && payload.specimen_result.specimen_agent_report) return payload.specimen_result.specimen_agent_report;
+  }
+  return latestReportPayload(report, ["latest_specimen_agent_report", "specimen_agent_report", "data.specimen_agent_report", "role_specific.specimen_agent_report", "sections.specimen_agent_report"]);
 }
 
 function latestSpecimenFabricatedPacket(report) {
@@ -3686,6 +4116,21 @@ function latestVisionReport(report) {
   return latestReportPayload(report, ["vision_report", "observation.vision_report", "latest_vision_observation.vision_report", "sections.vision_report"]);
 }
 
+function latestVisionAgentReport(report) {
+  const state = report && report.state ? report.state : {};
+  const metadata = state && typeof state.run_metadata === "object" && state.run_metadata ? state.run_metadata : {};
+  if (metadata.latest_vision_agent_report && typeof metadata.latest_vision_agent_report === "object") return metadata.latest_vision_agent_report;
+  if (metadata.vision_agent_report && typeof metadata.vision_agent_report === "object") return metadata.vision_agent_report;
+  if (metadata.latest_vision_observation && typeof metadata.latest_vision_observation === "object" && metadata.latest_vision_observation.vision_agent_report) return metadata.latest_vision_observation.vision_agent_report;
+  if (state.latest_observations && typeof state.latest_observations === "object" && state.latest_observations.vision_agent_report) return state.latest_observations.vision_agent_report;
+  const payload = metadata.vision_agent_payload;
+  if (payload && typeof payload === "object") {
+    if (payload.vision_agent_report) return payload.vision_agent_report;
+    if (payload.observation && payload.observation.vision_agent_report) return payload.observation.vision_agent_report;
+  }
+  return latestReportPayload(report, ["latest_vision_agent_report", "vision_agent_report", "data.vision_agent_report", "role_specific.vision_agent_report", "sections.vision_agent_report"]);
+}
+
 function latestVisionSignalPacket(report) {
   const state = report && report.state ? report.state : {};
   const metadata = state && typeof state.run_metadata === "object" && state.run_metadata ? state.run_metadata : {};
@@ -3708,6 +4153,17 @@ function latestManipulationReport(report) {
   if (payload && typeof payload === "object" && payload.manipulation_report) return payload.manipulation_report;
   if (metadata.last_stage_payload && metadata.last_stage_payload.data && metadata.last_stage_payload.data.manipulation_report) return metadata.last_stage_payload.data.manipulation_report;
   return latestReportPayload(report, ["manipulation_report", "data.manipulation_report", "sections.manipulation_report"]);
+}
+
+function latestManipulationAgentReport(report) {
+  const state = report && report.state ? report.state : {};
+  const metadata = state && typeof state.run_metadata === "object" && state.run_metadata ? state.run_metadata : {};
+  if (metadata.latest_manipulation_agent_report && typeof metadata.latest_manipulation_agent_report === "object") return metadata.latest_manipulation_agent_report;
+  if (metadata.manipulation_agent_report && typeof metadata.manipulation_agent_report === "object") return metadata.manipulation_agent_report;
+  const payload = metadata.manipulation_agent_payload;
+  if (payload && typeof payload === "object" && payload.manipulation_agent_report) return payload.manipulation_agent_report;
+  if (metadata.last_stage_payload && metadata.last_stage_payload.data && metadata.last_stage_payload.data.manipulation_agent_report) return metadata.last_stage_payload.data.manipulation_agent_report;
+  return latestReportPayload(report, ["latest_manipulation_agent_report", "manipulation_agent_report", "data.manipulation_agent_report", "role_specific.manipulation_agent_report", "sections.manipulation_agent_report"]);
 }
 
 function latestRobotTaskResult(report) {
@@ -3777,11 +4233,20 @@ function latestEquipmentHandoffPacket(report) {
 
 function latestAnalysisPayload(report) {
   const state = report && report.state ? report.state : {};
-  if (state.latest_analysis && typeof state.latest_analysis === "object" && Object.keys(state.latest_analysis).length) return state.latest_analysis;
   const metadata = state && typeof state.run_metadata === "object" && state.run_metadata ? state.run_metadata : {};
+  const payload = metadata.analysis_agent_payload;
+  if (payload && typeof payload === "object") {
+    if (payload.analysis && typeof payload.analysis === "object") return payload.analysis;
+    if (payload.utm_curve || payload.utm_metrics || payload.quality_gate) return payload;
+  }
+  const lastPayload = metadata.last_stage_payload && metadata.last_stage_payload.data ? metadata.last_stage_payload.data : {};
+  if (lastPayload && typeof lastPayload === "object" && lastPayload.analysis && typeof lastPayload.analysis === "object") return lastPayload.analysis;
+  for (let index = (report.messages || []).length - 1; index >= 0; index -= 1) {
+    const msg = report.messages[index];
+    if (msg && msg.analysis && typeof msg.analysis === "object") return msg.analysis;
+  }
+  if (state.latest_analysis && typeof state.latest_analysis === "object" && Object.keys(state.latest_analysis).length) return state.latest_analysis;
   if (metadata.latest_analysis && typeof metadata.latest_analysis === "object") return metadata.latest_analysis;
-  const payload = metadata.last_stage_payload && metadata.last_stage_payload.data ? metadata.last_stage_payload.data : {};
-  if (payload && typeof payload === "object" && payload.analysis) return payload.analysis;
   return latestReportPayload(report, ["analysis", "data.analysis", "latest_analysis", "sections.analysis"]);
 }
 
@@ -3835,6 +4300,9 @@ function latestKnowledgeEvolutionProposal(report) {
 }
 
 function latestReportBoResult(report) {
+  const state = report && report.state ? report.state : {};
+  const metadata = state && typeof state.run_metadata === "object" && state.run_metadata ? state.run_metadata : {};
+  if (metadata.bo_agent && typeof metadata.bo_agent === "object") return metadata.bo_agent;
   for (let index = (report.messages || []).length - 1; index >= 0; index -= 1) {
     const value = report.messages[index].bo_result;
     if (value) return value;
@@ -5163,6 +5631,57 @@ function renderLiveChatContextStrip() {
   setCompactTextWithTitle(liveChatContextStrip, text, title);
 }
 
+function experimentSetupDisplayValue(...values) {
+  for (const value of values) {
+    if (value !== undefined && value !== null && value !== "") return renderRuntimeValue(value);
+  }
+  return "waiting";
+}
+
+function renderLiveExperimentSetupPanel(session = liveLastSession) {
+  if (!liveExperimentSetupPanel) return;
+  const report = selectedReportModel(session || {});
+  const state = report.state || {};
+  const spec = report.spec || state.current_experiment_spec || {};
+  const ctx = orchestratorContext(report, eventStatusForAgent(liveSelectedAgent, state, liveRunningFlag(session || {}, liveLastSnapshot || {}, state)));
+  const mission = ctx.missionContract || {};
+  const pending = (ctx.pendingApprovals || []).slice(0, 3);
+  const geometry = experimentSetupDisplayValue(spec.geometry_type, spec.specimen_geometry, spec.specimen_size_mm, spec.geometry);
+  const material = experimentSetupDisplayValue(spec.polymer_grade, spec.material, spec.polymer, mission.material);
+  const orientation = experimentSetupDisplayValue(spec.print_orientation, spec.orientation, spec.build_orientation);
+  const layer = experimentSetupDisplayValue(spec.layer_height_mm, spec.layer_height, spec.print_layer_height_mm);
+  const infill = experimentSetupDisplayValue(spec.infill_pattern, spec.pattern, spec.lattice_type, spec.geometry_type);
+  const protocol = experimentSetupDisplayValue(spec.test_protocol, spec.protocol, state.test_protocol);
+  liveExperimentSetupPanel.innerHTML = `
+    <div class="live-experiment-setup-head">
+      <div>
+        <span>Experimental Setup</span>
+        <strong>${escapeHtml(compactText(mission.goal || state.active_goal || "Autonomous specimen mission", 54))}</strong>
+      </div>
+      <em>${escapeHtml(ctx.missingCount ? `${ctx.missingCount} missing` : "ready")}</em>
+    </div>
+    <div class="live-experiment-setup-grid">
+      <label><span>Specimen Type</span><input class="text-input compact-input" value="${escapeHtml(geometry)}" readonly /></label>
+      <label><span>Polymer Grade</span><input class="text-input compact-input" value="${escapeHtml(material)}" readonly /></label>
+      <label><span>Print Orientation</span><input class="text-input compact-input" value="${escapeHtml(orientation)}" readonly /></label>
+      <label><span>Layer Height</span><input class="text-input compact-input" value="${escapeHtml(layer)}" readonly /></label>
+      <label><span>Infill / Pattern</span><input class="text-input compact-input" value="${escapeHtml(infill)}" readonly /></label>
+      <label><span>Test Protocol</span><input class="text-input compact-input" value="${escapeHtml(protocol)}" readonly /></label>
+    </div>
+    <div class="live-experiment-setup-queue">
+      <span>Approvals / Pending Actions</span>
+      ${pending.length ? pending.map((item) => `
+        <div>
+          <i></i>
+          <strong>${escapeHtml(compactText(item.title || item.stage || item.source || "Approval gate", 32))}</strong>
+          <em>${escapeHtml(compactText(item.agent || item.stage || item.status || "pending", 18))}</em>
+        </div>
+      `).join("") : `<p class="hint">No pending approvals. Mission setup is ready for the next ORC action.</p>`}
+    </div>
+    <button class="btn live-experiment-setup-apply" type="button" data-experiment-setup-action="draft_apply" title="Draft a mission setup update in Runtime Chat" aria-label="Draft a mission setup update in Runtime Chat">Draft Mission Update</button>
+  `;
+}
+
 function liveFocusChip(label, value, title = "", tone = "") {
   const safeTone = tone ? ` ${escapeHtml(tone)}` : "";
   return `<span class="live-focus-chip${safeTone}" title="${escapeHtml(title || `${label}: ${value}`)}"><em>${escapeHtml(label)}</em><strong>${escapeHtml(value || "-")}</strong></span>`;
@@ -5428,6 +5947,35 @@ function selectedAgentPinLabel() {
   return livePinnedFindings.some((item) => item.agent_id === liveSelectedAgent) ? "pinned" : "not pinned";
 }
 
+async function openRuntimeChatForAgentContext(agentId = liveSelectedAgent) {
+  const sourceAgent = knownLiveAgent(agentId) ? agentId : liveSelectedAgent;
+  const sourceLabel = liveAgentLabel(sourceAgent);
+  const section = selectedReportSectionLabel();
+  const sectionText = selectedReportSectionText(900);
+  await recordLiveOperatorEvent(
+    "agent_chat_opened",
+    `${sourceLabel} report context opened in Runtime Chat.`,
+    {
+      source_agent: sourceAgent,
+      source_agent_label: sourceLabel,
+      source_report_section: section,
+      source_report_section_text: sectionText,
+      target_chat_agent: liveChatTargetForAgent(sourceAgent),
+    }
+  );
+  liveSelectedAgent = "orchestrator";
+  liveReportPage = "agent";
+  setLiveView("report", { render: false });
+  setLiveChatCollapsed(false, { persist: false, resetUnread: false });
+  setLiveChatTargetMode(liveChatTargetForAgent(sourceAgent));
+  renderLiveRuntime(liveLastSession);
+  setLiveChatTargetMode(liveChatTargetForAgent(sourceAgent));
+  const prompt = `${sourceLabel} report context로 질문할게. 현재 선택 섹션은 [${section || "Overview / Summary"}]이고, 이 섹션과 최근 backend trace를 기준으로 판단, 리스크, 다음 액션을 설명해줘.${sectionText ? `\n\n선택 섹션 내용:\n${sectionText}` : ""}`;
+  draftRuntimeChat(prompt, "ask");
+  renderLiveChatContextStrip();
+  persistLiveUiState();
+}
+
 async function runLiveReportAction(action) {
   if (action === "backend") {
     await recordLiveOperatorEvent("backend_opened", `${liveAgentLabel(liveSelectedAgent)} backend trace opened from report.`);
@@ -5450,6 +5998,19 @@ async function runLiveReportAction(action) {
     const sectionText = selectedReportSectionText(900);
     draftRuntimeChat(`${liveAgentLabel(liveSelectedAgent)} 보고서의 [${section}] 섹션과 최근 backend trace를 기준으로 주요 판단과 다음 위험요소를 설명해줘.${sectionText ? `\n\n선택 섹션 내용:\n${sectionText}` : ""}`, "ask");
     await recordLiveOperatorEvent("ask_drafted", `${liveAgentLabel(liveSelectedAgent)} report section follow-up drafted in Runtime Chat.`, { ask_scope: "selected_report_section", ...selectedReportSectionPayload(900) });
+    return;
+  }
+  if (action === "toggle_chat") {
+    if (!liveAgentNeedsChatPanel(liveSelectedAgent)) {
+      await openRuntimeChatForAgentContext(liveSelectedAgent);
+      return;
+    }
+    setLiveChatCollapsed(!liveChatCollapsed);
+    renderLiveReportToolbar();
+    await recordLiveOperatorEvent(
+      liveChatCollapsed ? "chat_collapsed" : "chat_expanded",
+      `${liveAgentLabel(liveSelectedAgent)} runtime chat ${liveChatCollapsed ? "collapsed" : "expanded"} from Live toolbar.`
+    );
     return;
   }
   if (action === "reviewed") {
@@ -5506,18 +6067,6137 @@ function renderAcademicReportSections(session, report, status, agentLabel) {
   `;
 }
 
+function dashboardSectionClass(span = 4, tone = "") {
+  const allowed = new Set([3, 4, 5, 6, 7, 8, 9, 12]);
+  const safeSpan = allowed.has(Number(span)) ? Number(span) : 4;
+  return `ar-span-${safeSpan}${tone ? ` tone-${tone}` : ""}`;
+}
+
+function renderDashboardCard(title, body, options = {}) {
+  const sectionTitle = String(options.sectionTitle || title || "Section");
+  const selected = sectionTitle === liveSelectedReportSectionTitle;
+  const sectionKey = reportSectionKey(sectionTitle);
+  const eyebrow = options.eyebrow ? `<span class="ar-report-card-eyebrow">${escapeHtml(options.eyebrow)}</span>` : "";
+  const meta = options.meta ? `<small>${escapeHtml(options.meta)}</small>` : "";
+  const action = options.action || "";
+  const extraClass = options.className ? ` ${escapeHtml(options.className)}` : "";
+  return `
+    <section class="ar-report-card live-report-section ${dashboardSectionClass(options.span, options.tone)}${extraClass}${selected ? " selected" : ""}" data-report-section-title="${escapeHtml(sectionTitle)}" data-report-section-key="${escapeHtml(sectionKey)}" tabindex="0" role="button" aria-selected="${selected ? "true" : "false"}" aria-label="Select report section: ${escapeHtml(sectionTitle)}">
+      <div class="ar-report-card-head">
+        <div>
+          ${eyebrow}
+          <h4>${escapeHtml(title)}</h4>
+          ${meta}
+        </div>
+        ${action}
+      </div>
+      <div class="ar-report-card-body">
+${String(body || `<p class="hint">No evidence.</p>`)}
+      </div>
+    </section>
+  `;
+}
+
+function renderDashboardValue(value, limit = 96) {
+  const text = renderRuntimeValue(value);
+  return compactText(String(text).replace(/\s+/g, " "), limit);
+}
+
+function renderDashboardRows(rows) {
+  const clean = (rows || []).filter((row) => Array.isArray(row) && row.length >= 2);
+  if (!clean.length) return `<p class="hint">No evidence.</p>`;
+  return `
+    <dl class="ar-report-kv">
+      ${clean.map(([key, value]) => `
+        <div>
+          <dt>${escapeHtml(key)}</dt>
+          <dd title="${escapeHtml(renderRuntimeValue(value))}">${escapeHtml(renderDashboardValue(value))}</dd>
+        </div>
+      `).join("")}
+    </dl>
+  `;
+}
+
+function renderDashboardMetric(label, value, meta = "", tone = "idle") {
+  return `
+    <article class="ar-report-metric tone-${escapeHtml(tone)}">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(renderRuntimeValue(value))}</strong>
+      <small>${escapeHtml(meta || "")}</small>
+    </article>
+  `;
+}
+
+function reportStageSteps() {
+  return ["idle", "plan", "design", "specimen", "vision", "manipulation", "equipment", "analysis", "knowledge", "bo", "guardian", "complete"];
+}
+
+function reportStageIndex(stage) {
+  const normalized = String(stage || "idle").toLowerCase();
+  const steps = reportStageSteps();
+  const exact = steps.indexOf(normalized);
+  if (exact >= 0) return exact;
+  const fuzzy = steps.findIndex((item) => normalized.includes(item));
+  return fuzzy >= 0 ? fuzzy : 0;
+}
+
+function renderStageProgressCard(report) {
+  const state = report.state || {};
+  const steps = reportStageSteps();
+  const currentIndex = reportStageIndex(state.stage);
+  return `
+    <div class="ar-stage-progress" aria-label="runtime stage progress">
+      ${steps.map((step, index) => {
+        const stateClass = index < currentIndex ? "complete" : index === currentIndex ? "active" : "waiting";
+        return `
+          <div class="ar-stage-step ${stateClass}">
+            <span>${index + 1}</span>
+            <small>${escapeHtml(step)}</small>
+          </div>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function reportMissingInputRows(report) {
+  const spec = report.spec || {};
+  const state = report.state || {};
+  const checks = [
+    ["Specimen geometry", spec.geometry_type || spec.specimen_size_mm || spec.geometry || spec.specimen_geometry],
+    ["Polymer / material", spec.material || spec.material_family || spec.polymer_grade || spec.polymer],
+    ["Print orientation", spec.print_orientation || spec.orientation || spec.build_orientation],
+    ["Layer height", spec.layer_height_mm || spec.layer_height || spec.print_layer_height_mm],
+    ["Test protocol", spec.test_protocol || spec.protocol || state.test_protocol],
+  ];
+  return checks.map(([label, value]) => ({
+    label,
+    value,
+    missing: value === undefined || value === null || value === "" || (Array.isArray(value) && !value.length),
+  }));
+}
+
+function renderMissingInputsCard(report) {
+  const rows = reportMissingInputRows(report);
+  const missingCount = rows.filter((item) => item.missing).length;
+  return `
+    <div class="ar-input-check-list">
+      ${rows.map((item) => `
+        <div class="${item.missing ? "missing" : "ready"}">
+          <span>${escapeHtml(item.label)}</span>
+          <strong>${item.missing ? "Needed" : escapeHtml(compactText(renderRuntimeValue(item.value), 42))}</strong>
+        </div>
+      `).join("")}
+    </div>
+    <div class="ar-report-card-footer">
+      <span>Total missing</span>
+      <strong>${missingCount}</strong>
+    </div>
+  `;
+}
+
+function decisionRegisterCounts(report) {
+  const approvals = liveApprovals || { pending: [], resolved: [], approvals: [] };
+  const resolved = Array.isArray(approvals.resolved) ? approvals.resolved.length : 0;
+  const pending = Array.isArray(approvals.pending) ? approvals.pending.length : 0;
+  const warnings = (report.warnings || []).length;
+  const decisions = (report.decisionItems || []).length;
+  const events = (report.events || []).length;
+  return {
+    approved: Math.max(decisions, resolved),
+    pending,
+    blocked: warnings,
+    info: Math.max(0, events - warnings),
+  };
+}
+
+function renderDecisionRegisterCard(report) {
+  const counts = decisionRegisterCounts(report);
+  const total = Math.max(1, counts.approved + counts.pending + counts.blocked + counts.info);
+  const approvedDeg = Math.round((counts.approved / total) * 360);
+  const pendingDeg = approvedDeg + Math.round((counts.pending / total) * 360);
+  const blockedDeg = pendingDeg + Math.round((counts.blocked / total) * 360);
+  const style = `background: conic-gradient(var(--ar-success) 0 ${approvedDeg}deg, var(--ar-warning) ${approvedDeg}deg ${pendingDeg}deg, var(--ar-danger) ${pendingDeg}deg ${blockedDeg}deg, var(--ar-info) ${blockedDeg}deg 360deg);`;
+  const bars = renderMiniBarChart([
+    { label: "Approved", value: counts.approved, tone: "success", meta: String(counts.approved) },
+    { label: "Pending", value: counts.pending, tone: counts.pending ? "warning" : "success", meta: String(counts.pending) },
+    { label: "Blocked", value: counts.blocked, tone: counts.blocked ? "danger" : "success", meta: String(counts.blocked) },
+    { label: "Info", value: counts.info, tone: "info", meta: String(counts.info) },
+  ], { label: "decision register distribution", compact: true, limit: 4 });
+  return `
+    <div class="ar-decision-board">
+      <div class="ar-donut" style="${style}"><span>${counts.approved + counts.pending + counts.blocked}</span><small>items</small></div>
+      <dl>
+        <div><dt>Approved</dt><dd>${counts.approved}</dd></div>
+        <div><dt>Pending</dt><dd>${counts.pending}</dd></div>
+        <div><dt>Blocked</dt><dd>${counts.blocked}</dd></div>
+        <div><dt>Info</dt><dd>${counts.info}</dd></div>
+      </dl>
+    </div>
+    <div class="ar-decision-bars">${bars}</div>
+  `;
+}
+
+function renderRouteGraphDashboard(report, status) {
+  const state = report.state || {};
+  const running = liveRunningFlag(liveLastSession || {}, liveLastSnapshot || {}, state);
+  const route = ["objective", "orchestrator", "design", "specimen", "vision", "manipulation", "equipment", "analysis", "knowledge", "bo", "guardian"];
+  return `
+    <div class="ar-route-graph" aria-label="agent handoff route">
+      ${route.map((agentId, index) => {
+        const nodeStatus = agentId === liveSelectedAgent ? status : eventStatusForAgent(agentId, state, running);
+        return `
+          <article class="ar-route-node status-${escapeHtml(nodeStatus)}${agentId === liveSelectedAgent ? " selected" : ""}" data-agent-id="${escapeHtml(agentId)}">
+            <span class="ar-route-index">${String(index + 1).padStart(2, "0")}</span>
+            <div>
+              <span>${escapeHtml(liveAgentShort(agentId))}</span>
+              <strong>${escapeHtml(liveAgentLabel(agentId))}</strong>
+              <em>${escapeHtml(String(nodeStatus || "idle").toUpperCase())}</em>
+            </div>
+          </article>
+          ${index < route.length - 1 ? `<i aria-hidden="true"></i>` : ""}
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function renderEvidenceWarningsCard(report) {
+  const guardian = liveGuardianStatusPayload(report);
+  const summary = guardian && guardian.summary && typeof guardian.summary === "object" ? guardian.summary : {};
+  const rows = [
+    ["critical_issues", summary.incident_count ?? report.warnings.length],
+    ["pending_approvals", (liveApprovals.pending || []).length],
+    ["validation_items", report.validationItems.length],
+    ["artifact_refs", liveRunArtifacts.length + report.artifactItems.length],
+    ["guardian_risk", summary.risk_score ?? "-"],
+  ];
+  const warningList = renderReportList(report.warnings.slice(0, 4), "No active warnings.", 4);
+  return `${renderDashboardRows(rows)}${warningList}`;
+}
+
+function renderRecentActivityCard(report) {
+  const eventItems = (liveRunEvents || []).slice(-6).reverse().map((event) => {
+    const label = reportEventLabel(event);
+    const text = compactText(event.message || (eventPayload(event) || {}).message || event.event_type || event.type || "runtime event", 120);
+    return `${label} - ${text}`;
+  });
+  const messageItems = (report.messages || []).slice(-3).reverse().map((msg) => `${formatTime(msg.timestamp)} - ${roleLabel(msg.role)} - ${compactText(msg.content || "", 120)}`);
+  return renderReportList([...eventItems, ...messageItems], "No runtime activity yet.", 9);
+}
+
+function renderArtifactDashboardCard(report) {
+  const runArtifacts = (liveRunArtifacts || []).slice(0, 5).map((artifact) => ({
+    name: artifact.name || artifact.path || "artifact",
+    meta: `${artifact.preview_kind || artifact.suffix || "file"} - ${renderRuntimeValue(artifact.size_bytes)} bytes`,
+    url: artifact.url || artifact.download_url || "",
+  }));
+  const reportArtifacts = (report.artifactItems || []).slice(0, Math.max(0, 5 - runArtifacts.length)).map((item, index) => ({
+    name: `report-artifact-${index + 1}`,
+    meta: compactText(item, 110),
+    url: "",
+  }));
+  const artifacts = [...runArtifacts, ...reportArtifacts];
+  if (!artifacts.length) return `<p class="hint">No artifacts from backend yet.</p>`;
+  return `
+    <div class="ar-artifact-strip">
+      ${artifacts.map((artifact) => `
+        <article>
+          <strong>${escapeHtml(compactText(artifact.name, 36))}</strong>
+          <span>${escapeHtml(compactText(artifact.meta, 64))}</span>
+          ${artifact.url ? `<a href="${escapeHtml(artifact.url)}" target="_blank" rel="noreferrer">Open</a>` : ""}
+        </article>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderBackendConnectionCard(report) {
+  const snapshot = liveLastSnapshot || {};
+  const runtime = (liveLastSession && liveLastSession.runtime) || snapshot.runtime || {};
+  const backend = runtime.backend || {};
+  return renderDashboardRows([
+      ["backend", backend.label || backend.name || queryBackend || "-"],
+      ["status", backend.status || liveStreamState || "-"],
+      ["run_events", liveRunEvents.length],
+      ["run_artifacts", liveRunArtifacts.length],
+      ["approvals", (liveApprovals.pending || []).length],
+    ]);
+}
+
+function renderRuntimeSupportCard(report, status) {
+  const artifactCount = liveRunArtifacts.length + report.artifactItems.length;
+  const warningCount = (report.warnings || []).length;
+  const approvalCount = (liveApprovals.pending || []).length;
+  const supportMetrics = [
+    renderDashboardMetric("Stage", report.state.stage || "-", status, "info"),
+    renderDashboardMetric("Warnings", warningCount, "open", warningCount ? "warning" : "success"),
+    renderDashboardMetric("Artifacts", artifactCount, "available", artifactCount ? "success" : "idle"),
+    renderDashboardMetric("Approvals", approvalCount, "pending", approvalCount ? "warning" : "success"),
+  ].join("");
+  const warningList = warningCount
+    ? dashboardList(report.warnings.slice(0, 2), "No active warnings.", 2)
+    : "";
+  return `<div class="ar-report-metrics">${supportMetrics}</div>${warningList}`;
+}
+
+function renderAgentEvidenceDashboardCard(report, status, agentLabel) {
+  const profile = agentSpecificReportProfile(report, status, agentLabel);
+  const details = renderAgentSpecificReportSection(report, status, agentLabel);
+  return `
+    <p class="ar-card-summary">${escapeHtml(profile.summary || "Agent-specific backend evidence is connected below.")}</p>
+    ${renderDashboardRows(profile.rows || [])}
+    <details class="ar-report-evidence-details">
+      <summary>Backend evidence payload</summary>
+      ${details}
+    </details>
+  `;
+}
+
+function reportRuntimeMetadata(report) {
+  const state = report && report.state ? report.state : {};
+  return state && typeof state.run_metadata === "object" && state.run_metadata ? state.run_metadata : {};
+}
+
+function dashboardList(items, emptyText = "No items recorded.", limit = 6) {
+  return renderReportList(Array.isArray(items) ? items : [], emptyText, limit);
+}
+
+function dashboardObjectList(value, emptyText = "No items recorded.", limit = 6) {
+  if (!value || typeof value !== "object") return dashboardList([], emptyText, limit);
+  if (Array.isArray(value)) return dashboardList(value, emptyText, limit);
+  return dashboardList(Object.entries(value).map(([key, item]) => `${key}: ${renderDashboardValue(item, 96)}`), emptyText, limit);
+}
+
+function dashboardFiniteNumber(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function dashboardPercent(value, fallback = 0) {
+  const number = dashboardFiniteNumber(value);
+  if (number === null) return fallback;
+  return Math.max(0, Math.min(100, number));
+}
+
+function dashboardValueFromObject(source, keys) {
+  if (!source || typeof source !== "object") return null;
+  for (const key of keys || []) {
+    const value = backendField(source, [key]);
+    if (value !== null && value !== undefined && value !== "") return value;
+  }
+  return null;
+}
+
+function dashboardFirstNumber(source, keys) {
+  const value = dashboardValueFromObject(source, keys);
+  return dashboardFiniteNumber(value);
+}
+
+function dashboardStatusScore(value) {
+  if (value === true) return 1;
+  if (value === false) return 0;
+  const text = String(value ?? "").toLowerCase();
+  if (!text) return null;
+  if (/pass|passed|ok|ready|done|complete|success|approved|valid|clear/.test(text)) return 1;
+  if (/pending|wait|running|warn|partial|review|queued/.test(text)) return 0.5;
+  if (/fail|failed|blocked|error|reject|invalid|stale|missing/.test(text)) return 0;
+  return null;
+}
+
+function dashboardStatusTone(value) {
+  const score = dashboardStatusScore(value);
+  if (score === null) return "info";
+  if (score >= 0.9) return "success";
+  if (score > 0) return "warning";
+  return "danger";
+}
+
+function renderVizEmpty(message = "Waiting for backend evidence.") {
+  return `
+    <div class="ar-viz-empty">
+      <strong>No chartable data yet</strong>
+      <span>${escapeHtml(message)}</span>
+    </div>
+  `;
+}
+
+function renderMiniBarChart(items, options = {}) {
+  const clean = (items || [])
+    .map((item) => ({
+      label: item && item.label ? String(item.label) : "",
+      value: dashboardFiniteNumber(item && item.value),
+      max: dashboardFiniteNumber(item && item.max),
+      meta: item && item.meta !== undefined ? String(item.meta) : "",
+      tone: item && item.tone ? String(item.tone) : "info",
+    }))
+    .filter((item) => item.label && item.value !== null);
+  if (!clean.length) return renderVizEmpty(options.emptyText || "No numeric backend values are present for this chart.");
+  const values = clean.map((item) => item.value);
+  const minValue = Math.min(0, ...values);
+  const maxValue = Math.max(...values, 1);
+  const domain = Array.isArray(options.domain) && options.domain.length >= 2
+    ? options.domain.map(Number)
+    : [minValue, maxValue];
+  const domainStart = Number.isFinite(domain[0]) ? domain[0] : 0;
+  const domainEnd = Number.isFinite(domain[1]) && Math.abs(domain[1] - domainStart) > 1e-9 ? domain[1] : domainStart + 1;
+  const className = options.compact ? "ar-mini-bars compact" : "ar-mini-bars";
+  const chartLabel = options.label || "backend bar chart";
+  return `
+    <div class="${className}" role="list" aria-label="${escapeHtml(chartLabel)}">
+      ${clean.slice(0, options.limit || 10).map((item) => {
+        const pct = item.max && item.max > 0
+          ? dashboardPercent((item.value / item.max) * 100)
+          : dashboardPercent(((item.value - domainStart) / (domainEnd - domainStart)) * 100);
+        const valueText = item.meta || numberText(item.value, options.digits ?? 3);
+        return `
+          <div class="ar-mini-bar-row tone-${escapeHtml(item.tone)}" role="listitem" title="${escapeHtml(item.label)}: ${escapeHtml(valueText)}">
+            <div class="ar-mini-bar-label">
+              <span>${escapeHtml(compactText(item.label, 38))}</span>
+              <strong>${escapeHtml(valueText)}</strong>
+            </div>
+            <div class="ar-mini-bar-track" aria-hidden="true"><span style="--bar:${numberText(pct, 2)}%;"></span></div>
+          </div>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function renderStatusStackChart(report, status) {
+  const state = report.state || {};
+  const running = liveRunningFlag(liveLastSession || {}, liveLastSnapshot || {}, state);
+  const buckets = { running: 0, waiting: 0, done: 0, error: 0, idle: 0 };
+  LIVE_AGENTS.forEach((agent) => {
+    const agentStatus = agent.id === liveSelectedAgent ? status : eventStatusForAgent(agent.id, state, running);
+    const normalized = String(agentStatus || "idle").toLowerCase();
+    const bucket = normalized === "active" ? "running"
+      : normalized === "complete" ? "done"
+        : Object.prototype.hasOwnProperty.call(buckets, normalized) ? normalized : "idle";
+    buckets[bucket] += 1;
+  });
+  const total = Math.max(1, Object.values(buckets).reduce((sum, value) => sum + value, 0));
+  const order = [
+    ["running", "Running"],
+    ["waiting", "Waiting"],
+    ["done", "Done"],
+    ["error", "Error"],
+    ["idle", "Idle"],
+  ];
+  return `
+    <div class="ar-status-stack-wrap" aria-label="agent status distribution">
+      <div class="ar-status-stack">
+        ${order.map(([key, label]) => {
+          const width = dashboardPercent((buckets[key] / total) * 100);
+          return `<span class="status-${key}" style="--seg:${numberText(width, 2)}%;" title="${escapeHtml(label)}: ${buckets[key]}"></span>`;
+        }).join("")}
+      </div>
+      <div class="ar-status-legend">
+        ${order.map(([key, label]) => `<span class="status-${key}"><i></i>${escapeHtml(label)} ${buckets[key]}</span>`).join("")}
+      </div>
+    </div>
+  `;
+}
+
+function eventTimestampMs(event, index) {
+  const payload = eventPayload(event);
+  const raw = event.timestamp || event.created_at || event.ts || event.time || payload.timestamp || payload.created_at || "";
+  const parsed = Date.parse(raw);
+  return Number.isFinite(parsed) ? parsed : index;
+}
+
+function renderEventSparkline(report, options = {}) {
+  const events = (Array.isArray(report.events) && report.events.length ? report.events : selectedEvents()).slice(-48);
+  if (!events.length) {
+    return `
+      <div class="ar-sparkline-card ar-sparkline-empty">
+        <div class="ar-viz-title-row">
+          <span>${escapeHtml(options.title || "Event Pulse")}</span>
+          <strong>0</strong>
+        </div>
+        <svg class="ar-sparkline-svg" viewBox="0 0 168 58" role="img" aria-label="${escapeHtml(options.title || "Event pulse")} waiting for backend events">
+          <line x1="8" y1="40" x2="160" y2="40" class="ar-spark-idle-line"></line>
+          <circle cx="84" cy="40" r="2.4" class="ar-spark-idle-dot"><title>waiting for selected-agent runtime events</title></circle>
+        </svg>
+        <div class="ar-viz-foot">
+          <span>waiting</span>
+          <span>backend pulse</span>
+        </div>
+      </div>
+    `;
+  }
+  const bins = options.bins || 14;
+  const counts = Array.from({ length: bins }, () => 0);
+  const times = events.map((event, index) => eventTimestampMs(event, index));
+  const useTime = times.some((value) => value > 100000);
+  const min = Math.min(...times);
+  const max = Math.max(...times);
+  events.forEach((event, index) => {
+    const rawPos = useTime && max > min ? (times[index] - min) / (max - min) : index / Math.max(1, events.length - 1);
+    const bin = Math.max(0, Math.min(bins - 1, Math.floor(rawPos * bins)));
+    counts[bin] += 1;
+  });
+  const width = 168;
+  const height = 58;
+  const pad = { left: 8, right: 8, top: 8, bottom: 14 };
+  const plotW = width - pad.left - pad.right;
+  const plotH = height - pad.top - pad.bottom;
+  const maxCount = Math.max(1, ...counts);
+  const points = counts.map((value, index) => {
+    const x = pad.left + (index / Math.max(1, bins - 1)) * plotW;
+    const y = pad.top + plotH - (value / maxCount) * plotH;
+    return [x, y];
+  });
+  const area = [...points, [pad.left + plotW, pad.top + plotH], [pad.left, pad.top + plotH]];
+  return `
+    <div class="ar-sparkline-card">
+      <div class="ar-viz-title-row">
+        <span>${escapeHtml(options.title || "Event Pulse")}</span>
+        <strong>${events.length}</strong>
+      </div>
+      <svg class="ar-sparkline-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(options.title || "Event pulse")} over recent backend events">
+        <polygon points="${polyline(area)}" class="ar-spark-area"></polygon>
+        <polyline points="${polyline(points)}" class="ar-spark-line"></polyline>
+        ${points.map(([x, y], index) => counts[index] ? `<circle cx="${numberText(x, 2)}" cy="${numberText(y, 2)}" r="2.2"><title>bin ${index + 1}: ${counts[index]} event(s)</title></circle>` : "").join("")}
+      </svg>
+      <div class="ar-viz-foot">
+        <span>${escapeHtml(formatTime(events[0].timestamp || events[0].created_at || ""))}</span>
+        <span>${escapeHtml(formatTime(events[events.length - 1].timestamp || events[events.length - 1].created_at || ""))}</span>
+      </div>
+    </div>
+  `;
+}
+
+function renderRuntimeSignalGraph(report, status) {
+  const agentCounts = {};
+  (liveRunEvents.length ? liveRunEvents : liveRecentEvents).forEach((event) => {
+    const agentId = agentIdFromEvent(event);
+    agentCounts[agentId] = (agentCounts[agentId] || 0) + 1;
+  });
+  const activityRows = LIVE_AGENTS
+    .filter((agent) => agentCounts[agent.id])
+    .map((agent) => ({ label: liveAgentShort(agent.id), value: agentCounts[agent.id], tone: agent.id === liveSelectedAgent ? "running" : "info", meta: `${agentCounts[agent.id]} evt` }));
+  return `
+    <div class="ar-runtime-viz">
+      ${renderStatusStackChart(report, status)}
+      ${renderEventSparkline(report, { title: "Selected Event Pulse" })}
+      <div class="ar-runtime-viz-bars">
+        <div class="ar-viz-title-row"><span>Agent Event Mix</span><strong>${Object.values(agentCounts).reduce((sum, value) => sum + value, 0)}</strong></div>
+        ${renderMiniBarChart(activityRows, { label: "agent event mix", compact: true, emptyText: "No runtime events have been attributed to agents yet.", limit: 8 })}
+      </div>
+    </div>
+  `;
+}
+
+function renderGateStatusBars(items, options = {}) {
+  const rows = (items || []).map((item, index) => {
+    const label = item.label || item.name || item.gate || item.assertion || `gate ${index + 1}`;
+    const statusValue = item.status !== undefined ? item.status
+      : item.ok !== undefined ? item.ok
+        : item.value !== undefined ? item.value : null;
+    const score = dashboardStatusScore(statusValue);
+    if (score === null) return null;
+    return {
+      label,
+      value: score,
+      max: 1,
+      meta: String(statusValue),
+      tone: dashboardStatusTone(statusValue),
+    };
+  }).filter(Boolean);
+  return renderMiniBarChart(rows, {
+    label: options.label || "status gate bars",
+    emptyText: options.emptyText || "No gate status payload is present yet.",
+    compact: options.compact,
+    limit: options.limit || 10,
+  });
+}
+
+function dashboardHasEvidence(value) {
+  if (value === undefined || value === null) return false;
+  if (Array.isArray(value)) return value.length > 0;
+  if (typeof value === "object") return Object.keys(value).length > 0;
+  if (typeof value === "boolean") return true;
+  const text = String(value).trim().toLowerCase();
+  return Boolean(text && text !== "-" && text !== "not recorded" && text !== "none recorded" && text !== "unknown");
+}
+
+function dashboardEvidenceCount(value) {
+  if (!dashboardHasEvidence(value)) return 0;
+  if (Array.isArray(value)) return value.length;
+  if (typeof value === "object") return Object.keys(value).length;
+  const number = dashboardFiniteNumber(value);
+  if (number !== null && number >= 0) return number;
+  return 1;
+}
+
+function dashboardChannelDetail(value, fallback = "waiting") {
+  if (!dashboardHasEvidence(value)) return fallback;
+  if (Array.isArray(value)) return `${value.length} item${value.length === 1 ? "" : "s"}`;
+  if (typeof value === "object") return `${Object.keys(value).length} field${Object.keys(value).length === 1 ? "" : "s"}`;
+  return renderRuntimeValue(value);
+}
+
+function dashboardChannel(label, value, options = {}) {
+  const present = options.present !== undefined ? Boolean(options.present) : dashboardHasEvidence(value);
+  const score = dashboardFiniteNumber(options.score);
+  const count = options.count !== undefined ? options.count : dashboardEvidenceCount(value);
+  const status = options.status || (present ? "ready" : "waiting");
+  const tone = options.tone || (present ? "success" : "idle");
+  return {
+    label,
+    present,
+    score: score === null ? (present ? 1 : 0) : Math.max(0, Math.min(1, score)),
+    count,
+    status,
+    tone,
+    detail: options.detail || dashboardChannelDetail(value),
+  };
+}
+
+function dashboardGateChannel(label, value, options = {}) {
+  const hasValue = value !== undefined && value !== null && value !== "";
+  const score = dashboardStatusScore(value);
+  return dashboardChannel(label, value, {
+    ...options,
+    present: hasValue,
+    score: score === null ? (hasValue ? 1 : 0) : score,
+    status: hasValue ? renderRuntimeValue(value) : "waiting",
+    tone: hasValue ? dashboardStatusTone(value) : "idle",
+    detail: hasValue ? renderRuntimeValue(value) : "waiting",
+  });
+}
+
+function dashboardMiniBarItemCount(items) {
+  return (items || []).filter((item) => item && item.label && dashboardFiniteNumber(item.value) !== null).length;
+}
+
+function dashboardGateItemCount(items) {
+  return (items || []).filter((item) => {
+    if (!item) return false;
+    const statusValue = item.status !== undefined ? item.status
+      : item.ok !== undefined ? item.ok
+        : item.value !== undefined ? item.value : null;
+    return dashboardStatusScore(statusValue) !== null;
+  }).length;
+}
+
+function agentDataChannels(report, agentId) {
+  const state = report.state || {};
+  const spec = report.spec || {};
+  const metadata = reportRuntimeMetadata(report);
+  const artifacts = latestReportArtifacts(report);
+  const selectedEventCount = selectedEvents().length;
+  const baseChannels = [
+    dashboardChannel("Messages", report.messages, { status: report.messages.length ? "live" : "waiting", detail: `${report.messages.length} msg` }),
+    dashboardChannel("Events", report.events, { status: report.events.length ? "live" : "waiting", detail: `${report.events.length} evt` }),
+  ];
+
+  if (agentId === "objective") {
+    const missingRows = reportMissingInputRows(report);
+    const missingCount = missingRows.filter((item) => item.missing).length;
+    const readyCount = Math.max(0, missingRows.length - missingCount);
+    return [
+      dashboardChannel("Goal", state.active_goal || queryGoal, { detail: compactText(state.active_goal || queryGoal || "waiting", 48) }),
+      dashboardChannel("Experiment ID", state.experiment_id || state.run_id),
+      dashboardChannel("Required Vars", readyCount, { present: missingRows.length > 0, score: missingRows.length ? readyCount / missingRows.length : 0, status: missingCount ? "incomplete" : "ready", tone: missingCount ? "warning" : "success", detail: `${readyCount}/${missingRows.length}` }),
+      dashboardChannel("Material", spec.material || spec.material_family || spec.polymer_grade || spec.polymer),
+      dashboardChannel("Approvals", liveApprovals.pending || [], { present: true, score: (liveApprovals.pending || []).length ? 0.35 : 1, status: (liveApprovals.pending || []).length ? "pending" : "clear", tone: (liveApprovals.pending || []).length ? "warning" : "success", detail: `${(liveApprovals.pending || []).length} pending` }),
+      ...baseChannels,
+    ];
+  }
+
+  if (agentId === "orchestrator") {
+    const missionContract = metadata.latest_mission_contract || metadata.mission_contract || {};
+    const plan = metadata.latest_orchestration_plan || {};
+    const route = Array.isArray(plan.route) ? plan.route : [];
+    const decisions = Array.isArray(metadata.orchestrator_decision_register) ? metadata.orchestrator_decision_register : [];
+    const handoffs = Array.isArray(metadata.orchestrator_handoff_packets) ? metadata.orchestrator_handoff_packets : [];
+    const followups = Array.isArray(metadata.orchestrator_followups) ? metadata.orchestrator_followups : [];
+    return [
+      dashboardChannel("Mission Contract", missionContract),
+      dashboardChannel("Route Plan", route, { detail: `${route.length} nodes` }),
+      dashboardChannel("Decisions", decisions, { detail: `${decisions.length} logged` }),
+      dashboardChannel("Handoffs", handoffs.length ? handoffs : report.handoffs, { detail: `${handoffs.length || report.handoffs.length} packets` }),
+      dashboardChannel("Followups", followups, { detail: `${followups.length} opinions` }),
+      dashboardGateChannel("Guardian Gate", missionContract.requires_guardian_gate === undefined ? true : missionContract.requires_guardian_gate, { status: "required" }),
+      ...baseChannels,
+    ];
+  }
+
+  if (agentId === "design") {
+    const designReport = latestDesignReport(report) || {};
+    const generation = designReport.candidate_generation || {};
+    const evaluation = designReport.candidate_evaluation || {};
+    const candidates = [
+      ...(Array.isArray(generation.candidates) ? generation.candidates : []),
+      ...(Array.isArray(generation.top_candidates) ? generation.top_candidates : []),
+      ...(Array.isArray(evaluation.candidates) ? evaluation.candidates : []),
+    ];
+    return [
+      dashboardChannel("Objective", designReport.objective || spec.objective_type),
+      dashboardChannel("Hypothesis", designReport.hypothesis),
+      dashboardChannel("Candidate Pool", candidates, { detail: `${candidates.length || generation.candidate_count || 0} candidates` }),
+      dashboardChannel("Selected", evaluation.selected_candidate_id || evaluation.selected || spec.candidate_id),
+      dashboardChannel("Rejected Log", designReport.rejected_candidates || [], { detail: `${(designReport.rejected_candidates || []).length} rejected` }),
+      dashboardGateChannel("Specimen Handoff", (designReport.handoff_to_specimen || {}).required_fields_present),
+      ...baseChannels,
+    ];
+  }
+
+  if (agentId === "specimen") {
+    const fabrication = latestSpecimenFabricationReport(report) || {};
+    const thread = fabrication.digital_thread || {};
+    const packet = latestSpecimenFabricatedPacket(report) || {};
+    const gates = Array.isArray(fabrication.quality_gates) ? fabrication.quality_gates : [];
+    return [
+      dashboardChannel("Fabrication Report", fabrication),
+      dashboardChannel("Digital Thread", thread),
+      dashboardChannel("STL", thread.stl_path || latestReportPayload(report, ["stl_path"])),
+      dashboardChannel("G-code", thread.gcode_path || latestReportPayload(report, ["gcode_path", "sliced_path", "output_gcode"])),
+      dashboardChannel("Quality Gates", gates, { detail: `${dashboardGateItemCount(gates)}/${gates.length} scored` }),
+      dashboardChannel("Handoff Packet", packet),
+      dashboardChannel("Artifacts", artifacts, { detail: `${artifacts.length} artifacts` }),
+      ...baseChannels,
+    ];
+  }
+
+  if (agentId === "vision") {
+    const visionReport = latestVisionReport(report) || {};
+    const packet = latestVisionSignalPacket(report) || {};
+    const camera = visionReport.camera_source || {};
+    const signals = Array.isArray(visionReport.signal_board) ? visionReport.signal_board : Array.isArray(visionReport.agent_signals) ? visionReport.agent_signals : [];
+    const zones = visionReport.scene_map || visionReport.zones || {};
+    return [
+      dashboardChannel("Camera Source", camera),
+      dashboardChannel("Scene Map", zones),
+      dashboardChannel("Signal Board", signals, { detail: `${signals.length} signals` }),
+      dashboardGateChannel("Anomaly Clear", (visionReport.safety_anomaly || {}).anomaly === undefined ? undefined : !(visionReport.safety_anomaly || {}).anomaly),
+      dashboardChannel("Handoff Packet", packet),
+      dashboardChannel("Selected Events", selectedEventCount, { present: selectedEventCount > 0, detail: `${selectedEventCount} evt` }),
+      ...baseChannels,
+    ];
+  }
+
+  if (agentId === "manipulation") {
+    const manipulation = latestManipulationReport(report) || {};
+    const robot = latestRobotTaskResult(report) || {};
+    return [
+      dashboardChannel("Task Route", manipulation.task || robot.task_id),
+      dashboardChannel("Policy", manipulation.policy_plan || latestReportPayload(report, ["policy_path", "checkpoint_path", "policy_repo_id"])),
+      dashboardChannel("Preflight", manipulation.preflight),
+      dashboardChannel("Vision Context", manipulation.vision_context),
+      dashboardChannel("SARM State", manipulation.sarm),
+      dashboardChannel("Robot Result", robot),
+      ...baseChannels,
+    ];
+  }
+
+  if (agentId === "equipment") {
+    const equipment = latestEquipmentReport(report) || {};
+    const equipmentResult = latestEquipmentResult(report) || {};
+    const packet = latestUtmDataReadyPacket(report) || {};
+    const handoff = latestEquipmentHandoffPacket(report) || {};
+    const screenChecks = Array.isArray(equipment.screen_checks) ? equipment.screen_checks : [];
+    return [
+      dashboardChannel("Bridge", equipment.bridge || equipmentResult.bridge),
+      dashboardChannel("Control Profile", (equipment.control_plan || {}).profile || equipment.control_plan),
+      dashboardChannel("Screen Checks", screenChecks, { detail: `${screenChecks.filter((item) => item && item.ok).length}/${screenChecks.length} pass` }),
+      dashboardChannel("Physical Checks", equipment.physical_checks || equipment.vision_cross_checks),
+      dashboardChannel("Data Acquisition", equipment.data_acquisition || packet),
+      dashboardChannel("Analysis Handoff", handoff),
+      ...baseChannels,
+    ];
+  }
+
+  if (agentId === "analysis") {
+    const analysis = latestAnalysisPayload(report) || {};
+    const quality = analysis.quality_gate || analysis.data_quality_gate || {};
+    const artifactsValue = analysis.analysis_artifacts || artifacts;
+    return [
+      dashboardChannel("Raw Data", analysis.raw_data_ledger || analysis.raw_data || analysis.utm_metrics),
+      dashboardChannel("UTM Metrics", analysis.utm_metrics),
+      dashboardChannel("Quality Gate", quality),
+      dashboardChannel("FEM Comparison", analysis.fem_utm_comparison),
+      dashboardChannel("Artifacts", artifactsValue, { detail: dashboardChannelDetail(artifactsValue, "waiting") }),
+      dashboardGateChannel("BO Handoff", (latestAnalysisBoHandoff(report) || {}).ok_for_bo),
+      ...baseChannels,
+    ];
+  }
+
+  if (agentId === "knowledge") {
+    const payload = latestKnowledgePayload(report) || {};
+    const knowledgeReport = latestKnowledgeReport(report) || {};
+    const context = latestKnowledgeContext(report) || {};
+    const evolution = latestKnowledgeEvolutionProposal(report) || {};
+    const failures = Array.isArray(knowledgeReport.failure_patterns) ? knowledgeReport.failure_patterns : [];
+    const successes = Array.isArray(knowledgeReport.success_patterns) ? knowledgeReport.success_patterns : [];
+    return [
+      dashboardChannel("Memory Intake", knowledgeReport.memory_intake || payload),
+      dashboardChannel("Evidence Quality", knowledgeReport.evidence_quality || context.evidence_quality),
+      dashboardChannel("Failure Patterns", failures, { detail: `${failures.length} patterns` }),
+      dashboardChannel("Success Patterns", successes, { detail: `${successes.length} patterns` }),
+      dashboardChannel("Retrieval Context", context),
+      dashboardChannel("Evolution Packs", evolution.evidence_packs || [], { detail: `${(evolution.evidence_packs || []).length} packs` }),
+      ...baseChannels,
+    ];
+  }
+
+  if (agentId === "bo") {
+    const boResult = latestReportBoResult(report) || {};
+    const ranking = Array.isArray(boResult.candidate_ranking) ? boResult.candidate_ranking : Array.isArray(boResult.candidate_pool) ? boResult.candidate_pool : [];
+    return [
+      dashboardChannel("Strategy", boResult.strategy || boResult.acquisition),
+      dashboardChannel("Prior Summary", boResult.prior_summary),
+      dashboardChannel("Candidate Ranking", ranking, { detail: `${ranking.length} ranked` }),
+      dashboardChannel("Recommendation", boResult.recommendation || boResult.selected),
+      dashboardChannel("Reasoning", boResult.reasoning),
+      dashboardChannel("Next Design", boResult.next_design_request || boResult.handoff_to_design),
+      ...baseChannels,
+    ];
+  }
+
+  if (agentId === "guardian") {
+    const guardianStatus = liveGuardianStatusPayload(report) || {};
+    const summary = guardianStatus.summary || {};
+    return [
+      dashboardChannel("Safety Summary", summary),
+      dashboardChannel("Gate Timeline", guardianStatus.gates || guardianStatus.timeline || []),
+      dashboardChannel("Approvals", liveApprovals.pending || [], { present: true, score: (liveApprovals.pending || []).length ? 0.35 : 1, status: (liveApprovals.pending || []).length ? "pending" : "clear", tone: (liveApprovals.pending || []).length ? "warning" : "success", detail: `${(liveApprovals.pending || []).length} pending` }),
+      dashboardChannel("Blocked Actions", summary.blocked_action_count, { present: summary.blocked_action_count !== undefined, tone: summary.blocked_action_count ? "danger" : "success", detail: renderRuntimeValue(summary.blocked_action_count, "0") }),
+      dashboardChannel("Incidents", summary.incident_count, { present: summary.incident_count !== undefined, tone: summary.incident_count ? "danger" : "success", detail: renderRuntimeValue(summary.incident_count, "0") }),
+      dashboardChannel("Latest Decision", latestReportPayload(report, ["latest_guardian_decision", "guardian_decision", "decision"])),
+      ...baseChannels,
+    ];
+  }
+
+  return baseChannels;
+}
+
+function renderAgentFlowStrip(report, status) {
+  const state = report.state || {};
+  const running = liveRunningFlag(liveLastSession || {}, liveLastSnapshot || {}, state);
+  return `
+    <div class="ar-flow-strip" aria-label="agent route status">
+      ${LIVE_AGENTS.map((agent, index) => {
+        const agentStatus = agent.id === liveSelectedAgent ? status : eventStatusForAgent(agent.id, state, running);
+        const normalized = String(agentStatus || "idle").toLowerCase();
+        const statusClass = normalized === "active" ? "running" : normalized === "complete" ? "done" : normalized;
+        return `
+          <div class="ar-flow-node status-${escapeHtml(statusClass)}${agent.id === liveSelectedAgent ? " selected" : ""}">
+            <span>${escapeHtml(agent.short)}</span>
+            <strong>${escapeHtml(compactText(agent.label, 18))}</strong>
+            <em>${escapeHtml(index === 0 ? "intake" : agent.stage)}</em>
+          </div>
+        `;
+      }).join("<i></i>")}
+    </div>
+  `;
+}
+
+function renderChannelMatrix(channels, options = {}) {
+  const clean = (channels || []).slice(0, options.limit || 10);
+  if (!clean.length) return renderVizEmpty("No agent channels have been configured for this view.");
+  return `
+    <div class="ar-channel-matrix" role="list" aria-label="${escapeHtml(options.label || "agent data channels")}">
+      ${clean.map((channel) => {
+        const pct = dashboardPercent(channel.score * 100);
+        return `
+          <article class="ar-channel-tile tone-${escapeHtml(channel.tone || "idle")}" role="listitem" title="${escapeHtml(channel.label)}: ${escapeHtml(channel.detail)}">
+            <div class="ar-channel-top">
+              <span>${escapeHtml(compactText(channel.label, 26))}</span>
+              <strong>${escapeHtml(channel.status || (channel.present ? "ready" : "waiting"))}</strong>
+            </div>
+            <div class="ar-channel-meter" aria-hidden="true"><span style="--bar:${numberText(pct, 2)}%;"></span></div>
+            <small>${escapeHtml(compactText(channel.detail, 52))}</small>
+          </article>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function renderEvidenceCoverageMatrix(report, channels, options = {}) {
+  const metadata = reportRuntimeMetadata(report);
+  const payloadEventCount = (report.events || []).filter((event) => dashboardHasEvidence(eventPayload(event))).length;
+  const artifactCount = liveRunArtifacts.length + latestReportArtifacts(report).length + (report.artifactItems || []).length;
+  const readyChannels = (channels || []).filter((channel) => channel.score >= 0.75).length;
+  const coverageRows = [
+    { label: "Messages", value: report.messages.length, max: 8, tone: report.messages.length ? "success" : "idle", meta: `${report.messages.length}` },
+    { label: "Payload Events", value: payloadEventCount, max: 8, tone: payloadEventCount ? "success" : "idle", meta: `${payloadEventCount}` },
+    { label: "Artifacts", value: artifactCount, max: 6, tone: artifactCount ? "running" : "idle", meta: `${artifactCount}` },
+    { label: "Channels Ready", value: readyChannels, max: Math.max(1, (channels || []).length), tone: readyChannels ? "success" : "warning", meta: `${readyChannels}/${(channels || []).length}` },
+    { label: "Warnings", value: report.warnings.length, max: 6, tone: report.warnings.length ? "warning" : "success", meta: `${report.warnings.length}` },
+    { label: "Run Metadata", value: dashboardHasEvidence(metadata) ? 1 : 0, max: 1, tone: dashboardHasEvidence(metadata) ? "success" : "idle", meta: dashboardHasEvidence(metadata) ? `${Object.keys(metadata).length} keys` : "waiting" },
+  ];
+  return `
+    <div class="ar-coverage-grid ${options.compact ? "compact" : ""}" aria-label="backend evidence coverage">
+      ${coverageRows.map((row) => {
+        const pct = row.max ? dashboardPercent((row.value / row.max) * 100) : 0;
+        return `
+          <article class="ar-coverage-tile tone-${escapeHtml(row.tone)}">
+            <span>${escapeHtml(row.label)}</span>
+            <strong>${escapeHtml(row.meta)}</strong>
+            <div class="ar-channel-meter" aria-hidden="true"><span style="--bar:${numberText(pct, 2)}%;"></span></div>
+          </article>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function renderAgentEvidenceBoard(report, status, agentLabel, options = {}) {
+  const agentId = String(liveSelectedAgent || "").toLowerCase();
+  const channels = agentDataChannels(report, agentId);
+  const readyCount = channels.filter((channel) => channel.score >= 0.75).length;
+  const avgScore = channels.length ? channels.reduce((sum, channel) => sum + channel.score, 0) / channels.length : 0;
+  const title = options.title || `${agentLabel} Evidence Board`;
+  return `
+    <div class="ar-evidence-board ${options.compact ? "compact" : ""}" data-evidence-agent="${escapeHtml(agentId || "agent")}">
+      <div class="ar-evidence-head">
+        <div>
+          <span>${escapeHtml(title)}</span>
+          <strong>${escapeHtml(readyCount)}/${escapeHtml(channels.length)} live channels</strong>
+        </div>
+        <em>${escapeHtml(numberText(avgScore * 100, 1))}% coverage</em>
+      </div>
+      ${renderAgentFlowStrip(report, status)}
+      ${renderChannelMatrix(channels, { limit: options.channelLimit || 8, label: `${agentLabel} data channels` })}
+      ${renderEvidenceCoverageMatrix(report, channels)}
+      <div class="ar-evidence-bottom">
+        ${renderStatusStackChart(report, status)}
+        ${renderEventSparkline(report, { title: "Agent Event Pulse", emptyText: "No selected-agent runtime events have arrived yet." })}
+      </div>
+    </div>
+  `;
+}
+
+function renderAgentVisualizationCard(report, status, agentLabel) {
+  const agentId = String(liveSelectedAgent || "").toLowerCase();
+  let title = "Runtime Signals";
+  let body = "";
+
+  if (agentId === "objective") {
+    title = "Objective Readiness";
+    const rows = reportMissingInputRows(report).map((item) => ({
+      label: item.label,
+      value: item.missing ? 0 : 1,
+      max: 1,
+      meta: item.missing ? "Needed" : "Ready",
+      tone: item.missing ? "warning" : "success",
+    }));
+    body = renderMiniBarChart(rows, { label: "objective required variable readiness" });
+  } else if (agentId === "orchestrator") {
+    title = "Control Plane Activity";
+    body = renderOrchestratorControlPlaneVisualization(report, status);
+  } else if (agentId === "design") {
+    title = "Candidate Score Bars";
+    const screenReport = latestDesignAgentReport(report) || {};
+    const designReport = latestDesignReport(report) || {};
+    const candidates = designCandidateRows(screenReport, designReport);
+    const rows = candidates.slice(0, 8).map((item, index) => {
+      const value = designCandidateScore(item);
+      if (value === null) return null;
+      return {
+        label: item.candidate_id || item.id || `candidate ${index + 1}`,
+        value,
+        max: value <= 1 ? 1 : null,
+        meta: numberText(value, 4),
+        tone: designCandidateTone(item),
+      };
+    }).filter(Boolean);
+    body = dashboardMiniBarItemCount(rows)
+      ? renderMiniBarChart(rows, { label: "design candidate scores", emptyText: "No scored design candidates are present in the backend report yet." })
+      : renderAgentEvidenceBoard(report, status, agentLabel, { title: "Design Evidence Board" });
+  } else if (agentId === "specimen") {
+    title = "Quality Gate Bars";
+    const screenReport = latestSpecimenAgentReport(report) || {};
+    const fabrication = latestSpecimenFabricationReport(report) || {};
+    const gates = specimenReadinessGateRows(screenReport, fabrication);
+    body = dashboardGateItemCount(gates)
+      ? renderGateStatusBars(gates, { label: "specimen fabrication gate status", emptyText: "No fabrication quality gates have been emitted yet." })
+      : renderAgentEvidenceBoard(report, status, agentLabel, { title: "Specimen Evidence Board" });
+  } else if (agentId === "vision") {
+    title = "Signal Confidence";
+    const screenReport = latestVisionAgentReport(report) || {};
+    const visionReport = latestVisionReport(report) || {};
+    const histogram = screenReport.confidence_distribution || {};
+    const histRows = Array.isArray(histogram.histogram) ? histogram.histogram.map((item) => ({
+      label: item.bin || "bin",
+      value: dashboardFiniteNumber(item.count),
+      tone: "info",
+      meta: renderRuntimeValue(item.count, "0"),
+    })).filter((item) => item.value !== null) : [];
+    const signals = Array.isArray(visionReport.signal_board) ? visionReport.signal_board : Array.isArray(visionReport.agent_signals) ? visionReport.agent_signals : [];
+    const rows = histRows.length ? histRows : signals.map((signal, index) => {
+      const value = dashboardFiniteNumber(signal.confidence);
+      if (value === null) return null;
+      return {
+        label: signal.signal || signal.name || signal.id || `signal ${index + 1}`,
+        value,
+        max: value <= 1 ? 1 : 100,
+        meta: numberText(value, 3),
+        tone: value >= 0.8 || value >= 80 ? "success" : value >= 0.45 || value >= 45 ? "warning" : "danger",
+      };
+    }).filter(Boolean);
+    body = dashboardMiniBarItemCount(rows)
+      ? renderMiniBarChart(rows, { label: histRows.length ? "vision confidence histogram" : "vision signal confidence", emptyText: "No confidence-bearing vision signals are present yet." })
+      : renderAgentEvidenceBoard(report, status, agentLabel, { title: "Vision Evidence Board" });
+  } else if (agentId === "manipulation") {
+    title = "SARM / Preflight";
+    const manipulation = latestManipulationReport(report) || {};
+    const sarm = manipulation.sarm || {};
+    const preflight = manipulation.preflight || {};
+    const numericRows = [
+      ["progress_score", sarm.progress_score, "running"],
+      ["risk_score", sarm.risk_score, "warning"],
+      ["failure_precursor", sarm.failure_precursor, "danger"],
+    ].map(([label, value, tone]) => {
+      const number = dashboardFiniteNumber(value);
+      return number === null ? null : { label, value: number, max: number <= 1 ? 1 : 100, meta: numberText(number, 3), tone };
+    }).filter(Boolean);
+    const gates = [
+      { label: "robot_ready", status: preflight.robot_ready },
+      { label: "vision_ready", status: preflight.vision_ready },
+      { label: "workspace_clear", status: preflight.workspace_clear },
+    ].filter((item) => item.status !== undefined);
+    const sections = [];
+    if (dashboardMiniBarItemCount(numericRows)) sections.push(renderMiniBarChart(numericRows, { label: "manipulation SARM scores", emptyText: "No SARM numeric scores are present yet." }));
+    if (dashboardGateItemCount(gates)) sections.push(renderGateStatusBars(gates, { label: "manipulation preflight gates", compact: true, emptyText: "No manipulation preflight booleans are present yet." }));
+    body = sections.length ? sections.join("") : renderAgentEvidenceBoard(report, status, agentLabel, { title: "Manipulation Evidence Board" });
+  } else if (agentId === "equipment") {
+    title = "UTM Readiness";
+    const equipment = latestEquipmentReport(report) || {};
+    const screenChecks = Array.isArray(equipment.screen_checks) ? equipment.screen_checks : [];
+    const visionChecks = equipment.vision_cross_checks || {};
+    const physical = equipment.physical_checks || {};
+    const cross = equipment.cross_checks || {};
+    const gates = [
+      ...screenChecks.map((item, index) => ({ label: item.name || item.assertion || `screen ${index + 1}`, status: item.ok })),
+      { label: "vision_all_required", status: visionChecks.all_required_ok },
+      { label: "motion_confirmed", status: physical.vision_motion_confirmed },
+      { label: "alignment_confirmed", status: physical.alignment_confirmed },
+      { label: "data_parse_probe", status: cross.data_parse_probe_ok },
+      { label: "screen_started", status: cross.screen_started },
+    ].filter((item) => item.status !== undefined);
+    body = dashboardGateItemCount(gates)
+      ? renderGateStatusBars(gates, { label: "equipment UTM readiness gates", emptyText: "No screen, vision, or data readiness gates are present yet.", limit: 12 })
+      : renderAgentEvidenceBoard(report, status, agentLabel, { title: "Equipment Evidence Board" });
+  } else if (agentId === "analysis") {
+    title = "Measured Metric Bars";
+    const analysis = latestAnalysisPayload(report) || {};
+    const metrics = analysis.utm_metrics || {};
+    const quality = analysis.quality_gate || analysis.data_quality_gate || {};
+    const comparison = analysis.fem_utm_comparison || {};
+    const rows = [
+      ["peak_force_N", metrics.peak_force_N, "N", "info"],
+      ["strength_MPa", metrics.compressive_strength_MPa, "MPa", "success"],
+      ["objective_score", analysis.objective_score, "score", "running"],
+      ["uncertainty", analysis.uncertainty, "model", "warning"],
+      ["quality_score", quality.score, "qa", "success"],
+      ["agreement_score", comparison.agreement_score, "fem", "info"],
+    ].map(([label, value, unit, tone]) => {
+      const number = dashboardFiniteNumber(value);
+      return number === null ? null : { label, value: number, meta: `${numberText(number, 4)} ${unit}`, tone };
+    }).filter(Boolean);
+    body = dashboardMiniBarItemCount(rows)
+      ? renderMiniBarChart(rows, { label: "analysis measured metrics", emptyText: "No numeric analysis metrics are present yet." })
+      : renderAgentEvidenceBoard(report, status, agentLabel, { title: "Analysis Evidence Board" });
+  } else if (agentId === "knowledge") {
+    title = "Memory Coverage";
+    const knowledgeReport = latestKnowledgeReport(report) || {};
+    const context = latestKnowledgeContext(report) || {};
+    const evolution = latestKnowledgeEvolutionProposal(report) || {};
+    const rows = [
+      ["failure_patterns", Array.isArray(knowledgeReport.failure_patterns) ? knowledgeReport.failure_patterns.length : null, "danger"],
+      ["success_patterns", Array.isArray(knowledgeReport.success_patterns) ? knowledgeReport.success_patterns.length : null, "success"],
+      ["performance_records", Array.isArray(knowledgeReport.agent_performance_records) ? knowledgeReport.agent_performance_records.length : null, "info"],
+      ["context_items", Array.isArray(context.items) ? context.items.length : null, "running"],
+      ["evidence_packs", Array.isArray(evolution.evidence_packs) ? evolution.evidence_packs.length : null, "warning"],
+    ].map(([label, value, tone]) => dashboardFiniteNumber(value) === null ? null : { label, value, meta: `${value}`, tone }).filter(Boolean);
+    body = dashboardMiniBarItemCount(rows)
+      ? renderMiniBarChart(rows, { label: "knowledge memory coverage", emptyText: "No typed memory counts are present yet." })
+      : renderAgentEvidenceBoard(report, status, agentLabel, { title: "Knowledge Evidence Board" });
+  } else if (agentId === "bo") {
+    title = "BO Candidate Ranking";
+    const boResult = latestReportBoResult(report) || {};
+    const ranking = Array.isArray(boResult.candidate_ranking) ? boResult.candidate_ranking : Array.isArray(boResult.candidate_pool) ? boResult.candidate_pool : [];
+    const rows = ranking.slice(0, 8).map((item, index) => {
+      const value = dashboardFirstNumber(item, ["combined_score", "acquisition_score", "acquisition", "objective_score", "score"]);
+      if (value === null) return null;
+      return {
+        label: item.candidate_id || item.id || `candidate ${index + 1}`,
+        value,
+        meta: numberText(value, 5),
+        tone: index === 0 ? "success" : "info",
+      };
+    }).filter(Boolean);
+    body = dashboardMiniBarItemCount(rows)
+      ? renderMiniBarChart(rows, { label: "BO candidate ranking", emptyText: "No scored BO candidate ranking is present yet." })
+      : renderBoGateState(report);
+  } else if (agentId === "guardian") {
+    title = "Risk / Gate Load";
+    const guardianStatus = liveGuardianStatusPayload(report) || {};
+    const summary = guardianStatus.summary || {};
+    const rows = [
+      { label: "risk_score", value: dashboardFiniteNumber(summary.risk_score), max: dashboardFiniteNumber(summary.risk_score) !== null && dashboardFiniteNumber(summary.risk_score) <= 1 ? 1 : 100, tone: "warning", meta: renderRuntimeValue(summary.risk_score, "-") },
+      { label: "pending_approvals", value: (liveApprovals.pending || []).length, tone: (liveApprovals.pending || []).length ? "warning" : "success", meta: `${(liveApprovals.pending || []).length}` },
+      { label: "blocked_actions", value: dashboardFiniteNumber(summary.blocked_action_count), tone: "danger", meta: renderRuntimeValue(summary.blocked_action_count, "-") },
+      { label: "incidents", value: dashboardFiniteNumber(summary.incident_count), tone: "danger", meta: renderRuntimeValue(summary.incident_count, "-") },
+      { label: "warnings", value: report.warnings.length, tone: report.warnings.length ? "warning" : "success", meta: `${report.warnings.length}` },
+    ].filter((item) => item.value !== null);
+    body = renderMiniBarChart(rows, { label: "guardian risk and gate load", emptyText: "No Guardian risk or gate load metrics are present yet." });
+  } else {
+    body = renderRuntimeSignalGraph(report, status);
+  }
+
+  return renderDashboardCard(title, `
+    <div class="ar-agent-viz" data-agent-viz="${escapeHtml(agentId || "agent")}">
+      ${body}
+    </div>
+  `, { span: 8, tone: agentId || "agent", eyebrow: "data visualization", meta: `${agentLabel} live payload` });
+}
+
+function renderAgentWorkcellCard(profile, report, status, agentLabel) {
+  return renderDashboardCard("Agent Workcell", `
+    <p class="ar-card-summary">${escapeHtml(profile.summary || `${agentLabel} runtime evidence.`)}</p>
+    ${renderDashboardRows([
+      ["role", profile.title || agentLabel],
+      ["runtime_status", status],
+      ["messages", report.messages.length],
+      ["events", report.events.length],
+    ])}
+  `, { span: 4, tone: liveSelectedAgent || "agent", eyebrow: "agent-specific" });
+}
+
+function renderObjectiveDashboardCards(report, status, agentLabel, profile) {
+  const state = report.state || {};
+  const spec = report.spec || {};
+  const missingRows = reportMissingInputRows(report);
+  const missingCount = missingRows.filter((item) => item.missing).length;
+  const readyCount = missingRows.length - missingCount;
+  const activeGoal = state.active_goal || state.goal || queryGoal || "-";
+  return `
+    ${renderDashboardCard("Objective Intake", renderDashboardRows([
+      ["operator_goal", activeGoal],
+      ["experiment_id", state.experiment_id || "-"],
+      ["run_id", state.run_id || "-"],
+      ["mode", state.mode || "-"],
+      ["stage", state.stage || "-"],
+    ]), { span: 4, tone: "objective", eyebrow: "mission contract" })}
+    ${renderDashboardCard("Required Variables", renderMissingInputsCard(report), { span: 4, tone: missingCount ? "warning" : "success", eyebrow: "intake completeness" })}
+    ${renderDashboardCard("Contract Gate", `<div class="ar-report-metrics">
+      ${renderDashboardMetric("Ready", readyCount, "required fields", missingCount ? "warning" : "success")}
+      ${renderDashboardMetric("Missing", missingCount, "operator inputs", missingCount ? "warning" : "success")}
+      ${renderDashboardMetric("Approvals", (liveApprovals.pending || []).length, "pending", (liveApprovals.pending || []).length ? "warning" : "success")}
+      ${renderDashboardMetric("Status", status, "objective", "info")}
+    </div>`, { span: 4, tone: "objective", eyebrow: "go/no-go" })}
+    ${renderDashboardCard("Experiment Contract", renderDashboardRows([
+      ["specimen", spec.specimen_id || spec.geometry_type || "-"],
+      ["objective_type", spec.objective_type || "-"],
+      ["direction", spec.objective_direction || "-"],
+      ["material", spec.material || spec.material_family || "-"],
+      ["test_protocol", spec.test_protocol || state.test_protocol || "-"],
+    ]), { span: 6, tone: "objective", eyebrow: "locked inputs" })}
+    ${renderDashboardCard("Operator Trigger", dashboardList([report.nextAction], "No operator trigger recorded.", 1), { span: 6, tone: "accent", eyebrow: "chat-enabled" })}
+  `;
+}
+
+function orchestratorContext(report, status) {
+  const state = report.state || {};
+  const metadata = reportRuntimeMetadata(report);
+  const directControlPlane = metadata.latest_orchestrator_control_plane && typeof metadata.latest_orchestrator_control_plane === "object"
+    ? metadata.latest_orchestrator_control_plane
+    : metadata.orchestrator_control_plane && typeof metadata.orchestrator_control_plane === "object" ? metadata.orchestrator_control_plane : {};
+  const reportControlPlane = latestReportPayload(report, ["orchestrator_control_plane", "latest_orchestrator_control_plane", "role_specific.orchestrator_control_plane"]);
+  const controlPlane = Object.keys(directControlPlane).length
+    ? directControlPlane
+    : reportControlPlane && typeof reportControlPlane === "object" ? reportControlPlane : {};
+  const controlRouteState = controlPlane.route_state && typeof controlPlane.route_state === "object" ? controlPlane.route_state : {};
+  const controlMissing = controlPlane.missing_inputs && typeof controlPlane.missing_inputs === "object" ? controlPlane.missing_inputs : {};
+  const controlApproval = controlPlane.approval_summary && typeof controlPlane.approval_summary === "object" ? controlPlane.approval_summary : {};
+  const controlRisk = controlPlane.risk_register && typeof controlPlane.risk_register === "object" ? controlPlane.risk_register : {};
+  const controlNextAction = controlPlane.next_action && typeof controlPlane.next_action === "object" ? controlPlane.next_action : {};
+  const missionContract = controlPlane.mission_contract && typeof controlPlane.mission_contract === "object"
+    ? controlPlane.mission_contract
+    : metadata.latest_mission_contract && typeof metadata.latest_mission_contract === "object"
+    ? metadata.latest_mission_contract
+    : metadata.mission_contract && typeof metadata.mission_contract === "object" ? metadata.mission_contract : {};
+  const plan = metadata.latest_orchestration_plan && typeof metadata.latest_orchestration_plan === "object" ? metadata.latest_orchestration_plan : {};
+  const route = Array.isArray(controlRouteState.route) && controlRouteState.route.length ? controlRouteState.route : Array.isArray(plan.route) ? plan.route : [];
+  const followups = Array.isArray(metadata.orchestrator_followups) && metadata.orchestrator_followups.length
+    ? metadata.orchestrator_followups
+    : controlPlane.followup_questions && Array.isArray(controlPlane.followup_questions.items) ? controlPlane.followup_questions.items : [];
+  const decisions = Array.isArray(metadata.orchestrator_decision_register) && metadata.orchestrator_decision_register.length
+    ? metadata.orchestrator_decision_register
+    : controlPlane.decision_register && Array.isArray(controlPlane.decision_register.items) ? controlPlane.decision_register.items : [];
+  const handoffs = Array.isArray(metadata.orchestrator_handoff_packets) ? metadata.orchestrator_handoff_packets : [];
+  const operatorQueue = Array.isArray(metadata.operator_followup_queue) ? metadata.operator_followup_queue : [];
+  const operatorFollowups = Array.isArray(metadata.operator_followups) ? metadata.operator_followups : [];
+  const operatorContext = Array.isArray(metadata.operator_followup_context) ? metadata.operator_followup_context : [];
+  const controlApprovalItems = Array.isArray(controlApproval.items) ? controlApproval.items.filter((item) => item && typeof item === "object") : [];
+  const runtimeApprovals = [
+    ...(metadata.runtime_approvals && typeof metadata.runtime_approvals === "object" ? Object.values(metadata.runtime_approvals).filter((item) => item && typeof item === "object") : []),
+    ...controlApprovalItems,
+  ];
+  const guardianQueue = Array.isArray(metadata.guardian_approval_queue) ? metadata.guardian_approval_queue : [];
+  const guardian = liveGuardianStatusPayload(report) || {};
+  const guardianSummary = guardian.summary && typeof guardian.summary === "object" ? guardian.summary : controlRisk;
+  const controlMissingItems = Array.isArray(controlMissing.items) ? controlMissing.items : [];
+  const missingRows = controlMissingItems.length
+    ? controlMissingItems.map((item) => ({
+      label: item.label || item.key || "Required input",
+      value: item.value,
+      missing: item.status === "missing" || item.value === undefined || item.value === null || item.value === "",
+    }))
+    : reportMissingInputRows(report);
+  const missingCount = dashboardFiniteNumber(controlMissing.missing_count) !== null
+    ? Number(controlMissing.missing_count)
+    : missingRows.filter((item) => item.missing).length;
+  const warnings = report.warnings || [];
+  const events = (liveRunEvents.length ? liveRunEvents : liveRecentEvents).filter((event) => agentIdFromEvent(event) === "orchestrator" || eventTimelineKind(event) !== "info");
+  const activeRoute = route.find((item) => /active|running|waiting/i.test(String(item.status || ""))) || route[0] || {};
+  const completedRouteCount = dashboardFiniteNumber(controlRouteState.completed_count) !== null
+    ? Number(controlRouteState.completed_count)
+    : route.filter((item) => /complete|completed|done|success/i.test(String(item.status || ""))).length;
+  const blockedRouteCount = dashboardFiniteNumber(controlRouteState.blocked_count) !== null
+    ? Number(controlRouteState.blocked_count)
+    : route.filter((item) => /block|fail|error|reject/i.test(String(item.status || ""))).length;
+  const pendingApprovals = [
+    ...(liveApprovals.pending || []),
+    ...runtimeApprovals.filter((item) => /pending|waiting|approval_required/i.test(String(item.status || ""))),
+    ...guardianQueue.filter((item) => /pending|waiting|approval_required/i.test(String(item.status || ""))),
+  ];
+  const resolvedApprovals = [
+    ...(liveApprovals.resolved || []),
+    ...runtimeApprovals.filter((item) => /approved|resolved|rejected|denied/i.test(String(item.status || ""))),
+  ];
+  const approvalKeys = new Set();
+  const uniquePendingApprovals = pendingApprovals.filter((item, index) => {
+    const key = String((item && (item.approval_id || item.gate_key || item.title)) || `pending-${index}`);
+    if (approvalKeys.has(key)) return false;
+    approvalKeys.add(key);
+    return true;
+  });
+  const uniqueResolvedApprovals = resolvedApprovals.filter((item, index) => {
+    const key = String((item && (item.approval_id || item.gate_key || item.title)) || `resolved-${index}`);
+    if (approvalKeys.has(key)) return false;
+    approvalKeys.add(key);
+    return true;
+  });
+  return {
+    state,
+    metadata,
+    controlPlane,
+    controlRouteState,
+    controlMissing,
+    controlApproval,
+    controlRisk,
+    controlNextAction,
+    missionContract,
+    plan,
+    route,
+    followups,
+    decisions,
+    handoffs,
+    operatorQueue,
+    operatorFollowups,
+    operatorContext,
+    runtimeApprovals,
+    guardian,
+    guardianSummary,
+    missingRows,
+    missingCount,
+    warnings,
+    events,
+    activeRoute,
+    completedRouteCount,
+    blockedRouteCount,
+    pendingApprovals: uniquePendingApprovals,
+    resolvedApprovals: uniqueResolvedApprovals,
+    status,
+  };
+}
+
+function orchestratorStatusTone(value) {
+  const text = String(value || "").toLowerCase();
+  if (/block|fail|error|reject|denied|stale/.test(text)) return "danger";
+  if (/pending|wait|queued|review|approval|warn/.test(text)) return "warning";
+  if (/active|running|dispatch/.test(text)) return "running";
+  if (/complete|completed|done|success|approved|ready|clear|ok/.test(text)) return "success";
+  return "info";
+}
+
+function orchestratorItemText(item, fallback = "No detail recorded") {
+  if (!item || typeof item !== "object") return compactText(renderRuntimeValue(item || fallback), 120);
+  return compactText(
+    item.title
+      || item.question
+      || item.message
+      || item.reason
+      || item.recommendation
+      || item.opinion
+      || item.summary
+      || item.action
+      || item.stage
+      || fallback,
+    140,
+  );
+}
+
+function orchestratorItemMeta(item, fallback = "") {
+  if (!item || typeof item !== "object") return fallback;
+  return [
+    item.stage || item.from_stage || item.to_stage || "",
+    item.agent || item.target_agent || item.consumer_agent || item.next_agent || "",
+    item.status || item.decision || item.phase || "",
+  ].filter(Boolean).join(" / ") || fallback;
+}
+
+function orchestratorRecordKey(item, index = 0) {
+  if (!item || typeof item !== "object") return `item-${index}`;
+  return String(item.approval_id || item.gate_key || item.packet_id || item.decision_id || item.id || item.title || item.stage || item.source || `item-${index}`);
+}
+
+function uniqueOrchestratorItems(items, limit = 8) {
+  const seen = new Set();
+  const clean = [];
+  (Array.isArray(items) ? items : []).forEach((item, index) => {
+    const key = orchestratorRecordKey(item, index);
+    if (seen.has(key)) return;
+    seen.add(key);
+    clean.push(item);
+  });
+  return clean.slice(0, limit);
+}
+
+function orchestratorArrayValue(value) {
+  if (Array.isArray(value)) return value.filter((item) => item !== null && item !== undefined);
+  if (value && typeof value === "object") {
+    if (Array.isArray(value.items)) return value.items.filter((item) => item !== null && item !== undefined);
+    if (Array.isArray(value.records)) return value.records.filter((item) => item !== null && item !== undefined);
+  }
+  return [];
+}
+
+function orchestratorLatestObject(...values) {
+  for (const value of values) {
+    if (Array.isArray(value) && value.length) {
+      const latest = value[value.length - 1];
+      if (latest && typeof latest === "object") return latest;
+    } else if (value && typeof value === "object") {
+      return value;
+    }
+  }
+  return {};
+}
+
+function orchestratorReadableStage(stage) {
+  const text = String(stage || "").replace(/_/g, " ").trim();
+  return text || "-";
+}
+
+function orchestratorPrimaryDecision(ctx, report) {
+  const metadata = ctx.metadata || {};
+  const reflections = Array.isArray(metadata.loop_reflections) ? metadata.loop_reflections : [];
+  const latestReflection = orchestratorLatestObject(
+    metadata.latest_loop_reflection,
+    ctx.controlPlane.latest_loop_reflection,
+    reflections,
+  );
+  const latestDecision = orchestratorLatestObject(
+    latestReportPayload(report, ["latest_guardian_decision", "guardian_decision", "data.guardian_decision"]),
+    metadata.latest_guardian_gate_decision,
+    metadata.latest_orchestrator_decision,
+    ctx.decisions,
+  );
+  const latestHandoff = orchestratorLatestObject(metadata.latest_orchestrator_handoff, ctx.handoffs);
+  const decision = latestReflection.guardian_decision
+    || latestDecision.guardian_decision
+    || latestDecision.decision
+    || (latestHandoff.inputs && latestHandoff.inputs.selected_transition && latestHandoff.inputs.selected_transition.condition)
+    || latestHandoff.next_action
+    || "";
+  return {
+    decision: String(decision || "").replace(/^guardian_decision:/i, ""),
+    latestReflection,
+    latestDecision,
+    latestHandoff,
+  };
+}
+
+function orchestratorRuntimeReadinessRows(ctx) {
+  const snapshot = liveLastSnapshot || {};
+  const runtime = (liveLastSession && liveLastSession.runtime) || snapshot.runtime || {};
+  const backend = runtime.backend || {};
+  const system = snapshot.system_resources || {};
+  const ram = system.ram || {};
+  const gpu = system.gpu || {};
+  const gpuAggregate = gpu.aggregate || {};
+  const gpuRows = Array.isArray(gpu.gpus) ? gpu.gpus : [];
+  const deviceHealth = ctx.state.device_health || {};
+  const deviceValues = ["printer", "camera", "robot", "utm"].map((key) => ({ key, value: deviceHealth[key] || "unknown" }));
+  const readyDevices = deviceValues.filter((item) => /ready|ok|pass/i.test(String(item.value))).length;
+  const backendStatus = backend.active === false ? "inactive" : backend.status || (backend.name || queryBackend ? "active" : liveStreamState || "unknown");
+  const backendLabel = backend.label || backend.name || queryBackend || "Backend";
+  const modelRoute = runtime.models && runtime.models.orchestrator ? runtime.models.orchestrator : {};
+  const gpuName = gpuRows[0] ? gpuRows[0].name || gpu.message : gpu.message || "GPU";
+  const resourceValue = [
+    gpu.status || (gpuRows.length ? "GPU ready" : "GPU unknown"),
+    ram.status || "RAM unknown",
+  ].join(" / ");
+  const resourceMeta = [
+    gpuAggregate.memory_total_gb ? `GPU ${renderRuntimeValue(gpuAggregate.memory_used_gb, "0")}/${renderRuntimeValue(gpuAggregate.memory_total_gb, "0")} GB` : "",
+    ram.used_percent !== undefined ? `RAM ${renderRuntimeValue(ram.used_percent)}% used` : "",
+    ram.source ? ram.source : "",
+  ].filter(Boolean).join(" / ");
+  return [
+    {
+      label: "Backend",
+      value: backendLabel,
+      meta: `${backendStatus}${modelRoute.primary ? ` / ${modelRoute.primary}` : ""}${liveStreamState ? ` / ${liveStreamState}` : ""}`,
+      tone: /inactive|error|fail/i.test(String(backendStatus)) ? "danger" : "success",
+    },
+    {
+      label: "Fallback",
+      value: runtime.backend_fallback || "openai",
+      meta: "last-resort LLM route",
+      tone: runtime.backend_fallback ? "info" : "warning",
+    },
+    {
+      label: "Resources",
+      value: resourceValue,
+      meta: resourceMeta || gpuName,
+      tone: ram.used_percent !== undefined && Number(ram.used_percent) > 88 ? "warning" : dashboardStatusTone(`${gpu.status || "ready"} ${ram.status || "ready"}`),
+    },
+    {
+      label: "Devices",
+      value: `${readyDevices}/${deviceValues.length} ready`,
+      meta: deviceValues.map((item) => `${item.key}:${item.value}`).join(" / "),
+      tone: readyDevices === deviceValues.length ? "success" : readyDevices ? "warning" : "danger",
+    },
+  ];
+}
+
+function orchestratorRiskChainItems(ctx, report) {
+  const metadata = ctx.metadata || {};
+  const incidents = Array.isArray(metadata.incident_records) ? metadata.incident_records : [];
+  const { latestReflection } = orchestratorPrimaryDecision(ctx, report);
+  const chain = [];
+  ctx.missingRows.filter((item) => item.missing).slice(0, 2).forEach((item) => {
+    chain.push({
+      label: "Input gate",
+      value: `${item.label || "Required input"} missing`,
+      meta: "operator required",
+      tone: "warning",
+    });
+  });
+  incidents.slice(-12).reverse().forEach((incident) => {
+    const summary = incident.summary || incident.message || incident.reason_code || incident.failure_code || "";
+    if (!summary || /read-only parallel planning checks/i.test(summary)) return;
+    chain.push({
+      label: incident.stage || incident.component || incident.source || "Guardian",
+      value: summary,
+      meta: [incident.severity, incident.guardian_decision || incident.status, incident.risk_score !== undefined ? `risk ${incident.risk_score}` : ""].filter(Boolean).join(" / "),
+      tone: /block|stop|critical|error|fail/i.test(`${incident.severity || ""} ${incident.guardian_decision || ""} ${incident.status || ""}`) ? "danger" : "warning",
+    });
+  });
+  ctx.warnings.slice(-6).reverse().forEach((warning) => {
+    if (!warning || /read-only parallel planning checks/i.test(String(warning))) return;
+    chain.push({ label: "Runtime", value: warning, meta: "warning", tone: "warning" });
+  });
+  const loopFailures = Array.isArray(latestReflection.what_failed_or_nearly_failed) ? latestReflection.what_failed_or_nearly_failed : [];
+  loopFailures.slice(0, 2).forEach((item) => {
+    chain.push({ label: "Loop finding", value: item, meta: `loop ${latestReflection.loop_id ?? "-"}`, tone: /stop|fail|block/i.test(String(item)) ? "danger" : "warning" });
+  });
+  const primary = orchestratorPrimaryDecision(ctx, report);
+  if (/stop|safe_stop|complete/i.test(primary.decision)) {
+    chain.push({
+      label: "Guardian decision",
+      value: `Guardian routed ${primary.latestHandoff.from_stage || "guardian"} to ${primary.latestHandoff.to_stage || "complete"}`,
+      meta: primary.decision || "stop",
+      tone: /error|block/i.test(primary.decision) ? "danger" : "warning",
+    });
+  }
+  const seen = new Set();
+  return chain.filter((item) => {
+    const key = `${String(item.label).toLowerCase()}|${String(item.value).toLowerCase()}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).slice(0, 4);
+}
+
+function orchestratorDecisionAuditRows(ctx) {
+  return uniqueOrchestratorItems((ctx.decisions || []).slice(-8).reverse(), 2).map((item) => ({
+    stage: item.stage || item.from_stage || item.node_id || item.timestamp_stage || "-",
+    decision: item.decision || item.authority || "decision",
+    selected: item.selected || item.next_stage || item.to_stage || item.target || (item.selected_transition && (item.selected_transition.target || item.selected_transition.to_stage)) || "-",
+    reason: item.reason || item.summary || item.message || "-",
+    meta: item.loop_id !== undefined ? `loop ${item.loop_id}` : item.created_at || "",
+    tone: orchestratorStatusTone(`${item.status || ""} ${item.decision || ""} ${item.selected || ""}`),
+  }));
+}
+
+function orchestratorHandoffQaRows(ctx, report) {
+  const registry = latestReportPayload(report, ["handoff_registry", "role_specific.handoff_registry"]);
+  const registryItems = orchestratorArrayValue(registry);
+  const rows = ctx.handoffs && ctx.handoffs.length ? ctx.handoffs : registryItems;
+  const routeDerived = !rows.length ? (ctx.route || []).slice(0, 8).map((step, index, route) => {
+    const next = route[index + 1] || {};
+    return {
+      from_stage: step.stage || step.to_stage || `stage-${index + 1}`,
+      to_stage: next.stage || next.to_stage || "",
+      consumer_agent: next.agent || liveAgentLabel(agentIdFromStage(next.stage || next.to_stage || "")),
+      required_outputs: step.required_outputs || [],
+      evidence_refs: [],
+      guardian_status: step.status || "pending",
+    };
+  }).filter((item) => item.to_stage) : rows;
+  return uniqueOrchestratorItems(routeDerived.slice(-8).reverse(), 2).map((item) => {
+    const selectedTransition = item.inputs && item.inputs.selected_transition && typeof item.inputs.selected_transition === "object" ? item.inputs.selected_transition : {};
+    const evidenceCount = Array.isArray(item.evidence_refs) ? item.evidence_refs.length : 0;
+    const outputCount = Array.isArray(item.required_outputs) ? item.required_outputs.length : dashboardFiniteNumber(item.required_output_count) ?? 0;
+    const warningCount = Array.isArray(item.warnings) ? item.warnings.length : 0;
+    return {
+      from: item.from_stage || selectedTransition.from_stage || selectedTransition.source || item.producer_agent || item.stage || "-",
+      to: item.to_stage || selectedTransition.to_stage || selectedTransition.target || item.consumer_agent || item.next_stage || "-",
+      packet: item.packet_id || item.schema || item.task || "-",
+      evidenceCount,
+      outputCount,
+      status: item.guardian_status || item.status || item.next_action || "-",
+      warningCount,
+      tone: warningCount || /warn|missing|pending/i.test(String(item.guardian_status || item.status || "")) ? "warning" : "success",
+    };
+  });
+}
+
+function orchestratorLoopTimelineRows(ctx, report) {
+  const metadata = ctx.metadata || {};
+  const reflections = Array.isArray(metadata.loop_reflections) ? metadata.loop_reflections : [];
+  const controlReflection = ctx.controlPlane.latest_loop_reflection && typeof ctx.controlPlane.latest_loop_reflection === "object" ? ctx.controlPlane.latest_loop_reflection : null;
+  const rows = reflections.length ? reflections : controlReflection ? [controlReflection] : [];
+  if (!rows.length) {
+    const primary = orchestratorPrimaryDecision(ctx, report);
+    return [{
+      loop: ctx.missionContract.loop_id ?? ctx.state.loop_count ?? "-",
+      decision: primary.decision || "pending",
+      summary: report.summary || report.nextAction || "No loop reflection has been recorded yet.",
+      tone: orchestratorStatusTone(primary.decision || ctx.status),
+    }];
+  }
+  return rows.slice(-3).map((item, index) => {
+    if (!item || typeof item !== "object") {
+      return {
+        loop: index + 1,
+        decision: compactText(renderRuntimeValue(item), 20),
+        summary: renderRuntimeValue(item),
+        tone: orchestratorStatusTone(item),
+      };
+    }
+    return {
+      loop: item.loop_id ?? index + 1,
+      decision: item.guardian_decision || item.decision || "-",
+      summary: item.operator_visible_summary || item.next_loop_recommendation || item.summary || "-",
+      tone: orchestratorStatusTone(item.guardian_decision || item.decision || item.status),
+    };
+  });
+}
+
+function buildOrcBriefingModel(report, status, ctx = orchestratorContext(report, status)) {
+  const primary = orchestratorPrimaryDecision(ctx, report);
+  const routeCount = ctx.route.length || dashboardFiniteNumber(ctx.controlRouteState.route_count) || 0;
+  const completed = ctx.completedRouteCount;
+  const blocked = ctx.blockedRouteCount;
+  const progressNumber = dashboardFiniteNumber(ctx.controlRouteState.progress_ratio);
+  const progress = progressNumber === null ? (routeCount ? completed / routeCount : 0) : progressNumber;
+  const missingLabels = ctx.missingRows.filter((item) => item.missing).map((item) => item.label || item.key || "input");
+  const incidentCount = Array.isArray(ctx.metadata.incident_records) ? ctx.metadata.incident_records.length : dashboardFiniteNumber(ctx.guardianSummary.incident_count) ?? 0;
+  const decisionText = primary.decision || "";
+  const stageText = ctx.controlRouteState.current_stage || ctx.state.stage || status || "-";
+  const verdictLabel = /error|fail/i.test(String(stageText)) ? "ERROR"
+    : /stop|safe_stop/i.test(decisionText) ? "COMPLETE"
+      : /complete|done|success/i.test(String(stageText)) ? "COMPLETE"
+        : /running|active/i.test(String(status)) ? "RUNNING"
+          : /wait|pending|missing/i.test(`${status} ${ctx.controlMissing.status || ""}`) ? "WAITING"
+            : String(status || stageText || "STATUS").toUpperCase();
+  const driver = /stop|safe_stop/i.test(decisionText) ? "Guardian-directed stop"
+    : ctx.missingCount ? "Missing input gate"
+      : ctx.pendingApprovals.length ? "Approval gate"
+        : blocked ? "Blocked route"
+          : "Normal route control";
+  const riskChain = orchestratorRiskChainItems(ctx, report);
+  const nextStage = ctx.controlNextAction.next_stage || ctx.controlRouteState.next_recommended_stage || ctx.plan.next_recommended_stage || "";
+  const nextAction = missingLabels.some((label) => /test protocol/i.test(label))
+    ? "Define test_protocol, tighten candidate constraints, then rerun the design loop."
+    : ctx.controlNextAction.summary || primary.latestReflection.next_loop_recommendation || report.nextAction || (nextStage ? `Route next stage to ${nextStage}.` : "Inspect trace and continue when gates are clear.");
+  const why = primary.latestReflection.operator_visible_summary
+    || (riskChain.length ? `${riskChain[0].value}${riskChain[1] ? `; ${riskChain[1].value}` : ""}` : report.summary || "ORC is waiting for more backend evidence.");
+  const evidence = [
+    `loop ${ctx.missionContract.loop_id ?? ctx.state.loop_count ?? primary.latestReflection.loop_id ?? "-"}`,
+    `${completed}/${routeCount || 0} route`,
+    `${ctx.missingCount} missing`,
+    `${ctx.pendingApprovals.length} approvals`,
+    `${incidentCount} incidents`,
+  ];
+  const runtimeRows = orchestratorRuntimeReadinessRows(ctx);
+  const decisionRows = orchestratorDecisionAuditRows(ctx);
+  const handoffRows = orchestratorHandoffQaRows(ctx, report);
+  const loopRows = orchestratorLoopTimelineRows(ctx, report);
+  const riskTone = riskChain.some((item) => item.tone === "danger") ? "danger" : riskChain.length || ctx.missingCount ? "warning" : "success";
+  const runtimeTone = runtimeRows.some((item) => item.tone === "danger") ? "danger" : runtimeRows.some((item) => item.tone === "warning") ? "warning" : "success";
+  return {
+    ctx,
+    state: ctx.state,
+    mission: ctx.missionContract,
+    route: ctx.route,
+    routeStats: { routeCount, completed, blocked, progress, nextStage },
+    verdict: {
+      label: verdictLabel,
+      driver,
+      decision: decisionText || "-",
+      why,
+      nextAction,
+      tone: /error|fail|block/i.test(`${verdictLabel} ${driver}`) ? "danger" : ctx.missingCount || /stop|safe_stop/i.test(decisionText) ? "warning" : "success",
+      evidence,
+    },
+    riskChain,
+    riskTone,
+    runtimeRows,
+    runtimeTone,
+    decisionRows,
+    handoffRows,
+    loopRows,
+  };
+}
+
+function orcToneColor(tone = "info") {
+  const colors = {
+    success: "#22c55e",
+    warning: "#f59e0b",
+    danger: "#fb7185",
+    running: "#60a5fa",
+    info: "#38bdf8",
+    idle: "#64748b",
+  };
+  return colors[tone] || colors.info;
+}
+
+function orcToneScore(tone = "info") {
+  if (tone === "success") return 1;
+  if (tone === "running" || tone === "info") return 0.74;
+  if (tone === "warning") return 0.48;
+  if (tone === "danger") return 0.16;
+  return 0.34;
+}
+
+function orcChartPayloadAttr(payload) {
+  try {
+    return escapeHtml(JSON.stringify(payload || {}));
+  } catch (_err) {
+    return "{}";
+  }
+}
+
+function renderOrcReadinessBars(model) {
+  const rows = (model.runtimeRows || []).slice(0, 4);
+  const payload = rows.map((row) => ({
+    label: row.label,
+    value: Math.round(orcToneScore(row.tone) * 100),
+    tone: row.tone || "info",
+    detail: `${row.value}${row.meta ? ` / ${row.meta}` : ""}`,
+  }));
+  return `
+    <div class="ar-orc-echart ar-orc-readiness-chart" data-orc-echart="readiness" data-orc-payload="${orcChartPayloadAttr(payload)}" aria-label="runtime readiness chart"></div>
+  `;
+}
+
+function renderOrcRiskFlow(model) {
+  const items = (model.riskChain || []).slice(0, 4);
+  if (!items.length) return "";
+  const gap = items.length > 1 ? 100 / (items.length - 1) : 0;
+  const nodes = items.map((item, index) => ({
+    id: `risk-${index}`,
+    name: compactText(item.label || `Risk ${index + 1}`, 18),
+    x: gap * index,
+    y: index % 2 ? 34 : 16,
+    color: orcToneColor(item.tone),
+    tone: item.tone || "info",
+    value: compactText(item.value || "", 96),
+    meta: compactText(item.meta || "", 42),
+    symbolSize: index === items.length - 1 ? 34 : 28,
+  }));
+  const links = nodes.slice(0, -1).map((node, index) => ({
+    source: node.id,
+    target: nodes[index + 1].id,
+    lineStyle: { color: nodes[index + 1].color, width: 2, curveness: 0.18, opacity: 0.78 },
+  }));
+  return `
+    <div class="ar-orc-echart ar-orc-risk-flow" data-orc-echart="risk-flow" data-orc-payload="${orcChartPayloadAttr({ nodes, links })}" aria-label="Risk chain graph"></div>
+  `;
+}
+
+function orcRuntimeGraphSource() {
+  const graph = (liveGraphPayload && liveGraphPayload.graph) || liveGraphPayload || {};
+  if (!graph || !Array.isArray(graph.nodes) || !graph.nodes.length) return null;
+  return LIVE_RUNTIME_MAP_GEOMETRY
+    ? LIVE_RUNTIME_MAP_GEOMETRY.normalizeNodePositions(graph, { grid: 16 })
+    : graph;
+}
+
+function orcGraphNodeShort(node = {}) {
+  const stage = liveRuntimeMapNodeStage(node);
+  const id = String(node.id || stage || "").toLowerCase();
+  const labels = {
+    dispatch: "DSP",
+    idle: "IDL",
+    complete: "CMP",
+    error: "ERR",
+    step_complete: "STP",
+    orchestrator_supervisor: "ORC",
+    safety_gate_plane: "GRD",
+    device_bridge_plane: "BRG",
+    memory_evidence_plane: "EVD",
+  };
+  if (labels[id]) return labels[id];
+  const agentId = agentIdFromStage(stage || node.id || "");
+  if (knownLiveAgent(agentId) && !["objective"].includes(agentId)) return liveAgentShort(agentId);
+  return compactText(String(node.label || id || "N").replace(/[^A-Za-z0-9]+/g, "").toUpperCase(), 3);
+}
+
+function orcGraphNodeIcon(node = {}) {
+  const stage = liveRuntimeMapNodeStage(node);
+  const metadataIcon = String(node.metadata?.icon || "").trim().toLowerCase();
+  const runtimeIconMap = {
+    orchestrator: "/static/runtime_icons/orchestrator.svg",
+    play: "/static/runtime_icons/play.svg",
+    design_agent: "/static/runtime_icons/design_agent.svg",
+    specimen_maker: "/static/runtime_icons/specimen_maker.svg",
+    specimen_agent: "/static/runtime_icons/specimen_maker.svg",
+    vision_agent: "/static/runtime_icons/vision_agent.svg",
+    manipulation_agent: "/static/runtime_icons/manipulation_agent.svg",
+    equipment_agent: "/static/runtime_icons/equipment_agent.svg",
+    analysis_agent: "/static/runtime_icons/analysis_agent.svg",
+    knowledge_agent: "/static/runtime_icons/knowledge_agent.svg",
+    bo_agent: "/static/runtime_icons/bo_agent.svg",
+    guardian_agent: "/static/runtime_icons/guardian_agent.svg",
+    complete: "/static/runtime_icons/complete.svg",
+    error: "/static/runtime_icons/error.svg",
+    artifact: "/static/runtime_icons/artifact.svg",
+    mcp_tools: "/static/runtime_icons/mcp_tools.svg",
+    nemoclaw_ollama: "/static/runtime_icons/nemoclaw_ollama.svg",
+    memory_logs: "/static/runtime_icons/memory_logs.svg",
+    device_bridges: "/static/runtime_icons/device_bridges.svg",
+  };
+  if (metadataIcon && runtimeIconMap[metadataIcon]) return runtimeIconMap[metadataIcon];
+  const agentId = agentIdFromStage(stage || node.id || "");
+  const agent = LIVE_AGENTS.find((item) => item.id === agentId || item.stage === stage || item.id === node.id);
+  if (agent && agent.iconPath) return agent.iconPath;
+  const id = String(node.id || "").toLowerCase();
+  const iconMap = {
+    dispatch: "/static/live_gui_icons/orchestrator.svg",
+    idle: "/static/live_gui_icons/objective.svg?v=20260602-objective-contract-1",
+    complete: "/static/live_gui_icons/guardian_agent.svg",
+    error: "/static/live_gui_icons/guardian_agent.svg",
+    step_complete: "/static/live_gui_icons/knowledge_agent.svg",
+    orchestrator_supervisor: "/static/live_gui_icons/orchestrator.svg",
+    safety_gate_plane: "/static/live_gui_icons/guardian_agent.svg",
+    device_bridge_plane: "/static/live_gui_icons/equipment_agent.svg",
+    memory_evidence_plane: "/static/live_gui_icons/knowledge_agent.svg",
+  };
+  return iconMap[id] || "/static/live_gui_icons/orchestrator.svg";
+}
+
+function orcRuntimeMapEdgeColor(type = "logical_transition") {
+  const colors = {
+    logical_transition: "#38bdf8",
+    control_overlay: "#a78bfa",
+    device_bridge: "#f6c453",
+    evidence_flow: "#58a6ff",
+    runtime_sidecar: "#2dd4bf",
+  };
+  return colors[type] || "#38bdf8";
+}
+
+function buildOrcRuntimeGraphPayload(model) {
+  const graph = orcRuntimeGraphSource();
+  if (!graph) return null;
+  const rawNodes = Array.isArray(graph.nodes) ? graph.nodes : [];
+  const edges = LIVE_RUNTIME_MAP_GEOMETRY ? liveRuntimeMapEdges(graph) : [];
+  const activeStage = String(model.state.stage || "").toLowerCase();
+  const bounds = liveRuntimeMapBounds(rawNodes);
+  const nodes = rawNodes.map((node) => {
+    const stage = liveRuntimeMapNodeStage(node);
+    const id = node.id || stage;
+    const kind = String(node.kind || "agent").toLowerCase();
+    const type = String(node.metadata?.runtime_node || kind || "node").toLowerCase();
+    const agentId = agentIdFromStage(stage || id);
+    const active = Boolean(activeStage && String(stage || id).toLowerCase() === activeStage);
+    const error = liveRunEvents.some((event) => agentIdFromEvent(event) === agentId && String(event.level || event.severity || "").toLowerCase() === "error");
+    const tone = error ? "danger" : active ? "running" : kind === "terminal" ? "success" : kind === "bridge" ? "warning" : kind === "sidecar" || kind === "evidence_plane" ? "info" : "idle";
+    return {
+      id,
+      name: orcGraphNodeShort(node),
+      label: node.label || id,
+      stage,
+      kind,
+      type,
+      agentId,
+      active,
+      tone,
+      color: orcToneColor(tone),
+      icon: orcGraphNodeIcon(node),
+      x: Number(node.position?.x || 0),
+      y: Number(node.position?.y || 0),
+    };
+  });
+  const knownNodeIds = new Set(nodes.map((node) => node.id));
+  const links = edges
+    .filter((edge) => edge && edge.source && edge.target && knownNodeIds.has(edge.source.id) && knownNodeIds.has(edge.target.id))
+    .map((edge) => {
+      const type = liveRuntimeMapEdgeType(edge);
+      return {
+        source: edge.source.id,
+        target: edge.target.id,
+        type,
+        label: liveRuntimeMapEdgeLabel(edge),
+        color: orcRuntimeMapEdgeColor(type),
+        coords: [
+          [Number(edge.source.position?.x || 0), Number(edge.source.position?.y || 0)],
+          [Number(edge.target.position?.x || 0), Number(edge.target.position?.y || 0)],
+        ],
+        lineStyle: {
+          color: orcRuntimeMapEdgeColor(type),
+          width: type === "logical_transition" ? 2 : 1.25,
+          type: type === "logical_transition" || type === "runtime_sidecar" ? "solid" : "dashed",
+          opacity: type === "logical_transition" ? 0.72 : 0.42,
+          curveness: type === "logical_transition" ? 0.06 : 0.16,
+        },
+      };
+    });
+  return {
+    graphId: graph.id || "atr_closed_loop",
+    nodes,
+    links,
+    bounds,
+    activeStage,
+  };
+}
+
+function renderOrcRouteGraph(model) {
+  const payload = buildOrcRuntimeGraphPayload(model);
+  return `
+    <div class="ar-orc-echart ar-orc-route-graph" data-orc-echart="route-graph" data-orc-payload="${orcChartPayloadAttr(payload || {})}" aria-label="LangGraph handoff route map"></div>
+  `;
+}
+
+function renderOrcLoopTimelineChart(model) {
+  const rows = (model.loopRows || []).slice(-5);
+  if (!rows.length) return "";
+  const points = rows.map((row, index) => ({
+    name: `Loop ${row.loop}`,
+    value: [index, orcToneScore(row.tone || "info")],
+    loop: row.loop,
+    decision: row.decision || "-",
+    summary: compactText(row.summary || "", 96),
+    tone: row.tone || "info",
+    color: orcToneColor(row.tone || "info"),
+  }));
+  return `
+    <div class="ar-orc-echart ar-orc-loop-chart" data-orc-echart="loop-timeline" data-orc-payload="${orcChartPayloadAttr({ points })}" aria-label="Loop decision timeline chart"></div>
+  `;
+}
+
+function disposeOrcEcharts() {
+  liveOrcChartInstances.forEach((chart) => {
+    try { chart.dispose(); } catch (_err) {}
+  });
+  liveOrcChartInstances = [];
+}
+
+function orcBaseChartTextStyle() {
+  return {
+    color: "#cbd5e1",
+    fontFamily: "Inter, Segoe UI, system-ui, sans-serif",
+    fontSize: 10,
+    fontWeight: 500,
+  };
+}
+
+function orcGraphChartOption(payload, kind) {
+  const nodes = Array.isArray(payload.nodes) ? payload.nodes : [];
+  const links = Array.isArray(payload.links) ? payload.links : [];
+  return {
+    animation: false,
+    backgroundColor: "transparent",
+    tooltip: {
+      trigger: "item",
+      confine: true,
+      backgroundColor: "rgba(15,23,42,0.94)",
+      borderColor: "rgba(125,211,252,0.28)",
+      textStyle: orcBaseChartTextStyle(),
+      formatter: (params) => {
+        const data = params.data || {};
+        if (params.dataType === "edge") return "handoff edge";
+        const title = data.stage || data.name || "";
+        const status = data.status || data.value || data.meta || "";
+        return [title, status, data.detail || data.meta || ""].filter(Boolean).join("<br/>");
+      },
+    },
+    grid: { left: 4, right: 4, top: 4, bottom: 4 },
+    series: [{
+      type: "graph",
+      layout: "none",
+      roam: false,
+      draggable: false,
+      coordinateSystem: null,
+      edgeSymbol: ["none", "arrow"],
+      edgeSymbolSize: [0, kind === "route-graph" ? 8 : 7],
+      left: kind === "route-graph" ? 10 : 4,
+      right: kind === "route-graph" ? 10 : 4,
+      top: kind === "route-graph" ? 10 : 4,
+      bottom: kind === "route-graph" ? 10 : 4,
+      label: {
+        show: true,
+        color: "#f8fafc",
+        fontSize: kind === "route-graph" ? 10 : 9,
+        fontWeight: kind === "route-graph" ? 600 : 700,
+        lineHeight: kind === "route-graph" ? 13 : 10,
+        formatter: (params) => {
+          if (kind !== "route-graph") return params.data.name || "";
+          return `${params.data.name || ""}\n${compactText(params.data.stageLabel || params.data.stage || "", 13)}`;
+        },
+      },
+      labelLayout: { hideOverlap: true },
+      edgeLabel: { show: false },
+      data: nodes.map((node) => ({
+        ...node,
+        symbolSize: node.symbolSize || 28,
+        symbol: node.symbol || "circle",
+        itemStyle: {
+          color: kind === "route-graph" ? "rgba(16,28,45,0.92)" : node.color || orcToneColor(node.tone),
+          borderColor: kind === "route-graph" ? node.color || orcToneColor(node.tone) : "rgba(226,232,240,0.30)",
+          borderWidth: kind === "route-graph" ? 1.4 : 1,
+          shadowBlur: kind === "route-graph" ? 8 : 10,
+          shadowColor: `${node.color || orcToneColor(node.tone)}66`,
+        },
+        label: { position: kind === "route-graph" ? "inside" : "right" },
+      })),
+      links,
+      lineStyle: { width: 2, color: "#38bdf8", opacity: 0.68, curveness: kind === "risk-flow" ? 0.18 : 0.08 },
+      emphasis: { focus: "adjacency", lineStyle: { width: 3, opacity: 0.95 } },
+    }],
+  };
+}
+
+function orcRuntimeMapChartOption(payload) {
+  const nodes = Array.isArray(payload.nodes) ? payload.nodes : [];
+  const links = Array.isArray(payload.links) ? payload.links : [];
+  const bounds = payload.bounds && typeof payload.bounds === "object" ? payload.bounds : { width: 1800, height: 880 };
+  const nodeSize = 44;
+  const iconSize = 20;
+  const xValues = nodes.map((node) => Number(node.x || 0)).filter((value) => Number.isFinite(value));
+  const xMinNode = xValues.length ? Math.min(...xValues) : 0;
+  const xMaxNode = xValues.length ? Math.max(...xValues) : Number(bounds.width || 1800);
+  const xAxisWidth = Math.max(240, Number(bounds.width || 1800));
+  const xAxisCenter = (xMinNode + xMaxNode) / 2;
+  const xAxisMin = xAxisCenter - (xAxisWidth / 2);
+  const xAxisMax = xAxisCenter + (xAxisWidth / 2);
+  if (!nodes.length) {
+    return {
+      animation: false,
+      backgroundColor: "transparent",
+      graphic: [{
+        type: "text",
+        left: "center",
+        top: "middle",
+        style: {
+          text: "LangGraph map loading",
+          fill: "#94a3b8",
+          font: "500 12px Inter, Segoe UI, sans-serif",
+          textAlign: "center",
+        },
+      }],
+    };
+  }
+  return {
+    animation: false,
+    backgroundColor: "transparent",
+    tooltip: {
+      trigger: "item",
+      confine: true,
+      backgroundColor: "rgba(15,23,42,0.96)",
+      borderColor: "rgba(125,211,252,0.28)",
+      textStyle: orcBaseChartTextStyle(),
+      formatter: (params) => {
+        const node = params.data && params.data.node;
+        if (!node) return "";
+        return [
+          node.label || node.id,
+          `node: ${node.id}`,
+          node.stage ? `stage: ${node.stage}` : "",
+          node.kind ? `kind: ${node.kind}` : "",
+        ].filter(Boolean).join("<br/>");
+      },
+    },
+    grid: { left: 20, right: 20, top: 22, bottom: 22 },
+    xAxis: {
+      type: "value",
+      min: xAxisMin,
+      max: xAxisMax,
+      show: false,
+    },
+    yAxis: {
+      type: "value",
+      min: -24,
+      max: Math.max(200, Number(bounds.height || 880)),
+      inverse: true,
+      show: false,
+    },
+    series: [
+      {
+        type: "lines",
+        coordinateSystem: "cartesian2d",
+        silent: true,
+        symbol: ["none", "arrow"],
+        symbolSize: [0, 7],
+        z: 1,
+        data: links.map((link) => ({
+          name: link.label || link.type || "edge",
+          coords: link.coords,
+          lineStyle: link.lineStyle || { color: link.color || "#38bdf8", width: 1.5, opacity: 0.5 },
+        })),
+      },
+      {
+        type: "custom",
+        coordinateSystem: "cartesian2d",
+        z: 3,
+        tooltip: { trigger: "item" },
+        data: nodes.map((node) => ({ value: [node.x, node.y], node })),
+        renderItem: (params, api) => {
+          const node = nodes[params.dataIndex] || {};
+          const coord = api.coord([api.value(0), api.value(1)]);
+          const x = coord[0] - nodeSize / 2;
+          const y = coord[1] - nodeSize / 2;
+          const color = node.color || orcToneColor(node.tone);
+          const fill = node.active ? "rgba(16,40,55,0.96)" : node.kind === "bridge" ? "rgba(38,30,12,0.94)" : "rgba(14,24,40,0.94)";
+          const stroke = node.active ? "#67e8f9" : color;
+          const opacity = node.kind === "runtime" && !node.active ? 0.78 : 1;
+          return {
+            type: "group",
+            x,
+            y,
+            children: [
+              {
+                type: "rect",
+                shape: { x: 0, y: 0, width: nodeSize, height: nodeSize, r: 7 },
+                style: {
+                  fill,
+                  stroke,
+                  lineWidth: node.active ? 2.2 : 1.25,
+                  shadowBlur: node.active ? 16 : 8,
+                  shadowColor: `${stroke}55`,
+                  opacity,
+                },
+              },
+              {
+                type: "image",
+                style: {
+                  image: node.icon || "/static/live_gui_icons/orchestrator.svg",
+                  x: (nodeSize - iconSize) / 2,
+                  y: 5,
+                  width: iconSize,
+                  height: iconSize,
+                  opacity: node.active ? 1 : 0.82,
+                },
+              },
+              {
+                type: "text",
+                style: {
+                  text: node.name || "?",
+                  x: nodeSize / 2,
+                  y: 33,
+                  fill: "#f8fafc",
+                  font: "650 10px Inter, Segoe UI, sans-serif",
+                  textAlign: "center",
+                  textVerticalAlign: "middle",
+                  opacity,
+                },
+              },
+            ],
+          };
+        },
+      },
+    ],
+  };
+}
+
+function orcReadinessChartOption(payload) {
+  const rows = Array.isArray(payload) ? payload : [];
+  return {
+    animation: false,
+    backgroundColor: "transparent",
+    tooltip: {
+      trigger: "axis",
+      confine: true,
+      backgroundColor: "rgba(15,23,42,0.94)",
+      borderColor: "rgba(125,211,252,0.28)",
+      textStyle: orcBaseChartTextStyle(),
+      formatter: (params) => {
+        const data = params && params[0] ? rows[params[0].dataIndex] : null;
+        return data ? `${data.label}<br/>${data.detail}<br/>readiness ${data.value}` : "";
+      },
+    },
+    grid: { left: 78, right: 10, top: 8, bottom: 8 },
+    xAxis: {
+      type: "value",
+      min: 0,
+      max: 100,
+      show: false,
+    },
+    yAxis: {
+      type: "category",
+      inverse: true,
+      data: rows.map((row) => row.label),
+      axisTick: { show: false },
+      axisLine: { show: false },
+      axisLabel: { color: "#cbd5e1", fontSize: 10, overflow: "truncate", width: 72 },
+    },
+    series: [{
+      type: "bar",
+      barWidth: 8,
+      data: rows.map((row) => ({
+        value: row.value,
+        itemStyle: { color: orcToneColor(row.tone), borderRadius: [0, 4, 4, 0] },
+        label: { show: true, position: "right", formatter: `${row.value}`, color: "#dbeafe", fontSize: 9 },
+      })),
+      backgroundStyle: { color: "rgba(148,163,184,0.10)", borderRadius: 4 },
+      showBackground: true,
+    }],
+  };
+}
+
+function orcLoopChartOption(payload) {
+  const points = Array.isArray(payload.points) ? payload.points : [];
+  return {
+    animation: false,
+    backgroundColor: "transparent",
+    tooltip: {
+      trigger: "item",
+      confine: true,
+      backgroundColor: "rgba(15,23,42,0.94)",
+      borderColor: "rgba(125,211,252,0.28)",
+      textStyle: orcBaseChartTextStyle(),
+      formatter: (params) => {
+        const data = params.data || {};
+        return [`Loop ${data.loop}`, data.decision, data.summary].filter(Boolean).join("<br/>");
+      },
+    },
+    grid: { left: 12, right: 12, top: 12, bottom: 24 },
+    xAxis: {
+      type: "category",
+      data: points.map((item) => `L${item.loop}`),
+      axisLine: { lineStyle: { color: "rgba(148,163,184,0.22)" } },
+      axisTick: { show: false },
+      axisLabel: { color: "#cbd5e1", fontSize: 9 },
+    },
+    yAxis: {
+      type: "value",
+      min: 0,
+      max: 1,
+      show: false,
+    },
+    series: [{
+      type: "line",
+      smooth: false,
+      symbol: "circle",
+      symbolSize: 12,
+      lineStyle: { color: "#38bdf8", width: 2 },
+      areaStyle: { color: "rgba(56,189,248,0.08)" },
+      data: points.map((item) => ({
+        ...item,
+        value: item.value[1],
+        itemStyle: { color: item.color, borderColor: "rgba(226,232,240,0.35)", borderWidth: 1 },
+      })),
+      label: {
+        show: true,
+        position: "top",
+        formatter: (params) => compactText((params.data && params.data.decision) || "", 10),
+        color: "#dbeafe",
+        fontSize: 9,
+      },
+    }],
+  };
+}
+
+function orcDecisionDonutOption(payload) {
+  const rows = Array.isArray(payload.rows) ? payload.rows : [];
+  const total = dashboardFiniteNumber(payload.total) ?? rows.reduce((sum, row) => sum + (dashboardFiniteNumber(row.value) || 0), 0);
+  return {
+    animation: false,
+    backgroundColor: "transparent",
+    tooltip: {
+      trigger: "item",
+      confine: true,
+      backgroundColor: "rgba(15,23,42,0.94)",
+      borderColor: "rgba(125,211,252,0.28)",
+      textStyle: orcBaseChartTextStyle(),
+      formatter: (params) => `${params.name}<br/>${params.value} decisions`,
+    },
+    graphic: [{
+      type: "group",
+      left: "center",
+      top: "middle",
+      children: [
+        {
+          type: "text",
+          left: "center",
+          top: -18,
+          style: {
+            text: String(total || 0),
+            fill: "#f8fafc",
+            font: "700 22px Inter, Segoe UI, sans-serif",
+            textAlign: "center",
+          },
+        },
+        {
+          type: "text",
+          left: "center",
+          top: 8,
+          style: {
+            text: "Decisions",
+            fill: "#94a3b8",
+            font: "500 10px Inter, Segoe UI, sans-serif",
+            textAlign: "center",
+          },
+        },
+      ],
+    }],
+    series: [{
+      type: "pie",
+      radius: ["52%", "76%"],
+      center: ["50%", "50%"],
+      avoidLabelOverlap: true,
+      label: { show: false },
+      labelLine: { show: false },
+      itemStyle: {
+        borderColor: "rgba(11,16,32,0.95)",
+        borderWidth: 2,
+      },
+      data: rows.map((row) => ({
+        name: row.label,
+        value: Math.max(0, dashboardFiniteNumber(row.value) || 0),
+        itemStyle: { color: row.color || orcToneColor(row.tone) },
+      })),
+    }],
+  };
+}
+
+function dsnEmptyChartOption(message) {
+  return {
+    animation: false,
+    backgroundColor: "transparent",
+    graphic: [{
+      type: "text",
+      left: "center",
+      top: "middle",
+      style: {
+        text: message || "Waiting for backend data",
+        fill: "#9fb0c9",
+        font: "500 11px Inter, Segoe UI, sans-serif",
+        textAlign: "center",
+      },
+    }],
+  };
+}
+
+function dsnRankingChartOption(payload) {
+  const rows = (Array.isArray(payload.rows) ? payload.rows : [])
+    .map((row) => ({
+      ...row,
+      label: String(row.label || row.candidate_id || "candidate"),
+      value: dashboardFiniteNumber(row.value),
+      selected: /selected/i.test(String(row.status || "")) || row.tone === "success",
+    }))
+    .filter((row) => row.value !== null)
+    .slice(0, 8);
+  if (!rows.length) return dsnEmptyChartOption("Waiting for ranking");
+  const max = Math.max(1, ...rows.map((row) => row.value));
+  return {
+    animation: false,
+    backgroundColor: "transparent",
+    tooltip: {
+      trigger: "axis",
+      confine: true,
+      backgroundColor: "rgba(15,23,42,0.96)",
+      borderColor: "rgba(125,211,252,0.28)",
+      textStyle: orcBaseChartTextStyle(),
+      formatter: (params) => {
+        const row = rows[params && params[0] ? params[0].dataIndex : 0];
+        return row ? `${row.label}<br/>score ${numberText(row.value, 3)}` : "";
+      },
+    },
+    grid: { left: 82, right: 28, top: 8, bottom: 22 },
+    xAxis: {
+      type: "value",
+      min: 0,
+      max,
+      splitLine: { lineStyle: { color: "rgba(148,163,184,0.12)" } },
+      axisLine: { show: false },
+      axisTick: { show: false },
+      axisLabel: { color: "#9fb0c9", fontSize: 9 },
+    },
+    yAxis: {
+      type: "category",
+      inverse: true,
+      data: rows.map((row) => row.label),
+      axisLine: { show: false },
+      axisTick: { show: false },
+      axisLabel: { color: "#dbeafe", fontSize: 10, width: 76, overflow: "truncate" },
+    },
+    series: [{
+      type: "bar",
+      barWidth: 10,
+      data: rows.map((row) => ({
+        value: row.value,
+        itemStyle: { color: row.selected ? "#8b5cf6" : "#6d5dfc", borderRadius: [0, 5, 5, 0] },
+        label: { show: true, position: "right", formatter: numberText(row.value, 2), color: "#f8fafc", fontSize: 9 },
+      })),
+      backgroundStyle: { color: "rgba(148,163,184,0.10)", borderRadius: 5 },
+      showBackground: true,
+    }],
+  };
+}
+
+function dsnHeatmapChartOption(payload) {
+  const cells = (Array.isArray(payload.cells) ? payload.cells : [])
+    .map((cell) => ({
+      ...cell,
+      x: dashboardFiniteNumber(cell.x),
+      y: dashboardFiniteNumber(cell.y),
+      value: dashboardFiniteNumber(cell.value),
+      selected: /selected/i.test(String(cell.status || "")),
+    }))
+    .filter((cell) => cell.x !== null && cell.y !== null && cell.value !== null)
+    .slice(0, 48);
+  if (!cells.length) return dsnEmptyChartOption("Waiting for sweep");
+  const xCats = Array.from(new Set(cells.map((cell) => numberText(cell.x, 3)))).sort((a, b) => Number(a) - Number(b));
+  const yCats = Array.from(new Set(cells.map((cell) => numberText(cell.y, 3)))).sort((a, b) => Number(a) - Number(b));
+  const values = cells.map((cell) => cell.value);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  return {
+    animation: false,
+    backgroundColor: "transparent",
+    tooltip: {
+      position: "top",
+      confine: true,
+      backgroundColor: "rgba(15,23,42,0.96)",
+      borderColor: "rgba(125,211,252,0.28)",
+      textStyle: orcBaseChartTextStyle(),
+      formatter: (params) => {
+        const cell = cells[params.dataIndex] || {};
+        return `${cell.candidate_id || "candidate"}<br/>rd ${numberText(cell.x, 3)} / wall ${numberText(cell.y, 3)}<br/>score ${numberText(cell.value, 3)}`;
+      },
+    },
+    grid: { left: 48, right: 12, top: 12, bottom: 30 },
+    xAxis: {
+      type: "category",
+      data: xCats,
+      axisLabel: { color: "#9fb0c9", fontSize: 9 },
+      axisTick: { show: false },
+      axisLine: { lineStyle: { color: "rgba(148,163,184,0.18)" } },
+      name: "density",
+      nameTextStyle: { color: "#9fb0c9", fontSize: 9 },
+    },
+    yAxis: {
+      type: "category",
+      data: yCats,
+      axisLabel: { color: "#9fb0c9", fontSize: 9 },
+      axisTick: { show: false },
+      axisLine: { lineStyle: { color: "rgba(148,163,184,0.18)" } },
+      name: "wall",
+      nameTextStyle: { color: "#9fb0c9", fontSize: 9 },
+    },
+    visualMap: {
+      show: false,
+      min,
+      max: Math.max(max, min + 1e-6),
+      inRange: { color: ["#172554", "#2563eb", "#14b8a6", "#22c55e"] },
+    },
+    series: [{
+      type: "heatmap",
+      data: cells.map((cell) => [xCats.indexOf(numberText(cell.x, 3)), yCats.indexOf(numberText(cell.y, 3)), cell.value]),
+      label: { show: true, color: "#f8fafc", fontSize: 9, formatter: (params) => numberText(params.value[2], 2) },
+      itemStyle: { borderColor: "rgba(6,11,22,0.85)", borderWidth: 2, borderRadius: 4 },
+      emphasis: { itemStyle: { borderColor: "#67e8f9", borderWidth: 2 } },
+    }],
+  };
+}
+
+function dsnScatterChartOption(payload) {
+  const rows = (Array.isArray(payload.rows) ? payload.rows : [])
+    .map((row) => ({
+      ...row,
+      x: dashboardFiniteNumber(row.x),
+      y: dashboardFiniteNumber(row.y),
+      r: dashboardFiniteNumber(row.r) || 0,
+      selected: /selected/i.test(String(row.status || "")),
+    }))
+    .filter((row) => row.x !== null && row.y !== null)
+    .slice(0, 48);
+  if (!rows.length) return dsnEmptyChartOption("Waiting for scatter");
+  return {
+    animation: false,
+    backgroundColor: "transparent",
+    tooltip: {
+      trigger: "item",
+      confine: true,
+      backgroundColor: "rgba(15,23,42,0.96)",
+      borderColor: "rgba(125,211,252,0.28)",
+      textStyle: orcBaseChartTextStyle(),
+      formatter: (params) => {
+        const row = params.data && params.data.row;
+        return row ? `${row.candidate_id}<br/>mass ${numberText(row.x, 2)}g<br/>objective ${numberText(row.y, 3)}` : "";
+      },
+    },
+    grid: { left: 36, right: 12, top: 14, bottom: 28 },
+    xAxis: {
+      type: "value",
+      name: "mass",
+      nameTextStyle: { color: "#9fb0c9", fontSize: 9 },
+      axisLabel: { color: "#9fb0c9", fontSize: 9 },
+      splitLine: { lineStyle: { color: "rgba(148,163,184,0.10)" } },
+      axisLine: { lineStyle: { color: "rgba(148,163,184,0.20)" } },
+    },
+    yAxis: {
+      type: "value",
+      name: "objective",
+      nameTextStyle: { color: "#9fb0c9", fontSize: 9 },
+      axisLabel: { color: "#9fb0c9", fontSize: 9 },
+      splitLine: { lineStyle: { color: "rgba(148,163,184,0.10)" } },
+      axisLine: { lineStyle: { color: "rgba(148,163,184,0.20)" } },
+    },
+    series: [{
+      type: "scatter",
+      data: rows.map((row) => ({
+        value: [row.x, row.y],
+        row,
+        symbolSize: Math.max(8, Math.min(18, 8 + row.r * 14)),
+        itemStyle: {
+          color: row.selected ? "#2dd4bf" : "#7c3aed",
+          borderColor: "rgba(226,232,240,0.46)",
+          borderWidth: row.selected ? 1.6 : 1,
+          shadowBlur: row.selected ? 12 : 7,
+          shadowColor: row.selected ? "rgba(45,212,191,0.42)" : "rgba(124,58,237,0.32)",
+        },
+      })),
+    }],
+  };
+}
+
+function dsnRadarChartOption(payload) {
+  const rows = (Array.isArray(payload.rows) ? payload.rows : [])
+    .map((row) => ({
+      label: String(row.label || "metric"),
+      value: dashboardFiniteNumber(row.value),
+      max: dashboardFiniteNumber(row.max) || 1,
+    }))
+    .filter((row) => row.value !== null)
+    .slice(0, 6);
+  if (!rows.length) return dsnEmptyChartOption("Waiting for gate");
+  return {
+    animation: false,
+    backgroundColor: "transparent",
+    tooltip: {
+      trigger: "item",
+      confine: true,
+      backgroundColor: "rgba(15,23,42,0.96)",
+      borderColor: "rgba(125,211,252,0.28)",
+      textStyle: orcBaseChartTextStyle(),
+    },
+    radar: {
+      center: ["50%", "52%"],
+      radius: "66%",
+      splitNumber: 4,
+      indicator: rows.map((row) => ({ name: compactText(row.label, 14), max: row.max })),
+      axisName: { color: "#dbeafe", fontSize: 9 },
+      splitLine: { lineStyle: { color: "rgba(148,163,184,0.18)" } },
+      splitArea: { areaStyle: { color: ["rgba(124,58,237,0.04)", "rgba(45,212,191,0.035)"] } },
+      axisLine: { lineStyle: { color: "rgba(148,163,184,0.16)" } },
+    },
+    series: [{
+      type: "radar",
+      data: [{
+        value: rows.map((row) => row.value),
+        name: "assessment",
+        areaStyle: { color: "rgba(124,58,237,0.22)" },
+        lineStyle: { color: "#8b5cf6", width: 2 },
+        itemStyle: { color: "#2dd4bf" },
+      }],
+    }],
+  };
+}
+
+function orcChartOption(kind, payload) {
+  if (kind === "readiness") return orcReadinessChartOption(payload);
+  if (kind === "loop-timeline") return orcLoopChartOption(payload);
+  if (kind === "decision-donut") return orcDecisionDonutOption(payload);
+  if (kind === "route-graph") return orcRuntimeMapChartOption(payload);
+  if (kind === "dsn-ranking") return dsnRankingChartOption(payload);
+  if (kind === "dsn-heatmap") return dsnHeatmapChartOption(payload);
+  if (kind === "dsn-scatter") return dsnScatterChartOption(payload);
+  if (kind === "dsn-radar") return dsnRadarChartOption(payload);
+  return orcGraphChartOption(payload, kind);
+}
+
+function liveEchartsLibrary() {
+  if (typeof window !== "undefined" && window.echarts && typeof window.echarts.init === "function") return window.echarts;
+  if (typeof self !== "undefined" && self.echarts && typeof self.echarts.init === "function") return self.echarts;
+  return null;
+}
+
+async function loadLiveEchartsLibrary() {
+  const existing = liveEchartsLibrary();
+  if (existing) return existing;
+  if (liveOrcEchartsLoadPromise) return liveOrcEchartsLoadPromise;
+  const sourceUrl = "/static/vendor/echarts.min.js?v=5.6.0";
+  liveOrcEchartsLoadPromise = new Promise((resolve, reject) => {
+    const finish = () => {
+      const loaded = liveEchartsLibrary();
+      if (loaded) resolve(loaded);
+      else reject(new Error("ECharts vendor loaded but did not expose echarts."));
+    };
+    const script = document.createElement("script");
+    script.src = `${sourceUrl}&retry=${Date.now()}`;
+    script.async = true;
+    script.dataset.orcEchartsLoader = "dynamic";
+    script.onload = finish;
+    script.onerror = () => reject(new Error("ECharts vendor script failed to load."));
+    document.head.appendChild(script);
+  }).catch(async (scriptErr) => {
+    const response = await fetch(sourceUrl, { cache: "no-store" });
+    if (!response.ok) throw scriptErr;
+    const code = await response.text();
+    Function(code).call(typeof window !== "undefined" ? window : self);
+    const loaded = liveEchartsLibrary();
+    if (!loaded) throw scriptErr;
+    return loaded;
+  }).finally(() => {
+    if (!liveEchartsLibrary()) liveOrcEchartsLoadPromise = null;
+  });
+  return liveOrcEchartsLoadPromise;
+}
+
+function renderOrcChartFallback(containers, message) {
+  containers.forEach((container) => {
+    container.classList.add("chart-fallback");
+    container.textContent = message;
+  });
+}
+
+function orcCanvasFallbackSize(container) {
+  const rect = container.getBoundingClientRect();
+  const width = Math.max(120, Math.round(rect.width || container.clientWidth || 320));
+  const height = Math.max(90, Math.round(rect.height || container.clientHeight || 180));
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(width * dpr);
+  canvas.height = Math.round(height * dpr);
+  canvas.style.width = `${width}px`;
+  canvas.style.height = `${height}px`;
+  const ctx = canvas.getContext("2d");
+  if (ctx) ctx.scale(dpr, dpr);
+  return { canvas, ctx, width, height };
+}
+
+function renderOrcCanvasDecisionFallback(container, payload) {
+  const rows = Array.isArray(payload.rows) ? payload.rows : [];
+  const total = Math.max(0, dashboardFiniteNumber(payload.total) ?? rows.reduce((sum, row) => sum + (dashboardFiniteNumber(row.value) || 0), 0));
+  const { canvas, ctx, width, height } = orcCanvasFallbackSize(container);
+  if (!ctx) return false;
+  container.innerHTML = "";
+  container.classList.add("chart-canvas-fallback");
+  container.appendChild(canvas);
+  const cx = width / 2;
+  const cy = height / 2;
+  const radius = Math.max(34, Math.min(width, height) * 0.38);
+  const inner = radius * 0.68;
+  let start = -Math.PI / 2;
+  const safeRows = rows.length ? rows : [{ label: "Info", value: 1, tone: "info", color: "#58a6ff" }];
+  safeRows.forEach((row) => {
+    const value = total ? Math.max(0, dashboardFiniteNumber(row.value) || 0) : 1 / safeRows.length;
+    const portion = total ? value / total : 1 / safeRows.length;
+    const end = start + portion * Math.PI * 2;
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius, start, end);
+    ctx.arc(cx, cy, inner, end, start, true);
+    ctx.closePath();
+    ctx.fillStyle = row.color || orcToneColor(row.tone);
+    ctx.fill();
+    start = end;
+  });
+  ctx.beginPath();
+  ctx.arc(cx, cy, inner - 1, 0, Math.PI * 2);
+  ctx.fillStyle = "rgba(11,16,32,0.95)";
+  ctx.fill();
+  ctx.fillStyle = "#f8fafc";
+  ctx.font = "700 22px Inter, Segoe UI, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(String(total || 0), cx, cy - 8);
+  ctx.fillStyle = "#94a3b8";
+  ctx.font = "500 10px Inter, Segoe UI, sans-serif";
+  ctx.fillText("Decisions", cx, cy + 14);
+  return true;
+}
+
+function orcCanvasRoundedRectPath(ctx, x, y, width, height, radius = 7) {
+  const r = Math.max(0, Math.min(radius, width / 2, height / 2));
+  if (typeof ctx.roundRect === "function") {
+    ctx.roundRect(x, y, width, height, r);
+    return;
+  }
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + width - r, y);
+  ctx.quadraticCurveTo(x + width, y, x + width, y + r);
+  ctx.lineTo(x + width, y + height - r);
+  ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+  ctx.lineTo(x + r, y + height);
+  ctx.quadraticCurveTo(x, y + height, x, y + height - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+}
+
+function renderOrcCanvasRouteFallback(container, payload) {
+  const nodes = Array.isArray(payload.nodes) ? payload.nodes : [];
+  const links = Array.isArray(payload.links) ? payload.links : [];
+  const bounds = payload.bounds && typeof payload.bounds === "object" ? payload.bounds : { width: 1800, height: 880 };
+  const { canvas, ctx, width, height } = orcCanvasFallbackSize(container);
+  if (!ctx || !nodes.length) return false;
+  container.innerHTML = "";
+  container.classList.add("chart-canvas-fallback");
+  container.appendChild(canvas);
+  const pad = 28;
+  const graphWidth = Math.max(240, Number(bounds.width || 1800));
+  const graphHeight = Math.max(180, Number(bounds.height || 880));
+  const sx = (x) => pad + (Number(x || 0) / graphWidth) * Math.max(1, width - pad * 2);
+  const sy = (y) => pad + (Number(y || 0) / graphHeight) * Math.max(1, height - pad * 2);
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = "rgba(6,11,22,0.18)";
+  ctx.fillRect(0, 0, width, height);
+  links.forEach((link) => {
+    const coords = Array.isArray(link.coords) ? link.coords : [];
+    if (coords.length < 2) return;
+    const [from, to] = coords;
+    const x1 = sx(from[0]);
+    const y1 = sy(from[1]);
+    const x2 = sx(to[0]);
+    const y2 = sy(to[1]);
+    ctx.save();
+    ctx.strokeStyle = link.color || "#38bdf8";
+    ctx.globalAlpha = link.type === "logical_transition" ? 0.66 : 0.42;
+    ctx.lineWidth = link.type === "logical_transition" ? 1.8 : 1.15;
+    if (link.type !== "logical_transition" && link.type !== "runtime_sidecar") ctx.setLineDash([5, 5]);
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+    ctx.stroke();
+    const angle = Math.atan2(y2 - y1, x2 - x1);
+    ctx.beginPath();
+    ctx.moveTo(x2, y2);
+    ctx.lineTo(x2 - 8 * Math.cos(angle - 0.45), y2 - 8 * Math.sin(angle - 0.45));
+    ctx.lineTo(x2 - 8 * Math.cos(angle + 0.45), y2 - 8 * Math.sin(angle + 0.45));
+    ctx.closePath();
+    ctx.fillStyle = link.color || "#38bdf8";
+    ctx.fill();
+    ctx.restore();
+  });
+  nodes.forEach((node) => {
+    const x = sx(node.x);
+    const y = sy(node.y);
+    const size = node.active ? 42 : 38;
+    const half = size / 2;
+    const color = node.color || orcToneColor(node.tone);
+    ctx.save();
+    ctx.fillStyle = node.kind === "bridge" ? "rgba(38,30,12,0.95)" : "rgba(14,24,40,0.95)";
+    ctx.strokeStyle = node.active ? "#67e8f9" : color;
+    ctx.lineWidth = node.active ? 2.2 : 1.3;
+    ctx.shadowBlur = node.active ? 14 : 7;
+    ctx.shadowColor = `${ctx.strokeStyle}66`;
+    ctx.beginPath();
+    orcCanvasRoundedRectPath(ctx, x - half, y - half, size, size, 7);
+    ctx.fill();
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = "#f8fafc";
+    ctx.font = "650 10px Inter, Segoe UI, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(node.name || "?", x, y + 9);
+    ctx.fillStyle = color;
+    ctx.globalAlpha = 0.90;
+    ctx.beginPath();
+    ctx.arc(x, y - 8, 8, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = "#08111f";
+    ctx.font = "800 8px Inter, Segoe UI, sans-serif";
+    ctx.fillText((node.name || "?").slice(0, 2), x, y - 8);
+    ctx.restore();
+  });
+  return true;
+}
+
+function renderOrcCanvasFallback(container, kind, payload) {
+  if (kind === "decision-donut") return renderOrcCanvasDecisionFallback(container, payload);
+  if (kind === "route-graph") return renderOrcCanvasRouteFallback(container, payload);
+  return false;
+}
+
+function liveOrcChartContainersNeedHydration() {
+  if (!liveReportPanel) return false;
+  const containers = Array.from(liveReportPanel.querySelectorAll("[data-orc-echart]"));
+  return containers.some((container) => (
+    !container.classList.contains("chart-fallback")
+    && !container.querySelector("canvas")
+    && container.getBoundingClientRect().width > 0
+    && container.getBoundingClientRect().height > 0
+  ));
+}
+
+function ensureOrcChartHydration() {
+  if (!liveOrcChartContainersNeedHydration()) return;
+  scheduleOrcEchartsRender();
+}
+
+function renderOrcEcharts() {
+  if (!liveReportPanel) return;
+  const containers = Array.from(liveReportPanel.querySelectorAll("[data-orc-echart]"));
+  disposeOrcEcharts();
+  if (!containers.length) return;
+  const echartsLib = liveEchartsLibrary();
+  if (!echartsLib) {
+    containers.forEach((container) => {
+      const kind = container.dataset.orcEchart || "";
+      let payload = {};
+      try {
+        payload = JSON.parse(container.dataset.orcPayload || "{}");
+      } catch (_err) {
+        payload = {};
+      }
+      renderOrcCanvasFallback(container, kind, payload);
+    });
+    loadLiveEchartsLibrary()
+      .then(() => scheduleOrcEchartsRender())
+      .catch((err) => {
+        console.warn("ORC chart engine unavailable", err);
+        renderOrcChartFallback(containers.filter((container) => !container.querySelector("canvas")), "Chart engine unavailable");
+      });
+    return;
+  }
+  containers.forEach((container) => {
+    const kind = container.dataset.orcEchart || "";
+    let payload = {};
+    try {
+      payload = JSON.parse(container.dataset.orcPayload || "{}");
+    } catch (_err) {
+      payload = {};
+    }
+    try {
+      const chart = echartsLib.init(container, null, { renderer: "canvas" });
+      chart.setOption(orcChartOption(kind, payload), true);
+      liveOrcChartInstances.push(chart);
+    } catch (err) {
+      container.classList.add("chart-fallback");
+      container.textContent = "Chart render failed";
+      console.warn("ORC chart render failed", err);
+    }
+  });
+}
+
+function scheduleOrcEchartsRender() {
+  if (liveOrcChartRenderFrame) window.clearTimeout(liveOrcChartRenderFrame);
+  liveOrcChartRenderFrame = window.setTimeout(() => {
+    liveOrcChartRenderFrame = null;
+    renderOrcEcharts();
+  }, 16);
+}
+
+function setupOrcChartHydrationMonitor() {
+  if (liveOrcChartHydrationTimer) return;
+  if (liveReportPanel && typeof MutationObserver === "function") {
+    const observer = new MutationObserver(() => ensureOrcChartHydration());
+    observer.observe(liveReportPanel, { childList: true, subtree: true });
+  }
+  const tick = () => {
+    ensureOrcChartHydration();
+    liveOrcChartHydrationTimer = window.setTimeout(tick, 1000);
+  };
+  liveOrcChartHydrationTimer = window.setTimeout(tick, 250);
+}
+
+function renderOrcCommanderBrief(model) {
+  const mission = model.mission || {};
+  const briefRows = [
+    ["Run", compactRunId(mission.run_id || model.state.run_id || "-")],
+    ["Mode", mission.mode || model.state.mode || "-"],
+    ["Material", mission.material || (mission.constraints || {}).material || "-"],
+    ["Specimen", mission.specimen_id || "-"],
+    ["Objective", mission.objective_type || mission.goal || model.state.active_goal || "-"],
+  ];
+  return `
+    <div class="ar-orc-briefing">
+      <div class="ar-orc-verdict tone-${escapeHtml(model.verdict.tone)}">
+        <span>Verdict</span>
+        <strong>${escapeHtml(model.verdict.label)}</strong>
+        <em>${escapeHtml(model.verdict.driver)}</em>
+      </div>
+      <div class="ar-orc-brief-copy">
+        <p><span>Why</span>${escapeHtml(compactText(model.verdict.why, 180))}</p>
+        <p><span>Next</span>${escapeHtml(compactText(model.verdict.nextAction, 170))}</p>
+        <div class="ar-orc-evidence-strip">
+          ${model.verdict.evidence.map((item) => `<i>${escapeHtml(item)}</i>`).join("")}
+        </div>
+      </div>
+      <div class="ar-orc-brief-ledger">
+        ${briefRows.map(([label, value]) => `
+          <div><span>${escapeHtml(label)}</span><strong title="${escapeHtml(renderRuntimeValue(value))}">${escapeHtml(compactText(renderRuntimeValue(value), 42))}</strong></div>
+        `).join("")}
+      </div>
+    </div>
+  `;
+}
+
+function renderOrcRiskChain(model) {
+  if (!model.riskChain.length) return `<div class="ar-orc-empty">No active risk chain is recorded. Guardian, inputs, and runtime warnings are clear.</div>`;
+  return `
+    ${renderOrcRiskFlow(model)}
+    <div class="ar-orc-risk-notes" aria-label="orchestrator risk chain notes">
+      ${model.riskChain.slice(0, 2).map((item, index) => `
+        <span class="tone-${escapeHtml(item.tone || "info")}"><b>${escapeHtml(String(index + 1).padStart(2, "0"))}</b>${escapeHtml(compactText(item.value || item.label || "Risk", 82))}</span>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderOrcRuntimeReadiness(model) {
+  return `
+    ${renderOrcReadinessBars(model)}
+    <div class="ar-orc-runtime-readiness compact">
+      ${model.runtimeRows.map((row) => `
+        <span class="tone-${escapeHtml(row.tone || "info")}" title="${escapeHtml(`${row.label}: ${row.value} ${row.meta || ""}`)}"><b>${escapeHtml(row.label)}</b>${escapeHtml(compactText(row.value, 28))}</span>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderOrcRouteExecution(model) {
+  const pct = Math.round((model.routeStats.progress || 0) * 100);
+  return `
+    <div class="ar-orc-route-execution">
+      <div class="ar-orc-route-stats">
+        ${renderDashboardMetric("Progress", `${pct}%`, `${model.routeStats.completed}/${model.routeStats.routeCount || 0} stages`, model.routeStats.blocked ? "warning" : "success")}
+        ${renderDashboardMetric("Blocked", model.routeStats.blocked, "route nodes", model.routeStats.blocked ? "danger" : "success")}
+        ${renderDashboardMetric("Next", model.routeStats.nextStage || "-", "recommended stage", model.routeStats.nextStage ? "running" : "info")}
+      </div>
+      ${renderOrcRouteGraph(model)}
+    </div>
+  `;
+}
+
+function renderOrcDecisionAudit(model) {
+  if (!model.decisionRows.length) return `<div class="ar-orc-empty">No ORC decision register rows are recorded yet.</div>`;
+  return `
+    <div class="ar-orc-decision-audit" role="table" aria-label="orchestrator decision audit">
+      ${model.decisionRows.map((row) => `
+        <article class="tone-${escapeHtml(row.tone || "info")}" role="row">
+          <span>${escapeHtml(compactText(row.stage, 16))}</span>
+          <strong>${escapeHtml(compactText(row.selected, 20))}</strong>
+          <em>${escapeHtml(compactText(row.decision, 28))}</em>
+          <p>${escapeHtml(compactText(row.reason, 92))}</p>
+        </article>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderOrcHandoffQa(model) {
+  if (!model.handoffRows.length) return `<div class="ar-orc-empty">No handoff packet registry is available yet.</div>`;
+  return `
+    <div class="ar-orc-handoff-qa" role="table" aria-label="orchestrator handoff QA">
+      ${model.handoffRows.map((row) => `
+        <article class="tone-${escapeHtml(row.tone || "info")}" role="row">
+          <div>
+            <strong>${escapeHtml(compactText(row.from, 18))}</strong>
+            <span>${escapeHtml(compactText(row.to, 18))}</span>
+          </div>
+          <p>${escapeHtml(compactText(row.packet, 46))}</p>
+          <small>${escapeHtml(`evidence ${row.evidenceCount} / out ${row.outputCount} / ${row.status}`)}</small>
+        </article>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderOrcLoopTimeline(model) {
+  return `
+    ${renderOrcLoopTimelineChart(model)}
+    <div class="ar-orc-loop-summary" aria-label="orchestrator latest loop summary">
+      ${model.loopRows.slice(-1).map((row) => `
+        <span class="tone-${escapeHtml(row.tone || "info")}"><b>L${escapeHtml(row.loop)} / ${escapeHtml(compactText(row.decision, 16))}</b>${escapeHtml(compactText(row.summary, 92))}</span>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderOrchestratorMiniList(items, emptyText, limit = 6, options = {}) {
+  const clean = uniqueOrchestratorItems(items, limit);
+  if (!clean.length) return `<div class="ar-orc-empty">${escapeHtml(emptyText)}</div>`;
+  const showMeta = options.showMeta !== false;
+  const valueLimit = options.multiline ? 120 : 58;
+  return `
+    <div class="ar-orc-list">
+      ${clean.map((item) => `
+        <article class="ar-orc-list-row${options.multiline ? " is-multiline" : ""} tone-${escapeHtml(item.tone || orchestratorStatusTone(item.status || item.meta || ""))}" title="${escapeHtml(item.meta || "")}">
+          <span>${escapeHtml(compactText(item.label || item.title || "item", 34))}</span>
+          <strong>${escapeHtml(compactText(item.value || item.text || "", valueLimit))}</strong>
+          ${showMeta ? `<small>${escapeHtml(compactText(item.meta || "", 44))}</small>` : ""}
+        </article>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderOrchestratorRouteRail(route, state = {}) {
+  const fallbackRoute = ["design", "specimen", "vision", "manipulation", "equipment", "analysis", "knowledge", "bo", "guardian"].map((stage, index) => ({
+    order: index + 1,
+    stage,
+    agent: `${stage}_agent`,
+    status: stage === state.stage ? "active" : "pending",
+    required_outputs: [],
+  }));
+  const steps = route && route.length ? route : fallbackRoute;
+  return `
+    <div class="ar-orc-route-rail" aria-label="orchestrator route rail">
+      ${steps.slice(0, 9).map((step, index) => {
+        const stage = step.stage || step.to_stage || step.agent || `stage-${index + 1}`;
+        const agentId = agentIdFromStage(stage);
+        const statusText = step.status || (stage === state.stage ? "active" : "pending");
+        const tone = orchestratorStatusTone(statusText);
+        const outputs = Array.isArray(step.required_outputs) ? step.required_outputs.length : 0;
+        return `
+          <article class="ar-orc-route-step tone-${escapeHtml(tone)}${stage === state.stage ? " current" : ""}">
+            <span>${escapeHtml(String(step.order || index + 1).padStart(2, "0"))}</span>
+            <strong>${escapeHtml(liveAgentShort(agentId))}</strong>
+            <em>${escapeHtml(compactText(stage, 10))}</em>
+            <small>${escapeHtml(compactText(statusText, 14))}${outputs ? ` / ${outputs}` : ""}</small>
+          </article>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function renderOrchestratorMissionControlCard(ctx, report) {
+  const nextStage = ctx.controlNextAction.next_stage || ctx.plan.next_recommended_stage || ctx.activeRoute.stage || ctx.state.stage || "-";
+  const nextAgent = ctx.controlNextAction.next_agent || ctx.activeRoute.agent || liveAgentLabel(agentIdFromStage(nextStage));
+  const nextStatus = ctx.controlNextAction.status || ctx.activeRoute.status || ctx.status;
+  const nextSummary = ctx.controlNextAction.summary || report.nextAction || "Wait for next orchestrator instruction.";
+  return `
+    <div class="ar-orc-control-board">
+      <div class="ar-orc-control-summary">
+        ${renderDashboardMetric("Next", liveAgentShort(agentIdFromStage(nextStage)), compactText(nextStage, 24), "running")}
+        ${renderDashboardMetric("Route", `${ctx.completedRouteCount}/${ctx.route.length || 0}`, "completed", "info")}
+        ${renderDashboardMetric("Inputs", ctx.missingCount, "missing", ctx.missingCount ? "warning" : "success")}
+        ${renderDashboardMetric("Approvals", ctx.pendingApprovals.length, "pending", ctx.pendingApprovals.length ? "warning" : "success")}
+      </div>
+      <div class="ar-orc-mission-strip" aria-label="orchestrator mission identity">
+        <span><b>run</b><strong>${escapeHtml(compactText(ctx.missionContract.run_id || ctx.state.run_id || "-", 24))}</strong></span>
+        <span><b>mode</b><strong>${escapeHtml(compactText(ctx.missionContract.mode || ctx.state.mode || "-", 18))}</strong></span>
+        <span><b>loop</b><strong>${escapeHtml(renderRuntimeValue(ctx.missionContract.loop_id ?? ctx.state.loop_count ?? "-"))}</strong></span>
+        <span><b>gate</b><strong>${escapeHtml(ctx.missionContract.requires_guardian_gate === false ? "optional" : "guardian")}</strong></span>
+        <span><b>status</b><strong>${escapeHtml(compactText(nextStatus, 22))}</strong></span>
+      </div>
+      ${renderOrchestratorRouteRail(ctx.route, ctx.state)}
+      <div class="ar-orc-next-line">
+        <strong>${escapeHtml(compactText(nextAgent, 28))}</strong>
+        <span>${escapeHtml(compactText(nextSummary, 88))}</span>
+      </div>
+    </div>
+  `;
+}
+
+function renderOrchestratorGateBoard(ctx, report) {
+  const readyCount = ctx.missingRows.length - ctx.missingCount;
+  const riskScore = dashboardFiniteNumber(ctx.guardianSummary.risk_score);
+  const approvalItems = uniqueOrchestratorItems([...ctx.pendingApprovals, ...ctx.resolvedApprovals], 3).map((item) => ({
+    label: item.stage || item.source || "Gate",
+    value: orchestratorItemText(item, "Runtime approval"),
+    meta: orchestratorItemMeta(item, item.approval_id || ""),
+    tone: orchestratorStatusTone(item.status || item.decision || "pending"),
+  }));
+  const inputItems = ctx.missingRows.slice(0, 3).map((item) => ({
+    label: item.label,
+    value: item.missing ? "Needed" : compactText(renderRuntimeValue(item.value), 44),
+    meta: item.missing ? "operator input" : "ready",
+    tone: item.missing ? "warning" : "success",
+  }));
+  const riskItems = orchestratorRiskItems(ctx, report).slice(0, 3);
+  return `
+    <div class="ar-orc-gate-board">
+      <div class="ar-orc-control-summary compact">
+        ${renderDashboardMetric("Ready", readyCount, "required", ctx.missingCount ? "warning" : "success")}
+        ${renderDashboardMetric("Missing", ctx.missingCount, "operator inputs", ctx.missingCount ? "warning" : "success")}
+        ${renderDashboardMetric("Approvals", ctx.pendingApprovals.length, "pending", ctx.pendingApprovals.length ? "warning" : "success")}
+        ${renderDashboardMetric("Risk", riskScore === null ? "-" : numberText(riskScore, 3), "guardian", riskScore !== null && riskScore >= 0.7 ? "danger" : riskScore !== null && riskScore >= 0.35 ? "warning" : "success")}
+      </div>
+      <div class="ar-orc-gate-grid">
+        <section>
+          <h5>Inputs</h5>
+          ${renderOrchestratorMiniList(inputItems, "Required inputs are complete.", 3)}
+        </section>
+        <section>
+          <h5>Approvals</h5>
+          ${renderOrchestratorMiniList(approvalItems, "Approval queue clear.", 3)}
+        </section>
+        <section>
+          <h5>Guardian</h5>
+          ${renderOrchestratorMiniList(riskItems, "Guardian risk register is clear.", 3)}
+        </section>
+      </div>
+    </div>
+  `;
+}
+
+function orchestratorFollowupItems(ctx) {
+  const items = [];
+  const controlQuestions = ctx.controlPlane && ctx.controlPlane.followup_questions && Array.isArray(ctx.controlPlane.followup_questions.items)
+    ? ctx.controlPlane.followup_questions.items : [];
+  controlQuestions.slice(-8).reverse().forEach((item) => items.push({
+    label: item.source || item.trigger || "Control Question",
+    value: orchestratorItemText(item, "ORC follow-up question"),
+    meta: orchestratorItemMeta(item, item.priority || "question"),
+    tone: item.status === "clear" ? "success" : "warning",
+  }));
+  ctx.operatorQueue.forEach((item) => items.push({
+    label: "Operator Queue",
+    value: orchestratorItemText(item, "Queued operator follow-up"),
+    meta: orchestratorItemMeta(item, "queued"),
+    tone: "warning",
+  }));
+  ctx.operatorFollowups.slice(-6).reverse().forEach((item) => items.push({
+    label: "Operator Follow-up",
+    value: orchestratorItemText(item, "Consumed operator follow-up"),
+    meta: orchestratorItemMeta(item, "consumed"),
+    tone: "running",
+  }));
+  ctx.followups.slice(-8).reverse().forEach((item) => {
+    const concerns = Array.isArray(item.concerns) ? item.concerns.filter(Boolean).join("; ") : "";
+    items.push({
+      label: item.trigger || "Supervisor",
+      value: concerns || orchestratorItemText(item, "Supervisor follow-up"),
+      meta: orchestratorItemMeta(item, "orchestrator"),
+      tone: item.requires_response ? "warning" : orchestratorStatusTone(item.status || item.recommendation),
+    });
+  });
+  if (!items.length && ctx.missingCount) {
+    ctx.missingRows.filter((item) => item.missing).forEach((item) => items.push({
+      label: "Missing Input",
+      value: `Resolve ${item.label}`,
+      meta: "operator question",
+      tone: "warning",
+    }));
+  }
+  return items;
+}
+
+function renderOrchestratorFollowupCard(ctx) {
+  const items = orchestratorFollowupItems(ctx);
+  return `
+    <div class="ar-orc-followup-board">
+      <div class="ar-orc-control-summary compact">
+        ${renderDashboardMetric("Queued", ctx.operatorQueue.length, "operator", ctx.operatorQueue.length ? "warning" : "success")}
+        ${renderDashboardMetric("Supervisor", ctx.followups.length, "followups", "info")}
+        ${renderDashboardMetric("Needs Reply", items.filter((item) => item.tone === "warning").length, "questions", items.some((item) => item.tone === "warning") ? "warning" : "success")}
+      </div>
+      ${renderOrchestratorMiniList(items, "No follow-up questions or missing-input prompts are active.", 7)}
+    </div>
+  `;
+}
+
+function renderOrchestratorApprovalSummaryCard(ctx) {
+  const approved = ctx.resolvedApprovals.filter((item) => /approved|resolved/i.test(String(item.status || item.decision || ""))).length;
+  const rejected = ctx.resolvedApprovals.filter((item) => /reject|denied|blocked/i.test(String(item.status || item.decision || ""))).length;
+  const allApprovals = [...ctx.pendingApprovals, ...ctx.resolvedApprovals].slice(0, 8).map((item) => ({
+    label: item.source || item.stage || "Approval",
+    value: orchestratorItemText(item, "Runtime approval"),
+    meta: orchestratorItemMeta(item, item.approval_id || ""),
+    tone: orchestratorStatusTone(item.status || item.decision || "pending"),
+  }));
+  return `
+    <div class="ar-orc-approval-board">
+      <div class="ar-orc-control-summary compact">
+        ${renderDashboardMetric("Pending", ctx.pendingApprovals.length, "operator gates", ctx.pendingApprovals.length ? "warning" : "success")}
+        ${renderDashboardMetric("Approved", approved, "resolved", "success")}
+        ${renderDashboardMetric("Rejected", rejected, "resolved", rejected ? "danger" : "success")}
+      </div>
+      ${renderOrchestratorMiniList(allApprovals, "Approval queue clear. No runtime approval gate is currently pending.", 6)}
+    </div>
+  `;
+}
+
+function orchestratorRiskItems(ctx, report) {
+  const riskItems = [];
+  const controlRisks = ctx.controlRisk && Array.isArray(ctx.controlRisk.items) ? ctx.controlRisk.items : [];
+  controlRisks.slice(-8).reverse().forEach((risk) => riskItems.push({
+    label: risk.source || "Control Risk",
+    value: risk.reason || risk.title || risk.decision || "Risk item",
+    meta: `risk=${renderRuntimeValue(risk.risk_score, "0")} / ${risk.status || risk.decision || "recorded"}`,
+    tone: orchestratorStatusTone(risk.status || risk.decision || ""),
+  }));
+  const dominantRisks = Array.isArray(ctx.guardianSummary.dominant_risks) ? ctx.guardianSummary.dominant_risks : [];
+  dominantRisks.forEach((risk) => riskItems.push({ label: "Guardian Risk", value: risk, meta: `risk=${renderRuntimeValue(ctx.guardianSummary.risk_score, "0")}`, tone: "warning" }));
+  ctx.warnings.slice(-6).reverse().forEach((warning) => riskItems.push({ label: "Warning", value: warning, meta: "runtime warning", tone: "warning" }));
+  ctx.events.slice(-6).reverse().forEach((event) => {
+    const kind = eventTimelineKind(event);
+    if (kind === "info") return;
+    riskItems.push({
+      label: reportEventLabel(event),
+      value: compactText(reportEventText(event), 120),
+      meta: kind,
+      tone: kind === "error" ? "danger" : "warning",
+    });
+  });
+  return riskItems;
+}
+
+function renderOrchestratorRiskRegisterCard(ctx, report) {
+  const riskItems = orchestratorRiskItems(ctx, report);
+  const riskScore = dashboardFiniteNumber(ctx.guardianSummary.risk_score);
+  return `
+    <div class="ar-orc-risk-board">
+      <div class="ar-orc-control-summary compact">
+        ${renderDashboardMetric("Risk", riskScore === null ? "-" : numberText(riskScore, 3), "guardian", riskScore !== null && riskScore >= 0.7 ? "danger" : riskScore !== null && riskScore >= 0.35 ? "warning" : "success")}
+        ${renderDashboardMetric("Warnings", ctx.warnings.length, "open", ctx.warnings.length ? "warning" : "success")}
+        ${renderDashboardMetric("Blocked", ctx.blockedRouteCount, "route nodes", ctx.blockedRouteCount ? "danger" : "success")}
+        ${renderDashboardMetric("Incidents", ctx.guardianSummary.incident_count ?? 0, "guardian", ctx.guardianSummary.incident_count ? "danger" : "success")}
+      </div>
+      ${renderOrchestratorMiniList(riskItems, "No active ORC risk entries. Guardian and runtime warnings are clear.", 7)}
+    </div>
+  `;
+}
+
+function renderOrchestratorSupervisorSignalCard(ctx) {
+  const decisionItems = ctx.decisions.slice(-3).reverse().map((item) => ({
+    label: item.decision || item.stage || "Decision",
+    value: orchestratorItemText(item, "Supervisor decision"),
+    meta: orchestratorItemMeta(item, "decision"),
+    tone: orchestratorStatusTone(item.status || item.decision || "complete"),
+  }));
+  const followupItems = orchestratorFollowupItems(ctx).slice(0, 3);
+  const signalBars = [
+    { label: "decisions", value: ctx.decisions.length, tone: "success", meta: `${ctx.decisions.length}` },
+    { label: "handoffs", value: ctx.handoffs.length, tone: "running", meta: `${ctx.handoffs.length}` },
+    { label: "followups", value: ctx.followups.length, tone: ctx.followups.length ? "warning" : "success", meta: `${ctx.followups.length}` },
+    { label: "warnings", value: ctx.warnings.length, tone: ctx.warnings.length ? "warning" : "success", meta: `${ctx.warnings.length}` },
+  ];
+  return `
+    <div class="ar-orc-supervisor-board">
+      ${renderMiniBarChart(signalBars, { label: "orchestrator supervisor signal counts", compact: true, limit: 4 })}
+      <div class="ar-orc-supervisor-grid">
+        <section>
+          <h5>Decisions</h5>
+          ${renderOrchestratorMiniList(decisionItems, "No supervisor decisions recorded yet.", 3)}
+        </section>
+        <section>
+          <h5>Follow-ups</h5>
+          ${renderOrchestratorMiniList(followupItems, "No follow-up questions are active.", 3)}
+        </section>
+      </div>
+    </div>
+  `;
+}
+
+function orchestratorTaskQueueItems(ctx) {
+  const controlTasks = ctx.controlPlane && ctx.controlPlane.task_queue && Array.isArray(ctx.controlPlane.task_queue.items)
+    ? ctx.controlPlane.task_queue.items : [];
+  if (controlTasks.length) {
+    return controlTasks.map((item, index) => ({
+      order: item.order || index + 1,
+      task: item.task || `Run ${item.stage || item.agent || "stage"}`,
+      agent: item.agent || item.stage || "-",
+      priority: item.priority || (/active|running|waiting/i.test(String(item.status || "")) ? "high" : "normal"),
+      status: item.status || "pending",
+      outputs: Array.isArray(item.required_outputs) ? item.required_outputs.length : dashboardFiniteNumber(item.required_output_count) ?? 0,
+      tone: orchestratorStatusTone(item.status || item.priority || "pending"),
+    }));
+  }
+  const routeItems = (ctx.route || []).map((item, index) => {
+    const stage = item.stage || item.to_stage || `stage-${index + 1}`;
+    const agentId = agentIdFromStage(stage);
+    const requiredOutputs = Array.isArray(item.required_outputs) ? item.required_outputs : [];
+    return {
+      order: item.order || index + 1,
+      task: item.task || `Run ${liveAgentLabel(agentId)}`,
+      agent: item.agent || liveAgentLabel(agentId),
+      priority: /active|running|waiting/i.test(String(item.status || "")) ? "high" : /pending|queued/i.test(String(item.status || "")) ? "normal" : "low",
+      status: item.status || "pending",
+      outputs: requiredOutputs.length,
+      tone: orchestratorStatusTone(item.status || "pending"),
+    };
+  });
+  if (!routeItems.length && ctx.missingCount) {
+    return ctx.missingRows.filter((item) => item.missing).map((item, index) => ({
+      order: index + 1,
+      task: `Collect ${item.label}`,
+      agent: "Objective",
+      priority: "high",
+      status: "waiting_input",
+      outputs: 0,
+      tone: "warning",
+    }));
+  }
+  return routeItems;
+}
+
+function renderOrchestratorTaskQueueCard(ctx) {
+  const tasks = orchestratorTaskQueueItems(ctx);
+  if (!tasks.length) return `<div class="ar-orc-empty">No ORC task queue is available yet.</div>`;
+  return `
+    <div class="ar-orc-task-table" role="table" aria-label="orchestrator task queue">
+      <div class="ar-orc-task-head" role="row">
+        <span>#</span><span>Task</span><span>Agent</span><span>Status</span><span>Out</span>
+      </div>
+      ${tasks.slice(0, 5).map((task) => `
+        <div class="ar-orc-task-row tone-${escapeHtml(task.tone)}" role="row">
+          <span>${escapeHtml(task.order)}</span>
+          <strong>${escapeHtml(compactText(task.task, 46))}</strong>
+          <em>${escapeHtml(compactText(task.agent, 26))}</em>
+          <small>${escapeHtml(task.status)} · ${escapeHtml(task.priority)}</small>
+          <span>${escapeHtml(task.outputs)}</span>
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderOrchestratorHandoffMatrix(ctx, report) {
+  const routeDerived = (ctx.route || []).slice(0, 8).map((step, index, route) => {
+    const next = route[index + 1] || {};
+    const stage = step.stage || step.to_stage || `stage-${index + 1}`;
+    return {
+      from_stage: stage,
+      to_stage: next.stage || next.to_stage || "",
+      consumer_agent: next.agent || liveAgentLabel(agentIdFromStage(next.stage || next.to_stage || "")),
+      packet_id: step.packet_id || "",
+      required_outputs: step.required_outputs || [],
+      status: step.status || "pending",
+    };
+  }).filter((item) => item.to_stage);
+  const rows = uniqueOrchestratorItems(ctx.handoffs && ctx.handoffs.length ? ctx.handoffs.slice(-6).reverse() : routeDerived, 6);
+  if (!rows.length) return `<div class="ar-orc-empty">No handoff route or packet registry is available yet.</div>`;
+  return `
+    <div class="ar-orc-handoff-matrix" role="table" aria-label="orchestrator handoff matrix">
+      <div class="ar-orc-handoff-head" role="row">
+        <span>From</span><span>To</span><span>Packet</span><span>Out</span>
+      </div>
+      ${rows.map((item) => {
+        const fromStage = item.from_stage || item.stage || "-";
+        const toStage = item.to_stage || item.next_stage || "-";
+        const packet = item.packet_id || item.schema || item.consumer_agent || item.target_agent || "-";
+        const outputCount = Array.isArray(item.required_outputs) ? item.required_outputs.length : dashboardFiniteNumber(item.required_output_count) ?? 0;
+        const tone = orchestratorStatusTone(item.status || item.decision || packet);
+        return `
+          <div class="ar-orc-handoff-row tone-${escapeHtml(tone)}" role="row">
+            <strong>${escapeHtml(compactText(fromStage, 22))}</strong>
+            <em>${escapeHtml(compactText(toStage, 22))}</em>
+            <small>${escapeHtml(compactText(packet, 34))}</small>
+            <span>${escapeHtml(renderRuntimeValue(outputCount))}</span>
+          </div>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function renderOrchestratorControlPlaneVisualization(report, status) {
+  const ctx = orchestratorContext(report, status);
+  const taskRows = orchestratorTaskQueueItems(ctx).slice(0, 6).map((item) => ({
+    label: item.task,
+    value: item.status === "completed" || item.status === "complete" ? 1 : item.status === "active" || item.status === "running" ? 0.65 : item.status === "pending" ? 0.3 : 0.1,
+    max: 1,
+    meta: item.status,
+    tone: item.tone,
+  }));
+  return `
+    <div class="ar-orc-viz">
+      ${renderOrchestratorRouteRail(ctx.route, ctx.state)}
+      <div class="ar-orc-viz-grid">
+        <div>
+          <div class="ar-viz-title-row"><span>Task Readiness</span><strong>${taskRows.length}</strong></div>
+          ${renderMiniBarChart(taskRows, { label: "orchestrator task readiness", compact: true, emptyText: "No route tasks are available yet.", limit: 6 })}
+        </div>
+        <div>
+          <div class="ar-viz-title-row"><span>Control Signals</span><strong>${ctx.decisions.length + ctx.handoffs.length}</strong></div>
+          ${renderMiniBarChart([
+            { label: "decisions", value: ctx.decisions.length, tone: "success", meta: `${ctx.decisions.length}` },
+            { label: "handoffs", value: ctx.handoffs.length, tone: "running", meta: `${ctx.handoffs.length}` },
+            { label: "followups", value: ctx.followups.length, tone: "info", meta: `${ctx.followups.length}` },
+            { label: "warnings", value: ctx.warnings.length, tone: ctx.warnings.length ? "warning" : "success", meta: `${ctx.warnings.length}` },
+          ], { label: "orchestrator control signal counts", compact: true, limit: 4 })}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderOrcReferenceStageProgress(model) {
+  const steps = ["idle", "design", "specimen", "vision", "manipulation", "equipment", "analysis", "bo", "guardian", "complete"];
+  const activeStage = String(model.state.stage || "idle").toLowerCase();
+  const activeAgent = agentIdFromStage(activeStage);
+  const currentIndex = Math.max(0, steps.findIndex((step) => step === activeStage || step === activeAgent));
+  const fallbackIndex = currentIndex >= 0 ? currentIndex : 0;
+  return `
+    <div class="ar-orc-stage-progress" aria-label="orchestrator stage progress">
+      ${steps.map((step, index) => {
+        const state = index < fallbackIndex ? "done" : index === fallbackIndex ? "active" : "idle";
+        return `
+          <span class="is-${state}">
+            <i></i>
+            <b>${escapeHtml(step === "specimen" ? "spec" : step === "manipulation" ? "man" : step)}</b>
+          </span>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function renderOrcReferenceMissionContract(model) {
+  const mission = model.mission || {};
+  const goal = mission.goal || mission.active_goal || mission.objective || model.state.active_goal || "Mission goal not recorded yet.";
+  const owner = mission.owner || mission.owner_agent || "OrchestratorAgent";
+  const created = mission.created_at || mission.timestamp || model.state.started_at || "-";
+  const priority = mission.priority || model.verdict.label || "-";
+  return `
+    <div class="ar-orc-reference-mission">
+      <section class="ar-orc-commander-brief tone-${escapeHtml(model.verdict.tone)}">
+        <span>Commander Brief</span>
+        <strong>${escapeHtml(model.verdict.driver)}</strong>
+        <p>${escapeHtml(compactText(model.verdict.why, 150))}</p>
+      </section>
+      <dl class="ar-orc-reference-kv">
+        <div><dt>Mission ID</dt><dd title="${escapeHtml(renderRuntimeValue(mission.mission_id || "-"))}">${escapeHtml(compactText(mission.mission_id || "-", 34))}</dd></div>
+        <div><dt>Run ID</dt><dd title="${escapeHtml(renderRuntimeValue(mission.run_id || model.state.run_id || "-"))}">${escapeHtml(compactRunId(mission.run_id || model.state.run_id || "-"))}</dd></div>
+        <div><dt>Goal</dt><dd title="${escapeHtml(renderRuntimeValue(goal))}">${escapeHtml(compactText(goal, 92))}</dd></div>
+        <div><dt>Owner</dt><dd>${escapeHtml(compactText(owner, 28))}</dd></div>
+        <div><dt>Priority</dt><dd><span class="ar-orc-priority-chip tone-${escapeHtml(model.verdict.tone)}">${escapeHtml(compactText(priority, 16))}</span></dd></div>
+        <div><dt>Created</dt><dd>${escapeHtml(compactText(created, 30))}</dd></div>
+      </dl>
+    </div>
+  `;
+}
+
+function renderOrcReferenceMissingInputs(model) {
+  const rows = (model.ctx.missingRows || []).slice(0, 5);
+  const missingRows = rows.filter((item) => item.missing);
+  return `
+    <div class="ar-orc-reference-missing">
+      <div class="ar-orc-missing-list">
+        ${rows.map((item) => `
+          <div class="${item.missing ? "missing" : "ready"}">
+            <span>${escapeHtml(compactText(item.label, 34))}</span>
+            <strong>${item.missing ? "1" : "OK"}</strong>
+          </div>
+        `).join("") || `<p class="hint">No required input checklist is available yet.</p>`}
+      </div>
+      <div class="ar-orc-reference-total">
+        <span>Total Missing</span>
+        <strong>${escapeHtml(renderRuntimeValue(model.ctx.missingCount ?? missingRows.length, "0"))}</strong>
+      </div>
+    </div>
+  `;
+}
+
+function renderOrcReferenceGateSummary(model) {
+  const ctx = model.ctx || {};
+  const approvals = [...(ctx.pendingApprovals || []), ...(ctx.resolvedApprovals || [])].slice(0, 3);
+  const pendingCount = (ctx.pendingApprovals || []).length;
+  const approvalTone = pendingCount ? "warning" : "success";
+  return `
+    <div class="ar-orc-reference-gate">
+      ${renderOrcReferenceMissingInputs(model)}
+      <div class="ar-orc-gate-approval">
+        <div class="ar-orc-reference-total tone-${escapeHtml(approvalTone)}">
+          <span>Pending Approvals</span>
+          <strong>${escapeHtml(renderRuntimeValue(pendingCount, "0"))}</strong>
+        </div>
+        <div class="ar-orc-gate-approval-list">
+          ${approvals.length ? approvals.map((item) => {
+            const status = item.status || item.decision || "pending";
+            return `
+              <span class="tone-${escapeHtml(orchestratorStatusTone(status))}">
+                <b>${escapeHtml(compactText(item.stage || item.source || item.agent || "Gate", 18))}</b>
+                <strong>${escapeHtml(compactText(status, 18))}</strong>
+              </span>
+            `;
+          }).join("") : `<p class="hint">Approval queue clear.</p>`}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function orcDecisionRegisterPayload(report) {
+  const counts = decisionRegisterCounts(report);
+  const rows = [
+    { label: "Approved", value: counts.approved, tone: "success", color: "#39d98a" },
+    { label: "Pending", value: counts.pending, tone: "warning", color: "#f6c453" },
+    { label: "Blocked", value: counts.blocked, tone: "danger", color: "#ff6b6b" },
+    { label: "Info", value: counts.info, tone: "info", color: "#58a6ff" },
+  ];
+  const total = rows.reduce((sum, row) => sum + Math.max(0, Number(row.value) || 0), 0);
+  return { rows, total };
+}
+
+function renderOrcDecisionDonut(payload) {
+  return `
+    <div class="ar-orc-echart ar-orc-decision-donut" data-orc-echart="decision-donut" data-orc-payload="${orcChartPayloadAttr(payload)}" aria-label="Decision register donut chart"></div>
+  `;
+}
+
+function orcMissingInputImpact(item = {}) {
+  const label = String(item.label || item.key || "Required input");
+  const text = label.toLowerCase();
+  if (/material|polymer/.test(text)) {
+    return { blocks: "DSN/SPC", impact: "candidate + print profile degraded", fallback: "default material profile", tone: "warning" };
+  }
+  if (/geometry|specimen|size/.test(text)) {
+    return { blocks: "DSN/SPC", impact: "fabrication route blocked", fallback: "operator input", tone: "warning" };
+  }
+  if (/orientation|layer|print/.test(text)) {
+    return { blocks: "SPC/VIS", impact: "print validation delayed", fallback: "profile default", tone: "info" };
+  }
+  if (/protocol|test/.test(text)) {
+    return { blocks: "EQP/ANL", impact: "measurement contract blocked", fallback: "operator input", tone: "warning" };
+  }
+  return { blocks: "ORC", impact: "mission confidence reduced", fallback: "operator review", tone: "warning" };
+}
+
+function renderOrcMissingInputImpactRows(model) {
+  const rows = (model.ctx.missingRows || []).filter((item) => item.missing).slice(0, 4);
+  if (!rows.length) {
+    return `
+      <div class="ar-orc-missing-impact is-clear">
+        <span>Missing Inputs</span>
+        <strong>Clear</strong>
+        <small>No operator input is blocking the mission contract.</small>
+      </div>
+    `;
+  }
+  return `
+    <div class="ar-orc-missing-impact" aria-label="missing input impact">
+      <div class="ar-orc-missing-impact-head">
+        <span>Missing Inputs</span>
+        <strong>${escapeHtml(renderRuntimeValue(model.ctx.missingCount, "0"))}</strong>
+      </div>
+      ${rows.map((item) => {
+        const impact = orcMissingInputImpact(item);
+        return `
+          <article class="tone-${escapeHtml(impact.tone)}">
+            <strong>${escapeHtml(compactText(item.label || "Required input", 34))}</strong>
+            <em>${escapeHtml(compactText(impact.impact, 48))}</em>
+          </article>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function renderOrcEvidenceChips(model, options = {}) {
+  const mapPayload = buildOrcRuntimeGraphPayload(model);
+  const equipmentReport = latestEquipmentReport({ state: model.state }) || latestReportPayload({ state: model.state }, ["equipment_report"]) || {};
+  const equipmentStatus = equipmentReport.status || (equipmentReport.bridge || {}).connection_status || (equipmentReport.cross_checks || {}).status || "waiting";
+  const artifactCount = liveRunArtifacts.length + (latestReportArtifacts({ state: model.state }) || []).length;
+  const chips = [
+    { label: "TRACE", detail: `${model.ctx.events.length || liveRunEvents.length} evt`, view: "backend", tone: model.ctx.events.length || liveRunEvents.length ? "info" : "idle" },
+    { label: "EQUIP", detail: compactText(equipmentStatus, 24), view: "report", agent: "equipment", tone: /ok|ready|connected|pass/i.test(String(equipmentStatus)) ? "success" : "warning" },
+    { label: "ART", detail: `${artifactCount} refs`, view: "artifacts", tone: artifactCount ? "success" : "idle" },
+    { label: "GRAPH", detail: mapPayload ? `${mapPayload.nodes.length}/${mapPayload.links.length}` : "map", view: "graph", tone: mapPayload ? "running" : "idle" },
+  ];
+  return `
+    <div class="ar-orc-evidence-chips ${options.compact ? "compact" : ""}" aria-label="linked backend equipment artifact graph evidence">
+      ${chips.map((chip) => `
+        <button type="button" class="ar-orc-evidence-chip tone-${escapeHtml(chip.tone)}" data-evidence-view="${escapeHtml(chip.view)}" data-evidence-agent="${escapeHtml(chip.agent || "")}" title="${escapeHtml(`${chip.label}: ${chip.detail}`)}">
+          <b>${escapeHtml(chip.label)}</b><span>${escapeHtml(chip.detail)}</span>
+        </button>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderOrcReferenceDecisionRegister(report, model) {
+  const payload = orcDecisionRegisterPayload(report);
+  return `
+    <div class="ar-orc-reference-decision">
+      <div class="ar-orc-decision-donut-stack">
+        ${renderOrcDecisionDonut(payload)}
+        <div class="ar-orc-decision-legend">
+          ${payload.rows.map((row) => `
+            <span class="tone-${escapeHtml(row.tone)}"><i></i><b>${escapeHtml(row.label)}</b><strong>${escapeHtml(renderRuntimeValue(row.value, "0"))}</strong></span>
+          `).join("")}
+        </div>
+      </div>
+      ${model ? renderOrcMissingInputImpactRows(model) : ""}
+    </div>
+  `;
+}
+
+function renderOrcReferenceRoute(model) {
+  const completed = model.routeStats.completed || 0;
+  const total = model.routeStats.routeCount || 0;
+  const blocked = model.routeStats.blocked || 0;
+  const activeStage = model.state.stage || "idle";
+  const mapPayload = buildOrcRuntimeGraphPayload(model);
+  const graphId = mapPayload ? mapPayload.graphId : "atr_closed_loop";
+  const nodeCount = mapPayload ? mapPayload.nodes.length : 0;
+  const edgeCount = mapPayload ? mapPayload.links.length : 0;
+  return `
+    <div class="ar-orc-reference-route">
+      <div class="ar-orc-map-meta" aria-label="LangGraph map metadata">
+        <span><b>Graph</b><strong>${escapeHtml(compactText(graphId, 28))}</strong></span>
+        <span><b>Nodes</b><strong>${escapeHtml(renderRuntimeValue(nodeCount, "0"))}</strong></span>
+        <span><b>Edges</b><strong>${escapeHtml(renderRuntimeValue(edgeCount, "0"))}</strong></span>
+        <span><b>Active</b><strong>${escapeHtml(compactText(activeStage, 24))}</strong></span>
+      </div>
+      ${renderOrcRouteGraph(model)}
+      <div class="ar-orc-route-legend">
+        <span class="edge-logical"><i></i>route</span>
+        <span class="edge-control"><i></i>control</span>
+        <span class="edge-bridge"><i></i>bridge</span>
+        <span class="edge-evidence"><i></i>evidence</span>
+        <span class="edge-sidecar"><i></i>sidecar</span>
+      </div>
+      <div class="ar-orc-route-summary">
+        <span><b>Stage</b><strong>${escapeHtml(compactText(activeStage, 24))}</strong></span>
+        <span><b>Route</b><strong>${escapeHtml(`${completed}/${total}`)}</strong></span>
+        <span><b>Blocked</b><strong>${escapeHtml(renderRuntimeValue(blocked, "0"))}</strong></span>
+        <span><b>Next</b><strong>${escapeHtml(compactText(model.routeStats.nextStage || "-", 24))}</strong></span>
+      </div>
+    </div>
+  `;
+}
+
+function renderOrcReferenceControlAudit(model) {
+  return `
+    <div class="ar-orc-reference-control-audit">
+      <section>
+        <h5>Decision Audit</h5>
+        ${renderOrcDecisionAudit(model)}
+      </section>
+      <section>
+        <h5>Handoff QA Matrix</h5>
+        ${renderOrcHandoffQa(model)}
+      </section>
+      <section class="ar-orc-control-audit-loop">
+        <h5>Loop Timeline</h5>
+        ${renderOrcLoopTimeline(model)}
+      </section>
+    </div>
+  `;
+}
+
+function orchestratorOperatorFocusItems(model) {
+  const ctx = model.ctx || {};
+  const items = [];
+  (ctx.pendingApprovals || []).slice(0, 3).forEach((item) => {
+    items.push({
+      label: item.stage || item.source || "Approval",
+      value: orchestratorItemText(item, "Resolve approval gate"),
+      meta: item.approval_id || item.status || "operator required",
+      tone: "warning",
+    });
+  });
+  (ctx.missingRows || []).filter((item) => item.missing).slice(0, 3).forEach((item) => {
+    const impact = orcMissingInputImpact(item);
+    items.push({
+      label: "Missing Input",
+      value: `Provide ${item.label || "required input"}`,
+      meta: `${impact.blocks} / ${impact.fallback}`,
+      tone: "warning",
+    });
+  });
+  (model.riskChain || []).filter((item) => item.tone === "danger" || item.tone === "warning").slice(0, 2).forEach((item) => {
+    items.push({
+      label: item.label || "Review",
+      value: item.value || "Review runtime finding",
+      meta: item.meta || "runtime warning",
+      tone: item.tone || "warning",
+    });
+  });
+  if (!items.length) {
+    items.push({
+      label: "Operator",
+      value: "No immediate operator action.",
+      meta: "watch runtime",
+      tone: "success",
+    });
+  }
+  return uniqueOrchestratorItems(items, 5);
+}
+
+function orchestratorAutomationFocusItems(model) {
+  const ctx = model.ctx || {};
+  const active = ctx.activeRoute || {};
+  const latestHandoff = (model.handoffRows || [])[0];
+  const latestRuntime = (model.runtimeRows || [])[0];
+  const rows = [
+    {
+      label: "Active Agent",
+      value: liveAgentLabel(agentIdFromStage(active.stage || ctx.state.stage || "")),
+      meta: active.status || ctx.status || "runtime",
+      tone: orchestratorStatusTone(active.status || ctx.status || "running"),
+    },
+    {
+      label: "Next Stage",
+      value: model.routeStats.nextStage || model.verdict.nextAction || "Waiting",
+      meta: `${model.routeStats.completed}/${model.routeStats.routeCount || 0} route`,
+      tone: model.routeStats.nextStage ? "running" : "info",
+    },
+    {
+      label: "Handoff",
+      value: latestHandoff ? `${latestHandoff.from} -> ${latestHandoff.to}` : "No packet yet",
+      meta: latestHandoff ? latestHandoff.packet : "route registry",
+      tone: latestHandoff ? latestHandoff.tone : "idle",
+    },
+    {
+      label: "Backend Sync",
+      value: latestRuntime ? latestRuntime.value : (liveStreamState || "waiting"),
+      meta: liveLastSyncAt ? relativeTimeLabel(liveLastSyncAt) : "sync pending",
+      tone: latestRuntime ? latestRuntime.tone : orchestratorStatusTone(liveStreamState),
+    },
+  ];
+  return uniqueOrchestratorItems(rows, 4);
+}
+
+function renderOrcOperatorAutomationBoard(model) {
+  return `
+    <div class="ar-orc-operator-automation">
+      <section>
+        <h5>Needs Operator</h5>
+        ${renderOrchestratorMiniList(orchestratorOperatorFocusItems(model), "No immediate operator action.", 5, { showMeta: false, multiline: true })}
+      </section>
+    </div>
+  `;
+}
+
+function renderOrcReferenceAuditStrip(model) {
+  const runtimeRows = (model.runtimeRows || []).slice(0, 4);
+  const handoffRow = (model.handoffRows || [])[0];
+  const loopRow = (model.loopRows || []).slice(-1)[0];
+  return `
+    <section class="ar-orc-reference-audit">
+      <h5>Runtime / Handoff Audit</h5>
+      <div class="ar-orc-audit-readiness" aria-label="runtime readiness summary">
+        ${runtimeRows.map((row) => `
+          <span class="tone-${escapeHtml(row.tone || "info")}" title="${escapeHtml(`${row.label}: ${row.value}${row.meta ? ` / ${row.meta}` : ""}`)}">
+            <b>${escapeHtml(compactText(row.label, 12))}</b>
+            <strong>${escapeHtml(compactText(row.value, 22))}</strong>
+          </span>
+        `).join("") || `<p class="hint">Runtime readiness has not reported yet.</p>`}
+      </div>
+      <div class="ar-orc-audit-grid">
+        <article class="tone-${escapeHtml((handoffRow && handoffRow.tone) || "info")}">
+          <span>Handoff</span>
+          <strong>${escapeHtml(handoffRow ? `${compactText(handoffRow.from, 12)} -> ${compactText(handoffRow.to, 12)}` : "No packet")}</strong>
+          <small>${escapeHtml(handoffRow ? `${compactText(handoffRow.packet, 28)} / out ${handoffRow.outputCount}` : "No handoff QA row yet.")}</small>
+        </article>
+        <article class="tone-${escapeHtml((loopRow && loopRow.tone) || "info")}">
+          <span>Loop</span>
+          <strong>${escapeHtml(loopRow ? `L${loopRow.loop} / ${compactText(loopRow.decision, 14)}` : "No reflection")}</strong>
+          <small>${escapeHtml(loopRow ? compactText(loopRow.summary, 42) : "No loop timeline row yet.")}</small>
+        </article>
+      </div>
+    </section>
+  `;
+}
+
+function renderOrcReferenceActionEvidence(model) {
+  const currentStage = model.state.stage || "idle";
+  const nextStage = model.routeStats.nextStage || model.ctx.controlNextAction.next_stage || "-";
+  const criticalCount = model.riskChain.filter((item) => item.tone === "danger").length;
+  const warningCount = model.riskChain.filter((item) => item.tone === "warning").length + model.ctx.missingCount + model.ctx.pendingApprovals.length;
+  const infoCount = Math.max(0, model.ctx.decisions.length + model.ctx.handoffs.length + model.ctx.events.length - warningCount - criticalCount);
+  const warningRows = model.riskChain.length ? model.riskChain.slice(0, 3) : [
+    { label: "Route", value: model.verdict.driver, tone: model.verdict.tone },
+    { label: "Next", value: model.verdict.nextAction, tone: model.verdict.tone },
+  ];
+  return `
+    <div class="ar-orc-action-evidence">
+      <section>
+        <h5>Next Action</h5>
+        <p>${escapeHtml(compactText(model.verdict.nextAction, 150))}</p>
+        <dl>
+          <div><dt>Planned Route</dt><dd>${escapeHtml(compactText(`${currentStage} -> ${nextStage}`, 38))}</dd></div>
+          <div><dt>ETA</dt><dd>${model.ctx.missingCount ? "waiting input" : "~2 min"}</dd></div>
+        </dl>
+      </section>
+      <section>
+        <h5>Evidence</h5>
+        <div class="ar-orc-evidence-counts">
+          <span class="tone-danger"><b>${escapeHtml(renderRuntimeValue(criticalCount, "0"))}</b>Critical</span>
+          <span class="tone-warning"><b>${escapeHtml(renderRuntimeValue(warningCount, "0"))}</b>Warnings</span>
+          <span class="tone-success"><b>${escapeHtml(renderRuntimeValue(infoCount, "0"))}</b>Info</span>
+        </div>
+        <div class="ar-orc-warning-list">
+          ${warningRows.map((item) => `
+            <span class="tone-${escapeHtml(item.tone || "info")}"><b>${escapeHtml(compactText(item.label, 18))}</b>${escapeHtml(compactText(item.value, 74))}</span>
+          `).join("")}
+        </div>
+      </section>
+      ${renderOrcOperatorAutomationBoard(model)}
+      ${renderOrcEvidenceChips(model)}
+    </div>
+  `;
+}
+
+function renderOrchestratorDashboardCards(report, status, agentLabel, profile) {
+  const ctx = orchestratorContext(report, status);
+  const model = buildOrcBriefingModel(report, status, ctx);
+  return `
+    ${renderDashboardCard("Mission Contract", renderOrcReferenceMissionContract(model), { span: 4, tone: model.verdict.tone, eyebrow: "orchestrator contract", className: "ar-orc-reference-card ar-orc-mission-contract-card" })}
+    ${renderDashboardCard("Decision Register (Today)", renderOrcReferenceDecisionRegister(report, model), { span: 8, tone: ctx.missingCount ? "warning" : "orchestrator", eyebrow: "decisions + input impact", className: "ar-orc-reference-card ar-orc-decision-register-card" })}
+    ${renderDashboardCard("Orchestration Plan / Handoff Route", renderOrcReferenceRoute(model), { span: 7, tone: "route", eyebrow: "execution graph", className: "ar-orc-reference-card ar-orc-route-card" })}
+    ${renderDashboardCard("Next Action / Audit", renderOrcReferenceActionEvidence(model), { span: 5, tone: model.riskTone, eyebrow: "operator focus", className: "ar-orc-reference-card ar-orc-action-card" })}
+  `;
+}
+
+function mergeDesignCandidateRecord(base, extra) {
+  const merged = { ...(base || {}) };
+  Object.entries(extra || {}).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== "") merged[key] = value;
+  });
+  return merged;
+}
+
+function normalizeDesignCandidateRow(item, index = 0) {
+  if (!item || typeof item !== "object") return null;
+  const candidateId = String(item.candidate_id || item.id || item.specimen_id || `candidate-${index + 1}`).trim();
+  const valueScore = dashboardFiniteNumber(item.value);
+  const scatterScore = dashboardFiniteNumber(item.y_predicted_objective);
+  const score = dashboardFiniteNumber(item.score)
+    ?? dashboardFiniteNumber(item.expected_objective_proxy_score)
+    ?? dashboardFiniteNumber(item.predicted_objective)
+    ?? scatterScore
+    ?? valueScore;
+  return {
+    ...item,
+    candidate_id: candidateId,
+    rank: item.rank || index + 1,
+    status: item.status || item.candidate_status || "",
+    geometry_type: item.geometry_type || item.geometry || item.structure_type || "",
+    score,
+    expected_objective_proxy_score: item.expected_objective_proxy_score ?? item.score ?? item.y_predicted_objective ?? item.value,
+    predicted_objective: item.predicted_objective ?? item.y_predicted_objective ?? item.value,
+    uncertainty: item.uncertainty ?? item.radius_uncertainty,
+    relative_density: item.relative_density ?? item.x_relative_density,
+    wall_thickness_mm: item.wall_thickness_mm ?? item.y_wall_thickness_mm,
+  };
+}
+
+function designCandidateRows(screenReport, designReport, report) {
+  const board = screenReport && screenReport.candidate_board ? screenReport.candidate_board : {};
+  const ranking = screenReport && screenReport.candidate_ranking && Array.isArray(screenReport.candidate_ranking.rows)
+    ? screenReport.candidate_ranking.rows : [];
+  const generation = designReport && designReport.candidate_generation ? designReport.candidate_generation : {};
+  const sweep = screenReport && screenReport.parameter_sweep ? screenReport.parameter_sweep : {};
+  const performance = screenReport && screenReport.expected_performance ? screenReport.expected_performance : {};
+  const spec = report && report.spec ? report.spec : {};
+  const poolSummary = spec && spec.candidate_pool_summary ? spec.candidate_pool_summary : {};
+  const sources = [
+    board.candidate_ledger,
+    generation.candidate_ledger,
+    board.cad_candidate_cards,
+    ranking,
+    generation.top_candidates,
+    poolSummary.top_candidates,
+    performance.scatter_points,
+    sweep.heatmap_cells,
+  ];
+  const byId = new Map();
+  let order = 0;
+  sources.forEach((source) => {
+    if (!Array.isArray(source)) return;
+    source.forEach((raw, index) => {
+      const row = normalizeDesignCandidateRow(raw, index);
+      if (!row) return;
+      const key = row.candidate_id || `candidate-${order + 1}`;
+      const prior = byId.get(key);
+      const candidate = mergeDesignCandidateRecord(prior, row);
+      if (!prior) candidate.__candidate_order = order++;
+      byId.set(key, candidate);
+    });
+  });
+  return Array.from(byId.values()).sort((a, b) => (a.__candidate_order || 0) - (b.__candidate_order || 0));
+}
+
+function designCandidateScore(item) {
+  return dashboardFirstNumber(item, ["score", "selected_score", "expected_objective_proxy_score", "predicted_objective", "y_predicted_objective", "value", "manufacturability_score", "information_gain_score"]);
+}
+
+function designCandidateTone(item) {
+  const status = String((item && item.status) || (item && item.candidate_status) || "").toLowerCase();
+  if (/selected/.test(status)) return "success";
+  if (/reject|fail|block/.test(status)) return "warning";
+  return "info";
+}
+
+function designScoreText(value, digits = 2) {
+  const number = dashboardFiniteNumber(value);
+  return number === null ? "-" : numberText(number, digits);
+}
+
+function designCandidateMetricValue(item, keys) {
+  return dashboardFirstNumber(item, keys);
+}
+
+function designMetricPercent(value, options = {}) {
+  const number = dashboardFiniteNumber(value);
+  if (number === null) return 0;
+  const max = dashboardFiniteNumber(options.max);
+  const normalized = max && max > 0 ? number / max : number > 1 && number <= 100 ? number / 100 : number;
+  const bounded = Math.max(0, Math.min(1, normalized));
+  return Math.round(bounded * 100);
+}
+
+function designCandidateStatusText(item, isSelected = false) {
+  if (item && item.__actual_specimen) {
+    const status = String((item.status || item.candidate_status || "")).trim();
+    if (/ready|printed|finished|generated|valid|pass|ok/i.test(status)) return "built";
+    if (/warn|degraded|review/i.test(status)) return "review";
+    if (/reject|fail|block|invalid/i.test(status)) return "blocked";
+    return status || "specimen";
+  }
+  if (isSelected) return "selected";
+  const status = String((item && (item.status || item.candidate_status)) || "").trim();
+  if (/valid|ready|approved|pass/i.test(status)) return "buildable";
+  if (/reject|fail|block|invalid/i.test(status)) return "rejected";
+  return status || "generated";
+}
+
+function renderDesignSpecimenMetric(label, value, options = {}) {
+  const number = dashboardFiniteNumber(value);
+  const pct = designMetricPercent(number, options);
+  const display = options.display !== undefined ? options.display : number === null ? "-" : numberText(number, options.digits ?? 2);
+  return `
+    <span class="ar-design-specimen-metric tone-${escapeHtml(options.tone || "info")}">
+      <b>${escapeHtml(label)}</b>
+      <em>${escapeHtml(display)}</em>
+      <i style="width: ${pct}%"></i>
+    </span>
+  `;
+}
+
+function renderDesignSpecimenMetricStrip(item) {
+  if (item && item.__actual_specimen) {
+    const maxLoop = dashboardFiniteNumber(item.__max_loop) || Math.max(dashboardFiniteNumber(item.loop_index) || 1, 1);
+    const hasStl = Boolean(item.stl_url || item.stl_path);
+    const hasGcode = Boolean(item.gcode_url || item.gcode_path);
+    return `
+      <div class="ar-design-specimen-metrics" aria-label="actual specimen build metrics">
+        ${renderDesignSpecimenMetric("LOOP", item.loop_index, { tone: "info", max: maxLoop, display: `L${renderRuntimeValue(item.loop_index || "-")}` })}
+        ${renderDesignSpecimenMetric("OBJ", designCandidateMetricValue(item, ["expected_objective_proxy_score", "predicted_objective", "y_predicted_objective", "score", "value"]), { tone: "objective" })}
+        ${renderDesignSpecimenMetric("STL", hasStl ? 1 : 0, { tone: hasStl ? "print" : "risk", display: hasStl ? "OK" : "-" })}
+        ${renderDesignSpecimenMetric("GCODE", hasGcode ? 1 : 0, { tone: hasGcode ? "print" : "risk", display: hasGcode ? "OK" : "-" })}
+      </div>
+    `;
+  }
+  return `
+    <div class="ar-design-specimen-metrics" aria-label="specimen evaluation metrics">
+      ${renderDesignSpecimenMetric("OBJ", designCandidateMetricValue(item, ["expected_objective_proxy_score", "predicted_objective", "y_predicted_objective", "score", "value"]), { tone: "objective" })}
+      ${renderDesignSpecimenMetric("PRT", designCandidateMetricValue(item, ["manufacturability_score", "expected_manufacturability_score", "printability_score"]), { tone: "print" })}
+      ${renderDesignSpecimenMetric("RSK", designCandidateMetricValue(item, ["risk_score", "risk", "failure_probability"]), { tone: "risk" })}
+      ${renderDesignSpecimenMetric("INF", designCandidateMetricValue(item, ["information_gain_score", "info_gain", "novelty_score"]), { tone: "info" })}
+    </div>
+  `;
+}
+
+function renderDesignEmpty(message) {
+  return `<div class="ar-design-empty">${escapeHtml(message || "Waiting for backend data.")}</div>`;
+}
+
+function designSafeImageUrl(value, options = {}) {
+  const url = String(value || "").trim();
+  if (!url) return "";
+  const allowed = (
+    url.startsWith("/api/planning/artifacts/")
+    || url.startsWith("/api/runs/")
+    || url.startsWith("/api/artifacts/")
+    || url.startsWith("/static/")
+    || /^https?:\/\//i.test(url)
+  );
+  if (!allowed) return "";
+  if (!options.allowSvg && /\.svg(?:[?#]|$)/i.test(url)) return "";
+  const looksImage = /\.(png|jpe?g|webp|gif|svg)(?:[?#]|$)/i.test(url) || /capture|screenshot|snapshot|preview|image|artifact-file/i.test(url);
+  return looksImage ? url : "";
+}
+
+function designImageUrlFromSource(source) {
+  if (!source || typeof source !== "object") return "";
+  const fields = [
+    ["viewer_capture_url", false],
+    ["viewer_capture", false],
+    ["viewer_screenshot_url", false],
+    ["viewer_snapshot_url", false],
+    ["cad_capture_url", false],
+    ["capture_url", false],
+    ["capture_image_url", false],
+    ["screenshot_url", false],
+    ["screenshot", false],
+    ["render_capture_url", false],
+    ["rendered_capture_url", false],
+    ["thumbnail_url", false],
+    ["image_url", false],
+    ["preview_image_url", false],
+    ["preview_url", false],
+    ["artifacts.viewer_capture_url", false],
+    ["artifacts.viewer_screenshot_url", false],
+    ["artifacts.capture_image_url", false],
+    ["artifacts.preview_image_url", false],
+    ["artifacts.preview_url", false],
+    ["artifact.viewer_capture_url", false],
+    ["artifact.preview_url", false],
+  ];
+  for (const [field, allowSvg] of fields) {
+    const url = designSafeImageUrl(backendField(source, [field]), { allowSvg });
+    if (url) return url;
+  }
+  return "";
+}
+
+function designRunArtifactCaptureUrl(terms, options = {}) {
+  const searchTerms = (terms || [])
+    .map((item) => String(item || "").trim().toLowerCase())
+    .filter(Boolean);
+  if (!searchTerms.length || !Array.isArray(liveRunArtifacts)) return "";
+  const imageArtifacts = liveRunArtifacts.filter((artifact) => {
+    const hay = [artifact.name, artifact.path, artifact.url, artifact.artifact_id, artifact.preview_kind]
+      .map((item) => String(item || "").toLowerCase())
+      .join(" ");
+    return artifact.preview_kind === "image"
+      && /\.(png|jpe?g|webp|gif)(?:[?#]|$)/i.test(hay)
+      && /capture|screenshot|snapshot|viewer|render|preview|cad|specimen/i.test(hay);
+  });
+  const match = imageArtifacts.find((artifact) => {
+    const hay = [artifact.name, artifact.path, artifact.url, artifact.artifact_id]
+      .map((item) => String(item || "").toLowerCase())
+      .join(" ");
+    return searchTerms.some((term) => hay.includes(term));
+  }) || (options.allowFallback ? imageArtifacts[0] : null);
+  return match ? designSafeImageUrl(match.url || match.compat_url || match.download_url, { allowSvg: false }) : "";
+}
+
+function designCandidateDirectCaptureUrl(item, report) {
+  const state = (report && report.state) || (liveLastSession && liveLastSession.state) || (liveLastSnapshot && liveLastSnapshot.state) || {};
+  const runId = String((state && state.run_id) || (report && report.run_id) || "").trim();
+  const candidateId = String((item && (item.candidate_id || item.id)) || "").trim();
+  if (!runId || !candidateId) return "";
+  return `/api/runs/${encodeURIComponent(runId)}/artifact-file/design_candidates/${encodeURIComponent(candidateId)}/viewer_capture.png`;
+}
+
+function designReportRunId(report) {
+  const state = (report && report.state) || (liveLastSession && liveLastSession.state) || (liveLastSnapshot && liveLastSnapshot.state) || {};
+  return String((state && state.run_id) || (report && report.run_id) || "").trim();
+}
+
+function designRunArtifactUrlFromPath(value, report) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (raw.startsWith("/api/runs/") || raw.startsWith("/api/artifacts/") || /^https?:\/\//i.test(raw)) return raw;
+  const runId = designReportRunId(report);
+  if (!runId) return "";
+  const normalized = raw.replace(/\\/g, "/");
+  const marker = `/runs/${runId}/`;
+  let rel = "";
+  const markerIndex = normalized.indexOf(marker);
+  if (markerIndex >= 0) rel = normalized.slice(markerIndex + marker.length);
+  else if (normalized.startsWith(`runs/${runId}/`)) rel = normalized.slice(`runs/${runId}/`.length);
+  if (!rel || rel.includes("..")) return "";
+  return `/api/runs/${encodeURIComponent(runId)}/artifact-file/${rel.split("/").map((part) => encodeURIComponent(part)).join("/")}`;
+}
+
+function designSpecimenIdFromPath(value) {
+  const normalized = String(value || "").replace(/\\/g, "/");
+  const match = normalized.match(/(?:^|\/)specimens\/([^/]+)/i);
+  return match ? match[1] : "";
+}
+
+function designCandidateIdFromSpecimenId(value) {
+  const match = String(value || "").match(/(cand-\d+-\d+)/i);
+  return match ? match[1] : "";
+}
+
+function designLoopIndexFromIds(...values) {
+  for (const value of values) {
+    const match = String(value || "").match(/cand-(\d+)-\d+/i) || String(value || "").match(/loop[-_ ]?(\d+)/i);
+    if (match) {
+      const number = Number(match[1]);
+      if (Number.isFinite(number) && number > 0) return number;
+    }
+  }
+  return null;
+}
+
+function mergeDesignActualSpecimenRecord(base, extra = {}) {
+  const merged = { ...(base || {}) };
+  Object.entries(extra || {}).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== "") merged[key] = value;
+  });
+  return merged;
+}
+
+function designActualSpecimenRows(screenReport, designReport, report) {
+  const candidateRows = designCandidateRows(screenReport, designReport, report);
+  const candidateById = new Map(candidateRows.map((item) => [String(item.candidate_id || item.id || ""), item]));
+  const rows = new Map();
+  const ensureRow = (specimenId, seed = {}) => {
+    const id = String(specimenId || seed.specimen_id || "").trim();
+    if (!id) return null;
+    const candidateId = seed.candidate_id || designCandidateIdFromSpecimenId(id);
+    const candidate = candidateById.get(String(candidateId || "")) || {};
+    const prior = rows.get(id);
+    const loopIndex = dashboardFiniteNumber(seed.loop_index) || designLoopIndexFromIds(seed.candidate_id, id, seed.loop_id);
+    const row = mergeDesignActualSpecimenRecord(prior, {
+      ...candidate,
+      ...seed,
+      __actual_specimen: true,
+      specimen_id: id,
+      candidate_id: candidateId || candidate.candidate_id || "",
+      geometry_type: seed.geometry_type || candidate.geometry_type || candidate.geometry || "specimen",
+      loop_index: loopIndex || (prior && prior.loop_index) || null,
+      status: seed.status || seed.outcome_status || seed.queue_status || (prior && prior.status) || "generated",
+    });
+    rows.set(id, row);
+    return row;
+  };
+
+  (Array.isArray(liveRunArtifacts) ? liveRunArtifacts : []).forEach((artifact) => {
+    const path = String((artifact && artifact.path) || "").replace(/\\/g, "/");
+    const specimenId = designSpecimenIdFromPath(path);
+    if (!specimenId) return;
+    const row = ensureRow(specimenId, {
+      specimen_id: specimenId,
+      candidate_id: designCandidateIdFromSpecimenId(specimenId),
+      loop_index: designLoopIndexFromIds(specimenId),
+    });
+    if (!row) return;
+    const name = String((artifact && artifact.name) || path.split("/").pop() || "").toLowerCase();
+    const url = artifact.url || artifact.compat_url || artifact.download_url || "";
+    if (name === "viewer_capture.png") row.viewer_capture_url = url;
+    else if (name === "specimen.stl" || /\.stl$/i.test(name)) row.stl_url = url;
+    else if (/\.(?:gcode|bgcode)$/i.test(name)) row.gcode_url = url;
+    else if (name === "handoff_package.json") row.handoff_package_url = url;
+  });
+
+  const specimenReport = latestSpecimenAgentReport(report) || {};
+  const fabricationReport = latestSpecimenFabricationReport(report) || {};
+  const packet = latestSpecimenFabricatedPacket(report) || {};
+  const thread = fabricationReport && typeof fabricationReport.digital_thread === "object" ? fabricationReport.digital_thread : {};
+  const layer = specimenReport && typeof specimenReport.layer_preview === "object" ? specimenReport.layer_preview : {};
+  const buildQueue = specimenReport && typeof specimenReport.build_queue === "object" ? specimenReport.build_queue : {};
+  const readiness = specimenReport && typeof specimenReport.print_readiness === "object" ? specimenReport.print_readiness : {};
+  const latestSpecimenId = specimenReport.specimen_id || packet.specimen_id || thread.specimen_id || designSpecimenIdFromPath(thread.stl_path || layer.stl_path || "");
+  if (latestSpecimenId) {
+    const row = ensureRow(latestSpecimenId, {
+      specimen_id: latestSpecimenId,
+      candidate_id: packet.candidate_id || thread.candidate_id || designCandidateIdFromSpecimenId(latestSpecimenId),
+      loop_index: specimenReport.loop_index || designLoopIndexFromIds(packet.loop_id, latestSpecimenId),
+      status: packet.status || buildQueue.queue_status || specimenReport.handoff_status?.status || "generated",
+      readiness_score: readiness.readiness_score,
+      viewer_capture_url: designRunArtifactUrlFromPath(layer.viewer_capture_path || thread.viewer_capture_path, report),
+      stl_url: designRunArtifactUrlFromPath(layer.stl_path || thread.stl_path, report),
+      gcode_url: designRunArtifactUrlFromPath(layer.gcode_path || thread.gcode_path, report),
+      stl_path: layer.stl_path || thread.stl_path,
+      gcode_path: layer.gcode_path || thread.gcode_path,
+    });
+    if (row && packet.physical_location) row.physical_location = packet.physical_location;
+  }
+
+  const sorted = Array.from(rows.values()).sort((a, b) => {
+    const aLoop = dashboardFiniteNumber(a.loop_index) || 9999;
+    const bLoop = dashboardFiniteNumber(b.loop_index) || 9999;
+    if (aLoop !== bLoop) return aLoop - bLoop;
+    return String(a.specimen_id || "").localeCompare(String(b.specimen_id || ""));
+  });
+  const maxLoop = sorted.reduce((max, item) => Math.max(max, dashboardFiniteNumber(item.loop_index) || 0), 0) || sorted.length || 1;
+  return sorted.map((item, index) => ({ ...item, rank: item.loop_index || index + 1, __max_loop: maxLoop }));
+}
+
+function designSelectedCandidate(screenReport, designReport, spec) {
+  const board = screenReport && screenReport.candidate_board ? screenReport.candidate_board : {};
+  const evaluation = designReport && designReport.candidate_evaluation ? designReport.candidate_evaluation : {};
+  const selected = evaluation.selected_candidate || evaluation.selected || spec.selected_candidate || {};
+  const selectedId = board.selected_candidate_id || evaluation.selected_candidate_id || selected.candidate_id || spec.candidate_id || "";
+  const row = designCandidateRows(screenReport, designReport, { spec }).find((item) => String(item.candidate_id || item.id || "") === String(selectedId));
+  return row || selected || {};
+}
+
+function designCandidateCaptureUrl(item, screenReport, designReport, report) {
+  const spec = report && report.spec ? report.spec : {};
+  const selected = designSelectedCandidate(screenReport, designReport, spec);
+  const handoff = (screenReport && screenReport.handoff_to_specimen) || (designReport && designReport.handoff_to_specimen) || {};
+  const candidateId = String((item && (item.candidate_id || item.id)) || "").trim();
+  const selectedId = String((handoff && handoff.authoritative_candidate_id) || (selected && selected.candidate_id) || spec.candidate_id || "").trim();
+  const ownUrl = designImageUrlFromSource(item);
+  if (ownUrl) return ownUrl;
+  if (selectedId && candidateId === selectedId) {
+    for (const source of [selected, handoff, spec, spec.artifacts].filter(Boolean)) {
+      const url = designImageUrlFromSource(source);
+      if (url) return url;
+    }
+    const candidateArtifact = designRunArtifactCaptureUrl([candidateId, item && item.specimen_id], { allowFallback: false });
+    if (candidateArtifact) return candidateArtifact;
+    const directCandidateUrl = designCandidateDirectCaptureUrl(item, report);
+    if (directCandidateUrl) return directCandidateUrl;
+    return designRunArtifactCaptureUrl([
+      candidateId,
+      item && item.specimen_id,
+      selected && selected.specimen_id,
+      handoff.authoritative_specimen_id,
+      spec.specimen_id,
+    ], { allowFallback: true });
+  }
+  return designRunArtifactCaptureUrl([candidateId, item && item.specimen_id], { allowFallback: false })
+    || designCandidateDirectCaptureUrl(item, report);
+}
+
+function designCandidateCapturePayload(item, screenReport, designReport, report, rank) {
+  const spec = report && report.spec ? report.spec : {};
+  const selected = designSelectedCandidate(screenReport, designReport, spec);
+  const handoff = (screenReport && screenReport.handoff_to_specimen) || (designReport && designReport.handoff_to_specimen) || {};
+  const candidateId = String((item && (item.candidate_id || item.id)) || (selected && selected.candidate_id) || spec.candidate_id || `candidate ${rank || ""}`).trim();
+  const selectedId = String((handoff && handoff.authoritative_candidate_id) || (selected && selected.candidate_id) || spec.candidate_id || "").trim();
+  const source = selectedId && candidateId === selectedId ? { ...spec, ...selected, ...item } : { ...spec, ...item };
+  const size = Array.isArray(source.specimen_size_mm) ? source.specimen_size_mm : [30, 30, 30];
+  return {
+    candidateId,
+    specimenId: source.specimen_id || handoff.authoritative_specimen_id || "",
+    geometry: source.geometry_type || source.geometry || source.structure_type || "gyroid",
+    rank: rank || source.rank || 1,
+    score: designCandidateScore(item),
+    selected: selectedId ? candidateId === selectedId : designCandidateTone(item) === "success",
+    size: size.slice(0, 3).map((value) => dashboardFiniteNumber(value) ?? 30),
+    cell: dashboardFiniteNumber(source.cell_size_mm) ?? 10,
+    wall: dashboardFiniteNumber(source.wall_thickness_mm) ?? 1.6,
+    density: dashboardFiniteNumber(source.relative_density) ?? 0.28,
+    orientation: dashboardFiniteNumber(source.orientation_deg) ?? ((rank || 1) * 15),
+    defect: dashboardFiniteNumber(source.defect_ratio) ?? 0,
+  };
+}
+
+function renderDesignCaptureSnapshot(payload, candidateId, rank) {
+  return `
+    <canvas class="ar-design-capture-canvas" width="360" height="220" data-design-capture="${orcChartPayloadAttr(payload)}" aria-label="${escapeHtml(`3D viewer capture for ${candidateId}`)}"></canvas>
+    <span class="ar-design-capture-mode">VIEWER SNAPSHOT</span>
+    <b>${escapeHtml(String(rank).padStart(2, "0"))}</b>
+  `;
+}
+
+function renderDesignCaptureImage(imageUrl, payload, candidateId, rank, options = {}) {
+  const mode = options.mode || "ISO STL";
+  const alt = options.alt || `Preview for ${candidateId}`;
+  return `
+    <img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(alt)}" loading="eager" decoding="async" onload="this.parentElement.classList.add('capture-loaded')" onerror="this.parentElement.classList.add('capture-error')" />
+    <span class="ar-design-capture-mode">${escapeHtml(mode)}</span>
+    <b>${escapeHtml(String(rank).padStart(2, "0"))}</b>
+    <div class="ar-design-capture-fallback" aria-hidden="true">
+      ${renderDesignCaptureSnapshot(payload, candidateId, rank)}
+    </div>
+  `;
+}
+
+function drawDesignCaptureCanvas(canvas, payload = {}) {
+  const ctx = canvas && canvas.getContext ? canvas.getContext("2d") : null;
+  if (!ctx) return;
+  const width = canvas.width || 360;
+  const height = canvas.height || 220;
+  const rank = Math.max(1, Number(payload.rank) || 1);
+  const density = Math.max(0.08, Math.min(0.85, Number(payload.density) || 0.28));
+  const wall = Math.max(0.6, Math.min(4.0, Number(payload.wall) || 1.6));
+  const cell = Math.max(3, Math.min(18, Number(payload.cell) || 10));
+  const orientation = (Number(payload.orientation) || 0) * Math.PI / 180;
+  const selected = Boolean(payload.selected);
+  const accent = selected ? "#45e3a2" : "#38bdf8";
+  const accent2 = selected ? "#22c55e" : "#a78bfa";
+
+  ctx.clearRect(0, 0, width, height);
+  const bg = ctx.createLinearGradient(0, 0, width, height);
+  bg.addColorStop(0, "#0f1b2d");
+  bg.addColorStop(0.55, "#07111f");
+  bg.addColorStop(1, "#040814");
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, width, height);
+
+  ctx.save();
+  ctx.globalAlpha = 0.30;
+  ctx.strokeStyle = "#31506b";
+  ctx.lineWidth = 1;
+  for (let x = -width; x < width * 1.5; x += 24) {
+    ctx.beginPath();
+    ctx.moveTo(x, height - 26);
+    ctx.lineTo(x + width * 0.74, height * 0.32);
+    ctx.stroke();
+  }
+  for (let y = height * 0.32; y < height; y += 22) {
+    ctx.beginPath();
+    ctx.moveTo(20, y);
+    ctx.lineTo(width - 20, y + 16);
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  const cx = width * 0.53;
+  const cy = height * 0.66;
+  const unit = Math.min(width * 0.23, height * 0.40);
+  const sx = unit;
+  const sy = unit * 0.54;
+  const sz = unit * 1.05;
+  const yaw = orientation * 0.42 + (rank % 4 - 1.5) * 0.05;
+  const cos = Math.cos(yaw);
+  const sin = Math.sin(yaw);
+  const project = (x, y, z) => {
+    const xr = x * cos - y * sin;
+    const yr = x * sin + y * cos;
+    return {
+      x: cx + (xr - yr) * sx,
+      y: cy + (xr + yr) * sy - z * sz,
+    };
+  };
+  const corners = {
+    a: project(-0.5, -0.5, 0),
+    b: project(0.5, -0.5, 0),
+    c: project(0.5, 0.5, 0),
+    d: project(-0.5, 0.5, 0),
+    e: project(-0.5, -0.5, 1),
+    f: project(0.5, -0.5, 1),
+    g: project(0.5, 0.5, 1),
+    h: project(-0.5, 0.5, 1),
+  };
+  const drawPath = (points) => {
+    ctx.beginPath();
+    points.forEach((point, index) => {
+      if (index === 0) ctx.moveTo(point.x, point.y);
+      else ctx.lineTo(point.x, point.y);
+    });
+    ctx.closePath();
+  };
+  const strokeLine = (from, to, color, lineWidth = 1, alpha = 1) => {
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = lineWidth;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(from.x, from.y);
+    ctx.lineTo(to.x, to.y);
+    ctx.stroke();
+    ctx.restore();
+  };
+  const lerp = (a, b, t) => a + (b - a) * t;
+
+  ctx.save();
+  ctx.fillStyle = "rgba(0, 0, 0, 0.24)";
+  ctx.beginPath();
+  ctx.ellipse(cx, cy + unit * 0.54, unit * 1.25, unit * 0.28, -0.08, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+
+  [
+    { pts: [corners.d, corners.c, corners.g, corners.h], fill: "rgba(15, 23, 42, 0.58)" },
+    { pts: [corners.b, corners.c, corners.g, corners.f], fill: "rgba(8, 15, 27, 0.68)" },
+    { pts: [corners.e, corners.f, corners.g, corners.h], fill: "rgba(28, 44, 68, 0.52)" },
+  ].forEach((face) => {
+    drawPath(face.pts);
+    ctx.fillStyle = face.fill;
+    ctx.fill();
+  });
+
+  const grid = Math.max(3, Math.min(7, Math.round(9 - cell / 2 + density * 3)));
+  const lineWidth = Math.max(0.9, Math.min(2.4, wall * 0.72));
+  const gridColor = selected ? "rgba(69, 227, 162, 0.72)" : "rgba(125, 211, 252, 0.66)";
+  const braceColor = selected ? "rgba(34, 197, 94, 0.66)" : "rgba(167, 139, 250, 0.56)";
+
+  for (let i = 0; i <= grid; i += 1) {
+    const t = i / grid;
+    strokeLine(project(lerp(-0.5, 0.5, t), 0.5, 0), project(lerp(-0.5, 0.5, t), 0.5, 1), gridColor, lineWidth, 0.72);
+    strokeLine(project(-0.5, 0.5, t), project(0.5, 0.5, t), gridColor, lineWidth, 0.55);
+    strokeLine(project(0.5, lerp(-0.5, 0.5, t), 0), project(0.5, lerp(-0.5, 0.5, t), 1), gridColor, lineWidth, 0.50);
+    strokeLine(project(0.5, -0.5, t), project(0.5, 0.5, t), gridColor, lineWidth, 0.42);
+    strokeLine(project(lerp(-0.5, 0.5, t), -0.5, 1), project(lerp(-0.5, 0.5, t), 0.5, 1), gridColor, lineWidth, 0.46);
+    strokeLine(project(-0.5, lerp(-0.5, 0.5, t), 1), project(0.5, lerp(-0.5, 0.5, t), 1), gridColor, lineWidth, 0.46);
+  }
+  for (let i = 0; i < grid; i += 1) {
+    const t0 = i / grid;
+    const t1 = (i + 1) / grid;
+    const z0 = (i % 2 === 0) ? 0.08 : 0.92;
+    const z1 = (i % 2 === 0) ? 0.92 : 0.08;
+    strokeLine(project(lerp(-0.5, 0.5, t0), 0.5, z0), project(lerp(-0.5, 0.5, t1), 0.5, z1), braceColor, lineWidth + 0.35, 0.70);
+    strokeLine(project(0.5, lerp(-0.5, 0.5, t0), z1), project(0.5, lerp(-0.5, 0.5, t1), z0), braceColor, lineWidth + 0.15, 0.48);
+  }
+  if (/gyroid|tpms|voronoi/i.test(String(payload.geometry || ""))) {
+    ctx.save();
+    ctx.strokeStyle = accent2;
+    ctx.lineWidth = lineWidth + 0.2;
+    ctx.globalAlpha = 0.56;
+    for (let band = 0; band < 3; band += 1) {
+      ctx.beginPath();
+      for (let step = 0; step <= 44; step += 1) {
+        const t = step / 44;
+        const x = lerp(-0.44, 0.44, t);
+        const z = 0.18 + band * 0.24 + Math.sin(t * Math.PI * 2 + band + rank * 0.2) * 0.045;
+        const point = project(x, 0.505, z);
+        if (step === 0) ctx.moveTo(point.x, point.y);
+        else ctx.lineTo(point.x, point.y);
+      }
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  ctx.save();
+  ctx.strokeStyle = selected ? "rgba(69, 227, 162, 0.94)" : "rgba(125, 211, 252, 0.82)";
+  ctx.lineWidth = 1.4;
+  [[corners.a, corners.b], [corners.b, corners.c], [corners.c, corners.d], [corners.d, corners.a], [corners.e, corners.f], [corners.f, corners.g], [corners.g, corners.h], [corners.h, corners.e], [corners.a, corners.e], [corners.b, corners.f], [corners.c, corners.g], [corners.d, corners.h]].forEach(([from, to]) => strokeLine(from, to, ctx.strokeStyle, 1.35, 0.92));
+  if (selected) {
+    ctx.shadowColor = "rgba(69, 227, 162, 0.45)";
+    ctx.shadowBlur = 16;
+    drawPath([corners.e, corners.f, corners.g, corners.h]);
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  const shine = ctx.createRadialGradient(width * 0.30, height * 0.18, 8, width * 0.30, height * 0.18, width * 0.52);
+  shine.addColorStop(0, selected ? "rgba(69, 227, 162, 0.20)" : "rgba(56, 189, 248, 0.20)");
+  shine.addColorStop(1, "rgba(56, 189, 248, 0)");
+  ctx.fillStyle = shine;
+  ctx.fillRect(0, 0, width, height);
+
+  ctx.fillStyle = "rgba(5, 9, 20, 0.66)";
+  ctx.fillRect(12, height - 34, width - 24, 22);
+  ctx.fillStyle = "#dbeafe";
+  ctx.font = "600 12px IBM Plex Mono, Consolas, monospace";
+  ctx.fillText(String(payload.geometry || "specimen").toUpperCase(), 20, height - 19);
+  ctx.fillStyle = "#9fb0c9";
+  ctx.font = "10px IBM Plex Mono, Consolas, monospace";
+  ctx.fillText(`${cell.toFixed(1)} / ${wall.toFixed(1)} / ${density.toFixed(2)}`, width - 112, height - 19);
+}
+
+function hydrateDesignCaptureCanvases(root = liveReportPanel) {
+  if (!root) return;
+  root.querySelectorAll("canvas[data-design-capture]").forEach((canvas) => {
+    if (canvas.dataset.captureHydrated === "1") return;
+    let payload = {};
+    try {
+      payload = JSON.parse(canvas.dataset.designCapture || "{}");
+    } catch (_err) {
+      payload = {};
+    }
+    drawDesignCaptureCanvas(canvas, payload);
+    canvas.dataset.captureHydrated = "1";
+  });
+}
+
+function renderDesignCandidateCards(screenReport, designReport, report) {
+  const rows = designActualSpecimenRows(screenReport, designReport, report);
+  if (!rows.length) return renderDesignEmpty("No generated specimens yet.");
+  const spec = report && report.spec ? report.spec : {};
+  const selected = designSelectedCandidate(screenReport, designReport, spec);
+  const handoff = (screenReport && screenReport.handoff_to_specimen) || (designReport && designReport.handoff_to_specimen) || {};
+  const selectedId = String((handoff && handoff.authoritative_candidate_id) || (selected && selected.candidate_id) || spec.candidate_id || "").trim();
+  const currentSpecimenId = String((report && report.state && report.state.current_experiment_spec && report.state.current_experiment_spec.specimen_id) || spec.specimen_id || "").trim();
+  return `
+    <div class="ar-design-candidate-grid" role="list" aria-label="actual generated specimen cards">
+      ${rows.map((item, index) => {
+        const rank = item.rank || index + 1;
+        const imageUrl = designCandidateCaptureUrl(item, screenReport, designReport, report);
+        const candidateId = item.__actual_specimen ? (item.specimen_id || item.candidate_id || `specimen ${rank}`) : (item.candidate_id || item.id || `candidate ${rank}`);
+        const geometry = item.geometry_type || item.geometry || item.structure_type || "candidate";
+        const isSelected = item.__actual_specimen
+          ? Boolean(currentSpecimenId && String(item.specimen_id || "") === currentSpecimenId)
+          : selectedId ? String(candidateId) === selectedId : designCandidateTone(item) === "success";
+        const tone = isSelected ? "success" : designCandidateTone(item);
+        const capturePayload = designCandidateCapturePayload(item, screenReport, designReport, report, rank);
+        return `
+          <article class="ar-design-candidate-card tone-${escapeHtml(tone)}${isSelected ? " selected" : ""}${imageUrl ? " has-capture" : ""}" role="listitem" aria-label="${escapeHtml(candidateId)}">
+            <div class="ar-design-cad-capture">
+              ${imageUrl
+                ? renderDesignCaptureImage(imageUrl, capturePayload, candidateId, rank, item.__actual_specimen ? { mode: "SPECIMEN", alt: `Generated specimen ${candidateId}` } : {})
+                : renderDesignCaptureSnapshot(capturePayload, candidateId, rank)}
+            </div>
+            <div class="ar-design-candidate-meta">
+              <strong>${escapeHtml(compactText(candidateId, 28))}</strong>
+              <span>${escapeHtml(compactText(geometry, 18))}</span>
+            </div>
+            <div class="ar-design-specimen-status-row">
+              <span class="ar-design-specimen-status tone-${escapeHtml(tone)}">${escapeHtml(designCandidateStatusText(item, isSelected))}</span>
+              <small>#${escapeHtml(String(rank).padStart(2, "0"))}</small>
+            </div>
+            ${renderDesignSpecimenMetricStrip(item)}
+          </article>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function renderDesignRankingChart(screenReport, designReport) {
+  const rows = designCandidateRows(screenReport, designReport).slice(0, 8).map((item, index) => {
+    const value = designCandidateScore(item);
+    if (value === null) return null;
+    return {
+      label: item.candidate_id || item.id || `candidate ${index + 1}`,
+      value,
+      max: value <= 1 ? 1 : null,
+      meta: numberText(value, 4),
+      tone: designCandidateTone(item),
+      status: item.status || item.candidate_status || "",
+      rank: item.rank || index + 1,
+    };
+  }).filter(Boolean);
+  if (!rows.length) return renderDesignEmpty("Waiting for ranking.");
+  return `<div class="ar-design-echart ar-design-ranking-chart" data-orc-echart="dsn-ranking" data-orc-payload="${orcChartPayloadAttr({ rows })}" aria-label="Design candidate ranking chart"></div>`;
+}
+
+function renderDesignParameterSweep(screenReport) {
+  const sweep = screenReport && screenReport.parameter_sweep ? screenReport.parameter_sweep : {};
+  const cells = Array.isArray(sweep.heatmap_cells) ? sweep.heatmap_cells : [];
+  const clean = cells.map((cell) => ({
+    ...cell,
+    value: dashboardFiniteNumber(cell && cell.value),
+    x: dashboardFiniteNumber(cell && cell.x_relative_density),
+    y: dashboardFiniteNumber(cell && cell.y_wall_thickness_mm),
+  })).filter((cell) => cell.value !== null).slice(0, 24);
+  const params = Array.isArray(sweep.parameters) ? sweep.parameters : [];
+  const values = clean.map((cell) => cell.value);
+  const min = values.length ? Math.min(...values) : 0;
+  const max = values.length ? Math.max(...values) : 1;
+  const spread = Math.max(1e-6, max - min);
+  const paramRows = params.slice(0, 5).map((item) => ({
+    label: item.parameter || "parameter",
+    value: item.selected ?? item.value ?? "-",
+    range: [item.min, item.max].filter((value) => value !== undefined && value !== null && value !== "").join(" - "),
+  }));
+  const paramStrip = paramRows.length ? `
+    <div class="ar-design-param-strip">
+      ${paramRows.map((item) => `
+        <span><b>${escapeHtml(compactText(item.label, 18))}</b>${escapeHtml(compactText(renderRuntimeValue(item.value, "-"), 18))}</span>
+      `).join("")}
+    </div>
+  ` : "";
+  if (!clean.length) return `${paramStrip}${renderDesignEmpty("Waiting for sweep.")}`;
+  const chartCells = clean.map((cell) => ({
+    candidate_id: cell.candidate_id || "candidate",
+    x: cell.x,
+    y: cell.y,
+    value: cell.value,
+    status: cell.status || "",
+  }));
+  return `
+    <div class="ar-design-echart ar-design-heatmap-chart" data-orc-echart="dsn-heatmap" data-orc-payload="${orcChartPayloadAttr({ cells: chartCells, min, max, spread })}" aria-label="Design parameter sweep heatmap"></div>
+    ${paramStrip}
+  `;
+}
+
+function designScatterRows(points) {
+  const clean = (points || []).map((point) => ({
+    ...point,
+    x: dashboardFiniteNumber(point && point.x_mass_g),
+    y: dashboardFiniteNumber(point && point.y_predicted_objective),
+    r: dashboardFiniteNumber(point && point.radius_uncertainty),
+  })).filter((point) => point.x !== null && point.y !== null).slice(0, 24);
+  return clean.map((point) => ({
+    candidate_id: point.candidate_id || "candidate",
+    geometry_type: point.geometry_type || "",
+    x: point.x,
+    y: point.y,
+    r: point.r || 0,
+    score: dashboardFiniteNumber(point.score),
+    status: point.status || "",
+  }));
+}
+
+function designRadarRows(source, fallbackMetrics = {}) {
+  const explicit = Array.isArray(source) ? source.map((item) => ({
+    label: item.axis || item.label || "metric",
+    value: dashboardFiniteNumber(item.value),
+    max: dashboardFiniteNumber(item.max) || 1,
+  })).filter((item) => item.value !== null) : [];
+  if (explicit.length) return explicit.slice(0, 6);
+  return [
+    ["objective", fallbackMetrics.selected_score],
+    ["manufacturing", fallbackMetrics.manufacturability_score],
+    ["info_gain", fallbackMetrics.information_gain_score],
+    ["margin", fallbackMetrics.constraint_margin_score],
+    ["risk_inv", (() => {
+      const risk = dashboardFiniteNumber(fallbackMetrics.risk_score);
+      return risk === null ? null : Math.max(0, 1 - risk);
+    })()],
+  ].map(([label, value]) => ({ label, value: dashboardFiniteNumber(value), max: 1 }))
+    .filter((item) => item.value !== null);
+}
+
+function renderDesignExpectedPerformance(screenReport, designReport, selected = {}) {
+  const expected = screenReport && screenReport.expected_performance ? screenReport.expected_performance : {};
+  const evaluation = designReport && designReport.candidate_evaluation ? designReport.candidate_evaluation : {};
+  const scatterRows = designScatterRows(Array.isArray(expected.scatter_points) ? expected.scatter_points : []);
+  const metricRows = [
+    ["OBJ", evaluation.selected_score ?? selected.expected_objective_proxy_score ?? selected.predicted_objective ?? selected.score],
+    ["PRINT", selected.manufacturability_score ?? selected.expected_manufacturability_score],
+    ["INFO", selected.information_gain_score],
+    ["RISK", evaluation.risk_score ?? selected.risk_score],
+  ].map(([label, value]) => ({ label, value: designScoreText(value, 2) }));
+  return `
+    <div class="ar-design-performance-map">
+      ${scatterRows.length
+        ? `<div class="ar-design-echart ar-design-scatter-chart" data-orc-echart="dsn-scatter" data-orc-payload="${orcChartPayloadAttr({ rows: scatterRows })}" aria-label="Candidate mass versus predicted objective"></div>`
+        : renderDesignEmpty("Waiting for scatter.")}
+      <div class="ar-design-metric-strip">
+        ${metricRows.map((item) => `<span><b>${escapeHtml(item.label)}</b>${escapeHtml(item.value)}</span>`).join("")}
+      </div>
+    </div>
+  `;
+}
+
+function renderDesignArtifactLedger(items) {
+  const rows = (Array.isArray(items) ? items : []).map((item) => {
+    const status = item.status || "recorded";
+    return `${item.artifact_type || "artifact"} / ${item.artifact_id || "-"} / ${status}`;
+  });
+  return dashboardList(rows, "No design artifact ledger recorded.", 8);
+}
+
+function renderDesignBriefCard(brief, objective, hypothesis, spec, prior, material = {}, manufacturability = {}, selected = {}) {
+  const constraints = Array.isArray(brief.success_criteria) ? brief.success_criteria.slice(0, 3) : [];
+  const goal = brief.hypothesis || hypothesis.statement || objective.statement || spec.objective || "Objective pending.";
+  return `
+    <div class="ar-design-brief-layout">
+      ${renderDashboardRows([
+        ["Metric", brief.primary_metric || objective.primary_metric || spec.objective_type || "-"],
+        ["Test", spec.specimen_type || spec.specimen_kind || "compression"],
+        ["Standard", spec.standard || spec.test_standard || "-"],
+        ["Material", material.material || brief.material || spec.material || spec.material_family || "-"],
+        ["Printer", manufacturability.printer_model || spec.printer_model || "-"],
+        ["Selected", selected.candidate_id || spec.candidate_id || "-"],
+        ["Priors", prior.prior_count || 0],
+      ])}
+      ${constraints.length ? `<ul class="ar-design-check-list">${constraints.map((item) => `<li>${escapeHtml(compactText(item, 72))}</li>`).join("")}</ul>` : ""}
+      <p>${escapeHtml(compactText(goal, 120))}</p>
+    </div>
+  `;
+}
+
+function renderDesignManufacturabilityCard(screenReport, designReport, selected, spec, material = {}, candidateRows = []) {
+  const expected = screenReport && screenReport.expected_performance ? screenReport.expected_performance : {};
+  const evaluation = designReport && designReport.candidate_evaluation ? designReport.candidate_evaluation : {};
+  const manufacturability = (screenReport && screenReport.manufacturability) || (designReport && designReport.manufacturability) || {};
+  const radarRows = designRadarRows(Array.isArray(expected.radar) ? expected.radar : [], {
+    ...evaluation,
+    manufacturability_score: manufacturability.manufacturability_score || selected.manufacturability_score || selected.expected_manufacturability_score,
+  });
+  const warnings = Array.isArray(manufacturability.warnings) ? manufacturability.warnings : [];
+  const previewCount = candidateRows.filter((item) => designImageUrlFromSource(item) || designCandidateDirectCaptureUrl(item)).length;
+  return `
+    <div class="ar-design-manufacturing-layout">
+      ${radarRows.length
+        ? `<div class="ar-design-echart ar-design-radar-chart" data-orc-echart="dsn-radar" data-orc-payload="${orcChartPayloadAttr({ rows: radarRows })}" aria-label="Manufacturability radar chart"></div>`
+        : renderDesignEmpty("Waiting for gate.")}
+      <div class="ar-design-metric-strip">
+        <span><b>Printer</b>${escapeHtml(compactText(manufacturability.printer_model || spec.printer_model || "-", 18))}</span>
+        <span><b>Material</b>${escapeHtml(compactText(material.material || spec.material || "-", 18))}</span>
+        <span><b>Mass</b>${escapeHtml(`${renderRuntimeValue(manufacturability.expected_mass_g || spec.expected_mass_g || "-")} g`)}</span>
+        <span><b>Time</b>${escapeHtml(`${renderRuntimeValue(manufacturability.expected_print_time_min || spec.expected_print_time_min || "-")} min`)}</span>
+        <span><b>Nozzle</b>${escapeHtml(renderRuntimeValue(material.nozzle_diameter_mm || spec.nozzle_diameter_mm || "-"))}</span>
+        <span><b>Captures</b>${escapeHtml(`${previewCount || 0}/${candidateRows.length || 0}`)}</span>
+      </div>
+      ${warnings.length ? `<div class="ar-design-note-list">${warnings.slice(0, 2).map((item) => `<span>${escapeHtml(compactText(item, 72))}</span>`).join("")}</div>` : ""}
+    </div>
+  `;
+}
+
+function renderDesignMaterialCard(material, spec) {
+  const notes = Array.isArray(material.notes) ? material.notes.slice(0, 3) : [];
+  return `
+    <div class="ar-design-material-layout">
+      <div class="ar-design-metric-strip">
+        <span><b>Material</b>${escapeHtml(compactText(material.material || spec.material || "-", 22))}</span>
+        <span><b>Layer</b>${escapeHtml(renderRuntimeValue(material.layer_height_mm || spec.layer_height_mm || "-"))}</span>
+        <span><b>Nozzle</b>${escapeHtml(renderRuntimeValue(material.nozzle_diameter_mm || spec.nozzle_diameter_mm || "-"))}</span>
+        <span><b>Bed</b>${escapeHtml(renderRuntimeValue(material.bed_temperature_c || spec.bed_temperature_c || "-"))}</span>
+      </div>
+      <div class="ar-design-note-list">
+        ${(notes.length ? notes : ["Material notes pending."]).map((item) => `<span>${escapeHtml(compactText(item, 88))}</span>`).join("")}
+      </div>
+    </div>
+  `;
+}
+
+function renderDesignHandoffCard(handoff, selected, material, spec, artifactLedger = []) {
+  const missing = Array.isArray(handoff.missing_required_fields) ? handoff.missing_required_fields : [];
+  const ready = handoff.required_fields_present !== false && !missing.length;
+  return `
+    <div class="ar-design-handoff-layout">
+      <div class="ar-design-handoff-main">
+        <span class="tone-${ready ? "success" : "warning"}">${ready ? "Ready" : "Needs Input"}</span>
+        <strong>${escapeHtml(compactText(handoff.authoritative_candidate_id || selected.candidate_id || spec.candidate_id || "-", 34))}</strong>
+        <em>${escapeHtml(compactText(handoff.authoritative_specimen_id || selected.specimen_id || spec.specimen_id || "-", 44))}</em>
+      </div>
+      <div class="ar-design-metric-strip">
+        <span><b>Next</b>SPC</span>
+        <span><b>Status</b>${escapeHtml(handoff.packet_status || (ready ? "ready" : "blocked"))}</span>
+        <span><b>Profile</b>${escapeHtml(compactText(material.printer_profile || spec.printer_profile || "-", 18))}</span>
+        <span><b>Evidence</b>${escapeHtml(`${Array.isArray(artifactLedger) ? artifactLedger.length : 0} files`)}</span>
+      </div>
+      ${missing.length ? `<div class="ar-design-note-list">${missing.slice(0, 4).map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>` : ""}
+    </div>
+  `;
+}
+
+function renderDesignEvidenceCard(artifactLedger, rejected) {
+  const artifacts = Array.isArray(artifactLedger) ? artifactLedger.slice(0, 5) : [];
+  const repairs = Array.isArray(rejected) ? rejected.slice(0, 4) : [];
+  return `
+    <div class="ar-design-evidence-layout">
+      <section>
+        <h5>Artifacts</h5>
+        ${renderDesignArtifactLedger(artifacts)}
+      </section>
+      <section>
+        <h5>Rejected / Repair</h5>
+        ${dashboardList(repairs.map((item) => renderRuntimeValue(item)), "No rejected entries.", 4)}
+      </section>
+    </div>
+  `;
+}
+
+function renderDesignDashboardCards(report, status, agentLabel, profile) {
+  const spec = report.spec || {};
+  const screenReport = latestDesignAgentReport(report) || {};
+  const designReport = latestDesignReport(report) || {};
+  const brief = screenReport.design_brief || {};
+  const board = screenReport.candidate_board || {};
+  const material = screenReport.material_notes || {};
+  const artifactLedger = Array.isArray(screenReport.artifact_ledger) ? screenReport.artifact_ledger : [];
+  const objective = designReport.objective || {};
+  const hypothesis = designReport.hypothesis || {};
+  const generation = designReport.candidate_generation || {};
+  const evaluation = designReport.candidate_evaluation || {};
+  const prior = designReport.prior_context || {};
+  const manufacturability = screenReport.manufacturability || designReport.manufacturability || {};
+  const handoff = screenReport.handoff_to_specimen || designReport.handoff_to_specimen || {};
+  const rejected = Array.isArray(designReport.rejected_candidates) ? designReport.rejected_candidates
+    : Array.isArray(generation.rejection_log) ? generation.rejection_log
+    : Array.isArray(generation.rejected_candidates) ? generation.rejected_candidates
+      : Array.isArray(evaluation.rejected_candidates) ? evaluation.rejected_candidates : [];
+  const selected = designSelectedCandidate(screenReport, designReport, spec);
+  const candidateRows = designCandidateRows(screenReport, designReport, report);
+  const specimenRows = designActualSpecimenRows(screenReport, designReport, report);
+  const generatedCount = specimenRows.length;
+  const validCount = specimenRows.filter((item) => !/reject|fail|block|invalid/i.test(String(item.status || item.candidate_status || ""))).length;
+  const previewCount = specimenRows.filter((item) => designImageUrlFromSource(item)).length;
+  return `
+    ${renderDashboardCard("Experiment Contract", renderDesignBriefCard(brief, objective, hypothesis, spec, prior, material, manufacturability, selected), { span: 3, tone: "design", eyebrow: "mission input", className: "ar-design-reference-card ar-design-brief-card" })}
+    ${renderDashboardCard("Generated Specimens", renderDesignCandidateCards(screenReport, designReport, report), { span: 9, tone: "design", eyebrow: "built specimen log", className: "ar-design-reference-card ar-design-candidates-card", meta: `${renderRuntimeValue(generatedCount)} built / ${renderRuntimeValue(validCount)} usable / ${renderRuntimeValue(previewCount)} previews` })}
+    ${renderDashboardCard("DOE Map / Design Space", renderDesignParameterSweep(screenReport), { span: 4, tone: "metrics", eyebrow: "parameter sweep", className: "ar-design-reference-card ar-design-sweep-card" })}
+    ${renderDashboardCard("Evaluation Matrix", renderDesignExpectedPerformance(screenReport, designReport, selected), { span: 4, tone: "metrics", eyebrow: "objective vs mass", className: "ar-design-reference-card ar-design-performance-card" })}
+    ${renderDashboardCard("Buildability Gate", renderDesignManufacturabilityCard(screenReport, designReport, selected, spec, material, specimenRows.length ? specimenRows : candidateRows), { span: 4, tone: handoff.required_fields_present === false || (manufacturability.warnings || []).length ? "warning" : "success", eyebrow: "print path", className: "ar-design-reference-card ar-design-manufacturing-card" })}
+    ${renderDashboardCard("Active Handoff", renderDesignHandoffCard(handoff, selected, material, spec, artifactLedger), { span: 12, tone: handoff.required_fields_present === false || rejected.length ? "warning" : "success", eyebrow: "dsn -> spc", className: "ar-design-reference-card ar-design-handoff-card" })}
+  `;
+}
+
+function renderSpecimenDonut(items, options = {}) {
+  const clean = (Array.isArray(items) ? items : [])
+    .map((item) => ({
+      label: String((item && item.label) || "item"),
+      value: dashboardFiniteNumber(item && item.value) || 0,
+      unit: String((item && item.unit) || ""),
+    }))
+    .filter((item) => item.value > 0);
+  if (!clean.length) return renderVizEmpty(options.emptyText || "No donut data is present yet.");
+  const total = clean.reduce((sum, item) => sum + item.value, 0) || 1;
+  const colors = options.colors || ["#38bdf8", "#22c55e", "#f59e0b", "#fb7185", "#8b5cf6"];
+  let cursor = 0;
+  const segments = clean.map((item, index) => {
+    const start = cursor;
+    const end = cursor + (item.value / total) * 100;
+    cursor = end;
+    return `${colors[index % colors.length]} ${numberText(start, 2)}% ${numberText(end, 2)}%`;
+  }).join(", ");
+  return `
+    <div class="ar-spm-donut-wrap">
+      <div class="ar-spm-donut" style="background: conic-gradient(${segments});">
+        <span>${escapeHtml(numberText(total, 2))}</span>
+        <small>${escapeHtml(options.unit || clean[0].unit || "")}</small>
+      </div>
+      <div class="ar-spm-donut-legend">
+        ${clean.slice(0, 5).map((item, index) => `
+          <span><i style="background:${escapeHtml(colors[index % colors.length])};"></i>${escapeHtml(item.label)} ${escapeHtml(numberText(item.value, 2))}${item.unit ? ` ${escapeHtml(item.unit)}` : ""}</span>
+        `).join("")}
+      </div>
+    </div>
+  `;
+}
+
+function renderSpecimenTimeline(items) {
+  const rows = (Array.isArray(items) ? items : []).slice(0, 12);
+  if (!rows.length) return renderVizEmpty("No build timeline rows are present yet.");
+  return `
+    <div class="ar-spm-timeline" role="list" aria-label="specimen build timeline">
+      ${rows.map((item, index) => {
+        const status = item.status || "recorded";
+        return `
+          <div class="ar-spm-timeline-row tone-${escapeHtml(dashboardStatusTone(status))}" role="listitem">
+            <span>${escapeHtml(item.order || index + 1)}</span>
+            <strong>${escapeHtml(compactText(item.step || `step ${index + 1}`, 34))}</strong>
+            <em>${escapeHtml(compactText(status, 22))}</em>
+            <small>${escapeHtml(compactText(renderRuntimeValue(item.detail || item.duration_s || ""), 52))}</small>
+          </div>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function renderSpecimenLayerPreview(layerPreview) {
+  const preview = layerPreview || {};
+  const available = Boolean(preview.preview_available || preview.stl_path || preview.gcode_path);
+  const layerCount = available ? 18 : 10;
+  return `
+    <div class="ar-spm-layer-preview ${available ? "ready" : "pending"}" aria-label="specimen layer preview">
+      <div class="ar-spm-layer-stack" aria-hidden="true">
+        ${Array.from({ length: layerCount }).map((_, index) => {
+          const width = 46 + ((index * 13) % 44);
+          return `<span style="--layer:${width}%;"></span>`;
+        }).join("")}
+      </div>
+      ${renderDashboardRows([
+        ["preview_available", available],
+        ["stl_path", preview.stl_path || "-"],
+        ["gcode_path", preview.gcode_path || "-"],
+        ["layerwise_monitoring", preview.layerwise_monitoring_available === undefined ? "-" : preview.layerwise_monitoring_available],
+      ])}
+    </div>
+  `;
+}
+
+function renderSpecimenArtifactLedger(items) {
+  const rows = (Array.isArray(items) ? items : []).map((item) => `${item.artifact_type || "artifact"} / ${item.status || "recorded"} / ${item.artifact_id || "-"}`);
+  return dashboardList(rows, "No specimen artifact ledger recorded.", 8);
+}
+
+function specimenReadinessGateRows(screenReport, fabrication) {
+  const readiness = screenReport && screenReport.print_readiness ? screenReport.print_readiness : {};
+  if (Array.isArray(readiness.gates) && readiness.gates.length) return readiness.gates;
+  return Array.isArray(fabrication.quality_gates) ? fabrication.quality_gates : [];
+}
+
+function renderSpecimenDashboardCards(report, status, agentLabel, profile) {
+  const spec = report.spec || {};
+  const screenReport = latestSpecimenAgentReport(report) || {};
+  const fabrication = latestSpecimenFabricationReport(report) || {};
+  const packet = latestSpecimenFabricatedPacket(report) || {};
+  const intent = fabrication.fabrication_intent || {};
+  const thread = fabrication.digital_thread || {};
+  const plan = fabrication.process_plan || {};
+  const outcome = fabrication.fabrication_outcome || {};
+  const feedback = fabrication.feedback_to_design || {};
+  const slicer = screenReport.slicer_configuration || {};
+  const printerProfile = screenReport.printer_profile || {};
+  const buildQueue = screenReport.build_queue || {};
+  const estimatedPrintTime = screenReport.estimated_print_time || {};
+  const filamentUsage = screenReport.filament_usage || {};
+  const gcodeValidation = screenReport.gcode_validation || {};
+  const printReadiness = screenReport.print_readiness || {};
+  const buildTimeline = screenReport.build_timeline || {};
+  const layerPreview = screenReport.layer_preview || {};
+  const printerStatus = screenReport.printer_status || {};
+  const handoffStatus = screenReport.handoff_status || {};
+  const artifactLedger = Array.isArray(screenReport.artifact_ledger) ? screenReport.artifact_ledger : [];
+  const gates = specimenReadinessGateRows(screenReport, fabrication);
+  const gateItems = gates.map((gate) => `${gate.name || gate.gate || "gate"} / ${gate.status || "unknown"} / ${gate.reason || gate.summary || ""}`);
+  const queueItems = Array.isArray(buildQueue.items) ? buildQueue.items.map((item) => `${item.queue_id || "queue"} / ${item.status || "recorded"} / ${item.remote_path || item.detail || ""}`) : [];
+  const readinessBars = [
+    { label: "pass", value: printReadiness.pass_count, tone: "success", meta: renderRuntimeValue(printReadiness.pass_count, "0") },
+    { label: "warn", value: printReadiness.warn_count, tone: "warning", meta: renderRuntimeValue(printReadiness.warn_count, "0") },
+    { label: "blocked", value: printReadiness.blocked_count, tone: "danger", meta: renderRuntimeValue(printReadiness.blocked_count, "0") },
+    { label: "fail", value: printReadiness.fail_count, tone: "danger", meta: renderRuntimeValue(printReadiness.fail_count, "0") },
+  ];
+  return `
+    ${renderDashboardCard("Fabrication Plan", `
+      <div class="ar-report-metrics">
+        ${renderDashboardMetric("Layer", slicer.layer_height_mm || plan.layer_height_mm || spec.layer_height_mm || "-", "mm", "info")}
+        ${renderDashboardMetric("Nozzle", slicer.nozzle_diameter_mm || plan.nozzle_diameter_mm || spec.nozzle_diameter_mm || "-", "mm", "running")}
+        ${renderDashboardMetric("Time", estimatedPrintTime.estimated_print_time_min || plan.estimated_print_time_min || spec.expected_print_time_min || "-", "min", "metrics")}
+      </div>
+      ${renderDashboardRows([
+        ["specimen_id", thread.specimen_id || spec.specimen_id || "-"],
+        ["candidate_id", thread.candidate_id || spec.candidate_id || "-"],
+        ["slicer_profile", slicer.slicer_profile_hint || thread.slicer_profile_hint || spec.slicer_profile_hint || "-"],
+        ["material", printerProfile.material || thread.material || spec.material || "-"],
+        ["bed_temperature_c", slicer.bed_temperature_c || plan.bed_temperature_c || spec.bed_temperature_c || "-"],
+        ["stl_path", thread.stl_path || latestReportPayload(report, ["stl_path"]) || "-"],
+      ])}
+    `, { span: 4, tone: "specimen", eyebrow: "slicer + digital thread" })}
+    ${renderDashboardCard("Printer Runtime", `
+      <div class="ar-report-metrics">
+        ${renderDashboardMetric("Queue", buildQueue.queue_status || outcome.status || "-", "status", /blocked|fail/i.test(String(buildQueue.queue_status || outcome.status || "")) ? "warning" : "success")}
+        ${renderDashboardMetric("Storage", printerProfile.storage_status || "-", "profile", "info")}
+        ${renderDashboardMetric("Mode", printerStatus.mode || "-", "printer", "running")}
+      </div>
+      ${renderDashboardRows([
+        ["printer_profile", printerProfile.printer_profile || thread.printer_profile || spec.printer_profile || "-"],
+        ["printer_path", printerProfile.printer_path || intent.printer_path || "-"],
+        ["printer_job_id", buildQueue.printer_job_id || thread.printer_job_id || "-"],
+        ["remote_gcode_path", printerProfile.remote_gcode_path || thread.remote_gcode_path || "-"],
+        ["physical_intent", printerProfile.physical_intent === undefined ? intent.physical_intent : printerProfile.physical_intent],
+      ])}
+      ${dashboardList(queueItems, "No build queue items recorded.", 3)}
+    `, { span: 4, tone: buildQueue.queue_status === "blocked" ? "warning" : "specimen", eyebrow: "printer + queue" })}
+    ${renderDashboardCard("Material Budget", `
+      ${renderSpecimenDonut(filamentUsage.donut || [], { unit: "g", emptyText: "No filament usage data is present." })}
+      ${renderMiniBarChart((estimatedPrintTime.bars || []).map((item) => ({ label: item.label, value: item.value, tone: item.label === "print" ? "running" : "info", meta: `${renderRuntimeValue(item.value, "0")} ${item.unit || "min"}` })), { label: "specimen print time bars", compact: true, emptyText: "No print-time bar data is present." })}
+    `, { span: 4, tone: "metrics", eyebrow: "filament + time" })}
+    ${renderDashboardCard("Readiness Gate", `<div class="ar-report-metrics">
+      ${renderDashboardMetric("Pass", gates.filter((gate) => gate.status === "pass").length, "quality gates", "success")}
+      ${renderDashboardMetric("Blocked", gates.filter((gate) => gate.status === "blocked").length, "quality gates", "warning")}
+      ${renderDashboardMetric("Fail", gates.filter((gate) => gate.status === "fail").length, "quality gates", "danger")}
+      ${renderDashboardMetric("Total", gates.length, "checks", "info")}
+    </div>${renderMiniBarChart(readinessBars, { label: "specimen readiness gate counts", compact: true, limit: 4 })}${dashboardList(gateItems, "No fabrication quality gates recorded.", 6)}`, { span: 6, tone: gates.some((gate) => gate.status === "blocked" || gate.status === "fail") ? "warning" : "success", eyebrow: "quality + gcode gates" })}
+    ${renderDashboardCard("Build Evidence", `
+      <div class="ar-spm-evidence-grid">
+        <section>
+          <h5>Timeline</h5>
+          ${renderSpecimenTimeline((buildTimeline.timeline || []))}
+        </section>
+        <section>
+          <h5>Layer Preview</h5>
+          ${renderSpecimenLayerPreview(layerPreview)}
+        </section>
+      </div>
+    `, { span: 6, tone: "activity", eyebrow: "timeline + layer preview" })}
+    ${renderDashboardCard("G-code / Handoff", `
+      <div class="ar-report-metrics">
+        ${renderDashboardMetric("G-code", gcodeValidation.status || "-", "validation", /blocked|fail/i.test(String(gcodeValidation.status || "")) ? "warning" : "success")}
+        ${renderDashboardMetric("Handoff", handoffStatus.status || packet.status || "-", "specimen", /ready|virtual|printed/i.test(String(handoffStatus.status || packet.status || "")) ? "success" : "warning")}
+        ${renderDashboardMetric("Feedback", feedback.quality_score === undefined ? "-" : feedback.quality_score, "quality", "info")}
+      </div>
+      ${renderDashboardRows([
+        ["gcode_path", gcodeValidation.gcode_path || thread.gcode_path || latestReportPayload(report, ["sliced_path", "gcode_path", "output_gcode"]) || "-"],
+        ["slicer_gate", (gcodeValidation.slicer_gate || {}).status || "-"],
+        ["gcode_gate", (gcodeValidation.gcode_gate || {}).status || "-"],
+        ["consumer_agent", handoffStatus.consumer_agent || packet.consumer_agent || "-"],
+        ["physical_location", handoffStatus.physical_location || packet.physical_location || outcome.location || "-"],
+        ["next_action", handoffStatus.next_action || packet.next_action || "-"],
+      ])}
+    `, { span: 6, tone: /ready|virtual|printed/i.test(String(handoffStatus.status || packet.status || "")) ? "success" : "warning", eyebrow: "validated output" })}
+    ${renderDashboardCard("Artifact Ledger", renderSpecimenArtifactLedger(artifactLedger), { span: 6, tone: "artifact", eyebrow: "artifact_ledger" })}
+  `;
+}
+
+function renderVisionHistogram(distribution) {
+  const rows = (Array.isArray(distribution && distribution.histogram) ? distribution.histogram : []).map((item) => ({
+    label: item.bin || "bin",
+    value: dashboardFiniteNumber(item.count),
+    tone: "vision",
+    meta: renderRuntimeValue(item.count, "0"),
+  })).filter((item) => item.value !== null);
+  return renderMiniBarChart(rows, { label: "vision confidence histogram", compact: true, emptyText: "No confidence histogram data is present." });
+}
+
+function renderVisionSegmentationPanels(segmentation) {
+  const panels = Array.isArray(segmentation && segmentation.panels) ? segmentation.panels.slice(0, 6) : [];
+  if (!panels.length) return renderVizEmpty("No segmentation panels are present yet.");
+  return `
+    <div class="ar-vis-seg-panels" role="list" aria-label="vision segmentation panels">
+      ${panels.map((panel, index) => `
+        <div class="ar-vis-seg-panel" role="listitem">
+          <span>${escapeHtml(panel.panel_id || `seg-${index + 1}`)}</span>
+          <strong>${escapeHtml(compactText(panel.label || "object", 28))}</strong>
+          <em>${escapeHtml(compactText(panel.zone || panel.state || "-", 28))}</em>
+          <small>conf ${escapeHtml(renderRuntimeValue(panel.confidence, "-"))}</small>
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderVisionConfusionMatrix(matrixPayload) {
+  const labels = Array.isArray(matrixPayload && matrixPayload.labels) ? matrixPayload.labels : ["clear", "blocked"];
+  const matrix = Array.isArray(matrixPayload && matrixPayload.matrix) ? matrixPayload.matrix : [];
+  if (!matrix.length) return renderVizEmpty("No confusion matrix data is present yet.");
+  const values = matrix.flat().map((value) => dashboardFiniteNumber(value) || 0);
+  const maxValue = Math.max(1, ...values);
+  return `
+    <div class="ar-vis-confusion" role="table" aria-label="vision confusion matrix">
+      <div></div>
+      ${labels.map((label) => `<strong>${escapeHtml(label)}</strong>`).join("")}
+      ${matrix.map((row, rowIndex) => `
+        <strong>${escapeHtml(labels[rowIndex] || `row ${rowIndex + 1}`)}</strong>
+        ${row.map((value) => {
+          const pct = dashboardPercent(((dashboardFiniteNumber(value) || 0) / maxValue) * 100);
+          return `<span style="--heat:${numberText(pct, 2)}%;">${escapeHtml(renderRuntimeValue(value, "0"))}</span>`;
+        }).join("")}
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderVisionInspectionFeed(feed) {
+  const events = Array.isArray(feed && feed.events) ? feed.events.map((item) => `${item.event_type || "event"} / ${item.status || "unknown"} / conf=${renderRuntimeValue(item.confidence, "-")}`) : [];
+  return `
+    ${renderDashboardRows([
+      ["task", feed.task || "-"],
+      ["summary", feed.summary || "-"],
+      ["annotated_frame", feed.annotated_frame_path || "-"],
+      ["detections", Array.isArray(feed.detections) ? feed.detections.length : 0],
+    ])}
+    ${dashboardList(events, "No inspection feed events recorded.", 6)}
+  `;
+}
+
+function renderVisionDashboardCards(report, status, agentLabel, profile) {
+  const screenReport = latestVisionAgentReport(report) || {};
+  const visionReport = latestVisionReport(report) || {};
+  const packet = latestVisionSignalPacket(report) || {};
+  const cameraHealth = screenReport.camera_health || {};
+  const calibration = screenReport.calibration_summary || {};
+  const confidenceDistribution = screenReport.confidence_distribution || {};
+  const inspectionFeed = screenReport.inspection_feed || {};
+  const segmentation = screenReport.segmentation || {};
+  const defectSummary = screenReport.defect_summary || {};
+  const pose = screenReport.pose_estimation || {};
+  const confusion = screenReport.confusion_matrix || {};
+  const quality = screenReport.quality_metrics || {};
+  const evidence = screenReport.evidence_review || {};
+  const handoff = screenReport.handoff_recommendations || {};
+  const camera = visionReport.camera_source || {};
+  const signals = Array.isArray(visionReport.signal_board) ? visionReport.signal_board : Array.isArray(visionReport.agent_signals) ? visionReport.agent_signals : [];
+  const zones = visionReport.scene_map || visionReport.zones || {};
+  const anomaly = visionReport.safety_anomaly || {};
+  const calibrationRows = Array.isArray(calibration.line_chart) ? calibration.line_chart.map((item) => ({ label: item.x || "metric", value: item.value, tone: "info", meta: renderRuntimeValue(item.value, "-") })) : [];
+  const signalItems = signals.map((signal) => `${signal.signal || signal.name || "signal"} / ${signal.status || "unknown"} / conf=${renderRuntimeValue(signal.confidence)} / ttl=${renderRuntimeValue(signal.expires_at)}`);
+  const artifactRows = evidence.artifacts && typeof evidence.artifacts === "object" ? Object.entries(evidence.artifacts).map(([key, value]) => `${key} / ${renderRuntimeValue(value)}`) : [];
+  return `
+    ${renderDashboardCard("Perception Bus", `
+      <div class="ar-report-metrics">
+        ${renderDashboardMetric("Camera", cameraHealth.status || (anomaly.anomaly ? "review" : "ready"), "status", cameraHealth.status === "review_required" ? "warning" : "success")}
+        ${renderDashboardMetric("Signals", quality.signal_count || signals.length, "bounded", "info")}
+        ${renderDashboardMetric("Frame Age", cameraHealth.frame_age_ms === undefined ? camera.frame_age_ms || "-" : cameraHealth.frame_age_ms, "ms", "running")}
+      </div>
+      <div class="ar-vis-two-up">
+        <section>
+          <h5>Camera</h5>
+          ${renderDashboardRows([
+            ["camera_key", cameraHealth.camera_key || camera.camera_key || "-"],
+            ["source", cameraHealth.source || camera.source || "-"],
+            ["frame_id", cameraHealth.frame_id || camera.frame_id || "-"],
+            ["calibration_id", calibration.calibration_id || camera.calibration_id || "-"],
+          ])}
+        </section>
+        <section>
+          <h5>Confidence</h5>
+          ${renderVisionHistogram(confidenceDistribution)}
+        </section>
+      </div>
+    `, { span: 6, tone: cameraHealth.status === "review_required" ? "warning" : "vision", eyebrow: "camera + signal distribution" })}
+    ${renderDashboardCard("Scene Understanding", `
+      <div class="ar-vis-two-up">
+        <section>
+          <h5>Inspection</h5>
+          ${renderVisionInspectionFeed(inspectionFeed)}
+        </section>
+        <section>
+          <h5>Segmentation</h5>
+          ${renderVisionSegmentationPanels(segmentation)}
+        </section>
+      </div>
+    `, { span: 6, tone: "vision", eyebrow: "feed + segmentation" })}
+    ${renderDashboardCard("Quality Gate", `
+      <div class="ar-report-metrics">
+        ${renderDashboardMetric("Transfer", quality.transfer_ready === undefined ? "-" : quality.transfer_ready, "ready", quality.transfer_ready ? "success" : "warning")}
+        ${renderDashboardMetric("Anomaly", defectSummary.anomaly === undefined ? anomaly.anomaly : defectSummary.anomaly, "vision", defectSummary.anomaly ? "warning" : "success")}
+        ${renderDashboardMetric("TTL", quality.freshness_ttl_ms || "-", "ms", "info")}
+      </div>
+      <div class="ar-vis-two-up">
+        <section>
+          <h5>Defects</h5>
+          ${renderDashboardRows([
+            ["low_confidence", defectSummary.low_confidence === undefined ? anomaly.low_confidence || "-" : defectSummary.low_confidence],
+            ["occlusion", defectSummary.occlusion === undefined ? anomaly.occlusion || "-" : defectSummary.occlusion],
+            ["blocking_reason", defectSummary.blocking_reason || anomaly.blocking_reason || quality.blocking_reason || "-"],
+            ["failure_labels", defectSummary.failure_labels || []],
+          ])}
+        </section>
+        <section>
+          <h5>Confusion</h5>
+          ${renderVisionConfusionMatrix(confusion)}
+        </section>
+      </div>
+    `, { span: 6, tone: defectSummary.anomaly || !quality.transfer_ready ? "warning" : "success", eyebrow: "quality + anomaly" })}
+    ${renderDashboardCard("Pose / Handoff", `
+      <div class="ar-report-metrics">
+        ${renderDashboardMetric("Pose", pose.ready === undefined ? "-" : pose.ready, "ready", pose.ready ? "success" : "warning")}
+        ${renderDashboardMetric("Handoff", handoff.status || packet.status || "-", "next", /ready/i.test(String(handoff.status || packet.status || "")) ? "success" : "warning")}
+        ${renderDashboardMetric("Conf", handoff.confidence || packet.confidence || pose.confidence || "-", "signal", "info")}
+      </div>
+      ${renderDashboardRows([
+        ["signal_id", handoff.signal_id || packet.signal_id || "-"],
+        ["zone_id", handoff.zone_id || packet.zone_id || "-"],
+        ["x_mm", pose.x_mm || "-"],
+        ["y_mm", pose.y_mm || "-"],
+        ["z_mm", pose.z_mm || "-"],
+        ["expires_at", handoff.expires_at || packet.expires_at || "-"],
+      ])}
+      ${dashboardList(signalItems, "No bounded vision signals recorded.", 5)}
+    `, { span: 6, tone: /ready/i.test(String(handoff.status || packet.status || "")) ? "success" : "warning", eyebrow: "pose + bounded signals" })}
+    ${renderDashboardCard("Evidence Ledger", `${renderDashboardRows([
+      ["evidence_refs", Array.isArray(evidence.evidence_refs) ? evidence.evidence_refs.length : 0],
+      ["dataset_ledger", evidence.dataset_ledger && typeof evidence.dataset_ledger === "object" ? Object.keys(evidence.dataset_ledger).length : 0],
+      ["zone_count", zones && typeof zones === "object" ? Object.keys(zones).length : 0],
+      ["pose_backend", calibration.pose_backend || "-"],
+      ["frame_size", `${calibration.frame_width || "-"} x ${calibration.frame_height || "-"}`],
+    ])}${dashboardList(artifactRows, "No visual evidence artifacts recorded.", 6)}${calibrationRows.length ? renderMiniBarChart(calibrationRows, { label: "vision calibration trend", compact: true, emptyText: "No calibration trend data recorded." }) : ""}`, { span: 12, tone: "artifact", eyebrow: "trace summary" })}
+  `;
+}
+
+function manipulationReportTone(value) {
+  const text = String(value ?? "").toLowerCase();
+  if (/safe|success|complete|completed|clear|within|verified|ready|ok|no_collision/.test(text)) return "success";
+  if (/review|pending|active|warn|partial|retry/.test(text)) return "warning";
+  if (/blocked|fail|failed|error|stale|missing|not_started/.test(text)) return "danger";
+  return dashboardStatusTone(value);
+}
+
+function renderManipulationKpis(kpis = {}) {
+  const specs = [
+    ["Manipulation Success", "manipulation_success_pct", "%", "closed loop"],
+    ["Grasp Success", "grasp_success_pct", "%", "grasp planner"],
+    ["Avg Execution Time", "avg_execution_time_s", "s", "rollout"],
+    ["Path Efficiency", "path_efficiency_pct", "%", "motion plan"],
+    ["Max Joint Velocity", "max_joint_velocity_pct", "%", "limit usage"],
+    ["Safety Score", "safety_score_pct", "%", "guardian"],
+  ];
+  const values = specs
+    .map(([label, key, unit, meta]) => ({ label, key, unit, meta, value: dashboardFiniteNumber(kpis[key]) }))
+    .filter((item) => item.value !== null);
+  if (!values.length) return renderVizEmpty("No manipulation KPI values are available yet.");
+  return `
+    <div class="ar-man-kpi-grid" role="list" aria-label="manipulation performance kpis">
+      ${values.map((item) => {
+        const isDuration = item.unit === "s";
+        const pct = isDuration ? dashboardPercent((item.value / 60) * 100) : dashboardPercent(item.value);
+        const tone = isDuration ? "info" : item.value >= 80 ? "success" : item.value >= 55 ? "warning" : "danger";
+        const valueText = isDuration ? `${numberText(item.value, 2)}s` : `${numberText(item.value, 0)}%`;
+        return `
+          <article class="ar-man-kpi tone-${escapeHtml(tone)}" role="listitem" title="${escapeHtml(item.label)}: ${escapeHtml(valueText)}">
+            <span>${escapeHtml(item.label)}</span>
+            <strong>${escapeHtml(valueText)}</strong>
+            <div class="ar-man-kpi-meter" aria-hidden="true"><i style="--bar:${numberText(pct, 2)}%;"></i></div>
+            <small>${escapeHtml(item.meta)}</small>
+          </article>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function renderManipulationGraspPlan(plan = {}) {
+  const candidates = Array.isArray(plan.candidates) ? plan.candidates : [];
+  const clean = candidates
+    .map((item, index) => ({
+      label: String(item.label || item.name || `Grasp ${index + 1}`),
+      score: Math.max(0, dashboardFiniteNumber(item.score) ?? 0),
+    }))
+    .filter((item) => item.score > 0);
+  if (!clean.length) return renderVizEmpty("No grasp candidates have been scored yet.");
+  const colors = ["#34d399", "#38bdf8", "#f59e0b", "#94a3b8", "#a78bfa"];
+  const total = clean.reduce((sum, item) => sum + item.score, 0) || 1;
+  let cursor = 0;
+  const gradient = clean.map((item, index) => {
+    const start = cursor;
+    cursor += (item.score / total) * 360;
+    return `${colors[index % colors.length]} ${numberText(start, 2)}deg ${numberText(cursor, 2)}deg`;
+  }).join(", ");
+  const best = dashboardFiniteNumber(plan.best_score) ?? Math.max(...clean.map((item) => item.score));
+  return `
+    <div class="ar-man-donut-wrap">
+      <div class="ar-man-donut" style="background:conic-gradient(${escapeHtml(gradient)});"><span>${escapeHtml(numberText(best * 100, 0))}%</span><small>best</small></div>
+      <div class="ar-man-donut-legend">
+        ${clean.slice(0, 5).map((item, index) => `<span><i style="background:${escapeHtml(colors[index % colors.length])};"></i>${escapeHtml(item.label)} ${escapeHtml(numberText(item.score * 100, 0))}%</span>`).join("")}
+        ${plan.scoring ? `<em>${escapeHtml(plan.scoring)}</em>` : ""}
+      </div>
+    </div>
+  `;
+}
+
+function renderManipulationWaypoints(sequence = {}) {
+  const rows = Array.isArray(sequence.rows) ? sequence.rows : [];
+  if (!rows.length) return renderVizEmpty("No waypoint sequence has been recorded.");
+  return `
+    <div class="ar-man-waypoints" role="list" aria-label="manipulation waypoint sequence">
+      ${rows.slice(0, 7).map((item, index) => {
+        const status = item.status || "pending";
+        return `
+          <article class="ar-man-waypoint tone-${escapeHtml(manipulationReportTone(status))}" role="listitem">
+            <span>${escapeHtml(String(item.index || index + 1).padStart(2, "0"))}</span>
+            <strong>${escapeHtml(compactText(item.waypoint || item.name || `waypoint ${index + 1}`, 34))}</strong>
+            <em>${escapeHtml(item.type || "transit")}</em>
+            <small>${escapeHtml(status)}</small>
+          </article>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function renderManipulationChecks(execution = {}) {
+  const checks = Array.isArray(execution.checks) ? execution.checks : [];
+  if (!checks.length) return renderVizEmpty("No execution checks have been reported.");
+  return `
+    <div class="ar-man-checks" role="list" aria-label="motion execution checks">
+      ${checks.slice(0, 5).map((item) => {
+        const status = item.status || "unknown";
+        return `
+          <article class="ar-man-check tone-${escapeHtml(manipulationReportTone(status))}" role="listitem">
+            <strong>${escapeHtml(compactText(item.name || "check", 32))}</strong>
+            <span>${escapeHtml(compactText(status, 28))}</span>
+            ${item.detail ? `<small>${escapeHtml(compactText(item.detail, 42))}</small>` : ""}
+          </article>
+        `;
+      }).join("")}
+    </div>
+    ${renderDashboardRows([["attempts", execution.attempts ?? "-"], ["retries", execution.retries ?? "-"]])}
+  `;
+}
+
+function renderManipulationWorkspace(workspace = {}, reachability = {}) {
+  const trajectory = Array.isArray(workspace.trajectory) ? workspace.trajectory : [];
+  const hotspots = Array.isArray(reachability.hotspots) ? reachability.hotspots : [];
+  if (!trajectory.length && !hotspots.length) return renderVizEmpty("No robot workspace trajectory is available.");
+  const width = 360;
+  const height = 180;
+  const pad = { left: 26, right: 18, top: 16, bottom: 26 };
+  const xs = [...trajectory.map((point) => point.x_m), ...hotspots.map((point) => point.x)].map(Number).filter(Number.isFinite);
+  const ys = [...trajectory.map((point) => point.y_m), ...hotspots.map((point) => point.y)].map(Number).filter(Number.isFinite);
+  const xDomain = finiteRange(xs, [-0.3, 0.35]);
+  const yDomain = finiteRange(ys, [-0.2, 0.25]);
+  const x = (value) => scaleLinear(value, xDomain, [pad.left, width - pad.right]);
+  const y = (value) => scaleLinear(value, yDomain, [height - pad.bottom, pad.top]);
+  const path = trajectory.map((point) => [x(point.x_m), y(point.y_m)]);
+  return `
+    <div class="ar-man-workspace">
+      <svg class="ar-man-workspace-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="robot workspace trajectory and reachability hotspots">
+        <rect x="${pad.left}" y="${pad.top}" width="${width - pad.left - pad.right}" height="${height - pad.top - pad.bottom}" rx="8"></rect>
+        <line x1="${pad.left}" y1="${y(0)}" x2="${width - pad.right}" y2="${y(0)}" class="axis"></line>
+        <line x1="${x(0)}" y1="${pad.top}" x2="${x(0)}" y2="${height - pad.bottom}" class="axis"></line>
+        ${hotspots.map((point, index) => {
+          const score = dashboardFiniteNumber(point.score) ?? 0.5;
+          return `<circle class="hotspot" cx="${numberText(x(point.x), 2)}" cy="${numberText(y(point.y), 2)}" r="${numberText(5 + score * 8, 2)}"><title>hotspot ${index + 1}: ${numberText(score * 100, 0)}%</title></circle>`;
+        }).join("")}
+        ${path.length ? `<polyline points="${polyline(path)}" class="path"></polyline>` : ""}
+        ${path.map(([px, py], index) => `<circle class="path-point" cx="${numberText(px, 2)}" cy="${numberText(py, 2)}" r="${index === 0 || index === path.length - 1 ? 4 : 2.6}"><title>step ${index + 1}</title></circle>`).join("")}
+        <text x="${pad.left}" y="${height - 7}">x/y workspace</text>
+        <text x="${width - pad.right}" y="${height - 7}" text-anchor="end">${escapeHtml(workspace.current_stage || "stage")}</text>
+      </svg>
+      <div class="ar-man-workspace-grid">
+        <span><strong>${escapeHtml(workspace.robot || "LeRobot")}</strong><em>robot</em></span>
+        <span><strong>${escapeHtml(compactText(workspace.source_location || "-", 28))}</strong><em>source</em></span>
+        <span><strong>${escapeHtml(compactText(workspace.target_location || "-", 28))}</strong><em>target</em></span>
+      </div>
+    </div>
+  `;
+}
+
+function renderManipulationReachabilityMap(reachability = {}) {
+  const hotspots = Array.isArray(reachability.hotspots) ? reachability.hotspots : [];
+  if (!hotspots.length) return renderVizEmpty("No reachability map hotspots are available.");
+  return `
+    <div class="ar-man-reach-grid" role="list" aria-label="reachability hotspots">
+      ${hotspots.slice(0, 9).map((point) => {
+        const score = dashboardPercent((dashboardFiniteNumber(point.score) ?? 0) * 100);
+        return `
+          <article role="listitem" style="--heat:${numberText(score, 2)}%;">
+            <strong>${escapeHtml(numberText(score, 0))}%</strong>
+            <span>x=${escapeHtml(numberText(point.x, 2))}</span>
+            <small>y=${escapeHtml(numberText(point.y, 2))}</small>
+          </article>
+        `;
+      }).join("")}
+    </div>
+    ${renderDashboardRows([["status", reachability.status || "-"]])}
+  `;
+}
+
+function renderManipulationSafety(safety = {}) {
+  const checks = Array.isArray(safety.checks) ? safety.checks : [];
+  if (!checks.length) return renderVizEmpty("No collision or safety status has been reported.");
+  return `
+    <div class="ar-man-safety-grid" role="list" aria-label="collision and safety status">
+      ${checks.map((item) => {
+        const status = item.status || "unknown";
+        return `<article class="ar-man-safety-row tone-${escapeHtml(manipulationReportTone(status))}" role="listitem"><strong>${escapeHtml(compactText(item.name || "check", 30))}</strong><span>${escapeHtml(compactText(status, 32))}</span></article>`;
+      }).join("")}
+    </div>
+    ${renderDashboardRows([["overall", safety.overall || "-"]])}
+  `;
+}
+
+function renderManipulationPoseTable(pose = {}) {
+  const frames = Array.isArray(pose.frames) ? pose.frames : [];
+  if (!frames.length) return renderVizEmpty("No object pose handoff frames are available.");
+  return `
+    <div class="ar-man-pose-table" role="table" aria-label="object pose handoff table">
+      <div class="head" role="row"><span>Frame</span><span>X</span><span>Y</span><span>Z</span><span>Rx</span><span>Ry</span><span>Rz</span></div>
+      ${frames.slice(0, 4).map((frame) => `
+        <div role="row">
+          <strong>${escapeHtml(compactText(frame.frame || "frame", 22))}</strong>
+          <span>${escapeHtml(numberText(frame.x_m, 3))}</span>
+          <span>${escapeHtml(numberText(frame.y_m, 3))}</span>
+          <span>${escapeHtml(numberText(frame.z_m, 3))}</span>
+          <span>${escapeHtml(numberText(frame.rx_deg, 1))}</span>
+          <span>${escapeHtml(numberText(frame.ry_deg, 1))}</span>
+          <span>${escapeHtml(numberText(frame.rz_deg, 1))}</span>
+        </div>
+      `).join("")}
+    </div>
+    ${renderDashboardRows([["pose_error_mm", pose.pose_error_mm ?? "-"], ["rotation_error_deg", pose.rotation_error_deg ?? "-"]])}
+  `;
+}
+
+function renderManipulationTrajectory(motion = {}) {
+  const series = Array.isArray(motion.series) ? motion.series : [];
+  const axes = Array.isArray(motion.axes) && motion.axes.length ? motion.axes : ["x_m", "y_m", "z_m"];
+  if (!series.length) return renderVizEmpty("No motion trajectory series is available.");
+  const width = 360;
+  const height = 154;
+  const pad = { left: 28, right: 16, top: 14, bottom: 24 };
+  const times = series.map((point, index) => dashboardFiniteNumber(point.t_s) ?? index);
+  const values = axes.flatMap((axis) => series.map((point) => dashboardFiniteNumber(point[axis]))).filter((value) => value !== null);
+  const xDomain = finiteRange(times, [0, series.length - 1]);
+  const yDomain = finiteRange(values, [-0.2, 0.4]);
+  const colors = ["#34d399", "#38bdf8", "#f59e0b"];
+  const x = (value) => scaleLinear(value, xDomain, [pad.left, width - pad.right]);
+  const y = (value) => scaleLinear(value, yDomain, [height - pad.bottom, pad.top]);
+  return `
+    <div class="ar-man-trajectory">
+      <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="motion trajectory line chart">
+        <rect x="${pad.left}" y="${pad.top}" width="${width - pad.left - pad.right}" height="${height - pad.top - pad.bottom}" rx="7"></rect>
+        <line x1="${pad.left}" y1="${height - pad.bottom}" x2="${width - pad.right}" y2="${height - pad.bottom}" class="axis"></line>
+        <line x1="${pad.left}" y1="${pad.top}" x2="${pad.left}" y2="${height - pad.bottom}" class="axis"></line>
+        ${axes.map((axis, axisIndex) => {
+          const points = series.map((point, index) => [x(times[index]), y(dashboardFiniteNumber(point[axis]) ?? 0)]);
+          return `<polyline points="${polyline(points)}" style="--line:${escapeHtml(colors[axisIndex % colors.length])};"><title>${escapeHtml(axis)}</title></polyline>`;
+        }).join("")}
+        ${series.map((point, index) => `<circle cx="${numberText(x(times[index]), 2)}" cy="${numberText(y(dashboardFiniteNumber(point.z_m) ?? 0), 2)}" r="2"><title>t=${escapeHtml(numberText(times[index], 2))}s z=${escapeHtml(numberText(point.z_m, 3))}</title></circle>`).join("")}
+      </svg>
+      <div class="ar-man-axis-legend">${axes.map((axis, index) => `<span><i style="background:${escapeHtml(colors[index % colors.length])};"></i>${escapeHtml(axis)}</span>`).join("")}</div>
+    </div>
+  `;
+}
+
+function renderManipulationTimeline(timeline = {}) {
+  const segments = Array.isArray(timeline.segments) ? timeline.segments : [];
+  if (!segments.length) return renderVizEmpty("No reaction timeline segments are available.");
+  const total = Math.max(dashboardFiniteNumber(timeline.total_time_s) ?? 0, ...segments.map((item) => dashboardFiniteNumber(item.end_s) ?? 0), 1);
+  return `
+    <div class="ar-man-timeline" role="list" aria-label="reaction timeline">
+      ${segments.slice(0, 6).map((item) => {
+        const start = dashboardFiniteNumber(item.start_s) ?? 0;
+        const end = dashboardFiniteNumber(item.end_s) ?? start;
+        const left = dashboardPercent((start / total) * 100);
+        const width = Math.max(3, dashboardPercent(((end - start) / total) * 100));
+        const status = item.status || "pending";
+        return `
+          <article class="ar-man-time-row tone-${escapeHtml(manipulationReportTone(status))}" role="listitem">
+            <span>${escapeHtml(compactText(item.label || "segment", 30))}</span>
+            <div><i style="--start:${numberText(left, 2)}%;--width:${numberText(width, 2)}%;"></i></div>
+            <strong>${escapeHtml(numberText(start, 1))}-${escapeHtml(numberText(end, 1))}s</strong>
+          </article>
+        `;
+      }).join("")}
+    </div>
+    ${renderDashboardRows([["total_time_s", timeline.total_time_s ?? total], ["status", timeline.status || "-"]])}
+  `;
+}
+
+function renderManipulationScene(scene = {}) {
+  const frames = Array.isArray(scene.frames) ? scene.frames : [];
+  if (!frames.length) return renderVizEmpty("No grasp scene frames are available.");
+  return `
+    <div class="ar-man-scene-grid" role="list" aria-label="grasp scene camera frames">
+      ${frames.slice(0, 4).map((frame, index) => {
+        const status = frame.status || "pending";
+        return `
+          <article class="tone-${escapeHtml(manipulationReportTone(status))}" role="listitem">
+            <span>${escapeHtml(String(index + 1).padStart(2, "0"))}</span>
+            <strong>${escapeHtml(compactText(frame.label || "frame", 24))}</strong>
+            <small>${escapeHtml(status)}</small>
+          </article>
+        `;
+      }).join("")}
+    </div>
+    ${renderDashboardRows([["camera", scene.camera || "-"]])}
+  `;
+}
+
+function renderManipulationArtifacts(artifacts = []) {
+  const clean = Array.isArray(artifacts) ? artifacts : [];
+  if (!clean.length) return renderVizEmpty("No manipulation artifacts have been indexed.");
+  return `
+    <div class="ar-man-artifacts" role="list" aria-label="manipulation key artifacts">
+      ${clean.slice(0, 4).map((item) => `
+        <article role="listitem">
+          <strong>${escapeHtml(compactText(item.name || "artifact", 34))}</strong>
+          <span>${escapeHtml(compactText(item.type || "file", 18))} / ${escapeHtml(compactText(item.size || "-", 18))}</span>
+          <small>${escapeHtml(compactText(item.path || "runtime", 72))}</small>
+        </article>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderManipulationDashboardCards(report, status, agentLabel, profile) {
+  const screen = latestManipulationAgentReport(report) || {};
+  if (screen.schema === "manipulation_agent_report.v1") {
+    const brief = screen.execution_brief || {};
+    const summary = screen.summary || {};
+    return `
+      ${renderDashboardCard("Execution Control", `
+        <div class="ar-report-metrics">
+          ${renderDashboardMetric("Outcome", summary.outcome || screen.status || "-", "run", manipulationReportTone(summary.outcome || screen.status))}
+          ${renderDashboardMetric("Duration", brief.duration_s ?? "-", "s", "info")}
+          ${renderDashboardMetric("Grade", summary.quality_grade || "-", "quality", manipulationReportTone(summary.quality_grade || summary.outcome))}
+        </div>
+        ${renderDashboardRows([
+          ["run_id", brief.run_id || "-"],
+          ["task", brief.task || "-"],
+          ["target_object", brief.target_object || "-"],
+          ["executor", brief.executor || "-"],
+          ["start_time", brief.start_time || "-"],
+          ["end_time", brief.end_time || "-"],
+          ["next_agent", summary.next_agent || "-"],
+        ])}
+      `, { span: 4, tone: "manipulation", eyebrow: "task + outcome", meta: screen.status || status })}
+      ${renderDashboardCard("Performance KPIs", renderManipulationKpis(screen.performance_kpis || {}), { span: 8, tone: "metrics", eyebrow: "six-axis run health" })}
+      ${renderDashboardCard("Grasp / Path Plan", `
+        <div class="ar-man-two-up">
+          <section>
+            <h5>Grasp</h5>
+            ${renderManipulationGraspPlan(screen.grasp_plan || {})}
+          </section>
+          <section>
+            <h5>Waypoints</h5>
+            ${renderManipulationWaypoints(screen.waypoint_sequence || {})}
+          </section>
+        </div>
+      `, { span: 6, tone: "manipulation", eyebrow: "candidate scoring + route" })}
+      ${renderDashboardCard("Workspace Map", `
+        <div class="ar-man-two-up">
+          <section>
+            <h5>Workspace</h5>
+            ${renderManipulationWorkspace(screen.robot_workspace || {}, screen.reachability_map || {})}
+          </section>
+          <section>
+            <h5>Reachability</h5>
+            ${renderManipulationReachabilityMap(screen.reachability_map || {})}
+          </section>
+        </div>
+      `, { span: 6, tone: "manipulation", eyebrow: "workspace + feasibility" })}
+      ${renderDashboardCard("Safety / Pose Gate", `
+        <div class="ar-man-two-up">
+          <section>
+            <h5>Safety</h5>
+            ${renderManipulationSafety(screen.collision_safety_status || {})}
+          </section>
+          <section>
+            <h5>Pose</h5>
+            ${renderManipulationPoseTable(screen.object_pose_handoff || {})}
+          </section>
+        </div>
+      `, { span: 8, tone: "manipulation", eyebrow: "collision + object pose" })}
+      ${renderDashboardCard("Motion Trace", `
+        <div class="ar-man-two-up">
+          <section>
+            <h5>Execution Checks</h5>
+            ${renderManipulationChecks(screen.motion_execution || {})}
+          </section>
+          <section>
+            <h5>Trajectory</h5>
+            ${renderManipulationTrajectory(screen.motion_trajectory || {})}
+          </section>
+        </div>
+      `, { span: 8, tone: "metrics", eyebrow: "checks + trajectory" })}
+      ${renderDashboardCard("Scene Snapshot", `
+        <div class="ar-man-two-up">
+          <section>
+            <h5>Scene</h5>
+            ${renderManipulationScene(screen.grasp_scene || {})}
+          </section>
+          <section>
+            <h5>Trace Summary</h5>
+            ${renderDashboardRows([
+              ["artifacts", Array.isArray(screen.key_artifacts) ? screen.key_artifacts.length : 0],
+              ["timeline_segments", Array.isArray(screen.reaction_timeline && screen.reaction_timeline.segments) ? screen.reaction_timeline.segments.length : 0],
+              ["manifest", Array.isArray(screen.visualization_manifest) ? `${screen.visualization_manifest.length} visual layers` : "-"],
+              ["notes", summary.notes || "-"],
+            ])}
+          </section>
+        </div>
+      `, { span: 4, tone: "artifact", eyebrow: "camera + run evidence" })}
+    `;
+  }
+
+  const manipulation = latestManipulationReport(report) || {};
+  const robotResult = latestRobotTaskResult(report) || {};
+  const task = manipulation.task || {};
+  const policy = manipulation.policy_plan || {};
+  const preflight = manipulation.preflight || {};
+  const vision = manipulation.vision_context || {};
+  const stage = manipulation.stage_machine || {};
+  const sarm = manipulation.sarm || {};
+  const decision = manipulation.decision || {};
+  const preflightItems = Array.isArray(preflight.checks) ? preflight.checks.map((item) => `${item.name || "check"} / ${item.status || item.ok || "unknown"} / ${item.reason || ""}`) : [];
+  return `
+    ${renderDashboardCard("Task Route", renderDashboardRows([
+      ["task_id", task.task_id || robotResult.task_id || "-"],
+      ["source", task.source_location || "-"],
+      ["target", task.target_location || "-"],
+      ["object", task.object_id || robotResult.object_id || "-"],
+      ["vision_signal", vision.signal_id || vision.signal || "-"],
+    ]), { span: 4, tone: "manipulation", eyebrow: "bounded action" })}
+    ${renderDashboardCard("Policy / Pi0.5", renderDashboardRows([
+      ["policy_backend", policy.policy_backend || "-"],
+      ["policy_type", policy.policy_type || latestReportPayload(report, ["policy_type"]) || "-"],
+      ["policy_ref", policy.policy_ref || latestReportPayload(report, ["policy_path", "checkpoint_path", "policy_repo_id"]) || "-"],
+      ["lerobot_env", policy.lerobot_env || "-"],
+      ["execution_boundary", policy.execution_boundary || "bounded rollout"],
+    ]), { span: 4, tone: "manipulation", eyebrow: "control policy" })}
+    ${renderDashboardCard("Preflight Gates", `${renderDashboardRows([
+      ["status", preflight.status || "-"],
+      ["robot_ready", preflight.robot_ready === undefined ? "-" : preflight.robot_ready],
+      ["vision_ready", preflight.vision_ready === undefined ? "-" : preflight.vision_ready],
+      ["workspace_clear", preflight.workspace_clear === undefined ? "-" : preflight.workspace_clear],
+    ])}${dashboardList(preflightItems, "No manipulation preflight checklist recorded.", 6)}`, { span: 4, tone: preflight.status === "blocked" ? "warning" : "manipulation", eyebrow: "safety checks" })}
+    ${renderDashboardCard("SARM Progress", renderDashboardRows([
+      ["current_stage", stage.current_stage || "-"],
+      ["progress_score", sarm.progress_score === undefined ? "-" : sarm.progress_score],
+      ["risk_score", sarm.risk_score === undefined ? "-" : sarm.risk_score],
+      ["failure_precursor", sarm.failure_precursor === undefined ? "-" : sarm.failure_precursor],
+      ["recovery_action", sarm.recovery_action || "-"],
+    ]), { span: 6, tone: "manipulation", eyebrow: "runtime supervision" })}
+    ${renderDashboardCard("Robot Task Result", renderDashboardRows([
+      ["status", robotResult.status || decision.status || "-"],
+      ["handoff_status", robotResult.handoff_status || decision.handoff_status || "-"],
+      ["next_agent", robotResult.next_action || decision.recommended_next_agent || "-"],
+      ["trace_id", robotResult.trace_id || "-"],
+      ["post_place_verified", robotResult.post_place_verified === undefined ? "-" : robotResult.post_place_verified],
+    ]), { span: 6, tone: "manipulation", eyebrow: "physical result" })}
+  `;
+}
+
+function reportBooleanTone(value) {
+  const normalized = String(value ?? "").toLowerCase();
+  if (value === true || ["ok", "ready", "pass", "passed", "success"].includes(normalized)) return "success";
+  if (value === false || ["blocked", "block", "error", "failed", "fail"].includes(normalized)) return "danger";
+  return "warning";
+}
+
+function reportBooleanLabel(value) {
+  if (value === true) return "ok";
+  if (value === false) return "block";
+  return renderRuntimeValue(value, "-");
+}
+
+function renderEquipmentGauge(label, pct, status, meta = "") {
+  const value = dashboardPercent(pct);
+  const tone = reportBooleanTone(status);
+  return `
+    <article class="ar-eqp-gauge tone-${escapeHtml(tone)}" style="--score:${numberText(value, 2)}%;">
+      <div class="ar-eqp-gauge-ring"><strong>${escapeHtml(numberText(value, 0))}%</strong><span>${escapeHtml(reportBooleanLabel(status))}</span></div>
+      <div><b>${escapeHtml(label)}</b><small>${escapeHtml(compactText(meta || "-", 42))}</small></div>
+    </article>
+  `;
+}
+
+function renderEquipmentReadinessBoard(equipment, result, packet, handoff) {
+  const bridge = equipment.bridge || {};
+  const controlPlan = equipment.control_plan || {};
+  const screenChecks = Array.isArray(equipment.screen_checks) ? equipment.screen_checks : [];
+  const vision = equipment.vision_cross_checks || {};
+  const physical = equipment.physical_checks || {};
+  const data = equipment.data_acquisition || {};
+  const cross = equipment.cross_checks || {};
+  const screenTotal = Math.max(1, screenChecks.length);
+  const screenPassed = screenChecks.filter((item) => item && item.ok).length;
+  const physicalGates = [vision.all_required_ok, physical.vision_motion_confirmed, physical.alignment_confirmed, physical.specimen_loaded].filter((item) => item !== undefined);
+  const physicalPassed = physicalGates.filter(Boolean).length;
+  const dataGates = [cross.data_parse_probe_ok, cross.save_export_responsibility_ok, data.status === "ready" || result.status === "ok" || packet.status === "ready" || handoff.status === "ready_for_analysis"].filter((item) => item !== undefined);
+  const dataPassed = dataGates.filter(Boolean).length;
+  return `
+    <div class="ar-eqp-readiness-board">
+      ${renderEquipmentGauge("Bridge", bridge.connection_status === "connected" ? 96 : bridge.connection_status ? 64 : 22, bridge.connection_status === "connected", bridge.provider || controlPlan.locator_backend || "windows bridge")}
+      ${renderEquipmentGauge("Screen", (screenPassed / screenTotal) * 100, screenPassed === screenChecks.length && screenChecks.length > 0, `${screenPassed}/${screenChecks.length || 0} checks`)}
+      ${renderEquipmentGauge("Vision", physicalGates.length ? (physicalPassed / physicalGates.length) * 100 : 0, physicalGates.length ? physicalPassed === physicalGates.length : undefined, `${physicalPassed}/${physicalGates.length} gates`)}
+      ${renderEquipmentGauge("Data", dataGates.length ? (dataPassed / dataGates.length) * 100 : 0, dataGates.length ? dataPassed === dataGates.length : undefined, data.linux_path || result.result_file || "csv ledger")}
+    </div>
+  `;
+}
+
+function renderEquipmentGatePanel(equipment) {
+  const screenChecks = Array.isArray(equipment.screen_checks) ? equipment.screen_checks : [];
+  const vision = equipment.vision_cross_checks || {};
+  const physical = equipment.physical_checks || {};
+  const cross = equipment.cross_checks || {};
+  const gates = [
+    ...screenChecks.map((item, index) => ({ label: item.name || item.assertion || `screen_${index + 1}`, status: item.ok })),
+    { label: "vision_required", status: vision.all_required_ok },
+    { label: "motion_confirmed", status: physical.vision_motion_confirmed },
+    { label: "alignment", status: physical.alignment_confirmed || physical.specimen_alignment_ok },
+    { label: "parse_ready", status: cross.data_parse_probe_ok },
+    { label: "export_owner", status: cross.save_export_responsibility_ok },
+  ].filter((item) => item.status !== undefined);
+  return renderGateStatusBars(gates, { label: "equipment readiness gates", limit: 14, emptyText: "No equipment gates recorded." });
+}
+
+function renderEquipmentSensorTable(equipment) {
+  const physical = equipment.physical_checks || {};
+  const data = equipment.data_acquisition || {};
+  const audit = equipment.live_evidence_audit || {};
+  const rows = [
+    ["specimen_loaded", physical.specimen_loaded],
+    ["motion_confirmed", physical.vision_motion_confirmed],
+    ["alignment_ok", physical.alignment_confirmed || physical.specimen_alignment_ok],
+    ["fixture_safe", physical.fixture_safe_to_access],
+    ["row_probe", data.row_count_probe],
+    ["save_export", audit.save_export && typeof audit.save_export === "object" ? audit.save_export.ok : undefined],
+    ["linux_pull", audit.linux_artifact_pull && typeof audit.linux_artifact_pull === "object" ? audit.linux_artifact_pull.ok : undefined],
+  ].filter(([, value]) => value !== undefined && value !== null && value !== "");
+  if (!rows.length) return renderVizEmpty("No sensor or evidence audit rows recorded.");
+  return `
+    <div class="ar-eqp-sensor-table" role="table" aria-label="equipment sensor and audit channels">
+      ${rows.map(([label, value]) => `
+        <div role="row" class="tone-${escapeHtml(reportBooleanTone(value))}">
+          <span>${escapeHtml(label)}</span>
+          <strong>${escapeHtml(renderRuntimeValue(value))}</strong>
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderEquipmentEventLog(report) {
+  const events = (report.events || []).filter((event) => {
+    const text = `${event.event_type || event.type || ""} ${event.node_id || ""} ${event.message || ""}`.toLowerCase();
+    return /equipment|utm|windows|bridge|pyautogui|analysis/.test(text);
+  }).slice(-7).reverse();
+  if (!events.length) return renderVizEmpty("No equipment events recorded.");
+  return `
+    <div class="ar-eqp-event-log">
+      ${events.slice(0, 4).map((event) => `
+        <article>
+          <span>${escapeHtml(formatTime(event.ts || event.timestamp))}</span>
+          <strong>${escapeHtml(compactText(event.event_type || event.type || "event", 34))}</strong>
+          <small>${escapeHtml(compactText(event.message || "", 52))}</small>
+        </article>
+      `).join("")}
+    </div>
+  `;
+}
+
+function analysisCurvePoints(analysis) {
+  const curve = analysis.utm_curve || {};
+  return Array.isArray(curve.preview) ? curve.preview : Array.isArray(curve.points) ? curve.points : [];
+}
+
+function renderAnalysisCurve(analysis) {
+  const points = analysisCurvePoints(analysis)
+    .map((point) => ({
+      x: dashboardFiniteNumber(point.displacement_mm ?? point.displacement ?? point.x),
+      y: dashboardFiniteNumber(point.force_N ?? point.force ?? point.y),
+      t: dashboardFiniteNumber(point.time_s ?? point.t),
+    }))
+    .filter((point) => point.x !== null && point.y !== null);
+  if (points.length < 2) return renderVizEmpty("No UTM curve preview recorded.");
+  const width = 420;
+  const height = 190;
+  const pad = { left: 38, right: 14, top: 18, bottom: 30 };
+  const minX = Math.min(...points.map((point) => point.x));
+  const maxX = Math.max(...points.map((point) => point.x), minX + 1);
+  const minY = Math.min(0, ...points.map((point) => point.y));
+  const maxY = Math.max(...points.map((point) => point.y), minY + 1);
+  const x = (value) => pad.left + ((value - minX) / (maxX - minX)) * (width - pad.left - pad.right);
+  const y = (value) => height - pad.bottom - ((value - minY) / (maxY - minY)) * (height - pad.top - pad.bottom);
+  const line = points.map((point) => [x(point.x), y(point.y)]);
+  const peak = points.reduce((best, point) => point.y > best.y ? point : best, points[0]);
+  return `
+    <div class="ar-analysis-curve">
+      <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="UTM force displacement curve preview">
+        <line x1="${pad.left}" y1="${height - pad.bottom}" x2="${width - pad.right}" y2="${height - pad.bottom}" class="axis"></line>
+        <line x1="${pad.left}" y1="${pad.top}" x2="${pad.left}" y2="${height - pad.bottom}" class="axis"></line>
+        <polyline points="${polyline(line)}" class="curve"></polyline>
+        <circle class="peak" cx="${numberText(x(peak.x), 2)}" cy="${numberText(y(peak.y), 2)}" r="4.4"><title>peak ${numberText(peak.y, 3)} N at ${numberText(peak.x, 3)} mm</title></circle>
+        <text x="${pad.left}" y="14">force-displacement</text>
+        <text x="${x(peak.x) + 8}" y="${Math.max(22, y(peak.y) - 8)}">peak ${escapeHtml(numberText(peak.y, 2))} N</text>
+        <text x="${width - 92}" y="${height - 8}">disp mm</text>
+      </svg>
+    </div>
+  `;
+}
+
+function renderAnalysisMetricBars(analysis) {
+  const metrics = analysis.utm_metrics || {};
+  const rows = [
+    ["peak_force_N", metrics.peak_force_N, "N", "info"],
+    ["strength_MPa", metrics.compressive_strength_MPa, "MPa", "success"],
+    ["stiffness", metrics.initial_stiffness_N_per_mm, "N/mm", "running"],
+    ["energy", metrics.energy_absorption_mJ, "mJ", "warning"],
+    ["objective", analysis.objective_score, "score", "success"],
+    ["uncertainty", analysis.uncertainty, "model", "warning"],
+  ].map(([label, value, unit, tone]) => {
+    const number = dashboardFiniteNumber(value);
+    return number === null ? null : { label, value: number, meta: `${numberText(number, 4)} ${unit}`, tone };
+  }).filter(Boolean);
+  return renderMiniBarChart(rows, { label: "analysis metric bars", emptyText: "No numeric analysis metrics recorded." });
+}
+
+function renderAnalysisQualityDonut(quality) {
+  const score = dashboardFiniteNumber(quality.score);
+  const pct = score === null ? (quality.ok_for_bo ? 100 : 0) : dashboardPercent(score <= 1 ? score * 100 : score);
+  const checks = Array.isArray(quality.checks) ? quality.checks : [];
+  const warnings = Array.isArray(quality.warnings) ? quality.warnings : [];
+  return `
+    <div class="ar-analysis-quality">
+      <div class="ar-analysis-donut" style="--score:${numberText(pct, 2)}%;"><strong>${escapeHtml(numberText(pct, 0))}%</strong><span>${escapeHtml(quality.ok_for_bo === false ? "hold" : "pass")}</span></div>
+      ${renderDashboardRows([
+        ["ok_for_bo", quality.ok_for_bo === undefined ? "-" : quality.ok_for_bo],
+        ["checks", checks.length],
+        ["warnings", warnings.length],
+        ["failure", quality.failure_code || "-"],
+      ])}
+    </div>
+  `;
+}
+
+function renderKnowledgeMemoryBoard(knowledgeReport, evolution) {
+  const intake = knowledgeReport.memory_intake || {};
+  const evidence = knowledgeReport.evidence_quality || {};
+  const packs = Array.isArray(evolution.evidence_packs) ? evolution.evidence_packs : [];
+  return `
+    <div class="ar-knw-memory-board">
+      ${renderDashboardMetric("Failures", intake.failure_pattern_count ?? (knowledgeReport.failure_patterns || []).length ?? 0, "patterns", "danger")}
+      ${renderDashboardMetric("Successes", intake.success_pattern_count ?? (knowledgeReport.success_patterns || []).length ?? 0, "patterns", "success")}
+      ${renderDashboardMetric("Performance", intake.agent_performance_count ?? (knowledgeReport.agent_performance_records || []).length ?? 0, "records", "info")}
+      ${renderDashboardMetric("Evolution", intake.evolution_pack_count ?? packs.length, "packs", "warning")}
+      ${renderMiniBarChart([
+        { label: "artifact_links", value: dashboardFiniteNumber(evidence.artifact_link_coverage) ?? 0, max: 1, tone: "success", meta: renderRuntimeValue(evidence.artifact_link_coverage, "0") },
+        { label: "agent_reports", value: dashboardFiniteNumber(evidence.agent_report_coverage) ?? 0, max: 1, tone: "info", meta: renderRuntimeValue(evidence.agent_report_coverage, "0") },
+        { label: "incidents", value: dashboardFiniteNumber(evidence.guardian_incident_count) ?? 0, tone: "warning", meta: renderRuntimeValue(evidence.guardian_incident_count, "0") },
+        { label: "gates", value: dashboardFiniteNumber(evidence.guardian_gate_count) ?? 0, tone: "running", meta: renderRuntimeValue(evidence.guardian_gate_count, "0") },
+      ], { label: "knowledge evidence coverage", compact: true })}
+    </div>
+  `;
+}
+
+function renderKnowledgePatternBoard(knowledgeReport) {
+  const failures = Array.isArray(knowledgeReport.failure_patterns) ? knowledgeReport.failure_patterns : [];
+  const successes = Array.isArray(knowledgeReport.success_patterns) ? knowledgeReport.success_patterns : [];
+  const items = [
+    ...failures.slice(0, 3).map((item) => ({ tone: "danger", label: item.pattern_id || item.failure_code || "failure", text: item.summary || item.description || renderRuntimeValue(item) })),
+    ...successes.slice(0, 2).map((item) => ({ tone: "success", label: item.pattern_id || item.name || "success", text: item.summary || item.description || renderRuntimeValue(item) })),
+  ];
+  if (!items.length) return renderVizEmpty("No typed pattern memory recorded.");
+  return `
+    <div class="ar-knw-patterns">
+      ${items.map((item) => `
+        <article class="tone-${escapeHtml(item.tone)}">
+          <strong>${escapeHtml(compactText(item.label, 32))}</strong>
+          <span>${escapeHtml(compactText(item.text, 58))}</span>
+        </article>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderBoRankingBoard(boResult) {
+  const ranking = Array.isArray(boResult.candidate_ranking) ? boResult.candidate_ranking : Array.isArray(boResult.candidate_pool) ? boResult.candidate_pool.slice(0, 8) : [];
+  if (!ranking.length) return renderVizEmpty("No BO candidate ranking recorded.");
+  const maxScore = Math.max(...ranking.map((item) => dashboardFirstNumber(item, ["combined_score", "acquisition_score", "objective_score", "score"]) ?? 0), 1);
+  return `
+    <div class="ar-bo-ranking-board">
+      ${ranking.slice(0, 8).map((item, index) => {
+        const score = dashboardFirstNumber(item, ["combined_score", "acquisition_score", "objective_score", "score"]) ?? 0;
+        const acq = dashboardFirstNumber(item.numeric || item, ["acquisition_value", "acquisition_score", "acquisition"]) ?? 0;
+        const llm = dashboardFirstNumber(item.llm || item, ["preference_score", "llm_preference"]) ?? 0;
+        const risk = dashboardFirstNumber(item.constraints || item, ["risk_score", "risk"]) ?? 0;
+        const pct = dashboardPercent((score / maxScore) * 100);
+        return `
+          <article class="${index === 0 ? "selected" : ""}" style="--score:${numberText(pct, 2)}%;">
+            <div><strong>${escapeHtml(item.candidate_id || item.id || `candidate_${index + 1}`)}</strong><span>${escapeHtml(numberText(score, 4))}</span></div>
+            <div class="bar"><i></i></div>
+            <small>acq ${escapeHtml(numberText(acq, 3))} / pref ${escapeHtml(numberText(llm, 3))} / risk ${escapeHtml(numberText(risk, 3))}</small>
+          </article>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function renderBoParameterChips(candidate) {
+  const params = candidate && typeof candidate.parameters === "object" ? candidate.parameters : {};
+  const entries = Object.entries(params).slice(0, 12);
+  if (!entries.length) return renderVizEmpty("No selected candidate parameters recorded.");
+  return `
+    <div class="ar-bo-param-chips">
+      ${entries.map(([key, value]) => `<span><b>${escapeHtml(key)}</b><em>${escapeHtml(renderRuntimeValue(value))}</em></span>`).join("")}
+    </div>
+  `;
+}
+
+function latestBoGateContext(report) {
+  const events = [...(liveRunEvents || []), ...((report && report.events) || [])];
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index] || {};
+    const payload = eventPayload(event);
+    const text = `${event.event_type || event.type || ""} ${event.message || ""} ${JSON.stringify(payload)}`.toLowerCase();
+    const fromStage = String(payload.from_stage || backendField(payload, ["selected_transition.from_stage", "transition.from_stage"]) || "").toLowerCase();
+    const toStage = String(payload.to_stage || backendField(payload, ["selected_transition.to_stage", "transition.to_stage"]) || "").toLowerCase();
+    if ((fromStage === "knowledge" && toStage === "guardian") || text.includes("knowledge -> guardian") || text.includes("guardian_post_gate_block")) {
+      const gate = backendField(payload, ["guardian_gate", "result.guardian_gate", "orchestrator_followup.guardian_gate"]) || {};
+      const followup = backendField(payload, ["orchestrator_followup"]) || {};
+      return {
+        blocked: true,
+        source: event.event_type || event.type || "stage_transition",
+        reason: gate.reason_code || gate.decision || followup.trigger || event.message || "Knowledge gate routed to Guardian before BO.",
+        decision: gate.decision || payload.status || "blocked",
+        next_stage: toStage || "guardian",
+      };
+    }
+  }
+  const messages = planningMessagesCache || [];
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const msg = messages[index] || {};
+    const text = String(msg.content || "").toLowerCase();
+    if (text.includes("stage: knowledge") && text.includes("guardian_post_gate_block")) {
+      return {
+        blocked: true,
+        source: "orchestrator_followup",
+        reason: "Knowledge post-gate routed to Guardian before BO.",
+        decision: "blocked",
+        next_stage: "guardian",
+      };
+    }
+  }
+  return { blocked: false, source: "not_recorded", reason: "BO Agent has not emitted a candidate ranking yet.", decision: "waiting", next_stage: "bo" };
+}
+
+function renderBoGateState(report) {
+  const gate = latestBoGateContext(report);
+  const analysis = latestAnalysisPayload(report) || {};
+  const quality = analysis.quality_gate || analysis.data_quality_gate || {};
+  const knowledgeReport = latestKnowledgeReport(report) || {};
+  const evolution = latestKnowledgeEvolutionProposal(report) || {};
+  const packs = Array.isArray(evolution.evidence_packs) ? evolution.evidence_packs : [];
+  const failures = Array.isArray(knowledgeReport.failure_patterns) ? knowledgeReport.failure_patterns : [];
+  const successes = Array.isArray(knowledgeReport.success_patterns) ? knowledgeReport.success_patterns : [];
+  return `
+    <div class="ar-bo-gate-state ${gate.blocked ? "blocked" : "waiting"}">
+      <div class="ar-report-metrics">
+        ${renderDashboardMetric("Route", gate.blocked ? "Held" : "Waiting", gate.next_stage || "bo", gate.blocked ? "warning" : "info")}
+        ${renderDashboardMetric("BO Ready", quality.ok_for_bo === undefined ? "-" : quality.ok_for_bo, "analysis gate", quality.ok_for_bo === false ? "warning" : "success")}
+        ${renderDashboardMetric("Priors", packs.length, "evidence packs", packs.length ? "success" : "idle")}
+        ${renderDashboardMetric("Memory", `${failures.length}/${successes.length}`, "fail/success", failures.length ? "warning" : "success")}
+      </div>
+      ${renderDashboardRows([
+        ["gate_source", gate.source],
+        ["decision", gate.decision],
+        ["reason", gate.reason],
+        ["next_step", gate.blocked ? "Review Knowledge/Guardian gate in Trace" : "Run BO Agent or wait for graph handoff"],
+      ])}
+    </div>
+  `;
+}
+
+function renderEquipmentDashboardCards(report, status, agentLabel, profile) {
+  const equipment = latestEquipmentReport(report) || {};
+  const result = latestEquipmentResult(report) || {};
+  const packet = latestUtmDataReadyPacket(report) || {};
+  const handoff = latestEquipmentHandoffPacket(report) || {};
+  const bridge = equipment.bridge || {};
+  const controlPlan = equipment.control_plan || {};
+  const controlProfile = controlPlan.profile || {};
+  const screenChecks = Array.isArray(equipment.screen_checks) ? equipment.screen_checks : [];
+  const visionChecks = equipment.vision_cross_checks || {};
+  const physical = equipment.physical_checks || {};
+  const data = equipment.data_acquisition || {};
+  const cross = equipment.cross_checks || {};
+  const decision = equipment.decision || {};
+  return `
+    ${renderDashboardCard("Equipment Readiness", renderEquipmentReadinessBoard(equipment, result, packet, handoff), { span: 8, tone: "equipment", eyebrow: "readiness" })}
+    ${renderDashboardCard("Live Test Status", `<div class="ar-report-metrics">
+      ${renderDashboardMetric("Screen", `${screenChecks.filter((item) => item && item.ok).length}/${screenChecks.length}`, "checks", screenChecks.some((item) => item && !item.ok) ? "warning" : "success")}
+      ${renderDashboardMetric("Rows", data.row_count_probe || "-", "probe", data.row_count_probe ? "success" : "idle")}
+      ${renderDashboardMetric("Vision", visionChecks.all_required_ok === undefined ? "-" : visionChecks.all_required_ok, "required", visionChecks.all_required_ok === false ? "danger" : "success")}
+      ${renderDashboardMetric("Handoff", decision.handoff_status || handoff.status || "-", "analysis", decision.failure_code ? "warning" : "success")}
+    </div>`, { span: 4, tone: "equipment", eyebrow: "live" })}
+    ${renderDashboardCard("Control Profile", renderDashboardRows([
+      ["provider", bridge.provider || "-"],
+      ["connection_status", bridge.connection_status || "-"],
+      ["program_id", controlPlan.program_id || result.program_id || handoff.program_id || "-"],
+      ["profile_id", controlProfile.program_id || controlProfile.id || "-"],
+      ["locator_count", controlProfile.locator_count || "-"],
+    ]), { span: 4, tone: "equipment", eyebrow: "control" })}
+    ${renderDashboardCard("Gate Matrix", renderEquipmentGatePanel(equipment), { span: 4, tone: screenChecks.some((item) => item && !item.ok) ? "warning" : "equipment", eyebrow: "screen + vision" })}
+    ${renderDashboardCard("Sensor Channels", renderEquipmentSensorTable(equipment), { span: 4, tone: "metrics", eyebrow: "audit" })}
+    ${renderDashboardCard("UTM Data Ledger", renderDashboardRows([
+      ["status", data.status || result.status || "-"],
+      ["row_count_probe", data.row_count_probe || "-"],
+      ["parse_probe_ok", cross.data_parse_probe_ok === undefined ? "-" : cross.data_parse_probe_ok],
+      ["linux_csv", data.linux_path || result.result_file || packet.result_file || handoff.result_file || "-"],
+      ["checksum", data.checksum || packet.checksum || "-"],
+    ]), { span: 4, tone: "equipment", eyebrow: "csv" })}
+    ${renderDashboardCard("Analysis Handoff", renderDashboardRows([
+      ["decision", decision.handoff_status || handoff.status || "-"],
+      ["failure_code", decision.failure_code || result.failure_code || handoff.failure_code || "-"],
+      ["next_agent", handoff.next_agent || decision.next_agent || "Analysis"],
+      ["packet_schema", packet.schema || handoff.schema || "-"],
+      ["guardian_required", decision.guardian_required === undefined ? "-" : decision.guardian_required],
+    ]), { span: 4, tone: decision.failure_code ? "warning" : "equipment", eyebrow: "handoff" })}
+  `;
+}
+
+function renderAnalysisDashboardCards(report, status, agentLabel, profile) {
+  const analysis = latestAnalysisPayload(report) || {};
+  const metrics = analysis.utm_metrics || {};
+  const quality = analysis.quality_gate || analysis.data_quality_gate || {};
+  const comparison = analysis.fem_utm_comparison || {};
+  const artifacts = analysis.analysis_artifacts || {};
+  const femLoop = analysis.fem_agentic_loop || {};
+  const boHandoff = latestAnalysisBoHandoff(report) || {};
+  return `
+    ${renderDashboardCard("Force-Displacement Curve", renderAnalysisCurve(analysis), { span: 8, tone: "analysis", eyebrow: "utm curve" })}
+    ${renderDashboardCard("Result Summary", `<div class="ar-report-metrics">
+      ${renderDashboardMetric("Peak", metrics.peak_force_N ?? "-", "N", "info")}
+      ${renderDashboardMetric("Strength", metrics.compressive_strength_MPa ?? "-", "MPa", "success")}
+      ${renderDashboardMetric("Score", analysis.objective_score ?? "-", "objective", "running")}
+      ${renderDashboardMetric("Unc.", analysis.uncertainty ?? "-", "model", "warning")}
+    </div>`, { span: 4, tone: "analysis", eyebrow: "result" })}
+    ${renderDashboardCard("Metric Bars", renderAnalysisMetricBars(analysis), { span: 4, tone: "metrics", eyebrow: "features" })}
+    ${renderDashboardCard("Data Quality", renderAnalysisQualityDonut(quality), { span: 4, tone: quality.ok_for_bo === false ? "warning" : "analysis", eyebrow: "qa" })}
+    ${renderDashboardCard("Raw Data Ledger", renderDashboardRows([
+      ["raw_file", analysis.raw_file || analysis.source_file || "-"],
+      ["fingerprint", analysis.file_fingerprint || analysis.checksum || "-"],
+      ["row_count", analysis.row_count || metrics.row_count || "-"],
+      ["unit_confidence", analysis.unit_confidence || "-"],
+      ["canonical_curve", artifacts.canonical_curve || "-"],
+    ]), { span: 4, tone: "analysis", eyebrow: "utm ingest" })}
+    ${renderDashboardCard("FEM / CAE Comparison", renderDashboardRows([
+      ["agreement_score", comparison.agreement_score === undefined ? "-" : comparison.agreement_score],
+      ["residual", comparison.residual || comparison.error || "-"],
+      ["fem_loop_status", femLoop.status || "-"],
+      ["selected_iteration", femLoop.selected_iteration === undefined ? "-" : femLoop.selected_iteration],
+      ["fem_result", artifacts.fem_result || "-"],
+    ]), { span: 4, tone: "analysis", eyebrow: "simulation" })}
+    ${renderDashboardCard("BO Handoff", renderDashboardRows([
+      ["ok_for_bo", boHandoff.ok_for_bo === undefined ? "-" : boHandoff.ok_for_bo],
+      ["objective_score", boHandoff.objective_score ?? analysis.objective_score ?? "-"],
+      ["uncertainty", boHandoff.uncertainty ?? analysis.uncertainty ?? "-"],
+      ["experiment_evaluation", artifacts.experiment_evaluation || "-"],
+      ["next_agent", boHandoff.next_agent || "BO"],
+    ]), { span: 4, tone: "analysis", eyebrow: "optimization" })}
+  `;
+}
+
+function renderKnowledgeDashboardCards(report, status, agentLabel, profile) {
+  const payload = latestKnowledgePayload(report) || {};
+  const knowledgeReport = latestKnowledgeReport(report) || {};
+  const context = latestKnowledgeContext(report) || {};
+  const evolution = latestKnowledgeEvolutionProposal(report) || {};
+  const intake = knowledgeReport.memory_intake || {};
+  const evidenceQuality = knowledgeReport.evidence_quality || context.evidence_quality || {};
+  const failures = Array.isArray(knowledgeReport.failure_patterns) ? knowledgeReport.failure_patterns : [];
+  const successes = Array.isArray(knowledgeReport.success_patterns) ? knowledgeReport.success_patterns : [];
+  const performance = Array.isArray(knowledgeReport.agent_performance_records) ? knowledgeReport.agent_performance_records : [];
+  const packs = Array.isArray(evolution.evidence_packs) ? evolution.evidence_packs : [];
+  const outcomes = Array.isArray(evolution.outcomes) ? evolution.outcomes : Array.isArray(knowledgeReport.evolution_outcomes) ? knowledgeReport.evolution_outcomes : [];
+  const packItems = packs.map((item) => `${item.target_type || "target"}:${item.target_id || "unknown"} / ${item.status || "proposed"} / ${item.summary || ""}`);
+  return `
+    ${renderDashboardCard("Memory Ledger", renderKnowledgeMemoryBoard(knowledgeReport, evolution), { span: 8, tone: "knowledge", eyebrow: "memory" })}
+    ${renderDashboardCard("Evidence Quality", renderDashboardRows([
+      ["artifact_links", evidenceQuality.artifact_link_coverage ?? "-"],
+      ["agent_reports", evidenceQuality.agent_report_coverage ?? "-"],
+      ["guardian_incidents", evidenceQuality.guardian_incident_count ?? "-"],
+      ["graph_backend", evidenceQuality.graph_backend_enabled ?? "-"],
+      ["context_items", Array.isArray(context.items) ? context.items.length : "-"],
+    ]), { span: 4, tone: "knowledge", eyebrow: "provenance" })}
+    ${renderDashboardCard("Pattern Library", renderKnowledgePatternBoard(knowledgeReport), { span: 6, tone: "knowledge", eyebrow: "failure + success" })}
+    ${renderDashboardCard("Memory Intake", renderDashboardRows([
+      ["experiment_record", intake.experiment_record_id || "-"],
+      ["agent_performance", intake.agent_performance_count ?? performance.length ?? "-"],
+      ["failure_patterns", intake.failure_pattern_count ?? failures.length ?? 0],
+      ["success_patterns", intake.success_pattern_count ?? successes.length ?? 0],
+      ["evolution_packs", intake.evolution_pack_count ?? packs.length ?? "-"],
+    ]), { span: 6, tone: "knowledge", eyebrow: "typed memory" })}
+    ${renderDashboardCard("Evolution Packs", `${renderDashboardRows([
+      ["packs", packs.length],
+      ["outcomes", outcomes.length],
+      ["top_target", packs[0] ? `${packs[0].target_type || "target"}:${packs[0].target_id || "unknown"}` : "-"],
+      ["activation_gate", evolution.activation_gate || "Self-Evolution / Guardian / operator"],
+    ])}${dashboardList(packItems, "No evolution evidence packs recorded.", 4)}`, { span: 6, tone: "knowledge", eyebrow: "self-evolution prep" })}
+    ${renderDashboardCard("Retrieval / Provenance", dashboardObjectList(context.retrieval || payload.retrieval || {}, "No retrieval context recorded.", 4), { span: 6, tone: "knowledge", eyebrow: "memory context" })}
+  `;
+}
+
+function renderBoDashboardCards(report, status, agentLabel, profile) {
+  const boResult = latestReportBoResult(report) || {};
+  const recommendation = boResult.recommendation || boResult.selected || {};
+  const reasoning = boResult.reasoning || {};
+  const priorSummary = boResult.prior_summary || {};
+  const ranking = Array.isArray(boResult.candidate_ranking) ? boResult.candidate_ranking : Array.isArray(boResult.candidate_pool) ? boResult.candidate_pool.slice(0, 8) : [];
+  const rankingItems = ranking.map((item, index) => `${index + 1}. ${item.candidate_id || item.id || "candidate"} / acq=${renderRuntimeValue(item.acquisition_score || item.acquisition || "-")} / score=${renderRuntimeValue(item.combined_score || item.objective_score || item.score || "-")}`);
+  if (!ranking.length && !Object.keys(boResult).length) {
+    const analysis = latestAnalysisPayload(report) || {};
+    const quality = analysis.quality_gate || analysis.data_quality_gate || {};
+    const knowledgeReport = latestKnowledgeReport(report) || {};
+    const evolution = latestKnowledgeEvolutionProposal(report) || {};
+    const packs = Array.isArray(evolution.evidence_packs) ? evolution.evidence_packs : [];
+    return `
+      ${renderDashboardCard("BO Gate Status", renderBoGateState(report), { span: 8, tone: "bo", eyebrow: "route state" })}
+      ${renderDashboardCard("Optimization Input", renderDashboardRows([
+        ["objective_score", analysis.objective_score ?? "-"],
+        ["uncertainty", analysis.uncertainty ?? "-"],
+        ["ok_for_bo", quality.ok_for_bo === undefined ? "-" : quality.ok_for_bo],
+        ["quality_warnings", quality.warnings || []],
+        ["knowledge_packs", packs.length],
+      ]), { span: 4, tone: quality.ok_for_bo === false ? "warning" : "bo", eyebrow: "ready check" })}
+      ${renderDashboardCard("Expected BO Payload", renderDashboardRows([
+        ["candidate_ranking", "waiting"],
+        ["recommendation", "waiting"],
+        ["next_design_request", "waiting"],
+        ["memory_failures", Array.isArray(knowledgeReport.failure_patterns) ? knowledgeReport.failure_patterns.length : 0],
+      ]), { span: 4, tone: "bo", eyebrow: "contract" })}
+    `;
+  }
+  return `
+    ${renderDashboardCard("Candidate Ranking", renderBoRankingBoard(boResult), { span: 8, tone: "bo", eyebrow: "top-k" })}
+    ${renderDashboardCard("Recommendation", renderDashboardRows([
+      ["candidate_id", recommendation.candidate_id || recommendation.id || "-"],
+      ["combined_score", recommendation.combined_score || "-"],
+      ["objective_score", recommendation.objective_score || recommendation.score || "-"],
+      ["uncertainty", recommendation.uncertainty || "-"],
+      ["source", recommendation.source_strategy || "-"],
+    ]), { span: 4, tone: "bo", eyebrow: "selected" })}
+    ${renderDashboardCard("Selected Parameters", renderBoParameterChips(recommendation), { span: 4, tone: "bo", eyebrow: "design vector" })}
+    ${renderDashboardCard("Acquisition Strategy", renderDashboardRows([
+      ["strategy", boResult.strategy || "-"],
+      ["benchmark_strategy", boResult.benchmark_strategy || "-"],
+      ["acquisition", boResult.acquisition || latestReportPayload(report, ["acquisition", "acquisition_function"]) || "-"],
+      ["budget", boResult.budget || "-"],
+      ["constraints", boResult.constraints || "-"],
+    ]), { span: 4, tone: "bo", eyebrow: "optimizer" })}
+    ${renderDashboardCard("Prior Memory", renderDashboardRows([
+      ["measured_count", priorSummary.measured_count ?? "-"],
+      ["failed_count", priorSummary.failed_count ?? "-"],
+      ["constraint_count", priorSummary.constraint_count ?? "-"],
+      ["reasoning_source", reasoning.source || "-"],
+      ["failure_penalty", boResult.failure_penalty || "-"],
+    ]), { span: 4, tone: "bo", eyebrow: "knowledge input" })}
+    ${renderDashboardCard("Ranking Audit", `${renderDashboardRows([
+      ["ranked_candidates", ranking.length],
+      ["top_candidate", ranking[0] ? ranking[0].candidate_id || ranking[0].id || "-" : "-"],
+      ["selection_rule", boResult.selection_rule || "-"],
+      ["llm_preference", reasoning.preference || reasoning.summary || "-"],
+    ])}${dashboardList(rankingItems, "No BO candidate ranking recorded.", 5)}`, { span: 4, tone: "bo", eyebrow: "audit" })}
+    ${renderDashboardCard("Next Design Request", renderDashboardRows([
+      ["schema", (boResult.next_design_request || {}).schema || "-"],
+      ["target_agent", (boResult.next_design_request || {}).target_agent || "Design"],
+      ["candidate_id", (boResult.next_design_request || {}).candidate_id || recommendation.candidate_id || "-"],
+      ["priority", (boResult.next_design_request || {}).priority || "-"],
+      ["status", (boResult.next_design_request || {}).status || "-"],
+    ]), { span: 4, tone: "bo", eyebrow: "handoff" })}
+  `;
+}
+
+function renderGuardianDashboardCards(report, status, agentLabel, profile) {
+  const guardianStatus = liveGuardianStatusPayload(report);
+  const summary = guardianStatus && guardianStatus.summary ? guardianStatus.summary : {};
+  const decisionRaw = latestReportPayload(report, ["latest_guardian_decision", "guardian_decision", "data.guardian_decision"]);
+  const decision = decisionRaw && typeof decisionRaw === "object" ? decisionRaw : {};
+  const incidents = Array.isArray(guardianStatus && guardianStatus.incidents) ? guardianStatus.incidents : Array.isArray(summary.incidents) ? summary.incidents : [];
+  const gates = Array.isArray(guardianStatus && guardianStatus.gates) ? guardianStatus.gates : Array.isArray(summary.gates) ? summary.gates : [];
+  const gateItems = gates.map((item) => `${item.name || item.gate || "gate"} / ${item.status || "unknown"} / ${item.reason || ""}`);
+  const incidentItems = incidents.map((item) => `${item.severity || "incident"} / ${item.type || item.code || "event"} / ${item.summary || item.reason || ""}`);
+  return `
+    ${renderDashboardCard("Safety Summary", renderDashboardRows([
+      ["guardian_status", guardianStatus ? guardianStatus.status || "-" : "not_loaded"],
+      ["risk_score", summary.risk_score ?? "-"],
+      ["dominant_risks", summary.dominant_risks || []],
+      ["blocked_actions", summary.blocked_action_count ?? "-"],
+      ["incidents", summary.incident_count ?? incidents.length ?? "-"],
+    ]), { span: 4, tone: summary.risk_score > 0.6 ? "warning" : "guardian", eyebrow: "global risk" })}
+    ${renderDashboardCard("Gate Queue", `${renderDashboardRows([
+      ["gate_count", summary.gate_count ?? gates.length ?? "-"],
+      ["pending_approvals", summary.pending_approval_count ?? (liveApprovals.pending || []).length],
+      ["approval_api_pending", (liveApprovals.pending || []).length],
+      ["resolved", (liveApprovals.resolved || []).length],
+    ])}${dashboardList(gateItems, "No guardian gate queue recorded.", 8)}`, { span: 4, tone: "guardian", eyebrow: "approval interrupts" })}
+    ${renderDashboardCard("Stop / Continue Decision", renderDashboardRows([
+      ["decision", decision.decision || latestReportPayload(report, ["guardian_decision", "decision", "next_stage"]) || report.nextAction],
+      ["reason_code", decision.reason_code || "-"],
+      ["latest_warning", report.warnings[report.warnings.length - 1] || "-"],
+      ["policy_schema", decision.policy_schema || "-"],
+      ["next_action", decision.next_action || report.nextAction],
+    ]), { span: 4, tone: "guardian", eyebrow: "authority" })}
+    ${renderDashboardCard("Incidents", dashboardList(incidentItems, "No active incidents recorded.", 8), { span: 6, tone: incidents.length ? "danger" : "success", eyebrow: "runtime safety" })}
+    ${renderDashboardCard("Device / Data Integrity", renderDashboardRows([
+      ["artifact_refs", liveRunArtifacts.length + report.artifactItems.length],
+      ["validation_items", report.validationItems.length],
+      ["warnings", report.warnings.length],
+      ["run_events", liveRunEvents.length],
+      ["integrity_status", summary.integrity_status || "-"],
+    ]), { span: 6, tone: "guardian", eyebrow: "audit trail" })}
+  `;
+}
+
+function renderAgentSpecializedDashboardSections(session, report, status, agentLabel) {
+  const profile = agentSpecificReportProfile(report, status, agentLabel);
+  const agentId = String(liveSelectedAgent || "").toLowerCase();
+  const controlSurface = liveAgentNeedsChatPanel(agentId);
+  const cardsByAgent = {
+    objective: () => renderObjectiveDashboardCards(report, status, agentLabel, profile),
+    orchestrator: () => renderOrchestratorDashboardCards(report, status, agentLabel, profile),
+    design: () => renderDesignDashboardCards(report, status, agentLabel, profile),
+    specimen: () => renderSpecimenDashboardCards(report, status, agentLabel, profile),
+    vision: () => renderVisionDashboardCards(report, status, agentLabel, profile),
+    manipulation: () => renderManipulationDashboardCards(report, status, agentLabel, profile),
+    equipment: () => renderEquipmentDashboardCards(report, status, agentLabel, profile),
+    analysis: () => renderAnalysisDashboardCards(report, status, agentLabel, profile),
+    knowledge: () => renderKnowledgeDashboardCards(report, status, agentLabel, profile),
+    bo: () => renderBoDashboardCards(report, status, agentLabel, profile),
+    guardian: () => renderGuardianDashboardCards(report, status, agentLabel, profile),
+  };
+  const specialized = cardsByAgent[agentId] ? cardsByAgent[agentId]() : renderAgentWorkcellCard(profile, report, status, agentLabel);
+  const visualization = ["orchestrator", "design", "specimen", "vision", "manipulation", "equipment", "analysis", "knowledge"].includes(agentId) ? "" : renderAgentVisualizationCard(report, status, agentLabel);
+  const checklistItems = Array.isArray(profile.checklist) ? profile.checklist : [];
+  const checklist = controlSurface && !["objective", "orchestrator"].includes(agentId) && checklistItems.length
+    ? renderDashboardCard(`${agentLabel} Checklist`, dashboardList(checklistItems, "No checklist recorded.", 5), { span: 4, tone: agentId || "agent", eyebrow: "operator" })
+    : "";
+  return `${specialized}${visualization}${checklist}`;
+}
+
+function renderLiveDashboardReportSections(session, report, status, agentLabel) {
+  const agentId = String(liveSelectedAgent || "").toLowerCase();
+  const controlSurface = liveAgentNeedsChatPanel(agentId);
+  const orchestratorSurface = agentId === "orchestrator";
+  const objectiveSurface = agentId === "objective";
+  const metricCards = [
+    renderDashboardMetric("Messages", report.messages.length, "selected agent", "info"),
+    renderDashboardMetric("Events", report.events.length, "agent scoped", "running"),
+    renderDashboardMetric("Artifacts", liveRunArtifacts.length + report.artifactItems.length, "run + report", "success"),
+    renderDashboardMetric("Approvals", (liveApprovals.pending || []).length, "pending", (liveApprovals.pending || []).length ? "warning" : "success"),
+  ].join("");
+  const nextAction = report.nextAction || "Wait for the next orchestrator instruction.";
+  const specializedCards = renderAgentSpecializedDashboardSections(session, report, status, agentLabel);
+  const controlCards = controlSurface
+    ? `
+      ${renderDashboardCard("Orchestration Route", renderRouteGraphDashboard(report, status), { span: 8, tone: "route", eyebrow: "agent graph" })}
+      ${renderDashboardCard("Decision Register", renderDecisionRegisterCard(report), { span: 4, tone: "success", eyebrow: "today" })}
+      ${renderDashboardCard("Next Action", renderReportList([nextAction], "No next action recorded.", 1), { span: 4, tone: "accent", eyebrow: "handoff" })}
+    `
+    : "";
+  const supportCards = controlSurface
+    ? orchestratorSurface
+      ? ""
+      : objectiveSurface
+      ? `
+      ${renderDashboardCard("Run Metrics", `<div class="ar-report-metrics">${metricCards}</div>`, { span: 5, tone: "metrics", eyebrow: "runtime" })}
+      ${renderDashboardCard("Backend Trace", renderBackendConnectionCard(report), { span: objectiveSurface ? 3 : 4, tone: "backend", eyebrow: "raw evidence lives in Trace" })}
+      ${objectiveSurface ? renderDashboardCard("Warnings", renderEvidenceWarningsCard(report), { span: 2, tone: "danger", eyebrow: "guardian" }) : ""}
+      ${renderDashboardCard("Artifacts", renderArtifactDashboardCard(report), { span: objectiveSurface ? 2 : 3, tone: "artifact", eyebrow: "ledger" })}
+    `
+      : `
+      ${renderDashboardCard("Stage Progress", renderStageProgressCard(report), { span: 4, tone: "info", eyebrow: "runtime" })}
+      ${renderDashboardCard("Run Metrics", `<div class="ar-report-metrics">${metricCards}</div>${renderRuntimeSignalGraph(report, status)}`, { span: 8, tone: "metrics", eyebrow: "runtime" })}
+      ${controlCards}
+      ${renderDashboardCard("Trace Link", renderBackendConnectionCard(report), { span: 4, tone: "backend", eyebrow: "backend" })}
+      ${renderDashboardCard("Warnings", renderEvidenceWarningsCard(report), { span: 4, tone: "danger", eyebrow: "guardian" })}
+      ${renderDashboardCard("Artifacts", renderArtifactDashboardCard(report), { span: 4, tone: "artifact", eyebrow: "ledger" })}
+    `
+    : `
+      ${renderDashboardCard("Runtime Support", renderRuntimeSupportCard(report, status), { span: 12, tone: report.warnings.length ? "warning" : "metrics", eyebrow: "runtime + trace summary" })}
+    `;
+  return `
+    ${specializedCards}
+    ${supportCards}
+  `;
+}
+
+function renderLiveReportToolbarActions() {
+  const agentNeedsChat = liveAgentNeedsChatPanel(liveSelectedAgent);
+  const canRestoreChatPanel = liveChatCanManualCollapse(liveSelectedAgent) && liveChatCollapsed;
+  const canOpenAgentChat = !agentNeedsChat && liveReportPage !== "attention";
+  const chatUnreadLabel = liveChatUnreadLabel();
+  const chatToggleLabel = canOpenAgentChat
+    ? `Open Runtime Chat for ${liveAgentLabel(liveSelectedAgent)}`
+    : liveChatCollapsed ? "Show Runtime Chat" : "Hide Runtime Chat";
+  const chatToggleTitle = chatUnreadLabel ? `${chatToggleLabel} (${chatUnreadLabel} unread)` : chatToggleLabel;
+  const chatActionMode = canOpenAgentChat ? "open_agent" : "restore";
+  const chatToggleAction = canRestoreChatPanel || canOpenAgentChat
+    ? `<button class="btn live-report-action live-chat-toggle-action ${chatUnreadLabel ? "has-chat-unread" : ""} ${liveChatCollapsed ? "is-chat-collapsed" : ""}" data-report-action="toggle_chat" data-chat-action-mode="${escapeHtml(chatActionMode)}" data-chat-agent-id="${escapeHtml(liveSelectedAgent)}" data-chat-agent-label="${escapeHtml(liveAgentLabel(liveSelectedAgent))}" data-chat-unread-count="${escapeHtml(chatUnreadLabel)}" data-chat-alert-state="${chatUnreadLabel ? "unread" : liveChatCollapsed ? "collapsed" : "idle"}" type="button" title="${escapeHtml(chatToggleTitle)}" aria-label="${escapeHtml(chatToggleTitle)}"><span class="live-report-action-icon" aria-hidden="true">CHAT</span><span class="live-report-action-label">Chat</span></button>`
+    : "";
+  if (liveCurrentView !== "report") return chatToggleAction;
+  const chatReportAction = agentNeedsChat
+    ? `<button class="btn live-report-action" data-report-action="ask" type="button" title="Ask in Runtime Chat" aria-label="Ask in Runtime Chat"><span class="live-report-action-icon" aria-hidden="true">?</span><span class="live-report-action-label">Ask</span></button>`
+    : "";
+  return `
+    <button class="btn live-report-action" data-report-action="export" type="button" title="Export selected report section" aria-label="Export selected report section"><span class="live-report-action-icon" aria-hidden="true">DL</span><span class="live-report-action-label">Export</span></button>
+    <button class="btn live-report-action" data-report-action="pin" type="button" title="Pin finding" aria-label="Pin finding"><span class="live-report-action-icon" aria-hidden="true">*</span><span class="live-report-action-label">Pin</span></button>
+    ${chatReportAction}
+    <button class="btn live-report-action" data-report-action="reviewed" type="button" title="Mark reviewed" aria-label="Mark reviewed"><span class="live-report-action-icon" aria-hidden="true">OK</span><span class="live-report-action-label">Review</span></button>
+    ${chatToggleAction}
+  `;
+}
+
+function renderLiveReportToolbar() {
+  if (!liveReportToolbar) return;
+  const toolbarActions = renderLiveReportToolbarActions();
+  liveReportToolbar.hidden = !toolbarActions.trim();
+  liveReportToolbar.innerHTML = toolbarActions;
+  syncLiveChatUnreadIndicators(liveReportToolbar);
+}
+
 function renderReportPanel(session) {
   if (!liveReportPanel) return;
   if (liveReportPage === "attention") {
+    renderLiveReportToolbar();
     liveReportPanel.innerHTML = renderAttentionReportPage(session);
     return;
   }
   const report = selectedReportModel(session);
-  const messages = report.messages;
-  const latestMessage = report.latestMessage;
   const agentLabel = liveAgentLabel(liveSelectedAgent);
   const status = eventStatusForAgent(liveSelectedAgent, report.state, liveRunningFlag(session, liveLastSnapshot || {}, report.state));
-  const profile = agentSpecificReportProfile(report, status, agentLabel);
+  renderLiveReportToolbar();
+  liveReportPanel.innerHTML = `
+    <div class="ar-live-report-page live-report-page">
+      <div class="ar-report-grid live-report-grid">
+        ${renderLiveDashboardReportSections(session, report, status, agentLabel)}
+        ${renderPinnedFindingComparison()}
+        ${renderPinnedFindings()}
+      </div>
+    </div>
+  `;
+  scheduleOrcEchartsRender();
+  hydrateDesignCaptureCanvases();
+  return;
   const designEvidence = liveSelectedAgent === "design" ? latestDesignReport(report) : null;
   const specimenEvidence = liveSelectedAgent === "specimen" ? latestSpecimenFabricationReport(report) : null;
   const visionEvidence = liveSelectedAgent === "vision" ? latestVisionReport(report) : null;
@@ -5847,6 +12527,27 @@ function liveRuntimeMapBounds(nodes = []) {
   return { width: maxX + 96, height: maxY + 96 };
 }
 
+function liveRuntimeMapScaleConfig(mode) {
+  if (mode === "expanded") {
+    return { min: 0.52, max: 1.08, fitBoost: 1.06, minWidth: 720, pad: 40 };
+  }
+  if (mode === "stack-expanded") {
+    return { min: 0.42, max: 0.58, fitBoost: 1.02, minWidth: 520, pad: 28 };
+  }
+  if (mode === "stack-split") {
+    return { min: 0.36, max: 0.52, fitBoost: 0.98, minWidth: 440, pad: 28 };
+  }
+  return { min: 0.38, max: 0.72, fitBoost: 1.0, minWidth: 520, pad: 32 };
+}
+
+function liveRuntimeMapScaleForPanel(bounds, panelWidth, mode = liveGraphLayoutMode()) {
+  const config = liveRuntimeMapScaleConfig(mode);
+  const availableWidth = Math.max(config.minWidth, Math.round(panelWidth || 0) - config.pad);
+  const fitScale = availableWidth / Math.max(1, bounds.width);
+  const scale = Math.min(config.max, Math.max(config.min, fitScale * config.fitBoost));
+  return Number(scale.toFixed(3));
+}
+
 function liveRuntimeMapEdgePath(edge) {
   return LIVE_RUNTIME_MAP_GEOMETRY.path(edge, liveRuntimeMapGeometryOptions());
 }
@@ -5993,6 +12694,27 @@ function renderGraphGateControls(graph) {
   `;
 }
 
+const LIVE_GRAPH_RUN_BACKENDS = new Set(["openai", "nemoclaw", "ollama", "vllm"]);
+
+function liveGraphRunTestPayload(graphId) {
+  const payload = { mode: "test", goal: `Live GUI graph gate test run: ${graphId}` };
+  const backend = String(queryBackend || "").trim().toLowerCase();
+  if (LIVE_GRAPH_RUN_BACKENDS.has(backend)) payload.backend = backend;
+  return payload;
+}
+
+async function refreshLiveStartedRun(runId) {
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    await refreshPlanningState({ background: true });
+    const state = liveLastSession && liveLastSession.state && typeof liveLastSession.state === "object" ? liveLastSession.state : {};
+    if (!runId || state.run_id === runId) {
+      if (state.stage && state.stage !== "complete") return;
+      if (state.run_metadata && state.run_metadata.latest_design_agent_report) return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 450));
+  }
+}
+
 async function runLiveGraphGateAction(action) {
   const graph = (liveGraphPayload && liveGraphPayload.graph) || liveGraphPayload || {};
   const graphId = graph.id || "atr_closed_loop";
@@ -6021,7 +12743,7 @@ async function runLiveGraphGateAction(action) {
     const options = action === "save_version"
       ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reason: "live_gui_graph_gate_save_version", author: "live_gui", activate: false }) }
       : action === "run_test"
-        ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode: "test", goal: `Live GUI graph gate test run: ${graphId}`, backend: queryBackend }) }
+        ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(liveGraphRunTestPayload(graphId)) }
         : { method: "POST" };
     const endpoint = action === "validate"
       ? `/api/graphs/${encodeURIComponent(graphId)}/validate`
@@ -6045,7 +12767,11 @@ async function runLiveGraphGateAction(action) {
       message: data.ok ? (action === "run_test" ? `started ${data.run && data.run.run_id ? data.run.run_id : "test run"}` : "ok") : "failed",
       errors: Array.isArray(data.errors) ? data.errors : [],
     };
-    await refreshPlanningState({ background: true });
+    if (action === "run_test") {
+      await refreshLiveStartedRun(liveGraphActionStatus.run_id);
+    } else {
+      await refreshPlanningState({ background: true });
+    }
     if (graphIntentEvent && action === "run_test") {
       const intentId = String(graphIntentEvent.event_id || graphIntentEvent.id || "");
       const isSameIntent = (event) => {
@@ -6091,10 +12817,9 @@ function renderGraphMiniPanel(session) {
   const runtimeIdeHref = `/ide?graph=${encodeURIComponent(graphId)}${ideNodeRef ? `&node=${encodeURIComponent(ideNodeRef)}` : ""}&source=live_graph`;
   const edges = LIVE_RUNTIME_MAP_GEOMETRY ? liveRuntimeMapEdges(graph) : [];
   const bounds = liveRuntimeMapBounds(nodes);
-  const graphPanelWidth = liveGraphPanel.clientWidth || 1180;
-  const availableWidth = Math.max(560, graphPanelWidth - 32);
-  const fitScale = Math.min(1, availableWidth / Math.max(1, bounds.width));
-  const scale = Math.min(LIVE_RUNTIME_MAP_MAX_SCALE, Math.max(0.42, fitScale * LIVE_RUNTIME_MAP_ZOOM_STEP));
+  const graphLayoutMode = liveGraphLayoutMode();
+  const graphPanelWidth = liveGraphPanel.clientWidth || liveGraphPanel.getBoundingClientRect().width || 1180;
+  const scale = liveRuntimeMapScaleForPanel(bounds, graphPanelWidth, graphLayoutMode);
   const scaledWidth = Math.ceil(bounds.width * scale);
   const scaledHeight = Math.ceil(bounds.height * scale);
   const canvasViewportHeight = Math.round(Math.min(720, Math.max(560, (window.innerHeight || 900) * 0.58)));
@@ -6150,7 +12875,7 @@ function renderGraphMiniPanel(session) {
       </div>
       ${renderGraphGateControls(graph)}
       <div class="live-graph-mini-body">
-        <div class="live-graph-mini-canvas langgraph-shell runtime-readonly-map live-runtime-map-lite" data-live-graph-scale="${scale}" data-live-graph-focus-node="${escapeHtml(focusNodeId)}" style="height:${canvasHeight}px;min-height:${canvasHeight}px;">
+        <div class="live-graph-mini-canvas langgraph-shell runtime-readonly-map live-runtime-map-lite" data-live-graph-scale="${scale}" data-live-graph-layout="${escapeHtml(graphLayoutMode)}" data-live-graph-focus-node="${escapeHtml(focusNodeId)}" style="height:${canvasHeight}px;min-height:${canvasHeight}px;">
           <div class="live-graph-scroll-world" style="width:${scaledWidth}px;height:${scaledHeight}px;">
             <div class="langgraph-cells" style="width:${bounds.width}px;height:${bounds.height}px;transform:scale(${scale});transform-origin:0 0;">
               <svg class="runtime-map-edge-svg" viewBox="0 0 ${bounds.width} ${bounds.height}" aria-hidden="true">
@@ -6178,7 +12903,7 @@ function renderGraphMiniPanel(session) {
     </div>
   `;
   if (shouldFocusGraph) {
-    window.requestAnimationFrame(() => {
+    liveRequestFrame(() => {
       if (focusLiveGraphNode(focusNodeId, { instant: liveGraphLastFocusKey === "" })) {
         liveGraphLastFocusKey = focusKey;
         liveGraphFocusPending = false;
@@ -6418,13 +13143,13 @@ function renderFaultCard(event) {
 function updateLiveFaultChip() {
   const faults = liveFaultEvents(12);
   if (!faults.length) {
-    setRuntimeChip(liveFaultChip, "F:0", "idle", "No runtime faults detected");
+    setRuntimeChip(liveFaultChip, "Clear", "idle", "No runtime faults detected");
     return;
   }
   const errors = faults.filter((event) => eventTimelineKind(event) === "error").length;
   const warnings = Math.max(0, faults.length - errors);
   const latest = faults[0];
-  const label = errors ? `E:${errors}${warnings ? ` W:${warnings}` : ""}` : `W:${warnings}`;
+  const label = errors ? `${errors} err${warnings ? ` / ${warnings} warn` : ""}` : `${warnings} warn`;
   const cls = errors ? "error" : "warning";
   setRuntimeChip(
     liveFaultChip,
@@ -6473,7 +13198,7 @@ function renderAttentionApprovalCard(item, runId = "") {
       <small>${escapeHtml(item.stage || "approval")} · ${escapeHtml(item.approval_id || "-")}</small>
       <div class="button-row">
         <button class="btn primary live-approval-action" data-run-id="${escapeHtml(runId)}" data-approval-id="${escapeHtml(item.approval_id || "")}" data-decision="approved" ${item.approval_id ? "" : "disabled"}>Approve</button>
-        <button class="btn live-approval-action" data-run-id="${escapeHtml(runId)}" data-approval-id="${escapeHtml(item.approval_id || "")}" data-decision="cancelled" ${item.approval_id ? "" : "disabled"}>Revise</button>
+        <button class="btn live-approval-action" ${item.approval_id ? "" : "disabled"} data-run-id="${escapeHtml(runId)}" data-approval-id="${escapeHtml(item.approval_id || "")}" data-decision="cancelled">Revise</button>
         <button class="btn warning live-approval-action" data-run-id="${escapeHtml(runId)}" data-approval-id="${escapeHtml(item.approval_id || "")}" data-decision="rejected" ${item.approval_id ? "" : "disabled"}>Reject</button>
       </div>
     </article>
@@ -6703,11 +13428,95 @@ function renderDeviceStrip(session) {
     renderDeviceStatusCard("Environment Sensor", latestRuntimeEvent([/environment/, /sensor/, /humidity/, /temperature/]), "idle"),
   ];
   liveDeviceStrip.innerHTML = cards.join("");
+  const gpuUtilNumber = Number(gpuAgg.utilization_percent);
+  const ramUsedNumber = Number(ram.used_gb);
+  const ramTotalNumber = Number(ram.total_gb);
+  const gpuLabel = Number.isFinite(gpuUtilNumber) ? `GPU ${Math.round(gpuUtilNumber)}%` : "GPU -";
+  const memLabel = Number.isFinite(ramUsedNumber) && Number.isFinite(ramTotalNumber) && ramTotalNumber > 0
+    ? `Mem ${Math.round((ramUsedNumber / ramTotalNumber) * 100)}%`
+    : "Mem -";
   setCompactTextWithTitle(
     liveResourceChip,
-    `GPU/RAM ${renderCompactMemoryGb(gpuAgg.memory_used_gb)}/${renderCompactMemoryGb(gpuAgg.memory_total_gb)} · ${renderCompactMemoryGb(ram.used_gb)}/${renderCompactMemoryGb(ram.total_gb)}`,
+    `${gpuLabel} · ${memLabel}`,
     `GPU ${gpuValue}; RAM ${ramValue}; GPU util=${renderRuntimeValue(gpuAgg.utilization_percent)}%`
   );
+}
+
+function latestRuntimeAgeLabel() {
+  const timestamps = [...(liveRunEvents || []), ...(liveRecentEvents || [])]
+    .map((event) => event && (event.ts || event.timestamp || event.created_at))
+    .filter(Boolean)
+    .map((value) => new Date(value).getTime())
+    .filter((value) => Number.isFinite(value));
+  if (liveLastEventAt) {
+    const streamTs = new Date(liveLastEventAt).getTime();
+    if (Number.isFinite(streamTs)) timestamps.push(streamTs);
+  }
+  if (!timestamps.length) return "-";
+  return relativeTimeLabel(new Date(Math.max(...timestamps)));
+}
+
+function renderLiveMissionAutomationChips(model) {
+  const iconMap = {
+    "active agent": "A",
+    "next stage": "N",
+    handoff: "H",
+    "backend sync": "S",
+  };
+  return orchestratorAutomationFocusItems(model).slice(0, 4).map((item) => {
+    const key = String(item.label || "").toLowerCase();
+    const icon = iconMap[key] || String(item.label || "?").slice(0, 1).toUpperCase();
+    const title = `${item.label || "Automation"}: ${item.value || "-"}${item.meta ? ` / ${item.meta}` : ""}`;
+    return `
+      <span class="ar-mission-auto-chip tone-${escapeHtml(item.tone || "info")}" title="${escapeHtml(title)}">
+        <i aria-hidden="true">${escapeHtml(icon)}</i>
+        <b>${escapeHtml(compactText(item.value || "-", 28))}</b>
+      </span>
+    `;
+  }).join("");
+}
+
+function renderLiveMissionProgressSlim(session = liveLastSession) {
+  if (!liveMissionProgressSlim) return;
+  const snapshot = liveLastSnapshot || {};
+  const baseReport = selectedReportModel(session || {});
+  const state = (session && session.state) || snapshot.state || baseReport.state || {};
+  const report = { ...baseReport, state: { ...(baseReport.state || {}), ...state } };
+  const activeAgent = agentIdFromStage(state.stage || "") || liveSelectedAgent || "orchestrator";
+  const running = liveRunningFlag(session || {}, snapshot, report.state || {});
+  const status = eventStatusForAgent(activeAgent, report.state || {}, running);
+  const model = buildOrcBriefingModel(report, status, orchestratorContext(report, status));
+  const pct = Math.max(0, Math.min(100, Math.round((model.routeStats.progress || 0) * 100)));
+  const waitingCount = (model.ctx.missingCount || 0) + (model.ctx.pendingApprovals || []).length + (model.routeStats.blocked || 0);
+  const handoff = (model.handoffRows || [])[0];
+  const handoffLabel = handoff ? `${compactText(handoff.from, 10)} -> ${compactText(handoff.to, 10)}` : "handoff waiting";
+  const activeLabel = liveAgentShort(activeAgent);
+  const phaseLabel = compactText(model.state.stage || model.ctx.controlRouteState.current_stage || status || "idle", 18);
+  const eventAge = latestRuntimeAgeLabel();
+  const title = [
+    `phase=${phaseLabel}`,
+    `active=${liveAgentLabel(activeAgent)}`,
+    `progress=${pct}%`,
+    `waiting=${waitingCount}`,
+    `latest=${eventAge}`,
+    `handoff=${handoffLabel}`,
+  ].join("; ");
+  liveMissionProgressSlim.title = title;
+  liveMissionProgressSlim.innerHTML = `
+    <div class="ar-mission-slim-kpi tone-${escapeHtml(model.verdict.tone)}">
+      <span>Phase</span>
+      <strong>${escapeHtml(phaseLabel)}</strong>
+    </div>
+    <div class="ar-mission-slim-track" aria-label="mission progress ${pct}%">
+      <span style="--progress:${numberText(pct, 0)}%;"></span>
+    </div>
+    <div class="ar-mission-slim-steps">
+      ${renderOrcReferenceStageProgress(model)}
+    </div>
+    <div class="ar-mission-slim-automation" aria-label="automation summary">
+      ${renderLiveMissionAutomationChips(model)}
+    </div>
+  `;
 }
 
 function renderLiveRuntime(session) {
@@ -6716,22 +13525,33 @@ function renderLiveRuntime(session) {
   const state = session.state || snapshot.state || {};
   ensureOperatorReportStateRun(state.run_id || liveCurrentRunId());
   const activeAgent = agentIdFromStage(state.stage || "");
-  setCompactTextWithTitle(liveActiveAgentChip, `A:${liveAgentShort(activeAgent)}`, `Active agent: ${liveAgentLabel(activeAgent)}`);
-  if (liveCenterTitle) liveCenterTitle.textContent = liveCurrentView === "report" && liveReportPage === "attention" ? "Operator Attention · Report" : `${liveAgentLabel(liveSelectedAgent)} · ${liveCurrentView}`;
+  // Legacy package contract marker: setCompactTextWithTitle(liveActiveAgentChip, `A:${liveAgentShort(activeAgent)}`, ...).
+  setCompactTextWithTitle(liveActiveAgentChip, liveAgentTopbarLabel(activeAgent), `Active agent: ${liveAgentLabel(activeAgent)}`);
+  const viewLabel = liveCurrentView === "backend"
+    ? "Backend"
+    : liveCurrentView === "report"
+      ? "Report"
+      : liveCurrentView.charAt(0).toUpperCase() + liveCurrentView.slice(1);
+  if (liveCenterTitle) liveCenterTitle.textContent = liveCurrentView === "report" && liveReportPage === "attention" ? "Operator Attention · Report" : `${liveAgentLabel(liveSelectedAgent)} · ${viewLabel}`;
+  applyLiveAgentLayoutMode();
   renderAgentBinder(session);
   renderApprovalPanel(session);
   renderDeviceStrip(session);
+  renderLiveMissionProgressSlim(session);
   updateLiveFaultChip();
   applyLiveAttentionStatus();
   renderLiveChatContextStrip();
+  renderLiveExperimentSetupPanel(session);
   renderLiveFocusStrip();
   updateLiveTokenChip(session);
   setLiveBottomCollapsed(liveBottomCollapsed, { persist: false });
+  setLiveChatCollapsed(liveChatCollapsed, { persist: false, resetUnread: false });
   setLiveView(liveCurrentView, { render: false });
   renderActiveLiveCenterPanel(session);
   setLiveQuickActionBusy(liveQuickActionBusy);
   persistLiveUiState();
   persistLivePlanningCache(session);
+  scheduleLiveMissionMarquee();
 }
 
 async function requestLiveGuardianStatus(runId, options = {}) {
@@ -6902,12 +13722,15 @@ function applyPlanningSession(session) {
   const stageLabel = String(state.stage || "idle");
   const runId = String(state.run_id || "-");
   const modeLabel = String(state.mode || "-");
-  setCompactTextWithTitle(planningStageLabel, `S:${stageLabel}`, `Stage: ${stageLabel}`);
+  const missionLabel = liveMissionTopbarLabel(state);
+  // Legacy package contract marker: setCompactTextWithTitle(planningStageLabel, `S:${stageLabel}`, ...).
+  setCompactTextWithTitle(planningStageLabel, missionLabel, `Mission: ${state.active_goal || state.goal || queryGoal || "-"}; Stage: ${stageLabel}`);
+  scheduleLiveMissionMarquee();
   const cycleLabel = formatPlanningCycleLabel(state, running);
   setCompactTextWithTitle(planningCycleLabel, cycleLabel, `Cycle: ${cycleLabel}`);
   setCompactTextWithTitle(
     planningRunDetail,
-    `${compactRunId(runId)} · ${modeLabel} · ${running ? "on" : "idle"}`,
+    liveRunTopbarLabel(runId, modeLabel, running),
     `run=${runId} mode=${modeLabel} running=${running}`
   );
   renderSpecSummary(state);
@@ -7386,6 +14209,18 @@ if (btnLiveBottomCollapse) {
   });
 }
 
+if (btnLiveChatCollapse) {
+  btnLiveChatCollapse.addEventListener("click", () => {
+    setLiveChatCollapsed(true);
+  });
+}
+
+if (btnLiveChatRestore) {
+  btnLiveChatRestore.addEventListener("click", () => {
+    setLiveChatCollapsed(false);
+  });
+}
+
 liveViewTabs.forEach((button) => {
   button.addEventListener("click", () => {
     const nextView = button.dataset.liveView || "report";
@@ -7402,6 +14237,26 @@ if (liveChatMode) {
   });
 }
 
+if (liveExperimentSetupPanel) {
+  liveExperimentSetupPanel.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-experiment-setup-action]");
+    if (!button) return;
+    const report = selectedReportModel(liveLastSession || {});
+    const spec = report.spec || {};
+    const state = report.state || {};
+    const prompt = [
+      "현재 Experiment Setup 패널 값을 기준으로 미션 스펙 업데이트 초안을 작성하고, 누락값/승인 필요 항목을 먼저 확인해줘.",
+      `run_id=${state.run_id || "-"}`,
+      `stage=${state.stage || "-"}`,
+      `spec=${JSON.stringify(spec)}`,
+    ].join("\n");
+    setLiveChatTargetMode("orchestrator");
+    draftRuntimeChat(prompt, "command");
+    setLiveChatCollapsed(false, { resetUnread: false });
+    renderLiveRuntime(liveLastSession);
+  });
+}
+
 liveTimelineFilters.forEach((button) => {
   button.addEventListener("click", () => {
     liveTimelineFilter = LIVE_TIMELINE_FILTER_IDS.has(button.dataset.timelineFilter) ? button.dataset.timelineFilter : "all";
@@ -7409,6 +14264,8 @@ liveTimelineFilters.forEach((button) => {
     persistLiveUiState();
   });
 });
+
+setupLiveScrollbarFade();
 
 const LIVE_NODE_TEST_MODULES = new Set(["design", "specimen", "vision", "manipulation", "equipment", "analysis", "knowledge", "bo", "guardian"]);
 const LIVE_BUSY_QUICK_ACTIONS = new Set(["pause_run", "resume_run", "dry_run", "run_node_test", "explain_current_node"]);
@@ -7791,6 +14648,21 @@ document.addEventListener("click", (event) => {
     });
     return;
   }
+  const evidenceChip = event.target.closest(".ar-orc-evidence-chip[data-evidence-view]");
+  if (evidenceChip) {
+    closeBinderContextMenu();
+    const targetAgent = evidenceChip.dataset.evidenceAgent || "";
+    const targetView = evidenceChip.dataset.evidenceView || "report";
+    if (knownLiveAgent(targetAgent)) {
+      liveSelectedAgent = targetAgent;
+      liveReportPage = "agent";
+      setLiveChatTargetMode(liveChatTargetForAgent(targetAgent));
+      requestLiveGraphFocusForAgent(targetAgent);
+    }
+    setLiveView(LIVE_VIEW_IDS.has(targetView) ? targetView : "report");
+    renderLiveRuntime(liveLastSession);
+    return;
+  }
   const reportButton = event.target.closest(".live-report-action[data-report-action]");
   if (reportButton) {
     closeBinderContextMenu();
@@ -8046,14 +14918,26 @@ applyQueryGoal();
 ensurePlanningSessionId();
 restoreLiveUiState();
 restoreCachedPlanningState();
+setupOrcChartHydrationMonitor();
+if (liveCurrentView === "report") window.setTimeout(() => scheduleOrcEchartsRender(), 0);
 if (planningChatLog && !planningChatLog.dataset.autoScrollObserved) {
   planningChatLog.dataset.autoScrollObserved = "1";
   planningChatAutoScrollObserver.observe(planningChatLog, { childList: true, subtree: false });
 }
 if (!window.__atrPlanningChatResizeSyncBound) {
   window.__atrPlanningChatResizeSyncBound = true;
-  window.addEventListener("resize", () => schedulePlanningChatLayoutSync({ scrollToBottom: false }), { passive: true });
-  document.fonts?.ready?.then(() => schedulePlanningChatLayoutSync({ scrollToBottom: false })).catch?.(() => {});
+  window.addEventListener("resize", () => {
+    schedulePlanningChatLayoutSync({ scrollToBottom: false });
+    scheduleLiveMissionMarquee();
+    scheduleLiveGraphScaleRefresh();
+    liveOrcChartInstances.forEach((chart) => {
+      try { chart.resize(); } catch (_err) {}
+    });
+  }, { passive: true });
+  document.fonts?.ready?.then(() => {
+    schedulePlanningChatLayoutSync({ scrollToBottom: false });
+    scheduleLiveMissionMarquee();
+  }).catch?.(() => {});
 }
 connectPlanningEventStream();
 refreshPlanningState()

@@ -2319,6 +2319,31 @@ class _CaptureBackend(BaseLLMBackend):
         return LLMResponse(text="module-routed", model=model, raw={"metadata": metadata or {}})
 
 
+class _FailingBackend(BaseLLMBackend):
+    """LLM backend that records calls and then fails."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    async def complete(
+        self,
+        *,
+        model: str,
+        system_prompt: str,
+        user_prompt: str,
+        metadata: dict[str, object] | None = None,
+    ) -> LLMResponse:
+        self.calls.append(
+            {
+                "model": model,
+                "system_prompt": system_prompt,
+                "user_prompt": user_prompt,
+                "metadata": metadata or {},
+            }
+        )
+        raise RuntimeError(f"{model} unavailable")
+
+
 class _FakeToolRegistry:
     """Small ToolRegistry-compatible object for module allowlist tests."""
 
@@ -2339,20 +2364,28 @@ class _FakeToolRegistry:
 class _FakeAgentContext:
     """Minimal AgentContext-compatible object for module routing tests."""
 
-    def __init__(self, backend: _CaptureBackend) -> None:
+    def __init__(self, backend: BaseLLMBackend, fallback_backend: BaseLLMBackend | None = None) -> None:
         router = ModelRouter(
             {
                 "models": {"e4b": {"primary": "router-primary", "fallback": "router-fallback"}},
                 "task_routes": {"module_reasoning": "e4b", "design_reasoning": "e4b"},
             }
         )
+        openai_router = ModelRouter(
+            {
+                "models": {"e4b": {"primary": "gpt-5.5"}},
+                "task_routes": {"module_reasoning": "e4b", "design_reasoning": "e4b"},
+            }
+        )
+        effective_fallback = fallback_backend or backend
         self.active_backend = "ollama"
         self.model_router = router
-        self.model_routers = {"ollama": router, "vllm": router}
+        self.model_routers = {"ollama": router, "vllm": router, "openai": openai_router}
         self.primary_backend = backend
-        self.primary_backends = {"ollama": backend, "vllm": backend}
-        self.fallback_backend = backend
-        self.fallback_backends = {"ollama": backend, "vllm": backend}
+        self.primary_backends = {"ollama": backend, "vllm": backend, "openai": effective_fallback}
+        self.fallback_backend = effective_fallback
+        self.fallback_backends = {"ollama": effective_fallback, "vllm": effective_fallback, "openai": effective_fallback}
+        self.backend_fallbacks = {"ollama": "openai", "vllm": "openai", "openai": "openai"}
         self.tools = _FakeToolRegistry()
         self.notifications: list[dict[str, str]] = []
         self.model_call_events: list[dict[str, str]] = []
@@ -2402,6 +2435,35 @@ async def test_module_runtime_context_applies_llm_model_prompt_and_metadata() ->
         {"task_type": "module_reasoning", "model": "module-model", "role": "e4b", "backend": "vllm"}
     ]
     assert base_ctx.notifications == []
+
+
+@pytest.mark.asyncio
+async def test_module_runtime_context_uses_backend_fallback_after_active_models_fail() -> None:
+    local_backend = _FailingBackend()
+    openai_backend = _CaptureBackend()
+    base_ctx = _FakeAgentContext(local_backend, fallback_backend=openai_backend)
+    module_ctx = ModuleRuntimeContext(
+        base_ctx,  # type: ignore[arg-type]
+        {
+            "id": "design",
+            "llm_role": "design_reasoning",
+            "llm": {"backend": "vllm", "model": "local-primary", "fallback": "local-fallback"},
+        },
+        Stage.DESIGN,
+    )
+
+    response = await module_ctx.complete("design_reasoning", "design prompt")
+
+    assert response.model == "gpt-5.5"
+    assert [call["model"] for call in local_backend.calls] == ["local-primary", "local-fallback"]
+    assert openai_backend.calls[-1]["model"] == "gpt-5.5"
+    assert openai_backend.calls[-1]["metadata"]["role"] == "e4b:backend_fallback"
+    assert base_ctx.model_call_events[-1] == {
+        "task_type": "design_reasoning",
+        "model": "gpt-5.5",
+        "role": "e4b:backend_fallback",
+        "backend": "openai",
+    }
 
 
 def test_module_runtime_context_filters_tools_by_module_allowlist() -> None:

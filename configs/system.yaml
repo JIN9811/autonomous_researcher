@@ -55,6 +55,16 @@ ollama:
   timeout_seconds: 300
   keep_alive: "0"
 
+openai:
+  base_url: https://api.openai.com/v1
+  timeout_seconds: 300
+  api_key: ""
+  organization: ""
+  project: ""
+  # Leave blank to use the model default. Common values are low, medium, high,
+  # and xhigh for reasoning models that support them.
+  reasoning_effort: ""
+
 vllm:
   base_url: http://127.0.0.1:8001/v1
   api_key: EMPTY

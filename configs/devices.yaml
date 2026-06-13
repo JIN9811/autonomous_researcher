@@ -162,6 +162,8 @@ devices:
     provider: calculix
     solver: calculix
     mesher: gmsh
+    solver_path: ../.external_tools/bin/ccx.exe
+    mesher_path: ../.external_tools/gmsh-4.15.2/gmsh-4.15.2-Windows64/gmsh.exe
     require_solver_in_live: true
     artifact_dir: artifacts/cae
     default_material:

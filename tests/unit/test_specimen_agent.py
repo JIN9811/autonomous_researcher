@@ -423,6 +423,37 @@ async def test_specimen_agent_uses_phase1_printer_prepare_schema(tmp_path: Path,
     assert fabrication_report["monitoring_plan"]["layerwise_monitoring_available"] is False
     assert fabrication_report["fabrication_outcome"]["status"] in {"virtual_finished", "ready_for_vision"}
     assert isinstance(fabrication_report["feedback_to_design"], dict)
+    screen_report = result.data["specimen_agent_report"]
+    expected_sections = {
+        "slicer_configuration",
+        "printer_profile",
+        "build_queue",
+        "estimated_print_time",
+        "filament_usage",
+        "gcode_validation",
+        "print_readiness",
+        "build_timeline",
+        "layer_preview",
+        "artifact_ledger",
+        "printer_status",
+        "handoff_status",
+    }
+    assert screen_report["schema"] == "specimen_agent_report.v1"
+    assert expected_sections.issubset(screen_report)
+    assert screen_report["print_readiness"]["gate_count"] >= 8
+    assert screen_report["estimated_print_time"]["estimated_print_time_min"] == fabrication_report["process_plan"]["estimated_print_time_min"]
+    assert screen_report["filament_usage"]["estimated_mass_g"] == fabrication_report["process_plan"]["estimated_mass_g"]
+    assert screen_report["gcode_validation"]["gcode_path"] == specimen_result["sliced_path"]
+    assert screen_report["layer_preview"]["stl_path"] == specimen_result["stl_path"]
+    assert screen_report["artifact_ledger"]
+    assert specimen_result["specimen_agent_report"] == screen_report
+    assert {item["type"] for item in screen_report["visualization_manifest"]} >= {
+        "layer_preview",
+        "material_donut",
+        "readiness_donut",
+        "timeline_bars",
+        "print_time_bars",
+    }
     assert result.data["handoff_packet"]["schema"] == "specimen_fabricated.v1"
     assert result.data["handoff_packet"]["fabrication_report_ref"] == "run_metadata.fabrication_report"
     assert result.data["handoff_packet"]["fabrication_summary"]["stl_path"] == specimen_result["stl_path"]
@@ -458,6 +489,10 @@ async def test_specimen_agent_live_gui_test_mode_asks_for_printer_path() -> None
     assert "physical_print" in specimen_result["input_request"]["choices"]
     assert specimen_result["fabrication_report"]["schema"] == "fabrication_report.v1"
     assert specimen_result["fabrication_report"]["fabrication_outcome"]["status"] == "blocked"
+    assert result.data["specimen_agent_report"]["schema"] == "specimen_agent_report.v1"
+    assert result.data["specimen_agent_report"]["print_readiness"]["blocked_count"] >= 1
+    assert result.data["specimen_agent_report"]["handoff_status"]["status"] == "blocked"
+    assert specimen_result["specimen_agent_report"] == result.data["specimen_agent_report"]
     assert result.data["handoff_packet"]["schema"] == "specimen_fabricated.v1"
     assert result.data["handoff_packet"]["status"] == "blocked"
 
@@ -514,6 +549,69 @@ async def test_specimen_agent_live_gui_test_mode_virtual_choice_runs_virtual_bri
     assert specimen_result["printer_path"] == "virtual_prusalink"
     assert specimen_result["printer_mode"] == "test_printer_live_virtual"
     assert specimen_result["print_result"]["status"] == "virtual_finished"
+
+
+@pytest.mark.asyncio
+async def test_specimen_agent_virtual_bridge_degrades_on_windows_slicer_oserror(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent = SpecimenMakingAgent()
+    spec = _valid_spec()
+    spec["test_mode_autofill"] = True
+    spec["printer_test_path"] = "virtual_bridge"
+    state = OrchestratorState(
+        run_id="run-test",
+        experiment_id="exp-test",
+        mode=Mode.LIVE,
+        stage=Stage.SPECIMEN,
+        active_goal="live gui test mode",
+        current_experiment_spec=spec,
+    )
+    tools = ToolRegistry()
+    register_mock_tools(tools)
+    register_printer_tools(
+        tools,
+        {
+            "devices": {
+                "printer": {
+                    "mode": "test",
+                    "virtual_prusalink_dry_run": True,
+                    "connection_memory_path": str(tmp_path / "prusa_connection.json"),
+                    "test_printer_live_promotion": {"enabled": True, "transport": "virtual"},
+                    "slicer": {"enabled": True, "output_dir": str(tmp_path / "gcode")},
+                }
+            }
+        },
+        repo_root=tmp_path,
+    )
+    register_experiment_tools(tools)
+    ctx = _CtxStub()
+    ctx.tools = tools
+
+    def raise_oserror(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        raise OSError(193, "%1 is not a valid Win32 application")
+
+    monkeypatch.setattr(
+        SpecimenMakingAgent,
+        "_artifact_dir",
+        staticmethod(lambda _state, specimen_id: tmp_path / specimen_id),
+    )
+    monkeypatch.setattr(PrusaSlicerRunner, "slice", raise_oserror)
+
+    result = await agent.run(state, ctx)
+    specimen_result = result.data["specimen_result"]
+    screen_report = result.data["specimen_agent_report"]
+
+    assert result.success is True
+    assert specimen_result["ok"] is True
+    assert specimen_result["printer_path"] == "virtual_bridge"
+    assert specimen_result["printer_prepare_status"] == "virtual_bridge_degraded"
+    assert specimen_result["slicer_result"]["status"] == "degraded_virtual_slice"
+    assert specimen_result["gcode_validation"]["status"] == "degraded_virtual_validation"
+    assert specimen_result["experiment_evaluation"]["status"] == "evaluated_degraded"
+    assert screen_report["schema"] == "specimen_agent_report.v1"
+    assert screen_report["handoff_status"]["status"] in {"ready", "virtual_finished", "ready_for_vision"}
 
 
 @pytest.mark.asyncio

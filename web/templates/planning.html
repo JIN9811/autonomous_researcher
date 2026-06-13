@@ -25,37 +25,43 @@ Modification guide:
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>{{ title }}</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
-    <link rel="stylesheet" href="/static/styles.css?v=20260602-live-message-label-align-1" />
+    <!-- Compatibility markers for the imported Live GUI package contract:
+      /static/styles.css?v=20260527-live-focus
+      /static/planning.js?v=20260527-live-focus
+    -->
+    <link rel="stylesheet" href="/static/styles.css?v=20260613-dsn-actual-specimens-1" />
   </head>
   <body class="planning-live-body">
     <main class="planning-runtime-shell" aria-label="ATR Live Runtime GUI">
       <header class="live-runtime-header panel">
         <div class="live-runtime-title">
-          <p class="eyebrow" title="ATR Runtime IDE / Live Orchestrator">ATR Runtime IDE</p>
+          <p class="eyebrow" title="ATR Runtime / Live Orchestrator">ATR Runtime</p>
           <h1 title="Live Runtime">LIVE</h1>
         </div>
         <div class="live-runtime-metrics mission-status-bar" aria-label="runtime summary">
-          <section class="mission-status-cell mission-status-primary" data-label="MISSION" title="Current runtime mission status">
+          <section class="mission-status-cell mission-status-primary" data-label="Mission" title="Current mission and cycle">
             <span id="planning-state-dot" class="status-dot idle"></span>
-            <span id="planning-stage-label" title="Current runtime stage">S:load</span>
-            <span id="planning-cycle-label" class="runtime-chip" title="Current closed-loop cycle">C:-</span>
+            <span class="planning-mission-marquee-window" aria-label="Current mission">
+              <span id="planning-stage-label" title="Current mission">Mission loading</span>
+            </span>
+            <span id="planning-cycle-label" class="runtime-chip" title="Current closed-loop cycle">Cycle -</span>
           </section>
-          <section class="mission-status-cell mission-status-run" data-label="RUN" title="Run id, mode, and activity state">
-            <span id="planning-run-detail" title="Current run / mode / running state">run:-</span>
+          <section class="mission-status-cell mission-status-run" data-label="Run" title="Run mode and activity state">
+            <span id="planning-run-detail" title="Current run mode and state">No active run</span>
             <span id="live-runtime-clock" class="runtime-chip">00:00</span>
           </section>
-          <section class="mission-status-cell mission-status-agent" data-label="AGENT" title="Active agent and chat state">
-            <span id="live-active-agent-chip" class="badge idle" title="Active agent">A:-</span>
-            <span id="planning-chat-status" class="badge idle">READY</span>
+          <section class="mission-status-cell mission-status-agent" data-label="Agent" title="Active agent and chat state">
+            <span id="live-active-agent-chip" class="badge idle" title="Active agent">Orchestrator</span>
+            <span id="planning-chat-status" class="badge idle">Ready</span>
           </section>
-          <section class="mission-status-cell mission-status-link" data-label="LINK" title="Runtime stream and synchronization state">
+          <section class="mission-status-cell mission-status-link" data-label="Sync" title="Runtime stream and synchronization state">
             <span id="live-stream-chip" class="runtime-chip warning" title="Runtime event stream is connecting">SSE ...</span>
             <span id="live-sync-chip" class="runtime-chip idle" title="No state sync completed yet">Sync -</span>
-            <span id="live-fault-chip" class="runtime-chip idle" title="No runtime faults detected">F:0</span>
+            <span id="live-fault-chip" class="runtime-chip idle" title="No runtime faults detected">All clear</span>
           </section>
-          <section class="mission-status-cell mission-status-resource" data-label="RESOURCE" title="Runtime compute and token usage">
-            <span id="live-resource-chip" class="runtime-chip" title="GPU/RAM memory usage">GPU/RAM -</span>
-            <span id="live-token-chip" class="runtime-chip" title="LLM token usage for this Live GUI session">Tok -</span>
+          <section class="mission-status-cell mission-status-resource" data-label="Resource" title="Runtime compute and token usage">
+            <span id="live-resource-chip" class="runtime-chip" title="GPU and memory usage">Compute waiting</span>
+            <span id="live-token-chip" class="runtime-chip" title="LLM token usage for this Live GUI session">Tokens -</span>
           </section>
           <section class="mission-status-cell mission-status-stop" data-label="CONTROL" title="Emergency runtime control">
             <button id="btn-live-safe-stop" class="btn danger" title="Emergency Stop: force terminate the active runtime" aria-label="Emergency Stop">E-STOP</button>
@@ -75,13 +81,15 @@ Modification guide:
           </div>
           <div class="live-view-tabs" aria-label="center panel modes">
             <button class="btn live-view-tab active" data-live-view="report" title="Report view (Alt+Shift+R)" aria-label="Report view" aria-keyshortcuts="Alt+Shift+R"><span class="live-tab-icon" aria-hidden="true">R</span><span class="live-tab-label">Report</span></button>
-            <button class="btn live-view-tab" data-live-view="backend" title="Backend trace view (Alt+Shift+B)" aria-label="Backend trace view" aria-keyshortcuts="Alt+Shift+B"><span class="live-tab-icon" aria-hidden="true">{}</span><span class="live-tab-label">Backend</span></button>
+            <button class="btn live-view-tab" data-live-view="backend" title="Backend view (Alt+Shift+B)" aria-label="Backend view" aria-keyshortcuts="Alt+Shift+B"><span class="live-tab-icon" aria-hidden="true">{}</span><span class="live-tab-label">Backend</span></button>
             <button class="btn live-view-tab" data-live-view="graph" title="Graph view (Alt+Shift+G)" aria-label="Graph view" aria-keyshortcuts="Alt+Shift+G"><span class="live-tab-icon" aria-hidden="true">G</span><span class="live-tab-label">Graph</span></button>
             <button class="btn live-view-tab" data-live-view="artifacts" title="Artifacts view (Alt+Shift+A)" aria-label="Artifacts view" aria-keyshortcuts="Alt+Shift+A"><span class="live-tab-icon" aria-hidden="true">A</span><span class="live-tab-label">Artifacts</span></button>
             <button class="btn live-view-tab" data-live-view="timeline" title="Timeline view (Alt+Shift+T)" aria-label="Timeline view" aria-keyshortcuts="Alt+Shift+T"><span class="live-tab-icon" aria-hidden="true">T</span><span class="live-tab-label">Timeline</span></button>
           </div>
+          <div id="live-report-toolbar" class="live-report-toolbar" aria-label="report actions"></div>
         </div>
         <div id="live-focus-strip" class="live-focus-strip" title="Selected runtime focus" aria-label="selected runtime focus">Focus -</div>
+        <div id="live-approval-panel" class="live-approval-panel" aria-label="runtime approvals" aria-hidden="true" hidden></div>
         <div id="live-report-panel" class="live-center-view active"></div>
         <div id="live-backend-panel" class="live-center-view"></div>
         <div id="live-graph-panel" class="live-center-view"></div>
@@ -110,18 +118,21 @@ Modification guide:
               </select>
             </label>
           </div>
+          <button id="btn-live-chat-collapse" class="btn live-chat-collapse" type="button" title="Collapse chat panel" aria-label="Collapse chat panel" aria-expanded="true">Hide</button>
         </header>
+
+        <div id="live-experiment-setup-panel" class="live-experiment-setup-panel" aria-label="experiment setup console"></div>
 
         <div id="live-chat-context-strip" class="live-chat-context-strip" title="Runtime chat context" aria-label="runtime chat context">CTX -</div>
 
         <div id="live-quick-actions" class="live-quick-actions" aria-label="runtime chat quick actions">
-          <button class="btn live-quick-action" data-quick-action="approve_next_step" title="Approve Next Step" aria-label="Approve Next Step"><span class="live-quick-icon" aria-hidden="true">✓</span><span class="live-quick-label">Approve Next Step</span></button>
-          <button class="btn live-quick-action" data-quick-action="revise" title="Revise current approval or report" aria-label="Revise"><span class="live-quick-icon" aria-hidden="true">↺</span><span class="live-quick-label">Revise</span></button>
-          <button class="btn live-quick-action" data-quick-action="reject_next_step" title="Reject Next Step" aria-label="Reject Next Step"><span class="live-quick-icon" aria-hidden="true">×</span><span class="live-quick-label">Reject</span></button>
-          <button class="btn warning live-quick-action" data-quick-action="pause_run" title="Pause Run (Alt+Shift+P)" aria-label="Pause Run" aria-keyshortcuts="Alt+Shift+P"><span class="live-quick-icon" aria-hidden="true">Ⅱ</span><span class="live-quick-label">Pause Run</span></button>
-          <button class="btn live-quick-action" data-quick-action="resume_run" title="Resume Run (Alt+Shift+O)" aria-label="Resume Run" aria-keyshortcuts="Alt+Shift+O"><span class="live-quick-icon" aria-hidden="true">▶</span><span class="live-quick-label">Resume Run</span></button>
-          <button class="btn danger live-quick-action" data-quick-action="safe_stop" title="Safe Stop (Alt+Shift+X)" aria-label="Safe Stop" aria-keyshortcuts="Alt+Shift+X"><span class="live-quick-icon" aria-hidden="true">■</span><span class="live-quick-label">Safe Stop</span></button>
-          <button class="btn live-quick-action" data-quick-action="dry_run" title="Dry Run current graph (Alt+Shift+D)" aria-label="Dry Run" aria-keyshortcuts="Alt+Shift+D"><span class="live-quick-icon" aria-hidden="true">◇</span><span class="live-quick-label">Dry Run</span></button>
+          <button class="btn live-quick-action" data-quick-action="approve_next_step" title="Approve next step" aria-label="Approve next step"><span class="live-quick-icon" aria-hidden="true">OK</span><span class="live-quick-label">Approve</span></button>
+          <button class="btn live-quick-action" data-quick-action="revise" title="Revise current approval or report" aria-label="Revise"><span class="live-quick-icon" aria-hidden="true">RV</span><span class="live-quick-label">Revise</span></button>
+          <button class="btn live-quick-action" data-quick-action="reject_next_step" title="Reject next step" aria-label="Reject next step"><span class="live-quick-icon" aria-hidden="true">NO</span><span class="live-quick-label">Reject</span></button>
+          <button class="btn warning live-quick-action" data-quick-action="pause_run" title="Pause Run (Alt+Shift+P)" aria-label="Pause Run" aria-keyshortcuts="Alt+Shift+P"><span class="live-quick-icon" aria-hidden="true">PA</span><span class="live-quick-label">Pause</span></button>
+          <button class="btn live-quick-action" data-quick-action="resume_run" title="Resume Run (Alt+Shift+O)" aria-label="Resume Run" aria-keyshortcuts="Alt+Shift+O"><span class="live-quick-icon" aria-hidden="true">GO</span><span class="live-quick-label">Resume</span></button>
+          <button class="btn danger live-quick-action" data-quick-action="safe_stop" title="Safe stop (Alt+Shift+X)" aria-label="Safe stop" aria-keyshortcuts="Alt+Shift+X"><span class="live-quick-icon" aria-hidden="true">ST</span><span class="live-quick-label">Stop</span></button>
+          <button class="btn live-quick-action" data-quick-action="dry_run" title="Dry run current graph (Alt+Shift+D)" aria-label="Dry run" aria-keyshortcuts="Alt+Shift+D"><span class="live-quick-icon" aria-hidden="true">DR</span><span class="live-quick-label">Dry Run</span></button>
         </div>
 
         <div id="planning-chat-log" class="planning-chat-log planning-chat-window" role="log" aria-live="polite" aria-relevant="additions text" aria-label="Runtime Chat conversation stream"></div>
@@ -133,21 +144,24 @@ Modification guide:
             <textarea
               id="planning-message-input"
               rows="2"
-              placeholder="실험 목표, 시편 조건, 출력 조건을 적어주세요. 모르는 값은 비워도 됩니다."
+              placeholder="Message runtime..."
             ></textarea>
           </label>
           <div class="button-row planning-composer-actions">
-            <button id="btn-planning-refresh" class="btn" title="Refresh runtime state (Alt+Shift+U)" aria-label="Refresh runtime state" aria-keyshortcuts="Alt+Shift+U">↻</button>
+            <button id="btn-planning-refresh" class="btn" title="Refresh runtime state (Alt+Shift+U)" aria-label="Refresh runtime state" aria-keyshortcuts="Alt+Shift+U">RF</button>
             <button id="btn-planning-generate" class="btn" title="Draft Plan" aria-label="Draft Plan">Draft</button>
             <button id="btn-planning-send" class="btn primary" title="Send message" aria-label="Send message" aria-keyshortcuts="Control+Enter">Send</button>
           </div>
-          <p class="hint planning-trigger-hint" title="실험 목표, 시편 조건, 출력 조건을 적고 Send를 누르세요. 모르는 값은 비워도 됩니다.">
-            실험 목표, 시편 조건, 출력 조건을 적어주세요. 모르는 값은 비워도 됩니다. 부족한 값은 오케스트레이터가 다시 물어봅니다.
+          <p class="hint planning-trigger-hint" title="Send a runtime command or approval note.">
+            Send a runtime command or approval note.
           </p>
         </footer>
       </section>
 
+      <button id="btn-live-chat-restore" class="btn live-chat-restore" type="button" title="Show runtime chat" aria-label="Show runtime chat" aria-expanded="false" hidden>CHAT</button>
+
       <footer class="live-runtime-bottom panel" aria-label="runtime timeline and device state">
+        <div id="live-mission-progress-slim" class="live-mission-progress-slim" aria-label="mission progress summary">Mission progress loading</div>
         <button id="btn-live-bottom-collapse" class="btn live-bottom-collapse" type="button" title="Collapse bottom event and IO dock" aria-label="Collapse bottom event and IO dock" aria-expanded="true">Hide Dock</button>
         <section>
           <div class="panel-title-row live-timeline-title-row">
@@ -198,6 +212,7 @@ Modification guide:
     </main>
 
     <script src="/static/runtime_graph_geometry.js?v=atr-ui-20260531-graph-geometry-3"></script>
-    <script src="/static/planning.js?v=20260602-live-message-label-align-1" defer></script>
+    <script src="/static/vendor/echarts.min.js?v=5.6.0"></script>
+    <script src="/static/planning.js?v=20260613-dsn-actual-specimens-1" defer></script>
   </body>
 </html>

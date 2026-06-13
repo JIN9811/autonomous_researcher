@@ -23,6 +23,7 @@ from __future__ import annotations
 from agents.base_agent import AgentContext, AgentResult, BaseAgent
 from orchestrator.state import Mode, OrchestratorState
 from orchestrator.supervisor import (
+    build_orchestrator_control_plane_snapshot,
     build_decision_record,
     build_mission_contract,
     build_orchestration_plan,
@@ -62,6 +63,12 @@ class OrchestratorAgent(BaseAgent):
                 raise
         mission_contract = build_mission_contract(state=state)
         orchestration_plan = build_orchestration_plan(state=state)
+        control_plane = build_orchestrator_control_plane_snapshot(
+            state=state,
+            mission_contract=mission_contract,
+            orchestration_plan=orchestration_plan,
+            next_action=plan_text,
+        )
         followup = build_orchestrator_followup(
             state=state,
             stage=state.stage,
@@ -85,6 +92,7 @@ class OrchestratorAgent(BaseAgent):
                 "model": model,
                 "mission_contract": mission_contract,
                 "orchestration_plan": orchestration_plan,
+                "orchestrator_control_plane": control_plane,
                 "orchestrator_followup": followup,
                 "decisions": [decision],
                 "metrics": {

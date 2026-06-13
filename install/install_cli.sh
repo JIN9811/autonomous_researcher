@@ -53,7 +53,7 @@ Usage:
   atr docs
   atr status
   atr events
-  atr backend [vllm|nemoclaw|ollama]
+  atr backend [vllm|nemoclaw|ollama|openai]
   atr graphs
   atr graph show|validate|compile|dry-run|gate|versions <graph-id>
   atr graph version <graph-id> <version-id>
@@ -132,7 +132,7 @@ Commands:
   module register-generated
               Approve a Module Designer handler.py after static safety checks and activate module.generated_adapter.
   module create
-              Upload a Python file to Module Designer; Gemma 31B converts it to ATR protocol and catalogs it.
+              Upload a Python file to Module Designer; the active backend converts it to ATR protocol and catalogs it.
   Graph CUI commands intentionally use the same /api/graphs endpoints as Runtime IDE, so GUI/CUI state is cross-reflected after reload.
   Module CUI commands intentionally use the same /api/modules endpoints as Module Management Tool, so GUI/CUI state is cross-reflected after reload.
   chat        Send a message to the Live GUI orchestrator session.
@@ -141,7 +141,7 @@ Commands:
 
 Environment:
   ATR_URL       API base URL. Default: http://127.0.0.1:7860
-  ATR_BACKEND   Backend used by run/chat commands. Default: vllm
+  ATR_BACKEND   Backend used by run/chat commands. Default: vllm; set openai to skip local inference.
   ATR_DOWN_FORCE
                 Set to 0 to avoid SIGKILL fallback when stopping the GUI server.
 USAGE
@@ -435,7 +435,7 @@ json_module_create() {
 path = pathlib.Path(os.environ["ATR_MODULE_FILE"])
 module_id = os.environ["ATR_MODULE_ID"] or path.stem.replace("-", "_")
 label = os.environ["ATR_MODULE_LABEL"] or module_id.replace("_", " ").title()
-print(json.dumps({"module_id": module_id, "label": label, "category": os.environ.get("ATR_MODULE_CATEGORY_VALUE", ""), "handler": os.environ.get("ATR_MODULE_HANDLER_VALUE", "runtime.step_complete"), "source_filename": path.name, "source_text": path.read_text(encoding="utf-8"), "notes": "Created from atr module create", "transform_with_llm": True, "transform_model": "gemma4:31b"}, ensure_ascii=False))'
+print(json.dumps({"module_id": module_id, "label": label, "category": os.environ.get("ATR_MODULE_CATEGORY_VALUE", ""), "handler": os.environ.get("ATR_MODULE_HANDLER_VALUE", "runtime.step_complete"), "source_filename": path.name, "source_text": path.read_text(encoding="utf-8"), "notes": "Created from atr module create", "transform_with_llm": True, "transform_model": os.environ.get("AUTONOMOUS_MODULE_DESIGNER_MODEL", "")}, ensure_ascii=False))'
 }
 
 json_module_save_yaml() {

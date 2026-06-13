@@ -53,6 +53,7 @@ from orchestrator.supervisor import (
     build_decision_record,
     build_mission_contract,
     build_orchestration_plan,
+    build_orchestrator_control_plane_snapshot,
     build_orchestrator_followup,
     build_orchestrator_handoff_packet,
     normalize_operator_intent,
@@ -753,12 +754,21 @@ class MainController:
         if not isinstance(payload, dict):
             return {}
         keep = {
-            "agent", "agent_id", "node_id", "module_id", "stage", "status", "ok",
+            "agent", "agent_id", "node_id", "module_id", "stage", "status", "mode", "ok",
             "tool", "tool_name", "requested_tool", "program_id", "check_id",
             "failure_code", "reason_code", "decision", "risk_score", "title", "reason",
             "requires_human_approval", "requires_approval", "safety_class", "approval_id",
             "artifact_id", "artifact_path", "report_url", "preview_url", "stl_url",
-            "graph_id", "run_id", "experiment_id", "summary", "message",
+            "graph_id", "run_id", "experiment_id", "summary", "message", "action",
+            "compiled_graph", "errors", "graph_hash", "graph_version", "graph_version_id",
+            "graph_version_path", "source", "latest", "target_agent_id", "selected_agent_id",
+            "selected_node_id", "selected_graph_node_id", "trace_id", "selected_trace_id",
+            "event_key", "selected_event_key", "selected_event_id", "selected_event_type",
+            "selected_report_section", "selected_report_section_text",
+            "selected_report_section_text_excerpt", "run_context", "live_run_id",
+            "live_mode", "live_stage", "live_is_running", "live_active_goal",
+            "chat_mode", "chat_target_mode", "pinned_finding", "pinned_at", "reviewed_at",
+            "operator_source",
         }
         out: dict[str, Any] = {}
         for key, value in payload.items():
@@ -1357,6 +1367,18 @@ class MainController:
                 plans.append(plan)
             self._state.run_metadata["orchestration_plans"] = plans[-20:]
             self._state.run_metadata["latest_orchestration_plan"] = plan
+        control_plane = metadata.get("latest_orchestrator_control_plane") if isinstance(metadata.get("latest_orchestrator_control_plane"), dict) else {}
+        stale_control_plane = (
+            control_plane.get("run_id") != self._state.run_id
+            or control_plane.get("stage") != self._state.stage.value
+            or control_plane.get("route_state", {}).get("next_recommended_stage") != plan.get("next_recommended_stage")
+        )
+        if stale_control_plane:
+            self._state.run_metadata["latest_orchestrator_control_plane"] = build_orchestrator_control_plane_snapshot(
+                state=self._state,
+                mission_contract=mission,
+                orchestration_plan=plan,
+            )
 
     def snapshot(self) -> dict[str, Any]:
         """Return current state plus logging metadata."""
@@ -1825,7 +1847,22 @@ class MainController:
             analysis = entry.get("analysis") if isinstance(entry.get("analysis"), dict) else {}
             compact["analysis"] = self._select_runtime_fields(
                 analysis,
-                ("ok", "objective_score", "uncertainty", "recommendation", "summary", "utm_metrics", "fem_metrics", "cae_metrics", "quality_gate", "fem_utm_comparison"),
+                (
+                    "ok",
+                    "objective_score",
+                    "uncertainty",
+                    "recommendation",
+                    "summary",
+                    "utm_metrics",
+                    "utm_curve",
+                    "data_quality_gate",
+                    "fem_metrics",
+                    "cae_metrics",
+                    "quality_gate",
+                    "fem_utm_comparison",
+                    "analysis_artifacts",
+                    "bo_handoff",
+                ),
             )
         if "vision_signal" in entry:
             compact["vision_signal"] = compact_runtime_payload(entry.get("vision_signal"))
@@ -2115,6 +2152,27 @@ class MainController:
             compact["specimen"] = cls._planning_display_specimen_result(entry.get("specimen"))
         if "bo_result" in entry:
             compact["bo_result"] = cls._planning_display_bo_result(entry.get("bo_result"))
+        if "analysis" in entry:
+            analysis = entry.get("analysis") if isinstance(entry.get("analysis"), dict) else {}
+            compact["analysis"] = cls._select_runtime_fields(
+                analysis,
+                (
+                    "ok",
+                    "objective_score",
+                    "uncertainty",
+                    "recommendation",
+                    "summary",
+                    "utm_metrics",
+                    "utm_curve",
+                    "data_quality_gate",
+                    "fem_metrics",
+                    "cae_metrics",
+                    "quality_gate",
+                    "fem_utm_comparison",
+                    "analysis_artifacts",
+                    "bo_handoff",
+                ),
+            )
         # Agent reports can use state.run_metadata; avoid shipping bulky per-message internals every poll.
         for key in ("equipment_runtime_event", "macro_command", "equipment_result", "data_ledger", "data_acquisition", "visual_assertion", "physical_cross_check", "recovery", "handoff_packet", "vision_signal", "vision_cross_check_event", "guardian_gate"):
             value = entry.get(key)
@@ -2304,18 +2362,23 @@ class MainController:
             "latest_orchestrator_followup",
             "latest_orchestrator_decision",
             "latest_orchestrator_handoff",
+            "latest_orchestrator_control_plane",
             "latest_orchestrator_parallel_checks",
             "latest_operator_followup",
             "operator_followup_context",
             "latest_loop_reflection",
             "design_report",
+            "latest_design_agent_report",
             "design_candidate",
             "fabrication_report",
+            "latest_specimen_agent_report",
             "specimen_result",
             "specimen_fabricated",
             "vision_report",
+            "latest_vision_agent_report",
             "vision_signal",
             "manipulation_report",
+            "latest_manipulation_agent_report",
             "manipulation_result",
             "robot_task_result",
             "equipment_report",
@@ -2464,6 +2527,7 @@ class MainController:
 
     def _planning_state_payload(self) -> dict[str, Any]:
         """Return a compact state payload for high-frequency Live GUI refreshes."""
+        self._ensure_orchestrator_supervisor_baseline()
         state_json = self._state.model_dump(mode="json")
         return self._compact_planning_state_for_display(state_json)
 
@@ -4219,6 +4283,8 @@ class MainController:
     def _should_trigger_test_design(message: str) -> bool:
         """Detect Live GUI shortcut for creating a default test design handoff."""
         normalized = re.sub(r"\s+", "", message.lower())
+        if normalized.startswith("test") and MainController._parse_specimen_printer_choice(message):
+            return True
         return normalized in {"테스트모드", "testmode", "test"} or "테스트모드" in normalized
 
     def _default_test_constraints(self, constraints: dict[str, Any]) -> dict[str, Any]:
@@ -4705,6 +4771,12 @@ class MainController:
                 event_type="planning_handoff",
                 message="Planning handoff to Specimen Making Agent started.",
             )
+        remembered_printer_choice = str(self._state.run_metadata.get("last_specimen_printer_choice") or "").strip()
+        if remembered_printer_choice and not self._specimen_printer_path(experiment_spec):
+            experiment_spec = self._apply_specimen_printer_choice_to_spec(dict(experiment_spec), remembered_printer_choice)
+            experiment_spec.setdefault("test_mode_autofill", True)
+            experiment_spec.setdefault("test_mode_llm_generated", True)
+
         self._state.stage = Stage.SPECIMEN
         self._state.current_experiment_spec = experiment_spec
         await self._run_planning_langgraph_stage(Stage.SPECIMEN)
@@ -5069,6 +5141,7 @@ class MainController:
             experiment_spec.setdefault("test_mode_autofill", True)
             experiment_spec.setdefault("test_mode_llm_generated", True)
             self._state.current_experiment_spec = experiment_spec
+            self._state.run_metadata["last_specimen_printer_choice"] = choice
             self._state.run_metadata.pop("pending_specimen_input", None)
             await self._append_planning_message(
                 {
@@ -5291,6 +5364,8 @@ class MainController:
             self._state.run_metadata[f"{stage.value}_agent_payload"] = data
             if isinstance(data.get("design_report"), dict):
                 self._state.run_metadata["design_report"] = data["design_report"]
+            if isinstance(data.get("design_agent_report"), dict):
+                self._state.run_metadata["latest_design_agent_report"] = data["design_agent_report"]
             if isinstance(data.get("design_candidate"), dict):
                 self._state.run_metadata["design_candidate"] = data["design_candidate"]
             if isinstance(data.get("handoff_packet"), dict):
@@ -5317,16 +5392,22 @@ class MainController:
             if isinstance(data.get("fabrication_report"), dict):
                 self._state.run_metadata["fabrication_report"] = data["fabrication_report"]
                 self._state.run_metadata[f"{stage.value}_fabrication_report"] = data["fabrication_report"]
+            if isinstance(data.get("specimen_agent_report"), dict):
+                self._state.run_metadata["latest_specimen_agent_report"] = data["specimen_agent_report"]
             if isinstance(data.get("specimen_fabricated"), dict):
                 self._state.run_metadata["specimen_fabricated"] = data["specimen_fabricated"]
             if isinstance(data.get("vision_report"), dict):
                 self._state.run_metadata["vision_report"] = data["vision_report"]
                 self._state.run_metadata[f"{stage.value}_vision_report"] = data["vision_report"]
+            if isinstance(data.get("vision_agent_report"), dict):
+                self._state.run_metadata["latest_vision_agent_report"] = data["vision_agent_report"]
             if isinstance(data.get("vision_signal"), dict):
                 self._state.run_metadata["vision_signal"] = data["vision_signal"]
             if isinstance(data.get("manipulation_report"), dict):
                 self._state.run_metadata["manipulation_report"] = data["manipulation_report"]
                 self._state.run_metadata[f"{stage.value}_manipulation_report"] = data["manipulation_report"]
+            if isinstance(data.get("manipulation_agent_report"), dict):
+                self._state.run_metadata["latest_manipulation_agent_report"] = data["manipulation_agent_report"]
             if isinstance(data.get("robot_task_result"), dict):
                 self._state.run_metadata["robot_task_result"] = data["robot_task_result"]
                 self._state.run_metadata[f"{stage.value}_robot_task_result"] = data["robot_task_result"]

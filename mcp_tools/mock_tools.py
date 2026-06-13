@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from datetime import datetime, timedelta, timezone
 from random import Random
 import re
@@ -231,6 +232,278 @@ def _safe_segment(value: Any, fallback: str) -> str:
     return text or fallback
 
 
+def _try_write_stl_iso_capture_png(
+    path: Path,
+    *,
+    stl_path: Path,
+    specimen_id: str,
+    geometry_type: str,
+) -> bool:
+    """Render an actual STL mesh into a deterministic isometric PNG preview."""
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+        import numpy as np
+        import trimesh
+    except Exception:
+        return False
+    if not stl_path.exists():
+        return False
+    try:
+        mesh = trimesh.load_mesh(str(stl_path), force="mesh")
+        vertices = np.asarray(mesh.vertices, dtype=float)
+        faces = np.asarray(mesh.faces, dtype=int)
+    except Exception:
+        return False
+    if vertices.size == 0 or faces.size == 0:
+        return False
+
+    max_faces = 18000
+    if len(faces) > max_faces:
+        stride = max(1, math.ceil(len(faces) / max_faces))
+        faces = faces[::stride]
+
+    width, height = 760, 420
+    scale_factor = 2
+    render_size = (width * scale_factor, height * scale_factor)
+    image = Image.new("RGB", render_size, "#07111f")
+    draw = ImageDraw.Draw(image, "RGBA")
+
+    for y in range(render_size[1]):
+        r = int(7 + y * 0.009)
+        g = int(17 + y * 0.013)
+        b = int(31 + y * 0.021)
+        draw.line([(0, y), (render_size[0], y)], fill=(r, g, min(b, 66), 255))
+    for offset in range(-render_size[0], render_size[0], 48):
+        draw.line(
+            [(offset, render_size[1] - 82), (offset + render_size[0], 164)],
+            fill=(56, 189, 248, 22),
+            width=1,
+        )
+
+    centered = vertices - ((vertices.min(axis=0) + vertices.max(axis=0)) / 2.0)
+    iso_x = (centered[:, 0] - centered[:, 1]) * 0.8660254
+    iso_y = (centered[:, 0] + centered[:, 1]) * 0.50 - centered[:, 2] * 0.92
+    min_x, max_x = float(iso_x.min()), float(iso_x.max())
+    min_y, max_y = float(iso_y.min()), float(iso_y.max())
+    span_x = max(max_x - min_x, 1e-6)
+    span_y = max(max_y - min_y, 1e-6)
+    margin_x = 58 * scale_factor
+    margin_y = 44 * scale_factor
+    fit = min((render_size[0] - margin_x * 2) / span_x, (render_size[1] - margin_y * 2) / span_y)
+    px = (iso_x - (min_x + max_x) / 2.0) * fit + render_size[0] / 2.0
+    py = (iso_y - (min_y + max_y) / 2.0) * fit + render_size[1] / 2.0 + 8 * scale_factor
+
+    shadow_w = min(render_size[0] * 0.54, span_x * fit * 1.10)
+    shadow_h = min(render_size[1] * 0.18, max(18 * scale_factor, span_y * fit * 0.16))
+    draw.ellipse(
+        [
+            render_size[0] / 2.0 - shadow_w / 2.0,
+            render_size[1] / 2.0 + span_y * fit * 0.33,
+            render_size[0] / 2.0 + shadow_w / 2.0,
+            render_size[1] / 2.0 + span_y * fit * 0.33 + shadow_h,
+        ],
+        fill=(0, 0, 0, 62),
+    )
+
+    tri_vertices = centered[faces]
+    normals = np.cross(tri_vertices[:, 1] - tri_vertices[:, 0], tri_vertices[:, 2] - tri_vertices[:, 0])
+    lengths = np.linalg.norm(normals, axis=1)
+    normals = normals / np.maximum(lengths[:, None], 1e-9)
+    light = np.array([-0.35, -0.55, 0.78], dtype=float)
+    light = light / np.linalg.norm(light)
+    shade = np.clip(normals @ light, 0.0, 1.0)
+    shade = 0.40 + shade * 0.60
+    depth = tri_vertices.mean(axis=1) @ np.array([0.62, 0.62, 0.36], dtype=float)
+    order = np.argsort(depth)
+
+    palette = {
+        "gyroid": (65, 220, 164),
+        "lattice_bcc": (56, 189, 248),
+        "lattice_fcc": (88, 166, 255),
+        "lattice_octet": (167, 139, 250),
+        "honeycomb": (245, 196, 83),
+        "auxetic_reentrant": (244, 114, 182),
+        "random_voronoi": (34, 211, 238),
+    }
+    base = palette.get(str(geometry_type), (96, 165, 250))
+    face_count = len(order)
+    edge_step = max(1, face_count // 3500)
+    screen_points = np.column_stack([px, py])
+    for draw_index, face_index in enumerate(order):
+        face = faces[face_index]
+        pts = [(float(screen_points[idx, 0]), float(screen_points[idx, 1])) for idx in face]
+        s = float(shade[face_index])
+        fill = (
+            int(base[0] * s + 12 * (1.0 - s)),
+            int(base[1] * s + 22 * (1.0 - s)),
+            int(base[2] * s + 38 * (1.0 - s)),
+            226,
+        )
+        draw.polygon(pts, fill=fill)
+        if draw_index % edge_step == 0:
+            draw.line(pts + [pts[0]], fill=(210, 245, 255, 30), width=1)
+
+    try:
+        font_label = ImageFont.truetype("consola.ttf", 16 * scale_factor)
+        font_small = ImageFont.truetype("consola.ttf", 12 * scale_factor)
+    except Exception:
+        font_label = ImageFont.load_default()
+        font_small = ImageFont.load_default()
+    draw.rounded_rectangle(
+        [22 * scale_factor, 22 * scale_factor, 134 * scale_factor, 54 * scale_factor],
+        radius=8 * scale_factor,
+        fill=(5, 9, 20, 154),
+        outline=(125, 211, 252, 92),
+        width=1 * scale_factor,
+    )
+    draw.text((34 * scale_factor, 31 * scale_factor), "ISO VIEW", fill=(220, 245, 255, 245), font=font_label)
+    geom_label = str(geometry_type or "specimen").upper()
+    draw.text((render_size[0] - 246 * scale_factor, 34 * scale_factor), geom_label[:22], fill=(186, 230, 253, 218), font=font_small)
+    draw.rounded_rectangle(
+        [18 * scale_factor, 18 * scale_factor, render_size[0] - 18 * scale_factor, render_size[1] - 18 * scale_factor],
+        radius=18 * scale_factor,
+        outline=(56, 189, 248, 72),
+        width=1 * scale_factor,
+    )
+
+    try:
+        resample = Image.Resampling.LANCZOS
+    except AttributeError:
+        resample = Image.LANCZOS
+    image = image.resize((width, height), resample)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    image.save(path, format="PNG", optimize=True)
+    return True
+
+
+def _write_viewer_capture_png(
+    path: Path,
+    *,
+    specimen_id: str,
+    geometry_type: str,
+    size: list[float],
+    cell: float,
+    wall: float,
+    relative_density: float,
+    orientation_deg: float,
+    geometry_hash: str,
+    stl_path: Path | None = None,
+) -> bool:
+    """Write a bitmap capture, preferring an actual STL isometric render."""
+    if stl_path is not None and _try_write_stl_iso_capture_png(
+        path,
+        stl_path=stl_path,
+        specimen_id=specimen_id,
+        geometry_type=geometry_type,
+    ):
+        return True
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+    except Exception:
+        return False
+
+    width, height = 760, 420
+    image = Image.new("RGB", (width, height), "#07111f")
+    draw = ImageDraw.Draw(image, "RGBA")
+
+    for y in range(height):
+        r = int(7 + y * 0.018)
+        g = int(17 + y * 0.026)
+        b = int(31 + y * 0.042)
+        draw.line([(0, y), (width, y)], fill=(r, g, min(b, 64), 255))
+
+    for offset in range(-width, width, 34):
+        draw.line([(offset, height - 58), (offset + width, 110)], fill=(56, 189, 248, 34), width=1)
+    for y in range(120, height - 30, 28):
+        draw.line([(42, y), (width - 42, y + 24)], fill=(148, 163, 184, 30), width=1)
+
+    cx, cy = width * 0.53, height * 0.68
+    density = max(0.08, min(0.85, float(relative_density or 0.28)))
+    grid = max(3, min(8, round(9 - float(cell or 10.0) / 2.0 + density * 3.0)))
+    stroke_width = max(2, min(6, round(float(wall or 1.6) * 1.7)))
+    angle = float(orientation_deg or 0.0) * 3.141592653589793 / 180.0
+    accent = (69, 227, 162, 210)
+    accent2 = (56, 189, 248, 190)
+
+    unit = min(width * 0.23, height * 0.38)
+    sx, sy, sz = unit, unit * 0.54, unit * 1.05
+    cos_a = math.cos(angle * 0.42)
+    sin_a = math.sin(angle * 0.42)
+
+    def project(x: float, y: float, z: float) -> tuple[float, float]:
+        xr = x * cos_a - y * sin_a
+        yr = x * sin_a + y * cos_a
+        return (cx + (xr - yr) * sx, cy + (xr + yr) * sy - z * sz)
+
+    corners = {
+        "a": project(-0.5, -0.5, 0.0),
+        "b": project(0.5, -0.5, 0.0),
+        "c": project(0.5, 0.5, 0.0),
+        "d": project(-0.5, 0.5, 0.0),
+        "e": project(-0.5, -0.5, 1.0),
+        "f": project(0.5, -0.5, 1.0),
+        "g": project(0.5, 0.5, 1.0),
+        "h": project(-0.5, 0.5, 1.0),
+    }
+    draw.ellipse([cx - unit * 1.35, cy + unit * 0.20, cx + unit * 1.35, cy + unit * 0.82], fill=(0, 0, 0, 58))
+    draw.polygon([corners["d"], corners["c"], corners["g"], corners["h"]], fill=(15, 23, 42, 150))
+    draw.polygon([corners["b"], corners["c"], corners["g"], corners["f"]], fill=(8, 15, 27, 178))
+    draw.polygon([corners["e"], corners["f"], corners["g"], corners["h"]], fill=(28, 44, 68, 150))
+
+    def lerp(a: float, b: float, t: float) -> float:
+        return a + (b - a) * t
+
+    def line3(a: tuple[float, float, float], b: tuple[float, float, float], fill: tuple[int, int, int, int], width_px: int) -> None:
+        draw.line([project(*a), project(*b)], fill=fill, width=width_px)
+
+    grid_color = (125, 211, 252, 156)
+    brace_color = accent2
+    for idx in range(grid + 1):
+        t = idx / max(grid, 1)
+        line3((lerp(-0.5, 0.5, t), 0.5, 0), (lerp(-0.5, 0.5, t), 0.5, 1), grid_color, stroke_width)
+        line3((-0.5, 0.5, t), (0.5, 0.5, t), grid_color, stroke_width)
+        line3((0.5, lerp(-0.5, 0.5, t), 0), (0.5, lerp(-0.5, 0.5, t), 1), (125, 211, 252, 120), stroke_width)
+        line3((lerp(-0.5, 0.5, t), -0.5, 1), (lerp(-0.5, 0.5, t), 0.5, 1), (125, 211, 252, 112), max(1, stroke_width - 1))
+        line3((-0.5, lerp(-0.5, 0.5, t), 1), (0.5, lerp(-0.5, 0.5, t), 1), (125, 211, 252, 112), max(1, stroke_width - 1))
+    for idx in range(grid):
+        t0 = idx / max(grid, 1)
+        t1 = (idx + 1) / max(grid, 1)
+        z0, z1 = (0.08, 0.92) if idx % 2 == 0 else (0.92, 0.08)
+        line3((lerp(-0.5, 0.5, t0), 0.5, z0), (lerp(-0.5, 0.5, t1), 0.5, z1), brace_color, stroke_width + 1)
+        line3((0.5, lerp(-0.5, 0.5, t0), z1), (0.5, lerp(-0.5, 0.5, t1), z0), (167, 139, 250, 140), stroke_width)
+
+    if re.search(r"gyroid|tpms|voronoi", str(geometry_type), re.IGNORECASE):
+        for band in range(3):
+            points: list[tuple[float, float]] = []
+            for step in range(54):
+                t = step / 53.0
+                x = lerp(-0.44, 0.44, t)
+                z = 0.18 + band * 0.24 + math.sin(t * math.pi * 2.0 + band) * 0.045
+                points.append(project(x, 0.505, z))
+            draw.line(points, fill=(167, 139, 250, 150), width=max(2, stroke_width), joint="curve")
+
+    for start, end in (
+        ("a", "b"), ("b", "c"), ("c", "d"), ("d", "a"),
+        ("e", "f"), ("f", "g"), ("g", "h"), ("h", "e"),
+        ("a", "e"), ("b", "f"), ("c", "g"), ("d", "h"),
+    ):
+        draw.line([corners[start], corners[end]], fill=(125, 211, 252, 210), width=2)
+    draw.rounded_rectangle([18, 18, width - 18, height - 18], radius=20, outline=(56, 189, 248, 82), width=2)
+    draw.rounded_rectangle([24, height - 74, width - 24, height - 24], radius=10, fill=(5, 9, 20, 172), outline=(125, 211, 252, 70), width=1)
+
+    try:
+        font_label = ImageFont.truetype("consola.ttf", 18)
+        font_small = ImageFont.truetype("consola.ttf", 14)
+    except Exception:
+        font_label = ImageFont.load_default()
+        font_small = ImageFont.load_default()
+    draw.text((38, height - 62), f"{specimen_id} / {geometry_type}".upper(), fill=(226, 232, 240, 255), font=font_label)
+    draw.text((38, height - 38), f"size={size} cell={cell:.2f} wall={wall:.2f} rho={density:.2f} hash={geometry_hash[:12]}", fill=(159, 176, 201, 255), font=font_small)
+    draw.text((width - 188, 34), "3D VIEWER CAPTURE", fill=(186, 230, 253, 230), font=font_small)
+    image.save(path, format="PNG", optimize=True)
+    return True
+
+
 def _cuboid_facets(x0: float, x1: float, y0: float, y1: float, z0: float, z1: float) -> list[str]:
     v = [
         (x0, y0, z0), (x1, y0, z0), (x1, y1, z0), (x0, y1, z0),
@@ -437,6 +710,7 @@ def _generate_geometry_stl(payload: dict[str, Any]) -> dict[str, Any]:
     stl_path = output_dir / "specimen.stl"
     metadata_path = output_dir / "geometry_report.json"
     preview_path = output_dir / "specimen_preview.svg"
+    viewer_capture_path = output_dir / "viewer_capture.png"
     generation_log = output_dir / "geometry.log"
     generator_meta: dict[str, Any] = {}
     wrote_stl = False
@@ -535,6 +809,18 @@ def _generate_geometry_stl(payload: dict[str, Any]) -> dict[str, Any]:
         ),
         encoding="utf-8",
     )
+    capture_ready = _write_viewer_capture_png(
+        viewer_capture_path,
+        specimen_id=specimen_id,
+        geometry_type=geometry_type,
+        size=size,
+        cell=cell,
+        wall=wall,
+        relative_density=relative_density,
+        orientation_deg=orientation_deg,
+        geometry_hash=geometry_hash,
+        stl_path=stl_path,
+    )
     metadata_payload = {
         "ok": True,
         "geometry_type": geometry_type,
@@ -554,6 +840,7 @@ def _generate_geometry_stl(payload: dict[str, Any]) -> dict[str, Any]:
         "estimated_mass_g": round(estimated_mass, 3),
         "bounding_box_mm": size,
         "geometry_hash": geometry_hash,
+        "viewer_capture_path": str(viewer_capture_path) if capture_ready else "",
         "tool_version": "tpms-geometry-v3",
         **generator_meta,
     }
@@ -575,6 +862,8 @@ def _generate_geometry_stl(payload: dict[str, Any]) -> dict[str, Any]:
         "stl_path": str(stl_path),
         "metadata_path": str(metadata_path),
         "preview_image_path": str(preview_path),
+        "viewer_capture_path": str(viewer_capture_path) if capture_ready else "",
+        "capture_image_path": str(viewer_capture_path) if capture_ready else "",
         "geometry_report": metadata_payload,
         "estimated_volume_mm3": round(estimated_volume, 3),
         "estimated_mass_g": round(estimated_mass, 3),

@@ -41,6 +41,8 @@ class CAEBridgeConfig:
     mode: str = "test"
     default_solver: str = "calculix"
     default_mesher: str = "gmsh"
+    solver_path: str = ""
+    mesher_path: str = ""
     require_solver_in_live: bool = True
     artifact_dir: Path = field(default_factory=lambda: resolve_path("artifacts/cae"))
     default_material: dict[str, float] = field(
@@ -96,11 +98,26 @@ class CAEBridgeConfig:
             boundary["bottom"] = str(cae_raw["default_boundary_condition"])
         if isinstance(cae_raw.get("default_loading"), dict) and cae_raw["default_loading"].get("mode"):
             boundary["top"] = str(cae_raw["default_loading"]["mode"])
+        base_root = repo_root or resolve_path(".")
+
+        def _configured_path(*keys: str) -> str:
+            for key in keys:
+                raw_path = str(cae_raw.get(key) or "").strip()
+                if not raw_path:
+                    continue
+                path = Path(raw_path).expanduser()
+                if not path.is_absolute():
+                    path = base_root.joinpath(path).resolve()
+                return str(path)
+            return ""
+
         return cls(
             enabled=bool(cae_raw.get("enabled", True)),
             mode=str(cae_raw.get("mode", devices.get("mode", "test") if isinstance(devices, dict) else "test")),
             default_solver=str(cae_raw.get("solver", cae_raw.get("default_solver", "calculix"))),
             default_mesher=str(cae_raw.get("mesher", cae_raw.get("default_mesher", "gmsh"))),
+            solver_path=_configured_path("solver_path", "calculix_path", "ccx_path"),
+            mesher_path=_configured_path("mesher_path", "gmsh_path"),
             require_solver_in_live=bool(cae_raw.get("require_solver_in_live", True)),
             artifact_dir=artifact,
             default_material={key: float(value) for key, value in material.items()},
@@ -132,8 +149,8 @@ class CAEBridge(BaseBridge):
 
     def solver_status(self) -> dict[str, Any]:
         """Return local open-source CAE solver availability."""
-        ccx = shutil.which("ccx") or shutil.which("calculix")
-        gmsh = shutil.which("gmsh")
+        ccx = self._existing_executable(self.config.solver_path) or shutil.which("ccx") or shutil.which("calculix")
+        gmsh = self._existing_executable(self.config.mesher_path) or shutil.which("gmsh")
         return {
             "ok": True,
             "tool": "cae.health",
@@ -156,6 +173,13 @@ class CAEBridge(BaseBridge):
                 "mesh_size_mm": 2.0,
             },
         }
+
+    @staticmethod
+    def _existing_executable(path_text: str) -> str:
+        if not path_text:
+            return ""
+        path = Path(path_text).expanduser()
+        return str(path) if path.exists() and path.is_file() else ""
 
     @staticmethod
     def _float(payload: dict[str, Any], key: str, default: float) -> float:

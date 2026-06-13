@@ -7,6 +7,11 @@ Autonomous Researcher Framework는 실험 설계, 시편 제작, 장비 제어, 
 
 처음 사용하는 사람은 먼저 [사용자 종합 매뉴얼](docs/tutorials/user_manual.ko.md)을 읽으면 됩니다. 이 문서는 설치, 첫 실행, GUI 사용, 장비 설정, 상급자용 API/graph/module 구조까지 한 번에 정리합니다.
 
+Windows에서 로컬 AI 없이 API key만 사용할 때는 `.env`에
+`AUTONOMOUS_BACKEND=openai`와 `OPENAI_API_KEY`를 설정한 뒤
+`python -m app.serve`로 실행합니다. Linux 로컬 우선 워크스테이션은
+`AUTONOMOUS_BACKEND=vllm`을 유지하고, `configs/models.yaml`의
+`backend.fallback: openai`를 통해 OpenAI를 최종 fallback으로 사용합니다.
 
 ```bash
 cd /home/jin/autonomous_researcher
@@ -27,6 +32,16 @@ atr down
 
 ```bash
 .venv/bin/python -m app.serve
+```
+
+Windows 직접 실행:
+
+```powershell
+py -3.11 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+Copy-Item .env.example .env
+python -m app.serve
 ```
 
 ## 2. 주요 접속 경로

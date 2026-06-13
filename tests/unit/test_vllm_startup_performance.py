@@ -41,6 +41,42 @@ class _PreparedBackend(BaseLLMBackend):
         return LLMResponse(text="ok", model=model, raw={"metadata": metadata or {}})
 
 
+class _FailingBackend(BaseLLMBackend):
+    """Backend that records attempted models before failing."""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    async def complete(
+        self,
+        *,
+        model: str,
+        system_prompt: str,
+        user_prompt: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> LLMResponse:
+        self.calls.append(model)
+        raise RuntimeError(f"{model} unavailable")
+
+
+class _RecordingBackend(BaseLLMBackend):
+    """Backend that records the model used for a successful fallback."""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    async def complete(
+        self,
+        *,
+        model: str,
+        system_prompt: str,
+        user_prompt: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> LLMResponse:
+        self.calls.append(model)
+        return LLMResponse(text="openai-ok", model=model, raw={"metadata": metadata or {}})
+
+
 def _router() -> ModelRouter:
     return ModelRouter(
         {
@@ -79,6 +115,65 @@ async def test_agent_context_does_not_duplicate_backend_prepare() -> None:
     assert response.text == "ok"
     assert backend.complete_calls == 1
     assert backend.prepare_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_agent_context_uses_openai_backend_as_last_fallback() -> None:
+    local_backend = _FailingBackend()
+    openai_backend = _RecordingBackend()
+    local_router = ModelRouter(
+        {
+            "models": {"orchestrator": {"primary": "local-primary", "fallback": "local-fallback"}},
+            "task_routes": {"orchestrator_plan": "orchestrator"},
+        }
+    )
+    openai_router = ModelRouter(
+        {
+            "models": {"orchestrator": {"primary": "gpt-5.5"}},
+            "task_routes": {"orchestrator_plan": "orchestrator"},
+        }
+    )
+    model_events: list[dict[str, str]] = []
+
+    async def on_model_call(*, task_type: str, model: str, role: str, backend: str) -> None:
+        model_events.append(
+            {
+                "task_type": task_type,
+                "model": model,
+                "role": role,
+                "backend": backend,
+            }
+        )
+
+    ctx = AgentContext(
+        model_router=local_router,
+        primary_backend=local_backend,
+        fallback_backend=openai_backend,
+        rag=_rag(),
+        experiment_db=ExperimentDB(),
+        failure_memory=FailureMemory(),
+        tools=ToolRegistry(),
+        active_backend="vllm",
+        primary_backends={"vllm": local_backend, "openai": openai_backend},
+        fallback_backends={"vllm": openai_backend, "openai": openai_backend},
+        backend_fallbacks={"vllm": "openai", "openai": "openai"},
+        model_routers={"vllm": local_router, "openai": openai_router},
+        on_model_call=on_model_call,
+    )
+
+    response = await ctx.complete("orchestrator_plan", "plan this")
+
+    assert response.text == "openai-ok"
+    assert local_backend.calls == ["local-primary", "local-fallback"]
+    assert openai_backend.calls == ["gpt-5.5"]
+    assert model_events == [
+        {
+            "task_type": "orchestrator_plan",
+            "model": "gpt-5.5",
+            "role": "orchestrator:backend_fallback",
+            "backend": "openai",
+        }
+    ]
 
 
 @pytest.mark.asyncio

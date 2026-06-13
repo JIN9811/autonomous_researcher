@@ -1,5 +1,6 @@
 from orchestrator.state import Mode, OrchestratorState, Stage
 from orchestrator.supervisor import (
+    build_orchestrator_control_plane_snapshot,
     build_loop_reflection,
     build_mission_contract,
     build_orchestration_plan,
@@ -79,6 +80,61 @@ def test_orchestration_plan_compiles_route_parallel_checks_and_contract() -> Non
     assert "knowledge.retrieve_prior_failures" in plan["parallelizable_checks"]
     assert "vision.verify_print_or_fixture_state" in plan["serial_physical_actions"]
     assert "analysis_bo_handoff.json" in plan["expected_artifacts"]
+
+
+def test_orchestrator_control_plane_snapshot_covers_live_report_sections() -> None:
+    state = _state()
+    state.stage = Stage.DESIGN
+    state.current_experiment_spec = {
+        "specimen_id": "sp-supervisor",
+        "geometry_type": "gyroid",
+        "material": "PLA",
+        "test_protocol": "compression",
+    }
+    state.current_experiment_objective = {"objective_type": "specific_energy_absorption"}
+    state.run_metadata["runtime_approvals"] = {
+        "unit-gate": {
+            "approval_id": "approval-unit",
+            "status": "pending",
+            "stage": "design",
+            "title": "Approve design dispatch",
+            "risk_score": 0.25,
+        }
+    }
+    state.run_metadata["latest_guardian_gate"] = {
+        "stage": "design",
+        "decision": "allow_with_warning",
+        "reason_code": "UNIT_WARNING",
+        "risk_score": 0.42,
+    }
+    mission = build_mission_contract(state=state)
+    plan = build_orchestration_plan(state=state)
+
+    snapshot = build_orchestrator_control_plane_snapshot(
+        state=state,
+        mission_contract=mission,
+        orchestration_plan=plan,
+        next_action="Dispatch Design Agent.",
+    )
+
+    assert snapshot["schema"] == "orchestrator_control_plane.v1"
+    for section in (
+        "mission_contract",
+        "route_state",
+        "missing_inputs",
+        "decision_register",
+        "followup_questions",
+        "approval_summary",
+        "risk_register",
+        "task_queue",
+        "next_action",
+    ):
+        assert section in snapshot
+    assert snapshot["missing_inputs"]["missing_count"] == 0
+    assert snapshot["approval_summary"]["pending_count"] == 1
+    assert snapshot["risk_register"]["status"] == "warning"
+    assert snapshot["task_queue"]["items"][0]["stage"] == "design"
+    assert snapshot["next_action"]["next_stage"] == "design"
 
 
 def test_parallel_check_batch_records_read_only_evidence() -> None:

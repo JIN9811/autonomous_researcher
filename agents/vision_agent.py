@@ -702,6 +702,168 @@ class VisionAgent(BaseAgent):
             "next_action": "manipulation_pickup_precheck" if ready else "operator_or_guardian_review",
         }
 
+    def _vision_agent_report_snapshot(
+        self,
+        *,
+        state: OrchestratorState,
+        observation: dict[str, Any],
+        vision_report: dict[str, Any],
+        vision_packet: dict[str, Any],
+        metrics: dict[str, Any],
+        evidence_refs: list[dict[str, Any]],
+        capture: dict[str, Any],
+        ready: bool,
+        anomaly: bool,
+    ) -> dict[str, Any]:
+        """Build the Live GUI Vision Agent screen contract from observation evidence."""
+        camera = vision_report.get("camera_source", {}) if isinstance(vision_report.get("camera_source"), dict) else {}
+        model = vision_report.get("model_backend", {}) if isinstance(vision_report.get("model_backend"), dict) else {}
+        signals = [item for item in vision_report.get("signal_board", []) if isinstance(item, dict)]
+        detections = [item for item in vision_report.get("detections", []) if isinstance(item, dict)]
+        events = [item for item in vision_report.get("events", []) if isinstance(item, dict)]
+        zones = vision_report.get("scene_map", {}) if isinstance(vision_report.get("scene_map"), dict) else {}
+        artifacts = vision_report.get("artifacts", {}) if isinstance(vision_report.get("artifacts"), dict) else {}
+        safety = vision_report.get("safety_anomaly", {}) if isinstance(vision_report.get("safety_anomaly"), dict) else {}
+        pose = observation.get("pose_estimate", {}) if isinstance(observation.get("pose_estimate"), dict) else {}
+        readiness = observation.get("transfer_readiness", {}) if isinstance(observation.get("transfer_readiness"), dict) else {}
+        confidences = [self._as_float(signal.get("confidence"), 0.0) for signal in signals]
+        bins = [
+            {"bin": "0.00-0.25", "count": sum(1 for value in confidences if 0.0 <= value < 0.25)},
+            {"bin": "0.25-0.50", "count": sum(1 for value in confidences if 0.25 <= value < 0.5)},
+            {"bin": "0.50-0.75", "count": sum(1 for value in confidences if 0.5 <= value < 0.75)},
+            {"bin": "0.75-1.00", "count": sum(1 for value in confidences if 0.75 <= value <= 1.0)},
+        ]
+        clear_signals = sum(1 for signal in signals if signal.get("status") in {"ready", "record", "observed", "clear"})
+        blocked_signals = sum(1 for signal in signals if signal.get("status") in {"blocked", "warning"})
+        confusion_matrix = {
+            "labels": ["clear", "blocked"],
+            "matrix": [
+                [clear_signals, 0 if anomaly else max(0, len(detections) - clear_signals)],
+                [blocked_signals if anomaly else 0, blocked_signals],
+            ],
+            "source": "signal_status_proxy",
+        }
+        segmentation_panels = []
+        for index, detection in enumerate(detections[:6], start=1):
+            segmentation_panels.append(
+                {
+                    "panel_id": f"seg-{index}",
+                    "label": detection.get("label") or "object",
+                    "zone": detection.get("zone") or "",
+                    "bbox_xyxy": detection.get("bbox_xyxy", []),
+                    "mask_path": detection.get("mask_path", ""),
+                    "confidence": detection.get("confidence"),
+                }
+            )
+        if not segmentation_panels:
+            for index, (zone_id, zone) in enumerate(list(zones.items())[:6], start=1):
+                zone_payload = zone if isinstance(zone, dict) else {}
+                segmentation_panels.append(
+                    {
+                        "panel_id": f"zone-{index}",
+                        "label": zone_id,
+                        "zone": zone_id,
+                        "state": zone_payload.get("state", "unknown"),
+                        "confidence": zone_payload.get("confidence", 0.0),
+                    }
+                )
+        failure_labels = vision_report.get("knowledge_payload", {}).get("failure_labels", []) if isinstance(vision_report.get("knowledge_payload"), dict) else []
+        success_labels = vision_report.get("knowledge_payload", {}).get("success_labels", []) if isinstance(vision_report.get("knowledge_payload"), dict) else []
+        return {
+            "schema": "vision_agent_report.v1",
+            "source_report_schema": vision_report.get("schema"),
+            "report_id": f"vision-agent-report-{state.run_id or 'run'}-{state.loop_count + 1}",
+            "source_report_id": vision_report.get("report_id"),
+            "run_id": state.run_id,
+            "experiment_id": state.experiment_id,
+            "loop_index": state.loop_count + 1,
+            "created_at": self.now_iso(),
+            "producer_agent": self.name,
+            "camera_health": {
+                "camera_key": camera.get("camera_key"),
+                "source": camera.get("source"),
+                "frame_id": camera.get("frame_id"),
+                "frame_age_ms": camera.get("frame_age_ms"),
+                "capture_ok": bool(capture.get("ok")),
+                "status": "ready" if capture.get("ok") and not anomaly else "review_required",
+                "frame_path": artifacts.get("frame_path") or capture.get("frame_path") or capture.get("image_path") or "",
+            },
+            "calibration_summary": {
+                "calibration_id": camera.get("calibration_id"),
+                "pose_backend": model.get("pose_backend"),
+                "frame_width": capture.get("frame_width"),
+                "frame_height": capture.get("frame_height"),
+                "line_chart": [
+                    {"x": "frame_age_ms", "value": camera.get("frame_age_ms") or 0},
+                    {"x": "pose_confidence", "value": pose.get("confidence") or 0},
+                    {"x": "stable_for_ms", "value": readiness.get("stable_for_ms") or vision_packet.get("stable_for_ms") or 0},
+                ],
+            },
+            "confidence_distribution": {
+                "histogram": bins,
+                "max_confidence": metrics.get("max_signal_confidence"),
+                "min_confidence": metrics.get("min_signal_confidence"),
+                "signal_count": len(signals),
+            },
+            "inspection_feed": {
+                "task": vision_report.get("task"),
+                "summary": observation.get("summary"),
+                "annotated_frame_path": artifacts.get("annotated_frame_path"),
+                "frame_path": artifacts.get("frame_path"),
+                "events": events,
+                "detections": detections,
+            },
+            "segmentation": {
+                "panels": segmentation_panels,
+                "detection_count": len(detections),
+                "zone_count": len(zones),
+            },
+            "defect_summary": {
+                "anomaly": anomaly,
+                "low_confidence": safety.get("low_confidence"),
+                "occlusion": safety.get("occlusion"),
+                "human_or_obstacle_detected": safety.get("human_or_obstacle_detected"),
+                "blocking_reason": safety.get("blocking_reason"),
+                "failure_labels": failure_labels,
+                "success_labels": success_labels,
+            },
+            "pose_estimation": {
+                **pose,
+                "ready": ready,
+                "source_zone": (observation.get("pickup_target", {}) or {}).get("source_zone") if isinstance(observation.get("pickup_target"), dict) else "",
+                "target_location": (observation.get("pickup_target", {}) or {}).get("target_location") if isinstance(observation.get("pickup_target"), dict) else "",
+            },
+            "confusion_matrix": confusion_matrix,
+            "quality_metrics": {
+                **metrics,
+                "transfer_ready": ready,
+                "blocking_reason": readiness.get("blocking_reason"),
+                "freshness_ttl_ms": vision_report.get("freshness_policy", {}).get("ttl_ms") if isinstance(vision_report.get("freshness_policy"), dict) else self.SIGNAL_TTL_MS,
+            },
+            "evidence_review": {
+                "artifacts": artifacts,
+                "evidence_refs": evidence_refs,
+                "dataset_ledger": vision_report.get("dataset_ledger", {}),
+            },
+            "handoff_recommendations": {
+                "status": vision_packet.get("status"),
+                "signal_id": vision_packet.get("signal_id"),
+                "zone_id": vision_packet.get("zone_id"),
+                "confidence": vision_packet.get("confidence"),
+                "expires_at": vision_packet.get("expires_at"),
+                "consumer_agents": vision_packet.get("consumer_agents"),
+                "next_action": vision_packet.get("next_action"),
+                "warnings": vision_packet.get("warnings", []),
+            },
+            "visualization_manifest": [
+                {"id": "inspection_feed", "section": "inspection_feed", "type": "image_overlays"},
+                {"id": "confidence_distribution", "section": "confidence_distribution", "type": "histogram"},
+                {"id": "calibration_summary", "section": "calibration_summary", "type": "calibration_line_chart"},
+                {"id": "segmentation", "section": "segmentation", "type": "segmentation_panels"},
+                {"id": "confusion_matrix", "section": "confusion_matrix", "type": "confusion_matrix"},
+            ],
+        }
+
     def _transfer_observation(self, state: OrchestratorState, capture: dict[str, Any]) -> dict[str, Any]:
         specimen = self._specimen_result(state)
         fabrication_report = self._fabrication_report(state, specimen)
@@ -851,9 +1013,22 @@ class VisionAgent(BaseAgent):
             "vision_signal": vision_packet,
             "raw_capture": capture,
         }
+        vision_agent_report = self._vision_agent_report_snapshot(
+            state=state,
+            observation=observation,
+            vision_report=vision_report,
+            vision_packet=vision_packet,
+            metrics=metrics,
+            evidence_refs=evidence_refs,
+            capture=capture,
+            ready=ready,
+            anomaly=anomaly,
+        )
+        observation["vision_agent_report"] = vision_agent_report
         return {
             "observation": observation,
             "vision_report": vision_report,
+            "vision_agent_report": vision_agent_report,
             "vision_signal": vision_packet,
             "decisions": decisions,
             "metrics": metrics,
@@ -899,6 +1074,7 @@ class VisionAgent(BaseAgent):
             data={
                 "observation": observation,
                 "vision_report": payload["vision_report"],
+                "vision_agent_report": payload["vision_agent_report"],
                 "vision_signal": payload["vision_signal"],
                 "handoff_packet": payload["vision_signal"],
                 "decisions": payload["decisions"],

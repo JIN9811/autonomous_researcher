@@ -129,7 +129,7 @@ class LeRobotBridgeConfig:
             policy_root=policy_root,
             session_log_root=session_log_root,
             conda_env_name=str(root.get("conda_env_name", "lerobot")),
-            conda_executable=str(Path(str(root.get("conda_executable", "conda"))).expanduser()),
+            conda_executable=_resolve_conda_executable(str(root.get("conda_executable", "conda"))),
             pi05_conda_env_name=str(root.get("pi05_conda_env_name", "lerobot-pi05-torch211")),
             pi05_repo_root=pi05_repo_root,
             pi05_hf_home=pi05_hf_home,
@@ -3145,6 +3145,8 @@ print("Updated Pi0.5 quantile stats for " + ", ".join(updated))
         """Terminate stale LeRobot subprocesses without killing unrelated GUI/test processes."""
         matched = self._project_lerobot_pids(workflow)
         pids = self._expand_descendant_pids(matched)
+        if not pids:
+            return []
         current = {os.getpid(), os.getppid()}
         current_pgrp = os.getpgrp()
         safe_pids: list[int] = []
@@ -3233,7 +3235,10 @@ print("Updated Pi0.5 quantile stats for " + ", ".join(updated))
         project = self.config.repo_root.resolve()
         current = {os.getpid(), os.getppid()}
         pids: list[int] = []
-        for name in os.listdir("/proc"):
+        proc_root = Path("/proc")
+        if not proc_root.exists():
+            return []
+        for name in os.listdir(proc_root):
             if not name.isdigit():
                 continue
             pid = int(name)
@@ -3273,7 +3278,7 @@ print("Updated Pi0.5 quantile stats for " + ", ".join(updated))
                         return True
                     continue
                 if marker.endswith(".py"):
-                    if base == marker or part.endswith(f"/{marker}"):
+                    if base == marker or part.endswith(f"/{marker}") or part.endswith(f"\\{marker}"):
                         return True
                     continue
                 if marker == "rtc.enabled":
@@ -3293,6 +3298,8 @@ print("Updated Pi0.5 quantile stats for " + ", ".join(updated))
             return False
         except PermissionError:
             return True
+        except OSError:
+            return False
 
     def _send_lerobot_record_control_key(self, action: str) -> dict[str, Any]:
         key_by_action = {
@@ -4228,6 +4235,26 @@ def _resolve_path(repo_root: Path, value: str) -> Path:
     if not path.is_absolute():
         path = repo_root / path
     return path
+
+
+def _resolve_conda_executable(value: str) -> str:
+    configured = str(value or "conda").strip() or "conda"
+    expanded = Path(configured).expanduser()
+    if configured.lower() != "conda":
+        return str(expanded)
+    found = shutil.which(configured)
+    if found:
+        return found
+    home = Path.home()
+    for candidate in (
+        home / "miniconda3" / "Scripts" / "conda.exe",
+        home / "miniconda3" / "bin" / "conda",
+        home / "anaconda3" / "Scripts" / "conda.exe",
+        home / "anaconda3" / "bin" / "conda",
+    ):
+        if candidate.exists():
+            return str(candidate)
+    return configured
 
 
 def _bool_arg(value: bool) -> str:

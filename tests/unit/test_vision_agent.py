@@ -66,6 +66,36 @@ async def test_vision_agent_returns_pickup_observation() -> None:
     assert all(item["specimen_id"] == "specimen-001" for item in observation["vision_report"]["signal_board"])
     assert result.data["vision_signal"]["schema"] == "vision_signal.v1"
     assert result.data["vision_signal"]["signal_id"] == pickup_signal["signal_id"]
+    screen_report = result.data["vision_agent_report"]
+    expected_sections = {
+        "camera_health",
+        "calibration_summary",
+        "confidence_distribution",
+        "inspection_feed",
+        "segmentation",
+        "defect_summary",
+        "pose_estimation",
+        "confusion_matrix",
+        "quality_metrics",
+        "evidence_review",
+        "handoff_recommendations",
+    }
+    assert screen_report["schema"] == "vision_agent_report.v1"
+    assert screen_report["source_report_id"] == observation["vision_report"]["report_id"]
+    assert expected_sections.issubset(screen_report)
+    assert screen_report["camera_health"]["status"] == "ready"
+    assert screen_report["confidence_distribution"]["histogram"]
+    assert screen_report["segmentation"]["panels"]
+    assert screen_report["pose_estimation"]["ready"] is True
+    assert screen_report["handoff_recommendations"]["status"] == "ready"
+    assert observation["vision_agent_report"] == screen_report
+    assert {item["type"] for item in screen_report["visualization_manifest"]} >= {
+        "image_overlays",
+        "histogram",
+        "calibration_line_chart",
+        "segmentation_panels",
+        "confusion_matrix",
+    }
     assert result.data["vision_signal"]["consumer_agents"] == [
         "equipment_agent",
         "guardian_agent",
@@ -123,5 +153,9 @@ async def test_vision_agent_blocks_stale_risk_when_camera_fails() -> None:
     assert observation["transfer_readiness"]["ready"] is False
     assert observation["transfer_readiness"]["blocking_reason"] in {"camera_capture_failed", "anomaly_detected", "specimen_or_pose_not_ready"}
     assert result.data["vision_signal"]["status"] in {"warning", "blocked"}
+    assert result.data["vision_agent_report"]["schema"] == "vision_agent_report.v1"
+    assert result.data["vision_agent_report"]["camera_health"]["status"] == "review_required"
+    assert result.data["vision_agent_report"]["defect_summary"]["anomaly"] is True
+    assert result.data["vision_agent_report"]["handoff_recommendations"]["status"] in {"warning", "blocked"}
     assert result.data["vision_report"]["safety_anomaly"]["anomaly"] is True
     assert any(signal["signal"] == "anomaly_detected" for signal in result.data["vision_report"]["signal_board"])

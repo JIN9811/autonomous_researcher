@@ -25,7 +25,7 @@ lerobot:
   policy_root: outputs/train
   session_log_root: runs/lerobot_sessions
   conda_env_name: lerobot
-  conda_executable: /home/jin/miniconda3/bin/conda
+  conda_executable: conda
   pi05_conda_env_name: lerobot-pi05-torch211
   pi05_repo_root: /home/jin/lerobot_pi05
   pi05_hf_home: /home/jin/.cache/huggingface_pi05

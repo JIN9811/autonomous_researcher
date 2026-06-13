@@ -7,6 +7,10 @@ It connects experiment design, specimen manufacturing, equipment control, analys
 
 New users should start with the [Complete User Manual](docs/tutorials/user_manual.en.md). It covers installation, first run, GUI usage, device setup, advanced APIs, graph/module contracts, troubleshooting, and extension rules.
 
+Windows/API-key users can skip local AI by setting `AUTONOMOUS_BACKEND=openai`
+and `OPENAI_API_KEY` in `.env`, then starting with `python -m app.serve`.
+For local-first Linux workstations, keep `AUTONOMOUS_BACKEND=vllm`; OpenAI is
+available as the final backend fallback through `configs/models.yaml`.
 
 ```bash
 cd /home/jin/autonomous_researcher
@@ -27,6 +31,16 @@ Direct startup without the launcher:
 
 ```bash
 .venv/bin/python -m app.serve
+```
+
+Windows direct startup:
+
+```powershell
+py -3.11 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+Copy-Item .env.example .env
+python -m app.serve
 ```
 
 ## 2. Main Pages

@@ -46,6 +46,7 @@ from backends.model_router import ModelRouter
 from backends.nemoclaw_client import NemoClawBackend
 from backends.nemoclaw_vllm_runtime import NemoClawVLLMRuntime
 from backends.ollama_client import OllamaBackend
+from backends.openai_client import OpenAIBackend
 from backends.vllm_client import VLLMBackend
 from knowledge.experiment_db import ExperimentDB
 from knowledge.failure_memory import FailureMemory
@@ -77,13 +78,13 @@ def _env_flag(name: str, default: bool) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
-SUPPORTED_BACKENDS = ("nemoclaw", "ollama", "vllm")
+SUPPORTED_BACKENDS = ("openai", "nemoclaw", "ollama", "vllm")
 
 
 def _normalize_backend_name(value: str | None, default: str = "vllm") -> str:
     backend_name = str(value or default).strip().lower()
-    if backend_name == "openai":
-        backend_name = "vllm"
+    if backend_name in {"api", "cloud", "openai-api"}:
+        backend_name = "openai"
     return backend_name if backend_name in SUPPORTED_BACKENDS else default
 
 
@@ -119,7 +120,21 @@ def _build_backend(
     *,
     system_cfg: dict[str, Any],
     cfg: dict[str, Any],
-) -> OllamaBackend | NemoClawBackend | VLLMBackend:
+) -> OpenAIBackend | OllamaBackend | NemoClawBackend | VLLMBackend:
+    if backend_name == "openai":
+        openai_cfg = cfg.get("system", {}).get("openai", cfg.get("openai", {}))
+        return OpenAIBackend(
+            base_url=str(
+                os.getenv("OPENAI_BASE_URL", openai_cfg.get("base_url", "https://api.openai.com/v1"))
+            ),
+            timeout_s=float(os.getenv("OPENAI_TIMEOUT_S", openai_cfg.get("timeout_seconds", 300))),
+            api_key=str(os.getenv("OPENAI_API_KEY", openai_cfg.get("api_key", ""))),
+            organization=str(os.getenv("OPENAI_ORG_ID", openai_cfg.get("organization", ""))),
+            project=str(os.getenv("OPENAI_PROJECT_ID", openai_cfg.get("project", ""))),
+            reasoning_effort=str(
+                os.getenv("OPENAI_REASONING_EFFORT", openai_cfg.get("reasoning_effort", ""))
+            ),
+        )
     if backend_name == "nemoclaw":
         nemoclaw_cfg = cfg.get("system", {}).get("nemoclaw", cfg.get("nemoclaw", {}))
         return NemoClawBackend(
@@ -159,6 +174,7 @@ def _build_runtime_profile(
 ) -> dict[str, Any]:
     """Assemble backend/model metadata for GUI status panels."""
     labels = {
+        "openai": "OpenAI API",
         "nemoclaw": "Ollama / NemoClaw",
         "ollama": "Ollama",
         "vllm": "NemoClaw / vLLM",
@@ -218,8 +234,20 @@ def load_runtime() -> MainController:
         "AUTONOMOUS_ALLOW_MOCK_FALLBACK",
         bool(system_cfg.get("allow_mock_fallback", False)),
     )
+    fallback_backend_name = _normalize_backend_name(
+        str(base_models_cfg.get("backend", {}).get("fallback", "")),
+        default="openai",
+    )
+    backend_fallbacks = {
+        name: fallback_backend_name if name != fallback_backend_name else name
+        for name in SUPPORTED_BACKENDS
+    }
     fallback_registry = {
-        name: MockLLMBackend() if allow_mock_fallback else backend
+        name: (
+            MockLLMBackend()
+            if allow_mock_fallback
+            else backend_registry.get(backend_fallbacks[name], backend)
+        )
         for name, backend in backend_registry.items()
     }
     force_real_llm_in_test = _env_flag(
@@ -230,6 +258,7 @@ def load_runtime() -> MainController:
     router_registry = {name: ModelRouter(models_by_backend[name]) for name in SUPPORTED_BACKENDS}
     router = router_registry[backend_name]
     backend_cfg_by_name = {
+        "openai": cfg.get("system", {}).get("openai", cfg.get("openai", {})),
         "nemoclaw": cfg.get("system", {}).get("nemoclaw", cfg.get("nemoclaw", {})),
         "ollama": cfg.get("system", {}).get("ollama", cfg.get("ollama", {})),
         "vllm": cfg.get("system", {}).get("vllm", cfg.get("vllm", {})),
@@ -270,6 +299,7 @@ def load_runtime() -> MainController:
         model_routers=router_registry,
         primary_backends=backend_registry,
         fallback_backends=fallback_registry,
+        backend_fallbacks=backend_fallbacks,
         runtime_profiles=runtime_profiles,
     )
 

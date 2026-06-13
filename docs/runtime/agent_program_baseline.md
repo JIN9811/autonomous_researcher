@@ -112,6 +112,9 @@ Configured defaults (`configs/models.yaml`):
 - `orchestrator`: `gemma4:31b` (fallback `gemma4:e4b-it-nvfp4`)
 - `e4b`: `gemma4:e4b-it-nvfp4` (fallback `gemma4:31b`)
 - `e4b subordinate`: `gemma4:e4b-it-nvfp4` (fallback `gemma4:31b`)
+- Backend fallback: `openai`, using `gpt-5.5` by default when the active local
+  backend and its model fallback both fail. Set `AUTONOMOUS_BACKEND=openai` only
+  when intentionally skipping local inference.
 
 NemoClaw/vLLM deployment repos:
 

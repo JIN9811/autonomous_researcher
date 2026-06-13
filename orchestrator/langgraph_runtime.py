@@ -51,6 +51,7 @@ from orchestrator.supervisor import (
     build_loop_reflection,
     build_mission_contract,
     build_orchestration_plan,
+    build_orchestrator_control_plane_snapshot,
     build_orchestrator_followup,
     build_orchestrator_handoff_packet,
     build_orchestrator_parallel_check,
@@ -542,12 +543,20 @@ class ModuleRuntimeContext:
             return user_prompt
         return f"[Module developer guidance: {developer}]\n\n{user_prompt}"
 
-    async def _notify_model_call(self, task_type: str, model: str, role: str) -> None:
+    async def _notify_model_call(
+        self,
+        task_type: str,
+        model: str,
+        role: str,
+        *,
+        backend_name: str | None = None,
+    ) -> None:
         """Notify controller hooks with the module-selected backend name."""
+        resolved_backend = backend_name or self.active_backend
         callback = getattr(self._base, "on_model_call", None)
         if callback is not None:
             try:
-                result = callback(task_type=task_type, model=model, role=role, backend=self.active_backend)
+                result = callback(task_type=task_type, model=model, role=role, backend=resolved_backend)
                 if inspect.isawaitable(result):
                     await result
             except Exception:
@@ -574,7 +583,6 @@ class ModuleRuntimeContext:
         backend_name = self.active_backend
         router = self._base.model_routers.get(backend_name, self._base.model_router)
         primary_backend = self._base.primary_backends.get(backend_name, self._base.primary_backend)
-        fallback_backend = self._base.fallback_backends.get(backend_name, self._base.fallback_backend)
         selection = router.select(effective_task)
         primary_model = str(self._llm.get("model") or self._llm.get("primary") or selection.primary)
         fallback_model = str(self._llm.get("fallback") or selection.fallback or primary_model)
@@ -603,21 +611,73 @@ class ModuleRuntimeContext:
                 return await asyncio.wait_for(coro, timeout=effective_timeout)
             return await coro
 
-        try:
-            response = await _call_backend(primary_backend, primary_model, selection.role)
-            await self._notify_model_call(task_type=effective_task, model=primary_model, role=selection.role)
-            return response
-        except Exception as primary_error:
-            if fallback_backend is primary_backend and fallback_model == primary_model:
-                raise primary_error
+        attempts: list[tuple[str, Any, str, str]] = [
+            (backend_name, primary_backend, primary_model, selection.role),
+        ]
+        if fallback_model and fallback_model != primary_model:
+            attempts.append(
+                (
+                    backend_name,
+                    primary_backend,
+                    fallback_model,
+                    f"{selection.role}:model_fallback",
+                )
+            )
+
+        fallback_backend_name = self._base.backend_fallbacks.get(backend_name, "")
+        if fallback_backend_name and fallback_backend_name != backend_name:
+            fallback_router = self._base.model_routers.get(fallback_backend_name, router)
+            fallback_selection = fallback_router.select(effective_task)
+            fallback_backend = self._base.fallback_backends.get(backend_name, self._base.fallback_backend)
+            attempts.append(
+                (
+                    fallback_backend_name,
+                    fallback_backend,
+                    fallback_selection.primary,
+                    f"{fallback_selection.role}:backend_fallback",
+                )
+            )
+            if fallback_selection.fallback and fallback_selection.fallback != fallback_selection.primary:
+                attempts.append(
+                    (
+                        fallback_backend_name,
+                        fallback_backend,
+                        fallback_selection.fallback,
+                        f"{fallback_selection.role}:backend_fallback_model_fallback",
+                    )
+                )
+        else:
+            fallback_backend = self._base.fallback_backends.get(backend_name, self._base.fallback_backend)
+            if fallback_backend is not primary_backend and fallback_model:
+                attempts.append((backend_name, fallback_backend, fallback_model, f"{selection.role}:fallback"))
+
+        errors: list[tuple[str, str, str, Exception]] = []
+        seen: set[tuple[int, str, str]] = set()
+        for attempt_backend_name, backend, model, role in attempts:
+            key = (id(backend), model, role)
+            if key in seen:
+                continue
+            seen.add(key)
             try:
-                response = await _call_backend(fallback_backend, fallback_model, f"{selection.role}:fallback")
-                await self._notify_model_call(task_type=effective_task, model=fallback_model, role=f"{selection.role}:fallback")
+                response = await _call_backend(backend, model, role)
+                await self._notify_model_call(
+                    task_type=effective_task,
+                    model=model,
+                    role=role,
+                    backend_name=attempt_backend_name,
+                )
                 return response
-            except Exception as fallback_error:
-                raise RuntimeError(
-                    f"LLM call failed task={effective_task} primary={primary_model} fallback={fallback_model}"
-                ) from fallback_error
+            except Exception as exc:
+                errors.append((attempt_backend_name, model, role, exc))
+
+        detail = "; ".join(
+            f"{attempt_backend}/{role}/{model}: {type(exc).__name__}: {exc}"
+            for attempt_backend, model, role, exc in errors[-3:]
+        )
+        raise RuntimeError(
+            f"LLM call failed task={effective_task} active_backend={backend_name} "
+            f"fallback_backend={fallback_backend_name or backend_name}: {detail}"
+        ) from (errors[-1][3] if errors else None)
 
 
 class LangGraphRunLoop:
@@ -1120,6 +1180,14 @@ class LangGraphRunLoop:
         self._append_metadata_record("orchestration_plans", orchestration_plan, limit=20)
         self._state.run_metadata["latest_orchestration_plan"] = orchestration_plan
         await self._record_orchestrator_parallel_checks(plan=orchestration_plan, stage=stage)
+        self._state.run_metadata["latest_orchestrator_control_plane"] = compact_runtime_payload(
+            build_orchestrator_control_plane_snapshot(
+                state=self._state,
+                mission_contract=mission_contract,
+                orchestration_plan=orchestration_plan,
+                next_action=f"Route {stage.value} to {next_stage.value}.",
+            )
+        )
         await self._emit(
             event_type="orchestrator.decision",
             message=f"Orchestrator selected route {stage.value} -> {next_stage.value}",
@@ -1218,6 +1286,8 @@ class LangGraphRunLoop:
             self._state.run_metadata[f"{stage.value}_agent_payload"] = compact_data
             if isinstance(data.get("design_report"), dict):
                 self._state.run_metadata["design_report"] = compact_runtime_payload(data["design_report"])
+            if isinstance(data.get("design_agent_report"), dict):
+                self._state.run_metadata["latest_design_agent_report"] = compact_runtime_payload(data["design_agent_report"])
             if isinstance(data.get("design_candidate"), dict):
                 self._state.run_metadata["design_candidate"] = compact_runtime_payload(data["design_candidate"])
             if isinstance(data.get("handoff_packet"), dict):
@@ -1241,19 +1311,27 @@ class LangGraphRunLoop:
                 plans.append(compact_runtime_payload(data["orchestration_plan"]))
                 self._state.run_metadata["orchestration_plans"] = plans[-20:]
                 self._state.run_metadata["latest_orchestration_plan"] = compact_runtime_payload(data["orchestration_plan"])
+            if isinstance(data.get("orchestrator_control_plane"), dict):
+                self._state.run_metadata["latest_orchestrator_control_plane"] = compact_runtime_payload(data["orchestrator_control_plane"])
             if isinstance(data.get("fabrication_report"), dict):
                 self._state.run_metadata["fabrication_report"] = compact_runtime_payload(data["fabrication_report"])
                 self._state.run_metadata[f"{stage.value}_fabrication_report"] = compact_runtime_payload(data["fabrication_report"])
+            if isinstance(data.get("specimen_agent_report"), dict):
+                self._state.run_metadata["latest_specimen_agent_report"] = compact_runtime_payload(data["specimen_agent_report"])
             if isinstance(data.get("specimen_fabricated"), dict):
                 self._state.run_metadata["specimen_fabricated"] = compact_runtime_payload(data["specimen_fabricated"])
             if isinstance(data.get("vision_report"), dict):
                 self._state.run_metadata["vision_report"] = compact_runtime_payload(data["vision_report"])
                 self._state.run_metadata[f"{stage.value}_vision_report"] = compact_runtime_payload(data["vision_report"])
+            if isinstance(data.get("vision_agent_report"), dict):
+                self._state.run_metadata["latest_vision_agent_report"] = compact_runtime_payload(data["vision_agent_report"])
             if isinstance(data.get("vision_signal"), dict):
                 self._state.run_metadata["vision_signal"] = compact_runtime_payload(data["vision_signal"])
             if isinstance(data.get("manipulation_report"), dict):
                 self._state.run_metadata["manipulation_report"] = compact_runtime_payload(data["manipulation_report"])
                 self._state.run_metadata[f"{stage.value}_manipulation_report"] = compact_runtime_payload(data["manipulation_report"])
+            if isinstance(data.get("manipulation_agent_report"), dict):
+                self._state.run_metadata["latest_manipulation_agent_report"] = compact_runtime_payload(data["manipulation_agent_report"])
             if isinstance(data.get("robot_task_result"), dict):
                 self._state.run_metadata["robot_task_result"] = compact_runtime_payload(data["robot_task_result"])
                 self._state.run_metadata[f"{stage.value}_robot_task_result"] = compact_runtime_payload(data["robot_task_result"])
@@ -2285,6 +2363,18 @@ class LangGraphRunLoop:
                     self._append_metadata_record("orchestration_plans", orchestration_plan, limit=20)
                     self._state.run_metadata["latest_orchestration_plan"] = orchestration_plan
                     await self._record_orchestrator_parallel_checks(plan=orchestration_plan, stage=stage)
+                control_plane = result.data.get("orchestrator_control_plane")
+                if isinstance(control_plane, dict):
+                    self._state.run_metadata["latest_orchestrator_control_plane"] = compact_runtime_payload(control_plane)
+                elif isinstance(mission_contract, dict) and isinstance(orchestration_plan, dict):
+                    self._state.run_metadata["latest_orchestrator_control_plane"] = compact_runtime_payload(
+                        build_orchestrator_control_plane_snapshot(
+                            state=self._state,
+                            mission_contract=mission_contract,
+                            orchestration_plan=orchestration_plan,
+                            next_action=str(result.data.get("plan_text") or ""),
+                        )
+                    )
             completed_payload = {
                 "agent": agent_name,
                 "node_id": stage.value,

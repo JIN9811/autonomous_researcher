@@ -25,9 +25,11 @@ from __future__ import annotations
 
 import asyncio
 import csv
+import ctypes
 import hashlib
 import json
 import mimetypes
+import os
 import re
 import shutil
 import subprocess
@@ -67,7 +69,7 @@ from device_bridges.windows_pyautogui_bridge import (
     discover_windows_pyautogui_bridges,
 )
 from orchestrator.state import Mode, OrchestratorState, Stage
-from orchestrator.supervisor import build_mission_contract, build_orchestration_plan
+from orchestrator.supervisor import build_mission_contract, build_orchestration_plan, build_orchestrator_control_plane_snapshot
 from policies.guardian_gate import gate_blocks_execution, guardian_gate
 from utils.config_loader import load_all_configs
 from utils.manipulation_profile import (
@@ -103,7 +105,11 @@ RUNTIME_GRAPH_VERSION_ROOT = resolve_path("memory/graph_versions")
 RUNTIME_MODULE_ROOT = resolve_path("graphs/modules")
 RUNTIME_MODULE_VERSION_ROOT = resolve_path("memory/module_versions")
 _RUNTIME_GRAPH_DRY_RUN_RECORDS: dict[str, dict[str, object]] = {}
-_SYSTEM_RESOURCE_CACHE: dict[str, object] = {"updated_at_monotonic": 0.0, "payload": {}}
+_SYSTEM_RESOURCE_CACHE: dict[str, object] = {"updated_at_monotonic": 0.0, "payload": {}, "last_good_gpu": {}}
+try:
+    _NVIDIA_SMI_TIMEOUT_SEC = float(os.getenv("AUTONOMOUS_NVIDIA_SMI_TIMEOUT_SEC", "5.0") or 5.0)
+except ValueError:
+    _NVIDIA_SMI_TIMEOUT_SEC = 5.0
 _RUNTIME_MODULE_MANAGEMENT_LOADED: set[str] = set()
 _LEROBOT_BRIDGE: LeRobotBridge | None = None
 _LEROBOT_CONFIG_MTIME_NS: int = -1
@@ -275,7 +281,7 @@ class StartRunRequest(BaseModel):
 
     mode: Literal["live", "test", "replay", "fault-injection"] = "test"
     goal: str | None = None
-    backend: Literal["nemoclaw", "ollama", "vllm"] | None = None
+    backend: Literal["openai", "nemoclaw", "ollama", "vllm"] | None = None
     fault: str = Field(default="none", description="Fault name for fault-injection mode")
     fault_stage: str = Field(default="", description="Stage where fault is injected")
 
@@ -285,7 +291,7 @@ class PlanningMessageRequest(BaseModel):
 
     message: str = Field(..., min_length=1)
     goal: str | None = None
-    backend: Literal["nemoclaw", "ollama", "vllm"] | None = None
+    backend: Literal["openai", "nemoclaw", "ollama", "vllm"] | None = None
     constraints: dict[str, object] = Field(default_factory=dict)
     session_id: str | None = None
 
@@ -294,7 +300,7 @@ class PlanningBootstrapRequest(BaseModel):
     """Request body for starting the Live GUI orchestrator before user input."""
 
     goal: str | None = None
-    backend: Literal["nemoclaw", "ollama", "vllm"] | None = None
+    backend: Literal["openai", "nemoclaw", "ollama", "vllm"] | None = None
     constraints: dict[str, object] = Field(default_factory=dict)
     session_id: str | None = None
 
@@ -302,7 +308,7 @@ class PlanningBootstrapRequest(BaseModel):
 class BackendSwitchRequest(BaseModel):
     """Request body for one-click inference backend switching."""
 
-    backend: Literal["nemoclaw", "ollama", "vllm"]
+    backend: Literal["openai", "nemoclaw", "ollama", "vllm"]
 
 
 class RuntimeGraphSaveRequest(BaseModel):
@@ -351,7 +357,7 @@ class RuntimeModuleCreateRequest(BaseModel):
     source_text: str = ""
     notes: str = ""
     transform_with_llm: bool = True
-    transform_model: str = "gemma4:31b"
+    transform_model: str = ""
 
 
 class RuntimeGraphDryRunRequest(BaseModel):
@@ -777,7 +783,7 @@ class RuntimeAgentMessageRequest(BaseModel):
 
     message: str = Field(..., min_length=1)
     goal: str | None = None
-    backend: Literal["nemoclaw", "ollama", "vllm"] | None = None
+    backend: Literal["openai", "nemoclaw", "ollama", "vllm"] | None = None
     mode: Literal["ask", "command", "approval", "edit_report"] = "ask"
     constraints: dict[str, object] = Field(default_factory=dict)
     session_id: str | None = None
@@ -1010,8 +1016,58 @@ def _bytes_to_gb(value: int | float | None) -> float | None:
     return round(float(value) / (1024 ** 3), 2)
 
 
+def _read_windows_ram_snapshot() -> dict[str, object]:
+    """Read host RAM through the Windows API when /proc is unavailable."""
+    if os.name != "nt":
+        return {"status": "unknown", "message": "Windows RAM metrics unavailable on this OS"}
+
+    class MemoryStatusEx(ctypes.Structure):
+        _fields_ = [
+            ("dwLength", ctypes.c_ulong),
+            ("dwMemoryLoad", ctypes.c_ulong),
+            ("ullTotalPhys", ctypes.c_ulonglong),
+            ("ullAvailPhys", ctypes.c_ulonglong),
+            ("ullTotalPageFile", ctypes.c_ulonglong),
+            ("ullAvailPageFile", ctypes.c_ulonglong),
+            ("ullTotalVirtual", ctypes.c_ulonglong),
+            ("ullAvailVirtual", ctypes.c_ulonglong),
+            ("sullAvailExtendedVirtual", ctypes.c_ulonglong),
+        ]
+
+    status = MemoryStatusEx()
+    status.dwLength = ctypes.sizeof(MemoryStatusEx)
+    try:
+        ok = ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status))
+    except (AttributeError, OSError, ValueError):
+        return {"status": "unknown", "message": "Windows RAM metrics unavailable"}
+    if not ok:
+        return {"status": "unknown", "message": "Windows RAM metrics unavailable"}
+
+    total = int(status.ullTotalPhys)
+    available = int(status.ullAvailPhys)
+    if not total:
+        return {"status": "unknown", "message": "RAM total unavailable"}
+    used = max(total - available, 0)
+    used_percent = round((used / total) * 100, 1)
+    health = "error" if used_percent >= 92 else "warn" if used_percent >= 82 else "ready"
+    return {
+        "status": health,
+        "total_bytes": total,
+        "available_bytes": available,
+        "used_bytes": used,
+        "total_gb": _bytes_to_gb(total),
+        "available_gb": _bytes_to_gb(available),
+        "used_gb": _bytes_to_gb(used),
+        "used_percent": used_percent,
+        "source": "windows_api",
+    }
+
+
 def _read_ram_snapshot() -> dict[str, object]:
     """Read host RAM from /proc/meminfo without adding a psutil dependency."""
+    if os.name == "nt":
+        return _read_windows_ram_snapshot()
+
     values: dict[str, int] = {}
     try:
         for line in Path("/proc/meminfo").read_text(encoding="utf-8").splitlines():
@@ -1050,10 +1106,46 @@ def _float_or_none(value: str) -> float | None:
         return None
 
 
+def _resolve_nvidia_smi() -> str:
+    """Resolve nvidia-smi with Windows-specific executable fallbacks."""
+    candidates: list[Path] = []
+    for executable in ("nvidia-smi", "nvidia-smi.exe"):
+        found = shutil.which(executable)
+        if found:
+            candidates.append(Path(found))
+
+    if os.name == "nt":
+        system_root = os.getenv("SystemRoot") or os.getenv("windir") or "C:\\Windows"
+        program_files = [os.getenv("ProgramFiles"), os.getenv("ProgramW6432"), os.getenv("ProgramFiles(x86)")]
+        candidates.extend(
+            [
+                Path(system_root) / "System32" / "nvidia-smi.exe",
+                Path(system_root) / "Sysnative" / "nvidia-smi.exe",
+            ]
+        )
+        for root in program_files:
+            if root:
+                candidates.append(Path(root) / "NVIDIA Corporation" / "NVSMI" / "nvidia-smi.exe")
+
+    seen: set[str] = set()
+    for candidate in candidates:
+        try:
+            resolved = candidate.expanduser().resolve()
+        except OSError:
+            resolved = candidate
+        key = str(resolved).casefold() if os.name == "nt" else str(resolved)
+        if key in seen:
+            continue
+        seen.add(key)
+        if resolved.is_file():
+            return str(resolved)
+    return ""
+
+
 def _read_nvidia_process_memory_mb(nvidia_smi: str) -> dict[str, float]:
     """Fallback GPU memory view for devices whose aggregate memory is reported as N/A."""
     try:
-        result = subprocess.run([nvidia_smi], check=False, capture_output=True, text=True, timeout=1.5)
+        result = subprocess.run([nvidia_smi], check=False, capture_output=True, text=True, timeout=_NVIDIA_SMI_TIMEOUT_SEC)
     except (OSError, subprocess.TimeoutExpired):
         return {}
     memory_by_gpu: dict[str, float] = {}
@@ -1068,7 +1160,7 @@ def _read_nvidia_process_memory_mb(nvidia_smi: str) -> dict[str, float]:
 
 def _read_gpu_snapshot() -> dict[str, object]:
     """Read GPU/VRAM through nvidia-smi when present; degrade safely otherwise."""
-    nvidia_smi = shutil.which("nvidia-smi")
+    nvidia_smi = _resolve_nvidia_smi()
     if not nvidia_smi:
         return {"status": "unavailable", "message": "nvidia-smi not found", "gpus": []}
     query = "index,name,memory.total,memory.used,utilization.gpu,temperature.gpu"
@@ -1078,20 +1170,32 @@ def _read_gpu_snapshot() -> dict[str, object]:
             check=False,
             capture_output=True,
             text=True,
-            timeout=1.5,
+            timeout=_NVIDIA_SMI_TIMEOUT_SEC,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
+        fallback = _last_good_gpu_snapshot(f"nvidia-smi telemetry delayed: {exc}")
+        if fallback:
+            return fallback
         return {"status": "unknown", "message": f"nvidia-smi failed: {exc}", "gpus": []}
     if result.returncode != 0:
         message = (result.stderr or result.stdout or "nvidia-smi returned non-zero").strip().splitlines()[0]
+        fallback = _last_good_gpu_snapshot(f"nvidia-smi telemetry unavailable: {message}")
+        if fallback:
+            return fallback
         return {"status": "unknown", "message": message, "gpus": []}
-    process_memory = _read_nvidia_process_memory_mb(nvidia_smi)
-    gpus: list[dict[str, object]] = []
+    raw_rows = []
+    needs_process_memory = False
     for line in result.stdout.splitlines():
         parts = [part.strip() for part in line.split(",")]
         if len(parts) < 6:
             continue
-        index, name, mem_total, mem_used, util, temp = parts[:6]
+        if _float_or_none(parts[3]) is None:
+            needs_process_memory = True
+        raw_rows.append(parts[:6])
+
+    process_memory = _read_nvidia_process_memory_mb(nvidia_smi) if needs_process_memory else {}
+    gpus: list[dict[str, object]] = []
+    for index, name, mem_total, mem_used, util, temp in raw_rows:
         total_mb = _float_or_none(mem_total)
         used_mb = _float_or_none(mem_used)
         if used_mb is None:
@@ -1115,6 +1219,9 @@ def _read_gpu_snapshot() -> dict[str, object]:
         }
         gpus.append(item)
     if not gpus:
+        fallback = _last_good_gpu_snapshot("nvidia-smi telemetry parse returned no rows")
+        if fallback:
+            return fallback
         return {"status": "unknown", "message": "No GPU rows parsed from nvidia-smi", "gpus": []}
     worst = "error" if any(gpu["status"] == "error" for gpu in gpus) else "warn" if any(gpu["status"] == "warn" for gpu in gpus) else "ready"
     total_values = [float(gpu["memory_total_mb"]) for gpu in gpus if gpu.get("memory_total_mb") is not None]
@@ -1128,12 +1235,25 @@ def _read_gpu_snapshot() -> dict[str, object]:
         "memory_used_percent": round((used_mb / total_mb) * 100, 1) if total_mb and used_mb is not None else None,
         "utilization_percent": round(sum(util_values) / len(util_values), 1) if util_values else None,
     }
-    return {
+    snapshot = {
         "status": worst,
         "message": f"{len(gpus)} NVIDIA GPU(s)",
         "gpus": gpus,
         "aggregate": aggregate,
     }
+    _SYSTEM_RESOURCE_CACHE["last_good_gpu"] = snapshot
+    return snapshot
+
+
+def _last_good_gpu_snapshot(message: str) -> dict[str, object]:
+    """Return the previous successful GPU telemetry snapshot with a stale marker."""
+    previous = _SYSTEM_RESOURCE_CACHE.get("last_good_gpu")
+    if not isinstance(previous, dict) or not previous.get("gpus"):
+        return {}
+    snapshot = dict(previous)
+    snapshot["stale"] = True
+    snapshot["message"] = f"{previous.get('message', 'GPU telemetry cached')} (cached; {message})"
+    return snapshot
 
 
 def _system_resource_snapshot() -> dict[str, object]:
@@ -1717,6 +1837,14 @@ def _graph_config_path(graph_id: str) -> Path:
     raise HTTPException(status_code=404, detail=f"Unknown graph_id={graph_id}")
 
 
+def _graph_config_runtime_path(path: Path) -> str:
+    """Return a stable graph config path for runtime handoff payloads."""
+    try:
+        return path.resolve().relative_to(resolve_path(".").resolve()).as_posix()
+    except ValueError:
+        return str(path)
+
+
 def _load_runtime_graph_config(graph_id: str) -> GraphConfig:
     """Load one runtime graph config by graph id."""
     return load_graph_config(_graph_config_path(graph_id))
@@ -2231,7 +2359,7 @@ def _normalize_designer_steps(
 
 
 def _module_designer_system_prompt() -> str:
-    """Return the fixed system prompt used by Gemma 31B module designer."""
+    """Return the fixed system prompt used by the Module Designer model."""
     return (
         "You are the ATR Runtime IDE Module Designer. Convert one uploaded Python module "
         "into an Autonomous Researcher internal module adapter. Return only strict JSON. "
@@ -2253,7 +2381,7 @@ def _module_designer_user_prompt(
     handler_names: list[str],
     tool_names: list[str],
 ) -> str:
-    """Build the bounded Gemma 31B prompt for Python-to-ATR module conversion."""
+    """Build the bounded prompt for Python-to-ATR module conversion."""
     return json.dumps(
         {
             "task": "convert_python_file_to_atr_internal_module",
@@ -2291,53 +2419,93 @@ def _module_designer_user_prompt(
     )
 
 
-async def _transform_module_source_with_gemma31b(req: RuntimeModuleCreateRequest, safe_id: str) -> dict[str, Any]:
-    """Use Gemma 31B directly, without fallback, to transform uploaded Python into ATR module JSON."""
+async def _transform_module_source_with_model(req: RuntimeModuleCreateRequest, safe_id: str) -> dict[str, Any]:
+    """Use the active inference backend to transform uploaded Python into ATR module JSON."""
     source_text = str(req.source_text or "")
     if not source_text.strip():
         raise HTTPException(status_code=400, detail="Module Designer requires a Python source file.")
-
-    model = str(req.transform_model or "gemma4:31b").strip() or "gemma4:31b"
-    if model != "gemma4:31b":
-        raise HTTPException(status_code=400, detail="Module Designer is locked to gemma4:31b for protocol conversion.")
-
-    ctx = controller._deps.agent_context
-    backend = ctx.primary_backends.get("vllm") or ctx.primary_backend
-    prepare_model = getattr(backend, "prepare_model", None)
-    if prepare_model is not None:
-        await prepare_model(model)
 
     source_limit = 7200
     source_excerpt = source_text[:source_limit]
     source_truncated = len(source_text) > source_limit
     handlers = sorted(_runtime_graph_handler_registry().names())
     tools = sorted(_registered_tool_names())
-    try:
-        response = await backend.complete(
-            model=model,
-            system_prompt=_module_designer_system_prompt(),
-            user_prompt=_module_designer_user_prompt(
-                req=req,
-                safe_id=safe_id,
-                source_excerpt=source_excerpt,
-                source_truncated=source_truncated,
-                handler_names=handlers,
-                tool_names=tools,
-            ),
-            metadata={"task_type": "module_designer", "role": "orchestrator", "max_tokens": 1400},
+    ctx = controller._deps.agent_context
+    active_router = ctx.model_routers.get(ctx.active_backend, ctx.model_router)
+    active_selection = active_router.select("module_designer")
+    requested_model = str(req.transform_model or "").strip() or os.getenv(
+        "AUTONOMOUS_MODULE_DESIGNER_MODEL",
+        "",
+    ).strip()
+    model = requested_model or active_selection.primary
+    active_backend = ctx.primary_backends.get(ctx.active_backend) or ctx.primary_backend
+    attempts: list[tuple[str, Any, str, str]] = [
+        (ctx.active_backend, active_backend, model, active_selection.role),
+    ]
+    if (
+        not requested_model
+        and active_selection.fallback
+        and active_selection.fallback != active_selection.primary
+    ):
+        attempts.append(
+            (
+                ctx.active_backend,
+                active_backend,
+                active_selection.fallback,
+                f"{active_selection.role}:model_fallback",
+            )
         )
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Gemma 31B module transform failed: {exc}") from exc
+    fallback_backend_name = ctx.backend_fallbacks.get(ctx.active_backend, "")
+    if fallback_backend_name and fallback_backend_name != ctx.active_backend:
+        fallback_router = ctx.model_routers.get(fallback_backend_name, ctx.model_router)
+        fallback_selection = fallback_router.select("module_designer")
+        attempts.append(
+            (
+                fallback_backend_name,
+                ctx.fallback_backends.get(ctx.active_backend, ctx.fallback_backend),
+                fallback_selection.primary,
+                f"{fallback_selection.role}:backend_fallback",
+            )
+        )
+
+    last_error: Exception | None = None
+    response = None
+    used_model = model
+    for _backend_name, backend, attempt_model, role in attempts:
+        prepare_model = getattr(backend, "prepare_model", None)
+        if prepare_model is not None:
+            await prepare_model(attempt_model)
+        try:
+            response = await backend.complete(
+                model=attempt_model,
+                system_prompt=_module_designer_system_prompt(),
+                user_prompt=_module_designer_user_prompt(
+                    req=req,
+                    safe_id=safe_id,
+                    source_excerpt=source_excerpt,
+                    source_truncated=source_truncated,
+                    handler_names=handlers,
+                    tool_names=tools,
+                ),
+                metadata={"task_type": "module_designer", "role": role, "max_tokens": 1400},
+            )
+            used_model = attempt_model
+            break
+        except Exception as exc:
+            last_error = exc
+    if response is None:
+        raise HTTPException(status_code=502, detail=f"Module Designer model transform failed: {last_error}") from last_error
 
     try:
         payload = _extract_json_object(response.text)
     except Exception as exc:
         snippet = response.text[:1200] if response.text else ""
-        raise HTTPException(status_code=502, detail=f"Gemma 31B returned invalid module JSON: {exc}; response={snippet}") from exc
+        raise HTTPException(status_code=502, detail=f"Module Designer model returned invalid module JSON: {exc}; response={snippet}") from exc
 
     transformed_source = str(payload.get("transformed_source") or "").strip()
     if not transformed_source:
-        raise HTTPException(status_code=502, detail="Gemma 31B response did not include transformed_source.")
+        raise HTTPException(status_code=502, detail="Module Designer model response did not include transformed_source.")
+    payload["_used_model"] = used_model
     payload["_model"] = response.model
     payload["_source_truncated_for_prompt"] = source_truncated
     return payload
@@ -2736,13 +2904,14 @@ def _events_for_agent(agent_id: str, run_id: str | None = None) -> tuple[dict[st
 def _agent_report_payload(agent_id: str, run_id: str | None = None) -> dict[str, object]:
     """Build a lightweight academic-report payload for compatibility consumers."""
     definition, events = _events_for_agent(agent_id, run_id=run_id)
-    snapshot = controller.planning_snapshot()
+    planning_snapshot = controller.planning_snapshot()
+    snapshot = controller.snapshot()
     state = snapshot.get("state", {}) if isinstance(snapshot.get("state"), dict) else {}
-    messages = [msg for msg in snapshot.get("messages", []) if isinstance(msg, dict)]
+    messages = [msg for msg in planning_snapshot.get("messages", []) if isinstance(msg, dict)]
     role_aliases = {definition["agent_id"], definition["stage"], definition["module_id"]}
     agent_messages = [msg for msg in messages if str(msg.get("role") or "").lower() in role_aliases]
     warning_events = [event for event in events if str(event.get("level") or event.get("severity") or "").lower() in {"warning", "error", "critical"}]
-    status = "running" if str(state.get("stage") or "") == definition["stage"] and controller.snapshot().get("is_running") else "idle"
+    status = "running" if str(state.get("stage") or "") == definition["stage"] and snapshot.get("is_running") else "idle"
     if warning_events:
         status = "warning"
     if events and str(events[-1].get("level") or "").lower() == "error":
@@ -2757,6 +2926,7 @@ def _agent_report_payload(agent_id: str, run_id: str | None = None) -> dict[str,
     metadata = state.get("run_metadata", {}) if isinstance(state.get("run_metadata"), dict) else {}
     agent_payload = metadata.get(f"{definition['stage']}_agent_payload") if isinstance(metadata.get(f"{definition['stage']}_agent_payload"), dict) else {}
     design_report = None
+    design_agent_report = None
     report_decisions: list[object] = []
     report_metrics: dict[str, object] = {}
     if definition["agent_id"] == "orchestrator":
@@ -2771,6 +2941,7 @@ def _agent_report_payload(agent_id: str, run_id: str | None = None) -> dict[str,
         latest_reflection = metadata.get("latest_loop_reflection") if isinstance(metadata.get("latest_loop_reflection"), dict) else (reflections[-1] if reflections else {})
         latest_mission_contract = metadata.get("latest_mission_contract") if isinstance(metadata.get("latest_mission_contract"), dict) else metadata.get("mission_contract") if isinstance(metadata.get("mission_contract"), dict) else {}
         latest_orchestration_plan = metadata.get("latest_orchestration_plan") if isinstance(metadata.get("latest_orchestration_plan"), dict) else {}
+        latest_control_plane = metadata.get("latest_orchestrator_control_plane") if isinstance(metadata.get("latest_orchestrator_control_plane"), dict) else {}
         if not latest_mission_contract or not latest_orchestration_plan:
             try:
                 report_state = OrchestratorState.model_validate(state)
@@ -2778,10 +2949,21 @@ def _agent_report_payload(agent_id: str, run_id: str | None = None) -> dict[str,
                 latest_orchestration_plan = latest_orchestration_plan or build_orchestration_plan(state=report_state)
             except Exception:
                 pass
+        if not latest_control_plane:
+            try:
+                report_state = OrchestratorState.model_validate(state)
+                latest_control_plane = build_orchestrator_control_plane_snapshot(
+                    state=report_state,
+                    mission_contract=latest_mission_contract,
+                    orchestration_plan=latest_orchestration_plan,
+                )
+            except Exception:
+                latest_control_plane = {}
         role_specific.update(
             {
                 "title": "Orchestration Supervisor / Follow-up Control",
                 "summary": "Mission contract, graph route, context handoff registry, intermediate follow-up opinions, decision register, Guardian/operator coordination, and loop reflection.",
+                "orchestrator_control_plane": latest_control_plane,
                 "mission_contract": latest_mission_contract or {
                     "run_id": state.get("run_id", ""),
                     "mode": state.get("mode", ""),
@@ -2824,6 +3006,10 @@ def _agent_report_payload(agent_id: str, run_id: str | None = None) -> dict[str,
         report_decisions = decisions
         report_metrics = role_specific["run_health"]
     if definition["agent_id"] == "design":
+        if isinstance(metadata.get("latest_design_agent_report"), dict):
+            design_agent_report = metadata["latest_design_agent_report"]
+        elif isinstance(agent_payload.get("design_agent_report"), dict):
+            design_agent_report = agent_payload["design_agent_report"]
         if isinstance(metadata.get("design_report"), dict):
             design_report = metadata["design_report"]
         elif isinstance(agent_payload.get("design_report"), dict):
@@ -2847,13 +3033,22 @@ def _agent_report_payload(agent_id: str, run_id: str | None = None) -> dict[str,
             role_specific["objective"] = design_report.get("objective", {})
             role_specific["hypothesis"] = design_report.get("hypothesis", {})
             role_specific["prior_context"] = design_report.get("prior_context", {})
+            if isinstance(design_agent_report, dict):
+                role_specific["design_agent_report"] = design_agent_report
             report_decisions = design_report.get("decision_register", []) if isinstance(design_report.get("decision_register"), list) else []
             report_metrics = candidate_evaluation
     specimen_fabrication_report = None
+    specimen_agent_report = None
     if definition["agent_id"] == "specimen":
         specimen_result = metadata.get("specimen_result") if isinstance(metadata.get("specimen_result"), dict) else {}
         if not specimen_result and isinstance(agent_payload.get("specimen_result"), dict):
             specimen_result = agent_payload["specimen_result"]
+        if isinstance(metadata.get("latest_specimen_agent_report"), dict):
+            specimen_agent_report = metadata["latest_specimen_agent_report"]
+        elif isinstance(agent_payload.get("specimen_agent_report"), dict):
+            specimen_agent_report = agent_payload["specimen_agent_report"]
+        elif isinstance(specimen_result.get("specimen_agent_report"), dict):
+            specimen_agent_report = specimen_result["specimen_agent_report"]
         if isinstance(metadata.get("fabrication_report"), dict):
             specimen_fabrication_report = metadata["fabrication_report"]
         elif isinstance(specimen_result.get("fabrication_report"), dict):
@@ -2874,16 +3069,26 @@ def _agent_report_payload(agent_id: str, run_id: str | None = None) -> dict[str,
             role_specific["fabrication_outcome"] = specimen_fabrication_report.get("fabrication_outcome", {})
             role_specific["feedback_to_design"] = specimen_fabrication_report.get("feedback_to_design", {})
             role_specific["handoff_packet"] = specimen_packet
+            if isinstance(specimen_agent_report, dict):
+                role_specific["specimen_agent_report"] = specimen_agent_report
             report_decisions = specimen_packet.get("decisions", []) if isinstance(specimen_packet.get("decisions"), list) else agent_payload.get("decisions", []) if isinstance(agent_payload.get("decisions"), list) else []
             report_metrics = metadata.get("specimen_metrics") if isinstance(metadata.get("specimen_metrics"), dict) else agent_payload.get("metrics", {}) if isinstance(agent_payload.get("metrics"), dict) else {}
     vision_report = None
+    vision_agent_report = None
     knowledge_report = None
     manipulation_report = None
+    manipulation_agent_report = None
     robot_task_result = None
     if definition["agent_id"] == "vision":
         latest_observation = state.get("latest_observations") if isinstance(state.get("latest_observations"), dict) else {}
         if not latest_observation and isinstance(metadata.get("latest_vision_observation"), dict):
             latest_observation = metadata["latest_vision_observation"]
+        if isinstance(metadata.get("latest_vision_agent_report"), dict):
+            vision_agent_report = metadata["latest_vision_agent_report"]
+        elif isinstance(latest_observation.get("vision_agent_report"), dict):
+            vision_agent_report = latest_observation["vision_agent_report"]
+        elif isinstance(agent_payload.get("vision_agent_report"), dict):
+            vision_agent_report = agent_payload["vision_agent_report"]
         if isinstance(metadata.get("vision_report"), dict):
             vision_report = metadata["vision_report"]
         elif isinstance(latest_observation.get("vision_report"), dict):
@@ -2906,6 +3111,8 @@ def _agent_report_payload(agent_id: str, run_id: str | None = None) -> dict[str,
             role_specific["safety_anomaly"] = vision_report.get("safety_anomaly", {})
             role_specific["knowledge_payload"] = vision_report.get("knowledge_payload", {})
             role_specific["handoff_packet"] = vision_packet
+            if isinstance(vision_agent_report, dict):
+                role_specific["vision_agent_report"] = vision_agent_report
             report_decisions = vision_packet.get("decisions", []) if isinstance(vision_packet.get("decisions"), list) else agent_payload.get("decisions", []) if isinstance(agent_payload.get("decisions"), list) else []
             report_metrics = metadata.get("vision_metrics") if isinstance(metadata.get("vision_metrics"), dict) else agent_payload.get("metrics", {}) if isinstance(agent_payload.get("metrics"), dict) else {}
     if definition["agent_id"] == "equipment":
@@ -3060,6 +3267,10 @@ def _agent_report_payload(agent_id: str, run_id: str | None = None) -> dict[str,
             report_decisions = [equipment_report.get("decision", {})] if isinstance(equipment_report.get("decision"), dict) else agent_payload.get("decisions", []) if isinstance(agent_payload.get("decisions"), list) else []
             report_metrics = metadata.get("equipment_metrics") if isinstance(metadata.get("equipment_metrics"), dict) else agent_payload.get("metrics", {}) if isinstance(agent_payload.get("metrics"), dict) else {}
     if definition["agent_id"] == "manipulation":
+        if isinstance(metadata.get("latest_manipulation_agent_report"), dict):
+            manipulation_agent_report = metadata["latest_manipulation_agent_report"]
+        elif isinstance(agent_payload.get("manipulation_agent_report"), dict):
+            manipulation_agent_report = agent_payload["manipulation_agent_report"]
         if isinstance(metadata.get("manipulation_report"), dict):
             manipulation_report = metadata["manipulation_report"]
         elif isinstance(agent_payload.get("manipulation_report"), dict):
@@ -3089,6 +3300,8 @@ def _agent_report_payload(agent_id: str, run_id: str | None = None) -> dict[str,
             role_specific["decision"] = manipulation_report.get("decision", {})
             role_specific["knowledge_payload"] = manipulation_report.get("knowledge_payload", {})
             role_specific["handoff_packet"] = robot_task_result if isinstance(robot_task_result, dict) else manipulation_report.get("handoff_packet", {})
+            if isinstance(manipulation_agent_report, dict):
+                role_specific["manipulation_agent_report"] = manipulation_agent_report
             report_decisions = robot_task_result.get("decisions", []) if isinstance(robot_task_result, dict) and isinstance(robot_task_result.get("decisions"), list) else agent_payload.get("decisions", []) if isinstance(agent_payload.get("decisions"), list) else []
             report_metrics = metadata.get("manipulation_metrics") if isinstance(metadata.get("manipulation_metrics"), dict) else agent_payload.get("metrics", {}) if isinstance(agent_payload.get("metrics"), dict) else {}
     if definition["agent_id"] == "knowledge":
@@ -3261,10 +3474,14 @@ def _agent_report_payload(agent_id: str, run_id: str | None = None) -> dict[str,
         "sections": {
             "overview": summary,
             "role_specific": role_specific,
+            "design_agent_report": design_agent_report if definition["agent_id"] == "design" else None,
             "design_report": design_report if definition["agent_id"] == "design" else None,
+            "specimen_agent_report": specimen_agent_report if definition["agent_id"] == "specimen" else None,
             "fabrication_report": specimen_fabrication_report if definition["agent_id"] == "specimen" else None,
+            "vision_agent_report": vision_agent_report if definition["agent_id"] == "vision" else None,
             "vision_report": vision_report if definition["agent_id"] == "vision" else None,
             "manipulation_report": manipulation_report if definition["agent_id"] == "manipulation" else None,
+            "manipulation_agent_report": manipulation_agent_report if definition["agent_id"] == "manipulation" else None,
             "robot_task_result": robot_task_result if definition["agent_id"] == "manipulation" else None,
             "knowledge_report": knowledge_report if definition["agent_id"] == "knowledge" else None,
             "bo_result": metadata.get("bo_agent") if definition["agent_id"] == "bo" else None,
@@ -3638,7 +3855,7 @@ async def get_runtime_module_management_state() -> dict[str, object]:
 
 @app.post("/api/modules")
 async def create_runtime_module(req: RuntimeModuleCreateRequest) -> dict[str, object]:
-    """Create a cataloged Runtime IDE module from an uploaded Python file via Gemma 31B."""
+    """Create a cataloged Runtime IDE module from an uploaded Python file via the active LLM backend."""
     if controller.snapshot().get("is_running"):
         raise HTTPException(status_code=409, detail="Cannot create runtime module while a run is active.")
     try:
@@ -3658,7 +3875,7 @@ async def create_runtime_module(req: RuntimeModuleCreateRequest) -> dict[str, ob
     transformed_source = ""
 
     if req.transform_with_llm:
-        transform_payload = await _transform_module_source_with_gemma31b(req, safe_id)
+        transform_payload = await _transform_module_source_with_model(req, safe_id)
         transformed_source = str(transform_payload.get("transformed_source") or "").strip()
     else:
         transformed_source = str(req.source_text or "").strip()
@@ -3715,6 +3932,12 @@ async def create_runtime_module(req: RuntimeModuleCreateRequest) -> dict[str, ob
 
     transformed_path = module_dir / "handler.py"
     transformed_path.write_text(transformed_source + ("\n" if not transformed_source.endswith("\n") else ""), encoding="utf-8")
+    designer_model = str(
+        transform_payload.get("_used_model")
+        or req.transform_model
+        or os.getenv("AUTONOMOUS_MODULE_DESIGNER_MODEL", "")
+        or "module_designer_route"
+    )
 
     metadata: dict[str, object] = {
         "category": category,
@@ -3723,7 +3946,7 @@ async def create_runtime_module(req: RuntimeModuleCreateRequest) -> dict[str, ob
         "source_filename": original_source_name,
         "python_source_path": str(original_path) if req.source_text.strip() else "",
         "transformed_python_source_path": str(transformed_path),
-        "transformed_by_model": "gemma4:31b" if req.transform_with_llm else "operator_disabled_llm_transform",
+        "transformed_by_model": designer_model if req.transform_with_llm else "operator_disabled_llm_transform",
         "source_truncated_for_prompt": bool(transform_payload.get("_source_truncated_for_prompt", False)),
         "pending_handler_registration": handler == "runtime.step_complete",
         "generated_adapter_approved": False,
@@ -3773,7 +3996,7 @@ async def create_runtime_module(req: RuntimeModuleCreateRequest) -> dict[str, ob
         "dry_run": dry_run,
         "catalog_item": _module_list_item(module_path),
         "transform": {
-            "model": "gemma4:31b" if req.transform_with_llm else "disabled",
+            "model": designer_model if req.transform_with_llm else "disabled",
             "category": category,
             "handler": handler,
             "transformed_source_path": str(transformed_path),
@@ -4263,7 +4486,7 @@ async def run_runtime_graph(graph_id: str, req: StartRunRequest) -> dict[str, ob
         fault=req.fault,
         fault_stage=req.fault_stage,
         graph_id=graph_id,
-        graph_config_path=config_path,
+        graph_config_path=_graph_config_runtime_path(config_path),
         graph_hash=str(graph_evidence.get("graph_hash") or ""),
         graph_version=str(graph_evidence.get("graph_version") or ""),
         graph_version_id=str(graph_evidence.get("graph_version_id") or ""),
@@ -6352,12 +6575,12 @@ def _persist_windows_utm_live_validation(report: dict[str, object]) -> dict[str,
 
 
 def _windows_proof_checkable_path(value: object) -> Path | None:
-    """Return a local filesystem path only for refs that are meant to be checkable on Linux."""
+    """Return a local filesystem path for refs that are checkable on this host."""
     raw = str(value or "").strip()
     if not raw or "://" in raw:
         return None
     if re.match(r"^[A-Za-z]:[\\/]", raw):
-        return None
+        return Path(raw).expanduser()
     if raw.startswith("/") or raw.startswith("~"):
         return Path(raw).expanduser()
     if raw.startswith("artifacts/") or raw.startswith("./artifacts/"):
@@ -8231,6 +8454,7 @@ async def _run_manipulation_agent_bridge(req: ManipulationAgentBridgeRequest, *,
         "manipulation": manipulation,
         "sarm": result.data.get("sarm", {}),
         "manipulation_report": result.data.get("manipulation_report", {}),
+        "manipulation_agent_report": result.data.get("manipulation_agent_report", {}),
         "robot_task_result": result.data.get("robot_task_result", {}),
         "next_hint": result.next_hint,
         "state": state.model_dump(mode="json"),

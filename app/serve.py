@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import os
 
+from dotenv import load_dotenv
 import uvicorn
 
 from utils.config_loader import load_all_configs
@@ -36,6 +37,7 @@ def _str_to_bool(value: str, default: bool) -> bool:
 
 
 def main() -> None:
+    load_dotenv(resolve_path(".env"), override=False)
     cfg = load_all_configs(resolve_path("configs"))
     system_cfg = cfg.get("system", {})
     server_cfg = system_cfg.get("server", {})

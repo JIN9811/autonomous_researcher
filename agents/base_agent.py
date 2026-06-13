@@ -65,11 +65,12 @@ class AgentContext:
     force_real_llm_in_test: bool = True
     allow_mock_fallback: bool = False
     active_backend: str = "vllm"
-    on_model_call: Callable[[str, str, str, str], Awaitable[None] | None] | None = None
+    on_model_call: Callable[..., Awaitable[None] | None] | None = None
     on_tool_event: Callable[[dict[str, Any]], Awaitable[None] | None] | None = None
     model_routers: dict[str, ModelRouter] = field(default_factory=dict)
     primary_backends: dict[str, BaseLLMBackend] = field(default_factory=dict)
     fallback_backends: dict[str, BaseLLMBackend] = field(default_factory=dict)
+    backend_fallbacks: dict[str, str] = field(default_factory=dict)
     runtime_profiles: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def set_active_backend(self, backend_name: str) -> dict[str, Any]:
@@ -95,6 +96,7 @@ class AgentContext:
                 }
             )
         profile["available_backends"] = available
+        profile["backend_fallback"] = self.backend_fallbacks.get(self.active_backend, "")
         return profile
 
     async def complete(
@@ -107,7 +109,6 @@ class AgentContext:
         """Call selected model with fallback backend on failure."""
         router = self.model_routers.get(self.active_backend, self.model_router)
         primary_backend = self.primary_backends.get(self.active_backend, self.primary_backend)
-        fallback_backend = self.fallback_backends.get(self.active_backend, self.fallback_backend)
         selection = router.select(task_type)
         system_prompt = get_system_prompt(task_type)
 
@@ -122,31 +123,75 @@ class AgentContext:
                 return await asyncio.wait_for(coro, timeout=timeout_s)
             return await coro
 
-        try:
-            response = await _call_backend(primary_backend, selection.primary, selection.role)
-            await self._notify_model_call(task_type=task_type, model=selection.primary, role=selection.role)
-            return response
-        except Exception as primary_error:
-            model = selection.fallback or selection.primary
-            # If fallback path is effectively identical, surface the primary error directly.
-            if fallback_backend is primary_backend and model == selection.primary:
-                raise primary_error
-            try:
-                response = await _call_backend(fallback_backend, model, f"{selection.role}:fallback")
-                await self._notify_model_call(task_type=task_type, model=model, role=f"{selection.role}:fallback")
-                return response
-            except Exception as fallback_error:
-                raise RuntimeError(
-                    f"LLM call failed task={task_type} primary={selection.primary} fallback={model}"
-                ) from fallback_error
+        errors: list[Exception] = []
+        attempts: list[tuple[str, BaseLLMBackend, str, str]] = [
+            (self.active_backend, primary_backend, selection.primary, selection.role),
+        ]
+        if selection.fallback and selection.fallback != selection.primary:
+            attempts.append(
+                (
+                    self.active_backend,
+                    primary_backend,
+                    selection.fallback,
+                    f"{selection.role}:model_fallback",
+                )
+            )
 
-    async def _notify_model_call(self, task_type: str, model: str, role: str) -> None:
+        fallback_backend_name = self.backend_fallbacks.get(self.active_backend, "")
+        fallback_backend = self.fallback_backends.get(self.active_backend, self.fallback_backend)
+        if fallback_backend_name and fallback_backend_name != self.active_backend:
+            fallback_router = self.model_routers.get(fallback_backend_name, router)
+            fallback_selection = fallback_router.select(task_type)
+            attempts.append(
+                (
+                    fallback_backend_name,
+                    fallback_backend,
+                    fallback_selection.primary,
+                    f"{fallback_selection.role}:backend_fallback",
+                )
+            )
+        elif fallback_backend is not primary_backend:
+            fallback_model = selection.fallback or selection.primary
+            attempts.append(
+                (
+                    self.active_backend,
+                    fallback_backend,
+                    fallback_model,
+                    f"{selection.role}:fallback",
+                )
+            )
+
+        seen: set[tuple[int, str, str]] = set()
+        for backend_name, backend, model, role in attempts:
+            key = (id(backend), model, role)
+            if key in seen:
+                continue
+            seen.add(key)
+            try:
+                response = await _call_backend(backend, model, role)
+                await self._notify_model_call(
+                    task_type=task_type,
+                    model=model,
+                    role=role,
+                    backend=backend_name,
+                )
+                return response
+            except Exception as exc:
+                errors.append(exc)
+
+        detail = "; ".join(f"{type(exc).__name__}: {exc}" for exc in errors[-3:])
+        raise RuntimeError(
+            f"LLM call failed task={task_type} active_backend={self.active_backend} "
+            f"fallback_backend={fallback_backend_name or self.active_backend}: {detail}"
+        )
+
+    async def _notify_model_call(self, task_type: str, model: str, role: str, backend: str) -> None:
         """Notify controller hooks that one model was successfully used for a task."""
         callback = self.on_model_call
         if callback is None:
             return
         try:
-            result = callback(task_type=task_type, model=model, role=role, backend=self.active_backend)
+            result = callback(task_type=task_type, model=model, role=role, backend=backend)
             if inspect.isawaitable(result):
                 await result
         except Exception:

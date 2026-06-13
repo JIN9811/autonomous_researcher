@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -139,11 +140,27 @@ async def test_manipulation_agent_defaults_to_pi05_transfer_after_specimen(tmp_p
     assert result.data["robot_task_result"]["terminal_pose"] == "standby_clear_of_utm"
     assert "-n" in manipulation["command_preview"]
     assert manipulation["command_preview"][manipulation["command_preview"].index("-n") + 1] == "lerobot-pi05-torch211"
-    assert "scripts/lerobot_pi05_rollout_wrapper.py" in " ".join(manipulation["command_preview"])
+    assert any(Path(item).name == "lerobot_pi05_rollout_wrapper.py" for item in manipulation["command_preview"])
     assert "--policy.type=pi05" not in manipulation["command_preview"]
     assert "--rtc.enabled=true" in manipulation["command_preview"]
     assert any(item.startswith("--task=Move specimen-transfer-001") for item in manipulation["command_preview"])
 
+
+def test_manipulation_agent_test_mode_accepts_recently_expired_vision_signal() -> None:
+    state = _post_specimen_state()
+    expires_at = (datetime.now(timezone.utc) - timedelta(seconds=20)).isoformat()
+    state.latest_observations["transfer_readiness"]["expires_at"] = expires_at
+    state.latest_observations["vision_signal"] = {
+        "schema": "vision_signal.v1",
+        "signal_id": "sig-recently-expired",
+        "expires_at": expires_at,
+    }
+
+    freshness = ManipulationAgent._vision_signal_freshness(state)
+
+    assert freshness["fresh"] is True
+    assert freshness["reason"] == "fresh_with_test_mode_grace"
+    assert freshness["grace_s"] == 120
 
 @pytest.mark.asyncio
 async def test_manipulation_agent_blocks_expired_vision_signal(tmp_path: Path, monkeypatch: Any) -> None:

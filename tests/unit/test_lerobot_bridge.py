@@ -995,6 +995,7 @@ def test_live_train_start_returns_existing_active_session(tmp_path: Path) -> Non
         "train_config": {"steps": 20000},
     }
     bridge._start_live_process = lambda **_: (_ for _ in ()).throw(AssertionError("must not start duplicate train"))  # type: ignore[method-assign]
+    bridge._pid_alive = lambda _pid: True  # type: ignore[method-assign]
 
     result = bridge.train_start(
         {
@@ -1056,7 +1057,7 @@ def test_live_record_existing_dataset_uses_fresh_dataset_when_resume_unchecked(t
     fresh_repo = repo_arg.split("=", 1)[1]
     assert fresh_repo.startswith("jin/record-test-")
     assert started["dataset_repo_id"] == fresh_repo
-    assert started["dataset_path"].endswith(fresh_repo)
+    assert Path(started["dataset_path"]).parts[-2:] == tuple(fresh_repo.split("/"))
     assert "--resume=false" in started["command_preview"]
     assert started["step_trace"][0]["detail"].startswith("existing dataset detected; recording to fresh dataset ")
 
@@ -1258,7 +1259,7 @@ def test_rollout_uses_eval_dataset_name_and_manual_stop_duration(tmp_path: Path)
     assert "--policy.temporal_ensemble_coeff=0.01" in result["command_preview"]
     assert "--policy.n_action_steps=1" in result["command_preview"]
     assert "--robot.max_relative_target=5" in result["command_preview"]
-    assert result["dataset_path"].endswith("jin/eval_pick_and_place_cube_rollout")
+    assert Path(result["dataset_path"]).parts[-2:] == ("jin", "eval_pick_and_place_cube_rollout")
 
 
 def test_pi05_rollout_uses_dedicated_runtime_and_rtc_command(tmp_path: Path) -> None:
@@ -1283,7 +1284,7 @@ def test_pi05_rollout_uses_dedicated_runtime_and_rtc_command(tmp_path: Path) -> 
     assert result["ok"] is True
     assert "-n" in result["command_preview"]
     assert result["command_preview"][result["command_preview"].index("-n") + 1] == "lerobot-pi05-torch211"
-    assert "scripts/lerobot_pi05_rollout_wrapper.py" in " ".join(result["command_preview"])
+    assert any(Path(part).name == "lerobot_pi05_rollout_wrapper.py" for part in result["command_preview"])
     assert "--policy.path=fake://pi05_policy" in result["command_preview"]
     assert "--policy.type=pi05" not in result["command_preview"]
     assert "--device=cuda" in result["command_preview"]
@@ -1513,7 +1514,8 @@ def test_visualize_start_uses_lerobot_html_visualizer_with_dataset_root(tmp_path
     assert result["ok"] is True
     assert result["tool"] == "lerobot.visualize.start"
     assert result["workflow"] == "visualize"
-    assert command[:7] == ["conda", "run", "--no-capture-output", "-n", "lerobot", "python", "-m"]
+    assert Path(command[0]).name in {"conda", "conda.exe"}
+    assert command[1:7] == ["run", "--no-capture-output", "-n", "lerobot", "python", "-m"]
     assert "lerobot.scripts.visualize_dataset_html" in command
     assert "--repo-id=jin/record-test" in command
     assert "--root=" + str(dataset_dir.resolve()) in command

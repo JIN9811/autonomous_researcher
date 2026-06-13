@@ -1,6 +1,185 @@
 # Install
 
-This folder installs the terminal command for the local `autonomous_researcher` checkout.
+This folder contains setup notes and launchers for the local
+`autonomous_researcher` checkout.
+
+ATR supports two inference modes:
+
+- Local-first: use `vllm`, `ollama`, or `nemoclaw` first, then fall back to the
+  OpenAI API when `configs/models.yaml` sets `backend.fallback: openai`.
+- API-only: set `AUTONOMOUS_BACKEND=openai` in `.env` to skip local AI entirely.
+
+`openai` is intentionally the lowest-priority fallback unless the operator
+explicitly selects it as the active backend.
+
+## Windows Quick Start (API Key, No Local AI)
+
+Use this path when running the GUI/API on Windows and using an API key instead
+of a local model server.
+
+### 1. Install System Tools
+
+Required:
+
+- Windows 10/11 64-bit
+- Git for Windows
+- Python 3.11 or newer, installed with the `py` launcher
+- PowerShell 5.1 or PowerShell 7+
+- An OpenAI API key
+
+Recommended:
+
+- Miniconda or Mambaforge for LeRobot and solver-specific environments
+- Microsoft C++ Build Tools only if a Python dependency has to build from source
+- PrusaSlicer for local slicing, or Docker Desktop if using Linux containers
+
+### 2. Create the Main Python Environment
+
+Run from PowerShell:
+
+```powershell
+cd C:\Users\user\Documents\autonomous_researcher
+py -3.11 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip setuptools wheel
+pip install -r requirements.txt
+```
+
+If your Python command is not `py -3.11`, use the installed Python 3.11+ path.
+
+### 3. Configure API-Key Inference
+
+Create `.env` from the example:
+
+```powershell
+Copy-Item .env.example .env
+notepad .env
+```
+
+Keep real API keys in `.env` only. `.env.example` is tracked by Git and must
+keep secret values blank.
+
+For API-only Windows operation, set:
+
+```text
+AUTONOMOUS_BACKEND=openai
+OPENAI_API_KEY=<your-api-key>
+AUTONOMOUS_OPENAI_ORCHESTRATOR_MODEL=gpt-5.5
+AUTONOMOUS_OPENAI_E4B_MODEL=gpt-5.5
+AUTONOMOUS_MODULE_DESIGNER_MODEL=
+```
+
+Leave `AUTONOMOUS_MODULE_DESIGNER_MODEL` blank to use the active backend route.
+Set it only when you want Module Designer to force a specific model.
+
+If you want local-first behavior with OpenAI as the final fallback, keep:
+
+```text
+AUTONOMOUS_BACKEND=vllm
+OPENAI_API_KEY=<your-api-key>
+```
+
+Then ATR tries the active local backend and its model fallback first; OpenAI is
+used only after those fail.
+
+### 4. Start the Server on Windows
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+python -m app.serve
+```
+
+Open:
+
+```text
+http://127.0.0.1:7860/
+http://127.0.0.1:7860/live
+http://127.0.0.1:7860/docs
+```
+
+Stop the server with `Ctrl+C` in the PowerShell window.
+
+The Bash `atr` launcher below is for Linux, WSL, or Git Bash. Native Windows can
+run the same backend through `python -m app.serve` and the browser UI.
+
+### 5. Windows LeRobot Conda Environment
+
+LeRobot workflows must run outside the main `.venv` in a conda environment.
+The ATR bridge invokes them with:
+
+```text
+conda run --no-capture-output -n lerobot ...
+```
+
+Create the environment:
+
+```powershell
+$conda = "$env:USERPROFILE\miniconda3\Scripts\conda.exe"
+winget install -e --id Anaconda.Miniconda3 --scope user
+& $conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main
+& $conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r
+& $conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/msys2
+& $conda create -y -n lerobot python=3.10
+& $conda run -n lerobot python -m pip install --upgrade pip
+```
+
+Clone and install the LeRobot checkout outside this repository, then install it
+editable inside the `lerobot` environment according to the LeRobot version you
+are using. In ATR, keep these defaults unless your local setup differs:
+
+```yaml
+configs/lerobot.yaml:
+  conda_executable: conda
+  conda_env_name: lerobot
+```
+
+When `conda_executable` is left as `conda`, ATR first uses `conda` from PATH and
+then auto-detects common user installs such as
+`%USERPROFILE%\miniconda3\Scripts\conda.exe`.
+
+Use the `/lerobot` GUI page for port detection, teleoperation, recording,
+training, and rollout. Hardware actions still require live confirmation gates.
+
+### 6. Optional Windows Equipment Bridge
+
+If this same or another Windows PC controls UTM software through PyAutoGUI, run:
+
+```powershell
+py -m pip install pyautogui pywinauto Pillow
+$env:WINDOWS_PYAUTOGUI_BRIDGE_TOKEN = "<random-token>"
+py install\windows_pyautogui_bridge_server.py
+```
+
+Save the bridge URL/token from `http://127.0.0.1:7860/equipment/windows`.
+
+## Linux / WSL Quick Start
+
+Use this path on Linux workstations, WSL, or Git Bash environments.
+
+```bash
+cd /path/to/autonomous_researcher
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip setuptools wheel
+pip install -r requirements.txt
+cp .env.example .env
+```
+
+For API-only operation:
+
+```bash
+printf '\nAUTONOMOUS_BACKEND=openai\nOPENAI_API_KEY=<your-api-key>\n' >> .env
+python -m app.serve
+```
+
+For local-first operation with OpenAI as final fallback:
+
+```bash
+printf '\nAUTONOMOUS_BACKEND=vllm\nOPENAI_API_KEY=<your-api-key>\n' >> .env
+python -m app.serve
+```
+
+Install the optional `atr` terminal launcher only on Linux, WSL, or Git Bash:
 
 ## Install `atr`
 
@@ -90,6 +269,7 @@ atr backend
 atr backend vllm
 atr backend nemoclaw
 atr backend ollama
+atr backend openai
 ```
 
 GPU/model control:
@@ -148,7 +328,17 @@ atr module create ./my_internal_module.py my_internal_module "My Internal Module
 
 Module management commands call the same `/api/modules` endpoints used by the Module Management Tool. `load` and `unload` only change the management workspace state; they do not delete files or modify the executable graph. `save-yaml` validates the module payload, performs the non-device module dry-run, saves a version under `memory/module_versions/<module-id>/`, and activates the YAML unless `--no-activate` is passed. `register-generated` is the explicit approval step for Module Designer output: it statically checks `handler.py`, flips the module handler to `module.generated_adapter`, removes staging-only `runtime.step_complete` internal-step handlers, records a version, and enables runtime execution through the generated adapter wrapper.
 
-`atr module create` sends the Python file to the same `/api/modules` Module Designer endpoint used by the GUI. By default the API asks Gemma 31B (`gemma4:31b`) to convert the uploaded source into an ATR protocol adapter, writes `graphs/modules/<module-id>/handler.py`, stores the original source beside it for audit, writes `module.yaml`, saves a version under `memory/module_versions/<module-id>/`, then leaves execution bound to an allowlisted handler. If the generated handler is not registered yet, the module remains `pending_handler_registration` and uses `runtime.step_complete` until explicit `atr module register-generated <module-id>` approval.
+`atr module create` sends the Python file to the same `/api/modules` Module
+Designer endpoint used by the GUI. The active backend's `module_designer` route
+primary model is used first, its model fallback is used second, and if
+`backend.fallback: openai` is configured the OpenAI API model is tried last.
+The endpoint writes
+`graphs/modules/<module-id>/handler.py`, stores the original source beside it
+for audit, writes `module.yaml`, saves a version under
+`memory/module_versions/<module-id>/`, then leaves execution bound to an
+allowlisted handler. If the generated handler is not registered yet, the module
+remains `pending_handler_registration` and uses `runtime.step_complete` until
+explicit `atr module register-generated <module-id>` approval.
 
 Windows PyAutoGUI bridge helper:
 

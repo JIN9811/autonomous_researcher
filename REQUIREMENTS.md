@@ -10,24 +10,39 @@ Use `requirements.txt` only for Python packages installed into the main
 
 Required for the main GUI/API:
 
-- Linux workstation with Bash.
-- Python 3.10 or newer.
+- Windows 10/11, Linux, WSL, or another Python 3.11+ workstation.
+- Python 3.11 or newer for the main ATR environment.
 - `git`.
-- `curl`.
+- `curl` for CLI/API checks.
 - Python virtual environment support:
+  - Windows: `py -3.11 -m venv .venv`
   - `python3 -m venv .venv`
   - `pip install -r requirements.txt`
+- API key based inference, normally through `OPENAI_API_KEY`, when local AI is
+  unavailable or intentionally skipped.
 
 Optional but commonly used:
 
 - `conda` or Miniconda for LeRobot-specific environments.
 - `nvidia-smi` and NVIDIA driver stack for local GPU runtime checks.
+- Docker for PrusaSlicer, FEniCSx, local Neo4j, or local vLLM/NemoClaw paths.
+- Microsoft C++ Build Tools on Windows only when a package has to compile from
+  source instead of installing a wheel.
 
 ## Main Python Environment
 
 Install the tracked Python dependencies from:
 
 ```bash
+pip install -r requirements.txt
+```
+
+Windows PowerShell equivalent:
+
+```powershell
+py -3.11 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip setuptools wheel
 pip install -r requirements.txt
 ```
 
@@ -96,9 +111,42 @@ The installer creates a user-level launcher under `~/.local/bin/atr`. Reinstall
 after moving or recloning the repository because the generated command stores the
 checkout path.
 
+## API-Key Inference and Backend Fallback
+
+ATR now has an explicit API-key backend named `openai`.
+
+Keep real keys out of Git. Use `.env.example` only as a blank variable list,
+store real values in ignored `.env`, and see `docs/runtime/api_keys.md` for the
+full key-handling policy.
+
+Backend priority is controlled by:
+
+```yaml
+configs/models.yaml:
+  backend:
+    default: vllm
+    fallback: openai
+```
+
+This means the active backend runs first, its model fallback runs second, and
+OpenAI is tried last as the backend fallback. To skip local AI entirely on
+Windows or any API-only machine, set:
+
+```text
+AUTONOMOUS_BACKEND=openai
+```
+
+To keep local-first behavior with OpenAI as the final fallback, keep the active
+backend as `vllm`, `ollama`, or `nemoclaw` and still set `OPENAI_API_KEY`.
+
+The current implementation uses the Chat Completions endpoint to preserve the
+existing `BaseLLMBackend.complete(...)` contract shared by vLLM/Ollama/NemoClaw.
+New OpenAI-native agent features can later move to the Responses API without
+changing installation requirements.
+
 ## NemoClaw / vLLM Backend
 
-Required when using the default `vllm` backend:
+Optional. Required only when using the local-first `vllm` backend:
 
 - Docker-capable NemoClaw/k3s environment.
 - A running cluster container named `openshell-cluster-nemoclaw`.
@@ -134,7 +182,8 @@ FlashInfer/CUTLASS FP4 paths.
 
 ## Ollama / NemoClaw Compatibility Branch
 
-Optional compatibility backend:
+Optional compatibility backend. OpenAI remains the final fallback when
+`backend.fallback: openai` is configured and an API key is available:
 
 - Ollama installed locally or managed by the operator.
 - NemoClaw Ollama proxy files under the operator's local `~/.nemoclaw` directory
@@ -175,7 +224,8 @@ Docker must be installed and available to the user running the GUI/API.
 Required for real robot teleoperation, recording, training, and rollout:
 
 - A separate LeRobot checkout, expected locally at:
-  - `/home/jin/lerobot`
+  - Linux default: `/home/jin/lerobot`
+  - Windows example: `C:\Users\user\Documents\lerobot`
 - Conda environment:
   - `lerobot`
 - LeRobot CLI entry points available inside that environment:
@@ -191,11 +241,43 @@ default:
 ~/.cache/huggingface/lerobot
 ```
 
+On Windows, the same path resolves under the user's home directory. If you need a
+different location, update `configs/lerobot.yaml` or the LeRobot GUI settings.
+
 Robot/camera port memory is stored locally and ignored by Git:
 
 ```text
 memory/lerobot_device_ports.json
 ```
+
+The bridge must run LeRobot through conda, not through the main `.venv`:
+
+```yaml
+configs/lerobot.yaml:
+  conda_executable: conda
+  conda_env_name: lerobot
+  pi05_conda_env_name: lerobot-pi05-torch211
+```
+
+Setup outline:
+
+```powershell
+$conda = "$env:USERPROFILE\miniconda3\Scripts\conda.exe"
+winget install -e --id Anaconda.Miniconda3 --scope user
+& $conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main
+& $conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r
+& $conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/msys2
+& $conda create -y -n lerobot python=3.10
+& $conda run -n lerobot python -m pip install --upgrade pip
+```
+
+On Linux or WSL, the same setup can use `conda create -y -n lerobot python=3.10`
+when `conda` is already on PATH. ATR auto-detects common user installs when
+`conda_executable: conda`, including `%USERPROFILE%\miniconda3\Scripts\conda.exe`
+on Windows and `~/miniconda3/bin/conda` on Linux.
+
+Use `conda run -n lerobot <command>` to verify entry points before enabling live
+robot actions in the GUI.
 
 ### Optional Pi0.5 Training Branch
 

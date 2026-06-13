@@ -24,10 +24,13 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from agents.base_agent import AgentContext, AgentResult, BaseAgent
 from orchestrator.state import Mode, OrchestratorState
+from utils.paths import resolve_path
 
 
 class DesignAgent(BaseAgent):
@@ -169,6 +172,7 @@ class DesignAgent(BaseAgent):
                 + [self._rejection_summary(item) for item in rejected[:3]],
             }
         )
+        self._attach_candidate_preview_artifacts(state=state, ctx=ctx, pool=pool, constraints=constraints)
         design_report = self._design_report(
             state=state,
             selected=selected,
@@ -183,6 +187,14 @@ class DesignAgent(BaseAgent):
             failure_summary=failure_summary,
             bo_recommendation=bo_recommendation,
             knowledge_summary=knowledge_summary,
+        )
+        design_agent_report = self._design_agent_report_snapshot(
+            state=state,
+            selected=selected,
+            pool=pool,
+            ranked=ranked,
+            design_report=design_report,
+            constraints=constraints,
         )
         selected["candidate_pool_summary"] = {
             "generated_count": len(pool),
@@ -202,6 +214,7 @@ class DesignAgent(BaseAgent):
         return {
             "experiment_spec": selected,
             "design_report": design_report,
+            "design_agent_report": design_agent_report,
             "design_candidate": handoff_packet,
             "handoff_packet": handoff_packet,
             "candidate_ledger": design_report["candidate_generation"]["candidate_ledger"],
@@ -846,8 +859,122 @@ class DesignAgent(BaseAgent):
         return hashlib.sha1(json.dumps(payload, ensure_ascii=True, sort_keys=True).encode("utf-8")).hexdigest()[:12]
 
     @staticmethod
+    def _safe_artifact_segment(value: Any, fallback: str) -> str:
+        text = "".join(ch if ch.isalnum() or ch in ("-", "_", ".") else "-" for ch in str(value or "").strip())
+        text = text.strip(".-")
+        return text or fallback
+
+    @classmethod
+    def _run_artifact_url(cls, run_id: Any, path: Any) -> str:
+        safe_run = cls._safe_artifact_segment(run_id, "run")
+        try:
+            run_dir = (resolve_path("runs") / safe_run).resolve()
+            artifact_path = Path(str(path)).expanduser().resolve()
+            rel = artifact_path.relative_to(run_dir).as_posix()
+        except Exception:
+            return ""
+        return f"/api/runs/{quote(safe_run, safe='')}/artifact-file/{quote(rel, safe='/')}"
+
+    def _candidate_preview_payload(
+        self,
+        *,
+        state: OrchestratorState,
+        candidate: dict[str, Any],
+        constraints: dict[str, Any],
+        output_dir: Path,
+    ) -> dict[str, Any]:
+        payload = {
+            "run_id": state.run_id or "run",
+            "specimen_id": candidate.get("candidate_id") or "candidate",
+            "geometry_type": candidate.get("geometry_type"),
+            "specimen_size_mm": candidate.get("specimen_size_mm"),
+            "cell_size_mm": candidate.get("cell_size_mm"),
+            "wall_thickness_mm": candidate.get("wall_thickness_mm"),
+            "relative_density": candidate.get("relative_density"),
+            "anisotropy_ratio": candidate.get("anisotropy_ratio"),
+            "orientation_deg": candidate.get("orientation_deg"),
+            "defect_seed": candidate.get("defect_seed"),
+            "defect_ratio": candidate.get("defect_ratio"),
+            "skin_thickness_mm": candidate.get("skin_thickness_mm"),
+            "top_cap_enabled": candidate.get("top_cap_enabled"),
+            "bottom_cap_enabled": candidate.get("bottom_cap_enabled"),
+            "top_bottom_cap": candidate.get("top_bottom_cap"),
+            "tpms_thickness": candidate.get("tpms_thickness"),
+            "material": constraints.get("material"),
+            "output_dir": str(output_dir),
+        }
+        try:
+            payload["tpms_resolution"] = min(56, max(40, int(float(candidate.get("tpms_resolution") or 48))))
+        except (TypeError, ValueError):
+            payload["tpms_resolution"] = 48
+        return payload
+
+    def _attach_candidate_preview_artifacts(
+        self,
+        *,
+        state: OrchestratorState,
+        ctx: AgentContext | Any,
+        pool: list[dict[str, Any]],
+        constraints: dict[str, Any],
+    ) -> None:
+        tools = getattr(ctx, "tools", None)
+        if tools is None or not hasattr(tools, "call") or not state.run_id:
+            return
+        safe_run = self._safe_artifact_segment(state.run_id, "run")
+        run_dir = resolve_path("runs") / safe_run
+        for index, candidate in enumerate(pool[:24], start=1):
+            candidate_id = self._safe_artifact_segment(candidate.get("candidate_id"), f"candidate-{index:02d}")
+            output_dir = run_dir / "design_candidates" / candidate_id
+            payload = self._candidate_preview_payload(
+                state=state,
+                candidate=candidate,
+                constraints=constraints,
+                output_dir=output_dir,
+            )
+            try:
+                result = tools.call("geometry.generate_metamaterial_stl", payload)
+            except Exception as exc:
+                candidate["viewer_capture_error"] = f"preview_generation_failed: {exc}"
+                continue
+            if not isinstance(result, dict) or not result.get("ok"):
+                candidate["viewer_capture_error"] = str((result or {}).get("error_message") or "preview_generation_failed")
+                continue
+            stl_path = result.get("stl_path")
+            capture_path = result.get("viewer_capture_path") or result.get("capture_image_path")
+            preview_path = result.get("preview_image_path")
+            if stl_path:
+                candidate["stl_path"] = str(stl_path)
+                candidate["stl_url"] = self._run_artifact_url(state.run_id, stl_path)
+            if capture_path:
+                candidate["viewer_capture_path"] = str(capture_path)
+                candidate["capture_image_path"] = str(capture_path)
+                candidate["viewer_capture_url"] = self._run_artifact_url(state.run_id, capture_path)
+                candidate["capture_image_url"] = candidate["viewer_capture_url"]
+            if preview_path:
+                candidate["preview_image_path"] = str(preview_path)
+                candidate["preview_image_url"] = self._run_artifact_url(state.run_id, preview_path)
+            if isinstance(result.get("geometry_report"), dict):
+                candidate["preview_geometry_hash"] = result["geometry_report"].get("geometry_hash")
+
+    @staticmethod
     def _rejection_summary(record: dict[str, Any]) -> str:
         return f"{record.get('candidate_id', 'candidate')}: {record.get('reason', 'rejected')}"
+
+    @staticmethod
+    def _candidate_visual_refs(candidate: dict[str, Any]) -> dict[str, Any]:
+        keys = (
+            "viewer_capture_url",
+            "viewer_screenshot_url",
+            "viewer_snapshot_url",
+            "cad_capture_url",
+            "capture_image_url",
+            "screenshot_url",
+            "preview_image_url",
+            "thumbnail_url",
+            "image_url",
+            "preview_url",
+        )
+        return {key: candidate.get(key) for key in keys if candidate.get(key) not in (None, "", [])}
 
     def _candidate_ledger_item(self, candidate: dict[str, Any], *, status: str) -> dict[str, Any]:
         return {
@@ -866,6 +993,245 @@ class DesignAgent(BaseAgent):
             "manufacturability_score": candidate.get("expected_manufacturability_score"),
             "information_gain_score": candidate.get("information_gain_score"),
             "risk_score": candidate.get("risk_score"),
+            **self._candidate_visual_refs(candidate),
+        }
+
+    @staticmethod
+    def _numeric(value: Any, default: float = 0.0) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    @classmethod
+    def _parameter_range(cls, name: str, selected: dict[str, Any]) -> dict[str, Any]:
+        raw_range = cls.DEFAULT_DESIGN_SPACE.get(name, [])
+        values = raw_range if isinstance(raw_range, list) else []
+        lower: Any = None
+        upper: Any = None
+        if len(values) >= 2 and all(isinstance(item, (int, float)) for item in values[:2]):
+            lower = values[0]
+            upper = values[1]
+        return {
+            "parameter": name,
+            "selected": selected.get(name),
+            "min": lower,
+            "max": upper,
+            "values": values[:8],
+        }
+
+    def _design_agent_report_snapshot(
+        self,
+        *,
+        state: OrchestratorState,
+        selected: dict[str, Any],
+        pool: list[dict[str, Any]],
+        ranked: list[dict[str, Any]],
+        design_report: dict[str, Any],
+        constraints: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Build the Live GUI Design Agent screen contract without changing downstream handoffs."""
+        generation = design_report.get("candidate_generation", {}) if isinstance(design_report.get("candidate_generation"), dict) else {}
+        evaluation = design_report.get("candidate_evaluation", {}) if isinstance(design_report.get("candidate_evaluation"), dict) else {}
+        objective = design_report.get("objective", {}) if isinstance(design_report.get("objective"), dict) else {}
+        hypothesis = design_report.get("hypothesis", {}) if isinstance(design_report.get("hypothesis"), dict) else {}
+        manufacturability = design_report.get("manufacturability", {}) if isinstance(design_report.get("manufacturability"), dict) else {}
+        handoff = design_report.get("handoff_to_specimen", {}) if isinstance(design_report.get("handoff_to_specimen"), dict) else {}
+        rejected = design_report.get("rejected_candidates") if isinstance(design_report.get("rejected_candidates"), list) else []
+        repaired = design_report.get("repaired_candidates") if isinstance(design_report.get("repaired_candidates"), list) else []
+        timestamp = str(design_report.get("created_at") or self._now_iso())
+        selected_score = self._numeric(selected.get("expected_objective_proxy_score"))
+        max_mass = max(self._numeric(constraints.get("max_mass_g"), 1.0), 1e-6)
+        risk_score = self._numeric(selected.get("risk_score"))
+
+        ranking_rows = []
+        for rank, candidate in enumerate(ranked[:8], start=1):
+            ranking_rows.append(
+                {
+                    "rank": rank,
+                    "candidate_id": candidate.get("candidate_id"),
+                    "geometry_type": candidate.get("geometry_type"),
+                    "status": "selected" if candidate.get("candidate_id") == selected.get("candidate_id") else candidate.get("candidate_status", "valid"),
+                    "score": candidate.get("expected_objective_proxy_score"),
+                    "predicted_objective": candidate.get("predicted_objective"),
+                    "uncertainty": candidate.get("uncertainty"),
+                    "manufacturability_score": candidate.get("expected_manufacturability_score"),
+                    "information_gain_score": candidate.get("information_gain_score"),
+                    "risk_score": candidate.get("risk_score"),
+                    **self._candidate_visual_refs(candidate),
+                }
+            )
+
+        scatter_points = []
+        heatmap_cells = []
+        for candidate in pool[:24]:
+            status = "selected" if candidate.get("candidate_id") == selected.get("candidate_id") else candidate.get("candidate_status", "generated")
+            scatter_points.append(
+                {
+                    "candidate_id": candidate.get("candidate_id"),
+                    "geometry_type": candidate.get("geometry_type"),
+                    "x_mass_g": candidate.get("expected_mass_g"),
+                    "y_predicted_objective": candidate.get("predicted_objective"),
+                    "radius_uncertainty": candidate.get("uncertainty"),
+                    "score": candidate.get("expected_objective_proxy_score"),
+                    "status": status,
+                }
+            )
+            heatmap_cells.append(
+                {
+                    "candidate_id": candidate.get("candidate_id"),
+                    "x_relative_density": candidate.get("relative_density"),
+                    "y_wall_thickness_mm": candidate.get("wall_thickness_mm"),
+                    "value": candidate.get("expected_objective_proxy_score"),
+                    "status": status,
+                }
+            )
+
+        radar = [
+            {"axis": "objective_proxy", "value": round(selected_score, 4), "max": 1.0},
+            {"axis": "manufacturability", "value": selected.get("expected_manufacturability_score"), "max": 1.0},
+            {"axis": "information_gain", "value": selected.get("information_gain_score"), "max": 1.0},
+            {"axis": "constraint_margin", "value": selected.get("constraint_margin_score"), "max": 1.0},
+            {"axis": "mass_efficiency", "value": round(self._clamp(1.0 - self._numeric(selected.get("expected_mass_g")) / max_mass, 0.0, 1.0), 4), "max": 1.0},
+            {"axis": "risk_inverse", "value": round(self._clamp(1.0 - risk_score, 0.0, 1.0), 4), "max": 1.0},
+        ]
+
+        artifact_ledger = [
+            {
+                "artifact_id": design_report.get("report_id"),
+                "artifact_type": "design_report",
+                "status": "ready",
+                "owner": self.name,
+            },
+            {
+                "artifact_id": selected.get("candidate_id"),
+                "artifact_type": "selected_candidate",
+                "status": selected.get("candidate_status", "selected"),
+                "owner": self.name,
+            },
+            {
+                "artifact_id": selected.get("specimen_id"),
+                "artifact_type": "authoritative_experiment_spec",
+                "status": "handoff_ready" if handoff.get("required_fields_present", False) else "blocked",
+                "owner": self.name,
+            },
+            {
+                "artifact_id": f"{design_report.get('report_id')}-ranking",
+                "artifact_type": "candidate_ranking",
+                "status": "ready" if ranking_rows else "empty",
+                "owner": self.name,
+            },
+        ]
+        candidate_ledger = generation.get("candidate_ledger", []) if isinstance(generation.get("candidate_ledger"), list) else []
+        if not candidate_ledger:
+            ranked_ids = {str(item.get("candidate_id") or "") for item in ranked}
+            selected_id = str(selected.get("candidate_id") or "")
+            candidate_ledger = []
+            for candidate in pool[:24]:
+                candidate_id = str(candidate.get("candidate_id") or "")
+                if candidate_id == selected_id:
+                    status = "selected"
+                elif str(candidate.get("candidate_status") or "") == "rejected":
+                    status = "rejected"
+                elif candidate_id in ranked_ids:
+                    status = "valid"
+                else:
+                    status = str(candidate.get("candidate_status") or "generated")
+                candidate_ledger.append(self._candidate_ledger_item(candidate, status=status))
+
+        return {
+            "schema": "design_agent_report.v1",
+            "source_report_schema": design_report.get("schema"),
+            "report_id": f"design-agent-report-{state.run_id or 'run'}-{state.loop_count + 1}",
+            "source_report_id": design_report.get("report_id"),
+            "run_id": state.run_id,
+            "experiment_id": state.experiment_id,
+            "loop_index": state.loop_count + 1,
+            "created_at": timestamp,
+            "producer_agent": self.name,
+            "design_brief": {
+                "source_goal": objective.get("source_goal") or state.active_goal,
+                "objective_type": objective.get("objective_type"),
+                "primary_metric": objective.get("primary_metric"),
+                "direction": objective.get("direction"),
+                "hypothesis": hypothesis.get("statement"),
+                "selected_geometry": selected.get("geometry_type"),
+                "material": selected.get("material"),
+                "printer_model": constraints.get("printer_model"),
+                "success_criteria": objective.get("success_criteria", []),
+            },
+            "candidate_board": {
+                "generated_count": generation.get("candidate_count", len(pool)),
+                "valid_count": generation.get("valid_count", len(ranked)),
+                "rejected_count": generation.get("rejected_count", len(rejected)),
+                "repaired_count": generation.get("repaired_count", len(repaired)),
+                "selected_candidate_id": selected.get("candidate_id"),
+                "selected_candidate_fingerprint": selected.get("candidate_fingerprint"),
+                "cad_candidate_cards": candidate_ledger[:24],
+                "candidate_ledger": candidate_ledger,
+            },
+            "candidate_ranking": {
+                "chart_type": "ranking_bar",
+                "selected_candidate_id": selected.get("candidate_id"),
+                "rows": ranking_rows,
+            },
+            "parameter_sweep": {
+                "chart_type": "heatmap",
+                "x_axis": "relative_density",
+                "y_axis": "wall_thickness_mm",
+                "score_field": "expected_objective_proxy_score",
+                "parameters": [
+                    self._parameter_range("cell_size_mm", selected),
+                    self._parameter_range("wall_thickness_mm", selected),
+                    self._parameter_range("relative_density", selected),
+                    self._parameter_range("orientation_deg", selected),
+                    self._parameter_range("tpms_thickness", selected),
+                ],
+                "heatmap_cells": heatmap_cells,
+            },
+            "expected_performance": {
+                "chart_types": ["scatter_plot", "radar_chart"],
+                "selected_candidate_id": selected.get("candidate_id"),
+                "metrics": evaluation,
+                "radar": radar,
+                "scatter_points": scatter_points,
+            },
+            "manufacturability": {
+                **manufacturability,
+                "flat_faces_required": constraints.get("require_flat_compression_faces"),
+                "minimum_feature_size_mm": constraints.get("minimum_feature_size_mm"),
+                "max_bridge_distance_mm": constraints.get("fdm_max_bridge_distance_mm"),
+                "warnings": manufacturability.get("warnings", []),
+            },
+            "material_notes": {
+                "material": selected.get("material"),
+                "printer_profile": selected.get("printer_profile"),
+                "slicer_profile_hint": selected.get("slicer_profile_hint"),
+                "layer_height_mm": selected.get("layer_height_mm"),
+                "nozzle_diameter_mm": selected.get("nozzle_diameter_mm"),
+                "bed_temperature_c": selected.get("bed_temperature_c"),
+                "first_layer_bed_temperature_c": selected.get("first_layer_bed_temperature_c"),
+                "notes": [
+                    f"Use {selected.get('material')} with {selected.get('printer_profile')}.",
+                    f"Respect feature >= {constraints.get('minimum_feature_size_mm')} mm and bridge <= {constraints.get('fdm_max_bridge_distance_mm')} mm.",
+                    "Specimen Agent owns STL/G-code generation from the authoritative experiment_spec.",
+                ],
+            },
+            "handoff_to_specimen": {
+                **handoff,
+                "next_agent": "specimen",
+                "packet_status": "ready" if handoff.get("required_fields_present", False) else "blocked",
+                "authoritative_specimen_id": handoff.get("authoritative_specimen_id") or selected.get("specimen_id"),
+                "authoritative_candidate_id": handoff.get("authoritative_candidate_id") or selected.get("candidate_id"),
+            },
+            "artifact_ledger": artifact_ledger,
+            "visualization_manifest": [
+                {"id": "cad_candidate_cards", "section": "candidate_board", "type": "candidate_cards"},
+                {"id": "candidate_ranking", "section": "candidate_ranking", "type": "ranking_bar_chart"},
+                {"id": "parameter_sweep", "section": "parameter_sweep", "type": "heatmap"},
+                {"id": "performance_scatter", "section": "expected_performance", "type": "scatter_plot"},
+                {"id": "performance_radar", "section": "expected_performance", "type": "radar_chart"},
+            ],
         }
 
     def _design_report(

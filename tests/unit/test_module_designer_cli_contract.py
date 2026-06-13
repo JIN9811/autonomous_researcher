@@ -203,7 +203,7 @@ def test_install_cli_exposes_module_management_commands() -> None:
     assert 'os.environ["ATR_MODULE_ACTIVATE"] != "0"' in install_script
     assert r'api_post "/api/modules" "\$(json_module_create' in install_script
     assert '"transform_with_llm": True' in install_script
-    assert '"transform_model": "gemma4:31b"' in install_script
+    assert '"transform_model": os.environ.get("AUTONOMOUS_MODULE_DESIGNER_MODEL", "")' in install_script
     assert "Module CUI commands intentionally use the same /api/modules endpoints as Module Management Tool" in install_script
 
 

@@ -15,6 +15,7 @@ env/
 .env
 .env.*
 !.env.example
+docs/runtime/api_keys.local.md
 *.pem
 *.key
 *token*
