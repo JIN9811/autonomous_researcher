@@ -21925,13 +21925,15 @@ body .bambu-printer-page .btn.primary {
 }
 body .bambu-printer-page .btn:disabled,
 body .bambu-printer-page .btn.primary:disabled,
-body .bambu-printer-page .btn.danger:disabled {
+body .bambu-printer-page .btn.danger:disabled,
+body .bambu-printer-page .btn.busy-locked {
   background: #e5e7eb !important;
   border-color: #cbd5e1 !important;
   color: #64748b !important;
   opacity: 1 !important;
   box-shadow: none !important;
   cursor: not-allowed;
+  pointer-events: none;
 }
 body .bambu-printer-page .bridge-pill.ok {
   color: #047857 !important;

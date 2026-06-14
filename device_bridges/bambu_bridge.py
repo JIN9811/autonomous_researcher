@@ -822,6 +822,7 @@ class BambuVideoStreamClient:
             "stream_url": stream_url if reachable else "",
             "proxy_ready": proxy_ready,
             "proxy_url": "/api/printer/video-stream.mjpeg" if proxy_ready else "",
+            "snapshot_url": "/api/printer/video-frame.jpg" if proxy_ready else "",
             "ffmpeg_available": bool(ffmpeg_path),
             "blockers": blockers,
             "probes": {"rtsps": rtsps_probe, "jpeg": jpeg_probe},
@@ -2442,6 +2443,7 @@ class PrinterDeviceBridgeManager:
         camera_stream_kind = "unavailable"
         camera_proxy_ready = bool(video_probe.get("proxy_ready"))
         camera_proxy_url = str(video_probe.get("proxy_url") or "")
+        camera_snapshot_url = str(video_probe.get("snapshot_url") or "")
         camera_blockers = (
             list(video_probe.get("blockers", [])) if isinstance(video_probe.get("blockers"), list) else []
         )
@@ -2521,6 +2523,7 @@ class PrinterDeviceBridgeManager:
             "camera": {
                 "mode": "unavailable" if connection.get("video") not in {"virtual", "streaming", "snapshot"} else connection.get("video"),
                 "proxy_url": camera_proxy_url or report_camera.get("rtsp_url", ""),
+                "snapshot_url": camera_snapshot_url,
                 "frame_age_ms": None,
                 "error": "" if camera_proxy_url or report_camera.get("rtsp_url") or connection.get("video") == "virtual" else "video stream not connected",
                 "liveview_preview": bool(report_camera.get("liveview_preview", False)),
@@ -2539,6 +2542,7 @@ class PrinterDeviceBridgeManager:
                 "recording": report_camera.get("recording", ""),
                 "proxy_ready": camera_proxy_ready or connection.get("video") in {"streaming", "snapshot"},
                 "proxy_url": camera_proxy_url,
+                "snapshot_url": camera_snapshot_url,
                 "blockers": camera_blockers,
             },
             "job": {

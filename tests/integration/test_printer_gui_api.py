@@ -146,6 +146,25 @@ def test_printer_gui_does_not_treat_profile_ejection_checkbox_as_bambu_ejection_
     assert "renderConfig(data);\n  renderDeviceScreen(data);" in script
 
 
+def test_printer_video_status_updates_camera_without_clearing_device_screen() -> None:
+    script = (Path(__file__).resolve().parents[2] / "web" / "static" / "printer.js").read_text(encoding="utf-8")
+
+    video_status_body = script.split("async function runVideoStatus()", 1)[1].split("async function saveProfile()", 1)[0]
+    assert "renderCameraPanel(data);" in video_status_body
+    assert "renderDeviceScreen(data);" not in video_status_body
+
+
+def test_printer_prestart_check_refreshes_camera_and_locks_command_buttons() -> None:
+    script = (Path(__file__).resolve().parents[2] / "web" / "static" / "printer.js").read_text(encoding="utf-8")
+
+    prestart_body = script.split("async function runBambuPrestartCheck()", 1)[1].split("async function runStartCommandDraft()", 1)[0]
+    assert "await refreshVideoStatusCamera" in prestart_body
+    assert prestart_body.index("await refreshVideoStatusCamera") < prestart_body.index("if (!sourcePath && !artifactPath)")
+    assert "waitForCameraFrameLoaded" in script
+    assert "printerOperationButtons" in script
+    assert "setOperationButtonsLocked" in script
+
+
 def test_printer_status_api_redacts_connection_and_reports_gates() -> None:
     client = TestClient(app)
 
@@ -403,6 +422,61 @@ def test_printer_video_stream_endpoint_uses_saved_bambu_connection_without_echoi
     assert b"FAKEJPEG" in response.content
     assert b"secret-code" not in response.content
     assert captured["command"][0] == "/usr/bin/ffmpeg"
+    assert captured["kwargs"]["stdin"] == app_main.subprocess.DEVNULL
+
+
+def test_printer_video_frame_endpoint_returns_single_jpeg_without_echoing_secret(tmp_path, monkeypatch) -> None:
+    manager = PrinterDeviceBridgeManager.from_devices_config(
+        {
+            "devices": {
+                "printer": {
+                    "mode": "test",
+                    "default_profile_id": "bambulab_x2d_lab_01",
+                    "connection_memory_path": str(tmp_path / "printer_fleet.json"),
+                    "profiles": {
+                        "bambulab_x2d_lab_01": {
+                            "provider": "bambulab_x2d",
+                            "connection_memory_path": str(tmp_path / "bambu_connection.json"),
+                            "enabled": True,
+                        }
+                    },
+                }
+            }
+        },
+        repo_root=tmp_path,
+    )
+    BambuConnectionMemory(manager.config.default_profile.connection_memory_path).save_from_payload(
+        {
+            "host": "192.0.2.42",
+            "serial": "SERIAL",
+            "auth": {"mode": "lan_access_code", "username": "bblp", "access_code": "secret-code"},
+        }
+    )
+    monkeypatch.setattr(app_main, "_printer_bridge_manager", lambda: manager)
+    monkeypatch.setattr(app_main.shutil, "which", lambda name: "/usr/bin/ffmpeg" if name == "ffmpeg" else None)
+
+    captured: dict[str, object] = {}
+
+    class Completed:
+        returncode = 0
+        stdout = b"\xff\xd8FAKEJPEG\xff\xd9"
+        stderr = b""
+
+    def fake_run(command, **kwargs):  # noqa: ANN001
+        captured["command"] = command
+        captured["kwargs"] = kwargs
+        return Completed()
+
+    monkeypatch.setattr(app_main.subprocess, "run", fake_run)
+    client = TestClient(app)
+
+    response = client.get("/api/printer/video-frame.jpg")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/jpeg"
+    assert response.content.startswith(b"\xff\xd8")
+    assert b"secret-code" not in response.content
+    assert "-frames:v" in captured["command"]
     assert captured["kwargs"]["stdin"] == app_main.subprocess.DEVNULL
 
 

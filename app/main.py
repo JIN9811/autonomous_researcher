@@ -47,7 +47,7 @@ from dotenv import dotenv_values
 from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
@@ -8206,10 +8206,8 @@ async def get_printer_video_status() -> dict[str, object]:
     return manager.video_status({})
 
 
-@app.get("/api/printer/video-stream.mjpeg")
-async def get_printer_video_stream() -> StreamingResponse:
-    """Proxy selected Bambu RTSPS live view as MJPEG for the browser device panel."""
-    manager = _printer_bridge_manager()
+def _selected_bambu_video_connection(manager: PrinterDeviceBridgeManager) -> tuple[str, str]:
+    """Return selected Bambu host/access-code for local video proxy routes."""
     selected_profile, _reason = manager.fleet_selection()
     if selected_profile.provider != "bambulab_x2d":
         raise HTTPException(status_code=400, detail="BAMBU_VIDEO_STREAM_REQUIRES_BAMBU_PROFILE")
@@ -8220,6 +8218,64 @@ async def get_printer_video_stream() -> StreamingResponse:
     access_code = str(raw_auth.get("access_code") or "")
     if not host or not access_code:
         raise HTTPException(status_code=400, detail="BAMBU_VIDEO_CONNECTION_INFO_INCOMPLETE")
+    return host, access_code
+
+
+@app.get("/api/printer/video-frame.jpg")
+async def get_printer_video_frame() -> Response:
+    """Return one Bambu camera frame as JPEG for reliable browser preview cards."""
+    manager = _printer_bridge_manager()
+    host, access_code = _selected_bambu_video_connection(manager)
+    ffmpeg_path = shutil.which("ffmpeg")
+    if not ffmpeg_path:
+        raise HTTPException(status_code=503, detail="BAMBU_VIDEO_PROXY_FFMPEG_MISSING")
+
+    stream_url = f"rtsps://bblp:{quote(access_code, safe='')}@{host}:{manager.config.video.rtsps_port}/streaming/live/1"
+    command = [
+        ffmpeg_path,
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-rtsp_transport",
+        "tcp",
+        "-i",
+        stream_url,
+        "-frames:v",
+        "1",
+        "-vf",
+        "scale=960:-1",
+        "-q:v",
+        "4",
+        "-f",
+        "image2pipe",
+        "-vcodec",
+        "mjpeg",
+        "-",
+    ]
+    try:
+        completed = subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            stdin=subprocess.DEVNULL,
+            timeout=max(5.0, float(manager.config.video.timeout_sec) + 3.0),
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise HTTPException(status_code=504, detail="BAMBU_VIDEO_FRAME_TIMEOUT") from exc
+    if completed.returncode != 0 or not completed.stdout:
+        raise HTTPException(status_code=502, detail="BAMBU_VIDEO_FRAME_CAPTURE_FAILED")
+    return Response(
+        content=completed.stdout,
+        media_type="image/jpeg",
+        headers={"Cache-Control": "no-store, max-age=0"},
+    )
+
+
+@app.get("/api/printer/video-stream.mjpeg")
+async def get_printer_video_stream() -> StreamingResponse:
+    """Proxy selected Bambu RTSPS live view as MJPEG for the browser device panel."""
+    manager = _printer_bridge_manager()
+    host, access_code = _selected_bambu_video_connection(manager)
     ffmpeg_path = shutil.which("ffmpeg")
     if not ffmpeg_path:
         raise HTTPException(status_code=503, detail="BAMBU_VIDEO_PROXY_FFMPEG_MISSING")

@@ -157,6 +157,54 @@ let lastHttpArtifactUrl = "";
 let printerStatusManualOverride = false;
 let lastPrinterProvider = "";
 let lastFleetPayload = {};
+let printerOperationLockDepth = 0;
+const printerOperationDisabledSnapshot = new Map();
+
+function printerOperationButtons() {
+  return [
+    btnSave,
+    btnReset,
+    btnStatusTest,
+    btnStatusLive,
+    btnVideoStatus,
+    btnUploadPathProbe,
+    btnBambuSliceArtifact,
+    btnHttpArtifactRoute,
+    btnBambuPrestartCheck,
+    btnStartCommandDraft,
+    btnStartGate,
+    btnStartPublish,
+    btnSpcReadiness,
+    btnConnectionSave,
+    btnConnectionReload,
+    btnFleetSave,
+    btnAutoejectionConfigSave,
+  ].filter(Boolean);
+}
+
+function setOperationButtonsLocked(locked) {
+  const buttons = printerOperationButtons();
+  if (locked) {
+    if (printerOperationLockDepth === 0) {
+      printerOperationDisabledSnapshot.clear();
+      buttons.forEach((button) => printerOperationDisabledSnapshot.set(button, button.disabled));
+    }
+    printerOperationLockDepth += 1;
+    buttons.forEach((button) => {
+      button.disabled = true;
+      button.classList.add("busy-locked");
+    });
+    return;
+  }
+
+  printerOperationLockDepth = Math.max(0, printerOperationLockDepth - 1);
+  if (printerOperationLockDepth > 0) return;
+  buttons.forEach((button) => {
+    button.disabled = Boolean(printerOperationDisabledSnapshot.get(button));
+    button.classList.remove("busy-locked");
+  });
+  printerOperationDisabledSnapshot.clear();
+}
 
 function setDotState(dot, state) {
   if (!dot) return;
@@ -187,7 +235,8 @@ function setBusy(button, busy) {
   if (!button.dataset.originalText) {
     button.dataset.originalText = button.textContent;
   }
-  button.disabled = busy;
+  setOperationButtonsLocked(busy);
+  if (busy) button.disabled = true;
   button.textContent = busy ? "Working..." : button.dataset.originalText;
 }
 
@@ -819,13 +868,71 @@ function renderEvidenceCards(cards) {
     : `<div class="bambu-empty-panel">Run Live Status or SPC Readiness to collect bridge evidence.</div>`;
 }
 
+function streamUrlWithCacheBuster(url) {
+  const value = String(url || "").trim();
+  if (!value) return "";
+  const joiner = value.includes("?") ? "&" : "?";
+  return `${value}${joiner}t=${Date.now()}`;
+}
+
+function waitForCameraFrameLoaded(timeoutMs = 8000) {
+  const img = cameraPlaceholder ? cameraPlaceholder.querySelector(".printer-video-stream") : null;
+  if (!img) return Promise.resolve(false);
+  if (img.complete && img.naturalWidth > 0) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (ok) => {
+      if (settled) return;
+      settled = true;
+      img.removeEventListener("load", onLoad);
+      img.removeEventListener("error", onError);
+      clearTimeout(timer);
+      resolve(Boolean(ok));
+    };
+    const onLoad = () => finish(img.naturalWidth > 0);
+    const onError = () => finish(false);
+    const timer = setTimeout(() => finish(false), Number(timeoutMs) || 8000);
+    img.addEventListener("load", onLoad, { once: true });
+    img.addEventListener("error", onError, { once: true });
+  });
+}
+
+function renderCameraPanel(data, options = {}) {
+  const screen = data.device_screen || {};
+  const connection = screen.connection || {};
+  const camera = screen.camera || {};
+  const cameraPanel = screen.camera_panel || {};
+  const hasCameraPayload = Boolean(screen.camera || screen.camera_panel || data.video_status);
+  if (!hasCameraPayload && options.preserveExistingStream) return;
+  if (cameraSummary) {
+    cameraSummary.textContent = cameraPanel.summary || (camera.liveview_preview ? `${camera.resolution || "live"} preview available` : camera.mode || "unavailable");
+  }
+  if (cameraLiveState) cameraLiveState.textContent = `video: ${cameraPanel.status || camera.mode || connection.video || "unknown"}`;
+  if (cameraStreamKind) cameraStreamKind.textContent = `stream: ${cameraPanel.stream_kind || "unknown"}`;
+  if (cameraProxyState) cameraProxyState.textContent = `proxy: ${cameraPanel.proxy_ready ? "ready" : "not ready"}`;
+  if (cameraPlaceholder) {
+    const proxyUrl = cameraPanel.proxy_ready && cameraPanel.proxy_url ? cameraPanel.proxy_url : "";
+    const snapshotUrl = cameraPanel.snapshot_url || camera.snapshot_url || "";
+    const imageUrl = snapshotUrl || proxyUrl;
+    const existingStream = cameraPlaceholder.querySelector(".printer-video-stream");
+    if (imageUrl) {
+      cameraPlaceholder.innerHTML = `<img class="printer-video-stream" src="${escapeHtml(streamUrlWithCacheBuster(imageUrl))}" alt="Bambu live video stream" />`;
+    } else if (!options.preserveExistingStream || !existingStream) {
+      cameraPlaceholder.innerHTML = `<span>Live video proxy is not connected yet.</span>`;
+    }
+  }
+  if (cameraDetail) {
+    const stream = cameraPanel.proxy_url || camera.rtsp_url || camera.proxy_url || "";
+    const blockers = Array.isArray(cameraPanel.blockers) && cameraPanel.blockers.length ? ` · ${cameraPanel.blockers.join(", ")}` : "";
+    cameraDetail.textContent = stream ? `Video endpoint detected · ${stream}${blockers}` : camera.error || `recording=${camera.recording || "unknown"} · mode=${camera.mode || "unknown"}${blockers}`;
+  }
+}
+
 function renderDeviceScreen(data) {
   const screen = data.device_screen || {};
   const selected = data.selected_printer || {};
   const connection = screen.connection || {};
   const job = screen.job || {};
-  const camera = screen.camera || {};
-  const cameraPanel = screen.camera_panel || {};
   const progressPanel = screen.progress_panel || {};
   const controlPanel = screen.control_panel || {};
   const materialPanel = screen.material_panel || {};
@@ -839,23 +946,7 @@ function renderDeviceScreen(data) {
   const diagnostics = screen.diagnostics || {};
   const health = screen.health || {};
   if (deviceTitle) deviceTitle.textContent = selected.label || selected.profile_id || "Selected Printer";
-  if (cameraSummary) {
-    cameraSummary.textContent = cameraPanel.summary || (camera.liveview_preview ? `${camera.resolution || "live"} preview available` : camera.mode || "unavailable");
-  }
-  if (cameraLiveState) cameraLiveState.textContent = `video: ${cameraPanel.status || camera.mode || connection.video || "unknown"}`;
-  if (cameraStreamKind) cameraStreamKind.textContent = `stream: ${cameraPanel.stream_kind || "unknown"}`;
-  if (cameraProxyState) cameraProxyState.textContent = `proxy: ${cameraPanel.proxy_ready ? "ready" : "not ready"}`;
-  if (cameraPlaceholder) {
-    const proxyUrl = cameraPanel.proxy_ready && cameraPanel.proxy_url ? cameraPanel.proxy_url : "";
-    cameraPlaceholder.innerHTML = proxyUrl
-      ? `<img class="printer-video-stream" src="${escapeHtml(proxyUrl)}" alt="Bambu live video stream" />`
-      : `<span>Live video proxy is not connected yet.</span>`;
-  }
-  if (cameraDetail) {
-    const stream = cameraPanel.proxy_url || camera.rtsp_url || camera.proxy_url || "";
-    const blockers = Array.isArray(cameraPanel.blockers) && cameraPanel.blockers.length ? ` · ${cameraPanel.blockers.join(", ")}` : "";
-    cameraDetail.textContent = stream ? `Video endpoint detected · ${stream}${blockers}` : camera.error || `recording=${camera.recording || "unknown"} · mode=${camera.mode || "unknown"}${blockers}`;
-  }
+  renderCameraPanel(data);
   if (jobSummary) jobSummary.textContent = `${progressPanel.state || job.state || "unknown"}${progressPanel.job_name || job.name ? ` · ${progressPanel.job_name || job.name}` : ""}`;
   if (progressSummary) {
     const progress = progressPanel.progress_percent ?? job.progress_percent;
@@ -991,13 +1082,22 @@ async function refreshStatus(mode, options = {}) {
   return data;
 }
 
+async function refreshVideoStatusCamera(options = {}) {
+  const data = await apiJson("/api/printer/video-status");
+  renderCameraPanel(data, { preserveExistingStream: true });
+  await waitForCameraFrameLoaded();
+  if (!options.silentLog) writeLog(data);
+  return data;
+}
+
 async function runVideoStatus() {
   setBusy(btnVideoStatus, true);
   setDotState(statusDot, "busy");
   try {
     const data = await apiJson("/api/printer/video-status");
     setDotState(statusDot, data.ok ? "idle" : "warn");
-    renderDeviceScreen(data);
+    renderCameraPanel(data);
+    await waitForCameraFrameLoaded();
     const cameraPanel = data.device_screen && data.device_screen.camera_panel ? data.device_screen.camera_panel : {};
     if (cameraDetail) {
       const blockers = Array.isArray(cameraPanel.blockers) && cameraPanel.blockers.length ? ` · ${cameraPanel.blockers.join(", ")}` : "";
@@ -1257,6 +1357,13 @@ async function runBambuPrestartCheck() {
   try {
     const sourcePath = bambuSourcePathInput ? bambuSourcePathInput.value.trim() : "";
     const artifactPath = bambuArtifactPathInput ? bambuArtifactPathInput.value.trim() : "";
+    try {
+      await refreshVideoStatusCamera({ silentLog: true });
+    } catch (cameraErr) {
+      if (cameraDetail) {
+        cameraDetail.textContent = `Video status refresh failed · ${cameraErr.message}`;
+      }
+    }
     if (!sourcePath && !artifactPath) {
       throw new Error("Bambu source STL / 3MF path or sliced artifact path is required.");
     }
@@ -1289,6 +1396,13 @@ async function runBambuPrestartCheck() {
     }
     if (data.spc_readiness) {
       renderSpcReadiness(data.spc_readiness);
+    }
+    try {
+      await refreshVideoStatusCamera({ silentLog: true });
+    } catch (cameraErr) {
+      if (cameraDetail) {
+        cameraDetail.textContent = `Video status refresh failed · ${cameraErr.message}`;
+      }
     }
     if (gateDetail) {
       const blockers = data.start_gate && Array.isArray(data.start_gate.blockers) && data.start_gate.blockers.length
