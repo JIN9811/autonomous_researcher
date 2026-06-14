@@ -47,6 +47,19 @@ const modelE4BChipEl = document.getElementById("model-e4b-chip");
 const modelLoadButtons = Array.from(document.querySelectorAll(".model-load-btn"));
 const modelUnloadButtons = Array.from(document.querySelectorAll(".model-unload-btn"));
 const modelLoadDots = Array.from(document.querySelectorAll("[data-model-dot]"));
+const apiKeyChipEl = document.getElementById("api-key-chip");
+const apiKeyStatusTextEl = document.getElementById("api-key-status-text");
+const apiKeyDetailEl = document.getElementById("api-key-detail");
+const apiKeyDotEl = document.getElementById("api-key-dot");
+const apiKeyOpenBtn = document.getElementById("api-key-open-btn");
+const apiKeyLoadBtn = document.getElementById("api-key-load-btn");
+const apiKeyUnloadBtn = document.getElementById("api-key-unload-btn");
+const apiKeyDialogEl = document.getElementById("api-key-dialog");
+const apiKeyFormEl = document.getElementById("api-key-form");
+const apiKeyInputEl = document.getElementById("api-key-input");
+const apiKeyEnableInputEl = document.getElementById("api-key-enable-input");
+const apiKeyCloseBtn = document.getElementById("api-key-close-btn");
+const apiKeyDialogStatusEl = document.getElementById("api-key-dialog-status");
 
 const modeSelect = document.getElementById("mode-select");
 const backendSelect = document.getElementById("backend-select");
@@ -81,6 +94,7 @@ let currentRunId = null;
 let visitedStages = new Set(["controller", "orchestrator", "idle"]);
 let visitedEdges = new Set(["controller->orchestrator"]);
 let modelStatusTimer = null;
+let apiKeyState = { ok: false, enabled: false, has_key: false, key_status: "not_registered", source: "none" };
 
 const TERMINAL_EVENTS = new Set(["run_complete", "run_error", "run_stop", "replay_complete"]);
 const GRAPH_COLS = 12;
@@ -823,6 +837,108 @@ async function setModelServingState(model, action, button) {
   }
 }
 
+function renderApiKeyStatus(payload) {
+  apiKeyState = payload || { ok: false, enabled: false, has_key: false, key_status: "not_registered", source: "none" };
+  const hasKey = Boolean(apiKeyState.has_key);
+  const enabled = Boolean(apiKeyState.enabled);
+  const state = enabled ? "loaded" : hasKey ? "unloaded" : "unknown";
+  if (apiKeyChipEl) {
+    apiKeyChipEl.classList.toggle("is-loaded", enabled);
+    apiKeyChipEl.classList.toggle("is-unloaded", !enabled);
+    apiKeyChipEl.title = hasKey
+      ? `OpenAI API key ${enabled ? "enabled" : "saved but disabled"}; source=${apiKeyState.source || "memory"}`
+      : "OpenAI API key is not configured.";
+  }
+  if (apiKeyDotEl) setModelActionDot(apiKeyDotEl, state);
+  if (apiKeyStatusTextEl) {
+    apiKeyStatusTextEl.textContent = hasKey ? "Registered" : "Not registered";
+  }
+  if (apiKeyDetailEl) {
+    const primary = apiKeyState.primary_backend || apiKeyState.fallback_backend || "local";
+    apiKeyDetailEl.textContent = hasKey
+      ? `${enabled ? "API primary" : "API disabled"} · route=${primary} · source=${apiKeyState.source || "memory"}`
+      : "OpenAI API key is missing. Click API Key to register one.";
+  }
+  if (apiKeyLoadBtn) apiKeyLoadBtn.disabled = !hasKey || enabled;
+  if (apiKeyUnloadBtn) apiKeyUnloadBtn.disabled = !hasKey || !enabled;
+  if (apiKeyEnableInputEl) apiKeyEnableInputEl.checked = enabled || !hasKey;
+  if (apiKeyDialogStatusEl) {
+    apiKeyDialogStatusEl.textContent = hasKey
+      ? "Saved key is registered. Full value is never displayed."
+      : "No key saved yet. Enter a key and save to create memory/api_keys.json.";
+  }
+}
+
+async function refreshApiKeyStatus() {
+  try {
+    const res = await fetch("/api/runtime/api-key");
+    const data = await res.json();
+    renderApiKeyStatus(data);
+  } catch (err) {
+    renderApiKeyStatus({ ok: false, enabled: false, has_key: false, source: "unavailable", error: String(err) });
+  }
+}
+
+async function postApiKeyJson(url, body = {}) {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || data.ok === false) {
+    const message = data.message || data.detail || `Request failed with HTTP ${res.status}`;
+    throw new Error(message);
+  }
+  return data;
+}
+
+async function setApiKeyServingState(action, button) {
+  if (!["load", "unload"].includes(action)) return;
+  const originalText = button ? button.textContent : "";
+  if (button) {
+    button.disabled = true;
+    button.textContent = action === "load" ? "Loading..." : "Unloading...";
+  }
+  try {
+    const data = await postApiKeyJson(`/api/runtime/api-key/${action}`, {});
+    renderApiKeyStatus(data);
+  } catch (err) {
+    if (apiKeyDialogStatusEl) {
+      apiKeyDialogStatusEl.textContent = `API key ${action} failed: ${err.message || err}`;
+    }
+  } finally {
+    if (button) button.textContent = originalText;
+  }
+}
+
+function openApiKeyDialog() {
+  if (apiKeyInputEl) apiKeyInputEl.value = "";
+  if (apiKeyDialogEl && typeof apiKeyDialogEl.showModal === "function") {
+    apiKeyDialogEl.showModal();
+  }
+}
+
+async function saveApiKeyFromDialog() {
+  const apiKey = apiKeyInputEl ? apiKeyInputEl.value.trim() : "";
+  if (!apiKey) {
+    if (apiKeyDialogStatusEl) apiKeyDialogStatusEl.textContent = "Enter an API key before saving.";
+    return;
+  }
+  const enabled = apiKeyEnableInputEl ? apiKeyEnableInputEl.checked : true;
+  if (apiKeyDialogStatusEl) apiKeyDialogStatusEl.textContent = "Saving API key locally...";
+  try {
+    const data = await postApiKeyJson("/api/runtime/api-key", { api_key: apiKey, enabled });
+    renderApiKeyStatus(data);
+    if (apiKeyInputEl) apiKeyInputEl.value = "";
+    if (apiKeyDialogEl && typeof apiKeyDialogEl.close === "function") apiKeyDialogEl.close();
+  } catch (err) {
+    if (apiKeyDialogStatusEl) {
+      apiKeyDialogStatusEl.textContent = `Save failed: ${err.message || err}`;
+    }
+  }
+}
+
 function renderAgentStatus(agentStatus) {
   agentStatusEl.innerHTML = "";
   const names = Object.keys(agentStatus || {});
@@ -903,27 +1019,29 @@ async function refreshState() {
 
 async function refreshPrinterWorkspaceStatus() {
   if (!printerWorkspaceDetailEl && !printerWorkspaceDotEl) return;
-  const selectedMode = modeSelect ? modeSelect.value : "test";
-  const mode = selectedMode === "live" ? "live" : "test";
+  // Device Workspace status is a read-only bridge health view, independent of the run mode selector.
+  const mode = "live";
   try {
     const res = await fetch(`/api/printer/status?mode=${encodeURIComponent(mode)}`);
     const data = await res.json();
     const gates = data.live_gates || {};
     const connection = data.connection || {};
     const health = data.health || {};
+    const selectedPrinter = data.selected_printer || {};
     const ready = Boolean(data.ok || health.reachable || mode === "test");
     setDotState(printerWorkspaceDotEl, ready ? (mode === "live" ? "busy" : "idle") : "warn");
     if (printerWorkspaceDetailEl) {
+      const label = selectedPrinter.label || connection.model || data.provider || "selected printer";
       const host = connection.host || "not configured";
-      const storage = connection.storage || "usb";
+      const storage = connection.storage || (data.provider === "bambulab_x2d" ? "ftps/http" : "usb");
       const gateText = `upload=${Boolean(gates.allow_upload)} start=${Boolean(gates.allow_start_print)} eject=${Boolean(gates.allow_ejection)}`;
       const state = health.state || health.failure_code || "virtual-ready";
-      printerWorkspaceDetailEl.textContent = `${mode} · ${host} · storage=${storage} · ${gateText} · state=${state}`;
+      printerWorkspaceDetailEl.textContent = `${label} · ${mode} · ${host} · storage=${storage} · ${gateText} · state=${state}`;
     }
   } catch (err) {
     setDotState(printerWorkspaceDotEl, "warn");
     if (printerWorkspaceDetailEl) {
-      printerWorkspaceDetailEl.textContent = `Prusa bridge status unavailable: ${err}`;
+      printerWorkspaceDetailEl.textContent = `3DP bridge status unavailable: ${err}`;
     }
   }
 }
@@ -1160,10 +1278,32 @@ for (const button of modelUnloadButtons) {
   });
 }
 
+if (apiKeyOpenBtn) {
+  apiKeyOpenBtn.addEventListener("click", openApiKeyDialog);
+}
+if (apiKeyCloseBtn) {
+  apiKeyCloseBtn.addEventListener("click", () => {
+    if (apiKeyDialogEl && typeof apiKeyDialogEl.close === "function") apiKeyDialogEl.close();
+  });
+}
+if (apiKeyLoadBtn) {
+  apiKeyLoadBtn.addEventListener("click", () => setApiKeyServingState("load", apiKeyLoadBtn));
+}
+if (apiKeyUnloadBtn) {
+  apiKeyUnloadBtn.addEventListener("click", () => setApiKeyServingState("unload", apiKeyUnloadBtn));
+}
+if (apiKeyFormEl) {
+  apiKeyFormEl.addEventListener("submit", (event) => {
+    event.preventDefault();
+    saveApiKeyFromDialog();
+  });
+}
+
 async function bootstrap() {
   await initLangGraph();
   await refreshState();
   await refreshModelStatuses();
+  await refreshApiKeyStatus();
   await refreshPrinterWorkspaceStatus();
   await refreshWindowsWorkspaceStatus();
   await refreshLerobotWorkspaceStatus();

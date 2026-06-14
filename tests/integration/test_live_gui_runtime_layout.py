@@ -50,7 +50,7 @@ def test_live_gui_runtime_shell_contains_operational_panels() -> None:
         assert f'id="{element_id}"' in html
     assert "planning-live-body" in html
     assert "/static/styles.css?v=20260527-live-focus" in html
-    assert "/static/planning.js?v=20260527-live-focus" in html
+    assert "/static/planning.js?v=20260613-clean-stl-render-1" in html
     assert "Runtime Chat" in html
     assert "Safe Stop" in html
     assert "Pause Run" in html
@@ -251,8 +251,9 @@ def test_live_gui_static_script_exposes_runtime_ide_adapters() -> None:
     assert "requires_operator_approval" in script
     assert "live_graph.run_test" in script
     assert "liveNotificationCountsByAgent(session)" in script
-    assert "if (Array.isArray(liveRunEvents)) eventSources.push(...liveRunEvents);" in script
-    assert "if (Array.isArray(liveRecentEvents)) eventSources.push(...liveRecentEvents);" in script
+    assert "currentRunEventSources()" in script
+    assert "isAgentNotificationEvent(event)" in script
+    assert "eventMatchesCurrentRun(event)" in script
     assert "markLiveAgentRead(liveSelectedAgent, liveLastSession);" in script
     assert '<option value="current_agent">Current Agent</option>' in script
     assert '<option value="selected_agent">Selected Agent</option>' in script
@@ -398,6 +399,25 @@ def test_live_gui_static_script_exposes_runtime_ide_adapters() -> None:
     audit_script = Path("tests/ui/live_runtime_ide_browser_audit.py").read_text(encoding="utf-8")
     for symbol in ["LIVE_REFERENCE_IMAGE", "image_visual_metrics", "rgb_distance", "titleContrastOnPanel", "bright_ratio"]:
         assert symbol in audit_script
+
+
+def test_live_gui_specimen_runtime_uses_generic_spc_bridge_labels() -> None:
+    client = TestClient(app)
+    script = client.get("/static/planning.js").text
+
+    assert "Slicer / Artifact Settings" in script
+    assert "Printer Bridge / SPC Readiness" in script
+    assert "selected_printer" in script
+    assert "preprint_gate" in script
+    assert "readiness_levels" in script
+    assert "autoejection" in script
+    assert "autoejection_handoff" in script
+    assert "recommended_consumer_agent" in script
+    assert "requires_guardian_approval" in script
+    assert "motion_started" in script
+    assert "PrusaSlicer Settings" not in script
+    assert "PrusaLink / Bridge" not in script
+    assert "PrusaLink runtime evidence" not in script
 
 
 def test_evolution_lab_supports_live_gui_query_prefill() -> None:

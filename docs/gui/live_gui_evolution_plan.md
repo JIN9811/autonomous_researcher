@@ -96,7 +96,7 @@ Compatibility adapters now exist for package-level consumers without changing th
 - Safe Stop remains visible in live mode.
 - The frontend never executes Python or edits arbitrary Python source.
 - Graph edits must still go through Runtime IDE validate/compile/dry-run/save.
-- Live mode cannot bypass Prusa, LeRobot, Windows bridge, CAE, or Guardian gates.
+- Live mode cannot bypass the active printer bridge, LeRobot, Windows bridge, CAE, or Guardian gates.
 - Self-evolution variants cannot modify live hardware code directly.
 
 ## 2026-05-26 Implementation Update
@@ -612,4 +612,3 @@ The Live GUI was tightened for 1920x1080 operator monitoring after browser revie
 ### Pinned Compare Sync Note
 - The report compare area now shows the current selection next to the latest pinned finding, and `Focus Pinned` returns the report workspace to that pinned context without losing the selected section or trace focus.
 - Browser validation for the focused pin path now covers `operator.report.pinned` and `operator.report.pinned_focused` as separate events.
-

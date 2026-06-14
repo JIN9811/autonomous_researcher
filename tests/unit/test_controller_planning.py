@@ -38,8 +38,8 @@ def test_live_gui_test_mode_flags_survive_design_adaptation() -> None:
     assert spec["test_mode_llm_generated"] is True
     assert spec["layer_height_mm"] == 0.2
     assert spec["nozzle_diameter_mm"] == 0.4
-    assert spec["printer_model"] == "Prusa MK4S"
-    assert spec["storage"] == "usb"
+    assert spec["printer_model"] == "Bambu Lab X2D"
+    assert spec["storage"] == "ftps"
     assert spec["cell_size_mm"] == 10.0
     assert spec["print"]["start_immediately"] is False
     assert spec["print"]["physical_intent"] is False
@@ -188,7 +188,7 @@ def test_live_gui_test_defaults_use_3dp_gui_saved_test_size(monkeypatch: pytest.
     assert defaults["require_flat_compression_faces"] is False
 
 
-def test_live_gui_live_spec_arms_prusalink_upload_start(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_live_gui_live_spec_uses_active_bambu_bridge_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
     controller = load_runtime()
     controller._state.mode = Mode.LIVE
     monkeypatch.setattr(
@@ -229,19 +229,120 @@ def test_live_gui_live_spec_arms_prusalink_upload_start(monkeypatch: pytest.Monk
         },
     )
 
-    assert spec["printer_model"] == "Prusa MK4S"
-    assert spec["printer_profile"] == "prusa_mk4s_pla_0p4_nozzle"
+    assert spec["printer_model"] == "Bambu Lab X2D"
+    assert spec["printer_profile"] == "bambulab_x2d_pla_0p4_nozzle"
     assert spec["slicer_profile_hint"] == "0.2mm_quality"
     assert spec["nozzle_diameter_mm"] == 0.4
     assert spec["layer_height_mm"] == 0.2
-    assert spec["storage"] == "usb"
-    assert spec["print"]["storage"] == "usb"
-    assert spec["print"]["start_immediately"] is True
-    assert spec["print"]["confirm_physical_print"] is True
+    assert spec["storage"] == "ftps"
+    assert spec["print"]["storage"] == "ftps"
+    assert spec["print"]["start_immediately"] is False
+    assert spec["print"]["confirm_physical_print"] is False
     assert spec["ejection"]["enabled"] is False
     assert spec["top_cap_enabled"] is False
     assert spec["bottom_cap_enabled"] is False
     assert spec["top_bottom_cap"] is False
+
+
+def test_planning_specimen_display_preserves_bambu_spc_bridge_evidence() -> None:
+    controller = load_runtime()
+    specimen = {
+        "specimen_id": "specimen-cand-1-01-gyroid",
+        "candidate_id": "cand-1-01",
+        "printer_prepare_status": "HTTP_ARTIFACT_READY_NOT_STARTED",
+        "printer_mode": "live",
+        "printer_path": "http_artifact",
+        "fabrication_report": {
+            "schema": "fabrication_report.v1",
+            "fabrication_intent": {"printer_path": "http_artifact", "physical_intent": True},
+            "digital_thread": {"specimen_id": "specimen-cand-1-01-gyroid", "gcode_path": "/tmp/specimen.3mf"},
+            "printer_runtime": {
+                "provider": "bambulab_x2d",
+                "selected_printer": {
+                    "profile_id": "bambulab_x2d_lab_01",
+                    "label": "Bambu Lab X2D - Lab 01",
+                    "provider": "bambulab_x2d",
+                },
+                "device_screen": {
+                    "connection": {"mqtt": "connected", "transfer": "connected", "video": "available"},
+                    "actions": {"can_upload": True, "can_start_print": True},
+                },
+                "preprint_gate": {
+                    "state": "http_artifact_ready_not_started",
+                    "technical_ready_for_start": True,
+                    "ready_for_live_print": False,
+                    "blockers": ["BAMBU_OPERATOR_CONFIRMATION_REQUIRED"],
+                },
+                "readiness_levels": [
+                    {"level_id": "connection", "status": "ready"},
+                    {"level_id": "operator_approval", "status": "blocked"},
+                ],
+                "autoejection": {"status": "not_configured", "blockers": ["BAMBU_AUTOEJECTION_PROVIDER_REQUIRED"]},
+                "autoejection_handoff": {
+                    "schema": "bambu_autoejection_provider_handoff.v1",
+                    "recommended_consumer_agent": "ManipulationAgent",
+                    "next_tool": "lerobot.manipulation-agent.run",
+                    "motion_started": False,
+                },
+            },
+        },
+        "tool_result": {
+            "selected_printer": {
+                "profile_id": "bambulab_x2d_lab_01",
+                "label": "Bambu Lab X2D - Lab 01",
+                "provider": "bambulab_x2d",
+            },
+            "device_screen": {
+                "connection": {"mqtt": "connected", "transfer": "connected", "video": "available"},
+                "actions": {"can_upload": True, "can_start_print": True},
+            },
+            "preprint_gate": {
+                "state": "http_artifact_ready_not_started",
+                "technical_ready_for_start": True,
+                "ready_for_live_print": False,
+                "blockers": ["BAMBU_OPERATOR_CONFIRMATION_REQUIRED"],
+            },
+            "readiness_levels": [
+                {"level_id": "connection", "status": "ready"},
+                {"level_id": "operator_approval", "status": "blocked"},
+            ],
+            "autoejection": {"status": "not_configured", "blockers": ["BAMBU_AUTOEJECTION_PROVIDER_REQUIRED"]},
+            "autoejection_handoff": {
+                "schema": "bambu_autoejection_provider_handoff.v1",
+                "recommended_consumer_agent": "ManipulationAgent",
+                "next_tool": "lerobot.manipulation-agent.run",
+                "motion_started": False,
+            },
+        },
+    }
+
+    compact = controller._planning_display_specimen_result(specimen)
+
+    assert compact["selected_printer"]["provider"] == "bambulab_x2d"
+    assert compact["device_screen"]["actions"]["can_start_print"] is True
+    assert compact["preprint_gate"]["state"] == "http_artifact_ready_not_started"
+    assert compact["readiness_levels"][1]["level_id"] == "operator_approval"
+    assert compact["autoejection"]["blockers"] == ["BAMBU_AUTOEJECTION_PROVIDER_REQUIRED"]
+    assert compact["autoejection_handoff"]["recommended_consumer_agent"] == "ManipulationAgent"
+    assert compact["autoejection_handoff"]["motion_started"] is False
+    runtime = compact["fabrication_report"]["printer_runtime"]
+    assert runtime["selected_printer"]["profile_id"] == "bambulab_x2d_lab_01"
+    assert runtime["preprint_gate"]["technical_ready_for_start"] is True
+    assert runtime["autoejection_handoff"]["next_tool"] == "lerobot.manipulation-agent.run"
+
+
+def test_live_gui_text_parser_routes_explicit_bambu_choice_to_bambu_bridge() -> None:
+    controller = load_runtime()
+
+    values = controller._extract_design_values_from_text(
+        "PLA 30 x 30 x 30 mm gyroid 시편. 프린터는 Bambu Lab X2D, nozzle 0.4 mm, layer 0.2 mm."
+    )
+
+    assert values["printer_model"] == "Bambu Lab X2D"
+    assert values["printer_profile_id"] == "bambulab_x2d_lab_01"
+    assert values["printer_profile"] == "bambulab_x2d_pla_0p4_nozzle"
+    assert values["storage"] == "ftps"
+    assert values["print"]["storage"] == "ftps"
 
 
 def test_live_gui_live_spec_uses_saved_printer_profile(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -280,7 +381,8 @@ def test_live_gui_live_spec_uses_saved_printer_profile(monkeypatch: pytest.Monke
     )
 
     assert spec["material"] == "PETG"
-    assert spec["printer_profile"] == "petg_quality_0p4"
+    assert spec["printer_model"] == "Bambu Lab X2D"
+    assert spec["printer_profile"] == "bambulab_x2d_pla_0p4_nozzle"
     assert spec["slicer_profile_hint"] == "0.15mm_quality"
     assert spec["nozzle_diameter_mm"] == 0.6
     assert spec["layer_height_mm"] == 0.15
@@ -288,7 +390,7 @@ def test_live_gui_live_spec_uses_saved_printer_profile(monkeypatch: pytest.Monke
     assert spec["print"]["overwrite"] is False
     assert spec["print"]["start_immediately"] is False
     assert spec["print"]["physical_intent"] is False
-    assert spec["ejection"]["enabled"] is True
+    assert spec["ejection"]["enabled"] is False
 
 
 def test_live_gui_test_spec_uses_saved_auto_ejection_toggle(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -328,10 +430,10 @@ def test_live_gui_test_spec_uses_saved_auto_ejection_toggle(monkeypatch: pytest.
     )
 
     assert spec["test_mode_llm_generated"] is True
-    assert spec["ejection"]["enabled"] is True
+    assert spec["ejection"]["enabled"] is False
 
 
-def test_specimen_runtime_message_focuses_on_slicer_and_prusalink() -> None:
+def test_specimen_runtime_message_focuses_on_slicer_and_printer_bridge() -> None:
     controller = load_runtime()
     content = controller._format_specimen_runtime_message(
         {"specimen_id": "sp-1", "printer_profile": "prusa_mk4s_pla_0p4_nozzle", "material": "PLA"},
@@ -359,10 +461,11 @@ def test_specimen_runtime_message_focuses_on_slicer_and_prusalink() -> None:
         },
     )
 
-    assert "PrusaSlicer 적용 설정값" in content
+    assert "Slicer / artifact 적용 설정값" in content
     assert "layer_height_mm: 0.2" in content
     assert "expected_mass_g: 6.026" in content
-    assert "upload_endpoint: /api/v1/files/usb/sp-1.gcode" in content
+    assert "transfer_endpoint: /api/v1/files/usb/sp-1.gcode" in content
+    assert "Printer Bridge 결과" in content
     assert "[ok] SLICE" in content
     assert "STL 형상 확인은 Design Agent artifact" in content
 
@@ -778,6 +881,34 @@ def test_live_gui_planning_route_text_uses_active_graph_config(tmp_path: Path) -
     assert controller._planning_tail_start_stage() == Stage.ANALYSIS
 
 
+def test_live_gui_printer_defaults_follow_active_bambu_fleet_profile() -> None:
+    controller = load_runtime()
+
+    defaults = controller._validated_printer_defaults()
+
+    assert defaults["printer_model"] == "Bambu Lab X2D"
+    assert defaults["printer_profile"] == "bambulab_x2d_pla_0p4_nozzle"
+    assert defaults["storage"] == "ftps"
+    assert defaults["start_immediately_live"] is False
+    assert defaults["allow_ejection"] is False
+
+
+@pytest.mark.asyncio
+async def test_live_gui_orchestrator_prompt_describes_selected_bambu_bridge() -> None:
+    controller = load_runtime()
+
+    prompt = await controller._build_live_orchestrator_prompt(
+        operator_message="실험 수행",
+        goal="TPMS 압축 시편",
+        constraints={},
+    )
+
+    assert "Bambu Lab X2D" in prompt
+    assert "selected printer bridge" in prompt
+    assert "SPC Readiness" in prompt
+    assert "PrusaLink upload/start" not in prompt
+
+
 @pytest.mark.asyncio
 async def test_live_gui_test_prompt_uses_active_graph_config_route(tmp_path: Path) -> None:
     controller = load_runtime()
@@ -931,7 +1062,7 @@ async def test_live_gui_experiment_trigger_requests_missing_design_values(monkey
     assert "추가로 필요한 값" in last_message["content"]
     missing_fields = {item["key"] for item in last_message["missing_design_inputs"]}
     assert {"objective", "specimen_size_mm", "geometry_or_domain"} <= missing_fields
-    assert "Prusa MK4S" in last_message["content"]
+    assert "Bambu Lab X2D" in last_message["content"]
 
 
 @pytest.mark.asyncio

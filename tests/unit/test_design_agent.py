@@ -212,6 +212,11 @@ async def test_design_agent_returns_structured_design_report_and_handoff_packet(
     assert expected_sections.issubset(screen_report)
     assert screen_report["candidate_ranking"]["rows"][0]["candidate_id"] == spec["candidate_id"]
     assert screen_report["parameter_sweep"]["heatmap_cells"]
+    heatmap_coordinates = [
+        (item["x_relative_density"], item["y_wall_thickness_mm"])
+        for item in screen_report["parameter_sweep"]["heatmap_cells"]
+    ]
+    assert len(heatmap_coordinates) == len(set(heatmap_coordinates))
     assert screen_report["expected_performance"]["scatter_points"]
     assert screen_report["expected_performance"]["radar"]
     assert screen_report["handoff_to_specimen"]["packet_status"] == "ready"
@@ -224,6 +229,42 @@ async def test_design_agent_returns_structured_design_report_and_handoff_packet(
     }
     assert data["metrics"]["selected_score"] == spec["expected_objective_proxy_score"]
     assert data["decisions"] == report["decision_register"]
+
+
+def test_design_parameter_range_uses_full_numeric_design_space() -> None:
+    row = DesignAgent._parameter_range("orientation_deg", {"orientation_deg": 90})
+
+    assert row["min"] == 0
+    assert row["max"] == 90
+    assert row["values"] == [0, 15, 30, 45, 60, 90]
+
+
+def test_design_heatmap_cells_group_duplicate_coordinates_with_selected_representative() -> None:
+    agent = DesignAgent()
+    cells = agent._group_heatmap_cells(
+        [
+            {
+                "candidate_id": "cand-2-05",
+                "x_relative_density": 0.34,
+                "y_wall_thickness_mm": 1.6,
+                "value": 0.8633,
+                "status": "valid",
+            },
+            {
+                "candidate_id": "cand-2-12",
+                "x_relative_density": 0.34,
+                "y_wall_thickness_mm": 1.6,
+                "value": 0.8884,
+                "status": "selected",
+            },
+        ]
+    )
+
+    assert len(cells) == 1
+    assert cells[0]["candidate_id"] == "cand-2-12"
+    assert cells[0]["value"] == 0.8884
+    assert cells[0]["member_count"] == 2
+    assert [item["candidate_id"] for item in cells[0]["members"]] == ["cand-2-12", "cand-2-05"]
 
 
 class _ExperimentRecord:

@@ -241,7 +241,7 @@ def _try_write_stl_iso_capture_png(
 ) -> bool:
     """Render an actual STL mesh into a deterministic isometric PNG preview."""
     try:
-        from PIL import Image, ImageDraw, ImageFont
+        from PIL import Image, ImageDraw
         import numpy as np
         import trimesh
     except Exception:
@@ -257,7 +257,9 @@ def _try_write_stl_iso_capture_png(
     if vertices.size == 0 or faces.size == 0:
         return False
 
-    max_faces = 18000
+    # Keep the surface solid in small GUI cards.  The old 18k face stride made
+    # dense TPMS meshes look like sparse wire/point clouds instead of surfaces.
+    max_faces = 240000
     if len(faces) > max_faces:
         stride = max(1, math.ceil(len(faces) / max_faces))
         faces = faces[::stride]
@@ -273,13 +275,6 @@ def _try_write_stl_iso_capture_png(
         g = int(17 + y * 0.013)
         b = int(31 + y * 0.021)
         draw.line([(0, y), (render_size[0], y)], fill=(r, g, min(b, 66), 255))
-    for offset in range(-render_size[0], render_size[0], 48):
-        draw.line(
-            [(offset, render_size[1] - 82), (offset + render_size[0], 164)],
-            fill=(56, 189, 248, 22),
-            width=1,
-        )
-
     centered = vertices - ((vertices.min(axis=0) + vertices.max(axis=0)) / 2.0)
     iso_x = (centered[:, 0] - centered[:, 1]) * 0.8660254
     iso_y = (centered[:, 0] + centered[:, 1]) * 0.50 - centered[:, 2] * 0.92
@@ -326,10 +321,8 @@ def _try_write_stl_iso_capture_png(
         "random_voronoi": (34, 211, 238),
     }
     base = palette.get(str(geometry_type), (96, 165, 250))
-    face_count = len(order)
-    edge_step = max(1, face_count // 3500)
     screen_points = np.column_stack([px, py])
-    for draw_index, face_index in enumerate(order):
+    for face_index in order:
         face = faces[face_index]
         pts = [(float(screen_points[idx, 0]), float(screen_points[idx, 1])) for idx in face]
         s = float(shade[face_index])
@@ -337,34 +330,9 @@ def _try_write_stl_iso_capture_png(
             int(base[0] * s + 12 * (1.0 - s)),
             int(base[1] * s + 22 * (1.0 - s)),
             int(base[2] * s + 38 * (1.0 - s)),
-            226,
+            255,
         )
         draw.polygon(pts, fill=fill)
-        if draw_index % edge_step == 0:
-            draw.line(pts + [pts[0]], fill=(210, 245, 255, 30), width=1)
-
-    try:
-        font_label = ImageFont.truetype("consola.ttf", 16 * scale_factor)
-        font_small = ImageFont.truetype("consola.ttf", 12 * scale_factor)
-    except Exception:
-        font_label = ImageFont.load_default()
-        font_small = ImageFont.load_default()
-    draw.rounded_rectangle(
-        [22 * scale_factor, 22 * scale_factor, 134 * scale_factor, 54 * scale_factor],
-        radius=8 * scale_factor,
-        fill=(5, 9, 20, 154),
-        outline=(125, 211, 252, 92),
-        width=1 * scale_factor,
-    )
-    draw.text((34 * scale_factor, 31 * scale_factor), "ISO VIEW", fill=(220, 245, 255, 245), font=font_label)
-    geom_label = str(geometry_type or "specimen").upper()
-    draw.text((render_size[0] - 246 * scale_factor, 34 * scale_factor), geom_label[:22], fill=(186, 230, 253, 218), font=font_small)
-    draw.rounded_rectangle(
-        [18 * scale_factor, 18 * scale_factor, render_size[0] - 18 * scale_factor, render_size[1] - 18 * scale_factor],
-        radius=18 * scale_factor,
-        outline=(56, 189, 248, 72),
-        width=1 * scale_factor,
-    )
 
     try:
         resample = Image.Resampling.LANCZOS
@@ -398,7 +366,7 @@ def _write_viewer_capture_png(
     ):
         return True
     try:
-        from PIL import Image, ImageDraw, ImageFont
+        from PIL import Image, ImageDraw
     except Exception:
         return False
 
@@ -411,11 +379,6 @@ def _write_viewer_capture_png(
         g = int(17 + y * 0.026)
         b = int(31 + y * 0.042)
         draw.line([(0, y), (width, y)], fill=(r, g, min(b, 64), 255))
-
-    for offset in range(-width, width, 34):
-        draw.line([(offset, height - 58), (offset + width, 110)], fill=(56, 189, 248, 34), width=1)
-    for y in range(120, height - 30, 28):
-        draw.line([(42, y), (width - 42, y + 24)], fill=(148, 163, 184, 30), width=1)
 
     cx, cy = width * 0.53, height * 0.68
     density = max(0.08, min(0.85, float(relative_density or 0.28)))
@@ -488,18 +451,6 @@ def _write_viewer_capture_png(
         ("a", "e"), ("b", "f"), ("c", "g"), ("d", "h"),
     ):
         draw.line([corners[start], corners[end]], fill=(125, 211, 252, 210), width=2)
-    draw.rounded_rectangle([18, 18, width - 18, height - 18], radius=20, outline=(56, 189, 248, 82), width=2)
-    draw.rounded_rectangle([24, height - 74, width - 24, height - 24], radius=10, fill=(5, 9, 20, 172), outline=(125, 211, 252, 70), width=1)
-
-    try:
-        font_label = ImageFont.truetype("consola.ttf", 18)
-        font_small = ImageFont.truetype("consola.ttf", 14)
-    except Exception:
-        font_label = ImageFont.load_default()
-        font_small = ImageFont.load_default()
-    draw.text((38, height - 62), f"{specimen_id} / {geometry_type}".upper(), fill=(226, 232, 240, 255), font=font_label)
-    draw.text((38, height - 38), f"size={size} cell={cell:.2f} wall={wall:.2f} rho={density:.2f} hash={geometry_hash[:12]}", fill=(159, 176, 201, 255), font=font_small)
-    draw.text((width - 188, 34), "3D VIEWER CAPTURE", fill=(186, 230, 253, 230), font=font_small)
     image.save(path, format="PNG", optimize=True)
     return True
 

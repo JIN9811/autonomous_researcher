@@ -36,6 +36,7 @@
 - [ ] 서버 실행됨(`atr up`)
 - [ ] `/live` 접속
 - [ ] 테스트면 `mode=test`, 실기라면 `mode=live` 선택
+- [ ] 장비 상태가 필요하면 Main GUI의 `Device Workspaces`에서 `/printer`, `/equipment/windows`, `/lerobot`, `/bo`, `/cae` 전용 GUI를 먼저 열어 bridge 상태를 확인
 - [ ] Run 시작 버튼 → run_id 발급
 - [ ] 이벤트 스트림에 다음이 순차로 뜨는지 확인
   - `run.started`
@@ -43,6 +44,12 @@
   - `node.completed`
   - `edge.traversed` 또는 `stage_transition`
 - [ ] 마지막에 `run_complete` 또는 `run.failed`
+
+### 1.1 Device Workspace와 Live GUI의 관계
+
+- Main GUI의 `Device Workspaces`는 장비별 설정/검증 surface다. 3DP Printer Bridge는 Bambu Lab X2D를 기본 profile로 사용하고, Prusa MK4S는 명시 선택된 경우에만 사용된다.
+- Live GUI는 별도 fake 상태를 만들지 않는다. Specimen Making Agent report는 3DP GUI/API가 반환한 `selected_printer`, `device_screen`, `preprint_gate`, `readiness_levels`, `operator_actions`, `autoejection`, `autoejection_handoff`를 그대로 요약한다.
+- Bambu autoejection은 현재 physical motion executor가 아니라 provider handoff gate다. `autoejection_handoff`는 `ManipulationAgent`와 `lerobot.manipulation-agent.run`을 다음 실행 주체로 지정하고, `motion_started=false`와 operator/Guardian approval requirement를 표시해야 한다.
 
 ---
 
@@ -104,7 +111,7 @@ dispatch -> idle -> design -> specimen -> vision -> manipulation -> equipment ->
 | 메인 대시보드 | `/` | `index.html` | 전체 런타임 상태, 모델/런 제어, 장비 카드, Timeline, 이벤트 | `/api/state`, `/api/runtime/state`, `/api/runtime/start`, `/api/runtime/pause`, `/api/runtime/stop`, `/api/runtime/models*`, `/api/runtime/events` |
 | 라이브 오케스트레이션 | `/live` | `planning.html` | 채팅 기반 실험 지시, planning handoff, stage 메시지/아티팩트 표시 | `/api/planning/bootstrap`, `/api/planning/message`, `/api/planning/session`, `/api/planning/artifacts/{...}` |
 | 라이브(레거시) | `/planning` | `planning.html` | `/live` 별칭 | 동일 |
-| 3DP/Printer GUI | `/printer` | `printer.html` | 프린터/PrusaLink 프로파일 및 오토이젝션, 테스트 옵션, 상태 확인 | `/api/printer/profile`, `/api/printer/status`, `/api/printer/connection`, `/api/printer/autoejection-test` |
+| 3DP/Printer GUI | `/printer` | `printer.html` | Bambu Lab X2D 기본 device bridge, 명시적 printer fleet 선택, connection, live video probe/proxy, Bambu Studio slicing, sliced artifact route, pre-start checklist, start gate, guarded MQTT start publish, SPC readiness, autoejection gate 확인 | `/api/printer/fleet`, `/api/printer/profile`, `/api/printer/status`, `/api/printer/video-status`, `/api/printer/video-stream.mjpeg`, `/api/printer/connection`, `/api/printer/upload-path-probe`, `/api/printer/bambu-slice-artifact`, `/api/printer/http-artifact-route`, `/api/printer/bambu-prestart-check`, `/api/printer/start-command-draft`, `/api/printer/start-gate`, `/api/printer/start-publish`, `/api/printer/spc-readiness`, `/api/printer/autoejection-status`, `/api/printer/autoejection-config`, `/api/printer/autoejection-test` |
 | BO Workspace | `/bo` | `bo.html` | BO/MBO/LLM preference 전략 설정, reasoning audit, candidate ranking, next-design handoff | `/api/bo/config`, `/api/bo/benchmark`, `/api/bo/run` |
 | CAE Workspace | `/cae` | `cae.html` | 정적 CAE 분석 실행, 파라미터 저장, 결과 라인업 | `/api/cae/config`, `/api/cae/run` |
 | Runtime IDE | `/ide` | `runtime_ide.html` | 그래프/에지/모듈 편집, validate/dry-run/실행, 버전관리 | `/api/graphs*`, `/api/modules*`, `/api/handlers` |
@@ -130,6 +137,18 @@ dispatch -> idle -> design -> specimen -> vision -> manipulation -> equipment ->
 - **핵심 툴**: `geometry.generate_metamaterial_stl`, `geometry.check_mesh_quality`, `geometry.check_manufacturability`, `artifact.create_specimen_handoff`, `experiment.evaluate`, `printer.prepare`
 - **주요 결과**: `specimen_result`, `protocol_note`, `state.current_experiment_spec`의 제조 반영값( layer/nozzle/profile/옵션 )
 - **실행 특성**: STL 뷰어 렌더링은 보조적; 제조 상태와 아티팩트 전달이 핵심
+- **Printer fleet 연계**: 3DP GUI의 `/api/printer/fleet`는 active printer profile을 조회/저장한다. 기본값은 `bambulab_x2d_lab_01`이고, Prusa MK4S는 fallback이 아니라 operator가 명시 선택한 profile로만 실행된다. 선택값은 local-only `memory/printer_fleet.json`에 저장된다.
+- **Fleet UI 상태 유지**: `/api/printer/fleet`가 반환한 `available_printers` 목록은 `/api/printer/status` 또는 `/api/printer/spc-readiness` 응답을 렌더링한 뒤에도 유지되어야 한다. 후속 응답이 selected printer만 포함하더라도 GUI가 Bambu/Prusa 선택 목록을 비어 있는 것으로 표시하면 안 된다.
+- **Bambu slicer resolver**: Bambu profile의 slicer payload는 `BAMBU_STUDIO_EXECUTABLE` env var, configured wrapper path, `PATH`의 `bambu-studio` 순서로 executable을 해석한다. `/api/printer/profile`과 `/api/printer/status`는 `resolved_executable_path`, `available`, `source`, `output_dir`를 반환한다. Profile route는 Bambu Studio 설치 감지만 수행하며 upload/start readiness를 만들지 않는다.
+- **Bambu slicer runner**: `/api/printer/bambu-slice-artifact`는 active profile이 Bambu일 때만 동작한다. 입력 source는 실제 로컬 `.stl` 또는 `.3mf`여야 하며, backend가 Bambu Studio CLI를 `--slice 0 --arrange 1 --ensure-on-bed --outputdir <artifact-dir>` 형태로 실행한다. 결과는 `.gcode`, `.3mf`, `.gcode.3mf` 중 실제 생성된 파일 경로, size, sha256, command preview, stdout/stderr tail을 반환한다. 이 route는 slicing artifact 생성만 수행하며 upload, MQTT publish, print start를 수행하지 않는다.
+- **Bambu pre-start checklist**: `/api/printer/bambu-prestart-check`는 사용자용 출력 직전 점검 route다. 실제 backend path를 `slice_artifact -> http_artifact_route -> start_gate -> spc_readiness -> autoejection_handoff` 순서로 실행하고 stage별 결과를 반환한다. 이 route도 `will_publish=false`, `published=false`를 유지하며 MQTT `project_file` command를 보내지 않는다. `ready_to_publish=true`는 기술적으로 publish 가능한 조건이 검증됐다는 뜻이지, 출력이 시작됐다는 뜻이 아니다.
+- **Bambu bridge 연계**: 3DP GUI의 `/api/printer/spc-readiness`는 Specimen Making handoff용 집계 상태를 제공한다. 이 API는 현재 active printer profile이 Bambu일 때 Bambu live `prepare`, start gate, device screen, autoejection gate를 합쳐 `ready_for_live_print`, `autonomous_cycle_ready`, section별 blocker를 반환하지만 MQTT publish/start는 수행하지 않는다. SPC 응답에 포함된 `device_screen`은 frontend의 상단 Bambu Device Screen도 같이 갱신해야 하며, 이전 virtual/test evidence를 그대로 남기면 안 된다. Bambu autoejection은 `/api/printer/autoejection-config`가 저장한 local `memory/bambu_autoejection.json` overlay를 통해서만 configured로 바뀐다.
+- **Bambu Device 화면 계약**: `/api/printer/status?mode=live`의 `device_screen`은 raw MQTT JSON을 그대로 노출하지 않고 사용자 화면용 `progress_panel`, `camera_panel`, `control_panel`, `material_panel`, `evidence_cards`를 생성한다. 이 값들은 `normalize_bambu_report()`가 받은 실제 MQTT report, FTPS/upload probe, start-command draft, connection gate에서 파생되며 GUI가 임의 progress/camera/material 상태를 만들지 않는다. 카메라는 MQTT와 별도 plane이다. `/api/printer/video-status`는 저장된 Bambu host/access code로 LAN video port를 probe하고, `ffmpeg`가 있으면 `/api/printer/video-stream.mjpeg` 브라우저용 MJPEG proxy를 제공한다. access code 원문은 API 응답/GUI log에 노출하지 않는다.
+- **SPC 화면 계약**: `/api/printer/spc-readiness`는 raw gate payload만 반환하지 않는다. 사용자가 바로 판단할 수 있도록 `operator_summary`, `readiness_levels`, `next_actions`, `evidence`, `sections`를 함께 반환한다. `readiness_levels`는 connection, transfer path, approval, publish command, autoejection을 분리해 보여주며, `next_actions`는 실제 blocker/operator action/autoejection blocker에서 파생된다. GUI가 임의 상태를 만들지 않는다.
+- **Bambu Connection Confirmation 계약**: 3DP GUI의 `Connection Confirmation` board는 저장된 Bambu connection과 최신 status/SPC evidence를 합쳐 LAN-only 확인, Developer Mode 확인, sliced-artifact transfer, HTTP artifact route 상태를 보여준다. 표시 코드는 `BAMBU_LAN_MODE_NOT_CONFIRMED`, `BAMBU_DEVELOPER_MODE_NOT_CONFIRMED`, `BAMBU_FTPS_WRITE_FAILED`, `BAMBU_STORAGE_TRANSFER_PATH_NOT_VERIFIED`, `BAMBU_HTTP_ARTIFACT_ROUTE_ACTIVE`에서 파생되며, checkbox/form 값만으로 upload-ready를 만들면 안 된다.
+- **Bambu transfer 계약**: FTPS login/list 성공은 upload-ready가 아니다. live `prepare`는 root marker write/delete 실패 후 `cache`, `sdcard`, `Metadata`, `data/Metadata` 후보를 CWD+basename 방식으로 probe한다. 후보가 모두 실패하면 transfer는 `read_only`로 남고 `BAMBU_FTPS_WRITE_FAILED` / `BAMBU_STORAGE_TRANSFER_PATH_NOT_VERIFIED`가 blocker가 된다. `/api/printer/http-artifact-route`가 생성한 printer-reachable `http://`/`https://` URL 중 `server_fetch_probe.ok=true`와 sha256 match가 확인된 URL만 HTTP artifact transfer로 인정한다. 이때 ATR 서버는 LAN에서 접근 가능한 인터페이스(`server.host=0.0.0.0` 또는 명시 LAN IP)에 떠 있어야 하며, Bambu에 전달되는 artifact URL은 `localhost`가 아니라 ATR 서버 LAN IP를 사용해야 한다. 일반 remote path(`cache/*.gcode.3mf`)는 HTTP route가 아니며 FTPS 검증을 우회할 수 없다.
+- **Bambu start 연계**: `/api/printer/start-gate`는 검증 전용이고 publish하지 않는다. `/api/printer/start-publish`만 실제 MQTT `project_file` command를 보낼 수 있으며, draft validity, live preprint gate, device `can_start_print`, operator confirmation, Guardian approval, `dry_run=false`가 모두 만족될 때만 `BambuMqttReportClient.publish_project_file_command()`를 호출한다. HTTP artifact route가 검증되면 `device_screen.actions.can_start_print=true`와 `technical_ready_for_start=true`가 될 수 있지만, 이는 기술 gate가 열린 상태일 뿐이며 dry-run/operator/Guardian blocker가 남아 있으면 publish는 계속 금지된다. 3DP GUI의 operator/Guardian/dry-run controls는 backend 요청값으로 그대로 전달되며 frontend가 approval 값을 하드코딩하지 않는다.
+- **Live GUI Specimen report 계약**: `SpecimenMakingAgent`는 `printer.prepare` 결과의 Bambu/SPC evidence를 `fabrication_report.printer_runtime`과 `specimen_agent_report.spc_readiness`에 보존한다. `MainController`의 Live GUI compact 단계도 `selected_printer`, `device_screen`, `preprint_gate`, `readiness_levels`, `operator_actions`, `autoejection`을 버리면 안 된다. Frontend는 이 값을 `Printer Bridge / SPC Readiness`로 표시하고, active profile이 Prusa일 때만 PrusaLink-specific transport/storage 행을 보조 정보로 보여준다.
 
 ### Vision Agent (`modules/vision`, `agent.vision_agent`)
 - **목적**: 촬영/상태 관측 및 후단 조작용 관측값 생성
@@ -243,4 +262,3 @@ dispatch -> idle -> design -> specimen -> vision -> manipulation -> equipment ->
 ## 11) 협업자에게 설명할 때 한 문장 요약
 
 이 프로젝트는 `graphs/configs/atr_closed_loop.yaml`에 정의된 stage graph를 FastAPI runtime이 실행하고, 각 stage는 `graphs/modules/*`의 agent module을 통해 LLM/tool/device bridge를 호출하며, Live GUI와 Runtime IDE가 같은 runtime state/event/artifact API를 공유하는 구조입니다.
-

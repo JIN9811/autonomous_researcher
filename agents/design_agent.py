@@ -950,9 +950,15 @@ class DesignAgent(BaseAgent):
                 candidate["capture_image_path"] = str(capture_path)
                 candidate["viewer_capture_url"] = self._run_artifact_url(state.run_id, capture_path)
                 candidate["capture_image_url"] = candidate["viewer_capture_url"]
+                candidate["preview_render_kind"] = "viewer_capture_png"
+                candidate["preview_render_engine"] = "geometry.generate_metamaterial_stl"
+                candidate["preview_render_source"] = "generated_stl"
             if preview_path:
                 candidate["preview_image_path"] = str(preview_path)
                 candidate["preview_image_url"] = self._run_artifact_url(state.run_id, preview_path)
+                candidate.setdefault("preview_render_kind", "svg_preview")
+                candidate.setdefault("preview_render_engine", "geometry.generate_metamaterial_stl")
+                candidate.setdefault("preview_render_source", "generated_geometry_preview")
             if isinstance(result.get("geometry_report"), dict):
                 candidate["preview_geometry_hash"] = result["geometry_report"].get("geometry_hash")
 
@@ -973,6 +979,9 @@ class DesignAgent(BaseAgent):
             "thumbnail_url",
             "image_url",
             "preview_url",
+            "preview_render_kind",
+            "preview_render_engine",
+            "preview_render_source",
         )
         return {key: candidate.get(key) for key in keys if candidate.get(key) not in (None, "", [])}
 
@@ -1009,9 +1018,10 @@ class DesignAgent(BaseAgent):
         values = raw_range if isinstance(raw_range, list) else []
         lower: Any = None
         upper: Any = None
-        if len(values) >= 2 and all(isinstance(item, (int, float)) for item in values[:2]):
-            lower = values[0]
-            upper = values[1]
+        numeric_values = [item for item in values if isinstance(item, (int, float))]
+        if numeric_values and len(numeric_values) == len(values):
+            lower = min(numeric_values)
+            upper = max(numeric_values)
         return {
             "parameter": name,
             "selected": selected.get(name),
@@ -1019,6 +1029,46 @@ class DesignAgent(BaseAgent):
             "max": upper,
             "values": values[:8],
         }
+
+    @classmethod
+    def _group_heatmap_cells(cls, cells: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        groups: dict[tuple[float, float], list[dict[str, Any]]] = {}
+        order: list[tuple[float, float]] = []
+        for index, cell in enumerate(cells):
+            x = cls._numeric(cell.get("x_relative_density"), float("nan"))
+            y = cls._numeric(cell.get("y_wall_thickness_mm"), float("nan"))
+            value = cls._numeric(cell.get("value"), float("nan"))
+            if x != x or y != y or value != value:
+                continue
+            key = (round(x, 4), round(y, 4))
+            if key not in groups:
+                groups[key] = []
+                order.append(key)
+            groups[key].append({**cell, "_source_index": index})
+
+        grouped: list[dict[str, Any]] = []
+        for key in order:
+            members = sorted(
+                groups[key],
+                key=lambda item: (
+                    0 if "selected" in str(item.get("status") or "").lower() else 1,
+                    -cls._numeric(item.get("value")),
+                    cls._numeric(item.get("_source_index")),
+                ),
+            )
+            representative = dict(members[0])
+            representative.pop("_source_index", None)
+            representative["member_count"] = len(members)
+            representative["members"] = [
+                {
+                    "candidate_id": item.get("candidate_id"),
+                    "value": item.get("value"),
+                    "status": item.get("status"),
+                }
+                for item in members
+            ]
+            grouped.append(representative)
+        return grouped
 
     def _design_agent_report_snapshot(
         self,
@@ -1086,6 +1136,7 @@ class DesignAgent(BaseAgent):
                     "status": status,
                 }
             )
+        heatmap_cells = self._group_heatmap_cells(heatmap_cells)
 
         radar = [
             {"axis": "objective_proxy", "value": round(selected_score, 4), "max": 1.0},

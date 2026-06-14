@@ -59,7 +59,7 @@ atr down
 동작:
 
 - 가상 브릿지: 슬라이싱 + 가상 검증 경로
-- 설치 프린터: PrusaLink 연결 체크 + live gate 검증
+- 설치 프린터: 현재 active printer profile(Bambu X2D 기본, Prusa는 명시 선택)의 연결 체크 + live gate 검증
 - 실제 출력: live gate 통과 시 업로드/시작 경로
 
 실제 출력이 gate에서 차단되면 시작 전 단계에서 중단되어 이유가 표시되어야 합니다.

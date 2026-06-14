@@ -42,7 +42,7 @@
 선택/장비별 필요:
 
 - vLLM/Nemoclaw: NVIDIA GPU, Docker/k3s, NemoClaw container
-- 3DP: Prusa MK4S, PrusaLink, PrusaSlicer Docker wrapper
+- 3DP: Bambu Lab X2D가 기본 printer profile이며, Prusa MK4S는 명시 선택 profile로 유지된다. Bambu live camera proxy에는 `ffmpeg`가 필요하다.
 - Robot: `/home/jin/lerobot`, conda env `lerobot`, ROBOTIS/LeRobot 장비
 - Windows bridge: Windows PC, Python, PyAutoGUI bridge server
 - CAE live solver: CalculiX/Gmsh 또는 현재 bridge가 지원하는 solver 환경
@@ -114,7 +114,7 @@ atr down
 | Live GUI `/live` | 오케스트레이터와 대화하며 실험 실행 | 먼저 test mode로 목표 입력 |
 | Runtime IDE `/ide` | graph 구조를 보고 수정/검증 | Main System graph dry-run 확인 |
 | Module Management `/module-management` | agent module 검증/버전 관리 | 각 module validate/dry-run 확인 |
-| 3DP `/printer` | PrusaLink/슬라이싱/오토이젝션 설정 | connection/profile/test options 저장 |
+| 3DP `/printer` | Bambu Lab X2D 기본 device bridge, printer fleet, camera/status, slicing/start gate, autoejection 설정 | connection/profile/test options 저장 |
 | LeRobot `/lerobot` | 포트, 카메라, teleop, record, train, rollout | follower/leader/camera 포트 저장 |
 | BO `/bo` | acquisition/strategy/parameter space 설정 | settings 저장 후 benchmark 실행 |
 | CAE `/cae` | STL 해석 조건 설정 | bottom fixed/top cyclic 기본값 확인 |
@@ -144,27 +144,40 @@ atr down
 
 ## 2. 초보자용: 장비별 설정
 
-### 2.1 3DP / Prusa MK4S
+### 2.1 3DP / Bambu Lab X2D 기본 + Prusa MK4S 명시 선택
 
 설정 위치:
 
 - GUI: `/printer`
-- 연결 정보: `memory/prusa_connection.json`
+- printer fleet 선택: `memory/printer_fleet.json`
+- Bambu 연결 정보: `memory/bambu_connection.json`
+- Prusa 연결 정보: `memory/prusa_connection.json`
 - 출력 profile: `memory/prusa_print_profile.json`
 
 처음 해야 할 일:
 
-1. Prusa MK4S가 같은 네트워크에서 접근 가능한지 확인한다.
-2. `/printer`에서 host/IP, username/password 또는 API key를 저장한다.
-3. profile에서 material, nozzle, layer height, bed temperature, first layer speed를 확인한다.
-4. test specimen size와 test unit cell size를 저장한다.
-5. 실제 출력 전에는 upload/start gate와 autoejection 옵션을 확인한다.
+1. `/printer`의 Printer Fleet에서 기본 `bambulab_x2d_lab_01` 또는 명시적 `prusa_mk4s_lab_01`을 선택한다.
+2. Bambu를 쓸 때는 host/IP, SN, printer name, LAN access code를 저장한다. access code 원문은 GUI/API 응답에 표시되지 않는다.
+3. Bambu `Live Status`로 MQTT/FTPS/storage 상태를 확인하고, `Video Status`로 RTSPS/JPEG video port와 `ffmpeg` proxy 준비 상태를 확인한다.
+4. profile에서 material, nozzle, layer height, bed temperature, first layer speed를 확인한다.
+5. test specimen size와 test unit cell size를 저장한다.
+6. 실제 출력 전에는 upload/start gate, Guardian/operator approval, autoejection 옵션을 확인한다.
+7. `Start Gate Check`, `SPC Readiness`, `Publish Start`는 같은 start-gate checkbox를 사용한다. 기본값은 `dry-run / no publish` ON, operator/Guardian approval OFF이며, GUI는 이 값을 임의로 true로 바꾸지 않는다.
+8. `SPC Readiness`의 level cards는 connection, transfer path, approval, publish command, autoejection을 분리해서 보여준다. `technical_ready_for_start=true`여도 approval/dry-run이 남아 있으면 실제 publish는 되지 않는다.
+9. Bambu X2D에서 `Upload Path Probe`는 FTPS가 실제로 write/delete 가능한지 확인한다. login/list만 성공해도 upload-ready가 아니다.
+10. FTPS가 `read_only` 또는 `BAMBU_FTPS_WRITE_FAILED`이면 sliced `.gcode.3mf` 파일을 `Prepare HTTP Artifact`로 노출한다. 이때 backend가 artifact URL을 실제 GET하고 sha256을 비교해 `server_fetch_probe.ok=true`를 반환해야 Upload gate가 ready로 바뀐다. 이 검증은 프린터가 접근 가능한 LAN URL 기준이다. 서버는 기본적으로 `0.0.0.0:7860`에 바인딩되어야 하며, artifact URL은 `http://<ATR서버-LAN-IP>:7860/printer-artifacts/...` 형태여야 한다. `127.0.0.1` 바인딩 또는 localhost URL은 브라우저에서는 동작해도 Bambu 프린터 transfer evidence로 인정하지 않는다.
+11. `cache/specimen.gcode.3mf` 같은 일반 remote path는 HTTP artifact route가 아니다. FTPS write 검증을 우회할 수 있는 것은 `/api/printer/http-artifact-route`가 만든 `http://` 또는 `https://` URL 중 fetch probe가 통과한 URL뿐이다.
+12. `HTTP_ARTIFACT_READY_NOT_STARTED`는 artifact URL과 guarded start-command draft가 준비됐다는 뜻이다. 실제 출력 시작은 아니며, `Publish Start`는 dry-run 해제, operator 확인, Guardian 승인, start gate 통과가 모두 필요하다.
+13. Bambu autoejection의 `Fill Manipulation Handoff Defaults`는 provider/routine/vision profile 입력값만 채운다. 실제 readiness 저장은 검증 후 `Save Autoejection Gate`를 눌렀을 때만 `memory/bambu_autoejection.json`에 반영된다.
 
 주의:
 
 - password/API key는 Git에 커밋하지 않는다.
+- Bambu LAN access code도 Git에 커밋하지 않는다.
+- Bambu live camera browser view는 `ffmpeg`가 설치되어야 `/api/printer/video-stream.mjpeg`로 표시된다.
 - `test` 기본 흐름은 dry/virtual이어야 한다.
 - `테스트 모드, 실제 출력`은 명시적으로 실제 출력 경로를 요청한 경우에만 사용한다.
+- `Publish Start`를 눌러도 backend gate가 차단하면 MQTT start command는 전송되지 않는다.
 
 ### 2.2 LeRobot / ROBOTIS
 

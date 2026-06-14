@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
 File purpose:
-- Dedicated Prusa MK4S / 3DP printer workspace GUI.
+- Multi-printer 3DP workspace GUI with Bambu Lab X2D as the default device bridge.
 
 Key classes/functions:
 - Consumed by web/static/printer.js
 
 Inputs/outputs:
-- Input: /api/printer/profile and /api/printer/status
-- Output: saved print defaults used by Live GUI and test-mode handoffs
+- Input: /api/printer/profile, /api/printer/status, /api/printer/connection
+- Output: saved print defaults, selected-printer connection memory, bridge status display
 
 Dependencies:
 - /static/styles.css
@@ -27,29 +27,182 @@ Modification guide:
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
   <body>
-    <main class="page equipment-setup-page printer-page">
-      <section class="hero panel">
+    <main class="page equipment-setup-page printer-page bambu-printer-page">
+      <section class="hero panel printer-hero">
         <div class="hero-copy">
           <p class="eyebrow">Device Workspace</p>
           <h1>3DP Printer GUI</h1>
           <p class="subhead">
-            Prusa MK4S live 출력에 사용할 기본 출력 파라미터를 조정합니다. 저장된 값은 Live GUI의
-            Design Agent handoff와 Specimen Making Agent의 PrusaSlicer/PrusaLink 준비 단계에 반영됩니다.
+            Bambu Lab Device Bridge를 기본 장비로 사용합니다. MQTT 실시간 상태, FTPS 전송 경로,
+            slicing gate, autoejection gate를 같은 화면에서 확인하고 Live GUI handoff에 반영합니다.
           </p>
         </div>
         <article class="status-card">
           <div class="status-head">
-            <span class="status-title">Prusa Bridge</span>
+            <span class="status-title">Printer Fleet</span>
             <span id="printer-status-dot" class="status-dot idle"></span>
           </div>
           <strong id="printer-status-label">Loading</strong>
-          <p id="printer-status-detail">Reading Prusa profile and bridge status.</p>
+          <p id="printer-status-detail">Reading selected printer bridge status.</p>
         </article>
       </section>
 
-      <section class="panel equipment-setup-grid printer-setup-grid">
+      <section class="panel bambu-device-console">
+        <div class="bambu-console-head">
+          <div>
+            <p class="eyebrow">Bambu Device Screen</p>
+            <h2 id="printer-device-title">Selected Printer</h2>
+          </div>
+          <div class="button-row compact">
+            <button id="btn-printer-status-test" class="btn">Test Status</button>
+            <button id="btn-printer-status-live" class="btn primary">Live Status</button>
+            <button id="btn-printer-video-status" class="btn">Video Status</button>
+            <button id="btn-printer-upload-path-probe" class="btn">Upload Path Probe</button>
+            <button id="btn-printer-bambu-slice-artifact" class="btn">Slice Bambu Artifact</button>
+            <button id="btn-printer-http-artifact-route" class="btn">Prepare HTTP Artifact</button>
+            <button id="btn-printer-bambu-prestart-check" class="btn primary">Pre-start Check</button>
+            <button id="btn-printer-start-command-draft" class="btn">Print Command Draft</button>
+            <button id="btn-printer-start-gate" class="btn">Start Gate Check</button>
+            <button id="btn-printer-start-publish" class="btn danger">Publish Start</button>
+            <button id="btn-printer-spc-readiness" class="btn primary">SPC Readiness</button>
+            <button id="btn-printer-open-live" class="btn">Open Live GUI</button>
+          </div>
+          <div class="printer-start-gate-controls" aria-label="Bambu start gate controls">
+            <label class="checkbox-line compact">
+              <input id="printer-start-operator-confirmed-input" type="checkbox" />
+              operator confirmed
+            </label>
+            <label class="checkbox-line compact">
+              <input id="printer-start-guardian-approved-input" type="checkbox" />
+              Guardian approved
+            </label>
+            <label class="checkbox-line compact">
+              <input id="printer-start-dry-run-input" type="checkbox" checked />
+              dry-run / no publish
+            </label>
+            <span id="printer-start-gate-mode-detail" class="hint">Default: inspect readiness only. Uncheck dry-run only for a final approved publish attempt.</span>
+          </div>
+        </div>
+        <div class="bambu-device-grid">
+          <article class="bambu-camera-panel">
+            <div class="bambu-card-head">
+              <span>Camera / Live View</span>
+              <strong id="printer-camera-summary">unknown</strong>
+            </div>
+            <div class="bambu-camera-placeholder" id="printer-camera-placeholder">
+              <span>Live video proxy is not connected yet.</span>
+            </div>
+            <div class="bambu-mini-grid">
+              <span id="printer-camera-live-state">video: unknown</span>
+              <span id="printer-camera-stream-kind">stream: unknown</span>
+              <span id="printer-camera-proxy-state">proxy: unknown</span>
+            </div>
+            <p id="printer-camera-detail" class="hint">MQTT camera capability will be shown here when available.</p>
+          </article>
+          <article class="bambu-control-panel">
+            <div class="bambu-card-head">
+              <span>Control Gate</span>
+              <strong id="printer-gate-summary">Loading</strong>
+            </div>
+            <div class="bambu-axis-card">
+              <div class="bambu-axis-wheel">Y<br /><span>X / -X</span><br />-Y</div>
+              <div class="bambu-action-list">
+                <span id="printer-mqtt-pill" class="bridge-pill">MQTT</span>
+                <span id="printer-ftps-pill" class="bridge-pill">FTPS</span>
+                <span id="printer-upload-pill" class="bridge-pill">UPLOAD</span>
+              </div>
+            </div>
+            <div class="bambu-control-state-grid">
+              <span id="printer-control-state">state: unknown</span>
+              <span id="printer-control-queue">queue: --</span>
+              <span id="printer-control-upload">upload: blocked</span>
+              <span id="printer-control-start">start: guarded</span>
+            </div>
+            <p id="printer-gate-detail" class="hint">Reading bridge gates.</p>
+          </article>
+        </div>
+        <div class="bambu-status-strip">
+          <div>
+            <span>Job</span>
+            <strong id="printer-job-summary">No report</strong>
+          </div>
+          <div>
+            <span>Progress</span>
+            <strong id="printer-progress-summary">--</strong>
+          </div>
+          <div>
+            <span>Speed / Queue</span>
+            <strong id="printer-speed-summary">--</strong>
+          </div>
+          <div>
+            <span>Layer</span>
+            <strong id="printer-layer-summary">--</strong>
+          </div>
+          <div>
+            <span>Temperature</span>
+            <strong id="printer-temp-summary">--</strong>
+          </div>
+          <div>
+            <span>Materials</span>
+            <strong id="printer-materials-summary">--</strong>
+          </div>
+          <div>
+            <span>Storage</span>
+            <strong id="printer-storage-summary">--</strong>
+          </div>
+          <div>
+            <span>Tool / Plate</span>
+            <strong id="printer-tool-summary">--</strong>
+          </div>
+          <div>
+            <span>Safety</span>
+            <strong id="printer-safety-summary">--</strong>
+          </div>
+        </div>
+        <div class="bambu-device-detail-grid">
+          <article>
+            <div class="bambu-card-head">
+              <span>AMS / Material Slots</span>
+              <strong id="printer-material-slot-summary">No material report</strong>
+            </div>
+            <div id="printer-material-slot-list" class="bambu-material-slot-list"></div>
+          </article>
+          <article>
+            <div class="bambu-card-head">
+              <span>Bridge Evidence</span>
+              <strong id="printer-evidence-summary">No evidence yet</strong>
+            </div>
+            <div id="printer-evidence-cards" class="bambu-evidence-cards"></div>
+          </article>
+        </div>
+        <div class="printer-status-grid compact printer-spc-readiness-panel">
+          <div>
+            <span class="status-title">Specimen Making Readiness</span>
+            <strong id="printer-spc-readiness-summary">Not checked</strong>
+            <p id="printer-spc-readiness-detail" class="hint">Run SPC Readiness to aggregate printer connection, start gate, and autoejection evidence.</p>
+          </div>
+          <div class="printer-spc-readiness-body">
+            <div id="printer-spc-readiness-levels" class="printer-readiness-levels" aria-live="polite"></div>
+            <div id="printer-spc-readiness-sections" class="printer-readiness-sections" aria-live="polite"></div>
+            <div id="printer-spc-next-actions" class="printer-spc-next-actions" aria-live="polite"></div>
+          </div>
+        </div>
+        <div class="printer-status-grid compact printer-prestart-check-panel">
+          <div>
+            <span class="status-title">Bambu Pre-start Checklist</span>
+            <strong id="printer-prestart-check-summary">Not checked</strong>
+            <p id="printer-prestart-check-detail" class="hint">
+              Runs slicing, HTTP artifact exposure, guarded start gate, and SPC readiness without publishing MQTT.
+            </p>
+          </div>
+          <div id="printer-prestart-check-steps" class="printer-readiness-levels" aria-live="polite"></div>
+        </div>
+      </section>
+
+      <section class="panel equipment-setup-grid printer-setup-grid bambu-workspace-grid">
         <article>
-          <h2>1. Print Defaults</h2>
+          <h2>Print Defaults</h2>
+          <p class="hint">Live/Test workflow에서 생성한 STL을 slicing하고 출력 직전까지 검증할 기본값입니다.</p>
           <div class="lerobot-form-grid">
             <label>
               Material
@@ -57,11 +210,11 @@ Modification guide:
             </label>
             <label>
               Printer Model
-              <input id="printer-model-input" class="text-input" value="Prusa MK4S" />
+              <input id="printer-model-input" class="text-input" value="Bambu Lab X2D" />
             </label>
             <label>
               Printer Profile
-              <input id="printer-profile-input" class="text-input" value="prusa_mk4s_pla_0p4_nozzle" />
+              <input id="printer-profile-input" class="text-input" value="bambulab_x2d_pla_0p4_nozzle" />
             </label>
             <label>
               Slicer Profile Hint
@@ -93,7 +246,19 @@ Modification guide:
             </label>
             <label>
               Storage Target
-              <input id="printer-storage-input" class="text-input" value="usb" />
+              <input id="printer-storage-input" class="text-input" value="ftps" />
+            </label>
+            <label>
+              Bambu Source STL / 3MF Path
+              <input id="printer-bambu-source-path-input" class="text-input" value="" placeholder="/home/jin/.../specimen.stl" />
+            </label>
+            <label>
+              Bambu Sliced Artifact Path
+              <input id="printer-bambu-artifact-path-input" class="text-input" value="" placeholder="/home/jin/.../specimen.gcode.3mf" />
+            </label>
+            <label>
+              Public Base URL optional
+              <input id="printer-bambu-public-base-url-input" class="text-input" value="" placeholder="auto detect or http://192.168.50.x:8000" />
             </label>
             <label>
               Max Print Time min
@@ -102,15 +267,15 @@ Modification guide:
           </div>
           <label class="checkbox-line">
             <input id="printer-overwrite-input" type="checkbox" checked />
-            overwrite existing G-code with same name on PrusaLink storage
+            overwrite existing job artifact when the bridge confirms the target path
           </label>
           <label class="checkbox-line">
-            <input id="printer-start-input" type="checkbox" checked />
-            live mode에서 upload 후 즉시 start print
+            <input id="printer-start-input" type="checkbox" />
+            allow live workflow to start print after upload and Guardian approval
           </label>
           <label class="checkbox-line">
             <input id="printer-ejection-input" type="checkbox" />
-            append bed-sweep auto ejection G-code in test, live, and live-test runs
+            enable configured autoejection routine after print completion
           </label>
           <label class="checkbox-line">
             <input id="printer-slow-first-layer-input" type="checkbox" checked />
@@ -159,62 +324,88 @@ Modification guide:
         </article>
 
         <article>
-          <h2>2. Live Bridge Status</h2>
+          <h2>Bridge Connection</h2>
           <p class="hint">
-            연결정보는 <code>memory/prusa_connection.json</code>에 저장됩니다. 비밀번호/API key는 표시하지 않고,
-            새 값을 입력한 경우에만 덮어씁니다.
+            Bambu 연결정보는 <code>memory/bambu_connection.json</code>에 저장됩니다. Access code는 표시하지 않고,
+            새 값을 입력한 경우에만 덮어씁니다. Prusa는 별도 profile 선택 시 기존 adapter로 전환됩니다.
           </p>
           <div class="printer-subsection">
-            <h3>PrusaLink Connection</h3>
+            <h3>Printer Fleet Selection</h3>
+            <p class="hint">Bambu Lab X2D가 기본값입니다. 다른 장비는 fallback이 아니라 명시 선택으로만 active profile이 됩니다.</p>
+            <div class="lerobot-form-grid">
+              <label>
+                Active Printer Profile
+                <select id="printer-fleet-profile-input" class="text-input"></select>
+              </label>
+            </div>
+            <div class="button-row">
+              <button id="btn-printer-fleet-save" class="btn primary" type="button">Set Active Printer</button>
+            </div>
+          </div>
+          <div class="printer-subsection">
+            <h3>Bambu LAN Connection</h3>
             <div class="lerobot-form-grid">
               <label>
                 Host / IP
-                <input id="printer-connection-host-input" class="text-input" value="" placeholder="192.168.x.x 또는 prusa-mk4.local" />
+                <input id="printer-connection-host-input" class="text-input" value="" placeholder="192.0.2.42" />
               </label>
               <label>
-                Scheme
-                <select id="printer-connection-scheme-input" class="text-input">
-                  <option value="http">http</option>
-                  <option value="https">https</option>
-                </select>
+                Serial Number / SN
+                <input id="printer-connection-serial-input" class="text-input" value="" placeholder="20P..." />
               </label>
               <label>
-                Port
-                <input id="printer-connection-port-input" class="text-input" type="number" min="1" max="65535" step="1" value="80" />
+                Printer Name
+                <input id="printer-connection-printer-name-input" class="text-input" value="" placeholder="3DP-20P-425" />
               </label>
               <label>
-                Storage
-                <input id="printer-connection-storage-input" class="text-input" value="usb" />
-              </label>
-              <label>
-                Auth Mode
-                <select id="printer-connection-auth-mode-input" class="text-input">
-                  <option value="digest">digest</option>
-                  <option value="basic">basic</option>
-                  <option value="api_key">api_key</option>
-                  <option value="none">none</option>
-                </select>
+                Model
+                <input id="printer-connection-model-input" class="text-input" value="Bambu Lab X2D" />
               </label>
               <label>
                 Username
-                <input id="printer-connection-username-input" class="text-input" value="maker" />
+                <input id="printer-connection-username-input" class="text-input" value="bblp" />
               </label>
               <label>
-                Password
-                <input id="printer-connection-password-input" class="text-input" type="password" placeholder="blank = keep saved password" autocomplete="new-password" />
+                LAN Access Code
+                <input id="printer-connection-access-code-input" class="text-input" type="password" placeholder="blank = keep saved access code" autocomplete="new-password" />
               </label>
-              <label>
-                API Key Header
-                <input id="printer-connection-api-key-header-input" class="text-input" value="X-Api-Key" />
-              </label>
-              <label>
-                API Key
-                <input id="printer-connection-api-key-input" class="text-input" type="password" placeholder="blank = keep saved API key" autocomplete="new-password" />
-              </label>
+            </div>
+            <label class="checkbox-line">
+              <input id="printer-connection-lan-mode-input" type="checkbox" />
+              LAN-only mode was confirmed on the printer
+            </label>
+            <label class="checkbox-line">
+              <input id="printer-connection-developer-mode-input" type="checkbox" />
+              Developer mode was confirmed for local control
+            </label>
+            <div class="legacy-prusa-fields" aria-label="legacy Prusa connection fields">
+              <input id="printer-connection-scheme-input" type="hidden" value="http" />
+              <input id="printer-connection-port-input" type="hidden" value="80" />
+              <input id="printer-connection-storage-input" type="hidden" value="ftps" />
+              <select id="printer-connection-auth-mode-input" class="text-input" hidden>
+                <option value="lan_access_code" selected>lan_access_code</option>
+                <option value="digest">digest</option>
+                <option value="basic">basic</option>
+                <option value="api_key">api_key</option>
+                <option value="none">none</option>
+              </select>
+              <input id="printer-connection-password-input" type="hidden" value="" />
+              <input id="printer-connection-api-key-header-input" type="hidden" value="X-Api-Key" />
+              <input id="printer-connection-api-key-input" type="hidden" value="" />
             </div>
             <div class="button-row">
               <button id="btn-printer-connection-save" class="btn primary">Set Bridge Connection</button>
               <button id="btn-printer-connection-reload" class="btn">Reload Connection</button>
+            </div>
+            <div class="printer-connection-action-panel" aria-label="Bambu connection action guidance">
+              <div class="bambu-card-head">
+                <span>Connection Confirmation</span>
+                <strong id="printer-connection-action-summary">Waiting for bridge evidence</strong>
+              </div>
+              <p id="printer-connection-action-detail" class="hint">
+                Run Live Status or SPC Readiness to map LAN/Developer/storage blockers to the fields above.
+              </p>
+              <div id="printer-connection-action-list" class="printer-connection-action-list" aria-live="polite"></div>
             </div>
           </div>
           <div class="printer-status-grid">
@@ -224,29 +415,61 @@ Modification guide:
               <p id="printer-connection-detail" class="hint">Reading connection memory.</p>
             </div>
             <div>
-              <span class="status-title">Live Gates</span>
-              <strong id="printer-gate-summary">Loading</strong>
-              <p id="printer-gate-detail" class="hint">Reading config gates.</p>
-            </div>
-            <div>
               <span class="status-title">Slicer</span>
               <strong id="printer-slicer-summary">Loading</strong>
               <p id="printer-slicer-detail" class="hint">Reading slicer config.</p>
             </div>
-          </div>
-          <div class="button-row">
-            <button id="btn-printer-status-test" class="btn">Test Status</button>
-            <button id="btn-printer-status-live" class="btn">Live Status</button>
-            <button id="btn-printer-open-live" class="btn primary">Open Live GUI</button>
+            <div>
+              <span class="status-title">Selected Profiles</span>
+              <strong id="printer-fleet-summary">Loading</strong>
+              <p id="printer-fleet-detail" class="hint">Bambu is default; Prusa is explicit selection only.</p>
+            </div>
           </div>
         </article>
 
         <article>
-          <h2>3. Autoejection Test</h2>
+          <h2>Autoejection Gate / Test</h2>
           <p class="hint">
-            출력 없이 기존 bed-sweep autoejection G-code만 실제 PrusaLink에 업로드/시작합니다.
-            좌/중/우 버튼은 해당 위치에 출력물이 있다고 가정한 object bounds를 기존 ejection builder에 넣어 테스트합니다.
+            Bambu 기본 profile에서는 검증된 provider handoff만 확인합니다. Prusa profile을 명시 선택한 경우에만
+            bed-sweep ejection G-code 테스트가 실제 프린터 구동 경로로 전환됩니다.
           </p>
+          <div class="printer-subsection">
+            <h3>Bambu Autoejection Gate</h3>
+            <p class="hint">검증된 external routine과 pre/post vision profile을 저장해야 SPC autonomous loop ready로 판정됩니다.</p>
+            <label class="checkbox-line">
+              <input id="printer-autoejection-enabled-input" type="checkbox" />
+              request Bambu autoejection for autonomous loop
+            </label>
+            <div class="lerobot-form-grid">
+              <label>
+                Provider
+                <input id="printer-autoejection-provider-input" class="text-input" value="none" placeholder="external_robot_pickoff" />
+              </label>
+              <label>
+                Verified Routine ID
+                <input id="printer-autoejection-routine-input" class="text-input" value="" placeholder="robot-pickoff-v1" />
+              </label>
+              <label>
+                Pre-eject Vision Profile
+                <input id="printer-autoejection-pre-vision-input" class="text-input" value="" placeholder="bambu-bed-occupied-check" />
+              </label>
+              <label>
+                Post-eject Vision Profile
+                <input id="printer-autoejection-post-vision-input" class="text-input" value="" placeholder="bambu-bed-clear-check" />
+              </label>
+            </div>
+            <div class="button-row">
+              <button id="btn-printer-autoejection-fill-handoff" class="btn" type="button">Fill Manipulation Handoff Defaults</button>
+              <button id="btn-printer-autoejection-config-save" class="btn primary" type="button">Save Autoejection Gate</button>
+            </div>
+          </div>
+          <div class="printer-status-grid compact">
+            <div>
+              <span class="status-title">Autoejection Gate</span>
+              <strong id="printer-autoejection-status-summary">Loading</strong>
+              <p id="printer-autoejection-status-detail" class="hint">Reading provider routine evidence.</p>
+            </div>
+          </div>
           <div class="lerobot-form-grid">
             <label>
               Assumed Object Size mm
@@ -258,14 +481,14 @@ Modification guide:
             </label>
           </div>
           <div class="button-row">
-            <button id="btn-printer-eject-left" class="btn">Autoeject Left</button>
-            <button id="btn-printer-eject-center" class="btn primary">Autoeject Center</button>
-            <button id="btn-printer-eject-right" class="btn">Autoeject Right</button>
+            <button id="btn-printer-eject-left" class="btn">Check Handoff Left</button>
+            <button id="btn-printer-eject-center" class="btn primary">Check Handoff Center</button>
+            <button id="btn-printer-eject-right" class="btn">Check Handoff Right</button>
           </div>
         </article>
 
         <article>
-          <h2>Result Log</h2>
+          <h2>Bridge Evidence Log</h2>
           <pre id="printer-result-log" class="equipment-result-log">{}</pre>
         </article>
       </section>

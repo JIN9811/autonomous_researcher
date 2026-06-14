@@ -415,6 +415,13 @@ class SpecimenMakingAgent(BaseAgent):
         prusalink = self._dict_value(tool_result.get("prusalink"))
         print_result = self._dict_value(tool_result.get("print_result"))
         ejection_result = self._dict_value(tool_result.get("ejection_result"))
+        selected_printer = self._dict_value(tool_result.get("selected_printer"))
+        device_screen = self._dict_value(tool_result.get("device_screen"))
+        preprint_gate = self._dict_value(tool_result.get("preprint_gate"), tool_result.get("start_gate"))
+        autoejection = self._dict_value(tool_result.get("autoejection"), tool_result.get("autoejection_gate"))
+        autoejection_handoff = self._dict_value(tool_result.get("autoejection_handoff"), tool_result.get("handoff"), autoejection.get("handoff"))
+        readiness_levels = [item for item in tool_result.get("readiness_levels", []) if isinstance(item, dict)]
+        operator_actions = [item for item in tool_result.get("operator_actions", []) if isinstance(item, dict)]
         print_request = self._dict_value(printer_payload.get("print"))
         ejection_request = self._dict_value(printer_payload.get("ejection"))
         graph = state.run_metadata.get("runtime_graph") if isinstance(state.run_metadata, dict) else {}
@@ -449,6 +456,8 @@ class SpecimenMakingAgent(BaseAgent):
             "printer_profile": str(self._first_value(settings.get("printer_profile"), spec.get("printer_profile"), default="")),
             "slicer_profile_hint": str(self._first_value(settings.get("slicer_profile_hint"), spec.get("slicer_profile_hint"), default="")),
             "material": str(self._first_value(settings.get("material"), spec.get("material"), default="")),
+            "printer_provider": str(self._first_value(tool_result.get("provider"), printer.get("provider"), selected_printer.get("provider"), spec.get("printer_provider"), default="")),
+            "selected_printer_label": str(self._first_value(selected_printer.get("label"), selected_printer.get("profile_id"), spec.get("printer_model"), default="")),
             "graph_version": graph_version,
             "run_id": state.run_id,
             "printer_job_id": self._first_value(
@@ -492,6 +501,12 @@ class SpecimenMakingAgent(BaseAgent):
             "slicer_command": settings.get("resolved_command", []),
         }
         storage_status, storage_evidence = self._storage_gate_status(printer, prusalink)
+        spc_blockers = preprint_gate.get("blockers") if isinstance(preprint_gate.get("blockers"), list) else []
+        spc_status = "warn"
+        if preprint_gate:
+            spc_status = "pass" if preprint_gate.get("technical_ready_for_start") else ("blocked" if spc_blockers else "warn")
+        elif readiness_levels:
+            spc_status = "blocked" if any(str(item.get("status")).lower() == "blocked" for item in readiness_levels) else "pass"
         quality_gates = [
             self._gate("required_fields", "pass", {"missing": []}),
             self._gate("geometry", "pass" if geometry_result.get("ok") else "fail", {"geometry_hash": digital_thread["geometry_hash"], "stl_path": digital_thread["stl_path"]}),
@@ -500,6 +515,18 @@ class SpecimenMakingAgent(BaseAgent):
             self._gate("slicer", self._gate_status_from_result(slicer_result), {"sliced_path": digital_thread["gcode_path"], "failure_code": slicer_result.get("failure_code")}),
             self._gate("gcode", self._gate_status_from_result(gcode_validation), {"failure_code": gcode_validation.get("failure_code"), "violations": gcode_validation.get("violations", [])}),
             self._gate("printer_storage", storage_status, storage_evidence),
+            self._gate(
+                "spc_readiness",
+                spc_status,
+                {
+                    "provider": digital_thread["printer_provider"],
+                    "selected_printer": selected_printer,
+                    "preprint_gate": preprint_gate,
+                    "readiness_levels": readiness_levels,
+                    "operator_actions": operator_actions,
+                    "autoejection_handoff": autoejection_handoff,
+                },
+            ),
             self._gate("execution_gate", "pass" if tool_result.get("ok") else ("blocked" if tool_result.get("requires_connection_info") else "fail"), {"physical_intent": physical_intent, "printer_path": printer_path, "status": tool_result.get("status"), "failure_code": tool_result.get("failure_code")}),
             self._gate("ejection", "pass" if str(ejection_result.get("status", "disabled")) in {"disabled", "appended_to_print_gcode", "simulated_verified_ejected", "virtual_ack", "started"} else "warn", {"status": ejection_result.get("status"), "failure_code": ejection_result.get("failure_code")}),
         ]
@@ -555,6 +582,7 @@ class SpecimenMakingAgent(BaseAgent):
             "quality_gates": quality_gates,
             "monitoring_plan": {
                 "observe_prusalink_status": bool(prusalink or printer),
+                "observe_printer_bridge_status": bool(prusalink or printer or selected_printer or device_screen),
                 "observe_transfer_idle": bool(print_result.get("transfer_wait")),
                 "observe_camera_after_print": True,
                 "layerwise_monitoring_available": False,
@@ -563,6 +591,14 @@ class SpecimenMakingAgent(BaseAgent):
                 "after_print_consumer": "vision_agent",
             },
             "printer_runtime": {
+                "provider": digital_thread["printer_provider"],
+                "selected_printer": selected_printer,
+                "device_screen": device_screen,
+                "preprint_gate": preprint_gate,
+                "readiness_levels": readiness_levels,
+                "operator_actions": operator_actions,
+                "autoejection": autoejection,
+                "autoejection_handoff": autoejection_handoff,
                 "prepare_status": tool_result.get("status"),
                 "mode": tool_result.get("mode"),
                 "path": printer_path,
@@ -675,6 +711,16 @@ class SpecimenMakingAgent(BaseAgent):
         gcode_gate = next((gate for gate in gates if gate.get("gate") == "gcode"), {})
         execution_gate = next((gate for gate in gates if gate.get("gate") == "execution_gate"), {})
         storage_gate = next((gate for gate in gates if gate.get("gate") == "printer_storage"), {})
+        spc_gate = next((gate for gate in gates if gate.get("gate") == "spc_readiness"), {})
+        selected_printer = self._dict_value(runtime.get("selected_printer"))
+        device_screen = self._dict_value(runtime.get("device_screen"))
+        preprint_gate = self._dict_value(runtime.get("preprint_gate"))
+        readiness_levels = [item for item in runtime.get("readiness_levels", []) if isinstance(item, dict)]
+        operator_actions = [item for item in runtime.get("operator_actions", []) if isinstance(item, dict)]
+        autoejection_gate = self._dict_value(runtime.get("autoejection"))
+        autoejection_handoff = self._dict_value(runtime.get("autoejection_handoff"), autoejection_gate.get("handoff"))
+        device_actions = self._dict_value(device_screen.get("actions"))
+        device_connection = self._dict_value(device_screen.get("connection"))
 
         timeline_items: list[dict[str, Any]] = []
         step_trace = runtime.get("step_trace") if isinstance(runtime.get("step_trace"), list) else []
@@ -795,6 +841,8 @@ class SpecimenMakingAgent(BaseAgent):
             },
             "printer_profile": {
                 "printer_profile": thread.get("printer_profile") or spec.get("printer_profile"),
+                "provider": runtime.get("provider") or thread.get("printer_provider") or selected_printer.get("provider") or spec.get("printer_provider"),
+                "selected_printer": selected_printer,
                 "printer_path": intent.get("printer_path"),
                 "material": material,
                 "physical_intent": intent.get("physical_intent"),
@@ -831,6 +879,28 @@ class SpecimenMakingAgent(BaseAgent):
                 "gates": gates,
                 "donut": readiness_donut,
             },
+            "spc_readiness": {
+                "provider": runtime.get("provider") or thread.get("printer_provider") or selected_printer.get("provider") or spec.get("printer_provider"),
+                "selected_printer": selected_printer,
+                "preprint_gate": preprint_gate,
+                "preprint_gate_state": preprint_gate.get("state"),
+                "technical_ready_for_start": preprint_gate.get("technical_ready_for_start"),
+                "ready_for_live_print": preprint_gate.get("ready_for_live_print"),
+                "blockers": preprint_gate.get("blockers", []) if isinstance(preprint_gate.get("blockers"), list) else [],
+                "readiness_levels": readiness_levels,
+                "operator_actions": operator_actions,
+                "device_actions": device_actions,
+                "device_connection": device_connection,
+                "gate_status": spc_gate.get("status"),
+            },
+            "autoejection_gate": {
+                "status": autoejection_gate.get("status") or (runtime.get("ejection") or {}).get("status") if isinstance(runtime.get("ejection"), dict) else autoejection_gate.get("status"),
+                "blockers": autoejection_gate.get("blockers", []) if isinstance(autoejection_gate.get("blockers"), list) else [],
+                "provider": autoejection_gate.get("provider") or runtime.get("provider") or thread.get("printer_provider"),
+                "requested": autoejection_gate.get("requested"),
+                "method": autoejection_gate.get("method"),
+                "handoff": autoejection_handoff,
+            },
             "build_timeline": {
                 "timeline": timeline_items,
                 "bars": [
@@ -849,6 +919,11 @@ class SpecimenMakingAgent(BaseAgent):
             },
             "artifact_ledger": artifact_ledger,
             "printer_status": {
+                "provider": runtime.get("provider") or thread.get("printer_provider") or selected_printer.get("provider"),
+                "selected_printer": selected_printer,
+                "connection": device_connection,
+                "actions": device_actions,
+                "preprint_gate_state": preprint_gate.get("state"),
                 "prepare_status": runtime.get("prepare_status") or outcome.get("status"),
                 "mode": runtime.get("mode"),
                 "path": runtime.get("path") or intent.get("printer_path"),
@@ -867,6 +942,8 @@ class SpecimenMakingAgent(BaseAgent):
                 {"id": "layer_preview", "section": "layer_preview", "type": "layer_preview"},
                 {"id": "filament_usage", "section": "filament_usage", "type": "material_donut"},
                 {"id": "print_readiness", "section": "print_readiness", "type": "readiness_donut"},
+                {"id": "spc_readiness", "section": "spc_readiness", "type": "readiness_levels"},
+                {"id": "autoejection_gate", "section": "autoejection_gate", "type": "gate_board"},
                 {"id": "build_timeline", "section": "build_timeline", "type": "timeline_bars"},
                 {"id": "estimated_print_time", "section": "estimated_print_time", "type": "print_time_bars"},
             ],
@@ -1279,6 +1356,8 @@ class SpecimenMakingAgent(BaseAgent):
             preview_image_path=str(geometry_result.get("preview_image_path") or ""),
             viewer_capture_path=str(geometry_result.get("viewer_capture_path") or geometry_result.get("capture_image_path") or ""),
         )
+        fabrication_intent = fabrication_report.get("fabrication_intent", {}) if isinstance(fabrication_report.get("fabrication_intent"), dict) else {}
+        printer_runtime = fabrication_report.get("printer_runtime", {}) if isinstance(fabrication_report.get("printer_runtime"), dict) else {}
 
         specimen_result = {
             "ok": True,
@@ -1291,8 +1370,16 @@ class SpecimenMakingAgent(BaseAgent):
             "manufacturability_status": str(manufacturability_result.get("manufacturability_status", "pass")),
             "handoff_status": str(handoff_result.get("handoff_status", "ready")),
             "printer_prepare_status": str(response.get("status", "queued")),
-            "printer_path": response.get("printer_path"),
-            "printer_mode": response.get("mode"),
+            "printer_path": response.get("printer_path") or fabrication_intent.get("printer_path") or printer_runtime.get("path"),
+            "printer_mode": response.get("mode") or printer_runtime.get("mode") or printer_runtime_mode,
+            "provider": response.get("provider") or printer_runtime.get("provider"),
+            "selected_printer": response.get("selected_printer") or printer_runtime.get("selected_printer", {}),
+            "device_screen": response.get("device_screen") or printer_runtime.get("device_screen", {}),
+            "preprint_gate": response.get("preprint_gate") or response.get("start_gate") or printer_runtime.get("preprint_gate", {}),
+            "readiness_levels": response.get("readiness_levels") or printer_runtime.get("readiness_levels", []),
+            "operator_actions": response.get("operator_actions") or printer_runtime.get("operator_actions", []),
+            "autoejection": response.get("autoejection") or response.get("autoejection_gate") or printer_runtime.get("autoejection", {}),
+            "autoejection_handoff": response.get("autoejection_handoff") or response.get("handoff") or printer_runtime.get("autoejection_handoff", {}),
             "stl_path": geometry_result.get("stl_path"),
             "sliced_path": response.get("sliced_path"),
             "preview_image_path": geometry_result.get("preview_image_path"),

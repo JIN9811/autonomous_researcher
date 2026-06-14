@@ -3,7 +3,8 @@
 This repository must not store real API keys.
 
 Use `.env.example` only as a tracked list of supported environment variable
-names. Keep real values in `.env`, which is ignored by Git.
+names. Keep real values in `.env` or the local root `env` file, which are
+ignored by Git.
 
 ## Local `.env`
 
@@ -36,6 +37,30 @@ OPENAI_API_KEY=<your-key-here>
 ```
 
 The backend fallback order is configured in `configs/models.yaml`.
+
+## Main GUI API Key Store
+
+The Main GUI `Current Models` panel includes an `API Key` control. Use it when
+this checkout does not have a local `.env` yet or when a new operator needs to
+set the OpenAI fallback key from the browser.
+
+- `API Key` opens a small local input dialog.
+- `Loading` enables the saved key and makes OpenAI API the first inference route.
+- `Unloading` disables runtime API use, restores local inference as the first
+  route, and keeps the saved key for later.
+- Status refreshes only report and silently reapply the stored setting; they do
+  not emit runtime load/unload events.
+- Server startup also silently applies the saved setting before the first
+  browser status request, so first-call inference uses the saved API route when
+  it is loaded.
+- If the API route fails or returns an empty response, local Gemma/vLLM is tried
+  next, followed by the local model fallback.
+- The key is stored in `memory/api_keys.json`, which is ignored by Git.
+- If `OPENAI_API_KEY` is already present in `.env` or the local root `env`
+  file, the first GUI status load imports it into `memory/api_keys.json` and
+  marks it enabled.
+- API responses only return registration state such as `registered`; key
+  characters are never sent back to the browser after saving.
 
 ## Local-Only Key Notes
 

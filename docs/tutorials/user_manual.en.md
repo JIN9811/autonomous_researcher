@@ -48,7 +48,7 @@ Full external requirements are tracked in [../../REQUIREMENTS.md](../../REQUIREM
 | Live GUI | `/live` | Chat-based orchestration and stage progress |
 | Runtime IDE | `/ide` | Graph editing, validation, dry-run, version save |
 | Module Management | `/module-management` | Module validation, load state, generated adapter registration |
-| 3DP Workspace | `/printer` | Prusa connection, slicing profile, auto-ejection, test options |
+| 3DP Workspace | `/printer` | Bambu Lab X2D default bridge, explicit Prusa selection, printer fleet, live video/status, slicing/start gates, auto-ejection, test options |
 | LeRobot Workspace | `/lerobot` | Port/camera setup, teleop, recording, training, rollout |
 | BO Workspace | `/bo` | Acquisition/strategy/budget/parameter-space configuration |
 | CAE Workspace | `/cae` | STL analysis settings and results |
@@ -59,6 +59,14 @@ Full external requirements are tracked in [../../REQUIREMENTS.md](../../REQUIREM
 
 - `live`: real hardware path, requires device gates and operator confirmation.
 - `test`: dry-run and simulated path, with selected bridge/actual-print options when explicitly requested.
+- In the 3DP Workspace, `Start Gate Check`, `SPC Readiness`, and `Publish Start` use the same visible start-gate controls: operator confirmed, Guardian approved, and dry-run/no-publish. Defaults are dry-run ON and both approvals OFF. The frontend must pass those values unchanged and must not hardcode approval.
+- `Publish Start` can call the start-publish API, but the backend sends the Bambu MQTT `project_file` command only when the selected printer gate, transfer path, operator confirmation, Guardian approval, and `dry_run=false` all pass.
+- `SPC Readiness` level cards separate connection, transfer path, approval, publish command, and autoejection. `technical_ready_for_start=true` means the technical printer gates are clear, but publish still remains blocked when approval or dry-run policy is pending.
+- For Bambu X2D, `Upload Path Probe` checks whether FTPS is actually writable. Login/list alone is not enough. If the probe reports read-only or `BAMBU_FTPS_WRITE_FAILED`, use `Prepare HTTP Artifact` with a sliced `.gcode.3mf` file. The backend must then GET the generated URL and match sha256 (`server_fetch_probe.ok=true`) before the GUI treats Upload as ready.
+- That probe must use a printer-reachable LAN URL. The server default is `0.0.0.0:7860`, so operators may open `localhost` in the browser while Bambu receives `http://<ATR-server-LAN-IP>:7860/printer-artifacts/...`. A loopback-only bind or localhost artifact URL is not valid transfer evidence for the printer.
+- A plain remote path such as `cache/specimen.gcode.3mf` is not an HTTP artifact route. It cannot bypass FTPS write verification. Only generated `http://` or `https://` artifact URLs with a passing fetch probe are treated as ready transfer evidence.
+- `HTTP_ARTIFACT_READY_NOT_STARTED` means the artifact URL and guarded start-command draft are ready for review. It does not start printing; `Publish Start` still requires dry-run off, operator confirmation, Guardian approval, and a passing start gate.
+- `Fill Manipulation Handoff Defaults` only fills Bambu autoejection provider/routine/vision fields locally. It does not save readiness evidence or run motion. The gate changes only after the operator verifies the routine and clicks `Save Autoejection Gate`.
 - `virtual`: no physical device actions.
 
 ## 2. Advanced Path

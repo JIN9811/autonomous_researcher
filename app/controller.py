@@ -60,7 +60,10 @@ from orchestrator.supervisor import (
 )
 from policies.validation_policy import validate_agent_output
 from utils.ids import make_event_id, make_experiment_id, make_run_id
-from utils.printer_profile import load_prusa_print_profile
+from device_bridges.bambu_bridge import PrinterDeviceBridgeManager
+from utils.config_loader import load_all_configs
+from utils.paths import resolve_path
+from utils.printer_profile import adapt_print_profile_for_provider, load_prusa_print_profile
 
 
 WORKSPACE_ARTIFACT_COPY_LIMIT_BYTES = 50 * 1024 * 1024
@@ -199,7 +202,15 @@ class MainController:
             if "PROCESS" in code or "RUNTIME" in code:
                 return "robot", "pi05_runtime", "Pi0.5 conda/runtime process"
             return "robot", "lerobot_bridge", "LeRobot bridge"
-        if workspace == "printer" or code.startswith("PRINTER") or code.startswith("SLICER") or code.startswith("GCODE"):
+        if workspace == "printer" or code.startswith("PRINTER") or code.startswith("SLICER") or code.startswith("GCODE") or code.startswith("BAMBU"):
+            if code.startswith("BAMBU"):
+                if "FTPS" in code or "UPLOAD" in code or "STORAGE" in code:
+                    return "printer", "bambu_ftps_storage", "Bambu Lab FTPS storage/upload path"
+                if "MQTT" in code:
+                    return "printer", "bambu_mqtt", "Bambu Lab MQTT telemetry/control bridge"
+                if "AUTOEJECTION" in code:
+                    return "printer", "bambu_autoejection", "Bambu Lab autoejection routine gate"
+                return "printer", "bambu_bridge", "Bambu Lab device bridge"
             if code.startswith("SLICER"):
                 return "printer", "slicer", "PrusaSlicer pipeline"
             if code.startswith("GCODE"):
@@ -1565,6 +1576,61 @@ class MainController:
         )
         if isinstance(compact.get("quality_gates"), list):
             compact["quality_gates"] = compact["quality_gates"][:12]
+        process_plan = cls._select_runtime_fields(
+            report.get("process_plan"),
+            (
+                "layer_height_mm",
+                "first_layer_height_mm",
+                "nozzle_diameter_mm",
+                "bed_temperature_c",
+                "first_layer_bed_temperature_c",
+                "adhesion_policy",
+                "cap_skin_policy",
+                "ejection_policy",
+                "estimated_mass_g",
+                "estimated_print_time_min",
+            ),
+        )
+        printer_runtime = cls._select_runtime_fields(
+            report.get("printer_runtime"),
+            (
+                "provider",
+                "selected_printer",
+                "device_screen",
+                "preprint_gate",
+                "readiness_levels",
+                "operator_actions",
+                "autoejection",
+                "autoejection_handoff",
+                "prepare_status",
+                "mode",
+                "path",
+                "upload",
+                "transfer_wait",
+                "start",
+                "ejection",
+                "step_trace",
+            ),
+        )
+        monitoring_plan = cls._select_runtime_fields(
+            report.get("monitoring_plan"),
+            (
+                "observe_printer_bridge_status",
+                "observe_prusalink_status",
+                "observe_transfer_idle",
+                "observe_camera_after_print",
+                "layerwise_monitoring_available",
+                "defect_classes",
+            ),
+        )
+        if process_plan:
+            compact["process_plan"] = process_plan
+        if printer_runtime:
+            if isinstance(printer_runtime.get("step_trace"), list):
+                printer_runtime["step_trace"] = printer_runtime["step_trace"][-16:]
+            compact["printer_runtime"] = printer_runtime
+        if monitoring_plan:
+            compact["monitoring_plan"] = monitoring_plan
         return compact
 
     @classmethod
@@ -1596,6 +1662,45 @@ class MainController:
             {
                 "fabrication_report": cls._planning_display_fabrication_report(specimen.get("fabrication_report")),
                 "slicer_settings": cls._planning_display_slicer_settings(specimen.get("slicer_settings") or tool_result.get("slicer_settings")),
+                "selected_printer": cls._select_runtime_fields(
+                    specimen.get("selected_printer") or tool_result.get("selected_printer"),
+                    ("profile_id", "label", "provider", "model", "host", "serial_number"),
+                ),
+                "device_screen": cls._select_runtime_fields(
+                    specimen.get("device_screen") or tool_result.get("device_screen"),
+                    ("connection", "actions", "status", "camera", "temperatures", "job"),
+                ),
+                "preprint_gate": cls._select_runtime_fields(
+                    specimen.get("preprint_gate") or tool_result.get("preprint_gate") or tool_result.get("start_gate"),
+                    ("state", "technical_ready_for_start", "approval_ready_for_start", "ready_for_live_print", "blockers", "checks"),
+                ),
+                "operator_actions": compact_runtime_payload(
+                    specimen.get("operator_actions") or tool_result.get("operator_actions") or []
+                ),
+                "readiness_levels": compact_runtime_payload(
+                    specimen.get("readiness_levels") or tool_result.get("readiness_levels") or []
+                ),
+                "autoejection": cls._select_runtime_fields(
+                    specimen.get("autoejection") or tool_result.get("autoejection") or tool_result.get("autoejection_gate"),
+                    ("status", "blockers", "provider", "requested", "method", "handoff", "checks"),
+                ),
+                "autoejection_handoff": cls._select_runtime_fields(
+                    specimen.get("autoejection_handoff") or tool_result.get("autoejection_handoff") or tool_result.get("handoff"),
+                    (
+                        "schema",
+                        "status",
+                        "provider",
+                        "routine_id",
+                        "recommended_consumer_agent",
+                        "next_owner",
+                        "next_tool",
+                        "requires_guardian_approval",
+                        "requires_operator_confirmation",
+                        "requires_provider_executor",
+                        "motion_started",
+                        "dry_run_only",
+                    ),
+                ),
                 "prusalink": cls._select_runtime_fields(prusalink, ("transport", "storage", "upload_endpoint", "start_endpoint", "remote_path")),
                 "printer": cls._select_runtime_fields(printer, ("state", "status", "provider", "storage", "transfer", "job", "host_configured")),
                 "slicer_result": cls._select_runtime_fields(specimen.get("slicer_result") or tool_result.get("slicer_result"), ("ok", "failure_code", "elapsed_sec", "simulated", "sliced_path")),
@@ -2077,9 +2182,50 @@ class MainController:
         benchmark = bo_result.get("benchmark") if isinstance(bo_result.get("benchmark"), dict) else {}
         if benchmark:
             compact["benchmark"] = cls._planning_scalar_summary(benchmark, keys=("strategy", "acquisition", "best_score", "iteration_count", "budget", "ok"))
+            strategies = cls._bo_strategies_from_result(bo_result)
+            if strategies:
+                compact["benchmark"]["strategies"] = {
+                    str(name): cls._planning_display_bo_strategy(payload)
+                    for name, payload in strategies.items()
+                    if isinstance(payload, dict)
+                }
         ranking = bo_result.get("candidate_ranking")
         if isinstance(ranking, list):
             compact["candidate_ranking"] = [cls._planning_scalar_summary(item) for item in ranking[:3] if isinstance(item, dict)]
+        return compact
+
+    @classmethod
+    def _planning_display_bo_strategy(cls, payload: dict[str, Any]) -> dict[str, Any]:
+        """Preserve the compact BO curve and acquisition trace needed by Live GUI plots."""
+        compact = cls._planning_scalar_summary(
+            payload,
+            keys=("strategy", "acquisition", "best_score", "iteration_count", "budget", "backend_active"),
+        )
+        curve = payload.get("curve")
+        if isinstance(curve, list):
+            compact["curve"] = [
+                cls._planning_scalar_summary(item, keys=("step", "best_score", "score", "candidate_id"))
+                for item in curve[-24:]
+                if isinstance(item, dict)
+            ]
+        surrogate_trace = payload.get("surrogate_trace")
+        if isinstance(surrogate_trace, list):
+            trace: list[dict[str, Any]] = []
+            for item in surrogate_trace[-24:]:
+                if not isinstance(item, dict):
+                    continue
+                entry = cls._planning_scalar_summary(
+                    item,
+                    keys=("iteration", "acquisition", "acquisition_value", "score", "candidate_id"),
+                )
+                selected = item.get("selected") if isinstance(item.get("selected"), dict) else {}
+                if selected:
+                    entry["selected"] = cls._planning_scalar_summary(
+                        selected,
+                        keys=("acquisition_value", "source_strategy", "parameters"),
+                    )
+                trace.append(entry)
+            compact["surrogate_trace"] = trace
         return compact
 
     @classmethod
@@ -2174,7 +2320,21 @@ class MainController:
                 ),
             )
         # Agent reports can use state.run_metadata; avoid shipping bulky per-message internals every poll.
-        for key in ("equipment_runtime_event", "macro_command", "equipment_result", "data_ledger", "data_acquisition", "visual_assertion", "physical_cross_check", "recovery", "handoff_packet", "vision_signal", "vision_cross_check_event", "guardian_gate"):
+        for key in (
+            "module_runtime",
+            "equipment_runtime_event",
+            "macro_command",
+            "equipment_result",
+            "data_ledger",
+            "data_acquisition",
+            "visual_assertion",
+            "physical_cross_check",
+            "recovery",
+            "handoff_packet",
+            "vision_signal",
+            "vision_cross_check_event",
+            "guardian_gate",
+        ):
             value = entry.get(key)
             if isinstance(value, dict):
                 compact[key] = compact_runtime_payload(value)
@@ -2300,6 +2460,8 @@ class MainController:
             "failure_code", "candidate_id", "specimen_id", "geometry_type", "objective_score",
             "uncertainty", "score", "risk_score", "created_at", "artifact_path", "report_url",
             "preview_url", "stl_url", "gcode_path", "result_file", "linux_path",
+            "incident_id", "alert_id", "device_class", "component", "severity",
+            "blocks_workflow", "requires_ack", "corrective_action",
         )
         out: dict[str, Any] = {}
         for key in (*default_keys, *keys):
@@ -3549,9 +3711,9 @@ class MainController:
             "Treat `실험 수행` as start_live_run only when required design values are complete; otherwise ask for missing values.\n"
             "Do not add runtime-safety disclaimers. Focus on mission contract, missing values, and the next handoff.\n"
             "Do not use LaTeX math notation. Use plain text arrows like '->' for routes.\n"
-            "For normal Live GUI execution, `실험 수행` means generate the design and proceed to actual Prusa MK4S print upload/start through Specimen Making Agent.\n"
+            "For normal Live GUI execution, `실험 수행` means generate the design and proceed to the selected printer bridge through Specimen Making Agent. The default selected printer bridge is Bambu Lab X2D.\n"
             "For `테스트 모드`, keep printer actions virtual/read-only unless Specimen Making Agent later asks for the printer path and the operator explicitly chooses `실제 출력`.\n"
-            "Use validated printer defaults unless the operator overrides them: Prusa MK4S, USB storage, 0.4 mm nozzle, 0.2 mm layer height, PLA-oriented profile.\n"
+            "Use validated active-printer defaults unless the operator overrides them. Bambu Lab X2D uses guarded HTTP artifact/SPC Readiness/start gates; Prusa MK4S is explicit profile selection only.\n"
             "Ask for experimental objective, material, specimen size, structure/domain, and any printer/slicer override needed before handoff.\n"
             "If the operator includes `실험 수행` and required design inputs are complete, the controller will hand off to DesignAgent and then continue to the Specimen Making Agent.\n"
             "Respond in concise Korean as the OrchestratorAgent. Use at most 6 short bullets or 140 Korean words.\n\n"
@@ -3563,7 +3725,7 @@ class MainController:
             "Required response shape:\n"
             "- Ask for missing experiment-design and live-print inputs.\n"
             "- Summarize the proposed route only once, briefly.\n"
-            "- Tell the operator that including `실험 수행` starts DesignAgent -> Specimen Making Agent and, in live mode, PrusaLink upload/start.\n"
+            "- Tell the operator that including `실험 수행` starts DesignAgent -> Specimen Making Agent and, in live mode, the selected printer bridge with SPC Readiness/start gates.\n"
         )
 
     async def _live_guideline_context(self, *, operator_message: str, goal: str) -> str:
@@ -3639,8 +3801,8 @@ class MainController:
             "    \"fdm_max_gyroid_wall_cell_ratio\": 0.28,\n"
             "    \"expected_mass_g\": 18.0,\n"
             "    \"max_print_time_min\": 120,\n"
-            "    \"printer_model\": \"Prusa MK4S\",\n"
-            "    \"printer_profile\": \"prusa_mk4s_pla_0p4_nozzle\",\n"
+            "    \"printer_model\": \"Bambu Lab X2D\",\n"
+            "    \"printer_profile\": \"bambulab_x2d_pla_0p4_nozzle\",\n"
             "    \"slicer_profile_hint\": \"0.2mm_quality\",\n"
             "    \"nozzle_diameter_mm\": 0.4,\n"
             "    \"layer_height_mm\": 0.2,\n"
@@ -3649,8 +3811,8 @@ class MainController:
             "    \"first_layer_speed_mm_s\": 10.0,\n"
             "    \"bed_temperature_c\": 60.0,\n"
             "    \"first_layer_bed_temperature_c\": 60.0,\n"
-            "    \"storage\": \"usb\",\n"
-            "    \"print\": {\"storage\": \"usb\", \"start_immediately\": false, \"overwrite\": true}\n"
+            "    \"storage\": \"ftps\",\n"
+            "    \"print\": {\"storage\": \"ftps\", \"start_immediately\": false, \"overwrite\": true}\n"
             "  }\n"
             "}\n"
             "```\n\n"
@@ -3668,9 +3830,9 @@ class MainController:
             f"Active graph stage order is {route}. "
             "Design Agent chooses metamaterial parameters; deterministic geometry tools create STL; "
             "Specimen Making Agent owns printer.prepare and printer/ejection preparation. "
-            "Validated live printer path is Prusa MK4S -> PrusaSlicer -> PrusaLink Digest auth -> USB storage -> upload/start. "
+            "Validated live printer path uses the selected printer bridge. Default is Bambu Lab X2D -> Bambu slicer artifact -> Bambu MQTT/FTPS/HTTP artifact readiness -> guarded SPC Readiness/start gates. Prusa MK4S remains explicit profile selection only. "
             "Live mode may physically print after `실험 수행`; test modes stay virtual/read-only unless the operator explicitly selects `실제 출력` at the Specimen Making Agent printer-path prompt or sends `테스트 모드, 실제 출력`. "
-            "Auto ejection uses a gated bed-sweep append G-code path when explicitly enabled. "
+            "Bambu autoejection uses a verified external provider handoff; Prusa auto ejection uses a gated bed-sweep append G-code path only when Prusa is explicitly selected. "
             "Do not use LaTeX route notation such as $\\rightarrow$; use '->' only."
         )
 
@@ -3970,8 +4132,19 @@ class MainController:
             values["objective_direction"] = direction
         if re.search(r"\bprusa\s*mk4s?\b", text, flags=re.IGNORECASE):
             values["printer_model"] = "Prusa MK4S"
+            values["printer_profile_id"] = "prusa_mk4s_lab_01"
+            values["printer_profile"] = "prusa_mk4s_pla_0p4_nozzle"
+            values["storage"] = "usb"
+            values.setdefault("print", {"storage": "usb", "start_immediately": False, "overwrite": True})
         elif re.search(r"\bprusa\s*mk3s?\b", text, flags=re.IGNORECASE):
             values["printer_model"] = "Prusa MK3S"
+            values["storage"] = "usb"
+        elif re.search(r"\bbambu(?:\\s*lab)?\\s*x2d\b|\bx2d\b", text, flags=re.IGNORECASE):
+            values["printer_model"] = "Bambu Lab X2D"
+            values["printer_profile_id"] = "bambulab_x2d_lab_01"
+            values["printer_profile"] = "bambulab_x2d_pla_0p4_nozzle"
+            values["storage"] = "ftps"
+            values.setdefault("print", {"storage": "ftps", "start_immediately": False, "overwrite": True})
         nozzle = re.search(r"(?:nozzle|노즐)\s*[:=]?\s*(\d+(?:\.\d+)?)\s*mm", text, flags=re.IGNORECASE)
         if nozzle:
             values["nozzle_diameter_mm"] = float(nozzle.group(1))
@@ -4059,8 +4232,15 @@ class MainController:
 
     @staticmethod
     def _validated_printer_defaults() -> dict[str, Any]:
-        """Return operator-controlled MK4S/PrusaLink defaults."""
+        """Return operator-controlled print defaults adapted to the active printer profile."""
         profile = load_prusa_print_profile()
+        try:
+            manager = PrinterDeviceBridgeManager.from_devices_config(load_all_configs(resolve_path("configs")))
+            selected_profile, _reason = manager.fleet_selection()
+            profile = adapt_print_profile_for_provider(profile, selected_profile.provider)
+        except Exception:
+            # Keep Live GUI usable even if the optional fleet config cannot be read.
+            pass
         allowed = (
             "material",
             "printer_model",
@@ -4209,7 +4389,7 @@ class MainController:
                 ),
             ),
             ("최대 출력시간", constraints.get("max_print_time_min")),
-            ("PrusaLink storage", constraints.get("storage")),
+            ("전송/storage", constraints.get("storage")),
             ("스커트/브림/래프트", "사용" if constraints.get("skirt_enabled") else "미사용"),
             (
                 "cap/skin",
@@ -4240,7 +4420,7 @@ class MainController:
             "한 번에 입력하는 예:\n"
             "\"PLA로 30 x 30 x 30 mm TPMS gyroid 압축 시편을 만들고, "
             "specific energy absorption을 최대화. FDM 출력 가능한 closed-shell 구조로 하고, "
-            "프린터는 Prusa MK4S, nozzle 0.4 mm, layer 0.2 mm, "
+            "프린터는 Bambu Lab X2D, nozzle 0.4 mm, layer 0.2 mm, "
             "최대 출력 시간 120분. 실험 수행\""
         )
 
@@ -4325,13 +4505,13 @@ class MainController:
             "fdm_max_bridge_distance_mm": min(test_unit_cell_size_mm, 10.0),
             "fdm_max_unsupported_overhang_deg": 45.0,
             "fdm_max_gyroid_wall_cell_ratio": 0.28,
-            "printer_model": printer_defaults.get("printer_model", "Prusa MK4S"),
-            "printer_profile": printer_defaults.get("printer_profile", "prusa_mk4s_pla_0p4_nozzle"),
+            "printer_model": printer_defaults.get("printer_model", "Bambu Lab X2D"),
+            "printer_profile": printer_defaults.get("printer_profile", "bambulab_x2d_pla_0p4_nozzle"),
             "slicer_profile_hint": printer_defaults.get("slicer_profile_hint", "0.2mm_quality"),
             "nozzle_diameter_mm": printer_defaults.get("nozzle_diameter_mm", 0.4),
-            "storage": printer_defaults.get("storage", "usb"),
+            "storage": printer_defaults.get("storage", "ftps"),
             "print": {
-                "storage": printer_defaults.get("storage", "usb"),
+                "storage": printer_defaults.get("storage", "ftps"),
                 "start_immediately": False,
                 "overwrite": printer_defaults.get("overwrite", True),
                 "physical_intent": False,
@@ -5010,15 +5190,37 @@ class MainController:
         upload_result = print_result.get("upload") if isinstance(print_result.get("upload"), dict) else {}
         start_result = print_result.get("start") if isinstance(print_result.get("start"), dict) else {}
         ejection_result = specimen_payload.get("ejection_result") if isinstance(specimen_payload.get("ejection_result"), dict) else {}
+        selected_printer = (
+            tool_result.get("selected_printer")
+            if isinstance(tool_result.get("selected_printer"), dict)
+            else specimen_payload.get("selected_printer")
+            if isinstance(specimen_payload.get("selected_printer"), dict)
+            else {}
+        )
+        provider = (
+            printer.get("provider")
+            or tool_result.get("provider")
+            or selected_printer.get("provider")
+            or experiment_spec.get("printer_provider")
+            or "selected_bridge"
+        )
+        printer_label = (
+            selected_printer.get("label")
+            or experiment_spec.get("printer_model")
+            or settings.get("printer_model")
+            or provider
+        )
         storage_status = self._printer_storage_summary(printer.get("storage"), prusalink.get("storage"))
 
         lines = [
-            "Specimen Making Agent가 PrusaSlicer/PrusaLink 실행 준비를 완료했습니다.",
+            "Specimen Making Agent가 선택된 3DP bridge 실행 준비를 완료했습니다.",
             "",
             "STL 형상 확인은 Design Agent artifact에서 처리하고, 이 단계는 슬라이싱 설정과 프린터 bridge 진행 상태를 표시합니다.",
             "",
-            "PrusaSlicer 적용 설정값:",
+            "Slicer / artifact 적용 설정값:",
             f"- specimen_id: {self._runtime_value(specimen_payload.get('specimen_id', experiment_spec.get('specimen_id')))}",
+            f"- selected_printer: {self._runtime_value(printer_label)}",
+            f"- provider: {self._runtime_value(provider)}",
             f"- printer_profile: {self._runtime_value(settings.get('printer_profile') or experiment_spec.get('printer_profile'))}",
             f"- material: {self._runtime_value(settings.get('material') or experiment_spec.get('material'))}",
             f"- slicer_profile_hint: {self._runtime_value(settings.get('slicer_profile_hint') or experiment_spec.get('slicer_profile_hint'))}",
@@ -5043,14 +5245,14 @@ class MainController:
             f"- slicer_simulated: {self._runtime_value(settings.get('simulated'))}",
             f"- slicer_command: {self._runtime_command(settings.get('resolved_command'))}",
             "",
-            "PrusaLink/Bridge 결과:",
+            "Printer Bridge 결과:",
             f"- printer_prepare_status: {self._runtime_value(specimen_payload.get('printer_prepare_status'))}",
             f"- printer_mode: {self._runtime_value(specimen_payload.get('printer_mode'))}",
             f"- printer_path: {self._runtime_value(specimen_payload.get('printer_path'))}",
             f"- printer_state: {self._runtime_value(printer.get('state'))}",
-            f"- prusalink_transport: {self._runtime_value(prusalink.get('transport'))}",
+            f"- bridge_transport: {self._runtime_value(prusalink.get('transport') or printer.get('transfer'))}",
             f"- storage: {storage_status}",
-            f"- upload_endpoint: {self._runtime_value(prusalink.get('upload_endpoint'))}",
+            f"- transfer_endpoint: {self._runtime_value(prusalink.get('upload_endpoint') or printer.get('artifact_url'))}",
             f"- upload_status: {self._runtime_value(upload_result.get('status') or upload_result.get('failure_code'))}",
             f"- upload_http_status: {self._runtime_value(upload_result.get('status_code'))}",
             f"- upload_elapsed_sec: {self._runtime_value(upload_result.get('elapsed_sec'))}",
@@ -5072,8 +5274,8 @@ class MainController:
 
     @staticmethod
     def _printer_storage_summary(storage_result: Any, selected_storage: Any) -> str:
-        """Summarize PrusaLink storage readiness for operator-facing runtime text."""
-        selected = str(selected_storage or "usb")
+        """Summarize selected printer storage readiness for operator-facing runtime text."""
+        selected = str(selected_storage or "storage")
         if not isinstance(storage_result, dict):
             return selected
         if not storage_result.get("ok", False):
@@ -5162,10 +5364,16 @@ class MainController:
 
         if request_type == "printer_connection_info":
             if not self._is_connection_retry_message(message):
+                connection_path = str(
+                    input_request.get("connection_memory_path")
+                    or input_request.get("settings_path")
+                    or "memory/printer_connection.json"
+                )
+                provider = str(input_request.get("provider") or "selected printer bridge")
                 await self._append_planning_message(
                     {
                         "role": "printer_ai",
-                        "content": "`memory/prusa_connection.json`에 PrusaLink host/auth 값을 채운 뒤 `연결정보 입력 완료`라고 보내면 재시도합니다.",
+                        "content": f"`{connection_path}`에 {provider} 연결 정보를 채운 뒤 `연결정보 입력 완료`라고 보내면 재시도합니다.",
                         "timestamp": datetime.now(timezone.utc).isoformat(),
                         "model": "specimen_agent",
                         "ok": True,
@@ -5174,7 +5382,7 @@ class MainController:
                     event_type="planning_specimen_input_required",
                     message="SpecimenMakingAgent connection info still pending.",
                 )
-                return {"ok": True, "message": "SpecimenMakingAgent waiting for PrusaLink connection info.", "session": self.planning_snapshot(session_id=session_id)}
+                return {"ok": True, "message": "SpecimenMakingAgent waiting for selected printer bridge connection info.", "session": self.planning_snapshot(session_id=session_id)}
             self._state.run_metadata.pop("pending_specimen_input", None)
             return await self._resume_specimen_after_operator_input(
                 experiment_spec=dict(self._state.current_experiment_spec or {}),
@@ -5547,6 +5755,31 @@ class MainController:
                 return node
         return None
 
+    def _module_runtime_for_stage(self, stage: Stage, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Return compact module runtime metadata for Live GUI messages."""
+        payload = payload if isinstance(payload, dict) else {}
+        module_runtime = payload.get("module_runtime") if isinstance(payload.get("module_runtime"), dict) else {}
+        node = self._graph_node_for_stage(stage)
+        if node is None:
+            return {
+                **module_runtime,
+                "module_id": stage.value,
+                "graph_module_id": str(module_runtime.get("module_id") or ""),
+                "stage": stage.value,
+                "handler": "",
+                "label": self._planning_stage_role(stage),
+            }
+        original_module_id = str(module_runtime.get("module_id") or getattr(node, "module_id", "") or "")
+        return {
+            **module_runtime,
+            "module_id": getattr(node, "id", stage.value) or stage.value,
+            "graph_module_id": original_module_id,
+            "stage": stage.value,
+            "handler": getattr(node, "handler", "") or "",
+            "label": getattr(node, "label", "") or stage.value,
+            "kind": getattr(node, "kind", "") or "",
+        }
+
     def _next_configured_stage_after(self, stage: Stage, *, fallback: Stage | None = None) -> Stage | None:
         """Resolve the next stage from the active graph transitions."""
         config = self._active_graph_config()
@@ -5878,7 +6111,7 @@ class MainController:
             if stage not in planning_stages:
                 return
 
-            module_runtime = payload.get("module_runtime") if isinstance(payload.get("module_runtime"), dict) else {}
+            module_runtime = self._module_runtime_for_stage(stage, payload)
             agent_name = self._planning_agent_from_payload(payload)
             if event_type == "node.started":
                 await self._append_planning_message(
@@ -6830,6 +7063,62 @@ class MainController:
             "message": f"Model unloaded: {clean_model}",
             "result": result,
             "status": await self.runtime_model_statuses(),
+        }
+
+    async def apply_openai_api_key(self, api_key: str, *, enabled: bool, emit_event: bool = True) -> dict[str, Any]:
+        """Apply the saved OpenAI API key and update backend fallback priority."""
+        clean_key = str(api_key or "").strip()
+        use_api_key = bool(enabled and clean_key)
+        effective_key = clean_key if use_api_key else ""
+        if use_api_key:
+            os.environ["OPENAI_API_KEY"] = clean_key
+        else:
+            os.environ.pop("OPENAI_API_KEY", None)
+
+        touched = 0
+        seen: set[int] = set()
+        backend_maps = (
+            self._deps.agent_context.primary_backends,
+            self._deps.agent_context.fallback_backends,
+        )
+        for registry in backend_maps:
+            for backend in registry.values():
+                ident = id(backend)
+                if ident in seen:
+                    continue
+                seen.add(ident)
+                if hasattr(backend, "_api_key"):
+                    setattr(backend, "_api_key", effective_key)
+                    touched += 1
+
+        openai_backend = self._deps.agent_context.primary_backends.get("openai")
+        for backend_name, primary_backend in self._deps.agent_context.primary_backends.items():
+            if use_api_key and openai_backend is not None:
+                self._deps.agent_context.backend_fallbacks[backend_name] = "openai"
+                self._deps.agent_context.fallback_backends[backend_name] = openai_backend
+            else:
+                self._deps.agent_context.backend_fallbacks[backend_name] = backend_name
+                self._deps.agent_context.fallback_backends[backend_name] = primary_backend
+
+        active_fallback = self._deps.agent_context.backend_fallbacks.get(
+            self._deps.agent_context.active_backend,
+            self._deps.agent_context.active_backend,
+        )
+        if emit_event:
+            await self._emit_control_event(
+                "runtime_api_key_load" if use_api_key else "runtime_api_key_unload",
+                (
+                    "OpenAI API key enabled as first inference route."
+                    if use_api_key
+                    else "OpenAI API key disabled and local inference restored as first route."
+                ),
+            )
+        return {
+            "ok": True,
+            "enabled": use_api_key,
+            "updated_backends": touched,
+            "primary_backend": "openai" if use_api_key else self._deps.agent_context.active_backend,
+            "fallback_backend": active_fallback,
         }
 
     def _ollama_base_url(self) -> str:

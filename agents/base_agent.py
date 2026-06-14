@@ -124,9 +124,27 @@ class AgentContext:
             return await coro
 
         errors: list[Exception] = []
-        attempts: list[tuple[str, BaseLLMBackend, str, str]] = [
-            (self.active_backend, primary_backend, selection.primary, selection.role),
-        ]
+        attempts: list[tuple[str, BaseLLMBackend, str, str]] = []
+
+        fallback_backend_name = self.backend_fallbacks.get(self.active_backend, "")
+        fallback_backend = self.fallback_backends.get(self.active_backend, self.fallback_backend)
+        backend_fallback_attempt: tuple[str, BaseLLMBackend, str, str] | None = None
+        if fallback_backend_name and fallback_backend_name != self.active_backend:
+            fallback_router = self.model_routers.get(fallback_backend_name, router)
+            fallback_selection = fallback_router.select(task_type)
+            backend_fallback_attempt = (
+                fallback_backend_name,
+                fallback_backend,
+                fallback_selection.primary,
+                f"{fallback_selection.role}:backend_fallback",
+            )
+
+        api_key_primary = fallback_backend_name == "openai" and backend_fallback_attempt is not None
+        if api_key_primary:
+            attempts.append(backend_fallback_attempt)
+
+        attempts.append((self.active_backend, primary_backend, selection.primary, selection.role))
+
         if selection.fallback and selection.fallback != selection.primary:
             attempts.append(
                 (
@@ -137,20 +155,9 @@ class AgentContext:
                 )
             )
 
-        fallback_backend_name = self.backend_fallbacks.get(self.active_backend, "")
-        fallback_backend = self.fallback_backends.get(self.active_backend, self.fallback_backend)
-        if fallback_backend_name and fallback_backend_name != self.active_backend:
-            fallback_router = self.model_routers.get(fallback_backend_name, router)
-            fallback_selection = fallback_router.select(task_type)
-            attempts.append(
-                (
-                    fallback_backend_name,
-                    fallback_backend,
-                    fallback_selection.primary,
-                    f"{fallback_selection.role}:backend_fallback",
-                )
-            )
-        elif fallback_backend is not primary_backend:
+        if backend_fallback_attempt is not None and not api_key_primary:
+            attempts.append(backend_fallback_attempt)
+        elif backend_fallback_attempt is None and fallback_backend is not primary_backend:
             fallback_model = selection.fallback or selection.primary
             attempts.append(
                 (
@@ -169,6 +176,8 @@ class AgentContext:
             seen.add(key)
             try:
                 response = await _call_backend(backend, model, role)
+                if not str(response.text or "").strip():
+                    raise RuntimeError(f"empty LLM response from backend={backend_name} model={model}")
                 await self._notify_model_call(
                     task_type=task_type,
                     model=model,

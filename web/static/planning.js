@@ -122,6 +122,8 @@ let liveGraphSelectionCleared = false;
 let liveGraphFocusPending = false;
 let liveGraphLastFocusKey = "";
 let liveSelectedReportSectionTitle = "Overview / Summary";
+let liveDesignCaptureViewerOpen = false;
+let liveDesignCaptureViewerIndex = 0;
 let liveTimelineFilter = "all";
 let liveApprovals = { approvals: [], pending: [], resolved: [] };
 let liveGuardianStatus = null;
@@ -1906,7 +1908,7 @@ function planningDerivedEvents() {
 }
 
 function liveEventSources() {
-  const base = liveRunEvents.length ? liveRunEvents : liveRecentEvents;
+  const base = currentRunEventSources();
   const combined = [...base, ...planningDerivedEvents()];
   const seen = new Set();
   return combined.filter((event) => {
@@ -2357,12 +2359,34 @@ function renderSpecimenRuntimeCard(msg) {
   const fabricationIntent = fabricationReport.fabrication_intent || {};
   const digitalThread = fabricationReport.digital_thread || {};
   const processPlan = fabricationReport.process_plan || {};
+  const printerRuntime = fabricationReport.printer_runtime || {};
   const fabricationOutcome = fabricationReport.fabrication_outcome || {};
   const qualityGates = Array.isArray(fabricationReport.quality_gates) ? fabricationReport.quality_gates : [];
   const toolResult = specimen.tool_result || {};
   const settings = specimen.slicer_settings || toolResult.slicer_settings || {};
   const prusalink = specimen.prusalink || toolResult.prusalink || {};
   const printer = specimen.printer || toolResult.printer || {};
+  const selectedPrinter = specimen.selected_printer || toolResult.selected_printer || printerRuntime.selected_printer || {};
+  const deviceScreen = specimen.device_screen || toolResult.device_screen || printerRuntime.device_screen || {};
+  const deviceConnection = deviceScreen.connection || {};
+  const deviceActions = deviceScreen.actions || {};
+  const preprintGate = specimen.preprint_gate || toolResult.preprint_gate || toolResult.start_gate || printerRuntime.preprint_gate || {};
+  const readinessLevels = Array.isArray(specimen.readiness_levels)
+    ? specimen.readiness_levels
+    : Array.isArray(toolResult.readiness_levels)
+      ? toolResult.readiness_levels
+      : Array.isArray(printerRuntime.readiness_levels)
+        ? printerRuntime.readiness_levels
+        : [];
+  const operatorActions = Array.isArray(specimen.operator_actions)
+    ? specimen.operator_actions
+    : Array.isArray(toolResult.operator_actions)
+      ? toolResult.operator_actions
+      : Array.isArray(printerRuntime.operator_actions)
+        ? printerRuntime.operator_actions
+        : [];
+  const autoejection = specimen.autoejection || toolResult.autoejection || toolResult.autoejection_gate || printerRuntime.autoejection || {};
+  const autoejectionHandoff = specimen.autoejection_handoff || toolResult.autoejection_handoff || toolResult.handoff || autoejection.handoff || printerRuntime.autoejection_handoff || {};
   const slicerResult = specimen.slicer_result || toolResult.slicer_result || {};
   const gcodeValidation = specimen.gcode_validation || toolResult.gcode_validation || {};
   const printResult = specimen.print_result || toolResult.print_result || {};
@@ -2379,6 +2403,8 @@ function renderSpecimenRuntimeCard(msg) {
     ? `${qualityGates.filter((gate) => gate.status === "pass").length}/${qualityGates.length} pass · blocked=${qualityGates.filter((gate) => gate.status === "blocked").length} · fail=${qualityGates.filter((gate) => gate.status === "fail").length}`
     : "-";
   const gateItems = qualityGates.slice(0, 9).map((gate) => `<li>${escapeHtml(gate.gate || "gate")} · <strong>${escapeHtml(gate.status || "unknown")}</strong>${gate.repair ? ` · ${escapeHtml(renderRuntimeValue(gate.repair))}` : ""}</li>`).join("");
+  const readinessItems = readinessLevels.slice(0, 8).map((item) => `<li>${escapeHtml(item.level_id || item.id || item.name || "readiness")} · <strong>${escapeHtml(item.status || "unknown")}</strong>${item.reason || item.summary || item.detail ? ` · ${escapeHtml(compactText(item.reason || item.summary || item.detail, 90))}` : ""}</li>`).join("");
+  const operatorActionItems = operatorActions.slice(0, 6).map((item) => `<li>${escapeHtml(item.action_id || item.id || "operator_action")} · <strong>${escapeHtml(item.status || "required")}</strong>${item.label || item.summary ? ` · ${escapeHtml(compactText(item.label || item.summary, 90))}` : ""}</li>`).join("");
   return `
     <div class="printer-runtime-card">
       <div class="runtime-card-section runtime-card-wide">
@@ -2400,7 +2426,7 @@ function renderSpecimenRuntimeCard(msg) {
         ${gateItems ? `<ul class="report-list compact">${gateItems}</ul>` : ""}
       </div>
       <div class="runtime-card-section">
-        <h4>PrusaSlicer Settings</h4>
+        <h4>Slicer / Artifact Settings</h4>
         ${runtimeRows([
           ["printer_profile", settings.printer_profile],
           ["material", settings.material],
@@ -2428,8 +2454,28 @@ function renderSpecimenRuntimeCard(msg) {
         ${command ? `<pre class="runtime-command">${escapeHtml(command)}</pre>` : ""}
       </div>
       <div class="runtime-card-section">
-        <h4>PrusaLink / Bridge</h4>
+        <h4>Printer Bridge / SPC Readiness</h4>
         ${runtimeRows([
+          ["provider", printer.provider || toolResult.provider || selectedPrinter.provider || digitalThread.printer_provider],
+          ["selected_printer", selectedPrinter.label || selectedPrinter.profile_id || selectedPrinter.model],
+          ["device_mqtt", deviceConnection.mqtt],
+          ["device_transfer", deviceConnection.transfer],
+          ["device_video", deviceConnection.video],
+          ["can_upload", deviceActions.can_upload],
+          ["can_start_print", deviceActions.can_start_print],
+          ["preprint_state", preprintGate.state],
+          ["technical_ready_for_start", preprintGate.technical_ready_for_start],
+          ["approval_ready_for_start", preprintGate.approval_ready_for_start],
+          ["ready_for_live_print", preprintGate.ready_for_live_print],
+          ["preprint_blockers", preprintGate.blockers],
+          ["autoejection_status", autoejection.status],
+          ["autoejection_blockers", autoejection.blockers],
+          ["autoejection_handoff", autoejectionHandoff.schema || autoejectionHandoff.status],
+          ["recommended_consumer_agent", autoejectionHandoff.recommended_consumer_agent || autoejectionHandoff.next_owner],
+          ["next_tool", autoejectionHandoff.next_tool],
+          ["requires_guardian_approval", autoejectionHandoff.requires_guardian_approval],
+          ["requires_operator_confirmation", autoejectionHandoff.requires_operator_confirmation],
+          ["motion_started", autoejectionHandoff.motion_started],
           ["prepare_status", specimen.printer_prepare_status],
           ["printer_mode", specimen.printer_mode],
           ["printer_path", specimen.printer_path],
@@ -2461,6 +2507,8 @@ function renderSpecimenRuntimeCard(msg) {
           ["ejection_head_x_source", ejectionResult.resolved && ejectionResult.resolved.head_x_source],
           ["ejection_object_center_x_mm", ejectionResult.object_bounds && ejectionResult.object_bounds.center_x_mm],
         ])}
+        ${readinessItems ? `<h5>SPC Readiness Levels</h5><ul class="report-list compact">${readinessItems}</ul>` : ""}
+        ${operatorActionItems ? `<h5>Operator Actions</h5><ul class="report-list compact">${operatorActionItems}</ul>` : ""}
       </div>
       <div class="runtime-card-section runtime-card-wide">
         <h4>Step Trace</h4>
@@ -3433,10 +3481,9 @@ function messageCountsByAgent(messages) {
 function liveNotificationCountsByAgent(session = liveLastSession) {
   const counts = messageCountsByAgent((session && session.messages) || planningMessagesCache || []);
   const seen = new Set();
-  const eventSources = [];
-  if (Array.isArray(liveRunEvents)) eventSources.push(...liveRunEvents);
-  if (Array.isArray(liveRecentEvents)) eventSources.push(...liveRecentEvents);
+  const eventSources = currentRunEventSources();
   eventSources.forEach((event, index) => {
+    if (!isAgentNotificationEvent(event)) return;
     const payload = eventPayload(event);
     const eventKey = String(event.event_id || event.id || payload.event_id || `${event.event_type || event.type || "event"}:${event.ts || event.timestamp || index}`);
     if (seen.has(eventKey)) return;
@@ -3458,7 +3505,7 @@ function markLiveAgentRead(agentId = liveSelectedAgent, session = liveLastSessio
 }
 
 function eventStatusForAgent(agentId, state, running) {
-  const events = liveRunEvents.length ? liveRunEvents : liveRecentEvents;
+  const events = currentRunEventSources();
   const agentEvents = events.filter((event) => agentIdFromEvent(event) === agentId);
   const hasError = agentEvents.some((event) => String(event.level || event.severity || "").toLowerCase() === "error" || String(event.status || "").toLowerCase() === "failed");
   if (hasError) return "error";
@@ -4466,7 +4513,7 @@ function agentSpecificReportProfile(report, status, agentLabel) {
     },
     specimen: {
       title: "Manufacturing Digital Thread / Printer Runtime",
-      summary: "Tracks fabrication intent, STL-to-G-code digital thread, process plan, quality gates, PrusaLink runtime evidence, monitoring handoff, and feedback to the next loop.",
+      summary: "Tracks fabrication intent, STL-to-G-code digital thread, process plan, quality gates, selected printer bridge evidence, monitoring handoff, and feedback to the next loop.",
       rows: [
         ["fabrication_schema", specimenFabricationReport.schema || "-"],
         ["intent", `${specimenIntent.mode || "-"} / ${specimenIntent.printer_path || latestReportPayload(report, ["printer_path", "mode"]) || "-"}`],
@@ -4751,10 +4798,21 @@ function renderSpecimenReportDetails(report) {
   const ejection = plan.ejection_policy || {};
   const monitoring = fabricationReport.monitoring_plan || {};
   const runtime = fabricationReport.printer_runtime || {};
+  const selectedPrinter = runtime.selected_printer || {};
+  const deviceScreen = runtime.device_screen || {};
+  const deviceConnection = deviceScreen.connection || {};
+  const deviceActions = deviceScreen.actions || {};
+  const preprintGate = runtime.preprint_gate || {};
+  const readinessLevels = Array.isArray(runtime.readiness_levels) ? runtime.readiness_levels : [];
+  const operatorActions = Array.isArray(runtime.operator_actions) ? runtime.operator_actions : [];
+  const autoejectionGate = runtime.autoejection || {};
+  const autoejectionHandoff = runtime.autoejection_handoff || autoejectionGate.handoff || {};
   const outcome = fabricationReport.fabrication_outcome || {};
   const feedback = fabricationReport.feedback_to_design || {};
   const gates = Array.isArray(fabricationReport.quality_gates) ? fabricationReport.quality_gates : [];
   const gateItems = gates.map((gate) => `${gate.gate || "gate"} · ${gate.status || "unknown"}${gate.repair ? ` · repair=${renderRuntimeValue(gate.repair)}` : ""}`);
+  const readinessItems = readinessLevels.map((item) => `${item.level_id || item.id || "readiness"} · ${item.status || "unknown"}${item.reason || item.summary ? ` · ${item.reason || item.summary}` : ""}`);
+  const operatorActionItems = operatorActions.map((item) => `${item.action_id || item.id || "operator_action"} · ${item.status || "required"}${item.label || item.summary ? ` · ${item.label || item.summary}` : ""}`);
   const defectClasses = Array.isArray(monitoring.defect_classes) ? monitoring.defect_classes.join(", ") : "-";
   return `
     <div class="live-agent-specific-specimen-details">
@@ -4798,6 +4856,26 @@ function renderSpecimenReportDetails(report) {
       ${renderReportList(gateItems, "No manufacturing quality gates recorded.")}
       <h5>Printer Runtime</h5>
       ${runtimeRows([
+        ["provider", runtime.provider || thread.printer_provider || selectedPrinter.provider || "-"],
+        ["selected_printer", selectedPrinter.label || selectedPrinter.profile_id || "-"],
+        ["device_mqtt", deviceConnection.mqtt || "-"],
+        ["device_transfer", deviceConnection.transfer || "-"],
+        ["device_video", deviceConnection.video || "-"],
+        ["can_upload", deviceActions.can_upload === undefined ? "-" : deviceActions.can_upload],
+        ["can_start_print", deviceActions.can_start_print === undefined ? "-" : deviceActions.can_start_print],
+        ["preprint_state", preprintGate.state || "-"],
+        ["technical_ready_for_start", preprintGate.technical_ready_for_start === undefined ? "-" : preprintGate.technical_ready_for_start],
+        ["approval_ready_for_start", preprintGate.approval_ready_for_start === undefined ? "-" : preprintGate.approval_ready_for_start],
+        ["ready_for_live_print", preprintGate.ready_for_live_print === undefined ? "-" : preprintGate.ready_for_live_print],
+        ["preprint_blockers", preprintGate.blockers || []],
+        ["autoejection_status", autoejectionGate.status || "-"],
+        ["autoejection_blockers", autoejectionGate.blockers || []],
+        ["autoejection_handoff", autoejectionHandoff.schema || autoejectionHandoff.status || "-"],
+        ["recommended_consumer_agent", autoejectionHandoff.recommended_consumer_agent || autoejectionHandoff.next_owner || "-"],
+        ["next_tool", autoejectionHandoff.next_tool || "-"],
+        ["requires_guardian_approval", autoejectionHandoff.requires_guardian_approval === undefined ? "-" : autoejectionHandoff.requires_guardian_approval],
+        ["requires_operator_confirmation", autoejectionHandoff.requires_operator_confirmation === undefined ? "-" : autoejectionHandoff.requires_operator_confirmation],
+        ["motion_started", autoejectionHandoff.motion_started === undefined ? "-" : autoejectionHandoff.motion_started],
         ["prepare_status", runtime.prepare_status || "-"],
         ["mode", runtime.mode || "-"],
         ["path", runtime.path || "-"],
@@ -4806,10 +4884,12 @@ function renderSpecimenReportDetails(report) {
         ["start", runtime.start && (runtime.start.status || runtime.start.failure_code || (runtime.start.ok ? "ok" : "-"))],
         ["ejection", runtime.ejection && (runtime.ejection.status || runtime.ejection.failure_code || "-")],
       ])}
+      ${renderReportList(readinessItems, "No SPC readiness levels recorded.", 12)}
+      ${renderReportList(operatorActionItems, "No operator action contract recorded.", 8)}
       ${Array.isArray(runtime.step_trace) && runtime.step_trace.length ? renderStepTrace(runtime.step_trace) : ""}
       <h5>Monitoring / Feedback</h5>
       ${runtimeRows([
-        ["observe_prusalink_status", monitoring.observe_prusalink_status],
+        ["observe_printer_bridge_status", monitoring.observe_printer_bridge_status === undefined ? monitoring.observe_prusalink_status : monitoring.observe_printer_bridge_status],
         ["observe_transfer_idle", monitoring.observe_transfer_idle],
         ["observe_camera_after_print", monitoring.observe_camera_after_print],
         ["layerwise_monitoring_available", monitoring.layerwise_monitoring_available],
@@ -6571,7 +6651,7 @@ function renderEventSparkline(report, options = {}) {
 
 function renderRuntimeSignalGraph(report, status) {
   const agentCounts = {};
-  (liveRunEvents.length ? liveRunEvents : liveRecentEvents).forEach((event) => {
+  currentRunEventSources().forEach((event) => {
     const agentId = agentIdFromEvent(event);
     agentCounts[agentId] = (agentCounts[agentId] || 0) + 1;
   });
@@ -7256,7 +7336,7 @@ function orchestratorContext(report, status) {
     ? Number(controlMissing.missing_count)
     : missingRows.filter((item) => item.missing).length;
   const warnings = report.warnings || [];
-  const events = (liveRunEvents.length ? liveRunEvents : liveRecentEvents).filter((event) => agentIdFromEvent(event) === "orchestrator" || eventTimelineKind(event) !== "info");
+  const events = currentRunEventSources().filter((event) => agentIdFromEvent(event) === "orchestrator" || eventTimelineKind(event) !== "info");
   const activeRoute = route.find((item) => /active|running|waiting/i.test(String(item.status || ""))) || route[0] || {};
   const completedRouteCount = dashboardFiniteNumber(controlRouteState.completed_count) !== null
     ? Number(controlRouteState.completed_count)
@@ -8370,17 +8450,60 @@ function dsnRankingChartOption(payload) {
   };
 }
 
+function groupDesignHeatmapCells(rawCells) {
+  const groups = new Map();
+  (Array.isArray(rawCells) ? rawCells : []).forEach((raw, index) => {
+    const x = dashboardFiniteNumber(raw && raw.x);
+    const y = dashboardFiniteNumber(raw && raw.y);
+    const value = dashboardFiniteNumber(raw && raw.value);
+    if (x === null || y === null || value === null) return;
+    const status = String((raw && (raw.status || raw.candidate_status)) || "");
+    const selected = Boolean(raw && raw.selected) || /selected/i.test(status);
+    const cell = {
+      ...(raw || {}),
+      x,
+      y,
+      value,
+      status,
+      selected,
+      __sourceIndex: index,
+    };
+    const key = `${numberText(x, 4)}|${numberText(y, 4)}`;
+    const group = groups.get(key) || { x, y, members: [] };
+    group.members.push(cell);
+    groups.set(key, group);
+  });
+  return Array.from(groups.values()).map((group) => {
+    const members = group.members.slice().sort((a, b) => {
+      if (a.selected !== b.selected) return a.selected ? -1 : 1;
+      const scoreDelta = (b.value ?? Number.NEGATIVE_INFINITY) - (a.value ?? Number.NEGATIVE_INFINITY);
+      if (scoreDelta !== 0) return scoreDelta;
+      return (a.__sourceIndex || 0) - (b.__sourceIndex || 0);
+    });
+    const representative = members[0] || {};
+    const status = representative.selected && !/selected/i.test(String(representative.status || ""))
+      ? "selected"
+      : String(representative.status || "");
+    return {
+      ...representative,
+      x: group.x,
+      y: group.y,
+      value: representative.value,
+      status,
+      selected: Boolean(representative.selected),
+      member_count: members.length,
+      members: members.map((member) => ({
+        candidate_id: member.candidate_id || member.id || "candidate",
+        value: member.value,
+        status: member.status || "",
+        selected: Boolean(member.selected),
+      })),
+    };
+  });
+}
+
 function dsnHeatmapChartOption(payload) {
-  const cells = (Array.isArray(payload.cells) ? payload.cells : [])
-    .map((cell) => ({
-      ...cell,
-      x: dashboardFiniteNumber(cell.x),
-      y: dashboardFiniteNumber(cell.y),
-      value: dashboardFiniteNumber(cell.value),
-      selected: /selected/i.test(String(cell.status || "")),
-    }))
-    .filter((cell) => cell.x !== null && cell.y !== null && cell.value !== null)
-    .slice(0, 48);
+  const cells = groupDesignHeatmapCells(Array.isArray(payload.cells) ? payload.cells : []).slice(0, 48);
   if (!cells.length) return dsnEmptyChartOption("Waiting for sweep");
   const xCats = Array.from(new Set(cells.map((cell) => numberText(cell.x, 3)))).sort((a, b) => Number(a) - Number(b));
   const yCats = Array.from(new Set(cells.map((cell) => numberText(cell.y, 3)))).sort((a, b) => Number(a) - Number(b));
@@ -8397,8 +8520,19 @@ function dsnHeatmapChartOption(payload) {
       borderColor: "rgba(125,211,252,0.28)",
       textStyle: orcBaseChartTextStyle(),
       formatter: (params) => {
-        const cell = cells[params.dataIndex] || {};
-        return `${cell.candidate_id || "candidate"}<br/>rd ${numberText(cell.x, 3)} / wall ${numberText(cell.y, 3)}<br/>score ${numberText(cell.value, 3)}`;
+        const cell = (params.data && params.data.cell) || cells[params.dataIndex] || {};
+        const lines = [
+          `${cell.candidate_id || "candidate"}${cell.member_count > 1 ? ` +${cell.member_count - 1}` : ""}`,
+          `rd ${numberText(cell.x, 3)} / wall ${numberText(cell.y, 3)}`,
+          `score ${numberText(cell.value, 3)}`,
+        ];
+        if (Array.isArray(cell.members) && cell.members.length > 1) {
+          lines.push(...cell.members.slice(0, 5).map((member) => {
+            const selectedMark = member.selected ? " *" : "";
+            return `${member.candidate_id}${selectedMark}: ${numberText(member.value, 3)}`;
+          }));
+        }
+        return lines.join("<br/>");
       },
     },
     grid: { left: 48, right: 12, top: 12, bottom: 30 },
@@ -8428,7 +8562,15 @@ function dsnHeatmapChartOption(payload) {
     },
     series: [{
       type: "heatmap",
-      data: cells.map((cell) => [xCats.indexOf(numberText(cell.x, 3)), yCats.indexOf(numberText(cell.y, 3)), cell.value]),
+      data: cells.map((cell) => ({
+        value: [xCats.indexOf(numberText(cell.x, 3)), yCats.indexOf(numberText(cell.y, 3)), cell.value],
+        cell,
+        itemStyle: {
+          borderColor: cell.selected ? "rgba(103,232,249,0.95)" : "rgba(6,11,22,0.85)",
+          borderWidth: cell.selected ? 2.5 : 2,
+          borderRadius: 4,
+        },
+      })),
       label: { show: true, color: "#f8fafc", fontSize: 9, formatter: (params) => numberText(params.value[2], 2) },
       itemStyle: { borderColor: "rgba(6,11,22,0.85)", borderWidth: 2, borderRadius: 4 },
       emphasis: { itemStyle: { borderColor: "#67e8f9", borderWidth: 2 } },
@@ -10094,7 +10236,11 @@ function designActualSpecimenRows(screenReport, designReport, report) {
     if (!row) return;
     const name = String((artifact && artifact.name) || path.split("/").pop() || "").toLowerCase();
     const url = artifact.url || artifact.compat_url || artifact.download_url || "";
-    if (name === "viewer_capture.png") row.viewer_capture_url = url;
+    if (name === "viewer_capture.png") {
+      row.viewer_capture_url = url;
+      row.preview_render_kind = "viewer_capture_png";
+      row.preview_render_source = "generated_stl";
+    }
     else if (name === "specimen.stl" || /\.stl$/i.test(name)) row.stl_url = url;
     else if (/\.(?:gcode|bgcode)$/i.test(name)) row.gcode_url = url;
     else if (name === "handoff_package.json") row.handoff_package_url = url;
@@ -10116,6 +10262,8 @@ function designActualSpecimenRows(screenReport, designReport, report) {
       status: packet.status || buildQueue.queue_status || specimenReport.handoff_status?.status || "generated",
       readiness_score: readiness.readiness_score,
       viewer_capture_url: designRunArtifactUrlFromPath(layer.viewer_capture_path || thread.viewer_capture_path, report),
+      preview_render_kind: layer.viewer_capture_path || thread.viewer_capture_path ? "viewer_capture_png" : "",
+      preview_render_source: layer.viewer_capture_path || thread.viewer_capture_path ? "generated_stl" : "",
       stl_url: designRunArtifactUrlFromPath(layer.stl_path || thread.stl_path, report),
       gcode_url: designRunArtifactUrlFromPath(layer.gcode_path || thread.gcode_path, report),
       stl_path: layer.stl_path || thread.stl_path,
@@ -10199,22 +10347,149 @@ function designCandidateCapturePayload(item, screenReport, designReport, report,
 function renderDesignCaptureSnapshot(payload, candidateId, rank) {
   return `
     <canvas class="ar-design-capture-canvas" width="360" height="220" data-design-capture="${orcChartPayloadAttr(payload)}" aria-label="${escapeHtml(`3D viewer capture for ${candidateId}`)}"></canvas>
-    <span class="ar-design-capture-mode">VIEWER SNAPSHOT</span>
+    <span class="ar-design-capture-mode">CANVAS FALLBACK</span>
     <b>${escapeHtml(String(rank).padStart(2, "0"))}</b>
   `;
 }
 
+function designCandidateCaptureMode(item = {}, imageUrl = "", fallback = "IMAGE PREVIEW") {
+  const haystack = [
+    item.preview_render_kind,
+    item.preview_render_source,
+    item.preview_kind,
+    item.render_source,
+    item.render_engine,
+    imageUrl,
+  ].map((value) => String(value || "").toLowerCase()).join(" ");
+  if (!String(imageUrl || "").trim()) return "CANVAS FALLBACK";
+  if (/viewer_capture\.png|viewer[_-]?capture|generated_stl|stl.*png|capture_image/.test(haystack)) return "STL VIEWER PNG";
+  if (/\.svg(?:[?#]|$)|svg_preview|specimen_preview\.svg/.test(haystack)) return "SVG PREVIEW";
+  if (/\.(?:png|jpe?g|webp|gif)(?:[?#]|$)/.test(haystack)) return "IMAGE PREVIEW";
+  return fallback;
+}
+
+function designCaptureImageUrl(imageUrl = "") {
+  const src = String(imageUrl || "").trim();
+  if (!src) return "";
+  if (!/viewer_capture\.png(?:[?#]|$)/i.test(src)) return src;
+  const separator = src.includes("?") ? "&" : "?";
+  return `${src}${separator}render=solid-stl-v3`;
+}
+
 function renderDesignCaptureImage(imageUrl, payload, candidateId, rank, options = {}) {
-  const mode = options.mode || "ISO STL";
+  const mode = options.mode || "IMAGE PREVIEW";
   const alt = options.alt || `Preview for ${candidateId}`;
+  const resolvedImageUrl = designCaptureImageUrl(imageUrl);
+  const geometry = payload && payload.geometry ? payload.geometry : options.geometry || "specimen";
+  const score = payload && payload.score !== undefined && payload.score !== null ? payload.score : options.score;
+  const meta = [
+    geometry,
+    score !== undefined && score !== null && score !== "" ? `obj ${numberText(score, 3)}` : "",
+    mode,
+  ].filter(Boolean).join(" · ");
   return `
-    <img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(alt)}" loading="eager" decoding="async" onload="this.parentElement.classList.add('capture-loaded')" onerror="this.parentElement.classList.add('capture-error')" />
-    <span class="ar-design-capture-mode">${escapeHtml(mode)}</span>
-    <b>${escapeHtml(String(rank).padStart(2, "0"))}</b>
+    <button type="button"
+      class="ar-design-capture-open"
+      data-design-image-url="${escapeHtml(resolvedImageUrl)}"
+      data-design-candidate-id="${escapeHtml(candidateId)}"
+      data-design-geometry="${escapeHtml(geometry)}"
+      data-design-mode="${escapeHtml(mode)}"
+      data-design-rank="${escapeHtml(String(rank))}"
+      data-design-meta="${escapeHtml(meta)}"
+      aria-label="${escapeHtml(`Open large STL viewer PNG for ${candidateId}`)}">
+      <img src="${escapeHtml(resolvedImageUrl)}" alt="${escapeHtml(alt)}" loading="eager" decoding="async" onload="this.closest('.ar-design-cad-capture')?.classList.add('capture-loaded')" onerror="this.closest('.ar-design-cad-capture')?.classList.add('capture-error')" />
+      <span class="ar-design-capture-mode">${escapeHtml(mode)}</span>
+      <b>${escapeHtml(String(rank).padStart(2, "0"))}</b>
+    </button>
     <div class="ar-design-capture-fallback" aria-hidden="true">
       ${renderDesignCaptureSnapshot(payload, candidateId, rank)}
     </div>
   `;
+}
+
+function designCaptureGalleryItems() {
+  if (!liveReportPanel) return [];
+  return Array.from(liveReportPanel.querySelectorAll(".ar-design-capture-open[data-design-image-url]"))
+    .map((button, index) => ({
+      index,
+      imageUrl: button.dataset.designImageUrl || "",
+      candidateId: button.dataset.designCandidateId || `specimen ${index + 1}`,
+      geometry: button.dataset.designGeometry || "specimen",
+      mode: button.dataset.designMode || "STL VIEWER PNG",
+      rank: button.dataset.designRank || String(index + 1),
+      meta: button.dataset.designMeta || "",
+    }))
+    .filter((item) => item.imageUrl);
+}
+
+function closeDesignCaptureViewer() {
+  liveDesignCaptureViewerOpen = false;
+  const existing = liveReportPanel && liveReportPanel.querySelector(".ar-design-gallery-overlay");
+  if (existing) existing.remove();
+}
+
+function moveDesignCaptureViewer(delta) {
+  const items = designCaptureGalleryItems();
+  if (!items.length) {
+    closeDesignCaptureViewer();
+    return;
+  }
+  liveDesignCaptureViewerIndex = Math.max(0, Math.min(items.length - 1, liveDesignCaptureViewerIndex + delta));
+  renderDesignCaptureViewerOverlay();
+}
+
+function openDesignCaptureViewer(index = 0) {
+  const items = designCaptureGalleryItems();
+  if (!items.length) return;
+  liveDesignCaptureViewerOpen = true;
+  liveDesignCaptureViewerIndex = Math.max(0, Math.min(items.length - 1, Number(index) || 0));
+  renderDesignCaptureViewerOverlay();
+}
+
+function renderDesignCaptureViewerOverlay() {
+  if (!liveReportPanel) return;
+  const previous = liveReportPanel.querySelector(".ar-design-gallery-overlay");
+  if (previous) previous.remove();
+  if (!liveDesignCaptureViewerOpen) return;
+  const items = designCaptureGalleryItems();
+  if (!items.length) {
+    liveDesignCaptureViewerOpen = false;
+    return;
+  }
+  liveDesignCaptureViewerIndex = Math.max(0, Math.min(items.length - 1, liveDesignCaptureViewerIndex));
+  const item = items[liveDesignCaptureViewerIndex];
+  const prevDisabled = liveDesignCaptureViewerIndex <= 0;
+  const nextDisabled = liveDesignCaptureViewerIndex >= items.length - 1;
+  const overlay = document.createElement("div");
+  overlay.className = "ar-design-gallery-overlay";
+  overlay.setAttribute("role", "dialog");
+  overlay.setAttribute("aria-modal", "false");
+  overlay.setAttribute("aria-label", `STL viewer PNG preview for ${item.candidateId}`);
+  overlay.innerHTML = `
+    <div class="ar-design-gallery-scrim" data-design-gallery-action="close"></div>
+    <section class="ar-design-gallery-modal">
+      <header class="ar-design-gallery-head">
+        <div>
+          <span>STL VIEWER PNG</span>
+          <strong>${escapeHtml(item.candidateId)}</strong>
+          <em>${escapeHtml(item.meta || item.geometry || "")}</em>
+        </div>
+        <button type="button" class="ar-design-gallery-close" data-design-gallery-action="close" aria-label="Close STL preview">Close</button>
+      </header>
+      <div class="ar-design-gallery-stage">
+        <button type="button" class="ar-design-gallery-nav prev" data-design-gallery-action="prev" ${prevDisabled ? "disabled" : ""} aria-label="Previous specimen">‹</button>
+        <figure class="ar-design-gallery-figure">
+          <img src="${escapeHtml(item.imageUrl)}" alt="${escapeHtml(`Large STL viewer PNG for ${item.candidateId}`)}">
+          <figcaption>
+            <b>${escapeHtml(String(liveDesignCaptureViewerIndex + 1).padStart(2, "0"))} / ${escapeHtml(String(items.length).padStart(2, "0"))}</b>
+            <span>${escapeHtml(item.geometry)} · ${escapeHtml(item.mode)}</span>
+          </figcaption>
+        </figure>
+        <button type="button" class="ar-design-gallery-nav next" data-design-gallery-action="next" ${nextDisabled ? "disabled" : ""} aria-label="Next specimen">›</button>
+      </div>
+    </section>
+  `;
+  liveReportPanel.appendChild(overlay);
 }
 
 function drawDesignCaptureCanvas(canvas, payload = {}) {
@@ -10428,11 +10703,12 @@ function renderDesignCandidateCards(screenReport, designReport, report) {
           : selectedId ? String(candidateId) === selectedId : designCandidateTone(item) === "success";
         const tone = isSelected ? "success" : designCandidateTone(item);
         const capturePayload = designCandidateCapturePayload(item, screenReport, designReport, report, rank);
+        const captureMode = designCandidateCaptureMode(item, imageUrl, item.__actual_specimen ? "STL VIEWER PNG" : "IMAGE PREVIEW");
         return `
           <article class="ar-design-candidate-card tone-${escapeHtml(tone)}${isSelected ? " selected" : ""}${imageUrl ? " has-capture" : ""}" role="listitem" aria-label="${escapeHtml(candidateId)}">
             <div class="ar-design-cad-capture">
               ${imageUrl
-                ? renderDesignCaptureImage(imageUrl, capturePayload, candidateId, rank, item.__actual_specimen ? { mode: "SPECIMEN", alt: `Generated specimen ${candidateId}` } : {})
+                ? renderDesignCaptureImage(imageUrl, capturePayload, candidateId, rank, { mode: captureMode, alt: `Generated specimen ${candidateId}` })
                 : renderDesignCaptureSnapshot(capturePayload, candidateId, rank)}
             </div>
             <div class="ar-design-candidate-meta">
@@ -10798,6 +11074,14 @@ function renderSpecimenArtifactLedger(items) {
 function specimenReadinessGateRows(screenReport, fabrication) {
   const readiness = screenReport && screenReport.print_readiness ? screenReport.print_readiness : {};
   if (Array.isArray(readiness.gates) && readiness.gates.length) return readiness.gates;
+  const spc = screenReport && screenReport.spc_readiness ? screenReport.spc_readiness : {};
+  if (Array.isArray(spc.readiness_levels) && spc.readiness_levels.length) {
+    return spc.readiness_levels.map((item) => ({
+      gate: item.level_id || item.id || item.name || "spc_readiness",
+      status: item.status || "unknown",
+      reason: item.reason || item.summary || item.detail || "",
+    }));
+  }
   return Array.isArray(fabrication.quality_gates) ? fabrication.quality_gates : [];
 }
 
@@ -10818,6 +11102,12 @@ function renderSpecimenDashboardCards(report, status, agentLabel, profile) {
   const filamentUsage = screenReport.filament_usage || {};
   const gcodeValidation = screenReport.gcode_validation || {};
   const printReadiness = screenReport.print_readiness || {};
+  const spcReadiness = screenReport.spc_readiness || {};
+  const spcSelectedPrinter = spcReadiness.selected_printer || printerProfile.selected_printer || {};
+  const spcDeviceActions = spcReadiness.device_actions || printerStatus.actions || {};
+  const spcDeviceConnection = spcReadiness.device_connection || printerStatus.connection || {};
+  const spcPreprintGate = spcReadiness.preprint_gate || {};
+  const autoejectionGate = screenReport.autoejection_gate || {};
   const buildTimeline = screenReport.build_timeline || {};
   const layerPreview = screenReport.layer_preview || {};
   const printerStatus = screenReport.printer_status || {};
@@ -10855,6 +11145,15 @@ function renderSpecimenDashboardCards(report, status, agentLabel, profile) {
         ${renderDashboardMetric("Mode", printerStatus.mode || "-", "printer", "running")}
       </div>
       ${renderDashboardRows([
+        ["provider", spcReadiness.provider || printerProfile.provider || thread.printer_provider || "-"],
+        ["selected_printer", spcSelectedPrinter.label || spcSelectedPrinter.profile_id || "-"],
+        ["mqtt", spcDeviceConnection.mqtt || "-"],
+        ["transfer", spcDeviceConnection.transfer || "-"],
+        ["can_upload", spcDeviceActions.can_upload === undefined ? "-" : spcDeviceActions.can_upload],
+        ["can_start_print", spcDeviceActions.can_start_print === undefined ? "-" : spcDeviceActions.can_start_print],
+        ["preprint_gate", spcPreprintGate.state || spcReadiness.preprint_gate_state || "-"],
+        ["ready_for_live_print", spcReadiness.ready_for_live_print === undefined ? "-" : spcReadiness.ready_for_live_print],
+        ["autoejection", autoejectionGate.status || "-"],
         ["printer_profile", printerProfile.printer_profile || thread.printer_profile || spec.printer_profile || "-"],
         ["printer_path", printerProfile.printer_path || intent.printer_path || "-"],
         ["printer_job_id", buildQueue.printer_job_id || thread.printer_job_id || "-"],
@@ -11764,7 +12063,7 @@ function renderBoParameterChips(candidate) {
 }
 
 function latestBoGateContext(report) {
-  const events = [...(liveRunEvents || []), ...((report && report.events) || [])];
+  const events = [...currentRunEventSources(), ...((report && report.events) || []).filter((event) => eventMatchesCurrentRun(event) || !eventRunId(event))];
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index] || {};
     const payload = eventPayload(event);
@@ -12197,6 +12496,7 @@ function renderReportPanel(session) {
   `;
   scheduleOrcEchartsRender();
   hydrateDesignCaptureCanvases();
+  renderDesignCaptureViewerOverlay();
   return;
   const designEvidence = liveSelectedAgent === "design" ? latestDesignReport(report) : null;
   const specimenEvidence = liveSelectedAgent === "specimen" ? latestSpecimenFabricationReport(report) : null;
@@ -12272,6 +12572,47 @@ function backendField(payload, keys) {
 
 function eventPayload(event) {
   return event && typeof event.payload === "object" ? event.payload : {};
+}
+
+function eventRunId(event) {
+  if (!event || typeof event !== "object") return "";
+  const payload = eventPayload(event);
+  const nestedRun = payload.run && typeof payload.run === "object" ? payload.run.run_id : "";
+  const nestedState = payload.state && typeof payload.state === "object" ? payload.state.run_id : "";
+  const planningMessage = payload.planning_message && typeof payload.planning_message === "object" ? payload.planning_message : {};
+  const planningState = planningMessage.state && typeof planningMessage.state === "object" ? planningMessage.state : {};
+  return String(
+    event.run_id
+    || event.runId
+    || payload.run_id
+    || payload.runId
+    || nestedRun
+    || nestedState
+    || planningMessage.run_id
+    || planningState.run_id
+    || ""
+  );
+}
+
+function eventMatchesCurrentRun(event, runId = liveCurrentRunId()) {
+  const safeRunId = String(runId || "");
+  if (!safeRunId) return true;
+  const sourceRunId = eventRunId(event);
+  return Boolean(sourceRunId && sourceRunId === safeRunId);
+}
+
+function currentRunEventSources() {
+  const runScoped = (Array.isArray(liveRunEvents) ? liveRunEvents : []).filter((event) => eventMatchesCurrentRun(event));
+  if (runScoped.length) return runScoped;
+  return (Array.isArray(liveRecentEvents) ? liveRecentEvents : []).filter((event) => eventMatchesCurrentRun(event));
+}
+
+function isAgentNotificationEvent(event) {
+  const kind = eventTimelineKind(event);
+  if (kind === "error" || kind === "warning") return true;
+  if (isAgentQuestionEvent(event)) return true;
+  const payload = eventPayload(event);
+  return Boolean(payload.requires_user_input || payload.requires_operator_input || payload.needs_operator_input || payload.requires_response);
 }
 
 function renderBackendRawSection(title, value, className = "") {
@@ -13443,7 +13784,7 @@ function renderDeviceStrip(session) {
 }
 
 function latestRuntimeAgeLabel() {
-  const timestamps = [...(liveRunEvents || []), ...(liveRecentEvents || [])]
+  const timestamps = currentRunEventSources()
     .map((event) => event && (event.ts || event.timestamp || event.created_at))
     .filter(Boolean)
     .map((value) => new Date(value).getTime())
@@ -14566,6 +14907,23 @@ document.addEventListener("focusout", (event) => {
   if (element && (!event.relatedTarget || !element.contains(event.relatedTarget))) hideLiveHoverTooltip();
 });
 document.addEventListener("keydown", (event) => {
+  if (liveDesignCaptureViewerOpen) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeDesignCaptureViewer();
+      return;
+    }
+    if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      moveDesignCaptureViewer(-1);
+      return;
+    }
+    if (event.key === "ArrowRight") {
+      event.preventDefault();
+      moveDesignCaptureViewer(1);
+      return;
+    }
+  }
   const section = event.target.closest && event.target.closest(".live-report-section[data-report-section-title]");
   if (section && (event.key === "Enter" || event.key === " ")) {
     event.preventDefault();
@@ -14586,6 +14944,24 @@ if (btnLiveShortcutsClose) {
 }
 
 document.addEventListener("click", (event) => {
+  const designGalleryAction = event.target.closest("[data-design-gallery-action]");
+  if (designGalleryAction) {
+    event.preventDefault();
+    event.stopPropagation();
+    const action = designGalleryAction.dataset.designGalleryAction || "";
+    if (action === "close") closeDesignCaptureViewer();
+    else if (action === "prev") moveDesignCaptureViewer(-1);
+    else if (action === "next") moveDesignCaptureViewer(1);
+    return;
+  }
+  const designCaptureButton = event.target.closest(".ar-design-capture-open[data-design-image-url]");
+  if (designCaptureButton && liveReportPanel && liveReportPanel.contains(designCaptureButton)) {
+    event.preventDefault();
+    event.stopPropagation();
+    const buttons = Array.from(liveReportPanel.querySelectorAll(".ar-design-capture-open[data-design-image-url]"));
+    openDesignCaptureViewer(Math.max(0, buttons.indexOf(designCaptureButton)));
+    return;
+  }
   const boToggle = event.target.closest(".bo-graph-toggle[data-bo-card-key]");
   if (boToggle) {
     closeBinderContextMenu();

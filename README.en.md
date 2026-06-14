@@ -51,7 +51,7 @@ python -m app.serve
 | Live GUI | `http://localhost:7860/live` | `web/templates/planning.html`, `web/static/planning.js` | Chat-based orchestration, agent progress, artifacts, backend trace |
 | Runtime IDE | `http://localhost:7860/ide` | `web/templates/runtime_ide.html`, `web/static/runtime_ide.js` | LangGraph graph/node/edge editing, validation, dry-run, execution |
 | Module Management | `http://localhost:7860/module-management` | `web/templates/module_management.html`, `web/static/module_management.js` | Module loading, validation, versioning, generated adapter management |
-| 3DP Workspace | `http://localhost:7860/printer` | `web/templates/printer.html`, `web/static/printer.js` | PrusaLink, slicing options, auto-ejection, test-print settings |
+| 3DP Workspace | `http://localhost:7860/printer` | `web/templates/printer.html`, `web/static/printer.js` | Bambu Lab X2D default bridge, explicit Prusa selection, live video/status, slicing/start gates, auto-ejection, test-print settings |
 | LeRobot Workspace | `http://localhost:7860/lerobot` | `web/templates/lerobot.html`, `web/static/lerobot.js` | Port detection, teleop, recording, training, visualization, rollout |
 | BO Workspace | `http://localhost:7860/bo` | `web/templates/bo.html`, `web/static/bo.js` | BO/MBO/LLM preference strategy, lightweight/BoTorch optional backend, reasoning audit, candidate ranking/selection |
 | CAE Workspace | `http://localhost:7860/cae` | `web/templates/cae.html`, `web/static/cae.js` | STL analysis, bottom fixed/top cyclic load settings, result review |
@@ -59,6 +59,12 @@ python -m app.serve
 | Self-Evolution Lab | `http://localhost:7860/evolution-lab` | `web/templates/evolution_lab.html`, `web/static/evolution_lab.js` | Prompt/module/graph variants, validation, approval, rollback |
 
 Open `http://localhost:7860/docs` for FastAPI API documentation.
+
+The default server bind is `0.0.0.0:7860`. Operators may still open the GUI at
+`http://localhost:7860/`, but Bambu Lab HTTP artifact routing requires a printer
+reachable URL such as `http://<ATR-server-LAN-IP>:7860/printer-artifacts/...`.
+If the server is bound only to `127.0.0.1`, the GUI can load locally but Bambu
+fetch probe and the SPC Readiness transfer gate will fail.
 
 ## 3. Actual Closed Loop
 
@@ -99,7 +105,7 @@ Useful APIs:
 | Stage | Module Path | Responsibility | Representative Output |
 |---|---|---|---|
 | `design` | `graphs/modules/design` | Convert the objective into TPMS/specimen design variables and `experiment_spec` | `current_experiment_spec`, STL candidate settings |
-| `specimen` | `graphs/modules/specimen` | Create STL/manufacturing metadata and hand off to Prusa/virtual bridge | STL, gcode, slicer settings, printer prepare result |
+| `specimen` | `graphs/modules/specimen` | Create STL/manufacturing metadata and hand off to the selected Bambu/Prusa/virtual printer bridge | STL, gcode/sliced artifact, slicer settings, printer prepare result |
 | `vision` | `graphs/modules/vision` | Observe printed specimen/workspace and create pickup/test observation | `observation`, camera artifact |
 | `manipulation` | `graphs/modules/manipulation` | Run LeRobot rollout or pick-place handoff | rollout status, policy path, transfer evidence |
 | `equipment` | `graphs/modules/equipment` | Execute UTM/Windows bridge/equipment commands | equipment result, protocol note |
@@ -112,7 +118,7 @@ The older top-level `agents/` directory is an implementation/compatibility layer
 
 ## 5. Runtime Modes
 
-- `live`: Physical equipment path. Requires valid Prusa, LeRobot, Windows bridge, UTM, and safety-gate configuration where applicable.
+- `live`: Physical equipment path. Requires a valid selected printer bridge (Bambu Lab X2D by default, Prusa only by explicit selection), LeRobot, Windows bridge, UTM, and safety-gate configuration where applicable.
 - `test`: Dry-run and simulated evaluation path. Some operator-selected test paths can still go up to bridge verification or real print.
 - `virtual`: No physical device actions; used for experiment API, benchmark, and dry-run validation.
 
@@ -133,7 +139,7 @@ Shared contracts:
 | `web/static/` | GUI JavaScript, CSS, icons, static assets |
 | `graphs/configs/` | LangGraph execution graph YAML files |
 | `graphs/modules/` | Stage agent module contracts, handlers, tool allowlists |
-| `device_bridges/` | Prusa, LeRobot, Windows, UTM bridge layers |
+| `device_bridges/` | Bambu, Prusa, LeRobot, Windows, UTM bridge layers |
 | `experiments/` | Experiment objective/evaluate/benchmark/queue contracts |
 | `orchestrator/` | Orchestration and planning flow |
 | `backends/` | Ollama/vLLM/Nemoclaw backend integration |
@@ -157,7 +163,11 @@ Shared contracts:
 - [requirements.txt](requirements.txt): Python packages
 - [pyproject.toml](pyproject.toml): project and pytest settings
 - [graphs/configs/atr_closed_loop.yaml](graphs/configs/atr_closed_loop.yaml): default closed-loop graph
-- `memory/prusa_connection.json`: PrusaLink connection data
+- `memory/printer_fleet.json`: active printer profile selection
+- `memory/bambu_connection.json`: Bambu Lab LAN connection data
+- `memory/bambu_autoejection.json`: Bambu provider routine and pre/post vision evidence for autoejection handoff
+- `memory/manipulation_agent_bridge.json`: Manipulation Agent consumer profile and policy path used by Bambu handoff
+- `memory/prusa_connection.json`: PrusaLink connection data for explicit Prusa profile runs
 - `memory/bo_workspace_settings.json`: BO workspace saved settings
 - `memory/cae_workspace_settings.json`: CAE workspace saved settings
 - `memory/lerobot/`: LeRobot profile, calibration, port memory

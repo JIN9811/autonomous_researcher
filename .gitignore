@@ -10,8 +10,10 @@ htmlcov/
 .venv/
 venv/
 env/
+/env
 
 # Local secrets and machine-specific environment files
+memory/api_keys.json
 .env
 .env.*
 !.env.example
@@ -42,6 +44,7 @@ user_files/*
 !user_files/.gitkeep
 
 # Generated hardware / experiment outputs
+/result.json
 *.stl
 *.gcode
 *.3mf

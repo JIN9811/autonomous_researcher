@@ -89,6 +89,19 @@ Modification guide:
                   <button class="btn mini model-unload-btn" data-model="gemma4:e4b-it-nvfp4">Unloading</button>
                 </div>
               </div>
+              <div class="model-chip api-key-chip" id="api-key-chip">
+                <span class="chip-dot"></span>
+                <div class="model-copy api-key-copy">
+                  <button id="api-key-open-btn" class="btn mini api-key-open-btn" type="button">API Key</button>
+                  <strong id="api-key-status-text">not configured</strong>
+                  <small id="api-key-detail">OpenAI API key is stored locally.</small>
+                </div>
+                <div class="model-actions">
+                  <span id="api-key-dot" class="model-load-dot unloaded"></span>
+                  <button id="api-key-load-btn" class="btn mini api-key-load-btn" type="button">Loading</button>
+                  <button id="api-key-unload-btn" class="btn mini api-key-unload-btn" type="button">Unloading</button>
+                </div>
+              </div>
             </div>
           </article>
         </div>
@@ -148,11 +161,11 @@ Modification guide:
         <div class="workspace-grid">
           <article class="workspace-card">
             <div class="status-head">
-              <span class="status-title">Prusa MK4S Printer</span>
+              <span class="status-title">3DP Printer Bridge</span>
               <span id="printer-workspace-dot" class="status-dot idle"></span>
             </div>
-            <strong>PrusaSlicer · PrusaLink · USB upload/start</strong>
-            <p id="printer-workspace-detail">Reading Prusa bridge profile status.</p>
+            <strong>Bambu default · Prusa explicit selection</strong>
+            <p id="printer-workspace-detail">Reading selected 3DP bridge profile status.</p>
             <a id="btn-open-printer" class="btn primary" href="/printer" target="_blank" rel="noopener">Open 3DP GUI</a>
           </article>
           <article class="workspace-card">
@@ -270,7 +283,31 @@ Modification guide:
       </section>
     </main>
 
+    <dialog id="api-key-dialog" class="api-key-dialog" aria-labelledby="api-key-dialog-title">
+      <form id="api-key-form" class="api-key-form" method="dialog">
+        <div class="api-key-dialog-head">
+          <div>
+            <h3 id="api-key-dialog-title">OpenAI API Key</h3>
+            <p>Saved locally to <code>memory/api_keys.json</code>. The file is ignored by git.</p>
+          </div>
+          <button id="api-key-close-btn" class="btn mini" type="button">Close</button>
+        </div>
+        <label>
+          API key
+          <input id="api-key-input" type="password" autocomplete="off" placeholder="sk-..." />
+        </label>
+        <label class="api-key-checkbox">
+          <input id="api-key-enable-input" type="checkbox" checked />
+          Enable after saving
+        </label>
+        <p id="api-key-dialog-status" class="api-key-dialog-status">Current key is never displayed in full.</p>
+        <div class="api-key-dialog-actions">
+          <button id="api-key-save-btn" class="btn primary" type="submit">Save API Key</button>
+        </div>
+      </form>
+    </dialog>
+
     <script src="/static/runtime_graph_geometry.js?v=atr-ui-20260531-graph-geometry-3"></script>
-    <script src="/static/app.js?v=20260601-cycle-lite-1" defer></script>
+    <script src="/static/app.js?v=20260613-api-key-2" defer></script>
   </body>
 </html>

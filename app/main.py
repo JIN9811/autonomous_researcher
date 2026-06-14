@@ -27,18 +27,23 @@ import asyncio
 import csv
 import ctypes
 import hashlib
+import ipaddress
 import json
 import mimetypes
 import os
 import re
 import shutil
+import socket
 import subprocess
 import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import quote, unquote
+from urllib.parse import quote, unquote, urlparse
 
 import yaml
+import httpx
+from dotenv import dotenv_values
 from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Request
@@ -61,6 +66,12 @@ from knowledge.graph_importer import import_store_to_graph
 from knowledge.graphify_bridge import import_project_graph, scan_project_graph
 from knowledge.schemas import EvolutionOutcomeRecord
 from knowledge.stores import JsonlKnowledgeStore
+from device_bridges.bambu_bridge import (
+    BambuConnectionMemory,
+    BambuStudioSlicerRunner,
+    PrinterDeviceBridgeManager,
+    build_bambu_project_file_command_draft,
+)
 from device_bridges.lerobot_bridge import LeRobotBridge, LeRobotBridgeConfig
 from device_bridges.prusa_bridge import PrusaBridgeConfig, PrinterAgenticWorkflow
 from device_bridges.windows_pyautogui_bridge import (
@@ -75,11 +86,17 @@ from utils.config_loader import load_all_configs
 from utils.manipulation_profile import (
     MANIPULATION_AGENT_PROFILE_PATH,
     load_manipulation_agent_profile,
+    normalize_manipulation_agent_profile,
     save_manipulation_agent_profile,
 )
 from utils.ids import make_event_id
 from utils.paths import resolve_path
-from utils.printer_profile import PRUSA_PRINT_PROFILE_PATH, load_prusa_print_profile, save_prusa_print_profile
+from utils.printer_profile import (
+    PRUSA_PRINT_PROFILE_PATH,
+    adapt_print_profile_for_provider,
+    load_prusa_print_profile,
+    save_prusa_print_profile,
+)
 
 app = FastAPI(title="Autonomous Researcher")
 templates = Jinja2Templates(directory=str(resolve_path("web/templates")))
@@ -104,6 +121,8 @@ RUNTIME_GRAPH_CONFIG_PATH = RUNTIME_GRAPH_CONFIG_ROOT / f"{PRIMARY_RUNTIME_GRAPH
 RUNTIME_GRAPH_VERSION_ROOT = resolve_path("memory/graph_versions")
 RUNTIME_MODULE_ROOT = resolve_path("graphs/modules")
 RUNTIME_MODULE_VERSION_ROOT = resolve_path("memory/module_versions")
+API_KEY_SETTINGS_PATH = resolve_path("memory/api_keys.json")
+BAMBU_HTTP_EXPORT_ROOT = resolve_path("artifacts/bambu_http_exports")
 _RUNTIME_GRAPH_DRY_RUN_RECORDS: dict[str, dict[str, object]] = {}
 _SYSTEM_RESOURCE_CACHE: dict[str, object] = {"updated_at_monotonic": 0.0, "payload": {}, "last_good_gpu": {}}
 try:
@@ -264,10 +283,111 @@ def _write_workspace_settings(path: Path, payload: dict[str, Any]) -> dict[str, 
     return payload
 
 
+def _mask_api_key(value: str) -> str:
+    """Return a display-safe API key hint without exposing the secret."""
+    clean = str(value or "").strip()
+    if not clean:
+        return ""
+    if len(clean) <= 8:
+        return "*" * len(clean)
+    return f"{clean[:4]}••••{clean[-4:]}"
+
+
+def _read_openai_api_key_from_local_env() -> tuple[str, str]:
+    """Read only OPENAI_API_KEY from supported local env sources."""
+    env_key = str(os.getenv("OPENAI_API_KEY", "")).strip()
+    if env_key:
+        return env_key, "env"
+    for env_path in (resolve_path(".env"), resolve_path("env")):
+        if not env_path.exists() or not env_path.is_file():
+            continue
+        try:
+            file_key = str(dotenv_values(env_path).get("OPENAI_API_KEY") or "").strip()
+        except Exception:
+            file_key = ""
+        if file_key:
+            return file_key, env_path.name
+    return "", "none"
+
+
+def _read_api_key_settings(*, import_env: bool = True) -> dict[str, Any]:
+    """Read the gitignored API key settings file, initializing from .env on first use."""
+    path = API_KEY_SETTINGS_PATH
+    existed = path.exists()
+    settings = _read_workspace_settings(path) if existed else {}
+    env_key, env_source = _read_openai_api_key_from_local_env()
+    api_key = str(settings.get("api_key") or "").strip()
+    source = str(settings.get("source") or "").strip()
+    if import_env and not existed and env_key:
+        settings = {
+            "schema": "api_key.v1",
+            "provider": "openai",
+            "api_key": env_key,
+            "enabled": True,
+            "source": env_source,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        _write_workspace_settings(path, settings)
+        return settings
+    enabled = bool(settings.get("enabled", False)) and bool(api_key)
+    return {
+        "schema": "api_key.v1",
+        "provider": "openai",
+        "api_key": api_key,
+        "enabled": enabled,
+        "source": source or ("memory" if api_key else "none"),
+        "updated_at": str(settings.get("updated_at") or ""),
+    }
+
+
+def _write_api_key_settings(api_key: str, *, enabled: bool, source: str = "user") -> dict[str, Any]:
+    """Persist OpenAI API key settings to the local gitignored single-file store."""
+    clean_key = str(api_key or "").strip()
+    payload = {
+        "schema": "api_key.v1",
+        "provider": "openai",
+        "api_key": clean_key,
+        "enabled": bool(enabled and clean_key),
+        "source": source,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    return _write_workspace_settings(API_KEY_SETTINGS_PATH, payload)
+
+
+def _public_api_key_settings(settings: dict[str, Any]) -> dict[str, object]:
+    """Return API key status without the secret value."""
+    api_key = str(settings.get("api_key") or "").strip()
+    enabled = bool(settings.get("enabled") and api_key)
+    return {
+        "ok": True,
+        "provider": "openai",
+        "enabled": enabled,
+        "has_key": bool(api_key),
+        "key_status": "registered" if api_key else "not_registered",
+        "source": str(settings.get("source") or ("memory" if api_key else "none")),
+        "settings_path": str(API_KEY_SETTINGS_PATH),
+        "updated_at": str(settings.get("updated_at") or ""),
+    }
+
+
+async def _apply_runtime_api_key_settings(settings: dict[str, Any], *, emit_event: bool = True) -> dict[str, object]:
+    apply_result = await controller.apply_openai_api_key(
+        str(settings.get("api_key") or ""),
+        enabled=bool(settings.get("enabled")),
+        emit_event=emit_event,
+    )
+    public = _public_api_key_settings(settings)
+    public["apply_result"] = apply_result
+    public["primary_backend"] = str(apply_result.get("primary_backend") or "")
+    public["fallback_backend"] = str(apply_result.get("fallback_backend") or "")
+    return public
+
+
 @app.on_event("startup")
 async def keep_startup_side_effect_free() -> None:
-    """Keep GUI startup side-effect free; operators load vLLM models manually."""
-    return None
+    """Keep GUI startup free of model prewarming while applying saved secrets."""
+    settings = _read_api_key_settings(import_env=True)
+    await _apply_runtime_api_key_settings(settings, emit_event=False)
 
 
 @app.on_event("shutdown")
@@ -374,6 +494,13 @@ class RuntimeModelRequest(BaseModel):
     model: str = Field(..., min_length=1)
 
 
+class RuntimeApiKeyRequest(BaseModel):
+    """Request body for local API key storage controls."""
+
+    api_key: str = Field(..., min_length=1)
+    enabled: bool = True
+
+
 class BOAgentRequest(BaseModel):
     """Request body for BO Workspace benchmark and agent execution."""
 
@@ -445,17 +572,29 @@ class PrinterProfileRequest(BaseModel):
 
 
 class PrinterConnectionRequest(BaseModel):
-    """Request body for editable PrusaLink connection memory."""
+    """Request body for editable printer bridge connection memory."""
 
     host: str = Field(default="", min_length=0)
     scheme: Literal["http", "https"] = "http"
     port: int = Field(default=80, ge=1, le=65535)
     storage: str = "usb"
-    auth_mode: Literal["digest", "basic", "api_key", "none"] = "digest"
+    auth_mode: Literal["digest", "basic", "api_key", "none", "lan_access_code"] = "lan_access_code"
     username: str = ""
     password: str = ""
     api_key: str = ""
     api_key_header: str = "X-Api-Key"
+    serial: str = ""
+    printer_name: str = ""
+    model: str = "Bambu Lab X2D"
+    access_code: str = ""
+    lan_mode_confirmed: bool = False
+    developer_mode_confirmed: bool = False
+
+
+class PrinterFleetSelectionRequest(BaseModel):
+    """Request body for explicit selected-printer profile changes."""
+
+    profile_id: str = Field(..., min_length=1)
 
 
 class PrinterAutoejectionTestRequest(BaseModel):
@@ -465,6 +604,113 @@ class PrinterAutoejectionTestRequest(BaseModel):
     mode: Literal["live", "test"] = "live"
     object_size_mm: list[float] = Field(default_factory=lambda: [30.0, 30.0, 20.0])
     start_immediately: bool = True
+
+
+class PrinterAutoejectionConfigRequest(BaseModel):
+    """Request body for operator-verified Bambu autoejection gate settings."""
+
+    enabled: bool = False
+    provider: str = "none"
+    verified_routine_id: str = ""
+    pre_eject_vision_profile: str = ""
+    post_eject_vision_profile: str = ""
+    require_verified_routine: bool = True
+    require_pre_eject_vision: bool = True
+    require_post_eject_vision: bool = True
+    fallback_to_robot_pickoff: bool = True
+
+
+class PrinterUploadPathProbeRequest(BaseModel):
+    """Request body for safe Bambu FTPS marker write/delete path probing."""
+
+    candidate_dirs: list[str] = Field(default_factory=lambda: ["", "cache", "sdcard", "Metadata", "data/Metadata"])
+    timeout_sec: float = Field(default=8.0, ge=1.0, le=60.0)
+
+
+class PrinterStartCommandDraftRequest(BaseModel):
+    """Request body for draft-only Bambu project_file command inspection."""
+
+    remote_path: str = ""
+    subtask_name: str = ""
+    plate_id: int = Field(default=1, ge=1, le=32)
+    use_ams: bool = False
+    ams_mapping: list[int] | None = None
+    timelapse: bool = False
+    bed_leveling: bool = False
+    flow_cali: bool = False
+    vibration_cali: bool = False
+    layer_inspect: bool = False
+
+
+class PrinterStartGateRequest(PrinterStartCommandDraftRequest):
+    """Request body for guarded Bambu project_file start preflight."""
+
+    operator_confirmed: bool = False
+    guardian_approved: bool = False
+    dry_run: bool = True
+
+
+class PrinterSpcReadinessRequest(PrinterStartGateRequest):
+    """Request body for Specimen Making Agent printer-readiness aggregation."""
+
+    mode: Literal["live", "test"] = "live"
+
+
+class PrinterBambuSliceArtifactRequest(BaseModel):
+    """Request body for creating a real Bambu sliced artifact from an STL/3MF source."""
+
+    source_path: str = ""
+    specimen_id: str = ""
+    load_settings: str = ""
+    load_filaments: str = ""
+    extra_args: list[str] = Field(default_factory=list)
+    timeout_sec: float | None = Field(default=None, ge=1.0, le=3600.0)
+
+
+class PrinterHttpArtifactRouteRequest(BaseModel):
+    """Request body for exposing a sliced Bambu artifact over a printer-reachable HTTP route."""
+
+    artifact_path: str = ""
+    public_base_url: str = ""
+    subtask_name: str = ""
+    plate_id: int = Field(default=1, ge=1, le=32)
+    use_ams: bool = False
+    ams_mapping: list[int] | None = None
+    timelapse: bool = False
+    bed_leveling: bool = False
+    flow_cali: bool = False
+    vibration_cali: bool = False
+    layer_inspect: bool = False
+    verify_fetch: bool = True
+    fetch_timeout_sec: float = Field(default=3.0, ge=0.5, le=15.0)
+
+
+class PrinterBambuPrestartCheckRequest(BaseModel):
+    """Request body for the user-facing Bambu pre-start checklist."""
+
+    source_path: str = ""
+    artifact_path: str = ""
+    specimen_id: str = ""
+    load_settings: str = ""
+    load_filaments: str = ""
+    extra_args: list[str] = Field(default_factory=list)
+    timeout_sec: float | None = Field(default=None, ge=1.0, le=3600.0)
+    public_base_url: str = ""
+    subtask_name: str = ""
+    plate_id: int = Field(default=1, ge=1, le=32)
+    use_ams: bool = False
+    ams_mapping: list[int] | None = None
+    timelapse: bool = False
+    bed_leveling: bool = False
+    flow_cali: bool = False
+    vibration_cali: bool = False
+    layer_inspect: bool = False
+    verify_fetch: bool = True
+    fetch_timeout_sec: float = Field(default=3.0, ge=0.5, le=15.0)
+    operator_confirmed: bool = False
+    guardian_approved: bool = False
+    dry_run: bool = True
+    mode: Literal["live", "test"] = "live"
 
 
 class WindowsBridgeDiscoverRequest(BaseModel):
@@ -830,6 +1076,12 @@ def _printer_workflow() -> PrinterAgenticWorkflow:
     return PrinterAgenticWorkflow(config, repo_root=resolve_path("."))
 
 
+def _printer_bridge_manager() -> PrinterDeviceBridgeManager:
+    """Return the selected-printer bridge manager used by 3DP GUI and printer.prepare."""
+    cfg = load_all_configs(resolve_path("configs"))
+    return PrinterDeviceBridgeManager.from_devices_config(cfg.get("devices", {}), repo_root=resolve_path("."))
+
+
 def _redacted_printer_connection(workflow: PrinterAgenticWorkflow) -> dict[str, object]:
     """Return PrusaLink connection memory without exposing secrets."""
     config = workflow.config
@@ -847,6 +1099,218 @@ def _redacted_printer_connection(workflow: PrinterAgenticWorkflow) -> dict[str, 
         "api_key_set": bool(auth.get("api_key")),
         "api_key_header": auth.get("api_key_header", live_auth.get("api_key_header", "X-Api-Key")),
         "connection_memory_path": str(workflow.connection_memory.path),
+    }
+
+
+def _redacted_selected_printer_connection(manager: PrinterDeviceBridgeManager) -> dict[str, object]:
+    """Return selected printer connection memory without exposing Bambu/Prusa secrets."""
+    profile, _reason = manager.fleet_selection()
+    if profile.provider == "bambulab_x2d":
+        return BambuConnectionMemory(profile.connection_memory_path).redacted()
+    workflow = _printer_workflow()
+    return _redacted_printer_connection(workflow)
+
+
+def _host_is_loopback_or_unspecified(host: str) -> bool:
+    normalized = str(host or "").strip().lower()
+    if not normalized or normalized == "localhost":
+        return True
+    try:
+        ip = ipaddress.ip_address(normalized)
+    except ValueError:
+        return False
+    return bool(ip.is_loopback or ip.is_unspecified)
+
+
+def _detect_printer_reachable_host(printer_host: str) -> str:
+    """Return the local interface IP that would route to the printer host."""
+    if not printer_host:
+        return ""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        sock.settimeout(1.0)
+        sock.connect((printer_host, 9))
+        return str(sock.getsockname()[0])
+    except OSError:
+        return ""
+    finally:
+        sock.close()
+
+
+def _bambu_http_public_base_url(request: Request, *, printer_host: str, override: str = "") -> str:
+    raw_override = str(override or "").strip().rstrip("/")
+    if raw_override:
+        parsed = urlparse(raw_override)
+        if parsed.scheme not in {"http", "https"} or _host_is_loopback_or_unspecified(parsed.hostname or ""):
+            raise HTTPException(status_code=400, detail="BAMBU_HTTP_ARTIFACT_URL_NOT_PRINTER_REACHABLE")
+        return raw_override
+
+    local_host = _detect_printer_reachable_host(printer_host)
+    if not local_host:
+        req_host = request.url.hostname or ""
+        if _host_is_loopback_or_unspecified(req_host):
+            raise HTTPException(status_code=400, detail="BAMBU_HTTP_ARTIFACT_HOST_DETECTION_FAILED")
+        local_host = req_host
+    port = request.url.port
+    netloc = f"{local_host}:{port}" if port else local_host
+    scheme = request.url.scheme if request.url.scheme in {"http", "https"} else "http"
+    return f"{scheme}://{netloc}"
+
+
+def _safe_bambu_http_artifact_source(path_value: str) -> Path:
+    source = Path(str(path_value or "")).expanduser()
+    if not source.is_absolute():
+        source = resolve_path(source)
+    source = source.resolve()
+    if not source.exists() or not source.is_file():
+        raise HTTPException(status_code=404, detail="BAMBU_HTTP_ARTIFACT_FILE_NOT_FOUND")
+    name = source.name.lower()
+    allowed = name.endswith((".gcode.3mf", ".3mf", ".gcode"))
+    if not allowed:
+        raise HTTPException(status_code=400, detail="BAMBU_HTTP_ARTIFACT_UNSUPPORTED_EXTENSION")
+    return source
+
+
+def _safe_bambu_http_filename(source: Path) -> str:
+    name = re.sub(r"[^A-Za-z0-9._-]+", "_", source.name).strip("._")
+    return name or "bambu_artifact.gcode.3mf"
+
+
+def _safe_bambu_http_export_path(token: str, filename: str) -> Path:
+    if not re.fullmatch(r"[A-Za-z0-9_-]{8,80}", str(token or "")):
+        raise HTTPException(status_code=404, detail="Bambu HTTP artifact not found")
+    safe_name = _safe_bambu_http_filename(Path(filename))
+    root = BAMBU_HTTP_EXPORT_ROOT.resolve()
+    path = (root / token / safe_name).resolve()
+    try:
+        path.relative_to(root)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Bambu HTTP artifact path escapes export root") from exc
+    return path
+
+
+async def _probe_bambu_http_artifact_fetch(
+    artifact_url: str,
+    *,
+    expected_sha256: str,
+    timeout_sec: float = 3.0,
+) -> dict[str, object]:
+    """Fetch the prepared artifact URL and compare bytes before treating it as a transfer route."""
+    parsed = urlparse(str(artifact_url or ""))
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return {
+            "ok": False,
+            "failure_code": "BAMBU_HTTP_ARTIFACT_PROBE_URL_INVALID",
+            "message": "Artifact URL is not an HTTP(S) URL.",
+        }
+    try:
+        async with httpx.AsyncClient(timeout=float(timeout_sec), follow_redirects=True) as client:
+            response = await client.get(artifact_url)
+    except Exception as exc:  # noqa: BLE001 - return operator-facing probe evidence.
+        return {
+            "ok": False,
+            "failure_code": "BAMBU_HTTP_ARTIFACT_FETCH_FAILED",
+            "message": f"ATR server artifact URL could not be fetched: {exc}",
+        }
+    content = response.content
+    digest = hashlib.sha256(content).hexdigest()
+    status_ok = 200 <= response.status_code < 300
+    hash_ok = digest == expected_sha256
+    return {
+        "ok": bool(status_ok and hash_ok),
+        "status_code": response.status_code,
+        "size_bytes": len(content),
+        "sha256": digest,
+        "matches_expected_sha256": hash_ok,
+        "failure_code": "" if status_ok and hash_ok else (
+            "BAMBU_HTTP_ARTIFACT_HASH_MISMATCH" if status_ok else "BAMBU_HTTP_ARTIFACT_FETCH_STATUS_FAILED"
+        ),
+        "message": (
+            "Artifact URL fetched successfully and sha256 matched."
+            if status_ok and hash_ok
+            else "Artifact URL fetch did not prove that the prepared file is reachable and intact."
+        ),
+    }
+
+
+def _selected_print_profile(manager: PrinterDeviceBridgeManager) -> dict[str, object]:
+    """Return print defaults adapted to the selected printer provider without mutating memory."""
+    profile = load_prusa_print_profile()
+    selected_profile, _reason = manager.fleet_selection()
+    return adapt_print_profile_for_provider(profile, selected_profile.provider)
+
+
+def _selected_printer_autoejection_payload(
+    manager: PrinterDeviceBridgeManager,
+    config: PrusaBridgeConfig,
+    profile: dict[str, object],
+) -> dict[str, object]:
+    selected_profile, _reason = manager.fleet_selection()
+    if selected_profile.provider == "bambulab_x2d":
+        status = manager.autoejection_status()
+        return {
+            "enabled": bool(status.get("enabled", False)),
+            "method": status.get("provider", "none"),
+            "mode": status.get("status", "not_configured"),
+            "requested": bool(status.get("requested", False)),
+            "can_run_test": bool(status.get("can_run_test", False)),
+            "blockers": status.get("blockers", []),
+            "verified_routine_id": status.get("verified_routine_id", ""),
+            "pre_eject_vision_profile": status.get("pre_eject_vision_profile", ""),
+            "post_eject_vision_profile": status.get("post_eject_vision_profile", ""),
+            "require_verified_routine": bool(status.get("require_verified_routine", True)),
+            "require_pre_eject_vision": bool(status.get("require_pre_eject_vision", True)),
+            "require_post_eject_vision": bool(status.get("require_post_eject_vision", True)),
+        }
+    return {
+        "enabled": bool(profile.get("allow_ejection", False)),
+        "method": config.ejection.method,
+        "mode": config.ejection.mode,
+    }
+
+
+def _selected_printer_profile_live_gates(
+    manager: PrinterDeviceBridgeManager,
+    config: PrusaBridgeConfig,
+) -> dict[str, object]:
+    """Return non-actuating profile-page gate defaults for the active printer."""
+    selected_profile, _reason = manager.fleet_selection()
+    if selected_profile.provider == "bambulab_x2d":
+        autoejection = manager.autoejection_status()
+        return {
+            "allow_status": True,
+            # Profile load must not imply Bambu upload/start readiness. The live
+            # status/SPC routes attach the current MQTT/transfer/start evidence.
+            "allow_upload": False,
+            "allow_start_print": False,
+            "allow_ejection": bool(autoejection.get("enabled", False)),
+        }
+    return {
+        "allow_status": config.live_gate("allow_status", True),
+        "allow_upload": config.live_gate("allow_upload", False),
+        "allow_start_print": config.live_gate("allow_start_print", False),
+        "allow_ejection": config.live_gate("allow_ejection", False),
+    }
+
+
+def _selected_printer_slicer_payload(
+    manager: PrinterDeviceBridgeManager,
+    config: PrusaBridgeConfig,
+) -> dict[str, object]:
+    """Return slicer config for the active printer provider."""
+    selected_profile, _reason = manager.fleet_selection()
+    if selected_profile.provider == "bambulab_x2d":
+        return manager.config.slicer.resolved_payload(repo_root=resolve_path("."))
+    return {
+        "enabled": config.slicer.enabled,
+        "available": bool(os.environ.get(config.slicer.executable_env) or Path(config.slicer.executable_path).exists()),
+        "source": "env" if os.environ.get(config.slicer.executable_env) else "configured",
+        "executable_env": config.slicer.executable_env,
+        "executable_path": config.slicer.executable_path,
+        "configured_executable_path": config.slicer.executable_path,
+        "resolved_executable_path": os.environ.get(config.slicer.executable_env, config.slicer.executable_path),
+        "output_dir": config.slicer.output_dir,
+        "timeout_sec": config.slicer.timeout_sec,
     }
 
 
@@ -2439,9 +2903,23 @@ async def _transform_module_source_with_model(req: RuntimeModuleCreateRequest, s
     ).strip()
     model = requested_model or active_selection.primary
     active_backend = ctx.primary_backends.get(ctx.active_backend) or ctx.primary_backend
-    attempts: list[tuple[str, Any, str, str]] = [
-        (ctx.active_backend, active_backend, model, active_selection.role),
-    ]
+    attempts: list[tuple[str, Any, str, str]] = []
+    fallback_backend_name = ctx.backend_fallbacks.get(ctx.active_backend, "")
+    backend_fallback_attempt: tuple[str, Any, str, str] | None = None
+    if fallback_backend_name and fallback_backend_name != ctx.active_backend:
+        fallback_router = ctx.model_routers.get(fallback_backend_name, ctx.model_router)
+        fallback_selection = fallback_router.select("module_designer")
+        backend_fallback_attempt = (
+            fallback_backend_name,
+            ctx.fallback_backends.get(ctx.active_backend, ctx.fallback_backend),
+            fallback_selection.primary,
+            f"{fallback_selection.role}:backend_fallback",
+        )
+    api_key_primary = fallback_backend_name == "openai" and backend_fallback_attempt is not None
+    if api_key_primary:
+        attempts.append(backend_fallback_attempt)
+
+    attempts.append((ctx.active_backend, active_backend, model, active_selection.role))
     if (
         not requested_model
         and active_selection.fallback
@@ -2455,18 +2933,8 @@ async def _transform_module_source_with_model(req: RuntimeModuleCreateRequest, s
                 f"{active_selection.role}:model_fallback",
             )
         )
-    fallback_backend_name = ctx.backend_fallbacks.get(ctx.active_backend, "")
-    if fallback_backend_name and fallback_backend_name != ctx.active_backend:
-        fallback_router = ctx.model_routers.get(fallback_backend_name, ctx.model_router)
-        fallback_selection = fallback_router.select("module_designer")
-        attempts.append(
-            (
-                fallback_backend_name,
-                ctx.fallback_backends.get(ctx.active_backend, ctx.fallback_backend),
-                fallback_selection.primary,
-                f"{fallback_selection.role}:backend_fallback",
-            )
-        )
+    if backend_fallback_attempt is not None and not api_key_primary:
+        attempts.append(backend_fallback_attempt)
 
     last_error: Exception | None = None
     response = None
@@ -2489,6 +2957,8 @@ async def _transform_module_source_with_model(req: RuntimeModuleCreateRequest, s
                 ),
                 metadata={"task_type": "module_designer", "role": role, "max_tokens": 1400},
             )
+            if not str(response.text or "").strip():
+                raise RuntimeError(f"empty LLM response from backend={_backend_name} model={attempt_model}")
             used_model = attempt_model
             break
         except Exception as exc:
@@ -4724,6 +5194,48 @@ async def post_runtime_model_load(req: RuntimeModelRequest) -> dict[str, object]
 async def post_runtime_model_unload(req: RuntimeModelRequest) -> dict[str, object]:
     """Unload one managed NemoClaw vLLM model."""
     return await controller.unload_runtime_model(req.model)
+
+
+@app.get("/api/runtime/api-key")
+async def get_runtime_api_key() -> dict[str, object]:
+    """Return the local OpenAI API key status without exposing the secret."""
+    settings = _read_api_key_settings(import_env=True)
+    return await _apply_runtime_api_key_settings(settings, emit_event=False)
+
+
+@app.post("/api/runtime/api-key")
+async def post_runtime_api_key(req: RuntimeApiKeyRequest) -> dict[str, object]:
+    """Save the OpenAI API key to the local gitignored single-file store."""
+    settings = _write_api_key_settings(req.api_key, enabled=req.enabled, source="user")
+    return await _apply_runtime_api_key_settings(settings)
+
+
+@app.post("/api/runtime/api-key/load")
+async def post_runtime_api_key_load() -> dict[str, object]:
+    """Enable the saved OpenAI API key for runtime fallback use."""
+    settings = _read_api_key_settings(import_env=True)
+    if not str(settings.get("api_key") or "").strip():
+        public = _public_api_key_settings(settings)
+        public.update({"ok": False, "message": "API key is not configured."})
+        return public
+    settings = _write_api_key_settings(
+        str(settings.get("api_key") or ""),
+        enabled=True,
+        source=str(settings.get("source") or "memory"),
+    )
+    return await _apply_runtime_api_key_settings(settings)
+
+
+@app.post("/api/runtime/api-key/unload")
+async def post_runtime_api_key_unload() -> dict[str, object]:
+    """Disable the saved OpenAI API key without deleting it from the local store."""
+    settings = _read_api_key_settings(import_env=True)
+    settings = _write_api_key_settings(
+        str(settings.get("api_key") or ""),
+        enabled=False,
+        source=str(settings.get("source") or "memory"),
+    )
+    return await _apply_runtime_api_key_settings(settings)
 
 
 def _request_audit_log_gate(payload: dict[str, object]) -> tuple[dict[str, object], str | None]:
@@ -7652,43 +8164,139 @@ async def post_windows_equipment_request_log(req: WindowsBridgeRequestLogRequest
 
 @app.get("/api/printer/status")
 async def get_printer_status(mode: Literal["live", "test"] = "live") -> dict[str, object]:
-    """Return redacted Prusa MK4S/PrusaLink status for GUI display."""
-    workflow = _printer_workflow()
-    config = workflow.config
-    connection = _redacted_printer_connection(workflow)
-    health = workflow.health({"runtime_mode": mode})
-    profile = load_prusa_print_profile()
+    """Return selected-printer fleet/device status for GUI display."""
+    manager = _printer_bridge_manager()
+    health = manager.prepare({"runtime_mode": mode, "health_only": mode != "live"})
+    connection = _redacted_selected_printer_connection(manager)
+    profile = _selected_print_profile(manager)
+    config = manager.config
     return {
         "ok": bool(health.get("ok")),
         "mode": mode,
-        "provider": config.provider,
+        "provider": health.get("provider", config.default_profile.provider),
+        "selected_printer": health.get("selected_printer", {}),
+        "available_printers": health.get("available_printers", manager.available_printers()),
+        "automatic_fallback": bool(health.get("automatic_fallback", config.allow_automatic_fallback)),
         "connection": connection,
         "live_gates": {
-            "allow_status": config.live_gate("allow_status", True),
-            "allow_upload": config.live_gate("allow_upload", False),
-            "allow_start_print": config.live_gate("allow_start_print", False),
-            "allow_ejection": config.live_gate("allow_ejection", False),
+            "allow_status": True,
+            "allow_upload": bool(health.get("device_screen", {}).get("actions", {}).get("can_upload", False)),
+            "allow_start_print": bool(health.get("device_screen", {}).get("actions", {}).get("can_start_print", False)),
+            "allow_ejection": bool(health.get("autoejection", {}).get("enabled", False)),
         },
         "auto_ejection": {
-            "enabled": bool(profile.get("allow_ejection", False)),
-            "method": config.ejection.method,
-            "mode": config.ejection.mode,
+            "enabled": bool(health.get("autoejection", {}).get("enabled", False)),
+            "method": health.get("autoejection", {}).get("provider", "none"),
+            "mode": health.get("autoejection", {}).get("status", "not_configured"),
         },
-        "slicer": {
-            "enabled": config.slicer.enabled,
-            "executable_env": config.slicer.executable_env,
-            "executable_path": config.slicer.executable_path,
-            "output_dir": config.slicer.output_dir,
-        },
+        "slicer": _selected_printer_slicer_payload(manager, _printer_workflow().config),
         "profile": profile,
         "profile_path": str(PRUSA_PRINT_PROFILE_PATH),
+        "device_screen": health.get("device_screen", {}),
+        "preprint_gate": health.get("preprint_gate", {}),
+        "operator_actions": health.get("operator_actions", []),
         "health": health,
     }
 
 
+@app.get("/api/printer/video-status")
+async def get_printer_video_status() -> dict[str, object]:
+    """Probe selected Bambu live-view readiness without exposing access-code secrets."""
+    manager = _printer_bridge_manager()
+    return manager.video_status({})
+
+
+@app.get("/api/printer/video-stream.mjpeg")
+async def get_printer_video_stream() -> StreamingResponse:
+    """Proxy selected Bambu RTSPS live view as MJPEG for the browser device panel."""
+    manager = _printer_bridge_manager()
+    selected_profile, _reason = manager.fleet_selection()
+    if selected_profile.provider != "bambulab_x2d":
+        raise HTTPException(status_code=400, detail="BAMBU_VIDEO_STREAM_REQUIRES_BAMBU_PROFILE")
+    memory = BambuConnectionMemory(selected_profile.connection_memory_path)
+    raw_connection = memory.load()
+    raw_auth = raw_connection.get("auth") if isinstance(raw_connection.get("auth"), dict) else {}
+    host = str(raw_connection.get("host") or "").strip()
+    access_code = str(raw_auth.get("access_code") or "")
+    if not host or not access_code:
+        raise HTTPException(status_code=400, detail="BAMBU_VIDEO_CONNECTION_INFO_INCOMPLETE")
+    ffmpeg_path = shutil.which("ffmpeg")
+    if not ffmpeg_path:
+        raise HTTPException(status_code=503, detail="BAMBU_VIDEO_PROXY_FFMPEG_MISSING")
+
+    stream_url = f"rtsps://bblp:{quote(access_code, safe='')}@{host}:{manager.config.video.rtsps_port}/streaming/live/1"
+    command = [
+        ffmpeg_path,
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-rtsp_transport",
+        "tcp",
+        "-i",
+        stream_url,
+        "-an",
+        "-vf",
+        "fps=5,scale=960:-1",
+        "-q:v",
+        "5",
+        "-f",
+        "mpjpeg",
+        "-",
+    ]
+
+    def iter_mjpeg() -> object:
+        process = subprocess.Popen(
+            command,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            bufsize=0,
+        )
+        try:
+            if process.stdout is None:
+                return
+            while True:
+                chunk = process.stdout.read(65536)
+                if not chunk:
+                    break
+                yield chunk
+        finally:
+            if process.returncode is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+
+    return StreamingResponse(iter_mjpeg(), media_type="multipart/x-mixed-replace; boundary=ffmpeg")
+
+
+@app.get("/api/printer/fleet")
+async def get_printer_fleet() -> dict[str, object]:
+    """Return selectable printer profiles and the active operator-selected profile."""
+    manager = _printer_bridge_manager()
+    return manager.fleet_payload()
+
+
+@app.post("/api/printer/fleet")
+async def post_printer_fleet(req: PrinterFleetSelectionRequest) -> dict[str, object]:
+    """Persist the active printer profile without enabling automatic fallback."""
+    manager = _printer_bridge_manager()
+    try:
+        return manager.save_fleet_selection(req.profile_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @app.get("/api/printer/connection")
 async def get_printer_connection() -> dict[str, object]:
-    """Return editable PrusaLink bridge connection fields without secrets."""
+    """Return editable selected-printer bridge connection fields without secrets."""
+    manager = _printer_bridge_manager()
+    selected_profile, _reason = manager.fleet_selection()
+    if selected_profile.provider == "bambulab_x2d":
+        return {"ok": True, "connection": _redacted_selected_printer_connection(manager)}
     workflow = _printer_workflow()
     workflow.connection_memory.ensure_template(workflow.config.live)
     return {"ok": True, "connection": _redacted_printer_connection(workflow)}
@@ -7696,7 +8304,34 @@ async def get_printer_connection() -> dict[str, object]:
 
 @app.post("/api/printer/connection")
 async def post_printer_connection(req: PrinterConnectionRequest) -> dict[str, object]:
-    """Persist PrusaLink bridge connection memory from the 3DP GUI."""
+    """Persist selected-printer bridge connection memory from the 3DP GUI."""
+    manager = _printer_bridge_manager()
+    selected_profile, _reason = manager.fleet_selection()
+    if selected_profile.provider == "bambulab_x2d":
+        memory = BambuConnectionMemory(selected_profile.connection_memory_path)
+        memory.save_from_payload(
+            {
+                "host": req.host.strip(),
+                "model": req.model.strip() or "Bambu Lab X2D",
+                "serial": req.serial.strip(),
+                "printer_name": req.printer_name.strip(),
+                "lan_mode_confirmed": req.lan_mode_confirmed,
+                "developer_mode_confirmed": req.developer_mode_confirmed,
+                "auth": {
+                    "mode": "lan_access_code",
+                    "username": req.username.strip() or "bblp",
+                    "access_code": req.access_code or req.password,
+                },
+                "mqtt_port": 8883,
+                "ftps_port": 990,
+            }
+        )
+        return {
+            "ok": True,
+            "connection": memory.redacted(),
+            "message": "Bambu Lab bridge connection saved.",
+        }
+
     workflow = _printer_workflow()
     connection_info: dict[str, object] = {
         "host": req.host.strip(),
@@ -7719,71 +8354,1413 @@ async def post_printer_connection(req: PrinterConnectionRequest) -> dict[str, ob
     }
 
 
+@app.post("/api/printer/upload-path-probe")
+async def post_printer_upload_path_probe(req: PrinterUploadPathProbeRequest) -> dict[str, object]:
+    """Probe Bambu FTPS candidate upload paths using a small marker file that is deleted immediately."""
+    manager = _printer_bridge_manager()
+    selected_profile, selection_reason = manager.fleet_selection()
+    if selected_profile.provider != "bambulab_x2d":
+        return {
+            "ok": False,
+            "provider": selected_profile.provider,
+            "failure_code": "BAMBU_UPLOAD_PATH_PROBE_NOT_APPLICABLE",
+            "message": "Upload path probing is only implemented for the Bambu Lab bridge.",
+        }
+    memory = BambuConnectionMemory(selected_profile.connection_memory_path)
+    connection = memory.load()
+    auth = connection.get("auth") if isinstance(connection.get("auth"), dict) else {}
+    result = manager.ftps_client.probe_upload_paths(
+        host=str(connection.get("host") or ""),
+        username=str(auth.get("username") or "bblp"),
+        access_code=str(auth.get("access_code") or ""),
+        timeout_sec=float(req.timeout_sec),
+        candidate_dirs=[str(item) for item in req.candidate_dirs],
+    )
+    return {
+        **result,
+        "tool": "printer.bambu.upload_path_probe",
+        "provider": selected_profile.provider,
+        "selected_printer": manager._selected_printer_payload(selected_profile, selection_reason),
+        "connection": memory.redacted(),
+    }
+
+
+@app.post("/api/printer/start-command-draft")
+async def post_printer_start_command_draft(req: PrinterStartCommandDraftRequest) -> dict[str, object]:
+    """Build a Bambu MQTT project_file command draft without publishing or starting a print."""
+    manager = _printer_bridge_manager()
+    selected_profile, selection_reason = manager.fleet_selection()
+    if selected_profile.provider != "bambulab_x2d":
+        return {
+            "ok": False,
+            "provider": selected_profile.provider,
+            "failure_code": "BAMBU_START_COMMAND_DRAFT_NOT_APPLICABLE",
+            "message": "Start command drafts are only implemented for the Bambu Lab bridge.",
+            "will_publish": False,
+            "start_enabled": False,
+        }
+    memory = BambuConnectionMemory(selected_profile.connection_memory_path)
+    connection = memory.redacted()
+    draft = build_bambu_project_file_command_draft(
+        serial=str(connection.get("serial") or ""),
+        remote_path=req.remote_path,
+        subtask_name=req.subtask_name,
+        plate_id=req.plate_id,
+        use_ams=req.use_ams,
+        ams_mapping=req.ams_mapping,
+        timelapse=req.timelapse,
+        bed_leveling=req.bed_leveling,
+        flow_cali=req.flow_cali,
+        vibration_cali=req.vibration_cali,
+        layer_inspect=req.layer_inspect,
+    )
+    return {
+        **draft,
+        "tool": "printer.bambu.start_command_draft",
+        "provider": selected_profile.provider,
+        "selected_printer": manager._selected_printer_payload(selected_profile, selection_reason),
+        "connection": connection,
+    }
+
+
+def _bambu_start_gate_blockers(
+    *,
+    draft: dict[str, object],
+    prepare_result: dict[str, object],
+    operator_confirmed: bool,
+    guardian_approved: bool,
+    dry_run: bool,
+) -> tuple[list[str], dict[str, object]]:
+    """Return deterministic publish blockers for Bambu start-command preflight."""
+    device_screen = prepare_result.get("device_screen") if isinstance(prepare_result.get("device_screen"), dict) else {}
+    actions = device_screen.get("actions") if isinstance(device_screen.get("actions"), dict) else {}
+    preprint_gate = prepare_result.get("preprint_gate") if isinstance(prepare_result.get("preprint_gate"), dict) else {}
+    checks = preprint_gate.get("checks") if isinstance(preprint_gate.get("checks"), dict) else {}
+    blockers: list[str] = []
+
+    def add(code: str) -> None:
+        if code and code not in blockers:
+            blockers.append(code)
+
+    if not draft.get("ok"):
+        add(str(draft.get("failure_code") or "BAMBU_START_DRAFT_INVALID"))
+    for code in preprint_gate.get("blockers", []) if isinstance(preprint_gate.get("blockers"), list) else []:
+        add(str(code))
+    if dry_run:
+        add("BAMBU_START_DRY_RUN")
+    if not operator_confirmed:
+        add("BAMBU_OPERATOR_CONFIRMATION_REQUIRED")
+    if not guardian_approved:
+        add("BAMBU_GUARDIAN_APPROVAL_REQUIRED")
+    if not bool(actions.get("can_start_print", False)):
+        add("BAMBU_DEVICE_SCREEN_START_DISABLED")
+
+    required_check_codes = {
+        "mqtt_authenticated_or_virtual": "BAMBU_MQTT_NOT_AUTHENTICATED",
+        "latest_report_fresh": "BAMBU_MQTT_REPORT_NOT_FRESH",
+        "storage_transfer_path_verified": "BAMBU_STORAGE_TRANSFER_PATH_NOT_VERIFIED",
+        "printer_safe_state_verified": "BAMBU_PRINTER_SAFE_STATE_NOT_VERIFIED",
+        "start_command_draft_prepared": "BAMBU_START_COMMAND_DRAFT_NOT_PREPARED",
+    }
+    for key, code in required_check_codes.items():
+        if key in checks and not bool(checks.get(key)):
+            add(code)
+
+    gate_checks = {
+        "draft_valid": bool(draft.get("ok")),
+        "operator_confirmed": bool(operator_confirmed),
+        "guardian_approved": bool(guardian_approved),
+        "dry_run": bool(dry_run),
+        "device_screen_can_start_print": bool(actions.get("can_start_print", False)),
+        "device_screen_can_prepare_start_command": bool(actions.get("can_prepare_start_command", False)),
+        "preprint_gate_state": preprint_gate.get("state", ""),
+        "preprint_gate_checks": checks,
+    }
+    return blockers, gate_checks
+
+
+@app.post("/api/printer/start-gate")
+async def post_printer_start_gate(req: PrinterStartGateRequest) -> dict[str, object]:
+    """Evaluate the guarded Bambu start gate without publishing by default."""
+    manager = _printer_bridge_manager()
+    selected_profile, selection_reason = manager.fleet_selection()
+    if selected_profile.provider != "bambulab_x2d":
+        return {
+            "ok": False,
+            "tool": "printer.bambu.start_gate",
+            "provider": selected_profile.provider,
+            "failure_code": "BAMBU_START_GATE_NOT_APPLICABLE",
+            "message": "Start gate checks are only implemented for the Bambu Lab bridge.",
+            "will_publish": False,
+            "start_enabled": False,
+            "ready_to_publish": False,
+        }
+    memory = BambuConnectionMemory(selected_profile.connection_memory_path)
+    connection = memory.redacted()
+    draft = build_bambu_project_file_command_draft(
+        serial=str(connection.get("serial") or ""),
+        remote_path=req.remote_path,
+        subtask_name=req.subtask_name,
+        plate_id=req.plate_id,
+        use_ams=req.use_ams,
+        ams_mapping=req.ams_mapping,
+        timelapse=req.timelapse,
+        bed_leveling=req.bed_leveling,
+        flow_cali=req.flow_cali,
+        vibration_cali=req.vibration_cali,
+        layer_inspect=req.layer_inspect,
+    )
+    prepare_result = manager.prepare(
+        {
+            "runtime_mode": "live",
+            "health_only": False,
+            "bambu_artifact_url": req.remote_path,
+            "subtask_name": req.subtask_name,
+            "plate_id": req.plate_id,
+            "use_ams": req.use_ams,
+            "ams_mapping": req.ams_mapping,
+            "timelapse": req.timelapse,
+            "bed_leveling": req.bed_leveling,
+            "flow_cali": req.flow_cali,
+            "vibration_cali": req.vibration_cali,
+            "layer_inspect": req.layer_inspect,
+        }
+    )
+    blockers, gate_checks = _bambu_start_gate_blockers(
+        draft=draft,
+        prepare_result=prepare_result,
+        operator_confirmed=req.operator_confirmed,
+        guardian_approved=req.guardian_approved,
+        dry_run=req.dry_run,
+    )
+    ready_to_publish = not blockers
+    return {
+        "ok": True,
+        "tool": "printer.bambu.start_gate",
+        "provider": selected_profile.provider,
+        "selected_printer": manager._selected_printer_payload(selected_profile, selection_reason),
+        "connection": connection,
+        "draft": draft,
+        "preprint_gate": prepare_result.get("preprint_gate", {}),
+        "device_screen": prepare_result.get("device_screen", {}),
+        "operator_actions": prepare_result.get("operator_actions", []),
+        "checks": gate_checks,
+        "blockers": blockers,
+        "ready_to_publish": ready_to_publish,
+        "will_publish": False,
+        "start_enabled": ready_to_publish,
+        "message": (
+            "Bambu start gate is ready, but this endpoint does not publish by itself."
+            if ready_to_publish
+            else "Bambu start gate blocked; no MQTT publish was attempted."
+        ),
+    }
+
+
+@app.post("/api/printer/start-publish")
+async def post_printer_start_publish(req: PrinterStartGateRequest) -> dict[str, object]:
+    """Publish the Bambu project_file command only after every guarded start gate passes."""
+    manager = _printer_bridge_manager()
+    selected_profile, selection_reason = manager.fleet_selection()
+    if selected_profile.provider != "bambulab_x2d":
+        return {
+            "ok": False,
+            "tool": "printer.bambu.start_publish",
+            "provider": selected_profile.provider,
+            "failure_code": "BAMBU_START_PUBLISH_NOT_APPLICABLE",
+            "message": "Start publish is only implemented for the Bambu Lab bridge.",
+            "will_publish": False,
+            "published": False,
+            "ready_to_publish": False,
+        }
+    memory = BambuConnectionMemory(selected_profile.connection_memory_path)
+    raw_connection = memory.load()
+    raw_auth = raw_connection.get("auth") if isinstance(raw_connection.get("auth"), dict) else {}
+    connection = memory.redacted()
+    draft = build_bambu_project_file_command_draft(
+        serial=str(connection.get("serial") or ""),
+        remote_path=req.remote_path,
+        subtask_name=req.subtask_name,
+        plate_id=req.plate_id,
+        use_ams=req.use_ams,
+        ams_mapping=req.ams_mapping,
+        timelapse=req.timelapse,
+        bed_leveling=req.bed_leveling,
+        flow_cali=req.flow_cali,
+        vibration_cali=req.vibration_cali,
+        layer_inspect=req.layer_inspect,
+    )
+    prepare_result = manager.prepare(
+        {
+            "runtime_mode": "live",
+            "health_only": False,
+            "bambu_artifact_url": req.remote_path,
+            "subtask_name": req.subtask_name,
+            "plate_id": req.plate_id,
+            "use_ams": req.use_ams,
+            "ams_mapping": req.ams_mapping,
+            "timelapse": req.timelapse,
+            "bed_leveling": req.bed_leveling,
+            "flow_cali": req.flow_cali,
+            "vibration_cali": req.vibration_cali,
+            "layer_inspect": req.layer_inspect,
+        }
+    )
+    blockers, gate_checks = _bambu_start_gate_blockers(
+        draft=draft,
+        prepare_result=prepare_result,
+        operator_confirmed=req.operator_confirmed,
+        guardian_approved=req.guardian_approved,
+        dry_run=req.dry_run,
+    )
+    ready_to_publish = not blockers
+    base_payload: dict[str, object] = {
+        "tool": "printer.bambu.start_publish",
+        "provider": selected_profile.provider,
+        "selected_printer": manager._selected_printer_payload(selected_profile, selection_reason),
+        "connection": connection,
+        "draft": draft,
+        "preprint_gate": prepare_result.get("preprint_gate", {}),
+        "device_screen": prepare_result.get("device_screen", {}),
+        "operator_actions": prepare_result.get("operator_actions", []),
+        "checks": gate_checks,
+        "blockers": blockers,
+        "ready_to_publish": ready_to_publish,
+    }
+    if not ready_to_publish:
+        return {
+            **base_payload,
+            "ok": False,
+            "failure_code": "BAMBU_START_GATE_BLOCKED",
+            "will_publish": False,
+            "published": False,
+            "start_enabled": False,
+            "message": "Bambu start publish blocked by start-gate checks; no MQTT command was sent.",
+        }
+
+    publish_result = manager.mqtt_client.publish_project_file_command(
+        host=str(raw_connection.get("host") or ""),
+        serial=str(connection.get("serial") or ""),
+        username=str(connection.get("username") or "bblp"),
+        access_code=str(raw_auth.get("access_code") or ""),
+        topic=str(draft.get("topic") or ""),
+        payload=draft.get("payload") if isinstance(draft.get("payload"), dict) else {},
+        timeout_sec=manager.config.mqtt.timeout_sec,
+    )
+    published = bool(publish_result.get("ok"))
+    return {
+        **base_payload,
+        "ok": published,
+        "failure_code": "" if published else str(publish_result.get("failure_code") or "BAMBU_MQTT_PUBLISH_FAILED"),
+        "will_publish": published,
+        "published": published,
+        "start_enabled": published,
+        "publish_result": publish_result,
+        "message": (
+            "Bambu MQTT project_file command was published."
+            if published
+            else "Bambu start gate passed, but MQTT publish failed."
+        ),
+    }
+
+
+def _readiness_section(
+    *,
+    section_id: str,
+    label: str,
+    status: str,
+    detail: str,
+    blockers: list[str] | None = None,
+) -> dict[str, object]:
+    """Return a compact operator-facing readiness section."""
+    return {
+        "id": section_id,
+        "label": label,
+        "status": status,
+        "detail": detail,
+        "blockers": blockers or [],
+    }
+
+
+def _spc_action_for_code(code: str, *, source: str = "gate") -> dict[str, object]:
+    """Map backend gate codes into operator-facing actions without inventing status."""
+    labels = {
+        "BAMBU_FTPS_WRITE_FAILED": (
+            "Fix Bambu transfer path",
+            "FTPS read works but marker write failed. Confirm LAN/Developer mode, writable storage, or use a verified HTTP artifact route.",
+        ),
+        "BAMBU_STORAGE_TRANSFER_PATH_NOT_VERIFIED": (
+            "Verify sliced-artifact transfer",
+            "Run Upload Path Probe or Prepare HTTP Artifact, then rerun SPC Readiness.",
+        ),
+        "BAMBU_START_DRY_RUN": (
+            "Keep dry-run until final approval",
+            "Dry-run blocks MQTT publish by design. Disable it only for the final explicit start command.",
+        ),
+        "BAMBU_OPERATOR_CONFIRMATION_REQUIRED": (
+            "Confirm operator start",
+            "The operator must explicitly confirm that the Bambu job may be started.",
+        ),
+        "BAMBU_GUARDIAN_APPROVAL_REQUIRED": (
+            "Wait for Guardian approval",
+            "Guardian must approve the artifact, printer state, and safety gate before publish.",
+        ),
+        "BAMBU_DEVICE_SCREEN_START_DISABLED": (
+            "Wait for printer start-ready state",
+            "The live device screen does not currently report that start is allowed.",
+        ),
+        "BAMBU_DEVELOPER_MODE_NOT_CONFIRMED": (
+            "Confirm Developer Mode",
+            "Save the Bambu connection setting after confirming the printer allows local write/control.",
+        ),
+        "BAMBU_LAN_MODE_NOT_CONFIRMED": (
+            "Confirm LAN-only mode",
+            "Save the Bambu connection setting after confirming local LAN control is enabled.",
+        ),
+        "BAMBU_AUTOEJECTION_NOT_REQUESTED": (
+            "Configure autoejection provider",
+            "Autonomous loop readiness needs a verified provider routine and pre/post eject vision evidence.",
+        ),
+    }
+    label, detail = labels.get(code, ("Review printer gate", "Inspect the corresponding backend gate evidence before proceeding."))
+    return {
+        "code": code,
+        "label": label,
+        "detail": detail,
+        "severity": "blocking" if "REQUIRED" in code or "FAILED" in code or "DISABLED" in code else "warning",
+        "source": source,
+    }
+
+
+def _spc_next_actions(
+    *,
+    blockers: list[str],
+    operator_actions: list[object],
+    autoejection_blockers: list[str],
+) -> list[dict[str, object]]:
+    """Build a de-duplicated operator action list from actual backend evidence."""
+    ordered_codes: list[tuple[str, str]] = []
+    for code in blockers:
+        ordered_codes.append((str(code), "start_gate"))
+    for item in operator_actions:
+        if isinstance(item, dict) and item.get("code"):
+            ordered_codes.append((str(item.get("code")), "operator_action"))
+    for code in autoejection_blockers:
+        ordered_codes.append((str(code), "autoejection_gate"))
+    seen: set[str] = set()
+    actions: list[dict[str, object]] = []
+    for code, source in ordered_codes:
+        if not code or code in seen:
+            continue
+        seen.add(code)
+        actions.append(_spc_action_for_code(code, source=source))
+    return actions[:8]
+
+
+def _spc_readiness_level(
+    *,
+    level_id: str,
+    label: str,
+    status: str,
+    detail: str,
+    blocking_codes: list[str] | None = None,
+    evidence: dict[str, object] | None = None,
+) -> dict[str, object]:
+    """Return one operator-facing readiness level derived from backend gates."""
+    return {
+        "id": level_id,
+        "label": label,
+        "status": status,
+        "detail": detail,
+        "blocking_codes": blocking_codes or [],
+        "evidence": evidence or {},
+    }
+
+
+def _looks_like_local_policy_ref(policy_ref: str) -> bool:
+    """Return whether a policy reference should be proven on local disk."""
+    text = str(policy_ref or "").strip()
+    if not text or text.startswith("fake://"):
+        return False
+    return text.startswith(("/", "./", "../", "~", "outputs/", "artifacts/", "runs/"))
+
+
+def _bambu_manipulation_consumer_readiness(*, mode: str = "live") -> dict[str, object]:
+    """Verify that Bambu autoejection has an actual Manipulation Agent consumer path."""
+    profile_path = Path(MANIPULATION_AGENT_PROFILE_PATH)
+    profile_saved = profile_path.exists()
+    raw: dict[str, object] = {}
+    if profile_saved:
+        try:
+            loaded = json.loads(profile_path.read_text(encoding="utf-8"))
+            raw = loaded if isinstance(loaded, dict) else {}
+        except Exception:
+            raw = {}
+    profile = normalize_manipulation_agent_profile(raw)
+    strategy = str(profile.get("manipulation_strategy") or "")
+    task_id = str(profile.get("task_id") or profile.get("skill_id") or "")
+    profile_id = str(profile.get("profile_id") or "")
+    policy_path = str(profile.get("policy_path") or "")
+    policy_checkpoint_path = str(profile.get("policy_checkpoint_path") or "")
+    policy_repo_id = str(profile.get("policy_repo_id") or "")
+    policy_ref = policy_path or policy_checkpoint_path or policy_repo_id
+    blockers: list[str] = []
+    if not profile_saved:
+        blockers.append("MANIPULATION_AGENT_DEFAULTS_NOT_SAVED")
+    if strategy not in {"pi05_lerobot_policy", "lerobot_policy"}:
+        blockers.append("MANIPULATION_AGENT_STRATEGY_NOT_ROLLOUT")
+    if task_id != "transfer_to_utm":
+        blockers.append("MANIPULATION_AGENT_TASK_NOT_3DP_TO_UTM")
+    if not profile_id:
+        blockers.append("MANIPULATION_AGENT_PROFILE_ID_REQUIRED")
+    if not policy_ref:
+        blockers.append("MANIPULATION_POLICY_REFERENCE_REQUIRED")
+    if policy_ref.startswith("fake://") and str(mode).lower() == "live":
+        blockers.append("MANIPULATION_FAKE_POLICY_NOT_ALLOWED_IN_LIVE")
+    policy_local_path = ""
+    if _looks_like_local_policy_ref(policy_ref):
+        local_path = Path(policy_ref).expanduser()
+        if not local_path.is_absolute():
+            local_path = resolve_path(str(local_path))
+        policy_local_path = str(local_path)
+        if not local_path.exists():
+            blockers.append("MANIPULATION_POLICY_LOCAL_PATH_NOT_FOUND")
+    ready = not blockers
+    return {
+        "schema": "bambu_autoejection_consumer_readiness.v1",
+        "ready": ready,
+        "mode": str(mode or "live"),
+        "profile_saved": profile_saved,
+        "profile_path": str(profile_path),
+        "profile_id": profile_id,
+        "strategy": strategy,
+        "task_id": task_id,
+        "skill_id": str(profile.get("skill_id") or ""),
+        "source_location": str(profile.get("source_location") or ""),
+        "target_location": str(profile.get("target_location") or ""),
+        "policy_type": str(profile.get("policy_type") or ""),
+        "policy_backend": str(profile.get("policy_backend") or ""),
+        "policy_ref": policy_ref,
+        "policy_local_path": policy_local_path,
+        "blockers": blockers,
+    }
+
+
+def _bambu_autoejection_handoff_payload(
+    autoejection: dict[str, object],
+    *,
+    position: str = "post_print",
+    object_size_mm: list[float] | None = None,
+    mode: str = "live",
+    consumer_readiness: dict[str, object] | None = None,
+) -> dict[str, object]:
+    """Build the safe Bambu autoejection provider handoff packet without starting motion."""
+    if not autoejection.get("can_run_test"):
+        return {}
+    consumer = consumer_readiness or _bambu_manipulation_consumer_readiness(mode=mode)
+    if not consumer.get("ready"):
+        return {}
+    return {
+        "schema": "bambu_autoejection_provider_handoff.v1",
+        "status": "provider_handoff_ready",
+        "provider": str(autoejection.get("provider") or "none"),
+        "routine_id": str(autoejection.get("verified_routine_id") or ""),
+        "pre_eject_vision_profile": str(autoejection.get("pre_eject_vision_profile") or ""),
+        "post_eject_vision_profile": str(autoejection.get("post_eject_vision_profile") or ""),
+        "position": position,
+        "object_size_mm": [float(item) for item in object_size_mm] if object_size_mm else [],
+        "mode": mode,
+        "next_owner": "ManipulationAgent",
+        "recommended_consumer_agent": "ManipulationAgent",
+        "next_tool": "lerobot.manipulation-agent.run",
+        "requires_provider_executor": True,
+        "requires_guardian_approval": True,
+        "requires_operator_confirmation": True,
+        "motion_started": False,
+        "dry_run_only": True,
+        "consumer_readiness": consumer,
+        "consumer_profile_id": str(consumer.get("profile_id") or ""),
+        "consumer_policy_ref": str(consumer.get("policy_ref") or ""),
+    }
+
+
+@app.post("/api/printer/spc-readiness")
+async def post_printer_spc_readiness(req: PrinterSpcReadinessRequest) -> dict[str, object]:
+    """Aggregate real printer gates for the Specimen Making Agent without publishing."""
+    manager = _printer_bridge_manager()
+    selected_profile, selection_reason = manager.fleet_selection()
+    if selected_profile.provider != "bambulab_x2d":
+        return {
+            "ok": False,
+            "tool": "printer.spc_readiness",
+            "provider": selected_profile.provider,
+            "failure_code": "SPC_READINESS_NOT_APPLICABLE",
+            "message": "SPC readiness aggregation is currently implemented for the Bambu Lab device bridge.",
+            "ready_for_live_print": False,
+            "autonomous_cycle_ready": False,
+            "will_publish": False,
+            "sections": [],
+        }
+
+    memory = BambuConnectionMemory(selected_profile.connection_memory_path)
+    connection = memory.redacted()
+    draft = build_bambu_project_file_command_draft(
+        serial=str(connection.get("serial") or ""),
+        remote_path=req.remote_path,
+        subtask_name=req.subtask_name,
+        plate_id=req.plate_id,
+        use_ams=req.use_ams,
+        ams_mapping=req.ams_mapping,
+        timelapse=req.timelapse,
+        bed_leveling=req.bed_leveling,
+        flow_cali=req.flow_cali,
+        vibration_cali=req.vibration_cali,
+        layer_inspect=req.layer_inspect,
+    )
+    prepare_result = manager.prepare(
+        {
+            "runtime_mode": req.mode,
+            "health_only": False,
+            "bambu_artifact_url": req.remote_path,
+            "subtask_name": req.subtask_name,
+            "plate_id": req.plate_id,
+            "use_ams": req.use_ams,
+            "ams_mapping": req.ams_mapping,
+            "timelapse": req.timelapse,
+            "bed_leveling": req.bed_leveling,
+            "flow_cali": req.flow_cali,
+            "vibration_cali": req.vibration_cali,
+            "layer_inspect": req.layer_inspect,
+        }
+    )
+    blockers, gate_checks = _bambu_start_gate_blockers(
+        draft=draft,
+        prepare_result=prepare_result,
+        operator_confirmed=req.operator_confirmed,
+        guardian_approved=req.guardian_approved,
+        dry_run=req.dry_run,
+    )
+    device_screen = prepare_result.get("device_screen") if isinstance(prepare_result.get("device_screen"), dict) else {}
+    device_connection = device_screen.get("connection") if isinstance(device_screen.get("connection"), dict) else {}
+    preprint_gate = prepare_result.get("preprint_gate") if isinstance(prepare_result.get("preprint_gate"), dict) else {}
+    raw_preprint_blockers = preprint_gate.get("blockers", [])
+    preprint_blockers = [str(item) for item in raw_preprint_blockers] if isinstance(raw_preprint_blockers, list) else []
+    autoejection = manager.autoejection_status()
+    raw_autoejection_blockers = autoejection.get("blockers", [])
+    autoejection_blockers = [str(item) for item in raw_autoejection_blockers] if isinstance(raw_autoejection_blockers, list) else []
+    connection_ready = bool(connection.get("host")) and bool(connection.get("serial")) and bool(connection.get("access_code_set"))
+    mqtt_ready = device_connection.get("mqtt") in {"connected", "virtual"}
+    transfer_ready = device_connection.get("transfer") in {"connected", "virtual"}
+    ready_for_live_print = not blockers
+    approval_blockers = [
+        code
+        for code in blockers
+        if code in {"BAMBU_START_DRY_RUN", "BAMBU_OPERATOR_CONFIRMATION_REQUIRED", "BAMBU_GUARDIAN_APPROVAL_REQUIRED"}
+    ]
+    technical_blockers = [code for code in blockers if code not in set(approval_blockers)]
+    technical_ready_for_start = not technical_blockers
+    approval_ready_for_start = not approval_blockers
+    autoejection_ready = bool(autoejection.get("can_run_test", False))
+    consumer_readiness = _bambu_manipulation_consumer_readiness(mode=req.mode)
+    autoejection_handoff = _bambu_autoejection_handoff_payload(
+        autoejection,
+        position="post_print",
+        mode=req.mode,
+        consumer_readiness=consumer_readiness,
+    )
+    if autoejection_ready and not consumer_readiness.get("ready"):
+        autoejection_blockers = [*autoejection_blockers, *[str(item) for item in consumer_readiness.get("blockers", [])]]
+        autoejection_ready = False
+        autoejection_handoff = {}
+    autonomous_cycle_ready = ready_for_live_print and autoejection_ready
+    status = "ready" if ready_for_live_print else "blocked"
+    operator_actions = prepare_result.get("operator_actions", [])
+    operator_actions_list = operator_actions if isinstance(operator_actions, list) else []
+    next_actions = _spc_next_actions(
+        blockers=blockers,
+        operator_actions=operator_actions_list,
+        autoejection_blockers=autoejection_blockers,
+    )
+    primary_blocker = blockers[0] if blockers else (autoejection_blockers[0] if autoejection_blockers else "")
+    operator_summary = {
+        "title": "Ready for explicit Bambu start" if ready_for_live_print else "Blocked before Bambu start",
+        "severity": "ready" if ready_for_live_print else "blocked",
+        "primary_blocker": primary_blocker,
+        "print_gate": "ready" if ready_for_live_print else "blocked",
+        "technical_gate": "ready" if technical_ready_for_start else "blocked",
+        "approval_gate": "ready" if approval_ready_for_start else "waiting",
+        "autonomous_loop": "ready" if autonomous_cycle_ready else "attention",
+        "publish_policy": "no MQTT publish from SPC readiness",
+    }
+    evidence = {
+        "device_connection": {
+            "mqtt": device_connection.get("mqtt", "unknown"),
+            "transfer": device_connection.get("transfer", "unknown"),
+            "video": device_connection.get("video", "unknown"),
+        },
+        "job": device_screen.get("job", {}) if isinstance(device_screen.get("job"), dict) else {},
+        "preprint_gate_state": preprint_gate.get("state", "unknown"),
+        "autoejection_status": autoejection.get("status", "unknown"),
+        "autoejection_handoff": autoejection_handoff,
+        "autoejection_consumer_readiness": consumer_readiness,
+    }
+    preprint_checks = preprint_gate.get("checks") if isinstance(preprint_gate.get("checks"), dict) else {}
+    transfer_blockers = [
+        code
+        for code in blockers
+        if code
+        in {
+            "BAMBU_FTPS_WRITE_FAILED",
+            "BAMBU_STORAGE_TRANSFER_PATH_NOT_VERIFIED",
+            "BAMBU_START_COMMAND_DRAFT_NOT_PREPARED",
+            "BAMBU_START_DRAFT_INVALID",
+        }
+    ]
+    connection_blockers: list[str] = []
+    if not connection_ready:
+        connection_blockers.append("BAMBU_CONNECTION_MEMORY_INCOMPLETE")
+    if not mqtt_ready:
+        connection_blockers.append("BAMBU_MQTT_NOT_AUTHENTICATED")
+    transfer_verified = bool(preprint_checks.get("storage_transfer_path_verified", False)) and transfer_ready
+    readiness_levels = [
+        _spc_readiness_level(
+            level_id="connection",
+            label="Printer connection",
+            status="ready" if connection_ready and mqtt_ready else "blocked",
+            detail=f"mqtt={device_connection.get('mqtt', 'unknown')} · host={connection.get('host') or 'missing'}",
+            blocking_codes=connection_blockers,
+            evidence={
+                "host": connection.get("host", ""),
+                "serial": connection.get("serial", ""),
+                "mqtt": device_connection.get("mqtt", "unknown"),
+                "access_code_set": bool(connection.get("access_code_set")),
+            },
+        ),
+        _spc_readiness_level(
+            level_id="transfer_path",
+            label="Sliced artifact transfer",
+            status="ready" if transfer_verified and not transfer_blockers else "blocked",
+            detail=f"transfer={device_connection.get('transfer', 'unknown')} · storage_verified={bool(preprint_checks.get('storage_transfer_path_verified', False))}",
+            blocking_codes=transfer_blockers,
+            evidence={
+                "transfer": device_connection.get("transfer", "unknown"),
+                "preprint_gate_state": preprint_gate.get("state", "unknown"),
+                "storage_transfer_path_verified": bool(preprint_checks.get("storage_transfer_path_verified", False)),
+            },
+        ),
+        _spc_readiness_level(
+            level_id="start_approval",
+            label="Operator / Guardian approval",
+            status="ready" if approval_ready_for_start else "waiting",
+            detail=(
+                f"operator={bool(req.operator_confirmed)} · guardian={bool(req.guardian_approved)}"
+                f" · dry_run={bool(req.dry_run)}"
+            ),
+            blocking_codes=approval_blockers,
+            evidence={
+                "operator_confirmed": bool(req.operator_confirmed),
+                "guardian_approved": bool(req.guardian_approved),
+                "dry_run": bool(req.dry_run),
+            },
+        ),
+        _spc_readiness_level(
+            level_id="publish_command",
+            label="MQTT publish command",
+            status="ready" if ready_for_live_print else "blocked",
+            detail="ready to publish from explicit Publish Start" if ready_for_live_print else "no MQTT command will be published",
+            blocking_codes=blockers,
+            evidence={
+                "draft_valid": bool(draft.get("ok")),
+                "device_screen_can_start_print": bool(gate_checks.get("device_screen_can_start_print")),
+                "will_publish_from_spc": False,
+            },
+        ),
+        _spc_readiness_level(
+            level_id="autoejection",
+            label="Autoejection loop",
+            status="ready" if autoejection_ready else "warning",
+            detail=f"status={autoejection.get('status', 'unknown')} · provider={autoejection.get('provider') or 'none'}",
+            blocking_codes=autoejection_blockers,
+            evidence={
+                "can_run_test": bool(autoejection.get("can_run_test", False)),
+                "routine": autoejection.get("verified_routine_id", ""),
+                "pre_vision": autoejection.get("pre_eject_vision_profile", ""),
+                "post_vision": autoejection.get("post_eject_vision_profile", ""),
+                "handoff": autoejection_handoff,
+                "consumer_readiness": consumer_readiness,
+            },
+        ),
+    ]
+
+    sections = [
+        _readiness_section(
+            section_id="printer_connection",
+            label="Printer connection",
+            status="ready" if connection_ready else "blocked",
+            detail=f"{connection.get('host') or 'host missing'} · {connection.get('serial') or 'serial missing'}",
+            blockers=[] if connection_ready else ["BAMBU_CONNECTION_MEMORY_INCOMPLETE"],
+        ),
+        _readiness_section(
+            section_id="device_screen",
+            label="Live device screen",
+            status="ready" if mqtt_ready and transfer_ready else "blocked",
+            detail=f"mqtt={device_connection.get('mqtt', 'unknown')} · transfer={device_connection.get('transfer', 'unknown')}",
+            blockers=[] if mqtt_ready and transfer_ready else ["BAMBU_DEVICE_SCREEN_NOT_READY"],
+        ),
+        _readiness_section(
+            section_id="preprint_gate",
+            label="Pre-print communication gate",
+            status="ready" if not preprint_blockers else "blocked",
+            detail=f"state={preprint_gate.get('state', 'unknown')}",
+            blockers=preprint_blockers,
+        ),
+        _readiness_section(
+            section_id="start_gate",
+            label="MQTT start-command gate",
+            status="ready" if ready_for_live_print else "blocked",
+            detail="ready to publish after explicit run command" if ready_for_live_print else "publish blocked; no MQTT command sent",
+            blockers=blockers,
+        ),
+        _readiness_section(
+            section_id="autoejection_gate",
+            label="Autoejection gate",
+            status="ready" if autoejection_ready else "warning",
+            detail=(
+                f"routine={autoejection.get('verified_routine_id') or 'not configured'}"
+                f" · provider={autoejection.get('provider') or 'none'}"
+            ),
+            blockers=autoejection_blockers,
+        ),
+    ]
+
+    return {
+        "ok": True,
+        "tool": "printer.spc_readiness",
+        "provider": selected_profile.provider,
+        "selected_printer": manager._selected_printer_payload(selected_profile, selection_reason),
+        "connection": connection,
+        "status": status,
+        "technical_ready_for_start": technical_ready_for_start,
+        "approval_ready_for_start": approval_ready_for_start,
+        "ready_for_live_print": ready_for_live_print,
+        "autonomous_cycle_ready": autonomous_cycle_ready,
+        "will_publish": False,
+        "start_enabled": ready_for_live_print,
+        "draft": draft,
+        "device_screen": device_screen,
+        "preprint_gate": preprint_gate,
+        "start_gate": {
+            "checks": gate_checks,
+            "blockers": blockers,
+            "ready_to_publish": ready_for_live_print,
+            "will_publish": False,
+        },
+        "autoejection": autoejection,
+        "autoejection_handoff": autoejection_handoff,
+        "consumer_readiness": consumer_readiness,
+        "operator_summary": operator_summary,
+        "readiness_levels": readiness_levels,
+        "next_actions": next_actions,
+        "evidence": evidence,
+        "sections": sections,
+        "blockers": blockers,
+        "operator_actions": operator_actions_list,
+        "message": (
+            "Specimen Making Agent can hand off to live print start after explicit operator run command."
+            if ready_for_live_print
+            else "Specimen Making Agent is waiting on printer readiness gates; no print command was published."
+        ),
+    }
+
+
+@app.post("/api/printer/bambu-slice-artifact")
+async def post_printer_bambu_slice_artifact(req: PrinterBambuSliceArtifactRequest) -> dict[str, object]:
+    """Create a real Bambu sliced artifact from STL/3MF without upload or print start."""
+    manager = _printer_bridge_manager()
+    selected_profile, selection_reason = manager.fleet_selection()
+    if selected_profile.provider != "bambulab_x2d":
+        return {
+            "ok": False,
+            "tool": "printer.bambu.slice_artifact",
+            "provider": selected_profile.provider,
+            "selected_printer": manager._selected_printer_payload(selected_profile, selection_reason),
+            "failure_code": "BAMBU_SLICE_ARTIFACT_NOT_APPLICABLE",
+            "message": "Bambu Studio slicing is only implemented for the Bambu Lab bridge.",
+            "will_publish": False,
+            "start_enabled": False,
+        }
+    runner = BambuStudioSlicerRunner(manager.config.slicer, repo_root=resolve_path("."))
+    result = runner.slice(
+        source_path=req.source_path,
+        specimen_id=req.specimen_id,
+        load_settings=req.load_settings or None,
+        load_filaments=req.load_filaments or None,
+        extra_args=req.extra_args,
+        timeout_sec=req.timeout_sec,
+    )
+    artifact = {
+        "source_path": result.get("source_path", req.source_path),
+        "sliced_artifact_path": result.get("sliced_artifact_path", ""),
+        "size_bytes": result.get("size_bytes", 0),
+        "sha256": result.get("sha256", ""),
+    }
+    return {
+        **result,
+        "provider": selected_profile.provider,
+        "selected_printer": manager._selected_printer_payload(selected_profile, selection_reason),
+        "slicer": result.get("slicer") or _selected_printer_slicer_payload(manager, _printer_workflow().config),
+        "artifact": artifact,
+        "will_publish": False,
+        "start_enabled": False,
+    }
+
+
+@app.post("/api/printer/http-artifact-route")
+async def post_printer_http_artifact_route(req: PrinterHttpArtifactRouteRequest, request: Request) -> dict[str, object]:
+    """Expose a sliced Bambu artifact through an HTTP URL the printer can fetch."""
+    manager = _printer_bridge_manager()
+    selected_profile, selection_reason = manager.fleet_selection()
+    if selected_profile.provider != "bambulab_x2d":
+        return {
+            "ok": False,
+            "provider": selected_profile.provider,
+            "failure_code": "BAMBU_HTTP_ARTIFACT_ROUTE_NOT_APPLICABLE",
+            "message": "HTTP artifact routing is only implemented for the Bambu Lab bridge.",
+        }
+    memory = BambuConnectionMemory(selected_profile.connection_memory_path)
+    connection = memory.redacted()
+    source = _safe_bambu_http_artifact_source(req.artifact_path)
+    token = uuid.uuid4().hex
+    filename = _safe_bambu_http_filename(source)
+    export_path = _safe_bambu_http_export_path(token, filename)
+    export_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source, export_path)
+    digest = hashlib.sha256(export_path.read_bytes()).hexdigest()
+    public_base = _bambu_http_public_base_url(
+        request,
+        printer_host=str(connection.get("host") or ""),
+        override=req.public_base_url,
+    )
+    url_path = f"/printer-artifacts/bambu/{token}/{quote(filename, safe='')}"
+    artifact_url = f"{public_base}{url_path}"
+    draft = build_bambu_project_file_command_draft(
+        serial=str(connection.get("serial") or ""),
+        remote_path=artifact_url,
+        subtask_name=req.subtask_name or source.stem,
+        plate_id=req.plate_id,
+        use_ams=req.use_ams,
+        ams_mapping=req.ams_mapping,
+        timelapse=req.timelapse,
+        bed_leveling=req.bed_leveling,
+        flow_cali=req.flow_cali,
+        vibration_cali=req.vibration_cali,
+        layer_inspect=req.layer_inspect,
+    )
+    if not draft.get("ok"):
+        raise HTTPException(status_code=400, detail=str(draft.get("failure_code") or "BAMBU_HTTP_ARTIFACT_DRAFT_FAILED"))
+    fetch_probe = (
+        await _probe_bambu_http_artifact_fetch(
+            artifact_url,
+            expected_sha256=digest,
+            timeout_sec=req.fetch_timeout_sec,
+        )
+        if req.verify_fetch
+        else {
+            "ok": False,
+            "skipped": True,
+            "failure_code": "BAMBU_HTTP_ARTIFACT_FETCH_PROBE_SKIPPED",
+            "message": "Artifact URL fetch probe was skipped by request.",
+        }
+    )
+    printer_fetch_ready = bool(fetch_probe.get("ok"))
+    operator_actions = [
+        {
+            "code": "BAMBU_HTTP_ARTIFACT_FETCH_VERIFIED",
+            "severity": "info",
+            "message": "ATR served the prepared artifact URL and sha256 matched. MQTT publish is still disabled until explicit approval.",
+        }
+    ] if printer_fetch_ready else [
+        {
+            "code": str(fetch_probe.get("failure_code") or "BAMBU_HTTP_ARTIFACT_SERVER_BIND_CHECK_REQUIRED"),
+            "severity": "warning",
+            "message": (
+                f"{fetch_probe.get('message') or 'Artifact URL fetch probe failed.'} "
+                "Ensure the ATR server is bound to a LAN-reachable host/port before publishing this draft to the printer."
+            ),
+        }
+    ]
+    return {
+        "ok": True,
+        "tool": "printer.bambu.http_artifact_route",
+        "provider": selected_profile.provider,
+        "selected_printer": manager._selected_printer_payload(selected_profile, selection_reason),
+        "connection": connection,
+        "artifact": {
+            "source_path": str(source),
+            "export_path": str(export_path),
+            "filename": filename,
+            "size_bytes": export_path.stat().st_size,
+            "sha256": digest,
+        },
+        "artifact_url": artifact_url,
+        "artifact_url_path": url_path,
+        "server_fetch_probe": fetch_probe,
+        "printer_fetch_ready": printer_fetch_ready,
+        "start_command_draft": draft,
+        "will_publish": False,
+        "start_enabled": False,
+        "operator_actions": operator_actions,
+    }
+
+
+def _bambu_prestart_step(step_id: str, label: str, result: dict[str, object], *, ok: bool | None = None) -> dict[str, object]:
+    """Compact one backend result into an operator-facing pre-start step."""
+    resolved_ok = bool(result.get("ok")) if ok is None else bool(ok)
+    detail = (
+        result.get("failure_code")
+        or result.get("status")
+        or result.get("message")
+        or result.get("artifact_url")
+        or result.get("sliced_artifact_path")
+        or ""
+    )
+    return {
+        "id": step_id,
+        "label": label,
+        "status": "ok" if resolved_ok else "blocked",
+        "ok": resolved_ok,
+        "detail": str(detail),
+    }
+
+
+@app.post("/api/printer/bambu-prestart-check")
+async def post_printer_bambu_prestart_check(req: PrinterBambuPrestartCheckRequest, request: Request) -> dict[str, object]:
+    """Run the Bambu pre-start path up to guarded start readiness without publishing."""
+    manager = _printer_bridge_manager()
+    selected_profile, selection_reason = manager.fleet_selection()
+    selected_printer = manager._selected_printer_payload(selected_profile, selection_reason)
+    if selected_profile.provider != "bambulab_x2d":
+        return {
+            "ok": False,
+            "tool": "printer.bambu.prestart_check",
+            "provider": selected_profile.provider,
+            "selected_printer": selected_printer,
+            "status": "blocked",
+            "failure_code": "BAMBU_PRESTART_CHECK_NOT_APPLICABLE",
+            "message": "Bambu pre-start check is only implemented for the Bambu Lab bridge.",
+            "will_publish": False,
+            "published": False,
+            "start_enabled": False,
+        }
+
+    steps: list[dict[str, object]] = []
+    source_path = str(req.source_path or "").strip()
+    artifact_path = str(req.artifact_path or "").strip()
+    slice_result: dict[str, object] = {}
+    if source_path:
+        slice_result = await post_printer_bambu_slice_artifact(
+            PrinterBambuSliceArtifactRequest(
+                source_path=source_path,
+                specimen_id=req.specimen_id,
+                load_settings=req.load_settings,
+                load_filaments=req.load_filaments,
+                extra_args=req.extra_args,
+                timeout_sec=req.timeout_sec,
+            )
+        )
+        steps.append(_bambu_prestart_step("slice_artifact", "Bambu Studio slicing", slice_result))
+        artifact_path = str(slice_result.get("sliced_artifact_path") or "")
+        if not slice_result.get("ok"):
+            return {
+                "ok": False,
+                "tool": "printer.bambu.prestart_check",
+                "provider": selected_profile.provider,
+                "selected_printer": selected_printer,
+                "status": "blocked",
+                "failure_code": str(slice_result.get("failure_code") or "BAMBU_PRESTART_SLICE_FAILED"),
+                "steps": steps,
+                "slice_artifact": slice_result,
+                "sliced_artifact_path": artifact_path,
+                "will_publish": False,
+                "published": False,
+                "start_enabled": False,
+                "message": "Bambu pre-start check stopped before transfer because slicing failed.",
+            }
+    else:
+        steps.append(
+            {
+                "id": "slice_artifact",
+                "label": "Bambu Studio slicing",
+                "status": "skipped" if artifact_path else "blocked",
+                "ok": bool(artifact_path),
+                "detail": "using existing sliced artifact" if artifact_path else "source_path or artifact_path required",
+            }
+        )
+        if not artifact_path:
+            return {
+                "ok": False,
+                "tool": "printer.bambu.prestart_check",
+                "provider": selected_profile.provider,
+                "selected_printer": selected_printer,
+                "status": "blocked",
+                "failure_code": "BAMBU_PRESTART_ARTIFACT_REQUIRED",
+                "steps": steps,
+                "will_publish": False,
+                "published": False,
+                "start_enabled": False,
+                "message": "Provide a source STL/3MF or an existing sliced artifact path.",
+            }
+
+    try:
+        http_route = await post_printer_http_artifact_route(
+            PrinterHttpArtifactRouteRequest(
+                artifact_path=artifact_path,
+                public_base_url=req.public_base_url,
+                subtask_name=req.subtask_name or req.specimen_id or "atr-bambu-prestart",
+                plate_id=req.plate_id,
+                use_ams=req.use_ams,
+                ams_mapping=req.ams_mapping,
+                timelapse=req.timelapse,
+                bed_leveling=req.bed_leveling,
+                flow_cali=req.flow_cali,
+                vibration_cali=req.vibration_cali,
+                layer_inspect=req.layer_inspect,
+                verify_fetch=req.verify_fetch,
+                fetch_timeout_sec=req.fetch_timeout_sec,
+            ),
+            request,
+        )
+    except HTTPException as exc:
+        http_route = {
+            "ok": False,
+            "tool": "printer.bambu.http_artifact_route",
+            "failure_code": str(exc.detail),
+            "message": str(exc.detail),
+            "printer_fetch_ready": False,
+        }
+    http_ok = bool(http_route.get("ok")) and bool(http_route.get("printer_fetch_ready"))
+    steps.append(_bambu_prestart_step("http_artifact_route", "HTTP artifact route", http_route, ok=http_ok))
+    if not http_ok:
+        return {
+            "ok": False,
+            "tool": "printer.bambu.prestart_check",
+            "provider": selected_profile.provider,
+            "selected_printer": selected_printer,
+            "status": "blocked",
+            "failure_code": str(
+                http_route.get("failure_code")
+                or (http_route.get("server_fetch_probe", {}) if isinstance(http_route.get("server_fetch_probe"), dict) else {}).get("failure_code")
+                or "BAMBU_PRESTART_HTTP_ARTIFACT_NOT_VERIFIED"
+            ),
+            "steps": steps,
+            "slice_artifact": slice_result,
+            "http_artifact_route": http_route,
+            "sliced_artifact_path": artifact_path,
+            "artifact_url": str(http_route.get("artifact_url") or ""),
+            "will_publish": False,
+            "published": False,
+            "start_enabled": False,
+            "message": "Bambu pre-start check stopped before start gate because the printer-reachable artifact route is not verified.",
+        }
+
+    artifact_url = str(http_route.get("artifact_url") or "")
+    start_req = PrinterStartGateRequest(
+        remote_path=artifact_url,
+        subtask_name=req.subtask_name or req.specimen_id or "atr-bambu-prestart",
+        plate_id=req.plate_id,
+        use_ams=req.use_ams,
+        ams_mapping=req.ams_mapping,
+        timelapse=req.timelapse,
+        bed_leveling=req.bed_leveling,
+        flow_cali=req.flow_cali,
+        vibration_cali=req.vibration_cali,
+        layer_inspect=req.layer_inspect,
+        operator_confirmed=req.operator_confirmed,
+        guardian_approved=req.guardian_approved,
+        dry_run=req.dry_run,
+    )
+    start_gate = await post_printer_start_gate(start_req)
+    steps.append(_bambu_prestart_step("start_gate", "Guarded start gate", start_gate, ok=bool(start_gate.get("ready_to_publish"))))
+    spc_readiness = await post_printer_spc_readiness(
+        PrinterSpcReadinessRequest(
+            mode=req.mode,
+            **start_req.model_dump(),
+        )
+    )
+    steps.append(
+        _bambu_prestart_step(
+            "spc_readiness",
+            "SPC readiness report",
+            spc_readiness,
+            ok=bool(spc_readiness.get("ready_for_live_print")),
+        )
+    )
+    autoejection_handoff = (
+        spc_readiness.get("autoejection_handoff") if isinstance(spc_readiness.get("autoejection_handoff"), dict) else {}
+    )
+    steps.append(
+        {
+            "id": "autoejection_handoff",
+            "label": "Autoejection handoff",
+            "status": "ok" if autoejection_handoff else "blocked",
+            "ok": bool(autoejection_handoff),
+            "detail": str(autoejection_handoff.get("routine_id") or "not configured") if autoejection_handoff else "not configured",
+        }
+    )
+    ready_to_publish = bool(start_gate.get("ready_to_publish"))
+    return {
+        "ok": bool(http_ok and ready_to_publish),
+        "tool": "printer.bambu.prestart_check",
+        "provider": selected_profile.provider,
+        "selected_printer": selected_printer,
+        "status": "ready_to_publish_not_started" if ready_to_publish else "blocked",
+        "steps": steps,
+        "slice_artifact": slice_result,
+        "http_artifact_route": http_route,
+        "start_gate": start_gate,
+        "spc_readiness": spc_readiness,
+        "autoejection_handoff": autoejection_handoff,
+        "sliced_artifact_path": artifact_path,
+        "artifact_url": artifact_url,
+        "ready_to_publish": ready_to_publish,
+        "will_publish": False,
+        "published": False,
+        "start_enabled": ready_to_publish,
+        "message": (
+            "Bambu artifact, HTTP route, and guarded start gate are ready. No MQTT command was published."
+            if ready_to_publish
+            else "Bambu pre-start check completed with blockers. No MQTT command was published."
+        ),
+    }
+
+
+@app.get("/printer-artifacts/bambu/{token}/{filename}")
+async def get_bambu_http_artifact(token: str, filename: str) -> FileResponse:
+    """Serve a copied Bambu sliced artifact for printer-side HTTP fetch tests."""
+    path = _safe_bambu_http_export_path(token, filename)
+    if not path.exists() or not path.is_file():
+        raise HTTPException(status_code=404, detail="Bambu HTTP artifact not found")
+    return FileResponse(path, media_type=mimetypes.guess_type(path.name)[0] or "application/octet-stream", filename=path.name)
+
+
 @app.get("/api/printer/profile")
 async def get_printer_profile() -> dict[str, object]:
     """Return operator-controlled 3DP print profile defaults."""
+    manager = _printer_bridge_manager()
     workflow = _printer_workflow()
     config = workflow.config
-    profile = load_prusa_print_profile()
+    profile = _selected_print_profile(manager)
+    selected_profile, selection_reason = manager.fleet_selection()
     return {
         "ok": True,
         "profile": profile,
         "profile_path": str(PRUSA_PRINT_PROFILE_PATH),
-        "connection_memory_path": str(workflow.connection_memory.path),
-        "live_gates": {
-            "allow_status": config.live_gate("allow_status", True),
-            "allow_upload": config.live_gate("allow_upload", False),
-            "allow_start_print": config.live_gate("allow_start_print", False),
-            "allow_ejection": config.live_gate("allow_ejection", False),
-        },
-        "auto_ejection": {
-            "enabled": bool(profile.get("allow_ejection", False)),
-            "method": config.ejection.method,
-            "mode": config.ejection.mode,
-        },
-        "slicer": {
-            "enabled": config.slicer.enabled,
-            "executable_env": config.slicer.executable_env,
-            "executable_path": config.slicer.executable_path,
-            "output_dir": config.slicer.output_dir,
-        },
+        "selected_printer": manager._selected_printer_payload(selected_profile, selection_reason),
+        "connection_memory_path": str(selected_profile.connection_memory_path),
+        "live_gates": _selected_printer_profile_live_gates(manager, config),
+        "auto_ejection": _selected_printer_autoejection_payload(manager, config, profile),
+        "slicer": _selected_printer_slicer_payload(manager, config),
     }
 
 
 @app.post("/api/printer/profile")
 async def post_printer_profile(req: PrinterProfileRequest) -> dict[str, object]:
     """Persist operator-controlled 3DP print profile defaults."""
+    manager = _printer_bridge_manager()
     workflow = _printer_workflow()
     config = workflow.config
     profile = save_prusa_print_profile(req.model_dump())
+    profile = _selected_print_profile(manager)
+    selected_profile, selection_reason = manager.fleet_selection()
     return {
         "ok": True,
         "profile": profile,
         "profile_path": str(PRUSA_PRINT_PROFILE_PATH),
-        "live_gates": {
-            "allow_status": config.live_gate("allow_status", True),
-            "allow_upload": config.live_gate("allow_upload", False),
-            "allow_start_print": config.live_gate("allow_start_print", False),
-            "allow_ejection": config.live_gate("allow_ejection", False),
-        },
-        "auto_ejection": {
-            "enabled": bool(profile.get("allow_ejection", False)),
-            "method": config.ejection.method,
-            "mode": config.ejection.mode,
-        },
-        "slicer": {
-            "enabled": config.slicer.enabled,
-            "executable_env": config.slicer.executable_env,
-            "executable_path": config.slicer.executable_path,
-            "output_dir": config.slicer.output_dir,
-        },
-        "message": "Prusa MK4S print profile saved.",
+        "selected_printer": manager._selected_printer_payload(selected_profile, selection_reason),
+        "connection_memory_path": str(selected_profile.connection_memory_path),
+        "live_gates": _selected_printer_profile_live_gates(manager, config),
+        "auto_ejection": _selected_printer_autoejection_payload(manager, config, profile),
+        "slicer": _selected_printer_slicer_payload(manager, config),
+        "message": "3DP print profile saved for the active printer bridge.",
+    }
+
+
+@app.get("/api/printer/autoejection-status")
+async def get_printer_autoejection_status() -> dict[str, object]:
+    """Return selected-printer autoejection capability without running hardware motion."""
+    manager = _printer_bridge_manager()
+    selected_profile, selection_reason = manager.fleet_selection()
+    if selected_profile.provider == "bambulab_x2d":
+        status = manager.autoejection_status()
+        consumer_readiness = _bambu_manipulation_consumer_readiness(mode="live")
+        blockers = [str(item) for item in status.get("blockers", [])] if isinstance(status.get("blockers"), list) else []
+        if status.get("can_run_test") and not consumer_readiness.get("ready"):
+            blockers = [*blockers, *[str(item) for item in consumer_readiness.get("blockers", [])]]
+        return {
+            "ok": True,
+            "tool": "printer.autoejection_status",
+            "provider": selected_profile.provider,
+            "selected_printer": manager._selected_printer_payload(selected_profile, selection_reason),
+            "autoejection": status,
+            "consumer_readiness": consumer_readiness,
+            "can_run_test": bool(status.get("can_run_test", False) and consumer_readiness.get("ready")),
+            "blockers": blockers,
+            "settings_path": str(manager.config.autoejection_memory_path),
+            "message": (
+                "Bambu autoejection routine and Manipulation Agent consumer are configured and testable."
+                if status.get("can_run_test") and consumer_readiness.get("ready")
+                else "Bambu autoejection provider is configured, but the Manipulation Agent consumer is not ready."
+                if status.get("can_run_test")
+                else "Bambu autoejection is blocked until a verified provider routine and vision evidence are configured."
+            ),
+        }
+    workflow = _printer_workflow()
+    profile = load_prusa_print_profile()
+    payload = _selected_printer_autoejection_payload(manager, workflow.config, profile)
+    return {
+        "ok": True,
+        "tool": "printer.autoejection_status",
+        "provider": selected_profile.provider,
+        "selected_printer": manager._selected_printer_payload(selected_profile, selection_reason),
+        "autoejection": payload,
+        "can_run_test": bool(payload.get("enabled", False)),
+        "blockers": [] if payload.get("enabled", False) else ["AUTOEJECTION_DISABLED"],
+    }
+
+
+@app.post("/api/printer/autoejection-config")
+async def post_printer_autoejection_config(req: PrinterAutoejectionConfigRequest) -> dict[str, object]:
+    """Persist operator-verified Bambu autoejection settings without running motion."""
+    manager = _printer_bridge_manager()
+    selected_profile, selection_reason = manager.fleet_selection()
+    if selected_profile.provider != "bambulab_x2d":
+        return {
+            "ok": False,
+            "tool": "printer.autoejection_config",
+            "provider": selected_profile.provider,
+            "failure_code": "BAMBU_AUTOEJECTION_CONFIG_NOT_APPLICABLE",
+            "message": "Bambu autoejection config is only applicable to the Bambu Lab bridge.",
+        }
+    status = manager.save_autoejection_config(req.model_dump())
+    consumer_readiness = _bambu_manipulation_consumer_readiness(mode="live")
+    blockers = [str(item) for item in status.get("blockers", [])] if isinstance(status.get("blockers"), list) else []
+    if status.get("can_run_test") and not consumer_readiness.get("ready"):
+        blockers = [*blockers, *[str(item) for item in consumer_readiness.get("blockers", [])]]
+    return {
+        "ok": True,
+        "tool": "printer.autoejection_config",
+        "provider": selected_profile.provider,
+        "selected_printer": manager._selected_printer_payload(selected_profile, selection_reason),
+        "autoejection": status,
+        "consumer_readiness": consumer_readiness,
+        "can_run_test": bool(status.get("can_run_test", False) and consumer_readiness.get("ready")),
+        "blockers": blockers,
+        "settings_path": str(manager.config.autoejection_memory_path),
+        "message": (
+            "Bambu autoejection routine and Manipulation Agent consumer are configured and testable."
+            if status.get("can_run_test") and consumer_readiness.get("ready")
+            else "Bambu autoejection config saved, but the Manipulation Agent consumer is not ready."
+            if status.get("can_run_test")
+            else "Bambu autoejection config saved, but required routine or vision evidence is still missing."
+        ),
     }
 
 
 @app.post("/api/printer/autoejection-test")
 async def post_printer_autoejection_test(req: PrinterAutoejectionTestRequest) -> dict[str, object]:
     """Run a standalone autoejection test using the same ejection G-code builder."""
+    manager = _printer_bridge_manager()
+    selected_profile, selection_reason = manager.fleet_selection()
+    if selected_profile.provider == "bambulab_x2d":
+        autoejection = manager.autoejection_status()
+        if not autoejection.get("enabled"):
+            result = {
+                "ok": False,
+                "tool": "printer.autoejection_test",
+                "provider": "bambulab_x2d",
+                "selected_printer": manager._selected_printer_payload(selected_profile, selection_reason),
+                "status": "blocked",
+                "failure_code": "BAMBU_AUTOEJECTION_NOT_CONFIGURED",
+                "message": "Bambu autoejection routine is not configured or verified yet.",
+                "autoejection": autoejection,
+                "step_trace": [{"step": "AUTOEJECTION_GATE", "status": "blocked", "detail": "not_configured"}],
+            }
+            await controller.emit_workspace_result(
+                workspace="printer",
+                tool="printer.autoejection_test",
+                result=result,
+                stage=Stage.SPECIMEN,
+                module_id="specimen",
+                agent="specimen_agent",
+                workflow="autoejection_test",
+            )
+            return result
+        consumer_readiness = _bambu_manipulation_consumer_readiness(mode=req.mode)
+        if not consumer_readiness.get("ready"):
+            result = {
+                "ok": False,
+                "tool": "printer.autoejection_test",
+                "provider": "bambulab_x2d",
+                "selected_printer": manager._selected_printer_payload(selected_profile, selection_reason),
+                "status": "blocked",
+                "failure_code": "BAMBU_AUTOEJECTION_CONSUMER_NOT_READY",
+                "message": "Bambu autoejection provider is configured, but Manipulation Agent consumer defaults or policy evidence are not ready.",
+                "autoejection": autoejection,
+                "consumer_readiness": consumer_readiness,
+                "autoejection_handoff": {},
+                "step_trace": [
+                    {"step": "AUTOEJECTION_GATE", "status": "ok", "detail": str(autoejection.get("provider") or "")},
+                    {"step": "CONSUMER_READINESS", "status": "blocked", "detail": ",".join(str(item) for item in consumer_readiness.get("blockers", []))},
+                ],
+            }
+            await controller.emit_workspace_result(
+                workspace="printer",
+                tool="printer.autoejection_test",
+                result=result,
+                stage=Stage.SPECIMEN,
+                module_id="specimen",
+                agent="specimen_agent",
+                workflow="autoejection_test",
+            )
+            return result
+        handoff = _bambu_autoejection_handoff_payload(
+            autoejection,
+            position=req.position,
+            object_size_mm=[float(item) for item in req.object_size_mm],
+            mode=req.mode,
+            consumer_readiness=consumer_readiness,
+        )
+        result = {
+            "ok": True,
+            "tool": "printer.autoejection_test",
+            "provider": "bambulab_x2d",
+            "selected_printer": manager._selected_printer_payload(selected_profile, selection_reason),
+            "status": "provider_handoff_ready",
+            "motion_started": False,
+            "requested_start_immediately": bool(req.start_immediately),
+            "autoejection": autoejection,
+            "consumer_readiness": consumer_readiness,
+            "handoff": handoff,
+            "autoejection_handoff": handoff,
+            "message": (
+                "Bambu autoejection provider handoff is ready. No Prusa bed-sweep G-code was generated "
+                "and no robot motion was started by this endpoint."
+            ),
+            "step_trace": [
+                {"step": "AUTOEJECTION_GATE", "status": "ok", "detail": str(autoejection.get("provider") or "")},
+                {"step": "PROVIDER_HANDOFF", "status": "ready", "detail": str(autoejection.get("verified_routine_id") or "")},
+            ],
+        }
+        await controller.emit_workspace_result(
+            workspace="printer",
+            tool="printer.autoejection_test",
+            result=result,
+            stage=Stage.SPECIMEN,
+            module_id="specimen",
+            agent="specimen_agent",
+            workflow="autoejection_test",
+        )
+        return result
     workflow = _printer_workflow()
     profile = load_prusa_print_profile()
     payload = {

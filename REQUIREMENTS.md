@@ -26,8 +26,30 @@ Optional but commonly used:
 - `conda` or Miniconda for LeRobot-specific environments.
 - `nvidia-smi` and NVIDIA driver stack for local GPU runtime checks.
 - Docker for PrusaSlicer, FEniCSx, local Neo4j, or local vLLM/NemoClaw paths.
+- `ffmpeg` for the Bambu Lab live camera browser proxy. Without it, the Bambu
+  video status API can still report that the printer's LAN video port is
+  reachable, but `/api/printer/video-stream.mjpeg` stays unavailable.
+- Bambu Studio CLI for Bambu Lab X2D slicing/pre-start validation. The 3DP
+  GUI/backend resolves the executable in this order: `BAMBU_STUDIO_EXECUTABLE`,
+  configured wrapper path (`install/bambustudio/bambu-studio-wrapper`), then a
+  `PATH` executable such as `bambu-studio`. Without a resolved CLI, the bridge
+  can still run MQTT/FTPS/status checks, but it cannot honestly claim a new
+  Bambu-native sliced artifact was generated.
+  Current Spark workstation smoke check:
+  `timeout 15s /home/jin/.local/bin/bambu-studio --help` reports
+  `BambuStudio-02.07.01.57` and documents `--slice`, `--arrange`,
+  `--ensure-on-bed`, `--outputdir`, `--load-settings`, and `--load-filaments`.
+  The 3DP GUI `Slice Bambu Artifact` action uses those CLI options and records
+  the generated artifact hash before any HTTP route or MQTT start gate is
+  considered.
 - Microsoft C++ Build Tools on Windows only when a package has to compile from
   source instead of installing a wheel.
+
+Ubuntu/Spark workstation example:
+
+```bash
+sudo apt-get install -y ffmpeg
+```
 
 ## Main Python Environment
 
@@ -191,10 +213,21 @@ Optional compatibility backend. OpenAI remains the final fallback when
 
 The source tree does not commit proxy tokens or local Ollama runtime state.
 
-## Prusa MK4S / 3DP Runtime
+## Bambu Lab X2D / Prusa MK4S 3DP Runtime
 
 Required for physical 3D printing:
 
+- Bambu Lab X2D is the default 3DP bridge profile. Store LAN-mode connection
+  info locally in `memory/bambu_connection.json`; never commit the LAN access
+  code.
+- Bambu autoejection is not a Prusa-style appended G-code routine. It requires
+  `memory/bambu_autoejection.json` with a verified provider routine plus
+  pre/post vision profiles, and `memory/manipulation_agent_bridge.json` with a
+  rollout-capable Manipulation Agent consumer (`task_id=transfer_to_utm`) and an
+  existing local policy path or configured policy repository.
+- Bambu `Check Handoff` buttons only emit a provider handoff packet with
+  `motion_started=false`. Physical robot motion still requires the Manipulation
+  Agent bridge, Guardian approval, and operator confirmation.
 - Prusa MK4S on the same reachable network.
 - PrusaLink enabled.
 - PrusaLink connection info stored locally in:

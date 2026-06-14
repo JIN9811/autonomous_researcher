@@ -1,5 +1,5 @@
 # File purpose:
-# - Device bridge mode selection and safe Prusa MK4S phase1 printer workflow config.
+# - Device bridge mode selection and safe multi-printer/Bambu X2D workflow config.
 #
 # Key classes/functions:
 # - Parsed by app.bootstrap and mcp_tools.printer_tools.
@@ -10,19 +10,86 @@
 #
 # Dependencies:
 # - app/bootstrap.py
+# - device_bridges/bambu_bridge.py
 # - device_bridges/prusa_bridge.py
 #
 # Modification guide:
 # - Safe places to edit: host env names, action gates, virtual test defaults
 # - Risky places to edit: live upload/start/ejection gates
-# - Related files: docs/hardware/printer_agent_prusabridge_phase1_runtime_guideline.txt
+# - Related files:
+#   - 개선안/13_bambulab_x2d_spc_device_bridge_research.md
+#   - docs/hardware/printer_agent_prusabridge_phase1_runtime_guideline.txt
 
 devices:
   printer:
     mode: test                # test | live
-    provider: prusa_mk4s
+    # Default is Bambu Lab X2D. Prusa remains selectable as an explicit profile,
+    # not as an automatic fallback, so specimen digital threads stay traceable.
+    default_profile_id: bambulab_x2d_lab_01
+    allow_automatic_fallback: false
+    connection_memory_path: memory/printer_fleet.json
+    profiles:
+      bambulab_x2d_lab_01:
+        provider: bambulab_x2d
+        label: Bambu Lab X2D - Lab 01
+        enabled: true
+        priority: 10
+        connection_memory_path: memory/bambu_connection.json
+        capabilities:
+          slicer: bambu_studio_cli
+          transfer:
+            - ftps
+            - bambu_connect
+          telemetry: mqtt
+          live_view: lan_video_stream
+          nozzle_modes:
+            - main
+            - auxiliary
+            - dual
+          build_volume_main_mm: [256, 256, 260]
+          build_volume_dual_mm: [235.5, 256, 256]
+      prusa_mk4s_lab_01:
+        provider: prusa_mk4s
+        label: Prusa MK4S - Lab 01
+        enabled: true
+        priority: 5
+        connection_memory_path: memory/prusa_connection.json
+        capabilities:
+          slicer: prusa_slicer
+          transfer: prusalink_http
+          telemetry: prusalink_rest
+          live_view: none
     virtual_prusalink_dry_run: true
-    connection_memory_path: memory/prusa_connection.json
+
+    bambu:
+      mqtt:
+        port: 8883
+        timeout_sec: 5
+        username: bblp
+        report_topic_template: device/{serial}/report
+        request_topic_template: device/{serial}/request
+      video:
+        enabled: true
+        rtsps_port: 322
+        jpeg_stream_port: 6000
+        timeout_sec: 3
+      slicer:
+        enabled: true
+        executable_env: BAMBU_STUDIO_EXECUTABLE
+        executable_path: install/bambustudio/bambu-studio-wrapper
+        output_dir: artifacts/bambu_sliced
+        timeout_sec: 900
+
+    autoejection:
+      enabled: false
+      provider: none
+      verified_routine_id: ""
+      pre_eject_vision_profile: ""
+      post_eject_vision_profile: ""
+      require_verified_routine: true
+      require_pre_eject_vision: true
+      require_post_eject_vision: true
+      fallback_to_robot_pickoff: true
 
     simulator:
       enabled: true

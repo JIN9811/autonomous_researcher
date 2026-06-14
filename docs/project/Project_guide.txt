@@ -247,18 +247,20 @@ Purpose
 - Trigger specimen creation/preparation workflow
 - Delegate print/ejection preparation through `experiment.evaluate -> printer.prepare`
 - Cache existing specimens if possible
-- Surface PrusaSlicer settings, G-code output path, PrusaLink storage readiness, upload/start result, transport/endpoints, and printer.prepare step trace to Live GUI
+- Surface active-printer slicing settings, G-code/3MF output path, storage readiness, upload/start result, transport/endpoints, and printer.prepare step trace to Live GUI
 - Produce `fabrication_report.v1` with fabrication intent, digital thread, process plan, quality gates, printer runtime, monitoring plan, outcome, and feedback to Design/Knowledge/BO
 - Produce `specimen_fabricated.v1` as the downstream handoff packet for Vision, Manipulation, Knowledge, and BO
 - Do not duplicate Design Agent STL preview rendering
 
 Modes
-- live printer bridge
+- live selected printer bridge
 - test printer simulator
-- Live GUI test-mode virtual PrusaLink bridge
+- Live GUI test-mode virtual printer bridge
 - Live GUI test-mode installed-printer read-only communication check
 - Live GUI/Main GUI test-mode explicit actual-print path for a test-generated specimen
-- Normal Live GUI `실험 수행` performs actual Prusa MK4S PrusaLink upload/start; auto ejection is available through the 3DP GUI-controlled bed-sweep append-G-code path when explicitly enabled.
+- Normal Live GUI `실험 수행` uses the active printer profile selected by `PrinterFleetRegistry`.
+- The default physical printer profile is Bambu Lab X2D. Prusa MK4S remains available only when explicitly selected, and the runtime must not silently fallback from one printer vendor to another.
+- Auto ejection is printer-provider-specific. Prusa uses the existing bed-sweep append-G-code path when explicitly enabled; Bambu requires a verified provider routine plus Guardian/operator approval before motion.
 
 3.7 Vision Agent
 Purpose

@@ -228,6 +228,30 @@ def normalize_prusa_print_profile(raw: dict[str, Any] | None) -> dict[str, Any]:
     return profile
 
 
+def adapt_print_profile_for_provider(profile: dict[str, Any], provider: str) -> dict[str, Any]:
+    """Return operator print defaults overlaid for the active printer provider."""
+    selected_provider = str(provider or "").strip()
+    adapted = dict(profile or {})
+    if selected_provider != "bambulab_x2d":
+        return adapted
+    if str(adapted.get("printer_model", "")).lower().startswith("prusa"):
+        adapted.update(
+            {
+                "printer_model": "Bambu Lab X2D",
+                "printer_profile": "bambulab_x2d_pla_0p4_nozzle",
+                "storage": "ftps",
+                "start_immediately_live": False,
+                "allow_ejection": False,
+                "skirt_enabled": False,
+                "notes": (
+                    "Bambu Lab X2D provider overlay. MQTT/FTPS/HTTP artifact gates must pass before transfer; "
+                    "print start and autoejection require explicit Guardian-approved enablement."
+                ),
+            }
+        )
+    return adapted
+
+
 def load_prusa_print_profile(path: str | Path | None = None) -> dict[str, Any]:
     """Load the saved print profile or return normalized defaults."""
     profile_path = Path(path) if path is not None else PRUSA_PRINT_PROFILE_PATH

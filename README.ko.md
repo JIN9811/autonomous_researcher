@@ -52,7 +52,7 @@ python -m app.serve
 | Live GUI | `http://localhost:7860/live` | `web/templates/planning.html`, `web/static/planning.js` | 채팅 기반 오케스트레이터, 에이전트 진행, 아티팩트/trace 확인 |
 | Runtime IDE | `http://localhost:7860/ide` | `web/templates/runtime_ide.html`, `web/static/runtime_ide.js` | LangGraph 그래프/노드/에지 편집, 검증, dry-run, 실행 |
 | Module Management | `http://localhost:7860/module-management` | `web/templates/module_management.html`, `web/static/module_management.js` | 모듈 로드/검증/버전 관리, 생성 어댑터 관리 |
-| 3DP Workspace | `http://localhost:7860/printer` | `web/templates/printer.html`, `web/static/printer.js` | PrusaLink, 슬라이싱 옵션, 오토이젝션, 테스트 출력 설정 |
+| 3DP Workspace | `http://localhost:7860/printer` | `web/templates/printer.html`, `web/static/printer.js` | Bambu Lab X2D 기본 브릿지, Prusa 명시 선택, live video/status, 슬라이싱/start gate, 오토이젝션, 테스트 출력 설정 |
 | LeRobot Workspace | `http://localhost:7860/lerobot` | `web/templates/lerobot.html`, `web/static/lerobot.js` | 포트 탐색, teleop, recording, training, visualization, rollout |
 | BO Workspace | `http://localhost:7860/bo` | `web/templates/bo.html`, `web/static/bo.js` | BO/MBO/LLM preference 전략, lightweight/BoTorch optional backend, reasoning audit, 후보 ranking/추천 |
 | CAE Workspace | `http://localhost:7860/cae` | `web/templates/cae.html`, `web/static/cae.js` | STL 기반 해석 설정, bottom fixed/top cyclic load, 결과 확인 |
@@ -60,6 +60,13 @@ python -m app.serve
 | Self-Evolution Lab | `http://localhost:7860/evolution-lab` | `web/templates/evolution_lab.html`, `web/static/evolution_lab.js` | 프롬프트/모듈/그래프 변형, 검증, 승인, rollback |
 
 API 문서는 서버 실행 후 `http://localhost:7860/docs`에서 확인합니다.
+
+기본 서버 바인딩은 `0.0.0.0:7860`입니다. 브라우저는 계속
+`http://localhost:7860/`로 접속해도 되지만, Bambu Lab HTTP artifact
+route를 실제 프린터가 가져가려면 같은 LAN에서 보이는
+`http://<ATR서버-LAN-IP>:7860/printer-artifacts/...` URL이 필요합니다.
+서버를 `127.0.0.1`에만 바인딩하면 GUI는 열리더라도 Bambu fetch probe와
+SPC Readiness transfer gate가 실패합니다.
 
 ## 3. 실제 닫힌 루프 구조
 
@@ -100,7 +107,7 @@ guardian -> error: error
 | Stage | 모듈 위치 | 주 역할 | 대표 출력 |
 |---|---|---|---|
 | `design` | `graphs/modules/design` | 실험 목표를 TPMS/시편 설계 변수와 `experiment_spec`으로 변환 | `current_experiment_spec`, STL 후보 조건 |
-| `specimen` | `graphs/modules/specimen` | STL/제조 메타데이터 생성, Prusa/virtual bridge handoff | STL, gcode, slicer settings, printer prepare result |
+| `specimen` | `graphs/modules/specimen` | STL/제조 메타데이터 생성, 선택된 Bambu/Prusa/virtual printer bridge handoff | STL, gcode/sliced artifact, slicer settings, printer prepare result |
 | `vision` | `graphs/modules/vision` | 출력물/작업공간 관측, pickup/검사용 observation 작성 | `observation`, camera artifact |
 | `manipulation` | `graphs/modules/manipulation` | LeRobot policy rollout 또는 pick-place handoff | rollout status, policy path, transfer evidence |
 | `equipment` | `graphs/modules/equipment` | UTM/Windows bridge/장비 명령 실행 | equipment result, protocol note |
@@ -113,7 +120,7 @@ guardian -> error: error
 
 ## 5. Live/Test/Virtual 모드
 
-- `live`: 실제 장비 호출 경로입니다. Prusa, LeRobot, Windows bridge, UTM 등 장비 설정이 맞아야 합니다.
+- `live`: 실제 장비 호출 경로입니다. 선택된 printer bridge(Bambu Lab X2D가 기본, Prusa는 명시 선택), LeRobot, Windows bridge, UTM 등 장비 설정이 맞아야 합니다.
 - `test`: 실제 장비를 호출하지 않는 검증 경로입니다. 단, 테스트 안의 일부 옵션은 사용자가 선택하면 실제 bridge 직전까지 또는 실제 출력으로 갈 수 있습니다.
 - `virtual`: 장비 없이 experiment API, benchmark, dry-run 중심으로 검증합니다.
 
@@ -134,7 +141,7 @@ guardian -> error: error
 | `web/static/` | GUI JavaScript/CSS/icon 정적 파일 |
 | `graphs/configs/` | LangGraph 실행 그래프 YAML |
 | `graphs/modules/` | stage agent module 계약, handler, tool allowlist |
-| `device_bridges/` | Prusa, LeRobot, Windows, UTM 등 장비 연동 레이어 |
+| `device_bridges/` | Bambu, Prusa, LeRobot, Windows, UTM 등 장비 연동 레이어 |
 | `experiments/` | experiment objective/evaluate/benchmark/queue 계약 |
 | `orchestrator/` | 오케스트레이션 및 planning flow |
 | `backends/` | Ollama/vLLM/Nemoclaw 등 LLM backend 연결 |
@@ -158,6 +165,10 @@ guardian -> error: error
 - [requirements.txt](requirements.txt): Python 패키지
 - [pyproject.toml](pyproject.toml): 프로젝트/pytest 설정
 - [graphs/configs/atr_closed_loop.yaml](graphs/configs/atr_closed_loop.yaml): 기본 폐루프 그래프
+- `memory/printer_fleet.json`: 현재 선택된 printer profile
+- `memory/bambu_connection.json`: Bambu Lab LAN 연결 정보
+- `memory/bambu_autoejection.json`: Bambu autoejection handoff용 provider routine 및 pre/post vision evidence
+- `memory/manipulation_agent_bridge.json`: Bambu handoff를 소비할 Manipulation Agent profile 및 policy 경로
 - `memory/prusa_connection.json`: PrusaLink 연결 정보
 - `memory/bo_workspace_settings.json`: BO GUI 저장 설정
 - `memory/cae_workspace_settings.json`: CAE GUI 저장 설정

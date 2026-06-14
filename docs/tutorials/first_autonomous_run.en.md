@@ -63,7 +63,7 @@ In Live GUI chat, you can request:
 Routing behavior:
 
 - 가상 브릿지: slicing + virtual path validation
-- 설치 프린터: PrusaLink connection check + live gate checks
+- 설치 프린터: active printer profile connection check + live gate checks. Bambu X2D is the default; Prusa runs only after explicit profile selection.
 - 실제 출력: slice/upload/start path when live gate passes
 
 If live gate blocks, the run should stop before hardware start and show reason code.

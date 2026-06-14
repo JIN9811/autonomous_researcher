@@ -827,6 +827,21 @@ class AnalysisAgent(BaseAgent):
         live_audit = equipment_report.get("live_evidence_audit") if isinstance(equipment_report.get("live_evidence_audit"), dict) else {}
         decision = equipment_report.get("decision") if isinstance(equipment_report.get("decision"), dict) else {}
         cross_checks = equipment_report.get("cross_checks") if isinstance(equipment_report.get("cross_checks"), dict) else {}
+        cross_checks = dict(cross_checks)
+        screen_audit = live_audit.get("screen_evidence") if isinstance(live_audit.get("screen_evidence"), dict) else {}
+        linux_audit = live_audit.get("linux_artifact_pull") if isinstance(live_audit.get("linux_artifact_pull"), dict) else {}
+        vision_audit = live_audit.get("vision_evidence") if isinstance(live_audit.get("vision_evidence"), dict) else {}
+        request_audit = live_audit.get("request_audit_log") if isinstance(live_audit.get("request_audit_log"), dict) else {}
+        audit_gate_defaults = {
+            "screen_evidence_complete": bool(screen_audit.get("ok")),
+            "linux_artifact_pulled": bool(linux_audit.get("ok")),
+            "vision_evidence_complete": bool(vision_audit.get("ok") or vision_audit.get("all_required_ok")),
+            "request_audit_log_available": bool(request_audit.get("ok")),
+            "request_audit_execute_identity_match": request_audit.get("execute_identity_match") is not False,
+        }
+        for name, value in audit_gate_defaults.items():
+            if name not in cross_checks:
+                cross_checks[name] = value
         required_for_handoff = bool(live_audit.get("required_for_handoff"))
         bridge_report = equipment_report.get("bridge") if isinstance(equipment_report.get("bridge"), dict) else {}
         is_windows_utm = str(

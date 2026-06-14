@@ -257,6 +257,119 @@ def test_gyroid_manufacturability_rejects_non_fdm_wall() -> None:
     assert "wall_thickness_mm below FDM printable wall rule" in result["reject_reasons"]
 
 
+def test_specimen_fabrication_report_includes_bambu_spc_readiness_contract() -> None:
+    agent = SpecimenMakingAgent()
+    spec = _valid_spec()
+    spec.update({"printer_profile": "bambulab_x2d_pla_0p4_nozzle", "storage": "ftps"})
+    state = OrchestratorState(
+        run_id="run-bambu",
+        experiment_id="exp-bambu",
+        mode=Mode.LIVE,
+        stage=Stage.SPECIMEN,
+        active_goal="bambu spc bridge",
+        current_experiment_spec=spec,
+    )
+    printer_response = {
+        "ok": True,
+        "status": "HTTP_ARTIFACT_READY_NOT_STARTED",
+        "mode": "live",
+        "printer_path": "http_artifact",
+        "provider": "bambulab_x2d",
+        "selected_printer": {
+            "profile_id": "bambulab_x2d_lab_01",
+            "label": "Bambu Lab X2D - Lab 01",
+            "provider": "bambulab_x2d",
+        },
+        "device_screen": {
+            "connection": {"mqtt": "connected", "transfer": "connected", "video": "available"},
+            "actions": {"can_upload": True, "can_start_print": True},
+        },
+        "preprint_gate": {
+            "state": "http_artifact_ready_not_started",
+            "technical_ready_for_start": True,
+            "ready_for_live_print": False,
+            "blockers": ["BAMBU_OPERATOR_CONFIRMATION_REQUIRED"],
+        },
+        "readiness_levels": [
+            {"level_id": "connection", "status": "ready"},
+            {"level_id": "operator_approval", "status": "blocked"},
+        ],
+        "operator_actions": [{"action_id": "confirm_start", "status": "required"}],
+        "autoejection": {"status": "not_configured", "blockers": ["BAMBU_AUTOEJECTION_PROVIDER_REQUIRED"]},
+        "autoejection_handoff": {
+            "schema": "bambu_autoejection_provider_handoff.v1",
+            "recommended_consumer_agent": "ManipulationAgent",
+            "next_tool": "lerobot.manipulation-agent.run",
+            "requires_guardian_approval": True,
+            "requires_operator_confirmation": True,
+            "motion_started": False,
+            "dry_run_only": True,
+        },
+        "slicer_settings": {
+            "printer_profile": "bambulab_x2d_pla_0p4_nozzle",
+            "material": "PLA",
+            "layer_height_mm": 0.2,
+            "nozzle_diameter_mm": 0.4,
+            "output_gcode_path": "/tmp/specimen.3mf",
+        },
+        "slicer_result": {"ok": True, "sliced_path": "/tmp/specimen.3mf"},
+        "gcode_validation": {"ok": True, "violations": []},
+        "printer": {"provider": "bambulab_x2d", "storage": {"ok": True}, "transfer": "http_artifact"},
+        "print_result": {"status": "http_artifact_ready_not_started", "remote_path": "cache/specimen.3mf"},
+        "step_trace": [{"step": "SPC_READINESS", "status": "ok", "detail": "technical path verified"}],
+    }
+
+    fabrication_report = agent._build_fabrication_report(
+        state=state,
+        spec=spec,
+        candidate="cand-1-01",
+        specimen_id="specimen-cand-1-01-gyroid",
+        geometry_result={
+            "ok": True,
+            "stl_path": "/tmp/specimen.stl",
+            "geometry_hash": "geom-hash",
+            "viewer_capture_path": "/tmp/specimen.png",
+        },
+        mesh_result={"ok": True, "mesh_status": "pass", "warnings": []},
+        manufacturability_result={"ok": True, "manufacturability_status": "pass", "warnings": []},
+        handoff_result={"handoff_package_path": "/tmp/handoff.json", "status": "ready"},
+        experiment_response={"job": {"device": "printer:bambulab_x2d"}},
+        printer_response=printer_response,
+        printer_payload={"runtime_mode": "live", "print": {"physical_intent": True}},
+        protocol_note="bambu spc test",
+        live_gui_test_spec=False,
+        printer_test_path="physical_print",
+        top_cap_enabled=False,
+        bottom_cap_enabled=True,
+        geometry_payload={"skin_thickness_mm": 0.8},
+    )
+    screen_report = agent._specimen_agent_report_snapshot(
+        state=state,
+        spec=spec,
+        candidate="cand-1-01",
+        specimen_id="specimen-cand-1-01-gyroid",
+        fabrication_report=fabrication_report,
+        handoff_packet={"status": "ready", "consumer_agent": "vision_agent"},
+        preview_image_path="/tmp/specimen.png",
+        viewer_capture_path="/tmp/specimen.png",
+    )
+
+    runtime = fabrication_report["printer_runtime"]
+    assert runtime["provider"] == "bambulab_x2d"
+    assert runtime["selected_printer"]["profile_id"] == "bambulab_x2d_lab_01"
+    assert runtime["device_screen"]["actions"]["can_start_print"] is True
+    assert runtime["preprint_gate"]["technical_ready_for_start"] is True
+    assert runtime["readiness_levels"][1]["status"] == "blocked"
+    assert runtime["operator_actions"][0]["action_id"] == "confirm_start"
+    assert runtime["autoejection"]["blockers"] == ["BAMBU_AUTOEJECTION_PROVIDER_REQUIRED"]
+    assert runtime["autoejection_handoff"]["recommended_consumer_agent"] == "ManipulationAgent"
+    assert runtime["autoejection_handoff"]["motion_started"] is False
+    assert screen_report["printer_status"]["provider"] == "bambulab_x2d"
+    assert screen_report["spc_readiness"]["readiness_levels"][0]["level_id"] == "connection"
+    assert screen_report["autoejection_gate"]["status"] == "not_configured"
+    assert screen_report["autoejection_gate"]["handoff"]["next_tool"] == "lerobot.manipulation-agent.run"
+
+
 @pytest.mark.asyncio
 async def test_specimen_agent_executes_geometry_handoff_and_printer_prepare(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     agent = SpecimenMakingAgent()
@@ -406,7 +519,9 @@ async def test_specimen_agent_uses_phase1_printer_prepare_schema(tmp_path: Path,
     assert specimen_result["gcode_validation"]["ok"] is True
     assert specimen_result["operator_messages"]
     assert specimen_result["experiment_evaluation"]["bridge"] == "printer"
-    assert specimen_result["experiment_evaluation"]["job"]["device"] == "printer:prusa_mk4s"
+    assert specimen_result["experiment_evaluation"]["job"]["device"] == "printer:fleet"
+    assert specimen_result["provider"] == "prusa_mk4s"
+    assert specimen_result["selected_printer"]["provider"] == "prusa_mk4s"
 
     fabrication_report = specimen_result["fabrication_report"]
     assert fabrication_report["schema"] == "fabrication_report.v1"
