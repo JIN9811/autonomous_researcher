@@ -20,24 +20,30 @@ Modification guide:
 
 from __future__ import annotations
 
+import copy
 import json
 import hashlib
 import ipaddress
 import io
 import os
+import re
 import shutil
 import socket
 import ssl
 import subprocess
 import sys
 import threading
+import time
 import uuid
+import zipfile
 from ftplib import FTP_TLS
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
+
+from device_bridges.bambu_autoejection import BambuGcodeAutoejectionPatcher
 
 try:  # Optional until dependencies are installed in downstream deployments.
     import paho.mqtt.client as mqtt
@@ -49,6 +55,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_FLEET_MEMORY = REPO_ROOT / "memory" / "printer_fleet.json"
 DEFAULT_BAMBU_MEMORY = REPO_ROOT / "memory" / "bambu_connection.json"
 DEFAULT_BAMBU_AUTOEJECTION_MEMORY = REPO_ROOT / "memory" / "bambu_autoejection.json"
+DEFAULT_BAMBU_BED_CLEAR_MEMORY = REPO_ROOT / "memory" / "bambu_bed_clear_evidence.json"
 
 
 def _utc_now() -> str:
@@ -63,6 +70,20 @@ def _as_bool(value: Any, default: bool = False) -> bool:
     if isinstance(value, str):
         return value.strip().lower() in {"1", "true", "yes", "on"}
     return bool(value)
+
+
+def _as_float(value: Any, default: float) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def _as_int(value: Any, default: int) -> int:
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return int(default)
 
 
 def _resolve_path(value: str | Path | None, *, repo_root: Path) -> Path:
@@ -121,6 +142,10 @@ class BambuSlicerConfig:
     executable_path: str = "install/bambustudio/bambu-studio-wrapper"
     output_dir: str = "artifacts/bambu_sliced"
     timeout_sec: float = 900.0
+    auto_no_skirt_profile: bool = True
+    default_machine_profile: str = ""
+    default_process_profile: str = ""
+    default_filament_profile: str = ""
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any] | None) -> "BambuSlicerConfig":
@@ -131,6 +156,10 @@ class BambuSlicerConfig:
             executable_path=str(raw.get("executable_path", "install/bambustudio/bambu-studio-wrapper")),
             output_dir=str(raw.get("output_dir", "artifacts/bambu_sliced")),
             timeout_sec=float(raw.get("timeout_sec", 900) or 900),
+            auto_no_skirt_profile=_as_bool(raw.get("auto_no_skirt_profile"), True),
+            default_machine_profile=str(raw.get("default_machine_profile", "") or ""),
+            default_process_profile=str(raw.get("default_process_profile", "") or ""),
+            default_filament_profile=str(raw.get("default_filament_profile", "") or ""),
         )
 
     def resolved_payload(self, *, repo_root: Path | None = None) -> dict[str, Any]:
@@ -218,6 +247,17 @@ class BambuStudioSlicerRunner:
         safe_id = self._safe_name(specimen_id or source.stem)
         output_dir = (output_root / safe_id).resolve()
         output_dir.mkdir(parents=True, exist_ok=True)
+        export_path = output_dir / f"{safe_id}.gcode.3mf"
+        slicer_profile = self._default_no_skirt_profile(output_dir) if not load_settings else {
+            "auto_no_skirt_profile": False,
+            "reason": "explicit_load_settings_supplied",
+        }
+        effective_load_settings = load_settings
+        effective_load_filaments = load_filaments
+        if not effective_load_settings and slicer_profile.get("ok"):
+            effective_load_settings = str(slicer_profile.get("load_settings") or "")
+            if not effective_load_filaments:
+                effective_load_filaments = str(slicer_profile.get("load_filaments") or "")
 
         before = {path.resolve() for path in self._candidate_outputs(output_dir)}
         command = [
@@ -229,11 +269,15 @@ class BambuStudioSlicerRunner:
             "--ensure-on-bed",
             "--outputdir",
             str(output_dir),
+            "--export-3mf",
+            export_path.name,
+            "--debug",
+            "2",
         ]
-        if load_settings:
-            command.extend(["--load-settings", str(self._resolve_existing_optional(load_settings))])
-        if load_filaments:
-            command.extend(["--load-filaments", str(self._resolve_existing_optional(load_filaments))])
+        if effective_load_settings:
+            command.extend(["--load-settings", str(self._resolve_existing_optional(effective_load_settings))])
+        if effective_load_filaments:
+            command.extend(["--load-filaments", str(self._resolve_existing_optional(effective_load_filaments))])
         if extra_args:
             command.extend(str(item) for item in extra_args)
         command.append(str(source))
@@ -254,12 +298,14 @@ class BambuStudioSlicerRunner:
                 "timeout_sec": float(timeout_sec if timeout_sec is not None else self.config.timeout_sec),
                 "stdout": exc.stdout or "",
                 "stderr": exc.stderr or "",
+                "slicer_profile": slicer_profile,
             }
         except OSError as exc:
             return {
                 **self._blocked("BAMBU_STUDIO_SLICE_EXEC_FAILED", source_path=str(source), slicer=resolved),
                 "command": command,
                 "error": str(exc),
+                "slicer_profile": slicer_profile,
             }
 
         outputs = [path for path in self._candidate_outputs(output_dir) if path.resolve() not in before]
@@ -280,6 +326,7 @@ class BambuStudioSlicerRunner:
                 "stderr": completed.stderr[-4000:],
                 "output_dir": str(output_dir),
                 "outputs": [str(path) for path in outputs[:12]],
+                "slicer_profile": slicer_profile,
             }
 
         data = selected.read_bytes()
@@ -297,6 +344,7 @@ class BambuStudioSlicerRunner:
             "stdout": completed.stdout[-4000:],
             "stderr": completed.stderr[-4000:],
             "slicer": resolved,
+            "slicer_profile": slicer_profile,
             "created_at": _utc_now(),
             "started_at": started_at,
             "will_publish": False,
@@ -313,6 +361,98 @@ class BambuStudioSlicerRunner:
             for path in output_dir.rglob("*")
             if path.is_file() and any(path.name.lower().endswith(suffix) for suffix in allowed_suffixes)
         ]
+
+    def _default_no_skirt_profile(self, output_dir: Path) -> dict[str, Any]:
+        if not self.config.auto_no_skirt_profile:
+            return {"ok": False, "auto_no_skirt_profile": False, "reason": "disabled"}
+        machine = self._resolve_bambu_profile(
+            self.config.default_machine_profile,
+            "system/BBL/machine/Bambu Lab X2D 0.4 nozzle.json",
+        )
+        process = self._resolve_bambu_profile(
+            self.config.default_process_profile,
+            "system/BBL/process/0.20mm Standard @BBL X2D.json",
+        )
+        filament = self._resolve_bambu_profile(
+            self.config.default_filament_profile,
+            "system/BBL/filament/Bambu PLA Basic @BBL X2D 0.4 nozzle.json",
+        )
+        missing = [
+            name
+            for name, path in {"machine": machine, "process": process, "filament": filament}.items()
+            if path is None
+        ]
+        if missing:
+            return {
+                "ok": False,
+                "auto_no_skirt_profile": False,
+                "reason": "default_profile_source_missing",
+                "missing": missing,
+            }
+
+        profile_dir = output_dir / "_atr_no_skirt_profile"
+        profile_dir.mkdir(parents=True, exist_ok=True)
+        machine_out = profile_dir / "machine.json"
+        process_out = profile_dir / "process.no-skirt.json"
+        filament_out = profile_dir / "filament.json"
+        machine_out.write_bytes(machine.read_bytes())
+        filament_out.write_bytes(filament.read_bytes())
+        try:
+            process_payload = json.loads(process.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            process_payload = {}
+        if not isinstance(process_payload, dict):
+            process_payload = {}
+        process_payload.update(
+            {
+                "skirt_loops": "0",
+                "skirt_height": "0",
+                "skirt_distance": "0",
+                "brim_type": "no_brim",
+                "brim_width": "0",
+                "brim_object_gap": "0",
+                "raft_layers": "0",
+                "prime_tower_brim_width": "0",
+                "enable_prime_tower": "0",
+            }
+        )
+        process_out.write_text(json.dumps(process_payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        return {
+            "ok": True,
+            "auto_no_skirt_profile": True,
+            "machine_profile_path": str(machine),
+            "process_profile_path": str(process),
+            "filament_profile_path": str(filament),
+            "machine_override_path": str(machine_out),
+            "process_override_path": str(process_out),
+            "filament_override_path": str(filament_out),
+            "load_settings": f"{machine_out};{process_out}",
+            "load_filaments": str(filament_out),
+            "overrides": {
+                "skirt_loops": "0",
+                "skirt_height": "0",
+                "brim_type": "no_brim",
+                "brim_width": "0",
+                "raft_layers": "0",
+            },
+        }
+
+    def _resolve_bambu_profile(self, configured: str, relative_default: str) -> Path | None:
+        candidates: list[Path] = []
+        if configured:
+            configured_path = Path(configured).expanduser()
+            candidates.append(configured_path if configured_path.is_absolute() else self.repo_root / configured_path)
+        rel = Path(relative_default)
+        candidates.extend(
+            [
+                Path.home() / ".config" / "BambuStudio" / rel,
+                Path.home() / ".var" / "app" / "com.bambulab.BambuStudio" / "config" / "BambuStudio" / rel,
+            ]
+        )
+        for candidate in candidates:
+            if candidate.exists() and candidate.is_file():
+                return candidate.resolve()
+        return None
 
     def _resolve_existing_optional(self, value: str | Path) -> Path:
         path = Path(str(value)).expanduser()
@@ -340,9 +480,11 @@ class BambuStudioSlicerRunner:
 class BambuMqttConfig:
     port: int = 8883
     timeout_sec: float = 5.0
+    publish_timeout_sec: float = 180.0
     username: str = "bblp"
     report_topic_template: str = "device/{serial}/report"
     request_topic_template: str = "device/{serial}/request"
+    snapshot_cache_ttl_sec: float = 1.5
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any] | None) -> "BambuMqttConfig":
@@ -350,9 +492,11 @@ class BambuMqttConfig:
         return cls(
             port=int(raw.get("port", 8883) or 8883),
             timeout_sec=float(raw.get("timeout_sec", 5.0) or 5.0),
+            publish_timeout_sec=max(60.0, _as_float(raw.get("publish_timeout_sec"), 180.0)),
             username=str(raw.get("username", "bblp") or "bblp"),
             report_topic_template=str(raw.get("report_topic_template", "device/{serial}/report")),
             request_topic_template=str(raw.get("request_topic_template", "device/{serial}/request")),
+            snapshot_cache_ttl_sec=max(0.0, float(raw.get("snapshot_cache_ttl_sec", 1.5) or 0.0)),
         )
 
 
@@ -384,7 +528,14 @@ class AutoEjectionConfig:
     require_verified_routine: bool = True
     require_pre_eject_vision: bool = True
     require_post_eject_vision: bool = True
-    fallback_to_robot_pickoff: bool = True
+    recovery_to_robot_pickoff: bool = True
+    push_direction: str = "center"
+    z_push_offset_mm: float = 30.0
+    push_lane_offset_mm: float = 30.0
+    push_speed_mm_min: int = 300
+    enable_full_bed_sweep: bool = False
+    sweep_z_mm: float = 1.0
+    sweep_speed_mm_min: int = 300
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any] | None) -> "AutoEjectionConfig":
@@ -398,8 +549,23 @@ class AutoEjectionConfig:
             require_verified_routine=_as_bool(raw.get("require_verified_routine"), True),
             require_pre_eject_vision=_as_bool(raw.get("require_pre_eject_vision"), True),
             require_post_eject_vision=_as_bool(raw.get("require_post_eject_vision"), True),
-            fallback_to_robot_pickoff=_as_bool(raw.get("fallback_to_robot_pickoff"), True),
+            recovery_to_robot_pickoff=_as_bool(
+                raw.get("recovery_to_robot_pickoff", raw.get("fallback_to_robot_pickoff")),
+                True,
+            ),
+            push_direction=cls._clean_push_direction(raw.get("push_direction")),
+            z_push_offset_mm=max(0.0, min(200.0, _as_float(raw.get("z_push_offset_mm"), 30.0))),
+            push_lane_offset_mm=max(0.0, min(120.0, _as_float(raw.get("push_lane_offset_mm"), 30.0))),
+            push_speed_mm_min=max(100, min(1000, _as_int(raw.get("push_speed_mm_min"), 300))),
+            enable_full_bed_sweep=_as_bool(raw.get("enable_full_bed_sweep"), False),
+            sweep_z_mm=max(0.5, min(50.0, _as_float(raw.get("sweep_z_mm"), 1.0))),
+            sweep_speed_mm_min=max(100, min(1000, _as_int(raw.get("sweep_speed_mm_min"), 300))),
         )
+
+    @staticmethod
+    def _clean_push_direction(value: Any) -> str:
+        clean = str(value or "center").strip().lower()
+        return clean if clean in {"left", "center", "right"} else "center"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -411,28 +577,66 @@ class AutoEjectionConfig:
             "require_verified_routine": self.require_verified_routine,
             "require_pre_eject_vision": self.require_pre_eject_vision,
             "require_post_eject_vision": self.require_post_eject_vision,
-            "fallback_to_robot_pickoff": self.fallback_to_robot_pickoff,
+            "recovery_to_robot_pickoff": self.recovery_to_robot_pickoff,
+            "push_direction": self.push_direction,
+            "z_push_offset_mm": self.z_push_offset_mm,
+            "push_lane_offset_mm": self.push_lane_offset_mm,
+            "push_speed_mm_min": self.push_speed_mm_min,
+            "enable_full_bed_sweep": self.enable_full_bed_sweep,
+            "sweep_z_mm": self.sweep_z_mm,
+            "sweep_speed_mm_min": self.sweep_speed_mm_min,
+        }
+
+    def native_gcode_parameters(self) -> dict[str, Any]:
+        return {
+            "push_direction": self.push_direction,
+            "z_push_offset_mm": self.z_push_offset_mm,
+            "push_lane_offset_mm": self.push_lane_offset_mm,
+            "push_speed_mm_min": self.push_speed_mm_min,
+            "enable_full_bed_sweep": self.enable_full_bed_sweep,
+            "sweep_z_mm": self.sweep_z_mm,
+            "sweep_speed_mm_min": self.sweep_speed_mm_min,
         }
 
     def status_payload(self) -> dict[str, Any]:
         requested = bool(self.enabled)
         provider_configured = self.provider not in {"", "none"}
+        native_gcode_patch = self.provider in {"bambu_gcode_patch", "native_gcode", "gcode_patch"}
         blockers: list[str] = []
         if not requested:
             blockers.append("BAMBU_AUTOEJECTION_NOT_REQUESTED")
         if requested and not provider_configured:
             blockers.append("BAMBU_AUTOEJECTION_PROVIDER_NOT_CONFIGURED")
-        if requested and provider_configured and self.require_verified_routine and not self.verified_routine_id:
+        if (
+            requested
+            and provider_configured
+            and not native_gcode_patch
+            and self.require_verified_routine
+            and not self.verified_routine_id
+        ):
             blockers.append("BAMBU_AUTOEJECTION_ROUTINE_NOT_VERIFIED")
-        if requested and provider_configured and self.require_pre_eject_vision and not self.pre_eject_vision_profile:
+        if (
+            requested
+            and provider_configured
+            and not native_gcode_patch
+            and self.require_pre_eject_vision
+            and not self.pre_eject_vision_profile
+        ):
             blockers.append("BAMBU_PRE_EJECT_VISION_PROFILE_REQUIRED")
-        if requested and provider_configured and self.require_post_eject_vision and not self.post_eject_vision_profile:
+        if (
+            requested
+            and provider_configured
+            and not native_gcode_patch
+            and self.require_post_eject_vision
+            and not self.post_eject_vision_profile
+        ):
             blockers.append("BAMBU_POST_EJECT_VISION_PROFILE_REQUIRED")
         configured = requested and provider_configured and not blockers
         return {
             "enabled": bool(configured),
             "requested": requested,
             "provider": self.provider,
+            "native_gcode_patch": native_gcode_patch,
             "status": "configured" if configured else ("not_configured" if not requested else "blocked"),
             "can_run_test": bool(configured),
             "blockers": blockers,
@@ -442,7 +646,8 @@ class AutoEjectionConfig:
             "require_verified_routine": self.require_verified_routine,
             "require_pre_eject_vision": self.require_pre_eject_vision,
             "require_post_eject_vision": self.require_post_eject_vision,
-            "fallback_to_robot_pickoff": self.fallback_to_robot_pickoff,
+            "recovery_to_robot_pickoff": self.recovery_to_robot_pickoff,
+            "native_gcode_parameters": self.native_gcode_parameters(),
         }
 
 
@@ -654,16 +859,37 @@ class BambuAutoejectionMemory:
                 raw[key] = payload[key]
         return AutoEjectionConfig.from_dict(raw)
 
+    def runtime_paths(self) -> dict[str, Any]:
+        payload = self.load()
+        paths = payload.get("runtime_paths") if isinstance(payload.get("runtime_paths"), dict) else {}
+        if paths:
+            return paths
+        return {
+            "standalone_endpoint": "/api/printer/autoejection-test",
+            "standalone_transport": "mqtt_gcode_line",
+            "actual_print_transport": "project_file",
+            "virtual_bridge_transport": "virtual",
+            "artifact_dir": "artifacts/bambu_autoejection",
+            "validation_summary_path": "runs/manual_bambu_validation/direct_gcode_line_validation_summary.json",
+            "home_after_standalone": False,
+            "skipped_direct_commands": ["M190"],
+        }
+
     def save_from_payload(self, payload: dict[str, Any], defaults: AutoEjectionConfig) -> AutoEjectionConfig:
         source = payload if isinstance(payload, dict) else {}
+        existing = self.load()
         raw = defaults.to_dict()
         for key in raw:
             if key in source:
                 raw[key] = source[key]
         config = AutoEjectionConfig.from_dict(raw)
+        runtime_paths = existing.get("runtime_paths") if isinstance(existing.get("runtime_paths"), dict) else {}
+        if isinstance(source.get("runtime_paths"), dict):
+            runtime_paths = {**runtime_paths, **source["runtime_paths"]}
         record = {
             "schema": "bambu_autoejection.v1",
             **config.to_dict(),
+            "runtime_paths": runtime_paths or self.runtime_paths(),
             "updated_at": _utc_now(),
         }
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -673,6 +899,96 @@ class BambuAutoejectionMemory:
         except OSError:
             pass
         return config
+
+
+class BambuBedClearMemory:
+    """Local Bambu post-ejection bed-clear evidence gate."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+
+    def load(self) -> dict[str, Any]:
+        if not self.path.exists():
+            return self._default_payload()
+        try:
+            payload = json.loads(self.path.read_text(encoding="utf-8"))
+        except Exception:
+            return self._default_payload()
+        if not isinstance(payload, dict):
+            return self._default_payload()
+        return self._normalize(payload)
+
+    def save_from_payload(self, payload: dict[str, Any], *, printer_profile_id: str) -> dict[str, Any]:
+        source = payload if isinstance(payload, dict) else {}
+        existing = self.load()
+
+        def _payload_string(key: str) -> str:
+            if key in source:
+                return str(source.get(key) or "")
+            return str(existing.get(key) or "")
+
+        record = self._normalize(
+            {
+                **existing,
+                "printer_profile_id": str(printer_profile_id or ""),
+                "remote_path": _payload_string("remote_path"),
+                "subtask_name": _payload_string("subtask_name"),
+                "source_artifact_path": _payload_string("source_artifact_path"),
+                "source_artifact_sha256": _payload_string("source_artifact_sha256"),
+                "patched_artifact_path": _payload_string("patched_artifact_path"),
+                "patched_artifact_sha256": _payload_string("patched_artifact_sha256"),
+                "manifest_path": _payload_string("manifest_path"),
+                "publish_sequence_id": _payload_string("publish_sequence_id"),
+                "publish_topic": _payload_string("publish_topic"),
+                "post_publish_status": _payload_string("post_publish_status"),
+                "bed_clear_required": _as_bool(
+                    source.get("bed_clear_required"),
+                    _as_bool(existing.get("bed_clear_required"), False),
+                ),
+                "bed_clear_verified": _as_bool(
+                    source.get("bed_clear_verified"),
+                    _as_bool(existing.get("bed_clear_verified"), False),
+                ),
+                "verification_method": _payload_string("verification_method") or "operator",
+                "camera_snapshot_path": _payload_string("camera_snapshot_path"),
+                "updated_at": _utc_now(),
+            }
+        )
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
+        try:
+            os.chmod(self.path, 0o600)
+        except OSError:
+            pass
+        return record
+
+    def _default_payload(self) -> dict[str, Any]:
+        return self._normalize({"schema": "bambu_bed_clear_evidence.v1"})
+
+    def _normalize(self, payload: dict[str, Any]) -> dict[str, Any]:
+        required = _as_bool(payload.get("bed_clear_required"), False)
+        verified = _as_bool(payload.get("bed_clear_verified"), not required)
+        blocking_code = "BAMBU_POST_EJECT_BED_NOT_CLEAR" if required and not verified else ""
+        return {
+            "schema": "bambu_bed_clear_evidence.v1",
+            "printer_profile_id": str(payload.get("printer_profile_id") or ""),
+            "remote_path": str(payload.get("remote_path") or ""),
+            "subtask_name": str(payload.get("subtask_name") or ""),
+            "source_artifact_path": str(payload.get("source_artifact_path") or ""),
+            "source_artifact_sha256": str(payload.get("source_artifact_sha256") or ""),
+            "patched_artifact_path": str(payload.get("patched_artifact_path") or ""),
+            "patched_artifact_sha256": str(payload.get("patched_artifact_sha256") or ""),
+            "manifest_path": str(payload.get("manifest_path") or ""),
+            "publish_sequence_id": str(payload.get("publish_sequence_id") or ""),
+            "publish_topic": str(payload.get("publish_topic") or ""),
+            "post_publish_status": str(payload.get("post_publish_status") or ""),
+            "bed_clear_required": required,
+            "bed_clear_verified": verified,
+            "verification_method": str(payload.get("verification_method") or ""),
+            "camera_snapshot_path": str(payload.get("camera_snapshot_path") or ""),
+            "blocking_code": blocking_code,
+            "updated_at": str(payload.get("updated_at") or ""),
+        }
 
 
 class PrinterFleetMemory:
@@ -1016,6 +1332,24 @@ def _is_http_artifact_url(value: str) -> bool:
     return urlparse(str(value or "").strip()).scheme in {"http", "https"}
 
 
+def _remote_path_for_suffix_check(value: str) -> str:
+    parsed = urlparse(str(value or "").strip())
+    if parsed.scheme:
+        return parsed.path
+    return str(value or "")
+
+
+def _safe_bambu_subtask_name(value: str, fallback_remote: str) -> str:
+    candidate = str(value or "").strip() or Path(_remote_path_for_suffix_check(fallback_remote)).stem
+    if not candidate:
+        return ""
+    if "/" in candidate or "\\" in candidate:
+        return ""
+    if any(ord(char) < 32 for char in candidate):
+        return ""
+    return candidate[:128]
+
+
 def build_bambu_project_file_command_draft(
     *,
     serial: str,
@@ -1049,18 +1383,72 @@ def build_bambu_project_file_command_draft(
             "start_enabled": False,
             "requires_guardian": True,
         }
+    if not _remote_path_for_suffix_check(cleaned_remote).lower().endswith(".gcode.3mf"):
+        return {
+            "ok": False,
+            "failure_code": "BAMBU_PROJECT_FILE_PARAM_MISMATCH",
+            "message": "Bambu project_file requires a plate-sliced .gcode.3mf artifact so param can match Metadata/plate_#.gcode.",
+            "will_publish": False,
+            "start_enabled": False,
+            "requires_guardian": True,
+        }
+    if use_ams and ams_mapping is None:
+        return {
+            "ok": False,
+            "failure_code": "BAMBU_AMS_MAPPING_REQUIRED",
+            "will_publish": False,
+            "start_enabled": False,
+            "requires_guardian": True,
+        }
+    if ams_mapping is not None:
+        try:
+            normalized_mapping = [int(item) for item in ams_mapping]
+        except Exception:
+            normalized_mapping = []
+        if len(normalized_mapping) != 5 or any(item < -1 or item > 3 for item in normalized_mapping):
+            return {
+                "ok": False,
+                "failure_code": "BAMBU_AMS_MAPPING_INVALID",
+                "will_publish": False,
+                "start_enabled": False,
+                "requires_guardian": True,
+            }
+    else:
+        normalized_mapping = None
     if cleaned_remote.startswith(("file://", "http://", "https://", "ftp://")):
         url = cleaned_remote
     else:
         url = f"file:///{cleaned_remote}"
-    safe_plate_id = max(1, int(plate_id or 1))
+    try:
+        safe_plate_id = int(plate_id)
+    except (TypeError, ValueError):
+        safe_plate_id = 0
+    if safe_plate_id < 1:
+        return {
+            "ok": False,
+            "failure_code": "BAMBU_PROJECT_FILE_PARAM_MISMATCH",
+            "message": "Bambu project_file plate_id must be >= 1 so param can match Metadata/plate_#.gcode.",
+            "will_publish": False,
+            "start_enabled": False,
+            "requires_guardian": True,
+        }
+    safe_subtask_name = _safe_bambu_subtask_name(subtask_name, cleaned_remote)
+    if not safe_subtask_name:
+        return {
+            "ok": False,
+            "failure_code": "BAMBU_PROJECT_FILE_SUBTASK_NAME_INVALID",
+            "message": "Bambu project_file subtask_name must be a display name, not a path or control-string.",
+            "will_publish": False,
+            "start_enabled": False,
+            "requires_guardian": True,
+        }
     payload: dict[str, Any] = {
         "print": {
             "command": "project_file",
             "sequence_id": str(uuid.uuid4().int % 9000 + 1000),
             "url": url,
             "param": f"Metadata/plate_{safe_plate_id}.gcode",
-            "subtask_name": str(subtask_name or Path(cleaned_remote).stem),
+            "subtask_name": safe_subtask_name,
             "use_ams": bool(use_ams),
             "timelapse": bool(timelapse),
             "bed_leveling": bool(bed_leveling),
@@ -1069,8 +1457,8 @@ def build_bambu_project_file_command_draft(
             "layer_inspect": bool(layer_inspect),
         }
     }
-    if ams_mapping is not None:
-        payload["print"]["ams_mapping"] = [int(item) for item in ams_mapping]
+    if normalized_mapping is not None:
+        payload["print"]["ams_mapping"] = normalized_mapping
     return {
         "ok": True,
         "schema": "bambu_project_file_command_draft.v1",
@@ -1080,6 +1468,76 @@ def build_bambu_project_file_command_draft(
         "start_enabled": False,
         "requires_guardian": True,
         "guard_reason": "draft_only_until_upload_path_and_operator_approval_are_verified",
+    }
+
+
+def validate_bambu_project_file_local_artifact(local_path: str | Path, *, plate_id: int = 1) -> dict[str, Any]:
+    """Verify a local .gcode.3mf contains the plate path used by project_file.param."""
+    source = Path(str(local_path or "")).expanduser()
+    try:
+        source = source.resolve()
+    except OSError:
+        source = source.absolute()
+    try:
+        safe_plate_id = int(plate_id)
+    except (TypeError, ValueError):
+        safe_plate_id = 0
+    expected_plate_path = f"Metadata/plate_{safe_plate_id}.gcode" if safe_plate_id >= 1 else ""
+    base: dict[str, Any] = {
+        "schema": "bambu_project_file_artifact_plate_validation.v1",
+        "source_path": str(source),
+        "plate_id": safe_plate_id,
+        "expected_plate_path": expected_plate_path,
+        "will_publish": False,
+        "start_enabled": False,
+    }
+    if safe_plate_id < 1:
+        return {
+            **base,
+            "ok": False,
+            "failure_code": "BAMBU_PROJECT_FILE_PARAM_MISMATCH",
+            "message": "Bambu project_file plate_id must be >= 1 so param can match Metadata/plate_#.gcode.",
+        }
+    if not source.exists() or not source.is_file():
+        return {
+            **base,
+            "ok": False,
+            "failure_code": "BAMBU_LOCAL_ARTIFACT_NOT_FOUND",
+            "message": "Local Bambu artifact path does not exist.",
+        }
+    if not source.name.lower().endswith(".gcode.3mf"):
+        return {
+            **base,
+            "ok": False,
+            "failure_code": "BAMBU_PROJECT_FILE_PARAM_MISMATCH",
+            "message": "Bambu project_file requires a local plate-sliced .gcode.3mf artifact.",
+        }
+    try:
+        with zipfile.ZipFile(source) as archive:
+            names = archive.namelist()
+            plate_paths = sorted(name for name in names if re.fullmatch(r"Metadata/plate_\d+\.gcode", name))
+            if expected_plate_path not in names:
+                return {
+                    **base,
+                    "ok": False,
+                    "failure_code": "BAMBU_PROJECT_FILE_PARAM_MISMATCH",
+                    "available_plate_paths": plate_paths,
+                    "message": "Local .gcode.3mf does not contain the plate G-code path required by MQTT project_file.param.",
+                }
+    except zipfile.BadZipFile:
+        return {
+            **base,
+            "ok": False,
+            "failure_code": "BAMBU_PROJECT_FILE_ARTIFACT_INVALID",
+            "message": "Local Bambu artifact is not a valid .gcode.3mf zip container.",
+        }
+    return {
+        **base,
+        "ok": True,
+        "failure_code": "",
+        "available_plate_paths": plate_paths,
+        "source_plate_path": expected_plate_path,
+        "message": "Local Bambu artifact plate path matches MQTT project_file.param.",
     }
 
 
@@ -1255,6 +1713,8 @@ class BambuMqttReportClient:
 
     def __init__(self, config: BambuBridgeConfig) -> None:
         self.config = config
+        self._snapshot_cache: dict[tuple[str, str, str, str], tuple[float, dict[str, Any]]] = {}
+        self._snapshot_cache_lock = threading.Lock()
 
     def read_snapshot(
         self,
@@ -1264,6 +1724,7 @@ class BambuMqttReportClient:
         username: str,
         access_code: str,
         timeout_sec: float,
+        force_refresh: bool = False,
     ) -> dict[str, Any]:
         if mqtt is None:
             return {"ok": False, "failure_code": "PAHO_MQTT_NOT_INSTALLED"}
@@ -1272,6 +1733,21 @@ class BambuMqttReportClient:
 
         report_topic = self.config.mqtt.report_topic_template.format(serial=serial)
         request_topic = self.config.mqtt.request_topic_template.format(serial=serial)
+        access_hash = hashlib.sha256(str(access_code).encode("utf-8")).hexdigest()[:16]
+        cache_key = (str(host), str(serial), str(username or self.config.mqtt.username), access_hash)
+        cache_ttl = max(0.0, float(getattr(self.config.mqtt, "snapshot_cache_ttl_sec", 0.0) or 0.0))
+        if cache_ttl > 0 and not force_refresh:
+            now = time.monotonic()
+            with self._snapshot_cache_lock:
+                cached = self._snapshot_cache.get(cache_key)
+            if cached:
+                cached_at, cached_result = cached
+                age = now - cached_at
+                if age <= cache_ttl:
+                    result = copy.deepcopy(cached_result)
+                    result["cache_status"] = "cache_hit"
+                    result["cache_age_sec"] = round(age, 3)
+                    return result
         result: dict[str, Any] = {"ok": False, "topic": report_topic}
         event = threading.Event()
 
@@ -1316,13 +1792,18 @@ class BambuMqttReportClient:
             result.update({"ok": False, "failure_code": "BAMBU_MQTT_CONNECT_FAILED", "error": str(exc)})
         finally:
             try:
-                client.loop_stop()
-            except Exception:
-                pass
-            try:
                 client.disconnect()
             except Exception:
                 pass
+            try:
+                client.loop_stop()
+            except Exception:
+                pass
+        if result.get("ok"):
+            result["cache_status"] = "refreshed"
+            if cache_ttl > 0:
+                with self._snapshot_cache_lock:
+                    self._snapshot_cache[cache_key] = (time.monotonic(), copy.deepcopy(result))
         return result
 
     def publish_project_file_command(
@@ -1375,6 +1856,7 @@ class BambuMqttReportClient:
             "published": False,
         }
         event = threading.Event()
+        published_mid: dict[str, int | None] = {"value": None}
         client_id = f"atr-bambu-publish-{uuid.uuid4().hex[:10]}"
         try:
             client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=client_id)
@@ -1394,26 +1876,45 @@ class BambuMqttReportClient:
                 if rc != 0:
                     result.update({"ok": False, "status": "publish_failed", "failure_code": f"BAMBU_MQTT_PUBLISH_RC_{rc}"})
                 else:
-                    waiter = getattr(info, "wait_for_publish", None)
-                    if callable(waiter):
-                        waiter(timeout=float(timeout_sec))
-                    result.update(
-                        {
-                            "ok": True,
-                            "status": "published",
-                            "published": True,
-                            "published_at": _utc_now(),
-                            "sequence_id": str(print_payload.get("sequence_id") or ""),
-                            "command": "project_file",
-                            "url": str(print_payload.get("url") or ""),
-                        }
-                    )
+                    published_mid["value"] = getattr(info, "mid", None)
+                    if published_mid["value"] is None:
+                        result.update(
+                            {
+                                "ok": True,
+                                "status": "published",
+                                "published": True,
+                                "published_at": _utc_now(),
+                                "sequence_id": str(print_payload.get("sequence_id") or ""),
+                                "command": "project_file",
+                                "url": str(print_payload.get("url") or ""),
+                            }
+                        )
+                        event.set()
             except Exception as exc:
                 result.update({"ok": False, "status": "publish_failed", "failure_code": "BAMBU_MQTT_PUBLISH_FAILED", "error": str(exc)})
             finally:
-                event.set()
+                if result.get("status") == "publish_failed":
+                    event.set()
+
+        def on_publish(client, userdata, mid, *args):  # noqa: ANN001
+            expected_mid = published_mid.get("value")
+            if expected_mid is not None and int(mid) != int(expected_mid):
+                return
+            result.update(
+                {
+                    "ok": True,
+                    "status": "published",
+                    "published": True,
+                    "published_at": _utc_now(),
+                    "sequence_id": str(print_payload.get("sequence_id") or ""),
+                    "command": "project_file",
+                    "url": str(print_payload.get("url") or ""),
+                }
+            )
+            event.set()
 
         client.on_connect = on_connect
+        client.on_publish = on_publish
         client.username_pw_set(username or self.config.mqtt.username, access_code)
         client.tls_set(cert_reqs=ssl.CERT_NONE)
         client.tls_insecure_set(True)
@@ -1426,11 +1927,143 @@ class BambuMqttReportClient:
             result.update({"ok": False, "status": "connect_failed", "failure_code": "BAMBU_MQTT_CONNECT_FAILED", "error": str(exc)})
         finally:
             try:
-                client.loop_stop()
+                client.disconnect()
             except Exception:
                 pass
             try:
+                client.loop_stop()
+            except Exception:
+                pass
+        return result
+
+    def publish_gcode_line_command(
+        self,
+        *,
+        host: str,
+        serial: str,
+        username: str,
+        access_code: str,
+        topic: str,
+        gcode: str,
+        timeout_sec: float,
+    ) -> dict[str, Any]:
+        """Publish a guarded Bambu gcode_line command over LAN MQTT."""
+        if mqtt is None:
+            return {"ok": False, "failure_code": "PAHO_MQTT_NOT_INSTALLED", "will_publish": False, "published": False}
+        if not host or not serial or not access_code:
+            return {
+                "ok": False,
+                "failure_code": "BAMBU_MQTT_CONNECTION_INFO_INCOMPLETE",
+                "will_publish": False,
+                "published": False,
+            }
+        expected_topic = self.config.mqtt.request_topic_template.format(serial=serial)
+        if str(topic or "") != expected_topic:
+            return {
+                "ok": False,
+                "failure_code": "BAMBU_MQTT_TOPIC_MISMATCH",
+                "expected_topic": expected_topic,
+                "topic": str(topic or ""),
+                "will_publish": False,
+                "published": False,
+            }
+        clean_gcode = str(gcode or "").strip()
+        if not clean_gcode:
+            return {
+                "ok": False,
+                "failure_code": "BAMBU_GCODE_LINE_EMPTY",
+                "topic": expected_topic,
+                "will_publish": False,
+                "published": False,
+            }
+        param = clean_gcode.rstrip() + "\n"
+        sequence_id = str(uuid.uuid4().int % 9000 + 1000)
+        payload = {"print": {"sequence_id": sequence_id, "command": "gcode_line", "param": param}}
+        result: dict[str, Any] = {
+            "ok": False,
+            "tool": "printer.bambu.mqtt_gcode_line",
+            "topic": expected_topic,
+            "status": "pending",
+            "will_publish": True,
+            "published": False,
+            "payload": payload,
+        }
+        event = threading.Event()
+        published_mid: dict[str, int | None] = {"value": None}
+        client_id = f"atr-bambu-gcode-{uuid.uuid4().hex[:10]}"
+        try:
+            client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=client_id)
+        except AttributeError:  # pragma: no cover - paho<2 compatibility.
+            client = mqtt.Client(client_id=client_id)
+
+        def on_connect(client, userdata, flags, reason_code, properties=None):  # noqa: ANN001
+            code = int(reason_code.value) if hasattr(reason_code, "value") else int(reason_code)
+            result["connack"] = code
+            if code != 0:
+                result.update({"ok": False, "status": "connack_failed", "failure_code": f"BAMBU_MQTT_CONNACK_{code}"})
+                event.set()
+                return
+            try:
+                info = client.publish(expected_topic, json.dumps(payload), qos=1)
+                rc = int(getattr(info, "rc", 0) or 0)
+                if rc != 0:
+                    result.update({"ok": False, "status": "publish_failed", "failure_code": f"BAMBU_MQTT_PUBLISH_RC_{rc}"})
+                    event.set()
+                else:
+                    published_mid["value"] = getattr(info, "mid", None)
+                    if published_mid["value"] is None:
+                        result.update(
+                            {
+                                "ok": True,
+                                "status": "published",
+                                "published": True,
+                                "published_at": _utc_now(),
+                                "sequence_id": sequence_id,
+                                "command": "gcode_line",
+                                "gcode_line_count": len(param.splitlines()),
+                            }
+                        )
+                        event.set()
+            except Exception as exc:
+                result.update({"ok": False, "status": "publish_failed", "failure_code": "BAMBU_MQTT_PUBLISH_FAILED", "error": str(exc)})
+                event.set()
+
+        def on_publish(client, userdata, mid, *args):  # noqa: ANN001
+            expected_mid = published_mid.get("value")
+            if expected_mid is not None and int(mid) != int(expected_mid):
+                return
+            result.update(
+                {
+                    "ok": True,
+                    "status": "published",
+                    "published": True,
+                    "published_at": _utc_now(),
+                    "sequence_id": sequence_id,
+                    "command": "gcode_line",
+                    "gcode_line_count": len(param.splitlines()),
+                }
+            )
+            event.set()
+
+        client.on_connect = on_connect
+        client.on_publish = on_publish
+        client.username_pw_set(username or self.config.mqtt.username, access_code)
+        client.tls_set(cert_reqs=ssl.CERT_NONE)
+        client.tls_insecure_set(True)
+        try:
+            client.connect(host, self.config.mqtt.port, keepalive=30)
+            client.loop_start()
+            if not event.wait(float(timeout_sec)):
+                result.update({"ok": False, "status": "timeout", "failure_code": "BAMBU_MQTT_PUBLISH_TIMEOUT"})
+        except Exception as exc:
+            result.update({"ok": False, "status": "connect_failed", "failure_code": "BAMBU_MQTT_CONNECT_FAILED", "error": str(exc)})
+        finally:
+            try:
                 client.disconnect()
+            except Exception:
+                pass
+            try:
+                client.loop_stop()
             except Exception:
                 pass
         return result
@@ -1513,7 +2146,12 @@ class BambuFtpsClient:
                 "checked_at": _utc_now(),
             }
         except Exception as exc:
-            return {"ok": False, "failure_code": "BAMBU_FTPS_PROBE_FAILED", "error": str(exc)}
+            return self._classified_ftps_failure(
+                exc,
+                host=host,
+                timeout_sec=timeout_sec,
+                default_code="BAMBU_FTPS_PROBE_FAILED",
+            )
         finally:
             try:
                 client.quit()
@@ -1575,15 +2213,13 @@ class BambuFtpsClient:
                 "failure_code": "" if selected else "BAMBU_FTPS_NO_WRITABLE_PATH",
             }
         except Exception as exc:
-            return {
-                "ok": False,
-                "write_ok": False,
-                "storage": "ftps",
-                "failure_code": "BAMBU_FTPS_PATH_PROBE_FAILED",
-                "error": str(exc),
-                "candidates": candidates,
-                "checked_at": _utc_now(),
-            }
+            return self._classified_ftps_failure(
+                exc,
+                host=host,
+                timeout_sec=timeout_sec,
+                default_code="BAMBU_FTPS_PATH_PROBE_FAILED",
+                extra={"write_ok": False, "candidates": candidates},
+            )
         finally:
             try:
                 client.quit()
@@ -1672,13 +2308,13 @@ class BambuFtpsClient:
                 "checked_at": _utc_now(),
             }
         except Exception as exc:
-            return {
-                "ok": False,
-                "failure_code": "BAMBU_FTPS_UPLOAD_FAILED",
-                "remote_path": remote,
-                "error": str(exc),
-                "checked_at": _utc_now(),
-            }
+            return self._classified_ftps_failure(
+                exc,
+                host=host,
+                timeout_sec=timeout_sec,
+                default_code="BAMBU_FTPS_UPLOAD_FAILED",
+                extra={"remote_path": remote},
+            )
         finally:
             self._reset_cwd(client)
             try:
@@ -1686,6 +2322,60 @@ class BambuFtpsClient:
             except Exception:
                 try:
                     client.close()
+                except Exception:
+                    pass
+
+    def _classified_ftps_failure(
+        self,
+        exc: Exception,
+        *,
+        host: str,
+        timeout_sec: float,
+        default_code: str,
+        extra: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        error = str(exc)
+        payload: dict[str, Any] = {
+            "ok": False,
+            "storage": "ftps",
+            "failure_code": default_code,
+            "error": error,
+            "checked_at": _utc_now(),
+        }
+        if extra:
+            payload.update(extra)
+        if self._looks_like_plaintext_tls_mismatch(error):
+            banner = self._read_plain_ftp_banner(host=host, timeout_sec=timeout_sec)
+            if banner:
+                payload["plaintext_banner"] = banner
+                payload["error"] = f"{error}; plaintext_banner={banner}"
+            lowered = banner.lower()
+            if banner.startswith("421") and "too many connections" in lowered:
+                payload["failure_code"] = "BAMBU_FTPS_TOO_MANY_CONNECTIONS"
+                payload["operator_action"] = (
+                    "Close other Bambu Studio/FTP sessions or wait for stale FTPS sessions to expire before retrying."
+                )
+        return payload
+
+    def _looks_like_plaintext_tls_mismatch(self, error: str) -> bool:
+        lowered = str(error or "").lower()
+        return "wrong_version_number" in lowered or "wrong version number" in lowered
+
+    def _read_plain_ftp_banner(self, *, host: str, timeout_sec: float) -> str:
+        sock = None
+        try:
+            sock = socket.create_connection((host, 990), timeout=float(timeout_sec))
+            try:
+                sock.settimeout(float(timeout_sec))
+            except Exception:
+                pass
+            return sock.recv(512).decode("utf-8", errors="replace").strip()
+        except Exception:
+            return ""
+        finally:
+            if sock is not None:
+                try:
+                    sock.close()
                 except Exception:
                     pass
 
@@ -1740,15 +2430,303 @@ class PrinterDeviceBridgeManager:
     def autoejection_memory(self) -> BambuAutoejectionMemory:
         return BambuAutoejectionMemory(self.config.autoejection_memory_path)
 
+    def bed_clear_memory(self) -> BambuBedClearMemory:
+        return BambuBedClearMemory(self.repo_root / "memory" / "bambu_bed_clear_evidence.json")
+
     def autoejection_config(self) -> AutoEjectionConfig:
         return self.autoejection_memory().config_with_defaults(self.config.autoejection)
 
     def autoejection_status(self) -> dict[str, Any]:
-        return self.autoejection_config().status_payload()
+        status = self.autoejection_config().status_payload()
+        status["runtime_paths"] = self.autoejection_memory().runtime_paths()
+        return status
 
     def save_autoejection_config(self, payload: dict[str, Any]) -> dict[str, Any]:
         config = self.autoejection_memory().save_from_payload(payload, self.config.autoejection)
-        return config.status_payload()
+        status = config.status_payload()
+        status["runtime_paths"] = self.autoejection_memory().runtime_paths()
+        return status
+
+    def bed_clear_status(self) -> dict[str, Any]:
+        return self.bed_clear_memory().load()
+
+    def save_bed_clear_evidence(self, payload: dict[str, Any]) -> dict[str, Any]:
+        profile, _reason = self.fleet_selection()
+        return self.bed_clear_memory().save_from_payload(payload, printer_profile_id=profile.profile_id)
+
+    def _corexy_autoejection_family_blocker(
+        self,
+        profile: PrinterProfile,
+        selected_printer: dict[str, Any],
+        *,
+        tool: str,
+    ) -> dict[str, Any] | None:
+        family = str(profile.capabilities.get("model_family") or "").strip().lower()
+        label = str(profile.label or "").strip().lower()
+        profile_id = str(profile.profile_id or "").strip().lower()
+        family_hint = " ".join(part for part in (family, label, profile_id) if part)
+        is_a1_family = any(token in family_hint for token in ("a1", "bed_slinger", "bed-slinger"))
+        if not is_a1_family:
+            return None
+        return {
+            "ok": False,
+            "tool": tool,
+            "provider": profile.provider,
+            "selected_printer": selected_printer,
+            "status": "blocked",
+            "failure_code": "BAMBU_AUTOEJECTION_MODEL_FAMILY_UNSUPPORTED",
+            "blockers": ["BAMBU_AUTOEJECTION_MODEL_FAMILY_UNSUPPORTED"],
+            "message": (
+                "Bambu A1/A1 Mini bed-slinger autoejection needs a separate Y-axis/wiggle generator; "
+                "the CoreXY X-lane Bambu tail was not generated."
+            ),
+            "model_family": family or "inferred_a1_family",
+            "will_publish": False,
+            "start_enabled": False,
+        }
+
+    def patch_bambu_autoejection_artifact(
+        self,
+        *,
+        source_path: str | Path,
+        specimen_id: str = "",
+        position: str = "",
+        plate_id: int = 1,
+        loop_index: int = 1,
+        run_id: str = "",
+        validate_only: bool = False,
+    ) -> dict[str, Any]:
+        """Patch or validate a Bambu sliced artifact with native G-code autoejection, without publishing."""
+        profile, reason = self.fleet_selection()
+        selected_printer = self._selected_printer_payload(profile, reason)
+        if profile.provider != "bambulab_x2d":
+            return {
+                "ok": False,
+                "tool": "printer.bambu.autoejection_patch",
+                "provider": profile.provider,
+                "selected_printer": selected_printer,
+                "status": "blocked",
+                "failure_code": "BAMBU_AUTOEJECTION_PATCH_NOT_APPLICABLE",
+                "blockers": ["BAMBU_AUTOEJECTION_PATCH_NOT_APPLICABLE"],
+                "will_publish": False,
+                "start_enabled": False,
+            }
+        family_blocker = self._corexy_autoejection_family_blocker(
+            profile,
+            selected_printer,
+            tool="printer.bambu.autoejection_patch",
+        )
+        if family_blocker:
+            return family_blocker
+        config = self.autoejection_config()
+        autoejection = config.status_payload()
+        if not autoejection.get("can_run_test") or not autoejection.get("native_gcode_patch"):
+            return {
+                "ok": False,
+                "tool": "printer.bambu.autoejection_patch",
+                "provider": profile.provider,
+                "selected_printer": selected_printer,
+                "status": "blocked",
+                "failure_code": "BAMBU_NATIVE_GCODE_AUTOEJECTION_NOT_CONFIGURED",
+                "blockers": [*list(autoejection.get("blockers", [])), "BAMBU_NATIVE_GCODE_AUTOEJECTION_NOT_CONFIGURED"],
+                "autoejection": autoejection,
+                "will_publish": False,
+                "start_enabled": False,
+            }
+        native_params = config.native_gcode_parameters()
+        effective_position = str(position or native_params.get("push_direction") or "center")
+        patcher = BambuGcodeAutoejectionPatcher(
+            output_dir=self.repo_root / "artifacts" / "bambu_autoejection",
+            z_push_offset_mm=float(native_params.get("z_push_offset_mm") or 30.0),
+            push_lane_offset_mm=float(native_params.get("push_lane_offset_mm") or 30.0),
+            sweep_feedrate_mm_min=int(native_params.get("push_speed_mm_min") or 300),
+            enable_full_bed_sweep=bool(native_params.get("enable_full_bed_sweep")),
+            sweep_z_mm=float(native_params.get("sweep_z_mm") or 1.0),
+            full_bed_sweep_feedrate_mm_min=int(native_params.get("sweep_speed_mm_min") or 300),
+        )
+        if validate_only:
+            result = patcher.validate_artifact(
+                source_path=source_path,
+                specimen_id=specimen_id,
+                position=effective_position,
+                plate_id=plate_id,
+                loop_index=loop_index,
+            )
+        else:
+            result = patcher.patch_artifact(
+                source_path=source_path,
+                specimen_id=specimen_id,
+                position=effective_position,
+                plate_id=plate_id,
+                loop_index=loop_index,
+            )
+        payload = {
+            **result,
+            "provider": profile.provider,
+            "selected_printer": selected_printer,
+            "autoejection": autoejection,
+            "handoff_required": False,
+            "validate_only": bool(validate_only),
+            "will_publish": False,
+            "start_enabled": False,
+            "workspace_manifest_path": "",
+        }
+        if not validate_only:
+            workspace_manifest = self._write_bambu_workspace_manifest(run_id=run_id, payload=payload)
+            if workspace_manifest:
+                payload["workspace_manifest_path"] = workspace_manifest
+        return payload
+
+    def _write_bambu_workspace_manifest(self, *, run_id: str, payload: dict[str, Any]) -> str:
+        safe_run = "".join(ch if ch.isalnum() or ch in {"-", "_", "."} else "-" for ch in str(run_id or "").strip()).strip(".-")
+        if not safe_run:
+            return ""
+        manifest_dir = self.repo_root / "runs" / safe_run / "workspace" / "printer"
+        manifest_dir.mkdir(parents=True, exist_ok=True)
+        manifest_path = manifest_dir / "bambu_autoejection_manifest.json"
+        manifest_payload = {
+            **payload,
+            "schema": "bambu_autoejection_workspace_manifest.v1",
+            "artifact_manifest_schema": payload.get("schema", ""),
+            "run_id": safe_run,
+            "sidecar_manifest_path": payload.get("manifest_path", ""),
+            "manifest_created_at": _utc_now(),
+        }
+        manifest_path.write_text(json.dumps(manifest_payload, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+        return str(manifest_path)
+
+    def build_standalone_bambu_autoejection_artifact(
+        self,
+        *,
+        specimen_id: str = "standalone-ejection-test",
+        position: str = "center",
+        object_size_mm: list[float] | None = None,
+    ) -> dict[str, Any]:
+        """Build a standalone Bambu ejection validation artifact without publishing."""
+        profile, reason = self.fleet_selection()
+        selected_printer = self._selected_printer_payload(profile, reason)
+        if profile.provider != "bambulab_x2d":
+            return {
+                "ok": False,
+                "tool": "printer.bambu.autoejection_standalone",
+                "provider": profile.provider,
+                "selected_printer": selected_printer,
+                "status": "blocked",
+                "failure_code": "BAMBU_AUTOEJECTION_STANDALONE_NOT_APPLICABLE",
+                "blockers": ["BAMBU_AUTOEJECTION_STANDALONE_NOT_APPLICABLE"],
+                "will_publish": False,
+                "start_enabled": False,
+            }
+        family_blocker = self._corexy_autoejection_family_blocker(
+            profile,
+            selected_printer,
+            tool="printer.bambu.autoejection_standalone",
+        )
+        if family_blocker:
+            return family_blocker
+        config = self.autoejection_config()
+        autoejection = config.status_payload()
+        if not autoejection.get("can_run_test") or not autoejection.get("native_gcode_patch"):
+            return {
+                "ok": False,
+                "tool": "printer.bambu.autoejection_standalone",
+                "provider": profile.provider,
+                "selected_printer": selected_printer,
+                "status": "blocked",
+                "failure_code": "BAMBU_NATIVE_GCODE_AUTOEJECTION_NOT_CONFIGURED",
+                "blockers": [*list(autoejection.get("blockers", [])), "BAMBU_NATIVE_GCODE_AUTOEJECTION_NOT_CONFIGURED"],
+                "autoejection": autoejection,
+                "will_publish": False,
+                "start_enabled": False,
+            }
+        native_params = config.native_gcode_parameters()
+        effective_position = str(position or native_params.get("push_direction") or "center")
+        patcher = BambuGcodeAutoejectionPatcher(
+            output_dir=self.repo_root / "artifacts" / "bambu_autoejection",
+            z_push_offset_mm=float(native_params.get("z_push_offset_mm") or 30.0),
+            push_lane_offset_mm=float(native_params.get("push_lane_offset_mm") or 30.0),
+            sweep_feedrate_mm_min=int(native_params.get("push_speed_mm_min") or 300),
+            enable_full_bed_sweep=bool(native_params.get("enable_full_bed_sweep")),
+            sweep_z_mm=float(native_params.get("sweep_z_mm") or 1.0),
+            full_bed_sweep_feedrate_mm_min=int(native_params.get("sweep_speed_mm_min") or 300),
+        )
+        result = patcher.build_standalone_ejection_artifact(
+            position=effective_position,
+            specimen_id=specimen_id,
+            object_size_mm=object_size_mm,
+        )
+        return {
+            **result,
+            "provider": profile.provider,
+            "selected_printer": selected_printer,
+            "autoejection": autoejection,
+            "handoff_required": False,
+            "will_publish": False,
+            "start_enabled": False,
+        }
+
+    def build_bambu_autoejection_sweep_test_artifact(
+        self,
+        *,
+        specimen_id: str = "sweep-test",
+    ) -> dict[str, Any]:
+        """Build a full-bed sweep validation artifact without publishing."""
+        profile, reason = self.fleet_selection()
+        selected_printer = self._selected_printer_payload(profile, reason)
+        if profile.provider != "bambulab_x2d":
+            return {
+                "ok": False,
+                "tool": "printer.bambu.autoejection_sweep_test",
+                "provider": profile.provider,
+                "selected_printer": selected_printer,
+                "status": "blocked",
+                "failure_code": "BAMBU_AUTOEJECTION_SWEEP_TEST_NOT_APPLICABLE",
+                "blockers": ["BAMBU_AUTOEJECTION_SWEEP_TEST_NOT_APPLICABLE"],
+                "will_publish": False,
+                "start_enabled": False,
+            }
+        family_blocker = self._corexy_autoejection_family_blocker(
+            profile,
+            selected_printer,
+            tool="printer.bambu.autoejection_sweep_test",
+        )
+        if family_blocker:
+            return family_blocker
+        config = self.autoejection_config()
+        autoejection = config.status_payload()
+        if not autoejection.get("can_run_test") or not autoejection.get("native_gcode_patch"):
+            return {
+                "ok": False,
+                "tool": "printer.bambu.autoejection_sweep_test",
+                "provider": profile.provider,
+                "selected_printer": selected_printer,
+                "status": "blocked",
+                "failure_code": "BAMBU_NATIVE_GCODE_AUTOEJECTION_NOT_CONFIGURED",
+                "blockers": [*list(autoejection.get("blockers", [])), "BAMBU_NATIVE_GCODE_AUTOEJECTION_NOT_CONFIGURED"],
+                "autoejection": autoejection,
+                "will_publish": False,
+                "start_enabled": False,
+            }
+        native_params = config.native_gcode_parameters()
+        patcher = BambuGcodeAutoejectionPatcher(
+            output_dir=self.repo_root / "artifacts" / "bambu_autoejection",
+            z_push_offset_mm=float(native_params.get("z_push_offset_mm") or 30.0),
+            push_lane_offset_mm=float(native_params.get("push_lane_offset_mm") or 30.0),
+            sweep_feedrate_mm_min=int(native_params.get("push_speed_mm_min") or 300),
+            enable_full_bed_sweep=True,
+            sweep_z_mm=float(native_params.get("sweep_z_mm") or 1.0),
+            full_bed_sweep_feedrate_mm_min=int(native_params.get("sweep_speed_mm_min") or 300),
+        )
+        result = patcher.build_sweep_test_artifact(specimen_id=specimen_id)
+        return {
+            **result,
+            "provider": profile.provider,
+            "selected_printer": selected_printer,
+            "autoejection": autoejection,
+            "handoff_required": False,
+            "will_publish": False,
+            "start_enabled": False,
+        }
 
     def prepare(self, payload: dict[str, Any]) -> dict[str, Any]:
         normalized = dict(payload or {})
@@ -1992,13 +2970,16 @@ class PrinterDeviceBridgeManager:
             self.config.mqtt.timeout_sec,
         )
         if mqtt_probe.get("ok"):
-            mqtt_snapshot = self.mqtt_client.read_snapshot(
-                host=str(connection["host"]),
-                serial=str(connection["serial"]),
-                username=str(connection.get("username") or self.config.mqtt.username),
-                access_code=str(raw_auth.get("access_code") or ""),
-                timeout_sec=self.config.mqtt.timeout_sec,
-            )
+            mqtt_snapshot_kwargs = {
+                "host": str(connection["host"]),
+                "serial": str(connection["serial"]),
+                "username": str(connection.get("username") or self.config.mqtt.username),
+                "access_code": str(raw_auth.get("access_code") or ""),
+                "timeout_sec": self.config.mqtt.timeout_sec,
+            }
+            if payload.get("post_publish_observation") or payload.get("force_mqtt_refresh"):
+                mqtt_snapshot_kwargs["force_refresh"] = True
+            mqtt_snapshot = self.mqtt_client.read_snapshot(**mqtt_snapshot_kwargs)
         else:
             mqtt_snapshot = {"ok": False, "failure_code": mqtt_probe.get("failure_code", "BAMBU_MQTT_UNAVAILABLE")}
         mqtt_state = "connected" if mqtt_snapshot.get("ok") else "disconnected"
@@ -2059,7 +3040,16 @@ class PrinterDeviceBridgeManager:
         upload_result: dict[str, Any] = {}
         artifact_path = self._bambu_sliced_artifact_path(payload)
         artifact_url = self._bambu_artifact_url(payload)
+        print_payload = payload.get("print") if isinstance(payload.get("print"), dict) else {}
+        plate_id = payload.get("plate_id") or print_payload.get("plate_id") or 1
+        artifact_plate_validation: dict[str, Any] = {}
         wants_upload = self._wants_bambu_upload(payload)
+        if artifact_path and not health_only:
+            artifact_plate_validation = validate_bambu_project_file_local_artifact(artifact_path, plate_id=plate_id)
+            if not artifact_plate_validation.get("ok"):
+                gate_ready = False
+                gate_state = "blocked"
+                failure_code = str(artifact_plate_validation.get("failure_code") or "BAMBU_PROJECT_FILE_PARAM_MISMATCH")
         if gate_ready and artifact_path and not health_only:
             upload_result = self.ftps_client.upload_file(
                 local_path=artifact_path,
@@ -2082,12 +3072,26 @@ class PrinterDeviceBridgeManager:
             gate_ready = False
             gate_state = "blocked"
             failure_code = "BAMBU_SLICED_ARTIFACT_REQUIRED"
-        project_file_draft = self._bambu_project_file_draft(
-            connection=connection,
-            payload=payload,
-            upload_result=upload_result,
-            artifact_url=artifact_url,
-        )
+        if artifact_plate_validation and not artifact_plate_validation.get("ok"):
+            project_file_draft = {
+                **artifact_plate_validation,
+                "schema": "bambu_project_file_command_draft.v1",
+                "topic": "",
+                "payload": {},
+                "requires_guardian": True,
+                "guard_reason": "local_artifact_plate_validation_failed",
+            }
+        else:
+            project_file_draft = self._bambu_project_file_draft(
+                connection=connection,
+                payload=payload,
+                upload_result=upload_result,
+                artifact_url=artifact_url,
+            )
+            if artifact_url and not project_file_draft.get("ok"):
+                gate_ready = False
+                gate_state = "blocked"
+                failure_code = str(project_file_draft.get("failure_code") or failure_code or "BAMBU_PROJECT_FILE_DRAFT_INVALID")
         http_artifact_ready = bool(
             mqtt_snapshot.get("ok")
             and artifact_url
@@ -2121,6 +3125,7 @@ class PrinterDeviceBridgeManager:
                 "mqtt_snapshot": {k: v for k, v in mqtt_snapshot.items() if k != "report"},
                 "ftps_probe": ftps_probe,
                 "upload": upload_result,
+                "artifact_plate_validation": artifact_plate_validation,
                 "project_file_draft": project_file_draft,
                 "operator_actions": self._bambu_operator_actions(
                     connection=connection,
@@ -2229,7 +3234,7 @@ class PrinterDeviceBridgeManager:
             serial=str(connection.get("serial") or ""),
             remote_path=remote_path,
             subtask_name=str(payload.get("specimen_id") or print_payload.get("subtask_name") or ""),
-            plate_id=int(payload.get("plate_id") or print_payload.get("plate_id") or 1),
+            plate_id=payload.get("plate_id") or print_payload.get("plate_id") or 1,
             use_ams=_as_bool(payload.get("use_ams", print_payload.get("use_ams")), False),
             ams_mapping=payload.get("ams_mapping") if isinstance(payload.get("ams_mapping"), list) else print_payload.get("ams_mapping"),
             timelapse=_as_bool(payload.get("timelapse", print_payload.get("timelapse")), False),
@@ -2312,6 +3317,39 @@ class PrinterDeviceBridgeManager:
                     "code": "BAMBU_FTPS_WRITE_FAILED",
                     "severity": "blocking",
                     "message": "FTPS login/read succeeded but marker upload failed; verify Developer Mode, writeable target path, or Bambu Connect route.",
+                }
+            )
+        elif failure_code == "BAMBU_FTPS_TOO_MANY_CONNECTIONS":
+            actions.append(
+                {
+                    "code": "BAMBU_FTPS_TOO_MANY_CONNECTIONS",
+                    "severity": "blocking",
+                    "message": "The Bambu FTPS endpoint reports too many active sessions; close Bambu Studio/FTP clients or wait for stale sessions before retrying.",
+                }
+            )
+        elif http_artifact_ready and not ftps_probe.get("ok"):
+            ftps_code = str(ftps_probe.get("failure_code") or "BAMBU_FTPS_NOT_UPLOAD_READY")
+            actions.append(
+                {
+                    "code": "BAMBU_HTTP_ARTIFACT_ROUTE_ACTIVE",
+                    "severity": "warning",
+                    "message": "FTPS upload is not writable, so the prepared Bambu command uses a printer-reachable HTTP artifact URL.",
+                }
+            )
+            if ftps_code == "BAMBU_FTPS_TOO_MANY_CONNECTIONS":
+                actions.append(
+                    {
+                        "code": "BAMBU_FTPS_TOO_MANY_CONNECTIONS",
+                        "severity": "warning",
+                        "message": "FTPS still reports too many active sessions; HTTP artifact routing is active for this start path.",
+                    }
+                )
+        elif failure_code == "BAMBU_PROJECT_FILE_PARAM_MISMATCH":
+            actions.append(
+                {
+                    "code": "BAMBU_PROJECT_FILE_PARAM_MISMATCH",
+                    "severity": "blocking",
+                    "message": "The selected .gcode.3mf does not match the requested Metadata/plate_#.gcode path; reslice or select the correct plate.",
                 }
             )
         elif ftps_probe.get("read_ok") and not ftps_probe.get("ok") and not http_artifact_ready:

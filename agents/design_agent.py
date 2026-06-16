@@ -51,7 +51,7 @@ class DesignAgent(BaseAgent):
     )
 
     DEFAULT_CONSTRAINTS: dict[str, Any] = {
-        "printer_model": "Prusa MK4S",
+        "printer_model": "Bambu Lab X2D",
         "material": "PLA",
         "max_specimen_size_mm": [30.0, 30.0, 30.0],
         "utm_fixture_limit_mm": [40.0, 40.0, 60.0],
@@ -171,6 +171,10 @@ class DesignAgent(BaseAgent):
                 "validation_warnings": self._candidate_warnings(selected, constraints)
                 + [self._rejection_summary(item) for item in rejected[:3]],
             }
+        )
+        selected["bambu_autoejection_readiness"] = self._bambu_autoejection_design_readiness(
+            candidate=selected,
+            constraints=constraints,
         )
         self._attach_candidate_preview_artifacts(state=state, ctx=ctx, pool=pool, constraints=constraints)
         design_report = self._design_report(
@@ -579,6 +583,55 @@ class DesignAgent(BaseAgent):
         if str(candidate["geometry_type"]) == "random_voronoi":
             warnings.append("random_voronoi has higher disconnected-component risk")
         return warnings
+
+    def _bambu_autoejection_design_readiness(
+        self,
+        *,
+        candidate: dict[str, Any],
+        constraints: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Record design-side ejection assumptions before the printer bridge patches G-code."""
+        size = self._vector3(candidate.get("specimen_size_mm"), [30.0, 30.0, 30.0])
+        rel_density = self._numeric(candidate.get("relative_density"), 0.32)
+        has_bottom_cap = bool(candidate.get("bottom_cap_enabled", candidate.get("top_bottom_cap", False)))
+        skirt_enabled = bool(candidate.get("skirt_enabled", constraints.get("skirt_enabled", False)))
+        brim_enabled = bool(candidate.get("brim_enabled", constraints.get("brim_enabled", False)))
+        raft_enabled = bool(candidate.get("raft_enabled", constraints.get("raft_enabled", False)))
+        min_push_height = 5.0
+        full_face_area = max(float(size[0]) * float(size[1]), 1e-6)
+        bed_contact_area = full_face_area * (1.0 if has_bottom_cap else max(rel_density, 0.05))
+        bed_contact_ratio = self._clamp(bed_contact_area / full_face_area, 0.0, 1.0)
+        blockers: list[str] = []
+        if float(size[2]) < min_push_height:
+            blockers.append("BAMBU_AUTOEJECTION_OBJECT_TOO_LOW")
+        if any((skirt_enabled, brim_enabled, raft_enabled)):
+            blockers.append("BAMBU_AUTOEJECTION_RESIDUAL_PRIME_OR_SKIRT_RISK")
+        if bed_contact_ratio > 0.95 and not has_bottom_cap:
+            blockers.append("BAMBU_AUTOEJECTION_BED_CONTACT_AREA_UNCERTAIN")
+        printer_label = f"{constraints.get('printer_model', '')} {candidate.get('printer_profile', '')}".lower()
+        return {
+            "schema": "bambu_autoejection_design_readiness.v1",
+            "status": "ready" if not blockers else "blocked",
+            "applicable_printer": "bambu" in printer_label,
+            "ejection_contact_edge": "front",
+            "bed_contact_area_mm2": round(bed_contact_area, 3),
+            "bed_contact_area_ratio": round(bed_contact_ratio, 4),
+            "bed_contact_area_basis": "bottom_cap_full_face" if has_bottom_cap else "relative_density_projected_area",
+            "minimum_pushable_height_mm": min_push_height,
+            "object_height_mm": round(float(size[2]), 3),
+            "pushable_edge_height_mm": round(float(size[2]), 3),
+            "pushable_height_ok": float(size[2]) >= min_push_height,
+            "skirt_brim_raft_policy": {
+                "skirt_enabled": skirt_enabled,
+                "brim_enabled": brim_enabled,
+                "raft_enabled": raft_enabled,
+            },
+            "blockers": blockers,
+            "notes": [
+                "Printer bridge must re-validate object bounds after slicing.",
+                "Bambu autoejection live publish still requires camera, bed-clear, Guardian, and operator checklist gates.",
+            ],
+        }
 
     def _prior_results_summary(self, ctx: AgentContext | Any) -> dict[str, Any]:
         db = getattr(ctx, "experiment_db", None)
@@ -1254,6 +1307,7 @@ class DesignAgent(BaseAgent):
                 "max_bridge_distance_mm": constraints.get("fdm_max_bridge_distance_mm"),
                 "warnings": manufacturability.get("warnings", []),
             },
+            "bambu_autoejection_readiness": selected.get("bambu_autoejection_readiness", {}),
             "material_notes": {
                 "material": selected.get("material"),
                 "printer_profile": selected.get("printer_profile"),
@@ -1431,6 +1485,7 @@ class DesignAgent(BaseAgent):
                 "expected_print_time_min": selected.get("expected_print_time_min"),
                 "expected_mass_g": selected.get("expected_mass_g"),
                 "warnings": self._candidate_warnings(selected, constraints),
+                "bambu_autoejection_readiness": selected.get("bambu_autoejection_readiness", {}),
             },
             "decision_register": decision_register,
             "handoff_to_specimen": {

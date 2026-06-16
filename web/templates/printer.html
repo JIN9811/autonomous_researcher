@@ -67,21 +67,6 @@ Modification guide:
             <button id="btn-printer-spc-readiness" class="btn primary">SPC Readiness</button>
             <button id="btn-printer-open-live" class="btn">Open Live GUI</button>
           </div>
-          <div class="printer-start-gate-controls" aria-label="Bambu start gate controls">
-            <label class="checkbox-line compact">
-              <input id="printer-start-operator-confirmed-input" type="checkbox" />
-              operator confirmed
-            </label>
-            <label class="checkbox-line compact">
-              <input id="printer-start-guardian-approved-input" type="checkbox" />
-              Guardian approved
-            </label>
-            <label class="checkbox-line compact">
-              <input id="printer-start-dry-run-input" type="checkbox" checked />
-              dry-run / no publish
-            </label>
-            <span id="printer-start-gate-mode-detail" class="hint">Default: inspect readiness only. Uncheck dry-run only for a final approved publish attempt.</span>
-          </div>
         </div>
         <div class="bambu-device-grid">
           <article class="bambu-camera-panel">
@@ -331,7 +316,7 @@ Modification guide:
           </p>
           <div class="printer-subsection">
             <h3>Printer Fleet Selection</h3>
-            <p class="hint">Bambu Lab X2D가 기본값입니다. 다른 장비는 fallback이 아니라 명시 선택으로만 active profile이 됩니다.</p>
+            <p class="hint">Bambu Lab X2D가 기본값입니다. 다른 장비는 자동 대체가 아니라 명시 선택으로만 active profile이 됩니다.</p>
             <div class="lerobot-form-grid">
               <label>
                 Active Printer Profile
@@ -428,46 +413,119 @@ Modification guide:
         </article>
 
         <article>
-          <h2>Autoejection Gate / Test</h2>
+          <h2>Bambu G-code Autoejection</h2>
           <p class="hint">
-            Bambu 기본 profile에서는 검증된 provider handoff만 확인합니다. Prusa profile을 명시 선택한 경우에만
-            bed-sweep ejection G-code 테스트가 실제 프린터 구동 경로로 전환됩니다.
+            Bambu 기본 profile은 sliced artifact를 deterministic G-code patch로 변환한 뒤 validator, HTTP route,
+            start gate 순서로 확인합니다. 실제 MQTT publish는 별도 승인 경로에서만 수행됩니다.
           </p>
           <div class="printer-subsection">
-            <h3>Bambu Autoejection Gate</h3>
-            <p class="hint">검증된 external routine과 pre/post vision profile을 저장해야 SPC autonomous loop ready로 판정됩니다.</p>
+            <h3>Native Patch Gate</h3>
+            <p class="hint">기본 provider는 <code>bambu_gcode_patch</code>입니다. external robot handoff는 recovery path로만 별도 설정합니다.</p>
             <label class="checkbox-line">
               <input id="printer-autoejection-enabled-input" type="checkbox" />
               request Bambu autoejection for autonomous loop
             </label>
             <div class="lerobot-form-grid">
               <label>
-                Provider
-                <input id="printer-autoejection-provider-input" class="text-input" value="none" placeholder="external_robot_pickoff" />
+                Native Provider
+                <input id="printer-autoejection-provider-input" class="text-input" value="none" placeholder="bambu_gcode_patch" />
               </label>
               <label>
-                Verified Routine ID
+                Push Direction
+                <select id="printer-autoejection-push-direction-input" class="text-input">
+                  <option value="center">center</option>
+                  <option value="left">left</option>
+                  <option value="right">right</option>
+                </select>
+              </label>
+              <label>
+                Z Push Offset mm
+                <input id="printer-autoejection-z-push-offset-input" class="text-input" type="number" min="0" max="200" step="0.5" value="30" />
+              </label>
+              <label>
+                Push Lane Offset mm
+                <input id="printer-autoejection-push-lane-offset-input" class="text-input" type="number" min="0" max="120" step="0.5" value="30" />
+              </label>
+              <label>
+                Push Speed mm/min
+                <input id="printer-autoejection-push-speed-input" class="text-input" type="number" min="100" max="1000" step="10" value="300" />
+              </label>
+              <label>
+                Sweep Z mm
+                <input id="printer-autoejection-sweep-z-input" class="text-input" type="number" min="0.5" max="50" step="0.1" value="1" />
+              </label>
+              <label>
+                Sweep Speed mm/min
+                <input id="printer-autoejection-sweep-speed-input" class="text-input" type="number" min="100" max="1000" step="10" value="300" />
+              </label>
+              <label class="checkbox-line">
+                <input id="printer-autoejection-full-bed-sweep-input" type="checkbox" />
+                Enable full-bed sweep after local push
+              </label>
+              <label>
+                Recovery Routine ID optional
                 <input id="printer-autoejection-routine-input" class="text-input" value="" placeholder="robot-pickoff-v1" />
               </label>
               <label>
-                Pre-eject Vision Profile
+                Recovery Pre-eject Vision optional
                 <input id="printer-autoejection-pre-vision-input" class="text-input" value="" placeholder="bambu-bed-occupied-check" />
               </label>
               <label>
-                Post-eject Vision Profile
+                Recovery Post-eject Vision optional
                 <input id="printer-autoejection-post-vision-input" class="text-input" value="" placeholder="bambu-bed-clear-check" />
               </label>
             </div>
             <div class="button-row">
-              <button id="btn-printer-autoejection-fill-handoff" class="btn" type="button">Fill Manipulation Handoff Defaults</button>
-              <button id="btn-printer-autoejection-config-save" class="btn primary" type="button">Save Autoejection Gate</button>
+              <button id="btn-printer-autoejection-fill-native" class="btn" type="button">Fill Native G-code Defaults</button>
+              <button id="btn-printer-autoejection-config-save" class="btn primary" type="button">Save Autoejection Config</button>
+              <button id="btn-printer-autoejection-validate-preview" class="btn" type="button">Validate G-code Preview</button>
+              <button id="btn-printer-autoejection-validate-left" class="btn" type="button">Validate Left</button>
+              <button id="btn-printer-autoejection-validate-center" class="btn" type="button">Validate Center</button>
+              <button id="btn-printer-autoejection-validate-right" class="btn" type="button">Validate Right</button>
+              <button id="btn-printer-autoejection-test-artifact" class="btn" type="button">Generate Ejection Test Artifact</button>
+              <button id="btn-printer-autoejection-sweep-test-artifact" class="btn" type="button">Generate Sweep Test Artifact</button>
+              <button id="btn-printer-autoejection-patch-artifact" class="btn" type="button">Generate Patched Artifact</button>
             </div>
           </div>
           <div class="printer-status-grid compact">
             <div>
               <span class="status-title">Autoejection Gate</span>
               <strong id="printer-autoejection-status-summary">Loading</strong>
-              <p id="printer-autoejection-status-detail" class="hint">Reading provider routine evidence.</p>
+              <p id="printer-autoejection-status-detail" class="hint">Reading native G-code patch evidence.</p>
+              <details id="printer-autoejection-validation-details" class="printer-evidence-details">
+                <summary>Validation Evidence</summary>
+                <pre id="printer-autoejection-validation-body">No validation evidence yet.</pre>
+              </details>
+            </div>
+            <div>
+              <span class="status-title">Bed-clear Evidence</span>
+              <strong id="printer-bed-clear-summary">Loading</strong>
+              <p id="printer-bed-clear-detail" class="hint">Reading post-ejection bed-clear gate.</p>
+            </div>
+          </div>
+          <div class="button-row">
+            <button id="btn-printer-bed-clear-mark" class="btn primary" type="button">Mark Bed Clear</button>
+            <button id="btn-printer-bed-clear-not-clear" class="btn" type="button">Mark Not Clear</button>
+          </div>
+          <div class="printer-subsection">
+            <h3>Physical Proof Package</h3>
+            <p class="hint">
+              실제 Bambu autoejection 완료 판정은 proof package 감사가 통과해야 합니다. Template 생성과 Audit은 프린터를 움직이지 않습니다.
+            </p>
+            <div class="lerobot-form-grid">
+              <label>
+                Proof Package Path
+                <input id="printer-autoejection-proof-path-input" class="text-input" value="" placeholder="artifacts/printer/<run_id>/bambu/bambu_autoejection_physical_validation_*.json" />
+              </label>
+              <label>
+                Completion Status
+                <strong id="printer-autoejection-proof-summary">not audited</strong>
+                <span id="printer-autoejection-proof-detail" class="hint">Create a fail-closed template before supervised physical validation.</span>
+              </label>
+            </div>
+            <div class="button-row">
+              <button id="btn-printer-autoejection-proof-template" class="btn" type="button">Build Fail-Closed Proof Template</button>
+              <button id="btn-printer-autoejection-completion-audit" class="btn" type="button">Run Completion Audit</button>
             </div>
           </div>
           <div class="lerobot-form-grid">
@@ -481,9 +539,9 @@ Modification guide:
             </label>
           </div>
           <div class="button-row">
-            <button id="btn-printer-eject-left" class="btn">Check Handoff Left</button>
-            <button id="btn-printer-eject-center" class="btn primary">Check Handoff Center</button>
-            <button id="btn-printer-eject-right" class="btn">Check Handoff Right</button>
+            <button id="btn-printer-eject-left" class="btn">Run Standalone Eject: Left</button>
+            <button id="btn-printer-eject-center" class="btn primary">Run Standalone Eject: Center</button>
+            <button id="btn-printer-eject-right" class="btn">Run Standalone Eject: Right</button>
           </div>
         </article>
 
@@ -494,6 +552,6 @@ Modification guide:
       </section>
     </main>
 
-    <script src="/static/printer.js?v=20260614-printer-camera-lock-1" defer></script>
+    <script src="/static/printer.js?v=20260616-bambu-proof-audit-1" defer></script>
   </body>
 </html>

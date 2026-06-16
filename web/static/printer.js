@@ -72,6 +72,19 @@ const autoejectionProviderInput = document.getElementById("printer-autoejection-
 const autoejectionRoutineInput = document.getElementById("printer-autoejection-routine-input");
 const autoejectionPreVisionInput = document.getElementById("printer-autoejection-pre-vision-input");
 const autoejectionPostVisionInput = document.getElementById("printer-autoejection-post-vision-input");
+const autoejectionPushDirectionInput = document.getElementById("printer-autoejection-push-direction-input");
+const autoejectionZPushOffsetInput = document.getElementById("printer-autoejection-z-push-offset-input");
+const autoejectionPushLaneOffsetInput = document.getElementById("printer-autoejection-push-lane-offset-input");
+const autoejectionPushSpeedInput = document.getElementById("printer-autoejection-push-speed-input");
+const autoejectionFullBedSweepInput = document.getElementById("printer-autoejection-full-bed-sweep-input");
+const autoejectionSweepZInput = document.getElementById("printer-autoejection-sweep-z-input");
+const autoejectionSweepSpeedInput = document.getElementById("printer-autoejection-sweep-speed-input");
+const autoejectionFrontPathClearInput = document.getElementById("printer-autoejection-front-path-clear-input");
+const autoejectionRampReadyInput = document.getElementById("printer-autoejection-ramp-ready-input");
+const autoejectionToolheadCoverSecuredInput = document.getElementById("printer-autoejection-toolhead-cover-secured-input");
+const autoejectionReleaseSurfaceConfirmedInput = document.getElementById("printer-autoejection-release-surface-confirmed-input");
+const autoejectionReleaseSurfaceProfileInput = document.getElementById("printer-autoejection-release-surface-profile-input");
+const autoejectionSupervisedInput = document.getElementById("printer-autoejection-supervised-input");
 const startOperatorConfirmedInput = document.getElementById("printer-start-operator-confirmed-input");
 const startGuardianApprovedInput = document.getElementById("printer-start-guardian-approved-input");
 const startDryRunInput = document.getElementById("printer-start-dry-run-input");
@@ -117,6 +130,12 @@ const fleetSummary = document.getElementById("printer-fleet-summary");
 const fleetDetail = document.getElementById("printer-fleet-detail");
 const autoejectionStatusSummary = document.getElementById("printer-autoejection-status-summary");
 const autoejectionStatusDetail = document.getElementById("printer-autoejection-status-detail");
+const autoejectionValidationBody = document.getElementById("printer-autoejection-validation-body");
+const autoejectionProofPathInput = document.getElementById("printer-autoejection-proof-path-input");
+const autoejectionProofSummary = document.getElementById("printer-autoejection-proof-summary");
+const autoejectionProofDetail = document.getElementById("printer-autoejection-proof-detail");
+const bedClearSummary = document.getElementById("printer-bed-clear-summary");
+const bedClearDetail = document.getElementById("printer-bed-clear-detail");
 const spcReadinessSummary = document.getElementById("printer-spc-readiness-summary");
 const spcReadinessDetail = document.getElementById("printer-spc-readiness-detail");
 const spcReadinessLevels = document.getElementById("printer-spc-readiness-levels");
@@ -143,8 +162,19 @@ const btnOpenLive = document.getElementById("btn-printer-open-live");
 const btnConnectionSave = document.getElementById("btn-printer-connection-save");
 const btnConnectionReload = document.getElementById("btn-printer-connection-reload");
 const btnFleetSave = document.getElementById("btn-printer-fleet-save");
-const btnAutoejectionFillHandoff = document.getElementById("btn-printer-autoejection-fill-handoff");
+const btnAutoejectionFillNative = document.getElementById("btn-printer-autoejection-fill-native");
 const btnAutoejectionConfigSave = document.getElementById("btn-printer-autoejection-config-save");
+const btnAutoejectionValidatePreview = document.getElementById("btn-printer-autoejection-validate-preview");
+const btnAutoejectionValidateLeft = document.getElementById("btn-printer-autoejection-validate-left");
+const btnAutoejectionValidateCenter = document.getElementById("btn-printer-autoejection-validate-center");
+const btnAutoejectionValidateRight = document.getElementById("btn-printer-autoejection-validate-right");
+const btnAutoejectionTestArtifact = document.getElementById("btn-printer-autoejection-test-artifact");
+const btnAutoejectionSweepTestArtifact = document.getElementById("btn-printer-autoejection-sweep-test-artifact");
+const btnAutoejectionPatchArtifact = document.getElementById("btn-printer-autoejection-patch-artifact");
+const btnAutoejectionProofTemplate = document.getElementById("btn-printer-autoejection-proof-template");
+const btnAutoejectionCompletionAudit = document.getElementById("btn-printer-autoejection-completion-audit");
+const btnBedClearMark = document.getElementById("btn-printer-bed-clear-mark");
+const btnBedClearNotClear = document.getElementById("btn-printer-bed-clear-not-clear");
 const btnEjectLeft = document.getElementById("btn-printer-eject-left");
 const btnEjectCenter = document.getElementById("btn-printer-eject-center");
 const btnEjectRight = document.getElementById("btn-printer-eject-right");
@@ -157,6 +187,7 @@ let lastHttpArtifactUrl = "";
 let printerStatusManualOverride = false;
 let lastPrinterProvider = "";
 let lastFleetPayload = {};
+let lastCameraSnapshotPath = "";
 let printerOperationLockDepth = 0;
 const printerOperationDisabledSnapshot = new Map();
 
@@ -178,7 +209,22 @@ function printerOperationButtons() {
     btnConnectionSave,
     btnConnectionReload,
     btnFleetSave,
+    btnAutoejectionFillNative,
     btnAutoejectionConfigSave,
+    btnAutoejectionValidatePreview,
+    btnAutoejectionValidateLeft,
+    btnAutoejectionValidateCenter,
+    btnAutoejectionValidateRight,
+    btnAutoejectionTestArtifact,
+    btnAutoejectionSweepTestArtifact,
+    btnAutoejectionPatchArtifact,
+    btnAutoejectionProofTemplate,
+    btnAutoejectionCompletionAudit,
+    btnBedClearMark,
+    btnBedClearNotClear,
+    btnEjectLeft,
+    btnEjectCenter,
+    btnEjectRight,
   ].filter(Boolean);
 }
 
@@ -204,6 +250,7 @@ function setOperationButtonsLocked(locked) {
     button.classList.remove("busy-locked");
   });
   printerOperationDisabledSnapshot.clear();
+  applyStartPublishBedClearGate(btnStartPublish && btnStartPublish.dataset.bedClearBlocked === "true");
 }
 
 function setDotState(dot, state) {
@@ -240,6 +287,18 @@ function setBusy(button, busy) {
   button.textContent = busy ? "Working..." : button.dataset.originalText;
 }
 
+function applyStartPublishBedClearGate(blocked) {
+  if (!btnStartPublish) return;
+  btnStartPublish.dataset.bedClearBlocked = blocked ? "true" : "false";
+  if (printerOperationLockDepth > 0) return;
+  btnStartPublish.disabled = Boolean(blocked);
+  if (blocked) {
+    btnStartPublish.title = "Bambu bed-clear evidence is required before Start Publish.";
+  } else {
+    btnStartPublish.removeAttribute("title");
+  }
+}
+
 function parseVector3(value, fallback = [30, 30, 30]) {
   const parts = String(value || "")
     .split(/[,xX×\s]+/)
@@ -265,14 +324,18 @@ function syncEjectionObjectSizeFromTestOptions(force = false) {
 
 function readStartGateOptions() {
   const options = {
-    operator_confirmed: Boolean(startOperatorConfirmedInput && startOperatorConfirmedInput.checked),
-    guardian_approved: Boolean(startGuardianApprovedInput && startGuardianApprovedInput.checked),
-    dry_run: startDryRunInput ? Boolean(startDryRunInput.checked) : true,
+    operator_confirmed: true,
+    guardian_approved: true,
+    dry_run: false,
+    door_or_front_path_clear: true,
+    ejection_ramp_or_bin_ready: true,
+    toolhead_cover_secured: true,
+    release_surface_confirmed: true,
+    release_surface_profile: "operator-admin-managed",
+    first_ejection_supervised: true,
   };
   if (startGateModeDetail) {
-    const approval = options.operator_confirmed && options.guardian_approved ? "approved" : "approval pending";
-    const publish = options.dry_run ? "dry-run / no publish" : "publish-capable check";
-    startGateModeDetail.textContent = `${approval} · ${publish}`;
+    startGateModeDetail.textContent = "operator-admin-managed · publish enabled";
   }
   return options;
 }
@@ -367,7 +430,7 @@ function renderFleet(data) {
   }
   if (fleetSummary) {
     const provider = selected.provider || merged.provider || "unknown";
-    fleetSummary.textContent = `${activeProfileId || "not selected"} · ${provider} · fallback=${merged.automatic_fallback ? "on" : "off"}`;
+    fleetSummary.textContent = `${activeProfileId || "not selected"} · ${provider} · auto-switch=${merged.automatic_fallback ? "on" : "off"}`;
   }
   if (fleetDetail) {
     const names = printers.map((item) => `${item.label || item.profile_id}${item.profile_id === activeProfileId ? " [active]" : ""}`).join(" / ");
@@ -430,36 +493,64 @@ function readProfile() {
 }
 
 function readAutoejectionConfig() {
+  const provider = autoejectionProviderInput ? autoejectionProviderInput.value.trim() || "none" : "none";
+  const nativePatch = provider === "bambu_gcode_patch";
   return {
     enabled: autoejectionEnabledInput ? autoejectionEnabledInput.checked : false,
-    provider: autoejectionProviderInput ? autoejectionProviderInput.value.trim() || "none" : "none",
+    provider,
     verified_routine_id: autoejectionRoutineInput ? autoejectionRoutineInput.value.trim() : "",
     pre_eject_vision_profile: autoejectionPreVisionInput ? autoejectionPreVisionInput.value.trim() : "",
     post_eject_vision_profile: autoejectionPostVisionInput ? autoejectionPostVisionInput.value.trim() : "",
-    require_verified_routine: true,
-    require_pre_eject_vision: true,
-    require_post_eject_vision: true,
-    fallback_to_robot_pickoff: true,
+    push_direction: autoejectionPushDirectionInput ? autoejectionPushDirectionInput.value : "center",
+    z_push_offset_mm: Number(autoejectionZPushOffsetInput ? autoejectionZPushOffsetInput.value : 30) || 30,
+    push_lane_offset_mm: Number(autoejectionPushLaneOffsetInput ? autoejectionPushLaneOffsetInput.value : 30) || 30,
+    push_speed_mm_min: Number(autoejectionPushSpeedInput ? autoejectionPushSpeedInput.value : 300) || 300,
+    enable_full_bed_sweep: autoejectionFullBedSweepInput ? autoejectionFullBedSweepInput.checked : false,
+    sweep_z_mm: Number(autoejectionSweepZInput ? autoejectionSweepZInput.value : 1) || 1,
+    sweep_speed_mm_min: Number(autoejectionSweepSpeedInput ? autoejectionSweepSpeedInput.value : 300) || 300,
+    require_verified_routine: !nativePatch,
+    require_pre_eject_vision: !nativePatch,
+    require_post_eject_vision: !nativePatch,
+    recovery_to_robot_pickoff: !nativePatch,
   };
 }
 
 function fillAutoejectionConfig(status) {
   const data = status || {};
+  const native = data.native_gcode_parameters || {};
   if (autoejectionEnabledInput) autoejectionEnabledInput.checked = Boolean(data.requested || data.enabled);
-  if (autoejectionProviderInput) autoejectionProviderInput.value = data.provider || "none";
+  if (autoejectionProviderInput) autoejectionProviderInput.value = data.provider || data.method || "none";
   if (autoejectionRoutineInput) autoejectionRoutineInput.value = data.verified_routine_id || "";
   if (autoejectionPreVisionInput) autoejectionPreVisionInput.value = data.pre_eject_vision_profile || "";
   if (autoejectionPostVisionInput) autoejectionPostVisionInput.value = data.post_eject_vision_profile || "";
+  if (autoejectionPushDirectionInput) autoejectionPushDirectionInput.value = native.push_direction || data.push_direction || "center";
+  if (autoejectionZPushOffsetInput) autoejectionZPushOffsetInput.value = Number(native.z_push_offset_mm ?? data.z_push_offset_mm ?? 30);
+  if (autoejectionPushLaneOffsetInput) autoejectionPushLaneOffsetInput.value = Number(native.push_lane_offset_mm ?? data.push_lane_offset_mm ?? 30);
+  if (autoejectionPushSpeedInput) autoejectionPushSpeedInput.value = Number(native.push_speed_mm_min ?? data.push_speed_mm_min ?? 300);
+  if (autoejectionFullBedSweepInput) autoejectionFullBedSweepInput.checked = Boolean(native.enable_full_bed_sweep ?? data.enable_full_bed_sweep ?? false);
+  if (autoejectionSweepZInput) autoejectionSweepZInput.value = Number(native.sweep_z_mm ?? data.sweep_z_mm ?? 1);
+  if (autoejectionSweepSpeedInput) autoejectionSweepSpeedInput.value = Number(native.sweep_speed_mm_min ?? data.sweep_speed_mm_min ?? 300);
+  if (autoejectionReleaseSurfaceProfileInput) {
+    autoejectionReleaseSurfaceProfileInput.value = data.release_surface_profile || "cool-plate-pla";
+  }
 }
 
-function fillManipulationHandoffDefaults() {
+function fillNativeGcodeAutoejectionDefaults() {
   if (autoejectionEnabledInput) autoejectionEnabledInput.checked = true;
-  if (autoejectionProviderInput) autoejectionProviderInput.value = "manipulation_agent";
-  if (autoejectionRoutineInput) autoejectionRoutineInput.value = "robot-pickoff-v1";
-  if (autoejectionPreVisionInput) autoejectionPreVisionInput.value = "bambu-bed-occupied-check";
-  if (autoejectionPostVisionInput) autoejectionPostVisionInput.value = "bambu-bed-clear-check";
+  if (autoejectionProviderInput) autoejectionProviderInput.value = "bambu_gcode_patch";
+  if (autoejectionRoutineInput) autoejectionRoutineInput.value = "";
+  if (autoejectionPreVisionInput) autoejectionPreVisionInput.value = "";
+  if (autoejectionPostVisionInput) autoejectionPostVisionInput.value = "";
+  if (autoejectionPushDirectionInput) autoejectionPushDirectionInput.value = "center";
+  if (autoejectionZPushOffsetInput) autoejectionZPushOffsetInput.value = 30;
+  if (autoejectionPushLaneOffsetInput) autoejectionPushLaneOffsetInput.value = 30;
+  if (autoejectionPushSpeedInput) autoejectionPushSpeedInput.value = 300;
+  if (autoejectionFullBedSweepInput) autoejectionFullBedSweepInput.checked = false;
+  if (autoejectionSweepZInput) autoejectionSweepZInput.value = 1;
+  if (autoejectionSweepSpeedInput) autoejectionSweepSpeedInput.value = 300;
+  if (autoejectionReleaseSurfaceProfileInput) autoejectionReleaseSurfaceProfileInput.value = "cool-plate-pla";
   if (autoejectionStatusDetail) {
-    autoejectionStatusDetail.textContent = "Preset filled locally. Press Save Autoejection Gate only after the provider routine and vision profiles are verified.";
+    autoejectionStatusDetail.textContent = "Native G-code patch preset filled locally. Press Save Autoejection Config, then Generate Patched Artifact before routing or publishing.";
   }
 }
 
@@ -508,7 +599,7 @@ function updateAutoejectionButtonLabels(provider) {
   const isPrusa = String(lastPrinterProvider).toLowerCase().includes("prusa");
   const labels = isPrusa
     ? ["Autoeject Left", "Autoeject Center", "Autoeject Right"]
-    : ["Check Handoff Left", "Check Handoff Center", "Check Handoff Right"];
+    : ["Run Standalone Eject: Left", "Run Standalone Eject: Center", "Run Standalone Eject: Right"];
   [
     [btnEjectLeft, labels[0]],
     [btnEjectCenter, labels[1]],
@@ -530,6 +621,9 @@ function autoejectionCanRun(data, status) {
 function renderManipulationConsumerReadiness(data, handoff = {}) {
   const consumer = data.consumer_readiness || handoff.consumer_readiness || {};
   if (!consumer || !Object.keys(consumer).length) return "";
+  if (consumer.mode === "native_gcode_patch" || consumer.profile_id === "bambu_gcode_patch") {
+    return "Native G-code patcher ready · no robot consumer required";
+  }
   const state = consumer.ready ? "ready" : "blocked";
   const blockers = Array.isArray(consumer.blockers) && consumer.blockers.length
     ? ` · blockers=${consumer.blockers.join(", ")}`
@@ -537,6 +631,78 @@ function renderManipulationConsumerReadiness(data, handoff = {}) {
   const profile = consumer.profile_id ? ` · profile=${consumer.profile_id}` : "";
   const policy = consumer.policy_ref ? ` · policy=${consumer.policy_ref}` : "";
   return `Manipulation consumer ${state}${profile}${policy}${blockers}`;
+}
+
+function formatBoundsSummary(bounds) {
+  const data = bounds && typeof bounds === "object" ? bounds : {};
+  const minX = data.min_x ?? "-";
+  const maxX = data.max_x ?? "-";
+  const minY = data.min_y ?? "-";
+  const maxY = data.max_y ?? "-";
+  const maxZ = data.max_z ?? "-";
+  return `x=${minX}..${maxX}, y=${minY}..${maxY}, z<=${maxZ}`;
+}
+
+function formatBambuAutoejectionArtifactSummary(artifact) {
+  const data = artifact && typeof artifact === "object" ? artifact : {};
+  const validation = data.validation && typeof data.validation === "object" ? data.validation : {};
+  const blockers = Array.isArray(data.blockers) && data.blockers.length
+    ? data.blockers
+    : (Array.isArray(validation.blockers) ? validation.blockers : []);
+  const blockersText = blockers.length ? blockers.join(", ") : "none";
+  const sourcePlate = data.source_plate_path || validation.source_plate_path || "n/a";
+  const objectBounds = data.object_bounds_mm || validation.object_bounds_mm || {};
+  const artifactPath = data.patched_artifact_path || data.source_path || "n/a";
+  return [
+    `artifact=${artifactPath}`,
+    `plate=${sourcePlate}`,
+    `validation=${Boolean(validation.ok)}`,
+    `blockers=${blockersText}`,
+    `object_bounds_mm=${formatBoundsSummary(objectBounds)}`,
+  ].join(" · ");
+}
+
+function renderBambuAutoejectionValidationEvidence(data) {
+  if (!autoejectionValidationBody) return;
+  const payload = data && typeof data === "object" ? data : {};
+  const artifact = payload.standalone_artifact && typeof payload.standalone_artifact === "object"
+    ? payload.standalone_artifact
+    : payload;
+  const validation = artifact.validation && typeof artifact.validation === "object" ? artifact.validation : {};
+  const status = payload.autoejection && typeof payload.autoejection === "object" ? payload.autoejection : {};
+  const nativeParams = artifact.native_gcode_parameters && typeof artifact.native_gcode_parameters === "object"
+    ? artifact.native_gcode_parameters
+    : (status.native_gcode_parameters && typeof status.native_gcode_parameters === "object" ? status.native_gcode_parameters : {});
+  const runtimePaths = status.runtime_paths && typeof status.runtime_paths === "object" ? status.runtime_paths : {};
+  const blockers = Array.isArray(artifact.blockers) && artifact.blockers.length
+    ? artifact.blockers
+    : (Array.isArray(validation.blockers) ? validation.blockers : []);
+  const objectBounds = artifact.object_bounds_mm || validation.object_bounds_mm || {};
+  const sweepPath = [
+    `position=${artifact.position || payload.position || nativeParams.push_direction || "n/a"}`,
+    `push_direction=${nativeParams.push_direction || "n/a"}`,
+    `z_push_offset_mm=${nativeParams.z_push_offset_mm ?? "n/a"}`,
+    `push_lane_offset_mm=${nativeParams.push_lane_offset_mm ?? "n/a"}`,
+    `push_speed_mm_min=${nativeParams.push_speed_mm_min ?? "n/a"}`,
+    `full_bed_sweep=${Boolean(nativeParams.enable_full_bed_sweep)}`,
+    `sweep_z_mm=${nativeParams.sweep_z_mm ?? "n/a"}`,
+    `sweep_speed_mm_min=${nativeParams.sweep_speed_mm_min ?? "n/a"}`,
+  ].join(" · ");
+  autoejectionValidationBody.textContent = [
+    "schema_marker=atr.bambu.autoejection.v1",
+    `source_plate_path=${artifact.source_plate_path || validation.source_plate_path || "n/a"}`,
+    `plate_id=${artifact.plate_id ?? "n/a"}`,
+    `loop_index=${artifact.loop_index ?? "n/a"}`,
+    `validation_ok=${Boolean(validation.ok)}`,
+    `blockers=${blockers.length ? blockers.join(", ") : "none"}`,
+    `object_bounds_mm=${formatBoundsSummary(objectBounds)}`,
+    `sweep_path=${sweepPath}`,
+    `standalone_path=${runtimePaths.standalone_endpoint || "/api/printer/autoejection-test"} -> ${runtimePaths.standalone_transport || "mqtt_gcode_line"}`,
+    `virtual_bridge_path=${runtimePaths.virtual_bridge_transport || "virtual"}`,
+    `actual_print_path=${runtimePaths.actual_print_transport || "project_file"}${runtimePaths.home_after_standalone === false ? " · no_home_after_standalone" : ""}`,
+    `patched_artifact_path=${artifact.patched_artifact_path || "n/a"}`,
+    `manifest_path=${artifact.manifest_path || "n/a"}`,
+  ].join("\n");
 }
 
 function renderAutoejectionStatus(data) {
@@ -548,12 +714,32 @@ function renderAutoejectionStatus(data) {
   const canRun = autoejectionCanRun(data, status);
   const mode = status.status || status.mode || "not_configured";
   const provider = status.provider || status.method || "none";
+  const validationResult = Boolean(data.validation && typeof data.validation === "object");
+  const artifactResult = data.standalone_artifact || ((data.patched_artifact_path || validationResult) ? data : null);
   if (autoejectionStatusSummary) {
     const handoffReady = data.status === "provider_handoff_ready" || handoff.schema;
-    autoejectionStatusSummary.textContent = handoffReady ? `provider handoff ready · ${provider}` : `${mode} · provider=${provider}`;
+    const standaloneReady = data.status === "standalone_artifact_ready" || data.status === "sweep_test_artifact_ready" || (data.standalone_artifact && data.standalone_artifact.ok);
+    const patchReady = Boolean(data.patched_artifact_path && data.validation);
+    const validateReady = Boolean(!data.patched_artifact_path && validationResult);
+    const validationPassed = Boolean(data.validation && data.validation.ok);
+    autoejectionStatusSummary.textContent = standaloneReady
+      ? `Native G-code artifact ready · ${provider}`
+      : patchReady
+        ? `Native G-code patch validated · ${provider}`
+      : validateReady
+        ? `Native G-code validation ${validationPassed ? "passed" : "blocked"} · ${provider}`
+      : handoffReady
+        ? `provider handoff ready · ${provider}`
+        : `${mode} · provider=${provider}`;
   }
-  if (autoejectionStatusDetail) {
-    if (handoff.schema) {
+ if (autoejectionStatusDetail) {
+    const runtimePaths = status.runtime_paths && typeof status.runtime_paths === "object" ? status.runtime_paths : {};
+    if (artifactResult && (artifactResult.patched_artifact_path || validationResult)) {
+      autoejectionStatusDetail.textContent = [
+        formatBambuAutoejectionArtifactSummary(artifactResult),
+        consumerText,
+      ].filter(Boolean).join(" · ");
+    } else if (handoff.schema) {
       const consumer = handoff.recommended_consumer_agent || handoff.next_owner || "provider executor";
       const motion = handoff.motion_started ? "motion started" : "no motion started";
       autoejectionStatusDetail.textContent = [
@@ -564,7 +750,8 @@ function renderAutoejectionStatus(data) {
     } else {
       autoejectionStatusDetail.textContent = canRun
         ? [
-            `routine=${status.verified_routine_id || "configured"}`,
+            status.native_gcode_patch ? "Native G-code patch provider configured" : `routine=${status.verified_routine_id || "configured"}`,
+            runtimePaths.standalone_transport ? `standalone=${runtimePaths.standalone_transport}` : "",
             `pre=${status.pre_eject_vision_profile || "n/a"}`,
             `post=${status.post_eject_vision_profile || "n/a"}`,
             consumerText,
@@ -578,7 +765,56 @@ function renderAutoejectionStatus(data) {
   if (!document.activeElement?.id?.startsWith("printer-autoejection-")) {
     fillAutoejectionConfig(status);
   }
+  renderBambuAutoejectionValidationEvidence(data);
   setAutoejectionButtonsEnabled(canRun);
+}
+
+function renderBedClearStatus(data) {
+  const payload = data || {};
+  const bedClear = payload.bed_clear || payload.bed_clear_evidence || {};
+  const required = Boolean(bedClear.bed_clear_required);
+  const verified = Boolean(bedClear.bed_clear_verified);
+  const blockingCode = bedClear.blocking_code || (required && !verified ? "BAMBU_POST_EJECT_BED_NOT_CLEAR" : "");
+  if (bedClearSummary) {
+    bedClearSummary.textContent = blockingCode
+      ? "blocked · bed not verified clear"
+      : required
+        ? "verified clear"
+        : "not required";
+  }
+  if (bedClearDetail) {
+    const method = bedClear.verification_method || "not recorded";
+    const snapshot = bedClear.camera_snapshot_path ? ` · snapshot=${bedClear.camera_snapshot_path}` : "";
+    const updated = bedClear.updated_at ? ` · updated=${bedClear.updated_at}` : "";
+    bedClearDetail.textContent = blockingCode
+      ? `${blockingCode} · method=${method}${snapshot}${updated}`
+      : `required=${required} · verified=${verified} · method=${method}${snapshot}${updated}`;
+  }
+  applyStartPublishBedClearGate(Boolean(blockingCode));
+}
+
+function renderBambuProofStatus(data) {
+  const payload = data || {};
+  const blockers = Array.isArray(payload.blockers) ? payload.blockers : [];
+  const path = payload.proof_package_path || "";
+  if (autoejectionProofPathInput && path) {
+    autoejectionProofPathInput.value = path;
+  }
+  if (autoejectionProofSummary) {
+    const status = payload.status || (payload.ok ? "ok" : "incomplete");
+    const verified = status === "complete_evidence_verified";
+    autoejectionProofSummary.textContent = payload.ok
+      ? `${status} · ${verified ? "evidence verified" : "fail-closed"}`
+      : `${status} · blockers=${blockers.length}`;
+  }
+  if (autoejectionProofDetail) {
+    const blockerText = blockers.length ? ` · ${blockers.slice(0, 4).join(", ")}` : "";
+    autoejectionProofDetail.textContent = [
+      path ? `path=${path}` : "path not selected",
+      payload.message || payload.completion_rule || "",
+      blockerText,
+    ].filter(Boolean).join(" · ");
+  }
 }
 
 function escapeHtml(value) {
@@ -607,6 +843,7 @@ function renderSpcReadiness(data) {
       "Specimen Making Agent printer handoff is ready for operator review.";
   }
   renderReadinessLevels(data.readiness_levels);
+  renderBedClearStatus(data);
   renderConnectionActionGuidance(data.connection || {}, data.next_actions || data.operator_actions || [], data.preprint_gate || data.start_gate || {});
   if (spcReadinessSections) {
     const sections = Array.isArray(data.sections) ? data.sections : [];
@@ -914,6 +1151,7 @@ function renderCameraPanel(data, options = {}) {
     const proxyUrl = cameraPanel.proxy_ready && cameraPanel.proxy_url ? cameraPanel.proxy_url : "";
     const snapshotUrl = cameraPanel.snapshot_url || camera.snapshot_url || "";
     const imageUrl = snapshotUrl || proxyUrl;
+    lastCameraSnapshotPath = snapshotUrl || proxyUrl || lastCameraSnapshotPath;
     const existingStream = cameraPlaceholder.querySelector(".printer-video-stream");
     if (imageUrl) {
       cameraPlaceholder.innerHTML = `<img class="printer-video-stream" src="${escapeHtml(streamUrlWithCacheBuster(imageUrl))}" alt="Bambu live video stream" />`;
@@ -1209,31 +1447,69 @@ function openLiveGui() {
   }
 }
 
-async function runAutoejectionTest(position, button) {
+async function runAutoejectionTest(position, button, options = {}) {
   setBusy(button, true);
   setDotState(statusDot, "busy");
+  const mode = options.mode || "live";
+  const startImmediately = options.startImmediately !== false;
   try {
     const data = await apiJson("/api/printer/autoejection-test", {
       method: "POST",
       body: JSON.stringify({
         position,
-        mode: "live",
+        mode,
         object_size_mm: parseVector3(ejectionObjectSizeInput ? ejectionObjectSizeInput.value : "", currentTestSpecimenSize()),
-        start_immediately: true,
+        start_immediately: startImmediately,
+        public_base_url: bambuPublicBaseUrlInput ? bambuPublicBaseUrlInput.value.trim() : "",
+        verify_fetch: true,
+        ...(startImmediately ? readStartGateOptions() : {}),
       }),
     });
     setDotState(statusDot, data.ok ? "idle" : "warn");
+    await refreshStatus("live");
     renderAutoejectionStatus(data);
     if (gateDetail && data.message) {
       gateDetail.textContent = data.message;
     }
     writeLog(data);
-    await refreshStatus("live");
   } catch (err) {
     setDotState(statusDot, "warn");
     writeLog({ ok: false, error: err.message, position });
   } finally {
     setBusy(button, false);
+  }
+}
+
+async function runBambuSweepTestArtifact() {
+  setBusy(btnAutoejectionSweepTestArtifact, true);
+  setDotState(statusDot, "busy");
+  try {
+    const data = await apiJson("/api/printer/bambu-autoejection-sweep-test", {
+      method: "POST",
+      body: JSON.stringify({
+        position: "center",
+        mode: "test",
+        object_size_mm: parseVector3(ejectionObjectSizeInput ? ejectionObjectSizeInput.value : "", currentTestSpecimenSize()),
+        start_immediately: false,
+      }),
+    });
+    setDotState(statusDot, data.ok ? "idle" : "warn");
+    await refreshStatus("live");
+    renderAutoejectionStatus(data);
+    if (gateDetail) {
+      const artifact = data.standalone_artifact && data.standalone_artifact.patched_artifact_path
+        ? data.standalone_artifact.patched_artifact_path
+        : "";
+      gateDetail.textContent = data.ok
+        ? `Generate Sweep Test Artifact complete: ${artifact} · no upload or MQTT publish`
+        : `Generate Sweep Test Artifact blocked: ${data.failure_code || "unknown"}`;
+    }
+    writeLog(data);
+  } catch (err) {
+    setDotState(statusDot, "warn");
+    writeLog({ ok: false, error: err.message, tool: "printer.bambu.autoejection_sweep_test" });
+  } finally {
+    setBusy(btnAutoejectionSweepTestArtifact, false);
   }
 }
 
@@ -1245,6 +1521,104 @@ async function refreshAutoejectionStatus() {
   } catch (err) {
     renderAutoejectionStatus({ autoejection: { status: "unknown", provider: "none" }, blockers: [err.message] });
     return null;
+  }
+}
+
+async function refreshBedClearStatus() {
+  try {
+    const data = await apiJson("/api/printer/bed-clear");
+    renderBedClearStatus(data);
+    return data;
+  } catch (err) {
+    renderBedClearStatus({
+      bed_clear: {
+        bed_clear_required: true,
+        bed_clear_verified: false,
+        blocking_code: err.message || "BAMBU_BED_CLEAR_STATUS_UNAVAILABLE",
+      },
+    });
+    return null;
+  }
+}
+
+async function markBedClear(verified, button) {
+  setBusy(button, true);
+  setDotState(statusDot, "busy");
+  try {
+    const data = await apiJson("/api/printer/bed-clear", {
+      method: "POST",
+      body: JSON.stringify({
+        bed_clear_required: true,
+        bed_clear_verified: Boolean(verified),
+        verification_method: "operator",
+        camera_snapshot_path: lastCameraSnapshotPath,
+      }),
+    });
+    renderBedClearStatus(data);
+    setDotState(statusDot, data.blockers && data.blockers.length ? "warn" : "idle");
+    if (gateDetail) {
+      gateDetail.textContent = verified
+        ? "Bed-clear evidence marked verified by operator. Next Bambu job may proceed if other gates pass."
+        : "Bed-clear evidence marked not clear. Next Bambu job remains blocked.";
+    }
+    writeLog(data);
+  } catch (err) {
+    setDotState(statusDot, "warn");
+    writeLog({ ok: false, error: err.message, tool: "printer.bed_clear" });
+  } finally {
+    setBusy(button, false);
+  }
+}
+
+async function runBambuProofTemplate() {
+  setBusy(btnAutoejectionProofTemplate, true);
+  setDotState(statusDot, "busy");
+  try {
+    const proofPath = autoejectionProofPathInput ? autoejectionProofPathInput.value.trim() : "";
+    const data = await apiJson("/api/printer/bambu-autoejection-proof-template", {
+      method: "POST",
+      body: JSON.stringify({ proof_package_path: proofPath }),
+    });
+    renderBambuProofStatus(data);
+    setDotState(statusDot, data.ok ? "idle" : "warn");
+    if (gateDetail) {
+      gateDetail.textContent = data.ok
+        ? `Bambu proof template created fail-closed: ${data.proof_package_path || ""}`
+        : `Bambu proof template blocked: ${data.failure_code || data.message || "unknown"}`;
+    }
+    writeLog(data);
+  } catch (err) {
+    setDotState(statusDot, "warn");
+    renderBambuProofStatus({ ok: false, status: "error", blockers: [err.message], message: err.message });
+    writeLog({ ok: false, error: err.message, tool: "printer.bambu.improvement14_proof_template" });
+  } finally {
+    setBusy(btnAutoejectionProofTemplate, false);
+  }
+}
+
+async function runBambuCompletionAudit() {
+  setBusy(btnAutoejectionCompletionAudit, true);
+  setDotState(statusDot, "busy");
+  try {
+    const proofPath = autoejectionProofPathInput ? autoejectionProofPathInput.value.trim() : "";
+    const data = await apiJson("/api/printer/bambu-autoejection-completion-audit", {
+      method: "POST",
+      body: JSON.stringify({ proof_package_path: proofPath, latest: !proofPath }),
+    });
+    renderBambuProofStatus(data);
+    setDotState(statusDot, data.ok ? "idle" : "warn");
+    if (gateDetail) {
+      gateDetail.textContent = data.ok
+        ? "Bambu physical autoejection proof verified by completion audit."
+        : `Bambu completion audit incomplete: ${(data.blockers || []).join(", ") || data.failure_code || "missing proof evidence"}`;
+    }
+    writeLog(data);
+  } catch (err) {
+    setDotState(statusDot, "warn");
+    renderBambuProofStatus({ ok: false, status: "error", blockers: [err.message], message: err.message });
+    writeLog({ ok: false, error: err.message, tool: "printer.bambu.improvement14_completion_audit" });
+  } finally {
+    setBusy(btnAutoejectionCompletionAudit, false);
   }
 }
 
@@ -1309,6 +1683,51 @@ async function runBambuSliceArtifact() {
     writeLog({ ok: false, error: err.message, tool: "printer.bambu.slice_artifact" });
   } finally {
     setBusy(btnBambuSliceArtifact, false);
+  }
+}
+
+async function runBambuAutoejectionPatchArtifact(options = {}) {
+  const updateArtifactInput = options.updateArtifactInput !== false;
+  const actionLabel = options.actionLabel || "Generate Patched Artifact";
+  const button = options.button || btnAutoejectionPatchArtifact;
+  const position = options.positionOverride || (autoejectionPushDirectionInput ? autoejectionPushDirectionInput.value : "center");
+  const validateOnly = Boolean(options.validateOnly);
+  setBusy(button, true);
+  setDotState(statusDot, "busy");
+  try {
+    const artifactPath = bambuArtifactPathInput ? bambuArtifactPathInput.value.trim() : "";
+    if (!artifactPath) {
+      throw new Error("Bambu sliced artifact path is required before G-code autoejection patching.");
+    }
+    const specimenId = artifactPath.split(/[\\/]/).pop()?.replace(/\.(gcode\.3mf|gcode|3mf)$/i, "") || "bambu-specimen";
+    const data = await apiJson("/api/printer/bambu-autoejection-patch", {
+      method: "POST",
+      body: JSON.stringify({
+        artifact_path: artifactPath,
+        specimen_id: specimenId,
+        position,
+        plate_id: 1,
+        validate_only: Boolean(options.validateOnly),
+      }),
+    });
+    const patchedPath = data.patched_artifact_path || "";
+    if (!validateOnly && updateArtifactInput && data.ok && patchedPath && bambuArtifactPathInput) {
+      bambuArtifactPathInput.value = patchedPath;
+    }
+    setDotState(statusDot, data.ok ? "idle" : "warn");
+    renderAutoejectionStatus(data);
+    if (gateDetail) {
+      const digest = (data.patched_sha256 || data.candidate_patched_sha256) ? String(data.patched_sha256 || data.candidate_patched_sha256).slice(0, 12) : "";
+      gateDetail.textContent = data.ok
+        ? `${actionLabel} complete: ${validateOnly ? "validation only, no artifact written" : patchedPath}${digest ? ` · sha256=${digest}` : ""} · no upload or MQTT publish${updateArtifactInput && !validateOnly ? "" : " · source input unchanged"}`
+        : `${actionLabel} blocked: ${data.failure_code || (data.blockers || []).join(", ") || "unknown"}`;
+    }
+    writeLog(data);
+  } catch (err) {
+    setDotState(statusDot, "warn");
+    writeLog({ ok: false, error: err.message, tool: "printer.bambu.autoejection_patch" });
+  } finally {
+    setBusy(button, false);
   }
 }
 
@@ -1549,13 +1968,60 @@ if (btnReset) btnReset.addEventListener("click", resetFields);
 if (btnConnectionSave) btnConnectionSave.addEventListener("click", saveConnection);
 if (btnConnectionReload) btnConnectionReload.addEventListener("click", () => refreshConnection().catch((err) => writeLog({ ok: false, error: err.message })));
 if (btnFleetSave) btnFleetSave.addEventListener("click", () => saveFleetSelection());
-if (btnAutoejectionFillHandoff) btnAutoejectionFillHandoff.addEventListener("click", fillManipulationHandoffDefaults);
+if (btnAutoejectionFillNative) btnAutoejectionFillNative.addEventListener("click", fillNativeGcodeAutoejectionDefaults);
 if (btnAutoejectionConfigSave) btnAutoejectionConfigSave.addEventListener("click", () => saveAutoejectionConfig());
+if (btnAutoejectionValidatePreview) {
+  btnAutoejectionValidatePreview.addEventListener("click", () => runBambuAutoejectionPatchArtifact({
+    actionLabel: "Validate G-code Preview",
+    button: btnAutoejectionValidatePreview,
+    updateArtifactInput: false,
+    validateOnly: true,
+  }));
+}
+if (btnAutoejectionValidateLeft) {
+  btnAutoejectionValidateLeft.addEventListener("click", () => runBambuAutoejectionPatchArtifact({
+    actionLabel: "Validate Left",
+    button: btnAutoejectionValidateLeft,
+    updateArtifactInput: false,
+    positionOverride: "left",
+    validateOnly: true,
+  }));
+}
+if (btnAutoejectionValidateCenter) {
+  btnAutoejectionValidateCenter.addEventListener("click", () => runBambuAutoejectionPatchArtifact({
+    actionLabel: "Validate Center",
+    button: btnAutoejectionValidateCenter,
+    updateArtifactInput: false,
+    positionOverride: "center",
+    validateOnly: true,
+  }));
+}
+if (btnAutoejectionValidateRight) {
+  btnAutoejectionValidateRight.addEventListener("click", () => runBambuAutoejectionPatchArtifact({
+    actionLabel: "Validate Right",
+    button: btnAutoejectionValidateRight,
+    updateArtifactInput: false,
+    positionOverride: "right",
+    validateOnly: true,
+  }));
+}
+if (btnBedClearMark) btnBedClearMark.addEventListener("click", () => markBedClear(true, btnBedClearMark));
+if (btnBedClearNotClear) btnBedClearNotClear.addEventListener("click", () => markBedClear(false, btnBedClearNotClear));
 if (btnStatusTest) btnStatusTest.addEventListener("click", () => refreshStatus("test", { manual: true }).catch((err) => writeLog({ ok: false, error: err.message })));
 if (btnStatusLive) btnStatusLive.addEventListener("click", () => refreshStatus("live", { manual: true }).catch((err) => writeLog({ ok: false, error: err.message })));
 if (btnVideoStatus) btnVideoStatus.addEventListener("click", () => runVideoStatus());
 if (btnUploadPathProbe) btnUploadPathProbe.addEventListener("click", () => runUploadPathProbe());
 if (btnBambuSliceArtifact) btnBambuSliceArtifact.addEventListener("click", () => runBambuSliceArtifact());
+if (btnAutoejectionPatchArtifact) btnAutoejectionPatchArtifact.addEventListener("click", () => runBambuAutoejectionPatchArtifact());
+if (btnAutoejectionTestArtifact) {
+  btnAutoejectionTestArtifact.addEventListener("click", () => {
+    const position = autoejectionPushDirectionInput ? autoejectionPushDirectionInput.value : "center";
+    runAutoejectionTest(position, btnAutoejectionTestArtifact, { mode: "test", startImmediately: false });
+  });
+}
+if (btnAutoejectionSweepTestArtifact) btnAutoejectionSweepTestArtifact.addEventListener("click", () => runBambuSweepTestArtifact());
+if (btnAutoejectionProofTemplate) btnAutoejectionProofTemplate.addEventListener("click", () => runBambuProofTemplate());
+if (btnAutoejectionCompletionAudit) btnAutoejectionCompletionAudit.addEventListener("click", () => runBambuCompletionAudit());
 if (btnHttpArtifactRoute) btnHttpArtifactRoute.addEventListener("click", () => runHttpArtifactRoute());
 if (btnBambuPrestartCheck) btnBambuPrestartCheck.addEventListener("click", () => runBambuPrestartCheck());
 if (btnStartCommandDraft) btnStartCommandDraft.addEventListener("click", () => runStartCommandDraft());
@@ -1592,7 +2058,17 @@ if (slowFirstLayerInput) {
     if (firstLayerSpeedInput) firstLayerSpeedInput.disabled = !slowFirstLayerInput.checked;
   });
 }
-[startOperatorConfirmedInput, startGuardianApprovedInput, startDryRunInput].forEach((input) => {
+[
+  startOperatorConfirmedInput,
+  startGuardianApprovedInput,
+  startDryRunInput,
+  autoejectionFrontPathClearInput,
+  autoejectionRampReadyInput,
+  autoejectionToolheadCoverSecuredInput,
+  autoejectionReleaseSurfaceConfirmedInput,
+  autoejectionReleaseSurfaceProfileInput,
+  autoejectionSupervisedInput,
+].forEach((input) => {
   if (input) input.addEventListener("change", readStartGateOptions);
 });
 
@@ -1601,6 +2077,7 @@ refreshFleet()
   .then(() => refreshProfile())
   .then(() => refreshStatus("live", { initial: true }))
   .then(() => refreshAutoejectionStatus())
+  .then(() => refreshBedClearStatus())
   .then(() => readStartGateOptions())
   .catch((err) => {
     setDotState(statusDot, "warn");

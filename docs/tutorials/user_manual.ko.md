@@ -168,7 +168,14 @@ atr down
 10. FTPS가 `read_only` 또는 `BAMBU_FTPS_WRITE_FAILED`이면 sliced `.gcode.3mf` 파일을 `Prepare HTTP Artifact`로 노출한다. 이때 backend가 artifact URL을 실제 GET하고 sha256을 비교해 `server_fetch_probe.ok=true`를 반환해야 Upload gate가 ready로 바뀐다. 이 검증은 프린터가 접근 가능한 LAN URL 기준이다. 서버는 기본적으로 `0.0.0.0:7860`에 바인딩되어야 하며, artifact URL은 `http://<ATR서버-LAN-IP>:7860/printer-artifacts/...` 형태여야 한다. `127.0.0.1` 바인딩 또는 localhost URL은 브라우저에서는 동작해도 Bambu 프린터 transfer evidence로 인정하지 않는다.
 11. `cache/specimen.gcode.3mf` 같은 일반 remote path는 HTTP artifact route가 아니다. FTPS write 검증을 우회할 수 있는 것은 `/api/printer/http-artifact-route`가 만든 `http://` 또는 `https://` URL 중 fetch probe가 통과한 URL뿐이다.
 12. `HTTP_ARTIFACT_READY_NOT_STARTED`는 artifact URL과 guarded start-command draft가 준비됐다는 뜻이다. 실제 출력 시작은 아니며, `Publish Start`는 dry-run 해제, operator 확인, Guardian 승인, start gate 통과가 모두 필요하다.
-13. Bambu autoejection의 `Fill Manipulation Handoff Defaults`는 provider/routine/vision profile 입력값만 채운다. 실제 readiness 저장은 검증 후 `Save Autoejection Gate`를 눌렀을 때만 `memory/bambu_autoejection.json`에 반영된다.
+13. `Publish Start`가 MQTT `project_file` 명령을 보냈더라도 그것만으로 실제 출력 시작으로 간주하지 않는다. backend는 즉시 fresh printer observation을 다시 읽고 `post_publish_status`를 붙인다. 프린터가 `IDLE` 또는 not-started 상태로 남으면 `published=true`여도 `ok=false`, `BAMBU_PROJECT_FILE_ACCEPTED_BUT_NOT_STARTED`로 표시한다.
+14. Bambu autoejection의 `Fill Native G-code Defaults`는 native patch 입력값만 채운다. source artifact와 plate target을 확인한 뒤 `Save Autoejection Config`를 눌러야 `memory/bambu_autoejection.json`에 반영된다. 이 단계는 artifact patch/검증 준비이며, 실제 시작은 별도의 `Publish Start` gate가 통과해야 한다.
+15. `Validate G-code Preview`와 left/center/right validation은 원본 artifact를 바꾸지 않는 검증 동작이다. 이 validation-only 경로는 `.autoeject.*` 파일이나 manifest를 만들지 않고 would-be tail, object bounds, candidate hash, blocker만 반환한다. `Generate Ejection Test Artifact`와 `Generate Sweep Test Artifact`는 publish 없는 standalone 검증 파일만 만든다. 실제 `.autoeject.*` 출력 파일이 필요하면 `Generate Patched Artifact`를 사용하고, 실제 프린터 motion은 `Publish Start` live gate가 통과한 경우에만 허용한다.
+16. Bambu autoejection 조정값은 push direction, Z push offset, push lane offset, push speed, full-bed sweep, sweep Z, sweep speed로 관리한다. P1/P1S/X1/X1C 계열과 A1/A1 Mini 계열은 ejection generator가 다르므로 서로 같은 G-code path를 쓰지 않는다.
+17. `.autoeject.*` 실제 publish 전에는 front path/door, ramp/bin, toolhead cover, release surface/profile, supervised first ejection checklist를 모두 확인해야 한다.
+18. `Video Status` 또는 camera refresh가 실패해도 기존 MQTT/progress/material status는 유지되어야 한다. camera는 별도 plane이며, 실패 시 camera 영역에 blocker를 표시한다.
+19. Bambu bridge evidence는 `artifact`, `validation`, `transport`, `runtime`, `bed-clear` 5개 plane으로 읽는다. 실제 autoejection 성공은 `published=true`가 아니라 camera/operator observation, post-publish status, bed-clear lock/unlock, 다음 job gate 해제까지 확인됐을 때만 인정한다.
+20. 실제 Bambu autoejection 완료 판정은 `/printer`의 `Physical Proof Package` 또는 `scripts/audit_bambu_autoejection_completion.py`로 수행한다. `Build Fail-Closed Proof Template`은 증거 작성용 JSON을 만들 뿐이고, `Run Completion Audit`이 file-backed camera/manifest/post-publish/bed-clear/next-job evidence를 모두 확인하기 전까지 physical success가 아니다.
 
 주의:
 

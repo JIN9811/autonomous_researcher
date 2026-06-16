@@ -14,6 +14,7 @@
 | Experiment API 계약 | [runtime/autonomous_experiment_runtime.md](runtime/autonomous_experiment_runtime.md) |
 | Live GUI 운영 | [gui/gui.md](gui/gui.md) |
 | Device Workspaces / 3DP 사용법 | [tutorials/device_workspace_3dp_usage.ko.md](tutorials/device_workspace_3dp_usage.ko.md) |
+| BambuLab X2D bridge 구조 | [hardware/bambulab_x2d_device_bridge_runtime_guideline.md](hardware/bambulab_x2d_device_bridge_runtime_guideline.md) |
 | 첫 실행 튜토리얼 | [tutorials/first_autonomous_run.ko.md](tutorials/first_autonomous_run.ko.md), [tutorials/first_autonomous_run.en.md](tutorials/first_autonomous_run.en.md) |
 | Git/GitHub 운영 | [repository/github_version_control.md](repository/github_version_control.md) |
 
@@ -37,6 +38,18 @@ Live GUI에서 보이는 상태는 다음 소스에서 옵니다.
 - `/api/runs/{run_id}/events`: run별 이벤트
 - `/api/runs/{run_id}/artifacts`: run별 아티팩트
 
+3DP/Bambu 경로는 `SpecimenMakingAgent -> printer.prepare -> PrinterDeviceBridgeManager -> Bambu native G-code patch/start gate` 순서로 연결됩니다. 세부 구조는 [hardware/bambulab_x2d_device_bridge_runtime_guideline.md](hardware/bambulab_x2d_device_bridge_runtime_guideline.md)에 정리되어 있습니다. BambuLab X2D가 기본 active provider이며, Prusa MK4S는 fallback이 아니라 operator가 선택하는 별도 provider입니다. Bambu의 MQTT publish ack는 실제 출력 시작과 분리해서 기록하며, fresh post-publish observation이 RUNNING/PREPARING 계열 상태로 넘어가지 않으면 `BAMBU_PROJECT_FILE_ACCEPTED_BUT_NOT_STARTED`로 차단합니다. Native autoejection은 `bambu_gcode_patch` provider로 sliced `.gcode.3mf` 내부 plate G-code에 deterministic tail을 삽입하고, source/patched hash, plate id, loop index, material/bed placeholder, cooldown, sweep, purge/parking strategy, validation evidence를 manifest와 tail comment에 남긴 뒤에만 start gate로 넘어갑니다. Bambu bridge evidence는 `artifact`, `validation`, `transport`, `runtime`, `bed-clear` 5개 plane으로 나뉘며, GUI/Live report/API는 이 구분을 유지해야 합니다. `.autoeject.*` publish가 성공하면 bed-clear evidence는 remote path, subtask, source/patched artifact path와 hash, manifest, publish sequence/topic, post-publish status, camera snapshot reference를 같이 잠그며, 다음 job은 이 evidence가 해제되기 전까지 차단됩니다. 물리 완료 선언 시에도 physical start precheck는 saved prestart snapshot에서 `ready_to_publish_not_started`, `published=false`, `will_publish=false`가 확인되어야 합니다. center standalone ejection, left/right lane ejection, disposable live ejection은 각각 saved `printer.bambu.start_publish` 응답 snapshot을 가져야 하며, snapshot의 `ready_to_publish=true`, `start_enabled=true`, blocker 없음, remote path, publish sequence/topic, post-publish running status가 proof 본문과 일치해야 합니다. disposable live ejection은 추가로 local source/patched artifact file의 sha256이 proof hash와 맞아야 합니다. left/right lane은 marker artifact와 saved validation snapshot도 모두 있어야 하고, post-ejection bed-clear는 `operator`, `camera`, `vision` 중 하나의 검증 방식과 live ejection의 source/patched sha256 매칭을 요구하고, next-job gate는 saved start-gate snapshot에서 `ready_to_publish=true`, `start_enabled=true`, blocker 없음, `BAMBU_POST_EJECT_BED_NOT_CLEAR` 없음이 확인되어야 합니다. 실제 motion은 `.autoeject.*` artifact 검증, camera/bed-clear evidence, Guardian/operator approval, ejection-path operator checklist를 모두 통과한 뒤에만 이어집니다. 물리 완료 선언은 별도 completion audit으로만 가능하며, `/api/printer/bambu-autoejection-proof-template`와 `/api/printer/bambu-autoejection-completion-audit` 또는 `scripts/audit_bambu_autoejection_completion.py`가 file-backed proof package를 검증해야 합니다.
+
+시스템 설명 문서에서 3DP bridge를 설명할 때는 다음 세 계층을 섞지 않습니다.
+
+- `개선안/14_bambulab_gcode_autoejection_runtime_plan.md`: Reddit/GitHub/YouTube/Bambu community 사례조사와 구현 기준을 고정하는 설계 문서
+- `docs/hardware/bambulab_x2d_device_bridge_runtime_guideline.md`: 운영자/협업자에게 공개할 BambuLab X2D bridge runtime 설명
+- `docs/gui`, `docs/runtime`, `docs/tutorials`: 실제 화면, API, closed-loop, 사용자 절차 설명
+
+즉, 외부 사례의 G-code나 UI를 그대로 복사하지 않고, 검증된 원칙만 ATR의 provider/bridge/evidence 계약으로 재해석합니다.
+
+시스템 설명 문서를 갱신할 때는 코드 파일만 나열하지 않고 runtime path, GUI route, device bridge gate, agent report evidence가 어떻게 이어지는지 같이 적어야 합니다. 특히 Bambu/3DP 변경은 `docs/runtime/closed_loop_and_pages_reference.md`, `docs/gui/gui.md`, `docs/tutorials/device_workspace_3dp_usage.ko.md`, `docs/tutorials/user_manual.ko.md`, `docs/tutorials/user_manual.en.md`가 같은 의미로 맞아야 합니다.
+
 ## 3. 페이지별 문서 맵
 
 | 페이지 | URL | 코드 | 설명 문서 |
@@ -45,7 +58,7 @@ Live GUI에서 보이는 상태는 다음 소스에서 옵니다.
 | Live GUI | `/live`, `/planning` | `web/templates/planning.html`, `web/static/planning.js` | [gui/gui.md](gui/gui.md), [runtime/closed_loop_and_pages_reference.md](runtime/closed_loop_and_pages_reference.md) |
 | Runtime IDE | `/ide` | `web/templates/runtime_ide.html`, `web/static/runtime_ide.js` | [runtime/langgraph_runtime.md](runtime/langgraph_runtime.md) |
 | Module Management | `/module-management` | `web/templates/module_management.html`, `web/static/module_management.js` | [runtime/agent_program_baseline.md](runtime/agent_program_baseline.md) |
-| 3DP Workspace | `/printer` | `web/templates/printer.html`, `web/static/printer.js`, `device_bridges/bambu_bridge.py` | [gui/gui.md](gui/gui.md), [runtime/closed_loop_and_pages_reference.md](runtime/closed_loop_and_pages_reference.md), [../개선안/13_bambulab_x2d_spc_device_bridge_research.md](../개선안/13_bambulab_x2d_spc_device_bridge_research.md), [hardware/printer_agent_prusabridge_phase1_runtime_guideline.txt](hardware/printer_agent_prusabridge_phase1_runtime_guideline.txt) |
+| 3DP Workspace | `/printer` | `web/templates/printer.html`, `web/static/printer.js`, `device_bridges/bambu_bridge.py`, `device_bridges/bambu_autoejection.py` | [gui/gui.md](gui/gui.md), [runtime/closed_loop_and_pages_reference.md](runtime/closed_loop_and_pages_reference.md), [hardware/bambulab_x2d_device_bridge_runtime_guideline.md](hardware/bambulab_x2d_device_bridge_runtime_guideline.md), [../개선안/13_bambulab_x2d_spc_device_bridge_research.md](../개선안/13_bambulab_x2d_spc_device_bridge_research.md), [../개선안/14_bambulab_gcode_autoejection_runtime_plan.md](../개선안/14_bambulab_gcode_autoejection_runtime_plan.md), [tutorials/device_workspace_3dp_usage.ko.md](tutorials/device_workspace_3dp_usage.ko.md), [hardware/printer_agent_prusabridge_phase1_runtime_guideline.txt](hardware/printer_agent_prusabridge_phase1_runtime_guideline.txt) |
 | LeRobot Workspace | `/lerobot` | `web/templates/lerobot.html`, `web/static/lerobot.js` | [hardware/lerobot_robotis_manipulation_runtime_guideline.md](hardware/lerobot_robotis_manipulation_runtime_guideline.md) |
 | BO Workspace | `/bo` | `web/templates/bo.html`, `web/static/bo.js` | [agents/bo_agent_runtime_guideline.txt](agents/bo_agent_runtime_guideline.txt) - BO/MBO/LLM preference 설정, lightweight/BoTorch optional backend, reasoning audit, candidate ranking |
 | CAE Workspace | `/cae` | `web/templates/cae.html`, `web/static/cae.js` | [agents/cae_analysis_runtime_guideline.txt](agents/cae_analysis_runtime_guideline.txt) |
@@ -57,7 +70,7 @@ Live GUI에서 보이는 상태는 다음 소스에서 옵니다.
 | Agent | Runtime module | 문서 |
 |---|---|---|
 | Design | `graphs/modules/design` | [agents/specimen_design_existing_runtime_guideline.txt](agents/specimen_design_existing_runtime_guideline.txt) |
-| Specimen Making | `graphs/modules/specimen` | [../개선안/13_bambulab_x2d_spc_device_bridge_research.md](../개선안/13_bambulab_x2d_spc_device_bridge_research.md), [hardware/printer_agent_prusabridge_phase1_runtime_guideline.txt](hardware/printer_agent_prusabridge_phase1_runtime_guideline.txt) |
+| Specimen Making | `graphs/modules/specimen` | [hardware/bambulab_x2d_device_bridge_runtime_guideline.md](hardware/bambulab_x2d_device_bridge_runtime_guideline.md), [../개선안/13_bambulab_x2d_spc_device_bridge_research.md](../개선안/13_bambulab_x2d_spc_device_bridge_research.md), [../개선안/14_bambulab_gcode_autoejection_runtime_plan.md](../개선안/14_bambulab_gcode_autoejection_runtime_plan.md), [hardware/printer_agent_prusabridge_phase1_runtime_guideline.txt](hardware/printer_agent_prusabridge_phase1_runtime_guideline.txt) |
 | Vision | `graphs/modules/vision` | [agents/vision_pickup_observation_runtime_guideline.txt](agents/vision_pickup_observation_runtime_guideline.txt) |
 | Manipulation | `graphs/modules/manipulation` | [agents/manipulation_pi05_transfer_runtime_guideline.txt](agents/manipulation_pi05_transfer_runtime_guideline.txt) |
 | Lab Equipment | `graphs/modules/equipment` | [hardware/windows_pyautogui_equipment_agent_guideline.md](hardware/windows_pyautogui_equipment_agent_guideline.md), [hardware/lab_equipment_utm_visual_control_completion_audit.md](hardware/lab_equipment_utm_visual_control_completion_audit.md) |
@@ -83,7 +96,7 @@ Live GUI에서 보이는 상태는 다음 소스에서 옵니다.
 | `runs/` | 실행별 로그와 아티팩트 |
 | `artifacts/` | STL, G-code, CAE, UI audit 등 산출물 |
 | `tests/` | pytest, integration, UI audit |
-| `scripts/` | live 검증 runner와 운영 보조 스크립트. 예: `lab_equipment_live_utm_validation.py` |
+| `scripts/` | live 검증 runner와 운영 보조 스크립트. 예: `lab_equipment_live_utm_validation.py`, `audit_lab_equipment_utm_completion.py`, `audit_bambu_autoejection_completion.py` |
 | `install/` | CLI 설치와 외부 프로그램 설치 보조 |
 | `image/` | 발표/논문용 시스템 diagram prompt와 렌더 결과 |
 | `user_files/` | 사용자가 넣는 데이터/작업 파일 |

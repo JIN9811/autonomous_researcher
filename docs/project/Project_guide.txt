@@ -82,6 +82,7 @@ Top-Level Architecture
 [MCP Tool / Device Interface Layer]
         |
         +--> [Ollama Local Models]
+        +--> [BambuLab X2D Bridge: default 3DP provider]
         +--> [Prusa Bridge]
         +--> [RealSense Bridge]
         +--> [Robot Bridge]
@@ -260,7 +261,13 @@ Modes
 - Live GUI/Main GUI test-mode explicit actual-print path for a test-generated specimen
 - Normal Live GUI `실험 수행` uses the active printer profile selected by `PrinterFleetRegistry`.
 - The default physical printer profile is Bambu Lab X2D. Prusa MK4S remains available only when explicitly selected, and the runtime must not silently fallback from one printer vendor to another.
-- Auto ejection is printer-provider-specific. Prusa uses the existing bed-sweep append-G-code path when explicitly enabled; Bambu requires a verified provider routine plus Guardian/operator approval before motion.
+- Bambu Lab X2D bridge details are documented in `docs/hardware/bambulab_x2d_device_bridge_runtime_guideline.md`. The bridge separates fleet/provider selection, Bambu Studio/Orca slicing, MQTT status/control, FTPS/HTTP artifact transfer, camera evidence, native G-code autoejection validation, and bed-clear gate.
+- Auto ejection is printer-provider-specific. Prusa uses the existing bed-sweep append-G-code path when explicitly enabled. Bambu actual prints use the native `bambu_gcode_patch` path: sliced artifact -> `.autoeject.gcode.3mf` artifact -> validator evidence -> transfer/start gate -> bed-clear gate. Bambu standalone autoejection tests use the separate direct path `/api/printer/autoejection-test -> MQTT gcode_line`, recorded in `memory/bambu_autoejection.json.runtime_paths`. Guardian/operator approval is still required before physical motion.
+- Bambu standalone autoejection must not silently add homing. `home_after_standalone=false` is the current runtime contract; unexpected `G28` inside the generated ejection tail is blocked by the validator.
+- For Bambu publish, `published=true` only means the MQTT `project_file` command was acknowledged. The runtime must attach a fresh post-publish observation and only treat the start as successful when the observed printer state/progress moves into a running/preparing state. IDLE/not-started after ack is `BAMBU_PROJECT_FILE_ACCEPTED_BUT_NOT_STARTED`.
+- For Bambu `.autoeject.*` publish, manual ejection-path checkboxes are not part of the runtime gate. The workstation owner/operator manages front path, ramp/bin, toolhead cover, release surface, and supervision outside the UI; backend evidence records this as `operator_managed=true` while continuing to enforce printer-state, camera, geometry, bed-clear, and start/publish gates.
+- Bambu physical autoejection completion is audited separately. The 3DP GUI `Physical Proof Package` controls and `scripts/audit_bambu_autoejection_completion.py` only read/write proof packages; they must not move the printer. Completion requires file-backed camera evidence, post-publish observation, patch manifest/hash evidence, bed-clear evidence, and next-job gate evidence.
+- Design Agent must attach `bambu_autoejection_readiness` to the authoritative experiment spec and design report. The field records `ejection_contact_edge`, `bed_contact_area_mm2`, `bed_contact_area_ratio`, `minimum_pushable_height_mm`, `pushable_edge_height_mm`, object height, and skirt/brim/raft policy before slicing. Specimen Making must preserve the same object in `fabrication_report.process_plan` and the Live GUI specimen report so the printer bridge validator can be interpreted against the original design intent.
 
 3.7 Vision Agent
 Purpose

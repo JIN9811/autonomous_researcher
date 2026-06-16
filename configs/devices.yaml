@@ -82,14 +82,14 @@ devices:
 
     autoejection:
       enabled: false
-      provider: none
+      provider: bambu_gcode_patch
       verified_routine_id: ""
       pre_eject_vision_profile: ""
       post_eject_vision_profile: ""
       require_verified_routine: true
       require_pre_eject_vision: true
       require_post_eject_vision: true
-      fallback_to_robot_pickoff: true
+      recovery_to_robot_pickoff: false
 
     simulator:
       enabled: true

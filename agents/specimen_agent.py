@@ -487,6 +487,10 @@ class SpecimenMakingAgent(BaseAgent):
             "failure_code": ejection_result.get("failure_code"),
             "policy_source": "3dp_gui_or_experiment_spec",
         }
+        bambu_autoejection_readiness = self._dict_value(
+            spec.get("bambu_autoejection_readiness"),
+            printer_payload.get("bambu_autoejection_readiness"),
+        )
         process_plan = {
             "layer_height_mm": self._safe_float(self._first_value(settings.get("layer_height_mm"), spec.get("layer_height_mm")), None),
             "first_layer_height_mm": self._safe_float(self._first_value(settings.get("first_layer_height_mm"), spec.get("first_layer_height_mm")), None),
@@ -496,6 +500,7 @@ class SpecimenMakingAgent(BaseAgent):
             "adhesion_policy": adhesion_policy,
             "cap_skin_policy": cap_policy,
             "ejection_policy": ejection_policy,
+            "bambu_autoejection_readiness": bambu_autoejection_readiness,
             "estimated_mass_g": self._safe_float(self._first_value(settings.get("expected_mass_g"), manufacturability_result.get("expected_mass_g"), spec.get("expected_mass_g")), None),
             "estimated_print_time_min": self._safe_float(self._first_value(settings.get("expected_print_time_min"), manufacturability_result.get("expected_print_time_min"), spec.get("expected_print_time_min")), None),
             "slicer_command": settings.get("resolved_command", []),
@@ -901,6 +906,7 @@ class SpecimenMakingAgent(BaseAgent):
                 "method": autoejection_gate.get("method"),
                 "handoff": autoejection_handoff,
             },
+            "bambu_autoejection_readiness": plan.get("bambu_autoejection_readiness", {}),
             "build_timeline": {
                 "timeline": timeline_items,
                 "bars": [
@@ -1000,9 +1006,9 @@ class SpecimenMakingAgent(BaseAgent):
     def _printer_path_choice_result(self, state: OrchestratorState, spec: dict[str, Any], candidate: str, specimen_id: str) -> AgentResult:
         prompt = (
             "Specimen Making Agent가 테스트 프린터 경로 선택을 기다립니다.\n\n"
-            "- 가상 브릿지: 실제 PrusaSlicer로 슬라이싱한 뒤 PrusaLink 형태의 가상 통신으로 upload/start 경계까지 검증합니다.\n"
-            "- 설치 프린터 통신 테스트: 실제 PrusaSlicer로 슬라이싱한 뒤 저장된 PrusaLink 연결정보로 실제 프린터 read-only 상태 통신을 확인합니다.\n"
-            "- 실제 출력: 테스트 모드에서 생성한 시편을 실제 PrusaSlicer -> PrusaLink upload/start 경로로 출력합니다.\n\n"
+            "- 가상 브릿지: 선택된 3DP bridge의 slicing/upload/start boundary를 가상 통신으로 검증합니다.\n"
+            "- 설치 프린터 통신 테스트: 저장된 active printer 연결정보로 실제 프린터 read-only 상태 통신을 확인합니다.\n"
+            "- 실제 출력: 테스트 모드에서 생성한 시편을 active printer bridge로 실제 slicing/upload/start 경로까지 실행합니다. 기본 profile은 Bambu Lab X2D이며, Prusa MK4S는 명시 선택 시만 사용합니다.\n\n"
             "답변은 `가상 브릿지`, `설치 프린터`, `실제 출력` 중 하나로 보내주세요."
         )
         fabrication_report = self._build_pending_fabrication_report(
@@ -1420,7 +1426,7 @@ class SpecimenMakingAgent(BaseAgent):
         }
         if response.get("requires_connection_info"):
             prompt = (
-                "Specimen Making Agent가 설치 프린터 통신 테스트에 필요한 PrusaLink 연결정보를 기다립니다.\n\n"
+                "Specimen Making Agent가 설치 프린터 통신 테스트에 필요한 active printer 연결정보를 기다립니다.\n\n"
                 f"- 연결정보 파일: {response.get('connection_memory_path')}\n"
                 "- 파일의 host/auth 값을 채운 뒤 `연결정보 입력 완료`라고 보내면 같은 specimen 단계에서 재시도합니다."
             )
@@ -1434,7 +1440,7 @@ class SpecimenMakingAgent(BaseAgent):
             specimen_result["operator_messages"] = [*specimen_result["operator_messages"], prompt]
             return AgentResult(
                 success=True,
-                summary="Specimen Making Agent waiting for PrusaLink connection info",
+                summary="Specimen Making Agent waiting for active printer connection info",
                 data={
                     "specimen_result": specimen_result,
                     "fabrication_report": fabrication_report,

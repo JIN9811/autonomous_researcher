@@ -271,7 +271,7 @@ If user input is only a natural-language goal, DesignAgent may fill safe default
 Recommended default constraints:
 
 constraints:
-- printer_model: "Prusa MK4S"
+- printer_model: "Bambu Lab X2D"
 - material: "PLA"
 - max_specimen_size_mm: [30.0, 30.0, 30.0]
 - utm_fixture_limit_mm: [40.0, 40.0, 60.0]
@@ -279,9 +279,9 @@ constraints:
 - max_mass_g: 50.0
 - nozzle_diameter_mm: 0.4
 - layer_height_mm: 0.2
-- storage: "usb"
-- printer_profile: "prusa_mk4s_pla_0p4_nozzle"
-- slicer_profile_hint: "0.2mm_quality"
+- storage: "internal"
+- printer_profile: "bambulab_x2d_lab_01"
+- slicer_profile_hint: "0.2mm_quality_no_skirt"
 - min_wall_thickness_mm: 0.8
 - minimum_feature_size_mm: 0.8
 - require_flat_compression_faces: false
@@ -337,7 +337,7 @@ Current default geometry policy:
   - Axis-aligned faces should be limited to optional top/bottom compression caps; the gyroid body should be dominated by curved/non-axis STL facets.
   - After mesh generation, disconnected islands must be removed by keeping the largest connected component and recording cleanup metadata.
 - FDM printability is a hard precondition for generated gyroid specimens:
-  - Assume Prusa MK4S FDM/FFF with 0.4 mm nozzle and 0.2 mm layer height unless overridden.
+  - Assume the active printer profile, defaulting to Bambu Lab X2D FDM/FFF with 0.4 mm nozzle and 0.2 mm layer height unless overridden.
   - wall_thickness_mm must be at least 1.2 mm for gyroid TPMS compression specimens.
   - cell_size_mm should stay at or below 10 mm to avoid excessive unsupported span/bridging risk.
   - Default test-mode cell_size_mm comes from the 3DP GUI saved `test_unit_cell_size_mm`, defaulting to 10.0 mm unless the operator explicitly overrides it with another valid value.

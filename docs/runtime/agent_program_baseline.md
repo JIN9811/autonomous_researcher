@@ -350,13 +350,13 @@ Frequently written by run loop merge:
   - specimen size in mm
   - geometry or experiment domain
 - Validated printer defaults are applied unless overridden:
-  - `printer_model=Prusa MK4S`
-  - `printer_profile=prusa_mk4s_pla_0p4_nozzle`
+  - `printer_model=Bambu Lab X2D`
+  - `printer_profile=bambulab_x2d_lab_01`
   - `slicer_profile_hint=0.2mm_quality`
   - `nozzle_diameter_mm=0.4`
   - `layer_height_mm=0.2`
-  - `storage=usb`
-- In normal Live GUI mode, `실험 수행` builds `experiment_spec.print` with `start_immediately=true` and `confirm_physical_print=true`, so Specimen Making Agent proceeds to PrusaLink upload/start.
+  - `storage=internal`
+- In normal Live GUI mode, `실험 수행` builds `experiment_spec.print` with `start_immediately=true` and `confirm_physical_print=true`, so Specimen Making Agent proceeds through the active printer bridge. The default bridge is Bambu Lab X2D; PrusaLink upload/start is used only when Prusa MK4S is explicitly selected.
 - In Live GUI `테스트 모드` and Main GUI `test`, the generated TPMS gyroid cell size comes from the 3DP GUI saved `test_unit_cell_size_mm`, defaulting to `cell_size_mm=10.0`.
 - In Live GUI `테스트 모드` and Main GUI `test`, `print.start_immediately` remains false until Specimen Making Agent asks for a printer path; choosing `실제 출력` promotes only the printer step to real PrusaSlicer -> PrusaLink upload/start.
 - Live GUI one-shot commands `테스트 모드, 가상 브릿지`, `테스트 모드, 설치 프린터`, and `테스트 모드, 실제 출력` inject the selected `printer_test_path` before DesignAgent handoff, so Specimen Making Agent proceeds without the separate printer-path prompt.

@@ -29,6 +29,13 @@ Optional but commonly used:
 - `ffmpeg` for the Bambu Lab live camera browser proxy. Without it, the Bambu
   video status API can still report that the printer's LAN video port is
   reachable, but `/api/printer/video-stream.mjpeg` stays unavailable.
+- Intel RealSense Python SDK (`pyrealsense2==2.58.2.10647`) for live RealSense
+  camera checks and future VisionAgent depth/RGB capture. The Spark workstation
+  uses Ubuntu 24.04 on `aarch64`; the tested wheel is
+  `manylinux2014_aarch64` for Python 3.12 in the main `.venv` and Python 3.10
+  in the `lerobot` conda environment. `rs-enumerate-devices` is not required for
+  ATR operation when the Python SDK is installed, but it may still be useful if
+  the full librealsense CLI package is installed later.
 - Bambu Studio CLI for Bambu Lab X2D slicing/pre-start validation. The 3DP
   GUI/backend resolves the executable in this order: `BAMBU_STUDIO_EXECUTABLE`,
   configured wrapper path (`install/bambustudio/bambu-studio-wrapper`), then a
@@ -39,9 +46,12 @@ Optional but commonly used:
   `timeout 15s /home/jin/.local/bin/bambu-studio --help` reports
   `BambuStudio-02.07.01.57` and documents `--slice`, `--arrange`,
   `--ensure-on-bed`, `--outputdir`, `--load-settings`, and `--load-filaments`.
-  The 3DP GUI `Slice Bambu Artifact` action uses those CLI options and records
-  the generated artifact hash before any HTTP route or MQTT start gate is
-  considered.
+  The 3DP GUI `Slice Bambu Artifact` action uses those CLI options, passes
+  `--export-3mf` as a basename inside `--outputdir` rather than as an absolute
+  path, and records the generated artifact hash before any HTTP route or MQTT
+  start gate is considered. The runner also creates a local no-skirt process
+  profile copy under the slicing output folder so Bambu autoejection validation
+  does not inherit skirt/brim/raft residue from default slicer settings.
 - Microsoft C++ Build Tools on Windows only when a package has to compile from
   source instead of installing a wheel.
 
@@ -70,7 +80,9 @@ pip install -r requirements.txt
 
 The main dependency file covers FastAPI, HTTP clients, YAML parsing, testing,
 browser-based GUI inspection, and the TPMS/STL geometry stack (`numpy`,
-`scikit-image`, `trimesh`).
+`scikit-image`, `trimesh`). It also includes `pyrealsense2` so the main ATR
+runtime can enumerate RealSense devices and validate live depth/RGB frames from
+Python.
 
 Selenium is included for GUI browser inspection and screenshot audits. Use it
 when a GUI route, layout, report panel, Runtime IDE canvas, or Live GUI chat
@@ -220,14 +232,16 @@ Required for physical 3D printing:
 - Bambu Lab X2D is the default 3DP bridge profile. Store LAN-mode connection
   info locally in `memory/bambu_connection.json`; never commit the LAN access
   code.
-- Bambu autoejection is not a Prusa-style appended G-code routine. It requires
-  `memory/bambu_autoejection.json` with a verified provider routine plus
-  pre/post vision profiles, and `memory/manipulation_agent_bridge.json` with a
-  rollout-capable Manipulation Agent consumer (`task_id=transfer_to_utm`) and an
-  existing local policy path or configured policy repository.
-- Bambu `Check Handoff` buttons only emit a provider handoff packet with
-  `motion_started=false`. Physical robot motion still requires the Manipulation
-  Agent bridge, Guardian approval, and operator confirmation.
+- Bambu autoejection is not a Prusa-style appended G-code routine and is not a
+  Manipulation Agent handoff in the primary path. It requires
+  `memory/bambu_autoejection.json` with the native `bambu_gcode_patch` provider:
+  source sliced artifact -> `.autoeject.*` artifact -> validator evidence ->
+  transfer/start gate -> bed-clear gate.
+- Bambu autoejection validation actions must keep `motion_started=false` unless
+  the normal live publish gate is explicitly passed. Robot/Manipulation Agent
+  motion is reserved for failed-ejection recovery or downstream specimen
+  transfer, and still requires its own bridge config, Guardian approval, and
+  operator confirmation.
 - Prusa MK4S on the same reachable network.
 - PrusaLink enabled.
 - PrusaLink connection info stored locally in:
@@ -311,6 +325,49 @@ on Windows and `~/miniconda3/bin/conda` on Linux.
 
 Use `conda run -n lerobot <command>` to verify entry points before enabling live
 robot actions in the GUI.
+
+Install the RealSense Python SDK into the LeRobot environment as well when robot
+recording or rollout will use RealSense cameras:
+
+```bash
+/home/jin/miniconda3/envs/lerobot/bin/python -m pip install pyrealsense2==2.58.2.10647
+```
+
+Spark workstation camera smoke check, without writing ATR mapping files:
+
+```bash
+# Main ATR environment
+.venv/bin/python - <<'PY'
+import pyrealsense2 as rs
+ctx = rs.context()
+print("device_count", len(list(ctx.query_devices())))
+for dev in ctx.query_devices():
+    print(dev.get_info(rs.camera_info.name), dev.get_info(rs.camera_info.serial_number))
+PY
+
+# Kernel/UVC frame check when SDK CLI tools are not installed
+ffmpeg -hide_banner -loglevel error -y \
+  -f v4l2 -input_format gray16le -video_size 640x480 -i /dev/video2 \
+  -frames:v 1 /tmp/realsense_depth_probe.png
+```
+
+If RealSense and webcam devices disappear from both `lsusb` and
+`rs.context().query_devices()`, treat it as a USB bus/device reset rather than a
+software mapping problem. Replug or power-cycle the camera hub before debugging
+ATR camera code.
+
+Spark workstation RealSense safety note:
+
+- `pyrealsense2` installation only adds the Python SDK wheel; it does not install
+  kernel drivers or rewrite camera mappings.
+- Do not open arbitrary depth/RGB streams as a smoke test. First enumerate the
+  device and advertised stream profiles through `RealSenseBridge.enumerate`.
+- D405-class devices may expose only the Stereo Module even when a `color`
+  profile is advertised. ATR must validate the advertised profile first and must
+  reject any non-advertised stream before `rs.pipeline.start()`.
+- If kernel logs contain `xHCI host controller not responding, assume dead` or
+  `HC died; cleaning up`, the USB host controller dropped devices at bus level.
+  Restarting ATR is not enough; replug/power-cycle the USB camera hub or reboot.
 
 ### Optional Pi0.5 Training Branch
 

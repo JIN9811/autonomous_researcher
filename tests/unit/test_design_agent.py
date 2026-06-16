@@ -205,6 +205,7 @@ async def test_design_agent_returns_structured_design_report_and_handoff_packet(
         "parameter_sweep",
         "expected_performance",
         "manufacturability",
+        "bambu_autoejection_readiness",
         "material_notes",
         "handoff_to_specimen",
         "artifact_ledger",
@@ -219,6 +220,19 @@ async def test_design_agent_returns_structured_design_report_and_handoff_packet(
     assert len(heatmap_coordinates) == len(set(heatmap_coordinates))
     assert screen_report["expected_performance"]["scatter_points"]
     assert screen_report["expected_performance"]["radar"]
+    readiness = spec["bambu_autoejection_readiness"]
+    assert readiness["schema"] == "bambu_autoejection_design_readiness.v1"
+    assert readiness["ejection_contact_edge"] in {"front", "left", "right", "object_center"}
+    assert 0.0 < readiness["bed_contact_area_ratio"] <= 1.0
+    assert readiness["pushable_edge_height_mm"] == readiness["object_height_mm"]
+    assert readiness["minimum_pushable_height_mm"] >= 5.0
+    assert readiness["skirt_brim_raft_policy"] == {
+        "skirt_enabled": False,
+        "brim_enabled": False,
+        "raft_enabled": False,
+    }
+    assert screen_report["bambu_autoejection_readiness"] == readiness
+    assert report["manufacturability"]["bambu_autoejection_readiness"] == readiness
     assert screen_report["handoff_to_specimen"]["packet_status"] == "ready"
     assert {item["type"] for item in screen_report["visualization_manifest"]} >= {
         "candidate_cards",

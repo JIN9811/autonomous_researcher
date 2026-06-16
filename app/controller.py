@@ -3643,7 +3643,7 @@ class MainController:
             background_content = "테스트 모드 설치 프린터 통신 검증 workflow를 시작했습니다. Specimen Making 이후 Vision, Manipulation, Equipment, Analysis, Knowledge, BO, Guardian까지 백그라운드 closed-loop로 진행하고 단계별 결과를 이 창에 갱신합니다."
             schedule_message = "Installed-printer test planning handoff scheduled in background."
         elif printer_path == "virtual_bridge":
-            background_content = "테스트 모드 가상 브릿지 workflow를 시작했습니다. Specimen Making의 virtual PrusaLink boundary를 통과한 뒤 Vision, Manipulation, Equipment, Analysis, Knowledge, BO, Guardian까지 백그라운드 closed-loop로 진행하고 단계별 결과를 이 창에 갱신합니다."
+            background_content = "테스트 모드 가상 브릿지 workflow를 시작했습니다. Specimen Making의 virtual 3DP bridge boundary를 통과한 뒤 Vision, Manipulation, Equipment, Analysis, Knowledge, BO, Guardian까지 백그라운드 closed-loop로 진행하고 단계별 결과를 이 창에 갱신합니다."
             schedule_message = "Virtual-bridge test planning handoff scheduled in background."
         else:
             background_content = "Live GUI workflow를 시작했습니다. 전체 agent closed-loop는 백그라운드에서 진행하고 이 창에 단계별 결과를 갱신합니다."
@@ -3832,7 +3832,7 @@ class MainController:
             "Specimen Making Agent owns printer.prepare and printer/ejection preparation. "
             "Validated live printer path uses the selected printer bridge. Default is Bambu Lab X2D -> Bambu slicer artifact -> Bambu MQTT/FTPS/HTTP artifact readiness -> guarded SPC Readiness/start gates. Prusa MK4S remains explicit profile selection only. "
             "Live mode may physically print after `실험 수행`; test modes stay virtual/read-only unless the operator explicitly selects `실제 출력` at the Specimen Making Agent printer-path prompt or sends `테스트 모드, 실제 출력`. "
-            "Bambu autoejection uses a verified external provider handoff; Prusa auto ejection uses a gated bed-sweep append G-code path only when Prusa is explicitly selected. "
+            "Bambu actual-print autoejection uses native bambu_gcode_patch artifacts; Bambu standalone ejection tests use direct MQTT gcode_line after live gates. Prusa auto ejection uses a gated bed-sweep append G-code path only when Prusa is explicitly selected. "
             "Do not use LaTeX route notation such as $\\rightarrow$; use '->' only."
         )
 

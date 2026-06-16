@@ -261,6 +261,16 @@ def test_specimen_fabrication_report_includes_bambu_spc_readiness_contract() -> 
     agent = SpecimenMakingAgent()
     spec = _valid_spec()
     spec.update({"printer_profile": "bambulab_x2d_pla_0p4_nozzle", "storage": "ftps"})
+    spec["bambu_autoejection_readiness"] = {
+        "schema": "bambu_autoejection_design_readiness.v1",
+        "status": "ready",
+        "ejection_contact_edge": "front",
+        "bed_contact_area_mm2": 900.0,
+        "minimum_pushable_height_mm": 5.0,
+        "object_height_mm": 30.0,
+        "skirt_brim_raft_policy": {"skirt_enabled": False, "brim_enabled": False, "raft_enabled": False},
+        "blockers": [],
+    }
     state = OrchestratorState(
         run_id="run-bambu",
         experiment_id="exp-bambu",
@@ -364,8 +374,10 @@ def test_specimen_fabrication_report_includes_bambu_spc_readiness_contract() -> 
     assert runtime["autoejection"]["blockers"] == ["BAMBU_AUTOEJECTION_PROVIDER_REQUIRED"]
     assert runtime["autoejection_handoff"]["recommended_consumer_agent"] == "ManipulationAgent"
     assert runtime["autoejection_handoff"]["motion_started"] is False
+    assert fabrication_report["process_plan"]["bambu_autoejection_readiness"] == spec["bambu_autoejection_readiness"]
     assert screen_report["printer_status"]["provider"] == "bambulab_x2d"
     assert screen_report["spc_readiness"]["readiness_levels"][0]["level_id"] == "connection"
+    assert screen_report["bambu_autoejection_readiness"] == spec["bambu_autoejection_readiness"]
     assert screen_report["autoejection_gate"]["status"] == "not_configured"
     assert screen_report["autoejection_gate"]["handoff"]["next_tool"] == "lerobot.manipulation-agent.run"
 

@@ -24,6 +24,7 @@ dependencies = [
   "gpytorch>=1.14.0",
   "piper-tts>=1.4.2",
   "paho-mqtt>=2.1.0",
+  "pyrealsense2==2.58.2.10647",
 ]
 
 [project.optional-dependencies]

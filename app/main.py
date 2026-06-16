@@ -33,8 +33,10 @@ import mimetypes
 import os
 import re
 import shutil
+import signal
 import socket
 import subprocess
+import threading
 import time
 import uuid
 from datetime import datetime, timezone
@@ -71,6 +73,7 @@ from device_bridges.bambu_bridge import (
     BambuStudioSlicerRunner,
     PrinterDeviceBridgeManager,
     build_bambu_project_file_command_draft,
+    validate_bambu_project_file_local_artifact,
 )
 from device_bridges.lerobot_bridge import LeRobotBridge, LeRobotBridgeConfig
 from device_bridges.prusa_bridge import PrusaBridgeConfig, PrinterAgenticWorkflow
@@ -386,6 +389,7 @@ async def _apply_runtime_api_key_settings(settings: dict[str, Any], *, emit_even
 @app.on_event("startup")
 async def keep_startup_side_effect_free() -> None:
     """Keep GUI startup free of model prewarming while applying saved secrets."""
+    _cleanup_bambu_video_stream_processes(include_orphans=True)
     settings = _read_api_key_settings(import_env=True)
     await _apply_runtime_api_key_settings(settings, emit_event=False)
 
@@ -393,6 +397,7 @@ async def keep_startup_side_effect_free() -> None:
 @app.on_event("shutdown")
 async def shutdown_lerobot_subprocesses() -> None:
     """Release LeRobot live subprocesses so cameras/serial ports are not left busy."""
+    _cleanup_bambu_video_stream_processes(include_orphans=True)
     _lerobot_bridge().shutdown()
 
 
@@ -604,20 +609,94 @@ class PrinterAutoejectionTestRequest(BaseModel):
     mode: Literal["live", "test"] = "live"
     object_size_mm: list[float] = Field(default_factory=lambda: [30.0, 30.0, 20.0])
     start_immediately: bool = True
+    public_base_url: str = ""
+    plate_id: int = Field(default=1, ge=1, le=32)
+    use_ams: bool = False
+    ams_mapping: list[int] | None = None
+    timelapse: bool = False
+    bed_leveling: bool = False
+    flow_cali: bool = False
+    vibration_cali: bool = False
+    layer_inspect: bool = False
+    verify_fetch: bool = True
+    fetch_timeout_sec: float = Field(default=3.0, ge=0.5, le=15.0)
+    operator_confirmed: bool = False
+    guardian_approved: bool = False
+    dry_run: bool = True
+    door_or_front_path_clear: bool = False
+    ejection_ramp_or_bin_ready: bool = False
+    toolhead_cover_secured: bool = False
+    release_surface_confirmed: bool = False
+    release_surface_profile: str = ""
+    first_ejection_supervised: bool = False
 
 
 class PrinterAutoejectionConfigRequest(BaseModel):
     """Request body for operator-verified Bambu autoejection gate settings."""
 
     enabled: bool = False
-    provider: str = "none"
+    provider: str = "bambu_gcode_patch"
     verified_routine_id: str = ""
     pre_eject_vision_profile: str = ""
     post_eject_vision_profile: str = ""
     require_verified_routine: bool = True
     require_pre_eject_vision: bool = True
     require_post_eject_vision: bool = True
-    fallback_to_robot_pickoff: bool = True
+    recovery_to_robot_pickoff: bool = False
+    fallback_to_robot_pickoff: bool | None = None
+    push_direction: Literal["left", "center", "right"] = "center"
+    z_push_offset_mm: float = Field(default=30.0, ge=0.0, le=200.0)
+    push_lane_offset_mm: float = Field(default=30.0, ge=0.0, le=120.0)
+    push_speed_mm_min: int = Field(default=300, ge=100, le=1000)
+    enable_full_bed_sweep: bool = False
+    sweep_z_mm: float = Field(default=1.0, ge=0.5, le=50.0)
+    sweep_speed_mm_min: int = Field(default=300, ge=100, le=1000)
+
+
+class PrinterBambuAutoejectionPatchRequest(BaseModel):
+    """Request body for deterministic Bambu G-code autoejection artifact patching."""
+
+    artifact_path: str = ""
+    specimen_id: str = ""
+    position: Literal["left", "center", "right"] = "center"
+    plate_id: int = Field(default=1, ge=1, le=32)
+    loop_index: int = Field(default=1, ge=1, le=10000)
+    run_id: str = ""
+    validate_only: bool = False
+
+
+class PrinterBedClearRequest(BaseModel):
+    """Request body for Bambu post-ejection bed-clear evidence."""
+
+    bed_clear_required: bool = False
+    bed_clear_verified: bool = False
+    verification_method: str = "operator"
+    remote_path: str = ""
+    subtask_name: str = ""
+    source_artifact_path: str = ""
+    source_artifact_sha256: str = ""
+    patched_artifact_path: str = ""
+    patched_artifact_sha256: str = ""
+    manifest_path: str = ""
+    publish_sequence_id: str = ""
+    publish_topic: str = ""
+    post_publish_status: str = ""
+    camera_snapshot_path: str = ""
+
+
+class PrinterBambuAutoejectionProofTemplateRequest(BaseModel):
+    """Request body for writing a fail-closed Bambu physical proof scaffold."""
+
+    proof_package_path: str = ""
+    printer_profile_id: str = ""
+    provider: str = "bambulab"
+
+
+class PrinterBambuAutoejectionCompletionAuditRequest(BaseModel):
+    """Request body for auditing Bambu physical autoejection proof evidence."""
+
+    proof_package_path: str = ""
+    latest: bool = False
 
 
 class PrinterUploadPathProbeRequest(BaseModel):
@@ -648,6 +727,12 @@ class PrinterStartGateRequest(PrinterStartCommandDraftRequest):
     operator_confirmed: bool = False
     guardian_approved: bool = False
     dry_run: bool = True
+    door_or_front_path_clear: bool = False
+    ejection_ramp_or_bin_ready: bool = False
+    toolhead_cover_secured: bool = False
+    release_surface_confirmed: bool = False
+    release_surface_profile: str = ""
+    first_ejection_supervised: bool = False
 
 
 class PrinterSpcReadinessRequest(PrinterStartGateRequest):
@@ -691,6 +776,7 @@ class PrinterBambuPrestartCheckRequest(BaseModel):
     source_path: str = ""
     artifact_path: str = ""
     specimen_id: str = ""
+    run_id: str = ""
     load_settings: str = ""
     load_filaments: str = ""
     extra_args: list[str] = Field(default_factory=list)
@@ -710,6 +796,12 @@ class PrinterBambuPrestartCheckRequest(BaseModel):
     operator_confirmed: bool = False
     guardian_approved: bool = False
     dry_run: bool = True
+    door_or_front_path_clear: bool = False
+    ejection_ramp_or_bin_ready: bool = False
+    toolhead_cover_secured: bool = False
+    release_surface_confirmed: bool = False
+    release_surface_profile: str = ""
+    first_ejection_supervised: bool = False
     mode: Literal["live", "test"] = "live"
 
 
@@ -1187,6 +1279,69 @@ def _safe_bambu_http_export_path(token: str, filename: str) -> Path:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="Bambu HTTP artifact path escapes export root") from exc
     return path
+
+
+def _bambu_http_export_path_from_remote_path(remote_path: str) -> Path | None:
+    """Resolve an ATR-served Bambu artifact URL back to its local export path."""
+    parsed = urlparse(str(remote_path or ""))
+    path_value = parsed.path if parsed.scheme else str(remote_path or "")
+    parts = [unquote(part) for part in str(path_value or "").split("/") if part]
+    if len(parts) >= 4 and parts[-4:-2] == ["printer-artifacts", "bambu"]:
+        token = parts[-2]
+        filename = parts[-1]
+        try:
+            return _safe_bambu_http_export_path(token, filename)
+        except HTTPException:
+            return None
+    candidate = Path(str(remote_path or "")).expanduser()
+    if candidate.is_file():
+        return candidate.resolve()
+    return None
+
+
+def _load_bambu_autoejection_manifest_for_artifact(artifact_path: Path | None) -> dict[str, object]:
+    if artifact_path is None:
+        return {}
+    manifest_path = Path(f"{artifact_path}.manifest.json")
+    if not manifest_path.exists() or not manifest_path.is_file():
+        return {}
+    try:
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    return {**payload, "manifest_path": str(manifest_path)}
+
+
+def _bambu_bed_clear_publish_evidence(
+    *,
+    remote_path: str,
+    subtask_name: str,
+    publish_result: dict[str, object],
+    post_publish_state: dict[str, object],
+) -> dict[str, object]:
+    """Build bed-clear evidence references for a just-published autoejection artifact."""
+    artifact_path = _bambu_http_export_path_from_remote_path(remote_path)
+    manifest = _load_bambu_autoejection_manifest_for_artifact(artifact_path)
+    patched_sha = str(manifest.get("patched_sha256") or "")
+    if not patched_sha and artifact_path and artifact_path.exists():
+        try:
+            patched_sha = hashlib.sha256(artifact_path.read_bytes()).hexdigest()
+        except OSError:
+            patched_sha = ""
+    return {
+        "remote_path": str(remote_path or ""),
+        "subtask_name": str(subtask_name or ""),
+        "source_artifact_path": str(manifest.get("source_path") or ""),
+        "source_artifact_sha256": str(manifest.get("source_sha256") or ""),
+        "patched_artifact_path": str(manifest.get("patched_artifact_path") or artifact_path or ""),
+        "patched_artifact_sha256": patched_sha,
+        "manifest_path": str(manifest.get("manifest_path") or ""),
+        "publish_sequence_id": str(publish_result.get("sequence_id") or ""),
+        "publish_topic": str(publish_result.get("topic") or ""),
+        "post_publish_status": str(post_publish_state.get("status") or ""),
+    }
 
 
 async def _probe_bambu_http_artifact_fetch(
@@ -8203,7 +8358,95 @@ async def get_printer_status(mode: Literal["live", "test"] = "live") -> dict[str
 async def get_printer_video_status() -> dict[str, object]:
     """Probe selected Bambu live-view readiness without exposing access-code secrets."""
     manager = _printer_bridge_manager()
-    return manager.video_status({})
+    return _sanitize_bambu_video_payload(manager.video_status({}))
+
+
+def _sanitize_bambu_video_payload(payload: dict[str, object]) -> dict[str, object]:
+    """Remove binary camera frame bytes from JSON API payloads."""
+    safe = dict(payload or {})
+    if "snapshot_bytes" in safe:
+        safe.pop("snapshot_bytes", None)
+    video_status = safe.get("video_status")
+    if isinstance(video_status, dict):
+        safe["video_status"] = {key: value for key, value in video_status.items() if key != "snapshot_bytes"}
+    return safe
+
+
+_BAMBU_VIDEO_PROCESS_LOCK = threading.Lock()
+_BAMBU_VIDEO_STREAM_PROCESSES: set[subprocess.Popen] = set()
+
+
+def _terminate_bambu_video_process(process: subprocess.Popen, *, timeout_sec: float = 2.0) -> None:
+    """Terminate one registered Bambu ffmpeg stream process."""
+    with _BAMBU_VIDEO_PROCESS_LOCK:
+        _BAMBU_VIDEO_STREAM_PROCESSES.discard(process)
+    try:
+        if process.poll() is not None:
+            return
+        process.terminate()
+        try:
+            process.wait(timeout=timeout_sec)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=timeout_sec)
+    except Exception:
+        pass
+
+
+def _is_bambu_mjpeg_ffmpeg_cmdline(cmdline: str) -> bool:
+    """Return true for ATR-created long-lived Bambu MJPEG proxy processes."""
+    return (
+        "ffmpeg" in cmdline
+        and "/streaming/live/1" in cmdline
+        and "mpjpeg" in cmdline
+        and "rtsps://" in cmdline
+    )
+
+
+def _cleanup_orphan_bambu_video_ffmpeg() -> None:
+    """Clean old ATR Bambu video proxies left after browser/server disconnects."""
+    proc_root = Path("/proc")
+    if not proc_root.exists():
+        return
+    current_pid = os.getpid()
+    for cmdline_path in proc_root.glob("[0-9]*/cmdline"):
+        try:
+            pid = int(cmdline_path.parent.name)
+        except ValueError:
+            continue
+        if pid == current_pid:
+            continue
+        try:
+            raw = cmdline_path.read_bytes()
+        except OSError:
+            continue
+        cmdline = raw.replace(b"\x00", b" ").decode("utf-8", errors="replace")
+        if not _is_bambu_mjpeg_ffmpeg_cmdline(cmdline):
+            continue
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except OSError:
+            continue
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            if not (proc_root / str(pid)).exists():
+                break
+            time.sleep(0.05)
+        if (proc_root / str(pid)).exists():
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except OSError:
+                pass
+
+
+def _cleanup_bambu_video_stream_processes(*, include_orphans: bool = False) -> None:
+    """Terminate registered Bambu video proxies and optionally old orphan proxies."""
+    with _BAMBU_VIDEO_PROCESS_LOCK:
+        processes = list(_BAMBU_VIDEO_STREAM_PROCESSES)
+    for process in processes:
+        _terminate_bambu_video_process(process)
+    if include_orphans:
+        _cleanup_orphan_bambu_video_ffmpeg()
 
 
 def _selected_bambu_video_connection(manager: PrinterDeviceBridgeManager) -> tuple[str, str]:
@@ -8221,10 +8464,8 @@ def _selected_bambu_video_connection(manager: PrinterDeviceBridgeManager) -> tup
     return host, access_code
 
 
-@app.get("/api/printer/video-frame.jpg")
-async def get_printer_video_frame() -> Response:
-    """Return one Bambu camera frame as JPEG for reliable browser preview cards."""
-    manager = _printer_bridge_manager()
+def _capture_bambu_video_frame_bytes(manager: PrinterDeviceBridgeManager) -> bytes:
+    """Capture one Bambu camera frame without exposing LAN access-code details."""
     host, access_code = _selected_bambu_video_connection(manager)
     ffmpeg_path = shutil.which("ffmpeg")
     if not ffmpeg_path:
@@ -8264,15 +8505,23 @@ async def get_printer_video_frame() -> Response:
         raise HTTPException(status_code=504, detail="BAMBU_VIDEO_FRAME_TIMEOUT") from exc
     if completed.returncode != 0 or not completed.stdout:
         raise HTTPException(status_code=502, detail="BAMBU_VIDEO_FRAME_CAPTURE_FAILED")
+    return completed.stdout
+
+
+@app.get("/api/printer/video-frame.jpg")
+async def get_printer_video_frame() -> Response:
+    """Return one Bambu camera frame as JPEG for reliable browser preview cards."""
+    manager = _printer_bridge_manager()
+    frame_bytes = _capture_bambu_video_frame_bytes(manager)
     return Response(
-        content=completed.stdout,
+        content=frame_bytes,
         media_type="image/jpeg",
         headers={"Cache-Control": "no-store, max-age=0"},
     )
 
 
 @app.get("/api/printer/video-stream.mjpeg")
-async def get_printer_video_stream() -> StreamingResponse:
+async def get_printer_video_stream(request: Request) -> StreamingResponse:
     """Proxy selected Bambu RTSPS live view as MJPEG for the browser device panel."""
     manager = _printer_bridge_manager()
     host, access_code = _selected_bambu_video_connection(manager)
@@ -8300,7 +8549,7 @@ async def get_printer_video_stream() -> StreamingResponse:
         "-",
     ]
 
-    def iter_mjpeg() -> object:
+    async def iter_mjpeg() -> object:
         process = subprocess.Popen(
             command,
             stdin=subprocess.DEVNULL,
@@ -8308,21 +8557,42 @@ async def get_printer_video_stream() -> StreamingResponse:
             stderr=subprocess.DEVNULL,
             bufsize=0,
         )
+        with _BAMBU_VIDEO_PROCESS_LOCK:
+            _BAMBU_VIDEO_STREAM_PROCESSES.add(process)
         try:
             if process.stdout is None:
                 return
+            stdout_fileno = getattr(process.stdout, "fileno", None)
+            if not callable(stdout_fileno):
+                while True:
+                    if await request.is_disconnected():
+                        break
+                    chunk = process.stdout.read(65536)
+                    if not chunk:
+                        break
+                    yield chunk
+                    await asyncio.sleep(0)
+                return
+            fd = stdout_fileno()
+            os.set_blocking(fd, False)
             while True:
-                chunk = process.stdout.read(65536)
-                if not chunk:
+                if await request.is_disconnected():
                     break
+                try:
+                    chunk = os.read(fd, 65536)
+                except BlockingIOError:
+                    if process.poll() is not None:
+                        break
+                    await asyncio.sleep(0.05)
+                    continue
+                if not chunk:
+                    if process.poll() is not None:
+                        break
+                    await asyncio.sleep(0.05)
+                    continue
                 yield chunk
         finally:
-            if process.returncode is None:
-                process.terminate()
-                try:
-                    process.wait(timeout=2)
-                except subprocess.TimeoutExpired:
-                    process.kill()
+            _terminate_bambu_video_process(process)
 
     return StreamingResponse(iter_mjpeg(), media_type="multipart/x-mixed-replace; boundary=ffmpeg")
 
@@ -8535,6 +8805,227 @@ def _bambu_start_gate_blockers(
     return blockers, gate_checks
 
 
+def _append_bambu_bed_clear_blocker(blockers: list[str], manager: PrinterDeviceBridgeManager) -> dict[str, object]:
+    """Add the post-ejection bed-clear blocker to a start-like gate when required."""
+    bed_clear = manager.bed_clear_status()
+    bed_clear_blocker = str(bed_clear.get("blocking_code") or "")
+    if bed_clear_blocker and bed_clear_blocker not in blockers:
+        blockers.append(bed_clear_blocker)
+    return bed_clear
+
+
+def _bambu_autoejection_camera_gate(manager: PrinterDeviceBridgeManager, remote_path: str) -> dict[str, object]:
+    """Require visible camera evidence before publishing an autoeject artifact."""
+    if ".autoeject" not in str(remote_path or "").lower():
+        return {}
+    try:
+        probe = manager.video_status({})
+    except Exception as exc:
+        probe = {
+            "ok": False,
+            "status": "blocked",
+            "failure_code": "BAMBU_AUTOEJECTION_CAMERA_STATUS_FAILED",
+            "message": str(exc),
+            "video_status": {
+                "ok": False,
+                "status": "blocked",
+                "failure_code": "BAMBU_AUTOEJECTION_CAMERA_STATUS_FAILED",
+                "snapshot_url": "",
+                "blockers": ["BAMBU_AUTOEJECTION_CAMERA_STATUS_FAILED"],
+            },
+            "device_screen": {},
+        }
+    video_status = probe.get("video_status") if isinstance(probe.get("video_status"), dict) else {}
+    device_screen = probe.get("device_screen") if isinstance(probe.get("device_screen"), dict) else {}
+    camera_panel = device_screen.get("camera_panel") if isinstance(device_screen.get("camera_panel"), dict) else {}
+    snapshot_url = str(video_status.get("snapshot_url") or camera_panel.get("snapshot_url") or "")
+    frame_available = bool(probe.get("ok") and snapshot_url)
+    snapshot_bytes = video_status.get("snapshot_bytes")
+    if not isinstance(snapshot_bytes, (bytes, bytearray)) and frame_available:
+        try:
+            snapshot_bytes = _capture_bambu_video_frame_bytes(manager)
+        except Exception:
+            snapshot_bytes = None
+    camera_snapshot_path = ""
+    if isinstance(snapshot_bytes, (bytes, bytearray)) and snapshot_bytes:
+        evidence_dir = manager.repo_root / "artifacts" / "bambu_camera_evidence"
+        evidence_dir.mkdir(parents=True, exist_ok=True)
+        evidence_path = evidence_dir / f"bambu-camera-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')}-{uuid.uuid4().hex[:8]}.jpg"
+        evidence_path.write_bytes(bytes(snapshot_bytes))
+        camera_snapshot_path = str(evidence_path)
+    safe_video_status = {key: value for key, value in video_status.items() if key != "snapshot_bytes"}
+    return {
+        **safe_video_status,
+        "camera_frame_available": frame_available,
+        "snapshot_url": snapshot_url,
+        "camera_snapshot_path": camera_snapshot_path or snapshot_url,
+        "camera_snapshot_evidence_saved": bool(camera_snapshot_path),
+        "blockers": [] if frame_available else ["BAMBU_AUTOEJECTION_CAMERA_FRAME_REQUIRED"],
+        "device_screen": device_screen,
+    }
+
+
+def _bambu_autoejection_operator_checklist(req: PrinterStartGateRequest, remote_path: str) -> dict[str, object]:
+    """Report operator-managed Bambu ejection context without blocking motion."""
+    required = ".autoeject" in str(remote_path or "").lower()
+    checklist = {
+        "door_or_front_path_clear": True,
+        "ejection_ramp_or_bin_ready": True,
+        "toolhead_cover_secured": True,
+        "release_surface_confirmed": True,
+        "release_surface_profile": str(req.release_surface_profile or "operator-admin-managed").strip(),
+        "first_ejection_supervised": True,
+        "operator_managed": True,
+    }
+    return {
+        "required": required,
+        "ok": True,
+        "blockers": [],
+        **checklist,
+    }
+
+
+def _bambu_post_publish_status(observation: dict[str, object]) -> dict[str, object]:
+    """Classify a fresh post-MQTT observation so publish ack is not mistaken for print start."""
+    if not observation:
+        return {
+            "status": "timeout",
+            "failure_code": "BAMBU_POST_PUBLISH_OBSERVATION_MISSING",
+            "message": "No fresh printer observation was available after MQTT publish.",
+        }
+    if not bool(observation.get("ok")):
+        return {
+            "status": "failed",
+            "failure_code": str(observation.get("failure_code") or "BAMBU_POST_PUBLISH_OBSERVATION_FAILED"),
+            "message": str(observation.get("message") or observation.get("error") or "Post-publish observation failed."),
+        }
+    device_screen = observation.get("device_screen") if isinstance(observation.get("device_screen"), dict) else {}
+    progress_panel = device_screen.get("progress_panel") if isinstance(device_screen.get("progress_panel"), dict) else {}
+    preprint_gate = observation.get("preprint_gate") if isinstance(observation.get("preprint_gate"), dict) else {}
+    state = str(
+        progress_panel.get("gcode_state")
+        or progress_panel.get("state")
+        or preprint_gate.get("state")
+        or ""
+    ).strip()
+    normalized = state.upper()
+    running_states = {"RUNNING", "PRINTING", "PREPARE", "PREPARING", "HEATING", "SLICING"}
+    idle_states = {"IDLE", "FINISH", "FINISHED", "READY", "UNKNOWN", "UPLOADED_NOT_STARTED", "HTTP_ARTIFACT_READY_NOT_STARTED"}
+    failed_states = {"FAILED", "FAIL", "ERROR", "CANCELLED", "CANCELED", "ABORTED"}
+    if normalized in running_states:
+        return {"status": "running", "failure_code": "", "message": "Printer reported an active print/preparation state."}
+    if normalized in failed_states:
+        return {
+            "status": "failed",
+            "failure_code": "BAMBU_PROJECT_FILE_START_FAILED",
+            "message": f"Printer reported a failed post-publish state: {state or 'unknown'}.",
+        }
+    if normalized in idle_states or not normalized:
+        return {
+            "status": "idle",
+            "failure_code": "BAMBU_PROJECT_FILE_ACCEPTED_BUT_NOT_STARTED",
+            "message": "MQTT project_file publish was acknowledged, but the fresh printer observation did not show RUNNING/PRINTING/PREPARE.",
+        }
+    return {
+        "status": "timeout",
+        "failure_code": "BAMBU_PROJECT_FILE_START_STATE_UNKNOWN",
+        "message": f"Post-publish printer state was not classified as running: {state}.",
+    }
+
+
+def _bambu_direct_standalone_gcode(standalone_artifact: dict[str, object]) -> dict[str, object]:
+    """Build a direct MQTT gcode_line payload from a standalone autoejection artifact."""
+    path = Path(str(standalone_artifact.get("patched_artifact_path") or "")).expanduser()
+    try:
+        gcode_text = path.read_text(encoding="utf-8")
+    except Exception as exc:
+        return {
+            "ok": False,
+            "failure_code": "BAMBU_STANDALONE_GCODE_READ_FAILED",
+            "message": str(exc),
+            "source_path": str(path),
+        }
+    direct_lines: list[str] = []
+    skipped_waits: list[str] = []
+    for raw_line in gcode_text.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith(";"):
+            continue
+        upper = line.upper()
+        if upper.startswith("M190"):
+            skipped_waits.append(line)
+            continue
+        direct_lines.append(line)
+    if not direct_lines:
+        return {
+            "ok": False,
+            "failure_code": "BAMBU_STANDALONE_GCODE_EMPTY",
+            "source_path": str(path),
+        }
+    return {
+        "ok": True,
+        "schema": "bambu_direct_standalone_gcode.v1",
+        "source_path": str(path),
+        "line_count": len(direct_lines),
+        "skipped_wait_commands": skipped_waits,
+        "gcode": "\n".join(direct_lines).rstrip() + "\n",
+    }
+
+
+def _bambu_direct_gcode_gate_blockers(
+    *,
+    direct_gcode: dict[str, object],
+    prepare_result: dict[str, object],
+    operator_confirmed: bool,
+    guardian_approved: bool,
+    dry_run: bool,
+) -> tuple[list[str], dict[str, object]]:
+    """Return publish blockers for direct MQTT gcode_line motion.
+
+    Direct gcode_line motion does not need FTPS storage, a Bambu project_file
+    draft, or the device-screen print-start action. It still requires fresh
+    MQTT telemetry, a safe printer state, and explicit operator/Guardian gates.
+    """
+    device_screen = prepare_result.get("device_screen") if isinstance(prepare_result.get("device_screen"), dict) else {}
+    connection = device_screen.get("connection") if isinstance(device_screen.get("connection"), dict) else {}
+    preprint_gate = prepare_result.get("preprint_gate") if isinstance(prepare_result.get("preprint_gate"), dict) else {}
+    checks = preprint_gate.get("checks") if isinstance(preprint_gate.get("checks"), dict) else {}
+    blockers: list[str] = []
+
+    def add(code: str) -> None:
+        if code and code not in blockers:
+            blockers.append(code)
+
+    if not direct_gcode.get("ok"):
+        add(str(direct_gcode.get("failure_code") or "BAMBU_DIRECT_GCODE_INVALID"))
+    if dry_run:
+        add("BAMBU_START_DRY_RUN")
+    if not operator_confirmed:
+        add("BAMBU_OPERATOR_CONFIRMATION_REQUIRED")
+    if not guardian_approved:
+        add("BAMBU_GUARDIAN_APPROVAL_REQUIRED")
+    if connection.get("mqtt") not in {"connected", "virtual"}:
+        add("BAMBU_MQTT_NOT_AUTHENTICATED")
+    required_check_codes = {
+        "mqtt_authenticated_or_virtual": "BAMBU_MQTT_NOT_AUTHENTICATED",
+        "latest_report_fresh": "BAMBU_MQTT_REPORT_NOT_FRESH",
+        "printer_safe_state_verified": "BAMBU_PRINTER_SAFE_STATE_NOT_VERIFIED",
+    }
+    for key, code in required_check_codes.items():
+        if key in checks and not bool(checks.get(key)):
+            add(code)
+    return blockers, {
+        "direct_gcode_valid": bool(direct_gcode.get("ok")),
+        "operator_confirmed": bool(operator_confirmed),
+        "guardian_approved": bool(guardian_approved),
+        "dry_run": bool(dry_run),
+        "mqtt": connection.get("mqtt", "unknown"),
+        "preprint_gate_state": preprint_gate.get("state", ""),
+        "preprint_gate_checks": checks,
+        "project_file_storage_ignored": True,
+    }
+
+
 @app.post("/api/printer/start-gate")
 async def post_printer_start_gate(req: PrinterStartGateRequest) -> dict[str, object]:
     """Evaluate the guarded Bambu start gate without publishing by default."""
@@ -8566,22 +9057,21 @@ async def post_printer_start_gate(req: PrinterStartGateRequest) -> dict[str, obj
         vibration_cali=req.vibration_cali,
         layer_inspect=req.layer_inspect,
     )
-    prepare_result = manager.prepare(
-        {
-            "runtime_mode": "live",
-            "health_only": False,
-            "bambu_artifact_url": req.remote_path,
-            "subtask_name": req.subtask_name,
-            "plate_id": req.plate_id,
-            "use_ams": req.use_ams,
-            "ams_mapping": req.ams_mapping,
-            "timelapse": req.timelapse,
-            "bed_leveling": req.bed_leveling,
-            "flow_cali": req.flow_cali,
-            "vibration_cali": req.vibration_cali,
-            "layer_inspect": req.layer_inspect,
-        }
-    )
+    prepare_payload = {
+        "runtime_mode": "live",
+        "health_only": False,
+        "bambu_artifact_url": req.remote_path,
+        "subtask_name": req.subtask_name,
+        "plate_id": req.plate_id,
+        "use_ams": req.use_ams,
+        "ams_mapping": req.ams_mapping,
+        "timelapse": req.timelapse,
+        "bed_leveling": req.bed_leveling,
+        "flow_cali": req.flow_cali,
+        "vibration_cali": req.vibration_cali,
+        "layer_inspect": req.layer_inspect,
+    }
+    prepare_result = manager.prepare(prepare_payload)
     blockers, gate_checks = _bambu_start_gate_blockers(
         draft=draft,
         prepare_result=prepare_result,
@@ -8589,6 +9079,19 @@ async def post_printer_start_gate(req: PrinterStartGateRequest) -> dict[str, obj
         guardian_approved=req.guardian_approved,
         dry_run=req.dry_run,
     )
+    camera_status = _bambu_autoejection_camera_gate(manager, req.remote_path)
+    for code in camera_status.get("blockers", []) if isinstance(camera_status.get("blockers"), list) else []:
+        if code and code not in blockers:
+            blockers.append(str(code))
+    autoejection_operator_checklist = _bambu_autoejection_operator_checklist(req, req.remote_path)
+    for code in (
+        autoejection_operator_checklist.get("blockers", [])
+        if isinstance(autoejection_operator_checklist.get("blockers"), list)
+        else []
+    ):
+        if code and code not in blockers:
+            blockers.append(str(code))
+    bed_clear = _append_bambu_bed_clear_blocker(blockers, manager)
     ready_to_publish = not blockers
     return {
         "ok": True,
@@ -8601,6 +9104,9 @@ async def post_printer_start_gate(req: PrinterStartGateRequest) -> dict[str, obj
         "device_screen": prepare_result.get("device_screen", {}),
         "operator_actions": prepare_result.get("operator_actions", []),
         "checks": gate_checks,
+        "camera_status": camera_status,
+        "autoejection_operator_checklist": autoejection_operator_checklist,
+        "bed_clear": bed_clear,
         "blockers": blockers,
         "ready_to_publish": ready_to_publish,
         "will_publish": False,
@@ -8646,22 +9152,21 @@ async def post_printer_start_publish(req: PrinterStartGateRequest) -> dict[str, 
         vibration_cali=req.vibration_cali,
         layer_inspect=req.layer_inspect,
     )
-    prepare_result = manager.prepare(
-        {
-            "runtime_mode": "live",
-            "health_only": False,
-            "bambu_artifact_url": req.remote_path,
-            "subtask_name": req.subtask_name,
-            "plate_id": req.plate_id,
-            "use_ams": req.use_ams,
-            "ams_mapping": req.ams_mapping,
-            "timelapse": req.timelapse,
-            "bed_leveling": req.bed_leveling,
-            "flow_cali": req.flow_cali,
-            "vibration_cali": req.vibration_cali,
-            "layer_inspect": req.layer_inspect,
-        }
-    )
+    prepare_payload = {
+        "runtime_mode": "live",
+        "health_only": False,
+        "bambu_artifact_url": req.remote_path,
+        "subtask_name": req.subtask_name,
+        "plate_id": req.plate_id,
+        "use_ams": req.use_ams,
+        "ams_mapping": req.ams_mapping,
+        "timelapse": req.timelapse,
+        "bed_leveling": req.bed_leveling,
+        "flow_cali": req.flow_cali,
+        "vibration_cali": req.vibration_cali,
+        "layer_inspect": req.layer_inspect,
+    }
+    prepare_result = manager.prepare(prepare_payload)
     blockers, gate_checks = _bambu_start_gate_blockers(
         draft=draft,
         prepare_result=prepare_result,
@@ -8669,6 +9174,19 @@ async def post_printer_start_publish(req: PrinterStartGateRequest) -> dict[str, 
         guardian_approved=req.guardian_approved,
         dry_run=req.dry_run,
     )
+    camera_status = _bambu_autoejection_camera_gate(manager, req.remote_path)
+    for code in camera_status.get("blockers", []) if isinstance(camera_status.get("blockers"), list) else []:
+        if code and code not in blockers:
+            blockers.append(str(code))
+    autoejection_operator_checklist = _bambu_autoejection_operator_checklist(req, req.remote_path)
+    for code in (
+        autoejection_operator_checklist.get("blockers", [])
+        if isinstance(autoejection_operator_checklist.get("blockers"), list)
+        else []
+    ):
+        if code and code not in blockers:
+            blockers.append(str(code))
+    bed_clear = _append_bambu_bed_clear_blocker(blockers, manager)
     ready_to_publish = not blockers
     base_payload: dict[str, object] = {
         "tool": "printer.bambu.start_publish",
@@ -8680,6 +9198,8 @@ async def post_printer_start_publish(req: PrinterStartGateRequest) -> dict[str, 
         "device_screen": prepare_result.get("device_screen", {}),
         "operator_actions": prepare_result.get("operator_actions", []),
         "checks": gate_checks,
+        "camera_status": camera_status,
+        "autoejection_operator_checklist": autoejection_operator_checklist,
         "blockers": blockers,
         "ready_to_publish": ready_to_publish,
     }
@@ -8701,21 +9221,60 @@ async def post_printer_start_publish(req: PrinterStartGateRequest) -> dict[str, 
         access_code=str(raw_auth.get("access_code") or ""),
         topic=str(draft.get("topic") or ""),
         payload=draft.get("payload") if isinstance(draft.get("payload"), dict) else {},
-        timeout_sec=manager.config.mqtt.timeout_sec,
+        timeout_sec=manager.config.mqtt.publish_timeout_sec,
     )
     published = bool(publish_result.get("ok"))
+    post_publish_observation: dict[str, object] = {}
+    if published:
+        try:
+            post_publish_observation = manager.prepare({**prepare_payload, "post_publish_observation": True})
+        except Exception as exc:
+            post_publish_observation = {
+                "ok": False,
+                "failure_code": "BAMBU_POST_PUBLISH_OBSERVATION_FAILED",
+                "message": str(exc),
+            }
+    post_publish_state = _bambu_post_publish_status(post_publish_observation) if published else {
+        "status": "failed",
+        "failure_code": str(publish_result.get("failure_code") or "BAMBU_MQTT_PUBLISH_FAILED"),
+        "message": "MQTT publish failed before post-publish observation.",
+    }
+    post_publish_failure_code = str(post_publish_state.get("failure_code") or "")
+    start_observed = bool(published and post_publish_state.get("status") == "running")
+    if published and ".autoeject" in str(req.remote_path or ""):
+        publish_evidence = _bambu_bed_clear_publish_evidence(
+            remote_path=req.remote_path,
+            subtask_name=req.subtask_name,
+            publish_result=publish_result,
+            post_publish_state=post_publish_state,
+        )
+        bed_clear = manager.save_bed_clear_evidence(
+            {
+                "bed_clear_required": True,
+                "bed_clear_verified": False,
+                "verification_method": "pending_post_print_verification",
+                "camera_snapshot_path": str(camera_status.get("camera_snapshot_path") or camera_status.get("snapshot_url") or ""),
+                **publish_evidence,
+            }
+        )
+    effective_ok = bool(published and not post_publish_failure_code)
     return {
         **base_payload,
-        "ok": published,
-        "failure_code": "" if published else str(publish_result.get("failure_code") or "BAMBU_MQTT_PUBLISH_FAILED"),
+        "ok": effective_ok,
+        "failure_code": "" if effective_ok else post_publish_failure_code,
         "will_publish": published,
         "published": published,
-        "start_enabled": published,
+        "start_enabled": effective_ok,
         "publish_result": publish_result,
+        "post_publish_observation": post_publish_observation,
+        "post_publish_state": post_publish_state,
+        "post_publish_status": str(post_publish_state.get("status") or ""),
+        "post_publish_failure_code": post_publish_failure_code,
+        "bed_clear": bed_clear,
         "message": (
-            "Bambu MQTT project_file command was published."
-            if published
-            else "Bambu start gate passed, but MQTT publish failed."
+            "Bambu MQTT project_file command was published and active start was observed."
+            if effective_ok
+            else str(post_publish_state.get("message") or "Bambu start publish did not reach an observed running state.")
         ),
     }
 
@@ -8744,6 +9303,10 @@ def _spc_action_for_code(code: str, *, source: str = "gate") -> dict[str, object
         "BAMBU_FTPS_WRITE_FAILED": (
             "Fix Bambu transfer path",
             "FTPS read works but marker write failed. Confirm LAN/Developer mode, writable storage, or use a verified HTTP artifact route.",
+        ),
+        "BAMBU_FTPS_TOO_MANY_CONNECTIONS": (
+            "Close stale Bambu FTPS sessions",
+            "The printer reports too many FTPS connections. Close Bambu Studio/FTP clients or wait for stale sessions to expire, then retry.",
         ),
         "BAMBU_STORAGE_TRANSFER_PATH_NOT_VERIFIED": (
             "Verify sliced-artifact transfer",
@@ -8776,6 +9339,10 @@ def _spc_action_for_code(code: str, *, source: str = "gate") -> dict[str, object
         "BAMBU_AUTOEJECTION_NOT_REQUESTED": (
             "Configure autoejection provider",
             "Autonomous loop readiness needs a verified provider routine and pre/post eject vision evidence.",
+        ),
+        "BAMBU_POST_EJECT_BED_NOT_CLEAR": (
+            "Verify Bambu bed-clear",
+            "A previous autoejection run still requires bed-clear evidence. Use camera/vision or Mark Bed Clear before starting the next job.",
         ),
     }
     label, detail = labels.get(code, ("Review printer gate", "Inspect the corresponding backend gate evidence before proceeding."))
@@ -8902,6 +9469,28 @@ def _bambu_manipulation_consumer_readiness(*, mode: str = "live") -> dict[str, o
     }
 
 
+def _bambu_native_gcode_consumer_readiness() -> dict[str, object]:
+    """Report that native Bambu G-code patch ejection does not need a robot consumer."""
+    return {
+        "schema": "bambu_autoejection_consumer_readiness.v1",
+        "ready": True,
+        "mode": "native_gcode_patch",
+        "profile_saved": False,
+        "profile_path": "",
+        "profile_id": "bambu_gcode_patch",
+        "strategy": "deterministic_gcode_patch",
+        "task_id": "post_print_bed_clear",
+        "skill_id": "bambu_native_autoejection",
+        "source_location": "bambu_build_plate",
+        "target_location": "front_clearance_zone",
+        "policy_type": "none",
+        "policy_backend": "printer_gcode",
+        "policy_ref": "",
+        "policy_local_path": "",
+        "blockers": [],
+    }
+
+
 def _bambu_autoejection_handoff_payload(
     autoejection: dict[str, object],
     *,
@@ -8996,6 +9585,8 @@ async def post_printer_spc_readiness(req: PrinterSpcReadinessRequest) -> dict[st
         guardian_approved=req.guardian_approved,
         dry_run=req.dry_run,
     )
+    bed_clear = _append_bambu_bed_clear_blocker(blockers, manager)
+    bed_clear_blocker = str(bed_clear.get("blocking_code") or "")
     device_screen = prepare_result.get("device_screen") if isinstance(prepare_result.get("device_screen"), dict) else {}
     device_connection = device_screen.get("connection") if isinstance(device_screen.get("connection"), dict) else {}
     preprint_gate = prepare_result.get("preprint_gate") if isinstance(prepare_result.get("preprint_gate"), dict) else {}
@@ -9017,14 +9608,23 @@ async def post_printer_spc_readiness(req: PrinterSpcReadinessRequest) -> dict[st
     technical_ready_for_start = not technical_blockers
     approval_ready_for_start = not approval_blockers
     autoejection_ready = bool(autoejection.get("can_run_test", False))
-    consumer_readiness = _bambu_manipulation_consumer_readiness(mode=req.mode)
-    autoejection_handoff = _bambu_autoejection_handoff_payload(
-        autoejection,
-        position="post_print",
-        mode=req.mode,
-        consumer_readiness=consumer_readiness,
+    native_patch = bool(autoejection.get("native_gcode_patch"))
+    consumer_readiness = (
+        _bambu_native_gcode_consumer_readiness()
+        if native_patch
+        else _bambu_manipulation_consumer_readiness(mode=req.mode)
     )
-    if autoejection_ready and not consumer_readiness.get("ready"):
+    autoejection_handoff = (
+        {}
+        if native_patch
+        else _bambu_autoejection_handoff_payload(
+            autoejection,
+            position="post_print",
+            mode=req.mode,
+            consumer_readiness=consumer_readiness,
+        )
+    )
+    if autoejection_ready and not native_patch and not consumer_readiness.get("ready"):
         autoejection_blockers = [*autoejection_blockers, *[str(item) for item in consumer_readiness.get("blockers", [])]]
         autoejection_ready = False
         autoejection_handoff = {}
@@ -9059,6 +9659,7 @@ async def post_printer_spc_readiness(req: PrinterSpcReadinessRequest) -> dict[st
         "autoejection_status": autoejection.get("status", "unknown"),
         "autoejection_handoff": autoejection_handoff,
         "autoejection_consumer_readiness": consumer_readiness,
+        "bed_clear": bed_clear,
     }
     preprint_checks = preprint_gate.get("checks") if isinstance(preprint_gate.get("checks"), dict) else {}
     transfer_blockers = [
@@ -9132,6 +9733,18 @@ async def post_printer_spc_readiness(req: PrinterSpcReadinessRequest) -> dict[st
             },
         ),
         _spc_readiness_level(
+            level_id="bed_clear",
+            label="Post-ejection bed-clear",
+            status="blocked" if bed_clear_blocker else "ready",
+            detail=(
+                f"required={bool(bed_clear.get('bed_clear_required'))}"
+                f" · verified={bool(bed_clear.get('bed_clear_verified'))}"
+                f" · method={bed_clear.get('verification_method') or 'not recorded'}"
+            ),
+            blocking_codes=[bed_clear_blocker] if bed_clear_blocker else [],
+            evidence=bed_clear,
+        ),
+        _spc_readiness_level(
             level_id="autoejection",
             label="Autoejection loop",
             status="ready" if autoejection_ready else "warning",
@@ -9178,6 +9791,17 @@ async def post_printer_spc_readiness(req: PrinterSpcReadinessRequest) -> dict[st
             blockers=blockers,
         ),
         _readiness_section(
+            section_id="bed_clear_gate",
+            label="Post-ejection bed-clear",
+            status="blocked" if bed_clear_blocker else "ready",
+            detail=(
+                "bed clear verified"
+                if not bed_clear_blocker
+                else "previous autoejection requires bed-clear evidence"
+            ),
+            blockers=[bed_clear_blocker] if bed_clear_blocker else [],
+        ),
+        _readiness_section(
             section_id="autoejection_gate",
             label="Autoejection gate",
             status="ready" if autoejection_ready else "warning",
@@ -9212,6 +9836,7 @@ async def post_printer_spc_readiness(req: PrinterSpcReadinessRequest) -> dict[st
             "will_publish": False,
         },
         "autoejection": autoejection,
+        "bed_clear": bed_clear,
         "autoejection_handoff": autoejection_handoff,
         "consumer_readiness": consumer_readiness,
         "operator_summary": operator_summary,
@@ -9271,6 +9896,22 @@ async def post_printer_bambu_slice_artifact(req: PrinterBambuSliceArtifactReques
     }
 
 
+@app.post("/api/printer/bambu-autoejection-patch")
+async def post_printer_bambu_autoejection_patch(req: PrinterBambuAutoejectionPatchRequest) -> dict[str, object]:
+    """Patch a Bambu sliced artifact with native G-code autoejection without publishing."""
+    manager = _printer_bridge_manager()
+    result = manager.patch_bambu_autoejection_artifact(
+        source_path=req.artifact_path,
+        specimen_id=req.specimen_id,
+        position=req.position,
+        plate_id=req.plate_id,
+        loop_index=req.loop_index,
+        run_id=req.run_id,
+        validate_only=req.validate_only,
+    )
+    return result
+
+
 @app.post("/api/printer/http-artifact-route")
 async def post_printer_http_artifact_route(req: PrinterHttpArtifactRouteRequest, request: Request) -> dict[str, object]:
     """Expose a sliced Bambu artifact through an HTTP URL the printer can fetch."""
@@ -9286,11 +9927,21 @@ async def post_printer_http_artifact_route(req: PrinterHttpArtifactRouteRequest,
     memory = BambuConnectionMemory(selected_profile.connection_memory_path)
     connection = memory.redacted()
     source = _safe_bambu_http_artifact_source(req.artifact_path)
+    artifact_plate_validation = validate_bambu_project_file_local_artifact(source, plate_id=req.plate_id)
+    if not artifact_plate_validation.get("ok"):
+        raise HTTPException(
+            status_code=400,
+            detail=str(artifact_plate_validation.get("failure_code") or "BAMBU_PROJECT_FILE_PARAM_MISMATCH"),
+        )
     token = uuid.uuid4().hex
     filename = _safe_bambu_http_filename(source)
     export_path = _safe_bambu_http_export_path(token, filename)
     export_path.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(source, export_path)
+    source_manifest = Path(f"{source}.manifest.json")
+    export_manifest = Path(f"{export_path}.manifest.json")
+    if source_manifest.exists() and source_manifest.is_file():
+        shutil.copy2(source_manifest, export_manifest)
     digest = hashlib.sha256(export_path.read_bytes()).hexdigest()
     public_base = _bambu_http_public_base_url(
         request,
@@ -9357,7 +10008,9 @@ async def post_printer_http_artifact_route(req: PrinterHttpArtifactRouteRequest,
             "filename": filename,
             "size_bytes": export_path.stat().st_size,
             "sha256": digest,
+            "manifest_path": str(export_manifest) if export_manifest.exists() else "",
         },
+        "artifact_plate_validation": artifact_plate_validation,
         "artifact_url": artifact_url,
         "artifact_url_path": url_path,
         "server_fetch_probe": fetch_probe,
@@ -9410,6 +10063,27 @@ async def post_printer_bambu_prestart_check(req: PrinterBambuPrestartCheckReques
         }
 
     steps: list[dict[str, object]] = []
+    try:
+        camera_probe = manager.video_status({})
+    except Exception as exc:
+        camera_probe = {
+            "ok": False,
+            "tool": "printer.bambu.video_status",
+            "status": "blocked",
+            "failure_code": "BAMBU_PRESTART_CAMERA_STATUS_FAILED",
+            "message": str(exc),
+            "video_status": {
+                "ok": False,
+                "status": "blocked",
+                "failure_code": "BAMBU_PRESTART_CAMERA_STATUS_FAILED",
+                "blockers": ["BAMBU_PRESTART_CAMERA_STATUS_FAILED"],
+            },
+            "device_screen": {},
+        }
+    camera_probe = _sanitize_bambu_video_payload(camera_probe)
+    video_status = camera_probe.get("video_status") if isinstance(camera_probe.get("video_status"), dict) else {}
+    camera_device_screen = camera_probe.get("device_screen") if isinstance(camera_probe.get("device_screen"), dict) else {}
+    steps.append(_bambu_prestart_step("camera_status", "Bambu camera/video status", camera_probe))
     source_path = str(req.source_path or "").strip()
     artifact_path = str(req.artifact_path or "").strip()
     slice_result: dict[str, object] = {}
@@ -9435,6 +10109,8 @@ async def post_printer_bambu_prestart_check(req: PrinterBambuPrestartCheckReques
                 "status": "blocked",
                 "failure_code": str(slice_result.get("failure_code") or "BAMBU_PRESTART_SLICE_FAILED"),
                 "steps": steps,
+                "video_status": video_status,
+                "device_screen": camera_device_screen,
                 "slice_artifact": slice_result,
                 "sliced_artifact_path": artifact_path,
                 "will_publish": False,
@@ -9461,10 +10137,43 @@ async def post_printer_bambu_prestart_check(req: PrinterBambuPrestartCheckReques
                 "status": "blocked",
                 "failure_code": "BAMBU_PRESTART_ARTIFACT_REQUIRED",
                 "steps": steps,
+                "video_status": video_status,
+                "device_screen": camera_device_screen,
                 "will_publish": False,
                 "published": False,
                 "start_enabled": False,
                 "message": "Provide a source STL/3MF or an existing sliced artifact path.",
+            }
+
+    autoejection_patch: dict[str, object] = {}
+    autoejection_status = manager.autoejection_status()
+    if autoejection_status.get("can_run_test") and autoejection_status.get("native_gcode_patch"):
+        autoejection_patch = manager.patch_bambu_autoejection_artifact(
+            source_path=artifact_path,
+            specimen_id=req.specimen_id,
+            plate_id=req.plate_id,
+            run_id=req.run_id or _current_run_id(),
+        )
+        steps.append(_bambu_prestart_step("autoejection_patch", "Bambu G-code autoejection patch", autoejection_patch))
+        artifact_path = str(autoejection_patch.get("patched_artifact_path") or "")
+        if not autoejection_patch.get("ok") or not artifact_path:
+            return {
+                "ok": False,
+                "tool": "printer.bambu.prestart_check",
+                "provider": selected_profile.provider,
+                "selected_printer": selected_printer,
+                "status": "blocked",
+                "failure_code": str(autoejection_patch.get("failure_code") or "BAMBU_PRESTART_AUTOEJECTION_PATCH_FAILED"),
+                "steps": steps,
+                "video_status": video_status,
+                "device_screen": camera_device_screen,
+                "slice_artifact": slice_result,
+                "autoejection_patch": autoejection_patch,
+                "sliced_artifact_path": artifact_path,
+                "will_publish": False,
+                "published": False,
+                "start_enabled": False,
+                "message": "Bambu pre-start check stopped before transfer because native autoejection patching failed.",
             }
 
     try:
@@ -9509,7 +10218,10 @@ async def post_printer_bambu_prestart_check(req: PrinterBambuPrestartCheckReques
                 or "BAMBU_PRESTART_HTTP_ARTIFACT_NOT_VERIFIED"
             ),
             "steps": steps,
+            "video_status": video_status,
+            "device_screen": camera_device_screen,
             "slice_artifact": slice_result,
+            "autoejection_patch": autoejection_patch,
             "http_artifact_route": http_route,
             "sliced_artifact_path": artifact_path,
             "artifact_url": str(http_route.get("artifact_url") or ""),
@@ -9534,6 +10246,12 @@ async def post_printer_bambu_prestart_check(req: PrinterBambuPrestartCheckReques
         operator_confirmed=req.operator_confirmed,
         guardian_approved=req.guardian_approved,
         dry_run=req.dry_run,
+        door_or_front_path_clear=req.door_or_front_path_clear,
+        ejection_ramp_or_bin_ready=req.ejection_ramp_or_bin_ready,
+        toolhead_cover_secured=req.toolhead_cover_secured,
+        release_surface_confirmed=req.release_surface_confirmed,
+        release_surface_profile=req.release_surface_profile,
+        first_ejection_supervised=req.first_ejection_supervised,
     )
     start_gate = await post_printer_start_gate(start_req)
     steps.append(_bambu_prestart_step("start_gate", "Guarded start gate", start_gate, ok=bool(start_gate.get("ready_to_publish"))))
@@ -9554,15 +10272,16 @@ async def post_printer_bambu_prestart_check(req: PrinterBambuPrestartCheckReques
     autoejection_handoff = (
         spc_readiness.get("autoejection_handoff") if isinstance(spc_readiness.get("autoejection_handoff"), dict) else {}
     )
-    steps.append(
-        {
-            "id": "autoejection_handoff",
-            "label": "Autoejection handoff",
-            "status": "ok" if autoejection_handoff else "blocked",
-            "ok": bool(autoejection_handoff),
-            "detail": str(autoejection_handoff.get("routine_id") or "not configured") if autoejection_handoff else "not configured",
-        }
-    )
+    if autoejection_handoff:
+        steps.append(
+            {
+                "id": "autoejection_handoff",
+                "label": "Autoejection handoff",
+                "status": "ok",
+                "ok": True,
+                "detail": str(autoejection_handoff.get("routine_id") or "configured"),
+            }
+        )
     ready_to_publish = bool(start_gate.get("ready_to_publish"))
     return {
         "ok": bool(http_ok and ready_to_publish),
@@ -9571,7 +10290,10 @@ async def post_printer_bambu_prestart_check(req: PrinterBambuPrestartCheckReques
         "selected_printer": selected_printer,
         "status": "ready_to_publish_not_started" if ready_to_publish else "blocked",
         "steps": steps,
+        "video_status": video_status,
+        "device_screen": camera_device_screen,
         "slice_artifact": slice_result,
+        "autoejection_patch": autoejection_patch,
         "http_artifact_route": http_route,
         "start_gate": start_gate,
         "spc_readiness": spc_readiness,
@@ -9648,9 +10370,14 @@ async def get_printer_autoejection_status() -> dict[str, object]:
     selected_profile, selection_reason = manager.fleet_selection()
     if selected_profile.provider == "bambulab_x2d":
         status = manager.autoejection_status()
-        consumer_readiness = _bambu_manipulation_consumer_readiness(mode="live")
+        native_patch = bool(status.get("native_gcode_patch"))
+        consumer_readiness = (
+            _bambu_native_gcode_consumer_readiness()
+            if native_patch
+            else _bambu_manipulation_consumer_readiness(mode="live")
+        )
         blockers = [str(item) for item in status.get("blockers", [])] if isinstance(status.get("blockers"), list) else []
-        if status.get("can_run_test") and not consumer_readiness.get("ready"):
+        if status.get("can_run_test") and not native_patch and not consumer_readiness.get("ready"):
             blockers = [*blockers, *[str(item) for item in consumer_readiness.get("blockers", [])]]
         return {
             "ok": True,
@@ -9659,11 +10386,13 @@ async def get_printer_autoejection_status() -> dict[str, object]:
             "selected_printer": manager._selected_printer_payload(selected_profile, selection_reason),
             "autoejection": status,
             "consumer_readiness": consumer_readiness,
-            "can_run_test": bool(status.get("can_run_test", False) and consumer_readiness.get("ready")),
+            "can_run_test": bool(status.get("can_run_test", False) and (native_patch or consumer_readiness.get("ready"))),
             "blockers": blockers,
             "settings_path": str(manager.config.autoejection_memory_path),
             "message": (
-                "Bambu autoejection routine and Manipulation Agent consumer are configured and testable."
+                "Bambu Native G-code patch provider is configured and testable."
+                if status.get("can_run_test") and native_patch
+                else "Bambu autoejection routine and Manipulation Agent consumer are configured and testable."
                 if status.get("can_run_test") and consumer_readiness.get("ready")
                 else "Bambu autoejection provider is configured, but the Manipulation Agent consumer is not ready."
                 if status.get("can_run_test")
@@ -9684,6 +10413,119 @@ async def get_printer_autoejection_status() -> dict[str, object]:
     }
 
 
+@app.get("/api/printer/bed-clear")
+async def get_printer_bed_clear() -> dict[str, object]:
+    """Return Bambu post-ejection bed-clear evidence without touching hardware."""
+    manager = _printer_bridge_manager()
+    selected_profile, selection_reason = manager.fleet_selection()
+    bed_clear = manager.bed_clear_status()
+    return {
+        "ok": True,
+        "tool": "printer.bed_clear",
+        "provider": selected_profile.provider,
+        "selected_printer": manager._selected_printer_payload(selected_profile, selection_reason),
+        "bed_clear": bed_clear,
+        "settings_path": str(manager.bed_clear_memory().path),
+        "blockers": [bed_clear["blocking_code"]] if bed_clear.get("blocking_code") else [],
+    }
+
+
+@app.post("/api/printer/bed-clear")
+async def post_printer_bed_clear(req: PrinterBedClearRequest) -> dict[str, object]:
+    """Persist Bambu post-ejection bed-clear evidence from operator/camera/vision."""
+    manager = _printer_bridge_manager()
+    selected_profile, selection_reason = manager.fleet_selection()
+    bed_clear = manager.save_bed_clear_evidence(req.model_dump(exclude_unset=True))
+    return {
+        "ok": True,
+        "tool": "printer.bed_clear",
+        "provider": selected_profile.provider,
+        "selected_printer": manager._selected_printer_payload(selected_profile, selection_reason),
+        "bed_clear": bed_clear,
+        "settings_path": str(manager.bed_clear_memory().path),
+        "blockers": [bed_clear["blocking_code"]] if bed_clear.get("blocking_code") else [],
+    }
+
+
+@app.post("/api/printer/bambu-autoejection-proof-template")
+async def post_printer_bambu_autoejection_proof_template(req: PrinterBambuAutoejectionProofTemplateRequest) -> dict[str, object]:
+    """Write a fail-closed Bambu physical validation proof package scaffold."""
+    from scripts.audit_bambu_autoejection_completion import write_proof_template
+
+    manager = _printer_bridge_manager()
+    selected_profile, selection_reason = manager.fleet_selection()
+    if selected_profile.provider != "bambulab_x2d":
+        return {
+            "ok": False,
+            "tool": "printer.bambu.improvement14_proof_template",
+            "provider": selected_profile.provider,
+            "selected_printer": manager._selected_printer_payload(selected_profile, selection_reason),
+            "status": "blocked",
+            "failure_code": "BAMBU_PROOF_TEMPLATE_NOT_APPLICABLE",
+            "message": "Bambu physical proof templates are only applicable to the selected Bambu Lab bridge.",
+        }
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    default_path = manager.repo_root / "artifacts" / "printer" / "manual" / "bambu" / f"bambu_autoejection_physical_validation_{stamp}.json"
+    result = write_proof_template(
+        req.proof_package_path or str(default_path),
+        printer_profile_id=req.printer_profile_id or selected_profile.profile_id,
+        provider=req.provider or "bambulab",
+    )
+    result = {
+        **result,
+        "provider": selected_profile.provider,
+        "selected_printer": manager._selected_printer_payload(selected_profile, selection_reason),
+    }
+    await controller.emit_workspace_result(
+        workspace="printer",
+        tool="printer.bambu.improvement14_proof_template",
+        result=result,
+        stage=Stage.SPECIMEN,
+        module_id="specimen",
+        agent="specimen_agent",
+        workflow="bambu_autoejection_proof_template",
+        node_event=False,
+    )
+    return result
+
+
+@app.post("/api/printer/bambu-autoejection-completion-audit")
+async def post_printer_bambu_autoejection_completion_audit(req: PrinterBambuAutoejectionCompletionAuditRequest) -> dict[str, object]:
+    """Audit Bambu physical autoejection proof evidence without running hardware."""
+    from scripts.audit_bambu_autoejection_completion import audit as audit_bambu_autoejection_completion
+
+    manager = _printer_bridge_manager()
+    selected_profile, selection_reason = manager.fleet_selection()
+    if selected_profile.provider != "bambulab_x2d":
+        return {
+            "ok": False,
+            "tool": "printer.bambu.improvement14_completion_audit",
+            "provider": selected_profile.provider,
+            "selected_printer": manager._selected_printer_payload(selected_profile, selection_reason),
+            "status": "blocked",
+            "failure_code": "BAMBU_COMPLETION_AUDIT_NOT_APPLICABLE",
+            "message": "Bambu completion audit is only applicable to the selected Bambu Lab bridge.",
+            "blockers": ["BAMBU_COMPLETION_AUDIT_NOT_APPLICABLE"],
+        }
+    result = audit_bambu_autoejection_completion(req.proof_package_path, latest=bool(req.latest))
+    result = {
+        **result,
+        "provider": selected_profile.provider,
+        "selected_printer": manager._selected_printer_payload(selected_profile, selection_reason),
+    }
+    await controller.emit_workspace_result(
+        workspace="printer",
+        tool="printer.bambu.improvement14_completion_audit",
+        result=result,
+        stage=Stage.SPECIMEN,
+        module_id="specimen",
+        agent="specimen_agent",
+        workflow="bambu_autoejection_completion_audit",
+        node_event=False,
+    )
+    return result
+
+
 @app.post("/api/printer/autoejection-config")
 async def post_printer_autoejection_config(req: PrinterAutoejectionConfigRequest) -> dict[str, object]:
     """Persist operator-verified Bambu autoejection settings without running motion."""
@@ -9697,10 +10539,19 @@ async def post_printer_autoejection_config(req: PrinterAutoejectionConfigRequest
             "failure_code": "BAMBU_AUTOEJECTION_CONFIG_NOT_APPLICABLE",
             "message": "Bambu autoejection config is only applicable to the Bambu Lab bridge.",
         }
-    status = manager.save_autoejection_config(req.model_dump())
-    consumer_readiness = _bambu_manipulation_consumer_readiness(mode="live")
+    request_payload = req.model_dump()
+    if request_payload.get("fallback_to_robot_pickoff") is not None:
+        request_payload["recovery_to_robot_pickoff"] = bool(request_payload.get("fallback_to_robot_pickoff"))
+    request_payload.pop("fallback_to_robot_pickoff", None)
+    status = manager.save_autoejection_config(request_payload)
+    native_patch = bool(status.get("native_gcode_patch"))
+    consumer_readiness = (
+        _bambu_native_gcode_consumer_readiness()
+        if native_patch
+        else _bambu_manipulation_consumer_readiness(mode="live")
+    )
     blockers = [str(item) for item in status.get("blockers", [])] if isinstance(status.get("blockers"), list) else []
-    if status.get("can_run_test") and not consumer_readiness.get("ready"):
+    if status.get("can_run_test") and not native_patch and not consumer_readiness.get("ready"):
         blockers = [*blockers, *[str(item) for item in consumer_readiness.get("blockers", [])]]
     return {
         "ok": True,
@@ -9709,11 +10560,13 @@ async def post_printer_autoejection_config(req: PrinterAutoejectionConfigRequest
         "selected_printer": manager._selected_printer_payload(selected_profile, selection_reason),
         "autoejection": status,
         "consumer_readiness": consumer_readiness,
-        "can_run_test": bool(status.get("can_run_test", False) and consumer_readiness.get("ready")),
+        "can_run_test": bool(status.get("can_run_test", False) and (native_patch or consumer_readiness.get("ready"))),
         "blockers": blockers,
         "settings_path": str(manager.config.autoejection_memory_path),
         "message": (
-            "Bambu autoejection routine and Manipulation Agent consumer are configured and testable."
+            "Bambu Native G-code patch config saved and testable."
+            if status.get("can_run_test") and native_patch
+            else "Bambu autoejection routine and Manipulation Agent consumer are configured and testable."
             if status.get("can_run_test") and consumer_readiness.get("ready")
             else "Bambu autoejection config saved, but the Manipulation Agent consumer is not ready."
             if status.get("can_run_test")
@@ -9722,8 +10575,53 @@ async def post_printer_autoejection_config(req: PrinterAutoejectionConfigRequest
     }
 
 
+@app.post("/api/printer/bambu-autoejection-sweep-test")
+async def post_printer_bambu_autoejection_sweep_test(req: PrinterAutoejectionTestRequest) -> dict[str, object]:
+    """Generate a standalone Bambu full-bed sweep test artifact without publishing."""
+    manager = _printer_bridge_manager()
+    selected_profile, selection_reason = manager.fleet_selection()
+    autoejection = manager.autoejection_status() if selected_profile.provider == "bambulab_x2d" else {}
+    sweep_artifact = manager.build_bambu_autoejection_sweep_test_artifact(
+        specimen_id="bambu-sweep-test",
+    )
+    result = {
+        "ok": bool(sweep_artifact.get("ok")),
+        "tool": "printer.bambu.autoejection_sweep_test",
+        "provider": selected_profile.provider,
+        "selected_printer": manager._selected_printer_payload(selected_profile, selection_reason),
+        "status": "sweep_test_artifact_ready" if sweep_artifact.get("ok") else "blocked",
+        "failure_code": "" if sweep_artifact.get("ok") else str(sweep_artifact.get("failure_code") or "BAMBU_AUTOEJECTION_SWEEP_TEST_FAILED"),
+        "motion_started": False,
+        "requested_start_immediately": bool(req.start_immediately),
+        "autoejection": autoejection,
+        "consumer_readiness": _bambu_native_gcode_consumer_readiness() if sweep_artifact.get("ok") else {},
+        "standalone_artifact": sweep_artifact,
+        "handoff": {},
+        "autoejection_handoff": {},
+        "message": "Bambu full-bed sweep test artifact is ready. No MQTT command was published.",
+        "step_trace": [
+            {"step": "AUTOEJECTION_GATE", "status": "ok" if sweep_artifact.get("ok") else "blocked", "detail": str(autoejection.get("provider") or sweep_artifact.get("failure_code") or "")},
+            {
+                "step": "SWEEP_TEST_GCODE_ARTIFACT",
+                "status": "ready" if sweep_artifact.get("ok") else "blocked",
+                "detail": str(sweep_artifact.get("patched_artifact_path") or sweep_artifact.get("failure_code") or ""),
+            },
+        ],
+    }
+    await controller.emit_workspace_result(
+        workspace="printer",
+        tool="printer.bambu.autoejection_sweep_test",
+        result=result,
+        stage=Stage.SPECIMEN,
+        module_id="specimen",
+        agent="specimen_agent",
+        workflow="autoejection_sweep_test",
+    )
+    return result
+
+
 @app.post("/api/printer/autoejection-test")
-async def post_printer_autoejection_test(req: PrinterAutoejectionTestRequest) -> dict[str, object]:
+async def post_printer_autoejection_test(req: PrinterAutoejectionTestRequest, request: Request) -> dict[str, object]:
     """Run a standalone autoejection test using the same ejection G-code builder."""
     manager = _printer_bridge_manager()
     selected_profile, selection_reason = manager.fleet_selection()
@@ -9741,6 +10639,155 @@ async def post_printer_autoejection_test(req: PrinterAutoejectionTestRequest) ->
                 "autoejection": autoejection,
                 "step_trace": [{"step": "AUTOEJECTION_GATE", "status": "blocked", "detail": "not_configured"}],
             }
+            await controller.emit_workspace_result(
+                workspace="printer",
+                tool="printer.autoejection_test",
+                result=result,
+                stage=Stage.SPECIMEN,
+                module_id="specimen",
+                agent="specimen_agent",
+                workflow="autoejection_test",
+            )
+            return result
+        if autoejection.get("native_gcode_patch"):
+            consumer_readiness = _bambu_native_gcode_consumer_readiness()
+            standalone_artifact = manager.build_standalone_bambu_autoejection_artifact(
+                specimen_id=f"bambu-eject-{req.position}",
+                position=req.position,
+                object_size_mm=[float(item) for item in req.object_size_mm],
+            )
+            result = {
+                "ok": bool(standalone_artifact.get("ok")),
+                "tool": "printer.autoejection_test",
+                "provider": "bambulab_x2d",
+                "selected_printer": manager._selected_printer_payload(selected_profile, selection_reason),
+                "status": "standalone_artifact_ready" if standalone_artifact.get("ok") else "blocked",
+                "failure_code": "" if standalone_artifact.get("ok") else str(standalone_artifact.get("failure_code") or "BAMBU_AUTOEJECTION_STANDALONE_FAILED"),
+                "motion_started": False,
+                "requested_start_immediately": bool(req.start_immediately),
+                "autoejection": autoejection,
+                "consumer_readiness": consumer_readiness,
+                "standalone_artifact": standalone_artifact,
+                "handoff": {},
+                "autoejection_handoff": {},
+                "message": "Bambu native G-code autoejection standalone artifact is ready. No MQTT command was published.",
+                "step_trace": [
+                    {"step": "AUTOEJECTION_GATE", "status": "ok", "detail": str(autoejection.get("provider") or "")},
+                    {
+                        "step": "STANDALONE_GCODE_ARTIFACT",
+                        "status": "ready" if standalone_artifact.get("ok") else "blocked",
+                        "detail": str(standalone_artifact.get("patched_artifact_path") or standalone_artifact.get("failure_code") or ""),
+                    },
+                ],
+            }
+            if (
+                req.mode == "live"
+                and req.start_immediately
+                and standalone_artifact.get("ok")
+            ):
+                direct_gcode = _bambu_direct_standalone_gcode(standalone_artifact)
+                memory = BambuConnectionMemory(selected_profile.connection_memory_path)
+                raw_connection = memory.load()
+                raw_auth = raw_connection.get("auth") if isinstance(raw_connection.get("auth"), dict) else {}
+                connection = memory.redacted()
+                topic = manager.config.mqtt.request_topic_template.format(serial=str(connection.get("serial") or ""))
+                prepare_result = manager.prepare(
+                    {
+                        "runtime_mode": "live",
+                        "health_only": False,
+                        "bambu_direct_gcode": True,
+                        "subtask_name": f"bambu-eject-{req.position}",
+                    }
+                )
+                blockers, gate_checks = _bambu_direct_gcode_gate_blockers(
+                    direct_gcode=direct_gcode,
+                    prepare_result=prepare_result,
+                    operator_confirmed=req.operator_confirmed,
+                    guardian_approved=req.guardian_approved,
+                    dry_run=req.dry_run,
+                )
+                camera_status = _bambu_autoejection_camera_gate(manager, ".autoeject.gcode")
+                for code in camera_status.get("blockers", []) if isinstance(camera_status.get("blockers"), list) else []:
+                    if code and code not in blockers:
+                        blockers.append(str(code))
+                autoejection_operator_checklist = _bambu_autoejection_operator_checklist(req, ".autoeject.gcode")
+                for code in (
+                    autoejection_operator_checklist.get("blockers", [])
+                    if isinstance(autoejection_operator_checklist.get("blockers"), list)
+                    else []
+                ):
+                    if code and code not in blockers:
+                        blockers.append(str(code))
+                bed_clear = _append_bambu_bed_clear_blocker(blockers, manager)
+                if blockers:
+                    result = {
+                        **result,
+                        "ok": False,
+                        "status": "blocked",
+                        "failure_code": "BAMBU_STANDALONE_GCODE_GATE_BLOCKED",
+                        "blockers": blockers,
+                        "gate_checks": gate_checks,
+                        "direct_gcode": {key: value for key, value in direct_gcode.items() if key != "gcode"},
+                        "connection": connection,
+                        "camera_status": camera_status,
+                        "autoejection_operator_checklist": autoejection_operator_checklist,
+                        "bed_clear": bed_clear,
+                        "remote_path": "",
+                        "message": "Bambu standalone direct G-code autoejection was blocked by live safety gates.",
+                        "step_trace": [
+                            *result["step_trace"],
+                            {
+                                "step": "DIRECT_GCODE_GATE",
+                                "status": "blocked",
+                                "detail": ",".join(blockers),
+                            },
+                        ],
+                    }
+                else:
+                    standalone_publish = manager.mqtt_client.publish_gcode_line_command(
+                        host=str(raw_connection.get("host") or ""),
+                        serial=str(connection.get("serial") or ""),
+                        username=str(connection.get("username") or "bblp"),
+                        access_code=str(raw_auth.get("access_code") or ""),
+                        topic=topic,
+                        gcode=str(direct_gcode.get("gcode") or ""),
+                        timeout_sec=manager.config.mqtt.publish_timeout_sec,
+                    )
+                    motion_started = bool(standalone_publish.get("ok"))
+                    result = {
+                        **result,
+                        "ok": bool(standalone_publish.get("ok")),
+                        "status": "standalone_motion_started" if motion_started else "blocked",
+                        "failure_code": "" if motion_started else str(standalone_publish.get("failure_code") or "BAMBU_STANDALONE_GCODE_LINE_PUBLISH_FAILED"),
+                        "motion_started": motion_started,
+                        "will_publish": bool(standalone_publish.get("will_publish")),
+                        "published": bool(standalone_publish.get("published")),
+                        "remote_path": "",
+                        "direct_gcode": {key: value for key, value in direct_gcode.items() if key != "gcode"},
+                        "gate_checks": gate_checks,
+                        "camera_status": camera_status,
+                        "autoejection_operator_checklist": autoejection_operator_checklist,
+                        "bed_clear": bed_clear,
+                        "standalone_publish": standalone_publish,
+                        "message": (
+                            "Bambu standalone autoejection G-code was published through MQTT gcode_line."
+                            if motion_started
+                            else str(standalone_publish.get("message") or "Bambu standalone autoejection gcode_line publish failed.")
+                        ),
+                        "step_trace": [
+                            *result["step_trace"],
+                            {
+                                "step": "DIRECT_GCODE_GATE",
+                                "status": "ok",
+                                "detail": f"lines={direct_gcode.get('line_count')}",
+                            },
+                            {
+                                "step": "GCODE_LINE_PUBLISH",
+                                "status": "published" if motion_started else "blocked",
+                                "detail": str(standalone_publish.get("status") or standalone_publish.get("failure_code") or ""),
+                            },
+                        ],
+                    }
             await controller.emit_workspace_result(
                 workspace="printer",
                 tool="printer.autoejection_test",
@@ -9799,7 +10846,7 @@ async def post_printer_autoejection_test(req: PrinterAutoejectionTestRequest) ->
             "handoff": handoff,
             "autoejection_handoff": handoff,
             "message": (
-                "Bambu autoejection provider handoff is ready. No Prusa bed-sweep G-code was generated "
+                "Bambu autoejection provider handoff is ready. No Bambu native G-code artifact was generated "
                 "and no robot motion was started by this endpoint."
             ),
             "step_trace": [
