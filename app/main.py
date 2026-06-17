@@ -3659,7 +3659,7 @@ def _bridge_workspace_path(workspace: str, bridge_id: str = "") -> str:
     defaults = {
         "windows_pyautogui_bridge": "/equipment/windows",
         "lerobot_bridge": "/lerobot",
-        "fenicsx_cae_bridge": "/cae",
+        "cae_bridge": "/cae",
         "camera_utm_bridge": "/lerobot",
         "prusa_bridge": "/printer",
     }
@@ -3672,7 +3672,7 @@ def _bridge_endpoint_defaults(bridge_id: str, workspace: str) -> tuple[str, str]
         "prusa_bridge": ("/api/printer/status", "/api/printer/spc-readiness"),
         "lerobot_bridge": ("/api/lerobot/config", "/api/lerobot/profiles/validate"),
         "windows_pyautogui_bridge": ("/api/equipment/windows/readiness", "/api/equipment/windows/live-preflight"),
-        "fenicsx_cae_bridge": ("/api/cae/config", "/api/cae/config"),
+        "cae_bridge": ("/api/cae/config", "/api/cae/config"),
         "camera_utm_bridge": ("/api/lerobot/config", "/api/lerobot/camera/test"),
     }
     return mapping.get(str(bridge_id or "").strip(), ("/api/devices/state", workspace or "/api/devices/state"))
@@ -3684,7 +3684,7 @@ def _bridge_evidence_defaults(bridge_id: str, tools: list[str]) -> list[str]:
         "prusa_bridge": ["printer_prepare.v1", "printer_runtime.v1", "slicer_artifact.v1"],
         "lerobot_bridge": ["robot_task_result.v1", "lerobot_session.v1", "camera_capture.v1"],
         "windows_pyautogui_bridge": ["equipment_result.v1", "utm_data_ready.v1", "screen_evidence.v1"],
-        "fenicsx_cae_bridge": ["fem_result.v1", "cae_report.v1", "analysis_metrics.v1"],
+        "cae_bridge": ["fem_result.v1", "cae_report.v1", "analysis_metrics.v1"],
         "camera_utm_bridge": ["camera_capture.v1", "vision_signal.v1", "utm_result.v1"],
     }
     defaults = list(mapping.get(str(bridge_id or "").strip(), []))

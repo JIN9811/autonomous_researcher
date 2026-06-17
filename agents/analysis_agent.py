@@ -304,298 +304,44 @@ class AnalysisAgent(BaseAgent):
                 "message": f"{exc.__class__.__name__}: {exc}",
             }
 
-    def _fem_payload(self, state: OrchestratorState, geometry: dict[str, Any]) -> dict[str, Any]:
-        payload = self._cae_payload(state, geometry)
-        payload.update(
-            {
-                "schema": "fem_request.v1",
-                "run_id": state.run_id,
-                "experiment_id": state.experiment_id,
-                "runtime_mode": state.mode.value,
-                "mode": state.mode.value,
-                "source": "analysis_agent",
-            }
-        )
-        return payload
-
-    def _run_fem(self, state: OrchestratorState, ctx: AgentContext, geometry: dict[str, Any]) -> dict[str, Any] | None:
-        tools = getattr(ctx, "tools", None)
-        if tools is None:
-            return None
-        try:
-            available = tools.list_tools() if hasattr(tools, "list_tools") else []
-            if available and "fenicsx.run_linear_elasticity" not in available:
-                return None
-            return tools.call("fenicsx.run_linear_elasticity", self._fem_payload(state, geometry))
-        except KeyError:
-            return None
-        except Exception as exc:
+    def _cae_simulation_loop(self, cae_result: dict[str, Any] | None) -> dict[str, Any]:
+        """Expose CAE/CalculiX simulation evidence in the legacy loop slot."""
+        if not isinstance(cae_result, dict):
             return {
-                "ok": False,
-                "tool": "fenicsx.run_linear_elasticity",
-                "status": "error",
-                "failure_code": "FENICSX_TOOL_ERROR",
-                "message": f"{exc.__class__.__name__}: {exc}",
+                "schema": "analysis_cae_simulation_loop.v1",
+                "status": "skipped",
+                "reason": "cae_tool_unavailable",
+                "iterations": [],
+                "selected_result": {},
+                "tool_sequence": ["cae.health", "cae.run_static_analysis"],
             }
+        record = {
+            "iteration": 1,
+            "tool": cae_result.get("tool", "cae.run_static_analysis"),
+            "status": cae_result.get("status", "unknown"),
+            "ok": bool(cae_result.get("ok")),
+            "solver": cae_result.get("solver") or cae_result.get("default_solver") or "calculix",
+            "mesh_size_mm": cae_result.get("mesh_size_mm"),
+            "agreement_source": "fem_utm_comparison.v1",
+        }
+        return {
+            "schema": "analysis_cae_simulation_loop.v1",
+            "status": "completed" if cae_result.get("ok") else "blocked",
+            "health": {},
+            "iterations": [record],
+            "selected_iteration": 1 if cae_result.get("ok") else None,
+            "selected_cache_status": cae_result.get("cache_status"),
+            "selected_result": cae_result if cae_result.get("ok") else {},
+            "tool_sequence": ["cae.health", "cae.run_static_analysis"],
+            "safety_rule": "simulation evidence is produced only through registered CAE/CalculiX bridge tools and validated payloads",
+        }
 
     @staticmethod
-    def _extract_json_object(text: str) -> dict[str, Any]:
-        raw = str(text or "").strip()
-        if not raw:
+    def _cae_as_fem_result(cae_result: dict[str, Any] | None) -> dict[str, Any]:
+        """Keep legacy FEM report slots backed by CAE/CalculiX evidence."""
+        if not isinstance(cae_result, dict):
             return {}
-        start = raw.find("{")
-        end = raw.rfind("}")
-        if start < 0 or end <= start:
-            return {}
-        try:
-            value = json.loads(raw[start : end + 1])
-        except json.JSONDecodeError:
-            return {}
-        return value if isinstance(value, dict) else {}
-
-    @staticmethod
-    def _fenicsx_tutorial_contract() -> dict[str, Any]:
-        """Return the fixed tutorial-derived FEM workflow the LLM may plan around."""
-        return {
-            "schema": "fenicsx_tutorial_contract.v1",
-            "source": "artifacts/external/fenicsx/sources/dolfinx-tutorial/chapter2/linearelasticity_code.py",
-            "problem_family": "small_strain_linear_elasticity",
-            "tutorial_steps": [
-                "create 3D mesh from specimen bounding box or STL-derived envelope",
-                "define vector Lagrange function space with three displacement components",
-                "apply Dirichlet boundary condition on the bottom fixture face",
-                "apply top cyclic compression load/traction as validated loading data",
-                "define epsilon(u), sigma(u), bilinear form a(u,v), and linear form L(v)",
-                "solve the linear variational problem with a PETSc-backed validated template",
-                "postprocess displacement, reaction force, Von Mises stress, stiffness, and structural score",
-                "compare low-fidelity FEM prediction with high-fidelity UTM measurement",
-            ],
-            "allowed_tools": ["fenicsx.health", "fenicsx.run_linear_elasticity", "fenicsx.run_fem"],
-            "safety_rule": "LLM may plan and judge validated steps, but must not generate or execute arbitrary solver code.",
-        }
-
-    def _default_fem_agentic_plan(self, state: OrchestratorState, geometry: dict[str, Any]) -> dict[str, Any]:
-        spec = state.current_experiment_spec if isinstance(state.current_experiment_spec, dict) else {}
-        size = self._vector3(geometry.get("specimen_size_mm"), [20.0, 20.0, 20.0])
-        base_mesh = self._safe_float(spec.get("fem_agentic_mesh_size_mm") or spec.get("cae_mesh_size_mm") or spec.get("mesh_size_mm"), 2.0)
-        base_mesh = max(0.25, min(base_mesh, max(min(size) / 3.0, 0.25)))
-        return {
-            "schema": "analysis_fem_agentic_plan.v1",
-            "problem_family": "small_strain_linear_elasticity",
-            "max_iterations": int(max(1, min(self._safe_float(spec.get("fem_agentic_max_iterations"), 3.0), 3))),
-            "mesh_sweep_mm": [round(base_mesh, 6), round(max(base_mesh * 0.75, 0.25), 6), round(max(base_mesh * 0.5, 0.25), 6)],
-            "acceptance": {
-                "min_agreement_score": self._safe_float(spec.get("fem_agentic_min_agreement_score"), 0.60),
-                "require_solver_converged": True,
-            },
-            "decision_policy": "accept first converged run whose FEM/UTM agreement passes threshold; otherwise keep best available run",
-            "tutorial_basis": self._fenicsx_tutorial_contract()["tutorial_steps"],
-        }
-
-    def _sanitize_fem_agentic_plan(self, raw_plan: dict[str, Any], state: OrchestratorState, geometry: dict[str, Any]) -> dict[str, Any]:
-        default = self._default_fem_agentic_plan(state, geometry)
-        plan = dict(default)
-        if isinstance(raw_plan, dict):
-            if str(raw_plan.get("problem_family") or "").strip():
-                plan["problem_family"] = str(raw_plan["problem_family"]).strip()[:80]
-            acceptance = raw_plan.get("acceptance") if isinstance(raw_plan.get("acceptance"), dict) else {}
-            if "min_agreement_score" in acceptance:
-                plan["acceptance"]["min_agreement_score"] = max(0.35, min(self._safe_float(acceptance.get("min_agreement_score"), 0.60), 0.95))
-            if "max_iterations" in raw_plan:
-                plan["max_iterations"] = int(max(1, min(self._safe_float(raw_plan.get("max_iterations"), plan["max_iterations"]), 3)))
-            meshes = raw_plan.get("mesh_sweep_mm")
-            if isinstance(meshes, list) and meshes:
-                cleaned: list[float] = []
-                for value in meshes[:5]:
-                    mesh_size = self._safe_float(value, math.nan)
-                    if math.isfinite(mesh_size) and mesh_size > 0:
-                        cleaned.append(round(max(0.20, min(mesh_size, 10.0)), 6))
-                if cleaned:
-                    plan["mesh_sweep_mm"] = cleaned
-            if str(raw_plan.get("decision_policy") or "").strip():
-                plan["decision_policy"] = str(raw_plan["decision_policy"]).strip()[:240]
-        plan["mesh_sweep_mm"] = list(dict.fromkeys(plan["mesh_sweep_mm"]))[: max(1, int(plan["max_iterations"]))]
-        plan["tutorial_contract"] = self._fenicsx_tutorial_contract()
-        return plan
-
-    async def _llm_fem_agentic_plan(
-        self,
-        state: OrchestratorState,
-        ctx: AgentContext,
-        geometry: dict[str, Any],
-        metrics: dict[str, Any],
-        source_meta: dict[str, Any],
-    ) -> dict[str, Any]:
-        use_llm = state.mode.value == "live" or getattr(ctx, "force_real_llm_in_test", False)
-        default = self._default_fem_agentic_plan(state, geometry)
-        if not use_llm:
-            return {"ok": True, "source": "deterministic_default", "plan": default, "raw_text": ""}
-        contract = self._fenicsx_tutorial_contract()
-        prompt = (
-            "Create a JSON-only FEniCSx analysis plan for this autonomous materials experiment. "
-            "Follow the DOLFINx linear elasticity tutorial sequence: mesh, vector function space, bottom Dirichlet support, top compression loading, "
-            "variational form, solve, Von Mises/reaction-force postprocess, and FEM-vs-UTM comparison. "
-            "You may only choose validated tool-loop settings; do not generate executable solver code. "
-            "Return JSON with keys: problem_family, mesh_sweep_mm, max_iterations, acceptance.min_agreement_score, decision_policy. "
-            f"tutorial_contract={json.dumps(contract, ensure_ascii=True)}\n"
-            f"geometry={json.dumps(geometry, ensure_ascii=True, default=str)}\n"
-            f"utm_metrics={json.dumps(metrics, ensure_ascii=True, default=str)[:1200]}\n"
-            f"source={json.dumps(source_meta, ensure_ascii=True, default=str)[:900]}"
-        )
-        try:
-            response = await ctx.complete("analysis_fem_planning", prompt, timeout_s=60.0 if state.mode == Mode.TEST else None)
-            parsed = self._extract_json_object(response.text)
-            sanitized = self._sanitize_fem_agentic_plan(parsed, state, geometry)
-            return {
-                "ok": bool(parsed),
-                "source": "llm" if parsed else "llm_invalid_json_fallback",
-                "plan": sanitized,
-                "raw_text": str(response.text or "")[:1200],
-            }
-        except Exception as exc:
-            return {
-                "ok": False,
-                "source": "llm_error_fallback",
-                "plan": self._sanitize_fem_agentic_plan(default, state, geometry),
-                "raw_text": f"{exc.__class__.__name__}: {exc}",
-            }
-
-    def _fem_agentic_iteration_payload(
-        self,
-        state: OrchestratorState,
-        geometry: dict[str, Any],
-        metrics: dict[str, Any],
-        plan: dict[str, Any],
-        *,
-        mesh_size_mm: float,
-        iteration_index: int,
-    ) -> dict[str, Any]:
-        payload = self._fem_payload(state, geometry)
-        peak_force = self._safe_float(metrics.get("peak_force_N"), 0.0)
-        if peak_force > 0:
-            loading = dict(payload.get("loading") if isinstance(payload.get("loading"), dict) else {})
-            loading["load_max_n"] = peak_force
-            payload["loading"] = loading
-        payload.update(
-            {
-                "mesh_size_mm": mesh_size_mm,
-                "agentic_loop": True,
-                "agentic_iteration": iteration_index,
-                "tutorial_contract": plan.get("tutorial_contract", self._fenicsx_tutorial_contract()),
-                "analysis_method": "dolfinx_tutorial_linear_elasticity_validated_tool_loop",
-            }
-        )
-        return payload
-
-    async def _run_fem_agentic_loop(
-        self,
-        state: OrchestratorState,
-        ctx: AgentContext,
-        geometry: dict[str, Any],
-        metrics: dict[str, Any],
-        source_meta: dict[str, Any],
-    ) -> dict[str, Any]:
-        tools = getattr(ctx, "tools", None)
-        if tools is None:
-            return {"schema": "analysis_fenicsx_agentic_loop.v1", "status": "skipped", "reason": "tool_registry_unavailable", "iterations": []}
-        try:
-            available = tools.list_tools() if hasattr(tools, "list_tools") else []
-        except Exception:
-            available = []
-        if available and "fenicsx.run_linear_elasticity" not in available:
-            return {"schema": "analysis_fenicsx_agentic_loop.v1", "status": "skipped", "reason": "fenicsx_tool_unavailable", "available_tools": available, "iterations": []}
-
-        llm_plan = await self._llm_fem_agentic_plan(state, ctx, geometry, metrics, source_meta)
-        plan = llm_plan.get("plan") if isinstance(llm_plan.get("plan"), dict) else self._default_fem_agentic_plan(state, geometry)
-        threshold = self._safe_float((plan.get("acceptance") or {}).get("min_agreement_score"), 0.60)
-        health: dict[str, Any] = {}
-        try:
-            if not available or "fenicsx.health" in available:
-                health = tools.call("fenicsx.health", {"source": "analysis_agent", "agentic_loop": True})
-        except Exception as exc:
-            health = {"ok": False, "tool": "fenicsx.health", "status": "error", "message": f"{exc.__class__.__name__}: {exc}"}
-
-        iterations: list[dict[str, Any]] = []
-        selected: dict[str, Any] | None = None
-        best_score = -1.0
-        for index, mesh_size in enumerate(plan.get("mesh_sweep_mm") or [2.0], start=1):
-            payload = self._fem_agentic_iteration_payload(
-                state,
-                geometry,
-                metrics,
-                plan,
-                mesh_size_mm=self._safe_float(mesh_size, 2.0),
-                iteration_index=index,
-            )
-            try:
-                result = tools.call("fenicsx.run_linear_elasticity", payload)
-            except Exception as exc:
-                result = {
-                    "ok": False,
-                    "tool": "fenicsx.run_linear_elasticity",
-                    "status": "error",
-                    "failure_code": "FENICSX_TOOL_ERROR",
-                    "message": f"{exc.__class__.__name__}: {exc}",
-                }
-            comparison = self._fem_utm_comparison(metrics, result if isinstance(result, dict) else None, None)
-            agreement = self._safe_float(comparison.get("agreement_score"), 0.0) if isinstance(comparison, dict) else 0.0
-            solver_ok = bool(result.get("ok") and (result.get("fem_metrics", result.get("metrics", {})) or {}).get("solver_converged", True)) if isinstance(result, dict) else False
-            accepted = bool(solver_ok and agreement >= threshold)
-            record = {
-                "iteration": index,
-                "mesh_size_mm": payload.get("mesh_size_mm"),
-                "status": result.get("status", "unknown") if isinstance(result, dict) else "unknown",
-                "ok": bool(result.get("ok")) if isinstance(result, dict) else False,
-                "cache_status": result.get("cache_status") if isinstance(result, dict) else None,
-                "solver_backend": result.get("solver_backend") if isinstance(result, dict) else None,
-                "agreement_score": agreement,
-                "accepted": accepted,
-                "comparison": comparison,
-                "tool_result": result,
-            }
-            iterations.append(record)
-            if solver_ok and agreement >= best_score:
-                best_score = agreement
-                selected = result
-            if accepted:
-                record["stop_reason"] = "agreement_threshold_met"
-                break
-        if selected is None and iterations:
-            for record in reversed(iterations):
-                result = record.get("tool_result") if isinstance(record.get("tool_result"), dict) else {}
-                if result.get("ok"):
-                    selected = result
-                    break
-        status = "completed" if isinstance(selected, dict) and selected.get("ok") else "blocked" if iterations else "skipped"
-        selected_iteration = None
-        selected_cache = None
-        if isinstance(selected, dict):
-            selected_key = selected.get("cache_key")
-            for record in iterations:
-                result = record.get("tool_result") if isinstance(record.get("tool_result"), dict) else {}
-                if selected_key and result.get("cache_key") == selected_key:
-                    selected_iteration = record.get("iteration")
-                    selected_cache = result.get("cache_status")
-                    break
-        public_iterations = [
-            {key: value for key, value in record.items() if key != "tool_result"}
-            for record in iterations
-        ]
-        return {
-            "schema": "analysis_fenicsx_agentic_loop.v1",
-            "status": status,
-            "tutorial_reference": self._fenicsx_tutorial_contract(),
-            "llm_plan": llm_plan,
-            "sanitized_plan": plan,
-            "health": health,
-            "iterations": public_iterations,
-            "selected_iteration": selected_iteration,
-            "selected_cache_status": selected_cache,
-            "selected_result": selected or {},
-            "acceptance_threshold": threshold,
-            "tool_sequence": ["fenicsx.health", "fenicsx.run_linear_elasticity"],
-            "safety_rule": "agentic loop plans and evaluates only; FEniCSx execution remains inside registered validated tools",
-        }
+        return {"schema": "fem_result.v1", "source": "cae.run_static_analysis", "result": cae_result}
 
     @staticmethod
     def _equipment_result(state: OrchestratorState) -> dict[str, Any]:
@@ -1303,6 +1049,8 @@ class AnalysisAgent(BaseAgent):
                 paths["fem_cache_manifest"] = str(fem_result["artifacts"]["fem_cache_manifest"])
         elif isinstance(cae_result, dict):
             paths["fem_result"] = self._write_json(base / "fem_result.json", {"schema": "fem_result.v1", "source": "cae.run_static_analysis", "result": cae_result})
+            if isinstance(cae_result.get("request"), dict):
+                paths["fem_request"] = self._write_json(base / "fem_request.json", cae_result["request"])
         if analysis.get("fem_agentic_loop"):
             paths["fem_agentic_loop"] = self._write_json(base / "fem_agentic_loop.json", analysis["fem_agentic_loop"])
         if analysis.get("fem_utm_comparison"):
@@ -1318,7 +1066,7 @@ class AnalysisAgent(BaseAgent):
         events = [
             {"event": "analysis.file_discovered", "source": source_meta, "created_at": datetime.now(timezone.utc).isoformat()},
             {"event": "analysis.metrics_computed", "metrics": metrics, "created_at": datetime.now(timezone.utc).isoformat()},
-            {"event": "analysis.fem_agentic_loop_completed", "status": analysis.get("fem_agentic_loop", {}).get("status"), "selected_iteration": analysis.get("fem_agentic_loop", {}).get("selected_iteration"), "created_at": datetime.now(timezone.utc).isoformat()},
+            {"event": "analysis.cae_simulation_completed", "status": analysis.get("fem_agentic_loop", {}).get("status"), "selected_iteration": analysis.get("fem_agentic_loop", {}).get("selected_iteration"), "created_at": datetime.now(timezone.utc).isoformat()},
             {"event": "analysis.bo_handoff_created", "ok_for_bo": handoff.get("bo_handoff", {}).get("ok_for_bo"), "created_at": datetime.now(timezone.utc).isoformat()},
         ]
         trace_path.write_text("".join(json.dumps(item, ensure_ascii=True, default=str) + "\n" for item in events), encoding="utf-8")
@@ -1665,7 +1413,7 @@ class AnalysisAgent(BaseAgent):
         geometry = self._specimen_geometry(state)
         cae_result = self._run_cae(state, ctx, geometry)
         fem_result: dict[str, Any] | None = None
-        fem_agentic_loop: dict[str, Any] = {"schema": "analysis_fenicsx_agentic_loop.v1", "status": "not_started", "iterations": []}
+        fem_agentic_loop: dict[str, Any] = self._cae_simulation_loop(cae_result)
         cae_metrics = {}
         if isinstance(cae_result, dict):
             raw_cae_metrics = cae_result.get("cae_metrics") if isinstance(cae_result.get("cae_metrics"), dict) else cae_result.get("metrics")
@@ -1693,7 +1441,7 @@ class AnalysisAgent(BaseAgent):
                 "specimen_geometry": geometry,
                 "cae_result": cae_result or {},
                 "cae_metrics": cae_metrics,
-                "fem_result": fem_result or {},
+                "fem_result": fem_result or self._cae_as_fem_result(cae_result),
                 "fem_metrics": fem_metrics,
                 "equipment_handoff_gate": live_handoff_gate,
                 "equipment_result": {
@@ -1722,7 +1470,7 @@ class AnalysisAgent(BaseAgent):
                 "specimen_geometry": geometry,
                 "cae_result": cae_result or {},
                 "cae_metrics": cae_metrics,
-                "fem_result": fem_result or {},
+                "fem_result": fem_result or self._cae_as_fem_result(cae_result),
                 "fem_metrics": fem_metrics,
                 "equipment_result": {
                     "tool": equipment_result.get("tool", ""),
@@ -1755,7 +1503,7 @@ class AnalysisAgent(BaseAgent):
                 "specimen_geometry": geometry,
                 "cae_result": cae_result or {},
                 "cae_metrics": cae_metrics,
-                "fem_result": fem_result or {},
+                "fem_result": fem_result or self._cae_as_fem_result(cae_result),
                 "fem_metrics": fem_metrics,
                 "data_quality": signal_quality,
                 "equipment_handoff_gate": live_handoff_gate,
@@ -1776,9 +1524,8 @@ class AnalysisAgent(BaseAgent):
             )
 
         metrics = self._metrics(curve, geometry)
-        fem_agentic_loop = await self._run_fem_agentic_loop(state, ctx, geometry, metrics, source_meta)
-        selected_fem = fem_agentic_loop.get("selected_result") if isinstance(fem_agentic_loop.get("selected_result"), dict) else {}
-        fem_result = selected_fem if selected_fem else None
+        fem_agentic_loop = self._cae_simulation_loop(cae_result)
+        fem_result = None
         if isinstance(fem_result, dict):
             raw_fem_metrics = fem_result.get("fem_metrics") if isinstance(fem_result.get("fem_metrics"), dict) else fem_result.get("metrics")
             fem_metrics = dict(raw_fem_metrics) if isinstance(raw_fem_metrics, dict) else {}
@@ -1790,8 +1537,6 @@ class AnalysisAgent(BaseAgent):
         fem_utm_comparison = self._fem_utm_comparison(metrics, fem_result, cae_result)
         closed_loop_sources = [source_meta.get("source", "utm")]
         closed_loop_sources.append("cae.run_static_analysis" if isinstance(cae_result, dict) and cae_result.get("ok") else "cae.unavailable")
-        closed_loop_sources.append("fenicsx.agentic_loop" if fem_agentic_loop.get("status") in {"completed", "blocked"} else "fenicsx.unavailable")
-        closed_loop_sources.append("fenicsx.run_linear_elasticity" if isinstance(fem_result, dict) and fem_result.get("ok") else "fenicsx.unavailable")
         analysis = {
             "ok": True,
             "source": source_meta,
@@ -1805,7 +1550,7 @@ class AnalysisAgent(BaseAgent):
             "fem_utm_comparison": fem_utm_comparison,
             "cae_result": cae_result or {},
             "cae_metrics": cae_metrics,
-            "fem_result": fem_result or {},
+            "fem_result": fem_result or self._cae_as_fem_result(cae_result),
             "fem_metrics": fem_metrics,
             "fem_agentic_loop": fem_agentic_loop,
             "closed_loop_sources": closed_loop_sources,

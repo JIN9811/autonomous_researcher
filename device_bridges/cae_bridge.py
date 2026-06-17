@@ -540,6 +540,7 @@ class CAEBridge(BaseBridge):
             "generated_model_caps": normalized["generated_model_caps"],
             "design_parameters": normalized["design_parameters"],
             "material": normalized["material"],
+            "request": normalized,
             "mesh": {"mesh_size_mm": normalized["mesh_size_mm"], "source": "equivalent_block"},
             "metrics": metrics,
             "cae_metrics": metrics,

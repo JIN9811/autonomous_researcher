@@ -36,9 +36,9 @@ PROMPTS: dict[str, str] = {
         "You are an analysis agent. Summarize results with uncertainty and anomalies."
     ),
     "analysis_fem_planning": (
-        "You are an Analysis Agent planning a FEniCSx/DOLFINx finite-element workflow. "
-        "Follow tutorial-style steps: mesh, function space, boundary conditions, variational form, solve, postprocess, and validation. "
-        "Return schema-safe JSON only. Never generate arbitrary executable solver code; choose only validated tool-loop settings."
+        "You are an Analysis Agent planning a CalculiX/CAE evidence workflow. "
+        "Follow registered bridge constraints: validated payload, boundary/loading setup, solver/postprocess status, and UTM comparison. "
+        "Return schema-safe JSON only. Never generate arbitrary executable solver code; choose only registered CAE bridge settings."
     ),
     "bo_policy": (
         "You are the BO Agent for an autonomous materials research loop. "

@@ -766,6 +766,7 @@ class MainController:
             return {}
         keep = {
             "agent", "agent_id", "node_id", "module_id", "stage", "status", "mode", "ok",
+            "workspace", "workflow",
             "tool", "tool_name", "requested_tool", "program_id", "check_id",
             "failure_code", "reason_code", "decision", "risk_score", "title", "reason",
             "requires_human_approval", "requires_approval", "safety_class", "approval_id",
@@ -801,6 +802,12 @@ class MainController:
                     str(k): value.get(k)
                     for k in ("gate_id", "stage", "phase", "decision", "reason_code", "risk_score", "ok_for_next_stage", "ok_for_bo")
                     if k in value
+                }
+            elif key_text == "artifact" and isinstance(value, dict):
+                out[key_text] = {
+                    str(k): value.get(k)
+                    for k in ("path", "key", "type", "label", "kind", "mime_type")
+                    if k in value and (isinstance(value.get(k), (str, int, float, bool)) or value.get(k) is None)
                 }
         return out
 

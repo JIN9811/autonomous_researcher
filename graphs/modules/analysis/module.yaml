@@ -9,9 +9,6 @@ module:
     dry_run_supported: true
   tools:
   - cae.run_static_analysis
-  - fenicsx.health
-  - fenicsx.run_linear_elasticity
-  - fenicsx.run_fem
   internal_graph:
     - id: 01_receive_equipment_artifact
       label: Receive Equipment Artifact
@@ -43,14 +40,14 @@ module:
     - id: 10_prepare_fem_problem
       label: Prepare FEM Problem
       kind: internal_step
-    - id: 11_llm_plan_fenicsx_tutorial_loop
-      label: LLM Plan FEniCSx Tutorial Loop
+    - id: 11_prepare_cae_calculix_payload
+      label: Prepare CAE CalculiX Payload
       kind: internal_step
-    - id: 12_probe_fenicsx_runtime
-      label: Probe FEniCSx Runtime
+    - id: 12_probe_cae_runtime
+      label: Probe CAE Runtime
       kind: internal_step
-    - id: 13_run_fenicsx_mesh_iteration
-      label: Run FEniCSx Mesh Iteration
+    - id: 13_run_cae_calculix_analysis
+      label: Run CAE CalculiX Analysis
       kind: internal_step
     - id: 14_compare_iteration_with_utm
       label: Compare Iteration With UTM
@@ -85,8 +82,7 @@ module:
   notes: >-
     GUI/module editor may edit this module config, but execution remains bound to
     allowlisted Python handlers. This module leaves llm_role empty so Python
-    task routes such as analysis_reasoning and analysis_fem_planning remain
-    distinct inside the agent. The FEniCSx agentic loop lets the LLM plan
-    tutorial-style mesh/function-space/boundary/solve/postprocess steps, but
-    execution is restricted to registered fenicsx.* tools and validated payloads.
+    task routes such as analysis_reasoning remain distinct inside the agent.
+    CAE/CalculiX evidence is produced only through registered cae.* tools and
+    validated payloads.
     Python source is not modified by the GUI or LLM.

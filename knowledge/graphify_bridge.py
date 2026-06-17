@@ -456,7 +456,7 @@ def _tool_defs(text: str, rel_path: str) -> list[str]:
 def _concepts(text: str, rel_path: str) -> list[str]:
     lower = f"{rel_path}\n{text[:20000]}".lower()
     concepts = []
-    for term in ("guardian", "knowledge", "bayesian_optimization", "bo", "tpms", "gyroid", "printer", "prusaslicer", "lerobot", "utm", "fenics", "langgraph", "runtime_ide", "self_evolution", "vllm", "ollama", "pyautogui"):
+    for term in ("guardian", "knowledge", "bayesian_optimization", "bo", "tpms", "gyroid", "printer", "prusaslicer", "lerobot", "utm", "calculix", "langgraph", "runtime_ide", "self_evolution", "vllm", "ollama", "pyautogui"):
         token = term.replace("_", " ")
         if term in lower or token in lower:
             concepts.append(term)

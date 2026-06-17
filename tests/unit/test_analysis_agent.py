@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -570,11 +571,8 @@ async def test_analysis_agent_accepts_negative_force_sign_convention(tmp_path: P
     assert analysis["data_quality_gate"]["force_nonzero"] is True
     assert analysis["data_quality_gate"]["force_changes"] is True
 
-from mcp_tools.fenicsx_tools import register_fenicsx_tools
-
-
 @pytest.mark.asyncio
-async def test_analysis_agent_emits_improvement06_artifacts_bo_handoff_and_fenicsx(tmp_path: Path) -> None:
+async def test_analysis_agent_emits_improvement06_artifacts_bo_handoff_and_calculix_cae(tmp_path: Path) -> None:
     csv_path = tmp_path / "utm_units.csv"
     csv_path.write_text(
         "Time (s),Extension (mm),Load (kN)\n"
@@ -585,15 +583,14 @@ async def test_analysis_agent_emits_improvement06_artifacts_bo_handoff_and_fenic
         encoding="utf-8",
     )
     tools = ToolRegistry()
-    register_fenicsx_tools(
+    register_cae_tools(
         tools,
         {
             "devices": {
-                "fenicsx": {
+                "cae": {
                     "enabled": True,
                     "mode": "test",
-                    "execution_backend": "deterministic",
-                    "artifact_dir": str(tmp_path / "fenicsx"),
+                    "artifact_dir": str(tmp_path / "cae"),
                 }
             }
         },
@@ -612,12 +609,15 @@ async def test_analysis_agent_emits_improvement06_artifacts_bo_handoff_and_fenic
     assert analysis["source"]["parser_id"] == "analysis.parsers.csv_header"
     assert analysis["source"]["column_mapping"]["mappings"]["Load (kN)"]["multiplier"] == 1000.0
     assert analysis["quality_gate"]["ok_for_metrics"] is True
-    assert "fenicsx.run_linear_elasticity" in analysis["closed_loop_sources"]
+    assert "cae.run_static_analysis" in analysis["closed_loop_sources"]
+    removed_solver_token = "fe" + "nics"
+    assert not any(removed_solver_token in str(item).lower() for item in analysis["closed_loop_sources"])
+    assert analysis["cae_result"]["ok"] is True
+    assert analysis["cae_result"]["tool"] == "cae.run_static_analysis"
     assert analysis["fem_result"]["schema"] == "fem_result.v1"
-    assert analysis["fem_agentic_loop"]["schema"] == "analysis_fenicsx_agentic_loop.v1"
+    assert analysis["fem_agentic_loop"]["schema"] == "analysis_cae_simulation_loop.v1"
     assert analysis["fem_agentic_loop"]["status"] == "completed"
-    assert analysis["fem_agentic_loop"]["tutorial_reference"]["problem_family"] == "small_strain_linear_elasticity"
-    assert analysis["fem_agentic_loop"]["iterations"]
+    assert analysis["fem_agentic_loop"]["selected_result"]["tool"] == "cae.run_static_analysis"
     assert analysis["fem_utm_comparison"]["schema"] == "fem_utm_comparison.v1"
     assert result.data["bo_handoff"]["schema_version"] == "analysis_bo_handoff_v1"
     assert result.data["bo_handoff"]["fidelity"]["utm_high"]["objective_source"] is True
@@ -644,7 +644,7 @@ async def test_analysis_agent_emits_improvement06_artifacts_bo_handoff_and_fenic
 
 
 @pytest.mark.asyncio
-async def test_analysis_agent_uses_llm_fenicsx_agentic_plan_when_enabled(tmp_path: Path) -> None:
+async def test_analysis_agent_does_not_call_removed_python_fem_tools(tmp_path: Path) -> None:
     csv_path = tmp_path / "utm_llm_plan.csv"
     csv_path.write_text(
         "time_s,displacement_mm,force_N\n"
@@ -655,28 +655,20 @@ async def test_analysis_agent_uses_llm_fenicsx_agentic_plan_when_enabled(tmp_pat
         encoding="utf-8",
     )
     tools = ToolRegistry()
-    register_fenicsx_tools(
+    register_cae_tools(
         tools,
         {
             "devices": {
-                "fenicsx": {
+                "cae": {
                     "enabled": True,
                     "mode": "test",
-                    "execution_backend": "deterministic",
-                    "artifact_dir": str(tmp_path / "fenicsx"),
+                    "artifact_dir": str(tmp_path / "cae"),
                 }
             }
         },
         repo_root=tmp_path,
     )
-    llm_json = (
-        '{"problem_family":"small_strain_linear_elasticity",'
-        '"mesh_sweep_mm":[2.5,1.25],'
-        '"max_iterations":2,'
-        '"acceptance":{"min_agreement_score":0.35},'
-        '"decision_policy":"accept first validated run then compare with UTM"}'
-    )
-    ctx = _CtxStub(force_real_llm_in_test=True, text=llm_json, tools=tools)
+    ctx = _CtxStub(force_real_llm_in_test=False, tools=tools)
     state = _state(equipment_result={"ok": True, "tool": "equipment.pyautogui.run", "result_file": str(csv_path)})
 
     result = await AnalysisAgent().run(state, ctx)
@@ -684,9 +676,10 @@ async def test_analysis_agent_uses_llm_fenicsx_agentic_plan_when_enabled(tmp_pat
     analysis = result.data["analysis"]
     loop = analysis["fem_agentic_loop"]
     assert result.success is True
-    assert ctx.prompts[0][0] == "analysis_fem_planning"
-    assert loop["llm_plan"]["source"] == "llm"
-    assert loop["sanitized_plan"]["mesh_sweep_mm"] == [2.5, 1.25]
-    assert loop["selected_result"]["request"]["loading"]["load_max_n"] == analysis["utm_metrics"]["peak_force_N"]
-    assert "create 3D mesh" in " ".join(loop["tutorial_reference"]["tutorial_steps"])
+    assert ctx.prompts == []
+    removed_solver_token = "fe" + "nics"
+    assert removed_solver_token not in json.dumps(analysis, ensure_ascii=True).lower()
+    assert loop["schema"] == "analysis_cae_simulation_loop.v1"
+    assert loop["tool_sequence"] == ["cae.health", "cae.run_static_analysis"]
+    assert loop["selected_result"]["tool"] == "cae.run_static_analysis"
     assert Path(analysis["analysis_artifacts"]["fem_agentic_loop"]).exists()

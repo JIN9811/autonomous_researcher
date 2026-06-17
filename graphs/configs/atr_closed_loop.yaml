@@ -221,7 +221,7 @@ graph:
     stage: null
     kind: bridge
     description: Hardware/software bridge boundary for printer, robot, UTM/Windows,
-      cameras, CAE, and FEniCSx tools.
+      cameras, and CAE/CalculiX tools.
     module_id: null
     position:
       x: 1616.0
@@ -234,7 +234,7 @@ graph:
       - prusa_bridge
       - lerobot_bridge
       - windows_pyautogui_bridge
-      - fenicsx_cae_bridge
+      - cae_bridge
       - camera_utm_bridge
       live_source: /api/devices/state
   - id: memory_evidence_plane
@@ -697,11 +697,11 @@ graph:
   - source: device_bridge_plane
     target: analysis
     condition: null
-    label: fenicsx_cae_utm_bridge boundary
+    label: cae_bridge boundary
     metadata:
       runtime_edge: device_bridge
       overlay_relation: device_tool_boundary
-      bridge: fenicsx_cae_utm_bridge
+      bridge: cae_bridge
       condition: tool_call_bridge_contract
   - source: analysis
     target: memory_evidence_plane
@@ -810,7 +810,6 @@ graph:
       - printer.prepare
       - lerobot.rollout.start
       - equipment.pyautogui.run
-      - fenicsx.run_linear_elasticity
       - cae.run_static_analysis
     - id: knowledge_memory_evolution
       node_id: memory_evidence_plane
@@ -847,12 +846,11 @@ graph:
       - equipment.pyautogui.screenshot
       config: memory/windows_pyautogui_connection.json
       live_boundary: Windows host macro execution with token-gated bridge server
-    - id: fenicsx_cae_bridge
-      label: FEniCSx / CAE Bridge
+    - id: cae_bridge
+      label: CAE / CalculiX Bridge
       workspace: /cae
       tools:
-      - fenicsx.health
-      - fenicsx.run_linear_elasticity
+      - cae.health
       - cae.run_static_analysis
       config: memory/cae_workspace_settings.json
       live_boundary: simulation subprocess/container bridge with artifact outputs

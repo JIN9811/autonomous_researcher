@@ -249,32 +249,6 @@ devices:
     mesh:
       default_mesh_size_mm: 2.0
 
-
-  fenicsx:
-    enabled: true
-    mode: test                    # test | live
-    provider: dolfinx
-    execution_backend: auto       # auto | deterministic | conda | docker
-    runtime_solver_enabled: false # false: fast deterministic bridge, true: call conda/docker FEniCSx
-    require_runtime_in_live: false
-    conda_env: fenicsx
-    docker_image: dolfinx/dolfinx:stable
-    artifact_dir: artifacts/fenicsx
-    solver_script_path: scripts/fenicsx_linear_elasticity_template.py
-    timeout_sec: 120
-    allow_deterministic_fallback: true
-    template_version: atr_linear_elasticity_template_v1
-    default_material:
-      elastic_modulus_mpa: 1800.0
-      poisson_ratio: 0.35
-      yield_strength_mpa: 35.0
-    default_loading:
-      load_type: cyclic_compression
-      load_max_n: 500.0
-      load_min_ratio: 0.1
-      cycles: 10
-      frequency_hz: 1.0
-
   equipment:
     mode: simulator              # simulator | live
     provider: windows_pyautogui

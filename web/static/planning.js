@@ -4782,7 +4782,7 @@ function agentSpecificReportProfile(report, status, agentLabel) {
     },
     analysis: {
       title: "Analysis Agent / UTM-FEM-BO Handoff",
-      summary: "Shows raw UTM ingestion, canonical curve artifacts, quality gate, FEniCSx/CAE simulation evidence, FEM-UTM residuals, and BO-ready handoff status.",
+      summary: "Shows raw UTM ingestion, canonical curve artifacts, quality gate, CAE/CalculiX simulation evidence, FEM-UTM residuals, and BO-ready handoff status.",
       rows: [
         ["objective_score", analysisPayload.objective_score ?? latestReportPayload(report, ["objective_score", "score", "utility"]) ?? "-"],
         ["uncertainty", analysisPayload.uncertainty ?? "-"],
@@ -5479,11 +5479,11 @@ function renderAnalysisReportDetails(report) {
         ["quality_score", quality.score === undefined ? "-" : quality.score],
         ["quality_warnings", quality.warnings || []],
       ])}
-      <h5>FEM / FEniCSx / CAE Evidence</h5>
+      <h5>FEM / CAE / CalculiX Evidence</h5>
       ${runtimeRows([
         ["closed_loop_sources", closedLoopSources],
-        ["fenicsx_status", femResult.status || "-"],
-        ["fenicsx_backend", femResult.solver_backend || "-"],
+        ["cae_loop_status", femResult.status || "-"],
+        ["cae_backend", femResult.solver || femResult.solver_backend || "-"],
         ["fem_cache", femResult.cache_status || "-"],
         ["predicted_peak_force_N", femMetrics.predicted_peak_force_N ?? "-"],
         ["predicted_stiffness_N_per_mm", femMetrics.predicted_initial_stiffness_N_per_mm ?? "-"],

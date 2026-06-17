@@ -640,7 +640,7 @@ def _map_reason_code(value: str) -> str:
         return "DATA_PARSE_FAILED"
     if "DATA" in text or "QUALITY" in text:
         return "DATA_QUALITY_LOW"
-    if "FEM" in text or "FENICS" in text or "DIVERGENCE" in text:
+    if "FEM" in text or "CAE" in text or "CALCULIX" in text or "DIVERGENCE" in text:
         return "FEM_DIVERGENCE_HIGH"
     if "BO" in text or "CANDIDATE" in text or "UNSAFE" in text:
         return "BO_CANDIDATE_UNSAFE"

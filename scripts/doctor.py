@@ -215,7 +215,7 @@ class Doctor:
         if shutil.which("docker"):
             self.ok("docker", "docker command found")
         else:
-            self.warn("docker", "docker command not found", "Install Docker before using PrusaSlicer/FEniCSx container paths.")
+            self.warn("docker", "docker command not found", "Install Docker before using PrusaSlicer/CAE container paths.")
 
     def check_lerobot(self) -> None:
         cfg = self.load_yaml("configs/lerobot.yaml")

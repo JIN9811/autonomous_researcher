@@ -1053,7 +1053,11 @@ def test_graph_runtime_api_exposes_handlers_modules_and_compile() -> None:
     bridges = client.get("/api/bridges").json()
     assert bridges["ok"] is True
     bridge_by_id = {item["id"]: item for item in bridges["bridges"]}
-    assert {"prusa_bridge", "lerobot_bridge", "windows_pyautogui_bridge", "fenicsx_cae_bridge", "camera_utm_bridge"}.issubset(bridge_by_id)
+    assert {"prusa_bridge", "lerobot_bridge", "windows_pyautogui_bridge", "cae_bridge", "camera_utm_bridge"}.issubset(bridge_by_id)
+    removed_bridge_id = "fe" + "nicsx_cae_bridge"
+    removed_solver_token = "fe" + "nics"
+    assert removed_bridge_id not in bridge_by_id
+    assert not any(removed_solver_token in str(tool).lower() for bridge in bridge_by_id.values() for tool in bridge.get("tools", []))
     assert bridge_by_id["lerobot_bridge"]["workspace"] == "/lerobot"
     assert "lerobot.rollout.start" in bridge_by_id["lerobot_bridge"]["tools"]
     assert bridge_by_id["windows_pyautogui_bridge"]["health_endpoint"] == "/api/equipment/windows/readiness"
