@@ -139,7 +139,7 @@ verification did not change the DSN/design-window layout contract.
 | Printer APIs/artifacts | `device_bridges/bambu_*`, `device_bridges/prusa_bridge.py`, `app/main.py` | 3DP provider fleet, Bambu/Prusa status, slicing, start, autoejection, proof, Bambu HTTP artifact fetch route |
 | LeRobot APIs | `device_bridges/lerobot_bridge.py`, `app/main.py` | ROBOTIS/LeRobot teleop, record, train, rollout, manipulation bridge |
 | Windows equipment APIs | `device_bridges/windows_pyautogui_bridge.py`, `app/main.py` | Windows PyAutoGUI/UTM bridge discovery, proof, execution |
-| BO/CAE APIs | `agents/bo_agent.py`, `device_bridges/cae_bridge.py`, `device_bridges/fenicsx_bridge.py` | Optimizer and analysis workspaces |
+| BO/CAE APIs | `agents/bo_agent.py`, `device_bridges/cae_bridge.py` | Optimizer and analysis workspaces |
 | Knowledge/Evolution APIs | `knowledge/`, `self_evolution/`, `app/main.py` | Graphify/Neo4j optional memory and self-evolution tasks |
 
 Do not use this document as an instruction prompt. Use it as the "what the code
@@ -510,7 +510,7 @@ It currently returns these graph-level bridge entries:
 prusa_bridge
 lerobot_bridge
 windows_pyautogui_bridge
-fenicsx_cae_bridge
+cae_bridge
 camera_utm_bridge
 ```
 
@@ -612,7 +612,7 @@ Current normalized bridge endpoint defaults:
 | `prusa_bridge` | `/printer` | `/api/printer/status` | `/api/printer/spc-readiness` |
 | `lerobot_bridge` | `/lerobot` | `/api/lerobot/config` | `/api/lerobot/profiles/validate` |
 | `windows_pyautogui_bridge` | `/equipment/windows` | `/api/equipment/windows/readiness` | `/api/equipment/windows/live-preflight` |
-| `fenicsx_cae_bridge` | `/cae` | `/api/cae/config` | `/api/cae/config` |
+| `cae_bridge` | `/cae` | `/api/cae/config` | `/api/cae/config` |
 | `camera_utm_bridge` | `/lerobot` | `/api/lerobot/config` | `/api/lerobot/camera/test` |
 
 The graph YAML still contains the legacy Windows workspace alias

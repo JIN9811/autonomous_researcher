@@ -69,7 +69,7 @@ Optional but commonly used:
 
 - `conda` or Miniconda for LeRobot-specific environments.
 - `nvidia-smi` and NVIDIA driver stack for local GPU runtime checks.
-- Docker for PrusaSlicer, FEniCSx, local Neo4j, or local vLLM/NemoClaw paths.
+- Docker for PrusaSlicer, CalculiX, local Neo4j, or local vLLM/NemoClaw paths.
 - `ffmpeg` for the Bambu Lab live camera browser proxy. Without it, the Bambu
   video status API can still report that the printer's LAN video port is
   reachable, but `/api/printer/video-stream.mjpeg` stays unavailable.
@@ -625,180 +625,18 @@ are suppressed by the bridge.
 The Pi0.5 worktree, conda env, datasets, model cache, and offline W&B run files
 are not part of this Git repository.
 
-## FEniCSx / DOLFINx FEM Runtime
+## CAE / CalculiX Runtime
 
-Optional for Analysis Agent FEM/CAE enhancement and improvement 06.
+The current CAE plan uses the project CAE bridge and a CalculiX-oriented runtime path. A separate Python FEM solver stack is no longer part of the documented new-machine install path. CalculiX integration remains optional until the CAE runner is explicitly enabled.
 
-FEniCSx is intentionally not installed into the main `.venv` and is not listed
-in `requirements.txt`, because DOLFINx depends on MPI/PETSc/native solver
-libraries. Use a dedicated conda environment or the official Docker image.
-
-The main application registers FEniCSx through the device bridge layer, not by
-importing DOLFINx directly into the FastAPI process:
+Required CAE documentation lives in:
 
 ```text
-device_bridges/fenicsx_bridge.py
-mcp_tools/fenicsx_tools.py
+docs/agents/cae_analysis_runtime_guideline.txt
+개선안/15_utm_calculix_pinn_multifidelity_code_first_plan.md
 ```
 
-Registered tools:
-
-```text
-fenicsx.health
-fenicsx.run_linear_elasticity
-fenicsx.run_fem
-```
-
-The production execution path uses a fixed DOLFINx linear-elasticity template:
-
-```text
-scripts/fenicsx_linear_elasticity_template.py
-```
-
-This template is executed in the dedicated `fenicsx` conda environment or in the
-configured Docker image. It performs a real DOLFINx solve on a homogenized
-specimen envelope with bottom fixed support and top compression traction, then
-returns displacement, stiffness, Von Mises stress, mesh metadata, and XDMF output.
-The deterministic path is retained only as an explicit fallback/smoke mode.
-
-Runtime configuration is stored in `configs/devices.yaml`:
-
-```yaml
-devices:
-  fenicsx:
-    enabled: true
-    mode: test
-    provider: dolfinx
-    execution_backend: auto       # auto | deterministic | conda | docker
-    runtime_solver_enabled: false # false: fast bridge mode, true: call conda/docker FEniCSx
-    require_runtime_in_live: false
-    conda_env: fenicsx
-    docker_image: dolfinx/dolfinx:stable
-    artifact_dir: artifacts/fenicsx
-    solver_script_path: scripts/fenicsx_linear_elasticity_template.py
-    timeout_sec: 120
-    allow_deterministic_fallback: true
-    template_version: atr_linear_elasticity_template_v1
-```
-
-Use `runtime_solver_enabled=false` for fast deterministic bridge mode during repeated TEST loops. Use `runtime_solver_enabled=true` with `execution_backend=auto|conda|docker` for real DOLFINx execution. The same setting can be changed at runtime through `fenicsx.set_runtime_solver` without editing code. Set `require_runtime_in_live=true` only when live Analysis must block unless the FEniCSx runtime probe succeeds.
-
-Verified local conda environment:
-
-```bash
-conda run -n fenicsx python -c "import dolfinx, basix, ufl, ffcx"
-conda run -n fenicsx python artifacts/external/fenicsx/examples/poisson_smoke.py
-```
-
-Verified local package versions:
-
-```text
-dolfinx=0.10.0
-basix=0.10.0
-ufl=2025.2.1
-ffcx=0.10.0
-```
-
-Verified Docker runtime:
-
-```bash
-docker pull dolfinx/dolfinx:stable
-docker run --rm --entrypoint python3 \
-  -v "$PWD/artifacts/external/fenicsx/examples:/work/examples:ro" \
-  -w /work \
-  dolfinx/dolfinx:stable \
-  examples/poisson_smoke.py
-```
-
-Downloaded source, tutorial, and documentation assets are stored locally under:
-
-```text
-artifacts/external/fenicsx/
-```
-
-Local bundle contents:
-
-- `sources/dolfinx`
-- `sources/basix`
-- `sources/ffcx`
-- `sources/ufl`
-- `sources/fenics-docs`
-- `sources/dolfinx-tutorial`
-- `docs/html`
-- `docs/pdf/dolfinx-tutorial-latest.pdf`
-- `examples/poisson_smoke.py`
-- `manifests/fenicsx_sources_manifest.txt`
-
-These files are intentionally under `artifacts/` and should not be committed.
-Recreate/update them with shallow official source checkouts and official docs
-snapshots when needed.
-
-Analysis Agent usage rule:
-
-- Treat FEniCSx/FEM as `fem_low` simulation evidence.
-- Treat physical UTM data as `utm_high` measured evidence.
-- Do not insert FEM predictions into BO as measured observations.
-- Use validated FEM templates, cache manifests, and UTM/FEM comparison artifacts
-  before BO handoff.
-- The LLM agentic FEM loop may plan tutorial-style steps, mesh sweeps, and
-  acceptance criteria, but execution must stay inside registered `fenicsx.*`
-  tools and validated payloads. Do not run arbitrary LLM-generated solver code.
-
-LLM route used by the FEM planning loop:
-
-```text
-analysis_fem_planning -> e4b
-```
-
-Expected FEniCSx bridge artifacts:
-
-```text
-artifacts/fenicsx/<run_id>/<specimen_id>/*_fem_request.json
-artifacts/fenicsx/<run_id>/<specimen_id>/*_fem_result.json
-artifacts/fenicsx/<run_id>/<specimen_id>/*_fenicsx_solver_output.json
-artifacts/fenicsx/<run_id>/<specimen_id>/*.xdmf
-artifacts/fenicsx/<run_id>/<specimen_id>/*.h5
-artifacts/fenicsx/<run_id>/<specimen_id>/*_fem_cache_manifest.json
-```
-
-Expected Analysis Agent improvement 06 artifacts:
-
-```text
-runs/<run_id>/analysis/<specimen_id>/raw_input_sidecar.json
-runs/<run_id>/analysis/<specimen_id>/parse_report.json
-runs/<run_id>/analysis/<specimen_id>/canonical_curve.csv
-runs/<run_id>/analysis/<specimen_id>/preprocessing_report.json
-runs/<run_id>/analysis/<specimen_id>/quality_report.json
-runs/<run_id>/analysis/<specimen_id>/metrics.json
-runs/<run_id>/analysis/<specimen_id>/fem_request.json
-runs/<run_id>/analysis/<specimen_id>/fem_result.json
-runs/<run_id>/analysis/<specimen_id>/fem_agentic_loop.json
-runs/<run_id>/analysis/<specimen_id>/fem_utm_comparison.json
-runs/<run_id>/analysis/<specimen_id>/comparison.json
-runs/<run_id>/analysis/<specimen_id>/analysis_report.json
-runs/<run_id>/analysis/<specimen_id>/experiment_evaluation.json
-runs/<run_id>/analysis/<specimen_id>/bo_handoff.json
-runs/<run_id>/analysis/<specimen_id>/analysis_trace.jsonl
-```
-
-Regression checks:
-
-```bash
-.venv/bin/python -m pytest tests/unit/test_fenicsx_bridge.py tests/unit/test_analysis_agent.py -q
-.venv/bin/python -m pytest tests/unit/test_bo_agent.py tests/unit/test_langgraph_runtime.py tests/integration/test_controller_run.py -q
-conda run -n fenicsx python scripts/fenicsx_linear_elasticity_template.py <request.json> <result.json>
-```
-
-Official references:
-
-- `https://docs.fenicsproject.org/`
-- `https://docs.fenicsproject.org/dolfinx/main/python/installation.html`
-- `https://github.com/FEniCS/dolfinx`
-- `https://github.com/FEniCS/basix`
-- `https://github.com/FEniCS/ffcx`
-- `https://github.com/FEniCS/ufl`
-- `https://jsdokken.com/dolfinx-tutorial/`
-- `https://github.com/jorgensd/dolfinx-tutorial`
+Keep physical UTM data as the measured source of truth. CAE output is simulation evidence only and must not be inserted into BO as a measured observation.
 
 ## Windows PyAutoGUI Bridge
 

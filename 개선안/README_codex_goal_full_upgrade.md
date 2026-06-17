@@ -1,7 +1,7 @@
 # Codex Goal Full Upgrade Implementation README
 
 대상 프로젝트: Autonomous Researcher Framework
-목표: `개선안/01`부터 `개선안/10`까지의 agent 고도화안과 Live GUI 고도화안을 한 번의 장기 Codex Goal 작업으로 실제 구현한다.
+목표: `개선안/01`부터 `개선안/15`까지의 agent 고도화안, device bridge 고도화안, Live GUI 고도화안, 멀티피델리티 자가개선 루프 계획을 한 번의 장기 Codex Goal 작업에서 현재 코드 구조 기준으로 실제 구현한다.
 
 이 README는 계획 문서가 아니라 Codex Goal 실행 지침이다. Codex는 이 문서를 읽은 뒤 구현, 검증, 스크린샷 확인, 문서 갱신까지 완료해야 한다.
 
@@ -58,6 +58,10 @@ Codex Goal은 구현 전에 아래 순서대로 읽어야 한다.
 - `개선안/09_guardian_agent_graphwide_safety_incident_loop_research.md`
 - `개선안/10_orchestration_agent_supervisor_followup_loop_research.md`
 - `개선안/11_live_gui_control_surface_upgrade_plan.md`
+- `개선안/12_free_modularization_gap_analysis.md`
+- `개선안/13_bambulab_x2d_spc_device_bridge_research.md`
+- `개선안/14_bambulab_gcode_autoejection_runtime_plan.md`
+- `개선안/15_utm_calculix_pinn_multifidelity_code_first_plan.md`
 
 ### 1.4 구현 대상 코드
 
@@ -243,7 +247,7 @@ Manipulation/Equipment는 `expires_at`이 지난 signal을 쓰면 안 된다.
 
 - 실험 observation과 FEM prediction을 같은 값으로 취급하지 않는다.
 - BO로 넘길 때 `observed_metrics`, `simulation_metrics`, `simulation_residual`, `data_quality`를 분리한다.
-- FEniCS/FEM이 설치되지 않은 환경에서는 test-mode deterministic stub/cache를 제공하되 report에는 `fem_status=stub|cached|fresh`를 명시한다.
+- CAE/FEM이 설치되지 않은 환경에서는 test-mode deterministic stub/cache를 제공하되 report에는 `fem_status=stub|cached|fresh`를 명시한다.
 
 ### 5.5 Self-Evolution 주의점
 

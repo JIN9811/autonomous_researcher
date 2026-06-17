@@ -89,7 +89,7 @@ TestClient로 endpoint와 manifest payload가 현재 코드에서 import/응답�
 - `/api/handlers`: handler 15개, `module.generated_adapter` 포함
 - `/api/graphs/atr_closed_loop`: nested `graph.nodes` 18개, `graph.edges` 64개, `graph.stage_dispatch` 12개와 bridge metadata 확인
 - `/api/runtime/agent-manifests`: `ok=true`, `count=11`, `graph_id=atr_closed_loop`, `graph_version=0.2.0`
-- `/api/bridges`: `ok=true`, bridge 5개(`prusa_bridge`, `lerobot_bridge`, `windows_pyautogui_bridge`, `fenicsx_cae_bridge`, `camera_utm_bridge`)
+- `/api/bridges`: `ok=true`, bridge 5개(`prusa_bridge`, `lerobot_bridge`, `windows_pyautogui_bridge`, `cae_bridge`, `camera_utm_bridge`)
 - `/api/runtime/models`: managed model 2개(`gemma4:31b`, `gemma4:e4b-it-nvfp4`)
 - `/api/printer/fleet`: `active_profile_id=bambulab_x2d_lab_01`, `automatic_fallback=false`
 
@@ -253,7 +253,7 @@ Console `error/warn` 로그는 확인 시점 기준 비어 있었다.
   - prusa_bridge
   - lerobot_bridge
   - windows_pyautogui_bridge
-  - fenicsx_cae_bridge
+  - cae_bridge
   - camera_utm_bridge
 
 즉 graph 자체는 executable stage와 non-executable plane/bridge/evidence overlay를 함께 표현할 수 있다.

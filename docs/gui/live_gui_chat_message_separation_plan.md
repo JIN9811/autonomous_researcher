@@ -226,7 +226,7 @@ Report에 표시하는 조건은 다음이다.
 IO에 표시하는 조건은 다음이다.
 
 - `tool_event` 중 장비 또는 파일 입출력과 관련된다.
-- printer, PrusaLink, pyautogui bridge, lerobot bridge, UTM, FEniCSx bridge, file transfer 상태가 포함된다.
+- printer, PrusaLink, pyautogui bridge, lerobot bridge, UTM, CAE bridge, file transfer 상태가 포함된다.
 
 ## Agent Chat Contract
 
@@ -375,7 +375,7 @@ Report:
 
 Backend:
 
-- FEniCSx bridge trace
+- CAE bridge trace
 - solver status
 
 ### Knowledge Agent

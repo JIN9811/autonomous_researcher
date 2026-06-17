@@ -220,11 +220,11 @@ dispatch -> idle -> design -> specimen -> vision -> manipulation -> equipment ->
 
 ### Analysis Agent (`modules/analysis`, `agent.analysis_agent`)
 - **목적**: Lab Equipment raw UTM artifact를 표준 분석 기록과 BO-ready handoff로 변환
-- **핵심 툴**: `cae.run_static_analysis`, `fenicsx.health`, `fenicsx.run_linear_elasticity`
+- **핵심 툴**: `cae.run_static_analysis`, `cae.health`, `cae.run_static_analysis`
 - **주요 결과**: `analysis`, `bo_observation`, `bo_handoff`, `experiment_evaluation`, `knowledge_payload`
 - **주요 아티팩트**: `canonical_curve.csv`, `quality_report.json`, `metrics.json`, `fem_result.json`, `fem_agentic_loop.json`, `fem_utm_comparison.json`, `experiment_evaluation.json`, `bo_handoff.json`
-- **FEniCSx loop**: `analysis_fem_planning` LLM이 tutorial-style FEM 계획을 만들고, Agent가 sanitization 후 `fenicsx.health`/`fenicsx.run_linear_elasticity`를 반복 호출한다. 실제 solve는 bridge의 `runtime_solver_enabled=true`일 때 `scripts/fenicsx_linear_elasticity_template.py`가 conda/docker FEniCSx에서 수행한다. 기본 TEST loop는 빠른 deterministic bridge를 쓴다.
-- **주의**: UTM은 `utm_high` 실측값이고 FEniCSx/CAE는 `fem_low` simulation evidence다. FEM 예측을 실측 BO observation처럼 넣지 않는다. LLM이 임의 solver 코드를 실행하지 않는다.
+- **CAE loop**: `analysis_fem_planning` LLM이 tutorial-style FEM 계획을 만들고, Agent가 sanitization 후 `cae.health`/`cae.run_static_analysis`를 반복 호출한다. 실제 solve는 bridge의 `runtime_solver_enabled=true`일 때 `device_bridges/cae_bridge.py`가 conda/docker CalculiX에서 수행한다. 기본 TEST loop는 빠른 deterministic bridge를 쓴다.
+- **주의**: UTM은 `utm_high` 실측값이고 CAE/CalculiX는 `fem_low` simulation evidence다. FEM 예측을 실측 BO observation처럼 넣지 않는다. LLM이 임의 solver 코드를 실행하지 않는다.
 
 ### Knowledge Agent (`modules/knowledge`, `agent.knowledge_agent`)
 - **목적**: 실패/성능 이력 요약 후 다음 후보/지침 반영

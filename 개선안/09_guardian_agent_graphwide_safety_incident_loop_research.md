@@ -365,7 +365,7 @@ Analysis:
 - raw file 존재, parser confidence, units, timestamps, sample count
 - preprocessing log, outlier handling, smoothing/filtering 기록
 - previous loop와 비교 가능성
-- FEM/FEniCS result가 cache hit인지 fresh run인지
+- FEM/CalculiX result가 cache hit인지 fresh run인지
 - UTM vs FEM divergence가 threshold를 넘는지
 - BO handoff JSON schema와 `ready_for_bo` 여부
 
@@ -647,7 +647,7 @@ Lab Equipment Agent:
 Analysis Agent:
 
 - Guardian이 raw file/provenance/parser confidence/quality score를 검사하고 `ok_for_bo`를 최종 승인한다.
-- FEniCS/FEM result는 cache metadata와 divergence threshold를 확인한다.
+- CAE/FEM result는 cache metadata와 divergence threshold를 확인한다.
 
 BO Agent:
 

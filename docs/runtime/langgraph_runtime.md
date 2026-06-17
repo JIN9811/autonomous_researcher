@@ -175,7 +175,7 @@ Device bridge discovery is also exposed as a manifest:
 - `tests/unit/test_langgraph_runtime.py::test_new_bridge_manifest_entry_is_shared_by_bridge_api_and_runtime_contract` verifies that adding a new bridge entry to graph metadata is enough for both the bridge API and runtime contract to expose the same normalized discovery object. This covers registry/display wiring, not bridge-specific physical execution.
 - Legacy workspace aliases are normalized at the API boundary. The current graph YAML still has `windows_pyautogui_bridge.workspace=/windows-equipment`, but API consumers receive `/equipment/windows`.
 - This is a read-only registry for GUI/IDE discovery. Actual live device execution remains inside bridge-specific APIs and Guardian/device gates.
-- Current registry entries are `prusa_bridge`, `lerobot_bridge`, `windows_pyautogui_bridge`, `fenicsx_cae_bridge`, and `camera_utm_bridge`.
+- Current registry entries are `prusa_bridge`, `lerobot_bridge`, `windows_pyautogui_bridge`, `cae_bridge`, and `camera_utm_bridge`.
 - Bambu Lab X2D is the default printer provider, but it is intentionally managed by the printer fleet API (`/api/printer/fleet`) and printer workspace APIs (`/api/printer/*`), not by `/api/bridges`. Do not infer that Bambu is inactive just because it is absent from the graph bridge registry.
 
 For the latest route/API snapshot, see `docs/runtime/current_code_snapshot.md`.
@@ -527,7 +527,7 @@ The active closed-loop graph declares these runtime planes:
 
 - `orchestrator_supervisor`: `agent.orchestrator_agent` sidecar that exposes mission contract, orchestration plan, handoff packet, decision register, and loop reflection contracts.
 - `safety_gate_plane`: Guardian graph-wide gate that exposes safety/continue-stop decisions without replacing the executable Guardian stage.
-- `device_bridge_plane`: hardware/software boundary for PrusaLink, LeRobot/Pi0.5, Windows PyAutoGUI/UTM, FEniCSx/CAE, and camera/UTM evidence tools.
+- `device_bridge_plane`: hardware/software boundary for PrusaLink, LeRobot/Pi0.5, Windows PyAutoGUI/UTM, CAE/CalculiX, and camera/UTM evidence tools.
 - `memory_evidence_plane`: Knowledge/Graphify/BO evidence plane for experiment evidence, BO observations, and self-evolution proposals.
 
 `/api/state` includes `runtime_ide_contract` with `runtime_planes`, `device_bridges`, `module_contracts`, `supervisor_evidence`, and `device_health`. The IDE sidebar `Runtime Contract`, the `Device Status` panel, and the selected-node `Runtime Contract` inspector all read this payload. Route editing and readiness checks still use only `logical_transition` edges, so overlay lines cannot accidentally become executable routes. Double-clicking `Orchestrator Supervisor` opens `graphs/modules/orchestrator/module.yaml`, making supervisor internals inspectable like other agent modules.

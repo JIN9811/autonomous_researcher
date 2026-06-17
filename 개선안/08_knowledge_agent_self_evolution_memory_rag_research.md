@@ -655,7 +655,7 @@ Linux/live 환경 준비 후 가능한 것:
 1. 장기 memory를 JSONL에서 SQLite/DuckDB로 이동
 2. artifact text indexing 확장
 3. vision/manipulation video evidence를 lightweight metadata로 indexing
-4. FEniCS 공식 문서 RAG와 FEM/UTM discrepancy memory 연결
+4. CalculiX 공식 문서 RAG와 FEM/UTM discrepancy memory 연결
 5. BO Agent가 Knowledge의 failure/success pattern을 acquisition constraint로 사용
 
 나중에 고려할 것:

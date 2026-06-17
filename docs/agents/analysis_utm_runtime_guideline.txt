@@ -209,7 +209,7 @@ raw UTM/equipment artifact
 -> preprocessing report
 -> quality gate
 -> UTM metrics
--> optional FEniCSx/CAE simulation evidence
+-> optional CAE/CalculiX simulation evidence
 -> FEM/UTM comparison
 -> previous/best comparison
 -> experiment_evaluation.v1
@@ -230,7 +230,7 @@ Expected artifact files:
 - `preprocessing_report.json`
 - `quality_report.json`
 - `metrics.json`
-- `fem_request.json` when FEniCSx is available
+- `fem_request.json` when CalculiX is available
 - `fem_result.json`
 - `fem_utm_comparison.json`
 - `comparison.json`
@@ -247,58 +247,20 @@ The BO-facing payload is available as both:
 `experiment_evaluation.v1` is also emitted so the controller can append it to
 `state.experiment_evaluations` and BO/Knowledge can consume measured history.
 
-## 11. FEniCSx Device Bridge
+## 11. CAE / CalculiX Simulation Evidence
 
-A dedicated FEniCSx bridge is available through MCP-style tools:
+Analysis Agent may attach CAE simulation evidence through the registered CAE bridge. The documented solver direction is CalculiX-oriented, while the separate Python FEM solver stack is removed from the active install path.
 
-```text
-fenicsx.health
-fenicsx.run_linear_elasticity
-fenicsx.run_fem
-fenicsx.set_runtime_solver
-```
-
-Bridge implementation:
+Registered CAE tool:
 
 ```text
-device_bridges/fenicsx_bridge.py
-mcp_tools/fenicsx_tools.py
+cae.run_static_analysis
 ```
-
-The bridge uses a validated linear-elastic template contract. It must not execute
-arbitrary LLM-generated solver code. In test mode it normally runs as a deterministic FEniCSx-compatible bridge for speed. When `runtime_solver_enabled=true`, the bridge calls the local `fenicsx` conda environment or Docker backend, records the runtime probe, and labels the result as a validated template. Docker runtime is documented in `REQUIREMENTS.md`.
 
 Fidelity separation is mandatory:
 
 - UTM curve = `utm_high`, physical/measured objective source.
-- FEniCSx/CAE = `fem_low`, simulation/risk/calibration evidence.
-- FEM prediction must not be inserted into BO as if it were a measured UTM point.
-## 12. FEniCSx Tutorial-Based LLM Agentic Loop
+- CAE/CalculiX result = `fem_low`, simulation/risk/calibration evidence.
+- FEM/CAE prediction must not be inserted into BO as if it were a measured UTM point.
 
-Analysis Agent runs the FEniCSx bridge as an agentic loop, not as a single blind
-solver call. The loop starts only after UTM parsing, unit conversion, and metric
-calculation have succeeded, because the measured peak force is used to set the
-validated top-compression load.
-
-Runtime sequence:
-
-```text
-1. Build tutorial contract from DOLFINx linear-elasticity tutorial.
-2. Ask `analysis_fem_planning` LLM for JSON-only mesh/refinement/acceptance plan.
-3. Sanitize max iterations, mesh sizes, and acceptance threshold.
-4. Probe `fenicsx.health`.
-5. Call `fenicsx.run_linear_elasticity` for each mesh iteration. If
-   `runtime_solver_enabled=false`, this uses the deterministic bridge path. If
-   `runtime_solver_enabled=true`, `auto`/`conda`/`docker` executes
-   `scripts/fenicsx_linear_elasticity_template.py` through the configured
-   FEniCSx runtime and produces solver output/XDMF artifacts.
-6. Compare each low-fidelity FEM result with high-fidelity UTM metrics.
-7. Accept the first converged iteration above threshold, otherwise keep the best
-   validated result and tag uncertainty through the comparison record.
-8. Persist `fem_agentic_loop.json` and include it in Live GUI Analysis report.
-```
-
-Allowed LLM output fields are limited to planning metadata. Arbitrary generated
-FEniCSx/Python code is not executed. All physical/simulation execution goes
-through registered MCP tools and the configured Device Bridge.
-Bridge toggle rule: use `fenicsx.set_runtime_solver({"enabled": true, "execution_backend": "auto"})` to turn on real solver execution for the current runtime, and `fenicsx.set_runtime_solver({"enabled": false})` to return to fast deterministic bridge mode. Live-readiness rule: set `devices.fenicsx.runtime_solver_enabled=true` and `devices.fenicsx.require_runtime_in_live=true` when live Analysis must fail closed if conda/docker FEniCSx cannot run. Keep `allow_deterministic_fallback=false` for strict solver validation campaigns.
+The detailed CAE runtime contract is maintained in `docs/agents/cae_analysis_runtime_guideline.txt`.

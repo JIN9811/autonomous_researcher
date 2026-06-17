@@ -193,47 +193,38 @@ Phase 3: optional pyarrow for large CSV, type inference, streaming
 - PyArrow CSV docs: https://arrow.apache.org/docs/python/csv.html
 - pandas read_csv docs: https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.read_csv.html
 
-### 3.7 FEniCSx/FEM은 "LLM이 직접 해석 코드를 쓰는 구조"가 아니라 공식 문서 RAG + 검증된 template runner 구조가 맞다
+### 3.7 CalculiX/CAE는 "LLM이 직접 해석 코드를 쓰는 구조"가 아니라 공식 문서 RAG + 검증된 runner 구조가 맞다
 
-FEniCS 프로젝트는 FEM으로 PDE를 풀기 위한 open-source computing platform이고, 현재 권장 축은 FEniCSx다. FEniCSx는 UFL, Basix, FFCx, DOLFINx로 구성되며, DOLFINx는 FEniCS Project의 next-generation problem solving interface다. 공식 DOLFINx 문서에는 static linear elasticity, Gmsh mesh generation, PyVista visualization 데모가 이미 있다. UFL은 variational weak form을 수학식에 가까운 notation으로 선언하는 DSL이므로, Analysis Agent가 FEM problem spec을 만들 때 공식 문서 기반 RAG와 궁합이 좋다.
+현재 프로젝트의 해석 축은 별도 Python FEM solver stack이 아니라 CalculiX/CAE다. LLM은 임의 해석 코드를 생성하지 않고, `cae_request.json` 또는 `fem_request.json` 형태의 입력 명세와 해석 의도를 구성한다. 실제 실행은 `cae.run_static_analysis` 또는 이후 추가할 `calculix.run_job` 같은 검증된 tool/bridge가 담당한다.
 
 중요한 판단:
 
-1. LLM에게 live loop에서 arbitrary FEniCS 코드를 쓰게 하면 안 된다.
-2. LLM은 `fem_plan.json`을 만들고, validator가 공식 문서/튜토리얼 출처와 schema를 확인한다.
-3. 실제 실행은 검증된 FEniCSx template runner가 맡는다.
+1. LLM에게 live loop에서 arbitrary solver code를 쓰게 하면 안 된다.
+2. LLM은 `fem_plan.json` 또는 `cae_request.json`을 만들고, validator가 공식 문서/튜토리얼 출처와 schema를 확인한다.
+3. 실제 실행은 검증된 CalculiX input deck runner가 맡는다.
 4. 같은 geometry/material/loading loop에서는 cache를 우선 조회한다.
 5. FEM은 UTM을 대체하지 않고, UTM 전 예측과 UTM 후 보정에 모두 쓰는 2-way signal이어야 한다.
 
 권장 RAG source set:
 
 ```text
-fenics_docs/
-  fenics_project_home
-  fenicsx_download_install
-  dolfinx_python_docs
-  dolfinx_demo_elasticity
-  dolfinx_demo_gmsh
-  dolfinx_demo_pyvista
-  ufl_user_manual
-  dokken_fenicsx_tutorial
+calculix_docs/
+  calculix_manual
+  calculix_input_deck_format
+  calculix_material_cards
+  calculix_boundary_and_loading_cards
+  ccx2paraview_usage
 project_docs/
   docs/agents/cae_analysis_runtime_guideline.txt
   device_bridges/cae_bridge.py contract summary
+  개선안/15_utm_calculix_pinn_multifidelity_code_first_plan.md
 ```
 
 출처:
 
-- FEniCS project overview: https://fenicsproject.org/
-- FEniCSx download/install notes: https://fenicsproject.org/download/
-- FEniCSx documentation index: https://docs.fenicsproject.org/
-- DOLFINx Python documentation: https://docs.fenicsproject.org/dolfinx/main/python/
-- DOLFINx elasticity demo: https://docs.fenicsproject.org/dolfinx/main/python/demos/demo_elasticity.html
-- DOLFINx Gmsh mesh demo: https://docs.fenicsproject.org/dolfinx/main/python/demos/demo_gmsh.html
-- DOLFINx PyVista visualization demo: https://docs.fenicsproject.org/dolfinx/main/python/demos/demo_pyvista.html
-- UFL documentation: https://docs.fenicsproject.org/ufl/2025.2.0.post0/
-- J. S. Dokken FEniCSx tutorial: https://jsdokken.com/dolfinx-tutorial/
-- Linear elasticity tutorial implementation: https://jsdokken.com/dolfinx-tutorial/chapter2/linearelasticity_code.html
+- CalculiX project: https://www.calculix.de/
+- CalculiX input deck reference: https://web.mit.edu/calculix_v2.7/CalculiX/ccx_2.7/doc/ccx/node160.html
+- ccx2paraview postprocessor: https://github.com/calculix/ccx2paraview
 
 ### 3.8 더 고도화할 방향: FEM을 low-fidelity, UTM을 high-fidelity로 보는 multi-fidelity loop
 
@@ -245,11 +236,11 @@ project_docs/
 
 1. Phase 1에서는 FEM score를 BO score에 바로 섞지 말고 `fem_fidelity_record`로 보존한다.
 2. Phase 2에서 FEM-UTM 상관이 충분히 쌓이면 BO Agent에 `fidelity="fem"` / `fidelity="utm"` records를 같이 넘긴다.
-3. Phase 3에서 Linux FEniCSx + optional BoTorch/Ax backend가 준비되면 multi-fidelity acquisition을 검토한다.
+3. Phase 3에서 Linux CalculiX + optional BoTorch/Ax backend가 준비되면 multi-fidelity acquisition을 검토한다.
 4. FEM이 UTM과 자주 어긋나는 구간은 "나쁜 FEM"이 아니라 "model discrepancy가 큰 설계영역"으로 저장한다.
 5. LLM reasoning은 numeric optimizer를 대체하지 말고, fidelity 선택 이유, discrepancy 원인 가설, 다음 실험 제약 설명을 맡긴다.
 
-추가로 physics-informed BO도 유망하다. 물리 법칙이나 해석 모델이 있는 재료 설계에서는 완전 black-box BO보다 physics-informed kernel/feature를 쓰는 BO가 데이터 효율을 높일 수 있다는 사례가 있다. 다만 지금 프로젝트 기본 dependency에는 BoTorch, Ax, SciPy, FEniCSx가 없으므로, 현재 환경에서는 schema와 artifact만 먼저 열어두는 것이 현실적이다.
+추가로 physics-informed BO도 유망하다. 물리 법칙이나 해석 모델이 있는 재료 설계에서는 완전 black-box BO보다 physics-informed kernel/feature를 쓰는 BO가 데이터 효율을 높일 수 있다는 사례가 있다. 다만 지금 프로젝트 기본 dependency에는 BoTorch, Ax, SciPy, CalculiX가 없으므로, 현재 환경에서는 schema와 artifact만 먼저 열어두는 것이 현실적이다.
 
 추천 fidelity schema:
 
@@ -258,7 +249,7 @@ project_docs/
   "fidelity_records": [
     {
       "fidelity": "fem_low",
-      "source": "fenicsx_or_cae",
+      "source": "cae_or_calculix",
       "cost_class": "cheap_compute",
       "metrics": {
         "predicted_peak_force_N": 480.0,
@@ -298,7 +289,7 @@ project_docs/
 
 ## Live GUI 고도화 추가안 - 고도화안 기준
 
-Analysis Agent의 Live GUI는 CSV를 읽었다는 로그가 아니라, raw UTM/FEM 데이터가 BO로 넘길 수 있는 신뢰 가능한 objective JSON으로 바뀌는 과정을 보여줘야 한다. 특히 고도화안에서 추가한 FEniCS 기반 2-way FEM, 튜토리얼/공식문서 RAG, cache 재사용 여부가 보고서에 명확히 남아야 한다.
+Analysis Agent의 Live GUI는 CSV를 읽었다는 로그가 아니라, raw UTM/FEM 데이터가 BO로 넘길 수 있는 신뢰 가능한 objective JSON으로 바뀌는 과정을 보여줘야 한다. 특히 고도화안에서 추가한 CalculiX 기반 2-way FEM, 튜토리얼/공식문서 RAG, cache 재사용 여부가 보고서에 명확히 남아야 한다.
 
 ### Live GUI chat에 떠야 할 메시지
 
@@ -306,7 +297,7 @@ Analysis Agent의 Live GUI는 CSV를 읽었다는 로그가 아니라, raw UTM/F
 - preprocessing: header normalization, unit conversion, outlier/NaN 처리, strain/stress 계산 단계를 요약한다.
 - metric extraction: modulus, strength, strain_at_break, energy absorption 등 목표 metric과 품질 플래그를 표시한다.
 - previous loop comparison: 직전 실험 대비 개선/악화, 유효한 비교인지 여부를 표시한다.
-- FEM run/cache: FEniCS cache hit/miss, fresh simulation 실행, 실험-FEM residual, calibration 필요성을 표시한다.
+- FEM run/cache: CalculiX cache hit/miss, fresh simulation 실행, 실험-FEM residual, calibration 필요성을 표시한다.
 - BO handoff: `bo_observation.v1` JSON 생성 완료, objective/constraint/uncertainty 포함 여부를 보여준다.
 
 ### Analysis Agent 특화 보고서 페이지
@@ -314,7 +305,7 @@ Analysis Agent의 Live GUI는 CSV를 읽었다는 로그가 아니라, raw UTM/F
 - Raw data ledger: Windows 원본 경로, Linux 복사 경로, parser, checksum, acquisition metadata.
 - Preprocessing notebook view: 처리 단계, dropped rows, unit mapping, validation warnings.
 - Experiment metrics: UTM curve, derived metrics, confidence, failed metric reason.
-- FEM panel: FEniCS problem template, mesh/material/boundary condition, cache key, residual plot.
+- FEM panel: CalculiX problem template, mesh/material/boundary condition, cache key, residual plot.
 - Loop comparison: previous loop table, delta metrics, statistically meaningful/insufficient flag.
 - BO payload preview: generated JSON, objective vector, constraints, uncertainty, provenance refs.
 - Quality gate: Analysis confidence가 낮으면 BO Agent로 넘기기 전에 Guardian/Operator confirmation을 요청한다.
@@ -329,7 +320,9 @@ Analysis Agent의 Live GUI는 CSV를 읽었다는 로그가 아니라, raw UTM/F
 
 - LangSmith observability는 model/tool call과 decision point trace를 저장하는 기준이다: https://docs.langchain.com/oss/python/langchain/observability
 - OpenTelemetry semantic conventions는 logs/traces/metrics 명명 표준화에 적합하다: https://opentelemetry.io/docs/concepts/semantic-conventions/
-- FEniCSx tutorial과 공식 문서는 FEM RAG/실행 검증의 기준 자료로 유지한다: https://jsdokken.com/dolfinx-tutorial/ 및 https://docs.fenicsproject.org/dolfinx/main/python/
+- CalculiX 공식 문서와 input deck reference는 FEM/CAE RAG 및 실행 검증의 기준 자료로 유지한다: https://www.calculix.de/
+- ccx2paraview는 CalculiX 결과 후처리/시각화 경로의 기준 자료로 유지한다: https://github.com/calculix/ccx2paraview
+
 - NN/g error prevention/recovery 원칙상 parser confidence와 unit assumption은 숨기면 안 된다: https://www.nngroup.com/articles/ten-usability-heuristics/
 
 ## 4. 권장 전체 루프
@@ -348,7 +341,7 @@ flowchart TD
     J -->|no| X["blocked/review: no BO update"]
     J -->|yes| K["Compute UTM mechanical metrics"]
     K --> R["Prepare FEM request: geometry/material/load/boundary"]
-    R --> S["Retrieve FEniCS docs/tutorial RAG context"]
+    R --> S["Retrieve CalculiX docs/tutorial RAG context"]
     S --> T{"FEM cache hit?"}
     T -->|yes| U["Reuse cached FEM result"]
     T -->|no| V["Run validated FEM template or CAE fallback"]
@@ -676,7 +669,7 @@ uncertainty =
 
 - Atlas: https://github.com/aspuru-guzik-group/atlas
 
-### 9.4 FEniCS 기반 FEM metrics와 UTM 2-way calibration
+### 9.4 CalculiX 기반 FEM metrics와 UTM 2-way calibration
 
 FEM은 Analysis Agent 안에서 두 방향으로 돌아야 한다.
 
@@ -722,7 +715,7 @@ boundary_condition_mismatch_score
 model_discrepancy_tags
 ```
 
-처음에는 현재 `cae.run_static_analysis` contract를 유지하면서 `backend="deterministic_cae"`와 `backend="fenicsx"`를 나눌 수 있게 설계한다. Linux 환경에서 FEniCSx가 준비되면 같은 `fem_request.json`을 FEniCSx runner가 소비하게 만들면 된다.
+처음에는 현재 `cae.run_static_analysis` contract를 유지하면서 `backend="deterministic_cae"`와 `backend="calculix"`를 나눌 수 있게 설계한다. Linux 환경에서 CalculiX가 준비되면 같은 `fem_request.json`을 CalculiX runner가 소비하게 만들면 된다.
 
 ### 9.5 FEM cache 설계
 
@@ -766,11 +759,11 @@ cache artifact:
   "invalidations": [],
   "source_result": "runs/run001/analysis/specimen001/fem_result.json",
   "solver": {
-    "backend": "fenicsx",
+    "backend": "calculix",
     "version": "0.10.x"
   },
   "rag_context": {
-    "doc_set_id": "fenicsx_docs_2026_05",
+    "doc_set_id": "calculix_docs_2026_06",
     "retrieved_sources": []
   }
 }
@@ -1042,8 +1035,8 @@ Analysis Agent 패널은 다음을 보여야 한다.
    - objective score
    - uncertainty
 
-6. FEM / FEniCS
-   - backend: deterministic_cae / fenicsx / skipped
+6. FEM / CalculiX
+   - backend: deterministic_cae / calculix / skipped
    - RAG sources used
    - cache hit/miss
    - predicted stiffness/peak force/stress
@@ -1086,7 +1079,7 @@ Analysis Agent 패널은 다음을 보여야 한다.
 08_validate_curve_quality
 09_compute_utm_metrics
 10_prepare_fem_problem
-11_retrieve_fenics_rag_context
+11_retrieve_calculix_reference_context
 12_validate_fem_plan
 13_check_fem_cache
 14_run_or_reuse_fem
@@ -1189,10 +1182,10 @@ live mode에서 `ok_for_metrics=false`면 Knowledge/BO 업데이트를 막고 Gu
 
 증상:
 
-- FEniCS 공식 문서 RAG context를 못 찾음
+- CalculiX 공식 문서 RAG context를 못 찾음
 - LLM이 만든 `fem_plan.json`이 schema나 허용 template를 벗어남
 - cache hit처럼 보이지만 material/loading/calibration version이 다름
-- FEniCSx/CAE runner 실패
+- CAE/CalculiX runner 실패
 - FEM 예측과 UTM 결과가 허용 오차보다 크게 어긋남
 
 대응:
@@ -1232,7 +1225,7 @@ live mode에서 `ok_for_metrics=false`면 Knowledge/BO 업데이트를 막고 Gu
 7. previous/best comparison을 `state.experiment_evaluations` 기반으로 계산
 8. 분석 artifact를 run directory에 저장
 9. `fem_request.json`, `fem_result.json`, `fem_cache_manifest.json` schema 확정
-10. FEniCS 공식 문서/튜토리얼 RAG index manifest 설계
+10. CalculiX 공식 문서/튜토리얼 RAG index manifest 설계
 11. 현재 `cae.run_static_analysis`를 `backend="deterministic_cae"` fidelity record로 감싸기
 12. FEM cache key/checksum 규칙 추가
 13. FEM-UTM agreement를 objective와 분리된 진단 metric으로 저장
@@ -1244,8 +1237,8 @@ Linux/Windows live 환경 준비 후 가능한 것:
 3. GUI에서 column/unit override
 4. 실제 preprocessed curve preview
 5. BO Agent가 Analysis-generated measured evaluations만 prior로 쓰도록 필터링
-6. Linux FEniCSx runner 설치 및 `fenicsx` backend 추가
-7. Gmsh -> DOLFINx mesh conversion template 추가
+6. Linux CalculiX runner 설치 및 `calculix` backend 추가
+7. Gmsh -> CalculiX mesh conversion template 추가
 8. FEM result를 UTM 후 material/boundary calibration에 반영
 
 나중에 고려할 것:
@@ -1283,7 +1276,7 @@ Scientific Analysis Layer
   - UTM metrics, CAE blend, objective, uncertainty, quality
 
 FEM / Simulation Intelligence Layer
-  - FEniCS RAG plan, FEM cache, simulation result, FEM-UTM calibration, model discrepancy memory
+  - CalculiX RAG plan, FEM cache, simulation result, FEM-UTM calibration, model discrepancy memory
 
 Loop Handoff Layer
   - previous comparison, experiment_evaluation, bo_handoff, knowledge artifacts
@@ -1302,16 +1295,9 @@ Analysis Agent가 이 역할을 제대로 해주면, 뒤의 Knowledge/BO/Guardia
 - W3C PROV overview: https://www.w3.org/TR/prov-overview/
 - Apache Arrow CSV documentation: https://arrow.apache.org/docs/python/csv.html
 - pandas read_csv documentation: https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.read_csv.html
-- FEniCS project overview: https://fenicsproject.org/
-- FEniCSx download/install notes: https://fenicsproject.org/download/
-- FEniCSx documentation index: https://docs.fenicsproject.org/
-- DOLFINx Python documentation: https://docs.fenicsproject.org/dolfinx/main/python/
-- DOLFINx elasticity demo: https://docs.fenicsproject.org/dolfinx/main/python/demos/demo_elasticity.html
-- DOLFINx Gmsh mesh demo: https://docs.fenicsproject.org/dolfinx/main/python/demos/demo_gmsh.html
-- DOLFINx PyVista visualization demo: https://docs.fenicsproject.org/dolfinx/main/python/demos/demo_pyvista.html
-- UFL documentation: https://docs.fenicsproject.org/ufl/2025.2.0.post0/
-- J. S. Dokken FEniCSx tutorial: https://jsdokken.com/dolfinx-tutorial/
-- J. S. Dokken linear elasticity tutorial implementation: https://jsdokken.com/dolfinx-tutorial/chapter2/linearelasticity_code.html
+- CalculiX project and downloads: https://www.calculix.de/
+- CalculiX input deck reference: https://web.mit.edu/calculix_v2.7/CalculiX/ccx_2.7/doc/ccx/node160.html
+- ccx2paraview postprocessor: https://github.com/calculix/ccx2paraview
 - Multi-fidelity materials screening, npj Computational Materials: https://www.nature.com/articles/s41524-022-00947-9
 - BoTorch multi-fidelity BO tutorial: https://botorch.org/docs/v0.16.0/tutorials/multi_fidelity_bo/
 - Physics-informed BO for material design, npj Computational Materials: https://www.nature.com/articles/s41524-023-01173-7
