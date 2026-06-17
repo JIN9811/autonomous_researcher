@@ -2656,6 +2656,14 @@ textarea {
   gap: 8px;
 }
 
+.lerobot-camera-title-group {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 9px;
+  min-width: 0;
+}
+
 .lerobot-device-card strong {
   color: var(--text);
   font-size: 0.95rem;
@@ -22396,4 +22404,53 @@ body .bambu-printer-page .printer-evidence-details pre {
   overflow: auto;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
+}
+
+.lerobot-camera-backend-line {
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0;
+  padding: 3px 8px;
+  border: 1px solid rgba(20, 54, 179, 0.18);
+  border-radius: 999px;
+  background: rgba(241, 246, 255, 0.96);
+  color: var(--primary);
+  font-size: 0.74rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.lerobot-camera-backend-line .hint {
+  margin-left: 0.15rem;
+}
+
+.lerobot-camera-backend-line input {
+  accent-color: var(--primary);
+}
+
+.lerobot-camera-fps-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin: 0;
+  padding: 3px 7px;
+  border: 1px solid rgba(20, 54, 179, 0.14);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.lerobot-camera-fps-line input {
+  width: 48px;
+  min-height: 22px;
+  padding: 1px 5px;
+  border-radius: 8px;
+  font-size: 0.72rem;
+}
+
+.lerobot-camera-fps-line input:disabled {
+  opacity: 0.45;
 }

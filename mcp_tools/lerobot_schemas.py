@@ -161,3 +161,8 @@ class LeRobotDevicePortRequest(LeRobotBaseRequest):
     port: str = ""
     camera_key: str = "top"
     camera_index: int | None = None
+    camera_backend: str = "opencv"
+    camera_use_depth: bool = False
+    camera_fps: int | None = None
+    camera_width: int = 640
+    camera_height: int = 480

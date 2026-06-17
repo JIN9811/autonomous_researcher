@@ -36,6 +36,8 @@ def test_lerobot_gui_and_test_mode_api_workflow(tmp_path: Path, monkeypatch: Any
     assert "LeRobot / ROBOTIS Workspace" in page.text
     assert "Device Port Setup" in page.text
     assert "+ Camera" in page.text
+    assert "RealSense SDK" in page.text
+    assert "D455F top / D405 wrist" in page.text
     assert "jin/record-test" in page.text
     assert "Pick up the cylinder" in page.text
     assert "lerobot-action-status" in page.text

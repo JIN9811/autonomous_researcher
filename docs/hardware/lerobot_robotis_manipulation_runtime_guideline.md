@@ -1,7 +1,7 @@
 # LeRobot / ROBOTIS Manipulation Runtime Guideline
 
 Status: implementation guideline for Autonomous Researcher
-Last reviewed: 2026-05-06
+Last reviewed: 2026-06-17
 Scope: ROBOTIS OMX-AI + Hugging Face LeRobot integration for GUI, MCP tools, Manipulation Agent, test mode, live mode, replay, and fault injection.
 
 ## 1. Purpose
@@ -256,7 +256,7 @@ profiles:
     camera_map:
       top: top_camera
       wrist: wrist_camera
-    fps: 30
+    fps: 15
     observation_schema: lerobot_omx_v1
     action_schema: lerobot_omx_v1
     safety_limits:
@@ -599,8 +599,8 @@ Teleoperation GUI requirements:
 - persist follower and leader ports per profile after explicit baseline/detect or manual save
 - for the current ROBOTIS OMX-AI installation, treat leader as Dynamixel motor IDs `1-6` and follower as IDs `11-16`; if a saved port mapping contradicts that, Teleop must fail visibly rather than silently swapping roles
 - persist cameras per profile under `devices.cameras.<camera_key>` so `top`, `wrist`, and additional cameras can be configured independently
-- prefer stable device identity links when persisting live devices: `/dev/serial/by-id/*` for leader/follower and `/dev/v4l/by-id/*` or `/dev/v4l/by-path/*` for cameras; retain the original dynamic value as `raw_port` and store `device_id` / `device_link` for later lookup
-- resolve saved identity links to the current kernel node at execution time for all live LeRobot hardware paths: teleoperation, recording, rollout, and camera capture tests. For this ROBOTIS OMX-AI setup, that means saved follower identity resolves to `/dev/ttyACM0`, saved leader identity resolves to `/dev/ttyACM1`, and saved camera identities resolve to `/dev/video*` / integer OpenCV indices.
+- prefer stable device identity links when persisting live devices: `/dev/serial/by-id/*` for leader/follower and `/dev/v4l/by-id/*` or `/dev/v4l/by-path/*` for OpenCV cameras; retain the original dynamic value as `raw_port` and store `device_id` / `device_link` for later lookup
+- resolve saved identity links to the current kernel node at execution time for all live LeRobot hardware paths: teleoperation, recording, rollout, and camera capture tests. For this ROBOTIS OMX-AI setup, saved follower identity resolves to `/dev/ttyACM0`, saved leader identity resolves to `/dev/ttyACM1`, and OpenCV camera identities resolve to `/dev/video*` / integer OpenCV indices. Intel RealSense cameras are the exception: they must be saved and executed by SDK serial/name, not by `/dev/video*`.
 - allow GUI removal of non-default camera keys while protecting default `top` and `wrist` cameras
 - expose capture smoke tests per camera key
 - run live camera smoke tests through the LeRobot conda environment's OpenCV backend if the main application virtualenv does not include `cv2`
@@ -609,6 +609,25 @@ Teleoperation GUI requirements:
 - generate timestamped LeRobot live session IDs and write each subprocess log to a unique file; never rely on restart-local counters alone because reused log names can mix stale failure logs into later Stop/Status responses
 - use saved follower and leader device identities when building `python -m lerobot.teleoperate`, `lerobot-record`, and policy rollout command previews, then resolve them to current ports immediately before subprocess execution
 - build `--robot.cameras` from saved camera identities when camera capture is enabled, as LeRobot camera config dictionaries, not raw port strings, e.g. `{top: {type: opencv, index_or_path, width, height, fps}}`
+- support saved camera backend metadata per camera key. OpenCV cameras continue to use `{type: opencv, index_or_path, width: 640, height: 480, fps}`. Intel RealSense cameras use the local LeRobot official config shape `{type: intelrealsense, serial_number_or_name, width: 640, height: 480, fps: 15, use_depth: true, color_format, warmup_s}`.
+- for the current Spark workstation physical robot camera layout, use `top = D455F` and `wrist = D405`; each RealSense camera contributes RGB plus depth/displacement, so the manipulation input is two RGB streams plus two depth/displacement streams at 15 FPS by default. The default RealSense identifiers are `top = Intel RealSense D455F` and `wrist = 352122273019` unless the operator saves SDK-detected serials from Device Port Setup.
+- D405 must be configured with `color_format=bgr8` and `warmup_s>=1`. D455F/top uses `color_format=rgb8`. This mirrors the LeRobot D405 startup fix: D405 exposes color through the stereo module, and forcing `rgb8` or disabling warmup can cause `status=False`, no-frame warmup failures, or a stuck camera after a previous session.
+- `/lerobot` Device Port Setup exposes a per-camera `RealSense SDK` checkbox. When checked for a camera key, baseline/detect/save/test payloads store `backend=intelrealsense`, `use_depth=true`, `fps=15` by default, and downstream teleoperation, recording, rollout, and Manipulation Agent bridge commands all receive the RealSense camera config instead of OpenCV `/dev/video*` config.
+- When `top` or `wrist` is saved without an explicit RealSense identifier, the backend must resolve the role through SDK enumeration before writing memory: `top` prefers a detected D455/D455F serial, and `wrist` prefers a detected D405 serial. If `wrist` D405 is not visible, Device Port Setup must fail with `LEROBOT_REALSENSE_ROLE_CAMERA_NOT_FOUND` instead of saving D455F as wrist.
+- RealSense discovery must enumerate devices without opening camera streams and must use the official SDK path only. The bridge uses `pyrealsense2.context().query_devices()` and returns no RealSense candidates if SDK enumeration fails; it must not silently substitute OpenCV/V4L paths because downstream recording and rollout require the official LeRobot `intelrealsense` backend.
+- On the Spark workstation, D405 enumeration must load the local librealsense RSUSB build before the pip wheel package. The expected bindings are `/home/jin/librealsense-rsusb/build-rsusb/Release/pyrealsense2*.so` for ATR `.venv` and `/home/jin/librealsense-rsusb/build-rsusb-py310/Release/pyrealsense2*.so` for the `lerobot` conda environment. This follows the GitHub/libuvc workaround for V4L/UVC `UVCIOC_CTRL_QUERY` protocol failures and is not a fallback path.
+- Before live teleoperation, recording, or rollout starts, the bridge must validate all saved camera identities when `camera_enabled=true`. For `backend=intelrealsense`, this preflight must query the same LeRobot conda environment used by the subprocess, not only the main ATR `.venv`. A missing saved serial blocks before process launch with `LEROBOT_REALSENSE_CAMERA_UNAVAILABLE`; for example, if only D455F serial `341522300873` is visible and wrist D405 serial `352122273019` is missing, the operator must restore D405/hub/SDK visibility instead of letting LeRobot start and fail inside `RealSenseCamera.connect()`.
+- USB autosuspend is a known risk for long-running camera sessions. Use `scripts/realsense_usb_stabilize.py --include-brio` to inspect currently enumerated RealSense/BRIO devices and `sudo scripts/realsense_usb_stabilize.py --apply --include-brio` to set current `power/control=on`. This is a runtime sysfs fix and must be repeated after a camera re-enumerates unless a persistent udev/GRUB rule is added deliberately.
+- This live camera preflight applies to the shared robot command path, so it protects `python -m lerobot.teleoperate`, `lerobot-record`, Pi0.5/ACT rollout, and Manipulation Agent bridge calls that enable cameras. It does not apply to training because training does not open robot/camera devices.
+- current Spark workstation camera/USB routing:
+  - `top` RealSense: Intel RealSense D455F, SDK serial `341522300873`, USB 3.2. Use `serial_number_or_name=341522300873` in `intelrealsense` config.
+  - `wrist` RealSense: Intel RealSense D405, SDK serial `352122273019`, USB 3.2. Use `serial_number_or_name=352122273019` in `intelrealsense` config.
+  - BRIO auxiliary camera: Logitech BRIO by-id path `/dev/v4l/by-id/usb-046d_Logitech_BRIO_1CD057A6-video-index0` currently resolves to `/dev/video6`; use MJPEG `1280x720@15` for auxiliary monitoring, not for default LeRobot policy observations.
+  - RealSense V4L nodes may appear under `/dev/v4l/by-id/*RealSense*` and `/dev/v4l/by-path/*`, but those paths are diagnostic only for this pipeline. Do not route D405/D455F policy observations through OpenCV/V4L because the LeRobot command shape must remain `type=intelrealsense`.
+- camera throughput validation on 2026-06-17:
+  - D455F + D405 at `640x480 RGB+depth @ 30 FPS` ran for 20 seconds with no timeout/error at SDK level.
+  - D455F + D405 at `640x480 RGB+depth @ 30 FPS` plus BRIO `MJPEG 1280x720 @ 15 FPS` ran concurrently for 20 seconds; BRIO reported `drop_frames=0` and `dup_frames=0`; no `/dev/video*` process remained afterward.
+  - Despite successful 30 FPS stress tests, the ROBOTIS OMX-AI operational default is `15 Hz/FPS` for both dataset/control loop and RealSense camera streams. Recording and policy inference should favor timestamp stability and USB headroom over maximum camera rate. Raise both saved camera FPS and dataset/control FPS only for a deliberate 30 FPS recording campaign.
 - keep camera capture independent from LeRobot display visualization; display toggles `--display_data`, not whether saved cameras are recorded into the dataset
 - run live LeRobot subprocesses with `conda run --no-capture-output -n lerobot ...` and unbuffered Python output so command logs stream into the GUI while the process is active
 - start fake teleoperation in test mode
@@ -621,7 +640,7 @@ Recording GUI requirements:
 
 - show task/instruction, FPS, warmup, episode duration, reset duration, and episode count fields
 - pass the task/instruction field as LeRobot's required `--dataset.single_task` argument
-- reuse the same follower, leader, and camera resolution path as teleoperation; current ROBOTIS OMX live recording resolves follower to `/dev/ttyACM0`, leader to `/dev/ttyACM1`, top camera to OpenCV index `2`, and wrist camera to OpenCV index `0` when the saved identities are connected
+- reuse the same follower, leader, and camera resolution path as teleoperation. Current ROBOTIS OMX live recording resolves follower/leader from `/dev/serial/by-id/*` to current `/dev/ttyACM*` nodes, and resolves top/wrist cameras through saved RealSense SDK serials (`top=341522300873`, `wrist=352122273019`) when `backend=intelrealsense` is enabled.
 - if the selected dataset already exists and `resume` is false, live recording must not silently resume it; use a fresh suffixed dataset path and surface `existing dataset detected; recording to fresh dataset ...` in the trace so partial/corrupt prior runs do not break camera-enabled recording startup
 - live `record.control` must send LeRobot's actual recording keyboard events: Right Arrow for save/advance, Left Arrow for rerecord, Esc for graceful finish. Do not mark episodes complete in GUI without sending the corresponding control event.
 - live `record.control` must prefer the active recording session over newer stopped/stale record sessions, because repeated start/stop attempts can leave stopped sessions later in the GUI list than the currently running process.
@@ -815,6 +834,7 @@ Training rules:
 
 - test mode simulates logs, loss values, checkpoints, and completion
 - live training must be separately gated and currently requires `live_enabled=true`, `allow_training=true`, and operator `confirm_live_execute=true`
+- live training does not open robot or camera devices. It validates dataset/output/checkpoint paths instead: selected local datasets must be completed LeRobot datasets, selected output directories must stay under allowed roots, fresh runs use a timestamped output directory when the base output already exists, and resume runs require an existing `train_config.json` under the selected checkpoint/output tree.
 - ACT can be a quick baseline only if dependencies are verified
 - SmolVLA/VLA options must be config-driven and dependency-verified
 - no Hub upload unless explicitly configured
@@ -832,6 +852,8 @@ Rollout rules:
 - test mode simulates policy loading and active control
 - live rollout requires no active teleoperation conflict
 - missing policy path must block before any physical action
+- local rollout policy selections may point at an output directory, `checkpoints/last/pretrained_model`, or a recognized model file such as `model.safetensors`; the bridge normalizes these to the executable `pretrained_model` policy directory before command construction
+- when cameras are enabled, rollout uses the same follower/camera path and RealSense visibility preflight as teleoperation and recording
 - DAgger-like mode requires teleop config and explicit operator gate
 
 ## 16. Fault Injection

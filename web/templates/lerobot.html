@@ -25,7 +25,7 @@ Modification guide:
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>{{ title }}</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
-    <link rel="stylesheet" href="/static/styles.css?v=20260603-lerobot-piper-1" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260617-realsense-camera-fps-15-2" />
   </head>
   <body>
     <main class="page lerobot-page">
@@ -96,11 +96,11 @@ Modification guide:
           </label>
           <label>
             Control FPS
-            <input id="lerobot-fps-input" type="number" min="1" value="30" title="Policy/control loop fps. Keep camera fps separate when a camera cannot open at this rate." />
+            <input id="lerobot-fps-input" type="number" min="1" value="15" title="Policy/control loop fps. Keep this aligned with camera fps for recording and rollout datasets unless intentionally stress-testing." />
           </label>
           <label>
             Camera FPS
-            <input id="lerobot-camera-fps-input" type="number" min="1" value="30" title="OpenCV camera fps. Use 30 for the current top/wrist cameras unless verified otherwise." />
+            <input id="lerobot-camera-fps-input" type="number" min="1" value="15" title="Camera fps. RealSense RGB+depth defaults to 15 FPS for top/wrist capture." />
           </label>
           <label>
             Device
@@ -126,7 +126,7 @@ Modification guide:
           <span class="hint">follower, leader, and multiple cameras are remembered per profile</span>
         </summary>
         <p class="subhead">
-          For follower/leader MotorBus setup: save a baseline, disconnect or reconnect one target arm, then detect and save the changed port. Camera setup is key-based; defaults are top and wrist, and more cameras can be added.
+          For follower/leader MotorBus setup: save a baseline, disconnect or reconnect one target arm, then detect and save the changed port. Camera setup is key-based; defaults are top and wrist, and more cameras can be added. RealSense SDK mode records RGB + depth channels; D455F top / D405 wrist is the current default physical mapping.
         </p>
         <div class="lerobot-device-grid">
           <article class="lerobot-device-card">
@@ -786,6 +786,6 @@ Modification guide:
         </article>
       </section>
     </main>
-    <script src="/static/lerobot.js?v=20260605-train-reconnect-progress-2" defer></script>
+    <script src="/static/lerobot.js?v=20260617-realsense-camera-fps-15-2" defer></script>
   </body>
 </html>

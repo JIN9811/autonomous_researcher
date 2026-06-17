@@ -79,7 +79,7 @@ lerobot:
       camera_map:
         top: top_camera
         wrist: wrist_camera
-      fps: 30
+      fps: 15
       observation_schema: lerobot_omx_v1
       action_schema: lerobot_omx_v1
       safety_limits:

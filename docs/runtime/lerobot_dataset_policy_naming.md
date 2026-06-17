@@ -47,6 +47,52 @@ Example command shape:
 
 This matches the currently installed LeRobot implementation, where `LeRobotDataset.create(..., root=<path>)` creates the dataset directly at `<path>`.
 
+For live training, path resolution is stricter:
+
+- If `dataset_path` is selected, it must resolve under an allowed local root and
+  must contain a completed LeRobot dataset.
+- If only `dataset_repo_id` is selected, the bridge searches under
+  `dataset_root` and may pick the newest completed timestamped recording that
+  matches the same repo prefix.
+- Fresh training runs do not reuse an existing `output_dir`; the bridge creates
+  a timestamp-suffixed output directory.
+- Resume training keeps the selected `output_dir` but requires an existing
+  checkpoint `train_config.json`.
+
+For live rollout/inference, policy path resolution is also normalized by the
+bridge:
+
+- A selected output folder, a `checkpoints/last/pretrained_model` folder, or a
+  recognized model file such as `model.safetensors`, `policy.ckpt`, `*.pt`,
+  `*.pth`, or `*.bin` is resolved to the executable pretrained policy path.
+- GUI, CUI, and Manipulation Agent should pass the operator's selected value;
+  they must not duplicate checkpoint-directory search logic.
+
+## RealSense Camera Preflight Rule
+
+Camera path handling is part of rollout/record/teleop execution, not training.
+
+Rules:
+
+- `top` and `wrist` RealSense cameras are saved by SDK serial/name when
+  `backend=intelrealsense`.
+- Current Spark workstation defaults are `top=341522300873` for D455F and
+  `wrist=352122273019` for D405.
+- Command generation must preserve role-specific RealSense stream settings:
+  `top/D455F -> color_format=rgb8`, `wrist/D405 -> color_format=bgr8`, both
+  with `warmup_s>=1`, `use_depth=true`, and the saved FPS/resolution.
+- Device Port Setup must not save top/D455F as wrist when D405 is absent. Missing
+  D405 is represented as `LEROBOT_REALSENSE_ROLE_CAMERA_NOT_FOUND` during
+  detect/save or `LEROBOT_REALSENSE_CAMERA_UNAVAILABLE` during live startup.
+- Before live teleoperation, recording, or rollout starts with
+  `camera_enabled=true`, the bridge enumerates visible RealSense devices from
+  the LeRobot conda environment.
+- Missing saved serials block before launching LeRobot with
+  `LEROBOT_REALSENSE_CAMERA_UNAVAILABLE`.
+- Do not fall back to `/dev/video*` or OpenCV for RealSense policy
+  observations. Restore USB/SDK visibility and rerun Device Port Setup if
+  necessary.
+
 ## Manual-Stop Rollout Rule
 
 Policy rollout should run until the operator stops it unless a duration is explicitly requested.

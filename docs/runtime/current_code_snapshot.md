@@ -146,6 +146,20 @@ Do not use this document as an instruction prompt. Use it as the "what the code
 currently does" layer when updating operator docs, README files, or improvement
 plans.
 
+Current LeRobot bridge behavior:
+
+- `/api/lerobot/teleoperate/start`, `/api/lerobot/record/start`, and
+  `/api/lerobot/rollout/start` share the same follower/camera command-building
+  path in `device_bridges/lerobot_bridge.py`.
+- If `camera_enabled=true` in live mode and a saved RealSense camera serial is
+  not visible from the LeRobot conda environment, the bridge blocks before
+  launching the subprocess with `LEROBOT_REALSENSE_CAMERA_UNAVAILABLE`.
+- Training does not open robot/camera devices. It validates dataset/output
+  paths, fresh/resume output behavior, and Pi0.5 dataset conversion paths.
+- Rollout/inference normalizes selected local policy files or output folders to
+  the executable LeRobot `pretrained_model` checkpoint directory before command
+  construction.
+
 ## 1. Page Routes
 
 The FastAPI app currently serves these operator pages:
@@ -820,6 +834,15 @@ Important RealSense rules in the current code:
 - `requirements.txt` and `REQUIREMENTS.md` list `pyrealsense2==2.58.2.10647`.
   Installing that wheel adds the Python SDK only; it does not change USB
   topology, kernel camera mappings, or LeRobot camera key assignments.
+- LeRobotBridge owns policy-camera command generation. The current ROBOTIS OMX
+  profile uses `top=341522300873` D455F with `color_format=rgb8` and
+  `wrist=352122273019` D405 with `color_format=bgr8`; both RealSense cameras
+  keep `warmup_s>=1`.
+- `Detect & Save` must not store a visible D455F as the wrist camera when D405
+  is absent. That failure is reported as `LEROBOT_REALSENSE_ROLE_CAMERA_NOT_FOUND`.
+- `scripts/realsense_usb_stabilize.py` inspects RealSense/BRIO USB sysfs power
+  settings and can set currently enumerated devices to `power/control=on`
+  without opening a camera stream.
 
 ## 9. Live GUI Transcript And Session State
 

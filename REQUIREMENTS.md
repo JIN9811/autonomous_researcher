@@ -29,13 +29,13 @@ Optional but commonly used:
 - `ffmpeg` for the Bambu Lab live camera browser proxy. Without it, the Bambu
   video status API can still report that the printer's LAN video port is
   reachable, but `/api/printer/video-stream.mjpeg` stays unavailable.
-- Intel RealSense Python SDK (`pyrealsense2==2.58.2.10647`) for live RealSense
-  camera checks and future VisionAgent depth/RGB capture. The Spark workstation
-  uses Ubuntu 24.04 on `aarch64`; the tested wheel is
-  `manylinux2014_aarch64` for Python 3.12 in the main `.venv` and Python 3.10
-  in the `lerobot` conda environment. `rs-enumerate-devices` is not required for
-  ATR operation when the Python SDK is installed, but it may still be useful if
-  the full librealsense CLI package is installed later.
+- Intel RealSense Python SDK (`pyrealsense2==2.58.2.10647`) plus the local
+  librealsense RSUSB build for live D405/D455F depth/RGB capture. The Spark
+  workstation uses Ubuntu 24.04 on `aarch64`; the default wheel can import but
+  may hit Linux V4L/UVC `UVCIOC_CTRL_QUERY` protocol errors on D405. The tested
+  runtime therefore prefers a local `FORCE_RSUSB_BACKEND=ON` librealsense build
+  in Python 3.12 for the main `.venv` and Python 3.10 for the `lerobot` conda
+  environment. This is an SDK-path fix, not an OpenCV/V4L fallback.
 - Bambu Studio CLI for Bambu Lab X2D slicing/pre-start validation. The 3DP
   GUI/backend resolves the executable in this order: `BAMBU_STUDIO_EXECUTABLE`,
   configured wrapper path (`install/bambustudio/bambu-studio-wrapper`), then a
@@ -341,10 +341,64 @@ Use `conda run -n lerobot <command>` to verify entry points before enabling live
 robot actions in the GUI.
 
 Install the RealSense Python SDK into the LeRobot environment as well when robot
-recording or rollout will use RealSense cameras:
+teleoperation, recording, or rollout will use RealSense cameras:
 
 ```bash
 /home/jin/miniconda3/envs/lerobot/bin/python -m pip install pyrealsense2==2.58.2.10647
+```
+
+Spark workstation D405 fix:
+
+```bash
+sudo apt install -y libusb-1.0-0-dev python3.12-dev
+git clone https://github.com/realsenseai/librealsense /home/jin/librealsense-rsusb
+cd /home/jin/librealsense-rsusb
+git checkout v2.58.2
+
+# Host udev rule, then reload.
+sudo cp config/99-realsense-libusb.rules /etc/udev/rules.d/99-realsense-libusb.rules
+sudo udevadm control --reload-rules
+sudo udevadm trigger
+
+# Main ATR Python 3.12 build.
+cmake -S . -B build-rsusb -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DFORCE_RSUSB_BACKEND=ON \
+  -DBUILD_PYTHON_BINDINGS=ON \
+  -DPYTHON_EXECUTABLE=/home/jin/autonomous_researcher/.venv/bin/python \
+  -DPython_EXECUTABLE=/home/jin/autonomous_researcher/.venv/bin/python \
+  -DBUILD_EXAMPLES=OFF \
+  -DBUILD_GRAPHICAL_EXAMPLES=OFF \
+  -DBUILD_TOOLS=ON \
+  -DBUILD_UNIT_TESTS=OFF \
+  -DBUILD_WITH_CUDA=OFF
+cmake --build build-rsusb -j 8
+
+# LeRobot Python 3.10 build.
+cmake -S . -B build-rsusb-py310 -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DFORCE_RSUSB_BACKEND=ON \
+  -DBUILD_PYTHON_BINDINGS=ON \
+  -DPYTHON_EXECUTABLE=/home/jin/miniconda3/envs/lerobot/bin/python \
+  -DPython_EXECUTABLE=/home/jin/miniconda3/envs/lerobot/bin/python \
+  -DBUILD_EXAMPLES=OFF \
+  -DBUILD_GRAPHICAL_EXAMPLES=OFF \
+  -DBUILD_TOOLS=ON \
+  -DBUILD_UNIT_TESTS=OFF \
+  -DBUILD_WITH_CUDA=OFF
+cmake --build build-rsusb-py310 -j 8
+```
+
+Pin the built RSUSB bindings ahead of the pip wheel:
+
+```bash
+cat > /home/jin/autonomous_researcher/.venv/lib/python3.12/site-packages/atr_realsense_rsusb.pth <<'PTH'
+import os, sys; p='/home/jin/librealsense-rsusb/build-rsusb/Release'; os.path.isdir(p) and p not in sys.path and sys.path.insert(0, p)
+PTH
+
+cat > /home/jin/miniconda3/envs/lerobot/lib/python3.10/site-packages/atr_realsense_rsusb.pth <<'PTH'
+import os, sys; p='/home/jin/librealsense-rsusb/build-rsusb-py310/Release'; os.path.isdir(p) and p not in sys.path and sys.path.insert(0, p)
+PTH
 ```
 
 Spark workstation camera smoke check, without writing ATR mapping files:
@@ -353,16 +407,26 @@ Spark workstation camera smoke check, without writing ATR mapping files:
 # Main ATR environment
 .venv/bin/python - <<'PY'
 import pyrealsense2 as rs
+print("pyrealsense2", rs.__file__)
 ctx = rs.context()
 print("device_count", len(list(ctx.query_devices())))
 for dev in ctx.query_devices():
     print(dev.get_info(rs.camera_info.name), dev.get_info(rs.camera_info.serial_number))
 PY
 
-# Kernel/UVC frame check when SDK CLI tools are not installed
-ffmpeg -hide_banner -loglevel error -y \
-  -f v4l2 -input_format gray16le -video_size 640x480 -i /dev/video2 \
-  -frames:v 1 /tmp/realsense_depth_probe.png
+# LeRobot execution environment. This is the environment used by live
+# teleoperate/record/rollout subprocesses.
+/home/jin/miniconda3/condabin/conda run --no-capture-output -n lerobot python - <<'PY'
+import pyrealsense2 as rs
+print("pyrealsense2", rs.__file__)
+ctx = rs.context()
+print("device_count", len(list(ctx.query_devices())))
+for dev in ctx.query_devices():
+    print(dev.get_info(rs.camera_info.name), dev.get_info(rs.camera_info.serial_number))
+PY
+
+# Cross-check through LeRobot's own camera discovery command.
+/home/jin/miniconda3/condabin/conda run --no-capture-output -n lerobot lerobot-find-cameras realsense
 ```
 
 If RealSense and webcam devices disappear from both `lsusb` and
@@ -370,12 +434,74 @@ If RealSense and webcam devices disappear from both `lsusb` and
 software mapping problem. Replug or power-cycle the camera hub before debugging
 ATR camera code.
 
+Expected Spark workstation RealSense serials:
+
+- `top`: Intel RealSense D455F, serial `341522300873`
+- `wrist`: Intel RealSense D405, serial `352122273019`
+
+The LeRobot bridge uses the saved SDK serials when building
+`--robot.cameras`. In live `teleoperate`, `record`, and `rollout`, ATR now runs
+a pre-start camera visibility check before launching the LeRobot subprocess. If
+`camera_enabled=true` and a saved RealSense serial is not visible in the
+LeRobot conda environment, the request is blocked before robot motion with:
+
+```text
+LEROBOT_REALSENSE_CAMERA_UNAVAILABLE
+```
+
+Example operator meaning:
+
+```text
+Saved LeRobot cameras are not available: wrist=352122273019;
+visible RealSense devices: 341522300873.
+```
+
+This means the D405 is missing at SDK/USB level or not visible to the `lerobot`
+conda environment. Do not remap it to `/dev/video*`; restore SDK visibility by
+replugging/power-cycling the camera hub, then rerun Device Port Setup
+`Detect & Save` if the serial changed.
+
+LeRobot D405 issue-cleaning rules:
+
+- D405 must be passed to LeRobot as `type=intelrealsense`,
+  `serial_number_or_name=352122273019`, `color_format=bgr8`,
+  `use_depth=true`, `warmup_s>=1`.
+- D455F/top remains `color_format=rgb8`.
+- Do not use `warmup_s=0` for RealSense. LeRobot issue reports show
+  `warmup=False` / disabled warmup can produce `read failed (status=False)`
+  even when RealSense metadata discovery works.
+- Do not let `Detect & Save` assign visible D455F serial `341522300873` to the
+  `wrist` role when D405 is absent. A missing D405 must remain a blocked
+  hardware state, not a camera fallback.
+- If `wrist=352122273019` disappears after a failed session, first run:
+
+```bash
+cd /home/jin/autonomous_researcher
+.venv/bin/python scripts/realsense_usb_stabilize.py --include-brio
+```
+
+If visible RealSense/BRIO devices report `power_control=auto`, apply the
+runtime power fix:
+
+```bash
+sudo .venv/bin/python scripts/realsense_usb_stabilize.py --apply --include-brio
+```
+
+This changes currently enumerated USB device `power/control` to `on`. It does
+not remap cameras and does not open streams. Re-run it after reconnecting D405
+because sysfs entries are recreated on USB re-enumeration.
+
 Spark workstation RealSense safety note:
 
 - `pyrealsense2` installation only adds the Python SDK wheel; it does not install
-  kernel drivers or rewrite camera mappings.
+  kernel drivers or rewrite camera mappings. On this Spark workstation, D405
+  live use must import the RSUSB build from `/home/jin/librealsense-rsusb/...`
+  instead of the pip wheel package path.
 - Do not open arbitrary depth/RGB streams as a smoke test. First enumerate the
   device and advertised stream profiles through `RealSenseBridge.enumerate`.
+- Do not silently substitute `/dev/v4l/by-id` or OpenCV when RealSense SDK
+  enumeration fails. D405/D455F LeRobot recording and rollout require the
+  official `intelrealsense` camera backend.
 - D405-class devices may expose only the Stereo Module even when a `color`
   profile is advertised. ATR must validate the advertised profile first and must
   reject any non-advertised stream before `rs.pipeline.start()`.

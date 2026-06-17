@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
+from types import SimpleNamespace
 from pathlib import Path
 
 from device_bridges.lerobot_bridge import LeRobotBridge, LeRobotBridgeConfig
@@ -170,6 +172,226 @@ def test_multiple_camera_ports_are_saved_per_key_and_used_in_commands(tmp_path: 
     assert cameras["wrist"]["index_or_path"] == "/dev/video2"
 
 
+def test_realsense_camera_mode_uses_depth_rgb_for_top_and_wrist_at_default_15fps(tmp_path: Path, monkeypatch) -> None:
+    bridge = _bridge(tmp_path)
+
+    class FakeDevice:
+        def __init__(self, *, name: str, serial: str, product_line: str = "D400") -> None:
+            self.values = {
+                "name": name,
+                "serial_number": serial,
+                "product_line": product_line,
+            }
+
+        def supports(self, info: str) -> bool:
+            return info in self.values
+
+        def get_info(self, info: str) -> str:
+            return self.values[info]
+
+    class FakeContext:
+        def query_devices(self):
+            return [
+                FakeDevice(name="Intel RealSense D405", serial="352122273019"),
+                FakeDevice(name="Intel RealSense D455F", serial="341522300873"),
+            ]
+
+    fake_rs = SimpleNamespace(
+        camera_info=SimpleNamespace(name="name", serial_number="serial_number", product_line="product_line"),
+        context=lambda: FakeContext(),
+    )
+    monkeypatch.setitem(sys.modules, "pyrealsense2", fake_rs)
+
+    top = bridge.ports_save(
+        {
+            "mode": "test",
+            "profile_id": "fake_omx_ai",
+            "device_role": "camera",
+            "camera_key": "top",
+            "camera_backend": "realsense",
+            "camera_use_depth": True,
+        }
+    )
+    wrist = bridge.ports_save(
+        {
+            "mode": "test",
+            "profile_id": "fake_omx_ai",
+            "device_role": "camera",
+            "camera_key": "wrist",
+            "camera_backend": "realsense",
+            "camera_use_depth": True,
+        }
+    )
+    teleop = bridge.teleoperate_start({"mode": "test", "profile_id": "fake_omx_ai", "camera_enabled": True, "camera_fps": 15})
+
+    assert top["saved_devices"]["cameras"]["top"]["backend"] == "intelrealsense"
+    assert wrist["saved_devices"]["cameras"]["wrist"]["backend"] == "intelrealsense"
+    assert top["saved_devices"]["cameras"]["top"]["color_format"] == "rgb8"
+    assert wrist["saved_devices"]["cameras"]["wrist"]["color_format"] == "bgr8"
+    camera_arg = next(arg for arg in teleop["command_preview"] if arg.startswith("--robot.cameras="))
+    cameras = json.loads(camera_arg.removeprefix("--robot.cameras="))
+    assert cameras["top"] == {
+        "type": "intelrealsense",
+        "serial_number_or_name": "341522300873",
+        "width": 640,
+        "height": 480,
+        "fps": 15,
+        "color_format": "rgb8",
+        "use_depth": True,
+        "warmup_s": 1,
+    }
+    assert cameras["wrist"] == {
+        "type": "intelrealsense",
+        "serial_number_or_name": "352122273019",
+        "width": 640,
+        "height": 480,
+        "fps": 15,
+        "color_format": "bgr8",
+        "use_depth": True,
+        "warmup_s": 1,
+    }
+
+
+def test_realsense_scan_does_not_fallback_to_v4l_by_id_when_sdk_query_fails(tmp_path: Path, monkeypatch) -> None:
+    bridge = _bridge(tmp_path)
+
+    class BrokenContext:
+        def query_devices(self):
+            raise RuntimeError("UVCIOC_CTRL_QUERY failed")
+
+    monkeypatch.setitem(sys.modules, "pyrealsense2", SimpleNamespace(context=lambda: BrokenContext()))
+
+    def fake_glob(pattern: str) -> list[str]:
+        if pattern == "/dev/v4l/by-id/*RealSense*":
+            return [
+                "/dev/v4l/by-id/usb-Intel_R__RealSense_TM__Depth_Camera_405_Intel_R__RealSense_TM__Depth_Camera_405_352122273019-video-index0",
+                "/dev/v4l/by-id/usb-Intel_R__RealSense_TM__Depth_Camera_455f_Intel_R__RealSense_TM__Depth_Camera_455f-video-index0",
+            ]
+        return []
+
+    monkeypatch.setattr("device_bridges.lerobot_bridge.glob.glob", fake_glob)
+
+    assert bridge._scan_realsense_camera_ids() == []
+
+
+def test_realsense_wrist_detect_does_not_save_top_camera_when_d405_missing(tmp_path: Path, monkeypatch) -> None:
+    bridge = _bridge(tmp_path)
+
+    monkeypatch.setattr(bridge, "_scan_realsense_camera_ids", lambda: ["341522300873"], raising=False)
+    monkeypatch.setattr(
+        bridge,
+        "_scan_realsense_camera_entries",
+        lambda: [{"name": "Intel RealSense D455F", "serial": "341522300873", "product_line": "D400"}],
+        raising=False,
+    )
+
+    result = bridge.ports_detect(
+        {
+            "mode": "live",
+            "profile_id": "fake_omx_ai",
+            "device_role": "camera",
+            "camera_key": "wrist",
+            "camera_backend": "realsense",
+            "camera_use_depth": True,
+        }
+    )
+
+    assert result["ok"] is False
+    assert result["failure_code"] == "LEROBOT_REALSENSE_ROLE_CAMERA_NOT_FOUND"
+    assert "expected=352122273019" in result["message"]
+    assert "341522300873" in result["message"]
+
+
+def test_realsense_live_save_prefers_sdk_serial_for_top_d455(tmp_path: Path, monkeypatch) -> None:
+    bridge = _bridge(tmp_path)
+
+    class FakeDevice:
+        def __init__(self, *, name: str, serial: str, product_line: str = "D400") -> None:
+            self.values = {
+                "name": name,
+                "serial_number": serial,
+                "product_line": product_line,
+            }
+
+        def supports(self, info: str) -> bool:
+            return info in self.values
+
+        def get_info(self, info: str) -> str:
+            return self.values[info]
+
+    class FakeContext:
+        def query_devices(self):
+            return [
+                FakeDevice(name="Intel RealSense D405", serial="352122273019"),
+                FakeDevice(name="Intel RealSense D455F", serial="341522300873"),
+            ]
+
+    fake_rs = SimpleNamespace(
+        camera_info=SimpleNamespace(name="name", serial_number="serial_number", product_line="product_line"),
+        context=lambda: FakeContext(),
+    )
+    monkeypatch.setitem(sys.modules, "pyrealsense2", fake_rs)
+
+    result = bridge.ports_save(
+        {
+            "mode": "live",
+            "profile_id": "fake_omx_ai",
+            "device_role": "camera",
+            "camera_key": "top",
+            "camera_backend": "realsense",
+        }
+    )
+
+    assert result["saved_devices"]["cameras"]["top"]["serial_number_or_name"] == "341522300873"
+    assert result["saved_devices"]["cameras"]["top"]["port"] == "341522300873"
+
+
+def test_realsense_live_detect_prefers_role_specific_sdk_serial(tmp_path: Path, monkeypatch) -> None:
+    bridge = _bridge(tmp_path)
+
+    class FakeDevice:
+        def __init__(self, *, name: str, serial: str, product_line: str = "D400") -> None:
+            self.values = {
+                "name": name,
+                "serial_number": serial,
+                "product_line": product_line,
+            }
+
+        def supports(self, info: str) -> bool:
+            return info in self.values
+
+        def get_info(self, info: str) -> str:
+            return self.values[info]
+
+    class FakeContext:
+        def query_devices(self):
+            # D455F sorts before D405 by serial, so detect must use the camera_key hint.
+            return [
+                FakeDevice(name="Intel RealSense D405", serial="352122273019"),
+                FakeDevice(name="Intel RealSense D455F", serial="341522300873"),
+            ]
+
+    fake_rs = SimpleNamespace(
+        camera_info=SimpleNamespace(name="name", serial_number="serial_number", product_line="product_line"),
+        context=lambda: FakeContext(),
+    )
+    monkeypatch.setitem(sys.modules, "pyrealsense2", fake_rs)
+
+    result = bridge.ports_detect(
+        {
+            "mode": "live",
+            "profile_id": "fake_omx_ai",
+            "device_role": "camera",
+            "camera_key": "wrist",
+            "camera_backend": "realsense",
+        }
+    )
+
+    assert result["ok"] is True
+    assert result["saved_devices"]["cameras"]["wrist"]["serial_number_or_name"] == "352122273019"
+    assert result["saved_devices"]["cameras"]["wrist"]["port"] == "352122273019"
+
+
 def test_teleoperate_omits_cameras_until_enabled(tmp_path: Path) -> None:
     bridge = _bridge(tmp_path)
 
@@ -235,6 +457,115 @@ def test_live_rollout_blocks_unavailable_saved_follower_port(tmp_path: Path) -> 
     assert result["ok"] is False
     assert result["failure_code"] == "LEROBOT_DEVICE_PORT_UNAVAILABLE"
     assert str(missing_port) in result["message"]
+
+
+def test_live_teleoperate_blocks_missing_saved_realsense_camera_before_process_start(tmp_path: Path, monkeypatch) -> None:
+    bridge = _bridge(tmp_path)
+    follower = tmp_path / "omx_follower"
+    leader = tmp_path / "omx_leader"
+    follower.touch()
+    leader.touch()
+    bridge.ports_save({"mode": "live", "profile_id": "fake_omx_ai", "device_role": "follower", "port": str(follower)})
+    bridge.ports_save({"mode": "live", "profile_id": "fake_omx_ai", "device_role": "leader", "port": str(leader)})
+    bridge.ports_save(
+        {
+            "mode": "live",
+            "profile_id": "fake_omx_ai",
+            "device_role": "camera",
+            "camera_key": "top",
+            "port": "341522300873",
+            "camera_backend": "realsense",
+            "camera_use_depth": True,
+        }
+    )
+    bridge.ports_save(
+        {
+            "mode": "live",
+            "profile_id": "fake_omx_ai",
+            "device_role": "camera",
+            "camera_key": "wrist",
+            "port": "352122273019",
+            "camera_backend": "realsense",
+            "camera_use_depth": True,
+        }
+    )
+    monkeypatch.setattr(bridge, "_live_block_if_needed", lambda **_: None)
+    monkeypatch.setattr(
+        bridge,
+        "_scan_live_realsense_camera_entries",
+        lambda: [{"name": "Intel RealSense D455F", "serial": "341522300873", "product_line": "D400"}],
+        raising=False,
+    )
+    bridge._start_live_process = lambda **_: (_ for _ in ()).throw(AssertionError("must not start live teleop"))  # type: ignore[method-assign]
+
+    result = bridge.teleoperate_start(
+        {
+            "mode": "live",
+            "runtime_mode": "live",
+            "profile_id": "fake_omx_ai",
+            "camera_enabled": True,
+            "confirm_live_execute": True,
+        }
+    )
+
+    assert result["ok"] is False
+    assert result["failure_code"] == "LEROBOT_REALSENSE_CAMERA_UNAVAILABLE"
+    assert "wrist=352122273019" in result["message"]
+    assert "visible RealSense devices: 341522300873" in result["message"]
+
+
+def test_live_rollout_blocks_missing_saved_realsense_camera_before_policy_process_start(tmp_path: Path, monkeypatch) -> None:
+    bridge = _bridge(tmp_path)
+    follower = tmp_path / "omx_follower"
+    follower.touch()
+    policy_dir = tmp_path / "outputs" / "train" / "job" / "checkpoints" / "last" / "pretrained_model"
+    _make_policy_checkpoint(policy_dir)
+    bridge.ports_save({"mode": "live", "profile_id": "fake_omx_ai", "device_role": "follower", "port": str(follower)})
+    bridge.ports_save(
+        {
+            "mode": "live",
+            "profile_id": "fake_omx_ai",
+            "device_role": "camera",
+            "camera_key": "top",
+            "port": "341522300873",
+            "camera_backend": "realsense",
+            "camera_use_depth": True,
+        }
+    )
+    bridge.ports_save(
+        {
+            "mode": "live",
+            "profile_id": "fake_omx_ai",
+            "device_role": "camera",
+            "camera_key": "wrist",
+            "port": "352122273019",
+            "camera_backend": "realsense",
+            "camera_use_depth": True,
+        }
+    )
+    monkeypatch.setattr(bridge, "_live_block_if_needed", lambda **_: None)
+    monkeypatch.setattr(
+        bridge,
+        "_scan_live_realsense_camera_entries",
+        lambda: [{"name": "Intel RealSense D455F", "serial": "341522300873", "product_line": "D400"}],
+        raising=False,
+    )
+    bridge._start_live_process = lambda **_: (_ for _ in ()).throw(AssertionError("must not start live rollout"))  # type: ignore[method-assign]
+
+    result = bridge.rollout_start(
+        {
+            "mode": "live",
+            "runtime_mode": "live",
+            "profile_id": "fake_omx_ai",
+            "policy_path": str(policy_dir),
+            "camera_enabled": True,
+            "confirm_live_execute": True,
+        }
+    )
+
+    assert result["ok"] is False
+    assert result["failure_code"] == "LEROBOT_REALSENSE_CAMERA_UNAVAILABLE"
+    assert "wrist=352122273019" in result["message"]
 
 
 def test_extra_camera_can_be_deleted_but_default_camera_is_protected(tmp_path: Path) -> None:
@@ -1669,3 +2000,24 @@ def test_lerobot_cleanup_marker_matching_does_not_match_gui_dom_ids() -> None:
         markers,
     )
     assert LeRobotBridge._cmdline_matches_lerobot_marker(["python", "eval.py", "--rtc.enabled=true"], markers)
+
+
+def test_lerobot_display_viewer_marker_matching_targets_teleop_rerun_only() -> None:
+    assert LeRobotBridge._cmdline_matches_lerobot_display_viewer(
+        [
+            "/home/jin/miniconda3/envs/lerobot/bin/rerun",
+            "--port=9876",
+            "--memory-limit=10%",
+            "--expect-data-soon",
+        ]
+    )
+    assert LeRobotBridge._cmdline_matches_lerobot_display_viewer(
+        [
+            "rerun",
+            "--port",
+            "9876",
+            "--expect-data-soon",
+        ]
+    )
+    assert not LeRobotBridge._cmdline_matches_lerobot_display_viewer(["rerun", "--port=9090"])
+    assert not LeRobotBridge._cmdline_matches_lerobot_display_viewer(["python", "-m", "lerobot.teleoperate"])

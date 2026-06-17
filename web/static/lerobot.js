@@ -154,9 +154,13 @@ let lastBrowseOptions = {};
 let lastPortCandidates = [];
 let lastConfigData = null;
 let extraCameraKeys = [];
+const defaultRealsenseCameraKeys = new Set(["top", "wrist"]);
+const cameraRealsenseOverrides = new Map();
+const cameraFpsOverrides = new Map();
 let trainStatusTimer = null;
 let rolloutStatusTimer = null;
 let manipulationProfileLoaded = false;
+let profileSelectionInitialized = false;
 
 function setStatusDot(el, state) {
   if (!el) return;
@@ -556,8 +560,8 @@ function basePayload(overrides = {}) {
     wandb_project: trainWandbProjectInput ? trainWandbProjectInput.value.trim() : "",
     wandb_mode: trainWandbModeInput ? trainWandbModeInput.value || "" : "",
     train_extra_args: trainExtraArgs(),
-    fps: numberValue(fpsInput, 30),
-    camera_fps: numberValue(cameraFpsInput, 30),
+    fps: numberValue(fpsInput, 15),
+    camera_fps: numberValue(cameraFpsInput, 15),
     warmup_s: 2,
     episode_s: numberValue(episodeTimeInput, 60),
     reset_s: numberValue(resetTimeInput, 30),
@@ -683,8 +687,8 @@ function manipulationAgentPayload(overrides = {}) {
   payload.skill_id = taskId;
   payload.policy_backend = manipulationPolicyBackendInput ? manipulationPolicyBackendInput.value || "lerobot_cli" : "lerobot_cli";
   payload.max_duration_s = numberValue(manipulationMaxDurationInput, 30);
-  payload.fps = numberValue(fpsInput, 30);
-  payload.camera_fps = numberValue(cameraFpsInput, 30);
+  payload.fps = numberValue(fpsInput, 15);
+  payload.camera_fps = numberValue(cameraFpsInput, 15);
   payload.rollout_action_clamp = rolloutActionClampInput ? boolValue(rolloutActionClampInput) : true;
   payload.rollout_max_relative_target = numberValue(rolloutMaxRelativeTargetInput, 5);
   payload.rollout_temporal_ensemble = rolloutTemporalEnsembleInput ? boolValue(rolloutTemporalEnsembleInput) : true;
@@ -793,15 +797,18 @@ function visualizationPayload(overrides = {}) {
 }
 
 function devicePayload(role, overrides = {}) {
+  const cameraKey = overrides.camera_key || (manualCameraKeyInput ? manualCameraKeyInput.value.trim() || "top" : "top");
+  const cameraOptions = role === "camera" ? cameraPayloadOptions(cameraKey) : {};
   return {
     mode: modeSelect ? modeSelect.value : "test",
     runtime_mode: modeSelect ? modeSelect.value : "test",
     profile_id: profileSelect ? profileSelect.value : "",
     device_role: role,
     port: manualPortInput ? manualPortInput.value.trim() : "",
-    camera_key: overrides.camera_key || (manualCameraKeyInput ? manualCameraKeyInput.value.trim() || "top" : "top"),
+    camera_key: cameraKey,
     confirm_live_execute: boolValue(confirmLiveInput),
     dry_run: (modeSelect ? modeSelect.value : "test") !== "live",
+    ...cameraOptions,
     ...overrides,
   };
 }
@@ -1269,6 +1276,68 @@ function defaultCameraKeys(profile) {
   return new Set(["top", "wrist", ...Object.keys((profile && profile.camera_map) || {}).map(normalizeCameraKey)]);
 }
 
+function realsenseDefaultIdentifier(cameraKey) {
+  const key = normalizeCameraKey(cameraKey);
+  if (key === "wrist") return "352122273019";
+  if (key === "top") return "Intel RealSense D455F";
+  return "Intel RealSense";
+}
+
+function realsenseCheckboxLabel(cameraKey) {
+  const key = normalizeCameraKey(cameraKey);
+  if (key === "top") return "RealSense D455F";
+  if (key === "wrist") return "RealSense D405";
+  return "RealSense SDK";
+}
+
+function cameraUsesRealsense(camera) {
+  const backend = String((camera && camera.backend) || "").toLowerCase();
+  return backend === "intelrealsense" || backend === "realsense" || backend === "realsense_sdk";
+}
+
+function cameraRealsenseDefaultChecked(cameraKey, camera) {
+  const key = normalizeCameraKey(cameraKey);
+  if (cameraRealsenseOverrides.has(key)) return Boolean(cameraRealsenseOverrides.get(key));
+  if (defaultRealsenseCameraKeys.has(key)) return true;
+  return cameraUsesRealsense(camera);
+}
+
+function cameraRealsenseChecked(cameraKey) {
+  const key = normalizeCameraKey(cameraKey);
+  for (const input of document.querySelectorAll(".camera-realsense-toggle")) {
+    if (normalizeCameraKey(input.dataset.cameraKey) === key) return Boolean(input.checked);
+  }
+  return defaultRealsenseCameraKeys.has(key);
+}
+
+function cameraFpsDefault(cameraKey, camera) {
+  const key = normalizeCameraKey(cameraKey);
+  if (cameraFpsOverrides.has(key)) return cameraFpsOverrides.get(key);
+  const saved = Number((camera && (camera.fps || camera.camera_fps)) || 0);
+  if (Number.isFinite(saved) && saved > 0) return saved;
+  return 15;
+}
+
+function cameraFpsForKey(cameraKey) {
+  const key = normalizeCameraKey(cameraKey);
+  for (const input of document.querySelectorAll(".camera-fps-input")) {
+    if (normalizeCameraKey(input.dataset.cameraKey) === key) return numberValue(input, 15);
+  }
+  if (cameraFpsOverrides.has(key)) return cameraFpsOverrides.get(key);
+  return 15;
+}
+
+function cameraPayloadOptions(cameraKey) {
+  const useRealsense = cameraRealsenseChecked(cameraKey);
+  return {
+    camera_backend: useRealsense ? "realsense" : "opencv",
+    camera_use_depth: useRealsense,
+    camera_fps: useRealsense ? cameraFpsForKey(cameraKey) : numberValue(cameraFpsInput, 15),
+    camera_width: 640,
+    camera_height: 480,
+  };
+}
+
 function cameraKeysForProfile(profile, devices) {
   const keys = ["top", "wrist"];
   for (const key of Object.keys((profile && profile.camera_map) || {})) keys.push(key);
@@ -1295,14 +1364,27 @@ function renderDeviceMemory(data) {
     const defaultKeys = defaultCameraKeys(profile);
     cameraCardListEl.innerHTML = keys.map((key) => {
       const camera = cameras[key] || (devices.camera && (devices.camera.camera_key || "top") === key ? devices.camera : {});
+      const realsense = cameraRealsenseDefaultChecked(key, camera);
+      const cameraFps = cameraFpsDefault(key, camera);
+      const cameraIdentity = camera.serial_number_or_name || camera.port || realsenseDefaultIdentifier(key);
       const removable = !defaultKeys.has(key);
       return `
         <article class="lerobot-device-card">
           <div class="lerobot-card-title-row">
-            <strong>${escapeHtml(key)} Camera</strong>
+            <div class="lerobot-camera-title-group">
+              <strong>${escapeHtml(key)} Camera</strong>
+              <label class="checkbox-line inline-check lerobot-camera-backend-line" title="Checked: Detect & Save stores the role-specific RealSense RGB + depth camera.">
+                <input class="camera-realsense-toggle" data-camera-key="${escapeHtml(key)}" type="checkbox" ${realsense ? "checked" : ""} />
+                ${escapeHtml(realsenseCheckboxLabel(key))}
+              </label>
+              <label class="lerobot-camera-fps-line" title="RealSense camera FPS for this camera role.">
+                FPS
+                <input class="camera-fps-input" data-camera-key="${escapeHtml(key)}" type="number" min="1" value="${escapeHtml(String(cameraFps))}" ${realsense ? "" : "disabled"} />
+              </label>
+            </div>
             ${removable ? `<button class="btn mini danger camera-remove" data-camera-key="${escapeHtml(key)}" type="button">-</button>` : `<span class="state-pill">default</span>`}
           </div>
-          <code>${escapeHtml(camera.port || "not saved")}</code>
+          <code>${escapeHtml(cameraIdentity || "not saved")}</code>
           ${camera.raw_port ? `<span class="hint">raw: ${escapeHtml(camera.raw_port)}</span>` : ""}
           <div class="button-row compact">
             <button class="btn mini camera-action" data-camera-action="baseline" data-camera-key="${escapeHtml(key)}">Baseline</button>
@@ -1313,15 +1395,32 @@ function renderDeviceMemory(data) {
         </article>
       `;
     }).join("");
+    for (const input of cameraCardListEl.querySelectorAll(".camera-realsense-toggle")) {
+      input.addEventListener("change", () => {
+        const key = normalizeCameraKey(input.dataset.cameraKey);
+        cameraRealsenseOverrides.set(key, Boolean(input.checked));
+        const fpsInput = cameraCardListEl.querySelector(`.camera-fps-input[data-camera-key="${CSS.escape(key)}"]`);
+        if (fpsInput) fpsInput.disabled = !input.checked;
+      });
+    }
+    for (const input of cameraCardListEl.querySelectorAll(".camera-fps-input")) {
+      input.addEventListener("input", () => {
+        cameraFpsOverrides.set(normalizeCameraKey(input.dataset.cameraKey), numberValue(input, 15));
+      });
+      input.addEventListener("change", () => {
+        cameraFpsOverrides.set(normalizeCameraKey(input.dataset.cameraKey), numberValue(input, 15));
+      });
+    }
     for (const button of cameraCardListEl.querySelectorAll(".camera-action")) {
       button.addEventListener("click", (event) => {
         const cameraKey = button.dataset.cameraKey || "top";
         if (manualCameraKeyInput) manualCameraKeyInput.value = cameraKey;
         const action = button.dataset.cameraAction || "test";
         const statusTarget = actionStatusFromEvent(event);
-        if (action === "baseline") return runDevicePortAction(`${cameraKey} camera baseline`, "/api/lerobot/ports/baseline", "camera", { port: "", camera_key: cameraKey }, statusTarget);
-        if (action === "detect") return runDevicePortAction(`${cameraKey} camera detect/save`, "/api/lerobot/ports/detect", "camera", { port: "", camera_key: cameraKey }, statusTarget);
-        return runDevicePortAction(`${cameraKey} camera capture test`, "/api/lerobot/camera/test", "camera", { port: "", camera_key: cameraKey }, statusTarget);
+        const cameraOptions = cameraPayloadOptions(cameraKey);
+        if (action === "baseline") return runDevicePortAction(`${cameraKey} camera baseline`, "/api/lerobot/ports/baseline", "camera", { port: "", camera_key: cameraKey, ...cameraOptions }, statusTarget);
+        if (action === "detect") return runDevicePortAction(`${cameraKey} camera detect/save`, "/api/lerobot/ports/detect", "camera", { port: "", camera_key: cameraKey, ...cameraOptions }, statusTarget);
+        return runDevicePortAction(`${cameraKey} camera capture test`, "/api/lerobot/camera/test", "camera", { port: "", camera_key: cameraKey, ...cameraOptions }, statusTarget);
       });
     }
     for (const button of cameraCardListEl.querySelectorAll(".camera-remove")) {
@@ -1343,8 +1442,9 @@ function renderDeviceMemory(data) {
 function renderConfig(data) {
   const profiles = data.profiles || [];
   const selected = data.selected_profile_id || data.default_profile_id || "";
+  if (confirmLiveInput && !confirmLiveInput.dataset.userEdited) confirmLiveInput.checked = true;
   if (profileSelect) {
-    const prior = profileSelect.value || selected;
+    const prior = profileSelectionInitialized ? profileSelect.value || selected : selected;
     profileSelect.innerHTML = "";
     for (const profile of profiles) {
       const opt = document.createElement("option");
@@ -1353,6 +1453,7 @@ function renderConfig(data) {
       profileSelect.appendChild(opt);
     }
     profileSelect.value = profiles.some((p) => p.profile_id === prior) ? prior : selected;
+    profileSelectionInitialized = true;
   }
 
   applyDefaultPaths(data);
@@ -2030,6 +2131,7 @@ bind("btn-teleop-stop", (event) => runAction("teleoperate stop", "/api/lerobot/t
 bind("btn-teleop-status", (event) => runAction("teleoperate status", "/api/lerobot/teleoperate/status", sessionPayload("teleoperate"), actionStatusFromEvent(event)));
 
 if (ttsEngineInput) ttsEngineInput.addEventListener("change", () => { ttsEngineInput.dataset.userEdited = "1"; });
+if (confirmLiveInput) confirmLiveInput.addEventListener("change", () => { confirmLiveInput.dataset.userEdited = "1"; });
 if (ttsRateInput) {
   ttsRateInput.addEventListener("input", () => setTtsRate(ttsRateInput.value, { persist: true, userEdited: true }));
   ttsRateInput.addEventListener("change", () => setTtsRate(ttsRateInput.value, { persist: true, userEdited: true }));
