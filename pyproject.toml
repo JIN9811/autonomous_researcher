@@ -32,6 +32,7 @@ dev = [
   "pytest>=8.0.0",
   "pytest-asyncio>=0.23.0",
   "selenium>=4.44.0",
+  "build>=1.2.2",
   "ruff>=0.6.0",
 ]
 bo = [
@@ -43,6 +44,48 @@ graph = [
   "neo4j>=5.28.0",
   "networkx>=3.2.0",
   "graphifyy==0.4.4",
+]
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = [
+  "agents*",
+  "app*",
+  "backends*",
+  "device_bridges*",
+  "experiments*",
+  "graphs*",
+  "gui*",
+  "knowledge*",
+  "learning*",
+  "logging_system*",
+  "mcp_tools*",
+  "memory*",
+  "orchestrator*",
+  "policies*",
+  "self_evolution*",
+  "submodules*",
+  "utils*",
+]
+exclude = [
+  "tests*",
+  "docs*",
+  "runs*",
+  "artifacts*",
+  "outputs*",
+  "user_files*",
+  "image*",
+  "models*",
+  "install*",
+  "patches*",
+  "configs*",
+  "web*",
+  "livegui_package*",
+  "Pyautogui_server_for_window*",
+  "개선안*",
 ]
 
 [tool.pytest.ini_options]

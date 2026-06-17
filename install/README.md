@@ -14,6 +14,75 @@ operator explicitly selects it as the active backend or enables the Main GUI
 `API Key` Loading control. When that API-key cell is loaded, OpenAI becomes the
 first inference route until it is unloaded again.
 
+## Recommended Fresh-Install Flow
+
+Use this order on a new PC:
+
+1. Clone the private repository.
+2. Run the platform bootstrap for the host OS.
+3. Run `doctor` to see which optional device/tool dependencies are still
+   missing.
+4. Install only the external runtimes needed for that workstation: local AI,
+   Bambu/Prusa slicing, LeRobot/RealSense, Windows equipment bridge, or graph
+   database.
+
+Linux/WSL default:
+
+```bash
+git clone <private-repo-url> autonomous_researcher
+cd autonomous_researcher
+bash install/bootstrap_linux.sh
+atr doctor
+atr up
+```
+
+Windows supported path:
+
+```powershell
+git clone <private-repo-url> autonomous_researcher
+cd autonomous_researcher
+powershell -ExecutionPolicy Bypass -File .\install\bootstrap_windows.ps1
+python -m app.serve
+```
+
+Windows limitations:
+
+- Native Windows is the supported path for API-key GUI/API use and the
+  Windows PyAutoGUI bridge server.
+- The Linux `atr` launcher is intended for Linux, WSL, or Git Bash. Native
+  Windows starts the backend with `python -m app.serve`.
+- LeRobot live hardware, RealSense RSUSB, local NemoClaw/vLLM, Dockerized
+  solvers/slicers, and Linux device permissions require WSL/Linux or separate
+  conda/toolchain setup.
+- Hardware memory files such as `memory/bambu_connection.json`,
+  `memory/prusa_connection.json`, and `memory/lerobot_device_ports.json` are
+  intentionally not copied through Git. Recreate them from the GUI on each PC.
+
+The doctor command is non-actuating. It does not start printers, robots, model
+servers, or camera streams:
+
+```bash
+atr doctor
+atr doctor --core-only
+atr doctor --json
+```
+
+Before installing `atr`, run the same check directly:
+
+```bash
+.venv/bin/python scripts/doctor.py
+```
+
+Supported distribution model:
+
+- The supported operator install is a source checkout plus `.venv`.
+- `python -m build` is kept as a packaging sanity check so Python package
+  discovery does not accidentally include runtime artifacts, but the generated
+  wheel is not the primary deployment artifact for the full GUI/device system.
+- Do not delete the source checkout after installing dependencies; runtime
+  config, web templates, graph YAML, install helpers, and local memory folders
+  are expected to remain under the repository root.
+
 ## Windows Quick Start (API Key, No Local AI)
 
 Use this path when running the GUI/API on Windows and using an API key instead
@@ -370,6 +439,38 @@ This installs `piper-tts` into `.venv`, downloads the `en_US-lessac-medium`
 voice to `models/tts/piper/en_US-lessac-medium`, and verifies synthesis without
 requiring the LeRobot conda environment to install Piper.
 
+## Bambu Studio Wrapper
+
+The Bambu Lab X2D bridge resolves the slicer executable in this order:
+
+1. `BAMBU_STUDIO_EXECUTABLE`
+2. `install/bambustudio/bambu-studio-wrapper`
+3. `PATH` names such as `bambu-studio` or `BambuStudio`
+
+The repository-local wrapper is:
+
+```text
+install/bambustudio/bambu-studio-wrapper
+```
+
+It does not install Bambu Studio. It finds an existing Bambu Studio executable
+from `BAMBU_STUDIO_EXECUTABLE`, `PATH`, common user install locations, `/opt`,
+or Flatpak `com.bambulab.BambuStudio`, then forwards all slicer arguments
+unchanged.
+
+Recommended Linux setup:
+
+```bash
+export BAMBU_STUDIO_EXECUTABLE=/absolute/path/to/bambu-studio
+install/bambustudio/bambu-studio-wrapper --help
+atr doctor
+```
+
+If `atr doctor` reports that only the wrapper exists but Bambu Studio itself is
+missing, install Bambu Studio or set `BAMBU_STUDIO_EXECUTABLE`. The 3DP GUI can
+still run MQTT/status checks without slicing, but it cannot honestly generate a
+new Bambu-native sliced artifact until the CLI path resolves.
+
 ## PrusaSlicer Docker Wrapper
 
 The Prusa MK4S printer bridge can use a Dockerized PrusaSlicer when host-native PrusaSlicer is not installed.
@@ -397,6 +498,29 @@ memory/prusa_connection.json
 ```
 
 Do not put passwords in docs, prompts, command history, or runtime logs.
+
+## LeRobot D405 / RSUSB Patch Packaging
+
+ATR does not vendor the external LeRobot repository. Live ROBOTIS/RealSense
+workflows use a separate checkout, usually `~/lerobot`.
+
+This repository packages the current Spark workstation RealSense D405/RSUSB
+compatibility patch at:
+
+```text
+patches/lerobot/spark_realsense_d405_rsusb.patch
+```
+
+Apply it to the external LeRobot checkout with:
+
+```bash
+bash install/apply_lerobot_d405_patch.sh ~/lerobot
+```
+
+The apply script runs `git apply --check` first and stops without changing the
+checkout if the patch does not match the current LeRobot branch. If that
+happens, update the LeRobot branch/version deliberately; do not replace D405
+with `/dev/video*` or OpenCV fallback.
 
 ## Environment Variables
 

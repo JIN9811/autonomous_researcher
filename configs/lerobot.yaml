@@ -27,8 +27,8 @@ lerobot:
   conda_env_name: lerobot
   conda_executable: conda
   pi05_conda_env_name: lerobot-pi05-torch211
-  pi05_repo_root: /home/jin/lerobot_pi05
-  pi05_hf_home: /home/jin/.cache/huggingface_pi05
+  pi05_repo_root: ~/lerobot_pi05
+  pi05_hf_home: ~/.cache/huggingface_pi05
   train_video_backend: torchcodec
   train_video_backend_fallback: pyav
   pi05_video_backend: torchcodec

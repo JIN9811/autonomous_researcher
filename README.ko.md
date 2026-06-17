@@ -34,12 +34,19 @@ Main GUI의 `Current Models` 영역에는 `API Key` 버튼이 있으며,
 목록에서 제거된 상태입니다. `31b`는 MTP speculative decoding을 사용하고,
 `e4b`는 안정성을 위해 NVFP4 target-only로 서빙합니다.
 
+### Linux 설치 - 기본 경로
+
+Linux/WSL 기본 설치는 저장소 루트에서 bootstrap을 실행합니다. 이 경로는
+서버, GUI, Python 의존성, `atr` CLI, `.env` 템플릿까지 준비합니다.
+LeRobot, RealSense RSUSB, Bambu Studio, Docker/vLLM 같은 장비별 외부
+프로그램은 [REQUIREMENTS.md](REQUIREMENTS.md)의 해당 섹션을 이어서
+설치합니다.
+
 ```bash
-cd /home/jin/autonomous_researcher
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-bash install/install_cli.sh
+git clone <private-repo-url> autonomous_researcher
+cd autonomous_researcher
+bash install/bootstrap_linux.sh
+atr doctor
 atr up
 ```
 
@@ -55,15 +62,23 @@ atr down
 .venv/bin/python -m app.serve
 ```
 
-Windows 직접 실행:
+### Windows 설치 - 지원 범위와 제한사항
+
+Windows 기본 설치는 API key 기반 GUI/API 실행과 Windows PyAutoGUI bridge
+운영을 우선 지원합니다. Bash 기반 `atr` 런처, Linux Docker/RSUSB/vLLM
+경로, ROBOTIS/RealSense live robot 경로는 WSL/Linux 또는 별도 conda 설정이
+필요합니다.
 
 ```powershell
-py -3.11 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-Copy-Item .env.example .env
+git clone <private-repo-url> autonomous_researcher
+cd autonomous_researcher
+powershell -ExecutionPolicy Bypass -File .\install\bootstrap_windows.ps1
 python -m app.serve
 ```
+
+Windows에서 local AI 없이 쓰려면 `.env`에 `AUTONOMOUS_BACKEND=openai`와
+`OPENAI_API_KEY`를 설정합니다. 장비 제어용 Windows PyAutoGUI bridge는
+별도 PowerShell에서 `install\windows_pyautogui_bridge_server.py`를 실행합니다.
 
 ## 2. 주요 접속 경로
 

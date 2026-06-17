@@ -32,12 +32,19 @@ The current managed local vLLM surface has two models:
 managed model list. `31b` uses MTP speculative decoding, while `e4b` is served
 as a stable NVFP4 target-only deployment.
 
+### Linux Install - Default Path
+
+On Linux/WSL, run the bootstrap from the repository root. It prepares the main
+Python environment, Python dependencies, `.env` template, and the `atr` CLI.
+Device-specific external tools such as LeRobot, RealSense RSUSB, Bambu Studio,
+Docker/vLLM, and slicer runtimes are still installed from the relevant
+[REQUIREMENTS.md](REQUIREMENTS.md) sections.
+
 ```bash
-cd /home/jin/autonomous_researcher
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-bash install/install_cli.sh
+git clone <private-repo-url> autonomous_researcher
+cd autonomous_researcher
+bash install/bootstrap_linux.sh
+atr doctor
 atr up
 ```
 
@@ -53,15 +60,23 @@ Direct startup without the launcher:
 .venv/bin/python -m app.serve
 ```
 
-Windows direct startup:
+### Windows Install - Supported Scope and Limitations
+
+The native Windows path is intended for API-key GUI/API operation and the
+Windows PyAutoGUI bridge. The Bash `atr` launcher, Linux Docker/RSUSB/vLLM
+paths, and ROBOTIS/RealSense live robot workflows require WSL/Linux or separate
+conda/toolchain setup.
 
 ```powershell
-py -3.11 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-Copy-Item .env.example .env
+git clone <private-repo-url> autonomous_researcher
+cd autonomous_researcher
+powershell -ExecutionPolicy Bypass -File .\install\bootstrap_windows.ps1
 python -m app.serve
 ```
+
+For Windows API-only inference, set `AUTONOMOUS_BACKEND=openai` and
+`OPENAI_API_KEY` in `.env`. Run the Windows PyAutoGUI bridge in a separate
+PowerShell process with `install\windows_pyautogui_bridge_server.py`.
 
 ## 2. Main Pages
 

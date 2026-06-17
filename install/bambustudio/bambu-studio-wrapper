@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# File purpose:
+# - Stable repository-local launcher for Bambu Studio CLI calls.
+# - Keeps configs/devices.yaml portable while allowing operators to install
+#   Bambu Studio through PATH, ~/.local/bin, /opt, AppImage, or Flatpak.
+#
+# This wrapper does not install Bambu Studio. It only resolves an existing
+# executable and forwards all arguments unchanged.
+
+set -euo pipefail
+
+candidates=()
+
+if [[ -n "${BAMBU_STUDIO_EXECUTABLE:-}" ]]; then
+  candidates+=("${BAMBU_STUDIO_EXECUTABLE}")
+fi
+
+for name in bambu-studio BambuStudio bambu-studio.AppImage BambuStudio.AppImage; do
+  if found="$(command -v "${name}" 2>/dev/null)"; then
+    candidates+=("${found}")
+  fi
+done
+
+candidates+=(
+  "${HOME}/.local/bin/bambu-studio"
+  "${HOME}/.local/bin/BambuStudio"
+  "${HOME}/Applications/BambuStudio.AppImage"
+  "/usr/local/bin/bambu-studio"
+  "/usr/bin/bambu-studio"
+  "/opt/bambu-studio/bin/bambu-studio"
+  "/opt/BambuStudio/bin/bambu-studio"
+  "/opt/BambuStudio/BambuStudio.AppImage"
+)
+
+for candidate in "${candidates[@]}"; do
+  if [[ -n "${candidate}" && -x "${candidate}" ]]; then
+    exec "${candidate}" "$@"
+  fi
+done
+
+if command -v flatpak >/dev/null 2>&1 && flatpak info com.bambulab.BambuStudio >/dev/null 2>&1; then
+  exec flatpak run com.bambulab.BambuStudio "$@"
+fi
+
+cat >&2 <<'ERR'
+Bambu Studio executable was not found.
+
+Install Bambu Studio or set one of these before running the 3DP slicer path:
+  export BAMBU_STUDIO_EXECUTABLE=/absolute/path/to/bambu-studio
+
+The wrapper checked PATH, ~/.local/bin, ~/Applications, /usr/local/bin, /usr/bin,
+/opt, and Flatpak app id com.bambulab.BambuStudio.
+ERR
+exit 127

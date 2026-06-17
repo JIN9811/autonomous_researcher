@@ -51,6 +51,7 @@ Usage:
   atr gui
   atr live
   atr docs
+  atr doctor [--core-only] [--hardware] [--json]
   atr status
   atr events
   atr backend [vllm|nemoclaw|ollama|openai]
@@ -83,6 +84,7 @@ Commands:
   gui         Open the main GUI URL.
   live        Open the Live GUI URL with auto bootstrap.
   docs        Open FastAPI docs.
+  doctor      Run non-actuating fresh-install diagnostics for Python deps, CLI binding, ignored secrets, slicers, LeRobot, RealSense, and model config.
   status      Print /api/state.
   events      Print recent structured events.
   backend     Show current state, or switch inference backend when an argument is given.
@@ -513,6 +515,12 @@ case "\${1:-}" in
     open_url "\${BASE_URL}/docs"
     exit 0
     ;;
+  doctor)
+    py="\$(require_python)"
+    shift 1
+    cd "\${PROJECT_DIR}"
+    exec "\${py}" scripts/doctor.py "\$@"
+    ;;
   status)
     api_get "/api/state"
     exit 0
@@ -822,6 +830,9 @@ PATH rc file:
 Usage:
   atr up
   atr down
+  atr doctor
   atr status
   atr models
+  atr live
+  atr gui
 EOF

@@ -1,5 +1,40 @@
 # Autonomous Researcher Framework
 
+Closed-loop laboratory automation framework for autonomous experiment planning,
+metamaterial specimen design, device bridges, robot workflows, analysis, BO, and
+operator-supervised live execution.
+
+## Live GUI Preview
+
+Browser-captured test-mode screens from the active Live GUI renderer:
+
+<table>
+  <tr>
+    <td width="50%">
+      <img src="docs/assets/readme/live-gui-orchestrator-test-mode.png" alt="Live GUI Orchestrator test-mode screen" />
+      <br />
+      <sub><b>Orchestrator</b> - mission contract, handoff plan, runtime chat, and cycle status.</sub>
+    </td>
+    <td width="50%">
+      <img src="docs/assets/readme/live-gui-design-agent-report.png" alt="Live GUI Design Agent candidate board" />
+      <br />
+      <sub><b>Design Agent</b> - generated gyroid TPMS candidates, DOE board, and FDM handoff state.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <img src="docs/assets/readme/live-gui-design-preview-modal.png" alt="Live GUI STL preview modal" />
+      <br />
+      <sub><b>STL Preview</b> - enlarged generated specimen preview inside the operator report area.</sub>
+    </td>
+    <td width="50%">
+      <img src="docs/assets/readme/live-gui-design-artifacts.png" alt="Live GUI Design artifacts panel" />
+      <br />
+      <sub><b>Artifacts</b> - runtime files, STL captures, and digital-thread evidence for generated specimens.</sub>
+    </td>
+  </tr>
+</table>
+
 Choose a documentation language:
 
 - [English Guide](README.en.md)

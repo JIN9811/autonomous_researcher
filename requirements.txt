@@ -14,6 +14,7 @@ botorch>=0.17.0
 pytest>=8.0.0
 pytest-asyncio>=0.23.0
 selenium>=4.44.0
+build>=1.2.2
 piper-tts>=1.4.2
 paho-mqtt>=2.1.0
 pyrealsense2==2.58.2.10647

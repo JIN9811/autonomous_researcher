@@ -1,0 +1,367 @@
+diff --git a/src/lerobot/cameras/realsense/camera_realsense.py b/src/lerobot/cameras/realsense/camera_realsense.py
+index 12ce89c9..786cbb85 100644
+--- a/src/lerobot/cameras/realsense/camera_realsense.py
++++ b/src/lerobot/cameras/realsense/camera_realsense.py
+@@ -123,6 +123,7 @@ class RealSenseCamera(Camera):
+
+         self.fps = config.fps
+         self.color_mode = config.color_mode
++        self.color_format = config.color_format
+         self.use_depth = config.use_depth
+         self.warmup_s = config.warmup_s
+
+@@ -166,6 +167,28 @@ class RealSenseCamera(Camera):
+         if self.is_connected:
+             raise DeviceAlreadyConnectedError(f"{self} is already connected.")
+
++        self.warmup_s = max(self.warmup_s, 1)
++        try:
++            self._start_pipeline(warmup=warmup)
++        except (RuntimeError, TimeoutError, ConnectionError) as exc:
++            logger.warning(f"{self} startup failed, attempting RealSense hardware reset and one retry: {exc}")
++            self._stop_pipeline(ignore_errors=True)
++            self._hardware_reset()
++            self._start_pipeline(warmup=warmup)
++
++        logger.info(f"{self} connected.")
++
++    def _hardware_reset(self, wait_s: float = 5.0) -> None:
++        context = rs.context()
++        for device in context.query_devices():
++            if device.get_info(rs.camera_info.serial_number) == self.serial_number:
++                logger.info(f"{self} performing hardware reset.")
++                device.hardware_reset()
++                time.sleep(wait_s)
++                return
++        logger.warning(f"{self} device not found for hardware reset, skipping.")
++
++    def _start_pipeline(self, *, warmup: bool = True) -> None:
+         self.rs_pipeline = rs.pipeline()
+         rs_config = rs.config()
+         self._configure_rs_pipeline_config(rs_config)
+@@ -182,15 +205,26 @@ class RealSenseCamera(Camera):
+         self._configure_capture_settings()
+
+         if warmup:
+-            time.sleep(
+-                1
+-            )  # NOTE(Steven): RS cameras need a bit of time to warm up before the first read. If we don't wait, the first read from the warmup will raise.
++            # RealSense cameras, and D405 in particular, need pipeline warmup
++            # before the first frame can be consumed reliably.
++            time.sleep(1)
+             start_time = time.time()
+             while time.time() - start_time < self.warmup_s:
+-                self.read()
++                self.read(timeout_ms=max(1000, int(self.warmup_s * 1000)))
+                 time.sleep(0.1)
+
+-        logger.info(f"{self} connected.")
++    def _stop_pipeline(self, *, ignore_errors: bool = False) -> None:
++        if self.thread is not None:
++            self._stop_read_thread()
++        if self.rs_pipeline is not None:
++            try:
++                self.rs_pipeline.stop()
++            except RuntimeError:
++                if not ignore_errors:
++                    raise
++            finally:
++                self.rs_pipeline = None
++                self.rs_profile = None
+
+     @staticmethod
+     def find_cameras() -> list[dict[str, Any]]:
+@@ -267,17 +301,18 @@ class RealSenseCamera(Camera):
+     def _configure_rs_pipeline_config(self, rs_config):
+         """Creates and configures the RealSense pipeline configuration object."""
+         rs.config.enable_device(rs_config, self.serial_number)
++        rs_color_format = getattr(rs.format, self.color_format)
+
+         if self.width and self.height and self.fps:
+             rs_config.enable_stream(
+-                rs.stream.color, self.capture_width, self.capture_height, rs.format.rgb8, self.fps
++                rs.stream.color, self.capture_width, self.capture_height, rs_color_format, self.fps
+             )
+             if self.use_depth:
+                 rs_config.enable_stream(
+                     rs.stream.depth, self.capture_width, self.capture_height, rs.format.z16, self.fps
+                 )
+         else:
+-            rs_config.enable_stream(rs.stream.color)
++            rs_config.enable_stream(rs.stream.color, rs_color_format)
+             if self.use_depth:
+                 rs_config.enable_stream(rs.stream.depth)
+
+@@ -430,8 +465,11 @@ class RealSenseCamera(Camera):
+             )
+
+         processed_image = image
+-        if self.color_mode == ColorMode.BGR:
+-            processed_image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
++        if not depth_frame:
++            source_is_rgb = self.color_format == "rgb8"
++            want_rgb = self.color_mode == ColorMode.RGB
++            if source_is_rgb != want_rgb:
++                processed_image = cv2.cvtColor(processed_image, cv2.COLOR_RGB2BGR)
+
+         if self.rotation in [cv2.ROTATE_90_CLOCKWISE, cv2.ROTATE_90_COUNTERCLOCKWISE, cv2.ROTATE_180]:
+             processed_image = cv2.rotate(processed_image, self.rotation)
+@@ -449,7 +487,10 @@ class RealSenseCamera(Camera):
+
+         Stops on DeviceNotConnectedError, logs other errors and continues.
+         """
+-        while not self.stop_event.is_set():
++        stop_event = self.stop_event
++        if stop_event is None:
++            return
++        while not stop_event.is_set():
+             try:
+                 color_image = self.read(timeout_ms=500)
+
+@@ -544,12 +585,6 @@ class RealSenseCamera(Camera):
+                 f"Attempted to disconnect {self}, but it appears already disconnected."
+             )
+
+-        if self.thread is not None:
+-            self._stop_read_thread()
+-
+-        if self.rs_pipeline is not None:
+-            self.rs_pipeline.stop()
+-            self.rs_pipeline = None
+-            self.rs_profile = None
++        self._stop_pipeline()
+
+         logger.info(f"{self} disconnected.")
+diff --git a/src/lerobot/cameras/realsense/configuration_realsense.py b/src/lerobot/cameras/realsense/configuration_realsense.py
+index 36a86876..cfdfc630 100644
+--- a/src/lerobot/cameras/realsense/configuration_realsense.py
++++ b/src/lerobot/cameras/realsense/configuration_realsense.py
+@@ -16,6 +16,8 @@ from dataclasses import dataclass
+
+ from ..configs import CameraConfig, ColorMode, Cv2Rotation
+
++VALID_COLOR_FORMATS = {"rgb8", "bgr8"}
++
+
+ @CameraConfig.register_subclass("intelrealsense")
+ @dataclass
+@@ -42,6 +44,9 @@ class RealSenseCameraConfig(CameraConfig):
+         height: Requested frame height in pixels for the color stream.
+         serial_number_or_name: Unique serial number or human-readable name to identify the camera.
+         color_mode: Color mode for image output (RGB or BGR). Defaults to RGB.
++        color_format: RealSense SDK color stream pixel format. Most RealSense
++            cameras use rgb8. D405 should use bgr8 because its color stream is
++            exposed by the stereo module rather than a dedicated RGB sensor.
+         use_depth: Whether to enable depth stream. Defaults to False.
+         rotation: Image rotation setting (0°, 90°, 180°, or 270°). Defaults to no rotation.
+         warmup_s: Time reading frames before returning from connect (in seconds)
+@@ -55,11 +60,16 @@ class RealSenseCameraConfig(CameraConfig):
+
+     serial_number_or_name: str
+     color_mode: ColorMode = ColorMode.RGB
++    color_format: str = "rgb8"
+     use_depth: bool = False
+     rotation: Cv2Rotation = Cv2Rotation.NO_ROTATION
+     warmup_s: int = 1
+
+     def __post_init__(self):
++        self.color_format = str(self.color_format or "rgb8").lower()
++        if self.color_format not in VALID_COLOR_FORMATS:
++            raise ValueError(f"`color_format` must be one of {VALID_COLOR_FORMATS}, got '{self.color_format}'.")
++
+         if self.color_mode not in (ColorMode.RGB, ColorMode.BGR):
+             raise ValueError(
+                 f"`color_mode` is expected to be {ColorMode.RGB.value} or {ColorMode.BGR.value}, but {self.color_mode} is provided."
+diff --git a/src/lerobot/find_cameras.py b/src/lerobot/find_cameras.py
+index ec8f5ff3..2b5763dc 100644
+--- a/src/lerobot/find_cameras.py
++++ b/src/lerobot/find_cameras.py
+@@ -169,9 +169,19 @@ def create_camera_instance(cam_meta: dict[str, Any]) -> dict[str, Any] | None:
+             )
+             instance = OpenCVCamera(cv_config)
+         elif cam_type == "RealSense":
++            camera_name = str(cam_meta.get("name", ""))
++            color_format = "bgr8" if "D405" in camera_name.upper() else "rgb8"
++            default_profile = cam_meta.get("default_stream_profile") or {}
++            width = int(default_profile.get("width") or 640)
++            height = int(default_profile.get("height") or 480)
++            fps = int(default_profile.get("fps") or 30)
+             rs_config = RealSenseCameraConfig(
+                 serial_number_or_name=cam_id,
++                fps=fps,
++                width=width,
++                height=height,
+                 color_mode=ColorMode.RGB,
++                color_format=color_format,
+             )
+             instance = RealSenseCamera(rs_config)
+         else:
+@@ -180,7 +190,7 @@ def create_camera_instance(cam_meta: dict[str, Any]) -> dict[str, Any] | None:
+
+         if instance:
+             logger.info(f"Connecting to {cam_type} camera: {cam_id}...")
+-            instance.connect(warmup=False)
++            instance.connect()
+             return {"instance": instance, "meta": cam_meta}
+     except Exception as e:
+         logger.error(f"Failed to connect or configure {cam_type} camera {cam_id}: {e}")
+diff --git a/src/lerobot/record.py b/src/lerobot/record.py
+index ae0c79ae..45eae87e 100644
+--- a/src/lerobot/record.py
++++ b/src/lerobot/record.py
+@@ -340,6 +340,10 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
+     with VideoEncodingManager(dataset):
+         recorded_episodes = 0
+         while recorded_episodes < cfg.dataset.num_episodes and not events["stop_recording"]:
++            # Ignore right/left-arrow events that arrive while the previous episode is being saved
++            # or encoded. Otherwise the next episode can exit before collecting any frames.
++            events["exit_early"] = False
++            events["rerecord_episode"] = False
+             log_say(f"Recording episode {dataset.num_episodes}", cfg.play_sounds)
+             record_loop(
+                 robot=robot,
+@@ -377,6 +381,8 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
+                 continue
+
+             dataset.save_episode()
++            events["exit_early"] = False
++            events["rerecord_episode"] = False
+             recorded_episodes += 1
+
+     log_say("Stop recording", cfg.play_sounds, blocking=True)
+diff --git a/src/lerobot/robots/utils.py b/src/lerobot/robots/utils.py
+index 9bf77146..913d625f 100644
+--- a/src/lerobot/robots/utils.py
++++ b/src/lerobot/robots/utils.py
+@@ -74,12 +74,12 @@ def make_robot_from_config(config: RobotConfig) -> Robot:
+
+
+ def ensure_safe_goal_position(
+-    goal_present_pos: dict[str, tuple[float, float]], max_relative_target: float | dict[float]
++    goal_present_pos: dict[str, tuple[float, float]], max_relative_target: int | float | dict[str, float]
+ ) -> dict[str, float]:
+     """Caps relative action target magnitude for safety."""
+
+-    if isinstance(max_relative_target, float):
+-        diff_cap = dict.fromkeys(goal_present_pos, max_relative_target)
++    if isinstance(max_relative_target, (int, float)):
++        diff_cap = dict.fromkeys(goal_present_pos, float(max_relative_target))
+     elif isinstance(max_relative_target, dict):
+         if not set(goal_present_pos) == set(max_relative_target):
+             raise ValueError("max_relative_target keys must match those of goal_present_pos.")
+diff --git a/src/lerobot/utils/utils.py b/src/lerobot/utils/utils.py
+index 6e13646b..0d382700 100644
+--- a/src/lerobot/utils/utils.py
++++ b/src/lerobot/utils/utils.py
+@@ -18,6 +18,7 @@ import os
+ import os.path as osp
+ import platform
+ import select
++import shutil
+ import subprocess
+ import sys
+ import time
+@@ -195,6 +196,13 @@ def capture_timestamp_utc():
+     return datetime.now(timezone.utc)
+
+
++def _tts_rate_from_env(default: int = 0) -> int:
++    try:
++        return max(-100, min(100, int(os.environ.get("LEROBOT_TTS_RATE", str(default)))))
++    except ValueError:
++        return default
++
++
+ def say(text: str, blocking: bool = False):
+     system = platform.system()
+
+@@ -202,9 +210,60 @@ def say(text: str, blocking: bool = False):
+         cmd = ["say", text]
+
+     elif system == "Linux":
+-        cmd = ["spd-say", text]
+-        if blocking:
+-            cmd.append("--wait")
++        engine = os.environ.get("LEROBOT_TTS_ENGINE", "spd-say").strip().lower() or "spd-say"
++        voice = os.environ.get("LEROBOT_TTS_VOICE", "").strip()
++        rate = _tts_rate_from_env(0)
++
++        if engine == "piper":
++            atr_root = Path(os.environ.get("ATR_REPO_ROOT", "/home/jin/autonomous_researcher")).expanduser()
++            piper_python = os.environ.get("LEROBOT_TTS_PIPER_PYTHON") or str(atr_root / ".venv" / "bin" / "python")
++            piper_script = os.environ.get("LEROBOT_TTS_PIPER_SCRIPT") or str(atr_root / "tools" / "tts" / "atr_piper_say.py")
++            piper_bin = os.environ.get("LEROBOT_TTS_PIPER_BIN") or str(atr_root / ".venv" / "bin" / "piper")
++            piper_model = os.environ.get("LEROBOT_TTS_PIPER_MODEL") or str(
++                atr_root / "models" / "tts" / "piper" / "en_US-lessac-medium" / "en_US-lessac-medium.onnx"
++            )
++            piper_config = os.environ.get("LEROBOT_TTS_PIPER_CONFIG") or f"{piper_model}.json"
++            piper_player = os.environ.get("LEROBOT_TTS_PIPER_PLAYER", "").strip()
++            executable = piper_python if Path(piper_python).expanduser().exists() else (shutil.which("python3") or sys.executable)
++            cmd = [
++                executable,
++                piper_script,
++                "--rate",
++                str(rate),
++                "--model",
++                piper_model,
++                "--config",
++                piper_config,
++                "--piper-bin",
++                piper_bin,
++            ]
++            if piper_player:
++                cmd.extend(["--player", piper_player])
++            cmd.append(text)
++        elif engine in {"spd-say", "speech-dispatcher"} or engine not in {"espeak", "espeak-ng"}:
++            executable = shutil.which("spd-say") or "spd-say"
++            cmd = [executable, "--rate", str(rate)]
++            if voice:
++                cmd.extend(["--voice", voice])
++            if blocking:
++                cmd.append("--wait")
++            cmd.append(text)
++        else:
++            executable = shutil.which(engine) or shutil.which("spd-say") or "spd-say"
++            if Path(executable).name == "spd-say":
++                cmd = [executable, "--rate", str(rate)]
++                if voice:
++                    cmd.extend(["--voice", voice])
++                if blocking:
++                    cmd.append("--wait")
++                cmd.append(text)
++            else:
++                # espeak/espeak-ng use words-per-minute, so map Speech Dispatcher -100..100 to a safe WPM range.
++                wpm = max(80, min(450, 175 + rate))
++                cmd = [executable, "-s", str(wpm)]
++                if voice:
++                    cmd.extend(["-v", voice])
++                cmd.append(text)
+
+     elif system == "Windows":
+         cmd = [
+diff --git a/tests/cameras/test_realsense.py b/tests/cameras/test_realsense.py
+index 4b3fbae8..a198c07d 100644
+--- a/tests/cameras/test_realsense.py
++++ b/tests/cameras/test_realsense.py
+@@ -61,6 +61,21 @@ def test_abc_implementation():
+     _ = RealSenseCamera(config)
+
+
++def test_color_format_default():
++    config = RealSenseCameraConfig(serial_number_or_name="042")
++    assert config.color_format == "rgb8"
++
++
++def test_color_format_bgr8():
++    config = RealSenseCameraConfig(serial_number_or_name="042", color_format="bgr8")
++    assert config.color_format == "bgr8"
++
++
++def test_color_format_invalid():
++    with pytest.raises(ValueError, match="color_format"):
++        RealSenseCameraConfig(serial_number_or_name="042", color_format="yuv422")
++
++
+ def test_connect():
+     config = RealSenseCameraConfig(serial_number_or_name="042")
+     camera = RealSenseCamera(config)

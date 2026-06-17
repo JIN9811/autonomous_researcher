@@ -6,6 +6,50 @@ services, model downloads, and device-side programs required by this repository.
 Use `requirements.txt` only for Python packages installed into the main
 `autonomous_researcher` virtual environment.
 
+## Fresh Install Entry Points
+
+Linux/WSL default install:
+
+```bash
+git clone <private-repo-url> autonomous_researcher
+cd autonomous_researcher
+bash install/bootstrap_linux.sh
+atr doctor
+atr up
+```
+
+Windows supported install:
+
+```powershell
+git clone <private-repo-url> autonomous_researcher
+cd autonomous_researcher
+powershell -ExecutionPolicy Bypass -File .\install\bootstrap_windows.ps1
+python -m app.serve
+```
+
+Windows limitations:
+
+- Native Windows is supported for API-key GUI/API use and the standalone
+  Windows PyAutoGUI bridge server.
+- Linux-only runtime pieces such as NemoClaw/vLLM Kubernetes control,
+  RealSense RSUSB builds, Dockerized solver/slicer paths, and Linux device
+  permissions require Linux/WSL or equivalent manual setup.
+- Real robot LeRobot workflows require a separate conda environment and
+  LeRobot checkout on that PC.
+
+Run the non-actuating installer check at any time:
+
+```bash
+atr doctor
+.venv/bin/python scripts/doctor.py --core-only
+.venv/bin/python scripts/doctor.py --json
+```
+
+`doctor` does not start printers, robots, model servers, or camera streams. It
+checks core files, Python imports, `.env`, CLI binding, secret ignore policy,
+slicer executables, LeRobot patch packaging, RealSense SDK import, and model
+config presence.
+
 ## Core Workstation
 
 Required for the main GUI/API:
@@ -42,6 +86,14 @@ Optional but commonly used:
   `PATH` executable such as `bambu-studio`. Without a resolved CLI, the bridge
   can still run MQTT/FTPS/status checks, but it cannot honestly claim a new
   Bambu-native sliced artifact was generated.
+  The repository ships `install/bambustudio/bambu-studio-wrapper` as a stable
+  resolver/forwarder. It does not install Bambu Studio. On a new PC, install
+  Bambu Studio separately or set:
+  ```bash
+  export BAMBU_STUDIO_EXECUTABLE=/absolute/path/to/bambu-studio
+  install/bambustudio/bambu-studio-wrapper --help
+  atr doctor
+  ```
   Current Spark workstation smoke check:
   `timeout 15s /home/jin/.local/bin/bambu-studio --help` reports
   `BambuStudio-02.07.01.57` and documents `--slice`, `--arrange`,
@@ -285,7 +337,7 @@ Docker must be installed and available to the user running the GUI/API.
 Required for real robot teleoperation, recording, training, and rollout:
 
 - A separate LeRobot checkout, expected locally at:
-  - Linux default: `/home/jin/lerobot`
+  - Linux default: `~/lerobot`
   - Windows example: `C:\Users\user\Documents\lerobot`
 - Conda environment:
   - `lerobot`
@@ -339,6 +391,22 @@ on Windows and `~/miniconda3/bin/conda` on Linux.
 
 Use `conda run -n lerobot <command>` to verify entry points before enabling live
 robot actions in the GUI.
+
+Apply the ATR-packaged Spark RealSense D405/RSUSB LeRobot patch when this PC
+will run D405/D455F live robot workflows:
+
+```bash
+bash install/apply_lerobot_d405_patch.sh ~/lerobot
+```
+
+Patch source:
+
+```text
+patches/lerobot/spark_realsense_d405_rsusb.patch
+```
+
+The patch is intentionally outside the ATR runtime code. It makes the external
+LeRobot checkout reproducible without vendoring LeRobot into this repository.
 
 Install the RealSense Python SDK into the LeRobot environment as well when robot
 teleoperation, recording, or rollout will use RealSense cameras:
@@ -514,9 +582,9 @@ Spark workstation RealSense safety note:
 Pi0.5 training uses an isolated LeRobot worktree and conda environment:
 
 ```bash
-git -C /home/jin/lerobot worktree add /home/jin/lerobot_pi05 upstream/feat/add-pi05
+git -C ~/lerobot worktree add ~/lerobot_pi05 upstream/feat/add-pi05
 conda create -y -n lerobot-pi05-torch211 --clone lerobot
-conda run -n lerobot-pi05-torch211 pip install -e '/home/jin/lerobot_pi05[pi]'
+conda run -n lerobot-pi05-torch211 pip install -e "$HOME/lerobot_pi05[pi]"
 conda run -n lerobot-pi05-torch211 python -m pip install --upgrade --force-reinstall torch==2.11.0 torchvision==0.26.0 torchcodec==0.13.0
 conda run -n lerobot-pi05-torch211 python -m pip install --force-reinstall fsspec==2025.9.0 setuptools==80.10.2
 ```
@@ -524,9 +592,9 @@ conda run -n lerobot-pi05-torch211 python -m pip install --force-reinstall fsspe
 Optional model download:
 
 ```bash
-mkdir -p /home/jin/.cache/huggingface_pi05
-HF_HOME=/home/jin/.cache/huggingface_pi05 \
-HF_HUB_CACHE=/home/jin/.cache/huggingface_pi05/hub \
+mkdir -p ~/.cache/huggingface_pi05
+HF_HOME=~/.cache/huggingface_pi05 \
+HF_HUB_CACHE=~/.cache/huggingface_pi05/hub \
 HF_HUB_DISABLE_XET=1 \
 conda run -n lerobot-pi05-torch211 hf download lerobot/pi05_base --max-workers 1
 ```
