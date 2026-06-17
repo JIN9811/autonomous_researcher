@@ -610,8 +610,64 @@ class MainController:
             return
         step = str(event.get("step", "STEP"))
         status = str(event.get("status", "unknown"))
+        status_key = status.strip().lower()
         detail = event.get("detail")
         suffix = f" ({detail})" if detail not in (None, "") else ""
+        attention_statuses = {"blocked", "failed", "error", "warning", "approval_required"}
+        needs_operator_attention = status_key in attention_statuses or any(
+            bool(event.get(key))
+            for key in (
+                "requires_human_approval",
+                "requires_approval",
+                "requires_response",
+                "pending_operator_input",
+                "blocks_workflow",
+            )
+        )
+        tool_event_role = str(event.get("role") or "").strip()
+        if not tool_event_role:
+            if tool == "guardian.tool_shield":
+                tool_event_role = "guardian_ai"
+            elif tool.startswith("lerobot."):
+                tool_event_role = "manipulation_ai"
+            elif tool in {"equipment.pyautogui.run", "vision.equipment_cross_check"}:
+                tool_event_role = "equipment_ai"
+            else:
+                tool_event_role = "printer_ai"
+        if not needs_operator_attention:
+            await self._broadcast_controller_event(
+                {
+                    "event_id": make_event_id(),
+                    "run_id": self._state.run_id,
+                    "experiment_id": self._state.experiment_id,
+                    "timestamp_stage": self._state.stage.value,
+                    "event_type": "planning_tool_step",
+                    "type": "tool.step",
+                    "level": "INFO",
+                    "severity": "info",
+                    "ts": datetime.now(timezone.utc).isoformat(),
+                    "graph_id": "atr_closed_loop",
+                    "node_id": self._state.stage.value,
+                    "module_id": self._state.stage.value,
+                    "agent": self._planning_agent_id_for_role(tool_event_role),
+                    "status": status,
+                    "message": f"{tool} step {step} {status}{suffix}",
+                    "payload": {
+                        "surface": ["backend", "io"],
+                        "visibility": "internal",
+                        "tool": tool,
+                        "step": step,
+                        "status": status,
+                        "detail": detail,
+                        "check_id": event.get("check_id", ""),
+                        "program_id": event.get("program_id", ""),
+                        "sequence_id": event.get("sequence_id", ""),
+                        "source": "live_gui_tool_event",
+                    },
+                    "state": self._state.model_dump(mode="json"),
+                }
+            )
+            return
         if tool == "guardian.tool_shield":
             shielded_tool = str(event.get("shielded_tool") or "runtime tool")
             decision = str(event.get("decision") or status)
@@ -626,7 +682,7 @@ class MainController:
                     "content": f"Guardian action shield: {shielded_tool} -> {decision}{suffix}",
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                     "model": "guardian_agent",
-                    "ok": status not in {"blocked", "failed", "error", "approval_required"},
+                    "ok": status_key not in attention_statuses,
                     "tool": tool,
                     "shielded_tool": shielded_tool,
                     "decision": decision,
@@ -641,7 +697,7 @@ class MainController:
                 },
                 event_type="planning_guardian_tool_shield",
                 message=f"guardian.tool_shield {shielded_tool} {decision}",
-                level="ERROR" if status in {"blocked", "failed", "error"} else "WARNING" if status in {"warning", "approval_required"} else "INFO",
+                level="ERROR" if status_key in {"blocked", "failed", "error"} else "WARNING" if status_key in {"warning", "approval_required"} else "INFO",
             )
             return
         if tool.startswith("lerobot."):
@@ -651,12 +707,12 @@ class MainController:
                     "content": f"Manipulation Agent / LeRobot 단계 진행: {step} -> {status}{suffix}",
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                     "model": "manipulation_agent",
-                    "ok": status not in {"blocked", "failed", "error"},
+                    "ok": status_key not in attention_statuses,
                     "lerobot_runtime_event": event,
                 },
                 event_type="planning_lerobot_step",
                 message=f"{tool} step {step} {status}",
-                level="ERROR" if status in {"blocked", "failed", "error"} else "INFO",
+                level="ERROR" if status_key in {"blocked", "failed", "error"} else "WARNING" if status_key in {"warning", "approval_required"} else "INFO",
             )
             return
         if tool == "vision.equipment_cross_check":
@@ -670,7 +726,7 @@ class MainController:
                     "content": f"Equipment Agent Vision 물리검증: {step} -> {status}{check_suffix}{suffix}",
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                     "model": "equipment_agent",
-                    "ok": status not in {"blocked", "failed", "error"},
+                    "ok": status_key not in attention_statuses,
                     "tool": tool,
                     "check_id": check_id,
                     "equipment_runtime_event": event,
@@ -678,7 +734,7 @@ class MainController:
                 },
                 event_type="planning_equipment_vision_check",
                 message=f"vision.equipment_cross_check step {step} {status}",
-                level="ERROR" if status in {"blocked", "failed", "error"} else "INFO",
+                level="ERROR" if status_key in {"blocked", "failed", "error"} else "WARNING" if status_key in {"warning", "approval_required"} else "INFO",
             )
             return
         if tool == "equipment.pyautogui.run":
@@ -693,14 +749,14 @@ class MainController:
                     "content": f"Equipment Agent {semantic_label}: {step} -> {status}{suffix}",
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                     "model": "equipment_agent",
-                    "ok": status not in {"blocked", "failed", "error"},
+                    "ok": status_key not in attention_statuses,
                     "tool": tool,
                     "equipment_runtime_event": event,
                     **metadata,
                 },
                 event_type="planning_equipment_step",
                 message=f"equipment.pyautogui.run step {step} {status}",
-                level="ERROR" if status in {"blocked", "failed", "error"} else "INFO",
+                level="ERROR" if status_key in {"blocked", "failed", "error"} else "WARNING" if status_key in {"warning", "approval_required"} else "INFO",
             )
             return
         await self._append_planning_message(
@@ -709,12 +765,12 @@ class MainController:
                 "content": f"Specimen Making Agent 단계 진행: {step} -> {status}{suffix}",
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "model": "specimen_agent",
-                "ok": status not in {"blocked", "failed"},
+                "ok": status_key not in attention_statuses,
                 "printer_runtime_event": event,
             },
             event_type="planning_printer_step",
             message=f"printer.prepare step {step} {status}",
-            level="ERROR" if status in {"blocked", "failed"} else "INFO",
+            level="ERROR" if status_key in {"blocked", "failed", "error"} else "WARNING" if status_key in {"warning", "approval_required"} else "INFO",
         )
 
     def _apply_inference_backend(self, backend: str | None) -> None:
@@ -766,8 +822,9 @@ class MainController:
             return {}
         keep = {
             "agent", "agent_id", "node_id", "module_id", "stage", "status", "mode", "ok",
-            "workspace", "workflow",
+            "workspace", "workflow", "step", "detail", "surface", "visibility",
             "tool", "tool_name", "requested_tool", "program_id", "check_id",
+            "sequence_id",
             "failure_code", "reason_code", "decision", "risk_score", "title", "reason",
             "requires_human_approval", "requires_approval", "safety_class", "approval_id",
             "artifact_id", "artifact_path", "report_url", "preview_url", "stl_url",
@@ -1833,6 +1890,7 @@ class MainController:
             "knowledge_ai": "KnowledgeAgent",
             "bo_ai": "BOAgent",
             "guardian": "GuardianAgent",
+            "guardian_ai": "GuardianAgent",
             "system": "System",
         }
         clean_role = str(role or "").strip().lower()

@@ -1223,9 +1223,11 @@ def test_planning_vision_stage_message_summarizes_signal_board() -> None:
     assert "scene_map.svg" in content
 
 @pytest.mark.asyncio
-async def test_planning_equipment_pyautogui_tool_event_carries_visual_data_recovery_metadata() -> None:
+async def test_planning_success_tool_events_stay_out_of_agent_chat() -> None:
     controller = load_runtime()
     controller._planning_bootstrapped = True
+    before_count = controller.planning_snapshot()["message_total"]
+    event_cursor = len(controller.recent_events())
 
     await controller._on_tool_event(
         {
@@ -1242,20 +1244,38 @@ async def test_planning_equipment_pyautogui_tool_event_carries_visual_data_recov
         }
     )
 
-    latest = controller.planning_snapshot()["messages"][-1]
-    assert latest["schema"] == "live_chat_message.v1"
-    assert latest["role"] == "equipment_ai"
-    assert latest["message_type"] == "signal"
-    assert latest["command_id"] == "equipment-run-001"
-    assert latest["program_id"] == "utm_compression_start_v1"
-    assert latest["windows_host"] == "192.168.50.58"
-    assert latest["macro_command"]["program_id"] == "utm_compression_start_v1"
-    assert latest["macro_command"]["target_ui"] == "UTM Controller"
-    assert latest["visual_assertion"]["checkpoint"] == "running_state"
-    assert latest["visual_assertion"]["confidence"] == 0.93
-    assert latest["visual_assertion"]["screenshot_artifact"] == "screen-after-start"
-    assert latest["visual_assertion"]["ok"] is True
-    assert "화면 상태 검증" in latest["content"]
+    assert controller.planning_snapshot()["message_total"] == before_count
+
+    await controller._on_tool_event(
+        {
+            "tool": "vision.equipment_cross_check",
+            "step": "VISION_CHECK:utm_motion_confirm",
+            "status": "ok",
+            "detail": "confidence=0.91; frames=frame-utm-motion",
+            "check_id": "utm_motion_confirm",
+            "check_result": {"ok": True, "confidence": 0.91},
+        }
+    )
+
+    assert controller.planning_snapshot()["message_total"] == before_count
+    recent_tool_events = [
+        event
+        for event in controller.recent_events()[event_cursor:]
+        if event.get("event_type") == "planning_tool_step"
+    ]
+    assert len(recent_tool_events) == 2
+    assert recent_tool_events[0]["agent"] == "LabEquipmentAgent"
+    assert recent_tool_events[0]["payload"]["tool"] == "equipment.pyautogui.run"
+    assert recent_tool_events[0]["payload"]["step"] == "SCREEN_ASSERT_RUNNING"
+    assert recent_tool_events[1]["agent"] == "LabEquipmentAgent"
+    assert recent_tool_events[1]["payload"]["tool"] == "vision.equipment_cross_check"
+    assert recent_tool_events[1]["payload"]["check_id"] == "utm_motion_confirm"
+
+
+@pytest.mark.asyncio
+async def test_planning_blocked_tool_event_carries_visual_data_recovery_metadata() -> None:
+    controller = load_runtime()
+    controller._planning_bootstrapped = True
 
     await controller._on_tool_event(
         {
@@ -1292,7 +1312,7 @@ async def test_planning_equipment_pyautogui_tool_event_carries_visual_data_recov
 
 
 @pytest.mark.asyncio
-async def test_planning_equipment_vision_tool_event_becomes_live_chat_message() -> None:
+async def test_planning_warning_vision_tool_event_becomes_live_chat_message() -> None:
     controller = load_runtime()
     controller._planning_bootstrapped = True
 
@@ -1300,10 +1320,10 @@ async def test_planning_equipment_vision_tool_event_becomes_live_chat_message() 
         {
             "tool": "vision.equipment_cross_check",
             "step": "VISION_CHECK:utm_motion_confirm",
-            "status": "ok",
-            "detail": "confidence=0.91; frames=frame-utm-motion",
+            "status": "warning",
+            "detail": "confidence=0.51; frames=frame-utm-motion",
             "check_id": "utm_motion_confirm",
-            "check_result": {"ok": True, "confidence": 0.91},
+            "check_result": {"ok": False, "confidence": 0.51},
         }
     )
 
@@ -1313,6 +1333,7 @@ async def test_planning_equipment_vision_tool_event_becomes_live_chat_message() 
     assert latest["message_type"] == "signal"
     assert latest["check_id"] == "utm_motion_confirm"
     assert latest["vision_cross_check_event"]["tool"] == "vision.equipment_cross_check"
+    assert latest["ok"] is False
     assert "Vision 물리검증" in latest["content"]
 
 
@@ -1474,3 +1495,36 @@ def test_live_gui_message_routing_metadata_separates_chat_and_system_events(tmp_
     display_handoff = page["messages"][0]
     assert display_handoff["message_class"] == "handoff_event"
     assert "timeline" in display_handoff["surface"]
+
+
+def test_live_gui_agent_stage_messages_remain_chat_visible(tmp_path: Path) -> None:
+    controller = load_runtime()
+    controller._logger_bundle.run_dir = tmp_path
+    controller._planning_messages = []
+    controller._planning_message_total = 0
+
+    expected_agents = {
+        "orchestrator": "OrchestratorAgent",
+        "design_ai": "DesignAgent",
+        "printer_ai": "SpecimenMakingAgent",
+        "vision_ai": "VisionAgent",
+        "manipulation_ai": "ManipulationAgent",
+        "equipment_ai": "LabEquipmentAgent",
+        "analysis_ai": "AnalysisAgent",
+        "knowledge_ai": "KnowledgeAgent",
+        "bo_ai": "BOAgent",
+        "guardian": "GuardianAgent",
+        "guardian_ai": "GuardianAgent",
+    }
+
+    for role, agent_id in expected_agents.items():
+        stored = controller._record_planning_message(
+            {
+                "role": role,
+                "content": f"{role} stage summary",
+                "timestamp": "2026-06-01T00:00:02Z",
+            }
+        )
+        assert stored["message_class"] == "agent_chat"
+        assert "chat" in stored["surface"]
+        assert stored["agent_id"] == agent_id
