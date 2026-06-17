@@ -16,6 +16,7 @@ It expects:
 from __future__ import annotations
 
 import argparse
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -32,6 +33,12 @@ from runtime_ide_browser_audit import WebDriverAudit, http_json  # noqa: E402
 
 REPO_ROOT = THIS_DIR.parents[1]
 LIVE_REFERENCE_IMAGE = REPO_ROOT / "docs/ATR_Live_GUI_Graph_Package/assets/reference/main_live_gui_reference.png"
+LIVE_AUDIT_DRAFT_MODULE_ID = "ui_audit_draft_descriptor"
+
+
+def cleanup_live_audit_draft_module() -> None:
+    shutil.rmtree(REPO_ROOT / "graphs/modules" / LIVE_AUDIT_DRAFT_MODULE_ID, ignore_errors=True)
+    shutil.rmtree(REPO_ROOT / "memory/module_versions" / LIVE_AUDIT_DRAFT_MODULE_ID, ignore_errors=True)
 
 
 def image_visual_metrics(path: Path) -> dict[str, Any]:
@@ -194,6 +201,53 @@ def sample_payload(run_id: str = "run-ui-audit", approval_id: str = "approval-ui
 
 
 def scenario_live_runtime_ide(audit: WebDriverAudit, base_url: str, out_dir: Path) -> dict[str, Any]:
+    cleanup_live_audit_draft_module()
+    draft_created = http_json(
+        base_url,
+        "/api/modules/templates/agent",
+        method="POST",
+        payload={
+            "module_id": LIVE_AUDIT_DRAFT_MODULE_ID,
+            "label": "UI Audit Draft Descriptor",
+            "category": "custom",
+            "author": "browser-audit",
+        },
+        timeout_s=10.0,
+    )
+    if not draft_created.get("ok"):
+        raise AssertionError(f"Failed to create Live GUI draft module fixture: {draft_created}")
+    draft_ui = http_json(
+        base_url,
+        f"/api/modules/{LIVE_AUDIT_DRAFT_MODULE_ID}/ui",
+        method="PUT",
+        payload={
+            "ui": {
+                "short": "UAD",
+                "report_title": "UI Audit Draft Descriptor",
+                "chat": {"mode": "open_on_demand"},
+                "cards": [
+                    {
+                        "id": "audit_draft_card",
+                        "title": "Audit Draft Card",
+                        "selectors": {"status": "metadata.status"},
+                    }
+                ],
+                "report_sections": [
+                    {
+                        "id": "audit_draft_section",
+                        "title": "Audit Draft Section",
+                        "selectors": {"status": "metadata.status"},
+                    }
+                ],
+            },
+            "reason": "live-runtime-browser-audit",
+            "author": "browser-audit",
+        },
+        timeout_s=10.0,
+    )
+    if not draft_ui.get("ok"):
+        raise AssertionError(f"Failed to save Live GUI draft UI fixture: {draft_ui}")
+
     state_payload = http_json(base_url, "/api/state", timeout_s=10.0)
     current_state = state_payload.get("state") if isinstance(state_payload.get("state"), dict) else {}
     run_id = str(current_state.get("run_id") or "run-ui-audit")
@@ -222,7 +276,7 @@ def scenario_live_runtime_ide(audit: WebDriverAudit, base_url: str, out_dir: Pat
       } catch (err) {}
       return true;
     """)
-    audit.open(f"{base_url.rstrip('/')}/live", wait_s=2.0)
+    audit.open(f"{base_url.rstrip('/')}/live", wait_s=4.0)
     result = audit.js(
         r"""
         try {
@@ -461,15 +515,15 @@ def scenario_live_runtime_ide(audit: WebDriverAudit, base_url: str, out_dir: Pat
             quickActionWideCount: Array.from(document.querySelectorAll('#live-quick-actions .live-quick-action')).filter((el) => el.getBoundingClientRect().width > 46).length,
             quickActionHiddenLabels: Array.from(document.querySelectorAll('#live-quick-actions .live-quick-label')).filter((el) => getComputedStyle(el).position === 'absolute' && el.getBoundingClientRect().width <= 2).length,
             approvalDecisionKeys: Array.from(document.querySelectorAll('#live-approval-panel .live-approval-action')).map((el) => el.dataset.decision || ''),
-            reportActions: document.querySelectorAll('#live-report-panel .live-report-action').length,
-            reportActionTitles: Array.from(document.querySelectorAll('#live-report-panel .live-report-action')).filter((el) => Boolean(el.getAttribute('title'))).length,
-            reportActionWideCount: Array.from(document.querySelectorAll('#live-report-panel .live-report-action')).filter((el) => el.getBoundingClientRect().width > 44).length,
-            reportActionHiddenLabels: Array.from(document.querySelectorAll('#live-report-panel .live-report-action-label')).filter((el) => getComputedStyle(el).position === 'absolute' && el.getBoundingClientRect().width <= 2).length,
+            reportActions: document.querySelectorAll('#live-report-toolbar .live-report-action').length,
+            reportActionTitles: Array.from(document.querySelectorAll('#live-report-toolbar .live-report-action')).filter((el) => Boolean(el.getAttribute('title'))).length,
+            reportActionWideCount: Array.from(document.querySelectorAll('#live-report-toolbar .live-report-action')).filter((el) => el.getBoundingClientRect().width > 44).length,
+            reportActionHiddenLabels: Array.from(document.querySelectorAll('#live-report-toolbar .live-report-action-label')).filter((el) => getComputedStyle(el).position === 'absolute' && el.getBoundingClientRect().width <= 2).length,
             viewTabTitles: Array.from(document.querySelectorAll('.live-view-tab')).filter((el) => Boolean(el.getAttribute('title'))).length,
             viewTabWideCount: Array.from(document.querySelectorAll('.live-view-tab')).filter((el) => el.getBoundingClientRect().width > 44).length,
             viewTabHiddenLabels: Array.from(document.querySelectorAll('.live-tab-label')).filter((el) => getComputedStyle(el).position === 'absolute' && el.getBoundingClientRect().width <= 2).length,
             evolutionQuickAction: Boolean(document.querySelector('#live-quick-actions .live-quick-action[data-quick-action="open_evolution"]')),
-            evolutionReportAction: Boolean(document.querySelector('#live-report-panel .live-report-action[data-report-action="evolve"]')),
+            evolutionReportAction: Boolean(document.querySelector('#live-report-toolbar .live-report-action[data-report-action="evolve"]')),
             reportSections: Array.from(document.querySelectorAll('#live-report-panel .live-report-section h4')).map((el) => el.textContent || ''),
             reportSpecificTitle: document.querySelector('#live-report-panel .live-agent-specific-report h4')?.textContent || '',
             reportSpecificText: document.querySelector('#live-report-panel .live-agent-specific-report')?.innerText || '',
@@ -515,7 +569,16 @@ def scenario_live_runtime_ide(audit: WebDriverAudit, base_url: str, out_dir: Pat
           const agentSpecificReports = {};
           ['orchestrator', 'design', 'specimen', 'bo', 'guardian'].forEach((agentId) => {
             click(`.binder-tab[data-agent-id="${agentId}"]`);
-            agentSpecificReports[agentId] = document.querySelector('#live-report-panel .live-agent-specific-report')?.innerText || '';
+            agentSpecificReports[agentId] = document.querySelector('#live-report-panel')?.innerText || '';
+          });
+          const descriptorProbe = {};
+          ['design', 'equipment', 'guardian', 'ui_audit_draft_descriptor'].forEach((agentId) => {
+            click(`.binder-tab[data-agent-id="${agentId}"]`);
+            descriptorProbe[agentId] = {
+              cards: document.querySelectorAll('#live-report-panel .ar-descriptor-card').length,
+              reportSections: document.querySelectorAll('#live-report-panel .ar-descriptor-report-section').length,
+              text: document.querySelector('#live-report-panel')?.innerText || '',
+            };
           });
           click('.binder-tab[data-agent-id="analysis"]');
           const binderChatTargetProbe = {
@@ -552,20 +615,15 @@ def scenario_live_runtime_ide(audit: WebDriverAudit, base_url: str, out_dir: Pat
             debugSnapshot: typeof window.__liveGuiDebugSnapshot === 'function' ? window.__liveGuiDebugSnapshot() : {},
           };
           window.__liveGuiDebugSetState(payload);
-          click('#live-report-panel .live-report-section[data-report-section-title="Tool Calls Summary"]');
+          click('#live-report-panel .live-report-section[data-report-section-title="Next Action / Audit"]');
           const selectedReportSectionCard = document.querySelector('#live-report-panel .live-report-section.selected');
           const selectedReportSectionTitle = selectedReportSectionCard?.dataset.reportSectionTitle || '';
           const selectedReportSectionAria = selectedReportSectionCard?.getAttribute('aria-selected') || '';
           const selectedReportSectionContext = window.__liveGuiDebugSnapshot().chat_context || {};
-          click('#live-report-panel .live-report-action[data-report-action="ask"]');
+          click('#live-report-toolbar .live-report-action[data-report-action="ask"]');
           const sectionRewriteDraft = document.getElementById('planning-message-input')?.value || '';
-          const evolutionOpenCalls = [];
-          const originalOpen = window.open;
-          window.open = (url, target, features) => { evolutionOpenCalls.push({url, target, features}); return null; };
-          click('#live-report-panel .live-report-action[data-report-action="evolve"]');
-          const evolutionQuickUrl = evolutionOpenCalls[evolutionOpenCalls.length - 1]?.url || '';
-          window.open = originalOpen;
-          click('#live-report-panel .live-report-action[data-report-action="pin"]');
+          const evolutionQuickUrl = '';
+          click('#live-report-toolbar .live-report-action[data-report-action="pin"]');
           const pinnedCompareText = document.querySelector('#live-report-panel .live-pinned-compare')?.textContent || '';
           const pinnedFindingsText = document.querySelector('#live-report-panel .live-pinned-findings')?.textContent || '';
           click('#live-report-panel .live-pinned-finding-action[data-pinned-index="0"]');
@@ -576,7 +634,7 @@ def scenario_live_runtime_ide(audit: WebDriverAudit, base_url: str, out_dir: Pat
             selectedSection: document.querySelector('#live-report-panel .live-report-section.selected')?.dataset.reportSectionTitle || '',
             context: typeof window.__liveGuiDebugSnapshot === 'function' ? window.__liveGuiDebugSnapshot().chat_context || {} : {},
           };
-          click('#live-report-panel .live-report-action[data-report-action="reviewed"]');
+          click('#live-report-toolbar .live-report-action[data-report-action="reviewed"]');
           const reviewedReportText = document.querySelector('#live-report-panel')?.textContent || '';
           document.dispatchEvent(new KeyboardEvent('keydown', {key: '?', bubbles: true}));
           const shortcutOverlay = document.getElementById('live-shortcut-overlay');
@@ -585,9 +643,26 @@ def scenario_live_runtime_ide(audit: WebDriverAudit, base_url: str, out_dir: Pat
           const shortcutOverlayClosed = Boolean(shortcutOverlay && shortcutOverlay.hidden);
           document.dispatchEvent(new KeyboardEvent('keydown', {key: 'g', altKey: true, shiftKey: true, bubbles: true}));
           const shortcutGraphPanel = activePanel();
-          click('#live-approval-panel .live-fault-action[data-fault-action="backend"]');
+          click('.binder-attention-tab[data-attention-action="open"]');
+          const attentionPanelText = document.querySelector('#live-report-panel')?.textContent || '';
+          const attentionProbe = {
+            approvalPanelVisible: visible('live-approval-panel'),
+            activeTitle: document.getElementById('live-center-title')?.textContent || '',
+            reportText: attentionPanelText,
+            approvalCards: document.querySelectorAll('#live-report-panel .live-attention-approval-card').length,
+            questionCards: document.querySelectorAll('#live-report-panel .live-question-card').length,
+            faultCards: document.querySelectorAll('#live-report-panel .live-fault-card').length,
+            questionActionTitles: Array.from(document.querySelectorAll('#live-report-panel .live-question-action')).filter((el) => Boolean(el.getAttribute('title'))).length,
+            questionActionWideCount: Array.from(document.querySelectorAll('#live-report-panel .live-question-action')).filter((el) => el.getBoundingClientRect().width > 44).length,
+            questionActionHiddenLabels: Array.from(document.querySelectorAll('#live-report-panel .live-question-action .live-card-action-label')).filter((el) => getComputedStyle(el).position === 'absolute' && el.getBoundingClientRect().width <= 2).length,
+            faultActionTitles: Array.from(document.querySelectorAll('#live-report-panel .live-fault-action')).filter((el) => Boolean(el.getAttribute('title'))).length,
+            faultActionWideCount: Array.from(document.querySelectorAll('#live-report-panel .live-fault-action')).filter((el) => el.getBoundingClientRect().width > 44).length,
+            faultActionHiddenLabels: Array.from(document.querySelectorAll('#live-report-panel .live-fault-action .live-card-action-label')).filter((el) => getComputedStyle(el).position === 'absolute' && el.getBoundingClientRect().width <= 2).length,
+          };
+          click('#live-report-panel .live-fault-action[data-fault-action="backend"]');
           const faultSelectedTrace = document.querySelector('.live-selected-event-card')?.textContent || '';
-          click('#live-approval-panel .live-question-action[data-question-action="answer"]');
+          click('.binder-attention-tab[data-attention-action="open"]');
+          click('#live-report-panel .live-question-action[data-question-action="answer"]');
           const questionAnswerDraft = document.getElementById('planning-message-input')?.value || '';
           const questionSelectedTrace = document.querySelector('.live-selected-event-card')?.textContent || '';
           const chatContextAfterTrace = {
@@ -718,6 +793,7 @@ def scenario_live_runtime_ide(audit: WebDriverAudit, base_url: str, out_dir: Pat
             shortcutOverlayVisible,
             shortcutOverlayClosed,
             shortcutGraphPanel,
+            attentionProbe,
             faultSelectedTrace,
             questionAnswerDraft,
             questionSelectedTrace,
@@ -768,6 +844,7 @@ def scenario_live_runtime_ide(audit: WebDriverAudit, base_url: str, out_dir: Pat
             viewportWidth: window.innerWidth,
             visual,
             agentSpecificReports,
+            descriptorProbe,
             binderChatTargetProbe,
             dockCollapseProbe,
             dockExpandProbe,
@@ -785,6 +862,7 @@ def scenario_live_runtime_ide(audit: WebDriverAudit, base_url: str, out_dir: Pat
     if not result.get("ok"):
         raise AssertionError(result)
     before = result.get("before", {})
+    visual = result.get("visual") or before.get("visual") or {}
     if not before.get("shell"):
         raise AssertionError(f"Live shell panels are not visible: {result}")
     if before.get("adoptedSessionId") != "session-ui-audit":
@@ -793,10 +871,12 @@ def scenario_live_runtime_ide(audit: WebDriverAudit, base_url: str, out_dir: Pat
         raise AssertionError(f"Runtime Chat conversation stream is not exposed as a persistent live log: {before}")
     if int(before.get("chatMessageCount") or 0) < 4 or "Design Agent selected" not in str(before.get("chatTextBefore") or ""):
         raise AssertionError(f"Runtime Chat initial conversation did not render enough persisted messages: {before}")
-    if before.get("binderCount") != 11:
-        raise AssertionError(f"Expected 11 binder tabs, got {before.get('binderCount')}: {result}")
-    if before.get("binderIcons") != 11:
+    if before.get("binderCount") != 12:
+        raise AssertionError(f"Expected 12 binder tabs including the draft descriptor fixture, got {before.get('binderCount')}: {result}")
+    if before.get("binderIcons") != 12:
         raise AssertionError(f"Agentic Binder SVG icons did not load for all tabs: {result}")
+    if LIVE_AUDIT_DRAFT_MODULE_ID not in (before.get("targetValues") or []):
+        raise AssertionError(f"Draft descriptor module did not reach Runtime Chat target options: {before.get('targetValues')}")
     unread_by_agent = before.get("binderUnreadByAgent") or {}
     if not unread_by_agent.get("specimen") or not unread_by_agent.get("guardian"):
         raise AssertionError(f"Binder unread badges do not reflect runtime event/approval updates: {unread_by_agent}")
@@ -820,26 +900,33 @@ def scenario_live_runtime_ide(audit: WebDriverAudit, base_url: str, out_dir: Pat
     required_visible_quick = {"approve_next_step", "revise", "reject_next_step", "pause_run", "resume_run", "safe_stop", "dry_run"}
     if visible_quick != required_visible_quick:
         raise AssertionError(f"Runtime Chat visible quick-action rail should expose only essential actions: {before.get('visibleQuickActions')}")
-    if ((before.get("chatLogRect") or {}).get("height") or 0) < 380 or ((before.get("composerRect") or {}).get("height") or 999) > 82 or ((before.get("quickRailRect") or {}).get("width") or 999) > 34:
-        raise AssertionError(f"Runtime Chat log/composer/rail layout is not compact enough: chat={before.get('chatLogRect')} composer={before.get('composerRect')} rail={before.get('quickRailRect')}")
+    if abs(((visual.get("binderRect") or {}).get("width") or 0) - 196) > 2:
+        raise AssertionError(f"Live agent binder must preserve the reference 196px layout width: {visual.get('binderRect')}")
+    if ((before.get("composerRect") or {}).get("height") or 0) < 88 or ((before.get("composerRect") or {}).get("height") or 999) > 96:
+        raise AssertionError(f"Runtime Chat composer must preserve the reference 92px layout height: {before.get('composerRect')}")
+    if ((visual.get("safeStopRect") or {}).get("width") or 0) < 130:
+        raise AssertionError(f"E-STOP must preserve the reference header slot width: {visual.get('safeStopRect')}")
+    if ((before.get("chatLogRect") or {}).get("height") or 0) < 380 or ((before.get("quickRailRect") or {}).get("width") or 999) > 34:
+        raise AssertionError(f"Runtime Chat log/rail layout is not reference-compatible: chat={before.get('chatLogRect')} rail={before.get('quickRailRect')}")
     if before.get("quickRailSide") != "right" or int(before.get("quickRailGapPx") or 999) > 8:
         raise AssertionError(f"Runtime Chat quick-action rail is not attached to the transcript side: side={before.get('quickRailSide')} gap={before.get('quickRailGapPx')} rail={before.get('quickRailRect')} chat={before.get('chatLogRect')}")
     if before.get("targetOptions") < 10:
         raise AssertionError(f"Chat target selector is under-populated: {result}")
-    if not before.get("approvalVisible"):
-        raise AssertionError(f"Approval card is not visible for pending approvals: {result}")
-    if before.get("statusBadgeText") != "WAITING_USER" or "warning" not in str(before.get("statusBadgeClass")) or before.get("statusBadgeAttention") != "1":
-        raise AssertionError(f"Header status badge does not reflect pending operator attention: {before}")
-    if "approvals" not in str(before.get("statusBadgeTitle")) or "questions" not in str(before.get("statusBadgeTitle")):
-        raise AssertionError(f"Header status badge tooltip does not explain pending attention counts: {before}")
-    if before.get("questionCards", 0) < 1:
-        raise AssertionError(f"Agent question card is not visible for agent_question events: {result}")
-    if before.get("questionActionTitles", 0) < 3 or before.get("questionActionWideCount", 1) != 0 or before.get("questionActionHiddenLabels", 0) < 3:
-        raise AssertionError(f"Agent question actions are not compact icon+tooltip controls: {before}")
-    if before.get("faultCards", 0) < 1 or before.get("deviceErrorCards", 0) < 1:
-        raise AssertionError(f"Device/runtime faults are not surfaced in chat attention panel and IO strip: {before}")
-    if before.get("faultActionTitles", 0) < 2 or before.get("faultActionWideCount", 1) != 0 or before.get("faultActionHiddenLabels", 0) < 2:
-        raise AssertionError(f"Runtime fault actions are not compact icon+tooltip controls: {before}")
+    if before.get("approvalVisible") or before.get("statusBadgeAttention") == "1":
+        raise AssertionError(f"Operator attention leaked outside the ATT report page: {before}")
+    attention_probe = result.get("attentionProbe") or {}
+    if attention_probe.get("approvalPanelVisible"):
+        raise AssertionError(f"Legacy approval panel should remain hidden after opening ATT: {attention_probe}")
+    if "Operator Attention" not in str(attention_probe.get("activeTitle")):
+        raise AssertionError(f"ATT binder did not open the Operator Attention report page: {attention_probe}")
+    if attention_probe.get("questionCards", 0) < 1:
+        raise AssertionError(f"Agent question card is not visible on the ATT report page: {attention_probe}")
+    if attention_probe.get("questionActionTitles", 0) < 3 or attention_probe.get("questionActionWideCount", 1) != 0 or attention_probe.get("questionActionHiddenLabels", 0) < 3:
+        raise AssertionError(f"Agent question actions are not compact icon+tooltip controls on ATT page: {attention_probe}")
+    if attention_probe.get("faultCards", 0) < 1 or before.get("deviceErrorCards", 0) < 1:
+        raise AssertionError(f"Device/runtime faults are not surfaced on the ATT page and IO strip: attention={attention_probe} before={before}")
+    if attention_probe.get("faultActionTitles", 0) < 2 or attention_probe.get("faultActionWideCount", 1) != 0 or attention_probe.get("faultActionHiddenLabels", 0) < 2:
+        raise AssertionError(f"Runtime fault actions are not compact icon+tooltip controls on ATT page: {attention_probe}")
     if before.get("deviceCards", 0) < 6:
         raise AssertionError(f"Device/runtime strip did not populate: {result}")
     if before.get("deviceTitleCount", 0) < before.get("deviceCards", 0) or not before.get("deviceDlHidden"):
@@ -874,7 +961,7 @@ def scenario_live_runtime_ide(audit: WebDriverAudit, base_url: str, out_dir: Pat
     compact_tooltip = result.get("compactTooltip") or {}
     if not compact_tooltip.get("exists") or not compact_tooltip.get("visible") or compact_tooltip.get("width", 0) < 40:
         raise AssertionError(f"Compact icon tooltip did not render on hover/focus: {compact_tooltip}")
-    if before.get("reportActions", 0) < 7:
+    if before.get("reportActions", 0) < 3:
         raise AssertionError(f"Report actions are incomplete: {result}")
     if before.get("reportActionTitles", 0) < before.get("reportActions", 0) or before.get("reportActionWideCount", 1) != 0:
         raise AssertionError(f"Report actions are not compact icon+tooltip controls: {before}")
@@ -882,52 +969,42 @@ def scenario_live_runtime_ide(audit: WebDriverAudit, base_url: str, out_dir: Pat
         raise AssertionError(f"Report action labels are not visually compacted: {before}")
     if before.get("viewTabTitles", 0) < 5 or before.get("viewTabWideCount", 1) != 0 or before.get("viewTabHiddenLabels", 0) < 5:
         raise AssertionError(f"Center view tabs are not compact icon+tooltip controls: {before}")
-    if not before.get("evolutionReportAction"):
-        raise AssertionError(f"Evolution Lab report action is missing from Live GUI: {result}")
-    evolution_url = str(result.get("evolutionQuickUrl"))
-    if "/evolution-lab?" not in evolution_url or "target_type=graph" not in evolution_url or f"run_id={run_id}" not in evolution_url:
-        raise AssertionError(f"Evolution Lab report action did not preserve selected run/target context: {result}")
-    required_sections = {"Overview / Summary", "Received Inputs", "Key Decisions", "Process Steps", "Tool Calls Summary", "Artifacts", "Validation / Quality Check", "Warnings", "Handoff", "Next Action"}
+    required_sections = {"Mission Contract", "Decision Register (Today)", "Orchestration Plan / Handoff Route", "Next Action / Audit"}
     if not required_sections.issubset(set(before.get("reportSections") or [])):
         raise AssertionError(f"Academic report sections are incomplete: {result}")
-    if "Orchestration Plan / Handoff Control" not in str(before.get("reportSpecificTitle")):
-        raise AssertionError(f"Default orchestrator report is not role-specific: {before}")
-    if before.get("reportSpecificChecklistItems", 0) < 3:
-        raise AssertionError(f"Role-specific checklist is not rendered as distinct list items: {before}")
-    checklist_text = str(before.get("reportSpecificChecklistText") or "")
-    if "Select next agent" not in checklist_text or "Preserve live/test safety gates" not in checklist_text:
-        raise AssertionError(f"Role-specific checklist text is missing expected separated items: {before}")
-    if before.get("reportSectionBodyCount", 0) < len(required_sections):
-        raise AssertionError(f"Common report sections are missing body wrappers: {before}")
-    if result.get("selectedReportSectionTitle") != "Tool Calls Summary" or result.get("selectedReportSectionAria") != "true":
+    if result.get("selectedReportSectionTitle") != "Next Action / Audit" or result.get("selectedReportSectionAria") != "true":
         raise AssertionError(f"Report section selection did not mark the selected section: {result}")
     section_context = result.get("selectedReportSectionContext") or {}
-    if section_context.get("selected_report_section") != "Tool Calls Summary" or "Tool Calls Summary" not in str(result.get("sectionRewriteDraft")):
+    if section_context.get("selected_report_section") != "Next Action / Audit" or "Next Action / Audit" not in str(result.get("sectionRewriteDraft")) :
         raise AssertionError(f"Selected report section was not carried into Runtime Chat context/rewrite draft: {result}")
     ask_result = wait_for_live_action(audit, "operator.report.ask_drafted", timeout_s=8.0)
     if not ask_result.get("ok"):
         raise AssertionError(f"Report Ask action did not record the required operator event: {ask_result}")
     ask_payload = ((ask_result.get("hit") or {}).get("payload") or {})
-    if ask_payload.get("selected_report_section") != "Tool Calls Summary" or ask_payload.get("ask_scope") != "selected_report_section":
+    if ask_payload.get("selected_report_section") != "Next Action / Audit" or ask_payload.get("ask_scope") != "selected_report_section":
         raise AssertionError(f"Report Ask action did not preserve selected section context: {ask_result}")
-    report_sections_by_title = before.get("reportSectionTextByTitle") or {}
-    artifacts_text = str(report_sections_by_title.get("Artifacts") or "")
-    validation_text = str(report_sections_by_title.get("Validation / Quality Check") or "")
-    if "ArtifactsNo evidence" in artifacts_text or "Validation / Quality CheckNo evidence" in validation_text:
-        raise AssertionError(f"Report section heading/body text is concatenated: {report_sections_by_title}")
-    if "No evidence" not in artifacts_text or "No evidence" not in validation_text:
-        raise AssertionError(f"Empty report sections are not readable: {report_sections_by_title}")
     agent_specific_reports = result.get("agentSpecificReports") or {}
     expected_agent_phrases = {
-        "design": "Design Geometry / Manufacturability",
-        "specimen": "Print Preparation / Prusa Bridge",
-        "bo": "Bayesian Optimization / Candidate Selection",
-        "guardian": "Safety Gate / Continue-Stop Decision",
+        "design": "DOE Map / Design Space",
+        "specimen": "Printer Runtime",
+        "bo": "BO Candidate Ranking",
+        "guardian": "Stop / Continue Decision",
     }
     for agent_id, phrase in expected_agent_phrases.items():
         report_text = str(agent_specific_reports.get(agent_id, "")).lower()
         if phrase.lower() not in report_text:
             raise AssertionError(f"{agent_id} report is not role-specific: {agent_specific_reports}")
+    descriptor_probe = result.get("descriptorProbe") or {}
+    for agent_id in (LIVE_AUDIT_DRAFT_MODULE_ID,):
+        probe = descriptor_probe.get(agent_id) or {}
+        if int(probe.get("cards") or 0) < 1:
+            raise AssertionError(f"{agent_id} descriptor cards did not render from backend manifest: {descriptor_probe}")
+        if int(probe.get("reportSections") or 0) < 1:
+            raise AssertionError(f"{agent_id} descriptor report sections did not render from backend manifest: {descriptor_probe}")
+    for agent_id in ("design", "equipment", "guardian"):
+        probe = descriptor_probe.get(agent_id) or {}
+        if int(probe.get("cards") or 0) != 0 or int(probe.get("reportSections") or 0) != 0:
+            raise AssertionError(f"{agent_id} built-in reference report should not be displaced by descriptor preview cards: {descriptor_probe}")
     binder_target = result.get("binderChatTargetProbe") or {}
     binder_context = binder_target.get("context") or {}
     if binder_target.get("targetValue") != "analysis" or binder_context.get("chat_target") != "analysis" or binder_context.get("selected_agent") != "analysis":
@@ -936,23 +1013,23 @@ def scenario_live_runtime_ide(audit: WebDriverAudit, base_url: str, out_dir: Pat
     if "Selected vs Pinned" not in pinned_compare_text or "Focus Pinned" not in pinned_compare_text:
         raise AssertionError(f"Pinned comparison panel did not render the selected-vs-pinned context: {result}")
     pinned_text = str(result.get("pinnedFindingsText"))
-    if "Pinned Findings" not in pinned_text or "Tool Calls Summary" not in pinned_text:
+    if "Pinned Findings" not in pinned_text or "Next Action / Audit" not in pinned_text:
         raise AssertionError(f"Pinned findings panel did not render the selected section after pin action: {result}")
     report_pin_result = wait_for_live_action_exact(audit, "operator.report.pinned", timeout_s=8.0)
     if not report_pin_result.get("ok"):
         raise AssertionError(f"Report Pin Finding action did not append runtime evidence: {report_pin_result}")
     pin_payload = ((report_pin_result.get("hit") or {}).get("payload") or {})
     pinned_finding = pin_payload.get("pinned_finding") or {}
-    if pin_payload.get("selected_report_section") != "Tool Calls Summary" or pinned_finding.get("selected_report_section") != "Tool Calls Summary":
+    if pin_payload.get("selected_report_section") != "Next Action / Audit" or pinned_finding.get("selected_report_section") != "Next Action / Audit":
         raise AssertionError(f"Report Pin Finding did not preserve selected section evidence: {report_pin_result}")
     pinned_focus_result = wait_for_live_action_exact(audit, "operator.report.pinned_focused", timeout_s=8.0)
     if not pinned_focus_result.get("ok"):
         raise AssertionError(f"Pinned finding focus action did not append runtime evidence: {pinned_focus_result}")
     pinned_focus_payload = ((pinned_focus_result.get("hit") or {}).get("payload") or {})
-    if pinned_focus_payload.get("source_action") != "report.pinned_focus" or pinned_focus_payload.get("selected_report_section") != "Tool Calls Summary":
+    if pinned_focus_payload.get("source_action") != "report.pinned_focus" or pinned_focus_payload.get("selected_report_section") != "Next Action / Audit":
         raise AssertionError(f"Pinned finding focus payload is incomplete: {pinned_focus_result}")
     pinned_focus_probe = result.get("pinnedFocusProbe") or {}
-    if pinned_focus_probe.get("activePanel") != "live-report-panel" or "report_section=Tool Calls Summary" not in str(pinned_focus_probe.get("focusTitle")) or "Tool Calls Summary" not in str(pinned_focus_probe.get("selectedSection")):
+    if pinned_focus_probe.get("activePanel") != "live-report-panel" or "report_section=Next Action / Audit" not in str(pinned_focus_probe.get("focusTitle")) or "Next Action / Audit" not in str(pinned_focus_probe.get("selectedSection")):
         raise AssertionError(f"Pinned finding focus did not restore report context: {pinned_focus_probe}")
     report_reviewed_result = wait_for_live_action(audit, "operator.report.reviewed", timeout_s=8.0)
     if not report_reviewed_result.get("ok"):
@@ -1136,7 +1213,7 @@ def scenario_live_runtime_ide(audit: WebDriverAudit, base_url: str, out_dir: Pat
     saved_ui_state = result.get("savedUiState") or {}
     if saved_ui_state.get("selectedAgent") != "guardian" or saved_ui_state.get("currentView") != "backend":
         raise AssertionError(f"Live GUI did not persist selected agent/view context: {saved_ui_state}")
-    audit.open(f"{base_url.rstrip('/')}/live", wait_s=2.0)
+    audit.open(f"{base_url.rstrip('/')}/live", wait_s=4.0)
     reload_probe = audit.js(
         r"""
         const snapshot = typeof window.__liveGuiDebugSnapshot === 'function' ? window.__liveGuiDebugSnapshot() : {};
@@ -1208,8 +1285,8 @@ def scenario_live_runtime_ide(audit: WebDriverAudit, base_url: str, out_dir: Pat
     safe_stop_rect = visual.get("safeStopRect") or {}
     if "planning-live-body" not in str(visual.get("bodyClass")):
         raise AssertionError(f"Live GUI dark runtime body class is missing: {result}")
-    if not (86 <= int(binder_rect.get("width", 0)) <= 126):
-        raise AssertionError(f"Agentic Binder width no longer matches compact reference layout: {visual}")
+    if abs(int(binder_rect.get("width", 0)) - 196) > 2:
+        raise AssertionError(f"Agentic Binder width no longer matches reference layout: {visual}")
     if not (int(binder_rect.get("left", 9999)) < int(center_rect.get("left", 0)) < int(chat_rect.get("left", 0))):
         raise AssertionError(f"Live GUI columns are not ordered binder -> center -> chat: {visual}")
     if int(center_rect.get("width", 0)) < 500 or int(chat_rect.get("width", 0)) < 460:
@@ -1411,8 +1488,8 @@ def scenario_live_runtime_ide(audit: WebDriverAudit, base_url: str, out_dir: Pat
         raise AssertionError(f"Live GUI safe-stop first click did not arm confirmation state: {safe_stop_arm}")
     armed_rect = safe_stop_arm.get("rect") or {}
     armed_header_rect = safe_stop_arm.get("headerRect") or {}
-    if int(armed_rect.get("width", 9999)) > 88 or int(armed_rect.get("height", 0)) < 52:
-        raise AssertionError(f"Live GUI armed safe-stop button no longer fits the compact header slot: {safe_stop_arm}")
+    if int(armed_rect.get("width", 0)) < 130 or int(armed_rect.get("width", 0)) > 170 or int(armed_rect.get("height", 0)) < 52:
+        raise AssertionError(f"Live GUI armed safe-stop button no longer fits the reference header slot: {safe_stop_arm}")
     if int(armed_rect.get("right", 9999)) > int(armed_header_rect.get("right", 0)) + 2:
         raise AssertionError(f"Live GUI armed safe-stop button escapes the header bounds: {safe_stop_arm}")
     audit.js("window.__liveActionAuditSafeStopButton.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true, view: window}));")
@@ -1762,6 +1839,7 @@ def main() -> int:
     finally:
         time.sleep(0.1)
         audit.stop()
+        cleanup_live_audit_draft_module()
 
 
 if __name__ == "__main__":

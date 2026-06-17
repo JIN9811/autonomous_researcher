@@ -199,13 +199,27 @@ Managed model checkpoints:
 
 - `nvidia/Gemma-4-31B-IT-NVFP4`
 - `bg-digitalservices/Gemma-4-E4B-it-NVFP4`
-- `bg-digitalservices/Gemma-4-E2B-it-NVFP4`
 
-MTP assistant checkpoints:
+The current managed model surface is intentionally limited to two models:
+
+- `gemma4:31b`
+- `gemma4:e4b-it-nvfp4`
+
+`gemma4:e2b-*` is not part of the active `/api/runtime/models` GUI/API
+surface and should not be documented as a required local serving dependency.
+
+MTP assistant checkpoint:
 
 - `google/gemma-4-31B-it-assistant`
-- `google/gemma-4-E4B-it-assistant`
-- `google/gemma-4-E2B-it-assistant`
+
+Current MTP policy:
+
+- `gemma4:31b` uses Gemma4 MTP speculative decoding with
+  `google/gemma-4-31B-it-assistant` and `num_speculative_tokens=4`.
+- `gemma4:e4b-it-nvfp4` is served as a stable target-only NVFP4 deployment.
+  MTP is disabled for this model in `configs/system.yaml` because the
+  E4B+NVFP4+MTP path repeatedly triggered CUDA device-side asserts during local
+  validation.
 
 Important runtime setting:
 
@@ -396,7 +410,11 @@ Pi0.5 training uses local W&B offline logging by default. The GUI/bridge passes
 does not require a W&B cloud API key. Select `disabled` only when no W&B run
 metadata should be created.
 
-Pi0.5 training keeps `num_workers=4` as the safe GUI default and allows up to `num_workers=20` in the backend for faster local dataloader/video-decode throughput.
+Pi0.5 training keeps `num_workers=12` as the current GUI default and allows up to
+`num_workers=20` in the backend for faster local dataloader/video-decode
+throughput. This matches the current `/lerobot` frontend defaults and bridge
+normalization path; do not document `4` as the Pi0.5 GUI default unless the
+code is changed again.
 Pi0.5 training now runs in `lerobot-pi05-torch211` with `torch==2.11.0`, `torchvision==0.26.0`, and `torchcodec==0.13.0`; the bridge prefers `torchcodec` and falls back to `pyav` when the selected conda environment cannot import TorchCodec.
 
 The bridge resolves `lerobot/pi05_base` to a compatible local snapshot under

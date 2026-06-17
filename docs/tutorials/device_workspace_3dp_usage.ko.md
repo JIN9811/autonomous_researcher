@@ -49,12 +49,12 @@ Main GUI의 **Device Workspaces**에서 장비별 전용 GUI로 이동합니다.
 | Prepare HTTP Artifact | 프린터가 fetch할 수 있는 HTTP artifact route 준비 | 파일 노출만 수행 |
 | Pre-start Check | camera/video, slicing, HTTP route, start gate, SPC readiness 통합 점검 | MQTT start publish 없음 |
 | Print Command Draft | publish 전 command payload 초안 확인 | 명령 전송 없음 |
-| Start Gate Check | operator/Guardian/dry-run gate 확인 | dry-run 기본값이면 publish 없음 |
+| Start Gate Check | owner-managed publish 기본값과 backend start gate 확인 | 검증만 수행, publish 없음 |
 | Publish Start | 승인된 조건에서 실제 start publish | 실제 시작 가능 |
 | SPC Readiness | Specimen Making Agent 관점의 printer readiness 집계 | 상태 집계만 수행 |
 | Open Live GUI | Live GUI로 이동 | 별도 화면 열기 |
 
-운영 기본값은 `dry-run / no publish`가 켜져 있습니다. 실제 publish 전에는 최소한 `operator confirmed`, `Guardian approved`, `dry-run 해제`가 의도적으로 설정되어야 합니다.
+현재 운영 UI는 별도 `operator confirmed`, `Guardian approved`, `dry-run / no publish` 체크박스를 노출하지 않습니다. `Start Gate Check`, `SPC Readiness`, `Publish Start`는 owner-managed publish 기본값(`operator_confirmed=true`, `guardian_approved=true`, `dry_run=false`, ejection path 관리값 true)을 backend로 보냅니다. 실제 publish 여부는 백엔드의 artifact validity, printer safe-state, camera evidence, bed-clear evidence, post-publish observation gate가 결정합니다.
 
 `Slice Bambu Artifact`는 원본 Bambu Studio preset을 직접 수정하지 않습니다. 명시 `load_settings`가 없으면 slicing output 폴더 아래 `_atr_no_skirt_profile/`에 X2D용 machine/process/filament 복사본을 만들고, process 복사본에서 skirt/brim/raft 관련 값을 off/zero로 고정합니다. 또한 Bambu Studio CLI에는 `--export-3mf` 절대경로가 아니라 output directory 내부 basename을 전달합니다. 이 두 조건이 깨지면 `.gcode.3mf` export 실패나 `BAMBU_AUTOEJECTION_RESIDUAL_PRIME_OR_SKIRT_RISK` blocker가 날 수 있습니다.
 
@@ -154,14 +154,14 @@ Main GUI의 **Device Workspaces**에서 장비별 전용 GUI로 이동합니다.
 
 즉, pre-start check는 **출력 직전까지 갔는지** 확인하는 절차이지, 기본적으로 출력 시작 명령을 내리는 절차가 아닙니다.
 
-실제 출력은 다음 조건이 의도적으로 충족된 뒤에만 진행합니다.
+실제 출력은 다음 조건이 충족된 뒤에만 진행합니다.
 
 1. artifact가 올바른 STL/3MF에서 생성됨
 2. HTTP/FTPS route가 프린터에서 접근 가능함
-3. `operator confirmed` 체크
-4. `Guardian approved` 체크
-5. `dry-run / no publish` 해제
-6. `Publish Start` 실행
+3. owner-managed publish 기본값이 요청에 포함됨
+4. camera frame 또는 camera blocker 상태가 명확함
+5. 이전 ejection 이후 bed-clear blocker가 없음
+6. `Publish Start` 실행 후 fresh post-publish observation이 `RUNNING`/`PREPARING` 계열 상태로 확인됨
 
 ## 6. Bambu G-code Autoejection
 
@@ -219,7 +219,7 @@ Bambu native autoejection이 autonomous loop ready가 되려면 다음 조건이
 5. MQTT/FTPS 또는 HTTP artifact route가 start gate에서 검증되어야 합니다.
 6. 실제 publish 후에는 `bed_clear_required=true`가 되며, 다음 cycle은 `Mark Bed Clear` 또는 vision evidence 전까지 차단됩니다.
 7. 첫 live ejection 또는 geometry가 바뀐 ejection은 supervised mode와 disposable/test object로 검증해야 합니다.
-8. `.autoeject.*` artifact를 실제 publish하려면 front path/door clear, ramp/bin ready, toolhead cover secured, release surface confirmed/profile, supervised first ejection checklist가 모두 통과해야 합니다.
+8. `.autoeject.*` artifact를 실제 publish할 때 front path/door, ramp/bin, toolhead cover, release surface/profile, supervised first ejection 같은 물리 환경은 workstation owner/operator가 프린터 앞에서 직접 관리합니다. GUI는 별도 수동 checklist 대신 `operator_managed=true` evidence를 기록하고, backend는 camera/bed-clear/artifact/start-state blocker로 차단합니다.
 
 외부 robot/Manipulation Agent handoff는 primary ejection path가 아닙니다. Ejection 실패 후 recovery나 downstream transfer가 필요할 때 별도 provider로 사용합니다.
 
@@ -239,7 +239,7 @@ Bambu autoejection을 실제 완료로 인정하려면 proof package 감사가 �
 | 상태 | 의미 | 다음 조치 |
 |---|---|---|
 | `policy upload=false start=false` | upload/start gate가 닫혀 있음 | 실제 출력 전에는 정상. publish 전 gate 확인 필요 |
-| `dry-run / no publish` checked | start publish가 차단된 검사 모드 | 실제 시작 전까지 유지 |
+| `owner-managed publish defaults` | GUI가 start-gate 요청에 `operator_confirmed=true`, `guardian_approved=true`, `dry_run=false`, `operator_managed=true`를 보냄 | 현재 기본 동작 |
 | `Connection Confirmation`에 warning | LAN/Developer/storage/HTTP route 중 검토 항목 존재 | 카드의 action을 따라 connection/profile 수정 |
 | `SPC Readiness ready` | Specimen Making Agent 기준 handoff 가능 | live/test workflow에 넘길 수 있음 |
 | `native_gcode_patch_ready` | Bambu autoejection patch artifact 생성 가능 | patched artifact validator와 start gate 확인 |
@@ -260,11 +260,6 @@ Bambu autoejection을 실제 완료로 인정하려면 proof package 감사가 �
 | `BAMBU_AUTOEJECTION_UNSAFE_FEEDRATE` | ejection tail의 X/Y push feedrate가 안전 상한을 초과함 | Push Speed 또는 Sweep Speed를 낮춘 뒤 다시 patch/validate |
 | `BAMBU_AUTOEJECTION_UNEXPECTED_HOME` | ejection tail 내부에 예상 밖 homing이 있음 | G-code tail/validator 확인 |
 | `BAMBU_AUTOEJECTION_MODEL_FAMILY_UNSUPPORTED` | A1/A1 Mini 같은 bed-slinger 계열에 CoreXY X-lane tail을 적용하려고 함 | A1 전용 Y-axis/wiggle generator 구현 전까지 native autoejection off 또는 지원 profile 사용 |
-| `BAMBU_AUTOEJECTION_FRONT_PATH_NOT_CONFIRMED` | ejection 진행 방향의 door/front path 확인이 누락됨 | front path/door clear 체크 |
-| `BAMBU_AUTOEJECTION_RAMP_OR_BIN_NOT_CONFIRMED` | 배출 후 받을 ramp/bin 확인이 누락됨 | ramp/bin ready 체크 |
-| `BAMBU_AUTOEJECTION_TOOLHEAD_COVER_NOT_CONFIRMED` | toolhead/fan cover 고정 확인이 누락됨 | toolhead cover secured 체크 |
-| `BAMBU_AUTOEJECTION_RELEASE_SURFACE_NOT_CONFIRMED` | release surface 확인 또는 profile 입력이 누락됨 | release surface confirmed 체크 및 profile 입력 |
-| `BAMBU_AUTOEJECTION_SUPERVISED_FIRST_RUN_NOT_CONFIRMED` | 첫 live ejection/새 geometry supervised 확인이 누락됨 | supervised first ejection 체크 |
 | `BAMBU_AUTOEJECTION_OBJECT_TOO_LOW` | 시편이 너무 낮아 toolhead가 안정적으로 밀기 어려움 | autoejection off 또는 pushable edge가 있는 test part 사용 |
 | `BAMBU_AUTOEJECTION_OBJECT_TOO_TALL` | 시편이 너무 높아 충돌/간섭 위험이 큼 | autoejection off 또는 supervised manual removal |
 | `BAMBU_AUTOEJECTION_MULTI_OBJECT_UNSUPPORTED` | 한 plate에 여러 object가 있어 bed-clear/ejection path가 불명확 | 단일 object plate로 slicing하거나 object 선택 기능 구현 후 재시도 |

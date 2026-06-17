@@ -230,6 +230,16 @@ function deepLinkNodeRef() {
   return params.get("node") || params.get("node_id") || params.get("stage") || "";
 }
 
+function deepLinkModuleId() {
+  const params = runtimeIdeUrlParams();
+  return params.get("module") || params.get("module_id") || "";
+}
+
+function deepLinkAction() {
+  const params = runtimeIdeUrlParams();
+  return params.get("action") || "";
+}
+
 
 function cloneConfig(value) {
   if (value === undefined || value === null) return value;
@@ -1050,6 +1060,7 @@ function renderModuleCatalog() {
     templateListOutput.innerHTML = "<div>No module library entries found.</div>";
     return;
   }
+  const linkedModuleId = deepLinkModuleId();
   const groups = new Map();
   for (const module of availableModules) {
     const category = String(module.category || "runtime");
@@ -1066,14 +1077,18 @@ function renderModuleCatalog() {
         </div>
         ${modules
           .sort((a, b) => String(a.label || a.id).localeCompare(String(b.label || b.id)))
-          .map((module) => `
-            <button type="button" draggable="true" class="runtime-module-catalog-item" data-module-catalog-id="${escapeHtml(module.id)}" title="${escapeHtml(module.handler || "runtime.step_complete")} · tools ${escapeHtml(module.tool_count || 0)}${module.pending_handler_registration ? " · registration pending" : ""}">
+          .map((module) => {
+            const deepLinked = linkedModuleId && String(module.id || "") === linkedModuleId;
+            return `
+            <button type="button" draggable="true" class="runtime-module-catalog-item${deepLinked ? " deep-link-focus" : ""}" data-module-catalog-id="${escapeHtml(module.id)}" data-module-deep-link="${deepLinked ? "true" : "false"}" title="${escapeHtml(module.handler || "runtime.step_complete")} · tools ${escapeHtml(module.tool_count || 0)}${module.pending_handler_registration ? " · registration pending" : ""}${deepLinked ? " · attach target" : ""}">
               ${runtimeNodeIconMarkup(moduleIconName(module))}
               <span>
                 <strong>${escapeHtml(module.label || module.id)}</strong>
+                ${deepLinked ? `<small>Attach target</small>` : ""}
               </span>
             </button>
-          `)
+          `;
+          })
           .join("")}
       </section>
     `)
@@ -1087,6 +1102,41 @@ function renderModuleCatalog() {
       log(`Dragging module ${moduleId}; drop it on the canvas to add it to the active draft.`, "ok");
     });
   });
+}
+
+function moduleCatalogElement(moduleId = "") {
+  if (!templateListOutput || !moduleId) return null;
+  return templateListOutput.querySelector(`[data-module-catalog-id="${CSS.escape(moduleId)}"]`);
+}
+
+async function focusDeepLinkedModule() {
+  const moduleId = deepLinkModuleId();
+  if (!moduleId) return;
+  const module = availableModules.find((item) => item.id === moduleId);
+  if (!module) {
+    log(`Deep-linked module not found in catalog: ${moduleId}`, "error");
+    return;
+  }
+  if (moduleSelect && Array.from(moduleSelect.options).some((option) => option.value === moduleId)) {
+    moduleSelect.value = moduleId;
+    activeModuleId = moduleId;
+  }
+  renderModuleCatalog();
+  const target = moduleCatalogElement(moduleId);
+  target?.scrollIntoView?.({ behavior: "smooth", block: "center" });
+  flashRuntimeElement(target, "deep-link-focus");
+  if (deepLinkAction() === "attach") {
+    setStatus("busy", "Attach Module", `${module.label || module.id}: Drag the highlighted module onto the main graph canvas, connect ports, validate, dry-run, then Save Version.`);
+    dryRunOutput.innerHTML = `
+      <div class="runtime-version-draft-note">
+        <strong>Attach Module</strong>
+        <p>Drag the highlighted module onto the main graph canvas, connect its ports, run Validate and Dry Run, then Save Version to activate the checked graph draft.</p>
+      </div>
+    `;
+    log(`Attach deep link ready for ${moduleId}. Drag the highlighted module onto the main graph canvas, connect ports, validate, dry-run, then Save Version.`, "ok");
+  } else {
+    log(`Deep-linked module selected: ${moduleId}`, "ok");
+  }
 }
 
 function uniqueName(base, existing) {
@@ -2075,19 +2125,120 @@ function renderInfraList(snapshot = latestStateSnapshot) {
   const runtime = snapshot.runtime || state.run_metadata || {};
   const backend = runtime.backend || state.run_metadata?.backend || {};
   const health = state.device_health || {};
+  const bridges = Array.isArray(snapshot.runtime_ide_contract?.device_bridges)
+    ? snapshot.runtime_ide_contract.device_bridges
+    : [];
   const models = runtime.models || state.run_metadata?.models || {};
   const modelLines = Object.entries(models).slice(0, 4).map(([key, value]) => {
     const item = value || {};
     return `<div title="${escapeHtml(item.primary || "n/a")}"><strong>${escapeHtml(key)}</strong></div>`;
   }).join("");
-  const bridgeDetail = (snapshot.runtime_ide_contract?.device_bridges || []).map((item) => item.id || item.label).filter(Boolean).join(" · ") || Object.entries(health).map(([k, v]) => `${k}:${v}`).join(" · ") || "n/a";
+  const bridgeDetail = bridges.map((item) => item.id || item.label).filter(Boolean).join(" · ") || Object.entries(health).map(([k, v]) => `${k}:${v}`).join(" · ") || "n/a";
   infraListOutput.innerHTML = `
     <div class="runtime-infra-item" title="${escapeHtml(backend.label || backend.name || "n/a")}"><strong>Backend</strong></div>
     <div class="runtime-infra-item" title="ToolRegistry / agent context"><strong>MCP Tools</strong></div>
     <div class="runtime-infra-item" title="${escapeHtml(snapshot.logs?.run_dir || "n/a")}"><strong>Memory / Logs</strong></div>
     <div class="runtime-infra-item" title="${escapeHtml(bridgeDetail)}"><strong>Device Bridges</strong></div>
     <div class="runtime-infra-models">${modelLines}</div>
+    ${bridgeActionDescriptorEditor(bridges)}
   `;
+}
+
+function bridgeActionDescriptorEditor(bridges = []) {
+  const bridgeOptions = bridges.map((bridge) => {
+    const id = String(bridge.id || "").trim();
+    if (!id) return "";
+    return `<option value="${escapeHtml(id)}">${escapeHtml(bridge.label || id)}</option>`;
+  }).join("");
+  if (!bridgeOptions) {
+    return `
+      <div class="runtime-bridge-action-editor">
+        <strong>Custom Bridge Action</strong>
+        <small>No graph-backed bridge contracts are loaded yet.</small>
+      </div>
+    `;
+  }
+  return `
+    <div class="runtime-bridge-action-editor" data-bridge-action-editor>
+      <div class="runtime-bridge-action-head">
+        <strong>Custom Bridge Action</strong>
+        <small>descriptor_only · saved to graph metadata; hardware remains workspace handoff</small>
+      </div>
+      <label>Bridge
+        <select data-bridge-action-field="bridge_id">${bridgeOptions}</select>
+      </label>
+      <label>Action ID
+        <input data-bridge-action-field="id" value="custom_action" placeholder="run_custom_macro">
+      </label>
+      <label>Label
+        <input data-bridge-action-field="label" value="Custom Action" placeholder="Run custom macro">
+      </label>
+      <label>Method
+        <select data-bridge-action-field="method">
+          <option value="GET">GET</option>
+          <option value="POST" selected>POST</option>
+          <option value="PUT">PUT</option>
+          <option value="PATCH">PATCH</option>
+          <option value="DELETE">DELETE</option>
+        </select>
+      </label>
+      <label>Endpoint
+        <input data-bridge-action-field="endpoint" value="/api/devices/state" placeholder="/api/...">
+      </label>
+      <label>Tool
+        <input data-bridge-action-field="tool" value="" placeholder="registered.tool.name">
+      </label>
+      <div class="runtime-bridge-action-flags">
+        <label><input type="checkbox" data-bridge-action-field="requires_confirmation" checked> confirmation</label>
+        <label><input type="checkbox" data-bridge-action-field="read_only"> read-only</label>
+      </div>
+      <button type="button" class="btn tiny" data-bridge-action-save>Save Descriptor</button>
+      <small data-bridge-action-status>Custom POST or confirmation-required actions are shown as workspace handoff, not Live card execution.</small>
+    </div>
+  `;
+}
+
+function bridgeActionFieldValue(field, fallback = "") {
+  const root = infraListOutput?.querySelector("[data-bridge-action-editor]");
+  const el = root?.querySelector(`[data-bridge-action-field="${field}"]`);
+  if (!el) return fallback;
+  if (el.type === "checkbox") return Boolean(el.checked);
+  return String(el.value || fallback).trim();
+}
+
+async function saveBridgeCustomActionDescriptor() {
+  const root = infraListOutput?.querySelector("[data-bridge-action-editor]");
+  const status = root?.querySelector("[data-bridge-action-status]");
+  const bridgeId = bridgeActionFieldValue("bridge_id");
+  if (!bridgeId) {
+    if (status) status.textContent = "Select a bridge before saving.";
+    return;
+  }
+  const action = {
+    id: bridgeActionFieldValue("id", "custom_action"),
+    label: bridgeActionFieldValue("label", "Custom Action"),
+    kind: "api",
+    method: bridgeActionFieldValue("method", "POST"),
+    endpoint: bridgeActionFieldValue("endpoint", "/api/devices/state"),
+    tool: bridgeActionFieldValue("tool", ""),
+    requires_confirmation: bridgeActionFieldValue("requires_confirmation", true),
+    read_only: bridgeActionFieldValue("read_only", false),
+    mode_support: ["test", "live"],
+  };
+  if (status) status.textContent = "Saving bridge descriptor...";
+  const result = await requestJson(`/api/bridges/${bridgeId}/actions`, {
+    method: "POST",
+    body: JSON.stringify({
+      action,
+      reason: "runtime_ide_bridge_action_descriptor",
+      author: "runtime_ide",
+    }),
+  });
+  if (status) {
+    status.textContent = `${result.execution_scope || "descriptor_only"} saved: ${result.action?.id || action.id}`;
+  }
+  log(`Bridge descriptor saved: ${bridgeId}.${result.action?.id || action.id}`, "ok");
+  await loadRunContext({ preserveSelectedEventId: true });
 }
 
 function handlerOptions(selected = "") {
@@ -7362,6 +7513,16 @@ function openModuleManagementTool(event) {
 
 graphCanvas?.addEventListener("click", handleGraphCanvasBlankClick);
 document.addEventListener("click", (event) => {
+  const bridgeActionSave = event.target?.closest?.("[data-bridge-action-save]");
+  if (bridgeActionSave) {
+    event.preventDefault();
+    saveBridgeCustomActionDescriptor().catch((err) => {
+      const status = infraListOutput?.querySelector("[data-bridge-action-status]");
+      if (status) status.textContent = `Bridge descriptor save failed: ${err.message || err}`;
+      log(String(err), "error");
+    });
+    return;
+  }
   const trigger = event.target?.closest?.("[data-open-module-management]");
   if (trigger) {
     openModuleManagementTool(event);
@@ -7396,7 +7557,8 @@ async function boot() {
     await loadGraph();
     await loadHandlers();
     await loadTools();
-    await loadModules();
+    await loadModules({ preferredModuleId: deepLinkModuleId() });
+    await focusDeepLinkedModule();
     await loadRecentEvents();
     await loadRunContext();
     connectEventStream();

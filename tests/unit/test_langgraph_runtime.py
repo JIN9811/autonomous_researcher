@@ -13,14 +13,116 @@ from fastapi.testclient import TestClient
 
 import app.main as app_main
 from agents.registry import AgentRegistry
+from agents.base_agent import AgentResult
 from graphs import ATRLangGraphCompiler, GraphConfig, HandlerRegistry, ModuleConfig, load_graph_config, load_module_config
 from logging_system.structured_logger import StructuredLogger
 from orchestrator.langgraph_runtime import LangGraphRunLoop, compact_runtime_payload
 from orchestrator.graph import OrchestrationGraph
 from orchestrator.router import stage_to_agent
 from orchestrator.state import Mode, OrchestratorState, Stage
+from orchestrator.supervisor import build_orchestrator_followup
 from orchestrator.transitions import default_next_stage, ordered_stages
 from policies.guardian_gate import gate_blocks_execution, guardian_gate
+
+
+class _CustomQualityAgent:
+    name = "custom_quality_agent"
+
+    async def run(self, state: OrchestratorState, ctx: object) -> AgentResult:
+        return AgentResult(
+            success=True,
+            summary="custom quality gate complete",
+            data={
+                "metrics": {"quality_score": 0.97},
+                "handoff_packet": {"status": "ready", "from_stage": "custom_quality_gate"},
+            },
+        )
+
+
+def test_supervisor_followup_uses_custom_stage_supervisor_policy() -> None:
+    state = OrchestratorState(
+        run_id="run-custom-supervisor-policy",
+        experiment_id="exp-custom-supervisor-policy",
+        mode=Mode.TEST,
+        stage=Stage("custom_quality_gate"),
+    )
+
+    followup = build_orchestrator_followup(
+        state=state,
+        stage="custom_quality_gate",
+        trigger="agent_result",
+        next_stage=Stage.GUARDIAN,
+        payload={
+            "status": "ready",
+            "quality_metrics": {"quality_score": 0.91},
+            "handoff_packet": {"status": "ready"},
+            "module_runtime": {
+                "module_id": "custom_quality",
+                "label": "Custom Quality Gate",
+                "handler": "agent.custom_quality_agent",
+                "supervisor_policy": {
+                    "required_outputs": ["quality_metrics", "handoff_packet"],
+                    "opinion_template": "Custom Quality Gate checked status={status} quality_score={quality_metrics.quality_score}.",
+                    "recommendation_template": "Handoff to {next_stage} after verifying {required_outputs}.",
+                    "concern_rules": [
+                        {
+                            "id": "quality_score_low",
+                            "selector": "quality_metrics.quality_score",
+                            "lt": 0.95,
+                            "message": "quality score is below target",
+                        }
+                    ],
+                    "options": [{"id": "rerun_quality", "label": "Rerun quality check", "risk": "low"}],
+                },
+            },
+        },
+    )
+
+    assert followup["opinion"] == "Custom Quality Gate checked status=ready quality_score=0.91."
+    assert followup["recommendation"] == "Handoff to guardian after verifying quality_metrics, handoff_packet."
+    assert followup["concerns"] == ["quality_score_low: quality score is below target"]
+    assert followup["options"] == [{"id": "rerun_quality", "label": "Rerun quality check", "risk": "low"}]
+    assert followup["next_agent"] == "guardian_agent"
+
+
+def test_module_lifecycle_checks_supervisor_policy_required_outputs() -> None:
+    payload = {
+        "module": {
+            "id": "custom_quality",
+            "label": "Custom Quality",
+            "status": "active",
+            "enabled": True,
+            "handler": "agent.custom_quality_agent",
+            "execution": {"capability": "agent"},
+            "output_contracts": ["quality_metrics"],
+            "supervisor_policy": {
+                "required_outputs": ["quality_metrics", "handoff_packet"],
+            },
+            "internal_graph": [
+                {
+                    "id": "run_quality",
+                    "label": "Run quality",
+                    "handler": "agent.custom_quality_agent",
+                }
+            ],
+        }
+    }
+
+    lifecycle = app_main._module_management_lifecycle("custom_quality", payload)
+    requirement_by_id = {item["id"]: item for item in lifecycle["activation_requirements"]}
+
+    assert "supervisor_policy_outputs" in requirement_by_id
+    assert requirement_by_id["supervisor_policy_outputs"]["ok"] is False
+    assert "handoff_packet" in requirement_by_id["supervisor_policy_outputs"]["detail"]
+    assert lifecycle["supervisor_policy_gate"]["required_outputs"] == ["quality_metrics", "handoff_packet"]
+    assert lifecycle["supervisor_policy_gate"]["missing_outputs"] == ["handoff_packet"]
+
+    payload["module"]["output_contracts"].append("handoff_packet")
+    lifecycle_ready = app_main._module_management_lifecycle("custom_quality", payload)
+    ready_requirement_by_id = {item["id"]: item for item in lifecycle_ready["activation_requirements"]}
+
+    assert ready_requirement_by_id["supervisor_policy_outputs"]["ok"] is True
+    assert lifecycle_ready["supervisor_policy_gate"]["missing_outputs"] == []
 
 
 def _noop_registry() -> HandlerRegistry:
@@ -37,6 +139,175 @@ def _noop_registry() -> HandlerRegistry:
 
 def _event_cursor() -> int:
     return len(app_main.controller.recent_events())
+
+
+def test_bridge_custom_non_readonly_action_is_workspace_handoff_only() -> None:
+    payload = app_main._normalized_bridge_manifests(
+        {
+            "device_bridges": [
+                {
+                    "id": "custom_robot_bridge",
+                    "label": "Custom Robot Bridge",
+                    "workspace": "/lerobot",
+                    "tools": ["lerobot.rollout.start"],
+                    "actions": [
+                        {
+                            "id": "run_policy",
+                            "label": "Run Policy",
+                            "kind": "api",
+                            "method": "POST",
+                            "endpoint": "/api/lerobot/rollout/start",
+                            "requires_confirmation": True,
+                            "read_only": False,
+                            "tool": "lerobot.rollout.start",
+                            "mode_support": ["test", "live"],
+                        }
+                    ],
+                }
+            ]
+        },
+        health={},
+    )
+
+    bridge = payload[0]
+    action = bridge["actions"][0]
+
+    assert action["id"] == "run_policy"
+    assert action["source"] == "graph.metadata.device_bridges.actions"
+    assert action["live_card_runnable"] is False
+    assert action["handoff_required"] is True
+    assert action["handoff_workspace"] == "/lerobot"
+    assert action["blocked_reason"] == "workspace_handoff_required"
+    assert bridge["custom_action_count"] == 1
+    assert bridge["live_card_runnable_action_count"] == 0
+
+
+def test_bridge_custom_action_descriptor_can_be_saved_to_graph_metadata(tmp_path, monkeypatch) -> None:
+    config_root = tmp_path / "graph_configs"
+    config_root.mkdir()
+    active_graph_path = config_root / "atr_closed_loop.yaml"
+    active_graph_path.write_text(Path("graphs/configs/atr_closed_loop.yaml").read_text(encoding="utf-8"), encoding="utf-8")
+    monkeypatch.setattr(app_main, "RUNTIME_GRAPH_CONFIG_ROOT", config_root)
+    monkeypatch.setattr(app_main, "RUNTIME_GRAPH_VERSION_ROOT", tmp_path / "graph_versions")
+
+    client = TestClient(app_main.app)
+    response = client.post(
+        "/api/bridges/windows_pyautogui_bridge/actions",
+        json={
+            "action": {
+                "id": "run_utm_macro",
+                "label": "Run UTM Macro",
+                "kind": "api",
+                "method": "POST",
+                "endpoint": "/api/equipment/windows/run-program",
+                "read_only": False,
+                "requires_confirmation": True,
+                "tool": "equipment.pyautogui.run",
+                "mode_support": ["live"],
+            },
+            "reason": "unit bridge action descriptor",
+            "author": "pytest",
+        },
+    )
+
+    assert response.status_code == 200
+    saved = response.json()
+    assert saved["ok"] is True
+    assert saved["graph_id"] == "atr_closed_loop"
+    assert saved["bridge_id"] == "windows_pyautogui_bridge"
+    assert saved["execution_scope"] == "descriptor_only"
+    action = saved["action"]
+    assert action["id"] == "run_utm_macro"
+    assert action["live_card_runnable"] is False
+    assert action["handoff_required"] is True
+    assert action["handoff_workspace"] == "/equipment/windows"
+
+    bridges = client.get("/api/bridges").json()
+    bridge_by_id = {item["id"]: item for item in bridges["bridges"]}
+    saved_action_by_id = {
+        item["id"]: item
+        for item in bridge_by_id["windows_pyautogui_bridge"]["actions"]
+    }
+    assert saved_action_by_id["run_utm_macro"]["endpoint"] == "/api/equipment/windows/run-program"
+    assert saved_action_by_id["run_utm_macro"]["read_only"] is False
+    assert saved_action_by_id["run_utm_macro"]["handoff_required"] is True
+    assert bridge_by_id["windows_pyautogui_bridge"]["custom_action_count"] == 1
+    assert bridge_by_id["windows_pyautogui_bridge"]["live_card_runnable_action_count"] == 0
+
+    runtime_state = client.get("/api/runtime/state").json()
+    contract_bridge_by_id = {
+        item["id"]: item
+        for item in runtime_state["runtime_ide_contract"]["device_bridges"]
+    }
+    contract_action_by_id = {
+        item["id"]: item
+        for item in contract_bridge_by_id["windows_pyautogui_bridge"]["actions"]
+    }
+    assert contract_action_by_id["run_utm_macro"] == saved_action_by_id["run_utm_macro"]
+    assert contract_action_by_id["run_utm_macro"]["live_card_runnable"] is False
+    assert contract_action_by_id["run_utm_macro"]["handoff_workspace"] == "/equipment/windows"
+
+    active_yaml = active_graph_path.read_text(encoding="utf-8")
+    assert "run_utm_macro" in active_yaml
+    assert "equipment.pyautogui.run" in active_yaml
+    assert (tmp_path / "graph_versions" / "atr_closed_loop" / f"{saved['version']['version_id']}.yaml").exists()
+
+
+def test_new_bridge_manifest_entry_is_shared_by_bridge_api_and_runtime_contract(tmp_path, monkeypatch) -> None:
+    config_root = tmp_path / "graph_configs"
+    config_root.mkdir()
+    active_graph_path = config_root / "atr_closed_loop.yaml"
+    payload = yaml.safe_load(Path("graphs/configs/atr_closed_loop.yaml").read_text(encoding="utf-8"))
+    graph_payload = payload.setdefault("graph", {})
+    metadata = graph_payload.setdefault("metadata", {})
+    bridges = metadata.setdefault("device_bridges", [])
+    bridges.append(
+        {
+            "id": "unit_custom_bridge",
+            "label": "Unit Custom Bridge",
+            "workspace": "/ide",
+            "tools": ["unit.bridge.probe"],
+            "health_endpoint": "/api/runtime/state",
+            "preflight_endpoint": "/api/runtime/state",
+            "actions": [
+                {
+                    "id": "status_probe",
+                    "label": "Status Probe",
+                    "kind": "api",
+                    "method": "GET",
+                    "endpoint": "/api/runtime/state",
+                    "read_only": True,
+                    "requires_confirmation": False,
+                    "tool": "unit.bridge.probe",
+                    "mode_support": ["test"],
+                }
+            ],
+        }
+    )
+    active_graph_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+    monkeypatch.setattr(app_main, "RUNTIME_GRAPH_CONFIG_ROOT", config_root)
+    monkeypatch.setattr(app_main, "RUNTIME_GRAPH_VERSION_ROOT", tmp_path / "graph_versions")
+
+    client = TestClient(app_main.app)
+    bridges_payload = client.get("/api/bridges").json()
+    assert bridges_payload["ok"] is True
+    bridge_by_id = {item["id"]: item for item in bridges_payload["bridges"]}
+    bridge = bridge_by_id["unit_custom_bridge"]
+    assert bridge["workspace"] == "/ide"
+    assert "tool:unit.bridge.probe" in bridge["evidence_contracts"]
+    action_by_id = {item["id"]: item for item in bridge["actions"]}
+    assert action_by_id["status_probe"]["live_card_runnable"] is True
+    assert action_by_id["status_probe"]["handoff_required"] is False
+    assert action_by_id["status_probe"]["endpoint"] == "/api/runtime/state"
+
+    runtime_state = client.get("/api/runtime/state").json()
+    contract_bridge_by_id = {
+        item["id"]: item
+        for item in runtime_state["runtime_ide_contract"]["device_bridges"]
+    }
+    assert contract_bridge_by_id["unit_custom_bridge"]["actions"] == bridge["actions"]
+    assert contract_bridge_by_id["unit_custom_bridge"]["evidence_contracts"] == bridge["evidence_contracts"]
+    assert contract_bridge_by_id["unit_custom_bridge"]["source"] == "graph.metadata.device_bridges"
 
 
 def _assert_runtime_event_since(cursor: int, event_type: str, action: str) -> dict[str, object]:
@@ -221,6 +492,221 @@ def test_atr_graph_config_validates_and_compiles() -> None:
     transition_edges = [edge for edge in config.edges if edge.metadata.get("runtime_edge") == "logical_transition"]
     assert any(edge.metadata.get("from_stage") == "knowledge" and edge.metadata.get("to_stage") == "bo" for edge in transition_edges)
     assert compiler.compile() is not None
+
+
+@pytest.mark.asyncio
+async def test_langgraph_runtime_accepts_graph_validated_custom_stage(tmp_path: Path) -> None:
+    """Graph-configured extension stages must not fail only because they are absent from Stage enum."""
+    graph_path = tmp_path / "custom_stage_graph.yaml"
+    graph_path.write_text(
+        yaml.safe_dump(
+            {
+                "graph": {
+                    "id": "custom_stage_graph",
+                    "name": "Custom Stage Graph",
+                    "version": "0.1.0",
+                    "entry_node": "dispatch",
+                    "finish_nodes": ["step_complete"],
+                    "terminal_stages": ["complete", "error"],
+                    "stage_dispatch": {
+                        "idle": "idle_node",
+                        "custom_quality_gate": "custom_quality_gate_node",
+                        "complete": "complete_node",
+                        "error": "error_node",
+                    },
+                    "transitions": {
+                        "idle": "custom_quality_gate",
+                        "custom_quality_gate": "complete",
+                    },
+                    "nodes": [
+                        {"id": "dispatch", "label": "Dispatch", "handler": "runtime.dispatch", "kind": "runtime"},
+                        {"id": "idle_node", "label": "Idle", "handler": "runtime.idle", "stage": "idle", "kind": "runtime"},
+                        {
+                            "id": "custom_quality_gate_node",
+                            "label": "Custom Quality Gate",
+                            "handler": "runtime.step_complete",
+                            "stage": "custom_quality_gate",
+                            "kind": "runtime",
+                        },
+                        {"id": "complete_node", "label": "Complete", "handler": "runtime.terminal", "stage": "complete", "kind": "terminal"},
+                        {"id": "error_node", "label": "Error", "handler": "runtime.terminal", "stage": "error", "kind": "terminal"},
+                        {"id": "step_complete", "label": "Step Complete", "handler": "runtime.step_complete", "kind": "terminal"},
+                    ],
+                    "edges": [
+                        {"source": "dispatch", "target": "idle_node", "condition": "idle"},
+                        {"source": "dispatch", "target": "custom_quality_gate_node", "condition": "custom_quality_gate"},
+                        {"source": "dispatch", "target": "complete_node", "condition": "complete"},
+                        {"source": "dispatch", "target": "error_node", "condition": "error"},
+                        {"source": "idle_node", "target": "step_complete"},
+                        {"source": "custom_quality_gate_node", "target": "step_complete"},
+                        {"source": "complete_node", "target": "step_complete"},
+                        {"source": "error_node", "target": "step_complete"},
+                        {
+                            "source": "idle_node",
+                            "target": "custom_quality_gate_node",
+                            "condition": "default",
+                            "metadata": {
+                                "runtime_edge": "logical_transition",
+                                "from_stage": "idle",
+                                "to_stage": "custom_quality_gate",
+                                "condition": "default",
+                                "default_transition": True,
+                            },
+                        },
+                        {
+                            "source": "custom_quality_gate_node",
+                            "target": "complete_node",
+                            "condition": "default",
+                            "metadata": {
+                                "runtime_edge": "logical_transition",
+                                "from_stage": "custom_quality_gate",
+                                "to_stage": "complete",
+                                "condition": "default",
+                                "default_transition": True,
+                            },
+                        },
+                    ],
+                }
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+    runtime = LangGraphRunLoop(
+        state=OrchestratorState(run_id="run-custom-stage", experiment_id="exp-custom-stage", mode=Mode.TEST),
+        agent_registry=AgentRegistry(),
+        orchestrator_agent_name="orchestrator",
+        ctx=object(),
+        logger=StructuredLogger(tmp_path / "custom_runtime.jsonl", tmp_path / "custom_summary.log"),
+        graph_config_path=graph_path,
+        module_root=tmp_path / "modules",
+    )
+
+    await runtime._idle_node({"state": runtime._state})
+
+    assert runtime._state.stage.value == "custom_quality_gate"
+    assert runtime._state.model_dump(mode="json")["stage"] == "custom_quality_gate"
+
+
+@pytest.mark.asyncio
+async def test_langgraph_runtime_executes_custom_agent_stage_from_graph_config(tmp_path: Path) -> None:
+    module_dir = tmp_path / "modules" / "custom_quality"
+    module_dir.mkdir(parents=True)
+    (module_dir / "module.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "module": {
+                    "id": "custom_quality",
+                    "label": "Custom Quality Gate",
+                    "handler": "agent.custom_quality_agent",
+                    "editable": True,
+                    "safety": {"dry_run_supported": True, "live_requires_validation": True},
+                    "tools": [],
+                    "io_contract": {"input": "custom test state", "output": "custom quality metrics"},
+                }
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+    graph_path = tmp_path / "custom_agent_stage_graph.yaml"
+    graph_path.write_text(
+        yaml.safe_dump(
+            {
+                "graph": {
+                    "id": "custom_agent_stage_graph",
+                    "name": "Custom Agent Stage Graph",
+                    "version": "0.1.0",
+                    "entry_node": "dispatch",
+                    "finish_nodes": ["step_complete"],
+                    "terminal_stages": ["complete", "error"],
+                    "stage_dispatch": {
+                        "idle": "idle_node",
+                        "custom_quality_gate": "custom_quality_gate_node",
+                        "complete": "complete_node",
+                        "error": "error_node",
+                    },
+                    "transitions": {
+                        "idle": "custom_quality_gate",
+                        "custom_quality_gate": "complete",
+                    },
+                    "nodes": [
+                        {"id": "dispatch", "label": "Dispatch", "handler": "runtime.dispatch", "kind": "runtime"},
+                        {"id": "idle_node", "label": "Idle", "handler": "runtime.idle", "stage": "idle", "kind": "runtime"},
+                        {
+                            "id": "custom_quality_gate_node",
+                            "label": "Custom Quality Gate",
+                            "handler": "agent.custom_quality_agent",
+                            "stage": "custom_quality_gate",
+                            "kind": "agent",
+                            "module_id": "modules/custom_quality",
+                        },
+                        {"id": "complete_node", "label": "Complete", "handler": "runtime.terminal", "stage": "complete", "kind": "terminal"},
+                        {"id": "error_node", "label": "Error", "handler": "runtime.terminal", "stage": "error", "kind": "terminal"},
+                        {"id": "step_complete", "label": "Step Complete", "handler": "runtime.step_complete", "kind": "terminal"},
+                    ],
+                    "edges": [
+                        {"source": "dispatch", "target": "idle_node", "condition": "idle"},
+                        {"source": "dispatch", "target": "custom_quality_gate_node", "condition": "custom_quality_gate"},
+                        {"source": "dispatch", "target": "complete_node", "condition": "complete"},
+                        {"source": "dispatch", "target": "error_node", "condition": "error"},
+                        {"source": "idle_node", "target": "step_complete"},
+                        {"source": "custom_quality_gate_node", "target": "step_complete"},
+                        {"source": "complete_node", "target": "step_complete"},
+                        {"source": "error_node", "target": "step_complete"},
+                        {
+                            "source": "idle_node",
+                            "target": "custom_quality_gate_node",
+                            "condition": "default",
+                            "metadata": {
+                                "runtime_edge": "logical_transition",
+                                "from_stage": "idle",
+                                "to_stage": "custom_quality_gate",
+                                "condition": "default",
+                                "default_transition": True,
+                            },
+                        },
+                        {
+                            "source": "custom_quality_gate_node",
+                            "target": "complete_node",
+                            "condition": "default",
+                            "metadata": {
+                                "runtime_edge": "logical_transition",
+                                "from_stage": "custom_quality_gate",
+                                "to_stage": "complete",
+                                "condition": "default",
+                                "default_transition": True,
+                            },
+                        },
+                    ],
+                }
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+    registry = AgentRegistry()
+    registry.register(_CustomQualityAgent())  # type: ignore[arg-type]
+    runtime = LangGraphRunLoop(
+        state=OrchestratorState(
+            run_id="run-custom-agent-stage",
+            experiment_id="exp-custom-agent-stage",
+            mode=Mode.TEST,
+            stage=Stage("custom_quality_gate"),
+        ),
+        agent_registry=registry,
+        orchestrator_agent_name="orchestrator",
+        ctx=object(),
+        logger=StructuredLogger(tmp_path / "custom_agent_runtime.jsonl", tmp_path / "custom_agent_summary.log"),
+        graph_config_path=graph_path,
+        module_root=tmp_path,
+    )
+
+    await runtime.step()
+
+    assert runtime._state.stage == Stage.COMPLETE
+    assert runtime._state.run_metadata["custom_quality_gate_agent_payload"]["metrics"]["quality_score"] == 0.97
+    assert runtime._state.run_metadata["custom_quality_gate_handoff_packet"]["status"] == "ready"
 
 
 def test_logical_transition_candidates_drive_runtime_next_stage() -> None:
@@ -535,21 +1021,94 @@ def test_graph_runtime_api_exposes_handlers_modules_and_compile() -> None:
     module_ids = {item["id"] for item in modules["modules"]}
     assert {"design", "specimen", "bo", "guardian"}.issubset(module_ids)
 
+    manifests = client.get("/api/runtime/agent-manifests").json()
+    assert manifests["ok"] is True
+    assert manifests["graph_id"] == "atr_closed_loop"
+    manifest_by_id = {item["id"]: item for item in manifests["agents"]}
+    assert {"orchestrator", "design", "specimen", "guardian"}.issubset(manifest_by_id)
+    assert manifest_by_id["objective"]["kind"] == "ui_only"
+    assert manifest_by_id["orchestrator"]["module_id"] == "orchestrator"
+    assert manifest_by_id["orchestrator"]["graph_node_id"] == "orchestrator_supervisor"
+    assert manifest_by_id["design"]["module_id"] == "design"
+    assert manifest_by_id["design"]["handler"] == "agent.design_agent"
+    assert manifest_by_id["design"]["graph_node_id"] == "design"
+    assert manifest_by_id["design"]["io_contract"]
+    assert manifest_by_id["design"]["cards"]
+    assert manifest_by_id["equipment"]["cards"]
+    assert manifest_by_id["guardian"]["cards"]
+    assert manifest_by_id["design"]["cards"][0]["id"] == "design_decision_descriptor"
+    assert manifest_by_id["design"]["report_sections"][0]["id"] == "design_overview"
+    assert manifest_by_id["equipment"]["report_sections"][0]["id"] == "equipment_overview"
+    assert manifest_by_id["guardian"]["report_sections"][0]["id"] == "guardian_overview"
+    assert manifest_by_id["design"]["chat"]["mode"] == "open_on_demand"
+    assert manifest_by_id["equipment"]["chat"]["mode"] == "open_on_demand"
+    assert manifest_by_id["guardian"]["chat"]["mode"] == "open_on_demand"
+    assert manifest_by_id["design"]["safety"]["live_requires_validation"] is True
+    assert manifests["source_endpoints"] == [
+        "/api/graphs/atr_closed_loop",
+        "/api/modules",
+        "/api/runtime/agent-manifests",
+    ]
+
+    bridges = client.get("/api/bridges").json()
+    assert bridges["ok"] is True
+    bridge_by_id = {item["id"]: item for item in bridges["bridges"]}
+    assert {"prusa_bridge", "lerobot_bridge", "windows_pyautogui_bridge", "fenicsx_cae_bridge", "camera_utm_bridge"}.issubset(bridge_by_id)
+    assert bridge_by_id["lerobot_bridge"]["workspace"] == "/lerobot"
+    assert "lerobot.rollout.start" in bridge_by_id["lerobot_bridge"]["tools"]
+    assert bridge_by_id["windows_pyautogui_bridge"]["health_endpoint"] == "/api/equipment/windows/readiness"
+    assert bridge_by_id["windows_pyautogui_bridge"]["workspace"] == "/equipment/windows"
+    for bridge_id, bridge in bridge_by_id.items():
+        assert bridge["actions"], f"{bridge_id} must expose normalized bridge actions"
+        assert bridge["evidence_contracts"], f"{bridge_id} must expose evidence contracts"
+        for action in bridge["actions"]:
+            assert {"id", "label", "kind", "method", "endpoint", "requires_confirmation", "read_only"}.issubset(action)
+    windows_actions = {action["id"]: action for action in bridge_by_id["windows_pyautogui_bridge"]["actions"]}
+    assert windows_actions["open_workspace"]["endpoint"] == "/equipment/windows"
+    assert windows_actions["open_workspace"]["kind"] == "navigation"
+    assert windows_actions["health_check"]["endpoint"] == "/api/equipment/windows/readiness"
+    assert windows_actions["preflight"]["endpoint"] == "/api/equipment/windows/live-preflight"
+
+    runtime_state = client.get("/api/runtime/state").json()
+    contract_bridges = {
+        item["id"]: item
+        for item in runtime_state["runtime_ide_contract"]["device_bridges"]
+    }
+    assert contract_bridges["windows_pyautogui_bridge"]["workspace"] == "/equipment/windows"
+    assert contract_bridges["windows_pyautogui_bridge"]["actions"] == bridge_by_id["windows_pyautogui_bridge"]["actions"]
+
     design = client.get("/api/modules/design").json()
     assert design["ok"] is True
     assert design["module"]["module"]["handler"] == "agent.design_agent"
     assert design["module"]["module"]["internal_graph"]
+    assert design["runtime_effect"]["scope"] == "management_workspace"
+    assert design["lifecycle"]["graph_attached"] is True
+    assert design["lifecycle"]["activation_status"] == "active_graph_attached"
+    assert design["lifecycle"]["ready_for_live_activation"] is True
+    assert design["lifecycle"]["next_required_action"] == "none"
+    assert all(item["ok"] is True for item in design["lifecycle"]["activation_requirements"])
 
     load_result = client.post("/api/modules/design/load").json()
     assert load_result["ok"] is True
     assert load_result["loaded"] is True
     assert "design" in load_result["loaded_module_ids"]
+    assert load_result["runtime_effect"] == {
+        "scope": "management_workspace",
+        "changes_graph_config": False,
+        "changes_runtime_execution": False,
+        "requires_validate_dry_run_save_for_activation": True,
+    }
+    assert load_result["lifecycle"]["module_status"] == "active"
+    assert load_result["lifecycle"]["graph_attached"] is True
+    assert load_result["lifecycle"]["executable_count"] >= 1
     state_result = client.get("/api/modules/management-state").json()
     assert "design" in state_result["loaded_module_ids"]
     unload_result = client.post("/api/modules/design/unload").json()
     assert unload_result["ok"] is True
     assert unload_result["loaded"] is False
     assert "design" not in unload_result["loaded_module_ids"]
+    assert unload_result["runtime_effect"]["changes_runtime_execution"] is False
+    assert unload_result["lifecycle"]["graph_attached"] is True
 
     compiled = client.post("/api/graphs/atr_closed_loop/compile").json()
     assert compiled["ok"] is True
@@ -598,6 +1157,396 @@ def test_graph_runtime_api_exposes_handlers_modules_and_compile() -> None:
     assert module_version["version"]["module"]["module"]["id"] == "design"
     missing_graph_version = client.get("/api/graphs/atr_closed_loop/versions/not-a-real-version")
     assert missing_graph_version.status_code == 404
+
+
+def test_runtime_module_template_creates_non_executable_draft_manifest() -> None:
+    client = TestClient(app_main.app)
+    module_id = "unit_draft_template"
+    module_dir = app_main.RUNTIME_MODULE_ROOT / module_id
+    version_dir = app_main.RUNTIME_MODULE_VERSION_ROOT / module_id
+    shutil.rmtree(module_dir, ignore_errors=True)
+    shutil.rmtree(version_dir, ignore_errors=True)
+    try:
+        created = client.post(
+            "/api/modules/templates/agent",
+            json={"module_id": module_id, "label": "Unit Draft Template", "category": "custom"},
+        ).json()
+        assert created["ok"] is True
+        assert created["module_id"] == module_id
+        module = created["module"]["module"]
+        assert module["status"] == "draft"
+        assert module["enabled"] is False
+        assert module["handler"] == "runtime.step_complete"
+        assert module["execution"]["capability"] == "ui_only"
+        assert module["graph"]["attached"] is False
+
+        draft_detail = client.get(f"/api/modules/{module_id}").json()
+        lifecycle = draft_detail["lifecycle"]
+        assert lifecycle["activation_status"] == "draft_unattached"
+        assert lifecycle["ready_for_live_activation"] is False
+        assert lifecycle["management_loaded"] is False
+        assert lifecycle["next_required_action"] == "edit_module_contract"
+        requirement_by_id = {item["id"]: item for item in lifecycle["activation_requirements"]}
+        assert requirement_by_id["edit_module_contract"]["ok"] is False
+        assert requirement_by_id["attach_graph_node"]["ok"] is False
+        assert requirement_by_id["module_dry_run_executable"]["ok"] is False
+
+        listed = client.get("/api/runtime/agent-manifests").json()
+        draft_manifest = next(item for item in listed["agents"] if item["id"] == module_id)
+        assert draft_manifest["status"] == "draft"
+        assert draft_manifest["enabled"] is False
+        assert draft_manifest["execution_capability"] == "ui_only"
+        assert draft_manifest["graph_node_id"] == ""
+
+        dry_run = client.post(f"/api/modules/{module_id}/dry-run").json()
+        assert dry_run["ok"] is True
+        assert dry_run["summary"]["executable_count"] == 0
+        assert dry_run["summary"]["draft"] is True
+        assert all(item["executable"] is False for item in dry_run["sequence"])
+
+        loaded = client.post(f"/api/modules/{module_id}/load").json()
+        assert loaded["ok"] is True
+        assert loaded["runtime_effect"]["changes_runtime_execution"] is False
+        assert loaded["lifecycle"]["management_loaded"] is True
+        assert loaded["lifecycle"]["ready_for_live_activation"] is False
+        assert loaded["lifecycle"]["activation_status"] == "draft_unattached"
+
+        ui_before = client.get(f"/api/modules/{module_id}/ui").json()
+        assert ui_before["ok"] is True
+        assert ui_before["exists"] is True
+        updated_ui = {
+            "short": "UDT",
+            "renderer": {
+                "dashboard": "design_reference",
+                "report": "design_reference",
+                "fallback": "descriptor",
+            },
+            "chat": {"mode": "open_on_demand"},
+            "cards": [
+                {
+                    "id": "unit_descriptor",
+                    "title": "Unit Descriptor",
+                    "span": "9",
+                    "density": "compact",
+                    "priority": "high",
+                    "mobile_behavior": "stack",
+                    "selectors": {"status": "metadata.status"},
+                }
+            ],
+            "report_sections": [
+                {
+                    "id": "unit_report_section",
+                    "title": "Unit Report Section",
+                    "span": "12",
+                    "density": "dense",
+                    "priority": "critical",
+                    "mobile_behavior": "compact",
+                    "selectors": {"runtime": "metadata.status"},
+                    "chart": {
+                        "type": "mini_bar_chart",
+                        "items": [
+                            {"label": "ready", "value": "metadata.ready_count", "max": 5}
+                        ],
+                    },
+                    "actions": [
+                        {"label": "Open Module", "kind": "link", "url": "/module-management"},
+                        {
+                            "id": "runtime_state_probe",
+                            "label": "Runtime State",
+                            "kind": "api",
+                            "method": "GET",
+                            "url": "/api/runtime/state",
+                            "read_only": True,
+                        },
+                        {
+                            "id": "string_false_api",
+                            "label": "String False API",
+                            "kind": "api",
+                            "method": "GET",
+                            "url": "/api/runtime/state",
+                            "read_only": "false",
+                        },
+                        {
+                            "id": "run_windows_program",
+                            "label": "Run Windows Program",
+                            "kind": "api",
+                            "method": "POST",
+                            "url": "/api/equipment/windows/run-program",
+                            "workspace": "/equipment/windows",
+                            "read_only": False,
+                            "requires_confirmation": True,
+                        },
+                        {
+                            "id": "start_physical_device",
+                            "label": "Start Physical Device",
+                            "kind": "device",
+                            "method": "POST",
+                            "url": "/api/printer/start",
+                            "workspace": "/printer",
+                            "read_only": False,
+                            "requires_confirmation": True,
+                        },
+                        {"label": "Unsafe API", "kind": "link", "url": "/api/runtime/gpu-clear"},
+                    ],
+                },
+                {
+                    "id": "unit_scatter_section",
+                    "title": "Unit Scatter Section",
+                    "chart": {
+                        "type": "scatter_plot",
+                        "x_label": "cell size",
+                        "y_label": "objective",
+                        "points": [
+                            {
+                                "label": "candidate-a",
+                                "x": "metadata.candidate_a.cell_size_mm",
+                                "y": "metadata.candidate_a.objective_score",
+                                "value": "metadata.candidate_a.objective_score",
+                                "tone": "success",
+                            }
+                        ],
+                    },
+                },
+                {
+                    "id": "unit_line_section",
+                    "title": "Unit Line Section",
+                    "chart": {
+                        "type": "line_chart",
+                        "y_label": "objective",
+                        "points": [
+                            {"label": "loop 1", "value": "metadata.loop_1.objective_score", "tone": "info"},
+                            {"label": "loop 2", "value": "metadata.loop_2.objective_score", "tone": "success"},
+                        ],
+                    },
+                },
+                {
+                    "id": "unit_table_section",
+                    "title": "Unit Table Section",
+                    "chart": {
+                        "type": "table",
+                        "columns": [
+                            {"id": "metric", "label": "Metric", "selector": "metadata.table_row.metric"},
+                            {"id": "value", "label": "Value", "selector": "metadata.table_row.value"},
+                        ],
+                        "rows": [
+                            {"id": "selected", "label": "Selected"},
+                            {"id": "candidate", "metric": "metadata.candidate_a.cell_size_mm", "value": "metadata.candidate_a.objective_score"},
+                        ],
+                    },
+                },
+                {
+                    "id": "unit_heatmap_section",
+                    "title": "Unit Heatmap Section",
+                    "chart": {
+                        "type": "heatmap",
+                        "x_label": "metric",
+                        "y_label": "candidate",
+                        "cells": [
+                            {"row": "candidate-a", "column": "score", "value": "metadata.candidate_a.objective_score"},
+                            {"row": "candidate-a", "column": "risk", "value": "metadata.candidate_a.risk_score", "tone": "warning"},
+                        ],
+                    },
+                },
+                {
+                    "id": "unit_compound_section",
+                    "title": "Unit Compound Section",
+                    "chart": {
+                        "type": "compound_chart",
+                        "layout": "two_column",
+                        "panels": [
+                            {
+                                "id": "trend_panel",
+                                "title": "Trend",
+                                "chart": {
+                                    "type": "line_chart",
+                                    "points": [
+                                        {"label": "loop 1", "value": "metadata.loop_1.objective_score"},
+                                        {"label": "loop 2", "value": "metadata.loop_2.objective_score"},
+                                    ],
+                                },
+                            },
+                            {
+                                "id": "summary_panel",
+                                "title": "Summary",
+                                "chart": {
+                                    "type": "table",
+                                    "columns": [
+                                        {"id": "metric", "label": "Metric", "selector": "metadata.table_row.metric"},
+                                        {"id": "value", "label": "Value", "selector": "metadata.table_row.value"},
+                                    ],
+                                    "rows": [
+                                        {"id": "selected", "label": "Selected"},
+                                    ],
+                                },
+                            },
+                        ],
+                    },
+                }
+            ],
+        }
+        ui_saved = client.put(
+            f"/api/modules/{module_id}/ui",
+            json={"ui": updated_ui, "reason": "unit-ui-save", "author": "pytest"},
+        ).json()
+        assert ui_saved["ok"] is True
+        assert ui_saved["manifest"]["renderer"] == {
+            "dashboard": "design_reference",
+            "report": "design_reference",
+            "fallback": "descriptor",
+            "supported": True,
+            "execution_scope": "presentation_only",
+            "blocked_reason": "",
+        }
+        assert ui_saved["manifest"]["cards"][0]["id"] == "unit_descriptor"
+        assert ui_saved["manifest"]["cards"][0]["span"] == 9
+        assert ui_saved["manifest"]["cards"][0]["density"] == "compact"
+        assert ui_saved["manifest"]["cards"][0]["priority"] == "high"
+        assert ui_saved["manifest"]["cards"][0]["mobile_behavior"] == "stack"
+        assert ui_saved["manifest"]["cards"][0]["layout_intent"] == {
+            "span": 9,
+            "density": "compact",
+            "priority": "high",
+            "mobile_behavior": "stack",
+        }
+        assert ui_saved["manifest"]["report_sections"][0]["id"] == "unit_report_section"
+        saved_section = ui_saved["manifest"]["report_sections"][0]
+        assert saved_section["span"] == 12
+        assert saved_section["density"] == "dense"
+        assert saved_section["priority"] == "critical"
+        assert saved_section["mobile_behavior"] == "compact"
+        assert saved_section["layout_intent"] == {
+            "span": 12,
+            "density": "dense",
+            "priority": "critical",
+            "mobile_behavior": "compact",
+        }
+        assert saved_section["chart"]["type"] == "mini_bar_chart"
+        assert saved_section["chart"]["supported"] is True
+        assert saved_section["chart"]["render_mode"] == "mini_bar_chart"
+        assert saved_section["chart"]["items"][0]["value"] == "metadata.ready_count"
+        assert saved_section["actions"][0]["url"] == "/module-management"
+        assert saved_section["actions"][0]["safe_navigation"] is True
+        assert saved_section["actions"][0]["execution_scope"] == "navigation_only"
+        assert saved_section["actions"][1]["url"] == "/api/runtime/state"
+        assert saved_section["actions"][1]["safe_navigation"] is False
+        assert saved_section["actions"][1]["execution_scope"] == "read_only_api"
+        assert saved_section["actions"][1]["method"] == "GET"
+        assert saved_section["actions"][1]["read_only"] is True
+        assert saved_section["actions"][1]["live_card_runnable"] is True
+        assert saved_section["actions"][1]["blocked_reason"] == ""
+        assert saved_section["actions"][2]["url"] == "/api/runtime/state"
+        assert saved_section["actions"][2]["safe_navigation"] is False
+        assert saved_section["actions"][2]["execution_scope"] == "blocked"
+        assert saved_section["actions"][2]["blocked_reason"] == "api_action_must_be_read_only"
+        assert saved_section["actions"][3]["url"] == "/api/equipment/windows/run-program"
+        assert saved_section["actions"][3]["safe_navigation"] is False
+        assert saved_section["actions"][3]["execution_scope"] == "workspace_handoff"
+        assert saved_section["actions"][3]["live_card_runnable"] is False
+        assert saved_section["actions"][3]["handoff_required"] is True
+        assert saved_section["actions"][3]["handoff_workspace"] == "/equipment/windows"
+        assert saved_section["actions"][3]["blocked_reason"] == "workspace_handoff_required"
+        assert saved_section["actions"][4]["url"] == "/api/printer/start"
+        assert saved_section["actions"][4]["safe_navigation"] is False
+        assert saved_section["actions"][4]["execution_scope"] == "blocked"
+        assert saved_section["actions"][4]["handoff_required"] is False
+        assert saved_section["actions"][4]["blocked_reason"] == "physical_device_action_requires_bridge_workspace"
+        assert saved_section["actions"][5]["url"] == "/api/runtime/gpu-clear"
+        assert saved_section["actions"][5]["safe_navigation"] is False
+        assert saved_section["actions"][5]["execution_scope"] == "blocked"
+        assert saved_section["actions"][5]["blocked_reason"] == "api_endpoint_not_allowed_in_ui_descriptor"
+        scatter_section = ui_saved["manifest"]["report_sections"][1]
+        assert scatter_section["chart"]["type"] == "scatter_plot"
+        assert scatter_section["chart"]["supported"] is True
+        assert scatter_section["chart"]["render_mode"] == "scatter_plot"
+        assert scatter_section["chart"]["points"][0]["x"] == "metadata.candidate_a.cell_size_mm"
+        assert scatter_section["chart"]["points"][0]["y"] == "metadata.candidate_a.objective_score"
+        assert scatter_section["chart"]["points"][0]["label"] == "candidate-a"
+        line_section = ui_saved["manifest"]["report_sections"][2]
+        assert line_section["chart"]["type"] == "line_chart"
+        assert line_section["chart"]["supported"] is True
+        assert line_section["chart"]["render_mode"] == "line_chart"
+        assert line_section["chart"]["points"][0]["value"] == "metadata.loop_1.objective_score"
+        assert line_section["chart"]["points"][1]["label"] == "loop 2"
+        table_section = ui_saved["manifest"]["report_sections"][3]
+        assert table_section["chart"]["type"] == "table"
+        assert table_section["chart"]["supported"] is True
+        assert table_section["chart"]["render_mode"] == "table"
+        assert table_section["chart"]["columns"][0]["id"] == "metric"
+        assert table_section["chart"]["columns"][0]["label"] == "Metric"
+        assert table_section["chart"]["columns"][0]["selector"] == "metadata.table_row.metric"
+        assert table_section["chart"]["rows"][0]["id"] == "selected"
+        assert table_section["chart"]["rows"][1]["metric"] == "metadata.candidate_a.cell_size_mm"
+        heatmap_section = ui_saved["manifest"]["report_sections"][4]
+        assert heatmap_section["chart"]["type"] == "heatmap"
+        assert heatmap_section["chart"]["supported"] is True
+        assert heatmap_section["chart"]["render_mode"] == "heatmap"
+        assert heatmap_section["chart"]["cells"][0]["row"] == "candidate-a"
+        assert heatmap_section["chart"]["cells"][0]["column"] == "score"
+        assert heatmap_section["chart"]["cells"][0]["value"] == "metadata.candidate_a.objective_score"
+        assert heatmap_section["chart"]["cells"][1]["tone"] == "warning"
+        compound_section = ui_saved["manifest"]["report_sections"][5]
+        assert compound_section["chart"]["type"] == "compound_chart"
+        assert compound_section["chart"]["supported"] is True
+        assert compound_section["chart"]["render_mode"] == "compound_chart"
+        assert compound_section["chart"]["layout"] == "two_column"
+        assert compound_section["chart"]["panels"][0]["id"] == "trend_panel"
+        assert compound_section["chart"]["panels"][0]["chart"]["render_mode"] == "line_chart"
+        assert compound_section["chart"]["panels"][1]["id"] == "summary_panel"
+        assert compound_section["chart"]["panels"][1]["chart"]["render_mode"] == "table"
+
+        ui_after = client.get(f"/api/modules/{module_id}/ui").json()
+        assert ui_after["ui"]["renderer"]["dashboard"] == "design_reference"
+        assert ui_after["ui"]["renderer"]["execution_scope"] == "presentation_only"
+        assert ui_after["ui"]["cards"][0]["layout_intent"]["span"] == 9
+        assert ui_after["ui"]["report_sections"][0]["layout_intent"]["span"] == 12
+        assert ui_after["ui"]["report_sections"][0]["actions"][1]["execution_scope"] == "read_only_api"
+        assert ui_after["ui"]["report_sections"][0]["actions"][2]["execution_scope"] == "blocked"
+        assert ui_after["ui"]["report_sections"][0]["actions"][3]["execution_scope"] == "workspace_handoff"
+        assert ui_after["ui"]["report_sections"][0]["actions"][4]["blocked_reason"] == "physical_device_action_requires_bridge_workspace"
+        assert ui_after["ui"]["report_sections"][0]["actions"][5]["execution_scope"] == "blocked"
+        assert ui_after["ui"]["report_sections"][1]["chart"]["render_mode"] == "scatter_plot"
+        assert ui_after["ui"]["report_sections"][2]["chart"]["render_mode"] == "line_chart"
+        assert ui_after["ui"]["report_sections"][3]["chart"]["render_mode"] == "table"
+        assert ui_after["ui"]["report_sections"][4]["chart"]["render_mode"] == "heatmap"
+        assert ui_after["ui"]["report_sections"][5]["chart"]["render_mode"] == "compound_chart"
+        assert ui_after["ui"]["report_sections"][5]["chart"]["panels"][0]["chart"]["render_mode"] == "line_chart"
+
+        listed_after = client.get("/api/runtime/agent-manifests").json()
+        listed_manifest = next(item for item in listed_after["agents"] if item["id"] == module_id)
+        assert listed_manifest["renderer"]["dashboard"] == "design_reference"
+        assert listed_manifest["renderer"]["execution_scope"] == "presentation_only"
+        assert listed_manifest["status"] == "draft"
+        assert listed_manifest["enabled"] is False
+        assert listed_manifest["chat"]["mode"] == "open_on_demand"
+        assert listed_manifest["cards"][0]["id"] == "unit_descriptor"
+        assert listed_manifest["cards"][0]["layout_intent"]["density"] == "compact"
+        assert listed_manifest["report_sections"][0]["id"] == "unit_report_section"
+        assert listed_manifest["report_sections"][0]["chart"]["render_mode"] == "mini_bar_chart"
+        assert listed_manifest["report_sections"][0]["actions"][1]["execution_scope"] == "read_only_api"
+        assert listed_manifest["report_sections"][0]["actions"][3]["execution_scope"] == "workspace_handoff"
+        assert listed_manifest["report_sections"][0]["actions"][4]["blocked_reason"] == "physical_device_action_requires_bridge_workspace"
+        assert listed_manifest["report_sections"][5]["chart"]["render_mode"] == "compound_chart"
+    finally:
+        shutil.rmtree(module_dir, ignore_errors=True)
+        shutil.rmtree(version_dir, ignore_errors=True)
+
+
+def test_module_management_ui_exposes_draft_template_creation() -> None:
+    client = TestClient(app_main.app)
+    page = client.get("/module-management")
+    assert page.status_code == 200
+    assert 'id="mm-create-draft-btn"' in page.text
+    script = client.get("/static/module_management.js").text
+    assert "/api/modules/templates/agent" in script
+    assert "createDraftModuleTemplate" in script
+    assert "graph unattached" in script
+    assert "renderModuleLifecycle" in script
+    assert "changes_runtime_execution" in script
+    assert "Management-only load" in script
+    assert "activation_status" in script
+    assert "ready_for_live_activation" in script
+    assert "next_required_action" in script
+    assert "activation_requirements" in script
 
 
 def test_graph_runtime_api_exports_and_imports_yaml_drafts() -> None:
@@ -1460,9 +2409,26 @@ def test_runtime_ide_page_and_main_entry_render() -> None:
     assert "requireAppliedModuleDraft" in module_management_js
     assert "runtimeIdeUsageLink" in module_management_js
     assert "Open Node" in module_management_js
+    assert "runtimeIdeModuleAttachLink" in module_management_js
+    assert 'params.set("action", "attach")' in module_management_js
     assert "data-mm-version-load" in module_management_js
     assert "mm-config-handler-select" in module_management_js
+    assert "mm-config-supervisor-required-outputs" in module_management_js
+    assert "mm-config-supervisor-opinion-template" in module_management_js
+    assert "mm-config-supervisor-recommendation-template" in module_management_js
+    assert "mm-config-supervisor-response-statuses" in module_management_js
+    assert "mm-config-supervisor-concern-rules" in module_management_js
+    assert "mm-config-supervisor-options" in module_management_js
+    assert "moduleSupervisorPolicy" in module_management_js
+    assert "supervisor_policy_gate" in module_management_js
+    assert "Supervisor required outputs" in module_management_js
+    assert "missing_outputs" in module_management_js
     assert "data-mm-module-step-field" in module_management_js
+    assert "liveAgentChatMode" in planning_js
+    assert "liveAgentAllowsOnDemandChat" in planning_js
+    assert "agent.chat" in planning_js
+    assert "open_on_demand" in planning_js
+    assert "persistent" in planning_js
 
     assert "stageDisplayLabel" in js
     assert "displayCondition" in js
@@ -1472,6 +2438,17 @@ def test_runtime_ide_page_and_main_entry_render() -> None:
     assert "moduleDryRunResultMarkup" in js
     assert "modulePayloadForGraphDraft" in js
     assert "persistModuleTabPayload" in js
+    assert "deepLinkModuleId" in js
+    assert "deepLinkAction" in js
+    assert "focusDeepLinkedModule" in js
+    assert "data-module-deep-link" in js
+    assert "Drag the highlighted module onto the main graph canvas" in js
+    assert "bridgeActionDescriptorEditor" in js
+    assert "saveBridgeCustomActionDescriptor" in js
+    assert "/api/bridges/${bridgeId}/actions" in js
+    assert "Custom Bridge Action" in js
+    assert "data-bridge-action-save" in js
+    assert "descriptor_only" in js
     assert "moduleSavePreflightStatus" in js
     assert "moduleSavePreflightBlockedMarkup" in js
     assert "markModulePreflightDirty" in js

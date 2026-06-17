@@ -1,0 +1,35 @@
+ui:
+  short: DSN
+  icon: /static/live_gui_icons/design_agent.svg
+  report_title: Design Agent
+  chat:
+    mode: open_on_demand
+  cards:
+  - id: design_decision_descriptor
+    type: metric_group
+    title: Design Decision Descriptor
+    eyebrow: module descriptor
+    span: 4
+    tone: design
+    selectors:
+      objective: spec.objective_type
+      selected_candidate: metadata.latest_design_candidate.candidate_id
+      lattice_family: spec.lattice_type
+      cell_size_mm: spec.cell_size_mm
+  - id: manufacturability_descriptor
+    type: gate_summary
+    title: Manufacturability Descriptor
+    eyebrow: module descriptor
+    span: 4
+    tone: success
+    selectors:
+      required_fields: metadata.latest_design_report.handoff_to_specimen.required_fields_present
+      material: spec.material
+      size_mm: spec.size_mm
+      printer_profile: spec.printer_path
+  report_sections:
+  - id: design_overview
+    title: Design Overview
+    selectors:
+      selected_candidate: metadata.latest_design_candidate
+      final_spec: spec

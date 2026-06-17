@@ -24,6 +24,7 @@ Modification guide:
 from __future__ import annotations
 
 import asyncio
+import copy
 import csv
 import ctypes
 import hashlib
@@ -50,6 +51,7 @@ from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, Response, StreamingResponse
+from fastapi.routing import APIRoute
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
@@ -483,6 +485,33 @@ class RuntimeModuleCreateRequest(BaseModel):
     notes: str = ""
     transform_with_llm: bool = True
     transform_model: str = ""
+
+
+class RuntimeModuleTemplateRequest(BaseModel):
+    """Request body for creating an inactive draft module template."""
+
+    module_id: str = Field(..., min_length=1)
+    label: str = Field(..., min_length=1)
+    category: str = "custom"
+    notes: str = ""
+    author: str = "runtime_ide"
+
+
+class RuntimeModuleUiSaveRequest(BaseModel):
+    """Request body for saving a module-local ui.yaml descriptor."""
+
+    ui: dict[str, object] = Field(default_factory=dict)
+    reason: str = "runtime_module_ui_save"
+    author: str = "operator"
+
+
+class RuntimeBridgeActionSaveRequest(BaseModel):
+    """Request body for saving graph-backed bridge action descriptor metadata."""
+
+    action: dict[str, object] = Field(default_factory=dict)
+    reason: str = "runtime_bridge_action_save"
+    author: str = "operator"
+    graph_id: str = PRIMARY_RUNTIME_GRAPH_ID
 
 
 class RuntimeGraphDryRunRequest(BaseModel):
@@ -2330,10 +2359,28 @@ async def get_runtime_state_compat() -> dict[str, object]:
     return {"ok": True, "compatibility": "atr_live_gui_package", **snapshot}
 
 
+@app.get("/api/runtime/agent-manifests")
+async def get_runtime_agent_manifests() -> dict[str, object]:
+    """Return graph/module/UI-derived agent manifests for Live GUI consumers."""
+    return _runtime_agent_manifests_payload(PRIMARY_RUNTIME_GRAPH_ID)
+
+
 @app.get("/api/devices/state")
 async def get_devices_state_compat() -> dict[str, object]:
     """Compatibility endpoint exposing device/resource state for Live GUI consumers."""
     return _device_state_payload()
+
+
+@app.get("/api/bridges")
+async def get_runtime_bridge_registry() -> dict[str, object]:
+    """Return graph-backed device bridge manifests."""
+    return _runtime_bridge_registry_payload(PRIMARY_RUNTIME_GRAPH_ID)
+
+
+@app.post("/api/bridges/{bridge_id}/actions")
+async def save_runtime_bridge_action_descriptor(bridge_id: str, req: RuntimeBridgeActionSaveRequest) -> dict[str, object]:
+    """Save a graph-backed bridge action descriptor without executing hardware."""
+    return _save_runtime_bridge_action_descriptor(bridge_id, req)
 
 
 @app.get("/api/agents")
@@ -2665,20 +2712,1260 @@ def _runtime_ide_contract_payload(snapshot: dict[str, Any] | None = None) -> dic
     ]
     supervisor_evidence = {key: run_metadata.get(key) for key in supervisor_evidence_keys if key in run_metadata}
     bridge_health = state.get("device_health", {}) if isinstance(state.get("device_health"), dict) else {}
+    normalized_bridges = _normalized_bridge_manifests(graph_metadata, bridge_health)
 
     return {
         "ok": True,
         "graph_id": graph_payload.get("id", PRIMARY_RUNTIME_GRAPH_ID),
         "graph_version": graph_payload.get("version", ""),
         "runtime_planes": graph_metadata.get("runtime_planes", []),
-        "device_bridges": graph_metadata.get("device_bridges", []),
+        "device_bridges": normalized_bridges,
         "runtime_contract_map": graph_metadata.get("runtime_contract_map", {}),
         "module_contracts": module_contracts,
         "supervisor_evidence": supervisor_evidence,
         "device_health": bridge_health,
         "active_stage": state.get("stage", ""),
         "run_id": snapshot.get("run_id") or state.get("run_id") or _current_run_id(),
-        "source_endpoints": ["/api/graphs/atr_closed_loop", "/api/modules", "/api/state", "/api/devices/state", "/api/guardian/status"],
+        "source_endpoints": ["/api/graphs/atr_closed_loop", "/api/modules", "/api/runtime/agent-manifests", "/api/bridges", "/api/state", "/api/devices/state", "/api/guardian/status"],
+    }
+
+
+def _agent_manifest_short(agent_id: str, label: str = "") -> str:
+    """Return the stable Live GUI short code for one manifest agent."""
+    mapping = {
+        "objective": "OBJ",
+        "orchestrator": "ORC",
+        "design": "DSN",
+        "specimen": "SPC",
+        "vision": "VIS",
+        "manipulation": "MAN",
+        "equipment": "EQP",
+        "analysis": "ANL",
+        "knowledge": "KNW",
+        "bo": "BO",
+        "guardian": "GRD",
+    }
+    clean = str(agent_id or "").strip().lower()
+    if clean in mapping:
+        return mapping[clean]
+    text = re.sub(r"[^A-Za-z0-9]+", "", str(label or agent_id or "AGT")).upper()
+    return (text[:3] or "AGT")
+
+
+def _agent_manifest_icon_path(agent_id: str) -> str:
+    """Return the default Live GUI icon path for one manifest agent."""
+    mapping = {
+        "objective": "objective.svg",
+        "orchestrator": "orchestrator.svg",
+        "design": "design_agent.svg",
+        "specimen": "specimen_agent.svg",
+        "vision": "vision_agent.svg",
+        "manipulation": "manipulation_agent.svg",
+        "equipment": "equipment_agent.svg",
+        "analysis": "analysis_agent.svg",
+        "knowledge": "knowledge_agent.svg",
+        "bo": "bo_agent.svg",
+        "guardian": "guardian_agent.svg",
+    }
+    filename = mapping.get(str(agent_id or "").strip().lower(), "artifact.svg")
+    return f"/static/live_gui_icons/{filename}"
+
+
+def _module_ui_payload(module_id: str) -> tuple[dict[str, Any], str]:
+    """Read optional module-local ui.yaml descriptor without requiring it to exist."""
+    if not module_id or module_id == "objective":
+        return {}, ""
+    try:
+        safe_module = ModuleConfigStore.safe_module_id(module_id)
+    except ValueError:
+        return {}, ""
+    ui_path = RUNTIME_MODULE_ROOT / safe_module / "ui.yaml"
+    if not ui_path.exists():
+        return {}, ""
+    try:
+        raw = yaml.safe_load(ui_path.read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError):
+        return {}, str(ui_path)
+    ui = raw.get("ui", raw) if isinstance(raw, dict) else {}
+    return _normalize_module_ui_descriptor(ui if isinstance(ui, dict) else {}), str(ui_path)
+
+
+_UI_DESCRIPTOR_CHART_ALIASES = {
+    "mini_bar_chart": "mini_bar_chart",
+    "mini-bars": "mini_bar_chart",
+    "mini_bars": "mini_bar_chart",
+    "bar_chart": "mini_bar_chart",
+    "bar": "mini_bar_chart",
+    "scatter_plot": "scatter_plot",
+    "scatter": "scatter_plot",
+    "xy_scatter": "scatter_plot",
+    "line_chart": "line_chart",
+    "line": "line_chart",
+    "sparkline": "line_chart",
+    "trend_line": "line_chart",
+    "table": "table",
+    "data_table": "table",
+    "descriptor_table": "table",
+    "heatmap": "heatmap",
+    "matrix": "heatmap",
+    "cell_heatmap": "heatmap",
+    "compound_chart": "compound_chart",
+    "compound": "compound_chart",
+    "chart_grid": "compound_chart",
+    "dashboard_grid": "compound_chart",
+    "panel_grid": "compound_chart",
+}
+_UI_DESCRIPTOR_ACTION_KINDS = {"link", "navigation", "workspace", "api"}
+_UI_DESCRIPTOR_PHYSICAL_ACTION_KINDS = {"device", "physical", "hardware", "actuator"}
+_UI_DESCRIPTOR_SAFE_ROUTES = (
+    "/",
+    "/live",
+    "/planning",
+    "/ide",
+    "/module-management",
+    "/printer",
+    "/lerobot",
+    "/bo",
+    "/cae",
+    "/equipment/windows",
+    "/evolution-lab",
+)
+
+
+def _safe_ui_descriptor_navigation_url(value: object) -> tuple[str, str]:
+    """Return a safe internal GUI route or a stable block reason."""
+    url = str(value or "").strip()
+    if not url:
+        return "", "empty_url_not_allowed"
+    if not url.startswith("/") or url.startswith("//") or re.search(r"[\x00-\x1f]", url):
+        return url, "external_url_not_allowed"
+    if re.match(r"^/api/", url, flags=re.IGNORECASE):
+        return url, "api_endpoint_not_allowed_in_ui_descriptor"
+    for prefix in _UI_DESCRIPTOR_SAFE_ROUTES:
+        if url == prefix or url.startswith(f"{prefix}?") or url.startswith(f"{prefix}#"):
+            return url, ""
+    return url, "route_not_allowlisted"
+
+
+def _safe_ui_descriptor_api_endpoint_url(value: object, *, method: str = "GET") -> tuple[str, str]:
+    """Return a safe internal API route for the declared method or a stable block reason."""
+    url = str(value or "").strip()
+    if not url:
+        return "", "empty_url_not_allowed"
+    if not url.startswith("/api/") or url.startswith("//") or re.search(r"[\x00-\x1f]", url):
+        return url, "api_endpoint_not_allowed_in_ui_descriptor"
+    route_path = urlparse(url).path
+    desired_method = str(method or "GET").strip().upper()
+    for route in app.routes:
+        if not isinstance(route, APIRoute):
+            continue
+        if desired_method not in route.methods:
+            continue
+        if route.path_regex.match(route_path):
+            return url, ""
+    return url, "api_endpoint_not_found_or_method_not_allowed"
+
+
+def _safe_ui_descriptor_api_url(value: object) -> tuple[str, str]:
+    """Return a safe read-only GET API route or a stable block reason."""
+    return _safe_ui_descriptor_api_endpoint_url(value, method="GET")
+
+
+def _infer_ui_descriptor_handoff_workspace(api_url: str) -> str:
+    """Infer a safe workspace route for API actions that must not run from cards."""
+    route_path = urlparse(str(api_url or "").strip()).path
+    mapping = (
+        ("/api/equipment/windows", "/equipment/windows"),
+        ("/api/printer", "/printer"),
+        ("/api/lerobot", "/lerobot"),
+        ("/api/bo", "/bo"),
+        ("/api/cae", "/cae"),
+        ("/api/evolution", "/evolution-lab"),
+        ("/api/modules", "/module-management"),
+        ("/api/graphs", "/ide"),
+        ("/api/bridges", "/ide"),
+    )
+    for prefix, workspace in mapping:
+        if route_path.startswith(prefix):
+            return workspace
+    return ""
+
+
+def _coerce_ui_descriptor_bool(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value == 1
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return False
+
+
+_UI_DESCRIPTOR_ALLOWED_SPANS = {3, 4, 5, 6, 7, 8, 9, 12}
+_UI_DESCRIPTOR_DENSITIES = {"normal", "compact", "dense", "comfortable"}
+_UI_DESCRIPTOR_PRIORITIES = {"normal", "low", "high", "critical"}
+_UI_DESCRIPTOR_MOBILE_BEHAVIORS = {"stack", "compact", "hide", "scroll"}
+_UI_DESCRIPTOR_RENDERER_IDS = {
+    "descriptor",
+    "generic",
+    "objective_reference",
+    "orchestrator_reference",
+    "design_reference",
+    "specimen_reference",
+    "vision_reference",
+    "manipulation_reference",
+    "equipment_reference",
+    "analysis_reference",
+    "knowledge_reference",
+    "bo_reference",
+    "guardian_reference",
+}
+
+
+def _coerce_ui_descriptor_choice(value: object, allowed: set[str], default: str) -> str:
+    clean = str(value or "").strip().lower().replace("-", "_")
+    return clean if clean in allowed else default
+
+
+def _coerce_ui_descriptor_span(value: object, default: int) -> int:
+    try:
+        span = int(float(str(value).strip()))
+    except (TypeError, ValueError):
+        span = default
+    return span if span in _UI_DESCRIPTOR_ALLOWED_SPANS else default
+
+
+def _coerce_ui_descriptor_renderer_id(value: object, default: str = "descriptor") -> tuple[str, str]:
+    raw = str(value or "").strip().lower().replace("-", "_")
+    clean = re.sub(r"[^a-z0-9_:.]+", "_", raw)[:80].strip("_")
+    if not clean:
+        return default, ""
+    if clean in _UI_DESCRIPTOR_RENDERER_IDS:
+        return clean, ""
+    return default, f"unsupported_renderer_id:{clean}"
+
+
+def _normalize_ui_descriptor_renderer(ui: dict[str, Any]) -> dict[str, Any]:
+    """Normalize optional custom renderer ids without granting execution rights."""
+    raw = ui.get("renderer")
+    dashboard_raw: object = None
+    report_raw: object = None
+    fallback_raw: object = None
+    declared = False
+    if isinstance(raw, dict):
+        dashboard_raw = raw.get("dashboard") or raw.get("dashboard_renderer") or raw.get("dashboardRenderer")
+        report_raw = raw.get("report") or raw.get("report_renderer") or raw.get("reportRenderer")
+        fallback_raw = raw.get("fallback") or raw.get("fallback_renderer") or raw.get("fallbackRenderer") or "descriptor"
+        declared = any(value is not None for value in (dashboard_raw, report_raw, fallback_raw))
+    else:
+        dashboard_raw = raw or ui.get("custom_renderer") or ui.get("customRenderer") or ui.get("dashboard_renderer") or ui.get("dashboardRenderer")
+        report_raw = ui.get("report_renderer") or ui.get("reportRenderer") or dashboard_raw
+        fallback_raw = "descriptor"
+        declared = dashboard_raw is not None or report_raw is not None
+    if not declared:
+        return {}
+
+    dashboard, dashboard_reason = _coerce_ui_descriptor_renderer_id(dashboard_raw, "descriptor")
+    report, report_reason = _coerce_ui_descriptor_renderer_id(report_raw, dashboard)
+    fallback, fallback_reason = _coerce_ui_descriptor_renderer_id(fallback_raw, "descriptor")
+    reasons = [reason for reason in (dashboard_reason, report_reason, fallback_reason) if reason]
+    return {
+        "dashboard": dashboard,
+        "report": report,
+        "fallback": fallback,
+        "supported": not reasons,
+        "execution_scope": "presentation_only",
+        "blocked_reason": ";".join(reasons),
+    }
+
+
+def _normalize_ui_descriptor_layout_intent(item: dict[str, Any], *, default_span: int) -> dict[str, Any]:
+    """Normalize presentation-only layout intent for descriptor cards/sections."""
+    has_layout = any(
+        key in item
+        for key in ("span", "density", "priority", "mobile_behavior", "mobileBehavior", "layout_intent", "layoutIntent")
+    )
+    raw_intent = item.get("layout_intent") if isinstance(item.get("layout_intent"), dict) else {}
+    if not raw_intent and isinstance(item.get("layoutIntent"), dict):
+        raw_intent = item.get("layoutIntent") or {}
+    if raw_intent:
+        has_layout = True
+    if not has_layout:
+        return item
+
+    span = _coerce_ui_descriptor_span(raw_intent.get("span", item.get("span")), default_span)
+    density = _coerce_ui_descriptor_choice(raw_intent.get("density", item.get("density")), _UI_DESCRIPTOR_DENSITIES, "normal")
+    priority = _coerce_ui_descriptor_choice(raw_intent.get("priority", item.get("priority")), _UI_DESCRIPTOR_PRIORITIES, "normal")
+    mobile_behavior = _coerce_ui_descriptor_choice(
+        raw_intent.get("mobile_behavior", raw_intent.get("mobileBehavior", item.get("mobile_behavior", item.get("mobileBehavior")))),
+        _UI_DESCRIPTOR_MOBILE_BEHAVIORS,
+        "stack",
+    )
+    item["span"] = span
+    item["density"] = density
+    item["priority"] = priority
+    item["mobile_behavior"] = mobile_behavior
+    item["layout_intent"] = {
+        "span": span,
+        "density": density,
+        "priority": priority,
+        "mobile_behavior": mobile_behavior,
+    }
+    item.pop("layoutIntent", None)
+    item.pop("mobileBehavior", None)
+    return item
+
+
+def _normalize_ui_descriptor_chart(chart: object, *, _depth: int = 0) -> dict[str, Any]:
+    """Normalize a presentation-only chart descriptor without adding execution rights."""
+    if not isinstance(chart, dict):
+        return {}
+    normalized = copy.deepcopy(chart)
+    raw_type = str(normalized.get("type") or normalized.get("chart") or "").strip().lower()
+    render_mode = _UI_DESCRIPTOR_CHART_ALIASES.get(raw_type)
+    if not render_mode:
+        normalized["type"] = raw_type or "unknown"
+        normalized["supported"] = False
+        normalized["render_mode"] = "unsupported"
+        normalized["blocked_reason"] = "unsupported_chart_type"
+        return normalized
+    normalized["type"] = render_mode
+    normalized["supported"] = True
+    normalized["render_mode"] = render_mode
+    if render_mode == "compound_chart":
+        panels = normalized.get("panels")
+        if not isinstance(panels, list):
+            panels = normalized.get("items")
+        clean_panels: list[dict[str, Any]] = []
+        if isinstance(panels, list):
+            for index, panel_item in enumerate(panels):
+                if not isinstance(panel_item, dict):
+                    continue
+                panel = copy.deepcopy(panel_item)
+                panel_id = str(panel.get("id") or panel.get("key") or f"panel_{index + 1}").strip()
+                panel["id"] = re.sub(r"[^a-zA-Z0-9_.:-]+", "_", panel_id)[:80] or f"panel_{index + 1}"
+                panel.setdefault("title", str(panel.get("label") or panel["id"]).replace("_", " ").title())
+                child_chart = panel.get("chart") if isinstance(panel.get("chart"), dict) else {}
+                panel["chart"] = (
+                    _normalize_ui_descriptor_chart(child_chart, _depth=_depth + 1)
+                    if _depth < 2
+                    else {
+                        "type": "unknown",
+                        "supported": False,
+                        "render_mode": "unsupported",
+                        "blocked_reason": "compound_chart_nesting_limit",
+                    }
+                )
+                clean_panels.append(panel)
+        normalized["panels"] = clean_panels
+        layout = str(normalized.get("layout") or "").strip().lower()
+        normalized["layout"] = layout if layout in {"one_column", "two_column", "three_column", "compact"} else "two_column"
+        normalized.setdefault("limit", 6)
+        return normalized
+    if render_mode == "scatter_plot":
+        points = normalized.get("points")
+        clean_points: list[dict[str, Any]] = []
+        if isinstance(points, list):
+            for index, point in enumerate(points):
+                if not isinstance(point, dict):
+                    continue
+                row = copy.deepcopy(point)
+                row.setdefault("label", str(row.get("id") or f"point {index + 1}"))
+                if "x" not in row:
+                    row["x"] = row.get("x_selector", row.get("selector_x"))
+                if "y" not in row:
+                    row["y"] = row.get("y_selector", row.get("selector_y"))
+                if "value" not in row:
+                    row["value"] = row.get("value_selector", row.get("y"))
+                row.setdefault("tone", normalized.get("tone", "info"))
+                clean_points.append(row)
+        normalized["points"] = clean_points
+        normalized.setdefault("x_label", "x")
+        normalized.setdefault("y_label", "y")
+        return normalized
+    if render_mode == "line_chart":
+        points = normalized.get("points")
+        if not isinstance(points, list):
+            points = normalized.get("items")
+        clean_points: list[dict[str, Any]] = []
+        if isinstance(points, list):
+            for index, point in enumerate(points):
+                if not isinstance(point, dict):
+                    continue
+                row = copy.deepcopy(point)
+                row.setdefault("label", str(row.get("id") or f"point {index + 1}"))
+                if "value" not in row:
+                    row["value"] = row.get("value_selector", row.get("selector"))
+                row.setdefault("tone", normalized.get("tone", "info"))
+                clean_points.append(row)
+        normalized["points"] = clean_points
+        normalized.setdefault("x_label", "step")
+        normalized.setdefault("y_label", "value")
+        return normalized
+    if render_mode == "table":
+        columns = normalized.get("columns")
+        clean_columns: list[dict[str, Any]] = []
+        if isinstance(columns, list):
+            for index, column in enumerate(columns):
+                if not isinstance(column, dict):
+                    continue
+                col = copy.deepcopy(column)
+                col_id = str(col.get("id") or col.get("key") or f"column_{index + 1}").strip()
+                col["id"] = re.sub(r"[^a-zA-Z0-9_.:-]+", "_", col_id)[:80] or f"column_{index + 1}"
+                col.setdefault("label", str(col.get("title") or col["id"]).replace("_", " ").title())
+                if "selector" not in col and "value_selector" in col:
+                    col["selector"] = col.get("value_selector")
+                clean_columns.append(col)
+        rows = normalized.get("rows")
+        if not isinstance(rows, list):
+            rows = normalized.get("items")
+        clean_rows: list[dict[str, Any]] = []
+        if isinstance(rows, list):
+            for index, row_item in enumerate(rows):
+                if not isinstance(row_item, dict):
+                    continue
+                row = copy.deepcopy(row_item)
+                row.setdefault("id", str(row.get("label") or f"row_{index + 1}"))
+                row.setdefault("label", str(row.get("title") or row.get("id") or f"row {index + 1}"))
+                clean_rows.append(row)
+        normalized["columns"] = clean_columns
+        normalized["rows"] = clean_rows
+        normalized.setdefault("limit", 12)
+        return normalized
+    if render_mode == "heatmap":
+        cells = normalized.get("cells")
+        clean_cells: list[dict[str, Any]] = []
+        if isinstance(cells, list):
+            for index, cell_item in enumerate(cells):
+                if not isinstance(cell_item, dict):
+                    continue
+                cell = copy.deepcopy(cell_item)
+                cell.setdefault("row", str(cell.get("y") or cell.get("row_id") or f"row_{index + 1}"))
+                cell.setdefault("column", str(cell.get("x") or cell.get("column_id") or f"column_{index + 1}"))
+                if "value" not in cell:
+                    cell["value"] = cell.get("value_selector", cell.get("selector"))
+                cell.setdefault("tone", normalized.get("tone", "info"))
+                clean_cells.append(cell)
+        normalized["cells"] = clean_cells
+        normalized.setdefault("x_label", "column")
+        normalized.setdefault("y_label", "row")
+        normalized.setdefault("limit", 48)
+        return normalized
+    items = normalized.get("items")
+    clean_items: list[dict[str, Any]] = []
+    if isinstance(items, list):
+        for index, item in enumerate(items):
+            if not isinstance(item, dict):
+                continue
+            row = copy.deepcopy(item)
+            row.setdefault("label", str(row.get("id") or f"item {index + 1}"))
+            if "value" not in row:
+                if "value_selector" in row:
+                    row["value"] = row.get("value_selector")
+                elif "selector" in row:
+                    row["value"] = row.get("selector")
+            if "max" not in row and "max_selector" in row:
+                row["max"] = row.get("max_selector")
+            row.setdefault("tone", normalized.get("tone", "info"))
+            clean_items.append(row)
+    normalized["items"] = clean_items
+    return normalized
+
+
+def _normalize_ui_descriptor_actions(actions: object) -> list[dict[str, Any]]:
+    """Annotate descriptor actions so backend and frontend share the same safety boundary."""
+    normalized: list[dict[str, Any]] = []
+    if not isinstance(actions, list):
+        return normalized
+    for index, action in enumerate(actions):
+        if not isinstance(action, dict):
+            continue
+        item = copy.deepcopy(action)
+        item.setdefault("id", f"action_{index + 1}")
+        item.setdefault("label", str(item.get("title") or item.get("id") or f"Action {index + 1}"))
+        kind = str(item.get("kind") or "link").strip().lower()
+        item["kind"] = kind
+        method = str(item.get("method") or "GET").strip().upper()
+        item["method"] = method
+        item["read_only"] = _coerce_ui_descriptor_bool(item.get("read_only"))
+        item["requires_confirmation"] = _coerce_ui_descriptor_bool(item.get("requires_confirmation"))
+        if kind in _UI_DESCRIPTOR_PHYSICAL_ACTION_KINDS:
+            raw_url = str(item.get("url") or item.get("href") or item.get("route") or item.get("path") or "").strip()
+            if raw_url.startswith("/") and not raw_url.startswith("//") and not re.search(r"[\x00-\x1f]", raw_url):
+                item["url"] = raw_url
+            item["safe_navigation"] = False
+            item["live_card_runnable"] = False
+            item["handoff_required"] = False
+            item["handoff_workspace"] = ""
+            item["execution_scope"] = "blocked"
+            item["blocked_reason"] = "physical_device_action_requires_bridge_workspace"
+            normalized.append(item)
+            continue
+        if kind == "api":
+            url, block_reason = _safe_ui_descriptor_api_endpoint_url(
+                item.get("url") or item.get("href") or item.get("route") or item.get("path"),
+                method=method,
+            )
+            if url:
+                item["url"] = url
+            handoff_workspace_raw = (
+                item.get("handoff_workspace")
+                or item.get("workspace")
+                or _infer_ui_descriptor_handoff_workspace(url)
+            )
+            handoff_workspace, workspace_block_reason = _safe_ui_descriptor_navigation_url(handoff_workspace_raw)
+            callable_read_only = (
+                not block_reason
+                and method == "GET"
+                and item["read_only"]
+                and not item["requires_confirmation"]
+            )
+            needs_handoff = (
+                not block_reason
+                and not callable_read_only
+                and bool(handoff_workspace)
+                and not workspace_block_reason
+            )
+            if callable_read_only:
+                item["safe_navigation"] = False
+                item["live_card_runnable"] = True
+                item["handoff_required"] = False
+                item["handoff_workspace"] = ""
+                item["execution_scope"] = "read_only_api"
+                item["blocked_reason"] = ""
+            elif needs_handoff:
+                item["safe_navigation"] = False
+                item["live_card_runnable"] = False
+                item["handoff_required"] = True
+                item["handoff_workspace"] = handoff_workspace
+                item["execution_scope"] = "workspace_handoff"
+                item["blocked_reason"] = "workspace_handoff_required"
+            else:
+                if workspace_block_reason and not block_reason and handoff_workspace_raw:
+                    block_reason = f"workspace_handoff_{workspace_block_reason}"
+                elif method != "GET" and not block_reason:
+                    block_reason = "api_action_must_be_get"
+                elif not item["read_only"] and not block_reason:
+                    block_reason = "api_action_must_be_read_only"
+                elif item["requires_confirmation"] and not block_reason:
+                    block_reason = "api_action_confirmation_not_allowed"
+                item["safe_navigation"] = False
+                item["live_card_runnable"] = False
+                item["handoff_required"] = False
+                item["handoff_workspace"] = ""
+                item["execution_scope"] = "blocked"
+                item["blocked_reason"] = block_reason or "api_action_not_runnable"
+            normalized.append(item)
+            continue
+        url, block_reason = _safe_ui_descriptor_navigation_url(
+            item.get("url") or item.get("href") or item.get("route") or item.get("path")
+        )
+        if url:
+            item["url"] = url
+        if kind not in _UI_DESCRIPTOR_ACTION_KINDS:
+            block_reason = "unsupported_action_kind"
+        if block_reason:
+            item["safe_navigation"] = False
+            item["live_card_runnable"] = False
+            item["execution_scope"] = "blocked"
+            item["blocked_reason"] = block_reason
+        else:
+            item["safe_navigation"] = True
+            item["live_card_runnable"] = False
+            item["execution_scope"] = "navigation_only"
+            item["blocked_reason"] = ""
+        normalized.append(item)
+    return normalized
+
+
+def _normalize_module_ui_descriptor(ui: dict[str, Any]) -> dict[str, Any]:
+    """Normalize module-local UI metadata while keeping it presentation-only."""
+    normalized = copy.deepcopy(ui) if isinstance(ui, dict) else {}
+    renderer = _normalize_ui_descriptor_renderer(normalized)
+    if renderer:
+        normalized["renderer"] = renderer
+    for legacy_key in ("custom_renderer", "customRenderer", "dashboard_renderer", "dashboardRenderer", "report_renderer", "reportRenderer"):
+        normalized.pop(legacy_key, None)
+    for collection_key in ("cards", "report_sections"):
+        collection = normalized.get(collection_key)
+        if not isinstance(collection, list):
+            continue
+        clean_collection: list[dict[str, Any]] = []
+        for descriptor in collection:
+            if not isinstance(descriptor, dict):
+                continue
+            item = copy.deepcopy(descriptor)
+            item = _normalize_ui_descriptor_layout_intent(
+                item,
+                default_span=4 if collection_key == "cards" else 6,
+            )
+            if "chart" in item:
+                item["chart"] = _normalize_ui_descriptor_chart(item.get("chart"))
+            if "actions" in item:
+                item["actions"] = _normalize_ui_descriptor_actions(item.get("actions"))
+            clean_collection.append(item)
+        normalized[collection_key] = clean_collection
+    return normalized
+
+
+def _module_ui_path(module_id: str) -> Path:
+    """Return the module-local ui.yaml path after validating the module id."""
+    safe_module = ModuleConfigStore.safe_module_id(module_id)
+    module_path = RUNTIME_MODULE_ROOT / safe_module / "module.yaml"
+    if not module_path.exists():
+        raise HTTPException(status_code=404, detail=f"Unknown module_id={module_id}")
+    return RUNTIME_MODULE_ROOT / safe_module / "ui.yaml"
+
+
+def _module_payload_by_id() -> dict[str, dict[str, Any]]:
+    """Return active module payloads keyed by module id."""
+    modules: dict[str, dict[str, Any]] = {}
+    for module_path in sorted(RUNTIME_MODULE_ROOT.glob("*/module.yaml")):
+        try:
+            raw = yaml.safe_load(module_path.read_text(encoding="utf-8")) or {}
+        except (OSError, yaml.YAMLError):
+            continue
+        module = raw.get("module", raw) if isinstance(raw, dict) else {}
+        if not isinstance(module, dict):
+            continue
+        module_id = str(module.get("id") or module_path.parent.name).strip()
+        if module_id:
+            modules[module_id] = module
+    return modules
+
+
+def _module_attached_to_primary_graph(module_id: str, module: dict[str, Any]) -> bool:
+    """Return whether a module is attached to the primary executable graph."""
+    graph_binding = module.get("graph") if isinstance(module.get("graph"), dict) else {}
+    if graph_binding.get("attached") is False:
+        return False
+    try:
+        config = _load_runtime_graph_config(PRIMARY_RUNTIME_GRAPH_ID)
+    except Exception:
+        return bool(graph_binding.get("attached"))
+    safe_module_id = ModuleConfigStore.safe_module_id(module_id)
+    for node in config.nodes:
+        if _module_id_from_graph_node_module_id(node.module_id) == safe_module_id:
+            return True
+    return bool(graph_binding.get("attached"))
+
+
+def _module_management_runtime_effect() -> dict[str, object]:
+    """Describe what module-management load/unload changes and does not change."""
+    return {
+        "scope": "management_workspace",
+        "changes_graph_config": False,
+        "changes_runtime_execution": False,
+        "requires_validate_dry_run_save_for_activation": True,
+    }
+
+
+def _module_declared_output_contracts(module: dict[str, Any]) -> list[str]:
+    """Return output contract identifiers declared by module.yaml."""
+    outputs: list[str] = []
+
+    def add(value: object) -> None:
+        if isinstance(value, str):
+            clean = value.strip()
+            if clean and clean not in outputs:
+                outputs.append(clean)
+        elif isinstance(value, list):
+            for entry in value:
+                add(entry)
+
+    add(module.get("output_contracts"))
+    io_contract = module.get("io_contract") if isinstance(module.get("io_contract"), dict) else {}
+    add(io_contract.get("output"))
+    return outputs
+
+
+def _module_supervisor_policy_gate(module: dict[str, Any]) -> dict[str, object]:
+    """Check whether supervisor_policy required outputs are declared by the module."""
+    policy = module.get("supervisor_policy") if isinstance(module.get("supervisor_policy"), dict) else {}
+    required_outputs = []
+    if isinstance(policy.get("required_outputs"), list):
+        for item in policy.get("required_outputs", []):
+            clean = str(item or "").strip()
+            if clean and clean not in required_outputs:
+                required_outputs.append(clean)
+    declared_outputs = _module_declared_output_contracts(module)
+    missing_outputs = [item for item in required_outputs if item not in declared_outputs]
+    return {
+        "present": bool(policy),
+        "required_outputs": required_outputs,
+        "declared_outputs": declared_outputs,
+        "missing_outputs": missing_outputs,
+        "ok": not missing_outputs,
+    }
+
+
+def _module_activation_status(
+    *,
+    status: str,
+    contract_ready: bool,
+    graph_attached: bool,
+    validation_errors: list[str],
+    executable_count: int,
+    ready_for_live_activation: bool,
+) -> str:
+    """Return a compact lifecycle label without changing runtime activation."""
+    if ready_for_live_activation:
+        return "active_graph_attached"
+    if status == "draft" and not graph_attached:
+        return "draft_unattached"
+    if not contract_ready:
+        return "contract_incomplete"
+    if not graph_attached:
+        return "contract_ready_unattached"
+    if validation_errors:
+        return "validation_blocked"
+    if executable_count < 1:
+        return "dry_run_blocked"
+    return "inactive"
+
+
+def _module_management_lifecycle(module_id: str, payload: dict[str, Any]) -> dict[str, object]:
+    """Summarize module execution lifecycle state for GUI/CUI parity."""
+    normalized = ModuleConfigStore.normalize_payload(dict(payload))
+    module = normalized.get("module", {}) if isinstance(normalized, dict) else {}
+    if not isinstance(module, dict):
+        module = {}
+    metadata = module.get("metadata") if isinstance(module.get("metadata"), dict) else {}
+    execution = module.get("execution") if isinstance(module.get("execution"), dict) else {}
+    status = str(module.get("status") or metadata.get("status") or "active")
+    enabled = bool(module.get("enabled", status != "draft"))
+    handler = str(module.get("handler") or "").strip()
+    pending_registration = bool(metadata.get("pending_handler_registration"))
+    graph_attached = _module_attached_to_primary_graph(module_id, module)
+    validation_errors = _validate_module_payload(module_id, normalized)
+    dry_run = _module_dry_run_evidence(module_id, normalized)
+    summary = dry_run.get("summary") if isinstance(dry_run.get("summary"), dict) else {}
+    executable_count = int(summary.get("executable_count") or 0)
+    execution_capability = str(execution.get("capability") or "")
+    supervisor_policy_gate = _module_supervisor_policy_gate(module)
+    contract_ready = (
+        status != "draft"
+        and enabled
+        and bool(handler)
+        and handler != "runtime.step_complete"
+        and execution_capability != "ui_only"
+        and not pending_registration
+    )
+    activation_requirements = [
+        {
+            "id": "edit_module_contract",
+            "label": "Edit module contract",
+            "ok": contract_ready,
+            "detail": "enabled non-draft module with an allowlisted executable handler",
+        },
+        {
+            "id": "attach_graph_node",
+            "label": "Attach graph node",
+            "ok": graph_attached,
+            "detail": "active graph references this module",
+        },
+        {
+            "id": "validate_module",
+            "label": "Validate module",
+            "ok": not validation_errors,
+            "detail": "module schema and handler/tool references are valid",
+        },
+        {
+            "id": "module_dry_run_executable",
+            "label": "Dry-run executable path",
+            "ok": executable_count > 0,
+            "detail": "module dry-run has at least one executable step",
+        },
+    ]
+    if supervisor_policy_gate["present"]:
+        missing_outputs = supervisor_policy_gate.get("missing_outputs", [])
+        detail = (
+            "required outputs declared in module output contracts"
+            if not missing_outputs
+            else f"missing supervisor required outputs: {', '.join(str(item) for item in missing_outputs)}"
+        )
+        activation_requirements.append(
+            {
+                "id": "supervisor_policy_outputs",
+                "label": "Supervisor policy outputs",
+                "ok": bool(supervisor_policy_gate["ok"]),
+                "detail": detail,
+            }
+        )
+    ready_for_live_activation = all(bool(item["ok"]) for item in activation_requirements)
+    next_required_action = next((str(item["id"]) for item in activation_requirements if not item["ok"]), "none")
+    return {
+        "module_status": status,
+        "enabled": enabled,
+        "execution_capability": str(execution.get("capability") or ""),
+        "handler": handler,
+        "pending_handler_registration": pending_registration,
+        "management_loaded": module_id in _RUNTIME_MODULE_MANAGEMENT_LOADED,
+        "graph_attached": graph_attached,
+        "executable_count": executable_count,
+        "validation_errors": validation_errors,
+        "activation_requirements": activation_requirements,
+        "ready_for_live_activation": ready_for_live_activation,
+        "next_required_action": next_required_action,
+        "supervisor_policy_gate": supervisor_policy_gate,
+        "activation_status": _module_activation_status(
+            status=status,
+            contract_ready=contract_ready,
+            graph_attached=graph_attached,
+            validation_errors=validation_errors,
+            executable_count=executable_count,
+            ready_for_live_activation=ready_for_live_activation,
+        ),
+        "dry_run_summary": summary,
+    }
+
+
+def _runtime_agent_manifests_payload(graph_id: str = PRIMARY_RUNTIME_GRAPH_ID) -> dict[str, object]:
+    """Merge graph, module, and optional UI descriptors into Live GUI agent manifests."""
+    config = _load_runtime_graph_config(graph_id)
+    modules = _module_payload_by_id()
+    nodes_by_stage = {str(node.stage): node for node in config.nodes if node.stage}
+    nodes_by_module: dict[str, Any] = {}
+    for node in config.nodes:
+        module_id = _module_id_from_graph_node_module_id(node.module_id)
+        if module_id and module_id not in nodes_by_module:
+            nodes_by_module[module_id] = node
+
+    manifests: list[dict[str, object]] = []
+    seen_modules: set[str] = set()
+    seen_agents: set[str] = set()
+
+    def build_manifest(agent_id: str, label: str, stage: str, module_id: str, order: int) -> dict[str, object]:
+        module = modules.get(module_id, {}) if module_id and module_id != "objective" else {}
+        ui, ui_path = _module_ui_payload(module_id)
+        node = nodes_by_module.get(module_id) or nodes_by_stage.get(stage)
+        metadata = module.get("metadata") if isinstance(module.get("metadata"), dict) else {}
+        execution = module.get("execution") if isinstance(module.get("execution"), dict) else {}
+        safety = module.get("safety") if isinstance(module.get("safety"), dict) else {}
+        runtime_contract = module.get("runtime_contract") if isinstance(module.get("runtime_contract"), dict) else {}
+        handler = str(module.get("handler") or (node.handler if node else "") or "runtime.step_complete")
+        status = str(module.get("status") or metadata.get("status") or "active")
+        if agent_id == "objective":
+            capability = "ui_only"
+            kind = "ui_only"
+            enabled = True
+        else:
+            capability = str(execution.get("capability") or "")
+            if not capability:
+                capability = "generated_adapter" if handler == GENERATED_MODULE_HANDLER_ID else "allowlisted_agent" if handler.startswith("agent.") else "ui_only"
+            kind = str(module.get("kind") or (node.kind if node else "") or ("sidecar" if agent_id == "orchestrator" else "agent"))
+            enabled = bool(module.get("enabled", status != "draft"))
+        manifest_label = str(ui.get("label") or module.get("label") or label or module_id or agent_id)
+        short = str(ui.get("short") or _agent_manifest_short(agent_id, manifest_label))
+        icon = str(ui.get("icon") or _agent_manifest_icon_path(agent_id))
+        chat = ui.get("chat") if isinstance(ui.get("chat"), dict) else runtime_contract.get("chat_policy") if isinstance(runtime_contract.get("chat_policy"), dict) else {}
+        return {
+            "id": agent_id,
+            "label": manifest_label,
+            "short": short,
+            "stage": stage,
+            "module_id": module_id,
+            "handler": handler,
+            "kind": kind,
+            "enabled": enabled,
+            "status": status,
+            "category": _module_category(module) if module else ("ui" if agent_id == "objective" else "runtime"),
+            "execution_capability": capability,
+            "icon": short[:1] or "A",
+            "iconPath": icon,
+            "chat": chat,
+            "cards": ui.get("cards", []) if isinstance(ui.get("cards"), list) else [],
+            "report_sections": ui.get("report_sections", []) if isinstance(ui.get("report_sections"), list) else [],
+            "renderer": ui.get("renderer", {}) if isinstance(ui.get("renderer"), dict) else {},
+            "bridge_refs": module.get("device_bridge_contracts", []) if isinstance(module.get("device_bridge_contracts"), list) else [],
+            "tools": module.get("tools", []) if isinstance(module.get("tools"), list) else [],
+            "output_contracts": module.get("output_contracts", []) if isinstance(module.get("output_contracts"), list) else [],
+            "io_contract": module.get("io_contract", {}) if isinstance(module.get("io_contract"), dict) else {},
+            "runtime_contract": runtime_contract,
+            "safety": safety,
+            "editable": bool(module.get("editable", True)) if module else False,
+            "graph_node_id": node.id if node else "",
+            "graph_node_kind": node.kind if node else "",
+            "graph_stage": node.stage if node else stage,
+            "graph_position": node.position if node else {},
+            "module_path": str(RUNTIME_MODULE_ROOT / module_id / "module.yaml") if module_id and module_id != "objective" else "",
+            "ui_path": ui_path,
+            "source": "graph_module_ui_manifest",
+            "order": order,
+        }
+
+    for order, item in enumerate(LIVE_AGENT_DEFINITIONS):
+        agent_id = str(item.get("agent_id") or item.get("module_id") or "").strip()
+        module_id = str(item.get("module_id") or agent_id).strip()
+        manifest = build_manifest(
+            agent_id=agent_id,
+            label=str(item.get("label") or agent_id),
+            stage=str(item.get("stage") or agent_id),
+            module_id=module_id,
+            order=order,
+        )
+        manifests.append(manifest)
+        seen_agents.add(agent_id)
+        if module_id and module_id != "objective":
+            seen_modules.add(module_id)
+
+    for module_id, module in sorted(modules.items()):
+        if module_id in seen_modules:
+            continue
+        agent_id = module_id
+        node = nodes_by_module.get(module_id)
+        stage = str(node.stage or module_id) if node else module_id
+        manifest = build_manifest(
+            agent_id=agent_id,
+            label=str(module.get("label") or module_id),
+            stage=stage,
+            module_id=module_id,
+            order=len(manifests),
+        )
+        manifest["id"] = agent_id if agent_id not in seen_agents else f"{agent_id}_module"
+        manifests.append(manifest)
+        seen_agents.add(str(manifest["id"]))
+
+    categories: dict[str, int] = {}
+    for item in manifests:
+        category = str(item.get("category") or "runtime")
+        categories[category] = categories.get(category, 0) + 1
+    return {
+        "ok": True,
+        "graph_id": config.id,
+        "graph_version": config.version,
+        "agents": manifests,
+        "count": len(manifests),
+        "categories": categories,
+        "source_endpoints": ["/api/graphs/atr_closed_loop", "/api/modules", "/api/runtime/agent-manifests"],
+    }
+
+
+def _bridge_workspace_path(workspace: str, bridge_id: str = "") -> str:
+    """Normalize legacy workspace aliases to the current GUI routes."""
+    clean = str(workspace or "").strip()
+    aliases = {
+        "/windows-equipment": "/equipment/windows",
+    }
+    if clean in aliases:
+        return aliases[clean]
+    if clean:
+        return clean
+    defaults = {
+        "windows_pyautogui_bridge": "/equipment/windows",
+        "lerobot_bridge": "/lerobot",
+        "fenicsx_cae_bridge": "/cae",
+        "camera_utm_bridge": "/lerobot",
+        "prusa_bridge": "/printer",
+    }
+    return defaults.get(str(bridge_id or "").strip(), "")
+
+
+def _bridge_endpoint_defaults(bridge_id: str, workspace: str) -> tuple[str, str]:
+    """Return read-only health and preflight endpoints for one known bridge."""
+    mapping = {
+        "prusa_bridge": ("/api/printer/status", "/api/printer/spc-readiness"),
+        "lerobot_bridge": ("/api/lerobot/config", "/api/lerobot/profiles/validate"),
+        "windows_pyautogui_bridge": ("/api/equipment/windows/readiness", "/api/equipment/windows/live-preflight"),
+        "fenicsx_cae_bridge": ("/api/cae/config", "/api/cae/config"),
+        "camera_utm_bridge": ("/api/lerobot/config", "/api/lerobot/camera/test"),
+    }
+    return mapping.get(str(bridge_id or "").strip(), ("/api/devices/state", workspace or "/api/devices/state"))
+
+
+def _bridge_evidence_defaults(bridge_id: str, tools: list[str]) -> list[str]:
+    """Return default evidence contracts for graph-declared bridges."""
+    mapping = {
+        "prusa_bridge": ["printer_prepare.v1", "printer_runtime.v1", "slicer_artifact.v1"],
+        "lerobot_bridge": ["robot_task_result.v1", "lerobot_session.v1", "camera_capture.v1"],
+        "windows_pyautogui_bridge": ["equipment_result.v1", "utm_data_ready.v1", "screen_evidence.v1"],
+        "fenicsx_cae_bridge": ["fem_result.v1", "cae_report.v1", "analysis_metrics.v1"],
+        "camera_utm_bridge": ["camera_capture.v1", "vision_signal.v1", "utm_result.v1"],
+    }
+    defaults = list(mapping.get(str(bridge_id or "").strip(), []))
+    for tool in tools:
+        clean = str(tool or "").strip()
+        if not clean:
+            continue
+        contract = f"tool:{clean}"
+        if contract not in defaults:
+            defaults.append(contract)
+    return defaults
+
+
+def _normalize_bridge_action(
+    action: dict[str, Any],
+    *,
+    workspace: str,
+    source: str = "graph.metadata.device_bridges.actions",
+) -> dict[str, object]:
+    """Normalize graph-supplied bridge action metadata for GUI consumers."""
+    action_id = str(action.get("id") or action.get("action") or "").strip() or "action"
+    endpoint = str(action.get("endpoint") or action.get("url") or workspace or "").strip()
+    method = str(action.get("method") or "GET").strip().upper() or "GET"
+    kind = str(action.get("kind") or ("navigation" if endpoint and not endpoint.startswith("/api/") else "api")).strip()
+    read_only = bool(action.get("read_only", method == "GET" and not bool(action.get("requires_confirmation"))))
+    requires_confirmation = bool(action.get("requires_confirmation", False))
+    live_card_runnable = (
+        action_id == "open_workspace"
+        or (read_only and method == "GET" and endpoint.startswith("/api/"))
+    )
+    handoff_required = not live_card_runnable
+    return {
+        "id": action_id,
+        "label": str(action.get("label") or action_id.replace("_", " ").title()),
+        "kind": kind,
+        "method": method,
+        "endpoint": endpoint,
+        "requires_confirmation": requires_confirmation,
+        "read_only": read_only,
+        "tool": str(action.get("tool") or ""),
+        "mode_support": action.get("mode_support", ["test", "live"]) if isinstance(action.get("mode_support", ["test", "live"]), list) else ["test", "live"],
+        "source": source,
+        "live_card_runnable": live_card_runnable,
+        "handoff_required": handoff_required,
+        "handoff_workspace": workspace if handoff_required else "",
+        "blocked_reason": "workspace_handoff_required" if handoff_required else "",
+    }
+
+
+def _clean_bridge_action_descriptor(action: dict[str, Any], *, workspace: str) -> dict[str, Any]:
+    """Validate and normalize an editable bridge action descriptor for graph metadata."""
+    action_id = re.sub(r"[^a-zA-Z0-9_.:-]+", "_", str(action.get("id") or action.get("action") or "").strip())[:80]
+    if not action_id:
+        raise HTTPException(status_code=400, detail="Bridge action id is required.")
+    label = str(action.get("label") or action_id.replace("_", " ").title()).strip()[:120]
+    method = str(action.get("method") or "GET").strip().upper()
+    if method not in {"GET", "POST", "PUT", "PATCH", "DELETE"}:
+        raise HTTPException(status_code=400, detail=f"Unsupported bridge action method={method}")
+    endpoint = str(action.get("endpoint") or action.get("url") or "").strip()
+    if not endpoint:
+        endpoint = workspace
+    if not endpoint.startswith("/"):
+        raise HTTPException(status_code=400, detail="Bridge action endpoint must be a local absolute path.")
+    kind = str(action.get("kind") or ("api" if endpoint.startswith("/api/") else "navigation")).strip().lower()
+    if kind not in {"api", "navigation", "workspace"}:
+        raise HTTPException(status_code=400, detail=f"Unsupported bridge action kind={kind}")
+    if kind == "api" and not endpoint.startswith("/api/"):
+        raise HTTPException(status_code=400, detail="API bridge actions must target an /api/ endpoint.")
+    if kind in {"navigation", "workspace"} and method != "GET":
+        raise HTTPException(status_code=400, detail="Navigation bridge actions must use GET.")
+    requires_confirmation = bool(action.get("requires_confirmation", method != "GET"))
+    read_only = bool(action.get("read_only", method == "GET" and not requires_confirmation))
+    mode_support = action.get("mode_support", ["test", "live"])
+    if not isinstance(mode_support, list):
+        mode_support = ["test", "live"]
+    clean_modes = []
+    for mode in mode_support:
+        clean_mode = str(mode or "").strip()
+        if clean_mode and clean_mode not in clean_modes:
+            clean_modes.append(clean_mode)
+    if not clean_modes:
+        clean_modes = ["test", "live"]
+    descriptor: dict[str, Any] = {
+        "id": action_id,
+        "label": label or action_id,
+        "kind": kind,
+        "method": method,
+        "endpoint": endpoint,
+        "requires_confirmation": requires_confirmation,
+        "read_only": read_only,
+        "mode_support": clean_modes,
+    }
+    tool = str(action.get("tool") or "").strip()
+    if tool:
+        descriptor["tool"] = tool
+    return descriptor
+
+
+def _save_runtime_bridge_action_descriptor(bridge_id: str, req: RuntimeBridgeActionSaveRequest) -> dict[str, object]:
+    """Persist one editable bridge action descriptor into active graph metadata."""
+    if controller.snapshot().get("is_running"):
+        raise HTTPException(status_code=409, detail="Cannot modify bridge descriptors while a run is active.")
+    graph_id = str(req.graph_id or PRIMARY_RUNTIME_GRAPH_ID).strip() or PRIMARY_RUNTIME_GRAPH_ID
+    config = _load_runtime_graph_config(graph_id)
+    payload = config.model_dump(mode="json")
+    metadata = payload.setdefault("metadata", {})
+    if not isinstance(metadata, dict):
+        metadata = {}
+        payload["metadata"] = metadata
+    bridges = metadata.get("device_bridges")
+    if not isinstance(bridges, list):
+        bridges = []
+        metadata["device_bridges"] = bridges
+
+    clean_bridge_id = str(bridge_id or "").strip()
+    target_bridge: dict[str, Any] | None = None
+    for item in bridges:
+        if isinstance(item, dict) and str(item.get("id") or "").strip() == clean_bridge_id:
+            target_bridge = item
+            break
+    if target_bridge is None:
+        raise HTTPException(status_code=404, detail=f"Unknown bridge_id={bridge_id}")
+
+    workspace = _bridge_workspace_path(str(target_bridge.get("workspace") or ""), clean_bridge_id)
+    descriptor = _clean_bridge_action_descriptor(dict(req.action), workspace=workspace)
+    actions = target_bridge.get("actions")
+    if not isinstance(actions, list):
+        actions = []
+        target_bridge["actions"] = actions
+    replaced = False
+    for index, item in enumerate(actions):
+        if isinstance(item, dict) and str(item.get("id") or item.get("action") or "").strip() == descriptor["id"]:
+            actions[index] = descriptor
+            replaced = True
+            break
+    if not replaced:
+        actions.append(descriptor)
+
+    try:
+        updated_config = GraphConfig.model_validate(payload)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid graph metadata after bridge action save: {exc}") from exc
+
+    compiler = _runtime_graph_compiler(updated_config)
+    errors = compiler.validate()
+    if errors:
+        raise HTTPException(status_code=400, detail={"message": "Graph validation failed after bridge action save.", "errors": errors})
+
+    version = _graph_version_store(graph_id).save_version(
+        graph_id,
+        updated_config.model_dump(mode="json"),
+        reason=req.reason or "runtime_bridge_action_save",
+        author=req.author or "operator",
+    )
+    _graph_version_store(graph_id).write_active(updated_config.model_dump(mode="json"))
+    normalized_bridges = _normalized_bridge_manifests(updated_config.metadata if isinstance(updated_config.metadata, dict) else {}, {})
+    normalized_bridge = next((item for item in normalized_bridges if item.get("id") == clean_bridge_id), {})
+    normalized_action = next(
+        (
+            action
+            for action in normalized_bridge.get("actions", [])  # type: ignore[union-attr]
+            if isinstance(action, dict) and action.get("id") == descriptor["id"]
+        ),
+        _normalize_bridge_action(descriptor, workspace=workspace),
+    )
+    return {
+        "ok": True,
+        "graph_id": graph_id,
+        "bridge_id": clean_bridge_id,
+        "action": normalized_action,
+        "bridge": normalized_bridge,
+        "version": version,
+        "execution_scope": "descriptor_only",
+        "message": "Bridge action descriptor saved. Hardware execution remains owned by the bridge workspace and Guardian/device gates.",
+    }
+
+
+def _bridge_action_defaults(bridge_id: str, *, workspace: str, health_endpoint: str, preflight_endpoint: str) -> list[dict[str, object]]:
+    """Return a standard action set when graph metadata does not declare one."""
+    return [
+        _normalize_bridge_action(
+            {
+                "id": "open_workspace",
+                "label": "Open Workspace",
+                "kind": "navigation",
+                "method": "GET",
+                "endpoint": workspace,
+                "read_only": True,
+            },
+            workspace=workspace,
+            source="backend.standard_bridge_action",
+        ),
+        _normalize_bridge_action(
+            {
+                "id": "health_check",
+                "label": "Health Check",
+                "kind": "api",
+                "method": "GET",
+                "endpoint": health_endpoint,
+                "read_only": True,
+            },
+            workspace=workspace,
+            source="backend.standard_bridge_action",
+        ),
+        _normalize_bridge_action(
+            {
+                "id": "preflight",
+                "label": "Preflight",
+                "kind": "api",
+                "method": "POST" if preflight_endpoint.startswith("/api/") and bridge_id in {"lerobot_bridge", "windows_pyautogui_bridge", "camera_utm_bridge"} else "GET",
+                "endpoint": preflight_endpoint,
+                "read_only": bridge_id not in {"lerobot_bridge", "windows_pyautogui_bridge", "camera_utm_bridge"},
+            },
+            workspace=workspace,
+            source="backend.standard_bridge_action",
+        ),
+    ]
+
+
+def _normalized_bridge_manifests(metadata: dict[str, Any], health: dict[str, Any] | None = None) -> list[dict[str, object]]:
+    """Normalize graph bridge metadata into the shared GUI/IDE registry shape."""
+    bridges = metadata.get("device_bridges") if isinstance(metadata.get("device_bridges"), list) else []
+    health = health if isinstance(health, dict) else {}
+    normalized: list[dict[str, object]] = []
+    for index, item in enumerate(bridges):
+        bridge = item if isinstance(item, dict) else {}
+        bridge_id = str(bridge.get("id") or f"bridge_{index + 1}").strip()
+        if not bridge_id:
+            continue
+        workspace = _bridge_workspace_path(str(bridge.get("workspace") or ""), bridge_id)
+        tools = bridge.get("tools", []) if isinstance(bridge.get("tools"), list) else []
+        health_default, preflight_default = _bridge_endpoint_defaults(bridge_id, workspace)
+        health_endpoint = str(bridge.get("health_endpoint") or health_default)
+        preflight_endpoint = str(bridge.get("preflight_endpoint") or preflight_default)
+        raw_actions = bridge.get("actions", []) if isinstance(bridge.get("actions"), list) else []
+        actions = [
+            _normalize_bridge_action(action, workspace=workspace, source="graph.metadata.device_bridges.actions")
+            for action in raw_actions
+            if isinstance(action, dict)
+        ]
+        if not actions:
+            actions = _bridge_action_defaults(
+                bridge_id,
+                workspace=workspace,
+                health_endpoint=health_endpoint,
+                preflight_endpoint=preflight_endpoint,
+            )
+        evidence_contracts = bridge.get("evidence_contracts", []) if isinstance(bridge.get("evidence_contracts"), list) else []
+        if not evidence_contracts:
+            evidence_contracts = _bridge_evidence_defaults(bridge_id, [str(tool) for tool in tools])
+        normalized.append(
+            {
+                "id": bridge_id,
+                "label": str(bridge.get("label") or bridge_id),
+                "workspace": workspace,
+                "tools": tools,
+                "config": str(bridge.get("config") or ""),
+                "live_boundary": str(bridge.get("live_boundary") or ""),
+                "health_endpoint": health_endpoint,
+                "preflight_endpoint": preflight_endpoint,
+                "actions": actions,
+                "custom_action_count": len(raw_actions),
+                "live_card_runnable_action_count": sum(1 for action in actions if action.get("live_card_runnable")),
+                "evidence_contracts": evidence_contracts,
+                "health": health.get(bridge_id, {}) if isinstance(health, dict) else {},
+                "source": "graph.metadata.device_bridges",
+                "order": index,
+            }
+        )
+    return normalized
+
+
+def _runtime_bridge_registry_payload(graph_id: str = PRIMARY_RUNTIME_GRAPH_ID) -> dict[str, object]:
+    """Return device bridge manifests derived from the active graph metadata."""
+    config = _load_runtime_graph_config(graph_id)
+    metadata = config.metadata if isinstance(config.metadata, dict) else {}
+    device_state = _device_state_payload()
+    health = device_state.get("health", {}) if isinstance(device_state.get("health"), dict) else {}
+    normalized = _normalized_bridge_manifests(metadata, health)
+    return {
+        "ok": True,
+        "graph_id": config.id,
+        "graph_version": config.version,
+        "bridges": normalized,
+        "count": len(normalized),
+        "source_endpoints": ["/api/graphs/atr_closed_loop", "/api/bridges", "/api/devices/state"],
     }
 
 
@@ -2867,6 +4154,8 @@ def _module_list_item(path: Path) -> dict[str, object]:
         "id": module.get("id", path.parent.name),
         "label": module.get("label", path.parent.name),
         "handler": module.get("handler", ""),
+        "status": module.get("status", "active"),
+        "enabled": bool(module.get("enabled", True)),
         "category": _module_category(module),
         "path": str(path),
         "tools": tools,
@@ -2884,6 +4173,91 @@ def _module_list_item(path: Path) -> dict[str, object]:
         "output_contracts": module.get("output_contracts", []) if isinstance(module.get("output_contracts"), list) else [],
         "io_contract": module.get("io_contract", {}) if isinstance(module.get("io_contract"), dict) else {},
     }
+
+
+def _runtime_module_template_payload(template_kind: str, req: RuntimeModuleTemplateRequest, safe_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Build an inactive draft module template plus its optional ui.yaml payload."""
+    kind = str(template_kind or "agent").strip().lower().replace("_", "-")
+    if kind not in {"agent", "ui-only", "bridge"}:
+        raise HTTPException(status_code=400, detail=f"Unsupported module template kind={template_kind}")
+    category = _module_designer_category(req.category or ("runtime" if kind == "ui-only" else kind))
+    intended_capability = "bridge" if kind == "bridge" else "allowlisted_agent" if kind == "agent" else "ui_only"
+    created_at = datetime.now(timezone.utc).isoformat()
+    label = str(req.label or safe_id).strip() or safe_id
+    short = _agent_manifest_short(safe_id, label)
+    notes = str(req.notes or "Inactive draft module template. Configure contracts, UI descriptors, graph attachment, and validation before enabling.").strip()
+    payload: dict[str, Any] = {
+        "module": {
+            "id": safe_id,
+            "label": label,
+            "status": "draft",
+            "enabled": False,
+            "handler": "runtime.step_complete",
+            "llm_role": "",
+            "editable": True,
+            "kind": "ui_only" if kind == "ui-only" else kind,
+            "category": category,
+            "metadata": {
+                "created_from": f"runtime_ide_{kind}_template",
+                "created_at": created_at,
+                "author": req.author,
+                "pending_handler_registration": True,
+                "generated_adapter_approved": False,
+                "generated_adapter_handler_id": GENERATED_MODULE_HANDLER_ID,
+                "template_kind": kind,
+                "draft_preview_only": True,
+            },
+            "execution": {
+                "capability": "ui_only",
+                "intended_capability": intended_capability,
+                "active": False,
+            },
+            "graph": {
+                "attached": False,
+                "stage": None,
+                "node_id": None,
+            },
+            "safety": {
+                "live_requires_validation": True,
+                "dry_run_supported": True,
+                "requires_human_approval": True,
+            },
+            "tools": [],
+            "pre_execution": [],
+            "internal_graph": [
+                {"id": "01_define_contract", "label": "Define IO Contract", "kind": "draft_step"},
+                {"id": "02_configure_ui", "label": "Configure UI Descriptor", "kind": "draft_step"},
+                {"id": "03_attach_graph_after_validation", "label": "Attach Graph After Validation", "kind": "draft_step"},
+            ],
+            "io_contract": {
+                "input": "Draft only; not connected to OrchestratorState.",
+                "output": "Draft only; no AgentResult emitted until enabled.",
+            },
+            "output_contracts": [],
+            "runtime_contract": {
+                "draft_preview_only": True,
+                "execution_blocked_until_graph_attached": True,
+            },
+            "device_bridge_contracts": [],
+            "ui": {
+                "cards": [],
+                "report_sections": [],
+            },
+            "notes": notes,
+        }
+    }
+    ui_payload: dict[str, Any] = {
+        "ui": {
+            "icon": _agent_manifest_icon_path(safe_id),
+            "short": short,
+            "report_title": label,
+            "chat": {"mode": "open_on_demand"},
+            "cards": [],
+            "report_sections": [],
+            "empty_state": f"{label} is an inactive draft. Configure UI and graph attachment before enabling.",
+        }
+    }
+    return payload, ui_payload
 
 
 def _safe_source_filename(filename: str) -> str:
@@ -3311,6 +4685,10 @@ def _module_dry_run_sequence(module_id: str, payload: dict[str, Any] | None = No
         module = ModuleConfig.model_validate(module).model_dump(mode="json", exclude_none=True)
     except Exception:
         return []
+    module_status = str(module.get("status") or "").strip().lower()
+    execution = module.get("execution") if isinstance(module.get("execution"), dict) else {}
+    graph_binding = module.get("graph") if isinstance(module.get("graph"), dict) else {}
+    is_draft = module_status == "draft" or module.get("enabled") is False or execution.get("active") is False or graph_binding.get("attached") is False
     internal_graph = module.get("internal_graph", [])
     if not isinstance(internal_graph, list):
         return []
@@ -3331,7 +4709,9 @@ def _module_dry_run_sequence(module_id: str, payload: dict[str, Any] | None = No
                     "kind": item.get("kind", "pre_stage"),
                     "phase": "pre_execution",
                     "handler_configured": bool(handler),
-                    "executable": handler.startswith("agent."),
+                    "executable": (not is_draft) and handler.startswith("agent."),
+                    "module_status": module_status or "active",
+                    "draft": is_draft,
                 }
             )
     for index, step in enumerate(internal_graph, start=1):
@@ -3347,7 +4727,9 @@ def _module_dry_run_sequence(module_id: str, payload: dict[str, Any] | None = No
                 "kind": item.get("kind", "internal_step"),
                 "phase": "internal_graph",
                 "handler_configured": bool(configured_handler),
-                "executable": configured_handler.startswith("agent."),
+                "executable": (not is_draft) and configured_handler.startswith("agent."),
+                "module_status": module_status or "active",
+                "draft": is_draft,
             }
         )
     return sequence
@@ -3360,12 +4742,14 @@ def _module_dry_run_summary(sequence: list[dict[str, object]]) -> dict[str, obje
     executable = [item for item in sequence if item.get("executable")]
     checkpoints = [item for item in sequence if not item.get("executable")]
     handlers = sorted({str(item.get("handler") or "") for item in sequence if item.get("handler")})
+    draft = any(bool(item.get("draft")) for item in sequence)
     return {
         "step_count": len(sequence),
         "pre_execution_count": len(pre),
         "internal_graph_count": len(internal),
         "executable_count": len(executable),
         "checkpoint_count": len(checkpoints),
+        "draft": draft,
         "handler_count": len(handlers),
         "handlers": handlers,
         "ordered_step_ids": [str(item.get("id") or "") for item in sequence],
@@ -4632,10 +6016,93 @@ async def create_runtime_module(req: RuntimeModuleCreateRequest) -> dict[str, ob
     }
 
 
+@app.post("/api/modules/templates/{template_kind}")
+async def create_runtime_module_template(template_kind: str, req: RuntimeModuleTemplateRequest) -> dict[str, object]:
+    """Create an inactive draft module template for Runtime IDE preview/editing."""
+    if controller.snapshot().get("is_running"):
+        raise HTTPException(status_code=409, detail="Cannot create runtime module template while a run is active.")
+    try:
+        safe_id = ModuleConfigStore.safe_module_id(req.module_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    module_dir = RUNTIME_MODULE_ROOT / safe_id
+    module_path = module_dir / "module.yaml"
+    ui_path = module_dir / "ui.yaml"
+    if module_path.exists():
+        raise HTTPException(status_code=409, detail=f"Module already exists: {safe_id}")
+    payload, ui_payload = _runtime_module_template_payload(template_kind, req, safe_id)
+    errors = _validate_module_payload(safe_id, payload)
+    if errors:
+        return {"ok": False, "module_id": safe_id, "errors": errors, "module": payload}
+    module_dir.mkdir(parents=True, exist_ok=True)
+    ui_path.write_text(yaml.safe_dump(ui_payload, sort_keys=False, allow_unicode=True), encoding="utf-8")
+    store = _module_config_store()
+    version = store.save_version(safe_id, payload, reason=f"runtime_module_template_create:{template_kind}", author=req.author)
+    store.write_active(safe_id, payload)
+    dry_run = _module_dry_run_evidence(safe_id, payload)
+    return {
+        "ok": True,
+        "module_id": safe_id,
+        "template_kind": template_kind,
+        "version": version,
+        "module": payload,
+        "ui": ui_payload,
+        "ui_path": str(ui_path),
+        "catalog_item": _module_list_item(module_path),
+        "manifest": next((item for item in _runtime_agent_manifests_payload(PRIMARY_RUNTIME_GRAPH_ID)["agents"] if item.get("id") == safe_id), {}),
+        "dry_run": dry_run,
+        "errors": [],
+    }
+
+
 @app.get("/api/modules/{module_id}")
 async def get_runtime_module(module_id: str) -> dict[str, object]:
     """Return one editable module config."""
-    return {"ok": True, "module": _module_config_payload(module_id), "loaded": module_id in _RUNTIME_MODULE_MANAGEMENT_LOADED}
+    payload = _module_config_payload(module_id)
+    return {
+        "ok": True,
+        "module": payload,
+        "loaded": module_id in _RUNTIME_MODULE_MANAGEMENT_LOADED,
+        "runtime_effect": _module_management_runtime_effect(),
+        "lifecycle": _module_management_lifecycle(module_id, payload),
+    }
+
+
+@app.get("/api/modules/{module_id}/ui")
+async def get_runtime_module_ui(module_id: str) -> dict[str, object]:
+    """Return one module-local UI descriptor."""
+    ui_path = _module_ui_path(module_id)
+    ui, path = _module_ui_payload(module_id)
+    return {
+        "ok": True,
+        "module_id": ModuleConfigStore.safe_module_id(module_id),
+        "ui": ui,
+        "path": path or str(ui_path),
+        "exists": ui_path.exists(),
+    }
+
+
+@app.put("/api/modules/{module_id}/ui")
+async def save_runtime_module_ui(module_id: str, req: RuntimeModuleUiSaveRequest) -> dict[str, object]:
+    """Save one module-local UI descriptor without changing Python execution."""
+    if controller.snapshot().get("is_running"):
+        raise HTTPException(status_code=409, detail="Cannot modify runtime module UI while a run is active.")
+    ui_path = _module_ui_path(module_id)
+    safe_id = ModuleConfigStore.safe_module_id(module_id)
+    ui = _normalize_module_ui_descriptor(req.ui if isinstance(req.ui, dict) else {})
+    payload = {"ui": ui}
+    ui_path.parent.mkdir(parents=True, exist_ok=True)
+    ui_path.write_text(yaml.safe_dump(payload, sort_keys=False, allow_unicode=True), encoding="utf-8")
+    manifest = next((item for item in _runtime_agent_manifests_payload(PRIMARY_RUNTIME_GRAPH_ID)["agents"] if item.get("module_id") == safe_id or item.get("id") == safe_id), {})
+    return {
+        "ok": True,
+        "module_id": safe_id,
+        "ui": ui,
+        "path": str(ui_path),
+        "reason": req.reason,
+        "author": req.author,
+        "manifest": manifest,
+    }
 
 
 @app.post("/api/modules/{module_id}/register-generated")
@@ -4707,6 +6174,8 @@ async def load_runtime_module_into_management(module_id: str) -> dict[str, objec
         "module_id": module_id,
         "loaded": True,
         "loaded_module_ids": sorted(_RUNTIME_MODULE_MANAGEMENT_LOADED),
+        "runtime_effect": _module_management_runtime_effect(),
+        "lifecycle": _module_management_lifecycle(module_id, payload),
         "module": payload,
     }
 
@@ -4714,9 +6183,16 @@ async def load_runtime_module_into_management(module_id: str) -> dict[str, objec
 @app.post("/api/modules/{module_id}/unload")
 async def unload_runtime_module_from_management(module_id: str) -> dict[str, object]:
     """Unload a module from the management workspace without deleting module.yaml."""
-    _module_config_payload(module_id)
+    payload = _module_config_payload(module_id)
     _RUNTIME_MODULE_MANAGEMENT_LOADED.discard(module_id)
-    return {"ok": True, "module_id": module_id, "loaded": False, "loaded_module_ids": sorted(_RUNTIME_MODULE_MANAGEMENT_LOADED)}
+    return {
+        "ok": True,
+        "module_id": module_id,
+        "loaded": False,
+        "loaded_module_ids": sorted(_RUNTIME_MODULE_MANAGEMENT_LOADED),
+        "runtime_effect": _module_management_runtime_effect(),
+        "lifecycle": _module_management_lifecycle(module_id, payload),
+    }
 
 
 @app.get("/api/modules/{module_id}/versions")
@@ -4929,7 +6405,7 @@ async def get_runtime_graph_version(graph_id: str, version_id: str) -> dict[str,
 @app.put("/api/graphs/{graph_id}")
 async def save_runtime_graph(graph_id: str, req: RuntimeGraphSaveRequest) -> dict[str, object]:
     """Validate, version, and optionally activate a Runtime IDE graph config."""
-    if controller.snapshot().get("is_running"):
+    if controller.snapshot().get("is_running") and req.activate:
         raise HTTPException(status_code=409, detail="Cannot modify runtime graph while a run is active.")
     if not req.graph:
         raise HTTPException(status_code=400, detail="Missing graph payload.")

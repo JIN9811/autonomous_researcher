@@ -139,7 +139,7 @@ ATR bridge는 slicing을 upload/start와 분리한다. `Slice Bambu Artifact`는
 - `--export-3mf`에는 absolute path가 아니라 `--outputdir` 내부의 basename을 넘긴다. Spark workstation의 BambuStudio `02.07.01.57`에서는 absolute path를 넘기면 output directory가 중복 결합되어 export가 실패할 수 있었다.
 - 명시 `load_settings`가 없으면 bridge runner는 Bambu Studio 원본 preset을 덮어쓰지 않고 output directory 아래 `_atr_no_skirt_profile/`에 machine/process/filament 복사본을 만든다. process 복사본은 `skirt_loops=0`, `skirt_height=0`, `brim_type=no_brim`, `brim_width=0`, `raft_layers=0`, `prime_tower_brim_width=0`을 적용한다.
 - 실제 검증에서 위 profile copy와 basename export를 사용하면 `/home/jin/다운로드/specimen(4).stl` 기준 `.gcode.3mf` 생성, 내부 `Metadata/plate_1.gcode` patch, md5 sidecar 갱신, validator 통과가 가능했다. 이 검증은 artifact 생성/patch까지만 의미하며 실제 publish/ejection 성공을 뜻하지 않는다.
-- 실제 장비에 대해 HTTP artifact route는 ATR 서버 LAN IP URL로 server-side fetch와 sha256 match까지 확인됐다. 모든 approval/checklist 값을 명시하면 `Pre-start Check`가 `ready_to_publish_not_started`까지 도달하지만, 이 route는 여전히 `published=false`, `will_publish=false`를 유지한다.
+- 실제 장비에 대해 HTTP artifact route는 ATR 서버 LAN IP URL로 server-side fetch와 sha256 match까지 확인됐다. 현재 GUI는 owner-managed publish 기본값을 보내므로 artifact/camera/bed-clear/start-state blocker가 없으면 `Pre-start Check`가 `ready_to_publish_not_started`까지 도달할 수 있다. 이 route는 여전히 `published=false`, `will_publish=false`를 유지한다.
 - `.gcode.3mf` patch는 요청한 `plate_id`와 정확히 일치하는 `Metadata/plate_<id>.gcode`만 대상으로 한다. 요청 plate가 없고 다른 plate G-code가 존재하더라도 fallback으로 대체하지 않는다. 이는 MQTT `project_file.param`과 내부 plate path가 어긋난 채로 시작되는 것을 막기 위한 live-start gate 계약이다.
 - 로컬 `.gcode.3mf` artifact를 `printer.prepare` 또는 HTTP artifact route에 넘길 때도 같은 검사를 수행한다. 요청한 `plate_id`의 `Metadata/plate_<id>.gcode`가 없으면 FTPS upload나 HTTP export를 만들기 전에 `BAMBU_PROJECT_FILE_PARAM_MISMATCH`로 차단한다.
 - patch result와 manifest는 `source_sha256`, `patched_sha256`, `source_plate_path`, `plate_id`, `loop_index`, validator result를 함께 남긴다. `loop_index`가 요청에 없으면 현재 단일 출력 artifact 기준으로 `1`을 사용한다.
@@ -154,7 +154,7 @@ STL/3MF source
   -> optional Bambu native autoejection patch
   -> .autoeject.gcode.3mf artifact + manifest
   -> start gate
-  -> publish only after operator/Guardian approval
+  -> publish only after backend start gate and browser confirmation
 ```
 
 ---
@@ -186,7 +186,7 @@ Bambu autoejection은 `bambu_gcode_patch` provider로 표시한다. 이는 외�
 - skirt/brim/raft/purge residue risk
 - AMS mapping 누락
 - `.gcode.3mf` internal plate path와 MQTT `project_file.param` 불일치
-- ejection path operator checklist 누락
+- operator-managed physical context evidence 누락 또는 bed-clear/camera evidence 불충분
 
 ### Tail metadata 계약
 
@@ -208,9 +208,7 @@ Bambu autoejection은 `bambu_gcode_patch` provider로 표시한다. 이는 외�
 
 `.autoeject.*` artifact는 일반 artifact보다 강한 gate를 요구한다.
 
-- operator confirmed
-- Guardian approved
-- dry-run off
+- owner-managed publish defaults present (`operator_confirmed=true`, `guardian_approved=true`, `dry_run=false`)
 - operator-managed physical clearance/ejection setup recorded as evidence
 - camera frame available or operator visual evidence
 - previous `bed_clear_required`가 해제됨
@@ -342,12 +340,12 @@ Looprint 계열은 already-sliced G-code/3MF에 cooldown/push-off/loop logic을 
 - 동일 artifact에 대해 `Validate G-code Preview` 성격의 non-mutating 검증은 patched artifact나 manifest를 쓰지 않고 validator evidence만 반환해야 한다.
 - `Generate Patched Artifact` 성격의 patch 실행은 `.autoeject.gcode.3mf`, sidecar manifest, 내부 `Metadata/plate_1.gcode.md5` 갱신까지 확인됐다.
 - HTTP artifact route는 ATR 서버의 LAN IP URL로 server-side fetch 및 sha256 match가 확인됐다. 이 값은 프린터 publish를 실행했다는 뜻이 아니라, 프린터에 전달 가능한 URL 후보가 준비됐다는 뜻이다.
-- `Pre-start Check` dry-run은 `camera_status`, optional native patch, HTTP artifact route까지 진행한 뒤 start gate에서 의도적으로 막혔다. 대표 blocker는 `BAMBU_START_DRY_RUN`, operator confirmation, Guardian approval, front path/door, ramp/bin, toolhead cover, release surface, supervised first run이다.
+- 초기 수동-gate 버전의 `Pre-start Check` dry-run은 `camera_status`, optional native patch, HTTP artifact route까지 진행한 뒤 `BAMBU_START_DRY_RUN`, operator confirmation, Guardian approval, ejection checklist blocker로 의도적으로 막혔다. 현재 코드는 이 수동 checklist UI를 제거했고, 3DP GUI가 owner-managed publish 기본값을 보내며 backend는 artifact/camera/bed-clear/start-state blocker로 차단한다.
 - 실제 장비 상태 조회 중 FTPS가 `421 too many connections` 계열로 거부되면 generic network failure가 아니라 `BAMBU_FTPS_TOO_MANY_CONNECTIONS`로 표시한다. 이 경우 MQTT/video plane이 살아 있더라도 FTPS upload-ready는 아니다.
 - 3DP GUI visual QA에서는 `Video Status` 후 Bambu camera panel이 `proxy_ready`/RTSPS 또는 MJPEG proxy 상태를 표시하고, 이후 `Pre-start Check`가 실제 camera frame을 화면에 유지하는 것을 확인했다. 같은 화면에서 MQTT/progress/material card는 유지되고 FTPS blocker만 별도로 표시됐다.
 - Autoejection panel visual QA에서는 `Save Autoejection Config`, `Validate G-code Preview`, `Generate Ejection Test Artifact`, `Generate Sweep Test Artifact`, `Generate Patched Artifact`, `Mark Bed Clear`, `Mark Not Clear`, standalone left/center/right artifact buttons가 렌더링됐다. `Validation Evidence`는 기본 접힘 상태이며, 화면에는 full raw G-code block을 표시하지 않는다.
-- 2026-06-16 추가 pre-start audit에서는 실제 Bambu connection memory와 기존 `.gcode.3mf` artifact를 사용해 `0.0.0.0:7862` 임시 서버에서 `camera_status -> existing sliced artifact -> native autoejection patch -> HTTP artifact route -> start gate -> SPC readiness`를 호출했다. `HTTP artifact route`는 LAN IP URL로 `ok=true`, `printer_fetch_ready=true`였고, FTPS가 connection-limit 상태여도 HTTP route transfer evidence는 유지됐다. 최종 start gate는 `BAMBU_START_DRY_RUN`, operator confirmation, Guardian approval, front path/door, ramp/bin, toolhead cover, release surface, supervised first run checklist 때문에 `blocked`로 남았다. 이 결과도 physical publish/ejection 성공이 아니라 출력 직전 비파괴 gate 검증이다.
-- 같은 실제 API 경로에서 operator confirmation, Guardian approval, dry-run off, front path/door, ramp/bin, toolhead cover, release surface/profile, supervised first run 값을 모두 명시하면 `Pre-start Check`는 `ready_to_publish_not_started`까지 도달했다. 이 상태에서도 `published=false`, `will_publish=false`가 유지되므로 실제 MQTT publish 또는 motion을 의미하지 않는다.
+- 2026-06-16 추가 pre-start audit에서는 실제 Bambu connection memory와 기존 `.gcode.3mf` artifact를 사용해 `0.0.0.0:7862` 임시 서버에서 `camera_status -> existing sliced artifact -> native autoejection patch -> HTTP artifact route -> start gate -> SPC readiness`를 호출했다. `HTTP artifact route`는 LAN IP URL로 `ok=true`, `printer_fetch_ready=true`였고, FTPS가 connection-limit 상태여도 HTTP route transfer evidence는 유지됐다. 과거 수동-gate 요청은 approval/checklist blocker 때문에 `blocked`로 남았지만, 현재 GUI 요청은 owner-managed publish 기본값을 사용한다. 따라서 현행 차단 지점은 artifact validity, camera frame requirement, bed-clear lock, printer safe state, post-publish observation이다.
+- 같은 실제 API 경로에서 owner-managed publish 기본값과 camera/bed-clear/start-state evidence가 모두 통과하면 `Pre-start Check`는 `ready_to_publish_not_started`까지 도달한다. 이 상태에서도 `published=false`, `will_publish=false`가 유지되므로 실제 MQTT publish 또는 motion을 의미하지 않는다.
 - `BAMBU_POST_EJECT_BED_NOT_CLEAR` gate도 실제 API 경로에서 확인했다. `/api/printer/bed-clear`에 `bed_clear_required=true`, `bed_clear_verified=false`를 저장하면 all-confirmed pre-start path도 `BAMBU_POST_EJECT_BED_NOT_CLEAR`로 차단된다. 이후 `bed_clear_required=false`, `bed_clear_verified=true`를 저장하면 같은 start gate는 다시 `ready_to_publish_not_started`로 풀린다. 검증 후 local bed-clear memory는 원상 복구했다.
 - 2026-06-16 현재 코드 smoke에서는 임시 FastAPI 서버의 `/printer`가 `HTTP 200`과 3DP Printer GUI HTML을 반환했고, HTML 안에 `Bambu LAN Connection`, `Bambu G-code Autoejection`, `Pre-start Check`, `Video Status`, `Publish Start`, `Mark Bed Clear`, `Validate G-code Preview` control text가 존재했다. `/api/printer/status?mode=test`는 BambuLab X2D active profile과 device screen payload를 반환했고 `will_publish`/`start_enabled`가 비물리 조회에서 설정되지 않는 것을 확인했다. 같은 서버에서 Selenium/Firefox headless 렌더링은 상단 console과 autoejection section의 핵심 버튼이 실제 DOM에서 표시되는 것을 확인했다. 이 최신 확인은 rendered GUI smoke와 HTML/API smoke evidence이며 physical publish/ejection 검증은 아니다.
 
@@ -368,7 +366,7 @@ Looprint 계열은 already-sliced G-code/3MF에 cooldown/push-off/loop logic을 
 | 순서 | 목적 | 실행 경로 | 완료 evidence |
 | --- | --- | --- | --- |
 | 1 | physical start 전 상태 고정 | `Video Status` -> `Pre-start Check` -> `SPC Readiness` | saved pre-start snapshot, Bambu active profile, camera frame/proxy, `.autoeject.*` artifact, `ready_to_publish_not_started`, `published=false`, `will_publish=false` |
-| 2 | center standalone ejection 실제 motion | `Generate Ejection Test Artifact` center -> operator/Guardian/dry-run off/checklist -> `Publish Start` | center artifact file with ATR marker and `atr_position=center`, saved `printer.bambu.start_publish` snapshot with `ready_to_publish=true`, `start_enabled=true`, no blockers, matching remote path, publish sequence/topic, and running post-publish state, camera frame before/after, object moved to front-clearance/bin zone, no collision, no toolhead-cover/plate shift |
+| 2 | center standalone ejection 실제 motion | `Generate Ejection Test Artifact` center -> browser-confirmed `Publish Start` with owner-managed defaults | center artifact file with ATR marker and `atr_position=center`, saved `printer.bambu.start_publish` snapshot with `ready_to_publish=true`, `start_enabled=true`, no blockers, matching remote path, publish sequence/topic, and running post-publish state, camera frame before/after, object moved to front-clearance/bin zone, no collision, no toolhead-cover/plate shift |
 | 3 | disposable object live ejection | small disposable print using patched `.gcode.3mf` -> guarded `Publish Start` | print completion, autoejection tail execution observed, bed object removed, saved `printer.bambu.start_publish` snapshot with `ready_to_publish=true`, `start_enabled=true`, no blockers, matching remote path, publish sequence/topic, and running post-publish state, `/api/printer/bed-clear` temporarily `required=true`, `verified=false` after publish, source/patched artifact files with matching sha256 and manifest reference |
 | 4 | left/right lane validation | standalone left and right artifacts with the same gate | left/right artifact files, saved validation snapshots with matching position, saved start-publish snapshots with `ready_to_publish=true`, `start_enabled=true`, no blockers, matching remote path, publish sequence/topic, and running post-publish state, no sweep outside envelope, validator blockers empty |
 | 5 | post-ejection bed-clear | camera/operator confirms empty bed -> `Mark Bed Clear` | `memory/bambu_bed_clear_evidence.json` keeps `bed_clear_verified=true`, `blocking_code=""`, camera/operator/vision method, and source/patched sha256 matching the live `.autoeject.*` artifact |

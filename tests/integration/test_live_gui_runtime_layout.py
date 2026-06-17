@@ -62,7 +62,7 @@ def test_live_gui_runtime_shell_contains_operational_panels() -> None:
         assert label in script_text
     for role_label in [
         "Orchestration Plan / Handoff Control",
-        "Design Decision / Candidate Evidence",
+        "Design Geometry / Manufacturability",
         "Manufacturing Digital Thread / Printer Runtime",
         "Lab Perception Signal Bus / Visual Evidence",
         "Lab Equipment / UTM Visual Control",
@@ -93,6 +93,48 @@ def test_live_gui_static_script_exposes_runtime_ide_adapters() -> None:
     assert response.status_code == 200
     script = response.text
     for symbol in [
+        "DEFAULT_LIVE_AGENTS",
+        "refreshLiveAgentManifest",
+        "/api/runtime/agent-manifests",
+        "renderAgentDescriptorCards",
+        "renderAgentDescriptorReportSections",
+        "renderDescriptorChart",
+        "renderDescriptorScatterPlot",
+        "renderDescriptorLineChart",
+        "renderDescriptorTableChart",
+        "renderDescriptorHeatmapChart",
+        "renderDescriptorCompoundChart",
+        "renderDescriptorActions",
+        "descriptorLayoutClass",
+        "LIVE_RENDERER_PROFILES",
+        "liveAgentRendererProfile",
+        "presentation_only",
+        "unsupported_renderer_id",
+        "runDescriptorAction",
+        "openDescriptorWorkspaceHandoff",
+        "descriptorSelectorValue",
+        "descriptor.chart",
+        "descriptor.actions",
+        "mini_bar_chart",
+        "scatter_plot",
+        "line_chart",
+        "compound_chart",
+        "ar-scatter-plot",
+        "ar-line-chart",
+        "ar-descriptor-table",
+        "ar-descriptor-heatmap",
+        "ar-descriptor-compound",
+        "density-compact",
+        "priority-high",
+        "mobile-stack",
+        "data-descriptor-action-url",
+        "data-descriptor-api-action",
+        "data-descriptor-workspace-handoff",
+        "descriptor_action.workspace_handoff",
+        "read_only_api",
+        "workspace_handoff",
+        "reportSections",
+        "module descriptor report",
         "LIVE_AGENTS",
         "renderAgentBinder",
         "renderReportPanel",
@@ -119,6 +161,16 @@ def test_live_gui_static_script_exposes_runtime_ide_adapters() -> None:
         "clearLiveGraphSelection",
         "clearLiveTimelineSelection",
         "renderDeviceStrip",
+        "liveBridgeContracts",
+        "renderBridgeContractDeviceCards",
+        "bridgeContractStatus",
+        "bridgeContractActionSummary",
+        "openBridgeContractWorkspace",
+        "bridgeContractSafeActions",
+        "bridgeContractWorkspaceHandoffActions",
+        "runBridgeContractAction",
+        "workspace_handoff",
+        "handoff_required",
         "refreshLiveRunDetails",
         "resolveLiveApproval",
         "refreshLiveGraphPayload",
@@ -206,6 +258,12 @@ def test_live_gui_static_script_exposes_runtime_ide_adapters() -> None:
         "__liveGuiDebugRestoreOperatorReportState",
     ]:
         assert symbol in script
+    assert "const rendererProfile = liveAgentRendererProfile(liveSelectedAgent);" in script
+    assert 'const reportAgentId = rendererProfile.reportAgent || String(liveSelectedAgent || "").toLowerCase();' in script
+    assert 'reportAgentId === "design"' in script
+    assert "const rendererProfile = liveAgentRendererProfile(agentId);" in script
+    assert "const dashboardAgentId = rendererProfile.dashboardAgent && cardsByAgent[rendererProfile.dashboardAgent]" in script
+    assert "cardsByAgent[dashboardAgentId]" in script
     assert "window.localStorage || window.sessionStorage" in script
     assert "autonomousLiveGuiUiState" in script
     assert 'new EventSource("/api/events/stream")' in script
@@ -221,7 +279,7 @@ def test_live_gui_static_script_exposes_runtime_ide_adapters() -> None:
     assert 'setCompactTextWithTitle(planningStageLabel, `S:${stageLabel}`' in script
     assert 'setCompactTextWithTitle(liveActiveAgentChip, `A:${liveAgentShort(activeAgent)}`' in script
     assert 'setLiveBackendPlanningBusy(Boolean(liveLastSession.is_planning_busy));' in script
-    assert 'planningThinkingCount > 0 || liveBackendPlanningBusy' in script
+    assert 'planningThinkingCount <= 0 && !liveBackendPlanningBusy && !liveQuickActionBusy' in script
     assert 'backend_planning_busy: liveBackendPlanningBusy' in script
     assert "chat_context: liveChatContextSummary()" in script
     assert "`R:${liveModeShort(ctx.mode)}:${ctx.is_running ? \"ON\" : \"IDLE\"}`" in script
@@ -229,6 +287,16 @@ def test_live_gui_static_script_exposes_runtime_ide_adapters() -> None:
     assert "const snapshot = liveLastSnapshot || {};" in script
     assert "const state = session.state || snapshot.state || {};" in script
     assert "const state = liveLastSession.state || snapshot.state || {};" in script
+    assert "runtime_ide_contract.device_bridges" in script
+    assert "health_endpoint" in script
+    assert "preflight_endpoint" in script
+    assert "evidence_contracts" in script
+    assert "open_workspace" in script
+    assert 'data-bridge-action="open_workspace"' in script
+    assert 'data-bridge-action="health_check"' in script
+    assert "bridge_contract.open_workspace" in script
+    assert "bridge_contract.health_check" in script
+    assert "bridge_contract.preflight" in script
     assert "is_running: liveRunningFlag(session, snapshot, state)" in script
     assert "active_goal: state.active_goal ||" in script
     assert "running=${ctx.is_running ? \"true\" : \"false\"}" in script
@@ -285,6 +353,12 @@ def test_live_gui_static_script_exposes_runtime_ide_adapters() -> None:
     assert "operator.context" in script
     assert "operator.attention" in script
     assert "attention_event_key" in script
+    assert '<div class="binder-title binder-title-att" title="Operator Attention">ATT</div>' in script
+    assert '<div class="binder-title binder-title-att" title="Operator Attention">ATTENTION</div>' not in script
+    assert "Operator attention is surfaced only through the ATT binder/report page." in script
+    assert "Last-commit behavior: ATT content is rendered only after opening the ATT page." in script
+    assert "Waiting for operator input:" not in script
+    assert "Runtime attention required:" not in script
     assert "recordLiveAttentionAction(\"question\", \"answer\", event)" in script
     assert "recordLiveAttentionAction(\"fault\", \"backend\", event)" in script
     assert "operator.timeline" in script
@@ -383,6 +457,7 @@ def test_live_gui_static_script_exposes_runtime_ide_adapters() -> None:
     assert "Live bottom dock containment" in live_css
     assert "Runtime Focus Strip" in live_css
     assert "Device trace focus" in live_css
+    assert "live-device-inline-action" in live_css
     audit_script_for_layout = Path("tests/ui/live_runtime_ide_browser_audit.py").read_text(encoding="utf-8")
     assert "bottomDockContainment" in audit_script_for_layout
     assert "blankGraphSelection" in audit_script_for_layout

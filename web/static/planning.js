@@ -41,6 +41,7 @@ const liveAgentBinderList = document.getElementById("live-agent-binder-list");
 const liveCenterTitle = document.getElementById("live-center-title");
 const liveFocusStrip = document.getElementById("live-focus-strip");
 const liveReportToolbar = document.getElementById("live-report-toolbar");
+const liveBinderContextMenu = document.getElementById("live-binder-context-menu");
 const liveReportPanel = document.getElementById("live-report-panel");
 const liveBackendPanel = document.getElementById("live-backend-panel");
 const liveGraphPanel = document.getElementById("live-graph-panel");
@@ -90,8 +91,13 @@ const LIVE_BOX_CACHE_MAX_ITEM_CHARS = 220000;
 const LIVE_BOX_CACHE_MAX_TOTAL_CHARS = 700000;
 const LIVE_VIEW_IDS = new Set(["report", "backend", "graph", "artifacts", "timeline"]);
 const LIVE_TIMELINE_FILTER_IDS = new Set(["all", "info", "warning", "error", "tool", "artifact", "handoff"]);
+const BRIDGE_CONTRACT_EVENT_TYPES = {
+  open_workspace: "bridge_contract.open_workspace",
+  health_check: "bridge_contract.health_check",
+  preflight: "bridge_contract.preflight",
+};
 
-const LIVE_AGENTS = [
+const DEFAULT_LIVE_AGENTS = [
   { id: "objective", label: "Objective", short: "OBJ", stage: "idle", icon: "◎", iconPath: "/static/live_gui_icons/objective.svg?v=20260602-objective-contract-1" },
   { id: "orchestrator", label: "Orchestrator", short: "ORC", stage: "orchestrator", icon: "◇", iconPath: "/static/live_gui_icons/orchestrator.svg" },
   { id: "design", label: "Design Agent", short: "DSN", stage: "design", icon: "D", iconPath: "/static/live_gui_icons/design_agent.svg" },
@@ -104,6 +110,62 @@ const LIVE_AGENTS = [
   { id: "bo", label: "BO Agent", short: "BO", stage: "bo", icon: "B", iconPath: "/static/live_gui_icons/bo_agent.svg" },
   { id: "guardian", label: "Guardian Agent", short: "GRD", stage: "guardian", icon: "G", iconPath: "/static/live_gui_icons/guardian_agent.svg" },
 ];
+let LIVE_AGENTS = DEFAULT_LIVE_AGENTS.map((agent) => ({ ...agent, manifestSource: "fallback" }));
+let liveAgentManifestStatus = { ok: false, source: "fallback", error: "" };
+
+const LIVE_RENDERER_PROFILES = {
+  descriptor: { id: "descriptor", dashboardAgent: "", reportAgent: "", supported: true, execution_scope: "presentation_only", blocked_reason: "" },
+  generic: { id: "generic", dashboardAgent: "", reportAgent: "", supported: true, execution_scope: "presentation_only", blocked_reason: "" },
+  objective_reference: { id: "objective_reference", dashboardAgent: "objective", reportAgent: "objective", supported: true, execution_scope: "presentation_only", blocked_reason: "" },
+  orchestrator_reference: { id: "orchestrator_reference", dashboardAgent: "orchestrator", reportAgent: "orchestrator", supported: true, execution_scope: "presentation_only", blocked_reason: "" },
+  design_reference: { id: "design_reference", dashboardAgent: "design", reportAgent: "design", supported: true, execution_scope: "presentation_only", blocked_reason: "" },
+  specimen_reference: { id: "specimen_reference", dashboardAgent: "specimen", reportAgent: "specimen", supported: true, execution_scope: "presentation_only", blocked_reason: "" },
+  vision_reference: { id: "vision_reference", dashboardAgent: "vision", reportAgent: "vision", supported: true, execution_scope: "presentation_only", blocked_reason: "" },
+  manipulation_reference: { id: "manipulation_reference", dashboardAgent: "manipulation", reportAgent: "manipulation", supported: true, execution_scope: "presentation_only", blocked_reason: "" },
+  equipment_reference: { id: "equipment_reference", dashboardAgent: "equipment", reportAgent: "equipment", supported: true, execution_scope: "presentation_only", blocked_reason: "" },
+  analysis_reference: { id: "analysis_reference", dashboardAgent: "analysis", reportAgent: "analysis", supported: true, execution_scope: "presentation_only", blocked_reason: "" },
+  knowledge_reference: { id: "knowledge_reference", dashboardAgent: "knowledge", reportAgent: "knowledge", supported: true, execution_scope: "presentation_only", blocked_reason: "" },
+  bo_reference: { id: "bo_reference", dashboardAgent: "bo", reportAgent: "bo", supported: true, execution_scope: "presentation_only", blocked_reason: "" },
+  guardian_reference: { id: "guardian_reference", dashboardAgent: "guardian", reportAgent: "guardian", supported: true, execution_scope: "presentation_only", blocked_reason: "" },
+};
+
+function normalizeLiveRendererId(value) {
+  return String(value || "").trim().toLowerCase().replace(/[^a-z0-9_:.]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 80);
+}
+
+function liveRendererProfileForId(value, fallback = "descriptor") {
+  const clean = normalizeLiveRendererId(value);
+  if (!clean) return LIVE_RENDERER_PROFILES[fallback] || LIVE_RENDERER_PROFILES.descriptor;
+  if (LIVE_RENDERER_PROFILES[clean]) return LIVE_RENDERER_PROFILES[clean];
+  const fallbackProfile = LIVE_RENDERER_PROFILES[fallback] || LIVE_RENDERER_PROFILES.descriptor;
+  return {
+    ...fallbackProfile,
+    id: fallbackProfile.id || "descriptor",
+    supported: false,
+    execution_scope: "presentation_only",
+    blocked_reason: `unsupported_renderer_id:${clean}`,
+  };
+}
+
+function liveAgentRendererProfile(agentId) {
+  const agent = liveAgentById(agentId) || {};
+  const renderer = agent.renderer && typeof agent.renderer === "object" ? agent.renderer : {};
+  const fallbackId = normalizeLiveRendererId(renderer.fallback) || "descriptor";
+  const dashboardProfile = liveRendererProfileForId(renderer.dashboard, fallbackId);
+  const reportProfile = liveRendererProfileForId(renderer.report, normalizeLiveRendererId(renderer.dashboard) || fallbackId);
+  const reasons = [renderer.blocked_reason, dashboardProfile.blocked_reason, reportProfile.blocked_reason]
+    .map((item) => String(item || "").trim())
+    .filter(Boolean);
+  return {
+    id: normalizeLiveRendererId(renderer.dashboard) || dashboardProfile.id || "descriptor",
+    dashboardAgent: dashboardProfile.dashboardAgent || "",
+    reportAgent: reportProfile.reportAgent || dashboardProfile.reportAgent || "",
+    fallback: fallbackId,
+    supported: renderer.supported !== false && dashboardProfile.supported !== false && reportProfile.supported !== false && !reasons.length,
+    execution_scope: "presentation_only",
+    blocked_reason: reasons.join(";"),
+  };
+}
 
 let liveSelectedAgent = "orchestrator";
 let liveOrchestratorReady = false;
@@ -232,6 +294,86 @@ function knownLiveAgent(agentId) {
   return LIVE_AGENTS.some((agent) => agent.id === agentId);
 }
 
+function defaultLiveAgentForId(agentId) {
+  return DEFAULT_LIVE_AGENTS.find((agent) => agent.id === agentId || agent.stage === agentId) || null;
+}
+
+function normalizeLiveAgentManifestItem(item, index = 0) {
+  const raw = item && typeof item === "object" ? item : {};
+  const id = String(raw.id || raw.agent_id || raw.module_id || "").trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "_");
+  if (!id) return null;
+  const fallback = defaultLiveAgentForId(id) || {};
+  const label = String(raw.label || fallback.label || id).trim() || id;
+  const short = String(raw.short || fallback.short || label.replace(/[^A-Za-z0-9]+/g, "").slice(0, 3).toUpperCase() || "AGT").trim();
+  const stage = String(raw.stage || raw.graph_stage || fallback.stage || id).trim() || id;
+  const moduleId = String(raw.module_id || raw.moduleId || fallback.moduleId || id).trim();
+  const iconPath = String(raw.iconPath || raw.icon_path || raw.icon || fallback.iconPath || "").trim();
+  return {
+    ...fallback,
+    ...raw,
+    id,
+    label,
+    short,
+    stage,
+    moduleId,
+    module_id: moduleId,
+    handler: String(raw.handler || fallback.handler || "").trim(),
+    kind: String(raw.kind || fallback.kind || (id === "objective" ? "ui_only" : "agent")).trim(),
+    category: String(raw.category || fallback.category || "runtime").trim(),
+    enabled: raw.enabled === undefined ? true : Boolean(raw.enabled),
+    executionCapability: String(raw.execution_capability || raw.executionCapability || fallback.executionCapability || "").trim(),
+    graphNodeId: String(raw.graph_node_id || raw.graphNodeId || fallback.graphNodeId || "").trim(),
+    graphNodeKind: String(raw.graph_node_kind || raw.graphNodeKind || fallback.graphNodeKind || "").trim(),
+    icon: String(raw.icon || fallback.icon || short.slice(0, 1) || "A").trim(),
+    iconPath,
+    chat: raw.chat && typeof raw.chat === "object" ? raw.chat : {},
+    renderer: raw.renderer && typeof raw.renderer === "object" ? raw.renderer : {},
+    cards: Array.isArray(raw.cards) ? raw.cards : [],
+    reportSections: Array.isArray(raw.report_sections) ? raw.report_sections : Array.isArray(raw.reportSections) ? raw.reportSections : [],
+    bridgeRefs: Array.isArray(raw.bridge_refs) ? raw.bridge_refs : Array.isArray(raw.bridgeRefs) ? raw.bridgeRefs : [],
+    tools: Array.isArray(raw.tools) ? raw.tools : [],
+    outputContracts: Array.isArray(raw.output_contracts) ? raw.output_contracts : Array.isArray(raw.outputContracts) ? raw.outputContracts : [],
+    ioContract: raw.io_contract && typeof raw.io_contract === "object" ? raw.io_contract : {},
+    safety: raw.safety && typeof raw.safety === "object" ? raw.safety : {},
+    manifestSource: String(raw.source || "backend_manifest"),
+    order: Number.isFinite(Number(raw.order)) ? Number(raw.order) : index,
+  };
+}
+
+function applyLiveAgentManifest(payload) {
+  const agents = Array.isArray(payload?.agents) ? payload.agents : [];
+  const normalized = agents
+    .map((item, index) => normalizeLiveAgentManifestItem(item, index))
+    .filter(Boolean)
+    .sort((a, b) => (a.order || 0) - (b.order || 0));
+  if (!normalized.length || !normalized.some((agent) => agent.id === "orchestrator")) return false;
+  if (!normalized.some((agent) => agent.id === "objective")) {
+    const objective = normalizeLiveAgentManifestItem(defaultLiveAgentForId("objective") || DEFAULT_LIVE_AGENTS[0], -1);
+    if (objective) normalized.unshift(objective);
+  }
+  LIVE_AGENTS = normalized;
+  liveAgentManifestStatus = { ok: true, source: "/api/runtime/agent-manifests", error: "", graphId: payload.graph_id || "" };
+  if (!knownLiveAgent(liveSelectedAgent)) liveSelectedAgent = "orchestrator";
+  return true;
+}
+
+async function refreshLiveAgentManifest(options = {}) {
+  try {
+    const res = await fetch("/api/runtime/agent-manifests", { headers: { "Accept": "application/json" } });
+    if (!res.ok) throw new Error(`agent manifest HTTP ${res.status}`);
+    const payload = await res.json();
+    if (!payload || payload.ok === false || !applyLiveAgentManifest(payload)) {
+      throw new Error((payload && payload.error) || "agent manifest payload invalid");
+    }
+    if (liveLastSession && !options.skipRender) renderLiveRuntime(liveLastSession);
+    return payload;
+  } catch (err) {
+    liveAgentManifestStatus = { ok: false, source: "fallback", error: String(err) };
+    if (!options.silent) setChatStatus("MANIFEST FALLBACK", "warning", String(err));
+    return { ok: false, agents: LIVE_AGENTS, error: String(err), fallback: true };
+  }
+}
+
 const LIVE_CHAT_TARGET_SPECIALS = new Set(["current_agent", "selected_agent"]);
 
 function validLiveChatTarget(target) {
@@ -309,9 +451,29 @@ function setupLiveScrollbarFade() {
   }, { passive: true });
 }
 
+const LIVE_CHAT_PERSISTENT_MODES = new Set(["persistent", "always", "required"]);
+const LIVE_CHAT_ON_DEMAND_MODES = new Set(["open_on_demand", "on_demand", "collapsible", "contextual"]);
+const LIVE_CHAT_DISABLED_MODES = new Set(["disabled", "none", "off", "hidden"]);
+
+function liveAgentChatMode(agentId = liveSelectedAgent) {
+  const clean = String(agentId || "").toLowerCase();
+  const agent = LIVE_AGENTS.find((item) => item.id === clean || item.stage === clean) || {};
+  const chat = agent.chat && typeof agent.chat === "object" && !Array.isArray(agent.chat) ? agent.chat : {};
+  const explicitMode = String(chat.mode || chat.policy || "").trim().toLowerCase();
+  if (explicitMode) return explicitMode;
+  if (new Set(["objective", "orchestrator"]).has(clean)) return "persistent";
+  return "open_on_demand";
+}
+
+function liveAgentAllowsOnDemandChat(agentId = liveSelectedAgent) {
+  const mode = liveAgentChatMode(agentId);
+  return !LIVE_CHAT_DISABLED_MODES.has(mode);
+}
+
 function liveAgentNeedsChatPanel(agentId = liveSelectedAgent) {
   if (liveReportPage === "attention") return true;
-  return new Set(["objective", "orchestrator"]).has(String(agentId || "").toLowerCase());
+  const mode = liveAgentChatMode(agentId);
+  return LIVE_CHAT_PERSISTENT_MODES.has(mode);
 }
 
 function liveChatCanManualCollapse(agentId = liveSelectedAgent) {
@@ -813,7 +975,6 @@ function syncLiveTooltipAttributes(root = document) {
     const title = String(element.getAttribute("title") || "").trim();
     if (!title) continue;
     if (!element.dataset.liveTooltip) element.dataset.liveTooltip = title;
-    element.removeAttribute("title");
   }
 }
 
@@ -1089,8 +1250,10 @@ function liveTopbarStatusText(label) {
   if (!normalized) return "Ready";
   if (normalized.includes("ERROR") || normalized.includes("ISSUE")) return "Issue";
   if (normalized.includes("APPROVAL")) return "Approval";
+  if (normalized === "WAITING_USER") return "WAITING_USER";
   if (normalized.includes("SAFE STOP") || normalized.includes("EMERGENCY")) return "Stop";
-  if (normalized.includes("REASONING") || normalized.includes("SENDING") || normalized.includes("QUEUING") || normalized.includes("BUSY")) return "Working";
+  if (normalized === "BUSY") return "BUSY";
+  if (normalized.includes("REASONING") || normalized.includes("SENDING") || normalized.includes("QUEUING")) return "Working";
   if (normalized === "READY" || normalized === "RESTORED" || normalized === "GRAPH OK") return "Ready";
   if (normalized.startsWith("SECTION:")) return "Section";
   return compactText(liveHumanizeStatus(label, "Ready"), 16);
@@ -1129,12 +1292,12 @@ function setRuntimeChip(chip, label, cls, title) {
 function updateLiveConnectionChips() {
   const streamClass = liveStreamState === "live" ? "ok" : liveStreamState === "error" ? "warning" : "idle";
   const streamLabel = liveStreamState === "live"
-    ? "Live"
+    ? "SSE Live"
     : liveStreamState === "error"
-      ? "Issue"
+      ? "SSE Issue"
       : liveStreamState === "connecting"
-        ? "Connecting"
-        : "Idle";
+        ? "SSE Connecting"
+        : "SSE Idle";
   const streamTitle = liveLastEventAt
     ? `Runtime event stream: ${liveStreamState}. Last event ${new Date(liveLastEventAt).toLocaleString()}`
     : `Runtime event stream: ${liveStreamState}. Waiting for first event.`;
@@ -1158,12 +1321,12 @@ function updateLiveConnectionChips() {
   const syncLabel = displayedSyncState === "refreshing"
     ? "Syncing"
     : displayedSyncState === "ok"
-      ? syncAge
+      ? `Sync ${syncAge}`
       : displayedSyncState === "stale"
-        ? `Stale ${syncAge}`
-        : displayedSyncState === "error"
-          ? "Issue"
-          : "Waiting";
+        ? `Sync stale ${syncAge}`
+      : displayedSyncState === "error"
+          ? "Sync issue"
+          : "Sync waiting";
   setRuntimeChip(liveSyncChip, syncLabel, syncClass, syncTitle);
 }
 
@@ -1201,9 +1364,9 @@ function markLiveStreamState(state, eventTs = null) {
 function updatePlanningControls() {
   const runtimeBusy = planningThinkingCount > 0 || liveQuickActionBusy || liveBackendPlanningBusy;
   if (btnPlanningSend) {
-    btnPlanningSend.disabled = planningMessageSubmitInFlight;
+    btnPlanningSend.disabled = planningMessageSubmitInFlight || runtimeBusy;
     btnPlanningSend.title = runtimeBusy
-      ? "Queue an Orchestrator follow-up for the running loop"
+      ? "Backend orchestrator is still reasoning in this session"
       : "Send message (Ctrl+Enter)";
   }
   if (btnPlanningGenerate) {
@@ -1732,6 +1895,7 @@ function renderPlanningChatMessageDetail(msg, messageIndex) {
       ${renderReasoningBlock(msg)}
       ${content ? `<div class="message-content">${content}</div>` : ""}
       ${renderChatReportHint(msg)}
+      ${renderFemContourCard(msg)}
       ${renderBoResultCard(msg, `chat-${messageIndex}`)}
     </div>
   `;
@@ -2734,9 +2898,19 @@ function compactPlanningRevealBacklog(unseenItems) {
 function updatePlanningDisplayedMessages(messages, options = {}) {
   const canonical = limitPlanningMessageCache(Array.isArray(messages) ? messages : []);
   const canonicalItems = buildPlanningChatItems(canonical);
+  const canonicalItemKeys = new Set(canonicalItems.map(planningChatItemRevealKey));
+  const initialTranscriptHydration = planningDisplayInitialized
+    && canonicalItemKeys.size > 0
+    && planningDisplayedChatItemKeys.size === 0;
+  const replacesVisibleTranscript = planningDisplayInitialized
+    && canonicalItemKeys.size > 0
+    && planningDisplayedChatItemKeys.size > 0
+    && !Array.from(canonicalItemKeys).some((key) => planningDisplayedChatItemKeys.has(key));
   // Session restore/page refresh should hydrate the existing transcript immediately.
   // Only messages that arrive after the chat surface is initialized use the reveal queue.
-  const immediate = Boolean(options.immediate || options.scrollToBottom === false || planningHistoryLoading || !planningDisplayInitialized);
+  // Browser audits and session switches can replace the whole transcript; those must not
+  // wait behind the live-message reveal queue.
+  const immediate = Boolean(options.immediate || options.scrollToBottom === false || planningHistoryLoading || !planningDisplayInitialized || initialTranscriptHydration || replacesVisibleTranscript);
   if (immediate) {
     planningDisplayedMessages = canonical;
     syncPlanningDisplayedMessageKeys(canonical);
@@ -2751,7 +2925,6 @@ function updatePlanningDisplayedMessages(messages, options = {}) {
     return planningDisplayedMessages;
   }
 
-  const canonicalItemKeys = new Set(canonicalItems.map(planningChatItemRevealKey));
   for (const key of Array.from(planningDisplayedChatItemKeys)) {
     if (!canonicalItemKeys.has(key)) planningDisplayedChatItemKeys.delete(key);
   }
@@ -3459,12 +3632,12 @@ function collectLiveTokenUsage(session = liveLastSession) {
 function updateLiveTokenChip(session = liveLastSession) {
   const usage = collectLiveTokenUsage(session);
   if (!usage.total) {
-    setCompactTextWithTitle(liveTokenChip, "Tokens -", "No token usage recorded for this Live GUI session yet.");
+    setCompactTextWithTitle(liveTokenChip, "Tok -", "No token usage recorded for this Live GUI session yet.");
     return;
   }
   setCompactTextWithTitle(
     liveTokenChip,
-    `Tokens ${compactTokenCount(usage.total)}`,
+    `Tok ${compactTokenCount(usage.total)}`,
     `LLM token usage: total=${usage.total}, prompt=${usage.prompt}, completion=${usage.completion}, calls=${usage.calls}`
   );
 }
@@ -3574,7 +3747,7 @@ function renderAgentBinder(session) {
       ${agentTabs.join("")}
     </div>
     <div class="binder-attention-group">
-      <div class="binder-title binder-title-att" title="Operator Attention">ATTENTION</div>
+      <div class="binder-title binder-title-att" title="Operator Attention">ATT</div>
       <button class="binder-tab binder-attention-tab ${liveCurrentView === "report" && liveReportPage === "attention" ? "active" : ""} status-${attentionTone}" data-attention-action="open" title="Operator Attention · approvals ${attention.approvals}, questions ${attention.questions}, faults ${attention.faults}" aria-label="Operator Attention">
         <span class="binder-icon binder-attention-icon" aria-hidden="true">!</span>
         <span class="binder-agent-copy">
@@ -3602,7 +3775,26 @@ function liveCenterRenderKey(session = liveLastSession) {
     ? [guardianStatus.status || "", guardianSummary.risk_score || 0, guardianSummary.gate_count || 0, guardianSummary.incident_count || 0, guardianSummary.blocked_action_count || 0, guardianSummary.pending_approval_count || 0].join(":")
     : "no-guardian-status";
   const graphLayoutKey = liveCurrentView === "graph" ? `${liveGraphLayoutMode()}:${liveGraphPanelWidthKey()}` : "";
-  return [runId, stage, liveSelectedAgent, liveReportPage, liveRunEvents.length, liveRecentEvents.length, liveRunArtifacts.length, messageCount, approvalCount, guardianKey, graphLayoutKey].join("|");
+  return [
+    runId,
+    stage,
+    liveSelectedAgent,
+    liveReportPage,
+    liveSelectedEventKey,
+    liveSelectedGraphNodeId,
+    liveSelectedReportSectionTitle,
+    liveRunEvents.length,
+    liveRecentEvents.length,
+    liveRunArtifacts.length,
+    messageCount,
+    approvalCount,
+    guardianKey,
+    graphLayoutKey,
+  ].join("|");
+}
+
+function invalidateLiveCenterRender(view = liveCurrentView || "report") {
+  if (view && LIVE_VIEW_IDS.has(view)) liveCenterRenderKeys.delete(view);
 }
 
 function liveGraphLayoutMode() {
@@ -4488,10 +4680,17 @@ function agentSpecificReportProfile(report, status, agentLabel) {
         ["loop_reflections", (state.run_metadata && Array.isArray(state.run_metadata.loop_reflections)) ? state.run_metadata.loop_reflections.length : 0],
         ["pending_warnings", report.warnings.length],
       ],
-      checklist: ["Check mission contract", "Review latest follow-up", "Confirm next handoff packet", "Resolve operator questions", "Preserve Guardian authority"],
+      checklist: [
+        "Check mission contract",
+        "Select next agent",
+        "Confirm next handoff packet",
+        "Resolve operator questions",
+        "Preserve live/test safety gates",
+        "Preserve Guardian authority",
+      ],
     },
     design: {
-      title: "Design Decision / Candidate Evidence",
+      title: "Design Geometry / Manufacturability",
       summary: "Shows objective contract, hypothesis, candidate pool, deterministic selection rationale, rejected/repair log, and Specimen Agent handoff readiness.",
       rows: [
         ["objective", designObjective.primary_metric || spec.objective_type || "-"],
@@ -5440,16 +5639,18 @@ function renderAgentSpecificReportSection(report, status, agentLabel) {
   const profile = agentSpecificReportProfile(report, status, agentLabel);
   const rows = runtimeRows(profile.rows || []);
   const checklist = renderReportList(profile.checklist || [], "No role-specific checklist recorded.");
-  const orchestratorDetails = liveSelectedAgent === "orchestrator" ? renderOrchestratorReportDetails(report) : "";
-  const designDetails = liveSelectedAgent === "design" ? renderDesignReportDetails(report) : "";
-  const specimenDetails = liveSelectedAgent === "specimen" ? renderSpecimenReportDetails(report) : "";
-  const visionDetails = liveSelectedAgent === "vision" ? renderVisionReportDetails(report) : "";
-  const manipulationDetails = liveSelectedAgent === "manipulation" ? renderManipulationReportDetails(report) : "";
-  const equipmentDetails = liveSelectedAgent === "equipment" ? renderEquipmentReportDetails(report) : "";
-  const analysisDetails = liveSelectedAgent === "analysis" ? renderAnalysisReportDetails(report) : "";
-  const knowledgeDetails = liveSelectedAgent === "knowledge" ? renderKnowledgeReportDetails(report) : "";
-  const boDetails = liveSelectedAgent === "bo" ? renderBoReportDetails(report) : "";
-  const guardianDetails = liveSelectedAgent === "guardian" ? renderGuardianReportDetails(report) : "";
+  const rendererProfile = liveAgentRendererProfile(liveSelectedAgent);
+  const reportAgentId = rendererProfile.reportAgent || String(liveSelectedAgent || "").toLowerCase();
+  const orchestratorDetails = reportAgentId === "orchestrator" ? renderOrchestratorReportDetails(report) : "";
+  const designDetails = reportAgentId === "design" ? renderDesignReportDetails(report) : "";
+  const specimenDetails = reportAgentId === "specimen" ? renderSpecimenReportDetails(report) : "";
+  const visionDetails = reportAgentId === "vision" ? renderVisionReportDetails(report) : "";
+  const manipulationDetails = reportAgentId === "manipulation" ? renderManipulationReportDetails(report) : "";
+  const equipmentDetails = reportAgentId === "equipment" ? renderEquipmentReportDetails(report) : "";
+  const analysisDetails = reportAgentId === "analysis" ? renderAnalysisReportDetails(report) : "";
+  const knowledgeDetails = reportAgentId === "knowledge" ? renderKnowledgeReportDetails(report) : "";
+  const boDetails = reportAgentId === "bo" ? renderBoReportDetails(report) : "";
+  const guardianDetails = reportAgentId === "guardian" ? renderGuardianReportDetails(report) : "";
   return `
     <section class="runtime-card-section live-report-section live-agent-specific-report">
       <h4>${escapeHtml(profile.title)}</h4>
@@ -5824,6 +6025,9 @@ async function recordLiveOperatorEvent(action, message, payload = {}, namespace 
       ...trace,
     },
   };
+  if (action === "ask_drafted" && !body.payload.ask_scope) {
+    body.payload.ask_scope = "selected_report_section";
+  }
   const endpoint = state.run_id
     ? `/api/runs/${encodeURIComponent(state.run_id)}/operator-events`
     : "/api/runtime/operator-event";
@@ -5922,6 +6126,7 @@ function pinSelectedFinding() {
     event_key: trace.selected_event_key,
   };
   livePinnedFindings = [finding, ...livePinnedFindings.filter((item) => item.agent_id !== liveSelectedAgent)].slice(0, 12);
+  invalidateLiveCenterRender("report");
   renderLiveRuntime(liveLastSession);
   return finding;
 }
@@ -6545,6 +6750,193 @@ function renderMiniBarChart(items, options = {}) {
   `;
 }
 
+function renderDescriptorScatterPlot(report, descriptor = {}, chart = {}) {
+  const points = Array.isArray(chart.points) ? chart.points : [];
+  const clean = points.map((point, index) => {
+    const row = point && typeof point === "object" ? point : {};
+    const x = dashboardFiniteNumber(descriptorMaybeSelectorValue(report, row.x ?? row.x_selector ?? row.selector_x));
+    const y = dashboardFiniteNumber(descriptorMaybeSelectorValue(report, row.y ?? row.y_selector ?? row.selector_y));
+    const value = descriptorMaybeSelectorValue(report, row.value ?? row.value_selector ?? row.y ?? row.y_selector);
+    return {
+      label: row.label || row.id || `point ${index + 1}`,
+      x,
+      y,
+      value: value === undefined ? "" : renderRuntimeValue(value),
+      tone: row.tone || descriptor.tone || "info",
+    };
+  }).filter((point) => point.x !== null && point.y !== null);
+  if (!clean.length) return renderVizEmpty(chart.empty || "Descriptor scatter plot has no numeric points yet.");
+  const xs = clean.map((point) => point.x);
+  const ys = clean.map((point) => point.y);
+  const xMin = dashboardFiniteNumber(chart.x_min) ?? Math.min(...xs);
+  const xMaxRaw = dashboardFiniteNumber(chart.x_max) ?? Math.max(...xs);
+  const yMin = dashboardFiniteNumber(chart.y_min) ?? Math.min(...ys);
+  const yMaxRaw = dashboardFiniteNumber(chart.y_max) ?? Math.max(...ys);
+  const xMax = Math.abs(xMaxRaw - xMin) > 1e-9 ? xMaxRaw : xMin + 1;
+  const yMax = Math.abs(yMaxRaw - yMin) > 1e-9 ? yMaxRaw : yMin + 1;
+  const pointMarkup = clean.slice(0, chart.limit || 32).map((point) => {
+    const xPct = dashboardPercent(((point.x - xMin) / (xMax - xMin)) * 100);
+    const yPct = dashboardPercent(((point.y - yMin) / (yMax - yMin)) * 100);
+    const title = `${point.label}: x=${numberText(point.x, 4)}, y=${numberText(point.y, 4)}${point.value ? `, value=${point.value}` : ""}`;
+    return `
+      <span class="ar-scatter-point tone-${escapeHtml(point.tone)}" style="--x:${numberText(xPct, 2)}%;--y:${numberText(100 - yPct, 2)}%;" title="${escapeHtml(title)}">
+        <i>${escapeHtml(compactText(point.label, 10))}</i>
+      </span>
+    `;
+  }).join("");
+  return `
+    <div class="ar-scatter-plot" role="img" aria-label="${escapeHtml(chart.label || descriptor.title || "descriptor scatter_plot")}">
+      <div class="ar-scatter-frame">
+        ${pointMarkup}
+      </div>
+      <div class="ar-scatter-axis x"><span>${escapeHtml(chart.x_label || "x")}</span><strong>${numberText(xMin, 4)} - ${numberText(xMaxRaw, 4)}</strong></div>
+      <div class="ar-scatter-axis y"><span>${escapeHtml(chart.y_label || "y")}</span><strong>${numberText(yMin, 4)} - ${numberText(yMaxRaw, 4)}</strong></div>
+    </div>
+  `;
+}
+
+function renderDescriptorLineChart(report, descriptor = {}, chart = {}) {
+  const points = Array.isArray(chart.points) ? chart.points : [];
+  const clean = points.map((point, index) => {
+    const row = point && typeof point === "object" ? point : {};
+    const rawValue = Object.prototype.hasOwnProperty.call(row, "value_selector") ? row.value_selector
+      : Object.prototype.hasOwnProperty.call(row, "selector") ? row.selector
+        : row.value;
+    const value = dashboardFiniteNumber(descriptorMaybeSelectorValue(report, rawValue));
+    return {
+      label: row.label || row.id || `point ${index + 1}`,
+      value,
+      tone: row.tone || descriptor.tone || "info",
+    };
+  }).filter((point) => point.value !== null);
+  if (!clean.length) return renderVizEmpty(chart.empty || "Descriptor line chart has no numeric points yet.");
+  const limited = clean.slice(0, chart.limit || 48);
+  const values = limited.map((point) => point.value);
+  const minRaw = dashboardFiniteNumber(chart.y_min) ?? Math.min(...values);
+  const maxRaw = dashboardFiniteNumber(chart.y_max) ?? Math.max(...values);
+  const maxValue = Math.abs(maxRaw - minRaw) > 1e-9 ? maxRaw : minRaw + 1;
+  const width = 240;
+  const height = 72;
+  const padX = 10;
+  const padY = 10;
+  const usableWidth = width - padX * 2;
+  const usableHeight = height - padY * 2;
+  const coords = limited.map((point, index) => {
+    const x = limited.length === 1 ? width / 2 : padX + (index / (limited.length - 1)) * usableWidth;
+    const y = padY + (1 - ((point.value - minRaw) / (maxValue - minRaw))) * usableHeight;
+    return { ...point, x, y };
+  });
+  const path = coords.map((point) => `${numberText(point.x, 2)},${numberText(point.y, 2)}`).join(" ");
+  const first = coords[0];
+  const last = coords[coords.length - 1];
+  return `
+    <div class="ar-line-chart" role="img" aria-label="${escapeHtml(chart.label || descriptor.title || "descriptor line_chart")}">
+      <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" aria-hidden="true">
+        <polyline points="${escapeHtml(path)}"></polyline>
+        ${coords.map((point) => `<circle class="tone-${escapeHtml(point.tone)}" cx="${numberText(point.x, 2)}" cy="${numberText(point.y, 2)}" r="2.4"><title>${escapeHtml(point.label)}: ${escapeHtml(numberText(point.value, 4))}</title></circle>`).join("")}
+      </svg>
+      <div class="ar-line-chart-meta">
+        <span>${escapeHtml(first ? compactText(first.label, 18) : "")}</span>
+        <strong>${escapeHtml(numberText(minRaw, 4))} - ${escapeHtml(numberText(maxRaw, 4))}</strong>
+        <span>${escapeHtml(last ? compactText(last.label, 18) : "")}</span>
+      </div>
+      <div class="ar-line-chart-axis"><span>${escapeHtml(chart.x_label || "step")}</span><span>${escapeHtml(chart.y_label || "value")}</span></div>
+    </div>
+  `;
+}
+
+function renderDescriptorTableChart(report, descriptor = {}, chart = {}) {
+  const columns = Array.isArray(chart.columns) ? chart.columns : [];
+  const rows = Array.isArray(chart.rows) ? chart.rows : Array.isArray(chart.items) ? chart.items : [];
+  const cleanColumns = columns.map((column, index) => {
+    const col = column && typeof column === "object" ? column : {};
+    const id = String(col.id || col.key || `column_${index + 1}`);
+    return {
+      id,
+      label: col.label || col.title || id.replace(/[_-]+/g, " "),
+      selector: col.selector || col.value_selector || "",
+    };
+  }).filter((column) => column.id);
+  if (!cleanColumns.length || !rows.length) return renderVizEmpty(chart.empty || "Descriptor table has no rows yet.");
+  const limitedRows = rows.slice(0, chart.limit || 12).map((row, rowIndex) => {
+    const source = row && typeof row === "object" ? row : {};
+    const rowLabel = source.label || source.id || `row ${rowIndex + 1}`;
+    const cells = cleanColumns.map((column) => {
+      const rawValue = Object.prototype.hasOwnProperty.call(source, column.id)
+        ? source[column.id]
+        : column.selector;
+      const value = descriptorMaybeSelectorValue(report, rawValue);
+      return value === undefined || value === null || value === "" ? "-" : renderRuntimeValue(value, "-");
+    });
+    return { label: rowLabel, cells };
+  });
+  return `
+    <div class="ar-descriptor-table" role="region" aria-label="${escapeHtml(chart.label || descriptor.title || "descriptor table")}">
+      <table>
+        <thead>
+          <tr>${cleanColumns.map((column) => `<th>${escapeHtml(compactText(column.label, 24))}</th>`).join("")}</tr>
+        </thead>
+        <tbody>
+          ${limitedRows.map((row) => `
+            <tr title="${escapeHtml(row.label)}">
+              ${row.cells.map((cell) => `<td>${escapeHtml(compactText(cell, 36))}</td>`).join("")}
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+      ${rows.length > limitedRows.length ? `<small>${escapeHtml(`${rows.length - limitedRows.length} additional row(s) hidden`)}</small>` : ""}
+    </div>
+  `;
+}
+
+function renderDescriptorHeatmapChart(report, descriptor = {}, chart = {}) {
+  const cells = Array.isArray(chart.cells) ? chart.cells : [];
+  const clean = cells.map((cell, index) => {
+    const row = cell && typeof cell === "object" ? cell : {};
+    const rawValue = Object.prototype.hasOwnProperty.call(row, "value_selector") ? row.value_selector
+      : Object.prototype.hasOwnProperty.call(row, "selector") ? row.selector
+        : row.value;
+    const numericValue = dashboardFiniteNumber(descriptorMaybeSelectorValue(report, rawValue));
+    const displayValue = descriptorMaybeSelectorValue(report, rawValue);
+    return {
+      row: String(row.row || row.y || row.row_id || `row ${index + 1}`),
+      column: String(row.column || row.x || row.column_id || `column ${index + 1}`),
+      value: numericValue,
+      display: displayValue === undefined ? "" : renderRuntimeValue(displayValue, "-"),
+      tone: row.tone || descriptor.tone || "info",
+    };
+  }).filter((cell) => cell.row && cell.column);
+  if (!clean.length) return renderVizEmpty(chart.empty || "Descriptor heatmap has no cells yet.");
+  const values = clean.map((cell) => cell.value).filter((value) => value !== null);
+  const minRaw = dashboardFiniteNumber(chart.min ?? chart.value_min) ?? (values.length ? Math.min(...values) : 0);
+  const maxRaw = dashboardFiniteNumber(chart.max ?? chart.value_max) ?? (values.length ? Math.max(...values) : 1);
+  const maxValue = Math.abs(maxRaw - minRaw) > 1e-9 ? maxRaw : minRaw + 1;
+  const limited = clean.slice(0, chart.limit || 48);
+  return `
+    <div class="ar-descriptor-heatmap" role="img" aria-label="${escapeHtml(chart.label || descriptor.title || "descriptor heatmap")}">
+      <div class="ar-descriptor-heatmap-meta">
+        <span>${escapeHtml(chart.y_label || "row")}</span>
+        <strong>${escapeHtml(numberText(minRaw, 4))} - ${escapeHtml(numberText(maxRaw, 4))}</strong>
+        <span>${escapeHtml(chart.x_label || "column")}</span>
+      </div>
+      <div class="ar-descriptor-heatmap-grid">
+        ${limited.map((cell) => {
+          const pct = cell.value === null ? 0 : dashboardPercent(((cell.value - minRaw) / (maxValue - minRaw)) * 100);
+          const title = `${cell.row} / ${cell.column}: ${cell.display || "-"}`;
+          return `
+            <span class="tone-${escapeHtml(cell.tone)}" style="--heat:${numberText(pct, 2)}%;" title="${escapeHtml(title)}">
+              <i>${escapeHtml(compactText(cell.row, 12))}</i>
+              <b>${escapeHtml(compactText(cell.column, 12))}</b>
+              <strong>${escapeHtml(compactText(cell.display || "-", 12))}</strong>
+            </span>
+          `;
+        }).join("")}
+      </div>
+      ${clean.length > limited.length ? `<small>${escapeHtml(`${clean.length - limited.length} additional cell(s) hidden`)}</small>` : ""}
+    </div>
+  `;
+}
+
 function renderStatusStackChart(report, status) {
   const state = report.state || {};
   const running = liveRunningFlag(liveLastSession || {}, liveLastSnapshot || {}, state);
@@ -7027,6 +7419,353 @@ function renderEvidenceCoverageMatrix(report, channels, options = {}) {
   `;
 }
 
+function descriptorPathValue(root, path) {
+  const clean = String(path || "").trim();
+  if (!clean) return undefined;
+  const parts = clean.split(".").map((part) => part.trim()).filter(Boolean);
+  let value = root;
+  for (const part of parts) {
+    if (value === undefined || value === null) return undefined;
+    if (Array.isArray(value)) {
+      const index = Number(part);
+      value = Number.isInteger(index) ? value[index] : value.map((item) => item && typeof item === "object" ? item[part] : undefined).filter((item) => item !== undefined);
+    } else if (typeof value === "object") {
+      value = value[part];
+    } else {
+      return undefined;
+    }
+  }
+  return value;
+}
+
+function descriptorSelectorValue(report, selector) {
+  const path = String(selector || "").trim();
+  if (!path) return undefined;
+  const metadata = reportRuntimeMetadata(report);
+  const roots = {
+    report,
+    state: report.state || {},
+    spec: report.spec || {},
+    metadata,
+    runtime: report.runtime || {},
+  };
+  if (path.includes(".")) {
+    const [rootKey, ...rest] = path.split(".");
+    if (Object.prototype.hasOwnProperty.call(roots, rootKey)) {
+      return descriptorPathValue(roots[rootKey], rest.join("."));
+    }
+  }
+  const direct = descriptorPathValue(report, path);
+  if (direct !== undefined) return direct;
+  return descriptorPathValue(metadata, path);
+}
+
+function descriptorMaybeSelectorValue(report, value) {
+  if (typeof value === "string") {
+    const selected = descriptorSelectorValue(report, value);
+    return selected !== undefined ? selected : value;
+  }
+  return value;
+}
+
+function descriptorSafeActionUrl(value) {
+  const url = String(value || "").trim();
+  if (!url || !url.startsWith("/") || url.startsWith("//")) return "";
+  if (/[\u0000-\u001f]/.test(url)) return "";
+  if (/^\/api\//i.test(url)) return "";
+  const allowedPrefixes = [
+    "/",
+    "/live",
+    "/planning",
+    "/ide",
+    "/module-management",
+    "/printer",
+    "/lerobot",
+    "/bo",
+    "/cae",
+    "/equipment/windows",
+    "/evolution-lab",
+  ];
+  return allowedPrefixes.some((prefix) => url === prefix || url.startsWith(`${prefix}?`) || url.startsWith(`${prefix}#`))
+    ? url
+    : "";
+}
+
+function descriptorSafeApiActionUrl(value) {
+  const url = String(value || "").trim();
+  if (!url || !url.startsWith("/api/") || url.startsWith("//")) return "";
+  if (/[\u0000-\u001f]/.test(url)) return "";
+  return url;
+}
+
+function renderDescriptorCompoundChart(report, descriptor = {}, chart = {}) {
+  const panels = Array.isArray(chart.panels) ? chart.panels : Array.isArray(chart.items) ? chart.items : [];
+  const limitedPanels = panels.slice(0, chart.limit || 6).map((panel, index) => {
+    const item = panel && typeof panel === "object" ? panel : {};
+    const panelDescriptor = {
+      ...descriptor,
+      id: item.id || `${descriptor.id || "descriptor"}_panel_${index + 1}`,
+      title: item.title || item.label || `Panel ${index + 1}`,
+      tone: item.tone || descriptor.tone || "info",
+      chart: item.chart && typeof item.chart === "object" ? item.chart : {},
+    };
+    const body = renderDescriptorChart(report, panelDescriptor);
+    return `
+      <article class="ar-descriptor-compound-panel tone-${escapeHtml(panelDescriptor.tone)}">
+        <header>
+          <strong>${escapeHtml(compactText(panelDescriptor.title, 42))}</strong>
+          ${item.subtitle || item.description ? `<small>${escapeHtml(compactText(item.subtitle || item.description, 90))}</small>` : ""}
+        </header>
+        ${body || renderVizEmpty("Compound panel has no supported chart yet.")}
+      </article>
+    `;
+  });
+  if (!limitedPanels.length) return renderVizEmpty(chart.empty || "Descriptor compound chart has no panels yet.");
+  const layout = String(chart.layout || "two_column").toLowerCase();
+  const layoutClass = ["one_column", "two_column", "three_column", "compact"].includes(layout) ? layout : "two_column";
+  return `
+    <div class="ar-descriptor-compound ${escapeHtml(layoutClass)}" role="group" aria-label="${escapeHtml(chart.label || descriptor.title || "descriptor compound chart")}">
+      ${limitedPanels.join("")}
+      ${panels.length > limitedPanels.length ? `<small class="ar-descriptor-compound-limit">${escapeHtml(`${panels.length - limitedPanels.length} additional panel(s) hidden`)}</small>` : ""}
+    </div>
+  `;
+}
+
+function renderDescriptorChart(report, descriptor = {}) {
+  const chart = descriptor.chart && typeof descriptor.chart === "object" ? descriptor.chart : null;
+  if (!chart) return "";
+  const type = String(chart.type || chart.chart || "").toLowerCase();
+  if (type === "compound_chart" || type === "compound" || type === "chart_grid" || type === "dashboard_grid" || type === "panel_grid" || chart.render_mode === "compound_chart") {
+    return renderDescriptorCompoundChart(report, descriptor, chart);
+  }
+  if (type === "scatter_plot" || type === "scatter" || type === "xy_scatter" || chart.render_mode === "scatter_plot") {
+    return renderDescriptorScatterPlot(report, descriptor, chart);
+  }
+  if (type === "line_chart" || type === "line" || type === "sparkline" || type === "trend_line" || chart.render_mode === "line_chart") {
+    return renderDescriptorLineChart(report, descriptor, chart);
+  }
+  if (type === "table" || type === "data_table" || type === "descriptor_table" || chart.render_mode === "table") {
+    return renderDescriptorTableChart(report, descriptor, chart);
+  }
+  if (type === "heatmap" || type === "matrix" || type === "cell_heatmap" || chart.render_mode === "heatmap") {
+    return renderDescriptorHeatmapChart(report, descriptor, chart);
+  }
+  if (!["mini_bar_chart", "mini-bars", "mini_bars", "bar_chart", "bar"].includes(type)) {
+    return renderVizEmpty(chart.empty || `Unsupported descriptor chart: ${type || "unknown"}`);
+  }
+  const items = Array.isArray(chart.items) ? chart.items : [];
+  const rows = items.map((item, index) => {
+    const row = item && typeof item === "object" ? item : {};
+    const rawValue = Object.prototype.hasOwnProperty.call(row, "value_selector") ? row.value_selector
+      : Object.prototype.hasOwnProperty.call(row, "selector") ? row.selector
+        : row.value;
+    const rawMax = Object.prototype.hasOwnProperty.call(row, "max_selector") ? row.max_selector : row.max;
+    const value = descriptorMaybeSelectorValue(report, rawValue);
+    const max = descriptorMaybeSelectorValue(report, rawMax);
+    const meta = Object.prototype.hasOwnProperty.call(row, "meta_selector")
+      ? descriptorMaybeSelectorValue(report, row.meta_selector)
+      : row.meta;
+    return {
+      label: row.label || row.id || `item ${index + 1}`,
+      value,
+      max,
+      meta: meta === undefined ? "" : renderRuntimeValue(meta),
+      tone: row.tone || descriptor.tone || "info",
+    };
+  });
+  return renderMiniBarChart(rows, {
+    label: chart.label || descriptor.title || "descriptor mini_bar_chart",
+    compact: chart.compact !== false,
+    limit: chart.limit || 10,
+    emptyText: chart.empty || "Descriptor chart has no numeric selector values yet.",
+  });
+}
+
+function renderDescriptorActions(descriptor = {}) {
+  const actions = Array.isArray(descriptor.actions) ? descriptor.actions : [];
+  if (!actions.length) return "";
+  const rendered = actions.map((action, index) => {
+    const item = action && typeof action === "object" ? action : {};
+    const label = item.label || item.title || item.id || `Action ${index + 1}`;
+    const kind = String(item.kind || "link").toLowerCase();
+    const scope = String(item.execution_scope || "").toLowerCase();
+    const method = String(item.method || "GET").toUpperCase();
+    const actionId = String(item.id || `descriptor_action_${index + 1}`);
+    if (scope === "read_only_api" && item.live_card_runnable === true && method === "GET") {
+      const endpoint = descriptorSafeApiActionUrl(item.url || item.href || item.route || item.path);
+      if (endpoint) {
+        return `<button type="button" class="btn ar-descriptor-action ar-descriptor-api-action" data-descriptor-api-action="read_only_api" data-descriptor-action-id="${escapeHtml(actionId)}" data-descriptor-action-url="${escapeHtml(endpoint)}" data-descriptor-action-method="GET">${escapeHtml(label)}</button>`;
+      }
+    }
+    if (scope === "workspace_handoff" || item.handoff_required === true) {
+      const workspace = descriptorSafeActionUrl(item.handoff_workspace || item.workspace || item.route);
+      const endpoint = descriptorSafeApiActionUrl(item.url || item.href || item.path);
+      if (workspace) {
+        return `<button type="button" class="btn ar-descriptor-action ar-descriptor-handoff-action" data-descriptor-workspace-handoff="workspace_handoff" data-descriptor-action-id="${escapeHtml(actionId)}" data-descriptor-action-url="${escapeHtml(endpoint)}" data-descriptor-action-method="${escapeHtml(method)}" data-descriptor-handoff-workspace="${escapeHtml(workspace)}">${escapeHtml(label)}</button>`;
+      }
+    }
+    const url = descriptorSafeActionUrl(item.url || item.href || item.route || item.path);
+    if (!url || !["link", "navigation", "workspace"].includes(kind)) {
+      const reason = item.blocked_reason || item.execution_scope || "blocked";
+      return `<span class="btn disabled ar-descriptor-action" aria-disabled="true" title="${escapeHtml(reason)}">${escapeHtml(label)}</span>`;
+    }
+    return `<a class="btn ar-descriptor-action" href="${escapeHtml(url)}" target="_blank" rel="noopener" data-descriptor-action-url="${escapeHtml(url)}">${escapeHtml(label)}</a>`;
+  }).join("");
+  return rendered ? `<div class="ar-descriptor-actions" aria-label="descriptor.actions">${rendered}</div>` : "";
+}
+
+async function openDescriptorWorkspaceHandoff(button) {
+  const workspace = descriptorSafeActionUrl(button?.dataset?.descriptorHandoffWorkspace || "");
+  const endpoint = descriptorSafeApiActionUrl(button?.dataset?.descriptorActionUrl || "");
+  const method = String(button?.dataset?.descriptorActionMethod || "GET").toUpperCase();
+  const actionId = String(button?.dataset?.descriptorActionId || "descriptor_action");
+  const label = String(button?.textContent || actionId).trim() || actionId;
+  if (!workspace) {
+    setChatStatus("DESCRIPTOR HANDOFF BLOCKED", "warning", `${label} has no safe workspace route.`);
+    return;
+  }
+  let targetWorkspace = workspace;
+  if (workspace.startsWith("/")) {
+    const glue = workspace.includes("?") ? "&" : "?";
+    const params = new URLSearchParams({
+      descriptor_action: actionId,
+      descriptor_endpoint: endpoint,
+      descriptor_method: method,
+    });
+    targetWorkspace = `${workspace}${glue}${params.toString()}`;
+  }
+  setChatStatus("DESCRIPTOR HANDOFF", "idle", `${label} -> ${workspace}`);
+  await recordLiveIntentEvent(
+    "descriptor_action.workspace_handoff",
+    actionId,
+    `${label} descriptor action handed off to workspace.`,
+    {
+      source_action: "descriptor.workspace_handoff",
+      action_id: actionId,
+      endpoint,
+      method,
+      workspace,
+    },
+  ).catch(() => {});
+  window.open(targetWorkspace, "_blank", "noopener");
+}
+
+async function runDescriptorAction(button) {
+  const endpoint = descriptorSafeApiActionUrl(button?.dataset?.descriptorActionUrl || "");
+  const method = String(button?.dataset?.descriptorActionMethod || "GET").toUpperCase();
+  const actionId = String(button?.dataset?.descriptorActionId || "descriptor_action");
+  const label = String(button?.textContent || actionId).trim() || actionId;
+  if (!endpoint || method !== "GET") {
+    setChatStatus("DESCRIPTOR ACTION BLOCKED", "warning", `${label} is not a read-only GET API action.`);
+    return null;
+  }
+  const previousDisabled = button.disabled;
+  button.disabled = true;
+  button.classList.add("is-running");
+  setChatStatus("DESCRIPTOR ACTION", "running", `${label} -> ${endpoint}`);
+  try {
+    const data = await fetchJsonOrThrow(endpoint, { method: "GET" });
+    const resultStatus = data && Object.prototype.hasOwnProperty.call(data, "status")
+      ? String(data.status)
+      : data && Object.prototype.hasOwnProperty.call(data, "ok")
+        ? `ok=${String(data.ok)}`
+        : "completed";
+    setChatStatus("DESCRIPTOR ACTION OK", "idle", `${label}: ${resultStatus}`);
+    recordLiveIntentEvent(
+      "descriptor_action.completed",
+      actionId,
+      `${label} read-only descriptor API action completed.`,
+      { source_action: "descriptor.read_only_api", action_id: actionId, endpoint, method, result_status: resultStatus },
+    ).catch(() => {});
+    return data;
+  } finally {
+    button.disabled = previousDisabled;
+    button.classList.remove("is-running");
+  }
+}
+
+function renderDescriptorBody(report, descriptor = {}, emptyText = "Descriptor has no selectors yet.") {
+  const selectors = descriptor.selectors && typeof descriptor.selectors === "object" ? descriptor.selectors : {};
+  const rows = Object.entries(selectors).map(([label, selector]) => [
+    label,
+    descriptorSelectorValue(report, selector),
+  ]);
+  const rowBody = rows.length ? renderDashboardRows(rows) : "";
+  const chartBody = renderDescriptorChart(report, descriptor);
+  const actionBody = renderDescriptorActions(descriptor);
+  return [rowBody, chartBody, actionBody].filter(Boolean).join("") || renderVizEmpty(descriptor.empty || emptyText);
+}
+
+const DESCRIPTOR_LAYOUT_CLASS_TOKENS = {
+  densities: ["density-normal", "density-compact", "density-dense", "density-comfortable"],
+  priorities: ["priority-normal", "priority-low", "priority-high", "priority-critical"],
+  mobile: ["mobile-stack", "mobile-compact", "mobile-hide", "mobile-scroll"],
+};
+
+function descriptorLayoutIntent(descriptor = {}, defaults = {}) {
+  const intent = descriptor.layout_intent && typeof descriptor.layout_intent === "object" ? descriptor.layout_intent : {};
+  const allowedSpans = [3, 4, 5, 6, 7, 8, 9, 12];
+  const allowedDensities = DESCRIPTOR_LAYOUT_CLASS_TOKENS.densities.map((token) => token.replace("density-", ""));
+  const allowedPriorities = DESCRIPTOR_LAYOUT_CLASS_TOKENS.priorities.map((token) => token.replace("priority-", ""));
+  const allowedMobile = DESCRIPTOR_LAYOUT_CLASS_TOKENS.mobile.map((token) => token.replace("mobile-", ""));
+  const rawSpan = Number(intent.span ?? descriptor.span ?? defaults.span ?? 4);
+  const span = allowedSpans.includes(rawSpan) ? rawSpan : Number(defaults.span || 4);
+  const density = allowedDensities.includes(String(intent.density ?? descriptor.density ?? defaults.density ?? "normal").toLowerCase())
+    ? String(intent.density ?? descriptor.density ?? defaults.density ?? "normal").toLowerCase()
+    : "normal";
+  const priority = allowedPriorities.includes(String(intent.priority ?? descriptor.priority ?? defaults.priority ?? "normal").toLowerCase())
+    ? String(intent.priority ?? descriptor.priority ?? defaults.priority ?? "normal").toLowerCase()
+    : "normal";
+  const mobile = allowedMobile.includes(String(intent.mobile_behavior ?? descriptor.mobile_behavior ?? descriptor.mobileBehavior ?? defaults.mobile_behavior ?? "stack").toLowerCase())
+    ? String(intent.mobile_behavior ?? descriptor.mobile_behavior ?? descriptor.mobileBehavior ?? defaults.mobile_behavior ?? "stack").toLowerCase()
+    : "stack";
+  return { span: allowedSpans.includes(span) ? span : Number(defaults.span || 4), density, priority, mobile_behavior: mobile };
+}
+
+function descriptorLayoutClass(descriptor = {}, defaults = {}) {
+  const intent = descriptorLayoutIntent(descriptor, defaults);
+  return `density-${intent.density} priority-${intent.priority} mobile-${intent.mobile_behavior}`;
+}
+
+function renderAgentDescriptorCards(report, agentId) {
+  const agent = liveAgentById(agentId);
+  const cards = Array.isArray(agent.cards) ? agent.cards : [];
+  const rendered = cards.map((card, index) => {
+    const descriptor = card && typeof card === "object" ? card : {};
+    const title = descriptor.title || descriptor.id || `Descriptor ${index + 1}`;
+    const body = renderDescriptorBody(report, descriptor, "Descriptor has no selectors yet.");
+    const layout = descriptorLayoutIntent(descriptor, { span: 4 });
+    return renderDashboardCard(title, body, {
+      span: layout.span,
+      tone: descriptor.tone || agentId || "agent",
+      eyebrow: descriptor.eyebrow || "module descriptor",
+      className: `ar-descriptor-card ${descriptorLayoutClass(descriptor, { span: 4 })}`,
+    });
+  }).join("");
+  return rendered;
+}
+
+function renderAgentDescriptorReportSections(report, agentId, options = {}) {
+  const agent = liveAgentById(agentId);
+  const sections = Array.isArray(agent.reportSections) ? agent.reportSections : [];
+  if (!sections.length) return "";
+  return sections.map((section, index) => {
+    const descriptor = section && typeof section === "object" ? section : {};
+    const title = descriptor.title || descriptor.id || `Descriptor Report ${index + 1}`;
+    const body = renderDescriptorBody(report, descriptor, "Descriptor report has no selectors yet.");
+    if (options.academic) {
+      return renderReportSection(title, body, { wide: descriptor.wide !== false });
+    }
+    const layout = descriptorLayoutIntent(descriptor, { span: 6 });
+    return renderDashboardCard(title, body, {
+      span: layout.span,
+      tone: descriptor.tone || agentId || "agent",
+      eyebrow: descriptor.eyebrow || "module descriptor report",
+      className: `ar-descriptor-report-section ${descriptorLayoutClass(descriptor, { span: 6 })}`,
+    });
+  }).join("");
+}
+
 function renderAgentEvidenceBoard(report, status, agentLabel, options = {}) {
   const agentId = String(liveSelectedAgent || "").toLowerCase();
   const channels = agentDataChannels(report, agentId);
@@ -7043,6 +7782,7 @@ function renderAgentEvidenceBoard(report, status, agentLabel, options = {}) {
         <em>${escapeHtml(numberText(avgScore * 100, 1))}% coverage</em>
       </div>
       ${renderAgentFlowStrip(report, status)}
+      ${renderAgentDescriptorCards(report, agentId)}
       ${renderChannelMatrix(channels, { limit: options.channelLimit || 8, label: `${agentLabel} data channels` })}
       ${renderEvidenceCoverageMatrix(report, channels)}
       <div class="ar-evidence-bottom">
@@ -11102,6 +11842,7 @@ function renderSpecimenDashboardCards(report, status, agentLabel, profile) {
   const filamentUsage = screenReport.filament_usage || {};
   const gcodeValidation = screenReport.gcode_validation || {};
   const printReadiness = screenReport.print_readiness || {};
+  const printerStatus = screenReport.printer_status || {};
   const spcReadiness = screenReport.spc_readiness || {};
   const spcSelectedPrinter = spcReadiness.selected_printer || printerProfile.selected_printer || {};
   const spcDeviceActions = spcReadiness.device_actions || printerStatus.actions || {};
@@ -11110,7 +11851,6 @@ function renderSpecimenDashboardCards(report, status, agentLabel, profile) {
   const autoejectionGate = screenReport.autoejection_gate || {};
   const buildTimeline = screenReport.build_timeline || {};
   const layerPreview = screenReport.layer_preview || {};
-  const printerStatus = screenReport.printer_status || {};
   const handoffStatus = screenReport.handoff_status || {};
   const artifactLedger = Array.isArray(screenReport.artifact_ledger) ? screenReport.artifact_ledger : [];
   const gates = specimenReadinessGateRows(screenReport, fabrication);
@@ -12384,13 +13124,18 @@ function renderAgentSpecializedDashboardSections(session, report, status, agentL
     bo: () => renderBoDashboardCards(report, status, agentLabel, profile),
     guardian: () => renderGuardianDashboardCards(report, status, agentLabel, profile),
   };
-  const specialized = cardsByAgent[agentId] ? cardsByAgent[agentId]() : renderAgentWorkcellCard(profile, report, status, agentLabel);
-  const visualization = ["orchestrator", "design", "specimen", "vision", "manipulation", "equipment", "analysis", "knowledge"].includes(agentId) ? "" : renderAgentVisualizationCard(report, status, agentLabel);
+  const rendererProfile = liveAgentRendererProfile(agentId);
+  const dashboardAgentId = rendererProfile.dashboardAgent && cardsByAgent[rendererProfile.dashboardAgent] ? rendererProfile.dashboardAgent : agentId;
+  const hasBuiltInReferenceDashboard = Boolean(cardsByAgent[dashboardAgentId]);
+  const specialized = hasBuiltInReferenceDashboard ? cardsByAgent[dashboardAgentId]() : renderAgentWorkcellCard(profile, report, status, agentLabel);
+  const descriptorCards = hasBuiltInReferenceDashboard ? "" : renderAgentDescriptorCards(report, agentId);
+  const descriptorReportSections = hasBuiltInReferenceDashboard ? "" : renderAgentDescriptorReportSections(report, agentId);
+  const visualization = ["orchestrator", "design", "specimen", "vision", "manipulation", "equipment", "analysis", "knowledge"].includes(dashboardAgentId) ? "" : renderAgentVisualizationCard(report, status, agentLabel);
   const checklistItems = Array.isArray(profile.checklist) ? profile.checklist : [];
   const checklist = controlSurface && !["objective", "orchestrator"].includes(agentId) && checklistItems.length
     ? renderDashboardCard(`${agentLabel} Checklist`, dashboardList(checklistItems, "No checklist recorded.", 5), { span: 4, tone: agentId || "agent", eyebrow: "operator" })
     : "";
-  return `${specialized}${visualization}${checklist}`;
+  return `${descriptorCards}${descriptorReportSections}${specialized}${visualization}${checklist}`;
 }
 
 function renderLiveDashboardReportSections(session, report, status, agentLabel) {
@@ -12442,8 +13187,9 @@ function renderLiveDashboardReportSections(session, report, status, agentLabel) 
 
 function renderLiveReportToolbarActions() {
   const agentNeedsChat = liveAgentNeedsChatPanel(liveSelectedAgent);
+  const agentAllowsChat = liveAgentAllowsOnDemandChat(liveSelectedAgent);
   const canRestoreChatPanel = liveChatCanManualCollapse(liveSelectedAgent) && liveChatCollapsed;
-  const canOpenAgentChat = !agentNeedsChat && liveReportPage !== "attention";
+  const canOpenAgentChat = agentAllowsChat && !agentNeedsChat && liveReportPage !== "attention";
   const chatUnreadLabel = liveChatUnreadLabel();
   const chatToggleLabel = canOpenAgentChat
     ? `Open Runtime Chat for ${liveAgentLabel(liveSelectedAgent)}`
@@ -12602,7 +13348,7 @@ function eventMatchesCurrentRun(event, runId = liveCurrentRunId()) {
 }
 
 function currentRunEventSources() {
-  const runScoped = (Array.isArray(liveRunEvents) ? liveRunEvents : []).filter((event) => eventMatchesCurrentRun(event));
+  const runScoped = (Array.isArray(liveRunEvents) ? liveRunEvents : []).filter((event) => eventMatchesCurrentRun(event) || !eventRunId(event));
   if (runScoped.length) return runScoped;
   return (Array.isArray(liveRecentEvents) ? liveRecentEvents : []).filter((event) => eventMatchesCurrentRun(event));
 }
@@ -13172,7 +13918,7 @@ function renderGraphMiniPanel(session) {
   const edgeMarkup = edges.map((edge) => {
     const type = liveRuntimeMapEdgeType(edge);
     const activeClass = activeEdges.has(edge.key) ? " edge-active" : "";
-    return `<path class="runtime-map-edge edge-type-${liveRuntimeMapClassToken(type)}${activeClass}" data-edge="${escapeHtml(edge.key)}" d="${liveRuntimeMapEdgePath(edge)}"><title>${escapeHtml(edge.sourceStage)} -&gt; ${escapeHtml(edge.targetStage)} · ${escapeHtml(liveRuntimeMapEdgeLabel(edge))}</title></path>`;
+    return `<path class="runtime-map-edge live-graph-edge edge-type-${liveRuntimeMapClassToken(type)}${activeClass}" data-edge="${escapeHtml(edge.key)}" d="${liveRuntimeMapEdgePath(edge)}"><title>${escapeHtml(edge.sourceStage)} -&gt; ${escapeHtml(edge.targetStage)} · ${escapeHtml(liveRuntimeMapEdgeLabel(edge))}</title></path>`;
   }).join("");
   const nodeHtml = nodes.map((node) => {
     const stage = liveRuntimeMapNodeStage(node);
@@ -13410,7 +14156,10 @@ function renderQuestionCard(event) {
 
 function isRuntimeFaultEvent(event) {
   if (isAgentQuestionEvent(event)) return false;
+  const eventType = String(event?.event_type || event?.type || "").toLowerCase();
+  if (eventType.startsWith("approval.") || eventType === "approval_requested") return false;
   const payload = eventPayload(event);
+  if (payload.requires_human_approval === true || payload.approval_id) return false;
   const kind = eventTimelineKind(event);
   const text = `${event.event_type || event.type || ""} ${event.message || ""} ${event.status || ""} ${event.level || event.severity || ""} ${payload.device || ""} ${payload.tool || ""} ${payload.failure_code || ""} ${JSON.stringify(payload)}`.toLowerCase();
   const devicePattern = /guardian|incident|gate|device|printer|prusa|slicer|gcode|robot|lerobot|teleop|rollout|camera|vision|utm|bridge|windows|pyautogui|equipment|gpu|llm|stream|sync|sensor|fault|unsafe|failed|error|timeout|connection|disconnect/;
@@ -13489,14 +14238,14 @@ function updateLiveFaultChip() {
   }
   const errors = faults.filter((event) => eventTimelineKind(event) === "error").length;
   const warnings = Math.max(0, faults.length - errors);
-  const latest = faults[0];
+  const primaryFault = errors ? faults.find((event) => eventTimelineKind(event) === "error") : faults[0];
   const label = errors ? `${errors} err${warnings ? ` / ${warnings} warn` : ""}` : `${warnings} warn`;
   const cls = errors ? "error" : "warning";
   setRuntimeChip(
     liveFaultChip,
     label,
     cls,
-    `Runtime faults: ${errors} errors, ${warnings} warnings. Latest: ${faultText(latest)}`
+    `Runtime faults: ${errors} errors, ${warnings} warnings. Latest: ${faultText(primaryFault)}`
   );
 }
 
@@ -13538,9 +14287,9 @@ function renderAttentionApprovalCard(item, runId = "") {
       <p>${escapeHtml(item.reason || item.stage || "Operator review required.")}</p>
       <small>${escapeHtml(item.stage || "approval")} · ${escapeHtml(item.approval_id || "-")}</small>
       <div class="button-row">
-        <button class="btn primary live-approval-action" data-run-id="${escapeHtml(runId)}" data-approval-id="${escapeHtml(item.approval_id || "")}" data-decision="approved" ${item.approval_id ? "" : "disabled"}>Approve</button>
-        <button class="btn live-approval-action" ${item.approval_id ? "" : "disabled"} data-run-id="${escapeHtml(runId)}" data-approval-id="${escapeHtml(item.approval_id || "")}" data-decision="cancelled">Revise</button>
-        <button class="btn warning live-approval-action" data-run-id="${escapeHtml(runId)}" data-approval-id="${escapeHtml(item.approval_id || "")}" data-decision="rejected" ${item.approval_id ? "" : "disabled"}>Reject</button>
+        <button class="btn primary live-approval-action" data-run-id="${escapeHtml(runId)}" data-approval-id="${escapeHtml(item.approval_id || "")}" data-decision="approved" title="Approve this runtime gate" aria-label="Approve this runtime gate" ${item.approval_id ? "" : "disabled"}>Approve</button>
+        <button class="btn live-approval-action" ${item.approval_id ? "" : "disabled"} data-run-id="${escapeHtml(runId)}" data-approval-id="${escapeHtml(item.approval_id || "")}" data-decision="cancelled" title="Revise this runtime gate" aria-label="Revise this runtime gate">Revise</button>
+        <button class="btn warning live-approval-action" data-run-id="${escapeHtml(runId)}" data-approval-id="${escapeHtml(item.approval_id || "")}" data-decision="rejected" title="Reject this runtime gate" aria-label="Reject this runtime gate" ${item.approval_id ? "" : "disabled"}>Reject</button>
       </div>
     </article>
   `;
@@ -13586,37 +14335,23 @@ function renderAttentionReportPage(session = liveLastSession) {
 
 function applyLiveAttentionStatus() {
   if (!planningChatStatus) return;
-  if (planningThinkingCount > 0 || liveBackendPlanningBusy || liveQuickActionBusy) return;
-  const pending = liveApprovals.pending || [];
-  const questions = pendingAgentQuestions();
-  const faults = pendingRuntimeFaults();
-  const errors = faults.filter((event) => eventTimelineKind(event) === "error");
-  if (pending.length || questions.length) {
-    planningChatStatus.dataset.attentionStatus = "1";
-    setChatStatus(
-      "WAITING_USER",
-      "warning",
-      `Waiting for operator input: ${pending.length} approvals, ${questions.length} questions, ${faults.length} faults.`
-    );
-    return;
-  }
-  if (errors.length || faults.length) {
-    planningChatStatus.dataset.attentionStatus = "1";
-    setChatStatus(
-      errors.length ? "ERROR" : "WARNING",
-      errors.length ? "warning" : "warning",
-      `Runtime attention required: ${errors.length} errors, ${Math.max(0, faults.length - errors.length)} warnings.`
-    );
-    return;
-  }
+  // Operator attention is surfaced only through the ATT binder/report page.
+  // Do not let approvals, questions, or hardware faults overwrite Runtime Chat state.
   if (planningChatStatus.dataset.attentionStatus === "1") {
     planningChatStatus.dataset.attentionStatus = "0";
-    setChatStatus("READY", "idle", "No pending operator attention.");
+    if (planningThinkingCount <= 0 && !liveBackendPlanningBusy && !liveQuickActionBusy) {
+      setChatStatus("READY", "idle", "Runtime chat ready.");
+    }
   }
 }
 
 function renderApprovalPanel(_session) {
-  // Operator Attention is opened from the ATT binder/report page, not rendered in the top header.
+  const approvalPanel = document.getElementById("live-approval-panel");
+  if (!approvalPanel) return;
+  // Last-commit behavior: ATT content is rendered only after opening the ATT page.
+  approvalPanel.innerHTML = "";
+  approvalPanel.hidden = true;
+  approvalPanel.setAttribute("aria-hidden", "true");
 }
 
 function answerAgentQuestion(key) {
@@ -13727,6 +14462,103 @@ async function focusDeviceEventFromCard(card) {
   );
 }
 
+async function openBridgeContractWorkspace(button) {
+  const card = button && button.closest ? button.closest(".bridge-contract-card[data-bridge-id]") : null;
+  const workspace = (button && button.dataset.bridgeWorkspace) || (card && card.dataset.bridgeWorkspace) || "";
+  const bridgeId = (button && button.dataset.bridgeId) || (card && card.dataset.bridgeId) || "bridge";
+  const customAction = (button && button.dataset.bridgeCustomAction) || "";
+  const customEndpoint = (button && button.dataset.bridgeEndpoint) || "";
+  if (!workspace || workspace === "-") {
+    setChatStatus("BRIDGE WORKSPACE MISSING", "warning", `${bridgeId} has no workspace route.`);
+    return;
+  }
+  let targetWorkspace = workspace;
+  if (customAction && workspace.startsWith("/")) {
+    const glue = workspace.includes("?") ? "&" : "?";
+    const params = new URLSearchParams({
+      bridge_id: bridgeId,
+      bridge_action: customAction,
+      bridge_endpoint: customEndpoint,
+    });
+    targetWorkspace = `${workspace}${glue}${params.toString()}`;
+  }
+  setChatStatus("BRIDGE WORKSPACE", "idle", `${bridgeId} -> ${workspace}${customAction ? ` · ${customAction}` : ""}`);
+  await recordLiveOperatorEvent(
+    customAction ? "bridge_contract.workspace_handoff" : BRIDGE_CONTRACT_EVENT_TYPES.open_workspace,
+    customAction
+      ? `${bridgeId} ${customAction} handed off to bridge workspace from Live GUI bridge contract card.`
+      : `${bridgeId} workspace opened from Live GUI bridge contract card.`,
+    {
+      source_action: customAction ? "workspace_handoff" : BRIDGE_CONTRACT_EVENT_TYPES.open_workspace,
+      bridge_id: bridgeId,
+      workspace,
+      bridge_action: customAction,
+      endpoint: customEndpoint,
+    },
+    "operator.device"
+  );
+  window.open(targetWorkspace, "_blank", "noopener");
+}
+
+function bridgeContractSafeActions(bridge) {
+  const actions = Array.isArray(bridge?.actions) ? bridge.actions : [];
+  return actions.filter((action) => {
+    const id = String(action?.id || "").trim();
+    const endpoint = String(action?.endpoint || "").trim();
+    const method = String(action?.method || "GET").trim().toUpperCase();
+    if (id === "open_workspace") return Boolean(endpoint);
+    return Boolean(action?.read_only) && method === "GET" && endpoint.startsWith("/api/");
+  });
+}
+
+function bridgeContractWorkspaceHandoffActions(bridge) {
+  const actions = Array.isArray(bridge?.actions) ? bridge.actions : [];
+  return actions.filter((action) => {
+    const id = String(action?.id || "").trim();
+    if (!id || id === "open_workspace") return false;
+    if (action?.handoff_required === true) return true;
+    if (action?.live_card_runnable === false) return true;
+    const method = String(action?.method || "GET").trim().toUpperCase();
+    const endpoint = String(action?.endpoint || "").trim();
+    return !(Boolean(action?.read_only) && method === "GET" && endpoint.startsWith("/api/"));
+  });
+}
+
+async function runBridgeContractAction(button) {
+  const actionId = String(button?.dataset.bridgeAction || "").trim();
+  if (actionId === "open_workspace" || actionId === "workspace_handoff") {
+    await openBridgeContractWorkspace(button);
+    return;
+  }
+  const bridgeId = String(button?.dataset.bridgeId || "bridge").trim();
+  const endpoint = String(button?.dataset.bridgeEndpoint || "").trim();
+  const method = String(button?.dataset.bridgeMethod || "GET").trim().toUpperCase() || "GET";
+  if (!endpoint.startsWith("/api/") || method !== "GET") {
+    setChatStatus("BRIDGE ACTION BLOCKED", "warning", `${bridgeId}.${actionId} is not a read-only GET action.`);
+    return;
+  }
+  setChatStatus("BRIDGE ACTION", "idle", `${bridgeId}.${actionId}`);
+  const result = await fetchJsonOrThrow(endpoint, { method: "GET" });
+  const resultStatus = result && typeof result === "object"
+    ? String(result.status || result.state || result.ok || "ok")
+    : "ok";
+  const eventType = BRIDGE_CONTRACT_EVENT_TYPES[actionId] || `bridge_contract.${actionId}`;
+  await recordLiveOperatorEvent(
+    eventType,
+    `${bridgeId} ${actionId} completed from Live GUI bridge contract card.`,
+    {
+      source_action: eventType,
+      bridge_id: bridgeId,
+      endpoint,
+      method,
+      result_status: resultStatus,
+      result_ok: result && typeof result === "object" ? result.ok : undefined,
+    },
+    "operator.device"
+  );
+  setChatStatus("BRIDGE ACTION OK", "idle", `${bridgeId}.${actionId}: ${resultStatus}`);
+}
+
 function renderResourceStatusCard(title, value, detail, status = "ready") {
   const heartbeat = formatTime(new Date().toISOString());
   const safeState = status === "error" ? "unsafe/review" : "safe/ready";
@@ -13745,6 +14577,88 @@ function renderResourceStatusCard(title, value, detail, status = "ready") {
   `;
 }
 
+function liveBridgeContracts(session = liveLastSession, snapshot = liveLastSnapshot) {
+  const runtime_ide_contract = (session && session.runtime_ide_contract) || (snapshot && snapshot.runtime_ide_contract) || {};
+  const bridgeList = runtime_ide_contract.device_bridges;
+  return Array.isArray(bridgeList)
+    ? bridgeList.filter((bridge) => bridge && (bridge.id || bridge.label))
+    : [];
+}
+
+function bridgeContractStatus(bridge) {
+  const health = bridge && typeof bridge.health === "object" && bridge.health ? bridge.health : {};
+  const rawStatus = String(health.status || health.state || bridge?.status || "").toLowerCase();
+  if (health.ok === false || ["error", "failed", "blocked", "unsafe"].includes(rawStatus)) return "error";
+  if (["waiting", "pending", "degraded", "unknown"].includes(rawStatus)) return "waiting";
+  if (["running", "active", "connected", "ready", "ok", "healthy"].includes(rawStatus)) return rawStatus === "running" || rawStatus === "active" ? "active" : "ready";
+  return bridge?.health_endpoint || bridge?.preflight_endpoint ? "ready" : "idle";
+}
+
+function bridgeContractActionSummary(bridge) {
+  const actions = Array.isArray(bridge?.actions) ? bridge.actions : [];
+  if (!actions.length) return "actions: none";
+  const names = actions
+    .map((action) => {
+      const id = String(action?.id || "").trim();
+      if (id === "open_workspace") return "open workspace";
+      return String(action?.label || id || "action").trim();
+    })
+    .filter(Boolean)
+    .slice(0, 3);
+  const suffix = actions.length > names.length ? ` +${actions.length - names.length}` : "";
+  return `actions: ${names.join(", ")}${suffix}`;
+}
+
+function renderBridgeContractDeviceCards(bridges = liveBridgeContracts()) {
+  return bridges.map((bridge) => {
+    const status = bridgeContractStatus(bridge);
+    const label = bridge.label || bridge.id || "Device Bridge";
+    const workspace = bridge.workspace || "-";
+    const healthEndpoint = bridge.health_endpoint || "-";
+    const preflightEndpoint = bridge.preflight_endpoint || "-";
+    const evidenceContracts = Array.isArray(bridge.evidence_contracts) ? bridge.evidence_contracts : [];
+    const actionSummary = bridgeContractActionSummary(bridge);
+    const evidenceSummary = evidenceContracts.length ? `${evidenceContracts.length} evidence contracts` : "evidence: none";
+    const safeActions = bridgeContractSafeActions(bridge);
+    const handoffActions = bridgeContractWorkspaceHandoffActions(bridge);
+    const healthAction = safeActions.find((action) => String(action.id || "") === "health_check");
+    const preflightAction = safeActions.find((action) => String(action.id || "") === "preflight");
+    const handoffButtons = handoffActions.slice(0, 2).map((action) => {
+      const actionId = String(action.id || "").trim();
+      const labelText = String(action.label || actionId || "Action").trim();
+      const shortLabel = labelText.length > 18 ? `${labelText.slice(0, 15)}...` : labelText;
+      return `<button type="button" class="live-device-inline-action" data-bridge-action="workspace_handoff" data-bridge-id="${escapeHtml(bridge.id || "")}" data-bridge-workspace="${escapeHtml(workspace)}" data-bridge-custom-action="${escapeHtml(actionId)}" data-bridge-endpoint="${escapeHtml(action.endpoint || "")}" data-bridge-method="${escapeHtml(action.method || "GET")}" title="${escapeHtml(`${labelText} requires bridge workspace handoff`)}">${escapeHtml(shortLabel)}</button>`;
+    }).join("");
+    const tooltip = [
+      label,
+      `bridge: ${status}`,
+      `workspace: ${workspace}`,
+      `health: ${healthEndpoint}`,
+      `preflight: ${preflightEndpoint}`,
+      actionSummary,
+      evidenceSummary,
+    ].join("\n");
+    return `
+      <article class="live-device-card status-${escapeHtml(status)} bridge-contract-card" title="${escapeHtml(tooltip)}" tabindex="0" data-bridge-id="${escapeHtml(bridge.id || "")}" data-bridge-workspace="${escapeHtml(workspace)}">
+        <span>${escapeHtml(label)}</span>
+        <strong>${escapeHtml(status)}</strong>
+        <dl>
+          <div class="live-device-field"><dt>workspace</dt><dd>${escapeHtml(workspace)}</dd></div>
+          <div class="live-device-field"><dt>health</dt><dd>${escapeHtml(healthEndpoint)}</dd></div>
+          <div class="live-device-field"><dt>preflight</dt><dd>${escapeHtml(preflightEndpoint)}</dd></div>
+          <div class="live-device-field"><dt>evidence</dt><dd>${escapeHtml(evidenceSummary)}</dd></div>
+        </dl>
+        <div class="live-device-inline-actions">
+          <button type="button" class="live-device-inline-action" data-bridge-action="open_workspace" data-bridge-id="${escapeHtml(bridge.id || "")}" data-bridge-workspace="${escapeHtml(workspace)}">Open</button>
+          ${healthAction ? `<button type="button" class="live-device-inline-action" data-bridge-action="health_check" data-bridge-id="${escapeHtml(bridge.id || "")}" data-bridge-endpoint="${escapeHtml(healthAction.endpoint || "")}" data-bridge-method="${escapeHtml(healthAction.method || "GET")}">Health</button>` : ""}
+          ${preflightAction ? `<button type="button" class="live-device-inline-action" data-bridge-action="preflight" data-bridge-id="${escapeHtml(bridge.id || "")}" data-bridge-endpoint="${escapeHtml(preflightAction.endpoint || "")}" data-bridge-method="${escapeHtml(preflightAction.method || "GET")}">Preflight</button>` : ""}
+          ${handoffButtons}
+        </div>
+      </article>
+    `;
+  });
+}
+
 function renderDeviceStrip(session) {
   if (!liveDeviceStrip) return;
   const snapshot = liveLastSnapshot || {};
@@ -13757,10 +14671,12 @@ function renderDeviceStrip(session) {
   const gpuAgg = gpu.aggregate || {};
   const gpuValue = `${renderRuntimeValue(gpuAgg.memory_used_gb)}/${renderRuntimeValue(gpuAgg.memory_total_gb)} GB`;
   const ramValue = `${renderRuntimeValue(ram.used_gb)}/${renderRuntimeValue(ram.total_gb)} GB`;
+  const bridgeCards = renderBridgeContractDeviceCards(liveBridgeContracts(session, snapshot));
   const cards = [
     renderResourceStatusCard("Run", state.run_id || "-", `mode=${state.mode || "-"} · paused=${Boolean(state.is_paused)}`, state.is_paused ? "waiting" : "ready"),
     renderResourceStatusCard("GPU", gpuValue, `util=${renderRuntimeValue(gpuAgg.utilization_percent)}% · ${gpu.status || "unknown"}`, gpu.status || "ready"),
     renderResourceStatusCard("LLM", backend.label || backend.name || "-", `backend=${backend.name || "configured"}`, backend.status || "ready"),
+    ...bridgeCards,
     renderDeviceStatusCard("3D Printer", latestRuntimeEvent([/printer/, /prusa/, /slicer/, /gcode/, /specimen/]), "idle"),
     renderDeviceStatusCard("Robot Arm", latestRuntimeEvent([/robot/, /lerobot/, /manipulation/, /rollout/, /teleop/]), "idle"),
     renderDeviceStatusCard("UTM", latestRuntimeEvent([/utm/, /tensile/, /compression/, /equipment/]), "idle"),
@@ -13778,7 +14694,7 @@ function renderDeviceStrip(session) {
     : "Mem -";
   setCompactTextWithTitle(
     liveResourceChip,
-    `${gpuLabel} · ${memLabel}`,
+    `GPU/RAM ${gpuLabel.replace(/^GPU\\s*/i, "")}/${memLabel.replace(/^Mem\\s*/i, "")}`,
     `GPU ${gpuValue}; RAM ${ramValue}; GPU util=${renderRuntimeValue(gpuAgg.utilization_percent)}%`
   );
 }
@@ -13867,7 +14783,7 @@ function renderLiveRuntime(session) {
   ensureOperatorReportStateRun(state.run_id || liveCurrentRunId());
   const activeAgent = agentIdFromStage(state.stage || "");
   // Legacy package contract marker: setCompactTextWithTitle(liveActiveAgentChip, `A:${liveAgentShort(activeAgent)}`, ...).
-  setCompactTextWithTitle(liveActiveAgentChip, liveAgentTopbarLabel(activeAgent), `Active agent: ${liveAgentLabel(activeAgent)}`);
+  setCompactTextWithTitle(liveActiveAgentChip, `A:${liveAgentShort(activeAgent)}`, `Active agent: ${liveAgentLabel(activeAgent)}`);
   const viewLabel = liveCurrentView === "backend"
     ? "Backend"
     : liveCurrentView === "report"
@@ -13878,6 +14794,7 @@ function renderLiveRuntime(session) {
   renderAgentBinder(session);
   renderApprovalPanel(session);
   renderDeviceStrip(session);
+  renderTimelinePanels();
   renderLiveMissionProgressSlim(session);
   updateLiveFaultChip();
   applyLiveAttentionStatus();
@@ -14063,7 +14980,7 @@ function applyPlanningSession(session) {
   const stageLabel = String(state.stage || "idle");
   const runId = String(state.run_id || "-");
   const modeLabel = String(state.mode || "-");
-  const missionLabel = liveMissionTopbarLabel(state);
+  const missionLabel = `S:${stageLabel}`;
   // Legacy package contract marker: setCompactTextWithTitle(planningStageLabel, `S:${stageLabel}`, ...).
   setCompactTextWithTitle(planningStageLabel, missionLabel, `Mission: ${state.active_goal || state.goal || queryGoal || "-"}; Stage: ${stageLabel}`);
   scheduleLiveMissionMarquee();
@@ -14348,10 +15265,41 @@ function connectPlanningEventStream() {
 
 
 function closeBinderContextMenu() {
+  if (!liveBinderContextMenu) return;
+  liveBinderContextMenu.hidden = true;
+  liveBinderContextMenu.innerHTML = "";
 }
 
 function openBinderContextMenu(agentId, x, y) {
-  void agentId; void x; void y;
+  if (!liveBinderContextMenu || !knownLiveAgent(agentId)) return;
+  const agentLabel = liveAgentLabel(agentId);
+  const actions = [
+    ["open_report", "R", "Open Report"],
+    ["open_backend", "{}", "Open Backend"],
+    ["show_tool_calls", "TC", "Show Tool Calls"],
+    ["show_artifacts", "A", "Show Artifacts"],
+    ["open_graph", "G", "Open Graph"],
+    ["open_evolution", "EV", "Open Evolution"],
+    ["mark_read", "OK", "Mark Read"],
+    ["run_node_test", "T", "Run Node Test"],
+    ["rerun_from_here", "RR", "Re-run From Here"],
+  ];
+  liveBinderContextMenu.innerHTML = `
+    <div class="live-context-title">${escapeHtml(agentLabel)}</div>
+    ${actions.map(([action, icon, label]) => `
+      <button class="btn live-context-action" type="button" role="menuitem" data-context-action="${escapeHtml(action)}" data-agent-id="${escapeHtml(agentId)}" title="${escapeHtml(label)}" aria-label="${escapeHtml(`${agentLabel}: ${label}`)}">
+        <span class="live-card-action-icon" aria-hidden="true">${escapeHtml(icon)}</span>
+        <span class="live-card-action-label">${escapeHtml(label)}</span>
+      </button>
+    `).join("")}
+  `;
+  const menuWidth = 210;
+  const menuHeight = 360;
+  const left = Math.max(8, Math.min(Math.round(x || 0), Math.max(8, window.innerWidth - menuWidth - 8)));
+  const top = Math.max(8, Math.min(Math.round(y || 0), Math.max(8, window.innerHeight - menuHeight - 8)));
+  liveBinderContextMenu.style.left = `${left}px`;
+  liveBinderContextMenu.style.top = `${top}px`;
+  liveBinderContextMenu.hidden = false;
 }
 
 function graphNodeIdForAgent(agentId) {
@@ -14472,6 +15420,8 @@ function handleContextAction(action, agentId) {
 async function pinAgentReportFromBinder(agentId) {
   if (!knownLiveAgent(agentId)) return;
   liveSelectedAgent = agentId;
+  liveReportPage = "agent";
+  setLiveView("report", { render: false });
   markLiveAgentRead(liveSelectedAgent, liveLastSession);
   setLiveChatTargetMode(liveChatTargetForAgent(liveSelectedAgent));
   const finding = pinSelectedFinding();
@@ -14485,6 +15435,12 @@ async function pinAgentReportFromBinder(agentId) {
 }
 
 if (liveAgentBinderList) {
+  liveAgentBinderList.addEventListener("contextmenu", (event) => {
+    const button = event.target.closest("[data-agent-id]");
+    if (!button) return;
+    event.preventDefault();
+    openBinderContextMenu(button.dataset.agentId || "orchestrator", event.clientX || 0, event.clientY || 0);
+  });
   liveAgentBinderList.addEventListener("click", (event) => {
     const attentionButton = event.target.closest(".binder-attention-tab[data-attention-action]");
     if (attentionButton) {
@@ -14497,6 +15453,7 @@ if (liveAgentBinderList) {
     if (!button) return;
     liveSelectedAgent = button.dataset.agentId || "orchestrator";
     liveReportPage = "agent";
+    invalidateLiveCenterRender("report");
     requestLiveGraphFocusForAgent(liveSelectedAgent);
     markLiveAgentRead(liveSelectedAgent, liveLastSession);
     setLiveChatTargetMode(liveChatTargetForAgent(liveSelectedAgent));
@@ -14522,6 +15479,7 @@ if (liveAgentBinderList) {
     if (!button) return;
     liveSelectedAgent = button.dataset.agentId || "orchestrator";
     liveReportPage = "agent";
+    invalidateLiveCenterRender("report");
     requestLiveGraphFocusForAgent(liveSelectedAgent);
     markLiveAgentRead(liveSelectedAgent, liveLastSession);
     setLiveChatTargetMode(liveChatTargetForAgent(liveSelectedAgent));
@@ -14536,6 +15494,7 @@ if (liveChatTarget) {
     if (knownLiveAgent(target)) {
       liveSelectedAgent = target;
       liveReportPage = "agent";
+      invalidateLiveCenterRender("report");
       requestLiveGraphFocusForAgent(liveSelectedAgent);
       markLiveAgentRead(liveSelectedAgent, liveLastSession);
     }
@@ -14608,8 +15567,18 @@ liveTimelineFilters.forEach((button) => {
 
 setupLiveScrollbarFade();
 
-const LIVE_NODE_TEST_MODULES = new Set(["design", "specimen", "vision", "manipulation", "equipment", "analysis", "knowledge", "bo", "guardian"]);
+const DEFAULT_LIVE_NODE_TEST_MODULES = new Set(["design", "specimen", "vision", "manipulation", "equipment", "analysis", "knowledge", "bo", "guardian"]);
 const LIVE_BUSY_QUICK_ACTIONS = new Set(["pause_run", "resume_run", "dry_run", "run_node_test", "explain_current_node"]);
+
+function liveNodeTestModules() {
+  const moduleIds = new Set(DEFAULT_LIVE_NODE_TEST_MODULES);
+  for (const agent of LIVE_AGENTS) {
+    if (!agent || agent.id === "objective" || agent.id === "orchestrator") continue;
+    const moduleId = String(agent.moduleId || agent.module_id || agent.id || "").trim();
+    if (moduleId && agent.enabled !== false && agent.kind !== "ui_only") moduleIds.add(moduleId);
+  }
+  return moduleIds;
+}
 
 function firstPendingApproval() {
   const pending = liveApprovals && Array.isArray(liveApprovals.pending) ? liveApprovals.pending : [];
@@ -14675,14 +15644,17 @@ async function runSelectedNodeTest(state) {
   if (await blockLiveExecutionForPendingApproval("run_node_test", `${liveAgentLabel(selected)} node test`, { target_agent: selected, target_node_id: graphNodeIdForAgent(selected) || selected })) return;
   setChatStatus("NODE TEST", "running");
   let data;
-  if (LIVE_NODE_TEST_MODULES.has(selected)) {
-    const res = await fetch(`/api/modules/${encodeURIComponent(selected)}/dry-run`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+  const testModules = liveNodeTestModules();
+  const selectedManifest = liveAgentById(selected);
+  const selectedModuleId = String(selectedManifest.moduleId || selectedManifest.module_id || selected || "").trim();
+  if (testModules.has(selectedModuleId)) {
+    const res = await fetch(`/api/modules/${encodeURIComponent(selectedModuleId)}/dry-run`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
     data = await res.json();
     await recordLiveIntentEvent(
       "module.node_test",
       "module_node_test_result",
-      data.ok ? `Node test ok: ${selected} / ${((data.sequence || []).length)} steps` : `Node test failed: ${(data.errors || []).join(", ")}`,
-      { target_agent: selected, target_node_id: selected, result: data }
+      data.ok ? `Node test ok: ${selectedModuleId} / ${((data.sequence || []).length)} steps` : `Node test failed: ${(data.errors || []).join(", ")}`,
+      { target_agent: selected, target_node_id: selectedModuleId, target_module_id: selectedModuleId, result: data }
     );
   } else {
     const res = await fetch("/api/graphs/atr_closed_loop/dry-run", {
@@ -14936,6 +15908,24 @@ document.addEventListener("keydown", (event) => {
     focusDeviceEventFromCard(deviceCard).catch((err) => setChatStatus(`DEVICE TRACE ERROR: ${err}`, "warning"));
     return;
   }
+  const bridgeAction = event.target.closest && event.target.closest("[data-bridge-action]");
+  if (bridgeAction && (event.key === "Enter" || event.key === " ")) {
+    event.preventDefault();
+    runBridgeContractAction(bridgeAction).catch((err) => setChatStatus(`BRIDGE ACTION ERROR: ${err}`, "warning"));
+    return;
+  }
+  const descriptorAction = event.target.closest && event.target.closest("[data-descriptor-api-action]");
+  if (descriptorAction && (event.key === "Enter" || event.key === " ")) {
+    event.preventDefault();
+    runDescriptorAction(descriptorAction).catch((err) => setChatStatus(`DESCRIPTOR ACTION ERROR: ${err}`, "warning"));
+    return;
+  }
+  const descriptorHandoff = event.target.closest && event.target.closest("[data-descriptor-workspace-handoff]");
+  if (descriptorHandoff && (event.key === "Enter" || event.key === " ")) {
+    event.preventDefault();
+    openDescriptorWorkspaceHandoff(descriptorHandoff).catch((err) => setChatStatus(`DESCRIPTOR HANDOFF ERROR: ${err}`, "warning"));
+    return;
+  }
   runLiveKeyboardShortcut(event);
 });
 
@@ -15007,6 +15997,24 @@ document.addEventListener("click", (event) => {
   if (deviceCard) {
     closeBinderContextMenu();
     focusDeviceEventFromCard(deviceCard).catch((err) => setChatStatus(`DEVICE TRACE ERROR: ${err}`, "warning"));
+    return;
+  }
+  const bridgeAction = event.target.closest("[data-bridge-action]");
+  if (bridgeAction) {
+    closeBinderContextMenu();
+    runBridgeContractAction(bridgeAction).catch((err) => setChatStatus(`BRIDGE ACTION ERROR: ${err}`, "warning"));
+    return;
+  }
+  const descriptorAction = event.target.closest("[data-descriptor-api-action]");
+  if (descriptorAction) {
+    closeBinderContextMenu();
+    runDescriptorAction(descriptorAction).catch((err) => setChatStatus(`DESCRIPTOR ACTION ERROR: ${err}`, "warning"));
+    return;
+  }
+  const descriptorHandoff = event.target.closest("[data-descriptor-workspace-handoff]");
+  if (descriptorHandoff) {
+    closeBinderContextMenu();
+    openDescriptorWorkspaceHandoff(descriptorHandoff).catch((err) => setChatStatus(`DESCRIPTOR HANDOFF ERROR: ${err}`, "warning"));
     return;
   }
   const quickButton = event.target.closest(".live-quick-action[data-quick-action]");
@@ -15229,6 +16237,7 @@ async function confirmOrRequestLiveEmergencyStop() {
     const state = (liveLastSession && liveLastSession.state) || (liveLastSnapshot && liveLastSnapshot.state) || {};
     const endpoint = state.run_id ? `/api/runs/${encodeURIComponent(state.run_id)}/stop` : "/api/run/stop";
     setChatStatus("EMERGENCY STOP", "warning");
+    await fetchJsonOrThrow("/api/run/safe-stop", { method: "POST" });
     await recordLiveIntentEvent("runtime_command_requested", "emergency_stop", "Live GUI emergency stop confirmed and forced runtime termination requested.", { command: "emergency_stop", confirmation: "double_click_within_6s", endpoint });
     await fetchJsonOrThrow(endpoint, { method: "POST" });
     await refreshPlanningState();
@@ -15290,32 +16299,37 @@ if (planningMessageInput) {
   });
 }
 
-applyQueryGoal();
-ensurePlanningSessionId();
-restoreLiveUiState();
-restoreCachedPlanningState();
-setupOrcChartHydrationMonitor();
-if (liveCurrentView === "report") window.setTimeout(() => scheduleOrcEchartsRender(), 0);
-if (planningChatLog && !planningChatLog.dataset.autoScrollObserved) {
-  planningChatLog.dataset.autoScrollObserved = "1";
-  planningChatAutoScrollObserver.observe(planningChatLog, { childList: true, subtree: false });
+async function initializeLiveGuiRuntime() {
+  applyQueryGoal();
+  ensurePlanningSessionId();
+  await refreshLiveAgentManifest({ silent: true, skipRender: true });
+  restoreLiveUiState();
+  restoreCachedPlanningState();
+  setupOrcChartHydrationMonitor();
+  if (liveCurrentView === "report") window.setTimeout(() => scheduleOrcEchartsRender(), 0);
+  if (planningChatLog && !planningChatLog.dataset.autoScrollObserved) {
+    planningChatLog.dataset.autoScrollObserved = "1";
+    planningChatAutoScrollObserver.observe(planningChatLog, { childList: true, subtree: false });
+  }
+  if (!window.__atrPlanningChatResizeSyncBound) {
+    window.__atrPlanningChatResizeSyncBound = true;
+    window.addEventListener("resize", () => {
+      schedulePlanningChatLayoutSync({ scrollToBottom: false });
+      scheduleLiveMissionMarquee();
+      scheduleLiveGraphScaleRefresh();
+      liveOrcChartInstances.forEach((chart) => {
+        try { chart.resize(); } catch (_err) {}
+      });
+    }, { passive: true });
+    document.fonts?.ready?.then(() => {
+      schedulePlanningChatLayoutSync({ scrollToBottom: false });
+      scheduleLiveMissionMarquee();
+    }).catch?.(() => {});
+  }
+  connectPlanningEventStream();
+  return refreshPlanningState()
+    .then(bootstrapLiveOrchestrator)
+    .catch(() => setChatStatus("ERROR", "warning"));
 }
-if (!window.__atrPlanningChatResizeSyncBound) {
-  window.__atrPlanningChatResizeSyncBound = true;
-  window.addEventListener("resize", () => {
-    schedulePlanningChatLayoutSync({ scrollToBottom: false });
-    scheduleLiveMissionMarquee();
-    scheduleLiveGraphScaleRefresh();
-    liveOrcChartInstances.forEach((chart) => {
-      try { chart.resize(); } catch (_err) {}
-    });
-  }, { passive: true });
-  document.fonts?.ready?.then(() => {
-    schedulePlanningChatLayoutSync({ scrollToBottom: false });
-    scheduleLiveMissionMarquee();
-  }).catch?.(() => {});
-}
-connectPlanningEventStream();
-refreshPlanningState()
-  .then(bootstrapLiveOrchestrator)
-  .catch(() => setChatStatus("ERROR", "warning"));
+
+initializeLiveGuiRuntime().catch(() => setChatStatus("ERROR", "warning"));

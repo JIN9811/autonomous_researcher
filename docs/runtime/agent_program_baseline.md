@@ -81,6 +81,7 @@ If a required key is missing, the stage is retried and may end in `fatal_error`.
 | `equipment` | `equipment_agent` |
 | `analysis` | `analysis_agent` |
 | `knowledge` | `knowledge_agent` |
+| `bo` | `bo_agent` |
 | `guardian` | `guardian_agent` |
 
 ## Agent Integration Baseline
@@ -90,7 +91,7 @@ When replacing internals with real programs, keep these output keys stable.
 | Stage | Runtime-required keys | Current output keys | Real program integration target |
 |---|---|---|---|
 | `design` | `experiment_spec` | `experiment_spec`, `rationale` | protocol/candidate generation service |
-| `specimen` | none | `specimen_result`, `protocol_note` | geometry handoff + PrusaSlicer/PrusaLink runtime pipeline |
+| `specimen` | none | `specimen_result`, `protocol_note` | geometry handoff + provider-neutral printer bridge; Bambu Lab X2D is the default provider and PrusaLink is an explicit profile |
 | `vision` | `observation` | `observation`, `protocol_note` | 3DP output pickup observation via `camera.capture` |
 | `manipulation` | none | `manipulation`, `sarm`, `manipulation_report`, `robot_task_result`, `handoff_packet`, `protocol_note` | bounded robot skills through `robot.pick_place` or Pi0.5/LeRobot rollout |
 | `equipment` | `equipment_result`, `protocol_note` | `equipment_result`, `protocol_note`, `equipment_handoff` | Windows PyAutoGUI bridge macro runner or legacy UTM runner |
@@ -104,6 +105,28 @@ Notes:
 - Manipulation emits `manipulation_report.v1` and `robot_task_result.v1`; downstream agents and GUI reports must consume those structured packets rather than scraping raw rollout logs.
 - Design-stage orchestrator planning is declared as `module.pre_execution` in `graphs/modules/design/module.yaml` (`orchestrator_plan -> agent.orchestrator_agent`) and writes plan metadata to `state.run_metadata.orchestrator_plan`; it must not be reintroduced as a hard-coded run-loop special case.
 - Live GUI planning may skip that pre-execution step only after the chat orchestrator has already approved the same Design handoff, to avoid duplicate model calls.
+- Live GUI agent tabs and descriptor cards are loaded from `/api/runtime/agent-manifests`, not directly from hard-coded JavaScript. The manifest merges `graphs/configs/atr_closed_loop.yaml`, `graphs/modules/*/module.yaml`, and optional presentation-only `graphs/modules/*/ui.yaml`.
+- Module Management may create preview modules through `/api/modules/templates/{agent|ui-only|bridge}`. These draft modules are intentionally `enabled=false`, `status=draft`, and `graph.attached=false`; they cannot execute until attached, validated, dry-run, and saved with allowlisted handlers/tools.
+- Module Designer may create a source-backed module through `POST /api/modules`. The backend can use the active module-designer LLM route to convert Python source into ATR protocol shape, stores the original source and generated `handler.py`, and marks the module as pending generated-adapter registration when needed.
+- `POST /api/modules/{module_id}/register-generated` is the explicit approval path for generated adapters. It validates `handler.py`, sets the handler to `module.generated_adapter`, records `generated_adapter_approved=true`, and writes a versioned active module config. This still does not bypass graph validation or dry-run gates.
+- Module Management `Load/Unload` controls are workbench selection state only. API responses expose `runtime_effect.changes_runtime_execution=false`; a loaded module is not active in the closed loop until a graph node references it and the graph has been validated/dry-run.
+- Module Management lifecycle responses also expose `activation_status`,
+  `activation_requirements`, `ready_for_live_activation`, and
+  `next_required_action`. These are readiness indicators only; they do not
+  attach graph nodes, save graph versions, or start live execution.
+- Graph-validated custom stage strings are currently accepted through
+  `Stage._missing_()` pseudo-members, and controller/supervisor route snapshots
+  can show inserted stages. Custom stages may also provide a
+  `supervisor_policy` descriptor in the stage payload or `module_runtime` to
+  customize Orchestrator follow-up opinion/recommendation text, required-output
+  formatting, concern rules, operator options, and response-required statuses.
+  The current Module Management typed form exposes the main supervisor-policy
+  descriptor fields. Module Management can hand graph-unattached modules to
+  Runtime IDE attach mode via `/ide?module=<id>&action=attach`, but the graph
+  edit itself still uses Runtime IDE drag/drop plus validate/dry-run/Save
+  Version gates. Remaining custom-stage report authoring and deeper activation
+  authoring are tracked under
+  `개선안/12_free_modularization_gap_analysis.md`.
 
 ## Model Hierarchy Baseline
 
@@ -123,26 +146,37 @@ NemoClaw/vLLM deployment repos:
 
 The vLLM branch uses `*-nvfp4` aliases so runtime status reflects the actual served checkpoint. The `ollama` and `nemoclaw` proxy branches keep their installed local Ollama tags.
 
-Gemma4 MTP speculative decoding is enabled only in the NemoClaw/vLLM deployments. Use a vLLM image that includes Gemma4 MTP support (`vllm/vllm-openai:v0.21.0-cu129-ubuntu2404` or newer). Older local `vllm/vllm-openai:latest` / `latest-cu130` images around vLLM `0.20.0` do not include the Gemma4 MTP path. The earlier `gemma4-0505-cu130` tag has the MTP path but failed local verification with assistant weight shape mismatch, so it is not used.
+Gemma4 MTP speculative decoding is enabled only for the current
+`gemma4:31b` NemoClaw/vLLM deployment. Use a vLLM image that includes Gemma4
+MTP support (`vllm/vllm-openai:v0.21.0-cu129-ubuntu2404` or newer). Older local
+`vllm/vllm-openai:latest` / `latest-cu130` images around vLLM `0.20.0` do not
+include the Gemma4 MTP path. The earlier `gemma4-0505-cu130` tag has the MTP
+path but failed local verification with assistant weight shape mismatch, so it
+is not used.
 
 GB10/NVFP4 backend requirement:
 
 - Set `VLLM_NVFP4_GEMM_BACKEND=marlin` on every Gemma4 NVFP4 deployment.
 - Do not use the automatic FlashInfer FP4 path on this host; it fails with `CUDA error: no kernel image is available for execution on the device`.
 - Do not force `cutlass` on this host; it reaches the vLLM CUTLASS path but fails during profile run with `cutlass_scaled_fp4_mm` internal errors.
-- Verified working path: `MarlinNvFp4LinearKernel` + Gemma4 MTP assistant, tested on `gemma4:e4b-it-nvfp4` and `gemma4:31b` via `/v1/chat/completions`.
+- Verified working path for speculative serving: `MarlinNvFp4LinearKernel` +
+  Gemma4 MTP assistant on `gemma4:31b` via `/v1/chat/completions`.
+- Verified stable target-only serving path: `MarlinNvFp4LinearKernel` on
+  `gemma4:e4b-it-nvfp4`. Do not enable MTP for E4B unless the local CUDA
+  device-side assert issue is revalidated and resolved.
 
 MTP assistant mapping:
 
 - `gemma4:31b`: `google/gemma-4-31B-it-assistant`, `num_speculative_tokens=4`
-- `gemma4:e4b-it-nvfp4`: `google/gemma-4-E4B-it-assistant`, `num_speculative_tokens=4`
+- `gemma4:e4b-it-nvfp4`: MTP disabled, `num_speculative_tokens=0`
 
 NemoClaw/vLLM GPU residency profile:
 
 - `gemma4:31b`: `--gpu-memory-utilization 0.37`
-- `gemma4:e4b-it-nvfp4`: `--gpu-memory-utilization 0.20`
-- This profile is intentionally asymmetric so all three managed deployments can remain resident on the 120 GB class GPU.
-- Do not raise E4B to `0.30` while 31B remains resident; two small deployments would reserve roughly 70 GB before 31B starts, causing 31B startup to fail with insufficient free memory.
+- `gemma4:e4b-it-nvfp4`: `--gpu-memory-utilization 0.14` with `VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=0`
+- The current managed model list is intentionally limited to two deployments: 31B and E4B. E2B is not part of the active `/api/runtime/models` surface.
+- This profile is intentionally asymmetric so the two managed deployments can remain resident on the 120 GB class GPU.
+- Keep E4B at the low-residency `0.14` profile while 31B remains resident. vLLM 0.21 CUDA graph memory estimation can incorrectly force a higher reservation on this GB10/NVFP4 profile, so E4B disables `VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS` instead of raising the memory fraction. This profile was verified with 31B loaded: both `/v1/chat/completions` probes returned `OK`, E4B reserved about 15.7 GiB, and total system memory stayed at about 99 GiB used. Revalidate before raising E4B above `0.14`.
 
 Live GUI startup policy:
 
@@ -150,6 +184,7 @@ Live GUI startup policy:
 - Operators manually load the required model through the main dashboard per-model Loading buttons or `atr model load <e4b|31b>`.
 - Model-backed requests assume the target vLLM deployment is already loaded. If it is not loaded, the request should fail visibly instead of issuing hidden Kubernetes scale-up commands.
 - The main dashboard exposes per-model Loading/Unloading controls and deployment status dots for the managed NemoClaw/vLLM models.
+- OpenAI API-key loading is managed separately through `/api/runtime/api-key`. When enabled, OpenAI becomes the first inference route while preserving the saved key in local `memory/api_keys.json`; raw key text is never returned by API responses.
 
 Task routing baseline:
 

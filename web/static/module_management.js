@@ -25,6 +25,7 @@ const dryRunBtn = document.getElementById("mm-dry-run-btn");
 const versionsBtn = document.getElementById("mm-versions-btn");
 const versionOutput = document.getElementById("mm-version-output");
 const createBtn = document.getElementById("mm-create-btn");
+const createDraftBtn = document.getElementById("mm-create-draft-btn");
 const designerModuleIdInput = document.getElementById("mm-designer-module-id");
 const designerLabelInput = document.getElementById("mm-designer-label");
 const designerCategoryInput = document.getElementById("mm-designer-category");
@@ -51,6 +52,8 @@ let loadedIds = new Set();
 let selectedModuleId = "";
 let activeModulePayload = null;
 let activeModuleBaseline = null;
+let activeModuleLifecycle = null;
+let activeModuleRuntimeEffect = null;
 let searchQuery = "";
 let moduleGraphUsage = new Map();
 let lastDryRunResult = null;
@@ -215,9 +218,17 @@ function runtimeIdeUsageLink(item = {}) {
   return `/ide${params.toString() ? `?${params.toString()}` : ""}`;
 }
 
+function runtimeIdeModuleAttachLink(moduleId = "") {
+  const params = new URLSearchParams();
+  const clean = String(moduleId || "").trim();
+  if (clean) params.set("module", clean);
+  params.set("action", "attach");
+  return `/ide?${params.toString()}`;
+}
+
 function openRuntimeIdeForSelectedModule() {
   const usage = usageForModule(selectedModuleId)[0];
-  window.open(usage ? runtimeIdeUsageLink(usage) : "/ide", "_blank", "noopener");
+  window.open(usage ? runtimeIdeUsageLink(usage) : runtimeIdeModuleAttachLink(selectedModuleId), "_blank", "noopener");
 }
 
 function jumpToConfigSection(selector = "") {
@@ -286,6 +297,12 @@ function modulePrompt(module) {
   return module.prompt && typeof module.prompt === "object" && !Array.isArray(module.prompt) ? module.prompt : {};
 }
 
+function moduleSupervisorPolicy(module) {
+  return module.supervisor_policy && typeof module.supervisor_policy === "object" && !Array.isArray(module.supervisor_policy)
+    ? module.supervisor_policy
+    : {};
+}
+
 function moduleStepsForPhase(module, phase = "internal_graph") {
   module.pre_execution = Array.isArray(module.pre_execution) ? module.pre_execution : [];
   module.internal_graph = Array.isArray(module.internal_graph) ? module.internal_graph : [];
@@ -342,6 +359,27 @@ function readNumberInput(id) {
 
 function readCheckbox(id) {
   return Boolean(document.getElementById(id)?.checked);
+}
+
+function jsonTextareaValue(value, fallback = []) {
+  try {
+    return JSON.stringify(value === undefined || value === null ? fallback : value, null, 2);
+  } catch (err) {
+    return JSON.stringify(fallback, null, 2);
+  }
+}
+
+function readJsonArrayInput(id, label) {
+  const raw = document.getElementById(id)?.value?.trim() || "";
+  if (!raw) return [];
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    throw new Error(`${label} must be valid JSON array: ${err.message || err}`);
+  }
+  if (!Array.isArray(parsed)) throw new Error(`${label} must be a JSON array`);
+  return parsed;
 }
 
 function formatVersionTimestamp(value) {
@@ -557,6 +595,70 @@ function refreshModulePreflightCard(payload = activeModulePayload) {
   if (card) card.outerHTML = modulePreflightMarkup(payload);
 }
 
+function supervisorPolicyGateMarkup(gate = {}) {
+  if (!gate || typeof gate !== "object" || Array.isArray(gate) || !gate.present) return "";
+  const required = Array.isArray(gate.required_outputs) ? gate.required_outputs : [];
+  const declared = Array.isArray(gate.declared_outputs) ? gate.declared_outputs : [];
+  const missingOutputs = Array.isArray(gate.missing_outputs) ? gate.missing_outputs : [];
+  const row = (label, values, fallback = "none") => `
+    <span>
+      <strong>${escapeHtml(label)}</strong>
+      <small>${escapeHtml(values.length ? values.join(", ") : fallback)}</small>
+    </span>
+  `;
+  return `
+    <div class="module-management-lifecycle-gate ${gate.ok ? "ok" : "warn"}">
+      <span class="${gate.ok ? "ok" : "warn"}">${escapeHtml(gate.ok ? "OK" : "BLOCK")}</span>
+      <small>Supervisor required outputs</small>
+    </div>
+    <div class="module-management-requirements">
+      ${row("required_outputs", required)}
+      ${row("declared_outputs", declared)}
+      ${row("missing_outputs", missingOutputs)}
+    </div>
+  `;
+}
+
+function renderModuleLifecycle(lifecycle = activeModuleLifecycle, runtimeEffect = activeModuleRuntimeEffect) {
+  if (!lifecycle && !runtimeEffect) return "";
+  const state = lifecycle && typeof lifecycle === "object" && !Array.isArray(lifecycle) ? lifecycle : {};
+  const effect = runtimeEffect && typeof runtimeEffect === "object" && !Array.isArray(runtimeEffect) ? runtimeEffect : {};
+  const runtimeChange = effect.changes_runtime_execution ? "runtime execution changes" : "no runtime execution change";
+  const graphChange = effect.changes_graph_config ? "graph config changes" : "no graph config change";
+  const requirements = Array.isArray(state.activation_requirements) ? state.activation_requirements : [];
+  const supervisor_policy_gate = state.supervisor_policy_gate && typeof state.supervisor_policy_gate === "object" && !Array.isArray(state.supervisor_policy_gate)
+    ? state.supervisor_policy_gate
+    : {};
+  return `
+    <div class="module-management-section module-management-lifecycle-section">
+      <strong>Management-only load lifecycle</strong>
+      <p>${escapeHtml(effect.scope || "management_workspace")} · ${escapeHtml(runtimeChange)} · ${escapeHtml(graphChange)}</p>
+      <small>changes_runtime_execution=${escapeHtml(String(Boolean(effect.changes_runtime_execution)))}</small>
+      <div class="module-management-kpis compact">
+        <span><strong>${escapeHtml(state.module_status || "unknown")}</strong><small>status</small></span>
+        <span><strong>${escapeHtml(state.activation_status || "unknown")}</strong><small>activation_status</small></span>
+        <span><strong>${escapeHtml(state.graph_attached ? "yes" : "no")}</strong><small>graph</small></span>
+        <span><strong>${escapeHtml(state.executable_count ?? 0)}</strong><small>exec</small></span>
+      </div>
+      <div class="module-management-lifecycle-gate">
+        <span class="${state.ready_for_live_activation ? "ok" : "warn"}">${escapeHtml(state.ready_for_live_activation ? "READY" : "NOT READY")}</span>
+        <small>next_required_action=${escapeHtml(state.next_required_action || "none")}</small>
+      </div>
+      ${requirements.length ? `
+        <div class="module-management-requirements">
+          ${requirements.map((item) => `
+            <span class="${item.ok ? "ok" : "warn"}">
+              <strong>${escapeHtml(item.ok ? "OK" : "BLOCK")}</strong>
+              <small>${escapeHtml(item.id || item.label || "activation_requirement")}</small>
+            </span>
+          `).join("")}
+        </div>
+      ` : ""}
+      ${supervisorPolicyGateMarkup(supervisor_policy_gate)}
+    </div>
+  `;
+}
+
 function renderModulePayload(modulePayload, loaded = loadedIds.has(selectedModuleId)) {
   const module = modulePayload?.module || {};
   const tools = Array.isArray(module.tools) ? module.tools : [];
@@ -583,6 +685,7 @@ function renderModulePayload(modulePayload, loaded = loadedIds.has(selectedModul
       <span><strong>${escapeHtml(internal.length)}</strong><small>internal</small></span>
       <span><strong>${escapeHtml(usage.length)}</strong><small>graph refs</small></span>
     </div>
+    ${renderModuleLifecycle()}
     <div class="module-management-section module-management-impact-section">
       <strong>Graph Usage / Runtime Impact</strong>
       ${
@@ -626,6 +729,7 @@ function renderConfigSummary(modulePayload = activeModulePayload) {
   const module = normalizedModulePayload(modulePayload).module || {};
   const llm = moduleLlm(module);
   const prompt = modulePrompt(module);
+  const supervisorPolicy = moduleSupervisorPolicy(module);
   const retry = module.retry && typeof module.retry === "object" && !Array.isArray(module.retry) ? module.retry : {};
   const safety = module.safety && typeof module.safety === "object" && !Array.isArray(module.safety) ? module.safety : {};
   const preCount = Array.isArray(module.pre_execution) ? module.pre_execution.length : 0;
@@ -700,6 +804,31 @@ function renderConfigSummary(modulePayload = activeModulePayload) {
           </label>
           <label class="runtime-handler-select-label">Developer prompt override
             <textarea id="mm-config-prompt-developer" class="runtime-module-small-textarea" spellcheck="false">${escapeHtml(prompt.developer || "")}</textarea>
+          </label>
+        </div>
+      </section>
+      <section class="runtime-module-config-card wide">
+        <div class="runtime-module-card-title"><strong>Supervisor Policy</strong><small>custom Orchestrator follow-up language</small></div>
+        <div class="runtime-module-two-col prompt-columns">
+          <label class="runtime-handler-select-label">Required outputs
+            <textarea id="mm-config-supervisor-required-outputs" class="runtime-module-small-textarea" spellcheck="false" placeholder="one output contract per line">${escapeHtml(moduleTextLines(supervisorPolicy.required_outputs || []))}</textarea>
+          </label>
+          <label class="runtime-handler-select-label">Response-required statuses
+            <textarea id="mm-config-supervisor-response-statuses" class="runtime-module-small-textarea" spellcheck="false" placeholder="blocked&#10;requires_operator_input">${escapeHtml(moduleTextLines(supervisorPolicy.requires_response_on_status || []))}</textarea>
+          </label>
+        </div>
+        <label class="runtime-handler-select-label">Opinion template
+          <textarea id="mm-config-supervisor-opinion-template" class="runtime-module-small-textarea" spellcheck="false" placeholder="Custom stage checked status={status} score={metrics.score}.">${escapeHtml(supervisorPolicy.opinion_template || "")}</textarea>
+        </label>
+        <label class="runtime-handler-select-label">Recommendation template
+          <textarea id="mm-config-supervisor-recommendation-template" class="runtime-module-small-textarea" spellcheck="false" placeholder="Continue to {next_stage} after verifying {required_outputs}.">${escapeHtml(supervisorPolicy.recommendation_template || "")}</textarea>
+        </label>
+        <div class="runtime-module-two-col prompt-columns">
+          <label class="runtime-handler-select-label">Concern rules JSON
+            <textarea id="mm-config-supervisor-concern-rules" class="runtime-module-small-textarea" spellcheck="false" placeholder='[{"selector":"metrics.score","lt":0.95,"message":"score below target"}]'>${escapeHtml(jsonTextareaValue(supervisorPolicy.concern_rules || []))}</textarea>
+          </label>
+          <label class="runtime-handler-select-label">Options JSON
+            <textarea id="mm-config-supervisor-options" class="runtime-module-small-textarea" spellcheck="false" placeholder='[{"id":"rerun","label":"Rerun check","risk":"low"}]'>${escapeHtml(jsonTextareaValue(supervisorPolicy.options || []))}</textarea>
           </label>
         </div>
       </section>
@@ -989,6 +1118,21 @@ function applyConfigFormToPayload() {
   if (systemPrompt.trim()) module.prompt.system = systemPrompt.trim();
   if (developerPrompt.trim()) module.prompt.developer = developerPrompt.trim();
   if (!Object.keys(module.prompt).length) delete module.prompt;
+  const supervisorPolicy = {};
+  const requiredOutputs = parseLineList(document.getElementById("mm-config-supervisor-required-outputs")?.value || "");
+  const responseStatuses = parseLineList(document.getElementById("mm-config-supervisor-response-statuses")?.value || "");
+  const opinionTemplate = readInputValue("mm-config-supervisor-opinion-template");
+  const recommendationTemplate = readInputValue("mm-config-supervisor-recommendation-template");
+  const concernRules = readJsonArrayInput("mm-config-supervisor-concern-rules", "Supervisor concern rules");
+  const options = readJsonArrayInput("mm-config-supervisor-options", "Supervisor options");
+  if (requiredOutputs.length) supervisorPolicy.required_outputs = requiredOutputs;
+  if (opinionTemplate) supervisorPolicy.opinion_template = opinionTemplate;
+  if (recommendationTemplate) supervisorPolicy.recommendation_template = recommendationTemplate;
+  if (concernRules.length) supervisorPolicy.concern_rules = concernRules;
+  if (options.length) supervisorPolicy.options = options;
+  if (responseStatuses.length) supervisorPolicy.requires_response_on_status = responseStatuses;
+  if (Object.keys(supervisorPolicy).length) module.supervisor_policy = supervisorPolicy;
+  else delete module.supervisor_policy;
   module.safety = {
     ...(module.safety || {}),
     live_requires_validation: readCheckbox("mm-config-live-validation"),
@@ -1120,6 +1264,8 @@ async function inspectModule(moduleId) {
   const result = await requestJson(`/api/modules/${moduleId}`);
   activeModuleBadge.textContent = moduleId || "none";
   activeModulePayload = normalizedModulePayload(result.module);
+  activeModuleLifecycle = result.lifecycle || null;
+  activeModuleRuntimeEffect = result.runtime_effect || null;
   renderModulePayload(activeModulePayload, Boolean(result.loaded));
   setConfigPayload(activeModulePayload, { baseline: true, reason: "active module loaded" });
 }
@@ -1160,6 +1306,8 @@ async function loadSelected() {
   const result = await requestJson(`/api/modules/${selectedModuleId}/load`, { method: "POST", body: "{}" });
   loadedIds = new Set(result.loaded_module_ids || []);
   activeModulePayload = normalizedModulePayload(result.module);
+  activeModuleLifecycle = result.lifecycle || null;
+  activeModuleRuntimeEffect = result.runtime_effect || null;
   renderModuleList();
   renderModulePayload(activeModulePayload, true);
   setConfigPayload(activeModulePayload, { baseline: true, reason: "module loaded" });
@@ -1171,6 +1319,8 @@ async function unloadSelected() {
   if (!selectedModuleId) return;
   const result = await requestJson(`/api/modules/${selectedModuleId}/unload`, { method: "POST", body: "{}" });
   loadedIds = new Set(result.loaded_module_ids || []);
+  activeModuleLifecycle = result.lifecycle || null;
+  activeModuleRuntimeEffect = result.runtime_effect || null;
   renderModuleList();
   if (activeModulePayload) renderModulePayload(activeModulePayload, false);
   actionOutput.innerHTML = `<div><strong>Unloaded</strong> ${escapeHtml(selectedModuleId)} from management workspace.</div>`;
@@ -1366,6 +1516,37 @@ async function createModule() {
   await loadSelected();
 }
 
+async function createDraftModuleTemplate() {
+  const moduleId = designerModuleIdInput.value.trim();
+  const label = designerLabelInput.value.trim();
+  if (!moduleId || !label) throw new Error("Module ID and Label are required for a draft agent.");
+  createDraftBtn.disabled = true;
+  designerStatus.textContent = "Creating inactive draft agent template...";
+  try {
+    const result = await requestJson("/api/modules/templates/agent", {
+      method: "POST",
+      body: JSON.stringify({
+        module_id: moduleId,
+        label,
+        category: designerCategoryInput.value.trim() || "custom",
+        notes: designerNotesInput.value.trim(),
+        author: "module_management_gui",
+      }),
+    });
+    if (!result.ok) {
+      designerStatus.innerHTML = `<strong>Draft create failed</strong><pre>${escapeHtml(JSON.stringify(result.errors || result, null, 2))}</pre>`;
+      setStatus("warn", "Draft Create Failed", moduleId);
+      return;
+    }
+    designerStatus.innerHTML = `<strong>Draft Created</strong> ${escapeHtml(result.module_id)}<br /><small>inactive preview · graph unattached · ${escapeHtml(result.ui_path || "ui.yaml")}</small>`;
+    selectedModuleId = result.module_id;
+    await refreshAll();
+    await loadSelected();
+  } finally {
+    createDraftBtn.disabled = false;
+  }
+}
+
 refreshBtn.addEventListener("click", () => refreshAll().catch((err) => setStatus("warn", "Refresh Failed", String(err))));
 openIdeBtn.addEventListener("click", openRuntimeIdeForSelectedModule);
 saveConfigQuickBtn.addEventListener("click", () => saveConfigSelected().catch((err) => showModuleActionError("Save Failed", err)));
@@ -1397,6 +1578,10 @@ configJsonInput.addEventListener("change", () => {
 createBtn.addEventListener("click", () => createModule().catch((err) => {
   designerStatus.textContent = String(err);
   setStatus("warn", "Create Failed", String(err));
+}));
+createDraftBtn.addEventListener("click", () => createDraftModuleTemplate().catch((err) => {
+  designerStatus.textContent = String(err);
+  setStatus("warn", "Draft Create Failed", String(err));
 }));
 designerPythonFileInput.addEventListener("change", () => fillDesignerFromFile(designerPythonFileInput.files?.[0]));
 searchInput.addEventListener("input", () => { searchQuery = searchInput.value || ""; renderModuleList(); });

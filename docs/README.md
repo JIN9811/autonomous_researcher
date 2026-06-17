@@ -9,14 +9,33 @@
 | 전체 프로젝트 흐름 | [../README.ko.md](../README.ko.md), [../README.en.md](../README.en.md) |
 | 초보자/상급자 통합 매뉴얼 | [tutorials/user_manual.ko.md](tutorials/user_manual.ko.md), [tutorials/user_manual.en.md](tutorials/user_manual.en.md) |
 | 실제 닫힌 루프, 페이지, 에이전트 | [runtime/closed_loop_and_pages_reference.md](runtime/closed_loop_and_pages_reference.md) |
+| 현재 코드/API 스냅샷 | [runtime/current_code_snapshot.md](runtime/current_code_snapshot.md) |
 | LangGraph 실행 계약 | [runtime/langgraph_runtime.md](runtime/langgraph_runtime.md) |
 | Guardian safety/alarm 계약 | [runtime/guardian_graphwide_safety.md](runtime/guardian_graphwide_safety.md) |
 | Experiment API 계약 | [runtime/autonomous_experiment_runtime.md](runtime/autonomous_experiment_runtime.md) |
+| API key / OpenAI fallback | [runtime/api_keys.md](runtime/api_keys.md) |
 | Live GUI 운영 | [gui/gui.md](gui/gui.md) |
 | Device Workspaces / 3DP 사용법 | [tutorials/device_workspace_3dp_usage.ko.md](tutorials/device_workspace_3dp_usage.ko.md) |
 | BambuLab X2D bridge 구조 | [hardware/bambulab_x2d_device_bridge_runtime_guideline.md](hardware/bambulab_x2d_device_bridge_runtime_guideline.md) |
 | 첫 실행 튜토리얼 | [tutorials/first_autonomous_run.ko.md](tutorials/first_autonomous_run.ko.md), [tutorials/first_autonomous_run.en.md](tutorials/first_autonomous_run.en.md) |
 | Git/GitHub 운영 | [repository/github_version_control.md](repository/github_version_control.md) |
+
+## 1.1 현재 코드 기준 문서 읽는 순서
+
+문서가 서로 다르게 보이면 아래 순서로 판단합니다.
+
+1. `app/main.py`, `graphs/configs/*.yaml`, `graphs/modules/*/module.yaml`,
+   `device_bridges/*`, `web/templates/*`, `web/static/*`의 실제 코드
+2. [runtime/current_code_snapshot.md](runtime/current_code_snapshot.md)
+3. `docs/runtime`, `docs/gui`, `docs/hardware`, `docs/tutorials`의 운영 문서
+4. `개선안/*`과 `docs/ATR_*_Package/*`의 목표 설계/패키지 지침
+
+`runtime/current_code_snapshot.md`는 현재 코드가 실제로 노출하는 page
+route, API 그룹, agent manifest, module lifecycle, Module Management typed
+editor 범위, bridge registry, printer fleet, model/API-key 상태를 요약하는 문서입니다. 개선안 문서보다
+실제 코드 설명에 가깝고, 운영자용 문서를 갱신할 때 먼저 맞춰야 합니다.
+route 수치와 그룹 분류는 decorator grep가 아니라 `.venv/bin/python`으로
+FastAPI app을 import한 뒤 `APIRoute` 객체를 세는 기준입니다.
 
 ## 2. 실제 런타임 구조 요약
 
@@ -32,13 +51,49 @@ Main GUI -> Live GUI -> /api/run/start -> LangGraphRunLoop
 Live GUI에서 보이는 상태는 다음 소스에서 옵니다.
 
 - `/api/planning/session`: 채팅/오케스트레이션 세션
+- `/api/planning/messages`: file-backed Live GUI transcript 페이지 로딩
 - `/api/runtime/state`: 현재 runtime 상태
+- `/api/runtime/agent-manifests`: graph/module/`ui.yaml` 기반 Live GUI agent manifest
+- `/api/bridges`: graph metadata 기반 normalized device bridge registry
 - `/api/events/recent`: 최근 이벤트
 - `/api/events/stream`: SSE stream
 - `/api/runs/{run_id}/events`: run별 이벤트
 - `/api/runs/{run_id}/artifacts`: run별 아티팩트
 
-3DP/Bambu 경로는 `SpecimenMakingAgent -> printer.prepare -> PrinterDeviceBridgeManager -> Bambu native G-code patch/start gate` 순서로 연결됩니다. 세부 구조는 [hardware/bambulab_x2d_device_bridge_runtime_guideline.md](hardware/bambulab_x2d_device_bridge_runtime_guideline.md)에 정리되어 있습니다. BambuLab X2D가 기본 active provider이며, Prusa MK4S는 fallback이 아니라 operator가 선택하는 별도 provider입니다. Bambu의 MQTT publish ack는 실제 출력 시작과 분리해서 기록하며, fresh post-publish observation이 RUNNING/PREPARING 계열 상태로 넘어가지 않으면 `BAMBU_PROJECT_FILE_ACCEPTED_BUT_NOT_STARTED`로 차단합니다. Native autoejection은 `bambu_gcode_patch` provider로 sliced `.gcode.3mf` 내부 plate G-code에 deterministic tail을 삽입하고, source/patched hash, plate id, loop index, material/bed placeholder, cooldown, sweep, purge/parking strategy, validation evidence를 manifest와 tail comment에 남긴 뒤에만 start gate로 넘어갑니다. Bambu bridge evidence는 `artifact`, `validation`, `transport`, `runtime`, `bed-clear` 5개 plane으로 나뉘며, GUI/Live report/API는 이 구분을 유지해야 합니다. `.autoeject.*` publish가 성공하면 bed-clear evidence는 remote path, subtask, source/patched artifact path와 hash, manifest, publish sequence/topic, post-publish status, camera snapshot reference를 같이 잠그며, 다음 job은 이 evidence가 해제되기 전까지 차단됩니다. 물리 완료 선언 시에도 physical start precheck는 saved prestart snapshot에서 `ready_to_publish_not_started`, `published=false`, `will_publish=false`가 확인되어야 합니다. center standalone ejection, left/right lane ejection, disposable live ejection은 각각 saved `printer.bambu.start_publish` 응답 snapshot을 가져야 하며, snapshot의 `ready_to_publish=true`, `start_enabled=true`, blocker 없음, remote path, publish sequence/topic, post-publish running status가 proof 본문과 일치해야 합니다. disposable live ejection은 추가로 local source/patched artifact file의 sha256이 proof hash와 맞아야 합니다. left/right lane은 marker artifact와 saved validation snapshot도 모두 있어야 하고, post-ejection bed-clear는 `operator`, `camera`, `vision` 중 하나의 검증 방식과 live ejection의 source/patched sha256 매칭을 요구하고, next-job gate는 saved start-gate snapshot에서 `ready_to_publish=true`, `start_enabled=true`, blocker 없음, `BAMBU_POST_EJECT_BED_NOT_CLEAR` 없음이 확인되어야 합니다. 실제 motion은 `.autoeject.*` artifact 검증, camera/bed-clear evidence, Guardian/operator approval, ejection-path operator checklist를 모두 통과한 뒤에만 이어집니다. 물리 완료 선언은 별도 completion audit으로만 가능하며, `/api/printer/bambu-autoejection-proof-template`와 `/api/printer/bambu-autoejection-completion-audit` 또는 `scripts/audit_bambu_autoejection_completion.py`가 file-backed proof package를 검증해야 합니다.
+Live GUI agent 목록은 `web/static/planning.js`의 하드코딩 목록이 아니라 `/api/runtime/agent-manifests`가 우선입니다. 이 manifest payload는 `agents[]`를 포함하며, `graphs/configs/atr_closed_loop.yaml`, `graphs/modules/*/module.yaml`, 선택적 `graphs/modules/*/ui.yaml`을 병합합니다. 현재 descriptor card/report section 예시는 `design`, `equipment`, `guardian` 모듈에 있으며, `ui.yaml`은 표시 전용이라 handler, tool allowlist, graph transition, live device 권한을 바꾸지 않습니다. 현재 generic renderer는 selector 기반 card/report section, `mini_bar_chart`, `scatter_plot`, `line_chart`, `table`, `heatmap`, `compound_chart`/`chart_grid`, 내부 GUI navigation action, read-only GET API action, workspace handoff action을 처리합니다. `GET/PUT /api/modules/{module_id}/ui`는 chart/action descriptor를 표시용 계약으로 정규화하고, safe internal navigation은 `navigation_only`, 검증된 read-only GET `/api/*`는 `read_only_api`, 검증된 POST/confirmation/non-read-only 내부 API는 `workspace_handoff`, unsafe/unsupported action은 `blocked`로 표시합니다. 물리 장비 action은 workspace/API/Guardian gate 경로에 남아 있습니다. `ui.renderer` 기반 custom renderer manifest id는 현재 allowlisted `presentation_only` profile로만 동작합니다. 즉 `/api/runtime/agent-manifests`가 normalized `renderer`를 내려주고 Live GUI가 그 metadata로 기존 built-in report/dashboard renderer를 선택하지만, 임의 외부 renderer/plugin 코드를 로드하지는 않습니다.
+
+현재 구현 기준의 route/API/manifest 상태는 [runtime/current_code_snapshot.md](runtime/current_code_snapshot.md)에 따로 고정합니다. 문서를 갱신할 때는 목표 설계 문서보다 이 스냅샷과 `app/main.py`의 실제 route를 우선 확인합니다.
+
+Live GUI transcript는 `runs/<active_run_id>/live_planning_transcript.jsonl`에
+저장되고 `/api/planning/messages`로 페이지 단위 조회됩니다. 따라서 화면
+새로고침/재접속 상태 설명은 browser-local memory가 아니라 이 file-backed
+session 계약을 기준으로 써야 합니다.
+
+Module Management는 `Load/Unload`와 runtime activation을 분리합니다.
+`Load/Unload`는 management workspace selection일 뿐이고, 실제 실행은
+graph attach, validate, dry-run, save/version, graph live gate를 통과해야
+합니다. Module Designer 생성물은 `/api/modules/{module_id}/register-generated`
+승인 후에도 같은 graph validation 경로를 거칩니다.
+
+Custom stage는 현재 `Stage._missing_()` pseudo-member와 graph/module
+validation을 통해 최소 실행 경로가 열려 있습니다. Custom stage가
+operator-facing follow-up 문구를 직접 제어하려면 payload 또는
+`module_runtime`에 `supervisor_policy` descriptor를 넣어야 합니다. 현재
+Module Management typed form은 handler/LLM/tool/prompt/safety/step 편집용이며,
+`supervisor_policy`의 required outputs, opinion/recommendation template,
+response-required status, concern rules, options도 typed editor에서 편집할 수
+있습니다. graph attach/save lifecycle 통합은 아직 후속 범위입니다.
+
+LLM backend와 API key 상태는 Main GUI `Current Models` 영역과 아래 API가 같은 상태를 봅니다.
+
+- `/api/runtime/models`: vLLM/NemoClaw managed model load state
+- `/api/runtime/models/load`, `/api/runtime/models/unload`: 모델별 load/unload
+- `/api/runtime/api-key`: 저장된 OpenAI key 등록/활성 상태. key 원문은 반환하지 않음
+- `/api/runtime/api-key/load`, `/api/runtime/api-key/unload`: 저장된 key를 first inference route로 enable/disable
+
+3DP/Bambu 경로는 `SpecimenMakingAgent -> printer.prepare -> PrinterDeviceBridgeManager -> Bambu native G-code patch/start gate` 순서로 연결됩니다. 세부 구조는 [hardware/bambulab_x2d_device_bridge_runtime_guideline.md](hardware/bambulab_x2d_device_bridge_runtime_guideline.md)에 정리되어 있습니다. BambuLab X2D가 기본 active provider이며, Prusa MK4S는 fallback이 아니라 operator가 선택하는 별도 provider입니다. Bambu의 MQTT publish ack는 실제 출력 시작과 분리해서 기록하며, fresh post-publish observation이 RUNNING/PREPARING 계열 상태로 넘어가지 않으면 `BAMBU_PROJECT_FILE_ACCEPTED_BUT_NOT_STARTED`로 차단합니다. Native autoejection은 `bambu_gcode_patch` provider로 sliced `.gcode.3mf` 내부 plate G-code에 deterministic tail을 삽입하고, source/patched hash, plate id, loop index, material/bed placeholder, cooldown, sweep, purge/parking strategy, validation evidence를 manifest와 tail comment에 남긴 뒤에만 start gate로 넘어갑니다. Bambu bridge evidence는 `artifact`, `validation`, `transport`, `runtime`, `bed-clear` 5개 plane으로 나뉘며, GUI/Live report/API는 이 구분을 유지해야 합니다. `.autoeject.*` publish가 성공하면 bed-clear evidence는 remote path, subtask, source/patched artifact path와 hash, manifest, publish sequence/topic, post-publish status, camera snapshot reference를 같이 잠그며, 다음 job은 이 evidence가 해제되기 전까지 차단됩니다. 물리 완료 선언 시에도 physical start precheck는 saved prestart snapshot에서 `ready_to_publish_not_started`, `published=false`, `will_publish=false`가 확인되어야 합니다. center standalone ejection, left/right lane ejection, disposable live ejection은 각각 saved `printer.bambu.start_publish` 응답 snapshot을 가져야 하며, snapshot의 `ready_to_publish=true`, `start_enabled=true`, blocker 없음, remote path, publish sequence/topic, post-publish running status가 proof 본문과 일치해야 합니다. disposable live ejection은 추가로 local source/patched artifact file의 sha256이 proof hash와 맞아야 합니다. left/right lane은 marker artifact와 saved validation snapshot도 모두 있어야 하고, post-ejection bed-clear는 `operator`, `camera`, `vision` 중 하나의 검증 방식과 live ejection의 source/patched sha256 매칭을 요구하고, next-job gate는 saved start-gate snapshot에서 `ready_to_publish=true`, `start_enabled=true`, blocker 없음, `BAMBU_POST_EJECT_BED_NOT_CLEAR` 없음이 확인되어야 합니다. 현재 3DP GUI는 별도 수동 approval/checklist checkbox를 노출하지 않고 `operator_confirmed=true`, `guardian_approved=true`, `dry_run=false`, `operator_managed=true`를 owner-managed publish 기본값으로 보냅니다. 실제 motion은 `.autoeject.*` artifact 검증, camera/bed-clear evidence, printer safe-state, backend start gate, post-publish observation을 통과한 뒤에만 이어집니다. 물리 완료 선언은 별도 completion audit으로만 가능하며, `/api/printer/bambu-autoejection-proof-template`와 `/api/printer/bambu-autoejection-completion-audit` 또는 `scripts/audit_bambu_autoejection_completion.py`가 file-backed proof package를 검증해야 합니다.
+
+주의: `/api/bridges`는 현재 graph metadata 기반 bridge registry를 normalized contract로 반환합니다. 반환값에는 workspace, health/preflight endpoint, `actions[]`에 들어간 standard/custom action descriptor, evidence contract, health snapshot이 포함되며, 같은 shape가 `/api/runtime/state.runtime_ide_contract.device_bridges`에도 들어갑니다. Bambu Lab X2D는 이 registry가 아니라 `/api/printer/fleet`와 `/api/printer/*` provider 계층에서 기본 active profile로 관리됩니다. 따라서 Bambu가 `/api/bridges` 목록에 없다는 사실은 Bambu printer bridge가 비활성이라는 뜻은 아닙니다.
 
 시스템 설명 문서에서 3DP bridge를 설명할 때는 다음 세 계층을 섞지 않습니다.
 
@@ -57,7 +112,7 @@ Live GUI에서 보이는 상태는 다음 소스에서 옵니다.
 | Main GUI | `/` | `web/templates/index.html`, `web/static/app.js` | [gui/gui.md](gui/gui.md) |
 | Live GUI | `/live`, `/planning` | `web/templates/planning.html`, `web/static/planning.js` | [gui/gui.md](gui/gui.md), [runtime/closed_loop_and_pages_reference.md](runtime/closed_loop_and_pages_reference.md) |
 | Runtime IDE | `/ide` | `web/templates/runtime_ide.html`, `web/static/runtime_ide.js` | [runtime/langgraph_runtime.md](runtime/langgraph_runtime.md) |
-| Module Management | `/module-management` | `web/templates/module_management.html`, `web/static/module_management.js` | [runtime/agent_program_baseline.md](runtime/agent_program_baseline.md) |
+| Module Management | `/module-management` | `web/templates/module_management.html`, `web/static/module_management.js` | [runtime/langgraph_runtime.md](runtime/langgraph_runtime.md), [runtime/agent_program_baseline.md](runtime/agent_program_baseline.md) |
 | 3DP Workspace | `/printer` | `web/templates/printer.html`, `web/static/printer.js`, `device_bridges/bambu_bridge.py`, `device_bridges/bambu_autoejection.py` | [gui/gui.md](gui/gui.md), [runtime/closed_loop_and_pages_reference.md](runtime/closed_loop_and_pages_reference.md), [hardware/bambulab_x2d_device_bridge_runtime_guideline.md](hardware/bambulab_x2d_device_bridge_runtime_guideline.md), [../개선안/13_bambulab_x2d_spc_device_bridge_research.md](../개선안/13_bambulab_x2d_spc_device_bridge_research.md), [../개선안/14_bambulab_gcode_autoejection_runtime_plan.md](../개선안/14_bambulab_gcode_autoejection_runtime_plan.md), [tutorials/device_workspace_3dp_usage.ko.md](tutorials/device_workspace_3dp_usage.ko.md), [hardware/printer_agent_prusabridge_phase1_runtime_guideline.txt](hardware/printer_agent_prusabridge_phase1_runtime_guideline.txt) |
 | LeRobot Workspace | `/lerobot` | `web/templates/lerobot.html`, `web/static/lerobot.js` | [hardware/lerobot_robotis_manipulation_runtime_guideline.md](hardware/lerobot_robotis_manipulation_runtime_guideline.md) |
 | BO Workspace | `/bo` | `web/templates/bo.html`, `web/static/bo.js` | [agents/bo_agent_runtime_guideline.txt](agents/bo_agent_runtime_guideline.txt) - BO/MBO/LLM preference 설정, lightweight/BoTorch optional backend, reasoning audit, candidate ranking |
@@ -127,6 +182,8 @@ Live GUI에서 보이는 상태는 다음 소스에서 옵니다.
 
 ## 8. 문서 유지 규칙
 
+- 코드와 문서가 다르면 우선 `runtime/current_code_snapshot.md`를 갱신한 뒤
+  관련 문서를 따라 수정합니다.
 - runtime loop나 API를 바꾸면 `runtime/closed_loop_and_pages_reference.md`를 같이 갱신합니다.
 - Knowledge memory/evidence schema나 Evolution Lab prefill을 바꾸면 `agents/knowledge_agent_self_evolution_runtime_guideline.md`와 `runtime/self_evolution.md`를 같이 갱신합니다.
 - GUI route/버튼/API가 바뀌면 `gui/gui.md`와 이 인덱스의 페이지 맵을 같이 갱신합니다.

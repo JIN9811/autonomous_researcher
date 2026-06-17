@@ -27,7 +27,18 @@ from typing import Any
 import httpx
 
 from backends.llm_backend import BaseLLMBackend, LLMResponse
-from backends.vllm_client import DEFAULT_MAX_TOKENS_BY_TASK
+OPENAI_MAX_COMPLETION_TOKENS_BY_TASK = {
+    "orchestrator_plan": 1800,
+    "design_reasoning": 1200,
+    "analysis_reasoning": 1000,
+    "analysis_fem_planning": 1000,
+    "bo_policy": 1000,
+    "knowledge_query": 1000,
+    "guardian_reasoning": 1000,
+    "tool_formatting": 512,
+    "gui_helper": 512,
+    "module_designer": 2200,
+}
 
 
 class OpenAIBackend(BaseLLMBackend):
@@ -62,7 +73,7 @@ class OpenAIBackend(BaseLLMBackend):
             except (TypeError, ValueError):
                 return None
         task_type = str(metadata.get("task_type", "")).strip()
-        return DEFAULT_MAX_TOKENS_BY_TASK.get(task_type)
+        return OPENAI_MAX_COMPLETION_TOKENS_BY_TASK.get(task_type)
 
     @staticmethod
     def _message_text(value: Any) -> str:

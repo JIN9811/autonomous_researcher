@@ -1,0 +1,35 @@
+ui:
+  short: EQP
+  icon: /static/live_gui_icons/equipment_agent.svg
+  report_title: Lab Equipment Agent
+  chat:
+    mode: open_on_demand
+  cards:
+  - id: equipment_bridge_descriptor
+    type: bridge_status
+    title: Equipment Bridge Descriptor
+    eyebrow: module descriptor
+    span: 4
+    tone: equipment
+    selectors:
+      bridge: metadata.latest_equipment_report.bridge
+      profile: metadata.latest_equipment_report.control_plan.profile
+      data_file: metadata.latest_equipment_result.result_file
+      handoff: metadata.latest_equipment_handoff_packet.status
+  - id: utm_data_descriptor
+    type: evidence_summary
+    title: UTM Data Descriptor
+    eyebrow: module descriptor
+    span: 4
+    tone: success
+    selectors:
+      acquisition_status: metadata.latest_utm_data_ready_packet.status
+      linux_path: metadata.latest_utm_data_ready_packet.result_file
+      screen_checks: metadata.latest_equipment_report.screen_checks
+      physical_checks: metadata.latest_equipment_report.physical_checks
+  report_sections:
+  - id: equipment_overview
+    title: Equipment Overview
+    selectors:
+      bridge: metadata.latest_equipment_report
+      result: metadata.latest_equipment_result

@@ -210,6 +210,15 @@ Current implementation scope:
 
 - Test mode and camera unavailable paths use deterministic simulator/rule output.
 - When the LeRobot bridge is available, test mode can attach `/api/lerobot/camera/test` frame evidence; live mode requires explicit camera/live confirmation before any camera test is called.
+- The current `camera.capture` registration remains a deterministic typed
+  observation tool. It should not be documented as directly opening RealSense or
+  webcam streams in the main closed-loop path.
+- `device_bridges/realsense_bridge.py` is available as a guarded bridge class
+  for RealSense enumeration, profile validation, and single-frame capture. It is
+  intentionally fail-closed: enumeration and profile validation do not start
+  streams, and capture requires `allow_stream=true` or
+  `live_stream_confirmed=true` plus an advertised stream profile. It is not yet
+  exposed as a dedicated FastAPI workspace page/API.
 - DINOv3/Grounding DINO/SAM2/FoundationPose are represented as optional backend
   metadata, not assumed live dependencies.
 - The runtime writes Vision evidence artifacts and registers nested visual

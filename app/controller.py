@@ -45,7 +45,7 @@ from mcp_tools.tpms_geometry import (
     normalize_geometry_type as normalize_tpms_geometry_type,
     write_smooth_gyroid_stl,
 )
-from graphs import load_graph_config
+from graphs import load_graph_config, load_module_config
 from orchestrator.run_loop import RunLoop
 from orchestrator.langgraph_runtime import compact_runtime_payload, trim_runtime_memory
 from orchestrator.state import Mode, OrchestratorState, Stage
@@ -772,13 +772,17 @@ class MainController:
             "artifact_id", "artifact_path", "report_url", "preview_url", "stl_url",
             "graph_id", "run_id", "experiment_id", "summary", "message", "action",
             "compiled_graph", "errors", "graph_hash", "graph_version", "graph_version_id",
-            "graph_version_path", "source", "latest", "target_agent_id", "selected_agent_id",
+            "graph_version_path", "source", "source_action", "latest", "target_agent_id", "selected_agent_id",
+            "target_agent", "target_node_id", "target_event_key",
+            "selected_agent", "selected_agent_label", "selected_view", "ask_scope",
             "selected_node_id", "selected_graph_node_id", "trace_id", "selected_trace_id",
             "event_key", "selected_event_key", "selected_event_id", "selected_event_type",
             "selected_report_section", "selected_report_section_text",
             "selected_report_section_text_excerpt", "run_context", "live_run_id",
             "live_mode", "live_stage", "live_is_running", "live_active_goal",
             "chat_mode", "chat_target_mode", "pinned_finding", "pinned_at", "reviewed_at",
+            "attention_kind", "attention_action", "attention_event_key", "attention_event_type",
+            "attention_agent_id", "attention_node_id", "attention_trace_id", "attention_message",
             "operator_source",
         }
         out: dict[str, Any] = {}
@@ -1370,7 +1374,7 @@ class MainController:
             self._state.run_metadata["mission_contract"] = mission
             self._state.run_metadata["latest_mission_contract"] = mission
         if stale_plan:
-            plan = build_orchestration_plan(state=self._state)
+            plan = self._build_orchestration_plan()
             plans = self._state.run_metadata.get("orchestration_plans")
             if not isinstance(plans, list):
                 plans = []
@@ -1390,6 +1394,75 @@ class MainController:
                 mission_contract=mission,
                 orchestration_plan=plan,
             )
+
+    def _active_graph_plan_route_override(self, start: Stage | None = None) -> list[dict[str, Any]] | None:
+        """Return active graph stage metadata for supervisor plans, if graph-backed."""
+        config = self._active_graph_config()
+        if config is None:
+            return None
+        current = start or self._state.stage
+        if current in {Stage.COMPLETE, Stage.ERROR}:
+            return None
+        if current == Stage.IDLE:
+            try:
+                current = Stage(config.next_stage(Stage.IDLE.value, state_metadata=self._state.run_metadata))
+            except Exception:
+                current = Stage.DESIGN
+        stages = self._active_graph_stage_sequence(current, stop_at=Stage.GUARDIAN, include_start=True)
+        if not stages:
+            return None
+        route: list[dict[str, Any]] = []
+        for stage in stages:
+            node = self._graph_node_for_stage(stage)
+            module_runtime = self._module_runtime_for_stage(stage)
+            step = {
+                "stage": stage.value,
+                "agent": self._planning_stage_role(stage, module_runtime),
+                "label": self._planning_stage_label(stage, module_runtime),
+                "handler": str(module_runtime.get("handler") or getattr(node, "handler", "") or ""),
+                "module_id": str(module_runtime.get("graph_module_id") or getattr(node, "module_id", "") or ""),
+            }
+            required_outputs = self._module_required_outputs_for_graph_node(node)
+            if required_outputs:
+                step["required_outputs"] = required_outputs
+            route.append(step)
+        return route
+
+    def _active_graph_module_root(self) -> Path:
+        """Resolve module root for the active graph config path."""
+        if self._active_graph_config_path is None:
+            return Path(__file__).resolve().parent.parent / "graphs"
+        graph_dir = Path(self._active_graph_config_path).resolve().parent
+        return graph_dir.parent if graph_dir.name == "configs" else graph_dir
+
+    def _module_required_outputs_for_graph_node(self, node: Any) -> list[str]:
+        """Read module-declared output contracts for supervisor task queues."""
+        module_id = str(getattr(node, "module_id", "") or "").strip()
+        if not module_id:
+            return []
+        module_path = self._active_graph_module_root() / module_id / "module.yaml"
+        if not module_path.exists():
+            return []
+        try:
+            module = load_module_config(module_path).model_dump(mode="json", exclude_none=True)
+        except Exception:
+            return []
+        outputs: list[str] = []
+        output_contracts = module.get("output_contracts")
+        if isinstance(output_contracts, list):
+            outputs.extend(str(item).strip() for item in output_contracts if str(item).strip())
+        io_contract = module.get("io_contract") if isinstance(module.get("io_contract"), dict) else {}
+        io_output = io_contract.get("output")
+        if isinstance(io_output, list):
+            outputs.extend(str(item).strip() for item in io_output if str(item).strip())
+        return list(dict.fromkeys(outputs))
+
+    def _build_orchestration_plan(self) -> dict[str, Any]:
+        """Build supervisor plan with the active graph as the source of truth."""
+        return build_orchestration_plan(
+            state=self._state,
+            route_override=self._active_graph_plan_route_override(),
+        )
 
     def snapshot(self) -> dict[str, Any]:
         """Return current state plus logging metadata."""
@@ -3044,7 +3117,7 @@ class MainController:
         self._state.run_metadata["latest_orchestrator_decision"] = decision
         self._state.run_metadata["latest_orchestrator_handoff"] = handoff
         mission_contract = build_mission_contract(state=self._state)
-        orchestration_plan = build_orchestration_plan(state=self._state)
+        orchestration_plan = self._build_orchestration_plan()
         self._state.run_metadata["mission_contract"] = mission_contract
         self._state.run_metadata["latest_mission_contract"] = mission_contract
         self._append_orchestrator_metadata("orchestration_plans", orchestration_plan, limit=20)
@@ -5722,16 +5795,25 @@ class MainController:
         self._state.experiment_evaluations = compact_runtime_payload(self._state.experiment_evaluations)
         trim_runtime_memory()
 
-    @staticmethod
-    def _planning_stage_role(stage: Stage) -> str:
-        return {
+    def _planning_stage_role(self, stage: Stage, module_runtime: dict[str, Any] | None = None) -> str:
+        fixed_role = {
             Stage.VISION: "vision_ai",
             Stage.MANIPULATION: "manipulation_ai",
             Stage.EQUIPMENT: "equipment_ai",
             Stage.ANALYSIS: "analysis_ai",
             Stage.KNOWLEDGE: "knowledge_ai",
             Stage.GUARDIAN: "guardian",
-        }.get(stage, "system")
+        }.get(stage)
+        if fixed_role:
+            return fixed_role
+        runtime = module_runtime if isinstance(module_runtime, dict) else {}
+        for key in ("effective_handler", "handler"):
+            handler = str(runtime.get(key) or "").strip()
+            if handler.startswith("agent."):
+                return handler.removeprefix("agent.")
+            if handler:
+                return handler.replace(".", "_")
+        return f"{stage.value}_agent" if stage.value not in {Stage.IDLE.value, Stage.COMPLETE.value, Stage.ERROR.value} else "system"
 
     def _active_graph_config_for_labels(self):
         """Compatibility wrapper for label lookups."""
@@ -5767,7 +5849,7 @@ class MainController:
                 "graph_module_id": str(module_runtime.get("module_id") or ""),
                 "stage": stage.value,
                 "handler": "",
-                "label": self._planning_stage_role(stage),
+                "label": self._planning_stage_role(stage, module_runtime),
             }
         original_module_id = str(module_runtime.get("module_id") or getattr(node, "module_id", "") or "")
         return {
@@ -6175,7 +6257,7 @@ class MainController:
 
             content = self._format_planning_stage_message(stage, data, str(event.get("message") or ""))
             message_payload: dict[str, Any] = {
-                "role": self._planning_stage_role(stage),
+                "role": self._planning_stage_role(stage, module_runtime),
                 "content": content,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "model": agent_name or stage.value,

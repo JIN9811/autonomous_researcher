@@ -42,8 +42,14 @@ FastAPI Controller
   - `GET /api/handlers`
   - `GET /api/modules`
   - `GET /api/modules/management-state`
+  - `GET /api/runtime/agent-manifests`
+  - `GET /api/bridges`
+  - `POST /api/bridges/{bridge_id}/actions`
   - `GET /api/modules/{module_id}`
+  - `GET /api/modules/{module_id}/ui`
+  - `PUT /api/modules/{module_id}/ui`
   - `POST /api/modules`
+  - `POST /api/modules/templates/{agent|ui-only|bridge}`
   - `POST /api/modules/{module_id}/load`
   - `POST /api/modules/{module_id}/unload`
   - `POST /api/modules/{module_id}/validate`
@@ -83,6 +89,102 @@ Graph dry-run responses also include per-stage execution evidence: `graph_handle
 
 Activation is execution-affecting, not only a UI state. `PUT /api/graphs/{graph_id}` with `activate=true` writes the validated graph payload back to the active YAML under `graphs/configs`, records a new dry-run gate for that exact digest, and subsequent `/api/graphs/{graph_id}/dry-run` and `/api/graphs/{graph_id}/run` calls compile from that active YAML. Unit coverage `test_activated_graph_version_becomes_saved_run_target` uses an isolated active graph store, changes `design -> guardian`, saves with activation, then verifies the persisted YAML, dry-run sequence, live gate digest, and run compile summary all use the activated transition.
 
+## Runtime Agent Manifests and UI Descriptors
+
+Live GUI agent tabs are no longer treated as a JavaScript-only source of truth. The current runtime exposes a backend manifest layer:
+
+- `GET /api/runtime/agent-manifests` merges `graphs/configs/atr_closed_loop.yaml`, `graphs/modules/*/module.yaml`, and optional `graphs/modules/*/ui.yaml`.
+- The endpoint returns a dictionary payload with `ok`, `graph_id`, `graph_version`, `agents[]`, `count`, `categories`, and `source_endpoints[]`. `agents[]` is the list consumed by the frontend.
+- The response includes the UI-only `objective` entry plus runtime modules such as `orchestrator`, `design`, `specimen`, `vision`, `manipulation`, `equipment`, `analysis`, `knowledge`, `bo`, and `guardian`.
+- `web/static/planning.js` still keeps `DEFAULT_LIVE_AGENTS` as a fallback, but startup calls `/api/runtime/agent-manifests` first and refreshes `LIVE_AGENTS` from that response.
+- Descriptor cards are read from `ui.yaml` `ui.cards[]`. Current implemented descriptor examples are `graphs/modules/design/ui.yaml`, `graphs/modules/equipment/ui.yaml`, and `graphs/modules/guardian/ui.yaml`.
+- Chat policy is read from the same manifest. `ui.chat.mode` or `runtime_contract.chat_policy.mode` controls whether an agent has a persistent chat panel (`persistent`, `always`, `required`), report-first on-demand chat (`open_on_demand`, `on_demand`, `collapsible`, `contextual`), or no chat action (`disabled`, `none`, `off`, `hidden`). Missing policy keeps backward compatibility: objective/orchestrator are persistent, other agents are open-on-demand.
+- `GET /api/modules/{module_id}/ui` reads a module-local UI descriptor. `PUT /api/modules/{module_id}/ui` saves that descriptor without modifying Python execution code.
+- Bridge discovery is exposed separately through `GET /api/bridges` and embedded in `GET /api/runtime/state -> runtime_ide_contract.device_bridges`. The returned bridge contract uses `actions[]` for both backend-standard actions and Runtime IDE-authored custom descriptors; unsupported action descriptors are not executed from Live GUI cards.
+
+`module.yaml` remains the execution contract. `ui.yaml` is presentation-only: it can change Live GUI labels, short names, icons, report titles, descriptor cards, report section selectors, and presentation layout intent, but it must not grant tool access, register handlers, or change graph transitions. `GET/PUT /api/modules/{module_id}/ui` normalizes chart/action descriptors before manifest exposure: descriptor `span`, `density`, `priority`, and `mobile_behavior` become a sanitized `layout_intent`; supported mini-bar aliases become `render_mode=mini_bar_chart`; supported line aliases become `render_mode=line_chart`; supported table aliases become `render_mode=table`; supported heatmap aliases become `render_mode=heatmap`; supported compound/grid aliases become `render_mode=compound_chart`; safe internal links become `execution_scope=navigation_only`; callable read-only API actions become `execution_scope=read_only_api` only when declared as `kind=api`, `method=GET`, `read_only=true`, and backed by an actual FastAPI GET `/api/*` route. Internal API actions that are POST, confirmation-required, or non-read-only become `execution_scope=workspace_handoff` only when the declared API route exists and a safe operator workspace is available; the Live GUI opens that workspace with descriptor query context instead of calling the endpoint. Unsupported or unsafe actions are retained as `execution_scope=blocked` with `blocked_reason`. The current generic renderer supports selector-backed rows/cards/report sections, `chart.type=mini_bar_chart`, `chart.type=scatter_plot`, `chart.type=line_chart`, `chart.type=table`, `chart.type=heatmap`, `chart.type=compound_chart`/`chart_grid`, safe internal GUI navigation actions, read-only GET API action buttons, and workspace handoff buttons. Compound charts render bounded one/two/three-column panel grids whose child panels use the same safe chart renderer; backend normalization caps nested compound charts to avoid recursive UI payloads. Physical device descriptor actions are also retained as blocked metadata, not executable controls; `kind=device`, `kind=physical`, `kind=hardware`, and `kind=actuator` normalize to `blocked_reason=physical_device_action_requires_bridge_workspace`.
+
+Current boundary: module-local `ui.renderer` values are normalized into
+`/api/runtime/agent-manifests` only as allowlisted presentation profiles. The
+supported ids are `descriptor`, `generic`, and the built-in
+`<agent>_reference` profiles. The manifest includes `renderer.dashboard`,
+`renderer.report`, `renderer.fallback`, `renderer.supported`,
+`renderer.execution_scope=presentation_only`, and `renderer.blocked_reason`.
+Unsupported ids are downgraded to fallback with
+`blocked_reason=unsupported_renderer_id:<id>`. This does not register arbitrary
+renderer/plugin code or grant execution authority. The frontend consumes the
+profile only to choose existing built-in report/detail and dashboard/card
+renderers; the supported authoring path remains descriptor cards/sections plus
+safe actions.
+
+Draft module templates are intentionally non-executable:
+
+- `POST /api/modules/templates/agent`
+- `POST /api/modules/templates/ui-only`
+- `POST /api/modules/templates/bridge`
+
+These endpoints create a `status=draft`, `enabled=false` module with `handler=runtime.step_complete`, `execution.capability=ui_only`, `graph.attached=false`, and a starter `ui.yaml`. Its module dry-run evidence reports zero executable steps until an operator attaches it to a graph, selects allowlisted handlers/tools, validates it, dry-runs it, and saves the module version. This prevents a draft card/report preview from silently becoming part of the physical closed loop.
+
+Module lifecycle payloads also expose a supervisor-policy readiness gate. If a
+module has `supervisor_policy.required_outputs[]`, the backend compares those
+entries with module-declared outputs from `output_contracts[]` and list-valued
+`io_contract.output`. The returned `lifecycle.supervisor_policy_gate` contains
+`required_outputs`, `declared_outputs`, `missing_outputs`, and `ok`; a mismatch
+adds `supervisor_policy_outputs` to `activation_requirements[]` with
+`ok=false`. Module Management renders this as `Supervisor required outputs`, so
+operator-authored supervisor follow-up text cannot claim an output contract that
+the module has not declared.
+
+`POST /api/modules` is a separate Module Designer path. It accepts source text
+or an uploaded Python file payload, optionally sends the source through the
+active module-designer LLM route, writes the original source plus generated
+`handler.py` under `graphs/modules/<module_id>/`, and records metadata such as
+`pending_handler_registration`, `generated_adapter_handler_id`, and
+`transformed_python_source_path`. If the generated handler is not yet approved,
+the module remains protocol-pending and does not automatically become a live
+agent.
+
+`POST /api/modules/{module_id}/register-generated` is the explicit approval
+step for Module Designer output. It statically validates `handler.py`, sets the
+module handler to `module.generated_adapter`, marks
+`generated_adapter_approved=true`, saves a module version, and writes the active
+module config. This makes the module executable only through the normal graph
+path: the graph still has to reference the module, validation/compile must pass,
+and the dry-run/live gate must match the active graph digest.
+
+Module Management load/unload is deliberately scoped to the management
+workspace. `GET /api/modules/{module_id}`, `/load`, and `/unload` return
+`runtime_effect.scope=management_workspace`,
+`changes_graph_config=false`, and `changes_runtime_execution=false`, plus a
+`lifecycle` summary showing module status, graph attachment, executable dry-run
+step count, activation readiness, next required action, and activation
+requirements. The frontend renders this as a lifecycle card so operators do not
+confuse selecting a module in the workbench with enabling it in the live graph.
+The lifecycle card is descriptive: it does not attach graph nodes, save graph
+versions, or start physical/live execution.
+
+Device bridge discovery is also exposed as a manifest:
+
+- `GET /api/bridges` reads `graphs/configs/atr_closed_loop.yaml` `metadata.device_bridges`.
+- The response normalizes bridge id, label, workspace route, tools, config file, live boundary, health/preflight endpoints, actions, evidence contracts, and current health snapshot through `app/main.py::_normalized_bridge_manifests()`.
+- If a bridge does not declare actions in graph metadata, the backend creates the standard `open_workspace`, `health_check`, and `preflight` actions. Each action has `id`, `label`, `kind`, `method`, `endpoint`, `requires_confirmation`, `read_only`, `tool`, and `mode_support`.
+- The same normalized bridge shape is embedded in `GET /api/runtime/state -> runtime_ide_contract.device_bridges`, so Runtime IDE and Live GUI should not keep separate bridge schemas.
+- Live GUI reads `runtime_ide_contract.device_bridges` through `liveBridgeContracts()` and renders the same registry as device-strip cards via `renderBridgeContractDeviceCards()`. The card shows workspace, health/preflight endpoints, action summary, and evidence-contract count. The standard `open_workspace` action only opens the workspace route in a new window. `health_check` and `preflight` can run from the card only when the manifest action is `read_only=true`, `method=GET`, and points at an `/api/` endpoint. POST, confirmation-required, non-read-only, and custom actions are not executed from the Live GUI card; they are shown as workspace handoff buttons using `handoff_required`, `handoff_workspace`, and `blocked_reason`, then routed to the bridge workspace with `bridge_id`, `bridge_action`, and `bridge_endpoint` query context.
+- Runtime IDE Infra exposes a Custom Bridge Action descriptor editor backed by `POST /api/bridges/{bridge_id}/actions`. The endpoint saves descriptor metadata to the active graph and versions the graph with `execution_scope=descriptor_only`; it never calls the target endpoint or executes hardware.
+- `tests/unit/test_langgraph_runtime.py::test_bridge_custom_action_descriptor_can_be_saved_to_graph_metadata` verifies that a saved custom descriptor is returned by both `GET /api/bridges` and `GET /api/runtime/state -> runtime_ide_contract.device_bridges` with the same normalized workspace-handoff action.
+- `tests/unit/test_langgraph_runtime.py::test_new_bridge_manifest_entry_is_shared_by_bridge_api_and_runtime_contract` verifies that adding a new bridge entry to graph metadata is enough for both the bridge API and runtime contract to expose the same normalized discovery object. This covers registry/display wiring, not bridge-specific physical execution.
+- Legacy workspace aliases are normalized at the API boundary. The current graph YAML still has `windows_pyautogui_bridge.workspace=/windows-equipment`, but API consumers receive `/equipment/windows`.
+- This is a read-only registry for GUI/IDE discovery. Actual live device execution remains inside bridge-specific APIs and Guardian/device gates.
+- Current registry entries are `prusa_bridge`, `lerobot_bridge`, `windows_pyautogui_bridge`, `fenicsx_cae_bridge`, and `camera_utm_bridge`.
+- Bambu Lab X2D is the default printer provider, but it is intentionally managed by the printer fleet API (`/api/printer/fleet`) and printer workspace APIs (`/api/printer/*`), not by `/api/bridges`. Do not infer that Bambu is inactive just because it is absent from the graph bridge registry.
+
+For the latest route/API snapshot, see `docs/runtime/current_code_snapshot.md`.
+That snapshot is the implementation-facing reference for current route count,
+module lifecycle fields, bridge action normalization, printer fleet separation,
+and model/API-key state. This document describes the runtime contract and
+should point to the snapshot instead of duplicating every endpoint when the
+endpoint list changes.
+
 ## Logical Transition Candidates
 
 Runtime routing is no longer limited to one visual arrow per stage. `graph.transitions` remains the default path for backward compatibility, but `graph.edges[*].metadata.runtime_edge=logical_transition` may define multiple candidate routes from the same stage. `GraphConfig.next_stage()` evaluates those candidates at runtime using the current stage result and runtime context before falling back to the default transition.
@@ -100,6 +202,110 @@ Runtime events emitted as `stage_transition` include `transition_candidates` and
 ## Legacy Compatibility Boundary
 
 `orchestrator.graph.OrchestrationGraph`, `orchestrator.transitions.default_next_stage`, and `orchestrator.router.stage_to_agent` are retained only for old imports and documentation compatibility. They no longer carry independent hard-coded stage order or stage-agent maps: transition lookup is derived from `graphs/configs/*.yaml`, and stage-agent lookup resolves the graph node plus `graphs/modules/<module>/module.yaml` handler. `MainController`, `RunLoop`, Live GUI planning handoff, and `/api/graphs/{graph_id}/run` do not inject those shims as runtime source of truth. New execution order or handler changes must be made in graph/module YAML and validated/compiled through the Runtime IDE/API.
+
+`orchestrator.state.Stage` still exists for backward compatibility, but it is no
+longer a hard failure for every graph extension stage. `Stage._missing_()` keeps
+unknown but graph-validated stage strings as pseudo-members, so `.value` remains
+the serialized stage contract. The current minimum runtime guarantee is:
+
+- a configured transition such as `idle -> custom_quality_gate` can enter a
+  custom stage without `ValueError`;
+- an allowlisted `agent.*` handler with a module config can execute as that
+  custom stage and move through the graph transition table.
+- controller planning/supervisor snapshots use the active graph route as an
+  override for orchestration plans, so inserted custom stages are visible in
+  `latest_orchestration_plan`, `route_state`, and task queue payloads.
+- Live planning messages derive custom stage role/label from graph/module
+  metadata instead of falling back to `system`.
+- Module-declared `output_contracts[]` and list-valued `io_contract.output`
+  are promoted into supervisor route `required_outputs` for custom route steps.
+- `build_orchestrator_followup()` can read a custom stage `supervisor_policy`
+  from the payload or `module_runtime` and use it for operator-facing opinion
+  and recommendation templates, concern rules, options, and response-required
+  statuses.
+
+This does not yet make every controller/supervisor/Live GUI path fully
+custom-stage aware. `orchestrator/supervisor.py` still contains legacy
+stage-specific opinion/report branches for the built-in ATR stages, and custom
+stages need explicit `supervisor_policy` descriptors to get specialized
+follow-up language. The current Module Management typed editor covers
+handler/LLM/tool/prompt/safety/step fields plus the main `supervisor_policy`
+descriptor fields. Module-local `ui.yaml` `report_sections` are now preserved
+by `/api/runtime/agent-manifests` and rendered by Live GUI as selector-backed
+report sections. The implemented selector roots are `report`, `state`, `spec`,
+`metadata`, and `runtime`. Backend-normalized `mini_bar_chart`, `scatter_plot`,
+`line_chart`, `table`, `heatmap`, `compound_chart`/`chart_grid`, safe navigation action descriptors, read-only GET API action
+descriptors, POST/confirmation/non-read-only API workspace handoff
+descriptors, and explicit physical-device action blocking metadata are
+implemented; more domain-specific chart types and actual physical device action
+authoring remain follow-up. Graph
+attach/save uses Runtime IDE as the source of truth:
+Module Management can deep-link graph-unattached modules into
+`/ide?module=<id>&action=attach`, where the Module Library target is highlighted,
+but actual activation still requires graph drag/drop, port/route edits,
+validate, dry-run, and `Save Version`.
+
+Current modularization status:
+
+| Area | Current code status |
+|---|---|
+| Custom stage string execution | Supported for graph-validated stages through `Stage._missing_()` and allowlisted `agent.*` handlers |
+| Controller/supervisor route visibility | Supported for active graph route snapshots and module output-contract promotion |
+| Module Management load/unload | Management-workspace selection only; exposes activation readiness fields but does not activate runtime |
+| Generated adapter execution | Requires explicit `register-generated`, handler validation, graph reference, graph validation, dry-run gate |
+| Bridge card action execution | Read-only GET `/api/*` health/preflight can run from Live GUI cards; POST/custom/confirmation actions are workspace handoff only |
+| Custom-stage GUI authoring | Partial; Module Management has a typed `supervisor_policy` card, `ui.yaml report_sections` render in Live GUI reports, descriptor POST/confirmation actions can hand off to safe workspaces, graph bridge `actions[]` descriptors are normalized for read-only execution or workspace handoff, and graph-unattached modules can deep-link into Runtime IDE attach mode |
+| Graph attach/save activation authoring | Minimal Module Management -> Runtime IDE attach deep-link implemented; activation still requires Runtime IDE validate/dry-run/save |
+| Per-bridge custom action authoring | Descriptor editor implemented; physical execution remains bridge-workspace/device-gate specific |
+| Custom renderer manifest ids | Partial; `ui.renderer` is exposed through the agent manifest as an allowlisted `presentation_only` profile. Arbitrary external renderer/plugin execution is not supported |
+
+Minimal `supervisor_policy` shape:
+
+```yaml
+supervisor_policy:
+  required_outputs:
+    - quality_metrics
+    - handoff_packet
+  opinion_template: "Custom Quality Gate checked status={status} quality_score={quality_metrics.quality_score}."
+  recommendation_template: "Handoff to {next_stage} after verifying {required_outputs}."
+  concern_rules:
+    - id: quality_score_low
+      selector: quality_metrics.quality_score
+      lt: 0.95
+      message: quality score is below target
+  options:
+    - id: rerun_quality
+      label: Rerun quality check
+      risk: low
+```
+
+Supported template variables include `stage`, `next_stage`, `next_agent`,
+`status`, `confidence`, `required_outputs`, and dotted payload selectors such as
+`quality_metrics.quality_score`. Supported concern comparisons are `missing`,
+`equals`, `not_equals`, `lt`, `lte`, `gt`, and `gte`.
+
+## Live Planning Transcript Storage
+
+Live GUI planning messages are not stored only in browser memory. The controller
+persists compacted conversation entries to:
+
+```text
+runs/<active_run_id>/live_planning_transcript.jsonl
+```
+
+Relevant endpoints:
+
+- `GET /api/planning/session`: current planning state plus latest bounded page
+- `GET /api/planning/messages`: lazy-load transcript pages from disk using
+  `before` and `limit`
+- `POST /api/planning/bootstrap`: optional pre-message orchestrator warmup
+- `POST /api/planning/message`: user message to the live-planning orchestrator
+
+The controller keeps only a recent in-memory window and uses the JSONL file as
+the source for refresh/reopen continuity. Large raw runtime payloads are
+compacted before storage; operator-facing summaries such as `specimen`,
+`device_screen`, `preprint_gate`, `analysis`, `bo_result`, and `module_runtime`
+are preserved.
 
 ## Module Runtime Application
 
@@ -254,7 +460,7 @@ Refactor execution wiring through graph config and registry first; agent behavio
 - Runtime IDE module handler and internal-step handler dropdowns are populated from `GET /api/handlers`; operators cannot select arbitrary Python import paths. The allowlist is built from fixed runtime control handlers plus every agent registered in `AgentRegistry`, not only handlers already present in the active graph. The saved module handler is runtime-active and changes which registered agent is executed for that stage.
 - Module saves may update `graphs/modules/<module_id>/module.yaml`, but only when the module handler is registered. `LangGraphRunLoop` reads module YAML from the graph module root at construction time, so an activated module save changes the effective handler, LLM hints, prompt/tool allowlist, retry policy, safety flags, and module step sequence for the next run. Unit coverage `test_activated_module_version_changes_runtime_handler` saves `design.handler=agent.guardian_agent` through the module API in an isolated module store, then proves the next RunLoop step executes `guardian_agent` for the `design` stage while `design_agent` remains unused.
 - Fresh module graph tabs open with a clean draft state and missing validation/dry-run evidence, not as modified drafts; the strip changes to dirty only after the operator edits handler, prompt, tool, LLM, step order, or raw module JSON.
-- Module Designer is hosted in the standalone `/module-management` page, not inside the Runtime IDE graph/config editor. It writes an uploaded original source and an LLM-transformed ATR adapter under `graphs/modules/<module_id>/`, stores paths in module metadata, and still binds execution to an allowlisted handler. The active backend's `module_designer` primary model is used first, its model fallback is used second, and if `backend.fallback: openai` is configured OpenAI is tried last. Arbitrary uploaded Python is never imported or executed by the GUI just because it exists on disk. Operators must press `Register Generated` or run `atr module register-generated <module-id>` to approve a generated adapter. That API statically checks `handler.py`, rejects blocked imports/top-level side effects, changes the module handler to `module.generated_adapter`, clears `pending_handler_registration`, removes placeholder `runtime.step_complete` internal-step handlers left by the unapproved staging phase, saves a version, and only then allows the LangGraph runtime to load the adapter through the generated-module wrapper.
+- Module Designer is hosted in the standalone `/module-management` page, not inside the Runtime IDE graph/config editor. It writes an uploaded original source and an LLM-transformed ATR adapter under `graphs/modules/<module_id>/`, stores paths in module metadata, and still binds execution to an allowlisted handler. The active backend's `module_designer` route controls model selection. If the Main GUI API-key cell is loaded and the active backend fallback points to `openai`, the OpenAI backend is attempted first. Otherwise the active backend primary model is attempted first, then the active route model fallback, then the configured backend fallback such as OpenAI. Arbitrary uploaded Python is never imported or executed by the GUI just because it exists on disk. Operators must press `Register Generated` or run `atr module register-generated <module-id>` to approve a generated adapter. That API statically checks `handler.py`, rejects blocked imports/top-level side effects, changes the module handler to `module.generated_adapter`, clears `pending_handler_registration`, removes placeholder `runtime.step_complete` internal-step handlers left by the unapproved staging phase, saves a version, and only then allows the LangGraph runtime to load the adapter through the generated-module wrapper.
 - Graph and module saves write immutable snapshots under `memory/graph_versions` and `memory/module_versions`.
 
 ## Runtime IDE GUI
@@ -270,7 +476,7 @@ Refactor execution wiring through graph config and registry first; agent behavio
 - Activation Checklist shows draft validation, compile, dry-run, and saved-version evidence as expandable operator evidence cards. The cards include compiled graph summary, default routes, conditional candidate routes, full graph config fingerprint status, stage-dispatch mapping, dry-run payload type, live-gate/digest status, and a stage/next/node/handler sequence table. Runtime IDE dry-run sends the current editor graph payload to `/api/graphs/{graph_id}/dry-run`, so draft/version-loaded graph changes are simulated before save. Draft dry-run evidence is not recorded as the live gate. `Save Version` repeats the same non-device dry-run on the server; when the save activates the graph, the returned dry-run record is also registered as the backend live-run gate for that exact config digest.
 - Run Launcher starts the saved active graph through `/api/graphs/{graph_id}/run`. Its drawer now begins with a Saved Active Graph Execution summary that repeats the exact target, selected mode, required action, and blocker text before the operator reaches run buttons. The run buttons are labeled `Run Saved Test` and `Run Saved Live` to make it explicit that unsaved editor JSON is never executed directly. Every run mode is blocked when the editor contains unsaved draft route/config differences, because test/replay/fault/live all execute the active graph config rather than the unsaved editor draft. The browser compares both logical route records and the full normalized graph config fingerprint, so non-route edits such as handler, module, model, timeout, retry, safety metadata, or YAML import changes cannot silently run against the wrong saved graph. Live mode additionally requires the operator confirmation checkbox and a backend active dry-run gate. The Runtime IDE reads `/api/graphs/{graph_id}/dry-run-gate` to show run preflight status and blocks the run button in the browser before the request is sent when any required preflight item is missing. The launcher shows an execution-target strip (`Saved active graph`, graph id, mode, live gate) and disables `Run Saved Test`, `Run Saved Live`, or `Record Active Dry-run Gate` whenever that specific action would target the wrong graph state. The separate `Record Active Dry-run Gate` action intentionally calls dry-run without a draft payload when the operator wants to refresh gate evidence without saving a new version.
 - Node Inspector is structured for operator use: Info, Runtime, Runtime Recovery, Module Step Trace, Runtime Routes, Config, I/O Contract, and Code Mapping cards show graph identity, current/visited/failure status, agent run status, outgoing/incoming default and candidate routes, graph/module/effective handler mapping, handler signature/runtime-callable evidence from `/api/handlers`, model/timeout/retry/safety config, recent node-scoped events, stage-scoped module step trace events, declared `io_contract` input/output, captured input/output payload previews, schema mismatch indicators from runtime events, module config path, prompt path, Python source path, transformed ATR adapter path, and registry state. A top `Node Quick Actions` card keeps the most common selected-node operations visible without scrolling: Dry-run from node, Validate Draft, Open Module Management, and Inspect latest issue. Runtime Routes rows let the operator select an edge into the transition editor or dry-run from the route source without hunting for thin SVG strokes. The Runtime Recovery card summarizes node-scoped failed/warn events, schema contract status, missing routes, module trace failures, and pending handler registration, then exposes the same recovery actions deeper in the audit trail. The Code Mapping card is read-only and includes a node-scoped dry-run shortcut; it never edits Python source directly.
-- Module creation, operational module loading/unloading, and module configuration editing are integrated into `/module-management` as the **Module Management Tool**. Runtime IDE opens it in a new window from the Module Library area. Module Management graph-usage rows open `/ide?graph=<graph_id>&node=<node_id>` so operators can jump directly from a module draft to the affected runtime graph node. The Module Library rows are select-only and show loaded/select-only badges; load/unload operations live in the Workbench action row, and loaded-strip chips only refocus already loaded modules. The management load/unload state is a workspace state for operator module management and does not delete module files or change graph/module config by itself. Module config save still writes versioned `module.yaml` through the runtime module API.
+- Module creation, operational module loading/unloading, and module configuration editing are integrated into `/module-management` as the **Module Management Tool**. Runtime IDE opens it in a new window from the Module Library area. Module Management graph-usage rows open `/ide?graph=<graph_id>&node=<node_id>` so operators can jump directly from a module draft to the affected runtime graph node. If the selected module has no graph usage, Module Management opens `/ide?module=<module_id>&action=attach`; Runtime IDE selects and highlights that Module Library item and tells the operator to drag it onto the main graph canvas, connect ports, validate, dry-run, and `Save Version`. The Module Library rows are select-only and show loaded/select-only badges; load/unload operations live in the Workbench action row, and loaded-strip chips only refocus already loaded modules. The management load/unload state is a workspace state for operator module management and does not delete module files or change graph/module config by itself. Module config save still writes versioned `module.yaml` through the runtime module API.
 - Bottom Dock includes Live Runtime, Agent Status, Device Status, Metrics, Human Approval Queue, Run Timeline, Artifact Lineage, Artifact Preview, Replay Preview, and Event Log panels. The dock uses compact rows with internal scroll regions so it stays close to the graph canvas instead of pushing the operator into a long dashboard page. Agent/device/metric views are derived from `/api/state`, buffered run events, and SSE events. `/api/state` now includes a short-lived `system_resources` snapshot with host RAM and NVIDIA GPU/VRAM telemetry when `nvidia-smi` is available; the Top Bar health badge, Device Status panel, and Metrics panel display RAM/VRAM utilization without changing the runtime event schema. The Event Log merges structured runtime events with IDE operator actions, supports `all`, `info`, `warn`, and `error` filters, and exposes an `Inspect` action on runtime rows so operators can jump directly from a warning/error log entry to the selected event detail, matching the Runtime IDE event-schema requirement without changing backend event payloads. Human Approval Queue is event-backed and connected to run-scoped approval request/resolve APIs; approval-related remediation cards include a `Focus Approval Queue` action that scrolls to and highlights the matching pending approval item before the operator approves or rejects it. After an approval is resolved, the selected event remains focused, the remediation card switches its approval badge from pending to resolved with decision/operator evidence, and the queue refreshes from the same run-scoped approval source. Operator decisions are recorded as `approval.requested` and `approval.resolved` events and, for module safety gates, are also applied to `state.run_metadata.runtime_approvals` so the paused LangGraph stage can resume or fail safely.
 - The GUI consumes `/api/events/recent` and `/api/events/stream` so active stages, active transition edge, visited nodes, recent node payloads, and agent status snapshots are reflected in the Runtime IDE dashboard.
 - The GUI loads `/api/state`, `/api/runs/{run_id}/events`, and `/api/runs/{run_id}/artifacts` to show run status, run id, elapsed time, active agent/stage, active module step, device health, run timeline, current-run artifact lineage, and a time-travel replay preview. The Run Timeline now includes event severity/count summaries, selected-event raw payload/state inspection, related node/handler/module metadata, module step trace panels for `module.graph.*`, `module.step.*`, and `module.pre_step.*` events, and a replay basis panel. Selecting a timeline event focuses the corresponding node, shows an operator decision strip with event status, runtime target, selected route/candidate count, replay availability, and related artifact count, shows a remediation panel for warning/error events with likely cause, impacted target, evidence, and recommended next actions, and runs a dry-run preview from that event's stage when possible. Replay Preview now adds a validation panel that compares the selected event against the dry-run first step for stage, selected route, handler, and compile status before showing the full sequence. Runtime event state from SSE is merged into the visible snapshot for live active-module-step display, but IDE control events such as `graph.compiled` and `graph.validation_failed` do not drive the active runtime stage, preventing compile/check previews from overwriting the live stage. Module trace panels first prefer the active/selected run id and fall back to same stage/module trace events when inspecting historical or replayed events.
@@ -307,9 +513,9 @@ Node positions are first-class config data via `GraphNode.position`. The Runtime
 
 Runtime IDE uses drag/drop edge editing from node ports. Operators drag from a source port to another node or target port; the canvas shows a live connection tooltip explaining whether the drop will create a default route or add a conditional candidate, including the condition that will be written. The IDE updates `graph.transitions` plus the corresponding logical transition edge in YAML. If the source already has a default transition, the new edge is stored as a `next_stage:<target>` candidate instead of replacing the default; if no default exists, the new edge becomes the default transition. This is execution-significant, not just visual: `GraphConfig.transition_candidates(stage)` exposes all saved logical candidates, `GraphConfig.next_stage(...)` chooses `next_stage:<target>` candidates when agent output or runtime metadata requests that stage, and the LangGraph run loop records the selected candidate in `edge.traversed.payload.selected_transition`. During drag, the source node is highlighted in amber, the detected target node is highlighted in green, the status text explains whether the drop will create a default route or a candidate route, and `Escape` cancels the pending connection. Edges render with a wider transparent hitbox and clickable route labels so operators do not have to click the thin SVG stroke precisely. To keep dense maps readable, simple default edges are shown as arrows without repeated `default` labels, while conditional defaults and candidates keep visible labels. The renderer mirrors `GraphConfig.transition_candidates`: when a logical edge already represents the configured default target, the `transitions` fallback is not drawn a second time. Multi-route source nodes show a compact route-count badge. Clicking an edge, label, or route-inventory row loads source, target, condition preset, and condition value into the edge editor. The editor supports `default`, `next_stage:<target>`, `decision:<value>`, `guardian_decision:<value>`, and custom conditions; applying a changed condition replaces the selected edge condition instead of leaving stale duplicates. The route preview panel explains whether the edit changes `graph.transitions` or creates a candidate, what runtime metadata must be present for the condition to match, whether the current action updates or replaces an existing edge, and the active-baseline route/config diff that will be saved if the draft is activated. It also lists every outgoing route from the selected source stage, marking default and candidate routes so multi-route LangGraph behavior is visible before compile/dry-run. When the source changes, the editor automatically selects that source stage's current default target when one exists. `Delete Edge` removes the selected configured transition and its logical edge. Node target lookup uses DOM point lookup plus an expanded bounding-box fallback to avoid missed drops when the pointer is near icons, ports, or node edges.
 
-The Module Library lists modules from `graphs/modules/*/module.yaml` and groups them by metadata/category, module id, handler, and tool usage. Double-clicking a main graph agent node opens that module's internal graph as a browser-like tab beside the fixed Main System tab. Runtime IDE tab activation accepts the fixed tab id, the `main` alias, full `module:<id>` ids, or plain module ids so GUI actions, browser tests, and future CUI deep links resolve the same tab. Graph/node deep links such as `/ide?graph=atr_closed_loop&node=design` select and focus the target node, then background-load that node's full module payload so the Inspector can show module config, prompt/tool, I/O, and code-mapping evidence without requiring the operator to manually open Module Management first. Internal graph tabs render `pre_execution` and `internal_graph` steps as editable graph nodes with compact `pre:<step>` / `step:<step>` labels, while preserving the full YAML step ids in config. Default module step transitions are de-duplicated when both `transitions` and logical `edges` describe the same route, so each internal step route is shown once. Internal module routes use a dedicated high-contrast `module-flow` edge style with visible step-to-step labels, and the browser audit now verifies that the SVG paths, labels, computed visibility, module-specific arrow marker, and minimum label width are present after opening an agent module tab. Internal module default layout uses wider 560px column spacing than the main graph so the step-to-step labels remain readable; arrow markers are drawn with a joined stroke-colored module marker so the arrowhead reads as part of the same route line. Dropping a catalog item on the Main System graph adds a draft graph node with `module_id=modules/<module_id>`. Dropping it on an agent internal graph adds an internal module step. Dragging a graph node over the bottom trash zone removes it from the current draft graph or module step list.
+The Module Library lists modules from `graphs/modules/*/module.yaml` and groups them by metadata/category, module id, handler, and tool usage. Double-clicking a main graph agent node opens that module's internal graph as a browser-like tab beside the fixed Main System tab. Runtime IDE tab activation accepts the fixed tab id, the `main` alias, full `module:<id>` ids, or plain module ids so GUI actions, browser tests, and future CUI deep links resolve the same tab. Graph/node deep links such as `/ide?graph=atr_closed_loop&node=design` select and focus the target node, then background-load that node's full module payload so the Inspector can show module config, prompt/tool, I/O, and code-mapping evidence without requiring the operator to manually open Module Management first. Module attach deep links such as `/ide?module=my_draft&action=attach` keep the Main System graph active, select the requested module in the Module Library, highlight it, and show attach instructions without changing the graph automatically. Internal graph tabs render `pre_execution` and `internal_graph` steps as editable graph nodes with compact `pre:<step>` / `step:<step>` labels, while preserving the full YAML step ids in config. Default module step transitions are de-duplicated when both `transitions` and logical `edges` describe the same route, so each internal step route is shown once. Internal module routes use a dedicated high-contrast `module-flow` edge style with visible step-to-step labels, and the browser audit now verifies that the SVG paths, labels, computed visibility, module-specific arrow marker, and minimum label width are present after opening an agent module tab. Internal module default layout uses wider 560px column spacing than the main graph so the step-to-step labels remain readable; arrow markers are drawn with a joined stroke-colored module marker so the arrowhead reads as part of the same route line. Dropping a catalog item on the Main System graph adds a draft graph node with `module_id=modules/<module_id>`. Dropping it on an agent internal graph adds an internal module step. Dragging a graph node over the bottom trash zone removes it from the current draft graph or module step list.
 
-Module Designer converts uploaded Python files into ATR internal module artifacts through the active backend. The API endpoint is `POST /api/modules`; with `transform_with_llm=true`, it calls the active backend's `module_designer` route primary model, then the active route model fallback, then the configured backend fallback such as OpenAI only after local attempts fail. It requests strict JSON, writes `handler.py`, writes the original source file for audit, auto-classifies the category, filters tools against the registered tool list, and saves a versioned `module.yaml`. The saved module remains execution-safe because `handler` must still be present in `GET /api/handlers`; unregistered generated adapters are marked `pending_handler_registration` and remain bound to `runtime.step_complete`. When the operator explicitly registers the generated adapter, `POST /api/modules/{module_id}/register-generated` validates the adapter, versions/activates the module with `handler=module.generated_adapter`, removes staging-only `runtime.step_complete` internal-step handlers, and real LangGraph execution loads `async run(state, ctx)` only through the generated adapter wrapper. Unit coverage now exercises create -> register -> validate -> dry-run -> management-load so the GUI/CUI/API contract is tested as one flow.
+Module Designer converts uploaded Python files into ATR internal module artifacts through the active backend. The API endpoint is `POST /api/modules`; with `transform_with_llm=true`, it calls the active backend's `module_designer` route. The attempt order is stateful: if the saved OpenAI API key is loaded as the first inference route, the OpenAI backend attempt is placed before local attempts; otherwise the call order is active route primary model, active route model fallback, then configured backend fallback. It requests strict JSON, writes `handler.py`, writes the original source file for audit, auto-classifies the category, filters tools against the registered tool list, and saves a versioned `module.yaml`. The saved module remains execution-safe because `handler` must still be present in `GET /api/handlers`; unregistered generated adapters are marked `pending_handler_registration` and remain bound to `runtime.step_complete`. When the operator explicitly registers the generated adapter, `POST /api/modules/{module_id}/register-generated` validates the adapter, versions/activates the module with `handler=module.generated_adapter`, removes staging-only `runtime.step_complete` internal-step handlers, and real LangGraph execution loads `async run(state, ctx)` only through the generated adapter wrapper. Unit coverage now exercises create -> register -> validate -> dry-run -> management-load so the GUI/CUI/API contract is tested as one flow.
 
 GUI/CUI cross-compatibility is file/API based. Runtime graph editing uses the same `/api/graphs` endpoints from the browser and `atr graphs` / `atr graph show|validate|compile|dry-run|gate|export-yaml|import-yaml|save-yaml|run`, so graph YAML edits, validation gates, dry-run gates, version history, and active graph launches are reflected after reload. Module management uses the same `/api/modules` endpoints from the GUI and `atr modules` / `atr module show|validate|dry-run|load|unload|versions|version|save-yaml|register-generated|create`, so module workspace load state, active module YAML, generated-adapter approval, validation/dry-run evidence, and version history also appear after reload without a separate import/export step. Current smoke evidence should include `atr graph validate atr_closed_loop`, `atr graph compile atr_closed_loop`, `atr graph dry-run atr_closed_loop`, `atr graph gate atr_closed_loop`, `atr module validate design`, `atr module dry-run design`, `atr module load design`, and `atr module unload design` against the running server.
 
@@ -341,8 +547,44 @@ The current 2026-05-26 smoke set against `http://127.0.0.1:7860` passed the foll
 - Static/regression checks: `node --check web/static/runtime_ide.js && node --check web/static/planning.js && node --check web/static/module_management.js`, `python3 -m py_compile orchestrator/langgraph_runtime.py tests/integration/test_controller_run.py tests/ui/runtime_ide_browser_audit.py tests/ui/module_management_browser_audit.py tests/ui/planning_browser_audit.py`, `.venv/bin/pytest tests/integration/test_controller_run.py tests/integration/test_bo_gui_api.py tests/integration/test_cae_gui_api.py tests/unit/test_langgraph_runtime.py tests/unit/test_module_designer_cli_contract.py -q` (`51 passed, 4 warnings`), `git diff --check`, and post-audit state check showing `is_running=false` plus no `browser_audit_save_marker` or `browser_audit_discard_marker` in the active graph metadata
 - Closed-loop server smoke: `atr graph run atr_closed_loop test "closed-loop stability smoke v86"` completed as `run-20260526T065517Z-063398` with `stage=complete`, `loop_count=5`, `run.completed`, 300 runtime events, 57 artifacts, BO runtime SVGs, and CAE contour/report artifacts. Runtime IDE lineage screenshot: `/tmp/atr_runtime_closed_loop_lineage_v86/closed_loop_runtime_artifact_lineage.png`.
 
+The current 2026-06-17 12번 개선안 audit set against the local test server
+`http://127.0.0.1:7862` passed these checks:
 
-Module runtime steps are editable through config-only step lists. Operators can edit both `pre_execution` steps and `internal_graph` steps, reorder steps within each phase with buttons or drag/drop, duplicate/delete steps, add explicit checkpoint steps or executable agent steps, select module/step handlers from the allowlisted registry, edit prompt path/overrides, tool allowlist, LLM backend/model hints, timeout/retry policy, and safety flags, then validate/dry-run/save the module config. Internal graph tab node movement is not cosmetic: moving a step node writes the snapped position back to that step's `metadata.position` in the module JSON draft, marks the module tab dirty, and changes the Runtime IDE status to `Module Draft Changed` until validation/dry-run/save evidence is refreshed. Step cards now expose execution intent (`exec`, `checkpoint`, `disabled`, or `handler required`) and local id issues before backend validation. Blank-handler internal steps remain checkpoints even when the module handler changes; only explicit non-checkpoint internal steps receive a handler. The executable Python handler remains selected from the allowlisted registry; Python source remains immutable from the Runtime IDE. Saved `pre_execution` steps emit `module.pre_step.*` events and saved internal steps emit `module.step.planned` plus graph-level completion/failure events so the timeline reflects the active module contract.
+- Live GUI runtime audit:
+  `.venv/bin/python tests/ui/live_runtime_ide_browser_audit.py --base-url http://127.0.0.1:7862 --webdriver-url http://127.0.0.1:4448 --out-dir /tmp/atr_ui_audit_12 --width 1440 --height 1100`
+  -> PASS. Evidence screenshot:
+  `/tmp/atr_ui_audit_12/live_runtime_ide_browser_audit.png`.
+- Planning artifact audit:
+  `.venv/bin/python tests/ui/planning_browser_audit.py --base-url http://127.0.0.1:7862 --webdriver-url http://127.0.0.1:4448 --out-dir /tmp/atr_ui_audit_12 --width 1440 --height 1100`
+  -> PASS. Evidence screenshot:
+  `/tmp/atr_ui_audit_12/planning_browser_audit_live_artifacts.png`.
+- Module Management audit:
+  `.venv/bin/python tests/ui/module_management_browser_audit.py --base-url http://127.0.0.1:7862 --webdriver-url http://127.0.0.1:4448 --out-dir /tmp/atr_ui_audit_12`
+  -> PASS, with `modules=10`, `selected=design`, `validate OK`, and
+  `dry-run OK`.
+- Static/runtime checks:
+  `node --check web/static/planning.js`,
+  `.venv/bin/python -m py_compile app/main.py app/controller.py`, and the
+  runtime/module/controller/live-layout pytest suites all passed:
+  `tests/integration/test_controller_run.py tests/integration/test_stop_control.py`
+  -> `2 passed in 93.94s`, and
+  `tests/unit/test_langgraph_runtime.py tests/unit/test_controller_planning.py tests/integration/test_live_gui_runtime_layout.py`
+  -> `117 passed, 4 warnings in 305.74s`.
+
+This audit specifically confirms that Live GUI graph save-version can record a
+non-activating graph snapshot during an active run while graph activation still
+remains blocked, that backend compact event payloads preserve selected
+agent/view/report/action context for operator evidence, that built-in
+Design/Equipment/Guardian report surfaces keep their reference dashboard
+layouts instead of being displaced by descriptor preview cards, and that a
+temporary draft module `ui_audit_draft_descriptor` created through the module
+template/UI descriptor APIs appears in the Live GUI binder, Runtime Chat target,
+and descriptor report DOM without becoming executable. Chat artifact rendering keeps BO
+surrogate/acquisition graphs collapsed until expanded. It does not alter the
+DSN/design-window layout.
+
+
+Module runtime steps are editable through config-only step lists. Operators can edit both `pre_execution` steps and `internal_graph` steps, reorder steps within each phase with buttons or drag/drop, duplicate/delete steps, add explicit checkpoint steps or executable agent steps, select module/step handlers from the allowlisted registry, edit prompt path/overrides, tool allowlist, LLM backend/model hints, timeout/retry policy, safety flags, and supervisor policy fields, then validate/dry-run/save the module config. Supervisor policy editing covers required outputs, opinion/recommendation templates, response-required statuses, concern rules, and options; required outputs are checked against module output contracts by the lifecycle gate described above. Internal graph tab node movement is not cosmetic: moving a step node writes the snapped position back to that step's `metadata.position` in the module JSON draft, marks the module tab dirty, and changes the Runtime IDE status to `Module Draft Changed` until validation/dry-run/save evidence is refreshed. Step cards now expose execution intent (`exec`, `checkpoint`, `disabled`, or `handler required`) and local id issues before backend validation. Blank-handler internal steps remain checkpoints even when the module handler changes; only explicit non-checkpoint internal steps receive a handler. The executable Python handler remains selected from the allowlisted registry; Python source remains immutable from the Runtime IDE. Saved `pre_execution` steps emit `module.pre_step.*` events and saved internal steps emit `module.step.planned` plus graph-level completion/failure events so the timeline reflects the active module contract.
 
 When an internal module graph tab is active, the top-level `Validate`, `Compile`, and `Dry Run` controls operate on that module draft instead of the main graph. Each module tab keeps its own module payload snapshot, so a later background load of another module cannot make a `design` tab validate or dry-run `analysis` payload. The module catalog loader respects the active tab: automatic background loads cannot hijack an already-open module tab, and explicit module navigation from Module Management deep links opens the selected module/node context instead of silently replacing the active tab's graph. Opening a module tab starts as a clean draft with missing validation/dry-run evidence; it is marked changed only after step movement, route edits, config edits, raw JSON edits, or generated-module changes. Evidence is shown in the central `Dry-run Trace` panel and in Module Management evidence cards, not in a second visible Runtime IDE config editor: validation displays schema/allowlist status and dry-run displays pre-execution/internal step counts plus the ordered checkpoint/handler-backed step list. Runtime IDE stores a fingerprint for the validated and dry-run module draft. `Save Version` from the internal module graph tab or Module Management Tool is blocked until both evidence records match the exact current draft, and any graph/step/config/raw JSON edit invalidates the evidence. The backend save API repeats the non-device module dry-run before writing a version and returns the resulting sequence/summary, so GUI, CUI, and direct API saves all leave the same validation/dry-run evidence trail. When a module graph tab is selected, the `Activation Checklist` switches from graph live-run gates to module gates (`Validate Module Draft`, `Dry-run Module Draft`, and `Save Module Version`) so operators can see whether the current module draft is ready before pressing save. This keeps graph-tab edits auditable before a module version is saved.
 

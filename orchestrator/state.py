@@ -55,6 +55,19 @@ class Stage(str, Enum):
     COMPLETE = "complete"
     ERROR = "error"
 
+    @classmethod
+    def _missing_(cls, value: object) -> "Stage | None":
+        """Allow graph-validated extension stages while preserving `.value` semantics."""
+        clean = str(value or "").strip()
+        if not clean:
+            return None
+        pseudo = str.__new__(cls, clean)
+        safe_name = "".join(ch if ch.isalnum() else "_" for ch in clean).upper().strip("_") or "CUSTOM"
+        pseudo._name_ = f"CUSTOM_{safe_name}"
+        pseudo._value_ = clean
+        cls._value2member_map_[clean] = pseudo
+        return pseudo
+
 
 class AgentRuntimeStatus(BaseModel):
     """Per-agent status tracked for GUI monitoring."""

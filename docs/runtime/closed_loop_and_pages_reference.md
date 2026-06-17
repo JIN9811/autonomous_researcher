@@ -52,8 +52,10 @@
 - Bambu bridge evidence는 `artifact`, `validation`, `transport`, `runtime`, `bed-clear` 5개 plane으로 나뉜다. Live GUI와 3DP GUI는 이 plane을 같은 의미로 표시해야 하며, `published=true`만으로 physical ejection success를 표시하면 안 된다.
 - Live GUI는 별도 fake 상태를 만들지 않는다. Specimen Making Agent report는 3DP GUI/API가 반환한 `selected_printer`, `device_screen`, `preprint_gate`, `readiness_levels`, `operator_actions`, `autoejection`, `bed_clear`를 그대로 요약한다.
 - Design Agent는 Bambu autoejection을 사용할 수 있는 후보에 대해 `bambu_autoejection_readiness`를 authoritative experiment spec과 design report에 기록한다. 이 객체는 `ejection_contact_edge`, `bed_contact_area_mm2`, `bed_contact_area_ratio`, `minimum_pushable_height_mm`, `pushable_edge_height_mm`, skirt/brim/raft policy를 포함한다. Specimen Making Agent는 이 객체를 `fabrication_report.process_plan.bambu_autoejection_readiness`와 `specimen_agent_report.bambu_autoejection_readiness`에 그대로 보존해 설계-side 접촉면/밀림 edge/skirt-brim-raft 정책과 printer-side validator evidence가 같은 trace에서 읽히게 한다.
-- Bambu autoejection의 primary path는 Bambu 전용 deterministic G-code patch/validation이다. `bambu_gcode_patch` provider는 sliced `.gcode.3mf` 또는 plain `.gcode`를 원본 보존 방식으로 `.autoeject.*` artifact로 만들고, actual publish는 start gate/Guardian/operator approval 이후에만 가능하다. Manipulation Agent는 primary ejection executor가 아니라 failed ejection recovery 또는 downstream specimen transfer 계층으로 남긴다.
+- Bambu autoejection의 primary path는 Bambu 전용 deterministic G-code patch/validation이다. `bambu_gcode_patch` provider는 sliced `.gcode.3mf` 또는 plain `.gcode`를 원본 보존 방식으로 `.autoeject.*` artifact로 만들고, actual publish는 owner-managed publish defaults, backend start gate, camera/bed-clear evidence, printer safe-state 검증 이후에만 가능하다. Manipulation Agent는 primary ejection executor가 아니라 failed ejection recovery 또는 downstream specimen transfer 계층으로 남긴다.
 - Bambu bed-clear gate는 operator checkbox만으로 닫히지 않는다. 3DP GUI의 `Video Status` 또는 `Pre-start Check`가 최신 camera preview/proxy evidence를 확보하고, `Mark Bed Clear`가 그 값을 `/api/printer/bed-clear`의 `camera_snapshot_path`로 저장해야 다음 cycle gate evidence와 Live GUI report가 같은 근거를 참조한다. Guarded `.autoeject.*` publish 성공 시 backend는 가능하면 `artifacts/bambu_camera_evidence/` 아래 로컬 JPEG를 저장하고 그 파일을 evidence로 사용한다.
+- `/api/bridges`와 `/api/printer/fleet`는 같은 계층이 아니다. `/api/bridges`는 Runtime IDE/Live GUI가 graph metadata bridge boundary를 읽는 normalized discovery API이며, workspace, health/preflight endpoint, `actions[]`에 들어간 standard/custom action descriptor, evidence contract를 같은 shape로 반환한다. Bambu/Prusa active printer 선택은 `/api/printer/fleet`가 담당한다. 현재 Bambu Lab X2D 기본 profile은 `/api/printer/fleet`에서 확인한다.
+- 현재 route/API/manifest 스냅샷은 [current_code_snapshot.md](current_code_snapshot.md)를 기준으로 갱신한다.
 
 ---
 
@@ -89,6 +91,48 @@
 - `agent_result`, `tool_event`, `artifact.created`
 - `approval.requested` / `approval.resolved`
 
+### 2.5 Live GUI transcript 저장 계약
+
+Live GUI 대화는 브라우저 메모리에만 저장하지 않습니다. 컨트롤러는 각
+planning/chat 메시지를 compact 형태로
+`runs/<active_run_id>/live_planning_transcript.jsonl`에 append하고, 메모리에는
+최근 window만 유지합니다.
+
+- 최신 상태: `GET /api/planning/session`
+- 이전 메시지 페이지: `GET /api/planning/messages?before=<index>&limit=<n>`
+- 명시 초기화: fresh session 경로에서 transcript 파일 삭제
+
+따라서 새 창/새로고침 후에는 `/api/planning/session`과
+`/api/planning/messages`를 기준으로 현재 상태를 복원해야 합니다. Live GUI가
+별도 local-only 상태를 source of truth로 삼으면 runtime state와 대화 내용이
+갈라질 수 있습니다.
+
+### 2.6 custom stage 현재 지원 범위
+
+현재 코드는 고정 `Stage` enum을 완전히 제거하지 않았지만,
+graph-validated extension stage 문자열은 `Stage._missing_()` pseudo-member로
+통과시킵니다. 최소 보장 범위는 다음입니다.
+
+- active graph에 `custom_quality_gate` 같은 stage가 있으면 `.value` 기반으로
+  serialization됩니다.
+- allowlisted `agent.*` handler와 module config가 붙은 custom stage는
+  LangGraphRunLoop에서 실행될 수 있습니다.
+- `MainController`의 Orchestrator plan/control-plane snapshot은 active graph
+  route를 사용하므로 custom stage가 `latest_orchestration_plan`,
+  `route_state`, task queue에 표시됩니다.
+- module `output_contracts[]`와 list-valued `io_contract.output`은 supervisor
+  route step의 `required_outputs`로 승격됩니다.
+
+아직 완전하지 않은 부분은 custom stage별 domain-specific report authoring과
+custom action execution UX입니다. Graph-unattached module은 Module
+Management에서 `/ide?module=<id>&action=attach`로 Runtime IDE에 넘길 수
+있고, Runtime IDE가 Module Library attach 대상을 강조합니다. 실제 graph
+edit/activation은 여전히 Runtime IDE의 drag/drop, port 연결,
+validate/dry-run, Save Version gate를 통과해야 합니다. 현재 backend는
+payload/module runtime의 `supervisor_policy`를 읽을 수 있고 Module
+Management는 주요 descriptor 필드를 typed form으로 편집할 수 있습니다. 이 잔여 범위는
+`개선안/12_free_modularization_gap_analysis.md`에 추적합니다.
+
 ---
 
 ## 3) 기본 닫힌루프(기본 모드) 단계별 상세
@@ -118,8 +162,8 @@ dispatch -> idle -> design -> specimen -> vision -> manipulation -> equipment ->
 | 3DP/Printer GUI | `/printer` | `printer.html` | Bambu Lab X2D 기본 device bridge, 명시적 printer fleet 선택, connection, live video probe/proxy, Bambu Studio slicing, sliced artifact route, pre-start checklist, start gate, guarded MQTT start publish, SPC readiness, autoejection gate 확인, physical proof package 감사 | `/api/printer/fleet`, `/api/printer/profile`, `/api/printer/status`, `/api/printer/video-status`, `/api/printer/video-stream.mjpeg`, `/api/printer/connection`, `/api/printer/upload-path-probe`, `/api/printer/bambu-slice-artifact`, `/api/printer/http-artifact-route`, `/api/printer/bambu-prestart-check`, `/api/printer/start-command-draft`, `/api/printer/start-gate`, `/api/printer/start-publish`, `/api/printer/spc-readiness`, `/api/printer/autoejection-status`, `/api/printer/autoejection-config`, `/api/printer/autoejection-test`, `/api/printer/bambu-autoejection-patch`, `/api/printer/bambu-autoejection-sweep-test`, `/api/printer/bed-clear`, `/api/printer/bambu-autoejection-proof-template`, `/api/printer/bambu-autoejection-completion-audit` |
 | BO Workspace | `/bo` | `bo.html` | BO/MBO/LLM preference 전략 설정, reasoning audit, candidate ranking, next-design handoff | `/api/bo/config`, `/api/bo/benchmark`, `/api/bo/run` |
 | CAE Workspace | `/cae` | `cae.html` | 정적 CAE 분석 실행, 파라미터 저장, 결과 라인업 | `/api/cae/config`, `/api/cae/run` |
-| Runtime IDE | `/ide` | `runtime_ide.html` | 그래프/에지/모듈 편집, validate/dry-run/실행, 버전관리 | `/api/graphs*`, `/api/modules*`, `/api/handlers` |
-| Module Management | `/module-management` | `module_management.html` | 모듈 로드·언로드·검증·버전 저장(standalone) | `/api/modules*`, `/api/handlers`, `/api/graphs/{id}/run` |
+| Runtime IDE | `/ide` | `runtime_ide.html` | 그래프/에지/모듈 편집, module attach deep-link, validate/dry-run/실행, 버전관리 | `/api/graphs*`, `/api/modules*`, `/api/handlers` |
+| Module Management | `/module-management` | `module_management.html` | 모듈 로드·언로드·검증·버전 저장, draft module 생성, `ui.yaml` descriptor 관리, handler/LLM/tool/prompt/safety/step typed edit, raw JSON edit | `/api/modules*`, `/api/modules/templates/*`, `/api/modules/{id}/ui`, `/api/runtime/agent-manifests`, `/api/bridges`, `/api/handlers` |
 | Self-Evolution Lab | `/evolution-lab` | `evolution_lab.html` | 실험 변형/태스크 관리, variant 승인/롤백 | `/api/evolution/*` (설정/작업/태스크/variant) |
 | Windows 장비 브릿지 | `/equipment/windows` | `windows_equipment.html` | Windows PyAutoGUI 브릿지 후보 검색/선택/프로그램 실행 | `/api/equipment/windows/config`, `/api/equipment/windows/discover`, `/api/equipment/windows/connect`, `/api/equipment/windows/select`, `/api/equipment/windows/delete`, `/api/equipment/windows/test`, `/api/equipment/windows/run-program` |
 | LeRobot GUI | `/lerobot` | `lerobot.html` | ROBOTIS teleop/record/train/rollout, 포트/카메라 구성, 조작 agent bridge, manipulation 연동 | `/api/lerobot/config`, `/api/lerobot/ports*`, `/api/lerobot/camera/test`, `/api/lerobot/teleoperate/*`, `/api/lerobot/record/*`, `/api/lerobot/train/*`, `/api/lerobot/rollout/*`, `/api/lerobot/manipulation-agent/*` |
@@ -152,7 +196,7 @@ dispatch -> idle -> design -> specimen -> vision -> manipulation -> equipment ->
 - **Bambu autoejection parameter 계약**: Native provider `bambu_gcode_patch`는 external provider handoff가 아니라 deterministic G-code patcher다. 사용자 조정값은 push direction, Z push offset, push lane offset, push speed, full-bed sweep enable, sweep Z, sweep speed로 표현한다. P1/P1S/X1/X1C 계열은 X-axis multi-lane push, A1/A1 Mini 계열은 별도 Y-axis bed-slinger/wiggle generator를 사용해야 하며 서로 재사용하지 않는다. 현재 CoreXY tail generator는 A1/A1 Mini profile을 `BAMBU_AUTOEJECTION_MODEL_FAMILY_UNSUPPORTED`로 차단해 잘못된 motion artifact를 만들지 않는다.
 - **Bambu validation/test artifact 계약**: `Validate G-code Preview`와 left/center/right validation은 publish/start와 분리된 비파괴 검증이다. 이 validation-only 경로는 would-be tail, object bounds, candidate hash, blocker evidence만 반환하고 `.autoeject.*` artifact, sidecar manifest, run workspace manifest를 쓰지 않는다. `Generate Ejection Test Artifact`, `Generate Sweep Test Artifact`, `Generate Patched Artifact`는 로컬 파일을 생성하지만 source artifact를 덮어쓰지 않고 `will_publish=false` / `start_enabled=false`를 유지한다. 생성 artifact는 sidecar `.manifest.json`을 만들고, run context가 있으면 `runs/<run_id>/workspace/printer/bambu_autoejection_manifest.json`도 갱신한다. `.gcode.3mf` patch는 내부 plate G-code와 `Metadata/plate_#.gcode.md5` hash sidecar 정합성을 유지한다. Tail comment는 schema marker, source/patched hash reference, source plate path, plate id, loop index, object bounds/height, material/bed placeholder, cooldown, sweep, purge/parking strategy, door/front assumption, validation reference를 기록한다. Validator는 single schema marker, safe motion, no unexpected homing, object bounds, residual skirt/brim/raft, and cooldown wait evidence(`M190 R/S...` or explicit wait policy)를 확인한다. 실제 physical motion은 `/api/printer/start-publish` live gate를 통과한 경우에만 허용된다.
 - **Bambu physical proof/audit 계약**: `/api/printer/bambu-autoejection-proof-template`은 fail-closed physical validation JSON을 만든다. `/api/printer/bambu-autoejection-completion-audit`은 지정 path 또는 latest package를 읽어 center ejection, disposable live ejection, left/right lane, bed-clear, next-job gate, camera files, patch manifest를 검증한다. 두 route는 non-actuating audit helper이며 MQTT publish, upload, camera capture, axis motion을 실행하지 않는다. Active printer profile이 Bambu가 아니면 proof template 생성도 audit도 `NOT_APPLICABLE`로 차단하고, proof file을 쓰지 않는다. Completion audit이 `complete_evidence_verified`를 반환하기 전까지 Live GUI와 tutorial은 Bambu native autoejection을 physical success로 표시하면 안 된다.
-- **SPC 화면 계약**: `/api/printer/spc-readiness`는 raw gate payload만 반환하지 않는다. 사용자가 바로 판단할 수 있도록 `operator_summary`, `readiness_levels`, `next_actions`, `evidence`, `sections`를 함께 반환한다. `readiness_levels`는 connection, transfer path, approval, publish command, autoejection을 분리해 보여주며, `next_actions`는 실제 blocker/operator action/autoejection blocker에서 파생된다. GUI가 임의 상태를 만들지 않는다.
+- **SPC 화면 계약**: `/api/printer/spc-readiness`는 raw gate payload만 반환하지 않는다. 사용자가 바로 판단할 수 있도록 `operator_summary`, `readiness_levels`, `next_actions`, `evidence`, `sections`를 함께 반환한다. `readiness_levels`는 connection, transfer path, owner-managed publish default, publish command, autoejection을 분리해 보여주며, `next_actions`는 실제 blocker/operator action/autoejection blocker에서 파생된다. GUI가 임의 상태를 만들지 않는다.
 - **Bambu Connection Confirmation 계약**: 3DP GUI의 `Connection Confirmation` board는 저장된 Bambu connection과 최신 status/SPC evidence를 합쳐 LAN-only 확인, Developer Mode 확인, sliced-artifact transfer, HTTP artifact route 상태를 보여준다. 표시 코드는 `BAMBU_LAN_MODE_NOT_CONFIRMED`, `BAMBU_DEVELOPER_MODE_NOT_CONFIRMED`, `BAMBU_FTPS_WRITE_FAILED`, `BAMBU_STORAGE_TRANSFER_PATH_NOT_VERIFIED`, `BAMBU_HTTP_ARTIFACT_ROUTE_ACTIVE`에서 파생되며, checkbox/form 값만으로 upload-ready를 만들면 안 된다.
 - **Bambu transfer 계약**: FTPS login/list 성공은 upload-ready가 아니다. live `prepare`는 root marker write/delete 실패 후 `cache`, `sdcard`, `Metadata`, `data/Metadata` 후보를 CWD+basename 방식으로 probe한다. 후보가 모두 실패하면 transfer는 `read_only`로 남고 `BAMBU_FTPS_WRITE_FAILED` / `BAMBU_STORAGE_TRANSFER_PATH_NOT_VERIFIED`가 blocker가 된다. `/api/printer/http-artifact-route`가 생성한 printer-reachable `http://`/`https://` URL 중 `server_fetch_probe.ok=true`와 sha256 match가 확인된 URL만 HTTP artifact transfer로 인정한다. 이때 ATR 서버는 LAN에서 접근 가능한 인터페이스(`server.host=0.0.0.0` 또는 명시 LAN IP)에 떠 있어야 하며, Bambu에 전달되는 artifact URL은 `localhost`가 아니라 ATR 서버 LAN IP를 사용해야 한다. 일반 remote path(`cache/*.gcode.3mf`)는 HTTP route가 아니며 FTPS 검증을 우회할 수 없다.
 - **Bambu start 연계**: `/api/printer/start-gate`는 검증 전용이고 publish하지 않는다. `/api/printer/start-publish`만 실제 MQTT `project_file` command를 보낼 수 있으며, draft validity, live preprint gate, device `can_start_print`, operator confirmation, Guardian approval, `dry_run=false`가 모두 만족될 때만 `BambuMqttReportClient.publish_project_file_command()`를 호출한다. 3DP GUI에서는 operator/Guardian/dry-run 수동 controls를 제거했고, workstation owner/operator가 관리하는 기본 동작으로 `operator_confirmed=true`, `guardian_approved=true`, `dry_run=false`를 보낸다. `.autoeject.*` artifact의 front path/door, ramp/bin, toolhead cover, release surface, supervised first ejection 항목도 수동 checkbox blocker가 아니라 `operator_managed=true` evidence로 기록한다. `project_file` draft는 `.gcode.3mf` artifact에만 유효하며, plain `.gcode`나 `plate_id < 1`은 `BAMBU_PROJECT_FILE_PARAM_MISMATCH`로 차단된다. Status snapshot timeout과 publish timeout은 분리한다. Status는 짧게 유지할 수 있지만 publish timeout은 model 설정값 `publish_timeout_sec`를 사용하며 기본 180초, 최소 60초로 둔다. Publish 이후에는 `post_publish_observation`, `post_publish_status`, `post_publish_failure_code`로 fresh `printer.prepare` 결과를 다시 붙여 `gcode_state`, progress, subtask, safe-state evidence를 MQTT ack와 분리해 남긴다. `.autoeject.*` artifact는 publish ack가 성공하는 즉시 bed-clear required로 잠그며, 가능한 경우 `remote_path`, `subtask_name`, source/patched artifact path, source/patched sha256, sidecar manifest path, MQTT publish sequence/topic, post-publish status, camera snapshot reference를 `memory/bambu_bed_clear_evidence.json`에 같이 남긴다. `IDLE`/not-started observation이면 `published=true`라도 `ok=false`와 `BAMBU_PROJECT_FILE_ACCEPTED_BUT_NOT_STARTED`를 반환한다. HTTP artifact route가 검증되면 `device_screen.actions.can_start_print=true`와 `technical_ready_for_start=true`가 될 수 있지만, 이는 기술 gate가 열린 상태일 뿐이며 backend start/publish observation은 계속 확인한다.

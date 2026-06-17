@@ -868,6 +868,49 @@ def _write_graph_with_transition(tmp_path: Path, source: str, target: str) -> Pa
     return graph_path
 
 
+def _write_graph_with_custom_quality_stage(tmp_path: Path) -> Path:
+    module_dir = tmp_path / "modules" / "custom_quality"
+    module_dir.mkdir(parents=True, exist_ok=True)
+    (module_dir / "module.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "module": {
+                    "id": "custom_quality",
+                    "label": "Custom Quality Gate Module",
+                    "handler": "agent.custom_quality_agent",
+                    "io_contract": {
+                        "input": "Specimen handoff plus quality camera metrics",
+                        "output": ["quality_metrics", "handoff_packet"],
+                    },
+                }
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+    config = load_graph_config("graphs/configs/atr_closed_loop.yaml")
+    payload = config.model_dump(mode="json")
+    payload["nodes"].append(
+        {
+            "id": "custom_quality_gate_node",
+            "label": "Custom Quality Gate",
+            "handler": "agent.custom_quality_agent",
+            "stage": "custom_quality_gate",
+            "kind": "agent",
+            "description": "Custom quality inspection inserted by graph config.",
+            "module_id": "modules/custom_quality",
+            "position": {"x": 820.0, "y": 420.0},
+            "metadata": {"icon": "guardian"},
+        }
+    )
+    payload["stage_dispatch"]["custom_quality_gate"] = "custom_quality_gate_node"
+    payload["transitions"]["specimen"] = "custom_quality_gate"
+    payload["transitions"]["custom_quality_gate"] = "guardian"
+    graph_path = tmp_path / "atr_with_custom_quality_gate.yaml"
+    graph_path.write_text(yaml.safe_dump({"graph": payload}, sort_keys=False), encoding="utf-8")
+    return graph_path
+
+
 def test_live_gui_planning_route_text_uses_active_graph_config(tmp_path: Path) -> None:
     controller = load_runtime()
     controller._active_graph_config_path = _write_graph_with_transition(tmp_path, "specimen", "analysis")
@@ -879,6 +922,37 @@ def test_live_gui_planning_route_text_uses_active_graph_config(tmp_path: Path) -
     assert "Vision Agent" not in route
     assert f"Active graph stage order is {route}." in contract
     assert controller._planning_tail_start_stage() == Stage.ANALYSIS
+
+
+def test_orchestrator_plan_uses_active_graph_route_with_custom_stage(tmp_path: Path) -> None:
+    controller = load_runtime()
+    controller._active_graph_config_path = _write_graph_with_custom_quality_stage(tmp_path)
+    controller._state.stage = Stage.DESIGN
+    controller._state.run_metadata.pop("latest_orchestration_plan", None)
+    controller._state.run_metadata.pop("latest_orchestrator_control_plane", None)
+
+    snapshot = controller.snapshot()
+
+    plan = snapshot["state"]["run_metadata"]["latest_orchestration_plan"]
+    route_stages = [step["stage"] for step in plan["route"]]
+    assert route_stages[:4] == ["design", "specimen", "custom_quality_gate", "guardian"]
+    custom_step = next(step for step in plan["route"] if step["stage"] == "custom_quality_gate")
+    assert custom_step["agent"] == "custom_quality_agent"
+    assert custom_step["label"] == "Custom Quality Gate"
+    assert custom_step["required_outputs"] == ["quality_metrics", "handoff_packet"]
+    control_plane = snapshot["state"]["run_metadata"]["latest_orchestrator_control_plane"]
+    assert control_plane["route_state"]["route_count"] == len(plan["route"])
+    assert any(item["stage"] == "custom_quality_gate" for item in control_plane["task_queue"]["items"])
+
+
+def test_custom_planning_stage_role_uses_module_handler(tmp_path: Path) -> None:
+    controller = load_runtime()
+    controller._active_graph_config_path = _write_graph_with_custom_quality_stage(tmp_path)
+    custom_stage = Stage("custom_quality_gate")
+    module_runtime = controller._module_runtime_for_stage(custom_stage)
+
+    assert controller._planning_stage_role(custom_stage, module_runtime) == "custom_quality_agent"
+    assert controller._planning_stage_label(custom_stage, module_runtime) == "Custom Quality Gate"
 
 
 def test_live_gui_printer_defaults_follow_active_bambu_fleet_profile() -> None:

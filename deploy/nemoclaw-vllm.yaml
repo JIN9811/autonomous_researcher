@@ -134,7 +134,7 @@ spec:
             - --max-model-len
             - "8192"
             - --gpu-memory-utilization
-            - "0.20"
+            - "0.14"
             - --generation-config
             - vllm
             - --safetensors-load-strategy
@@ -151,6 +151,8 @@ spec:
               value: "1"
             - name: VLLM_NVFP4_GEMM_BACKEND
               value: marlin
+            - name: VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS
+              value: "0"
             - name: NVIDIA_VISIBLE_DEVICES
               value: all
             - name: NVIDIA_DRIVER_CAPABILITIES

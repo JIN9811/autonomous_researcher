@@ -28,15 +28,19 @@ OPENAI_API_KEY=<your-key-here>
 OPENAI_BASE_URL=https://api.openai.com/v1
 ```
 
-For local-first Linux development, keep the local backend and use OpenAI only as
-the final fallback:
+For local-first Linux development, keep the local backend. With only
+`configs/models.yaml` fallback active, OpenAI is used after the local backend
+and local model fallback fail:
 
 ```text
 AUTONOMOUS_BACKEND=vllm
 OPENAI_API_KEY=<your-key-here>
 ```
 
-The backend fallback order is configured in `configs/models.yaml`.
+The backend fallback order is configured in `configs/models.yaml`. The Main GUI
+API-key `Loading` control is stronger than this static fallback: when a saved
+key is loaded, OpenAI is promoted to the first inference route until the key is
+unloaded.
 
 ## Main GUI API Key Store
 

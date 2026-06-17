@@ -1,0 +1,35 @@
+ui:
+  short: GRD
+  icon: /static/live_gui_icons/guardian_agent.svg
+  report_title: Guardian Agent
+  chat:
+    mode: open_on_demand
+  cards:
+  - id: guardian_gate_descriptor
+    type: safety_gate
+    title: Guardian Gate Descriptor
+    eyebrow: module descriptor
+    span: 4
+    tone: guardian
+    selectors:
+      status: metadata.latest_guardian_decision.decision
+      reason_code: metadata.latest_guardian_decision.reason_code
+      pending_approvals: metadata.guardian_approval_queue
+      risk_score: metadata.latest_guardian_report.risk_score
+  - id: safety_evidence_descriptor
+    type: evidence_summary
+    title: Safety Evidence Descriptor
+    eyebrow: module descriptor
+    span: 4
+    tone: warning
+    selectors:
+      incidents: metadata.guardian_incidents
+      blocked_actions: metadata.latest_guardian_report.blocked_actions
+      latest_warning: metadata.latest_guardian_report.warning
+      next_stage: metadata.latest_guardian_decision.next_stage
+  report_sections:
+  - id: guardian_overview
+    title: Guardian Overview
+    selectors:
+      decision: metadata.latest_guardian_decision
+      report: metadata.latest_guardian_report

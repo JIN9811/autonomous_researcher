@@ -9,8 +9,10 @@ ATR supports two inference modes:
   OpenAI API when `configs/models.yaml` sets `backend.fallback: openai`.
 - API-only: set `AUTONOMOUS_BACKEND=openai` in `.env` to skip local AI entirely.
 
-`openai` is intentionally the lowest-priority fallback unless the operator
-explicitly selects it as the active backend.
+`openai` is intentionally the lowest-priority static fallback unless the
+operator explicitly selects it as the active backend or enables the Main GUI
+`API Key` Loading control. When that API-key cell is loaded, OpenAI becomes the
+first inference route until it is unloaded again.
 
 ## Windows Quick Start (API Key, No Local AI)
 

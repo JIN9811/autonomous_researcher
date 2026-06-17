@@ -177,19 +177,36 @@ def build_orchestration_plan(
     state: OrchestratorState,
     operator_intent: dict[str, Any] | None = None,
     graph_id: str = "atr_closed_loop",
+    route_override: list[Any] | None = None,
 ) -> dict[str, Any]:
     """Compile the current supervisor view into an executable plan object."""
     current_stage = stage_value(state.stage) or Stage.IDLE.value
-    route = _route_from_current_stage(current_stage)
+    if isinstance(route_override, list) and route_override:
+        route = route_override
+    else:
+        route = _route_from_current_stage(current_stage)
     route_steps = []
-    for index, stage in enumerate(route, start=1):
+    for index, item in enumerate(route, start=1):
+        if isinstance(item, dict):
+            stage = str(item.get("stage") or "").strip()
+            agent = str(item.get("agent") or "").strip() or STAGE_AGENT.get(stage, stage)
+            required_outputs = item.get("required_outputs") if isinstance(item.get("required_outputs"), list) else REQUIRED_OUTPUTS.get(stage, [])
+            label = str(item.get("label") or "").strip()
+        else:
+            stage = str(item or "").strip()
+            agent = STAGE_AGENT.get(stage, stage)
+            required_outputs = REQUIRED_OUTPUTS.get(stage, [])
+            label = ""
+        if not stage:
+            continue
         route_steps.append(
             {
                 "order": index,
                 "stage": stage,
-                "agent": STAGE_AGENT.get(stage, stage),
+                "agent": agent,
+                "label": label or stage,
                 "status": _stage_plan_status(state, stage),
-                "required_outputs": REQUIRED_OUTPUTS.get(stage, []),
+                "required_outputs": required_outputs,
                 "guardian_pre_gate": f"guardian.pre_{stage}",
                 "guardian_post_gate": f"guardian.post_{stage}",
             }
@@ -791,6 +808,110 @@ def _confidence_from_payload(stage: str, payload: dict[str, Any]) -> float:
     return 0.82 if _status_from_payload(stage, payload) in {"ready", "done", "continue", "allow"} else 0.64
 
 
+def _dotted_payload_value(payload: dict[str, Any], path: str) -> Any:
+    """Resolve a dotted selector against nested dict/list payloads."""
+    value: Any = payload
+    for part in [item for item in str(path or "").split(".") if item]:
+        if isinstance(value, dict):
+            value = value.get(part)
+        elif isinstance(value, list) and part.isdigit():
+            index = int(part)
+            value = value[index] if 0 <= index < len(value) else None
+        else:
+            return None
+    return value
+
+
+def _format_policy_value(value: Any) -> str:
+    if isinstance(value, list):
+        return ", ".join(str(item) for item in value)
+    if isinstance(value, dict):
+        return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+    if value is None:
+        return ""
+    return str(value)
+
+
+def _supervisor_policy_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Return a module-provided supervisor descriptor without touching execution."""
+    direct = payload.get("supervisor_policy")
+    if isinstance(direct, dict):
+        return direct
+    module_runtime = payload.get("module_runtime")
+    if isinstance(module_runtime, dict):
+        policy = module_runtime.get("supervisor_policy")
+        if isinstance(policy, dict):
+            return policy
+        runtime_contract = module_runtime.get("runtime_contract")
+        if isinstance(runtime_contract, dict) and isinstance(runtime_contract.get("supervisor_policy"), dict):
+            return runtime_contract["supervisor_policy"]
+    return {}
+
+
+def _format_supervisor_template(
+    template: str,
+    *,
+    payload: dict[str, Any],
+    stage: str,
+    next_stage: str,
+    next_agent: str,
+    status: str,
+    confidence: float,
+    required_outputs: list[str],
+) -> str:
+    """Format supervisor policy templates with safe dotted payload lookups."""
+    context = {
+        "stage": stage,
+        "next_stage": next_stage,
+        "next_agent": next_agent,
+        "status": status,
+        "confidence": round(confidence, 4),
+        "required_outputs": required_outputs,
+    }
+
+    def replace(match: re.Match[str]) -> str:
+        key = match.group(1).strip()
+        if key in context:
+            return _format_policy_value(context[key])
+        return _format_policy_value(_dotted_payload_value(payload, key))
+
+    return re.sub(r"\{([^{}]+)\}", replace, str(template or ""))
+
+
+def _supervisor_policy_concerns(policy: dict[str, Any], payload: dict[str, Any]) -> list[str]:
+    """Evaluate lightweight descriptor concern rules for custom supervisor reports."""
+    concerns: list[str] = []
+    rules = policy.get("concern_rules")
+    if not isinstance(rules, list):
+        return concerns
+    for rule in rules:
+        if not isinstance(rule, dict):
+            continue
+        selector = str(rule.get("selector") or "").strip()
+        value = _dotted_payload_value(payload, selector) if selector else None
+        matched = False
+        if rule.get("missing") is True:
+            matched = value in (None, "", [], {})
+        elif "equals" in rule:
+            matched = value == rule.get("equals")
+        elif "not_equals" in rule:
+            matched = value != rule.get("not_equals")
+        elif "lt" in rule and isinstance(value, (int, float)):
+            matched = float(value) < float(rule.get("lt"))
+        elif "lte" in rule and isinstance(value, (int, float)):
+            matched = float(value) <= float(rule.get("lte"))
+        elif "gt" in rule and isinstance(value, (int, float)):
+            matched = float(value) > float(rule.get("gt"))
+        elif "gte" in rule and isinstance(value, (int, float)):
+            matched = float(value) >= float(rule.get("gte"))
+        if not matched:
+            continue
+        rule_id = str(rule.get("id") or selector or "supervisor_policy_concern").strip()
+        message = str(rule.get("message") or rule_id).strip()
+        concerns.append(f"{rule_id}: {message}")
+    return concerns
+
+
 def build_orchestrator_followup(
     *,
     state: OrchestratorState,
@@ -812,6 +933,7 @@ def build_orchestrator_followup(
     recommendation = f"{next_stage_text or 'next stage'} handoff를 준비합니다."
     opinion = f"{stage_text} stage 결과를 확인했고 status={status}로 판단했습니다."
     options: list[dict[str, Any]] = []
+    supervisor_policy = _supervisor_policy_from_payload(data)
 
     if trigger == "operator_followup":
         operator_followup = _first_dict(data.get("operator_followup"))
@@ -828,6 +950,44 @@ def build_orchestrator_followup(
         ]
         if excerpt:
             concerns.append(f"operator_note={excerpt}")
+    elif supervisor_policy:
+        required_outputs = [
+            str(item)
+            for item in as_list(supervisor_policy.get("required_outputs"))
+            if str(item).strip()
+        ]
+        next_agent = STAGE_AGENT.get(next_stage_text, next_stage_text)
+        opinion_template = str(supervisor_policy.get("opinion_template") or "").strip()
+        recommendation_template = str(supervisor_policy.get("recommendation_template") or "").strip()
+        if opinion_template:
+            opinion = _format_supervisor_template(
+                opinion_template,
+                payload=data,
+                stage=stage_text,
+                next_stage=next_stage_text,
+                next_agent=next_agent,
+                status=status,
+                confidence=confidence,
+                required_outputs=required_outputs,
+            )
+        if recommendation_template:
+            recommendation = _format_supervisor_template(
+                recommendation_template,
+                payload=data,
+                stage=stage_text,
+                next_stage=next_stage_text,
+                next_agent=next_agent,
+                status=status,
+                confidence=confidence,
+                required_outputs=required_outputs,
+            )
+        concerns.extend(_supervisor_policy_concerns(supervisor_policy, data))
+        policy_options = supervisor_policy.get("options")
+        if isinstance(policy_options, list):
+            options = [dict(item) for item in policy_options if isinstance(item, dict)]
+        response_statuses = {str(item) for item in as_list(supervisor_policy.get("requires_response_on_status"))}
+        if status in response_statuses:
+            requires_response = True
     elif stage_text == Stage.DESIGN.value:
         candidate = _first_dict(data.get("design_candidate"), data.get("handoff_packet"))
         design_handoff = _first_dict(_first_dict(data.get("design_report")).get("handoff_to_specimen"))

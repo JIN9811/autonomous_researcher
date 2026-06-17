@@ -24,6 +24,8 @@
 - GUI, CLI, API는 같은 runtime state/event/artifact를 본다.
 - 실제 실행 순서는 `graphs/configs/atr_closed_loop.yaml`이 기준이다.
 - 각 단계의 실제 계약은 `graphs/modules/<agent>/module.yaml`이 기준이다.
+- Live GUI의 agent 표시와 일부 report card는 `/api/runtime/agent-manifests`가 기준이며, `graphs/modules/<agent>/ui.yaml`은 표시 전용 descriptor다.
+- 현재 코드가 실제로 노출하는 route/API/manifest/model 상태는 [../runtime/current_code_snapshot.md](../runtime/current_code_snapshot.md)에 정리한다.
 - 실제 장비는 bridge와 safety gate를 통과해야만 호출된다.
 - generated output, 비밀번호, 로컬 장비 IP, 모델 캐시는 Git에 넣지 않는다.
 
@@ -113,7 +115,7 @@ atr down
 | Main GUI `/` | 전체 상태 확인, 서버/모델/장비 진입 | runtime state, model status, device workspace 확인 |
 | Live GUI `/live` | 오케스트레이터와 대화하며 실험 실행 | 먼저 test mode로 목표 입력 |
 | Runtime IDE `/ide` | graph 구조를 보고 수정/검증 | Main System graph dry-run 확인 |
-| Module Management `/module-management` | agent module 검증/버전 관리 | 각 module validate/dry-run 확인 |
+| Module Management `/module-management` | agent module 검증/버전 관리, draft module 생성, `ui.yaml` 표시 descriptor 관리 | 각 module validate/dry-run 확인, draft는 실행되지 않는지 확인 |
 | 3DP `/printer` | Bambu Lab X2D 기본 device bridge, printer fleet, camera/status, slicing/start gate, autoejection 설정 | connection/profile/test options 저장 |
 | LeRobot `/lerobot` | 포트, 카메라, teleop, record, train, rollout | follower/leader/camera 포트 저장 |
 | BO `/bo` | acquisition/strategy/parameter space 설정 | settings 저장 후 benchmark 실행 |
@@ -132,11 +134,14 @@ atr down
 - Timeline: runtime event 순서
 - Device strip: GPU/LLM/Printer/Robot/Camera/Windows bridge 등 상태
 
+Live GUI agent 목록은 `web/static/planning.js` 하드코딩 값보다 `/api/runtime/agent-manifests`를 우선합니다. 이 manifest는 graph YAML, module YAML, 선택적 `ui.yaml`을 합칩니다. `ui.yaml`은 label, short name, icon, report card selector 같은 화면 표시만 바꿀 수 있고, handler/tool/graph transition/live device 권한은 바꾸지 않습니다.
+
 ### 1.7 작업 결과가 저장되는 곳
 
 | 위치 | 내용 |
 |---|---|
 | `runs/<run-id>/` | run별 이벤트, 로그, workspace evidence |
+| `runs/<run-id>/live_planning_transcript.jsonl` | Live GUI 채팅/시스템 메시지 compact transcript. `/api/planning/messages`가 이 파일을 page 단위로 읽음 |
 | `artifacts/` | STL, G-code, CAE, UI audit 결과 |
 | `memory/` | 로컬 설정, 장비 연결, graph/module version memory |
 | `outputs/train/` | LeRobot training output/checkpoint |
@@ -161,18 +166,18 @@ atr down
 3. Bambu `Live Status`로 MQTT/FTPS/storage 상태를 확인하고, `Video Status`로 RTSPS/JPEG video port와 `ffmpeg` proxy 준비 상태를 확인한다.
 4. profile에서 material, nozzle, layer height, bed temperature, first layer speed를 확인한다.
 5. test specimen size와 test unit cell size를 저장한다.
-6. 실제 출력 전에는 upload/start gate, Guardian/operator approval, autoejection 옵션을 확인한다.
-7. `Start Gate Check`, `SPC Readiness`, `Publish Start`는 같은 start-gate checkbox를 사용한다. 기본값은 `dry-run / no publish` ON, operator/Guardian approval OFF이며, GUI는 이 값을 임의로 true로 바꾸지 않는다.
-8. `SPC Readiness`의 level cards는 connection, transfer path, approval, publish command, autoejection을 분리해서 보여준다. `technical_ready_for_start=true`여도 approval/dry-run이 남아 있으면 실제 publish는 되지 않는다.
+6. 실제 출력 전에는 upload/start gate, camera/video evidence, bed-clear evidence, autoejection 옵션을 확인한다.
+7. 현재 3DP GUI는 별도 operator/Guardian/dry-run 체크박스를 노출하지 않는다. `Start Gate Check`, `SPC Readiness`, `Publish Start`는 owner-managed publish 기본값(`operator_confirmed=true`, `guardian_approved=true`, `dry_run=false`, ejection path 관리값 true)을 보내고, 백엔드가 artifact, printer safe-state, camera, bed-clear, post-publish observation으로 최종 차단한다.
+8. `SPC Readiness`의 level cards는 connection, transfer path, owner-managed publish default, publish command, autoejection을 분리해서 보여준다. `technical_ready_for_start=true`여도 camera/bed-clear/safe-state/start gate blocker가 있으면 실제 publish는 되지 않는다.
 9. Bambu X2D에서 `Upload Path Probe`는 FTPS가 실제로 write/delete 가능한지 확인한다. login/list만 성공해도 upload-ready가 아니다.
 10. FTPS가 `read_only` 또는 `BAMBU_FTPS_WRITE_FAILED`이면 sliced `.gcode.3mf` 파일을 `Prepare HTTP Artifact`로 노출한다. 이때 backend가 artifact URL을 실제 GET하고 sha256을 비교해 `server_fetch_probe.ok=true`를 반환해야 Upload gate가 ready로 바뀐다. 이 검증은 프린터가 접근 가능한 LAN URL 기준이다. 서버는 기본적으로 `0.0.0.0:7860`에 바인딩되어야 하며, artifact URL은 `http://<ATR서버-LAN-IP>:7860/printer-artifacts/...` 형태여야 한다. `127.0.0.1` 바인딩 또는 localhost URL은 브라우저에서는 동작해도 Bambu 프린터 transfer evidence로 인정하지 않는다.
 11. `cache/specimen.gcode.3mf` 같은 일반 remote path는 HTTP artifact route가 아니다. FTPS write 검증을 우회할 수 있는 것은 `/api/printer/http-artifact-route`가 만든 `http://` 또는 `https://` URL 중 fetch probe가 통과한 URL뿐이다.
-12. `HTTP_ARTIFACT_READY_NOT_STARTED`는 artifact URL과 guarded start-command draft가 준비됐다는 뜻이다. 실제 출력 시작은 아니며, `Publish Start`는 dry-run 해제, operator 확인, Guardian 승인, start gate 통과가 모두 필요하다.
+12. `HTTP_ARTIFACT_READY_NOT_STARTED`는 artifact URL과 guarded start-command draft가 준비됐다는 뜻이다. 실제 출력 시작은 아니며, `Publish Start`는 browser confirmation 이후에도 owner-managed publish defaults와 backend start gate, camera/bed-clear/safe-state 검증을 모두 통과해야 한다.
 13. `Publish Start`가 MQTT `project_file` 명령을 보냈더라도 그것만으로 실제 출력 시작으로 간주하지 않는다. backend는 즉시 fresh printer observation을 다시 읽고 `post_publish_status`를 붙인다. 프린터가 `IDLE` 또는 not-started 상태로 남으면 `published=true`여도 `ok=false`, `BAMBU_PROJECT_FILE_ACCEPTED_BUT_NOT_STARTED`로 표시한다.
 14. Bambu autoejection의 `Fill Native G-code Defaults`는 native patch 입력값만 채운다. source artifact와 plate target을 확인한 뒤 `Save Autoejection Config`를 눌러야 `memory/bambu_autoejection.json`에 반영된다. 이 단계는 artifact patch/검증 준비이며, 실제 시작은 별도의 `Publish Start` gate가 통과해야 한다.
 15. `Validate G-code Preview`와 left/center/right validation은 원본 artifact를 바꾸지 않는 검증 동작이다. 이 validation-only 경로는 `.autoeject.*` 파일이나 manifest를 만들지 않고 would-be tail, object bounds, candidate hash, blocker만 반환한다. `Generate Ejection Test Artifact`와 `Generate Sweep Test Artifact`는 publish 없는 standalone 검증 파일만 만든다. 실제 `.autoeject.*` 출력 파일이 필요하면 `Generate Patched Artifact`를 사용하고, 실제 프린터 motion은 `Publish Start` live gate가 통과한 경우에만 허용한다.
 16. Bambu autoejection 조정값은 push direction, Z push offset, push lane offset, push speed, full-bed sweep, sweep Z, sweep speed로 관리한다. P1/P1S/X1/X1C 계열과 A1/A1 Mini 계열은 ejection generator가 다르므로 서로 같은 G-code path를 쓰지 않는다.
-17. `.autoeject.*` 실제 publish 전에는 front path/door, ramp/bin, toolhead cover, release surface/profile, supervised first ejection checklist를 모두 확인해야 한다.
+17. `.autoeject.*` 실제 publish 전 물리 환경(front path/door, ramp/bin, toolhead cover, release surface/profile, supervised first ejection)은 workstation owner/operator가 프린터 앞에서 직접 관리한다. GUI는 수동 checklist 대신 `operator_managed=true` evidence를 기록하고, backend는 camera/bed-clear/artifact/start-state blocker로 차단한다.
 18. `Video Status` 또는 camera refresh가 실패해도 기존 MQTT/progress/material status는 유지되어야 한다. camera는 별도 plane이며, 실패 시 camera 영역에 blocker를 표시한다.
 19. Bambu bridge evidence는 `artifact`, `validation`, `transport`, `runtime`, `bed-clear` 5개 plane으로 읽는다. 실제 autoejection 성공은 `published=true`가 아니라 camera/operator observation, post-publish status, bed-clear lock/unlock, 다음 job gate 해제까지 확인됐을 때만 인정한다.
 20. 실제 Bambu autoejection 완료 판정은 `/printer`의 `Physical Proof Package` 또는 `scripts/audit_bambu_autoejection_completion.py`로 수행한다. `Build Fail-Closed Proof Template`은 증거 작성용 JSON을 만들 뿐이고, `Run Completion Audit`이 file-backed camera/manifest/post-publish/bed-clear/next-job evidence를 모두 확인하기 전까지 physical success가 아니다.
@@ -181,6 +186,7 @@ atr down
 
 - password/API key는 Git에 커밋하지 않는다.
 - Bambu LAN access code도 Git에 커밋하지 않는다.
+- `/api/bridges`는 graph bridge registry이며 Bambu printer fleet 선택 API가 아니다. Bambu 기본 profile은 `/api/printer/fleet`에서 확인한다.
 - Bambu live camera browser view는 `ffmpeg`가 설치되어야 `/api/printer/video-stream.mjpeg`로 표시된다.
 - `test` 기본 흐름은 dry/virtual이어야 한다.
 - `테스트 모드, 실제 출력`은 명시적으로 실제 출력 경로를 요청한 경우에만 사용한다.
@@ -302,6 +308,7 @@ Live 실행 전 요구:
 ### 3.3 Module 계약
 
 각 stage module은 `graphs/modules/<module>/module.yaml`에 있다.
+화면 표시 descriptor는 선택적으로 `graphs/modules/<module>/ui.yaml`에 둔다.
 
 공통 필드:
 
@@ -319,8 +326,13 @@ Module API:
 
 - `GET /api/modules`
 - `GET /api/modules/management-state`
+- `GET /api/runtime/agent-manifests`
+- `GET /api/bridges`
 - `POST /api/modules`
+- `POST /api/modules/templates/{agent|ui-only|bridge}`
 - `GET /api/modules/{module_id}`
+- `GET /api/modules/{module_id}/ui`
+- `PUT /api/modules/{module_id}/ui`
 - `POST /api/modules/{module_id}/load`
 - `POST /api/modules/{module_id}/unload`
 - `POST /api/modules/{module_id}/validate`
@@ -333,6 +345,8 @@ Module API:
 
 - GUI가 module YAML을 수정해도 arbitrary Python을 바로 실행하지 않는다.
 - handler는 allowlisted registry를 통과해야 한다.
+- `ui.yaml`은 Live GUI 표시 전용이다. 실행 handler, tool allowlist, graph transition, device 권한을 바꾸지 않는다.
+- `/api/modules/templates/*`가 만든 draft module은 `status=draft`, `enabled=false`, `graph.attached=false`라서 validate/dry-run/graph attach/save 전에는 실행되지 않는다.
 - generated adapter는 register/approval 없이는 실제 runtime handler로 승격되지 않는다.
 
 ### 3.4 Agent 단계별 내부 step
@@ -366,6 +380,16 @@ Module API:
 
 - backend switching은 runtime 전체에 영향을 준다.
 - model load/unload는 GUI와 CLI가 같은 API를 쓴다.
+- 현재 Main GUI/API가 관리하는 로컬 vLLM 모델은 `gemma4:31b`와
+  `gemma4:e4b-it-nvfp4` 두 개다. `e2b`는 현재 managed model surface가
+  아니다.
+- `31b`는 orchestrator route의 primary이며 MTP speculative decoding을
+  사용한다. `e4b`는 design/analysis/knowledge/guardian/tool-formatting 등
+  하위 route의 primary이며 NVFP4 target-only로 서빙한다.
+- OpenAI API key는 Main GUI `Current Models`의 `API Key` 버튼에서
+  저장/Loading/Unloading한다. `Loading` 상태에서는 OpenAI가 첫 inference
+  route가 되고, `Unloading`하면 저장값은 유지하되 local vLLM이 다시
+  우선된다.
 - vLLM/Nemoclaw 모델 상태가 준비됐다고 해서 첫 generation JIT 지연이 없다는 뜻은 아니다.
 - context overflow가 나면 최근 대화/프롬프트/출력 토큰을 먼저 줄인다.
 
@@ -385,7 +409,9 @@ atr run start test
 atr run start live "PLA compression specimen"
 atr run safe-stop
 atr models
+atr model load 31b
 atr model load e4b
+atr model unload 31b
 atr model unload e4b
 atr graph validate atr_closed_loop
 atr graph dry-run atr_closed_loop
@@ -540,6 +566,7 @@ python -m app.serve
 ```bash
 atr backend
 atr models
+atr model load 31b
 atr model load e4b
 atr gpu clear
 ```
