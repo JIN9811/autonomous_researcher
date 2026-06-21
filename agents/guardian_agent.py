@@ -454,6 +454,9 @@ class GuardianAgent(BaseAgent):
         analysis_failure_code = str(latest_analysis.get("failure_code") or "").strip()
         failure_tags = latest_analysis.get("failure_tags") if isinstance(latest_analysis.get("failure_tags"), list) else []
         handoff_gate = latest_analysis.get("equipment_handoff_gate") if isinstance(latest_analysis.get("equipment_handoff_gate"), dict) else {}
+        trust_score = latest_analysis.get("trust_score") if isinstance(latest_analysis.get("trust_score"), dict) else {}
+        trust_gate = str(trust_score.get("gate") or "").strip().lower()
+        multifidelity_comparison = latest_analysis.get("multifidelity_comparison") if isinstance(latest_analysis.get("multifidelity_comparison"), dict) else {}
         progress = GuardianAgent._safe_float(
             latest_analysis.get("sarm", {}).get("progress_score") if isinstance(latest_analysis.get("sarm"), dict) else None,
             -1.0,
@@ -467,6 +470,12 @@ class GuardianAgent(BaseAgent):
             blockers = handoff_gate.get("blockers") if isinstance(handoff_gate.get("blockers"), list) else []
             detail = str(handoff_gate.get("failure_code") or (blockers[0] if blockers else "equipment_handoff_gate"))
             issues.append(f"equipment handoff gate blocked: {detail}.")
+        if trust_gate == "block":
+            reasons = trust_score.get("reasons") if isinstance(trust_score.get("reasons"), list) else []
+            detail = ", ".join(str(item) for item in reasons[:3]) or "trust_score"
+            issues.append(f"multi-fidelity trust gate blocked BO/physical continuation: {detail}.")
+        elif trust_gate == "calibrate_only":
+            warnings.append("multi-fidelity trust gate requests calibration before BO/physical continuation.")
         if any(str(item).startswith(("UTM_DATA_", "EQUIPMENT_LIVE_EVIDENCE_INCOMPLETE", "UTM_SAVE_EXPORT_")) for item in failure_tags):
             warnings.append("analysis failure tags contain UTM data/evidence gate failures.")
         if progress >= 0.85 and precursor >= 0.85:
@@ -483,4 +492,9 @@ class GuardianAgent(BaseAgent):
             warnings.append("retry pressure is high.")
 
         status = "fail" if issues else ("warning" if warnings else "pass")
-        return {"status": status, "issues": issues, "warnings": warnings}
+        result = {"status": status, "issues": issues, "warnings": warnings}
+        if trust_score:
+            result["trust_score"] = trust_score
+        if multifidelity_comparison:
+            result["multifidelity_comparison"] = multifidelity_comparison
+        return result

@@ -171,17 +171,27 @@ Rules:
 - Test mode may use `fake://pi05_policy` and `fake_omx_ai`.
 - Manipulation Agent must not bypass LeRobotBridge or generate shell commands.
 - The GUI can save defaults, but explicit experiment spec values override them.
+- For Pi0.5 live rollout, LeRobotBridge injects
+  `--robot.disable_torque_on_disconnect=false` at command construction time.
+  Manipulation Agent must not set this manually or store a separate arbitrary
+  value. If a follower motor is missing after a rollout, the recovery path is
+  motor-status inspection/reboot, not removing that motor from the expected
+  ROBOTIS OMX follower ID set.
 - Camera configuration is owned by LeRobotBridge profile memory. For the current
   physical setup, saved cameras should be `top=D455F` and `wrist=D405` in
   `backend=intelrealsense` mode. The bridge converts this into LeRobot
   `--robot.cameras` entries with RGB + depth/displacement at 640x480 and 15 FPS,
   yielding two RGB observation streams plus two depth/displacement streams.
+  A valid RGB-D dataset must expose `observation.images.top`,
+  `observation.images.wrist`, `observation.images.top_depth`, and
+  `observation.images.wrist_depth` in `meta/info.json`; `use_depth=true` in the
+  command alone is not sufficient evidence.
 - When the operator saves `top` or `wrist` without a manual RealSense
   serial/name, LeRobotBridge must resolve the camera by SDK enumeration first:
   `top` prefers D455/D455F serials and `wrist` prefers D405 serials. This keeps
   D405 and D455F on the same RSUSB-backed `intelrealsense` runtime path.
 - D405 is not a generic RGB RealSense path. The generated LeRobot camera config
-  must use `color_format=bgr8` and `warmup_s>=1` for `wrist=352122273019`.
+  must use `color_format=bgr8` and `warmup_s>=5` for `wrist=352122273019`.
   D455F/top uses `color_format=rgb8`. Manipulation Agent must treat
   `LEROBOT_REALSENSE_ROLE_CAMERA_NOT_FOUND` and
   `LEROBOT_REALSENSE_CAMERA_UNAVAILABLE` as operator/device issues instead of
@@ -200,6 +210,11 @@ Rules:
   conda environment. A missing saved serial blocks with
   `LEROBOT_REALSENSE_CAMERA_UNAVAILABLE` before robot motion; the agent should
   surface that as an operator/device issue, not retry with OpenCV/V4L fallback.
+- Live recording postflight is also part of the LeRobotBridge boundary. If a
+  RealSense depth recording completes without the expected `*_depth` feature
+  keys, the bridge returns `LEROBOT_REALSENSE_DEPTH_FEATURE_MISSING`. Treat this
+  as a dataset-capture failure and do not send that dataset to Pi0.5 training as
+  RGB-D.
 - Spark workstation validated hardware:
   top RealSense D455F serial `341522300873`, wrist RealSense D405 serial
   `352122273019`, and Logitech BRIO by-id

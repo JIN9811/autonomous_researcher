@@ -254,6 +254,51 @@ async def test_bo_agent_emits_reasoning_ranking_handoff_and_artifacts() -> None:
         assert Path(path).exists()
 
 
+def test_bo_agent_reads_analysis_handoff_v2_trust_context() -> None:
+    state = OrchestratorState(
+        run_id="run-bo-trust",
+        experiment_id="exp-bo-trust",
+        mode=Mode.TEST,
+        stage=Stage.BO,
+        current_experiment_spec={"cell_size_mm": 5.0},
+    )
+    state.latest_analysis = {
+        "bo_handoff": {
+            "schema_version": "analysis_bo_handoff_v2",
+            "ok_for_bo": False,
+            "candidate_id": "specimen-trust-hold",
+            "parameters": {
+                "geometry_type": "gyroid",
+                "relative_density": 0.34,
+                "wall_thickness_mm": 1.5,
+                "cell_size_mm": 5.0,
+            },
+            "objective": {"score": 0.62, "uncertainty": 0.24},
+            "trust_score": {
+                "schema": "trust_score.v1",
+                "score": 0.61,
+                "gate": "calibrate_only",
+                "components": {"q_data": 0.9, "q_agreement": 0.35, "q_physics": 0.65, "q_uq": 0.76, "q_provenance": 0.8},
+                "reasons": ["stiffness_error_high"],
+            },
+            "fidelity_records": {
+                "utm_high": {"schema": "utm_record.v1"},
+                "fea_mid": {"schema": "fea_result.v1"},
+                "pinn_low_or_surrogate": {"status": "unavailable"},
+            },
+            "failure_tags": [],
+        }
+    }
+
+    records = BOAgent._analysis_handoff_records(state)
+
+    assert records[0]["source"] == "analysis_bo_handoff_v2"
+    assert records[0]["trust_score"]["score"] == 0.61
+    assert records[0]["trust_gate"] == "calibrate_only"
+    assert records[0]["ok_for_bo"] is False
+    assert records[0]["quality_score"] == 0.61
+
+
 @pytest.mark.asyncio
 async def test_bo_agent_uses_llm_reasoning_as_soft_preference() -> None:
     agent = BOAgent()

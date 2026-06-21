@@ -341,6 +341,13 @@ class BOAgent(BaseAgent):
             ok_for_bo = item.get("ok_for_bo")
             if ok_for_bo is None:
                 ok_for_bo = item.get("ok", True) and str(item.get("status") or "ready") not in {"blocked", "failed"}
+            trust_score = item.get("trust_score") if isinstance(item.get("trust_score"), dict) else {}
+            trust_gate = str(trust_score.get("gate") or item.get("trust_gate") or "").strip()
+            if trust_gate in {"block", "calibrate_only"}:
+                ok_for_bo = False
+            quality_score_source = trust_score.get("score") if trust_score else (
+                (item.get("quality") or {}).get("score") if isinstance(item.get("quality"), dict) else item.get("quality_score")
+            )
             records.append(
                 {
                     "source": str(item.get("schema") or item.get("schema_version") or "analysis_handoff"),
@@ -348,8 +355,12 @@ class BOAgent(BaseAgent):
                     "parameters": dict(params),
                     "score": cls._safe_float(score, 0.0),
                     "uncertainty": cls._safe_float(item.get("uncertainty", objective.get("uncertainty")), 0.5),
-                    "quality_score": cls._safe_float((item.get("quality") or {}).get("score") if isinstance(item.get("quality"), dict) else item.get("quality_score"), 0.7),
+                    "quality_score": cls._safe_float(quality_score_source, 0.7),
                     "ok_for_bo": bool(ok_for_bo),
+                    "trust_score": dict(trust_score),
+                    "trust_gate": trust_gate,
+                    "multifidelity_comparison": item.get("multifidelity_comparison") if isinstance(item.get("multifidelity_comparison"), dict) else {},
+                    "fidelity_records": item.get("fidelity_records") if isinstance(item.get("fidelity_records"), dict) else {},
                     "failure_tags": item.get("failure_tags") if isinstance(item.get("failure_tags"), list) else [],
                     "artifact_refs": item.get("artifact_refs") or item.get("artifacts") or {},
                 }

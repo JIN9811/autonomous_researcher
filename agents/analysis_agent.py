@@ -1018,6 +1018,154 @@ class AnalysisAgent(BaseAgent):
             "discrepancy_tags": tags,
         }
 
+    def _multifidelity_comparison(
+        self,
+        metrics: dict[str, Any],
+        fem_utm_comparison: dict[str, Any],
+        cae_result: dict[str, Any] | None,
+        fem_result: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        simulation = fem_result if isinstance(fem_result, dict) and fem_result.get("ok") else cae_result
+        sim_metrics = {}
+        if isinstance(simulation, dict):
+            sim_metrics = simulation.get("fem_metrics") if isinstance(simulation.get("fem_metrics"), dict) else simulation.get("cae_metrics") if isinstance(simulation.get("cae_metrics"), dict) else simulation.get("metrics", {})
+        return {
+            "schema": "multifidelity_comparison.v1",
+            "available": bool(fem_utm_comparison.get("available")),
+            "curve": {
+                "utm_peak_force_N": metrics.get("peak_force_N"),
+                "fea_peak_force_N": sim_metrics.get("predicted_peak_force_N") or sim_metrics.get("load_max_N"),
+                "peak_force_error_pct": fem_utm_comparison.get("peak_force_error_pct"),
+                "utm_stiffness_N_per_mm": metrics.get("initial_stiffness_N_per_mm"),
+                "fea_stiffness_N_per_mm": sim_metrics.get("predicted_initial_stiffness_N_per_mm") or sim_metrics.get("apparent_stiffness_N_per_mm"),
+                "stiffness_error_pct": fem_utm_comparison.get("stiffness_error_pct"),
+                "agreement_score": fem_utm_comparison.get("agreement_score", 0.0),
+                "tags": fem_utm_comparison.get("discrepancy_tags", []),
+            },
+            "field": {
+                "available": bool(isinstance(simulation, dict) and simulation.get("ok")),
+                "max_von_mises_MPa": sim_metrics.get("max_von_mises_MPa"),
+                "max_displacement_mm": sim_metrics.get("max_displacement_mm"),
+                "structural_score": sim_metrics.get("structural_score"),
+            },
+            "hotspot": {"available": False, "reason": "hotspot_extraction_not_enabled"},
+            "pinn": {"status": "unavailable", "reason": "no_active_pinn_model"},
+            "sources": {
+                "utm": "equipment_handoff",
+                "fea": (simulation or {}).get("tool") if isinstance(simulation, dict) else "unavailable",
+                "pinn": "unavailable",
+            },
+        }
+
+    def _fidelity_records(
+        self,
+        *,
+        state: OrchestratorState,
+        metrics: dict[str, Any],
+        source_meta: dict[str, Any],
+        cae_result: dict[str, Any] | None,
+        fem_result: dict[str, Any] | None,
+        analysis_artifacts: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        artifacts = analysis_artifacts if isinstance(analysis_artifacts, dict) else {}
+        simulation = fem_result if isinstance(fem_result, dict) and fem_result.get("ok") else cae_result
+        sim_metrics = {}
+        if isinstance(simulation, dict):
+            sim_metrics = simulation.get("fem_metrics") if isinstance(simulation.get("fem_metrics"), dict) else simulation.get("cae_metrics") if isinstance(simulation.get("cae_metrics"), dict) else simulation.get("metrics", {})
+        return {
+            "utm_high": {
+                "schema": "utm_record.v1",
+                "status": "available" if metrics else "unavailable",
+                "source": source_meta.get("source") or "utm",
+                "parser_id": source_meta.get("parser_id"),
+                "path": source_meta.get("path"),
+                "metrics_artifact": artifacts.get("metrics"),
+                "canonical_curve_artifact": artifacts.get("canonical_curve"),
+                "peak_force_N": metrics.get("peak_force_N"),
+                "objective_source": True,
+                "run_id": state.run_id,
+                "experiment_id": state.experiment_id,
+            },
+            "fea_mid": {
+                "schema": "fea_result.v1",
+                "status": "available" if isinstance(simulation, dict) and simulation.get("ok") else "unavailable",
+                "tool": (simulation or {}).get("tool") if isinstance(simulation, dict) else None,
+                "artifact": artifacts.get("fem_result"),
+                "metrics": sim_metrics,
+                "objective_source": False,
+            },
+            "pinn_low_or_surrogate": {
+                "schema": "pinn_prediction.v1",
+                "status": "unavailable",
+                "reason": "no_active_pinn_model",
+                "objective_source": False,
+            },
+        }
+
+    def _trust_score(
+        self,
+        *,
+        quality_gate: dict[str, Any],
+        multifidelity_comparison: dict[str, Any],
+        uncertainty: float,
+        source_meta: dict[str, Any],
+        cae_result: dict[str, Any] | None,
+        analysis_ok: bool,
+    ) -> dict[str, Any]:
+        curve = multifidelity_comparison.get("curve") if isinstance(multifidelity_comparison.get("curve"), dict) else {}
+        raw_agreement = self._safe_float(curve.get("agreement_score"), 0.0)
+        q_data = self._safe_float(quality_gate.get("score"), 0.0)
+        # FEA/CAE is an advisory mid-fidelity source here; UTM remains the
+        # high-fidelity objective source, so one uncalibrated mismatch should
+        # reduce trust but not automatically block BO updates.
+        q_agreement = max(raw_agreement, 0.65) if multifidelity_comparison.get("available") and q_data >= 0.75 else raw_agreement
+        if isinstance(cae_result, dict) and cae_result.get("ok"):
+            cae_metrics = cae_result.get("cae_metrics") if isinstance(cae_result.get("cae_metrics"), dict) else cae_result.get("metrics", {})
+            q_physics = self._safe_float(cae_metrics.get("structural_score"), 0.72)
+        else:
+            q_physics = 0.35
+        q_uq = max(0.0, min(1.0, 1.0 - self._safe_float(uncertainty, 1.0)))
+        fingerprint = source_meta.get("fingerprint") if isinstance(source_meta.get("fingerprint"), dict) else {}
+        column_mapping = source_meta.get("column_mapping") if isinstance(source_meta.get("column_mapping"), dict) else {}
+        q_provenance = 0.55
+        if source_meta.get("path") or fingerprint.get("sha256"):
+            q_provenance += 0.20
+        q_provenance += 0.15 * self._safe_float(column_mapping.get("column_mapping_confidence"), 0.8 if not column_mapping else 0.0)
+        q_provenance = max(0.0, min(1.0, q_provenance))
+        components = {
+            "q_data": round(max(0.0, min(q_data, 1.0)), 4),
+            "q_agreement": round(max(0.0, min(q_agreement, 1.0)), 4),
+            "q_physics": round(max(0.0, min(q_physics, 1.0)), 4),
+            "q_uq": round(q_uq, 4),
+            "q_provenance": round(q_provenance, 4),
+        }
+        weights = {"q_data": 0.30, "q_agreement": 0.25, "q_physics": 0.15, "q_uq": 0.15, "q_provenance": 0.15}
+        score = sum(components[key] * weight for key, weight in weights.items())
+        reasons: list[str] = []
+        if raw_agreement < 0.45 and multifidelity_comparison.get("available"):
+            reasons.append("fea_requires_calibration")
+        if not analysis_ok:
+            reasons.append("analysis_not_ok")
+            gate = "block"
+        elif components["q_data"] < 0.55:
+            reasons.append("data_quality_low")
+            gate = "block"
+        elif score < 0.62:
+            reasons.append("calibration_recommended_before_physical_update")
+            gate = "calibrate_only"
+        elif score >= 0.85 and components["q_agreement"] >= 0.75 and components["q_data"] >= 0.75:
+            gate = "allow_physical"
+        else:
+            gate = "allow_bo"
+        return {
+            "schema": "trust_score.v1",
+            "score": round(max(0.0, min(score, 1.0)), 4),
+            "gate": gate,
+            "components": components,
+            "weights": weights,
+            "reasons": reasons,
+        }
+
     def _write_analysis_artifacts(
         self,
         *,
@@ -1055,6 +1203,10 @@ class AnalysisAgent(BaseAgent):
             paths["fem_agentic_loop"] = self._write_json(base / "fem_agentic_loop.json", analysis["fem_agentic_loop"])
         if analysis.get("fem_utm_comparison"):
             paths["fem_utm_comparison"] = self._write_json(base / "fem_utm_comparison.json", analysis["fem_utm_comparison"])
+        if analysis.get("multifidelity_comparison"):
+            paths["multifidelity_comparison"] = self._write_json(base / "multifidelity_comparison.json", analysis["multifidelity_comparison"])
+        if analysis.get("trust_score"):
+            paths["trust_score"] = self._write_json(base / "trust_score.json", analysis["trust_score"])
         if analysis.get("comparison"):
             paths["comparison"] = self._write_json(base / "comparison.json", analysis["comparison"])
         paths["analysis_report"] = self._write_json(base / "analysis_report.json", analysis)
@@ -1234,7 +1386,28 @@ class AnalysisAgent(BaseAgent):
             "fem": fem_metrics,
         }
         fem_comparison = analysis.get("fem_utm_comparison") if isinstance(analysis.get("fem_utm_comparison"), dict) else {}
-        bo_ready = bool(analysis.get("ok") and (quality_gate.get("ok_for_bo", True) is True))
+        multifidelity_comparison = analysis.get("multifidelity_comparison") if isinstance(analysis.get("multifidelity_comparison"), dict) else self._multifidelity_comparison(metrics, fem_comparison, cae_result, fem_result)
+        fidelity_records = analysis.get("fidelity_records") if isinstance(analysis.get("fidelity_records"), dict) else self._fidelity_records(
+            state=state,
+            metrics=metrics,
+            source_meta=source_meta,
+            cae_result=cae_result,
+            fem_result=fem_result,
+            analysis_artifacts=analysis_artifacts,
+        )
+        trust_score = analysis.get("trust_score") if isinstance(analysis.get("trust_score"), dict) else self._trust_score(
+            quality_gate=quality_gate,
+            multifidelity_comparison=multifidelity_comparison,
+            uncertainty=self._safe_float(analysis.get("uncertainty"), 1.0),
+            source_meta=source_meta,
+            cae_result=cae_result,
+            analysis_ok=bool(analysis.get("ok")),
+        )
+        analysis["multifidelity_comparison"] = multifidelity_comparison
+        analysis["fidelity_records"] = fidelity_records
+        analysis["trust_score"] = trust_score
+        trust_gate = str(trust_score.get("gate") or "").strip()
+        bo_ready = bool(analysis.get("ok") and (quality_gate.get("ok_for_bo", True) is True) and trust_gate in {"allow_bo", "allow_physical"})
         bo_observation = {
             "schema": "bo_observation.v1",
             "run_id": state.run_id,
@@ -1247,6 +1420,9 @@ class AnalysisAgent(BaseAgent):
             "observed_metrics": metrics,
             "simulation_metrics": simulation_metrics,
             "simulation_residual": fem_comparison,
+            "multifidelity_comparison": multifidelity_comparison,
+            "trust_score": trust_score,
+            "trust_gate": trust_gate,
             "data_quality": quality_gate or metrics.get("curve_quality", {}),
             "parameters": parameters,
             "artifact_refs": artifact_refs,
@@ -1281,6 +1457,8 @@ class AnalysisAgent(BaseAgent):
                 "fem_low": (fem_result or {}).get("artifacts", {}).get("fem_result") if isinstance(fem_result, dict) else None,
                 "agreement": analysis_artifacts.get("fem_utm_comparison"),
             },
+            "multifidelity_comparison": multifidelity_comparison,
+            "trust_score": trust_score,
             "artifacts": analysis_artifacts,
             "artifact_refs": artifact_refs,
             "bridge_result": {
@@ -1294,7 +1472,7 @@ class AnalysisAgent(BaseAgent):
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
         bo_handoff = {
-            "schema_version": "analysis_bo_handoff_v1",
+            "schema_version": "analysis_bo_handoff_v2",
             "ok_for_bo": bo_ready,
             "run_id": state.run_id,
             "experiment_id": state.experiment_id,
@@ -1316,6 +1494,10 @@ class AnalysisAgent(BaseAgent):
                     "cache_status": (fem_result or {}).get("cache_status") if isinstance(fem_result, dict) else None,
                 },
             },
+            "fidelity_records": fidelity_records,
+            "multifidelity_comparison": multifidelity_comparison,
+            "trust_score": trust_score,
+            "trust_gate": trust_gate,
             "quality": quality_gate,
             "comparison": analysis.get("comparison", {}),
             "artifacts": analysis_artifacts,
@@ -1607,6 +1789,10 @@ class AnalysisAgent(BaseAgent):
             self._write_json(Path(str(final_artifacts["bo_handoff"])), handoff["bo_handoff"])
         if final_artifacts.get("experiment_evaluation"):
             self._write_json(Path(str(final_artifacts["experiment_evaluation"])), handoff["experiment_evaluation"])
+        if final_artifacts.get("multifidelity_comparison"):
+            self._write_json(Path(str(final_artifacts["multifidelity_comparison"])), analysis["multifidelity_comparison"])
+        if final_artifacts.get("trust_score"):
+            self._write_json(Path(str(final_artifacts["trust_score"])), analysis["trust_score"])
         if final_artifacts.get("analysis_report"):
             self._write_json(Path(str(final_artifacts["analysis_report"])), analysis)
         return AgentResult(

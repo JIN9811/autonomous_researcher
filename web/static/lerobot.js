@@ -242,7 +242,7 @@ function trainExtraArgs() {
 
 const PI05_BASE_POLICY = "lerobot/pi05_base";
 const PI05_TRAIN_EXTRA_DEFAULTS = [
-  "--policy.compile_model=false",
+  "--policy.compile_model=true",
   "--policy.gradient_checkpointing=true",
   "--policy.dtype=bfloat16",
   "--policy.freeze_vision_encoder=false",
@@ -269,11 +269,11 @@ const TRAIN_DEFAULTS = {
   pi05: {
     source_policy: PI05_BASE_POLICY,
     job_name: "atr_lerobot_pi05_train",
-    batch_size: "32",
+    batch_size: "16",
     steps: "3000",
     num_workers: "12",
     eval_freq: "500",
-    log_freq: "5",
+    log_freq: "50",
     save_freq: "500",
     optimizer_type: "",
     n_obs_steps: "1",
@@ -304,7 +304,7 @@ const TRAIN_DEFAULT_VALUE_SETS = {
   steps: new Set(["", "20000", "100000", "3000"]),
   num_workers: new Set(["", "2", "4", "12", "16", "20"]),
   eval_freq: new Set(["", "500", "2000", "20000"]),
-  log_freq: new Set(["", "5", "100", "200"]),
+  log_freq: new Set(["", "5", "50", "100", "200"]),
   save_freq: new Set(["", "500", "2000", "20000"]),
   optimizer_type: new Set(["", "adamw"]),
   n_obs_steps: new Set(["", "1"]),
@@ -1138,7 +1138,6 @@ function parseTrainingLogProgress(data, training) {
   const countPattern = "(\\d{1,9}(?:\\.\\d+)?)([kKmM]?)";
   let current = Number(training.current_step || 0);
   let total = Number(training.total_steps || 0);
-  let samples = 0;
   let lastLoss = training.last_loss;
 
   for (const line of log.split("\n")) {
@@ -1146,14 +1145,10 @@ function parseTrainingLogProgress(data, training) {
       const stepMatch = line.match(new RegExp(`\\b(?:step|global_step)\\s*[=:]\\s*${countPattern}`, "i"));
       if (stepMatch) current = Math.max(current, parseTrainingCount(stepMatch[1], stepMatch[2]));
     }
-    const sampleMatch = line.match(new RegExp(`\\b(?:smpl|samples|sample)\\s*[=:]\\s*${countPattern}`, "i"));
-    if (sampleMatch) samples = Math.max(samples, parseTrainingCount(sampleMatch[1], sampleMatch[2]));
     const lossMatch = line.match(/\b(?:loss|train_loss|l1_loss)\s*[=:]\s*([0-9]+(?:\.[0-9]+)?(?:e[-+]?\d+)?)/i);
     if (lossMatch) lastLoss = Number(lossMatch[1]);
   }
 
-  const batchSize = Number((training.config && training.config.batch_size) || training.batch_size || 0);
-  if (samples > 0 && batchSize > 0) current = Math.max(current, Math.floor(samples / batchSize));
   const elapsed = Number(training.elapsed_sec || 0);
   const rate = current > 0 && elapsed > 0 ? current / elapsed : Number(training.steps_per_sec || 0);
   const eta = rate > 0 && total > 0 && current < total ? (total - current) / rate : training.eta_sec;
@@ -1597,6 +1592,7 @@ function applyPolicySelection(value, policyType = "") {
   if (policySelect) policySelect.value = clean;
   if (inferredPolicyType && policyTypeInput) policyTypeInput.value = inferredPolicyType;
   if (inferredPolicyType && manipulationPolicyTypeInput) manipulationPolicyTypeInput.value = inferredPolicyType;
+  applyPolicyTypeDefaults();
   return clean;
 }
 
@@ -1704,7 +1700,6 @@ function startTrainStatusPolling() {
   trainStatusTimer = window.setInterval(async () => {
     try {
       const data = await postJson("/api/lerobot/train/status", sessionPayload("train"));
-      renderResult("train status", data);
       if (data && data.workflow && data.workflow !== "train") {
         stopTrainStatusPolling();
         return;
@@ -2218,6 +2213,7 @@ bind("btn-dataset-visualize-stop", async (event) => {
 bind("btn-dataset-preview", (event) => previewDataset(actionStatusFromEvent(event)));
 
 if (profileSelect) profileSelect.addEventListener("change", refreshConfig);
+if (policyTypeInput) policyTypeInput.addEventListener("change", () => applyPolicyTypeDefaults());
 if (policySelect) {
   policySelect.addEventListener("change", () => {
     const selectedOption = policySelect.options[policySelect.selectedIndex] || null;
@@ -2230,4 +2226,5 @@ if (policySelect) {
 if (manipulationTaskIdInput) manipulationTaskIdInput.addEventListener("change", () => syncManipulationTaskPreset(true));
 initializeTtsControls();
 syncManipulationTaskPreset(false);
+applyPolicyTypeDefaults();
 refreshConfig();

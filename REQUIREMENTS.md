@@ -407,6 +407,9 @@ patches/lerobot/spark_realsense_d405_rsusb.patch
 
 The patch is intentionally outside the ATR runtime code. It makes the external
 LeRobot checkout reproducible without vendoring LeRobot into this repository.
+It also adds the ATR RGB-D observation contract for OMX RealSense recording:
+`observation.images.top_depth` and `observation.images.wrist_depth` are emitted
+as 8-bit 3-channel depth videos alongside the RGB camera streams.
 
 Install the RealSense Python SDK into the LeRobot environment as well when robot
 teleoperation, recording, or rollout will use RealSense cameras:
@@ -418,7 +421,12 @@ teleoperation, recording, or rollout will use RealSense cameras:
 Spark workstation D405 fix:
 
 ```bash
-sudo apt install -y libusb-1.0-0-dev python3.12-dev
+sudo apt install -y git cmake ninja-build build-essential pkg-config \
+  libssl-dev libusb-1.0-0-dev libudev-dev \
+  libgtk-3-dev libglfw3-dev libgl1-mesa-dev libglu1-mesa-dev \
+  libxinerama-dev libxcursor-dev libxi-dev libxrandr-dev \
+  python3-dev python3-pip python3-setuptools python3-numpy \
+  v4l-utils udev libcurl4-openssl-dev curl
 git clone https://github.com/realsenseai/librealsense /home/jin/librealsense-rsusb
 cd /home/jin/librealsense-rsusb
 git checkout v2.58.2
@@ -456,6 +464,74 @@ cmake -S . -B build-rsusb-py310 -G Ninja \
   -DBUILD_WITH_CUDA=OFF
 cmake --build build-rsusb-py310 -j 8
 ```
+
+Host-wide RealSense tools for system diagnosis:
+
+```bash
+cd /home/jin/librealsense-rsusb
+cmake -S . -B build-rsusb-system -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_INSTALL_PREFIX=/usr/local \
+  -DFORCE_RSUSB_BACKEND=ON \
+  -DBUILD_EXAMPLES=ON \
+  -DBUILD_GRAPHICAL_EXAMPLES=ON \
+  -DBUILD_PYTHON_BINDINGS=ON \
+  -DCHECK_FOR_UPDATES=OFF \
+  -DPYTHON_EXECUTABLE=/usr/bin/python3
+cmake --build build-rsusb-system --parallel "$(nproc)"
+sudo cmake --install build-rsusb-system
+sudo ldconfig
+sudo ./scripts/setup_udev_rules.sh
+sudo udevadm control --reload-rules
+sudo udevadm trigger
+```
+
+`CHECK_FOR_UPDATES=OFF` is intentional for the Spark workstation build. It keeps
+`realsense-viewer` available while avoiding the bundled update-check curl target
+that can fail during source builds. ATR does not need RealSense viewer
+self-update checks.
+
+The system install provides:
+
+```bash
+rs-enumerate-devices
+rs-fw-update
+realsense-viewer
+rs-depth-quality
+rs-multicam
+python3 -c 'import pyrealsense2 as rs; print(rs.__file__)'
+```
+
+Verified on this Spark workstation after reboot on 2026-06-20:
+
+- system commands resolve from `/usr/local/bin`
+- system Python imports `pyrealsense2` from
+  `/usr/local/lib/python3.12/dist-packages/pyrealsense2`
+- `rs-enumerate-devices` sees D455F serial `341522300873` and D405 serial
+  `352122273019`
+- `rs-fw-update -l` sees both devices
+- a short system-Python stream probe opened `640x480 RGB+depth @15 FPS` for
+  each device and wrote:
+  `runs/camera_tests/realsense_global_stream_probe_latest.json`
+
+Current USB negotiation can still vary by hub/cable/port. In the 2026-06-20
+post-reboot recheck, both D455F and D405 reported SDK USB `3.2` / sysfs
+`5000M`. If either device reports SDK USB `2.1` or sysfs `480M`, treat it as a
+hub/cable/port negotiation problem before debugging ATR camera code.
+
+If D455F or D405 is visible in `rs-enumerate-devices` but a non-root stream
+probe raises `RS2_USB_STATUS_BUSY`, `failed to set power state`, or
+`Frame didn't arrive within ...`, first confirm no camera process owns the
+device:
+
+```bash
+fuser -v /dev/video* 2>/dev/null || true
+```
+
+Then run one controlled root smoke test or replug/power-cycle the camera hub.
+On 2026-06-20, D455F initially showed a transient libusb power-state busy
+condition; a root stream open succeeded, and the next normal user stream open
+succeeded without changing ATR mapping files.
 
 Pin the built RSUSB bindings ahead of the pip wheel:
 
@@ -495,6 +571,36 @@ PY
 
 # Cross-check through LeRobot's own camera discovery command.
 /home/jin/miniconda3/condabin/conda run --no-capture-output -n lerobot lerobot-find-cameras realsense
+
+# Host-wide system tools. These do not write ATR camera mappings.
+rs-enumerate-devices
+rs-fw-update -l
+python3 - <<'PY'
+import pyrealsense2 as rs
+print("pyrealsense2", rs.__file__)
+ctx = rs.context()
+print("device_count", len(list(ctx.query_devices())))
+for dev in ctx.query_devices():
+    print(
+        dev.get_info(rs.camera_info.name),
+        dev.get_info(rs.camera_info.serial_number),
+        dev.get_info(rs.camera_info.usb_type_descriptor),
+    )
+PY
+
+# USB bus-level check. RealSense devices must appear here before ATR can use them.
+# Use timeout because `lsusb -t` can hang on a sick USB bus/controller.
+timeout 5 lsusb -t || true
+for d in /sys/bus/usb/devices/*; do
+  product=$(timeout 1 cat "$d/product" 2>/dev/null || true)
+  if printf '%s' "$product" | grep -qi 'RealSense'; then
+    printf '%s product=%s speed=%s bcdUSB=%s serial=%s\n' \
+      "${d##*/}" "$product" \
+      "$(timeout 1 cat "$d/speed" 2>/dev/null || echo '?')" \
+      "$(timeout 1 cat "$d/bcdUSB" 2>/dev/null || echo '?')" \
+      "$(timeout 1 cat "$d/serial" 2>/dev/null || echo '?')"
+  fi
+done
 ```
 
 If RealSense and webcam devices disappear from both `lsusb` and
@@ -533,9 +639,14 @@ LeRobot D405 issue-cleaning rules:
 
 - D405 must be passed to LeRobot as `type=intelrealsense`,
   `serial_number_or_name=352122273019`, `color_format=bgr8`,
-  `use_depth=true`, `warmup_s>=1`.
+  `use_depth=true`, `warmup_s>=5`.
 - D455F/top remains `color_format=rgb8`.
-- Do not use `warmup_s=0` for RealSense. LeRobot issue reports show
+- After recording with RealSense depth enabled, inspect `meta/info.json`.
+  A valid ATR RGB-D LeRobotDataset contains `observation.images.top_depth` and
+  `observation.images.wrist_depth`. If these are missing, the ATR bridge returns
+  `LEROBOT_REALSENSE_DEPTH_FEATURE_MISSING`; do not train an RGB-D policy on
+  that dataset.
+- Do not use short or disabled RealSense warmup. LeRobot issue reports show
   `warmup=False` / disabled warmup can produce `read failed (status=False)`
   even when RealSense metadata discovery works.
 - Do not let `Detect & Save` assign visible D455F serial `341522300873` to the
@@ -587,6 +698,7 @@ conda create -y -n lerobot-pi05-torch211 --clone lerobot
 conda run -n lerobot-pi05-torch211 pip install -e "$HOME/lerobot_pi05[pi]"
 conda run -n lerobot-pi05-torch211 python -m pip install --upgrade --force-reinstall torch==2.11.0 torchvision==0.26.0 torchcodec==0.13.0
 conda run -n lerobot-pi05-torch211 python -m pip install --force-reinstall fsspec==2025.9.0 setuptools==80.10.2
+conda run -n lerobot-pi05-torch211 python -m pip install "wandb>=0.20.0"
 ```
 
 Optional model download:
@@ -604,11 +716,12 @@ Pi0.5 training uses local W&B offline logging by default. The GUI/bridge passes
 does not require a W&B cloud API key. Select `disabled` only when no W&B run
 metadata should be created.
 
-Pi0.5 training keeps `num_workers=12` as the current GUI default and allows up to
-`num_workers=20` in the backend for faster local dataloader/video-decode
+Pi0.5 training uses `batch_size=16`, `num_workers=12`, `eval_freq=500`,
+`log_freq=50`, and `save_freq=500` as the current GUI/bridge defaults. The
+backend allows up to `num_workers=20` for faster local dataloader/video-decode
 throughput. This matches the current `/lerobot` frontend defaults and bridge
-normalization path; do not document `4` as the Pi0.5 GUI default unless the
-code is changed again.
+normalization path; do not document `4` as the Pi0.5 GUI default unless the code
+is changed again.
 Pi0.5 training now runs in `lerobot-pi05-torch211` with `torch==2.11.0`, `torchvision==0.26.0`, and `torchcodec==0.13.0`; the bridge prefers `torchcodec` and falls back to `pyav` when the selected conda environment cannot import TorchCodec.
 
 The bridge resolves `lerobot/pi05_base` to a compatible local snapshot under
@@ -817,3 +930,44 @@ Use branches when the operator requests branch work or when a change is risky.
 Keep `main` as the latest known-good version. Avoid unnecessary branch
 proliferation for small, safe edits. See `docs/repository/github_version_control.md`
 for the exact workflow.
+
+## Long Training Stability Tools
+
+Long LeRobot/Pi0.5 training should be run with unrelated broken services stopped
+and a passive monitor writing to disk.
+
+Recommended host packages:
+
+```bash
+sudo apt-get install -y sysstat
+```
+
+ATR includes a passive monitor. LeRobot training started from the ATR GUI bridge
+in `live` mode starts this monitor automatically; the command below is for
+manual CLI-only training or one-off diagnosis:
+
+```bash
+python scripts/training_stability_monitor.py --once
+python scripts/training_stability_monitor.py --interval-seconds 30 \
+  --train-log runs/lerobot_sessions/<training-log>.log \
+  --checkpoint-dir outputs/train/<run>/checkpoints/<step>
+```
+
+The monitor records RAM, disk, GPU, recent kernel/system errors, recent
+`ollama.service` state, checkpoint step metadata, and the training log tail under
+`runs/training_watch/`. It is passive and does not start, stop, or control
+training.
+
+If the local systemd Ollama unit is not intentionally used, keep it disabled
+before long training. A broken `ollama.service` restart loop can create system
+noise during training:
+
+```bash
+systemctl is-active ollama.service || true
+sudo systemctl stop ollama.service || true
+sudo systemctl disable ollama.service || true
+sudo systemctl reset-failed ollama.service || true
+```
+
+See `docs/runtime/training_stability.md` for the 2026-06-19 Pi0.5 crash analysis
+and resume policy.

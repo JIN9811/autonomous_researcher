@@ -1031,6 +1031,189 @@ async def test_first_live_gui_test_design_cycle_uses_single_artifact() -> None:
 
 
 @pytest.mark.asyncio
+async def test_live_gui_planning_series_clears_stale_control_flags(monkeypatch: pytest.MonkeyPatch) -> None:
+    controller = load_runtime()
+    controller._state.mode = Mode.LIVE
+    controller._state.safe_stop_requested = True
+    controller._state.stop_requested = True
+    controller._state.is_paused = True
+    spec = controller._build_planning_spec(
+        base_spec={
+            "candidate_id": "cand-stale-stop",
+            "geometry_type": "gyroid",
+            "specimen_size_mm": [30, 30, 30],
+        },
+        constraints={
+            "geometry_type": "gyroid",
+            "specimen_size_mm": [30, 30, 30],
+            "test_mode_autofill": True,
+            "test_mode_llm_generated": True,
+            "printer_test_path": "virtual_bridge",
+        },
+    )
+    observed_flags: list[tuple[bool, bool, bool]] = []
+
+    async def fake_loop_tail(experiment_spec: dict, **_: object) -> dict:
+        observed_flags.append(
+            (
+                bool(controller._state.safe_stop_requested),
+                bool(controller._state.stop_requested),
+                bool(controller._state.is_paused),
+            )
+        )
+        return {"ok": True, "message": "tail stopped for test", "decision": "stop"}
+
+    monkeypatch.setattr(controller, "_run_planning_loop_tail", fake_loop_tail)
+
+    result = await controller._run_planning_cycle_series(
+        first_spec=spec,
+        design_constraints={**dict(spec.get("constraints", {})), **spec},
+        start_cycle=1,
+    )
+
+    assert result["decision"] == "stop"
+    assert observed_flags == [(False, False, False)]
+
+
+@pytest.mark.asyncio
+async def test_live_gui_planning_series_preserves_stop_after_workflow_reset(monkeypatch: pytest.MonkeyPatch) -> None:
+    controller = load_runtime()
+    controller._state.mode = Mode.LIVE
+    controller._reset_planning_workflow_controls()
+    controller._state.safe_stop_requested = True
+    spec = controller._build_planning_spec(
+        base_spec={
+            "candidate_id": "cand-real-stop",
+            "geometry_type": "gyroid",
+            "specimen_size_mm": [30, 30, 30],
+        },
+        constraints={
+            "geometry_type": "gyroid",
+            "specimen_size_mm": [30, 30, 30],
+            "test_mode_autofill": True,
+            "test_mode_llm_generated": True,
+            "printer_test_path": "virtual_bridge",
+        },
+    )
+    observed_flags: list[bool] = []
+
+    async def fake_loop_tail(experiment_spec: dict, **_: object) -> dict:
+        observed_flags.append(bool(controller._state.safe_stop_requested))
+        return {"ok": True, "message": "tail stopped for test", "decision": "stop"}
+
+    monkeypatch.setattr(controller, "_run_planning_loop_tail", fake_loop_tail)
+
+    result = await controller._run_planning_cycle_series(
+        first_spec=spec,
+        design_constraints={**dict(spec.get("constraints", {})), **spec},
+        start_cycle=1,
+    )
+
+    assert result["decision"] == "stop"
+    assert observed_flags == [True]
+
+
+@pytest.mark.asyncio
+async def test_live_gui_planning_tail_reports_operator_safe_stop_without_silent_cycle_continue() -> None:
+    controller = load_runtime()
+    controller._state.mode = Mode.LIVE
+    controller._state.safe_stop_requested = True
+    spec = controller._build_planning_spec(
+        base_spec={
+            "candidate_id": "cand-safe-stop",
+            "geometry_type": "gyroid",
+            "specimen_size_mm": [30, 30, 30],
+        },
+        constraints={
+            "geometry_type": "gyroid",
+            "specimen_size_mm": [30, 30, 30],
+            "test_mode_autofill": True,
+            "test_mode_llm_generated": True,
+            "printer_test_path": "virtual_bridge",
+        },
+    )
+
+    result = await controller._run_planning_loop_tail(spec, cycle_index=2, total_cycles=5)
+
+    assert result["ok"] is True
+    assert result["decision"] == "stop"
+    assert "safe_stop_requested" in result["message"]
+    system_messages = [message["content"] for message in controller.planning_snapshot()["messages"] if message["role"] == "system"]
+    assert any("SYSTEM_EVENT: WORKFLOW_HALTED" in content and "safe_stop_requested" in content for content in system_messages)
+
+
+@pytest.mark.asyncio
+async def test_live_gui_planning_tail_agent_messages_keep_cycle_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
+    controller = load_runtime()
+    controller._state.mode = Mode.LIVE
+    spec = controller._build_planning_spec(
+        base_spec={
+            "candidate_id": "cand-tail-cycle",
+            "geometry_type": "gyroid",
+            "specimen_size_mm": [30, 30, 30],
+        },
+        constraints={
+            "geometry_type": "gyroid",
+            "specimen_size_mm": [30, 30, 30],
+            "test_mode_autofill": True,
+            "test_mode_llm_generated": True,
+            "printer_test_path": "virtual_bridge",
+        },
+    )
+
+    def fake_stage_data(stage: Stage) -> dict:
+        if stage == Stage.VISION:
+            return {"observation": {"anomaly": False}, "vision_report": {"camera_source": {"camera_key": "top"}}, "vision_signal": {"signal_id": "sig-1"}}
+        if stage == Stage.MANIPULATION:
+            return {"manipulation": {"strategy": "pi0.5", "status": "done"}, "sarm": {"progress_score": 0.4}}
+        if stage == Stage.EQUIPMENT:
+            return {
+                "equipment_result": {"ok": True, "status": "done", "program_id": "utm"},
+                "equipment_handoff": {"status": "ready_for_analysis", "result_file": "/tmp/utm.csv"},
+                "equipment_report": {"decision": {"handoff_status": "ready_for_analysis"}},
+            }
+        if stage == Stage.ANALYSIS:
+            return {"analysis": {"ok": True, "objective_score": 0.7, "uncertainty": 0.1, "utm_metrics": {"peak_force_N": 120.0}}}
+        if stage == Stage.KNOWLEDGE:
+            return {"knowledge": {"retrieval_coverage": 1.0, "memory_summary": "ok"}}
+        if stage == Stage.BO:
+            return {"bo_result": {"strategy": "bo", "recommendation": {"candidate_id": "cand-next", "parameters": {}}}}
+        if stage == Stage.GUARDIAN:
+            return {"guardian": {"decision": "continue", "action": "continue", "reason": "ok"}}
+        return {stage.value: {"ok": True}}
+
+    class FakeRunLoop:
+        order = [Stage.VISION, Stage.MANIPULATION, Stage.EQUIPMENT, Stage.ANALYSIS, Stage.KNOWLEDGE, Stage.BO, Stage.GUARDIAN]
+
+        def __init__(self, *, state, on_event=None, **_: object) -> None:
+            self._state = state
+            self._on_event = on_event
+
+        async def step(self) -> None:
+            stage = self._state.stage if self._state.stage in self.order else self.order[0]
+            if self._on_event:
+                await self._on_event({"type": "node.started", "payload": {"node_id": stage.value}})
+                await self._on_event({"type": "node.completed", "payload": {"node_id": stage.value, "result": fake_stage_data(stage)}})
+            index = self.order.index(stage)
+            self._state.stage = self.order[index + 1] if index + 1 < len(self.order) else Stage.COMPLETE
+
+    monkeypatch.setattr("app.controller.RunLoop", FakeRunLoop)
+    monkeypatch.setattr(controller, "_write_planning_fem_artifacts", lambda *_args, **_kwargs: {})
+
+    result = await controller._run_planning_loop_tail(spec, cycle_index=2, total_cycles=5)
+
+    assert result["ok"] is True
+    expected_roles = {"vision_ai", "manipulation_ai", "equipment_ai", "analysis_ai", "knowledge_ai", "bo_ai", "guardian"}
+    messages = controller.planning_snapshot()["messages"]
+    roles_seen = {message["role"] for message in messages if message.get("role") in expected_roles}
+    assert roles_seen == expected_roles
+    for message in messages:
+        if message.get("role") in expected_roles or message.get("event_type") in {"planning_handoff", "planning.workflow_complete"}:
+            assert message.get("cycle_index") == 2
+            assert message.get("total_cycles") == 5
+
+
+@pytest.mark.asyncio
 async def test_live_gui_test_planning_series_runs_five_design_cycles(monkeypatch: pytest.MonkeyPatch) -> None:
     controller = load_runtime()
     controller._state.mode = Mode.LIVE

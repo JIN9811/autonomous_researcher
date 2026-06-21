@@ -31,6 +31,29 @@ from utils.ids import make_experiment_id
 ObjectiveDirection = Literal["maximize", "minimize", "target"]
 ExecutionMode = Literal["test", "live", "virtual", "replay"]
 BridgeName = Literal["auto", "virtual", "printer", "robot", "equipment", "analysis"]
+TrustGate = Literal["block", "calibrate_only", "allow_bo", "allow_physical"]
+MultifidelityJobType = Literal[
+    "utm_ingest",
+    "fea",
+    "fea_postprocess",
+    "pinn_train",
+    "pinn_predict",
+    "calibration",
+    "analysis_compare",
+]
+MultifidelityJobStatus = Literal[
+    "queued",
+    "precheck",
+    "running",
+    "postprocess",
+    "validated",
+    "registered",
+    "consumed_by_analysis",
+    "complete",
+    "failed",
+    "blocked",
+]
+PINNFamily = Literal["pinn", "xpinn", "deeponet", "fno", "gino", "mfnn", "fixture"]
 
 
 def now_iso() -> str:
@@ -111,6 +134,99 @@ class ExperimentEvaluationResult(BaseModel):
     step_trace: list[dict[str, Any]] = Field(default_factory=list)
     failure_code: str | None = None
     created_at: str = Field(default_factory=now_iso)
+
+
+class TrustScore(BaseModel):
+    """Multi-fidelity trust gate consumed by Analysis, BO, Guardian, and GUI."""
+
+    schema: str = "trust_score.v1"
+    score: float
+    gate: TrustGate
+    components: dict[str, float] = Field(default_factory=dict)
+    weights: dict[str, float] = Field(default_factory=dict)
+    reasons: list[str] = Field(default_factory=list)
+    provenance: dict[str, Any] = Field(default_factory=dict)
+
+
+class UTMRecord(BaseModel):
+    """Canonical UTM evidence record for a specimen-level compression test."""
+
+    schema: str = "utm_record.v1"
+    test_id: str = ""
+    specimen_id: str = ""
+    material_batch: str = ""
+    time_s: list[float] = Field(default_factory=list)
+    displacement_mm: list[float] = Field(default_factory=list)
+    force_n: list[float] = Field(default_factory=list)
+    eng_strain: list[float] = Field(default_factory=list)
+    eng_stress_mpa: list[float] = Field(default_factory=list)
+    true_strain: list[float] = Field(default_factory=list)
+    true_stress_mpa: list[float] = Field(default_factory=list)
+    sampling_hz: float | None = None
+    machine_meta: dict[str, Any] = Field(default_factory=dict)
+    dic_sync: dict[str, Any] = Field(default_factory=dict)
+    quality: dict[str, Any] = Field(default_factory=dict)
+    uncertainty: dict[str, Any] = Field(default_factory=dict)
+    provenance: dict[str, Any] = Field(default_factory=dict)
+
+
+class FEAResult(BaseModel):
+    """Canonical finite-element evidence record, currently CalculiX-oriented."""
+
+    schema: str = "fea_result.v1"
+    sim_id: str = ""
+    job_id: str = ""
+    specimen_id: str = ""
+    inp_uri: str = ""
+    dat_uri: str = ""
+    frd_uri: str = ""
+    field_asset_uri: str = ""
+    curve_asset_uri: str = ""
+    mesh_meta: dict[str, Any] = Field(default_factory=dict)
+    material_params: dict[str, Any] = Field(default_factory=dict)
+    loadcase: dict[str, Any] = Field(default_factory=dict)
+    solver_meta: dict[str, Any] = Field(default_factory=dict)
+    validation_flags: dict[str, Any] = Field(default_factory=dict)
+    uncertainty: dict[str, Any] = Field(default_factory=dict)
+    metrics: dict[str, Any] = Field(default_factory=dict)
+    provenance: dict[str, Any] = Field(default_factory=dict)
+
+
+class PINNModelRecord(BaseModel):
+    """Physics-informed surrogate model registry record."""
+
+    schema: str = "pinn_model_record.v1"
+    model_id: str
+    family: PINNFamily = "pinn"
+    input_signature: dict[str, Any] = Field(default_factory=dict)
+    output_signature: dict[str, Any] = Field(default_factory=dict)
+    train_dataset_ids: list[str] = Field(default_factory=list)
+    fidelity_config: dict[str, Any] = Field(default_factory=dict)
+    loss_config: dict[str, Any] = Field(default_factory=dict)
+    uq_method: str = ""
+    checkpoints: dict[str, Any] = Field(default_factory=dict)
+    metrics: dict[str, Any] = Field(default_factory=dict)
+    deployment_meta: dict[str, Any] = Field(default_factory=dict)
+    provenance: dict[str, Any] = Field(default_factory=dict)
+
+
+class MultifidelityJob(BaseModel):
+    """Track UTM/FEA/PINN/calibration work without blocking the live loop."""
+
+    schema: str = "multifidelity_job.v1"
+    job_id: str = Field(default_factory=make_experiment_id)
+    job_type: MultifidelityJobType
+    status: MultifidelityJobStatus = "queued"
+    run_id: str = ""
+    experiment_id: str = ""
+    session_id: str = ""
+    specimen_id: str = ""
+    parent_ids: list[str] = Field(default_factory=list)
+    artifacts: dict[str, Any] = Field(default_factory=dict)
+    step_trace: list[dict[str, Any]] = Field(default_factory=list)
+    trust_score: TrustScore | None = None
+    failure_code: str | None = None
+    provenance: dict[str, Any] = Field(default_factory=dict)
 
 
 def request_from_payload(payload: dict[str, Any]) -> ExperimentEvaluationRequest:

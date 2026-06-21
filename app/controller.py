@@ -2103,6 +2103,9 @@ class MainController:
                     "cae_metrics",
                     "quality_gate",
                     "fem_utm_comparison",
+                    "multifidelity_comparison",
+                    "trust_score",
+                    "fidelity_records",
                     "analysis_artifacts",
                     "bo_handoff",
                 ),
@@ -2453,6 +2456,9 @@ class MainController:
                     "cae_metrics",
                     "quality_gate",
                     "fem_utm_comparison",
+                    "multifidelity_comparison",
+                    "trust_score",
+                    "fidelity_records",
                     "analysis_artifacts",
                     "bo_handoff",
                 ),
@@ -4782,6 +4788,13 @@ class MainController:
         """Return planned Live GUI cycle count for test-mode handoffs."""
         return self.TEST_MODE_LOOP_CYCLES if self._is_planning_test_spec(payload) else 1
 
+    def _reset_planning_workflow_controls(self) -> None:
+        """Clear stale operator-control flags before a newly requested Live GUI workflow."""
+        self._state.safe_stop_requested = False
+        self._state.stop_requested = False
+        self._state.is_paused = False
+        self._state.run_metadata["_planning_workflow_controls_reset"] = True
+
     def _design_constraints_for_cycle(self, base_constraints: dict[str, Any]) -> dict[str, Any]:
         """Merge BO recommendation into DesignAgent constraints for the next cycle."""
         constraints = dict(base_constraints)
@@ -5148,6 +5161,10 @@ class MainController:
         design_constraints: dict[str, Any],
         start_cycle: int = 1,
     ) -> dict[str, Any]:
+        if start_cycle <= 1:
+            already_reset = bool(self._state.run_metadata.pop("_planning_workflow_controls_reset", False))
+            if not already_reset:
+                self._reset_planning_workflow_controls()
         total_cycles = self._planning_cycle_limit(first_spec)
         static_design_constraints = self._closed_loop_static_design_constraints(design_constraints)
         current_spec = first_spec
@@ -5192,6 +5209,7 @@ class MainController:
         constraints: dict[str, Any],
     ) -> dict[str, Any]:
         """Call DesignAgent for planning-only candidate generation and emit handoff chat messages."""
+        self._reset_planning_workflow_controls()
         self._state.active_goal = goal or self._state.active_goal
         await self._append_planning_message(
             {
@@ -6109,10 +6127,15 @@ class MainController:
             cae_result = analysis.get("cae_result") if isinstance(analysis.get("cae_result"), dict) else {}
             platens = cae_result.get("analysis_platens") if isinstance(cae_result.get("analysis_platens"), dict) else {}
             generated_caps = cae_result.get("generated_model_caps") if isinstance(cae_result.get("generated_model_caps"), dict) else {}
+            trust_score = analysis.get("trust_score") if isinstance(analysis.get("trust_score"), dict) else {}
+            multifidelity = analysis.get("multifidelity_comparison") if isinstance(analysis.get("multifidelity_comparison"), dict) else {}
+            mf_curve = multifidelity.get("curve") if isinstance(multifidelity.get("curve"), dict) else {}
             return (
                 "Analysis Agent가 UTM/CAE closed-loop 분석을 완료했습니다.\n\n"
                 f"- objective_score: {self._runtime_value(analysis.get('objective_score'))}\n"
                 f"- uncertainty: {self._runtime_value(analysis.get('uncertainty'))}\n"
+                f"- trust_score/gate: {self._runtime_value(trust_score.get('score'))} / {self._runtime_value(trust_score.get('gate'))}\n"
+                f"- UTM-FEA agreement: {self._runtime_value(mf_curve.get('agreement_score'))}, peak_error_pct={self._runtime_value(mf_curve.get('peak_force_error_pct'))}\n"
                 f"- peak_force_N: {self._runtime_value(utm.get('peak_force_N'))}\n"
                 f"- compressive_strength_MPa: {self._runtime_value(utm.get('compressive_strength_MPa'))}\n"
                 f"- CAE max_von_mises_MPa: {self._runtime_value(cae.get('max_von_mises_MPa'))}\n"
@@ -6198,6 +6221,36 @@ class MainController:
         planning_stages = self._planning_tail_stages(tail_start)
         if not planning_stages:
             planning_stages = {tail_start}
+        cycle_context = {"cycle_index": cycle_index, "total_cycles": total_cycles}
+
+        async def halt_for_control_flag() -> dict[str, Any]:
+            reason = "safe_stop_requested" if self._state.safe_stop_requested else "stop_requested"
+            self._state.stage = Stage.COMPLETE
+            await self._append_planning_message(
+                {
+                    "role": "system",
+                    "content": (
+                        "SYSTEM_EVENT: WORKFLOW_HALTED\n"
+                        f"reason={reason}\n"
+                        f"cycle={cycle_index}\n"
+                        f"total_cycles={total_cycles}"
+                    ),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "ok": True,
+                    **cycle_context,
+                },
+                event_type="planning_handoff",
+                message=f"Planning LangGraph tail halted by operator control flag: {reason}.",
+                level="WARNING",
+            )
+            return {
+                "ok": True,
+                "decision": "stop",
+                "message": f"Planning LangGraph handoff stopped because {reason} is set.",
+            }
+
+        if self._state.safe_stop_requested or self._state.stop_requested:
+            return await halt_for_control_flag()
 
         async def planning_runtime_event(event: dict[str, Any]) -> None:
             nonlocal previous_label, guardian_payload
@@ -6220,6 +6273,7 @@ class MainController:
                             "orchestrator_followup": followup,
                             "requires_response": bool(followup.get("requires_response")),
                             "evidence_refs": followup.get("evidence_refs", []),
+                            **cycle_context,
                         },
                         event_type="planning_orchestrator_followup",
                         level=str(event.get("level") or "INFO"),
@@ -6245,6 +6299,7 @@ class MainController:
                             "ok": True,
                             "graph_id": event.get("graph_id", ""),
                             "loop_reflection": reflection,
+                            **cycle_context,
                         },
                         event_type="planning_orchestrator_reflection",
                         message="Orchestrator loop reflection streamed from LangGraph runtime.",
@@ -6269,6 +6324,7 @@ class MainController:
                         "ok": True,
                         "graph_id": event.get("graph_id", ""),
                         "module_runtime": module_runtime,
+                        **cycle_context,
                     },
                     event_type="planning_handoff",
                     message=f"Planning LangGraph handoff to {agent_name or stage.value} started.",
@@ -6289,6 +6345,7 @@ class MainController:
                         "ok": False,
                         "graph_id": event.get("graph_id", ""),
                         "module_runtime": module_runtime,
+                        **cycle_context,
                     },
                     event_type="planning_handoff",
                     level="ERROR",
@@ -6313,6 +6370,7 @@ class MainController:
                         "bo_result": data.get("bo_result", {}),
                         "graph_id": event.get("graph_id", ""),
                         "module_runtime": module_runtime,
+                        **cycle_context,
                     },
                     event_type="planning_bo_result",
                     message="BOAgent completed next design recommendation through LangGraph runtime.",
@@ -6329,6 +6387,7 @@ class MainController:
                 "ok": True,
                 "graph_id": event.get("graph_id", ""),
                 "module_runtime": module_runtime,
+                **cycle_context,
                 stage.value: data.get(stage.value, data),
             }
             if stage == Stage.VISION:
@@ -6406,6 +6465,8 @@ class MainController:
             for _ in range(max_steps):
                 before_stage = self._state.stage
                 await loop.step()
+                if self._state.safe_stop_requested or self._state.stop_requested:
+                    return await halt_for_control_flag()
                 if self._state.is_paused:
                     return {
                         "ok": True,
@@ -6427,6 +6488,7 @@ class MainController:
                         "content": f"SYSTEM_EVENT: WORKFLOW_HALTED\nagent=GuardianAgent\ndecision={decision}",
                         "timestamp": datetime.now(timezone.utc).isoformat(),
                         "ok": False,
+                        **cycle_context,
                     },
                     event_type="planning_handoff",
                     message="Planning LangGraph tail halted by Guardian decision.",
@@ -6440,6 +6502,7 @@ class MainController:
                         "content": f"SYSTEM_EVENT: WORKFLOW_COMPLETE\nstatus=passed_guardian\ncycle={cycle_index}\ntotal_cycles={total_cycles}",
                         "timestamp": datetime.now(timezone.utc).isoformat(),
                         "ok": True,
+                        **cycle_context,
                     },
                     event_type="planning_handoff",
                     message="Planning LangGraph tail completed.",
@@ -6452,6 +6515,7 @@ class MainController:
                         "content": f"SYSTEM_EVENT: WORKFLOW_HALTED\nagent=GuardianAgent\ndecision={decision}\ncycle={cycle_index}",
                         "timestamp": datetime.now(timezone.utc).isoformat(),
                         "ok": True,
+                        **cycle_context,
                     },
                     event_type="planning_handoff",
                     message="Planning LangGraph tail halted by Guardian decision.",
@@ -6465,6 +6529,7 @@ class MainController:
                         "content": f"SYSTEM_EVENT: CYCLE_COMPLETE\ncycle={cycle_index}\ntotal_cycles={total_cycles}\nstatus=next_design",
                         "timestamp": datetime.now(timezone.utc).isoformat(),
                         "ok": True,
+                        **cycle_context,
                     },
                     event_type="planning_handoff",
                     message="Planning LangGraph cycle completed; next design cycle queued.",

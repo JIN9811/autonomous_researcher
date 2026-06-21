@@ -82,8 +82,10 @@ def test_experiment_tool_printer_route_uses_device_queue(tmp_path: Path) -> None
     assert result["ok"] is True
     assert result["bridge"] == "printer"
     assert result["bridge_result"]["tool"] == "printer.prepare"
-    assert result["job"]["device"] == "printer:prusa_mk4s"
-    assert registry.call("experiment.queue.status", {})["devices"]["printer:prusa_mk4s"]["submitted_count"] == 1
+    assert result["job"]["device"] == "printer:fleet"
+    selected = result["bridge_result"]["selected_printer"]
+    assert selected["provider"] == "prusa_mk4s"
+    assert registry.call("experiment.queue.status", {})["devices"]["printer:fleet"]["submitted_count"] == 1
 
 
 def test_benchmark_runs_random_grid_bo() -> None:

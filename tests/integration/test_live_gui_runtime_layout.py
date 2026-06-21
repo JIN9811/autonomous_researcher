@@ -258,6 +258,33 @@ def test_live_gui_static_script_exposes_runtime_ide_adapters() -> None:
         "__liveGuiDebugRestoreOperatorReportState",
     ]:
         assert symbol in script
+
+
+def test_live_gui_analysis_report_exposes_multifidelity_contract() -> None:
+    client = TestClient(app)
+    script = client.get("/static/planning.js").text
+    runtime_script = client.get("/static/runtime_ide.js").text
+
+    for token in [
+        "renderAnalysisTrustScore",
+        "renderAnalysisProvenance",
+        "renderAnalysisCurveOverlay",
+        "Trust Score / Gate",
+        "UTM-FEA Agreement",
+        "PINN Prediction",
+        "Provenance",
+        "multifidelity_comparison",
+        "trust_score",
+        "analysis_bo_handoff_v2",
+    ]:
+        assert token in script
+
+    for token in [
+        "trust_score",
+        "Trust",
+        "latestAnalysisPayload",
+    ]:
+        assert token in runtime_script
     assert "const rendererProfile = liveAgentRendererProfile(liveSelectedAgent);" in script
     assert 'const reportAgentId = rendererProfile.reportAgent || String(liveSelectedAgent || "").toLowerCase();' in script
     assert 'reportAgentId === "design"' in script
@@ -474,6 +501,21 @@ def test_live_gui_static_script_exposes_runtime_ide_adapters() -> None:
     audit_script = Path("tests/ui/live_runtime_ide_browser_audit.py").read_text(encoding="utf-8")
     for symbol in ["LIVE_REFERENCE_IMAGE", "image_visual_metrics", "rgb_distance", "titleContrastOnPanel", "bright_ratio"]:
         assert symbol in audit_script
+
+
+def test_live_gui_loop_archive_preserves_agent_messages() -> None:
+    client = TestClient(app)
+    script = client.get("/static/planning.js").text
+
+    for token in [
+        "isLoopArchiveAgentMessage",
+        "isLoopArchiveVisibleMessage",
+        "renderPlanningLoopArchiveMessageDetail",
+        "group.messages.filter(isLoopArchiveVisibleMessage)",
+        "isLoopSummary ? renderPlanningLoopArchiveMessageDetail",
+        "loop-archive-system",
+    ]:
+        assert token in script
 
 
 def test_live_gui_specimen_runtime_uses_generic_spc_bridge_labels() -> None:

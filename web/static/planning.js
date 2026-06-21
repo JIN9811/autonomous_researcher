@@ -1901,6 +1901,36 @@ function renderPlanningChatMessageDetail(msg, messageIndex) {
   `;
 }
 
+function isLoopArchiveAgentMessage(msg) {
+  if (!msg || typeof msg !== "object") return false;
+  const role = String(msg.role || "").toLowerCase();
+  if (!role || role === "system" || role === "operator" || role === "user" || role === "human") return false;
+  return Boolean(String(msg.content || "").trim() || msg.pendingReasoning);
+}
+
+function isLoopArchiveVisibleMessage(msg) {
+  if (!msg || typeof msg !== "object") return false;
+  if (isLoopArchiveAgentMessage(msg)) return true;
+  if (isPlanningSystemMessage(msg)) return true;
+  return Boolean(String(msg.content || "").trim()) && String(msg.visibility || "").toLowerCase() !== "internal";
+}
+
+function renderPlanningLoopArchiveMessageDetail(msg, messageIndex) {
+  const parsed = parsePlanningSystemEvent(msg && msg.content);
+  if (parsed && !isLoopArchiveAgentMessage(msg)) {
+    const fields = parsed.fields || {};
+    const route = fields.from && fields.to ? `${fields.from} -> ${fields.to}` : (fields.to || fields.from || "");
+    const bits = [parsed.name || "SYSTEM_EVENT", route, fields.status || fields.decision || fields.reason || ""].filter(Boolean);
+    return `
+      <div class="planning-agent-chat-message system loop-archive-system" data-message-index="${escapeHtml(String(messageIndex))}">
+        <small>${escapeHtml(formatTime(msg.timestamp))} / System</small>
+        <div class="message-content">${escapeHtml(bits.join(" / "))}</div>
+      </div>
+    `;
+  }
+  return renderPlanningChatMessageDetail(msg, messageIndex);
+}
+
 function renderOperatorPlanningMessage(msg, messageIndex) {
   const content = msg.content
     ? escapeHtml(normalizeDisplayText(msg.content)).replaceAll("\n", "<br />")
@@ -1932,10 +1962,12 @@ function renderPlanningChatGroup(group, groupIndex) {
     : chatGroupAgentDescriptor(group, role);
   const time = formatTime(latest.timestamp);
   const detailMessages = isLoopSummary
-    ? group.messages.filter((msg) => !isPlanningSystemMessage(msg) && String(msg.visibility || "").toLowerCase() !== "internal")
+    ? group.messages.filter(isLoopArchiveVisibleMessage)
     : group.messages;
   const messageHtml = detailMessages.length
-    ? detailMessages.map((msg, index) => renderPlanningChatMessageDetail(msg, index)).join("")
+    ? detailMessages.map((msg, index) => (
+        isLoopSummary ? renderPlanningLoopArchiveMessageDetail(msg, index) : renderPlanningChatMessageDetail(msg, index)
+      )).join("")
     : `<div class="planning-agent-chat-message loop-summary-note"><small>Loop archive</small><div class="message-content">시스템 이벤트는 Backend/Event 영역에 보관되었습니다.</div></div>`;
   return `
     <article class="planning-chat-item planning-agent-chat-group ${escapeHtml(role)} ${isLoopSummary ? "loop-summary" : ""} ${expanded ? "is-expanded" : "is-collapsed"}" data-chat-group-key="${escapeHtml(group.key)}" data-chat-group-index="${escapeHtml(String(groupIndex))}">
@@ -5445,6 +5477,9 @@ function renderAnalysisReportDetails(report) {
   const quality = analysis.quality_gate || analysis.data_quality_gate || {};
   const comparison = analysis.comparison || {};
   const femComparison = analysis.fem_utm_comparison || {};
+  const multifidelityComparison = analysis.multifidelity_comparison || {};
+  const trustScore = analysis.trust_score || {};
+  const fidelityRecords = analysis.fidelity_records || {};
   const femResult = analysis.fem_result || {};
   const femMetrics = analysis.fem_metrics || {};
   const femLoop = analysis.fem_agentic_loop || {};
@@ -5456,6 +5491,11 @@ function renderAnalysisReportDetails(report) {
   const artifactRows = Object.entries(artifacts).map(([key, value]) => `${key} · ${renderRuntimeValue(value)}`);
   return `
     <div class="live-agent-specific-report-detail">
+      <h5>Trust Score / Gate</h5>
+      ${renderAnalysisTrustScore(analysis)}
+      <h5>UTM-FEA Agreement / PINN Prediction</h5>
+      ${renderAnalysisCurveOverlay(analysis)}
+      ${renderAnalysisProvenance(analysis)}
       <h5>Raw Data Ledger</h5>
       ${runtimeRows([
         ["source", source.source || "-"],
@@ -5482,6 +5522,10 @@ function renderAnalysisReportDetails(report) {
       <h5>FEM / CAE / CalculiX Evidence</h5>
       ${runtimeRows([
         ["closed_loop_sources", closedLoopSources],
+        ["trust_score", trustScore.score === undefined ? "-" : trustScore.score],
+        ["trust_gate", trustScore.gate || "-"],
+        ["multifidelity_comparison", multifidelityComparison.schema || "-"],
+        ["fidelity_records", Object.keys(fidelityRecords)],
         ["cae_loop_status", femResult.status || "-"],
         ["cae_backend", femResult.solver || femResult.solver_backend || "-"],
         ["fem_cache", femResult.cache_status || "-"],
@@ -5503,8 +5547,9 @@ function renderAnalysisReportDetails(report) {
       ${renderReportList((femLoop.iterations || []).map((item) => `iter=${item.iteration} · mesh=${item.mesh_size_mm} mm · agreement=${renderRuntimeValue(item.agreement_score)} · accepted=${renderRuntimeValue(item.accepted)} · cache=${item.cache_status || "-"}`), "No FEM agentic iterations recorded.", 12)}
       <h5>BO Handoff / Loop Comparison</h5>
       ${runtimeRows([
-        ["bo_schema", boHandoff.schema_version || "-"],
+        ["bo_schema", boHandoff.schema_version || "analysis_bo_handoff_v2"],
         ["ok_for_bo", boHandoff.ok_for_bo === undefined ? "-" : boHandoff.ok_for_bo],
+        ["trust_gate", boHandoff.trust_gate || (boHandoff.trust_score || {}).gate || "-"],
         ["objective", boHandoff.objective || {}],
         ["comparison_mode", comparison.mode || "-"],
         ["comparison_summary", comparison.summary || "-"],
@@ -12693,6 +12738,76 @@ function renderAnalysisCurve(analysis) {
   `;
 }
 
+function renderAnalysisTrustScore(analysis) {
+  const trust = analysis.trust_score || {};
+  const components = trust.components || {};
+  const score = dashboardFiniteNumber(trust.score);
+  const gate = trust.gate || "not_recorded";
+  const rows = Object.entries(components).map(([label, value]) => ({
+    label,
+    value: dashboardFiniteNumber(value) ?? 0,
+    max: 1,
+    tone: label === "q_agreement" ? "analysis" : label === "q_data" ? "success" : "info",
+    meta: numberText(dashboardFiniteNumber(value) ?? 0, 3),
+  }));
+  return `
+    <div class="ar-analysis-trust-score">
+      <div class="ar-report-metrics">
+        ${renderDashboardMetric("Trust Score / Gate", score === null ? "-" : numberText(score, 3), gate, gate === "block" ? "danger" : gate === "calibrate_only" ? "warning" : "success")}
+        ${renderDashboardMetric("UTM-FEA Agreement", components.q_agreement === undefined ? "-" : numberText(components.q_agreement, 3), "curve agreement", components.q_agreement < 0.65 ? "warning" : "success")}
+        ${renderDashboardMetric("PINN Prediction", (analysis.fidelity_records || {}).pinn_low_or_surrogate?.status || (analysis.multifidelity_comparison || {}).pinn?.status || "unavailable", "optional", "idle")}
+      </div>
+      ${renderMiniBarChart(rows, { label: "trust_score component bars", compact: true, emptyText: "No trust_score components recorded." })}
+      ${renderDashboardRows([
+        ["schema", trust.schema || "trust_score.v1"],
+        ["reasons", trust.reasons || []],
+      ])}
+    </div>
+  `;
+}
+
+function renderAnalysisCurveOverlay(analysis) {
+  const comparison = analysis.multifidelity_comparison || {};
+  const curve = comparison.curve || {};
+  const pinn = comparison.pinn || (analysis.fidelity_records || {}).pinn_low_or_surrogate || {};
+  return `
+    <div class="ar-analysis-curve-overlay">
+      ${renderAnalysisCurve(analysis)}
+      <div class="ar-analysis-overlay-summary">
+        ${renderDashboardRows([
+          ["multifidelity_comparison", comparison.schema || "multifidelity_comparison.v1"],
+          ["UTM-FEA Agreement", curve.agreement_score === undefined ? "-" : curve.agreement_score],
+          ["peak_force_error_pct", curve.peak_force_error_pct === undefined ? "-" : curve.peak_force_error_pct],
+          ["stiffness_error_pct", curve.stiffness_error_pct === undefined ? "-" : curve.stiffness_error_pct],
+          ["PINN Prediction", pinn.status || "unavailable"],
+        ])}
+      </div>
+    </div>
+  `;
+}
+
+function renderAnalysisProvenance(analysis) {
+  const fidelity = analysis.fidelity_records || {};
+  const source = analysis.source || {};
+  const artifacts = analysis.analysis_artifacts || {};
+  const boHandoff = analysis.bo_handoff || {};
+  return `
+    <div class="ar-analysis-provenance">
+      <h5>Provenance</h5>
+      ${renderDashboardRows([
+        ["source", source.source || "-"],
+        ["parser_id", source.parser_id || "-"],
+        ["utm_high", fidelity.utm_high?.schema || "-"],
+        ["fea_mid", fidelity.fea_mid?.schema || "-"],
+        ["pinn_low_or_surrogate", fidelity.pinn_low_or_surrogate?.status || "-"],
+        ["analysis_bo_handoff_v2", boHandoff.schema_version || "-"],
+        ["trust_score", artifacts.trust_score || "-"],
+        ["multifidelity_comparison", artifacts.multifidelity_comparison || "-"],
+      ])}
+    </div>
+  `;
+}
+
 function renderAnalysisMetricBars(analysis) {
   const metrics = analysis.utm_metrics || {};
   const rows = [
@@ -12923,15 +13038,17 @@ function renderAnalysisDashboardCards(report, status, agentLabel, profile) {
   const femLoop = analysis.fem_agentic_loop || {};
   const boHandoff = latestAnalysisBoHandoff(report) || {};
   return `
-    ${renderDashboardCard("Force-Displacement Curve", renderAnalysisCurve(analysis), { span: 8, tone: "analysis", eyebrow: "utm curve" })}
+    ${renderDashboardCard("Force-Displacement Curve", renderAnalysisCurveOverlay(analysis), { span: 8, tone: "analysis", eyebrow: "utm / fea overlay" })}
     ${renderDashboardCard("Result Summary", `<div class="ar-report-metrics">
       ${renderDashboardMetric("Peak", metrics.peak_force_N ?? "-", "N", "info")}
       ${renderDashboardMetric("Strength", metrics.compressive_strength_MPa ?? "-", "MPa", "success")}
       ${renderDashboardMetric("Score", analysis.objective_score ?? "-", "objective", "running")}
       ${renderDashboardMetric("Unc.", analysis.uncertainty ?? "-", "model", "warning")}
     </div>`, { span: 4, tone: "analysis", eyebrow: "result" })}
+    ${renderDashboardCard("Trust Score / Gate", renderAnalysisTrustScore(analysis), { span: 4, tone: (analysis.trust_score || {}).gate === "block" ? "danger" : "analysis", eyebrow: "multi-fidelity" })}
     ${renderDashboardCard("Metric Bars", renderAnalysisMetricBars(analysis), { span: 4, tone: "metrics", eyebrow: "features" })}
     ${renderDashboardCard("Data Quality", renderAnalysisQualityDonut(quality), { span: 4, tone: quality.ok_for_bo === false ? "warning" : "analysis", eyebrow: "qa" })}
+    ${renderDashboardCard("Provenance", renderAnalysisProvenance(analysis), { span: 4, tone: "analysis", eyebrow: "artifacts" })}
     ${renderDashboardCard("Raw Data Ledger", renderDashboardRows([
       ["raw_file", analysis.raw_file || analysis.source_file || "-"],
       ["fingerprint", analysis.file_fingerprint || analysis.checksum || "-"],
@@ -12947,7 +13064,9 @@ function renderAnalysisDashboardCards(report, status, agentLabel, profile) {
       ["fem_result", artifacts.fem_result || "-"],
     ]), { span: 4, tone: "analysis", eyebrow: "simulation" })}
     ${renderDashboardCard("BO Handoff", renderDashboardRows([
+      ["schema", boHandoff.schema_version || "analysis_bo_handoff_v2"],
       ["ok_for_bo", boHandoff.ok_for_bo === undefined ? "-" : boHandoff.ok_for_bo],
+      ["trust_gate", boHandoff.trust_gate || (boHandoff.trust_score || {}).gate || "-"],
       ["objective_score", boHandoff.objective_score ?? analysis.objective_score ?? "-"],
       ["uncertainty", boHandoff.uncertainty ?? analysis.uncertainty ?? "-"],
       ["experiment_evaluation", artifacts.experiment_evaluation || "-"],

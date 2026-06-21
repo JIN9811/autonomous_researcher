@@ -619,7 +619,16 @@ async def test_analysis_agent_emits_improvement06_artifacts_bo_handoff_and_calcu
     assert analysis["fem_agentic_loop"]["status"] == "completed"
     assert analysis["fem_agentic_loop"]["selected_result"]["tool"] == "cae.run_static_analysis"
     assert analysis["fem_utm_comparison"]["schema"] == "fem_utm_comparison.v1"
-    assert result.data["bo_handoff"]["schema_version"] == "analysis_bo_handoff_v1"
+    assert analysis["trust_score"]["schema"] == "trust_score.v1"
+    assert analysis["trust_score"]["gate"] in {"allow_bo", "allow_physical"}
+    assert analysis["multifidelity_comparison"]["schema"] == "multifidelity_comparison.v1"
+    assert analysis["multifidelity_comparison"]["curve"]["peak_force_error_pct"] is not None
+    assert analysis["fidelity_records"]["utm_high"]["schema"] == "utm_record.v1"
+    assert analysis["fidelity_records"]["fea_mid"]["schema"] == "fea_result.v1"
+    assert analysis["fidelity_records"]["pinn_low_or_surrogate"]["status"] == "unavailable"
+    assert result.data["bo_handoff"]["schema_version"] == "analysis_bo_handoff_v2"
+    assert result.data["bo_handoff"]["trust_score"]["schema"] == "trust_score.v1"
+    assert result.data["bo_handoff"]["multifidelity_comparison"]["schema"] == "multifidelity_comparison.v1"
     assert result.data["bo_handoff"]["fidelity"]["utm_high"]["objective_source"] is True
     artifacts = analysis["analysis_artifacts"]
     for key in (
@@ -633,6 +642,8 @@ async def test_analysis_agent_emits_improvement06_artifacts_bo_handoff_and_calcu
         "fem_request",
         "fem_agentic_loop",
         "fem_utm_comparison",
+        "multifidelity_comparison",
+        "trust_score",
         "comparison",
         "analysis_report",
         "experiment_evaluation",
@@ -641,6 +652,7 @@ async def test_analysis_agent_emits_improvement06_artifacts_bo_handoff_and_calcu
     ):
         assert Path(artifacts[key]).exists(), key
     assert result.data["experiment_evaluation"]["fidelity_records"]["utm_high"] == "metrics"
+    assert result.data["experiment_evaluation"]["trust_score"]["schema"] == "trust_score.v1"
 
 
 @pytest.mark.asyncio

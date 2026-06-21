@@ -6893,6 +6893,7 @@ function renderMetricsPanel(snapshot = latestStateSnapshot) {
   const analysis = latestAnalysisPayload();
   const utm = analysis.utm_metrics || analysis.metrics || {};
   const cae = analysis.cae_metrics || {};
+  const trust_score = analysis.trust_score || {};
   const evaluation = latestEvaluation();
   const spec = state.current_experiment_spec || {};
   const geometry = spec.geometry || spec.design || {};
@@ -6904,6 +6905,7 @@ function renderMetricsPanel(snapshot = latestStateSnapshot) {
   const gpu = resources.gpu || {};
   const gpuAgg = gpuAggregate(resources);
   const objective = analysis.objective_score ?? evaluation.objective_score ?? evaluation.score ?? bo.best_score;
+  const trustValue = trust_score.score;
   const strength = utm.compressive_strength_MPa ?? utm.strength_MPa ?? cae.equivalent_strength_MPa;
   const density = geometry.relative_density ?? spec.relative_density ?? utm.relative_density;
   const boScore = bo.best_score ?? bo.objective_score ?? bo.last_score ?? objective;
@@ -6912,6 +6914,7 @@ function renderMetricsPanel(snapshot = latestStateSnapshot) {
   metricsPanelOutput.innerHTML = `
     <div class="runtime-metric-grid">
       ${metricCard("Objective", formatMetricValue(objective), "latest analysis/evaluation", objective === undefined ? "idle" : "ok")}
+      ${metricCard("Trust", formatMetricValue(trustValue), trust_score.gate || "trust_score", trustValue === undefined ? "idle" : trust_score.gate === "block" ? "warn" : "ok")}
       ${metricCard("Strength", formatMetricValue(strength, "MPa"), "UTM/CAE", strength === undefined ? "idle" : "ok")}
       ${metricCard("Density", formatMetricValue(density), "specimen relative density", density === undefined ? "idle" : "ok")}
       ${metricCard("BO Score", formatMetricValue(boScore), "knowledge -> BO", boScore === undefined ? "idle" : "ok")}

@@ -238,7 +238,7 @@ def test_realsense_camera_mode_uses_depth_rgb_for_top_and_wrist_at_default_15fps
         "fps": 15,
         "color_format": "rgb8",
         "use_depth": True,
-        "warmup_s": 1,
+        "warmup_s": 5,
     }
     assert cameras["wrist"] == {
         "type": "intelrealsense",
@@ -248,8 +248,48 @@ def test_realsense_camera_mode_uses_depth_rgb_for_top_and_wrist_at_default_15fps
         "fps": 15,
         "color_format": "bgr8",
         "use_depth": True,
-        "warmup_s": 1,
+        "warmup_s": 5,
     }
+
+
+def test_record_session_fails_if_requested_realsense_depth_is_missing_from_dataset(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    dataset = tmp_path / "hf_datasets" / "jin" / "rgb_only"
+    (dataset / "meta").mkdir(parents=True)
+    (dataset / "meta" / "info.json").write_text(
+        json.dumps(
+            {
+                "features": {
+                    "observation.images.top": {"dtype": "video", "shape": [480, 640, 3]},
+                    "observation.images.wrist": {"dtype": "video", "shape": [480, 640, 3]},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    session = {
+        "session_id": "record-depth-missing",
+        "workflow": "record",
+        "mode": "live",
+        "profile_id": "fake_omx_ai",
+        "status": "COMPLETED",
+        "dataset_path": str(dataset),
+        "expected_depth_features": ["observation.images.top_depth", "observation.images.wrist_depth"],
+        "command_preview": [],
+        "step_trace": [],
+        "log_path": "",
+        "returncode": 0,
+    }
+
+    result = bridge._session_response("lerobot.record.status", "live", session, [])
+
+    assert result["ok"] is False
+    assert result["status"] == "FAILED"
+    assert result["failure_code"] == "LEROBOT_REALSENSE_DEPTH_FEATURE_MISSING"
+    assert result["dataset_depth_validation"]["missing_depth_features"] == [
+        "observation.images.top_depth",
+        "observation.images.wrist_depth",
+    ]
 
 
 def test_realsense_scan_does_not_fallback_to_v4l_by_id_when_sdk_query_fails(tmp_path: Path, monkeypatch) -> None:
@@ -344,6 +384,53 @@ def test_realsense_live_save_prefers_sdk_serial_for_top_d455(tmp_path: Path, mon
 
     assert result["saved_devices"]["cameras"]["top"]["serial_number_or_name"] == "341522300873"
     assert result["saved_devices"]["cameras"]["top"]["port"] == "341522300873"
+
+
+def test_realsense_live_save_replaces_non_sdk_identifier_with_role_serial(tmp_path: Path, monkeypatch) -> None:
+    bridge = _bridge(tmp_path)
+
+    class FakeDevice:
+        def __init__(self, *, name: str, serial: str, product_line: str = "D400") -> None:
+            self.values = {
+                "name": name,
+                "serial_number": serial,
+                "product_line": product_line,
+            }
+
+        def supports(self, info: str) -> bool:
+            return info in self.values
+
+        def get_info(self, info: str) -> str:
+            return self.values[info]
+
+    class FakeContext:
+        def query_devices(self):
+            return [
+                FakeDevice(name="Intel RealSense D405", serial="352122273019"),
+                FakeDevice(name="Intel RealSense D455F", serial="341522300873"),
+            ]
+
+    fake_rs = SimpleNamespace(
+        camera_info=SimpleNamespace(name="name", serial_number="serial_number", product_line="product_line"),
+        context=lambda: FakeContext(),
+    )
+    monkeypatch.setitem(sys.modules, "pyrealsense2", fake_rs)
+
+    result = bridge.ports_save(
+        {
+            "mode": "live",
+            "profile_id": "fake_omx_ai",
+            "device_role": "camera",
+            "camera_key": "wrist",
+            "camera_backend": "realsense",
+            "port": "/dev/v4l/by-id/usb-Intel_R__RealSense_TM__Depth_Camera_405-video-index0",
+        }
+    )
+
+    assert result["ok"] is True
+    assert result["saved_devices"]["cameras"]["wrist"]["serial_number_or_name"] == "352122273019"
+    assert result["saved_devices"]["cameras"]["wrist"]["port"] == "352122273019"
+    assert result["raw_selected_port"].startswith("/dev/v4l/by-id/")
 
 
 def test_realsense_live_detect_prefers_role_specific_sdk_serial(tmp_path: Path, monkeypatch) -> None:
@@ -568,6 +655,99 @@ def test_live_rollout_blocks_missing_saved_realsense_camera_before_policy_proces
     assert "wrist=352122273019" in result["message"]
 
 
+def test_pi05_live_rollout_omits_realsense_color_format_for_pi05_runtime(tmp_path: Path, monkeypatch) -> None:
+    bridge = _bridge(tmp_path)
+    follower = tmp_path / "omx_follower"
+    follower.touch()
+    policy_dir = tmp_path / "outputs" / "train" / "job" / "checkpoints" / "000500" / "pretrained_model"
+    _make_policy_checkpoint(policy_dir)
+    bridge.ports_save({"mode": "live", "profile_id": "fake_omx_ai", "device_role": "follower", "port": str(follower)})
+    bridge.ports_save(
+        {
+            "mode": "live",
+            "profile_id": "fake_omx_ai",
+            "device_role": "camera",
+            "camera_key": "top",
+            "port": "341522300873",
+            "camera_backend": "realsense",
+            "camera_use_depth": True,
+        }
+    )
+    bridge.ports_save(
+        {
+            "mode": "live",
+            "profile_id": "fake_omx_ai",
+            "device_role": "camera",
+            "camera_key": "wrist",
+            "port": "352122273019",
+            "camera_backend": "realsense",
+            "camera_use_depth": True,
+        }
+    )
+    monkeypatch.setattr(bridge, "_live_block_if_needed", lambda **_: None)
+    monkeypatch.setattr(
+        bridge,
+        "_scan_live_realsense_camera_entries",
+        lambda: [
+            {"name": "Intel RealSense D455F", "serial": "341522300873", "product_line": "D400"},
+            {"name": "Intel RealSense D405", "serial": "352122273019", "product_line": "D400"},
+        ],
+        raising=False,
+    )
+    bridge._start_live_process = lambda **_: {"ok": True, "session_updates": {"pid": 123, "log_path": "", "returncode": None}}  # type: ignore[method-assign]
+
+    result = bridge.rollout_start(
+        {
+            "mode": "live",
+            "runtime_mode": "live",
+            "profile_id": "fake_omx_ai",
+            "policy_type": "pi05",
+            "policy_path": str(policy_dir),
+            "camera_enabled": True,
+            "camera_fps": 15,
+            "confirm_live_execute": True,
+        }
+    )
+
+    camera_arg = next(arg for arg in result["command_preview"] if arg.startswith("--robot.cameras="))
+    cameras = json.loads(camera_arg.removeprefix("--robot.cameras="))
+    assert result["ok"] is True
+    assert cameras["top"]["type"] == "intelrealsense"
+    assert cameras["wrist"]["type"] == "intelrealsense"
+    assert "color_format" not in cameras["top"]
+    assert "color_format" not in cameras["wrist"]
+    assert cameras["top"]["use_depth"] is True
+    assert cameras["wrist"]["use_depth"] is True
+
+
+def test_live_train_starts_passive_monitor_for_gui_training(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    dataset = tmp_path / "hf_datasets" / "jin" / "record-test"
+    _make_trainable_lerobot_dataset(dataset)
+    bridge._live_block_if_needed = lambda **_: None  # type: ignore[method-assign]
+    bridge._live_port_block_if_needed = lambda **_: None  # type: ignore[method-assign]
+    bridge._start_live_process = lambda **_: {"ok": True, "session_updates": {"pid": 123, "log_path": str(tmp_path / "train.log"), "returncode": None}}  # type: ignore[method-assign]
+    bridge._start_training_monitor = lambda session, request: {"status": "running", "pid": 456, "log_path": str(tmp_path / "watch.jsonl")}  # type: ignore[attr-defined]
+
+    result = bridge.train_start(
+        {
+            "mode": "live",
+            "runtime_mode": "live",
+            "profile_id": "fake_omx_ai",
+            "dataset_repo_id": "jin/record-test",
+            "dataset_root": str(tmp_path / "hf_datasets"),
+            "policy_type": "act",
+            "steps": 1,
+            "confirm_live_execute": True,
+        }
+    )
+
+    assert result["ok"] is True
+    assert result["workflow"] == "train"
+    assert result["monitor"]["status"] == "running"
+    assert result["monitor"]["pid"] == 456
+
+
 def test_extra_camera_can_be_deleted_but_default_camera_is_protected(tmp_path: Path) -> None:
     bridge = _bridge(tmp_path)
 
@@ -701,16 +881,16 @@ def test_pi05_train_uses_dedicated_runtime_and_hf_base_policy(tmp_path: Path) ->
     assert started["command_preview"][started["command_preview"].index("-n") + 1] == "lerobot-pi05-torch211"
     assert "--policy.type=pi05" in started["command_preview"]
     assert "--policy.pretrained_path=lerobot/pi05_base" in started["command_preview"]
-    assert "--batch_size=32" in started["command_preview"]
+    assert "--batch_size=16" in started["command_preview"]
     assert "--num_workers=12" in started["command_preview"]
     assert "--eval_freq=500" in started["command_preview"]
-    assert "--log_freq=5" in started["command_preview"]
+    assert "--log_freq=50" in started["command_preview"]
     assert "--save_freq=500" in started["command_preview"]
     assert all(not arg.startswith("--eval.batch_size=") for arg in started["command_preview"])
     assert "--policy.n_obs_steps=1" in started["command_preview"]
     assert "--policy.chunk_size=50" in started["command_preview"]
     assert "--policy.n_action_steps=50" in started["command_preview"]
-    assert "--policy.compile_model=false" in started["command_preview"]
+    assert "--policy.compile_model=true" in started["command_preview"]
     assert "--policy.gradient_checkpointing=true" in started["command_preview"]
     assert "--policy.dtype=bfloat16" in started["command_preview"]
     assert "--policy.freeze_vision_encoder=false" in started["command_preview"]
@@ -720,7 +900,7 @@ def test_pi05_train_uses_dedicated_runtime_and_hf_base_policy(tmp_path: Path) ->
     assert "--wandb.mode=offline" in started["command_preview"]
 
 
-def test_pi05_train_replaces_stale_act_log_freq_default(tmp_path: Path) -> None:
+def test_pi05_train_replaces_stale_act_log_freq_default_with_stable_pi05_default(tmp_path: Path) -> None:
     bridge = _bridge(tmp_path)
 
     started = bridge.train_start(
@@ -734,7 +914,7 @@ def test_pi05_train_replaces_stale_act_log_freq_default(tmp_path: Path) -> None:
     )
 
     assert started["ok"] is True
-    assert "--log_freq=5" in started["command_preview"]
+    assert "--log_freq=50" in started["command_preview"]
 
 def test_pi05_train_forces_stale_wandb_request_offline(tmp_path: Path) -> None:
     bridge = _bridge(tmp_path)
@@ -1253,7 +1433,7 @@ def test_train_progress_parses_compact_k_step_log(tmp_path: Path) -> None:
     assert status["training"]["last_loss"] == 0.019
 
 
-def test_train_progress_uses_sample_count_when_step_is_rounded(tmp_path: Path) -> None:
+def test_train_progress_does_not_inflate_step_from_sample_count(tmp_path: Path) -> None:
     bridge = _bridge(tmp_path)
     log_path = tmp_path / "train.log"
     log_path.write_text("INFO step:1K smpl:33K ep:28 loss:0.017\n", encoding="utf-8")
@@ -1275,8 +1455,8 @@ def test_train_progress_uses_sample_count_when_step_is_rounded(tmp_path: Path) -
     status = bridge.train_status({"mode": "live", "profile_id": "fake_omx_ai", "session_id": "train-active"})
 
     assert status["ok"] is True
-    assert status["training"]["current_step"] == 1031
-    assert status["training"]["progress_percent"] == 34.37
+    assert status["training"]["current_step"] == 1000
+    assert status["training"]["progress_percent"] == 33.33
     assert status["training"]["last_loss"] == 0.017
 
 
@@ -1624,6 +1804,7 @@ def test_pi05_rollout_uses_dedicated_runtime_and_rtc_command(tmp_path: Path) -> 
     assert "--rtc.execution_horizon=20" in result["command_preview"]
     assert "--rtc.max_guidance_weight=1.0" in result["command_preview"]
     assert "--action_queue_size_to_get_new_actions=60" in result["command_preview"]
+    assert "--robot.disable_torque_on_disconnect=false" in result["command_preview"]
     assert "--task=Move specimen from 3DP to UTM" in result["command_preview"]
     assert f"--duration={int(86400.0)}" in result["command_preview"]
     camera_arg = next(item for item in result["command_preview"] if item.startswith("--robot.cameras="))
@@ -1976,7 +2157,9 @@ def test_rollout_runtime_status_is_inferred_from_action_log(tmp_path: Path) -> N
 
     assert result["runtime_phase"] == "ACTION_ACTIVE"
     assert result["runtime"]["action_count"] == 90
+    assert result["action_count"] == 90
     assert result["runtime"]["max_abs_delta"] == 2.866
+    assert result["max_abs_delta"] == 2.866
     assert "Robot action stream active" in result["runtime_message"]
 
 

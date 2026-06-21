@@ -159,6 +159,11 @@ Current LeRobot bridge behavior:
 - Rollout/inference normalizes selected local policy files or output folders to
   the executable LeRobot `pretrained_model` checkpoint directory before command
   construction.
+- Pi0.5 rollout runs through `scripts/lerobot_pi05_rollout_wrapper.py` in
+  `lerobot-pi05-torch211` and injects
+  `--robot.disable_torque_on_disconnect=false` for the ROBOTIS OMX-AI follower.
+  If a follow-up handshake reports a missing follower ID, inspect the
+  Dynamixel status/reboot path instead of changing the saved motor set.
 
 ## 1. Page Routes
 
@@ -837,7 +842,7 @@ Important RealSense rules in the current code:
 - LeRobotBridge owns policy-camera command generation. The current ROBOTIS OMX
   profile uses `top=341522300873` D455F with `color_format=rgb8` and
   `wrist=352122273019` D405 with `color_format=bgr8`; both RealSense cameras
-  keep `warmup_s>=1`.
+  keep `warmup_s>=5`.
 - `Detect & Save` must not store a visible D455F as the wrist camera when D405
   is absent. That failure is reported as `LEROBOT_REALSENSE_ROLE_CAMERA_NOT_FOUND`.
 - `scripts/realsense_usb_stabilize.py` inspects RealSense/BRIO USB sysfs power

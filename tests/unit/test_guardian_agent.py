@@ -249,6 +249,38 @@ async def test_guardian_recovers_when_equipment_handoff_gate_blocked() -> None:
     assert guardian["consistency"]["status"] == "fail"
     assert any("equipment handoff gate blocked" in item for item in guardian["consistency"]["issues"])
 
+
+@pytest.mark.asyncio
+async def test_guardian_recovers_when_multifidelity_trust_gate_blocks_bo() -> None:
+    agent = GuardianAgent()
+    ctx = _CtxStub()
+    state = _state(mode=Mode.LIVE, objective_score=0.7, uncertainty=0.18, precursor=0.2)
+    state.latest_analysis.update(
+        {
+            "ok": True,
+            "trust_score": {
+                "schema": "trust_score.v1",
+                "score": 0.42,
+                "gate": "block",
+                "reasons": ["utm_fea_agreement_low"],
+            },
+            "multifidelity_comparison": {
+                "schema": "multifidelity_comparison.v1",
+                "curve": {"peak_force_error_pct": 58.0},
+            },
+        }
+    )
+
+    result = await agent.run(state, ctx)
+    guardian = result.data["guardian"]
+
+    assert guardian["decision"] == "continue"
+    assert guardian["action"] == "recover"
+    assert guardian["consistency"]["status"] == "fail"
+    assert guardian["consistency"]["trust_score"]["gate"] == "block"
+    assert any("multi-fidelity trust gate blocked" in item for item in guardian["consistency"]["issues"])
+
+
 @pytest.mark.asyncio
 async def test_guardian_recovers_on_blocking_graph_gate_metadata() -> None:
     agent = GuardianAgent()

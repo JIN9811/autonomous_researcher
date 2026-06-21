@@ -299,6 +299,22 @@ class ManipulationAgent(BaseAgent):
         policy_checkpoint_path = str(
             spec.get("lerobot_policy_checkpoint_path") or spec.get("policy_checkpoint_path") or ""
         ).strip()
+        explicit_keys = spec.get("__explicit_keys") if isinstance(spec.get("__explicit_keys"), set) else set()
+        explicit_policy = any(
+            key in explicit_keys
+            for key in (
+                "lerobot_policy_path",
+                "policy_path",
+                "lerobot_policy_checkpoint_path",
+                "policy_checkpoint_path",
+                "lerobot_policy_repo_id",
+                "policy_repo_id",
+            )
+        )
+        if state.mode == Mode.TEST and not explicit_policy:
+            policy_path = ""
+            policy_checkpoint_path = ""
+            policy_repo_id = ""
         if state.mode == Mode.TEST and not policy_path and not policy_checkpoint_path and not policy_repo_id:
             policy_path = "fake://pi05_policy" if is_pi05 else "fake://policy"
         source = str(spec.get("source_location") or task_def.get("source_location") or "3dp_output_area")

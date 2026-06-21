@@ -590,6 +590,8 @@ atr gpu clear
 - follower/leader 역할이 바뀌지 않았는지
 - top/wrist 카메라 index 또는 by-id 링크가 현재 연결 상태와 맞는지
 - stale subprocess가 카메라/serial을 점유 중인지
+- RealSense를 쓰는 경우 SDK serial이 보이는지. 현재 기본값은
+  `top=D455F/341522300873`, `wrist=D405/352122273019`이다.
 
 조치:
 
@@ -599,6 +601,41 @@ atr up
 ```
 
 필요하면 LeRobot GUI의 force stop/status를 사용한다.
+
+RealSense 전역 진단:
+
+```bash
+rs-enumerate-devices
+rs-fw-update -l
+python3 - <<'PY'
+import pyrealsense2 as rs
+ctx = rs.context()
+print("device_count", len(list(ctx.query_devices())))
+for dev in ctx.query_devices():
+    print(
+        dev.get_info(rs.camera_info.name),
+        dev.get_info(rs.camera_info.serial_number),
+        dev.get_info(rs.camera_info.usb_type_descriptor),
+    )
+PY
+```
+
+정상 기준:
+
+- D455F와 D405가 모두 보여야 한다.
+- 둘 다 SDK USB `3.2` 또는 sysfs `5000M`으로 잡히는 것이 안정적이다.
+- `2.1` 또는 `480M`이면 코드 문제가 아니라 USB 허브/케이블/포트 협상 문제부터 본다.
+
+D455F/D405가 보이는데 스트림만 `RS2_USB_STATUS_BUSY`,
+`failed to set power state`, 또는 frame timeout이면:
+
+```bash
+fuser -v /dev/video* 2>/dev/null || true
+```
+
+점유 프로세스가 없으면 허브를 power-cycle/replug한 뒤 다시 시도한다.
+필요할 때만 root smoke test로 power-state를 깨운 뒤 일반 사용자로 재시도한다.
+이 상태에서는 카메라 역할 매핑을 OpenCV `/dev/video*`로 바꾸지 않는다.
 
 ### graph가 live에서 막힐 때
 

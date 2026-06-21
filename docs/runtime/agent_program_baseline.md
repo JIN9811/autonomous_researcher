@@ -231,6 +231,16 @@ Current tool names expected by agents:
 - `equipment.pyautogui.save_connection`
 - `cae.health`
 - `cae.run_static_analysis`
+- `calculix.health`
+- `calculix.prepare_input`
+- `calculix.solve`
+- `calculix.postprocess`
+- `calculix.run_job`
+- `pinn.health`
+- `pinn.dataset.build`
+- `pinn.train`
+- `pinn.predict`
+- `pinn.registry`
 - `lerobot.profiles.list`
 - `lerobot.profiles.validate`
 - `lerobot.find_ports`
@@ -265,6 +275,12 @@ Payload baseline:
 | `equipment.pyautogui.save_connection` | `host` or `bridge_url`, optional `token` | `ok`, `bridge_url`, `selected`, `token_configured` |
 | `cae.health` | none | `ok`, `tool`, `calculix`, `gmsh`, `defaults`, `artifact_dir` |
 | `cae.run_static_analysis` | `runtime_mode`, `specimen_id`, `specimen_size_mm`, `material`, `loading`, `boundary` | `ok`, `tool`, `status`, `boundary_condition`, `loading_mode`, `metrics`, `cae_metrics`, `artifacts`, `step_trace`, `closed_loop_source` |
+| `calculix.health` | none | `ok`, `tool`, `enabled`, `mode`, `runtime_solver_enabled`, `calculix`, `ccx2paraview`, `frd2vtu`, `artifact_dir` |
+| `calculix.prepare_input` | `specimen_id`, optional `inp_text` or `inp_path` | `ok`, `tool`, `status`, `job_dir`, `inp_path`, `request_path` |
+| `calculix.run_job` | `specimen_id`, `inp_text` or `inp_path`, explicit `runtime_solver_enabled=true` for real solve | `ok`, `tool`, `status`, `prepared`, `solve`, `postprocess`, `dat_path`, `frd_path`, `failure_code`, `step_trace` |
+| `pinn.health` | none | `ok`, `tool`, `enabled`, `mode`, `active_model_id`, `active_model_available`, `model_count`, `registry_path` |
+| `pinn.dataset.build` | `specimen_id`, optional `utm_curve`, `fea_records` | `ok`, `tool`, `status`, `dataset_id`, `dataset_path`, `step_trace` |
+| `pinn.predict` | `specimen_id`, optional `model_id` | registered model: `ok=true`, `prediction`; no active model: `ok=false`, `status=unavailable`, `failure_code=PINN_MODEL_UNAVAILABLE` |
 | `lerobot.find_ports` | `mode`, optional `profile_id` | `ok`, `tool`, `mode`, `profile_id`, `ports`, `command_preview`, `step_trace` |
 | `lerobot.teleoperate.*` | `mode`, `profile_id`, optional `session_id` | `ok`, `tool`, `workflow`, `session_id`, `status`, `command_preview`, `step_trace` |
 | `lerobot.record.*` | `mode`, `profile_id`, optional `dataset_path`/`dataset_repo_id`/`session_id` | `ok`, `tool`, `workflow`, `session_id`, `status`, `dataset_path`, `command_preview`, `step_trace` |
@@ -298,6 +314,18 @@ Equipment-specific integration rule:
 - Discovery lists only token-verified Windows bridge hosts.
 - Saved Windows bridge candidates use aliases, for example `windows_pyautogui_pc_1`, so LLM/tool-call planning can refer to a stable device identity and quick-connect later.
 - `program1` is the setup demo macro: after PyAutoGUI is installed on Windows it briefly moves the mouse and returns `program_log: "program1 completed"`.
+
+Analysis/BO/Guardian multi-fidelity integration rule:
+
+- `AnalysisAgent` owns the multi-fidelity evidence envelope for UTM, CalculiX/CAE, and optional PINN evidence.
+- Analysis emits `analysis.multifidelity_comparison` with schema `multifidelity_comparison.v1`, `analysis.trust_score` with schema `trust_score.v1`, and `bo_handoff.schema_version=analysis_bo_handoff_v2`.
+- `experiments.schemas` defines additive typed records: `UTMRecord`, `FEAResult`, `PINNModelRecord`, `MultifidelityJob`, and `TrustScore`.
+- `device_bridges/calculix_bridge.py` is the explicit real CalculiX job contract. It must block real solves unless `runtime_solver_enabled=true`; this prevents hidden solver launches during test or GUI preview.
+- `device_bridges/pinn_bridge.py` is the explicit PINN/surrogate contract. If no active model is registered, `pinn.predict` returns `PINN_MODEL_UNAVAILABLE`; Analysis should display PINN as unavailable, not as a failed experiment.
+- `BOAgent` must read `analysis_bo_handoff_v2.trust_score` and `multifidelity_comparison`; `trust_gate=block` or `calibrate_only` prevents BO from treating the result as a normal optimization observation.
+- `GuardianAgent` must inspect `trust_score` and `multifidelity_comparison`. A blocking trust gate is a recoverable consistency issue unless a higher-priority stop condition exists.
+- Live GUI Analysis reports must render trust score/gate, UTM-FEA agreement, PINN availability, provenance/artifact links, and curve/contour evidence as report components rather than raw JSON.
+- Live GUI chat keeps each agent's operator-visible message. Completed loops may be collapsed into `Nth Loop Complete`, but expanding the loop must still show each agent message; system events are compact one-line entries.
 
 LeRobot-specific integration rule:
 

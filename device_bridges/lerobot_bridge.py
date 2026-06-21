@@ -31,6 +31,7 @@ import re
 import signal
 import shutil
 import subprocess
+import sys
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -58,7 +59,7 @@ MANUAL_STOP_ROLLOUT_EPISODE_S = 86400.0
 LEROBOT_REALSENSE_BACKENDS = {"realsense", "intelrealsense", "intel_realsense", "realsense_sdk"}
 LEROBOT_REALSENSE_TYPE = "intelrealsense"
 LEROBOT_DEFAULT_REALSENSE_FPS = 15
-LEROBOT_DEFAULT_REALSENSE_WARMUP_S = 1
+LEROBOT_DEFAULT_REALSENSE_WARMUP_S = 5
 LEROBOT_DEFAULT_CAMERA_WIDTH = 640
 LEROBOT_DEFAULT_CAMERA_HEIGHT = 480
 LEROBOT_REALSENSE_MODEL_NAMES = {
@@ -178,6 +179,7 @@ class LeRobotBridge:
         self.config = config
         self._sessions: dict[str, dict[str, Any]] = {}
         self._processes: dict[str, subprocess.Popen[str]] = {}
+        self._monitor_processes: dict[str, subprocess.Popen[str]] = {}
         self._log_handles: dict[str, IO[str]] = {}
         self._counter = 0
         self._selected_profile_id = config.default_profile_id
@@ -186,6 +188,8 @@ class LeRobotBridge:
     def shutdown(self) -> dict[str, Any]:
         """Stop tracked and stale LeRobot live subprocesses before the GUI server exits."""
         step_trace = self.cleanup_all_lerobot_processes()
+        for session_id in list(self._monitor_processes):
+            self._stop_training_monitor({"session_id": session_id})
         for session_id in list(self._log_handles):
             self._close_log_handle(session_id)
         return {"ok": True, "tool": "lerobot.shutdown", "step_trace": step_trace, "events": step_trace}
@@ -412,6 +416,8 @@ class LeRobotBridge:
             chosen = candidates[0] if candidates else ""
         if not chosen:
             return self._error("lerobot.ports.detect", mode, profile.profile_id, "LEROBOT_PORT_NOT_FOUND", f"No candidate found for {request.device_role}.")
+        raw_chosen = chosen
+        chosen = self._normalize_realsense_selected_identifier(request, chosen, mode=mode)
         stable_chosen = self._stable_device_port(chosen, request.device_role) if mode == "live" else str(chosen or "").strip()
         conflict = self._serial_role_port_conflict(profile.profile_id, request.device_role, stable_chosen, memory=memory)
         if conflict:
@@ -450,7 +456,7 @@ class LeRobotBridge:
             "candidates": candidates,
             "change_type": change_type,
             "selected_port": saved.get("port", chosen),
-            "raw_selected_port": chosen,
+            "raw_selected_port": raw_chosen,
             "saved_device": saved,
             "saved_devices": self._saved_devices(profile.profile_id),
             "step_trace": step_trace,
@@ -470,6 +476,8 @@ class LeRobotBridge:
             port = self._preferred_realsense_identifier(request.camera_key)
         if not port:
             return self._error("lerobot.ports.save", mode, profile.profile_id, "LEROBOT_PORT_REQUIRED", "A port or camera index is required.")
+        raw_port = port
+        port = self._normalize_realsense_selected_identifier(request, port, mode=mode)
         memory = self._load_device_memory()
         stable_port = self._stable_device_port(port, request.device_role) if mode == "live" else str(port or "").strip()
         conflict = self._serial_role_port_conflict(profile.profile_id, request.device_role, stable_port, memory=memory)
@@ -503,6 +511,7 @@ class LeRobotBridge:
             "profile_id": profile.profile_id,
             "device_role": request.device_role,
             "camera_key": request.camera_key,
+            "raw_selected_port": raw_port,
             "saved_device": saved,
             "saved_devices": self._saved_devices(profile.profile_id),
             "step_trace": step_trace,
@@ -1315,6 +1324,8 @@ class LeRobotBridge:
             "returncode": None,
             "tts": self._tts_config_for_request(request) if workflow == "record" else {},
         }
+        if workflow == "record":
+            session["expected_depth_features"] = self._expected_record_depth_features(profile, request)
         if workflow == "train":
             session["train_config"] = self._train_config_summary(profile, request)
             session["output_dir"] = session["train_config"].get("output_dir", "")
@@ -1353,6 +1364,8 @@ class LeRobotBridge:
             else:
                 session["status"] = status if status != "COMPLETED" else "RUNNING"
                 step_trace.append({"step": "PROCESS_STARTED", "status": "active", "detail": f"pid={session.get('pid')}"})
+                if workflow == "train":
+                    session["monitor"] = self._start_training_monitor(session, request)
         self._sessions[session_id] = session
         self._emit_trace(event_payload or request.model_dump(), tool, step_trace, profile.profile_id, mode, session_id)
         return self._session_response(tool, mode, session, step_trace)
@@ -1394,6 +1407,7 @@ class LeRobotBridge:
                 self._terminate_live_process(process, signal.SIGKILL)
                 process.wait(timeout=5)
             session["returncode"] = process.returncode
+        self._stop_training_monitor(session)
         cleanup_trace = self._cleanup_lerobot_processes(workflow)
         self._close_log_handle(str(session.get("session_id", "")))
         session["status"] = stopped_status
@@ -1440,6 +1454,7 @@ class LeRobotBridge:
             elif process:
                 session["returncode"] = process.returncode
                 self._processes.pop(session_id, None)
+            self._stop_training_monitor(session)
             self._close_log_handle(session_id)
             session["status"] = stopped_status
             session.setdefault("step_trace", []).extend(
@@ -1520,8 +1535,20 @@ class LeRobotBridge:
         training = self._training_progress(session)
         log_tail = self._tail_file(str(session.get("log_path", "")))
         runtime = self._runtime_status_from_log(session, log_tail)
+        depth_validation = self._record_depth_validation(session)
+        depth_failed = bool(depth_validation and depth_validation.get("status") == "failed")
+        if depth_failed:
+            session["status"] = "FAILED"
+            if not any(item.get("step") == "LEROBOT_REALSENSE_DEPTH_FEATURE_MISSING" for item in step_trace):
+                step_trace.append(
+                    {
+                        "step": "LEROBOT_REALSENSE_DEPTH_FEATURE_MISSING",
+                        "status": "failed",
+                        "detail": str(depth_validation.get("message", "")),
+                    }
+                )
         payload = {
-            "ok": True,
+            "ok": not depth_failed,
             "tool": tool,
             "mode": mode,
             "profile_id": session.get("profile_id", ""),
@@ -1531,6 +1558,8 @@ class LeRobotBridge:
             "runtime": runtime,
             "runtime_phase": runtime.get("phase"),
             "runtime_message": runtime.get("message"),
+            "action_count": runtime.get("action_count"),
+            "max_abs_delta": runtime.get("max_abs_delta"),
             "command_preview": list(session.get("command_preview", [])),
             "events": step_trace,
             "step_trace": step_trace,
@@ -1545,14 +1574,98 @@ class LeRobotBridge:
             "pid": session.get("pid"),
             "returncode": session.get("returncode"),
             "tts": session.get("tts", {}),
+            "monitor": session.get("monitor", {}),
             "error": None,
         }
+        if depth_validation:
+            payload["dataset_depth_validation"] = depth_validation
+        if depth_failed:
+            payload["failure_code"] = "LEROBOT_REALSENSE_DEPTH_FEATURE_MISSING"
+            payload["message"] = str(depth_validation.get("message", "RealSense depth feature is missing from the recorded dataset."))
+            payload["error"] = payload["message"]
         if training:
             payload["training"] = training
         if session.get("visualization"):
             payload["visualization"] = session.get("visualization", {})
         payload.update(extra)
         return payload
+
+    def _expected_record_depth_features(self, profile: RobotProfile, request: LeRobotSessionRequest) -> list[str]:
+        if not request.camera_enabled:
+            return []
+        expected: list[str] = []
+        for camera_key in self._profile_camera_keys(profile):
+            camera_device = self._saved_camera_device(profile.profile_id, camera_key)
+            backend = self._normalize_camera_backend((camera_device or {}).get("backend", "opencv"))
+            if backend == LEROBOT_REALSENSE_TYPE and self._camera_use_depth(camera_device or {}, default=True):
+                expected.append(f"observation.images.{camera_key}_depth")
+        return expected
+
+    def _record_depth_validation(self, session: dict[str, Any]) -> dict[str, Any] | None:
+        if str(session.get("workflow") or "").lower() != "record":
+            return None
+        expected = [str(item) for item in session.get("expected_depth_features", []) if str(item).strip()]
+        if not expected:
+            return None
+
+        dataset_path = Path(str(session.get("dataset_path") or "")).expanduser()
+        info_path = dataset_path / "meta" / "info.json"
+        terminal = str(session.get("status") or "").upper() in {"COMPLETED", "FAILED", "STOPPED", "CANCELLED"}
+        if not info_path.is_file():
+            status = "failed" if terminal else "waiting"
+            return {
+                "required": True,
+                "status": status,
+                "dataset_path": str(dataset_path),
+                "expected_depth_features": expected,
+                "present_depth_features": [],
+                "missing_depth_features": expected,
+                "message": f"Waiting for LeRobot dataset metadata at {info_path}."
+                if status == "waiting"
+                else f"LeRobot dataset metadata was not written at {info_path}.",
+            }
+
+        try:
+            info = json.loads(info_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            status = "failed" if terminal else "waiting"
+            return {
+                "required": True,
+                "status": status,
+                "dataset_path": str(dataset_path),
+                "expected_depth_features": expected,
+                "present_depth_features": [],
+                "missing_depth_features": expected,
+                "message": f"Could not read LeRobot dataset metadata: {exc.__class__.__name__}: {exc}",
+            }
+
+        features = info.get("features") if isinstance(info, dict) else {}
+        if not isinstance(features, dict):
+            features = {}
+        present_depth = sorted(key for key in features if str(key).startswith("observation.images.") and "depth" in str(key))
+        missing = [key for key in expected if key not in features]
+        if missing:
+            status = "failed" if terminal else "waiting"
+            return {
+                "required": True,
+                "status": status,
+                "dataset_path": str(dataset_path),
+                "expected_depth_features": expected,
+                "present_depth_features": present_depth,
+                "missing_depth_features": missing,
+                "message": "RealSense depth was requested, but the recorded LeRobot dataset does not expose "
+                f"the expected depth feature(s): {', '.join(missing)}.",
+            }
+
+        return {
+            "required": True,
+            "status": "ok",
+            "dataset_path": str(dataset_path),
+            "expected_depth_features": expected,
+            "present_depth_features": present_depth,
+            "missing_depth_features": [],
+            "message": "Recorded LeRobot dataset exposes the expected RealSense depth visual features.",
+        }
 
     def _runtime_status_from_log(self, session: dict[str, Any], log_tail: str) -> dict[str, Any]:
         """Summarize live LeRobot process state from its persisted session log."""
@@ -1651,10 +1764,6 @@ class LeRobotBridge:
         current_step, detected_total = self._parse_training_step(log_tail)
         if detected_total:
             total_steps = detected_total
-        batch_size = int(config.get("batch_size") or 0)
-        sample_count = self._parse_training_sample_count(log_tail)
-        if batch_size > 0 and sample_count > 0:
-            current_step = max(current_step, sample_count // batch_size)
         status = str(session.get("status") or "").upper()
         synthetic_complete = status == "COMPLETED" and not log_tail and bool(total_steps)
         if status == "COMPLETED" and total_steps:
@@ -1806,6 +1915,7 @@ class LeRobotBridge:
             "pid": session.get("pid"),
             "returncode": session.get("returncode"),
             "training": {**dict(session.get("train_config", {})), **dict(training or {})},
+            "monitor": session.get("monitor", {}),
             "visualization": session.get("visualization", {}),
         }
 
@@ -2041,13 +2151,38 @@ class LeRobotBridge:
         key = str(camera_key or "").strip().lower()
         hints = LEROBOT_REALSENSE_CAMERA_MODEL_HINTS.get(key, ())
         if hints:
-            for entry in self._scan_realsense_camera_entries():
+            for entry in self._scan_live_realsense_camera_entries():
                 name = str(entry.get("name") or "").lower()
                 product_line = str(entry.get("product_line") or "").lower()
                 match_text = f"{name} {product_line}"
                 if any(hint in match_text for hint in hints):
                     return str(entry.get("serial") or entry.get("name") or self._default_realsense_identifier(camera_key))
         return self._default_realsense_identifier(camera_key)
+
+    def _normalize_realsense_selected_identifier(self, request: LeRobotDevicePortRequest, selected: str, *, mode: str) -> str:
+        """Convert UI-selected RealSense paths/names to SDK serials for runtime stability."""
+        if request.device_role != "camera" or self._normalize_camera_backend(request.camera_backend) != LEROBOT_REALSENSE_TYPE:
+            return selected
+        raw = str(selected or "").strip()
+        if mode != "live":
+            return raw or self._preferred_realsense_identifier(request.camera_key)
+        entries = self._scan_live_realsense_camera_entries()
+        if not entries:
+            return raw or self._preferred_realsense_identifier(request.camera_key)
+        preferred = self._preferred_realsense_identifier(request.camera_key)
+        visible_serials = {str(entry.get("serial") or "").strip() for entry in entries if str(entry.get("serial") or "").strip()}
+        if preferred in visible_serials:
+            return preferred
+        if raw in visible_serials:
+            return raw
+        lowered = raw.lower()
+        for entry in entries:
+            serial = str(entry.get("serial") or "").strip()
+            name = str(entry.get("name") or "").strip().lower()
+            product_line = str(entry.get("product_line") or "").strip().lower()
+            if serial and lowered and (lowered == name or lowered == product_line or name in lowered or product_line in lowered):
+                return serial
+        return raw or preferred
 
     def _request_camera_metadata(self, request: LeRobotDevicePortRequest) -> dict[str, Any]:
         backend = self._normalize_camera_backend(request.camera_backend)
@@ -2111,7 +2246,7 @@ class LeRobotBridge:
         else:
             command.extend(self._workflow_entrypoint(profile, workflow))
         if workflow in {"teleoperate", "record", "rollout"}:
-            command.extend(self._robot_args(profile, request=request, allow_fake=mode != "live"))
+            command.extend(self._robot_args(profile, request=request, allow_fake=mode != "live", workflow=workflow))
         if workflow in {"teleoperate", "record"}:
             command.extend(self._teleop_args(profile, request=request, allow_fake=mode != "live"))
         command.extend([arg for arg in args if arg and not arg.endswith("=")])
@@ -2147,6 +2282,78 @@ class LeRobotBridge:
         if workflow == "record":
             env.update(self._tts_env_overrides(request))
         return env
+
+    def _start_training_monitor(self, session: dict[str, Any], request: LeRobotSessionRequest) -> dict[str, Any]:
+        """Attach passive host diagnostics to GUI-started live training sessions."""
+        session_id = str(session.get("session_id") or "")
+        log_path = str(session.get("log_path") or "").strip()
+        script = self.config.repo_root / "scripts" / "training_stability_monitor.py"
+        if not script.is_file():
+            return {"status": "unavailable", "reason": f"missing monitor script: {script}"}
+        output_dir = self.config.repo_root / "runs" / "training_watch"
+        command = [
+            sys.executable or "python3",
+            str(script),
+            "--interval-seconds",
+            "30",
+            "--output-dir",
+            str(output_dir),
+        ]
+        if log_path:
+            command.extend(["--train-log", log_path])
+        checkpoint_dir = self._checkpoint_dir_for_monitor(str(session.get("checkpoint_path") or ""))
+        if checkpoint_dir:
+            command.extend(["--checkpoint-dir", checkpoint_dir])
+        try:
+            process = subprocess.Popen(
+                command,
+                cwd=str(self.config.repo_root),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                env={**os.environ, "PYTHONUNBUFFERED": "1"},
+                start_new_session=True,
+            )
+        except Exception as exc:
+            return {"status": "failed", "reason": f"{exc.__class__.__name__}: {exc}", "command_preview": command}
+        if session_id:
+            self._monitor_processes[session_id] = process
+        return {
+            "status": "running",
+            "pid": process.pid,
+            "output_dir": str(output_dir),
+            "train_log": log_path,
+            "checkpoint_dir": checkpoint_dir,
+            "command_preview": command,
+        }
+
+    @staticmethod
+    def _checkpoint_dir_for_monitor(checkpoint_path: str) -> str:
+        path = Path(str(checkpoint_path or "")).expanduser()
+        candidates = [path]
+        if path.name == "pretrained_model":
+            candidates.append(path.parent)
+        for candidate in candidates:
+            if (candidate / "training_state" / "training_step.json").exists():
+                return str(candidate)
+        return ""
+
+    def _stop_training_monitor(self, session: dict[str, Any]) -> None:
+        session_id = str(session.get("session_id") or "")
+        process = self._monitor_processes.pop(session_id, None)
+        if process is None:
+            return
+        if process.poll() is None:
+            self._terminate_live_process(process, signal.SIGTERM)
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self._terminate_live_process(process, signal.SIGKILL)
+                process.wait(timeout=5)
+        monitor = dict(session.get("monitor") or {})
+        monitor["status"] = "stopped"
+        monitor["returncode"] = process.returncode
+        session["monitor"] = monitor
 
     def _hf_token_for_subprocess(self) -> str:
         for name in ("HF_TOKEN", "HUGGING_FACE_HUB_TOKEN"):
@@ -2386,12 +2593,12 @@ class LeRobotBridge:
             fields_set = set(request.model_fields_set)
             self._validate_pi05_train_request(request)
             pi05_defaults: dict[str, Any] = {
-                "batch_size": 32,
+                "batch_size": 16,
                 "steps": 3000,
                 "num_workers": 12,
                 "eval_batch_size": None,
                 "eval_freq": 500,
-                "log_freq": 5,
+                "log_freq": 50,
                 "save_freq": 500,
                 "wandb_enable": True,
                 "wandb_mode": "offline",
@@ -2499,7 +2706,7 @@ class LeRobotBridge:
         if not self._is_pi05_policy(request.policy_type):
             return args
         defaults = [
-            "--policy.compile_model=false",
+            "--policy.compile_model=true",
             "--policy.gradient_checkpointing=true",
             "--policy.dtype=bfloat16",
             "--policy.freeze_vision_encoder=false",
@@ -3147,7 +3354,7 @@ print("Updated Pi0.5 quantile stats for " + ", ".join(updated))
         }.get(workflow, f"lerobot-{workflow}")
         return [script]
 
-    def _robot_args(self, profile: RobotProfile, *, request: LeRobotSessionRequest, allow_fake: bool = True) -> list[str]:
+    def _robot_args(self, profile: RobotProfile, *, request: LeRobotSessionRequest, allow_fake: bool = True, workflow: str = "") -> list[str]:
         mode = request.runtime_mode or request.mode
         args = [
             f"--robot.type={profile.robot_type}",
@@ -3159,6 +3366,11 @@ print("Updated Pi0.5 quantile stats for " + ", ".join(updated))
         port = self._device_port(profile, "follower", allow_fake=allow_fake)
         if port:
             args.append(f"--robot.port={self._runtime_device_port(port, 'follower', live=mode == 'live')}")
+        if workflow == "rollout" and self._is_pi05_policy(request.policy_type):
+            # Pi0.5 OMX rollout can finish normally and then abort while disabling
+            # torque on a hardware-error motor. Avoid converting a completed
+            # rollout into FAILED during disconnect; operator stop remains explicit.
+            args.append("--robot.disable_torque_on_disconnect=false")
         camera_map: dict[str, dict[str, Any]] = {}
         if request.camera_enabled:
             for camera_key in self._profile_camera_keys(profile):
@@ -3170,12 +3382,20 @@ print("Updated Pi0.5 quantile stats for " + ", ".join(updated))
                         runtime_port,
                         saved_camera,
                         request_fps=request.camera_fps or request.fps or profile.fps,
+                        include_color_format=not (workflow == "rollout" and self._is_pi05_policy(request.policy_type)),
                     )
         if camera_map:
             args.append(f"--robot.cameras={json.dumps(camera_map, ensure_ascii=True)}")
         return args
 
-    def _camera_config_for_command(self, port_or_identifier: str, camera_device: dict[str, Any] | None = None, *, request_fps: int | None = None) -> dict[str, Any]:
+    def _camera_config_for_command(
+        self,
+        port_or_identifier: str,
+        camera_device: dict[str, Any] | None = None,
+        *,
+        request_fps: int | None = None,
+        include_color_format: bool = True,
+    ) -> dict[str, Any]:
         device = camera_device or {}
         backend = self._normalize_camera_backend(device.get("backend", "opencv"))
         if backend == LEROBOT_REALSENSE_TYPE:
@@ -3186,7 +3406,7 @@ print("Updated Pi0.5 quantile stats for " + ", ".join(updated))
                 use_depth=self._camera_use_depth(device, default=True),
                 width=_safe_int(device.get("width"), LEROBOT_DEFAULT_CAMERA_WIDTH, minimum=1),
                 height=_safe_int(device.get("height"), LEROBOT_DEFAULT_CAMERA_HEIGHT, minimum=1),
-                color_format=self._realsense_color_format(identifier=identifier, camera_device=device),
+                color_format=self._realsense_color_format(identifier=identifier, camera_device=device) if include_color_format else "",
             )
         return self._opencv_camera_config(port_or_identifier, request_fps)
 
@@ -3213,19 +3433,21 @@ print("Updated Pi0.5 quantile stats for " + ", ".join(updated))
         height: int,
         color_format: str,
     ) -> dict[str, Any]:
-        return {
+        data = {
             "type": LEROBOT_REALSENSE_TYPE,
             "serial_number_or_name": serial_number_or_name,
             "width": width,
             "height": height,
             "fps": fps,
-            "color_format": color_format,
             "use_depth": bool(use_depth),
             # LeRobot / RealSense D405 needs a real warmup period before
             # consuming frames; disabling warmup makes status=False failures
             # more likely after a previous session.
             "warmup_s": LEROBOT_DEFAULT_REALSENSE_WARMUP_S,
         }
+        if color_format:
+            data["color_format"] = color_format
+        return data
 
     def _teleop_args(self, profile: RobotProfile, *, request: LeRobotSessionRequest, allow_fake: bool = True) -> list[str]:
         mode = request.runtime_mode or request.mode
@@ -3346,11 +3568,14 @@ print("Updated Pi0.5 quantile stats for " + ", ".join(updated))
             return
         self._close_log_handle(session_id)
         if str(session.get("status", "")).upper() in {"CANCELLED", "STOPPED"}:
+            self._stop_training_monitor(session)
             return
         if int(returncode) == 0:
             session["status"] = "COMPLETED"
         else:
             session["status"] = "FAILED"
+        if str(session.get("workflow") or "").lower() == "train":
+            self._stop_training_monitor(session)
 
     @staticmethod
     def _rollout_log_has_fatal_runtime_failure(log_tail: str) -> bool:
@@ -3937,8 +4162,22 @@ print(json.dumps({"ok": True, "key": key_name}))
 
     def _scan_camera_candidates(self, request: LeRobotDevicePortRequest) -> list[str]:
         if self._normalize_camera_backend(request.camera_backend) == LEROBOT_REALSENSE_TYPE:
-            return self._scan_realsense_camera_ids()
+            return self._scan_live_realsense_camera_ids()
         return self._scan_camera_ports()
+
+    def _scan_live_realsense_camera_ids(self) -> list[str]:
+        ids: list[str] = []
+        for entry in self._scan_live_realsense_camera_entries():
+            serial = str(entry.get("serial") or "").strip()
+            name = str(entry.get("name") or "").strip()
+            product_line = str(entry.get("product_line") or "").strip()
+            if serial:
+                ids.append(serial)
+            if name:
+                ids.append(name)
+            if product_line and name and product_line not in name:
+                ids.append(f"{name} {product_line}")
+        return sorted(dict.fromkeys(ids))
 
     def _scan_realsense_camera_ids(self) -> list[str]:
         """Enumerate RealSense serials/names without starting streams."""

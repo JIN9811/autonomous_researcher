@@ -80,7 +80,7 @@ Rules:
   `wrist=352122273019` for D405.
 - Command generation must preserve role-specific RealSense stream settings:
   `top/D455F -> color_format=rgb8`, `wrist/D405 -> color_format=bgr8`, both
-  with `warmup_s>=1`, `use_depth=true`, and the saved FPS/resolution.
+  with `warmup_s>=5`, `use_depth=true`, and the saved FPS/resolution.
 - Device Port Setup must not save top/D455F as wrist when D405 is absent. Missing
   D405 is represented as `LEROBOT_REALSENSE_ROLE_CAMERA_NOT_FOUND` during
   detect/save or `LEROBOT_REALSENSE_CAMERA_UNAVAILABLE` during live startup.
@@ -155,7 +155,7 @@ HF_HOME=/home/jin/.cache/huggingface_pi05 HF_HUB_CACHE=/home/jin/.cache/huggingf
 Recommended additional train args for Pi0.5 on this workstation. Quantile stats are generated automatically for `observation.state` and `action` when missing; do not override Pi0.5 normalization unless intentionally debugging a dataset.
 
 ```text
---policy.compile_model=false
+--policy.compile_model=true
 --policy.gradient_checkpointing=true
 --policy.dtype=bfloat16
 --policy.freeze_vision_encoder=false
@@ -177,7 +177,7 @@ conda run --no-capture-output -n lerobot-pi05-torch211 python -m lerobot.dataset
 Policy-specific GUI defaults:
 
 - ACT follows the Hugging Face LeRobot train defaults and ACT config: `batch_size=8`, `steps=100000`, `num_workers=4`, `eval_freq=20000`, `log_freq=200`, `save_freq=20000`, `policy.n_obs_steps=1`, `policy.chunk_size=100`, `policy.n_action_steps=100`.
-- Pi0.5 follows the Hugging Face Pi0.5 fine-tuning example and the local workstation profile: `batch_size=32`, `steps=3000`, `num_workers=12`, `eval_freq=500`, `log_freq=5`, `save_freq=500` by default, `policy.n_obs_steps=1`, `policy.chunk_size=50`, `policy.n_action_steps=50`, plus `compile_model=false`, `gradient_checkpointing=true`, `dtype=bfloat16`, `freeze_vision_encoder=false`, and `train_expert_only=false`. The backend hard limit for Pi0.5 `num_workers` is 20 on this workstation.
+- Pi0.5 follows the Hugging Face Pi0.5 fine-tuning example and the local workstation profile: `batch_size=16`, `steps=3000`, `num_workers=12`, `eval_freq=500`, `log_freq=50`, `save_freq=500` by default, `policy.n_obs_steps=1`, `policy.chunk_size=50`, `policy.n_action_steps=50`, plus `compile_model=true`, `gradient_checkpointing=true`, `dtype=bfloat16`, `freeze_vision_encoder=false`, and `train_expert_only=false`. The backend hard limit for Pi0.5 `num_workers` is 20 on this workstation.
 - Official references: https://huggingface.co/docs/lerobot/act and https://huggingface.co/docs/lerobot/pi05.
 
 ## ACT Temporal Ensemble Filter
@@ -220,6 +220,12 @@ Rules:
 - Live mode requires a real `policy_path`, `policy_checkpoint_path`, or `policy_repo_id`.
 - The LeRobot bridge runs Pi0.5 rollout in conda env `lerobot-pi05-torch211`.
 - Pi0.5 rollout command preview uses `lerobot-rollout`, `--policy.type=pi05`, `--device=<device>`, and `--inference.type=rtc` by default.
+- On the ROBOTIS OMX-AI follower, Pi0.5 live rollout must pass
+  `--robot.disable_torque_on_disconnect=false`. A successful rollout can
+  otherwise be converted into a failed GUI session if a Dynamixel reports a
+  transient hardware-error bit while LeRobot disables torque during disconnect.
+  If a motor is later missing during handshake, inspect/reboot that motor rather
+  than silently dropping it from the expected 11-16 follower set.
 - The task text must mention the concrete transfer target: `3dp_output_area -> utm_fixture`.
 
 References:

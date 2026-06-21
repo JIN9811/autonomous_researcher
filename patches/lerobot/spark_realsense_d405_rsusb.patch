@@ -1,5 +1,5 @@
 diff --git a/src/lerobot/cameras/realsense/camera_realsense.py b/src/lerobot/cameras/realsense/camera_realsense.py
-index 12ce89c9..786cbb85 100644
+index 12ce89c9..f282dd27 100644
 --- a/src/lerobot/cameras/realsense/camera_realsense.py
 +++ b/src/lerobot/cameras/realsense/camera_realsense.py
 @@ -123,6 +123,7 @@ class RealSenseCamera(Camera):
@@ -10,7 +10,15 @@ index 12ce89c9..786cbb85 100644
          self.use_depth = config.use_depth
          self.warmup_s = config.warmup_s
 
-@@ -166,6 +167,28 @@ class RealSenseCamera(Camera):
+@@ -133,6 +134,7 @@ class RealSenseCamera(Camera):
+         self.stop_event: Event | None = None
+         self.frame_lock: Lock = Lock()
+         self.latest_frame: np.ndarray | None = None
++        self.latest_depth_frame: np.ndarray | None = None
+         self.new_frame_event: Event = Event()
+
+         self.rotation: int | None = get_cv2_rotation(config.rotation)
+@@ -166,6 +168,28 @@ class RealSenseCamera(Camera):
          if self.is_connected:
              raise DeviceAlreadyConnectedError(f"{self} is already connected.")
 
@@ -39,7 +47,7 @@ index 12ce89c9..786cbb85 100644
          self.rs_pipeline = rs.pipeline()
          rs_config = rs.config()
          self._configure_rs_pipeline_config(rs_config)
-@@ -182,15 +205,26 @@ class RealSenseCamera(Camera):
+@@ -182,15 +206,26 @@ class RealSenseCamera(Camera):
          self._configure_capture_settings()
 
          if warmup:
@@ -71,7 +79,7 @@ index 12ce89c9..786cbb85 100644
 
      @staticmethod
      def find_cameras() -> list[dict[str, Any]]:
-@@ -267,17 +301,18 @@ class RealSenseCamera(Camera):
+@@ -267,17 +302,18 @@ class RealSenseCamera(Camera):
      def _configure_rs_pipeline_config(self, rs_config):
          """Creates and configures the RealSense pipeline configuration object."""
          rs.config.enable_device(rs_config, self.serial_number)
@@ -92,7 +100,48 @@ index 12ce89c9..786cbb85 100644
              if self.use_depth:
                  rs_config.enable_stream(rs.stream.depth)
 
-@@ -430,8 +465,11 @@ class RealSenseCamera(Camera):
+@@ -351,6 +387,40 @@ class RealSenseCamera(Camera):
+
+         return depth_map_processed
+
++    def read_color_depth(
++        self, color_mode: ColorMode | None = None, timeout_ms: int = 200
++    ) -> tuple[np.ndarray, np.ndarray]:
++        """
++        Reads color and depth from the same RealSense frameset.
++        """
++
++        if not self.is_connected:
++            raise DeviceNotConnectedError(f"{self} is not connected.")
++        if not self.use_depth:
++            raise RuntimeError(
++                f"Failed to capture RGB-D frame '.read_color_depth()'. Depth stream is not enabled for {self}."
++            )
++
++        start_time = time.perf_counter()
++
++        ret, frame = self.rs_pipeline.try_wait_for_frames(timeout_ms=timeout_ms)
++
++        if not ret or frame is None:
++            raise RuntimeError(f"{self} read_color_depth failed (status={ret}).")
++
++        color_frame = frame.get_color_frame()
++        depth_frame = frame.get_depth_frame()
++        color_image_raw = np.asanyarray(color_frame.get_data())
++        depth_map_raw = np.asanyarray(depth_frame.get_data())
++
++        color_image_processed = self._postprocess_image(color_image_raw, color_mode)
++        depth_map_processed = self._postprocess_image(depth_map_raw, depth_frame=True)
++
++        read_duration_ms = (time.perf_counter() - start_time) * 1e3
++        logger.debug(f"{self} RGB-D read took: {read_duration_ms:.1f}ms")
++
++        return color_image_processed, depth_map_processed
++
+     def read(self, color_mode: ColorMode | None = None, timeout_ms: int = 200) -> np.ndarray:
+         """
+         Reads a single frame (color) synchronously from the camera.
+@@ -430,8 +500,11 @@ class RealSenseCamera(Camera):
              )
 
          processed_image = image
@@ -106,7 +155,7 @@ index 12ce89c9..786cbb85 100644
 
          if self.rotation in [cv2.ROTATE_90_CLOCKWISE, cv2.ROTATE_90_COUNTERCLOCKWISE, cv2.ROTATE_180]:
              processed_image = cv2.rotate(processed_image, self.rotation)
-@@ -449,7 +487,10 @@ class RealSenseCamera(Camera):
+@@ -449,12 +522,20 @@ class RealSenseCamera(Camera):
 
          Stops on DeviceNotConnectedError, logs other errors and continues.
          """
@@ -116,9 +165,67 @@ index 12ce89c9..786cbb85 100644
 +            return
 +        while not stop_event.is_set():
              try:
-                 color_image = self.read(timeout_ms=500)
+-                color_image = self.read(timeout_ms=500)
++                depth_map = None
++                if self.use_depth:
++                    color_image, depth_map = self.read_color_depth(timeout_ms=500)
++                else:
++                    color_image = self.read(timeout_ms=500)
 
-@@ -544,12 +585,6 @@ class RealSenseCamera(Camera):
+                 with self.frame_lock:
+                     self.latest_frame = color_image
++                    self.latest_depth_frame = depth_map
+                 self.new_frame_event.set()
+
+             except DeviceNotConnectedError:
+@@ -485,7 +566,6 @@ class RealSenseCamera(Camera):
+         self.thread = None
+         self.stop_event = None
+
+-    # NOTE(Steven): Missing implementation for depth for now
+     def async_read(self, timeout_ms: float = 200) -> np.ndarray:
+         """
+         Reads the latest available frame data (color) asynchronously.
+@@ -529,6 +609,38 @@ class RealSenseCamera(Camera):
+
+         return frame
+
++    def async_read_color_depth(self, timeout_ms: float = 200) -> tuple[np.ndarray, np.ndarray]:
++        """
++        Reads the latest color and depth frames from the background RealSense
++        read thread.
++        """
++        if not self.is_connected:
++            raise DeviceNotConnectedError(f"{self} is not connected.")
++        if not self.use_depth:
++            raise RuntimeError(
++                f"Failed to capture RGB-D frame '.async_read_color_depth()'. Depth stream is not enabled for {self}."
++            )
++
++        if self.thread is None or not self.thread.is_alive():
++            self._start_read_thread()
++
++        if not self.new_frame_event.wait(timeout=timeout_ms / 1000.0):
++            thread_alive = self.thread is not None and self.thread.is_alive()
++            raise TimeoutError(
++                f"Timed out waiting for RGB-D frame from camera {self} after {timeout_ms} ms. "
++                f"Read thread alive: {thread_alive}."
++            )
++
++        with self.frame_lock:
++            frame = self.latest_frame
++            depth_frame = self.latest_depth_frame
++            self.new_frame_event.clear()
++
++        if frame is None or depth_frame is None:
++            raise RuntimeError(f"Internal error: Event set but no RGB-D frame available for {self}.")
++
++        return frame, depth_frame
++
+     def disconnect(self):
+         """
+         Disconnects from the camera, stops the pipeline, and cleans up resources.
+@@ -544,12 +656,6 @@ class RealSenseCamera(Camera):
                  f"Attempted to disconnect {self}, but it appears already disconnected."
              )
 
@@ -229,6 +336,87 @@ index ae0c79ae..45eae87e 100644
              recorded_episodes += 1
 
      log_say("Stop recording", cfg.play_sounds, blocking=True)
+diff --git a/src/lerobot/robots/omx_follower/omx_follower.py b/src/lerobot/robots/omx_follower/omx_follower.py
+index a085a1b9..94d5400d 100644
+--- a/src/lerobot/robots/omx_follower/omx_follower.py
++++ b/src/lerobot/robots/omx_follower/omx_follower.py
+@@ -19,6 +19,8 @@ import time
+ from functools import cached_property
+ from typing import Any
+
++import numpy as np
++
+ from lerobot.cameras.utils import make_cameras_from_configs
+ from lerobot.errors import DeviceAlreadyConnectedError, DeviceNotConnectedError
+ from lerobot.motors import Motor, MotorCalibration, MotorNormMode
+@@ -71,9 +73,13 @@ class OmxFollower(Robot):
+
+     @property
+     def _cameras_ft(self) -> dict[str, tuple]:
+-        return {
+-            cam: (self.config.cameras[cam].height, self.config.cameras[cam].width, 3) for cam in self.cameras
+-        }
++        features = {}
++        for cam in self.cameras:
++            config = self.config.cameras[cam]
++            features[cam] = (config.height, config.width, 3)
++            if self._camera_uses_depth(config):
++                features[self._depth_feature_key(cam)] = (config.height, config.width, 3)
++        return features
+
+     @cached_property
+     def observation_features(self) -> dict[str, type | tuple]:
+@@ -227,12 +233,42 @@ class OmxFollower(Robot):
+         # Capture images from cameras
+         for cam_key, cam in self.cameras.items():
+             start = time.perf_counter()
+-            obs_dict[cam_key] = cam.async_read()
++            config = self.config.cameras[cam_key]
++            if self._camera_uses_depth(config) and hasattr(cam, "async_read_color_depth"):
++                color_image, depth_map = cam.async_read_color_depth()
++                obs_dict[cam_key] = color_image
++                obs_dict[self._depth_feature_key(cam_key)] = self._depth_map_to_uint8_rgb(depth_map)
++            else:
++                obs_dict[cam_key] = cam.async_read()
+             dt_ms = (time.perf_counter() - start) * 1e3
+             logger.debug(f"{self} read {cam_key}: {dt_ms:.1f}ms")
+
+         return obs_dict
+
++    @staticmethod
++    def _camera_uses_depth(camera_config: Any) -> bool:
++        return bool(getattr(camera_config, "use_depth", False))
++
++    @staticmethod
++    def _depth_feature_key(camera_key: str) -> str:
++        return f"{camera_key}_depth"
++
++    @staticmethod
++    def _depth_map_to_uint8_rgb(depth_map: np.ndarray) -> np.ndarray:
++        """Convert RealSense millimeter depth to LeRobot's current 3-channel image format."""
++        depth = np.asarray(depth_map)
++        if depth.ndim == 3 and depth.shape[-1] == 3 and depth.dtype == np.uint8:
++            return depth
++        if depth.ndim == 3 and depth.shape[-1] == 1:
++            depth = depth[..., 0]
++        if depth.ndim != 2:
++            raise ValueError(f"Depth map must be HxW or HxWx1, got shape={depth.shape}.")
++
++        depth_f32 = np.nan_to_num(depth.astype(np.float32), nan=0.0, posinf=0.0, neginf=0.0)
++        depth_u8 = np.clip(depth_f32, 0.0, 2000.0)
++        depth_u8 = np.rint(depth_u8 / 2000.0 * 255.0).astype(np.uint8)
++        return np.repeat(depth_u8[..., None], 3, axis=2)
++
+     def send_action(self, action: dict[str, float]) -> dict[str, float]:
+         """Command arm to move to a target joint configuration.
+
+@@ -271,4 +307,4 @@ class OmxFollower(Robot):
+         for cam in self.cameras.values():
+             cam.disconnect()
+
+-        logger.info(f"{self} disconnected.")
+\ No newline at end of file
++        logger.info(f"{self} disconnected.")
 diff --git a/src/lerobot/robots/utils.py b/src/lerobot/robots/utils.py
 index 9bf77146..913d625f 100644
 --- a/src/lerobot/robots/utils.py
