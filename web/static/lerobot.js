@@ -1208,9 +1208,9 @@ function renderIsaacMirror(data) {
     <div class="visual-summary">
       <strong>${escapeHtml(data.probe_source || data.tool || "Isaac mirror")}</strong>
       <span>scene=${escapeHtml(scene || "-")} · root=${escapeHtml(root || "-")} · follower=${escapeHtml(data.follower_port || "-")}</span>
-      <span>status=${escapeHtml(data.status || "-")} · launch=${escapeHtml(data.launch_mode || "-")} · samples=${escapeHtml(data.sample_count ?? receiverHealth.sample_count ?? "-")} · record=${escapeHtml(data.mirror_record_path || "-")}</span>
+      <span>status=${escapeHtml(data.status || "-")} · launch=${escapeHtml(data.launch_mode || "-")} · link samples=${escapeHtml(data.sample_count ?? receiverHealth.sample_count ?? "-")} · evidence=${escapeHtml(data.mirror_record_path || "-")}</span>
       <span>endpoint=${escapeHtml(data.mirror_endpoint || "-")} · health=${escapeHtml(data.health_url || receiverHealth.health_url || "-")} · apply=${escapeHtml(data.apply_mode || receiverHealth.apply_mode || "-")}</span>
-      ${verification.session_id ? `<span>verified=${escapeHtml(verification.session_id)} #${escapeHtml(verification.sample_index ?? "-")} · receiver=${escapeHtml(verification.receiver_sample_count_before ?? "-")}→${escapeHtml(verification.receiver_sample_count_after ?? "-")}</span>` : ""}
+      ${verification.session_id ? `<span>verified=${escapeHtml(verification.session_id)} #${escapeHtml(verification.sample_index ?? "-")} · link samples=${escapeHtml(verification.receiver_sample_count_before ?? "-")}→${escapeHtml(verification.receiver_sample_count_after ?? "-")}</span>` : ""}
     </div>
     <table>
       <thead>
@@ -2526,61 +2526,61 @@ bind("btn-port-save-manual", (event) => {
 
 bind("btn-isaac-mirror-map", async (event) => {
   const statusTarget = actionStatusFromEvent(event);
-  const data = await runAction("isaac mirror joint mapping", "/api/lerobot/mirror/joint-mapping", basePayload(), statusTarget);
+  const data = await runAction("load Isaac joint mapping", "/api/lerobot/mirror/joint-mapping", basePayload(), statusTarget);
   renderIsaacMirror(data);
 });
 
 bind("btn-isaac-mirror-receiver-start", async (event) => {
   const statusTarget = actionStatusFromEvent(event);
-  const data = await runAction("isaac mirror receiver start", "/api/lerobot/mirror/receiver-process/start", basePayload(), statusTarget);
+  const data = await runAction("open Isaac Sim mirror", "/api/lerobot/mirror/receiver-process/start", basePayload(), statusTarget);
   renderIsaacMirror(data);
 });
 
 bind("btn-isaac-mirror-receiver-status", async (event) => {
   const statusTarget = actionStatusFromEvent(event);
-  const data = await runAction("isaac mirror receiver status", "/api/lerobot/mirror/receiver-process/status", basePayload(), statusTarget);
+  const data = await runAction("mirror link status", "/api/lerobot/mirror/receiver-process/status", basePayload(), statusTarget);
   renderIsaacMirror(data);
 });
 
 bind("btn-isaac-mirror-receiver-stop", async (event) => {
   const statusTarget = actionStatusFromEvent(event);
-  const data = await runAction("isaac mirror receiver stop", "/api/lerobot/mirror/receiver-process/stop", basePayload(), statusTarget);
+  const data = await runAction("close Isaac Sim link", "/api/lerobot/mirror/receiver-process/stop", basePayload(), statusTarget);
   renderIsaacMirror(data);
 });
 
 bind("btn-isaac-mirror-health", async (event) => {
   const statusTarget = actionStatusFromEvent(event);
-  const data = await runAction("isaac mirror receiver health", "/api/lerobot/mirror/receiver-health", basePayload(), statusTarget);
+  const data = await runAction("check Isaac link", "/api/lerobot/mirror/receiver-health", basePayload(), statusTarget);
   renderIsaacMirror(data);
 });
 
 bind("btn-isaac-mirror-verify", async (event) => {
   const statusTarget = actionStatusFromEvent(event);
-  const data = await runAction("isaac mirror receiver verify", "/api/lerobot/mirror/receiver-verify", basePayload(), statusTarget);
+  const data = await runAction("send Isaac test pose", "/api/lerobot/mirror/receiver-verify", basePayload(), statusTarget);
   renderIsaacMirror(data);
 });
 
 bind("btn-isaac-mirror-probe", async (event) => {
   const statusTarget = actionStatusFromEvent(event);
-  const data = await runAction("isaac mirror state probe", "/api/lerobot/mirror/state-probe", basePayload(), statusTarget);
+  const data = await runAction("read follower state", "/api/lerobot/mirror/state-probe", basePayload(), statusTarget);
   renderIsaacMirror(data);
 });
 
 bind("btn-isaac-mirror-loop-start", async (event) => {
   const statusTarget = actionStatusFromEvent(event);
-  const data = await runAction("isaac mirror loop start", "/api/lerobot/mirror/loop/start", basePayload({ isaac_mirror_enabled: true }), statusTarget);
+  const data = await runAction("standalone mirror start", "/api/lerobot/mirror/loop/start", basePayload({ isaac_mirror_enabled: true }), statusTarget);
   renderIsaacMirror(data);
 });
 
 bind("btn-isaac-mirror-loop-status", async (event) => {
   const statusTarget = actionStatusFromEvent(event);
-  const data = await runAction("isaac mirror loop status", "/api/lerobot/mirror/loop/status", sessionPayload("isaac_mirror"), statusTarget);
+  const data = await runAction("standalone mirror status", "/api/lerobot/mirror/loop/status", sessionPayload("isaac_mirror"), statusTarget);
   renderIsaacMirror(data);
 });
 
 bind("btn-isaac-mirror-loop-stop", async (event) => {
   const statusTarget = actionStatusFromEvent(event);
-  const data = await runAction("isaac mirror loop stop", "/api/lerobot/mirror/loop/stop", sessionPayload("isaac_mirror"), statusTarget);
+  const data = await runAction("standalone mirror stop", "/api/lerobot/mirror/loop/stop", sessionPayload("isaac_mirror"), statusTarget);
   renderIsaacMirror(data);
 });
 

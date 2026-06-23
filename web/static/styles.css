@@ -2566,6 +2566,76 @@ textarea {
   line-height: 1.45;
 }
 
+.lerobot-isaac-link-card {
+  display: grid;
+  gap: 12px;
+}
+
+.lerobot-isaac-flow {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.lerobot-isaac-step {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto auto;
+  gap: 8px 10px;
+  align-items: start;
+  border: 1px solid rgba(20, 54, 179, 0.15);
+  border-radius: 16px;
+  background: rgba(248, 251, 255, 0.92);
+  padding: 12px;
+}
+
+.lerobot-isaac-step .btn {
+  grid-column: 1 / -1;
+  width: 100%;
+}
+
+.lerobot-isaac-step strong {
+  color: var(--text);
+  font-size: 0.9rem;
+}
+
+.lerobot-isaac-step p {
+  margin: 3px 0 0;
+  color: var(--muted);
+  font-size: 0.76rem;
+  line-height: 1.35;
+}
+
+.lerobot-step-index {
+  width: 28px;
+  height: 28px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 999px;
+  background: rgba(20, 54, 179, 0.1);
+  color: var(--primary);
+  font-weight: 900;
+  font-size: 0.78rem;
+}
+
+.lerobot-isaac-settings {
+  margin-top: 2px;
+}
+
+.lerobot-output-subtitle {
+  margin: 0 0 8px;
+  color: var(--primary);
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+@media (max-width: 980px) {
+  .lerobot-isaac-flow {
+    grid-template-columns: 1fr;
+  }
+}
+
 .lerobot-details {
   margin-top: 10px;
   border: 1px solid rgba(20, 54, 179, 0.14);

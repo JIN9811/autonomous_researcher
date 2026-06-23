@@ -365,7 +365,7 @@ Metadata field:
 - In `live` mode, the loop runs in a background thread until `loop_stop`, teleop stop, record stop, or GUI server shutdown.
 - If the Isaac endpoint cannot accept an update, the mirror session fails visibly with `LEROBOT_ISAAC_MIRROR_POST_FAILED`. The bridge does not silently fall back to a fake mirror.
 
-When the LeRobot GUI checkbox `Attach mirror loop to teleop / record` is enabled, `teleoperate.start` and `record.start` start an attached mirror loop and return:
+When the LeRobot GUI checkbox `Mirror during Teleop / Recording` is enabled, `teleoperate.start` and `record.start` start an attached mirror loop and return:
 
 ```text
 isaac_mirror_session_id
@@ -546,21 +546,21 @@ LeRobot GUI route:
 /lerobot
 ```
 
-Use the `Isaac Sim Mirror` card:
+Use the `3. Isaac Sim Link` card:
 
-1. Use `Launch Isaac Receiver` from the card, or manually start Isaac Sim with
+1. Use `Open Isaac Sim Mirror` from the card, or manually start Isaac Sim with
    `--ext-folder sim/robotis_omx/extensions --enable atr.omx.mirror`.
 2. Confirm Isaac Sim opens `sim/robotis_omx/scene/omx_table_layout.usda`.
 3. In `/lerobot`, confirm the endpoint is `http://127.0.0.1:8766/joints`.
-4. Use `Receiver Status` to check the managed process, or `Receiver Health` to
-   check any receiver already bound to the endpoint.
-5. Use `Verify E2E Sample` to POST one bounded mirror sample and confirm
+4. Use `Check Isaac Link` to confirm that the endpoint is reachable.
+5. Use `Send Test Pose` to POST one bounded mirror sample and confirm
    `/state` reports it as latest.
-6. Use `Probe Follower State` for a one-shot follower read.
-7. Use `Start Mirror Loop` for standalone mirror testing.
-8. Keep `Attach mirror loop to teleop / record` checked before starting
+6. Open `Advanced diagnostics and Standalone Mirror Test` only when you need
+   joint mapping, one-shot follower reads, link process status, or standalone
+   mirror-loop testing.
+7. Keep `Mirror during Teleop / Recording` checked before starting
    teleoperation or recording.
-9. Use `Stop Receiver` only when the managed receiver process should be
+8. Use `Close Isaac Sim Link` only when the managed receiver process should be
    terminated.
 
 During teleoperation the source of truth is:

@@ -306,16 +306,16 @@ def Xform "World"
         )
         {
             rel material:binding = </World/Materials/red_test_cube>
-            vector3f physics:angularVelocity = (0.16150923, 0.08749678, -0.00072487624)
+            vector3f physics:angularVelocity = (0.16221932, 0.087207876, -0.00067841297)
             custom token physics:approximation = "box"
             bool physics:collisionEnabled = 1
             float physics:mass = 0.02
             bool physics:rigidBodyEnabled = 1
-            vector3f physics:velocity = (-0.00011696449, -0.00015484223, -0.000078692916)
+            vector3f physics:velocity = (-0.000116850366, -0.00015533427, -0.00007856032)
             double size = 1
-            quatf xformOp:orient = (1, -6.7073955e-7, 0.0000038233297, 9.035703e-7)
+            quatf xformOp:orient = (1, -7.0727896e-7, 0.000004149643, -6.802649e-9)
             float3 xformOp:scale = (0.03, 0.03, 0.03)
-            double3 xformOp:translate = (0.40000075101852417, 0.3000001907348633, 0.015119952149689198)
+            double3 xformOp:translate = (0.40000107884407043, 0.30000025033950806, 0.015119952149689198)
             uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
         }
     }
@@ -335,26 +335,26 @@ def Xform "World"
                 string isaac:nameOverride (
                     displayName = "Name Override"
                 )
-                vector3f physics:angularVelocity = (0.6798633, -0.11137097, -0.016240459)
-                vector3f physics:velocity = (0.00023562527, 0.0012460212, -0.0018248486)
-                quatf xformOp:orient = (1, -9.667947e-8, 6.801302e-8, 9.102003e-7)
-                double3 xformOp:translate = (-0.00026545435190200584, 0.00006076931953430398, -0.000024771317839622498)
+                vector3f physics:angularVelocity = (-0.0007012682, 0.000859846, 0.008809775)
+                vector3f physics:velocity = (-0.0000018392013, 0.000003203914, -0.000003854962)
+                quatf xformOp:orient = (1, 5.310448e-7, -7.834917e-7, 4.0435992e-7)
+                double3 xformOp:translate = (9.551644097882672e-8, 3.218650945768786e-8, 5.4016709327697754e-8)
 
                 over "link1"
                 {
                     string isaac:nameOverride (
                         displayName = "Name Override"
                     )
-                    vector3f physics:angularVelocity = (0.6798633, -0.11137097, -0.016243475)
-                    vector3f physics:velocity = (0.00011576674, 0.0005097115, -0.0017930684)
-                    quatf xformOp:orient = (0.9937049, -1.195817e-7, 6.427576e-8, -0.11202902)
-                    double3 xformOp:translate = (-0.011249996721744537, -2.9802322387695312e-8, 0.03399999253451824)
+                    vector3f physics:angularVelocity = (-0.0007012682, 0.00085984607, 0.008790117)
+                    vector3f physics:velocity = (-0.0000014120462, 0.0000033893743, -0.000003839045)
+                    quatf xformOp:orient = (0.9940462, 5.9777926e-7, -7.1342555e-7, -0.108959354)
+                    double3 xformOp:translate = (-0.011250052601099014, -2.9802322387695312e-8, 0.0339999794960022)
 
                     over "Joint1"
                     {
-                        float drive:angular:physics:targetPosition = -12.879121
-                        float state:angular:physics:position = -12.879121
-                        float state:angular:physics:velocity = -0.0000030148829
+                        float drive:angular:physics:targetPosition = -12.5274725
+                        float state:angular:physics:position = -12.5274725
+                        float state:angular:physics:velocity = -0.000019658499
                     }
 
                     over "link2"
@@ -362,16 +362,16 @@ def Xform "World"
                         string isaac:nameOverride (
                             displayName = "Name Override"
                         )
-                        vector3f physics:angularVelocity = (38.317574, -8.70708, -0.016238125)
-                        vector3f physics:velocity = (-0.0027597959, -0.012071638, -0.06963608)
-                        quatf xformOp:orient = (0.7087008, 6.6269806e-8, -0.7055092, 1.078016e-7)
-                        double3 xformOp:translate = (4.485073798465855e-9, -1.3517509334093347e-8, 0.06349999457597673)
+                        vector3f physics:angularVelocity = (-0.00070118514, 0.0008598276, 0.008790117)
+                        vector3f physics:velocity = (0.000012527256, 6.825564e-8, -0.0000024022452)
+                        quatf xformOp:orient = (-0.50000006, 1.8271909e-7, 0.8660254, 6.142917e-8)
+                        double3 xformOp:translate = (2.9664564138442984e-9, -2.3734257226237787e-8, 0.06349999457597733)
 
                         over "Joint2"
                         {
-                            float drive:angular:physics:targetPosition = -85.64103
-                            float state:angular:physics:position = -85.64103
-                            float state:angular:physics:velocity = -38.606785
+                            float drive:angular:physics:targetPosition = -77.17949
+                            float state:angular:physics:position = -77.17949
+                            float state:angular:physics:velocity = -8.516065e-8
                         }
 
                         over "link3"
@@ -379,14 +379,14 @@ def Xform "World"
                             string isaac:nameOverride (
                                 displayName = "Name Override"
                             )
-                            vector3f physics:angularVelocity = (-355.71664, 81.282585, -0.016308643)
-                            vector3f physics:velocity = (0.0023402246, 0.010066732, -0.6349708)
-                            quatf xformOp:orient = (0.74664885, 7.29762e-8, 0.66521835, -1.6104941e-8)
-                            double3 xformOp:translate = (0.04149999212108385, 1.8895353559589267e-8, 0.1131500063582702)
+                            vector3f physics:angularVelocity = (-0.00069995987, 0.00085955573, 0.008790117)
+                            vector3f physics:velocity = (0.0000053137474, 0.000002487353, -0.0000032126675)
+                            quatf xformOp:orient = (0.70710677, 3.264546e-8, 0.70710677, 9.192907e-9)
+                            double3 xformOp:translate = (0.04149996489286423, 2.5144631266016404e-8, 0.1131499856710434)
 
                             over "Joint3"
                             {
-                                float drive:angular:physics:targetPosition = 43.435898
+                                float drive:angular:physics:targetPosition = 41.025642
                                 bool[] isaac:actuator (
                                     displayName = "Actuator"
                                 )
@@ -396,8 +396,8 @@ def Xform "World"
                                 token[] isaac:physics:DofOffsetOpOrder (
                                     displayName = "Dof Offset Op Order"
                                 )
-                                float state:angular:physics:position = 43.435898
-                                float state:angular:physics:velocity = 404.17953
+                                float state:angular:physics:position = 41.025642
+                                float state:angular:physics:velocity = -0.000001255045
                             }
 
                             over "link4"
@@ -405,59 +405,59 @@ def Xform "World"
                                 string isaac:nameOverride (
                                     displayName = "Name Override"
                                 )
-                                vector3f physics:angularVelocity = (-401.1902, 91.66784, -0.016318182)
-                                vector3f physics:velocity = (-0.0016137988, -0.007362847, -1.2496773)
-                                quatf xformOp:orient = (0.89318866, 5.1138247e-8, 0.44968215, -2.6898908e-8)
-                                double3 xformOp:translate = (0.16199996976580847, 3.5100579665048315e-9, 2.251061770319751e-8)
+                                vector3f physics:angularVelocity = (-0.0007002541, 0.00085962104, 0.008790117)
+                                vector3f physics:velocity = (-0.000005804928, 0.0000053290973, -0.000004376015)
+                                quatf xformOp:orient = (0.6427877, 9.148334e-8, 0.7660444, 2.437244e-8)
+                                double3 xformOp:translate = (0.16199995577335358, 8.161694431407795e-9, 3.195104847364405e-9)
 
                                 over "Joint4"
                                 {
-                                    float drive:angular:physics:targetPosition = 48.66911
-                                    float state:angular:physics:position = 48.66911
-                                    float state:angular:physics:velocity = 46.644375
+                                    float drive:angular:physics:targetPosition = 49.255188
+                                    float state:angular:physics:position = 49.255188
+                                    float state:angular:physics:velocity = 3.0140305e-7
                                 }
 
                                 over "link5"
                                 {
-                                    vector3f physics:angularVelocity = (-401.1902, 91.66784, -0.01632108)
-                                    vector3f physics:velocity = (-0.032690365, -0.14340767, -1.4533752)
-                                    quatf xformOp:orient = (0.9999787, -0.006521317, 1.6335692e-8, -4.8580542e-8)
-                                    double3 xformOp:translate = (0.02870000016308831, -5.539088077100018e-9, -1.2064991838922623e-8)
+                                    vector3f physics:angularVelocity = (-0.000698722, 0.00086652604, 0.008770684)
+                                    vector3f physics:velocity = (-0.000009019454, 0.00000557137, -0.0000046562423)
+                                    quatf xformOp:orient = (0.9999783, -0.006583481, -2.7961473e-8, -4.7914504e-8)
+                                    double3 xformOp:translate = (0.028699995949864388, 1.3787357922012689e-8, -1.2712423336225243e-9)
 
                                     over "Joint5"
                                     {
                                         float drive:angular:physics:targetPosition = -0.74725276
                                         float state:angular:physics:position = -0.74725276
-                                        float state:angular:physics:velocity = 0.0000039590477
+                                        float state:angular:physics:velocity = 0.000020679789
                                     }
 
                                     over "link6"
                                     {
-                                        vector3f physics:angularVelocity = (-401.1902, 91.66783, -0.01632566)
-                                        vector3f physics:velocity = (-0.06786742, -0.29736513, -1.4690318)
-                                        quatf xformOp:orient = (1, 0.0000022735912, 3.4309856e-8, 2.6177474e-7)
-                                        double3 xformOp:translate = (0.029499998469850755, 0.007500010876236862, 4.538710454693451e-8)
+                                        vector3f physics:angularVelocity = (-0.00069905596, 0.00086491473, 0.008770086)
+                                        vector3f physics:velocity = (-0.000008644069, 0.000003815537, -0.000004452946)
+                                        quatf xformOp:orient = (1, 0.0000037793588, 3.1925133e-8, 0.0000030282006)
+                                        double3 xformOp:translate = (0.029499990865588188, 0.007500012870877981, 6.15426003491848e-8)
 
                                         over "Gripper"
                                         {
-                                            float drive:angular:physics:targetPosition = 59.85348
-                                            float state:angular:physics:position = 59.85348
-                                            float state:angular:physics:velocity = -0.0000067269107
+                                            float drive:angular:physics:targetPosition = 59.95116
+                                            float state:angular:physics:position = 59.95116
+                                            float state:angular:physics:velocity = -0.0000017510993
                                         }
                                     }
 
                                     over "link7"
                                     {
-                                        vector3f physics:angularVelocity = (-401.1902, 91.667854, -0.016309284)
-                                        vector3f physics:velocity = (-0.0676086, -0.2962326, -1.4703014)
-                                        quatf xformOp:orient = (1, 0.000002275064, 1.6390846e-8, -1.6086159e-7)
-                                        double3 xformOp:translate = (0.029499992674174517, -0.01079998071648769, -2.8477524838255164e-8)
+                                        vector3f physics:angularVelocity = (-0.0006988526, 0.000865896, 0.00877045)
+                                        vector3f physics:velocity = (-0.000008070179, 0.0000065586937, -0.000004678195)
+                                        quatf xformOp:orient = (1, 0.0000037537964, 2.1007505e-8, -0.0000029891166)
+                                        double3 xformOp:translate = (0.02949998900294304, -0.010799992829561234, -7.074088159697567e-8)
 
                                         over "Gripper_mimic"
                                         {
-                                            float drive:angular:physics:targetPosition = 59.85348
-                                            float state:angular:physics:position = 59.85348
-                                            float state:angular:physics:velocity = 0.000017335477
+                                            float drive:angular:physics:targetPosition = 59.95116
+                                            float state:angular:physics:position = 59.95116
+                                            float state:angular:physics:velocity = -6.8465454e-7
                                         }
                                     }
                                 }

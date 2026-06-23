@@ -25,7 +25,7 @@ Modification guide:
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>{{ title }}</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
-    <link rel="stylesheet" href="/static/styles.css?v=20260623-isaac-mirror-1" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260624-isaac-link-1" />
   </head>
   <body>
     <main class="page lerobot-page">
@@ -65,7 +65,7 @@ Modification guide:
       <nav class="panel lerobot-quick-nav" aria-label="LeRobot workspace navigation">
         <a href="#profile-execution">Profile</a>
         <a href="#device-port-setup">Devices</a>
-        <a href="#isaac-mirror-card">Isaac Mirror</a>
+        <a href="#isaac-mirror-card">Isaac Link</a>
         <a href="#local-paths">Paths</a>
         <a href="#teleoperation-card">Teleop</a>
         <a href="#recording-card">Record</a>
@@ -190,55 +190,81 @@ Modification guide:
         <div id="lerobot-camera-preview" class="lerobot-camera-preview">No camera capture yet.</div>
       </details>
 
-      <section id="isaac-mirror-card" class="panel lerobot-card">
+      <section id="isaac-mirror-card" class="panel lerobot-card lerobot-isaac-link-card">
         <div class="panel-title-row">
-          <h2>Isaac Sim Mirror</h2>
-          <span class="hint">teleop follower-state synchronization</span>
+          <h2>3. Isaac Sim Link</h2>
+          <span class="hint">real follower state to virtual OMX</span>
         </div>
         <p class="subhead">
-          Mirror the real follower arm joint state into the Isaac Sim OMX scene during teleoperation or recording. The source is the follower's measured state, not policy inference output.
+          Connect the measured follower arm state to the Isaac Sim OMX scene. Use this when teleoperation or recording should also leave synchronized simulation evidence.
         </p>
-        <div class="control-grid compact-grid">
+        <div class="lerobot-isaac-flow">
+          <article class="lerobot-isaac-step">
+            <span class="lerobot-step-index">1</span>
+            <div>
+              <strong>Start the simulation link</strong>
+              <p>Open Isaac Sim with the ATR mirror extension and the prepared OMX table scene.</p>
+            </div>
+            <button id="btn-isaac-mirror-receiver-start" class="btn primary">Open Isaac Sim Mirror</button>
+          </article>
+          <article class="lerobot-isaac-step">
+            <span class="lerobot-step-index">2</span>
+            <div>
+              <strong>Check the link</strong>
+              <p>Confirm that the Isaac endpoint is reachable before live teleop or recording.</p>
+            </div>
+            <button id="btn-isaac-mirror-health" class="btn">Check Isaac Link</button>
+          </article>
+          <article class="lerobot-isaac-step">
+            <span class="lerobot-step-index">3</span>
+            <div>
+              <strong>Send one test pose</strong>
+              <p>Post one bounded follower-state sample and verify that Isaac receives it.</p>
+            </div>
+            <button id="btn-isaac-mirror-verify" class="btn primary">Send Test Pose</button>
+          </article>
+        </div>
+        <div class="control-grid compact-grid lerobot-isaac-settings">
           <label class="checkbox-label">
             <input id="lerobot-isaac-mirror-enabled-input" type="checkbox" checked />
-            Attach mirror loop to teleop / record
+            Mirror during Teleop / Recording
           </label>
           <label>
-            Isaac Endpoint
+            Isaac Link Endpoint
             <input id="lerobot-isaac-mirror-endpoint-input" type="text" value="http://127.0.0.1:8766/joints" />
           </label>
           <label>
-            Mirror Hz
+            Mirror Rate Hz
             <input id="lerobot-isaac-mirror-hz-input" type="number" min="0.1" max="120" step="0.1" value="15" />
           </label>
           <label>
-            Timeout s
+            Request Timeout s
             <input id="lerobot-isaac-mirror-timeout-input" type="number" min="0.05" max="10" step="0.05" value="0.5" />
           </label>
           <label>
-            Max Samples
+            Standalone Max Samples
             <input id="lerobot-isaac-mirror-max-samples-input" type="number" min="1" step="1" placeholder="blank = until stop" />
           </label>
         </div>
-        <div class="button-row">
-          <button id="btn-isaac-mirror-map" class="btn">Load Joint Mapping</button>
-          <button id="btn-isaac-mirror-receiver-start" class="btn primary">Launch Isaac Receiver</button>
-          <button id="btn-isaac-mirror-receiver-status" class="btn">Receiver Status</button>
-          <button id="btn-isaac-mirror-receiver-stop" class="btn danger">Stop Receiver</button>
-          <button id="btn-isaac-mirror-health" class="btn">Receiver Health</button>
-          <button id="btn-isaac-mirror-verify" class="btn primary">Verify E2E Sample</button>
-          <button id="btn-isaac-mirror-probe" class="btn primary">Probe Follower State</button>
-          <button id="btn-isaac-mirror-loop-start" class="btn primary">Start Mirror Loop</button>
-          <button id="btn-isaac-mirror-loop-status" class="btn">Mirror Status</button>
-          <button id="btn-isaac-mirror-loop-stop" class="btn danger">Stop Mirror Loop</button>
-        </div>
+        <details class="lerobot-details lerobot-isaac-advanced">
+          <summary>Advanced diagnostics and Standalone Mirror Test</summary>
+          <div class="button-row">
+            <button id="btn-isaac-mirror-map" class="btn">Load Joint Mapping</button>
+            <button id="btn-isaac-mirror-receiver-status" class="btn">Mirror Link Status</button>
+            <button id="btn-isaac-mirror-receiver-stop" class="btn danger">Close Isaac Sim Link</button>
+            <button id="btn-isaac-mirror-probe" class="btn primary">Read Follower State</button>
+            <button id="btn-isaac-mirror-loop-start" class="btn primary">Start Standalone Mirror</button>
+            <button id="btn-isaac-mirror-loop-status" class="btn">Standalone Mirror Status</button>
+            <button id="btn-isaac-mirror-loop-stop" class="btn danger">Stop Standalone Mirror</button>
+          </div>
+        </details>
         <div id="lerobot-isaac-mirror-action-status" class="lerobot-action-status idle">Waiting for Isaac mirror action.</div>
         <div id="lerobot-isaac-mirror-output" class="lerobot-data-panel">No mirror data yet.</div>
       </section>
 
       <section id="local-paths" class="panel lerobot-path-panel">
         <div class="panel-title-row">
-          <h2>3. Local Paths</h2>
+          <h2>4. Local Paths</h2>
           <span class="hint">LeRobot defaults, editable</span>
         </div>
         <div class="lerobot-path-grid">
@@ -277,7 +303,7 @@ Modification guide:
       <section class="lerobot-workflow-grid">
         <article id="teleoperation-card" class="panel lerobot-workflow-card">
           <div class="panel-title-row">
-            <h2>4. Teleoperation</h2>
+            <h2>5. Teleoperation</h2>
             <span class="hint">leader/follower control</span>
           </div>
           <div class="lerobot-form-grid single">
@@ -300,7 +326,7 @@ Modification guide:
 
         <article id="recording-card" class="panel lerobot-workflow-card">
           <div class="panel-title-row">
-            <h2>5. Recording</h2>
+            <h2>6. Recording</h2>
             <span class="hint">local LeRobotDataset</span>
           </div>
           <div class="lerobot-form-grid">
@@ -371,7 +397,7 @@ Modification guide:
 
         <details id="visualization-card" class="panel lerobot-workflow-card lerobot-visualization-panel lerobot-panel-details">
           <summary class="panel-title-row lerobot-panel-summary">
-            <h2>6. Dataset Visualization</h2>
+            <h2>7. Dataset Visualization</h2>
             <span class="hint">LeRobot HTML viewer + local preview</span>
           </summary>
           <div class="lerobot-card-note">
@@ -451,7 +477,7 @@ Modification guide:
 
         <article id="training-card" class="panel lerobot-workflow-card lerobot-training-card">
           <div class="panel-title-row">
-            <h2>7. Training</h2>
+            <h2>8. Training</h2>
             <span class="hint">policy checkpoint · GPU job</span>
           </div>
           <div class="lerobot-card-note">
@@ -649,7 +675,7 @@ Modification guide:
 
         <article id="rollout-card" class="panel lerobot-workflow-card">
           <div class="panel-title-row">
-            <h2>8. Inference / Rollout</h2>
+            <h2>9. Inference / Rollout</h2>
             <span class="hint">policy-controlled robot run</span>
           </div>
           <div class="lerobot-form-grid single">
@@ -734,7 +760,7 @@ Modification guide:
 
         <article id="manipulation-agent-card" class="panel lerobot-workflow-card">
           <div class="panel-title-row">
-            <h2>Manipulation Agent Bridge</h2>
+            <h2>10. Manipulation Agent Bridge</h2>
             <span class="hint">agent-level 3DP to UTM policy execution</span>
           </div>
           <p class="lerobot-card-note">
@@ -851,9 +877,10 @@ Modification guide:
       <section id="session-output" class="split lerobot-output-split">
         <article class="panel">
           <div class="panel-title-row">
-            <h2>Recent Sessions</h2>
+            <h2>11. Session Output</h2>
             <span class="hint">shared server state</span>
           </div>
+          <h3 class="lerobot-output-subtitle">Recent Sessions</h3>
           <div id="lerobot-session-list" class="list"></div>
         </article>
         <article class="panel">
@@ -865,6 +892,6 @@ Modification guide:
         </article>
       </section>
     </main>
-    <script src="/static/lerobot.js?v=20260623-isaac-mirror-1" defer></script>
+    <script src="/static/lerobot.js?v=20260624-isaac-link-1" defer></script>
   </body>
 </html>

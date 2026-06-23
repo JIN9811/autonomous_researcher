@@ -63,13 +63,29 @@ def test_lerobot_gui_and_test_mode_api_workflow(tmp_path: Path, monkeypatch: Any
     assert "Manipulation Agent Runtime Report" in page.text
     assert "Save Agent Defaults" in page.text
     assert "Test Agent Bridge" in page.text
-    assert "Attach mirror loop to teleop / record" in page.text
+    assert "3. Isaac Sim Link" in page.text
+    assert "Mirror during Teleop / Recording" in page.text
+    assert "Open Isaac Sim Mirror" in page.text
+    assert "Check Isaac Link" in page.text
+    assert "Send Test Pose" in page.text
+    assert "Standalone Mirror Test" in page.text
+    assert "Launch Isaac Receiver" not in page.text
+    assert "Receiver Health" not in page.text
+    assert "Receiver Status" not in page.text
     assert "btn-isaac-mirror-loop-start" in page.text
     assert "btn-isaac-mirror-receiver-start" in page.text
     assert "btn-isaac-mirror-receiver-status" in page.text
     assert "btn-isaac-mirror-receiver-stop" in page.text
     assert "btn-isaac-mirror-health" in page.text
     assert "btn-isaac-mirror-verify" in page.text
+    assert "4. Local Paths" in page.text
+    assert "5. Teleoperation" in page.text
+    assert "6. Recording" in page.text
+    assert "7. Dataset Visualization" in page.text
+    assert "8. Training" in page.text
+    assert "9. Inference / Rollout" in page.text
+    assert "10. Manipulation Agent Bridge" in page.text
+    assert "11. Session Output" in page.text
 
     home = client.get("/")
     assert home.status_code == 200
