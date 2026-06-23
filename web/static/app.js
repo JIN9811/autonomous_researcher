@@ -1299,17 +1299,25 @@ if (apiKeyFormEl) {
   });
 }
 
+async function safeBootstrapStep(label, fn) {
+  try {
+    await fn();
+  } catch (err) {
+    console.warn(`Bootstrap step failed: ${label}`, err);
+  }
+}
+
 async function bootstrap() {
-  await initLangGraph();
-  await refreshState();
-  await refreshModelStatuses();
-  await refreshApiKeyStatus();
-  await refreshPrinterWorkspaceStatus();
-  await refreshWindowsWorkspaceStatus();
-  await refreshLerobotWorkspaceStatus();
-  await refreshBoWorkspaceStatus();
-  await refreshCaeWorkspaceStatus();
-  await loadRecentEvents();
+  await safeBootstrapStep("initLangGraph", initLangGraph);
+  await safeBootstrapStep("refreshState", refreshState);
+  await safeBootstrapStep("refreshModelStatuses", refreshModelStatuses);
+  await safeBootstrapStep("refreshApiKeyStatus", refreshApiKeyStatus);
+  await safeBootstrapStep("refreshPrinterWorkspaceStatus", refreshPrinterWorkspaceStatus);
+  await safeBootstrapStep("refreshWindowsWorkspaceStatus", refreshWindowsWorkspaceStatus);
+  await safeBootstrapStep("refreshLerobotWorkspaceStatus", refreshLerobotWorkspaceStatus);
+  await safeBootstrapStep("refreshBoWorkspaceStatus", refreshBoWorkspaceStatus);
+  await safeBootstrapStep("refreshCaeWorkspaceStatus", refreshCaeWorkspaceStatus);
+  await safeBootstrapStep("loadRecentEvents", loadRecentEvents);
   connectEventStream();
   if (!modelStatusTimer) {
     modelStatusTimer = window.setInterval(refreshModelStatuses, 8000);

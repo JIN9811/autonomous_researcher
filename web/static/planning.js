@@ -177,6 +177,18 @@ let liveRecentEvents = [];
 let liveRunEvents = [];
 let liveRunArtifacts = [];
 let liveGraphPayload = null;
+let liveUtmRuntimeStatus = null;
+let liveUtmRuntimeGraph = null;
+let liveUtmRuntimeFrame = null;
+let liveUtmCameraConfig = null;
+let liveUtmRuntimeGraphHash = "";
+let liveUtmRuntimeGraphFetchedAt = 0;
+let liveUtmRuntimeRefreshInFlight = null;
+let liveUtmRuntimeFrameInFlight = null;
+let liveUtmRuntimeStreamUrlCache = "";
+let liveUtmRuntimeStreamUrlKey = "";
+const LIVE_UTM_GRAPH_REFRESH_INTERVAL_MS = 15000;
+const LIVE_UTM_FRAME_FETCH_TIMEOUT_MS = 3000;
 let liveGraphActionStatus = null;
 let liveSelectedGraphNodeId = "";
 let liveSelectedEventKey = "";
@@ -1434,6 +1446,16 @@ async function fetchJsonOrThrow(url, options = {}) {
     throw new Error(data.detail || data.message || `HTTP ${res.status}`);
   }
   return data;
+}
+
+async function fetchJsonOrThrowWithTimeout(url, options = {}, timeoutMs = 3000) {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetchJsonOrThrow(url, { ...options, signal: controller.signal });
+  } finally {
+    window.clearTimeout(timer);
+  }
 }
 
 function pushPlanningThinking() {
@@ -12049,10 +12071,164 @@ function renderVisionInspectionFeed(feed) {
   `;
 }
 
+function visionLiveCameraProfile() {
+  const config = liveUtmCameraConfig || {};
+  return (config.active_profile && typeof config.active_profile === "object") ? config.active_profile : {};
+}
+
+function visionLiveFrameEvidence(report, screenReport = {}, visionReport = {}) {
+  const liveFrame = liveUtmRuntimeFrame && typeof liveUtmRuntimeFrame === "object" ? liveUtmRuntimeFrame : null;
+  const candidates = [
+    liveFrame,
+    screenReport.live_frame,
+    screenReport.frame_evidence,
+    screenReport.camera_frame,
+    visionReport.frame_evidence,
+    visionReport.camera_frame,
+    visionReport.latest_frame,
+  ];
+  return candidates.find((item) => item && typeof item === "object") || {};
+}
+
+function utmRuntimeLiveStreamTopic(frame = {}, profile = {}) {
+  return profile.ros_output_topic || profile.ros_rect_topic || profile.ros_image_topic || frame.topic || "/image_utm";
+}
+
+function utmRuntimeFrameStreamUrl(frame = {}, profile = {}) {
+  const fps = Number(profile.fps || frame.fps || 15);
+  const selectedFps = Number.isFinite(fps) && fps > 0 ? Math.min(Math.max(fps, 1), 60) : 15;
+  const topic = utmRuntimeLiveStreamTopic(frame, profile);
+  const runtimeKey = [
+    liveUtmRuntimeStatus?.status || "",
+    liveUtmRuntimeStatus?.pid || "",
+    liveUtmRuntimeStatus?.started_at || "",
+  ].join(":");
+  const streamKey = `${topic}|${selectedFps}|${runtimeKey}`;
+  if (streamKey !== liveUtmRuntimeStreamUrlKey || !liveUtmRuntimeStreamUrlCache) {
+    liveUtmRuntimeStreamUrlKey = streamKey;
+    liveUtmRuntimeStreamUrlCache = `/api/equipment/utm-runtime/frame-stream.mjpeg?topic=${encodeURIComponent(topic)}&fps=${encodeURIComponent(String(selectedFps))}&runtime=${encodeURIComponent(runtimeKey || "active")}`;
+  }
+  return liveUtmRuntimeStreamUrlCache;
+}
+
+function renderVisionLiveFrameEvidence(frame, profile) {
+  const topic = frame.topic || frame.device_path || profile.device_path || "/image_utm";
+  const size = frame.width && frame.height ? `${frame.width}x${frame.height}` : profile.width && profile.height ? `${profile.width}x${profile.height}` : "-";
+  const runtimeRunning = liveUtmRuntimeStatus?.status === "running";
+  const streamUrl = runtimeRunning ? utmRuntimeFrameStreamUrl(frame, profile) : "";
+  if (streamUrl) {
+    const fps = Number(profile.fps || frame.fps || 15);
+    return `
+      <div class="ar-vis-live-frame">
+        <img src="${escapeHtml(streamUrl)}" alt="Vision live frame evidence stream">
+        <div class="ar-vis-live-frame-meta">
+          <span>live_mjpeg_stream</span>
+          <strong>${escapeHtml(utmRuntimeLiveStreamTopic(frame, profile))}</strong>
+          <em>${escapeHtml(size)} · ${escapeHtml(`${Number.isFinite(fps) ? fps : 15}fps`)}</em>
+        </div>
+      </div>
+    `;
+  }
+  if (frame.data_url) {
+    return `
+      <div class="ar-vis-live-frame">
+        <img src="${escapeHtml(frame.data_url)}" alt="Vision live frame evidence">
+        <div class="ar-vis-live-frame-meta">
+          <span>${escapeHtml(frame.mode || "frame")}</span>
+          <strong>${escapeHtml(topic)}</strong>
+          <em>${escapeHtml(size)} · ${escapeHtml(frame.encoding || frame.format || "image")}</em>
+        </div>
+      </div>
+    `;
+  }
+  return `
+    <div class="ar-vis-live-frame is-empty">
+      <strong>${escapeHtml(frame.failure_code || "FRAME_UNAVAILABLE")}</strong>
+      <span>${escapeHtml(compactText(frame.message || "No camera frame evidence is available for this Vision report.", 120))}</span>
+      <em>${escapeHtml(topic)} · ${escapeHtml(size)}</em>
+    </div>
+  `;
+}
+
+function renderVisionCameraHealthBoard(screenReport, visionReport, frame, profile) {
+  const cameraHealth = screenReport.camera_health || {};
+  const diagnostics = (liveUtmRuntimeGraph && liveUtmRuntimeGraph.diagnostics) || {};
+  const runtimeStatus = (liveUtmRuntimeStatus && liveUtmRuntimeStatus.status) || "unknown";
+  const frameAvailable = frame.frame_available === true || Boolean(frame.data_url);
+  const healthRows = [
+    ["runtime", runtimeStatus],
+    ["camera_seen", diagnostics.camera_seen === undefined ? "-" : diagnostics.camera_seen],
+    ["summary_topic", diagnostics.topic_seen === undefined ? "-" : diagnostics.topic_seen],
+    ["frame", frameAvailable ? "available" : (frame.failure_code || "unavailable")],
+    ["device_path", profile.device_path || "-"],
+    ["resolution", profile.width && profile.height ? `${profile.width}x${profile.height}` : "-"],
+    ["fps", profile.fps || "-"],
+    ["pixel_format", profile.pixel_format || "-"],
+    ["health_status", cameraHealth.status || visionReport.status || "-"],
+  ];
+  return `
+    <div class="ar-vis-camera-health">
+      <div class="ar-report-metrics">
+        ${renderDashboardMetric("Runtime", runtimeStatus, "UTM ROS", runtimeStatus === "running" ? "success" : runtimeStatus === "error" ? "danger" : "warning")}
+        ${renderDashboardMetric("Camera", diagnostics.camera_seen === undefined ? "-" : diagnostics.camera_seen, "ROS graph", diagnostics.camera_seen ? "success" : "warning")}
+        ${renderDashboardMetric("Frame", frameAvailable ? "available" : "unavailable", frame.mode || "evidence", frameAvailable ? "success" : "warning")}
+      </div>
+      ${renderDashboardRows(healthRows)}
+    </div>
+  `;
+}
+
+function renderVisionRuntimeNodeFlow() {
+  const graph = liveUtmRuntimeGraph || {};
+  const diagnostics = graph.diagnostics || {};
+  const expected = graph.expected_graph || {};
+  const actual = graph.actual_graph || {};
+  const expectedNodeCount = Array.isArray(expected.nodes) ? expected.nodes.length : 0;
+  const actualNodeCount = Array.isArray(actual.nodes) ? actual.nodes.length : 0;
+  return `
+    <div class="ar-vis-node-flow">
+      <div class="live-utm-rqt-flow" aria-label="UTM Vision node flow">
+        <span>usb_cam</span><em>→</em><span>rectify</span><em>→</em><span>green_dot</span><em>→</em><span>yolov8</span>
+      </div>
+      ${renderDashboardRows([
+        ["ros2_available", diagnostics.ros2_available === undefined ? "-" : diagnostics.ros2_available],
+        ["workspace_found", diagnostics.workspace_found === undefined ? "-" : diagnostics.workspace_found],
+        ["script_found", diagnostics.script_found === undefined ? "-" : diagnostics.script_found],
+        ["topic_seen", diagnostics.topic_seen === undefined ? "-" : diagnostics.topic_seen],
+        ["camera_seen", diagnostics.camera_seen === undefined ? "-" : diagnostics.camera_seen],
+        ["expected_nodes", expectedNodeCount],
+        ["actual_nodes", actualNodeCount],
+        ["graph_hash", graph.graph_hash || "-"],
+      ])}
+    </div>
+  `;
+}
+
+function renderVisionEvidenceReviewBoard(evidence, frame, packet) {
+  const refs = Array.isArray(evidence.evidence_refs) ? evidence.evidence_refs : [];
+  const artifacts = evidence.artifacts && typeof evidence.artifacts === "object" ? Object.entries(evidence.artifacts).map(([key, value]) => `${key} / ${renderRuntimeValue(value)}`) : [];
+  const attempts = Array.isArray(frame.attempts) ? frame.attempts.map((attempt) => `${attempt.topic || attempt.device_path || "frame"} / ${attempt.failure_code || attempt.returncode || "attempt"}`) : [];
+  return `
+    ${renderDashboardRows([
+      ["review_status", evidence.review_status || "-"],
+      ["assigned_to", evidence.assigned_to || "-"],
+      ["priority", evidence.priority || "-"],
+      ["evidence_refs", refs.length],
+      ["signal_id", packet.signal_id || "-"],
+      ["handoff_status", packet.status || "-"],
+    ])}
+    ${dashboardList(refs.map((item) => typeof item === "string" ? item : `${item.kind || "evidence"} / ${item.path || item.id || "-"}`), "No evidence refs recorded.", 5)}
+    ${dashboardList(artifacts, "No artifact ledger recorded.", 5)}
+    ${dashboardList(attempts, "No frame attempts recorded.", 4)}
+  `;
+}
+
 function renderVisionDashboardCards(report, status, agentLabel, profile) {
   const screenReport = latestVisionAgentReport(report) || {};
   const visionReport = latestVisionReport(report) || {};
   const packet = latestVisionSignalPacket(report) || {};
+  const liveProfile = visionLiveCameraProfile();
+  const liveFrame = visionLiveFrameEvidence(report, screenReport, visionReport);
   const cameraHealth = screenReport.camera_health || {};
   const calibration = screenReport.calibration_summary || {};
   const confidenceDistribution = screenReport.confidence_distribution || {};
@@ -12072,9 +12248,12 @@ function renderVisionDashboardCards(report, status, agentLabel, profile) {
   const signalItems = signals.map((signal) => `${signal.signal || signal.name || "signal"} / ${signal.status || "unknown"} / conf=${renderRuntimeValue(signal.confidence)} / ttl=${renderRuntimeValue(signal.expires_at)}`);
   const artifactRows = evidence.artifacts && typeof evidence.artifacts === "object" ? Object.entries(evidence.artifacts).map(([key, value]) => `${key} / ${renderRuntimeValue(value)}`) : [];
   return `
+    ${renderDashboardCard("Camera Health", renderVisionCameraHealthBoard(screenReport, visionReport, liveFrame, liveProfile), { span: 4, tone: liveFrame.data_url ? "success" : "vision", eyebrow: "device bridge" })}
+    ${renderDashboardCard("Live Inspection Feed", renderVisionLiveFrameEvidence(liveFrame, liveProfile), { span: 5, tone: liveFrame.data_url ? "success" : "warning", eyebrow: "camera frame" })}
+    ${renderDashboardCard("Runtime Node Flow", renderVisionRuntimeNodeFlow(), { span: 3, tone: "vision", eyebrow: "rqt-like" })}
     ${renderDashboardCard("Perception Bus", `
       <div class="ar-report-metrics">
-        ${renderDashboardMetric("Camera", cameraHealth.status || (anomaly.anomaly ? "review" : "ready"), "status", cameraHealth.status === "review_required" ? "warning" : "success")}
+        ${renderDashboardMetric("Camera", cameraHealth.status || visionReport.status || "-", "status", cameraHealth.status === "review_required" ? "warning" : cameraHealth.status ? "success" : "idle")}
         ${renderDashboardMetric("Signals", quality.signal_count || signals.length, "bounded", "info")}
         ${renderDashboardMetric("Frame Age", cameraHealth.frame_age_ms === undefined ? camera.frame_age_ms || "-" : cameraHealth.frame_age_ms, "ms", "running")}
       </div>
@@ -12144,13 +12323,14 @@ function renderVisionDashboardCards(report, status, agentLabel, profile) {
       ])}
       ${dashboardList(signalItems, "No bounded vision signals recorded.", 5)}
     `, { span: 6, tone: /ready/i.test(String(handoff.status || packet.status || "")) ? "success" : "warning", eyebrow: "pose + bounded signals" })}
+    ${renderDashboardCard("Operator Review / Evidence", renderVisionEvidenceReviewBoard(evidence, liveFrame, packet), { span: 4, tone: evidence.priority === "High" || evidence.priority === "Critical" ? "warning" : "artifact", eyebrow: "review" })}
     ${renderDashboardCard("Evidence Ledger", `${renderDashboardRows([
       ["evidence_refs", Array.isArray(evidence.evidence_refs) ? evidence.evidence_refs.length : 0],
       ["dataset_ledger", evidence.dataset_ledger && typeof evidence.dataset_ledger === "object" ? Object.keys(evidence.dataset_ledger).length : 0],
       ["zone_count", zones && typeof zones === "object" ? Object.keys(zones).length : 0],
       ["pose_backend", calibration.pose_backend || "-"],
       ["frame_size", `${calibration.frame_width || "-"} x ${calibration.frame_height || "-"}`],
-    ])}${dashboardList(artifactRows, "No visual evidence artifacts recorded.", 6)}${calibrationRows.length ? renderMiniBarChart(calibrationRows, { label: "vision calibration trend", compact: true, emptyText: "No calibration trend data recorded." }) : ""}`, { span: 12, tone: "artifact", eyebrow: "trace summary" })}
+    ])}${dashboardList(artifactRows, "No visual evidence artifacts recorded.", 6)}${calibrationRows.length ? renderMiniBarChart(calibrationRows, { label: "vision calibration trend", compact: true, emptyText: "No calibration trend data recorded." }) : ""}`, { span: 8, tone: "artifact", eyebrow: "trace summary" })}
   `;
 }
 
@@ -14556,6 +14736,166 @@ function renderDeviceStatusCard(title, event, fallbackStatus = "idle") {
   `;
 }
 
+function renderUtmRuntimeDeviceCard() {
+  const statusPayload = liveUtmRuntimeStatus || {};
+  const graphPayload = liveUtmRuntimeGraph || {};
+  const framePayload = liveUtmRuntimeFrame || {};
+  const diagnostics = graphPayload.diagnostics || statusPayload.diagnostics || {};
+  const runtimeStatus = String(statusPayload.status || "stopped");
+  const rosReady = Boolean(diagnostics.ros2_available);
+  const topicSeen = Boolean(diagnostics.topic_seen);
+  const cameraSeen = Boolean(diagnostics.camera_seen);
+  const frameSeen = Boolean(framePayload.frame_available);
+  const graphHash = graphPayload.graph_hash || "-";
+  const bridgeStatus = runtimeStatus === "running" && topicSeen ? "active" : runtimeStatus === "error" ? "error" : "waiting";
+  const expected = graphPayload.expected_graph || {};
+  const actual = graphPayload.actual_graph || {};
+  const expectedNodeCount = Array.isArray(expected.nodes) ? expected.nodes.length : 0;
+  const actualNodeCount = Array.isArray(actual.nodes) ? actual.nodes.length : 0;
+  const title = "UTM ROS Runtime";
+  const tooltip = [
+    title,
+    `runtime: ${runtimeStatus}`,
+    `ros2: ${rosReady ? "available" : "missing"}`,
+    `camera: ${cameraSeen ? "seen" : "waiting"}`,
+    `frame: ${frameSeen ? (framePayload.topic || "available") : "waiting"}`,
+    `summary topic: ${topicSeen ? "seen" : "waiting"}`,
+    `rqt source: cloned UTM program`,
+  ].join("\n");
+  return `
+    <article class="live-device-card status-${escapeHtml(bridgeStatus)}" title="${escapeHtml(tooltip)}" tabindex="0" data-device-name="UTM ROS Runtime">
+      <span>${escapeHtml(`${title} · usb→rect→green→yolo`)}</span>
+      <strong>${escapeHtml(runtimeStatus)}</strong>
+      <div class="live-utm-rqt-flow" aria-label="UTM RQT flow from cloned UTM program">
+        <span>usb_cam</span><em>→</em><span>rectify</span><em>→</em><span>green_dot</span><em>→</em><span>yolov8</span>
+      </div>
+      <dl>
+        <div class="live-device-field"><dt>rqt</dt><dd>${escapeHtml(`${expectedNodeCount}/${actualNodeCount} nodes`)}</dd></div>
+        <div class="live-device-field"><dt>ros2</dt><dd>${escapeHtml(rosReady ? "available" : "missing")}</dd></div>
+        <div class="live-device-field"><dt>topic</dt><dd>${escapeHtml(topicSeen ? "/compression_tester/summary" : "waiting")}</dd></div>
+        <div class="live-device-field"><dt>frame</dt><dd>${escapeHtml(frameSeen ? (framePayload.topic || "available") : "waiting")}</dd></div>
+        <div class="live-device-field"><dt>hash</dt><dd>${escapeHtml(graphHash)}</dd></div>
+      </dl>
+    </article>
+  `;
+}
+
+function liveUtmRuntimeFrameSignature(frame) {
+  if (!frame || typeof frame !== "object") return "";
+  return [
+    frame.topic || "",
+    frame.generated_at || "",
+    frame.frame_age_ms === undefined ? "" : Math.round(Number(frame.frame_age_ms) || 0),
+    frame.data_url ? frame.data_url.length : 0,
+    frame.data_url ? frame.data_url.slice(-96) : "",
+    frame.failure_code || "",
+  ].join("|");
+}
+
+function liveUtmRuntimeStreamVisible() {
+  return Boolean(document.querySelector('.ar-vis-live-frame img[src*="/api/equipment/utm-runtime/frame-stream.mjpeg"]'));
+}
+
+function renderLiveUtmRuntimeRefreshIfVisible(previousFrameSignature = "") {
+  if (!liveLastSession) return;
+  const nextSignature = liveUtmRuntimeFrameSignature(liveUtmRuntimeFrame);
+  const frameChanged = nextSignature && nextSignature !== previousFrameSignature;
+  if (liveUtmRuntimeStreamVisible()) return;
+  const visible = document.querySelector(".ar-vis-live-frame") || document.querySelector('[data-device-name="UTM ROS Runtime"]');
+  if (visible && frameChanged) {
+    renderLiveRuntime(liveLastSession);
+  }
+}
+
+async function refreshLiveUtmRuntimeGraphSnapshot() {
+  const now = Date.now();
+  const shouldRefreshGraph = !liveUtmRuntimeGraph || (now - liveUtmRuntimeGraphFetchedAt) >= LIVE_UTM_GRAPH_REFRESH_INTERVAL_MS;
+  if (!shouldRefreshGraph) return liveUtmRuntimeGraph;
+  const graphResult = await fetch(`/api/equipment/utm-runtime/graph?previous_hash=${encodeURIComponent(liveUtmRuntimeGraphHash || "")}`);
+  if (graphResult.ok) {
+    const graphPayload = await graphResult.json();
+    liveUtmRuntimeGraphFetchedAt = Date.now();
+    if (graphPayload.changed !== false || !liveUtmRuntimeGraph) {
+      liveUtmRuntimeGraph = graphPayload;
+    }
+    if (graphPayload.graph_hash) {
+      liveUtmRuntimeGraphHash = graphPayload.graph_hash;
+    }
+  }
+  return liveUtmRuntimeGraph;
+}
+
+async function refreshLiveUtmRuntimeFrame(options = {}) {
+  if (liveUtmRuntimeFrameInFlight) return liveUtmRuntimeFrameInFlight;
+  const previousSignature = liveUtmRuntimeFrameSignature(liveUtmRuntimeFrame);
+  liveUtmRuntimeFrameInFlight = (async () => {
+    try {
+      const framePayload = await fetchJsonOrThrowWithTimeout(
+        "/api/equipment/utm-runtime/frame",
+        {},
+        LIVE_UTM_FRAME_FETCH_TIMEOUT_MS
+      );
+      liveUtmRuntimeFrame = framePayload;
+      if (options.render) renderLiveUtmRuntimeRefreshIfVisible(previousSignature);
+      return liveUtmRuntimeFrame;
+    } catch (err) {
+      liveUtmRuntimeFrame = {
+        ok: false,
+        frame_available: false,
+        mode: "ros_image_topic",
+        failure_code: err?.name === "AbortError" ? "UTM_FRAME_FETCH_TIMEOUT" : "UTM_FRAME_FETCH_FAILED",
+        message: String(err),
+        generated_at: new Date().toISOString(),
+      };
+      if (options.render) renderLiveUtmRuntimeRefreshIfVisible(previousSignature);
+      return liveUtmRuntimeFrame;
+    } finally {
+      liveUtmRuntimeFrameInFlight = null;
+    }
+  })();
+  return liveUtmRuntimeFrameInFlight;
+}
+
+async function refreshLiveUtmRuntimeStatus(options = {}) {
+  if (liveUtmRuntimeRefreshInFlight) return liveUtmRuntimeRefreshInFlight;
+  liveUtmRuntimeRefreshInFlight = (async () => {
+    try {
+      const [statusResult, cameraConfigResult] = await Promise.allSettled([
+        fetch("/api/equipment/utm-runtime/status"),
+        fetch("/api/equipment/utm-runtime/camera-config"),
+      ]);
+      if (statusResult.status === "fulfilled" && statusResult.value.ok) {
+        liveUtmRuntimeStatus = await statusResult.value.json();
+      }
+      if (cameraConfigResult.status === "fulfilled" && cameraConfigResult.value.ok) {
+        liveUtmCameraConfig = await cameraConfigResult.value.json();
+      }
+      refreshLiveUtmRuntimeGraphSnapshot()
+        .then(() => {
+          if (options.render && liveLastSession) renderLiveRuntime(liveLastSession);
+        })
+        .catch(() => {});
+      const diagnostics = liveUtmRuntimeGraph?.diagnostics || {};
+      const shouldFetchFrame = !liveUtmRuntimeStreamVisible()
+        && (liveUtmRuntimeStatus?.status === "running" || diagnostics.camera_seen || diagnostics.topic_seen || !liveUtmRuntimeFrame);
+      if (shouldFetchFrame) {
+        refreshLiveUtmRuntimeFrame({ render: Boolean(options.render) }).catch(() => {});
+      }
+    } catch (err) {
+      liveUtmRuntimeStatus = {
+        ok: false,
+        status: "error",
+        failure_code: "UTM_RUNTIME_STATUS_UNAVAILABLE",
+        message: String(err),
+      };
+    } finally {
+      liveUtmRuntimeRefreshInFlight = null;
+    }
+    return { status: liveUtmRuntimeStatus, graph: liveUtmRuntimeGraph, frame: liveUtmRuntimeFrame };
+  })();
+  return liveUtmRuntimeRefreshInFlight;
+}
+
 async function focusDeviceEventFromCard(card) {
   if (!card) return;
   const eventKey = card.dataset.deviceEventKey || "";
@@ -14799,6 +15139,7 @@ function renderDeviceStrip(session) {
     renderDeviceStatusCard("3D Printer", latestRuntimeEvent([/printer/, /prusa/, /slicer/, /gcode/, /specimen/]), "idle"),
     renderDeviceStatusCard("Robot Arm", latestRuntimeEvent([/robot/, /lerobot/, /manipulation/, /rollout/, /teleop/]), "idle"),
     renderDeviceStatusCard("UTM", latestRuntimeEvent([/utm/, /tensile/, /compression/, /equipment/]), "idle"),
+    renderUtmRuntimeDeviceCard(),
     renderDeviceStatusCard("Camera", latestRuntimeEvent([/camera/, /vision/, /capture/, /image/]), "idle"),
     renderDeviceStatusCard("Windows Bridge", latestRuntimeEvent([/windows/, /pyautogui/, /bridge/, /equipment/]), "idle"),
     renderDeviceStatusCard("Environment Sensor", latestRuntimeEvent([/environment/, /sensor/, /humidity/, /temperature/]), "idle"),
@@ -15161,6 +15502,7 @@ async function refreshPlanningAuxiliaryState(session) {
         runtime: (session && session.runtime) || (liveLastSession && liveLastSession.runtime) || {},
         guardian_status: guardianPayload || liveGuardianStatus,
       };
+      refreshLiveUtmRuntimeStatus({ render: true });
       await refreshLiveGraphPayload();
       await refreshLiveRunDetails(session || liveLastSession || {});
       renderLiveRuntime(liveLastSession);

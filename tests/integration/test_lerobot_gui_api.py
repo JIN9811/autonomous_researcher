@@ -25,7 +25,9 @@ def test_lerobot_gui_and_test_mode_api_workflow(tmp_path: Path, monkeypatch: Any
     cfg["output_root"] = str(tmp_path / "outputs")
     cfg["policy_root"] = str(tmp_path / "outputs")
     cfg["session_log_root"] = str(tmp_path / "logs")
-    monkeypatch.setattr(main_module, "_LEROBOT_BRIDGE", LeRobotBridge(LeRobotBridgeConfig.from_config(cfg, repo_root=tmp_path)))
+    bridge = LeRobotBridge(LeRobotBridgeConfig.from_config(cfg, repo_root=tmp_path))
+    bridge._post_isaac_mirror_state = lambda endpoint, payload, timeout_s=0.5: {"ok": True, "status_code": 200}  # type: ignore[method-assign]
+    monkeypatch.setattr(main_module, "_LEROBOT_BRIDGE", bridge)
     manipulation_profile_path = tmp_path / "memory" / "manipulation_agent_bridge.json"
     monkeypatch.setattr(manipulation_profile_module, "MANIPULATION_AGENT_PROFILE_PATH", manipulation_profile_path)
     monkeypatch.setattr(main_module, "MANIPULATION_AGENT_PROFILE_PATH", manipulation_profile_path)
@@ -38,19 +40,36 @@ def test_lerobot_gui_and_test_mode_api_workflow(tmp_path: Path, monkeypatch: Any
     assert "+ Camera" in page.text
     assert "RealSense SDK" in page.text
     assert "D455F top / D405 wrist" in page.text
-    assert "jin/record-test" in page.text
-    assert "Pick up the cylinder" in page.text
+    assert '<option value="xvla">xvla (X-VLA)</option>' in page.text
+    assert '<option value="smolvla" selected>smolvla (SmolVLA)</option>' in page.text
+    assert 'id="lerobot-train-source-policy-input" type="text" value="lerobot/smolvla_base"' in page.text
+    assert "lerobot/smolvla_base" in page.text
+    assert "lerobot/xvla-base" in page.text
+    assert "jin/record-test" not in page.text
+    assert "Pick up the cube and place it" in page.text
+    assert 'id="lerobot-episodes-input" type="number" min="1" value="60"' in page.text
     assert "lerobot-action-status" in page.text
     assert "Batch Size" in page.text
     assert "Additional Train CLI Args" in page.text
+    assert "WandB Local Server" in page.text
+    assert "btn-wandb-local-start" in page.text
     assert "Resume dataset" in page.text
     assert "Resume training from checkpoint" in page.text
     assert "Manipulation Agent Bridge" in page.text
     assert "lerobot-manipulation-task-id-input" in page.text
+    assert "lerobot-rollout-policy-type-input" in page.text
+    assert "Rollout Policy Type" in page.text
     assert "Pi0.5 RTC Execution Horizon" in page.text
     assert "Manipulation Agent Runtime Report" in page.text
     assert "Save Agent Defaults" in page.text
     assert "Test Agent Bridge" in page.text
+    assert "Attach mirror loop to teleop / record" in page.text
+    assert "btn-isaac-mirror-loop-start" in page.text
+    assert "btn-isaac-mirror-receiver-start" in page.text
+    assert "btn-isaac-mirror-receiver-status" in page.text
+    assert "btn-isaac-mirror-receiver-stop" in page.text
+    assert "btn-isaac-mirror-health" in page.text
+    assert "btn-isaac-mirror-verify" in page.text
 
     home = client.get("/")
     assert home.status_code == 200
@@ -60,9 +79,81 @@ def test_lerobot_gui_and_test_mode_api_workflow(tmp_path: Path, monkeypatch: Any
     config = client.get("/api/lerobot/config").json()
     assert config["ok"] is True
     assert any(profile["profile_id"] == "fake_omx_ai" for profile in config["profiles"])
+    assert any(policy["policy_type"] == "smolvla" and policy["value"] == "lerobot/smolvla_base" for policy in config["policy_presets"])
+    assert any(policy["policy_type"] == "xvla" and policy["value"] == "lerobot/xvla-base" for policy in config["policy_presets"])
 
     selected = client.post("/api/lerobot/config", json={"profile_id": "fake_omx_ai", "mode": "test"}).json()
     assert selected["selected_profile_id"] == "fake_omx_ai"
+
+    monkeypatch.setattr(
+        bridge,
+        "mirror_receiver_process_start",
+        lambda payload: {"ok": True, "tool": "lerobot.mirror.receiver_process.start", "status": "RUNNING", "pid": 123, "health": {"ok": True}},
+    )
+    monkeypatch.setattr(
+        bridge,
+        "mirror_receiver_process_status",
+        lambda payload: {"ok": True, "tool": "lerobot.mirror.receiver_process.status", "status": "RUNNING", "pid": 123, "health": {"ok": True}},
+    )
+    monkeypatch.setattr(
+        bridge,
+        "mirror_receiver_process_stop",
+        lambda payload: {"ok": True, "tool": "lerobot.mirror.receiver_process.stop", "status": "STOPPED", "pid": 123},
+    )
+    assert client.post("/api/lerobot/mirror/receiver-process/start", json={"mode": "test", "profile_id": "fake_omx_ai"}).json()["status"] == "RUNNING"
+    assert client.post("/api/lerobot/mirror/receiver-process/status", json={"mode": "test", "profile_id": "fake_omx_ai"}).json()["status"] == "RUNNING"
+    assert client.post("/api/lerobot/mirror/receiver-process/stop", json={"mode": "test", "profile_id": "fake_omx_ai"}).json()["status"] == "STOPPED"
+
+    mirror_loop = client.post(
+        "/api/lerobot/mirror/loop/start",
+        json={"mode": "test", "profile_id": "fake_omx_ai", "isaac_mirror_max_samples": 2},
+    ).json()
+    assert mirror_loop["ok"] is True
+    assert mirror_loop["workflow"] == "isaac_mirror"
+    assert mirror_loop["sample_count"] == 2
+    monkeypatch.setattr(
+        bridge,
+        "_fetch_isaac_mirror_receiver_health",
+        lambda endpoint, timeout_s=0.5: {
+            "ok": True,
+            "health_url": "http://127.0.0.1:8766/health",
+            "apply_mode": "deferred_update_tick",
+            "sample_count": 2,
+        },
+    )
+    receiver_health = client.post(
+        "/api/lerobot/mirror/receiver-health",
+        json={"mode": "test", "profile_id": "fake_omx_ai", "isaac_mirror_endpoint": "http://127.0.0.1:8766/joints"},
+    ).json()
+    assert receiver_health["ok"] is True
+    assert receiver_health["apply_mode"] == "deferred_update_tick"
+    bridge._post_isaac_mirror_state = lambda endpoint, payload, timeout_s=0.5: {"ok": True, "status_code": 200}  # type: ignore[method-assign]
+    monkeypatch.setattr(
+        bridge,
+        "_fetch_isaac_mirror_receiver_state",
+        lambda endpoint, timeout_s=0.5: {
+            "ok": True,
+            "state_url": "http://127.0.0.1:8766/state",
+            "sample_count": 3,
+            "last_payload_summary": {"session_id": next(reversed(bridge._sessions)), "sample_index": 1, "joint_count": 6, "target_count": 6},
+        },
+    )
+    receiver_verify = client.post(
+        "/api/lerobot/mirror/receiver-verify",
+        json={"mode": "test", "profile_id": "fake_omx_ai", "isaac_mirror_endpoint": "http://127.0.0.1:8766/joints"},
+    ).json()
+    assert receiver_verify["ok"] is True
+    assert receiver_verify["verification"]["receiver_sample_count_after"] == 3
+    mirror_status = client.post(
+        "/api/lerobot/mirror/loop/status",
+        json={"mode": "test", "profile_id": "fake_omx_ai", "session_id": mirror_loop["session_id"]},
+    ).json()
+    assert mirror_status["status"] == "COMPLETED"
+    mirror_stop = client.post(
+        "/api/lerobot/mirror/loop/stop",
+        json={"mode": "test", "profile_id": "fake_omx_ai", "session_id": mirror_loop["session_id"]},
+    ).json()
+    assert mirror_stop["ok"] is True
 
     ports = client.get("/api/lerobot/ports", params={"profile_id": "fake_omx_ai", "mode": "test"}).json()
     assert ports["ok"] is True
@@ -121,10 +212,11 @@ def test_lerobot_gui_and_test_mode_api_workflow(tmp_path: Path, monkeypatch: Any
     train = client.post(
         "/api/lerobot/train/start",
         json={
-            "mode": "test",
-            "profile_id": "fake_omx_ai",
-            "dataset_repo_id": "jin/record-test",
-            "policy_type": "act",
+                "mode": "test",
+                "profile_id": "fake_omx_ai",
+                "observation_pipeline_id": "legacy_lerobot",
+                "dataset_repo_id": "jin/record-test",
+                "policy_type": "act",
             "device": "cuda",
             "batch_size": 32,
             "steps": 20000,
@@ -291,6 +383,14 @@ def test_lerobot_gui_and_test_mode_api_workflow(tmp_path: Path, monkeypatch: Any
     assert visual["ok"] is True
     assert visual["tool"] == "lerobot.dataset.visualize"
 
+    wandb_local = client.post(
+        "/api/lerobot/wandb-local/start",
+        json={"mode": "test", "profile_id": "fake_omx_ai", "wandb_base_url": "http://127.0.0.1:8081"},
+    ).json()
+    assert wandb_local["ok"] is True
+    assert wandb_local["tool"] == "lerobot.wandb_local.start"
+    assert wandb_local["url"] == "http://127.0.0.1:8081"
+
 
 def test_lerobot_rollout_api_hardware_alert_is_guardian_ready(monkeypatch: Any) -> None:
     def fake_call(name: str, payload: dict[str, object]) -> dict[str, object]:
@@ -372,3 +472,23 @@ def test_lerobot_rollout_api_uses_backend_tool_registry(monkeypatch: Any) -> Non
     assert result["command_preview"] == ["backend-tool-registry"]
     assert calls and calls[0][0] == "lerobot.rollout.start"
     assert calls[0][1]["policy_path"] == "fake://policy"
+
+
+def test_lerobot_resume_checkboxes_pin_auto_generated_names() -> None:
+    script = resolve_path("web/static/lerobot.js").read_text(encoding="utf-8")
+
+    assert "function resumeDatasetRequested()" in script
+    assert "function resumeTrainingRequested()" in script
+    assert "const resumeDataset = resumeDatasetRequested();" in script
+    assert "const resumeTraining = resumeTrainingRequested();" in script
+    assert "if (!resumeDataset && datasetInput" in script
+    assert "if (!resumeTraining) syncTrainNamingFromDataset();" in script
+
+
+def test_lerobot_train_output_name_includes_policy_type_suffix() -> None:
+    script = resolve_path("web/static/lerobot.js").read_text(encoding="utf-8")
+
+    assert "function currentTrainPolicySuffix()" in script
+    assert 'String(policyTypeInput.value || "smolvla")' in script
+    assert "`${runName}_train(${suffix})`" in script
+    assert "syncTrainNamingFromDataset({ policyChanged: true })" in script

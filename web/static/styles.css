@@ -2432,6 +2432,75 @@ textarea {
   line-height: 1.45;
 }
 
+.workspace-mini-graph {
+  display: grid;
+  gap: 7px;
+  align-self: end;
+  color: var(--text);
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.utm-rqt-flow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+}
+
+.utm-rqt-node {
+  border: 1px solid rgba(20, 54, 179, 0.14);
+  border-radius: 8px;
+  background: rgba(241, 246, 255, 0.9);
+  color: var(--primary);
+  padding: 3px 6px;
+  font-weight: 700;
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+.utm-rqt-arrow {
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.utm-rqt-meta {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.workspace-frame-preview {
+  display: grid;
+  gap: 5px;
+  min-height: 34px;
+  border: 1px solid rgba(20, 54, 179, 0.12);
+  border-radius: 10px;
+  background: rgba(246, 249, 255, 0.72);
+  padding: 6px;
+  color: var(--muted);
+  font-size: 0.74rem;
+  overflow: hidden;
+}
+
+.workspace-frame-preview img {
+  width: 100%;
+  max-height: 118px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid rgba(20, 54, 179, 0.14);
+  background: #08162a;
+}
+
+.workspace-frame-preview small,
+.workspace-frame-empty {
+  overflow-wrap: anywhere;
+}
+
+.workspace-frame-empty {
+  color: var(--muted);
+  font-weight: 700;
+}
+
 .lerobot-page {
   max-width: 1320px;
 }
@@ -3524,6 +3593,43 @@ a.btn.tiny {
   overflow: hidden;
 }
 
+.lerobot-data-panel {
+  margin-top: 12px;
+  border: 1px solid rgba(20, 54, 179, 0.14);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.82);
+  padding: 12px;
+  color: var(--muted);
+  overflow-x: auto;
+}
+
+.lerobot-data-panel table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+  color: var(--text);
+}
+
+.lerobot-data-panel th,
+.lerobot-data-panel td {
+  border-bottom: 1px solid rgba(20, 54, 179, 0.10);
+  padding: 8px 7px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.lerobot-data-panel th {
+  color: var(--primary);
+  font-size: 0.74rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.lerobot-data-panel code {
+  font-size: 0.72rem;
+  word-break: break-all;
+}
+
 .runtime-ide-node-icon img {
   width: 26px;
   height: 26px;
@@ -4453,6 +4559,30 @@ body.runtime-ide-body .runtime-artifact-item small {
   justify-content: center;
   margin-top: auto;
   width: 100%;
+}
+
+body.planning-live-body .live-utm-rqt-flow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin: 5px 0 3px;
+  font-size: 0.66rem;
+  color: rgba(176, 210, 255, 0.88);
+}
+
+body.planning-live-body .live-utm-rqt-flow span {
+  border: 1px solid rgba(94, 201, 255, 0.22);
+  border-radius: 6px;
+  background: rgba(8, 20, 42, 0.46);
+  padding: 2px 4px;
+  white-space: nowrap;
+}
+
+body.planning-live-body .live-utm-rqt-flow em {
+  color: rgba(111, 255, 229, 0.78);
+  font-style: normal;
+  font-weight: 800;
 }
 
 .runtime-map-actions {
@@ -22453,4 +22583,179 @@ body .bambu-printer-page .printer-evidence-details pre {
 
 .lerobot-camera-fps-line input:disabled {
   opacity: 0.45;
+}
+
+/* Vision / UTM Camera Bridge workspace */
+.vision-utm-page .vision-camera-status-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.vision-camera-command-panel .vision-camera-button-row {
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.vision-camera-grid {
+  grid-template-columns: minmax(420px, 1.2fr) minmax(320px, 0.8fr);
+}
+
+.vision-camera-settings-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.vision-camera-evidence-grid {
+  display: grid;
+  grid-template-columns: minmax(420px, 1.15fr) minmax(320px, 0.85fr);
+  gap: 1rem;
+}
+
+.vision-camera-frame-title-row {
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.vision-camera-frame-title-main {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.vision-camera-frame-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+.vision-camera-frame-controls .badge {
+  min-width: 82px;
+  text-align: center;
+}
+
+.vision-camera-frame-placeholder {
+  min-height: 280px;
+  display: grid;
+  place-items: center;
+  border: 1px dashed rgba(125, 170, 255, 0.32);
+  border-radius: 14px;
+  color: var(--muted, #8da0bd);
+  text-align: center;
+  background: rgba(7, 14, 30, 0.48);
+}
+
+.vision-camera-frame-img {
+  width: 100%;
+  max-height: 460px;
+  object-fit: contain;
+  border: 1px solid rgba(125, 170, 255, 0.24);
+  border-radius: 14px;
+  background: #060b16;
+}
+
+.vision-camera-rqt-flow {
+  min-height: 160px;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  padding: 1rem;
+  border: 1px solid rgba(125, 170, 255, 0.22);
+  border-radius: 14px;
+  background: rgba(7, 14, 30, 0.42);
+}
+
+.vision-camera-device-card {
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+}
+
+.vision-camera-device-card span,
+.vision-camera-device-card small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 980px) {
+  .vision-utm-page .vision-camera-status-grid,
+  .vision-camera-grid,
+  .vision-camera-evidence-grid,
+  .vision-camera-settings-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .vision-camera-frame-title-row,
+  .vision-camera-frame-controls {
+    justify-content: flex-start;
+  }
+}
+
+/* v20260622 Vision Agent camera/UTM inspection dashboard. */
+body.planning-live-body .ar-vis-live-frame {
+  min-height: 210px;
+  display: grid;
+  place-items: center;
+  gap: 0.65rem;
+  border: 1px solid rgba(61, 214, 255, 0.24);
+  background: linear-gradient(145deg, rgba(6, 15, 30, 0.82), rgba(10, 26, 45, 0.72));
+  border-radius: 14px;
+  overflow: hidden;
+  text-align: center;
+}
+
+body.planning-live-body .ar-vis-live-frame img {
+  width: 100%;
+  max-height: 320px;
+  object-fit: contain;
+  display: block;
+  background: #020814;
+}
+
+body.planning-live-body .ar-vis-live-frame.is-empty {
+  padding: 1rem;
+  border-style: dashed;
+  color: rgba(201, 214, 236, 0.76);
+}
+
+body.planning-live-body .ar-vis-live-frame.is-empty strong {
+  color: #fbbf24;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+body.planning-live-body .ar-vis-live-frame-meta {
+  width: 100%;
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.65rem 0.8rem;
+  background: rgba(3, 9, 18, 0.72);
+  border-top: 1px solid rgba(61, 214, 255, 0.18);
+}
+
+body.planning-live-body .ar-vis-live-frame-meta span,
+body.planning-live-body .ar-vis-live-frame-meta em,
+body.planning-live-body .ar-vis-node-flow .ar-report-kv dt,
+body.planning-live-body .ar-vis-camera-health .ar-report-kv dt {
+  color: rgba(165, 184, 214, 0.78);
+  font-size: 0.72rem;
+}
+
+body.planning-live-body .ar-vis-live-frame-meta strong {
+  color: rgba(232, 244, 255, 0.95);
+  overflow-wrap: anywhere;
+}
+
+body.planning-live-body .ar-vis-camera-health,
+body.planning-live-body .ar-vis-node-flow {
+  display: grid;
+  gap: 0.75rem;
+}
+
+body.planning-live-body .ar-vis-node-flow .live-utm-rqt-flow {
+  justify-content: center;
+  padding: 0.65rem;
+  border: 1px solid rgba(61, 214, 255, 0.2);
+  border-radius: 12px;
+  background: rgba(6, 18, 34, 0.58);
 }

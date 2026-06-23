@@ -31,6 +31,7 @@ MANIPULATION_AGENT_PROFILE_PATH = resolve_path("memory/manipulation_agent_bridge
 DEFAULT_MANIPULATION_AGENT_PROFILE: dict[str, Any] = {
     "manipulation_strategy": "pi05_lerobot_policy",
     "profile_id": "robotis_omx_ai",
+    "observation_pipeline_id": "rgbd_sidecar",
     "policy_type": "pi05",
     "policy_path": "",
     "policy_checkpoint_path": "",
@@ -63,6 +64,7 @@ DEFAULT_MANIPULATION_AGENT_PROFILE: dict[str, Any] = {
 _STRING_LIMITS = {
     "manipulation_strategy": 80,
     "profile_id": 120,
+    "observation_pipeline_id": 80,
     "policy_type": 40,
     "policy_path": 1000,
     "policy_checkpoint_path": 1000,
@@ -181,12 +183,14 @@ def normalize_manipulation_agent_profile(raw: dict[str, Any] | None) -> dict[str
         profile["task_id"] = DEFAULT_MANIPULATION_AGENT_PROFILE["task_id"]
     if profile["skill_id"] not in {"transfer_to_utm", "clear_utm_to_disposal"}:
         profile["skill_id"] = profile["task_id"]
-    if profile["policy_type"] not in {"pi05", "act"}:
+    if profile["policy_type"] not in {"pi05", "act", "xvla", "smolvla"}:
         profile["policy_type"] = DEFAULT_MANIPULATION_AGENT_PROFILE["policy_type"]
     if profile["policy_backend"] not in {"lerobot_cli", "openpi_server", "fixed_kinematic", "act_policy"}:
         profile["policy_backend"] = DEFAULT_MANIPULATION_AGENT_PROFILE["policy_backend"]
     if profile["rollout_inference_type"] not in {"", "sync", "rtc"}:
         profile["rollout_inference_type"] = DEFAULT_MANIPULATION_AGENT_PROFILE["rollout_inference_type"]
+    if profile["observation_pipeline_id"] not in {"legacy_lerobot", "rgbd_sidecar", "raw_depth_adapter"}:
+        profile["observation_pipeline_id"] = DEFAULT_MANIPULATION_AGENT_PROFILE["observation_pipeline_id"]
     return profile
 
 

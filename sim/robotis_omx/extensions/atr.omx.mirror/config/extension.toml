@@ -1,0 +1,19 @@
+[package]
+version = "0.1.0"
+title = "ATR ROBOTIS OMX Mirror Receiver"
+description = "Runs the ATR ROBOTIS OMX HTTP mirror receiver inside the active Isaac Sim process."
+authors = ["ATR"]
+category = "Simulation"
+keywords = ["isaac", "robotis", "mirror", "teleoperation"]
+
+[[python.module]]
+name = "atr.omx.mirror.extension"
+
+[settings.exts."atr.omx.mirror"]
+enabled = true
+host = "127.0.0.1"
+port = 8766
+scene = ""
+useCurrentStage = true
+openSceneOnStartup = true
+playTimelineOnStartup = true

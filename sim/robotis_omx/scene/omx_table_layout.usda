@@ -1,0 +1,581 @@
+#usda 1.0
+(
+    defaultPrim = "World"
+    metersPerUnit = 1
+    upAxis = "Z"
+)
+
+def Xform "World"
+{
+    def PhysicsScene "PhysicsScene" (
+        prepend apiSchemas = ["NewtonSceneAPI", "PhysxSceneAPI"]
+    )
+    {
+        vector3f physics:gravityDirection = (0, 0, -1)
+        float physics:gravityMagnitude = 9.81
+        custom int physxScene:timeStepsPerSecond = 60
+    }
+
+    def "Materials"
+    {
+        def Material "desk_redwood_laminate"
+        {
+            token outputs:surface.connect = </World/Materials/desk_redwood_laminate/PreviewSurface.outputs:surface>
+
+            def Shader "PreviewSurface"
+            {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.42, 0.095, 0.04)
+                float inputs:metallic = 0
+                float inputs:roughness = 0.6
+                token outputs:surface
+            }
+        }
+
+        def Material "desk_redwood_textured"
+        {
+            token outputs:surface.connect = </World/Materials/desk_redwood_textured/PreviewSurface.outputs:surface>
+
+            def Shader "PreviewSurface"
+            {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.5, 0.1, 0.045)
+                color3f inputs:diffuseColor.connect = </World/Materials/desk_redwood_textured/WoodTexture.outputs:rgb>
+                float inputs:metallic = 0
+                float inputs:roughness = 0.58
+                token outputs:surface
+            }
+
+            def Shader "PrimvarReader_st"
+            {
+                uniform token info:id = "UsdPrimvarReader_float2"
+                token inputs:varname = "st"
+                float2 outputs:result
+            }
+
+            def Shader "WoodTexture"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file = @/home/jin/autonomous_researcher/sim/robotis_omx/scene/Textures/redwood_table_grain.png@
+                token inputs:sourceColorSpace = "sRGB"
+                float2 inputs:st.connect = </World/Materials/desk_redwood_textured/PrimvarReader_st.outputs:result>
+                color3f outputs:rgb
+            }
+        }
+
+        def Material "desk_dark_redwood_edge"
+        {
+            token outputs:surface.connect = </World/Materials/desk_dark_redwood_edge/PreviewSurface.outputs:surface>
+
+            def Shader "PreviewSurface"
+            {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.2, 0.045, 0.022)
+                float inputs:metallic = 0
+                float inputs:roughness = 0.7
+                token outputs:surface
+            }
+        }
+
+        def Material "a4_matte_white"
+        {
+            token outputs:surface.connect = </World/Materials/a4_matte_white/PreviewSurface.outputs:surface>
+
+            def Shader "PreviewSurface"
+            {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.93, 0.93, 0.9)
+                float inputs:metallic = 0
+                float inputs:roughness = 0.78
+                token outputs:surface
+            }
+        }
+
+        def Material "aluminum_disk"
+        {
+            token outputs:surface.connect = </World/Materials/aluminum_disk/PreviewSurface.outputs:surface>
+
+            def Shader "PreviewSurface"
+            {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.72, 0.69, 0.62)
+                float inputs:metallic = 0.15
+                float inputs:roughness = 0.35
+                token outputs:surface
+            }
+        }
+
+        def Material "dark_base"
+        {
+            token outputs:surface.connect = </World/Materials/dark_base/PreviewSurface.outputs:surface>
+
+            def Shader "PreviewSurface"
+            {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.02, 0.02, 0.018)
+                float inputs:metallic = 0
+                float inputs:roughness = 0.65
+                token outputs:surface
+            }
+        }
+
+        def Material "red_test_cube"
+        {
+            token outputs:surface.connect = </World/Materials/red_test_cube/PreviewSurface.outputs:surface>
+
+            def Shader "PreviewSurface"
+            {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.86, 0.05, 0.04)
+                float inputs:metallic = 0
+                float inputs:roughness = 0.55
+                token outputs:surface
+            }
+        }
+
+        def Material "blue_corner_marker"
+        {
+            token outputs:surface.connect = </World/Materials/blue_corner_marker/PreviewSurface.outputs:surface>
+
+            def Shader "PreviewSurface"
+            {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.02, 0.42, 0.9)
+                float inputs:metallic = 0
+                float inputs:roughness = 0.45
+                token outputs:surface
+            }
+        }
+
+        def Material "yellow_center_marker"
+        {
+            token outputs:surface.connect = </World/Materials/yellow_center_marker/PreviewSurface.outputs:surface>
+
+            def Shader "PreviewSurface"
+            {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (1, 0.88, 0.02)
+                float inputs:metallic = 0
+                float inputs:roughness = 0.38
+                token outputs:surface
+            }
+        }
+    }
+
+    def "Table"
+    {
+        def Cube "TableTop" (
+            prepend apiSchemas = ["PhysicsCollisionAPI"]
+        )
+        {
+            rel material:binding = </World/Materials/desk_redwood_laminate>
+            custom token physics:approximation = "box"
+            bool physics:collisionEnabled = 1
+            double size = 1
+            float3 xformOp:scale = (0.7, 0.45, 0.03)
+            double3 xformOp:translate = (0.35, 0.225, -0.015)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+        }
+
+        def Mesh "TableTopRedwoodGrainSurface"
+        {
+            int[] faceVertexCounts = [4]
+            int[] faceVertexIndices = [0, 1, 2, 3]
+            rel material:binding = </World/Materials/desk_redwood_textured>
+            normal3f[] normals = [(0, 0, 1)] (
+                interpolation = "uniform"
+            )
+            point3f[] points = [(0, 0, 0.00003), (0.7, 0, 0.00003), (0.7, 0.45, 0.00003), (0, 0.45, 0.00003)]
+            texCoord2f[] primvars:st = [(0, 0), (1, 0), (1, 1), (0, 1)] (
+                interpolation = "vertex"
+            )
+        }
+    }
+
+    def "Workspace"
+    {
+        def Cube "A4Sheet" (
+            prepend apiSchemas = ["PhysicsCollisionAPI"]
+        )
+        {
+            rel material:binding = </World/Materials/a4_matte_white>
+            custom token physics:approximation = "box"
+            bool physics:collisionEnabled = 1
+            double size = 1
+            float3 xformOp:scale = (0.297, 0.21, 0.00012)
+            double3 xformOp:translate = (0.315, 0.265, 0.00006)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+        }
+
+        def Mesh "A4CornerMarker_1"
+        {
+            int[] faceVertexCounts = [3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3]
+            int[] faceVertexIndices = [0, 1, 2, 0, 2, 3, 0, 3, 4, 0, 4, 5, 0, 5, 6, 0, 6, 7, 0, 7, 8, 0, 8, 9, 0, 9, 10, 0, 10, 11, 0, 11, 12, 0, 12, 13, 0, 13, 14, 0, 14, 15, 0, 15, 16, 0, 16, 17, 0, 17, 18, 0, 18, 19, 0, 19, 20, 0, 20, 21, 0, 21, 22, 0, 22, 23, 0, 23, 24, 0, 24, 25, 0, 25, 26, 0, 26, 27, 0, 27, 28, 0, 28, 29, 0, 29, 30, 0, 30, 31, 0, 31, 32, 0, 32, 33, 0, 33, 34, 0, 34, 35, 0, 35, 36, 0, 36, 37, 0, 37, 38, 0, 38, 39, 0, 39, 40, 0, 40, 41, 0, 41, 42, 0, 42, 43, 0, 43, 44, 0, 44, 45, 0, 45, 46, 0, 46, 47, 0, 47, 48, 0, 48, 1]
+            rel material:binding = </World/Materials/blue_corner_marker>
+            normal3f[] normals = [(0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1)] (
+                interpolation = "uniform"
+            )
+            point3f[] points = [(0.1665, 0.16, 0.00014), (0.1705, 0.16, 0.00014), (0.17046578, 0.1605221, 0.00014), (0.17036371, 0.16103527, 0.00014), (0.17019552, 0.16153073, 0.00014), (0.1699641, 0.162, 0.00014), (0.16967341, 0.16243504, 0.00014), (0.16932842, 0.16282843, 0.00014), (0.16893505, 0.1631734, 0.00014), (0.1685, 0.1634641, 0.00014), (0.16803074, 0.16369551, 0.00014), (0.16753528, 0.1638637, 0.00014), (0.16702211, 0.16396578, 0.00014), (0.1665, 0.164, 0.00014), (0.1659779, 0.16396578, 0.00014), (0.16546473, 0.1638637, 0.00014), (0.16496927, 0.16369551, 0.00014), (0.1645, 0.1634641, 0.00014), (0.16406496, 0.1631734, 0.00014), (0.16367157, 0.16282843, 0.00014), (0.16332659, 0.16243504, 0.00014), (0.1630359, 0.162, 0.00014), (0.16280448, 0.16153073, 0.00014), (0.1626363, 0.16103527, 0.00014), (0.16253422, 0.1605221, 0.00014), (0.1625, 0.16, 0.00014), (0.16253422, 0.15947789, 0.00014), (0.1626363, 0.15896472, 0.00014), (0.16280448, 0.15846926, 0.00014), (0.1630359, 0.158, 0.00014), (0.16332659, 0.15756495, 0.00014), (0.16367157, 0.15717158, 0.00014), (0.16406496, 0.15682659, 0.00014), (0.1645, 0.1565359, 0.00014), (0.16496927, 0.15630448, 0.00014), (0.16546473, 0.1561363, 0.00014), (0.1659779, 0.15603422, 0.00014), (0.1665, 0.156, 0.00014), (0.16702211, 0.15603422, 0.00014), (0.16753528, 0.1561363, 0.00014), (0.16803074, 0.15630448, 0.00014), (0.1685, 0.1565359, 0.00014), (0.16893505, 0.15682659, 0.00014), (0.16932842, 0.15717158, 0.00014), (0.16967341, 0.15756495, 0.00014), (0.1699641, 0.158, 0.00014), (0.17019552, 0.15846926, 0.00014), (0.17036371, 0.15896472, 0.00014), (0.17046578, 0.15947789, 0.00014)]
+        }
+
+        def Mesh "A4CornerMarker_2"
+        {
+            int[] faceVertexCounts = [3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3]
+            int[] faceVertexIndices = [0, 1, 2, 0, 2, 3, 0, 3, 4, 0, 4, 5, 0, 5, 6, 0, 6, 7, 0, 7, 8, 0, 8, 9, 0, 9, 10, 0, 10, 11, 0, 11, 12, 0, 12, 13, 0, 13, 14, 0, 14, 15, 0, 15, 16, 0, 16, 17, 0, 17, 18, 0, 18, 19, 0, 19, 20, 0, 20, 21, 0, 21, 22, 0, 22, 23, 0, 23, 24, 0, 24, 25, 0, 25, 26, 0, 26, 27, 0, 27, 28, 0, 28, 29, 0, 29, 30, 0, 30, 31, 0, 31, 32, 0, 32, 33, 0, 33, 34, 0, 34, 35, 0, 35, 36, 0, 36, 37, 0, 37, 38, 0, 38, 39, 0, 39, 40, 0, 40, 41, 0, 41, 42, 0, 42, 43, 0, 43, 44, 0, 44, 45, 0, 45, 46, 0, 46, 47, 0, 47, 48, 0, 48, 1]
+            rel material:binding = </World/Materials/blue_corner_marker>
+            normal3f[] normals = [(0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1)] (
+                interpolation = "uniform"
+            )
+            point3f[] points = [(0.4635, 0.16, 0.00014), (0.4675, 0.16, 0.00014), (0.4674658, 0.1605221, 0.00014), (0.46736372, 0.16103527, 0.00014), (0.4671955, 0.16153073, 0.00014), (0.4669641, 0.162, 0.00014), (0.4666734, 0.16243504, 0.00014), (0.4663284, 0.16282843, 0.00014), (0.46593505, 0.1631734, 0.00014), (0.4655, 0.1634641, 0.00014), (0.46503073, 0.16369551, 0.00014), (0.46453527, 0.1638637, 0.00014), (0.4640221, 0.16396578, 0.00014), (0.4635, 0.164, 0.00014), (0.4629779, 0.16396578, 0.00014), (0.46246472, 0.1638637, 0.00014), (0.46196926, 0.16369551, 0.00014), (0.4615, 0.1634641, 0.00014), (0.46106496, 0.1631734, 0.00014), (0.46067157, 0.16282843, 0.00014), (0.46032658, 0.16243504, 0.00014), (0.4600359, 0.162, 0.00014), (0.45980448, 0.16153073, 0.00014), (0.4596363, 0.16103527, 0.00014), (0.45953423, 0.1605221, 0.00014), (0.4595, 0.16, 0.00014), (0.45953423, 0.15947789, 0.00014), (0.4596363, 0.15896472, 0.00014), (0.45980448, 0.15846926, 0.00014), (0.4600359, 0.158, 0.00014), (0.46032658, 0.15756495, 0.00014), (0.46067157, 0.15717158, 0.00014), (0.46106496, 0.15682659, 0.00014), (0.4615, 0.1565359, 0.00014), (0.46196926, 0.15630448, 0.00014), (0.46246472, 0.1561363, 0.00014), (0.4629779, 0.15603422, 0.00014), (0.4635, 0.156, 0.00014), (0.4640221, 0.15603422, 0.00014), (0.46453527, 0.1561363, 0.00014), (0.46503073, 0.15630448, 0.00014), (0.4655, 0.1565359, 0.00014), (0.46593505, 0.15682659, 0.00014), (0.4663284, 0.15717158, 0.00014), (0.4666734, 0.15756495, 0.00014), (0.4669641, 0.158, 0.00014), (0.4671955, 0.15846926, 0.00014), (0.46736372, 0.15896472, 0.00014), (0.4674658, 0.15947789, 0.00014)]
+        }
+
+        def Mesh "A4CornerMarker_3"
+        {
+            int[] faceVertexCounts = [3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3]
+            int[] faceVertexIndices = [0, 1, 2, 0, 2, 3, 0, 3, 4, 0, 4, 5, 0, 5, 6, 0, 6, 7, 0, 7, 8, 0, 8, 9, 0, 9, 10, 0, 10, 11, 0, 11, 12, 0, 12, 13, 0, 13, 14, 0, 14, 15, 0, 15, 16, 0, 16, 17, 0, 17, 18, 0, 18, 19, 0, 19, 20, 0, 20, 21, 0, 21, 22, 0, 22, 23, 0, 23, 24, 0, 24, 25, 0, 25, 26, 0, 26, 27, 0, 27, 28, 0, 28, 29, 0, 29, 30, 0, 30, 31, 0, 31, 32, 0, 32, 33, 0, 33, 34, 0, 34, 35, 0, 35, 36, 0, 36, 37, 0, 37, 38, 0, 38, 39, 0, 39, 40, 0, 40, 41, 0, 41, 42, 0, 42, 43, 0, 43, 44, 0, 44, 45, 0, 45, 46, 0, 46, 47, 0, 47, 48, 0, 48, 1]
+            rel material:binding = </World/Materials/blue_corner_marker>
+            normal3f[] normals = [(0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1)] (
+                interpolation = "uniform"
+            )
+            point3f[] points = [(0.1665, 0.37, 0.00014), (0.1705, 0.37, 0.00014), (0.17046578, 0.3705221, 0.00014), (0.17036371, 0.37103528, 0.00014), (0.17019552, 0.37153074, 0.00014), (0.1699641, 0.372, 0.00014), (0.16967341, 0.37243503, 0.00014), (0.16932842, 0.37282842, 0.00014), (0.16893505, 0.37317342, 0.00014), (0.1685, 0.3734641, 0.00014), (0.16803074, 0.37369552, 0.00014), (0.16753528, 0.3738637, 0.00014), (0.16702211, 0.37396577, 0.00014), (0.1665, 0.374, 0.00014), (0.1659779, 0.37396577, 0.00014), (0.16546473, 0.3738637, 0.00014), (0.16496927, 0.37369552, 0.00014), (0.1645, 0.3734641, 0.00014), (0.16406496, 0.37317342, 0.00014), (0.16367157, 0.37282842, 0.00014), (0.16332659, 0.37243503, 0.00014), (0.1630359, 0.372, 0.00014), (0.16280448, 0.37153074, 0.00014), (0.1626363, 0.37103528, 0.00014), (0.16253422, 0.3705221, 0.00014), (0.1625, 0.37, 0.00014), (0.16253422, 0.3694779, 0.00014), (0.1626363, 0.36896473, 0.00014), (0.16280448, 0.36846927, 0.00014), (0.1630359, 0.368, 0.00014), (0.16332659, 0.36756495, 0.00014), (0.16367157, 0.3671716, 0.00014), (0.16406496, 0.3668266, 0.00014), (0.1645, 0.3665359, 0.00014), (0.16496927, 0.3663045, 0.00014), (0.16546473, 0.36613628, 0.00014), (0.1659779, 0.3660342, 0.00014), (0.1665, 0.366, 0.00014), (0.16702211, 0.3660342, 0.00014), (0.16753528, 0.36613628, 0.00014), (0.16803074, 0.3663045, 0.00014), (0.1685, 0.3665359, 0.00014), (0.16893505, 0.3668266, 0.00014), (0.16932842, 0.3671716, 0.00014), (0.16967341, 0.36756495, 0.00014), (0.1699641, 0.368, 0.00014), (0.17019552, 0.36846927, 0.00014), (0.17036371, 0.36896473, 0.00014), (0.17046578, 0.3694779, 0.00014)]
+        }
+
+        def Mesh "A4CornerMarker_4"
+        {
+            int[] faceVertexCounts = [3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3]
+            int[] faceVertexIndices = [0, 1, 2, 0, 2, 3, 0, 3, 4, 0, 4, 5, 0, 5, 6, 0, 6, 7, 0, 7, 8, 0, 8, 9, 0, 9, 10, 0, 10, 11, 0, 11, 12, 0, 12, 13, 0, 13, 14, 0, 14, 15, 0, 15, 16, 0, 16, 17, 0, 17, 18, 0, 18, 19, 0, 19, 20, 0, 20, 21, 0, 21, 22, 0, 22, 23, 0, 23, 24, 0, 24, 25, 0, 25, 26, 0, 26, 27, 0, 27, 28, 0, 28, 29, 0, 29, 30, 0, 30, 31, 0, 31, 32, 0, 32, 33, 0, 33, 34, 0, 34, 35, 0, 35, 36, 0, 36, 37, 0, 37, 38, 0, 38, 39, 0, 39, 40, 0, 40, 41, 0, 41, 42, 0, 42, 43, 0, 43, 44, 0, 44, 45, 0, 45, 46, 0, 46, 47, 0, 47, 48, 0, 48, 1]
+            rel material:binding = </World/Materials/blue_corner_marker>
+            normal3f[] normals = [(0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1)] (
+                interpolation = "uniform"
+            )
+            point3f[] points = [(0.4635, 0.37, 0.00014), (0.4675, 0.37, 0.00014), (0.4674658, 0.3705221, 0.00014), (0.46736372, 0.37103528, 0.00014), (0.4671955, 0.37153074, 0.00014), (0.4669641, 0.372, 0.00014), (0.4666734, 0.37243503, 0.00014), (0.4663284, 0.37282842, 0.00014), (0.46593505, 0.37317342, 0.00014), (0.4655, 0.3734641, 0.00014), (0.46503073, 0.37369552, 0.00014), (0.46453527, 0.3738637, 0.00014), (0.4640221, 0.37396577, 0.00014), (0.4635, 0.374, 0.00014), (0.4629779, 0.37396577, 0.00014), (0.46246472, 0.3738637, 0.00014), (0.46196926, 0.37369552, 0.00014), (0.4615, 0.3734641, 0.00014), (0.46106496, 0.37317342, 0.00014), (0.46067157, 0.37282842, 0.00014), (0.46032658, 0.37243503, 0.00014), (0.4600359, 0.372, 0.00014), (0.45980448, 0.37153074, 0.00014), (0.4596363, 0.37103528, 0.00014), (0.45953423, 0.3705221, 0.00014), (0.4595, 0.37, 0.00014), (0.45953423, 0.3694779, 0.00014), (0.4596363, 0.36896473, 0.00014), (0.45980448, 0.36846927, 0.00014), (0.4600359, 0.368, 0.00014), (0.46032658, 0.36756495, 0.00014), (0.46067157, 0.3671716, 0.00014), (0.46106496, 0.3668266, 0.00014), (0.4615, 0.3665359, 0.00014), (0.46196926, 0.3663045, 0.00014), (0.46246472, 0.36613628, 0.00014), (0.4629779, 0.3660342, 0.00014), (0.4635, 0.366, 0.00014), (0.4640221, 0.3660342, 0.00014), (0.46453527, 0.36613628, 0.00014), (0.46503073, 0.3663045, 0.00014), (0.4655, 0.3665359, 0.00014), (0.46593505, 0.3668266, 0.00014), (0.4663284, 0.3671716, 0.00014), (0.4666734, 0.36756495, 0.00014), (0.4669641, 0.368, 0.00014), (0.4671955, 0.36846927, 0.00014), (0.46736372, 0.36896473, 0.00014), (0.4674658, 0.3694779, 0.00014)]
+        }
+
+        def Mesh "A4CenterMarker"
+        {
+            int[] faceVertexCounts = [3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3]
+            int[] faceVertexIndices = [0, 1, 2, 0, 2, 3, 0, 3, 4, 0, 4, 5, 0, 5, 6, 0, 6, 7, 0, 7, 8, 0, 8, 9, 0, 9, 10, 0, 10, 11, 0, 11, 12, 0, 12, 13, 0, 13, 14, 0, 14, 15, 0, 15, 16, 0, 16, 17, 0, 17, 18, 0, 18, 19, 0, 19, 20, 0, 20, 21, 0, 21, 22, 0, 22, 23, 0, 23, 24, 0, 24, 25, 0, 25, 26, 0, 26, 27, 0, 27, 28, 0, 28, 29, 0, 29, 30, 0, 30, 31, 0, 31, 32, 0, 32, 33, 0, 33, 34, 0, 34, 35, 0, 35, 36, 0, 36, 37, 0, 37, 38, 0, 38, 39, 0, 39, 40, 0, 40, 41, 0, 41, 42, 0, 42, 43, 0, 43, 44, 0, 44, 45, 0, 45, 46, 0, 46, 47, 0, 47, 48, 0, 48, 1]
+            rel material:binding = </World/Materials/blue_corner_marker>
+            normal3f[] normals = [(0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1)] (
+                interpolation = "uniform"
+            )
+            point3f[] points = [(0.315, 0.265, 0.00014), (0.319, 0.265, 0.00014), (0.3189658, 0.2655221, 0.00014), (0.3188637, 0.2660353, 0.00014), (0.31869552, 0.26653072, 0.00014), (0.3184641, 0.267, 0.00014), (0.3181734, 0.26743504, 0.00014), (0.31782842, 0.26782843, 0.00014), (0.31743506, 0.26817343, 0.00014), (0.317, 0.2684641, 0.00014), (0.31653073, 0.2686955, 0.00014), (0.31603527, 0.2688637, 0.00014), (0.3155221, 0.26896578, 0.00014), (0.315, 0.269, 0.00014), (0.3144779, 0.26896578, 0.00014), (0.31396472, 0.2688637, 0.00014), (0.31346926, 0.2686955, 0.00014), (0.313, 0.2684641, 0.00014), (0.31256497, 0.26817343, 0.00014), (0.31217158, 0.26782843, 0.00014), (0.3118266, 0.26743504, 0.00014), (0.3115359, 0.267, 0.00014), (0.31130448, 0.26653072, 0.00014), (0.3111363, 0.2660353, 0.00014), (0.31103423, 0.2655221, 0.00014), (0.311, 0.265, 0.00014), (0.31103423, 0.2644779, 0.00014), (0.3111363, 0.2639647, 0.00014), (0.31130448, 0.26346928, 0.00014), (0.3115359, 0.263, 0.00014), (0.3118266, 0.26256496, 0.00014), (0.31217158, 0.26217157, 0.00014), (0.31256497, 0.26182657, 0.00014), (0.313, 0.2615359, 0.00014), (0.31346926, 0.26130447, 0.00014), (0.31396472, 0.2611363, 0.00014), (0.3144779, 0.26103422, 0.00014), (0.315, 0.261, 0.00014), (0.3155221, 0.26103422, 0.00014), (0.31603527, 0.2611363, 0.00014), (0.31653073, 0.26130447, 0.00014), (0.317, 0.2615359, 0.00014), (0.31743506, 0.26182657, 0.00014), (0.31782842, 0.26217157, 0.00014), (0.3181734, 0.26256496, 0.00014), (0.3184641, 0.263, 0.00014), (0.31869552, 0.26346928, 0.00014), (0.3188637, 0.2639647, 0.00014), (0.3189658, 0.2644779, 0.00014)]
+        }
+
+        def Cylinder "RightDiskAluminumTop" (
+            prepend apiSchemas = ["PhysicsCollisionAPI"]
+        )
+        {
+            uniform token axis = "Z"
+            double height = 0.074
+            rel material:binding = </World/Materials/aluminum_disk>
+            custom token physics:approximation = "convexHull"
+            bool physics:collisionEnabled = 1
+            double radius = 0.05
+            double3 xformOp:translate = (0.59, 0.078, 0.037)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+        }
+
+        def Cylinder "RightDiskBlackBase" (
+            prepend apiSchemas = ["PhysicsCollisionAPI"]
+        )
+        {
+            uniform token axis = "Z"
+            double height = 0.024
+            rel material:binding = </World/Materials/dark_base>
+            custom token physics:approximation = "convexHull"
+            bool physics:collisionEnabled = 1
+            double radius = 0.052
+            double3 xformOp:translate = (0.59, 0.078, 0.012)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+        }
+
+        def Mesh "RightDiskCenterYellowMarker"
+        {
+            int[] faceVertexCounts = [3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3]
+            int[] faceVertexIndices = [0, 1, 2, 0, 2, 3, 0, 3, 4, 0, 4, 5, 0, 5, 6, 0, 6, 7, 0, 7, 8, 0, 8, 9, 0, 9, 10, 0, 10, 11, 0, 11, 12, 0, 12, 13, 0, 13, 14, 0, 14, 15, 0, 15, 16, 0, 16, 17, 0, 17, 18, 0, 18, 19, 0, 19, 20, 0, 20, 21, 0, 21, 22, 0, 22, 23, 0, 23, 24, 0, 24, 25, 0, 25, 26, 0, 26, 27, 0, 27, 28, 0, 28, 29, 0, 29, 30, 0, 30, 31, 0, 31, 32, 0, 32, 33, 0, 33, 34, 0, 34, 35, 0, 35, 36, 0, 36, 37, 0, 37, 38, 0, 38, 39, 0, 39, 40, 0, 40, 41, 0, 41, 42, 0, 42, 43, 0, 43, 44, 0, 44, 45, 0, 45, 46, 0, 46, 47, 0, 47, 48, 0, 48, 1]
+            rel material:binding = </World/Materials/yellow_center_marker>
+            normal3f[] normals = [(0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1)] (
+                interpolation = "uniform"
+            )
+            point3f[] points = [(0.59, 0.078, 0.0743), (0.5945, 0.078, 0.0743), (0.5944615, 0.07858737, 0.0743), (0.59434664, 0.079164684, 0.0743), (0.59415746, 0.07972208, 0.0743), (0.5938971, 0.08025, 0.0743), (0.5935701, 0.08073942, 0.0743), (0.59318197, 0.08118198, 0.0743), (0.5927394, 0.08157009, 0.0743), (0.59225, 0.08189712, 0.0743), (0.5917221, 0.082157455, 0.0743), (0.5911647, 0.08234666, 0.0743), (0.5905874, 0.0824615, 0.0743), (0.59, 0.0825, 0.0743), (0.5894126, 0.0824615, 0.0743), (0.5888353, 0.08234666, 0.0743), (0.58827794, 0.082157455, 0.0743), (0.58775, 0.08189712, 0.0743), (0.58726054, 0.08157009, 0.0743), (0.58681804, 0.08118198, 0.0743), (0.5864299, 0.08073942, 0.0743), (0.5861029, 0.08025, 0.0743), (0.58584255, 0.07972208, 0.0743), (0.5856533, 0.079164684, 0.0743), (0.5855385, 0.07858737, 0.0743), (0.5855, 0.078, 0.0743), (0.5855385, 0.077412635, 0.0743), (0.5856533, 0.07683531, 0.0743), (0.58584255, 0.07627793, 0.0743), (0.5861029, 0.07575, 0.0743), (0.5864299, 0.07526057, 0.0743), (0.58681804, 0.07481802, 0.0743), (0.58726054, 0.07442991, 0.0743), (0.58775, 0.074102886, 0.0743), (0.58827794, 0.07384254, 0.0743), (0.5888353, 0.07365333, 0.0743), (0.5894126, 0.0735385, 0.0743), (0.59, 0.0735, 0.0743), (0.5905874, 0.0735385, 0.0743), (0.5911647, 0.07365333, 0.0743), (0.5917221, 0.07384254, 0.0743), (0.59225, 0.074102886, 0.0743), (0.5927394, 0.07442991, 0.0743), (0.59318197, 0.07481802, 0.0743), (0.5935701, 0.07526057, 0.0743), (0.5938971, 0.07575, 0.0743), (0.59415746, 0.07627793, 0.0743), (0.59434664, 0.07683531, 0.0743), (0.5944615, 0.077412635, 0.0743)]
+        }
+
+        def Cube "RedSpecimenBlock" (
+            prepend apiSchemas = ["PhysicsCollisionAPI", "PhysicsRigidBodyAPI", "PhysicsMassAPI"]
+        )
+        {
+            rel material:binding = </World/Materials/red_test_cube>
+            vector3f physics:angularVelocity = (0.16150923, 0.08749678, -0.00072487624)
+            custom token physics:approximation = "box"
+            bool physics:collisionEnabled = 1
+            float physics:mass = 0.02
+            bool physics:rigidBodyEnabled = 1
+            vector3f physics:velocity = (-0.00011696449, -0.00015484223, -0.000078692916)
+            double size = 1
+            quatf xformOp:orient = (1, -6.7073955e-7, 0.0000038233297, 9.035703e-7)
+            float3 xformOp:scale = (0.03, 0.03, 0.03)
+            double3 xformOp:translate = (0.40000075101852417, 0.3000001907348633, 0.015119952149689198)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+        }
+    }
+
+    def Xform "Robot" (
+        prepend references = @/home/jin/autonomous_researcher/sim/robotis_omx/omx/omx.usda@</omx>
+    )
+    {
+        float xformOp:rotateZ = 90
+        double3 xformOp:translate = (0.315, 0.06, 0)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateZ"]
+
+        over "Geometry"
+        {
+            over "link0"
+            {
+                string isaac:nameOverride (
+                    displayName = "Name Override"
+                )
+                vector3f physics:angularVelocity = (0.6798633, -0.11137097, -0.016240459)
+                vector3f physics:velocity = (0.00023562527, 0.0012460212, -0.0018248486)
+                quatf xformOp:orient = (1, -9.667947e-8, 6.801302e-8, 9.102003e-7)
+                double3 xformOp:translate = (-0.00026545435190200584, 0.00006076931953430398, -0.000024771317839622498)
+
+                over "link1"
+                {
+                    string isaac:nameOverride (
+                        displayName = "Name Override"
+                    )
+                    vector3f physics:angularVelocity = (0.6798633, -0.11137097, -0.016243475)
+                    vector3f physics:velocity = (0.00011576674, 0.0005097115, -0.0017930684)
+                    quatf xformOp:orient = (0.9937049, -1.195817e-7, 6.427576e-8, -0.11202902)
+                    double3 xformOp:translate = (-0.011249996721744537, -2.9802322387695312e-8, 0.03399999253451824)
+
+                    over "Joint1"
+                    {
+                        float drive:angular:physics:targetPosition = -12.879121
+                        float state:angular:physics:position = -12.879121
+                        float state:angular:physics:velocity = -0.0000030148829
+                    }
+
+                    over "link2"
+                    {
+                        string isaac:nameOverride (
+                            displayName = "Name Override"
+                        )
+                        vector3f physics:angularVelocity = (38.317574, -8.70708, -0.016238125)
+                        vector3f physics:velocity = (-0.0027597959, -0.012071638, -0.06963608)
+                        quatf xformOp:orient = (0.7087008, 6.6269806e-8, -0.7055092, 1.078016e-7)
+                        double3 xformOp:translate = (4.485073798465855e-9, -1.3517509334093347e-8, 0.06349999457597673)
+
+                        over "Joint2"
+                        {
+                            float drive:angular:physics:targetPosition = -85.64103
+                            float state:angular:physics:position = -85.64103
+                            float state:angular:physics:velocity = -38.606785
+                        }
+
+                        over "link3"
+                        {
+                            string isaac:nameOverride (
+                                displayName = "Name Override"
+                            )
+                            vector3f physics:angularVelocity = (-355.71664, 81.282585, -0.016308643)
+                            vector3f physics:velocity = (0.0023402246, 0.010066732, -0.6349708)
+                            quatf xformOp:orient = (0.74664885, 7.29762e-8, 0.66521835, -1.6104941e-8)
+                            double3 xformOp:translate = (0.04149999212108385, 1.8895353559589267e-8, 0.1131500063582702)
+
+                            over "Joint3"
+                            {
+                                float drive:angular:physics:targetPosition = 43.435898
+                                bool[] isaac:actuator (
+                                    displayName = "Actuator"
+                                )
+                                string isaac:NameOverride (
+                                    displayName = "Joint Name Override"
+                                )
+                                token[] isaac:physics:DofOffsetOpOrder (
+                                    displayName = "Dof Offset Op Order"
+                                )
+                                float state:angular:physics:position = 43.435898
+                                float state:angular:physics:velocity = 404.17953
+                            }
+
+                            over "link4"
+                            {
+                                string isaac:nameOverride (
+                                    displayName = "Name Override"
+                                )
+                                vector3f physics:angularVelocity = (-401.1902, 91.66784, -0.016318182)
+                                vector3f physics:velocity = (-0.0016137988, -0.007362847, -1.2496773)
+                                quatf xformOp:orient = (0.89318866, 5.1138247e-8, 0.44968215, -2.6898908e-8)
+                                double3 xformOp:translate = (0.16199996976580847, 3.5100579665048315e-9, 2.251061770319751e-8)
+
+                                over "Joint4"
+                                {
+                                    float drive:angular:physics:targetPosition = 48.66911
+                                    float state:angular:physics:position = 48.66911
+                                    float state:angular:physics:velocity = 46.644375
+                                }
+
+                                over "link5"
+                                {
+                                    vector3f physics:angularVelocity = (-401.1902, 91.66784, -0.01632108)
+                                    vector3f physics:velocity = (-0.032690365, -0.14340767, -1.4533752)
+                                    quatf xformOp:orient = (0.9999787, -0.006521317, 1.6335692e-8, -4.8580542e-8)
+                                    double3 xformOp:translate = (0.02870000016308831, -5.539088077100018e-9, -1.2064991838922623e-8)
+
+                                    over "Joint5"
+                                    {
+                                        float drive:angular:physics:targetPosition = -0.74725276
+                                        float state:angular:physics:position = -0.74725276
+                                        float state:angular:physics:velocity = 0.0000039590477
+                                    }
+
+                                    over "link6"
+                                    {
+                                        vector3f physics:angularVelocity = (-401.1902, 91.66783, -0.01632566)
+                                        vector3f physics:velocity = (-0.06786742, -0.29736513, -1.4690318)
+                                        quatf xformOp:orient = (1, 0.0000022735912, 3.4309856e-8, 2.6177474e-7)
+                                        double3 xformOp:translate = (0.029499998469850755, 0.007500010876236862, 4.538710454693451e-8)
+
+                                        over "Gripper"
+                                        {
+                                            float drive:angular:physics:targetPosition = 59.85348
+                                            float state:angular:physics:position = 59.85348
+                                            float state:angular:physics:velocity = -0.0000067269107
+                                        }
+                                    }
+
+                                    over "link7"
+                                    {
+                                        vector3f physics:angularVelocity = (-401.1902, 91.667854, -0.016309284)
+                                        vector3f physics:velocity = (-0.0676086, -0.2962326, -1.4703014)
+                                        quatf xformOp:orient = (1, 0.000002275064, 1.6390846e-8, -1.6086159e-7)
+                                        double3 xformOp:translate = (0.029499992674174517, -0.01079998071648769, -2.8477524838255164e-8)
+
+                                        over "Gripper_mimic"
+                                        {
+                                            float drive:angular:physics:targetPosition = 59.85348
+                                            float state:angular:physics:position = 59.85348
+                                            float state:angular:physics:velocity = 0.000017335477
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                over "PhysicsFixedJoint"
+                {
+                    bool[] isaac:actuator (
+                        displayName = "Actuator"
+                    )
+                    string isaac:NameOverride (
+                        displayName = "Joint Name Override"
+                    )
+                    token[] isaac:physics:DofOffsetOpOrder (
+                        displayName = "Dof Offset Op Order"
+                    )
+                }
+            }
+        }
+    }
+
+    def "Lights"
+    {
+        def DomeLight "SoftLabDome"
+        {
+            float inputs:intensity = 450
+        }
+
+        def DistantLight "OverheadLight"
+        {
+            float inputs:angle = 0.35
+            float inputs:intensity = 1200
+        }
+    }
+}
+
+def "Render" (
+    hide_in_stage_window = true
+    no_delete = true
+)
+{
+    def "OmniverseKit"
+    {
+        def "HydraTextures" (
+            hide_in_stage_window = true
+            no_delete = true
+        )
+        {
+            def RenderProduct "omni_kit_widget_viewport_ViewportTexture_0" (
+                prepend apiSchemas = ["OmniRtxSettingsCommonAdvancedAPI_1", "OmniRtxSettingsRtAdvancedAPI_1", "OmniRtxSettingsPtAdvancedAPI_1", "OmniRtxPostColorGradingAPI_1", "OmniRtxPostChromaticAberrationAPI_1", "OmniRtxPostBloomPhysicalAPI_1", "OmniRtxPostMatteObjectAPI_1", "OmniRtxPostCompositingAPI_1", "OmniRtxPostDofAPI_1", "OmniRtxPostMotionBlurAPI_1", "OmniRtxPostTvNoiseAPI_1", "OmniRtxPostTonemapIrayReinhardAPI_1", "OmniRtxPostDebugSettingsAPI_1", "OmniRtxDebugSettingsAPI_1"]
+                hide_in_stage_window = true
+                no_delete = true
+            )
+            {
+                rel camera = </OmniverseKit_Persp>
+                token omni:rtx:ambientOcclusion:denoiserMode = "none"
+                token omni:rtx:background:source:texture:textureMode = "repeatMirrored"
+                token omni:rtx:background:source:type = "domeLight"
+                bool omni:rtx:debug:view:pixelDebug:enableFixedTextPos = 1
+                token omni:rtx:directLighting:sampledLighting:denoisingTechnique = "None"
+                bool omni:rtx:dlss:frameGeneration = 0
+                float3 omni:rtx:domeLight:rotationAxis = (0, 0, 1)
+                bool omni:rtx:indirectDiffuse:denoiser:enabled = 0
+                bool omni:rtx:material:db:syncLoads = 1
+                token omni:rtx:post:dlss:execMode = "performance"
+                bool omni:rtx:post:registeredCompositing:invertColorCorrection = 1
+                bool omni:rtx:post:registeredCompositing:invertToneMap = 1
+                bool omni:rtx:pt:adaptiveSampling:filterError = 0
+                uint omni:rtx:pt:adaptiveSampling:fixedSppIterations = 2
+                uint omni:rtx:pt:maxSamplesPerLaunch = 2073600
+                uint omni:rtx:pt:mgpu:maxPixelsPerRegionExponent = 12
+                bool omni:rtx:reflections:denoiser:enabled = 0
+                token omni:rtx:rendermode = "RealTimePathTracing"
+                color3f omni:rtx:rt:ambientLight:color = (0.1, 0.1, 0.1)
+                bool omni:rtx:rt:demoire = 0
+                bool omni:rtx:rt:ecoMode:enabled = 0
+                bool omni:rtx:rt:lightcache:spatialCache:dontResolveConflicts = 1
+                int omni:rtx:rt:sss:samples = 1
+                uint omni:rtx:rtpt:maxVolumeBounces = 15
+                float omni:rtx:rtpt:modulatingRoughnessThreshold = 0.08
+                bool omni:rtx:scene:hydra:materialSyncLoads = 1
+                bool omni:rtx:scene:hydra:mdlMaterialWarmup = 1
+                rel orderedVars = </Render/Vars/LdrColor>
+                custom bool overrideClipRange = 0
+                uniform int2 resolution = (1280, 720)
+            }
+        }
+    }
+
+    def RenderSettings "OmniverseGlobalRenderSettings" (
+        prepend apiSchemas = ["OmniRtxSettingsGlobalRtAdvancedAPI_1", "OmniRtxSettingsGlobalPtAdvancedAPI_1"]
+        no_delete = true
+    )
+    {
+        rel products = </Render/OmniverseKit/HydraTextures/omni_kit_widget_viewport_ViewportTexture_0>
+    }
+
+    def "Vars"
+    {
+        def RenderVar "LdrColor" (
+            hide_in_stage_window = true
+            no_delete = true
+        )
+        {
+            uniform string sourceName = "LdrColor"
+            uniform token sourceType = "raw"
+        }
+    }
+}
+
+over "OmniverseKit_Persp" (
+    prepend apiSchemas = ["OmniRtxCameraAutoExposureAPI_1", "OmniRtxCameraExposureAPI_1"]
+)
+{
+    float exposure:fStop = 5
+    float exposure:responsivity = 1.1026709
+    float exposure:time = 0.02
+}

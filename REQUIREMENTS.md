@@ -80,6 +80,119 @@ Optional but commonly used:
   runtime therefore prefers a local `FORCE_RSUSB_BACKEND=ON` librealsense build
   in Python 3.12 for the main `.venv` and Python 3.10 for the `lerobot` conda
   environment. This is an SDK-path fix, not an OpenCV/V4L fallback.
+- UTM ROS Vision Runtime for live UTM equipment evidence. On Ubuntu 24.04
+  (`noble`), use ROS 2 Jazzy as the system ROS target. This is not a Python-only
+  dependency: it requires ROS apt packages, a built UTM ROS workspace, a built
+  `yolo_ros` workspace, `uv`, and the runtime launcher configured in
+  `configs/devices.yaml`. The runtime flow follows the cloned UTM program under
+  `/home/jin/external_repos/UTM`; the browser RQT-like view is `usb_cam ->
+  rectify_node -> green_dot_monitor -> yolov8`, with live `ros2 node/topic`
+  introspection overlaid. Detailed setup and verification are documented in
+  `docs/hardware/utm_ros_vision_runtime_bridge.md` and
+  `개선안/16_utm_ros_runtime_bridge_live_gui_plan.md`. Camera bridge setup,
+  V4L2 device mapping, frame probe, and checkerboard calibration are tracked in
+  `개선안/17_vision_agent_camera_device_bridge_live_gui_plan.md`. The stable
+  BRIO-class UVC profile on this workstation is `640x480 @ 15fps`,
+  `pixel_format=yuyv2rgb`; ATR pins
+  `exposure_dynamic_framerate=0` with `v4l2-ctl` before runtime start and
+  records the result in `startup_camera_controls`. ATR image snapshot/MJPEG,
+  UTM green-dot image input/output, and YOLO image subscribers are configured as live
+  evidence streams with Best Effort, Keep Last, depth 1. The system ROS
+  `usb_cam` publisher may still report RELIABLE QoS; if raw ROS camera FPS drops
+  below target, patch or replace the camera publisher rather than increasing GUI
+  queues. OpenCV CUDA color conversion was tested and removed because the ROS
+  Python OpenCV runtime on this workstation reports zero CUDA devices; keep the
+  MJPEG worker on the CPU path unless a real CUDA-enabled OpenCV runtime is
+  installed and re-benchmarked.
+  Expected install baseline:
+  ```bash
+  sudo apt update
+  sudo apt install -y software-properties-common curl ca-certificates git
+  sudo add-apt-repository -y universe
+  curl -L -o /tmp/ros2-apt-source_noble.deb \
+    https://repo.ros2.org/ubuntu/main/pool/main/r/ros-apt-source/ros2-apt-source_1.2.0~noble_all.deb
+  sudo dpkg -i /tmp/ros2-apt-source_noble.deb
+  sudo apt update
+  sudo apt install -y \
+    v4l-utils \
+    ros-jazzy-ros-base \
+    ros-dev-tools \
+    python3-colcon-common-extensions \
+    python3-rosdep \
+    ros-jazzy-cv-bridge \
+    ros-jazzy-image-transport \
+    ros-jazzy-image-proc \
+    ros-jazzy-vision-msgs \
+    ros-jazzy-usb-cam \
+    ros-jazzy-camera-calibration \
+    ros-jazzy-camera-calibration-parsers \
+    ros-jazzy-rqt-gui \
+    ros-jazzy-rqt-image-view \
+    ros-jazzy-rqt-graph
+  sudo rosdep init  # only once
+  rosdep update
+  cd /home/jin/external_repos/UTM
+  source /opt/ros/jazzy/setup.bash
+  rosdep check --from-paths src --ignore-src
+  colcon build --symlink-install
+  source /home/jin/external_repos/UTM/install/setup.bash
+  cd /home/jin/external_repos
+  git clone https://github.com/mgonzs13/yolo_ros.git yolo_ros
+  cd /home/jin/external_repos/yolo_ros
+  source /opt/ros/jazzy/setup.bash
+  rosdep check --from-paths . --ignore-src
+  colcon build --symlink-install
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  export PATH="$HOME/.local/bin:$PATH"
+  uv sync --project /home/jin/external_repos/yolo_ros/install/yolo_ros/share/yolo_ros
+  mkdir -p /home/jin/external_repos/yolo_ros/models
+  curl -L -o /home/jin/external_repos/yolo_ros/models/yolov8m.pt \
+    https://github.com/ultralytics/assets/releases/download/v8.3.0/yolov8m.pt
+  ```
+  The runtime should expose `ros2`, `colcon`, and the UTM stack topics such as
+  `/compression_tester/summary`. Test mode should use the real ROS observer when
+  camera/topic evidence is available and otherwise continue through the virtual
+  UTM bridge. Live mode should auto-load and diagnose the ROS stack, but must not
+  mark physical UTM completion from virtual evidence. The ATR GUI should render
+  browser-native RQT-like panels from live ROS state: image topics (`/image_utm`,
+  `/camera/image_rect`, `/yolo/dbg_image`) and a node/topic graph derived from
+  `ros2 node/topic` introspection. The graph panel should use a stable graph hash
+  so unchanged node/topic topology refreshes status timestamps without
+  re-rendering the canvas/SVG. `rqt_image_view` and `rqt_graph` remain operator
+  debugging helpers, not the primary GUI rendering path.
+  Live camera FPS troubleshooting should start at `/camera/image_raw`. If
+  `/camera/image_raw` is already below target, the problem is camera/V4L2/USB
+  input, not browser rendering. The accepted local fix is `yuyv2rgb` plus
+  `v4l2-ctl --device=<camera> --set-ctrl=exposure_dynamic_framerate=0`.
+  Local disk note: `/home/jin/external_repos/yolo_ros` is about 5 GB after
+  `uv sync` because it contains PyTorch/CUDA wheels.
+- NVIDIA Isaac Sim for ROBOTIS OMX real-to-sim mirror mode. The Spark
+  workstation path is `/home/jin/IsaacSim/`. The ATR mirror receiver production
+  path launches:
+  ```bash
+  /home/jin/IsaacSim/isaac-sim.sh \
+    --ext-folder /home/jin/autonomous_researcher/sim/robotis_omx/extensions \
+    --enable atr.omx.mirror
+  ```
+  The receiver extension opens
+  `sim/robotis_omx/scene/omx_table_layout.usda`, serves
+  `http://127.0.0.1:8766/joints`, and starts the Isaac timeline from a delayed
+  Kit update callback instead of immediately during extension startup. This
+  avoids startup-time Kit crashes while still making the visible stage enter
+  Play mode automatically. Scene generation must use Isaac Sim Python because
+  system Python does not provide `pxr`:
+  ```bash
+  /home/jin/IsaacSim/python.sh sim/robotis_omx/tools/build_table_layout_scene.py
+  ```
+  The generated table scene includes a physics-lite contract: `PhysicsScene`,
+  static colliders for table/A4/disk objects, and a dynamic red specimen block
+  rigid body. Receiver `/state.last_apply_result.stage_summary.physics_ready`
+  should be `true` before using mirror evidence as synchronized real/sim
+  recording proof. In live LeRobot teleoperation/recording with Isaac mirror
+  enabled, ATR runs `scripts/lerobot_isaac_mirror_runtime_wrapper.py` inside
+  the LeRobot conda environment so Isaac samples are published from the same
+  `send_action()` process that owns the follower bus. Standalone mirror checks
+  still use `lerobot.mirror.loop_start` with one persistent follower reader.
 - Bambu Studio CLI for Bambu Lab X2D slicing/pre-start validation. The 3DP
   GUI/backend resolves the executable in this order: `BAMBU_STUDIO_EXECUTABLE`,
   configured wrapper path (`install/bambustudio/bambu-studio-wrapper`), then a
@@ -370,6 +483,8 @@ configs/lerobot.yaml:
   conda_executable: conda
   conda_env_name: lerobot
   pi05_conda_env_name: lerobot-pi05-torch211
+  xvla_conda_env_name: lerobot-pi05-torch211
+  smolvla_conda_env_name: lerobot-pi05-torch211
 ```
 
 Setup outline:
@@ -409,7 +524,83 @@ The patch is intentionally outside the ATR runtime code. It makes the external
 LeRobot checkout reproducible without vendoring LeRobot into this repository.
 It also adds the ATR RGB-D observation contract for OMX RealSense recording:
 `observation.images.top_depth` and `observation.images.wrist_depth` are emitted
-as 8-bit 3-channel depth videos alongside the RGB camera streams.
+as 8-bit 3-channel depth videos alongside the RGB camera streams. ATR keeps
+that compatibility path, and live recording additionally writes metric raw
+depth sidecars when RealSense depth is enabled:
+
+```text
+<dataset>/sidecar/depth_raw/top/frame_000000.png
+<dataset>/sidecar/depth_raw/wrist/frame_000000.png
+```
+
+Those sidecar PNG files are 16-bit `uint16` RealSense Z16 depth maps. The
+bridge passes `ATR_LEROBOT_RAW_DEPTH_DIR`, `ATR_LEROBOT_RAW_DEPTH_CAMERA_KEYS`,
+and `ATR_LEROBOT_RAW_DEPTH_FORMAT=png16` to the LeRobot subprocess. It also
+passes the RGB-D transform contract:
+
+```text
+ATR_LEROBOT_DEPTH_ALIGNED_TO=color
+ATR_LEROBOT_DEPTH_SCALE_M_PER_UNIT=0.001
+ATR_LEROBOT_DEPTH_CLIP_MIN_MM=0.0
+ATR_LEROBOT_DEPTH_CLIP_MAX_MM=2000.0
+```
+
+The patched LeRobot runtime writes
+`<dataset>/sidecar/depth_raw/transform_manifest.json` beside the raw PNG files.
+That manifest is the source of truth for aligned depth, metric scale, and the
+visual-depth clipping range. When the GUI/bridge selects `raw_depth_adapter`,
+the patched LeRobot dataset loader consumes this manifest and the 16-bit PNG
+sidecar during training. It replaces the existing LeRobot depth observations
+such as `observation.images.top_depth` and `observation.images.wrist_depth`
+with tensors reconstructed from raw `uint16` metric depth, resized to the
+policy feature shape and normalized with the recorded clip/scale contract.
+`rgbd_sidecar` keeps the compatibility path only: policies still see the normal
+LeRobot RGB-D video features while raw depth is stored as evidence.
+
+ATR stores the selected observation contract beside each locally recorded
+dataset:
+
+```text
+<dataset>/meta/atr_pipeline.json
+```
+
+The `/lerobot` Profile panel exposes the same contract as an `Observation
+Pipeline` selector:
+
+- `legacy_lerobot`: standard LeRobot RGB/depth visual features only; ATR raw
+  16-bit sidecar is disabled.
+- `rgbd_sidecar`: current default for ROBOTIS OMX-AI RealSense runs; standard
+  LeRobot RGB-D features plus ATR 16-bit raw-depth sidecar and transform
+  metadata.
+- `raw_depth_adapter`: training-time adapter mode that requires the raw sidecar
+  manifest and sets `ATR_LEROBOT_RAW_DEPTH_ADAPTER=1` plus
+  `ATR_LEROBOT_RAW_DEPTH_SOURCE_DIR=<dataset>/sidecar/depth_raw`. The patched
+  LeRobot loader then replaces the standard `*_depth` feature tensors with
+  tensors loaded from the raw 16-bit sidecar. This is not only a metadata
+  contract.
+
+The bridge passes `ATR_LEROBOT_OBSERVATION_PIPELINE_ID=<pipeline>` to LeRobot
+record/train/rollout subprocesses. Training refuses to start when a selected
+pipeline conflicts with `<dataset>/meta/atr_pipeline.json`, returning
+`LEROBOT_OBSERVATION_PIPELINE_MISMATCH` instead of silently falling back.
+Browsing or inspecting a dataset from the GUI reads this metadata and restores
+the matching robot profile and observation pipeline when possible.
+
+The same patch also retries Dynamixel calibration writes and torque-disable
+commands during OMX follower startup. This is required on the Spark workstation
+because live recording/rollout can otherwise abort on a transient
+`There is no status packet` response even though the same motor still
+successfully pings and reads position.
+
+Config keys to keep in `configs/lerobot.yaml` for reproducible RGB-D runs:
+
+```yaml
+realsense_depth_align_to_color: true
+realsense_depth_scale_m_per_unit: 0.001
+realsense_depth_clip_min_mm: 0.0
+realsense_depth_clip_max_mm: 2000.0
+default_observation_pipeline_id: rgbd_sidecar
+```
 
 Install the RealSense Python SDK into the LeRobot environment as well when robot
 teleoperation, recording, or rollout will use RealSense cameras:
@@ -646,6 +837,11 @@ LeRobot D405 issue-cleaning rules:
   `observation.images.wrist_depth`. If these are missing, the ATR bridge returns
   `LEROBOT_REALSENSE_DEPTH_FEATURE_MISSING`; do not train an RGB-D policy on
   that dataset.
+- For metric depth evidence, also inspect
+  `sidecar/depth_raw/<camera_key>/frame_*.png`. These files must load as
+  `uint16` and preserve the RealSense Z16 millimeter-scale depth values. They
+  are not a replacement for the 8-bit LeRobot video features used by existing
+  ACT/Pi0.5/SmolVLA/X-VLA training paths.
 - Do not use short or disabled RealSense warmup. LeRobot issue reports show
   `warmup=False` / disabled warmup can produce `read failed (status=False)`
   even when RealSense metadata discovery works.
@@ -711,10 +907,65 @@ HF_HUB_DISABLE_XET=1 \
 conda run -n lerobot-pi05-torch211 hf download lerobot/pi05_base --max-workers 1
 ```
 
+### Optional X-VLA Training Branch
+
+X-VLA is integrated as an additive LeRobot policy backend for lower-data
+experiments. It uses the normal `lerobot` conda environment and does not require
+the isolated Pi0.5 worktree/environment.
+
+Optional model download:
+
+```bash
+conda run -n lerobot hf download lerobot/xvla-base --max-workers 1
+```
+
+When `policy_type=xvla` is selected, the GUI/bridge passes
+`--policy.type=xvla --policy.path=lerobot/xvla-base` and seeds the X-VLA
+soft-prompt fine-tuning flags. Keep Pi0.5 as the default transfer policy until
+X-VLA is benchmarked on the same ROBOTIS OMX-AI datasets and real rollout tasks.
+
+### Optional SmolVLA Training Branch
+
+SmolVLA is integrated as an additive LeRobot VLA backend. Training runs through
+the TorchCodec-ready `lerobot-pi05-torch211` conda environment so video decoding
+uses the same TorchCodec stack as Pi0.5. The editable source checkout for that
+environment is `/home/jin/lerobot_pi05`.
+
+Install the LeRobot extra and prefetch the required model resources:
+
+```bash
+cd /home/jin/lerobot_pi05
+conda run --no-capture-output -n lerobot-pi05-torch211 python -m pip install -e ".[smolvla]"
+conda run --no-capture-output -n lerobot-pi05-torch211 hf download lerobot/smolvla_base --max-workers 1
+conda run --no-capture-output -n lerobot-pi05-torch211 hf download HuggingFaceTB/SmolVLM2-500M-Video-Instruct --exclude "onnx/*" --max-workers 1
+```
+
+When `policy_type=smolvla` is selected, the GUI/bridge passes
+`--policy.type=smolvla --policy.path=lerobot/smolvla_base`. Default train shape:
+`batch_size=8`, `steps=20000`, `num_workers=4`, `policy.n_obs_steps=1`,
+`policy.chunk_size=50`, and `policy.n_action_steps=50`. The bridge/GUI seed
+the SmolVLA fine-tuning flags `--policy.freeze_vision_encoder=true`,
+`--policy.train_expert_only=true`, and `--policy.train_state_proj=true`.
+SmolVLA rollout uses the generic LeRobot rollout path and intentionally omits
+ACT temporal-ensemble flags.
+
 Pi0.5 training uses local W&B offline logging by default. The GUI/bridge passes
 `--wandb.enable=true --wandb.mode=offline` and `WANDB_MODE=offline`, so training
 does not require a W&B cloud API key. Select `disabled` only when no W&B run
 metadata should be created.
+
+The LeRobot GUI can also start a local W&B Server dashboard from the Training
+panel. Use the `WandB Local Server` controls to run
+`conda run --no-capture-output -n lerobot-pi05-torch211 wandb server start
+--port 8081 --no-daemon`, then keep `wandb.enable=true` and
+select `wandb.mode=local server` in the GUI. The bridge maps that operator-facing
+local mode to the W&B CLI's `--wandb.mode=online` and passes
+`WANDB_BASE_URL=http://127.0.0.1:8081` to the LeRobot training subprocess.
+Port `8081` is the project default because
+port `8080` is commonly occupied by Docker services on the Spark workstation.
+On the DGX Spark `aarch64` host, W&B Local currently uses an amd64 Docker image;
+enable Docker binfmt/QEMU before first use:
+`docker run --privileged --rm tonistiigi/binfmt --install amd64`.
 
 Pi0.5 training uses `batch_size=16`, `num_workers=12`, `eval_freq=500`,
 `log_freq=50`, and `save_freq=500` as the current GUI/bridge defaults. The

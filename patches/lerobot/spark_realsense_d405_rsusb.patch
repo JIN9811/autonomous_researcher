@@ -1,16 +1,24 @@
 diff --git a/src/lerobot/cameras/realsense/camera_realsense.py b/src/lerobot/cameras/realsense/camera_realsense.py
-index 12ce89c9..f282dd27 100644
+index 12ce89c9..2a7bad28 100644
 --- a/src/lerobot/cameras/realsense/camera_realsense.py
 +++ b/src/lerobot/cameras/realsense/camera_realsense.py
-@@ -123,6 +123,7 @@ class RealSenseCamera(Camera):
+@@ -123,16 +123,23 @@ class RealSenseCamera(Camera):
 
          self.fps = config.fps
          self.color_mode = config.color_mode
 +        self.color_format = config.color_format
          self.use_depth = config.use_depth
++        self.align_depth_to_color = bool(config.align_depth_to_color)
++        self.depth_scale_m_per_unit = float(config.depth_scale_m_per_unit)
++        self.depth_clip_min_mm = float(config.depth_clip_min_mm)
++        self.depth_clip_max_mm = float(config.depth_clip_max_mm)
          self.warmup_s = config.warmup_s
 
-@@ -133,6 +134,7 @@ class RealSenseCamera(Camera):
+         self.rs_pipeline: rs.pipeline | None = None
+         self.rs_profile: rs.pipeline_profile | None = None
++        self.rs_align: Any | None = None
+
+         self.thread: Thread | None = None
          self.stop_event: Event | None = None
          self.frame_lock: Lock = Lock()
          self.latest_frame: np.ndarray | None = None
@@ -18,7 +26,7 @@ index 12ce89c9..f282dd27 100644
          self.new_frame_event: Event = Event()
 
          self.rotation: int | None = get_cv2_rotation(config.rotation)
-@@ -166,6 +168,28 @@ class RealSenseCamera(Camera):
+@@ -166,6 +173,28 @@ class RealSenseCamera(Camera):
          if self.is_connected:
              raise DeviceAlreadyConnectedError(f"{self} is already connected.")
 
@@ -47,7 +55,11 @@ index 12ce89c9..f282dd27 100644
          self.rs_pipeline = rs.pipeline()
          rs_config = rs.config()
          self._configure_rs_pipeline_config(rs_config)
-@@ -182,15 +206,26 @@ class RealSenseCamera(Camera):
+@@ -179,18 +208,31 @@ class RealSenseCamera(Camera):
+                 f"Failed to open {self}.Run `lerobot-find-cameras realsense` to find available cameras."
+             ) from e
+
++        self.rs_align = rs.align(rs.stream.color) if self.use_depth and self.align_depth_to_color else None
          self._configure_capture_settings()
 
          if warmup:
@@ -76,10 +88,11 @@ index 12ce89c9..f282dd27 100644
 +            finally:
 +                self.rs_pipeline = None
 +                self.rs_profile = None
++                self.rs_align = None
 
      @staticmethod
      def find_cameras() -> list[dict[str, Any]]:
-@@ -267,17 +302,18 @@ class RealSenseCamera(Camera):
+@@ -267,17 +309,18 @@ class RealSenseCamera(Camera):
      def _configure_rs_pipeline_config(self, rs_config):
          """Creates and configures the RealSense pipeline configuration object."""
          rs.config.enable_device(rs_config, self.serial_number)
@@ -100,7 +113,15 @@ index 12ce89c9..f282dd27 100644
              if self.use_depth:
                  rs_config.enable_stream(rs.stream.depth)
 
-@@ -351,6 +387,40 @@ class RealSenseCamera(Camera):
+@@ -341,6 +384,7 @@ class RealSenseCamera(Camera):
+         if not ret or frame is None:
+             raise RuntimeError(f"{self} read_depth failed (status={ret}).")
+
++        frame = self._align_frameset_if_needed(frame)
+         depth_frame = frame.get_depth_frame()
+         depth_map = np.asanyarray(depth_frame.get_data())
+
+@@ -351,6 +395,49 @@ class RealSenseCamera(Camera):
 
          return depth_map_processed
 
@@ -125,6 +146,7 @@ index 12ce89c9..f282dd27 100644
 +        if not ret or frame is None:
 +            raise RuntimeError(f"{self} read_color_depth failed (status={ret}).")
 +
++        frame = self._align_frameset_if_needed(frame)
 +        color_frame = frame.get_color_frame()
 +        depth_frame = frame.get_depth_frame()
 +        color_image_raw = np.asanyarray(color_frame.get_data())
@@ -138,10 +160,18 @@ index 12ce89c9..f282dd27 100644
 +
 +        return color_image_processed, depth_map_processed
 +
++    def _align_frameset_if_needed(self, frame):
++        """Align depth to the color stream when RGB-D recording requests it."""
++        if self.use_depth and self.align_depth_to_color:
++            if self.rs_align is None:
++                self.rs_align = rs.align(rs.stream.color)
++            return self.rs_align.process(frame)
++        return frame
++
      def read(self, color_mode: ColorMode | None = None, timeout_ms: int = 200) -> np.ndarray:
          """
          Reads a single frame (color) synchronously from the camera.
-@@ -430,8 +500,11 @@ class RealSenseCamera(Camera):
+@@ -430,8 +517,11 @@ class RealSenseCamera(Camera):
              )
 
          processed_image = image
@@ -155,7 +185,7 @@ index 12ce89c9..f282dd27 100644
 
          if self.rotation in [cv2.ROTATE_90_CLOCKWISE, cv2.ROTATE_90_COUNTERCLOCKWISE, cv2.ROTATE_180]:
              processed_image = cv2.rotate(processed_image, self.rotation)
-@@ -449,12 +522,20 @@ class RealSenseCamera(Camera):
+@@ -449,12 +539,20 @@ class RealSenseCamera(Camera):
 
          Stops on DeviceNotConnectedError, logs other errors and continues.
          """
@@ -178,7 +208,7 @@ index 12ce89c9..f282dd27 100644
                  self.new_frame_event.set()
 
              except DeviceNotConnectedError:
-@@ -485,7 +566,6 @@ class RealSenseCamera(Camera):
+@@ -485,7 +583,6 @@ class RealSenseCamera(Camera):
          self.thread = None
          self.stop_event = None
 
@@ -186,7 +216,7 @@ index 12ce89c9..f282dd27 100644
      def async_read(self, timeout_ms: float = 200) -> np.ndarray:
          """
          Reads the latest available frame data (color) asynchronously.
-@@ -529,6 +609,38 @@ class RealSenseCamera(Camera):
+@@ -529,6 +626,38 @@ class RealSenseCamera(Camera):
 
          return frame
 
@@ -225,7 +255,7 @@ index 12ce89c9..f282dd27 100644
      def disconnect(self):
          """
          Disconnects from the camera, stops the pipeline, and cleans up resources.
-@@ -544,12 +656,6 @@ class RealSenseCamera(Camera):
+@@ -544,12 +673,6 @@ class RealSenseCamera(Camera):
                  f"Attempted to disconnect {self}, but it appears already disconnected."
              )
 
@@ -240,7 +270,7 @@ index 12ce89c9..f282dd27 100644
 
          logger.info(f"{self} disconnected.")
 diff --git a/src/lerobot/cameras/realsense/configuration_realsense.py b/src/lerobot/cameras/realsense/configuration_realsense.py
-index 36a86876..cfdfc630 100644
+index 36a86876..e61a7e06 100644
 --- a/src/lerobot/cameras/realsense/configuration_realsense.py
 +++ b/src/lerobot/cameras/realsense/configuration_realsense.py
 @@ -16,6 +16,8 @@ from dataclasses import dataclass
@@ -252,7 +282,7 @@ index 36a86876..cfdfc630 100644
 
  @CameraConfig.register_subclass("intelrealsense")
  @dataclass
-@@ -42,6 +44,9 @@ class RealSenseCameraConfig(CameraConfig):
+@@ -42,7 +44,18 @@ class RealSenseCameraConfig(CameraConfig):
          height: Requested frame height in pixels for the color stream.
          serial_number_or_name: Unique serial number or human-readable name to identify the camera.
          color_mode: Color mode for image output (RGB or BGR). Defaults to RGB.
@@ -260,14 +290,27 @@ index 36a86876..cfdfc630 100644
 +            cameras use rgb8. D405 should use bgr8 because its color stream is
 +            exposed by the stereo module rather than a dedicated RGB sensor.
          use_depth: Whether to enable depth stream. Defaults to False.
++        align_depth_to_color: Align depth frames to their paired color stream.
++            This is the expected RGB-D recording path for policy observations.
++        depth_scale_m_per_unit: Metric scale of one raw Z16 depth unit in meters.
++            Intel D400 cameras commonly report 0.001, i.e. one raw unit is 1 mm.
++        depth_clip_min_mm: Minimum millimeter value used when converting raw
++            depth to the compatibility 8-bit visual depth feature.
++        depth_clip_max_mm: Maximum millimeter value used when converting raw
++            depth to the compatibility 8-bit visual depth feature.
          rotation: Image rotation setting (0°, 90°, 180°, or 270°). Defaults to no rotation.
          warmup_s: Time reading frames before returning from connect (in seconds)
-@@ -55,11 +60,16 @@ class RealSenseCameraConfig(CameraConfig):
+
+@@ -55,16 +68,33 @@ class RealSenseCameraConfig(CameraConfig):
 
      serial_number_or_name: str
      color_mode: ColorMode = ColorMode.RGB
 +    color_format: str = "rgb8"
      use_depth: bool = False
++    align_depth_to_color: bool = True
++    depth_scale_m_per_unit: float = 0.001
++    depth_clip_min_mm: float = 0.0
++    depth_clip_max_mm: float = 2000.0
      rotation: Cv2Rotation = Cv2Rotation.NO_ROTATION
      warmup_s: int = 1
 
@@ -279,6 +322,266 @@ index 36a86876..cfdfc630 100644
          if self.color_mode not in (ColorMode.RGB, ColorMode.BGR):
              raise ValueError(
                  f"`color_mode` is expected to be {ColorMode.RGB.value} or {ColorMode.BGR.value}, but {self.color_mode} is provided."
+             )
+
++        self.depth_scale_m_per_unit = float(self.depth_scale_m_per_unit)
++        self.depth_clip_min_mm = float(self.depth_clip_min_mm)
++        self.depth_clip_max_mm = float(self.depth_clip_max_mm)
++        if self.depth_scale_m_per_unit <= 0:
++            raise ValueError("`depth_scale_m_per_unit` must be greater than 0.")
++        if self.depth_clip_max_mm <= self.depth_clip_min_mm:
++            raise ValueError("`depth_clip_max_mm` must be greater than `depth_clip_min_mm`.")
++
+         if self.rotation not in (
+             Cv2Rotation.NO_ROTATION,
+             Cv2Rotation.ROTATE_90,
+diff --git a/src/lerobot/datasets/lerobot_dataset.py b/src/lerobot/datasets/lerobot_dataset.py
+index 617ac297..899bf6bb 100644
+--- a/src/lerobot/datasets/lerobot_dataset.py
++++ b/src/lerobot/datasets/lerobot_dataset.py
+@@ -14,7 +14,9 @@
+ # See the License for the specific language governing permissions and
+ # limitations under the License.
+ import contextlib
++import json
+ import logging
++import os
+ import shutil
+ from collections.abc import Callable
+ from pathlib import Path
+@@ -76,6 +78,183 @@ from lerobot.datasets.video_utils import (
+ CODEBASE_VERSION = "v2.1"
+
+
++def _atr_env_bool(name: str, default: bool = False) -> bool:
++    value = os.environ.get(name)
++    if value is None:
++        return default
++    return value.strip().lower() in {"1", "true", "yes", "on", "enabled"}
++
++
++def _atr_env_float(name: str, default: float) -> float:
++    try:
++        return float(os.environ.get(name, "").strip())
++    except ValueError:
++        return default
++
++
++def _atr_raw_depth_sidecar_root(dataset_root: Path) -> Path:
++    configured = (
++        os.environ.get("ATR_LEROBOT_RAW_DEPTH_SOURCE_DIR", "").strip()
++        or os.environ.get("ATR_LEROBOT_RAW_DEPTH_DIR", "").strip()
++    )
++    return Path(configured).expanduser() if configured else dataset_root / "sidecar" / "depth_raw"
++
++
++def _atr_raw_depth_feature_key(camera_key: str) -> str:
++    return f"observation.images.{camera_key}_depth"
++
++
++def _atr_raw_depth_camera_keys_from_features(features: dict[str, dict]) -> list[str]:
++    prefix = "observation.images."
++    suffix = "_depth"
++    return sorted(
++        key.removeprefix(prefix).removesuffix(suffix)
++        for key in features
++        if key.startswith(prefix) and key.endswith(suffix)
++    )
++
++
++def _atr_load_raw_depth_manifest(sidecar_root: Path) -> dict:
++    manifest_path = sidecar_root / "transform_manifest.json"
++    if not manifest_path.is_file():
++        if _atr_env_bool("ATR_LEROBOT_RAW_DEPTH_ADAPTER_STRICT", True):
++            raise RuntimeError(f"ATR raw depth adapter requires manifest: {manifest_path}")
++        return {}
++    try:
++        loaded = json.loads(manifest_path.read_text(encoding="utf-8"))
++    except (OSError, json.JSONDecodeError) as exc:
++        raise RuntimeError(f"ATR raw depth adapter cannot read manifest {manifest_path}: {exc}") from exc
++    return loaded if isinstance(loaded, dict) else {}
++
++
++def _atr_raw_depth_adapter_config(dataset_root: Path, features: dict[str, dict]) -> dict | None:
++    if not _atr_env_bool("ATR_LEROBOT_RAW_DEPTH_ADAPTER", False):
++        return None
++
++    sidecar_root = _atr_raw_depth_sidecar_root(dataset_root)
++    manifest = _atr_load_raw_depth_manifest(sidecar_root)
++    env_camera_keys = [
++        item.strip()
++        for item in os.environ.get("ATR_LEROBOT_RAW_DEPTH_CAMERA_KEYS", "").split(",")
++        if item.strip()
++    ]
++    manifest_camera_keys = [str(item).strip() for item in manifest.get("camera_keys", []) if str(item).strip()]
++    camera_keys = env_camera_keys or manifest_camera_keys or _atr_raw_depth_camera_keys_from_features(features)
++
++    target_map = {
++        camera_key: _atr_raw_depth_feature_key(camera_key)
++        for camera_key in camera_keys
++        if _atr_raw_depth_feature_key(camera_key) in features
++    }
++    if not target_map and _atr_env_bool("ATR_LEROBOT_RAW_DEPTH_ADAPTER_STRICT", True):
++        raise RuntimeError(
++            "ATR raw depth adapter is enabled but no matching LeRobot depth features were found. "
++            f"camera_keys={camera_keys}, feature_keys={list(features)}"
++        )
++
++    visual = manifest.get("visual_depth_feature", {}) if isinstance(manifest.get("visual_depth_feature"), dict) else {}
++    clip_min = _atr_env_float(
++        "ATR_LEROBOT_DEPTH_CLIP_MIN_MM",
++        float(manifest.get("depth_clip_min_mm", visual.get("clip_min_mm", 0.0))),
++    )
++    clip_max = _atr_env_float(
++        "ATR_LEROBOT_DEPTH_CLIP_MAX_MM",
++        float(manifest.get("depth_clip_max_mm", visual.get("clip_max_mm", 2000.0))),
++    )
++    if clip_max <= clip_min:
++        raise RuntimeError(f"ATR raw depth adapter has invalid clip range: {clip_min}..{clip_max} mm")
++
++    logging.info(
++        "ATR raw depth adapter enabled: root=%s features=%s clip_mm=(%s, %s)",
++        sidecar_root,
++        sorted(target_map.values()),
++        clip_min,
++        clip_max,
++    )
++    return {
++        "root": sidecar_root,
++        "manifest": manifest,
++        "target_map": target_map,
++        "depth_scale_m_per_unit": _atr_env_float(
++            "ATR_LEROBOT_DEPTH_SCALE_M_PER_UNIT",
++            float(manifest.get("depth_scale_m_per_unit", 0.001)),
++        ),
++        "depth_clip_min_mm": clip_min,
++        "depth_clip_max_mm": clip_max,
++        "strict": _atr_env_bool("ATR_LEROBOT_RAW_DEPTH_ADAPTER_STRICT", True),
++    }
++
++
++def _atr_tensor_int(value, fallback: int) -> int:
++    if isinstance(value, torch.Tensor):
++        if value.numel() == 1:
++            return int(value.item())
++        return fallback
++    try:
++        return int(value)
++    except (TypeError, ValueError):
++        return fallback
++
++
++def _atr_raw_depth_png_to_tensor(path: Path, config: dict, target: torch.Tensor | None = None) -> torch.Tensor:
++    if not path.is_file():
++        raise RuntimeError(f"ATR raw depth frame is missing: {path}")
++    try:
++        raw = np.asarray(PIL.Image.open(path))
++    except OSError as exc:
++        raise RuntimeError(f"ATR raw depth frame cannot be read: {path}: {exc}") from exc
++    if raw.ndim == 3:
++        raw = raw[..., 0]
++    if raw.ndim != 2:
++        raise RuntimeError(f"ATR raw depth frame must be HxW uint16-like data, got shape={raw.shape}: {path}")
++
++    scale_mm_per_unit = float(config["depth_scale_m_per_unit"]) * 1000.0
++    depth_mm = raw.astype(np.float32) * scale_mm_per_unit
++    clip_min = float(config["depth_clip_min_mm"])
++    clip_max = float(config["depth_clip_max_mm"])
++    normalized = np.clip((depth_mm - clip_min) / (clip_max - clip_min), 0.0, 1.0)
++    tensor = torch.from_numpy(normalized).unsqueeze(0).repeat(3, 1, 1).to(dtype=torch.float32)
++
++    if isinstance(target, torch.Tensor):
++        if tuple(tensor.shape[-2:]) != tuple(target.shape[-2:]):
++            tensor = torch.nn.functional.interpolate(
++                tensor.unsqueeze(0),
++                size=tuple(target.shape[-2:]),
++                mode="bilinear",
++                align_corners=False,
++            ).squeeze(0)
++        tensor = tensor.to(device=target.device)
++        if target.dtype.is_floating_point:
++            tensor = tensor.to(dtype=target.dtype)
++    return tensor
++
++
++def _atr_raw_depth_sequence_to_tensor(
++    config: dict,
++    camera_key: str,
++    frame_indices: list[int],
++    target: torch.Tensor | None = None,
++) -> torch.Tensor:
++    frames = [
++        _atr_raw_depth_png_to_tensor(
++            Path(config["root"]) / camera_key / f"frame_{frame_index:06d}.png",
++            config,
++            target[0] if isinstance(target, torch.Tensor) and target.ndim == 4 else target,
++        )
++        for frame_index in frame_indices
++    ]
++    if isinstance(target, torch.Tensor) and target.ndim == 3:
++        return frames[0]
++    if len(frames) == 1 and not (isinstance(target, torch.Tensor) and target.ndim == 4):
++        return frames[0]
++    stacked = torch.stack(frames, dim=0)
++    if isinstance(target, torch.Tensor) and target.ndim == 4:
++        stacked = stacked.to(device=target.device)
++        if target.dtype.is_floating_point:
++            stacked = stacked.to(dtype=target.dtype)
++    return stacked
++
++
+ class LeRobotDatasetMetadata:
+     def __init__(
+         self,
+@@ -468,6 +647,7 @@ class LeRobotDataset(torch.utils.data.Dataset):
+         self.meta = LeRobotDatasetMetadata(
+             self.repo_id, self.root, self.revision, force_cache_sync=force_cache_sync
+         )
++        self._atr_raw_depth_adapter_config = _atr_raw_depth_adapter_config(self.root, self.meta.features)
+         if self.episodes is not None and self.meta._version >= packaging.version.parse("v2.1"):
+             episodes_stats = [self.meta.episodes_stats[ep_idx] for ep_idx in self.episodes]
+             self.stats = aggregate_stats(episodes_stats)
+@@ -720,6 +900,8 @@ class LeRobotDataset(torch.utils.data.Dataset):
+             video_frames = self._query_videos(query_timestamps, ep_idx)
+             item = {**video_frames, **item}
+
++        self._apply_atr_raw_depth_adapter(item, idx, query_indices)
++
+         if self.image_transforms is not None:
+             image_keys = self.meta.camera_keys
+             for cam in image_keys:
+@@ -731,6 +913,31 @@ class LeRobotDataset(torch.utils.data.Dataset):
+
+         return item
+
++    def _apply_atr_raw_depth_adapter(
++        self,
++        item: dict,
++        idx: int,
++        query_indices: dict[str, list[int]] | None,
++    ) -> None:
++        config = self._atr_raw_depth_adapter_config
++        if not config:
++            return
++        for camera_key, target_key in config["target_map"].items():
++            if target_key not in item:
++                if config["strict"]:
++                    raise RuntimeError(f"ATR raw depth adapter expected depth feature in item: {target_key}")
++                continue
++            if query_indices is not None and target_key in query_indices:
++                frame_indices = [_atr_tensor_int(frame_idx, idx) for frame_idx in query_indices[target_key]]
++            else:
++                frame_indices = [_atr_tensor_int(item.get("frame_index", item.get("index", idx)), idx)]
++            item[target_key] = _atr_raw_depth_sequence_to_tensor(
++                config,
++                camera_key,
++                frame_indices,
++                item.get(target_key) if isinstance(item.get(target_key), torch.Tensor) else None,
++            )
++
+     def __repr__(self):
+         feature_keys = list(self.features)
+         return (
 diff --git a/src/lerobot/find_cameras.py b/src/lerobot/find_cameras.py
 index ec8f5ff3..2b5763dc 100644
 --- a/src/lerobot/find_cameras.py
@@ -312,6 +615,25 @@ index ec8f5ff3..2b5763dc 100644
              return {"instance": instance, "meta": cam_meta}
      except Exception as e:
          logger.error(f"Failed to connect or configure {cam_type} camera {cam_id}: {e}")
+diff --git a/src/lerobot/motors/dynamixel/dynamixel.py b/src/lerobot/motors/dynamixel/dynamixel.py
+index f059010b..0d3a1bf8 100644
+--- a/src/lerobot/motors/dynamixel/dynamixel.py
++++ b/src/lerobot/motors/dynamixel/dynamixel.py
+@@ -192,10 +192,10 @@ class DynamixelMotorsBus(MotorsBus):
+
+     def write_calibration(self, calibration_dict: dict[str, MotorCalibration], cache: bool = True) -> None:
+         for motor, calibration in calibration_dict.items():
+-            self.write("Drive_Mode", motor, calibration.drive_mode)
+-            self.write("Homing_Offset", motor, calibration.homing_offset)
+-            self.write("Min_Position_Limit", motor, calibration.range_min)
+-            self.write("Max_Position_Limit", motor, calibration.range_max)
++            self.write("Drive_Mode", motor, calibration.drive_mode, num_retry=5)
++            self.write("Homing_Offset", motor, calibration.homing_offset, num_retry=5)
++            self.write("Min_Position_Limit", motor, calibration.range_min, num_retry=5)
++            self.write("Max_Position_Limit", motor, calibration.range_max, num_retry=5)
+
+         if cache:
+             self.calibration = calibration_dict
 diff --git a/src/lerobot/record.py b/src/lerobot/record.py
 index ae0c79ae..45eae87e 100644
 --- a/src/lerobot/record.py
@@ -337,11 +659,18 @@ index ae0c79ae..45eae87e 100644
 
      log_say("Stop recording", cfg.play_sounds, blocking=True)
 diff --git a/src/lerobot/robots/omx_follower/omx_follower.py b/src/lerobot/robots/omx_follower/omx_follower.py
-index a085a1b9..94d5400d 100644
+index a085a1b9..01ff6b21 100644
 --- a/src/lerobot/robots/omx_follower/omx_follower.py
 +++ b/src/lerobot/robots/omx_follower/omx_follower.py
-@@ -19,6 +19,8 @@ import time
+@@ -15,10 +15,15 @@
+ # limitations under the License.
+
+ import logging
++import json
++import os
+ import time
  from functools import cached_property
++from pathlib import Path
  from typing import Any
 
 +import numpy as np
@@ -349,7 +678,7 @@ index a085a1b9..94d5400d 100644
  from lerobot.cameras.utils import make_cameras_from_configs
  from lerobot.errors import DeviceAlreadyConnectedError, DeviceNotConnectedError
  from lerobot.motors import Motor, MotorCalibration, MotorNormMode
-@@ -71,9 +73,13 @@ class OmxFollower(Robot):
+@@ -71,9 +76,13 @@ class OmxFollower(Robot):
 
      @property
      def _cameras_ft(self) -> dict[str, tuple]:
@@ -366,7 +695,16 @@ index a085a1b9..94d5400d 100644
 
      @cached_property
      def observation_features(self) -> dict[str, type | tuple]:
-@@ -227,12 +233,42 @@ class OmxFollower(Robot):
+@@ -100,7 +109,7 @@ class OmxFollower(Robot):
+         if self.calibration:
+             logger.info(f"Using pre-configured calibration for {self}")
+             # Ensure EEPROM writes are permitted
+-            self.bus.disable_torque()
++            self.bus.disable_torque(num_retry=5)
+             self.bus.write_calibration(self.calibration)
+         elif not self.is_calibrated and calibrate:
+             logger.info(
+@@ -227,12 +236,154 @@ class OmxFollower(Robot):
          # Capture images from cameras
          for cam_key, cam in self.cameras.items():
              start = time.perf_counter()
@@ -375,6 +713,7 @@ index a085a1b9..94d5400d 100644
 +            if self._camera_uses_depth(config) and hasattr(cam, "async_read_color_depth"):
 +                color_image, depth_map = cam.async_read_color_depth()
 +                obs_dict[cam_key] = color_image
++                self._write_raw_depth_sidecar(cam_key, depth_map)
 +                obs_dict[self._depth_feature_key(cam_key)] = self._depth_map_to_uint8_rgb(depth_map)
 +            else:
 +                obs_dict[cam_key] = cam.async_read()
@@ -403,14 +742,125 @@ index a085a1b9..94d5400d 100644
 +            raise ValueError(f"Depth map must be HxW or HxWx1, got shape={depth.shape}.")
 +
 +        depth_f32 = np.nan_to_num(depth.astype(np.float32), nan=0.0, posinf=0.0, neginf=0.0)
-+        depth_u8 = np.clip(depth_f32, 0.0, 2000.0)
-+        depth_u8 = np.rint(depth_u8 / 2000.0 * 255.0).astype(np.uint8)
++        clip_min_mm, clip_max_mm = OmxFollower._depth_clip_range_mm()
++        depth_u8 = np.clip(depth_f32, clip_min_mm, clip_max_mm)
++        depth_u8 = np.rint((depth_u8 - clip_min_mm) / (clip_max_mm - clip_min_mm) * 255.0).astype(np.uint8)
 +        return np.repeat(depth_u8[..., None], 3, axis=2)
++
++    @staticmethod
++    def _depth_clip_range_mm() -> tuple[float, float]:
++        clip_min = OmxFollower._env_float("ATR_LEROBOT_DEPTH_CLIP_MIN_MM", 0.0)
++        clip_max = OmxFollower._env_float("ATR_LEROBOT_DEPTH_CLIP_MAX_MM", 2000.0)
++        if clip_max <= clip_min:
++            logger.warning(
++                "Invalid ATR depth clip range min=%s max=%s; using 0..2000 mm.", clip_min, clip_max
++            )
++            return 0.0, 2000.0
++        return clip_min, clip_max
++
++    @staticmethod
++    def _env_float(name: str, default: float) -> float:
++        value = os.environ.get(name, "").strip()
++        if not value:
++            return default
++        try:
++            return float(value)
++        except ValueError:
++            logger.warning("Invalid %s=%r; using %s.", name, value, default)
++            return default
++
++    def _write_raw_depth_sidecar(self, camera_key: str, depth_map: np.ndarray) -> None:
++        root_value = os.environ.get("ATR_LEROBOT_RAW_DEPTH_DIR", "").strip()
++        if not root_value:
++            return
++        allowed_keys = {
++            item.strip()
++            for item in os.environ.get("ATR_LEROBOT_RAW_DEPTH_CAMERA_KEYS", "").split(",")
++            if item.strip()
++        }
++        if allowed_keys and camera_key not in allowed_keys:
++            return
++        raw_format = os.environ.get("ATR_LEROBOT_RAW_DEPTH_FORMAT", "png16").strip().lower()
++        if raw_format not in {"png16", "png"}:
++            logger.warning("Unsupported ATR_LEROBOT_RAW_DEPTH_FORMAT=%s; skipping raw depth sidecar", raw_format)
++            return
++
++        depth = np.asarray(depth_map)
++        if depth.ndim == 3 and depth.shape[-1] == 1:
++            depth = depth[..., 0]
++        if depth.ndim != 2:
++            logger.warning("Skipping raw depth sidecar for %s: expected HxW, got shape=%s", camera_key, depth.shape)
++            return
++        if depth.dtype != np.uint16:
++            depth = np.clip(np.nan_to_num(depth.astype(np.float32), nan=0.0, posinf=0.0, neginf=0.0), 0, 65535).astype(
++                np.uint16
++            )
++
++        try:
++            import cv2
++
++            camera_dir = Path(root_value).expanduser() / camera_key
++            camera_dir.mkdir(parents=True, exist_ok=True)
++            self._write_raw_depth_transform_manifest(Path(root_value).expanduser(), camera_key, sorted(allowed_keys))
++            frame_index = self._next_raw_depth_frame_index(camera_dir, camera_key)
++            path = camera_dir / f"frame_{frame_index:06d}.png"
++            if not cv2.imwrite(str(path), depth):
++                logger.warning("Failed to write raw depth sidecar frame: %s", path)
++        except Exception as exc:
++            logger.warning("Failed to write raw depth sidecar for %s: %s: %s", camera_key, exc.__class__.__name__, exc)
++
++    def _write_raw_depth_transform_manifest(self, root: Path, camera_key: str, allowed_keys: list[str]) -> None:
++        manifest_path = root / "transform_manifest.json"
++        if manifest_path.exists():
++            return
++        clip_min_mm, clip_max_mm = self._depth_clip_range_mm()
++        camera_keys = allowed_keys or [camera_key]
++        payload = {
++            "version": 1,
++            "kind": "atr_lerobot_realsense_rgbd_transform",
++            "camera_keys": sorted(dict.fromkeys(camera_keys)),
++            "aligned_to": os.environ.get("ATR_LEROBOT_DEPTH_ALIGNED_TO", "color").strip() or "color",
++            "depth_encoding": os.environ.get("ATR_LEROBOT_RAW_DEPTH_FORMAT", "png16").strip() or "png16",
++            "raw_depth_dtype": "uint16",
++            "depth_unit": "z16",
++            "depth_scale_m_per_unit": self._env_float("ATR_LEROBOT_DEPTH_SCALE_M_PER_UNIT", 0.001),
++            "depth_clip_min_mm": clip_min_mm,
++            "depth_clip_max_mm": clip_max_mm,
++            "visual_depth_feature": {
++                "keys_suffix": "_depth",
++                "encoding": "uint8_rgb",
++                "clip_min_mm": clip_min_mm,
++                "clip_max_mm": clip_max_mm,
++            },
++            "contract": "recording and rollout must use the same aligned RGB-D camera transform",
++        }
++        root.mkdir(parents=True, exist_ok=True)
++        manifest_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
++
++    def _next_raw_depth_frame_index(self, camera_dir: Path, camera_key: str) -> int:
++        counters = getattr(self, "_raw_depth_sidecar_frame_indices", None)
++        if not isinstance(counters, dict):
++            counters = {}
++            setattr(self, "_raw_depth_sidecar_frame_indices", counters)
++        if camera_key not in counters:
++            existing = []
++            try:
++                existing = [
++                    int(path.stem.rsplit("_", 1)[-1])
++                    for path in camera_dir.glob("frame_*.png")
++                    if path.stem.rsplit("_", 1)[-1].isdigit()
++                ]
++            except OSError:
++                existing = []
++            counters[camera_key] = (max(existing) + 1) if existing else 0
++        frame_index = int(counters[camera_key])
++        counters[camera_key] = frame_index + 1
++        return frame_index
 +
      def send_action(self, action: dict[str, float]) -> dict[str, float]:
          """Command arm to move to a target joint configuration.
 
-@@ -271,4 +307,4 @@ class OmxFollower(Robot):
+@@ -271,4 +422,4 @@ class OmxFollower(Robot):
          for cam in self.cameras.values():
              cam.disconnect()
 
@@ -528,10 +978,10 @@ index 6e13646b..0d382700 100644
      elif system == "Windows":
          cmd = [
 diff --git a/tests/cameras/test_realsense.py b/tests/cameras/test_realsense.py
-index 4b3fbae8..a198c07d 100644
+index 4b3fbae8..75e6d54c 100644
 --- a/tests/cameras/test_realsense.py
 +++ b/tests/cameras/test_realsense.py
-@@ -61,6 +61,21 @@ def test_abc_implementation():
+@@ -61,6 +61,35 @@ def test_abc_implementation():
      _ = RealSenseCamera(config)
 
 
@@ -550,6 +1000,261 @@ index 4b3fbae8..a198c07d 100644
 +        RealSenseCameraConfig(serial_number_or_name="042", color_format="yuv422")
 +
 +
++def test_rgbd_transform_contract_defaults():
++    config = RealSenseCameraConfig(serial_number_or_name="042", use_depth=True)
++
++    assert config.align_depth_to_color is True
++    assert config.depth_scale_m_per_unit == 0.001
++    assert config.depth_clip_min_mm == 0.0
++    assert config.depth_clip_max_mm == 2000.0
++
++
++def test_rgbd_transform_contract_rejects_invalid_clip_range():
++    with pytest.raises(ValueError, match="depth_clip_max_mm"):
++        RealSenseCameraConfig(serial_number_or_name="042", use_depth=True, depth_clip_min_mm=2000, depth_clip_max_mm=0)
++
++
  def test_connect():
      config = RealSenseCameraConfig(serial_number_or_name="042")
      camera = RealSenseCamera(config)
+diff --git a/tests/robots/test_omx_follower_realsense_depth.py b/tests/robots/test_omx_follower_realsense_depth.py
+new file mode 100644
+index 00000000..cbd14540
+--- /dev/null
++++ b/tests/robots/test_omx_follower_realsense_depth.py
+@@ -0,0 +1,113 @@
++import json
++
++import numpy as np
++import cv2
++
++from lerobot.robots.omx_follower.omx_follower import OmxFollower
++
++
++class _FakeBus:
++    is_connected = True
++    motors = {
++        "shoulder_pan": object(),
++        "shoulder_lift": object(),
++        "elbow_flex": object(),
++        "wrist_flex": object(),
++        "wrist_roll": object(),
++        "gripper": object(),
++    }
++
++    def sync_read(self, _key):
++        return {name: 0.0 for name in self.motors}
++
++
++class _FakeCameraConfig:
++    width = 640
++    height = 480
++    use_depth = True
++
++
++class _FakeCamera:
++    is_connected = True
++
++    def async_read_color_depth(self):
++        color = np.full((480, 640, 3), 16, dtype=np.uint8)
++        depth_mm = np.full((480, 640), 1000, dtype=np.uint16)
++        return color, depth_mm
++
++
++def _fake_follower() -> OmxFollower:
++    follower = OmxFollower.__new__(OmxFollower)
++    follower.id = "test-omx"
++    follower.bus = _FakeBus()
++    follower.config = type("Config", (), {"cameras": {"top": _FakeCameraConfig()}})()
++    follower.cameras = {"top": _FakeCamera()}
++    return follower
++
++
++def test_omx_follower_exposes_realsense_depth_as_visual_feature():
++    follower = _fake_follower()
++
++    features = follower.observation_features
++
++    assert features["top"] == (480, 640, 3)
++    assert features["top_depth"] == (480, 640, 3)
++
++
++def test_omx_follower_returns_depth_visual_frame_for_realsense_camera():
++    follower = _fake_follower()
++
++    observation = follower.get_observation()
++
++    assert observation["top"].shape == (480, 640, 3)
++    assert observation["top_depth"].shape == (480, 640, 3)
++    assert observation["top_depth"].dtype == np.uint8
++    assert observation["top_depth"].min() > 0
++
++
++def test_omx_follower_writes_raw_uint16_depth_sidecar_when_enabled(tmp_path, monkeypatch):
++    follower = _fake_follower()
++    monkeypatch.setenv("ATR_LEROBOT_RAW_DEPTH_DIR", str(tmp_path))
++    monkeypatch.setenv("ATR_LEROBOT_RAW_DEPTH_CAMERA_KEYS", "top")
++    monkeypatch.setenv("ATR_LEROBOT_RAW_DEPTH_FORMAT", "png16")
++
++    follower.get_observation()
++
++    raw_files = sorted((tmp_path / "top").glob("frame_*.png"))
++    assert len(raw_files) == 1
++    depth = cv2.imread(str(raw_files[0]), cv2.IMREAD_UNCHANGED)
++    assert depth.shape == (480, 640)
++    assert depth.dtype == np.uint16
++    assert int(depth[0, 0]) == 1000
++
++
++def test_omx_follower_depth_visual_respects_configured_clip_range(monkeypatch):
++    monkeypatch.setenv("ATR_LEROBOT_DEPTH_CLIP_MIN_MM", "500")
++    monkeypatch.setenv("ATR_LEROBOT_DEPTH_CLIP_MAX_MM", "1500")
++
++    depth_rgb = OmxFollower._depth_map_to_uint8_rgb(np.full((4, 4), 750, dtype=np.uint16))
++
++    assert int(depth_rgb[0, 0, 0]) == 64
++
++
++def test_omx_follower_raw_depth_sidecar_writes_transform_manifest(tmp_path, monkeypatch):
++    follower = _fake_follower()
++    monkeypatch.setenv("ATR_LEROBOT_RAW_DEPTH_DIR", str(tmp_path))
++    monkeypatch.setenv("ATR_LEROBOT_RAW_DEPTH_CAMERA_KEYS", "top")
++    monkeypatch.setenv("ATR_LEROBOT_RAW_DEPTH_FORMAT", "png16")
++    monkeypatch.setenv("ATR_LEROBOT_DEPTH_ALIGNED_TO", "color")
++    monkeypatch.setenv("ATR_LEROBOT_DEPTH_SCALE_M_PER_UNIT", "0.001")
++    monkeypatch.setenv("ATR_LEROBOT_DEPTH_CLIP_MIN_MM", "0.0")
++    monkeypatch.setenv("ATR_LEROBOT_DEPTH_CLIP_MAX_MM", "2000.0")
++
++    follower.get_observation()
++
++    manifest = tmp_path / "transform_manifest.json"
++    assert manifest.is_file()
++    payload = json.loads(manifest.read_text(encoding="utf-8"))
++    assert payload["aligned_to"] == "color"
++    assert payload["depth_scale_m_per_unit"] == 0.001
++    assert payload["depth_clip_min_mm"] == 0.0
++    assert payload["depth_clip_max_mm"] == 2000.0
++    assert payload["visual_depth_feature"]["clip_min_mm"] == 0.0
++    assert payload["visual_depth_feature"]["clip_max_mm"] == 2000.0
+diff --git a/tests/datasets/test_atr_raw_depth_adapter.py b/tests/datasets/test_atr_raw_depth_adapter.py
+new file mode 100644
+index 00000000..c4c6779c
+--- /dev/null
++++ b/tests/datasets/test_atr_raw_depth_adapter.py
+@@ -0,0 +1,116 @@
++import json
++
++import numpy as np
++import PIL.Image
++import torch
++
++from lerobot.datasets.lerobot_dataset import (
++    LeRobotDataset,
++    _atr_raw_depth_adapter_config,
++    _atr_raw_depth_sequence_to_tensor,
++)
++
++
++def test_atr_raw_depth_adapter_replaces_depth_feature_from_uint16_sidecar(tmp_path, monkeypatch):
++    sidecar_root = tmp_path / "sidecar" / "depth_raw"
++    camera_dir = sidecar_root / "top"
++    camera_dir.mkdir(parents=True)
++    PIL.Image.fromarray(np.full((4, 5), 1000, dtype=np.uint16)).save(camera_dir / "frame_000000.png")
++    (sidecar_root / "transform_manifest.json").write_text(
++        json.dumps(
++            {
++                "camera_keys": ["top"],
++                "depth_scale_m_per_unit": 0.001,
++                "depth_clip_min_mm": 0.0,
++                "depth_clip_max_mm": 2000.0,
++            }
++        ),
++        encoding="utf-8",
++    )
++    monkeypatch.setenv("ATR_LEROBOT_RAW_DEPTH_ADAPTER", "1")
++    monkeypatch.setenv("ATR_LEROBOT_RAW_DEPTH_SOURCE_DIR", str(sidecar_root))
++
++    config = _atr_raw_depth_adapter_config(
++        tmp_path,
++        {"observation.images.top_depth": {"dtype": "video", "shape": [3, 4, 5]}},
++    )
++    tensor = _atr_raw_depth_sequence_to_tensor(
++        config,
++        "top",
++        [0],
++        torch.zeros(3, 4, 5),
++    )
++
++    assert tensor.shape == (3, 4, 5)
++    assert tensor.dtype == torch.float32
++    assert torch.allclose(tensor, torch.full((3, 4, 5), 0.5))
++
++
++def test_atr_raw_depth_adapter_stacks_delta_frames(tmp_path, monkeypatch):
++    sidecar_root = tmp_path / "sidecar" / "depth_raw"
++    camera_dir = sidecar_root / "wrist"
++    camera_dir.mkdir(parents=True)
++    PIL.Image.fromarray(np.full((2, 2), 500, dtype=np.uint16)).save(camera_dir / "frame_000001.png")
++    PIL.Image.fromarray(np.full((2, 2), 1500, dtype=np.uint16)).save(camera_dir / "frame_000002.png")
++    (sidecar_root / "transform_manifest.json").write_text(
++        json.dumps(
++            {
++                "camera_keys": ["wrist"],
++                "depth_scale_m_per_unit": 0.001,
++                "depth_clip_min_mm": 0.0,
++                "depth_clip_max_mm": 2000.0,
++            }
++        ),
++        encoding="utf-8",
++    )
++    monkeypatch.setenv("ATR_LEROBOT_RAW_DEPTH_ADAPTER", "1")
++    monkeypatch.setenv("ATR_LEROBOT_RAW_DEPTH_SOURCE_DIR", str(sidecar_root))
++
++    config = _atr_raw_depth_adapter_config(
++        tmp_path,
++        {"observation.images.wrist_depth": {"dtype": "video", "shape": [3, 2, 2]}},
++    )
++    tensor = _atr_raw_depth_sequence_to_tensor(
++        config,
++        "wrist",
++        [1, 2],
++        torch.zeros(2, 3, 2, 2),
++    )
++
++    assert tensor.shape == (2, 3, 2, 2)
++    assert torch.allclose(tensor[0], torch.full((3, 2, 2), 0.25))
++    assert torch.allclose(tensor[1], torch.full((3, 2, 2), 0.75))
++
++
++def test_lerobot_dataset_item_hook_overwrites_existing_depth_observation(tmp_path, monkeypatch):
++    sidecar_root = tmp_path / "sidecar" / "depth_raw"
++    camera_dir = sidecar_root / "top"
++    camera_dir.mkdir(parents=True)
++    PIL.Image.fromarray(np.full((3, 3), 2000, dtype=np.uint16)).save(camera_dir / "frame_000004.png")
++    (sidecar_root / "transform_manifest.json").write_text(
++        json.dumps(
++            {
++                "camera_keys": ["top"],
++                "depth_scale_m_per_unit": 0.001,
++                "depth_clip_min_mm": 0.0,
++                "depth_clip_max_mm": 2000.0,
++            }
++        ),
++        encoding="utf-8",
++    )
++    monkeypatch.setenv("ATR_LEROBOT_RAW_DEPTH_ADAPTER", "1")
++    monkeypatch.setenv("ATR_LEROBOT_RAW_DEPTH_SOURCE_DIR", str(sidecar_root))
++
++    dataset = LeRobotDataset.__new__(LeRobotDataset)
++    dataset._atr_raw_depth_adapter_config = _atr_raw_depth_adapter_config(
++        tmp_path,
++        {"observation.images.top_depth": {"dtype": "video", "shape": [3, 3, 3]}},
++    )
++    item = {
++        "frame_index": torch.tensor(4),
++        "observation.images.top_depth": torch.zeros(3, 3, 3),
++    }
++
++    LeRobotDataset._apply_atr_raw_depth_adapter(dataset, item, 4, query_indices=None)
++
++    assert torch.allclose(item["observation.images.top_depth"], torch.ones(3, 3, 3))

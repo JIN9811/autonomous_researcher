@@ -208,6 +208,16 @@ When `conda_executable` is left as `conda`, ATR first uses `conda` from PATH and
 then auto-detects common user installs such as
 `%USERPROFILE%\miniconda3\Scripts\conda.exe`.
 
+For SmolVLA training/rollout experiments, install the LeRobot extra and cache
+the required Hub repos in that same `lerobot` environment:
+
+```bash
+cd /home/jin/lerobot
+conda run --no-capture-output -n lerobot python -m pip install -e ".[smolvla]"
+conda run --no-capture-output -n lerobot hf download lerobot/smolvla_base --max-workers 1
+conda run --no-capture-output -n lerobot hf download HuggingFaceTB/SmolVLM2-500M-Video-Instruct --exclude "onnx/*" --max-workers 1
+```
+
 Use the `/lerobot` GUI page for port detection, teleoperation, recording,
 training, and rollout. Hardware actions still require live confirmation gates.
 
@@ -521,6 +531,15 @@ The apply script runs `git apply --check` first and stops without changing the
 checkout if the patch does not match the current LeRobot branch. If that
 happens, update the LeRobot branch/version deliberately; do not replace D405
 with `/dev/video*` or OpenCV fallback.
+
+After the patch, RealSense recording keeps the standard 8-bit LeRobot depth
+video features and, when ATR passes `ATR_LEROBOT_RAW_DEPTH_DIR`, also writes
+16-bit raw Z16 sidecars at
+`<dataset>/sidecar/depth_raw/<camera_key>/frame_*.png`. It also writes
+`<dataset>/sidecar/depth_raw/transform_manifest.json`, which records the
+production RGB-D contract: depth aligned to color, metric scale
+`0.001 m/unit`, and fixed visual-depth clipping range `0..2000 mm` unless
+`configs/lerobot.yaml` is deliberately changed.
 
 ## Environment Variables
 

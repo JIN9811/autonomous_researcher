@@ -1,0 +1,295 @@
+#usda 1.0
+(
+    customLayerData = {
+        string creator = "MuJoCo USD Converter v0.2.0"
+    }
+    defaultPrim = "tn__omxscene_h8"
+    doc = """Generated from Composed Stage of root layer /tmp/tmpo3nr2xdn/omx scene.usdc
+
+
+Generated from Composed Stage of root layer /tmp/mjcf_import_scene_5taoa0x7/usdex_scene/omx scene.usdc
+
+
+Generated from Composed Stage of root layer /tmp/mjcf_import_scene_5taoa0x7/temp_scene/scene.usd
+
+
+Generated from Composed Stage of root layer /home/jin/autonomous_researcher/sim/robotis_omx/scene/payloads/base.usd
+"""
+    kilogramsPerUnit = 1
+    metersPerUnit = 1
+    subLayers = [
+        @./physics.usda@
+    ]
+    upAxis = "Z"
+)
+
+over "tn__omxscene_h8"
+{
+    over "Geometry"
+    {
+        over "floor" (
+            prepend apiSchemas = ["MjcCollisionAPI"]
+        )
+        {
+        }
+
+        over "link0"
+        {
+            over "link1"
+            {
+                over "link2"
+                {
+                    over "link3"
+                    {
+                        over "link4"
+                        {
+                            over "link5"
+                            {
+                                over "link6"
+                                {
+                                    over "Gripper" (
+                                        delete apiSchemas = ["PhysicsDriveAPI:angular", "PhysicsJointStateAPI:angular"]
+                                        prepend apiSchemas = ["MjcJointAPI"]
+                                    )
+                                    {
+                                        uniform double mjc:armature = 0.1
+                                        uniform double mjc:frictionloss = 0.1
+                                    }
+
+                                    over "follower_07_gripper_motorized"
+                                    {
+                                    }
+
+                                    over "follower_07_gripper_motorized_1"
+                                    {
+                                    }
+                                }
+
+                                over "link7"
+                                {
+                                    over "Gripper_mimic" (
+                                        delete apiSchemas = ["PhysicsDriveAPI:angular", "PhysicsJointStateAPI:angular"]
+                                        prepend apiSchemas = ["MjcJointAPI", "MjcEqualityJointAPI"]
+                                    )
+                                    {
+                                        uniform double mjc:armature = 0.1
+                                        uniform double mjc:coef1 = -1
+                                        uniform double mjc:frictionloss = 0.1
+                                        rel mjc:target = </tn__omxscene_h8/Geometry/link0/link1/link2/link3/link4/link5/link6/Gripper>
+                                    }
+
+                                    over "follower_08_gripper_gear"
+                                    {
+                                    }
+
+                                    over "follower_08_gripper_gear_1"
+                                    {
+                                    }
+                                }
+
+                                over "Joint5" (
+                                    delete apiSchemas = ["PhysicsDriveAPI:angular", "PhysicsJointStateAPI:angular"]
+                                    prepend apiSchemas = ["MjcJointAPI"]
+                                )
+                                {
+                                    uniform double mjc:armature = 0.1
+                                    uniform double mjc:frictionloss = 0.1
+                                }
+
+                                over "follower_06_pan_Revised"
+                                {
+                                }
+
+                                over "follower_06_pan_Revised_1"
+                                {
+                                }
+                            }
+
+                            over "Joint4" (
+                                delete apiSchemas = ["PhysicsDriveAPI:angular", "PhysicsJointStateAPI:angular"]
+                                prepend apiSchemas = ["MjcJointAPI"]
+                            )
+                            {
+                                uniform double mjc:armature = 0.1
+                                uniform double mjc:frictionloss = 0.1
+                            }
+
+                            over "follower_05_tip"
+                            {
+                            }
+
+                            over "follower_05_tip_1"
+                            {
+                            }
+                        }
+
+                        over "Joint3" (
+                            delete apiSchemas = ["PhysicsDriveAPI:angular", "PhysicsJointStateAPI:angular"]
+                            prepend apiSchemas = ["MjcJointAPI"]
+                        )
+                        {
+                            uniform double mjc:armature = 0.1
+                            uniform double mjc:frictionloss = 0.1
+                        }
+
+                        over "follower_04_middle_horizontal"
+                        {
+                        }
+
+                        over "follower_04_middle_horizontal_1"
+                        {
+                        }
+                    }
+
+                    over "Joint2" (
+                        delete apiSchemas = ["PhysicsDriveAPI:angular", "PhysicsJointStateAPI:angular"]
+                        prepend apiSchemas = ["MjcJointAPI"]
+                    )
+                    {
+                        uniform double mjc:armature = 0.1
+                        uniform double mjc:frictionloss = 0.1
+                    }
+
+                    over "follower_03_middle_verticle"
+                    {
+                    }
+
+                    over "follower_03_middle_verticle_1"
+                    {
+                    }
+                }
+
+                over "Joint1" (
+                    delete apiSchemas = ["PhysicsDriveAPI:angular", "PhysicsJointStateAPI:angular"]
+                    prepend apiSchemas = ["MjcJointAPI"]
+                )
+                {
+                    uniform double mjc:armature = 0.1
+                    uniform double mjc:frictionloss = 0.1
+                }
+
+                over "follower_02_base_tilt_Revised"
+                {
+                }
+
+                over "follower_02_base_tilt_Revised_1"
+                {
+                }
+            }
+
+            over "PhysicsFixedJoint"
+            {
+            }
+
+            over "follower_01_base"
+            {
+            }
+
+            over "follower_01_base_1"
+            {
+            }
+        }
+    }
+
+    over "Physics"
+    {
+        over "PhysicsMaterial" (
+            prepend apiSchemas = ["MjcMaterialAPI"]
+        )
+        {
+        }
+
+        def MjcActuator "Joint1"
+        {
+            uniform double[] mjc:biasPrm = [0, -50, 1, 0, 0, 0, 0, 0, 0, 0]
+            uniform token mjc:biasType = "affine"
+            uniform double mjc:forceRange:max = 3.5
+            uniform double mjc:forceRange:min = -3.5
+            uniform double[] mjc:gainPrm = [50, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+            uniform double mjc:inheritRange = 1
+            custom rel mjc:target
+            prepend rel mjc:target = </tn__omxscene_h8/Geometry/link0/link1/Joint1>
+        }
+
+        def MjcActuator "Joint2"
+        {
+            uniform double[] mjc:biasPrm = [0, -50, 1, 0, 0, 0, 0, 0, 0, 0]
+            uniform token mjc:biasType = "affine"
+            uniform double mjc:forceRange:max = 3.5
+            uniform double mjc:forceRange:min = -3.5
+            uniform double[] mjc:gainPrm = [50, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+            uniform double mjc:inheritRange = 1
+            custom rel mjc:target
+            prepend rel mjc:target = </tn__omxscene_h8/Geometry/link0/link1/link2/Joint2>
+        }
+
+        def MjcActuator "Joint3"
+        {
+            uniform double[] mjc:biasPrm = [0, -50, 1, 0, 0, 0, 0, 0, 0, 0]
+            uniform token mjc:biasType = "affine"
+            uniform double mjc:forceRange:max = 3.5
+            uniform double mjc:forceRange:min = -3.5
+            uniform double[] mjc:gainPrm = [50, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+            uniform double mjc:inheritRange = 1
+            custom rel mjc:target
+            prepend rel mjc:target = </tn__omxscene_h8/Geometry/link0/link1/link2/link3/Joint3>
+        }
+
+        def MjcActuator "Joint4"
+        {
+            uniform double[] mjc:biasPrm = [0, -50, 1, 0, 0, 0, 0, 0, 0, 0]
+            uniform token mjc:biasType = "affine"
+            uniform double mjc:forceRange:max = 3.5
+            uniform double mjc:forceRange:min = -3.5
+            uniform double[] mjc:gainPrm = [50, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+            uniform double mjc:inheritRange = 1
+            custom rel mjc:target
+            prepend rel mjc:target = </tn__omxscene_h8/Geometry/link0/link1/link2/link3/link4/Joint4>
+        }
+
+        def MjcActuator "Joint5"
+        {
+            uniform double[] mjc:biasPrm = [0, -50, 1, 0, 0, 0, 0, 0, 0, 0]
+            uniform token mjc:biasType = "affine"
+            uniform double mjc:forceRange:max = 3.5
+            uniform double mjc:forceRange:min = -3.5
+            uniform double[] mjc:gainPrm = [50, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+            uniform double mjc:inheritRange = 1
+            custom rel mjc:target
+            prepend rel mjc:target = </tn__omxscene_h8/Geometry/link0/link1/link2/link3/link4/link5/Joint5>
+        }
+
+        def MjcActuator "Gripper"
+        {
+            uniform double[] mjc:biasPrm = [0, -50, 1, 0, 0, 0, 0, 0, 0, 0]
+            uniform token mjc:biasType = "affine"
+            uniform double mjc:forceRange:max = 3.5
+            uniform double mjc:forceRange:min = -3.5
+            uniform double[] mjc:gainPrm = [50, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+            uniform double mjc:inheritRange = 1
+            custom rel mjc:target
+            prepend rel mjc:target = </tn__omxscene_h8/Geometry/link0/link1/link2/link3/link4/link5/link6/Gripper>
+        }
+    }
+
+    over "Materials"
+    {
+        over "groundplane"
+        {
+        }
+    }
+
+    over "VisualMaterials"
+    {
+    }
+}
+
+over "PhysicsScene" (
+    prepend apiSchemas = ["MjcSceneAPI"]
+)
+{
+    uniform token mjc:compiler:angle = "radian"
+    uniform bool mjc:flag:multiccd = 0
+    uniform token mjc:option:cone = "elliptic"
+    uniform double mjc:option:impratio = 10
+}

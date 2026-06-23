@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{ title }}</title>
+    <link rel="icon" href="/favicon.ico" />
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="page equipment-setup-page printer-page vision-utm-page">
+      <header class="page-header printer-header">
+        <div>
+          <p class="eyebrow">Device Workspace</p>
+          <h1>Vision Camera Device Bridge</h1>
+          <p class="subtitle">Camera profile, UTM ROS runtime, frame evidence, and checkerboard calibration for the Vision Agent.</p>
+        </div>
+        <div class="header-actions">
+          <a class="btn" href="/" target="_self">Main GUI</a>
+          <a class="btn" href="/live" target="_blank" rel="noopener">Live GUI</a>
+        </div>
+      </header>
+
+      <section class="panel workspace-status-grid vision-camera-status-grid">
+        <article class="status-card">
+          <div class="status-head">
+            <span class="status-title">Camera Config</span>
+            <span id="vision-camera-config-dot" class="status-dot idle"></span>
+          </div>
+          <strong id="vision-camera-config-label">Loading</strong>
+          <p id="vision-camera-config-detail">Reading saved Camera profile.</p>
+        </article>
+        <article class="status-card">
+          <div class="status-head">
+            <span class="status-title">Runtime</span>
+            <span id="vision-camera-runtime-dot" class="status-dot idle"></span>
+          </div>
+          <strong id="vision-camera-runtime-label">Unknown</strong>
+          <p id="vision-camera-runtime-detail">UTM ROS runtime status has not been checked.</p>
+        </article>
+        <article class="status-card">
+          <div class="status-head">
+            <span class="status-title">Calibration</span>
+            <span id="vision-camera-calibration-dot" class="status-dot idle"></span>
+          </div>
+          <strong id="vision-camera-calibration-label">Stopped</strong>
+          <p id="vision-camera-calibration-detail">Checkerboard calibration GUI is stopped.</p>
+        </article>
+      </section>
+
+      <section class="panel equipment-command-panel vision-camera-command-panel">
+        <div class="equipment-command-banner" id="vision-camera-command-banner">
+          <div>
+            <span class="eyebrow">Operator Controls</span>
+            <strong id="vision-camera-command-title">Ready for Camera bridge setup</strong>
+            <p id="vision-camera-command-detail">Use Pre Start Check to collect config, device discovery, runtime graph, and latest frame evidence in one pass.</p>
+          </div>
+          <span id="vision-camera-command-pill" class="badge idle">idle</span>
+        </div>
+        <div class="button-row compact-tools vision-camera-button-row">
+          <button id="btn-vision-camera-load" class="btn" type="button">Load Config</button>
+          <button id="btn-vision-camera-devices" class="btn" type="button">Detect Devices</button>
+          <button id="btn-vision-camera-apply" class="btn primary" type="button">Apply Camera</button>
+          <button id="btn-vision-camera-precheck" class="btn primary" type="button">Pre Start Check</button>
+          <button id="btn-vision-camera-runtime-start" class="btn" type="button">ROS Loading</button>
+          <button id="btn-vision-camera-runtime-stop" class="btn danger" type="button">ROS Unloading</button>
+          <button id="btn-vision-camera-cleanup" class="btn" type="button">Release Camera Ports</button>
+          <button id="btn-vision-camera-calibrate" class="btn" type="button">Calibrate</button>
+          <button id="btn-vision-camera-calibrate-stop" class="btn danger" type="button">Stop Calibrate</button>
+        </div>
+      </section>
+
+      <section class="panel equipment-setup-grid printer-setup-grid vision-camera-grid">
+        <article class="printer-card vision-camera-form-card">
+          <div class="panel-title-row">
+            <h2>Camera Profile</h2>
+            <span class="hint">saved to memory/device_bridge</span>
+          </div>
+          <div class="settings-grid vision-camera-settings-grid">
+            <label>Device path<input id="vision-camera-device-path" class="text-input" /></label>
+            <label>Width<input id="vision-camera-width" class="text-input" type="number" min="160" /></label>
+            <label>Height<input id="vision-camera-height" class="text-input" type="number" min="120" /></label>
+            <label>FPS<input id="vision-camera-fps" class="text-input" type="number" min="1" /></label>
+            <label>Pixel format<input id="vision-camera-pixel-format" class="text-input" /></label>
+            <label>Brightness<input id="vision-camera-brightness" class="text-input" type="number" min="-1" max="255" /></label>
+            <label>Gain<input id="vision-camera-gain" class="text-input" type="number" min="-1" max="255" /></label>
+            <label>Checkerboard size<input id="vision-camera-checkerboard-size" class="text-input" placeholder="9x6" /></label>
+            <label>Square size m<input id="vision-camera-checkerboard-square" class="text-input" type="number" step="0.001" min="0.0001" /></label>
+            <label>Calibration YAML<input id="vision-camera-calibration-file" class="text-input" placeholder="optional" /></label>
+          </div>
+        </article>
+
+        <article class="printer-card vision-camera-devices-card">
+          <div class="panel-title-row">
+            <h2>Detected Cameras</h2>
+            <span class="hint">V4L2 by-id candidates</span>
+          </div>
+          <div id="vision-camera-devices" class="equipment-candidates">No device scan yet.</div>
+        </article>
+      </section>
+
+      <section class="panel vision-camera-evidence-grid">
+        <article class="printer-card vision-camera-frame-card">
+          <div class="panel-title-row vision-camera-frame-title-row">
+            <div class="vision-camera-frame-title-main">
+              <h2>Live Frame Evidence</h2>
+              <span id="vision-camera-frame-meta" class="hint">No frame captured.</span>
+            </div>
+            <div class="vision-camera-frame-controls" aria-label="Live frame stream controls">
+              <span id="vision-camera-frame-stream-status" class="badge idle">stopped</span>
+              <button id="btn-vision-camera-frame-play" class="btn primary" type="button">Play Live</button>
+              <button id="btn-vision-camera-frame-stop" class="btn" type="button" disabled>Stop Live</button>
+            </div>
+          </div>
+          <div id="vision-camera-frame" class="vision-camera-frame-placeholder">Frame evidence waits for Pre Start Check or runtime frame probe.</div>
+        </article>
+        <article class="printer-card vision-camera-graph-card">
+          <div class="panel-title-row">
+            <h2>RQT flow from cloned UTM program</h2>
+            <span id="vision-camera-graph-meta" class="hint">Loading UTM runtime graph.</span>
+          </div>
+          <div id="vision-camera-graph" class="utm-rqt-flow vision-camera-rqt-flow">No graph evidence yet.</div>
+        </article>
+      </section>
+
+      <section class="panel">
+        <div class="panel-title-row">
+          <h2>Bridge Result</h2>
+          <span class="hint">last callback payload</span>
+        </div>
+        <pre id="vision-camera-result-log" class="equipment-result-log">{}</pre>
+      </section>
+    </main>
+    <script src="/static/vision_utm_device_bridge.js" defer></script>
+  </body>
+</html>

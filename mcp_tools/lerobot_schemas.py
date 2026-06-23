@@ -48,6 +48,7 @@ class RobotProfile(BaseModel):
     camera_map: dict[str, str] = Field(default_factory=dict)
     fps: int = 30
     observation_schema: str = ""
+    observation_pipeline_id: str = ""
     action_schema: str = ""
     safety_limits: dict[str, Any] = Field(default_factory=dict)
     command_templates: dict[str, list[str]] = Field(default_factory=dict)
@@ -61,10 +62,23 @@ class LeRobotBaseRequest(BaseModel):
     mode: RuntimeMode = "test"
     runtime_mode: RuntimeMode | None = None
     profile_id: str = ""
+    observation_pipeline_id: str = ""
     session_id: str = ""
     fault: str = ""
     dry_run: bool = True
     confirm_live_execute: bool = False
+    isaac_mirror_enabled: bool = False
+    isaac_mirror_endpoint: str = "http://127.0.0.1:8766/joints"
+    isaac_mirror_sample_hz: float = 15.0
+    isaac_mirror_timeout_s: float = 0.5
+    isaac_mirror_max_samples: int | None = None
+    isaac_mirror_record_path: str = ""
+    isaac_mirror_attached_to_session_id: str = ""
+    isaac_mirror_receiver_launch_mode: str = "isaac_extension"
+    isaac_mirror_receiver_isaac_sim_executable: str = ""
+    isaac_mirror_receiver_python: str = ""
+    isaac_mirror_receiver_scene: str = ""
+    isaac_mirror_receiver_start_timeout_s: float | None = None
 
 
 class LeRobotSessionRequest(LeRobotBaseRequest):
@@ -107,6 +121,8 @@ class LeRobotSessionRequest(LeRobotBaseRequest):
     wandb_enable: bool = False
     wandb_project: str = ""
     wandb_mode: str = "disabled"
+    wandb_base_url: str = ""
+    wandb_local_port: int = 8081
     train_extra_args: list[str] = Field(default_factory=list)
     fps: int | None = None
     camera_fps: int | None = None

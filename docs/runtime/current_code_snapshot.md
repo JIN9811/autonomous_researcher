@@ -137,7 +137,7 @@ verification did not change the DSN/design-window layout contract.
 | Runtime graph/module APIs | `graphs/*`, `app/main.py` | Graph, module, handler, dry-run, version, run gates |
 | Live planning APIs | `app/controller.py`, `app/main.py` | Chat/session transcript and orchestrator handoff |
 | Printer APIs/artifacts | `device_bridges/bambu_*`, `device_bridges/prusa_bridge.py`, `app/main.py` | 3DP provider fleet, Bambu/Prusa status, slicing, start, autoejection, proof, Bambu HTTP artifact fetch route |
-| LeRobot APIs | `device_bridges/lerobot_bridge.py`, `app/main.py` | ROBOTIS/LeRobot teleop, record, train, rollout, manipulation bridge |
+| LeRobot APIs | `device_bridges/lerobot_bridge.py`, `app/main.py` | ROBOTIS/LeRobot teleop, record, train, rollout, manipulation bridge, Isaac Sim mirror-state probe and mirror loop |
 | Windows equipment APIs | `device_bridges/windows_pyautogui_bridge.py`, `app/main.py` | Windows PyAutoGUI/UTM bridge discovery, proof, execution |
 | BO/CAE APIs | `agents/bo_agent.py`, `device_bridges/cae_bridge.py` | Optimizer and analysis workspaces |
 | Knowledge/Evolution APIs | `knowledge/`, `self_evolution/`, `app/main.py` | Graphify/Neo4j optional memory and self-evolution tasks |
@@ -159,6 +159,52 @@ Current LeRobot bridge behavior:
 - Rollout/inference normalizes selected local policy files or output folders to
   the executable LeRobot `pretrained_model` checkpoint directory before command
   construction.
+- Isaac Sim mirror mode is read-only with respect to the physical robot. `/api/lerobot/mirror/joint-mapping`
+  returns the static follower-ID to Isaac-joint contract for
+  `sim/robotis_omx/scene/omx_table_layout.usda`; `/api/lerobot/mirror/state-probe`
+  reads follower `Present_Position` through the saved follower port and closes
+  the Dynamixel bus without launching teleop/record/train/rollout;
+  `/api/lerobot/mirror/receiver-health` checks the configured Isaac receiver
+  `/health` endpoint before synchronized live execution; `/api/lerobot/mirror/receiver-verify`
+  posts one bounded sample and checks receiver `/state.last_payload_summary`
+  against the just-created mirror session/sample.
+- `/api/lerobot/mirror/receiver-process/start`, `/api/lerobot/mirror/receiver-process/status`,
+  and `/api/lerobot/mirror/receiver-process/stop` manage the local
+  Isaac receiver process for the configured host/port. The production default
+  launches `/home/jin/IsaacSim/isaac-sim.sh` with
+  `--ext-folder sim/robotis_omx/extensions --enable atr.omx.mirror`, so
+  `sim/robotis_omx/extensions/atr.omx.mirror` hosts the HTTP receiver inside
+  Isaac Sim, opens `sim/robotis_omx/scene/omx_table_layout.usda`, starts the
+  Isaac timeline, and applies queued samples on Kit update ticks. The scene has
+  a physics-lite contract: `/World/PhysicsScene`, static colliders for the table,
+  A4 sheet, and right disk, plus a dynamic `RedSpecimenBlock` rigid body. The
+  receiver `/state.last_apply_result.stage_summary` reports `physics_ready`,
+  physics-scene paths, collision paths, and rigid-body paths so physical
+  teleop/record mirror runs can prove that the visible stage is not a
+  visual-only layout. The direct
+  `sim/robotis_omx/tools/isaac_omx_mirror_server.py` Python launch remains a
+  smoke-test path when `isaac_mirror_receiver_python` is explicitly supplied.
+  The start call waits for `/health` and returns process evidence; stop only
+  terminates the managed receiver process.
+- `/api/lerobot/mirror/loop/start`, `/api/lerobot/mirror/loop/status`, and
+  `/api/lerobot/mirror/loop/stop` manage workflow `isaac_mirror`. The loop
+  samples follower state, POSTs it to the configured Isaac endpoint, and writes
+  JSONL evidence to `runs/isaac_mirror_sessions/<session_id>.jsonl` for standalone
+  runs. Teleop and record starts can attach the loop through
+  `isaac_mirror_enabled=true`; stopping the parent teleop/record session stops
+  the attached mirror loop. Record-attached mirror loops default to
+  `<dataset_path>/sidecar/isaac_mirror/<record_session_id>.jsonl` and update
+  `<dataset_path>/meta/atr_pipeline.json` with `isaac_mirror` session/path
+  metadata plus `sync_summary` and `receiver_state_at_stop` when receiver
+  `/state` is available at record stop. Each JSONL row includes per-sample
+  `sync_metrics` such as target Hz, loop lag, POST latency, receiver status, and
+  receiver sample count when available. The mirrored source is the measured
+  follower state, not policy inference output. In live teleop/record with mirror enabled, receiver health
+  failure returns `LEROBOT_ISAAC_MIRROR_RECEIVER_UNAVAILABLE` before the LeRobot
+  subprocess is started. A reachable receiver that reports
+  `apply_mode=direct_http_thread` is also blocked for live teleop/record with
+  `LEROBOT_ISAAC_MIRROR_RECEIVER_NOT_IN_ISAAC_UPDATE_TICK`, because that path
+  does not prove in-process visible-stage mirroring.
 - Pi0.5 rollout runs through `scripts/lerobot_pi05_rollout_wrapper.py` in
   `lerobot-pi05-torch211` and injects
   `--robot.disable_torque_on_disconnect=false` for the ROBOTIS OMX-AI follower.

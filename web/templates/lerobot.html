@@ -25,7 +25,7 @@ Modification guide:
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>{{ title }}</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
-    <link rel="stylesheet" href="/static/styles.css?v=20260617-realsense-camera-fps-15-2" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260623-isaac-mirror-1" />
   </head>
   <body>
     <main class="page lerobot-page">
@@ -65,6 +65,7 @@ Modification guide:
       <nav class="panel lerobot-quick-nav" aria-label="LeRobot workspace navigation">
         <a href="#profile-execution">Profile</a>
         <a href="#device-port-setup">Devices</a>
+        <a href="#isaac-mirror-card">Isaac Mirror</a>
         <a href="#local-paths">Paths</a>
         <a href="#teleoperation-card">Teleop</a>
         <a href="#recording-card">Record</a>
@@ -93,6 +94,10 @@ Modification guide:
           <label>
             Profile
             <select id="lerobot-profile-select"></select>
+          </label>
+          <label>
+            Observation Pipeline
+            <select id="lerobot-observation-pipeline-select" title="Choose how RGB-D observations are recorded and reused by training/rollout."></select>
           </label>
           <label>
             Control FPS
@@ -185,6 +190,52 @@ Modification guide:
         <div id="lerobot-camera-preview" class="lerobot-camera-preview">No camera capture yet.</div>
       </details>
 
+      <section id="isaac-mirror-card" class="panel lerobot-card">
+        <div class="panel-title-row">
+          <h2>Isaac Sim Mirror</h2>
+          <span class="hint">teleop follower-state synchronization</span>
+        </div>
+        <p class="subhead">
+          Mirror the real follower arm joint state into the Isaac Sim OMX scene during teleoperation or recording. The source is the follower's measured state, not policy inference output.
+        </p>
+        <div class="control-grid compact-grid">
+          <label class="checkbox-label">
+            <input id="lerobot-isaac-mirror-enabled-input" type="checkbox" checked />
+            Attach mirror loop to teleop / record
+          </label>
+          <label>
+            Isaac Endpoint
+            <input id="lerobot-isaac-mirror-endpoint-input" type="text" value="http://127.0.0.1:8766/joints" />
+          </label>
+          <label>
+            Mirror Hz
+            <input id="lerobot-isaac-mirror-hz-input" type="number" min="0.1" max="120" step="0.1" value="15" />
+          </label>
+          <label>
+            Timeout s
+            <input id="lerobot-isaac-mirror-timeout-input" type="number" min="0.05" max="10" step="0.05" value="0.5" />
+          </label>
+          <label>
+            Max Samples
+            <input id="lerobot-isaac-mirror-max-samples-input" type="number" min="1" step="1" placeholder="blank = until stop" />
+          </label>
+        </div>
+        <div class="button-row">
+          <button id="btn-isaac-mirror-map" class="btn">Load Joint Mapping</button>
+          <button id="btn-isaac-mirror-receiver-start" class="btn primary">Launch Isaac Receiver</button>
+          <button id="btn-isaac-mirror-receiver-status" class="btn">Receiver Status</button>
+          <button id="btn-isaac-mirror-receiver-stop" class="btn danger">Stop Receiver</button>
+          <button id="btn-isaac-mirror-health" class="btn">Receiver Health</button>
+          <button id="btn-isaac-mirror-verify" class="btn primary">Verify E2E Sample</button>
+          <button id="btn-isaac-mirror-probe" class="btn primary">Probe Follower State</button>
+          <button id="btn-isaac-mirror-loop-start" class="btn primary">Start Mirror Loop</button>
+          <button id="btn-isaac-mirror-loop-status" class="btn">Mirror Status</button>
+          <button id="btn-isaac-mirror-loop-stop" class="btn danger">Stop Mirror Loop</button>
+        </div>
+        <div id="lerobot-isaac-mirror-action-status" class="lerobot-action-status idle">Waiting for Isaac mirror action.</div>
+        <div id="lerobot-isaac-mirror-output" class="lerobot-data-panel">No mirror data yet.</div>
+      </section>
+
       <section id="local-paths" class="panel lerobot-path-panel">
         <div class="panel-title-row">
           <h2>3. Local Paths</h2>
@@ -201,14 +252,14 @@ Modification guide:
           <label>
             Dataset Repo ID / Local Name
             <span class="input-action-row">
-              <input id="lerobot-dataset-input" type="text" value="jin/record-test" placeholder="jin/record-test" />
+              <input id="lerobot-dataset-input" type="text" placeholder="jin/YYYYMMDD_1" />
               <button id="btn-browse-dataset-repo" class="btn mini" type="button">Browse</button>
             </span>
           </label>
           <label>
             Policy / Output Root
             <span class="input-action-row">
-              <input id="lerobot-output-dir-input" type="text" placeholder="outputs/train/atr_lerobot_train" />
+              <input id="lerobot-output-dir-input" type="text" placeholder="outputs/train/YYYYMMDD_1_train" />
               <button id="btn-browse-output-dir" class="btn mini" type="button">Browse</button>
             </span>
           </label>
@@ -255,11 +306,11 @@ Modification guide:
           <div class="lerobot-form-grid">
             <label>
               Task Instruction
-              <input id="lerobot-task-input" type="text" value="Pick up the cylinder" />
+              <input id="lerobot-task-input" type="text" value="Pick up the cube and place it" />
             </label>
             <label>
               Episodes
-              <input id="lerobot-episodes-input" type="number" min="1" value="5" />
+              <input id="lerobot-episodes-input" type="number" min="1" value="60" />
             </label>
             <label>
               Episode Time (s)
@@ -404,7 +455,7 @@ Modification guide:
             <span class="hint">policy checkpoint · GPU job</span>
           </div>
           <div class="lerobot-card-note">
-            Core settings match the practical LeRobot train command. Advanced optimizer, scheduler, policy, and WandB options stay available below without crowding the default path.
+            Core settings match the practical LeRobot train command. Pi0.5 uses <code>lerobot/pi05_base</code>; X-VLA uses <code>lerobot/xvla-base</code>; SmolVLA uses <code>lerobot/smolvla_base</code>. Advanced optimizer, scheduler, policy, and WandB options stay available below without crowding the default path.
           </div>
           <div class="lerobot-form-grid train-form-grid train-core-grid">
             <label>
@@ -412,20 +463,21 @@ Modification guide:
               <select id="lerobot-policy-type-input">
                 <option value="act">act</option>
                 <option value="diffusion">diffusion</option>
-                <option value="smolvla">smolvla</option>
+                <option value="smolvla" selected>smolvla (SmolVLA)</option>
                 <option value="pi0">pi0</option>
-                <option value="pi05" selected>pi05 (Pi0.5)</option>
+                <option value="pi05">pi05 (Pi0.5)</option>
                 <option value="pi0fast">pi0fast</option>
+                <option value="xvla">xvla (X-VLA)</option>
                 <option value="vqbet">vqbet</option>
               </select>
             </label>
             <label>
               Train Source Policy / HF Base
-              <input id="lerobot-train-source-policy-input" type="text" value="lerobot/pi05_base" placeholder="lerobot/pi05_base" />
+              <input id="lerobot-train-source-policy-input" type="text" value="lerobot/smolvla_base" placeholder="lerobot/smolvla_base" />
             </label>
             <label>
               Job Name
-              <input id="lerobot-job-name-input" type="text" value="atr_lerobot_pi05_train" />
+              <input id="lerobot-job-name-input" type="text" placeholder="YYYYMMDD_1_train" />
             </label>
             <label>
               Policy Repo ID
@@ -553,8 +605,19 @@ Modification guide:
                 <option value="">default</option>
                 <option value="disabled">disabled</option>
                 <option value="offline" selected>offline</option>
+                <option value="local">local server</option>
                 <option value="online">online</option>
               </select>
+            </label>
+            <label>
+              WandB Local Server
+              <span class="input-action-row">
+                <input id="lerobot-train-wandb-base-url-input" type="text" value="http://127.0.0.1:8081" placeholder="http://127.0.0.1:8081" />
+                <button id="btn-wandb-local-start" class="btn mini" type="button">Start</button>
+                <button id="btn-wandb-local-status" class="btn mini" type="button">Status</button>
+                <button id="btn-wandb-local-stop" class="btn mini danger" type="button">Stop</button>
+                <button id="btn-wandb-local-open" class="btn mini" type="button">Open</button>
+              </span>
             </label>
             <label class="planning-message-label train-extra-args">
               Additional Train CLI Args
@@ -565,6 +628,7 @@ Modification guide:
               <label class="checkbox-line"><input id="lerobot-train-use-amp-input" type="checkbox" /> policy.use_amp</label>
               <label class="checkbox-line"><input id="lerobot-train-wandb-input" type="checkbox" checked /> wandb.enable</label>
             </div>
+            <div id="lerobot-wandb-action-status" class="lerobot-action-status idle">Waiting for W&B local server action.</div>
           </details>
           <div id="lerobot-train-progress" class="lerobot-training-progress hidden">
             <div class="training-progress-head">
@@ -594,6 +658,19 @@ Modification guide:
               <select id="lerobot-policy-select"></select>
             </label>
             <label>
+              Rollout Policy Type
+              <select id="lerobot-rollout-policy-type-input">
+                <option value="act">act</option>
+                <option value="diffusion">diffusion</option>
+                <option value="smolvla" selected>smolvla (SmolVLA)</option>
+                <option value="pi0">pi0</option>
+                <option value="pi05">pi05 (Pi0.5)</option>
+                <option value="pi0fast">pi0fast</option>
+                <option value="xvla">xvla (X-VLA)</option>
+                <option value="vqbet">vqbet</option>
+              </select>
+            </label>
+            <label>
               Rollout Policy Checkpoint / Output File
               <span class="input-action-row">
                 <input id="lerobot-rollout-policy-input" type="text" placeholder="outputs/train/.../checkpoints/last/pretrained_model or model.safetensors" />
@@ -603,7 +680,7 @@ Modification guide:
             </label>
             <label>
               Rollout Task Instruction
-              <textarea id="lerobot-rollout-instruction-input" rows="3" placeholder="e.g. Pick up the cube and place it in the target area.">Pick up the cube and put on the metal plate</textarea>
+              <textarea id="lerobot-rollout-instruction-input" rows="3" placeholder="e.g. Pick up the cube and place it in the target area.">Pick up the cube and place it</textarea>
             </label>
             <label>
               Rollout Duration Seconds (optional)
@@ -691,6 +768,8 @@ Modification guide:
               Policy Type
               <select id="lerobot-manipulation-policy-type-input">
                 <option value="pi05" selected>pi05</option>
+                <option value="xvla">xvla</option>
+                <option value="smolvla">smolvla</option>
                 <option value="act">act</option>
               </select>
             </label>
@@ -786,6 +865,6 @@ Modification guide:
         </article>
       </section>
     </main>
-    <script src="/static/lerobot.js?v=20260617-realsense-camera-fps-15-2" defer></script>
+    <script src="/static/lerobot.js?v=20260623-isaac-mirror-1" defer></script>
   </body>
 </html>

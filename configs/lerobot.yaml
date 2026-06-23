@@ -27,6 +27,8 @@ lerobot:
   conda_env_name: lerobot
   conda_executable: conda
   pi05_conda_env_name: lerobot-pi05-torch211
+  xvla_conda_env_name: lerobot-pi05-torch211
+  smolvla_conda_env_name: lerobot-pi05-torch211
   pi05_repo_root: ~/lerobot_pi05
   pi05_hf_home: ~/.cache/huggingface_pi05
   train_video_backend: torchcodec
@@ -34,6 +36,15 @@ lerobot:
   pi05_video_backend: torchcodec
   hf_token_path: ~/.cache/huggingface/token
   pi05_base_policy: lerobot/pi05_base
+  xvla_base_policy: lerobot/xvla-base
+  smolvla_base_policy: lerobot/smolvla_base
+  wandb_local_port: 8081
+  wandb_local_base_url: http://127.0.0.1:8081
+  realsense_depth_align_to_color: true
+  realsense_depth_scale_m_per_unit: 0.001
+  realsense_depth_clip_min_mm: 0.0
+  realsense_depth_clip_max_mm: 2000.0
+  default_observation_pipeline_id: raw_depth_adapter
   tts_engine: piper
   tts_rate: -35
   tts_voice: en_US-lessac-medium
@@ -55,6 +66,17 @@ lerobot:
       value: lerobot/pi05_base
       repo_id: lerobot/pi05_base
       source: huggingface
+      policy_type: pi05
+    - label: X-VLA base
+      value: lerobot/xvla-base
+      repo_id: lerobot/xvla-base
+      source: huggingface
+      policy_type: xvla
+    - label: SmolVLA base
+      value: lerobot/smolvla_base
+      repo_id: lerobot/smolvla_base
+      source: huggingface
+      policy_type: smolvla
     - label: Pi0 base
       value: lerobot/pi0_base
       repo_id: lerobot/pi0_base
@@ -81,6 +103,7 @@ lerobot:
         wrist: wrist_camera
       fps: 15
       observation_schema: lerobot_omx_v1
+      observation_pipeline_id: raw_depth_adapter
       action_schema: lerobot_omx_v1
       safety_limits:
         live_enabled: true
@@ -119,6 +142,7 @@ lerobot:
         wrist: wrist_camera
       fps: 30
       observation_schema: lerobot_so101_v1
+      observation_pipeline_id: legacy_lerobot
       action_schema: lerobot_so101_v1
       safety_limits:
         live_enabled: false

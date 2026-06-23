@@ -223,6 +223,26 @@ devices:
     mode: simulator
     endpoint: local
 
+  utm_vision_runtime:
+    enabled: true
+    # Source-of-truth UTM ROS workspace cloned from https://github.com/hylee12345/UTM.
+    # The RQT-like GUI graph follows this repository's launch/scripts flow.
+    workspace_root: /home/jin/external_repos/UTM
+    script_path: /home/jin/external_repos/UTM/scripts/start_utm_vision_stack.sh
+    log_dir: artifacts/utm_runtime
+    stop_timeout_sec: 5.0
+    probe_timeout_sec: 2.0
+    summary_topic: /compression_tester/summary
+    frame_topic: /image_utm
+    ros_setup_paths:
+      - /opt/ros/jazzy/setup.bash
+    extra_setup_paths:
+      - /home/jin/external_repos/UTM/install/setup.bash
+      - /home/jin/external_repos/yolo_ros/install/setup.bash
+    environment:
+      YOLO_MODEL_PATH: /home/jin/external_repos/yolo_ros/models/yolov8m.pt
+    allow_virtual_bridge_in_test: true
+
   cae:
     enabled: true
     mode: test                    # test | live

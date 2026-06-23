@@ -156,7 +156,7 @@ dispatch -> idle -> design -> specimen -> vision -> manipulation -> equipment ->
 
 | 페이지 | 경로 | 템플릿 | 목적 | 주요 API |
 |---|---:|---|---|---|
-| 메인 대시보드 | `/` | `index.html` | 전체 런타임 상태, 모델/런 제어, 장비 카드, Timeline, 이벤트 | `/api/state`, `/api/runtime/state`, `/api/runtime/start`, `/api/runtime/pause`, `/api/runtime/stop`, `/api/runtime/models*`, `/api/runtime/events` |
+| 메인 대시보드 | `/` | `index.html` | 전체 런타임 상태, 모델/런 제어, 장비 카드, Timeline, 이벤트, UTM ROS runtime card | `/api/state`, `/api/runtime/state`, `/api/runtime/start`, `/api/runtime/pause`, `/api/runtime/stop`, `/api/runtime/models*`, `/api/runtime/events`, `/api/equipment/utm-runtime/*` |
 | 라이브 오케스트레이션 | `/live` | `planning.html` | 채팅 기반 실험 지시, planning handoff, stage 메시지/아티팩트 표시 | `/api/planning/bootstrap`, `/api/planning/message`, `/api/planning/session`, `/api/planning/artifacts/{...}` |
 | 라이브(레거시) | `/planning` | `planning.html` | `/live` 별칭 | 동일 |
 | 3DP/Printer GUI | `/printer` | `printer.html` | Bambu Lab X2D 기본 device bridge, 명시적 printer fleet 선택, connection, live video probe/proxy, Bambu Studio slicing, sliced artifact route, pre-start checklist, start gate, guarded MQTT start publish, SPC readiness, autoejection gate 확인, physical proof package 감사 | `/api/printer/fleet`, `/api/printer/profile`, `/api/printer/status`, `/api/printer/video-status`, `/api/printer/video-stream.mjpeg`, `/api/printer/connection`, `/api/printer/upload-path-probe`, `/api/printer/bambu-slice-artifact`, `/api/printer/http-artifact-route`, `/api/printer/bambu-prestart-check`, `/api/printer/start-command-draft`, `/api/printer/start-gate`, `/api/printer/start-publish`, `/api/printer/spc-readiness`, `/api/printer/autoejection-status`, `/api/printer/autoejection-config`, `/api/printer/autoejection-test`, `/api/printer/bambu-autoejection-patch`, `/api/printer/bambu-autoejection-sweep-test`, `/api/printer/bed-clear`, `/api/printer/bambu-autoejection-proof-template`, `/api/printer/bambu-autoejection-completion-audit` |
@@ -166,7 +166,7 @@ dispatch -> idle -> design -> specimen -> vision -> manipulation -> equipment ->
 | Module Management | `/module-management` | `module_management.html` | 모듈 로드·언로드·검증·버전 저장, draft module 생성, `ui.yaml` descriptor 관리, handler/LLM/tool/prompt/safety/step typed edit, raw JSON edit | `/api/modules*`, `/api/modules/templates/*`, `/api/modules/{id}/ui`, `/api/runtime/agent-manifests`, `/api/bridges`, `/api/handlers` |
 | Self-Evolution Lab | `/evolution-lab` | `evolution_lab.html` | 실험 변형/태스크 관리, variant 승인/롤백 | `/api/evolution/*` (설정/작업/태스크/variant) |
 | Windows 장비 브릿지 | `/equipment/windows` | `windows_equipment.html` | Windows PyAutoGUI 브릿지 후보 검색/선택/프로그램 실행 | `/api/equipment/windows/config`, `/api/equipment/windows/discover`, `/api/equipment/windows/connect`, `/api/equipment/windows/select`, `/api/equipment/windows/delete`, `/api/equipment/windows/test`, `/api/equipment/windows/run-program` |
-| LeRobot GUI | `/lerobot` | `lerobot.html` | ROBOTIS teleop/record/train/rollout, 포트/카메라 구성, 조작 agent bridge, manipulation 연동 | `/api/lerobot/config`, `/api/lerobot/ports*`, `/api/lerobot/camera/test`, `/api/lerobot/teleoperate/*`, `/api/lerobot/record/*`, `/api/lerobot/train/*`, `/api/lerobot/rollout/*`, `/api/lerobot/manipulation-agent/*` |
+| LeRobot GUI | `/lerobot` | `lerobot.html` | ROBOTIS teleop/record/train/rollout, 포트/카메라 구성, 조작 agent bridge, manipulation 연동, Isaac Sim follower-state probe/receiver process/receiver-health/receiver-verify 및 mirror loop | `/api/lerobot/config`, `/api/lerobot/ports*`, `/api/lerobot/camera/test`, `/api/lerobot/mirror/*`, `/api/lerobot/teleoperate/*`, `/api/lerobot/record/*`, `/api/lerobot/train/*`, `/api/lerobot/rollout/*`, `/api/lerobot/manipulation-agent/*` |
 
 ---
 
@@ -217,6 +217,8 @@ dispatch -> idle -> design -> specimen -> vision -> manipulation -> equipment ->
 - **목적**: 실험장비(Windows 브릿지, UTM 매크로) 제어 handoff
 - **핵심 툴**: `equipment.pyautogui.health`, `equipment.pyautogui.list_programs`, `equipment.pyautogui.run`, `utm.run_protocol`
 - **필수 결과 키**: `equipment_result`, `protocol_note`
+- **UTM ROS evidence provider**: `device_bridges/utm_runtime_bridge.py`는 `/home/jin/external_repos/UTM`의 `start_utm_vision_stack.sh`, `camera_rect.launch.py`, `green_dot_monitor.launch.py`, `yolo.sh` 흐름을 기준으로 `usb_cam -> rectify_node -> green_dot_monitor -> yolov8` RQT-like graph를 만든다. 실제 graph는 ROS2 node/topic introspection으로 읽고, image evidence는 `/api/equipment/utm-runtime/frame`이 `/image_utm`, `/yolo/dbg_image`, `/compression_tester/debug_image`, `/camera/image_rect`, `/camera/image_raw` 순서로 1프레임을 캡처한다.
+- **UTM test/live policy**: test mode에서 ROS topic/frame evidence가 없으면 `vision.equipment_cross_check`가 `virtual_utm_bridge`로 진행하되 fallback trace를 남긴다. live mode에서는 virtual evidence로 physical UTM 완료를 선언하지 않고 operator attention/recovery action으로 남긴다.
 
 ### Analysis Agent (`modules/analysis`, `agent.analysis_agent`)
 - **목적**: Lab Equipment raw UTM artifact를 표준 분석 기록과 BO-ready handoff로 변환

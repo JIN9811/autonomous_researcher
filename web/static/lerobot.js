@@ -22,9 +22,12 @@ Modification guide:
 */
 
 const $ = (id) => document.getElementById(id);
-const DEFAULT_PI05_ROLLOUT_TASK = "Pick up the cube and put on the metal plate";
+const DEFAULT_LEROBOT_TASK_INSTRUCTION = "Pick up the cube and place it";
+const DEFAULT_PI05_ROLLOUT_TASK = DEFAULT_LEROBOT_TASK_INSTRUCTION;
+const DEFAULT_RECORD_NUM_EPISODES = 60;
 
 const profileSelect = $("lerobot-profile-select");
+const observationPipelineSelect = $("lerobot-observation-pipeline-select");
 const modeSelect = $("lerobot-mode-select");
 const fpsInput = $("lerobot-fps-input");
 const cameraFpsInput = $("lerobot-camera-fps-input");
@@ -50,6 +53,7 @@ const pushHubInput = $("lerobot-push-hub-input");
 const policyTypeInput = $("lerobot-policy-type-input");
 const outputDirInput = $("lerobot-output-dir-input");
 const policyInput = $("lerobot-policy-input");
+const rolloutPolicyTypeInput = $("lerobot-rollout-policy-type-input");
 const rolloutPolicyInput = $("lerobot-rollout-policy-input");
 const rolloutInstructionInput = $("lerobot-rollout-instruction-input");
 const rolloutDurationInput = $("lerobot-rollout-duration-input");
@@ -109,6 +113,7 @@ const trainUseAmpInput = $("lerobot-train-use-amp-input");
 const trainWandbInput = $("lerobot-train-wandb-input");
 const trainWandbProjectInput = $("lerobot-train-wandb-project-input");
 const trainWandbModeInput = $("lerobot-train-wandb-mode-input");
+const trainWandbBaseUrlInput = $("lerobot-train-wandb-base-url-input");
 const trainProgressEl = $("lerobot-train-progress");
 const trainProgressLabelEl = $("lerobot-train-progress-label");
 const trainProgressBarEl = $("lerobot-train-progress-bar");
@@ -145,9 +150,20 @@ const manualRoleSelect = $("lerobot-manual-role-select");
 const manualCameraKeyInput = $("lerobot-manual-camera-key-input");
 const portCandidatesEl = $("lerobot-port-candidates");
 const cameraPreviewEl = $("lerobot-camera-preview");
+const isaacMirrorOutputEl = $("lerobot-isaac-mirror-output");
+const isaacMirrorEnabledInput = $("lerobot-isaac-mirror-enabled-input");
+const isaacMirrorEndpointInput = $("lerobot-isaac-mirror-endpoint-input");
+const isaacMirrorHzInput = $("lerobot-isaac-mirror-hz-input");
+const isaacMirrorTimeoutInput = $("lerobot-isaac-mirror-timeout-input");
+const isaacMirrorMaxSamplesInput = $("lerobot-isaac-mirror-max-samples-input");
 
 let lastSessions = [];
 let lastSessionByWorkflow = {};
+let lastConfigPaths = {};
+let lastWorkflowDefaults = {};
+let lastAutoDatasetRepo = "";
+let lastAutoTrainName = "";
+let lastAutoOutputDir = "";
 let lastBrowseTargetInput = null;
 let lastBrowseKind = "any";
 let lastBrowseOptions = {};
@@ -241,6 +257,8 @@ function trainExtraArgs() {
 }
 
 const PI05_BASE_POLICY = "lerobot/pi05_base";
+const XVLA_BASE_POLICY = "lerobot/xvla-base";
+const SMOLVLA_BASE_POLICY = "lerobot/smolvla_base";
 const PI05_TRAIN_EXTRA_DEFAULTS = [
   "--policy.compile_model=true",
   "--policy.gradient_checkpointing=true",
@@ -249,6 +267,21 @@ const PI05_TRAIN_EXTRA_DEFAULTS = [
   "--policy.train_expert_only=false",
 ];
 const PI05_TRAIN_EXTRA_KEYS = PI05_TRAIN_EXTRA_DEFAULTS.map((item) => item.split("=", 1)[0]);
+const XVLA_TRAIN_EXTRA_DEFAULTS = [
+  "--policy.dtype=bfloat16",
+  "--policy.action_mode=auto",
+  "--policy.freeze_vision_encoder=false",
+  "--policy.freeze_language_encoder=false",
+  "--policy.train_policy_transformer=true",
+  "--policy.train_soft_prompts=true",
+];
+const XVLA_TRAIN_EXTRA_KEYS = XVLA_TRAIN_EXTRA_DEFAULTS.map((item) => item.split("=", 1)[0]);
+const SMOLVLA_TRAIN_EXTRA_DEFAULTS = [
+  "--policy.freeze_vision_encoder=true",
+  "--policy.train_expert_only=true",
+  "--policy.train_state_proj=true",
+];
+const SMOLVLA_TRAIN_EXTRA_KEYS = SMOLVLA_TRAIN_EXTRA_DEFAULTS.map((item) => item.split("=", 1)[0]);
 const TRAIN_DEFAULTS = {
   act: {
     source_policy: "",
@@ -283,6 +316,40 @@ const TRAIN_DEFAULTS = {
     wandb_enable: true,
     wandb_mode: "offline",
   },
+  xvla: {
+    source_policy: XVLA_BASE_POLICY,
+    job_name: "atr_lerobot_xvla_train",
+    batch_size: "8",
+    steps: "20000",
+    num_workers: "4",
+    eval_freq: "20000",
+    log_freq: "200",
+    save_freq: "20000",
+    optimizer_type: "",
+    n_obs_steps: "1",
+    chunk_size: "100",
+    n_action_steps: "100",
+    eval_batch_size: "",
+    wandb_enable: false,
+    wandb_mode: "",
+  },
+  smolvla: {
+    source_policy: SMOLVLA_BASE_POLICY,
+    job_name: "atr_lerobot_smolvla_train",
+    batch_size: "8",
+    steps: "20000",
+    num_workers: "4",
+    eval_freq: "20000",
+    log_freq: "200",
+    save_freq: "20000",
+    optimizer_type: "",
+    n_obs_steps: "1",
+    chunk_size: "50",
+    n_action_steps: "50",
+    eval_batch_size: "",
+    wandb_enable: false,
+    wandb_mode: "",
+  },
 };
 const GENERATED_PATH_SUFFIX_RE = /-(?:\d{8}T\d{6}(?:\d{6})?Z)(?:-\d{2})?$/;
 
@@ -298,8 +365,8 @@ function trainNumberValue(el, field, fallback = null) {
 }
 
 const TRAIN_DEFAULT_VALUE_SETS = {
-  source_policy: new Set(["", PI05_BASE_POLICY]),
-  job_name: new Set(["", "atr_lerobot_train", "atr_lerobot_act_train", "atr_lerobot_pi05_train"]),
+  source_policy: new Set(["", PI05_BASE_POLICY, XVLA_BASE_POLICY, SMOLVLA_BASE_POLICY]),
+  job_name: new Set(["", "atr_lerobot_train", "atr_lerobot_act_train", "atr_lerobot_pi05_train", "atr_lerobot_xvla_train", "atr_lerobot_smolvla_train"]),
   batch_size: new Set(["", "2", "4", "8", "16", "32"]),
   steps: new Set(["", "20000", "100000", "3000"]),
   num_workers: new Set(["", "2", "4", "12", "16", "20"]),
@@ -311,8 +378,152 @@ const TRAIN_DEFAULT_VALUE_SETS = {
   chunk_size: new Set(["", "100", "50"]),
   n_action_steps: new Set(["", "100", "50"]),
   eval_batch_size: new Set(["", "1", "2", "4", "8"]),
-  wandb_mode: new Set(["", "disabled", "offline", "online"]),
+  wandb_mode: new Set(["", "disabled", "offline", "local", "online"]),
 };
+
+const LEGACY_DATASET_DEFAULTS = new Set(["", "jin/record-test", "local/fake_lerobot_dataset"]);
+const LEGACY_OUTPUT_DEFAULT_SUFFIXES = [
+  "",
+  "atr_lerobot_train",
+  "atr_lerobot_act_train",
+  "atr_lerobot_pi05_train",
+  "atr_lerobot_xvla_train",
+  "atr_lerobot_smolvla_train",
+];
+const LEGACY_TASK_DEFAULTS = new Set([
+  "",
+  "Pick up the cylinder",
+  "Pick up the cube and put on the metal plate",
+  DEFAULT_LEROBOT_TASK_INSTRUCTION,
+]);
+
+function markUserEdited(input) {
+  if (input) input.dataset.userEdited = "1";
+}
+
+function todayRunNameFallback() {
+  const now = new Date();
+  const yyyy = String(now.getFullYear());
+  const mm = String(now.getMonth() + 1).padStart(2, "0");
+  const dd = String(now.getDate()).padStart(2, "0");
+  return `${yyyy}${mm}${dd}_1`;
+}
+
+function runNameFromDatasetRepo(value) {
+  const clean = String(value || "").trim().replace(/\/+$/, "");
+  if (!clean) return "";
+  const parts = clean.split("/");
+  return parts[parts.length - 1] || "";
+}
+
+function currentTrainPolicySuffix() {
+  const clean = policyTypeInput ? String(policyTypeInput.value || "smolvla").trim().toLowerCase() : "smolvla";
+  return clean.replace(/[^a-z0-9_.-]+/g, "_").replace(/^_+|_+$/g, "") || "smolvla";
+}
+
+function trainNameFromDatasetRepo(value) {
+  const runName = runNameFromDatasetRepo(value) || lastWorkflowDefaults.run_name || todayRunNameFallback();
+  const suffix = currentTrainPolicySuffix();
+  if (/_train\([A-Za-z0-9_.-]+\)$/.test(runName)) return runName.replace(/_train\([A-Za-z0-9_.-]+\)$/, `_train(${suffix})`);
+  if (runName.endsWith("_train")) return `${runName}(${suffix})`;
+  return `${runName}_train(${suffix})`;
+}
+
+function outputDirForTrainName(trainName) {
+  const root = String((lastConfigPaths && lastConfigPaths.output_root) || "").replace(/\/+$/, "");
+  return root ? `${root}/${trainName}` : trainName;
+}
+
+function basenameFromPath(value) {
+  const clean = String(value || "").trim().replace(/\/+$/, "");
+  if (!clean) return "";
+  const parts = clean.split("/");
+  return parts[parts.length - 1] || clean;
+}
+
+function isLegacyOutputDefault(value) {
+  const clean = String(value || "").trim().replace(/\/+$/, "");
+  const base = basenameFromPath(clean);
+  return LEGACY_OUTPUT_DEFAULT_SUFFIXES.includes(clean) || LEGACY_OUTPUT_DEFAULT_SUFFIXES.includes(base);
+}
+
+function isAutoTrainNameDefault(value) {
+  const clean = String(value || "").trim();
+  return TRAIN_DEFAULT_VALUE_SETS.job_name.has(clean) || /^\d{8}_\d+_train(?:\([A-Za-z0-9_.-]+\))?$/.test(clean);
+}
+
+function canReplaceAutoInput(input, legacyPredicate, previousAutoValue = "") {
+  if (!input) return false;
+  const current = String(input.value || "").trim();
+  return !input.dataset.userEdited || current === previousAutoValue || legacyPredicate(current);
+}
+
+function resumeDatasetRequested() {
+  return boolValue(resumeInput);
+}
+
+function resumeTrainingRequested() {
+  return boolValue(trainResumeInput);
+}
+
+function syncTrainNamingFromDataset(options = {}) {
+  if (!datasetInput) return;
+  if (resumeTrainingRequested() && !options.force) return;
+  const force = Boolean(options.force);
+  const datasetRepo = String(datasetInput.value || "").trim() || lastWorkflowDefaults.dataset_repo_id || `jin/${todayRunNameFallback()}`;
+  const trainName = trainNameFromDatasetRepo(datasetRepo);
+  const outputDir = outputDirForTrainName(trainName);
+  if (outputDirInput && (force || canReplaceAutoInput(outputDirInput, isLegacyOutputDefault, lastAutoOutputDir))) {
+    outputDirInput.value = outputDir;
+  }
+  if (jobNameInput && (force || canReplaceAutoInput(jobNameInput, isAutoTrainNameDefault, lastAutoTrainName))) {
+    jobNameInput.value = trainName;
+  }
+  lastAutoDatasetRepo = datasetRepo;
+  lastAutoTrainName = trainName;
+  lastAutoOutputDir = outputDir;
+}
+
+function syncJobNameFromOutputDir(options = {}) {
+  if (!outputDirInput || !jobNameInput) return;
+  if (resumeTrainingRequested() && !options.force) return;
+  const force = Boolean(options.force);
+  const trainName = basenameFromPath(outputDirInput.value);
+  if (!trainName) return;
+  if (force || canReplaceAutoInput(jobNameInput, isAutoTrainNameDefault, lastAutoTrainName)) {
+    jobNameInput.value = trainName;
+    lastAutoTrainName = trainName;
+    lastAutoOutputDir = outputDirInput.value.trim();
+  }
+}
+
+function syncRolloutTaskFromRecordTask(options = {}) {
+  if (!taskInput || !rolloutInstructionInput) return;
+  const force = Boolean(options.force);
+  const recordTask = String(taskInput.value || "").trim() || DEFAULT_LEROBOT_TASK_INSTRUCTION;
+  if (force || canReplaceAutoInput(rolloutInstructionInput, (value) => LEGACY_TASK_DEFAULTS.has(value), lastWorkflowDefaults.rollout_task_instruction || "")) {
+    rolloutInstructionInput.value = recordTask;
+  }
+}
+
+function applyWorkflowDefaults(data) {
+  const defaults = data.workflow_defaults || {};
+  lastWorkflowDefaults = defaults;
+  const datasetRepo = defaults.dataset_repo_id || `jin/${todayRunNameFallback()}`;
+  const resumeDataset = resumeDatasetRequested();
+  const resumeTraining = resumeTrainingRequested();
+  if (!resumeDataset && datasetInput && canReplaceAutoInput(datasetInput, (value) => LEGACY_DATASET_DEFAULTS.has(value), lastAutoDatasetRepo)) {
+    datasetInput.value = datasetRepo;
+  }
+  if (taskInput && canReplaceAutoInput(taskInput, (value) => LEGACY_TASK_DEFAULTS.has(value), DEFAULT_LEROBOT_TASK_INSTRUCTION)) {
+    taskInput.value = defaults.record_task_instruction || DEFAULT_LEROBOT_TASK_INSTRUCTION;
+  }
+  if (episodesInput && canReplaceAutoInput(episodesInput, (value) => ["", "1", "5"].includes(value), String(DEFAULT_RECORD_NUM_EPISODES))) {
+    episodesInput.value = String(defaults.record_num_episodes || DEFAULT_RECORD_NUM_EPISODES);
+  }
+  if (!resumeTraining) syncTrainNamingFromDataset();
+  syncRolloutTaskFromRecordTask();
+}
 
 function ensureTrainExtraArg(arg) {
   if (!trainExtraArgsInput || !arg) return;
@@ -377,9 +588,41 @@ function applyPolicyTypeDefaults(options = {}) {
 
   if (type === "pi05") {
     replaceTrainExtraArgsByDefaults(PI05_TRAIN_EXTRA_DEFAULTS);
+    removeTrainExtraArgsByKeys([...XVLA_TRAIN_EXTRA_KEYS, ...SMOLVLA_TRAIN_EXTRA_KEYS]);
+  } else if (type === "xvla") {
+    replaceTrainExtraArgsByDefaults(XVLA_TRAIN_EXTRA_DEFAULTS);
+    removeTrainExtraArgsByKeys([...PI05_TRAIN_EXTRA_KEYS, ...SMOLVLA_TRAIN_EXTRA_KEYS]);
+  } else if (type === "smolvla") {
+    replaceTrainExtraArgsByDefaults(SMOLVLA_TRAIN_EXTRA_DEFAULTS);
+    removeTrainExtraArgsByKeys([...PI05_TRAIN_EXTRA_KEYS, ...XVLA_TRAIN_EXTRA_KEYS]);
   } else {
-    removeTrainExtraArgsByKeys(PI05_TRAIN_EXTRA_KEYS);
+    removeTrainExtraArgsByKeys([...PI05_TRAIN_EXTRA_KEYS, ...XVLA_TRAIN_EXTRA_KEYS, ...SMOLVLA_TRAIN_EXTRA_KEYS]);
   }
+}
+
+function selectedRolloutPolicyType() {
+  const rolloutType = rolloutPolicyTypeInput ? String(rolloutPolicyTypeInput.value || "").trim() : "";
+  if (rolloutType) return rolloutType;
+  const trainType = policyTypeInput ? String(policyTypeInput.value || "").trim() : "";
+  return trainType || "smolvla";
+}
+
+function setRolloutOptionDisabled(input, disabled) {
+  if (!input) return;
+  input.disabled = Boolean(disabled);
+  const label = input.closest("label");
+  if (label) label.classList.toggle("muted", Boolean(disabled));
+}
+
+function syncRolloutPolicyOptions() {
+  const type = selectedRolloutPolicyType().toLowerCase();
+  const isAct = type === "act";
+  const isPi05 = type === "pi05";
+  setRolloutOptionDisabled(rolloutTemporalEnsembleInput, !isAct);
+  setRolloutOptionDisabled(rolloutTemporalCoeffInput, !isAct);
+  setRolloutOptionDisabled(rolloutRtcHorizonInput, !isPi05);
+  setRolloutOptionDisabled(rolloutRtcGuidanceInput, !isPi05);
+  setRolloutOptionDisabled(rolloutActionQueueInput, !isPi05);
 }
 
 function parseObservation() {
@@ -453,6 +696,47 @@ function browseSelectionValue(path) {
   return path || "";
 }
 
+function applyDatasetProfileFromInspect(data) {
+  const dataset = (data && data.dataset) || {};
+  const changes = [];
+  const profileId = dataset.robot_profile_id || dataset.profile_id || "";
+  if (profileSelect && profileId) {
+    const hasProfile = Array.from(profileSelect.options || []).some((opt) => opt.value === profileId);
+    if (hasProfile && profileSelect.value !== profileId) {
+      profileSelect.value = profileId;
+      changes.push(`profile=${profileId}`);
+    }
+  }
+  const pipelineId = dataset.observation_pipeline_id || "";
+  if (observationPipelineSelect && pipelineId) {
+    const hasPipeline = Array.from(observationPipelineSelect.options || []).some((opt) => opt.value === pipelineId);
+    if (hasPipeline && observationPipelineSelect.value !== pipelineId) {
+      observationPipelineSelect.value = pipelineId;
+      changes.push(`pipeline=${pipelineId}`);
+    }
+  }
+  if (changes.length) {
+    renderResult("dataset profile restored", {
+      ok: true,
+      restored: changes,
+      dataset_path: dataset.path || "",
+      pipeline_metadata_path: dataset.pipeline_metadata_path || "",
+    });
+  }
+}
+
+async function restoreDatasetProfileFromCurrentInput() {
+  if (!datasetInput || !datasetInput.value.trim()) return null;
+  try {
+    const data = await postJson("/api/lerobot/dataset/inspect", basePayload(), 60000);
+    applyDatasetProfileFromInspect(data);
+    return data;
+  } catch (err) {
+    renderResult("dataset profile restore", { ok: false, error: String(err) });
+    return null;
+  }
+}
+
 function placeBrowserNearTarget() {
   if (!browserEl || !lastBrowseTargetInput) return;
   const label = lastBrowseTargetInput.closest("label");
@@ -512,6 +796,18 @@ function parseJsonText(inputEl, fallback = {}) {
   }
 }
 
+function wandbLocalPortValue() {
+  const raw = trainWandbBaseUrlInput ? String(trainWandbBaseUrlInput.value || "").trim() : "";
+  if (!raw) return 8081;
+  try {
+    const parsed = new URL(raw);
+    return parsed.port ? Number(parsed.port) : 8081;
+  } catch (_err) {
+    const match = raw.match(/:(\d+)(?:\/)?$/);
+    return match ? Number(match[1]) : 8081;
+  }
+}
+
 function basePayload(overrides = {}) {
   const datasetValue = datasetInput ? datasetInput.value.trim() : "";
   const datasetSplit = splitPathOrRepo(datasetValue);
@@ -520,16 +816,17 @@ function basePayload(overrides = {}) {
     mode: modeSelect ? modeSelect.value : "test",
     runtime_mode: modeSelect ? modeSelect.value : "test",
     profile_id: profileSelect ? profileSelect.value : "",
-    task_instruction: taskInput ? taskInput.value : "Pick up the cylinder",
+    observation_pipeline_id: observationPipelineSelect ? observationPipelineSelect.value : "raw_depth_adapter",
+    task_instruction: taskInput ? taskInput.value : DEFAULT_LEROBOT_TASK_INSTRUCTION,
     dataset_root: datasetRootInput ? datasetRootInput.value.trim() : "",
-    dataset_repo_id: datasetSplit.repo || "jin/record-test",
+    dataset_repo_id: datasetSplit.repo || lastWorkflowDefaults.dataset_repo_id || `jin/${todayRunNameFallback()}`,
     dataset_path: datasetSplit.path,
     policy_path: policy.policy_path,
     policy_checkpoint_path: policy.policy_checkpoint_path,
     policy_pretrained_path: trainSourcePolicyInput ? trainSourcePolicyInput.value.trim() : "",
     policy_type: policyTypeInput ? policyTypeInput.value || "act" : "act",
     output_dir: outputDirInput ? outputDirInput.value.trim() : "",
-    job_name: jobNameInput ? jobNameInput.value.trim() : "atr_lerobot_train",
+    job_name: jobNameInput ? jobNameInput.value.trim() : lastWorkflowDefaults.job_name || trainNameFromDatasetRepo(datasetValue),
     device: deviceInput ? deviceInput.value || "cuda" : "cuda",
     seed: numberValue(trainSeedInput, null),
     batch_size: trainNumberValue(trainBatchSizeInput, "batch_size", 8),
@@ -559,13 +856,15 @@ function basePayload(overrides = {}) {
     wandb_enable: boolValue(trainWandbInput),
     wandb_project: trainWandbProjectInput ? trainWandbProjectInput.value.trim() : "",
     wandb_mode: trainWandbModeInput ? trainWandbModeInput.value || "" : "",
+    wandb_base_url: trainWandbBaseUrlInput ? trainWandbBaseUrlInput.value.trim() : "",
+    wandb_local_port: wandbLocalPortValue(),
     train_extra_args: trainExtraArgs(),
     fps: numberValue(fpsInput, 15),
     camera_fps: numberValue(cameraFpsInput, 15),
     warmup_s: 2,
     episode_s: numberValue(episodeTimeInput, 60),
     reset_s: numberValue(resetTimeInput, 30),
-    num_episodes: numberValue(episodesInput, 1),
+    num_episodes: numberValue(episodesInput, DEFAULT_RECORD_NUM_EPISODES),
     tts_engine: ttsEngineInput ? ttsEngineInput.value || "piper" : "piper",
     tts_rate: numberValue(ttsRateInput, -35),
     display_data: boolValue(displayDataInput),
@@ -583,6 +882,12 @@ function basePayload(overrides = {}) {
     visualization_tolerance_s: numberValue(visualizationToleranceInput, 0.0001),
     visualization_save: boolValue(visualizationSaveInput),
     visualization_output_dir: visualizationOutputDirInput ? visualizationOutputDirInput.value.trim() : "",
+    isaac_mirror_enabled: boolValue(isaacMirrorEnabledInput),
+    isaac_mirror_endpoint: isaacMirrorEndpointInput ? isaacMirrorEndpointInput.value.trim() : "http://127.0.0.1:8766/joints",
+    isaac_mirror_sample_hz: numberValue(isaacMirrorHzInput, 15),
+    isaac_mirror_timeout_s: numberValue(isaacMirrorTimeoutInput, 0.5),
+    isaac_mirror_max_samples: numberValue(isaacMirrorMaxSamplesInput, null),
+    isaac_mirror_receiver_launch_mode: "isaac_extension",
     observation: parseObservation(),
     dry_run: (modeSelect ? modeSelect.value : "test") !== "live",
     ...overrides,
@@ -592,9 +897,12 @@ function basePayload(overrides = {}) {
 function rolloutPayload(overrides = {}) {
   const payload = basePayload(overrides);
   const policy = rolloutPolicyFields();
+  const rolloutPolicyType = selectedRolloutPolicyType();
+  const rolloutPolicyTypeKey = rolloutPolicyType.toLowerCase();
   payload.policy_path = policy.policy_path;
   payload.policy_checkpoint_path = policy.policy_checkpoint_path;
   payload.policy_repo_id = policy.policy_path ? "" : policy.policy_repo_id;
+  payload.policy_type = rolloutPolicyType;
   payload.task_instruction = rolloutInstructionInput && rolloutInstructionInput.value.trim()
     ? rolloutInstructionInput.value.trim()
     : DEFAULT_PI05_ROLLOUT_TASK;
@@ -611,12 +919,12 @@ function rolloutPayload(overrides = {}) {
   }
   payload.rollout_action_clamp = rolloutActionClampInput ? boolValue(rolloutActionClampInput) : true;
   payload.rollout_max_relative_target = numberValue(rolloutMaxRelativeTargetInput, 5);
-  payload.rollout_temporal_ensemble = rolloutTemporalEnsembleInput ? boolValue(rolloutTemporalEnsembleInput) : true;
+  payload.rollout_temporal_ensemble = rolloutPolicyTypeKey === "act" && (rolloutTemporalEnsembleInput ? boolValue(rolloutTemporalEnsembleInput) : true);
   payload.rollout_temporal_ensemble_coeff = numberValue(rolloutTemporalCoeffInput, 0.01);
-  payload.rollout_inference_type = policyTypeInput && policyTypeInput.value === "pi05" ? "rtc" : "";
-  payload.rollout_rtc_execution_horizon = numberValue(rolloutRtcHorizonInput, 20);
-  payload.rollout_rtc_max_guidance_weight = numberValue(rolloutRtcGuidanceInput, 1.0);
-  payload.rollout_action_queue_size_to_get_new_actions = numberValue(rolloutActionQueueInput, 60);
+  payload.rollout_inference_type = rolloutPolicyTypeKey === "pi05" ? "rtc" : "";
+  payload.rollout_rtc_execution_horizon = rolloutPolicyTypeKey === "pi05" ? numberValue(rolloutRtcHorizonInput, 20) : null;
+  payload.rollout_rtc_max_guidance_weight = rolloutPolicyTypeKey === "pi05" ? numberValue(rolloutRtcGuidanceInput, 1.0) : null;
+  payload.rollout_action_queue_size_to_get_new_actions = rolloutPolicyTypeKey === "pi05" ? numberValue(rolloutActionQueueInput, 60) : null;
   return payload;
 }
 
@@ -666,11 +974,11 @@ function manipulationAgentPayload(overrides = {}) {
   const policy = manipulationPolicyFields();
   const taskId = selectedManipulationTaskId();
   const preset = MANIPULATION_TASK_PRESETS[taskId] || MANIPULATION_TASK_PRESETS.transfer_to_utm;
-  const policyType = policyTypeInput && policyTypeInput.value
-    ? policyTypeInput.value
-    : manipulationPolicyTypeInput && manipulationPolicyTypeInput.value
-      ? manipulationPolicyTypeInput.value
-      : "pi05";
+  const policyType = manipulationPolicyTypeInput && manipulationPolicyTypeInput.value
+    ? manipulationPolicyTypeInput.value
+    : rolloutPolicyTypeInput && rolloutPolicyTypeInput.value
+      ? rolloutPolicyTypeInput.value
+      : selectedRolloutPolicyType() || "pi05";
   if (manipulationPolicyTypeInput) manipulationPolicyTypeInput.value = policyType;
   const strategy = manipulationStrategyInput ? manipulationStrategyInput.value || "pi05_lerobot_policy" : "pi05_lerobot_policy";
   const specimenId = manipulationSpecimenIdInput ? manipulationSpecimenIdInput.value.trim() || "manual-specimen" : "manual-specimen";
@@ -733,6 +1041,10 @@ function applyManipulationProfile(profile, force = false) {
     const hasProfile = Array.from(profileSelect.options || []).some((opt) => opt.value === profile.profile_id);
     if (hasProfile) profileSelect.value = profile.profile_id;
   }
+  if (observationPipelineSelect && profile.observation_pipeline_id) {
+    const hasPipeline = Array.from(observationPipelineSelect.options || []).some((opt) => opt.value === profile.observation_pipeline_id);
+    if (hasPipeline) observationPipelineSelect.value = profile.observation_pipeline_id;
+  }
   setInputValue(manipulationTaskIdInput, profile.task_id || profile.skill_id);
   setInputValue(manipulationStrategyInput, profile.manipulation_strategy);
   setInputValue(manipulationPolicyBackendInput, profile.policy_backend);
@@ -784,6 +1096,23 @@ function recordPayload(overrides = {}) {
 
 function trainPayload(overrides = {}) {
   return basePayload({ resume: boolValue(trainResumeInput), ...overrides });
+}
+
+function prepareLocalWandbForTraining() {
+  if (trainWandbBaseUrlInput && !trainWandbBaseUrlInput.value.trim()) {
+    trainWandbBaseUrlInput.value = "http://127.0.0.1:8081";
+  }
+  if (trainWandbInput) trainWandbInput.checked = true;
+  if (trainWandbModeInput) trainWandbModeInput.value = "local";
+}
+
+function wandbLocalPayload(overrides = {}) {
+  const payload = basePayload(overrides);
+  payload.wandb_base_url = trainWandbBaseUrlInput && trainWandbBaseUrlInput.value.trim()
+    ? trainWandbBaseUrlInput.value.trim()
+    : "http://127.0.0.1:8081";
+  payload.wandb_local_port = wandbLocalPortValue();
+  return payload;
 }
 
 function visualizationPayload(overrides = {}) {
@@ -847,6 +1176,57 @@ function renderResult(label, data) {
   }
 }
 
+function renderIsaacMirror(data) {
+  if (!isaacMirrorOutputEl) return;
+  if (!data || !data.ok) {
+    isaacMirrorOutputEl.innerHTML = `<pre class="command-output">${escapeHtml(JSON.stringify(data || {}, null, 2))}</pre>`;
+    return;
+  }
+  const scene = data.scene_path || "";
+  const root = data.articulation_root || "";
+  const receiverHealth = data.receiver_health || data.health || {};
+  const verification = data.verification || {};
+  const rows = Array.isArray(data.joint_state) && data.joint_state.length
+    ? data.joint_state
+    : Array.isArray(data.last_joint_state) && data.last_joint_state.length
+      ? data.last_joint_state
+    : Array.isArray(data.joint_map)
+      ? data.joint_map
+      : [];
+  const hasState = (Array.isArray(data.joint_state) && data.joint_state.length)
+    || (Array.isArray(data.last_joint_state) && data.last_joint_state.length);
+  const body = rows.map((item) => `
+    <tr>
+      <td>${escapeHtml(item.motor_id ?? "")}</td>
+      <td>${escapeHtml(item.motor_name || "")}</td>
+      <td>${escapeHtml(item.isaac_joint_name || "")}</td>
+      <td>${hasState ? escapeHtml(Number(item.position_deg || 0).toFixed(3)) : "-"}</td>
+      <td><code>${escapeHtml(item.isaac_joint_path || "")}</code></td>
+    </tr>
+  `).join("");
+  isaacMirrorOutputEl.innerHTML = `
+    <div class="visual-summary">
+      <strong>${escapeHtml(data.probe_source || data.tool || "Isaac mirror")}</strong>
+      <span>scene=${escapeHtml(scene || "-")} · root=${escapeHtml(root || "-")} · follower=${escapeHtml(data.follower_port || "-")}</span>
+      <span>status=${escapeHtml(data.status || "-")} · launch=${escapeHtml(data.launch_mode || "-")} · samples=${escapeHtml(data.sample_count ?? receiverHealth.sample_count ?? "-")} · record=${escapeHtml(data.mirror_record_path || "-")}</span>
+      <span>endpoint=${escapeHtml(data.mirror_endpoint || "-")} · health=${escapeHtml(data.health_url || receiverHealth.health_url || "-")} · apply=${escapeHtml(data.apply_mode || receiverHealth.apply_mode || "-")}</span>
+      ${verification.session_id ? `<span>verified=${escapeHtml(verification.session_id)} #${escapeHtml(verification.sample_index ?? "-")} · receiver=${escapeHtml(verification.receiver_sample_count_before ?? "-")}→${escapeHtml(verification.receiver_sample_count_after ?? "-")}</span>` : ""}
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>Motor</th>
+          <th>Name</th>
+          <th>Isaac Joint</th>
+          <th>${hasState ? "Position" : "Position"}</th>
+          <th>Path</th>
+        </tr>
+      </thead>
+      <tbody>${body || `<tr><td colspan="5">No mirror joint data.</td></tr>`}</tbody>
+    </table>
+  `;
+}
+
 function isActiveSession(session) {
   if (!session || !session.session_id) return false;
   const status = String(session.status || "").toUpperCase();
@@ -902,8 +1282,8 @@ function renderSessions(sessions) {
 
 function applyDefaultPaths(data) {
   const paths = data.paths || {};
+  lastConfigPaths = paths;
   if (datasetRootInput && !datasetRootInput.value) datasetRootInput.value = paths.dataset_root || "";
-  if (outputDirInput && !outputDirInput.value) outputDirInput.value = paths.output_root ? `${paths.output_root}/atr_lerobot_train` : "";
   if (visualizationOutputDirInput && !visualizationOutputDirInput.value) visualizationOutputDirInput.value = paths.output_root ? `${paths.output_root}/visualize_dataset` : "";
 }
 
@@ -1049,7 +1429,7 @@ function renderManipulationAgentReport(data) {
 
 function actionStatusFromEvent(event) {
   const el = event && event.currentTarget ? event.currentTarget : null;
-  const scope = el ? el.closest(".lerobot-device-card, .lerobot-port-panel, .lerobot-workflow-card, .lerobot-visualization-panel, .lerobot-config-panel") : null;
+  const scope = el ? el.closest(".lerobot-device-card, .lerobot-port-panel, .lerobot-workflow-card, .lerobot-visualization-panel, .lerobot-config-panel, .lerobot-card") : null;
   return scope ? scope.querySelector(".lerobot-action-status") : null;
 }
 
@@ -1252,7 +1632,7 @@ function setActionStatus(target, state, label, data = null) {
   const normalized = state || "idle";
   const prefix = normalized === "ok" ? "OK" : normalized === "error" ? "ERROR" : normalized === "running" ? "RUNNING" : "IDLE";
   const logTail = compactLogTail(data);
-  const progressHtml = trainingProgressHtml(data);
+  const progressHtml = expectedWorkflow === "train" ? "" : trainingProgressHtml(data);
   const runtimeHtml = runtimeStatusHtml(data);
   const logHtml = logTail ? `<pre class="lerobot-inline-log">${escapeHtml(logTail)}</pre>` : "";
   el.className = `lerobot-action-status ${normalized}`;
@@ -1450,8 +1830,32 @@ function renderConfig(data) {
     profileSelect.value = profiles.some((p) => p.profile_id === prior) ? prior : selected;
     profileSelectionInitialized = true;
   }
+  const pipelineOptions = Array.isArray(data.observation_pipelines) ? data.observation_pipelines : [];
+  const selectedPipeline = data.selected_observation_pipeline_id || data.default_observation_pipeline_id || "raw_depth_adapter";
+  if (observationPipelineSelect) {
+    const priorPipeline = observationPipelineSelect.value || selectedPipeline;
+    observationPipelineSelect.innerHTML = "";
+    for (const pipeline of pipelineOptions) {
+      const opt = document.createElement("option");
+      opt.value = pipeline.pipeline_id;
+      opt.textContent = `${pipeline.label || pipeline.pipeline_id}`;
+      opt.title = pipeline.description || pipeline.pipeline_id;
+      observationPipelineSelect.appendChild(opt);
+    }
+    if (!pipelineOptions.length) {
+      for (const id of ["legacy_lerobot", "rgbd_sidecar", "raw_depth_adapter"]) {
+        const opt = document.createElement("option");
+        opt.value = id;
+        opt.textContent = id;
+        observationPipelineSelect.appendChild(opt);
+      }
+    }
+    const validPipelines = Array.from(observationPipelineSelect.options || []).map((opt) => opt.value);
+    observationPipelineSelect.value = validPipelines.includes(priorPipeline) ? priorPipeline : selectedPipeline;
+  }
 
   applyDefaultPaths(data);
+  applyWorkflowDefaults(data);
   const profile = profiles.find((p) => p.profile_id === (profileSelect ? profileSelect.value : selected)) || profiles[0] || {};
   const gates = profile.live_gate_summary || data.live_gate_summary || {};
   const liveEnabled = Boolean(gates.live_enabled);
@@ -1478,6 +1882,9 @@ function renderConfig(data) {
     } else {
       setTtsRate(ttsRateInput ? ttsRateInput.value : lerobotTtsServerDefaultRate);
     }
+  }
+  if (data.wandb && trainWandbBaseUrlInput && !trainWandbBaseUrlInput.dataset.userEdited) {
+    trainWandbBaseUrlInput.value = data.wandb.local_base_url || "http://127.0.0.1:8081";
   }
   renderDeviceMemory(data);
   renderSessions(data.sessions || []);
@@ -1559,6 +1966,8 @@ async function refreshPolicies() {
 
 function inferPolicyTypeFromPolicy(value = "", label = "") {
   const text = `${value} ${label}`.toLowerCase();
+  if (text.includes("smolvla") || text.includes("smol-vla")) return "smolvla";
+  if (text.includes("xvla") || text.includes("x-vla")) return "xvla";
   if (text.includes("pi0fast")) return "pi0fast";
   if (text.includes("pi05") || text.includes("pi0.5")) return "pi05";
   if (text.includes("pi0_base") || text.includes("/pi0") || text.includes(" pi0")) return "pi0";
@@ -1591,8 +2000,10 @@ function applyPolicySelection(value, policyType = "") {
   if (manipulationPolicyInput && !manipulationPolicyInput.value.trim()) manipulationPolicyInput.value = clean;
   if (policySelect) policySelect.value = clean;
   if (inferredPolicyType && policyTypeInput) policyTypeInput.value = inferredPolicyType;
+  if (inferredPolicyType && rolloutPolicyTypeInput) rolloutPolicyTypeInput.value = inferredPolicyType;
   if (inferredPolicyType && manipulationPolicyTypeInput) manipulationPolicyTypeInput.value = inferredPolicyType;
   applyPolicyTypeDefaults();
+  syncRolloutPolicyOptions();
   return clean;
 }
 
@@ -1800,9 +2211,12 @@ function renderBrowser(data) {
   if (parentBtn && data.parent) parentBtn.addEventListener("click", () => browsePath(lastBrowseKind, data.parent, lastBrowseTargetInput, lastBrowseOptions));
   const useCurrentBtn = $("btn-browser-use-current");
   if (useCurrentBtn) {
-    useCurrentBtn.addEventListener("click", () => {
+    useCurrentBtn.addEventListener("click", async () => {
       if (lastBrowseTargetInput) lastBrowseTargetInput.value = browseSelectionValue(data.path || "");
       browserEl.classList.add("hidden");
+      if (lastBrowseKind === "dataset" && lastBrowseTargetInput === datasetInput) {
+        await restoreDatasetProfileFromCurrentInput();
+      }
     });
   }
   const refreshBtn = $("btn-browser-refresh");
@@ -1820,15 +2234,21 @@ function renderBrowser(data) {
   const closeBtn = $("btn-browser-close");
   if (closeBtn) closeBtn.addEventListener("click", () => browserEl.classList.add("hidden"));
   for (const button of browserEl.querySelectorAll(".browser-entry")) {
-    button.addEventListener("click", () => {
+    button.addEventListener("click", async () => {
       const path = button.dataset.path || "";
       const kind = button.dataset.kind || "file";
       if (kind === "dir") {
         if (lastBrowseTargetInput) lastBrowseTargetInput.value = browseSelectionValue(path);
+        if (lastBrowseKind === "dataset" && lastBrowseTargetInput === datasetInput) {
+          await restoreDatasetProfileFromCurrentInput();
+        }
         browsePath(lastBrowseKind, path, lastBrowseTargetInput, lastBrowseOptions);
       } else if (lastBrowseTargetInput) {
         lastBrowseTargetInput.value = browseSelectionValue(path);
         browserEl.classList.add("hidden");
+        if (lastBrowseKind === "dataset" && lastBrowseTargetInput === datasetInput) {
+          await restoreDatasetProfileFromCurrentInput();
+        }
       }
     });
   }
@@ -1915,6 +2335,9 @@ async function openNativePathPicker(path = "") {
   if (picked && picked.ok && picked.selected_path) {
     if (lastBrowseTargetInput) lastBrowseTargetInput.value = browseSelectionValue(picked.selected_path);
     if (browserEl) browserEl.classList.add("hidden");
+    if (lastBrowseKind === "dataset" && lastBrowseTargetInput === datasetInput) {
+      await restoreDatasetProfileFromCurrentInput();
+    }
   }
   return picked;
 }
@@ -2056,7 +2479,11 @@ bind("btn-lerobot-refresh", async (event) => {
 bind("btn-lerobot-save-profile", async (event) => {
   const statusTarget = actionStatusFromEvent(event);
   setActionStatus(statusTarget, "running", "config saved", { status: "request sent" });
-  const data = await postJson("/api/lerobot/config", { profile_id: profileSelect ? profileSelect.value : "", mode: modeSelect ? modeSelect.value : "test" });
+  const data = await postJson("/api/lerobot/config", {
+    profile_id: profileSelect ? profileSelect.value : "",
+    observation_pipeline_id: observationPipelineSelect ? observationPipelineSelect.value : "raw_depth_adapter",
+    mode: modeSelect ? modeSelect.value : "test",
+  });
   renderResult("config saved", data);
   setActionStatus(statusTarget, data && data.ok ? "ok" : "error", "config saved", data);
   await refreshConfig();
@@ -2097,6 +2524,66 @@ bind("btn-port-save-manual", (event) => {
   return runDevicePortAction(`${role} manual save`, "/api/lerobot/ports/save", role, {}, actionStatusFromEvent(event));
 });
 
+bind("btn-isaac-mirror-map", async (event) => {
+  const statusTarget = actionStatusFromEvent(event);
+  const data = await runAction("isaac mirror joint mapping", "/api/lerobot/mirror/joint-mapping", basePayload(), statusTarget);
+  renderIsaacMirror(data);
+});
+
+bind("btn-isaac-mirror-receiver-start", async (event) => {
+  const statusTarget = actionStatusFromEvent(event);
+  const data = await runAction("isaac mirror receiver start", "/api/lerobot/mirror/receiver-process/start", basePayload(), statusTarget);
+  renderIsaacMirror(data);
+});
+
+bind("btn-isaac-mirror-receiver-status", async (event) => {
+  const statusTarget = actionStatusFromEvent(event);
+  const data = await runAction("isaac mirror receiver status", "/api/lerobot/mirror/receiver-process/status", basePayload(), statusTarget);
+  renderIsaacMirror(data);
+});
+
+bind("btn-isaac-mirror-receiver-stop", async (event) => {
+  const statusTarget = actionStatusFromEvent(event);
+  const data = await runAction("isaac mirror receiver stop", "/api/lerobot/mirror/receiver-process/stop", basePayload(), statusTarget);
+  renderIsaacMirror(data);
+});
+
+bind("btn-isaac-mirror-health", async (event) => {
+  const statusTarget = actionStatusFromEvent(event);
+  const data = await runAction("isaac mirror receiver health", "/api/lerobot/mirror/receiver-health", basePayload(), statusTarget);
+  renderIsaacMirror(data);
+});
+
+bind("btn-isaac-mirror-verify", async (event) => {
+  const statusTarget = actionStatusFromEvent(event);
+  const data = await runAction("isaac mirror receiver verify", "/api/lerobot/mirror/receiver-verify", basePayload(), statusTarget);
+  renderIsaacMirror(data);
+});
+
+bind("btn-isaac-mirror-probe", async (event) => {
+  const statusTarget = actionStatusFromEvent(event);
+  const data = await runAction("isaac mirror state probe", "/api/lerobot/mirror/state-probe", basePayload(), statusTarget);
+  renderIsaacMirror(data);
+});
+
+bind("btn-isaac-mirror-loop-start", async (event) => {
+  const statusTarget = actionStatusFromEvent(event);
+  const data = await runAction("isaac mirror loop start", "/api/lerobot/mirror/loop/start", basePayload({ isaac_mirror_enabled: true }), statusTarget);
+  renderIsaacMirror(data);
+});
+
+bind("btn-isaac-mirror-loop-status", async (event) => {
+  const statusTarget = actionStatusFromEvent(event);
+  const data = await runAction("isaac mirror loop status", "/api/lerobot/mirror/loop/status", sessionPayload("isaac_mirror"), statusTarget);
+  renderIsaacMirror(data);
+});
+
+bind("btn-isaac-mirror-loop-stop", async (event) => {
+  const statusTarget = actionStatusFromEvent(event);
+  const data = await runAction("isaac mirror loop stop", "/api/lerobot/mirror/loop/stop", sessionPayload("isaac_mirror"), statusTarget);
+  renderIsaacMirror(data);
+});
+
 bind("btn-browse-dataset-root", () => browsePath("dataset", datasetRootInput ? datasetRootInput.value : "", datasetRootInput));
 bind("btn-browse-dataset-repo", () => browsePath("dataset", datasetBrowseStartPath(), datasetInput, { include_files: false, valueTransform: datasetRepoValueFromPath }));
 bind("btn-browse-output-dir", () => browsePath("output", outputDirInput ? outputDirInput.value : "", outputDirInput));
@@ -2114,6 +2601,7 @@ bind("btn-browse-manipulation-policy", () => {
 bind("btn-browse-manipulation-stl", () => browsePath("any", manipulationStlInput ? manipulationStlInput.value : "", manipulationStlInput, { select: "file", include_files: true }));
 bind("btn-manipulation-use-rollout-policy", (event) => {
   if (manipulationPolicyInput && rolloutPolicyInput) manipulationPolicyInput.value = rolloutPolicyInput.value;
+  if (manipulationPolicyTypeInput && rolloutPolicyTypeInput) manipulationPolicyTypeInput.value = rolloutPolicyTypeInput.value;
   const statusTarget = actionStatusFromEvent(event);
   setActionStatus(statusTarget, "ok", "use rollout policy", { status: "rollout policy copied to Manipulation Agent Bridge" });
 });
@@ -2162,6 +2650,18 @@ bind("btn-record-finish", (event) => runRecordControl("record finish", "finish",
 bind("btn-train-start", () => runTrainAction("train start", "/api/lerobot/train/start", trainPayload()));
 bind("btn-train-cancel", () => runTrainAction("train cancel", "/api/lerobot/train/cancel", sessionPayload("train")));
 bind("btn-train-status", () => runTrainAction("train status", "/api/lerobot/train/status", sessionPayload("train")));
+bind("btn-wandb-local-start", (event) => {
+  prepareLocalWandbForTraining();
+  return runAction("wandb local start", "/api/lerobot/wandb-local/start", wandbLocalPayload(), actionStatusFromEvent(event), 120000);
+});
+bind("btn-wandb-local-stop", (event) => runAction("wandb local stop", "/api/lerobot/wandb-local/stop", wandbLocalPayload(), actionStatusFromEvent(event), 120000));
+bind("btn-wandb-local-status", (event) => runAction("wandb local status", "/api/lerobot/wandb-local/status", wandbLocalPayload(), actionStatusFromEvent(event)));
+bind("btn-wandb-local-open", (event) => {
+  const statusTarget = actionStatusFromEvent(event);
+  const url = trainWandbBaseUrlInput && trainWandbBaseUrlInput.value.trim() ? trainWandbBaseUrlInput.value.trim() : "http://127.0.0.1:8081";
+  window.open(url, "_blank", "noopener");
+  setActionStatus(statusTarget, "ok", "wandb local open", { ok: true, status: "browser_open_requested", url });
+});
 bind("btn-policy-refresh", async (event) => {
   const statusTarget = actionStatusFromEvent(event);
   setActionStatus(statusTarget, "running", "refresh policies", { status: "request sent" });
@@ -2198,7 +2698,20 @@ bind("btn-manipulation-preview", (event) => {
 bind("btn-manipulation-run", (event) => runAction("manipulation agent run", "/api/lerobot/manipulation-agent/run", manipulationAgentPayload(), actionStatusFromEvent(event), 300000));
 bind("btn-manipulation-rollout-stop", (event) => runAction("manipulation rollout stop", "/api/lerobot/rollout/stop", sessionPayload("rollout"), actionStatusFromEvent(event)));
 bind("btn-manipulation-rollout-status", (event) => runAction("manipulation rollout status", "/api/lerobot/rollout/status", sessionPayload("rollout"), actionStatusFromEvent(event)));
-bind("btn-dataset-inspect", (event) => runAction("dataset inspect", "/api/lerobot/dataset/inspect", null, actionStatusFromEvent(event)));
+bind("btn-dataset-inspect", async (event) => {
+  const statusTarget = actionStatusFromEvent(event);
+  setActionStatus(statusTarget, "running", "dataset inspect", { status: "request sent" });
+  try {
+    const data = await postJson("/api/lerobot/dataset/inspect", basePayload(), 60000);
+    applyDatasetProfileFromInspect(data);
+    renderResult("dataset inspect", data);
+    setActionStatus(statusTarget, data && data.ok ? "ok" : "error", "dataset inspect", data);
+  } catch (err) {
+    const error = { ok: false, error: String(err) };
+    renderResult("dataset inspect", error);
+    setActionStatus(statusTarget, "error", "dataset inspect", error);
+  }
+});
 bind("btn-dataset-visualize", (event) => visualizeDataset(actionStatusFromEvent(event)));
 bind("btn-dataset-visualize-status", async (event) => {
   const statusTarget = actionStatusFromEvent(event);
@@ -2213,7 +2726,55 @@ bind("btn-dataset-visualize-stop", async (event) => {
 bind("btn-dataset-preview", (event) => previewDataset(actionStatusFromEvent(event)));
 
 if (profileSelect) profileSelect.addEventListener("change", refreshConfig);
-if (policyTypeInput) policyTypeInput.addEventListener("change", () => applyPolicyTypeDefaults());
+if (policyTypeInput) policyTypeInput.addEventListener("change", () => {
+  applyPolicyTypeDefaults();
+  syncTrainNamingFromDataset({ policyChanged: true });
+});
+if (rolloutPolicyTypeInput) rolloutPolicyTypeInput.addEventListener("change", () => syncRolloutPolicyOptions());
+if (datasetInput) {
+  datasetInput.addEventListener("input", () => {
+    markUserEdited(datasetInput);
+    syncTrainNamingFromDataset();
+  });
+  datasetInput.addEventListener("change", () => syncTrainNamingFromDataset());
+}
+if (outputDirInput) {
+  outputDirInput.addEventListener("input", () => {
+    markUserEdited(outputDirInput);
+    syncJobNameFromOutputDir();
+  });
+  outputDirInput.addEventListener("change", () => syncJobNameFromOutputDir());
+}
+if (jobNameInput) jobNameInput.addEventListener("input", () => markUserEdited(jobNameInput));
+if (taskInput) {
+  taskInput.addEventListener("input", () => {
+    markUserEdited(taskInput);
+    syncRolloutTaskFromRecordTask();
+  });
+  taskInput.addEventListener("change", () => syncRolloutTaskFromRecordTask());
+}
+if (rolloutInstructionInput) rolloutInstructionInput.addEventListener("input", () => markUserEdited(rolloutInstructionInput));
+if (trainWandbBaseUrlInput) trainWandbBaseUrlInput.addEventListener("input", () => markUserEdited(trainWandbBaseUrlInput));
+if (episodesInput) episodesInput.addEventListener("input", () => markUserEdited(episodesInput));
+if (resumeInput) {
+  resumeInput.addEventListener("change", () => {
+    if (resumeDatasetRequested()) {
+      markUserEdited(datasetInput);
+      return;
+    }
+    if (lastWorkflowDefaults && lastWorkflowDefaults.dataset_repo_id) applyWorkflowDefaults({ workflow_defaults: lastWorkflowDefaults });
+  });
+}
+if (trainResumeInput) {
+  trainResumeInput.addEventListener("change", () => {
+    if (resumeTrainingRequested()) {
+      markUserEdited(outputDirInput);
+      markUserEdited(jobNameInput);
+      return;
+    }
+    syncTrainNamingFromDataset({ force: true });
+  });
+}
 if (policySelect) {
   policySelect.addEventListener("change", () => {
     const selectedOption = policySelect.options[policySelect.selectedIndex] || null;
@@ -2227,4 +2788,5 @@ if (manipulationTaskIdInput) manipulationTaskIdInput.addEventListener("change", 
 initializeTtsControls();
 syncManipulationTaskPreset(false);
 applyPolicyTypeDefaults();
+syncRolloutPolicyOptions();
 refreshConfig();

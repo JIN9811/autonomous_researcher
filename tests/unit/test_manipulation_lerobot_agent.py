@@ -16,6 +16,7 @@ from mcp_tools.tool_registry import ToolRegistry
 from orchestrator.state import Mode, OrchestratorState, Stage
 from utils.config_loader import load_all_configs
 import utils.manipulation_profile as manipulation_profile_module
+from utils.manipulation_profile import normalize_manipulation_agent_profile
 
 
 class _CtxStub:
@@ -91,6 +92,38 @@ def _isolate_manipulation_profile(tmp_path: Path, monkeypatch: Any) -> None:
         "MANIPULATION_AGENT_PROFILE_PATH",
         tmp_path / "memory" / "manipulation_agent_bridge.json",
     )
+
+
+def test_manipulation_profile_accepts_xvla_policy_type() -> None:
+    profile = normalize_manipulation_agent_profile(
+        {
+            "manipulation_strategy": "lerobot_policy",
+            "policy_type": "xvla",
+            "policy_path": "fake://xvla-policy",
+            "rollout_inference_type": "sync",
+        }
+    )
+
+    assert profile["manipulation_strategy"] == "lerobot_policy"
+    assert profile["policy_type"] == "xvla"
+    assert profile["policy_path"] == "fake://xvla-policy"
+    assert profile["rollout_inference_type"] == "sync"
+
+
+def test_manipulation_profile_accepts_smolvla_policy_type() -> None:
+    profile = normalize_manipulation_agent_profile(
+        {
+            "manipulation_strategy": "lerobot_policy",
+            "policy_type": "smolvla",
+            "policy_path": "fake://smolvla-policy",
+            "rollout_inference_type": "sync",
+        }
+    )
+
+    assert profile["manipulation_strategy"] == "lerobot_policy"
+    assert profile["policy_type"] == "smolvla"
+    assert profile["policy_path"] == "fake://smolvla-policy"
+    assert profile["rollout_inference_type"] == "sync"
 
 
 @pytest.mark.asyncio

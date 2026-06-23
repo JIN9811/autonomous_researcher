@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import json
+import shutil
+import socket
 import subprocess
 import sys
+import time
+from datetime import datetime
 from types import SimpleNamespace
 from pathlib import Path
 
@@ -64,6 +68,25 @@ def _make_trainable_lerobot_dataset(path: Path) -> None:
     (path / "meta" / "episodes.jsonl").write_text(json.dumps({"episode_index": 0, "tasks": ["Pick up the cylinder"], "length": 1}) + "\n", encoding="utf-8")
     (path / "meta" / "episodes_stats.jsonl").write_text(json.dumps({"episode_index": 0, "stats": {}}) + "\n", encoding="utf-8")
     (path / "data" / "chunk-000" / "episode_000000.parquet").write_bytes(b"PAR1")
+    _write_raw_depth_manifest(path)
+
+
+def _write_raw_depth_manifest(path: Path) -> None:
+    manifest = path / "sidecar" / "depth_raw" / "transform_manifest.json"
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    manifest.write_text(
+        json.dumps(
+            {
+                "camera_keys": ["top", "wrist"],
+                "aligned_to": "color",
+                "depth_encoding": "png16",
+                "depth_scale_m_per_unit": 0.001,
+                "depth_clip_min_mm": 0.0,
+                "depth_clip_max_mm": 2000.0,
+            }
+        ),
+        encoding="utf-8",
+    )
 
 
 def _mark_lerobot_dataset_v30(path: Path) -> None:
@@ -71,6 +94,7 @@ def _mark_lerobot_dataset_v30(path: Path) -> None:
     info = json.loads(info_path.read_text(encoding="utf-8"))
     info["codebase_version"] = "v3.0"
     info_path.write_text(json.dumps(info), encoding="utf-8")
+    _write_raw_depth_manifest(path)
     (path / "meta" / "tasks.parquet").write_bytes(b"PAR1")
     (path / "meta" / "stats.json").write_text(
         json.dumps({"observation.state": {"q01": [0.0], "q99": [1.0], "count": [1]}, "action": {"q01": [0.0], "q99": [1.0], "count": [1]}}),
@@ -91,6 +115,12 @@ def _make_policy_checkpoint(path: Path, *, repo_id: str = "jin/demo_policy") -> 
     (path / "train_config.json").write_text(json.dumps({"policy": {"repo_id": repo_id}}), encoding="utf-8")
 
 
+def _free_tcp_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
 def test_find_ports_returns_deterministic_test_ports(tmp_path: Path) -> None:
     bridge = _bridge(tmp_path)
 
@@ -103,6 +133,517 @@ def test_find_ports_returns_deterministic_test_ports(tmp_path: Path) -> None:
     assert result["ports"][2]["role"] == "camera"
     assert {item["camera_key"] for item in result["ports"] if item["role"] == "camera"} == {"top", "wrist"}
     assert result["step_trace"][-1]["step"] == "DONE"
+
+
+def test_config_status_suggests_date_scoped_recording_and_training_defaults(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    today = datetime.now().strftime("%Y%m%d")
+    existing_dataset = tmp_path / "hf_datasets" / "jin" / f"{today}_1"
+    existing_dataset.mkdir(parents=True)
+
+    result = bridge.config_status()
+
+    defaults = result["workflow_defaults"]
+    assert defaults["dataset_repo_id"] == f"jin/{today}_2"
+    assert defaults["run_name"] == f"{today}_2"
+    assert defaults["train_name"] == f"{today}_2_train(smolvla)"
+    assert defaults["output_dir"] == str(tmp_path / "outputs" / "train" / f"{today}_2_train(smolvla)")
+    assert defaults["job_name"] == f"{today}_2_train(smolvla)"
+    assert defaults["record_task_instruction"] == "Pick up the cube and place it"
+    assert defaults["rollout_task_instruction"] == "Pick up the cube and place it"
+    assert defaults["record_num_episodes"] == 60
+
+
+def test_config_status_exposes_observation_pipeline_options(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+
+    result = bridge.config_status()
+
+    assert result["selected_observation_pipeline_id"] == "raw_depth_adapter"
+    assert result["default_observation_pipeline_id"] == "raw_depth_adapter"
+    assert [item["pipeline_id"] for item in result["observation_pipelines"]] == [
+        "legacy_lerobot",
+        "rgbd_sidecar",
+        "raw_depth_adapter",
+    ]
+
+
+def test_mirror_joint_mapping_returns_isaac_omx_contract(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+
+    result = bridge.mirror_joint_mapping({"mode": "test", "profile_id": "fake_omx_ai"})
+
+    assert result["ok"] is True
+    assert result["tool"] == "lerobot.mirror.joint_mapping"
+    assert result["scene_path"].endswith("sim/robotis_omx/scene/omx_table_layout.usda")
+    assert result["articulation_root"] == "/World/Robot/Geometry/link0"
+    assert [item["motor_id"] for item in result["joint_map"]] == [11, 12, 13, 14, 15, 16]
+    assert [item["isaac_joint_name"] for item in result["joint_map"]] == ["Joint1", "Joint2", "Joint3", "Joint4", "Joint5", "Gripper"]
+    assert result["joint_map"][0]["isaac_joint_path"].endswith("/Joint1")
+    assert result["step_trace"][0]["step"] == "MIRROR_MAPPING"
+
+
+def test_mirror_joint_state_probe_test_mode_returns_fake_positions(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+
+    result = bridge.mirror_joint_state_probe({"mode": "test", "profile_id": "fake_omx_ai"})
+
+    assert result["ok"] is True
+    assert result["tool"] == "lerobot.mirror.state_probe"
+    assert result["probe_source"] == "deterministic_test_state"
+    assert result["joint_state"][0]["motor_id"] == 11
+    assert result["joint_state"][0]["position_deg"] == 0.0
+    assert len(result["joint_state"]) == 6
+    assert all("isaac_joint_path" in item for item in result["joint_state"])
+    assert result["step_trace"][-1]["step"] == "STATE_READY"
+
+
+def test_mirror_joint_state_probe_live_reads_saved_follower_port(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    bridge.ports_save(
+        {
+            "mode": "live",
+            "profile_id": "fake_omx_ai",
+            "device_role": "follower",
+            "port": "test-follower-port",
+        }
+    )
+    bridge._read_follower_joint_positions = lambda port, motor_ids: {motor_id: float(motor_id) for motor_id in motor_ids}  # type: ignore[method-assign]
+
+    result = bridge.mirror_joint_state_probe({"mode": "live", "profile_id": "fake_omx_ai"})
+
+    assert result["ok"] is True
+    assert result["probe_source"] == "live_dynamixel_present_position"
+    assert result["follower_port"] == "test-follower-port"
+    assert [item["position_deg"] for item in result["joint_state"]] == [11.0, 12.0, 13.0, 14.0, 15.0, 16.0]
+
+
+def test_mirror_loop_start_test_mode_posts_and_records_samples(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    posted: list[tuple[str, dict[str, object]]] = []
+    bridge._post_isaac_mirror_state = lambda endpoint, payload, timeout_s=0.5: posted.append((endpoint, payload)) or {"ok": True, "status_code": 200}  # type: ignore[method-assign]
+
+    result = bridge.mirror_loop_start(
+        {
+            "mode": "test",
+            "profile_id": "fake_omx_ai",
+            "isaac_mirror_endpoint": "http://127.0.0.1:8766/joints",
+            "isaac_mirror_sample_hz": 30,
+            "isaac_mirror_max_samples": 3,
+        }
+    )
+
+    assert result["ok"] is True
+    assert result["tool"] == "lerobot.mirror.loop_start"
+    assert result["workflow"] == "isaac_mirror"
+    assert result["status"] == "COMPLETED"
+    assert result["sample_count"] == 3
+    assert len(posted) == 3
+    assert posted[0][0] == "http://127.0.0.1:8766/joints"
+    assert len(posted[0][1]["joint_state"]) == 6  # type: ignore[arg-type]
+    record_path = Path(str(result["mirror_record_path"]))
+    assert record_path.exists()
+    records = [json.loads(line) for line in record_path.read_text(encoding="utf-8").splitlines()]
+    assert len(records) == 3
+    assert records[0]["joint_state"][0]["motor_id"] == 11
+    assert records[-1]["isaac_post"]["ok"] is True
+    assert records[0]["sync_metrics"]["target_sample_hz"] == 30
+    assert records[0]["sync_metrics"]["sample_period_s"] == 1 / 30
+    assert records[0]["sync_metrics"]["post_latency_ms"] >= 0
+    assert records[0]["sync_metrics"]["loop_lag_ms"] >= 0
+    assert result["sync_summary"]["target_sample_hz"] == 30
+    assert result["sync_summary"]["sample_count"] == 3
+    assert result["sync_summary"]["mean_post_latency_ms"] >= 0
+    assert result["sync_summary"]["effective_sample_hz"] > 0
+
+
+def test_mirror_loop_start_live_reuses_persistent_joint_reader(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    follower = tmp_path / "omx_follower"
+    follower.touch()
+    bridge.ports_save({"mode": "live", "profile_id": "fake_omx_ai", "device_role": "follower", "port": str(follower)})
+    posted: list[dict[str, object]] = []
+    reader_events: list[str] = []
+
+    class FakeReader:
+        def __enter__(self) -> "FakeReader":
+            reader_events.append("open")
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:  # type: ignore[no-untyped-def]
+            reader_events.append("close")
+
+        def read(self) -> dict[int, float]:
+            reader_events.append("read")
+            return {motor_id: float(motor_id) for motor_id in [11, 12, 13, 14, 15, 16]}
+
+    bridge._open_follower_joint_position_reader = lambda port, motor_ids: FakeReader()  # type: ignore[attr-defined, method-assign]
+    bridge._read_follower_joint_positions = lambda port, motor_ids: (_ for _ in ()).throw(AssertionError("per-sample subprocess reader must not be used"))  # type: ignore[method-assign]
+    bridge._post_isaac_mirror_state = lambda endpoint, payload, timeout_s=0.5: posted.append(payload) or {"ok": True, "status_code": 200}  # type: ignore[method-assign]
+
+    result = bridge.mirror_loop_start(
+        {
+            "mode": "live",
+            "runtime_mode": "live",
+            "profile_id": "fake_omx_ai",
+            "isaac_mirror_endpoint": "http://127.0.0.1:8766/joints",
+            "isaac_mirror_sample_hz": 30,
+            "isaac_mirror_max_samples": 3,
+        }
+    )
+
+    assert result["ok"] is True
+    assert result["status"] == "COMPLETED"
+    assert result["sample_count"] == 3
+    assert reader_events == ["open", "read", "read", "read", "close"]
+    assert len(posted) == 3
+    assert posted[0]["follower_port"] == str(follower)
+    assert posted[0]["joint_state"][0]["position_deg"] == 11.0  # type: ignore[index]
+
+
+def test_mirror_receiver_health_checks_endpoint_health_url(tmp_path: Path, monkeypatch) -> None:
+    bridge = _bridge(tmp_path)
+    requested: list[tuple[str, float]] = []
+    monkeypatch.setattr(
+        bridge,
+        "_fetch_isaac_mirror_receiver_health",
+        lambda endpoint, timeout_s=0.5: requested.append((endpoint, timeout_s))
+        or {
+            "ok": True,
+            "health_url": "http://127.0.0.1:8766/health",
+            "apply_mode": "deferred_update_tick",
+            "sample_count": 12,
+        },
+    )
+
+    result = bridge.mirror_receiver_health(
+        {
+            "mode": "test",
+            "profile_id": "fake_omx_ai",
+            "isaac_mirror_endpoint": "http://127.0.0.1:8766/joints",
+            "isaac_mirror_timeout_s": 0.25,
+        }
+    )
+
+    assert result["ok"] is True
+    assert result["tool"] == "lerobot.mirror.receiver_health"
+    assert result["health_url"] == "http://127.0.0.1:8766/health"
+    assert result["apply_mode"] == "deferred_update_tick"
+    assert requested == [("http://127.0.0.1:8766/joints", 0.25)]
+
+
+def test_mirror_receiver_verify_posts_one_sample_and_confirms_receiver_state(tmp_path: Path, monkeypatch) -> None:
+    bridge = _bridge(tmp_path)
+    posted: list[tuple[str, dict[str, object]]] = []
+    monkeypatch.setattr(
+        bridge,
+        "_fetch_isaac_mirror_receiver_health",
+        lambda endpoint, timeout_s=0.5: {
+            "ok": True,
+            "health_url": "http://127.0.0.1:8766/health",
+            "apply_mode": "deferred_update_tick",
+            "sample_count": 4,
+        },
+        raising=False,
+    )
+    bridge._post_isaac_mirror_state = lambda endpoint, payload, timeout_s=0.5: posted.append((endpoint, payload)) or {"ok": True, "status_code": 200}  # type: ignore[method-assign]
+    monkeypatch.setattr(
+        bridge,
+        "_fetch_isaac_mirror_receiver_state",
+        lambda endpoint, timeout_s=0.5: {
+            "ok": True,
+            "health_url": "http://127.0.0.1:8766/state",
+            "sample_count": 5,
+            "last_payload_summary": {
+                "session_id": posted[-1][1]["session_id"],
+                "sample_index": posted[-1][1]["sample_index"],
+                "joint_count": 6,
+                "target_count": 6,
+            },
+        },
+        raising=False,
+    )
+
+    result = bridge.mirror_receiver_verify(
+        {
+            "mode": "test",
+            "profile_id": "fake_omx_ai",
+            "isaac_mirror_endpoint": "http://127.0.0.1:8766/joints",
+            "isaac_mirror_timeout_s": 0.25,
+        }
+    )
+
+    assert result["ok"] is True
+    assert result["tool"] == "lerobot.mirror.receiver_verify"
+    assert result["verification"]["receiver_sample_count_before"] == 4
+    assert result["verification"]["receiver_sample_count_after"] == 5
+    assert result["verification"]["session_id"] == result["isaac_mirror"]["session_id"]
+    assert result["verification"]["sample_index"] == 1
+    assert posted[0][0] == "http://127.0.0.1:8766/joints"
+
+
+def test_mirror_receiver_verify_fails_on_stale_receiver_state(tmp_path: Path, monkeypatch) -> None:
+    bridge = _bridge(tmp_path)
+    monkeypatch.setattr(
+        bridge,
+        "_fetch_isaac_mirror_receiver_health",
+        lambda endpoint, timeout_s=0.5: {"ok": True, "health_url": "http://127.0.0.1:8766/health", "sample_count": 10},
+        raising=False,
+    )
+    bridge._post_isaac_mirror_state = lambda endpoint, payload, timeout_s=0.5: {"ok": True, "status_code": 200}  # type: ignore[method-assign]
+    monkeypatch.setattr(
+        bridge,
+        "_fetch_isaac_mirror_receiver_state",
+        lambda endpoint, timeout_s=0.5: {
+            "ok": True,
+            "health_url": "http://127.0.0.1:8766/state",
+            "sample_count": 10,
+            "last_payload_summary": {"session_id": "older-session", "sample_index": 1, "joint_count": 6, "target_count": 6},
+        },
+        raising=False,
+    )
+
+    result = bridge.mirror_receiver_verify({"mode": "test", "profile_id": "fake_omx_ai"})
+
+    assert result["ok"] is False
+    assert result["failure_code"] == "LEROBOT_ISAAC_MIRROR_VERIFY_STALE_STATE"
+    assert "older-session" in result["message"]
+
+
+def test_mirror_receiver_process_start_status_and_stop(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    source_script = Path(__file__).resolve().parents[2] / "sim" / "robotis_omx" / "tools" / "isaac_omx_mirror_server.py"
+    target_script = tmp_path / "sim" / "robotis_omx" / "tools" / "isaac_omx_mirror_server.py"
+    target_script.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source_script, target_script)
+    port = _free_tcp_port()
+    endpoint = f"http://127.0.0.1:{port}/joints"
+    try:
+        started = bridge.mirror_receiver_process_start(
+            {
+                "mode": "test",
+                "profile_id": "fake_omx_ai",
+                "isaac_mirror_endpoint": endpoint,
+                "isaac_mirror_receiver_python": sys.executable,
+                "isaac_mirror_receiver_start_timeout_s": 5.0,
+            }
+        )
+
+        assert started["ok"] is True
+        assert started["status"] == "RUNNING"
+        assert started["pid"] > 0
+        assert started["health"]["ok"] is True
+
+        status = bridge.mirror_receiver_process_status({"mode": "test", "profile_id": "fake_omx_ai", "isaac_mirror_endpoint": endpoint})
+        assert status["ok"] is True
+        assert status["status"] == "RUNNING"
+        assert status["health"]["ok"] is True
+    finally:
+        stopped = bridge.mirror_receiver_process_stop({"mode": "test", "profile_id": "fake_omx_ai", "isaac_mirror_endpoint": endpoint})
+    assert stopped["ok"] is True
+    assert stopped["status"] == "STOPPED"
+    time.sleep(0.1)
+    assert bridge.mirror_receiver_process_status({"mode": "test", "profile_id": "fake_omx_ai", "isaac_mirror_endpoint": endpoint})["status"] in {
+        "STOPPED",
+        "IDLE",
+    }
+
+
+
+def test_mirror_receiver_extension_command_uses_isaac_app_and_extension(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    isaac_app = tmp_path / "IsaacSim" / "isaac-sim.sh"
+    isaac_app.parent.mkdir(parents=True, exist_ok=True)
+    isaac_app.write_text("#!/bin/sh\n", encoding="utf-8")
+    isaac_app.chmod(0o755)
+    extension_manifest = tmp_path / "sim" / "robotis_omx" / "extensions" / "atr.omx.mirror" / "config" / "extension.toml"
+    extension_manifest.parent.mkdir(parents=True, exist_ok=True)
+    extension_manifest.write_text("[package]\ntitle = \"ATR ROBOTIS OMX Mirror Receiver\"\n", encoding="utf-8")
+    scene_path = tmp_path / "sim" / "robotis_omx" / "scene" / "omx_table_layout.usda"
+    scene_path.parent.mkdir(parents=True, exist_ok=True)
+    scene_path.write_text("#usda 1.0\n", encoding="utf-8")
+
+    command_info = bridge._isaac_mirror_receiver_command(
+        {
+            "isaac_mirror_receiver_launch_mode": "isaac_extension",
+            "isaac_mirror_receiver_isaac_sim_executable": str(isaac_app),
+            "isaac_mirror_receiver_scene": str(scene_path),
+        },
+        "http://127.0.0.1:18766/joints",
+    )
+
+    assert command_info["ok"] is True
+    command = command_info["command"]
+    assert command[0] == str(isaac_app)
+    assert "--ext-folder" in command
+    assert str(tmp_path / "sim" / "robotis_omx" / "extensions") in command
+    assert "--enable" in command
+    assert "atr.omx.mirror" in command
+    assert "--/exts/atr.omx.mirror/host=127.0.0.1" in command
+    assert "--/exts/atr.omx.mirror/port=18766" in command
+    assert f"--/exts/atr.omx.mirror/scene={scene_path}" in command
+    assert "--/exts/atr.omx.mirror/openSceneOnStartup=true" in command
+    assert "--/exts/atr.omx.mirror/playTimelineOnStartup=true" in command
+    assert str(scene_path) in command
+
+
+def test_live_mirror_preflight_blocks_non_isaac_update_tick_receiver(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    profile = bridge._profile("fake_omx_ai")
+    assert profile is not None
+    request = LeRobotSessionRequest.model_validate(
+        {
+            "mode": "live",
+            "profile_id": "fake_omx_ai",
+            "isaac_mirror_enabled": True,
+            "isaac_mirror_endpoint": "http://127.0.0.1:8766/joints",
+        }
+    )
+    bridge._fetch_isaac_mirror_receiver_health = lambda endpoint, timeout_s=0.5: {  # type: ignore[method-assign]
+        "ok": True,
+        "health_url": "http://127.0.0.1:8766/health",
+        "apply_mode": "direct_http_thread",
+    }
+
+    result = bridge._live_isaac_mirror_preflight_if_needed(
+        tool="lerobot.teleoperate.start",
+        mode="live",
+        profile=profile,
+        workflow="teleoperate",
+        request=request,
+    )
+
+    assert result is not None
+    assert result["ok"] is False
+    assert result["failure_code"] == "LEROBOT_ISAAC_MIRROR_RECEIVER_NOT_IN_ISAAC_UPDATE_TICK"
+
+def test_teleoperate_start_can_attach_isaac_mirror_loop(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    posted: list[tuple[str, dict[str, object]]] = []
+    bridge._post_isaac_mirror_state = lambda endpoint, payload, timeout_s=0.5: posted.append((endpoint, payload)) or {"ok": True, "status_code": 200}  # type: ignore[method-assign]
+
+    started = bridge.teleoperate_start(
+        {
+            "mode": "test",
+            "profile_id": "fake_omx_ai",
+            "isaac_mirror_enabled": True,
+            "isaac_mirror_endpoint": "http://127.0.0.1:8766/joints",
+            "isaac_mirror_max_samples": 2,
+        }
+    )
+
+    assert started["ok"] is True
+    assert started["workflow"] == "teleoperate"
+    assert started["isaac_mirror"]["status"] == "COMPLETED"
+    assert started["isaac_mirror"]["sample_count"] == 2
+    assert started["isaac_mirror_session_id"]
+    assert all(payload["attached_to_session_id"] == started["session_id"] for _, payload in posted)
+
+
+def test_teleoperate_stop_stops_attached_isaac_mirror_loop(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    bridge._post_isaac_mirror_state = lambda endpoint, payload, timeout_s=0.5: {"ok": True, "status_code": 200}  # type: ignore[method-assign]
+    started = bridge.teleoperate_start(
+        {
+            "mode": "test",
+            "profile_id": "fake_omx_ai",
+            "isaac_mirror_enabled": True,
+            "isaac_mirror_max_samples": 2,
+        }
+    )
+
+    stopped = bridge.teleoperate_stop({"mode": "test", "session_id": started["session_id"]})
+
+    assert stopped["ok"] is True
+    assert stopped["status"] == "STOPPED"
+    assert stopped["isaac_mirror_stop"]["status"] in {"STOPPED", "COMPLETED"}
+    assert stopped["isaac_mirror_stop"]["attached_to_session_id"] == started["session_id"]
+
+
+def test_live_teleoperate_with_isaac_mirror_blocks_when_receiver_unavailable(tmp_path: Path, monkeypatch) -> None:
+    bridge = _bridge(tmp_path)
+    bridge.config.profiles["fake_omx_ai"]["safety_limits"].update({"live_enabled": True, "allow_teleoperation": True})
+    follower = tmp_path / "omx_follower"
+    leader = tmp_path / "omx_leader"
+    follower.touch()
+    leader.touch()
+    bridge.ports_save({"mode": "live", "profile_id": "fake_omx_ai", "device_role": "follower", "port": str(follower)})
+    bridge.ports_save({"mode": "live", "profile_id": "fake_omx_ai", "device_role": "leader", "port": str(leader)})
+    monkeypatch.setattr(
+        bridge,
+        "_fetch_isaac_mirror_receiver_health",
+        lambda endpoint, timeout_s=0.5: {
+            "ok": False,
+            "health_url": "http://127.0.0.1:8766/health",
+            "message": "connection refused",
+        },
+        raising=False,
+    )
+    bridge._start_live_process = lambda **_: (_ for _ in ()).throw(AssertionError("must not start live teleop"))  # type: ignore[method-assign]
+
+    result = bridge.teleoperate_start(
+        {
+            "mode": "live",
+            "runtime_mode": "live",
+            "profile_id": "fake_omx_ai",
+            "confirm_live_execute": True,
+            "isaac_mirror_enabled": True,
+            "isaac_mirror_endpoint": "http://127.0.0.1:8766/joints",
+        }
+    )
+
+    assert result["ok"] is False
+    assert result["failure_code"] == "LEROBOT_ISAAC_MIRROR_RECEIVER_UNAVAILABLE"
+    assert "http://127.0.0.1:8766/health" in result["message"]
+
+
+def test_live_teleoperate_with_isaac_mirror_starts_when_receiver_ready(tmp_path: Path, monkeypatch) -> None:
+    bridge = _bridge(tmp_path)
+    bridge.config.profiles["fake_omx_ai"]["safety_limits"].update({"live_enabled": True, "allow_teleoperation": True})
+    follower = tmp_path / "omx_follower"
+    leader = tmp_path / "omx_leader"
+    follower.touch()
+    leader.touch()
+    bridge.ports_save({"mode": "live", "profile_id": "fake_omx_ai", "device_role": "follower", "port": str(follower)})
+    bridge.ports_save({"mode": "live", "profile_id": "fake_omx_ai", "device_role": "leader", "port": str(leader)})
+    monkeypatch.setattr(
+        bridge,
+        "_fetch_isaac_mirror_receiver_health",
+        lambda endpoint, timeout_s=0.5: {
+            "ok": True,
+            "health_url": "http://127.0.0.1:8766/health",
+            "apply_mode": "deferred_update_tick",
+            "sample_count": 0,
+        },
+        raising=False,
+    )
+    live_start_kwargs: dict[str, object] = {}
+    bridge.mirror_loop_start = lambda payload: (_ for _ in ()).throw(AssertionError("live teleop mirror must run in-process"))  # type: ignore[method-assign]
+    bridge._start_live_process = lambda **kwargs: live_start_kwargs.update(kwargs) or {"ok": True, "session_updates": {"pid": 1234, "log_path": "", "returncode": None}}  # type: ignore[method-assign]
+
+    result = bridge.teleoperate_start(
+        {
+            "mode": "live",
+            "runtime_mode": "live",
+            "profile_id": "fake_omx_ai",
+            "confirm_live_execute": True,
+            "isaac_mirror_enabled": True,
+            "isaac_mirror_endpoint": "http://127.0.0.1:8766/joints",
+            "isaac_mirror_max_samples": 1,
+        }
+    )
+
+    assert result["ok"] is True
+    assert result["status"] == "TELEOP_ACTIVE"
+    assert result["isaac_mirror"]["status"] == "IN_PROCESS"
+    assert result["isaac_mirror"]["attached_to_session_id"] == result["session_id"]
+    command = [str(item) for item in live_start_kwargs["command"]]  # type: ignore[index]
+    assert "teleoperate" in command
+    assert any(item.endswith("lerobot_isaac_mirror_runtime_wrapper.py") for item in command)
+    env = live_start_kwargs["env_overrides"]  # type: ignore[index]
+    assert env["ATR_ISAAC_MIRROR_ENABLED"] == "1"  # type: ignore[index]
+    assert env["ATR_ISAAC_MIRROR_ENDPOINT"] == "http://127.0.0.1:8766/joints"  # type: ignore[index]
+    assert env["ATR_ISAAC_MIRROR_CALIBRATION_PATH"] == str(tmp_path / "memory" / "isaac_omx_mirror_calibration.json")  # type: ignore[index]
 
 
 def test_port_baseline_detect_persists_follower_port(tmp_path: Path) -> None:
@@ -131,6 +672,91 @@ def test_port_detect_accepts_removed_port_like_lerobot_find_port(tmp_path: Path)
     assert detected["ok"] is True
     assert detected["change_type"] == "removed"
     assert detected["selected_port"] == "/dev/ttyUSB1"
+
+
+def test_port_detect_uses_added_robot_candidate_and_keeps_serial_id_mapping(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    stable_map = {
+        "/dev/ttyUSB0": "/dev/serial/by-id/leader-openrb",
+        "/dev/ttyUSB1": "/dev/serial/by-id/follower-openrb",
+    }
+    bridge._stable_device_port = lambda port, role: stable_map.get(port, port)  # type: ignore[method-assign]
+    bridge.ports_save({"mode": "live", "profile_id": "fake_omx_ai", "device_role": "leader", "port": "/dev/ttyUSB0"})
+    bridge._scan_serial_ports = lambda: ["/dev/ttyUSB0"]  # type: ignore[method-assign]
+    bridge.ports_baseline({"mode": "live", "profile_id": "fake_omx_ai", "device_role": "follower"})
+    bridge._scan_serial_ports = lambda: ["/dev/ttyUSB0", "/dev/ttyUSB1"]  # type: ignore[method-assign]
+    detected = bridge.ports_detect({"mode": "live", "profile_id": "fake_omx_ai", "device_role": "follower"})
+
+    assert detected["ok"] is True
+    assert detected["change_type"] == "added"
+    assert detected["candidates"] == ["/dev/ttyUSB1"]
+    assert detected["raw_selected_port"] == "/dev/ttyUSB1"
+    assert detected["selected_port"] == "/dev/serial/by-id/follower-openrb"
+    assert detected["saved_devices"]["follower"]["port"] == "/dev/serial/by-id/follower-openrb"
+    teleop = bridge.teleoperate_start({"mode": "test", "profile_id": "fake_omx_ai", "camera_enabled": False})
+    assert "--robot.port=/dev/serial/by-id/follower-openrb" in teleop["command_preview"]
+    assert "--teleop.port=/dev/serial/by-id/leader-openrb" in teleop["command_preview"]
+
+
+def test_port_detect_keeps_lerobot_delta_behavior_when_other_role_matches(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    bridge._stable_device_port = lambda port, role: "/dev/serial/by-id/shared-openrb" if port == "/dev/ttyUSB0" else port  # type: ignore[method-assign]
+    bridge.ports_save({"mode": "live", "profile_id": "fake_omx_ai", "device_role": "leader", "port": "/dev/ttyUSB0"})
+    bridge._scan_serial_ports = lambda: ["/dev/ttyUSB0"]  # type: ignore[method-assign]
+
+    detected = bridge.ports_detect({"mode": "live", "profile_id": "fake_omx_ai", "device_role": "follower"})
+
+    assert detected["ok"] is True
+    assert detected["raw_selected_port"] == "/dev/ttyUSB0"
+    assert detected["selected_port"] == "/dev/serial/by-id/shared-openrb"
+    assert detected["saved_devices"]["leader"]["port"] == "/dev/serial/by-id/shared-openrb"
+    assert detected["saved_devices"]["follower"]["port"] == "/dev/serial/by-id/shared-openrb"
+
+
+def test_live_robot_port_detect_uses_motor_ids_when_no_delta_exists(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    leader = "/dev/serial/by-id/leader-openrb"
+    follower = "/dev/serial/by-id/follower-openrb"
+    bridge._scan_serial_ports = lambda: [leader, follower]  # type: ignore[method-assign]
+    bridge._serial_motor_ids = lambda port: {  # type: ignore[attr-defined, method-assign]
+        leader: [1, 2, 3, 4, 5, 6],
+        follower: [11, 12, 13, 14, 15, 16],
+    }.get(port, [])
+
+    follower_result = bridge.ports_detect({"mode": "live", "profile_id": "fake_omx_ai", "device_role": "follower"})
+    leader_result = bridge.ports_detect({"mode": "live", "profile_id": "fake_omx_ai", "device_role": "leader"})
+
+    assert follower_result["ok"] is True
+    assert follower_result["selected_port"] == follower
+    assert follower_result["saved_devices"]["follower"]["port"] == follower
+    assert leader_result["ok"] is True
+    assert leader_result["selected_port"] == leader
+    assert leader_result["saved_devices"]["leader"]["port"] == leader
+
+
+def test_removed_robot_port_uses_baseline_serial_number_identity(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    baseline_phase = True
+
+    def matching_symlink(device_path: str, patterns: list[str]) -> str:
+        if baseline_phase and device_path == "/dev/ttyACM0" and patterns == ["/dev/serial/by-id/*"]:
+            return "/dev/serial/by-id/usb-ROBOTIS_OpenRB-150_FOLLOWER123-if00"
+        return ""
+
+    bridge._matching_symlink = matching_symlink  # type: ignore[method-assign]
+    bridge._scan_serial_ports = lambda: ["/dev/ttyACM0"]  # type: ignore[method-assign]
+    bridge.ports_baseline({"mode": "live", "profile_id": "fake_omx_ai", "device_role": "follower"})
+    baseline_phase = False
+    bridge._scan_serial_ports = lambda: []  # type: ignore[method-assign]
+
+    detected = bridge.ports_detect({"mode": "live", "profile_id": "fake_omx_ai", "device_role": "follower"})
+
+    assert detected["ok"] is True
+    assert detected["raw_selected_port"] == "/dev/ttyACM0"
+    assert detected["selected_port"] == "/dev/serial/by-id/usb-ROBOTIS_OpenRB-150_FOLLOWER123-if00"
+    assert detected["saved_device"]["raw_port"] == "/dev/ttyACM0"
+    assert detected["saved_device"]["device_link"] == "/dev/serial/by-id/usb-ROBOTIS_OpenRB-150_FOLLOWER123-if00"
+    assert detected["saved_device"]["serial_number"] == "FOLLOWER123"
 
 
 def test_camera_paths_are_preserved_for_opencv(tmp_path: Path) -> None:
@@ -238,6 +864,10 @@ def test_realsense_camera_mode_uses_depth_rgb_for_top_and_wrist_at_default_15fps
         "fps": 15,
         "color_format": "rgb8",
         "use_depth": True,
+        "align_depth_to_color": True,
+        "depth_scale_m_per_unit": 0.001,
+        "depth_clip_min_mm": 0.0,
+        "depth_clip_max_mm": 2000.0,
         "warmup_s": 5,
     }
     assert cameras["wrist"] == {
@@ -248,6 +878,10 @@ def test_realsense_camera_mode_uses_depth_rgb_for_top_and_wrist_at_default_15fps
         "fps": 15,
         "color_format": "bgr8",
         "use_depth": True,
+        "align_depth_to_color": True,
+        "depth_scale_m_per_unit": 0.001,
+        "depth_clip_min_mm": 0.0,
+        "depth_clip_max_mm": 2000.0,
         "warmup_s": 5,
     }
 
@@ -290,6 +924,72 @@ def test_record_session_fails_if_requested_realsense_depth_is_missing_from_datas
         "observation.images.top_depth",
         "observation.images.wrist_depth",
     ]
+
+
+def test_dataset_inspect_reads_real_metadata_and_depth_features(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    dataset = tmp_path / "hf_datasets" / "jin" / "depth_dataset"
+    _make_trainable_lerobot_dataset(dataset)
+    info_path = dataset / "meta" / "info.json"
+    info = json.loads(info_path.read_text(encoding="utf-8"))
+    info.update(
+        {
+            "total_episodes": 2,
+            "fps": 15,
+            "features": {
+                "observation.images.top": {"dtype": "video", "shape": [480, 640, 3]},
+                "observation.images.top_depth": {"dtype": "video", "shape": [480, 640, 3]},
+                "observation.images.wrist": {"dtype": "video", "shape": [480, 640, 3]},
+                "observation.images.wrist_depth": {"dtype": "video", "shape": [480, 640, 3]},
+                "observation.state": {"dtype": "float32", "shape": [6]},
+                "action": {"dtype": "float32", "shape": [6]},
+            },
+        }
+    )
+    info_path.write_text(json.dumps(info), encoding="utf-8")
+
+    result = bridge.dataset_inspect(
+        {
+            "mode": "live",
+            "profile_id": "fake_omx_ai",
+            "dataset_path": str(dataset),
+        }
+    )
+
+    assert result["ok"] is True
+    assert result["dataset"]["episode_count"] == 2
+    assert result["dataset"]["fps"] == 15
+    assert result["dataset"]["has_depth_features"] is True
+    assert result["dataset"]["depth_features"] == [
+        "observation.images.top_depth",
+        "observation.images.wrist_depth",
+    ]
+    assert "observation.images.top_depth" in result["dataset"]["features"]
+
+
+def test_dataset_inspect_restores_profile_and_pipeline_from_metadata(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    dataset = tmp_path / "hf_datasets" / "jin" / "recorded"
+    _make_trainable_lerobot_dataset(dataset)
+    (dataset / "meta" / "atr_pipeline.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "profile_id": "fake_omx_ai",
+                "observation_pipeline_id": "raw_depth_adapter",
+                "dataset_repo_id": "jin/recorded",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = bridge.dataset_inspect({"mode": "test", "profile_id": "fake_omx_ai", "dataset_path": str(dataset)})
+
+    assert result["ok"] is True
+    assert result["dataset"]["robot_profile_id"] == "fake_omx_ai"
+    assert result["dataset"]["observation_pipeline_id"] == "raw_depth_adapter"
+    assert result["dataset"]["profile_restored_from_metadata"] is True
+    assert result["dataset"]["pipeline_metadata_path"] == str(dataset / "meta" / "atr_pipeline.json")
 
 
 def test_realsense_scan_does_not_fallback_to_v4l_by_id_when_sdk_query_fails(tmp_path: Path, monkeypatch) -> None:
@@ -510,16 +1210,16 @@ def test_custom_udev_style_device_name_is_preserved(tmp_path: Path) -> None:
     assert "raw_port" not in saved["saved_device"]
 
 
-def test_leader_and_follower_cannot_share_same_serial_port(tmp_path: Path) -> None:
+def test_leader_and_follower_save_does_not_block_same_serial_port(tmp_path: Path) -> None:
     bridge = _bridge(tmp_path)
 
     follower = bridge.ports_save({"mode": "test", "profile_id": "fake_omx_ai", "device_role": "follower", "port": "/dev/ttyUSB0"})
     leader = bridge.ports_save({"mode": "test", "profile_id": "fake_omx_ai", "device_role": "leader", "port": "/dev/ttyUSB0"})
 
     assert follower["ok"] is True
-    assert leader["ok"] is False
-    assert leader["failure_code"] == "LEROBOT_SERIAL_ROLE_PORT_CONFLICT"
-    assert "follower" in leader["message"]
+    assert leader["ok"] is True
+    assert leader["saved_devices"]["follower"]["port"] == "/dev/ttyUSB0"
+    assert leader["saved_devices"]["leader"]["port"] == "/dev/ttyUSB0"
 
 
 def test_live_rollout_blocks_unavailable_saved_follower_port(tmp_path: Path) -> None:
@@ -900,6 +1600,88 @@ def test_pi05_train_uses_dedicated_runtime_and_hf_base_policy(tmp_path: Path) ->
     assert "--wandb.mode=offline" in started["command_preview"]
 
 
+def test_xvla_train_uses_lerobot_runtime_and_soft_prompt_defaults(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+
+    started = bridge.train_start(
+        {
+            "mode": "test",
+            "profile_id": "fake_omx_ai",
+            "dataset_repo_id": "jin/record-test",
+            "policy_type": "xvla",
+        }
+    )
+
+    assert started["ok"] is True
+    assert "-n" in started["command_preview"]
+    assert started["command_preview"][started["command_preview"].index("-n") + 1] == "lerobot-pi05-torch211"
+    assert "--policy.type=xvla" in started["command_preview"]
+    assert "--policy.path=lerobot/xvla-base" in started["command_preview"]
+    assert "--steps=20000" in started["command_preview"]
+    assert "--policy.dtype=bfloat16" in started["command_preview"]
+    assert "--policy.action_mode=auto" in started["command_preview"]
+    assert "--policy.freeze_vision_encoder=false" in started["command_preview"]
+    assert "--policy.freeze_language_encoder=false" in started["command_preview"]
+    assert "--policy.train_policy_transformer=true" in started["command_preview"]
+    assert "--policy.train_soft_prompts=true" in started["command_preview"]
+    assert "--dataset.video_backend=torchcodec" in started["command_preview"]
+    assert "--policy.type=pi05" not in started["command_preview"]
+
+
+def test_smolvla_train_uses_lerobot_runtime_and_base_policy_defaults(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+
+    started = bridge.train_start(
+        {
+            "mode": "test",
+            "profile_id": "fake_omx_ai",
+            "dataset_repo_id": "jin/record-test",
+            "policy_type": "smolvla",
+        }
+    )
+
+    assert started["ok"] is True
+    assert "-n" in started["command_preview"]
+    assert started["command_preview"][started["command_preview"].index("-n") + 1] == "lerobot-pi05-torch211"
+    assert "--policy.type=smolvla" in started["command_preview"]
+    assert "--policy.path=lerobot/smolvla_base" in started["command_preview"]
+    assert "--steps=20000" in started["command_preview"]
+    assert "--batch_size=8" in started["command_preview"]
+    assert "--policy.n_obs_steps=1" in started["command_preview"]
+    assert "--policy.chunk_size=50" in started["command_preview"]
+    assert "--policy.n_action_steps=50" in started["command_preview"]
+    assert "--policy.freeze_vision_encoder=true" in started["command_preview"]
+    assert "--policy.train_expert_only=true" in started["command_preview"]
+    assert "--policy.train_state_proj=true" in started["command_preview"]
+    assert "--dataset.video_backend=torchcodec" in started["command_preview"]
+    assert "--policy.type=pi05" not in started["command_preview"]
+    assert all("xvla" not in str(item).lower() for item in started["command_preview"])
+
+
+def test_policy_presets_include_xvla_base(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+
+    result = bridge.policies_list({"mode": "test"})
+
+    assert result["ok"] is True
+    assert any(
+        policy["value"] == "lerobot/xvla-base" and policy["policy_type"] == "xvla"
+        for policy in result["policies"]
+    )
+
+
+def test_policy_presets_include_smolvla_base(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+
+    result = bridge.policies_list({"mode": "test"})
+
+    assert result["ok"] is True
+    assert any(
+        policy["value"] == "lerobot/smolvla_base" and policy["policy_type"] == "smolvla"
+        for policy in result["policies"]
+    )
+
+
 def test_pi05_train_replaces_stale_act_log_freq_default_with_stable_pi05_default(tmp_path: Path) -> None:
     bridge = _bridge(tmp_path)
 
@@ -933,6 +1715,71 @@ def test_pi05_train_forces_stale_wandb_request_offline(tmp_path: Path) -> None:
     assert started["ok"] is True
     assert "--wandb.enable=true" in started["command_preview"]
     assert "--wandb.mode=offline" in started["command_preview"]
+
+
+def test_pi05_train_uses_local_wandb_base_url_when_requested(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+
+    started = bridge.train_start(
+        {
+            "mode": "test",
+            "profile_id": "fake_omx_ai",
+            "dataset_repo_id": "jin/record-test",
+            "policy_type": "pi05",
+            "wandb_enable": True,
+            "wandb_mode": "online",
+            "wandb_base_url": "http://127.0.0.1:8081",
+        }
+    )
+
+    assert started["ok"] is True
+    assert "--wandb.enable=true" in started["command_preview"]
+    assert "--wandb.mode=online" in started["command_preview"]
+    assert started["training"]["wandb_base_url"] == "http://127.0.0.1:8081"
+
+
+def test_train_local_wandb_mode_maps_to_online_cli_mode(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+
+    started = bridge.train_start(
+        {
+            "mode": "test",
+            "profile_id": "fake_omx_ai",
+            "dataset_repo_id": "jin/record-test",
+            "policy_type": "pi05",
+            "wandb_enable": True,
+            "wandb_mode": "local",
+            "wandb_base_url": "http://127.0.0.1:8081",
+        }
+    )
+
+    assert started["ok"] is True
+    assert "--wandb.mode=online" in started["command_preview"]
+    assert "--wandb.mode=local" not in started["command_preview"]
+    assert started["training"]["wandb_base_url"] == "http://127.0.0.1:8081"
+
+
+def test_wandb_local_start_returns_conda_server_command_in_test_mode(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+
+    result = bridge.wandb_local_start({"mode": "test", "wandb_base_url": "http://127.0.0.1:8081"})
+
+    assert result["ok"] is True
+    assert result["tool"] == "lerobot.wandb_local.start"
+    assert result["status"] == "WANDB_LOCAL_READY"
+    assert result["url"] == "http://127.0.0.1:8081"
+    assert result["command_preview"][:4] == [bridge.config.conda_executable, "run", "--no-capture-output", "-n"]
+    assert result["command_preview"][result["command_preview"].index("-n") + 1] == "lerobot-pi05-torch211"
+    assert result["command_preview"][-6:] == ["wandb", "server", "start", "--port", "8081", "--no-daemon"]
+
+
+def test_wandb_local_log_exec_format_error_is_reported_as_failure(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+
+    failure = bridge._wandb_local_failure_from_log("exec /usr/sbin/my_init: exec format error")
+
+    assert failure is not None
+    assert failure[0] == "WANDB_LOCAL_PLATFORM_EMULATION_REQUIRED"
 
 
 def test_pi05_train_respects_explicit_wandb_disabled(tmp_path: Path) -> None:
@@ -1741,6 +2588,7 @@ def test_rollout_normalizes_selected_model_file_to_checkpoint_dir(tmp_path: Path
 
     assert result["ok"] is True
     assert f"--policy.path={policy_dir}" in result["command_preview"]
+    assert "--policy.type=act" not in result["command_preview"]
     assert "--policy.temporal_ensemble_coeff=0.01" in result["command_preview"]
     assert "--policy.n_action_steps=1" in result["command_preview"]
     assert "--robot.max_relative_target=5" in result["command_preview"]
@@ -1810,6 +2658,58 @@ def test_pi05_rollout_uses_dedicated_runtime_and_rtc_command(tmp_path: Path) -> 
     camera_arg = next(item for item in result["command_preview"] if item.startswith("--robot.cameras="))
     cameras = json.loads(camera_arg.split("=", 1)[1])
     assert all(camera["fps"] == 30 for camera in cameras.values())
+
+
+def test_xvla_rollout_uses_generic_lerobot_runtime_without_act_temporal_ensemble(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+
+    result = bridge.rollout_start(
+        {
+            "mode": "test",
+            "profile_id": "fake_omx_ai",
+            "policy_path": "fake://xvla_policy",
+            "policy_type": "xvla",
+            "continuous_rollout": True,
+            "camera_enabled": True,
+        }
+    )
+
+    assert result["ok"] is True
+    assert "-n" in result["command_preview"]
+    assert result["command_preview"][result["command_preview"].index("-n") + 1] == "lerobot-pi05-torch211"
+    assert not any(Path(part).name == "lerobot_pi05_rollout_wrapper.py" for part in result["command_preview"])
+    assert "--policy.path=fake://xvla_policy" in result["command_preview"]
+    assert "--policy.type=xvla" not in result["command_preview"]
+    assert "--policy.temporal_ensemble_coeff=0.01" not in result["command_preview"]
+    assert "--policy.n_action_steps=1" not in result["command_preview"]
+    assert "--rtc.enabled=true" not in result["command_preview"]
+    assert "--robot.max_relative_target=5" in result["command_preview"]
+
+
+def test_smolvla_rollout_uses_generic_lerobot_runtime_without_act_temporal_ensemble(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+
+    result = bridge.rollout_start(
+        {
+            "mode": "test",
+            "profile_id": "fake_omx_ai",
+            "policy_path": "fake://smolvla_policy",
+            "policy_type": "smolvla",
+            "continuous_rollout": True,
+            "camera_enabled": True,
+        }
+    )
+
+    assert result["ok"] is True
+    assert "-n" in result["command_preview"]
+    assert result["command_preview"][result["command_preview"].index("-n") + 1] == "lerobot-pi05-torch211"
+    assert not any(Path(part).name == "lerobot_pi05_rollout_wrapper.py" for part in result["command_preview"])
+    assert "--policy.path=fake://smolvla_policy" in result["command_preview"]
+    assert "--policy.type=smolvla" not in result["command_preview"]
+    assert "--policy.temporal_ensemble_coeff=0.01" not in result["command_preview"]
+    assert "--policy.n_action_steps=1" not in result["command_preview"]
+    assert "--rtc.enabled=true" not in result["command_preview"]
+    assert "--robot.max_relative_target=5" in result["command_preview"]
 
 
 def test_rollout_control_fps_can_differ_from_camera_fps(tmp_path: Path) -> None:
@@ -2065,10 +2965,9 @@ def test_live_record_passes_tts_env_overrides(tmp_path: Path) -> None:
 
     assert started["ok"] is True
     assert started["tts"] == {"engine": "espeak-ng", "rate": -60, "voice": ""}
-    assert captured["env_overrides"] == {
-        "LEROBOT_TTS_ENGINE": "espeak-ng",
-        "LEROBOT_TTS_RATE": "-60",
-    }
+    assert captured["env_overrides"]["LEROBOT_TTS_ENGINE"] == "espeak-ng"
+    assert captured["env_overrides"]["LEROBOT_TTS_RATE"] == "-60"
+    assert captured["env_overrides"]["ATR_LEROBOT_OBSERVATION_PIPELINE_ID"] == "raw_depth_adapter"
 
 
 def test_live_record_default_piper_passes_packaged_tts_env(tmp_path: Path) -> None:
@@ -2106,6 +3005,434 @@ def test_live_record_default_piper_passes_packaged_tts_env(tmp_path: Path) -> No
         tmp_path / "models" / "tts" / "piper" / "en_US-lessac-medium" / "en_US-lessac-medium.onnx"
     )
 
+def test_live_record_enables_raw_depth_sidecar_env_for_realsense_depth(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    captured: dict[str, object] = {}
+    bridge._live_block_if_needed = lambda **_: None  # type: ignore[method-assign]
+    bridge._live_port_block_if_needed = lambda **_: None  # type: ignore[method-assign]
+    bridge._live_camera_block_if_needed = lambda **_: None  # type: ignore[method-assign]
+    bridge._saved_camera_device = lambda _profile_id, camera_key: {  # type: ignore[method-assign]
+        "backend": "intelrealsense",
+        "serial_number_or_name": f"rs-{camera_key}",
+        "use_depth": True,
+        "fps": 15,
+        "width": 640,
+        "height": 480,
+    }
+
+    def fake_start_live_process(**kwargs: object) -> dict[str, object]:
+        captured.update(kwargs)
+        return {"ok": True, "session_updates": {"pid": 123, "log_path": "", "returncode": None}}
+
+    bridge._start_live_process = fake_start_live_process  # type: ignore[method-assign]
+
+    started = bridge.record_start(
+        {
+            "mode": "live",
+            "runtime_mode": "live",
+            "profile_id": "fake_omx_ai",
+            "dataset_repo_id": "jin/record-test",
+            "confirm_live_execute": True,
+            "camera_enabled": True,
+        }
+    )
+
+    raw_depth_dir = tmp_path / "hf_datasets" / "jin" / "record-test" / "sidecar" / "depth_raw"
+    assert started["ok"] is True
+    assert started["raw_depth_sidecar"]["enabled"] is True
+    assert started["raw_depth_sidecar"]["root"] == str(raw_depth_dir)
+    assert started["raw_depth_sidecar"]["expected_camera_keys"] == ["top", "wrist"]
+    assert captured["env_overrides"]["ATR_LEROBOT_RAW_DEPTH_DIR"] == str(raw_depth_dir)
+    assert captured["env_overrides"]["ATR_LEROBOT_RAW_DEPTH_CAMERA_KEYS"] == "top,wrist"
+    assert captured["env_overrides"]["ATR_LEROBOT_RAW_DEPTH_FORMAT"] == "png16"
+    assert captured["env_overrides"]["ATR_LEROBOT_DEPTH_ALIGNED_TO"] == "color"
+    assert captured["env_overrides"]["ATR_LEROBOT_DEPTH_SCALE_M_PER_UNIT"] == "0.001"
+    assert captured["env_overrides"]["ATR_LEROBOT_DEPTH_CLIP_MIN_MM"] == "0.0"
+    assert captured["env_overrides"]["ATR_LEROBOT_DEPTH_CLIP_MAX_MM"] == "2000.0"
+
+
+def test_live_record_legacy_pipeline_disables_raw_depth_sidecar_env(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    captured: dict[str, object] = {}
+    bridge._live_block_if_needed = lambda **_: None  # type: ignore[method-assign]
+    bridge._live_port_block_if_needed = lambda **_: None  # type: ignore[method-assign]
+    bridge._live_camera_block_if_needed = lambda **_: None  # type: ignore[method-assign]
+    bridge._saved_camera_device = lambda _profile_id, camera_key: {  # type: ignore[method-assign]
+        "backend": "intelrealsense",
+        "serial_number_or_name": f"rs-{camera_key}",
+        "use_depth": True,
+        "fps": 15,
+        "width": 640,
+        "height": 480,
+    }
+
+    def fake_start_live_process(**kwargs: object) -> dict[str, object]:
+        captured.update(kwargs)
+        return {"ok": True, "session_updates": {"pid": 123, "log_path": "", "returncode": None}}
+
+    bridge._start_live_process = fake_start_live_process  # type: ignore[method-assign]
+
+    started = bridge.record_start(
+        {
+            "mode": "live",
+            "runtime_mode": "live",
+            "profile_id": "fake_omx_ai",
+            "dataset_repo_id": "jin/record-test",
+            "confirm_live_execute": True,
+            "camera_enabled": True,
+            "observation_pipeline_id": "legacy_lerobot",
+        }
+    )
+
+    assert started["ok"] is True
+    assert started["observation_pipeline_id"] == "legacy_lerobot"
+    assert "raw_depth_sidecar" not in started
+    assert "ATR_LEROBOT_RAW_DEPTH_DIR" not in captured["env_overrides"]
+    assert captured["env_overrides"]["ATR_LEROBOT_OBSERVATION_PIPELINE_ID"] == "legacy_lerobot"
+
+
+def test_record_writes_dataset_pipeline_metadata_for_raw_depth_adapter(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+
+    started = bridge.record_start(
+        {
+            "mode": "test",
+            "runtime_mode": "test",
+            "profile_id": "fake_omx_ai",
+            "dataset_repo_id": "jin/raw-adapter",
+            "camera_enabled": True,
+            "observation_pipeline_id": "raw_depth_adapter",
+        }
+    )
+
+    metadata_path = tmp_path / "hf_datasets" / "jin" / "raw-adapter" / "meta" / "atr_pipeline.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    assert started["ok"] is True
+    assert started["observation_pipeline_id"] == "raw_depth_adapter"
+    assert metadata["profile_id"] == "fake_omx_ai"
+    assert metadata["observation_pipeline_id"] == "raw_depth_adapter"
+    assert metadata["dataset_repo_id"] == "jin/raw-adapter"
+    assert metadata["raw_depth_sidecar"]["required"] is True
+
+
+def test_record_with_isaac_mirror_stores_mirror_sidecar_in_dataset_metadata(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    bridge._post_isaac_mirror_state = lambda endpoint, payload, timeout_s=0.5: {"ok": True, "status_code": 200}  # type: ignore[method-assign]
+
+    started = bridge.record_start(
+        {
+            "mode": "test",
+            "runtime_mode": "test",
+            "profile_id": "fake_omx_ai",
+            "dataset_repo_id": "jin/mirror-record",
+            "camera_enabled": True,
+            "observation_pipeline_id": "raw_depth_adapter",
+            "isaac_mirror_enabled": True,
+            "isaac_mirror_max_samples": 2,
+        }
+    )
+
+    dataset_path = tmp_path / "hf_datasets" / "jin" / "mirror-record"
+    expected_record_path = dataset_path / "sidecar" / "isaac_mirror" / f"{started['session_id']}.jsonl"
+    metadata_path = dataset_path / "meta" / "atr_pipeline.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+
+    assert started["ok"] is True
+    assert started["isaac_mirror"]["sample_count"] == 2
+    assert Path(started["isaac_mirror"]["mirror_record_path"]) == expected_record_path
+    assert expected_record_path.exists()
+    assert metadata["isaac_mirror"]["enabled"] is True
+    assert metadata["isaac_mirror"]["record_path"] == str(expected_record_path)
+    assert metadata["isaac_mirror"]["session_id"] == started["isaac_mirror_session_id"]
+    assert metadata["isaac_mirror"]["sync_summary"]["target_sample_hz"] > 0
+    assert metadata["isaac_mirror"]["sync_summary"]["sample_count"] == 2
+
+
+def test_record_stop_refreshes_isaac_mirror_metadata(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    bridge._post_isaac_mirror_state = lambda endpoint, payload, timeout_s=0.5: {"ok": True, "status_code": 200}  # type: ignore[method-assign]
+    bridge._fetch_isaac_mirror_receiver_state = lambda endpoint, timeout_s=0.5: {  # type: ignore[method-assign]
+        "ok": True,
+        "state_url": "http://127.0.0.1:8766/state",
+        "sample_count": 7,
+        "last_payload_summary": {"session_id": "mirror-session-at-stop", "sample_index": 7, "joint_count": 6, "target_count": 6},
+    }
+    started = bridge.record_start(
+        {
+            "mode": "test",
+            "runtime_mode": "test",
+            "profile_id": "fake_omx_ai",
+            "dataset_repo_id": "jin/mirror-stop",
+            "isaac_mirror_enabled": True,
+            "isaac_mirror_max_samples": 2,
+        }
+    )
+    mirror_session = bridge._sessions[started["isaac_mirror_session_id"]]
+    mirror_session["sample_count"] = 7
+    mirror_session["status"] = "STOPPED"
+
+    stopped = bridge.record_control({"mode": "test", "profile_id": "fake_omx_ai", "session_id": started["session_id"], "action": "stop"})
+
+    metadata_path = tmp_path / "hf_datasets" / "jin" / "mirror-stop" / "meta" / "atr_pipeline.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    assert stopped["ok"] is True
+    assert stopped["isaac_mirror_stop"]["sample_count"] == 7
+    assert metadata["isaac_mirror"]["sample_count"] == 7
+    assert metadata["isaac_mirror"]["status"] == "STOPPED"
+    assert metadata["isaac_mirror"]["sync_summary"]["sample_count"] == 7
+    assert metadata["isaac_mirror"]["receiver_state_at_stop"]["ok"] is True
+    assert metadata["isaac_mirror"]["receiver_state_at_stop"]["last_payload_summary"]["sample_index"] == 7
+
+
+def test_live_record_status_exposes_in_process_isaac_mirror_sidecar_progress(tmp_path: Path, monkeypatch) -> None:
+    bridge = _bridge(tmp_path)
+    bridge.config.profiles["fake_omx_ai"]["safety_limits"].update({"live_enabled": True, "allow_recording": True})
+    follower = tmp_path / "omx_follower"
+    leader = tmp_path / "omx_leader"
+    follower.touch()
+    leader.touch()
+    bridge.ports_save({"mode": "live", "profile_id": "fake_omx_ai", "device_role": "follower", "port": str(follower)})
+    bridge.ports_save({"mode": "live", "profile_id": "fake_omx_ai", "device_role": "leader", "port": str(leader)})
+    monkeypatch.setattr(
+        bridge,
+        "_fetch_isaac_mirror_receiver_health",
+        lambda endpoint, timeout_s=0.5: {
+            "ok": True,
+            "health_url": "http://127.0.0.1:8766/health",
+            "apply_mode": "deferred_update_tick",
+            "sample_count": 0,
+        },
+        raising=False,
+    )
+    bridge._start_live_process = lambda **kwargs: {"ok": True, "session_updates": {"pid": 1234, "log_path": "", "returncode": None}}  # type: ignore[method-assign]
+
+    started = bridge.record_start(
+        {
+            "mode": "live",
+            "runtime_mode": "live",
+            "profile_id": "fake_omx_ai",
+            "dataset_repo_id": "jin/live-mirror-progress",
+            "confirm_live_execute": True,
+            "camera_enabled": False,
+            "isaac_mirror_enabled": True,
+            "isaac_mirror_endpoint": "http://127.0.0.1:8766/joints",
+        }
+    )
+    sidecar_path = Path(started["isaac_mirror"]["mirror_record_path"])
+    sidecar_path.parent.mkdir(parents=True, exist_ok=True)
+    sidecar_path.write_text(
+        "\n".join(json.dumps({"sample_index": idx, "joint_state": []}) for idx in range(1, 4)) + "\n",
+        encoding="utf-8",
+    )
+
+    status = bridge.record_status({"mode": "live", "profile_id": "fake_omx_ai", "session_id": started["session_id"]})
+    metadata = json.loads((tmp_path / "hf_datasets" / "jin" / "live-mirror-progress" / "meta" / "atr_pipeline.json").read_text(encoding="utf-8"))
+
+    assert status["ok"] is True
+    assert status["isaac_mirror"]["status"] == "IN_PROCESS"
+    assert status["isaac_mirror"]["sample_count"] == 3
+    assert status["isaac_mirror"]["sync_summary"]["sample_count"] == 3
+    assert metadata["isaac_mirror"]["sample_count"] == 3
+
+
+def test_live_record_stop_summarizes_in_process_isaac_mirror_sidecar_metrics(tmp_path: Path, monkeypatch) -> None:
+    bridge = _bridge(tmp_path)
+    bridge.config.profiles["fake_omx_ai"]["safety_limits"].update({"live_enabled": True, "allow_recording": True})
+    follower = tmp_path / "omx_follower"
+    leader = tmp_path / "omx_leader"
+    follower.touch()
+    leader.touch()
+    bridge.ports_save({"mode": "live", "profile_id": "fake_omx_ai", "device_role": "follower", "port": str(follower)})
+    bridge.ports_save({"mode": "live", "profile_id": "fake_omx_ai", "device_role": "leader", "port": str(leader)})
+    monkeypatch.setattr(
+        bridge,
+        "_fetch_isaac_mirror_receiver_health",
+        lambda endpoint, timeout_s=0.5: {"ok": True, "health_url": "http://127.0.0.1:8766/health", "apply_mode": "deferred_update_tick", "sample_count": 0},
+        raising=False,
+    )
+    monkeypatch.setattr(
+        bridge,
+        "_fetch_isaac_mirror_receiver_state",
+        lambda endpoint, timeout_s=0.5: {
+            "ok": True,
+            "state_url": "http://127.0.0.1:8766/state",
+            "sample_count": 53,
+            "last_payload_summary": {"session_id": "mirror-live", "sample_index": 3, "joint_count": 6, "target_count": 6},
+        },
+        raising=False,
+    )
+    bridge._start_live_process = lambda **kwargs: {"ok": True, "session_updates": {"pid": 1234, "log_path": "", "returncode": None}}  # type: ignore[method-assign]
+
+    started = bridge.record_start(
+        {
+            "mode": "live",
+            "runtime_mode": "live",
+            "profile_id": "fake_omx_ai",
+            "dataset_repo_id": "jin/live-mirror-summary",
+            "confirm_live_execute": True,
+            "camera_enabled": False,
+            "isaac_mirror_enabled": True,
+            "isaac_mirror_endpoint": "http://127.0.0.1:8766/joints",
+        }
+    )
+    sidecar_path = Path(started["isaac_mirror"]["mirror_record_path"])
+    sidecar_path.parent.mkdir(parents=True, exist_ok=True)
+    sidecar_path.write_text(
+        "\n".join(
+            json.dumps(
+                {
+                    "sample_index": idx,
+                    "sync_metrics": {
+                        "target_sample_hz": 15.0,
+                        "sample_period_s": 1 / 15,
+                        "post_latency_ms": float(idx),
+                        "receiver_accepted": idx != 2,
+                        "receiver_sample_count": 50 + idx,
+                    },
+                }
+            )
+            for idx in range(1, 4)
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    stopped = bridge.record_control({"mode": "live", "profile_id": "fake_omx_ai", "session_id": started["session_id"], "action": "stop"})
+    metadata = json.loads((tmp_path / "hf_datasets" / "jin" / "live-mirror-summary" / "meta" / "atr_pipeline.json").read_text(encoding="utf-8"))
+    summary = metadata["isaac_mirror"]["sync_summary"]
+
+    assert stopped["isaac_mirror_stop"]["sample_count"] == 3
+    assert summary["sample_count"] == 3
+    assert summary["target_sample_hz"] == 15.0
+    assert summary["post_ok_count"] == 2
+    assert summary["post_fail_count"] == 1
+    assert summary["last_receiver_sample_count"] == 53
+    assert summary["mean_post_latency_ms"] == 2.0
+
+
+def test_live_record_with_in_process_isaac_mirror_does_not_precreate_lerobot_dataset_root(tmp_path: Path, monkeypatch) -> None:
+    bridge = _bridge(tmp_path)
+    bridge.config.profiles["fake_omx_ai"]["safety_limits"].update({"live_enabled": True, "allow_recording": True})
+    follower = tmp_path / "omx_follower"
+    leader = tmp_path / "omx_leader"
+    follower.touch()
+    leader.touch()
+    bridge.ports_save({"mode": "live", "profile_id": "fake_omx_ai", "device_role": "follower", "port": str(follower)})
+    bridge.ports_save({"mode": "live", "profile_id": "fake_omx_ai", "device_role": "leader", "port": str(leader)})
+    monkeypatch.setattr(
+        bridge,
+        "_fetch_isaac_mirror_receiver_health",
+        lambda endpoint, timeout_s=0.5: {
+            "ok": True,
+            "health_url": "http://127.0.0.1:8766/health",
+            "apply_mode": "deferred_update_tick",
+            "sample_count": 0,
+        },
+        raising=False,
+    )
+    bridge._start_live_process = lambda **kwargs: {"ok": True, "session_updates": {"pid": 1234, "log_path": "", "returncode": None}}  # type: ignore[method-assign]
+
+    started = bridge.record_start(
+        {
+            "mode": "live",
+            "runtime_mode": "live",
+            "profile_id": "fake_omx_ai",
+            "dataset_repo_id": "jin/live-root-ownership",
+            "confirm_live_execute": True,
+            "camera_enabled": False,
+            "isaac_mirror_enabled": True,
+            "isaac_mirror_endpoint": "http://127.0.0.1:8766/joints",
+        }
+    )
+
+    assert started["ok"] is True
+    assert started["isaac_mirror"]["status"] == "IN_PROCESS"
+    assert not Path(started["dataset_path"]).exists()
+    assert not (Path(started["dataset_path"]) / "meta" / "atr_pipeline.json").exists()
+
+
+def test_train_raw_depth_adapter_env_points_to_dataset_sidecar(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    dataset = tmp_path / "hf_datasets" / "jin" / "raw-adapter"
+    _make_trainable_lerobot_dataset(dataset)
+    sidecar_root = dataset / "sidecar" / "depth_raw"
+    sidecar_root.mkdir(parents=True, exist_ok=True)
+    (sidecar_root / "transform_manifest.json").write_text(
+        json.dumps(
+            {
+                "camera_keys": ["top", "wrist"],
+                "aligned_to": "color",
+                "depth_encoding": "png16",
+                "depth_scale_m_per_unit": 0.001,
+                "depth_clip_min_mm": 0.0,
+                "depth_clip_max_mm": 2000.0,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    request = LeRobotSessionRequest.model_validate(
+        {
+            "mode": "live",
+            "runtime_mode": "live",
+            "profile_id": "fake_omx_ai",
+            "dataset_path": str(dataset),
+            "observation_pipeline_id": "raw_depth_adapter",
+        }
+    )
+
+    env = bridge._workflow_env_overrides("train", request)
+
+    assert env["ATR_LEROBOT_OBSERVATION_PIPELINE_ID"] == "raw_depth_adapter"
+    assert env["ATR_LEROBOT_RAW_DEPTH_ADAPTER"] == "1"
+    assert env["ATR_LEROBOT_RAW_DEPTH_SOURCE_DIR"] == str(sidecar_root)
+    assert env["ATR_LEROBOT_RAW_DEPTH_ADAPTER_STRICT"] == "1"
+    assert env["ATR_LEROBOT_RAW_DEPTH_CAMERA_KEYS"] == "top,wrist"
+    assert env["ATR_LEROBOT_DEPTH_SCALE_M_PER_UNIT"] == "0.001"
+    assert env["ATR_LEROBOT_DEPTH_CLIP_MIN_MM"] == "0.0"
+    assert env["ATR_LEROBOT_DEPTH_CLIP_MAX_MM"] == "2000.0"
+
+
+def test_train_blocks_observation_pipeline_mismatch(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    dataset = tmp_path / "hf_datasets" / "jin" / "recorded"
+    _make_trainable_lerobot_dataset(dataset)
+    (dataset / "meta" / "atr_pipeline.json").write_text(
+        json.dumps({"profile_id": "fake_omx_ai", "observation_pipeline_id": "rgbd_sidecar"}),
+        encoding="utf-8",
+    )
+
+    result = bridge.train_start(
+        {
+            "mode": "test",
+            "profile_id": "fake_omx_ai",
+            "dataset_path": str(dataset),
+            "observation_pipeline_id": "legacy_lerobot",
+        }
+    )
+
+    assert result["ok"] is False
+    assert result["failure_code"] == "LEROBOT_OBSERVATION_PIPELINE_MISMATCH"
+
+
+def test_realsense_camera_command_config_carries_depth_transform_contract(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+
+    camera = bridge._realsense_camera_config(
+        "341522300873",
+        fps=15,
+        use_depth=True,
+        width=640,
+        height=480,
+        color_format="rgb8",
+    )
+
+    assert camera["type"] == "intelrealsense"
+    assert camera["use_depth"] is True
+    assert camera["align_depth_to_color"] is True
+    assert camera["depth_scale_m_per_unit"] == 0.001
+    assert camera["depth_clip_min_mm"] == 0.0
+    assert camera["depth_clip_max_mm"] == 2000.0
 
 
 def test_pi05_train_env_passes_hf_token_from_token_path(tmp_path: Path, monkeypatch) -> None:

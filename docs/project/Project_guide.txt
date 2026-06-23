@@ -289,6 +289,7 @@ Purpose
 - Include SARM submodule
 - Support two bounded short skills: `transfer_to_utm` (`3dp_output_area -> utm_fixture`) and `clear_utm_to_disposal` (`utm_fixture -> discard_bin`).
 - After a ready 3DP specimen and Vision observation, default to Pi0.5 LeRobot rollout for `transfer_to_utm`.
+- Keep X-VLA and SmolVLA as operator-selectable VLA backends for training/rollout experiments; they must not replace the Pi0.5 default transfer path until real rollout success rates justify that change.
 - Keep `fixed_kinematic` available as an explicit compatibility strategy.
 - Use `lerobot.rollout.start`; do not construct LeRobot shell commands inside the agent.
 - Treat Pi0.5 as the low-level VLA executor only. Manipulation Agent owns preflight, task stage, SARM-lite progress/risk state, Vision verification dependency, and Guardian/next-agent handoff.
@@ -304,7 +305,7 @@ SARM submodule responsibilities
 
 Modes
 - live robot mode with saved LeRobot profile, camera identities, policy path/repo, and `confirm_live_execute=true`
-- test mode through deterministic LeRobot rollout session using `fake_omx_ai` and `fake://pi05_policy`
+- test mode through deterministic LeRobot rollout session using `fake_omx_ai` and a fake or local policy reference such as `fake://pi05_policy`, `fake://xvla_policy`, or `fake://smolvla_policy`
 
 3.9 Lab Equipment Agent
 Purpose

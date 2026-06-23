@@ -45,6 +45,9 @@ outputs/*
 user_files/*
 !user_files/README.md
 !user_files/.gitkeep
+logs/
+test-results/
+meta/
 
 # Generated hardware / experiment outputs
 /result.json

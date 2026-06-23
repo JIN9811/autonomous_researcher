@@ -1,7 +1,7 @@
 # Codex Goal Full Upgrade Implementation README
 
 대상 프로젝트: Autonomous Researcher Framework
-목표: `개선안/01`부터 `개선안/15`까지의 agent 고도화안, device bridge 고도화안, Live GUI 고도화안, 멀티피델리티 자가개선 루프 계획을 한 번의 장기 Codex Goal 작업에서 현재 코드 구조 기준으로 실제 구현한다.
+목표: `개선안/01`부터 `개선안/17`까지의 agent 고도화안, device bridge 고도화안, Live GUI 고도화안, 멀티피델리티/UTM ROS runtime 자가개선 루프 계획을 한 번의 장기 Codex Goal 작업에서 현재 코드 구조 기준으로 실제 구현한다.
 
 이 README는 계획 문서가 아니라 Codex Goal 실행 지침이다. Codex는 이 문서를 읽은 뒤 구현, 검증, 스크린샷 확인, 문서 갱신까지 완료해야 한다.
 
@@ -10,7 +10,7 @@
 ## 0. Codex Goal에 그대로 넣을 목표 문장
 
 ```text
-Autonomous Researcher 프로젝트의 개선안/01-10 문서와 README_codex_goal_full_upgrade.md를 기준으로 전체 agentic closed-loop, Live GUI, agent report, backend trace, Guardian/Knowledge/Self-Evolution, handoff packet schema를 실제 구현해줘.
+Autonomous Researcher 프로젝트의 개선안/01-17 문서와 README_codex_goal_full_upgrade.md를 기준으로 전체 agentic closed-loop, Live GUI, agent report, backend trace, Guardian/Knowledge/Self-Evolution, handoff packet schema, UTM ROS runtime bridge, Vision/UTM Camera device bridge, Live GUI Vision inspection dashboard를 실제 구현해줘.
 
 단순 리팩터링이나 UI 장식으로 끝내지 말고, 현재 프로젝트 구조(app/main.py, app/controller.py, orchestrator/langgraph_runtime.py, agents/*, graphs/configs/atr_closed_loop.yaml, graphs/modules/*, web/templates/planning.html, web/static/planning.js, web/static/styles.css, tests/*)에 맞춰 프론트엔드와 백엔드를 나누어 구현해.
 
@@ -62,6 +62,8 @@ Codex Goal은 구현 전에 아래 순서대로 읽어야 한다.
 - `개선안/13_bambulab_x2d_spc_device_bridge_research.md`
 - `개선안/14_bambulab_gcode_autoejection_runtime_plan.md`
 - `개선안/15_utm_calculix_pinn_multifidelity_code_first_plan.md`
+- `개선안/16_utm_ros_runtime_bridge_live_gui_plan.md`
+- `개선안/17_vision_agent_camera_device_bridge_live_gui_plan.md`
 
 ### 1.4 구현 대상 코드
 

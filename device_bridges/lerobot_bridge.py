@@ -28,16 +28,22 @@ import inspect
 import json
 import os
 import re
+import select
 import signal
 import shutil
+import socket
 import subprocess
 import sys
+import threading
 import time
+from contextlib import ExitStack
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, IO
-from urllib.parse import quote
+from urllib.error import HTTPError, URLError
+from urllib.parse import quote, urlparse
+from urllib.request import Request, urlopen
 
 from mcp_tools.lerobot_schemas import (
     LeRobotBaseRequest,
@@ -45,6 +51,15 @@ from mcp_tools.lerobot_schemas import (
     LeRobotRecordControlRequest,
     LeRobotSessionRequest,
     RobotProfile,
+)
+from utils.isaac_omx_mirror_mapping import (
+    ISAAC_OMX_ARTICULATION_ROOT,
+    ISAAC_OMX_JOINT_MAP,
+    ISAAC_OMX_SCENE_RELATIVE_PATH,
+    ISAAC_OMX_TEST_JOINT_STATE_DEG,
+    default_isaac_omx_mirror_calibration_path,
+    load_isaac_omx_mirror_calibration,
+    positions_to_joint_state,
 )
 
 
@@ -62,6 +77,9 @@ LEROBOT_DEFAULT_REALSENSE_FPS = 15
 LEROBOT_DEFAULT_REALSENSE_WARMUP_S = 5
 LEROBOT_DEFAULT_CAMERA_WIDTH = 640
 LEROBOT_DEFAULT_CAMERA_HEIGHT = 480
+LEROBOT_DEFAULT_DEPTH_SCALE_M_PER_UNIT = 0.001
+LEROBOT_DEFAULT_DEPTH_CLIP_MIN_MM = 0.0
+LEROBOT_DEFAULT_DEPTH_CLIP_MAX_MM = 2000.0
 LEROBOT_REALSENSE_MODEL_NAMES = {
     "405": "Intel(R) RealSense(TM) Depth Camera 405",
     "455": "Intel(R) RealSense(TM) Depth Camera 455",
@@ -75,6 +93,270 @@ LEROBOT_REALSENSE_CAMERA_MODEL_HINTS = {
     "top": ("d455f", "d455", "455f", "455"),
     "wrist": ("d405", "405"),
 }
+LEROBOT_DEFAULT_TASK_INSTRUCTION = "Pick up the cube and place it"
+LEROBOT_DEFAULT_RECORD_NUM_EPISODES = 60
+LEROBOT_DEFAULT_OBSERVATION_PIPELINE_ID = "raw_depth_adapter"
+LEROBOT_DEFAULT_TRAIN_POLICY_TYPE = "smolvla"
+LEROBOT_OBSERVATION_PIPELINES: dict[str, dict[str, Any]] = {
+    "legacy_lerobot": {
+        "pipeline_id": "legacy_lerobot",
+        "label": "Legacy LeRobot",
+        "description": "LeRobot standard RGB/depth visual features only; raw 16-bit sidecar disabled.",
+        "raw_depth_sidecar": False,
+        "requires_raw_depth": False,
+    },
+    "rgbd_sidecar": {
+        "pipeline_id": "rgbd_sidecar",
+        "label": "RGB-D Sidecar",
+        "description": "LeRobot standard RGB-D features plus ATR 16-bit raw-depth sidecar metadata.",
+        "raw_depth_sidecar": True,
+        "requires_raw_depth": False,
+    },
+    "raw_depth_adapter": {
+        "pipeline_id": "raw_depth_adapter",
+        "label": "Raw Depth Adapter",
+        "description": "Adapter-ready RGB-D pipeline requiring ATR raw-depth sidecar and transform metadata.",
+        "raw_depth_sidecar": True,
+        "requires_raw_depth": True,
+    },
+}
+def _normalize_observation_pipeline_id(value: Any, default: str = LEROBOT_DEFAULT_OBSERVATION_PIPELINE_ID) -> str:
+    """Normalize operator-facing RGB-D pipeline aliases into stable IDs."""
+    clean = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "legacy": "legacy_lerobot",
+        "lerobot": "legacy_lerobot",
+        "rgbd": "rgbd_sidecar",
+        "rgb_d": "rgbd_sidecar",
+        "sidecar": "rgbd_sidecar",
+        "raw": "raw_depth_adapter",
+        "raw_depth": "raw_depth_adapter",
+        "adapter": "raw_depth_adapter",
+    }
+    clean = aliases.get(clean, clean)
+    if clean in LEROBOT_OBSERVATION_PIPELINES:
+        return clean
+    fallback = str(default or LEROBOT_DEFAULT_OBSERVATION_PIPELINE_ID)
+    return fallback if fallback in LEROBOT_OBSERVATION_PIPELINES else LEROBOT_DEFAULT_OBSERVATION_PIPELINE_ID
+
+
+class _SubprocessFollowerJointPositionReader:
+    """Keep one Dynamixel bus process open and read OMX follower positions on demand."""
+
+    def __init__(self, bridge: "LeRobotBridge", port: str, motor_ids: list[int], *, timeout_s: float = 3.0) -> None:
+        self._bridge = bridge
+        self._port = str(port or "").strip()
+        self._motor_ids = [int(item) for item in motor_ids]
+        self._timeout_s = timeout_s
+        self._process: subprocess.Popen[str] | None = None
+
+    def __enter__(self) -> "_SubprocessFollowerJointPositionReader":
+        if not self._port:
+            raise ValueError("follower port is empty")
+        command = [
+            self._bridge.config.conda_executable,
+            "run",
+            "--no-capture-output",
+            "-n",
+            self._bridge.config.conda_env_name,
+            "python",
+            "-u",
+            "-c",
+            self._script(),
+            self._port,
+            json.dumps(self._motor_ids),
+        ]
+        self._process = subprocess.Popen(
+            command,
+            cwd=str(self._bridge.config.repo_root),
+            text=True,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            bufsize=1,
+        )
+        ready = self._read_message(timeout_s=max(self._timeout_s, 8.0))
+        if not ready.get("ok"):
+            raise RuntimeError(str(ready.get("message") or ready.get("error") or "Dynamixel reader did not become ready"))
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:  # type: ignore[no-untyped-def]
+        process = self._process
+        if process is None:
+            return
+        try:
+            if process.stdin and process.poll() is None:
+                process.stdin.write(json.dumps({"command": "close"}) + "\n")
+                process.stdin.flush()
+        except Exception:
+            pass
+        try:
+            process.wait(timeout=1.0)
+        except subprocess.TimeoutExpired:
+            process.terminate()
+            try:
+                process.wait(timeout=1.0)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=1.0)
+        finally:
+            self._process = None
+
+    def read(self) -> dict[int, float]:
+        process = self._require_process()
+        if process.stdin is None:
+            raise RuntimeError("Dynamixel reader stdin is unavailable")
+        process.stdin.write(json.dumps({"command": "read"}) + "\n")
+        process.stdin.flush()
+        message = self._read_message(timeout_s=self._timeout_s)
+        if not message.get("ok"):
+            raise RuntimeError(str(message.get("message") or message.get("error") or "Dynamixel read failed"))
+        positions = message.get("positions")
+        if not isinstance(positions, dict):
+            raise RuntimeError("Dynamixel reader returned no positions")
+        requested = set(self._motor_ids)
+        return {
+            _safe_int(key, -1, minimum=0): _safe_float(value, 0.0)
+            for key, value in positions.items()
+            if _safe_int(key, -1, minimum=0) in requested
+        }
+
+    def _require_process(self) -> subprocess.Popen[str]:
+        process = self._process
+        if process is None or process.poll() is not None:
+            output_tail = ""
+            if process and process.stdout:
+                try:
+                    output_tail = process.stdout.read()[-500:]
+                except Exception:
+                    output_tail = ""
+            raise RuntimeError(f"Dynamixel reader process is not running. {output_tail}".strip())
+        return process
+
+    def _read_message(self, *, timeout_s: float) -> dict[str, Any]:
+        process = self._process
+        if process is None or process.stdout is None:
+            raise RuntimeError("Dynamixel reader stdout is unavailable")
+        deadline = time.monotonic() + timeout_s
+        last_line = ""
+        while time.monotonic() < deadline:
+            if process.poll() is not None:
+                remainder = ""
+                try:
+                    remainder = process.stdout.read()
+                except Exception:
+                    remainder = ""
+                raise RuntimeError((last_line + "\n" + remainder).strip() or f"Dynamixel reader exited with {process.returncode}")
+            remaining = max(0.0, deadline - time.monotonic())
+            readable, _, _ = select.select([process.stdout], [], [], min(remaining, 0.1))
+            if not readable:
+                continue
+            line = process.stdout.readline()
+            if not line:
+                continue
+            last_line = line.strip()
+            if not last_line.startswith("{"):
+                continue
+            try:
+                parsed = json.loads(last_line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(parsed, dict):
+                return parsed
+        raise TimeoutError(f"Dynamixel reader timed out after {timeout_s:g}s; last_line={last_line}")
+
+    @staticmethod
+    def _script() -> str:
+        return r"""
+import importlib
+import json
+import sys
+from pathlib import Path
+
+from lerobot.motors import Motor, MotorCalibration, MotorNormMode
+from lerobot.motors.dynamixel import DynamixelMotorsBus
+
+port = sys.argv[1]
+requested_ids = {int(item) for item in json.loads(sys.argv[2])}
+motors = {
+    "shoulder_pan": Motor(11, "xl430-w250", MotorNormMode.DEGREES),
+    "shoulder_lift": Motor(12, "xl430-w250", MotorNormMode.RANGE_M100_100),
+    "elbow_flex": Motor(13, "xl430-w250", MotorNormMode.RANGE_M100_100),
+    "wrist_flex": Motor(14, "xl330-m288", MotorNormMode.RANGE_M100_100),
+    "wrist_roll": Motor(15, "xl330-m288", MotorNormMode.DEGREES),
+    "gripper": Motor(16, "xl330-m288", MotorNormMode.RANGE_0_100),
+}
+limits = {
+    11: (-270.0, 360.0, "degrees"),
+    12: (-120.0, 90.0, "range_m100_100"),
+    13: (-120.0, 90.0, "range_m100_100"),
+    14: (-100.0, 100.0, "range_m100_100"),
+    15: (-270.0, 270.0, "degrees"),
+    16: (0.0, 100.0, "range_0_100"),
+}
+calibration = {}
+try:
+    module = importlib.import_module("lerobot.robots.omx_follower.omx_follower")
+    calib_path = Path(module.__file__).parent / "calibration" / "omx_follower_arm.json"
+    if calib_path.exists():
+        raw_calib = json.loads(calib_path.read_text(encoding="utf-8"))
+        calibration = {name: MotorCalibration(**value) for name, value in raw_calib.items()}
+except Exception:
+    calibration = {}
+
+bus = DynamixelMotorsBus(port, motors, calibration=calibration)
+
+def read_positions():
+    raw = bus.sync_read("Present_Position", normalize=False, num_retry=1)
+    normalized = {}
+    if calibration:
+        try:
+            normalized = bus.sync_read("Present_Position", normalize=True, num_retry=1)
+        except Exception:
+            normalized = {}
+    values = {}
+    for name, motor in motors.items():
+        if motor.id not in requested_ids:
+            continue
+        lower, upper, norm_mode = limits[motor.id]
+        raw_value = float(raw.get(name, 0.0))
+        if name in normalized:
+            norm_value = float(normalized[name])
+            if norm_mode == "range_m100_100":
+                value = lower + ((norm_value + 100.0) / 200.0) * (upper - lower)
+            else:
+                value = norm_value
+        else:
+            value = lower + (raw_value / 4095.0) * (upper - lower)
+        values[str(motor.id)] = value
+    return values
+
+try:
+    bus.connect(handshake=False)
+    bus.set_baudrate(bus.default_baudrate)
+    print(json.dumps({"ok": True, "event": "ready"}), flush=True)
+    for line in sys.stdin:
+        try:
+            request = json.loads(line)
+        except Exception as exc:
+            print(json.dumps({"ok": False, "message": f"invalid request: {exc}"}), flush=True)
+            continue
+        command = str(request.get("command") or "").lower()
+        if command == "close":
+            break
+        if command != "read":
+            print(json.dumps({"ok": False, "message": f"unsupported command: {command}"}), flush=True)
+            continue
+        try:
+            print(json.dumps({"ok": True, "positions": read_positions()}, sort_keys=True), flush=True)
+        except Exception as exc:
+            print(json.dumps({"ok": False, "message": f"{exc.__class__.__name__}: {exc}"}), flush=True)
+finally:
+    try:
+        bus.port_handler.closePort()
+    except Exception:
+        pass
+""".strip()
 
 
 @dataclass(slots=True)
@@ -94,6 +376,8 @@ class LeRobotBridgeConfig:
     conda_env_name: str = "lerobot"
     conda_executable: str = "conda"
     pi05_conda_env_name: str = "lerobot-pi05-torch211"
+    xvla_conda_env_name: str = "lerobot-pi05-torch211"
+    smolvla_conda_env_name: str = "lerobot-pi05-torch211"
     pi05_repo_root: Path = Path("~/lerobot_pi05")
     pi05_hf_home: Path = Path("~/.cache/huggingface_pi05")
     train_video_backend: str = "torchcodec"
@@ -101,6 +385,15 @@ class LeRobotBridgeConfig:
     pi05_video_backend: str = "torchcodec"
     hf_token_path: Path = Path("~/.cache/huggingface/token")
     pi05_base_policy: str = "lerobot/pi05_base"
+    xvla_base_policy: str = "lerobot/xvla-base"
+    smolvla_base_policy: str = "lerobot/smolvla_base"
+    wandb_local_port: int = 8081
+    wandb_local_base_url: str = "http://127.0.0.1:8081"
+    realsense_depth_align_to_color: bool = True
+    realsense_depth_scale_m_per_unit: float = LEROBOT_DEFAULT_DEPTH_SCALE_M_PER_UNIT
+    realsense_depth_clip_min_mm: float = LEROBOT_DEFAULT_DEPTH_CLIP_MIN_MM
+    realsense_depth_clip_max_mm: float = LEROBOT_DEFAULT_DEPTH_CLIP_MAX_MM
+    default_observation_pipeline_id: str = LEROBOT_DEFAULT_OBSERVATION_PIPELINE_ID
     tts_engine: str = "piper"
     tts_rate: int = -35
     tts_voice: str = "en_US-lessac-medium"
@@ -151,6 +444,8 @@ class LeRobotBridgeConfig:
             conda_env_name=str(root.get("conda_env_name", "lerobot")),
             conda_executable=_resolve_conda_executable(str(root.get("conda_executable", "conda"))),
             pi05_conda_env_name=str(root.get("pi05_conda_env_name", "lerobot-pi05-torch211")),
+            xvla_conda_env_name=str(root.get("xvla_conda_env_name", root.get("pi05_conda_env_name", "lerobot-pi05-torch211"))),
+            smolvla_conda_env_name=str(root.get("smolvla_conda_env_name", root.get("pi05_conda_env_name", "lerobot-pi05-torch211"))),
             pi05_repo_root=pi05_repo_root,
             pi05_hf_home=pi05_hf_home,
             train_video_backend=str(root.get("train_video_backend", "torchcodec")),
@@ -158,6 +453,28 @@ class LeRobotBridgeConfig:
             pi05_video_backend=str(root.get("pi05_video_backend", root.get("train_video_backend", "torchcodec"))),
             hf_token_path=hf_token_path,
             pi05_base_policy=str(root.get("pi05_base_policy", "lerobot/pi05_base")),
+            xvla_base_policy=str(root.get("xvla_base_policy", "lerobot/xvla-base")),
+            smolvla_base_policy=str(root.get("smolvla_base_policy", "lerobot/smolvla_base")),
+            wandb_local_port=_safe_int(root.get("wandb_local_port", 8081), 8081, minimum=1, maximum=65535),
+            wandb_local_base_url=str(root.get("wandb_local_base_url", "http://127.0.0.1:8081")),
+            realsense_depth_align_to_color=bool(root.get("realsense_depth_align_to_color", True)),
+            realsense_depth_scale_m_per_unit=_safe_float(
+                root.get("realsense_depth_scale_m_per_unit", LEROBOT_DEFAULT_DEPTH_SCALE_M_PER_UNIT),
+                LEROBOT_DEFAULT_DEPTH_SCALE_M_PER_UNIT,
+                minimum=0.000001,
+            ),
+            realsense_depth_clip_min_mm=_safe_float(
+                root.get("realsense_depth_clip_min_mm", LEROBOT_DEFAULT_DEPTH_CLIP_MIN_MM),
+                LEROBOT_DEFAULT_DEPTH_CLIP_MIN_MM,
+            ),
+            realsense_depth_clip_max_mm=_safe_float(
+                root.get("realsense_depth_clip_max_mm", LEROBOT_DEFAULT_DEPTH_CLIP_MAX_MM),
+                LEROBOT_DEFAULT_DEPTH_CLIP_MAX_MM,
+                minimum=1.0,
+            ),
+            default_observation_pipeline_id=_normalize_observation_pipeline_id(
+                root.get("default_observation_pipeline_id", LEROBOT_DEFAULT_OBSERVATION_PIPELINE_ID)
+            ),
             tts_engine=str(root.get("tts_engine", "piper")),
             tts_rate=_safe_int(root.get("tts_rate", -35), -35, minimum=-100, maximum=100),
             tts_voice=str(root.get("tts_voice", "en_US-lessac-medium")),
@@ -180,18 +497,27 @@ class LeRobotBridge:
         self._sessions: dict[str, dict[str, Any]] = {}
         self._processes: dict[str, subprocess.Popen[str]] = {}
         self._monitor_processes: dict[str, subprocess.Popen[str]] = {}
+        self._receiver_processes: dict[str, subprocess.Popen[str]] = {}
         self._log_handles: dict[str, IO[str]] = {}
+        self._receiver_log_handles: dict[str, IO[str]] = {}
+        self._mirror_stop_events: dict[str, threading.Event] = {}
+        self._mirror_threads: dict[str, threading.Thread] = {}
         self._counter = 0
         self._selected_profile_id = config.default_profile_id
+        self._selected_observation_pipeline_id = _normalize_observation_pipeline_id(config.default_observation_pipeline_id)
         self._module_available_cache: dict[tuple[str, str], bool] = {}
 
     def shutdown(self) -> dict[str, Any]:
         """Stop tracked and stale LeRobot live subprocesses before the GUI server exits."""
+        mirror_trace = self._stop_all_mirror_loops()
         step_trace = self.cleanup_all_lerobot_processes()
         for session_id in list(self._monitor_processes):
             self._stop_training_monitor({"session_id": session_id})
         for session_id in list(self._log_handles):
             self._close_log_handle(session_id)
+        for endpoint in list(self._receiver_processes):
+            self._stop_receiver_process(endpoint)
+        step_trace = mirror_trace + step_trace
         return {"ok": True, "tool": "lerobot.shutdown", "step_trace": step_trace, "events": step_trace}
 
     def cleanup_all_lerobot_processes(self, *, exclude_workflows: set[str] | None = None) -> list[dict[str, Any]]:
@@ -212,12 +538,20 @@ class LeRobotBridge:
             "tool": "lerobot.config",
             "default_profile_id": self.config.default_profile_id,
             "selected_profile_id": self._selected_profile_id,
+            "default_observation_pipeline_id": self.config.default_observation_pipeline_id,
+            "selected_observation_pipeline_id": self._selected_observation_pipeline_id,
+            "observation_pipelines": self._observation_pipeline_options(),
             "profiles": profiles,
             "sessions": self.sessions_recent(),
             "live_gate_summary": self._live_gate_summary(self._profile(self._selected_profile_id)),
             "paths": self._path_status(),
+            "workflow_defaults": self._workflow_defaults_status(),
             "policy_presets": self._policy_presets(),
             "tts": self._tts_config_public(),
+            "wandb": {
+                "local_base_url": self.config.wandb_local_base_url,
+                "local_port": self.config.wandb_local_port,
+            },
             "environment": self._environment_status(),
             "device_memory": self._device_memory_public(),
         }
@@ -229,6 +563,7 @@ class LeRobotBridge:
         if profile is None:
             return self._error("lerobot.config", "test", profile_id, "LEROBOT_PROFILE_NOT_FOUND", "Robot profile not found.")
         self._selected_profile_id = profile.profile_id
+        self._selected_observation_pipeline_id = self._request_observation_pipeline_id(payload, profile)
         return self.config_status()
 
     def profiles_list(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -273,6 +608,602 @@ class LeRobotBridge:
                 }
             ],
         }
+
+    def mirror_joint_mapping(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Return the physical OMX follower to Isaac Sim joint mapping."""
+        request = LeRobotBaseRequest.model_validate(payload or {})
+        mode = request.runtime_mode or request.mode
+        profile = self._profile(request.profile_id)
+        if profile is None:
+            return self._error("lerobot.mirror.joint_mapping", mode, request.profile_id, "LEROBOT_PROFILE_NOT_FOUND", "Robot profile not found.")
+        joint_map = [dict(item) for item in ISAAC_OMX_JOINT_MAP]
+        scene_path = self.config.repo_root / ISAAC_OMX_SCENE_RELATIVE_PATH
+        calibration = self._isaac_mirror_calibration()
+        step_trace = [
+            {"step": "MIRROR_MAPPING", "status": "ok", "detail": f"{len(joint_map)} follower joints -> Isaac articulation"},
+            {
+                "step": "MIRROR_CALIBRATION",
+                "status": "ok" if calibration.get("loaded") else "idle",
+                "detail": str(calibration.get("path") or ""),
+            },
+        ]
+        return {
+            "ok": True,
+            "tool": "lerobot.mirror.joint_mapping",
+            "mode": mode,
+            "profile_id": profile.profile_id,
+            "scene_path": str(scene_path),
+            "articulation_root": ISAAC_OMX_ARTICULATION_ROOT,
+            "joint_map": joint_map,
+            "calibration": calibration,
+            "events": step_trace,
+            "step_trace": step_trace,
+            "error": None,
+        }
+
+    def mirror_joint_state_probe(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Read the follower arm state for Isaac mirror mode without commanding motion."""
+        request = LeRobotBaseRequest.model_validate(payload or {})
+        mode = request.runtime_mode or request.mode
+        profile = self._profile(request.profile_id)
+        if profile is None:
+            return self._error("lerobot.mirror.state_probe", mode, request.profile_id, "LEROBOT_PROFILE_NOT_FOUND", "Robot profile not found.")
+        joint_map = [dict(item) for item in ISAAC_OMX_JOINT_MAP]
+        motor_ids = [int(item["motor_id"]) for item in joint_map]
+        follower_port = self._device_port(profile, "follower", allow_fake=mode != "live")
+        if mode == "test":
+            positions = dict(ISAAC_OMX_TEST_JOINT_STATE_DEG)
+            probe_source = "deterministic_test_state"
+            read_step = {"step": "READ_TEST_STATE", "status": "ok", "detail": "fake follower joint positions"}
+        else:
+            follower_port = self._runtime_device_port(follower_port, "follower", live=True)
+            if not follower_port:
+                return self._error(
+                    "lerobot.mirror.state_probe",
+                    mode,
+                    profile.profile_id,
+                    "LEROBOT_MIRROR_FOLLOWER_PORT_REQUIRED",
+                    "Saved follower port is required before live mirror probing.",
+                )
+            if follower_port.startswith("/dev/") and not Path(follower_port).exists():
+                return self._error(
+                    "lerobot.mirror.state_probe",
+                    mode,
+                    profile.profile_id,
+                    "LEROBOT_MIRROR_FOLLOWER_PORT_UNAVAILABLE",
+                    f"Follower port is not available: {follower_port}",
+                )
+            try:
+                positions = self._read_follower_joint_positions(follower_port, motor_ids)
+            except Exception as exc:
+                return self._error(
+                    "lerobot.mirror.state_probe",
+                    mode,
+                    profile.profile_id,
+                    "LEROBOT_MIRROR_JOINT_READ_FAILED",
+                    f"Follower joint read failed: {exc}",
+                )
+            probe_source = "live_dynamixel_present_position"
+            read_step = {"step": "READ_LIVE_STATE", "status": "ok", "detail": f"follower={follower_port}"}
+        return self._isaac_mirror_probe_from_positions(
+            mode=mode,
+            profile_id=profile.profile_id,
+            follower_port=follower_port,
+            probe_source=probe_source,
+            read_step=read_step,
+            joint_map=joint_map,
+            positions=positions,
+        )
+
+    def _isaac_mirror_probe_from_positions(
+        self,
+        *,
+        mode: str,
+        profile_id: str,
+        follower_port: str,
+        probe_source: str,
+        read_step: dict[str, str],
+        joint_map: list[dict[str, Any]],
+        positions: dict[int, float],
+    ) -> dict[str, Any]:
+        calibration = self._isaac_mirror_calibration()
+        normalized_positions = {
+            int(item["motor_id"]): _safe_float(
+                positions.get(int(item["motor_id"])),
+                ISAAC_OMX_TEST_JOINT_STATE_DEG.get(int(item["motor_id"]), 0.0),
+            )
+            for item in joint_map
+        }
+        joint_state = positions_to_joint_state(
+            normalized_positions,
+            calibration=calibration,
+            values_are_isaac_targets=True,
+            joint_map=joint_map,
+        )
+        step_trace = [
+            {"step": "MIRROR_MAPPING", "status": "ok", "detail": f"{len(joint_map)} joints"},
+            {
+                "step": "MIRROR_CALIBRATION",
+                "status": "ok" if calibration.get("loaded") else "idle",
+                "detail": str(calibration.get("path") or ""),
+            },
+            read_step,
+            {"step": "STATE_READY", "status": "ok", "detail": f"{len(joint_state)} joint values"},
+        ]
+        return {
+            "ok": True,
+            "tool": "lerobot.mirror.state_probe",
+            "mode": mode,
+            "profile_id": profile_id,
+            "scene_path": str(self.config.repo_root / ISAAC_OMX_SCENE_RELATIVE_PATH),
+            "articulation_root": ISAAC_OMX_ARTICULATION_ROOT,
+            "follower_port": follower_port,
+            "probe_source": probe_source,
+            "joint_state": joint_state,
+            "joint_map": joint_map,
+            "calibration": calibration,
+            "events": step_trace,
+            "step_trace": step_trace,
+            "error": None,
+        }
+
+    def _isaac_mirror_calibration(self) -> dict[str, Any]:
+        return load_isaac_omx_mirror_calibration(default_isaac_omx_mirror_calibration_path(self.config.repo_root))
+
+    def mirror_receiver_health(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Check the Isaac mirror receiver before live teleop/record synchronization."""
+        request = LeRobotBaseRequest.model_validate(payload or {})
+        mode = request.runtime_mode or request.mode
+        profile = self._profile(request.profile_id)
+        profile_id = profile.profile_id if profile else request.profile_id or self._selected_profile_id
+        endpoint = self._isaac_mirror_endpoint(request)
+        timeout_s = self._isaac_mirror_timeout_s(request)
+        health = self._fetch_isaac_mirror_receiver_health(endpoint, timeout_s=timeout_s)
+        ok = bool(health.get("ok"))
+        step_trace = [
+            {
+                "step": "ISAAC_MIRROR_RECEIVER_HEALTH",
+                "status": "ok" if ok else "failed",
+                "detail": str(health.get("health_url") or self._isaac_mirror_health_url(endpoint)),
+            }
+        ]
+        return {
+            "ok": ok,
+            "tool": "lerobot.mirror.receiver_health",
+            "mode": mode,
+            "profile_id": profile_id,
+            "mirror_endpoint": endpoint,
+            "health_url": health.get("health_url", self._isaac_mirror_health_url(endpoint)),
+            "receiver_health": health,
+            "status": "READY" if ok else "UNAVAILABLE",
+            "apply_mode": health.get("apply_mode", ""),
+            "sample_count": health.get("sample_count", 0),
+            "message": "" if ok else str(health.get("message") or health.get("error") or "Isaac mirror receiver is unavailable."),
+            "events": step_trace,
+            "step_trace": step_trace,
+            "error": None if ok else str(health.get("message") or health.get("error") or "Isaac mirror receiver is unavailable."),
+        }
+
+    def mirror_receiver_verify(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Post one mirror sample and confirm the Isaac receiver reports it as latest state."""
+        raw_payload = dict(payload or {})
+        request = LeRobotBaseRequest.model_validate(raw_payload)
+        mode = request.runtime_mode or request.mode
+        profile = self._profile(request.profile_id)
+        profile_id = profile.profile_id if profile else request.profile_id or self._selected_profile_id
+        endpoint = self._isaac_mirror_endpoint(request)
+        timeout_s = self._isaac_mirror_timeout_s(request)
+        health = self._fetch_isaac_mirror_receiver_health(endpoint, timeout_s=timeout_s)
+        if not health.get("ok"):
+            return self._error(
+                "lerobot.mirror.receiver_verify",
+                mode,
+                profile_id,
+                "LEROBOT_ISAAC_MIRROR_RECEIVER_UNAVAILABLE",
+                f"Isaac mirror receiver is unavailable at {health.get('health_url', self._isaac_mirror_health_url(endpoint))}: "
+                f"{health.get('message') or health.get('error') or 'health check failed'}",
+            )
+        verify_payload = {**raw_payload, "isaac_mirror_endpoint": endpoint, "isaac_mirror_timeout_s": timeout_s, "isaac_mirror_max_samples": 1}
+        loop = self.mirror_loop_start(verify_payload)
+        if not loop.get("ok"):
+            result = self._error(
+                "lerobot.mirror.receiver_verify",
+                mode,
+                profile_id,
+                str(loop.get("failure_code") or "LEROBOT_ISAAC_MIRROR_LOOP_FAILED"),
+                str(loop.get("message") or loop.get("error") or "Mirror loop failed during receiver verification."),
+            )
+            result["isaac_mirror"] = loop
+            result["receiver_health_before"] = health
+            return result
+        state = self._fetch_isaac_mirror_receiver_state(endpoint, timeout_s=timeout_s)
+        if not state.get("ok"):
+            result = self._error(
+                "lerobot.mirror.receiver_verify",
+                mode,
+                profile_id,
+                "LEROBOT_ISAAC_MIRROR_STATE_UNAVAILABLE",
+                f"Isaac mirror receiver state is unavailable at {state.get('state_url', self._isaac_mirror_state_url(endpoint))}: "
+                f"{state.get('message') or state.get('error') or 'state check failed'}",
+            )
+            result["isaac_mirror"] = loop
+            result["receiver_health_before"] = health
+            result["receiver_state_after"] = state
+            return result
+        summary = dict(state.get("last_payload_summary") or {})
+        loop_session_id = str(loop.get("session_id") or "")
+        loop_sample_count = int(loop.get("sample_count") or 0)
+        summary_session_id = str(summary.get("session_id") or "")
+        summary_sample_index = int(summary.get("sample_index") or 0)
+        before_count = int(health.get("sample_count") or 0)
+        after_count = int(state.get("sample_count") or 0)
+        if summary_session_id != loop_session_id or summary_sample_index != loop_sample_count or after_count <= before_count:
+            message = (
+                "Isaac mirror receiver did not report the posted sample as latest state: "
+                f"expected session={loop_session_id} sample={loop_sample_count}, "
+                f"got session={summary_session_id or '-'} sample={summary_sample_index}, "
+                f"receiver_count {before_count}->{after_count}."
+            )
+            result = self._error(
+                "lerobot.mirror.receiver_verify",
+                mode,
+                profile_id,
+                "LEROBOT_ISAAC_MIRROR_VERIFY_STALE_STATE",
+                message,
+            )
+            result["isaac_mirror"] = loop
+            result["receiver_health_before"] = health
+            result["receiver_state_after"] = state
+            return result
+        step_trace = [
+            {"step": "ISAAC_MIRROR_RECEIVER_HEALTH", "status": "ok", "detail": str(health.get("health_url") or self._isaac_mirror_health_url(endpoint))},
+            {"step": "MIRROR_SAMPLE_POSTED", "status": "ok", "detail": f"session={loop_session_id} sample={loop_sample_count}"},
+            {"step": "RECEIVER_STATE_CONFIRMED", "status": "ok", "detail": f"receiver_count {before_count}->{after_count}"},
+        ]
+        return {
+            "ok": True,
+            "tool": "lerobot.mirror.receiver_verify",
+            "mode": mode,
+            "profile_id": profile_id,
+            "status": "VERIFIED",
+            "mirror_endpoint": endpoint,
+            "health_url": health.get("health_url", self._isaac_mirror_health_url(endpoint)),
+            "state_url": state.get("state_url", self._isaac_mirror_state_url(endpoint)),
+            "isaac_mirror": loop,
+            "receiver_health_before": health,
+            "receiver_state_after": state,
+            "verification": {
+                "session_id": loop_session_id,
+                "sample_index": loop_sample_count,
+                "receiver_sample_count_before": before_count,
+                "receiver_sample_count_after": after_count,
+                "last_payload_summary": summary,
+            },
+            "events": step_trace,
+            "step_trace": step_trace,
+            "error": None,
+        }
+
+    def mirror_receiver_process_start(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Start the Isaac mirror receiver process for the configured endpoint."""
+        raw_payload = dict(payload or {})
+        request = LeRobotBaseRequest.model_validate(raw_payload)
+        mode = request.runtime_mode or request.mode
+        profile = self._profile(request.profile_id)
+        profile_id = profile.profile_id if profile else request.profile_id or self._selected_profile_id
+        endpoint = self._isaac_mirror_endpoint(request)
+        process_key = self._isaac_mirror_process_key(endpoint)
+        existing = self._receiver_processes.get(process_key)
+        if existing and existing.poll() is None:
+            return self.mirror_receiver_process_status(raw_payload)
+        self._stop_receiver_process(process_key)
+
+        command_info = self._isaac_mirror_receiver_command(raw_payload, endpoint)
+        host, port = self._isaac_mirror_host_port(endpoint)
+        if not command_info.get("ok"):
+            return self._error(
+                "lerobot.mirror.receiver_process.start",
+                mode,
+                profile_id,
+                str(command_info.get("failure_code") or "LEROBOT_ISAAC_MIRROR_RECEIVER_COMMAND_INVALID"),
+                str(command_info.get("message") or "Isaac mirror receiver command is invalid."),
+            )
+
+        log_dir = self.config.repo_root / "runs" / "isaac_mirror_receiver"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        launch_mode = str(command_info.get("launch_mode") or "python_script")
+        log_path = log_dir / f"receiver_{launch_mode}_{host.replace('.', '_')}_{port}.log"
+        command = [str(item) for item in command_info["command"]]
+        log_handle = log_path.open("a", encoding="utf-8")
+        try:
+            process = subprocess.Popen(
+                command,
+                cwd=str(self.config.repo_root),
+                stdout=log_handle,
+                stderr=subprocess.STDOUT,
+                text=True,
+                start_new_session=True,
+            )
+        except Exception as exc:
+            log_handle.close()
+            return self._error("lerobot.mirror.receiver_process.start", mode, profile_id, "LEROBOT_ISAAC_MIRROR_RECEIVER_START_FAILED", f"{exc.__class__.__name__}: {exc}")
+        self._receiver_processes[process_key] = process
+        self._receiver_log_handles[process_key] = log_handle
+        default_timeout_s = 180.0 if launch_mode == "isaac_extension" else 5.0
+        timeout_s = _safe_float(raw_payload.get("isaac_mirror_receiver_start_timeout_s"), default_timeout_s, minimum=0.1, maximum=300.0)
+        health = self._wait_for_isaac_mirror_receiver(endpoint, timeout_s=timeout_s, request_timeout_s=self._isaac_mirror_timeout_s(request))
+        if not health.get("ok"):
+            return {
+                "ok": False,
+                "tool": "lerobot.mirror.receiver_process.start",
+                "mode": mode,
+                "profile_id": profile_id,
+                "status": "STARTING",
+                "failure_code": "LEROBOT_ISAAC_MIRROR_RECEIVER_HEALTH_TIMEOUT",
+                "message": f"Receiver process started but health did not become ready within {timeout_s:g}s.",
+                "pid": process.pid,
+                "launch_mode": launch_mode,
+                "command_preview": command,
+                "log_path": str(log_path),
+                "health": health,
+                "step_trace": [{"step": "RECEIVER_PROCESS_STARTED", "status": "active", "detail": f"pid={process.pid}"}],
+                "events": [{"step": "RECEIVER_PROCESS_STARTED", "status": "active", "detail": f"pid={process.pid}"}],
+                "error": f"Receiver process started but health did not become ready within {timeout_s:g}s.",
+            }
+        step_trace = [
+            {"step": "RECEIVER_PROCESS_STARTED", "status": "ok", "detail": f"pid={process.pid}"},
+            {"step": "RECEIVER_HEALTH_READY", "status": "ok", "detail": str(health.get("health_url") or self._isaac_mirror_health_url(endpoint))},
+        ]
+        return {
+            "ok": True,
+            "tool": "lerobot.mirror.receiver_process.start",
+            "mode": mode,
+            "profile_id": profile_id,
+            "status": "RUNNING",
+            "pid": process.pid,
+            "launch_mode": launch_mode,
+            "mirror_endpoint": endpoint,
+            "command_preview": command,
+            "log_path": str(log_path),
+            "health": health,
+            "events": step_trace,
+            "step_trace": step_trace,
+            "error": None,
+        }
+
+    def mirror_receiver_process_status(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Return managed Isaac mirror receiver process and HTTP health status."""
+        raw_payload = dict(payload or {})
+        request = LeRobotBaseRequest.model_validate(raw_payload)
+        mode = request.runtime_mode or request.mode
+        profile = self._profile(request.profile_id)
+        profile_id = profile.profile_id if profile else request.profile_id or self._selected_profile_id
+        endpoint = self._isaac_mirror_endpoint(request)
+        process_key = self._isaac_mirror_process_key(endpoint)
+        process = self._receiver_processes.get(process_key)
+        returncode = process.poll() if process else None
+        running = bool(process and returncode is None)
+        health = self._fetch_isaac_mirror_receiver_health(endpoint, timeout_s=self._isaac_mirror_timeout_s(request)) if running else {"ok": False, "message": "managed receiver process is not running"}
+        status = "RUNNING" if running else "STOPPED" if process else "IDLE"
+        return {
+            "ok": bool(running and health.get("ok")),
+            "tool": "lerobot.mirror.receiver_process.status",
+            "mode": mode,
+            "profile_id": profile_id,
+            "status": status,
+            "pid": process.pid if process else None,
+            "returncode": returncode,
+            "mirror_endpoint": endpoint,
+            "health": health,
+            "log_path": str(self._receiver_log_handles.get(process_key).name) if self._receiver_log_handles.get(process_key) else "",
+            "events": [{"step": "RECEIVER_PROCESS_STATUS", "status": "ok" if running else "idle", "detail": status}],
+            "step_trace": [{"step": "RECEIVER_PROCESS_STATUS", "status": "ok" if running else "idle", "detail": status}],
+            "error": None if running else "managed receiver process is not running",
+        }
+
+    def mirror_receiver_process_stop(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Stop the managed Isaac mirror receiver process for the configured endpoint."""
+        raw_payload = dict(payload or {})
+        request = LeRobotBaseRequest.model_validate(raw_payload)
+        mode = request.runtime_mode or request.mode
+        profile = self._profile(request.profile_id)
+        profile_id = profile.profile_id if profile else request.profile_id or self._selected_profile_id
+        endpoint = self._isaac_mirror_endpoint(request)
+        process_key = self._isaac_mirror_process_key(endpoint)
+        stopped = self._stop_receiver_process(process_key)
+        step_trace = [{"step": "RECEIVER_PROCESS_STOP", "status": "ok", "detail": stopped.get("detail", "stopped")}]
+        return {
+            "ok": True,
+            "tool": "lerobot.mirror.receiver_process.stop",
+            "mode": mode,
+            "profile_id": profile_id,
+            "status": "STOPPED",
+            "mirror_endpoint": endpoint,
+            "pid": stopped.get("pid"),
+            "returncode": stopped.get("returncode"),
+            "events": step_trace,
+            "step_trace": step_trace,
+            "error": None,
+        }
+
+    def mirror_loop_start(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Continuously mirror the physical follower state into an Isaac Sim endpoint."""
+        raw_payload = dict(payload or {})
+        request = LeRobotBaseRequest.model_validate(raw_payload)
+        mode = request.runtime_mode or request.mode
+        profile = self._profile(request.profile_id)
+        if profile is None:
+            return self._error("lerobot.mirror.loop_start", mode, request.profile_id, "LEROBOT_PROFILE_NOT_FOUND", "Robot profile not found.")
+        endpoint = self._isaac_mirror_endpoint(request)
+        if not endpoint:
+            return self._error(
+                "lerobot.mirror.loop_start",
+                mode,
+                profile.profile_id,
+                "LEROBOT_ISAAC_MIRROR_ENDPOINT_REQUIRED",
+                "Isaac mirror endpoint is required.",
+            )
+        sample_hz = self._isaac_mirror_sample_hz(request)
+        max_samples = request.isaac_mirror_max_samples
+        if mode == "test" and (max_samples is None or max_samples <= 0):
+            max_samples = 1
+        attached_to = str(request.isaac_mirror_attached_to_session_id or raw_payload.get("attached_to_session_id") or "").strip()
+        session_id = request.session_id or self._new_session_id("isaac_mirror")
+        record_path = self._isaac_mirror_record_path(request, session_id)
+        step_trace = [
+            {"step": "MIRROR_LOOP_READY", "status": "ok", "detail": f"endpoint={endpoint}"},
+            {"step": "MIRROR_LOOP_SAMPLING", "status": "active", "detail": f"{sample_hz:g} Hz"},
+        ]
+        session = {
+            "session_id": session_id,
+            "tool": "lerobot.mirror.loop_start",
+            "workflow": "isaac_mirror",
+            "mode": mode,
+            "profile_id": profile.profile_id,
+            "status": "MIRROR_ACTIVE",
+            "command_preview": ["POST", endpoint],
+            "step_trace": step_trace,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "dataset_repo_id": "",
+            "dataset_root": "",
+            "dataset_path": "",
+            "output_dir": "",
+            "job_name": "",
+            "checkpoint_path": "",
+            "log_path": str(record_path),
+            "pid": None,
+            "returncode": None,
+            "mirror_endpoint": endpoint,
+            "mirror_sample_hz": sample_hz,
+            "mirror_timeout_s": self._isaac_mirror_timeout_s(request),
+            "mirror_record_path": str(record_path),
+            "attached_to_session_id": attached_to,
+            "sample_count": 0,
+            "sync_summary": {
+                "target_sample_hz": sample_hz,
+                "sample_period_s": round(1.0 / sample_hz, 6),
+                "sample_count": 0,
+                "effective_sample_hz": 0.0,
+                "mean_post_latency_ms": 0.0,
+                "max_post_latency_ms": 0.0,
+                "mean_loop_lag_ms": 0.0,
+                "max_loop_lag_ms": 0.0,
+                "post_ok_count": 0,
+                "post_fail_count": 0,
+                "last_receiver_sample_count": None,
+            },
+        }
+        self._sessions[session_id] = session
+        stop_event = threading.Event()
+        self._mirror_stop_events[session_id] = stop_event
+        if mode == "test" or (max_samples is not None and max_samples > 0):
+            self._run_isaac_mirror_loop(session, request, stop_event, max_samples=max_samples)
+        else:
+            thread = threading.Thread(
+                target=self._run_isaac_mirror_loop,
+                args=(session, request, stop_event),
+                kwargs={"max_samples": max_samples},
+                name=f"isaac-mirror-{session_id}",
+                daemon=True,
+            )
+            self._mirror_threads[session_id] = thread
+            thread.start()
+        self._emit_trace(raw_payload, "lerobot.mirror.loop_start", list(session.get("step_trace", [])), profile.profile_id, mode, session_id)
+        return self._session_response(
+            "lerobot.mirror.loop_start",
+            mode,
+            session,
+            list(session.get("step_trace", [])),
+            mirror_record_path=str(record_path),
+            sample_count=session.get("sample_count", 0),
+            attached_to_session_id=attached_to,
+        )
+
+    def mirror_loop_stop(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Stop an Isaac mirror loop by session id or attached LeRobot session id."""
+        raw_payload = dict(payload or {})
+        request = LeRobotBaseRequest.model_validate(raw_payload)
+        mode = request.runtime_mode or request.mode
+        attached_to = str(request.isaac_mirror_attached_to_session_id or raw_payload.get("attached_to_session_id") or "").strip()
+        session = self._resolve_mirror_session(request.session_id, attached_to, prefer_active=True)
+        profile_id = str(session.get("profile_id") if session else request.profile_id or self._selected_profile_id)
+        if session is None:
+            step_trace = [{"step": "MIRROR_LOOP_STOP", "status": "ok", "detail": "no active mirror session; idempotent stop"}]
+            return {
+                "ok": True,
+                "tool": "lerobot.mirror.loop_stop",
+                "mode": mode,
+                "profile_id": profile_id,
+                "session_id": request.session_id,
+                "workflow": "isaac_mirror",
+                "status": "STOPPED",
+                "attached_to_session_id": attached_to,
+                "idempotent": True,
+                "events": step_trace,
+                "step_trace": step_trace,
+                "error": None,
+            }
+        session_id = str(session.get("session_id", ""))
+        stop_event = self._mirror_stop_events.get(session_id)
+        if stop_event:
+            stop_event.set()
+        thread = self._mirror_threads.get(session_id)
+        if thread and thread.is_alive():
+            thread.join(timeout=2.0)
+        status = str(session.get("status") or "").upper()
+        if status not in {"COMPLETED", "FAILED"}:
+            session["status"] = "STOPPED"
+            session["returncode"] = 0
+        step_trace = [
+            {"step": "MIRROR_LOOP_STOPPING", "status": "ok", "detail": f"session={session_id}"},
+            {"step": str(session.get("status") or "STOPPED"), "status": "ok", "detail": "mirror loop stopped"},
+        ]
+        session.setdefault("step_trace", []).extend(step_trace)
+        self._mirror_stop_events.pop(session_id, None)
+        self._mirror_threads.pop(session_id, None)
+        self._emit_trace(raw_payload, "lerobot.mirror.loop_stop", step_trace, profile_id, mode, session_id)
+        return self._session_response(
+            "lerobot.mirror.loop_stop",
+            mode,
+            session,
+            step_trace,
+            mirror_record_path=session.get("mirror_record_path", ""),
+            sample_count=session.get("sample_count", 0),
+            attached_to_session_id=str(session.get("attached_to_session_id") or attached_to),
+        )
+
+    def mirror_loop_status(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Return Isaac mirror loop status."""
+        raw_payload = dict(payload or {})
+        request = LeRobotBaseRequest.model_validate(raw_payload)
+        mode = request.runtime_mode or request.mode
+        attached_to = str(request.isaac_mirror_attached_to_session_id or raw_payload.get("attached_to_session_id") or "").strip()
+        session = self._resolve_mirror_session(request.session_id, attached_to)
+        if session is None:
+            step_trace = [{"step": "MIRROR_LOOP_STATUS", "status": "idle", "detail": "no mirror session"}]
+            return {
+                "ok": True,
+                "tool": "lerobot.mirror.loop_status",
+                "mode": mode,
+                "profile_id": request.profile_id or self._selected_profile_id,
+                "session_id": request.session_id,
+                "workflow": "isaac_mirror",
+                "status": "IDLE",
+                "sample_count": 0,
+                "attached_to_session_id": attached_to,
+                "events": step_trace,
+                "step_trace": step_trace,
+                "error": None,
+            }
+        return self._session_response(
+            "lerobot.mirror.loop_status",
+            mode,
+            session,
+            list(session.get("step_trace", [])),
+            mirror_record_path=session.get("mirror_record_path", ""),
+            sample_count=session.get("sample_count", 0),
+            attached_to_session_id=str(session.get("attached_to_session_id") or attached_to),
+        )
 
     def find_ports(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         """Return fake ports in test mode and block unsafe live discovery by default."""
@@ -349,6 +1280,8 @@ class LeRobotBridge:
             "camera_ports": camera_ports,
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
+        if mode != "test" and request.device_role in {"follower", "leader"}:
+            baseline["serial_identity_map"] = self._serial_identity_map(serial_ports)
         memory = self._load_device_memory()
         profile_memory = self._profile_device_memory(memory, profile.profile_id)
         baseline_key = self._device_memory_key(request.device_role, request.camera_key)
@@ -412,22 +1345,16 @@ class LeRobotBridge:
                     f"expected={preferred}; candidates={', '.join(map(str, candidates)) or 'none'}",
                 )
             chosen = preferred
+        if not chosen and mode == "live" and request.device_role in {"follower", "leader"}:
+            chosen = self._select_serial_candidate_by_motor_ids(candidates, request.device_role)
         if not chosen:
             chosen = candidates[0] if candidates else ""
         if not chosen:
             return self._error("lerobot.ports.detect", mode, profile.profile_id, "LEROBOT_PORT_NOT_FOUND", f"No candidate found for {request.device_role}.")
         raw_chosen = chosen
+        if mode == "live" and request.device_role in {"follower", "leader"}:
+            chosen = self._baseline_serial_identity_port(baseline, chosen)
         chosen = self._normalize_realsense_selected_identifier(request, chosen, mode=mode)
-        stable_chosen = self._stable_device_port(chosen, request.device_role) if mode == "live" else str(chosen or "").strip()
-        conflict = self._serial_role_port_conflict(profile.profile_id, request.device_role, stable_chosen, memory=memory)
-        if conflict:
-            return self._error(
-                "lerobot.ports.detect",
-                mode,
-                profile.profile_id,
-                "LEROBOT_SERIAL_ROLE_PORT_CONFLICT",
-                f"{request.device_role} port conflicts with saved {conflict} port: {stable_chosen}",
-            )
         saved = self._save_device_port(
             profile.profile_id,
             request.device_role,
@@ -436,6 +1363,7 @@ class LeRobotBridge:
             source=f"detect_delta:{change_type}",
             memory=memory,
             prefer_identity_link=mode == "live",
+            raw_port=raw_chosen,
             camera_backend=request.camera_backend,
             camera_use_depth=request.camera_use_depth,
             camera_fps=request.camera_fps,
@@ -478,24 +1406,12 @@ class LeRobotBridge:
             return self._error("lerobot.ports.save", mode, profile.profile_id, "LEROBOT_PORT_REQUIRED", "A port or camera index is required.")
         raw_port = port
         port = self._normalize_realsense_selected_identifier(request, port, mode=mode)
-        memory = self._load_device_memory()
-        stable_port = self._stable_device_port(port, request.device_role) if mode == "live" else str(port or "").strip()
-        conflict = self._serial_role_port_conflict(profile.profile_id, request.device_role, stable_port, memory=memory)
-        if conflict:
-            return self._error(
-                "lerobot.ports.save",
-                mode,
-                profile.profile_id,
-                "LEROBOT_SERIAL_ROLE_PORT_CONFLICT",
-                f"{request.device_role} port conflicts with saved {conflict} port: {stable_port}",
-            )
         saved = self._save_device_port(
             profile.profile_id,
             request.device_role,
             port,
             camera_key=request.camera_key,
             source="manual",
-            memory=memory,
             prefer_identity_link=mode == "live",
             camera_backend=request.camera_backend,
             camera_use_depth=request.camera_use_depth,
@@ -624,7 +1540,7 @@ class LeRobotBridge:
         mode = request.runtime_mode or request.mode
         connect_detail = "leader/follower ports accepted" if mode == "live" else "fake leader/follower connected"
         active_detail = "LeRobot teleoperation process starting" if mode == "live" else "synthetic teleoperation session active"
-        return self._start_session(
+        result = self._start_session(
             tool="lerobot.teleoperate.start",
             workflow="teleoperate",
             request=request,
@@ -642,10 +1558,21 @@ class LeRobotBridge:
             ],
             event_payload=payload or {},
         )
+        return self._attach_isaac_mirror_loop_if_requested(result, payload or {}, workflow="teleoperate")
 
     def teleoperate_stop(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         """Stop a teleoperation session idempotently."""
-        return self._stop_session("lerobot.teleoperate.stop", payload or {}, "teleoperate")
+        stopped = self._stop_session("lerobot.teleoperate.stop", payload or {}, "teleoperate")
+        if self._uses_in_process_isaac_mirror(stopped):
+            stopped["isaac_mirror_stop"] = self._in_process_isaac_mirror_stop_summary(stopped)
+        else:
+            stopped["isaac_mirror_stop"] = self.mirror_loop_stop(
+                {
+                    **dict(payload or {}),
+                    "isaac_mirror_attached_to_session_id": stopped.get("session_id", ""),
+                }
+            )
+        return stopped
 
     def teleoperate_status(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         """Return teleoperation session status."""
@@ -657,7 +1584,7 @@ class LeRobotBridge:
         mode = request.runtime_mode or request.mode
         request, effective_resume, ready_detail = self._record_start_request(request)
         active_detail = "LeRobot recording process starting" if mode == "live" else "synthetic recording session active"
-        return self._start_session(
+        result = self._start_session(
             tool="lerobot.record.start",
             workflow="record",
             request=request,
@@ -682,12 +1609,23 @@ class LeRobotBridge:
             ],
             event_payload=payload or {},
         )
+        return self._attach_isaac_mirror_loop_if_requested(result, payload or {}, workflow="record")
 
     def record_control(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         """Apply a deterministic recording control action."""
         request = LeRobotRecordControlRequest.model_validate(payload or {})
         if request.action == "stop":
             stopped = self._stop_session("lerobot.record.control", payload or {}, "record", stopped_status="STOPPED")
+            if self._uses_in_process_isaac_mirror(stopped):
+                stopped["isaac_mirror_stop"] = self._in_process_isaac_mirror_stop_summary(stopped)
+            else:
+                stopped["isaac_mirror_stop"] = self.mirror_loop_stop(
+                    {
+                        **dict(payload or {}),
+                        "isaac_mirror_attached_to_session_id": stopped.get("session_id", ""),
+                    }
+                )
+            self._refresh_record_isaac_mirror_metadata(stopped.get("session_id", ""), stopped["isaac_mirror_stop"])
             extra_cleanup = self.cleanup_all_lerobot_processes(exclude_workflows={"record"})
             if extra_cleanup:
                 step_trace = list(stopped.get("step_trace", [])) + extra_cleanup
@@ -770,7 +1708,13 @@ class LeRobotBridge:
         try:
             request, runtime_detail = self._train_request_with_policy_runtime(request)
             request, dataset_detail = self._train_request_with_local_dataset(request)
+            pipeline_block = self._dataset_pipeline_block_if_needed("lerobot.train.start", mode, profile, request, "train")
+            if pipeline_block:
+                return pipeline_block
             request, dataset_version_detail = self._train_request_with_pi05_dataset_version(request)
+            pipeline_block = self._dataset_pipeline_block_if_needed("lerobot.train.start", mode, profile, request, "train")
+            if pipeline_block:
+                return pipeline_block
             request, train_detail = self._train_request_with_output_dir(profile, request)
             request, resume_detail = self._train_request_with_resume_config(profile, request)
             train_args = self._train_args(profile, request)
@@ -840,8 +1784,6 @@ class LeRobotBridge:
         policy_type = self._canonical_policy_type(request.policy_type or "act")
         is_pi05 = self._is_pi05_policy(policy_type)
         policy_args = [f"--policy.path={policy_ref or str(self.config.fake_checkpoint_root / 'policy.ckpt')}"]
-        if not is_pi05:
-            policy_args.append(f"--policy.type={policy_type}")
         device_override = str(raw_payload.get("device") or "").strip()
         if device_override:
             if is_pi05:
@@ -871,7 +1813,7 @@ class LeRobotBridge:
                     policy_args.append(f"--inference.rtc.max_guidance_weight={float(request.rollout_rtc_max_guidance_weight)}")
         if "policy_use_amp" in raw_payload:
             policy_args.append(f"--policy.use_amp={_bool_arg(request.policy_use_amp)}")
-        if request.rollout_temporal_ensemble and not is_pi05:
+        if request.rollout_temporal_ensemble and not is_pi05 and not self._is_vla_policy(policy_type):
             coeff = float(request.rollout_temporal_ensemble_coeff or 0.01)
             policy_args.append(f"--policy.temporal_ensemble_coeff={coeff}")
             policy_args.append("--policy.n_action_steps=1")
@@ -1046,31 +1988,192 @@ class LeRobotBridge:
         """Return LeRobot dataset visualization status."""
         return self._session_status("lerobot.visualize.status", payload or {}, "visualize")
 
+    def wandb_local_start(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Start a local W&B Server instance for LeRobot training dashboards."""
+        request = LeRobotSessionRequest.model_validate(payload or {})
+        mode = request.runtime_mode or request.mode
+        url = self._wandb_local_url(request)
+        port = self._wandb_local_port(request)
+        command = self._wandb_local_command("start", port)
+        step_trace = [{"step": "WANDB_LOCAL_COMMAND", "status": "ok", "detail": " ".join(command)}]
+        session_id = request.session_id or self._new_session_id("wandb-local")
+        session = {
+            "session_id": session_id,
+            "workflow": "wandb_local",
+            "profile_id": request.profile_id or self._selected_profile_id,
+            "observation_pipeline_id": self._selected_observation_pipeline_id,
+            "mode": mode,
+            "status": "WANDB_LOCAL_READY" if mode == "test" else "STARTING",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "command_preview": command,
+            "url": url,
+            "port": port,
+            "step_trace": step_trace,
+            "events": step_trace,
+        }
+        if mode != "test":
+            if self._wandb_local_port_ready(url):
+                session["status"] = "WANDB_LOCAL_RUNNING"
+                session.setdefault("step_trace", []).append({"step": "PORT_READY", "status": "ok", "detail": url})
+                self._sessions[session_id] = session
+                return self._session_response("lerobot.wandb_local.start", mode, session, session["step_trace"], url=url, port=port, idempotent=True)
+            live_start = self._start_live_process(
+                session_id=session_id,
+                command=command,
+                env_overrides={"WANDB_BASE_URL": url, "DOCKER_DEFAULT_PLATFORM": "linux/amd64"},
+            )
+            if live_start.get("session_updates"):
+                session.update(dict(live_start["session_updates"]))
+            if not live_start["ok"]:
+                session["status"] = "FAILED"
+                session["step_trace"] = step_trace + [
+                    {
+                        "step": str(live_start.get("failure_code", "WANDB_LOCAL_PROCESS_START_FAILED")),
+                        "status": "failed",
+                        "detail": str(live_start.get("message", "Local W&B server failed during startup.")),
+                    }
+                ]
+                self._sessions[session_id] = session
+                return self._session_response(
+                    "lerobot.wandb_local.start",
+                    mode,
+                    session,
+                    session["step_trace"],
+                    ok=False,
+                    failure_code=str(live_start.get("failure_code", "WANDB_LOCAL_PROCESS_START_FAILED")),
+                    message=str(live_start.get("message", "")),
+                    error=str(live_start.get("message", "")),
+                    url=url,
+                    port=port,
+                )
+            session.setdefault("step_trace", []).append({"step": "PROCESS_STARTED", "status": "active", "detail": f"pid={session.get('pid')}"})
+            ready, failure = self._wait_for_wandb_local_ready(url, session, timeout_s=45.0)
+            if ready:
+                session["status"] = "WANDB_LOCAL_RUNNING"
+                session.setdefault("step_trace", []).append({"step": "PORT_READY", "status": "ok", "detail": url})
+            elif failure:
+                failure_code, message = failure
+                session["status"] = "FAILED"
+                session.setdefault("step_trace", []).append({"step": failure_code, "status": "failed", "detail": message})
+                self._sessions[session_id] = session
+                return self._session_response(
+                    "lerobot.wandb_local.start",
+                    mode,
+                    session,
+                    session["step_trace"],
+                    ok=False,
+                    failure_code=failure_code,
+                    message=message,
+                    error=message,
+                    url=url,
+                    port=port,
+                )
+            else:
+                session["status"] = "STARTING"
+                session.setdefault("step_trace", []).append({"step": "PORT_WAITING", "status": "active", "detail": url})
+        self._sessions[session_id] = session
+        return self._session_response("lerobot.wandb_local.start", mode, session, session["step_trace"], url=url, port=port)
+
+    def wandb_local_stop(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Stop the tracked local W&B Server process and ask W&B to stop its local container."""
+        request = LeRobotSessionRequest.model_validate(payload or {})
+        mode = request.runtime_mode or request.mode
+        result = self._stop_all_workflow_sessions("lerobot.wandb_local.stop", payload or {}, "wandb_local")
+        stop_command = self._wandb_local_command("stop", self._wandb_local_port(request))
+        result["stop_command_preview"] = stop_command
+        if mode != "test":
+            try:
+                completed = subprocess.run(stop_command, cwd=str(self.config.repo_root), text=True, capture_output=True, timeout=60)
+                result["stop_returncode"] = completed.returncode
+                result["stop_output"] = (completed.stdout or completed.stderr or "").strip()[-2000:]
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                result["ok"] = False
+                result["status"] = "FAILED"
+                result["error"] = str(exc)
+        result["url"] = self._wandb_local_url(request)
+        return result
+
+    def wandb_local_status(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Return local W&B Server status tracked by this bridge."""
+        request = LeRobotSessionRequest.model_validate(payload or {})
+        result = self._session_status("lerobot.wandb_local.status", payload or {}, "wandb_local")
+        url = self._wandb_local_url(request)
+        result["url"] = url
+        result["port"] = self._wandb_local_port(request)
+        failure = self._wandb_local_failure_from_log(str(result.get("log_tail") or ""))
+        if failure:
+            failure_code, message = failure
+            result.update({"ok": False, "status": "FAILED", "failure_code": failure_code, "message": message, "error": message})
+        elif self._wandb_local_port_ready(url):
+            result.update({"ok": True, "status": "WANDB_LOCAL_RUNNING"})
+        elif str(result.get("status") or "").upper() in {"COMPLETED", "IDLE"}:
+            message = f"Local W&B server is not listening at {url}."
+            result.update({"ok": False, "status": "FAILED", "failure_code": "WANDB_LOCAL_NOT_LISTENING", "message": message, "error": message})
+        return result
+
     def dataset_inspect(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
-        """Return deterministic fake LeRobotDataset-like metadata."""
+        """Return LeRobot dataset metadata from the selected local dataset path."""
         request = LeRobotSessionRequest.model_validate(payload or {})
         mode = request.runtime_mode or request.mode
         profile = self._profile(request.profile_id)
         if profile is None:
             return self._error("lerobot.dataset.inspect", mode, request.profile_id, "LEROBOT_PROFILE_NOT_FOUND", "Robot profile not found.")
         dataset_path = request.dataset_path or self._dataset_path_for(request)
+        dataset_dir = _resolve_path(self.config.repo_root, dataset_path)
+        info_path = dataset_dir / "meta" / "info.json"
+        info: dict[str, Any] = {}
+        if info_path.is_file():
+            try:
+                loaded = json.loads(info_path.read_text(encoding="utf-8"))
+                info = loaded if isinstance(loaded, dict) else {}
+            except (OSError, json.JSONDecodeError):
+                info = {}
+        features = info.get("features") if isinstance(info.get("features"), dict) else {}
+        feature_names = sorted(str(key) for key in features)
+        depth_features = sorted(key for key in feature_names if key.startswith("observation.images.") and "depth" in key)
+        pipeline_metadata = self._read_dataset_pipeline_metadata(dataset_dir)
+        metadata_profile_id = str(pipeline_metadata.get("profile_id") or "").strip()
+        restored_profile = self._profile(metadata_profile_id) if metadata_profile_id else None
+        effective_profile = restored_profile or profile
+        metadata_files = [
+            rel
+            for rel in (
+                "meta/info.json",
+                "meta/atr_pipeline.json",
+                "meta/tasks.parquet",
+                "meta/tasks.jsonl",
+                "meta/episodes.jsonl",
+                "meta/episodes_stats.jsonl",
+                "meta/stats.json",
+            )
+            if (dataset_dir / rel).is_file()
+        ]
         return {
             "ok": True,
             "tool": "lerobot.dataset.inspect",
             "mode": mode,
-            "profile_id": profile.profile_id,
+            "profile_id": effective_profile.profile_id,
             "status": "ready",
             "dataset": {
                 "path": dataset_path,
                 "root": request.dataset_root or str(self.config.dataset_root),
-                "robot_profile_id": profile.profile_id,
-                "robot_type": profile.robot_type,
-                "teleop_type": profile.teleop_type,
-                "episode_count": request.num_episodes,
-                "fps": request.fps or profile.fps,
+                "robot_profile_id": effective_profile.profile_id,
+                "robot_type": str(info.get("robot_type") or effective_profile.robot_type),
+                "teleop_type": effective_profile.teleop_type,
+                "observation_pipeline_id": pipeline_metadata["observation_pipeline_id"],
+                "observation_pipeline_source": pipeline_metadata["source"],
+                "profile_restored_from_metadata": bool(restored_profile is not None),
+                "pipeline_metadata_path": str(pipeline_metadata.get("path") or ""),
+                "episode_count": _safe_int(info.get("total_episodes"), request.num_episodes, minimum=0),
+                "frame_count": _safe_int(info.get("total_frames"), 0, minimum=0),
+                "fps": _safe_int(info.get("fps"), request.fps or effective_profile.fps, minimum=0),
+                "codebase_version": str(info.get("codebase_version") or ""),
                 "tasks": [request.task_instruction],
-                "camera_keys": sorted(profile.camera_map.values()),
-                "metadata_files": ["meta/info.json", "tasks.jsonl"],
+                "camera_keys": sorted(effective_profile.camera_map.values()),
+                "metadata_files": metadata_files,
+                "features": feature_names,
+                "depth_features": depth_features,
+                "has_depth_features": bool(depth_features),
             },
             "step_trace": [{"step": "INSPECT_DATASET", "status": "ok", "detail": dataset_path}],
             "error": None,
@@ -1266,6 +2369,275 @@ class LeRobotBridge:
             self._refresh_process_status(session)
         return [self._public_session(session) for session in sorted(self._sessions.values(), key=lambda item: item.get("created_at", ""))[-20:]]
 
+    def _attach_isaac_mirror_loop_if_requested(self, response: dict[str, Any], payload: dict[str, Any], *, workflow: str) -> dict[str, Any]:
+        """Start a follower-state Isaac mirror loop alongside teleop/record when requested."""
+        request = LeRobotSessionRequest.model_validate(payload or {})
+        if not request.isaac_mirror_enabled:
+            return response
+        session_id = str(response.get("session_id") or "")
+        if not response.get("ok") or not session_id:
+            return response
+        mode = str(response.get("mode") or request.runtime_mode or request.mode)
+        if mode == "live" and workflow in {"teleoperate", "record"}:
+            mirror_record_path = self._in_process_isaac_mirror_record_path(workflow, request, session_id, response)
+            response["isaac_mirror"] = {
+                "ok": True,
+                "session_id": session_id,
+                "status": "IN_PROCESS",
+                "sample_count": 0,
+                "mirror_record_path": str(mirror_record_path),
+                "attached_to_session_id": session_id,
+                "sync_summary": {
+                    "target_sample_hz": self._isaac_mirror_sample_hz(request),
+                    "sample_count": 0,
+                    "source": "lerobot_in_process_send_action",
+                },
+            }
+            response["isaac_mirror_session_id"] = session_id
+            session = self._sessions.get(session_id)
+            if session is not None:
+                session["isaac_mirror_session_id"] = session_id
+                session["isaac_mirror_enabled"] = True
+                session["isaac_mirror"] = dict(response["isaac_mirror"])
+                session["isaac_mirror_endpoint"] = self._isaac_mirror_endpoint(request)
+                session["isaac_mirror_sample_hz"] = self._isaac_mirror_sample_hz(request)
+                session.setdefault("step_trace", []).append(
+                    {
+                        "step": "ISAAC_MIRROR_IN_PROCESS",
+                        "status": "ok",
+                        "detail": f"{workflow} send_action wrapper -> {self._isaac_mirror_endpoint(request)}",
+                    }
+                )
+                if workflow == "record":
+                    metadata = self._write_record_pipeline_metadata(session, create_missing=False)
+                    if metadata:
+                        session["dataset_pipeline_metadata"] = metadata
+                        response["dataset_pipeline_metadata"] = metadata
+            return response
+        mirror_payload = request.model_dump()
+        mirror_payload["session_id"] = ""
+        mirror_payload["isaac_mirror_attached_to_session_id"] = session_id
+        if workflow == "record" and not str(mirror_payload.get("isaac_mirror_record_path") or "").strip():
+            dataset_path = Path(str(response.get("dataset_path") or self._dataset_path_for(request))).expanduser()
+            mirror_payload["isaac_mirror_record_path"] = str(dataset_path / "sidecar" / "isaac_mirror" / f"{session_id}.jsonl")
+        mirror = self.mirror_loop_start(mirror_payload)
+        response["isaac_mirror"] = {
+            "ok": mirror.get("ok"),
+            "session_id": mirror.get("session_id", ""),
+            "status": mirror.get("status", ""),
+            "sample_count": mirror.get("sample_count", 0),
+            "mirror_record_path": mirror.get("mirror_record_path", ""),
+            "attached_to_session_id": session_id,
+            "sync_summary": dict(mirror.get("sync_summary") or {}),
+        }
+        response["isaac_mirror_session_id"] = mirror.get("session_id", "")
+        session = self._sessions.get(session_id)
+        if session is not None:
+            session["isaac_mirror_session_id"] = mirror.get("session_id", "")
+            session["isaac_mirror_enabled"] = True
+            session["isaac_mirror"] = dict(response["isaac_mirror"])
+            session["isaac_mirror_endpoint"] = mirror.get("mirror_endpoint", request.isaac_mirror_endpoint)
+            session["isaac_mirror_sample_hz"] = mirror.get("mirror_sample_hz", request.isaac_mirror_sample_hz)
+            session.setdefault("step_trace", []).append(
+                {
+                    "step": "ISAAC_MIRROR_ATTACHED",
+                    "status": "ok" if mirror.get("ok") else "failed",
+                    "detail": f"{workflow} -> {mirror.get('session_id', '')}",
+                }
+            )
+            if workflow == "record":
+                metadata = self._write_record_pipeline_metadata(session, create_missing=True)
+                if metadata:
+                    session["dataset_pipeline_metadata"] = metadata
+                    response["dataset_pipeline_metadata"] = metadata
+        return response
+
+    def _in_process_isaac_mirror_record_path(
+        self,
+        workflow: str,
+        request: LeRobotSessionRequest,
+        session_id: str,
+        response: dict[str, Any] | None = None,
+    ) -> Path:
+        raw = str(request.isaac_mirror_record_path or "").strip()
+        if raw:
+            return _resolve_path(self.config.repo_root, raw)
+        if workflow == "record":
+            dataset_path = Path(str((response or {}).get("dataset_path") or self._dataset_path_for(request))).expanduser()
+            return dataset_path / "sidecar" / "isaac_mirror" / f"{session_id}.jsonl"
+        return self.config.repo_root / "runs" / "isaac_mirror_sessions" / f"{session_id}.jsonl"
+
+    @staticmethod
+    def _uses_in_process_isaac_mirror(session_payload: dict[str, Any]) -> bool:
+        mirror = session_payload.get("isaac_mirror")
+        if not isinstance(mirror, dict):
+            return False
+        return str(mirror.get("status") or "").upper() == "IN_PROCESS"
+
+    def _refresh_in_process_isaac_mirror_progress(self, session_payload: dict[str, Any]) -> dict[str, Any]:
+        """Update an in-process mirror summary from its JSONL sidecar."""
+        mirror = session_payload.get("isaac_mirror")
+        if not isinstance(mirror, dict):
+            return {}
+        if str(mirror.get("status") or "").upper() not in {"IN_PROCESS", "IN_PROCESS_STOPPED"}:
+            return mirror
+        raw_record_path = str(mirror.get("mirror_record_path") or "").strip()
+        if not raw_record_path:
+            return mirror
+        mirror = dict(mirror)
+        existing_summary = dict(mirror.get("sync_summary") or {})
+        sync_summary = self._in_process_isaac_mirror_sidecar_sync_summary(
+            Path(raw_record_path).expanduser(),
+            fallback_target_hz=existing_summary.get("target_sample_hz") or session_payload.get("isaac_mirror_sample_hz"),
+        )
+        mirror["sample_count"] = sync_summary["sample_count"]
+        mirror["sync_summary"] = sync_summary
+        session_payload["isaac_mirror"] = mirror
+        return mirror
+
+    def _in_process_isaac_mirror_stop_summary(self, session_payload: dict[str, Any]) -> dict[str, Any]:
+        self._refresh_in_process_isaac_mirror_progress(session_payload)
+        mirror = dict(session_payload.get("isaac_mirror") or {})
+        raw_record_path = str(mirror.get("mirror_record_path") or "").strip()
+        record_path = Path(raw_record_path).expanduser() if raw_record_path else None
+        sync_summary = dict(mirror.get("sync_summary") or {})
+        if record_path is not None:
+            sync_summary = self._in_process_isaac_mirror_sidecar_sync_summary(
+                record_path,
+                fallback_target_hz=sync_summary.get("target_sample_hz") or session_payload.get("isaac_mirror_sample_hz"),
+            )
+        sample_count = _safe_int(sync_summary.get("sample_count"), 0, minimum=0)
+        return {
+            "ok": True,
+            "session_id": str(mirror.get("session_id") or session_payload.get("session_id") or ""),
+            "status": "IN_PROCESS_STOPPED",
+            "sample_count": sample_count,
+            "mirror_record_path": str(record_path) if record_path is not None else "",
+            "attached_to_session_id": str(session_payload.get("session_id") or ""),
+            "sync_summary": sync_summary,
+        }
+
+    @staticmethod
+    def _jsonl_line_count(path: Path) -> int:
+        try:
+            with Path(path).open("r", encoding="utf-8") as handle:
+                return sum(1 for line in handle if line.strip())
+        except OSError:
+            return 0
+
+    @staticmethod
+    def _in_process_isaac_mirror_sidecar_sync_summary(path: Path, *, fallback_target_hz: Any | None = None) -> dict[str, Any]:
+        """Summarize in-process Isaac mirror JSONL metrics without loading large sidecars."""
+        sample_count = 0
+        post_latencies: list[float] = []
+        post_ok_count = 0
+        post_fail_count = 0
+        target_hz = _safe_float(fallback_target_hz, 0.0, minimum=0.0)
+        sample_period_s = round(1.0 / target_hz, 6) if target_hz > 0 else 0.0
+        last_receiver_sample_count: int | None = None
+        first_timestamp: datetime | None = None
+        last_timestamp: datetime | None = None
+        try:
+            with Path(path).open("r", encoding="utf-8") as handle:
+                for line in handle:
+                    if not line.strip():
+                        continue
+                    sample_count += 1
+                    try:
+                        record = json.loads(line)
+                    except json.JSONDecodeError:
+                        post_fail_count += 1
+                        continue
+                    metrics = record.get("sync_metrics")
+                    if not isinstance(metrics, dict):
+                        metrics = {}
+                    target_hz = _safe_float(metrics.get("target_sample_hz"), target_hz, minimum=0.0)
+                    sample_period_s = _safe_float(
+                        metrics.get("sample_period_s"),
+                        sample_period_s or (1.0 / target_hz if target_hz > 0 else 0.0),
+                        minimum=0.0,
+                    )
+                    if "post_latency_ms" in metrics:
+                        post_latencies.append(_safe_float(metrics.get("post_latency_ms"), 0.0, minimum=0.0))
+                    if bool(metrics.get("receiver_accepted")):
+                        post_ok_count += 1
+                    else:
+                        post_fail_count += 1
+                    receiver_count = metrics.get("receiver_sample_count")
+                    if receiver_count is None:
+                        post = record.get("isaac_post")
+                        if isinstance(post, dict):
+                            receiver_count = LeRobotBridge._isaac_mirror_receiver_sample_count(post)
+                    try:
+                        if receiver_count is not None:
+                            last_receiver_sample_count = int(receiver_count)
+                    except (TypeError, ValueError):
+                        pass
+                    timestamp = str(record.get("timestamp") or "").strip()
+                    if timestamp:
+                        try:
+                            parsed = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+                        except ValueError:
+                            parsed = None
+                        if parsed is not None:
+                            first_timestamp = first_timestamp or parsed
+                            last_timestamp = parsed
+        except OSError:
+            pass
+        elapsed_s = 0.0
+        if first_timestamp is not None and last_timestamp is not None:
+            elapsed_s = max(0.0, (last_timestamp - first_timestamp).total_seconds())
+        effective_hz = (sample_count - 1) / elapsed_s if sample_count > 1 and elapsed_s > 0 else 0.0
+        return {
+            "target_sample_hz": target_hz,
+            "sample_period_s": round(sample_period_s, 6) if sample_period_s > 0 else 0.0,
+            "sample_count": sample_count,
+            "effective_sample_hz": round(effective_hz, 3),
+            "mean_post_latency_ms": round(sum(post_latencies) / len(post_latencies), 3) if post_latencies else 0.0,
+            "max_post_latency_ms": round(max(post_latencies), 3) if post_latencies else 0.0,
+            "mean_loop_lag_ms": 0.0,
+            "max_loop_lag_ms": 0.0,
+            "post_ok_count": post_ok_count,
+            "post_fail_count": post_fail_count,
+            "last_receiver_sample_count": last_receiver_sample_count,
+            "source": "lerobot_in_process_send_action",
+        }
+
+    def _refresh_record_isaac_mirror_metadata(self, record_session_id: Any, mirror_result: dict[str, Any]) -> None:
+        """Update record-session metadata with final mirror loop status/sample count."""
+        session_id = str(record_session_id or "")
+        if not session_id:
+            return
+        session = self._sessions.get(session_id)
+        if not session or str(session.get("workflow") or "").lower() != "record":
+            return
+        session["isaac_mirror_enabled"] = bool(session.get("isaac_mirror_enabled") or mirror_result.get("session_id"))
+        session["isaac_mirror_session_id"] = str(mirror_result.get("session_id") or session.get("isaac_mirror_session_id") or "")
+        mirror_sync_summary = dict(mirror_result.get("sync_summary") or {})
+        if not mirror_sync_summary:
+            mirror_sync_summary = self._isaac_mirror_sync_summary(
+                self._sessions.get(session["isaac_mirror_session_id"], {}),
+                fallback_sample_count=mirror_result.get("sample_count", 0),
+            )
+        session["isaac_mirror"] = {
+            "ok": mirror_result.get("ok"),
+            "session_id": session["isaac_mirror_session_id"],
+            "status": mirror_result.get("status", ""),
+            "sample_count": mirror_result.get("sample_count", 0),
+            "mirror_record_path": mirror_result.get("mirror_record_path", ""),
+            "attached_to_session_id": session_id,
+            "sync_summary": mirror_sync_summary,
+        }
+        session["isaac_mirror_endpoint"] = mirror_result.get("mirror_endpoint", session.get("isaac_mirror_endpoint", ""))
+        session["isaac_mirror_sample_hz"] = mirror_result.get("mirror_sample_hz", session.get("isaac_mirror_sample_hz", 0))
+        endpoint = str(session.get("isaac_mirror_endpoint") or "")
+        if endpoint:
+            receiver_state = self._fetch_isaac_mirror_receiver_state(endpoint, timeout_s=_safe_float(mirror_result.get("mirror_timeout_s"), 0.5, minimum=0.05, maximum=10.0))
+            session["isaac_mirror"]["receiver_state_at_stop"] = receiver_state
+        metadata = self._write_record_pipeline_metadata(session, create_missing=True)
+        if metadata:
+            session["dataset_pipeline_metadata"] = metadata
+
     def _start_session(
         self,
         *,
@@ -1282,6 +2654,8 @@ class LeRobotBridge:
         profile = self._profile(request.profile_id)
         if profile is None:
             return self._error(tool, mode, request.profile_id, "LEROBOT_PROFILE_NOT_FOUND", "Robot profile not found.")
+        observation_pipeline_id = self._request_observation_pipeline_id(request, profile)
+        request = request.model_copy(update={"observation_pipeline_id": observation_pipeline_id})
         unsafe = self._unsafe_arguments(extra_args + [request.dataset_path, request.policy_path, request.policy_pretrained_path, request.output_dir])
         if unsafe:
             return self._error(tool, mode, profile.profile_id, "LEROBOT_UNSAFE_ARGUMENT", f"Unsafe command argument rejected: {unsafe}")
@@ -1294,6 +2668,18 @@ class LeRobotBridge:
         camera_blocked = self._live_camera_block_if_needed(tool=tool, mode=mode, profile=profile, workflow=workflow, request=request)
         if camera_blocked:
             return camera_blocked
+        mirror_preflight = self._live_isaac_mirror_preflight_if_needed(tool=tool, mode=mode, profile=profile, workflow=workflow, request=request)
+        if mirror_preflight:
+            if not mirror_preflight.get("ok"):
+                return mirror_preflight
+            trace = [
+                *trace,
+                (
+                    "ISAAC_MIRROR_RECEIVER_READY",
+                    "ok",
+                    str(mirror_preflight.get("detail") or mirror_preflight.get("health_url") or request.isaac_mirror_endpoint),
+                ),
+            ]
         if mode == "live" and not request.confirm_live_execute:
             return self._blocked(tool, mode, profile.profile_id, "LEROBOT_LIVE_CONFIRMATION_REQUIRED", "Live LeRobot execution requires confirm_live_execute=true.", workflow)
         session_id = request.session_id or self._new_session_id(workflow)
@@ -1305,6 +2691,7 @@ class LeRobotBridge:
             "workflow": workflow,
             "mode": mode,
             "profile_id": profile.profile_id,
+            "observation_pipeline_id": observation_pipeline_id,
             "status": status,
             "command_preview": command_preview,
             "step_trace": step_trace,
@@ -1326,6 +2713,12 @@ class LeRobotBridge:
         }
         if workflow == "record":
             session["expected_depth_features"] = self._expected_record_depth_features(profile, request)
+            raw_depth_sidecar = self._record_raw_depth_sidecar(profile, request)
+            if raw_depth_sidecar.get("enabled"):
+                session["raw_depth_sidecar"] = raw_depth_sidecar
+            metadata = self._write_record_pipeline_metadata(session, create_missing=(mode != "live"))
+            if metadata:
+                session["dataset_pipeline_metadata"] = metadata
         if workflow == "train":
             session["train_config"] = self._train_config_summary(profile, request)
             session["output_dir"] = session["train_config"].get("output_dir", "")
@@ -1334,7 +2727,7 @@ class LeRobotBridge:
             live_start = self._start_live_process(
                 session_id=session_id,
                 command=command_preview,
-                env_overrides=self._workflow_env_overrides(workflow, request),
+                env_overrides=self._workflow_env_overrides(workflow, request, session_id=session_id),
             )
             if live_start.get("session_updates"):
                 session.update(dict(live_start["session_updates"]))
@@ -1532,6 +2925,11 @@ class LeRobotBridge:
         return self._session_response(tool, mode, session, list(session.get("step_trace", [])))
 
     def _session_response(self, tool: str, mode: str, session: dict[str, Any], step_trace: list[dict[str, Any]], **extra: Any) -> dict[str, Any]:
+        self._refresh_in_process_isaac_mirror_progress(session)
+        if str(session.get("workflow") or "").lower() == "record":
+            metadata = self._write_record_pipeline_metadata(session, create_missing=False)
+            if metadata:
+                session["dataset_pipeline_metadata"] = metadata
         training = self._training_progress(session)
         log_tail = self._tail_file(str(session.get("log_path", "")))
         runtime = self._runtime_status_from_log(session, log_tail)
@@ -1554,6 +2952,7 @@ class LeRobotBridge:
             "profile_id": session.get("profile_id", ""),
             "session_id": session.get("session_id", ""),
             "workflow": session.get("workflow", ""),
+            "observation_pipeline_id": session.get("observation_pipeline_id", ""),
             "status": session.get("status", ""),
             "runtime": runtime,
             "runtime_phase": runtime.get("phase"),
@@ -1577,18 +2976,737 @@ class LeRobotBridge:
             "monitor": session.get("monitor", {}),
             "error": None,
         }
+        if str(session.get("workflow") or "").lower() == "isaac_mirror":
+            payload.update(
+                {
+                    "mirror_endpoint": session.get("mirror_endpoint", ""),
+                    "mirror_sample_hz": session.get("mirror_sample_hz", 0),
+                    "mirror_record_path": session.get("mirror_record_path", ""),
+                    "attached_to_session_id": session.get("attached_to_session_id", ""),
+                    "sample_count": session.get("sample_count", 0),
+                    "last_joint_state": session.get("last_joint_state", []),
+                    "last_isaac_post": session.get("last_isaac_post", {}),
+                    "sync_summary": self._isaac_mirror_sync_summary(session),
+                }
+            )
+        if isinstance(session.get("isaac_mirror"), dict):
+            payload["isaac_mirror"] = dict(session["isaac_mirror"])
+            payload["isaac_mirror_session_id"] = session.get("isaac_mirror_session_id", "")
+        if session.get("raw_depth_sidecar"):
+            payload["raw_depth_sidecar"] = self._record_raw_depth_sidecar_status(dict(session["raw_depth_sidecar"]))
         if depth_validation:
             payload["dataset_depth_validation"] = depth_validation
         if depth_failed:
             payload["failure_code"] = "LEROBOT_REALSENSE_DEPTH_FEATURE_MISSING"
             payload["message"] = str(depth_validation.get("message", "RealSense depth feature is missing from the recorded dataset."))
             payload["error"] = payload["message"]
-        if training:
+        if str(session.get("workflow") or "").lower() == "train":
+            payload["training"] = {**dict(session.get("train_config", {})), **dict(training or {})}
+        elif training:
             payload["training"] = training
         if session.get("visualization"):
             payload["visualization"] = session.get("visualization", {})
         payload.update(extra)
         return payload
+
+    def _run_isaac_mirror_loop(
+        self,
+        session: dict[str, Any],
+        request: LeRobotBaseRequest,
+        stop_event: threading.Event,
+        *,
+        max_samples: int | None = None,
+    ) -> None:
+        """Read follower state, post it to Isaac, and persist one JSONL row per sample."""
+        mode = str(session.get("mode") or request.runtime_mode or request.mode)
+        profile_id = str(session.get("profile_id") or request.profile_id or self._selected_profile_id)
+        endpoint = str(session.get("mirror_endpoint") or self._isaac_mirror_endpoint(request))
+        timeout_s = _safe_float(session.get("mirror_timeout_s"), self._isaac_mirror_timeout_s(request), minimum=0.05, maximum=10.0)
+        sample_hz = _safe_float(session.get("mirror_sample_hz"), self._isaac_mirror_sample_hz(request), minimum=0.1, maximum=120.0)
+        period_s = 1.0 / sample_hz
+        record_path = Path(str(session.get("mirror_record_path") or self._isaac_mirror_record_path(request, str(session.get("session_id", "")))))
+        record_path.parent.mkdir(parents=True, exist_ok=True)
+        session_id = str(session.get("session_id", ""))
+        attached_to = str(session.get("attached_to_session_id") or request.isaac_mirror_attached_to_session_id or "")
+        started = time.monotonic()
+        sample_count = int(session.get("sample_count") or 0)
+        live_reader_context = None
+        live_joint_map: list[dict[str, Any]] = []
+        live_follower_port = ""
+        try:
+            if mode == "live":
+                profile = self._profile(profile_id)
+                if profile is None:
+                    raise RuntimeError(f"Robot profile not found: {profile_id}")
+                live_joint_map = [dict(item) for item in ISAAC_OMX_JOINT_MAP]
+                motor_ids = [int(item["motor_id"]) for item in live_joint_map]
+                live_follower_port = self._device_port(profile, "follower", allow_fake=False)
+                live_follower_port = self._runtime_device_port(live_follower_port, "follower", live=True)
+                if not live_follower_port:
+                    raise RuntimeError("Saved follower port is required before live mirror loop.")
+                if live_follower_port.startswith("/dev/") and not Path(live_follower_port).exists():
+                    raise RuntimeError(f"Follower port is not available: {live_follower_port}")
+                live_reader_context = self._open_follower_joint_position_reader(live_follower_port, motor_ids)
+            with ExitStack() as stack:
+                live_reader = stack.enter_context(live_reader_context) if live_reader_context is not None else None
+                with record_path.open("a", encoding="utf-8") as handle:
+                    started = time.monotonic()
+                    while not stop_event.is_set():
+                        sample_started_monotonic = time.monotonic()
+                        scheduled_sample_monotonic = started + (sample_count * period_s)
+                        next_deadline = sample_started_monotonic + period_s
+                        sample_count += 1
+                        if live_reader is not None:
+                            positions = live_reader.read()
+                            probe = self._isaac_mirror_probe_from_positions(
+                                mode=mode,
+                                profile_id=profile_id,
+                                follower_port=live_follower_port,
+                                probe_source="live_dynamixel_present_position_persistent",
+                                read_step={"step": "READ_LIVE_STATE", "status": "ok", "detail": f"persistent follower={live_follower_port}"},
+                                joint_map=live_joint_map,
+                                positions=positions,
+                            )
+                        else:
+                            probe = self.mirror_joint_state_probe({"mode": mode, "runtime_mode": mode, "profile_id": profile_id})
+                        timestamp = datetime.now(timezone.utc).isoformat()
+                        if not probe.get("ok"):
+                            failure = {
+                                "step": str(probe.get("failure_code") or "LEROBOT_ISAAC_MIRROR_PROBE_FAILED"),
+                                "status": "failed",
+                                "detail": str(probe.get("message") or probe.get("error") or "Follower joint probe failed."),
+                            }
+                            session["status"] = "FAILED"
+                            session["returncode"] = 1
+                            session.setdefault("step_trace", []).append(failure)
+                            handle.write(json.dumps({"timestamp": timestamp, "probe": probe, "failure": failure}, ensure_ascii=False) + "\n")
+                            handle.flush()
+                            break
+                        post_payload = {
+                            "session_id": session_id,
+                            "attached_to_session_id": attached_to,
+                            "sample_index": sample_count,
+                            "timestamp": timestamp,
+                            "elapsed_s": round(time.monotonic() - started, 6),
+                            "mode": mode,
+                            "profile_id": profile_id,
+                            "scene_path": probe.get("scene_path", ""),
+                            "articulation_root": probe.get("articulation_root", ""),
+                            "follower_port": probe.get("follower_port", ""),
+                            "joint_state": probe.get("joint_state", []),
+                        }
+                        post_started_monotonic = time.monotonic()
+                        post_result = self._post_isaac_mirror_state(endpoint, post_payload, timeout_s=timeout_s)
+                        post_latency_ms = round((time.monotonic() - post_started_monotonic) * 1000.0, 3)
+                        loop_lag_ms = round(max(0.0, sample_started_monotonic - scheduled_sample_monotonic) * 1000.0, 3)
+                        sample_total_latency_ms = round((time.monotonic() - sample_started_monotonic) * 1000.0, 3)
+                        sync_metrics = {
+                            "target_sample_hz": sample_hz,
+                            "sample_period_s": period_s,
+                            "sample_index": sample_count,
+                            "loop_lag_ms": loop_lag_ms,
+                            "post_latency_ms": post_latency_ms,
+                            "sample_total_latency_ms": sample_total_latency_ms,
+                            "receiver_accepted": bool(post_result.get("ok")),
+                            "receiver_status_code": post_result.get("status_code"),
+                            "receiver_sample_count": self._isaac_mirror_receiver_sample_count(post_result),
+                        }
+                        record = {**post_payload, "sync_metrics": sync_metrics, "isaac_post": post_result}
+                        handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+                        handle.flush()
+                        session["sample_count"] = sample_count
+                        session["last_joint_state"] = post_payload["joint_state"]
+                        session["last_sample_at"] = timestamp
+                        session["last_isaac_post"] = post_result
+                        self._update_isaac_mirror_sync_summary(
+                            session,
+                            sync_metrics,
+                            sample_started_monotonic=sample_started_monotonic,
+                            sample_finished_monotonic=time.monotonic(),
+                        )
+                        if not post_result.get("ok"):
+                            failure = {
+                                "step": "LEROBOT_ISAAC_MIRROR_POST_FAILED",
+                                "status": "failed",
+                                "detail": str(post_result.get("message") or post_result.get("error") or endpoint),
+                            }
+                            session["status"] = "FAILED"
+                            session["returncode"] = 1
+                            session.setdefault("step_trace", []).append(failure)
+                            break
+                        if max_samples is not None and sample_count >= max_samples:
+                            session["status"] = "COMPLETED"
+                            session["returncode"] = 0
+                            session.setdefault("step_trace", []).append(
+                                {"step": "MIRROR_LOOP_COMPLETED", "status": "ok", "detail": f"samples={sample_count}"}
+                            )
+                            break
+                        sleep_s = next_deadline - time.monotonic()
+                        if sleep_s > 0:
+                            stop_event.wait(timeout=sleep_s)
+        except Exception as exc:
+            session["status"] = "FAILED"
+            session["returncode"] = 1
+            session.setdefault("step_trace", []).append(
+                {"step": "LEROBOT_ISAAC_MIRROR_LOOP_FAILED", "status": "failed", "detail": f"{exc.__class__.__name__}: {exc}"}
+            )
+        finally:
+            if stop_event.is_set() and str(session.get("status") or "").upper() not in {"COMPLETED", "FAILED"}:
+                session["status"] = "STOPPED"
+                session["returncode"] = 0
+                session.setdefault("step_trace", []).append(
+                    {"step": "MIRROR_LOOP_STOPPED", "status": "ok", "detail": f"samples={session.get('sample_count', 0)}"}
+                )
+
+    @staticmethod
+    def _isaac_mirror_receiver_sample_count(post_result: dict[str, Any]) -> int | None:
+        """Extract receiver sample count from direct or nested receiver responses."""
+        candidates: list[Any] = [post_result.get("sample_count")]
+        response = post_result.get("response")
+        if isinstance(response, dict):
+            candidates.append(response.get("sample_count"))
+        for value in candidates:
+            try:
+                if value is not None:
+                    return int(value)
+            except (TypeError, ValueError):
+                continue
+        return None
+
+    @staticmethod
+    def _update_isaac_mirror_sync_summary(
+        session: dict[str, Any],
+        metrics: dict[str, Any],
+        *,
+        sample_started_monotonic: float,
+        sample_finished_monotonic: float,
+    ) -> dict[str, Any]:
+        """Maintain a compact synchronization summary for GUI/status/metadata evidence."""
+        summary = dict(session.get("sync_summary") or {})
+        previous_count = _safe_int(summary.get("sample_count"), 0, minimum=0)
+        sample_count = _safe_int(metrics.get("sample_index"), previous_count + 1, minimum=previous_count + 1)
+        target_hz = _safe_float(metrics.get("target_sample_hz"), _safe_float(summary.get("target_sample_hz"), 0.0, minimum=0.0), minimum=0.0)
+        sample_period_s = _safe_float(metrics.get("sample_period_s"), (1.0 / target_hz if target_hz > 0 else 0.0), minimum=0.0)
+        post_latency_ms = _safe_float(metrics.get("post_latency_ms"), 0.0, minimum=0.0)
+        loop_lag_ms = _safe_float(metrics.get("loop_lag_ms"), 0.0, minimum=0.0)
+        prior_n = max(previous_count, 0)
+        denominator = max(prior_n + 1, 1)
+        mean_post = ((_safe_float(summary.get("mean_post_latency_ms"), 0.0, minimum=0.0) * prior_n) + post_latency_ms) / denominator
+        mean_lag = ((_safe_float(summary.get("mean_loop_lag_ms"), 0.0, minimum=0.0) * prior_n) + loop_lag_ms) / denominator
+        first_monotonic = session.get("_sync_first_monotonic_s")
+        if first_monotonic is None:
+            first_monotonic = sample_started_monotonic
+            session["_sync_first_monotonic_s"] = first_monotonic
+        session["_sync_last_monotonic_s"] = sample_finished_monotonic
+        elapsed = max(0.0, float(sample_finished_monotonic) - float(first_monotonic))
+        effective_hz = (sample_count - 1) / elapsed if sample_count > 1 and elapsed > 0 else 0.0
+        receiver_sample_count = metrics.get("receiver_sample_count")
+        updated = {
+            "target_sample_hz": target_hz,
+            "sample_period_s": round(sample_period_s, 6),
+            "sample_count": sample_count,
+            "effective_sample_hz": round(effective_hz, 3),
+            "mean_post_latency_ms": round(mean_post, 3),
+            "max_post_latency_ms": round(max(_safe_float(summary.get("max_post_latency_ms"), 0.0, minimum=0.0), post_latency_ms), 3),
+            "mean_loop_lag_ms": round(mean_lag, 3),
+            "max_loop_lag_ms": round(max(_safe_float(summary.get("max_loop_lag_ms"), 0.0, minimum=0.0), loop_lag_ms), 3),
+            "post_ok_count": _safe_int(summary.get("post_ok_count"), 0, minimum=0) + (1 if bool(metrics.get("receiver_accepted")) else 0),
+            "post_fail_count": _safe_int(summary.get("post_fail_count"), 0, minimum=0) + (0 if bool(metrics.get("receiver_accepted")) else 1),
+            "last_receiver_sample_count": receiver_sample_count,
+        }
+        session["sync_summary"] = updated
+        return updated
+
+    @staticmethod
+    def _isaac_mirror_sync_summary(session: dict[str, Any], *, fallback_sample_count: Any | None = None) -> dict[str, Any]:
+        """Return a public sync summary reconciled with the session sample count."""
+        summary = dict(session.get("sync_summary") or {})
+        fallback_count = _safe_int(
+            fallback_sample_count if fallback_sample_count is not None else session.get("sample_count"),
+            0,
+            minimum=0,
+        )
+        if fallback_count:
+            summary["sample_count"] = max(_safe_int(summary.get("sample_count"), 0, minimum=0), fallback_count)
+        if "target_sample_hz" not in summary:
+            summary["target_sample_hz"] = _safe_float(session.get("mirror_sample_hz"), 0.0, minimum=0.0)
+        if "sample_period_s" not in summary:
+            hz = _safe_float(summary.get("target_sample_hz"), 0.0, minimum=0.0)
+            summary["sample_period_s"] = round(1.0 / hz, 6) if hz > 0 else 0.0
+        summary.setdefault("effective_sample_hz", 0.0)
+        summary.setdefault("mean_post_latency_ms", 0.0)
+        summary.setdefault("max_post_latency_ms", 0.0)
+        summary.setdefault("mean_loop_lag_ms", 0.0)
+        summary.setdefault("max_loop_lag_ms", 0.0)
+        summary.setdefault("post_ok_count", 0)
+        summary.setdefault("post_fail_count", 0)
+        summary.setdefault("last_receiver_sample_count", None)
+        return summary
+
+    def _post_isaac_mirror_state(self, endpoint: str, payload: dict[str, Any], *, timeout_s: float = 0.5) -> dict[str, Any]:
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        request = Request(
+            endpoint,
+            data=body,
+            method="POST",
+            headers={"Content-Type": "application/json", "Accept": "application/json"},
+        )
+        try:
+            with urlopen(request, timeout=timeout_s) as response:
+                raw = response.read(8192).decode("utf-8", errors="replace")
+                parsed: Any = {}
+                if raw.strip():
+                    try:
+                        parsed = json.loads(raw)
+                    except json.JSONDecodeError:
+                        parsed = {"body": raw}
+                status_code = int(getattr(response, "status", 200))
+                return {"ok": 200 <= status_code < 300, "status_code": status_code, "response": parsed}
+        except HTTPError as exc:
+            return {"ok": False, "status_code": exc.code, "message": exc.reason or str(exc)}
+        except (URLError, TimeoutError, OSError) as exc:
+            return {"ok": False, "status_code": None, "message": f"{exc.__class__.__name__}: {exc}"}
+
+    def _fetch_isaac_mirror_receiver_health(self, endpoint: str, *, timeout_s: float = 0.5) -> dict[str, Any]:
+        health_url = self._isaac_mirror_health_url(endpoint)
+        request = Request(health_url, method="GET", headers={"Accept": "application/json"})
+        try:
+            with urlopen(request, timeout=timeout_s) as response:
+                raw = response.read(8192).decode("utf-8", errors="replace")
+                parsed: dict[str, Any] = {}
+                if raw.strip():
+                    try:
+                        parsed = json.loads(raw)
+                    except json.JSONDecodeError:
+                        parsed = {"body": raw}
+                status_code = int(getattr(response, "status", 200))
+                return {
+                    "ok": 200 <= status_code < 300 and bool(parsed.get("ok", True)),
+                    "status_code": status_code,
+                    "health_url": health_url,
+                    **parsed,
+                }
+        except HTTPError as exc:
+            return {"ok": False, "status_code": exc.code, "health_url": health_url, "message": exc.reason or str(exc)}
+        except (URLError, TimeoutError, OSError) as exc:
+            return {"ok": False, "status_code": None, "health_url": health_url, "message": f"{exc.__class__.__name__}: {exc}"}
+
+    def _fetch_isaac_mirror_receiver_state(self, endpoint: str, *, timeout_s: float = 0.5) -> dict[str, Any]:
+        state_url = self._isaac_mirror_state_url(endpoint)
+        request = Request(state_url, method="GET", headers={"Accept": "application/json"})
+        try:
+            with urlopen(request, timeout=timeout_s) as response:
+                raw = response.read(16384).decode("utf-8", errors="replace")
+                parsed: dict[str, Any] = {}
+                if raw.strip():
+                    try:
+                        parsed = json.loads(raw)
+                    except json.JSONDecodeError:
+                        parsed = {"body": raw}
+                status_code = int(getattr(response, "status", 200))
+                return {
+                    "ok": 200 <= status_code < 300 and bool(parsed.get("ok", True)),
+                    "status_code": status_code,
+                    "state_url": state_url,
+                    **parsed,
+                }
+        except HTTPError as exc:
+            return {"ok": False, "status_code": exc.code, "state_url": state_url, "message": exc.reason or str(exc)}
+        except (URLError, TimeoutError, OSError) as exc:
+            return {"ok": False, "status_code": None, "state_url": state_url, "message": f"{exc.__class__.__name__}: {exc}"}
+
+    def _wait_for_isaac_mirror_receiver(self, endpoint: str, *, timeout_s: float, request_timeout_s: float) -> dict[str, Any]:
+        deadline = time.monotonic() + timeout_s
+        last: dict[str, Any] = {"ok": False, "message": "not checked"}
+        while time.monotonic() < deadline:
+            last = self._fetch_isaac_mirror_receiver_health(endpoint, timeout_s=request_timeout_s)
+            if last.get("ok"):
+                return last
+            time.sleep(0.1)
+        return last
+
+    def _stop_receiver_process(self, endpoint_or_key: str) -> dict[str, Any]:
+        process_key = self._isaac_mirror_process_key(endpoint_or_key)
+        process = self._receiver_processes.pop(process_key, None)
+        log_handle = self._receiver_log_handles.pop(process_key, None)
+        try:
+            if process and process.poll() is None:
+                self._terminate_live_process(process, signal.SIGTERM)
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    self._terminate_live_process(process, signal.SIGKILL)
+                    process.wait(timeout=5)
+            return {
+                "pid": process.pid if process else None,
+                "returncode": process.returncode if process else None,
+                "detail": "receiver process stopped" if process else "no managed receiver process",
+            }
+        finally:
+            if log_handle:
+                try:
+                    log_handle.close()
+                except OSError:
+                    pass
+
+    def _live_isaac_mirror_preflight_if_needed(
+        self,
+        *,
+        tool: str,
+        mode: str,
+        profile: RobotProfile,
+        workflow: str,
+        request: LeRobotSessionRequest,
+    ) -> dict[str, Any] | None:
+        if mode != "live" or workflow not in {"teleoperate", "record"} or not request.isaac_mirror_enabled:
+            return None
+        endpoint = self._isaac_mirror_endpoint(request)
+        timeout_s = self._isaac_mirror_timeout_s(request)
+        health = self._fetch_isaac_mirror_receiver_health(endpoint, timeout_s=timeout_s)
+        health_url = str(health.get("health_url") or self._isaac_mirror_health_url(endpoint))
+        if not health.get("ok"):
+            message = str(health.get("message") or health.get("error") or "Isaac mirror receiver is unavailable.")
+            return self._blocked(
+                tool,
+                mode,
+                profile.profile_id,
+                "LEROBOT_ISAAC_MIRROR_RECEIVER_UNAVAILABLE",
+                f"Isaac mirror receiver is unavailable at {health_url}: {message}",
+                workflow,
+            )
+        apply_mode = str(health.get("apply_mode") or "unknown")
+        detail = f"{health_url} apply_mode={apply_mode}"
+        if apply_mode != "deferred_update_tick":
+            return self._blocked(
+                tool,
+                mode,
+                profile.profile_id,
+                "LEROBOT_ISAAC_MIRROR_RECEIVER_NOT_IN_ISAAC_UPDATE_TICK",
+                f"Isaac mirror receiver is reachable at {health_url}, but it is not running inside Isaac Kit update-tick mode: apply_mode={apply_mode}. Start the ATR Isaac extension receiver before live teleop/record.",
+                workflow,
+            )
+        return {"ok": True, "health_url": health_url, "receiver_health": health, "detail": detail}
+
+    @staticmethod
+    def _isaac_mirror_endpoint(request: LeRobotBaseRequest) -> str:
+        return str(request.isaac_mirror_endpoint or "http://127.0.0.1:8766/joints").strip()
+
+    @staticmethod
+    def _isaac_mirror_process_key(endpoint: str) -> str:
+        clean = str(endpoint or "http://127.0.0.1:8766/joints").strip()
+        if "://" not in clean and "/" not in clean and ":" in clean:
+            return clean
+        parsed = urlparse(clean)
+        host = parsed.hostname or "127.0.0.1"
+        port = parsed.port or 8766
+        return f"{host}:{port}"
+
+    @staticmethod
+    def _isaac_mirror_host_port(endpoint: str) -> tuple[str, int]:
+        parsed = urlparse(str(endpoint or "http://127.0.0.1:8766/joints").strip())
+        return parsed.hostname or "127.0.0.1", int(parsed.port or 8766)
+
+    def _isaac_mirror_receiver_command(self, payload: dict[str, Any], endpoint: str) -> dict[str, Any]:
+        """Build the managed receiver command.
+
+        The production default launches Isaac Sim with the ATR extension enabled,
+        so the HTTP receiver runs inside the Isaac process and can update the
+        active stage on Kit update ticks. A direct Python script launch remains
+        available for bounded HTTP smoke tests.
+        """
+        launch_mode = self._isaac_mirror_receiver_launch_mode(payload)
+        host, port = self._isaac_mirror_host_port(endpoint)
+        scene_path = _resolve_path(self.config.repo_root, str(payload.get("isaac_mirror_receiver_scene") or ISAAC_OMX_SCENE_RELATIVE_PATH))
+        if launch_mode == "isaac_extension":
+            executable = self._isaac_mirror_receiver_isaac_sim_executable(payload)
+            extension_root = self.config.repo_root / "sim" / "robotis_omx" / "extensions"
+            manifest = extension_root / "atr.omx.mirror" / "config" / "extension.toml"
+            if not manifest.exists():
+                return {
+                    "ok": False,
+                    "launch_mode": launch_mode,
+                    "failure_code": "LEROBOT_ISAAC_MIRROR_EXTENSION_NOT_FOUND",
+                    "message": f"Isaac mirror extension manifest not found: {manifest}",
+                }
+            if not scene_path.exists():
+                return {
+                    "ok": False,
+                    "launch_mode": launch_mode,
+                    "failure_code": "LEROBOT_ISAAC_MIRROR_SCENE_NOT_FOUND",
+                    "message": f"Isaac mirror scene not found: {scene_path}",
+                }
+            if not Path(executable).exists() and shutil.which(executable) is None:
+                return {
+                    "ok": False,
+                    "launch_mode": launch_mode,
+                    "failure_code": "LEROBOT_ISAAC_SIM_EXECUTABLE_NOT_FOUND",
+                    "message": f"Isaac Sim executable not found: {executable}",
+                }
+            command = [
+                executable,
+                "--ext-folder",
+                str(extension_root),
+                "--enable",
+                "atr.omx.mirror",
+                f"--/exts/atr.omx.mirror/enabled=true",
+                f"--/exts/atr.omx.mirror/host={host}",
+                f"--/exts/atr.omx.mirror/port={port}",
+                f"--/exts/atr.omx.mirror/scene={scene_path}",
+                f"--/exts/atr.omx.mirror/useCurrentStage=true",
+                f"--/exts/atr.omx.mirror/openSceneOnStartup=true",
+                f"--/exts/atr.omx.mirror/playTimelineOnStartup=true",
+                str(scene_path),
+            ]
+            return {"ok": True, "launch_mode": launch_mode, "command": command, "scene_path": str(scene_path)}
+
+        python_executable = self._isaac_mirror_receiver_python(payload)
+        script_path = self.config.repo_root / "sim" / "robotis_omx" / "tools" / "isaac_omx_mirror_server.py"
+        if not script_path.exists():
+            return {
+                "ok": False,
+                "launch_mode": launch_mode,
+                "failure_code": "LEROBOT_ISAAC_MIRROR_RECEIVER_SCRIPT_NOT_FOUND",
+                "message": f"Receiver script not found: {script_path}",
+            }
+        if not Path(python_executable).exists() and shutil.which(python_executable) is None:
+            return {
+                "ok": False,
+                "launch_mode": launch_mode,
+                "failure_code": "LEROBOT_ISAAC_MIRROR_RECEIVER_PYTHON_NOT_FOUND",
+                "message": f"Receiver Python not found: {python_executable}",
+            }
+        return {
+            "ok": True,
+            "launch_mode": launch_mode,
+            "command": [python_executable, str(script_path), "--host", host, "--port", str(port), "--scene", str(scene_path)],
+            "scene_path": str(scene_path),
+        }
+
+    @staticmethod
+    def _isaac_mirror_receiver_launch_mode(payload: dict[str, Any]) -> str:
+        explicit = str(payload.get("isaac_mirror_receiver_launch_mode") or "").strip().lower()
+        if explicit in {"isaac_extension", "extension", "isaac"}:
+            return "isaac_extension"
+        if explicit in {"python_script", "script", "python"}:
+            return "python_script"
+        if str(payload.get("isaac_mirror_receiver_python") or "").strip():
+            return "python_script"
+        return "isaac_extension"
+
+    @staticmethod
+    def _isaac_mirror_receiver_isaac_sim_executable(payload: dict[str, Any]) -> str:
+        explicit = str(payload.get("isaac_mirror_receiver_isaac_sim_executable") or "").strip()
+        if explicit:
+            return explicit
+        env_value = os.environ.get("ATR_ISAAC_SIM_EXECUTABLE", "").strip()
+        if env_value:
+            return env_value
+        isaac_sim = Path("/home/jin/IsaacSim/isaac-sim.sh")
+        if isaac_sim.exists():
+            return str(isaac_sim)
+        return "isaac-sim.sh"
+
+    @staticmethod
+    def _isaac_mirror_receiver_python(payload: dict[str, Any]) -> str:
+        explicit = str(payload.get("isaac_mirror_receiver_python") or "").strip()
+        if explicit:
+            return explicit
+        env_value = os.environ.get("ATR_ISAAC_MIRROR_RECEIVER_PYTHON", "").strip()
+        if env_value:
+            return env_value
+        isaac_python = Path("/home/jin/IsaacSim/python.sh")
+        if isaac_python.exists():
+            return str(isaac_python)
+        return sys.executable
+
+    @staticmethod
+    def _isaac_mirror_health_url(endpoint: str) -> str:
+        parsed = urlparse(str(endpoint or "http://127.0.0.1:8766/joints").strip())
+        if not parsed.scheme or not parsed.netloc:
+            return "http://127.0.0.1:8766/health"
+        return parsed._replace(path="/health", params="", query="", fragment="").geturl()
+
+    @staticmethod
+    def _isaac_mirror_state_url(endpoint: str) -> str:
+        parsed = urlparse(str(endpoint or "http://127.0.0.1:8766/joints").strip())
+        if not parsed.scheme or not parsed.netloc:
+            return "http://127.0.0.1:8766/state"
+        return parsed._replace(path="/state", params="", query="", fragment="").geturl()
+
+    @staticmethod
+    def _isaac_mirror_sample_hz(request: LeRobotBaseRequest) -> float:
+        return _safe_float(request.isaac_mirror_sample_hz, 15.0, minimum=0.1, maximum=120.0)
+
+    @staticmethod
+    def _isaac_mirror_timeout_s(request: LeRobotBaseRequest) -> float:
+        return _safe_float(request.isaac_mirror_timeout_s, 0.5, minimum=0.05, maximum=10.0)
+
+    def _isaac_mirror_record_path(self, request: LeRobotBaseRequest, session_id: str) -> Path:
+        raw = str(request.isaac_mirror_record_path or "").strip()
+        if raw:
+            return _resolve_path(self.config.repo_root, raw)
+        return self.config.repo_root / "runs" / "isaac_mirror_sessions" / f"{session_id}.jsonl"
+
+    def _resolve_mirror_session(self, session_id: str, attached_to_session_id: str = "", *, prefer_active: bool = False) -> dict[str, Any] | None:
+        if session_id:
+            session = self._resolve_session(session_id, "isaac_mirror", prefer_active=prefer_active)
+            if session is not None:
+                return session
+        attached = str(attached_to_session_id or "").strip()
+        if attached:
+            matches = [
+                session
+                for session in self._sessions.values()
+                if session.get("workflow") == "isaac_mirror" and str(session.get("attached_to_session_id") or "") == attached
+            ]
+            if prefer_active:
+                for session in reversed(matches):
+                    if self._session_is_active(session):
+                        return session
+            if matches:
+                return matches[-1]
+        return self._resolve_session("", "isaac_mirror", prefer_active=prefer_active)
+
+    def _stop_all_mirror_loops(self) -> list[dict[str, Any]]:
+        step_trace: list[dict[str, Any]] = []
+        for session in [item for item in self._sessions.values() if item.get("workflow") == "isaac_mirror"]:
+            session_id = str(session.get("session_id", ""))
+            stop_event = self._mirror_stop_events.get(session_id)
+            if stop_event:
+                stop_event.set()
+            thread = self._mirror_threads.get(session_id)
+            if thread and thread.is_alive():
+                thread.join(timeout=2.0)
+            if str(session.get("status") or "").upper() not in {"COMPLETED", "FAILED"}:
+                session["status"] = "STOPPED"
+                session["returncode"] = 0
+            step_trace.append({"step": "STOP_ISAAC_MIRROR", "status": "ok", "detail": f"session={session_id}"})
+            self._mirror_stop_events.pop(session_id, None)
+            self._mirror_threads.pop(session_id, None)
+        return step_trace
+
+    def _write_record_pipeline_metadata(self, session: dict[str, Any], *, create_missing: bool) -> dict[str, Any] | None:
+        """Persist the ATR dataset/profile/pipeline contract beside a recorded dataset."""
+        if str(session.get("workflow") or "").lower() != "record":
+            return None
+        dataset_path = Path(str(session.get("dataset_path") or "")).expanduser()
+        if not dataset_path:
+            return None
+        if not create_missing and not dataset_path.exists():
+            return None
+        pipeline_id = _normalize_observation_pipeline_id(session.get("observation_pipeline_id"))
+        pipeline = LEROBOT_OBSERVATION_PIPELINES[pipeline_id]
+        sidecar = dict(session.get("raw_depth_sidecar") or {})
+        isaac_mirror = dict(session.get("isaac_mirror") or {})
+        metadata_path = self._dataset_pipeline_metadata_path(dataset_path)
+        payload = {
+            "version": 1,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "profile_id": str(session.get("profile_id") or ""),
+            "observation_pipeline_id": pipeline_id,
+            "pipeline_label": str(pipeline.get("label") or pipeline_id),
+            "dataset_repo_id": str(session.get("dataset_repo_id") or ""),
+            "dataset_root": str(session.get("dataset_root") or ""),
+            "dataset_path": str(dataset_path),
+            "raw_depth_sidecar": {
+                "required": bool(pipeline.get("raw_depth_sidecar")),
+                "adapter_required": bool(pipeline.get("requires_raw_depth")),
+                "enabled": bool(sidecar.get("enabled")),
+                "root": str(sidecar.get("root") or ""),
+                "format": str(sidecar.get("format") or "png16"),
+                "expected_camera_keys": list(sidecar.get("expected_camera_keys") or []),
+                "aligned_to": str(sidecar.get("aligned_to") or ("color" if self.config.realsense_depth_align_to_color else "native_depth")),
+                "depth_scale_m_per_unit": self.config.realsense_depth_scale_m_per_unit,
+                "depth_clip_min_mm": self.config.realsense_depth_clip_min_mm,
+                "depth_clip_max_mm": self.config.realsense_depth_clip_max_mm,
+            },
+            "isaac_mirror": {
+                "enabled": bool(session.get("isaac_mirror_enabled")),
+                "session_id": str(session.get("isaac_mirror_session_id") or isaac_mirror.get("session_id") or ""),
+                "attached_to_session_id": str(session.get("session_id") or ""),
+                "record_path": str(isaac_mirror.get("mirror_record_path") or ""),
+                "endpoint": str(session.get("isaac_mirror_endpoint") or ""),
+                "sample_hz": _safe_float(session.get("isaac_mirror_sample_hz"), 0.0, minimum=0.0),
+                "sample_count": _safe_int(isaac_mirror.get("sample_count"), 0, minimum=0),
+                "status": str(isaac_mirror.get("status") or ""),
+                "sync_summary": dict(isaac_mirror.get("sync_summary") or self._isaac_mirror_sync_summary(
+                    self._sessions.get(str(session.get("isaac_mirror_session_id") or ""), {}),
+                    fallback_sample_count=isaac_mirror.get("sample_count"),
+                )),
+                "receiver_state_at_stop": dict(isaac_mirror.get("receiver_state_at_stop") or {}),
+            },
+        }
+        try:
+            metadata_path.parent.mkdir(parents=True, exist_ok=True)
+            metadata_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+        except OSError:
+            return None
+        return {
+            "path": str(metadata_path),
+            "observation_pipeline_id": pipeline_id,
+            "profile_id": payload["profile_id"],
+        }
+
+    @staticmethod
+    def _dataset_pipeline_metadata_path(dataset_path: Path) -> Path:
+        return dataset_path / "meta" / "atr_pipeline.json"
+
+    @staticmethod
+    def _dataset_raw_depth_manifest_path(dataset_path: Path) -> Path:
+        return dataset_path / "sidecar" / "depth_raw" / "transform_manifest.json"
+
+    def _read_dataset_pipeline_metadata(self, dataset_path: Path) -> dict[str, Any]:
+        """Read ATR dataset pipeline metadata, or infer a conservative display-only value."""
+        metadata_path = self._dataset_pipeline_metadata_path(dataset_path)
+        if metadata_path.is_file():
+            try:
+                loaded = json.loads(metadata_path.read_text(encoding="utf-8"))
+                data = loaded if isinstance(loaded, dict) else {}
+            except (OSError, json.JSONDecodeError):
+                data = {}
+            pipeline_id = _normalize_observation_pipeline_id(data.get("observation_pipeline_id"), self.config.default_observation_pipeline_id)
+            return {
+                **data,
+                "exists": True,
+                "source": "metadata",
+                "path": str(metadata_path),
+                "observation_pipeline_id": pipeline_id,
+                "profile_id": str(data.get("profile_id") or ""),
+            }
+        inferred = "rgbd_sidecar" if self._dataset_raw_depth_manifest_path(dataset_path).is_file() else "legacy_lerobot"
+        return {
+            "exists": False,
+            "source": "inferred_sidecar" if inferred == "rgbd_sidecar" else "inferred_legacy",
+            "path": str(metadata_path),
+            "observation_pipeline_id": inferred,
+            "profile_id": "",
+        }
+
+    def _dataset_pipeline_block_if_needed(self, tool: str, mode: str, profile: RobotProfile, request: LeRobotSessionRequest, workflow: str) -> dict[str, Any] | None:
+        """Block explicit train/rollout requests that conflict with dataset pipeline metadata."""
+        dataset_path = Path(self._dataset_path_for(request)).expanduser()
+        metadata = self._read_dataset_pipeline_metadata(dataset_path)
+        requested = self._request_observation_pipeline_id(request, profile)
+        recorded = _normalize_observation_pipeline_id(metadata.get("observation_pipeline_id"), requested)
+        if metadata.get("source") == "metadata" and recorded != requested:
+            return self._blocked(
+                tool,
+                mode,
+                profile.profile_id,
+                "LEROBOT_OBSERVATION_PIPELINE_MISMATCH",
+                f"Selected pipeline '{requested}' does not match dataset metadata '{recorded}' at {metadata.get('path')}.",
+                workflow,
+            )
+        if requested == "raw_depth_adapter" and mode == "live" and not self._dataset_raw_depth_manifest_path(dataset_path).is_file():
+            return self._blocked(
+                tool,
+                mode,
+                profile.profile_id,
+                "LEROBOT_RAW_DEPTH_ADAPTER_SOURCE_MISSING",
+                f"Raw Depth Adapter requires {self._dataset_raw_depth_manifest_path(dataset_path)}.",
+                workflow,
+            )
+        return None
 
     def _expected_record_depth_features(self, profile: RobotProfile, request: LeRobotSessionRequest) -> list[str]:
         if not request.camera_enabled:
@@ -1665,6 +3783,66 @@ class LeRobotBridge:
             "present_depth_features": present_depth,
             "missing_depth_features": [],
             "message": "Recorded LeRobot dataset exposes the expected RealSense depth visual features.",
+        }
+
+    def _record_raw_depth_sidecar(self, profile: RobotProfile, request: LeRobotSessionRequest) -> dict[str, Any]:
+        pipeline_id = self._request_observation_pipeline_id(request, profile)
+        pipeline = LEROBOT_OBSERVATION_PIPELINES[pipeline_id]
+        if not bool(pipeline.get("raw_depth_sidecar")):
+            return {
+                "enabled": False,
+                "root": "",
+                "expected_camera_keys": [],
+                "format": "png16",
+                "pipeline_id": pipeline_id,
+            }
+        camera_keys = self._record_raw_depth_camera_keys(profile, request)
+        if not camera_keys:
+            return {"enabled": False, "root": "", "expected_camera_keys": [], "format": "png16", "pipeline_id": pipeline_id}
+        root = Path(self._dataset_path_for(request)).expanduser() / "sidecar" / "depth_raw"
+        return {
+            "enabled": True,
+            "root": str(root),
+            "expected_camera_keys": camera_keys,
+            "format": "png16",
+            "pipeline_id": pipeline_id,
+            "aligned_to": "color" if self.config.realsense_depth_align_to_color else "native_depth",
+            "depth_scale_m_per_unit": self.config.realsense_depth_scale_m_per_unit,
+            "depth_clip_min_mm": self.config.realsense_depth_clip_min_mm,
+            "depth_clip_max_mm": self.config.realsense_depth_clip_max_mm,
+        }
+
+    def _record_raw_depth_camera_keys(self, profile: RobotProfile | None, request: LeRobotSessionRequest) -> list[str]:
+        if profile is None or not request.camera_enabled:
+            return []
+        keys: list[str] = []
+        for camera_key in self._profile_camera_keys(profile):
+            camera_device = self._saved_camera_device(profile.profile_id, camera_key)
+            backend = self._normalize_camera_backend((camera_device or {}).get("backend", "opencv"))
+            if backend == LEROBOT_REALSENSE_TYPE and self._camera_use_depth(camera_device or {}, default=True):
+                keys.append(camera_key)
+        return sorted(dict.fromkeys(keys))
+
+    @staticmethod
+    def _record_raw_depth_sidecar_status(sidecar: dict[str, Any]) -> dict[str, Any]:
+        root = Path(str(sidecar.get("root") or "")).expanduser()
+        camera_keys = [str(item) for item in sidecar.get("expected_camera_keys", []) if str(item).strip()]
+        file_counts: dict[str, int] = {}
+        for camera_key in camera_keys:
+            camera_dir = root / camera_key
+            try:
+                file_counts[camera_key] = len(list(camera_dir.glob("frame_*.png")))
+            except OSError:
+                file_counts[camera_key] = 0
+        missing = [key for key, count in file_counts.items() if count <= 0]
+        status = "disabled"
+        if sidecar.get("enabled"):
+            status = "ok" if file_counts and not missing else "waiting"
+        return {
+            **sidecar,
+            "status": status,
+            "file_counts": file_counts,
+            "missing_camera_keys": missing,
         }
 
     def _runtime_status_from_log(self, session: dict[str, Any], log_tail: str) -> dict[str, Any]:
@@ -1890,17 +4068,39 @@ class LeRobotBridge:
     @staticmethod
     def _public_profile(profile: RobotProfile) -> dict[str, Any]:
         data = profile.model_dump()
+        data["observation_pipeline_id"] = _normalize_observation_pipeline_id(
+            data.get("observation_pipeline_id") or LEROBOT_DEFAULT_OBSERVATION_PIPELINE_ID
+        )
         data["live_gate_summary"] = LeRobotBridge._live_gate_summary(profile)
         return data
 
+    @staticmethod
+    def _observation_pipeline_options() -> list[dict[str, Any]]:
+        """Return stable GUI choices for RGB-D dataset handling."""
+        return [dict(item) for item in LEROBOT_OBSERVATION_PIPELINES.values()]
+
+    def _request_observation_pipeline_id(self, request: Any, profile: RobotProfile | None = None) -> str:
+        """Resolve the effective observation pipeline for a request/profile."""
+        if isinstance(request, dict):
+            requested = request.get("observation_pipeline_id")
+        else:
+            requested = getattr(request, "observation_pipeline_id", "")
+        if requested:
+            return _normalize_observation_pipeline_id(requested, self._selected_observation_pipeline_id)
+        if profile and profile.observation_pipeline_id:
+            return _normalize_observation_pipeline_id(profile.observation_pipeline_id, self.config.default_observation_pipeline_id)
+        return _normalize_observation_pipeline_id(self._selected_observation_pipeline_id or self.config.default_observation_pipeline_id)
+
     def _public_session(self, session: dict[str, Any]) -> dict[str, Any]:
+        self._refresh_in_process_isaac_mirror_progress(session)
         log_tail = self._tail_file(str(session.get("log_path", "")))
         runtime = self._runtime_status_from_log(session, log_tail)
         training = self._training_progress(session)
-        return {
+        public = {
             "session_id": session.get("session_id", ""),
             "workflow": session.get("workflow", ""),
             "profile_id": session.get("profile_id", ""),
+            "observation_pipeline_id": session.get("observation_pipeline_id", ""),
             "mode": session.get("mode", ""),
             "status": session.get("status", ""),
             "runtime": runtime,
@@ -1918,6 +4118,20 @@ class LeRobotBridge:
             "monitor": session.get("monitor", {}),
             "visualization": session.get("visualization", {}),
         }
+        if str(session.get("workflow") or "").lower() == "isaac_mirror":
+            public.update(
+                {
+                    "mirror_endpoint": session.get("mirror_endpoint", ""),
+                    "mirror_sample_hz": session.get("mirror_sample_hz", 0),
+                    "mirror_record_path": session.get("mirror_record_path", ""),
+                    "attached_to_session_id": session.get("attached_to_session_id", ""),
+                    "sample_count": session.get("sample_count", 0),
+                }
+            )
+        if isinstance(session.get("isaac_mirror"), dict):
+            public["isaac_mirror"] = dict(session["isaac_mirror"])
+            public["isaac_mirror_session_id"] = session.get("isaac_mirror_session_id", "")
+        return public
 
     @staticmethod
     def _live_gate_summary(profile: RobotProfile | None) -> dict[str, Any]:
@@ -2241,7 +4455,9 @@ class LeRobotBridge:
     def _workflow_command(self, profile: RobotProfile, workflow: str, request: LeRobotSessionRequest, args: list[str]) -> list[str]:
         mode = request.runtime_mode or request.mode
         command = [self.config.conda_executable, "run", "--no-capture-output", "-n", self._workflow_conda_env_name(workflow, request)]
-        if workflow == "rollout" and self._is_pi05_policy(request.policy_type):
+        if mode == "live" and workflow in {"teleoperate", "record"} and request.isaac_mirror_enabled:
+            command.extend(["python", str(self.config.repo_root / "scripts" / "lerobot_isaac_mirror_runtime_wrapper.py"), workflow])
+        elif workflow == "rollout" and self._is_pi05_policy(request.policy_type):
             command.extend(["python", str(self.config.repo_root / "scripts" / "lerobot_pi05_rollout_wrapper.py")])
         else:
             command.extend(self._workflow_entrypoint(profile, workflow))
@@ -2255,10 +4471,37 @@ class LeRobotBridge:
     def _workflow_conda_env_name(self, workflow: str, request: LeRobotSessionRequest) -> str:
         if workflow in {"train", "rollout"} and self._is_pi05_policy(request.policy_type):
             return self.config.pi05_conda_env_name
+        if workflow in {"train", "rollout"} and self._is_xvla_policy(request.policy_type):
+            return self.config.xvla_conda_env_name
+        if workflow in {"train", "rollout"} and self._is_smolvla_policy(request.policy_type):
+            return self.config.smolvla_conda_env_name
         return self.config.conda_env_name
 
-    def _workflow_env_overrides(self, workflow: str, request: LeRobotSessionRequest) -> dict[str, str]:
-        env: dict[str, str] = {}
+    def _workflow_env_overrides(self, workflow: str, request: LeRobotSessionRequest, *, session_id: str = "") -> dict[str, str]:
+        pipeline_id = self._request_observation_pipeline_id(request, self._profile(request.profile_id or self._selected_profile_id))
+        env: dict[str, str] = {
+            "ATR_LEROBOT_OBSERVATION_PIPELINE_ID": pipeline_id,
+        }
+        mode = request.runtime_mode or request.mode
+        if mode == "live" and workflow in {"teleoperate", "record"} and request.isaac_mirror_enabled:
+            mirror_session_id = session_id or request.session_id or ""
+            env.update(
+                {
+                    "ATR_ISAAC_MIRROR_ENABLED": "1",
+                    "ATR_ISAAC_MIRROR_ENDPOINT": self._isaac_mirror_endpoint(request),
+                    "ATR_ISAAC_MIRROR_SAMPLE_HZ": str(self._isaac_mirror_sample_hz(request)),
+                    "ATR_ISAAC_MIRROR_TIMEOUT_S": str(self._isaac_mirror_timeout_s(request)),
+                    "ATR_ISAAC_MIRROR_SESSION_ID": mirror_session_id,
+                    "ATR_ISAAC_MIRROR_ATTACHED_TO_SESSION_ID": mirror_session_id,
+                    "ATR_ISAAC_MIRROR_PROFILE_ID": str(request.profile_id or self._selected_profile_id),
+                    "ATR_ISAAC_MIRROR_CALIBRATION_PATH": str(default_isaac_omx_mirror_calibration_path(self.config.repo_root)),
+                    "ATR_ISAAC_MIRROR_RECORD_PATH": str(self._in_process_isaac_mirror_record_path(workflow, request, mirror_session_id or "live")),
+                }
+            )
+        if pipeline_id == "raw_depth_adapter":
+            env["ATR_LEROBOT_RAW_DEPTH_ADAPTER"] = "1"
+            if workflow in {"train", "rollout"}:
+                env.update(self._raw_depth_adapter_env_overrides(request))
         if workflow in {"train", "rollout"} and self._is_pi05_policy(request.policy_type):
             hf_home = self.config.pi05_hf_home
             env.update(
@@ -2277,11 +4520,75 @@ class LeRobotBridge:
             if hf_token:
                 env["HF_TOKEN"] = hf_token
                 env["HUGGING_FACE_HUB_TOKEN"] = hf_token
-            if workflow == "train" and request.wandb_enable and str(request.wandb_mode or "").strip().lower() == "offline":
-                env["WANDB_MODE"] = "offline"
+        wandb_mode = str(request.wandb_mode or "").strip().lower()
+        if workflow == "train" and request.wandb_enable:
+            wandb_base_url = str(request.wandb_base_url or "").strip().rstrip("/")
+            if wandb_mode == "local" and not wandb_base_url:
+                wandb_base_url = self._wandb_local_url(request)
+            if wandb_base_url:
+                env["WANDB_BASE_URL"] = wandb_base_url
+        if workflow == "train" and request.wandb_enable and wandb_mode == "offline":
+            env["WANDB_MODE"] = "offline"
         if workflow == "record":
             env.update(self._tts_env_overrides(request))
+            env.update(self._raw_depth_env_overrides(request))
         return env
+
+    def _raw_depth_adapter_env_overrides(self, request: LeRobotSessionRequest) -> dict[str, str]:
+        dataset_path = Path(self._dataset_path_for(request)).expanduser()
+        manifest_path = self._dataset_raw_depth_manifest_path(dataset_path)
+        env = {
+            "ATR_LEROBOT_RAW_DEPTH_SOURCE_DIR": str(manifest_path.parent),
+            "ATR_LEROBOT_RAW_DEPTH_ADAPTER_STRICT": "1",
+        }
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            manifest = {}
+        if isinstance(manifest, dict):
+            camera_keys = [str(item).strip() for item in manifest.get("camera_keys", []) if str(item).strip()]
+            if camera_keys:
+                env["ATR_LEROBOT_RAW_DEPTH_CAMERA_KEYS"] = ",".join(camera_keys)
+            for key in ("ATR_LEROBOT_DEPTH_ALIGNED_TO", "ATR_LEROBOT_RAW_DEPTH_FORMAT"):
+                env.pop(key, None)
+            aligned_to = str(manifest.get("aligned_to") or "").strip()
+            if aligned_to:
+                env["ATR_LEROBOT_DEPTH_ALIGNED_TO"] = aligned_to
+            depth_encoding = str(manifest.get("depth_encoding") or "").strip()
+            if depth_encoding:
+                env["ATR_LEROBOT_RAW_DEPTH_FORMAT"] = depth_encoding
+            for source_key, env_key in (
+                ("depth_scale_m_per_unit", "ATR_LEROBOT_DEPTH_SCALE_M_PER_UNIT"),
+                ("depth_clip_min_mm", "ATR_LEROBOT_DEPTH_CLIP_MIN_MM"),
+                ("depth_clip_max_mm", "ATR_LEROBOT_DEPTH_CLIP_MAX_MM"),
+            ):
+                if source_key in manifest:
+                    env[env_key] = str(manifest[source_key])
+            visual = manifest.get("visual_depth_feature")
+            if isinstance(visual, dict):
+                if "clip_min_mm" in visual and "ATR_LEROBOT_DEPTH_CLIP_MIN_MM" not in env:
+                    env["ATR_LEROBOT_DEPTH_CLIP_MIN_MM"] = str(visual["clip_min_mm"])
+                if "clip_max_mm" in visual and "ATR_LEROBOT_DEPTH_CLIP_MAX_MM" not in env:
+                    env["ATR_LEROBOT_DEPTH_CLIP_MAX_MM"] = str(visual["clip_max_mm"])
+        return env
+
+    def _raw_depth_env_overrides(self, request: LeRobotSessionRequest) -> dict[str, str]:
+        profile = self._profile(request.profile_id or self._selected_profile_id)
+        if profile is None:
+            return {}
+        sidecar = self._record_raw_depth_sidecar(profile, request)
+        if not sidecar.get("enabled"):
+            return {}
+        camera_keys = [str(item) for item in sidecar.get("expected_camera_keys", []) if str(item).strip()]
+        return {
+            "ATR_LEROBOT_RAW_DEPTH_DIR": str(sidecar["root"]),
+            "ATR_LEROBOT_RAW_DEPTH_CAMERA_KEYS": ",".join(camera_keys),
+            "ATR_LEROBOT_RAW_DEPTH_FORMAT": str(sidecar.get("format") or "png16"),
+            "ATR_LEROBOT_DEPTH_ALIGNED_TO": str(sidecar.get("aligned_to") or "color"),
+            "ATR_LEROBOT_DEPTH_SCALE_M_PER_UNIT": str(sidecar.get("depth_scale_m_per_unit")),
+            "ATR_LEROBOT_DEPTH_CLIP_MIN_MM": str(sidecar.get("depth_clip_min_mm")),
+            "ATR_LEROBOT_DEPTH_CLIP_MAX_MM": str(sidecar.get("depth_clip_max_mm")),
+        }
 
     def _start_training_monitor(self, session: dict[str, Any], request: LeRobotSessionRequest) -> dict[str, Any]:
         """Attach passive host diagnostics to GUI-started live training sessions."""
@@ -2496,7 +4803,8 @@ class LeRobotBridge:
         if request.wandb_project:
             optional.append(f"--wandb.project={request.wandb_project}")
         if request.wandb_mode:
-            optional.append(f"--wandb.mode={request.wandb_mode}")
+            wandb_mode = "online" if str(request.wandb_mode).strip().lower() == "local" else request.wandb_mode
+            optional.append(f"--wandb.mode={wandb_mode}")
         return args + optional + extra
 
     def _train_request_with_output_dir(self, profile: RobotProfile, request: LeRobotSessionRequest) -> tuple[LeRobotSessionRequest, str]:
@@ -2611,19 +4919,74 @@ class LeRobotBridge:
                     updates[field_name] = value
             requested_wandb = bool(updates.get("wandb_enable", request.wandb_enable))
             requested_wandb_mode = str(updates.get("wandb_mode", request.wandb_mode or "") or "").strip().lower()
+            requested_wandb_base_url = str(updates.get("wandb_base_url", request.wandb_base_url or "") or "").strip()
             if requested_wandb:
-                if not requested_wandb_mode or (requested_wandb_mode == "online" and not self._wandb_api_key_available()):
+                if requested_wandb_mode == "local":
+                    updates["wandb_mode"] = "online"
+                    if not requested_wandb_base_url:
+                        updates["wandb_base_url"] = self._wandb_local_url(request)
+                elif requested_wandb_base_url and not requested_wandb_mode:
+                    updates["wandb_mode"] = "online"
+                elif (
+                    not requested_wandb_mode
+                    or (
+                        requested_wandb_mode == "online"
+                        and not self._wandb_api_key_available()
+                        and not self._is_local_wandb_url(requested_wandb_base_url)
+                    )
+                ):
                     updates["wandb_mode"] = "offline"
             else:
                 updates["wandb_mode"] = "disabled"
             pretrained = str(request.policy_pretrained_path or "").strip()
             if not self._is_valid_policy_source_ref(pretrained) or self._is_pi05_base_policy_ref(pretrained):
                 updates["policy_pretrained_path"] = self._pi05_compatible_base_policy_ref()
+        elif self._is_xvla_policy(policy_type):
+            fields_set = set(request.model_fields_set)
+            xvla_defaults: dict[str, Any] = {
+                "steps": 20000,
+            }
+            for field_name, value in xvla_defaults.items():
+                if field_name not in fields_set:
+                    updates[field_name] = value
+            pretrained = str(request.policy_pretrained_path or "").strip()
+            if not self._is_valid_policy_source_ref(pretrained):
+                updates["policy_pretrained_path"] = self.config.xvla_base_policy
+        elif self._is_smolvla_policy(policy_type):
+            fields_set = set(request.model_fields_set)
+            smolvla_defaults: dict[str, Any] = {
+                "batch_size": 8,
+                "steps": 20000,
+                "num_workers": 4,
+                "eval_batch_size": None,
+                "eval_freq": 20000,
+                "log_freq": 200,
+                "save_freq": 20000,
+                "policy_n_obs_steps": 1,
+                "policy_chunk_size": 50,
+                "policy_n_action_steps": 50,
+            }
+            for field_name, value in smolvla_defaults.items():
+                if field_name not in fields_set:
+                    updates[field_name] = value
+            pretrained = str(request.policy_pretrained_path or "").strip()
+            if not self._is_valid_policy_source_ref(pretrained):
+                updates["policy_pretrained_path"] = self.config.smolvla_base_policy
         next_request = request.model_copy(update=updates)
         if self._is_pi05_policy(policy_type):
             return (
                 next_request,
                 f"using Pi0.5 runtime env={self.config.pi05_conda_env_name} source={next_request.policy_pretrained_path}",
+            )
+        if self._is_xvla_policy(policy_type):
+            return (
+                next_request,
+                f"using X-VLA runtime env={self.config.xvla_conda_env_name} source={next_request.policy_pretrained_path}",
+            )
+        if self._is_smolvla_policy(policy_type):
+            return (
+                next_request,
+                f"using SmolVLA runtime env={self.config.smolvla_conda_env_name} source={next_request.policy_pretrained_path}",
             )
         return next_request, f"using LeRobot runtime env={self.config.conda_env_name}"
 
@@ -2667,6 +5030,97 @@ class LeRobotBridge:
                 return True
         return False
 
+    @staticmethod
+    def _is_local_wandb_url(value: str) -> bool:
+        clean = str(value or "").strip().lower()
+        return clean.startswith("http://127.0.0.1:") or clean.startswith("http://localhost:")
+
+    def _wandb_local_port(self, request: LeRobotSessionRequest) -> int:
+        if request.wandb_local_port:
+            return _safe_int(request.wandb_local_port, self.config.wandb_local_port, minimum=1, maximum=65535)
+        base_url = str(request.wandb_base_url or self.config.wandb_local_base_url or "").strip()
+        match = re.search(r":(\d+)(?:/)?$", base_url)
+        if match:
+            return _safe_int(match.group(1), self.config.wandb_local_port, minimum=1, maximum=65535)
+        return self.config.wandb_local_port
+
+    def _wandb_local_url(self, request: LeRobotSessionRequest) -> str:
+        clean = str(request.wandb_base_url or "").strip()
+        if clean:
+            return clean.rstrip("/")
+        configured = str(self.config.wandb_local_base_url or "").strip().rstrip("/")
+        if configured:
+            return configured
+        return f"http://127.0.0.1:{self._wandb_local_port(request)}"
+
+    def _wandb_local_command(self, action: str, port: int) -> list[str]:
+        base = [self.config.conda_executable, "run", "--no-capture-output", "-n", self.config.pi05_conda_env_name, "wandb", "server"]
+        if action == "stop":
+            return base + ["stop"]
+        return base + ["start", "--port", str(port), "--no-daemon"]
+
+    @staticmethod
+    def _wandb_local_port_ready(url: str, *, timeout_s: float = 0.8) -> bool:
+        parsed = urlparse(str(url or "").strip())
+        host = parsed.hostname or "127.0.0.1"
+        if parsed.port:
+            port = parsed.port
+        elif parsed.scheme == "https":
+            port = 443
+        else:
+            port = 80
+        try:
+            with socket.create_connection((host, port), timeout=timeout_s):
+                return True
+        except OSError:
+            return False
+
+    @staticmethod
+    def _wandb_local_failure_from_log(log_tail: str) -> tuple[str, str] | None:
+        text = str(log_tail or "")
+        lowered = text.lower()
+        if "exec format error" in lowered:
+            return (
+                "WANDB_LOCAL_PLATFORM_EMULATION_REQUIRED",
+                "W&B local Docker image is amd64. Register linux/amd64 binfmt/QEMU support, then restart W&B local server.",
+            )
+        if "cannot connect to the docker daemon" in lowered:
+            return ("WANDB_LOCAL_DOCKER_UNAVAILABLE", "Docker daemon is not reachable for W&B local server.")
+        if "port is already allocated" in lowered or "address already in use" in lowered or "bind:" in lowered:
+            return ("WANDB_LOCAL_PORT_BUSY", "W&B local server port is already in use.")
+        if "docker: error" in lowered or "error response from daemon" in lowered:
+            return ("WANDB_LOCAL_DOCKER_ERROR", "Docker failed while starting W&B local server.")
+        return None
+
+    def _wait_for_wandb_local_ready(
+        self,
+        url: str,
+        session: dict[str, Any],
+        *,
+        timeout_s: float,
+    ) -> tuple[bool, tuple[str, str] | None]:
+        deadline = time.monotonic() + max(1.0, timeout_s)
+        session_id = str(session.get("session_id") or "")
+        while time.monotonic() < deadline:
+            log_tail = self._tail_file(str(session.get("log_path", "")), max_chars=12000)
+            failure = self._wandb_local_failure_from_log(log_tail)
+            if failure:
+                return False, failure
+            if self._wandb_local_port_ready(url):
+                return True, None
+            process = self._processes.get(session_id)
+            if process is not None:
+                returncode = process.poll()
+                if returncode is not None:
+                    session["returncode"] = returncode
+                    self._close_log_handle(session_id)
+                    failure = self._wandb_local_failure_from_log(self._tail_file(str(session.get("log_path", "")), max_chars=12000))
+                    if failure:
+                        return False, failure
+                    return False, ("WANDB_LOCAL_EXITED_BEFORE_READY", f"W&B local server process exited before {url} started listening.")
+            time.sleep(1.0)
+        return False, None
+
     def _is_pi05_base_policy_ref(self, value: str) -> bool:
         clean = str(value or "").strip().rstrip("/")
         configured = str(self.config.pi05_base_policy or "lerobot/pi05_base").strip().rstrip("/")
@@ -2703,18 +5157,36 @@ class LeRobotBridge:
 
     def _train_extra_args_with_policy_defaults(self, request: LeRobotSessionRequest) -> list[str]:
         args = list(request.train_extra_args or [])
-        if not self._is_pi05_policy(request.policy_type):
+        policy_type = self._canonical_policy_type(request.policy_type)
+        if self._is_pi05_policy(policy_type):
+            defaults = [
+                "--policy.compile_model=true",
+                "--policy.gradient_checkpointing=true",
+                "--policy.dtype=bfloat16",
+                "--policy.freeze_vision_encoder=false",
+                "--policy.train_expert_only=false",
+            ]
+        elif self._is_xvla_policy(policy_type):
+            defaults = [
+                "--policy.dtype=bfloat16",
+                "--policy.action_mode=auto",
+                "--policy.freeze_vision_encoder=false",
+                "--policy.freeze_language_encoder=false",
+                "--policy.train_policy_transformer=true",
+                "--policy.train_soft_prompts=true",
+            ]
+        elif self._is_smolvla_policy(policy_type):
+            defaults = [
+                "--policy.freeze_vision_encoder=true",
+                "--policy.train_expert_only=true",
+                "--policy.train_state_proj=true",
+            ]
+        else:
             return args
-        defaults = [
-            "--policy.compile_model=true",
-            "--policy.gradient_checkpointing=true",
-            "--policy.dtype=bfloat16",
-            "--policy.freeze_vision_encoder=false",
-            "--policy.train_expert_only=false",
-        ]
-        # Match the upstream LeRobot Pi0.5 reference command. Remove stale local overrides.
+        # Keep policy-specific LeRobot reference flags single-sourced when the GUI switches presets.
         forced_keys = {item.split("=", 1)[0] for item in defaults}
-        forced_keys.add("--policy.normalization_mapping")
+        if self._is_pi05_policy(policy_type):
+            forced_keys.add("--policy.normalization_mapping")
         filtered = [item for item in args if str(item).split("=", 1)[0] not in forced_keys]
         return defaults + filtered
 
@@ -2725,10 +5197,24 @@ class LeRobotBridge:
             return "pi05"
         if clean == "pi0fast":
             return "pi0fast"
+        if clean in {"xvla", "xvlabase"}:
+            return "xvla"
+        if clean in {"smolvla", "smolvlabase"}:
+            return "smolvla"
         return str(policy_type or "act").strip() or "act"
 
     def _is_pi05_policy(self, policy_type: str) -> bool:
         return self._canonical_policy_type(policy_type) == "pi05"
+
+    def _is_xvla_policy(self, policy_type: str) -> bool:
+        return self._canonical_policy_type(policy_type) == "xvla"
+
+    def _is_smolvla_policy(self, policy_type: str) -> bool:
+        return self._canonical_policy_type(policy_type) == "smolvla"
+
+    def _is_vla_policy(self, policy_type: str) -> bool:
+        canonical = self._canonical_policy_type(policy_type)
+        return canonical in {"xvla", "smolvla"}
 
     def _train_video_backend(self, policy_type: str, request: LeRobotSessionRequest | None = None) -> str:
         preferred = str(self.config.pi05_video_backend if self._is_pi05_policy(policy_type) else self.config.train_video_backend).strip() or "torchcodec"
@@ -2737,7 +5223,14 @@ class LeRobotBridge:
             return preferred
         if request is None or (request.runtime_mode or request.mode) != "live":
             return preferred
-        env_name = self.config.pi05_conda_env_name if self._is_pi05_policy(policy_type) else self.config.conda_env_name
+        if self._is_pi05_policy(policy_type):
+            env_name = self.config.pi05_conda_env_name
+        elif self._is_xvla_policy(policy_type):
+            env_name = self.config.xvla_conda_env_name
+        elif self._is_smolvla_policy(policy_type):
+            env_name = self.config.smolvla_conda_env_name
+        else:
+            env_name = self.config.conda_env_name
         return preferred if self._conda_env_has_module(env_name, "torchcodec") else fallback
 
     def _conda_env_has_module(self, env_name: str, module_name: str) -> bool:
@@ -2803,6 +5296,10 @@ class LeRobotBridge:
             "log_freq": int(request.log_freq),
             "save_freq": int(request.save_freq),
             "save_checkpoint": bool(request.save_checkpoint),
+            "wandb_enable": bool(request.wandb_enable),
+            "wandb_mode": request.wandb_mode or "",
+            "wandb_project": request.wandb_project or "",
+            "wandb_base_url": request.wandb_base_url or "",
         }
 
     def _visualization_args(self, request: LeRobotSessionRequest) -> tuple[list[str], dict[str, Any]]:
@@ -3212,6 +5709,8 @@ print("Updated Pi0.5 quantile stats for " + ", ".join(updated))
     def _pi05_v30_dataset_is_current(self, source_path: Path, converted_path: Path) -> bool:
         if self._lerobot_dataset_codebase_version(converted_path) != "v3.0":
             return False
+        if self._dataset_raw_depth_manifest_path(source_path).is_file() and not self._dataset_raw_depth_manifest_path(converted_path).is_file():
+            return False
         return self._dataset_tree_mtime(converted_path) >= self._dataset_tree_mtime(source_path)
 
     def _is_generated_pi05_dataset_path(self, path: Path) -> bool:
@@ -3423,8 +5922,8 @@ print("Updated Pi0.5 quantile stats for " + ", ".join(updated))
             "fps": fps or 30,
         }
 
-    @staticmethod
     def _realsense_camera_config(
+        self,
         serial_number_or_name: str,
         *,
         fps: int,
@@ -3440,6 +5939,10 @@ print("Updated Pi0.5 quantile stats for " + ", ".join(updated))
             "height": height,
             "fps": fps,
             "use_depth": bool(use_depth),
+            "align_depth_to_color": bool(self.config.realsense_depth_align_to_color),
+            "depth_scale_m_per_unit": self.config.realsense_depth_scale_m_per_unit,
+            "depth_clip_min_mm": self.config.realsense_depth_clip_min_mm,
+            "depth_clip_max_mm": self.config.realsense_depth_clip_max_mm,
             # LeRobot / RealSense D405 needs a real warmup period before
             # consuming frames; disabling warmup makes status=False failures
             # more likely after a previous session.
@@ -4378,6 +6881,7 @@ print(json.dumps(entries))
         camera_fps: int | None = None,
         camera_width: int = LEROBOT_DEFAULT_CAMERA_WIDTH,
         camera_height: int = LEROBOT_DEFAULT_CAMERA_HEIGHT,
+        raw_port: str = "",
     ) -> dict[str, Any]:
         data = memory or self._load_device_memory()
         profile_memory = self._profile_device_memory(data, profile_id)
@@ -4395,12 +6899,16 @@ print(json.dumps(entries))
             "source": source,
             "saved_at": datetime.now(timezone.utc).isoformat(),
         }
-        if stable_port != port:
-            device["raw_port"] = port
+        original_port = str(raw_port or port or "").strip()
+        if original_port and stable_port != original_port:
+            device["raw_port"] = original_port
             device["stability"] = "persistent_path"
         if self._is_device_identity_link(stable_port):
             device["device_id"] = Path(stable_port).name
             device["device_link"] = stable_port
+            serial_number = self._serial_number_from_device_id(device["device_id"])
+            if serial_number:
+                device["serial_number"] = serial_number
         if role == "camera":
             key = camera_key or "top"
             device["camera_key"] = key
@@ -4422,30 +6930,248 @@ print(json.dumps(entries))
         self._save_device_memory(data)
         return device
 
-    def _serial_role_port_conflict(self, profile_id: str, role: str, port: str, *, memory: dict[str, Any] | None = None) -> str:
-        if role not in {"follower", "leader"}:
+    def _serial_identity_map(self, ports: list[str]) -> dict[str, dict[str, str]]:
+        identity_map: dict[str, dict[str, str]] = {}
+        for raw_port in ports:
+            port = str(raw_port or "").strip()
+            if not port:
+                continue
+            identity = port if self._is_device_identity_link(port) else self._matching_symlink(port, ["/dev/serial/by-id/*"])
+            if not identity:
+                continue
+            device_id = Path(identity).name
+            serial_number = self._serial_number_from_device_id(device_id)
+            identity_map[port] = {
+                "port": identity,
+                "device_id": device_id,
+                "device_link": identity,
+                "serial_number": serial_number,
+            }
+            identity_map.setdefault(identity, identity_map[port])
+        return identity_map
+
+    @staticmethod
+    def _expected_motor_ids_for_role(role: str) -> set[int]:
+        if role in {"follower", "robot"}:
+            return {11, 12, 13, 14, 15, 16}
+        if role in {"leader", "teleop"}:
+            return {1, 2, 3, 4, 5, 6}
+        return set()
+
+    def _select_serial_candidate_by_motor_ids(self, candidates: list[str], role: str) -> str:
+        expected = self._expected_motor_ids_for_role(role)
+        if not expected:
             return ""
+        for candidate in candidates:
+            motor_ids = set(self._serial_motor_ids(candidate))
+            if expected.issubset(motor_ids):
+                return str(candidate)
+        return ""
+
+    def _open_follower_joint_position_reader(self, port: str, motor_ids: list[int]) -> _SubprocessFollowerJointPositionReader:
+        """Open a reusable OMX follower joint reader without commanding motion."""
+        return _SubprocessFollowerJointPositionReader(self, port, motor_ids)
+
+    def _read_follower_joint_positions(self, port: str, motor_ids: list[int]) -> dict[int, float]:
+        """Read current OMX follower positions in Isaac joint units without writing motor state."""
+        with self._open_follower_joint_position_reader(port, motor_ids) as reader:
+            return reader.read()
+
+    def _read_follower_joint_positions_legacy_subprocess(self, port: str, motor_ids: list[int]) -> dict[int, float]:
+        """Legacy one-shot reader kept for diagnostics and fallback comparisons."""
+        raw_port = str(port or "").strip()
+        requested_ids = [int(item) for item in motor_ids]
+        if not raw_port:
+            raise ValueError("follower port is empty")
+        script = r"""
+import importlib
+import json
+import sys
+from pathlib import Path
+
+from lerobot.motors import Motor, MotorCalibration, MotorNormMode
+from lerobot.motors.dynamixel import DynamixelMotorsBus
+
+port = sys.argv[1]
+requested_ids = {int(item) for item in json.loads(sys.argv[2])}
+motors = {
+    "shoulder_pan": Motor(11, "xl430-w250", MotorNormMode.DEGREES),
+    "shoulder_lift": Motor(12, "xl430-w250", MotorNormMode.RANGE_M100_100),
+    "elbow_flex": Motor(13, "xl430-w250", MotorNormMode.RANGE_M100_100),
+    "wrist_flex": Motor(14, "xl330-m288", MotorNormMode.RANGE_M100_100),
+    "wrist_roll": Motor(15, "xl330-m288", MotorNormMode.DEGREES),
+    "gripper": Motor(16, "xl330-m288", MotorNormMode.RANGE_0_100),
+}
+limits = {
+    11: (-270.0, 360.0, "degrees"),
+    12: (-120.0, 90.0, "range_m100_100"),
+    13: (-120.0, 90.0, "range_m100_100"),
+    14: (-100.0, 100.0, "range_m100_100"),
+    15: (-270.0, 270.0, "degrees"),
+    16: (0.0, 100.0, "range_0_100"),
+}
+calibration = {}
+try:
+    module = importlib.import_module("lerobot.robots.omx_follower.omx_follower")
+    calib_path = Path(module.__file__).parent / "calibration" / "omx_follower_arm.json"
+    if calib_path.exists():
+        raw_calib = json.loads(calib_path.read_text(encoding="utf-8"))
+        calibration = {name: MotorCalibration(**value) for name, value in raw_calib.items()}
+except Exception:
+    calibration = {}
+bus = DynamixelMotorsBus(port, motors, calibration=calibration)
+try:
+    bus.connect(handshake=False)
+    bus.set_baudrate(bus.default_baudrate)
+    raw = bus.sync_read("Present_Position", normalize=False, num_retry=1)
+    normalized = {}
+    if calibration:
+        try:
+            normalized = bus.sync_read("Present_Position", normalize=True, num_retry=1)
+        except Exception:
+            normalized = {}
+    values = {}
+    for name, motor in motors.items():
+        if motor.id not in requested_ids:
+            continue
+        lower, upper, norm_mode = limits[motor.id]
+        raw_value = float(raw.get(name, 0.0))
+        if name in normalized:
+            norm_value = float(normalized[name])
+            if norm_mode == "range_m100_100":
+                value = lower + ((norm_value + 100.0) / 200.0) * (upper - lower)
+            else:
+                value = norm_value
+        else:
+            value = lower + (raw_value / 4095.0) * (upper - lower)
+        values[str(motor.id)] = value
+finally:
+    try:
+        bus.port_handler.closePort()
+    except Exception:
+        pass
+print(json.dumps(values, sort_keys=True))
+""".strip()
+        command = [
+            self.config.conda_executable,
+            "run",
+            "--no-capture-output",
+            "-n",
+            self.config.conda_env_name,
+            "python",
+            "-c",
+            script,
+            raw_port,
+            json.dumps(requested_ids),
+        ]
+        completed = subprocess.run(
+            command,
+            cwd=str(self.config.repo_root),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            timeout=12,
+            check=False,
+        )
+        if completed.returncode != 0:
+            raise RuntimeError((completed.stdout or "").strip() or f"returncode={completed.returncode}")
+        for line in reversed((completed.stdout or "").splitlines()):
+            text = line.strip()
+            if not text.startswith("{"):
+                continue
+            parsed = json.loads(text)
+            if isinstance(parsed, dict):
+                return {
+                    _safe_int(key, -1, minimum=0): _safe_float(value, 0.0)
+                    for key, value in parsed.items()
+                    if _safe_int(key, -1, minimum=0) in requested_ids
+                }
+        raise RuntimeError("no JSON joint position payload returned")
+
+    def _serial_motor_ids(self, port: str) -> list[int]:
+        raw_port = str(port or "").strip()
+        if not raw_port:
+            return []
+        script = r"""
+import json
+import sys
+from lerobot.motors.dynamixel import DynamixelMotorsBus
+
+port = sys.argv[1]
+bus = DynamixelMotorsBus(port, {})
+ids = []
+try:
+    bus._connect(handshake=False)
+    bus.set_baudrate(bus.default_baudrate)
+    for motor_id in range(1, 17):
+        if bus.ping(motor_id) is not None:
+            ids.append(motor_id)
+finally:
+    try:
+        bus.port_handler.closePort()
+    except Exception:
+        pass
+print(json.dumps(ids))
+""".strip()
+        command = [
+            self.config.conda_executable,
+            "run",
+            "--no-capture-output",
+            "-n",
+            self.config.conda_env_name,
+            "python",
+            "-c",
+            script,
+            raw_port,
+        ]
+        try:
+            completed = subprocess.run(
+                command,
+                cwd=str(self.config.repo_root),
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                timeout=12,
+                check=False,
+            )
+        except Exception:
+            return []
+        if completed.returncode != 0:
+            return []
+        for line in reversed((completed.stdout or "").splitlines()):
+            text = line.strip()
+            if not text.startswith("["):
+                continue
+            try:
+                parsed = json.loads(text)
+            except Exception:
+                continue
+            if isinstance(parsed, list):
+                return [_safe_int(item, -1, minimum=0) for item in parsed if _safe_int(item, -1, minimum=0) >= 0]
+        return []
+
+    @staticmethod
+    def _baseline_serial_identity_port(baseline: dict[str, Any], port: str) -> str:
         raw = str(port or "").strip()
         if not raw:
+            return raw
+        serial_map = baseline.get("serial_identity_map", {})
+        if not isinstance(serial_map, dict):
+            return raw
+        entry = serial_map.get(raw)
+        if not isinstance(entry, dict):
+            return raw
+        return str(entry.get("port") or entry.get("device_link") or raw)
+
+    @staticmethod
+    def _serial_number_from_device_id(device_id: str) -> str:
+        name = Path(str(device_id or "").strip()).name
+        if not name:
             return ""
-        other_role = "leader" if role == "follower" else "follower"
-        data = memory or self._load_device_memory()
-        profile_memory = data.get("profiles", {}).get(profile_id, {})
-        devices = profile_memory.get("devices", {})
-        other = devices.get(other_role, {})
-        if not isinstance(other, dict):
-            return ""
-        other_port = str(other.get("port") or other.get("device_link") or "").strip()
-        if not other_port:
-            return ""
-        if raw == other_port:
-            return other_role
-        try:
-            if Path(raw).resolve(strict=True) == Path(other_port).resolve(strict=True):
-                return other_role
-        except Exception:
-            return ""
-        return ""
+        match = re.search(r"_([A-Za-z0-9]+)-if\d+$", name)
+        if match:
+            return match.group(1)
+        return name
 
     def _saved_device_identity_link(self, saved: dict[str, Any], role: str) -> str:
         fallback = ""
@@ -4755,6 +7481,46 @@ finally:
             "fake_checkpoint_root": str(self.config.fake_checkpoint_root),
         }
 
+    def _workflow_defaults_status(self) -> dict[str, Any]:
+        """Return date-scoped GUI defaults for recording, training, and rollout."""
+        run_name = self._next_recording_run_name()
+        train_name = f"{run_name}_train({LEROBOT_DEFAULT_TRAIN_POLICY_TYPE})"
+        return {
+            "run_name": run_name,
+            "dataset_repo_id": f"jin/{run_name}",
+            "train_name": train_name,
+            "output_dir": str((self.config.output_root / train_name).resolve()),
+            "job_name": train_name,
+            "record_task_instruction": LEROBOT_DEFAULT_TASK_INSTRUCTION,
+            "rollout_task_instruction": LEROBOT_DEFAULT_TASK_INSTRUCTION,
+            "record_num_episodes": LEROBOT_DEFAULT_RECORD_NUM_EPISODES,
+            "record_episode_time_s": 60,
+        }
+
+    def _next_recording_run_name(self) -> str:
+        today = datetime.now().strftime("%Y%m%d")
+        next_index = self._highest_date_run_index(today) + 1
+        return f"{today}_{next_index}"
+
+    def _highest_date_run_index(self, date_prefix: str) -> int:
+        pattern = re.compile(rf"^{re.escape(date_prefix)}_(\d+)(?:_train(?:\([A-Za-z0-9_.-]+\))?)?$")
+        highest = 0
+        candidates: list[Path] = []
+        dataset_namespace = self.config.dataset_root / "jin"
+        if dataset_namespace.exists():
+            candidates.extend(dataset_namespace.iterdir())
+        if self.config.output_root.exists():
+            candidates.extend(self.config.output_root.iterdir())
+        for path in candidates:
+            match = pattern.match(path.name)
+            if not match:
+                continue
+            try:
+                highest = max(highest, int(match.group(1)))
+            except ValueError:
+                continue
+        return highest
+
     def _environment_status(self) -> dict[str, Any]:
         conda = shutil.which(self.config.conda_executable) or self.config.conda_executable
         return {
@@ -4774,6 +7540,20 @@ finally:
                 "train_video_backend_fallback": self.config.train_video_backend_fallback,
                 "available": (Path.home() / "miniconda3" / "envs" / self.config.pi05_conda_env_name / "bin" / "lerobot-train").exists(),
             },
+            "xvla": {
+                "conda_env_name": self.config.xvla_conda_env_name,
+                "base_policy": self.config.xvla_base_policy,
+                "train_video_backend": self.config.train_video_backend,
+                "train_video_backend_fallback": self.config.train_video_backend_fallback,
+                "available": (Path.home() / "miniconda3" / "envs" / self.config.xvla_conda_env_name / "bin" / "lerobot-train").exists(),
+            },
+            "smolvla": {
+                "conda_env_name": self.config.smolvla_conda_env_name,
+                "base_policy": self.config.smolvla_base_policy,
+                "train_video_backend": self.config.train_video_backend,
+                "train_video_backend_fallback": self.config.train_video_backend_fallback,
+                "available": (Path.home() / "miniconda3" / "envs" / self.config.smolvla_conda_env_name / "bin" / "lerobot-train").exists(),
+            },
         }
 
     def _policy_presets(self) -> list[dict[str, str]]:
@@ -4781,6 +7561,8 @@ finally:
             {"label": "Manual policy path", "value": "", "source": "manual", "policy_type": ""},
             {"label": "lerobot/act_koch_real", "value": "lerobot/act_koch_real", "repo_id": "lerobot/act_koch_real", "source": "huggingface", "policy_type": "act"},
             {"label": "Pi0.5 base", "value": self.config.pi05_base_policy, "repo_id": self.config.pi05_base_policy, "source": "huggingface", "policy_type": "pi05"},
+            {"label": "X-VLA base", "value": self.config.xvla_base_policy, "repo_id": self.config.xvla_base_policy, "source": "huggingface", "policy_type": "xvla"},
+            {"label": "SmolVLA base", "value": self.config.smolvla_base_policy, "repo_id": self.config.smolvla_base_policy, "source": "huggingface", "policy_type": "smolvla"},
             {"label": "Pi0 base", "value": "lerobot/pi0_base", "repo_id": "lerobot/pi0_base", "source": "huggingface", "policy_type": "pi0"},
             {"label": "Pi0FAST base", "value": "lerobot/pi0fast-base", "repo_id": "lerobot/pi0fast-base", "source": "huggingface", "policy_type": "pi0fast"},
         ]
@@ -5013,6 +7795,20 @@ def _safe_int(value: Any, default: int, *, minimum: int | None = None, maximum: 
         result = max(int(minimum), result)
     if maximum is not None:
         result = min(int(maximum), result)
+    return result
+
+
+def _safe_float(
+    value: Any, default: float, *, minimum: float | None = None, maximum: float | None = None
+) -> float:
+    try:
+        result = float(value)
+    except (TypeError, ValueError):
+        result = float(default)
+    if minimum is not None:
+        result = max(float(minimum), result)
+    if maximum is not None:
+        result = min(float(maximum), result)
     return result
 
 

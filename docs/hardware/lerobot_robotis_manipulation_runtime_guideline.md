@@ -611,6 +611,11 @@ Teleoperation GUI requirements:
 - build `--robot.cameras` from saved camera identities when camera capture is enabled, as LeRobot camera config dictionaries, not raw port strings, e.g. `{top: {type: opencv, index_or_path, width, height, fps}}`
 - support saved camera backend metadata per camera key. OpenCV cameras continue to use `{type: opencv, index_or_path, width: 640, height: 480, fps}`. Intel RealSense cameras use the local LeRobot official config shape `{type: intelrealsense, serial_number_or_name, width: 640, height: 480, fps: 15, use_depth: true, color_format, warmup_s}`.
 - for the current Spark workstation physical robot camera layout, use `top = D455F` and `wrist = D405`; each RealSense camera contributes RGB plus depth/displacement, so the manipulation input is two RGB streams plus two depth/displacement streams at 15 FPS by default. The actual LeRobotDataset feature contract is `observation.images.top`, `observation.images.wrist`, `observation.images.top_depth`, and `observation.images.wrist_depth`. The `*_depth` streams are 8-bit 3-channel depth images generated from RealSense millimeter depth so the current LeRobot visual writer/policies can consume them. The default RealSense identifiers are `top = Intel RealSense D455F` and `wrist = 352122273019` unless the operator saves SDK-detected serials from Device Port Setup.
+- `/lerobot` Profile & Execution exposes an `Observation Pipeline` selector that is stored with the selected profile and passed to record/train/rollout/Manipulation Agent calls. Supported IDs are `legacy_lerobot`, `rgbd_sidecar`, and `raw_depth_adapter`; the ROBOTIS OMX-AI default is `rgbd_sidecar`.
+- Recording writes the selected contract to `<dataset>/meta/atr_pipeline.json`. Dataset browse and `Inspect Dataset` read this file and restore the matching robot profile and observation pipeline in the GUI. If the file is absent, the GUI may infer display-only `rgbd_sidecar` from `sidecar/depth_raw/transform_manifest.json`, otherwise `legacy_lerobot`.
+- `legacy_lerobot` disables ATR raw 16-bit sidecar emission but does not disable normal LeRobot visual features. `rgbd_sidecar` keeps standard LeRobot RGB-D features and additionally writes raw 16-bit depth evidence. `raw_depth_adapter` requires the raw sidecar manifest and enables the patched LeRobot dataset loader with `ATR_LEROBOT_RAW_DEPTH_ADAPTER=1`, `ATR_LEROBOT_RAW_DEPTH_SOURCE_DIR=<dataset>/sidecar/depth_raw`, `ATR_LEROBOT_RAW_DEPTH_CAMERA_KEYS`, and the recorded clip/scale env values. During training, the loader replaces existing `observation.images.<camera>_depth` tensors with tensors reconstructed from the 16-bit raw sidecar, so this path actually consumes raw depth instead of only recording metadata.
+- Training must not silently switch contracts. If the GUI-selected pipeline conflicts with `<dataset>/meta/atr_pipeline.json`, return `LEROBOT_OBSERVATION_PIPELINE_MISMATCH`; if `raw_depth_adapter` is selected without a raw depth manifest, return `LEROBOT_RAW_DEPTH_ADAPTER_SOURCE_MISSING`.
+- Pi0.5 v2.1 -> v3.0 conversion must preserve `sidecar/depth_raw`. If the source dataset has `sidecar/depth_raw/transform_manifest.json` but the generated `local-pi05-v30/...` copy does not, the bridge must treat the conversion as stale and regenerate before training.
 - D405 must be configured with `color_format=bgr8` and `warmup_s>=5`. D455F/top uses `color_format=rgb8`. This mirrors the LeRobot D405 startup fix: D405 exposes color through the stereo module, and forcing `rgb8` or disabling warmup can cause `status=False`, no-frame warmup failures, or a stuck camera after a previous session.
 - `/lerobot` Device Port Setup exposes a per-camera `RealSense SDK` checkbox. When checked for a camera key, baseline/detect/save/test payloads store `backend=intelrealsense`, `use_depth=true`, `fps=15` by default, and downstream teleoperation, recording, rollout, and Manipulation Agent bridge commands all receive the RealSense camera config instead of OpenCV `/dev/video*` config.
 - When `top` or `wrist` is saved without an explicit RealSense identifier, the backend must resolve the role through SDK enumeration before writing memory: `top` prefers a detected D455/D455F serial, and `wrist` prefers a detected D405 serial. If `wrist` D405 is not visible, Device Port Setup must fail with `LEROBOT_REALSENSE_ROLE_CAMERA_NOT_FOUND` instead of saving D455F as wrist.
@@ -651,6 +656,7 @@ Recording GUI requirements:
 - pass the task/instruction field as LeRobot's required `--dataset.single_task` argument
 - reuse the same follower, leader, and camera resolution path as teleoperation. Current ROBOTIS OMX live recording resolves follower/leader from `/dev/serial/by-id/*` to current `/dev/ttyACM*` nodes, and resolves top/wrist cameras through saved RealSense SDK serials (`top=341522300873`, `wrist=352122273019`) when `backend=intelrealsense` is enabled.
 - for RealSense recordings, verify the completed dataset exposes both RGB and depth visual keys. A valid RGB-D recording has `observation.images.top`, `observation.images.wrist`, `observation.images.top_depth`, and `observation.images.wrist_depth` in `meta/info.json`; older RGB-only recordings remain usable for RGB policies but must not be labeled RGB-D.
+- write `<dataset>/meta/atr_pipeline.json` for ATR-owned recordings so future browse/inspect actions can restore the exact robot profile and observation pipeline that produced the dataset
 - if the selected dataset already exists and `resume` is false, live recording must not silently resume it; use a fresh suffixed dataset path and surface `existing dataset detected; recording to fresh dataset ...` in the trace so partial/corrupt prior runs do not break camera-enabled recording startup
 - live `record.control` must send LeRobot's actual recording keyboard events: Right Arrow for save/advance, Left Arrow for rerecord, Esc for graceful finish. Do not mark episodes complete in GUI without sending the corresponding control event.
 - live `record.control` must prefer the active recording session over newer stopped/stale record sessions, because repeated start/stop attempts can leave stopped sessions later in the GUI list than the currently running process.
@@ -665,6 +671,7 @@ Recording GUI requirements:
 Inference / Rollout GUI requirements:
 
 - show policy path or repo selector
+- expose a rollout-local policy type selector for `act`, `pi05`, `xvla`, and `smolvla`; do not require rollout to inherit the training policy selector
 - validate missing policy path before action
 - show command preview
 - fake policy loading in test mode
@@ -672,7 +679,7 @@ Inference / Rollout GUI requirements:
 - keep training dataset, policy repo, and rollout/evaluation dataset names separate
 - apply `eval_` only to rollout/evaluation output datasets; the bridge must normalize `jin/foo_rollout` to `jin/eval_foo_rollout`
 - leave rollout duration blank by default so policy rollout runs until `Stop Rollout`; internally this maps to one long LeRobot episode
-- enable ACT Temporal Ensemble by default and add `--policy.temporal_ensemble_coeff=0.01 --policy.n_action_steps=1` unless the operator disables it
+- enable ACT Temporal Ensemble by default only when rollout policy type is `act`; Pi0.5 uses RTC options and X-VLA/SmolVLA omit ACT temporal-ensemble flags
 - enable Safe Action Clamp by default and add `--robot.max_relative_target=5` unless the operator disables it
 - stop rollout idempotently
 - block rollout while teleoperation is active unless a verified workflow explicitly permits it
@@ -853,7 +860,7 @@ Training rules:
   - batch size, steps, num workers
   - eval/log/save frequency, save checkpoint, resume, seed
   - optimizer, scheduler, AMP, policy window/chunk/action fields
-  - WandB enable/project/mode
+  - WandB enable/project/mode plus local server URL; local W&B Server defaults to `http://127.0.0.1:8081` and is launched through `lerobot.wandb_local.start`; GUI `local server` mode maps to CLI `--wandb.mode=online` with `WANDB_BASE_URL`
   - advanced one-safe-argument-per-line `--key=value` passthrough
 - Training status must show current step, total steps, percent, elapsed time, steps/sec, last parsed loss, and ETA when logs expose progress.
 
@@ -1033,6 +1040,7 @@ GUI/API acceptance:
 - GUI can simulate training/rollout progress.
 - GUI can browse local dataset/policy/output roots.
 - Browse buttons must open a native OS picker for actual workstation folders/files; the in-page browser is fallback only when the native picker is unavailable. Rollout policy browse starts from `outputs/train`, shows folders plus recognized policy output files (`*.safetensors`, `*.ckpt`, `*.pt`, `*.pth`, `*.bin`), and resolves selected LeRobot model files to the parent `pretrained_model` checkpoint directory.
+- Dataset browse and `Inspect Dataset` must call the backend dataset inspector and, when `meta/atr_pipeline.json` is present, update the Profile and Observation Pipeline selectors before the next train/rollout/manipulation request.
 - GUI can select configured HF policy repo IDs or discovered local checkpoints.
 - GUI can visualize local dataset metadata and local video/image media without requiring Hugging Face dataset upload.
 - SSE shows session progress.
@@ -1169,7 +1177,7 @@ Rollout guard rule:
 
 Pi0.5 rollout execution rule:
 
-- The local `lerobot-pi05` environment does not provide a `lerobot-rollout` executable.
+- The local `lerobot-pi05-torch211` environment is the TorchCodec runtime for Pi0.5, X-VLA, and SmolVLA training; Pi0.5 rollout still uses the project wrapper rather than a direct `lerobot-rollout` binary.
 - Pi0.5 real-robot inference is routed through `scripts/lerobot_pi05_rollout_wrapper.py`, which delegates to `/home/jin/lerobot_pi05/examples/rtc/eval_with_real_robot.py` after registering the ROBOTIS OMX robot class.
 - Pi0.5 RTC arguments use the installed script contract: `--rtc.enabled`, `--rtc.execution_horizon`, `--rtc.max_guidance_weight`, `--duration`, `--fps`, and `--task`.
 - ACT-specific rollout smoothing such as `--policy.temporal_ensemble_coeff` is not injected for Pi0.5 rollout.

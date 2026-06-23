@@ -860,6 +860,24 @@ class MainController:
                     for k in ("gate_id", "stage", "phase", "decision", "reason_code", "risk_score", "ok_for_next_stage", "ok_for_bo")
                     if k in value
                 }
+            elif key_text == "hardware_alert" and isinstance(value, dict):
+                out[key_text] = {
+                    str(k): value.get(k)
+                    for k in (
+                        "alert_id",
+                        "device_class",
+                        "component",
+                        "severity",
+                        "failure_code",
+                        "reason_code",
+                        "status",
+                        "message",
+                        "blocks_workflow",
+                        "requires_ack",
+                        "guardian_route_hint",
+                    )
+                    if k in value and (isinstance(value.get(k), (str, int, float, bool)) or value.get(k) is None)
+                }
             elif key_text == "artifact" and isinstance(value, dict):
                 out[key_text] = {
                     str(k): value.get(k)

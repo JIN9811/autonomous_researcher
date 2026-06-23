@@ -47,7 +47,7 @@ from urllib.parse import quote, unquote, urlparse
 import yaml
 import httpx
 from dotenv import dotenv_values
-from typing import Any, Literal
+from typing import Any, AsyncIterator, Literal
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, Response, StreamingResponse
@@ -79,6 +79,7 @@ from device_bridges.bambu_bridge import (
 )
 from device_bridges.lerobot_bridge import LeRobotBridge, LeRobotBridgeConfig
 from device_bridges.prusa_bridge import PrusaBridgeConfig, PrinterAgenticWorkflow
+from device_bridges.utm_runtime_bridge import UTMRuntimeProcessManager, get_utm_runtime_manager
 from device_bridges.windows_pyautogui_bridge import (
     WindowsPyAutoGUIBridge,
     WindowsPyAutoGUIBridgeConfig,
@@ -137,6 +138,7 @@ except ValueError:
 _RUNTIME_MODULE_MANAGEMENT_LOADED: set[str] = set()
 _LEROBOT_BRIDGE: LeRobotBridge | None = None
 _LEROBOT_CONFIG_MTIME_NS: int = -1
+_utm_runtime_manager: UTMRuntimeProcessManager | None = None
 
 LIVE_AGENT_DEFINITIONS: list[dict[str, str]] = [
     {"agent_id": "objective", "label": "Objective", "stage": "idle", "module_id": "objective"},
@@ -401,6 +403,7 @@ async def shutdown_lerobot_subprocesses() -> None:
     """Release LeRobot live subprocesses so cameras/serial ports are not left busy."""
     _cleanup_bambu_video_stream_processes(include_orphans=True)
     _lerobot_bridge().shutdown()
+    _utm_runtime_bridge().shutdown()
 
 
 class StartRunRequest(BaseModel):
@@ -986,6 +989,7 @@ class LeRobotConfigRequest(BaseModel):
     """Request body for selecting a LeRobot robot profile."""
 
     profile_id: str = ""
+    observation_pipeline_id: str = ""
     mode: Literal["live", "test", "replay", "fault-injection"] = "test"
 
 
@@ -995,7 +999,20 @@ class LeRobotAPIRequest(BaseModel):
     mode: Literal["live", "test", "replay", "fault-injection"] = "test"
     runtime_mode: Literal["live", "test", "replay", "fault-injection"] | None = None
     profile_id: str = ""
+    observation_pipeline_id: str = ""
     session_id: str = ""
+    isaac_mirror_enabled: bool = False
+    isaac_mirror_endpoint: str = "http://127.0.0.1:8766/joints"
+    isaac_mirror_sample_hz: float = 15.0
+    isaac_mirror_timeout_s: float = 0.5
+    isaac_mirror_max_samples: int | None = None
+    isaac_mirror_record_path: str = ""
+    isaac_mirror_attached_to_session_id: str = ""
+    isaac_mirror_receiver_launch_mode: str = "isaac_extension"
+    isaac_mirror_receiver_isaac_sim_executable: str = ""
+    isaac_mirror_receiver_python: str = ""
+    isaac_mirror_receiver_scene: str = ""
+    isaac_mirror_receiver_start_timeout_s: float | None = None
     task_instruction: str = "pick and place specimen"
     dataset_path: str = ""
     dataset_root: str = ""
@@ -1033,6 +1050,8 @@ class LeRobotAPIRequest(BaseModel):
     wandb_enable: bool = False
     wandb_project: str = ""
     wandb_mode: str = "disabled"
+    wandb_base_url: str = ""
+    wandb_local_port: int = 8081
     train_extra_args: list[str] = Field(default_factory=list)
     fps: int | None = None
     camera_fps: int | None = None
@@ -1534,6 +1553,15 @@ def _lerobot_bridge() -> LeRobotBridge:
     return _LEROBOT_BRIDGE
 
 
+def _utm_runtime_bridge() -> UTMRuntimeProcessManager:
+    """Return the shared UTM ROS runtime manager used by GUI routes and tools."""
+    global _utm_runtime_manager
+    if _utm_runtime_manager is None:
+        cfg = load_all_configs(resolve_path("configs"))
+        _utm_runtime_manager = get_utm_runtime_manager(cfg.get("devices", {}), repo_root=resolve_path("."))
+    return _utm_runtime_manager
+
+
 async def _publish_lerobot_result(result: dict[str, object]) -> dict[str, object]:
     """Broadcast LeRobot tool results into the shared runtime event stream."""
     await controller.emit_lerobot_result(result)
@@ -1598,6 +1626,16 @@ async def cae_gui(request: Request) -> HTMLResponse:
         request=request,
         name="cae.html",
         context={"title": "CAE Analysis Workspace"},
+    )
+
+
+@app.get("/device-bridge/vision-utm", response_class=HTMLResponse)
+async def vision_utm_device_bridge_gui(request: Request) -> HTMLResponse:
+    """Serve Camera/UTM Vision device bridge setup and verification GUI."""
+    return templates.TemplateResponse(
+        request=request,
+        name="vision_utm_device_bridge.html",
+        context={"title": "Vision Camera Device Bridge"},
     )
 
 
@@ -2380,6 +2418,182 @@ async def get_devices_state_compat() -> dict[str, object]:
 async def get_runtime_bridge_registry() -> dict[str, object]:
     """Return graph-backed device bridge manifests."""
     return _runtime_bridge_registry_payload(PRIMARY_RUNTIME_GRAPH_ID)
+
+
+@app.get("/api/equipment/utm-runtime/status")
+async def get_utm_runtime_status() -> dict[str, object]:
+    """Return the managed UTM ROS Vision runtime process status."""
+    return _utm_runtime_bridge().status()
+
+
+@app.post("/api/equipment/utm-runtime/start")
+async def start_utm_runtime() -> dict[str, object]:
+    """Start the managed UTM ROS Vision runtime."""
+    return _utm_runtime_bridge().start()
+
+
+@app.post("/api/equipment/utm-runtime/stop")
+async def stop_utm_runtime() -> dict[str, object]:
+    """Stop the managed UTM ROS Vision runtime."""
+    return _utm_runtime_bridge().stop()
+
+
+@app.post("/api/equipment/utm-runtime/probe")
+async def probe_utm_runtime() -> dict[str, object]:
+    """Probe ROS availability, cloned UTM files, topics, and graph evidence."""
+    return _utm_runtime_bridge().probe()
+
+
+@app.get("/api/equipment/utm-runtime/graph")
+async def get_utm_runtime_graph(previous_hash: str = "") -> dict[str, object]:
+    """Return expected UTM RQT-like graph plus actual ROS graph overlay."""
+    return await asyncio.to_thread(_utm_runtime_bridge().graph, previous_hash=previous_hash)
+
+
+@app.get("/api/equipment/utm-runtime/frame")
+async def get_utm_runtime_frame() -> dict[str, object]:
+    """Return UTM image frame availability metadata for GUI panels."""
+    return await asyncio.to_thread(_utm_runtime_bridge().frame)
+
+
+@app.get("/api/equipment/utm-runtime/frame-stream.mjpeg")
+async def get_utm_runtime_frame_stream(request: Request, topic: str = "", fps: float | None = None) -> StreamingResponse:
+    """Stream UTM image evidence as browser-consumable MJPEG at the configured GUI FPS."""
+    sentinel = object()
+    source = iter(_utm_runtime_bridge().frame_stream(topic=topic, fps=fps))
+
+    def next_chunk() -> bytes | object:
+        try:
+            return next(source)
+        except StopIteration:
+            return sentinel
+
+    async def iter_mjpeg() -> AsyncIterator[bytes]:
+        try:
+            while not await request.is_disconnected():
+                chunk = await asyncio.to_thread(next_chunk)
+                if chunk is sentinel:
+                    break
+                yield chunk  # type: ignore[misc]
+                await asyncio.sleep(0)
+        finally:
+            close = getattr(source, "close", None)
+            if callable(close):
+                close()
+
+    return StreamingResponse(
+        iter_mjpeg(),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@app.get("/api/equipment/utm-runtime/camera-config")
+async def get_utm_runtime_camera_config() -> dict[str, object]:
+    """Return persisted Camera settings used by the UTM Vision runtime."""
+    return _utm_runtime_bridge().camera_config()
+
+
+@app.post("/api/equipment/utm-runtime/camera-config")
+async def post_utm_runtime_camera_config(request: Request) -> dict[str, object]:
+    """Persist Camera settings without changing devices.yaml."""
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    return _utm_runtime_bridge().update_camera_config(payload if isinstance(payload, dict) else {})
+
+
+@app.get("/api/equipment/utm-runtime/camera/devices")
+async def get_utm_runtime_camera_devices() -> dict[str, object]:
+    """Return V4L2 Camera candidates discovered without opening streams."""
+    return _utm_runtime_bridge().discover_camera_devices()
+
+
+@app.post("/api/equipment/utm-runtime/camera/probe")
+async def post_utm_runtime_camera_probe() -> dict[str, object]:
+    """Run the pre-start Camera/UTM check and return config, device, graph, and frame evidence."""
+    bridge = _utm_runtime_bridge()
+    config = bridge.camera_config()
+    devices = bridge.discover_camera_devices()
+    runtime_status = bridge.status()
+    graph = bridge.graph()
+    diagnostics = dict(graph.get("diagnostics", {})) if isinstance(graph, dict) else {}
+    runtime_probe = dict(runtime_status)
+    runtime_probe.update(
+        {
+            "ok": bool(diagnostics.get("ros2_available") and diagnostics.get("workspace_found", True) and diagnostics.get("script_found", True)),
+            "tool": "utm.runtime.probe",
+            "diagnostics": diagnostics,
+            "graph_hash": graph.get("graph_hash", "") if isinstance(graph, dict) else "",
+            "failure_code": None,
+        }
+    )
+    if not diagnostics.get("ros2_available"):
+        runtime_probe["failure_code"] = "ROS2_NOT_INSTALLED"
+    elif diagnostics.get("script_found") is False:
+        runtime_probe["failure_code"] = "UTM_RUNTIME_SCRIPT_NOT_FOUND"
+    elif diagnostics.get("topic_seen") is False:
+        runtime_probe["failure_code"] = "UTM_TOPIC_NOT_READY"
+    if runtime_status.get("status") == "running":
+        frame = bridge.frame()
+    else:
+        frame = bridge.camera_direct_frame()
+    ok = bool(devices.get("ok")) and bool(runtime_probe.get("ok"))
+    if not bool(frame.get("ok")) and frame.get("failure_code"):
+        ok = False
+    return {
+        "ok": ok,
+        "tool": "utm.camera.pre_start_check",
+        "config": config,
+        "devices": devices,
+        "runtime_probe": runtime_probe,
+        "graph": graph,
+        "frame": frame,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@app.post("/api/equipment/utm-runtime/camera/cleanup")
+async def post_utm_runtime_camera_cleanup() -> dict[str, object]:
+    """Release stale UTM ROS processes and selected Camera device holders."""
+    return _utm_runtime_bridge().cleanup_ports()
+
+
+@app.post("/api/equipment/utm-runtime/camera/apply")
+async def post_utm_runtime_camera_apply(request: Request) -> dict[str, object]:
+    """Apply and persist the selected Camera profile for the UTM runtime."""
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    return _utm_runtime_bridge().update_camera_config(payload if isinstance(payload, dict) else {})
+
+
+@app.post("/api/equipment/utm-runtime/camera/calibrate/start")
+async def post_utm_runtime_camera_calibrate_start(request: Request) -> dict[str, object]:
+    """Start the ROS camera_calibration GUI for checkerboard calibration."""
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    return _utm_runtime_bridge().start_calibration(payload if isinstance(payload, dict) else {})
+
+
+@app.post("/api/equipment/utm-runtime/camera/calibrate/stop")
+async def post_utm_runtime_camera_calibrate_stop() -> dict[str, object]:
+    """Stop the ROS camera_calibration GUI."""
+    return _utm_runtime_bridge().stop_calibration()
+
+
+@app.get("/api/equipment/utm-runtime/camera/calibrate/status")
+async def get_utm_runtime_camera_calibrate_status() -> dict[str, object]:
+    """Return camera_calibration GUI process status."""
+    return _utm_runtime_bridge().calibration_status()
 
 
 @app.post("/api/bridges/{bridge_id}/actions")
@@ -12831,6 +13045,76 @@ async def post_lerobot_profile_validate(req: LeRobotAPIRequest) -> dict[str, obj
     return await _publish_lerobot_result(result)
 
 
+@app.post("/api/lerobot/mirror/joint-mapping")
+async def post_lerobot_mirror_joint_mapping(req: LeRobotAPIRequest) -> dict[str, object]:
+    """Return the physical follower to Isaac Sim joint mapping."""
+    result = _lerobot_bridge().mirror_joint_mapping(req.model_dump())
+    return await _publish_lerobot_result(result)
+
+
+@app.post("/api/lerobot/mirror/state-probe")
+async def post_lerobot_mirror_state_probe(req: LeRobotAPIRequest) -> dict[str, object]:
+    """Read current follower joint state for Isaac mirror mode without commanding motion."""
+    result = _lerobot_bridge().mirror_joint_state_probe(req.model_dump())
+    return await _publish_lerobot_result(result)
+
+
+@app.post("/api/lerobot/mirror/receiver-health")
+async def post_lerobot_mirror_receiver_health(req: LeRobotAPIRequest) -> dict[str, object]:
+    """Check the Isaac mirror receiver before synchronized live execution."""
+    result = _lerobot_bridge().mirror_receiver_health(req.model_dump())
+    return await _publish_lerobot_result(result)
+
+
+@app.post("/api/lerobot/mirror/receiver-verify")
+async def post_lerobot_mirror_receiver_verify(req: LeRobotAPIRequest) -> dict[str, object]:
+    """Post one mirror sample and confirm the Isaac receiver reports it as latest state."""
+    result = _lerobot_bridge().mirror_receiver_verify(req.model_dump())
+    return await _publish_lerobot_result(result)
+
+
+@app.post("/api/lerobot/mirror/receiver-process/start")
+async def post_lerobot_mirror_receiver_process_start(req: LeRobotAPIRequest) -> dict[str, object]:
+    """Start the managed Isaac mirror receiver process."""
+    result = _lerobot_bridge().mirror_receiver_process_start(req.model_dump())
+    return await _publish_lerobot_result(result)
+
+
+@app.post("/api/lerobot/mirror/receiver-process/status")
+async def post_lerobot_mirror_receiver_process_status(req: LeRobotAPIRequest) -> dict[str, object]:
+    """Return the managed Isaac mirror receiver process status."""
+    result = _lerobot_bridge().mirror_receiver_process_status(req.model_dump())
+    return await _publish_lerobot_result(result)
+
+
+@app.post("/api/lerobot/mirror/receiver-process/stop")
+async def post_lerobot_mirror_receiver_process_stop(req: LeRobotAPIRequest) -> dict[str, object]:
+    """Stop the managed Isaac mirror receiver process."""
+    result = _lerobot_bridge().mirror_receiver_process_stop(req.model_dump())
+    return await _publish_lerobot_result(result)
+
+
+@app.post("/api/lerobot/mirror/loop/start")
+async def post_lerobot_mirror_loop_start(req: LeRobotAPIRequest) -> dict[str, object]:
+    """Start an Isaac Sim follower-state mirror loop."""
+    result = _lerobot_bridge().mirror_loop_start(req.model_dump())
+    return await _publish_lerobot_result(result)
+
+
+@app.post("/api/lerobot/mirror/loop/stop")
+async def post_lerobot_mirror_loop_stop(req: LeRobotAPIRequest) -> dict[str, object]:
+    """Stop an Isaac Sim follower-state mirror loop."""
+    result = _lerobot_bridge().mirror_loop_stop(req.model_dump())
+    return await _publish_lerobot_result(result)
+
+
+@app.post("/api/lerobot/mirror/loop/status")
+async def post_lerobot_mirror_loop_status(req: LeRobotAPIRequest) -> dict[str, object]:
+    """Return Isaac Sim follower-state mirror loop status."""
+    result = _lerobot_bridge().mirror_loop_status(req.model_dump())
+    return await _publish_lerobot_result(result)
+
+
 @app.post("/api/lerobot/teleoperate/start")
 async def post_lerobot_teleoperate_start(req: LeRobotAPIRequest) -> dict[str, object]:
     """Start LeRobot teleoperation."""
@@ -12885,6 +13169,24 @@ async def post_lerobot_train_status(req: LeRobotAPIRequest) -> dict[str, object]
     return await _call_lerobot_backend_tool("lerobot.train.status", req.model_dump(), publish=False)
 
 
+@app.post("/api/lerobot/wandb-local/start")
+async def post_lerobot_wandb_local_start(req: LeRobotAPIRequest) -> dict[str, object]:
+    """Start a local W&B Server for LeRobot training dashboards."""
+    return await _call_lerobot_backend_tool("lerobot.wandb_local.start", req.model_dump())
+
+
+@app.post("/api/lerobot/wandb-local/stop")
+async def post_lerobot_wandb_local_stop(req: LeRobotAPIRequest) -> dict[str, object]:
+    """Stop the local W&B Server tracked by the LeRobot bridge."""
+    return await _call_lerobot_backend_tool("lerobot.wandb_local.stop", req.model_dump())
+
+
+@app.post("/api/lerobot/wandb-local/status")
+async def post_lerobot_wandb_local_status(req: LeRobotAPIRequest) -> dict[str, object]:
+    """Return local W&B Server status."""
+    return await _call_lerobot_backend_tool("lerobot.wandb_local.status", req.model_dump(), publish=False)
+
+
 @app.post("/api/lerobot/rollout/start")
 async def post_lerobot_rollout_start(req: LeRobotAPIRequest) -> dict[str, object]:
     """Start LeRobot policy rollout/inference."""
@@ -12901,6 +13203,7 @@ def _manipulation_profile_from_request(req: ManipulationAgentBridgeRequest) -> d
         "policy_checkpoint_path": req.policy_checkpoint_path,
         "policy_repo_id": req.policy_repo_id,
         "profile_id": req.profile_id,
+        "observation_pipeline_id": req.observation_pipeline_id,
         "dataset_repo_id": req.dataset_repo_id,
         "dataset_root": req.dataset_root,
         "task_id": req.task_id or req.skill_id,
@@ -12935,6 +13238,8 @@ def _manipulation_spec_from_request(req: ManipulationAgentBridgeRequest) -> dict
         "manipulation_strategy": profile.get("manipulation_strategy"),
         "lerobot_profile_id": profile.get("profile_id"),
         "robot_profile_id": profile.get("profile_id"),
+        "observation_pipeline_id": profile.get("observation_pipeline_id"),
+        "lerobot_observation_pipeline_id": profile.get("observation_pipeline_id"),
         "lerobot_policy_type": profile.get("policy_type"),
         "policy_type": profile.get("policy_type"),
         "lerobot_policy_path": policy_path,
