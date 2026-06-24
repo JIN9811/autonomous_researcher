@@ -5,9 +5,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from utils.isaac_omx_mirror_mapping import (
     ISAAC_OMX_JOINT_MAP,
     action_to_joint_state,
+    joint_state_item_to_isaac_target,
     load_isaac_omx_mirror_calibration,
     positions_to_joint_state,
     value_to_isaac_target,
@@ -31,20 +34,93 @@ def test_value_to_isaac_target_converts_lerobot_range_then_applies_calibration()
     result = value_to_isaac_target(shoulder_lift, 0.0, calibration=calibration)
 
     assert result["source_value"] == 0.0
-    assert result["base_target_value"] == -15.0
-    assert result["target_value"] == 20.0
+    assert result["base_target_value"] == 0.0
+    assert result["target_value"] == 5.0
     assert result["calibration_applied"] is True
+
+
+def test_value_to_isaac_target_matches_lerobot_full_turn_degrees() -> None:
+    elbow_flex = next(item for item in ISAAC_OMX_JOINT_MAP if item["motor_name"] == "elbow_flex")
+
+    result = value_to_isaac_target(elbow_flex, 56.19047619047619)
+
+    assert result["base_target_value"] == pytest.approx(101.14285714285714)
+    assert result["target_value"] == pytest.approx(101.14285714285714)
+    assert result["clamped"] is False
+
+
+def test_range_m100_100_body_joints_use_dynamixel_resolution_angle() -> None:
+    shoulder_lift = next(item for item in ISAAC_OMX_JOINT_MAP if item["motor_name"] == "shoulder_lift")
+
+    centered_result = value_to_isaac_target(shoulder_lift, 0.0)
+    positive_result = value_to_isaac_target(shoulder_lift, 50.0)
+    negative_result = value_to_isaac_target(shoulder_lift, -50.0)
+    over_limit_result = value_to_isaac_target(shoulder_lift, 110.0)
+
+    assert centered_result["target_value"] == pytest.approx(0.0)
+    assert positive_result["target_value"] == pytest.approx(90.0)
+    assert negative_result["target_value"] == pytest.approx(-90.0)
+    assert over_limit_result["target_value"] == pytest.approx(180.0)
+    assert over_limit_result["clamped"] is True
+    assert centered_result["source_raw_position"] == pytest.approx(2047.5)
+    assert positive_result["source_raw_position"] == pytest.approx(3071.25)
+    assert positive_result["source_zero_raw_position"] == pytest.approx(2047.5)
+    assert positive_result["dynamixel_deg_per_tick"] == pytest.approx(360.0 / 4095.0)
+    assert positive_result["conversion_mode"] == "dynamixel_raw_resolution"
+
+
+def test_gripper_uses_dynamixel_resolution_angle_with_closed_zero() -> None:
+    gripper = next(item for item in ISAAC_OMX_JOINT_MAP if item["motor_name"] == "gripper")
+
+    closed_result = value_to_isaac_target(gripper, 50.0)
+    open_result = value_to_isaac_target(gripper, 60.0)
+    under_closed_result = value_to_isaac_target(gripper, 49.0)
+    over_open_result = value_to_isaac_target(gripper, 89.0)
+
+    assert closed_result["target_value"] == pytest.approx(0.0)
+    assert closed_result["base_target_value"] == pytest.approx(0.0)
+    assert open_result["target_value"] == pytest.approx(36.0)
+    assert under_closed_result["target_value"] == pytest.approx(0.0)
+    assert under_closed_result["clamped"] is True
+    assert over_open_result["target_value"] == pytest.approx(36.0)
+    assert over_open_result["clamped"] is True
+    assert closed_result["source_raw_position"] == pytest.approx(2047.5)
+    assert open_result["source_raw_position"] == pytest.approx(2457.0)
+    assert open_result["source_zero_raw_position"] == pytest.approx(2047.5)
+
+
+def test_gripper_mapping_sets_contact_friendly_drive_impedance() -> None:
+    converted = joint_state_item_to_isaac_target({"motor_id": 16, "motor_name": "gripper", "source_value": 59.9})
+
+    assert converted["drive_stiffness"] == 900.0
+    assert converted["drive_damping"] == 90.0
+    assert converted["drive_max_force"] == 25.0
 
 
 def test_value_to_isaac_target_clamps_after_sign_scale_offset() -> None:
     wrist_flex = next(item for item in ISAAC_OMX_JOINT_MAP if item["motor_name"] == "wrist_flex")
-    calibration = {"joints": {"wrist_flex": {"scale": 2.0, "offset_deg": 60.0}}}
+    calibration = {"joints": {"wrist_flex": {"scale": 2.0, "offset_deg": 60.0, "clamp_upper_deg": 100.0}}}
 
     result = value_to_isaac_target(wrist_flex, 100.0, calibration=calibration)
 
-    assert result["base_target_value"] == 100.0
+    assert result["base_target_value"] == 180.0
     assert result["target_value"] == 100.0
     assert result["clamped"] is True
+
+
+def test_joint_state_item_to_isaac_target_recomputes_old_payload_from_source_value() -> None:
+    converted = joint_state_item_to_isaac_target(
+        {
+            "motor_id": 13,
+            "motor_name": "elbow_flex",
+            "isaac_joint_name": "Joint3",
+            "target_value": 43.58974358974362,
+            "source_value": 55.799755799755815,
+        }
+    )
+
+    assert converted["target_value"] == pytest.approx(100.43956043956047)
+    assert converted["recomputed_from_source"] is True
 
 
 def test_action_to_joint_state_uses_shared_calibration_contract() -> None:
@@ -57,7 +133,7 @@ def test_action_to_joint_state_uses_shared_calibration_contract() -> None:
     assert shoulder_pan["target_value"] == -2.0
     assert shoulder_pan["source_value"] == -12.0
     assert shoulder_pan["calibration_applied"] is True
-    assert gripper["target_value"] == 60.0
+    assert gripper["target_value"] == 36.0
     assert gripper["calibration_applied"] is False
 
 
@@ -71,6 +147,16 @@ def test_positions_to_joint_state_accepts_preconverted_target_positions() -> Non
     assert elbow["source_value"] == 40.0
     assert elbow["base_target_value"] == 40.0
     assert elbow["target_value"] == -37.0
+
+
+def test_preconverted_joint_state_payload_is_not_range_scaled_again() -> None:
+    joint_state = positions_to_joint_state({13: 40.0}, values_are_isaac_targets=True)
+
+    converted = joint_state_item_to_isaac_target(joint_state[0])
+
+    assert converted["base_target_value"] == pytest.approx(40.0)
+    assert converted["target_value"] == pytest.approx(40.0)
+    assert converted["recomputed_from_source"] is True
 
 
 def test_load_isaac_omx_mirror_calibration_tolerates_missing_file(tmp_path: Path) -> None:

@@ -9,6 +9,8 @@ from typing import Any
 
 ISAAC_OMX_SCENE_RELATIVE_PATH = Path("sim/robotis_omx/scene/omx_table_layout.usda")
 ISAAC_OMX_ARTICULATION_ROOT = "/World/Robot/Geometry/link0"
+DYNAMIXEL_POSITION_MAX_TICK = 4095.0
+DYNAMIXEL_DEG_PER_TICK = 360.0 / DYNAMIXEL_POSITION_MAX_TICK
 ISAAC_OMX_JOINT_MAP: tuple[dict[str, Any], ...] = (
     {
         "motor_id": 11,
@@ -27,9 +29,14 @@ ISAAC_OMX_JOINT_MAP: tuple[dict[str, Any], ...] = (
         "isaac_joint_name": "Joint2",
         "isaac_joint_path": "/World/Robot/Geometry/link0/link1/link2/Joint2",
         "axis": "Y",
-        "lower_deg": -120.0,
-        "upper_deg": 90.0,
+        "lower_deg": -180.0,
+        "upper_deg": 180.0,
         "mode": "range_m100_100",
+        "source_zero": 0.0,
+        "source_to_raw_mode": "range_m100_100",
+        "source_raw_min": 0.0,
+        "source_raw_max": DYNAMIXEL_POSITION_MAX_TICK,
+        "clamp_to_limits": True,
         "unit": "deg",
     },
     {
@@ -38,9 +45,14 @@ ISAAC_OMX_JOINT_MAP: tuple[dict[str, Any], ...] = (
         "isaac_joint_name": "Joint3",
         "isaac_joint_path": "/World/Robot/Geometry/link0/link1/link2/link3/Joint3",
         "axis": "Y",
-        "lower_deg": -120.0,
-        "upper_deg": 90.0,
+        "lower_deg": -180.0,
+        "upper_deg": 180.0,
         "mode": "range_m100_100",
+        "source_zero": 0.0,
+        "source_to_raw_mode": "range_m100_100",
+        "source_raw_min": 0.0,
+        "source_raw_max": DYNAMIXEL_POSITION_MAX_TICK,
+        "clamp_to_limits": True,
         "unit": "deg",
     },
     {
@@ -49,9 +61,14 @@ ISAAC_OMX_JOINT_MAP: tuple[dict[str, Any], ...] = (
         "isaac_joint_name": "Joint4",
         "isaac_joint_path": "/World/Robot/Geometry/link0/link1/link2/link3/link4/Joint4",
         "axis": "Y",
-        "lower_deg": -100.0,
-        "upper_deg": 100.0,
+        "lower_deg": -180.0,
+        "upper_deg": 180.0,
         "mode": "range_m100_100",
+        "source_zero": 0.0,
+        "source_to_raw_mode": "range_m100_100",
+        "source_raw_min": 0.0,
+        "source_raw_max": DYNAMIXEL_POSITION_MAX_TICK,
+        "clamp_to_limits": True,
         "unit": "deg",
     },
     {
@@ -71,10 +88,19 @@ ISAAC_OMX_JOINT_MAP: tuple[dict[str, Any], ...] = (
         "isaac_joint_name": "Gripper",
         "isaac_joint_path": "/World/Robot/Geometry/link0/link1/link2/link3/link4/link5/link6/Gripper",
         "mimic_joint_path": "/World/Robot/Geometry/link0/link1/link2/link3/link4/link5/link7/Gripper_mimic",
+        "mimic_multiplier": -1.0,
         "axis": "Z",
         "lower_deg": 0.0,
-        "upper_deg": 100.0,
+        "upper_deg": 36.0,
         "mode": "range_0_100",
+        "source_zero": 50.0,
+        "source_to_raw_mode": "range_0_100",
+        "source_raw_min": 0.0,
+        "source_raw_max": DYNAMIXEL_POSITION_MAX_TICK,
+        "clamp_to_limits": True,
+        "drive_stiffness": 900.0,
+        "drive_damping": 90.0,
+        "drive_max_force": 25.0,
         "unit": "percent",
     },
 )
@@ -117,18 +143,82 @@ def _safe_float(value: Any, default: float) -> float:
         return default
 
 
-def _base_target_from_source(item: dict[str, Any], source_value: Any, *, values_are_isaac_targets: bool = False) -> float:
+def _source_value_to_dynamixel_raw(item: dict[str, Any], source_value: float) -> float | None:
+    mode = str(item.get("source_to_raw_mode") or "")
+    if not mode:
+        return None
+    raw_min = _safe_float(item.get("source_raw_min"), 0.0)
+    raw_max = _safe_float(item.get("source_raw_max"), DYNAMIXEL_POSITION_MAX_TICK)
+    raw_span = raw_max - raw_min
+    if raw_span == 0.0:
+        return raw_min
+    if mode == "range_m100_100":
+        bounded = min(100.0, max(-100.0, source_value))
+        return ((bounded + 100.0) / 200.0) * raw_span + raw_min
+    if mode == "range_0_100":
+        bounded = min(100.0, max(0.0, source_value))
+        return (bounded / 100.0) * raw_span + raw_min
+    return None
+
+
+def _base_target_from_source(item: dict[str, Any], source_value: Any, *, values_are_isaac_targets: bool = False) -> dict[str, Any]:
     raw = _safe_float(source_value, 0.0)
     if values_are_isaac_targets:
-        return raw
+        return {"base_target_value": raw, "conversion_mode": "isaac_target"}
     mode = str(item.get("mode") or "degrees")
+    source_raw_position = _source_value_to_dynamixel_raw(item, raw)
+    if source_raw_position is not None:
+        source_raw_clamped = (
+            (str(item.get("source_to_raw_mode") or "") == "range_m100_100" and (raw < -100.0 or raw > 100.0))
+            or (str(item.get("source_to_raw_mode") or "") == "range_0_100" and (raw < 0.0 or raw > 100.0))
+        )
+        zero_source = _safe_float(item.get("source_zero"), 0.0)
+        source_zero_raw_position = item.get("source_zero_raw_position")
+        if source_zero_raw_position is None:
+            source_zero_raw_position = _source_value_to_dynamixel_raw(item, zero_source)
+        zero_raw = _safe_float(source_zero_raw_position, 0.0)
+        deg_per_tick = _safe_float(item.get("dynamixel_deg_per_tick"), DYNAMIXEL_DEG_PER_TICK)
+        base = ((source_raw_position - zero_raw) * deg_per_tick) + _safe_float(item.get("source_to_deg_offset"), 0.0)
+        return {
+            "base_target_value": base,
+            "conversion_mode": "dynamixel_raw_resolution",
+            "source_raw_position": source_raw_position,
+            "source_zero_raw_position": zero_raw,
+            "dynamixel_deg_per_tick": deg_per_tick,
+            "source_raw_clamped": source_raw_clamped,
+        }
+    source_to_deg_scale = item.get("source_to_deg_scale")
+    if source_to_deg_scale is not None:
+        source_zero = _safe_float(item.get("source_zero"), 0.0)
+        return {
+            "base_target_value": ((raw - source_zero) * _safe_float(source_to_deg_scale, 1.0))
+            + _safe_float(item.get("source_to_deg_offset"), 0.0),
+            "conversion_mode": "source_scale",
+        }
     lower = _safe_float(item.get("lower_deg"), raw)
     upper = _safe_float(item.get("upper_deg"), raw)
+    source_lower = item.get("source_lower")
+    source_upper = item.get("source_upper")
+    if source_lower is not None and source_upper is not None:
+        target_lower = _safe_float(item.get("target_lower_deg"), lower)
+        target_upper = _safe_float(item.get("target_upper_deg"), upper)
+        input_lower = _safe_float(source_lower, raw)
+        input_upper = _safe_float(source_upper, raw)
+        input_span = input_upper - input_lower
+        if input_span == 0.0:
+            return {"base_target_value": target_lower, "conversion_mode": "source_range"}
+        return {
+            "base_target_value": target_lower + ((raw - input_lower) / input_span) * (target_upper - target_lower),
+            "conversion_mode": "source_range",
+        }
     if mode == "range_m100_100":
-        return lower + ((raw + 100.0) / 200.0) * (upper - lower)
+        return {
+            "base_target_value": lower + ((raw + 100.0) / 200.0) * (upper - lower),
+            "conversion_mode": "legacy_range_m100_100",
+        }
     if mode == "range_0_100":
-        return lower + (raw / 100.0) * (upper - lower)
-    return raw
+        return {"base_target_value": lower + (raw / 100.0) * (upper - lower), "conversion_mode": "legacy_range_0_100"}
+    return {"base_target_value": raw, "conversion_mode": "degrees"}
 
 
 def _joint_calibration(item: dict[str, Any], calibration: dict[str, Any] | None) -> dict[str, Any]:
@@ -152,16 +242,25 @@ def value_to_isaac_target(
     values_are_isaac_targets: bool = False,
 ) -> dict[str, Any]:
     source = _safe_float(source_value, 0.0)
-    base = _base_target_from_source(item, source, values_are_isaac_targets=values_are_isaac_targets)
+    base_details = _base_target_from_source(item, source, values_are_isaac_targets=values_are_isaac_targets)
+    base = _safe_float(base_details.get("base_target_value"), source)
     rule = _joint_calibration(item, calibration)
     sign = _safe_float(rule.get("sign"), 1.0) if rule else 1.0
     scale = _safe_float(rule.get("scale"), 1.0) if rule else 1.0
     offset = _safe_float(rule.get("offset_deg"), 0.0) if rule else 0.0
     target = (base * sign * scale) + offset
-    lower = _safe_float(rule.get("clamp_lower_deg"), _safe_float(item.get("lower_deg"), target)) if rule else _safe_float(item.get("lower_deg"), target)
-    upper = _safe_float(rule.get("clamp_upper_deg"), _safe_float(item.get("upper_deg"), target)) if rule else _safe_float(item.get("upper_deg"), target)
-    clamped = False
-    if lower <= upper:
+    clamp_requested = bool(item.get("clamp_to_limits")) or (
+        bool(rule) and ("clamp_lower_deg" in rule or "clamp_upper_deg" in rule)
+    )
+    lower = target
+    upper = target
+    if clamp_requested:
+        item_lower = _safe_float(item.get("target_lower_deg"), _safe_float(item.get("lower_deg"), target))
+        item_upper = _safe_float(item.get("target_upper_deg"), _safe_float(item.get("upper_deg"), target))
+        lower = _safe_float(rule.get("clamp_lower_deg"), item_lower) if rule else item_lower
+        upper = _safe_float(rule.get("clamp_upper_deg"), item_upper) if rule else item_upper
+    clamped = bool(base_details.get("source_raw_clamped", False))
+    if clamp_requested and lower <= upper:
         if target < lower:
             target = lower
             clamped = True
@@ -175,18 +274,20 @@ def value_to_isaac_target(
         "calibration_applied": bool(rule),
         "calibration_rule": dict(rule),
         "clamped": clamped,
+        **{key: value for key, value in base_details.items() if key != "base_target_value"},
     }
 
 
 def _joint_state_entry(item: dict[str, Any], source_value: Any, *, calibration: dict[str, Any] | None, values_are_isaac_targets: bool) -> dict[str, Any]:
     converted = value_to_isaac_target(item, source_value, calibration=calibration, values_are_isaac_targets=values_are_isaac_targets)
     target = converted["target_value"]
-    return {
+    entry = {
         "motor_id": item["motor_id"],
         "motor_name": item["motor_name"],
         "isaac_joint_name": item["isaac_joint_name"],
         "isaac_joint_path": item["isaac_joint_path"],
         "mimic_joint_path": item.get("mimic_joint_path", ""),
+        "mimic_multiplier": _safe_float(item.get("mimic_multiplier"), 1.0),
         "axis": item["axis"],
         "position_deg": target,
         "target_value": target,
@@ -195,8 +296,16 @@ def _joint_state_entry(item: dict[str, Any], source_value: Any, *, calibration: 
         "calibration_applied": converted["calibration_applied"],
         "calibration_rule": converted["calibration_rule"],
         "clamped": converted["clamped"],
+        "source_value_is_isaac_target": bool(values_are_isaac_targets),
         "unit": item.get("unit", "deg"),
     }
+    for key in ("conversion_mode", "source_raw_position", "source_zero_raw_position", "dynamixel_deg_per_tick"):
+        if key in converted:
+            entry[key] = converted[key]
+    for key in ("drive_stiffness", "drive_damping", "drive_max_force"):
+        if key in item:
+            entry[key] = _safe_float(item.get(key), 0.0)
+    return entry
 
 
 def action_to_joint_state(
@@ -212,6 +321,93 @@ def action_to_joint_state(
             continue
         joint_state.append(_joint_state_entry(item, action[key], calibration=calibration, values_are_isaac_targets=False))
     return joint_state
+
+
+def _joint_map_item_for_payload_item(
+    payload_item: dict[str, Any],
+    joint_map: tuple[dict[str, Any], ...] | list[dict[str, Any]] = ISAAC_OMX_JOINT_MAP,
+) -> dict[str, Any] | None:
+    raw_motor_id = payload_item.get("motor_id")
+    try:
+        motor_id = int(raw_motor_id)
+    except (TypeError, ValueError):
+        motor_id = None
+    motor_name = str(payload_item.get("motor_name") or "")
+    isaac_joint_name = str(payload_item.get("isaac_joint_name") or "")
+    isaac_joint_path = str(payload_item.get("isaac_joint_path") or "")
+    for item in joint_map:
+        if motor_id is not None and int(item.get("motor_id", -1)) == motor_id:
+            return item
+        if motor_name and str(item.get("motor_name") or "") == motor_name:
+            return item
+        if isaac_joint_name and str(item.get("isaac_joint_name") or "") == isaac_joint_name:
+            return item
+        if isaac_joint_path and str(item.get("isaac_joint_path") or "") == isaac_joint_path:
+            return item
+    return None
+
+
+def joint_state_item_to_isaac_target(
+    payload_item: dict[str, Any],
+    *,
+    calibration: dict[str, Any] | None = None,
+    joint_map: tuple[dict[str, Any], ...] | list[dict[str, Any]] = ISAAC_OMX_JOINT_MAP,
+) -> dict[str, Any]:
+    """Return the receiver-side Isaac target for a posted joint_state item.
+
+    Live sessions can keep running across mapping updates. When source_value is
+    present, the receiver recomputes the target from the current shared mapping
+    instead of trusting an older target_value produced by an already-running
+    wrapper process.
+    """
+
+    mapped_item = _joint_map_item_for_payload_item(payload_item, joint_map)
+    if mapped_item is not None and "source_value" in payload_item:
+        source_value_is_isaac_target = bool(
+            payload_item.get("source_value_is_isaac_target")
+            or payload_item.get("source_values_are_isaac_targets")
+            or payload_item.get("values_are_isaac_targets")
+        )
+        converted = value_to_isaac_target(
+            mapped_item,
+            payload_item.get("source_value"),
+            calibration=calibration,
+            values_are_isaac_targets=source_value_is_isaac_target,
+        )
+        result = {
+            **converted,
+            "recomputed_from_source": True,
+            "source_value_is_isaac_target": source_value_is_isaac_target,
+            "mimic_multiplier": _safe_float(mapped_item.get("mimic_multiplier"), _safe_float(payload_item.get("mimic_multiplier"), 1.0)),
+        }
+        for key in ("drive_stiffness", "drive_damping", "drive_max_force"):
+            if key in mapped_item:
+                result[key] = _safe_float(mapped_item.get(key), 0.0)
+            elif key in payload_item:
+                result[key] = _safe_float(payload_item.get(key), 0.0)
+        return result
+    fallback_value = payload_item.get("target_value", payload_item.get("position_deg", 0.0))
+    target = _safe_float(fallback_value, 0.0)
+    fallback_mimic_multiplier = payload_item.get("mimic_multiplier")
+    if fallback_mimic_multiplier is None and mapped_item is not None:
+        fallback_mimic_multiplier = mapped_item.get("mimic_multiplier")
+    result = {
+        "source_value": _safe_float(payload_item.get("source_value"), target),
+        "base_target_value": _safe_float(payload_item.get("base_target_value"), target),
+        "target_value": target,
+        "calibration_applied": bool(payload_item.get("calibration_applied", False)),
+        "calibration_rule": dict(payload_item.get("calibration_rule") or {}),
+        "clamped": bool(payload_item.get("clamped", False)),
+        "recomputed_from_source": False,
+        "source_value_is_isaac_target": bool(payload_item.get("source_value_is_isaac_target", False)),
+        "mimic_multiplier": _safe_float(fallback_mimic_multiplier, 1.0),
+    }
+    for key in ("drive_stiffness", "drive_damping", "drive_max_force"):
+        if key in payload_item:
+            result[key] = _safe_float(payload_item.get(key), 0.0)
+        elif mapped_item is not None and key in mapped_item:
+            result[key] = _safe_float(mapped_item.get(key), 0.0)
+    return result
 
 
 def positions_to_joint_state(
