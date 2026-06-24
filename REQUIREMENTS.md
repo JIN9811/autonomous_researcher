@@ -1222,3 +1222,20 @@ sudo systemctl reset-failed ollama.service || true
 
 See `docs/runtime/training_stability.md` for the 2026-06-19 Pi0.5 crash analysis
 and resume policy.
+
+## ROS Specimen Pose Tracking
+
+Required for live D455F one-shot pose tracking:
+
+```bash
+sudo apt install -y ros-jazzy-realsense2-camera ros-jazzy-cv-bridge ros-jazzy-image-transport python3-opencv python3-numpy
+```
+
+Build the local ROS package:
+
+```bash
+cd /home/jin/autonomous_researcher/ros
+colcon build --packages-select atr_specimen_pose_tracker
+```
+
+Live validation requires the D455F to enumerate as a USB3 RealSense device. If it is not visible to `rs-enumerate-devices` or appears only on a USB2/high-speed path, fix the physical cable/hub/port before using `vision.specimen_pose_snapshot` in live mode.

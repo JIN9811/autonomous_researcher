@@ -288,6 +288,9 @@ class ManipulationAgent(BaseAgent):
         task_id = self._task_id(state, spec)
         task_def = self._task_definition(task_id)
         specimen = self._specimen_result(state)
+        vision_observation = self._vision_observation(state)
+        pickup_target = vision_observation.get("pickup_target") if isinstance(vision_observation.get("pickup_target"), dict) else {}
+        pickup_pose = vision_observation.get("pose_estimate") if isinstance(vision_observation.get("pose_estimate"), dict) else {}
         specimen_id = str(specimen.get("specimen_id") or specimen.get("candidate_id") or "printed specimen")
         profile_id = str(spec.get("lerobot_profile_id") or spec.get("robot_profile_id") or spec.get("profile_id") or "").strip()
         if state.mode == Mode.TEST and not profile_id:
@@ -317,8 +320,10 @@ class ManipulationAgent(BaseAgent):
             policy_repo_id = ""
         if state.mode == Mode.TEST and not policy_path and not policy_checkpoint_path and not policy_repo_id:
             policy_path = "fake://pi05_policy" if is_pi05 else "fake://policy"
-        source = str(spec.get("source_location") or task_def.get("source_location") or "3dp_output_area")
-        target = str(spec.get("target_location") or task_def.get("target_location") or "utm_fixture")
+        explicit_source = spec.get("source_location") if "source_location" in explicit_keys else None
+        explicit_target = spec.get("target_location") if "target_location" in explicit_keys else None
+        source = str(explicit_source or pickup_target.get("source_location") or pickup_target.get("physical_location") or task_def.get("source_location") or "3dp_output_area")
+        target = str(explicit_target or pickup_target.get("target_location") or task_def.get("target_location") or "utm_fixture")
         task_instruction = str(
             spec.get("manipulation_task")
             or spec.get("task_instruction")
@@ -389,7 +394,9 @@ class ManipulationAgent(BaseAgent):
                 "confirm_manipulation_execute",
                 default=state.mode == Mode.LIVE,
             ),
-            "observation": self._vision_observation(state),
+            "observation": vision_observation,
+            "pickup_pose": pickup_pose,
+            "pickup_target": pickup_target,
             "specimen": specimen,
             "source_location": source,
             "target_location": target,
@@ -440,6 +447,7 @@ class ManipulationAgent(BaseAgent):
             "freshness": freshness,
             "pose_estimate": observation.get("pose_estimate", {}),
             "pickup_target": observation.get("pickup_target", {}),
+            "transfer_readiness": observation.get("transfer_readiness", {}),
         }
 
     def _preflight(self, *, state: OrchestratorState, strategy: str, payload: dict[str, Any], freshness: dict[str, Any], vision_context: dict[str, Any]) -> dict[str, Any]:
@@ -449,6 +457,12 @@ class ManipulationAgent(BaseAgent):
         policy_type = self._canonical_policy_type(payload.get("policy_type"))
         if not freshness.get("fresh", False):
             blocking.append(str(freshness.get("reason") or "stale_vision_signal"))
+        readiness = vision_context.get("transfer_readiness") if isinstance(vision_context.get("transfer_readiness"), dict) else {}
+        if strategy in {"lerobot_policy", "pi05_lerobot_policy"}:
+            if readiness.get("camera_returned_to_vla") is False:
+                blocking.append("d455f_not_returned_to_vla")
+            if readiness.get("vla_camera_precheck_ok") is False:
+                blocking.append("vla_camera_precheck_failed")
         requires_specimen = strategy == "pi05_lerobot_policy" and payload.get("task_id") == "transfer_to_utm"
         if requires_specimen and not self._specimen_ready_for_transfer(state):
             blocking.append("specimen_result_not_ready")
@@ -678,6 +692,8 @@ class ManipulationAgent(BaseAgent):
             "sarm": sarm,
             "preflight": preflight,
             "evidence_refs": evidence_refs,
+            "pickup_pose": payload.get("pickup_pose", {}),
+            "pickup_target": payload.get("pickup_target", {}),
             "guardian_status": "warn" if decision.get("recommended_next_agent") == "guardian_agent" else "not_checked",
             "decisions": decisions,
             "warnings": list(preflight.get("warnings") or []) + list(preflight.get("blocking_reasons") or []),
@@ -714,6 +730,8 @@ class ManipulationAgent(BaseAgent):
                 "canonical_instruction": payload.get("task_instruction", ""),
                 "source_location": payload.get("source_location", ""),
                 "target_location": payload.get("target_location", ""),
+                "pickup_pose": payload.get("pickup_pose", {}),
+                "pickup_target": payload.get("pickup_target", {}),
                 "intended_terminal_pose": payload.get("terminal_pose", "standby_clear_of_utm"),
                 "specimen_id": payload.get("specimen", {}).get("specimen_id", ""),
                 "candidate_id": payload.get("specimen", {}).get("candidate_id", ""),
@@ -975,6 +993,10 @@ class ManipulationAgent(BaseAgent):
             "status": "blocked",
             "failure_code": "MANIPULATION_PREFLIGHT_BLOCKED",
             "freshness": vision_context.get("freshness", {}),
+            "preflight": preflight,
+            "observation": payload.get("observation", {}),
+            "pickup_pose": payload.get("pickup_pose", {}),
+            "pickup_target": payload.get("pickup_target", {}),
             "handoff_status": "blocked",
             "completion_status": "not_started",
             "grasp_score": 0.0,
@@ -1131,6 +1153,10 @@ class ManipulationAgent(BaseAgent):
             retry_count=state.retry_counters.get("manipulation", 0),
         )
         decision = self._decision(task_id=task_id, response=response, preflight=preflight, verification=verification, sarm=sarm)
+        response["preflight"] = preflight
+        response["observation"] = payload.get("observation", {})
+        response["pickup_pose"] = payload.get("pickup_pose", {})
+        response["pickup_target"] = payload.get("pickup_target", {})
         response["handoff_status"] = decision["handoff_status"]
         response["completion_status"] = decision["completion_status"]
         response["recommended_next_agent"] = decision["recommended_next_agent"]

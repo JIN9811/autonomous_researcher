@@ -484,7 +484,7 @@ def test_mirror_receiver_extension_command_uses_isaac_app_and_extension(tmp_path
     assert f"--/exts/atr.omx.mirror/scene={scene_path}" in command
     assert "--/exts/atr.omx.mirror/openSceneOnStartup=true" in command
     assert "--/exts/atr.omx.mirror/playTimelineOnStartup=true" in command
-    assert str(scene_path) in command
+    assert str(scene_path) not in command
 
 
 def test_live_mirror_preflight_blocks_non_isaac_update_tick_receiver(tmp_path: Path) -> None:
@@ -643,12 +643,14 @@ def test_live_teleoperate_with_isaac_mirror_starts_when_receiver_ready(tmp_path:
     env = live_start_kwargs["env_overrides"]  # type: ignore[index]
     assert env["ATR_ISAAC_MIRROR_ENABLED"] == "1"  # type: ignore[index]
     assert env["ATR_ISAAC_MIRROR_ENDPOINT"] == "http://127.0.0.1:8766/joints"  # type: ignore[index]
+    assert env["ATR_ISAAC_MIRROR_SOURCE"] == "follower_present_position"  # type: ignore[index]
     assert env["ATR_ISAAC_MIRROR_CALIBRATION_PATH"] == str(tmp_path / "memory" / "isaac_omx_mirror_calibration.json")  # type: ignore[index]
 
 
 def test_port_baseline_detect_persists_follower_port(tmp_path: Path) -> None:
     bridge = _bridge(tmp_path)
     bridge._scan_serial_ports = lambda: ["/dev/ttyUSB0"]  # type: ignore[method-assign]
+    bridge._serial_motor_ids = lambda port: {"/dev/ttyUSB9": [11, 12, 13, 14, 15, 16]}.get(port, [])  # type: ignore[attr-defined, method-assign]
 
     baseline = bridge.ports_baseline({"mode": "live", "profile_id": "fake_omx_ai", "device_role": "follower"})
     bridge._scan_serial_ports = lambda: ["/dev/ttyUSB0", "/dev/ttyUSB9"]  # type: ignore[method-assign]
@@ -661,7 +663,7 @@ def test_port_baseline_detect_persists_follower_port(tmp_path: Path) -> None:
     assert "--robot.port=/dev/ttyUSB9" in teleop["command_preview"]
 
 
-def test_port_detect_accepts_removed_port_like_lerobot_find_port(tmp_path: Path) -> None:
+def test_port_detect_rejects_removed_live_robot_port_without_role_probe(tmp_path: Path) -> None:
     bridge = _bridge(tmp_path)
     bridge._scan_serial_ports = lambda: ["/dev/ttyUSB0", "/dev/ttyUSB1"]  # type: ignore[method-assign]
 
@@ -669,9 +671,9 @@ def test_port_detect_accepts_removed_port_like_lerobot_find_port(tmp_path: Path)
     bridge._scan_serial_ports = lambda: ["/dev/ttyUSB0"]  # type: ignore[method-assign]
     detected = bridge.ports_detect({"mode": "live", "profile_id": "fake_omx_ai", "device_role": "leader"})
 
-    assert detected["ok"] is True
-    assert detected["change_type"] == "removed"
-    assert detected["selected_port"] == "/dev/ttyUSB1"
+    assert detected["ok"] is False
+    assert detected["failure_code"] == "LEROBOT_PORT_REMOVED_UNVERIFIED"
+    assert "leader" not in detected.get("saved_devices", {})
 
 
 def test_port_detect_uses_added_robot_candidate_and_keeps_serial_id_mapping(tmp_path: Path) -> None:
@@ -681,6 +683,7 @@ def test_port_detect_uses_added_robot_candidate_and_keeps_serial_id_mapping(tmp_
         "/dev/ttyUSB1": "/dev/serial/by-id/follower-openrb",
     }
     bridge._stable_device_port = lambda port, role: stable_map.get(port, port)  # type: ignore[method-assign]
+    bridge._serial_motor_ids = lambda port: {"/dev/ttyUSB1": [11, 12, 13, 14, 15, 16]}.get(port, [])  # type: ignore[attr-defined, method-assign]
     bridge.ports_save({"mode": "live", "profile_id": "fake_omx_ai", "device_role": "leader", "port": "/dev/ttyUSB0"})
     bridge._scan_serial_ports = lambda: ["/dev/ttyUSB0"]  # type: ignore[method-assign]
     bridge.ports_baseline({"mode": "live", "profile_id": "fake_omx_ai", "device_role": "follower"})
@@ -698,19 +701,19 @@ def test_port_detect_uses_added_robot_candidate_and_keeps_serial_id_mapping(tmp_
     assert "--teleop.port=/dev/serial/by-id/leader-openrb" in teleop["command_preview"]
 
 
-def test_port_detect_keeps_lerobot_delta_behavior_when_other_role_matches(tmp_path: Path) -> None:
+def test_port_detect_does_not_blindly_save_other_saved_role_when_unverified(tmp_path: Path) -> None:
     bridge = _bridge(tmp_path)
     bridge._stable_device_port = lambda port, role: "/dev/serial/by-id/shared-openrb" if port == "/dev/ttyUSB0" else port  # type: ignore[method-assign]
+    bridge._serial_motor_ids = lambda port: []  # type: ignore[attr-defined, method-assign]
     bridge.ports_save({"mode": "live", "profile_id": "fake_omx_ai", "device_role": "leader", "port": "/dev/ttyUSB0"})
     bridge._scan_serial_ports = lambda: ["/dev/ttyUSB0"]  # type: ignore[method-assign]
 
     detected = bridge.ports_detect({"mode": "live", "profile_id": "fake_omx_ai", "device_role": "follower"})
 
-    assert detected["ok"] is True
-    assert detected["raw_selected_port"] == "/dev/ttyUSB0"
-    assert detected["selected_port"] == "/dev/serial/by-id/shared-openrb"
+    assert detected["ok"] is False
+    assert detected["failure_code"] == "LEROBOT_PORT_ROLE_NOT_VERIFIED"
     assert detected["saved_devices"]["leader"]["port"] == "/dev/serial/by-id/shared-openrb"
-    assert detected["saved_devices"]["follower"]["port"] == "/dev/serial/by-id/shared-openrb"
+    assert "follower" not in detected["saved_devices"]
 
 
 def test_live_robot_port_detect_uses_motor_ids_when_no_delta_exists(tmp_path: Path) -> None:
@@ -734,7 +737,26 @@ def test_live_robot_port_detect_uses_motor_ids_when_no_delta_exists(tmp_path: Pa
     assert leader_result["saved_devices"]["leader"]["port"] == leader
 
 
-def test_removed_robot_port_uses_baseline_serial_number_identity(tmp_path: Path) -> None:
+def test_live_robot_port_detect_accepts_partial_role_motor_ids(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    leader = "/dev/serial/by-id/leader-openrb"
+    follower = "/dev/serial/by-id/follower-openrb"
+    bridge._scan_serial_ports = lambda: [leader, follower]  # type: ignore[method-assign]
+    bridge._serial_motor_ids = lambda port: {  # type: ignore[attr-defined, method-assign]
+        leader: [1, 2, 3, 4, 5, 6],
+        follower: [11, 13, 14, 15, 16],
+    }.get(port, [])
+
+    follower_result = bridge.ports_detect({"mode": "live", "profile_id": "fake_omx_ai", "device_role": "follower"})
+
+    assert follower_result["ok"] is True
+    assert follower_result["selected_port"] == follower
+    assert follower_result["saved_device"]["source"] == "id_detect:partial"
+    assert follower_result["saved_devices"]["follower"]["port"] == follower
+    assert follower_result["role_verification"]["matched_motor_ids"] == [11, 13, 14, 15, 16]
+
+
+def test_removed_robot_port_does_not_save_baseline_serial_identity_without_live_role_probe(tmp_path: Path) -> None:
     bridge = _bridge(tmp_path)
     baseline_phase = True
 
@@ -751,12 +773,10 @@ def test_removed_robot_port_uses_baseline_serial_number_identity(tmp_path: Path)
 
     detected = bridge.ports_detect({"mode": "live", "profile_id": "fake_omx_ai", "device_role": "follower"})
 
-    assert detected["ok"] is True
-    assert detected["raw_selected_port"] == "/dev/ttyACM0"
-    assert detected["selected_port"] == "/dev/serial/by-id/usb-ROBOTIS_OpenRB-150_FOLLOWER123-if00"
-    assert detected["saved_device"]["raw_port"] == "/dev/ttyACM0"
-    assert detected["saved_device"]["device_link"] == "/dev/serial/by-id/usb-ROBOTIS_OpenRB-150_FOLLOWER123-if00"
-    assert detected["saved_device"]["serial_number"] == "FOLLOWER123"
+    assert detected["ok"] is False
+    assert detected["failure_code"] == "LEROBOT_PORT_REMOVED_UNVERIFIED"
+    assert detected["candidates"] == ["/dev/ttyACM0"]
+    assert "follower" not in detected.get("saved_devices", {})
 
 
 def test_camera_paths_are_preserved_for_opencv(tmp_path: Path) -> None:

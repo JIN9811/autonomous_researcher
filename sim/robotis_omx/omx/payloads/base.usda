@@ -290,8 +290,22 @@ def Xform "omx" (
 
     def Scope "Physics"
     {
-        def Material "PhysicsMaterial"
+        def Material "PhysicsMaterial" (
+            prepend apiSchemas = ["PhysicsMaterialAPI"]
+        )
         {
+            float physics:dynamicFriction = 0.45
+            float physics:restitution = 0
+            float physics:staticFriction = 0.6
+        }
+
+        def Material "AntiSlipTapeMaterial" (
+            prepend apiSchemas = ["PhysicsMaterialAPI"]
+        )
+        {
+            float physics:dynamicFriction = 1.8
+            float physics:restitution = 0
+            float physics:staticFriction = 2.4
         }
     }
 

@@ -33,13 +33,12 @@ over "tn__omxscene_h8"
         }
 
         over "link0" (
-            prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI", "PhysicsArticulationRootAPI", "NewtonArticulationRootAPI", "PhysicsFilteredPairsAPI"]
+            prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI", "PhysicsArticulationRootAPI", "NewtonArticulationRootAPI"]
         )
         {
-            bool newton:selfCollisionEnabled = 0
+            bool newton:selfCollisionEnabled = 1
             point3f physics:centerOfMass = (-0.014412508, -0.003149888, 0.019276598)
             float3 physics:diagonalInertia = (0.0003568046, 0.00021941932, 0.000455759)
-            rel physics:filteredPairs = </tn__omxscene_h8/Geometry/link0/link1>
             float physics:mass = 0.22389051
             quatf physics:principalAxes = (1, 0, 0, 0)
 
@@ -80,25 +79,20 @@ over "tn__omxscene_h8"
                             quatf physics:principalAxes = (1, 0, 0, 0)
 
                             over "link5" (
-                                prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI", "PhysicsFilteredPairsAPI"]
+                                prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
                             )
                             {
                                 point3f physics:centerOfMass = (0.028072407, 0.000024135941, 0.013528914)
                                 float3 physics:diagonalInertia = (0.00002369446, 0.000023236924, 0.000007180629)
-                                rel physics:filteredPairs = [
-                                    </tn__omxscene_h8/Geometry/link0/link1/link2/link3/link4/link5/link6>,
-                                    </tn__omxscene_h8/Geometry/link0/link1/link2/link3/link4/link5/link7>,
-                                ]
                                 float physics:mass = 0.043810885
                                 quatf physics:principalAxes = (1, 0, 0, 0)
 
                                 over "link6" (
-                                    prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI", "PhysicsFilteredPairsAPI"]
+                                    prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
                                 )
                                 {
                                     point3f physics:centerOfMass = (0.016164565, 0.0012731032, 0.000272916)
                                     float3 physics:diagonalInertia = (0.0000027083288, 0.000006873373, 0.000004694188)
-                                    rel physics:filteredPairs = </tn__omxscene_h8/Geometry/link0/link1/link2/link3/link4/link5/link7>
                                     float physics:mass = 0.012090677
                                     quatf physics:principalAxes = (1, 0, 0, 0)
 
@@ -117,7 +111,7 @@ over "tn__omxscene_h8"
                                         quatf physics:localRot0 = (1, 0, 0, 0)
                                         quatf physics:localRot1 = (1, 0, 0, 0)
                                         float physics:lowerLimit = 0
-                                        float physics:upperLimit = 99.999985
+                                        float physics:upperLimit = 36
                                     }
                                 }
 
@@ -145,7 +139,7 @@ over "tn__omxscene_h8"
                                         point3f physics:localPos1 = (0, 0, 0)
                                         quatf physics:localRot0 = (1, 0, 0, 0)
                                         quatf physics:localRot1 = (1, 0, 0, 0)
-                                        float physics:lowerLimit = -99.999985
+                                        float physics:lowerLimit = -36
                                         float physics:upperLimit = 0
                                     }
                                 }
@@ -183,8 +177,8 @@ over "tn__omxscene_h8"
                                 point3f physics:localPos1 = (0, 0, 0)
                                 quatf physics:localRot0 = (1, 0, 0, 0)
                                 quatf physics:localRot1 = (1, 0, 0, 0)
-                                float physics:lowerLimit = -99.999985
-                                float physics:upperLimit = 99.999985
+                                float physics:lowerLimit = -180
+                                float physics:upperLimit = 180
                             }
                         }
 
@@ -202,8 +196,8 @@ over "tn__omxscene_h8"
                             point3f physics:localPos1 = (0, 0, 0)
                             quatf physics:localRot0 = (1, 0, 0, 0)
                             quatf physics:localRot1 = (1, 0, 0, 0)
-                            float physics:lowerLimit = -119.99999
-                            float physics:upperLimit = 89.999985
+                            float physics:lowerLimit = -180
+                            float physics:upperLimit = 180
                         }
                     }
 
@@ -221,8 +215,8 @@ over "tn__omxscene_h8"
                         point3f physics:localPos1 = (0, 0, 0)
                         quatf physics:localRot0 = (1, 0, 0, 0)
                         quatf physics:localRot1 = (1, 0, 0, 0)
-                        float physics:lowerLimit = -119.99999
-                        float physics:upperLimit = 89.999985
+                        float physics:lowerLimit = -180
+                        float physics:upperLimit = 180
                     }
                 }
 
@@ -267,7 +261,20 @@ over "tn__omxscene_h8"
         {
             float newton:rollingFriction = 0.0001
             float newton:torsionalFriction = 0.005
-            float physics:dynamicFriction = 1
+            float physics:dynamicFriction = 0.45
+            float physics:restitution = 0
+            float physics:staticFriction = 0.6
+        }
+
+        def Material "AntiSlipTapeMaterial" (
+            prepend apiSchemas = ["PhysicsMaterialAPI", "NewtonMaterialAPI"]
+        )
+        {
+            float newton:rollingFriction = 0.0001
+            float newton:torsionalFriction = 0.005
+            float physics:dynamicFriction = 1.8
+            float physics:restitution = 0
+            float physics:staticFriction = 2.4
         }
     }
 }

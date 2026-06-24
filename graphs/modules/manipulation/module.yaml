@@ -18,6 +18,7 @@ module:
     progress_monitor: sarm_lite
     live_bridge_boundary: LeRobotBridge
     direct_shell_generation_allowed: false
+    requires_camera_return_to_vla: true
   supported_tasks:
   - id: transfer_to_utm
     label: Printed specimen to UTM fixture
@@ -93,7 +94,10 @@ module:
       emits:
       - evidence_refs
   io_contract:
-    input: OrchestratorState with specimen_result, latest Vision observation, and manipulation profile
+    input:
+    - OrchestratorState with specimen_result, latest Vision observation, and manipulation profile
+    - specimen_pose.v1
+    - transfer_readiness.camera_returned_to_vla
     output:
     - manipulation
     - sarm

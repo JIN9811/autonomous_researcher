@@ -79,6 +79,7 @@ from device_bridges.bambu_bridge import (
 )
 from device_bridges.lerobot_bridge import LeRobotBridge, LeRobotBridgeConfig
 from device_bridges.prusa_bridge import PrusaBridgeConfig, PrinterAgenticWorkflow
+from device_bridges.specimen_pose_tracker import SpecimenPoseTrackerBridge, get_specimen_pose_tracker_bridge
 from device_bridges.utm_runtime_bridge import UTMRuntimeProcessManager, get_utm_runtime_manager
 from device_bridges.windows_pyautogui_bridge import (
     WindowsPyAutoGUIBridge,
@@ -139,6 +140,7 @@ _RUNTIME_MODULE_MANAGEMENT_LOADED: set[str] = set()
 _LEROBOT_BRIDGE: LeRobotBridge | None = None
 _LEROBOT_CONFIG_MTIME_NS: int = -1
 _utm_runtime_manager: UTMRuntimeProcessManager | None = None
+_specimen_pose_tracker: SpecimenPoseTrackerBridge | None = None
 
 LIVE_AGENT_DEFINITIONS: list[dict[str, str]] = [
     {"agent_id": "objective", "label": "Objective", "stage": "idle", "module_id": "objective"},
@@ -202,6 +204,8 @@ LIVE_AGENT_REPORT_PROFILES: dict[str, dict[str, object]] = {
         "focus_rows": [
             {"label": "Scene task", "value": "post-ejection, pickup, UTM fixture, or reset observation task with current specimen context"},
             {"label": "Signal board", "value": "pickup_ready, visual_evidence_ready, anomaly_detected, and future equipment cross-check signals with confidence/freshness"},
+            {"label": "D455F snapshot", "value": "one-shot RGB-D pose after auto-ejection, then camera returned to VLA route"},
+            {"label": "VLA gate", "value": "Manipulation starts only when specimen_pose_ready and camera_returned_to_vla are true"},
             {"label": "Evidence", "value": "frame/annotated scene, detection JSON, zone states, and Knowledge memory payload"},
             {"label": "Safety", "value": "Vision observes only; robot/printer/equipment actions remain gated by downstream agents and Guardian"},
         ],
@@ -1562,6 +1566,15 @@ def _utm_runtime_bridge() -> UTMRuntimeProcessManager:
     return _utm_runtime_manager
 
 
+def _specimen_pose_tracker_bridge() -> SpecimenPoseTrackerBridge:
+    """Return the shared one-shot D455F specimen pose tracker bridge."""
+    global _specimen_pose_tracker
+    if _specimen_pose_tracker is None:
+        cfg = load_all_configs(resolve_path("configs"))
+        _specimen_pose_tracker = get_specimen_pose_tracker_bridge(cfg.get("devices", {}), repo_root=resolve_path("."))
+    return _specimen_pose_tracker
+
+
 async def _publish_lerobot_result(result: dict[str, object]) -> dict[str, object]:
     """Broadcast LeRobot tool results into the shared runtime event stream."""
     await controller.emit_lerobot_result(result)
@@ -2424,6 +2437,24 @@ async def get_runtime_bridge_registry() -> dict[str, object]:
 async def get_utm_runtime_status() -> dict[str, object]:
     """Return the managed UTM ROS Vision runtime process status."""
     return _utm_runtime_bridge().status()
+
+
+@app.get("/api/vision/specimen-pose/status")
+async def get_specimen_pose_tracker_status() -> dict[str, object]:
+    """Return D455F one-shot specimen pose tracker lease and last-pose status."""
+    return await asyncio.to_thread(_specimen_pose_tracker_bridge().status)
+
+
+@app.post("/api/vision/specimen-pose/snapshot")
+async def post_specimen_pose_snapshot(payload: dict[str, object]) -> dict[str, object]:
+    """Run one specimen pose snapshot or deterministic test-mode virtual pose."""
+    return await asyncio.to_thread(_specimen_pose_tracker_bridge().snapshot, payload)
+
+
+@app.post("/api/vision/specimen-pose/release")
+async def post_specimen_pose_release(payload: dict[str, object]) -> dict[str, object]:
+    """Return D455F ownership to the VLA route after specimen pose tracking."""
+    return await asyncio.to_thread(_specimen_pose_tracker_bridge().release, payload)
 
 
 @app.post("/api/equipment/utm-runtime/start")

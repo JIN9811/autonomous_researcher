@@ -79,6 +79,25 @@ graph:
       y: 240.0
     metadata:
       icon: manipulation_agent
+  - id: vision_verify
+    label: Vision Verification Agent
+    handler: agent.vision_agent
+    stage: null
+    kind: sidecar
+    description: Verify specimen placement after manipulation using BRIO/UTM camera evidence.
+    module_id: modules/vision
+    position:
+      x: 1456.0
+      y: 240.0
+    metadata:
+      icon: vision_agent
+      runtime_node: sidecar
+      role: post_manipulation_placement_verification
+      consumes:
+      - robot_task_result.v1
+      produces:
+      - placement_verification.v1
+      - vision_signal.v1
   - id: equipment
     label: Lab Equipment Agent
     handler: agent.equipment_agent
@@ -422,10 +441,42 @@ graph:
       runtime_edge: logical_transition
       from_stage: vision
       to_stage: manipulation
-      condition: default
-      transition_condition: default
+      condition: specimen_pose_ready_and_camera_returned_to_vla
+      transition_condition: specimen_pose_ready_and_camera_returned_to_vla
       default_transition: true
       auto_ports: true
+      contracts:
+      - specimen_pose.v1
+      - transfer_readiness.camera_returned_to_vla
+  - source: manipulation
+    target: vision_verify
+    condition: null
+    label: 'default transition: manipulation -> vision verification'
+    metadata:
+      runtime_edge: runtime_sidecar
+      from_stage: manipulation
+      to_stage: vision
+      condition: post_place_verification_required
+      transition_condition: post_place_verification_required
+      default_transition: false
+      auto_ports: true
+      contracts:
+      - robot_task_result.v1
+      - placement_verification.v1
+  - source: vision_verify
+    target: equipment
+    condition: null
+    label: 'default transition: vision verification -> equipment'
+    metadata:
+      runtime_edge: runtime_sidecar
+      from_stage: vision
+      to_stage: equipment
+      condition: placement_verified
+      transition_condition: placement_verified
+      default_transition: false
+      auto_ports: true
+      contracts:
+      - placement_verification.v1
   - source: manipulation
     target: equipment
     condition: null

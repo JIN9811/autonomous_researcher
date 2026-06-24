@@ -410,13 +410,15 @@ def Scope "Instances"
     )
     {
         over "follower_07_gripper_motorized" (
-            apiSchemas = ["PhysicsCollisionAPI", "NewtonCollisionAPI", "MjcCollisionAPI", "PhysicsMeshCollisionAPI", "NewtonMeshCollisionAPI", "PhysicsMassAPI", "MaterialBindingAPI"]
+            apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "NewtonCollisionAPI", "MjcCollisionAPI", "PhysicsMeshCollisionAPI", "NewtonMeshCollisionAPI", "PhysicsMassAPI", "MaterialBindingAPI"]
         )
         {
             custom rel material:binding
             prepend rel material:binding = </Instances/follower_07_gripper_motorized_1/VisualMaterials/black>
             custom rel material:binding:physics
-            prepend rel material:binding:physics = </omx/Physics/PhysicsMaterial>
+            prepend rel material:binding:physics = </omx/Physics/AntiSlipTapeMaterial>
+            float physxCollision:contactOffset = 0.002
+            float physxCollision:restOffset = 0
             int mjc:group = 3
             float newton:contactGap = 0 (
                 limits = {
@@ -470,13 +472,15 @@ def Scope "Instances"
     )
     {
         over "follower_08_gripper_gear" (
-            apiSchemas = ["PhysicsCollisionAPI", "NewtonCollisionAPI", "MjcCollisionAPI", "PhysicsMeshCollisionAPI", "NewtonMeshCollisionAPI", "PhysicsMassAPI", "MaterialBindingAPI"]
+            apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "NewtonCollisionAPI", "MjcCollisionAPI", "PhysicsMeshCollisionAPI", "NewtonMeshCollisionAPI", "PhysicsMassAPI", "MaterialBindingAPI"]
         )
         {
             custom rel material:binding
             prepend rel material:binding = </Instances/follower_08_gripper_gear_1/VisualMaterials/black>
             custom rel material:binding:physics
-            prepend rel material:binding:physics = </omx/Physics/PhysicsMaterial>
+            prepend rel material:binding:physics = </omx/Physics/AntiSlipTapeMaterial>
+            float physxCollision:contactOffset = 0.002
+            float physxCollision:restOffset = 0
             int mjc:group = 3
             float newton:contactGap = 0 (
                 limits = {

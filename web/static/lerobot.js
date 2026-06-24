@@ -2503,7 +2503,7 @@ bind("btn-lerobot-find-ports", async (event) => {
 
 for (const role of ["follower", "leader"]) {
   bind(`btn-port-baseline-${role}`, (event) => runDevicePortAction(`${role} baseline`, "/api/lerobot/ports/baseline", role, { port: "" }, actionStatusFromEvent(event)));
-  bind(`btn-port-detect-${role}`, (event) => runDevicePortAction(`${role} detect/save`, "/api/lerobot/ports/detect", role, { port: "" }, actionStatusFromEvent(event)));
+  bind(`btn-port-detect-${role}`, (event) => runDevicePortAction(`${role} ID detect/save`, "/api/lerobot/ports/detect", role, { port: "" }, actionStatusFromEvent(event)));
 }
 
 bind("btn-add-camera", () => {

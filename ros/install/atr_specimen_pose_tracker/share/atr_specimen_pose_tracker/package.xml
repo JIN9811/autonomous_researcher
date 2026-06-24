@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>atr_specimen_pose_tracker</name>
+  <version>0.1.0</version>
+  <description>ATR one-shot specimen pose tracker for D455F workspace localization.</description>
+  <maintainer email="local@atr.invalid">ATR</maintainer>
+  <license>Proprietary</license>
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>cv_bridge</exec_depend>
+  <exec_depend>python3-opencv</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
+  <export><build_type>ament_python</build_type></export>
+</package>

@@ -573,7 +573,7 @@ Recommended API routes:
 Recommended GUI sections:
 
 - Hardware Profile Selector
-- Hardware Setup / Ports: follower and leader MotorBus ports are identified separately using a baseline/device-change/detect workflow; camera port/index setup is key-based and multi-camera. Default camera keys are `top` and `wrist`, and the GUI must allow adding more camera keys with `+ Camera`.
+- Hardware Setup / Ports: follower and leader MotorBus ports are identified by live Dynamixel ID detection, not by unplug-order alone. Keep both MotorBus boards connected and use ID Detect & Save; camera port/index setup is key-based and multi-camera. Default camera keys are `top` and `wrist`, and the GUI must allow adding more camera keys with `+ Camera`.
 - Teleoperation
 - Recording
 - Dataset / Visualization
@@ -596,7 +596,7 @@ Teleoperation GUI requirements:
 - show robot/teleop type
 - show command preview
 - fake port discovery in test mode
-- persist follower and leader ports per profile after explicit baseline/detect or manual save
+- persist follower and leader ports per profile after ID-verified detect or manual save
 - for the current ROBOTIS OMX-AI installation, treat leader as Dynamixel motor IDs `1-6` and follower as IDs `11-16`; if a saved port mapping contradicts that, Teleop must fail visibly rather than silently swapping roles
 - persist cameras per profile under `devices.cameras.<camera_key>` so `top`, `wrist`, and additional cameras can be configured independently
 - prefer stable device identity links when persisting live devices: `/dev/serial/by-id/*` for leader/follower and `/dev/v4l/by-id/*` or `/dev/v4l/by-path/*` for OpenCV cameras; retain the original dynamic value as `raw_port` and store `device_id` / `device_link` for later lookup

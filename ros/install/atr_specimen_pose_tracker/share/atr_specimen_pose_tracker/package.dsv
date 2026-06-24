@@ -1,0 +1,12 @@
+source;share/atr_specimen_pose_tracker/hook/path.ps1
+source;share/atr_specimen_pose_tracker/hook/path.dsv
+source;share/atr_specimen_pose_tracker/hook/path.sh
+source;share/atr_specimen_pose_tracker/hook/pythonpath.ps1
+source;share/atr_specimen_pose_tracker/hook/pythonpath.dsv
+source;share/atr_specimen_pose_tracker/hook/pythonpath.sh
+source;share/atr_specimen_pose_tracker/hook/pythonscriptspath.ps1
+source;share/atr_specimen_pose_tracker/hook/pythonscriptspath.dsv
+source;share/atr_specimen_pose_tracker/hook/pythonscriptspath.sh
+source;share/atr_specimen_pose_tracker/hook/ament_prefix_path.ps1
+source;share/atr_specimen_pose_tracker/hook/ament_prefix_path.dsv
+source;share/atr_specimen_pose_tracker/hook/ament_prefix_path.sh

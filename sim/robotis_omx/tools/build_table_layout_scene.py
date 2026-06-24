@@ -4,6 +4,11 @@ from pathlib import Path
 from PIL import Image, ImageDraw
 from pxr import Gf, Sdf, Usd, UsdGeom, UsdLux, UsdPhysics, UsdShade, Vt
 
+try:
+    from pxr import PhysxSchema
+except Exception:
+    PhysxSchema = None
+
 ROOT = Path('/home/jin/autonomous_researcher/sim/robotis_omx')
 OUT = ROOT / 'scene' / 'omx_table_layout.usda'
 ROBOT_USD = ROOT / 'omx' / 'omx.usda'
@@ -84,6 +89,13 @@ def bind(prim, material):
     UsdShade.MaterialBindingAPI(prim).Bind(material)
 
 
+def bind_physics(prim, material):
+    rel = prim.GetRelationship('material:binding:physics')
+    if not rel:
+        rel = prim.CreateRelationship('material:binding:physics')
+    rel.SetTargets([material.GetPrim().GetPath()])
+
+
 def _set_attr(prim, name, type_name, value):
     attr = prim.GetAttribute(name)
     if not attr:
@@ -92,17 +104,76 @@ def _set_attr(prim, name, type_name, value):
     return attr
 
 
-def apply_static_collider(geom_prim, *, approximation='box'):
+def _apply_physx_api(prim, api_name):
+    if PhysxSchema is None:
+        return
+    try:
+        getattr(PhysxSchema, api_name).Apply(prim)
+    except Exception:
+        pass
+
+
+def apply_physx_contact_tuning(
+    prim,
+    *,
+    contact_offset=None,
+    rest_offset=None,
+    enable_ccd=False,
+    max_depenetration_velocity=None,
+):
+    if contact_offset is not None or rest_offset is not None:
+        _apply_physx_api(prim, 'PhysxCollisionAPI')
+    if enable_ccd or max_depenetration_velocity is not None:
+        _apply_physx_api(prim, 'PhysxRigidBodyAPI')
+    if contact_offset is not None:
+        _set_attr(prim, 'physxCollision:contactOffset', Sdf.ValueTypeNames.Float, float(contact_offset))
+    if rest_offset is not None:
+        _set_attr(prim, 'physxCollision:restOffset', Sdf.ValueTypeNames.Float, float(rest_offset))
+    if enable_ccd:
+        _set_attr(prim, 'physxRigidBody:enableCCD', Sdf.ValueTypeNames.Bool, True)
+    if max_depenetration_velocity is not None:
+        _set_attr(
+            prim,
+            'physxRigidBody:maxDepenetrationVelocity',
+            Sdf.ValueTypeNames.Float,
+            float(max_depenetration_velocity),
+        )
+
+
+def make_physics_material(stage, path, *, static_friction, dynamic_friction, restitution=0.0):
+    mat = UsdShade.Material.Define(stage, path)
+    prim = mat.GetPrim()
+    UsdPhysics.MaterialAPI.Apply(prim)
+    _set_attr(prim, 'physics:staticFriction', Sdf.ValueTypeNames.Float, float(static_friction))
+    _set_attr(prim, 'physics:dynamicFriction', Sdf.ValueTypeNames.Float, float(dynamic_friction))
+    _set_attr(prim, 'physics:restitution', Sdf.ValueTypeNames.Float, float(restitution))
+    return mat
+
+
+def apply_static_collider(geom_prim, *, approximation='box', physics_material=None, contact_offset=None, rest_offset=None):
     """Give fixed workspace geometry a lightweight physics collision contract."""
     prim = geom_prim.GetPrim()
     UsdPhysics.CollisionAPI.Apply(prim)
     _set_attr(prim, 'physics:collisionEnabled', Sdf.ValueTypeNames.Bool, True)
     if approximation:
         _set_attr(prim, 'physics:approximation', Sdf.ValueTypeNames.Token, approximation)
+    apply_physx_contact_tuning(prim, contact_offset=contact_offset, rest_offset=rest_offset)
+    if physics_material is not None:
+        bind_physics(prim, physics_material)
     return geom_prim
 
 
-def apply_dynamic_rigid_body(geom_prim, *, mass_kg, approximation='box'):
+def apply_dynamic_rigid_body(
+    geom_prim,
+    *,
+    mass_kg,
+    approximation='box',
+    physics_material=None,
+    contact_offset=None,
+    rest_offset=None,
+    enable_ccd=False,
+    max_depenetration_velocity=None,
+):
     """Make a movable object participate in Isaac physics without mesh-heavy collision."""
     prim = geom_prim.GetPrim()
     UsdPhysics.CollisionAPI.Apply(prim)
@@ -113,6 +184,15 @@ def apply_dynamic_rigid_body(geom_prim, *, mass_kg, approximation='box'):
     _set_attr(prim, 'physics:mass', Sdf.ValueTypeNames.Float, float(mass_kg))
     if approximation:
         _set_attr(prim, 'physics:approximation', Sdf.ValueTypeNames.Token, approximation)
+    apply_physx_contact_tuning(
+        prim,
+        contact_offset=contact_offset,
+        rest_offset=rest_offset,
+        enable_ccd=enable_ccd,
+        max_depenetration_velocity=max_depenetration_velocity,
+    )
+    if physics_material is not None:
+        bind_physics(prim, physics_material)
     return geom_prim
 
 
@@ -195,7 +275,13 @@ def main():
     physics_scene = UsdPhysics.Scene.Define(stage, '/World/PhysicsScene')
     physics_scene.CreateGravityDirectionAttr(Gf.Vec3f(0.0, 0.0, -1.0))
     physics_scene.CreateGravityMagnitudeAttr(9.81)
-    _set_attr(physics_scene.GetPrim(), 'physxScene:timeStepsPerSecond', Sdf.ValueTypeNames.Int, 60)
+    physics_scene_prim = physics_scene.GetPrim()
+    _set_attr(physics_scene_prim, 'physxScene:enableCCD', Sdf.ValueTypeNames.Bool, True)
+    _set_attr(physics_scene_prim, 'physxScene:enableStabilization', Sdf.ValueTypeNames.Bool, True)
+    _set_attr(physics_scene_prim, 'physxScene:frictionCorrelationDistance', Sdf.ValueTypeNames.Float, 0.005)
+    _set_attr(physics_scene_prim, 'physxScene:frictionOffsetThreshold', Sdf.ValueTypeNames.Float, 0.002)
+    _set_attr(physics_scene_prim, 'physxScene:solverType', Sdf.ValueTypeNames.Token, 'TGS')
+    _set_attr(physics_scene_prim, 'physxScene:timeStepsPerSecond', Sdf.ValueTypeNames.Int, 240)
 
     # Materials tuned from the supplied photo: redwood-like laminate desk, matte paper, black robot/disk.
     desk_mat = make_material(stage, '/World/Materials/desk_redwood_laminate', (0.42, 0.095, 0.040), 0.60)
@@ -211,6 +297,24 @@ def main():
     disk_mat = make_material(stage, '/World/Materials/aluminum_disk', (0.72, 0.69, 0.62), 0.35, 0.15)
     black_mat = make_material(stage, '/World/Materials/dark_base', (0.02, 0.02, 0.018), 0.65)
     cube_mat = make_material(stage, '/World/Materials/red_test_cube', (0.86, 0.05, 0.04), 0.55)
+    wood_physics_mat = make_physics_material(
+        stage,
+        '/World/Materials/wood_laminate_contact_physics',
+        static_friction=0.45,
+        dynamic_friction=0.35,
+    )
+    paper_physics_mat = make_physics_material(
+        stage,
+        '/World/Materials/paper_contact_physics',
+        static_friction=0.75,
+        dynamic_friction=0.55,
+    )
+    pla_physics_mat = make_physics_material(
+        stage,
+        '/World/Materials/pla_specimen_contact_physics',
+        static_friction=0.5,
+        dynamic_friction=0.35,
+    )
 
     # Coordinate convention: X left->right, Y front->back, Z up. Origin is front-left table-top corner.
     # Desk outer boundary follows the provided top-view drawing: 700 x 450 mm.
@@ -218,7 +322,10 @@ def main():
     table_d = 0.450
     table_th = 0.030
     table_center = (table_w / 2.0, table_d / 2.0, -table_th / 2.0)
-    apply_static_collider(cube(stage, '/World/Table/TableTop', table_center, (table_w, table_d, table_th), desk_mat))
+    apply_static_collider(
+        cube(stage, '/World/Table/TableTop', table_center, (table_w, table_d, table_th), desk_mat),
+        physics_material=wood_physics_mat,
+    )
     textured_rect_mesh(stage, '/World/Table/TableTopRedwoodGrainSurface', 0.0, table_w, 0.0, table_d, 0.00003, desk_texture_mat)
 
     # Robot base slot from drawing: 150 x 120 mm, front-left at x=240 mm, y=0.
@@ -238,7 +345,10 @@ def main():
             (a4_center_x, a4_bottom_y + a4_h / 2, paper_th / 2.0),
             (a4_w, a4_h, paper_th),
             paper_mat,
-        )
+        ),
+        physics_material=paper_physics_mat,
+        contact_offset=0.003,
+        rest_offset=0.0,
     )
 
     # Blue corner markers visible in the photo.
@@ -283,6 +393,11 @@ def main():
             cube_mat,
         ),
         mass_kg=0.02,
+        physics_material=pla_physics_mat,
+        contact_offset=0.004,
+        rest_offset=0.0,
+        enable_ccd=True,
+        max_depenetration_velocity=0.5,
     )
 
     # Lighting only; no fixed camera requested.

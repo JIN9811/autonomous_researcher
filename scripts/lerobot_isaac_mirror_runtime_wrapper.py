@@ -37,6 +37,21 @@ def _env_float(name: str, default: float, *, minimum: float = 0.0) -> float:
     return max(minimum, value)
 
 
+def _mirror_source_from_env() -> str:
+    raw = os.getenv("ATR_ISAAC_MIRROR_SOURCE", "follower_present_position").strip().lower().replace("-", "_")
+    aliases = {
+        "present": "follower_present_position",
+        "present_position": "follower_present_position",
+        "follower_present": "follower_present_position",
+        "follower_present_position": "follower_present_position",
+        "sent": "sent_action",
+        "sent_action": "sent_action",
+        "goal": "sent_action",
+        "goal_position": "sent_action",
+    }
+    return aliases.get(raw, "follower_present_position")
+
+
 class IsaacMirrorPublisher:
     def __init__(self) -> None:
         self.enabled = os.getenv("ATR_ISAAC_MIRROR_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"}
@@ -44,6 +59,7 @@ class IsaacMirrorPublisher:
         self.timeout_s = _env_float("ATR_ISAAC_MIRROR_TIMEOUT_S", 0.5, minimum=0.05)
         self.sample_hz = _env_float("ATR_ISAAC_MIRROR_SAMPLE_HZ", 15.0, minimum=0.1)
         self.period_s = 1.0 / self.sample_hz
+        self.source = _mirror_source_from_env()
         self.session_id = os.getenv("ATR_ISAAC_MIRROR_SESSION_ID", "").strip()
         self.attached_to_session_id = os.getenv("ATR_ISAAC_MIRROR_ATTACHED_TO_SESSION_ID", "").strip()
         self.profile_id = os.getenv("ATR_ISAAC_MIRROR_PROFILE_ID", "").strip()
@@ -53,16 +69,34 @@ class IsaacMirrorPublisher:
         self._last_post_monotonic = 0.0
         self._sample_count = 0
 
-    def maybe_publish(self, sent_action: dict[str, Any]) -> None:
+    def should_publish(self) -> bool:
         if not self.enabled:
-            return
+            return False
         now = time.monotonic()
         if self._last_post_monotonic and now - self._last_post_monotonic < self.period_s:
+            return False
+        return True
+
+    def action_from_follower(self, follower: Any, sent_action: dict[str, Any]) -> tuple[dict[str, Any], str, str]:
+        if self.source != "follower_present_position":
+            return sent_action, "in_process_send_action", ""
+        try:
+            present_pos = follower.bus.sync_read("Present_Position")
+        except Exception as exc:
+            return sent_action, "in_process_send_action_fallback", f"{exc.__class__.__name__}: {exc}"
+        action = {key if str(key).endswith(".pos") else f"{key}.pos": value for key, value in present_pos.items()}
+        return action, "in_process_follower_present_position", ""
+
+    def maybe_publish(self, sent_action: dict[str, Any], *, source: str = "in_process_send_action", source_error: str = "") -> None:
+        if not self.should_publish():
             return
-        joint_state = action_to_joint_state(sent_action, calibration=self.calibration)
+        self.publish_action(sent_action, source=source, source_error=source_error)
+
+    def publish_action(self, action: dict[str, Any], *, source: str, source_error: str = "") -> None:
+        joint_state = action_to_joint_state(action, calibration=self.calibration)
         if not joint_state:
             return
-        self._last_post_monotonic = now
+        self._last_post_monotonic = time.monotonic()
         self._sample_count += 1
         timestamp = datetime.now(timezone.utc).isoformat()
         payload = {
@@ -75,23 +109,26 @@ class IsaacMirrorPublisher:
             "profile_id": self.profile_id,
             "scene_path": "",
             "articulation_root": "/World/Robot/Geometry/link0",
-            "follower_port": "in_process_lerobot_send_action",
+            "follower_port": source,
             "calibration": self.calibration,
             "joint_state": joint_state,
         }
         post_started = time.monotonic()
         post_result = self._post(payload)
+        sync_metrics = {
+            "target_sample_hz": self.sample_hz,
+            "sample_period_s": self.period_s,
+            "sample_index": self._sample_count,
+            "post_latency_ms": round((time.monotonic() - post_started) * 1000.0, 3),
+            "receiver_accepted": bool(post_result.get("ok")),
+            "receiver_status_code": post_result.get("status_code"),
+            "source": source,
+        }
+        if source_error:
+            sync_metrics["source_error"] = source_error
         record = {
             **payload,
-            "sync_metrics": {
-                "target_sample_hz": self.sample_hz,
-                "sample_period_s": self.period_s,
-                "sample_index": self._sample_count,
-                "post_latency_ms": round((time.monotonic() - post_started) * 1000.0, 3),
-                "receiver_accepted": bool(post_result.get("ok")),
-                "receiver_status_code": post_result.get("status_code"),
-                "source": "in_process_send_action",
-            },
+            "sync_metrics": sync_metrics,
             "isaac_post": post_result,
         }
         if self.record_path:
@@ -120,7 +157,9 @@ def patch_omx_send_action(publisher: IsaacMirrorPublisher) -> None:
 
     def mirrored_send_action(self, action):  # type: ignore[no-untyped-def]
         sent_action = original_send_action(self, action)
-        publisher.maybe_publish(sent_action)
+        if publisher.should_publish():
+            mirror_action, source, source_error = publisher.action_from_follower(self, sent_action)
+            publisher.publish_action(mirror_action, source=source, source_error=source_error)
         return sent_action
 
     OmxFollower.send_action = mirrored_send_action

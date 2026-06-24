@@ -456,3 +456,21 @@ accepted profile: 640x480, 15 fps, yuyv2rgb, exposure_dynamic_framerate=0 before
 verified route: /api/equipment/utm-runtime/frame-stream.mjpeg?topic=/image_utm&fps=15
 result: 457 frames / 30.1 s
 ```
+
+## D455F Specimen Pose Tracker Separation
+
+The UTM/BRIO bridge remains the inspection and placement-verification camera path. D455F specimen pose tracking is a separate one-shot ROS runtime used before manipulation.
+
+The D455F tracker does not reuse `/image_utm` and does not keep a shared ROS topic open for VLA. It captures one RGB-D pose, stops ROS, confirms release, and returns the camera to VLA.
+
+Runtime boundary:
+
+```text
+VLA route owns D455F by default
+-> VisionAgent requests vision.specimen_pose_snapshot
+-> D455F one-shot tracker writes specimen_pose.v1 evidence
+-> vision.specimen_pose.release returns ownership to VLA
+-> ManipulationAgent starts only if camera_returned_to_vla and vla_camera_precheck_ok are true
+```
+
+The post-manipulation placement check still uses the BRIO/UTM runtime path and its RQT-like graph evidence.

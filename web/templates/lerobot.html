@@ -131,7 +131,7 @@ Modification guide:
           <span class="hint">follower, leader, and multiple cameras are remembered per profile</span>
         </summary>
         <p class="subhead">
-          For follower/leader MotorBus setup: save a baseline, disconnect or reconnect one target arm, then detect and save the changed port. Camera setup is key-based; defaults are top and wrist, and more cameras can be added. RealSense SDK mode records RGB + depth channels; D455F top / D405 wrist is the current default physical mapping.
+          For follower/leader MotorBus setup: keep both arms connected and use ID Detect & Save. The bridge saves leader from Dynamixel IDs 1-6 and follower from IDs 11-16. Camera setup is key-based; defaults are top and wrist, and more cameras can be added. RealSense SDK mode records RGB + depth channels; D455F top / D405 wrist is the current default physical mapping.
         </p>
         <div class="lerobot-device-grid">
           <article class="lerobot-device-card">
@@ -139,7 +139,7 @@ Modification guide:
             <code id="lerobot-follower-port-display">not saved</code>
             <div class="button-row compact">
               <button id="btn-port-baseline-follower" class="btn mini">Baseline</button>
-              <button id="btn-port-detect-follower" class="btn mini primary">Detect & Save</button>
+              <button id="btn-port-detect-follower" class="btn mini primary">ID Detect & Save</button>
             </div>
             <div id="lerobot-follower-action-status" class="lerobot-action-status idle">Waiting for follower action.</div>
           </article>
@@ -148,7 +148,7 @@ Modification guide:
             <code id="lerobot-leader-port-display">not saved</code>
             <div class="button-row compact">
               <button id="btn-port-baseline-leader" class="btn mini">Baseline</button>
-              <button id="btn-port-detect-leader" class="btn mini primary">Detect & Save</button>
+              <button id="btn-port-detect-leader" class="btn mini primary">ID Detect & Save</button>
             </div>
             <div id="lerobot-leader-action-status" class="lerobot-action-status idle">Waiting for leader action.</div>
           </article>

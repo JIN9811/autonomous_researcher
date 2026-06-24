@@ -153,6 +153,83 @@ def scenario_live_planning_render(audit: WebDriverAudit, base_url: str, out_dir:
     return rendered
 
 
+def scenario_vision_pose_gate_render(audit: WebDriverAudit, base_url: str, out_dir: Path) -> dict[str, Any]:
+    audit.open(f"{base_url.rstrip('/')}/live", wait_s=2.0)
+    rendered = audit.js(
+        """
+        try {
+          if (typeof renderVisionDashboardCards !== 'function') {
+            return {ok: false, error: 'renderVisionDashboardCards is not available'};
+          }
+          const report = {
+            state: {
+              run_id: 'run-vision-pose-audit',
+              run_metadata: {
+                vision_agent_report: {
+                  specimen_pose: {
+                    schema: 'specimen_pose.v1',
+                    specimen_id: 'specimen-audit',
+                    workspace: 'a4_robot_workspace',
+                    port_released: true,
+                    vla_camera_precheck_ok: true,
+                    confidence: 0.93,
+                    position_robot_base_mm: {x: 11, y: 22, z: 33},
+                  },
+                  transfer_readiness: {
+                    ready: true,
+                    camera_returned_to_vla: true,
+                    vla_camera_precheck_ok: true,
+                  },
+                },
+                vision_report: {
+                  specimen_pose: {
+                    schema: 'specimen_pose.v1',
+                    confidence: 0.93,
+                    port_released: true,
+                    vla_camera_precheck_ok: true,
+                    position_robot_base_mm: {x: 11, y: 22, z: 33},
+                  },
+                  transfer_readiness: {
+                    ready: true,
+                    camera_returned_to_vla: true,
+                    vla_camera_precheck_ok: true,
+                  },
+                },
+              },
+            },
+          };
+          const host = document.createElement('div');
+          host.id = 'vision-pose-gate-audit-host';
+          host.innerHTML = renderVisionDashboardCards(report, 'ready', 'Vision Agent', {});
+          document.body.appendChild(host);
+          const cards = Array.from(host.querySelectorAll('.ar-report-card'));
+          const card = cards.find((item) => (item.textContent || '').includes('D455F Pose / VLA Return'));
+          const text = card ? (card.textContent || '') : '';
+          return {
+            ok: Boolean(card),
+            cardCount: cards.length,
+            hasGrid: Boolean(card && card.querySelector('.vision-pose-gate-grid')),
+            text,
+            hasReturned: text.includes('returned'),
+            hasReady: text.includes('ready'),
+            hasConfidence: text.includes('0.93'),
+            hasRobotBase: text.includes('x 11') && text.includes('y 22'),
+          };
+        } catch (err) {
+          return {ok: false, error: String(err && err.message ? err.message : err)};
+        }
+        """,
+        [],
+    )
+    if not rendered.get("ok"):
+        raise AssertionError(rendered.get("error") or f"D455F Vision card did not render: {rendered}")
+    for key in ("hasGrid", "hasReturned", "hasReady", "hasConfidence", "hasRobotBase"):
+        if not rendered.get(key):
+            raise AssertionError(f"D455F Vision card missing {key}: {rendered}")
+    audit.screenshot(out_dir / "planning_browser_audit_vision_pose_gate.png")
+    return rendered
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url", default="http://127.0.0.1:7860")
@@ -166,8 +243,10 @@ def main() -> int:
     try:
         audit.start()
         result = scenario_live_planning_render(audit, args.base_url, Path(args.out_dir))
+        vision_result = scenario_vision_pose_gate_render(audit, args.base_url, Path(args.out_dir))
         print("planning_browser_audit: PASS")
         print({k: v for k, v in result.items() if k != "text"})
+        print({k: v for k, v in vision_result.items() if k != "text"})
         return 0
     finally:
         time.sleep(0.1)

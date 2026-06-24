@@ -215,3 +215,40 @@ async def test_manipulation_agent_blocks_expired_vision_signal(tmp_path: Path, m
     assert result.data["sarm"]["stage_name"] == "vision_signal_gate"
     assert result.data["manipulation_report"]["preflight"]["status"] == "fail"
     assert result.data["robot_task_result"]["handoff_status"] == "blocked"
+
+
+@pytest.mark.asyncio
+async def test_manipulation_agent_blocks_when_d455f_not_returned(tmp_path: Path, monkeypatch: Any) -> None:
+    _isolate_manipulation_profile(tmp_path, monkeypatch)
+    state = _post_specimen_state()
+    state.latest_observations["transfer_readiness"]["camera_returned_to_vla"] = False
+    state.latest_observations["transfer_readiness"]["vla_camera_precheck_ok"] = False
+    ctx = _CtxStub(_tools(tmp_path))
+
+    result = await ManipulationAgent().run(state, ctx)
+
+    assert result.success is False
+    assert result.data["manipulation"]["failure_code"] == "MANIPULATION_PREFLIGHT_BLOCKED"
+    assert "d455f_not_returned_to_vla" in result.data["manipulation"]["preflight"]["blocking_reasons"]
+    assert result.data["robot_task_result"]["handoff_status"] == "blocked"
+
+
+@pytest.mark.asyncio
+async def test_manipulation_agent_passes_pickup_pose_to_rollout(tmp_path: Path, monkeypatch: Any) -> None:
+    _isolate_manipulation_profile(tmp_path, monkeypatch)
+    state = _post_specimen_state()
+    state.latest_observations["transfer_readiness"]["camera_returned_to_vla"] = True
+    state.latest_observations["transfer_readiness"]["vla_camera_precheck_ok"] = True
+    state.latest_observations["pose_estimate"] = {"x_mm": 11.0, "y_mm": 22.0, "z_mm": 33.0, "yaw_deg": 7.5, "confidence": 0.93}
+    state.latest_observations["pickup_target"] = {"source_location": "a4_robot_workspace", "target_location": "utm_fixture"}
+    ctx = _CtxStub(_tools(tmp_path))
+
+    result = await ManipulationAgent().run(state, ctx)
+
+    assert result.success is True
+    assert result.data["manipulation"]["observation"]["pose_estimate"]["x_mm"] == 11.0
+    assert result.data["manipulation"]["pickup_pose"]["yaw_deg"] == 7.5
+    assert result.data["manipulation"]["pickup_target"]["source_location"] == "a4_robot_workspace"
+    assert result.data["manipulation_report"]["vision_context"]["pose_estimate"]["yaw_deg"] == 7.5
+    assert result.data["manipulation_report"]["task"]["source_location"] == "a4_robot_workspace"
+    assert result.data["robot_task_result"]["pickup_pose"]["x_mm"] == 11.0

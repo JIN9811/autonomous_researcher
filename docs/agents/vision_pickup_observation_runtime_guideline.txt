@@ -235,3 +235,23 @@ Live GUI chat message contract:
 - The structured message payload should carry `signal_id`, `zone_id`,
   `confidence`, `stability_ms`, `vision_report`, `vision_signal`, and
   `agent_signals` so the Live GUI chat and report view stay consistent.
+
+## 2026-06-24 D455F One-Shot Specimen Pose Update
+
+After 3DP auto-ejection, the ejection output location for manipulation is the A4 robot workspace. VisionAgent requests a one-shot D455F RGB-D pose snapshot through `vision.specimen_pose_snapshot` before ManipulationAgent starts VLA inference.
+
+The D455F is not shared between ROS and VLA. The camera is borrowed from the VLA route, used by ROS for one snapshot, then returned before ManipulationAgent may start inference.
+
+Required readiness fields:
+
+```json
+{
+  "specimen_pose_ready": true,
+  "camera_returned_to_vla": true,
+  "vla_camera_precheck_ok": true
+}
+```
+
+Live mode blocks ManipulationAgent if the D455F is not returned to the VLA route. Test mode may use a deterministic virtual `specimen_pose.v1`, but the returned payload must include a fallback trace so it is never mistaken for physical camera evidence.
+
+Current physical caveat: the D455F must enumerate as a USB3 RealSense device before live snapshot validation. If the D455F is unavailable, the bridge/API/agent/GUI path can be tested up to the live camera boundary only.

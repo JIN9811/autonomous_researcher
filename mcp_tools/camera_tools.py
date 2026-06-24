@@ -286,6 +286,7 @@ def register_camera_tools(
     *,
     utm_state_observer: Callable[..., dict[str, Any]] | None = None,
     utm_runtime_manager: Any | None = None,
+    specimen_pose_tracker: Any | None = None,
 ) -> None:
     """Register camera capture and equipment cross-check tools."""
     registry.register(
@@ -303,6 +304,28 @@ def register_camera_tools(
             "confidence": 0.86,
             "pose_confidence": 0.86,
             "anomaly": False,
+        },
+    )
+    registry.register(
+        "vision.specimen_pose_snapshot",
+        lambda payload: specimen_pose_tracker.snapshot(payload if isinstance(payload, dict) else {})
+        if specimen_pose_tracker is not None
+        else {
+            "ok": False,
+            "tool": "vision.specimen_pose_snapshot",
+            "failure_code": "SPECIMEN_POSE_TRACKER_NOT_CONFIGURED",
+            "message": "Specimen pose tracker bridge is not configured.",
+        },
+    )
+    registry.register(
+        "vision.specimen_pose.release",
+        lambda payload: specimen_pose_tracker.release(payload if isinstance(payload, dict) else {})
+        if specimen_pose_tracker is not None
+        else {
+            "ok": False,
+            "tool": "vision.specimen_pose.release",
+            "failure_code": "SPECIMEN_POSE_TRACKER_NOT_CONFIGURED",
+            "message": "Specimen pose tracker bridge is not configured.",
         },
     )
     registry.register(

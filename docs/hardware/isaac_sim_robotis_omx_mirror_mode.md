@@ -467,8 +467,7 @@ Managed GUI launch uses the extension by default:
   --/exts/atr.omx.mirror/useCurrentStage=true \
   --/exts/atr.omx.mirror/openSceneOnStartup=true \
   --/exts/atr.omx.mirror/playTimelineOnStartup=true \
-  --/exts/atr.omx.mirror/playTimelineDelayTicks=300 \
-  /home/jin/autonomous_researcher/sim/robotis_omx/scene/omx_table_layout.usda
+  --/exts/atr.omx.mirror/playTimelineDelayTicks=300
 ```
 
 Direct `python.sh sim/robotis_omx/tools/isaac_omx_mirror_server.py` remains

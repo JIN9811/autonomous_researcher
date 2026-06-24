@@ -227,6 +227,90 @@ class VisionAgent(BaseAgent):
             enriched["synthetic_frame"] = capture_result.get("synthetic")
         return enriched
 
+    def _should_request_specimen_pose_snapshot(self, state: OrchestratorState) -> bool:
+        specimen = self._specimen_result(state)
+        if not specimen or specimen.get("ok") is False:
+            return False
+        fabricated = state.run_metadata.get("specimen_fabricated") if isinstance(state.run_metadata, dict) else {}
+        handoff = state.run_metadata.get("specimen_handoff_packet") if isinstance(state.run_metadata, dict) else {}
+        for packet in (fabricated, handoff):
+            if isinstance(packet, dict) and packet.get("schema") == "specimen_fabricated.v1":
+                if str(packet.get("status") or "").strip().lower() in {"ready", "ok", "completed"}:
+                    return True
+        report = self._fabrication_report(state, specimen)
+        intent = report.get("fabrication_intent") if isinstance(report.get("fabrication_intent"), dict) else {}
+        printer_path = str(intent.get("printer_path") or "").strip().lower()
+        if printer_path in {"virtual_bridge", "live", "installed_printer", "actual_print", "bambulab_x2d"}:
+            return True
+        outcome = report.get("fabrication_outcome") if isinstance(report.get("fabrication_outcome"), dict) else {}
+        location = str(outcome.get("location") or "").strip().lower()
+        return location in {"a4_workspace", "robot_workspace", "ejection_basket", "3dp_output_area", ""}
+
+    def _specimen_pose_snapshot(self, state: OrchestratorState, ctx: AgentContext, frame_id: str) -> dict[str, Any]:
+        if "vision.specimen_pose_snapshot" not in set(ctx.tools.list_tools()):
+            return {}
+        if not self._should_request_specimen_pose_snapshot(state):
+            return {}
+        specimen = self._specimen_result(state)
+        payload = {
+            "mode": state.mode.value,
+            "runtime_mode": state.mode.value,
+            "run_id": state.run_id,
+            "experiment_id": state.experiment_id,
+            "frame_id": frame_id,
+            "specimen_id": specimen.get("specimen_id", ""),
+            "output_dir": str(self._artifact_dir(state, f"pose-{frame_id}")),
+        }
+        try:
+            return ctx.tools.call("vision.specimen_pose_snapshot", payload)
+        except Exception as exc:
+            if state.mode == Mode.TEST:
+                return {"ok": False, "failure_code": exc.__class__.__name__, "message": str(exc), "tool": "vision.specimen_pose_snapshot"}
+            raise
+
+    def _merge_specimen_pose_capture(self, capture: dict[str, Any], pose_result: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(pose_result, dict) or not pose_result:
+            return capture
+        merged = dict(capture)
+        merged["specimen_pose_result"] = pose_result
+        pose = pose_result.get("pose") if isinstance(pose_result.get("pose"), dict) else {}
+        if not pose_result.get("ok") or not pose:
+            merged["pose_snapshot_failure_code"] = pose_result.get("failure_code", "SPECIMEN_POSE_FAILED")
+            return merged
+        position = pose.get("position_robot_base_mm") if isinstance(pose.get("position_robot_base_mm"), dict) else {}
+        orientation = pose.get("orientation_deg") if isinstance(pose.get("orientation_deg"), dict) else {}
+        camera_returned = bool(pose.get("port_released") and pose.get("camera_owner_after") == "vla_runtime")
+        merged.update(
+            {
+                "x_mm": position.get("x", 0.0),
+                "y_mm": position.get("y", 0.0),
+                "z_mm": position.get("z", 0.0),
+                "yaw_deg": orientation.get("yaw", 0.0),
+                "pose_confidence": pose.get("confidence", merged.get("confidence", 0.0)),
+                "confidence": pose.get("confidence", merged.get("confidence", 0.0)),
+                "camera_returned_to_vla": camera_returned,
+                "vla_camera_precheck_ok": bool(pose.get("vla_camera_precheck_ok")),
+                "specimen_pose": pose,
+                "source": "d455f_ros_snapshot",
+                "detector": "atr_specimen_pose_tracker",
+                "pose_backend": "d455f_rgbd_one_shot",
+            }
+        )
+        merged.setdefault(
+            "detections",
+            [
+                {
+                    "label": "printed_specimen",
+                    "zone": "a4_workspace",
+                    "specimen_id": pose.get("specimen_id", ""),
+                    "bbox_xyxy": pose.get("bbox_xyxy", []),
+                    "confidence": pose.get("confidence", 0.0),
+                    "source": "d455f_ros_snapshot",
+                }
+            ],
+        )
+        return merged
+
     def _events(
         self,
         *,
@@ -779,6 +863,8 @@ class VisionAgent(BaseAgent):
             "loop_index": state.loop_count + 1,
             "created_at": self.now_iso(),
             "producer_agent": self.name,
+            "specimen_pose": observation.get("specimen_pose", {}),
+            "transfer_readiness": observation.get("transfer_readiness", {}),
             "camera_health": {
                 "camera_key": camera.get("camera_key"),
                 "source": camera.get("source"),
@@ -881,6 +967,11 @@ class VisionAgent(BaseAgent):
         stable_for_ms = self._as_int(capture.get("stable_for_ms"), 1200 if capture_ok and specimen_ready and not anomaly else 0)
         task = self._resolve_task(state, capture)
         ready = bool(capture_ok and specimen_ready and not anomaly and pose_confidence >= 0.6)
+        pose_payload = capture.get("specimen_pose") if isinstance(capture.get("specimen_pose"), dict) else {}
+        camera_returned_to_vla = bool(capture.get("camera_returned_to_vla", True if not pose_payload else False))
+        vla_camera_precheck_ok = bool(capture.get("vla_camera_precheck_ok", True if not pose_payload else False))
+        if pose_payload and not camera_returned_to_vla:
+            ready = False
         zones = self._zone_state(capture=capture, specimen_ready=specimen_ready, capture_ok=capture_ok, anomaly=anomaly, confidence=pose_confidence)
         detections = self._detections(capture=capture, specimen=specimen, specimen_ready=specimen_ready, capture_ok=capture_ok, anomaly=anomaly, confidence=pose_confidence)
         events = self._events(capture=capture, capture_ok=capture_ok, specimen_ready=specimen_ready, anomaly=anomaly, confidence=pose_confidence, frame_id=frame_id)
@@ -900,6 +991,9 @@ class VisionAgent(BaseAgent):
         source_location = "3dp_output_area"
         fabrication_outcome = fabrication_report.get("fabrication_outcome") if isinstance(fabrication_report.get("fabrication_outcome"), dict) else {}
         physical_location = str(fabrication_outcome.get("location") or "ejection_basket")
+        if pose_payload:
+            source_location = str(pose_payload.get("workspace") or physical_location or "a4_workspace")
+            physical_location = source_location
         pose = {
             "x_mm": self._as_float(capture.get("x_mm"), 0.0),
             "y_mm": self._as_float(capture.get("y_mm"), 0.0),
@@ -908,6 +1002,7 @@ class VisionAgent(BaseAgent):
             "pitch_deg": self._as_float(capture.get("pitch_deg"), 0.0),
             "yaw_deg": self._as_float(capture.get("yaw_deg"), 0.0),
             "confidence": round(pose_confidence, 3),
+            "source": "specimen_pose.v1" if pose_payload else "capture_fields",
         }
         vision_report = {
             "schema": "vision_report.v1",
@@ -971,6 +1066,7 @@ class VisionAgent(BaseAgent):
                 "ttl_ms": self.SIGNAL_TTL_MS,
                 "stale_action": "block_downstream_use",
             },
+            "specimen_pose": pose_payload,
         }
         vision_packet = self._vision_packet(
             state=state,
@@ -1004,7 +1100,9 @@ class VisionAgent(BaseAgent):
                 "camera_ok": capture_ok,
                 "specimen_ready": specimen_ready,
                 "pose_confidence": round(pose_confidence, 3),
-                "blocking_reason": None if ready else next((signal.get("blocking_reason") for signal in signals if signal.get("signal") == "pickup_ready"), "unknown"),
+                "camera_returned_to_vla": camera_returned_to_vla,
+                "vla_camera_precheck_ok": vla_camera_precheck_ok,
+                "blocking_reason": "D455F_PORT_RETURN_FAILED" if pose_payload and not camera_returned_to_vla else None if ready else next((signal.get("blocking_reason") for signal in signals if signal.get("signal") == "pickup_ready"), "unknown"),
                 "signal_id": vision_packet.get("signal_id"),
                 "expires_at": vision_packet.get("expires_at"),
             },
@@ -1012,6 +1110,7 @@ class VisionAgent(BaseAgent):
             "agent_signals": signals,
             "vision_signal": vision_packet,
             "raw_capture": capture,
+            "specimen_pose": pose_payload,
         }
         vision_agent_report = self._vision_agent_report_snapshot(
             state=state,
@@ -1065,6 +1164,8 @@ class VisionAgent(BaseAgent):
                 "mode": state.mode.value,
             },
         )
+        pose_result = self._specimen_pose_snapshot(state, ctx, frame_id)
+        response = self._merge_specimen_pose_capture(dict(response), pose_result)
         response = self._attach_lerobot_camera_evidence(state, ctx, dict(response))
         payload = self._transfer_observation(state, dict(response))
         observation = payload["observation"]

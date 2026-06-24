@@ -10,6 +10,8 @@ module:
     stale_signal_blocks_downstream: true
   tools:
   - camera.capture
+  - vision.specimen_pose_snapshot
+  - vision.specimen_pose.release
   internal_graph:
     - id: 01_observation_task_resolve
       label: Observation Task Resolve
@@ -20,6 +22,22 @@ module:
     - id: 03_capture_scene
       label: Capture Scene
       kind: internal_step
+    - id: 03a_acquire_d455f_lease
+      label: Acquire D455F lease from VLA route
+      kind: tool_step
+      tool: vision.specimen_pose_snapshot
+      emits:
+      - camera_lease
+    - id: 03b_one_shot_specimen_pose
+      label: One-shot D455F RGB-D specimen pose snapshot
+      kind: internal_step
+      emits:
+      - specimen_pose.v1
+    - id: 03c_release_d455f_to_vla
+      label: Confirm D455F returned to VLA route
+      kind: handoff_gate
+      emits:
+      - camera_returned_to_vla
     - id: 04_perception_backend
       label: Perception Backend / Simulator Degrade
       kind: internal_step
@@ -48,6 +66,7 @@ module:
     produces:
     - vision_report.v1
     - vision_signal.v1
+    - specimen_pose.v1
     - decisions
     - metrics
     - evidence_refs

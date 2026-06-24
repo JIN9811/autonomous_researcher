@@ -44,3 +44,24 @@ def test_isaac_mirror_runtime_wrapper_applies_calibration_to_payload_and_sidecar
     record = json.loads(record_path.read_text(encoding="utf-8").splitlines()[0])
     assert record["calibration"]["path"] == str(calibration_path)
     assert record["sync_metrics"]["receiver_accepted"] is True
+
+
+def test_isaac_mirror_runtime_wrapper_uses_follower_present_position_source(monkeypatch) -> None:
+    monkeypatch.setenv("ATR_ISAAC_MIRROR_ENABLED", "1")
+    monkeypatch.setenv("ATR_ISAAC_MIRROR_SOURCE", "follower_present_position")
+
+    class FakeBus:
+        def sync_read(self, register: str) -> dict[str, float]:
+            assert register == "Present_Position"
+            return {"shoulder_pan": 5.0, "gripper": 42.5}
+
+    class FakeFollower:
+        bus = FakeBus()
+
+    publisher = IsaacMirrorPublisher()
+
+    action, source, source_error = publisher.action_from_follower(FakeFollower(), {"shoulder_pan.pos": 1.0, "gripper.pos": 60.0})
+
+    assert action == {"shoulder_pan.pos": 5.0, "gripper.pos": 42.5}
+    assert source == "in_process_follower_present_position"
+    assert source_error == ""

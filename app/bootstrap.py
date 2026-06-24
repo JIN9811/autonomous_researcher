@@ -51,6 +51,7 @@ from backends.vllm_client import VLLMBackend
 from knowledge.experiment_db import ExperimentDB
 from knowledge.failure_memory import FailureMemory
 from knowledge.rag import HybridRAG, LocalRAGIndex, WebRetriever
+from device_bridges.specimen_pose_tracker import get_specimen_pose_tracker_bridge
 from device_bridges.utm_runtime_bridge import get_utm_runtime_manager
 from device_bridges.utm_state_observer import observe_utm_state_window
 from mcp_tools.cae_tools import register_cae_tools
@@ -281,10 +282,12 @@ def load_runtime() -> MainController:
     register_mock_tools(tools)
     register_utm_tools(tools, repo_root=resolve_path("."))
     utm_runtime_manager = get_utm_runtime_manager(cfg.get("devices", {}), repo_root=resolve_path("."))
+    specimen_pose_tracker = get_specimen_pose_tracker_bridge(cfg.get("devices", {}), repo_root=resolve_path("."))
     register_camera_tools(
         tools,
         utm_state_observer=observe_utm_state_window,
         utm_runtime_manager=utm_runtime_manager,
+        specimen_pose_tracker=specimen_pose_tracker,
     )
     register_printer_tools(tools, cfg.get("devices", {}), repo_root=resolve_path("."))
     register_equipment_tools(tools, cfg.get("devices", {}), repo_root=resolve_path("."))

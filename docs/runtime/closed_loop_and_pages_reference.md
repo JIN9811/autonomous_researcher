@@ -316,3 +316,23 @@ dispatch -> idle -> design -> specimen -> vision -> manipulation -> equipment ->
 ## 11) 협업자에게 설명할 때 한 문장 요약
 
 이 프로젝트는 `graphs/configs/atr_closed_loop.yaml`에 정의된 stage graph를 FastAPI runtime이 실행하고, 각 stage는 `graphs/modules/*`의 agent module을 통해 LLM/tool/device bridge를 호출하며, Live GUI와 Runtime IDE가 같은 runtime state/event/artifact API를 공유하는 구조입니다.
+
+## Specimen Pose Tracking Gate
+
+Closed-loop order around manipulation:
+
+```text
+Specimen/3DP auto-ejection
+-> VisionAgent D455F one-shot pose
+-> D455F returned to VLA
+-> ManipulationAgent VLA inference
+-> VisionAgent BRIO/UTM placement verification contract
+-> Lab Equipment Agent
+```
+
+Runtime representation:
+
+- `graphs/modules/vision/module.yaml` declares `vision.specimen_pose_snapshot`, `vision.specimen_pose.release`, and `specimen_pose.v1`.
+- `graphs/modules/manipulation/module.yaml` consumes `specimen_pose.v1` and `transfer_readiness.camera_returned_to_vla`.
+- `graphs/configs/atr_closed_loop.yaml` keeps the executable stage transition `manipulation -> equipment` unchanged because the current compiler requires one executable node per stage. Post-place Vision verification is represented as a non-executable `vision_verify` sidecar/contract node and as a ManipulationAgent handoff gate.
+- Live GUI Vision cards show `D455F Pose / VLA Return` from `vision_agent_report.specimen_pose` and `transfer_readiness`.

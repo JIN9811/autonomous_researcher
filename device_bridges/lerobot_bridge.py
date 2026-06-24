@@ -305,6 +305,7 @@ except Exception:
     calibration = {}
 
 bus = DynamixelMotorsBus(port, motors, calibration=calibration)
+full_turn_deg_per_norm = 1.8
 
 def read_positions():
     raw = bus.sync_read("Present_Position", normalize=False, num_retry=1)
@@ -323,11 +324,14 @@ def read_positions():
         if name in normalized:
             norm_value = float(normalized[name])
             if norm_mode == "range_m100_100":
-                value = lower + ((norm_value + 100.0) / 200.0) * (upper - lower)
+                value = norm_value * full_turn_deg_per_norm
             else:
                 value = norm_value
         else:
-            value = lower + (raw_value / 4095.0) * (upper - lower)
+            if norm_mode == "range_m100_100":
+                value = ((raw_value / 4095.0) * 360.0) - 180.0
+            else:
+                value = lower + (raw_value / 4095.0) * (upper - lower)
         values[str(motor.id)] = value
     return values
 
@@ -1255,8 +1259,8 @@ class LeRobotBridge:
             "camera_ports": camera_ports,
             "saved_devices": self._saved_devices(profile.profile_id),
             "instructions": [
-                "For follower/leader, save a baseline, disconnect or reconnect one target MotorBus, then detect and save the changed serial port.",
-                "Repeat the same process separately for follower and leader.",
+                "For follower/leader, keep the MotorBus boards connected and run Detect & Save; live detection verifies Dynamixel IDs before saving.",
+                "ROBOTIS OMX-AI leader uses IDs 1-6 and follower uses IDs 11-16. Removed serial ports are not auto-saved.",
                 "For cameras, scan or save top and wrist camera device/index separately, then run each capture test.",
             ],
             "command_preview": command_preview,
@@ -1289,7 +1293,7 @@ class LeRobotBridge:
         self._save_device_memory(memory)
         step_trace = [
             {"step": "BASELINE", "status": "ok", "detail": f"{request.device_role} serial={len(serial_ports)} camera={len(camera_ports)}"},
-            {"step": "WAIT_DEVICE_CHANGE", "status": "operator", "detail": "Disconnect or reconnect the target device, then run detect/save."},
+            {"step": "WAIT_DEVICE_CHANGE", "status": "operator", "detail": "Optional snapshot saved. For live follower/leader, reconnect all boards and run ID detect/save."},
         ]
         return {
             "ok": True,
@@ -1306,7 +1310,7 @@ class LeRobotBridge:
         }
 
     def ports_detect(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
-        """Detect the newly appearing device relative to the saved baseline and persist it."""
+        """Detect a device and persist it after role validation where available."""
         request = LeRobotDevicePortRequest.model_validate(payload or {})
         mode = request.runtime_mode or request.mode
         profile = self._profile(request.profile_id)
@@ -1333,6 +1337,9 @@ class LeRobotBridge:
             candidates = added or removed or list(now)
             change_type = "added" if added else "removed" if removed else "unchanged"
         chosen = request.port or ""
+        role_verification: dict[str, Any] = {}
+        role_verifications: list[dict[str, Any]] = []
+        save_source = f"detect_delta:{change_type}"
         if not chosen and candidates and request.device_role == "camera" and self._normalize_camera_backend(request.camera_backend) == LEROBOT_REALSENSE_TYPE:
             preferred = self._preferred_realsense_identifier(request.camera_key)
             if preferred not in candidates:
@@ -1345,8 +1352,53 @@ class LeRobotBridge:
                     f"expected={preferred}; candidates={', '.join(map(str, candidates)) or 'none'}",
                 )
             chosen = preferred
-        if not chosen and mode == "live" and request.device_role in {"follower", "leader"}:
-            chosen = self._select_serial_candidate_by_motor_ids(candidates, request.device_role)
+        live_robot_port = mode == "live" and request.device_role in {"follower", "leader"}
+        if live_robot_port and not chosen and change_type == "removed":
+            result = self._error(
+                "lerobot.ports.detect",
+                mode,
+                profile.profile_id,
+                "LEROBOT_PORT_REMOVED_UNVERIFIED",
+                f"{request.device_role} port disappeared from the baseline. Reconnect it and run detect/save so the bridge can verify Dynamixel IDs.",
+            )
+            result.update(
+                {
+                    "device_role": request.device_role,
+                    "camera_key": request.camera_key,
+                    "candidates": candidates,
+                    "change_type": change_type,
+                    "saved_devices": self._saved_devices(profile.profile_id),
+                }
+            )
+            return result
+        if live_robot_port:
+            validation_candidates = [chosen] if chosen else candidates
+            selected, role_verification, role_verifications = self._select_serial_candidate_with_role_verification(
+                validation_candidates,
+                request.device_role,
+            )
+            if selected:
+                chosen = selected
+                save_source = f"id_detect:{role_verification.get('status') or 'verified'}"
+            elif validation_candidates:
+                result = self._error(
+                    "lerobot.ports.detect",
+                    mode,
+                    profile.profile_id,
+                    "LEROBOT_PORT_ROLE_NOT_VERIFIED",
+                    f"No current serial port exposes Dynamixel IDs matching {request.device_role}.",
+                )
+                result.update(
+                    {
+                        "device_role": request.device_role,
+                        "camera_key": request.camera_key,
+                        "candidates": candidates,
+                        "change_type": change_type,
+                        "role_verifications": role_verifications,
+                        "saved_devices": self._saved_devices(profile.profile_id),
+                    }
+                )
+                return result
         if not chosen:
             chosen = candidates[0] if candidates else ""
         if not chosen:
@@ -1360,7 +1412,7 @@ class LeRobotBridge:
             request.device_role,
             chosen,
             camera_key=request.camera_key,
-            source=f"detect_delta:{change_type}",
+            source=save_source,
             memory=memory,
             prefer_identity_link=mode == "live",
             raw_port=raw_chosen,
@@ -1385,6 +1437,8 @@ class LeRobotBridge:
             "change_type": change_type,
             "selected_port": saved.get("port", chosen),
             "raw_selected_port": raw_chosen,
+            "role_verification": role_verification,
+            "role_verifications": role_verifications,
             "saved_device": saved,
             "saved_devices": self._saved_devices(profile.profile_id),
             "step_trace": step_trace,
@@ -3455,7 +3509,6 @@ class LeRobotBridge:
                 f"--/exts/atr.omx.mirror/useCurrentStage=true",
                 f"--/exts/atr.omx.mirror/openSceneOnStartup=true",
                 f"--/exts/atr.omx.mirror/playTimelineOnStartup=true",
-                str(scene_path),
             ]
             return {"ok": True, "launch_mode": launch_mode, "command": command, "scene_path": str(scene_path)}
 
@@ -4491,6 +4544,7 @@ class LeRobotBridge:
                     "ATR_ISAAC_MIRROR_ENDPOINT": self._isaac_mirror_endpoint(request),
                     "ATR_ISAAC_MIRROR_SAMPLE_HZ": str(self._isaac_mirror_sample_hz(request)),
                     "ATR_ISAAC_MIRROR_TIMEOUT_S": str(self._isaac_mirror_timeout_s(request)),
+                    "ATR_ISAAC_MIRROR_SOURCE": "follower_present_position",
                     "ATR_ISAAC_MIRROR_SESSION_ID": mirror_session_id,
                     "ATR_ISAAC_MIRROR_ATTACHED_TO_SESSION_ID": mirror_session_id,
                     "ATR_ISAAC_MIRROR_PROFILE_ID": str(request.profile_id or self._selected_profile_id),
@@ -6958,15 +7012,48 @@ print(json.dumps(entries))
             return {1, 2, 3, 4, 5, 6}
         return set()
 
-    def _select_serial_candidate_by_motor_ids(self, candidates: list[str], role: str) -> str:
+    @staticmethod
+    def _conflicting_motor_ids_for_role(role: str) -> set[int]:
+        if role in {"follower", "robot"}:
+            return {1, 2, 3, 4, 5, 6}
+        if role in {"leader", "teleop"}:
+            return {11, 12, 13, 14, 15, 16}
+        return set()
+
+    def _serial_candidate_role_verification(self, candidate: str, role: str) -> dict[str, Any]:
         expected = self._expected_motor_ids_for_role(role)
-        if not expected:
-            return ""
+        conflicting = self._conflicting_motor_ids_for_role(role)
+        motor_ids = set(self._serial_motor_ids(candidate))
+        matched = sorted(expected & motor_ids)
+        unexpected_role_motor_ids = sorted(conflicting & motor_ids)
+        minimum_match_count = min(3, len(expected)) if expected else 0
+        exact = bool(expected and expected.issubset(motor_ids))
+        partial = bool(len(matched) >= minimum_match_count and not unexpected_role_motor_ids)
+        ok = bool(exact or partial)
+        return {
+            "port": str(candidate),
+            "role": role,
+            "ok": ok,
+            "status": "exact" if exact else "partial" if ok else "failed",
+            "motor_ids": sorted(motor_ids),
+            "expected_motor_ids": sorted(expected),
+            "matched_motor_ids": matched,
+            "missing_motor_ids": sorted(expected - motor_ids),
+            "unexpected_role_motor_ids": unexpected_role_motor_ids,
+        }
+
+    def _select_serial_candidate_with_role_verification(self, candidates: list[str], role: str) -> tuple[str, dict[str, Any], list[dict[str, Any]]]:
+        verifications: list[dict[str, Any]] = []
         for candidate in candidates:
-            motor_ids = set(self._serial_motor_ids(candidate))
-            if expected.issubset(motor_ids):
-                return str(candidate)
-        return ""
+            verification = self._serial_candidate_role_verification(candidate, role)
+            verifications.append(verification)
+            if verification.get("ok"):
+                return str(candidate), verification, verifications
+        return "", {}, verifications
+
+    def _select_serial_candidate_by_motor_ids(self, candidates: list[str], role: str) -> str:
+        selected, _, _ = self._select_serial_candidate_with_role_verification(candidates, role)
+        return selected
 
     def _open_follower_joint_position_reader(self, port: str, motor_ids: list[int]) -> _SubprocessFollowerJointPositionReader:
         """Open a reusable OMX follower joint reader without commanding motion."""
@@ -7020,6 +7107,7 @@ try:
 except Exception:
     calibration = {}
 bus = DynamixelMotorsBus(port, motors, calibration=calibration)
+full_turn_deg_per_norm = 1.8
 try:
     bus.connect(handshake=False)
     bus.set_baudrate(bus.default_baudrate)
@@ -7039,11 +7127,14 @@ try:
         if name in normalized:
             norm_value = float(normalized[name])
             if norm_mode == "range_m100_100":
-                value = lower + ((norm_value + 100.0) / 200.0) * (upper - lower)
+                value = norm_value * full_turn_deg_per_norm
             else:
                 value = norm_value
         else:
-            value = lower + (raw_value / 4095.0) * (upper - lower)
+            if norm_mode == "range_m100_100":
+                value = ((raw_value / 4095.0) * 360.0) - 180.0
+            else:
+                value = lower + (raw_value / 4095.0) * (upper - lower)
         values[str(motor.id)] = value
 finally:
     try:

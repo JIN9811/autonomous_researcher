@@ -12223,6 +12223,23 @@ function renderVisionEvidenceReviewBoard(evidence, frame, packet) {
   `;
 }
 
+function renderSpecimenPoseGate(screenReport, visionReport) {
+  const pose = (visionReport && visionReport.specimen_pose) || (screenReport && screenReport.specimen_pose) || {};
+  const readiness = (screenReport && screenReport.transfer_readiness) || (visionReport && visionReport.transfer_readiness) || {};
+  const returned = readiness.camera_returned_to_vla === true || pose.port_released === true;
+  const precheck = readiness.vla_camera_precheck_ok === true || pose.vla_camera_precheck_ok === true;
+  const confidence = Number(pose.confidence || 0);
+  const robot = pose.position_robot_base_mm || {};
+  return `
+    <div class="vision-pose-gate-grid">
+      <div><span class="hint">D455F</span><strong>${returned ? "returned" : "held / waiting"}</strong></div>
+      <div><span class="hint">VLA camera</span><strong>${precheck ? "ready" : "waiting"}</strong></div>
+      <div><span class="hint">confidence</span><strong>${Number.isFinite(confidence) && confidence > 0 ? confidence.toFixed(2) : "-"}</strong></div>
+      <div><span class="hint">robot base</span><strong>x ${escapeHtml(String(robot.x ?? "-"))} / y ${escapeHtml(String(robot.y ?? "-"))}</strong></div>
+    </div>
+  `;
+}
+
 function renderVisionDashboardCards(report, status, agentLabel, profile) {
   const screenReport = latestVisionAgentReport(report) || {};
   const visionReport = latestVisionReport(report) || {};
@@ -12249,6 +12266,7 @@ function renderVisionDashboardCards(report, status, agentLabel, profile) {
   const artifactRows = evidence.artifacts && typeof evidence.artifacts === "object" ? Object.entries(evidence.artifacts).map(([key, value]) => `${key} / ${renderRuntimeValue(value)}`) : [];
   return `
     ${renderDashboardCard("Camera Health", renderVisionCameraHealthBoard(screenReport, visionReport, liveFrame, liveProfile), { span: 4, tone: liveFrame.data_url ? "success" : "vision", eyebrow: "device bridge" })}
+    ${renderDashboardCard("D455F Pose / VLA Return", renderSpecimenPoseGate(screenReport, visionReport), { span: 4, tone: "vision", eyebrow: "specimen_pose" })}
     ${renderDashboardCard("Live Inspection Feed", renderVisionLiveFrameEvidence(liveFrame, liveProfile), { span: 5, tone: liveFrame.data_url ? "success" : "warning", eyebrow: "camera frame" })}
     ${renderDashboardCard("Runtime Node Flow", renderVisionRuntimeNodeFlow(), { span: 3, tone: "vision", eyebrow: "rqt-like" })}
     ${renderDashboardCard("Perception Bus", `

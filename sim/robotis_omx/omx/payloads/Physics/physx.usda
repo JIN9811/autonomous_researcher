@@ -27,8 +27,13 @@ over "omx"
 {
     over "Geometry"
     {
-        over "link0"
+        over "link0" (
+            prepend apiSchemas = ["PhysxArticulationAPI"]
+        )
         {
+            int physxArticulation:solverPositionIterationCount = 64
+            int physxArticulation:solverVelocityIterationCount = 4
+
             over "link1"
             {
                 over "link2"
