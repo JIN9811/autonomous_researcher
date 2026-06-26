@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+import sys
+import types
 from pathlib import Path
 
 import pytest
 
-from sim.robotis_omx.tools.isaac_omx_mirror_server import IsaacMirrorState, _joint_targets
+from sim.robotis_omx.tools.isaac_omx_mirror_server import (
+    GRIPPER_CONTACT_COLLIDER_TOKENS,
+    IsaacMirrorState,
+    _joint_targets,
+)
 
 
 class _FakeAttr:
@@ -211,6 +217,9 @@ def test_joint_targets_extracts_valid_isaac_joint_targets() -> None:
             "recomputed_from_source": False,
             "mimic_multiplier": 1.0,
             "unit": "deg",
+            "drive_stiffness": 450.0,
+            "drive_damping": 60.0,
+            "drive_max_force": 1.5,
         }
     ]
 
@@ -279,9 +288,9 @@ def test_joint_targets_recomputes_gripper_live_source_as_dynamixel_angle() -> No
 
     assert targets[0]["target_value"] == pytest.approx(35.64)
     assert targets[0]["recomputed_from_source"] is True
-    assert targets[0]["drive_stiffness"] == 900.0
-    assert targets[0]["drive_damping"] == 90.0
-    assert targets[0]["drive_max_force"] == 25.0
+    assert targets[0]["drive_stiffness"] == 180.0
+    assert targets[0]["drive_damping"] == 18.0
+    assert targets[0]["drive_max_force"] == 4.0
 
 
 def test_deferred_receive_queues_until_update_tick_applies_to_stage() -> None:
@@ -311,9 +320,9 @@ def test_deferred_receive_queues_until_update_tick_applies_to_stage() -> None:
     assert applied["status"] == "applied"
     assert applied["applied_count"] == 1
     assert stage.prim.attrs["drive:angular:physics:targetPosition"].value == 31.25
-    assert stage.prim.attrs["drive:angular:physics:stiffness"].value == 1000.0
-    assert stage.prim.attrs["drive:angular:physics:damping"].value == 100.0
-    assert stage.prim.attrs["drive:angular:physics:maxForce"].value == 1000.0
+    assert stage.prim.attrs["drive:angular:physics:stiffness"].value == 450.0
+    assert stage.prim.attrs["drive:angular:physics:damping"].value == 60.0
+    assert stage.prim.attrs["drive:angular:physics:maxForce"].value == 1.5
 
 
 def test_direct_receive_applies_immediately_when_defer_disabled() -> None:
@@ -326,9 +335,9 @@ def test_direct_receive_applies_immediately_when_defer_disabled() -> None:
     assert result["ok"] is True
     assert result["status"] == "applied"
     assert stage.prim.attrs["drive:angular:physics:targetPosition"].value == -7.0
-    assert stage.prim.attrs["drive:angular:physics:stiffness"].value == 1000.0
-    assert stage.prim.attrs["drive:angular:physics:damping"].value == 100.0
-    assert stage.prim.attrs["drive:angular:physics:maxForce"].value == 1000.0
+    assert stage.prim.attrs["drive:angular:physics:stiffness"].value == 450.0
+    assert stage.prim.attrs["drive:angular:physics:damping"].value == 60.0
+    assert stage.prim.attrs["drive:angular:physics:maxForce"].value == 1.5
 
 
 def test_apply_joint_target_prefers_drive_target_without_teleporting_joint_state() -> None:
@@ -342,9 +351,9 @@ def test_apply_joint_target_prefers_drive_target_without_teleporting_joint_state
     assert result["ok"] is True
     assert result["status"] == "applied"
     assert stage.prim.attrs["drive:angular:physics:targetPosition"].value == 42.0
-    assert stage.prim.attrs["drive:angular:physics:stiffness"].value == 1000.0
-    assert stage.prim.attrs["drive:angular:physics:damping"].value == 100.0
-    assert stage.prim.attrs["drive:angular:physics:maxForce"].value == 1000.0
+    assert stage.prim.attrs["drive:angular:physics:stiffness"].value == 450.0
+    assert stage.prim.attrs["drive:angular:physics:damping"].value == 60.0
+    assert stage.prim.attrs["drive:angular:physics:maxForce"].value == 1.5
     assert stage.prim.attrs["state:angular:physics:position"].value is None
 
 
@@ -390,18 +399,79 @@ def test_gripper_mimic_applies_inverse_target_value() -> None:
     assert result["ok"] is True
     assert stage.prims[gripper_path].attrs["drive:angular:physics:targetPosition"].value == 36.0
     assert stage.prims[mimic_path].attrs["drive:angular:physics:targetPosition"].value == -36.0
-    assert stage.prims[gripper_path].attrs["drive:angular:physics:stiffness"].value == 900.0
-    assert stage.prims[gripper_path].attrs["drive:angular:physics:damping"].value == 90.0
-    assert stage.prims[gripper_path].attrs["drive:angular:physics:maxForce"].value == 25.0
+    assert stage.prims[gripper_path].attrs["drive:angular:physics:stiffness"].value == 180.0
+    assert stage.prims[gripper_path].attrs["drive:angular:physics:damping"].value == 18.0
+    assert stage.prims[gripper_path].attrs["drive:angular:physics:maxForce"].value == 4.0
     assert result["applied_targets"][0]["conversion_mode"] == "dynamixel_raw_resolution"
     assert result["applied_targets"][0]["source_raw_position"] == pytest.approx(2457.0)
     assert result["applied_targets"][0]["source_zero_raw_position"] == pytest.approx(2047.5)
-    assert stage.prims[mimic_path].attrs["drive:angular:physics:stiffness"].value == 900.0
-    assert stage.prims[mimic_path].attrs["drive:angular:physics:damping"].value == 90.0
-    assert stage.prims[mimic_path].attrs["drive:angular:physics:maxForce"].value == 25.0
+    assert stage.prims[mimic_path].attrs["drive:angular:physics:stiffness"].value == 180.0
+    assert stage.prims[mimic_path].attrs["drive:angular:physics:damping"].value == 18.0
+    assert stage.prims[mimic_path].attrs["drive:angular:physics:maxForce"].value == 4.0
 
 
-def test_gripper_target_applies_full_close_step_without_slew_delay() -> None:
+def test_gripper_contact_matching_covers_real_collision_meshes() -> None:
+    state = IsaacMirrorState(Path("scene.usda"), defer_apply=False, stage_provider=lambda: _FakeMultiStage([]))
+    contact_paths = (
+        "/World/Robot/Geometry/link0/link1/link2/link3/link4/link5/link6/InnerGripPadCollision",
+        "/World/Robot/Geometry/link0/link1/link2/link3/link4/link5/link6/follower_07_gripper_motorized_1/follower_07_gripper_motorized",
+        "/World/Robot/Geometry/link0/link1/link2/link3/link4/link5/link7/follower_08_gripper_gear_1/follower_08_gripper_gear",
+        "/World/Robot/Geometry/link0/link1/link2/link3/link4/link5/link6/follower_05_tip_1/follower_05_tip",
+    )
+
+    for path in contact_paths:
+        assert state._path_matches_any(path, GRIPPER_CONTACT_COLLIDER_TOKENS), path
+
+
+def test_contact_report_returns_matched_real_gripper_pair_paths(monkeypatch: pytest.MonkeyPatch) -> None:
+    gripper_path = (
+        "/World/Robot/Geometry/link0/link1/link2/link3/link4/link5/link6/"
+        "follower_07_gripper_motorized_1/follower_07_gripper_motorized"
+    )
+    cube_path = "/World/Workspace/RedSpecimenBlock"
+    header = types.SimpleNamespace(
+        collider0=gripper_path,
+        collider1=cube_path,
+        contact_data_offset=0,
+        num_contact_data=1,
+    )
+    contact = types.SimpleNamespace(impulse=(0.0, 0.05, 0.0), separation=-0.0012)
+
+    class _FakePhysxInterface:
+        def get_contact_report(self):
+            return [header], [contact]
+
+        def get_simulation_time_steps_per_second(self, _stage_id, _scene_path):
+            return 100.0
+
+    physx_module = types.ModuleType("omni.physx")
+    physx_module.get_physx_simulation_interface = lambda: _FakePhysxInterface()
+    omni_module = types.ModuleType("omni")
+    omni_module.physx = physx_module
+    monkeypatch.setitem(sys.modules, "omni", omni_module)
+    monkeypatch.setitem(sys.modules, "omni.physx", physx_module)
+
+    class _FakePhysicsSchemaTools:
+        @staticmethod
+        def intToSdfPath(value):  # noqa: N802 - USD-style fake
+            return value
+
+    pxr_module = types.ModuleType("pxr")
+    pxr_module.PhysicsSchemaTools = _FakePhysicsSchemaTools
+    monkeypatch.setitem(sys.modules, "pxr", pxr_module)
+
+    state = IsaacMirrorState(Path("scene.usda"), defer_apply=False, stage_provider=lambda: _FakeMultiStage([]))
+
+    result = state._poll_gripper_contact_force(None)
+
+    assert result["contact"] is True
+    assert result["force_n"] == pytest.approx(5.0)
+    assert result["penetration_m"] == pytest.approx(0.0012)
+    assert result["matched_pairs"] == 1
+    assert result["matched_pair_paths"] == [{"collider0": gripper_path, "collider1": cube_path}]
+
+
+def test_gripper_close_target_uses_fast_probe_step_before_contact_hold() -> None:
     gripper_path = "/World/Robot/Geometry/link0/link1/link2/link3/link4/link5/link6/Gripper"
     mimic_path = "/World/Robot/Geometry/link0/link1/link2/link3/link4/link5/link7/Gripper_mimic"
     stage = _FakeMultiStage([gripper_path, mimic_path])
@@ -440,10 +510,293 @@ def test_gripper_target_applies_full_close_step_without_slew_delay() -> None:
 
     assert result["runtime_grip"]["status"] == "runtime_grip_disabled"
     assert result["runtime_grip"]["enabled"] is False
-    assert stage.prims[gripper_path].attrs["drive:angular:physics:targetPosition"].value == pytest.approx(0.0)
-    assert stage.prims[mimic_path].attrs["drive:angular:physics:targetPosition"].value == pytest.approx(-0.0)
+    assert stage.prims[gripper_path].attrs["drive:angular:physics:targetPosition"].value == pytest.approx(30.0)
+    assert stage.prims[mimic_path].attrs["drive:angular:physics:targetPosition"].value == pytest.approx(-30.0)
     assert result["applied_targets"][0]["slew_limited"] is False
     assert result["applied_targets"][0]["raw_target_value"] == pytest.approx(0.0)
+    assert result["applied_targets"][0]["contact_probe_limited"] is True
+    assert result["applied_targets"][0]["contact_hold_active"] is False
+    assert result["gripper_contact"]["hold_active"] is False
+
+
+def test_gripper_contact_force_holds_close_target_until_operator_opens() -> None:
+    gripper_path = "/World/Robot/Geometry/link0/link1/link2/link3/link4/link5/link6/Gripper"
+    mimic_path = "/World/Robot/Geometry/link0/link1/link2/link3/link4/link5/link7/Gripper_mimic"
+    stage = _FakeMultiStage([gripper_path, mimic_path])
+    contact_state = {
+        "available": True,
+        "contact": False,
+        "force_n": 0.0,
+        "status": "test_contact_report",
+    }
+    state = IsaacMirrorState(
+        Path("scene.usda"),
+        defer_apply=False,
+        stage_provider=lambda: stage,
+        contact_force_provider=lambda _stage: dict(contact_state),
+    )
+
+    state.receive(
+        {
+            "joint_state": [
+                {
+                    "motor_id": 16,
+                    "motor_name": "gripper",
+                    "isaac_joint_name": "Gripper",
+                    "isaac_joint_path": gripper_path,
+                    "mimic_joint_path": mimic_path,
+                    "source_value": 60.0,
+                    "unit": "percent",
+                }
+            ]
+        }
+    )
+
+    contact_state.update({"contact": True, "force_n": 18.0})
+    contact_result = state.receive(
+        {
+            "joint_state": [
+                {
+                    "motor_id": 16,
+                    "motor_name": "gripper",
+                    "isaac_joint_name": "Gripper",
+                    "isaac_joint_path": gripper_path,
+                    "mimic_joint_path": mimic_path,
+                    "source_value": 50.0,
+                    "unit": "percent",
+                }
+            ]
+        }
+    )
+
+    assert stage.prims[gripper_path].attrs["drive:angular:physics:targetPosition"].value == pytest.approx(30.0)
+    assert stage.prims[mimic_path].attrs["drive:angular:physics:targetPosition"].value == pytest.approx(-30.0)
+    assert contact_result["gripper_contact"]["hold_active"] is True
+    assert contact_result["gripper_contact"]["hold_target_value"] == pytest.approx(30.0)
+    assert contact_result["applied_targets"][0]["contact_hold_active"] is True
+
+    held_result = state.receive(
+        {
+            "joint_state": [
+                {
+                    "motor_id": 16,
+                    "motor_name": "gripper",
+                    "isaac_joint_name": "Gripper",
+                    "isaac_joint_path": gripper_path,
+                    "mimic_joint_path": mimic_path,
+                    "source_value": 50.0,
+                    "unit": "percent",
+                }
+            ]
+        }
+    )
+
+    assert stage.prims[gripper_path].attrs["drive:angular:physics:targetPosition"].value == pytest.approx(30.0)
+    assert held_result["gripper_contact"]["hold_active"] is True
+    assert held_result["applied_targets"][0]["contact_hold_active"] is True
+
+    contact_state.update({"contact": False, "force_n": 0.0})
+    open_result = state.receive(
+        {
+            "joint_state": [
+                {
+                    "motor_id": 16,
+                    "motor_name": "gripper",
+                    "isaac_joint_name": "Gripper",
+                    "isaac_joint_path": gripper_path,
+                    "mimic_joint_path": mimic_path,
+                    "source_value": 60.0,
+                    "unit": "percent",
+                }
+            ]
+        }
+    )
+
+    assert stage.prims[gripper_path].attrs["drive:angular:physics:targetPosition"].value == pytest.approx(36.0)
+    assert open_result["gripper_contact"]["hold_active"] is False
+
+
+def test_gripper_contact_penetration_holds_previous_target_instead_of_digging_deeper() -> None:
+    gripper_path = "/World/Robot/Geometry/link0/link1/link2/link3/link4/link5/link6/Gripper"
+    mimic_path = "/World/Robot/Geometry/link0/link1/link2/link3/link4/link5/link7/Gripper_mimic"
+    stage = _FakeMultiStage([gripper_path, mimic_path])
+    contact_state = {
+        "available": True,
+        "contact": False,
+        "force_n": 0.0,
+        "penetration_m": 0.0,
+        "status": "test_contact_report",
+    }
+    state = IsaacMirrorState(
+        Path("scene.usda"),
+        defer_apply=False,
+        stage_provider=lambda: stage,
+        contact_force_provider=lambda _stage: dict(contact_state),
+    )
+
+    state.receive(
+        {
+            "joint_state": [
+                {
+                    "motor_id": 16,
+                    "motor_name": "gripper",
+                    "isaac_joint_name": "Gripper",
+                    "isaac_joint_path": gripper_path,
+                    "mimic_joint_path": mimic_path,
+                    "source_value": 60.0,
+                    "unit": "percent",
+                }
+            ]
+        }
+    )
+    state.receive(
+        {
+            "joint_state": [
+                {
+                    "motor_id": 16,
+                    "motor_name": "gripper",
+                    "isaac_joint_name": "Gripper",
+                    "isaac_joint_path": gripper_path,
+                    "mimic_joint_path": mimic_path,
+                    "source_value": 50.0,
+                    "unit": "percent",
+                }
+            ]
+        }
+    )
+
+    contact_state.update({"contact": True, "force_n": 18.0, "penetration_m": 0.0012})
+    result = state.receive(
+        {
+            "joint_state": [
+                {
+                    "motor_id": 16,
+                    "motor_name": "gripper",
+                    "isaac_joint_name": "Gripper",
+                    "isaac_joint_path": gripper_path,
+                    "mimic_joint_path": mimic_path,
+                    "source_value": 40.0,
+                    "unit": "percent",
+                }
+            ]
+        }
+    )
+
+    assert stage.prims[gripper_path].attrs["drive:angular:physics:targetPosition"].value == pytest.approx(30.0)
+    assert stage.prims[mimic_path].attrs["drive:angular:physics:targetPosition"].value == pytest.approx(-30.0)
+    assert result["gripper_contact"]["hold_active"] is True
+    assert result["gripper_contact"]["hold_target_value"] == pytest.approx(30.0)
+    assert result["applied_targets"][0]["contact_hold_active"] is True
+    assert result["applied_targets"][0]["contact_penetration_limited"] is True
+
+
+def test_gripper_contact_hold_releases_when_contact_is_lost_and_operator_opens() -> None:
+    gripper_path = "/World/Robot/Geometry/link0/link1/link2/link3/link4/link5/link6/Gripper"
+    mimic_path = "/World/Robot/Geometry/link0/link1/link2/link3/link4/link5/link7/Gripper_mimic"
+    stage = _FakeMultiStage([gripper_path, mimic_path])
+    contact_state = {
+        "available": True,
+        "contact": False,
+        "force_n": 0.0,
+        "penetration_m": 0.0,
+        "status": "test_contact_report",
+    }
+    state = IsaacMirrorState(
+        Path("scene.usda"),
+        defer_apply=False,
+        stage_provider=lambda: stage,
+        contact_force_provider=lambda _stage: dict(contact_state),
+    )
+
+    state.receive(
+        {
+            "joint_state": [
+                {
+                    "motor_id": 16,
+                    "motor_name": "gripper",
+                    "isaac_joint_name": "Gripper",
+                    "isaac_joint_path": gripper_path,
+                    "mimic_joint_path": mimic_path,
+                    "target_value": 36.0,
+                }
+            ]
+        }
+    )
+    contact_state.update({"contact": True, "force_n": 18.0})
+    held = state.receive(
+        {
+            "joint_state": [
+                {
+                    "motor_id": 16,
+                    "motor_name": "gripper",
+                    "isaac_joint_name": "Gripper",
+                    "isaac_joint_path": gripper_path,
+                    "mimic_joint_path": mimic_path,
+                    "target_value": 35.2,
+                }
+            ]
+        }
+    )
+    assert held["gripper_contact"]["hold_active"] is True
+    assert held["gripper_contact"]["hold_target_value"] == pytest.approx(35.2)
+
+    contact_state.update({"contact": False, "force_n": 0.0})
+    released = state.receive(
+        {
+            "joint_state": [
+                {
+                    "motor_id": 16,
+                    "motor_name": "gripper",
+                    "isaac_joint_name": "Gripper",
+                    "isaac_joint_path": gripper_path,
+                    "mimic_joint_path": mimic_path,
+                    "target_value": 35.9,
+                }
+            ]
+        }
+    )
+
+    assert released["gripper_contact"]["hold_active"] is False
+    assert released["gripper_contact"]["hold_target_value"] is None
+    assert stage.prims[gripper_path].attrs["drive:angular:physics:targetPosition"].value == pytest.approx(35.9)
+    assert stage.prims[mimic_path].attrs["drive:angular:physics:targetPosition"].value == pytest.approx(-35.9)
+
+
+def test_gripper_direct_target_jump_is_not_slew_limited() -> None:
+    gripper_path = "/World/Robot/Geometry/link0/link1/link2/link3/link4/link5/link6/Gripper"
+    stage = _FakeMultiStage([gripper_path])
+    state = IsaacMirrorState(Path("scene.usda"), defer_apply=False, stage_provider=lambda: stage)
+
+    state.receive(
+        {
+            "joint_state": [
+                {
+                    "motor_id": 16,
+                    "motor_name": "gripper",
+                    "isaac_joint_name": "Gripper",
+                    "isaac_joint_path": gripper_path,
+                    "target_value": 0.0,
+                }
+            ]
+        }
+    )
+    result = state.receive(
+        {
+            "joint_state": [
+                {
+                    "motor_id": 16,
+                    "motor_name": "gripper",
+                    "isaac_joint_name": "Gripper",
+                    "isaac_joint_path": gripper_path,
+                    "target_value": 90.0,
+                }
+            ]
+        }
+    )
+
+    assert stage.prims[gripper_path].attrs["drive:angular:physics:targetPosition"].value == pytest.approx(90.0)
+    assert result["applied_targets"][0]["slew_limited"] is False
+    assert result["applied_targets"][0]["raw_target_value"] == pytest.approx(90.0)
 
 
 def test_runtime_grip_disabled_does_not_author_surface_gripper_or_fixed_joint() -> None:

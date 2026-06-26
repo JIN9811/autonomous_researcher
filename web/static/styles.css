@@ -22656,6 +22656,26 @@ body .bambu-printer-page .printer-evidence-details pre {
 }
 
 /* Vision / UTM Camera Bridge workspace */
+.vision-camera-page-tabs {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.65rem;
+}
+
+.vision-camera-page-tab {
+  min-width: 170px;
+  justify-content: center;
+}
+
+.vision-camera-page-tab.active {
+  box-shadow: 0 0 0 1px rgba(61, 214, 255, 0.26), 0 10px 26px rgba(61, 214, 255, 0.12);
+}
+
+.vision-camera-page-panel[hidden] {
+  display: none !important;
+}
+
 .vision-utm-page .vision-camera-status-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
@@ -22747,11 +22767,93 @@ body .bambu-printer-page .printer-evidence-details pre {
   overflow-wrap: anywhere;
 }
 
+.vision-camera-test-status-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.vision-camera-test-grid {
+  grid-template-columns: minmax(520px, 1.25fr) minmax(320px, 0.75fr);
+}
+
+.vision-camera-test-settings-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.vision-camera-test-output-grid {
+  display: grid;
+  grid-template-columns: minmax(420px, 0.95fr) minmax(420px, 1.05fr);
+  gap: 1rem;
+}
+
+.vision-camera-test-guidance {
+  display: grid;
+  gap: 0.7rem;
+  color: var(--muted, #8da0bd);
+  line-height: 1.5;
+}
+
+.vision-camera-test-guidance p {
+  margin: 0;
+  padding: 0.72rem 0.8rem;
+  border: 1px solid rgba(125, 170, 255, 0.18);
+  border-radius: 12px;
+  background: rgba(7, 14, 30, 0.38);
+}
+
+.vision-camera-test-guidance strong {
+  color: var(--text, #f2f7ff);
+}
+
+.vision-pose-summary-placeholder {
+  min-height: 260px;
+  display: grid;
+  place-items: center;
+  border: 1px dashed rgba(125, 170, 255, 0.32);
+  border-radius: 14px;
+  color: var(--muted, #8da0bd);
+  text-align: center;
+  background: rgba(7, 14, 30, 0.42);
+}
+
+.vision-pose-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.vision-pose-summary-grid > div {
+  min-width: 0;
+  padding: 0.72rem 0.8rem;
+  border: 1px solid rgba(125, 170, 255, 0.18);
+  border-radius: 12px;
+  background: rgba(7, 14, 30, 0.42);
+}
+
+.vision-pose-summary-grid span {
+  display: block;
+  color: var(--muted, #8da0bd);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.vision-pose-summary-grid strong {
+  display: block;
+  margin-top: 0.22rem;
+  color: var(--text, #f2f7ff);
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 980px) {
   .vision-utm-page .vision-camera-status-grid,
   .vision-camera-grid,
   .vision-camera-evidence-grid,
-  .vision-camera-settings-grid {
+  .vision-camera-settings-grid,
+  .vision-camera-test-status-grid,
+  .vision-camera-test-grid,
+  .vision-camera-test-settings-grid,
+  .vision-camera-test-output-grid,
+  .vision-pose-summary-grid {
     grid-template-columns: 1fr;
   }
 

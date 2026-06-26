@@ -101,7 +101,10 @@ class SpecimenPoseNode(Node):
         red_mask = cv2.morphologyEx(red_mask, cv2.MORPH_CLOSE, kernel)
         contours, _ = cv2.findContours(red_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         if not contours:
-            return _failure("SPECIMEN_NOT_DETECTED", "No red specimen contour was detected in D455F color frame.")
+            return _failure(
+                "SPECIMEN_NOT_DETECTED",
+                f"No red specimen contour was detected in {self.cfg.camera_id} color frame.",
+            )
 
         contour = max(contours, key=cv2.contourArea)
         area = float(cv2.contourArea(contour))
@@ -126,7 +129,8 @@ class SpecimenPoseNode(Node):
         if depth_mm < 10.0:
             depth_mm *= 1000.0
 
-        k = list(getattr(self.info, "k", []) or [])
+        k_raw = getattr(self.info, "k", [])
+        k = list(k_raw) if k_raw is not None else []
         fx = float(k[0]) if len(k) > 0 and k[0] else 1.0
         fy = float(k[4]) if len(k) > 4 and k[4] else 1.0
         ppx = float(k[2]) if len(k) > 2 else depth.shape[1] / 2.0
@@ -156,7 +160,7 @@ class SpecimenPoseNode(Node):
             "camera_owner_after": "vla_runtime",
             "workspace": self.cfg.workspace,
             "specimen_id": self.cfg.specimen_id,
-            "frame_id": f"d455f-{int(time.time() * 1000)}",
+            "frame_id": f"{self.cfg.camera_id}-{int(time.time() * 1000)}",
             "timestamp": _now_iso(),
             "color_stamp": self.color_stamp,
             "depth_stamp": self.depth_stamp,
@@ -203,13 +207,13 @@ class SpecimenPoseNode(Node):
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="ATR one-shot D455F specimen pose tracker")
+    parser = argparse.ArgumentParser(description="ATR one-shot RGB-D specimen pose tracker")
     parser.add_argument("--specimen-id", default="specimen-live")
     parser.add_argument("--camera-id", default="d455f_global")
     parser.add_argument("--workspace", default="a4_robot_workspace")
-    parser.add_argument("--color-topic", default="/camera/color/image_raw")
-    parser.add_argument("--depth-topic", default="/camera/aligned_depth_to_color/image_raw")
-    parser.add_argument("--info-topic", default="/camera/color/camera_info")
+    parser.add_argument("--color-topic", default="/camera/d455f/color/image_raw")
+    parser.add_argument("--depth-topic", default="/camera/d455f/aligned_depth_to_color/image_raw")
+    parser.add_argument("--info-topic", default="/camera/d455f/color/camera_info")
     parser.add_argument("--output-dir", default="runs/specimen_pose_tracker")
     parser.add_argument("--timeout-sec", type=float, default=8.0)
     parser.add_argument("--confidence-threshold", type=float, default=0.75)

@@ -21,7 +21,12 @@
         </div>
       </header>
 
-      <section class="panel workspace-status-grid vision-camera-status-grid">
+      <nav class="panel vision-camera-page-tabs" aria-label="Vision Camera Bridge pages">
+        <button id="btn-vision-camera-page-runtime" class="btn primary vision-camera-page-tab active" type="button" data-vision-camera-page="runtime">Runtime Bridge</button>
+        <button id="btn-vision-camera-page-test" class="btn vision-camera-page-tab" type="button" data-vision-camera-page="test">Specimen Pose Test</button>
+      </nav>
+
+      <section class="panel workspace-status-grid vision-camera-status-grid vision-camera-page-panel" data-vision-camera-page-panel="runtime">
         <article class="status-card">
           <div class="status-head">
             <span class="status-title">Camera Config</span>
@@ -48,7 +53,7 @@
         </article>
       </section>
 
-      <section class="panel equipment-command-panel vision-camera-command-panel">
+      <section class="panel equipment-command-panel vision-camera-command-panel vision-camera-page-panel" data-vision-camera-page-panel="runtime">
         <div class="equipment-command-banner" id="vision-camera-command-banner">
           <div>
             <span class="eyebrow">Operator Controls</span>
@@ -70,7 +75,7 @@
         </div>
       </section>
 
-      <section class="panel equipment-setup-grid printer-setup-grid vision-camera-grid">
+      <section class="panel equipment-setup-grid printer-setup-grid vision-camera-grid vision-camera-page-panel" data-vision-camera-page-panel="runtime">
         <article class="printer-card vision-camera-form-card">
           <div class="panel-title-row">
             <h2>Camera Profile</h2>
@@ -99,7 +104,7 @@
         </article>
       </section>
 
-      <section class="panel vision-camera-evidence-grid">
+      <section class="panel vision-camera-evidence-grid vision-camera-page-panel" data-vision-camera-page-panel="runtime">
         <article class="printer-card vision-camera-frame-card">
           <div class="panel-title-row vision-camera-frame-title-row">
             <div class="vision-camera-frame-title-main">
@@ -123,12 +128,107 @@
         </article>
       </section>
 
-      <section class="panel">
+      <section class="panel vision-camera-page-panel" data-vision-camera-page-panel="runtime">
         <div class="panel-title-row">
           <h2>Bridge Result</h2>
           <span class="hint">last callback payload</span>
         </div>
         <pre id="vision-camera-result-log" class="equipment-result-log">{}</pre>
+      </section>
+
+      <section class="vision-camera-page-panel vision-camera-test-page" data-vision-camera-page-panel="test" hidden>
+        <section class="panel workspace-status-grid vision-camera-test-status-grid">
+          <article class="status-card">
+            <div class="status-head">
+              <span class="status-title">Pose Tracker</span>
+              <span id="vision-pose-status-dot" class="status-dot idle"></span>
+            </div>
+            <strong id="vision-pose-status-label">Not checked</strong>
+            <p id="vision-pose-status-detail">Load the tracker status before running live camera tests.</p>
+          </article>
+          <article class="status-card">
+            <div class="status-head">
+              <span class="status-title">Camera Lease</span>
+              <span id="vision-pose-lease-dot" class="status-dot idle"></span>
+            </div>
+            <strong id="vision-pose-lease-label">Unknown</strong>
+            <p id="vision-pose-lease-detail">The D455F route should return to VLA after each snapshot.</p>
+          </article>
+          <article class="status-card">
+            <div class="status-head">
+              <span class="status-title">Last Test</span>
+              <span id="vision-pose-last-dot" class="status-dot idle"></span>
+            </div>
+            <strong id="vision-pose-last-label">No run</strong>
+            <p id="vision-pose-last-detail">Run virtual, D455F, or D405 smoke from this page.</p>
+          </article>
+        </section>
+
+        <section class="panel equipment-command-panel vision-camera-test-command-panel">
+          <div class="equipment-command-banner" id="vision-pose-command-banner">
+            <div>
+              <span class="eyebrow">Specimen Pose Test Page</span>
+              <strong id="vision-pose-command-title">Ready for pose tracker test</strong>
+              <p id="vision-pose-command-detail">Virtual mode needs no camera. Live D455F/D405 tests require the matching ROS camera topics to be running.</p>
+            </div>
+            <span id="vision-pose-command-pill" class="badge idle">idle</span>
+          </div>
+          <div class="button-row compact-tools vision-camera-button-row">
+            <button id="btn-vision-pose-status" class="btn" type="button">Load Pose Status</button>
+            <button id="btn-vision-pose-virtual" class="btn primary" type="button">Virtual Pose Test</button>
+            <button id="btn-vision-pose-d455f" class="btn primary" type="button">Live D455F Snapshot</button>
+            <button id="btn-vision-pose-d405" class="btn" type="button">D405 Smoke Snapshot</button>
+            <button id="btn-vision-pose-release" class="btn" type="button">Release VLA Camera</button>
+          </div>
+        </section>
+
+        <section class="panel equipment-setup-grid printer-setup-grid vision-camera-test-grid">
+          <article class="printer-card">
+            <div class="panel-title-row">
+              <h2>Snapshot Payload</h2>
+              <span class="hint">used by D455F/D405 live tests</span>
+            </div>
+            <div class="settings-grid vision-camera-test-settings-grid">
+              <label>Specimen ID<input id="vision-pose-specimen-id" class="text-input" value="gui-specimen-pose-test" /></label>
+              <label>Camera ID<input id="vision-pose-camera-id" class="text-input" value="d455f_global" /></label>
+              <label>Output dir<input id="vision-pose-output-dir" class="text-input" value="/tmp/atr_specimen_pose_gui_test" /></label>
+              <label>Timeout s<input id="vision-pose-timeout" class="text-input" type="number" min="1" value="8" /></label>
+              <label>Confidence threshold<input id="vision-pose-confidence" class="text-input" type="number" step="0.01" min="0" max="1" value="0.25" /></label>
+              <label>Min contour px<input id="vision-pose-min-area" class="text-input" type="number" min="1" value="10" /></label>
+              <label>Color topic<input id="vision-pose-color-topic" class="text-input" value="/camera/d455f/color/image_raw" /></label>
+              <label>Depth topic<input id="vision-pose-depth-topic" class="text-input" value="/camera/d455f/aligned_depth_to_color/image_raw" /></label>
+              <label>Camera info topic<input id="vision-pose-info-topic" class="text-input" value="/camera/d455f/color/camera_info" /></label>
+            </div>
+          </article>
+          <article class="printer-card">
+            <div class="panel-title-row">
+              <h2>Test Guidance</h2>
+              <span class="hint">current hardware boundary</span>
+            </div>
+            <div class="vision-camera-test-guidance">
+              <p><strong>Virtual Pose Test</strong> verifies the agent/API contract without camera access.</p>
+              <p><strong>Live D455F Snapshot</strong> attaches to the default D455F topics and is the intended pre-manipulation path.</p>
+              <p><strong>D405 Smoke Snapshot</strong> rewrites topics to `/camera/d405/...` for hardware-path testing when D455F is unavailable.</p>
+            </div>
+          </article>
+        </section>
+
+        <section class="panel vision-camera-test-output-grid">
+          <article class="printer-card">
+            <div class="panel-title-row">
+              <h2>Pose Summary</h2>
+              <span id="vision-pose-summary-meta" class="hint">No pose result yet.</span>
+            </div>
+            <div id="vision-pose-summary" class="vision-pose-summary-placeholder">Run a pose test to see specimen coordinates, confidence, lease status, and debug artifact paths.</div>
+          </article>
+          <article class="printer-card">
+            <div class="panel-title-row">
+              <h2>Pose API Result</h2>
+              <span class="hint">last callback payload</span>
+            </div>
+            <pre id="vision-pose-result-log" class="equipment-result-log">{}</pre>
+          </article>
+        </section>
       </section>
     </main>
     <script src="/static/vision_utm_device_bridge.js" defer></script>

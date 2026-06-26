@@ -14,6 +14,9 @@ OUT = ROOT / 'scene' / 'omx_table_layout.usda'
 ROBOT_USD = ROOT / 'omx' / 'omx.usda'
 TEXTURE_DIR = ROOT / 'scene' / 'Textures'
 REDWOOD_TEXTURE = TEXTURE_DIR / 'redwood_table_grain.png'
+COLLISION_SKIN_FRACTION = 0.01
+COLLISION_SKIN_MIN_M = 0.0001
+COLLISION_SKIN_MAX_M = 0.001
 
 
 def write_redwood_texture(path):
@@ -104,13 +107,47 @@ def _set_attr(prim, name, type_name, value):
     return attr
 
 
+def _set_uniform_attr(prim, name, type_name, value):
+    attr = prim.GetAttribute(name)
+    if not attr:
+        attr = prim.CreateAttribute(name, type_name, False, Sdf.VariabilityUniform)
+    else:
+        attr.SetVariability(Sdf.VariabilityUniform)
+    attr.Set(value)
+    return attr
+
+
+def collision_skin_for_dimensions(dimensions):
+    positive_dimensions = [float(value) for value in dimensions if float(value) > 0.0]
+    if not positive_dimensions:
+        return COLLISION_SKIN_MIN_M
+    offset = min(positive_dimensions) * COLLISION_SKIN_FRACTION
+    return max(COLLISION_SKIN_MIN_M, min(COLLISION_SKIN_MAX_M, offset))
+
+
+def _ensure_api_schema(prim, api_name):
+    schemas = prim.GetMetadata('apiSchemas')
+    items = []
+    if schemas is not None:
+        try:
+            items = [str(item) for item in schemas.GetAddedOrExplicitItems()]
+        except Exception:
+            items = []
+    if api_name not in items:
+        items.append(api_name)
+    op = Sdf.TokenListOp()
+    op.prependedItems = items
+    prim.SetMetadata('apiSchemas', op)
+
+
 def _apply_physx_api(prim, api_name):
     if PhysxSchema is None:
+        _ensure_api_schema(prim, api_name)
         return
     try:
         getattr(PhysxSchema, api_name).Apply(prim)
     except Exception:
-        pass
+        _ensure_api_schema(prim, api_name)
 
 
 def apply_physx_contact_tuning(
@@ -173,6 +210,9 @@ def apply_dynamic_rigid_body(
     rest_offset=None,
     enable_ccd=False,
     max_depenetration_velocity=None,
+    solver_position_iterations=None,
+    solver_velocity_iterations=None,
+    contact_report_threshold=None,
 ):
     """Make a movable object participate in Isaac physics without mesh-heavy collision."""
     prim = geom_prim.GetPrim()
@@ -191,6 +231,30 @@ def apply_dynamic_rigid_body(
         enable_ccd=enable_ccd,
         max_depenetration_velocity=max_depenetration_velocity,
     )
+    if solver_position_iterations is not None:
+        _apply_physx_api(prim, 'PhysxRigidBodyAPI')
+        _set_attr(
+            prim,
+            'physxRigidBody:solverPositionIterationCount',
+            Sdf.ValueTypeNames.Int,
+            int(solver_position_iterations),
+        )
+    if solver_velocity_iterations is not None:
+        _apply_physx_api(prim, 'PhysxRigidBodyAPI')
+        _set_attr(
+            prim,
+            'physxRigidBody:solverVelocityIterationCount',
+            Sdf.ValueTypeNames.Int,
+            int(solver_velocity_iterations),
+        )
+    if contact_report_threshold is not None:
+        _apply_physx_api(prim, 'PhysxContactReportAPI')
+        _set_attr(
+            prim,
+            'physxContactReport:threshold',
+            Sdf.ValueTypeNames.Float,
+            float(contact_report_threshold),
+        )
     if physics_material is not None:
         bind_physics(prim, physics_material)
     return geom_prim
@@ -276,11 +340,13 @@ def main():
     physics_scene.CreateGravityDirectionAttr(Gf.Vec3f(0.0, 0.0, -1.0))
     physics_scene.CreateGravityMagnitudeAttr(9.81)
     physics_scene_prim = physics_scene.GetPrim()
+    _ensure_api_schema(physics_scene_prim, 'NewtonSceneAPI')
+    _ensure_api_schema(physics_scene_prim, 'PhysxSceneAPI')
     _set_attr(physics_scene_prim, 'physxScene:enableCCD', Sdf.ValueTypeNames.Bool, True)
     _set_attr(physics_scene_prim, 'physxScene:enableStabilization', Sdf.ValueTypeNames.Bool, True)
     _set_attr(physics_scene_prim, 'physxScene:frictionCorrelationDistance', Sdf.ValueTypeNames.Float, 0.005)
     _set_attr(physics_scene_prim, 'physxScene:frictionOffsetThreshold', Sdf.ValueTypeNames.Float, 0.002)
-    _set_attr(physics_scene_prim, 'physxScene:solverType', Sdf.ValueTypeNames.Token, 'TGS')
+    _set_uniform_attr(physics_scene_prim, 'physxScene:solverType', Sdf.ValueTypeNames.Token, 'TGS')
     _set_attr(physics_scene_prim, 'physxScene:timeStepsPerSecond', Sdf.ValueTypeNames.Int, 240)
 
     # Materials tuned from the supplied photo: redwood-like laminate desk, matte paper, black robot/disk.
@@ -306,14 +372,14 @@ def main():
     paper_physics_mat = make_physics_material(
         stage,
         '/World/Materials/paper_contact_physics',
-        static_friction=0.75,
-        dynamic_friction=0.55,
+        static_friction=1.1,
+        dynamic_friction=0.9,
     )
     pla_physics_mat = make_physics_material(
         stage,
         '/World/Materials/pla_specimen_contact_physics',
-        static_friction=0.5,
-        dynamic_friction=0.35,
+        static_friction=2.2,
+        dynamic_friction=1.8,
     )
 
     # Coordinate convention: X left->right, Y front->back, Z up. Origin is front-left table-top corner.
@@ -347,7 +413,7 @@ def main():
             paper_mat,
         ),
         physics_material=paper_physics_mat,
-        contact_offset=0.003,
+        contact_offset=0.001,
         rest_offset=0.0,
     )
 
@@ -384,20 +450,25 @@ def main():
     flat_circle_marker(stage, '/World/Workspace/RightDiskCenterYellowMarker', (0.590, 0.078, 0.0743), 0.0045, yellow_marker_mat)
 
     # Red specimen/cube on A4 near the back side from photo.
+    specimen_size = (0.030, 0.030, 0.030)
     apply_dynamic_rigid_body(
         cube(
             stage,
             '/World/Workspace/RedSpecimenBlock',
-            (a4_center_x + 0.085, 0.300, paper_th + 0.030 / 2.0),
-            (0.030, 0.030, 0.030),
+            (a4_center_x + 0.085, 0.300, paper_th + 0.030 / 2.0 + 0.00008),
+            specimen_size,
             cube_mat,
         ),
-        mass_kg=0.02,
+        mass_kg=0.03,
+        approximation=None,
         physics_material=pla_physics_mat,
-        contact_offset=0.004,
+        contact_offset=collision_skin_for_dimensions(specimen_size),
         rest_offset=0.0,
         enable_ccd=True,
-        max_depenetration_velocity=0.5,
+        max_depenetration_velocity=0.2,
+        solver_position_iterations=32,
+        solver_velocity_iterations=4,
+        contact_report_threshold=1.0,
     )
 
     # Lighting only; no fixed camera requested.

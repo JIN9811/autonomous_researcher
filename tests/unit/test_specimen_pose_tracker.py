@@ -104,6 +104,47 @@ def test_ros_wrapper_matches_snapshot_node_contract() -> None:
     assert "--color-topic" in script
     assert "--depth-topic" in script
     assert "--info-topic" in script
+    assert "/camera/d455f/color/image_raw" in script
+    assert "/camera/d455f/aligned_depth_to_color/image_raw" in script
+    assert "/camera/d455f/color/camera_info" in script
     assert "create_subscription(Image" in node
     assert "CameraInfo" in node
+    assert "No red specimen contour was detected in {self.cfg.camera_id}" in node
     assert "specimen_pose_debug.pgm" not in node
+
+
+def test_live_snapshot_injects_topics_and_rsusb_env(tmp_path: Path) -> None:
+    script = tmp_path / "run_specimen_pose_snapshot.sh"
+    script.write_text(
+        "#!/usr/bin/env bash\n"
+        "echo \"color=$ATR_SPECIMEN_POSE_COLOR_TOPIC\"\n"
+        "echo \"depth=$ATR_SPECIMEN_POSE_DEPTH_TOPIC\"\n"
+        "echo \"info=$ATR_SPECIMEN_POSE_INFO_TOPIC\"\n"
+        "echo \"pythonpath=$PYTHONPATH\"\n"
+        "echo \"ldpath=$LD_LIBRARY_PATH\"\n"
+        "echo '{\"ok\": true, \"pose\": {\"schema\": \"specimen_pose.v1\"}}'\n",
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+    bridge = SpecimenPoseTrackerBridge(
+        SpecimenPoseTrackerConfig(
+            script_path=script,
+            log_dir=tmp_path / "logs",
+            artifact_dir=tmp_path / "artifacts",
+            color_topic="/camera/d455f/color/image_raw",
+            depth_topic="/camera/d455f/aligned_depth_to_color/image_raw",
+            info_topic="/camera/d455f/color/camera_info",
+            rsusb_pythonpath="/opt/rsusb/python",
+            rsusb_library_path="/opt/rsusb/lib",
+        )
+    )
+
+    result = bridge.snapshot({"mode": "live", "specimen_id": "specimen-live"})
+    log_text = Path(result["log_path"]).read_text(encoding="utf-8")
+
+    assert result["ok"] is True
+    assert "color=/camera/d455f/color/image_raw" in log_text
+    assert "depth=/camera/d455f/aligned_depth_to_color/image_raw" in log_text
+    assert "info=/camera/d455f/color/camera_info" in log_text
+    assert "pythonpath=/opt/rsusb/python" in log_text
+    assert "ldpath=/opt/rsusb/lib" in log_text

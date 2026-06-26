@@ -25,7 +25,18 @@ DEFAULT_PORT = 8766
 DEFAULT_SCENE = Path(__file__).resolve().parents[1] / "scene" / "omx_table_layout.usda"
 LATEST_STATE_PATH = Path("/tmp/atr_isaac_omx_mirror_latest.json")
 RUNTIME_GRIP_JOINT_PATH = "/World/RuntimeGrip/OmxTeleopGripJoint"
-RUNTIME_GRIP_TARGET_MAX_STEP_DEG = 36.0
+GRIPPER_CONTACT_FORCE_HOLD_THRESHOLD_N = 12.0
+GRIPPER_CONTACT_PROBE_MAX_CLOSE_STEP_DEG = 6.0
+GRIPPER_CONTACT_RELEASE_MARGIN_DEG = 1.0
+GRIPPER_CONTACT_PENETRATION_BACKOFF_THRESHOLD_M = 0.0005
+GRIPPER_CONTACT_COLLIDER_TOKENS = (
+    "InnerGripPadCollision",
+    "follower_07_gripper_motorized",
+    "follower_08_gripper_gear",
+    "follower_05_tip",
+)
+GRIPPER_CONTACT_OBJECT_TOKENS = ("RedSpecimenBlock",)
+DEFAULT_PHYSICS_DT_S = 1.0 / 240.0
 REPO_ROOT = next(
     (
         parent
@@ -124,12 +135,14 @@ class IsaacMirrorState:
         defer_apply: bool = False,
         save_stage_on_apply: bool | None = None,
         stage_provider: Callable[[], Any] | None = None,
+        contact_force_provider: Callable[[Any], dict[str, Any]] | None = None,
     ) -> None:
         self.scene_path = scene_path
         self.use_current_stage = use_current_stage
         self.defer_apply = defer_apply
         self.save_stage_on_apply = (not use_current_stage) if save_stage_on_apply is None else bool(save_stage_on_apply)
         self.stage_provider = stage_provider
+        self.contact_force_provider = contact_force_provider
         self.lock = threading.Lock()
         self.last_payload: dict[str, Any] = {}
         self.pending_payload: dict[str, Any] | None = None
@@ -143,6 +156,13 @@ class IsaacMirrorState:
         self.stage = None
         self._runtime_grip_active = False
         self._last_gripper_target_value: float | None = None
+        self._gripper_contact_hold_target_value: float | None = None
+        self._last_gripper_contact: dict[str, Any] = {
+            "available": False,
+            "contact": False,
+            "force_n": 0.0,
+            "status": "not_polled",
+        }
 
     def stage_or_open(self) -> Any:
         if self.stage_provider is not None:
@@ -273,7 +293,9 @@ class IsaacMirrorState:
                 }
                 return dict(self.last_apply_result)
             stage_summary = self._stage_summary(stage)
-            self._slew_limit_gripper_targets(targets)
+            previous_gripper_target = self._last_gripper_target_value
+            self._annotate_gripper_raw_targets(targets)
+            gripper_contact = self._apply_gripper_contact_control(stage, targets, previous_gripper_target)
             applied = []
             applied_targets = []
             missing = []
@@ -308,6 +330,7 @@ class IsaacMirrorState:
                 "applied_targets": applied_targets[:12],
                 "missing_paths": missing[:12],
                 "runtime_grip": runtime_grip,
+                "gripper_contact": gripper_contact,
                 "stage_summary": stage_summary,
                 "latest_state_path": str(LATEST_STATE_PATH),
             }
@@ -340,6 +363,10 @@ class IsaacMirrorState:
             "drive_max_force": target.get("drive_max_force"),
             "physics_lower_limit": target.get("physics_lower_limit"),
             "physics_upper_limit": target.get("physics_upper_limit"),
+            "contact_probe_limited": bool(target.get("contact_probe_limited")),
+            "contact_hold_active": bool(target.get("contact_hold_active")),
+            "contact_hold_target_value": target.get("contact_hold_target_value"),
+            "contact_penetration_limited": bool(target.get("contact_penetration_limited")),
             "unit": str(target.get("unit") or ""),
         }
         for key in (
@@ -421,23 +448,19 @@ class IsaacMirrorState:
         motor_id = target.get("motor_id")
         return name == "Gripper" or motor_name == "gripper" or str(motor_id) == "16"
 
-    def _slew_limit_gripper_targets(self, targets: list[dict[str, Any]]) -> None:
+    def _annotate_gripper_raw_targets(self, targets: list[dict[str, Any]]) -> None:
         for target in targets:
             if not self._target_is_gripper(target):
                 continue
             value = _safe_float(target.get("target_value"), float("nan"))
             if value != value:
                 continue
-            previous = self._last_gripper_target_value
             target["raw_target_value"] = value
             target["slew_limited"] = False
-            if previous is not None:
-                delta = value - previous
-                max_step = RUNTIME_GRIP_TARGET_MAX_STEP_DEG
-                if abs(delta) > max_step:
-                    value = previous + (max_step if delta > 0 else -max_step)
-                    target["target_value"] = value
-                    target["slew_limited"] = True
+
+    def _remember_final_gripper_target(self, targets: list[dict[str, Any]]) -> None:
+        value = self._gripper_target_value(targets)
+        if value is not None:
             self._last_gripper_target_value = value
 
     @staticmethod
@@ -458,6 +481,188 @@ class IsaacMirrorState:
                 if value == value:
                     return value
         return None
+
+    @staticmethod
+    def _vector_magnitude(value: Any) -> float:
+        try:
+            return sum(float(item) ** 2 for item in value) ** 0.5
+        except Exception:
+            return 0.0
+
+    @staticmethod
+    def _path_matches_any(path: str, tokens: tuple[str, ...]) -> bool:
+        return any(token in path for token in tokens)
+
+    def _poll_gripper_contact_force(self, stage: Any) -> dict[str, Any]:
+        if self.contact_force_provider is not None:
+            try:
+                provided = self.contact_force_provider(stage)
+                result = {
+                    "available": bool(provided.get("available", True)),
+                    "contact": bool(provided.get("contact", False)),
+                    "force_n": _safe_float(provided.get("force_n"), 0.0),
+                    "status": str(provided.get("status") or "provided"),
+                }
+                for key in ("penetration_m", "matched_pairs", "matched_pair_paths"):
+                    if key in provided:
+                        result[key] = provided[key]
+                return result
+            except Exception as exc:
+                return {
+                    "available": False,
+                    "contact": False,
+                    "force_n": 0.0,
+                    "status": f"provider_error:{exc.__class__.__name__}",
+                }
+        try:
+            from omni.physx import get_physx_simulation_interface  # type: ignore
+            from pxr import PhysicsSchemaTools  # type: ignore
+        except Exception as exc:
+            return {
+                "available": False,
+                "contact": False,
+                "force_n": 0.0,
+                "status": f"contact_report_unavailable:{exc.__class__.__name__}",
+            }
+        try:
+            interface = get_physx_simulation_interface()
+            headers, contacts = interface.get_contact_report()
+        except Exception as exc:
+            return {
+                "available": False,
+                "contact": False,
+                "force_n": 0.0,
+                "status": f"contact_report_error:{exc.__class__.__name__}",
+            }
+
+        max_force_n = 0.0
+        max_penetration_m = 0.0
+        matched_pairs = 0
+        matched_pair_paths: list[dict[str, str]] = []
+        try:
+            dt = DEFAULT_PHYSICS_DT_S
+            getter = getattr(interface, "get_simulation_time_steps_per_second", None)
+            if callable(getter):
+                try:
+                    stage_id = 0
+                    scene_path = ""
+                    rate = float(getter(stage_id, scene_path))
+                    if rate > 0:
+                        dt = 1.0 / rate
+                except Exception:
+                    dt = DEFAULT_PHYSICS_DT_S
+            for header in headers:
+                collider0 = str(PhysicsSchemaTools.intToSdfPath(header.collider0))
+                collider1 = str(PhysicsSchemaTools.intToSdfPath(header.collider1))
+                pair = (collider0, collider1)
+                has_gripper = any(self._path_matches_any(path, GRIPPER_CONTACT_COLLIDER_TOKENS) for path in pair)
+                has_object = any(self._path_matches_any(path, GRIPPER_CONTACT_OBJECT_TOKENS) for path in pair)
+                if not (has_gripper and has_object):
+                    continue
+                matched_pairs += 1
+                if len(matched_pair_paths) < 8:
+                    matched_pair_paths.append({"collider0": collider0, "collider1": collider1})
+                start = int(getattr(header, "contact_data_offset", 0) or 0)
+                count = int(getattr(header, "num_contact_data", 0) or 0)
+                for index in range(start, start + count):
+                    if index < 0 or index >= len(contacts):
+                        continue
+                    contact = contacts[index]
+                    impulse_n_s = self._vector_magnitude(getattr(contact, "impulse", (0.0, 0.0, 0.0)))
+                    max_force_n = max(max_force_n, impulse_n_s / dt if dt > 0 else 0.0)
+                    separation = _safe_float(getattr(contact, "separation", 0.0), 0.0)
+                    if separation < 0:
+                        max_penetration_m = max(max_penetration_m, abs(separation))
+        except Exception as exc:
+            return {
+                "available": False,
+                "contact": False,
+                "force_n": 0.0,
+                "status": f"contact_parse_error:{exc.__class__.__name__}",
+            }
+        return {
+            "available": True,
+            "contact": matched_pairs > 0,
+            "force_n": max_force_n,
+            "penetration_m": max_penetration_m,
+            "matched_pairs": matched_pairs,
+            "matched_pair_paths": matched_pair_paths,
+            "status": "contact_report",
+        }
+
+    def _apply_gripper_contact_control(
+        self,
+        stage: Any,
+        targets: list[dict[str, Any]],
+        previous_gripper_target: float | None,
+    ) -> dict[str, Any]:
+        contact = self._poll_gripper_contact_force(stage)
+        raw_target = self._gripper_raw_target_value(targets)
+        if raw_target is None:
+            self._last_gripper_contact = {**contact, "hold_active": self._gripper_contact_hold_target_value is not None}
+            return dict(self._last_gripper_contact)
+
+        for target in targets:
+            target["contact_probe_limited"] = False
+            target["contact_hold_active"] = False
+            target["contact_hold_target_value"] = None
+            target["contact_penetration_limited"] = False
+
+        if self._gripper_contact_hold_target_value is not None:
+            hold_target = self._gripper_contact_hold_target_value
+            release_by_open_margin = raw_target > hold_target + GRIPPER_CONTACT_RELEASE_MARGIN_DEG
+            release_by_lost_contact_opening = not bool(contact.get("contact")) and raw_target >= hold_target
+            if release_by_open_margin or release_by_lost_contact_opening:
+                self._gripper_contact_hold_target_value = None
+
+        for target in targets:
+            if not self._target_is_gripper(target):
+                continue
+            value = _safe_float(target.get("target_value"), raw_target)
+            if (
+                self._gripper_contact_hold_target_value is None
+                and previous_gripper_target is not None
+                and value < previous_gripper_target - GRIPPER_CONTACT_PROBE_MAX_CLOSE_STEP_DEG
+            ):
+                value = previous_gripper_target - GRIPPER_CONTACT_PROBE_MAX_CLOSE_STEP_DEG
+                target["target_value"] = value
+                target["contact_probe_limited"] = True
+
+            force_n = _safe_float(contact.get("force_n"), 0.0)
+            penetration_m = _safe_float(contact.get("penetration_m"), 0.0)
+            if (
+                self._gripper_contact_hold_target_value is None
+                and bool(contact.get("contact"))
+                and force_n >= GRIPPER_CONTACT_FORCE_HOLD_THRESHOLD_N
+            ):
+                hold_value = value
+                if (
+                    penetration_m >= GRIPPER_CONTACT_PENETRATION_BACKOFF_THRESHOLD_M
+                    and previous_gripper_target is not None
+                    and value < previous_gripper_target
+                ):
+                    hold_value = previous_gripper_target
+                    target["contact_penetration_limited"] = True
+                self._gripper_contact_hold_target_value = hold_value
+
+            if self._gripper_contact_hold_target_value is not None and value < self._gripper_contact_hold_target_value:
+                target["target_value"] = self._gripper_contact_hold_target_value
+                target["contact_hold_active"] = True
+                target["contact_hold_target_value"] = self._gripper_contact_hold_target_value
+            elif self._gripper_contact_hold_target_value is not None:
+                target["contact_hold_active"] = True
+                target["contact_hold_target_value"] = self._gripper_contact_hold_target_value
+
+        self._remember_final_gripper_target(targets)
+        self._last_gripper_contact = {
+            **contact,
+            "hold_active": self._gripper_contact_hold_target_value is not None,
+            "hold_target_value": self._gripper_contact_hold_target_value,
+            "hold_force_threshold_n": GRIPPER_CONTACT_FORCE_HOLD_THRESHOLD_N,
+            "probe_max_close_step_deg": GRIPPER_CONTACT_PROBE_MAX_CLOSE_STEP_DEG,
+            "penetration_backoff_threshold_m": GRIPPER_CONTACT_PENETRATION_BACKOFF_THRESHOLD_M,
+        }
+        return dict(self._last_gripper_contact)
 
     @staticmethod
     def _runtime_grip_joint_exists(stage: Any) -> bool:

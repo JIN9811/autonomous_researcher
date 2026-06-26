@@ -11,8 +11,27 @@ ISAAC_OMX_SCENE_RELATIVE_PATH = Path("sim/robotis_omx/scene/omx_table_layout.usd
 ISAAC_OMX_ARTICULATION_ROOT = "/World/Robot/Geometry/link0"
 DYNAMIXEL_POSITION_MAX_TICK = 4095.0
 DYNAMIXEL_DEG_PER_TICK = 360.0 / DYNAMIXEL_POSITION_MAX_TICK
+XL330_M288_T_STALL_TORQUE_NM_AT_5V = 0.52
+XL430_W250_T_STALL_TORQUE_NM_AT_12V = 1.5
+ISAAC_OMX_XL330_SIM_GRASP_FORCE_NM = 1.5
+ISAAC_OMX_GRIPPER_SIM_GRASP_FORCE_NM = 4.0
+ISAAC_OMX_ARM_DRIVE_STIFFNESS = 450.0
+ISAAC_OMX_ARM_DRIVE_DAMPING = 60.0
+ISAAC_OMX_GRIPPER_DRIVE_STIFFNESS = 180.0
+ISAAC_OMX_GRIPPER_DRIVE_DAMPING = 18.0
+ISAAC_OMX_XL330_M288_T_DRIVE = {
+    "drive_stiffness": ISAAC_OMX_ARM_DRIVE_STIFFNESS,
+    "drive_damping": ISAAC_OMX_ARM_DRIVE_DAMPING,
+    "drive_max_force": ISAAC_OMX_XL330_SIM_GRASP_FORCE_NM,
+}
+ISAAC_OMX_XL430_W250_T_DRIVE = {
+    "drive_stiffness": ISAAC_OMX_ARM_DRIVE_STIFFNESS,
+    "drive_damping": ISAAC_OMX_ARM_DRIVE_DAMPING,
+    "drive_max_force": XL430_W250_T_STALL_TORQUE_NM_AT_12V,
+}
 ISAAC_OMX_JOINT_MAP: tuple[dict[str, Any], ...] = (
     {
+        **ISAAC_OMX_XL430_W250_T_DRIVE,
         "motor_id": 11,
         "motor_name": "shoulder_pan",
         "isaac_joint_name": "Joint1",
@@ -24,6 +43,7 @@ ISAAC_OMX_JOINT_MAP: tuple[dict[str, Any], ...] = (
         "unit": "deg",
     },
     {
+        **ISAAC_OMX_XL430_W250_T_DRIVE,
         "motor_id": 12,
         "motor_name": "shoulder_lift",
         "isaac_joint_name": "Joint2",
@@ -40,6 +60,7 @@ ISAAC_OMX_JOINT_MAP: tuple[dict[str, Any], ...] = (
         "unit": "deg",
     },
     {
+        **ISAAC_OMX_XL430_W250_T_DRIVE,
         "motor_id": 13,
         "motor_name": "elbow_flex",
         "isaac_joint_name": "Joint3",
@@ -56,6 +77,7 @@ ISAAC_OMX_JOINT_MAP: tuple[dict[str, Any], ...] = (
         "unit": "deg",
     },
     {
+        **ISAAC_OMX_XL330_M288_T_DRIVE,
         "motor_id": 14,
         "motor_name": "wrist_flex",
         "isaac_joint_name": "Joint4",
@@ -72,6 +94,7 @@ ISAAC_OMX_JOINT_MAP: tuple[dict[str, Any], ...] = (
         "unit": "deg",
     },
     {
+        **ISAAC_OMX_XL330_M288_T_DRIVE,
         "motor_id": 15,
         "motor_name": "wrist_roll",
         "isaac_joint_name": "Joint5",
@@ -83,6 +106,7 @@ ISAAC_OMX_JOINT_MAP: tuple[dict[str, Any], ...] = (
         "unit": "deg",
     },
     {
+        **ISAAC_OMX_XL330_M288_T_DRIVE,
         "motor_id": 16,
         "motor_name": "gripper",
         "isaac_joint_name": "Gripper",
@@ -98,9 +122,9 @@ ISAAC_OMX_JOINT_MAP: tuple[dict[str, Any], ...] = (
         "source_raw_min": 0.0,
         "source_raw_max": DYNAMIXEL_POSITION_MAX_TICK,
         "clamp_to_limits": True,
-        "drive_stiffness": 900.0,
-        "drive_damping": 90.0,
-        "drive_max_force": 25.0,
+        "drive_stiffness": ISAAC_OMX_GRIPPER_DRIVE_STIFFNESS,
+        "drive_damping": ISAAC_OMX_GRIPPER_DRIVE_DAMPING,
+        "drive_max_force": ISAAC_OMX_GRIPPER_SIM_GRASP_FORCE_NM,
         "unit": "percent",
     },
 )

@@ -244,6 +244,22 @@ def Xform "omx" (
                                         double3 xformOp:translate = (0, 0, 0)
                                         uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
                                     }
+
+                                    def Cube "InnerGripPadCollision" (
+                                        prepend apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "MaterialBindingAPI"]
+                                    )
+                                    {
+                                        rel material:binding:physics = </omx/Physics/AntiSlipTapeMaterial>
+                                        float physxCollision:contactOffset = 0.0005
+                                        float physxCollision:restOffset = 0
+                                        custom token physics:approximation = "box"
+                                        bool physics:collisionEnabled = 1
+                                        double size = 1
+                                        uniform token purpose = "guide"
+                                        float3 xformOp:scale = (0.01264, 0.0012, 0.02094)
+                                        double3 xformOp:translate = (0.05868, -0.00855, 0)
+                                        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+                                    }
                                 }
 
                                 def Xform "link7"
@@ -275,6 +291,22 @@ def Xform "omx" (
                                         double3 xformOp:translate = (0, 0, 0)
                                         uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
                                     }
+
+                                    def Cube "InnerGripPadCollision_mimic" (
+                                        prepend apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "MaterialBindingAPI"]
+                                    )
+                                    {
+                                        rel material:binding:physics = </omx/Physics/AntiSlipTapeMaterial>
+                                        float physxCollision:contactOffset = 0.0005
+                                        float physxCollision:restOffset = 0
+                                        custom token physics:approximation = "box"
+                                        bool physics:collisionEnabled = 1
+                                        double size = 1
+                                        uniform token purpose = "guide"
+                                        float3 xformOp:scale = (0.01263, 0.0012, 0.02174)
+                                        double3 xformOp:translate = (0.05869, 0.00855, 0)
+                                        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+                                    }
                                 }
                             }
                         }
@@ -300,12 +332,15 @@ def Xform "omx" (
         }
 
         def Material "AntiSlipTapeMaterial" (
-            prepend apiSchemas = ["PhysicsMaterialAPI"]
+            prepend apiSchemas = ["PhysicsMaterialAPI", "PhysxMaterialAPI"]
         )
         {
-            float physics:dynamicFriction = 1.8
+            float physxMaterial:compliantContactDamping = 300
+            float physxMaterial:compliantContactStiffness = 50000
+            uniform token physxMaterial:frictionCombineMode = "max"
+            float physics:dynamicFriction = 4
             float physics:restitution = 0
-            float physics:staticFriction = 2.4
+            float physics:staticFriction = 5
         }
     }
 

@@ -463,6 +463,19 @@ The UTM/BRIO bridge remains the inspection and placement-verification camera pat
 
 The D455F tracker does not reuse `/image_utm` and does not keep a shared ROS topic open for VLA. It captures one RGB-D pose, stops ROS, confirms release, and returns the camera to VLA.
 
+Current ROS topic contract:
+
+```text
+color: /camera/d455f/color/image_raw
+depth: /camera/d455f/aligned_depth_to_color/image_raw
+info:  /camera/d455f/color/camera_info
+```
+
+The Spark workstation should prefer the local RSUSB Python/librealsense build
+when Python tools import `pyrealsense2`. The bridge injects
+`/home/jin/librealsense-rsusb/build-rsusb-system/Release` into `PYTHONPATH` and
+`LD_LIBRARY_PATH` for the one-shot tracker subprocess.
+
 Runtime boundary:
 
 ```text
@@ -474,3 +487,10 @@ VLA route owns D455F by default
 ```
 
 The post-manipulation placement check still uses the BRIO/UTM runtime path and its RQT-like graph evidence.
+
+Observed hardware boundary on 2026-06-25: D455F initially enumerated on USB2,
+then moved to USB3 during re-enumeration, but later `NVDA8000:00` reported
+`xHCI host controller not responding, assume dead` and the camera disappeared
+from `lsusb`. In that state, ROS can create publishers but no frames arrive.
+Recover the USB controller by replug/power-cycle/reboot before live D455F
+validation; test mode continues through the deterministic virtual pose path.

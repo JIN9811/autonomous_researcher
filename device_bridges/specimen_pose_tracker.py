@@ -52,6 +52,11 @@ class SpecimenPoseTrackerConfig:
     artifact_dir: Path = Path("runs")
     ros_setup_paths: list[str] = field(default_factory=lambda: ["/opt/ros/jazzy/setup.bash"])
     extra_setup_paths: list[str] = field(default_factory=list)
+    color_topic: str = "/camera/d455f/color/image_raw"
+    depth_topic: str = "/camera/d455f/aligned_depth_to_color/image_raw"
+    info_topic: str = "/camera/d455f/color/camera_info"
+    rsusb_pythonpath: str = "/home/jin/librealsense-rsusb/build-rsusb-system/Release"
+    rsusb_library_path: str = "/home/jin/librealsense-rsusb/build-rsusb-system/Release"
     max_runtime_sec: float = 8.0
     release_timeout_sec: float = 5.0
     pose_confidence_threshold: float = 0.75
@@ -83,6 +88,11 @@ class SpecimenPoseTrackerConfig:
             artifact_dir=artifact_dir,
             ros_setup_paths=[str(item) for item in ros_setup_paths] if isinstance(ros_setup_paths, list) else [str(ros_setup_paths)],
             extra_setup_paths=[str(item) for item in extra_setup_paths] if isinstance(extra_setup_paths, list) else [str(extra_setup_paths)],
+            color_topic=str(raw.get("color_topic") or "/camera/d455f/color/image_raw"),
+            depth_topic=str(raw.get("depth_topic") or "/camera/d455f/aligned_depth_to_color/image_raw"),
+            info_topic=str(raw.get("info_topic") or "/camera/d455f/color/camera_info"),
+            rsusb_pythonpath=str(raw.get("rsusb_pythonpath") or "/home/jin/librealsense-rsusb/build-rsusb-system/Release"),
+            rsusb_library_path=str(raw.get("rsusb_library_path") or "/home/jin/librealsense-rsusb/build-rsusb-system/Release"),
             max_runtime_sec=max(_safe_float(raw.get("max_runtime_sec"), 8.0), 1.0),
             release_timeout_sec=max(_safe_float(raw.get("release_timeout_sec"), 5.0), 0.5),
             pose_confidence_threshold=max(min(_safe_float(raw.get("pose_confidence_threshold"), 0.75), 1.0), 0.0),
@@ -150,8 +160,15 @@ class SpecimenPoseTrackerBridge:
         env = os.environ.copy()
         env["ATR_D455F_SERIAL"] = self.config.d455f_serial
         env["ATR_SPECIMEN_POSE_THRESHOLD"] = str(self.config.pose_confidence_threshold)
+        env.setdefault("ATR_SPECIMEN_POSE_COLOR_TOPIC", self.config.color_topic)
+        env.setdefault("ATR_SPECIMEN_POSE_DEPTH_TOPIC", self.config.depth_topic)
+        env.setdefault("ATR_SPECIMEN_POSE_INFO_TOPIC", self.config.info_topic)
         env["ATR_SPECIMEN_POSE_ROS_SETUP_PATHS"] = os.pathsep.join(self.config.ros_setup_paths)
         env["ATR_SPECIMEN_POSE_EXTRA_SETUP_PATHS"] = os.pathsep.join(self.config.extra_setup_paths)
+        if self.config.rsusb_pythonpath:
+            env["PYTHONPATH"] = self.config.rsusb_pythonpath + os.pathsep + env.get("PYTHONPATH", "")
+        if self.config.rsusb_library_path:
+            env["LD_LIBRARY_PATH"] = self.config.rsusb_library_path + os.pathsep + env.get("LD_LIBRARY_PATH", "")
         try:
             completed = subprocess.run(
                 command,

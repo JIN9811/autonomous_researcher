@@ -220,9 +220,14 @@ devices:
     enabled: true
     camera_id: d455f_global
     d455f_serial: "341522300873"
+    color_topic: /camera/d455f/color/image_raw
+    depth_topic: /camera/d455f/aligned_depth_to_color/image_raw
+    info_topic: /camera/d455f/color/camera_info
     script_path: scripts/vision/run_specimen_pose_snapshot.sh
     log_dir: artifacts/specimen_pose_tracker
     artifact_dir: runs
+    rsusb_pythonpath: /home/jin/librealsense-rsusb/build-rsusb-system/Release
+    rsusb_library_path: /home/jin/librealsense-rsusb/build-rsusb-system/Release
     ros_setup_paths:
       - /opt/ros/jazzy/setup.bash
     extra_setup_paths:

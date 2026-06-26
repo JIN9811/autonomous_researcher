@@ -255,3 +255,14 @@ Required readiness fields:
 Live mode blocks ManipulationAgent if the D455F is not returned to the VLA route. Test mode may use a deterministic virtual `specimen_pose.v1`, but the returned payload must include a fallback trace so it is never mistaken for physical camera evidence.
 
 Current physical caveat: the D455F must enumerate as a USB3 RealSense device before live snapshot validation. If the D455F is unavailable, the bridge/API/agent/GUI path can be tested up to the live camera boundary only.
+
+Runtime topic contract:
+
+- Color: `/camera/d455f/color/image_raw`
+- Depth: `/camera/d455f/aligned_depth_to_color/image_raw`
+- Camera info: `/camera/d455f/color/camera_info`
+
+If kernel logs show `xHCI host controller not responding, assume dead` on the
+D455F host controller, the VisionAgent must report a hardware-boundary failure
+instead of retrying indefinitely. Use the virtual pose path only in test mode and
+include the fallback trace in the report.

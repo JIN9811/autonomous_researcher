@@ -69,6 +69,10 @@ def test_vision_utm_device_bridge_page_wires_camera_api() -> None:
     js = (ROOT / "web/static/vision_utm_device_bridge.js").read_text(encoding="utf-8")
 
     assert "Vision Camera Device Bridge" in html
+    assert "btn-vision-camera-page-runtime" in html
+    assert "btn-vision-camera-page-test" in html
+    assert 'data-vision-camera-page-panel="runtime"' in html
+    assert 'data-vision-camera-page-panel="test"' in html
     assert "RQT flow from cloned UTM program" in html
     assert "vision-camera-device-path" in html
     assert "btn-vision-camera-precheck" in html
@@ -76,6 +80,13 @@ def test_vision_utm_device_bridge_page_wires_camera_api() -> None:
     assert "btn-vision-camera-frame-stop" in html
     assert "vision-camera-frame-stream-status" in html
     assert "btn-vision-camera-calibrate" in html
+    assert "Specimen Pose Test" in html
+    assert "btn-vision-pose-status" in html
+    assert "btn-vision-pose-virtual" in html
+    assert "btn-vision-pose-d455f" in html
+    assert "btn-vision-pose-d405" in html
+    assert "btn-vision-pose-release" in html
+    assert "vision-pose-result-log" in html
     assert "/static/vision_utm_device_bridge.js" in html
     assert "/api/equipment/utm-runtime/camera-config" in js
     assert "/api/equipment/utm-runtime/camera/devices" in js
@@ -89,6 +100,13 @@ def test_vision_utm_device_bridge_page_wires_camera_api() -> None:
     assert "profile.ros_output_topic || profile.ros_rect_topic || profile.ros_image_topic" in js
     assert "startFrameStream" in js
     assert "stopFrameStream" in js
+    assert "selectVisionCameraPage" in js
+    assert "atrVisionCameraBridgePage" in js
+    assert "/api/vision/specimen-pose/status" in js
+    assert "/api/vision/specimen-pose/snapshot" in js
+    assert "/api/vision/specimen-pose/release" in js
+    assert "/camera/d405/color/image_raw" in js
+    assert "/camera/d455f/color/image_raw" in js
     assert "frameStreamUrlCache" in js
     assert "frameStreamUrlKey" in js
     assert "Date.now()" not in js[js.index("function utmRuntimeFrameStreamUrl"):js.index("function frameStreamTopicLabel")]

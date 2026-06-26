@@ -11,6 +11,7 @@ const state = {
   frameStreamUrlCache: "",
   frameStreamUrlKey: "",
   activeProfile: {},
+  activePage: "runtime",
 };
 
 function escapeHtml(value) {
@@ -59,11 +60,12 @@ function setBusy(busy, label = "working") {
   state.busy = busy;
   state.buttons.forEach((button) => { button.disabled = busy; });
   updateFrameStreamControls();
-  const pill = el("vision-camera-command-pill");
-  if (pill) {
+  ["vision-camera-command-pill", "vision-pose-command-pill"].forEach((id) => {
+    const pill = el(id);
+    if (!pill) return;
     pill.textContent = busy ? label : "idle";
     pill.className = `badge ${busy ? "busy" : "idle"}`;
-  }
+  });
 }
 
 function updateFrameStreamControls() {
@@ -132,6 +134,39 @@ function updateBanner(title, detail, status = "idle") {
     pill.textContent = status;
     pill.className = `badge ${status === "ok" ? "ready" : status === "error" ? "warn" : "idle"}`;
   }
+}
+
+function updatePoseBanner(title, detail, status = "idle") {
+  const titleEl = el("vision-pose-command-title");
+  const detailEl = el("vision-pose-command-detail");
+  const pill = el("vision-pose-command-pill");
+  if (titleEl) titleEl.textContent = title;
+  if (detailEl) detailEl.textContent = detail;
+  if (pill && !state.busy) {
+    pill.textContent = status;
+    pill.className = `badge ${status === "ok" ? "ready" : status === "error" ? "warn" : "idle"}`;
+  }
+}
+
+function selectVisionCameraPage(page) {
+  const selected = page === "test" ? "test" : "runtime";
+  state.activePage = selected;
+  try {
+    localStorage.setItem("atrVisionCameraBridgePage", selected);
+  } catch (_err) {
+    // localStorage may be unavailable in some embedded browser contexts.
+  }
+  document.querySelectorAll("[data-vision-camera-page-panel]").forEach((panel) => {
+    const active = panel.getAttribute("data-vision-camera-page-panel") === selected;
+    panel.hidden = !active;
+    panel.classList.toggle("is-active", active);
+  });
+  document.querySelectorAll(".vision-camera-page-tab").forEach((button) => {
+    const active = button.getAttribute("data-vision-camera-page") === selected;
+    button.classList.toggle("active", active);
+    button.classList.toggle("primary", active);
+    button.setAttribute("aria-selected", active ? "true" : "false");
+  });
 }
 
 function activeProfileFrom(payload) {
@@ -289,6 +324,139 @@ function renderCalibration(payload) {
   const detail = el("vision-camera-calibration-detail");
   if (label) label.textContent = status;
   if (detail) detail.textContent = `${payload?.calibration_file || "calibration YAML pending"}${payload?.pid ? ` · pid=${payload.pid}` : ""}`;
+}
+
+function logPoseResult(payload) {
+  const log = el("vision-pose-result-log");
+  if (log) log.textContent = JSON.stringify(payload || {}, null, 2);
+}
+
+function renderPoseStatus(payload) {
+  const ok = payload?.ok !== false;
+  setDot(el("vision-pose-status-dot"), ok ? "ready" : "warn");
+  const label = el("vision-pose-status-label");
+  const detail = el("vision-pose-status-detail");
+  if (label) label.textContent = payload?.enabled === false ? "Disabled" : ok ? "Ready" : "Error";
+  if (detail) {
+    const camera = payload?.camera_id || "camera";
+    const serial = payload?.d455f_serial || "serial unknown";
+    detail.textContent = `${camera} · ${serial}`;
+  }
+  renderPoseLease(payload?.lease || {});
+}
+
+function renderPoseLease(lease) {
+  const owner = lease?.owner || "unknown";
+  const stateLabel = lease?.state || (owner === "vla_runtime" ? "released" : "active");
+  setDot(el("vision-pose-lease-dot"), owner === "vla_runtime" ? "ready" : owner === "unknown" ? "idle" : "busy");
+  const label = el("vision-pose-lease-label");
+  const detail = el("vision-pose-lease-detail");
+  if (label) label.textContent = owner;
+  if (detail) detail.textContent = `state=${stateLabel}`;
+}
+
+function poseNumberValue(id, fallback) {
+  const value = el(id)?.value;
+  if (value === "" || value === undefined || value === null) return fallback;
+  const num = Number(value);
+  return Number.isFinite(num) ? num : fallback;
+}
+
+function poseBasePayload(mode) {
+  return {
+    mode,
+    specimen_id: el("vision-pose-specimen-id")?.value || "gui-specimen-pose-test",
+    camera_id: el("vision-pose-camera-id")?.value || "d455f_global",
+    workspace: "a4_robot_workspace",
+    output_dir: el("vision-pose-output-dir")?.value || "/tmp/atr_specimen_pose_gui_test",
+    timeout_sec: poseNumberValue("vision-pose-timeout", 8),
+    confidence_threshold: poseNumberValue("vision-pose-confidence", 0.25),
+    min_contour_area_px: poseNumberValue("vision-pose-min-area", 10),
+    color_topic: el("vision-pose-color-topic")?.value || "/camera/d455f/color/image_raw",
+    depth_topic: el("vision-pose-depth-topic")?.value || "/camera/d455f/aligned_depth_to_color/image_raw",
+    info_topic: el("vision-pose-info-topic")?.value || "/camera/d455f/color/camera_info",
+  };
+}
+
+function d405SmokePayload() {
+  const payload = poseBasePayload("live");
+  payload.camera_id = "d405_smoke";
+  payload.specimen_id = payload.specimen_id || "d405-smoke";
+  payload.color_topic = "/camera/d405/color/image_raw";
+  payload.depth_topic = "/camera/d405/aligned_depth_to_color/image_raw";
+  payload.info_topic = "/camera/d405/color/camera_info";
+  return payload;
+}
+
+function renderPoseSnapshot(payload) {
+  const ok = payload?.ok === true;
+  const pose = payload?.pose || {};
+  setDot(el("vision-pose-last-dot"), ok ? "ready" : payload?.pose ? "warn" : "idle");
+  const label = el("vision-pose-last-label");
+  const detail = el("vision-pose-last-detail");
+  if (label) label.textContent = ok ? "Snapshot OK" : payload?.failure_code || "Snapshot returned";
+  if (detail) detail.textContent = payload?.message || `confidence=${pose.confidence ?? "-"}`;
+  renderPoseLease(payload?.lease || pose?.lease || {});
+
+  const meta = el("vision-pose-summary-meta");
+  const summary = el("vision-pose-summary");
+  if (meta) {
+    meta.textContent = `${pose.camera_id || payload?.camera_id || "camera"} · ${pose.specimen_id || "-"} · confidence ${pose.confidence ?? "-"}`;
+  }
+  if (!summary) return;
+  if (!pose || !Object.keys(pose).length) {
+    summary.innerHTML = `<div class="vision-pose-summary-placeholder">${escapeHtml(payload?.failure_code || "NO_POSE")}<br><small>${escapeHtml(payload?.message || "No pose payload returned.")}</small></div>`;
+    return;
+  }
+  const robot = pose.position_robot_base_mm || {};
+  const a4 = pose.position_a4_mm || {};
+  summary.innerHTML = `
+    <div class="vision-pose-summary-grid">
+      <div><span>Specimen</span><strong>${escapeHtml(pose.specimen_id || "-")}</strong></div>
+      <div><span>Camera</span><strong>${escapeHtml(pose.camera_id || "-")}</strong></div>
+      <div><span>Confidence</span><strong>${escapeHtml(pose.confidence ?? "-")}</strong></div>
+      <div><span>Depth mm</span><strong>${escapeHtml(pose.depth_mm ?? "-")}</strong></div>
+      <div><span>Robot X/Y/Z</span><strong>${escapeHtml(`${robot.x ?? "-"} / ${robot.y ?? "-"} / ${robot.z ?? "-"}`)}</strong></div>
+      <div><span>A4 X/Y/Z</span><strong>${escapeHtml(`${a4.x ?? "-"} / ${a4.y ?? "-"} / ${a4.z ?? "-"}`)}</strong></div>
+      <div><span>Debug image</span><strong>${escapeHtml(pose.debug_image_path || "-")}</strong></div>
+      <div><span>Raw JSON</span><strong>${escapeHtml(pose.raw_pose_json_path || "-")}</strong></div>
+    </div>
+  `;
+}
+
+async function loadPoseStatus() {
+  const payload = await fetchJson("/api/vision/specimen-pose/status");
+  renderPoseStatus(payload);
+  logPoseResult(payload);
+  updatePoseBanner("Pose tracker status loaded", payload.ok === false ? payload.failure_code || "Status failed" : "Tracker status is reflected on this page.", payload.ok === false ? "error" : "ok");
+  return payload;
+}
+
+async function runPoseSnapshot(kind) {
+  const payload = kind === "virtual" ? poseBasePayload("test") : kind === "d405" ? d405SmokePayload() : poseBasePayload("live");
+  const result = await fetchJson("/api/vision/specimen-pose/snapshot", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+    timeoutMs: Math.max(12000, Number(payload.timeout_sec || 8) * 1000 + 4000),
+  });
+  renderPoseSnapshot(result);
+  logPoseResult(result);
+  const label = kind === "virtual" ? "Virtual pose test" : kind === "d405" ? "D405 smoke snapshot" : "Live D455F snapshot";
+  updatePoseBanner(`${label} returned`, result.ok ? "Pose tracker returned a usable snapshot." : result.message || result.failure_code || "Snapshot returned a non-OK payload.", result.ok ? "ok" : "error");
+  return result;
+}
+
+async function releasePoseCamera() {
+  const payload = await fetchJson("/api/vision/specimen-pose/release", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ mode: "live" }),
+  });
+  renderPoseLease(payload?.lease || {});
+  logPoseResult(payload);
+  updatePoseBanner("VLA camera release requested", payload.camera_returned_to_vla ? "Camera lease is back to VLA runtime." : payload.message || "Release returned.", payload.ok ? "ok" : "error");
+  return payload;
 }
 
 async function withBusy(label, action) {
@@ -485,7 +653,17 @@ async function refreshInitial() {
 }
 
 function init() {
-  state.buttons = Array.from(document.querySelectorAll("button"));
+  state.buttons = Array.from(document.querySelectorAll("button")).filter((button) => !button.classList.contains("vision-camera-page-tab"));
+  document.querySelectorAll(".vision-camera-page-tab").forEach((button) => {
+    button.addEventListener("click", () => selectVisionCameraPage(button.getAttribute("data-vision-camera-page") || "runtime"));
+  });
+  let savedPage = "runtime";
+  try {
+    savedPage = localStorage.getItem("atrVisionCameraBridgePage") || "runtime";
+  } catch (_err) {
+    savedPage = "runtime";
+  }
+  selectVisionCameraPage(savedPage);
   el("btn-vision-camera-load")?.addEventListener("click", () => withBusy("load", loadConfig));
   el("btn-vision-camera-devices")?.addEventListener("click", () => withBusy("scan", loadDevices));
   el("btn-vision-camera-apply")?.addEventListener("click", () => withBusy("save", applyCamera));
@@ -497,7 +675,13 @@ function init() {
   el("btn-vision-camera-cleanup")?.addEventListener("click", () => withBusy("cleanup", cleanupCameraPorts));
   el("btn-vision-camera-calibrate")?.addEventListener("click", () => withBusy("calibrating", () => calibrationAction("start")));
   el("btn-vision-camera-calibrate-stop")?.addEventListener("click", () => withBusy("stopping", () => calibrationAction("stop")));
+  el("btn-vision-pose-status")?.addEventListener("click", () => withBusy("pose status", loadPoseStatus));
+  el("btn-vision-pose-virtual")?.addEventListener("click", () => withBusy("virtual pose", () => runPoseSnapshot("virtual")));
+  el("btn-vision-pose-d455f")?.addEventListener("click", () => withBusy("d455f pose", () => runPoseSnapshot("d455f")));
+  el("btn-vision-pose-d405")?.addEventListener("click", () => withBusy("d405 pose", () => runPoseSnapshot("d405")));
+  el("btn-vision-pose-release")?.addEventListener("click", () => withBusy("release", releasePoseCamera));
   refreshInitial().catch((err) => logResult({ ok: false, message: String(err) }));
+  loadPoseStatus().catch((err) => logPoseResult({ ok: false, message: String(err) }));
 }
 
 if (document.readyState === "loading") {

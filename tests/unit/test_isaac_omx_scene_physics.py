@@ -30,6 +30,15 @@ INSTANCE_PAYLOADS = [
         "</omx/Physics/AntiSlipTapeMaterial>",
     ),
 ]
+CONTACT_LINK_PATHS = (
+    "link0/link1/link2/link3/link4/follower_05_tip_1",
+    "link0/link1/link2/link3/link4/link5/link6/follower_07_gripper_motorized_1",
+    "link0/link1/link2/link3/link4/link5/link7/follower_08_gripper_gear_1",
+)
+GRIPPER_CONTACT_PROXY_NAMES = (
+    "InnerGripPadCollision",
+    "InnerGripPadCollision_mimic",
+)
 
 
 def _block(name: str) -> str:
@@ -67,13 +76,27 @@ def test_red_specimen_block_is_dynamic_rigid_body() -> None:
     assert "PhysxRigidBodyAPI" in block
     assert "PhysicsCollisionAPI" in block
     assert "PhysxCollisionAPI" in block
+    assert "PhysxContactReportAPI" in block
     assert "PhysicsMassAPI" in block
-    assert re.search(r"float physics:mass = 0\.0?2", block), block
+    assert re.search(r"float physics:mass = 0\.0?3", block), block
     assert "physics:collisionEnabled" in block
-    assert "float physxCollision:contactOffset = 0.004" in block
+    assert "float physxCollision:contactOffset = 0.0003" in block
     assert "float physxCollision:restOffset = 0" in block
     assert "bool physxRigidBody:enableCCD = 1" in block
-    assert "float physxRigidBody:maxDepenetrationVelocity = 0.5" in block
+    assert "float physxRigidBody:maxDepenetrationVelocity = 0.2" in block
+    assert re.search(r"(?:custom )?int physxRigidBody:solverPositionIterationCount = 32", block)
+    assert re.search(r"(?:custom )?int physxRigidBody:solverVelocityIterationCount = 4", block)
+    assert "float physxContactReport:threshold = 1" in block
+    assert 'double3 xformOp:translate = (0.4, 0.3, 0.0152)' in block
+    assert "physics:approximation" not in block
+
+
+def test_red_specimen_collision_skin_is_derived_from_object_size() -> None:
+    script = (REPO_ROOT / "sim" / "robotis_omx" / "tools" / "build_table_layout_scene.py").read_text(encoding="utf-8")
+
+    assert "def collision_skin_for_dimensions" in script
+    assert "specimen_size = (0.030, 0.030, 0.030)" in script
+    assert "contact_offset=collision_skin_for_dimensions(specimen_size)" in script
 
 
 def test_red_specimen_and_work_surfaces_use_realistic_contact_materials() -> None:
@@ -81,16 +104,16 @@ def test_red_specimen_and_work_surfaces_use_realistic_contact_materials() -> Non
 
     assert 'def Material "paper_contact_physics"' in text
     assert 'def Material "pla_specimen_contact_physics"' in text
-    assert "float physics:staticFriction = 0.75" in text
-    assert "float physics:dynamicFriction = 0.55" in text
-    assert "float physics:staticFriction = 0.5" in text
-    assert "float physics:dynamicFriction = 0.35" in text
+    assert "float physics:staticFriction = 1.1" in text
+    assert "float physics:dynamicFriction = 0.9" in text
+    assert "float physics:staticFriction = 2.2" in text
+    assert "float physics:dynamicFriction = 1.8" in text
     assert "float physics:restitution = 0" in text
 
     block = _block("A4Sheet")
     assert "rel material:binding:physics = </World/Materials/paper_contact_physics>" in block
     assert "PhysxCollisionAPI" in block
-    assert "float physxCollision:contactOffset = 0.003" in block
+    assert "float physxCollision:contactOffset = 0.001" in block
     assert "float physxCollision:restOffset = 0" in block
 
     block = _block("RedSpecimenBlock")
@@ -110,20 +133,111 @@ def test_robot_gripper_uses_antislip_tape_contact_material() -> None:
         match = re.search(r'def Material "AntiSlipTapeMaterial".*?\n\s*}', text, flags=re.DOTALL)
         assert match, payload
         block = match.group(0)
-        assert "float physics:staticFriction = 2.4" in block, payload
-        assert "float physics:dynamicFriction = 1.8" in block, payload
+        assert "float physics:staticFriction = 5" in block, payload
+        assert "float physics:dynamicFriction = 4" in block, payload
         assert "float physics:restitution = 0" in block, payload
+        assert "PhysxMaterialAPI" in block, payload
+        assert 'uniform token physxMaterial:frictionCombineMode = "max"' in block, payload
+        assert "float physxMaterial:compliantContactStiffness = 50000" in block, payload
+        assert "float physxMaterial:compliantContactDamping = 300" in block, payload
 
     for payload, expected_binding in INSTANCE_PAYLOADS:
         text = payload.read_text(encoding="utf-8")
-        for name in ("follower_07_gripper_motorized_1", "follower_08_gripper_gear_1"):
+        fingertip_contact_links = (
+            "follower_05_tip_1",
+            "follower_07_gripper_motorized_1",
+            "follower_08_gripper_gear_1",
+        )
+        for name in fingertip_contact_links:
             match = re.search(rf'def Xform "{name}".*?\n    }}', text, flags=re.DOTALL)
             assert match, f"{payload}:{name}"
             block = match.group(0)
             assert expected_binding in block, f"{payload}:{name}"
             assert "PhysxCollisionAPI" in block, f"{payload}:{name}"
-            assert "float physxCollision:contactOffset = 0.002" in block, f"{payload}:{name}"
+            assert "float physxCollision:contactOffset = 0.001" in block, f"{payload}:{name}"
             assert "float physxCollision:restOffset = 0" in block, f"{payload}:{name}"
+
+
+def test_robot_gripper_has_explicit_inner_collision_proxy_pads() -> None:
+    expected_transforms = {
+        "InnerGripPadCollision": (
+            "float3 xformOp:scale = (0.01264, 0.0012, 0.02094)",
+            "double3 xformOp:translate = (0.05868, -0.00855, 0)",
+        ),
+        "InnerGripPadCollision_mimic": (
+            "float3 xformOp:scale = (0.01263, 0.0012, 0.02174)",
+            "double3 xformOp:translate = (0.05869, 0.00855, 0)",
+        ),
+    }
+    for payload, expected_binding in (
+        (
+            REPO_ROOT / "sim" / "robotis_omx" / "omx" / "payloads" / "base.usda",
+            "</omx/Physics/AntiSlipTapeMaterial>",
+        ),
+        (
+            REPO_ROOT / "sim" / "robotis_omx" / "scene" / "payloads" / "base.usda",
+            "</tn__omxscene_h8/Physics/AntiSlipTapeMaterial>",
+        ),
+    ):
+        text = payload.read_text(encoding="utf-8")
+        for name in GRIPPER_CONTACT_PROXY_NAMES:
+            match = re.search(rf'def Cube "{re.escape(name)}".*?\n\s*}}', text, flags=re.DOTALL)
+            assert match, f"{payload}:{name}"
+            block = match.group(0)
+            assert 'prepend apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "MaterialBindingAPI"]' in block
+            assert expected_binding in block, f"{payload}:{name}"
+            assert "bool physics:collisionEnabled = 1" in block
+            assert 'custom token physics:approximation = "box"' in block
+            assert "float physxCollision:contactOffset = 0.0005" in block
+            assert "float physxCollision:restOffset = 0" in block
+            assert 'uniform token purpose = "guide"' in block
+            expected_scale, expected_translate = expected_transforms[name]
+            assert expected_scale in block
+            assert expected_translate in block
+
+
+def test_robot_gripper_physx_payload_binds_antislip_on_composed_contact_roots() -> None:
+    for payload, expected_binding in zip(PHYSX_PAYLOADS, (
+        "</tn__omxscene_h8/Physics/AntiSlipTapeMaterial>",
+        "</omx/Physics/AntiSlipTapeMaterial>",
+    ), strict=True):
+        text = payload.read_text(encoding="utf-8")
+        for link_path in CONTACT_LINK_PATHS:
+            name = link_path.rsplit("/", 1)[-1]
+            match = re.search(
+                rf'over "{re.escape(name)}".*?\n\s*}}',
+                text,
+                flags=re.DOTALL,
+            )
+            assert match, f"{payload}:{link_path}"
+            block = match.group(0)
+            assert expected_binding in block, f"{payload}:{link_path}"
+            assert "PhysxCollisionAPI" in block, f"{payload}:{link_path}"
+            assert "MaterialBindingAPI" in block, f"{payload}:{link_path}"
+            assert "float physxCollision:contactOffset = 0.001" in block, f"{payload}:{link_path}"
+            assert "float physxCollision:restOffset = 0" in block, f"{payload}:{link_path}"
+
+
+def _payload_joint_drive_max_force(path: Path, joint_name: str) -> float:
+    text = path.read_text(encoding="utf-8")
+    match = re.search(rf'def PhysicsRevoluteJoint "{re.escape(joint_name)}".*?\n\s*}}', text, flags=re.DOTALL)
+    assert match, f"{joint_name} missing in {path}"
+    block = match.group(0)
+    max_force = re.search(r"float drive:angular:physics:maxForce = (-?\d+(?:\.\d+)?)", block)
+    assert max_force, f"{joint_name} drive max force missing in {path}"
+    return float(max_force.group(1))
+
+
+def test_robot_payload_drives_use_xl330_grasp_force_override() -> None:
+    for payload in PHYSICS_PAYLOADS:
+        text = payload.read_text(encoding="utf-8")
+
+        for joint_name in ("Joint1", "Joint2", "Joint3"):
+            assert _payload_joint_drive_max_force(payload, joint_name) == 1.5
+        for joint_name in ("Joint4", "Joint5"):
+            assert _payload_joint_drive_max_force(payload, joint_name) == 1.5
+        for joint_name in ("Gripper", "Gripper_mimic"):
+            assert _payload_joint_drive_max_force(payload, joint_name) == 4.0
 
 
 def test_robot_internal_collision_is_not_filtered_out() -> None:

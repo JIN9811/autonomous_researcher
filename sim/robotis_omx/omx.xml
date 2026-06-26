@@ -19,18 +19,24 @@
   <default>
     <default class="omx">
       <joint frictionloss="0.1" armature="0.1"/>
-      <!-- XL330-M288-T: stall torque 0.52 N.m -->
-      <position kp="50" dampratio="1" forcerange="-3.5 3.5"/>
+      <!-- XL330-M288-T (IDs 14-16): sim grasp force raised above 0.52 N.m stall torque. -->
+      <position kp="50" dampratio="1" forcerange="-1.5 1.5"/>
       <!-- Joint 1: -270 ~ +360 deg -->
       <default class="Joint1">
         <joint axis="0 0 1" range="-4.712389 6.283185"/>
+        <!-- XL430-W250-T (ID 11): stall torque 1.5 N.m. -->
+        <position forcerange="-1.5 1.5"/>
       </default>
       <!-- Joint 2, 3: -120 ~ +90 deg -->
       <default class="Joint2">
         <joint axis="0 1 0" range="-2.094395 1.570796"/>
+        <!-- XL430-W250-T (ID 12): stall torque 1.5 N.m. -->
+        <position forcerange="-1.5 1.5"/>
       </default>
       <default class="Joint3">
         <joint axis="0 1 0" range="-2.094395 1.570796"/>
+        <!-- XL430-W250-T (ID 13): stall torque 1.5 N.m. -->
+        <position forcerange="-1.5 1.5"/>
       </default>
       <!-- Joint 4: -100 ~ +100 deg -->
       <default class="Joint4">

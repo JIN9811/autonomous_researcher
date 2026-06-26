@@ -13,10 +13,10 @@ def Xform "World"
     {
         vector3f physics:gravityDirection = (0, 0, -1)
         float physics:gravityMagnitude = 9.81
-        bool physxScene:enableCCD = 1
-        bool physxScene:enableStabilization = 1
-        float physxScene:frictionCorrelationDistance = 0.005
-        float physxScene:frictionOffsetThreshold = 0.002
+        custom bool physxScene:enableCCD = 1
+        custom bool physxScene:enableStabilization = 1
+        custom float physxScene:frictionCorrelationDistance = 0.005
+        custom float physxScene:frictionOffsetThreshold = 0.002
         uniform token physxScene:solverType = "TGS"
         custom int physxScene:timeStepsPerSecond = 240
     }
@@ -138,20 +138,6 @@ def Xform "World"
             }
         }
 
-        def Material "blue_corner_marker"
-        {
-            token outputs:surface.connect = </World/Materials/blue_corner_marker/PreviewSurface.outputs:surface>
-
-            def Shader "PreviewSurface"
-            {
-                uniform token info:id = "UsdPreviewSurface"
-                color3f inputs:diffuseColor = (0.02, 0.42, 0.9)
-                float inputs:metallic = 0
-                float inputs:roughness = 0.45
-                token outputs:surface
-            }
-        }
-
         def Material "wood_laminate_contact_physics" (
             prepend apiSchemas = ["PhysicsMaterialAPI"]
         )
@@ -165,18 +151,32 @@ def Xform "World"
             prepend apiSchemas = ["PhysicsMaterialAPI"]
         )
         {
-            float physics:dynamicFriction = 0.55
+            float physics:dynamicFriction = 0.9
             float physics:restitution = 0
-            float physics:staticFriction = 0.75
+            float physics:staticFriction = 1.1
         }
 
         def Material "pla_specimen_contact_physics" (
             prepend apiSchemas = ["PhysicsMaterialAPI"]
         )
         {
-            float physics:dynamicFriction = 0.35
+            float physics:dynamicFriction = 1.8
             float physics:restitution = 0
-            float physics:staticFriction = 0.5
+            float physics:staticFriction = 2.2
+        }
+
+        def Material "blue_corner_marker"
+        {
+            token outputs:surface.connect = </World/Materials/blue_corner_marker/PreviewSurface.outputs:surface>
+
+            def Shader "PreviewSurface"
+            {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.02, 0.42, 0.9)
+                float inputs:metallic = 0
+                float inputs:roughness = 0.45
+                token outputs:surface
+            }
         }
 
         def Material "yellow_center_marker"
@@ -201,7 +201,7 @@ def Xform "World"
         )
         {
             rel material:binding = </World/Materials/desk_redwood_laminate>
-            rel material:binding:physics = </World/Materials/wood_laminate_contact_physics>
+            custom rel material:binding:physics = </World/Materials/wood_laminate_contact_physics>
             custom token physics:approximation = "box"
             bool physics:collisionEnabled = 1
             double size = 1
@@ -232,11 +232,11 @@ def Xform "World"
         )
         {
             rel material:binding = </World/Materials/a4_matte_white>
-            rel material:binding:physics = </World/Materials/paper_contact_physics>
-            float physxCollision:contactOffset = 0.003
-            float physxCollision:restOffset = 0
+            custom rel material:binding:physics = </World/Materials/paper_contact_physics>
             custom token physics:approximation = "box"
             bool physics:collisionEnabled = 1
+            custom float physxCollision:contactOffset = 0.001
+            custom float physxCollision:restOffset = 0
             double size = 1
             float3 xformOp:scale = (0.297, 0.21, 0.00012)
             double3 xformOp:translate = (0.315, 0.265, 0.00006)
@@ -338,22 +338,24 @@ def Xform "World"
         }
 
         def Cube "RedSpecimenBlock" (
-            prepend apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "PhysicsRigidBodyAPI", "PhysxRigidBodyAPI", "PhysicsMassAPI"]
+            prepend apiSchemas = ["PhysicsCollisionAPI", "PhysicsRigidBodyAPI", "PhysicsMassAPI", "PhysxCollisionAPI", "PhysxRigidBodyAPI", "PhysxContactReportAPI"]
         )
         {
             rel material:binding = </World/Materials/red_test_cube>
-            rel material:binding:physics = </World/Materials/pla_specimen_contact_physics>
-            float physxCollision:contactOffset = 0.004
-            float physxCollision:restOffset = 0
-            bool physxRigidBody:enableCCD = 1
-            float physxRigidBody:maxDepenetrationVelocity = 0.5
-            custom token physics:approximation = "box"
+            custom rel material:binding:physics = </World/Materials/pla_specimen_contact_physics>
             bool physics:collisionEnabled = 1
-            float physics:mass = 0.02
+            float physics:mass = 0.03
             bool physics:rigidBodyEnabled = 1
+            custom float physxCollision:contactOffset = 0.0003
+            custom float physxCollision:restOffset = 0
+            custom float physxContactReport:threshold = 1
+            custom bool physxRigidBody:enableCCD = 1
+            custom float physxRigidBody:maxDepenetrationVelocity = 0.2
+            custom int physxRigidBody:solverPositionIterationCount = 32
+            custom int physxRigidBody:solverVelocityIterationCount = 4
             double size = 1
             float3 xformOp:scale = (0.03, 0.03, 0.03)
-            double3 xformOp:translate = (0.4, 0.3, 0.015)
+            double3 xformOp:translate = (0.4, 0.3, 0.0152)
             uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
         }
     }
@@ -382,85 +384,3 @@ def Xform "World"
     }
 }
 
-def "Render" (
-    hide_in_stage_window = true
-    no_delete = true
-)
-{
-    def "OmniverseKit"
-    {
-        def "HydraTextures" (
-            hide_in_stage_window = true
-            no_delete = true
-        )
-        {
-            def RenderProduct "omni_kit_widget_viewport_ViewportTexture_0" (
-                prepend apiSchemas = ["OmniRtxSettingsCommonAdvancedAPI_1", "OmniRtxSettingsRtAdvancedAPI_1", "OmniRtxSettingsPtAdvancedAPI_1", "OmniRtxPostColorGradingAPI_1", "OmniRtxPostChromaticAberrationAPI_1", "OmniRtxPostBloomPhysicalAPI_1", "OmniRtxPostMatteObjectAPI_1", "OmniRtxPostCompositingAPI_1", "OmniRtxPostDofAPI_1", "OmniRtxPostMotionBlurAPI_1", "OmniRtxPostTvNoiseAPI_1", "OmniRtxPostTonemapIrayReinhardAPI_1", "OmniRtxPostDebugSettingsAPI_1", "OmniRtxDebugSettingsAPI_1"]
-                hide_in_stage_window = true
-                no_delete = true
-            )
-            {
-                rel camera = </OmniverseKit_Persp>
-                token omni:rtx:ambientOcclusion:denoiserMode = "none"
-                token omni:rtx:background:source:texture:textureMode = "repeatMirrored"
-                token omni:rtx:background:source:type = "domeLight"
-                bool omni:rtx:debug:view:pixelDebug:enableFixedTextPos = 1
-                token omni:rtx:directLighting:sampledLighting:denoisingTechnique = "None"
-                bool omni:rtx:dlss:frameGeneration = 0
-                float3 omni:rtx:domeLight:rotationAxis = (0, 0, 1)
-                bool omni:rtx:indirectDiffuse:denoiser:enabled = 0
-                bool omni:rtx:material:db:syncLoads = 1
-                token omni:rtx:post:dlss:execMode = "performance"
-                bool omni:rtx:post:registeredCompositing:invertColorCorrection = 1
-                bool omni:rtx:post:registeredCompositing:invertToneMap = 1
-                bool omni:rtx:pt:adaptiveSampling:filterError = 0
-                uint omni:rtx:pt:adaptiveSampling:fixedSppIterations = 2
-                uint omni:rtx:pt:maxSamplesPerLaunch = 2073600
-                uint omni:rtx:pt:mgpu:maxPixelsPerRegionExponent = 12
-                bool omni:rtx:reflections:denoiser:enabled = 0
-                token omni:rtx:rendermode = "RealTimePathTracing"
-                color3f omni:rtx:rt:ambientLight:color = (0.1, 0.1, 0.1)
-                bool omni:rtx:rt:demoire = 0
-                bool omni:rtx:rt:ecoMode:enabled = 0
-                bool omni:rtx:rt:lightcache:spatialCache:dontResolveConflicts = 1
-                int omni:rtx:rt:sss:samples = 1
-                uint omni:rtx:rtpt:maxVolumeBounces = 15
-                float omni:rtx:rtpt:modulatingRoughnessThreshold = 0.08
-                bool omni:rtx:scene:hydra:materialSyncLoads = 1
-                bool omni:rtx:scene:hydra:mdlMaterialWarmup = 1
-                rel orderedVars = </Render/Vars/LdrColor>
-                custom bool overrideClipRange = 0
-                uniform int2 resolution = (1280, 720)
-            }
-        }
-    }
-
-    def RenderSettings "OmniverseGlobalRenderSettings" (
-        prepend apiSchemas = ["OmniRtxSettingsGlobalRtAdvancedAPI_1", "OmniRtxSettingsGlobalPtAdvancedAPI_1"]
-        no_delete = true
-    )
-    {
-        rel products = </Render/OmniverseKit/HydraTextures/omni_kit_widget_viewport_ViewportTexture_0>
-    }
-
-    def "Vars"
-    {
-        def RenderVar "LdrColor" (
-            hide_in_stage_window = true
-            no_delete = true
-        )
-        {
-            uniform string sourceName = "LdrColor"
-            uniform token sourceType = "raw"
-        }
-    }
-}
-
-over "OmniverseKit_Persp" (
-    prepend apiSchemas = ["OmniRtxCameraAutoExposureAPI_1", "OmniRtxCameraExposureAPI_1"]
-)
-{
-    float exposure:fStop = 5
-    float exposure:responsivity = 1.1026709
-    float exposure:time = 0.02
-}

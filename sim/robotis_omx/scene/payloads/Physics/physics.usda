@@ -100,7 +100,7 @@ over "tn__omxscene_h8"
                                         prepend apiSchemas = ["PhysicsDriveAPI:angular", "PhysicsJointStateAPI:angular"]
                                     )
                                     {
-                                        float drive:angular:physics:maxForce = 3.5
+                                        float drive:angular:physics:maxForce = 4
                                         uniform token physics:axis = "Z"
                                         custom rel physics:body0
                                         prepend rel physics:body0 = </tn__omxscene_h8/Geometry/link0/link1/link2/link3/link4/link5>
@@ -128,6 +128,7 @@ over "tn__omxscene_h8"
                                         prepend apiSchemas = ["NewtonMimicAPI", "PhysicsDriveAPI:angular", "PhysicsJointStateAPI:angular"]
                                     )
                                     {
+                                        float drive:angular:physics:maxForce = 4
                                         float newton:mimicCoef1 = -1
                                         rel newton:mimicJoint = </tn__omxscene_h8/Geometry/link0/link1/link2/link3/link4/link5/link6/Gripper>
                                         uniform token physics:axis = "Z"
@@ -148,7 +149,7 @@ over "tn__omxscene_h8"
                                     prepend apiSchemas = ["PhysicsDriveAPI:angular", "PhysicsJointStateAPI:angular"]
                                 )
                                 {
-                                    float drive:angular:physics:maxForce = 3.5
+                                    float drive:angular:physics:maxForce = 1.5
                                     uniform token physics:axis = "X"
                                     custom rel physics:body0
                                     prepend rel physics:body0 = </tn__omxscene_h8/Geometry/link0/link1/link2/link3/link4>
@@ -167,7 +168,7 @@ over "tn__omxscene_h8"
                                 prepend apiSchemas = ["PhysicsDriveAPI:angular", "PhysicsJointStateAPI:angular"]
                             )
                             {
-                                float drive:angular:physics:maxForce = 3.5
+                                float drive:angular:physics:maxForce = 1.5
                                 uniform token physics:axis = "Y"
                                 custom rel physics:body0
                                 prepend rel physics:body0 = </tn__omxscene_h8/Geometry/link0/link1/link2/link3>
@@ -186,7 +187,7 @@ over "tn__omxscene_h8"
                             prepend apiSchemas = ["PhysicsDriveAPI:angular", "PhysicsJointStateAPI:angular"]
                         )
                         {
-                            float drive:angular:physics:maxForce = 3.5
+                            float drive:angular:physics:maxForce = 1.5
                             uniform token physics:axis = "Y"
                             custom rel physics:body0
                             prepend rel physics:body0 = </tn__omxscene_h8/Geometry/link0/link1/link2>
@@ -205,7 +206,7 @@ over "tn__omxscene_h8"
                         prepend apiSchemas = ["PhysicsDriveAPI:angular", "PhysicsJointStateAPI:angular"]
                     )
                     {
-                        float drive:angular:physics:maxForce = 3.5
+                        float drive:angular:physics:maxForce = 1.5
                         uniform token physics:axis = "Y"
                         custom rel physics:body0
                         prepend rel physics:body0 = </tn__omxscene_h8/Geometry/link0/link1>
@@ -224,7 +225,7 @@ over "tn__omxscene_h8"
                     prepend apiSchemas = ["PhysicsDriveAPI:angular", "PhysicsJointStateAPI:angular"]
                 )
                 {
-                    float drive:angular:physics:maxForce = 3.5
+                    float drive:angular:physics:maxForce = 1.5
                     uniform token physics:axis = "Z"
                     custom rel physics:body0
                     prepend rel physics:body0 = </tn__omxscene_h8/Geometry/link0>
@@ -267,14 +268,17 @@ over "tn__omxscene_h8"
         }
 
         def Material "AntiSlipTapeMaterial" (
-            prepend apiSchemas = ["PhysicsMaterialAPI", "NewtonMaterialAPI"]
+            prepend apiSchemas = ["PhysicsMaterialAPI", "NewtonMaterialAPI", "PhysxMaterialAPI"]
         )
         {
             float newton:rollingFriction = 0.0001
             float newton:torsionalFriction = 0.005
-            float physics:dynamicFriction = 1.8
+            float physxMaterial:compliantContactDamping = 300
+            float physxMaterial:compliantContactStiffness = 50000
+            uniform token physxMaterial:frictionCombineMode = "max"
+            float physics:dynamicFriction = 4
             float physics:restitution = 0
-            float physics:staticFriction = 2.4
+            float physics:staticFriction = 5
         }
     }
 }

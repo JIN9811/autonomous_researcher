@@ -1231,6 +1231,14 @@ Required for live D455F one-shot pose tracking:
 sudo apt install -y ros-jazzy-realsense2-camera ros-jazzy-cv-bridge ros-jazzy-image-transport python3-opencv python3-numpy
 ```
 
+The Spark RealSense runtime should prefer the local RSUSB build when Python imports
+`pyrealsense2` directly:
+
+```bash
+export PYTHONPATH=/home/jin/librealsense-rsusb/build-rsusb-system/Release:$PYTHONPATH
+export LD_LIBRARY_PATH=/home/jin/librealsense-rsusb/build-rsusb-system/Release:$LD_LIBRARY_PATH
+```
+
 Build the local ROS package:
 
 ```bash
@@ -1239,3 +1247,16 @@ colcon build --packages-select atr_specimen_pose_tracker
 ```
 
 Live validation requires the D455F to enumerate as a USB3 RealSense device. If it is not visible to `rs-enumerate-devices` or appears only on a USB2/high-speed path, fix the physical cable/hub/port before using `vision.specimen_pose_snapshot` in live mode.
+
+The ROS driver publishes the current default D455F topics under the camera name:
+
+```text
+/camera/d455f/color/image_raw
+/camera/d455f/color/camera_info
+/camera/d455f/aligned_depth_to_color/image_raw
+```
+
+If kernel logs show `xHCI host controller not responding, assume dead` for
+`NVDA8000:00`, the D455F bus has died below ROS/librealsense. Stop the ROS node,
+power-cycle/replug the camera or reboot before retrying; the software bridge can
+only validate up to the live-camera boundary while the device is absent.

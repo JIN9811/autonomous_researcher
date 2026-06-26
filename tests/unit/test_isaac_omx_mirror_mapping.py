@@ -9,6 +9,7 @@ import pytest
 
 from utils.isaac_omx_mirror_mapping import (
     ISAAC_OMX_JOINT_MAP,
+    XL430_W250_T_STALL_TORQUE_NM_AT_12V,
     action_to_joint_state,
     joint_state_item_to_isaac_target,
     load_isaac_omx_mirror_calibration,
@@ -92,9 +93,23 @@ def test_gripper_uses_dynamixel_resolution_angle_with_closed_zero() -> None:
 def test_gripper_mapping_sets_contact_friendly_drive_impedance() -> None:
     converted = joint_state_item_to_isaac_target({"motor_id": 16, "motor_name": "gripper", "source_value": 59.9})
 
-    assert converted["drive_stiffness"] == 900.0
-    assert converted["drive_damping"] == 90.0
-    assert converted["drive_max_force"] == 25.0
+    assert converted["drive_stiffness"] == 180.0
+    assert converted["drive_damping"] == 18.0
+    assert converted["drive_max_force"] == 4.0
+
+
+def test_joint_map_raises_all_xl330_drive_force_for_grasping() -> None:
+    expected_by_motor_id = {
+        11: XL430_W250_T_STALL_TORQUE_NM_AT_12V,
+        12: XL430_W250_T_STALL_TORQUE_NM_AT_12V,
+        13: XL430_W250_T_STALL_TORQUE_NM_AT_12V,
+        14: 1.5,
+        15: 1.5,
+        16: 4.0,
+    }
+
+    for item in ISAAC_OMX_JOINT_MAP:
+        assert item["drive_max_force"] == expected_by_motor_id[item["motor_id"]]
 
 
 def test_value_to_isaac_target_clamps_after_sign_scale_offset() -> None:
