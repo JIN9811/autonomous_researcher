@@ -253,7 +253,7 @@ def Xform "omx" (
                                         float physxCollision:contactOffset = 0.0005
                                         float physxCollision:restOffset = 0
                                         custom token physics:approximation = "box"
-                                        bool physics:collisionEnabled = 1
+                                        bool physics:collisionEnabled = 0
                                         double size = 1
                                         uniform token purpose = "guide"
                                         float3 xformOp:scale = (0.01264, 0.0012, 0.02094)
@@ -300,7 +300,7 @@ def Xform "omx" (
                                         float physxCollision:contactOffset = 0.0005
                                         float physxCollision:restOffset = 0
                                         custom token physics:approximation = "box"
-                                        bool physics:collisionEnabled = 1
+                                        bool physics:collisionEnabled = 0
                                         double size = 1
                                         uniform token purpose = "guide"
                                         float3 xformOp:scale = (0.01263, 0.0012, 0.02174)
@@ -338,9 +338,9 @@ def Xform "omx" (
             float physxMaterial:compliantContactDamping = 300
             float physxMaterial:compliantContactStiffness = 50000
             uniform token physxMaterial:frictionCombineMode = "max"
-            float physics:dynamicFriction = 4
+            float physics:dynamicFriction = 5
             float physics:restitution = 0
-            float physics:staticFriction = 5
+            float physics:staticFriction = 6
         }
     }
 

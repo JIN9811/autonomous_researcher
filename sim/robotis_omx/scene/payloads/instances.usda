@@ -429,7 +429,7 @@ def Scope "Instances"
                     }
                 }
             )
-            token physics:approximation = "convexHull"
+            token physics:approximation = "convexDecomposition"
             float physics:density = 1000
             token purpose = "guide"
         }
@@ -491,7 +491,7 @@ def Scope "Instances"
                     }
                 }
             )
-            token physics:approximation = "convexHull"
+            token physics:approximation = "convexDecomposition"
             float physics:density = 1000
             token purpose = "guide"
         }

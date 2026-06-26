@@ -276,9 +276,9 @@ over "tn__omxscene_h8"
             float physxMaterial:compliantContactDamping = 300
             float physxMaterial:compliantContactStiffness = 50000
             uniform token physxMaterial:frictionCombineMode = "max"
-            float physics:dynamicFriction = 4
+            float physics:dynamicFriction = 5
             float physics:restitution = 0
-            float physics:staticFriction = 5
+            float physics:staticFriction = 6
         }
     }
 }
