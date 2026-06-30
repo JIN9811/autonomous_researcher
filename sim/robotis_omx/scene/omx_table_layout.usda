@@ -15,8 +15,12 @@ def Xform "World"
         float physics:gravityMagnitude = 9.81
         custom bool physxScene:enableCCD = 1
         custom bool physxScene:enableStabilization = 1
-        custom float physxScene:frictionCorrelationDistance = 0.005
+        custom float physxScene:bounceThresholdVelocity = 0.01
+        custom float physxScene:frictionCorrelationDistance = 0.00625
         custom float physxScene:frictionOffsetThreshold = 0.002
+        uniform token physxScene:broadphaseType = "GPU"
+        uint physxScene:gpuFoundLostAggregatePairsCapacity = 8192
+        uint physxScene:gpuTotalAggregatePairsCapacity = 8192
         uniform token physxScene:solverType = "TGS"
         custom int physxScene:timeStepsPerSecond = 240
     }
@@ -157,12 +161,15 @@ def Xform "World"
         }
 
         def Material "pla_specimen_contact_physics" (
-            prepend apiSchemas = ["PhysicsMaterialAPI"]
+            prepend apiSchemas = ["PhysicsMaterialAPI", "PhysxMaterialAPI"]
         )
         {
-            float physics:dynamicFriction = 1.8
+            float physics:dynamicFriction = 0.8
             float physics:restitution = 0
-            float physics:staticFriction = 2.2
+            float physics:staticFriction = 1
+            float physxMaterial:compliantContactDamping = 1000
+            float physxMaterial:compliantContactStiffness = 100000
+            uniform token physxMaterial:frictionCombineMode = "max"
         }
 
         def Material "blue_corner_marker"
@@ -205,12 +212,54 @@ def Xform "World"
             custom token physics:approximation = "box"
             bool physics:collisionEnabled = 1
             double size = 1
-            float3 xformOp:scale = (0.7, 0.45, 0.03)
-            double3 xformOp:translate = (0.35, 0.225, -0.015)
+            float3 xformOp:scale = (0.7, 0.33, 0.03)
+            double3 xformOp:translate = (0.35, 0.285, -0.015)
             uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
         }
 
-        def Mesh "TableTopRedwoodGrainSurface"
+        def Cube "TableTopFrontLeft" (
+            prepend apiSchemas = ["PhysicsCollisionAPI"]
+        )
+        {
+            rel material:binding = </World/Materials/desk_redwood_laminate>
+            custom rel material:binding:physics = </World/Materials/wood_laminate_contact_physics>
+            custom token physics:approximation = "box"
+            bool physics:collisionEnabled = 1
+            double size = 1
+            float3 xformOp:scale = (0.24, 0.12, 0.03)
+            double3 xformOp:translate = (0.12, 0.06, -0.015)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+        }
+
+        def Cube "TableTopFrontRight" (
+            prepend apiSchemas = ["PhysicsCollisionAPI"]
+        )
+        {
+            rel material:binding = </World/Materials/desk_redwood_laminate>
+            custom rel material:binding:physics = </World/Materials/wood_laminate_contact_physics>
+            custom token physics:approximation = "box"
+            bool physics:collisionEnabled = 1
+            double size = 1
+            float3 xformOp:scale = (0.31, 0.12, 0.03)
+            double3 xformOp:translate = (0.545, 0.06, -0.015)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+        }
+
+        def Cube "RobotBasePocketFloor" (
+            prepend apiSchemas = ["PhysicsCollisionAPI"]
+        )
+        {
+            rel material:binding = </World/Materials/desk_dark_redwood_edge>
+            custom rel material:binding:physics = </World/Materials/wood_laminate_contact_physics>
+            custom token physics:approximation = "box"
+            bool physics:collisionEnabled = 1
+            double size = 1
+            float3 xformOp:scale = (0.15, 0.12, 0.004)
+            double3 xformOp:translate = (0.315, 0.06, -0.022)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+        }
+
+        def Mesh "TableTopRedwoodGrainSurface_Back"
         {
             int[] faceVertexCounts = [4]
             int[] faceVertexIndices = [0, 1, 2, 3]
@@ -218,7 +267,49 @@ def Xform "World"
             normal3f[] normals = [(0, 0, 1)] (
                 interpolation = "uniform"
             )
-            point3f[] points = [(0, 0, 0.00003), (0.7, 0, 0.00003), (0.7, 0.45, 0.00003), (0, 0.45, 0.00003)]
+            point3f[] points = [(0, 0.12, 0.00003), (0.7, 0.12, 0.00003), (0.7, 0.45, 0.00003), (0, 0.45, 0.00003)]
+            texCoord2f[] primvars:st = [(0, 0), (1, 0), (1, 1), (0, 1)] (
+                interpolation = "vertex"
+            )
+        }
+
+        def Mesh "TableTopRedwoodGrainSurface_FrontLeft"
+        {
+            int[] faceVertexCounts = [4]
+            int[] faceVertexIndices = [0, 1, 2, 3]
+            rel material:binding = </World/Materials/desk_redwood_textured>
+            normal3f[] normals = [(0, 0, 1)] (
+                interpolation = "uniform"
+            )
+            point3f[] points = [(0, 0, 0.00003), (0.24, 0, 0.00003), (0.24, 0.12, 0.00003), (0, 0.12, 0.00003)]
+            texCoord2f[] primvars:st = [(0, 0), (1, 0), (1, 1), (0, 1)] (
+                interpolation = "vertex"
+            )
+        }
+
+        def Mesh "TableTopRedwoodGrainSurface_FrontRight"
+        {
+            int[] faceVertexCounts = [4]
+            int[] faceVertexIndices = [0, 1, 2, 3]
+            rel material:binding = </World/Materials/desk_redwood_textured>
+            normal3f[] normals = [(0, 0, 1)] (
+                interpolation = "uniform"
+            )
+            point3f[] points = [(0.39, 0, 0.00003), (0.7, 0, 0.00003), (0.7, 0.12, 0.00003), (0.39, 0.12, 0.00003)]
+            texCoord2f[] primvars:st = [(0, 0), (1, 0), (1, 1), (0, 1)] (
+                interpolation = "vertex"
+            )
+        }
+
+        def Mesh "RobotBasePocketFloorRedwoodGrainSurface"
+        {
+            int[] faceVertexCounts = [4]
+            int[] faceVertexIndices = [0, 1, 2, 3]
+            rel material:binding = </World/Materials/desk_dark_redwood_edge>
+            normal3f[] normals = [(0, 0, 1)] (
+                interpolation = "uniform"
+            )
+            point3f[] points = [(0.24, 0, -0.01997), (0.39, 0, -0.01997), (0.39, 0.12, -0.01997), (0.24, 0.12, -0.01997)]
             texCoord2f[] primvars:st = [(0, 0), (1, 0), (1, 1), (0, 1)] (
                 interpolation = "vertex"
             )
@@ -346,9 +437,9 @@ def Xform "World"
             bool physics:collisionEnabled = 1
             float physics:mass = 0.03
             bool physics:rigidBodyEnabled = 1
-            custom float physxCollision:contactOffset = 0.0003
+            custom float physxCollision:contactOffset = 0.003
             custom float physxCollision:restOffset = 0
-            custom float physxContactReport:threshold = 1
+            custom float physxContactReport:threshold = 0.2
             custom bool physxRigidBody:enableCCD = 1
             custom float physxRigidBody:maxDepenetrationVelocity = 0.2
             custom int physxRigidBody:solverPositionIterationCount = 32
@@ -365,7 +456,7 @@ def Xform "World"
     )
     {
         float xformOp:rotateZ = 90
-        double3 xformOp:translate = (0.315, 0.06, 0)
+        double3 xformOp:translate = (0.315, 0.06, -0.02)
         uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateZ"]
     }
 
@@ -383,4 +474,3 @@ def Xform "World"
         }
     }
 }
-

@@ -65,6 +65,11 @@ def test_lerobot_gui_and_test_mode_api_workflow(tmp_path: Path, monkeypatch: Any
     assert "Test Agent Bridge" in page.text
     assert "3. Isaac Sim Link" in page.text
     assert "Mirror during Teleop / Recording" in page.text
+    assert "Active Robot-Cam specimen tracking" in page.text
+    assert "D405 wrist primary" in page.text
+    assert "D455F top fallback" in page.text
+    assert "lerobot-active-robot-cam-enabled-input" in page.text
+    assert "lerobot-active-robot-cam-record-start-input" in page.text
     assert "Open Isaac Sim Mirror" in page.text
     assert "Check Isaac Link" in page.text
     assert "Send Test Pose" in page.text
@@ -81,11 +86,25 @@ def test_lerobot_gui_and_test_mode_api_workflow(tmp_path: Path, monkeypatch: Any
     assert "4. Local Paths" in page.text
     assert "5. Teleoperation" in page.text
     assert "6. Recording" in page.text
-    assert "7. Dataset Visualization" in page.text
-    assert "8. Training" in page.text
-    assert "9. Inference / Rollout" in page.text
-    assert "10. Manipulation Agent Bridge" in page.text
-    assert "11. Session Output" in page.text
+    assert "7. Isaac Sim Data Augmentation" in page.text
+    assert "Augmentation Profile" in page.text
+    assert "standard_sim2real_v2" in page.text
+    assert "Common image/depth augmentation" in page.text
+    assert "Photometric" in page.text
+    assert "Sensor noise" in page.text
+    assert "Depth noise" in page.text
+    assert "Render domain" in page.text
+    assert "Camera pose augmentation" in page.text
+    assert "RGB Strength" in page.text
+    assert "Depth Strength" in page.text
+    assert "Render Strength" in page.text
+    assert "Camera Pose Strength" in page.text
+    assert "btn-isaac-augment-run" in page.text
+    assert "8. Dataset Visualization" in page.text
+    assert "9. Training" in page.text
+    assert "10. Inference / Rollout" in page.text
+    assert "11. Manipulation Agent Bridge" in page.text
+    assert "12. Session Output" in page.text
 
     home = client.get("/")
     assert home.status_code == 200
@@ -399,6 +418,47 @@ def test_lerobot_gui_and_test_mode_api_workflow(tmp_path: Path, monkeypatch: Any
     assert visual["ok"] is True
     assert visual["tool"] == "lerobot.dataset.visualize"
 
+    monkeypatch.setattr(
+        bridge,
+        "augment_isaac_dataset",
+        lambda payload: {
+            "ok": True,
+            "tool": "lerobot.augment.isaac",
+            "summary": {"variant_count": 4, "manifest_path": "/tmp/manifest.jsonl"},
+            "command_preview": ["python3", "scripts/lerobot_isaac_data_augmentation.py"],
+        },
+    )
+    augmented = client.post(
+        "/api/lerobot/augment/isaac",
+        json={"mode": "test", "profile_id": "fake_omx_ai", "dataset_repo_id": "local/fake_dataset"},
+    ).json()
+    assert augmented["ok"] is True
+    assert augmented["tool"] == "lerobot.augment.isaac"
+    assert augmented["summary"]["variant_count"] == 4
+
+    monkeypatch.setattr(
+        bridge,
+        "augment_isaac_preview",
+        lambda payload: {
+            "ok": True,
+            "tool": "lerobot.augment.preview",
+            "preview_count": payload.get("isaac_data_augmentation_preview_count"),
+            "rows": [{"variant_id": "e000_f000000_v000", "camera": "top"}],
+        },
+    )
+    preview = client.post(
+        "/api/lerobot/augment/preview",
+        json={
+            "mode": "test",
+            "profile_id": "fake_omx_ai",
+            "dataset_repo_id": "local/fake_dataset",
+            "isaac_data_augmentation_preview_count": 3,
+        },
+    ).json()
+    assert preview["ok"] is True
+    assert preview["tool"] == "lerobot.augment.preview"
+    assert preview["preview_count"] == 3
+
     wandb_local = client.post(
         "/api/lerobot/wandb-local/start",
         json={"mode": "test", "profile_id": "fake_omx_ai", "wandb_base_url": "http://127.0.0.1:8081"},
@@ -508,3 +568,72 @@ def test_lerobot_train_output_name_includes_policy_type_suffix() -> None:
     assert 'String(policyTypeInput.value || "smolvla")' in script
     assert "`${runName}_train(${suffix})`" in script
     assert "syncTrainNamingFromDataset({ policyChanged: true })" in script
+
+
+def test_lerobot_active_robot_cam_payload_fields_are_wired() -> None:
+    script = resolve_path("web/static/lerobot.js").read_text(encoding="utf-8")
+
+    assert 'const activeRobotCamEnabledInput = $("lerobot-active-robot-cam-enabled-input");' in script
+    assert "active_robot_cam_enabled: boolValue(activeRobotCamEnabledInput)" in script
+    assert 'active_robot_cam_camera_priority: "d405,d455f"' in script
+    assert 'active_robot_cam_primary_camera_key: "wrist"' in script
+    assert 'active_robot_cam_fallback_camera_key: "top"' in script
+    assert "active_robot_cam_record_start_enabled: boolValue(activeRobotCamRecordStartInput)" in script
+
+
+def test_lerobot_gui_api_default_rgbd_render_cameras_are_top_front_right() -> None:
+    request = main_module.LeRobotAPIRequest()
+
+    assert request.isaac_rgbd_render_cameras == "top,front,right"
+    assert request.isaac_data_augmentation_cameras == "top,front,right"
+
+
+def test_lerobot_gui_api_preserves_isaac_augmentation_options() -> None:
+    request = main_module.LeRobotAPIRequest.model_validate(
+        {
+            "isaac_data_augmentation_profile": "sim2real",
+            "isaac_data_augmentation_sensor_noise_enabled": False,
+            "isaac_data_augmentation_rgb_strength": 0.75,
+            "isaac_data_augmentation_depth_strength": 1.25,
+            "isaac_data_augmentation_render_domain_strength": 1.1,
+            "isaac_data_augmentation_camera_pose_strength": 0.6,
+            "isaac_data_augmentation_preview_count": 12,
+            "dataset_mix_real_original_weight": 0.8,
+            "dataset_mix_isaac_rgbd_weight": 0.3,
+            "dataset_mix_isaac_augmentation_weight": 0.2,
+            "dataset_mix_isaac_rgbd_max_samples": 20,
+            "dataset_mix_isaac_augmentation_max_samples": 30,
+            "dataset_mix_seed": 7,
+            "fidelity_weighting_enabled": True,
+            "fidelity_real_original_weight": 1.0,
+            "fidelity_isaac_rgbd_weight": 0.45,
+            "fidelity_isaac_augmentation_weight": 0.25,
+        }
+    )
+    payload = request.model_dump()
+
+    assert payload["isaac_data_augmentation_profile"] == "sim2real"
+    assert payload["isaac_data_augmentation_sensor_noise_enabled"] is False
+    assert payload["isaac_data_augmentation_rgb_strength"] == 0.75
+    assert payload["isaac_data_augmentation_depth_strength"] == 1.25
+    assert payload["isaac_data_augmentation_render_domain_strength"] == 1.1
+    assert payload["isaac_data_augmentation_camera_pose_strength"] == 0.6
+    assert payload["isaac_data_augmentation_preview_count"] == 12
+    assert payload["dataset_mix_real_original_weight"] == 0.8
+    assert payload["dataset_mix_isaac_rgbd_weight"] == 0.3
+    assert payload["dataset_mix_isaac_augmentation_weight"] == 0.2
+    assert payload["dataset_mix_isaac_rgbd_max_samples"] == 20
+    assert payload["dataset_mix_isaac_augmentation_max_samples"] == 30
+    assert payload["dataset_mix_seed"] == 7
+    assert payload["fidelity_weighting_enabled"] is True
+    assert payload["fidelity_real_original_weight"] == 1.0
+    assert payload["fidelity_isaac_rgbd_weight"] == 0.45
+    assert payload["fidelity_isaac_augmentation_weight"] == 0.25
+
+
+def test_lerobot_gui_isaac_augmentation_camera_default_is_top_front_right() -> None:
+    page = resolve_path("web/templates/lerobot.html").read_text(encoding="utf-8")
+    script = resolve_path("web/static/lerobot.js").read_text(encoding="utf-8")
+
+    assert 'id="lerobot-isaac-augment-cameras-input" type="text" value="top,front,right"' in page
+    assert 'top,front,right' in script

@@ -12,6 +12,9 @@ from datetime import datetime
 from types import SimpleNamespace
 from pathlib import Path
 
+import numpy as np
+from PIL import Image
+
 from device_bridges.lerobot_bridge import LeRobotBridge, LeRobotBridgeConfig
 from mcp_tools.lerobot_schemas import LeRobotSessionRequest
 
@@ -60,6 +63,21 @@ def _bridge(tmp_path: Path) -> LeRobotBridge:
     return LeRobotBridge(LeRobotBridgeConfig.from_config(config, repo_root=tmp_path))
 
 
+def test_record_attempt_default_rgbd_render_cameras_are_top_front_right(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    request = LeRobotSessionRequest.model_validate(
+        {
+            "mode": "test",
+            "profile_id": "fake_omx_ai",
+            "dataset_repo_id": "jin/default-rgbd-cameras",
+        }
+    )
+
+    attempt = bridge._record_attempt_summary(request, "lr-record-test")  # noqa: SLF001
+
+    assert attempt["isaac_rgbd_render"]["cameras"] == ["top", "front", "right"]
+
+
 def _make_trainable_lerobot_dataset(path: Path) -> None:
     (path / "meta").mkdir(parents=True, exist_ok=True)
     (path / "data" / "chunk-000").mkdir(parents=True, exist_ok=True)
@@ -83,6 +101,98 @@ def _write_raw_depth_manifest(path: Path) -> None:
                 "depth_scale_m_per_unit": 0.001,
                 "depth_clip_min_mm": 0.0,
                 "depth_clip_max_mm": 2000.0,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def _write_raw_depth_frames(path: Path, *, cameras: tuple[str, ...] = ("top", "wrist"), count: int = 2) -> None:
+    for camera in cameras:
+        camera_dir = path / "sidecar" / "depth_raw" / camera
+        camera_dir.mkdir(parents=True, exist_ok=True)
+        for index in range(count):
+            Image.fromarray(np.full((8, 8), 420 + index, dtype=np.uint16)).save(camera_dir / f"frame_{index:06d}.png")
+
+
+def _write_isaac_rgbd_render_fixture(path: Path, *, camera: str = "wrist") -> tuple[Path, Path]:
+    render_dir = path / "sidecar" / "isaac_rgbd" / "episode_000" / "attempt_aug"
+    camera_dir = render_dir / camera
+    camera_dir.mkdir(parents=True, exist_ok=True)
+    rgb_path = camera_dir / "frame_000000_rgb.png"
+    depth_path = camera_dir / "frame_000000_depth.png"
+    Image.fromarray(np.full((8, 8, 3), [80, 120, 160], dtype=np.uint8), mode="RGB").save(rgb_path)
+    Image.fromarray(np.full((8, 8), 430, dtype=np.uint16)).save(depth_path)
+    (render_dir / "manifest.jsonl").write_text(
+        json.dumps(
+            {
+                "schema": "atr.isaac_rgbd.render_manifest.v1",
+                "status": "rendered",
+                "attempt_id": "attempt_aug",
+                "episode_index": 0,
+                "frame_index": 0,
+                "cameras": [camera],
+                "output_dir": str(render_dir),
+                "specimen_pose": {"a4_xy_mm": [105.0, 148.0], "yaw_deg": 0.0},
+                "files": [
+                    {"camera": camera, "kind": "rgb", "path": str(rgb_path), "encoding": "png"},
+                    {"camera": camera, "kind": "depth", "path": str(depth_path), "encoding": "png16", "unit": "mm"},
+                ],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return rgb_path, depth_path
+
+
+def _write_isaac_rgbd_manifest_rows(path: Path, *, count: int, camera: str = "wrist") -> None:
+    render_dir = path / "sidecar" / "isaac_rgbd" / "episode_000" / "attempt_mix"
+    render_dir.mkdir(parents=True, exist_ok=True)
+    rows = [
+        {
+            "schema": "atr.isaac_rgbd.render_manifest.v1",
+            "status": "metadata_only",
+            "attempt_id": "attempt_mix",
+            "episode_index": 0,
+            "frame_index": index,
+            "cameras": [camera],
+            "files": [],
+        }
+        for index in range(count)
+    ]
+    (render_dir / "manifest.jsonl").write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
+
+
+def _write_isaac_augmentation_summary(path: Path, *, variant_count: int, valid_variant_count: int, failed_variant_count: int = 0) -> None:
+    output_dir = path / "sidecar" / "isaac_augmentation" / "latest"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    manifest_path = output_dir / "manifest.jsonl"
+    rows = [
+        {
+            "schema": "atr.isaac_data_augmentation.variant.v1",
+            "variant_id": f"mix_{index:03d}",
+            "qa_ok": index < valid_variant_count,
+            "source": {"episode_index": 0, "frame_index": index},
+            "image_outputs": {},
+        }
+        for index in range(variant_count)
+    ]
+    manifest_path.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
+    summary_path = output_dir / "summary.json"
+    summary_path.write_text(
+        json.dumps(
+            {
+                "ok": True,
+                "dataset_path": str(path),
+                "output_dir": str(output_dir),
+                "manifest_path": str(manifest_path),
+                "summary_path": str(summary_path),
+                "qa_summary_path": str(output_dir / "qa_summary.json"),
+                "source_frame_count": 1,
+                "variant_count": variant_count,
+                "valid_variant_count": valid_variant_count,
+                "failed_variant_count": failed_variant_count,
             }
         ),
         encoding="utf-8",
@@ -413,9 +523,13 @@ def test_mirror_receiver_verify_fails_on_stale_receiver_state(tmp_path: Path, mo
 def test_mirror_receiver_process_start_status_and_stop(tmp_path: Path) -> None:
     bridge = _bridge(tmp_path)
     source_script = Path(__file__).resolve().parents[2] / "sim" / "robotis_omx" / "tools" / "isaac_omx_mirror_server.py"
+    source_mapping = Path(__file__).resolve().parents[2] / "utils" / "isaac_omx_mirror_mapping.py"
     target_script = tmp_path / "sim" / "robotis_omx" / "tools" / "isaac_omx_mirror_server.py"
+    target_mapping = tmp_path / "utils" / "isaac_omx_mirror_mapping.py"
     target_script.parent.mkdir(parents=True, exist_ok=True)
+    target_mapping.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(source_script, target_script)
+    shutil.copy2(source_mapping, target_mapping)
     port = _free_tcp_port()
     endpoint = f"http://127.0.0.1:{port}/joints"
     try:
@@ -483,11 +597,98 @@ def test_mirror_receiver_extension_command_uses_isaac_app_and_extension(tmp_path
     assert "--/exts/atr.omx.mirror/port=18766" in command
     assert f"--/exts/atr.omx.mirror/scene={scene_path}" in command
     assert "--/exts/atr.omx.mirror/openSceneOnStartup=true" in command
-    assert "--/exts/atr.omx.mirror/playTimelineOnStartup=true" in command
+    assert "--/exts/atr.omx.mirror/playTimelineOnStartup=false" in command
+    assert "--/exts/atr.omx.mirror/specimenPoseActiveRobotCamOnMissing=true" in command
     assert str(scene_path) not in command
 
 
-def test_live_mirror_preflight_blocks_non_isaac_update_tick_receiver(tmp_path: Path) -> None:
+def test_mirror_receiver_extension_command_can_disable_active_robot_cam(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    isaac_app = tmp_path / "IsaacSim" / "isaac-sim.sh"
+    isaac_app.parent.mkdir(parents=True, exist_ok=True)
+    isaac_app.write_text("#!/bin/sh\n", encoding="utf-8")
+    isaac_app.chmod(0o755)
+    extension_manifest = tmp_path / "sim" / "robotis_omx" / "extensions" / "atr.omx.mirror" / "config" / "extension.toml"
+    extension_manifest.parent.mkdir(parents=True, exist_ok=True)
+    extension_manifest.write_text("[package]\ntitle = \"ATR ROBOTIS OMX Mirror Receiver\"\n", encoding="utf-8")
+    scene_path = tmp_path / "sim" / "robotis_omx" / "scene" / "omx_table_layout.usda"
+    scene_path.parent.mkdir(parents=True, exist_ok=True)
+    scene_path.write_text("#usda 1.0\n", encoding="utf-8")
+
+    command_info = bridge._isaac_mirror_receiver_command(
+        {
+            "isaac_mirror_receiver_launch_mode": "isaac_extension",
+            "isaac_mirror_receiver_isaac_sim_executable": str(isaac_app),
+            "isaac_mirror_receiver_scene": str(scene_path),
+            "active_robot_cam_enabled": False,
+        },
+        "http://127.0.0.1:18766/joints",
+    )
+
+    assert command_info["ok"] is True
+    assert "--/exts/atr.omx.mirror/specimenPoseActiveRobotCamOnMissing=false" in command_info["command"]
+
+
+def test_mirror_receiver_process_start_restarts_when_active_robot_cam_option_changes(tmp_path: Path, monkeypatch) -> None:
+    bridge = _bridge(tmp_path)
+    endpoint = "http://127.0.0.1:18766/joints"
+    started_commands: list[list[str]] = []
+    terminated: list[int] = []
+
+    class FakeProcess:
+        next_pid = 7000
+
+        def __init__(self, command: list[str], **_kwargs: object) -> None:
+            FakeProcess.next_pid += 1
+            self.pid = FakeProcess.next_pid
+            self.command = command
+            self.returncode = None
+
+        def poll(self) -> int | None:
+            return self.returncode
+
+        def wait(self, timeout: float | None = None) -> int:
+            self.returncode = 0
+            return 0
+
+    def fake_popen(command: list[str], **kwargs: object) -> FakeProcess:
+        started_commands.append(list(command))
+        return FakeProcess(command, **kwargs)
+
+    def fake_command(payload: dict[str, object], _endpoint: str) -> dict[str, object]:
+        active = "1" if payload.get("active_robot_cam_enabled") else "0"
+        return {"ok": True, "launch_mode": "isaac_extension", "command": ["isaac-sim", f"active={active}"]}
+
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+    bridge._isaac_mirror_receiver_command = fake_command  # type: ignore[method-assign]
+    bridge._wait_for_isaac_mirror_receiver = lambda *_args, **_kwargs: {"ok": True, "health_url": "http://127.0.0.1:18766/health"}  # type: ignore[method-assign]
+    bridge._fetch_isaac_mirror_receiver_health = lambda *_args, **_kwargs: {"ok": True}  # type: ignore[method-assign]
+    bridge._terminate_live_process = lambda process, _signal: terminated.append(process.pid)  # type: ignore[method-assign]
+
+    first = bridge.mirror_receiver_process_start(
+        {
+            "mode": "test",
+            "profile_id": "fake_omx_ai",
+            "isaac_mirror_endpoint": endpoint,
+            "active_robot_cam_enabled": False,
+        }
+    )
+    second = bridge.mirror_receiver_process_start(
+        {
+            "mode": "test",
+            "profile_id": "fake_omx_ai",
+            "isaac_mirror_endpoint": endpoint,
+            "active_robot_cam_enabled": True,
+        }
+    )
+
+    assert first["ok"] is True
+    assert second["ok"] is True
+    assert started_commands == [["isaac-sim", "active=0"], ["isaac-sim", "active=1"]]
+    assert terminated == [first["pid"]]
+
+
+def test_live_mirror_preflight_warns_non_isaac_update_tick_receiver(tmp_path: Path) -> None:
     bridge = _bridge(tmp_path)
     profile = bridge._profile("fake_omx_ai")
     assert profile is not None
@@ -514,8 +715,9 @@ def test_live_mirror_preflight_blocks_non_isaac_update_tick_receiver(tmp_path: P
     )
 
     assert result is not None
-    assert result["ok"] is False
-    assert result["failure_code"] == "LEROBOT_ISAAC_MIRROR_RECEIVER_NOT_IN_ISAAC_UPDATE_TICK"
+    assert result["ok"] is True
+    assert result["status"] == "warning"
+    assert result["warning_code"] == "LEROBOT_ISAAC_MIRROR_RECEIVER_NOT_IN_ISAAC_UPDATE_TICK"
 
 def test_teleoperate_start_can_attach_isaac_mirror_loop(tmp_path: Path) -> None:
     bridge = _bridge(tmp_path)
@@ -560,7 +762,7 @@ def test_teleoperate_stop_stops_attached_isaac_mirror_loop(tmp_path: Path) -> No
     assert stopped["isaac_mirror_stop"]["attached_to_session_id"] == started["session_id"]
 
 
-def test_live_teleoperate_with_isaac_mirror_blocks_when_receiver_unavailable(tmp_path: Path, monkeypatch) -> None:
+def test_live_teleoperate_with_isaac_mirror_starts_when_receiver_unavailable(tmp_path: Path, monkeypatch) -> None:
     bridge = _bridge(tmp_path)
     bridge.config.profiles["fake_omx_ai"]["safety_limits"].update({"live_enabled": True, "allow_teleoperation": True})
     follower = tmp_path / "omx_follower"
@@ -579,7 +781,8 @@ def test_live_teleoperate_with_isaac_mirror_blocks_when_receiver_unavailable(tmp
         },
         raising=False,
     )
-    bridge._start_live_process = lambda **_: (_ for _ in ()).throw(AssertionError("must not start live teleop"))  # type: ignore[method-assign]
+    live_start_kwargs: dict[str, object] = {}
+    bridge._start_live_process = lambda **kwargs: live_start_kwargs.update(kwargs) or {"ok": True, "session_updates": {"pid": 1234, "log_path": "", "returncode": None}}  # type: ignore[method-assign]
 
     result = bridge.teleoperate_start(
         {
@@ -592,9 +795,17 @@ def test_live_teleoperate_with_isaac_mirror_blocks_when_receiver_unavailable(tmp
         }
     )
 
-    assert result["ok"] is False
-    assert result["failure_code"] == "LEROBOT_ISAAC_MIRROR_RECEIVER_UNAVAILABLE"
-    assert "http://127.0.0.1:8766/health" in result["message"]
+    assert result["ok"] is True
+    assert result["status"] == "TELEOP_ACTIVE"
+    assert result["isaac_mirror"]["status"] == "IN_PROCESS"
+    assert any(
+        item["step"] == "ISAAC_MIRROR_RECEIVER_PENDING"
+        and item["status"] == "warning"
+        and "http://127.0.0.1:8766/health" in item["detail"]
+        for item in result["step_trace"]
+    )
+    command = [str(item) for item in live_start_kwargs["command"]]  # type: ignore[index]
+    assert any(item.endswith("lerobot_isaac_mirror_runtime_wrapper.py") for item in command)
 
 
 def test_live_teleoperate_with_isaac_mirror_starts_when_receiver_ready(tmp_path: Path, monkeypatch) -> None:
@@ -618,8 +829,12 @@ def test_live_teleoperate_with_isaac_mirror_starts_when_receiver_ready(tmp_path:
         raising=False,
     )
     live_start_kwargs: dict[str, object] = {}
+    viewport_frame_calls: list[dict[str, object]] = []
     bridge.mirror_loop_start = lambda payload: (_ for _ in ()).throw(AssertionError("live teleop mirror must run in-process"))  # type: ignore[method-assign]
     bridge._start_live_process = lambda **kwargs: live_start_kwargs.update(kwargs) or {"ok": True, "session_updates": {"pid": 1234, "log_path": "", "returncode": None}}  # type: ignore[method-assign]
+    bridge._post_isaac_mirror_viewport_frame = lambda endpoint, reason, timeout_s=0.5: viewport_frame_calls.append(  # type: ignore[method-assign]
+        {"endpoint": endpoint, "reason": reason, "timeout_s": timeout_s}
+    ) or {"ok": True, "status": "viewport_frame_queued", "viewport_frame_url": "http://127.0.0.1:8766/viewport/frame"}
 
     result = bridge.teleoperate_start(
         {
@@ -637,14 +852,170 @@ def test_live_teleoperate_with_isaac_mirror_starts_when_receiver_ready(tmp_path:
     assert result["status"] == "TELEOP_ACTIVE"
     assert result["isaac_mirror"]["status"] == "IN_PROCESS"
     assert result["isaac_mirror"]["attached_to_session_id"] == result["session_id"]
+    assert result["isaac_viewport_frame"]["status"] == "viewport_frame_queued"
+    assert viewport_frame_calls == [
+        {
+            "endpoint": "http://127.0.0.1:8766/joints",
+            "reason": "teleoperate_start",
+            "timeout_s": 0.5,
+        }
+    ]
     command = [str(item) for item in live_start_kwargs["command"]]  # type: ignore[index]
     assert "teleoperate" in command
     assert any(item.endswith("lerobot_isaac_mirror_runtime_wrapper.py") for item in command)
     env = live_start_kwargs["env_overrides"]  # type: ignore[index]
     assert env["ATR_ISAAC_MIRROR_ENABLED"] == "1"  # type: ignore[index]
     assert env["ATR_ISAAC_MIRROR_ENDPOINT"] == "http://127.0.0.1:8766/joints"  # type: ignore[index]
-    assert env["ATR_ISAAC_MIRROR_SOURCE"] == "follower_present_position"  # type: ignore[index]
+    assert env["ATR_ISAAC_MIRROR_SOURCE"] == "leader_action"  # type: ignore[index]
     assert env["ATR_ISAAC_MIRROR_CALIBRATION_PATH"] == str(tmp_path / "memory" / "isaac_omx_mirror_calibration.json")  # type: ignore[index]
+
+
+def test_live_teleoperate_active_robot_cam_uses_wrapper_and_d405_direct_env(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    bridge.config.profiles["fake_omx_ai"]["safety_limits"].update({"live_enabled": True, "allow_teleoperation": True})
+    follower = tmp_path / "omx_follower"
+    leader = tmp_path / "omx_leader"
+    follower.touch()
+    leader.touch()
+    bridge.ports_save({"mode": "live", "profile_id": "fake_omx_ai", "device_role": "follower", "port": str(follower)})
+    bridge.ports_save({"mode": "live", "profile_id": "fake_omx_ai", "device_role": "leader", "port": str(leader)})
+    bridge._live_camera_block_if_needed = lambda **_: None  # type: ignore[method-assign]
+    captured: dict[str, object] = {}
+
+    def fake_start_live_process(**kwargs: object) -> dict[str, object]:
+        captured.update(kwargs)
+        return {"ok": True, "session_updates": {"pid": 1234, "log_path": "", "returncode": None}}
+
+    bridge._start_live_process = fake_start_live_process  # type: ignore[method-assign]
+
+    result = bridge.teleoperate_start(
+        {
+            "mode": "live",
+            "runtime_mode": "live",
+            "profile_id": "fake_omx_ai",
+            "confirm_live_execute": True,
+            "camera_enabled": True,
+            "active_robot_cam_enabled": True,
+            "isaac_mirror_enabled": False,
+        }
+    )
+
+    command = result["command_preview"]
+    env = captured["env_overrides"]
+    assert result["ok"] is True
+    assert any(Path(item).name == "lerobot_isaac_mirror_runtime_wrapper.py" for item in command)
+    assert env["ATR_ACTIVE_ROBOT_CAM_ENABLED"] == "1"  # type: ignore[index]
+    assert env["ATR_ACTIVE_ROBOT_CAM_CAMERA_PRIORITY"] == "d405,d455f"  # type: ignore[index]
+    assert env["ATR_LEROBOT_SPECIMEN_CAMERA_KEY"] == "wrist"  # type: ignore[index]
+    assert env["ATR_ACTIVE_ROBOT_CAM_D405_A4_CAMERA_TO_ISAAC_TRANSFORM"] == "direct"  # type: ignore[index]
+    assert env["ATR_ACTIVE_ROBOT_CAM_D405_A4_WIDTH_MM"] == "297.0"  # type: ignore[index]
+    assert env["ATR_ACTIVE_ROBOT_CAM_D405_A4_HEIGHT_MM"] == "210.0"  # type: ignore[index]
+    assert env["ATR_ACTIVE_ROBOT_CAM_D405_A4_WORLD_OFFSET_X_MM"] == "0.0"  # type: ignore[index]
+    assert env["ATR_ACTIVE_ROBOT_CAM_D405_A4_WORLD_OFFSET_Y_MM"] == "0.0"  # type: ignore[index]
+    assert env["ATR_ACTIVE_ROBOT_CAM_D455F_A4_WORLD_OFFSET_X_MM"] == "0.0"  # type: ignore[index]
+    assert env["ATR_ACTIVE_ROBOT_CAM_D455F_A4_WORLD_OFFSET_Y_MM"] == "0.0"  # type: ignore[index]
+    assert env["ATR_ACTIVE_ROBOT_CAM_SPEED_SCALE"] == "0.7"  # type: ignore[index]
+    assert env["ATR_ACTIVE_ROBOT_CAM_RESUME_SPEED_SCALE"] == "0.5"  # type: ignore[index]
+    assert env["ATR_ACTIVE_ROBOT_CAM_TELEOP_TRANSITION_MAX_STEP"] == "3.0"  # type: ignore[index]
+    assert env["ATR_ACTIVE_ROBOT_CAM_RESUME_WAIT_TIMEOUT_S"] == "4.0"  # type: ignore[index]
+    assert env["ATR_ACTIVE_ROBOT_CAM_RESUME_WAIT_POLL_S"] == "0.05"  # type: ignore[index]
+    assert env["ATR_ACTIVE_ROBOT_CAM_RESUME_WAIT_TOLERANCE_DEG"] == "2.0"  # type: ignore[index]
+    assert env["ATR_ACTIVE_ROBOT_CAM_SETTLE_S"] == "1.0"  # type: ignore[index]
+    assert env["ATR_ACTIVE_ROBOT_CAM_HOLD_AFTER_CAPTURE_S"] == "1.0"  # type: ignore[index]
+    assert env["ATR_SPECIMEN_POSE_PENDING_PATH"] == "/tmp/atr_specimen_pose_pending/latest_specimen_pose_payload.json"  # type: ignore[index]
+    assert env["ATR_ACTIVE_ROBOT_CAM_REQUEST_PATH"] == "/tmp/atr_active_robot_cam_request/request.json"  # type: ignore[index]
+
+
+def test_live_record_active_robot_cam_metadata_and_home_resume_env(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    bridge.config.profiles["fake_omx_ai"]["safety_limits"].update({"live_enabled": True, "allow_recording": True})
+    follower = tmp_path / "omx_follower"
+    leader = tmp_path / "omx_leader"
+    follower.touch()
+    leader.touch()
+    bridge.ports_save({"mode": "live", "profile_id": "fake_omx_ai", "device_role": "follower", "port": str(follower)})
+    bridge.ports_save({"mode": "live", "profile_id": "fake_omx_ai", "device_role": "leader", "port": str(leader)})
+    bridge._live_camera_block_if_needed = lambda **_: None  # type: ignore[method-assign]
+    captured: dict[str, object] = {}
+
+    def fake_start_live_process(**kwargs: object) -> dict[str, object]:
+        captured.update(kwargs)
+        return {"ok": True, "session_updates": {"pid": 1234, "log_path": "", "returncode": None}}
+
+    bridge._start_live_process = fake_start_live_process  # type: ignore[method-assign]
+
+    result = bridge.record_start(
+        {
+            "mode": "live",
+            "runtime_mode": "live",
+            "profile_id": "fake_omx_ai",
+            "dataset_repo_id": "jin/active-cam-test",
+            "confirm_live_execute": True,
+            "camera_enabled": True,
+            "active_robot_cam_enabled": True,
+            "active_robot_cam_resume_mode": "home_pose",
+        }
+    )
+
+    env = captured["env_overrides"]
+    assert result["ok"] is True
+    assert result["active_robot_cam"]["enabled"] is True
+    assert result["active_robot_cam"]["primary_camera"] == "d405"
+    assert env["ATR_ACTIVE_ROBOT_CAM_ENABLED"] == "1"  # type: ignore[index]
+    assert env["ATR_ACTIVE_ROBOT_CAM_RESUME_MODE"] == "home_pose"  # type: ignore[index]
+
+
+def test_live_record_active_robot_cam_enables_saved_cameras_when_camera_flag_omitted(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    bridge.config.profiles["fake_omx_ai"]["safety_limits"].update({"live_enabled": True, "allow_recording": True})
+    follower = tmp_path / "omx_follower"
+    leader = tmp_path / "omx_leader"
+    follower.touch()
+    leader.touch()
+    bridge.ports_save({"mode": "live", "profile_id": "fake_omx_ai", "device_role": "follower", "port": str(follower)})
+    bridge.ports_save({"mode": "live", "profile_id": "fake_omx_ai", "device_role": "leader", "port": str(leader)})
+    bridge.ports_save(
+        {
+            "mode": "live",
+            "profile_id": "fake_omx_ai",
+            "device_role": "camera",
+            "camera_key": "top",
+            "port": "341522300873",
+            "camera_backend": "realsense",
+            "camera_use_depth": True,
+        }
+    )
+    bridge.ports_save(
+        {
+            "mode": "live",
+            "profile_id": "fake_omx_ai",
+            "device_role": "camera",
+            "camera_key": "wrist",
+            "port": "352122273019",
+            "camera_backend": "realsense",
+            "camera_use_depth": True,
+        }
+    )
+    bridge._live_camera_block_if_needed = lambda **_: None  # type: ignore[method-assign]
+    bridge._start_live_process = lambda **_: {"ok": True, "session_updates": {"pid": 1234, "log_path": "", "returncode": None}}  # type: ignore[method-assign]
+
+    result = bridge.record_start(
+        {
+            "mode": "live",
+            "runtime_mode": "live",
+            "profile_id": "fake_omx_ai",
+            "dataset_repo_id": "jin/active-cam-test",
+            "confirm_live_execute": True,
+            "active_robot_cam_enabled": True,
+        }
+    )
+
+    camera_arg = next(arg for arg in result["command_preview"] if arg.startswith("--robot.cameras="))
+    cameras = json.loads(camera_arg.removeprefix("--robot.cameras="))
+    assert cameras["top"]["type"] == "intelrealsense"
+    assert cameras["top"]["use_depth"] is True
+    assert cameras["wrist"]["type"] == "intelrealsense"
+    assert cameras["wrist"]["use_depth"] is True
 
 
 def test_port_baseline_detect_persists_follower_port(tmp_path: Path) -> None:
@@ -874,6 +1245,8 @@ def test_realsense_camera_mode_uses_depth_rgb_for_top_and_wrist_at_default_15fps
     assert wrist["saved_devices"]["cameras"]["wrist"]["backend"] == "intelrealsense"
     assert top["saved_devices"]["cameras"]["top"]["color_format"] == "rgb8"
     assert wrist["saved_devices"]["cameras"]["wrist"]["color_format"] == "bgr8"
+    assert top["saved_devices"]["cameras"]["top"]["depth_scale_m_per_unit"] == 0.001
+    assert wrist["saved_devices"]["cameras"]["wrist"]["depth_scale_m_per_unit"] == 0.0001
     camera_arg = next(arg for arg in teleop["command_preview"] if arg.startswith("--robot.cameras="))
     cameras = json.loads(camera_arg.removeprefix("--robot.cameras="))
     assert cameras["top"] == {
@@ -899,7 +1272,7 @@ def test_realsense_camera_mode_uses_depth_rgb_for_top_and_wrist_at_default_15fps
         "color_format": "bgr8",
         "use_depth": True,
         "align_depth_to_color": True,
-        "depth_scale_m_per_unit": 0.001,
+        "depth_scale_m_per_unit": 0.0001,
         "depth_clip_min_mm": 0.0,
         "depth_clip_max_mm": 2000.0,
         "warmup_s": 5,
@@ -1010,6 +1383,89 @@ def test_dataset_inspect_restores_profile_and_pipeline_from_metadata(tmp_path: P
     assert result["dataset"]["observation_pipeline_id"] == "raw_depth_adapter"
     assert result["dataset"]["profile_restored_from_metadata"] is True
     assert result["dataset"]["pipeline_metadata_path"] == str(dataset / "meta" / "atr_pipeline.json")
+
+
+def test_dataset_inspect_health_is_ok_for_complete_sidecars(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    dataset = tmp_path / "hf_datasets" / "jin" / "health_complete"
+    _make_trainable_lerobot_dataset(dataset)
+    _write_raw_depth_frames(dataset)
+    _write_isaac_rgbd_render_fixture(dataset, camera="wrist")
+    augmented = bridge.augment_isaac_dataset(
+        {
+            "mode": "test",
+            "profile_id": "fake_omx_ai",
+            "dataset_repo_id": "jin/health_complete",
+            "isaac_data_augmentation_variants": 1,
+            "isaac_data_augmentation_max_frames": 1,
+            "isaac_data_augmentation_cameras": "wrist",
+        }
+    )
+    assert augmented["ok"] is True
+
+    result = bridge.dataset_inspect(
+        {
+            "mode": "test",
+            "profile_id": "fake_omx_ai",
+            "dataset_path": str(dataset),
+            "observation_pipeline_id": "raw_depth_adapter",
+        }
+    )
+
+    health = result["dataset_health"]
+    assert health["severity"] == "ok"
+    assert health["blocking_count"] == 0
+    assert health["metrics"]["episodes"] == 1
+    assert health["metrics"]["original_frames"] == 1
+    assert health["sidecars"]["raw_depth"]["camera_counts"] == {"top": 2, "wrist": 2}
+    assert health["sidecars"]["isaac_rgbd"]["manifest_count"] == 1
+    assert health["sidecars"]["isaac_rgbd"]["rendered_count"] == 1
+    assert health["sidecars"]["isaac_augmentation"]["valid_variant_count"] == 1
+
+
+def test_dataset_inspect_health_warns_for_missing_optional_sidecars(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    dataset = tmp_path / "hf_datasets" / "jin" / "health_partial"
+    _make_trainable_lerobot_dataset(dataset)
+    _write_raw_depth_frames(dataset)
+
+    result = bridge.dataset_inspect(
+        {
+            "mode": "test",
+            "profile_id": "fake_omx_ai",
+            "dataset_path": str(dataset),
+            "observation_pipeline_id": "raw_depth_adapter",
+        }
+    )
+
+    health = result["dataset_health"]
+    assert health["severity"] == "warning"
+    issue_codes = {item["code"] for item in health["issues"]}
+    assert "LEROBOT_ISAAC_RGBD_SIDECAR_MISSING" in issue_codes
+    assert "LEROBOT_ISAAC_AUGMENTATION_MISSING" in issue_codes
+    assert health["blocking_count"] == 0
+
+
+def test_dataset_inspect_health_blocks_raw_depth_adapter_without_raw_depth(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    dataset = tmp_path / "hf_datasets" / "jin" / "health_missing"
+    _make_trainable_lerobot_dataset(dataset)
+    shutil.rmtree(dataset / "sidecar")
+
+    result = bridge.dataset_inspect(
+        {
+            "mode": "test",
+            "profile_id": "fake_omx_ai",
+            "dataset_path": str(dataset),
+            "observation_pipeline_id": "raw_depth_adapter",
+        }
+    )
+
+    health = result["dataset_health"]
+    assert health["severity"] == "blocking"
+    assert health["blocking_count"] == 1
+    assert health["sidecars"]["raw_depth"]["available"] is False
+    assert health["issues"][0]["code"] == "LEROBOT_RAW_DEPTH_SIDECAR_MISSING"
 
 
 def test_realsense_scan_does_not_fallback_to_v4l_by_id_when_sdk_query_fails(tmp_path: Path, monkeypatch) -> None:
@@ -1556,6 +2012,10 @@ def test_train_command_includes_runtime_parameters_and_progress(tmp_path: Path) 
     assert started["training"]["current_step"] == 20000
     assert started["training"]["total_steps"] == 20000
     assert started["training"]["progress_percent"] == 100.0
+    assert started["training_preflight"]["stage"] == "ready_to_start"
+    assert started["training_preflight"]["done"] == started["training_preflight"]["total"]
+    assert started["training_preflight"]["percent"] == 100.0
+    assert "resolve_dataset" in [item["stage"] for item in started["training_preflight"]["stages"]]
 
 
 def test_act_train_uses_huggingface_lerobot_defaults(tmp_path: Path) -> None:
@@ -1636,7 +2096,7 @@ def test_xvla_train_uses_lerobot_runtime_and_soft_prompt_defaults(tmp_path: Path
     assert "-n" in started["command_preview"]
     assert started["command_preview"][started["command_preview"].index("-n") + 1] == "lerobot-pi05-torch211"
     assert "--policy.type=xvla" in started["command_preview"]
-    assert "--policy.path=lerobot/xvla-base" in started["command_preview"]
+    assert "--policy.pretrained_path=lerobot/xvla-base" in started["command_preview"]
     assert "--steps=20000" in started["command_preview"]
     assert "--policy.dtype=bfloat16" in started["command_preview"]
     assert "--policy.action_mode=auto" in started["command_preview"]
@@ -1664,7 +2124,7 @@ def test_smolvla_train_uses_lerobot_runtime_and_base_policy_defaults(tmp_path: P
     assert "-n" in started["command_preview"]
     assert started["command_preview"][started["command_preview"].index("-n") + 1] == "lerobot-pi05-torch211"
     assert "--policy.type=smolvla" in started["command_preview"]
-    assert "--policy.path=lerobot/smolvla_base" in started["command_preview"]
+    assert "--policy.pretrained_path=lerobot/smolvla_base" in started["command_preview"]
     assert "--steps=20000" in started["command_preview"]
     assert "--batch_size=8" in started["command_preview"]
     assert "--policy.n_obs_steps=1" in started["command_preview"]
@@ -1961,6 +2421,58 @@ def test_pi05_live_train_uses_dedicated_hf_cache(tmp_path: Path) -> None:
     assert env["WANDB_MODE"] == "offline"
 
 
+def test_vla_live_train_uses_standard_data_pipeline_env(tmp_path: Path) -> None:
+    dataset = tmp_path / "hf_datasets" / "jin" / "record-test"
+    _make_trainable_lerobot_dataset(dataset)
+    _mark_lerobot_dataset_v30(dataset)
+    rgbd_manifest = dataset / "sidecar" / "isaac_rgbd" / "episode_000" / "attempt_a" / "manifest.jsonl"
+    rgbd_manifest.parent.mkdir(parents=True, exist_ok=True)
+    rgbd_manifest.write_text(
+        json.dumps(
+            {
+                "schema": "atr.isaac_rgbd.render_manifest.v1",
+                "attempt_id": "attempt_a",
+                "episode_index": 0,
+                "frame_index": 0,
+                "cameras": ["wrist"],
+                "files": [{"camera": "wrist", "kind": "rgb", "path": "wrist/rgb.png"}],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    for policy_type in ("pi05", "xvla", "smolvla"):
+        bridge = _bridge(tmp_path)
+        bridge._live_block_if_needed = lambda **_: None  # type: ignore[method-assign]
+        captured: dict[str, object] = {}
+
+        def fake_start_live_process(**kwargs: object) -> dict[str, object]:
+            captured.update(kwargs)
+            return {"ok": True, "session_updates": {"pid": 1234, "log_path": str(tmp_path / f"{policy_type}.log")}}
+
+        bridge._start_live_process = fake_start_live_process  # type: ignore[method-assign]
+        started = bridge.train_start(
+            {
+                "mode": "live",
+                "runtime_mode": "live",
+                "profile_id": "fake_omx_ai",
+                "dataset_repo_id": "jin/record-test",
+                "policy_type": policy_type,
+                "confirm_live_execute": True,
+                "steps": 1,
+            }
+        )
+
+        assert started["ok"] is True
+        env = captured["env_overrides"]
+        assert env["HF_HOME"] == str(tmp_path / "hf_home_pi05")  # type: ignore[index]
+        assert env["ATR_LEROBOT_STANDARD_DATA_PIPELINE"] == "1"  # type: ignore[index]
+        assert env["ATR_LEROBOT_RAW_DEPTH_ADAPTER"] == "1"  # type: ignore[index]
+        assert env["ATR_LEROBOT_ISAAC_RGBD_SOURCE_ADAPTER"] == "1"  # type: ignore[index]
+        assert env["ATR_LEROBOT_ISAAC_RGBD_SOURCE_ROOT"] == str(dataset / "sidecar" / "isaac_rgbd")  # type: ignore[index]
+
+
 def test_pi05_live_train_converts_v21_dataset_copy_to_v30(tmp_path: Path) -> None:
     bridge = _bridge(tmp_path)
     dataset = tmp_path / "hf_datasets" / "jin" / "record-test"
@@ -1996,6 +2508,42 @@ def test_pi05_live_train_converts_v21_dataset_copy_to_v30(tmp_path: Path) -> Non
     assert started["dataset_repo_id"] == "local-pi05-v30/jin-record-test"
     assert started["dataset_path"] == str(converted)
     assert "Pi0.5 converted jin/record-test v2.1 -> local-pi05-v30/jin-record-test v3.0" in started["step_trace"][1]["detail"]
+
+
+def test_vla_live_train_converts_v21_dataset_copy_to_v30(tmp_path: Path) -> None:
+    for policy_type, label in (("xvla", "X-VLA"), ("smolvla", "SmolVLA")):
+        bridge = _bridge(tmp_path)
+        dataset = tmp_path / "hf_datasets" / "jin" / f"record-test-{policy_type}"
+        _make_trainable_lerobot_dataset(dataset)
+        bridge._live_block_if_needed = lambda **_: None  # type: ignore[method-assign]
+        bridge._live_port_block_if_needed = lambda **_: None  # type: ignore[method-assign]
+        bridge._start_live_process = lambda **_: {"ok": True, "session_updates": {"pid": 123, "log_path": "", "returncode": None}}  # type: ignore[method-assign]
+
+        def fake_convert(converted_repo_id: str, converted_root: Path) -> None:
+            _mark_lerobot_dataset_v30(converted_root / converted_repo_id)
+
+        bridge._run_pi05_v30_dataset_conversion = fake_convert  # type: ignore[method-assign]
+
+        started = bridge.train_start(
+            {
+                "mode": "live",
+                "runtime_mode": "live",
+                "profile_id": "fake_omx_ai",
+                "dataset_repo_id": f"jin/record-test-{policy_type}",
+                "dataset_root": str(tmp_path / "hf_datasets"),
+                "policy_type": policy_type,
+                "confirm_live_execute": True,
+                "steps": 1,
+            }
+        )
+
+        converted = tmp_path / "hf_datasets" / "local-pi05-v30" / f"jin-record-test-{policy_type}"
+        assert started["ok"] is True
+        assert json.loads((dataset / "meta" / "info.json").read_text(encoding="utf-8"))["codebase_version"] == "v2.1"
+        assert json.loads((converted / "meta" / "info.json").read_text(encoding="utf-8"))["codebase_version"] == "v3.0"
+        assert f"--dataset.repo_id=local-pi05-v30/jin-record-test-{policy_type}" in started["command_preview"]
+        assert f"--dataset.root={converted}" in started["command_preview"]
+        assert f"{label} converted jin/record-test-{policy_type} v2.1 -> local-pi05-v30/jin-record-test-{policy_type} v3.0" in started["step_trace"][1]["detail"]
 
 
 def test_pi05_live_train_augments_missing_quantile_stats(tmp_path: Path) -> None:
@@ -2245,6 +2793,44 @@ def test_train_progress_parses_live_log_tail(tmp_path: Path) -> None:
     assert status["training"]["total_steps"] == 1000
     assert status["training"]["progress_percent"] == 25.0
     assert status["training"]["last_loss"] == 0.42
+
+
+def test_train_progress_eta_uses_active_step_rate_not_startup_elapsed(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    log_path = tmp_path / "train.log"
+    log_path.write_text(
+        "\n".join(
+            [
+                "INFO 2026-06-30 23:09:37 ot_train.py:270 Creating dataset",
+                "INFO 2026-06-30 23:09:59 ot_train.py:458 Start offline training on a fixed dataset",
+                "INFO 2026-06-30 23:10:00 ot_train.py:488 step:1 smpl:1 ep:0 epch:0.00 loss:0.166 updt_s:1.000 data_s:0.000",
+                "INFO 2026-06-30 23:10:01 ot_train.py:488 step:2 smpl:2 ep:0 epch:0.00 loss:0.473 updt_s:0.500 data_s:0.000",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    bridge._sessions["train-active"] = {
+        "session_id": "train-active",
+        "workflow": "train",
+        "mode": "live",
+        "profile_id": "fake_omx_ai",
+        "status": "TRAINING",
+        "created_at": "2026-05-06T00:00:00+00:00",
+        "command_preview": [],
+        "step_trace": [],
+        "log_path": str(log_path),
+        "pid": None,
+        "returncode": None,
+        "train_config": {"steps": 100},
+    }
+
+    status = bridge.train_status({"mode": "live", "profile_id": "fake_omx_ai", "session_id": "train-active"})
+
+    assert status["ok"] is True
+    assert status["training"]["current_step"] == 2
+    assert status["training"]["steps_per_sec"] == 1.3333
+    assert status["training"]["eta_sec"] == 73.5
+    assert status["training"]["last_loss"] == 0.473
 
 
 def test_refresh_process_status_preserves_cancelled_status(tmp_path: Path) -> None:
@@ -2897,10 +3483,20 @@ def test_visualize_dataset_returns_metadata_and_media(tmp_path: Path) -> None:
     dataset_dir = tmp_path / "datasets" / "atr" / "demo"
     meta_dir = dataset_dir / "meta"
     video_dir = dataset_dir / "videos" / "chunk-000"
+    isaac_rgbd_ep0 = dataset_dir / "sidecar" / "isaac_rgbd" / "episode_000000"
+    isaac_rgbd_ep1 = dataset_dir / "sidecar" / "isaac_rgbd" / "episode_000001"
+    isaac_mirror_ep1 = dataset_dir / "sidecar" / "isaac_mirror" / "episode_000001"
     meta_dir.mkdir(parents=True)
     video_dir.mkdir(parents=True)
-    (meta_dir / "info.json").write_text('{"fps": 30, "total_episodes": 1}', encoding="utf-8")
+    isaac_rgbd_ep0.mkdir(parents=True)
+    isaac_rgbd_ep1.mkdir(parents=True)
+    isaac_mirror_ep1.mkdir(parents=True)
+    (meta_dir / "info.json").write_text('{"fps": 30, "total_episodes": 3}', encoding="utf-8")
     (video_dir / "episode_0.mp4").write_bytes(b"not-real-video")
+    (video_dir / "episode_1.mp4").write_bytes(b"not-real-video")
+    (isaac_rgbd_ep0 / "top_rgb.png").write_bytes(b"not-real-png")
+    (isaac_rgbd_ep1 / "right_rgb.png").write_bytes(b"not-real-png")
+    (isaac_mirror_ep1 / "frames.jsonl").write_text('{"frame": 0}\n', encoding="utf-8")
     bridge = _bridge(tmp_path)
 
     result = bridge.visualize_dataset(
@@ -2909,18 +3505,140 @@ def test_visualize_dataset_returns_metadata_and_media(tmp_path: Path) -> None:
             "profile_id": "fake_omx_ai",
             "dataset_root": str(tmp_path / "datasets"),
             "dataset_repo_id": "atr/demo",
-            "episode_index": 0,
+            "episode_indices": "0,1",
         }
     )
 
     assert result["ok"] is True
+    assert result["episode_index"] == 0
+    assert result["episode_indices"] == [0, 1]
     assert result["metadata"]["meta/info.json"]["fps"] == 30
     assert any(item["media_type"] == "video" for item in result["media"])
+    assert sorted(result["media_by_episode"]) == ["0", "1"]
+    ep0_paths = [item["path"] for item in result["media_by_episode"]["0"]]
+    ep1_paths = [item["path"] for item in result["media_by_episode"]["1"]]
+    assert any("episode_0.mp4" in path for path in ep0_paths)
+    assert not any("episode_1.mp4" in path for path in ep0_paths)
+    assert any("episode_1.mp4" in path for path in ep1_paths)
+    sources = {item["source"] for item in result["media"]}
+    assert {"isaac_rgbd", "isaac_mirror"}.issubset(sources)
+    assert result["summary"]["source_counts"]["isaac_rgbd"] >= 2
 
 
-def test_visualize_start_uses_lerobot_html_visualizer_with_dataset_root(tmp_path: Path) -> None:
+def test_isaac_augmentation_writes_sidecar_and_training_exposes_summary(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    dataset = tmp_path / "hf_datasets" / "jin" / "augmented"
+    _make_trainable_lerobot_dataset(dataset)
+    _write_isaac_rgbd_render_fixture(dataset, camera="wrist")
+
+    augmented = bridge.augment_isaac_dataset(
+        {
+            "mode": "test",
+            "profile_id": "fake_omx_ai",
+            "dataset_repo_id": "jin/augmented",
+            "isaac_data_augmentation_variants": 2,
+            "isaac_data_augmentation_max_frames": 1,
+            "isaac_data_augmentation_seed": 11,
+            "isaac_data_augmentation_cameras": "wrist",
+            "isaac_data_augmentation_camera_pose_enabled": True,
+            "isaac_data_augmentation_image_enabled": True,
+            "isaac_data_augmentation_profile": "sim2real",
+            "isaac_data_augmentation_photometric_enabled": True,
+            "isaac_data_augmentation_sensor_noise_enabled": False,
+            "isaac_data_augmentation_depth_noise_enabled": True,
+            "isaac_data_augmentation_render_domain_enabled": True,
+            "isaac_data_augmentation_rgb_strength": 0.75,
+            "isaac_data_augmentation_depth_strength": 1.25,
+            "isaac_data_augmentation_render_domain_strength": 1.1,
+            "isaac_data_augmentation_camera_pose_strength": 0.6,
+        }
+    )
+
+    assert augmented["ok"] is True
+    assert augmented["tool"] == "lerobot.augment.isaac"
+    assert augmented["summary"]["variant_count"] == 2
+    assert augmented["augmentation_progress"]["stage"] == "complete"
+    assert augmented["augmentation_progress"]["done"] == 2
+    assert augmented["augmentation_progress"]["total"] == 2
+    assert augmented["summary"]["progress"]["percent"] == 100.0
+    assert augmented["summary"]["augmentation_profile"] == "sim2real"
+    assert augmented["summary"]["augmentation_options"]["sensor_noise_enabled"] is False
+    assert augmented["summary"]["augmentation_options"]["depth_strength"] == 1.25
+    assert Path(augmented["summary"]["manifest_path"]).is_file()
+    assert augmented["command_preview"][0].endswith("python3") or augmented["command_preview"][0].endswith("python")
+    assert "--augmentation-profile=sim2real" in augmented["command_preview"]
+    assert "--sensor-noise-enabled=0" in augmented["command_preview"]
+    assert "--depth-strength=1.25" in augmented["command_preview"]
+
+    train = bridge.train_start(
+        {
+            "mode": "test",
+            "profile_id": "fake_omx_ai",
+            "dataset_repo_id": "jin/augmented",
+            "observation_pipeline_id": "raw_depth_adapter",
+        }
+    )
+
+    assert train["ok"] is True
+    assert train["isaac_data_augmentation"]["available"] is True
+    assert train["isaac_data_augmentation"]["variant_count"] == 2
+
+
+def test_isaac_augmentation_preview_returns_source_and_augmented_depth_previews(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    dataset = tmp_path / "hf_datasets" / "jin" / "previewed"
+    _make_trainable_lerobot_dataset(dataset)
+    _write_isaac_rgbd_render_fixture(dataset, camera="wrist")
+    manifest_path = dataset / "sidecar" / "isaac_rgbd" / "episode_000" / "attempt_aug" / "manifest.jsonl"
+    rendered_row = json.loads(manifest_path.read_text(encoding="utf-8").splitlines()[0])
+    pending_row = {**rendered_row, "status": "render_pending", "files": []}
+    manifest_path.write_text(
+        json.dumps(pending_row) + "\n" + json.dumps(rendered_row) + "\n",
+        encoding="utf-8",
+    )
+    augmented = bridge.augment_isaac_dataset(
+        {
+            "mode": "test",
+            "profile_id": "fake_omx_ai",
+            "dataset_repo_id": "jin/previewed",
+            "isaac_data_augmentation_variants": 2,
+            "isaac_data_augmentation_max_frames": 1,
+            "isaac_data_augmentation_seed": 13,
+            "isaac_data_augmentation_cameras": "wrist",
+        }
+    )
+    assert augmented["ok"] is True
+
+    preview = bridge.augment_isaac_preview(
+        {
+            "mode": "test",
+            "profile_id": "fake_omx_ai",
+            "dataset_repo_id": "jin/previewed",
+            "isaac_data_augmentation_preview_count": 1,
+        }
+    )
+
+    assert preview["ok"] is True
+    assert preview["tool"] == "lerobot.augment.preview"
+    assert preview["preview_count"] == 1
+    row = preview["rows"][0]
+    assert row["variant_id"] == "e000_f000000_v000"
+    assert row["episode_index"] == 0
+    assert row["frame_index"] == 0
+    assert row["camera"] == "wrist"
+    assert row["qa"]["ok"] is True
+    assert row["source_rgb"]["serve_url"].startswith("/api/lerobot/visualization/file?path=")
+    assert row["augmented_rgb"]["serve_url"].startswith("/api/lerobot/visualization/file?path=")
+    assert Path(row["source_depth_preview"]["path"]).is_file()
+    assert Path(row["augmented_depth_preview"]["path"]).is_file()
+    assert Image.open(row["source_depth_preview"]["path"]).mode == "RGB"
+    assert Image.open(row["augmented_depth_preview"]["path"]).mode == "RGB"
+    assert row["augmentation_parameters"]["depth"]
+
+
+def test_visualize_start_defaults_to_official_lerobot_rerun_viewer_with_dataset_root(tmp_path: Path) -> None:
     dataset_dir = tmp_path / "hf_datasets" / "jin" / "record-test"
-    dataset_dir.mkdir(parents=True)
+    _make_trainable_lerobot_dataset(dataset_dir)
     bridge = _bridge(tmp_path)
     captured: dict[str, object] = {}
 
@@ -2938,7 +3656,8 @@ def test_visualize_start_uses_lerobot_html_visualizer_with_dataset_root(tmp_path
             "dataset_root": str(tmp_path / "hf_datasets"),
             "dataset_repo_id": "jin/record-test",
             "episode_index": 2,
-            "visualization_web_port": 9091,
+            "visualization_web_port": 19091,
+            "visualization_ws_port": 19089,
         }
     )
 
@@ -2948,15 +3667,143 @@ def test_visualize_start_uses_lerobot_html_visualizer_with_dataset_root(tmp_path
     assert result["workflow"] == "visualize"
     assert Path(command[0]).name in {"conda", "conda.exe"}
     assert command[1:7] == ["run", "--no-capture-output", "-n", "lerobot", "python", "-m"]
-    assert "lerobot.scripts.visualize_dataset_html" in command
+    assert "lerobot.scripts.visualize_dataset" in command
+    assert "lerobot.scripts.visualize_dataset_html" not in command
     assert "--repo-id=jin/record-test" in command
     assert "--root=" + str(dataset_dir.resolve()) in command
-    assert "--episodes" in command
-    assert "2" in command
-    assert "--serve=1" in command
-    assert "--port=9091" in command
-    assert result["visualization"]["viewer_url"] == "http://127.0.0.1:9091/jin/record-test/episode_2"
+    assert "--episode-index=2" in command
+    assert "--mode=distant" in command
+    assert "--web-port=19091" in command
+    assert "--ws-port=19089" in command
+    assert result["visualization"]["rerun_web_url"] == "http://localhost:19091"
+    assert result["visualization"]["viewer_url"] == "http://localhost:19091/?url=ws://localhost:19089"
     assert captured["command"] == command
+
+
+def test_visualize_start_auto_selects_free_web_port_when_default_is_occupied(tmp_path: Path) -> None:
+    dataset_dir = tmp_path / "hf_datasets" / "jin" / "record-test"
+    _make_trainable_lerobot_dataset(dataset_dir)
+    bridge = _bridge(tmp_path)
+    captured: dict[str, object] = {}
+
+    def fake_start(*, session_id: str, command: list[str]) -> dict[str, object]:
+        captured["command"] = command
+        return {"ok": True, "session_updates": {"pid": 1234, "log_path": "", "returncode": None}}
+
+    bridge._start_live_process = fake_start  # type: ignore[method-assign]
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind(("127.0.0.1", 0))
+        sock.listen(1)
+        occupied_port = int(sock.getsockname()[1])
+        result = bridge.visualize_start(
+            {
+                "mode": "test",
+                "profile_id": "fake_omx_ai",
+                "dataset_root": str(tmp_path / "hf_datasets"),
+                "dataset_repo_id": "jin/record-test",
+                "visualization_web_port": occupied_port,
+            }
+        )
+
+    selected_port = result["visualization"]["web_port"]
+    command = result["command_preview"]
+    assert result["ok"] is True
+    assert selected_port != occupied_port
+    assert result["visualization"]["requested_web_port"] == occupied_port
+    assert result["visualization"]["port_auto_selected"] is True
+    assert f"--web-port={selected_port}" in command
+    assert f"--web-port={occupied_port}" not in command
+    assert captured["command"] == command
+
+
+def test_visualize_start_blocks_incomplete_local_dataset_before_launch(tmp_path: Path) -> None:
+    dataset_dir = tmp_path / "hf_datasets" / "jin" / "empty-record-test"
+    dataset_dir.mkdir(parents=True)
+    bridge = _bridge(tmp_path)
+    launched = False
+
+    def fake_start(*, session_id: str, command: list[str]) -> dict[str, object]:
+        nonlocal launched
+        launched = True
+        return {"ok": True, "session_updates": {"pid": 1234, "log_path": "", "returncode": None}}
+
+    bridge._start_live_process = fake_start  # type: ignore[method-assign]
+
+    result = bridge.visualize_start(
+        {
+            "mode": "test",
+            "profile_id": "fake_omx_ai",
+            "dataset_root": str(tmp_path / "hf_datasets"),
+            "dataset_repo_id": "jin/empty-record-test",
+        }
+    )
+
+    assert result["ok"] is False
+    assert result["failure_code"] == "LEROBOT_VISUALIZATION_CONFIG_INVALID"
+    assert "meta/info.json" in result["error"]
+    assert launched is False
+
+
+def test_visualize_status_prefers_active_viewer_over_newer_failed_session(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    bridge._refresh_process_status = lambda _session: None  # type: ignore[method-assign]
+    bridge._sessions["active-viewer"] = {
+        "session_id": "active-viewer",
+        "workflow": "visualize",
+        "mode": "live",
+        "profile_id": "fake_omx_ai",
+        "status": "VISUALIZING",
+        "created_at": "2026-06-30T02:00:00+00:00",
+        "command_preview": [],
+        "step_trace": [],
+        "pid": 1234,
+        "returncode": None,
+        "visualization": {"rerun_web_url": "http://localhost:9092"},
+    }
+    bridge._sessions["failed-viewer"] = {
+        "session_id": "failed-viewer",
+        "workflow": "visualize",
+        "mode": "live",
+        "profile_id": "fake_omx_ai",
+        "status": "FAILED",
+        "created_at": "2026-06-30T02:10:00+00:00",
+        "command_preview": [],
+        "step_trace": [],
+        "pid": 5678,
+        "returncode": 1,
+        "visualization": {"stale": True, "stale_reason": "process_returncode_1"},
+    }
+
+    status = bridge.visualize_status({"mode": "live", "profile_id": "fake_omx_ai"})
+
+    assert status["session_id"] == "active-viewer"
+    assert status["status"] == "VISUALIZING"
+
+
+def test_visualize_status_marks_dead_viewer_session_as_stale(tmp_path: Path) -> None:
+    dataset_dir = tmp_path / "hf_datasets" / "jin" / "record-test"
+    _make_trainable_lerobot_dataset(dataset_dir)
+    bridge = _bridge(tmp_path)
+    bridge._pid_alive = lambda _pid: False  # type: ignore[method-assign]
+    bridge._start_live_process = lambda **_: {  # type: ignore[method-assign]
+        "ok": True,
+        "session_updates": {"pid": 99999999, "log_path": "", "returncode": None},
+    }
+
+    started = bridge.visualize_start(
+        {
+            "mode": "test",
+            "profile_id": "fake_omx_ai",
+            "dataset_root": str(tmp_path / "hf_datasets"),
+            "dataset_repo_id": "jin/record-test",
+        }
+    )
+    status = bridge.visualize_status({"mode": "test", "profile_id": "fake_omx_ai", "session_id": started["session_id"]})
+
+    assert status["status"] == "FAILED"
+    assert status["visualization"]["stale"] is True
+    assert status["visualization"]["stale_reason"] == "process_not_alive"
 
 
 def test_live_record_passes_tts_env_overrides(tmp_path: Path) -> None:
@@ -3033,7 +3880,7 @@ def test_live_record_enables_raw_depth_sidecar_env_for_realsense_depth(tmp_path:
     bridge._live_camera_block_if_needed = lambda **_: None  # type: ignore[method-assign]
     bridge._saved_camera_device = lambda _profile_id, camera_key: {  # type: ignore[method-assign]
         "backend": "intelrealsense",
-        "serial_number_or_name": f"rs-{camera_key}",
+        "serial_number_or_name": "341522300873" if camera_key == "top" else "352122273019",
         "use_depth": True,
         "fps": 15,
         "width": 640,
@@ -3067,6 +3914,7 @@ def test_live_record_enables_raw_depth_sidecar_env_for_realsense_depth(tmp_path:
     assert captured["env_overrides"]["ATR_LEROBOT_RAW_DEPTH_FORMAT"] == "png16"
     assert captured["env_overrides"]["ATR_LEROBOT_DEPTH_ALIGNED_TO"] == "color"
     assert captured["env_overrides"]["ATR_LEROBOT_DEPTH_SCALE_M_PER_UNIT"] == "0.001"
+    assert captured["env_overrides"]["ATR_LEROBOT_CAMERA_DEPTH_SCALE_M_PER_UNIT"] == "top=0.001,wrist=0.0001"
     assert captured["env_overrides"]["ATR_LEROBOT_DEPTH_CLIP_MIN_MM"] == "0.0"
     assert captured["env_overrides"]["ATR_LEROBOT_DEPTH_CLIP_MAX_MM"] == "2000.0"
 
@@ -3255,6 +4103,178 @@ def test_live_record_status_exposes_in_process_isaac_mirror_sidecar_progress(tmp
     assert metadata["isaac_mirror"]["sample_count"] == 3
 
 
+def test_live_record_with_isaac_mirror_enables_attempt_and_rgbd_render_env(tmp_path: Path, monkeypatch) -> None:
+    bridge = _bridge(tmp_path)
+    bridge.config.profiles["fake_omx_ai"]["safety_limits"].update({"live_enabled": True, "allow_recording": True})
+    follower = tmp_path / "omx_follower"
+    leader = tmp_path / "omx_leader"
+    follower.touch()
+    leader.touch()
+    bridge.ports_save({"mode": "live", "profile_id": "fake_omx_ai", "device_role": "follower", "port": str(follower)})
+    bridge.ports_save({"mode": "live", "profile_id": "fake_omx_ai", "device_role": "leader", "port": str(leader)})
+    monkeypatch.setattr(
+        bridge,
+        "_fetch_isaac_mirror_receiver_health",
+        lambda endpoint, timeout_s=0.5: {
+            "ok": True,
+            "health_url": "http://127.0.0.1:8766/health",
+            "apply_mode": "deferred_update_tick",
+            "sample_count": 0,
+        },
+        raising=False,
+    )
+    captured: dict[str, object] = {}
+    viewport_frame_calls: list[dict[str, object]] = []
+    timeline_play_calls: list[dict[str, object]] = []
+    bridge._start_live_process = lambda **kwargs: captured.update(kwargs) or {"ok": True, "session_updates": {"pid": 1234, "log_path": "", "returncode": None}}  # type: ignore[method-assign]
+    bridge._post_isaac_mirror_timeline_play = lambda endpoint, reason, timeout_s=0.5: timeline_play_calls.append(  # type: ignore[attr-defined]
+        {"endpoint": endpoint, "reason": reason, "timeout_s": timeout_s}
+    ) or {"ok": True, "status": "timeline_play_queued", "timeline_play_url": "http://127.0.0.1:8766/timeline/play"}
+    bridge._post_isaac_mirror_viewport_frame = lambda endpoint, reason, timeout_s=0.5: viewport_frame_calls.append(  # type: ignore[method-assign]
+        {"endpoint": endpoint, "reason": reason, "timeout_s": timeout_s}
+    ) or {"ok": True, "status": "viewport_frame_queued", "viewport_frame_url": "http://127.0.0.1:8766/viewport/frame"}
+
+    started = bridge.record_start(
+        {
+            "mode": "live",
+            "runtime_mode": "live",
+            "profile_id": "fake_omx_ai",
+            "dataset_repo_id": "jin/live-attempt-rgbd",
+            "confirm_live_execute": True,
+            "camera_enabled": False,
+            "isaac_mirror_enabled": True,
+            "isaac_mirror_endpoint": "http://127.0.0.1:8766/joints",
+            "isaac_mirror_sample_hz": 15,
+        }
+    )
+
+    dataset_path = tmp_path / "hf_datasets" / "jin" / "live-attempt-rgbd"
+    env = captured["env_overrides"]
+    attempt = started["record_attempt"]
+    assert started["ok"] is True
+    assert started["isaac_timeline_play"]["status"] == "timeline_play_queued"
+    assert timeline_play_calls == [
+        {
+            "endpoint": "http://127.0.0.1:8766/joints",
+            "reason": "record_start",
+            "timeout_s": 0.5,
+        }
+    ]
+    assert started["isaac_viewport_frame"]["status"] == "viewport_frame_queued"
+    assert viewport_frame_calls == [
+        {
+            "endpoint": "http://127.0.0.1:8766/joints",
+            "reason": "record_start",
+            "timeout_s": 0.5,
+        }
+    ]
+    assert attempt["enabled"] is True
+    assert attempt["overwrite"] is True
+    assert attempt["attempt_id"].startswith("attempt_")
+    assert attempt["attempt_id"].endswith("_ep000")
+    assert env["ATR_RECORD_ATTEMPT_ENABLED"] == "1"  # type: ignore[index]
+    assert env["ATR_RECORD_ATTEMPT_OVERWRITE"] == "1"  # type: ignore[index]
+    assert env["ATR_RECORD_ATTEMPT_ID"] == attempt["attempt_id"]  # type: ignore[index]
+    assert env["ATR_RECORD_ATTEMPT_DATASET_PATH"] == str(dataset_path)  # type: ignore[index]
+    assert env["ATR_ISAAC_MIRROR_TIMEOUT_S"] == "0.5"  # type: ignore[index]
+    assert env["ATR_ISAAC_MIRROR_POST_TIMEOUT_S"] == "0.15"  # type: ignore[index]
+    assert env["ATR_ISAAC_RGBD_RENDER_ENABLED"] == "1"  # type: ignore[index]
+    assert env["ATR_ISAAC_RGBD_RENDER_MODE"] == "deferred_after_record"  # type: ignore[index]
+    assert env["ATR_ISAAC_RGBD_RENDER_TARGET_FPS"] == "15.0"  # type: ignore[index]
+    assert env["ATR_ISAAC_RGBD_RENDER_POST_TIMEOUT_S"] == "0.15"  # type: ignore[index]
+    assert Path(str(env["ATR_ISAAC_RGBD_RENDER_OUTPUT_DIR"])) == dataset_path / "sidecar" / "isaac_rgbd" / "episode_000" / attempt["attempt_id"]  # type: ignore[index]
+    assert Path(str(attempt["attempt_dir"])) == dataset_path / "sidecar" / "attempts" / "episode_000" / attempt["attempt_id"]
+    assert Path(str(attempt["isaac_rgbd_render"]["manifest_path"])) == dataset_path / "sidecar" / "isaac_rgbd" / "episode_000" / attempt["attempt_id"] / "manifest.jsonl"
+    assert started["isaac_mirror"]["rgbd_render"]["enabled"] is True
+    assert not dataset_path.exists()
+
+
+def test_isaac_rgbd_post_render_start_skips_rendered_and_posts_missing_frames(tmp_path: Path, monkeypatch) -> None:
+    bridge = _bridge(tmp_path)
+    dataset = tmp_path / "hf_datasets" / "jin" / "post-render"
+    mirror_path = dataset / "sidecar" / "isaac_mirror" / "record-one.jsonl"
+    output_dir = dataset / "sidecar" / "isaac_rgbd" / "episode_000" / "attempt_post"
+    (output_dir / "top").mkdir(parents=True, exist_ok=True)
+    rendered_rgb = output_dir / "top" / "frame_000000_rgb.png"
+    rendered_rgb.write_bytes(b"rgb")
+    (output_dir / "manifest.jsonl").write_text(
+        json.dumps(
+            {
+                "schema": "atr.isaac_rgbd.render_manifest.v1",
+                "status": "rendered",
+                "attempt_id": "attempt_post",
+                "episode_index": 0,
+                "frame_index": 0,
+                "sample_index": 1,
+                "cameras": ["top"],
+                "files": [{"camera": "top", "kind": "rgb", "path": str(rendered_rgb)}],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    mirror_path.parent.mkdir(parents=True, exist_ok=True)
+    rows = []
+    for frame_index, sample_index in [(0, 1), (1, 2)]:
+        request = {
+            "schema": "atr.isaac_rgbd.render_request.v1",
+            "enabled": True,
+            "session_id": "record-one",
+            "attempt_id": "attempt_post",
+            "episode_index": 0,
+            "frame_index": frame_index,
+            "sample_index": sample_index,
+            "timestamp": f"2026-06-29T00:00:0{sample_index}+00:00",
+            "target_fps": 15.0,
+            "cameras": ["top"],
+            "output_dir": str(output_dir),
+        }
+        rows.append(
+            {
+                "session_id": "record-one",
+                "sample_index": sample_index,
+                "timestamp": request["timestamp"],
+                "joint_state": [{"isaac_joint_path": "/World/Robot/joint", "target_value": float(sample_index)}],
+                "render_queue": {
+                    "status": "deferred_after_record",
+                    "attempt_id": "attempt_post",
+                    "episode_index": 0,
+                    "frame_index": frame_index,
+                    "sample_index": sample_index,
+                    "endpoint": "http://127.0.0.1:8766/render",
+                    "render_request": request,
+                },
+            }
+        )
+    mirror_path.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
+
+    posted: list[int] = []
+
+    def fake_post(payload: dict[str, object], *, endpoint: str, timeout_s: float) -> dict[str, object]:
+        posted.append(int(payload["render_request"]["frame_index"]))  # type: ignore[index]
+        return {"ok": True, "status_code": 200, "response": {"status": "render_queued"}}
+
+    monkeypatch.setattr(bridge, "_post_isaac_rgbd_render_payload", fake_post)
+    monkeypatch.setattr(bridge, "_wait_for_isaac_rgbd_render_completion", lambda candidate, endpoint, timeout_s: {"ok": True, "status": "rendered"})
+
+    started = bridge.isaac_rgbd_render_start(
+        {
+            "mode": "test",
+            "profile_id": "fake_omx_ai",
+            "dataset_path": str(dataset),
+            "session_id": "record-one",
+            "isaac_rgbd_post_render_inline": True,
+        }
+    )
+
+    assert started["ok"] is True
+    assert posted == [1]
+    assert started["post_render"]["done"] == 2
+    assert started["post_render"]["skipped"] == 1
+    assert started["post_render"]["rendered"] == 1
+    assert started["post_render"]["percent"] == 100.0
+
+
 def test_live_record_stop_summarizes_in_process_isaac_mirror_sidecar_metrics(tmp_path: Path, monkeypatch) -> None:
     bridge = _bridge(tmp_path)
     bridge.config.profiles["fake_omx_ai"]["safety_limits"].update({"live_enabled": True, "allow_recording": True})
@@ -3384,6 +4404,7 @@ def test_train_raw_depth_adapter_env_points_to_dataset_sidecar(tmp_path: Path) -
                 "aligned_to": "color",
                 "depth_encoding": "png16",
                 "depth_scale_m_per_unit": 0.001,
+                "camera_depth_scale_m_per_unit": {"top": 0.001, "wrist": 0.0001},
                 "depth_clip_min_mm": 0.0,
                 "depth_clip_max_mm": 2000.0,
             }
@@ -3409,8 +4430,429 @@ def test_train_raw_depth_adapter_env_points_to_dataset_sidecar(tmp_path: Path) -
     assert env["ATR_LEROBOT_RAW_DEPTH_ADAPTER_STRICT"] == "1"
     assert env["ATR_LEROBOT_RAW_DEPTH_CAMERA_KEYS"] == "top,wrist"
     assert env["ATR_LEROBOT_DEPTH_SCALE_M_PER_UNIT"] == "0.001"
+    assert env["ATR_LEROBOT_CAMERA_DEPTH_SCALE_M_PER_UNIT"] == "top=0.001,wrist=0.0001"
     assert env["ATR_LEROBOT_DEPTH_CLIP_MIN_MM"] == "0.0"
     assert env["ATR_LEROBOT_DEPTH_CLIP_MAX_MM"] == "2000.0"
+
+
+def test_train_preflight_normalizes_raw_depth_sidecar_frame_indices(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    dataset = tmp_path / "hf_datasets" / "jin" / "raw-depth-offset"
+    _make_trainable_lerobot_dataset(dataset)
+    sidecar_root = dataset / "sidecar" / "depth_raw"
+    for index in (0, 1, 2):
+        (sidecar_root / "top").mkdir(parents=True, exist_ok=True)
+        (sidecar_root / "top" / f"frame_{index:06d}.png").write_bytes(f"top-{index}".encode("utf-8"))
+    for source_index in (12693, 12694, 12696):
+        (sidecar_root / "wrist").mkdir(parents=True, exist_ok=True)
+        (sidecar_root / "wrist" / f"frame_{source_index:06d}.png").write_bytes(f"wrist-{source_index}".encode("utf-8"))
+
+    request = LeRobotSessionRequest.model_validate(
+        {
+            "mode": "live",
+            "runtime_mode": "live",
+            "profile_id": "fake_omx_ai",
+            "dataset_path": str(dataset),
+            "observation_pipeline_id": "raw_depth_adapter",
+        }
+    )
+
+    normalized = bridge._normalize_train_raw_depth_sidecar(request)  # noqa: SLF001
+
+    assert normalized["ok"] is True
+    assert normalized["camera_results"]["top"]["renamed_count"] == 0
+    assert normalized["camera_results"]["wrist"]["renamed_count"] == 3
+    assert sorted(path.name for path in (sidecar_root / "wrist").glob("frame_*.png")) == [
+        "frame_000000.png",
+        "frame_000001.png",
+        "frame_000002.png",
+    ]
+    assert (sidecar_root / "wrist" / "frame_000002.png").read_bytes() == b"wrist-12696"
+
+
+def test_train_env_enables_isaac_augmentation_adapter_when_sidecar_exists(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    dataset = tmp_path / "hf_datasets" / "jin" / "isaac-aug-train"
+    _make_trainable_lerobot_dataset(dataset)
+    output_dir = dataset / "sidecar" / "isaac_augmentation" / "latest"
+    manifest_path = output_dir / "manifest.jsonl"
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "schema": "atr.isaac_data_augmentation.variant.v1",
+                "variant_id": "e000_f000000_v000",
+                "source": {"episode_index": 0, "frame_index": 0},
+                "image_outputs": {},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    summary_path = output_dir / "summary.json"
+    summary_path.write_text(
+        json.dumps(
+            {
+                "ok": True,
+                "dataset_path": str(dataset),
+                "output_dir": str(output_dir),
+                "manifest_path": str(manifest_path),
+                "summary_path": str(summary_path),
+                "qa_summary_path": str(output_dir / "qa_summary.json"),
+                "source_frame_count": 1,
+                "variant_count": 3,
+                "valid_variant_count": 2,
+                "failed_variant_count": 1,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    request = LeRobotSessionRequest.model_validate(
+        {
+            "mode": "live",
+            "runtime_mode": "live",
+            "profile_id": "fake_omx_ai",
+            "dataset_path": str(dataset),
+            "observation_pipeline_id": "raw_depth_adapter",
+        }
+    )
+
+    env = bridge._workflow_env_overrides("train", request)
+
+    assert env["ATR_LEROBOT_ISAAC_AUGMENTATION_ADAPTER"] == "1"
+    assert env["ATR_LEROBOT_ISAAC_AUGMENTATION_MANIFEST"] == str(manifest_path)
+    assert env["ATR_LEROBOT_ISAAC_AUGMENTATION_SUMMARY"] == str(summary_path)
+    assert env["ATR_LEROBOT_ISAAC_AUGMENTATION_INCLUDE_ALL"] == "1"
+    assert env["ATR_LEROBOT_ISAAC_AUGMENTATION_STRICT"] == "0"
+    assert env["ATR_LEROBOT_ISAAC_AUGMENTATION_VARIANT_COUNT"] == "3"
+    assert env["ATR_LEROBOT_ISAAC_AUGMENTATION_REQUIRE_QA_OK"] == "1"
+    assert env["ATR_LEROBOT_ISAAC_AUGMENTATION_VALID_VARIANT_COUNT"] == "2"
+    assert env["ATR_LEROBOT_ISAAC_AUGMENTATION_FAILED_VARIANT_COUNT"] == "1"
+    assert env["ATR_LEROBOT_ISAAC_AUGMENTATION_QA_SUMMARY"] == str(output_dir / "qa_summary.json")
+
+
+def test_train_dataset_mix_defaults_are_conservative_and_report_effective_counts(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    dataset = tmp_path / "hf_datasets" / "jin" / "mix-default"
+    _make_trainable_lerobot_dataset(dataset)
+    info_path = dataset / "meta" / "info.json"
+    info = json.loads(info_path.read_text(encoding="utf-8"))
+    info["total_frames"] = 10
+    info_path.write_text(json.dumps(info), encoding="utf-8")
+    _write_isaac_rgbd_manifest_rows(dataset, count=4)
+    _write_isaac_augmentation_summary(dataset, variant_count=8, valid_variant_count=8)
+
+    request = LeRobotSessionRequest.model_validate(
+        {
+            "mode": "live",
+            "runtime_mode": "live",
+            "profile_id": "fake_omx_ai",
+            "dataset_path": str(dataset),
+            "observation_pipeline_id": "raw_depth_adapter",
+        }
+    )
+    env = bridge._workflow_env_overrides("train", request)
+
+    assert env["ATR_LEROBOT_DATA_MIX_REAL_ORIGINAL_WEIGHT"] == "1"
+    assert env["ATR_LEROBOT_DATA_MIX_ISAAC_RGBD_WEIGHT"] == "0.5"
+    assert env["ATR_LEROBOT_DATA_MIX_ISAAC_AUGMENTATION_WEIGHT"] == "0.5"
+    assert env["ATR_LEROBOT_FIDELITY_WEIGHTING_ENABLED"] == "1"
+    assert env["ATR_LEROBOT_FIDELITY_REAL_ORIGINAL_WEIGHT"] == "1"
+    assert env["ATR_LEROBOT_FIDELITY_ISAAC_RGBD_WEIGHT"] == "0.5"
+    assert env["ATR_LEROBOT_FIDELITY_ISAAC_AUGMENTATION_WEIGHT"] == "0.3"
+    result = bridge.train_start(
+        {
+            "mode": "test",
+            "profile_id": "fake_omx_ai",
+            "dataset_path": str(dataset),
+            "observation_pipeline_id": "raw_depth_adapter",
+        }
+    )
+
+    assert result["ok"] is True
+    assert result["dataset_mix"]["weights"] == {"real_original": 1.0, "isaac_rgbd": 0.5, "isaac_augmentation": 0.5}
+    assert result["fidelity_weights"] == {
+        "schema": "atr.lerobot.fidelity_weights.v1",
+        "enabled": True,
+        "mode": "source_loss_weight",
+        "weights": {"real_original": 1.0, "isaac_rgbd": 0.5, "isaac_augmentation": 0.3},
+    }
+    assert result["dataset_mix"]["effective_counts"] == {
+        "real_original": 10,
+        "isaac_rgbd": 4,
+        "isaac_augmentation": 5,
+        "total": 19,
+    }
+    status = bridge.train_status({"mode": "test", "profile_id": "fake_omx_ai", "session_id": result["session_id"]})
+    assert status["dataset_mix"]["effective_counts"]["total"] == 19
+    assert status["fidelity_weights"]["weights"]["isaac_augmentation"] == 0.3
+    assert status["training"]["dataset_mix_effective_counts"]["total"] == 19
+    assert status["training"]["fidelity_weights"]["weights"]["isaac_augmentation"] == 0.3
+
+
+def test_train_dataset_mix_operator_override_is_passed_to_env_and_counts(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    dataset = tmp_path / "hf_datasets" / "jin" / "mix-override"
+    _make_trainable_lerobot_dataset(dataset)
+    info_path = dataset / "meta" / "info.json"
+    info = json.loads(info_path.read_text(encoding="utf-8"))
+    info["total_frames"] = 10
+    info_path.write_text(json.dumps(info), encoding="utf-8")
+    _write_isaac_rgbd_manifest_rows(dataset, count=9)
+    _write_isaac_augmentation_summary(dataset, variant_count=12, valid_variant_count=12)
+    payload = {
+        "mode": "test",
+        "profile_id": "fake_omx_ai",
+        "dataset_path": str(dataset),
+        "observation_pipeline_id": "raw_depth_adapter",
+        "dataset_mix_real_original_weight": 0.8,
+        "dataset_mix_isaac_rgbd_weight": 0.3,
+        "dataset_mix_isaac_augmentation_weight": 0.2,
+        "dataset_mix_isaac_rgbd_max_samples": 2,
+        "dataset_mix_isaac_augmentation_max_samples": 1,
+        "dataset_mix_seed": 7,
+        "fidelity_weighting_enabled": True,
+        "fidelity_real_original_weight": 1.0,
+        "fidelity_isaac_rgbd_weight": 0.45,
+        "fidelity_isaac_augmentation_weight": 0.25,
+    }
+    request = LeRobotSessionRequest.model_validate({**payload, "mode": "live", "runtime_mode": "live"})
+    env = bridge._workflow_env_overrides("train", request)
+
+    assert env["ATR_LEROBOT_DATA_MIX_REAL_ORIGINAL_WEIGHT"] == "0.8"
+    assert env["ATR_LEROBOT_DATA_MIX_ISAAC_RGBD_WEIGHT"] == "0.3"
+    assert env["ATR_LEROBOT_DATA_MIX_ISAAC_AUGMENTATION_WEIGHT"] == "0.2"
+    assert env["ATR_LEROBOT_DATA_MIX_ISAAC_RGBD_MAX_SAMPLES"] == "2"
+    assert env["ATR_LEROBOT_DATA_MIX_ISAAC_AUGMENTATION_MAX_SAMPLES"] == "1"
+    assert env["ATR_LEROBOT_DATA_MIX_SEED"] == "7"
+    assert env["ATR_LEROBOT_FIDELITY_WEIGHTING_ENABLED"] == "1"
+    assert env["ATR_LEROBOT_FIDELITY_REAL_ORIGINAL_WEIGHT"] == "1"
+    assert env["ATR_LEROBOT_FIDELITY_ISAAC_RGBD_WEIGHT"] == "0.45"
+    assert env["ATR_LEROBOT_FIDELITY_ISAAC_AUGMENTATION_WEIGHT"] == "0.25"
+    result = bridge.train_start(payload)
+
+    assert result["dataset_mix"]["effective_counts"] == {
+        "real_original": 8,
+        "isaac_rgbd": 2,
+        "isaac_augmentation": 1,
+        "total": 11,
+    }
+    assert result["fidelity_weights"]["weights"] == {
+        "real_original": 1.0,
+        "isaac_rgbd": 0.45,
+        "isaac_augmentation": 0.25,
+    }
+
+
+def test_train_start_blocks_when_isaac_augmentation_has_no_valid_variants(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    dataset = tmp_path / "hf_datasets" / "jin" / "isaac-aug-invalid"
+    _make_trainable_lerobot_dataset(dataset)
+    output_dir = dataset / "sidecar" / "isaac_augmentation" / "latest"
+    manifest_path = output_dir / "manifest.jsonl"
+    output_dir.mkdir(parents=True)
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "schema": "atr.isaac_data_augmentation.variant.v1",
+                "variant_id": "invalid",
+                "qa_ok": False,
+                "qa_failure_code": "MISSING_AUGMENTED_RGB",
+                "source": {"episode_index": 0, "frame_index": 0},
+                "image_outputs": {},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    summary_path = output_dir / "summary.json"
+    summary_path.write_text(
+        json.dumps(
+            {
+                "ok": True,
+                "dataset_path": str(dataset),
+                "output_dir": str(output_dir),
+                "manifest_path": str(manifest_path),
+                "summary_path": str(summary_path),
+                "qa_summary_path": str(output_dir / "qa_summary.json"),
+                "source_frame_count": 1,
+                "variant_count": 1,
+                "valid_variant_count": 0,
+                "failed_variant_count": 1,
+                "qa_failure_counts": {"MISSING_AUGMENTED_RGB": 1},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = bridge.train_start(
+        {
+            "mode": "test",
+            "profile_id": "fake_omx_ai",
+            "dataset_path": str(dataset),
+            "observation_pipeline_id": "raw_depth_adapter",
+        }
+    )
+
+    assert result["ok"] is False
+    assert result["failure_code"] == "LEROBOT_ISAAC_AUGMENTATION_QA_BLOCKED"
+    assert "0 valid Isaac augmentation variants" in result["message"]
+
+
+def test_train_start_warns_when_isaac_augmentation_has_failed_variants(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    dataset = tmp_path / "hf_datasets" / "jin" / "isaac-aug-partial"
+    _make_trainable_lerobot_dataset(dataset)
+    output_dir = dataset / "sidecar" / "isaac_augmentation" / "latest"
+    manifest_path = output_dir / "manifest.jsonl"
+    output_dir.mkdir(parents=True)
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "schema": "atr.isaac_data_augmentation.variant.v1",
+                "variant_id": "valid",
+                "qa_ok": True,
+                "source": {"episode_index": 0, "frame_index": 0},
+                "image_outputs": {},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    summary_path = output_dir / "summary.json"
+    summary_path.write_text(
+        json.dumps(
+            {
+                "ok": True,
+                "dataset_path": str(dataset),
+                "output_dir": str(output_dir),
+                "manifest_path": str(manifest_path),
+                "summary_path": str(summary_path),
+                "qa_summary_path": str(output_dir / "qa_summary.json"),
+                "source_frame_count": 2,
+                "variant_count": 2,
+                "valid_variant_count": 1,
+                "failed_variant_count": 1,
+                "qa_failure_counts": {"MISSING_AUGMENTED_DEPTH": 1},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = bridge.train_start(
+        {
+            "mode": "test",
+            "profile_id": "fake_omx_ai",
+            "dataset_path": str(dataset),
+            "observation_pipeline_id": "raw_depth_adapter",
+        }
+    )
+
+    assert result["ok"] is True
+    assert result["isaac_data_augmentation"]["valid_variant_count"] == 1
+    assert result["isaac_data_augmentation"]["failed_variant_count"] == 1
+    assert any(
+        item["step"] == "ISAAC_AUGMENTATION_QA" and item["status"] == "warning"
+        for item in result["step_trace"]
+    )
+
+
+def test_train_env_omits_isaac_augmentation_adapter_when_sidecar_missing(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    dataset = tmp_path / "hf_datasets" / "jin" / "no-isaac-aug"
+    _make_trainable_lerobot_dataset(dataset)
+    request = LeRobotSessionRequest.model_validate(
+        {
+            "mode": "live",
+            "runtime_mode": "live",
+            "profile_id": "fake_omx_ai",
+            "dataset_path": str(dataset),
+            "observation_pipeline_id": "raw_depth_adapter",
+        }
+    )
+
+    env = bridge._workflow_env_overrides("train", request)
+
+    assert "ATR_LEROBOT_ISAAC_AUGMENTATION_ADAPTER" not in env
+    assert "ATR_LEROBOT_ISAAC_AUGMENTATION_MANIFEST" not in env
+
+
+def test_train_env_enables_isaac_rgbd_source_adapter_when_sim_original_exists(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    dataset = tmp_path / "hf_datasets" / "jin" / "isaac-sim-original-train"
+    _make_trainable_lerobot_dataset(dataset)
+    manifest_path = dataset / "sidecar" / "isaac_rgbd" / "episode_000" / "attempt_a" / "manifest.jsonl"
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "schema": "atr.isaac_rgbd.render_manifest.v1",
+                "attempt_id": "attempt_a",
+                "episode_index": 0,
+                "frame_index": 0,
+                "cameras": ["wrist"],
+                "files": [
+                    {"camera": "wrist", "kind": "rgb", "path": "wrist/rgb.png"},
+                    {"camera": "wrist", "kind": "depth", "path": "wrist/depth.png"},
+                ],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    request = LeRobotSessionRequest.model_validate(
+        {
+            "mode": "live",
+            "runtime_mode": "live",
+            "profile_id": "fake_omx_ai",
+            "dataset_path": str(dataset),
+            "observation_pipeline_id": "raw_depth_adapter",
+        }
+    )
+
+    env = bridge._workflow_env_overrides("train", request)
+
+    assert env["ATR_LEROBOT_ISAAC_RGBD_SOURCE_ADAPTER"] == "1"
+    assert env["ATR_LEROBOT_ISAAC_RGBD_SOURCE_ROOT"] == str(dataset / "sidecar" / "isaac_rgbd")
+    assert env["ATR_LEROBOT_ISAAC_RGBD_SOURCE_INCLUDE_ALL"] == "1"
+    assert env["ATR_LEROBOT_ISAAC_RGBD_SOURCE_STRICT"] == "0"
+
+
+def test_train_start_exposes_record_attempt_manifest_summary(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    dataset = tmp_path / "hf_datasets" / "jin" / "attempt-dataset"
+    _make_trainable_lerobot_dataset(dataset)
+    manifest_path = dataset / "sidecar" / "attempts" / "manifest.jsonl"
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "schema": "atr.record_attempt.event.v1",
+                "event": "active_cam_result_written",
+                "attempt_id": "attempt_train_ready",
+                "episode_index": 0,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = bridge.train_start(
+        {
+            "mode": "test",
+            "runtime_mode": "test",
+            "profile_id": "fake_omx_ai",
+            "dataset_repo_id": "jin/attempt-dataset",
+            "observation_pipeline_id": "legacy_lerobot",
+        }
+    )
+
+    assert result["ok"] is True
+    assert result["record_attempts"]["available"] is True
+    assert result["record_attempts"]["latest_attempt_id"] == "attempt_train_ready"
+    assert result["record_attempts"]["event_count"] == 1
 
 
 def test_train_blocks_observation_pipeline_mismatch(tmp_path: Path) -> None:
@@ -3453,6 +4895,24 @@ def test_realsense_camera_command_config_carries_depth_transform_contract(tmp_pa
     assert camera["depth_scale_m_per_unit"] == 0.001
     assert camera["depth_clip_min_mm"] == 0.0
     assert camera["depth_clip_max_mm"] == 2000.0
+
+
+def test_realsense_d405_camera_command_config_uses_d405_depth_scale(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+
+    camera = bridge._realsense_camera_config(
+        "352122273019",
+        camera_key="wrist",
+        fps=15,
+        use_depth=True,
+        width=640,
+        height=480,
+        color_format="bgr8",
+    )
+
+    assert camera["type"] == "intelrealsense"
+    assert camera["serial_number_or_name"] == "352122273019"
+    assert camera["depth_scale_m_per_unit"] == 0.0001
 
 
 def test_pi05_train_env_passes_hf_token_from_token_path(tmp_path: Path, monkeypatch) -> None:
@@ -3508,6 +4968,30 @@ def test_rollout_runtime_status_is_inferred_from_action_log(tmp_path: Path) -> N
     assert result["runtime"]["max_abs_delta"] == 2.866
     assert result["max_abs_delta"] == 2.866
     assert "Robot action stream active" in result["runtime_message"]
+
+
+def test_record_runtime_status_reports_specimen_preflight_failure(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    session = {
+        "session_id": "lr-record-test",
+        "workflow": "record",
+        "profile_id": "fake_omx_ai",
+        "mode": "live",
+        "status": "FAILED",
+        "log_path": str(tmp_path / "lr-record-test.log"),
+        "pid": 123,
+        "returncode": 134,
+    }
+    log_tail = (
+        "Traceback (most recent call last):\n"
+        "RecordStartPreflightError: SPECIMEN_OUTSIDE_A4: SPECIMEN_OUTSIDE_A4\n"
+    )
+
+    runtime = bridge._runtime_status_from_log(session, log_tail)
+
+    assert runtime["phase"] == "FAILED"
+    assert runtime["message"] == "Record start blocked: detected specimen is outside the A4 workspace."
+    assert runtime["warnings"] == ["record_start_preflight_failed"]
 
 
 def test_lerobot_cleanup_marker_matching_does_not_match_gui_dom_ids() -> None:

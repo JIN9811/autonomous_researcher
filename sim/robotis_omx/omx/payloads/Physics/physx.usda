@@ -46,7 +46,7 @@ over "omx"
                                 prepend apiSchemas = ["PhysxCollisionAPI", "MaterialBindingAPI"]
                             )
                             {
-                                rel material:binding:physics = </omx/Physics/AntiSlipTapeMaterial>
+                                rel material:binding:physics = </omx/Physics/PhysicsMaterial>
                                 float physxCollision:contactOffset = 0.001
                                 float physxCollision:restOffset = 0
                             }
@@ -59,8 +59,8 @@ over "omx"
                                         prepend apiSchemas = ["PhysxCollisionAPI", "MaterialBindingAPI"]
                                     )
                                     {
-                                        rel material:binding:physics = </omx/Physics/AntiSlipTapeMaterial>
-                                        float physxCollision:contactOffset = 0.001
+                                        rel material:binding:physics = </omx/Physics/PhysicsMaterial>
+                                        float physxCollision:contactOffset = 0.0005
                                         float physxCollision:restOffset = 0
                                     }
 
@@ -79,8 +79,8 @@ over "omx"
                                         prepend apiSchemas = ["PhysxCollisionAPI", "MaterialBindingAPI"]
                                     )
                                     {
-                                        rel material:binding:physics = </omx/Physics/AntiSlipTapeMaterial>
-                                        float physxCollision:contactOffset = 0.001
+                                        rel material:binding:physics = </omx/Physics/PhysicsMaterial>
+                                        float physxCollision:contactOffset = 0.0005
                                         float physxCollision:restOffset = 0
                                     }
 

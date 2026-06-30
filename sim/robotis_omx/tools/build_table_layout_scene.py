@@ -14,9 +14,9 @@ OUT = ROOT / 'scene' / 'omx_table_layout.usda'
 ROBOT_USD = ROOT / 'omx' / 'omx.usda'
 TEXTURE_DIR = ROOT / 'scene' / 'Textures'
 REDWOOD_TEXTURE = TEXTURE_DIR / 'redwood_table_grain.png'
-COLLISION_SKIN_FRACTION = 0.01
+COLLISION_SKIN_FRACTION = 0.10
 COLLISION_SKIN_MIN_M = 0.0001
-COLLISION_SKIN_MAX_M = 0.001
+COLLISION_SKIN_MAX_M = 0.005
 
 
 def write_redwood_texture(path):
@@ -177,13 +177,41 @@ def apply_physx_contact_tuning(
         )
 
 
-def make_physics_material(stage, path, *, static_friction, dynamic_friction, restitution=0.0):
+def make_physics_material(
+    stage,
+    path,
+    *,
+    static_friction,
+    dynamic_friction,
+    restitution=0.0,
+    friction_combine_mode=None,
+    compliant_contact_stiffness=None,
+    compliant_contact_damping=None,
+):
     mat = UsdShade.Material.Define(stage, path)
     prim = mat.GetPrim()
     UsdPhysics.MaterialAPI.Apply(prim)
     _set_attr(prim, 'physics:staticFriction', Sdf.ValueTypeNames.Float, float(static_friction))
     _set_attr(prim, 'physics:dynamicFriction', Sdf.ValueTypeNames.Float, float(dynamic_friction))
     _set_attr(prim, 'physics:restitution', Sdf.ValueTypeNames.Float, float(restitution))
+    if friction_combine_mode is not None or compliant_contact_stiffness is not None or compliant_contact_damping is not None:
+        _apply_physx_api(prim, 'PhysxMaterialAPI')
+    if friction_combine_mode is not None:
+        _set_uniform_attr(prim, 'physxMaterial:frictionCombineMode', Sdf.ValueTypeNames.Token, str(friction_combine_mode))
+    if compliant_contact_stiffness is not None:
+        _set_attr(
+            prim,
+            'physxMaterial:compliantContactStiffness',
+            Sdf.ValueTypeNames.Float,
+            float(compliant_contact_stiffness),
+        )
+    if compliant_contact_damping is not None:
+        _set_attr(
+            prim,
+            'physxMaterial:compliantContactDamping',
+            Sdf.ValueTypeNames.Float,
+            float(compliant_contact_damping),
+        )
     return mat
 
 
@@ -344,8 +372,12 @@ def main():
     _ensure_api_schema(physics_scene_prim, 'PhysxSceneAPI')
     _set_attr(physics_scene_prim, 'physxScene:enableCCD', Sdf.ValueTypeNames.Bool, True)
     _set_attr(physics_scene_prim, 'physxScene:enableStabilization', Sdf.ValueTypeNames.Bool, True)
-    _set_attr(physics_scene_prim, 'physxScene:frictionCorrelationDistance', Sdf.ValueTypeNames.Float, 0.005)
+    _set_attr(physics_scene_prim, 'physxScene:bounceThresholdVelocity', Sdf.ValueTypeNames.Float, 0.01)
+    _set_attr(physics_scene_prim, 'physxScene:frictionCorrelationDistance', Sdf.ValueTypeNames.Float, 0.00625)
     _set_attr(physics_scene_prim, 'physxScene:frictionOffsetThreshold', Sdf.ValueTypeNames.Float, 0.002)
+    _set_uniform_attr(physics_scene_prim, 'physxScene:broadphaseType', Sdf.ValueTypeNames.Token, 'GPU')
+    _set_attr(physics_scene_prim, 'physxScene:gpuFoundLostAggregatePairsCapacity', Sdf.ValueTypeNames.UInt, 8192)
+    _set_attr(physics_scene_prim, 'physxScene:gpuTotalAggregatePairsCapacity', Sdf.ValueTypeNames.UInt, 8192)
     _set_uniform_attr(physics_scene_prim, 'physxScene:solverType', Sdf.ValueTypeNames.Token, 'TGS')
     _set_attr(physics_scene_prim, 'physxScene:timeStepsPerSecond', Sdf.ValueTypeNames.Int, 240)
 
@@ -378,8 +410,11 @@ def main():
     pla_physics_mat = make_physics_material(
         stage,
         '/World/Materials/pla_specimen_contact_physics',
-        static_friction=2.2,
-        dynamic_friction=1.8,
+        static_friction=1.0,
+        dynamic_friction=0.8,
+        friction_combine_mode='max',
+        compliant_contact_stiffness=100000,
+        compliant_contact_damping=1000,
     )
 
     # Coordinate convention: X left->right, Y front->back, Z up. Origin is front-left table-top corner.
@@ -387,16 +422,78 @@ def main():
     table_w = 0.700
     table_d = 0.450
     table_th = 0.030
-    table_center = (table_w / 2.0, table_d / 2.0, -table_th / 2.0)
-    apply_static_collider(
-        cube(stage, '/World/Table/TableTop', table_center, (table_w, table_d, table_th), desk_mat),
-        physics_material=wood_physics_mat,
-    )
-    textured_rect_mesh(stage, '/World/Table/TableTopRedwoodGrainSurface', 0.0, table_w, 0.0, table_d, 0.00003, desk_texture_mat)
 
     # Robot base slot from drawing: 150 x 120 mm, front-left at x=240 mm, y=0.
-    robot_center_x = 0.240 + 0.150 / 2.0
-    robot_center_y = 0.120 / 2.0
+    robot_slot_x_min = 0.240
+    robot_slot_w = 0.150
+    robot_slot_x_max = robot_slot_x_min + robot_slot_w
+    robot_slot_y_min = 0.0
+    robot_slot_d = 0.120
+    robot_slot_y_max = robot_slot_y_min + robot_slot_d
+    robot_center_x = robot_slot_x_min + robot_slot_w / 2.0
+    robot_center_y = robot_slot_y_min + robot_slot_d / 2.0
+    robot_base_pocket_depth = 0.020
+    robot_base_pocket_floor_th = 0.004
+
+    # Keep the table visual continuous around a real collision recess, so the lowered robot base
+    # does not penetrate the tabletop collider.
+    apply_static_collider(
+        cube(
+            stage,
+            '/World/Table/TableTop',
+            (table_w / 2.0, robot_slot_y_max + (table_d - robot_slot_y_max) / 2.0, -table_th / 2.0),
+            (table_w, table_d - robot_slot_y_max, table_th),
+            desk_mat,
+        ),
+        physics_material=wood_physics_mat,
+    )
+    apply_static_collider(
+        cube(
+            stage,
+            '/World/Table/TableTopFrontLeft',
+            (robot_slot_x_min / 2.0, robot_slot_d / 2.0, -table_th / 2.0),
+            (robot_slot_x_min, robot_slot_d, table_th),
+            desk_mat,
+        ),
+        physics_material=wood_physics_mat,
+    )
+    apply_static_collider(
+        cube(
+            stage,
+            '/World/Table/TableTopFrontRight',
+            (robot_slot_x_max + (table_w - robot_slot_x_max) / 2.0, robot_slot_d / 2.0, -table_th / 2.0),
+            (table_w - robot_slot_x_max, robot_slot_d, table_th),
+            desk_mat,
+        ),
+        physics_material=wood_physics_mat,
+    )
+    apply_static_collider(
+        cube(
+            stage,
+            '/World/Table/RobotBasePocketFloor',
+            (
+                robot_center_x,
+                robot_center_y,
+                -robot_base_pocket_depth - robot_base_pocket_floor_th / 2.0,
+            ),
+            (robot_slot_w, robot_slot_d, robot_base_pocket_floor_th),
+            desk_edge_mat,
+        ),
+        physics_material=wood_physics_mat,
+    )
+    textured_rect_mesh(stage, '/World/Table/TableTopRedwoodGrainSurface_Back', 0.0, table_w, robot_slot_y_max, table_d, 0.00003, desk_texture_mat)
+    textured_rect_mesh(stage, '/World/Table/TableTopRedwoodGrainSurface_FrontLeft', 0.0, robot_slot_x_min, 0.0, robot_slot_y_max, 0.00003, desk_texture_mat)
+    textured_rect_mesh(stage, '/World/Table/TableTopRedwoodGrainSurface_FrontRight', robot_slot_x_max, table_w, 0.0, robot_slot_y_max, 0.00003, desk_texture_mat)
+    textured_rect_mesh(
+        stage,
+        '/World/Table/RobotBasePocketFloorRedwoodGrainSurface',
+        robot_slot_x_min,
+        robot_slot_x_max,
+        robot_slot_y_min,
+        robot_slot_y_max,
+        -robot_base_pocket_depth + 0.00003,
+        desk_edge_mat,
+    )
 
     # A4 sheet from drawing: 297 x 210 mm, 40 mm behind the robot base and symmetric to robot center.
     a4_w = 0.297
@@ -433,7 +530,7 @@ def main():
     robot_anchor.GetPrim().GetReferences().AddReference(str(ROBOT_USD), '/omx')
     robot_xform = UsdGeom.Xformable(robot_anchor.GetPrim())
     robot_xform.ClearXformOpOrder()
-    robot_xform.AddTranslateOp().Set(Gf.Vec3d(robot_center_x, robot_center_y, 0.0))
+    robot_xform.AddTranslateOp().Set(Gf.Vec3d(robot_center_x, robot_center_y, -robot_base_pocket_depth))
     # Rotate the robot toward the A4 workspace behind the front slot.
     robot_xform.AddRotateZOp().Set(90.0)
 
@@ -468,7 +565,7 @@ def main():
         max_depenetration_velocity=0.2,
         solver_position_iterations=32,
         solver_velocity_iterations=4,
-        contact_report_threshold=1.0,
+        contact_report_threshold=0.2,
     )
 
     # Lighting only; no fixed camera requested.

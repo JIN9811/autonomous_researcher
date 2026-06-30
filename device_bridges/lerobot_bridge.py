@@ -78,6 +78,7 @@ LEROBOT_DEFAULT_REALSENSE_WARMUP_S = 5
 LEROBOT_DEFAULT_CAMERA_WIDTH = 640
 LEROBOT_DEFAULT_CAMERA_HEIGHT = 480
 LEROBOT_DEFAULT_DEPTH_SCALE_M_PER_UNIT = 0.001
+LEROBOT_D405_DEPTH_SCALE_M_PER_UNIT = 0.0001
 LEROBOT_DEFAULT_DEPTH_CLIP_MIN_MM = 0.0
 LEROBOT_DEFAULT_DEPTH_CLIP_MAX_MM = 2000.0
 LEROBOT_REALSENSE_MODEL_NAMES = {
@@ -97,6 +98,7 @@ LEROBOT_DEFAULT_TASK_INSTRUCTION = "Pick up the cube and place it"
 LEROBOT_DEFAULT_RECORD_NUM_EPISODES = 60
 LEROBOT_DEFAULT_OBSERVATION_PIPELINE_ID = "raw_depth_adapter"
 LEROBOT_DEFAULT_TRAIN_POLICY_TYPE = "smolvla"
+LEROBOT_DEFAULT_ISAAC_RGBD_RENDER_CAMERAS = "top,front,right"
 LEROBOT_OBSERVATION_PIPELINES: dict[str, dict[str, Any]] = {
     "legacy_lerobot": {
         "pipeline_id": "legacy_lerobot",
@@ -504,8 +506,12 @@ class LeRobotBridge:
         self._receiver_processes: dict[str, subprocess.Popen[str]] = {}
         self._log_handles: dict[str, IO[str]] = {}
         self._receiver_log_handles: dict[str, IO[str]] = {}
+        self._receiver_commands: dict[str, list[str]] = {}
         self._mirror_stop_events: dict[str, threading.Event] = {}
         self._mirror_threads: dict[str, threading.Thread] = {}
+        self._isaac_rgbd_render_jobs: dict[str, dict[str, Any]] = {}
+        self._isaac_rgbd_render_threads: dict[str, threading.Thread] = {}
+        self._isaac_rgbd_render_lock = threading.Lock()
         self._counter = 0
         self._selected_profile_id = config.default_profile_id
         self._selected_observation_pipeline_id = _normalize_observation_pipeline_id(config.default_observation_pipeline_id)
@@ -897,11 +903,6 @@ class LeRobotBridge:
         profile_id = profile.profile_id if profile else request.profile_id or self._selected_profile_id
         endpoint = self._isaac_mirror_endpoint(request)
         process_key = self._isaac_mirror_process_key(endpoint)
-        existing = self._receiver_processes.get(process_key)
-        if existing and existing.poll() is None:
-            return self.mirror_receiver_process_status(raw_payload)
-        self._stop_receiver_process(process_key)
-
         command_info = self._isaac_mirror_receiver_command(raw_payload, endpoint)
         host, port = self._isaac_mirror_host_port(endpoint)
         if not command_info.get("ok"):
@@ -912,12 +913,19 @@ class LeRobotBridge:
                 str(command_info.get("failure_code") or "LEROBOT_ISAAC_MIRROR_RECEIVER_COMMAND_INVALID"),
                 str(command_info.get("message") or "Isaac mirror receiver command is invalid."),
             )
+        command = [str(item) for item in command_info["command"]]
+        existing = self._receiver_processes.get(process_key)
+        if existing and existing.poll() is None:
+            if self._receiver_commands.get(process_key) == command:
+                return self.mirror_receiver_process_status(raw_payload)
+            self._stop_receiver_process(process_key)
+        else:
+            self._stop_receiver_process(process_key)
 
         log_dir = self.config.repo_root / "runs" / "isaac_mirror_receiver"
         log_dir.mkdir(parents=True, exist_ok=True)
         launch_mode = str(command_info.get("launch_mode") or "python_script")
         log_path = log_dir / f"receiver_{launch_mode}_{host.replace('.', '_')}_{port}.log"
-        command = [str(item) for item in command_info["command"]]
         log_handle = log_path.open("a", encoding="utf-8")
         try:
             process = subprocess.Popen(
@@ -933,6 +941,7 @@ class LeRobotBridge:
             return self._error("lerobot.mirror.receiver_process.start", mode, profile_id, "LEROBOT_ISAAC_MIRROR_RECEIVER_START_FAILED", f"{exc.__class__.__name__}: {exc}")
         self._receiver_processes[process_key] = process
         self._receiver_log_handles[process_key] = log_handle
+        self._receiver_commands[process_key] = command
         default_timeout_s = 180.0 if launch_mode == "isaac_extension" else 5.0
         timeout_s = _safe_float(raw_payload.get("isaac_mirror_receiver_start_timeout_s"), default_timeout_s, minimum=0.1, maximum=300.0)
         health = self._wait_for_isaac_mirror_receiver(endpoint, timeout_s=timeout_s, request_timeout_s=self._isaac_mirror_timeout_s(request))
@@ -1762,6 +1771,9 @@ class LeRobotBridge:
         try:
             request, runtime_detail = self._train_request_with_policy_runtime(request)
             request, dataset_detail = self._train_request_with_local_dataset(request)
+            raw_depth_normalization = self._normalize_train_raw_depth_sidecar(request)
+            if raw_depth_normalization.get("changed"):
+                dataset_detail = f"{dataset_detail}; raw depth indices normalized"
             pipeline_block = self._dataset_pipeline_block_if_needed("lerobot.train.start", mode, profile, request, "train")
             if pipeline_block:
                 return pipeline_block
@@ -1769,6 +1781,16 @@ class LeRobotBridge:
             pipeline_block = self._dataset_pipeline_block_if_needed("lerobot.train.start", mode, profile, request, "train")
             if pipeline_block:
                 return pipeline_block
+            augmentation_qa = self._train_isaac_augmentation_qa_preflight(request)
+            if augmentation_qa.get("blocked"):
+                return self._blocked(
+                    "lerobot.train.start",
+                    mode,
+                    profile.profile_id,
+                    "LEROBOT_ISAAC_AUGMENTATION_QA_BLOCKED",
+                    str(augmentation_qa.get("message") or "Isaac augmentation QA blocked training."),
+                    "train",
+                )
             request, train_detail = self._train_request_with_output_dir(profile, request)
             request, resume_detail = self._train_request_with_resume_config(profile, request)
             train_args = self._train_args(profile, request)
@@ -1778,6 +1800,7 @@ class LeRobotBridge:
         trace = [
             ("PRECHECK", "ok", f"{train_detail}; {runtime_detail}; {resume_detail}"),
             ("LOAD_DATASET", "ok", f"{dataset_detail}; {dataset_version_detail}"),
+            *list(augmentation_qa.get("trace", [])),
             ("TRAINING", "ok" if mode != "live" else "active", f"steps={request.steps} batch_size={request.batch_size}"),
             ("CHECKPOINT", "ok" if mode != "live" else "pending", self._train_checkpoint_path(profile, request)),
         ]
@@ -1982,7 +2005,7 @@ class LeRobotBridge:
         step_trace = [
             {"step": "PRECHECK", "status": "ok", "detail": "LeRobot visualization config accepted"},
             {"step": "LOAD_DATASET", "status": "ok", "detail": str(viz_info.get("dataset_path", ""))},
-            {"step": "START_VISUALIZER", "status": "active", "detail": f"tool={viz_info.get('tool')} episode={request.episode_index}"},
+            {"step": "START_VISUALIZER", "status": "active", "detail": f"tool={viz_info.get('tool')} episode={viz_info.get('episode_index')} episodes={viz_info.get('episode_indices')}"},
         ]
         session = {
             "session_id": session_id,
@@ -2040,7 +2063,7 @@ class LeRobotBridge:
 
     def visualize_status(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         """Return LeRobot dataset visualization status."""
-        return self._session_status("lerobot.visualize.status", payload or {}, "visualize")
+        return self._session_status("lerobot.visualize.status", payload or {}, "visualize", prefer_active=True)
 
     def wandb_local_start(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         """Start a local W&B Server instance for LeRobot training dashboards."""
@@ -2202,35 +2225,222 @@ class LeRobotBridge:
             )
             if (dataset_dir / rel).is_file()
         ]
+        requested_pipeline_id = self._request_observation_pipeline_id(request, effective_profile)
+        dataset_payload = {
+            "path": dataset_path,
+            "root": request.dataset_root or str(self.config.dataset_root),
+            "robot_profile_id": effective_profile.profile_id,
+            "robot_type": str(info.get("robot_type") or effective_profile.robot_type),
+            "teleop_type": effective_profile.teleop_type,
+            "observation_pipeline_id": pipeline_metadata["observation_pipeline_id"],
+            "requested_observation_pipeline_id": requested_pipeline_id,
+            "observation_pipeline_source": pipeline_metadata["source"],
+            "profile_restored_from_metadata": bool(restored_profile is not None),
+            "pipeline_metadata_path": str(pipeline_metadata.get("path") or ""),
+            "episode_count": _safe_int(info.get("total_episodes"), request.num_episodes, minimum=0),
+            "frame_count": _safe_int(info.get("total_frames"), 0, minimum=0),
+            "fps": _safe_int(info.get("fps"), request.fps or effective_profile.fps, minimum=0),
+            "codebase_version": str(info.get("codebase_version") or ""),
+            "tasks": [request.task_instruction],
+            "camera_keys": sorted(effective_profile.camera_map.values()),
+            "metadata_files": metadata_files,
+            "features": feature_names,
+            "depth_features": depth_features,
+            "has_depth_features": bool(depth_features),
+        }
+        health = self._dataset_health_summary(
+            dataset_dir,
+            dataset=dataset_payload,
+            requested_pipeline_id=requested_pipeline_id,
+            request=request,
+        )
         return {
             "ok": True,
             "tool": "lerobot.dataset.inspect",
             "mode": mode,
             "profile_id": effective_profile.profile_id,
             "status": "ready",
-            "dataset": {
-                "path": dataset_path,
-                "root": request.dataset_root or str(self.config.dataset_root),
-                "robot_profile_id": effective_profile.profile_id,
-                "robot_type": str(info.get("robot_type") or effective_profile.robot_type),
-                "teleop_type": effective_profile.teleop_type,
-                "observation_pipeline_id": pipeline_metadata["observation_pipeline_id"],
-                "observation_pipeline_source": pipeline_metadata["source"],
-                "profile_restored_from_metadata": bool(restored_profile is not None),
-                "pipeline_metadata_path": str(pipeline_metadata.get("path") or ""),
-                "episode_count": _safe_int(info.get("total_episodes"), request.num_episodes, minimum=0),
-                "frame_count": _safe_int(info.get("total_frames"), 0, minimum=0),
-                "fps": _safe_int(info.get("fps"), request.fps or effective_profile.fps, minimum=0),
-                "codebase_version": str(info.get("codebase_version") or ""),
-                "tasks": [request.task_instruction],
-                "camera_keys": sorted(effective_profile.camera_map.values()),
-                "metadata_files": metadata_files,
-                "features": feature_names,
-                "depth_features": depth_features,
-                "has_depth_features": bool(depth_features),
-            },
+            "dataset": dataset_payload,
+            "dataset_health": health,
             "step_trace": [{"step": "INSPECT_DATASET", "status": "ok", "detail": dataset_path}],
             "error": None,
+        }
+
+    def _dataset_health_summary(
+        self,
+        dataset_path: Path,
+        *,
+        dataset: dict[str, Any],
+        requested_pipeline_id: str,
+        request: LeRobotSessionRequest | None = None,
+    ) -> dict[str, Any]:
+        raw_depth = self._dataset_raw_depth_health(dataset_path)
+        isaac_rgbd = self._dataset_isaac_rgbd_health(dataset_path)
+        isaac_augmentation = self._read_latest_isaac_augmentation_summary(dataset_path)
+        active_robot_cam = self._dataset_active_robot_cam_health(dataset_path)
+        issues: list[dict[str, Any]] = []
+        if requested_pipeline_id == "raw_depth_adapter":
+            if not raw_depth.get("available"):
+                issues.append(
+                    {
+                        "severity": "blocking",
+                        "code": "LEROBOT_RAW_DEPTH_SIDECAR_MISSING",
+                        "message": f"Raw-depth adapter requires {raw_depth.get('manifest_path')}.",
+                    }
+                )
+            elif _safe_int(raw_depth.get("total_frame_count"), 0, minimum=0) <= 0:
+                issues.append(
+                    {
+                        "severity": "blocking",
+                        "code": "LEROBOT_RAW_DEPTH_FRAMES_MISSING",
+                        "message": "Raw-depth adapter is selected but no raw depth PNG frames were found.",
+                    }
+                )
+        if _safe_int(isaac_rgbd.get("manifest_count"), 0, minimum=0) <= 0:
+            issues.append(
+                {
+                    "severity": "warning",
+                    "code": "LEROBOT_ISAAC_RGBD_SIDECAR_MISSING",
+                    "message": "Isaac RGB-D sidecar is missing; synthetic render coverage is unavailable.",
+                }
+            )
+        if not isaac_augmentation.get("available"):
+            issues.append(
+                {
+                    "severity": "warning",
+                    "code": "LEROBOT_ISAAC_AUGMENTATION_MISSING",
+                    "message": "Isaac augmentation sidecar is missing; training will use non-augmented data only.",
+                }
+            )
+        else:
+            variant_count = _safe_int(isaac_augmentation.get("variant_count"), 0, minimum=0)
+            valid_variant_count = _safe_int(isaac_augmentation.get("valid_variant_count"), variant_count, minimum=0)
+            failed_variant_count = _safe_int(isaac_augmentation.get("failed_variant_count"), max(0, variant_count - valid_variant_count), minimum=0)
+            if variant_count > 0 and valid_variant_count <= 0:
+                issues.append(
+                    {
+                        "severity": "blocking",
+                        "code": "LEROBOT_ISAAC_AUGMENTATION_NO_VALID_VARIANTS",
+                        "message": "Isaac augmentation manifest exists but QA left 0 valid variants.",
+                    }
+                )
+            elif failed_variant_count > 0:
+                issues.append(
+                    {
+                        "severity": "warning",
+                        "code": "LEROBOT_ISAAC_AUGMENTATION_FAILED_VARIANTS",
+                        "message": f"Isaac augmentation QA rejected {failed_variant_count} variants.",
+                    }
+                )
+        blocking_count = sum(1 for issue in issues if issue.get("severity") == "blocking")
+        warning_count = sum(1 for issue in issues if issue.get("severity") == "warning")
+        severity = "blocking" if blocking_count else "warning" if warning_count else "ok"
+        original_frames = _safe_int(dataset.get("frame_count"), 0, minimum=0)
+        rendered_count = _safe_int(isaac_rgbd.get("rendered_count"), 0, minimum=0)
+        valid_variant_count = _safe_int(isaac_augmentation.get("valid_variant_count"), 0, minimum=0)
+        dataset_mix = self._dataset_mix_summary_for_counts(
+            request or LeRobotSessionRequest(),
+            real_available=original_frames,
+            isaac_rgbd_available=rendered_count,
+            isaac_augmentation_available=valid_variant_count,
+        )
+        return {
+            "schema": "atr.lerobot.dataset_health.v1",
+            "severity": severity,
+            "blocking_count": blocking_count,
+            "warning_count": warning_count,
+            "issues": issues,
+            "metrics": {
+                "episodes": _safe_int(dataset.get("episode_count"), 0, minimum=0),
+                "original_frames": original_frames,
+                "raw_depth_total_frames": _safe_int(raw_depth.get("total_frame_count"), 0, minimum=0),
+                "isaac_rgbd_rendered_frames": rendered_count,
+                "augmentation_valid_variants": valid_variant_count,
+                "active_robot_cam_attempt_count": _safe_int(active_robot_cam.get("attempt_count"), 0, minimum=0),
+                "train_effective_frame_count": dataset_mix["effective_counts"]["total"],
+            },
+            "dataset_mix": dataset_mix,
+            "sidecars": {
+                "raw_depth": raw_depth,
+                "isaac_rgbd": isaac_rgbd,
+                "isaac_augmentation": isaac_augmentation,
+                "active_robot_cam": active_robot_cam,
+            },
+        }
+
+    def _dataset_raw_depth_health(self, dataset_path: Path) -> dict[str, Any]:
+        manifest_path = self._dataset_raw_depth_manifest_path(dataset_path)
+        camera_keys: list[str] = []
+        if manifest_path.is_file():
+            try:
+                loaded = json.loads(manifest_path.read_text(encoding="utf-8"))
+                if isinstance(loaded, dict):
+                    camera_keys = [str(item).strip() for item in loaded.get("camera_keys", []) if str(item).strip()]
+            except (OSError, json.JSONDecodeError):
+                camera_keys = []
+        root = manifest_path.parent
+        if not camera_keys and root.is_dir():
+            camera_keys = sorted(path.name for path in root.iterdir() if path.is_dir())
+        camera_counts = {
+            camera_key: len(sorted((root / camera_key).glob("frame_*.png")))
+            for camera_key in camera_keys
+        }
+        return {
+            "available": manifest_path.is_file(),
+            "manifest_path": str(manifest_path),
+            "camera_keys": camera_keys,
+            "camera_counts": camera_counts,
+            "total_frame_count": sum(camera_counts.values()),
+        }
+
+    def _dataset_isaac_rgbd_health(self, dataset_path: Path) -> dict[str, Any]:
+        manifest_paths = sorted((dataset_path / "sidecar" / "isaac_rgbd").glob("**/manifest.jsonl"))
+        row_count = 0
+        rendered_count = 0
+        failed_count = 0
+        skipped_count = 0
+        cameras: set[str] = set()
+        for manifest_path in manifest_paths:
+            for row in self._read_jsonl_file(manifest_path):
+                row_count += 1
+                status = str(row.get("status") or "").lower()
+                if isinstance(row.get("cameras"), list):
+                    cameras.update(str(item) for item in row["cameras"] if str(item).strip())
+                has_files = bool(row.get("files")) if isinstance(row.get("files"), list) else False
+                if "fail" in status or "error" in status:
+                    failed_count += 1
+                elif "skip" in status:
+                    skipped_count += 1
+                elif has_files or status in {"rendered", "metadata_only", "ok", "complete", "completed"}:
+                    rendered_count += 1
+        return {
+            "available": bool(manifest_paths),
+            "root": str(dataset_path / "sidecar" / "isaac_rgbd"),
+            "manifest_count": len(manifest_paths),
+            "row_count": row_count,
+            "rendered_count": rendered_count,
+            "failed_count": failed_count,
+            "skipped_count": skipped_count,
+            "cameras": sorted(cameras),
+        }
+
+    @staticmethod
+    def _dataset_active_robot_cam_health(dataset_path: Path) -> dict[str, Any]:
+        candidate_roots = [
+            dataset_path / "sidecar" / "active_robot_cam",
+            dataset_path / "sidecar" / "isaac_mirror",
+            dataset_path / "sidecar" / "latest_frame",
+        ]
+        result_paths: list[Path] = []
+        for root in candidate_roots:
+            if root.is_dir():
+                result_paths.extend(sorted(root.glob("**/*specimen_pose*.json")))
+                result_paths.extend(sorted(root.glob("**/*active_robot_cam*.json")))
+        unique_paths = sorted({str(path) for path in result_paths})
+        return {
+            "available": bool(unique_paths),
+            "attempt_count": len(unique_paths),
+            "result_paths": unique_paths[:20],
         }
 
     def policies_list(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -2368,24 +2578,658 @@ class LeRobotBridge:
         if not self._is_under_allowed_roots(dataset_path):
             return self._error("lerobot.dataset.visualize", request.runtime_mode or request.mode, request.profile_id, "LEROBOT_PATH_OUTSIDE_ALLOWED_ROOTS", f"Dataset path is outside allowed roots: {dataset_path}")
         metadata = self._read_dataset_metadata(dataset_path)
-        media = self._dataset_media(dataset_path, episode_index=request.episode_index)
+        episode_indices = self._visualization_episode_indices(request, dataset_path)
+        media_by_episode = {
+            str(episode_index): self._dataset_media(dataset_path, episode_index=episode_index)
+            for episode_index in episode_indices
+        }
+        media: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for episode_media in media_by_episode.values():
+            for item in episode_media:
+                path_key = str(item.get("path") or item.get("serve_url") or "")
+                if path_key in seen:
+                    continue
+                seen.add(path_key)
+                media.append(item)
         return {
             "ok": True,
             "tool": "lerobot.dataset.visualize",
             "mode": request.runtime_mode or request.mode,
             "profile_id": request.profile_id or self._selected_profile_id,
             "dataset_path": str(dataset_path),
-            "episode_index": request.episode_index,
+            "episode_index": episode_indices[0],
+            "episode_indices": episode_indices,
             "metadata": metadata,
             "media": media,
+            "media_by_episode": media_by_episode,
             "summary": {
                 "video_count": len([item for item in media if item.get("media_type") == "video"]),
                 "image_count": len([item for item in media if item.get("media_type") == "image"]),
                 "data_files": len([item for item in media if item.get("media_type") == "data"]),
+                "source_counts": self._dataset_media_source_counts(media),
             },
             "step_trace": [{"step": "VISUALIZE_DATASET", "status": "ok", "detail": str(dataset_path)}],
             "error": None,
         }
+
+    def augment_isaac_dataset(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Build Isaac Sim augmentation sidecars for a selected LeRobot dataset."""
+        request = LeRobotSessionRequest.model_validate(payload or {})
+        mode = request.runtime_mode or request.mode
+        profile_id = request.profile_id or self._selected_profile_id
+        dataset_path = Path(self._dataset_path_for(request)).expanduser().resolve()
+        if not self._is_under_allowed_roots(dataset_path):
+            return self._error(
+                "lerobot.augment.isaac",
+                mode,
+                profile_id,
+                "LEROBOT_PATH_OUTSIDE_ALLOWED_ROOTS",
+                f"Dataset path is outside allowed roots: {dataset_path}",
+            )
+        raw_output = str(getattr(request, "isaac_data_augmentation_output_dir", "") or "").strip()
+        output_dir = (
+            _resolve_path(self.config.repo_root, raw_output).resolve()
+            if raw_output
+            else dataset_path / "sidecar" / "isaac_augmentation" / "latest"
+        )
+        if not self._is_under_allowed_roots(output_dir):
+            return self._error(
+                "lerobot.augment.isaac",
+                mode,
+                profile_id,
+                "LEROBOT_PATH_OUTSIDE_ALLOWED_ROOTS",
+                f"Augmentation output dir is outside allowed roots: {output_dir}",
+            )
+        cameras = [
+            item.strip()
+            for item in str(
+                getattr(request, "isaac_data_augmentation_cameras", LEROBOT_DEFAULT_ISAAC_RGBD_RENDER_CAMERAS)
+                or LEROBOT_DEFAULT_ISAAC_RGBD_RENDER_CAMERAS
+            ).split(",")
+            if item.strip()
+        ] or [item.strip() for item in LEROBOT_DEFAULT_ISAAC_RGBD_RENDER_CAMERAS.split(",") if item.strip()]
+        variants = _safe_int(getattr(request, "isaac_data_augmentation_variants", 8), 8, minimum=1, maximum=256)
+        max_frames = _safe_int(getattr(request, "isaac_data_augmentation_max_frames", 200), 200, minimum=1, maximum=100_000)
+        seed = getattr(request, "isaac_data_augmentation_seed", 0)
+        seed_value = int(seed if seed is not None else 0)
+        augmentation_profile = str(getattr(request, "isaac_data_augmentation_profile", "conservative") or "conservative")
+        image_enabled = bool(getattr(request, "isaac_data_augmentation_image_enabled", True))
+        photometric_enabled = bool(getattr(request, "isaac_data_augmentation_photometric_enabled", True))
+        sensor_noise_enabled = bool(getattr(request, "isaac_data_augmentation_sensor_noise_enabled", True))
+        depth_noise_enabled = bool(getattr(request, "isaac_data_augmentation_depth_noise_enabled", True))
+        render_domain_enabled = bool(getattr(request, "isaac_data_augmentation_render_domain_enabled", True))
+        camera_pose_enabled = bool(getattr(request, "isaac_data_augmentation_camera_pose_enabled", True))
+        rgb_strength = _safe_float(getattr(request, "isaac_data_augmentation_rgb_strength", 1.0), 1.0, minimum=0.0, maximum=2.0)
+        depth_strength = _safe_float(getattr(request, "isaac_data_augmentation_depth_strength", 1.0), 1.0, minimum=0.0, maximum=2.0)
+        render_domain_strength = _safe_float(getattr(request, "isaac_data_augmentation_render_domain_strength", 1.0), 1.0, minimum=0.0, maximum=2.0)
+        camera_pose_strength = _safe_float(getattr(request, "isaac_data_augmentation_camera_pose_strength", 1.0), 1.0, minimum=0.0, maximum=2.0)
+        command_preview = [
+            sys.executable,
+            "scripts/lerobot_isaac_data_augmentation.py",
+            f"--dataset-path={dataset_path}",
+            f"--output-dir={output_dir}",
+            f"--variants-per-frame={variants}",
+            f"--max-source-frames={max_frames}",
+            f"--seed={seed_value}",
+            f"--cameras={','.join(cameras)}",
+            f"--augmentation-profile={augmentation_profile}",
+            f"--image-augmentation-enabled={1 if image_enabled else 0}",
+            f"--photometric-enabled={1 if photometric_enabled else 0}",
+            f"--sensor-noise-enabled={1 if sensor_noise_enabled else 0}",
+            f"--depth-noise-enabled={1 if depth_noise_enabled else 0}",
+            f"--render-domain-enabled={1 if render_domain_enabled else 0}",
+            f"--camera-pose-enabled={1 if camera_pose_enabled else 0}",
+            f"--rgb-strength={rgb_strength:g}",
+            f"--depth-strength={depth_strength:g}",
+            f"--render-domain-strength={render_domain_strength:g}",
+            f"--camera-pose-strength={camera_pose_strength:g}",
+        ]
+        progress_events: list[dict[str, Any]] = []
+        try:
+            from scripts.lerobot_isaac_data_augmentation import build_augmentation_sidecar
+
+            summary = build_augmentation_sidecar(
+                dataset_path=dataset_path,
+                output_dir=output_dir,
+                variants_per_frame=variants,
+                max_source_frames=max_frames,
+                seed=seed_value,
+                cameras=cameras,
+                augmentation_profile=augmentation_profile,
+                image_augmentation_enabled=image_enabled,
+                photometric_enabled=photometric_enabled,
+                sensor_noise_enabled=sensor_noise_enabled,
+                depth_noise_enabled=depth_noise_enabled,
+                render_domain_enabled=render_domain_enabled,
+                camera_pose_enabled=camera_pose_enabled,
+                rgb_strength=rgb_strength,
+                depth_strength=depth_strength,
+                render_domain_strength=render_domain_strength,
+                camera_pose_strength=camera_pose_strength,
+                progress_callback=lambda event: progress_events.append(dict(event)),
+            )
+        except Exception as exc:
+            return self._error(
+                "lerobot.augment.isaac",
+                mode,
+                profile_id,
+                "LEROBOT_ISAAC_AUGMENTATION_FAILED",
+                f"{exc.__class__.__name__}: {exc}",
+            )
+        status = "completed" if summary.get("ok") else "failed"
+        augmentation_progress = dict(summary.get("progress") or (progress_events[-1] if progress_events else {}))
+        step_trace = [
+            {"step": "RESOLVE_DATASET", "status": "ok", "detail": str(dataset_path)},
+            {"step": "BUILD_ISAAC_AUGMENTATION", "status": "ok" if summary.get("ok") else "failed", "detail": str(summary.get("manifest_path") or "")},
+        ]
+        self._write_latest_isaac_augmentation_metadata(dataset_path, summary)
+        return {
+            "ok": bool(summary.get("ok")),
+            "tool": "lerobot.augment.isaac",
+            "mode": mode,
+            "profile_id": profile_id,
+            "status": status,
+            "dataset_path": str(dataset_path),
+            "output_dir": str(output_dir),
+            "summary": summary,
+            "augmentation_progress": augmentation_progress,
+            "command_preview": command_preview,
+            "step_trace": step_trace,
+            "events": step_trace,
+            "error": None if summary.get("ok") else summary.get("message"),
+        }
+
+    def augment_isaac_preview(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Return deterministic preview rows for the latest Isaac augmentation sidecar."""
+        request = LeRobotSessionRequest.model_validate(payload or {})
+        mode = request.runtime_mode or request.mode
+        profile_id = request.profile_id or self._selected_profile_id
+        dataset_path = Path(self._dataset_path_for(request)).expanduser().resolve()
+        if not self._is_under_allowed_roots(dataset_path):
+            return self._error(
+                "lerobot.augment.preview",
+                mode,
+                profile_id,
+                "LEROBOT_PATH_OUTSIDE_ALLOWED_ROOTS",
+                f"Dataset path is outside allowed roots: {dataset_path}",
+            )
+        summary = self._read_latest_isaac_augmentation_summary(dataset_path)
+        manifest_path = Path(str(summary.get("manifest_path") or self._dataset_isaac_augmentation_summary_path(dataset_path).parent / "manifest.jsonl")).expanduser()
+        if not manifest_path.is_absolute():
+            manifest_path = (dataset_path / manifest_path).resolve()
+        else:
+            manifest_path = manifest_path.resolve()
+        if not manifest_path.is_file():
+            return self._error(
+                "lerobot.augment.preview",
+                mode,
+                profile_id,
+                "LEROBOT_ISAAC_AUGMENTATION_MANIFEST_MISSING",
+                f"Isaac augmentation manifest not found: {manifest_path}",
+            )
+        if not self._is_under_allowed_roots(manifest_path):
+            return self._error(
+                "lerobot.augment.preview",
+                mode,
+                profile_id,
+                "LEROBOT_PATH_OUTSIDE_ALLOWED_ROOTS",
+                f"Isaac augmentation manifest is outside allowed roots: {manifest_path}",
+            )
+        preview_limit = _safe_int(getattr(request, "isaac_data_augmentation_preview_count", 20), 20, minimum=1, maximum=200)
+        preview_dir = manifest_path.parent / "previews"
+        manifest_rows = self._read_jsonl_file(manifest_path)
+        preview_rows: list[dict[str, Any]] = []
+        for row in manifest_rows:
+            if len(preview_rows) >= preview_limit:
+                break
+            if not isinstance(row, dict):
+                continue
+            source_files = self._augmentation_source_files(row, dataset_path=dataset_path)
+            image_outputs = row.get("image_outputs") if isinstance(row.get("image_outputs"), dict) else {}
+            cameras = [str(item) for item in row.get("cameras", []) if str(item or "").strip()]
+            variant_id = str(row.get("variant_id") or f"variant_{len(preview_rows):06d}")
+            for camera in cameras:
+                if len(preview_rows) >= preview_limit:
+                    break
+                source_camera = source_files.get(camera, {})
+                augmented_camera = image_outputs.get(camera) if isinstance(image_outputs.get(camera), dict) else {}
+                source_rgb_path = self._allowed_file_or_none(source_camera.get("rgb"))
+                source_depth_path = self._allowed_file_or_none(source_camera.get("depth"))
+                augmented_rgb_path = self._allowed_file_or_none(augmented_camera.get("rgb_path"))
+                augmented_depth_path = self._allowed_file_or_none(augmented_camera.get("depth_path"))
+                row_preview_dir = preview_dir / variant_id / camera
+                source_depth_preview = (
+                    self._write_depth_preview_png(source_depth_path, row_preview_dir / "source_depth_preview.png")
+                    if source_depth_path is not None
+                    else None
+                )
+                augmented_depth_preview = (
+                    self._write_depth_preview_png(augmented_depth_path, row_preview_dir / "augmented_depth_preview.png")
+                    if augmented_depth_path is not None
+                    else None
+                )
+                source = row.get("source") if isinstance(row.get("source"), dict) else {}
+                preview_rows.append(
+                    {
+                        "variant_id": variant_id,
+                        "episode_index": _safe_int(source.get("episode_index"), _safe_int(row.get("episode_index"), 0, minimum=0), minimum=0),
+                        "frame_index": _safe_int(source.get("frame_index"), _safe_int(row.get("frame_index"), 0, minimum=0), minimum=0),
+                        "camera": camera,
+                        "source_rgb": self._media_file_ref(source_rgb_path),
+                        "source_depth_preview": self._media_file_ref(source_depth_preview),
+                        "isaac_rgb": self._media_file_ref(source_rgb_path),
+                        "isaac_depth_preview": self._media_file_ref(source_depth_preview),
+                        "augmented_rgb": self._media_file_ref(augmented_rgb_path),
+                        "augmented_depth_preview": self._media_file_ref(augmented_depth_preview),
+                        "source_pose": row.get("source_pose") if isinstance(row.get("source_pose"), dict) else {},
+                        "augmentation_parameters": {
+                            "image": row.get("image_augmentations") if isinstance(row.get("image_augmentations"), dict) else {},
+                            "depth": row.get("depth_augmentations") if isinstance(row.get("depth_augmentations"), dict) else {},
+                            "render_domain": row.get("render_domain_augmentations") if isinstance(row.get("render_domain_augmentations"), dict) else {},
+                            "camera_pose": (row.get("render_request") or {}).get("camera_specs", {}) if isinstance(row.get("render_request"), dict) else {},
+                        },
+                        "qa": {
+                            "ok": bool(row.get("qa_ok")),
+                            "failure_code": str(row.get("qa_failure_code") or ""),
+                            "depth_valid_ratio": row.get("depth_valid_ratio"),
+                            "rgb_exists": bool(row.get("rgb_exists")),
+                            "depth_exists": bool(row.get("depth_exists")),
+                        },
+                    }
+                )
+        return {
+            "ok": True,
+            "tool": "lerobot.augment.preview",
+            "mode": mode,
+            "profile_id": profile_id,
+            "dataset_path": str(dataset_path),
+            "manifest_path": str(manifest_path),
+            "preview_dir": str(preview_dir),
+            "requested_count": preview_limit,
+            "preview_count": len(preview_rows),
+            "rows": preview_rows,
+            "summary": summary,
+            "step_trace": [{"step": "BUILD_ISAAC_AUGMENTATION_PREVIEW", "status": "ok", "detail": str(preview_dir)}],
+            "error": None,
+        }
+
+    def isaac_rgbd_render_start(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Render missing Isaac RGB-D sidecar frames after recording has completed."""
+        request = LeRobotSessionRequest.model_validate(payload or {})
+        mode = request.runtime_mode or request.mode
+        profile_id = request.profile_id or self._selected_profile_id
+        dataset_path = Path(self._dataset_path_for(request)).expanduser().resolve()
+        if not self._is_under_allowed_roots(dataset_path):
+            return self._error(
+                "lerobot.isaac_rgbd.render.start",
+                mode,
+                profile_id,
+                "LEROBOT_PATH_OUTSIDE_ALLOWED_ROOTS",
+                f"Dataset path is outside allowed roots: {dataset_path}",
+            )
+        job_id = self._isaac_rgbd_post_render_job_id(dataset_path, request.session_id)
+        with self._isaac_rgbd_render_lock:
+            existing = self._isaac_rgbd_render_jobs.get(job_id)
+            if existing and str(existing.get("status") or "").upper() == "RUNNING":
+                return self._isaac_rgbd_post_render_response(
+                    "lerobot.isaac_rgbd.render.start",
+                    mode,
+                    profile_id,
+                    dataset_path,
+                    dict(existing),
+                    idempotent=True,
+                )
+        candidates = self._isaac_rgbd_post_render_candidates(dataset_path, request.session_id)
+        job = self._new_isaac_rgbd_post_render_job(job_id, dataset_path, request.session_id, candidates)
+        with self._isaac_rgbd_render_lock:
+            self._isaac_rgbd_render_jobs[job_id] = job
+        if bool(getattr(request, "isaac_rgbd_post_render_inline", False)):
+            self._run_isaac_rgbd_post_render_job(
+                job_id,
+                candidates,
+                post_timeout_s=0.5,
+                poll_timeout_s=_safe_float(getattr(request, "isaac_rgbd_post_render_poll_timeout_s", 10.0), 10.0, minimum=0.1, maximum=120.0),
+            )
+        else:
+            worker = threading.Thread(
+                target=self._run_isaac_rgbd_post_render_job,
+                args=(job_id, candidates),
+                kwargs={
+                    "post_timeout_s": 0.5,
+                    "poll_timeout_s": _safe_float(
+                        getattr(request, "isaac_rgbd_post_render_poll_timeout_s", 10.0),
+                        10.0,
+                        minimum=0.1,
+                        maximum=120.0,
+                    ),
+                },
+                name=f"atr-isaac-rgbd-post-render-{job_id[:12]}",
+                daemon=True,
+            )
+            with self._isaac_rgbd_render_lock:
+                self._isaac_rgbd_render_threads[job_id] = worker
+            worker.start()
+        with self._isaac_rgbd_render_lock:
+            public_job = dict(self._isaac_rgbd_render_jobs.get(job_id, job))
+        return self._isaac_rgbd_post_render_response("lerobot.isaac_rgbd.render.start", mode, profile_id, dataset_path, public_job)
+
+    def isaac_rgbd_render_status(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Return the current or discovered Isaac RGB-D post-record render status."""
+        request = LeRobotSessionRequest.model_validate(payload or {})
+        mode = request.runtime_mode or request.mode
+        profile_id = request.profile_id or self._selected_profile_id
+        dataset_path = Path(self._dataset_path_for(request)).expanduser().resolve()
+        if not self._is_under_allowed_roots(dataset_path):
+            return self._error(
+                "lerobot.isaac_rgbd.render.status",
+                mode,
+                profile_id,
+                "LEROBOT_PATH_OUTSIDE_ALLOWED_ROOTS",
+                f"Dataset path is outside allowed roots: {dataset_path}",
+            )
+        job_id = self._isaac_rgbd_post_render_job_id(dataset_path, request.session_id)
+        with self._isaac_rgbd_render_lock:
+            job = dict(self._isaac_rgbd_render_jobs.get(job_id, {}))
+        if not job:
+            candidates = self._isaac_rgbd_post_render_candidates(dataset_path, request.session_id)
+            job = self._new_isaac_rgbd_post_render_job(job_id, dataset_path, request.session_id, candidates)
+            done = skipped = 0
+            for candidate in candidates:
+                if self._isaac_rgbd_render_candidate_done(candidate):
+                    done += 1
+                    skipped += 1
+            job.update(
+                {
+                    "status": "COMPLETED" if done == len(candidates) else "IDLE",
+                    "done": done,
+                    "skipped": skipped,
+                    "pending": max(0, len(candidates) - done),
+                    "percent": self._percent(done, len(candidates)),
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }
+            )
+        return self._isaac_rgbd_post_render_response("lerobot.isaac_rgbd.render.status", mode, profile_id, dataset_path, job)
+
+    def _new_isaac_rgbd_post_render_job(
+        self,
+        job_id: str,
+        dataset_path: Path,
+        session_id: str,
+        candidates: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        now = datetime.now(timezone.utc).isoformat()
+        return {
+            "job_id": job_id,
+            "status": "RUNNING" if candidates else "COMPLETED",
+            "dataset_path": str(dataset_path),
+            "session_id": session_id,
+            "total": len(candidates),
+            "done": 0,
+            "rendered": 0,
+            "skipped": 0,
+            "failed": 0,
+            "pending": len(candidates),
+            "percent": 100.0 if not candidates else 0.0,
+            "started_at": now,
+            "updated_at": now,
+            "completed_at": now if not candidates else "",
+            "last_frame_index": None,
+            "last_error": "",
+        }
+
+    @staticmethod
+    def _isaac_rgbd_post_render_job_id(dataset_path: Path, session_id: str = "") -> str:
+        clean_session = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(session_id or "all").strip()).strip("._-") or "all"
+        return f"{str(dataset_path)}::{clean_session}"
+
+    def _isaac_rgbd_post_render_response(
+        self,
+        tool: str,
+        mode: str,
+        profile_id: str,
+        dataset_path: Path,
+        job: dict[str, Any],
+        *,
+        idempotent: bool = False,
+    ) -> dict[str, Any]:
+        step_trace = [
+            {"step": "RESOLVE_DATASET", "status": "ok", "detail": str(dataset_path)},
+            {
+                "step": "ISAAC_RGBD_POST_RENDER",
+                "status": "active" if str(job.get("status") or "").upper() == "RUNNING" else "ok",
+                "detail": f"{job.get('done', 0)}/{job.get('total', 0)} frames ({job.get('percent', 0.0)}%)",
+            },
+        ]
+        return {
+            "ok": str(job.get("status") or "").upper() != "FAILED",
+            "tool": tool,
+            "mode": mode,
+            "profile_id": profile_id,
+            "status": job.get("status", "IDLE"),
+            "dataset_path": str(dataset_path),
+            "post_render": dict(job),
+            "idempotent": idempotent,
+            "step_trace": step_trace,
+            "events": step_trace,
+            "error": job.get("last_error") or None,
+        }
+
+    def _run_isaac_rgbd_post_render_job(
+        self,
+        job_id: str,
+        candidates: list[dict[str, Any]],
+        *,
+        post_timeout_s: float,
+        poll_timeout_s: float,
+    ) -> None:
+        total = len(candidates)
+        if total == 0:
+            self._update_isaac_rgbd_post_render_job(job_id, status="COMPLETED", done=0, pending=0, percent=100.0, completed_at=datetime.now(timezone.utc).isoformat())
+            return
+        done = rendered = skipped = failed = 0
+        for candidate in candidates:
+            frame_index = candidate.get("frame_index")
+            if self._isaac_rgbd_render_candidate_done(candidate):
+                skipped += 1
+                done += 1
+                self._update_isaac_rgbd_post_render_job(
+                    job_id,
+                    done=done,
+                    skipped=skipped,
+                    pending=max(0, total - done),
+                    percent=self._percent(done, total),
+                    last_frame_index=frame_index,
+                )
+                continue
+            endpoint = str(candidate.get("endpoint") or "http://127.0.0.1:8766/render")
+            post_result = self._post_isaac_rgbd_render_payload(dict(candidate.get("payload") or {}), endpoint=endpoint, timeout_s=post_timeout_s)
+            wait_result = (
+                self._wait_for_isaac_rgbd_render_completion(candidate, endpoint=endpoint, timeout_s=poll_timeout_s)
+                if post_result.get("ok")
+                else {"ok": False, "status": "post_failed", "message": post_result.get("error") or post_result.get("response")}
+            )
+            if post_result.get("ok") and wait_result.get("ok"):
+                rendered += 1
+            else:
+                failed += 1
+            done += 1
+            self._update_isaac_rgbd_post_render_job(
+                job_id,
+                done=done,
+                rendered=rendered,
+                skipped=skipped,
+                failed=failed,
+                pending=max(0, total - done),
+                percent=self._percent(done, total),
+                last_frame_index=frame_index,
+                last_error="" if post_result.get("ok") and wait_result.get("ok") else str(wait_result.get("message") or post_result.get("error") or wait_result.get("status") or ""),
+            )
+        final_status = "COMPLETED" if failed == 0 else "FAILED"
+        self._update_isaac_rgbd_post_render_job(
+            job_id,
+            status=final_status,
+            done=done,
+            rendered=rendered,
+            skipped=skipped,
+            failed=failed,
+            pending=0,
+            percent=100.0,
+            completed_at=datetime.now(timezone.utc).isoformat(),
+        )
+
+    def _update_isaac_rgbd_post_render_job(self, job_id: str, **updates: Any) -> None:
+        with self._isaac_rgbd_render_lock:
+            job = self._isaac_rgbd_render_jobs.setdefault(job_id, {"job_id": job_id})
+            job.update(updates)
+            job["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+    def _isaac_rgbd_post_render_candidates(self, dataset_path: Path, session_id: str = "") -> list[dict[str, Any]]:
+        mirror_paths = self._isaac_rgbd_post_render_mirror_paths(dataset_path, session_id)
+        candidates_by_key: dict[tuple[str, int, int], dict[str, Any]] = {}
+        for mirror_path in mirror_paths:
+            for row in self._read_jsonl_rows(mirror_path):
+                render_queue = row.get("render_queue") if isinstance(row.get("render_queue"), dict) else {}
+                if not isinstance(render_queue, dict):
+                    continue
+                request = render_queue.get("render_request") if isinstance(render_queue.get("render_request"), dict) else {}
+                if not isinstance(request, dict) or not request.get("enabled"):
+                    continue
+                status = str(render_queue.get("status") or "").lower()
+                if status and status not in {"deferred_after_record", "queued", "queued_replaced_stale", "queue_full"}:
+                    continue
+                attempt_id = str(request.get("attempt_id") or render_queue.get("attempt_id") or "").strip()
+                episode_index = _safe_int(request.get("episode_index"), _safe_int(render_queue.get("episode_index"), 0, minimum=0), minimum=0)
+                frame_index = _safe_int(request.get("frame_index"), _safe_int(render_queue.get("frame_index"), 0, minimum=0), minimum=0)
+                if not attempt_id:
+                    continue
+                output_dir = Path(str(request.get("output_dir") or "")).expanduser()
+                if not str(output_dir):
+                    continue
+                endpoint = str(render_queue.get("endpoint") or "").strip() or "http://127.0.0.1:8766/render"
+                payload = {
+                    key: value
+                    for key, value in row.items()
+                    if key not in {"render_queue", "isaac_post", "sync_metrics"}
+                }
+                payload["joint_state"] = [dict(item) for item in row.get("joint_state", []) if isinstance(item, dict)]
+                payload["render_request"] = dict(request)
+                key = (attempt_id, episode_index, frame_index)
+                candidates_by_key[key] = {
+                    "key": key,
+                    "attempt_id": attempt_id,
+                    "episode_index": episode_index,
+                    "frame_index": frame_index,
+                    "sample_index": request.get("sample_index", row.get("sample_index")),
+                    "endpoint": endpoint,
+                    "output_dir": str(output_dir),
+                    "manifest_path": str(output_dir / "manifest.jsonl"),
+                    "request": dict(request),
+                    "payload": payload,
+                    "mirror_record_path": str(mirror_path),
+                }
+        return [
+            candidates_by_key[key]
+            for key in sorted(candidates_by_key, key=lambda item: (item[1], item[2], item[0]))
+        ]
+
+    @staticmethod
+    def _read_jsonl_rows(path: Path) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        try:
+            with path.open("r", encoding="utf-8") as handle:
+                for line in handle:
+                    if not line.strip():
+                        continue
+                    try:
+                        parsed = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if isinstance(parsed, dict):
+                        rows.append(parsed)
+        except OSError:
+            return []
+        return rows
+
+    @staticmethod
+    def _isaac_rgbd_post_render_mirror_paths(dataset_path: Path, session_id: str = "") -> list[Path]:
+        mirror_root = dataset_path / "sidecar" / "isaac_mirror"
+        if session_id:
+            direct = mirror_root / f"{session_id}.jsonl"
+            return [direct] if direct.is_file() else []
+        return sorted(mirror_root.glob("*.jsonl"))
+
+    def _isaac_rgbd_render_candidate_done(self, candidate: dict[str, Any]) -> bool:
+        manifest_path = Path(str(candidate.get("manifest_path") or "")).expanduser()
+        if not manifest_path.is_file():
+            return False
+        attempt_id = str(candidate.get("attempt_id") or "")
+        episode_index = _safe_int(candidate.get("episode_index"), 0, minimum=0)
+        frame_index = _safe_int(candidate.get("frame_index"), 0, minimum=0)
+        for row in reversed(self._read_jsonl_rows(manifest_path)):
+            if str(row.get("attempt_id") or "") != attempt_id:
+                continue
+            if _safe_int(row.get("episode_index"), 0, minimum=0) != episode_index:
+                continue
+            if _safe_int(row.get("frame_index"), 0, minimum=0) != frame_index:
+                continue
+            if str(row.get("status") or "").lower() != "rendered":
+                continue
+            if self._isaac_rgbd_manifest_files_exist(row, manifest_path=manifest_path, request=dict(candidate.get("request") or {})):
+                return True
+        return False
+
+    @staticmethod
+    def _isaac_rgbd_manifest_files_exist(row: dict[str, Any], *, manifest_path: Path, request: dict[str, Any]) -> bool:
+        files = row.get("files")
+        if not isinstance(files, list) or not files:
+            return False
+        requested_cameras = {str(item).strip() for item in request.get("cameras", []) if str(item).strip()} if isinstance(request.get("cameras"), list) else set()
+        seen_cameras: set[str] = set()
+        for file_info in files:
+            if not isinstance(file_info, dict):
+                return False
+            raw_path = str(file_info.get("path") or "").strip()
+            if not raw_path:
+                return False
+            path = Path(raw_path)
+            if not path.is_absolute():
+                path = manifest_path.parent / path
+            if not path.is_file():
+                return False
+            camera = str(file_info.get("camera") or "").strip()
+            if camera:
+                seen_cameras.add(camera)
+        return requested_cameras.issubset(seen_cameras) if requested_cameras else True
+
+    def _post_isaac_rgbd_render_payload(self, payload: dict[str, object], *, endpoint: str, timeout_s: float) -> dict[str, object]:
+        data = json.dumps(payload).encode("utf-8")
+        request = Request(endpoint, data=data, headers={"Content-Type": "application/json"}, method="POST")
+        try:
+            with urlopen(request, timeout=timeout_s) as response:
+                body = response.read().decode("utf-8", errors="replace")
+                parsed = json.loads(body) if body else {}
+                return {"ok": 200 <= response.status < 300, "status_code": response.status, "response": parsed}
+        except Exception as exc:
+            return {"ok": False, "status_code": None, "error": f"{exc.__class__.__name__}: {exc}"}
+
+    def _wait_for_isaac_rgbd_render_completion(self, candidate: dict[str, Any], *, endpoint: str, timeout_s: float) -> dict[str, object]:
+        deadline = time.monotonic() + max(0.1, timeout_s)
+        while time.monotonic() <= deadline:
+            if self._isaac_rgbd_render_candidate_done(candidate):
+                return {"ok": True, "status": "rendered"}
+            time.sleep(0.1)
+        return {
+            "ok": False,
+            "status": "timeout",
+            "message": f"Timed out waiting for Isaac RGB-D render frame={candidate.get('frame_index')} endpoint={endpoint}",
+        }
+
+    @staticmethod
+    def _percent(done: int, total: int) -> float:
+        if total <= 0:
+            return 100.0
+        return round(min(100.0, max(0.0, (float(done) / float(total)) * 100.0)), 1)
 
     def visualization_file_path(self, path_value: str) -> Path:
         """Resolve and validate a local media path for dataset visualization."""
@@ -2434,6 +3278,8 @@ class LeRobotBridge:
         mode = str(response.get("mode") or request.runtime_mode or request.mode)
         if mode == "live" and workflow in {"teleoperate", "record"}:
             mirror_record_path = self._in_process_isaac_mirror_record_path(workflow, request, session_id, response)
+            session = self._sessions.get(session_id)
+            receiver_preflight = dict(session.get("isaac_mirror_receiver_preflight") or {}) if session is not None else {}
             response["isaac_mirror"] = {
                 "ok": True,
                 "session_id": session_id,
@@ -2441,20 +3287,28 @@ class LeRobotBridge:
                 "sample_count": 0,
                 "mirror_record_path": str(mirror_record_path),
                 "attached_to_session_id": session_id,
+                "receiver_preflight": receiver_preflight,
                 "sync_summary": {
                     "target_sample_hz": self._isaac_mirror_sample_hz(request),
                     "sample_count": 0,
                     "source": "lerobot_in_process_send_action",
                 },
             }
+            if workflow == "record":
+                dataset_path = Path(str(response.get("dataset_path") or self._dataset_path_for(request))).expanduser()
+                record_attempt = self._record_attempt_summary(request, session_id, dataset_path=dataset_path)
+                response["record_attempt"] = dict(record_attempt)
+                response["isaac_mirror"]["record_attempt_id"] = record_attempt["attempt_id"]
+                response["isaac_mirror"]["rgbd_render"] = dict(record_attempt.get("isaac_rgbd_render") or {})
             response["isaac_mirror_session_id"] = session_id
-            session = self._sessions.get(session_id)
             if session is not None:
                 session["isaac_mirror_session_id"] = session_id
                 session["isaac_mirror_enabled"] = True
                 session["isaac_mirror"] = dict(response["isaac_mirror"])
                 session["isaac_mirror_endpoint"] = self._isaac_mirror_endpoint(request)
                 session["isaac_mirror_sample_hz"] = self._isaac_mirror_sample_hz(request)
+                if workflow == "record":
+                    session["record_attempt"] = dict(response.get("record_attempt") or {})
                 session.setdefault("step_trace", []).append(
                     {
                         "step": "ISAAC_MIRROR_IN_PROCESS",
@@ -2467,6 +3321,8 @@ class LeRobotBridge:
                     if metadata:
                         session["dataset_pipeline_metadata"] = metadata
                         response["dataset_pipeline_metadata"] = metadata
+            self._attach_isaac_timeline_play_if_ready(response, session, request, workflow)
+            self._attach_isaac_viewport_frame_if_ready(response, session, request, workflow)
             return response
         mirror_payload = request.model_dump()
         mirror_payload["session_id"] = ""
@@ -2484,6 +3340,12 @@ class LeRobotBridge:
             "attached_to_session_id": session_id,
             "sync_summary": dict(mirror.get("sync_summary") or {}),
         }
+        if workflow == "record":
+            dataset_path = Path(str(response.get("dataset_path") or self._dataset_path_for(request))).expanduser()
+            record_attempt = self._record_attempt_summary(request, session_id, dataset_path=dataset_path)
+            response["record_attempt"] = dict(record_attempt)
+            response["isaac_mirror"]["record_attempt_id"] = record_attempt["attempt_id"]
+            response["isaac_mirror"]["rgbd_render"] = dict(record_attempt.get("isaac_rgbd_render") or {})
         response["isaac_mirror_session_id"] = mirror.get("session_id", "")
         session = self._sessions.get(session_id)
         if session is not None:
@@ -2492,6 +3354,8 @@ class LeRobotBridge:
             session["isaac_mirror"] = dict(response["isaac_mirror"])
             session["isaac_mirror_endpoint"] = mirror.get("mirror_endpoint", request.isaac_mirror_endpoint)
             session["isaac_mirror_sample_hz"] = mirror.get("mirror_sample_hz", request.isaac_mirror_sample_hz)
+            if workflow == "record":
+                session["record_attempt"] = dict(response.get("record_attempt") or {})
             session.setdefault("step_trace", []).append(
                 {
                     "step": "ISAAC_MIRROR_ATTACHED",
@@ -2504,6 +3368,8 @@ class LeRobotBridge:
                 if metadata:
                     session["dataset_pipeline_metadata"] = metadata
                     response["dataset_pipeline_metadata"] = metadata
+        self._attach_isaac_timeline_play_if_ready(response, session, request, workflow)
+        self._attach_isaac_viewport_frame_if_ready(response, session, request, workflow)
         return response
 
     def _in_process_isaac_mirror_record_path(
@@ -2520,6 +3386,170 @@ class LeRobotBridge:
             dataset_path = Path(str((response or {}).get("dataset_path") or self._dataset_path_for(request))).expanduser()
             return dataset_path / "sidecar" / "isaac_mirror" / f"{session_id}.jsonl"
         return self.config.repo_root / "runs" / "isaac_mirror_sessions" / f"{session_id}.jsonl"
+
+    def _attach_isaac_viewport_frame_if_ready(
+        self,
+        response: dict[str, Any],
+        session: dict[str, Any] | None,
+        request: LeRobotSessionRequest,
+        workflow: str,
+    ) -> None:
+        if not bool(getattr(request, "isaac_viewport_frame_on_start", True)):
+            return
+        if workflow not in {"teleoperate", "record"}:
+            return
+        receiver_preflight = dict((session or {}).get("isaac_mirror_receiver_preflight") or {})
+        if str(receiver_preflight.get("status") or "") != "ready":
+            return
+        endpoint = self._isaac_mirror_endpoint(request)
+        reason = f"{workflow}_start"
+        result = self._post_isaac_mirror_viewport_frame(endpoint, reason=reason, timeout_s=self._isaac_mirror_timeout_s(request))
+        response["isaac_viewport_frame"] = dict(result)
+        if session is not None:
+            session["isaac_viewport_frame"] = dict(result)
+        trace = {
+            "step": "ISAAC_VIEWPORT_FRAME",
+            "status": "ok" if result.get("ok") else "warning",
+            "detail": str(result.get("viewport_frame_url") or result.get("message") or reason),
+        }
+        response_trace = response.get("step_trace")
+        if isinstance(response_trace, list):
+            response_trace.append(trace)
+        response_events = response.get("events")
+        if isinstance(response_events, list) and response_events is not response_trace:
+            response_events.append(trace)
+        session_trace = session.get("step_trace") if isinstance(session, dict) else None
+        if isinstance(session_trace, list) and session_trace is not response_trace and session_trace is not response_events:
+            session_trace.append(trace)
+
+    def _attach_isaac_timeline_play_if_ready(
+        self,
+        response: dict[str, Any],
+        session: dict[str, Any] | None,
+        request: LeRobotSessionRequest,
+        workflow: str,
+    ) -> None:
+        if workflow not in {"teleoperate", "record"}:
+            return
+        receiver_preflight = dict((session or {}).get("isaac_mirror_receiver_preflight") or {})
+        if str(receiver_preflight.get("status") or "") != "ready":
+            return
+        endpoint = self._isaac_mirror_endpoint(request)
+        reason = f"{workflow}_start"
+        result = self._post_isaac_mirror_timeline_play(endpoint, reason=reason, timeout_s=self._isaac_mirror_timeout_s(request))
+        response["isaac_timeline_play"] = dict(result)
+        if session is not None:
+            session["isaac_timeline_play"] = dict(result)
+        trace = {
+            "step": "ISAAC_TIMELINE_PLAY",
+            "status": "ok" if result.get("ok") else "warning",
+            "detail": str(result.get("timeline_play_url") or result.get("message") or result.get("status") or reason),
+        }
+        response_trace = response.get("step_trace")
+        if isinstance(response_trace, list):
+            response_trace.append(trace)
+        response_events = response.get("events")
+        if isinstance(response_events, list) and response_events is not response_trace:
+            response_events.append(trace)
+        session_trace = session.get("step_trace") if isinstance(session, dict) else None
+        if isinstance(session_trace, list) and session_trace is not response_trace and session_trace is not response_events:
+            session_trace.append(trace)
+
+    @staticmethod
+    def _record_attempt_id(session_id: str) -> str:
+        clean = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(session_id or "").strip()).strip("._-")
+        return f"attempt_{clean or datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
+
+    @staticmethod
+    def _strip_record_attempt_episode_suffix(attempt_id: str) -> str:
+        if len(attempt_id) > 6 and attempt_id[-6:-3] == "_ep" and attempt_id[-3:].isdigit():
+            return attempt_id[:-6]
+        return attempt_id
+
+    @classmethod
+    def _record_attempt_id_for_episode(cls, session_id: str, episode_index: int) -> str:
+        base_attempt_id = cls._strip_record_attempt_episode_suffix(cls._record_attempt_id(session_id))
+        return f"{base_attempt_id}_ep{int(episode_index):03d}"
+
+    def _record_attempt_summary(
+        self,
+        request: LeRobotSessionRequest,
+        session_id: str,
+        *,
+        dataset_path: Path | None = None,
+    ) -> dict[str, Any]:
+        dataset = dataset_path or Path(self._dataset_path_for(request)).expanduser()
+        episode_index = 0
+        attempt_id = self._record_attempt_id_for_episode(session_id, episode_index)
+        render_target_fps = _safe_float(
+            getattr(request, "isaac_rgbd_render_target_fps", 15.0),
+            15.0,
+            minimum=0.1,
+            maximum=120.0,
+        )
+        render_cameras = [
+            item.strip()
+            for item in str(
+                getattr(request, "isaac_rgbd_render_cameras", LEROBOT_DEFAULT_ISAAC_RGBD_RENDER_CAMERAS)
+                or LEROBOT_DEFAULT_ISAAC_RGBD_RENDER_CAMERAS
+            ).split(",")
+            if item.strip()
+        ]
+        overwrite = bool(getattr(request, "record_attempt_overwrite", True))
+        attempt_dir = dataset / "sidecar" / "attempts" / f"episode_{episode_index:03d}" / attempt_id
+        render_dir = dataset / "sidecar" / "isaac_rgbd" / f"episode_{episode_index:03d}" / attempt_id
+        render_enabled = bool(getattr(request, "isaac_rgbd_render_enabled", True))
+        return {
+            "enabled": True,
+            "attempt_id": attempt_id,
+            "session_id": session_id,
+            "episode_index": episode_index,
+            "dataset_path": str(dataset),
+            "attempt_dir": str(attempt_dir),
+            "manifest_path": str(dataset / "sidecar" / "attempts" / "manifest.jsonl"),
+            "target_fps": render_target_fps,
+            "overwrite": overwrite,
+            "status": "configured",
+            "isaac_rgbd_render": {
+                "enabled": render_enabled,
+                "target_fps": render_target_fps,
+                "cameras": render_cameras,
+                "output_dir": str(render_dir),
+                "manifest_path": str(render_dir / "manifest.jsonl"),
+            },
+        }
+
+    @staticmethod
+    def _read_record_attempts_summary(dataset_path: Path) -> dict[str, Any]:
+        manifest_path = dataset_path / "sidecar" / "attempts" / "manifest.jsonl"
+        if not manifest_path.is_file():
+            return {"available": False, "manifest_path": str(manifest_path), "event_count": 0}
+        rows: list[dict[str, Any]] = []
+        try:
+            for line in manifest_path.read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                parsed = json.loads(line)
+                if isinstance(parsed, dict):
+                    rows.append(parsed)
+        except (OSError, json.JSONDecodeError) as exc:
+            return {
+                "available": False,
+                "manifest_path": str(manifest_path),
+                "event_count": 0,
+                "error": f"{exc.__class__.__name__}: {exc}",
+            }
+        latest = rows[-1] if rows else {}
+        attempt_ids = sorted({str(row.get("attempt_id") or "") for row in rows if str(row.get("attempt_id") or "").strip()})
+        return {
+            "available": bool(rows),
+            "manifest_path": str(manifest_path),
+            "event_count": len(rows),
+            "attempt_count": len(attempt_ids),
+            "attempt_ids": attempt_ids,
+            "latest_attempt_id": str(latest.get("attempt_id") or ""),
+            "latest_event": latest,
+        }
 
     @staticmethod
     def _uses_in_process_isaac_mirror(session_payload: dict[str, Any]) -> bool:
@@ -2726,11 +3756,12 @@ class LeRobotBridge:
         if mirror_preflight:
             if not mirror_preflight.get("ok"):
                 return mirror_preflight
+            preflight_status = str(mirror_preflight.get("status") or "ready")
             trace = [
                 *trace,
                 (
-                    "ISAAC_MIRROR_RECEIVER_READY",
-                    "ok",
+                    "ISAAC_MIRROR_RECEIVER_READY" if preflight_status == "ready" else "ISAAC_MIRROR_RECEIVER_PENDING",
+                    "ok" if preflight_status == "ready" else "warning",
                     str(mirror_preflight.get("detail") or mirror_preflight.get("health_url") or request.isaac_mirror_endpoint),
                 ),
             ]
@@ -2765,7 +3796,30 @@ class LeRobotBridge:
             "returncode": None,
             "tts": self._tts_config_for_request(request) if workflow == "record" else {},
         }
+        if mirror_preflight and request.isaac_mirror_enabled and workflow in {"teleoperate", "record"}:
+            session["isaac_mirror_receiver_preflight"] = {
+                "ok": bool(mirror_preflight.get("ok")),
+                "status": str(mirror_preflight.get("status") or ""),
+                "warning_code": str(mirror_preflight.get("warning_code") or ""),
+                "health_url": str(mirror_preflight.get("health_url") or ""),
+                "detail": str(mirror_preflight.get("detail") or ""),
+                "receiver_health": dict(mirror_preflight.get("receiver_health") or {}),
+            }
+        if request.active_robot_cam_enabled and workflow in {"teleoperate", "record"}:
+            session["active_robot_cam"] = self._active_robot_cam_summary(request, workflow=workflow)
+            step_trace.append(
+                {
+                    "step": "ACTIVE_ROBOT_CAM_ENABLED",
+                    "status": "ok",
+                    "detail": "D405 wrist direct A4 mapping; D455F top fallback available",
+                }
+            )
         if workflow == "record":
+            session["isaac_rgbd_post_render_auto_on_record_success"] = bool(
+                getattr(request, "isaac_rgbd_post_render_auto_on_record_success", True)
+            )
+            if request.isaac_mirror_enabled:
+                session["record_attempt"] = self._record_attempt_summary(request, session_id)
             session["expected_depth_features"] = self._expected_record_depth_features(profile, request)
             raw_depth_sidecar = self._record_raw_depth_sidecar(profile, request)
             if raw_depth_sidecar.get("enabled"):
@@ -2775,8 +3829,13 @@ class LeRobotBridge:
                 session["dataset_pipeline_metadata"] = metadata
         if workflow == "train":
             session["train_config"] = self._train_config_summary(profile, request)
+            session["dataset_mix"] = dict(session["train_config"].get("dataset_mix") or self._train_dataset_mix_summary(request))
+            session["fidelity_weights"] = dict(session["train_config"].get("fidelity_weights") or self._train_fidelity_summary(request))
             session["output_dir"] = session["train_config"].get("output_dir", "")
             session["job_name"] = session["train_config"].get("job_name", "")
+            session["record_attempts"] = self._read_record_attempts_summary(Path(self._dataset_path_for(request)).expanduser())
+            session["isaac_data_augmentation"] = self._read_latest_isaac_augmentation_summary(Path(self._dataset_path_for(request)).expanduser())
+            session["training_preflight"] = self._training_preflight_progress(session)
         if mode == "live":
             live_start = self._start_live_process(
                 session_id=session_id,
@@ -2939,10 +3998,10 @@ class LeRobotBridge:
         self._emit_trace(payload, tool, step_trace, profile_id, mode, str(selected.get("session_id", "")))
         return self._session_response(tool, mode, selected, step_trace, idempotent=True, stopped_session_ids=stopped_session_ids)
 
-    def _session_status(self, tool: str, payload: dict[str, Any], workflow: str) -> dict[str, Any]:
+    def _session_status(self, tool: str, payload: dict[str, Any], workflow: str, *, prefer_active: bool = False) -> dict[str, Any]:
         request = LeRobotBaseRequest.model_validate(payload or {})
         mode = request.runtime_mode or request.mode
-        session = self._resolve_session(request.session_id, workflow)
+        session = self._resolve_session(request.session_id, workflow, prefer_active=prefer_active)
         profile_id = str(session.get("profile_id") if session else request.profile_id or self._selected_profile_id)
         if session is None:
             step_trace = [{"step": "STATUS", "status": "idle", "detail": f"no active {workflow} session"}]
@@ -2978,8 +4037,22 @@ class LeRobotBridge:
         self._refresh_process_status(session)
         return self._session_response(tool, mode, session, list(session.get("step_trace", [])))
 
+    def _current_isaac_rgbd_post_render_for_session(self, session: dict[str, Any]) -> dict[str, Any]:
+        if str(session.get("workflow") or "").lower() != "record":
+            return {}
+        dataset_path = str(session.get("dataset_path") or "").strip()
+        if not dataset_path:
+            return dict(session.get("isaac_rgbd_post_render") or {}) if isinstance(session.get("isaac_rgbd_post_render"), dict) else {}
+        job_id = self._isaac_rgbd_post_render_job_id(Path(dataset_path).expanduser().resolve(), str(session.get("session_id") or ""))
+        with self._isaac_rgbd_render_lock:
+            job = dict(self._isaac_rgbd_render_jobs.get(job_id, {}))
+        return job or (dict(session.get("isaac_rgbd_post_render") or {}) if isinstance(session.get("isaac_rgbd_post_render"), dict) else {})
+
     def _session_response(self, tool: str, mode: str, session: dict[str, Any], step_trace: list[dict[str, Any]], **extra: Any) -> dict[str, Any]:
         self._refresh_in_process_isaac_mirror_progress(session)
+        post_render = self._current_isaac_rgbd_post_render_for_session(session)
+        if post_render:
+            session["isaac_rgbd_post_render"] = post_render
         if str(session.get("workflow") or "").lower() == "record":
             metadata = self._write_record_pipeline_metadata(session, create_missing=False)
             if metadata:
@@ -3046,6 +4119,20 @@ class LeRobotBridge:
         if isinstance(session.get("isaac_mirror"), dict):
             payload["isaac_mirror"] = dict(session["isaac_mirror"])
             payload["isaac_mirror_session_id"] = session.get("isaac_mirror_session_id", "")
+        if isinstance(session.get("active_robot_cam"), dict):
+            payload["active_robot_cam"] = dict(session["active_robot_cam"])
+        if isinstance(session.get("record_attempt"), dict):
+            payload["record_attempt"] = dict(session["record_attempt"])
+        if isinstance(session.get("record_attempts"), dict):
+            payload["record_attempts"] = dict(session["record_attempts"])
+        if isinstance(session.get("isaac_data_augmentation"), dict):
+            payload["isaac_data_augmentation"] = dict(session["isaac_data_augmentation"])
+        if isinstance(session.get("dataset_mix"), dict):
+            payload["dataset_mix"] = dict(session["dataset_mix"])
+        if isinstance(session.get("fidelity_weights"), dict):
+            payload["fidelity_weights"] = dict(session["fidelity_weights"])
+        if isinstance(session.get("isaac_rgbd_post_render"), dict):
+            payload["isaac_rgbd_post_render"] = dict(session["isaac_rgbd_post_render"])
         if session.get("raw_depth_sidecar"):
             payload["raw_depth_sidecar"] = self._record_raw_depth_sidecar_status(dict(session["raw_depth_sidecar"]))
         if depth_validation:
@@ -3056,6 +4143,8 @@ class LeRobotBridge:
             payload["error"] = payload["message"]
         if str(session.get("workflow") or "").lower() == "train":
             payload["training"] = {**dict(session.get("train_config", {})), **dict(training or {})}
+            if isinstance(session.get("training_preflight"), dict):
+                payload["training_preflight"] = dict(session["training_preflight"])
         elif training:
             payload["training"] = training
         if session.get("visualization"):
@@ -3369,6 +4458,56 @@ class LeRobotBridge:
         except (URLError, TimeoutError, OSError) as exc:
             return {"ok": False, "status_code": None, "state_url": state_url, "message": f"{exc.__class__.__name__}: {exc}"}
 
+    def _post_isaac_mirror_viewport_frame(self, endpoint: str, *, reason: str, timeout_s: float = 0.5) -> dict[str, Any]:
+        frame_url = self._isaac_mirror_viewport_frame_url(endpoint)
+        body = json.dumps({"reason": reason}).encode("utf-8")
+        request = Request(frame_url, data=body, method="POST", headers={"Content-Type": "application/json", "Accept": "application/json"})
+        try:
+            with urlopen(request, timeout=timeout_s) as response:
+                raw = response.read(8192).decode("utf-8", errors="replace")
+                parsed: dict[str, Any] = {}
+                if raw.strip():
+                    try:
+                        parsed = json.loads(raw)
+                    except json.JSONDecodeError:
+                        parsed = {"body": raw}
+                status_code = int(getattr(response, "status", 200))
+                return {
+                    "ok": 200 <= status_code < 300 and bool(parsed.get("ok", True)),
+                    "status_code": status_code,
+                    "viewport_frame_url": frame_url,
+                    **parsed,
+                }
+        except HTTPError as exc:
+            return {"ok": False, "status_code": exc.code, "viewport_frame_url": frame_url, "message": exc.reason or str(exc)}
+        except (URLError, TimeoutError, OSError) as exc:
+            return {"ok": False, "status_code": None, "viewport_frame_url": frame_url, "message": f"{exc.__class__.__name__}: {exc}"}
+
+    def _post_isaac_mirror_timeline_play(self, endpoint: str, *, reason: str, timeout_s: float = 0.5) -> dict[str, Any]:
+        play_url = self._isaac_mirror_timeline_play_url(endpoint)
+        body = json.dumps({"reason": reason}).encode("utf-8")
+        request = Request(play_url, data=body, method="POST", headers={"Content-Type": "application/json", "Accept": "application/json"})
+        try:
+            with urlopen(request, timeout=timeout_s) as response:
+                raw = response.read(8192).decode("utf-8", errors="replace")
+                parsed: dict[str, Any] = {}
+                if raw.strip():
+                    try:
+                        parsed = json.loads(raw)
+                    except json.JSONDecodeError:
+                        parsed = {"body": raw}
+                status_code = int(getattr(response, "status", 200))
+                return {
+                    "ok": 200 <= status_code < 300 and bool(parsed.get("ok", True)),
+                    "status_code": status_code,
+                    "timeline_play_url": play_url,
+                    **parsed,
+                }
+        except HTTPError as exc:
+            return {"ok": False, "status_code": exc.code, "timeline_play_url": play_url, "message": exc.reason or str(exc)}
+        except (URLError, TimeoutError, OSError) as exc:
+            return {"ok": False, "status_code": None, "timeline_play_url": play_url, "message": f"{exc.__class__.__name__}: {exc}"}
+
     def _wait_for_isaac_mirror_receiver(self, endpoint: str, *, timeout_s: float, request_timeout_s: float) -> dict[str, Any]:
         deadline = time.monotonic() + timeout_s
         last: dict[str, Any] = {"ok": False, "message": "not checked"}
@@ -3383,6 +4522,7 @@ class LeRobotBridge:
         process_key = self._isaac_mirror_process_key(endpoint_or_key)
         process = self._receiver_processes.pop(process_key, None)
         log_handle = self._receiver_log_handles.pop(process_key, None)
+        self._receiver_commands.pop(process_key, None)
         try:
             if process and process.poll() is None:
                 self._terminate_live_process(process, signal.SIGTERM)
@@ -3420,26 +4560,32 @@ class LeRobotBridge:
         health_url = str(health.get("health_url") or self._isaac_mirror_health_url(endpoint))
         if not health.get("ok"):
             message = str(health.get("message") or health.get("error") or "Isaac mirror receiver is unavailable.")
-            return self._blocked(
-                tool,
-                mode,
-                profile.profile_id,
-                "LEROBOT_ISAAC_MIRROR_RECEIVER_UNAVAILABLE",
-                f"Isaac mirror receiver is unavailable at {health_url}: {message}",
-                workflow,
-            )
+            return {
+                "ok": True,
+                "status": "warning",
+                "warning_code": "LEROBOT_ISAAC_MIRROR_RECEIVER_UNAVAILABLE",
+                "health_url": health_url,
+                "receiver_health": health,
+                "detail": (
+                    f"Isaac mirror receiver is unavailable at {health_url}: {message}. "
+                    "Live teleop/record will start; the in-process mirror publisher will attach when the receiver becomes reachable."
+                ),
+            }
         apply_mode = str(health.get("apply_mode") or "unknown")
         detail = f"{health_url} apply_mode={apply_mode}"
         if apply_mode != "deferred_update_tick":
-            return self._blocked(
-                tool,
-                mode,
-                profile.profile_id,
-                "LEROBOT_ISAAC_MIRROR_RECEIVER_NOT_IN_ISAAC_UPDATE_TICK",
-                f"Isaac mirror receiver is reachable at {health_url}, but it is not running inside Isaac Kit update-tick mode: apply_mode={apply_mode}. Start the ATR Isaac extension receiver before live teleop/record.",
-                workflow,
-            )
-        return {"ok": True, "health_url": health_url, "receiver_health": health, "detail": detail}
+            return {
+                "ok": True,
+                "status": "warning",
+                "warning_code": "LEROBOT_ISAAC_MIRROR_RECEIVER_NOT_IN_ISAAC_UPDATE_TICK",
+                "health_url": health_url,
+                "receiver_health": health,
+                "detail": (
+                    f"Isaac mirror receiver is reachable at {health_url}, but it is not running inside Isaac Kit update-tick mode: "
+                    f"apply_mode={apply_mode}. Live teleop/record will start; use the ATR Isaac extension receiver for active-stage updates."
+                ),
+            }
+        return {"ok": True, "status": "ready", "health_url": health_url, "receiver_health": health, "detail": detail}
 
     @staticmethod
     def _isaac_mirror_endpoint(request: LeRobotBaseRequest) -> str:
@@ -3473,6 +4619,7 @@ class LeRobotBridge:
         scene_path = _resolve_path(self.config.repo_root, str(payload.get("isaac_mirror_receiver_scene") or ISAAC_OMX_SCENE_RELATIVE_PATH))
         if launch_mode == "isaac_extension":
             executable = self._isaac_mirror_receiver_isaac_sim_executable(payload)
+            active_robot_cam_enabled = _safe_bool(payload.get("active_robot_cam_enabled"), True)
             extension_root = self.config.repo_root / "sim" / "robotis_omx" / "extensions"
             manifest = extension_root / "atr.omx.mirror" / "config" / "extension.toml"
             if not manifest.exists():
@@ -3508,7 +4655,8 @@ class LeRobotBridge:
                 f"--/exts/atr.omx.mirror/scene={scene_path}",
                 f"--/exts/atr.omx.mirror/useCurrentStage=true",
                 f"--/exts/atr.omx.mirror/openSceneOnStartup=true",
-                f"--/exts/atr.omx.mirror/playTimelineOnStartup=true",
+                f"--/exts/atr.omx.mirror/playTimelineOnStartup=false",
+                f"--/exts/atr.omx.mirror/specimenPoseActiveRobotCamOnMissing={_bool_arg(active_robot_cam_enabled)}",
             ]
             return {"ok": True, "launch_mode": launch_mode, "command": command, "scene_path": str(scene_path)}
 
@@ -3587,12 +4735,30 @@ class LeRobotBridge:
         return parsed._replace(path="/state", params="", query="", fragment="").geturl()
 
     @staticmethod
+    def _isaac_mirror_viewport_frame_url(endpoint: str) -> str:
+        parsed = urlparse(str(endpoint or "http://127.0.0.1:8766/joints").strip())
+        if not parsed.scheme or not parsed.netloc:
+            return "http://127.0.0.1:8766/viewport/frame"
+        return parsed._replace(path="/viewport/frame", params="", query="", fragment="").geturl()
+
+    @staticmethod
+    def _isaac_mirror_timeline_play_url(endpoint: str) -> str:
+        parsed = urlparse(str(endpoint or "http://127.0.0.1:8766/joints").strip())
+        if not parsed.scheme or not parsed.netloc:
+            return "http://127.0.0.1:8766/timeline/play"
+        return parsed._replace(path="/timeline/play", params="", query="", fragment="").geturl()
+
+    @staticmethod
     def _isaac_mirror_sample_hz(request: LeRobotBaseRequest) -> float:
         return _safe_float(request.isaac_mirror_sample_hz, 15.0, minimum=0.1, maximum=120.0)
 
     @staticmethod
     def _isaac_mirror_timeout_s(request: LeRobotBaseRequest) -> float:
         return _safe_float(request.isaac_mirror_timeout_s, 0.5, minimum=0.05, maximum=10.0)
+
+    @staticmethod
+    def _isaac_mirror_post_timeout_s(request: LeRobotBaseRequest) -> float:
+        return min(LeRobotBridge._isaac_mirror_timeout_s(request), 0.15)
 
     def _isaac_mirror_record_path(self, request: LeRobotBaseRequest, session_id: str) -> Path:
         raw = str(request.isaac_mirror_record_path or "").strip()
@@ -3651,6 +4817,7 @@ class LeRobotBridge:
         pipeline = LEROBOT_OBSERVATION_PIPELINES[pipeline_id]
         sidecar = dict(session.get("raw_depth_sidecar") or {})
         isaac_mirror = dict(session.get("isaac_mirror") or {})
+        record_attempt = dict(session.get("record_attempt") or {})
         metadata_path = self._dataset_pipeline_metadata_path(dataset_path)
         payload = {
             "version": 1,
@@ -3688,7 +4855,12 @@ class LeRobotBridge:
                 )),
                 "receiver_state_at_stop": dict(isaac_mirror.get("receiver_state_at_stop") or {}),
             },
+            "record_attempt": record_attempt,
+            "isaac_rgbd_sidecar": dict(record_attempt.get("isaac_rgbd_render") or {}),
         }
+        augmentation_summary = self._read_latest_isaac_augmentation_summary(dataset_path)
+        if augmentation_summary.get("available"):
+            payload["isaac_data_augmentation"] = augmentation_summary
         try:
             metadata_path.parent.mkdir(parents=True, exist_ok=True)
             metadata_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -3707,6 +4879,291 @@ class LeRobotBridge:
     @staticmethod
     def _dataset_raw_depth_manifest_path(dataset_path: Path) -> Path:
         return dataset_path / "sidecar" / "depth_raw" / "transform_manifest.json"
+
+    @staticmethod
+    def _read_jsonl_file(path: Path) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        if not path.is_file():
+            return rows
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            return rows
+        for line in lines:
+            if not line.strip():
+                continue
+            try:
+                parsed = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(parsed, dict):
+                rows.append(parsed)
+        return rows
+
+    def _allowed_file_or_none(self, raw_path: Any) -> Path | None:
+        clean = str(raw_path or "").strip()
+        if not clean:
+            return None
+        try:
+            path = Path(clean).expanduser().resolve()
+        except OSError:
+            return None
+        if not path.is_file() or not self._is_under_allowed_roots(path):
+            return None
+        return path
+
+    def _resolve_manifest_file_path(self, raw_path: Any, *, dataset_path: Path, manifest_path: Path) -> Path | None:
+        clean = str(raw_path or "").strip()
+        if not clean:
+            return None
+        raw = Path(clean).expanduser()
+        candidates = [raw] if raw.is_absolute() else [manifest_path.parent / raw, dataset_path / raw]
+        for candidate in candidates:
+            try:
+                path = candidate.resolve()
+            except OSError:
+                continue
+            if path.is_file() and self._is_under_allowed_roots(path):
+                return path
+        return None
+
+    def _augmentation_source_files(self, row: dict[str, Any], *, dataset_path: Path) -> dict[str, dict[str, Path]]:
+        source = row.get("source") if isinstance(row.get("source"), dict) else {}
+        manifest_raw = str(source.get("manifest_path") or "").strip()
+        if not manifest_raw:
+            return {}
+        manifest_path = Path(manifest_raw).expanduser()
+        if not manifest_path.is_absolute():
+            manifest_path = dataset_path / manifest_path
+        try:
+            manifest_path = manifest_path.resolve()
+        except OSError:
+            return {}
+        if not manifest_path.is_file() or not self._is_under_allowed_roots(manifest_path):
+            return {}
+        target_attempt = str(source.get("attempt_id") or "")
+        target_episode = _safe_int(source.get("episode_index"), -1)
+        target_frame = _safe_int(source.get("frame_index"), -1)
+        for source_row in self._read_jsonl_file(manifest_path):
+            attempt_id = str(source_row.get("attempt_id") or manifest_path.parent.name)
+            episode_index = _safe_int(source_row.get("episode_index"), 0, minimum=0)
+            frame_index = _safe_int(source_row.get("frame_index"), _safe_int(source_row.get("sample_index"), 0, minimum=0), minimum=0)
+            if target_attempt and attempt_id != target_attempt:
+                continue
+            if target_episode >= 0 and episode_index != target_episode:
+                continue
+            if target_frame >= 0 and frame_index != target_frame:
+                continue
+            files: dict[str, dict[str, Path]] = {}
+            file_infos = source_row.get("files") if isinstance(source_row.get("files"), list) else []
+            for file_info in file_infos:
+                if not isinstance(file_info, dict):
+                    continue
+                camera = str(file_info.get("camera") or "").strip()
+                kind = str(file_info.get("kind") or "").strip()
+                if not camera or kind not in {"rgb", "depth"}:
+                    continue
+                path = self._resolve_manifest_file_path(file_info.get("path"), dataset_path=dataset_path, manifest_path=manifest_path)
+                if path is not None:
+                    files.setdefault(camera, {})[kind] = path
+            if files:
+                return files
+        return {}
+
+    @staticmethod
+    def _depth_preview_array(depth_path: Path) -> Any:
+        from PIL import Image
+        import numpy as np
+
+        depth = np.asarray(Image.open(depth_path)).astype(np.float32)
+        if depth.size <= 0:
+            return np.zeros((1, 1, 3), dtype=np.uint8)
+        valid = depth > 0.0
+        if not np.any(valid):
+            normalized = np.zeros(depth.shape, dtype=np.uint8)
+        else:
+            valid_values = depth[valid]
+            low = float(np.percentile(valid_values, 1.0))
+            high = float(np.percentile(valid_values, 99.0))
+            if high <= low:
+                high = low + 1.0
+            normalized_float = ((depth - low) / (high - low)) * 255.0
+            normalized_float[~valid] = 0.0
+            normalized = np.clip(normalized_float, 0.0, 255.0).astype(np.uint8)
+        return np.stack([normalized, normalized, normalized], axis=-1)
+
+    def _write_depth_preview_png(self, depth_path: Path, preview_path: Path) -> Path:
+        from PIL import Image
+
+        preview_path.parent.mkdir(parents=True, exist_ok=True)
+        Image.fromarray(self._depth_preview_array(depth_path), mode="RGB").save(preview_path)
+        return preview_path
+
+    @staticmethod
+    def _media_file_ref(path: Path | None) -> dict[str, Any]:
+        if path is None:
+            return {}
+        return {
+            "path": str(path),
+            "name": path.name,
+            "size_bytes": path.stat().st_size if path.is_file() else 0,
+            "serve_url": f"/api/lerobot/visualization/file?path={quote(str(path))}",
+        }
+
+    def _normalize_train_raw_depth_sidecar(self, request: LeRobotSessionRequest) -> dict[str, Any]:
+        """Normalize raw depth PNG names to dataset-local frame indices before training."""
+        if (request.runtime_mode or request.mode) != "live":
+            return {"ok": True, "status": "skipped_non_live", "changed": False}
+        dataset_path = Path(self._dataset_path_for(request)).expanduser()
+        manifest_path = self._dataset_raw_depth_manifest_path(dataset_path)
+        if not manifest_path.is_file():
+            return {"ok": True, "status": "no_raw_depth_manifest", "changed": False}
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ValueError(f"Raw depth manifest is not readable: {manifest_path} ({exc.__class__.__name__}: {exc})") from exc
+
+        root = manifest_path.parent
+        camera_keys = [str(item).strip() for item in manifest.get("camera_keys", []) if str(item).strip()]
+        if not camera_keys:
+            camera_keys = sorted(path.name for path in root.iterdir() if path.is_dir())
+        results = {camera_key: self._normalize_raw_depth_camera_indices(root / camera_key) for camera_key in camera_keys}
+        changed = any(int(result.get("renamed_count", 0)) > 0 for result in results.values())
+        if changed:
+            normalization_path = root / "index_normalization.json"
+            payload = {
+                "schema": "atr.raw_depth.index_normalization.v1",
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "dataset_path": str(dataset_path),
+                "manifest_path": str(manifest_path),
+                "camera_results": results,
+            }
+            tmp_path = normalization_path.with_suffix(".tmp")
+            tmp_path.write_text(json.dumps(payload, ensure_ascii=True, indent=2), encoding="utf-8")
+            tmp_path.replace(normalization_path)
+        return {"ok": True, "status": "normalized" if changed else "already_normalized", "changed": changed, "camera_results": results}
+
+    @staticmethod
+    def _normalize_raw_depth_camera_indices(camera_dir: Path) -> dict[str, Any]:
+        frame_pattern = re.compile(r"^frame_(\d+)[.]png$")
+        if not camera_dir.is_dir():
+            return {"camera_dir": str(camera_dir), "status": "missing", "input_count": 0, "renamed_count": 0}
+        indexed_files: list[tuple[int, Path]] = []
+        for path in camera_dir.glob("frame_*.png"):
+            match = frame_pattern.match(path.name)
+            if match:
+                indexed_files.append((int(match.group(1)), path))
+        indexed_files.sort(key=lambda item: (item[0], item[1].name))
+        expected_names = [f"frame_{index:06d}.png" for index in range(len(indexed_files))]
+        current_names = [path.name for _, path in indexed_files]
+        result_base = {
+            "camera_dir": str(camera_dir),
+            "input_count": len(indexed_files),
+            "first_source_index": indexed_files[0][0] if indexed_files else None,
+            "last_source_index": indexed_files[-1][0] if indexed_files else None,
+        }
+        if current_names == expected_names:
+            return {**result_base, "status": "already_normalized", "renamed_count": 0}
+
+        staged: list[Path] = []
+        token = f".atr_raw_depth_normalize.{os.getpid()}.{time.time_ns()}"
+        try:
+            for order, (_, source_path) in enumerate(indexed_files):
+                temp_path = camera_dir / f"{token}.{order:06d}.tmp"
+                source_path.rename(temp_path)
+                staged.append(temp_path)
+            for order, temp_path in enumerate(staged):
+                temp_path.rename(camera_dir / f"frame_{order:06d}.png")
+        except OSError as exc:
+            raise ValueError(f"Raw depth index normalization failed for {camera_dir}: {exc}") from exc
+        return {**result_base, "status": "normalized", "renamed_count": len(indexed_files)}
+
+    @staticmethod
+    def _dataset_isaac_augmentation_summary_path(dataset_path: Path) -> Path:
+        return dataset_path / "sidecar" / "isaac_augmentation" / "latest" / "summary.json"
+
+    def _read_latest_isaac_augmentation_summary(self, dataset_path: Path) -> dict[str, Any]:
+        summary_path = self._dataset_isaac_augmentation_summary_path(dataset_path)
+        if not summary_path.is_file():
+            return {"available": False, "summary_path": str(summary_path), "variant_count": 0}
+        try:
+            loaded = json.loads(summary_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            return {
+                "available": False,
+                "summary_path": str(summary_path),
+                "variant_count": 0,
+                "error": f"{exc.__class__.__name__}: {exc}",
+            }
+        summary = loaded if isinstance(loaded, dict) else {}
+        variant_count = _safe_int(summary.get("variant_count"), 0, minimum=0)
+        valid_variant_count = _safe_int(summary.get("valid_variant_count"), variant_count, minimum=0)
+        failed_variant_count = _safe_int(summary.get("failed_variant_count"), max(0, variant_count - valid_variant_count), minimum=0)
+        return {
+            **summary,
+            "available": bool(summary.get("ok", True)),
+            "summary_path": str(summary_path),
+            "manifest_path": str(summary.get("manifest_path") or summary_path.parent / "manifest.jsonl"),
+            "qa_summary_path": str(summary.get("qa_summary_path") or summary_path.parent / "qa_summary.json"),
+            "variant_count": variant_count,
+            "valid_variant_count": valid_variant_count,
+            "failed_variant_count": failed_variant_count,
+            "source_frame_count": _safe_int(summary.get("source_frame_count"), 0, minimum=0),
+        }
+
+    def _train_isaac_augmentation_qa_preflight(self, request: LeRobotSessionRequest) -> dict[str, Any]:
+        dataset_path = Path(self._dataset_path_for(request)).expanduser()
+        summary = self._read_latest_isaac_augmentation_summary(dataset_path)
+        if not summary.get("available"):
+            return {"blocked": False, "trace": [], "summary": summary}
+        variant_count = _safe_int(summary.get("variant_count"), 0, minimum=0)
+        valid_variant_count = _safe_int(summary.get("valid_variant_count"), variant_count, minimum=0)
+        failed_variant_count = _safe_int(summary.get("failed_variant_count"), max(0, variant_count - valid_variant_count), minimum=0)
+        failure_counts = summary.get("qa_failure_counts") if isinstance(summary.get("qa_failure_counts"), dict) else {}
+        if variant_count > 0 and valid_variant_count <= 0:
+            return {
+                "blocked": True,
+                "summary": summary,
+                "message": (
+                    f"Isaac augmentation QA has 0 valid Isaac augmentation variants "
+                    f"out of {variant_count}; failures={failure_counts or failed_variant_count}."
+                ),
+                "trace": [],
+            }
+        if failed_variant_count > 0:
+            detail = (
+                f"valid={valid_variant_count} failed={failed_variant_count} "
+                f"manifest={summary.get('manifest_path', '')} failures={failure_counts}"
+            )
+            return {
+                "blocked": False,
+                "summary": summary,
+                "trace": [("ISAAC_AUGMENTATION_QA", "warning", detail)],
+            }
+        return {"blocked": False, "trace": [], "summary": summary}
+
+    def _write_latest_isaac_augmentation_metadata(self, dataset_path: Path, summary: dict[str, Any]) -> None:
+        metadata_path = self._dataset_pipeline_metadata_path(dataset_path)
+        try:
+            if metadata_path.is_file():
+                loaded = json.loads(metadata_path.read_text(encoding="utf-8"))
+                metadata = loaded if isinstance(loaded, dict) else {}
+            else:
+                metadata = {}
+            metadata["isaac_data_augmentation"] = {
+                "available": bool(summary.get("ok")),
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+                "summary_path": str(summary.get("summary_path") or self._dataset_isaac_augmentation_summary_path(dataset_path)),
+                "manifest_path": str(summary.get("manifest_path") or ""),
+                "output_dir": str(summary.get("output_dir") or ""),
+                "variant_count": _safe_int(summary.get("variant_count"), 0, minimum=0),
+                "source_frame_count": _safe_int(summary.get("source_frame_count"), 0, minimum=0),
+                "common_augmentation_families": list(summary.get("common_augmentation_families") or []),
+            }
+            metadata_path.parent.mkdir(parents=True, exist_ok=True)
+            metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
+        except (OSError, TypeError, ValueError):
+            return None
 
     def _read_dataset_pipeline_metadata(self, dataset_path: Path) -> dict[str, Any]:
         """Read ATR dataset pipeline metadata, or infer a conservative display-only value."""
@@ -3853,6 +5310,7 @@ class LeRobotBridge:
         if not camera_keys:
             return {"enabled": False, "root": "", "expected_camera_keys": [], "format": "png16", "pipeline_id": pipeline_id}
         root = Path(self._dataset_path_for(request)).expanduser() / "sidecar" / "depth_raw"
+        camera_depth_scales = self._record_raw_depth_camera_scale_map(profile, camera_keys)
         return {
             "enabled": True,
             "root": str(root),
@@ -3861,9 +5319,18 @@ class LeRobotBridge:
             "pipeline_id": pipeline_id,
             "aligned_to": "color" if self.config.realsense_depth_align_to_color else "native_depth",
             "depth_scale_m_per_unit": self.config.realsense_depth_scale_m_per_unit,
+            "camera_depth_scale_m_per_unit": camera_depth_scales,
             "depth_clip_min_mm": self.config.realsense_depth_clip_min_mm,
             "depth_clip_max_mm": self.config.realsense_depth_clip_max_mm,
         }
+
+    def _record_raw_depth_camera_scale_map(self, profile: RobotProfile, camera_keys: list[str]) -> dict[str, float]:
+        scales: dict[str, float] = {}
+        for camera_key in camera_keys:
+            camera_device = self._saved_camera_device(profile.profile_id, camera_key)
+            identifier = str((camera_device or {}).get("serial_number_or_name") or (camera_device or {}).get("port") or "").strip()
+            scales[camera_key] = self._realsense_depth_scale_m_per_unit(camera_key, identifier, camera_device or {})
+        return scales
 
     def _record_raw_depth_camera_keys(self, profile: RobotProfile | None, request: LeRobotSessionRequest) -> list[str]:
         if profile is None or not request.camera_enabled:
@@ -3974,6 +5441,14 @@ class LeRobotBridge:
         if "Fatal exception" in text or "Traceback" in text or status == "FAILED":
             phase = "FAILED"
             message = f"{workflow_label.capitalize()} failed; inspect log_tail for the stack trace."
+            preflight_match = re.search(r"RecordStartPreflightError:\s*([A-Z0-9_]+)", text)
+            if preflight_match:
+                warnings.append("record_start_preflight_failed")
+                failure_code = preflight_match.group(1)
+                if failure_code == "SPECIMEN_OUTSIDE_A4":
+                    message = "Record start blocked: detected specimen is outside the A4 workspace."
+                else:
+                    message = f"Record start blocked by preflight check: {failure_code}."
         return {
             "phase": phase,
             "message": message,
@@ -4002,7 +5477,16 @@ class LeRobotBridge:
         progress_percent = round((current_step / total_steps) * 100.0, 2) if total_steps else (100.0 if status == "COMPLETED" else 0.0)
         progress_percent = max(0.0, min(100.0, progress_percent))
         elapsed_sec = self._session_elapsed_sec(session)
-        steps_per_sec = 0.0 if synthetic_complete else round(current_step / elapsed_sec, 4) if current_step > 0 and elapsed_sec > 0 else 0.0
+        active_rate = self._parse_training_steps_per_sec(log_tail)
+        steps_per_sec = (
+            0.0
+            if synthetic_complete
+            else round(active_rate, 4)
+            if active_rate > 0
+            else round(current_step / elapsed_sec, 4)
+            if current_step > 0 and elapsed_sec > 0
+            else 0.0
+        )
         eta_sec: float | None = None
         if steps_per_sec > 0 and total_steps and current_step < total_steps and status not in {"COMPLETED", "FAILED", "CANCELLED"}:
             eta_sec = round((total_steps - current_step) / steps_per_sec, 1)
@@ -4066,6 +5550,60 @@ class LeRobotBridge:
             return None
         try:
             return float(matches[-1].group(1))
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _parse_training_steps_per_sec(log: str) -> float:
+        """Estimate active training throughput without counting model/dataset startup time."""
+        step_records: list[tuple[int, datetime | None]] = []
+        step_durations: list[float] = []
+        count_pattern = r"(\d{1,9}(?:\.\d+)?)([kKmM]?)"
+        for line in log.splitlines():
+            if "cfg.steps" in line:
+                continue
+            step_match = re.search(rf"\b(?:step|global_step)\s*[=:]\s*{count_pattern}", line, flags=re.IGNORECASE)
+            if not step_match:
+                continue
+            step = LeRobotBridge._parse_training_count(step_match.group(1), step_match.group(2))
+            if step <= 0:
+                continue
+            timestamp = LeRobotBridge._parse_training_log_timestamp(line)
+            step_records.append((step, timestamp))
+            duration_parts = []
+            for key in ("updt_s", "data_s"):
+                match = re.search(rf"\b{key}\s*[=:]\s*([0-9]+(?:\.[0-9]+)?)", line, flags=re.IGNORECASE)
+                if match:
+                    try:
+                        duration_parts.append(float(match.group(1)))
+                    except ValueError:
+                        pass
+            duration = sum(duration_parts)
+            if duration > 0:
+                step_durations.append(duration)
+        rates: list[float] = []
+        timestamped = [(step, timestamp) for step, timestamp in step_records if timestamp is not None]
+        if len(timestamped) >= 2:
+            first_step, first_timestamp = timestamped[0]
+            last_step, last_timestamp = timestamped[-1]
+            elapsed = max(0.0, (last_timestamp - first_timestamp).total_seconds())
+            step_delta = max(0, last_step - first_step)
+            if elapsed > 0 and step_delta > 0:
+                rates.append(step_delta / elapsed)
+        if step_durations:
+            recent = step_durations[-10:]
+            avg_duration = sum(recent) / len(recent)
+            if avg_duration > 0:
+                rates.append(1.0 / avg_duration)
+        return max(rates) if rates else 0.0
+
+    @staticmethod
+    def _parse_training_log_timestamp(line: str) -> datetime | None:
+        match = re.search(r"\b(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2})\b", line)
+        if not match:
+            return None
+        try:
+            return datetime.fromisoformat(f"{match.group(1)}T{match.group(2)}").replace(tzinfo=timezone.utc)
         except ValueError:
             return None
 
@@ -4146,6 +5684,9 @@ class LeRobotBridge:
 
     def _public_session(self, session: dict[str, Any]) -> dict[str, Any]:
         self._refresh_in_process_isaac_mirror_progress(session)
+        post_render = self._current_isaac_rgbd_post_render_for_session(session)
+        if post_render:
+            session["isaac_rgbd_post_render"] = post_render
         log_tail = self._tail_file(str(session.get("log_path", "")))
         runtime = self._runtime_status_from_log(session, log_tail)
         training = self._training_progress(session)
@@ -4184,6 +5725,14 @@ class LeRobotBridge:
         if isinstance(session.get("isaac_mirror"), dict):
             public["isaac_mirror"] = dict(session["isaac_mirror"])
             public["isaac_mirror_session_id"] = session.get("isaac_mirror_session_id", "")
+        if isinstance(session.get("active_robot_cam"), dict):
+            public["active_robot_cam"] = dict(session["active_robot_cam"])
+        if isinstance(session.get("record_attempt"), dict):
+            public["record_attempt"] = dict(session["record_attempt"])
+        if isinstance(session.get("record_attempts"), dict):
+            public["record_attempts"] = dict(session["record_attempts"])
+        if isinstance(session.get("isaac_rgbd_post_render"), dict):
+            public["isaac_rgbd_post_render"] = dict(session["isaac_rgbd_post_render"])
         return public
 
     @staticmethod
@@ -4259,7 +5808,8 @@ class LeRobotBridge:
         workflow: str,
         request: LeRobotSessionRequest,
     ) -> dict[str, Any] | None:
-        if mode != "live" or workflow not in {"teleoperate", "record", "rollout"} or not request.camera_enabled:
+        camera_required = bool(request.camera_enabled or self._uses_active_robot_cam(workflow, request))
+        if mode != "live" or workflow not in {"teleoperate", "record", "rollout"} or not camera_required:
             return None
         missing: list[str] = []
         unavailable: list[str] = []
@@ -4461,6 +6011,7 @@ class LeRobotBridge:
             "serial_number_or_name": identifier,
             "color_format": self._realsense_color_format(request.camera_key, identifier),
             "use_depth": True,
+            "depth_scale_m_per_unit": self._realsense_depth_scale_m_per_unit(request.camera_key, identifier),
             "fps": _safe_int(request.camera_fps, LEROBOT_DEFAULT_REALSENSE_FPS, minimum=1),
             "width": _safe_int(request.camera_width, LEROBOT_DEFAULT_CAMERA_WIDTH, minimum=1),
             "height": _safe_int(request.camera_height, LEROBOT_DEFAULT_CAMERA_HEIGHT, minimum=1),
@@ -4489,6 +6040,32 @@ class LeRobotBridge:
         return "rgb8"
 
     @staticmethod
+    def _realsense_depth_scale_m_per_unit(
+        camera_key: str | None = None,
+        identifier: str | None = None,
+        camera_device: dict[str, Any] | None = None,
+    ) -> float:
+        device = camera_device or {}
+        explicit = _safe_float(device.get("depth_scale_m_per_unit"), 0.0, minimum=0.0)
+        if explicit > 0.0:
+            return explicit
+        text = " ".join(
+            str(value or "").lower()
+            for value in (
+                camera_key,
+                identifier,
+                device.get("camera_key"),
+                device.get("serial_number_or_name"),
+                device.get("port"),
+                device.get("name"),
+                device.get("model"),
+            )
+        )
+        if "wrist" in text or "d405" in text or "405" in text or "352122273019" in text:
+            return LEROBOT_D405_DEPTH_SCALE_M_PER_UNIT
+        return LEROBOT_DEFAULT_DEPTH_SCALE_M_PER_UNIT
+
+    @staticmethod
     def _camera_use_depth(camera_device: dict[str, Any], *, default: bool = False) -> bool:
         if "use_depth" in camera_device:
             return bool(camera_device.get("use_depth"))
@@ -4508,7 +6085,7 @@ class LeRobotBridge:
     def _workflow_command(self, profile: RobotProfile, workflow: str, request: LeRobotSessionRequest, args: list[str]) -> list[str]:
         mode = request.runtime_mode or request.mode
         command = [self.config.conda_executable, "run", "--no-capture-output", "-n", self._workflow_conda_env_name(workflow, request)]
-        if mode == "live" and workflow in {"teleoperate", "record"} and request.isaac_mirror_enabled:
+        if self._uses_in_process_lerobot_wrapper(workflow, request):
             command.extend(["python", str(self.config.repo_root / "scripts" / "lerobot_isaac_mirror_runtime_wrapper.py"), workflow])
         elif workflow == "rollout" and self._is_pi05_policy(request.policy_type):
             command.extend(["python", str(self.config.repo_root / "scripts" / "lerobot_pi05_rollout_wrapper.py")])
@@ -4544,7 +6121,8 @@ class LeRobotBridge:
                     "ATR_ISAAC_MIRROR_ENDPOINT": self._isaac_mirror_endpoint(request),
                     "ATR_ISAAC_MIRROR_SAMPLE_HZ": str(self._isaac_mirror_sample_hz(request)),
                     "ATR_ISAAC_MIRROR_TIMEOUT_S": str(self._isaac_mirror_timeout_s(request)),
-                    "ATR_ISAAC_MIRROR_SOURCE": "follower_present_position",
+                    "ATR_ISAAC_MIRROR_POST_TIMEOUT_S": str(self._isaac_mirror_post_timeout_s(request)),
+                    "ATR_ISAAC_MIRROR_SOURCE": "leader_action",
                     "ATR_ISAAC_MIRROR_SESSION_ID": mirror_session_id,
                     "ATR_ISAAC_MIRROR_ATTACHED_TO_SESSION_ID": mirror_session_id,
                     "ATR_ISAAC_MIRROR_PROFILE_ID": str(request.profile_id or self._selected_profile_id),
@@ -4552,11 +6130,39 @@ class LeRobotBridge:
                     "ATR_ISAAC_MIRROR_RECORD_PATH": str(self._in_process_isaac_mirror_record_path(workflow, request, mirror_session_id or "live")),
                 }
             )
+            if workflow == "record":
+                attempt = self._record_attempt_summary(request, mirror_session_id or "live")
+                render = dict(attempt.get("isaac_rgbd_render") or {})
+                env.update(
+                    {
+                        "ATR_RECORD_ATTEMPT_ENABLED": "1",
+                        "ATR_RECORD_ATTEMPT_DATASET_PATH": str(attempt.get("dataset_path") or ""),
+                        "ATR_RECORD_ATTEMPT_SESSION_ID": mirror_session_id,
+                        "ATR_RECORD_ATTEMPT_ID": str(attempt.get("attempt_id") or ""),
+                        "ATR_RECORD_ATTEMPT_EPISODE_INDEX": str(attempt.get("episode_index") or 0),
+                        "ATR_RECORD_ATTEMPT_TARGET_FPS": str(attempt.get("target_fps") or self._isaac_mirror_sample_hz(request)),
+                        "ATR_RECORD_ATTEMPT_OVERWRITE": "1" if attempt.get("overwrite", True) else "0",
+                        "ATR_ISAAC_RGBD_RENDER_ENABLED": "1" if render.get("enabled") else "0",
+                        "ATR_ISAAC_RGBD_RENDER_MODE": "deferred_after_record",
+                        "ATR_ISAAC_RGBD_RENDER_TARGET_FPS": str(render.get("target_fps") or 15.0),
+                        "ATR_ISAAC_RGBD_RENDER_POST_TIMEOUT_S": str(self._isaac_mirror_post_timeout_s(request)),
+                        "ATR_ISAAC_RGBD_RENDER_CAMERAS": ",".join(str(item) for item in render.get("cameras", []) if str(item).strip()),
+                        "ATR_ISAAC_RGBD_RENDER_OUTPUT_DIR": str(render.get("output_dir") or ""),
+                    }
+                )
+        if self._uses_active_robot_cam(workflow, request):
+            env.update(self._active_robot_cam_env_overrides(request))
         if pipeline_id == "raw_depth_adapter":
             env["ATR_LEROBOT_RAW_DEPTH_ADAPTER"] = "1"
             if workflow in {"train", "rollout"}:
                 env.update(self._raw_depth_adapter_env_overrides(request))
-        if workflow in {"train", "rollout"} and self._is_pi05_policy(request.policy_type):
+        if workflow == "train":
+            env["ATR_LEROBOT_STANDARD_DATA_PIPELINE"] = "1"
+            env.update(self._dataset_mix_env_overrides(request))
+            env.update(self._fidelity_env_overrides(request))
+            env.update(self._isaac_rgbd_source_train_env_overrides(request))
+            env.update(self._isaac_augmentation_train_env_overrides(request))
+        if workflow in {"train", "rollout"} and self._uses_pi05_dataset_runtime(request.policy_type):
             hf_home = self.config.pi05_hf_home
             env.update(
                 {
@@ -4588,6 +6194,146 @@ class LeRobotBridge:
             env.update(self._raw_depth_env_overrides(request))
         return env
 
+    @staticmethod
+    def _dataset_mix_weight(value: Any, default: float) -> float:
+        return _safe_float(value, default, minimum=0.0)
+
+    @staticmethod
+    def _dataset_mix_max_samples(value: Any) -> int | None:
+        if value is None:
+            return None
+        parsed = _safe_int(value, 0, minimum=0)
+        return parsed
+
+    @staticmethod
+    def _dataset_mix_effective_count(available_count: int, base_count: int, weight: float, max_samples: int | None) -> int:
+        available = max(0, int(available_count))
+        base = max(0, int(base_count))
+        if available <= 0 or base <= 0 or weight <= 0:
+            return 0
+        raw_desired = base * weight
+        desired = int(raw_desired)
+        if raw_desired > desired:
+            desired += 1
+        selected = min(available, desired)
+        if max_samples is not None:
+            selected = min(selected, max(0, int(max_samples)))
+        return selected
+
+    @staticmethod
+    def _format_dataset_mix_env_float(value: float) -> str:
+        return f"{float(value):g}"
+
+    def _dataset_mix_summary_for_counts(
+        self,
+        request: LeRobotSessionRequest,
+        *,
+        real_available: int,
+        isaac_rgbd_available: int,
+        isaac_augmentation_available: int,
+    ) -> dict[str, Any]:
+        weights = {
+            "real_original": self._dataset_mix_weight(getattr(request, "dataset_mix_real_original_weight", 1.0), 1.0),
+            "isaac_rgbd": self._dataset_mix_weight(getattr(request, "dataset_mix_isaac_rgbd_weight", 0.5), 0.5),
+            "isaac_augmentation": self._dataset_mix_weight(getattr(request, "dataset_mix_isaac_augmentation_weight", 0.5), 0.5),
+        }
+        max_samples = {
+            "real_original": self._dataset_mix_max_samples(getattr(request, "dataset_mix_real_original_max_samples", None)),
+            "isaac_rgbd": self._dataset_mix_max_samples(getattr(request, "dataset_mix_isaac_rgbd_max_samples", None)),
+            "isaac_augmentation": self._dataset_mix_max_samples(getattr(request, "dataset_mix_isaac_augmentation_max_samples", None)),
+        }
+        available_counts = {
+            "real_original": max(0, int(real_available)),
+            "isaac_rgbd": max(0, int(isaac_rgbd_available)),
+            "isaac_augmentation": max(0, int(isaac_augmentation_available)),
+        }
+        base_count = available_counts["real_original"]
+        effective_counts = {
+            source: self._dataset_mix_effective_count(available, base_count, weights[source], max_samples[source])
+            for source, available in available_counts.items()
+        }
+        effective_counts["total"] = sum(effective_counts.values())
+        return {
+            "schema": "atr.lerobot.dataset_mix.v1",
+            "weights": weights,
+            "max_samples": max_samples,
+            "available_counts": available_counts,
+            "effective_counts": effective_counts,
+            "seed": _safe_int(getattr(request, "dataset_mix_seed", 0), 0),
+        }
+
+    def _dataset_base_frame_count(self, dataset_path: Path) -> int:
+        info_path = dataset_path / "meta" / "info.json"
+        try:
+            loaded = json.loads(info_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            loaded = {}
+        return _safe_int(loaded.get("total_frames") if isinstance(loaded, dict) else None, 0, minimum=0)
+
+    def _train_dataset_mix_summary(self, request: LeRobotSessionRequest) -> dict[str, Any]:
+        dataset_path = Path(self._dataset_path_for(request)).expanduser()
+        real_available = self._dataset_base_frame_count(dataset_path)
+        isaac_rgbd = self._dataset_isaac_rgbd_health(dataset_path)
+        isaac_augmentation = self._read_latest_isaac_augmentation_summary(dataset_path)
+        variant_count = _safe_int(isaac_augmentation.get("variant_count"), 0, minimum=0)
+        valid_variant_count = _safe_int(isaac_augmentation.get("valid_variant_count"), variant_count, minimum=0)
+        return self._dataset_mix_summary_for_counts(
+            request,
+            real_available=real_available,
+            isaac_rgbd_available=_safe_int(isaac_rgbd.get("rendered_count"), 0, minimum=0),
+            isaac_augmentation_available=valid_variant_count,
+        )
+
+    def _dataset_mix_env_overrides(self, request: LeRobotSessionRequest) -> dict[str, str]:
+        summary = self._train_dataset_mix_summary(request)
+        weights = dict(summary.get("weights") or {})
+        max_samples = dict(summary.get("max_samples") or {})
+        env = {
+            "ATR_LEROBOT_DATA_MIX_REAL_ORIGINAL_WEIGHT": self._format_dataset_mix_env_float(weights.get("real_original", 1.0)),
+            "ATR_LEROBOT_DATA_MIX_ISAAC_RGBD_WEIGHT": self._format_dataset_mix_env_float(weights.get("isaac_rgbd", 0.5)),
+            "ATR_LEROBOT_DATA_MIX_ISAAC_AUGMENTATION_WEIGHT": self._format_dataset_mix_env_float(weights.get("isaac_augmentation", 0.5)),
+            "ATR_LEROBOT_DATA_MIX_SEED": str(_safe_int(summary.get("seed"), 0)),
+        }
+        max_env_keys = {
+            "real_original": "ATR_LEROBOT_DATA_MIX_REAL_ORIGINAL_MAX_SAMPLES",
+            "isaac_rgbd": "ATR_LEROBOT_DATA_MIX_ISAAC_RGBD_MAX_SAMPLES",
+            "isaac_augmentation": "ATR_LEROBOT_DATA_MIX_ISAAC_AUGMENTATION_MAX_SAMPLES",
+        }
+        for source, env_key in max_env_keys.items():
+            value = max_samples.get(source)
+            if value is not None:
+                env[env_key] = str(_safe_int(value, 0, minimum=0))
+        return env
+
+    @staticmethod
+    def _fidelity_weight(value: Any, default: float) -> float:
+        return _safe_float(value, default, minimum=0.0, maximum=1.0)
+
+    def _train_fidelity_summary(self, request: LeRobotSessionRequest) -> dict[str, Any]:
+        weights = {
+            "real_original": self._fidelity_weight(getattr(request, "fidelity_real_original_weight", 1.0), 1.0),
+            "isaac_rgbd": self._fidelity_weight(getattr(request, "fidelity_isaac_rgbd_weight", 0.5), 0.5),
+            "isaac_augmentation": self._fidelity_weight(getattr(request, "fidelity_isaac_augmentation_weight", 0.3), 0.3),
+        }
+        return {
+            "schema": "atr.lerobot.fidelity_weights.v1",
+            "enabled": _safe_bool(getattr(request, "fidelity_weighting_enabled", True), True),
+            "mode": "source_loss_weight",
+            "weights": weights,
+        }
+
+    def _fidelity_env_overrides(self, request: LeRobotSessionRequest) -> dict[str, str]:
+        summary = self._train_fidelity_summary(request)
+        weights = dict(summary.get("weights") or {})
+        return {
+            "ATR_LEROBOT_FIDELITY_SCHEMA": str(summary.get("schema") or "atr.lerobot.fidelity_weights.v1"),
+            "ATR_LEROBOT_FIDELITY_WEIGHTING_ENABLED": "1" if summary.get("enabled") else "0",
+            "ATR_LEROBOT_FIDELITY_MODE": str(summary.get("mode") or "source_loss_weight"),
+            "ATR_LEROBOT_FIDELITY_REAL_ORIGINAL_WEIGHT": self._format_dataset_mix_env_float(weights.get("real_original", 1.0)),
+            "ATR_LEROBOT_FIDELITY_ISAAC_RGBD_WEIGHT": self._format_dataset_mix_env_float(weights.get("isaac_rgbd", 0.5)),
+            "ATR_LEROBOT_FIDELITY_ISAAC_AUGMENTATION_WEIGHT": self._format_dataset_mix_env_float(weights.get("isaac_augmentation", 0.3)),
+        }
+
     def _raw_depth_adapter_env_overrides(self, request: LeRobotSessionRequest) -> dict[str, str]:
         dataset_path = Path(self._dataset_path_for(request)).expanduser()
         manifest_path = self._dataset_raw_depth_manifest_path(dataset_path)
@@ -4603,6 +6349,11 @@ class LeRobotBridge:
             camera_keys = [str(item).strip() for item in manifest.get("camera_keys", []) if str(item).strip()]
             if camera_keys:
                 env["ATR_LEROBOT_RAW_DEPTH_CAMERA_KEYS"] = ",".join(camera_keys)
+            camera_scales = manifest.get("camera_depth_scale_m_per_unit")
+            if isinstance(camera_scales, dict):
+                formatted = self._format_camera_depth_scale_env(camera_scales)
+                if formatted:
+                    env["ATR_LEROBOT_CAMERA_DEPTH_SCALE_M_PER_UNIT"] = formatted
             for key in ("ATR_LEROBOT_DEPTH_ALIGNED_TO", "ATR_LEROBOT_RAW_DEPTH_FORMAT"):
                 env.pop(key, None)
             aligned_to = str(manifest.get("aligned_to") or "").strip()
@@ -4626,6 +6377,44 @@ class LeRobotBridge:
                     env["ATR_LEROBOT_DEPTH_CLIP_MAX_MM"] = str(visual["clip_max_mm"])
         return env
 
+    def _isaac_augmentation_train_env_overrides(self, request: LeRobotSessionRequest) -> dict[str, str]:
+        dataset_path = Path(self._dataset_path_for(request)).expanduser()
+        summary = self._read_latest_isaac_augmentation_summary(dataset_path)
+        if not summary.get("available") or _safe_int(summary.get("variant_count"), 0, minimum=0) <= 0:
+            return {}
+        manifest_path = Path(str(summary.get("manifest_path") or "")).expanduser()
+        summary_path = Path(str(summary.get("summary_path") or "")).expanduser()
+        if not manifest_path.is_file():
+            return {}
+        variant_count = _safe_int(summary.get("variant_count"), 0, minimum=0)
+        valid_variant_count = _safe_int(summary.get("valid_variant_count"), variant_count, minimum=0)
+        failed_variant_count = _safe_int(summary.get("failed_variant_count"), max(0, variant_count - valid_variant_count), minimum=0)
+        qa_summary_path = Path(str(summary.get("qa_summary_path") or summary_path.parent / "qa_summary.json")).expanduser()
+        return {
+            "ATR_LEROBOT_ISAAC_AUGMENTATION_ADAPTER": "1",
+            "ATR_LEROBOT_ISAAC_AUGMENTATION_MANIFEST": str(manifest_path),
+            "ATR_LEROBOT_ISAAC_AUGMENTATION_SUMMARY": str(summary_path),
+            "ATR_LEROBOT_ISAAC_AUGMENTATION_QA_SUMMARY": str(qa_summary_path),
+            "ATR_LEROBOT_ISAAC_AUGMENTATION_INCLUDE_ALL": "1",
+            "ATR_LEROBOT_ISAAC_AUGMENTATION_REQUIRE_QA_OK": "1",
+            "ATR_LEROBOT_ISAAC_AUGMENTATION_STRICT": "0",
+            "ATR_LEROBOT_ISAAC_AUGMENTATION_VARIANT_COUNT": str(variant_count),
+            "ATR_LEROBOT_ISAAC_AUGMENTATION_VALID_VARIANT_COUNT": str(valid_variant_count),
+            "ATR_LEROBOT_ISAAC_AUGMENTATION_FAILED_VARIANT_COUNT": str(failed_variant_count),
+        }
+
+    def _isaac_rgbd_source_train_env_overrides(self, request: LeRobotSessionRequest) -> dict[str, str]:
+        dataset_path = Path(self._dataset_path_for(request)).expanduser()
+        source_root = dataset_path / "sidecar" / "isaac_rgbd"
+        if not any(source_root.glob("**/manifest.jsonl")):
+            return {}
+        return {
+            "ATR_LEROBOT_ISAAC_RGBD_SOURCE_ADAPTER": "1",
+            "ATR_LEROBOT_ISAAC_RGBD_SOURCE_ROOT": str(source_root),
+            "ATR_LEROBOT_ISAAC_RGBD_SOURCE_INCLUDE_ALL": "1",
+            "ATR_LEROBOT_ISAAC_RGBD_SOURCE_STRICT": "0",
+        }
+
     def _raw_depth_env_overrides(self, request: LeRobotSessionRequest) -> dict[str, str]:
         profile = self._profile(request.profile_id or self._selected_profile_id)
         if profile is None:
@@ -4634,7 +6423,7 @@ class LeRobotBridge:
         if not sidecar.get("enabled"):
             return {}
         camera_keys = [str(item) for item in sidecar.get("expected_camera_keys", []) if str(item).strip()]
-        return {
+        env = {
             "ATR_LEROBOT_RAW_DEPTH_DIR": str(sidecar["root"]),
             "ATR_LEROBOT_RAW_DEPTH_CAMERA_KEYS": ",".join(camera_keys),
             "ATR_LEROBOT_RAW_DEPTH_FORMAT": str(sidecar.get("format") or "png16"),
@@ -4643,6 +6432,21 @@ class LeRobotBridge:
             "ATR_LEROBOT_DEPTH_CLIP_MIN_MM": str(sidecar.get("depth_clip_min_mm")),
             "ATR_LEROBOT_DEPTH_CLIP_MAX_MM": str(sidecar.get("depth_clip_max_mm")),
         }
+        formatted = self._format_camera_depth_scale_env(sidecar.get("camera_depth_scale_m_per_unit"))
+        if formatted:
+            env["ATR_LEROBOT_CAMERA_DEPTH_SCALE_M_PER_UNIT"] = formatted
+        return env
+
+    @staticmethod
+    def _format_camera_depth_scale_env(scales: Any) -> str:
+        if not isinstance(scales, dict):
+            return ""
+        parts: list[str] = []
+        for camera_key in sorted(str(key).strip() for key in scales if str(key).strip()):
+            value = _safe_float(scales.get(camera_key), 0.0, minimum=0.0)
+            if value > 0.0:
+                parts.append(f"{camera_key}={value:g}")
+        return ",".join(parts)
 
     def _start_training_monitor(self, session: dict[str, Any], request: LeRobotSessionRequest) -> dict[str, Any]:
         """Attach passive host diagnostics to GUI-started live training sessions."""
@@ -4823,7 +6627,7 @@ class LeRobotBridge:
         if not is_pi05:
             args.insert(8, f"--policy.use_amp={_bool_arg(request.policy_use_amp)}")
         if pretrained_policy:
-            pretrained_key = "policy.pretrained_path" if self._is_pi05_policy(policy_type) else "policy.path"
+            pretrained_key = "policy.pretrained_path" if self._uses_pi05_dataset_runtime(policy_type) else "policy.path"
             args.append(f"--{pretrained_key}={pretrained_policy}")
         optional: list[str] = []
         if request.seed is not None:
@@ -5270,6 +7074,10 @@ class LeRobotBridge:
         canonical = self._canonical_policy_type(policy_type)
         return canonical in {"xvla", "smolvla"}
 
+    def _uses_pi05_dataset_runtime(self, policy_type: str) -> bool:
+        canonical = self._canonical_policy_type(policy_type)
+        return canonical in {"pi05", "xvla", "smolvla"}
+
     def _train_video_backend(self, policy_type: str, request: LeRobotSessionRequest | None = None) -> str:
         preferred = str(self.config.pi05_video_backend if self._is_pi05_policy(policy_type) else self.config.train_video_backend).strip() or "torchcodec"
         fallback = str(self.config.train_video_backend_fallback or "pyav").strip() or "pyav"
@@ -5332,6 +7140,8 @@ class LeRobotBridge:
         return safe
 
     def _train_config_summary(self, profile: RobotProfile, request: LeRobotSessionRequest) -> dict[str, Any]:
+        dataset_mix = self._train_dataset_mix_summary(request)
+        fidelity_weights = self._train_fidelity_summary(request)
         return {
             "profile_id": profile.profile_id,
             "policy_type": request.policy_type or "act",
@@ -5354,28 +7164,115 @@ class LeRobotBridge:
             "wandb_mode": request.wandb_mode or "",
             "wandb_project": request.wandb_project or "",
             "wandb_base_url": request.wandb_base_url or "",
+            "dataset_mix": dataset_mix,
+            "dataset_mix_weights": dataset_mix["weights"],
+            "dataset_mix_effective_counts": dataset_mix["effective_counts"],
+            "fidelity_weights": fidelity_weights,
+            "fidelity_loss_weights": fidelity_weights["weights"],
         }
+
+    @staticmethod
+    def _training_preflight_progress(session: dict[str, Any]) -> dict[str, Any]:
+        stages = [
+            {"stage": "resolve_dataset", "status": "ok", "detail": str(session.get("dataset_path") or "")},
+            {"stage": "inspect_sidecars", "status": "ok", "detail": "raw depth, Isaac RGB-D, and augmentation summaries inspected"},
+            {"stage": "apply_dataset_mix", "status": "ok", "detail": json.dumps(session.get("dataset_mix") or {}, ensure_ascii=False)},
+            {"stage": "apply_fidelity_weights", "status": "ok", "detail": json.dumps(session.get("fidelity_weights") or {}, ensure_ascii=False)},
+            {"stage": "build_train_command", "status": "ok", "detail": str(session.get("job_name") or "")},
+        ]
+        total = len(stages)
+        return {
+            "stage": "ready_to_start",
+            "done": total,
+            "total": total,
+            "percent": 100.0,
+            "message": "Training preflight complete; process can start",
+            "stages": stages,
+        }
+
+    def _visualization_episode_indices(self, request: LeRobotSessionRequest, dataset_path: Path | None = None) -> list[int]:
+        total_episodes = self._dataset_total_episodes(dataset_path) if dataset_path is not None else 0
+        raw = str(getattr(request, "episode_indices", "") or "").strip()
+        fallback = [_safe_int(getattr(request, "episode_index", 0), 0, minimum=0)]
+        if not raw:
+            return fallback
+        lowered = raw.lower()
+        if lowered in {"all", "*"}:
+            return list(range(total_episodes)) if total_episodes > 0 else fallback
+        parsed: list[int] = []
+        for part in re.split(r"[\s,;]+", raw):
+            clean = part.strip()
+            if not clean:
+                continue
+            if "-" in clean:
+                left, right = clean.split("-", 1)
+                try:
+                    start = int(left)
+                    end = int(right)
+                except ValueError:
+                    continue
+                if end < start:
+                    start, end = end, start
+                parsed.extend(range(max(0, start), max(0, end) + 1))
+                continue
+            try:
+                parsed.append(max(0, int(clean)))
+            except ValueError:
+                continue
+        unique = sorted(dict.fromkeys(parsed))
+        if total_episodes > 0:
+            unique = [item for item in unique if item < total_episodes]
+        return unique[:200] or fallback
+
+    @staticmethod
+    def _dataset_total_episodes(dataset_path: Path | None) -> int:
+        if dataset_path is None:
+            return 0
+        info_path = Path(dataset_path) / "meta" / "info.json"
+        try:
+            info = json.loads(info_path.read_text(encoding="utf-8"))
+        except Exception:
+            return 0
+        return _safe_int(info.get("total_episodes"), 0, minimum=0)
 
     def _visualization_args(self, request: LeRobotSessionRequest) -> tuple[list[str], dict[str, Any]]:
         """Build the installed LeRobot dataset visualizer command arguments."""
         viz_info = self._visualization_dataset_refs(request)
-        tool = request.visualization_tool or "html"
+        dataset_path = Path(str(viz_info["dataset_path"])).expanduser().resolve()
+        episode_indices = self._visualization_episode_indices(request, dataset_path)
+        episode_index = episode_indices[0]
+        tool = request.visualization_tool or "rerun"
         dataset_root_for_lerobot = str(viz_info["dataset_path"])
+        requested_web_port = _safe_int(request.visualization_web_port, 9092, minimum=1, maximum=65535)
+        requested_ws_port = _safe_int(request.visualization_ws_port, 9089, minimum=1, maximum=65535)
+        web_port = self._select_free_tcp_port(requested_web_port)
+        ws_port = self._select_free_tcp_port(requested_ws_port, avoid={web_port})
+        port_auto_selected = web_port != requested_web_port or ws_port != requested_ws_port
+        rerun_ws_url = f"ws://localhost:{ws_port}"
+        rerun_web_url = f"http://localhost:{web_port}"
+        rerun_viewer_url = f"{rerun_web_url}/?url={quote(rerun_ws_url, safe=':/')}"
         viz_info.update(
             {
                 "tool": tool,
-                "episode_index": int(request.episode_index),
+                "episode_index": int(episode_index),
+                "episode_indices": episode_indices,
+                "episode_indices_input": str(getattr(request, "episode_indices", "") or ""),
                 "visualization_mode": request.visualization_mode,
                 "batch_size": int(request.visualization_batch_size),
                 "num_workers": int(request.visualization_num_workers),
-                "web_port": int(request.visualization_web_port),
-                "ws_port": int(request.visualization_ws_port),
-                "rerun_ws_url": f"ws://localhost:{int(request.visualization_ws_port)}",
-                "rerun_web_url": f"http://localhost:{int(request.visualization_web_port)}",
+                "requested_web_port": requested_web_port,
+                "requested_ws_port": requested_ws_port,
+                "web_port": web_port,
+                "ws_port": ws_port,
+                "port_auto_selected": port_auto_selected,
+                "rerun_ws_url": rerun_ws_url,
+                "rerun_web_url": rerun_web_url,
                 "save": bool(request.visualization_save),
                 "lerobot_root": dataset_root_for_lerobot,
             }
         )
+        if tool == "rerun" and request.visualization_mode == "distant" and not request.visualization_save:
+            viz_info["viewer_url"] = rerun_viewer_url
         if tool == "html":
             output_dir = _resolve_path(
                 self.config.repo_root,
@@ -5385,34 +7282,34 @@ class LeRobotBridge:
                 raise ValueError(f"Visualization output_dir is outside allowed roots: {output_dir}")
             host = "127.0.0.1"
             repo_parts = str(viz_info["repo_id"]).split("/", 1)
-            viewer_path = f"/{repo_parts[0]}/{repo_parts[1]}/episode_{int(request.episode_index)}" if len(repo_parts) == 2 else f"/?dataset={viz_info['repo_id']}&episode={int(request.episode_index)}"
+            viewer_path = f"/{repo_parts[0]}/{repo_parts[1]}/episode_{episode_index}" if len(repo_parts) == 2 else f"/?dataset={viz_info['repo_id']}&episode={episode_index}"
             viz_info.update(
                 {
                     "output_dir": str(output_dir),
-                    "viewer_url": f"http://{host}:{int(request.visualization_web_port)}{viewer_path}",
+                    "viewer_url": f"http://{host}:{web_port}{viewer_path}",
                 }
             )
             return [
                 f"--repo-id={viz_info['repo_id']}",
                 f"--root={dataset_root_for_lerobot}",
                 "--episodes",
-                str(int(request.episode_index)),
+                str(episode_index),
                 f"--output-dir={output_dir}",
                 "--serve=1",
                 f"--host={host}",
-                f"--port={int(request.visualization_web_port)}",
+                f"--port={web_port}",
                 "--force-override=1",
                 f"--tolerance-s={float(request.visualization_tolerance_s)}",
             ], viz_info
         args = [
             f"--repo-id={viz_info['repo_id']}",
-            f"--episode-index={int(request.episode_index)}",
+            f"--episode-index={episode_index}",
             f"--root={dataset_root_for_lerobot}",
             f"--batch-size={int(request.visualization_batch_size)}",
             f"--num-workers={int(request.visualization_num_workers)}",
             f"--mode={request.visualization_mode}",
-            f"--web-port={int(request.visualization_web_port)}",
-            f"--ws-port={int(request.visualization_ws_port)}",
+            f"--web-port={web_port}",
+            f"--ws-port={ws_port}",
             f"--tolerance-s={float(request.visualization_tolerance_s)}",
         ]
         if request.visualization_save:
@@ -5425,6 +7322,30 @@ class LeRobotBridge:
             args.extend([f"--save={1}", f"--output-dir={output_dir}"])
             viz_info["output_dir"] = str(output_dir)
         return args, viz_info
+
+    @staticmethod
+    def _tcp_port_available(port: int, host: str = "127.0.0.1") -> bool:
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.bind((host, int(port)))
+            return True
+        except OSError:
+            return False
+
+    def _select_free_tcp_port(self, preferred_port: int, *, avoid: set[int] | None = None) -> int:
+        avoid_ports = set(avoid or set())
+        preferred = _safe_int(preferred_port, 9090, minimum=1, maximum=65535)
+        for offset in range(0, 100):
+            candidate = preferred + offset
+            if candidate > 65535:
+                break
+            if candidate in avoid_ports:
+                continue
+            if self._tcp_port_available(candidate):
+                return candidate
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind(("127.0.0.1", 0))
+            return int(sock.getsockname()[1])
 
     def _visualization_command(self, request: LeRobotSessionRequest, viz_info: dict[str, Any], args: list[str]) -> list[str]:
         entrypoint = ["python", "-m", "lerobot.scripts.visualize_dataset_html"]
@@ -5448,6 +7369,9 @@ class LeRobotBridge:
             dataset_path = (configured_root / repo_id).resolve()
         if not repo_id:
             raise ValueError("LeRobot visualization requires dataset_repo_id or a dataset_path that can be mapped to repo-id/root.")
+        info_path = dataset_path / "meta" / "info.json"
+        if not info_path.is_file():
+            raise ValueError(f"LeRobot visualization requires a completed local dataset with meta/info.json: {info_path}")
         return {
             "dataset_path": str(dataset_path),
             "dataset_root": str(configured_root),
@@ -5525,11 +7449,16 @@ class LeRobotBridge:
         )
 
     def _train_request_with_pi05_dataset_version(self, request: LeRobotSessionRequest) -> tuple[LeRobotSessionRequest, str]:
-        """Use a v3.0 local dataset copy for Pi0.5 without mutating the recorded v2.1 dataset."""
+        """Use a v3.0 local dataset copy for Pi0.5-family policies without mutating the recorded v2.1 dataset."""
         mode = request.runtime_mode or request.mode
-        if mode != "live" or not self._is_pi05_policy(request.policy_type):
+        if mode != "live" or not self._uses_pi05_dataset_runtime(request.policy_type):
             return request, "dataset format unchanged"
 
+        runtime_label = {
+            "pi05": "Pi0.5",
+            "xvla": "X-VLA",
+            "smolvla": "SmolVLA",
+        }.get(self._canonical_policy_type(request.policy_type), "Pi0.5-family")
         raw_dataset_path = str(request.dataset_path or request.dataset_root or "").strip()
         if not raw_dataset_path:
             return request, "dataset format unchanged"
@@ -5538,10 +7467,10 @@ class LeRobotBridge:
         if dataset_version == "v3.0":
             repo_id, root = self._repo_id_root_from_dataset_path(dataset_path, self.config.dataset_root.resolve())
             self._ensure_pi05_quantile_stats(repo_id, root)
-            return request, f"Pi0.5 dataset already v3.0 at {dataset_path}; quantile stats ready"
+            return request, f"{runtime_label} dataset already v3.0 at {dataset_path}; quantile stats ready"
         if dataset_version != "v2.1":
             raise ValueError(
-                "Pi0.5 live training requires a LeRobot v3.0 dataset. "
+                f"{runtime_label} live training requires a LeRobot v3.0 dataset. "
                 f"Selected dataset has codebase_version='{dataset_version or 'unknown'}' at {dataset_path}."
             )
 
@@ -5558,7 +7487,7 @@ class LeRobotBridge:
 
         return (
             self._train_request_for_dataset(request, converted_repo_id, converted_path),
-            f"Pi0.5 converted {request.dataset_repo_id or dataset_path.name} v2.1 -> {converted_repo_id} v3.0 at {converted_path}",
+            f"{runtime_label} converted {request.dataset_repo_id or dataset_path.name} v2.1 -> {converted_repo_id} v3.0 at {converted_path}",
         )
 
     def _prepare_pi05_v30_dataset_copy(self, source_path: Path, converted_repo_id: str, converted_root: Path) -> None:
@@ -5584,6 +7513,7 @@ class LeRobotBridge:
         target_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copytree(source_path, target_path, symlinks=True)
         self._run_pi05_v30_dataset_conversion(converted_repo_id, converted_root)
+        self._attach_pi05_sidecar_from_source(source_path, target_path)
 
     def _run_pi05_v30_dataset_conversion(self, converted_repo_id: str, converted_root: Path) -> None:
         command = [
@@ -5628,6 +7558,30 @@ class LeRobotBridge:
             output = (completed.stdout or "").strip()
             tail = "\n".join(output.splitlines()[-30:])
             raise ValueError(f"Pi0.5 dataset v3.0 conversion failed with returncode={completed.returncode}:\n{tail}")
+
+    def _attach_pi05_sidecar_from_source(self, source_path: Path, target_path: Path) -> None:
+        """Preserve ATR sidecars after LeRobot v2.1->v3.0 conversion.
+
+        The upstream converter rewrites the LeRobot dataset directory and only
+        keeps standard meta/data files. ATR raw-depth, Isaac RGB-D, and
+        augmentation sidecars are external to the LeRobot schema, so reattach
+        them to the generated v3.0 copy for training-time adapters.
+        """
+        source_sidecar = source_path / "sidecar"
+        target_sidecar = target_path / "sidecar"
+        if not source_sidecar.is_dir():
+            return
+        if target_sidecar.exists() or target_sidecar.is_symlink():
+            if target_sidecar.is_symlink() or target_sidecar.is_file():
+                target_sidecar.unlink()
+            else:
+                shutil.rmtree(target_sidecar)
+        target_sidecar.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            relative_source = os.path.relpath(source_sidecar, target_sidecar.parent)
+            target_sidecar.symlink_to(relative_source, target_is_directory=True)
+        except OSError:
+            shutil.copytree(source_sidecar, target_sidecar, symlinks=True)
 
     def _ensure_pi05_quantile_stats(self, repo_id: str, dataset_root: Path) -> None:
         dataset_path = (Path(dataset_root).resolve() / repo_id).resolve()
@@ -5762,6 +7716,8 @@ print("Updated Pi0.5 quantile stats for " + ", ".join(updated))
 
     def _pi05_v30_dataset_is_current(self, source_path: Path, converted_path: Path) -> bool:
         if self._lerobot_dataset_codebase_version(converted_path) != "v3.0":
+            return False
+        if (source_path / "sidecar").is_dir() and not (converted_path / "sidecar").exists():
             return False
         if self._dataset_raw_depth_manifest_path(source_path).is_file() and not self._dataset_raw_depth_manifest_path(converted_path).is_file():
             return False
@@ -5925,7 +7881,8 @@ print("Updated Pi0.5 quantile stats for " + ", ".join(updated))
             # rollout into FAILED during disconnect; operator stop remains explicit.
             args.append("--robot.disable_torque_on_disconnect=false")
         camera_map: dict[str, dict[str, Any]] = {}
-        if request.camera_enabled:
+        camera_required = bool(request.camera_enabled or self._uses_active_robot_cam(workflow, request))
+        if camera_required:
             for camera_key in self._profile_camera_keys(profile):
                 camera_port = self._device_port(profile, "camera", camera_key=camera_key, allow_fake=allow_fake)
                 if camera_port:
@@ -5934,6 +7891,7 @@ print("Updated Pi0.5 quantile stats for " + ", ".join(updated))
                     camera_map[camera_key] = self._camera_config_for_command(
                         runtime_port,
                         saved_camera,
+                        camera_key=camera_key,
                         request_fps=request.camera_fps or request.fps or profile.fps,
                         include_color_format=not (workflow == "rollout" and self._is_pi05_policy(request.policy_type)),
                     )
@@ -5946,6 +7904,7 @@ print("Updated Pi0.5 quantile stats for " + ", ".join(updated))
         port_or_identifier: str,
         camera_device: dict[str, Any] | None = None,
         *,
+        camera_key: str = "",
         request_fps: int | None = None,
         include_color_format: bool = True,
     ) -> dict[str, Any]:
@@ -5955,6 +7914,8 @@ print("Updated Pi0.5 quantile stats for " + ", ".join(updated))
             identifier = str(device.get("serial_number_or_name") or port_or_identifier)
             return self._realsense_camera_config(
                 identifier,
+                camera_key=str(camera_key or device.get("camera_key") or ""),
+                camera_device=device,
                 fps=self._camera_fps(device, request_fps),
                 use_depth=self._camera_use_depth(device, default=True),
                 width=_safe_int(device.get("width"), LEROBOT_DEFAULT_CAMERA_WIDTH, minimum=1),
@@ -5980,6 +7941,8 @@ print("Updated Pi0.5 quantile stats for " + ", ".join(updated))
         self,
         serial_number_or_name: str,
         *,
+        camera_key: str = "",
+        camera_device: dict[str, Any] | None = None,
         fps: int,
         use_depth: bool,
         width: int,
@@ -5994,7 +7957,7 @@ print("Updated Pi0.5 quantile stats for " + ", ".join(updated))
             "fps": fps,
             "use_depth": bool(use_depth),
             "align_depth_to_color": bool(self.config.realsense_depth_align_to_color),
-            "depth_scale_m_per_unit": self.config.realsense_depth_scale_m_per_unit,
+            "depth_scale_m_per_unit": self._realsense_depth_scale_m_per_unit(camera_key, serial_number_or_name, camera_device),
             "depth_clip_min_mm": self.config.realsense_depth_clip_min_mm,
             "depth_clip_max_mm": self.config.realsense_depth_clip_max_mm,
             # LeRobot / RealSense D405 needs a real warmup period before
@@ -6005,6 +7968,135 @@ print("Updated Pi0.5 quantile stats for " + ", ".join(updated))
         if color_format:
             data["color_format"] = color_format
         return data
+
+    def _uses_in_process_lerobot_wrapper(self, workflow: str, request: LeRobotSessionRequest) -> bool:
+        mode = request.runtime_mode or request.mode
+        return bool(
+            mode == "live"
+            and workflow in {"teleoperate", "record"}
+            and (request.isaac_mirror_enabled or self._uses_active_robot_cam(workflow, request))
+        )
+
+    @staticmethod
+    def _uses_active_robot_cam(workflow: str, request: LeRobotSessionRequest) -> bool:
+        return bool(workflow in {"teleoperate", "record"} and request.active_robot_cam_enabled)
+
+    def _active_robot_cam_summary(self, request: LeRobotSessionRequest, *, workflow: str) -> dict[str, Any]:
+        priority = self._active_robot_cam_priority(request)
+        return {
+            "enabled": True,
+            "workflow": workflow,
+            "primary_camera": priority[0] if priority else "d405",
+            "camera_priority": priority,
+            "primary_camera_key": self._active_robot_cam_primary_camera_key(request),
+            "fallback_camera_key": self._active_robot_cam_fallback_camera_key(request),
+            "d455f_fallback_enabled": bool(request.active_robot_cam_d455f_fallback_enabled),
+            "resume_mode": str(request.active_robot_cam_resume_mode or "auto"),
+            "capture_pose_path": self._active_robot_cam_capture_pose_path(request),
+            "home_pose_path": self._active_robot_cam_home_pose_path(request),
+            "motion": {
+                "speed_scale": 0.7,
+                "settle_before_capture_s": 1.0,
+                "hold_after_capture_s": 1.0,
+            },
+            "pending_pose_path": "/tmp/atr_specimen_pose_pending/latest_specimen_pose_payload.json",
+            "d405_mapping": {
+                "a4_camera_to_isaac_transform": "direct",
+                "a4_width_mm": 297.0,
+                "a4_height_mm": 210.0,
+                "a4_isaac_width_mm": 297.0,
+                "a4_isaac_height_mm": 210.0,
+                "depth_scale_m_per_unit": LEROBOT_D405_DEPTH_SCALE_M_PER_UNIT,
+            },
+            "d455f_fallback_mapping": {
+                "a4_camera_to_isaac_transform": "robot_right_plane",
+                "a4_width_mm": 210.0,
+                "a4_height_mm": 297.0,
+                "a4_isaac_width_mm": 297.0,
+                "a4_isaac_height_mm": 210.0,
+            },
+        }
+
+    def _active_robot_cam_env_overrides(self, request: LeRobotSessionRequest) -> dict[str, str]:
+        priority = ",".join(self._active_robot_cam_priority(request))
+        primary_key = self._active_robot_cam_primary_camera_key(request)
+        fallback_key = self._active_robot_cam_fallback_camera_key(request)
+        return {
+            "ATR_ACTIVE_ROBOT_CAM_ENABLED": "1",
+            "ATR_ACTIVE_ROBOT_CAM_RECORD_START_ENABLED": _bool_arg(request.active_robot_cam_record_start_enabled),
+            "ATR_ACTIVE_ROBOT_CAM_TRIGGER_ON_FIRST_ACTION": _bool_arg(request.active_robot_cam_trigger_on_first_action),
+            "ATR_ACTIVE_ROBOT_CAM_CAMERA_PRIORITY": priority,
+            "ATR_ACTIVE_ROBOT_CAM_D455F_FALLBACK_ENABLED": _bool_arg(request.active_robot_cam_d455f_fallback_enabled),
+            "ATR_ACTIVE_ROBOT_CAM_RESUME_MODE": str(request.active_robot_cam_resume_mode or "auto"),
+            "ATR_ACTIVE_ROBOT_CAM_CAPTURE_POSE_PATH": self._active_robot_cam_capture_pose_path(request),
+            "ATR_ACTIVE_ROBOT_CAM_HOME_POSE_PATH": self._active_robot_cam_home_pose_path(request),
+            "ATR_ACTIVE_ROBOT_CAM_D455F_MANIFEST_PATH": "/tmp/atr_lerobot_latest_frame/latest_frame.json",
+            "ATR_ACTIVE_ROBOT_CAM_SPEED_SCALE": "0.7",
+            "ATR_ACTIVE_ROBOT_CAM_RESUME_SPEED_SCALE": "0.5",
+            "ATR_ACTIVE_ROBOT_CAM_TELEOP_TRANSITION_MAX_STEP": "3.0",
+            "ATR_ACTIVE_ROBOT_CAM_RESUME_WAIT_TIMEOUT_S": "4.0",
+            "ATR_ACTIVE_ROBOT_CAM_RESUME_WAIT_POLL_S": "0.05",
+            "ATR_ACTIVE_ROBOT_CAM_RESUME_WAIT_TOLERANCE_DEG": "2.0",
+            "ATR_ACTIVE_ROBOT_CAM_SETTLE_S": "1.0",
+            "ATR_ACTIVE_ROBOT_CAM_HOLD_AFTER_CAPTURE_S": "1.0",
+            "ATR_SPECIMEN_POSE_PENDING_PATH": "/tmp/atr_specimen_pose_pending/latest_specimen_pose_payload.json",
+            "ATR_ACTIVE_ROBOT_CAM_REQUEST_PATH": "/tmp/atr_active_robot_cam_request/request.json",
+            "ATR_LEROBOT_LATEST_FRAME_ENABLED": "1",
+            "ATR_LEROBOT_SPECIMEN_CAMERA_KEY": primary_key,
+            "ATR_ACTIVE_ROBOT_CAM_PRIMARY_CAMERA_KEY": primary_key,
+            "ATR_ACTIVE_ROBOT_CAM_FALLBACK_CAMERA_KEY": fallback_key,
+            "ATR_ACTIVE_ROBOT_CAM_D405_A4_CAMERA_TO_ISAAC_TRANSFORM": "direct",
+            "ATR_ACTIVE_ROBOT_CAM_D405_A4_WIDTH_MM": "297.0",
+            "ATR_ACTIVE_ROBOT_CAM_D405_A4_HEIGHT_MM": "210.0",
+            "ATR_ACTIVE_ROBOT_CAM_D405_A4_ISAAC_WIDTH_MM": "297.0",
+            "ATR_ACTIVE_ROBOT_CAM_D405_A4_ISAAC_HEIGHT_MM": "210.0",
+            "ATR_ACTIVE_ROBOT_CAM_D405_A4_WORLD_OFFSET_X_MM": "0.0",
+            "ATR_ACTIVE_ROBOT_CAM_D405_A4_WORLD_OFFSET_Y_MM": "0.0",
+            "ATR_ACTIVE_ROBOT_CAM_D405_DEPTH_SCALE_M_PER_UNIT": str(LEROBOT_D405_DEPTH_SCALE_M_PER_UNIT),
+            "ATR_ACTIVE_ROBOT_CAM_D455F_A4_CAMERA_TO_ISAAC_TRANSFORM": "robot_right_plane",
+            "ATR_ACTIVE_ROBOT_CAM_D455F_A4_WIDTH_MM": "210.0",
+            "ATR_ACTIVE_ROBOT_CAM_D455F_A4_HEIGHT_MM": "297.0",
+            "ATR_ACTIVE_ROBOT_CAM_D455F_A4_ISAAC_WIDTH_MM": "297.0",
+            "ATR_ACTIVE_ROBOT_CAM_D455F_A4_ISAAC_HEIGHT_MM": "210.0",
+            "ATR_ACTIVE_ROBOT_CAM_D455F_A4_WORLD_OFFSET_X_MM": "0.0",
+            "ATR_ACTIVE_ROBOT_CAM_D455F_A4_WORLD_OFFSET_Y_MM": "0.0",
+        }
+
+    @staticmethod
+    def _active_robot_cam_priority(request: LeRobotSessionRequest) -> list[str]:
+        raw = str(request.active_robot_cam_camera_priority or "d405,d455f")
+        priority = [item.strip().lower() for item in raw.split(",") if item.strip()]
+        normalized = []
+        for item in priority or ["d405", "d455f"]:
+            if item in {"wrist", "active_robot_cam"}:
+                item = "d405"
+            if item in {"top", "d455"}:
+                item = "d455f"
+            if item not in normalized:
+                normalized.append(item)
+        if "d405" not in normalized:
+            normalized.insert(0, "d405")
+        return normalized
+
+    @staticmethod
+    def _active_robot_cam_primary_camera_key(request: LeRobotSessionRequest) -> str:
+        return str(request.active_robot_cam_primary_camera_key or "wrist").strip() or "wrist"
+
+    @staticmethod
+    def _active_robot_cam_fallback_camera_key(request: LeRobotSessionRequest) -> str:
+        return str(request.active_robot_cam_fallback_camera_key or "top").strip() or "top"
+
+    def _active_robot_cam_capture_pose_path(self, request: LeRobotSessionRequest) -> str:
+        raw = str(request.active_robot_cam_capture_pose_path or "").strip()
+        if raw:
+            return str(_resolve_path(self.config.repo_root, raw))
+        return str(self.config.repo_root / "runs" / "active_robot_cam" / "latest_follower_capture_pose.json")
+
+    def _active_robot_cam_home_pose_path(self, request: LeRobotSessionRequest) -> str:
+        raw = str(request.active_robot_cam_home_pose_path or "").strip()
+        if raw:
+            return str(_resolve_path(self.config.repo_root, raw))
+        return str(self.config.repo_root / "runs" / "active_robot_cam" / "latest_follower_home_pose.json")
 
     def _teleop_args(self, profile: RobotProfile, *, request: LeRobotSessionRequest, allow_fake: bool = True) -> list[str]:
         mode = request.runtime_mode or request.mode
@@ -6110,10 +8202,16 @@ print("Updated Pi0.5 quantile stats for " + ", ".join(updated))
                 if pid_int and not self._pid_alive(pid_int) and session.get("returncode") is None:
                     session["returncode"] = -999
                     session["status"] = "FAILED"
+                    self._mark_visualization_stale(session, "process_not_alive")
             return
         returncode = process.poll()
         session["returncode"] = returncode
         if returncode is None:
+            if str(session.get("workflow") or "").lower() == "visualize" and isinstance(session.get("visualization"), dict):
+                visualization = dict(session["visualization"])
+                visualization["stale"] = False
+                visualization["stale_reason"] = ""
+                session["visualization"] = visualization
             if str(session.get("workflow") or "").lower() == "rollout":
                 log_tail = self._tail_file(str(session.get("log_path", "")), max_chars=20000)
                 if self._rollout_log_has_fatal_runtime_failure(log_tail):
@@ -6131,8 +8229,50 @@ print("Updated Pi0.5 quantile stats for " + ", ".join(updated))
             session["status"] = "COMPLETED"
         else:
             session["status"] = "FAILED"
+        self._mark_visualization_stale(session, f"process_returncode_{returncode}")
         if str(session.get("workflow") or "").lower() == "train":
             self._stop_training_monitor(session)
+        if int(returncode) == 0 and str(session.get("workflow") or "").lower() == "record":
+            self._start_isaac_rgbd_post_render_after_record(session)
+
+    @staticmethod
+    def _mark_visualization_stale(session: dict[str, Any], reason: str) -> None:
+        if str(session.get("workflow") or "").lower() != "visualize":
+            return
+        visualization = dict(session.get("visualization") or {})
+        visualization["stale"] = True
+        visualization["stale_reason"] = str(reason or "stale")
+        session["visualization"] = visualization
+
+    def _start_isaac_rgbd_post_render_after_record(self, session: dict[str, Any]) -> None:
+        if not bool(session.get("isaac_rgbd_post_render_auto_on_record_success", True)):
+            return
+        if bool(session.get("isaac_rgbd_post_render_auto_started")):
+            return
+        record_attempt = session.get("record_attempt")
+        if isinstance(record_attempt, dict):
+            render = record_attempt.get("isaac_rgbd_render")
+            if isinstance(render, dict) and not bool(render.get("enabled", True)):
+                return
+        session["isaac_rgbd_post_render_auto_started"] = True
+        payload = {
+            "mode": session.get("mode", "live"),
+            "runtime_mode": session.get("mode", "live"),
+            "profile_id": session.get("profile_id", self._selected_profile_id),
+            "dataset_path": session.get("dataset_path", ""),
+            "session_id": session.get("session_id", ""),
+            "isaac_mirror_endpoint": session.get("isaac_mirror_endpoint", "http://127.0.0.1:8766/joints"),
+            "isaac_rgbd_post_render_auto_on_record_success": True,
+        }
+        result = self.isaac_rgbd_render_start(payload)
+        session["isaac_rgbd_post_render"] = dict(result.get("post_render") or {})
+        session.setdefault("step_trace", []).append(
+            {
+                "step": "ISAAC_RGBD_POST_RENDER_AUTO_START",
+                "status": "ok" if result.get("ok") else "warning",
+                "detail": str((result.get("post_render") or {}).get("job_id") or result.get("error") or ""),
+            }
+        )
 
     @staticmethod
     def _rollout_log_has_fatal_runtime_failure(log_tail: str) -> bool:
@@ -6971,6 +9111,7 @@ print(json.dumps(entries))
                 device["serial_number_or_name"] = stable_port
                 device["color_format"] = self._realsense_color_format(key, stable_port)
                 device["use_depth"] = True
+                device["depth_scale_m_per_unit"] = self._realsense_depth_scale_m_per_unit(key, stable_port)
                 device["fps"] = _safe_int(camera_fps, LEROBOT_DEFAULT_REALSENSE_FPS, minimum=1)
                 device["width"] = _safe_int(camera_width, LEROBOT_DEFAULT_CAMERA_WIDTH, minimum=1)
                 device["height"] = _safe_int(camera_height, LEROBOT_DEFAULT_CAMERA_HEIGHT, minimum=1)
@@ -7774,8 +9915,9 @@ finally:
             ".json": "data",
             ".jsonl": "data",
         }
-        episode_tokens = [f"episode_{episode_index}", f"episode-{episode_index}", f"episode={episode_index}", f"/{episode_index}/"]
+        episode_tokens = self._dataset_episode_tokens(episode_index)
         out: list[dict[str, Any]] = []
+        counts_by_source_type: dict[tuple[str, str], int] = {}
         paths = sorted(dataset_path.rglob("*"), key=self._dataset_media_sort_key)
         for path in paths:
             if not path.is_file():
@@ -7784,28 +9926,106 @@ finally:
             if not media_type:
                 continue
             text = str(path)
-            if media_type in {"video", "image"} and episode_index >= 0 and not any(token in text for token in episode_tokens):
+            source = self._dataset_media_source(path)
+            explicit_episode = self._dataset_explicit_episode_index(text)
+            if explicit_episode is not None and explicit_episode != episode_index:
+                continue
+            has_episode_token = explicit_episode == episode_index or any(token in text for token in episode_tokens)
+            if media_type in {"video", "image"} and episode_index >= 0 and not has_episode_token:
                 # Keep a few unfiltered media files for datasets that do not encode episode id in filenames.
-                if len([item for item in out if item.get("media_type") == media_type]) >= 4:
+                if counts_by_source_type.get((source, media_type), 0) >= 4:
                     continue
+            if media_type == "data" and source in {"isaac_rgbd", "isaac_mirror"} and episode_index >= 0 and not has_episode_token:
+                if counts_by_source_type.get((source, media_type), 0) >= 8:
+                    continue
+            counts_by_source_type[(source, media_type)] = counts_by_source_type.get((source, media_type), 0) + 1
             out.append(
                 {
                     "path": str(path),
                     "name": path.name,
                     "media_type": media_type,
+                    "source": source,
+                    "episode_index": episode_index,
                     "size_bytes": path.stat().st_size,
                     "serve_url": f"/api/lerobot/visualization/file?path={quote(str(path))}",
                 }
             )
-            if len(out) >= 80:
+            if len(out) >= 140:
                 break
         return out
 
     @staticmethod
+    def _dataset_episode_tokens(episode_index: int) -> list[str]:
+        return [
+            f"episode_{episode_index}",
+            f"episode_{episode_index:03d}",
+            f"episode_{episode_index:06d}",
+            f"episode-{episode_index}",
+            f"episode={episode_index}",
+            f"/{episode_index}/",
+            f"_ep{episode_index}",
+            f"_ep{episode_index:03d}",
+            f"ep{episode_index:03d}",
+        ]
+
+    @staticmethod
+    def _dataset_explicit_episode_index(text: str) -> int | None:
+        for pattern in (r"episode[_=\-]0*(\d+)", r"(?:^|[\/_\-])ep0*(\d+)(?:[._\/\-]|$)"):
+            match = re.search(pattern, text)
+            if match:
+                try:
+                    return int(match.group(1))
+                except ValueError:
+                    return None
+        return None
+
+    @staticmethod
+    def _dataset_media_source(path: Path) -> str:
+        text = str(path)
+        if "/sidecar/isaac_rgbd/" in text:
+            return "isaac_rgbd"
+        if "/sidecar/isaac_mirror/" in text or "/sidecar/isaac_mirror" in text:
+            return "isaac_mirror"
+        if "/sidecar/isaac_augmentation/" in text:
+            return "isaac_augmentation"
+        if "/sidecar/depth_raw/" in text or "/sidecar/raw_depth/" in text:
+            return "raw_depth"
+        if "/sidecar/" in text:
+            return "sidecar"
+        if "/videos/" in text:
+            return "lerobot_video"
+        if "/data/" in text:
+            return "lerobot_data"
+        if "/meta/" in text:
+            return "lerobot_meta"
+        return "dataset"
+
+    @staticmethod
+    def _dataset_media_source_counts(media: list[dict[str, Any]]) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for item in media:
+            source = str(item.get("source") or "dataset")
+            counts[source] = counts.get(source, 0) + 1
+        return counts
+
+    @staticmethod
     def _dataset_media_sort_key(path: Path) -> tuple[int, str]:
         text = str(path)
-        camera_rank = 0 if "observation.images.top" in text else 1 if "observation.images.wrist" in text else 2
-        return camera_rank, text
+        source_rank = 0
+        if "/videos/" in text:
+            source_rank = 0
+        elif "/sidecar/isaac_rgbd/" in text:
+            source_rank = 1
+        elif "/sidecar/isaac_mirror/" in text:
+            source_rank = 2
+        elif "/sidecar/isaac_augmentation/" in text:
+            source_rank = 3
+        elif "/sidecar/depth_raw/" in text:
+            source_rank = 4
+        elif "/data/" in text:
+            source_rank = 5
+        camera_rank = 0 if "top" in text else 1 if "front" in text else 2 if "right" in text else 3 if "wrist" in text else 4
+        return source_rank, camera_rank, text
 
     @staticmethod
     def _unsafe_arguments(args: list[str]) -> str:
@@ -7875,6 +10095,24 @@ def _resolve_conda_executable(value: str) -> str:
 
 def _bool_arg(value: bool) -> str:
     return "true" if bool(value) else "false"
+
+
+def _safe_bool(value: Any, default: bool = False) -> bool:
+    if value is None:
+        return bool(default)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "y", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "n", "off"}:
+            return False
+        if normalized == "":
+            return bool(default)
+    return bool(default)
 
 
 def _safe_int(value: Any, default: int, *, minimum: int | None = None, maximum: int | None = None) -> int:

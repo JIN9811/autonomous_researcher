@@ -108,6 +108,17 @@ const trainChunkInput = $("lerobot-train-chunk-input");
 const trainNActionInput = $("lerobot-train-n-action-input");
 const trainEvalBatchInput = $("lerobot-train-eval-batch-input");
 const trainExtraArgsInput = $("lerobot-train-extra-args-input");
+const datasetMixRealWeightInput = $("lerobot-dataset-mix-real-weight-input");
+const datasetMixIsaacRgbdWeightInput = $("lerobot-dataset-mix-isaac-rgbd-weight-input");
+const datasetMixIsaacAugmentationWeightInput = $("lerobot-dataset-mix-isaac-augmentation-weight-input");
+const datasetMixRealMaxInput = $("lerobot-dataset-mix-real-max-input");
+const datasetMixIsaacRgbdMaxInput = $("lerobot-dataset-mix-isaac-rgbd-max-input");
+const datasetMixIsaacAugmentationMaxInput = $("lerobot-dataset-mix-isaac-augmentation-max-input");
+const datasetMixSeedInput = $("lerobot-dataset-mix-seed-input");
+const fidelityWeightingEnabledInput = $("lerobot-fidelity-weighting-enabled-input");
+const fidelityRealWeightInput = $("lerobot-fidelity-real-weight-input");
+const fidelityIsaacRgbdWeightInput = $("lerobot-fidelity-isaac-rgbd-weight-input");
+const fidelityIsaacAugmentationWeightInput = $("lerobot-fidelity-isaac-augmentation-weight-input");
 const trainSaveCheckpointInput = $("lerobot-train-save-checkpoint-input");
 const trainUseAmpInput = $("lerobot-train-use-amp-input");
 const trainWandbInput = $("lerobot-train-wandb-input");
@@ -129,11 +140,47 @@ const visualizationWsPortInput = $("lerobot-visualization-ws-port-input");
 const visualizationToleranceInput = $("lerobot-visualization-tolerance-input");
 const visualizationSaveInput = $("lerobot-visualization-save-input");
 const visualizationOutputDirInput = $("lerobot-visualization-output-dir-input");
+const isaacAugmentProfileInput = $("lerobot-isaac-augment-profile-input");
+const isaacAugmentVariantsInput = $("lerobot-isaac-augment-variants-input");
+const isaacAugmentMaxFramesInput = $("lerobot-isaac-augment-max-frames-input");
+const isaacAugmentSeedInput = $("lerobot-isaac-augment-seed-input");
+const isaacAugmentCamerasInput = $("lerobot-isaac-augment-cameras-input");
+const isaacAugmentOutputDirInput = $("lerobot-isaac-augment-output-dir-input");
+const isaacAugmentImageInput = $("lerobot-isaac-augment-image-input");
+const isaacAugmentPhotometricInput = $("lerobot-isaac-augment-photometric-input");
+const isaacAugmentSensorNoiseInput = $("lerobot-isaac-augment-sensor-noise-input");
+const isaacAugmentDepthNoiseInput = $("lerobot-isaac-augment-depth-noise-input");
+const isaacAugmentRenderDomainInput = $("lerobot-isaac-augment-render-domain-input");
+const isaacAugmentCameraPoseInput = $("lerobot-isaac-augment-camera-pose-input");
+const isaacAugmentRgbStrengthInput = $("lerobot-isaac-augment-rgb-strength-input");
+const isaacAugmentDepthStrengthInput = $("lerobot-isaac-augment-depth-strength-input");
+const isaacAugmentRenderDomainStrengthInput = $("lerobot-isaac-augment-render-domain-strength-input");
+const isaacAugmentCameraPoseStrengthInput = $("lerobot-isaac-augment-camera-pose-strength-input");
+const isaacAugmentPreviewCountInput = $("lerobot-isaac-augment-preview-count-input");
+const isaacRgbdRenderProgressEl = $("lerobot-isaac-rgbd-render-progress");
+const isaacRgbdRenderProgressLabelEl = $("lerobot-isaac-rgbd-render-progress-label");
+const isaacRgbdRenderProgressBarEl = $("lerobot-isaac-rgbd-render-progress-bar");
+const isaacAugmentationProgressEl = $("lerobot-isaac-augmentation-progress");
+const isaacAugmentationProgressLabelEl = $("lerobot-isaac-augmentation-progress-label");
+const isaacAugmentationProgressBarEl = $("lerobot-isaac-augmentation-progress-bar");
+const visualizationProgressEl = $("lerobot-visualization-progress");
+const visualizationProgressLabelEl = $("lerobot-visualization-progress-label");
+const visualizationProgressBarEl = $("lerobot-visualization-progress-bar");
+const ISAAC_RGBD_RENDER_PROGRESS_EASE = 0.18;
+const ISAAC_RGBD_RENDER_PROGRESS_ANIMATION_MS = 80;
+const ISAAC_RGBD_RENDER_PROGRESS_MIN_STEP = 0.15;
+let isaacRgbdRenderDisplayedPercent = 0;
+let isaacRgbdRenderTargetPercent = 0;
+let isaacRgbdRenderProgressTimer = null;
+const smoothProgressControllers = {};
 const outputEl = $("lerobot-output");
 const sessionListEl = $("lerobot-session-list");
 const browserEl = $("lerobot-browser");
 const policyListEl = $("lerobot-policy-list");
 const visualizationEl = $("lerobot-visualization");
+const datasetHealthEl = $("lerobot-dataset-health");
+const isaacAugmentationEl = $("lerobot-isaac-augmentation");
+const isaacAugmentationPreviewEl = $("lerobot-isaac-augmentation-preview");
 const statusDotEl = $("lerobot-status-dot");
 const statusLabelEl = $("lerobot-status-label");
 const statusDetailEl = $("lerobot-status-detail");
@@ -156,6 +203,8 @@ const isaacMirrorEndpointInput = $("lerobot-isaac-mirror-endpoint-input");
 const isaacMirrorHzInput = $("lerobot-isaac-mirror-hz-input");
 const isaacMirrorTimeoutInput = $("lerobot-isaac-mirror-timeout-input");
 const isaacMirrorMaxSamplesInput = $("lerobot-isaac-mirror-max-samples-input");
+const activeRobotCamEnabledInput = $("lerobot-active-robot-cam-enabled-input");
+const activeRobotCamRecordStartInput = $("lerobot-active-robot-cam-record-start-input");
 
 let lastSessions = [];
 let lastSessionByWorkflow = {};
@@ -173,10 +222,14 @@ let extraCameraKeys = [];
 const defaultRealsenseCameraKeys = new Set(["top", "wrist"]);
 const cameraRealsenseOverrides = new Map();
 const cameraFpsOverrides = new Map();
+let recordStatusTimer = null;
 let trainStatusTimer = null;
 let rolloutStatusTimer = null;
+let isaacRgbdRenderStatusTimer = null;
+let lastIsaacRgbdRenderSessionId = "";
 let manipulationProfileLoaded = false;
 let profileSelectionInitialized = false;
+let observationPipelineProfileId = "";
 
 function setStatusDot(el, state) {
   if (!el) return;
@@ -192,6 +245,18 @@ function numberValue(el, fallback = null) {
   if (!el || el.value === "") return fallback;
   const value = Number(el.value);
   return Number.isFinite(value) ? value : fallback;
+}
+
+function episodeIndicesValue() {
+  const raw = episodeIndexInput ? String(episodeIndexInput.value || "").trim() : "";
+  return raw || "0";
+}
+
+function primaryEpisodeIndexValue() {
+  const raw = episodeIndicesValue().toLowerCase();
+  if (raw === "all" || raw === "*") return 0;
+  const match = raw.match(/\d+/);
+  return match ? Number(match[0]) : 0;
 }
 
 const LEROBOT_TTS_RATE_STORAGE_KEY = "atr_lerobot_tts_rate_default";
@@ -730,6 +795,7 @@ async function restoreDatasetProfileFromCurrentInput() {
   try {
     const data = await postJson("/api/lerobot/dataset/inspect", basePayload(), 60000);
     applyDatasetProfileFromInspect(data);
+    renderDatasetHealth(data);
     return data;
   } catch (err) {
     renderResult("dataset profile restore", { ok: false, error: String(err) });
@@ -859,6 +925,17 @@ function basePayload(overrides = {}) {
     wandb_base_url: trainWandbBaseUrlInput ? trainWandbBaseUrlInput.value.trim() : "",
     wandb_local_port: wandbLocalPortValue(),
     train_extra_args: trainExtraArgs(),
+    dataset_mix_real_original_weight: numberValue(datasetMixRealWeightInput, 1),
+    dataset_mix_isaac_rgbd_weight: numberValue(datasetMixIsaacRgbdWeightInput, 0.5),
+    dataset_mix_isaac_augmentation_weight: numberValue(datasetMixIsaacAugmentationWeightInput, 0.5),
+    dataset_mix_real_original_max_samples: numberValue(datasetMixRealMaxInput, null),
+    dataset_mix_isaac_rgbd_max_samples: numberValue(datasetMixIsaacRgbdMaxInput, null),
+    dataset_mix_isaac_augmentation_max_samples: numberValue(datasetMixIsaacAugmentationMaxInput, null),
+    dataset_mix_seed: numberValue(datasetMixSeedInput, 0),
+    fidelity_weighting_enabled: boolValue(fidelityWeightingEnabledInput),
+    fidelity_real_original_weight: numberValue(fidelityRealWeightInput, 1),
+    fidelity_isaac_rgbd_weight: numberValue(fidelityIsaacRgbdWeightInput, 0.5),
+    fidelity_isaac_augmentation_weight: numberValue(fidelityIsaacAugmentationWeightInput, 0.3),
     fps: numberValue(fpsInput, 15),
     camera_fps: numberValue(cameraFpsInput, 15),
     warmup_s: 2,
@@ -872,22 +949,50 @@ function basePayload(overrides = {}) {
     resume: false,
     push_to_hub: boolValue(pushHubInput),
     confirm_live_execute: boolValue(confirmLiveInput),
-    episode_index: numberValue(episodeIndexInput, 0),
-    visualization_tool: visualizationToolInput ? visualizationToolInput.value || "html" : "html",
-    visualization_mode: visualizationModeInput ? visualizationModeInput.value || "local" : "local",
+    episode_index: primaryEpisodeIndexValue(),
+    episode_indices: episodeIndicesValue(),
+    visualization_tool: visualizationToolInput ? visualizationToolInput.value || "rerun" : "rerun",
+    visualization_mode: visualizationModeInput ? visualizationModeInput.value || "distant" : "distant",
     visualization_batch_size: numberValue(visualizationBatchSizeInput, 32),
     visualization_num_workers: numberValue(visualizationWorkersInput, 4),
-    visualization_web_port: numberValue(visualizationWebPortInput, 9090),
-    visualization_ws_port: numberValue(visualizationWsPortInput, 9087),
+    visualization_web_port: numberValue(visualizationWebPortInput, 9092),
+    visualization_ws_port: numberValue(visualizationWsPortInput, 9089),
     visualization_tolerance_s: numberValue(visualizationToleranceInput, 0.0001),
     visualization_save: boolValue(visualizationSaveInput),
     visualization_output_dir: visualizationOutputDirInput ? visualizationOutputDirInput.value.trim() : "",
+    isaac_data_augmentation_profile: isaacAugmentProfileInput ? isaacAugmentProfileInput.value || "conservative" : "conservative",
+    isaac_data_augmentation_variants: numberValue(isaacAugmentVariantsInput, 8),
+    isaac_data_augmentation_max_frames: numberValue(isaacAugmentMaxFramesInput, 200),
+    isaac_data_augmentation_seed: numberValue(isaacAugmentSeedInput, 0),
+    isaac_data_augmentation_cameras: isaacAugmentCamerasInput
+      ? isaacAugmentCamerasInput.value.trim() || "top,front,right"
+      : "top,front,right",
+    isaac_data_augmentation_output_dir: isaacAugmentOutputDirInput ? isaacAugmentOutputDirInput.value.trim() : "",
+    isaac_data_augmentation_image_enabled: boolValue(isaacAugmentImageInput),
+    isaac_data_augmentation_photometric_enabled: boolValue(isaacAugmentPhotometricInput),
+    isaac_data_augmentation_sensor_noise_enabled: boolValue(isaacAugmentSensorNoiseInput),
+    isaac_data_augmentation_depth_noise_enabled: boolValue(isaacAugmentDepthNoiseInput),
+    isaac_data_augmentation_render_domain_enabled: boolValue(isaacAugmentRenderDomainInput),
+    isaac_data_augmentation_camera_pose_enabled: boolValue(isaacAugmentCameraPoseInput),
+    isaac_data_augmentation_rgb_strength: numberValue(isaacAugmentRgbStrengthInput, 1),
+    isaac_data_augmentation_depth_strength: numberValue(isaacAugmentDepthStrengthInput, 1),
+    isaac_data_augmentation_render_domain_strength: numberValue(isaacAugmentRenderDomainStrengthInput, 1),
+    isaac_data_augmentation_camera_pose_strength: numberValue(isaacAugmentCameraPoseStrengthInput, 1),
+    isaac_data_augmentation_preview_count: numberValue(isaacAugmentPreviewCountInput, 20),
     isaac_mirror_enabled: boolValue(isaacMirrorEnabledInput),
     isaac_mirror_endpoint: isaacMirrorEndpointInput ? isaacMirrorEndpointInput.value.trim() : "http://127.0.0.1:8766/joints",
     isaac_mirror_sample_hz: numberValue(isaacMirrorHzInput, 15),
     isaac_mirror_timeout_s: numberValue(isaacMirrorTimeoutInput, 0.5),
     isaac_mirror_max_samples: numberValue(isaacMirrorMaxSamplesInput, null),
     isaac_mirror_receiver_launch_mode: "isaac_extension",
+    active_robot_cam_enabled: boolValue(activeRobotCamEnabledInput),
+    active_robot_cam_record_start_enabled: boolValue(activeRobotCamRecordStartInput),
+    active_robot_cam_camera_priority: "d405,d455f",
+    active_robot_cam_primary_camera_key: "wrist",
+    active_robot_cam_fallback_camera_key: "top",
+    active_robot_cam_resume_mode: "auto",
+    active_robot_cam_d455f_fallback_enabled: true,
+    active_robot_cam_trigger_on_first_action: true,
     observation: parseObservation(),
     dry_run: (modeSelect ? modeSelect.value : "test") !== "live",
     ...overrides,
@@ -1037,14 +1142,6 @@ function setCheckboxValue(input, value) {
 function applyManipulationProfile(profile, force = false) {
   if (!profile || (manipulationProfileLoaded && !force)) return;
   manipulationProfileLoaded = true;
-  if (profileSelect && profile.profile_id) {
-    const hasProfile = Array.from(profileSelect.options || []).some((opt) => opt.value === profile.profile_id);
-    if (hasProfile) profileSelect.value = profile.profile_id;
-  }
-  if (observationPipelineSelect && profile.observation_pipeline_id) {
-    const hasPipeline = Array.from(observationPipelineSelect.options || []).some((opt) => opt.value === profile.observation_pipeline_id);
-    if (hasPipeline) observationPipelineSelect.value = profile.observation_pipeline_id;
-  }
   setInputValue(manipulationTaskIdInput, profile.task_id || profile.skill_id);
   setInputValue(manipulationStrategyInput, profile.manipulation_strategy);
   setInputValue(manipulationPolicyBackendInput, profile.policy_backend);
@@ -1123,6 +1220,10 @@ function visualizationPayload(overrides = {}) {
     payload.dataset_repo_id = "";
   }
   return payload;
+}
+
+function isaacAugmentationPayload(overrides = {}) {
+  return visualizationPayload(overrides);
 }
 
 function devicePayload(role, overrides = {}) {
@@ -1257,6 +1358,9 @@ function renderSessions(sessions) {
       if (isActiveSession(session)) {
         lastSessionByWorkflow[workflow] = String(session.session_id);
       }
+      if (session.isaac_rgbd_post_render) {
+        handleIsaacRgbdRenderResponse(session);
+      }
     }
   }
   for (const [workflow, sessionId] of Object.entries(fallbackByWorkflow)) {
@@ -1316,6 +1420,55 @@ function reportListHtml(items) {
   const clean = Array.isArray(items) ? items.filter(Boolean) : [];
   if (!clean.length) return `<span class="hint">none</span>`;
   return `<ul class="lerobot-report-list">${clean.map((item) => `<li>${escapeHtml(typeof item === "object" ? JSON.stringify(item) : item)}</li>`).join("")}</ul>`;
+}
+
+function renderDatasetHealth(data) {
+  if (!datasetHealthEl) return;
+  const health = data && data.dataset_health ? data.dataset_health : null;
+  if (!health) {
+    datasetHealthEl.innerHTML = "";
+    return;
+  }
+  const metrics = health.metrics || {};
+  const sidecars = health.sidecars || {};
+  const raw_depth = sidecars.raw_depth || {};
+  const isaac_rgbd = sidecars.isaac_rgbd || {};
+  const isaac_augmentation = sidecars.isaac_augmentation || {};
+  const mix = health.dataset_mix || {};
+  const dataset_mix_effective_counts = mix.effective_counts || {};
+  const severity = String(health.severity || "unknown");
+  const issues = Array.isArray(health.issues) ? health.issues : [];
+  datasetHealthEl.innerHTML = `
+    <article class="lerobot-report-card wide">
+      <div class="lerobot-report-card-title">
+        <strong>Dataset Health</strong>
+        <span class="state-pill ${escapeHtml(severity === "ok" ? "ok" : "warning")}">${escapeHtml(severity)}</span>
+      </div>
+      ${reportRowsHtml([
+        ["Episodes", metrics.episodes],
+        ["Original frames", metrics.original_frames],
+        ["Raw depth frames", metrics.raw_depth_total_frames],
+        ["Isaac RGB-D rendered", metrics.isaac_rgbd_rendered_frames],
+        ["Aug valid variants", metrics.augmentation_valid_variants],
+        ["Train effective frames", metrics.train_effective_frame_count],
+      ])}
+      <div class="lerobot-report-subtitle">Training mix</div>
+      ${reportRowsHtml([
+        ["real_original", dataset_mix_effective_counts.real_original],
+        ["isaac_rgbd", dataset_mix_effective_counts.isaac_rgbd],
+        ["isaac_augmentation", dataset_mix_effective_counts.isaac_augmentation],
+        ["total", dataset_mix_effective_counts.total],
+      ])}
+      <div class="lerobot-report-subtitle">Sidecars</div>
+      ${reportRowsHtml([
+        ["raw_depth", raw_depth.available ? JSON.stringify(raw_depth.camera_counts || {}) : "missing"],
+        ["isaac_rgbd", `${isaac_rgbd.rendered_count || 0}/${isaac_rgbd.row_count || 0}`],
+        ["isaac_augmentation", `${isaac_augmentation.valid_variant_count || 0}/${isaac_augmentation.variant_count || 0}`],
+      ])}
+      <div class="lerobot-report-subtitle">Issues</div>
+      ${reportListHtml(issues.map((issue) => `${issue.severity || "warning"} · ${issue.code || "UNKNOWN"} · ${issue.message || ""}`))}
+    </article>
+  `;
 }
 
 function manipulationReportFromResponse(data) {
@@ -1445,7 +1598,10 @@ function actionSummary(data) {
   }
   if (data.training || data.workflow === "train") {
     const t = normalizedTrainingProgress(data) || data.training || {};
-    return `${data.status || "training"} · ${t.current_step || 0}/${t.total_steps || "?"} · ${Number(t.progress_percent || 0).toFixed(1)}%`;
+    const fidelity_weights = data.fidelity_weights || t.fidelity_weights || {};
+    const weights = fidelity_weights.weights || {};
+    const fidelity = weights.isaac_augmentation !== undefined ? ` · sim fidelity=${weights.isaac_rgbd ?? "-"} / ${weights.isaac_augmentation}` : "";
+    return `${data.status || "training"} · ${t.current_step || 0}/${t.total_steps || "?"} · ${Number(t.progress_percent || 0).toFixed(1)}%${fidelity}`;
   }
   if (data.runtime) {
     const rt = data.runtime;
@@ -1513,6 +1669,23 @@ function parseTrainingCount(value, suffix = "") {
   return Math.round(numeric * multiplier);
 }
 
+function parseTrainingActiveStepsPerSec(log) {
+  const durations = [];
+  for (const line of String(log || "").split("\n")) {
+    if (!/\b(?:step|global_step)\s*[=:]/i.test(line) || line.includes("cfg.steps")) continue;
+    let duration = 0;
+    for (const key of ["updt_s", "data_s"]) {
+      const match = line.match(new RegExp(`\\b${key}\\s*[=:]\\s*([0-9]+(?:\\.[0-9]+)?)`, "i"));
+      if (match) duration += Number(match[1]) || 0;
+    }
+    if (duration > 0) durations.push(duration);
+  }
+  if (!durations.length) return 0;
+  const recent = durations.slice(-10);
+  const avg = recent.reduce((total, item) => total + item, 0) / recent.length;
+  return avg > 0 ? 1 / avg : 0;
+}
+
 function parseTrainingLogProgress(data, training) {
   const log = String((data && data.log_tail) || "");
   const countPattern = "(\\d{1,9}(?:\\.\\d+)?)([kKmM]?)";
@@ -1530,7 +1703,10 @@ function parseTrainingLogProgress(data, training) {
   }
 
   const elapsed = Number(training.elapsed_sec || 0);
-  const rate = current > 0 && elapsed > 0 ? current / elapsed : Number(training.steps_per_sec || 0);
+  const activeRate = parseTrainingActiveStepsPerSec(log);
+  const backendRate = Number(training.steps_per_sec || 0);
+  const fallbackRate = current > 0 && elapsed > 0 ? current / elapsed : 0;
+  const rate = activeRate > 0 ? activeRate : backendRate > 0 ? backendRate : fallbackRate;
   const eta = rate > 0 && total > 0 && current < total ? (total - current) / rate : training.eta_sec;
   const percent = total > 0 ? Math.max(0, Math.min(100, (current / total) * 100)) : Number(training.progress_percent || 0);
 
@@ -1585,6 +1761,18 @@ function renderTrainingProgress(data) {
   if (trainProgressBarEl) {
     trainProgressBarEl.style.width = `${percent}%`;
   }
+}
+
+function renderTrainingPreflightProgress(data) {
+  if (!data || !data.training_preflight) return;
+  renderUnifiedProgress(
+    "training_preflight",
+    trainProgressEl,
+    trainProgressLabelEl,
+    trainProgressBarEl,
+    data.training_preflight,
+    { label: "Preflight" },
+  );
 }
 
 function trainIsActive(data) {
@@ -1830,10 +2018,14 @@ function renderConfig(data) {
     profileSelect.value = profiles.some((p) => p.profile_id === prior) ? prior : selected;
     profileSelectionInitialized = true;
   }
+  const selectedProfileId = profileSelect ? profileSelect.value : selected;
+  const profile = profiles.find((p) => p.profile_id === selectedProfileId) || profiles[0] || {};
   const pipelineOptions = Array.isArray(data.observation_pipelines) ? data.observation_pipelines : [];
   const selectedPipeline = data.selected_observation_pipeline_id || data.default_observation_pipeline_id || "raw_depth_adapter";
   if (observationPipelineSelect) {
-    const priorPipeline = observationPipelineSelect.value || selectedPipeline;
+    const profileDefaultPipeline = profile.observation_pipeline_id || selectedPipeline;
+    const pipelineProfileUnchanged = observationPipelineProfileId === selectedProfileId;
+    const priorPipeline = pipelineProfileUnchanged && observationPipelineSelect.value ? observationPipelineSelect.value : profileDefaultPipeline;
     observationPipelineSelect.innerHTML = "";
     for (const pipeline of pipelineOptions) {
       const opt = document.createElement("option");
@@ -1851,12 +2043,12 @@ function renderConfig(data) {
       }
     }
     const validPipelines = Array.from(observationPipelineSelect.options || []).map((opt) => opt.value);
-    observationPipelineSelect.value = validPipelines.includes(priorPipeline) ? priorPipeline : selectedPipeline;
+    observationPipelineSelect.value = validPipelines.includes(priorPipeline) ? priorPipeline : profileDefaultPipeline;
+    observationPipelineProfileId = selectedProfileId;
   }
 
   applyDefaultPaths(data);
   applyWorkflowDefaults(data);
-  const profile = profiles.find((p) => p.profile_id === (profileSelect ? profileSelect.value : selected)) || profiles[0] || {};
   const gates = profile.live_gate_summary || data.live_gate_summary || {};
   const liveEnabled = Boolean(gates.live_enabled);
   setStatusDot(statusDotEl, data.ok ? "busy" : "warn");
@@ -2031,6 +2223,8 @@ async function runAction(label, url, payload = null, statusTarget = null, timeou
     renderResult(label, data);
     setActionStatus(statusTarget, data && data.ok ? "ok" : "error", label, data);
     syncFieldsFromWorkflowResponse(data);
+    handleRecordProgressResponse(data);
+    handleIsaacRgbdRenderResponse(data);
     await refreshConfig();
     return data;
   } catch (err) {
@@ -2041,8 +2235,63 @@ async function runAction(label, url, payload = null, statusTarget = null, timeou
   }
 }
 
+function recordIsActive(data) {
+  if (!data || data.workflow !== "record") return false;
+  const status = String(data.status || "").toUpperCase();
+  const terminal = new Set(["STOPPED", "FAILED", "COMPLETED", "CANCELLED", "DATASET_COMPLETE"]);
+  return !terminal.has(status) && (data.returncode === undefined || data.returncode === null);
+}
+
+function handleRecordProgressResponse(data) {
+  if (!data || data.workflow !== "record") return;
+  if (recordIsActive(data)) {
+    startRecordStatusPolling(data.session_id || "");
+  } else {
+    stopRecordStatusPolling();
+  }
+  handleIsaacRgbdRenderResponse(data);
+}
+
+function startRecordStatusPolling(sessionId = "") {
+  stopRecordStatusPolling();
+  const target = $("lerobot-record-action-status");
+  recordStatusTimer = window.setInterval(async () => {
+    try {
+      const data = await postJson("/api/lerobot/record/status", sessionPayload("record", sessionId ? { session_id: sessionId } : {}));
+      setActionStatus(target, data && data.ok ? "ok" : "error", "record status", data);
+      renderResult("record status", data);
+      syncFieldsFromWorkflowResponse(data);
+      handleIsaacRgbdRenderResponse(data);
+      if (!recordIsActive(data)) {
+        stopRecordStatusPolling();
+        await refreshConfig();
+      }
+    } catch (err) {
+      setActionStatus(target, "error", "record status", { error: String(err) });
+      stopRecordStatusPolling();
+    }
+  }, 3000);
+}
+
+function stopRecordStatusPolling() {
+  if (recordStatusTimer) {
+    window.clearInterval(recordStatusTimer);
+    recordStatusTimer = null;
+  }
+}
+
 async function runTrainAction(label, url, payload = null, timeoutMs = 30000) {
   const statusTarget = $("lerobot-train-action-status");
+  renderTrainingPreflightProgress({
+    training_preflight: {
+      stage: "request_sent",
+      done: 0,
+      total: 4,
+      percent: 5,
+      message: "training request sent",
+      stages: [],
+    },
+  });
   renderResult(`${label} running`, { ok: true, workflow: "train", status: "request_sent" });
   setActionStatus(statusTarget, "running", label, { status: "request sent", workflow: "train" });
   try {
@@ -2097,6 +2346,7 @@ async function runRolloutAction(label, url, payload = null, timeoutMs = 30000) {
 
 function handleTrainProgressResponse(data) {
   if (!data || data.workflow !== "train") return;
+  renderTrainingPreflightProgress(data);
   renderTrainingProgress(data);
   if (trainIsActive(data)) {
     startTrainStatusPolling();
@@ -2116,6 +2366,7 @@ function startTrainStatusPolling() {
         return;
       }
       setActionStatus(target, data && data.ok ? "ok" : "error", "train status", data);
+      renderTrainingPreflightProgress(data);
       renderTrainingProgress(data);
       if (!trainIsActive(data)) {
         stopTrainStatusPolling();
@@ -2304,6 +2555,15 @@ function renderCameraTest(data) {
   `;
 }
 
+function rerunViewerUrl(viz) {
+  if (!viz || viz.tool !== "rerun" || viz.visualization_mode !== "distant" || viz.save) return "";
+  if (viz.viewer_url) return viz.viewer_url;
+  if (!viz.rerun_web_url || !viz.rerun_ws_url) return viz.rerun_web_url || "";
+  const separator = String(viz.rerun_web_url).includes("?") ? "&" : "/?url=";
+  if (separator === "&") return `${viz.rerun_web_url}&url=${encodeURIComponent(viz.rerun_ws_url)}`;
+  return `${String(viz.rerun_web_url).replace(/\/$/, "")}${separator}${encodeURIComponent(viz.rerun_ws_url)}`;
+}
+
 async function runDevicePortAction(label, url, role, overrides = {}, statusTarget = null) {
   const statusTargetId = statusTarget && statusTarget.id ? statusTarget.id : "";
   renderResult(`${label} running`, { ok: true, status: "request_sent", role });
@@ -2378,28 +2638,67 @@ async function browsePath(kind, path = "", targetInput = null, options = {}) {
 
 function renderVisualizationSession(data) {
   if (!visualizationEl) return;
+  renderVisualizationProgress(data);
   const viz = (data && data.visualization) || {};
   const command = Array.isArray(data && data.command_preview) ? data.command_preview.join(" ") : "";
   const tool = viz.tool || "html";
   const mode = viz.visualization_mode || "local";
+  const episodeList = Array.isArray(viz.episode_indices) && viz.episode_indices.length
+    ? viz.episode_indices.join(",")
+    : String(viz.episode_index ?? "");
+  const openViewerUrl = rerunViewerUrl(viz) || viz.viewer_url || "";
   const viewerHint = tool === "html"
     ? `LeRobot HTML viewer: ${viz.viewer_url || "waiting for server URL"}`
     : mode === "distant"
-    ? `Rerun websocket: ${viz.rerun_ws_url || "ws://localhost:9087"}`
+    ? `Rerun viewer: ${viz.viewer_url || viz.rerun_web_url || "waiting for viewer URL"} · websocket: ${viz.rerun_ws_url || "ws://localhost:9089"}`
     : (viz.save ? `RRD output: ${viz.output_dir || "configured output dir"}` : "Local Rerun viewer should open from the LeRobot process.");
-  const viewerLink = viz.viewer_url
-    ? `<a class="btn mini primary" href="${escapeHtml(viz.viewer_url)}" target="_blank" rel="noopener">Open viewer</a>`
+  const viewerLink = openViewerUrl
+    ? `<a class="btn mini primary" href="${escapeHtml(openViewerUrl)}" target="_blank" rel="noopener">Open viewer</a>`
     : "";
   visualizationEl.innerHTML = `
     <div class="visual-summary">
       <strong>${escapeHtml(viz.repo_id || data.dataset_path || "LeRobot visualization")}</strong>
-      <span>tool=${escapeHtml(tool)} · session=${escapeHtml((data && data.session_id) || "")} · status=${escapeHtml((data && data.status) || "")} · episode=${escapeHtml(String(viz.episode_index ?? ""))}</span>
+      <span>tool=${escapeHtml(tool)} · session=${escapeHtml((data && data.session_id) || "")} · status=${escapeHtml((data && data.status) || "")} · viewer episode=${escapeHtml(String(viz.episode_index ?? ""))} · selected=${escapeHtml(episodeList)}</span>
       <span>${escapeHtml(viewerHint)}</span>
       ${viewerLink}
     </div>
     <details open><summary>LeRobot visualize command</summary><pre class="command-output">${escapeHtml(command || "No command preview.")}</pre></details>
     ${data && data.log_tail ? `<details open><summary>Process log</summary><pre class="command-output">${escapeHtml(data.log_tail)}</pre></details>` : ""}
   `;
+}
+
+function visualizationProgressPayload(data) {
+  const status = String((data && data.status) || "").toUpperCase();
+  const viz = (data && data.visualization) || {};
+  if (viz && viz.stale) {
+    return { stage: "stale", done: 1, total: 1, percent: 100, message: viz.stale_reason || "viewer process is stale" };
+  }
+  if (!data || data.status === "request_sent") {
+    return { stage: "request_sent", done: 0, total: 4, percent: 8, message: "request sent" };
+  }
+  if (status === "RUNNING") {
+    return { stage: "viewer_running", done: 3, total: 4, percent: 75, message: viz.viewer_url || viz.rerun_web_url || viz.rerun_ws_url || "viewer process started" };
+  }
+  if (status === "VISUALIZING") {
+    return { stage: "viewer_running", done: 4, total: 4, percent: 100, message: viz.viewer_url || viz.rerun_web_url || viz.rerun_ws_url || "viewer process is running" };
+  }
+  if (status === "COMPLETED") {
+    return { stage: "complete", done: 4, total: 4, percent: 100, message: "visualization complete" };
+  }
+  if (status === "FAILED" || data.ok === false) {
+    return { stage: "failed", done: 4, total: 4, percent: 100, message: data.error || "visualization failed" };
+  }
+  return { stage: "starting", done: 2, total: 4, percent: 45, message: viz.viewer_url || viz.rerun_web_url || "starting viewer" };
+}
+
+function renderVisualizationProgress(data) {
+  renderUnifiedProgress(
+    "visualization",
+    visualizationProgressEl,
+    visualizationProgressLabelEl,
+    visualizationProgressBarEl,
+    visualizationProgressPayload(data),
+  );
 }
 
 function renderVisualization(data) {
@@ -2412,22 +2711,441 @@ function renderVisualization(data) {
   const videos = media.filter((item) => item.media_type === "video");
   const images = media.filter((item) => item.media_type === "image");
   const dataFiles = media.filter((item) => item.media_type === "data");
-  const videoHtml = videos.map((item) => `<figure><video src="${item.serve_url}" controls muted></video><figcaption>${item.name}</figcaption></figure>`).join("");
-  const imageHtml = images.map((item) => `<figure><img src="${item.serve_url}" alt="${item.name}" /><figcaption>${item.name}</figcaption></figure>`).join("");
-  const dataHtml = dataFiles.slice(0, 12).map((item) => `<li>${item.name} · ${item.size_bytes} bytes</li>`).join("");
+  const sourceCounts = data.summary && data.summary.source_counts ? data.summary.source_counts : {};
+  const episodeList = Array.isArray(data.episode_indices) && data.episode_indices.length
+    ? data.episode_indices.join(",")
+    : String(data.episode_index ?? "");
+  const sourceCountsHtml = Object.entries(sourceCounts)
+    .map(([source, count]) => `<span>${escapeHtml(source)}=${escapeHtml(String(count))}</span>`)
+    .join("");
+  const caption = (item) => `${escapeHtml(item.source || "dataset")} · ep=${escapeHtml(String(item.episode_index ?? ""))} · ${escapeHtml(item.name || "")}`;
+  const videoHtml = videos.map((item) => `<figure><video src="${item.serve_url}" controls muted></video><figcaption>${caption(item)}</figcaption></figure>`).join("");
+  const imageHtml = images.map((item) => `<figure><img src="${item.serve_url}" alt="${escapeHtml(item.name || "dataset image")}" /><figcaption>${caption(item)}</figcaption></figure>`).join("");
+  const dataHtml = dataFiles.slice(0, 36).map((item) => `<li><a href="${escapeHtml(item.serve_url || "#")}" target="_blank" rel="noopener">${escapeHtml(item.name || item.path || "data")}</a> · ${escapeHtml(item.source || "dataset")} · ep=${escapeHtml(String(item.episode_index ?? ""))} · ${escapeHtml(String(item.size_bytes || 0))} bytes</li>`).join("");
   visualizationEl.innerHTML = `
     <div class="visual-summary">
-      <strong>${data.dataset_path}</strong>
-      <span>episode=${data.episode_index} · videos=${videos.length} · images=${images.length} · data=${dataFiles.length}</span>
+      <strong>${escapeHtml(data.dataset_path || "")}</strong>
+      <span>episodes=${escapeHtml(episodeList)} · videos=${videos.length} · images=${images.length} · data=${dataFiles.length}</span>
+      <span>${sourceCountsHtml || "no source counts"}</span>
     </div>
     <div class="visual-media-grid">${videoHtml}${imageHtml || ""}</div>
-    <details open><summary>Dataset metadata</summary><pre class="command-output">${JSON.stringify(data.metadata || {}, null, 2)}</pre></details>
+    <details open><summary>Dataset metadata</summary><pre class="command-output">${escapeHtml(JSON.stringify(data.metadata || {}, null, 2))}</pre></details>
     <details><summary>Data files</summary><ul>${dataHtml || "<li>No local media/data files found.</li>"}</ul></details>
   `;
 }
 
+function renderIsaacAugmentation(data) {
+  if (!isaacAugmentationEl) return;
+  renderIsaacAugmentationProgress(data);
+  if (!data || !data.ok) {
+    isaacAugmentationEl.innerHTML = `<pre class="command-output">${escapeHtml(JSON.stringify(data || {}, null, 2))}</pre>`;
+    return;
+  }
+  const summary = data.summary || {};
+  const families = Array.isArray(summary.common_augmentation_families)
+    ? summary.common_augmentation_families.join(", ")
+    : "";
+  const recipe = summary.augmentation_recipe_version || (summary.augmentation_recipe && summary.augmentation_recipe.version) || "";
+  const profile = summary.augmentation_profile || "";
+  const options = summary.augmentation_options || {};
+  const validVariants = Number(summary.valid_variant_count ?? summary.variant_count ?? 0);
+  const failedVariants = Number(summary.failed_variant_count ?? 0);
+  const qaFailureCounts = summary.qa_failure_counts && typeof summary.qa_failure_counts === "object"
+    ? summary.qa_failure_counts
+    : {};
+  const command = Array.isArray(data.command_preview) ? data.command_preview.join(" ") : "";
+  isaacAugmentationEl.innerHTML = `
+    <div class="visual-summary">
+      <strong>${escapeHtml(summary.output_dir || data.output_dir || "Isaac augmentation sidecar")}</strong>
+      <span>sources=${escapeHtml(String(summary.source_frame_count ?? 0))} · variants=${escapeHtml(String(summary.variant_count ?? 0))} · cameras=${escapeHtml((summary.cameras || []).join ? summary.cameras.join(",") : "")}</span>
+      <span>qa valid=${escapeHtml(String(validVariants))} · failed=${escapeHtml(String(failedVariants))}</span>
+      <span>recipe=${escapeHtml(recipe || "unknown")} · profile=${escapeHtml(profile || "unknown")}</span>
+      <span>${escapeHtml(families)}</span>
+    </div>
+    <details open><summary>Augmentation manifest</summary><pre class="command-output">${escapeHtml(summary.manifest_path || "No manifest path.")}</pre></details>
+    <details><summary>QA summary</summary><pre class="command-output">${escapeHtml(JSON.stringify({
+      qa_summary_path: summary.qa_summary_path || "",
+      valid_variant_count: validVariants,
+      failed_variant_count: failedVariants,
+      qa_failure_counts: qaFailureCounts,
+    }, null, 2))}</pre></details>
+    <details><summary>Recipe options</summary><pre class="command-output">${escapeHtml(JSON.stringify(options, null, 2))}</pre></details>
+    <details><summary>Command preview</summary><pre class="command-output">${escapeHtml(command || "No command preview.")}</pre></details>
+  `;
+}
+
+function isaacAugmentationProgressPayload(data) {
+  const summary = (data && data.summary) || {};
+  if (data && data.augmentation_progress) return data.augmentation_progress;
+  if (summary && summary.progress) return summary.progress;
+  if (!data || data.status === "request_sent") {
+    return { stage: "request_sent", done: 0, total: 1, percent: 5, message: "request sent" };
+  }
+  if (data && data.ok === false) {
+    return { stage: "failed", done: 1, total: 1, percent: 100, message: data.error || "augmentation failed" };
+  }
+  if (data && data.ok) {
+    const total = Number(summary.variant_count || 1);
+    return { stage: "complete", done: total, total, percent: 100, message: "augmentation complete" };
+  }
+  return { stage: "waiting", done: 0, total: 1, percent: 0, message: "waiting" };
+}
+
+function renderIsaacAugmentationProgress(data) {
+  renderUnifiedProgress(
+    "isaac_augmentation",
+    isaacAugmentationProgressEl,
+    isaacAugmentationProgressLabelEl,
+    isaacAugmentationProgressBarEl,
+    isaacAugmentationProgressPayload(data),
+  );
+}
+
+function isaacPreviewImageHtml(title, ref) {
+  const serveUrl = ref && ref.serve_url ? String(ref.serve_url) : "";
+  if (!serveUrl) {
+    return `
+      <figure>
+        <div class="visual-placeholder">missing</div>
+        <figcaption>${escapeHtml(title)}</figcaption>
+      </figure>
+    `;
+  }
+  return `
+    <figure>
+      <img src="${escapeHtml(serveUrl)}" alt="${escapeHtml(title)}" loading="lazy" />
+      <figcaption>${escapeHtml(title)}</figcaption>
+    </figure>
+  `;
+}
+
+function renderIsaacAugmentationPreview(data) {
+  if (!isaacAugmentationPreviewEl) return;
+  if (!data || !data.ok) {
+    isaacAugmentationPreviewEl.innerHTML = `<pre class="command-output">${escapeHtml(JSON.stringify(data || {}, null, 2))}</pre>`;
+    return;
+  }
+  const rows = Array.isArray(data.rows) ? data.rows : [];
+  const cards = rows.map((row) => {
+    const qa = row.qa || {};
+    const qaState = qa.ok ? "ok" : "warning";
+    return `
+      <article class="lerobot-report-card wide">
+        <div class="lerobot-report-card-title">
+          <strong>${escapeHtml(row.variant_id || "variant")}</strong>
+          <span class="state-pill ${escapeHtml(qaState)}">${escapeHtml(qa.ok ? "qa ok" : (qa.failure_code || "qa failed"))}</span>
+        </div>
+        <div class="visual-media-grid">
+          ${isaacPreviewImageHtml("source rgb", row.source_rgb)}
+          ${isaacPreviewImageHtml("source_depth_preview", row.source_depth_preview)}
+          ${isaacPreviewImageHtml("augmented rgb", row.augmented_rgb)}
+          ${isaacPreviewImageHtml("augmented_depth_preview", row.augmented_depth_preview)}
+        </div>
+        ${reportRowsHtml([
+          ["Episode", row.episode_index],
+          ["Frame", row.frame_index],
+          ["Camera", row.camera],
+          ["Depth valid", qa.depth_valid_ratio],
+        ])}
+        <details><summary>Pose / augmentation metadata</summary><pre class="command-output">${escapeHtml(JSON.stringify({
+          source_pose: row.source_pose || {},
+          augmentation_parameters: row.augmentation_parameters || {},
+          qa,
+        }, null, 2))}</pre></details>
+      </article>
+    `;
+  }).join("");
+  isaacAugmentationPreviewEl.innerHTML = `
+    <div class="visual-summary">
+      <strong>${escapeHtml(data.preview_dir || "Isaac augmentation previews")}</strong>
+      <span>preview rows=${escapeHtml(String(data.preview_count ?? rows.length))} · requested=${escapeHtml(String(data.requested_count ?? ""))}</span>
+      <span>${escapeHtml(data.manifest_path || "")}</span>
+    </div>
+    <div class="lerobot-report-grid">${cards || "<p>No preview rows available.</p>"}</div>
+  `;
+}
+
+async function runIsaacAugmentation(statusTarget = null) {
+  const payload = isaacAugmentationPayload();
+  renderIsaacAugmentationProgress({ status: "request_sent" });
+  setActionStatus(statusTarget, "running", "Isaac data augmentation", { status: "request sent" });
+  try {
+    const data = await postJson("/api/lerobot/augment/isaac", payload, 300000);
+    renderIsaacAugmentation(data);
+    renderResult("Isaac data augmentation", data);
+    setActionStatus(statusTarget, data && data.ok ? "ok" : "error", "Isaac data augmentation", data);
+    return data;
+  } catch (err) {
+    const error = { ok: false, status: "request_failed", error: String(err) };
+    renderIsaacAugmentation(error);
+    renderResult("Isaac data augmentation", error);
+    setActionStatus(statusTarget, "error", "Isaac data augmentation", error);
+    return error;
+  }
+}
+
+async function previewIsaacAugmentation(statusTarget = null) {
+  const payload = isaacAugmentationPayload();
+  setActionStatus(statusTarget, "running", "Isaac augmentation preview", { status: "request sent" });
+  try {
+    const data = await postJson("/api/lerobot/augment/preview", payload, 60000);
+    renderIsaacAugmentationPreview(data);
+    renderResult("Isaac augmentation preview", data);
+    setActionStatus(statusTarget, data && data.ok ? "ok" : "error", "Isaac augmentation preview", data);
+    return data;
+  } catch (err) {
+    const error = { ok: false, status: "request_failed", error: String(err) };
+    renderIsaacAugmentationPreview(error);
+    renderResult("Isaac augmentation preview", error);
+    setActionStatus(statusTarget, "error", "Isaac augmentation preview", error);
+    return error;
+  }
+}
+
+function clampPercent(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 0;
+  return Math.max(0, Math.min(100, numeric));
+}
+
+function createSmoothProgressController(barEl, options = {}) {
+  let displayedPercent = 0;
+  let targetPercent = 0;
+  let timer = null;
+
+  function setBar(percent) {
+    const clamped = clampPercent(percent);
+    if (barEl) barEl.style.width = `${clamped.toFixed(2)}%`;
+    if (typeof options.onRender === "function") options.onRender(clamped, targetPercent);
+  }
+
+  function stop() {
+    if (!timer) return;
+    window.clearTimeout(timer);
+    timer = null;
+  }
+
+  function step() {
+    const delta = targetPercent - displayedPercent;
+    if (Math.abs(delta) <= ISAAC_RGBD_RENDER_PROGRESS_MIN_STEP) {
+      displayedPercent = targetPercent;
+      setBar(displayedPercent);
+      stop();
+      return;
+    }
+    displayedPercent += delta * ISAAC_RGBD_RENDER_PROGRESS_EASE;
+    setBar(displayedPercent);
+    timer = window.setTimeout(step, ISAAC_RGBD_RENDER_PROGRESS_ANIMATION_MS);
+  }
+
+  return {
+    update(percent) {
+      const target = clampPercent(percent);
+      targetPercent = target;
+      if (target < displayedPercent) {
+        stop();
+        displayedPercent = target;
+        setBar(target);
+        return;
+      }
+      if (!timer) step();
+    },
+    reset() {
+      stop();
+      displayedPercent = 0;
+      targetPercent = 0;
+      setBar(0);
+    },
+    stop,
+    displayedPercent() {
+      return displayedPercent;
+    },
+    targetPercent() {
+      return targetPercent;
+    },
+  };
+}
+
+function smoothProgressController(key, barEl, options = {}) {
+  if (!smoothProgressControllers[key]) {
+    smoothProgressControllers[key] = createSmoothProgressController(barEl, options);
+  }
+  return smoothProgressControllers[key];
+}
+
+function progressPercentFromPayload(progress) {
+  const total = Number(progress && (progress.total ?? progress.total_steps ?? 0));
+  const done = Number(progress && (progress.done ?? progress.current_step ?? 0));
+  if (progress && progress.percent !== undefined) return clampPercent(progress.percent);
+  if (progress && progress.progress_percent !== undefined) return clampPercent(progress.progress_percent);
+  return total > 0 ? clampPercent((done / total) * 100) : 0;
+}
+
+function renderUnifiedProgress(key, progressEl, labelEl, barEl, progress, options = {}) {
+  if (!progressEl || !progress) return;
+  progressEl.classList.remove("hidden");
+  const total = Number(progress.total ?? progress.total_steps ?? 0);
+  const done = Number(progress.done ?? progress.current_step ?? 0);
+  const percent = progressPercentFromPayload(progress);
+  const stage = String(progress.stage || progress.status || options.stage || "running");
+  const message = String(progress.message || options.message || "");
+  const prefix = options.label || "";
+  if (labelEl) {
+    const countText = total > 0 ? `${done} / ${total}` : `${done} / ?`;
+    labelEl.textContent = `${prefix ? `${prefix} · ` : ""}${countText} · ${percent.toFixed(1)}% · ${stage}${message ? ` · ${message}` : ""}`;
+  }
+  smoothProgressController(key, barEl).update(percent);
+}
+
+function setIsaacRgbdRenderProgressBar(percent) {
+  if (!smoothProgressControllers.isaac_rgbd_render && isaacRgbdRenderProgressBarEl) {
+    isaacRgbdRenderProgressBarEl.style.width = `${clampPercent(percent).toFixed(2)}%`;
+  }
+  const controller = smoothProgressController("isaac_rgbd_render", isaacRgbdRenderProgressBarEl, {
+    onRender(displayed, target) {
+      isaacRgbdRenderDisplayedPercent = displayed;
+      isaacRgbdRenderTargetPercent = target;
+    },
+  });
+  controller.update(percent);
+}
+
+function stopIsaacRgbdRenderProgressAnimation() {
+  const controller = smoothProgressControllers.isaac_rgbd_render;
+  if (controller) controller.stop();
+  isaacRgbdRenderProgressTimer = null;
+}
+
+function stepIsaacRgbdRenderProgressBar() {
+  setIsaacRgbdRenderProgressBar(isaacRgbdRenderTargetPercent);
+}
+
+function updateIsaacRgbdRenderProgressBar(clampedPercent) {
+  const target = clampPercent(clampedPercent);
+  isaacRgbdRenderTargetPercent = target;
+  if (target < isaacRgbdRenderDisplayedPercent) {
+    stopIsaacRgbdRenderProgressAnimation();
+    isaacRgbdRenderDisplayedPercent = target;
+    setIsaacRgbdRenderProgressBar(target);
+    return;
+  }
+  if (!isaacRgbdRenderProgressTimer) {
+    stepIsaacRgbdRenderProgressBar();
+  }
+}
+
+function resetIsaacRgbdRenderProgressBar() {
+  stopIsaacRgbdRenderProgressAnimation();
+  isaacRgbdRenderDisplayedPercent = 0;
+  isaacRgbdRenderTargetPercent = 0;
+  const controller = smoothProgressController("isaac_rgbd_render", isaacRgbdRenderProgressBarEl, {
+    onRender(displayed, target) {
+      isaacRgbdRenderDisplayedPercent = displayed;
+      isaacRgbdRenderTargetPercent = target;
+    },
+  });
+  controller.reset();
+}
+
+function renderIsaacRgbdRenderProgress(data) {
+  const job = data && data.post_render
+    ? data.post_render
+    : data && data.isaac_rgbd_post_render
+      ? data.isaac_rgbd_post_render
+      : data || {};
+  if (!isaacRgbdRenderProgressEl || !job || !Object.keys(job).length) return;
+  isaacRgbdRenderProgressEl.classList.remove("hidden");
+  const done = Number(job.done || 0);
+  const total = Number(job.total || 0);
+  const percent = Number(job.percent ?? (total > 0 ? (done / total) * 100 : 100));
+  const clampedPercent = clampPercent(percent);
+  const failed = Number(job.failed || 0);
+  const skipped = Number(job.skipped || 0);
+  const rendered = Number(job.rendered || 0);
+  const status = String(job.status || "IDLE");
+  if (isaacRgbdRenderProgressLabelEl) {
+    isaacRgbdRenderProgressLabelEl.textContent = `${done} / ${total} · ${clampedPercent.toFixed(1)}% · rendered=${rendered} · skipped=${skipped} · failed=${failed} · ${status}`;
+  }
+  updateIsaacRgbdRenderProgressBar(clampedPercent);
+}
+
+function isaacRgbdRenderIsActive(data) {
+  const job = data && data.post_render
+    ? data.post_render
+    : data && data.isaac_rgbd_post_render
+      ? data.isaac_rgbd_post_render
+      : data || {};
+  return String(job.status || "").toUpperCase() === "RUNNING";
+}
+
+function handleIsaacRgbdRenderResponse(data) {
+  const job = data && data.post_render
+    ? data.post_render
+    : data && data.isaac_rgbd_post_render
+      ? data.isaac_rgbd_post_render
+      : null;
+  if (!job) return;
+  renderIsaacRgbdRenderProgress(job);
+  lastIsaacRgbdRenderSessionId = String(job.session_id || data.session_id || lastIsaacRgbdRenderSessionId || "");
+  const target = $("lerobot-isaac-rgbd-render-action-status");
+  setActionStatus(target, isaacRgbdRenderIsActive(job) ? "running" : (Number(job.failed || 0) > 0 ? "error" : "ok"), "Isaac RGB-D render", job);
+  if (isaacRgbdRenderIsActive(job)) {
+    startIsaacRgbdRenderStatusPolling(lastIsaacRgbdRenderSessionId);
+  } else {
+    stopIsaacRgbdRenderStatusPolling();
+  }
+}
+
+async function runIsaacRgbdRender(statusTarget = null) {
+  const sessionId = lastIsaacRgbdRenderSessionId || lastSessionByWorkflow.record || "";
+  const payload = basePayload({ session_id: sessionId, isaac_rgbd_post_render_inline: false });
+  resetIsaacRgbdRenderProgressBar();
+  setActionStatus(statusTarget, "running", "Isaac RGB-D render", { status: "request sent" });
+  try {
+    const data = await postJson("/api/lerobot/isaac-rgbd/render/start", payload, 30000);
+    renderIsaacRgbdRenderProgress(data);
+    renderResult("Isaac RGB-D render", data);
+    setActionStatus(statusTarget, data && data.ok ? "ok" : "error", "Isaac RGB-D render", data);
+    handleIsaacRgbdRenderResponse(data);
+    return data;
+  } catch (err) {
+    const error = { ok: false, status: "request_failed", error: String(err) };
+    renderResult("Isaac RGB-D render", error);
+    setActionStatus(statusTarget, "error", "Isaac RGB-D render", error);
+    return error;
+  }
+}
+
+function startIsaacRgbdRenderStatusPolling(sessionId = "") {
+  stopIsaacRgbdRenderStatusPolling();
+  const target = $("lerobot-isaac-rgbd-render-action-status");
+  isaacRgbdRenderStatusTimer = window.setInterval(async () => {
+    try {
+      const payload = basePayload({ session_id: sessionId || lastIsaacRgbdRenderSessionId || lastSessionByWorkflow.record || "" });
+      const data = await postJson("/api/lerobot/isaac-rgbd/render/status", payload);
+      renderIsaacRgbdRenderProgress(data);
+      setActionStatus(target, data && data.ok ? (isaacRgbdRenderIsActive(data) ? "running" : "ok") : "error", "Isaac RGB-D render", data);
+      if (!isaacRgbdRenderIsActive(data)) {
+        stopIsaacRgbdRenderStatusPolling();
+        await refreshConfig();
+      }
+    } catch (err) {
+      setActionStatus(target, "error", "Isaac RGB-D render", { error: String(err) });
+      stopIsaacRgbdRenderStatusPolling();
+    }
+  }, 2000);
+}
+
+function stopIsaacRgbdRenderStatusPolling() {
+  if (isaacRgbdRenderStatusTimer) {
+    window.clearInterval(isaacRgbdRenderStatusTimer);
+    isaacRgbdRenderStatusTimer = null;
+  }
+}
+
 async function visualizeDataset(statusTarget = null) {
-  const payload = visualizationPayload({ episode_index: numberValue(episodeIndexInput, 0) });
+  const payload = visualizationPayload();
+  renderVisualizationProgress({ status: "request_sent" });
   setActionStatus(statusTarget, "running", "LeRobot visualize start", { status: "request sent" });
   try {
     const data = await postJson("/api/lerobot/visualize/start", payload, 60000);
@@ -2448,7 +3166,7 @@ async function visualizeDataset(statusTarget = null) {
 }
 
 async function previewDataset(statusTarget = null) {
-  const payload = visualizationPayload({ episode_index: numberValue(episodeIndexInput, 0) });
+  const payload = visualizationPayload();
   setActionStatus(statusTarget, "running", "preview local media", { status: "request sent" });
   try {
     const data = await postJson("/api/lerobot/visualize/dataset", payload);
@@ -2608,6 +3326,7 @@ bind("btn-manipulation-use-rollout-policy", (event) => {
 bind("btn-rollout-latest-policy", (event) => useLatestLocalPolicy(actionStatusFromEvent(event)));
 bind("btn-browse-visualization", () => browsePath("dataset", visualizationPathInput ? visualizationPathInput.value : "", visualizationPathInput));
 bind("btn-browse-visualization-output", () => browsePath("output", visualizationOutputDirInput ? visualizationOutputDirInput.value : "", visualizationOutputDirInput));
+bind("btn-browse-isaac-augment-output", () => browsePath("output", isaacAugmentOutputDirInput ? isaacAugmentOutputDirInput.value : "", isaacAugmentOutputDirInput));
 
 bind("btn-teleop-start", (event) => runAction("teleoperate start", "/api/lerobot/teleoperate/start", basePayload({ teleop_time_s: numberValue(teleopTimeInput, null) }), actionStatusFromEvent(event)));
 bind("btn-teleop-stop", (event) => runAction("teleoperate stop", "/api/lerobot/teleoperate/stop", sessionPayload("teleoperate"), actionStatusFromEvent(event)));
@@ -2646,6 +3365,7 @@ bind("btn-record-stop", (event) => runRecordControl("record force stop", "stop",
 bind("btn-record-retry", (event) => runRecordControl("record retry", "retry", event));
 bind("btn-record-next", (event) => runRecordControl("record next", "next", event));
 bind("btn-record-finish", (event) => runRecordControl("record finish", "finish", event));
+bind("btn-isaac-rgbd-render-start", (event) => runIsaacRgbdRender(actionStatusFromEvent(event)));
 
 bind("btn-train-start", () => runTrainAction("train start", "/api/lerobot/train/start", trainPayload()));
 bind("btn-train-cancel", () => runTrainAction("train cancel", "/api/lerobot/train/cancel", sessionPayload("train")));
@@ -2704,6 +3424,7 @@ bind("btn-dataset-inspect", async (event) => {
   try {
     const data = await postJson("/api/lerobot/dataset/inspect", basePayload(), 60000);
     applyDatasetProfileFromInspect(data);
+    renderDatasetHealth(data);
     renderResult("dataset inspect", data);
     setActionStatus(statusTarget, data && data.ok ? "ok" : "error", "dataset inspect", data);
   } catch (err) {
@@ -2713,6 +3434,8 @@ bind("btn-dataset-inspect", async (event) => {
   }
 });
 bind("btn-dataset-visualize", (event) => visualizeDataset(actionStatusFromEvent(event)));
+bind("btn-isaac-augment-run", (event) => runIsaacAugmentation(actionStatusFromEvent(event)));
+bind("btn-isaac-augment-preview", (event) => previewIsaacAugmentation(actionStatusFromEvent(event)));
 bind("btn-dataset-visualize-status", async (event) => {
   const statusTarget = actionStatusFromEvent(event);
   const data = await runAction("LeRobot visualize status", "/api/lerobot/visualize/status", sessionPayload("visualize"), statusTarget);

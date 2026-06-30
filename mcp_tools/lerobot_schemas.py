@@ -29,6 +29,7 @@ from pydantic import BaseModel, Field
 
 RuntimeMode = Literal["live", "test", "replay", "fault-injection"]
 LeRobotDeviceRole = Literal["follower", "leader", "camera"]
+DEFAULT_ISAAC_RGBD_RENDER_CAMERAS = "top,front,right"
 
 
 class RobotProfile(BaseModel):
@@ -79,6 +80,24 @@ class LeRobotBaseRequest(BaseModel):
     isaac_mirror_receiver_python: str = ""
     isaac_mirror_receiver_scene: str = ""
     isaac_mirror_receiver_start_timeout_s: float | None = None
+    isaac_viewport_frame_on_start: bool = True
+    isaac_rgbd_render_enabled: bool = True
+    isaac_rgbd_render_target_fps: float = 15.0
+    isaac_rgbd_render_cameras: str = DEFAULT_ISAAC_RGBD_RENDER_CAMERAS
+    isaac_rgbd_post_render_auto_on_record_success: bool = True
+    isaac_rgbd_post_render_inline: bool = False
+    isaac_rgbd_post_render_poll_timeout_s: float = 10.0
+    record_attempt_overwrite: bool = True
+    active_robot_cam_enabled: bool = False
+    active_robot_cam_record_start_enabled: bool = True
+    active_robot_cam_camera_priority: str = "d405,d455f"
+    active_robot_cam_primary_camera_key: str = "wrist"
+    active_robot_cam_fallback_camera_key: str = "top"
+    active_robot_cam_capture_pose_path: str = ""
+    active_robot_cam_home_pose_path: str = ""
+    active_robot_cam_resume_mode: str = "auto"
+    active_robot_cam_d455f_fallback_enabled: bool = True
+    active_robot_cam_trigger_on_first_action: bool = True
 
 
 class LeRobotSessionRequest(LeRobotBaseRequest):
@@ -124,6 +143,17 @@ class LeRobotSessionRequest(LeRobotBaseRequest):
     wandb_base_url: str = ""
     wandb_local_port: int = 8081
     train_extra_args: list[str] = Field(default_factory=list)
+    dataset_mix_real_original_weight: float = 1.0
+    dataset_mix_isaac_rgbd_weight: float = 0.5
+    dataset_mix_isaac_augmentation_weight: float = 0.5
+    dataset_mix_real_original_max_samples: int | None = None
+    dataset_mix_isaac_rgbd_max_samples: int | None = None
+    dataset_mix_isaac_augmentation_max_samples: int | None = None
+    dataset_mix_seed: int = 0
+    fidelity_weighting_enabled: bool = True
+    fidelity_real_original_weight: float = 1.0
+    fidelity_isaac_rgbd_weight: float = 0.5
+    fidelity_isaac_augmentation_weight: float = 0.3
     fps: int | None = None
     camera_fps: int | None = None
     teleop_time_s: float | None = None
@@ -152,15 +182,33 @@ class LeRobotSessionRequest(LeRobotBaseRequest):
     tts_rate: int | None = None
     tts_voice: str = ""
     episode_index: int = 0
-    visualization_tool: Literal["html", "rerun"] = "html"
-    visualization_mode: Literal["local", "distant"] = "local"
+    episode_indices: str = ""
+    visualization_tool: Literal["html", "rerun"] = "rerun"
+    visualization_mode: Literal["local", "distant"] = "distant"
     visualization_batch_size: int = 32
     visualization_num_workers: int = 4
     visualization_save: bool = False
     visualization_output_dir: str = ""
-    visualization_web_port: int = 9090
-    visualization_ws_port: int = 9087
+    visualization_web_port: int = 9092
+    visualization_ws_port: int = 9089
     visualization_tolerance_s: float = 1e-4
+    isaac_data_augmentation_output_dir: str = ""
+    isaac_data_augmentation_variants: int = 8
+    isaac_data_augmentation_max_frames: int = 200
+    isaac_data_augmentation_seed: int | None = 0
+    isaac_data_augmentation_cameras: str = DEFAULT_ISAAC_RGBD_RENDER_CAMERAS
+    isaac_data_augmentation_profile: Literal["conservative", "sim2real", "stress"] = "conservative"
+    isaac_data_augmentation_image_enabled: bool = True
+    isaac_data_augmentation_photometric_enabled: bool = True
+    isaac_data_augmentation_sensor_noise_enabled: bool = True
+    isaac_data_augmentation_depth_noise_enabled: bool = True
+    isaac_data_augmentation_render_domain_enabled: bool = True
+    isaac_data_augmentation_camera_pose_enabled: bool = True
+    isaac_data_augmentation_rgb_strength: float = 1.0
+    isaac_data_augmentation_depth_strength: float = 1.0
+    isaac_data_augmentation_render_domain_strength: float = 1.0
+    isaac_data_augmentation_camera_pose_strength: float = 1.0
+    isaac_data_augmentation_preview_count: int = 20
     observation: dict[str, Any] = Field(default_factory=dict)
 
 

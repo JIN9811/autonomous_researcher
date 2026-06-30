@@ -59,6 +59,8 @@ class SpecimenPoseTrackerConfig:
     rsusb_library_path: str = "/home/jin/librealsense-rsusb/build-rsusb-system/Release"
     max_runtime_sec: float = 8.0
     release_timeout_sec: float = 5.0
+    autostart_realsense: bool = False
+    camera_startup_timeout_sec: float = 5.0
     pose_confidence_threshold: float = 0.75
     allow_virtual_pose_in_test: bool = True
 
@@ -95,6 +97,8 @@ class SpecimenPoseTrackerConfig:
             rsusb_library_path=str(raw.get("rsusb_library_path") or "/home/jin/librealsense-rsusb/build-rsusb-system/Release"),
             max_runtime_sec=max(_safe_float(raw.get("max_runtime_sec"), 8.0), 1.0),
             release_timeout_sec=max(_safe_float(raw.get("release_timeout_sec"), 5.0), 0.5),
+            autostart_realsense=bool(raw.get("autostart_realsense", False)),
+            camera_startup_timeout_sec=max(_safe_float(raw.get("camera_startup_timeout_sec"), 5.0), 0.1),
             pose_confidence_threshold=max(min(_safe_float(raw.get("pose_confidence_threshold"), 0.75), 1.0), 0.0),
             allow_virtual_pose_in_test=bool(raw.get("allow_virtual_pose_in_test", True)),
         )
@@ -159,7 +163,11 @@ class SpecimenPoseTrackerBridge:
         command = [str(self.config.script_path), json.dumps(request, ensure_ascii=True)]
         env = os.environ.copy()
         env["ATR_D455F_SERIAL"] = self.config.d455f_serial
+        env["ATR_SPECIMEN_POSE_REALSENSE_SERIAL"] = self.config.d455f_serial
         env["ATR_SPECIMEN_POSE_THRESHOLD"] = str(self.config.pose_confidence_threshold)
+        env["ATR_SPECIMEN_POSE_TIMEOUT_SEC"] = str(self.config.max_runtime_sec)
+        env["ATR_SPECIMEN_POSE_AUTOSTART_REALSENSE"] = "1" if self.config.autostart_realsense else "0"
+        env["ATR_SPECIMEN_POSE_CAMERA_STARTUP_TIMEOUT_SEC"] = str(self.config.camera_startup_timeout_sec)
         env.setdefault("ATR_SPECIMEN_POSE_COLOR_TOPIC", self.config.color_topic)
         env.setdefault("ATR_SPECIMEN_POSE_DEPTH_TOPIC", self.config.depth_topic)
         env.setdefault("ATR_SPECIMEN_POSE_INFO_TOPIC", self.config.info_topic)

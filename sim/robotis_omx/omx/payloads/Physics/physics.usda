@@ -74,9 +74,12 @@ over "omx"
                                 prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
                             )
                             {
-                                point3f physics:centerOfMass = (0.028072407, 0.000024135941, 0.013528914)
-                                float3 physics:diagonalInertia = (0.00002369446, 0.000023236924, 0.000007180629)
-                                float physics:mass = 0.043810885
+                                custom point3f atr:payload:centerOfMass = (0.07, 0, 0.045)
+                                custom float atr:payload:mass = 0.06
+                                custom string atr:payload:name = "Intel RealSense D405 wrist camera"
+                                point3f physics:centerOfMass = (0.05230547, 0.000010186, 0.031718386)
+                                float3 physics:diagonalInertia = (0.000060238684, 0.00010429448, 0.00006933399)
+                                float physics:mass = 0.103810885
                                 quatf physics:principalAxes = (1, 0, 0, 0)
 
                                 over "link6" (
@@ -92,7 +95,9 @@ over "omx"
                                         prepend apiSchemas = ["PhysicsDriveAPI:angular", "PhysicsJointStateAPI:angular"]
                                     )
                                     {
+                                        float drive:angular:physics:damping = 18
                                         float drive:angular:physics:maxForce = 4
+                                        float drive:angular:physics:stiffness = 180
                                         uniform token physics:axis = "Z"
                                         custom rel physics:body0
                                         prepend rel physics:body0 = </omx/Geometry/link0/link1/link2/link3/link4/link5>
@@ -120,7 +125,9 @@ over "omx"
                                         prepend apiSchemas = ["NewtonMimicAPI", "PhysicsDriveAPI:angular", "PhysicsJointStateAPI:angular"]
                                     )
                                     {
+                                        float drive:angular:physics:damping = 18
                                         float drive:angular:physics:maxForce = 4
+                                        float drive:angular:physics:stiffness = 180
                                         float newton:mimicCoef1 = -1
                                         rel newton:mimicJoint = </omx/Geometry/link0/link1/link2/link3/link4/link5/link6/Gripper>
                                         uniform token physics:axis = "Z"
@@ -268,9 +275,9 @@ over "omx"
             float physxMaterial:compliantContactDamping = 300
             float physxMaterial:compliantContactStiffness = 50000
             uniform token physxMaterial:frictionCombineMode = "max"
-            float physics:dynamicFriction = 5
+            float physics:dynamicFriction = 4
             float physics:restitution = 0
-            float physics:staticFriction = 6
+            float physics:staticFriction = 5
         }
     }
 }

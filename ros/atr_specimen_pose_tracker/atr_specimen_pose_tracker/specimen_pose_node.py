@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
+import os
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -36,6 +38,74 @@ def _failure(code: str, message: str, **extra: Any) -> dict[str, Any]:
     payload = {"ok": False, "failure_code": code, "message": message, "timestamp": _now_iso()}
     payload.update(extra)
     return payload
+
+
+def _normalize_axis_yaw_deg(yaw_deg: float) -> float:
+    yaw = ((float(yaw_deg) + 90.0) % 180.0) - 90.0
+    if yaw == -90.0:
+        return 90.0
+    return yaw
+
+
+def _canonical_low_aspect_yaw_deg(yaw_deg: float) -> float:
+    yaw = _normalize_axis_yaw_deg(yaw_deg)
+    if yaw > 45.0:
+        yaw -= 90.0
+    elif yaw <= -45.0:
+        yaw += 90.0
+    return 0.0 if abs(yaw) < 1e-9 else yaw
+
+
+def _yaw_min_aspect_ratio() -> float:
+    try:
+        return float(os.environ.get("ATR_SPECIMEN_YAW_MIN_ASPECT_RATIO", "1.5"))
+    except ValueError:
+        return 1.5
+
+
+def _estimate_image_contour_yaw_deg(contour: Any) -> tuple[float, dict[str, Any]]:
+    points = np.asarray(contour, dtype=np.float64).reshape(-1, 2)
+    if points.shape[0] < 4:
+        return 0.0, {"source": "contour_too_small", "aspect_ratio": 1.0, "sample_count": int(points.shape[0])}
+    points[:, 1] *= -1.0
+    try:
+        rect = cv2.minAreaRect(points.astype(np.float32).reshape(-1, 1, 2))
+        box = cv2.boxPoints(rect).astype(np.float64)
+    except Exception:
+        return 0.0, {"source": "min_area_rect_failed", "aspect_ratio": 1.0, "sample_count": int(points.shape[0])}
+    edges = [box[(index + 1) % 4] - box[index] for index in range(4)]
+    lengths = np.asarray([float(np.linalg.norm(edge)) for edge in edges], dtype=np.float64)
+    if not np.isfinite(lengths).all() or float(np.max(lengths)) <= 1e-9:
+        return 0.0, {"source": "min_area_rect_degenerate", "aspect_ratio": 1.0, "sample_count": int(points.shape[0])}
+    major_index = int(np.argmax(lengths))
+    major = max(float(lengths[major_index]), 1e-9)
+    minor = max(float(np.min(lengths)), 1e-9)
+    aspect_ratio = major / minor
+    vector = edges[major_index].astype(np.float64) / major
+    if vector[0] < 0:
+        vector *= -1.0
+    raw_yaw = _normalize_axis_yaw_deg(math.degrees(math.atan2(float(vector[1]), float(vector[0]))))
+    min_aspect_ratio = _yaw_min_aspect_ratio()
+    if aspect_ratio < min_aspect_ratio:
+        yaw = _canonical_low_aspect_yaw_deg(raw_yaw)
+        canonical_axis = [round(float(math.cos(math.radians(yaw))), 6), round(float(math.sin(math.radians(yaw))), 6)]
+        return yaw, {
+            "source": "red_contour_image_min_area_rect_low_aspect",
+            "aspect_ratio": round(float(aspect_ratio), 3),
+            "raw_yaw_deg": round(float(raw_yaw), 3),
+            "low_aspect_yaw_canonicalized": True,
+            "min_stable_aspect_ratio": round(float(min_aspect_ratio), 3),
+            "sample_count": int(points.shape[0]),
+            "rect_size_px": [round(float(major), 3), round(float(minor), 3)],
+            "image_axis": canonical_axis,
+        }
+    return raw_yaw, {
+        "source": "red_contour_image_min_area_rect",
+        "aspect_ratio": round(float(aspect_ratio), 3),
+        "sample_count": int(points.shape[0]),
+        "rect_size_px": [round(float(major), 3), round(float(minor), 3)],
+        "image_axis": [round(float(vector[0]), 6), round(float(vector[1]), 6)],
+    }
 
 
 @dataclass
@@ -152,6 +222,7 @@ class SpecimenPoseNode(Node):
 
         image_area = float(max(1, self.color.shape[0] * self.color.shape[1]))
         confidence = min(0.99, max(0.0, (area / image_area) * 18.0))
+        specimen_yaw_deg, orientation_quality = _estimate_image_contour_yaw_deg(contour)
         pose = {
             "schema": "specimen_pose.v1",
             "stage": "post_ejection_workspace_localization",
@@ -188,7 +259,9 @@ class SpecimenPoseNode(Node):
                 "y": round(robot_y_mm, 3),
                 "z": round(robot_z_mm, 3),
             },
-            "orientation_deg": {"yaw": 0.0},
+            "orientation_deg": {"yaw": round(float(specimen_yaw_deg), 3)},
+            "orientation_source": str(orientation_quality.get("source") or ""),
+            "orientation_quality": orientation_quality,
             "confidence": round(confidence, 3),
             "stable_frames": 1,
             "freshness_ms": 0,

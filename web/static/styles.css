@@ -2566,6 +2566,30 @@ textarea {
   line-height: 1.45;
 }
 
+.lerobot-card-note a,
+.inline-panel-link {
+  color: var(--primary);
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.inline-panel-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  width: fit-content;
+  border: 1px solid rgba(20, 54, 179, 0.18);
+  border-radius: 8px;
+  background: rgba(241, 246, 255, 0.78);
+  padding: 0 11px;
+  font-size: 0.8rem;
+}
+
+.inline-panel-link:hover {
+  border-color: rgba(20, 54, 179, 0.34);
+  background: rgba(226, 236, 255, 0.92);
+}
+
 .lerobot-isaac-link-card {
   display: grid;
   gap: 12px;
@@ -3171,6 +3195,12 @@ textarea {
 .visual-summary span {
   color: var(--muted);
   font-size: 0.78rem;
+}
+
+.visual-summary .btn {
+  justify-self: start;
+  width: auto;
+  text-decoration: none;
 }
 
 .visual-media-grid {

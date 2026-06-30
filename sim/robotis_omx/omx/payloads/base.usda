@@ -250,13 +250,14 @@ def Xform "omx" (
                                     )
                                     {
                                         rel material:binding:physics = </omx/Physics/AntiSlipTapeMaterial>
+                                        custom string atr:collision:role = "inner_pad_fallback"
                                         float physxCollision:contactOffset = 0.0005
                                         float physxCollision:restOffset = 0
                                         custom token physics:approximation = "box"
-                                        bool physics:collisionEnabled = 0
+                                        bool physics:collisionEnabled = 1
                                         double size = 1
                                         uniform token purpose = "guide"
-                                        float3 xformOp:scale = (0.01264, 0.0012, 0.02094)
+                                        float3 xformOp:scale = (0.01264, 0.0008, 0.02094)
                                         double3 xformOp:translate = (0.05868, -0.00855, 0)
                                         uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
                                     }
@@ -297,13 +298,14 @@ def Xform "omx" (
                                     )
                                     {
                                         rel material:binding:physics = </omx/Physics/AntiSlipTapeMaterial>
+                                        custom string atr:collision:role = "inner_pad_fallback"
                                         float physxCollision:contactOffset = 0.0005
                                         float physxCollision:restOffset = 0
                                         custom token physics:approximation = "box"
-                                        bool physics:collisionEnabled = 0
+                                        bool physics:collisionEnabled = 1
                                         double size = 1
                                         uniform token purpose = "guide"
-                                        float3 xformOp:scale = (0.01263, 0.0012, 0.02174)
+                                        float3 xformOp:scale = (0.01263, 0.0008, 0.02174)
                                         double3 xformOp:translate = (0.05869, 0.00855, 0)
                                         uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
                                     }
@@ -338,9 +340,9 @@ def Xform "omx" (
             float physxMaterial:compliantContactDamping = 300
             float physxMaterial:compliantContactStiffness = 50000
             uniform token physxMaterial:frictionCombineMode = "max"
-            float physics:dynamicFriction = 5
+            float physics:dynamicFriction = 4
             float physics:restitution = 0
-            float physics:staticFriction = 6
+            float physics:staticFriction = 5
         }
     }
 

@@ -234,6 +234,8 @@ devices:
       - ros/install/setup.bash
     max_runtime_sec: 8.0
     release_timeout_sec: 5.0
+    autostart_realsense: false
+    camera_startup_timeout_sec: 5.0
     pose_confidence_threshold: 0.75
     allow_virtual_pose_in_test: true
   robot:

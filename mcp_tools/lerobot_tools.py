@@ -70,6 +70,8 @@ def register_lerobot_tools(
     registry.register("lerobot.rollout.status", lambda payload: bridge.rollout_status(dict(payload or {})))
     registry.register("lerobot.dataset.inspect", lambda payload: bridge.dataset_inspect(dict(payload or {})))
     registry.register("lerobot.dataset.visualize", lambda payload: bridge.visualize_dataset(dict(payload or {})))
+    registry.register("lerobot.isaac_rgbd.render_start", lambda payload: bridge.isaac_rgbd_render_start(dict(payload or {})))
+    registry.register("lerobot.isaac_rgbd.render_status", lambda payload: bridge.isaac_rgbd_render_status(dict(payload or {})))
     registry.register("lerobot.visualize.start", lambda payload: bridge.visualize_start(dict(payload or {})), device="robot:lerobot")
     registry.register("lerobot.visualize.stop", lambda payload: bridge.visualize_stop(dict(payload or {})))
     registry.register("lerobot.visualize.status", lambda payload: bridge.visualize_status(dict(payload or {})))

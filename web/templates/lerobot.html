@@ -25,7 +25,7 @@ Modification guide:
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>{{ title }}</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
-    <link rel="stylesheet" href="/static/styles.css?v=20260624-isaac-link-1" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260630-sim2real-fidelity-1" />
   </head>
   <body>
     <main class="page lerobot-page">
@@ -69,6 +69,7 @@ Modification guide:
         <a href="#local-paths">Paths</a>
         <a href="#teleoperation-card">Teleop</a>
         <a href="#recording-card">Record</a>
+        <a href="#isaac-augmentation-card">Augment</a>
         <a href="#visualization-card">Visualize</a>
         <a href="#training-card">Train</a>
         <a href="#rollout-card">Rollout</a>
@@ -245,7 +246,18 @@ Modification guide:
             Standalone Max Samples
             <input id="lerobot-isaac-mirror-max-samples-input" type="number" min="1" step="1" placeholder="blank = until stop" />
           </label>
+          <label class="checkbox-label">
+            <input id="lerobot-active-robot-cam-enabled-input" type="checkbox" checked />
+            Active Robot-Cam specimen tracking
+          </label>
+          <label class="checkbox-label">
+            <input id="lerobot-active-robot-cam-record-start-input" type="checkbox" checked />
+            Run at recording start
+          </label>
         </div>
+        <p class="hint">
+          Active Robot-Cam uses D405 wrist primary A4-aligned tracking and keeps D455F top fallback right-plane tracking.
+        </p>
         <details class="lerobot-details lerobot-isaac-advanced">
           <summary>Advanced diagnostics and Standalone Mirror Test</summary>
           <div class="button-row">
@@ -393,20 +405,116 @@ Modification guide:
             <button id="btn-record-stop" class="btn danger">Force Stop</button>
           </div>
           <div id="lerobot-record-action-status" class="lerobot-action-status idle">Waiting for recording action.</div>
+          <div class="button-row compact">
+            <button id="btn-isaac-rgbd-render-start" class="btn">Render Missing Isaac RGB-D</button>
+          </div>
+          <div id="lerobot-isaac-rgbd-render-action-status" class="lerobot-action-status idle">Waiting for Isaac RGB-D render action.</div>
+          <div id="lerobot-isaac-rgbd-render-progress" class="lerobot-training-progress hidden">
+            <div class="training-progress-head">
+              <strong>Isaac RGB-D Render</strong>
+              <span id="lerobot-isaac-rgbd-render-progress-label">0 / 0 · 0%</span>
+            </div>
+            <div class="training-progress-track"><span id="lerobot-isaac-rgbd-render-progress-bar"></span></div>
+          </div>
         </article>
+
+        <details id="isaac-augmentation-card" class="panel lerobot-workflow-card lerobot-panel-details">
+          <summary class="panel-title-row lerobot-panel-summary">
+            <h2>7. Isaac Sim Data Augmentation</h2>
+            <span class="hint">RGB-D sidecar + camera pose variants</span>
+          </summary>
+          <div class="lerobot-card-note">
+            Build an immutable sidecar under the selected dataset for synthetic Isaac RGB-D variants, standard_sim2real_v2 common image/depth augmentation, render-domain randomization, and camera pose augmentation when recording metadata is available.
+          </div>
+          <div class="lerobot-form-grid train-form-grid">
+            <label>
+              Augmentation Profile
+              <select id="lerobot-isaac-augment-profile-input">
+                <option value="conservative" selected>conservative</option>
+                <option value="sim2real">sim2real</option>
+                <option value="stress">stress</option>
+              </select>
+            </label>
+            <label>
+              Variants Per Source Frame
+              <input id="lerobot-isaac-augment-variants-input" type="number" min="1" max="256" value="8" />
+            </label>
+            <label>
+              Max Source Frames
+              <input id="lerobot-isaac-augment-max-frames-input" type="number" min="1" value="200" />
+            </label>
+            <label>
+              Seed
+              <input id="lerobot-isaac-augment-seed-input" type="number" value="0" />
+            </label>
+            <label>
+              Cameras
+              <input id="lerobot-isaac-augment-cameras-input" type="text" value="top,front,right" />
+            </label>
+            <label>
+              Augmentation Output Dir (optional)
+              <span class="input-action-row">
+                <input id="lerobot-isaac-augment-output-dir-input" type="text" placeholder="dataset/sidecar/isaac_augmentation/latest" />
+                <button id="btn-browse-isaac-augment-output" class="btn mini" type="button">Browse</button>
+              </span>
+            </label>
+            <label>
+              RGB Strength
+              <input id="lerobot-isaac-augment-rgb-strength-input" type="number" min="0" max="2" step="0.05" value="1" />
+            </label>
+            <label>
+              Depth Strength
+              <input id="lerobot-isaac-augment-depth-strength-input" type="number" min="0" max="2" step="0.05" value="1" />
+            </label>
+            <label>
+              Render Strength
+              <input id="lerobot-isaac-augment-render-domain-strength-input" type="number" min="0" max="2" step="0.05" value="1" />
+            </label>
+            <label>
+              Camera Pose Strength
+              <input id="lerobot-isaac-augment-camera-pose-strength-input" type="number" min="0" max="2" step="0.05" value="1" />
+            </label>
+            <label>
+              Preview Rows
+              <input id="lerobot-isaac-augment-preview-count-input" type="number" min="1" max="200" value="20" />
+            </label>
+          </div>
+          <div class="lerobot-inline-options">
+            <label class="checkbox-line"><input id="lerobot-isaac-augment-image-input" type="checkbox" checked /> Common image/depth augmentation</label>
+            <label class="checkbox-line"><input id="lerobot-isaac-augment-photometric-input" type="checkbox" checked /> Photometric</label>
+            <label class="checkbox-line"><input id="lerobot-isaac-augment-sensor-noise-input" type="checkbox" checked /> Sensor noise</label>
+            <label class="checkbox-line"><input id="lerobot-isaac-augment-depth-noise-input" type="checkbox" checked /> Depth noise</label>
+            <label class="checkbox-line"><input id="lerobot-isaac-augment-render-domain-input" type="checkbox" checked /> Render domain</label>
+            <label class="checkbox-line"><input id="lerobot-isaac-augment-camera-pose-input" type="checkbox" checked /> Camera pose augmentation</label>
+          </div>
+          <div class="button-row compact">
+            <button id="btn-isaac-augment-run" class="btn primary">Build Isaac Augmentation</button>
+            <button id="btn-isaac-augment-preview" class="btn">Preview Variants</button>
+          </div>
+          <div id="lerobot-isaac-augmentation-action-status" class="lerobot-action-status idle">Waiting for Isaac augmentation action.</div>
+          <div id="lerobot-isaac-augmentation-progress" class="lerobot-training-progress hidden">
+            <div class="training-progress-head">
+              <strong>Isaac Augmentation</strong>
+              <span id="lerobot-isaac-augmentation-progress-label">0 / 0 · 0%</span>
+            </div>
+            <div class="training-progress-track"><span id="lerobot-isaac-augmentation-progress-bar"></span></div>
+          </div>
+          <div id="lerobot-isaac-augmentation" class="lerobot-visualization"></div>
+          <div id="lerobot-isaac-augmentation-preview" class="lerobot-visualization"></div>
+        </details>
 
         <details id="visualization-card" class="panel lerobot-workflow-card lerobot-visualization-panel lerobot-panel-details">
           <summary class="panel-title-row lerobot-panel-summary">
-            <h2>7. Dataset Visualization</h2>
-            <span class="hint">LeRobot HTML viewer + local preview</span>
+            <h2>8. Dataset Visualization</h2>
+            <span class="hint">Official Rerun + Isaac sidecar preview</span>
           </summary>
           <div class="lerobot-card-note">
-            Open LeRobot's dataset visualizer for the selected episode. The default uses <code>python -m lerobot.scripts.visualize_dataset_html</code>, which serves the same multi-camera HTML viewer provided by LeRobot.
+            Open LeRobot's official Rerun dataset visualizer for the first selected episode. Dataset preview can inspect multiple episodes and Isaac Sim sidecar recordings.
           </div>
           <div class="lerobot-form-grid">
             <label>
-              Episode Index
-              <input id="lerobot-episode-index-input" type="number" min="0" value="0" />
+              Episodes
+              <input id="lerobot-episode-index-input" type="text" value="0" placeholder="0,1,2 · 0-4 · all" />
             </label>
             <label>
               Visualization Dataset Path (optional)
@@ -422,15 +530,15 @@ Modification guide:
               <label>
                 Visualization Tool
                 <select id="lerobot-visualization-tool-input">
-                  <option value="html" selected>LeRobot HTML visualizer</option>
-                  <option value="rerun">Rerun stream/script</option>
+                  <option value="rerun" selected>Official LeRobot Rerun viewer</option>
+                  <option value="html">LeRobot HTML visualizer</option>
                 </select>
               </label>
               <label>
                 Rerun Mode
                 <select id="lerobot-visualization-mode-input">
-                  <option value="local" selected>local - spawn Rerun viewer</option>
-                  <option value="distant">distant - serve websocket</option>
+                  <option value="distant" selected>distant - serve websocket</option>
+                  <option value="local">local - spawn Rerun viewer</option>
                 </select>
               </label>
               <label>
@@ -443,11 +551,11 @@ Modification guide:
               </label>
               <label>
                 Web Port
-                <input id="lerobot-visualization-web-port-input" type="number" min="1" value="9090" />
+                <input id="lerobot-visualization-web-port-input" type="number" min="1" value="9092" />
               </label>
               <label>
                 WS Port
-                <input id="lerobot-visualization-ws-port-input" type="number" min="1" value="9087" />
+                <input id="lerobot-visualization-ws-port-input" type="number" min="1" value="9089" />
               </label>
               <label>
                 Tolerance Seconds
@@ -469,19 +577,27 @@ Modification guide:
             <button id="btn-dataset-visualize" class="btn primary">Open LeRobot Viz</button>
             <button id="btn-dataset-visualize-status" class="btn">Viz Status</button>
             <button id="btn-dataset-visualize-stop" class="btn danger">Stop Viz</button>
-            <button id="btn-dataset-preview" class="btn">Preview Local Media</button>
+            <button id="btn-dataset-preview" class="btn">Preview Dataset + Isaac Media</button>
           </div>
           <div id="lerobot-visualization-action-status" class="lerobot-action-status idle">Waiting for visualization action.</div>
+          <div id="lerobot-visualization-progress" class="lerobot-training-progress hidden">
+            <div class="training-progress-head">
+              <strong>Visualization</strong>
+              <span id="lerobot-visualization-progress-label">0 / 0 · 0%</span>
+            </div>
+            <div class="training-progress-track"><span id="lerobot-visualization-progress-bar"></span></div>
+          </div>
+          <div id="lerobot-dataset-health" class="lerobot-visualization"></div>
           <div id="lerobot-visualization" class="lerobot-visualization"></div>
         </details>
 
         <article id="training-card" class="panel lerobot-workflow-card lerobot-training-card">
           <div class="panel-title-row">
-            <h2>8. Training</h2>
+            <h2>9. Training</h2>
             <span class="hint">policy checkpoint · GPU job</span>
           </div>
           <div class="lerobot-card-note">
-            Core settings match the practical LeRobot train command. Pi0.5 uses <code>lerobot/pi05_base</code>; X-VLA uses <code>lerobot/xvla-base</code>; SmolVLA uses <code>lerobot/smolvla_base</code>. Advanced optimizer, scheduler, policy, and WandB options stay available below without crowding the default path.
+            Core settings match the practical LeRobot train command. Pi0.5 uses <code>lerobot/pi05_base</code>; X-VLA uses <code>lerobot/xvla-base</code>; SmolVLA uses <code>lerobot/smolvla_base</code>. Sim2Real fidelity weights are applied during loss computation; build or refresh domain-randomized Isaac sidecars in <a href="#isaac-augmentation-card">Augment</a>.
           </div>
           <div class="lerobot-form-grid train-form-grid train-core-grid">
             <label>
@@ -522,6 +638,65 @@ Modification guide:
               <input id="lerobot-train-workers-input" type="number" min="0" value="12" />
             </label>
           </div>
+
+          <details class="lerobot-details" open>
+            <summary>Sim2Real Fidelity</summary>
+            <div class="lerobot-form-grid train-form-grid">
+              <label>
+                Real Loss Weight
+                <input id="lerobot-fidelity-real-weight-input" type="number" min="0" max="1" step="0.05" value="1" />
+              </label>
+              <label>
+                Isaac RGB-D Loss Weight
+                <input id="lerobot-fidelity-isaac-rgbd-weight-input" type="number" min="0" max="1" step="0.05" value="0.5" />
+              </label>
+              <label>
+                Isaac Augmentation Loss Weight
+                <input id="lerobot-fidelity-isaac-augmentation-weight-input" type="number" min="0" max="1" step="0.05" value="0.3" />
+              </label>
+              <label>
+                Domain Randomization
+                <a class="inline-panel-link" href="#isaac-augmentation-card">Open Augment settings</a>
+              </label>
+            </div>
+            <div class="lerobot-inline-options">
+              <label class="checkbox-line"><input id="lerobot-fidelity-weighting-enabled-input" type="checkbox" checked /> Enable source loss weighting</label>
+            </div>
+          </details>
+
+          <details class="lerobot-details" open>
+            <summary>Dataset Mix</summary>
+            <div class="lerobot-form-grid train-form-grid">
+              <label>
+                Real Original Weight
+                <input id="lerobot-dataset-mix-real-weight-input" type="number" min="0" step="0.05" value="1" />
+              </label>
+              <label>
+                Isaac RGB-D Weight
+                <input id="lerobot-dataset-mix-isaac-rgbd-weight-input" type="number" min="0" step="0.05" value="0.5" />
+              </label>
+              <label>
+                Isaac Augmentation Weight
+                <input id="lerobot-dataset-mix-isaac-augmentation-weight-input" type="number" min="0" step="0.05" value="0.5" />
+              </label>
+              <label>
+                Mix Seed
+                <input id="lerobot-dataset-mix-seed-input" type="number" step="1" value="0" />
+              </label>
+              <label>
+                Real Original Max
+                <input id="lerobot-dataset-mix-real-max-input" type="number" min="0" step="1" placeholder="unlimited" />
+              </label>
+              <label>
+                Isaac RGB-D Max
+                <input id="lerobot-dataset-mix-isaac-rgbd-max-input" type="number" min="0" step="1" placeholder="unlimited" />
+              </label>
+              <label>
+                Isaac Augmentation Max
+                <input id="lerobot-dataset-mix-isaac-augmentation-max-input" type="number" min="0" step="1" placeholder="unlimited" />
+              </label>
+            </div>
+          </details>
 
           <details class="lerobot-details" open>
             <summary>Schedule & Checkpoints</summary>
@@ -675,7 +850,7 @@ Modification guide:
 
         <article id="rollout-card" class="panel lerobot-workflow-card">
           <div class="panel-title-row">
-            <h2>9. Inference / Rollout</h2>
+            <h2>10. Inference / Rollout</h2>
             <span class="hint">policy-controlled robot run</span>
           </div>
           <div class="lerobot-form-grid single">
@@ -760,7 +935,7 @@ Modification guide:
 
         <article id="manipulation-agent-card" class="panel lerobot-workflow-card">
           <div class="panel-title-row">
-            <h2>10. Manipulation Agent Bridge</h2>
+            <h2>11. Manipulation Agent Bridge</h2>
             <span class="hint">agent-level 3DP to UTM policy execution</span>
           </div>
           <p class="lerobot-card-note">
@@ -877,7 +1052,7 @@ Modification guide:
       <section id="session-output" class="split lerobot-output-split">
         <article class="panel">
           <div class="panel-title-row">
-            <h2>11. Session Output</h2>
+            <h2>12. Session Output</h2>
             <span class="hint">shared server state</span>
           </div>
           <h3 class="lerobot-output-subtitle">Recent Sessions</h3>
@@ -892,6 +1067,6 @@ Modification guide:
         </article>
       </section>
     </main>
-    <script src="/static/lerobot.js?v=20260624-isaac-link-1" defer></script>
+    <script src="/static/lerobot.js?v=20260630-rerun-pipeline-activecam-1" defer></script>
   </body>
 </html>

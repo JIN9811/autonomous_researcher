@@ -170,13 +170,15 @@ def Scope "Instances"
     )
     {
         over "follower_03_middle_verticle" (
-            apiSchemas = ["PhysicsCollisionAPI", "NewtonCollisionAPI", "MjcCollisionAPI", "PhysicsMeshCollisionAPI", "NewtonMeshCollisionAPI", "PhysicsMassAPI", "MaterialBindingAPI"]
+            apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "NewtonCollisionAPI", "MjcCollisionAPI", "PhysicsMeshCollisionAPI", "NewtonMeshCollisionAPI", "PhysicsMassAPI", "MaterialBindingAPI"]
         )
         {
             custom rel material:binding
             prepend rel material:binding = </Instances/follower_03_middle_verticle_1/VisualMaterials/black>
             custom rel material:binding:physics
             prepend rel material:binding:physics = </omx/Physics/PhysicsMaterial>
+            float physxCollision:contactOffset = 0.0005
+            float physxCollision:restOffset = 0
             int mjc:group = 3
             float newton:contactGap = 0 (
                 limits = {
@@ -185,7 +187,7 @@ def Scope "Instances"
                     }
                 }
             )
-            token physics:approximation = "convexHull"
+            token physics:approximation = "convexDecomposition"
             float physics:density = 1000
             token purpose = "guide"
         }
@@ -230,13 +232,15 @@ def Scope "Instances"
     )
     {
         over "follower_04_middle_horizontal" (
-            apiSchemas = ["PhysicsCollisionAPI", "NewtonCollisionAPI", "MjcCollisionAPI", "PhysicsMeshCollisionAPI", "NewtonMeshCollisionAPI", "PhysicsMassAPI", "MaterialBindingAPI"]
+            apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "NewtonCollisionAPI", "MjcCollisionAPI", "PhysicsMeshCollisionAPI", "NewtonMeshCollisionAPI", "PhysicsMassAPI", "MaterialBindingAPI"]
         )
         {
             custom rel material:binding
             prepend rel material:binding = </Instances/follower_04_middle_horizontal_1/VisualMaterials/black>
             custom rel material:binding:physics
             prepend rel material:binding:physics = </omx/Physics/PhysicsMaterial>
+            float physxCollision:contactOffset = 0.0005
+            float physxCollision:restOffset = 0
             int mjc:group = 3
             float newton:contactGap = 0 (
                 limits = {
@@ -245,7 +249,7 @@ def Scope "Instances"
                     }
                 }
             )
-            token physics:approximation = "convexHull"
+            token physics:approximation = "convexDecomposition"
             float physics:density = 1000
             token purpose = "guide"
         }
@@ -296,7 +300,7 @@ def Scope "Instances"
             custom rel material:binding
             prepend rel material:binding = </Instances/follower_05_tip_1/VisualMaterials/black>
             custom rel material:binding:physics
-            prepend rel material:binding:physics = </omx/Physics/AntiSlipTapeMaterial>
+            prepend rel material:binding:physics = </omx/Physics/PhysicsMaterial>
             float physxCollision:contactOffset = 0.001
             float physxCollision:restOffset = 0
             int mjc:group = 3
@@ -307,7 +311,7 @@ def Scope "Instances"
                     }
                 }
             )
-            token physics:approximation = "convexHull"
+            token physics:approximation = "convexDecomposition"
             float physics:density = 1000
             token purpose = "guide"
         }
@@ -352,13 +356,15 @@ def Scope "Instances"
     )
     {
         over "follower_06_pan_Revised" (
-            apiSchemas = ["PhysicsCollisionAPI", "NewtonCollisionAPI", "MjcCollisionAPI", "PhysicsMeshCollisionAPI", "NewtonMeshCollisionAPI", "PhysicsMassAPI", "MaterialBindingAPI"]
+            apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "NewtonCollisionAPI", "MjcCollisionAPI", "PhysicsMeshCollisionAPI", "NewtonMeshCollisionAPI", "PhysicsMassAPI", "MaterialBindingAPI"]
         )
         {
             custom rel material:binding
             prepend rel material:binding = </Instances/follower_06_pan_Revised_1/VisualMaterials/black>
             custom rel material:binding:physics
             prepend rel material:binding:physics = </omx/Physics/PhysicsMaterial>
+            float physxCollision:contactOffset = 0.0005
+            float physxCollision:restOffset = 0
             int mjc:group = 3
             float newton:contactGap = 0 (
                 limits = {
@@ -367,7 +373,7 @@ def Scope "Instances"
                     }
                 }
             )
-            token physics:approximation = "convexHull"
+            token physics:approximation = "convexDecomposition"
             float physics:density = 1000
             token purpose = "guide"
         }
@@ -418,8 +424,8 @@ def Scope "Instances"
             custom rel material:binding
             prepend rel material:binding = </Instances/follower_07_gripper_motorized_1/VisualMaterials/black>
             custom rel material:binding:physics
-            prepend rel material:binding:physics = </omx/Physics/AntiSlipTapeMaterial>
-            float physxCollision:contactOffset = 0.001
+            prepend rel material:binding:physics = </omx/Physics/PhysicsMaterial>
+            float physxCollision:contactOffset = 0.0005
             float physxCollision:restOffset = 0
             int mjc:group = 3
             float newton:contactGap = 0 (
@@ -480,8 +486,8 @@ def Scope "Instances"
             custom rel material:binding
             prepend rel material:binding = </Instances/follower_08_gripper_gear_1/VisualMaterials/black>
             custom rel material:binding:physics
-            prepend rel material:binding:physics = </omx/Physics/AntiSlipTapeMaterial>
-            float physxCollision:contactOffset = 0.001
+            prepend rel material:binding:physics = </omx/Physics/PhysicsMaterial>
+            float physxCollision:contactOffset = 0.0005
             float physxCollision:restOffset = 0
             int mjc:group = 3
             float newton:contactGap = 0 (

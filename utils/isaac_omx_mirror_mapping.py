@@ -11,9 +11,12 @@ ISAAC_OMX_SCENE_RELATIVE_PATH = Path("sim/robotis_omx/scene/omx_table_layout.usd
 ISAAC_OMX_ARTICULATION_ROOT = "/World/Robot/Geometry/link0"
 DYNAMIXEL_POSITION_MAX_TICK = 4095.0
 DYNAMIXEL_DEG_PER_TICK = 360.0 / DYNAMIXEL_POSITION_MAX_TICK
+ISAAC_OMX_X_SERIES_PROXY_BACKLASH_DEG = 0.25
+ISAAC_OMX_X_SERIES_PROXY_BACKLASH_SOURCE = "xm430_w350_15_arcmin_proxy"
 XL330_M288_T_STALL_TORQUE_NM_AT_5V = 0.52
 XL430_W250_T_STALL_TORQUE_NM_AT_12V = 1.5
-ISAAC_OMX_XL330_SIM_GRASP_FORCE_NM = 1.5
+ISAAC_OMX_XL330_ARM_SIM_DRIVE_FORCE_NM = 1.5
+ISAAC_OMX_XL430_ARM_SIM_DRIVE_FORCE_NM = 1.5
 ISAAC_OMX_GRIPPER_SIM_GRASP_FORCE_NM = 4.0
 ISAAC_OMX_ARM_DRIVE_STIFFNESS = 450.0
 ISAAC_OMX_ARM_DRIVE_DAMPING = 60.0
@@ -22,16 +25,29 @@ ISAAC_OMX_GRIPPER_DRIVE_DAMPING = 18.0
 ISAAC_OMX_XL330_M288_T_DRIVE = {
     "drive_stiffness": ISAAC_OMX_ARM_DRIVE_STIFFNESS,
     "drive_damping": ISAAC_OMX_ARM_DRIVE_DAMPING,
-    "drive_max_force": ISAAC_OMX_XL330_SIM_GRASP_FORCE_NM,
+    "drive_max_force": ISAAC_OMX_XL330_ARM_SIM_DRIVE_FORCE_NM,
 }
 ISAAC_OMX_XL430_W250_T_DRIVE = {
     "drive_stiffness": ISAAC_OMX_ARM_DRIVE_STIFFNESS,
     "drive_damping": ISAAC_OMX_ARM_DRIVE_DAMPING,
-    "drive_max_force": XL430_W250_T_STALL_TORQUE_NM_AT_12V,
+    "drive_max_force": ISAAC_OMX_XL430_ARM_SIM_DRIVE_FORCE_NM,
+}
+ISAAC_OMX_XL330_M288_T_METADATA = {
+    "motor_model": "xl330-m288",
+    "backlash_deg": ISAAC_OMX_X_SERIES_PROXY_BACKLASH_DEG,
+    "backlash_source": ISAAC_OMX_X_SERIES_PROXY_BACKLASH_SOURCE,
+    "backlash_note": "Isaac mirror applies a conservative 15 arcmin X-series proxy backlash hysteresis unless a measured per-joint calibration overrides it.",
+}
+ISAAC_OMX_XL430_W250_T_METADATA = {
+    "motor_model": "xl430-w250",
+    "backlash_deg": ISAAC_OMX_X_SERIES_PROXY_BACKLASH_DEG,
+    "backlash_source": ISAAC_OMX_X_SERIES_PROXY_BACKLASH_SOURCE,
+    "backlash_note": "Isaac mirror applies a conservative 15 arcmin X-series proxy backlash hysteresis unless a measured per-joint calibration overrides it.",
 }
 ISAAC_OMX_JOINT_MAP: tuple[dict[str, Any], ...] = (
     {
         **ISAAC_OMX_XL430_W250_T_DRIVE,
+        **ISAAC_OMX_XL430_W250_T_METADATA,
         "motor_id": 11,
         "motor_name": "shoulder_pan",
         "isaac_joint_name": "Joint1",
@@ -44,6 +60,7 @@ ISAAC_OMX_JOINT_MAP: tuple[dict[str, Any], ...] = (
     },
     {
         **ISAAC_OMX_XL430_W250_T_DRIVE,
+        **ISAAC_OMX_XL430_W250_T_METADATA,
         "motor_id": 12,
         "motor_name": "shoulder_lift",
         "isaac_joint_name": "Joint2",
@@ -61,6 +78,7 @@ ISAAC_OMX_JOINT_MAP: tuple[dict[str, Any], ...] = (
     },
     {
         **ISAAC_OMX_XL430_W250_T_DRIVE,
+        **ISAAC_OMX_XL430_W250_T_METADATA,
         "motor_id": 13,
         "motor_name": "elbow_flex",
         "isaac_joint_name": "Joint3",
@@ -78,6 +96,7 @@ ISAAC_OMX_JOINT_MAP: tuple[dict[str, Any], ...] = (
     },
     {
         **ISAAC_OMX_XL330_M288_T_DRIVE,
+        **ISAAC_OMX_XL330_M288_T_METADATA,
         "motor_id": 14,
         "motor_name": "wrist_flex",
         "isaac_joint_name": "Joint4",
@@ -95,6 +114,7 @@ ISAAC_OMX_JOINT_MAP: tuple[dict[str, Any], ...] = (
     },
     {
         **ISAAC_OMX_XL330_M288_T_DRIVE,
+        **ISAAC_OMX_XL330_M288_T_METADATA,
         "motor_id": 15,
         "motor_name": "wrist_roll",
         "isaac_joint_name": "Joint5",
@@ -107,6 +127,7 @@ ISAAC_OMX_JOINT_MAP: tuple[dict[str, Any], ...] = (
     },
     {
         **ISAAC_OMX_XL330_M288_T_DRIVE,
+        **ISAAC_OMX_XL330_M288_T_METADATA,
         "motor_id": 16,
         "motor_name": "gripper",
         "isaac_joint_name": "Gripper",
@@ -167,6 +188,31 @@ def _safe_float(value: Any, default: float) -> float:
         return default
 
 
+def _joint_backlash_metadata(item: dict[str, Any], rule: dict[str, Any] | None = None) -> dict[str, Any]:
+    metadata: dict[str, Any] = {}
+    motor_model = str(item.get("motor_model") or "").strip()
+    if motor_model:
+        metadata["motor_model"] = motor_model
+    if "backlash_deg" in item:
+        metadata["backlash_deg"] = _safe_float(item.get("backlash_deg"), 0.0)
+    if "backlash_source" in item:
+        metadata["backlash_source"] = str(item.get("backlash_source") or "")
+    if "backlash_note" in item:
+        metadata["backlash_note"] = str(item.get("backlash_note") or "")
+    if rule:
+        if "motor_model" in rule:
+            metadata["motor_model"] = str(rule.get("motor_model") or metadata.get("motor_model", ""))
+        if "backlash_deg" in rule:
+            metadata["backlash_deg"] = _safe_float(rule.get("backlash_deg"), _safe_float(metadata.get("backlash_deg"), 0.0))
+            metadata["backlash_source"] = str(rule.get("backlash_source") or "calibration")
+        if "backlash_enabled" in rule and not bool(rule.get("backlash_enabled")):
+            metadata["backlash_deg"] = 0.0
+            metadata["backlash_source"] = str(rule.get("backlash_source") or "calibration_disabled")
+        if "backlash_direction_sign" in rule:
+            metadata["backlash_direction_sign"] = _safe_float(rule.get("backlash_direction_sign"), 1.0)
+    return metadata
+
+
 def _source_value_to_dynamixel_raw(item: dict[str, Any], source_value: float) -> float | None:
     mode = str(item.get("source_to_raw_mode") or "")
     if not mode:
@@ -185,7 +231,12 @@ def _source_value_to_dynamixel_raw(item: dict[str, Any], source_value: float) ->
     return None
 
 
-def _base_target_from_source(item: dict[str, Any], source_value: Any, *, values_are_isaac_targets: bool = False) -> dict[str, Any]:
+def _base_target_from_source(
+    item: dict[str, Any],
+    source_value: Any,
+    *,
+    values_are_isaac_targets: bool = False,
+) -> dict[str, Any]:
     raw = _safe_float(source_value, 0.0)
     if values_are_isaac_targets:
         return {"base_target_value": raw, "conversion_mode": "isaac_target"}
@@ -323,12 +374,18 @@ def _joint_state_entry(item: dict[str, Any], source_value: Any, *, calibration: 
         "source_value_is_isaac_target": bool(values_are_isaac_targets),
         "unit": item.get("unit", "deg"),
     }
-    for key in ("conversion_mode", "source_raw_position", "source_zero_raw_position", "dynamixel_deg_per_tick"):
+    for key in (
+        "conversion_mode",
+        "source_raw_position",
+        "source_zero_raw_position",
+        "dynamixel_deg_per_tick",
+    ):
         if key in converted:
             entry[key] = converted[key]
     for key in ("drive_stiffness", "drive_damping", "drive_max_force"):
         if key in item:
             entry[key] = _safe_float(item.get(key), 0.0)
+    entry.update(_joint_backlash_metadata(item, converted.get("calibration_rule")))
     return entry
 
 
@@ -409,6 +466,7 @@ def joint_state_item_to_isaac_target(
                 result[key] = _safe_float(mapped_item.get(key), 0.0)
             elif key in payload_item:
                 result[key] = _safe_float(payload_item.get(key), 0.0)
+        result.update(_joint_backlash_metadata(mapped_item, converted.get("calibration_rule")))
         return result
     fallback_value = payload_item.get("target_value", payload_item.get("position_deg", 0.0))
     target = _safe_float(fallback_value, 0.0)
@@ -431,6 +489,7 @@ def joint_state_item_to_isaac_target(
             result[key] = _safe_float(payload_item.get(key), 0.0)
         elif mapped_item is not None and key in mapped_item:
             result[key] = _safe_float(mapped_item.get(key), 0.0)
+    result.update(_joint_backlash_metadata(mapped_item or payload_item, result.get("calibration_rule")))
     return result
 
 

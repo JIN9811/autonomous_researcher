@@ -85,6 +85,15 @@ The physics contract is intentionally "physics-lite":
   scene stepping and later contact-aware improvements.
 - It is not yet a full manipulation simulator with grasp/contact validation.
 
+Robot payload/collision notes:
+
+- The wrist/end-effector `link5` mass properties include the mounted Intel
+  RealSense D405 wrist camera as a `0.06 kg` payload, with the payload COM
+  recorded in USD metadata for future measured adjustment.
+- The board-like arm collision instances for the middle/tip/pan links use
+  mesh convex decomposition instead of broad convex hulls, so side-board contact
+  does not get replaced by a large empty-space hull.
+
 Regenerate the scene only through Isaac Sim Python because system Python does
 not provide `pxr`:
 
@@ -110,6 +119,23 @@ Follower motor mapping:
 | 14 | `wrist_flex` | `Joint4` | `/World/Robot/Geometry/link0/link1/link2/link3/link4/Joint4` |
 | 15 | `wrist_roll` | `Joint5` | `/World/Robot/Geometry/link0/link1/link2/link3/link4/link5/Joint5` |
 | 16 | `gripper` | `Gripper` | `/World/Robot/Geometry/link0/link1/link2/link3/link4/link5/link6/Gripper` |
+
+Follower motor backlash model:
+
+| Follower motor ID | Motor name | LeRobot motor model | Isaac backlash used | Source |
+| --- | --- | --- | --- | --- |
+| 11 | `shoulder_pan` | `xl430-w250` | `0.25 deg` | `xm430_w350_15_arcmin_proxy` |
+| 12 | `shoulder_lift` | `xl430-w250` | `0.25 deg` | `xm430_w350_15_arcmin_proxy` |
+| 13 | `elbow_flex` | `xl430-w250` | `0.25 deg` | `xm430_w350_15_arcmin_proxy` |
+| 14 | `wrist_flex` | `xl330-m288` | `0.25 deg` | `xm430_w350_15_arcmin_proxy` |
+| 15 | `wrist_roll` | `xl330-m288` | `0.25 deg` | `xm430_w350_15_arcmin_proxy` |
+| 16 | `gripper` | `xl330-m288` | `0.25 deg` | `xm430_w350_15_arcmin_proxy` |
+
+The Isaac receiver applies this conservative X-series proxy hysteresis before
+writing `drive:angular:physics:targetPosition`. Override it only with measured
+per-joint values in `memory/isaac_omx_mirror_calibration.json` using
+`backlash_deg` and `backlash_source`, or set `backlash_enabled=false` for a
+specific diagnostic run.
 
 The gripper mimic path is:
 
@@ -150,7 +176,8 @@ Calibration format:
       "scale": 1.0,
       "offset_deg": 5.0,
       "clamp_lower_deg": -120.0,
-      "clamp_upper_deg": 90.0
+      "clamp_upper_deg": 90.0,
+      "backlash_enabled": false
     }
   }
 }
@@ -162,6 +189,11 @@ Rule keys may be the ATR motor name (`shoulder_lift`), Isaac joint name
 ```text
 LeRobot action/position -> base Isaac target -> sign/scale/offset -> clamp
 ```
+
+Backlash override is applied by the Isaac receiver after conversion and before
+the joint drive target is written. The default live teleoperation path uses the
+0.25 degree proxy backlash for every mapped joint unless calibration overrides
+it.
 
 The bridge passes the same calibration file into live teleoperation/recording
 with:
@@ -413,12 +445,11 @@ visible/current Isaac stage while the physical robot moves.
 Timeline handling:
 
 - The extension does not call `timeline.play()` immediately during startup.
-- When `playTimelineOnStartup=true`, it registers a delayed Kit update callback
-  and starts the timeline after the GUI and scene have settled.
+- Managed live launch uses `playTimelineOnStartup=false`; press Play in Isaac
+  after the GUI and scene have settled.
 - The default delayed Play setting is `playTimelineDelayTicks=300`.
-- This avoids the observed Isaac/Kit startup crash
-  `Cannot calculate frequency: TSC ran backwards` while preserving automatic
-  visible-stage playback.
+- This avoids observed Isaac/Kit startup crashes during GUI/RTX initialization
+  and keeps Active Robot Cam capture tied to explicit Play events.
 - If the timeline is paused, `/health.sample_count` can still increase and the
   USD joint target/state attributes can still update, but the viewport may not
   visibly step until Play is active.
@@ -466,7 +497,7 @@ Managed GUI launch uses the extension by default:
   --/exts/atr.omx.mirror/scene=/home/jin/autonomous_researcher/sim/robotis_omx/scene/omx_table_layout.usda \
   --/exts/atr.omx.mirror/useCurrentStage=true \
   --/exts/atr.omx.mirror/openSceneOnStartup=true \
-  --/exts/atr.omx.mirror/playTimelineOnStartup=true \
+  --/exts/atr.omx.mirror/playTimelineOnStartup=false \
   --/exts/atr.omx.mirror/playTimelineDelayTicks=300
 ```
 

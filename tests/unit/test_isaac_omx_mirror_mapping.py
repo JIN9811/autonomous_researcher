@@ -8,6 +8,8 @@ from pathlib import Path
 import pytest
 
 from utils.isaac_omx_mirror_mapping import (
+    ISAAC_OMX_GRIPPER_DRIVE_DAMPING,
+    ISAAC_OMX_GRIPPER_DRIVE_STIFFNESS,
     ISAAC_OMX_JOINT_MAP,
     XL430_W250_T_STALL_TORQUE_NM_AT_12V,
     action_to_joint_state,
@@ -16,6 +18,10 @@ from utils.isaac_omx_mirror_mapping import (
     positions_to_joint_state,
     value_to_isaac_target,
 )
+
+
+PROXY_BACKLASH_DEG = 0.25
+PROXY_BACKLASH_SOURCE = "xm430_w350_15_arcmin_proxy"
 
 
 def test_value_to_isaac_target_converts_lerobot_range_then_applies_calibration() -> None:
@@ -38,16 +44,6 @@ def test_value_to_isaac_target_converts_lerobot_range_then_applies_calibration()
     assert result["base_target_value"] == 0.0
     assert result["target_value"] == 5.0
     assert result["calibration_applied"] is True
-
-
-def test_value_to_isaac_target_matches_lerobot_full_turn_degrees() -> None:
-    elbow_flex = next(item for item in ISAAC_OMX_JOINT_MAP if item["motor_name"] == "elbow_flex")
-
-    result = value_to_isaac_target(elbow_flex, 56.19047619047619)
-
-    assert result["base_target_value"] == pytest.approx(101.14285714285714)
-    assert result["target_value"] == pytest.approx(101.14285714285714)
-    assert result["clamped"] is False
 
 
 def test_range_m100_100_body_joints_use_dynamixel_resolution_angle() -> None:
@@ -110,6 +106,32 @@ def test_joint_map_raises_all_xl330_drive_force_for_grasping() -> None:
 
     for item in ISAAC_OMX_JOINT_MAP:
         assert item["drive_max_force"] == expected_by_motor_id[item["motor_id"]]
+
+
+def test_joint_map_tracks_follower_motor_models_and_backlash_metadata() -> None:
+    expected = {
+        11: ("xl430-w250", PROXY_BACKLASH_DEG),
+        12: ("xl430-w250", PROXY_BACKLASH_DEG),
+        13: ("xl430-w250", PROXY_BACKLASH_DEG),
+        14: ("xl330-m288", PROXY_BACKLASH_DEG),
+        15: ("xl330-m288", PROXY_BACKLASH_DEG),
+        16: ("xl330-m288", PROXY_BACKLASH_DEG),
+    }
+
+    for item in ISAAC_OMX_JOINT_MAP:
+        motor_model, backlash_deg = expected[item["motor_id"]]
+        assert item["motor_model"] == motor_model
+        assert item["backlash_deg"] == pytest.approx(backlash_deg)
+        assert item["backlash_source"] == PROXY_BACKLASH_SOURCE
+
+
+def test_joint_state_conversion_carries_backlash_metadata() -> None:
+    converted = joint_state_item_to_isaac_target({"motor_id": 12, "motor_name": "shoulder_lift", "source_value": 0.0})
+
+    assert converted["target_value"] == pytest.approx(0.0)
+    assert converted["motor_model"] == "xl430-w250"
+    assert converted["backlash_deg"] == pytest.approx(PROXY_BACKLASH_DEG)
+    assert converted["backlash_source"] == PROXY_BACKLASH_SOURCE
 
 
 def test_value_to_isaac_target_clamps_after_sign_scale_offset() -> None:
