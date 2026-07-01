@@ -89,6 +89,7 @@ def _make_trainable_lerobot_dataset(path: Path) -> None:
     (path / "meta" / "episodes_stats.jsonl").write_text(json.dumps({"episode_index": 0, "stats": {}}) + "\n", encoding="utf-8")
     (path / "data" / "chunk-000" / "episode_000000.parquet").write_bytes(b"PAR1")
     _write_raw_depth_manifest(path)
+    _write_raw_depth_frames(path, count=1)
 
 
 def _write_raw_depth_manifest(path: Path) -> None:
@@ -638,6 +639,32 @@ def test_mirror_receiver_process_start_status_and_stop(tmp_path: Path) -> None:
     }
 
 
+def test_mirror_receiver_process_start_reports_exited_process_before_timeout(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    target_script = tmp_path / "sim" / "robotis_omx" / "tools" / "isaac_omx_mirror_server.py"
+    target_script.parent.mkdir(parents=True, exist_ok=True)
+    target_script.write_text("# receiver fixture\n", encoding="utf-8")
+    exit_script = tmp_path / "exit_receiver.sh"
+    exit_script.write_text("#!/bin/sh\nexit 7\n", encoding="utf-8")
+    exit_script.chmod(0o755)
+    port = _free_tcp_port()
+
+    result = bridge.mirror_receiver_process_start(
+        {
+            "mode": "test",
+            "profile_id": "fake_omx_ai",
+            "isaac_mirror_endpoint": f"http://127.0.0.1:{port}/joints",
+            "isaac_mirror_receiver_python": str(exit_script),
+            "isaac_mirror_receiver_start_timeout_s": 5.0,
+        }
+    )
+
+    assert result["ok"] is False
+    assert result["status"] == "failed"
+    assert result["failure_code"] == "LEROBOT_ISAAC_MIRROR_RECEIVER_EXITED"
+    assert result["health"]["returncode"] == 7
+
+
 
 def test_mirror_receiver_extension_command_uses_isaac_app_and_extension(tmp_path: Path) -> None:
     bridge = _bridge(tmp_path)
@@ -645,6 +672,8 @@ def test_mirror_receiver_extension_command_uses_isaac_app_and_extension(tmp_path
     isaac_app.parent.mkdir(parents=True, exist_ok=True)
     isaac_app.write_text("#!/bin/sh\n", encoding="utf-8")
     isaac_app.chmod(0o755)
+    site_packages = isaac_app.parent / "kit" / "python" / "lib" / "python3.12" / "site-packages"
+    site_packages.mkdir(parents=True, exist_ok=True)
     extension_manifest = tmp_path / "sim" / "robotis_omx" / "extensions" / "atr.omx.mirror" / "config" / "extension.toml"
     extension_manifest.parent.mkdir(parents=True, exist_ok=True)
     extension_manifest.write_text("[package]\ntitle = \"ATR ROBOTIS OMX Mirror Receiver\"\n", encoding="utf-8")
@@ -664,6 +693,7 @@ def test_mirror_receiver_extension_command_uses_isaac_app_and_extension(tmp_path
     assert command_info["ok"] is True
     command = command_info["command"]
     assert command[0] == str(isaac_app)
+    assert f"--/app/python/extraPaths/0={site_packages}" in command
     assert "--ext-folder" in command
     assert str(tmp_path / "sim" / "robotis_omx" / "extensions") in command
     assert "--enable" in command
@@ -4179,6 +4209,12 @@ def test_live_record_status_exposes_in_process_isaac_mirror_sidecar_progress(tmp
         },
         raising=False,
     )
+    bridge.mirror_receiver_process_start = lambda payload: {  # type: ignore[method-assign]
+        "ok": True,
+        "status": "RUNNING",
+        "pid": 4321,
+        "health": {"ok": True, "health_url": "http://127.0.0.1:8766/health", "apply_mode": "deferred_update_tick"},
+    }
     bridge._start_live_process = lambda **kwargs: {"ok": True, "session_updates": {"pid": 1234, "log_path": "", "returncode": None}}  # type: ignore[method-assign]
 
     started = bridge.record_start(
@@ -4427,6 +4463,12 @@ def test_live_record_stop_summarizes_in_process_isaac_mirror_sidecar_metrics(tmp
         },
         raising=False,
     )
+    bridge.mirror_receiver_process_start = lambda payload: {  # type: ignore[method-assign]
+        "ok": True,
+        "status": "RUNNING",
+        "pid": 4321,
+        "health": {"ok": True, "health_url": "http://127.0.0.1:8766/health", "apply_mode": "deferred_update_tick"},
+    }
     bridge._start_live_process = lambda **kwargs: {"ok": True, "session_updates": {"pid": 1234, "log_path": "", "returncode": None}}  # type: ignore[method-assign]
 
     started = bridge.record_start(
@@ -4496,6 +4538,12 @@ def test_live_record_with_in_process_isaac_mirror_does_not_precreate_lerobot_dat
         },
         raising=False,
     )
+    bridge.mirror_receiver_process_start = lambda payload: {  # type: ignore[method-assign]
+        "ok": True,
+        "status": "RUNNING",
+        "pid": 4321,
+        "health": {"ok": True, "health_url": "http://127.0.0.1:8766/health", "apply_mode": "deferred_update_tick"},
+    }
     bridge._start_live_process = lambda **kwargs: {"ok": True, "session_updates": {"pid": 1234, "log_path": "", "returncode": None}}  # type: ignore[method-assign]
 
     started = bridge.record_start(
@@ -4561,11 +4609,34 @@ def test_train_raw_depth_adapter_env_points_to_dataset_sidecar(tmp_path: Path) -
     assert env["ATR_LEROBOT_DEPTH_CLIP_MAX_MM"] == "2000.0"
 
 
+def test_train_start_blocks_raw_depth_adapter_when_manifest_has_no_frames(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    dataset = tmp_path / "hf_datasets" / "jin" / "raw-adapter-empty"
+    _make_trainable_lerobot_dataset(dataset)
+    shutil.rmtree(dataset / "sidecar" / "depth_raw" / "top", ignore_errors=True)
+    shutil.rmtree(dataset / "sidecar" / "depth_raw" / "wrist", ignore_errors=True)
+
+    result = bridge.train_start(
+        {
+            "mode": "test",
+            "profile_id": "fake_omx_ai",
+            "dataset_path": str(dataset),
+            "observation_pipeline_id": "raw_depth_adapter",
+        }
+    )
+
+    assert result["ok"] is False
+    assert result["status"] == "blocked"
+    assert result["failure_code"] == "LEROBOT_RAW_DEPTH_FRAMES_MISSING"
+
+
 def test_train_preflight_normalizes_raw_depth_sidecar_frame_indices(tmp_path: Path) -> None:
     bridge = _bridge(tmp_path)
     dataset = tmp_path / "hf_datasets" / "jin" / "raw-depth-offset"
     _make_trainable_lerobot_dataset(dataset)
     sidecar_root = dataset / "sidecar" / "depth_raw"
+    shutil.rmtree(sidecar_root / "top", ignore_errors=True)
+    shutil.rmtree(sidecar_root / "wrist", ignore_errors=True)
     for index in (0, 1, 2):
         (sidecar_root / "top").mkdir(parents=True, exist_ok=True)
         (sidecar_root / "top" / f"frame_{index:06d}.png").write_bytes(f"top-{index}".encode("utf-8"))

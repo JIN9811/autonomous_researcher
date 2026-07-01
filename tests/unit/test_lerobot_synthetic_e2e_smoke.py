@@ -2,12 +2,26 @@
 
 from __future__ import annotations
 
+import struct
 from pathlib import Path
 
 import h5py
+import numpy as np
+from PIL import Image
 
 from device_bridges.lerobot_bridge import LeRobotBridge, LeRobotBridgeConfig
 from scripts.lerobot_synthetic_e2e_smoke import build_fixture_recording_dataset, run_e2e_smoke
+
+
+def _png_bit_depth(path: Path) -> tuple[int, int]:
+    data = path.read_bytes()
+    assert data[:8] == b"\x89PNG\r\n\x1a\n"
+    length = struct.unpack(">I", data[8:12])[0]
+    assert data[12:16] == b"IHDR"
+    ihdr = data[16 : 16 + length]
+    bit_depth = ihdr[8]
+    color_type = ihdr[9]
+    return bit_depth, color_type
 
 
 def _bridge(tmp_path: Path) -> LeRobotBridge:
@@ -65,6 +79,15 @@ def test_five_by_ten_second_fixture_flows_to_synthetic_hdf5_and_train_smoke(tmp_
     assert report["ok"] is True
     assert fixture["episode_count"] == 5
     assert fixture["frame_count"] == 750
+    for camera in ("top", "wrist"):
+        depth_frames = sorted((dataset / "sidecar" / "depth_raw" / camera).glob("frame_*.png"))
+        assert len(depth_frames) == 750
+        assert depth_frames[0].name == "frame_000000.png"
+        assert depth_frames[-1].name == "frame_000749.png"
+        assert _png_bit_depth(depth_frames[0]) == (16, 0)
+        depth = np.asarray(Image.open(depth_frames[0]))
+        assert depth.ndim == 2
+        assert int(depth.max()) > int(depth.min()) > 0
     assert report["recording_fixture"]["frame_count"] == 750
     assert report["synthetic"]["status"] == "READY_FOR_TRAINING"
     assert report["synthetic"]["canonical_episode_index"]["frame_count"] == 750

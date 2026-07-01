@@ -964,16 +964,24 @@ class LeRobotBridge:
         self._receiver_commands[process_key] = command
         default_timeout_s = 180.0 if launch_mode == "isaac_extension" else 5.0
         timeout_s = _safe_float(raw_payload.get("isaac_mirror_receiver_start_timeout_s"), default_timeout_s, minimum=0.1, maximum=300.0)
-        health = self._wait_for_isaac_mirror_receiver(endpoint, timeout_s=timeout_s, request_timeout_s=self._isaac_mirror_timeout_s(request))
+        health = self._wait_for_isaac_mirror_receiver(endpoint, timeout_s=timeout_s, request_timeout_s=self._isaac_mirror_timeout_s(request), process=process)
         if not health.get("ok"):
+            failure_code = str(health.get("failure_code") or "LEROBOT_ISAAC_MIRROR_RECEIVER_HEALTH_TIMEOUT")
+            message = (
+                str(health.get("message"))
+                if health.get("message")
+                else f"Receiver process started but health did not become ready within {timeout_s:g}s."
+            )
+            if failure_code == "LEROBOT_ISAAC_MIRROR_RECEIVER_EXITED":
+                self._stop_receiver_process(process_key)
             return {
                 "ok": False,
                 "tool": "lerobot.mirror.receiver_process.start",
                 "mode": mode,
                 "profile_id": profile_id,
-                "status": "STARTING",
-                "failure_code": "LEROBOT_ISAAC_MIRROR_RECEIVER_HEALTH_TIMEOUT",
-                "message": f"Receiver process started but health did not become ready within {timeout_s:g}s.",
+                "status": "failed" if failure_code == "LEROBOT_ISAAC_MIRROR_RECEIVER_EXITED" else "STARTING",
+                "failure_code": failure_code,
+                "message": message,
                 "pid": process.pid,
                 "launch_mode": launch_mode,
                 "command_preview": command,
@@ -981,7 +989,7 @@ class LeRobotBridge:
                 "health": health,
                 "step_trace": [{"step": "RECEIVER_PROCESS_STARTED", "status": "active", "detail": f"pid={process.pid}"}],
                 "events": [{"step": "RECEIVER_PROCESS_STARTED", "status": "active", "detail": f"pid={process.pid}"}],
-                "error": f"Receiver process started but health did not become ready within {timeout_s:g}s.",
+                "error": message,
             }
         step_trace = [
             {"step": "RECEIVER_PROCESS_STARTED", "status": "ok", "detail": f"pid={process.pid}"},
@@ -5330,10 +5338,26 @@ class LeRobotBridge:
         except (URLError, TimeoutError, OSError) as exc:
             return {"ok": False, "status_code": None, "timeline_play_url": play_url, "message": f"{exc.__class__.__name__}: {exc}"}
 
-    def _wait_for_isaac_mirror_receiver(self, endpoint: str, *, timeout_s: float, request_timeout_s: float) -> dict[str, Any]:
+    def _wait_for_isaac_mirror_receiver(
+        self,
+        endpoint: str,
+        *,
+        timeout_s: float,
+        request_timeout_s: float,
+        process: subprocess.Popen[str] | None = None,
+    ) -> dict[str, Any]:
         deadline = time.monotonic() + timeout_s
         last: dict[str, Any] = {"ok": False, "message": "not checked"}
         while time.monotonic() < deadline:
+            if process is not None:
+                returncode = process.poll()
+                if returncode is not None:
+                    return {
+                        "ok": False,
+                        "failure_code": "LEROBOT_ISAAC_MIRROR_RECEIVER_EXITED",
+                        "message": f"Receiver process exited before health became ready (returncode={returncode}).",
+                        "returncode": returncode,
+                    }
             last = self._fetch_isaac_mirror_receiver_health(endpoint, timeout_s=request_timeout_s)
             if last.get("ok"):
                 return last
@@ -5535,8 +5559,14 @@ class LeRobotBridge:
                     "failure_code": "LEROBOT_ISAAC_SIM_EXECUTABLE_NOT_FOUND",
                     "message": f"Isaac Sim executable not found: {executable}",
                 }
+            python_site_packages = self._isaac_sim_python_site_packages(executable)
             command = [
                 executable,
+                *(
+                    [f"--/app/python/extraPaths/0={python_site_packages}"]
+                    if python_site_packages
+                    else []
+                ),
                 "--ext-folder",
                 str(extension_root),
                 "--enable",
@@ -5598,6 +5628,18 @@ class LeRobotBridge:
         if isaac_sim.exists():
             return str(isaac_sim)
         return "isaac-sim.sh"
+
+    @staticmethod
+    def _isaac_sim_python_site_packages(executable: str) -> str:
+        resolved = Path(executable)
+        if not resolved.exists():
+            found = shutil.which(executable)
+            if not found:
+                return ""
+            resolved = Path(found)
+        python_lib = resolved.parent / "kit" / "python" / "lib"
+        candidates = sorted(p for p in python_lib.glob("python*/site-packages") if p.is_dir())
+        return str(candidates[-1]) if candidates else ""
 
     @staticmethod
     def _isaac_mirror_receiver_python(payload: dict[str, Any]) -> str:
@@ -6172,15 +6214,34 @@ class LeRobotBridge:
                 f"Selected pipeline '{requested}' does not match dataset metadata '{recorded}' at {metadata.get('path')}.",
                 workflow,
             )
-        if requested == "raw_depth_adapter" and mode == "live" and not self._dataset_raw_depth_manifest_path(dataset_path).is_file():
-            return self._blocked(
-                tool,
-                mode,
-                profile.profile_id,
-                "LEROBOT_RAW_DEPTH_ADAPTER_SOURCE_MISSING",
-                f"Raw Depth Adapter requires {self._dataset_raw_depth_manifest_path(dataset_path)}.",
-                workflow,
-            )
+        should_validate_raw_depth = bool(
+            requested == "raw_depth_adapter"
+            and workflow in {"train", "rollout"}
+            and (mode == "live" or bool(str(request.dataset_path or "").strip()) or self._is_trainable_lerobot_dataset(dataset_path))
+        )
+        if should_validate_raw_depth:
+            raw_depth = self._dataset_raw_depth_health(dataset_path)
+            if not raw_depth.get("available"):
+                return self._blocked(
+                    tool,
+                    mode,
+                    profile.profile_id,
+                    "LEROBOT_RAW_DEPTH_ADAPTER_SOURCE_MISSING",
+                    f"Raw Depth Adapter requires {raw_depth.get('manifest_path')}.",
+                    workflow,
+                )
+            camera_counts = raw_depth.get("camera_counts") if isinstance(raw_depth.get("camera_counts"), dict) else {}
+            missing_cameras = [str(camera) for camera, count in camera_counts.items() if _safe_int(count, 0, minimum=0) <= 0]
+            if _safe_int(raw_depth.get("total_frame_count"), 0, minimum=0) <= 0 or missing_cameras:
+                detail = f" missing cameras={','.join(missing_cameras)}" if missing_cameras else ""
+                return self._blocked(
+                    tool,
+                    mode,
+                    profile.profile_id,
+                    "LEROBOT_RAW_DEPTH_FRAMES_MISSING",
+                    f"Raw Depth Adapter requires uint16 PNG frames under {Path(str(raw_depth.get('manifest_path'))).parent}.{detail}",
+                    workflow,
+                )
         return None
 
     def _expected_record_depth_features(self, profile: RobotProfile, request: LeRobotSessionRequest) -> list[str]:

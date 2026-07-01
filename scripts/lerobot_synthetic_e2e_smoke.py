@@ -14,8 +14,10 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
+from PIL import Image
 
 from device_bridges.lerobot_bridge import LeRobotBridge, LeRobotBridgeConfig
 from utils.config_loader import load_all_configs
@@ -38,6 +40,36 @@ def _json_write(path: Path, payload: dict[str, Any]) -> None:
 def _jsonl_write(path: Path, rows: list[dict[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows), encoding="utf-8")
+
+
+def _write_raw_depth_fixture_frames(
+    dataset_path: Path,
+    *,
+    episodes: int,
+    frames_per_episode: int,
+) -> dict[str, Any]:
+    height = 48
+    width = 64
+    x_gradient = np.arange(width, dtype=np.uint16).reshape(1, width)
+    y_gradient = np.arange(height, dtype=np.uint16).reshape(height, 1)
+    camera_bases = {"top": 620, "wrist": 780}
+    frame_count = int(episodes) * int(frames_per_episode)
+    camera_counts: dict[str, int] = {}
+    for camera, base_depth_mm in camera_bases.items():
+        camera_dir = dataset_path / "sidecar" / "depth_raw" / camera
+        camera_dir.mkdir(parents=True, exist_ok=True)
+        camera_counts[camera] = 0
+        for global_index in range(frame_count):
+            depth = base_depth_mm + (global_index % 37) + x_gradient + (y_gradient * 2)
+            Image.fromarray(depth.astype(np.uint16)).save(camera_dir / f"frame_{global_index:06d}.png")
+            camera_counts[camera] += 1
+    return {
+        "camera_counts": camera_counts,
+        "frame_count_per_camera": frame_count,
+        "height": height,
+        "width": width,
+        "dtype": "uint16",
+    }
 
 
 def build_fixture_recording_dataset(
@@ -107,6 +139,11 @@ def build_fixture_recording_dataset(
             "depth_clip_max_mm": 2000.0,
         },
     )
+    raw_depth = _write_raw_depth_fixture_frames(
+        dataset_path,
+        episodes=int(episodes),
+        frames_per_episode=frames_per_episode,
+    )
     return {
         "schema": "atr.lerobot.synthetic_e2e.fixture.v1",
         "dataset_path": str(dataset_path),
@@ -115,6 +152,7 @@ def build_fixture_recording_dataset(
         "fps": int(fps),
         "frames_per_episode": frames_per_episode,
         "frame_count": frame_count,
+        "raw_depth": raw_depth,
     }
 
 
