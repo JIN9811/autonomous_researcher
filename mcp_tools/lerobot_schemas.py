@@ -22,14 +22,200 @@ Modification guide:
 
 from __future__ import annotations
 
+from enum import Enum
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 RuntimeMode = Literal["live", "test", "replay", "fault-injection"]
 LeRobotDeviceRole = Literal["follower", "leader", "camera"]
 DEFAULT_ISAAC_RGBD_RENDER_CAMERAS = "top,front,right"
+
+
+class IsaacSyntheticPipelineMode(str, Enum):
+    """Synthetic pipeline backend selected by section 7."""
+
+    ISAAC_LAB_REPLICATOR = "isaac_lab_replicator"
+    REPLICATOR_RENDER_ONLY = "replicator_render_only"
+    LEGACY_SIDECAR = "legacy_sidecar"
+
+
+class IsaacSyntheticFallbackPolicy(str, Enum):
+    """Policy for legacy sidecar use when the primary synthetic path is blocked."""
+
+    BLOCK_ON_PRIMARY_FAILURE = "block_on_primary_failure"
+    ALLOW_LEGACY_FALLBACK = "allow_legacy_fallback"
+    LEGACY_ONLY = "legacy_only"
+
+
+class IsaacSyntheticSourceIntent(str, Enum):
+    """Operator intent for preview/debug/train exposure."""
+
+    PREVIEW_ONLY = "preview_only"
+    TRAIN_READY_SUCCESS_ONLY = "train_ready_success_only"
+    DEBUG_INCLUDE_FAILED = "debug_include_failed"
+
+
+class IsaacSyntheticSourceType(str, Enum):
+    """Stable source labels used by manifests and training mix logic."""
+
+    REAL_LEROBOT = "real_lerobot"
+    ISAAC_RGBD_RENDER = "isaac_rgbd_render"
+    REPLICATOR_RENDER_ONLY = "replicator_render_only"
+    ISAAC_TELEOP_REPLAY_RENDER = "isaac_teleop_replay_render"
+    ISAAC_LAB_MIMIC = "isaac_lab_mimic"
+    ISAAC_LAB_RL_TEACHER = "isaac_lab_rl_teacher"
+    LEGACY_SIDECAR = "legacy_sidecar"
+
+
+class IsaacSyntheticRunStatus(str, Enum):
+    """Top-level run status returned by Isaac Lab synthetic endpoints."""
+
+    IDLE = "IDLE"
+    VALIDATING = "VALIDATING"
+    BLOCKED = "BLOCKED"
+    READY_TO_BUILD = "READY_TO_BUILD"
+    BUILDING = "BUILDING"
+    READY_FOR_PREVIEW = "READY_FOR_PREVIEW"
+    READY_FOR_HDF5 = "READY_FOR_HDF5"
+    READY_FOR_TRAINING = "READY_FOR_TRAINING"
+    FAILED = "FAILED"
+    CANCELLED = "CANCELLED"
+
+
+class IsaacSyntheticStage(str, Enum):
+    """Validation/build stage names shared by API, CLI, and manifests."""
+
+    REQUEST = "request"
+    RUNTIME = "runtime"
+    DIGITAL_TWIN = "digital_twin"
+    DEPTH = "depth"
+    CANONICAL_INDEX = "canonical_index"
+    PHYSICS = "physics"
+    ARTICULATION = "articulation"
+    REPLICATOR = "replicator"
+    HDF5 = "hdf5"
+    MIMIC = "mimic"
+    RL_TEACHER = "rl_teacher"
+    TRAINING = "training"
+    LEGACY = "legacy"
+
+
+class IsaacLabSyntheticRequest(BaseModel):
+    """Shared payload for Isaac Lab synthetic validation/build endpoints."""
+
+    mode: RuntimeMode = "test"
+    runtime_mode: RuntimeMode | None = None
+    profile_id: str = ""
+    dataset_path: str = ""
+    dataset_root: str = ""
+    dataset_repo_id: str = ""
+    repo_id: str | None = None
+    profile_name: str | None = None
+
+    pipeline_mode: IsaacSyntheticPipelineMode = IsaacSyntheticPipelineMode.ISAAC_LAB_REPLICATOR
+    fallback_policy: IsaacSyntheticFallbackPolicy = IsaacSyntheticFallbackPolicy.BLOCK_ON_PRIMARY_FAILURE
+    source_intent: IsaacSyntheticSourceIntent = IsaacSyntheticSourceIntent.TRAIN_READY_SUCCESS_ONLY
+
+    output_root: str | None = None
+    force_rebuild: bool = False
+    resume: bool = True
+    overwrite_latest: bool = True
+    dry_run: bool = False
+    job_id: str = ""
+
+    isaac_lab_path: str = ""
+    isaac_sim_python: str = ""
+    isaac_sim_version: str = ""
+    isaac_sim_docs_version: str = ""
+    stage_path: str = ""
+
+    cameras: list[str] = Field(default_factory=lambda: ["top", "front", "right"])
+    max_source_frames: int = Field(default=150, ge=1, le=5000)
+    attempts_per_source_frame: int = Field(default=1, ge=1, le=100)
+    seed: int = Field(default=42, ge=0)
+    isaac_data_augmentation_preview_count: int = Field(default=20, ge=1, le=200)
+    validation_checks: list[str] = Field(default_factory=lambda: ["all"])
+
+    augmentation_profile: str = "conservative"
+    rgb_strength: float = Field(default=0.15, ge=0.0, le=1.0)
+    depth_strength: float = Field(default=0.15, ge=0.0, le=1.0)
+    render_strength: float = Field(default=0.15, ge=0.0, le=1.0)
+    camera_pose_strength: float = Field(default=0.05, ge=0.0, le=1.0)
+
+    enable_replicator: bool = True
+    enable_hdf5_export: bool = True
+    enable_mimic: bool = False
+    enable_rl_teacher: bool = False
+    enable_legacy_fallback: bool = False
+
+    mimic_trials: int = Field(default=20, ge=1, le=5000)
+    mimic_num_envs: int = Field(default=1, ge=1, le=256)
+    rl_teacher_steps: int = Field(default=0, ge=0)
+
+    e2e_create_fixture: bool = True
+    e2e_episodes: int = Field(default=5, ge=1, le=50)
+    e2e_episode_s: int = Field(default=10, ge=1, le=600)
+    e2e_fps: int = Field(default=15, ge=1, le=120)
+    e2e_train_steps: int = Field(default=2, ge=1, le=1000)
+
+    require_digital_twin_pass: bool = True
+    require_physics_pass: bool = True
+    require_depth_pass: bool = True
+    require_articulation_pass: bool = True
+
+    real_weight: float = Field(default=1.0, ge=0.0, le=2.0)
+    isaac_rgbd_weight: float = Field(default=0.35, ge=0.0, le=1.0)
+    replicator_render_weight: float = Field(default=0.25, ge=0.0, le=1.0)
+    isaac_lab_synthetic_weight: float = Field(default=0.25, ge=0.0, le=1.0)
+    legacy_sidecar_weight: float = Field(default=0.0, ge=0.0, le=1.0)
+
+
+class IsaacLabStepTraceItem(BaseModel):
+    """Step trace row rendered by the GUI checklist."""
+
+    stage: IsaacSyntheticStage
+    status: str
+    started_at: str | None = None
+    finished_at: str | None = None
+    progress_start: float = 0.0
+    progress_end: float = 0.0
+    message: str = ""
+    artifact: str | None = None
+    blocker_code: str | None = None
+
+
+class IsaacLabSyntheticResponse(BaseModel):
+    """Common response envelope for Isaac Lab synthetic endpoints."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    ok: bool
+    tool: str
+    schema_: str = Field(default="atr.lerobot.isaac_lab_synthetic.response.v1", alias="schema")
+    status: IsaacSyntheticRunStatus
+    dataset_path: str
+    output_root: str
+    run_id: str
+    job_id: str | None = None
+    pipeline_mode: IsaacSyntheticPipelineMode
+    fallback_policy: IsaacSyntheticFallbackPolicy
+    source_intent: IsaacSyntheticSourceIntent
+    fallback_used: bool = False
+    validation_report: dict[str, Any] = Field(default_factory=dict)
+    compatibility: dict[str, Any] = Field(default_factory=dict)
+    digital_twin: dict[str, Any] = Field(default_factory=dict)
+    canonical_episode_index: dict[str, Any] = Field(default_factory=dict)
+    replicator: dict[str, Any] = Field(default_factory=dict)
+    hdf5: dict[str, Any] = Field(default_factory=dict)
+    mimic: dict[str, Any] = Field(default_factory=dict)
+    rl_teacher: dict[str, Any] = Field(default_factory=dict)
+    source_labels: dict[str, Any] = Field(default_factory=dict)
+    training_exposure: dict[str, Any] = Field(default_factory=dict)
+    progress: dict[str, Any] = Field(default_factory=dict)
+    step_trace: list[IsaacLabStepTraceItem] = Field(default_factory=list)
+    error: dict[str, Any] | None = None
 
 
 class RobotProfile(BaseModel):
@@ -80,6 +266,8 @@ class LeRobotBaseRequest(BaseModel):
     isaac_mirror_receiver_python: str = ""
     isaac_mirror_receiver_scene: str = ""
     isaac_mirror_receiver_start_timeout_s: float | None = None
+    isaac_mirror_receiver_force_restart: bool = False
+    isaac_mirror_receiver_play_timeline_on_startup: bool = False
     isaac_viewport_frame_on_start: bool = True
     isaac_rgbd_render_enabled: bool = True
     isaac_rgbd_render_target_fps: float = 15.0
@@ -146,14 +334,17 @@ class LeRobotSessionRequest(LeRobotBaseRequest):
     dataset_mix_real_original_weight: float = 1.0
     dataset_mix_isaac_rgbd_weight: float = 0.5
     dataset_mix_isaac_augmentation_weight: float = 0.5
+    dataset_mix_isaac_lab_synthetic_weight: float = 0.5
     dataset_mix_real_original_max_samples: int | None = None
     dataset_mix_isaac_rgbd_max_samples: int | None = None
     dataset_mix_isaac_augmentation_max_samples: int | None = None
+    dataset_mix_isaac_lab_synthetic_max_samples: int | None = None
     dataset_mix_seed: int = 0
     fidelity_weighting_enabled: bool = True
     fidelity_real_original_weight: float = 1.0
     fidelity_isaac_rgbd_weight: float = 0.5
     fidelity_isaac_augmentation_weight: float = 0.3
+    fidelity_isaac_lab_synthetic_weight: float = 0.2
     fps: int | None = None
     camera_fps: int | None = None
     teleop_time_s: float | None = None

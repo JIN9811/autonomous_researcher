@@ -534,9 +534,9 @@ def main():
     # Rotate the robot toward the A4 workspace behind the front slot.
     robot_xform.AddRotateZOp().Set(90.0)
 
-    # Right disk: diameter 100 mm, height 74 mm, drawing center x=590 mm, y=78 mm.
+    # Right disk: diameter 100 mm, top height 104 mm, drawing center x=590 mm, y=78 mm.
     apply_static_collider(
-        cylinder(stage, '/World/Workspace/RightDiskAluminumTop', (0.590, 0.078, 0.037), 0.050, 0.074, disk_mat),
+        cylinder(stage, '/World/Workspace/RightDiskAluminumTop', (0.590, 0.078, 0.052), 0.050, 0.104, disk_mat),
         approximation='convexHull',
     )
     apply_static_collider(
@@ -544,7 +544,7 @@ def main():
         approximation='convexHull',
     )
     yellow_marker_mat = make_material(stage, '/World/Materials/yellow_center_marker', (1.0, 0.88, 0.02), 0.38)
-    flat_circle_marker(stage, '/World/Workspace/RightDiskCenterYellowMarker', (0.590, 0.078, 0.0743), 0.0045, yellow_marker_mat)
+    flat_circle_marker(stage, '/World/Workspace/RightDiskCenterYellowMarker', (0.590, 0.078, 0.1043), 0.0045, yellow_marker_mat)
 
     # Red specimen/cube on A4 near the back side from photo.
     specimen_size = (0.030, 0.030, 0.030)

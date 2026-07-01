@@ -55,6 +55,7 @@ from fastapi.routing import APIRoute
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
+from mcp_tools.lerobot_schemas import IsaacLabSyntheticRequest
 
 from self_evolution import EvolutionTaskCreate, SelfEvolutionService
 from self_evolution.models import EvolutionActivationRequest, EvolutionRollbackRequest
@@ -1017,6 +1018,8 @@ class LeRobotAPIRequest(BaseModel):
     isaac_mirror_receiver_python: str = ""
     isaac_mirror_receiver_scene: str = ""
     isaac_mirror_receiver_start_timeout_s: float | None = None
+    isaac_mirror_receiver_force_restart: bool = False
+    isaac_mirror_receiver_play_timeline_on_startup: bool = False
     isaac_viewport_frame_on_start: bool = True
     isaac_rgbd_render_enabled: bool = True
     isaac_rgbd_render_target_fps: float = 15.0
@@ -1078,14 +1081,17 @@ class LeRobotAPIRequest(BaseModel):
     dataset_mix_real_original_weight: float = 1.0
     dataset_mix_isaac_rgbd_weight: float = 0.5
     dataset_mix_isaac_augmentation_weight: float = 0.5
+    dataset_mix_isaac_lab_synthetic_weight: float = 0.5
     dataset_mix_real_original_max_samples: int | None = None
     dataset_mix_isaac_rgbd_max_samples: int | None = None
     dataset_mix_isaac_augmentation_max_samples: int | None = None
+    dataset_mix_isaac_lab_synthetic_max_samples: int | None = None
     dataset_mix_seed: int = 0
     fidelity_weighting_enabled: bool = True
     fidelity_real_original_weight: float = 1.0
     fidelity_isaac_rgbd_weight: float = 0.5
     fidelity_isaac_augmentation_weight: float = 0.3
+    fidelity_isaac_lab_synthetic_weight: float = 0.2
     fps: int | None = None
     camera_fps: int | None = None
     teleop_time_s: float | None = None
@@ -13053,6 +13059,113 @@ async def post_lerobot_augment_preview(req: LeRobotAPIRequest) -> dict[str, obje
     """Return deterministic side-by-side preview rows for Isaac augmentation variants."""
     result = _lerobot_bridge().augment_isaac_preview(req.model_dump())
     return await _publish_lerobot_result(result)
+
+
+@app.post("/api/lerobot/isaac-lab/validate")
+async def post_lerobot_isaac_lab_validate(req: IsaacLabSyntheticRequest) -> dict[str, object]:
+    """Run non-actuating Isaac Lab synthetic validation checks."""
+    result = _lerobot_bridge().isaac_lab_validate(req.model_dump(mode="json"))
+    return await _publish_lerobot_result(result)
+
+
+@app.post("/api/lerobot/isaac-lab/prepare")
+async def post_lerobot_isaac_lab_prepare(req: IsaacLabSyntheticRequest) -> dict[str, object]:
+    """Run Isaac Lab synthetic digital-twin preflight and write artifacts."""
+    result = _lerobot_bridge().isaac_lab_prepare(req.model_dump(mode="json"))
+    return await _publish_lerobot_result(result)
+
+
+@app.post("/api/lerobot/isaac-lab/build-synthetic")
+async def post_lerobot_isaac_lab_build_synthetic(req: IsaacLabSyntheticRequest) -> dict[str, object]:
+    """Build the validation-first Isaac Lab synthetic manifests."""
+    result = _lerobot_bridge().isaac_lab_build_synthetic(req.model_dump(mode="json"))
+    return await _publish_lerobot_result(result)
+
+
+@app.post("/api/lerobot/isaac-lab/run-replicator-worker")
+async def post_lerobot_isaac_lab_run_replicator_worker(req: IsaacLabSyntheticRequest) -> dict[str, object]:
+    """Run the Isaac Sim Replicator worker and refresh synthetic manifests."""
+    result = _lerobot_bridge().isaac_lab_run_replicator_worker(req.model_dump(mode="json"))
+    return await _publish_lerobot_result(result)
+
+
+@app.post("/api/lerobot/isaac-lab/preview")
+async def post_lerobot_isaac_lab_preview(req: IsaacLabSyntheticRequest) -> dict[str, object]:
+    """Return preview card metadata for the latest Isaac Lab synthetic run."""
+    result = _lerobot_bridge().isaac_lab_preview(req.model_dump(mode="json"))
+    return await _publish_lerobot_result(result)
+
+
+@app.post("/api/lerobot/isaac-lab/export-hdf5")
+async def post_lerobot_isaac_lab_export_hdf5(req: IsaacLabSyntheticRequest) -> dict[str, object]:
+    """Write HDF5 export hook summaries for the latest Isaac Lab synthetic run."""
+    result = _lerobot_bridge().isaac_lab_export_hdf5(req.model_dump(mode="json"))
+    return await _publish_lerobot_result(result)
+
+
+@app.post("/api/lerobot/isaac-lab/run-mimic-smoke")
+async def post_lerobot_isaac_lab_run_mimic_smoke(req: IsaacLabSyntheticRequest) -> dict[str, object]:
+    """Validate and write the Isaac Lab Mimic smoke launch artifact."""
+    result = _lerobot_bridge().isaac_lab_run_mimic_smoke(req.model_dump(mode="json"))
+    return await _publish_lerobot_result(result)
+
+
+@app.post("/api/lerobot/isaac-lab/run-mimic")
+async def post_lerobot_isaac_lab_run_mimic(req: IsaacLabSyntheticRequest) -> dict[str, object]:
+    """Run the Isaac Lab Mimic branch or its deterministic dry-run runner."""
+    result = _lerobot_bridge().isaac_lab_run_mimic(req.model_dump(mode="json"))
+    return await _publish_lerobot_result(result)
+
+
+@app.post("/api/lerobot/isaac-lab/mimic/status")
+async def post_lerobot_isaac_lab_mimic_status(req: IsaacLabSyntheticRequest) -> dict[str, object]:
+    """Return the latest or requested Isaac Lab Mimic job state."""
+    return _lerobot_bridge().isaac_lab_mimic_status(req.model_dump(mode="json"))
+
+
+@app.post("/api/lerobot/isaac-lab/mimic/stop")
+async def post_lerobot_isaac_lab_mimic_stop(req: IsaacLabSyntheticRequest) -> dict[str, object]:
+    """Stop the latest or requested Isaac Lab Mimic job."""
+    return _lerobot_bridge().isaac_lab_mimic_stop(req.model_dump(mode="json"))
+
+
+@app.post("/api/lerobot/isaac-lab/run-rl-teacher-smoke")
+async def post_lerobot_isaac_lab_run_rl_teacher_smoke(req: IsaacLabSyntheticRequest) -> dict[str, object]:
+    """Validate and write the Isaac Lab RL teacher smoke launch artifact."""
+    result = _lerobot_bridge().isaac_lab_run_rl_teacher_smoke(req.model_dump(mode="json"))
+    return await _publish_lerobot_result(result)
+
+
+@app.post("/api/lerobot/isaac-lab/run-rl-teacher")
+async def post_lerobot_isaac_lab_run_rl_teacher(req: IsaacLabSyntheticRequest) -> dict[str, object]:
+    """Run the Isaac Lab RL teacher branch or its deterministic dry-run runner."""
+    result = _lerobot_bridge().isaac_lab_run_rl_teacher(req.model_dump(mode="json"))
+    return await _publish_lerobot_result(result)
+
+
+@app.post("/api/lerobot/isaac-lab/rl-teacher/status")
+async def post_lerobot_isaac_lab_rl_teacher_status(req: IsaacLabSyntheticRequest) -> dict[str, object]:
+    """Return the latest or requested Isaac Lab RL teacher job state."""
+    return _lerobot_bridge().isaac_lab_rl_teacher_status(req.model_dump(mode="json"))
+
+
+@app.post("/api/lerobot/isaac-lab/rl-teacher/stop")
+async def post_lerobot_isaac_lab_rl_teacher_stop(req: IsaacLabSyntheticRequest) -> dict[str, object]:
+    """Stop the latest or requested Isaac Lab RL teacher job."""
+    return _lerobot_bridge().isaac_lab_rl_teacher_stop(req.model_dump(mode="json"))
+
+
+@app.post("/api/lerobot/isaac-lab/e2e-smoke")
+async def post_lerobot_isaac_lab_e2e_smoke(req: IsaacLabSyntheticRequest) -> dict[str, object]:
+    """Run a non-actuating 5x10 synthetic workflow smoke through GUI-equivalent bridge methods."""
+    result = _lerobot_bridge().isaac_lab_run_e2e_smoke(req.model_dump(mode="json"))
+    return await _publish_lerobot_result(result)
+
+
+@app.post("/api/lerobot/isaac-lab/status")
+async def post_lerobot_isaac_lab_status(req: IsaacLabSyntheticRequest) -> dict[str, object]:
+    """Return latest Isaac Lab synthetic status without launching runtimes."""
+    return _lerobot_bridge().isaac_lab_status(req.model_dump(mode="json"))
 
 
 @app.post("/api/lerobot/isaac-rgbd/render/start")

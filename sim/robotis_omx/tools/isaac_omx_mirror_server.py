@@ -32,7 +32,7 @@ MM_TO_M = 0.001
 LEISAAC_GRIPPER_EFFORT_MASS_DIVISOR_KG = 0.15
 GRIPPER_CONTACT_FORCE_HOLD_THRESHOLD_N = 12.0
 GRIPPER_CONTACT_PROBE_MAX_CLOSE_STEP_DEG = 6.0
-GRIPPER_CONTACT_HOLD_OVERTRAVEL_DEG = 1.0
+GRIPPER_CONTACT_HOLD_OVERTRAVEL_DEG = 0.1
 GRIPPER_CONTACT_RELEASE_MARGIN_DEG = 1.0
 GRIPPER_CONTACT_PENETRATION_BACKOFF_THRESHOLD_M = 0.0005
 GRIPPER_CLOSED_TARGET_THRESHOLD_DEG = 6.0
@@ -2095,6 +2095,7 @@ class IsaacMirrorState:
             if primary_target is not None
             else float("nan")
         )
+        contact_reliable = self._contact_report_is_reliable(contact)
 
         if hold_target_value is not None and primary_value == primary_value:
             if primary_value > hold_target_value + GRIPPER_CONTACT_RELEASE_MARGIN_DEG:
@@ -2103,7 +2104,6 @@ class IsaacMirrorState:
                 hold_reason = "released_opening"
                 released_this_tick = True
 
-        contact_reliable = self._contact_report_is_reliable(contact)
         if (
             hold_target_value is None
             and primary_target is not None
@@ -2113,11 +2113,35 @@ class IsaacMirrorState:
         ):
             closing_or_unknown = previous_gripper_target is None or primary_value <= previous_gripper_target
             if closing_or_unknown:
-                hold_target_value = primary_value - GRIPPER_CONTACT_HOLD_OVERTRAVEL_DEG
+                if previous_gripper_target is None:
+                    hold_target_value = primary_value
+                else:
+                    hold_target_value = max(
+                        primary_value,
+                        previous_gripper_target - GRIPPER_CONTACT_HOLD_OVERTRAVEL_DEG,
+                    )
                 self._gripper_contact_hold_target_value = hold_target_value
                 hold_reason = "contact_hold_armed"
 
         hold_active = hold_target_value is not None
+        probe_limited = False
+        if (
+            not hold_active
+            and primary_target is not None
+            and primary_value == primary_value
+            and previous_gripper_target is not None
+        ):
+            max_close_target_value = previous_gripper_target - GRIPPER_CONTACT_PROBE_MAX_CLOSE_STEP_DEG
+            if primary_value < max_close_target_value:
+                for target in gripper_targets:
+                    value = _safe_float(target.get("target_value"), float("nan"))
+                    if value == value and value < max_close_target_value:
+                        target["target_value"] = max_close_target_value
+                        target["contact_probe_limited"] = True
+                        probe_limited = True
+                if probe_limited and not hold_reason:
+                    hold_reason = "contact_probe_limited"
+
         clamped = False
         if hold_active:
             for target in gripper_targets:
@@ -2143,7 +2167,7 @@ class IsaacMirrorState:
             "hold_target_value": hold_target_value,
             "hold_overtravel_deg": GRIPPER_CONTACT_HOLD_OVERTRAVEL_DEG,
             "release_margin_deg": GRIPPER_CONTACT_RELEASE_MARGIN_DEG,
-            "probe_limited": False,
+            "probe_limited": probe_limited,
         }
         return dict(self._last_gripper_contact)
 

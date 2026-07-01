@@ -23,6 +23,7 @@ from contextlib import contextmanager, nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterator
+from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -36,8 +37,8 @@ from utils.isaac_omx_mirror_mapping import (  # noqa: E402
 )
 
 DEFAULT_ISAAC_RGBD_RENDER_CAMERAS = "top,front,right"
-DEFAULT_ISAAC_MIRROR_POST_TIMEOUT_S = 0.15
-DEFAULT_ISAAC_RGBD_RENDER_POST_TIMEOUT_S = 0.15
+DEFAULT_ISAAC_MIRROR_POST_TIMEOUT_S = 0.5
+DEFAULT_ISAAC_RGBD_RENDER_POST_TIMEOUT_S = 0.5
 LEADER_SAG_DOWN_SIGN_BY_JOINT = {
     "shoulder_lift.pos": -1.0,
     "elbow_flex.pos": 1.0,
@@ -130,6 +131,7 @@ class IsaacMirrorPublisher:
         self._worker_started = False
         self._worker_active = False
         self._worker_lock = threading.Lock()
+        self._collection_enabled = True
 
     def should_publish(self) -> bool:
         if not self.enabled:
@@ -254,9 +256,14 @@ class IsaacMirrorPublisher:
             "calibration": self.calibration,
             "joint_state": joint_state,
         }
+        record_attempt_id = os.getenv("ATR_RECORD_ATTEMPT_ID", "").strip()
+        if record_attempt_id:
+            payload["record_attempt_id"] = record_attempt_id
+            payload["record_episode_index"] = _env_int("ATR_RECORD_ATTEMPT_EPISODE_INDEX", 0, minimum=0)
         if isinstance(source_selection, dict) and source_selection:
             payload["source_selection"] = source_selection
-        render_queue = self.render_worker.enqueue(payload, self._sample_count, timestamp)
+        collection_enabled = self.collection_enabled
+        render_queue = self.render_worker.enqueue(payload, self._sample_count, timestamp) if collection_enabled else {}
         post_started = time.monotonic()
         job = {
             "payload": payload,
@@ -264,11 +271,95 @@ class IsaacMirrorPublisher:
             "source_error": source_error,
             "post_started": post_started,
             "render_queue": render_queue,
+            "collection_enabled": collection_enabled,
         }
         if self._async_enabled:
             self._enqueue_job(job)
         else:
             self._process_job(job)
+
+    @property
+    def collection_enabled(self) -> bool:
+        return bool(self._collection_enabled)
+
+    @contextmanager
+    def collection_scope(self, enabled: bool, *, reason: str = "") -> Iterator[None]:
+        previous = self._collection_enabled
+        self._collection_enabled = bool(enabled)
+        try:
+            yield
+        finally:
+            self._collection_enabled = previous
+
+    def reset_collection_frame_context(self) -> None:
+        self.render_context.reset_frame_context()
+
+    def discard_collection_for_attempt(self, *, attempt_id: str, episode_index: int | None = None) -> bool:
+        if not attempt_id:
+            return False
+        self.flush(timeout_s=2.0)
+        self.reset_collection_frame_context()
+        if not self.record_path or not self.record_path.is_file():
+            return True
+        kept: list[str] = []
+        removed = False
+        try:
+            lines = self.record_path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            return False
+        for line in lines:
+            if not line.strip():
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                kept.append(line)
+                continue
+            if isinstance(row, dict) and self._record_row_matches_attempt(
+                row,
+                attempt_id=attempt_id,
+                episode_index=episode_index,
+            ):
+                removed = True
+                continue
+            kept.append(json.dumps(row, ensure_ascii=False) if isinstance(row, dict) else line)
+        if not removed:
+            return True
+        try:
+            if kept:
+                tmp_path = self.record_path.with_suffix(self.record_path.suffix + ".tmp")
+                tmp_path.write_text("\n".join(kept) + "\n", encoding="utf-8")
+                tmp_path.replace(self.record_path)
+            else:
+                self.record_path.unlink(missing_ok=True)
+        except OSError:
+            return False
+        return True
+
+    @staticmethod
+    def _record_row_matches_attempt(
+        row: dict[str, Any],
+        *,
+        attempt_id: str,
+        episode_index: int | None,
+    ) -> bool:
+        render_queue = row.get("render_queue") if isinstance(row.get("render_queue"), dict) else {}
+        request = render_queue.get("render_request") if isinstance(render_queue.get("render_request"), dict) else {}
+        row_attempt_id = str(
+            request.get("attempt_id")
+            or render_queue.get("attempt_id")
+            or row.get("record_attempt_id")
+            or ""
+        ).strip()
+        if row_attempt_id != attempt_id:
+            return False
+        if episode_index is None:
+            return True
+        try:
+            row_episode_index = int(float(request.get("episode_index", row.get("record_episode_index", 0))))
+        except (TypeError, ValueError):
+            row_episode_index = 0
+        return row_episode_index == int(episode_index)
 
     def _enqueue_job(self, job: dict[str, Any]) -> None:
         self._ensure_worker()
@@ -333,7 +424,7 @@ class IsaacMirrorPublisher:
         render_queue = job.get("render_queue")
         if isinstance(render_queue, dict) and render_queue:
             record["render_queue"] = render_queue
-        if self.record_path:
+        if bool(job.get("collection_enabled", True)) and self.record_path:
             self.record_path.parent.mkdir(parents=True, exist_ok=True)
             with self.record_path.open("a", encoding="utf-8") as handle:
                 handle.write(json.dumps(record, ensure_ascii=False) + "\n")
@@ -365,6 +456,13 @@ def _env_bool(name: str, default: bool) -> bool:
     if not value:
         return default
     return value in {"1", "true", "yes", "on"}
+
+
+def _isaac_mirror_timeline_play_url(endpoint: str) -> str:
+    parsed = urlparse(str(endpoint or "http://127.0.0.1:8766/joints").strip())
+    if not parsed.scheme or not parsed.netloc:
+        return "http://127.0.0.1:8766/timeline/play"
+    return parsed._replace(path="/timeline/play", params="", query="", fragment="").geturl()
 
 
 def _utc_timestamp() -> str:
@@ -624,6 +722,10 @@ class IsaacRgbdRenderContext:
         if context_key != self._context_key:
             self._context_key = context_key
             self._sample_base = max(0, int(sample_index) - 1)
+
+    def reset_frame_context(self) -> None:
+        self._context_key = ""
+        self._sample_base = 0
 
     def request_for_sample(self, sample_index: int, timestamp: str) -> dict[str, Any] | None:
         self._refresh_from_env(sample_index=sample_index)
@@ -1252,6 +1354,22 @@ class ActiveRobotCamTracker:
         self.resume_wait_timeout_s = _env_float("ATR_ACTIVE_ROBOT_CAM_RESUME_WAIT_TIMEOUT_S", 4.0, minimum=0.0)
         self.resume_wait_poll_s = _env_float("ATR_ACTIVE_ROBOT_CAM_RESUME_WAIT_POLL_S", 0.05, minimum=0.0)
         self.resume_wait_tolerance_deg = _env_float("ATR_ACTIVE_ROBOT_CAM_RESUME_WAIT_TOLERANCE_DEG", 2.0, minimum=0.0)
+        self.capture_wait_timeout_s = _env_float("ATR_ACTIVE_ROBOT_CAM_CAPTURE_WAIT_TIMEOUT_S", 0.0, minimum=0.0)
+        self.capture_wait_poll_s = _env_float(
+            "ATR_ACTIVE_ROBOT_CAM_CAPTURE_WAIT_POLL_S",
+            self.resume_wait_poll_s,
+            minimum=0.0,
+        )
+        self.capture_wait_tolerance_deg = _env_float(
+            "ATR_ACTIVE_ROBOT_CAM_CAPTURE_WAIT_TOLERANCE_DEG",
+            self.resume_wait_tolerance_deg,
+            minimum=0.0,
+        )
+        self.resume_wait_soft_tolerance_deg = _env_float(
+            "ATR_ACTIVE_ROBOT_CAM_RESUME_WAIT_SOFT_TOLERANCE_DEG",
+            max(3.0, self.resume_wait_tolerance_deg),
+            minimum=0.0,
+        )
         self.step_sleep_s = _env_float("ATR_ACTIVE_ROBOT_CAM_STEP_SLEEP_S", 0.05, minimum=0.0)
         self.settle_s = _env_float("ATR_ACTIVE_ROBOT_CAM_SETTLE_S", 1.0, minimum=0.0)
         self.hold_after_capture_s = _env_float("ATR_ACTIVE_ROBOT_CAM_HOLD_AFTER_CAPTURE_S", 1.0, minimum=0.0)
@@ -1366,10 +1484,31 @@ class ActiveRobotCamTracker:
         result: dict[str, Any] = {"ok": False, "status": "not_started"}
         fallback_used = False
         resume_action: dict[str, float] = {}
+        capture_wait_result: dict[str, Any] = {}
         try:
             capture_action = self._load_pose_action(self.capture_pose_path)
             pre_capture_action = self._present_action(robot)
             self._move_to_action(robot, send_action, capture_action)
+            capture_wait_result = self._wait_until_capture_pose_reached(robot, capture_action)
+            if capture_wait_result and not capture_wait_result.get("ok"):
+                result = {
+                    "ok": False,
+                    "status": "failed",
+                    "failure_code": "ACTIVE_ROBOT_CAM_CAPTURE_POSE_NOT_REACHED",
+                    "capture_wait": capture_wait_result,
+                }
+                resume_action = self._resume_action(current_action, pre_capture_action, resume_mode="home_pose")
+                resume_waypoint_action = self._move_through_resume_waypoint(robot, send_action, resume_action)
+                if resume_action:
+                    self._move_to_action(robot, send_action, resume_action, speed_scale=self.resume_speed_scale)
+                self._hold_action = {}
+                self._teleop_transition_action = dict(resume_action)
+                result["resume_mode"] = "home_pose"
+                result["resume_action"] = dict(resume_action)
+                result["resume_waypoint_action"] = dict(resume_waypoint_action)
+                result["resume_speed_scale"] = self.resume_speed_scale
+                self._write_result(result)
+                return result
             if self.settle_s > 0:
                 time.sleep(self.settle_s)
 
@@ -1440,6 +1579,7 @@ class ActiveRobotCamTracker:
                 time.sleep(self.hold_after_capture_s)
             resume_mode = self._resolved_resume_mode(current_action, capture_ok=bool(result.get("ok")))
             resume_action = self._resume_action(current_action, pre_capture_action, resume_mode=resume_mode)
+            resume_waypoint_action = self._move_through_resume_waypoint(robot, send_action, resume_action)
             if resume_action:
                 self._move_to_action(robot, send_action, resume_action, speed_scale=self.resume_speed_scale)
             if result.get("ok"):
@@ -1448,8 +1588,11 @@ class ActiveRobotCamTracker:
             elif resume_action:
                 self._hold_action = {}
                 self._teleop_transition_action = dict(resume_action)
+            if capture_wait_result:
+                result["capture_wait"] = dict(capture_wait_result)
             result["resume_mode"] = resume_mode
             result["resume_action"] = dict(resume_action)
+            result["resume_waypoint_action"] = dict(resume_waypoint_action)
             result["resume_speed_scale"] = self.resume_speed_scale
             self._write_result(result)
             return result
@@ -1465,6 +1608,7 @@ class ActiveRobotCamTracker:
                 "message": f"{exc.__class__.__name__}: {exc}",
                 "resume_mode": "home_pose",
                 "resume_action": dict(resume_action),
+                "resume_waypoint_action": self._resume_waypoint_action(resume_action),
             }
             self._write_result(result)
             return result
@@ -1496,6 +1640,41 @@ class ActiveRobotCamTracker:
             return self._normalize_action(current_action)
         return self._load_pose_action(self.home_pose_path)
 
+    def _wait_until_capture_pose_reached(self, robot: Any, capture_action: dict[str, Any]) -> dict[str, Any]:
+        if self.capture_wait_timeout_s <= 0:
+            return {"ok": True, "status": "disabled", "reason": "active_cam_capture_pose"}
+        return self.wait_until_action_reached(
+            robot,
+            capture_action,
+            reason="active_cam_capture_pose",
+            timeout_s=self.capture_wait_timeout_s,
+            poll_s=self.capture_wait_poll_s,
+            tolerance_deg=self.capture_wait_tolerance_deg,
+            failure_code="ACTIVE_ROBOT_CAM_CAPTURE_POSE_NOT_REACHED",
+        )
+
+    def _resume_waypoint_action(self, home_action: dict[str, float] | None = None) -> dict[str, float]:
+        action = dict(home_action) if home_action is not None else self._load_pose_action(self.home_pose_path)
+        if "wrist_flex.pos" not in action:
+            return {}
+        action["wrist_flex.pos"] = 0.0
+        return action
+
+    def _move_through_resume_waypoint(
+        self,
+        robot: Any,
+        send_action: Callable[[Any, dict[str, float]], dict[str, float]],
+        resume_action: dict[str, float],
+    ) -> dict[str, float]:
+        try:
+            waypoint_action = self._resume_waypoint_action()
+        except Exception:
+            return {}
+        if not waypoint_action or waypoint_action == resume_action:
+            return {}
+        self._move_to_action(robot, send_action, waypoint_action, speed_scale=self.resume_speed_scale)
+        return waypoint_action
+
     def _home_action_after_failure(
         self,
         robot: Any,
@@ -1506,6 +1685,9 @@ class ActiveRobotCamTracker:
         except Exception:
             return {}
         if resume_action:
+            waypoint_action = self._resume_waypoint_action(resume_action)
+            if waypoint_action and waypoint_action != resume_action:
+                self._move_to_action(robot, send_action, waypoint_action, speed_scale=self.resume_speed_scale)
             self._move_to_action(robot, send_action, resume_action, speed_scale=self.resume_speed_scale)
         return resume_action
 
@@ -1546,11 +1728,24 @@ class ActiveRobotCamTracker:
             return {}
         return {f"{str(key).removesuffix('.pos')}.pos": float(value) for key, value in dict(present).items()}
 
-    def wait_until_action_reached(self, robot: Any, target_action: dict[str, Any], *, reason: str) -> dict[str, Any]:
+    def wait_until_action_reached(
+        self,
+        robot: Any,
+        target_action: dict[str, Any],
+        *,
+        reason: str,
+        timeout_s: float | None = None,
+        poll_s: float | None = None,
+        tolerance_deg: float | None = None,
+        failure_code: str = "ACTIVE_ROBOT_CAM_RESUME_NOT_REACHED",
+    ) -> dict[str, Any]:
         target = self._normalize_action(target_action)
         if not target:
             return {"ok": True, "status": "no_target", "reason": reason}
-        deadline = time.monotonic() + self.resume_wait_timeout_s
+        timeout = self.resume_wait_timeout_s if timeout_s is None else max(0.0, float(timeout_s))
+        poll = self.resume_wait_poll_s if poll_s is None else max(0.0, float(poll_s))
+        tolerance = self.resume_wait_tolerance_deg if tolerance_deg is None else max(0.0, float(tolerance_deg))
+        deadline = time.monotonic() + timeout
         best_error = float("inf")
         latest_action: dict[str, float] = {}
         while True:
@@ -1558,7 +1753,7 @@ class ActiveRobotCamTracker:
             errors = [abs(float(latest_action.get(key, float("inf"))) - float(value)) for key, value in target.items()]
             max_error = max(errors, default=0.0)
             best_error = min(best_error, max_error)
-            if errors and max_error <= self.resume_wait_tolerance_deg:
+            if errors and max_error <= tolerance:
                 return {
                     "ok": True,
                     "status": "reached",
@@ -1571,15 +1766,15 @@ class ActiveRobotCamTracker:
                 return {
                     "ok": False,
                     "status": "timeout",
-                    "failure_code": "ACTIVE_ROBOT_CAM_RESUME_NOT_REACHED",
+                    "failure_code": failure_code,
                     "reason": reason,
                     "max_error_deg": round(best_error, 4) if math.isfinite(best_error) else None,
-                    "tolerance_deg": self.resume_wait_tolerance_deg,
+                    "tolerance_deg": tolerance,
                     "target_action": target,
                     "current_action": latest_action,
                 }
-            if self.resume_wait_poll_s > 0:
-                time.sleep(self.resume_wait_poll_s)
+            if poll > 0:
+                time.sleep(poll)
 
     @staticmethod
     def _camera_depth_scale_m_per_unit(robot: Any, camera_key: str, *, default: float) -> float:
@@ -1748,9 +1943,13 @@ def patch_record_loop(
     updater: SpecimenPoseFrameUpdater,
     active_robot_cam: ActiveRobotCamTracker | None = None,
     attempt_sidecar: RecordAttemptSidecar | None = None,
+    *,
+    publisher: IsaacMirrorPublisher | None = None,
 ) -> None:
     attempt_enabled = bool(attempt_sidecar and attempt_sidecar.enabled)
-    if not (sidecar.enabled or attempt_enabled) or (not updater.enabled and not (active_robot_cam and active_robot_cam.enabled)):
+    publisher_enabled = bool(publisher and publisher.enabled)
+    preflight_available = bool(updater.enabled or (active_robot_cam and active_robot_cam.enabled))
+    if not (sidecar.enabled or attempt_enabled or publisher_enabled) or (not preflight_available and not publisher_enabled):
         return
     import lerobot.record as record_module
 
@@ -1758,28 +1957,51 @@ def patch_record_loop(
         return
     original_record_loop = record_module.record_loop
 
-    def _record_loop_context(args: tuple[Any, ...], kwargs: dict[str, Any]) -> tuple[Any | None, Any | None]:
+    def _record_loop_context(
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+    ) -> tuple[Any | None, Any | None, Any | None, bool]:
         robot = kwargs.get("robot")
         dataset = kwargs.get("dataset")
+        events = kwargs.get("events")
+        display_data = kwargs.get("display_data")
         try:
             bound = inspect.signature(original_record_loop).bind_partial(*args, **kwargs)
         except (TypeError, ValueError):
-            return (robot if robot is not None else (args[0] if args else None), dataset)
+            return (
+                robot if robot is not None else (args[0] if args else None),
+                dataset,
+                events if events is not None else (args[1] if len(args) > 1 else None),
+                _display_data_enabled(display_data if display_data is not None else (args[8] if len(args) > 8 else False)),
+            )
         robot = bound.arguments.get("robot", robot)
         dataset = bound.arguments.get("dataset", dataset)
+        events = bound.arguments.get("events", events)
+        display_data = bound.arguments.get("display_data", display_data)
         varargs = bound.arguments.get("args")
         varkwargs = bound.arguments.get("kwargs")
         if isinstance(varkwargs, dict):
             robot = varkwargs.get("robot", robot)
             dataset = varkwargs.get("dataset", dataset)
+            events = varkwargs.get("events", events)
+            display_data = varkwargs.get("display_data", display_data)
         if robot is None and isinstance(varargs, tuple) and varargs:
             robot = varargs[0]
+        if events is None and isinstance(varargs, tuple) and len(varargs) > 1:
+            events = varargs[1]
         if dataset is None and isinstance(varargs, tuple):
             if len(varargs) >= 7:
                 dataset = varargs[6]
             elif len(varargs) == 4:
                 dataset = varargs[3]
-        return robot, dataset
+        if display_data is None and isinstance(varargs, tuple) and len(varargs) > 8:
+            display_data = varargs[8]
+        return robot, dataset, events, _display_data_enabled(display_data)
+
+    def _display_data_enabled(value: Any) -> bool:
+        if isinstance(value, str):
+            return value.strip().lower() in {"1", "true", "yes", "on"}
+        return bool(value)
 
     def _episode_index_for_dataset(dataset: Any) -> int:
         try:
@@ -1800,59 +2022,222 @@ def patch_record_loop(
             message = str(result)
         return RecordStartPreflightError(f"{failure_code}: {message}")
 
+    def _collection_scope(enabled: bool, *, reason: str) -> Iterator[None]:
+        if publisher is not None and hasattr(publisher, "collection_scope"):
+            return publisher.collection_scope(enabled, reason=reason)
+        return nullcontext()
+
+    def _reset_collection_frame_context() -> None:
+        if publisher is not None and hasattr(publisher, "reset_collection_frame_context"):
+            publisher.reset_collection_frame_context()
+
+    def _flush_collection() -> None:
+        if publisher is not None and hasattr(publisher, "flush"):
+            publisher.flush(timeout_s=2.0)
+
+    def _events_request_rerecord(events: Any) -> bool:
+        return bool(isinstance(events, dict) and events.get("rerecord_episode"))
+
+    def _discard_rejected_attempt(episode_index: int) -> None:
+        if publisher is None or not hasattr(publisher, "discard_collection_for_attempt"):
+            return
+        attempt_id = ""
+        if attempt_sidecar is not None:
+            attempt_id = str(getattr(attempt_sidecar, "attempt_id", "") or "")
+        if not attempt_id:
+            attempt_id = os.getenv("ATR_RECORD_ATTEMPT_ID", "").strip()
+        if attempt_id:
+            publisher.discard_collection_for_attempt(attempt_id=attempt_id, episode_index=episode_index)
+
+    def _resume_wait_failure_is_soft(wait_result: dict[str, Any]) -> tuple[bool, float | None]:
+        if str(wait_result.get("failure_code") or "") != "ACTIVE_ROBOT_CAM_RESUME_NOT_REACHED":
+            return False, None
+        soft_tolerance = getattr(active_robot_cam, "resume_wait_soft_tolerance_deg", None)
+        try:
+            soft_tolerance_float = float(soft_tolerance)
+            max_error = float(wait_result.get("max_error_deg"))
+        except (TypeError, ValueError):
+            return False, None
+        return max_error <= soft_tolerance_float, soft_tolerance_float
+
+    def _active_cam_specimen_pose_failure_is_soft(result: dict[str, Any]) -> bool:
+        return str(result.get("failure_code") or "") == "ACTIVE_ROBOT_CAM_SPECIMEN_POSE_FAILED"
+
+    rerun_blueprint_sent = False
+
+    def _send_recording_rerun_blueprint(*, display_data: bool) -> None:
+        nonlocal rerun_blueprint_sent
+        if not display_data or rerun_blueprint_sent:
+            return
+        try:
+            import rerun as rr
+            import rerun.blueprint as rrb
+        except Exception:
+            return
+        try:
+            blueprint = rrb.Blueprint(
+                rrb.Vertical(
+                    rrb.Horizontal(
+                        rrb.Spatial2DView(origin="observation.top", name="observation.top"),
+                        rrb.Spatial2DView(origin="observation.wrist", name="observation.wrist"),
+                        column_shares=[1.0, 1.0],
+                    ),
+                    rrb.Horizontal(
+                        rrb.Spatial2DView(origin="observation.top_depth", name="observation.top_depth"),
+                        rrb.Spatial2DView(origin="observation.wrist_depth", name="observation.wrist_depth"),
+                        column_shares=[1.0, 1.0],
+                    ),
+                    rrb.TimeSeriesView(origin="/", name="state_action"),
+                    row_shares=[3.0, 2.0, 2.0],
+                ),
+                auto_layout=False,
+                auto_views=False,
+                collapse_panels=False,
+            )
+            rr.send_blueprint(blueprint, make_active=True, make_default=True)
+        except Exception:
+            return
+        rerun_blueprint_sent = True
+
+    def _seed_rerun_observation(robot: Any, action: dict[str, Any], *, display_data: bool) -> None:
+        if not display_data or robot is None:
+            return
+        log_rerun_data = getattr(record_module, "log_rerun_data", None)
+        if not callable(log_rerun_data):
+            return
+        try:
+            observation = robot.get_observation()
+        except Exception:
+            return
+        if not isinstance(observation, dict):
+            return
+        try:
+            log_rerun_data(observation, dict(action))
+        except Exception:
+            return
+
+    def _post_record_start_timeline_play() -> dict[str, Any] | None:
+        if not _env_bool("ATR_ISAAC_TIMELINE_PLAY_RECORD_START_ENABLED", False):
+            return None
+        endpoint = str(getattr(publisher, "endpoint", "") or os.getenv("ATR_ISAAC_MIRROR_ENDPOINT", "")).strip()
+        if not endpoint:
+            return None
+        play_url = _isaac_mirror_timeline_play_url(endpoint)
+        payload = {"reason": "record_start"}
+        data = json.dumps(payload).encode("utf-8")
+        request = Request(play_url, data=data, headers={"Content-Type": "application/json"}, method="POST")
+        timeout_s = _env_capped_post_timeout(
+            "ATR_ISAAC_TIMELINE_PLAY_POST_TIMEOUT_S",
+            "ATR_ISAAC_MIRROR_POST_TIMEOUT_S",
+            DEFAULT_ISAAC_MIRROR_POST_TIMEOUT_S,
+            1.0,
+        )
+        try:
+            with urlopen(request, timeout=timeout_s) as response:
+                body = response.read().decode("utf-8", errors="replace")
+                parsed = json.loads(body) if body else {}
+                return {
+                    "ok": 200 <= response.status < 300,
+                    "status_code": response.status,
+                    "timeline_play_url": play_url,
+                    "response": parsed,
+                }
+        except Exception as exc:
+            return {
+                "ok": False,
+                "status_code": None,
+                "timeline_play_url": play_url,
+                "message": f"{exc.__class__.__name__}: {exc}",
+            }
+
     def record_loop_with_specimen_frame(*args, **kwargs):  # type: ignore[no-untyped-def]
-        robot, dataset = _record_loop_context(args, kwargs)
-        if dataset is not None and robot is not None:
-            episode_index = _episode_index_for_dataset(dataset)
-            blocking_preflight = bool(active_robot_cam is not None and active_robot_cam.enabled and active_robot_cam.record_start_enabled)
+        robot, dataset, events, display_data = _record_loop_context(args, kwargs)
+        if dataset is None:
+            with _collection_scope(False, reason="reset"):
+                return original_record_loop(*args, **kwargs)
+
+        episode_index = _episode_index_for_dataset(dataset)
+        blocking_preflight = bool(active_robot_cam is not None and active_robot_cam.enabled and active_robot_cam.record_start_enabled)
+        passive_preflight = bool(sidecar.enabled and updater.enabled)
+        if robot is not None and (blocking_preflight or passive_preflight):
             try:
                 if attempt_sidecar is not None:
                     attempt_sidecar.begin_episode(episode_index=episode_index, reason="record_start")
-                if blocking_preflight:
-                    current_action_reader = getattr(active_robot_cam, "present_action", None)
-                    record_start_action = current_action_reader(robot) if callable(current_action_reader) else {}
-                    result = active_robot_cam.capture_once(
-                        robot,
-                        send_action=lambda active_robot, action: active_robot.send_action(action),
-                        current_action=record_start_action,
-                        reason="record_start",
-                        force=True,
-                    )
-                    if isinstance(result, dict) and bool(result.get("ok", True)):
-                        resume_action = result.get("resume_action") if isinstance(result.get("resume_action"), dict) else record_start_action
-                        wait_until_action_reached = getattr(active_robot_cam, "wait_until_action_reached", None)
-                        wait_result = (
-                            wait_until_action_reached(robot, resume_action, reason="record_start")
-                            if callable(wait_until_action_reached)
-                            else {"ok": True, "status": "unsupported"}
+                with _collection_scope(False, reason="record_start_preflight"):
+                    if blocking_preflight:
+                        current_action_reader = getattr(active_robot_cam, "present_action", None)
+                        record_start_action = current_action_reader(robot) if callable(current_action_reader) else {}
+                        _send_recording_rerun_blueprint(display_data=display_data)
+                        _seed_rerun_observation(robot, record_start_action, display_data=display_data)
+                        result = active_robot_cam.capture_once(
+                            robot,
+                            send_action=lambda active_robot, action: active_robot.send_action(action),
+                            current_action=record_start_action,
+                            reason="record_start",
+                            force=True,
                         )
-                        result["resume_wait"] = wait_result
-                        if isinstance(wait_result, dict) and not bool(wait_result.get("ok", True)):
-                            result = {
-                                **result,
-                                "ok": False,
-                                "failure_code": str(wait_result.get("failure_code") or "ACTIVE_ROBOT_CAM_RESUME_NOT_REACHED"),
-                                "resume_wait": wait_result,
-                            }
-                else:
-                    if active_robot_cam is not None and hasattr(active_robot_cam, "suppress_first_action_capture"):
-                        active_robot_cam.suppress_first_action_capture()
-                    observation = robot.get_observation()
-                    manifest_path = sidecar.write_observation(observation, force=True, reason="record_start")
-                    result = updater.update_from_manifest(manifest_path, reason="record_start")
-                if isinstance(result, dict) and not bool(result.get("ok", True)) and not blocking_preflight:
-                    result = {**result, "warning_only": True}
+                        if isinstance(result, dict) and bool(result.get("ok", True)):
+                            resume_action = (
+                                result.get("resume_action")
+                                if isinstance(result.get("resume_action"), dict)
+                                else record_start_action
+                            )
+                            wait_until_action_reached = getattr(active_robot_cam, "wait_until_action_reached", None)
+                            wait_result = (
+                                wait_until_action_reached(robot, resume_action, reason="record_start")
+                                if callable(wait_until_action_reached)
+                                else {"ok": True, "status": "unsupported"}
+                            )
+                            result["resume_wait"] = wait_result
+                            if isinstance(wait_result, dict) and not bool(wait_result.get("ok", True)):
+                                soft_ok, soft_tolerance = _resume_wait_failure_is_soft(wait_result)
+                                if soft_ok:
+                                    result = {
+                                        **result,
+                                        "ok": True,
+                                        "warning_only": True,
+                                        "resume_wait": wait_result,
+                                        "resume_wait_soft_tolerance_deg": soft_tolerance,
+                                    }
+                                else:
+                                    result = {
+                                        **result,
+                                        "ok": False,
+                                        "failure_code": str(
+                                            wait_result.get("failure_code")
+                                            or "ACTIVE_ROBOT_CAM_RESUME_NOT_REACHED"
+                                        ),
+                                        "resume_wait": wait_result,
+                                    }
+                    else:
+                        if active_robot_cam is not None and hasattr(active_robot_cam, "suppress_first_action_capture"):
+                            active_robot_cam.suppress_first_action_capture()
+                        observation = robot.get_observation()
+                        manifest_path = sidecar.write_observation(observation, force=True, reason="record_start")
+                        result = updater.update_from_manifest(manifest_path, reason="record_start")
+                if isinstance(result, dict) and not bool(result.get("ok", True)):
+                    if not blocking_preflight or _active_cam_specimen_pose_failure_is_soft(result):
+                        result = {**result, "warning_only": True}
                 sidecar.root.mkdir(parents=True, exist_ok=True)
                 result_path = sidecar.root / "record_start_specimen_pose_result.json"
                 result_path.write_text(json.dumps(result, ensure_ascii=True, indent=2), encoding="utf-8")
                 if attempt_sidecar is not None:
                     attempt_sidecar.write_active_cam_result(result)
-                if blocking_preflight and isinstance(result, dict) and not bool(result.get("ok", True)):
+                if (
+                    blocking_preflight
+                    and isinstance(result, dict)
+                    and not bool(result.get("ok", True))
+                    and not bool(result.get("warning_only"))
+                ):
                     raise _record_start_preflight_error(result)
             except RecordStartPreflightError:
                 raise
             except Exception as exc:
-                result = {"ok": False, "failure_code": "SPECIMEN_POSE_RECORD_START_ERROR", "message": f"{exc.__class__.__name__}: {exc}"}
+                result = {
+                    "ok": False,
+                    "failure_code": "SPECIMEN_POSE_RECORD_START_ERROR",
+                    "message": f"{exc.__class__.__name__}: {exc}",
+                }
                 if not blocking_preflight:
                     result["warning_only"] = True
                 sidecar.root.mkdir(parents=True, exist_ok=True)
@@ -1862,7 +2247,20 @@ def patch_record_loop(
                 )
                 if blocking_preflight:
                     raise _record_start_preflight_error(result) from exc
-        return original_record_loop(*args, **kwargs)
+        timeline_play_result = _post_record_start_timeline_play()
+        if timeline_play_result is not None and sidecar.enabled:
+            sidecar.root.mkdir(parents=True, exist_ok=True)
+            (sidecar.root / "record_start_isaac_timeline_play_result.json").write_text(
+                json.dumps(timeline_play_result, ensure_ascii=True, indent=2),
+                encoding="utf-8",
+            )
+        _reset_collection_frame_context()
+        with _collection_scope(True, reason="record_episode"):
+            loop_result = original_record_loop(*args, **kwargs)
+        _flush_collection()
+        if _events_request_rerecord(events):
+            _discard_rejected_attempt(episode_index)
+        return loop_result
 
     record_module.record_loop = record_loop_with_specimen_frame
     record_module._atr_record_start_frame_patched = True
@@ -1885,7 +2283,7 @@ def main() -> None:
     else:
         import lerobot.record as record_module
 
-        patch_record_loop(sidecar, updater, active_robot_cam, attempt_sidecar)
+        patch_record_loop(sidecar, updater, active_robot_cam, attempt_sidecar, publisher=publisher)
         lerobot_main = record_module.main
     try:
         lerobot_main()

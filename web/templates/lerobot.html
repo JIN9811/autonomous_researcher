@@ -420,12 +420,107 @@ Modification guide:
 
         <details id="isaac-augmentation-card" class="panel lerobot-workflow-card lerobot-panel-details">
           <summary class="panel-title-row lerobot-panel-summary">
-            <h2>7. Isaac Sim Data Augmentation</h2>
-            <span class="hint">RGB-D sidecar + camera pose variants</span>
+            <h2>7. Isaac Lab Synthetic Intelligence</h2>
+            <span class="hint">Synthetic trajectories + Replicator + legacy fallback</span>
           </summary>
           <div class="lerobot-card-note">
             Build an immutable sidecar under the selected dataset for synthetic Isaac RGB-D variants, standard_sim2real_v2 common image/depth augmentation, render-domain randomization, and camera pose augmentation when recording metadata is available.
           </div>
+          <details id="isaac-synthetic-panel" class="lerobot-details" open>
+            <summary>Isaac Lab Synthetic Intelligence</summary>
+            <div class="lerobot-form-grid train-form-grid">
+              <label>
+                Synthetic Pipeline
+                <select id="isaac-synthetic-pipeline-mode">
+                  <option value="isaac_lab_replicator" selected>Isaac Lab + Replicator</option>
+                  <option value="replicator_render_only">Replicator render only</option>
+                  <option value="legacy_sidecar">Legacy sidecar</option>
+                </select>
+              </label>
+              <label>
+                Fallback Policy
+                <select id="isaac-synthetic-fallback-policy">
+                  <option value="block_on_primary_failure" selected>block on primary failure</option>
+                  <option value="allow_legacy_fallback">allow legacy fallback</option>
+                  <option value="legacy_only">legacy only</option>
+                </select>
+              </label>
+              <label>
+                Source Intent
+                <select id="isaac-synthetic-source-intent">
+                  <option value="train_ready_success_only" selected>train-ready successes only</option>
+                  <option value="preview_only">preview only</option>
+                  <option value="debug_include_failed">debug preview with failed rows</option>
+                </select>
+              </label>
+              <label>
+                Isaac Lab Path
+                <input id="isaac-synthetic-isaac-lab-path" type="text" placeholder="/home/jin/IsaacLab" />
+              </label>
+              <label>
+                Isaac Sim Python
+                <input id="isaac-synthetic-isaac-sim-python" type="text" value="/home/jin/IsaacSim/python.sh" placeholder="/home/jin/IsaacSim/python.sh" />
+              </label>
+              <label>
+                Isaac Stage Path
+                <input id="isaac-synthetic-stage-path" type="text" placeholder="sim/robotis_omx/scene/omx_table_layout.usda" />
+              </label>
+              <label>
+                Mimic Trials
+                <input id="isaac-synthetic-mimic-trials" type="number" min="1" max="5000" step="1" value="20" />
+              </label>
+              <label>
+                Mimic Envs
+                <input id="isaac-synthetic-mimic-num-envs" type="number" min="1" max="256" step="1" value="1" />
+              </label>
+              <label>
+                RL Teacher Steps
+                <input id="isaac-synthetic-rl-teacher-steps" type="number" min="0" step="1" value="0" />
+              </label>
+            </div>
+            <div class="lerobot-inline-options">
+              <label class="checkbox-line"><input id="isaac-synthetic-enable-replicator" type="checkbox" checked /> Replicator output</label>
+              <label class="checkbox-line"><input id="isaac-synthetic-enable-hdf5-export" type="checkbox" checked /> HDF5 export hook</label>
+              <label class="checkbox-line"><input id="isaac-synthetic-enable-mimic" type="checkbox" /> Mimic generation hook</label>
+              <label class="checkbox-line"><input id="isaac-synthetic-enable-rl-teacher" type="checkbox" /> RL teacher hook</label>
+            </div>
+            <div class="button-row compact">
+              <button id="isaac-synthetic-check-digital-twin" class="btn">Check Digital Twin</button>
+              <button id="isaac-synthetic-build" class="btn primary">Build Synthetic Dataset</button>
+              <button id="isaac-synthetic-run-replicator-worker" class="btn">Run Replicator Worker</button>
+              <button id="isaac-synthetic-run-replicator-smoke" class="btn">Run Replicator Smoke</button>
+              <button id="isaac-synthetic-preview" class="btn">Preview Synthetic Sources</button>
+              <button id="isaac-synthetic-export-hdf5" class="btn">Export HDF5</button>
+              <button id="isaac-synthetic-run-mimic" class="btn">Run Mimic</button>
+              <button id="isaac-synthetic-run-mimic-smoke" class="btn">Run Mimic Smoke</button>
+              <button id="isaac-synthetic-mimic-status" class="btn">Mimic Status</button>
+              <button id="isaac-synthetic-mimic-stop" class="btn">Stop Mimic Job</button>
+              <button id="isaac-synthetic-run-rl-teacher" class="btn">Run RL Teacher</button>
+              <button id="isaac-synthetic-run-rl-teacher-smoke" class="btn">Run RL Smoke</button>
+              <button id="isaac-synthetic-rl-teacher-status" class="btn">RL Status</button>
+              <button id="isaac-synthetic-rl-teacher-stop" class="btn">Stop RL Job</button>
+              <button id="isaac-synthetic-e2e-smoke" class="btn">Run 5x10 E2E Smoke</button>
+              <button id="isaac-synthetic-status" class="btn">Synthetic Status</button>
+            </div>
+            <div class="lerobot-report-grid compact">
+              <div id="isaac-synthetic-status-compatibility" class="lerobot-report-card"></div>
+              <div id="isaac-synthetic-status-digital-twin" class="lerobot-report-card"></div>
+              <div id="isaac-synthetic-status-source-labels" class="lerobot-report-card"></div>
+              <div id="isaac-synthetic-status-canonical-index" class="lerobot-report-card"></div>
+              <div id="isaac-synthetic-status-generation" class="lerobot-report-card"></div>
+              <div id="isaac-synthetic-status-hdf5" class="lerobot-report-card"></div>
+              <div id="isaac-synthetic-status-training-exposure" class="lerobot-report-card"></div>
+            </div>
+            <div id="isaac-synthetic-progress" class="lerobot-training-progress hidden">
+              <div class="training-progress-head">
+                <strong>Synthetic Intelligence</strong>
+                <span id="isaac-synthetic-progress-label">0%</span>
+              </div>
+              <div class="training-progress-track"><span id="isaac-synthetic-progress-bar"></span></div>
+            </div>
+            <div id="isaac-synthetic-step-trace" class="lerobot-visualization"></div>
+            <div id="isaac-synthetic-output" class="lerobot-visualization"></div>
+          </details>
           <div class="lerobot-form-grid train-form-grid">
             <label>
               Augmentation Profile
@@ -655,6 +750,10 @@ Modification guide:
                 <input id="lerobot-fidelity-isaac-augmentation-weight-input" type="number" min="0" max="1" step="0.05" value="0.3" />
               </label>
               <label>
+                Isaac Lab Synthetic Loss Weight
+                <input id="lerobot-fidelity-isaac-lab-synthetic-weight-input" type="number" min="0" max="1" step="0.05" value="0.2" />
+              </label>
+              <label>
                 Domain Randomization
                 <a class="inline-panel-link" href="#isaac-augmentation-card">Open Augment settings</a>
               </label>
@@ -680,6 +779,10 @@ Modification guide:
                 <input id="lerobot-dataset-mix-isaac-augmentation-weight-input" type="number" min="0" step="0.05" value="0.5" />
               </label>
               <label>
+                Isaac Lab Synthetic Weight
+                <input id="lerobot-dataset-mix-isaac-lab-synthetic-weight-input" type="number" min="0" step="0.05" value="0.5" />
+              </label>
+              <label>
                 Mix Seed
                 <input id="lerobot-dataset-mix-seed-input" type="number" step="1" value="0" />
               </label>
@@ -694,6 +797,10 @@ Modification guide:
               <label>
                 Isaac Augmentation Max
                 <input id="lerobot-dataset-mix-isaac-augmentation-max-input" type="number" min="0" step="1" placeholder="unlimited" />
+              </label>
+              <label>
+                Isaac Lab Synthetic Max
+                <input id="lerobot-dataset-mix-isaac-lab-synthetic-max-input" type="number" min="0" step="1" placeholder="unlimited" />
               </label>
             </div>
           </details>

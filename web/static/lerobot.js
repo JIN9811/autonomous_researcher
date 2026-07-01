@@ -111,14 +111,17 @@ const trainExtraArgsInput = $("lerobot-train-extra-args-input");
 const datasetMixRealWeightInput = $("lerobot-dataset-mix-real-weight-input");
 const datasetMixIsaacRgbdWeightInput = $("lerobot-dataset-mix-isaac-rgbd-weight-input");
 const datasetMixIsaacAugmentationWeightInput = $("lerobot-dataset-mix-isaac-augmentation-weight-input");
+const datasetMixIsaacLabSyntheticWeightInput = $("lerobot-dataset-mix-isaac-lab-synthetic-weight-input");
 const datasetMixRealMaxInput = $("lerobot-dataset-mix-real-max-input");
 const datasetMixIsaacRgbdMaxInput = $("lerobot-dataset-mix-isaac-rgbd-max-input");
 const datasetMixIsaacAugmentationMaxInput = $("lerobot-dataset-mix-isaac-augmentation-max-input");
+const datasetMixIsaacLabSyntheticMaxInput = $("lerobot-dataset-mix-isaac-lab-synthetic-max-input");
 const datasetMixSeedInput = $("lerobot-dataset-mix-seed-input");
 const fidelityWeightingEnabledInput = $("lerobot-fidelity-weighting-enabled-input");
 const fidelityRealWeightInput = $("lerobot-fidelity-real-weight-input");
 const fidelityIsaacRgbdWeightInput = $("lerobot-fidelity-isaac-rgbd-weight-input");
 const fidelityIsaacAugmentationWeightInput = $("lerobot-fidelity-isaac-augmentation-weight-input");
+const fidelityIsaacLabSyntheticWeightInput = $("lerobot-fidelity-isaac-lab-synthetic-weight-input");
 const trainSaveCheckpointInput = $("lerobot-train-save-checkpoint-input");
 const trainUseAmpInput = $("lerobot-train-use-amp-input");
 const trainWandbInput = $("lerobot-train-wandb-input");
@@ -157,6 +160,20 @@ const isaacAugmentDepthStrengthInput = $("lerobot-isaac-augment-depth-strength-i
 const isaacAugmentRenderDomainStrengthInput = $("lerobot-isaac-augment-render-domain-strength-input");
 const isaacAugmentCameraPoseStrengthInput = $("lerobot-isaac-augment-camera-pose-strength-input");
 const isaacAugmentPreviewCountInput = $("lerobot-isaac-augment-preview-count-input");
+const isaacSyntheticPanelEl = $("isaac-synthetic-panel");
+const isaacSyntheticPipelineModeInput = $("isaac-synthetic-pipeline-mode");
+const isaacSyntheticFallbackPolicyInput = $("isaac-synthetic-fallback-policy");
+const isaacSyntheticSourceIntentInput = $("isaac-synthetic-source-intent");
+const isaacSyntheticIsaacLabPathInput = $("isaac-synthetic-isaac-lab-path");
+const isaacSyntheticIsaacSimPythonInput = $("isaac-synthetic-isaac-sim-python");
+const isaacSyntheticStagePathInput = $("isaac-synthetic-stage-path");
+const isaacSyntheticMimicTrialsInput = $("isaac-synthetic-mimic-trials");
+const isaacSyntheticMimicNumEnvsInput = $("isaac-synthetic-mimic-num-envs");
+const isaacSyntheticRlTeacherStepsInput = $("isaac-synthetic-rl-teacher-steps");
+const isaacSyntheticEnableReplicatorInput = $("isaac-synthetic-enable-replicator");
+const isaacSyntheticEnableHdf5ExportInput = $("isaac-synthetic-enable-hdf5-export");
+const isaacSyntheticEnableMimicInput = $("isaac-synthetic-enable-mimic");
+const isaacSyntheticEnableRlTeacherInput = $("isaac-synthetic-enable-rl-teacher");
 const isaacRgbdRenderProgressEl = $("lerobot-isaac-rgbd-render-progress");
 const isaacRgbdRenderProgressLabelEl = $("lerobot-isaac-rgbd-render-progress-label");
 const isaacRgbdRenderProgressBarEl = $("lerobot-isaac-rgbd-render-progress-bar");
@@ -181,6 +198,18 @@ const visualizationEl = $("lerobot-visualization");
 const datasetHealthEl = $("lerobot-dataset-health");
 const isaacAugmentationEl = $("lerobot-isaac-augmentation");
 const isaacAugmentationPreviewEl = $("lerobot-isaac-augmentation-preview");
+const isaacSyntheticOutputEl = $("isaac-synthetic-output");
+const isaacSyntheticProgressEl = $("isaac-synthetic-progress");
+const isaacSyntheticProgressLabelEl = $("isaac-synthetic-progress-label");
+const isaacSyntheticProgressBarEl = $("isaac-synthetic-progress-bar");
+const isaacSyntheticStepTraceEl = $("isaac-synthetic-step-trace");
+const isaacSyntheticCompatibilityEl = $("isaac-synthetic-status-compatibility");
+const isaacSyntheticDigitalTwinEl = $("isaac-synthetic-status-digital-twin");
+const isaacSyntheticSourceLabelsEl = $("isaac-synthetic-status-source-labels");
+const isaacSyntheticCanonicalIndexEl = $("isaac-synthetic-status-canonical-index");
+const isaacSyntheticGenerationEl = $("isaac-synthetic-status-generation");
+const isaacSyntheticHdf5El = $("isaac-synthetic-status-hdf5");
+const isaacSyntheticTrainingExposureEl = $("isaac-synthetic-status-training-exposure");
 const statusDotEl = $("lerobot-status-dot");
 const statusLabelEl = $("lerobot-status-label");
 const statusDetailEl = $("lerobot-status-detail");
@@ -928,14 +957,17 @@ function basePayload(overrides = {}) {
     dataset_mix_real_original_weight: numberValue(datasetMixRealWeightInput, 1),
     dataset_mix_isaac_rgbd_weight: numberValue(datasetMixIsaacRgbdWeightInput, 0.5),
     dataset_mix_isaac_augmentation_weight: numberValue(datasetMixIsaacAugmentationWeightInput, 0.5),
+    dataset_mix_isaac_lab_synthetic_weight: numberValue(datasetMixIsaacLabSyntheticWeightInput, 0.5),
     dataset_mix_real_original_max_samples: numberValue(datasetMixRealMaxInput, null),
     dataset_mix_isaac_rgbd_max_samples: numberValue(datasetMixIsaacRgbdMaxInput, null),
     dataset_mix_isaac_augmentation_max_samples: numberValue(datasetMixIsaacAugmentationMaxInput, null),
+    dataset_mix_isaac_lab_synthetic_max_samples: numberValue(datasetMixIsaacLabSyntheticMaxInput, null),
     dataset_mix_seed: numberValue(datasetMixSeedInput, 0),
     fidelity_weighting_enabled: boolValue(fidelityWeightingEnabledInput),
     fidelity_real_original_weight: numberValue(fidelityRealWeightInput, 1),
     fidelity_isaac_rgbd_weight: numberValue(fidelityIsaacRgbdWeightInput, 0.5),
     fidelity_isaac_augmentation_weight: numberValue(fidelityIsaacAugmentationWeightInput, 0.3),
+    fidelity_isaac_lab_synthetic_weight: numberValue(fidelityIsaacLabSyntheticWeightInput, 0.2),
     fps: numberValue(fpsInput, 15),
     camera_fps: numberValue(cameraFpsInput, 15),
     warmup_s: 2,
@@ -1224,6 +1256,49 @@ function visualizationPayload(overrides = {}) {
 
 function isaacAugmentationPayload(overrides = {}) {
   return visualizationPayload(overrides);
+}
+
+function isaacSyntheticPayload(overrides = {}) {
+  const payload = visualizationPayload(overrides);
+  const cameraList = isaacAugmentCamerasInput
+    ? isaacAugmentCamerasInput.value.split(",").map((item) => item.trim()).filter(Boolean)
+    : ["top", "front", "right"];
+  return {
+    ...payload,
+    pipeline_mode: isaacSyntheticPipelineModeInput
+      ? isaacSyntheticPipelineModeInput.value || "isaac_lab_replicator"
+      : "isaac_lab_replicator",
+    fallback_policy: isaacSyntheticFallbackPolicyInput
+      ? isaacSyntheticFallbackPolicyInput.value || "block_on_primary_failure"
+      : "block_on_primary_failure",
+    source_intent: isaacSyntheticSourceIntentInput
+      ? isaacSyntheticSourceIntentInput.value || "train_ready_success_only"
+      : "train_ready_success_only",
+    isaac_lab_path: isaacSyntheticIsaacLabPathInput ? isaacSyntheticIsaacLabPathInput.value.trim() : "",
+    isaac_sim_python: isaacSyntheticIsaacSimPythonInput ? isaacSyntheticIsaacSimPythonInput.value.trim() : "",
+    stage_path: isaacSyntheticStagePathInput ? isaacSyntheticStagePathInput.value.trim() : "",
+    cameras: cameraList.length ? cameraList : ["top", "front", "right"],
+    max_source_frames: numberValue(isaacAugmentMaxFramesInput, 150),
+    attempts_per_source_frame: numberValue(isaacAugmentVariantsInput, 1),
+    seed: numberValue(isaacAugmentSeedInput, 42),
+    augmentation_profile: isaacAugmentProfileInput ? isaacAugmentProfileInput.value || "conservative" : "conservative",
+    rgb_strength: numberValue(isaacAugmentRgbStrengthInput, 0.15),
+    depth_strength: numberValue(isaacAugmentDepthStrengthInput, 0.15),
+    render_strength: numberValue(isaacAugmentRenderDomainStrengthInput, 0.15),
+    camera_pose_strength: numberValue(isaacAugmentCameraPoseStrengthInput, 0.05),
+    mimic_trials: numberValue(isaacSyntheticMimicTrialsInput, 20),
+    mimic_num_envs: numberValue(isaacSyntheticMimicNumEnvsInput, 1),
+    rl_teacher_steps: numberValue(isaacSyntheticRlTeacherStepsInput, 0),
+    enable_replicator: boolValue(isaacSyntheticEnableReplicatorInput),
+    enable_hdf5_export: boolValue(isaacSyntheticEnableHdf5ExportInput),
+    enable_mimic: boolValue(isaacSyntheticEnableMimicInput),
+    enable_rl_teacher: boolValue(isaacSyntheticEnableRlTeacherInput),
+    real_weight: numberValue(datasetMixRealWeightInput, 1),
+    isaac_rgbd_weight: numberValue(datasetMixIsaacRgbdWeightInput, 0.35),
+    isaac_lab_synthetic_weight: numberValue(datasetMixIsaacLabSyntheticWeightInput, 0.5),
+    legacy_sidecar_weight: numberValue(datasetMixIsaacAugmentationWeightInput, 0.5),
+    ...overrides,
+  };
 }
 
 function devicePayload(role, overrides = {}) {
@@ -1600,7 +1675,9 @@ function actionSummary(data) {
     const t = normalizedTrainingProgress(data) || data.training || {};
     const fidelity_weights = data.fidelity_weights || t.fidelity_weights || {};
     const weights = fidelity_weights.weights || {};
-    const fidelity = weights.isaac_augmentation !== undefined ? ` · sim fidelity=${weights.isaac_rgbd ?? "-"} / ${weights.isaac_augmentation}` : "";
+    const fidelity = weights.isaac_augmentation !== undefined
+      ? ` · sim fidelity=${weights.isaac_rgbd ?? "-"} / ${weights.isaac_augmentation} / ${weights.isaac_lab_synthetic ?? "-"}`
+      : "";
     return `${data.status || "training"} · ${t.current_step || 0}/${t.total_steps || "?"} · ${Number(t.progress_percent || 0).toFixed(1)}%${fidelity}`;
   }
   if (data.runtime) {
@@ -2865,6 +2942,170 @@ function renderIsaacAugmentationPreview(data) {
   `;
 }
 
+function setSyntheticCard(el, title, rows = []) {
+  if (!el) return;
+  el.innerHTML = `
+    <div class="lerobot-report-card-title"><strong>${escapeHtml(title)}</strong></div>
+    ${reportRowsHtml(rows)}
+  `;
+}
+
+function syntheticCameraPrimLabel(cameraPrims) {
+  if (!Array.isArray(cameraPrims) || !cameraPrims.length) return "-";
+  return cameraPrims
+    .map((item) => {
+      if (typeof item === "string") return item;
+      if (!item || typeof item !== "object") return "";
+      const camera = item.camera || "";
+      const path = item.path || "";
+      const status = item.found === false ? "missing" : "";
+      return [camera, path, status].filter(Boolean).join(":");
+    })
+    .filter(Boolean)
+    .join(", ");
+}
+
+function renderIsaacSyntheticProgress(data) {
+  const progress = (data && data.progress) || {};
+  renderUnifiedProgress(
+    "isaac_synthetic",
+    isaacSyntheticProgressEl,
+    isaacSyntheticProgressLabelEl,
+    isaacSyntheticProgressBarEl,
+    {
+      stage: data && data.status ? data.status : "waiting",
+      done: Number(progress.percent || 0),
+      total: 100,
+      percent: Number(progress.percent || (data && data.ok ? 100 : 0)),
+      message: data && data.status ? data.status : "waiting",
+    },
+  );
+}
+
+function renderIsaacSynthetic(data) {
+  if (!isaacSyntheticOutputEl) return;
+  renderIsaacSyntheticProgress(data);
+  const compatibility = (data && data.compatibility) || {};
+  const digitalTwin = (data && data.digital_twin) || {};
+  const canonical = (data && data.canonical_episode_index) || {};
+  const sourceLabels = (data && data.source_labels) || {};
+  const trainingExposure = (data && data.training_exposure) || {};
+  const syntheticTrajectoryMetrics = (data && data.synthetic_trajectory_metrics) || {};
+  const syntheticTrajectoryTotal = syntheticTrajectoryMetrics.total || {};
+  const hdf5 = (data && data.hdf5) || {};
+  const validation = (data && data.validation_report) || {};
+  const blockers = Array.isArray(validation.blockers) ? validation.blockers : [];
+  const sourceCounts = sourceLabels.counts || {};
+  const sourceDetails = sourceLabels.details || {};
+  const sourceTrainableCount = (sourceType) => {
+    const detail = sourceDetails[sourceType] || {};
+    return Number(detail.trainable_count || 0);
+  };
+  const sourceCountLabel = (sourceType) => `${Number(sourceCounts[sourceType] || 0)} total / ${sourceTrainableCount(sourceType)} trainable`;
+  function syntheticTrajectoryMetricLabel(kind) {
+    const metric = syntheticTrajectoryMetrics[kind] || {};
+    return `${Number(metric.candidate_count || 0)} cand / ${Number(metric.success_count || 0)} ok / ${Number(metric.failure_count || 0)} fail`;
+  }
+  function syntheticSourceTypeSummary() {
+    const names = Object.keys(sourceCounts).filter((name) => Number(sourceCounts[name] || 0) > 0);
+    if (!names.length) return "-";
+    return names.map((name) => `${name}:${Number(sourceCounts[name] || 0)}`).join(" · ");
+  }
+  function syntheticEffectiveSampleLabel() {
+    const total = syntheticTrajectoryTotal.effective_training_samples;
+    const rows = syntheticTrajectoryTotal.training_row_count;
+    if (total === undefined && rows === undefined) return "-";
+    return `${total ?? "-"} effective / ${rows ?? 0} rows`;
+  }
+  function sourceWeightLabel(sourceType) {
+    const detail = sourceDetails[sourceType] || {};
+    const sourceWeight = detail.source_weight ?? sourceLabels.weights?.[sourceType];
+    const fidelityWeight = detail.fidelity_weight ?? sourceLabels.fidelity_weights?.[sourceType];
+    const effectiveWeight = detail.effective_weight;
+    const trainingRows = detail.training_row_count ?? 0;
+    return `src=${sourceWeight ?? "-"} fidelity=${fidelityWeight ?? "-"} effective=${effectiveWeight ?? "-"} rows=${trainingRows}`;
+  }
+  const candidateSourceCounts = trainingExposure.candidate_source_counts || {};
+  const exposedSourceCounts = trainingExposure.source_counts || {};
+  const replicatorProbeCheck = Array.isArray(data?.replicator?.checks)
+    ? data.replicator.checks.find((check) => check && check.id === "replicator_import_probe")
+    : null;
+  const replicatorProbe = (data?.replicator?.runtime_probe) || {};
+  setSyntheticCard(isaacSyntheticCompatibilityEl, "Compatibility", [
+    ["status", compatibility.compatibility_status || data?.status || "-"],
+    ["Lab", compatibility.isaac_lab_exists === undefined ? "-" : compatibility.isaac_lab_exists ? "present" : "missing"],
+    ["Lab tag", compatibility.isaac_lab_git_tag || compatibility.lab?.git_tag || "-"],
+    ["Lab commit", compatibility.isaac_lab_git_commit || compatibility.lab?.git_commit || "-"],
+    ["Sim", compatibility.isaac_sim_version || compatibility.sim?.version || "-"],
+    ["docs", compatibility.isaac_sim_docs_version || "-"],
+    ["Replicator", compatibility.replicator?.status || replicatorProbe.status || "-"],
+  ]);
+  setSyntheticCard(isaacSyntheticDigitalTwinEl, "Digital Twin", [
+    ["stage", digitalTwin.stage_exists === undefined ? "-" : digitalTwin.stage_exists ? "present" : "missing"],
+    ["cameras", syntheticCameraPrimLabel(digitalTwin.camera_prims)],
+  ]);
+  setSyntheticCard(isaacSyntheticSourceLabelsEl, "Source Labels", [
+    ["real", sourceCountLabel("real_lerobot")],
+    ["isaac_rgbd", sourceCountLabel("isaac_rgbd_render")],
+    ["replicator", sourceCountLabel("replicator_render_only")],
+    ["mimic", sourceCountLabel("isaac_lab_mimic")],
+    ["rl_teacher", sourceCountLabel("isaac_lab_rl_teacher")],
+    ["source types", syntheticSourceTypeSummary()],
+    ["effective samples", syntheticEffectiveSampleLabel()],
+    ["real weights", sourceWeightLabel("real_lerobot")],
+    ["synthetic weights", sourceWeightLabel("isaac_lab_synthetic")],
+  ]);
+  setSyntheticCard(isaacSyntheticCanonicalIndexEl, "Canonical Index", [
+    ["episodes", canonical.episode_count || 0],
+    ["frames", canonical.frame_count || 0],
+  ]);
+  setSyntheticCard(isaacSyntheticGenerationEl, "Generation", [
+    ["replicator", data?.replicator?.status || "skipped"],
+    ["replicator probe", replicatorProbe.status || replicatorProbeCheck?.status || "-"],
+    ["worker", data?.worker?.status || "-"],
+    ["worker return", data?.worker?.returncode === undefined ? "-" : data.worker.returncode],
+    ["mimic", data?.mimic?.status || "skipped"],
+    ["rl", data?.rl_teacher?.status || "skipped"],
+    ["mimic trajectories", syntheticTrajectoryMetricLabel("mimic")],
+    ["rl trajectories", syntheticTrajectoryMetricLabel("rl_teacher")],
+    ["job", data?.job?.status || "-"],
+    ["job id", data?.job_id || data?.job?.job_id || "-"],
+  ]);
+  setSyntheticCard(isaacSyntheticHdf5El, "HDF5 Export", [
+    ["status", hdf5.status || "not run"],
+    ["blocker", hdf5.blocker || "-"],
+    ["frames", hdf5.canonical_frame_count || 0],
+  ]);
+  setSyntheticCard(isaacSyntheticTrainingExposureEl, "Training Exposure", [
+    ["rows", trainingExposure.row_count || 0],
+    ["candidates", trainingExposure.candidate_row_count || 0],
+    ["exposed", trainingExposure.exposed_row_count || 0],
+    ["blocked rows", trainingExposure.blocked_row_count || 0],
+    ["validation", trainingExposure.validation_status || "-"],
+    ["candidate sources", Object.keys(candidateSourceCounts).length ? JSON.stringify(candidateSourceCounts) : "-"],
+    ["exposed sources", Object.keys(exposedSourceCounts).length ? JSON.stringify(exposedSourceCounts) : "-"],
+    ["synthetic training rows", syntheticTrajectoryTotal.training_row_count ?? 0],
+    ["synthetic effective", syntheticTrajectoryTotal.effective_training_samples ?? "-"],
+    ["blocked", blockers.length],
+  ]);
+  if (isaacSyntheticStepTraceEl) {
+    const trace = Array.isArray(data && data.step_trace) ? data.step_trace : [];
+    const items = trace.map((item) => `
+      <li><strong>${escapeHtml(item.stage || item.step || "-")}</strong> · ${escapeHtml(item.status || "-")} · ${escapeHtml(item.message || item.detail || "")}</li>
+    `).join("");
+    isaacSyntheticStepTraceEl.innerHTML = `<details open><summary>Synthetic step trace</summary><ul>${items || "<li>No step trace.</li>"}</ul></details>`;
+  }
+  isaacSyntheticOutputEl.innerHTML = `
+    <div class="visual-summary">
+      <strong>${escapeHtml(data && data.output_root ? data.output_root : "Isaac Lab synthetic")}</strong>
+      <span>status=${escapeHtml(data && data.status ? data.status : "unknown")} · blockers=${escapeHtml(String(blockers.length))}</span>
+      <span>${escapeHtml(data && data.pipeline_mode ? data.pipeline_mode : "")}</span>
+    </div>
+    <details><summary>Validation report</summary><pre class="command-output">${escapeHtml(JSON.stringify(validation, null, 2))}</pre></details>
+    <details><summary>Full response</summary><pre class="command-output">${escapeHtml(JSON.stringify(data || {}, null, 2))}</pre></details>
+  `;
+}
+
 async function runIsaacAugmentation(statusTarget = null) {
   const payload = isaacAugmentationPayload();
   renderIsaacAugmentationProgress({ status: "request_sent" });
@@ -2880,6 +3121,25 @@ async function runIsaacAugmentation(statusTarget = null) {
     renderIsaacAugmentation(error);
     renderResult("Isaac data augmentation", error);
     setActionStatus(statusTarget, "error", "Isaac data augmentation", error);
+    return error;
+  }
+}
+
+async function runIsaacSyntheticAction(label, endpoint, statusTarget = null, timeoutMs = 300000, overrides = {}) {
+  const payload = isaacSyntheticPayload(overrides);
+  renderIsaacSyntheticProgress({ status: "request_sent", progress: { percent: 5 } });
+  setActionStatus(statusTarget, "running", label, { status: "request sent" });
+  try {
+    const data = await postJson(endpoint, payload, timeoutMs);
+    renderIsaacSynthetic(data);
+    renderResult(label, data);
+    setActionStatus(statusTarget, data && data.ok ? "ok" : "error", label, data);
+    return data;
+  } catch (err) {
+    const error = { ok: false, status: "request_failed", error: String(err) };
+    renderIsaacSynthetic(error);
+    renderResult(label, error);
+    setActionStatus(statusTarget, "error", label, error);
     return error;
   }
 }
@@ -3434,6 +3694,22 @@ bind("btn-dataset-inspect", async (event) => {
   }
 });
 bind("btn-dataset-visualize", (event) => visualizeDataset(actionStatusFromEvent(event)));
+bind("isaac-synthetic-check-digital-twin", (event) => runIsaacSyntheticAction("Isaac Lab synthetic prepare", "/api/lerobot/isaac-lab/prepare", actionStatusFromEvent(event), 120000));
+bind("isaac-synthetic-build", (event) => runIsaacSyntheticAction("Isaac Lab synthetic build", "/api/lerobot/isaac-lab/build-synthetic", actionStatusFromEvent(event), 300000));
+bind("isaac-synthetic-run-replicator-worker", (event) => runIsaacSyntheticAction("Isaac Lab Replicator worker", "/api/lerobot/isaac-lab/run-replicator-worker", actionStatusFromEvent(event), 900000, { enable_replicator: true }));
+bind("isaac-synthetic-run-replicator-smoke", (event) => runIsaacSyntheticAction("Isaac Lab Replicator smoke", "/api/lerobot/isaac-lab/run-replicator-worker", actionStatusFromEvent(event), 180000, { enable_replicator: true, max_source_frames: 1, attempts_per_source_frame: 1, cameras: ["top"] }));
+bind("isaac-synthetic-preview", (event) => runIsaacSyntheticAction("Isaac Lab synthetic preview", "/api/lerobot/isaac-lab/preview", actionStatusFromEvent(event), 60000));
+bind("isaac-synthetic-export-hdf5", (event) => runIsaacSyntheticAction("Isaac Lab HDF5 export", "/api/lerobot/isaac-lab/export-hdf5", actionStatusFromEvent(event), 120000));
+bind("isaac-synthetic-run-mimic", (event) => runIsaacSyntheticAction("Isaac Lab Mimic runner", "/api/lerobot/isaac-lab/run-mimic", actionStatusFromEvent(event), 300000, { enable_mimic: true }));
+bind("isaac-synthetic-run-mimic-smoke", (event) => runIsaacSyntheticAction("Isaac Lab Mimic smoke", "/api/lerobot/isaac-lab/run-mimic-smoke", actionStatusFromEvent(event), 120000, { enable_mimic: true }));
+bind("isaac-synthetic-mimic-status", (event) => runIsaacSyntheticAction("Isaac Lab Mimic status", "/api/lerobot/isaac-lab/mimic/status", actionStatusFromEvent(event), 60000, { enable_mimic: true }));
+bind("isaac-synthetic-mimic-stop", (event) => runIsaacSyntheticAction("Isaac Lab Mimic stop", "/api/lerobot/isaac-lab/mimic/stop", actionStatusFromEvent(event), 60000, { enable_mimic: true }));
+bind("isaac-synthetic-run-rl-teacher", (event) => runIsaacSyntheticAction("Isaac Lab RL teacher runner", "/api/lerobot/isaac-lab/run-rl-teacher", actionStatusFromEvent(event), 300000, { enable_rl_teacher: true }));
+bind("isaac-synthetic-run-rl-teacher-smoke", (event) => runIsaacSyntheticAction("Isaac Lab RL teacher smoke", "/api/lerobot/isaac-lab/run-rl-teacher-smoke", actionStatusFromEvent(event), 120000, { enable_rl_teacher: true }));
+bind("isaac-synthetic-rl-teacher-status", (event) => runIsaacSyntheticAction("Isaac Lab RL teacher status", "/api/lerobot/isaac-lab/rl-teacher/status", actionStatusFromEvent(event), 60000, { enable_rl_teacher: true }));
+bind("isaac-synthetic-rl-teacher-stop", (event) => runIsaacSyntheticAction("Isaac Lab RL teacher stop", "/api/lerobot/isaac-lab/rl-teacher/stop", actionStatusFromEvent(event), 60000, { enable_rl_teacher: true }));
+bind("isaac-synthetic-e2e-smoke", (event) => runIsaacSyntheticAction("Isaac Lab 5x10 E2E smoke", "/api/lerobot/isaac-lab/e2e-smoke", actionStatusFromEvent(event), 300000, { e2e_create_fixture: true, e2e_episodes: 5, e2e_episode_s: 10, e2e_fps: 15, e2e_train_steps: 2, enable_replicator: false, require_physics_pass: false, require_articulation_pass: false }));
+bind("isaac-synthetic-status", (event) => runIsaacSyntheticAction("Isaac Lab synthetic status", "/api/lerobot/isaac-lab/status", actionStatusFromEvent(event), 60000));
 bind("btn-isaac-augment-run", (event) => runIsaacAugmentation(actionStatusFromEvent(event)));
 bind("btn-isaac-augment-preview", (event) => previewIsaacAugmentation(actionStatusFromEvent(event)));
 bind("btn-dataset-visualize-status", async (event) => {

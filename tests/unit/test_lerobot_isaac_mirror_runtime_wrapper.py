@@ -115,6 +115,29 @@ def test_isaac_mirror_publish_tolerates_control_loop_jitter(monkeypatch) -> None
     assert publisher.should_publish() is True
 
 
+def test_isaac_mirror_publisher_can_pause_sidecar_collection_while_posting_live_state(tmp_path: Path, monkeypatch) -> None:
+    record_path = tmp_path / "mirror.jsonl"
+    monkeypatch.setenv("ATR_ISAAC_MIRROR_ENABLED", "1")
+    monkeypatch.setenv("ATR_ISAAC_MIRROR_RECORD_PATH", str(record_path))
+    monkeypatch.setenv("ATR_ISAAC_MIRROR_SAMPLE_HZ", "999")
+    monkeypatch.setenv("ATR_RECORD_ATTEMPT_ENABLED", "1")
+    monkeypatch.setenv("ATR_RECORD_ATTEMPT_DATASET_PATH", str(tmp_path / "dataset"))
+    monkeypatch.setenv("ATR_RECORD_ATTEMPT_ID", "attempt_pause")
+    monkeypatch.setenv("ATR_ISAAC_RGBD_RENDER_ENABLED", "1")
+    monkeypatch.setenv("ATR_ISAAC_RGBD_RENDER_MODE", "deferred_after_record")
+
+    publisher = IsaacMirrorPublisher()
+    posted: list[dict[str, object]] = []
+    monkeypatch.setattr(publisher, "_post", lambda payload: posted.append(payload) or {"ok": True, "status_code": 200})
+
+    with publisher.collection_scope(False, reason="reset"):
+        publisher.publish_action({"shoulder_pan.pos": 5.0}, source="test")
+
+    assert publisher.flush(timeout_s=1.0) is True
+    assert len(posted) == 1
+    assert not record_path.exists()
+
+
 def test_isaac_mirror_publisher_caps_legacy_timeout_for_live_post(monkeypatch) -> None:
     monkeypatch.setenv("ATR_ISAAC_MIRROR_TIMEOUT_S", "0.5")
     monkeypatch.delenv("ATR_ISAAC_MIRROR_POST_TIMEOUT_S", raising=False)
@@ -924,6 +947,192 @@ def test_active_robot_cam_resume_motion_uses_slower_default_speed_scale(tmp_path
     assert result["ok"] is True
     assert len(sent) == 12
     assert sent[-1] == {"shoulder_pan.pos": 100.0}
+
+
+def test_active_robot_cam_resume_adds_home_wrist_flex_zero_waypoint(tmp_path: Path, monkeypatch) -> None:
+    capture_pose = tmp_path / "capture.json"
+    home_pose = tmp_path / "home.json"
+    capture_pose.write_text(
+        json.dumps(
+            {
+                "present_position_lerobot": {
+                    "shoulder_pan.pos": 10.0,
+                    "shoulder_lift.pos": 20.0,
+                    "elbow_flex.pos": 30.0,
+                    "wrist_flex.pos": 40.0,
+                    "wrist_roll.pos": 50.0,
+                    "gripper.pos": 60.0,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    home_pose.write_text(
+        json.dumps(
+            {
+                "present_position_lerobot": {
+                    "shoulder_pan.pos": 1.0,
+                    "shoulder_lift.pos": 2.0,
+                    "elbow_flex.pos": 3.0,
+                    "wrist_flex.pos": 44.0,
+                    "wrist_roll.pos": 5.0,
+                    "gripper.pos": 6.0,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("ATR_ACTIVE_ROBOT_CAM_ENABLED", "1")
+    monkeypatch.setenv("ATR_ACTIVE_ROBOT_CAM_CAPTURE_POSE_PATH", str(capture_pose))
+    monkeypatch.setenv("ATR_ACTIVE_ROBOT_CAM_HOME_POSE_PATH", str(home_pose))
+    monkeypatch.setenv("ATR_ACTIVE_ROBOT_CAM_RESULT_DIR", str(tmp_path / "active_cam_result"))
+    monkeypatch.setenv("ATR_ACTIVE_ROBOT_CAM_MIN_STEPS", "1")
+    monkeypatch.setenv("ATR_ACTIVE_ROBOT_CAM_MAX_STEP", "1000")
+    monkeypatch.setenv("ATR_ACTIVE_ROBOT_CAM_SPEED_SCALE", "1")
+    monkeypatch.setenv("ATR_ACTIVE_ROBOT_CAM_RESUME_SPEED_SCALE", "1")
+    monkeypatch.setenv("ATR_ACTIVE_ROBOT_CAM_STEP_SLEEP_S", "0")
+    monkeypatch.setenv("ATR_ACTIVE_ROBOT_CAM_SETTLE_S", "0")
+    monkeypatch.setenv("ATR_ACTIVE_ROBOT_CAM_HOLD_AFTER_CAPTURE_S", "0")
+
+    class FakeSidecar:
+        camera_key = "wrist"
+        root = tmp_path
+
+        def write_observation(self, observation, *, force=False, reason="latest", depth_scale_m_per_unit=None):
+            path = tmp_path / f"{reason}.json"
+            path.write_text("{}", encoding="utf-8")
+            return path
+
+    class FakeUpdater:
+        def update_from_manifest(self, manifest_path: Path, *, reason: str, pose_payload_overrides=None) -> dict[str, object]:
+            return {"ok": True, "pose": {"schema": "specimen_pose.v1"}}
+
+    class FakeBus:
+        def __init__(self) -> None:
+            self.positions = {
+                "shoulder_pan": 0.0,
+                "shoulder_lift": 0.0,
+                "elbow_flex": 0.0,
+                "wrist_flex": 0.0,
+                "wrist_roll": 0.0,
+                "gripper": 0.0,
+            }
+
+        def sync_read(self, register: str):
+            assert register == "Present_Position"
+            return dict(self.positions)
+
+    class FakeRobot:
+        def __init__(self) -> None:
+            self.bus = FakeBus()
+
+        def get_observation(self):
+            return {"wrist": np.zeros((8, 8, 3), dtype=np.uint8)}
+
+    sent: list[dict[str, float]] = []
+    robot = FakeRobot()
+    current_action = {
+        "shoulder_pan.pos": 100.0,
+        "shoulder_lift.pos": 101.0,
+        "elbow_flex.pos": 102.0,
+        "wrist_flex.pos": 103.0,
+        "wrist_roll.pos": 104.0,
+        "gripper.pos": 105.0,
+    }
+
+    def fake_send_action(_robot, action):
+        sent.append(dict(action))
+        for key, value in action.items():
+            robot.bus.positions[str(key).removesuffix(".pos")] = float(value)
+        return dict(action)
+
+    tracker = ActiveRobotCamTracker(FakeSidecar(), FakeUpdater())  # type: ignore[arg-type]
+
+    result = tracker.capture_once(robot, send_action=fake_send_action, current_action=current_action, reason="teleop")
+
+    expected_waypoint = {
+        "shoulder_pan.pos": 1.0,
+        "shoulder_lift.pos": 2.0,
+        "elbow_flex.pos": 3.0,
+        "wrist_flex.pos": 0.0,
+        "wrist_roll.pos": 5.0,
+        "gripper.pos": 6.0,
+    }
+    assert result["ok"] is True
+    assert sent[-2] == expected_waypoint
+    assert sent[-1] == current_action
+    assert result["resume_waypoint_action"] == expected_waypoint
+
+
+def test_active_robot_cam_capture_wait_accepts_small_motor_jitter(tmp_path: Path, monkeypatch) -> None:
+    capture_pose = tmp_path / "capture.json"
+    home_pose = tmp_path / "home.json"
+    capture_pose.write_text(json.dumps({"present_position_lerobot": {"shoulder_pan.pos": 10.0}}), encoding="utf-8")
+    home_pose.write_text(json.dumps({"present_position_lerobot": {"shoulder_pan.pos": 0.0}}), encoding="utf-8")
+    monkeypatch.setenv("ATR_ACTIVE_ROBOT_CAM_ENABLED", "1")
+    monkeypatch.setenv("ATR_ACTIVE_ROBOT_CAM_CAPTURE_POSE_PATH", str(capture_pose))
+    monkeypatch.setenv("ATR_ACTIVE_ROBOT_CAM_HOME_POSE_PATH", str(home_pose))
+    monkeypatch.setenv("ATR_ACTIVE_ROBOT_CAM_RESULT_DIR", str(tmp_path / "active_cam_result"))
+    monkeypatch.setenv("ATR_ACTIVE_ROBOT_CAM_MIN_STEPS", "1")
+    monkeypatch.setenv("ATR_ACTIVE_ROBOT_CAM_MAX_STEP", "1000")
+    monkeypatch.setenv("ATR_ACTIVE_ROBOT_CAM_SPEED_SCALE", "1")
+    monkeypatch.setenv("ATR_ACTIVE_ROBOT_CAM_RESUME_SPEED_SCALE", "1")
+    monkeypatch.setenv("ATR_ACTIVE_ROBOT_CAM_STEP_SLEEP_S", "0")
+    monkeypatch.setenv("ATR_ACTIVE_ROBOT_CAM_SETTLE_S", "0")
+    monkeypatch.setenv("ATR_ACTIVE_ROBOT_CAM_HOLD_AFTER_CAPTURE_S", "0")
+    monkeypatch.setenv("ATR_ACTIVE_ROBOT_CAM_CAPTURE_WAIT_TIMEOUT_S", "1")
+    monkeypatch.setenv("ATR_ACTIVE_ROBOT_CAM_CAPTURE_WAIT_POLL_S", "0")
+    monkeypatch.setenv("ATR_ACTIVE_ROBOT_CAM_CAPTURE_WAIT_TOLERANCE_DEG", "0.1")
+
+    events: list[str] = []
+
+    class FakeSidecar:
+        camera_key = "wrist"
+        root = tmp_path
+
+        def write_observation(self, observation, *, force=False, reason="latest", depth_scale_m_per_unit=None):
+            events.append("write_observation")
+            path = tmp_path / f"{reason}.json"
+            path.write_text("{}", encoding="utf-8")
+            return path
+
+    class FakeUpdater:
+        def update_from_manifest(self, manifest_path: Path, *, reason: str, pose_payload_overrides=None) -> dict[str, object]:
+            return {"ok": True, "pose": {"schema": "specimen_pose.v1"}}
+
+    class FakeBus:
+        def __init__(self) -> None:
+            self.position = 0.0
+
+        def sync_read(self, register: str):
+            assert register == "Present_Position"
+            events.append(f"present:{self.position:.2f}")
+            return {"shoulder_pan": self.position}
+
+    class FakeRobot:
+        def __init__(self) -> None:
+            self.bus = FakeBus()
+
+        def get_observation(self):
+            events.append("get_observation")
+            return {"wrist": np.zeros((8, 8, 3), dtype=np.uint8)}
+
+    robot = FakeRobot()
+
+    def fake_send_action(_robot, action):
+        events.append("send")
+        if "shoulder_pan.pos" in action:
+            robot.bus.position = float(action["shoulder_pan.pos"]) - 0.03
+        return dict(action)
+
+    tracker = ActiveRobotCamTracker(FakeSidecar(), FakeUpdater())  # type: ignore[arg-type]
+
+    result = tracker.capture_once(robot, send_action=fake_send_action, current_action=None, reason="teleop")
+
+    assert result["ok"] is True
+    assert result["capture_wait"]["ok"] is True
+    assert result["capture_wait"]["max_error_deg"] == pytest.approx(0.03)
+    assert events.index("present:9.97") < events.index("get_observation")
 
 
 def test_active_robot_cam_consumes_external_isaac_capture_request(tmp_path: Path, monkeypatch) -> None:
@@ -1924,6 +2133,337 @@ def test_record_loop_patch_waits_for_active_cam_return_to_teleop_pose_before_rec
     assert events == ["present", "capture:record_start", "wait:record_start", "record"]
 
 
+def test_record_loop_patch_seeds_rerun_observation_before_active_cam_preflight(tmp_path: Path, monkeypatch) -> None:
+    fake_lerobot = types.ModuleType("lerobot")
+    fake_lerobot.__path__ = []
+    fake_record = types.ModuleType("lerobot.record")
+    events: list[str] = []
+    rerun_observations: list[dict[str, object]] = []
+    rerun_actions: list[dict[str, float]] = []
+
+    class FakeRobot:
+        def get_observation(self):
+            events.append("get_observation")
+            return {
+                "top": np.zeros((2, 2, 3), dtype=np.uint8),
+                "wrist": np.ones((2, 2, 3), dtype=np.uint8),
+            }
+
+    def _original_record_loop(*args, **kwargs):
+        events.append("record")
+        return "recorded"
+
+    def _log_rerun_data(observation, action):
+        events.append("rerun")
+        rerun_observations.append(dict(observation))
+        rerun_actions.append(dict(action))
+
+    fake_record.record_loop = _original_record_loop
+    fake_record.log_rerun_data = _log_rerun_data
+    monkeypatch.setitem(sys.modules, "lerobot", fake_lerobot)
+    monkeypatch.setitem(sys.modules, "lerobot.record", fake_record)
+
+    class FakeActiveRobotCam:
+        enabled = True
+        record_start_enabled = True
+
+        def present_action(self, robot):
+            events.append("present")
+            return {"shoulder_pan.pos": 17.0}
+
+        def capture_once(self, robot, *, send_action, current_action, reason, force=False):
+            events.append(f"capture:{reason}")
+            return {"ok": True, "status": "applied", "resume_action": dict(current_action)}
+
+        def wait_until_action_reached(self, robot, target_action, *, reason):
+            events.append(f"wait:{reason}")
+            return {"ok": True, "status": "reached", "target_action": dict(target_action)}
+
+    class FakeSidecar:
+        enabled = True
+        root = tmp_path / "latest_frame"
+
+    class FakeUpdater:
+        enabled = True
+
+    patch_record_loop(FakeSidecar(), FakeUpdater(), FakeActiveRobotCam())  # type: ignore[arg-type]
+
+    result = fake_record.record_loop(robot=FakeRobot(), dataset=object(), events={}, fps=15, display_data=True)
+
+    assert result == "recorded"
+    assert events == ["present", "get_observation", "rerun", "capture:record_start", "wait:record_start", "record"]
+    assert "wrist" in rerun_observations[0]
+    assert rerun_actions == [{"shoulder_pan.pos": 17.0}]
+
+
+def test_record_loop_patch_sends_rerun_blueprint_with_wrist_view_before_active_cam_preflight(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fake_lerobot = types.ModuleType("lerobot")
+    fake_lerobot.__path__ = []
+    fake_record = types.ModuleType("lerobot.record")
+    fake_rerun = types.ModuleType("rerun")
+    fake_rerun.__path__ = []
+    fake_rrb = types.ModuleType("rerun.blueprint")
+    events: list[str] = []
+    spatial_origins: list[str] = []
+
+    class FakeView:
+        def __init__(self, *, origin="/", name=None, contents=None):
+            self.origin = origin
+            self.name = name
+            self.contents = contents
+
+    class FakeSpatial2DView(FakeView):
+        def __init__(self, *, origin="/", name=None, contents="$origin/**"):
+            super().__init__(origin=origin, name=name, contents=contents)
+            spatial_origins.append(str(origin))
+
+    class FakeTimeSeriesView(FakeView):
+        pass
+
+    class FakeContainer:
+        def __init__(self, *children, **kwargs):
+            self.children = list(children)
+            self.kwargs = kwargs
+
+    class FakeBlueprint:
+        def __init__(self, *parts, **kwargs):
+            self.parts = list(parts)
+            self.kwargs = kwargs
+
+    def _send_blueprint(blueprint, *, make_active=True, make_default=True):
+        events.append("send_blueprint")
+        assert any(origin == "observation.wrist" for origin in spatial_origins)
+        assert make_active is True
+        assert make_default is True
+
+    class FakeRobot:
+        def get_observation(self):
+            events.append("get_observation")
+            return {"top": np.zeros((2, 2, 3), dtype=np.uint8), "wrist": np.ones((2, 2, 3), dtype=np.uint8)}
+
+    def _original_record_loop(*args, **kwargs):
+        events.append("record")
+        return "recorded"
+
+    def _log_rerun_data(observation, action):
+        events.append("rerun")
+
+    fake_record.record_loop = _original_record_loop
+    fake_record.log_rerun_data = _log_rerun_data
+    fake_rerun.send_blueprint = _send_blueprint
+    fake_rrb.Blueprint = FakeBlueprint
+    fake_rrb.Vertical = FakeContainer
+    fake_rrb.Horizontal = FakeContainer
+    fake_rrb.Spatial2DView = FakeSpatial2DView
+    fake_rrb.TimeSeriesView = FakeTimeSeriesView
+    monkeypatch.setitem(sys.modules, "lerobot", fake_lerobot)
+    monkeypatch.setitem(sys.modules, "lerobot.record", fake_record)
+    monkeypatch.setitem(sys.modules, "rerun", fake_rerun)
+    monkeypatch.setitem(sys.modules, "rerun.blueprint", fake_rrb)
+
+    class FakeActiveRobotCam:
+        enabled = True
+        record_start_enabled = True
+
+        def present_action(self, robot):
+            events.append("present")
+            return {"shoulder_pan.pos": 17.0}
+
+        def capture_once(self, robot, *, send_action, current_action, reason, force=False):
+            events.append(f"capture:{reason}")
+            return {"ok": True, "status": "applied", "resume_action": dict(current_action)}
+
+        def wait_until_action_reached(self, robot, target_action, *, reason):
+            events.append(f"wait:{reason}")
+            return {"ok": True, "status": "reached", "target_action": dict(target_action)}
+
+    class FakeSidecar:
+        enabled = True
+        root = tmp_path / "latest_frame"
+
+    class FakeUpdater:
+        enabled = True
+
+    patch_record_loop(FakeSidecar(), FakeUpdater(), FakeActiveRobotCam())  # type: ignore[arg-type]
+
+    result = fake_record.record_loop(robot=FakeRobot(), dataset=object(), events={}, fps=15, display_data=True)
+
+    assert result == "recorded"
+    assert "observation.top" in spatial_origins
+    assert "observation.wrist" in spatial_origins
+    assert events.index("send_blueprint") < events.index("capture:record_start")
+
+
+def test_record_loop_patch_posts_isaac_timeline_play_after_active_cam_preflight(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fake_lerobot = types.ModuleType("lerobot")
+    fake_lerobot.__path__ = []
+    fake_record = types.ModuleType("lerobot.record")
+    events: list[str] = []
+    requests: list[dict[str, object]] = []
+    monkeypatch.setenv("ATR_ISAAC_TIMELINE_PLAY_RECORD_START_ENABLED", "1")
+
+    class FakeResponse:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return b'{"ok": true, "status": "timeline_play_queued"}'
+
+    def _urlopen(request, timeout=0.5):
+        events.append("timeline_play")
+        requests.append(
+            {
+                "url": request.full_url,
+                "method": request.get_method(),
+                "body": json.loads(request.data.decode("utf-8")),
+                "timeout": timeout,
+            }
+        )
+        return FakeResponse()
+
+    monkeypatch.setattr(runtime_wrapper, "urlopen", _urlopen)
+
+    class FakePublisher:
+        enabled = True
+        endpoint = "http://127.0.0.1:8766/joints"
+
+        def collection_scope(self, enabled, *, reason=""):
+            class Scope:
+                def __enter__(self_inner):
+                    return None
+
+                def __exit__(self_inner, *_args):
+                    return False
+
+            return Scope()
+
+        def reset_collection_frame_context(self):
+            return None
+
+        def flush(self, timeout_s=2.0):
+            return True
+
+    class FakeRobot:
+        def get_observation(self):
+            events.append("get_observation")
+            return {"top": np.zeros((2, 2, 3), dtype=np.uint8), "wrist": np.ones((2, 2, 3), dtype=np.uint8)}
+
+    def _original_record_loop(*args, **kwargs):
+        events.append("record")
+        return "recorded"
+
+    fake_record.record_loop = _original_record_loop
+    fake_record.log_rerun_data = lambda observation, action: events.append("rerun")
+    monkeypatch.setitem(sys.modules, "lerobot", fake_lerobot)
+    monkeypatch.setitem(sys.modules, "lerobot.record", fake_record)
+
+    class FakeActiveRobotCam:
+        enabled = True
+        record_start_enabled = True
+
+        def present_action(self, robot):
+            events.append("present")
+            return {"shoulder_pan.pos": 17.0}
+
+        def capture_once(self, robot, *, send_action, current_action, reason, force=False):
+            events.append(f"capture:{reason}")
+            return {"ok": True, "status": "applied", "resume_action": dict(current_action)}
+
+        def wait_until_action_reached(self, robot, target_action, *, reason):
+            events.append(f"wait:{reason}")
+            return {"ok": True, "status": "reached", "target_action": dict(target_action)}
+
+    class FakeSidecar:
+        enabled = True
+        root = tmp_path / "latest_frame"
+
+    class FakeUpdater:
+        enabled = True
+
+    patch_record_loop(FakeSidecar(), FakeUpdater(), FakeActiveRobotCam(), publisher=FakePublisher())  # type: ignore[arg-type]
+
+    result = fake_record.record_loop(robot=FakeRobot(), dataset=object(), events={}, fps=15, display_data=True)
+
+    assert result == "recorded"
+    assert events.index("timeline_play") > events.index("wait:record_start")
+    assert events.index("timeline_play") < events.index("record")
+    assert requests == [
+        {
+            "url": "http://127.0.0.1:8766/timeline/play",
+            "method": "POST",
+            "body": {"reason": "record_start"},
+            "timeout": 0.15,
+        }
+    ]
+
+
+def test_record_loop_patch_warns_when_active_cam_return_miss_is_within_soft_tolerance(tmp_path: Path, monkeypatch) -> None:
+    fake_lerobot = types.ModuleType("lerobot")
+    fake_lerobot.__path__ = []
+    fake_record = types.ModuleType("lerobot.record")
+    events: list[str] = []
+
+    def _original_record_loop(*args, **kwargs):
+        events.append("record")
+        return "recorded"
+
+    fake_record.record_loop = _original_record_loop
+    monkeypatch.setitem(sys.modules, "lerobot", fake_lerobot)
+    monkeypatch.setitem(sys.modules, "lerobot.record", fake_record)
+
+    class FakeActiveRobotCam:
+        enabled = True
+        record_start_enabled = True
+        resume_wait_soft_tolerance_deg = 3.0
+
+        def present_action(self, robot):
+            events.append("present")
+            return {"wrist_flex.pos": 41.2}
+
+        def capture_once(self, robot, *, send_action, current_action, reason, force=False):
+            events.append(f"capture:{reason}")
+            return {"ok": True, "status": "applied", "resume_action": dict(current_action)}
+
+        def wait_until_action_reached(self, robot, target_action, *, reason):
+            events.append(f"wait:{reason}")
+            return {
+                "ok": False,
+                "status": "timeout",
+                "failure_code": "ACTIVE_ROBOT_CAM_RESUME_NOT_REACHED",
+                "max_error_deg": 2.3443,
+                "tolerance_deg": 2.0,
+                "target_action": dict(target_action),
+            }
+
+    class FakeSidecar:
+        enabled = True
+        root = tmp_path / "latest_frame"
+
+    class FakeUpdater:
+        enabled = True
+
+    patch_record_loop(FakeSidecar(), FakeUpdater(), FakeActiveRobotCam())  # type: ignore[arg-type]
+
+    result = fake_record.record_loop(robot=object(), dataset=object(), events={}, fps=15)
+
+    assert result == "recorded"
+    assert events == ["present", "capture:record_start", "wait:record_start", "record"]
+    saved_result = json.loads((tmp_path / "latest_frame" / "record_start_specimen_pose_result.json").read_text(encoding="utf-8"))
+    assert saved_result["ok"] is True
+    assert saved_result["warning_only"] is True
+    assert saved_result["resume_wait"]["ok"] is False
+    assert saved_result["resume_wait_soft_tolerance_deg"] == 3.0
+
+
 def test_record_loop_patch_blocks_when_active_cam_return_pose_is_not_reached(tmp_path: Path, monkeypatch) -> None:
     fake_lerobot = types.ModuleType("lerobot")
     fake_lerobot.__path__ = []
@@ -1974,7 +2514,7 @@ def test_record_loop_patch_blocks_when_active_cam_return_pose_is_not_reached(tmp
     assert (tmp_path / "latest_frame" / "record_start_specimen_pose_result.json").is_file()
 
 
-def test_record_loop_patch_does_not_start_episode_when_active_cam_fails(tmp_path: Path, monkeypatch) -> None:
+def test_record_loop_patch_warns_when_active_cam_specimen_pose_fails(tmp_path: Path, monkeypatch) -> None:
     fake_lerobot = types.ModuleType("lerobot")
     fake_lerobot.__path__ = []
     fake_record = types.ModuleType("lerobot.record")
@@ -2011,11 +2551,178 @@ def test_record_loop_patch_does_not_start_episode_when_active_cam_fails(tmp_path
 
     patch_record_loop(FakeSidecar(), FakeUpdater(), FakeActiveRobotCam())  # type: ignore[arg-type]
 
-    with pytest.raises(RuntimeError, match="ACTIVE_ROBOT_CAM_SPECIMEN_POSE_FAILED"):
-        fake_record.record_loop(robot=object(), dataset=object(), events={}, fps=15)
+    result = fake_record.record_loop(robot=object(), dataset=object(), events={}, fps=15)
 
-    assert events == ["capture:record_start"]
-    assert (tmp_path / "latest_frame" / "record_start_specimen_pose_result.json").is_file()
+    assert result == "recorded"
+    assert events == ["capture:record_start", "record"]
+    result_path = tmp_path / "latest_frame" / "record_start_specimen_pose_result.json"
+    assert result_path.is_file()
+    saved_result = json.loads(result_path.read_text(encoding="utf-8"))
+    assert saved_result["ok"] is False
+    assert saved_result["warning_only"] is True
+    assert saved_result["failure_code"] == "ACTIVE_ROBOT_CAM_SPECIMEN_POSE_FAILED"
+
+
+def test_record_loop_patch_pauses_isaac_collection_during_reset_loop(tmp_path: Path, monkeypatch) -> None:
+    record_path = tmp_path / "mirror.jsonl"
+    monkeypatch.setenv("ATR_ISAAC_MIRROR_ENABLED", "1")
+    monkeypatch.setenv("ATR_ISAAC_MIRROR_RECORD_PATH", str(record_path))
+    monkeypatch.setenv("ATR_ISAAC_MIRROR_SAMPLE_HZ", "999")
+    fake_lerobot = types.ModuleType("lerobot")
+    fake_lerobot.__path__ = []
+    fake_record = types.ModuleType("lerobot.record")
+    events: list[str] = []
+
+    publisher = IsaacMirrorPublisher()
+    posted: list[dict[str, object]] = []
+    monkeypatch.setattr(publisher, "_post", lambda payload: posted.append(payload) or {"ok": True, "status_code": 200})
+
+    def _original_record_loop(*args, **kwargs):
+        events.append("reset")
+        publisher.publish_action({"shoulder_pan.pos": 3.0}, source="reset")
+        return "reset"
+
+    fake_record.record_loop = _original_record_loop
+    monkeypatch.setitem(sys.modules, "lerobot", fake_lerobot)
+    monkeypatch.setitem(sys.modules, "lerobot.record", fake_record)
+
+    class FakeSidecar:
+        enabled = True
+        root = tmp_path / "latest_frame"
+
+    class FakeUpdater:
+        enabled = True
+
+    patch_record_loop(FakeSidecar(), FakeUpdater(), publisher=publisher)  # type: ignore[arg-type]
+
+    result = fake_record.record_loop(robot=object(), events={}, fps=15, control_time_s=1)
+
+    assert result == "reset"
+    assert publisher.flush(timeout_s=1.0) is True
+    assert events == ["reset"]
+    assert len(posted) == 1
+    assert not record_path.exists()
+
+
+def test_record_loop_patch_pauses_isaac_collection_during_active_cam_preflight(tmp_path: Path, monkeypatch) -> None:
+    record_path = tmp_path / "mirror.jsonl"
+    monkeypatch.setenv("ATR_ISAAC_MIRROR_ENABLED", "1")
+    monkeypatch.setenv("ATR_ISAAC_MIRROR_RECORD_PATH", str(record_path))
+    monkeypatch.setenv("ATR_ISAAC_MIRROR_SAMPLE_HZ", "999")
+    fake_lerobot = types.ModuleType("lerobot")
+    fake_lerobot.__path__ = []
+    fake_record = types.ModuleType("lerobot.record")
+    events: list[str] = []
+
+    publisher = IsaacMirrorPublisher()
+    monkeypatch.setattr(publisher, "_post", lambda payload: {"ok": True, "status_code": 200})
+
+    class FakeRobot:
+        def send_action(self, action):
+            events.append(f"send:{action['shoulder_pan.pos']}")
+            publisher.publish_action(dict(action), source="robot_send")
+            return dict(action)
+
+    def _original_record_loop(*args, **kwargs):
+        events.append("record")
+        publisher.publish_action({"shoulder_pan.pos": 9.0}, source="record")
+        return "recorded"
+
+    fake_record.record_loop = _original_record_loop
+    monkeypatch.setitem(sys.modules, "lerobot", fake_lerobot)
+    monkeypatch.setitem(sys.modules, "lerobot.record", fake_record)
+
+    class FakeActiveRobotCam:
+        enabled = True
+        record_start_enabled = True
+
+        def capture_once(self, robot, *, send_action, current_action, reason, force=False):
+            events.append(f"capture:{reason}")
+            send_action(robot, {"shoulder_pan.pos": 42.0})
+            return {"ok": True, "status": "applied", "resume_action": dict(current_action)}
+
+        def wait_until_action_reached(self, robot, target_action, *, reason):
+            events.append(f"wait:{reason}")
+            return {"ok": True, "status": "reached"}
+
+    class FakeSidecar:
+        enabled = True
+        root = tmp_path / "latest_frame"
+
+    class FakeUpdater:
+        enabled = True
+
+    patch_record_loop(FakeSidecar(), FakeUpdater(), FakeActiveRobotCam(), publisher=publisher)  # type: ignore[arg-type]
+
+    result = fake_record.record_loop(robot=FakeRobot(), dataset=object(), events={}, fps=15)
+
+    assert result == "recorded"
+    assert publisher.flush(timeout_s=1.0) is True
+    rows = [json.loads(line) for line in record_path.read_text(encoding="utf-8").splitlines()]
+    assert [row["joint_state"][0]["position_deg"] for row in rows] == [9.0]
+    assert events == ["capture:record_start", "send:42.0", "wait:record_start", "record"]
+
+
+def test_record_loop_patch_discards_isaac_collection_for_rejected_rerecord_attempt(tmp_path: Path, monkeypatch) -> None:
+    dataset_root = tmp_path / "dataset"
+    record_path = dataset_root / "sidecar" / "isaac_mirror" / "session.jsonl"
+    monkeypatch.setenv("ATR_ISAAC_MIRROR_ENABLED", "1")
+    monkeypatch.setenv("ATR_ISAAC_MIRROR_RECORD_PATH", str(record_path))
+    monkeypatch.setenv("ATR_ISAAC_MIRROR_SAMPLE_HZ", "999")
+    monkeypatch.setenv("ATR_RECORD_ATTEMPT_ENABLED", "1")
+    monkeypatch.setenv("ATR_RECORD_ATTEMPT_DATASET_PATH", str(dataset_root))
+    monkeypatch.setenv("ATR_RECORD_ATTEMPT_SESSION_ID", "session")
+    monkeypatch.setenv("ATR_RECORD_ATTEMPT_ID", "attempt_session_ep000")
+    monkeypatch.setenv("ATR_RECORD_ATTEMPT_EPISODE_INDEX", "0")
+    fake_lerobot = types.ModuleType("lerobot")
+    fake_lerobot.__path__ = []
+    fake_record = types.ModuleType("lerobot.record")
+    events: dict[str, bool] = {}
+
+    publisher = IsaacMirrorPublisher()
+    monkeypatch.setattr(publisher, "_post", lambda payload: {"ok": True, "status_code": 200})
+
+    class FakeDataset:
+        num_episodes = 0
+
+    class FakeRobot:
+        def get_observation(self):
+            return {"top": np.zeros((8, 8, 3), dtype=np.uint8)}
+
+    def _original_record_loop(*args, **kwargs):
+        publisher.publish_action({"shoulder_pan.pos": 11.0}, source="record")
+        kwargs["events"]["rerecord_episode"] = True
+        return "recorded"
+
+    fake_record.record_loop = _original_record_loop
+    monkeypatch.setitem(sys.modules, "lerobot", fake_lerobot)
+    monkeypatch.setitem(sys.modules, "lerobot.record", fake_record)
+
+    class FakeSidecar:
+        enabled = True
+        root = tmp_path / "latest_frame"
+
+        def write_observation(self, observation, *, force=False, reason="latest", depth_scale_m_per_unit=None):
+            path = self.root / "latest_frame.json"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("{}", encoding="utf-8")
+            return path
+
+    class FakeUpdater:
+        enabled = True
+
+        def update_from_manifest(self, manifest_path: Path, *, reason: str) -> dict[str, object]:
+            return {"ok": True}
+
+    attempt_sidecar = RecordAttemptSidecar()
+    patch_record_loop(FakeSidecar(), FakeUpdater(), attempt_sidecar=attempt_sidecar, publisher=publisher)  # type: ignore[arg-type]
+
+    result = fake_record.record_loop(robot=FakeRobot(), dataset=FakeDataset(), events=events, fps=15)
+
+    assert result == "recorded"
+    assert publisher.flush(timeout_s=1.0) is True
+    assert events["rerecord_episode"] is True
+    assert not record_path.exists() or record_path.read_text(encoding="utf-8").strip() == ""
 
 
 def test_record_loop_patch_warns_when_passive_specimen_pose_fails(tmp_path: Path, monkeypatch) -> None:

@@ -107,6 +107,13 @@ def _workspace_scale(prim_name: str) -> tuple[float, float, float]:
     return float(match.group(1)), float(match.group(2)), float(match.group(3))
 
 
+def _workspace_height(prim_name: str) -> float:
+    block = _block(prim_name)
+    match = re.search(r"double height = ([^\n]+)", block)
+    assert match, f"{prim_name} height missing"
+    return float(match.group(1))
+
+
 def test_workspace_static_objects_have_collision_contract() -> None:
     for prim_name in [
         "TableTop",
@@ -122,11 +129,12 @@ def test_workspace_static_objects_have_collision_contract() -> None:
         assert "physics:collisionEnabled" in block, prim_name
 
 
-def test_right_disk_uses_original_height_and_robot_base_sits_in_two_cm_table_pocket() -> None:
-    assert _workspace_translate("RightDiskAluminumTop") == (0.59, 0.078, 0.037)
+def test_right_disk_is_three_cm_taller_and_robot_base_sits_in_two_cm_table_pocket() -> None:
+    assert _workspace_height("RightDiskAluminumTop") == 0.104
+    assert _workspace_translate("RightDiskAluminumTop") == (0.59, 0.078, 0.052)
     assert _workspace_translate("RightDiskBlackBase") == (0.59, 0.078, 0.012)
     marker_block = _block("RightDiskCenterYellowMarker")
-    assert "(0.59, 0.078, 0.0743)" in marker_block
+    assert "(0.59, 0.078, 0.1043)" in marker_block
     assert _workspace_translate("Robot") == (0.315, 0.06, -0.02)
 
     assert _workspace_translate("TableTop") == (0.35, 0.285, -0.015)

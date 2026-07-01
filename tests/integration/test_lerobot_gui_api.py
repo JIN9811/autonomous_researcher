@@ -86,7 +86,11 @@ def test_lerobot_gui_and_test_mode_api_workflow(tmp_path: Path, monkeypatch: Any
     assert "4. Local Paths" in page.text
     assert "5. Teleoperation" in page.text
     assert "6. Recording" in page.text
-    assert "7. Isaac Sim Data Augmentation" in page.text
+    assert "7. Isaac Lab Synthetic Intelligence" in page.text
+    assert "Isaac Lab Synthetic Intelligence" in page.text
+    assert "isaac-synthetic-pipeline-mode" in page.text
+    assert "Build Synthetic Dataset" in page.text
+    assert "Check Digital Twin" in page.text
     assert "Augmentation Profile" in page.text
     assert "standard_sim2real_v2" in page.text
     assert "Common image/depth augmentation" in page.text
@@ -601,13 +605,16 @@ def test_lerobot_gui_api_preserves_isaac_augmentation_options() -> None:
             "dataset_mix_real_original_weight": 0.8,
             "dataset_mix_isaac_rgbd_weight": 0.3,
             "dataset_mix_isaac_augmentation_weight": 0.2,
+            "dataset_mix_isaac_lab_synthetic_weight": 0.4,
             "dataset_mix_isaac_rgbd_max_samples": 20,
             "dataset_mix_isaac_augmentation_max_samples": 30,
+            "dataset_mix_isaac_lab_synthetic_max_samples": 40,
             "dataset_mix_seed": 7,
             "fidelity_weighting_enabled": True,
             "fidelity_real_original_weight": 1.0,
             "fidelity_isaac_rgbd_weight": 0.45,
             "fidelity_isaac_augmentation_weight": 0.25,
+            "fidelity_isaac_lab_synthetic_weight": 0.2,
         }
     )
     payload = request.model_dump()
@@ -622,13 +629,16 @@ def test_lerobot_gui_api_preserves_isaac_augmentation_options() -> None:
     assert payload["dataset_mix_real_original_weight"] == 0.8
     assert payload["dataset_mix_isaac_rgbd_weight"] == 0.3
     assert payload["dataset_mix_isaac_augmentation_weight"] == 0.2
+    assert payload["dataset_mix_isaac_lab_synthetic_weight"] == 0.4
     assert payload["dataset_mix_isaac_rgbd_max_samples"] == 20
     assert payload["dataset_mix_isaac_augmentation_max_samples"] == 30
+    assert payload["dataset_mix_isaac_lab_synthetic_max_samples"] == 40
     assert payload["dataset_mix_seed"] == 7
     assert payload["fidelity_weighting_enabled"] is True
     assert payload["fidelity_real_original_weight"] == 1.0
     assert payload["fidelity_isaac_rgbd_weight"] == 0.45
     assert payload["fidelity_isaac_augmentation_weight"] == 0.25
+    assert payload["fidelity_isaac_lab_synthetic_weight"] == 0.2
 
 
 def test_lerobot_gui_isaac_augmentation_camera_default_is_top_front_right() -> None:

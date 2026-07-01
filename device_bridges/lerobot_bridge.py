@@ -36,6 +36,7 @@ import subprocess
 import sys
 import threading
 import time
+import uuid
 from contextlib import ExitStack
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -46,12 +47,14 @@ from urllib.parse import quote, urlparse
 from urllib.request import Request, urlopen
 
 from mcp_tools.lerobot_schemas import (
+    IsaacLabSyntheticRequest,
     LeRobotBaseRequest,
     LeRobotDevicePortRequest,
     LeRobotRecordControlRequest,
     LeRobotSessionRequest,
     RobotProfile,
 )
+from device_bridges.isaac_lab_synthetic import IsaacLabSyntheticPipeline
 from utils.isaac_omx_mirror_mapping import (
     ISAAC_OMX_ARTICULATION_ROOT,
     ISAAC_OMX_JOINT_MAP,
@@ -512,6 +515,16 @@ class LeRobotBridge:
         self._isaac_rgbd_render_jobs: dict[str, dict[str, Any]] = {}
         self._isaac_rgbd_render_threads: dict[str, threading.Thread] = {}
         self._isaac_rgbd_render_lock = threading.Lock()
+        self._isaac_lab_mimic_jobs: dict[str, dict[str, Any]] = {}
+        self._isaac_lab_mimic_processes: dict[str, subprocess.Popen[str]] = {}
+        self._isaac_lab_mimic_threads: dict[str, threading.Thread] = {}
+        self._isaac_lab_mimic_lock = threading.Lock()
+        self._isaac_lab_mimic_latest_job_id = ""
+        self._isaac_lab_rl_teacher_jobs: dict[str, dict[str, Any]] = {}
+        self._isaac_lab_rl_teacher_processes: dict[str, subprocess.Popen[str]] = {}
+        self._isaac_lab_rl_teacher_threads: dict[str, threading.Thread] = {}
+        self._isaac_lab_rl_teacher_lock = threading.Lock()
+        self._isaac_lab_rl_teacher_latest_job_id = ""
         self._counter = 0
         self._selected_profile_id = config.default_profile_id
         self._selected_observation_pipeline_id = _normalize_observation_pipeline_id(config.default_observation_pipeline_id)
@@ -915,7 +928,14 @@ class LeRobotBridge:
             )
         command = [str(item) for item in command_info["command"]]
         existing = self._receiver_processes.get(process_key)
-        if existing and existing.poll() is None:
+        force_restart = _safe_bool(raw_payload.get("isaac_mirror_receiver_force_restart"), False)
+        stopped_for_restart: dict[str, Any] = {}
+        if force_restart:
+            stopped_for_restart = self._stop_receiver_process(process_key)
+            unmanaged_stop = self._stop_unmanaged_receiver_processes(endpoint)
+            if unmanaged_stop:
+                stopped_for_restart["unmanaged"] = unmanaged_stop
+        elif existing and existing.poll() is None:
             if self._receiver_commands.get(process_key) == command:
                 return self.mirror_receiver_process_status(raw_payload)
             self._stop_receiver_process(process_key)
@@ -979,6 +999,8 @@ class LeRobotBridge:
             "command_preview": command,
             "log_path": str(log_path),
             "health": health,
+            "force_restart": force_restart,
+            "stopped_for_restart": stopped_for_restart,
             "events": step_trace,
             "step_trace": step_trace,
             "error": None,
@@ -2854,6 +2876,737 @@ class LeRobotBridge:
             "error": None,
         }
 
+    def isaac_lab_validate(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Run non-actuating Isaac Lab synthetic validation checks."""
+        request = self._isaac_lab_synthetic_request(payload)
+        return self._isaac_lab_synthetic_pipeline().validate(request)
+
+    def isaac_lab_prepare(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Run digital-twin preflight and write validation artifacts."""
+        request = self._isaac_lab_synthetic_request(payload)
+        return self._isaac_lab_synthetic_pipeline().prepare(request)
+
+    def isaac_lab_build_synthetic(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Build canonical indexes and training import manifests for synthetic workflow."""
+        request = self._isaac_lab_synthetic_request(payload)
+        return self._isaac_lab_synthetic_pipeline().build_synthetic(request)
+
+    def isaac_lab_run_replicator_worker(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Run the Replicator worker from the latest build plan, then refresh synthetic summaries."""
+        request = self._isaac_lab_synthetic_request(payload)
+        pipeline = self._isaac_lab_synthetic_pipeline()
+        build = pipeline.build_synthetic(request)
+        output_root = Path(str(build.get("output_root") or "")).expanduser().resolve()
+        build_plan_path = output_root / "replicator" / "build_plan.json"
+        try:
+            build_plan = json.loads(build_plan_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {
+                **build,
+                "ok": False,
+                "tool": "lerobot.isaac_lab.run_replicator_worker",
+                "status": "BLOCKED",
+                "worker": {
+                    "status": "blocked",
+                    "blocker": "REPLICATOR_BUILD_PLAN_MISSING",
+                    "build_plan_path": str(build_plan_path),
+                },
+                "error": {
+                    "code": "REPLICATOR_BUILD_PLAN_MISSING",
+                    "message": "Replicator build plan is missing or invalid.",
+                },
+            }
+        command = [str(item) for item in list((build_plan.get("worker") or {}).get("command") or [])]
+        if not command or command[0] == "<isaac-sim-python>":
+            return {
+                **build,
+                "ok": False,
+                "tool": "lerobot.isaac_lab.run_replicator_worker",
+                "status": "BLOCKED",
+                "worker": {
+                    "status": "blocked",
+                    "blocker": "REPLICATOR_RUNTIME_MISSING",
+                    "build_plan_path": str(build_plan_path),
+                    "command": command,
+                },
+                "error": {
+                    "code": "REPLICATOR_RUNTIME_MISSING",
+                    "message": "Replicator worker requires isaac_sim_python in the build plan.",
+                },
+            }
+        active_live_sessions = self._active_live_control_sessions(mode=str((payload or {}).get("mode") or ""))
+        allow_during_live = bool((payload or {}).get("allow_replicator_during_live_control"))
+        if active_live_sessions and not allow_during_live:
+            return {
+                **build,
+                "ok": False,
+                "tool": "lerobot.isaac_lab.run_replicator_worker",
+                "status": "BLOCKED",
+                "worker": {
+                    "status": "blocked",
+                    "blocker": "REPLICATOR_LIVE_SESSION_ACTIVE",
+                    "build_plan_path": str(build_plan_path),
+                    "command": command,
+                    "active_sessions": active_live_sessions,
+                },
+                "error": {
+                    "code": "REPLICATOR_LIVE_SESSION_ACTIVE",
+                    "message": "Replicator worker is blocked while live teleoperation, recording, or rollout is active.",
+                    "active_sessions": active_live_sessions,
+                },
+            }
+        try:
+            completed = subprocess.run(
+                command,
+                cwd=str(self.config.repo_root),
+                text=True,
+                capture_output=True,
+                timeout=900,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            return {
+                **build,
+                "ok": False,
+                "tool": "lerobot.isaac_lab.run_replicator_worker",
+                "status": "BLOCKED",
+                "worker": {
+                    "status": "blocked",
+                    "blocker": "REPLICATOR_WORKER_FAILED",
+                    "build_plan_path": str(build_plan_path),
+                    "command": command,
+                    "error": f"{type(exc).__name__}: {exc}",
+                },
+                "error": {
+                    "code": "REPLICATOR_WORKER_FAILED",
+                    "message": f"Replicator worker could not be launched: {exc}",
+                },
+            }
+        refreshed = pipeline.build_synthetic(request)
+        worker = {
+            "status": "completed" if completed.returncode == 0 else "blocked",
+            "returncode": completed.returncode,
+            "command": command,
+            "build_plan_path": str(build_plan_path),
+            "stdout_tail": (completed.stdout or "")[-4000:],
+            "stderr_tail": (completed.stderr or "")[-4000:],
+        }
+        status = refreshed.get("status", "BLOCKED") if completed.returncode == 0 else "BLOCKED"
+        return {
+            **refreshed,
+            "ok": bool(completed.returncode == 0 and refreshed.get("ok")),
+            "tool": "lerobot.isaac_lab.run_replicator_worker",
+            "status": status,
+            "worker": worker,
+            "step_trace": list(refreshed.get("step_trace") or [])
+            + [
+                {
+                    "stage": "replicator_worker",
+                    "status": "ok" if completed.returncode == 0 else "blocked",
+                    "message": f"returncode={completed.returncode}",
+                }
+            ],
+        }
+
+    def _active_live_control_sessions(self, *, mode: str = "") -> list[dict[str, Any]]:
+        active: list[dict[str, Any]] = []
+        for session in self._sessions.values():
+            workflow = str(session.get("workflow") or "").lower()
+            if workflow not in {"teleoperate", "record", "rollout"}:
+                continue
+            if not self._session_is_active(session):
+                continue
+            active.append(
+                {
+                    "session_id": str(session.get("session_id") or ""),
+                    "workflow": workflow,
+                    "status": str(session.get("status") or ""),
+                }
+            )
+        if str(mode or "").lower() == "live":
+            known = {(item["workflow"], item.get("session_id", "")) for item in active}
+            for workflow in ("teleoperate", "record", "rollout"):
+                for pid in self._project_lerobot_pids(workflow):
+                    key = (workflow, "")
+                    if key in known:
+                        continue
+                    active.append(
+                        {
+                            "session_id": "",
+                            "workflow": workflow,
+                            "status": "PROCESS_ACTIVE",
+                            "pid": int(pid),
+                        }
+                    )
+                    known.add(key)
+        return active
+
+    def isaac_lab_preview(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Return preview card metadata for the latest synthetic run."""
+        request = self._isaac_lab_synthetic_request(payload)
+        return self._isaac_lab_synthetic_pipeline().preview(request)
+
+    def isaac_lab_export_hdf5(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Write HDF5 export hook summaries for the latest synthetic run."""
+        request = self._isaac_lab_synthetic_request(payload)
+        return self._isaac_lab_synthetic_pipeline().export_hdf5(request)
+
+    def isaac_lab_run_mimic_smoke(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Validate and write the non-actuating Isaac Lab Mimic smoke launch artifact."""
+        data = dict(payload or {})
+        data["enable_mimic"] = True
+        request = self._isaac_lab_synthetic_request(data)
+        result = self._isaac_lab_synthetic_pipeline().run_mimic_smoke(request)
+        return self._record_isaac_lab_immediate_job("mimic", result)
+
+    def isaac_lab_run_mimic(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Run the Isaac Lab Mimic generation branch or deterministic dry-run runner."""
+        data = dict(payload or {})
+        data["enable_mimic"] = True
+        request = self._isaac_lab_synthetic_request(data)
+        result = self._isaac_lab_synthetic_pipeline().run_mimic(request)
+        return self._record_or_launch_isaac_lab_runner("mimic", request, result)
+
+    def isaac_lab_mimic_status(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Return the latest or requested Isaac Lab Mimic job state."""
+        return self._isaac_lab_job_status("mimic", payload or {})
+
+    def isaac_lab_mimic_stop(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Mark a running Isaac Lab Mimic job as stopped without touching teleop state."""
+        return self._isaac_lab_job_stop("mimic", payload or {})
+
+    def isaac_lab_run_rl_teacher_smoke(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Validate and write the non-actuating Isaac Lab RL teacher smoke launch artifact."""
+        data = dict(payload or {})
+        data["enable_rl_teacher"] = True
+        request = self._isaac_lab_synthetic_request(data)
+        result = self._isaac_lab_synthetic_pipeline().run_rl_teacher_smoke(request)
+        return self._record_isaac_lab_immediate_job("rl_teacher", result)
+
+    def isaac_lab_run_rl_teacher(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Run the Isaac Lab RL teacher branch or deterministic dry-run runner."""
+        data = dict(payload or {})
+        data["enable_rl_teacher"] = True
+        request = self._isaac_lab_synthetic_request(data)
+        result = self._isaac_lab_synthetic_pipeline().run_rl_teacher(request)
+        return self._record_or_launch_isaac_lab_runner("rl_teacher", request, result)
+
+    def isaac_lab_rl_teacher_status(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Return the latest or requested Isaac Lab RL teacher job state."""
+        return self._isaac_lab_job_status("rl_teacher", payload or {})
+
+    def isaac_lab_rl_teacher_stop(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Mark a running Isaac Lab RL teacher job as stopped without touching teleop state."""
+        return self._isaac_lab_job_stop("rl_teacher", payload or {})
+
+    def isaac_lab_run_e2e_smoke(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Run the non-actuating 5x10 synthetic workflow smoke through the same bridge methods as the GUI."""
+        from scripts.lerobot_synthetic_e2e_smoke import build_fixture_recording_dataset, run_e2e_smoke
+
+        request = self._isaac_lab_synthetic_request(payload)
+        dataset_path = Path(request.dataset_path).expanduser()
+        if not str(request.dataset_path or "").strip():
+            dataset_path = self.config.repo_root / "artifacts" / "lerobot" / "synthetic_e2e_gui" / "five-by-ten"
+        dataset_path = dataset_path.resolve()
+        if not self._is_under_allowed_roots(dataset_path):
+            return {
+                "ok": False,
+                "tool": "lerobot.isaac_lab.e2e_smoke",
+                "schema": "atr.lerobot.synthetic_e2e.smoke_report.v1",
+                "status": "BLOCKED",
+                "error": {
+                    "code": "LEROBOT_PATH_OUTSIDE_ALLOWED_ROOTS",
+                    "message": f"Dataset path is outside allowed roots: {dataset_path}",
+                },
+                "dataset_path": str(dataset_path),
+                "step_trace": [{"stage": "resolve_dataset", "status": "blocked", "message": "Dataset path is outside allowed roots."}],
+            }
+        isaac_lab_path = Path(request.isaac_lab_path).expanduser().resolve() if request.isaac_lab_path else (self.config.repo_root / "IsaacLab").resolve()
+        stage_path = Path(request.stage_path).expanduser().resolve() if request.stage_path else (self.config.repo_root / "sim" / "robotis_omx" / "scene" / "omx_table_layout.usda").resolve()
+        fixture = {}
+        if request.e2e_create_fixture:
+            fixture = build_fixture_recording_dataset(
+                dataset_path,
+                episodes=request.e2e_episodes,
+                episode_s=request.e2e_episode_s,
+                fps=request.e2e_fps,
+            )
+        report = run_e2e_smoke(
+            bridge=self,
+            dataset_path=dataset_path,
+            isaac_lab_path=isaac_lab_path,
+            stage_path=stage_path,
+            train_steps=request.e2e_train_steps,
+            enable_replicator=request.enable_replicator,
+        )
+        status = "COMPLETED" if report.get("ok") else "BLOCKED"
+        report.update(
+            {
+                "tool": "lerobot.isaac_lab.e2e_smoke",
+                "status": status,
+                "fixture_created": bool(request.e2e_create_fixture),
+                "created_fixture": fixture,
+                "step_trace": [
+                    {"stage": "recording_fixture", "status": "ok" if (report.get("recording_fixture") or {}).get("frame_count") else "warning", "message": "5x10 fixture recording ready"},
+                    {"stage": "synthetic_build", "status": str((report.get("synthetic") or {}).get("status") or "")},
+                    {"stage": "hdf5_export", "status": str((report.get("hdf5") or {}).get("status") or "")},
+                    {"stage": "train_smoke", "status": str((report.get("train") or {}).get("status") or "")},
+                ],
+            }
+        )
+        return report
+
+    def isaac_lab_status(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Return latest synthetic pipeline status without launching external runtimes."""
+        request = self._isaac_lab_synthetic_request(payload)
+        return self._isaac_lab_synthetic_pipeline().status(request)
+
+    def _record_or_launch_isaac_lab_runner(
+        self,
+        kind: str,
+        request: IsaacLabSyntheticRequest,
+        result: dict[str, Any],
+    ) -> dict[str, Any]:
+        if not result.get("ok"):
+            return self._record_isaac_lab_immediate_job(kind, result)
+        if not self._isaac_lab_live_runner_requested(request):
+            return self._record_isaac_lab_immediate_job(kind, result)
+        active_live_sessions = self._active_live_control_sessions(mode=str(request.mode or ""))
+        if active_live_sessions:
+            return self._record_isaac_lab_blocked_runner(
+                kind,
+                result,
+                code="ISAAC_LAB_RUNNER_LIVE_SESSION_ACTIVE",
+                message="Isaac Lab runner is blocked while live teleoperation, recording, or rollout is active.",
+                details={"active_sessions": active_live_sessions},
+            )
+        return self._record_isaac_lab_running_job(kind, request, result)
+
+    @staticmethod
+    def _isaac_lab_live_runner_requested(request: IsaacLabSyntheticRequest) -> bool:
+        return str(request.mode or "").lower() == "live" and not bool(request.dry_run)
+
+    @staticmethod
+    def _isaac_lab_summary_key(kind: str) -> str:
+        return "mimic" if kind == "mimic" else "rl_teacher"
+
+    def _isaac_lab_result_summary(self, kind: str, result: dict[str, Any]) -> dict[str, Any]:
+        summary_key = self._isaac_lab_summary_key(kind)
+        return {
+            "tool": result.get("tool", ""),
+            "dataset_path": result.get("dataset_path", ""),
+            "output_root": result.get("output_root", ""),
+            "hdf5": copy.deepcopy(result.get("hdf5") or {}),
+            summary_key: copy.deepcopy(result.get(summary_key) or {}),
+            "validation_report": {
+                "status": (result.get("validation_report") or {}).get("status"),
+                "blockers": copy.deepcopy((result.get("validation_report") or {}).get("blockers") or []),
+            },
+        }
+
+    def _record_isaac_lab_blocked_runner(
+        self,
+        kind: str,
+        result: dict[str, Any],
+        *,
+        code: str,
+        message: str,
+        details: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        summary_key = self._isaac_lab_summary_key(kind)
+        decorated = copy.deepcopy(result)
+        hook_summary = dict(decorated.get(summary_key) or {})
+        runner = dict(hook_summary.get("runner") or {})
+        runner.update(
+            {
+                "status": "blocked",
+                "blocker": code,
+                "message": message,
+                **copy.deepcopy(details or {}),
+            }
+        )
+        hook_summary["runner"] = runner
+        decorated[summary_key] = hook_summary
+        decorated["ok"] = False
+        decorated["status"] = "BLOCKED"
+        decorated["error"] = {
+            "code": code,
+            "message": message,
+            **copy.deepcopy(details or {}),
+        }
+        decorated["step_trace"] = list(decorated.get("step_trace") or []) + [
+            {
+                "stage": f"{summary_key}_runner",
+                "status": "blocked",
+                "message": message,
+            }
+        ]
+        return self._record_isaac_lab_immediate_job(kind, decorated)
+
+    def _record_isaac_lab_running_job(
+        self,
+        kind: str,
+        request: IsaacLabSyntheticRequest,
+        result: dict[str, Any],
+    ) -> dict[str, Any]:
+        summary_key = self._isaac_lab_summary_key(kind)
+        hook_summary = dict(result.get(summary_key) or {})
+        runner = dict(hook_summary.get("runner") or {})
+        command = [str(item) for item in list(runner.get("command") or []) if str(item)]
+        if len(command) < 2:
+            return self._record_isaac_lab_blocked_runner(
+                kind,
+                result,
+                code="ISAAC_LAB_RUNNER_COMMAND_MISSING",
+                message="Isaac Lab runner command is missing from the synthetic summary.",
+            )
+        runtime_path = Path(command[0]).expanduser()
+        script_path = Path(command[1]).expanduser()
+        if not runtime_path.is_file():
+            return self._record_isaac_lab_blocked_runner(
+                kind,
+                result,
+                code="ISAAC_LAB_RUNNER_RUNTIME_MISSING",
+                message=f"Isaac Sim Python runtime is missing: {runtime_path}",
+                details={"command": command},
+            )
+        if not script_path.is_file():
+            return self._record_isaac_lab_blocked_runner(
+                kind,
+                result,
+                code="ISAAC_LAB_RUNNER_SCRIPT_MISSING",
+                message=f"Isaac Lab runner script is missing: {script_path}",
+                details={"command": command},
+            )
+        job_id = self._new_isaac_lab_job_id(kind)
+        now = datetime.now(timezone.utc).isoformat()
+        output_root = Path(str(result.get("output_root") or "")).expanduser().resolve()
+        log_path = output_root / summary_key / "logs" / f"{job_id}.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        cwd = Path(request.isaac_lab_path).expanduser().resolve() if request.isaac_lab_path else self.config.repo_root
+        try:
+            with log_path.open("a", encoding="utf-8") as log:
+                process = subprocess.Popen(
+                    command,
+                    cwd=str(cwd),
+                    stdin=subprocess.DEVNULL,
+                    stdout=log,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    start_new_session=True,
+                )
+        except OSError as exc:
+            return self._record_isaac_lab_blocked_runner(
+                kind,
+                result,
+                code="ISAAC_LAB_RUNNER_LAUNCH_FAILED",
+                message=f"Isaac Lab runner could not be launched: {exc}",
+                details={"command": command, "log_path": str(log_path)},
+            )
+        runner.update(
+            {
+                "status": "running",
+                "pid": int(process.pid),
+                "command": command,
+                "log_path": str(log_path),
+                "started_at": now,
+            }
+        )
+        hook_summary["runner"] = runner
+        decorated = copy.deepcopy(result)
+        decorated[summary_key] = hook_summary
+        summary = self._isaac_lab_result_summary(kind, decorated)
+        progress = {"percent": 5.0, "stage": "running"}
+        job_manifest_path = self._isaac_lab_job_manifest_path(kind, result.get("output_root"))
+        job = {
+            "job_id": job_id,
+            "kind": kind,
+            "status": "RUNNING",
+            "progress": progress,
+            "summary": summary,
+            "command_preview": copy.deepcopy(runner.get("command_preview") or {}),
+            "command": command,
+            "pid": int(process.pid),
+            "log_path": str(log_path),
+            "runtime_smoke": copy.deepcopy(runner.get("runtime_smoke") or {}),
+            "job_manifest_path": str(job_manifest_path) if job_manifest_path else "",
+            "error": None,
+            "created_at": now,
+            "started_at": now,
+            "updated_at": now,
+            "completed_at": None,
+            "stop_requested": False,
+        }
+        self._store_isaac_lab_runner_process(kind, job_id, process)
+        self._store_isaac_lab_job(kind, job)
+        decorated["ok"] = True
+        decorated["status"] = "RUNNING"
+        decorated["job_id"] = job_id
+        decorated["job"] = copy.deepcopy(job)
+        decorated["progress"] = progress
+        return decorated
+
+    def _store_isaac_lab_runner_process(self, kind: str, job_id: str, process: subprocess.Popen[str]) -> None:
+        if kind == "mimic":
+            with self._isaac_lab_mimic_lock:
+                self._isaac_lab_mimic_processes[job_id] = process
+            return
+        with self._isaac_lab_rl_teacher_lock:
+            self._isaac_lab_rl_teacher_processes[job_id] = process
+
+    def _record_isaac_lab_immediate_job(self, kind: str, result: dict[str, Any]) -> dict[str, Any]:
+        job_id = self._new_isaac_lab_job_id(kind)
+        status = self._isaac_lab_job_status_from_result(result)
+        now = datetime.now(timezone.utc).isoformat()
+        summary_key = self._isaac_lab_summary_key(kind)
+        job_manifest_path = self._isaac_lab_job_manifest_path(kind, result.get("output_root"))
+        hook_summary = result.get(summary_key) if isinstance(result.get(summary_key), dict) else {}
+        smoke_summary = hook_summary.get("smoke") if isinstance(hook_summary.get("smoke"), dict) else {}
+        summary = self._isaac_lab_result_summary(kind, result)
+        progress = {"percent": 100.0, "stage": status.lower()}
+        job = {
+            "job_id": job_id,
+            "kind": kind,
+            "status": status,
+            "progress": progress,
+            "summary": summary,
+            "command_preview": copy.deepcopy(smoke_summary.get("command_preview") or {}),
+            "runtime_smoke": copy.deepcopy(smoke_summary.get("runtime_smoke") or {}),
+            "job_manifest_path": str(job_manifest_path) if job_manifest_path else "",
+            "error": copy.deepcopy(result.get("error")) if status == "FAILED" else None,
+            "created_at": now,
+            "started_at": now,
+            "updated_at": now,
+            "completed_at": now,
+            "stop_requested": False,
+        }
+        self._store_isaac_lab_job(kind, job)
+        decorated = dict(result)
+        decorated["job_id"] = job_id
+        decorated["job"] = copy.deepcopy(job)
+        decorated.setdefault("progress", progress)
+        return decorated
+
+    def _isaac_lab_job_manifest_path(self, kind: str, output_root_value: Any) -> Path | None:
+        output_root_text = str(output_root_value or "").strip()
+        if not output_root_text:
+            return None
+        try:
+            output_root = Path(output_root_text).expanduser().resolve()
+        except OSError:
+            return None
+        if not self._is_under_allowed_roots(output_root):
+            return None
+        hook_dir = "mimic" if kind == "mimic" else "rl_teacher"
+        return output_root / hook_dir / "job.json"
+
+    def _write_isaac_lab_job_manifest(self, job: dict[str, Any]) -> None:
+        summary = job.get("summary") if isinstance(job.get("summary"), dict) else {}
+        manifest_path = self._isaac_lab_job_manifest_path(str(job.get("kind") or ""), summary.get("output_root"))
+        if manifest_path is None:
+            return
+        job["job_manifest_path"] = str(manifest_path)
+        try:
+            manifest_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp_path = manifest_path.with_name(f"{manifest_path.name}.tmp.{os.getpid()}")
+            tmp_path.write_text(json.dumps(job, indent=2, ensure_ascii=False), encoding="utf-8")
+            tmp_path.replace(manifest_path)
+        except OSError:
+            return
+
+    def _read_isaac_lab_job_manifest(self, kind: str, payload: dict[str, Any]) -> dict[str, Any] | None:
+        try:
+            request = self._isaac_lab_synthetic_request(payload)
+        except Exception:
+            return None
+        try:
+            dataset_path = Path(request.dataset_path).expanduser().resolve()
+            output_root = Path(request.output_root).expanduser().resolve() if request.output_root else self._dataset_isaac_lab_synthetic_root(dataset_path).resolve()
+        except OSError:
+            return None
+        manifest_path = self._isaac_lab_job_manifest_path(kind, output_root)
+        if manifest_path is None or not manifest_path.is_file():
+            return None
+        try:
+            job = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        if not isinstance(job, dict) or str(job.get("kind") or "") != kind:
+            return None
+        requested_job_id = str(payload.get("job_id") or "").strip()
+        if requested_job_id and str(job.get("job_id") or "") != requested_job_id:
+            return None
+        job["job_manifest_path"] = str(manifest_path)
+        self._store_isaac_lab_job(kind, copy.deepcopy(job))
+        return job
+
+    @staticmethod
+    def _new_isaac_lab_job_id(kind: str) -> str:
+        prefix = "isaac_lab_mimic" if kind == "mimic" else "isaac_lab_rl_teacher"
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+        return f"{prefix}_{stamp}_{uuid.uuid4().hex[:8]}"
+
+    @staticmethod
+    def _isaac_lab_job_status_from_result(result: dict[str, Any]) -> str:
+        if result.get("ok"):
+            return "COMPLETED"
+        status = str(result.get("status") or "").upper()
+        if status == "BLOCKED":
+            return "BLOCKED"
+        return "FAILED"
+
+    def _store_isaac_lab_job(self, kind: str, job: dict[str, Any]) -> None:
+        if kind == "mimic":
+            with self._isaac_lab_mimic_lock:
+                self._isaac_lab_mimic_jobs[str(job["job_id"])] = job
+                self._isaac_lab_mimic_latest_job_id = str(job["job_id"])
+            self._write_isaac_lab_job_manifest(job)
+            return
+        with self._isaac_lab_rl_teacher_lock:
+            self._isaac_lab_rl_teacher_jobs[str(job["job_id"])] = job
+            self._isaac_lab_rl_teacher_latest_job_id = str(job["job_id"])
+        self._write_isaac_lab_job_manifest(job)
+
+    def _isaac_lab_job_snapshot(self, kind: str, job_id: str = "") -> dict[str, Any] | None:
+        if kind == "mimic":
+            with self._isaac_lab_mimic_lock:
+                resolved = job_id or self._isaac_lab_mimic_latest_job_id
+                job = self._isaac_lab_mimic_jobs.get(resolved)
+                return copy.deepcopy(job) if job else None
+        with self._isaac_lab_rl_teacher_lock:
+            resolved = job_id or self._isaac_lab_rl_teacher_latest_job_id
+            job = self._isaac_lab_rl_teacher_jobs.get(resolved)
+            return copy.deepcopy(job) if job else None
+
+    def _refresh_isaac_lab_runner_process(self, kind: str, job_id: str = "") -> None:
+        refreshed: dict[str, Any] | None = None
+        if kind == "mimic":
+            with self._isaac_lab_mimic_lock:
+                resolved = job_id or self._isaac_lab_mimic_latest_job_id
+                job = self._isaac_lab_mimic_jobs.get(resolved)
+                process = self._isaac_lab_mimic_processes.get(resolved)
+                if not job or not process or str(job.get("status") or "").upper() != "RUNNING":
+                    return
+                returncode = process.poll()
+                if returncode is None:
+                    return
+                self._isaac_lab_mimic_processes.pop(resolved, None)
+                refreshed = self._complete_isaac_lab_runner_job(job, int(returncode))
+        else:
+            with self._isaac_lab_rl_teacher_lock:
+                resolved = job_id or self._isaac_lab_rl_teacher_latest_job_id
+                job = self._isaac_lab_rl_teacher_jobs.get(resolved)
+                process = self._isaac_lab_rl_teacher_processes.get(resolved)
+                if not job or not process or str(job.get("status") or "").upper() != "RUNNING":
+                    return
+                returncode = process.poll()
+                if returncode is None:
+                    return
+                self._isaac_lab_rl_teacher_processes.pop(resolved, None)
+                refreshed = self._complete_isaac_lab_runner_job(job, int(returncode))
+        if refreshed is not None:
+            self._write_isaac_lab_job_manifest(refreshed)
+
+    @staticmethod
+    def _complete_isaac_lab_runner_job(job: dict[str, Any], returncode: int) -> dict[str, Any]:
+        status = "COMPLETED" if returncode == 0 else "FAILED"
+        now = datetime.now(timezone.utc).isoformat()
+        job["status"] = status
+        job["returncode"] = returncode
+        job["progress"] = {"percent": 100.0, "stage": status.lower()}
+        job["updated_at"] = now
+        job["completed_at"] = now
+        job["error"] = None
+        if status == "FAILED":
+            job["error"] = {
+                "code": "ISAAC_LAB_RUNNER_FAILED",
+                "message": f"Isaac Lab runner exited with returncode={returncode}.",
+            }
+        return copy.deepcopy(job)
+
+    def _isaac_lab_job_status(self, kind: str, payload: dict[str, Any]) -> dict[str, Any]:
+        job_id = str(payload.get("job_id") or "").strip()
+        self._refresh_isaac_lab_runner_process(kind, job_id)
+        job = self._isaac_lab_job_snapshot(kind, job_id)
+        if not job:
+            job = self._read_isaac_lab_job_manifest(kind, payload)
+        tool = f"lerobot.isaac_lab.{kind}.status"
+        if not job:
+            return self._isaac_lab_job_not_found_response(tool, job_id)
+        return self._isaac_lab_job_response(tool, job)
+
+    def _isaac_lab_job_stop(self, kind: str, payload: dict[str, Any]) -> dict[str, Any]:
+        job_id = str(payload.get("job_id") or "").strip()
+        tool = f"lerobot.isaac_lab.{kind}.stop"
+        terminal = {"BLOCKED", "COMPLETED", "FAILED", "STOPPED"}
+        self._refresh_isaac_lab_runner_process(kind, job_id)
+        if not self._isaac_lab_job_snapshot(kind, job_id):
+            self._read_isaac_lab_job_manifest(kind, payload)
+        if kind == "mimic":
+            with self._isaac_lab_mimic_lock:
+                resolved = job_id or self._isaac_lab_mimic_latest_job_id
+                job = self._isaac_lab_mimic_jobs.get(resolved)
+                if not job:
+                    return self._isaac_lab_job_not_found_response(tool, resolved)
+                if str(job.get("status") or "").upper() not in terminal:
+                    process = self._isaac_lab_mimic_processes.pop(resolved, None)
+                    if process is not None:
+                        self._terminate_live_process(process, signal.SIGTERM)
+                    job["status"] = "STOPPED"
+                    job["stop_requested"] = True
+                    job["completed_at"] = datetime.now(timezone.utc).isoformat()
+                job["updated_at"] = datetime.now(timezone.utc).isoformat()
+                self._write_isaac_lab_job_manifest(job)
+                public_job = copy.deepcopy(job)
+        else:
+            with self._isaac_lab_rl_teacher_lock:
+                resolved = job_id or self._isaac_lab_rl_teacher_latest_job_id
+                job = self._isaac_lab_rl_teacher_jobs.get(resolved)
+                if not job:
+                    return self._isaac_lab_job_not_found_response(tool, resolved)
+                if str(job.get("status") or "").upper() not in terminal:
+                    process = self._isaac_lab_rl_teacher_processes.pop(resolved, None)
+                    if process is not None:
+                        self._terminate_live_process(process, signal.SIGTERM)
+                    job["status"] = "STOPPED"
+                    job["stop_requested"] = True
+                    job["completed_at"] = datetime.now(timezone.utc).isoformat()
+                job["updated_at"] = datetime.now(timezone.utc).isoformat()
+                self._write_isaac_lab_job_manifest(job)
+                public_job = copy.deepcopy(job)
+        return self._isaac_lab_job_response(tool, public_job)
+
+    @staticmethod
+    def _isaac_lab_job_response(tool: str, job: dict[str, Any]) -> dict[str, Any]:
+        status = str(job.get("status") or "FAILED").upper()
+        return {
+            "ok": status != "FAILED",
+            "tool": tool,
+            "status": status,
+            "job_id": str(job.get("job_id") or ""),
+            "progress": copy.deepcopy(job.get("progress") or {}),
+            "summary": copy.deepcopy(job.get("summary") or {}),
+            "error": copy.deepcopy(job.get("error")) if status == "FAILED" else None,
+            "stop_requested": bool(job.get("stop_requested")),
+            "job": copy.deepcopy(job),
+        }
+
+    @staticmethod
+    def _isaac_lab_job_not_found_response(tool: str, job_id: str = "") -> dict[str, Any]:
+        return {
+            "ok": False,
+            "tool": tool,
+            "status": "FAILED",
+            "job_id": job_id,
+            "progress": {},
+            "summary": {},
+            "error": {
+                "code": "ISAAC_LAB_JOB_NOT_FOUND",
+                "message": "Isaac Lab job was not found in the current bridge process.",
+            },
+            "stop_requested": False,
+            "job": {},
+        }
+
     def isaac_rgbd_render_start(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         """Render missing Isaac RGB-D sidecar frames after recording has completed."""
         request = LeRobotSessionRequest.model_validate(payload or {})
@@ -3431,6 +4184,8 @@ class LeRobotBridge:
     ) -> None:
         if workflow not in {"teleoperate", "record"}:
             return
+        if workflow == "record" and self._uses_in_process_lerobot_wrapper(workflow, request):
+            return
         receiver_preflight = dict((session or {}).get("isaac_mirror_receiver_preflight") or {})
         if str(receiver_preflight.get("status") or "") != "ready":
             return
@@ -3722,6 +4477,25 @@ class LeRobotBridge:
         if metadata:
             session["dataset_pipeline_metadata"] = metadata
 
+    def _restart_record_isaac_receiver(self, request: LeRobotSessionRequest) -> dict[str, Any]:
+        """Restart Isaac Sim for a live recording with the timeline already playing."""
+        payload = request.model_dump()
+        mode = request.runtime_mode or request.mode
+        payload.update(
+            {
+                "mode": mode,
+                "runtime_mode": mode,
+                "profile_id": request.profile_id or self._selected_profile_id,
+                "isaac_mirror_endpoint": self._isaac_mirror_endpoint(request),
+                "isaac_mirror_receiver_force_restart": True,
+                "isaac_mirror_receiver_play_timeline_on_startup": True,
+                # Record-start active-cam is owned by the LeRobot wrapper. Disabling
+                # the extension-side fallback prevents a second capture on timeline play.
+                "active_robot_cam_enabled": False,
+            }
+        )
+        return self.mirror_receiver_process_start(payload)
+
     def _start_session(
         self,
         *,
@@ -3752,6 +4526,28 @@ class LeRobotBridge:
         camera_blocked = self._live_camera_block_if_needed(tool=tool, mode=mode, profile=profile, workflow=workflow, request=request)
         if camera_blocked:
             return camera_blocked
+        if mode == "live" and not request.confirm_live_execute:
+            return self._blocked(tool, mode, profile.profile_id, "LEROBOT_LIVE_CONFIRMATION_REQUIRED", "Live LeRobot execution requires confirm_live_execute=true.", workflow)
+        receiver_start: dict[str, Any] | None = None
+        record_start_timeline_play: dict[str, Any] | None = None
+        if mode == "live" and workflow == "record" and request.isaac_mirror_enabled:
+            receiver_start = self._restart_record_isaac_receiver(request)
+            if not receiver_start.get("ok"):
+                return self._error(
+                    tool,
+                    mode,
+                    profile.profile_id,
+                    str(receiver_start.get("failure_code") or "LEROBOT_ISAAC_MIRROR_RECEIVER_RECORD_START_FAILED"),
+                    str(receiver_start.get("message") or receiver_start.get("error") or "Isaac Sim receiver failed to start for recording."),
+                )
+            trace = [
+                *trace,
+                (
+                    "ISAAC_MIRROR_RECEIVER_RESTARTED",
+                    "ok",
+                    f"pid={receiver_start.get('pid')} playTimelineOnStartup=true",
+                ),
+            ]
         mirror_preflight = self._live_isaac_mirror_preflight_if_needed(tool=tool, mode=mode, profile=profile, workflow=workflow, request=request)
         if mirror_preflight:
             if not mirror_preflight.get("ok"):
@@ -3765,8 +4561,25 @@ class LeRobotBridge:
                     str(mirror_preflight.get("detail") or mirror_preflight.get("health_url") or request.isaac_mirror_endpoint),
                 ),
             ]
-        if mode == "live" and not request.confirm_live_execute:
-            return self._blocked(tool, mode, profile.profile_id, "LEROBOT_LIVE_CONFIRMATION_REQUIRED", "Live LeRobot execution requires confirm_live_execute=true.", workflow)
+            if mode == "live" and workflow == "record" and request.isaac_mirror_enabled and preflight_status == "ready":
+                record_start_timeline_play = self._post_isaac_mirror_timeline_play(
+                    self._isaac_mirror_endpoint(request),
+                    reason="record_start",
+                    timeout_s=self._isaac_mirror_timeout_s(request),
+                )
+                trace = [
+                    *trace,
+                    (
+                        "ISAAC_TIMELINE_PLAY",
+                        "ok" if record_start_timeline_play.get("ok") else "warning",
+                        str(
+                            record_start_timeline_play.get("timeline_play_url")
+                            or record_start_timeline_play.get("message")
+                            or record_start_timeline_play.get("status")
+                            or "record_start"
+                        ),
+                    ),
+                ]
         session_id = request.session_id or self._new_session_id(workflow)
         step_trace = [{"step": step, "status": step_status, "detail": detail} for step, step_status, detail in trace]
         command_preview = self._workflow_command(profile, workflow, request, extra_args)
@@ -3805,6 +4618,10 @@ class LeRobotBridge:
                 "detail": str(mirror_preflight.get("detail") or ""),
                 "receiver_health": dict(mirror_preflight.get("receiver_health") or {}),
             }
+        if receiver_start is not None:
+            session["isaac_mirror_receiver_start"] = dict(receiver_start)
+        if record_start_timeline_play is not None:
+            session["isaac_timeline_play"] = dict(record_start_timeline_play)
         if request.active_robot_cam_enabled and workflow in {"teleoperate", "record"}:
             session["active_robot_cam"] = self._active_robot_cam_summary(request, workflow=workflow)
             step_trace.append(
@@ -3835,6 +4652,7 @@ class LeRobotBridge:
             session["job_name"] = session["train_config"].get("job_name", "")
             session["record_attempts"] = self._read_record_attempts_summary(Path(self._dataset_path_for(request)).expanduser())
             session["isaac_data_augmentation"] = self._read_latest_isaac_augmentation_summary(Path(self._dataset_path_for(request)).expanduser())
+            session["isaac_lab_synthetic"] = self._read_latest_isaac_lab_synthetic_summary(Path(self._dataset_path_for(request)).expanduser())
             session["training_preflight"] = self._training_preflight_progress(session)
         if mode == "live":
             live_start = self._start_live_process(
@@ -4119,6 +4937,8 @@ class LeRobotBridge:
         if isinstance(session.get("isaac_mirror"), dict):
             payload["isaac_mirror"] = dict(session["isaac_mirror"])
             payload["isaac_mirror_session_id"] = session.get("isaac_mirror_session_id", "")
+        if isinstance(session.get("isaac_timeline_play"), dict):
+            payload["isaac_timeline_play"] = dict(session["isaac_timeline_play"])
         if isinstance(session.get("active_robot_cam"), dict):
             payload["active_robot_cam"] = dict(session["active_robot_cam"])
         if isinstance(session.get("record_attempt"), dict):
@@ -4127,6 +4947,8 @@ class LeRobotBridge:
             payload["record_attempts"] = dict(session["record_attempts"])
         if isinstance(session.get("isaac_data_augmentation"), dict):
             payload["isaac_data_augmentation"] = dict(session["isaac_data_augmentation"])
+        if isinstance(session.get("isaac_lab_synthetic"), dict):
+            payload["isaac_lab_synthetic"] = dict(session["isaac_lab_synthetic"])
         if isinstance(session.get("dataset_mix"), dict):
             payload["dataset_mix"] = dict(session["dataset_mix"])
         if isinstance(session.get("fidelity_weights"), dict):
@@ -4543,6 +5365,75 @@ class LeRobotBridge:
                 except OSError:
                     pass
 
+    def _stop_unmanaged_receiver_processes(self, endpoint: str) -> list[dict[str, Any]]:
+        """Stop an Isaac receiver already listening on the endpoint but not tracked in memory."""
+        _host, port = self._isaac_mirror_host_port(endpoint)
+        try:
+            completed = subprocess.run(
+                ["ss", "-ltnp"],
+                text=True,
+                capture_output=True,
+                timeout=2,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return []
+        stopped: list[dict[str, Any]] = []
+        seen: set[int] = set()
+        for line in (completed.stdout or "").splitlines():
+            if f":{port}" not in line:
+                continue
+            for match in re.finditer(r"pid=(\d+)", line):
+                pid = _safe_int(match.group(1), 0, minimum=0)
+                if pid <= 0 or pid == os.getpid() or pid in seen:
+                    continue
+                seen.add(pid)
+                try:
+                    ps = subprocess.run(
+                        ["ps", "-p", str(pid), "-o", "cmd="],
+                        text=True,
+                        capture_output=True,
+                        timeout=2,
+                        check=False,
+                    )
+                except (OSError, subprocess.TimeoutExpired):
+                    continue
+                command = (ps.stdout or "").strip()
+                if not self._looks_like_isaac_receiver_command(command):
+                    continue
+                status = "terminated"
+                try:
+                    os.kill(pid, signal.SIGTERM)
+                    deadline = time.monotonic() + 5.0
+                    while time.monotonic() < deadline:
+                        try:
+                            os.kill(pid, 0)
+                        except ProcessLookupError:
+                            break
+                        time.sleep(0.05)
+                    else:
+                        os.kill(pid, signal.SIGKILL)
+                        status = "killed"
+                except ProcessLookupError:
+                    status = "already_exited"
+                except OSError as exc:
+                    status = f"error:{exc.__class__.__name__}"
+                stopped.append({"pid": pid, "status": status, "command": command})
+        return stopped
+
+    @staticmethod
+    def _looks_like_isaac_receiver_command(command: str) -> bool:
+        lowered = str(command or "").lower()
+        return any(
+            marker in lowered
+            for marker in (
+                "isaacsim",
+                "isaac-sim",
+                "atr.omx.mirror",
+                "isaac_omx_mirror_server.py",
+            )
+        )
+
     def _live_isaac_mirror_preflight_if_needed(
         self,
         *,
@@ -4620,6 +5511,7 @@ class LeRobotBridge:
         if launch_mode == "isaac_extension":
             executable = self._isaac_mirror_receiver_isaac_sim_executable(payload)
             active_robot_cam_enabled = _safe_bool(payload.get("active_robot_cam_enabled"), True)
+            play_timeline_on_startup = _safe_bool(payload.get("isaac_mirror_receiver_play_timeline_on_startup"), False)
             extension_root = self.config.repo_root / "sim" / "robotis_omx" / "extensions"
             manifest = extension_root / "atr.omx.mirror" / "config" / "extension.toml"
             if not manifest.exists():
@@ -4655,7 +5547,7 @@ class LeRobotBridge:
                 f"--/exts/atr.omx.mirror/scene={scene_path}",
                 f"--/exts/atr.omx.mirror/useCurrentStage=true",
                 f"--/exts/atr.omx.mirror/openSceneOnStartup=true",
-                f"--/exts/atr.omx.mirror/playTimelineOnStartup=false",
+                f"--/exts/atr.omx.mirror/playTimelineOnStartup={_bool_arg(play_timeline_on_startup)}",
                 f"--/exts/atr.omx.mirror/specimenPoseActiveRobotCamOnMissing={_bool_arg(active_robot_cam_enabled)}",
             ]
             return {"ok": True, "launch_mode": launch_mode, "command": command, "scene_path": str(scene_path)}
@@ -4758,7 +5650,7 @@ class LeRobotBridge:
 
     @staticmethod
     def _isaac_mirror_post_timeout_s(request: LeRobotBaseRequest) -> float:
-        return min(LeRobotBridge._isaac_mirror_timeout_s(request), 0.15)
+        return LeRobotBridge._isaac_mirror_timeout_s(request)
 
     def _isaac_mirror_record_path(self, request: LeRobotBaseRequest, session_id: str) -> Path:
         raw = str(request.isaac_mirror_record_path or "").strip()
@@ -5111,6 +6003,61 @@ class LeRobotBridge:
             "source_frame_count": _safe_int(summary.get("source_frame_count"), 0, minimum=0),
         }
 
+    @staticmethod
+    def _dataset_isaac_lab_synthetic_root(dataset_path: Path) -> Path:
+        return dataset_path / "sidecar" / "isaac_lab_synthetic" / "latest"
+
+    def _read_latest_isaac_lab_synthetic_summary(self, dataset_path: Path) -> dict[str, Any]:
+        output_root = self._dataset_isaac_lab_synthetic_root(dataset_path)
+        summary_path = output_root / "summary.json"
+        training_summary_path = output_root / "training_import" / "summary.json"
+        manifest_path = output_root / "training_import" / "manifest.jsonl"
+        try:
+            run_summary = json.loads(summary_path.read_text(encoding="utf-8")) if summary_path.is_file() else {}
+        except (OSError, json.JSONDecodeError) as exc:
+            run_summary = {"error": f"{exc.__class__.__name__}: {exc}"}
+        if not isinstance(run_summary, dict):
+            run_summary = {}
+        try:
+            training_summary = json.loads(training_summary_path.read_text(encoding="utf-8")) if training_summary_path.is_file() else {}
+        except (OSError, json.JSONDecodeError) as exc:
+            training_summary = {"error": f"{exc.__class__.__name__}: {exc}"}
+        if not isinstance(training_summary, dict):
+            training_summary = {}
+        if isinstance(training_summary.get("manifest_path"), str) and str(training_summary["manifest_path"]).strip():
+            manifest_path = Path(str(training_summary["manifest_path"])).expanduser()
+        source_counts = training_summary.get("source_counts") if isinstance(training_summary.get("source_counts"), dict) else {}
+        if not source_counts and manifest_path.is_file():
+            inferred_counts: dict[str, int] = {}
+            for row in self._read_jsonl_file(manifest_path):
+                source_type = str(row.get("source_type") or "isaac_lab_synthetic")
+                inferred_counts[source_type] = inferred_counts.get(source_type, 0) + 1
+            source_counts = inferred_counts
+        row_count = _safe_int(training_summary.get("row_count"), 0, minimum=0)
+        if row_count <= 0 and source_counts:
+            row_count = sum(_safe_int(value, 0, minimum=0) for value in source_counts.values())
+        if not source_counts and row_count > 0:
+            source_counts = {"isaac_lab_synthetic": row_count}
+        synthetic_row_count = sum(
+            _safe_int(value, 0, minimum=0)
+            for source_type, value in source_counts.items()
+            if str(source_type) != "real_lerobot"
+        )
+        return {
+            "available": bool(training_summary_path.is_file() and manifest_path.is_file() and synthetic_row_count > 0),
+            "schema": str(training_summary.get("schema") or "atr.lerobot.training_import.summary.v1"),
+            "status": str(training_summary.get("status") or run_summary.get("status") or "missing"),
+            "output_root": str(output_root),
+            "summary_path": str(summary_path),
+            "training_import_summary_path": str(training_summary_path),
+            "training_import_manifest_path": str(manifest_path),
+            "row_count": row_count,
+            "synthetic_row_count": synthetic_row_count,
+            "source_counts": dict(source_counts),
+            "run_summary": run_summary if isinstance(run_summary, dict) else {},
+            "training_import": training_summary if isinstance(training_summary, dict) else {},
+        }
+
     def _train_isaac_augmentation_qa_preflight(self, request: LeRobotSessionRequest) -> dict[str, Any]:
         dataset_path = Path(self._dataset_path_for(request)).expanduser()
         summary = self._read_latest_isaac_augmentation_summary(dataset_path)
@@ -5164,6 +6111,24 @@ class LeRobotBridge:
             metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
         except (OSError, TypeError, ValueError):
             return None
+
+    def _isaac_lab_synthetic_request(self, payload: dict[str, Any] | None = None) -> IsaacLabSyntheticRequest:
+        """Normalize LeRobot GUI payloads into the Isaac Lab synthetic request contract."""
+        data = dict(payload or {})
+        if not str(data.get("dataset_path") or "").strip():
+            session_request = LeRobotSessionRequest.model_validate(data)
+            data["dataset_path"] = self._dataset_path_for(session_request)
+        if data.get("fallback_policy") == "legacy_only":
+            data["pipeline_mode"] = "legacy_sidecar"
+        if data.get("pipeline_mode") == "legacy_sidecar":
+            data.setdefault("enable_replicator", False)
+            data.setdefault("enable_mimic", False)
+            data.setdefault("enable_rl_teacher", False)
+        return IsaacLabSyntheticRequest.model_validate(data)
+
+    def _isaac_lab_synthetic_pipeline(self) -> IsaacLabSyntheticPipeline:
+        """Return the non-actuating Isaac Lab synthetic pipeline helper."""
+        return IsaacLabSyntheticPipeline(repo_root=self.config.repo_root, allowed_roots=self._allowed_roots())
 
     def _read_dataset_pipeline_metadata(self, dataset_path: Path) -> dict[str, Any]:
         """Read ATR dataset pipeline metadata, or infer a conservative display-only value."""
@@ -6162,6 +7127,7 @@ class LeRobotBridge:
             env.update(self._fidelity_env_overrides(request))
             env.update(self._isaac_rgbd_source_train_env_overrides(request))
             env.update(self._isaac_augmentation_train_env_overrides(request))
+            env.update(self._isaac_lab_synthetic_train_env_overrides(request))
         if workflow in {"train", "rollout"} and self._uses_pi05_dataset_runtime(request.policy_type):
             hf_home = self.config.pi05_hf_home
             env.update(
@@ -6231,21 +7197,25 @@ class LeRobotBridge:
         real_available: int,
         isaac_rgbd_available: int,
         isaac_augmentation_available: int,
+        isaac_lab_synthetic_available: int = 0,
     ) -> dict[str, Any]:
         weights = {
             "real_original": self._dataset_mix_weight(getattr(request, "dataset_mix_real_original_weight", 1.0), 1.0),
             "isaac_rgbd": self._dataset_mix_weight(getattr(request, "dataset_mix_isaac_rgbd_weight", 0.5), 0.5),
             "isaac_augmentation": self._dataset_mix_weight(getattr(request, "dataset_mix_isaac_augmentation_weight", 0.5), 0.5),
+            "isaac_lab_synthetic": self._dataset_mix_weight(getattr(request, "dataset_mix_isaac_lab_synthetic_weight", 0.5), 0.5),
         }
         max_samples = {
             "real_original": self._dataset_mix_max_samples(getattr(request, "dataset_mix_real_original_max_samples", None)),
             "isaac_rgbd": self._dataset_mix_max_samples(getattr(request, "dataset_mix_isaac_rgbd_max_samples", None)),
             "isaac_augmentation": self._dataset_mix_max_samples(getattr(request, "dataset_mix_isaac_augmentation_max_samples", None)),
+            "isaac_lab_synthetic": self._dataset_mix_max_samples(getattr(request, "dataset_mix_isaac_lab_synthetic_max_samples", None)),
         }
         available_counts = {
             "real_original": max(0, int(real_available)),
             "isaac_rgbd": max(0, int(isaac_rgbd_available)),
             "isaac_augmentation": max(0, int(isaac_augmentation_available)),
+            "isaac_lab_synthetic": max(0, int(isaac_lab_synthetic_available)),
         }
         base_count = available_counts["real_original"]
         effective_counts = {
@@ -6275,6 +7245,7 @@ class LeRobotBridge:
         real_available = self._dataset_base_frame_count(dataset_path)
         isaac_rgbd = self._dataset_isaac_rgbd_health(dataset_path)
         isaac_augmentation = self._read_latest_isaac_augmentation_summary(dataset_path)
+        isaac_lab_synthetic = self._read_latest_isaac_lab_synthetic_summary(dataset_path)
         variant_count = _safe_int(isaac_augmentation.get("variant_count"), 0, minimum=0)
         valid_variant_count = _safe_int(isaac_augmentation.get("valid_variant_count"), variant_count, minimum=0)
         return self._dataset_mix_summary_for_counts(
@@ -6282,6 +7253,7 @@ class LeRobotBridge:
             real_available=real_available,
             isaac_rgbd_available=_safe_int(isaac_rgbd.get("rendered_count"), 0, minimum=0),
             isaac_augmentation_available=valid_variant_count,
+            isaac_lab_synthetic_available=_safe_int(isaac_lab_synthetic.get("synthetic_row_count"), 0, minimum=0),
         )
 
     def _dataset_mix_env_overrides(self, request: LeRobotSessionRequest) -> dict[str, str]:
@@ -6292,12 +7264,14 @@ class LeRobotBridge:
             "ATR_LEROBOT_DATA_MIX_REAL_ORIGINAL_WEIGHT": self._format_dataset_mix_env_float(weights.get("real_original", 1.0)),
             "ATR_LEROBOT_DATA_MIX_ISAAC_RGBD_WEIGHT": self._format_dataset_mix_env_float(weights.get("isaac_rgbd", 0.5)),
             "ATR_LEROBOT_DATA_MIX_ISAAC_AUGMENTATION_WEIGHT": self._format_dataset_mix_env_float(weights.get("isaac_augmentation", 0.5)),
+            "ATR_LEROBOT_DATA_MIX_ISAAC_LAB_SYNTHETIC_WEIGHT": self._format_dataset_mix_env_float(weights.get("isaac_lab_synthetic", 0.5)),
             "ATR_LEROBOT_DATA_MIX_SEED": str(_safe_int(summary.get("seed"), 0)),
         }
         max_env_keys = {
             "real_original": "ATR_LEROBOT_DATA_MIX_REAL_ORIGINAL_MAX_SAMPLES",
             "isaac_rgbd": "ATR_LEROBOT_DATA_MIX_ISAAC_RGBD_MAX_SAMPLES",
             "isaac_augmentation": "ATR_LEROBOT_DATA_MIX_ISAAC_AUGMENTATION_MAX_SAMPLES",
+            "isaac_lab_synthetic": "ATR_LEROBOT_DATA_MIX_ISAAC_LAB_SYNTHETIC_MAX_SAMPLES",
         }
         for source, env_key in max_env_keys.items():
             value = max_samples.get(source)
@@ -6314,6 +7288,7 @@ class LeRobotBridge:
             "real_original": self._fidelity_weight(getattr(request, "fidelity_real_original_weight", 1.0), 1.0),
             "isaac_rgbd": self._fidelity_weight(getattr(request, "fidelity_isaac_rgbd_weight", 0.5), 0.5),
             "isaac_augmentation": self._fidelity_weight(getattr(request, "fidelity_isaac_augmentation_weight", 0.3), 0.3),
+            "isaac_lab_synthetic": self._fidelity_weight(getattr(request, "fidelity_isaac_lab_synthetic_weight", 0.2), 0.2),
         }
         return {
             "schema": "atr.lerobot.fidelity_weights.v1",
@@ -6332,6 +7307,7 @@ class LeRobotBridge:
             "ATR_LEROBOT_FIDELITY_REAL_ORIGINAL_WEIGHT": self._format_dataset_mix_env_float(weights.get("real_original", 1.0)),
             "ATR_LEROBOT_FIDELITY_ISAAC_RGBD_WEIGHT": self._format_dataset_mix_env_float(weights.get("isaac_rgbd", 0.5)),
             "ATR_LEROBOT_FIDELITY_ISAAC_AUGMENTATION_WEIGHT": self._format_dataset_mix_env_float(weights.get("isaac_augmentation", 0.3)),
+            "ATR_LEROBOT_FIDELITY_ISAAC_LAB_SYNTHETIC_WEIGHT": self._format_dataset_mix_env_float(weights.get("isaac_lab_synthetic", 0.2)),
         }
 
     def _raw_depth_adapter_env_overrides(self, request: LeRobotSessionRequest) -> dict[str, str]:
@@ -6401,6 +7377,28 @@ class LeRobotBridge:
             "ATR_LEROBOT_ISAAC_AUGMENTATION_VARIANT_COUNT": str(variant_count),
             "ATR_LEROBOT_ISAAC_AUGMENTATION_VALID_VARIANT_COUNT": str(valid_variant_count),
             "ATR_LEROBOT_ISAAC_AUGMENTATION_FAILED_VARIANT_COUNT": str(failed_variant_count),
+        }
+
+    def _isaac_lab_synthetic_train_env_overrides(self, request: LeRobotSessionRequest) -> dict[str, str]:
+        dataset_path = Path(self._dataset_path_for(request)).expanduser()
+        summary = self._read_latest_isaac_lab_synthetic_summary(dataset_path)
+        if not summary.get("available") or _safe_int(summary.get("row_count"), 0, minimum=0) <= 0:
+            return {}
+        manifest_path = Path(str(summary.get("training_import_manifest_path") or "")).expanduser()
+        summary_path = Path(str(summary.get("training_import_summary_path") or "")).expanduser()
+        if not manifest_path.is_file() or not summary_path.is_file():
+            return {}
+        source_counts = summary.get("source_counts") if isinstance(summary.get("source_counts"), dict) else {}
+        return {
+            "ATR_LEROBOT_ISAAC_LAB_SYNTHETIC_ADAPTER": "1",
+            "ATR_LEROBOT_ISAAC_LAB_SYNTHETIC_MANIFEST": str(manifest_path),
+            "ATR_LEROBOT_ISAAC_LAB_SYNTHETIC_SUMMARY": str(summary_path),
+            "ATR_LEROBOT_ISAAC_LAB_SYNTHETIC_OUTPUT_ROOT": str(summary.get("output_root") or manifest_path.parents[1]),
+            "ATR_LEROBOT_ISAAC_LAB_SYNTHETIC_REQUIRE_SUCCESS": "1",
+            "ATR_LEROBOT_ISAAC_LAB_SYNTHETIC_STRICT": "0",
+            "ATR_LEROBOT_ISAAC_LAB_SYNTHETIC_ROW_COUNT": str(_safe_int(summary.get("row_count"), 0, minimum=0)),
+            "ATR_LEROBOT_ISAAC_LAB_SYNTHETIC_SYNTHETIC_ROW_COUNT": str(_safe_int(summary.get("synthetic_row_count"), 0, minimum=0)),
+            "ATR_LEROBOT_ISAAC_LAB_SYNTHETIC_SOURCE_COUNTS": json.dumps(source_counts, sort_keys=True),
         }
 
     def _isaac_rgbd_source_train_env_overrides(self, request: LeRobotSessionRequest) -> dict[str, str]:
@@ -7175,7 +8173,7 @@ class LeRobotBridge:
     def _training_preflight_progress(session: dict[str, Any]) -> dict[str, Any]:
         stages = [
             {"stage": "resolve_dataset", "status": "ok", "detail": str(session.get("dataset_path") or "")},
-            {"stage": "inspect_sidecars", "status": "ok", "detail": "raw depth, Isaac RGB-D, and augmentation summaries inspected"},
+            {"stage": "inspect_sidecars", "status": "ok", "detail": "raw depth, Isaac RGB-D, Isaac augmentation, and Isaac Lab synthetic summaries inspected"},
             {"stage": "apply_dataset_mix", "status": "ok", "detail": json.dumps(session.get("dataset_mix") or {}, ensure_ascii=False)},
             {"stage": "apply_fidelity_weights", "status": "ok", "detail": json.dumps(session.get("fidelity_weights") or {}, ensure_ascii=False)},
             {"stage": "build_train_command", "status": "ok", "detail": str(session.get("job_name") or "")},
@@ -8034,6 +9032,9 @@ print("Updated Pi0.5 quantile stats for " + ", ".join(updated))
             "ATR_ACTIVE_ROBOT_CAM_SPEED_SCALE": "0.7",
             "ATR_ACTIVE_ROBOT_CAM_RESUME_SPEED_SCALE": "0.5",
             "ATR_ACTIVE_ROBOT_CAM_TELEOP_TRANSITION_MAX_STEP": "3.0",
+            "ATR_ACTIVE_ROBOT_CAM_CAPTURE_WAIT_TIMEOUT_S": "4.0",
+            "ATR_ACTIVE_ROBOT_CAM_CAPTURE_WAIT_POLL_S": "0.05",
+            "ATR_ACTIVE_ROBOT_CAM_CAPTURE_WAIT_TOLERANCE_DEG": "2.0",
             "ATR_ACTIVE_ROBOT_CAM_RESUME_WAIT_TIMEOUT_S": "4.0",
             "ATR_ACTIVE_ROBOT_CAM_RESUME_WAIT_POLL_S": "0.05",
             "ATR_ACTIVE_ROBOT_CAM_RESUME_WAIT_TOLERANCE_DEG": "2.0",
@@ -8383,8 +9384,16 @@ print("Updated Pi0.5 quantile stats for " + ", ".join(updated))
 
     def _project_lerobot_pids(self, workflow: str) -> list[int]:
         markers_by_workflow = {
-            "teleoperate": ("lerobot-teleoperate", "lerobot.teleoperate"),
-            "record": ("lerobot-record", "lerobot.record"),
+            "teleoperate": (
+                "lerobot-teleoperate",
+                "lerobot.teleoperate",
+                "lerobot_isaac_mirror_runtime_wrapper.py teleoperate",
+            ),
+            "record": (
+                "lerobot-record",
+                "lerobot.record",
+                "lerobot_isaac_mirror_runtime_wrapper.py record",
+            ),
             "train": ("lerobot-train", "lerobot.train"),
             "rollout": (
                 "lerobot-rollout",
@@ -8454,9 +9463,14 @@ print("Updated Pi0.5 quantile stats for " + ", ".join(updated))
     @staticmethod
     def _cmdline_matches_lerobot_marker(parts: list[str], markers: tuple[str, ...]) -> bool:
         """Match actual LeRobot commands without catching GUI DOM ids or test scripts."""
+        for marker in markers:
+            if " " in marker and LeRobotBridge._cmdline_matches_lerobot_marker_sequence(parts, marker.split()):
+                return True
         for part in parts:
             base = Path(part).name
             for marker in markers:
+                if " " in marker:
+                    continue
                 if marker.startswith("lerobot-"):
                     if part == marker or base == marker:
                         return True
@@ -8475,6 +9489,24 @@ print("Updated Pi0.5 quantile stats for " + ", ".join(updated))
                     continue
                 if marker in part:
                     return True
+        return False
+
+    @staticmethod
+    def _cmdline_matches_lerobot_marker_sequence(parts: list[str], markers: list[str]) -> bool:
+        if not parts or not markers or len(markers) > len(parts):
+            return False
+        for start in range(0, len(parts) - len(markers) + 1):
+            for offset, marker in enumerate(markers):
+                part = parts[start + offset]
+                base = Path(part).name
+                if marker.endswith(".py"):
+                    if not (base == marker or part.endswith(f"/{marker}") or part.endswith(f"\\{marker}")):
+                        break
+                    continue
+                if part != marker:
+                    break
+            else:
+                return True
         return False
 
     @staticmethod

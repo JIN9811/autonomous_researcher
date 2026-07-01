@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import socket
 import subprocess
@@ -11,6 +12,7 @@ import time
 from datetime import datetime
 from types import SimpleNamespace
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 from PIL import Image
@@ -193,6 +195,79 @@ def _write_isaac_augmentation_summary(path: Path, *, variant_count: int, valid_v
                 "variant_count": variant_count,
                 "valid_variant_count": valid_variant_count,
                 "failed_variant_count": failed_variant_count,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def _write_isaac_lab_synthetic_training_import(path: Path, *, row_count: int) -> None:
+    output_dir = path / "sidecar" / "isaac_lab_synthetic" / "latest"
+    manifest_path = output_dir / "training_import" / "manifest.jsonl"
+    summary_path = output_dir / "training_import" / "summary.json"
+    rows = [
+        {
+            "schema": "atr.lerobot.training_import_row.v1",
+            "source_type": "isaac_lab_synthetic",
+            "episode_index": index,
+            "frame_index": 0,
+            "success": True,
+            "source_manifest": str(output_dir / "canonical_episode_index" / "manifest.jsonl"),
+        }
+        for index in range(row_count)
+    ]
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
+    summary_path.write_text(
+        json.dumps(
+            {
+                "schema": "atr.lerobot.training_import.summary.v1",
+                "status": "passed",
+                "row_count": row_count,
+                "source_counts": {"isaac_lab_synthetic": row_count},
+                "manifest_path": str(manifest_path),
+            }
+        ),
+        encoding="utf-8",
+    )
+    (output_dir / "summary.json").write_text(
+        json.dumps(
+            {
+                "schema": "atr.lerobot.isaac_lab_synthetic.summary.v1",
+                "status": "READY_FOR_TRAINING",
+                "dataset_path": str(path),
+                "output_root": str(output_dir),
+                "counts": {"training_rows": row_count},
+                "artifacts": {"training_import_summary": str(summary_path), "training_import_manifest": str(manifest_path)},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def _write_real_only_isaac_lab_training_import(path: Path, *, row_count: int) -> None:
+    output_dir = path / "sidecar" / "isaac_lab_synthetic" / "latest"
+    manifest_path = output_dir / "training_import" / "manifest.jsonl"
+    summary_path = output_dir / "training_import" / "summary.json"
+    rows = [
+        {
+            "schema": "atr.lerobot.training_import_row.v1",
+            "source_type": "real_lerobot",
+            "episode_index": index,
+            "success": True,
+        }
+        for index in range(row_count)
+    ]
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
+    summary_path.write_text(
+        json.dumps(
+            {
+                "schema": "atr.lerobot.training_import.summary.v1",
+                "status": "passed",
+                "row_count": row_count,
+                "source_counts": {"real_lerobot": row_count},
+                "manifest_path": str(manifest_path),
             }
         ),
         encoding="utf-8",
@@ -602,6 +677,35 @@ def test_mirror_receiver_extension_command_uses_isaac_app_and_extension(tmp_path
     assert str(scene_path) not in command
 
 
+def test_mirror_receiver_extension_command_can_start_with_timeline_playing(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    isaac_app = tmp_path / "IsaacSim" / "isaac-sim.sh"
+    isaac_app.parent.mkdir(parents=True, exist_ok=True)
+    isaac_app.write_text("#!/bin/sh\n", encoding="utf-8")
+    isaac_app.chmod(0o755)
+    extension_manifest = tmp_path / "sim" / "robotis_omx" / "extensions" / "atr.omx.mirror" / "config" / "extension.toml"
+    extension_manifest.parent.mkdir(parents=True, exist_ok=True)
+    extension_manifest.write_text("[package]\ntitle = \"ATR ROBOTIS OMX Mirror Receiver\"\n", encoding="utf-8")
+    scene_path = tmp_path / "sim" / "robotis_omx" / "scene" / "omx_table_layout.usda"
+    scene_path.parent.mkdir(parents=True, exist_ok=True)
+    scene_path.write_text("#usda 1.0\n", encoding="utf-8")
+
+    command_info = bridge._isaac_mirror_receiver_command(
+        {
+            "isaac_mirror_receiver_launch_mode": "isaac_extension",
+            "isaac_mirror_receiver_isaac_sim_executable": str(isaac_app),
+            "isaac_mirror_receiver_scene": str(scene_path),
+            "isaac_mirror_receiver_play_timeline_on_startup": True,
+            "active_robot_cam_enabled": False,
+        },
+        "http://127.0.0.1:18766/joints",
+    )
+
+    assert command_info["ok"] is True
+    assert "--/exts/atr.omx.mirror/playTimelineOnStartup=true" in command_info["command"]
+    assert "--/exts/atr.omx.mirror/specimenPoseActiveRobotCamOnMissing=false" in command_info["command"]
+
+
 def test_mirror_receiver_extension_command_can_disable_active_robot_cam(tmp_path: Path) -> None:
     bridge = _bridge(tmp_path)
     isaac_app = tmp_path / "IsaacSim" / "isaac-sim.sh"
@@ -917,6 +1021,9 @@ def test_live_teleoperate_active_robot_cam_uses_wrapper_and_d405_direct_env(tmp_
     assert env["ATR_ACTIVE_ROBOT_CAM_SPEED_SCALE"] == "0.7"  # type: ignore[index]
     assert env["ATR_ACTIVE_ROBOT_CAM_RESUME_SPEED_SCALE"] == "0.5"  # type: ignore[index]
     assert env["ATR_ACTIVE_ROBOT_CAM_TELEOP_TRANSITION_MAX_STEP"] == "3.0"  # type: ignore[index]
+    assert env["ATR_ACTIVE_ROBOT_CAM_CAPTURE_WAIT_TIMEOUT_S"] == "4.0"  # type: ignore[index]
+    assert env["ATR_ACTIVE_ROBOT_CAM_CAPTURE_WAIT_POLL_S"] == "0.05"  # type: ignore[index]
+    assert env["ATR_ACTIVE_ROBOT_CAM_CAPTURE_WAIT_TOLERANCE_DEG"] == "2.0"  # type: ignore[index]
     assert env["ATR_ACTIVE_ROBOT_CAM_RESUME_WAIT_TIMEOUT_S"] == "4.0"  # type: ignore[index]
     assert env["ATR_ACTIVE_ROBOT_CAM_RESUME_WAIT_POLL_S"] == "0.05"  # type: ignore[index]
     assert env["ATR_ACTIVE_ROBOT_CAM_RESUME_WAIT_TOLERANCE_DEG"] == "2.0"  # type: ignore[index]
@@ -4124,9 +4231,20 @@ def test_live_record_with_isaac_mirror_enables_attempt_and_rgbd_render_env(tmp_p
         raising=False,
     )
     captured: dict[str, object] = {}
+    receiver_starts: list[dict[str, object]] = []
     viewport_frame_calls: list[dict[str, object]] = []
     timeline_play_calls: list[dict[str, object]] = []
     bridge._start_live_process = lambda **kwargs: captured.update(kwargs) or {"ok": True, "session_updates": {"pid": 1234, "log_path": "", "returncode": None}}  # type: ignore[method-assign]
+    bridge.mirror_receiver_process_start = lambda payload: receiver_starts.append(dict(payload)) or {  # type: ignore[method-assign]
+        "ok": True,
+        "status": "RUNNING",
+        "pid": 4321,
+        "health": {
+            "ok": True,
+            "health_url": "http://127.0.0.1:8766/health",
+            "apply_mode": "deferred_update_tick",
+        },
+    }
     bridge._post_isaac_mirror_timeline_play = lambda endpoint, reason, timeout_s=0.5: timeline_play_calls.append(  # type: ignore[attr-defined]
         {"endpoint": endpoint, "reason": reason, "timeout_s": timeout_s}
     ) or {"ok": True, "status": "timeline_play_queued", "timeline_play_url": "http://127.0.0.1:8766/timeline/play"}
@@ -4152,6 +4270,11 @@ def test_live_record_with_isaac_mirror_enables_attempt_and_rgbd_render_env(tmp_p
     env = captured["env_overrides"]
     attempt = started["record_attempt"]
     assert started["ok"] is True
+    assert receiver_starts
+    assert receiver_starts[0]["isaac_mirror_receiver_force_restart"] is True
+    assert receiver_starts[0]["isaac_mirror_receiver_play_timeline_on_startup"] is True
+    assert receiver_starts[0]["active_robot_cam_enabled"] is False
+    assert any(item["step"] == "ISAAC_MIRROR_RECEIVER_RESTARTED" for item in started["step_trace"])
     assert started["isaac_timeline_play"]["status"] == "timeline_play_queued"
     assert timeline_play_calls == [
         {
@@ -4160,6 +4283,8 @@ def test_live_record_with_isaac_mirror_enables_attempt_and_rgbd_render_env(tmp_p
             "timeout_s": 0.5,
         }
     ]
+    trace_steps = [item["step"] for item in started["step_trace"]]
+    assert trace_steps.index("ISAAC_TIMELINE_PLAY") < trace_steps.index("PROCESS_STARTED")
     assert started["isaac_viewport_frame"]["status"] == "viewport_frame_queued"
     assert viewport_frame_calls == [
         {
@@ -4177,11 +4302,12 @@ def test_live_record_with_isaac_mirror_enables_attempt_and_rgbd_render_env(tmp_p
     assert env["ATR_RECORD_ATTEMPT_ID"] == attempt["attempt_id"]  # type: ignore[index]
     assert env["ATR_RECORD_ATTEMPT_DATASET_PATH"] == str(dataset_path)  # type: ignore[index]
     assert env["ATR_ISAAC_MIRROR_TIMEOUT_S"] == "0.5"  # type: ignore[index]
-    assert env["ATR_ISAAC_MIRROR_POST_TIMEOUT_S"] == "0.15"  # type: ignore[index]
+    assert env["ATR_ISAAC_MIRROR_POST_TIMEOUT_S"] == "0.5"  # type: ignore[index]
+    assert "ATR_ISAAC_TIMELINE_PLAY_RECORD_START_ENABLED" not in env
     assert env["ATR_ISAAC_RGBD_RENDER_ENABLED"] == "1"  # type: ignore[index]
     assert env["ATR_ISAAC_RGBD_RENDER_MODE"] == "deferred_after_record"  # type: ignore[index]
     assert env["ATR_ISAAC_RGBD_RENDER_TARGET_FPS"] == "15.0"  # type: ignore[index]
-    assert env["ATR_ISAAC_RGBD_RENDER_POST_TIMEOUT_S"] == "0.15"  # type: ignore[index]
+    assert env["ATR_ISAAC_RGBD_RENDER_POST_TIMEOUT_S"] == "0.5"  # type: ignore[index]
     assert Path(str(env["ATR_ISAAC_RGBD_RENDER_OUTPUT_DIR"])) == dataset_path / "sidecar" / "isaac_rgbd" / "episode_000" / attempt["attempt_id"]  # type: ignore[index]
     assert Path(str(attempt["attempt_dir"])) == dataset_path / "sidecar" / "attempts" / "episode_000" / attempt["attempt_id"]
     assert Path(str(attempt["isaac_rgbd_render"]["manifest_path"])) == dataset_path / "sidecar" / "isaac_rgbd" / "episode_000" / attempt["attempt_id"] / "manifest.jsonl"
@@ -4557,10 +4683,12 @@ def test_train_dataset_mix_defaults_are_conservative_and_report_effective_counts
     assert env["ATR_LEROBOT_DATA_MIX_REAL_ORIGINAL_WEIGHT"] == "1"
     assert env["ATR_LEROBOT_DATA_MIX_ISAAC_RGBD_WEIGHT"] == "0.5"
     assert env["ATR_LEROBOT_DATA_MIX_ISAAC_AUGMENTATION_WEIGHT"] == "0.5"
+    assert env["ATR_LEROBOT_DATA_MIX_ISAAC_LAB_SYNTHETIC_WEIGHT"] == "0.5"
     assert env["ATR_LEROBOT_FIDELITY_WEIGHTING_ENABLED"] == "1"
     assert env["ATR_LEROBOT_FIDELITY_REAL_ORIGINAL_WEIGHT"] == "1"
     assert env["ATR_LEROBOT_FIDELITY_ISAAC_RGBD_WEIGHT"] == "0.5"
     assert env["ATR_LEROBOT_FIDELITY_ISAAC_AUGMENTATION_WEIGHT"] == "0.3"
+    assert env["ATR_LEROBOT_FIDELITY_ISAAC_LAB_SYNTHETIC_WEIGHT"] == "0.2"
     result = bridge.train_start(
         {
             "mode": "test",
@@ -4571,17 +4699,23 @@ def test_train_dataset_mix_defaults_are_conservative_and_report_effective_counts
     )
 
     assert result["ok"] is True
-    assert result["dataset_mix"]["weights"] == {"real_original": 1.0, "isaac_rgbd": 0.5, "isaac_augmentation": 0.5}
+    assert result["dataset_mix"]["weights"] == {
+        "real_original": 1.0,
+        "isaac_rgbd": 0.5,
+        "isaac_augmentation": 0.5,
+        "isaac_lab_synthetic": 0.5,
+    }
     assert result["fidelity_weights"] == {
         "schema": "atr.lerobot.fidelity_weights.v1",
         "enabled": True,
         "mode": "source_loss_weight",
-        "weights": {"real_original": 1.0, "isaac_rgbd": 0.5, "isaac_augmentation": 0.3},
+        "weights": {"real_original": 1.0, "isaac_rgbd": 0.5, "isaac_augmentation": 0.3, "isaac_lab_synthetic": 0.2},
     }
     assert result["dataset_mix"]["effective_counts"] == {
         "real_original": 10,
         "isaac_rgbd": 4,
         "isaac_augmentation": 5,
+        "isaac_lab_synthetic": 0,
         "total": 19,
     }
     status = bridge.train_status({"mode": "test", "profile_id": "fake_omx_ai", "session_id": result["session_id"]})
@@ -4623,6 +4757,7 @@ def test_train_dataset_mix_operator_override_is_passed_to_env_and_counts(tmp_pat
     assert env["ATR_LEROBOT_DATA_MIX_REAL_ORIGINAL_WEIGHT"] == "0.8"
     assert env["ATR_LEROBOT_DATA_MIX_ISAAC_RGBD_WEIGHT"] == "0.3"
     assert env["ATR_LEROBOT_DATA_MIX_ISAAC_AUGMENTATION_WEIGHT"] == "0.2"
+    assert env["ATR_LEROBOT_DATA_MIX_ISAAC_LAB_SYNTHETIC_WEIGHT"] == "0.5"
     assert env["ATR_LEROBOT_DATA_MIX_ISAAC_RGBD_MAX_SAMPLES"] == "2"
     assert env["ATR_LEROBOT_DATA_MIX_ISAAC_AUGMENTATION_MAX_SAMPLES"] == "1"
     assert env["ATR_LEROBOT_DATA_MIX_SEED"] == "7"
@@ -4630,19 +4765,737 @@ def test_train_dataset_mix_operator_override_is_passed_to_env_and_counts(tmp_pat
     assert env["ATR_LEROBOT_FIDELITY_REAL_ORIGINAL_WEIGHT"] == "1"
     assert env["ATR_LEROBOT_FIDELITY_ISAAC_RGBD_WEIGHT"] == "0.45"
     assert env["ATR_LEROBOT_FIDELITY_ISAAC_AUGMENTATION_WEIGHT"] == "0.25"
+    assert env["ATR_LEROBOT_FIDELITY_ISAAC_LAB_SYNTHETIC_WEIGHT"] == "0.2"
     result = bridge.train_start(payload)
 
     assert result["dataset_mix"]["effective_counts"] == {
         "real_original": 8,
         "isaac_rgbd": 2,
         "isaac_augmentation": 1,
+        "isaac_lab_synthetic": 0,
         "total": 11,
     }
     assert result["fidelity_weights"]["weights"] == {
         "real_original": 1.0,
         "isaac_rgbd": 0.45,
         "isaac_augmentation": 0.25,
+        "isaac_lab_synthetic": 0.2,
     }
+
+
+def test_train_start_exposes_isaac_lab_synthetic_training_import_and_weights(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    dataset = tmp_path / "hf_datasets" / "jin" / "isaac-lab-synthetic-train"
+    _make_trainable_lerobot_dataset(dataset)
+    info_path = dataset / "meta" / "info.json"
+    info = json.loads(info_path.read_text(encoding="utf-8"))
+    info["total_frames"] = 10
+    info_path.write_text(json.dumps(info), encoding="utf-8")
+    _write_isaac_lab_synthetic_training_import(dataset, row_count=7)
+    payload = {
+        "mode": "test",
+        "profile_id": "fake_omx_ai",
+        "dataset_path": str(dataset),
+        "observation_pipeline_id": "raw_depth_adapter",
+        "dataset_mix_isaac_lab_synthetic_weight": 0.4,
+        "dataset_mix_isaac_lab_synthetic_max_samples": 3,
+        "fidelity_isaac_lab_synthetic_weight": 0.2,
+    }
+    request = LeRobotSessionRequest.model_validate({**payload, "mode": "live", "runtime_mode": "live"})
+    env = bridge._workflow_env_overrides("train", request)
+
+    assert env["ATR_LEROBOT_DATA_MIX_ISAAC_LAB_SYNTHETIC_WEIGHT"] == "0.4"
+    assert env["ATR_LEROBOT_DATA_MIX_ISAAC_LAB_SYNTHETIC_MAX_SAMPLES"] == "3"
+    assert env["ATR_LEROBOT_FIDELITY_ISAAC_LAB_SYNTHETIC_WEIGHT"] == "0.2"
+    assert env["ATR_LEROBOT_ISAAC_LAB_SYNTHETIC_ADAPTER"] == "1"
+    assert env["ATR_LEROBOT_ISAAC_LAB_SYNTHETIC_REQUIRE_SUCCESS"] == "1"
+    assert env["ATR_LEROBOT_ISAAC_LAB_SYNTHETIC_SYNTHETIC_ROW_COUNT"] == "7"
+
+    result = bridge.train_start(payload)
+
+    assert result["ok"] is True
+    assert result["isaac_lab_synthetic"]["available"] is True
+    assert result["isaac_lab_synthetic"]["row_count"] == 7
+    assert result["isaac_lab_synthetic"]["synthetic_row_count"] == 7
+    assert result["dataset_mix"]["weights"]["isaac_lab_synthetic"] == 0.4
+    assert result["dataset_mix"]["available_counts"]["isaac_lab_synthetic"] == 7
+    assert result["dataset_mix"]["effective_counts"]["isaac_lab_synthetic"] == 3
+    assert result["training"]["dataset_mix_effective_counts"]["isaac_lab_synthetic"] == 3
+    assert result["fidelity_weights"]["weights"]["isaac_lab_synthetic"] == 0.2
+
+
+def test_train_dataset_mix_does_not_count_real_only_isaac_lab_import_as_synthetic(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    dataset = tmp_path / "hf_datasets" / "jin" / "isaac-lab-real-only"
+    _make_trainable_lerobot_dataset(dataset)
+    info_path = dataset / "meta" / "info.json"
+    info = json.loads(info_path.read_text(encoding="utf-8"))
+    info["total_frames"] = 10
+    info_path.write_text(json.dumps(info), encoding="utf-8")
+    _write_real_only_isaac_lab_training_import(dataset, row_count=4)
+
+    result = bridge.train_start(
+        {
+            "mode": "test",
+            "profile_id": "fake_omx_ai",
+            "dataset_path": str(dataset),
+            "observation_pipeline_id": "raw_depth_adapter",
+        }
+    )
+
+    assert result["ok"] is True
+    assert result["isaac_lab_synthetic"]["row_count"] == 4
+    assert result["isaac_lab_synthetic"]["synthetic_row_count"] == 0
+    assert result["isaac_lab_synthetic"]["available"] is False
+    assert result["dataset_mix"]["available_counts"]["isaac_lab_synthetic"] == 0
+    assert result["dataset_mix"]["effective_counts"]["isaac_lab_synthetic"] == 0
+
+
+def test_isaac_lab_run_replicator_worker_executes_build_plan_and_refreshes_summary(tmp_path: Path, monkeypatch) -> None:
+    from scripts.lerobot_synthetic_e2e_smoke import build_fixture_recording_dataset
+
+    bridge = _bridge(tmp_path)
+    dataset = tmp_path / "hf_datasets" / "jin" / "replicator-worker"
+    build_fixture_recording_dataset(dataset, episodes=1, episode_s=1, fps=2)
+    isaac_lab = tmp_path / "IsaacLab"
+    isaac_lab.mkdir()
+    stage = tmp_path / "sim" / "robotis_omx" / "scene" / "omx_table_layout.usda"
+    stage.parent.mkdir(parents=True)
+    stage.write_text("#usda 1.0\n", encoding="utf-8")
+    isaac_python = tmp_path / "isaac-sim" / "python.sh"
+    isaac_python.parent.mkdir(parents=True)
+    isaac_python.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    commands: list[list[str]] = []
+
+    def fake_run(command, **kwargs):
+        if "--output-dir" not in command:
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        commands.append(list(command))
+        output_dir = Path(command[command.index("--output-dir") + 1])
+        rgb = output_dir / "rgb" / "top" / "e000000_f000000_v000.png"
+        depth = output_dir / "depth" / "top" / "e000000_f000000_v000.png"
+        metadata = output_dir / "metadata" / "top" / "e000000_f000000_v000.json"
+        for path, payload in [(rgb, b"rgb"), (depth, b"depth16"), (metadata, b"{}")]:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(payload)
+        manifest = output_dir / "manifest.jsonl"
+        manifest.write_text(
+            json.dumps(
+                {
+                    "schema": "atr.lerobot.replicator_frame.v1",
+                    "source_type": "replicator_render_only",
+                    "episode_index": 0,
+                    "frame_index": 0,
+                    "camera": "top",
+                    "variant_index": 0,
+                    "rgb_path": "replicator/rgb/top/e000000_f000000_v000.png",
+                    "depth_path": "replicator/depth/top/e000000_f000000_v000.png",
+                    "metadata_path": "replicator/metadata/top/e000000_f000000_v000.json",
+                    "train_eligible": False,
+                    "train_exclusion_reason": "render_only_same_pose",
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return SimpleNamespace(returncode=0, stdout=json.dumps({"ok": True, "status": "completed"}), stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    result = bridge.isaac_lab_run_replicator_worker(
+        {
+            "mode": "test",
+            "dataset_path": str(dataset),
+            "isaac_lab_path": str(isaac_lab),
+            "isaac_sim_python": str(isaac_python),
+            "stage_path": str(stage),
+            "enable_replicator": True,
+            "enable_hdf5_export": False,
+            "enable_mimic": False,
+            "enable_rl_teacher": False,
+            "require_physics_pass": False,
+            "require_articulation_pass": False,
+            "cameras": ["top"],
+            "attempts_per_source_frame": 1,
+        }
+    )
+
+    assert result["ok"] is True
+    assert result["tool"] == "lerobot.isaac_lab.run_replicator_worker"
+    assert commands
+    assert commands[0][0] == str(isaac_python)
+    assert "scripts/lerobot_isaac_replicator_synthetic.py" in commands[0][1]
+    assert result["worker"]["returncode"] == 0
+    assert result["worker"]["command"] == commands[0]
+    assert result["replicator"]["status"] == "completed"
+    assert result["replicator"]["rendered_count"] == 1
+    assert result["replicator"]["valid_rendered_count"] == 1
+    assert result["source_labels"]["counts"]["replicator_render_only"] == 1
+
+
+def test_isaac_lab_run_replicator_worker_smoke_limits_canonical_rows(tmp_path: Path, monkeypatch) -> None:
+    from scripts.lerobot_synthetic_e2e_smoke import build_fixture_recording_dataset
+
+    bridge = _bridge(tmp_path)
+    dataset = tmp_path / "hf_datasets" / "jin" / "replicator-worker-smoke"
+    build_fixture_recording_dataset(dataset, episodes=1, episode_s=5, fps=15)
+    isaac_lab = tmp_path / "IsaacLab"
+    isaac_lab.mkdir()
+    stage = tmp_path / "sim" / "robotis_omx" / "scene" / "omx_table_layout.usda"
+    stage.parent.mkdir(parents=True)
+    stage.write_text("#usda 1.0\n", encoding="utf-8")
+    isaac_python = tmp_path / "isaac-sim" / "python.sh"
+    isaac_python.parent.mkdir(parents=True)
+    isaac_python.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    commands: list[list[str]] = []
+
+    def fake_run(command, **kwargs):
+        commands.append(list(command))
+        canonical_index = Path(command[command.index("--canonical-index") + 1])
+        canonical_rows = [json.loads(line) for line in canonical_index.read_text(encoding="utf-8").splitlines()]
+        assert len(canonical_rows) == 1
+        assert command[command.index("--cameras") + 1] == "top"
+        assert command[command.index("--variants") + 1] == "1"
+        output_dir = Path(command[command.index("--output-dir") + 1])
+        rgb = output_dir / "rgb" / "top" / "e000000_f000000_v000.png"
+        depth = output_dir / "depth" / "top" / "e000000_f000000_v000.png"
+        metadata = output_dir / "metadata" / "top" / "e000000_f000000_v000.json"
+        for path, payload in [(rgb, b"rgb"), (depth, b"depth16"), (metadata, b"{}")]:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(payload)
+        (output_dir / "manifest.jsonl").write_text(
+            json.dumps(
+                {
+                    "schema": "atr.lerobot.replicator_frame.v1",
+                    "source_type": "replicator_render_only",
+                    "episode_index": 0,
+                    "frame_index": 0,
+                    "camera": "top",
+                    "variant_index": 0,
+                    "rgb_path": "replicator/rgb/top/e000000_f000000_v000.png",
+                    "depth_path": "replicator/depth/top/e000000_f000000_v000.png",
+                    "metadata_path": "replicator/metadata/top/e000000_f000000_v000.json",
+                    "train_eligible": False,
+                    "train_exclusion_reason": "render_only_same_pose",
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return SimpleNamespace(returncode=0, stdout=json.dumps({"ok": True, "status": "completed"}), stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    result = bridge.isaac_lab_run_replicator_worker(
+        {
+            "mode": "test",
+            "dataset_path": str(dataset),
+            "isaac_lab_path": str(isaac_lab),
+            "isaac_sim_python": str(isaac_python),
+            "stage_path": str(stage),
+            "enable_replicator": True,
+            "enable_hdf5_export": False,
+            "enable_mimic": False,
+            "enable_rl_teacher": False,
+            "require_physics_pass": False,
+            "require_articulation_pass": False,
+            "cameras": ["top"],
+            "attempts_per_source_frame": 1,
+            "max_source_frames": 1,
+        }
+    )
+
+    assert result["ok"] is True
+    assert commands
+    assert result["replicator"]["expected_render_rows"] == 1
+    assert result["replicator"]["rendered_count"] == 1
+
+
+def test_isaac_lab_run_replicator_worker_blocks_during_active_teleop(tmp_path: Path, monkeypatch) -> None:
+    from scripts.lerobot_synthetic_e2e_smoke import build_fixture_recording_dataset
+
+    bridge = _bridge(tmp_path)
+    dataset = tmp_path / "hf_datasets" / "jin" / "replicator-worker-live-block"
+    build_fixture_recording_dataset(dataset, episodes=1, episode_s=1, fps=2)
+    isaac_lab = tmp_path / "IsaacLab"
+    isaac_lab.mkdir()
+    stage = tmp_path / "sim" / "robotis_omx" / "scene" / "omx_table_layout.usda"
+    stage.parent.mkdir(parents=True)
+    stage.write_text("#usda 1.0\n", encoding="utf-8")
+    isaac_python = tmp_path / "isaac-sim" / "python.sh"
+    isaac_python.parent.mkdir(parents=True)
+    isaac_python.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    bridge._sessions["teleop-active"] = {
+        "session_id": "teleop-active",
+        "workflow": "teleoperate",
+        "status": "RUNNING",
+        "returncode": None,
+    }
+
+    def fail_run(command, **kwargs):
+        raise AssertionError(f"replicator worker must not run during live control: {command}")
+
+    monkeypatch.setattr(subprocess, "run", fail_run)
+
+    result = bridge.isaac_lab_run_replicator_worker(
+        {
+            "mode": "test",
+            "dataset_path": str(dataset),
+            "isaac_lab_path": str(isaac_lab),
+            "isaac_sim_python": str(isaac_python),
+            "stage_path": str(stage),
+            "enable_replicator": True,
+            "enable_hdf5_export": False,
+            "enable_mimic": False,
+            "enable_rl_teacher": False,
+            "require_physics_pass": False,
+            "require_articulation_pass": False,
+            "cameras": ["top"],
+            "attempts_per_source_frame": 1,
+        }
+    )
+
+    assert result["ok"] is False
+    assert result["status"] == "BLOCKED"
+    assert result["worker"]["blocker"] == "REPLICATOR_LIVE_SESSION_ACTIVE"
+    assert result["worker"]["active_sessions"][0]["workflow"] == "teleoperate"
+
+
+def test_isaac_lab_mimic_smoke_creates_queryable_blocked_job(tmp_path: Path) -> None:
+    from scripts.lerobot_synthetic_e2e_smoke import build_fixture_recording_dataset
+
+    bridge = _bridge(tmp_path)
+    dataset = tmp_path / "hf_datasets" / "jin" / "mimic-job-blocked"
+    build_fixture_recording_dataset(dataset, episodes=1, episode_s=1, fps=2)
+    isaac_lab = tmp_path / "IsaacLab"
+    isaac_lab.mkdir()
+    stage = tmp_path / "sim" / "robotis_omx" / "scene" / "omx_table_layout.usda"
+    stage.parent.mkdir(parents=True)
+    stage.write_text("#usda 1.0\n", encoding="utf-8")
+    payload = {
+        "mode": "test",
+        "dataset_path": str(dataset),
+        "isaac_lab_path": str(isaac_lab),
+        "stage_path": str(stage),
+        "enable_replicator": False,
+        "require_physics_pass": False,
+        "require_articulation_pass": False,
+    }
+
+    build = bridge.isaac_lab_build_synthetic(payload)
+    start = bridge.isaac_lab_run_mimic_smoke(payload)
+
+    assert build["ok"] is True
+    assert start["ok"] is False
+    assert start["tool"] == "lerobot.isaac_lab.run_mimic_smoke"
+    assert start["job_id"].startswith("isaac_lab_mimic_")
+    assert start["job"]["status"] == "BLOCKED"
+    assert start["job"]["summary"]["mimic"]["blocker"] == "MIMIC_HDF5_EXPORT_MISSING"
+    job_manifest = Path(start["job"]["job_manifest_path"])
+    assert job_manifest == Path(start["output_root"]) / "mimic" / "job.json"
+    assert job_manifest.is_file()
+    persisted_job = json.loads(job_manifest.read_text(encoding="utf-8"))
+    assert persisted_job["job_id"] == start["job_id"]
+    assert persisted_job["kind"] == "mimic"
+    assert persisted_job["status"] == "BLOCKED"
+
+    status = bridge.isaac_lab_mimic_status({"job_id": start["job_id"]})
+    assert status["ok"] is True
+    assert status["tool"] == "lerobot.isaac_lab.mimic.status"
+    assert status["status"] == "BLOCKED"
+    assert status["job_id"] == start["job_id"]
+    assert status["summary"]["mimic"]["blocker"] == "MIMIC_HDF5_EXPORT_MISSING"
+    assert status["error"] is None
+
+    stopped = bridge.isaac_lab_mimic_stop({"job_id": start["job_id"]})
+    assert stopped["ok"] is True
+    assert stopped["tool"] == "lerobot.isaac_lab.mimic.stop"
+    assert stopped["status"] == "BLOCKED"
+    assert stopped["stop_requested"] is False
+
+    reloaded_bridge = _bridge(tmp_path)
+    reloaded_status = reloaded_bridge.isaac_lab_mimic_status(payload)
+    assert reloaded_status["ok"] is True
+    assert reloaded_status["job_id"] == start["job_id"]
+    assert reloaded_status["status"] == "BLOCKED"
+    assert reloaded_status["job"]["job_manifest_path"] == str(job_manifest)
+
+
+def test_isaac_lab_rl_teacher_smoke_creates_queryable_completed_job(tmp_path: Path) -> None:
+    from scripts.lerobot_synthetic_e2e_smoke import build_fixture_recording_dataset
+
+    bridge = _bridge(tmp_path)
+    dataset = tmp_path / "hf_datasets" / "jin" / "rl-teacher-job-ready"
+    build_fixture_recording_dataset(dataset, episodes=1, episode_s=1, fps=2)
+    isaac_lab = tmp_path / "IsaacLab"
+    isaac_lab.mkdir()
+    stage = tmp_path / "sim" / "robotis_omx" / "scene" / "omx_table_layout.usda"
+    stage.parent.mkdir(parents=True)
+    stage.write_text("#usda 1.0\n", encoding="utf-8")
+    payload = {
+        "mode": "test",
+        "dataset_path": str(dataset),
+        "isaac_lab_path": str(isaac_lab),
+        "stage_path": str(stage),
+        "enable_replicator": False,
+        "enable_rl_teacher": True,
+        "rl_teacher_steps": 16,
+        "require_physics_pass": False,
+        "require_articulation_pass": False,
+    }
+
+    assert bridge.isaac_lab_build_synthetic(payload)["ok"] is True
+    assert bridge.isaac_lab_export_hdf5(payload)["ok"] is True
+    start = bridge.isaac_lab_run_rl_teacher_smoke(payload)
+
+    assert start["ok"] is True
+    assert start["tool"] == "lerobot.isaac_lab.run_rl_teacher_smoke"
+    assert start["job_id"].startswith("isaac_lab_rl_teacher_")
+    assert start["job"]["status"] == "COMPLETED"
+    assert start["job"]["summary"]["rl_teacher"]["smoke"]["rl_teacher_steps"] == 16
+    job_manifest = Path(start["job"]["job_manifest_path"])
+    assert job_manifest == Path(start["output_root"]) / "rl_teacher" / "job.json"
+    assert job_manifest.is_file()
+    persisted_job = json.loads(job_manifest.read_text(encoding="utf-8"))
+    assert persisted_job["job_id"] == start["job_id"]
+    assert persisted_job["kind"] == "rl_teacher"
+    assert persisted_job["status"] == "COMPLETED"
+
+    status = bridge.isaac_lab_rl_teacher_status({})
+    assert status["ok"] is True
+    assert status["tool"] == "lerobot.isaac_lab.rl_teacher.status"
+    assert status["status"] == "COMPLETED"
+    assert status["job_id"] == start["job_id"]
+    assert status["summary"]["rl_teacher"]["smoke"]["status"] == "ready_to_launch"
+
+    stopped = bridge.isaac_lab_rl_teacher_stop({"job_id": start["job_id"]})
+    assert stopped["ok"] is True
+    assert stopped["status"] == "COMPLETED"
+    assert stopped["stop_requested"] is False
+
+    reloaded_bridge = _bridge(tmp_path)
+    reloaded_status = reloaded_bridge.isaac_lab_rl_teacher_status(payload)
+    assert reloaded_status["ok"] is True
+    assert reloaded_status["job_id"] == start["job_id"]
+    assert reloaded_status["status"] == "COMPLETED"
+    assert reloaded_status["job"]["job_manifest_path"] == str(job_manifest)
+
+
+def test_isaac_lab_mimic_and_rl_runner_endpoints_generate_training_sources(tmp_path: Path) -> None:
+    from scripts.lerobot_synthetic_e2e_smoke import build_fixture_recording_dataset
+
+    bridge = _bridge(tmp_path)
+    dataset = tmp_path / "hf_datasets" / "jin" / "runner-generate"
+    build_fixture_recording_dataset(dataset, episodes=1, episode_s=1, fps=3)
+    isaac_lab = tmp_path / "IsaacLab"
+    isaac_lab.mkdir()
+    stage = tmp_path / "sim" / "robotis_omx" / "scene" / "omx_table_layout.usda"
+    stage.parent.mkdir(parents=True)
+    stage.write_text("#usda 1.0\n", encoding="utf-8")
+    payload = {
+        "mode": "test",
+        "dataset_path": str(dataset),
+        "isaac_lab_path": str(isaac_lab),
+        "stage_path": str(stage),
+        "enable_replicator": False,
+        "enable_mimic": True,
+        "enable_rl_teacher": True,
+        "mimic_trials": 6,
+        "rl_teacher_steps": 16,
+        "dry_run": True,
+        "require_physics_pass": False,
+        "require_articulation_pass": False,
+    }
+
+    assert bridge.isaac_lab_build_synthetic(payload)["ok"] is True
+    assert bridge.isaac_lab_export_hdf5(payload)["ok"] is True
+    mimic = bridge.isaac_lab_run_mimic(payload)
+    rl = bridge.isaac_lab_run_rl_teacher(payload)
+
+    assert mimic["ok"] is True
+    assert mimic["tool"] == "lerobot.isaac_lab.run_mimic"
+    assert mimic["job_id"].startswith("isaac_lab_mimic_")
+    assert mimic["mimic"]["runner"]["status"] == "completed"
+    assert mimic["mimic"]["runner"]["dry_run"] is True
+    assert mimic["mimic"]["runner"]["operation"] == "mimic_generate_dataset"
+    assert mimic["mimic"]["runner"]["generation_config"]["object_pose_randomization"]["workspace"] == "a4_sheet"
+    assert mimic["mimic"]["runner"]["generation_config"]["object_pose_randomization"]["bounds_m"] == {
+        "x": [-0.105, 0.105],
+        "y": [-0.1485, 0.1485],
+    }
+    assert mimic["mimic"]["runner"]["generation_config"]["success_filter"]["success_only"] is True
+    assert mimic["mimic"]["runner"]["generation_config"]["success_filter"]["excluded_manifest"].endswith("mimic/failures.jsonl")
+    assert Path(mimic["mimic"]["generated_dataset_path"]).is_file()
+    assert rl["ok"] is True
+    assert rl["tool"] == "lerobot.isaac_lab.run_rl_teacher"
+    assert rl["job_id"].startswith("isaac_lab_rl_teacher_")
+    assert rl["rl_teacher"]["runner"]["status"] == "completed"
+    assert rl["rl_teacher"]["runner"]["dry_run"] is True
+    assert rl["rl_teacher"]["runner"]["operation"] == "rl_teacher_generate_dataset"
+    assert rl["rl_teacher"]["runner"]["generation_config"]["observations"] == ["eef_pose", "joint_pos", "gripper_state", "object_pose"]
+    assert rl["rl_teacher"]["runner"]["generation_config"]["success_metrics"] == ["bounded_workspace", "grasp_stable", "place_success", "simulation_only"]
+    assert rl["rl_teacher"]["runner"]["generation_config"]["success_filter"]["success_only"] is True
+    assert Path(rl["rl_teacher"]["generated_dataset_path"]).is_file()
+
+    rebuilt = bridge.isaac_lab_build_synthetic(payload)
+    training_rows = bridge._read_jsonl_file(Path(rebuilt["training_exposure"]["manifest_path"]))  # noqa: SLF001
+    synthetic_rows = [row for row in training_rows if row["source_type"] == "isaac_lab_synthetic"]
+    assert len(synthetic_rows) == mimic["mimic"]["success_count"] + rl["rl_teacher"]["success_count"]
+    assert all((Path(rebuilt["output_root"]) / row["artifact_path"]).is_file() for row in synthetic_rows)
+
+
+def test_live_isaac_lab_mimic_runner_blocks_during_active_teleop(tmp_path: Path, monkeypatch) -> None:
+    from scripts.lerobot_synthetic_e2e_smoke import build_fixture_recording_dataset
+
+    bridge = _bridge(tmp_path)
+    dataset = tmp_path / "hf_datasets" / "jin" / "mimic-runner-live-block"
+    build_fixture_recording_dataset(dataset, episodes=1, episode_s=1, fps=2)
+    isaac_lab = tmp_path / "IsaacLab"
+    isaac_lab.mkdir()
+    stage = tmp_path / "sim" / "robotis_omx" / "scene" / "omx_table_layout.usda"
+    stage.parent.mkdir(parents=True)
+    stage.write_text("#usda 1.0\n", encoding="utf-8")
+    bridge._sessions["teleop-active"] = {
+        "session_id": "teleop-active",
+        "workflow": "teleoperate",
+        "status": "RUNNING",
+        "returncode": None,
+    }
+
+    payload = {
+        "mode": "live",
+        "dataset_path": str(dataset),
+        "isaac_lab_path": str(isaac_lab),
+        "stage_path": str(stage),
+        "enable_replicator": False,
+        "enable_mimic": True,
+        "mimic_trials": 4,
+        "dry_run": False,
+        "require_physics_pass": False,
+        "require_articulation_pass": False,
+    }
+    assert bridge.isaac_lab_build_synthetic(payload)["ok"] is True
+    assert bridge.isaac_lab_export_hdf5(payload)["ok"] is True
+
+    def fail_popen(command, **kwargs):
+        raise AssertionError(f"mimic runner must not launch during live control: {command}")
+
+    monkeypatch.setattr(bridge, "_project_lerobot_pids", lambda workflow: [])
+    monkeypatch.setattr(subprocess, "Popen", fail_popen)
+
+    result = bridge.isaac_lab_run_mimic(payload)
+
+    assert result["ok"] is False
+    assert result["status"] == "BLOCKED"
+    assert result["job"]["status"] == "BLOCKED"
+    assert result["mimic"]["runner"]["status"] == "blocked"
+    assert result["mimic"]["runner"]["blocker"] == "ISAAC_LAB_RUNNER_LIVE_SESSION_ACTIVE"
+    assert result["mimic"]["runner"]["active_sessions"][0]["workflow"] == "teleoperate"
+    assert result["error"]["code"] == "ISAAC_LAB_RUNNER_LIVE_SESSION_ACTIVE"
+
+
+def test_live_isaac_lab_mimic_runner_launches_file_backed_job(tmp_path: Path, monkeypatch) -> None:
+    from scripts.lerobot_synthetic_e2e_smoke import build_fixture_recording_dataset
+
+    bridge = _bridge(tmp_path)
+    dataset = tmp_path / "hf_datasets" / "jin" / "mimic-runner-live-launch"
+    build_fixture_recording_dataset(dataset, episodes=1, episode_s=1, fps=2)
+    isaac_lab = tmp_path / "IsaacLab"
+    mimic_script = isaac_lab / "scripts" / "imitation_learning" / "isaaclab_mimic" / "generate_dataset.py"
+    mimic_script.parent.mkdir(parents=True)
+    mimic_script.write_text("print('fake mimic')\n", encoding="utf-8")
+    isaac_python = tmp_path / "isaac-sim" / "python.sh"
+    isaac_python.parent.mkdir(parents=True)
+    isaac_python.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    stage = tmp_path / "sim" / "robotis_omx" / "scene" / "omx_table_layout.usda"
+    stage.parent.mkdir(parents=True)
+    stage.write_text("#usda 1.0\n", encoding="utf-8")
+    launched: list[list[str]] = []
+    processes: list[Any] = []
+
+    class FakePopen:
+        pid = 24680
+        returncode = None
+
+        def __init__(self, command, **kwargs):
+            launched.append(list(command))
+            processes.append(self)
+            self.kwargs = kwargs
+            self.terminated = False
+            self.killed = False
+
+        def poll(self):
+            return self.returncode
+
+        def terminate(self):
+            self.terminated = True
+            self.returncode = -15
+
+        def kill(self):
+            self.killed = True
+            self.returncode = -9
+
+    payload = {
+        "mode": "live",
+        "dataset_path": str(dataset),
+        "isaac_lab_path": str(isaac_lab),
+        "isaac_sim_python": str(isaac_python),
+        "stage_path": str(stage),
+        "enable_replicator": False,
+        "enable_mimic": True,
+        "mimic_trials": 4,
+        "mimic_num_envs": 2,
+        "dry_run": False,
+        "require_physics_pass": False,
+        "require_articulation_pass": False,
+    }
+    assert bridge.isaac_lab_build_synthetic(payload)["ok"] is True
+    assert bridge.isaac_lab_export_hdf5(payload)["ok"] is True
+    monkeypatch.setattr(bridge, "_project_lerobot_pids", lambda workflow: [])
+    monkeypatch.setattr(subprocess, "Popen", FakePopen)
+    monkeypatch.setattr(os, "getpgid", lambda pid: os.getpgrp())
+
+    result = bridge.isaac_lab_run_mimic(payload)
+
+    assert result["ok"] is True
+    assert result["status"] == "RUNNING"
+    assert result["job"]["status"] == "RUNNING"
+    assert result["job"]["pid"] == 24680
+    assert launched
+    assert launched[0][0] == str(isaac_python)
+    assert launched[0][1] == str(mimic_script)
+    assert "--trials" in launched[0]
+    assert launched[0][launched[0].index("--trials") + 1] == "4"
+    assert "--num-envs" in launched[0]
+    assert launched[0][launched[0].index("--num-envs") + 1] == "2"
+    job_manifest = Path(result["job"]["job_manifest_path"])
+    assert job_manifest.is_file()
+    persisted = json.loads(job_manifest.read_text(encoding="utf-8"))
+    assert persisted["status"] == "RUNNING"
+    assert persisted["pid"] == 24680
+
+    status = bridge.isaac_lab_mimic_status({"job_id": result["job_id"]})
+    assert status["status"] == "RUNNING"
+
+    stopped = bridge.isaac_lab_mimic_stop({"job_id": result["job_id"]})
+    assert stopped["status"] == "STOPPED"
+    assert stopped["stop_requested"] is True
+    assert processes[0].terminated is True
+
+
+def test_live_isaac_lab_mimic_runner_status_refreshes_completed_process(tmp_path: Path, monkeypatch) -> None:
+    from scripts.lerobot_synthetic_e2e_smoke import build_fixture_recording_dataset
+
+    bridge = _bridge(tmp_path)
+    dataset = tmp_path / "hf_datasets" / "jin" / "mimic-runner-live-complete"
+    build_fixture_recording_dataset(dataset, episodes=1, episode_s=1, fps=2)
+    isaac_lab = tmp_path / "IsaacLab"
+    mimic_script = isaac_lab / "scripts" / "imitation_learning" / "isaaclab_mimic" / "generate_dataset.py"
+    mimic_script.parent.mkdir(parents=True)
+    mimic_script.write_text("print('fake mimic')\n", encoding="utf-8")
+    isaac_python = tmp_path / "isaac-sim" / "python.sh"
+    isaac_python.parent.mkdir(parents=True)
+    isaac_python.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    stage = tmp_path / "sim" / "robotis_omx" / "scene" / "omx_table_layout.usda"
+    stage.parent.mkdir(parents=True)
+    stage.write_text("#usda 1.0\n", encoding="utf-8")
+    processes: list[Any] = []
+
+    class FakePopen:
+        pid = 24681
+
+        def __init__(self, command, **kwargs):
+            self.returncode = None
+            processes.append(self)
+
+        def poll(self):
+            return self.returncode
+
+        def terminate(self):
+            self.returncode = -15
+
+        def kill(self):
+            self.returncode = -9
+
+    payload = {
+        "mode": "live",
+        "dataset_path": str(dataset),
+        "isaac_lab_path": str(isaac_lab),
+        "isaac_sim_python": str(isaac_python),
+        "stage_path": str(stage),
+        "enable_replicator": False,
+        "enable_mimic": True,
+        "mimic_trials": 2,
+        "dry_run": False,
+        "require_physics_pass": False,
+        "require_articulation_pass": False,
+    }
+    assert bridge.isaac_lab_build_synthetic(payload)["ok"] is True
+    assert bridge.isaac_lab_export_hdf5(payload)["ok"] is True
+    monkeypatch.setattr(bridge, "_project_lerobot_pids", lambda workflow: [])
+    monkeypatch.setattr(subprocess, "Popen", FakePopen)
+
+    result = bridge.isaac_lab_run_mimic(payload)
+    processes[0].returncode = 0
+
+    status = bridge.isaac_lab_mimic_status({"job_id": result["job_id"]})
+
+    assert status["status"] == "COMPLETED"
+    assert status["job"]["returncode"] == 0
+    assert status["progress"]["percent"] == 100.0
+    persisted = json.loads(Path(status["job"]["job_manifest_path"]).read_text(encoding="utf-8"))
+    assert persisted["status"] == "COMPLETED"
+    assert persisted["returncode"] == 0
+
+
+def test_live_isaac_lab_run_replicator_worker_blocks_when_lerobot_process_is_active(tmp_path: Path, monkeypatch) -> None:
+    from scripts.lerobot_synthetic_e2e_smoke import build_fixture_recording_dataset
+
+    bridge = _bridge(tmp_path)
+    dataset = tmp_path / "hf_datasets" / "jin" / "replicator-worker-live-process-block"
+    build_fixture_recording_dataset(dataset, episodes=1, episode_s=1, fps=2)
+    isaac_lab = tmp_path / "IsaacLab"
+    isaac_lab.mkdir()
+    stage = tmp_path / "sim" / "robotis_omx" / "scene" / "omx_table_layout.usda"
+    stage.parent.mkdir(parents=True)
+    stage.write_text("#usda 1.0\n", encoding="utf-8")
+    isaac_python = tmp_path / "isaac-sim" / "python.sh"
+    isaac_python.parent.mkdir(parents=True)
+    isaac_python.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    monkeypatch.setattr(
+        bridge,
+        "_project_lerobot_pids",
+        lambda workflow: [4321] if workflow == "teleoperate" else [],
+    )
+
+    def fail_run(command, **kwargs):
+        raise AssertionError(f"replicator worker must not run during live process: {command}")
+
+    monkeypatch.setattr(subprocess, "run", fail_run)
+
+    result = bridge.isaac_lab_run_replicator_worker(
+        {
+            "mode": "live",
+            "dataset_path": str(dataset),
+            "isaac_lab_path": str(isaac_lab),
+            "isaac_sim_python": str(isaac_python),
+            "stage_path": str(stage),
+            "enable_replicator": True,
+            "enable_hdf5_export": False,
+            "enable_mimic": False,
+            "enable_rl_teacher": False,
+            "require_physics_pass": False,
+            "require_articulation_pass": False,
+            "cameras": ["top"],
+            "attempts_per_source_frame": 1,
+        }
+    )
+
+    assert result["ok"] is False
+    assert result["worker"]["blocker"] == "REPLICATOR_LIVE_SESSION_ACTIVE"
+    assert result["worker"]["active_sessions"] == [
+        {"session_id": "", "workflow": "teleoperate", "status": "PROCESS_ACTIVE", "pid": 4321}
+    ]
 
 
 def test_train_start_blocks_when_isaac_augmentation_has_no_valid_variants(tmp_path: Path) -> None:
@@ -5014,6 +5867,47 @@ def test_lerobot_cleanup_marker_matching_does_not_match_gui_dom_ids() -> None:
         markers,
     )
     assert LeRobotBridge._cmdline_matches_lerobot_marker(["python", "eval.py", "--rtc.enabled=true"], markers)
+
+
+def test_project_lerobot_pids_matches_isaac_mirror_runtime_wrapper_by_workflow(tmp_path: Path, monkeypatch) -> None:
+    from device_bridges import lerobot_bridge as bridge_module
+
+    bridge = _bridge(tmp_path)
+    pid = 99123
+    wrapper = tmp_path / "scripts" / "lerobot_isaac_mirror_runtime_wrapper.py"
+    raw_cmdline = b"\0".join(
+        [
+            b"python",
+            str(wrapper).encode("utf-8"),
+            b"teleoperate",
+            b"--fps=15",
+        ]
+    ) + b"\0"
+    original_listdir = bridge_module.os.listdir
+    original_readlink = bridge_module.os.readlink
+    original_read_bytes = Path.read_bytes
+
+    def fake_listdir(path):
+        if Path(path) == Path("/proc"):
+            return [str(pid)]
+        return original_listdir(path)
+
+    def fake_readlink(path):
+        if Path(path) == Path(f"/proc/{pid}/cwd"):
+            return str(tmp_path)
+        return original_readlink(path)
+
+    def fake_read_bytes(path: Path) -> bytes:
+        if path == Path(f"/proc/{pid}/cmdline"):
+            return raw_cmdline
+        return original_read_bytes(path)
+
+    monkeypatch.setattr(bridge_module.os, "listdir", fake_listdir)
+    monkeypatch.setattr(bridge_module.os, "readlink", fake_readlink)
+    monkeypatch.setattr(Path, "read_bytes", fake_read_bytes)
+
+    assert bridge._project_lerobot_pids("teleoperate") == [pid]  # noqa: SLF001
+    assert bridge._project_lerobot_pids("record") == []  # noqa: SLF001
 
 
 def test_lerobot_display_viewer_marker_matching_targets_teleop_rerun_only() -> None:
