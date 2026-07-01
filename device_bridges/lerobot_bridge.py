@@ -84,6 +84,7 @@ LEROBOT_DEFAULT_DEPTH_SCALE_M_PER_UNIT = 0.001
 LEROBOT_D405_DEPTH_SCALE_M_PER_UNIT = 0.0001
 LEROBOT_DEFAULT_DEPTH_CLIP_MIN_MM = 0.0
 LEROBOT_DEFAULT_DEPTH_CLIP_MAX_MM = 2000.0
+LEROBOT_DEFAULT_CAMERA_DEPTH_CLIP_MM = {"wrist": {"min_mm": 50.0, "max_mm": 150.0}}
 LEROBOT_REALSENSE_MODEL_NAMES = {
     "405": "Intel(R) RealSense(TM) Depth Camera 405",
     "455": "Intel(R) RealSense(TM) Depth Camera 455",
@@ -402,6 +403,9 @@ class LeRobotBridgeConfig:
     realsense_depth_scale_m_per_unit: float = LEROBOT_DEFAULT_DEPTH_SCALE_M_PER_UNIT
     realsense_depth_clip_min_mm: float = LEROBOT_DEFAULT_DEPTH_CLIP_MIN_MM
     realsense_depth_clip_max_mm: float = LEROBOT_DEFAULT_DEPTH_CLIP_MAX_MM
+    realsense_camera_depth_clip_mm: dict[str, dict[str, float]] = field(
+        default_factory=lambda: copy.deepcopy(LEROBOT_DEFAULT_CAMERA_DEPTH_CLIP_MM)
+    )
     default_observation_pipeline_id: str = LEROBOT_DEFAULT_OBSERVATION_PIPELINE_ID
     tts_engine: str = "piper"
     tts_rate: int = -35
@@ -480,6 +484,9 @@ class LeRobotBridgeConfig:
                 root.get("realsense_depth_clip_max_mm", LEROBOT_DEFAULT_DEPTH_CLIP_MAX_MM),
                 LEROBOT_DEFAULT_DEPTH_CLIP_MAX_MM,
                 minimum=1.0,
+            ),
+            realsense_camera_depth_clip_mm=_normalize_camera_depth_clip_map(
+                root.get("realsense_camera_depth_clip_mm", LEROBOT_DEFAULT_CAMERA_DEPTH_CLIP_MM)
             ),
             default_observation_pipeline_id=_normalize_observation_pipeline_id(
                 root.get("default_observation_pipeline_id", LEROBOT_DEFAULT_OBSERVATION_PIPELINE_ID)
@@ -2411,10 +2418,7 @@ class LeRobotBridge:
         root = manifest_path.parent
         if not camera_keys and root.is_dir():
             camera_keys = sorted(path.name for path in root.iterdir() if path.is_dir())
-        camera_counts = {
-            camera_key: len(sorted((root / camera_key).glob("frame_*.png")))
-            for camera_key in camera_keys
-        }
+        camera_counts = {camera_key: self._raw_depth_camera_frame_count(root / camera_key) for camera_key in camera_keys}
         return {
             "available": manifest_path.is_file(),
             "manifest_path": str(manifest_path),
@@ -2422,6 +2426,14 @@ class LeRobotBridge:
             "camera_counts": camera_counts,
             "total_frame_count": sum(camera_counts.values()),
         }
+
+    @staticmethod
+    def _raw_depth_camera_frame_count(camera_dir: Path) -> int:
+        if not camera_dir.is_dir():
+            return 0
+        flat_count = len(sorted(camera_dir.glob("frame_*.png")))
+        episode_count = sum(len(sorted(path.glob("frame_*.png"))) for path in camera_dir.glob("episode_*") if path.is_dir())
+        return flat_count + episode_count
 
     def _dataset_isaac_rgbd_health(self, dataset_path: Path) -> dict[str, Any]:
         manifest_paths = sorted((dataset_path / "sidecar" / "isaac_rgbd").glob("**/manifest.jsonl"))
@@ -5773,6 +5785,7 @@ class LeRobotBridge:
                 "depth_scale_m_per_unit": self.config.realsense_depth_scale_m_per_unit,
                 "depth_clip_min_mm": self.config.realsense_depth_clip_min_mm,
                 "depth_clip_max_mm": self.config.realsense_depth_clip_max_mm,
+                "camera_depth_clip_mm": dict(sidecar.get("camera_depth_clip_mm") or {}),
             },
             "isaac_mirror": {
                 "enabled": bool(session.get("isaac_mirror_enabled")),
@@ -6337,6 +6350,7 @@ class LeRobotBridge:
             return {"enabled": False, "root": "", "expected_camera_keys": [], "format": "png16", "pipeline_id": pipeline_id}
         root = Path(self._dataset_path_for(request)).expanduser() / "sidecar" / "depth_raw"
         camera_depth_scales = self._record_raw_depth_camera_scale_map(profile, camera_keys)
+        camera_depth_clips = self._record_raw_depth_camera_clip_map(camera_keys)
         return {
             "enabled": True,
             "root": str(root),
@@ -6348,6 +6362,7 @@ class LeRobotBridge:
             "camera_depth_scale_m_per_unit": camera_depth_scales,
             "depth_clip_min_mm": self.config.realsense_depth_clip_min_mm,
             "depth_clip_max_mm": self.config.realsense_depth_clip_max_mm,
+            "camera_depth_clip_mm": camera_depth_clips,
         }
 
     def _record_raw_depth_camera_scale_map(self, profile: RobotProfile, camera_keys: list[str]) -> dict[str, float]:
@@ -6357,6 +6372,16 @@ class LeRobotBridge:
             identifier = str((camera_device or {}).get("serial_number_or_name") or (camera_device or {}).get("port") or "").strip()
             scales[camera_key] = self._realsense_depth_scale_m_per_unit(camera_key, identifier, camera_device or {})
         return scales
+
+    def _record_raw_depth_camera_clip_map(self, camera_keys: list[str]) -> dict[str, dict[str, float]]:
+        clips: dict[str, dict[str, float]] = {}
+        global_min = float(self.config.realsense_depth_clip_min_mm)
+        global_max = float(self.config.realsense_depth_clip_max_mm)
+        for camera_key in camera_keys:
+            clip_min, clip_max = self._realsense_depth_clip_range_mm(camera_key)
+            if abs(clip_min - global_min) > 1e-9 or abs(clip_max - global_max) > 1e-9:
+                clips[camera_key] = {"min_mm": clip_min, "max_mm": clip_max}
+        return clips
 
     def _record_raw_depth_camera_keys(self, profile: RobotProfile | None, request: LeRobotSessionRequest) -> list[str]:
         if profile is None or not request.camera_enabled:
@@ -6377,7 +6402,7 @@ class LeRobotBridge:
         for camera_key in camera_keys:
             camera_dir = root / camera_key
             try:
-                file_counts[camera_key] = len(list(camera_dir.glob("frame_*.png")))
+                file_counts[camera_key] = LeRobotBridge._raw_depth_camera_frame_count(camera_dir)
             except OSError:
                 file_counts[camera_key] = 0
         missing = [key for key, count in file_counts.items() if count <= 0]
@@ -7391,6 +7416,10 @@ class LeRobotBridge:
                 formatted = self._format_camera_depth_scale_env(camera_scales)
                 if formatted:
                     env["ATR_LEROBOT_CAMERA_DEPTH_SCALE_M_PER_UNIT"] = formatted
+            camera_clips = manifest.get("camera_depth_clip_mm")
+            formatted_clips = self._format_camera_depth_clip_env(camera_clips)
+            if formatted_clips:
+                env["ATR_LEROBOT_CAMERA_DEPTH_CLIP_MM"] = formatted_clips
             for key in ("ATR_LEROBOT_DEPTH_ALIGNED_TO", "ATR_LEROBOT_RAW_DEPTH_FORMAT"):
                 env.pop(key, None)
             aligned_to = str(manifest.get("aligned_to") or "").strip()
@@ -7494,6 +7523,9 @@ class LeRobotBridge:
         formatted = self._format_camera_depth_scale_env(sidecar.get("camera_depth_scale_m_per_unit"))
         if formatted:
             env["ATR_LEROBOT_CAMERA_DEPTH_SCALE_M_PER_UNIT"] = formatted
+        formatted_clips = self._format_camera_depth_clip_env(sidecar.get("camera_depth_clip_mm"))
+        if formatted_clips:
+            env["ATR_LEROBOT_CAMERA_DEPTH_CLIP_MM"] = formatted_clips
         return env
 
     @staticmethod
@@ -7505,6 +7537,15 @@ class LeRobotBridge:
             value = _safe_float(scales.get(camera_key), 0.0, minimum=0.0)
             if value > 0.0:
                 parts.append(f"{camera_key}={value:g}")
+        return ",".join(parts)
+
+    @staticmethod
+    def _format_camera_depth_clip_env(clips: Any) -> str:
+        normalized = _normalize_camera_depth_clip_map(clips, default={})
+        parts: list[str] = []
+        for camera_key in sorted(normalized):
+            clip = normalized[camera_key]
+            parts.append(f"{camera_key}={clip['min_mm']:g}:{clip['max_mm']:g}")
         return ",".join(parts)
 
     def _start_training_monitor(self, session: dict[str, Any], request: LeRobotSessionRequest) -> dict[str, Any]:
@@ -9008,6 +9049,7 @@ print("Updated Pi0.5 quantile stats for " + ", ".join(updated))
         height: int,
         color_format: str,
     ) -> dict[str, Any]:
+        clip_min_mm, clip_max_mm = self._realsense_depth_clip_range_mm(camera_key)
         data = {
             "type": LEROBOT_REALSENSE_TYPE,
             "serial_number_or_name": serial_number_or_name,
@@ -9017,8 +9059,8 @@ print("Updated Pi0.5 quantile stats for " + ", ".join(updated))
             "use_depth": bool(use_depth),
             "align_depth_to_color": bool(self.config.realsense_depth_align_to_color),
             "depth_scale_m_per_unit": self._realsense_depth_scale_m_per_unit(camera_key, serial_number_or_name, camera_device),
-            "depth_clip_min_mm": self.config.realsense_depth_clip_min_mm,
-            "depth_clip_max_mm": self.config.realsense_depth_clip_max_mm,
+            "depth_clip_min_mm": clip_min_mm,
+            "depth_clip_max_mm": clip_max_mm,
             # LeRobot / RealSense D405 needs a real warmup period before
             # consuming frames; disabling warmup makes status=False failures
             # more likely after a previous session.
@@ -9027,6 +9069,14 @@ print("Updated Pi0.5 quantile stats for " + ", ".join(updated))
         if color_format:
             data["color_format"] = color_format
         return data
+
+    def _realsense_depth_clip_range_mm(self, camera_key: str) -> tuple[float, float]:
+        clean_key = str(camera_key or "").strip()
+        camera_clips = self.config.realsense_camera_depth_clip_mm
+        if clean_key and clean_key in camera_clips:
+            clip = camera_clips[clean_key]
+            return float(clip["min_mm"]), float(clip["max_mm"])
+        return float(self.config.realsense_depth_clip_min_mm), float(self.config.realsense_depth_clip_max_mm)
 
     def _uses_in_process_lerobot_wrapper(self, workflow: str, request: LeRobotSessionRequest) -> bool:
         mode = request.runtime_mode or request.mode
@@ -11232,6 +11282,33 @@ def _safe_float(
     if maximum is not None:
         result = min(float(maximum), result)
     return result
+
+
+def _normalize_camera_depth_clip_map(
+    raw: Any, *, default: dict[str, dict[str, float]] | None = None
+) -> dict[str, dict[str, float]]:
+    source = raw if isinstance(raw, dict) else (default or {})
+    normalized: dict[str, dict[str, float]] = {}
+    if not isinstance(source, dict):
+        return normalized
+    for key, value in source.items():
+        camera_key = str(key or "").strip()
+        if not camera_key:
+            continue
+        if isinstance(value, dict):
+            min_value = value.get("min_mm", value.get("min", value.get("clip_min_mm")))
+            max_value = value.get("max_mm", value.get("max", value.get("clip_max_mm")))
+        elif isinstance(value, (list, tuple)) and len(value) >= 2:
+            min_value, max_value = value[0], value[1]
+        elif isinstance(value, str) and ":" in value:
+            min_value, max_value = value.split(":", 1)
+        else:
+            continue
+        clip_min = _safe_float(min_value, LEROBOT_DEFAULT_DEPTH_CLIP_MIN_MM)
+        clip_max = _safe_float(max_value, LEROBOT_DEFAULT_DEPTH_CLIP_MAX_MM, minimum=clip_min + 1e-6)
+        if clip_max > clip_min:
+            normalized[camera_key] = {"min_mm": clip_min, "max_mm": clip_max}
+    return normalized
 
 
 def _resolve_profiles(raw_profiles: dict[str, Any]) -> dict[str, dict[str, Any]]:

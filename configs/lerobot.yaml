@@ -44,6 +44,10 @@ lerobot:
   realsense_depth_scale_m_per_unit: 0.001
   realsense_depth_clip_min_mm: 0.0
   realsense_depth_clip_max_mm: 2000.0
+  realsense_camera_depth_clip_mm:
+    wrist:
+      min_mm: 50.0
+      max_mm: 150.0
   default_observation_pipeline_id: raw_depth_adapter
   tts_engine: piper
   tts_rate: -35

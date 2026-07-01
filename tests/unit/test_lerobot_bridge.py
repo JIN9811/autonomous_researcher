@@ -1410,8 +1410,8 @@ def test_realsense_camera_mode_uses_depth_rgb_for_top_and_wrist_at_default_15fps
         "use_depth": True,
         "align_depth_to_color": True,
         "depth_scale_m_per_unit": 0.0001,
-        "depth_clip_min_mm": 0.0,
-        "depth_clip_max_mm": 2000.0,
+        "depth_clip_min_mm": 50.0,
+        "depth_clip_max_mm": 150.0,
         "warmup_s": 5,
     }
 
@@ -1558,6 +1558,44 @@ def test_dataset_inspect_health_is_ok_for_complete_sidecars(tmp_path: Path) -> N
     assert health["sidecars"]["isaac_rgbd"]["manifest_count"] == 1
     assert health["sidecars"]["isaac_rgbd"]["rendered_count"] == 1
     assert health["sidecars"]["isaac_augmentation"]["valid_variant_count"] == 1
+
+
+def test_dataset_raw_depth_health_counts_episode_scoped_frames(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    dataset = tmp_path / "hf_datasets" / "jin" / "episode_scoped_raw"
+    _write_raw_depth_manifest(dataset)
+    for camera in ("top", "wrist"):
+        camera_dir = dataset / "sidecar" / "depth_raw" / camera / "episode_000000"
+        camera_dir.mkdir(parents=True, exist_ok=True)
+        for index in range(3):
+            Image.fromarray(np.full((8, 8), 420 + index, dtype=np.uint16)).save(camera_dir / f"frame_{index:06d}.png")
+
+    health = bridge._dataset_raw_depth_health(dataset)  # noqa: SLF001
+
+    assert health["camera_counts"] == {"top": 3, "wrist": 3}
+    assert health["total_frame_count"] == 6
+
+
+def test_record_raw_depth_sidecar_status_counts_episode_scoped_frames(tmp_path: Path) -> None:
+    root = tmp_path / "sidecar" / "depth_raw"
+    for camera in ("top", "wrist"):
+        episode_dir = root / camera / "episode_000000"
+        episode_dir.mkdir(parents=True, exist_ok=True)
+        for frame_index in range(2):
+            (episode_dir / f"frame_{frame_index:06d}.png").write_bytes(f"{camera}-{frame_index}".encode("utf-8"))
+
+    status = LeRobotBridge._record_raw_depth_sidecar_status(
+        {
+            "enabled": True,
+            "root": str(root),
+            "expected_camera_keys": ["top", "wrist"],
+            "format": "png16",
+        }
+    )
+
+    assert status["status"] == "ok"
+    assert status["file_counts"] == {"top": 2, "wrist": 2}
+    assert status["missing_camera_keys"] == []
 
 
 def test_dataset_inspect_health_warns_for_missing_optional_sidecars(tmp_path: Path) -> None:
@@ -4052,6 +4090,7 @@ def test_live_record_enables_raw_depth_sidecar_env_for_realsense_depth(tmp_path:
     assert captured["env_overrides"]["ATR_LEROBOT_DEPTH_ALIGNED_TO"] == "color"
     assert captured["env_overrides"]["ATR_LEROBOT_DEPTH_SCALE_M_PER_UNIT"] == "0.001"
     assert captured["env_overrides"]["ATR_LEROBOT_CAMERA_DEPTH_SCALE_M_PER_UNIT"] == "top=0.001,wrist=0.0001"
+    assert captured["env_overrides"]["ATR_LEROBOT_CAMERA_DEPTH_CLIP_MM"] == "wrist=50:150"
     assert captured["env_overrides"]["ATR_LEROBOT_DEPTH_CLIP_MIN_MM"] == "0.0"
     assert captured["env_overrides"]["ATR_LEROBOT_DEPTH_CLIP_MAX_MM"] == "2000.0"
 
@@ -4579,6 +4618,7 @@ def test_train_raw_depth_adapter_env_points_to_dataset_sidecar(tmp_path: Path) -
                 "depth_encoding": "png16",
                 "depth_scale_m_per_unit": 0.001,
                 "camera_depth_scale_m_per_unit": {"top": 0.001, "wrist": 0.0001},
+                "camera_depth_clip_mm": {"wrist": {"min_mm": 50.0, "max_mm": 150.0}},
                 "depth_clip_min_mm": 0.0,
                 "depth_clip_max_mm": 2000.0,
             }
@@ -4605,6 +4645,7 @@ def test_train_raw_depth_adapter_env_points_to_dataset_sidecar(tmp_path: Path) -
     assert env["ATR_LEROBOT_RAW_DEPTH_CAMERA_KEYS"] == "top,wrist"
     assert env["ATR_LEROBOT_DEPTH_SCALE_M_PER_UNIT"] == "0.001"
     assert env["ATR_LEROBOT_CAMERA_DEPTH_SCALE_M_PER_UNIT"] == "top=0.001,wrist=0.0001"
+    assert env["ATR_LEROBOT_CAMERA_DEPTH_CLIP_MM"] == "wrist=50:150"
     assert env["ATR_LEROBOT_DEPTH_CLIP_MIN_MM"] == "0.0"
     assert env["ATR_LEROBOT_DEPTH_CLIP_MAX_MM"] == "2000.0"
 

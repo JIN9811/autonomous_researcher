@@ -115,6 +115,42 @@ def test_isaac_mirror_publish_tolerates_control_loop_jitter(monkeypatch) -> None
     assert publisher.should_publish() is True
 
 
+def test_isaac_mirror_record_collection_publishes_every_frame(tmp_path: Path, monkeypatch) -> None:
+    record_path = tmp_path / "mirror.jsonl"
+    monkeypatch.setenv("ATR_ISAAC_MIRROR_ENABLED", "1")
+    monkeypatch.setenv("ATR_ISAAC_MIRROR_RECORD_PATH", str(record_path))
+    monkeypatch.setenv("ATR_ISAAC_MIRROR_SAMPLE_HZ", "1")
+    monkeypatch.setenv("ATR_ISAAC_MIRROR_ASYNC_ENABLED", "0")
+
+    now = [100.0]
+    monkeypatch.setattr(runtime_wrapper.time, "monotonic", lambda: now[0])
+    publisher = IsaacMirrorPublisher()
+    monkeypatch.setattr(publisher, "_post", lambda payload: {"ok": True, "status_code": 200})
+
+    with publisher.collection_scope(True, reason="record_episode"):
+        for idx in range(3):
+            publisher.maybe_publish({"shoulder_pan.pos": float(idx)})
+
+    rows = [json.loads(line) for line in record_path.read_text(encoding="utf-8").splitlines()]
+    assert [row["sample_index"] for row in rows] == [1, 2, 3]
+    assert [row["joint_state"][0]["position_deg"] for row in rows] == [0.0, 1.0, 2.0]
+
+
+def test_isaac_mirror_record_collection_queue_preserves_pending_jobs(monkeypatch) -> None:
+    monkeypatch.setenv("ATR_ISAAC_MIRROR_ENABLED", "1")
+    publisher = IsaacMirrorPublisher()
+    publisher._worker_started = True
+    publisher._jobs = runtime_wrapper.queue.Queue(maxsize=2)
+
+    publisher._enqueue_job({"record_collection_active": True, "payload": {"sample_index": 1}})
+    publisher._enqueue_job({"record_collection_active": True, "payload": {"sample_index": 2}})
+
+    first = publisher._jobs.get_nowait()
+    second = publisher._jobs.get_nowait()
+    assert first["payload"]["sample_index"] == 1
+    assert second["payload"]["sample_index"] == 2
+
+
 def test_isaac_mirror_publisher_can_pause_sidecar_collection_while_posting_live_state(tmp_path: Path, monkeypatch) -> None:
     record_path = tmp_path / "mirror.jsonl"
     monkeypatch.setenv("ATR_ISAAC_MIRROR_ENABLED", "1")
@@ -135,6 +171,24 @@ def test_isaac_mirror_publisher_can_pause_sidecar_collection_while_posting_live_
 
     assert publisher.flush(timeout_s=1.0) is True
     assert len(posted) == 1
+    assert not record_path.exists()
+
+
+def test_isaac_mirror_publisher_can_suppress_active_cam_posts(tmp_path: Path, monkeypatch) -> None:
+    record_path = tmp_path / "mirror.jsonl"
+    monkeypatch.setenv("ATR_ISAAC_MIRROR_ENABLED", "1")
+    monkeypatch.setenv("ATR_ISAAC_MIRROR_RECORD_PATH", str(record_path))
+    monkeypatch.setenv("ATR_ISAAC_MIRROR_SAMPLE_HZ", "999")
+
+    publisher = IsaacMirrorPublisher()
+    posted: list[dict[str, object]] = []
+    monkeypatch.setattr(publisher, "_post", lambda payload: posted.append(payload) or {"ok": True, "status_code": 200})
+
+    with publisher.publish_scope(False, reason="active_robot_cam"):
+        publisher.publish_action({"shoulder_pan.pos": 42.0}, source="active_robot_cam")
+
+    assert publisher.flush(timeout_s=1.0) is True
+    assert posted == []
     assert not record_path.exists()
 
 
@@ -1708,6 +1762,57 @@ def test_omx_send_action_mirrors_raw_leader_action_while_active_cam_holds_robot(
     assert publisher.published == [{"shoulder_pan.pos": 9.0, "shoulder_lift.pos": -67.0}]
 
 
+def test_omx_send_action_does_not_mirror_active_cam_motion(monkeypatch) -> None:
+    fake_lerobot = types.ModuleType("lerobot")
+    fake_lerobot.__path__ = []
+    fake_robots = types.ModuleType("lerobot.robots")
+    fake_robots.__path__ = []
+    fake_omx_pkg = types.ModuleType("lerobot.robots.omx_follower")
+    fake_omx_pkg.__path__ = []
+    fake_omx_module = types.ModuleType("lerobot.robots.omx_follower.omx_follower")
+    sent: list[dict[str, float]] = []
+
+    class OmxFollower:
+        def send_action(self, action):
+            sent.append(dict(action))
+            return dict(action)
+
+    fake_omx_module.OmxFollower = OmxFollower
+    monkeypatch.setitem(sys.modules, "lerobot", fake_lerobot)
+    monkeypatch.setitem(sys.modules, "lerobot.robots", fake_robots)
+    monkeypatch.setitem(sys.modules, "lerobot.robots.omx_follower", fake_omx_pkg)
+    monkeypatch.setitem(sys.modules, "lerobot.robots.omx_follower.omx_follower", fake_omx_module)
+
+    class FakeActiveRobotCam:
+        enabled = True
+        _active = True
+
+    class FakePublisher:
+        enabled = True
+
+        def __init__(self) -> None:
+            self.published: list[dict[str, float]] = []
+
+        def should_publish(self) -> bool:
+            return True
+
+        def action_from_follower(self, follower, sent_action, *, leader_action=None):
+            return dict(leader_action or sent_action), "active_cam", "", {}
+
+        def publish_action(self, action, *, source, source_error="", source_selection=None) -> None:
+            self.published.append(dict(action))
+
+    publisher = FakePublisher()
+    patch_omx_send_action(publisher, FakeActiveRobotCam())  # type: ignore[arg-type]
+
+    follower = OmxFollower()
+    returned = follower.send_action({"shoulder_pan.pos": 42.0})
+
+    assert returned == {"shoulder_pan.pos": 42.0}
+    assert sent == [{"shoulder_pan.pos": 42.0}]
+    assert publisher.published == []
+
+
 def test_omx_send_action_limits_joint_delta_when_returning_to_teleop(tmp_path: Path, monkeypatch) -> None:
     fake_lerobot = types.ModuleType("lerobot")
     fake_lerobot.__path__ = []
@@ -2600,7 +2705,7 @@ def test_record_loop_patch_pauses_isaac_collection_during_reset_loop(tmp_path: P
     assert result == "reset"
     assert publisher.flush(timeout_s=1.0) is True
     assert events == ["reset"]
-    assert len(posted) == 1
+    assert posted == []
     assert not record_path.exists()
 
 
@@ -2615,7 +2720,8 @@ def test_record_loop_patch_pauses_isaac_collection_during_active_cam_preflight(t
     events: list[str] = []
 
     publisher = IsaacMirrorPublisher()
-    monkeypatch.setattr(publisher, "_post", lambda payload: {"ok": True, "status_code": 200})
+    posted: list[dict[str, object]] = []
+    monkeypatch.setattr(publisher, "_post", lambda payload: posted.append(payload) or {"ok": True, "status_code": 200})
 
     class FakeRobot:
         def send_action(self, action):
@@ -2660,6 +2766,7 @@ def test_record_loop_patch_pauses_isaac_collection_during_active_cam_preflight(t
     assert publisher.flush(timeout_s=1.0) is True
     rows = [json.loads(line) for line in record_path.read_text(encoding="utf-8").splitlines()]
     assert [row["joint_state"][0]["position_deg"] for row in rows] == [9.0]
+    assert [payload["joint_state"][0]["position_deg"] for payload in posted] == [9.0]
     assert events == ["capture:record_start", "send:42.0", "wait:record_start", "record"]
 
 

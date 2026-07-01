@@ -127,15 +127,20 @@ class IsaacMirrorPublisher:
         self._last_post_monotonic = 0.0
         self._sample_count = 0
         self._async_enabled = _env_bool("ATR_ISAAC_MIRROR_ASYNC_ENABLED", True)
+        self.record_frame_sync_enabled = _env_bool("ATR_ISAAC_MIRROR_RECORD_FRAME_SYNC_ENABLED", True)
         self._jobs: queue.Queue[dict[str, Any]] = queue.Queue(maxsize=1)
         self._worker_started = False
         self._worker_active = False
         self._worker_lock = threading.Lock()
         self._collection_enabled = True
+        self._record_collection_active = False
+        self._publish_enabled = True
 
     def should_publish(self) -> bool:
-        if not self.enabled:
+        if not self.enabled or not self._publish_enabled:
             return False
+        if self.record_frame_sync_enabled and self._record_collection_active:
+            return True
         now = time.monotonic()
         if self._last_post_monotonic and now - self._last_post_monotonic < self.period_s * self.min_period_ratio:
             return False
@@ -236,6 +241,8 @@ class IsaacMirrorPublisher:
         source_error: str = "",
         source_selection: dict[str, Any] | None = None,
     ) -> None:
+        if not self.enabled or not self._publish_enabled:
+            return
         joint_state = action_to_joint_state(action, calibration=self.calibration)
         if not joint_state:
             return
@@ -272,6 +279,7 @@ class IsaacMirrorPublisher:
             "post_started": post_started,
             "render_queue": render_queue,
             "collection_enabled": collection_enabled,
+            "record_collection_active": self._record_collection_active,
         }
         if self._async_enabled:
             self._enqueue_job(job)
@@ -283,13 +291,27 @@ class IsaacMirrorPublisher:
         return bool(self._collection_enabled)
 
     @contextmanager
+    def publish_scope(self, enabled: bool, *, reason: str = "") -> Iterator[None]:
+        previous = self._publish_enabled
+        self._publish_enabled = bool(enabled)
+        try:
+            yield
+        finally:
+            self._publish_enabled = previous
+
+    @contextmanager
     def collection_scope(self, enabled: bool, *, reason: str = "") -> Iterator[None]:
         previous = self._collection_enabled
+        previous_record = self._record_collection_active
         self._collection_enabled = bool(enabled)
+        self._record_collection_active = bool(
+            enabled and self.record_frame_sync_enabled and str(reason or "") == "record_episode"
+        )
         try:
             yield
         finally:
             self._collection_enabled = previous
+            self._record_collection_active = previous_record
 
     def reset_collection_frame_context(self) -> None:
         self.render_context.reset_frame_context()
@@ -363,6 +385,9 @@ class IsaacMirrorPublisher:
 
     def _enqueue_job(self, job: dict[str, Any]) -> None:
         self._ensure_worker()
+        if bool(job.get("record_collection_active")):
+            self._jobs.put(job)
+            return
         try:
             self._jobs.put_nowait(job)
             return
@@ -1889,15 +1914,7 @@ def patch_omx_send_action(publisher: IsaacMirrorPublisher, active_robot_cam: Act
 
     def mirrored_send_action(self, action):  # type: ignore[no-untyped-def]
         if active_robot_cam is not None and bool(getattr(active_robot_cam, "_active", False)):
-            sent_action = original_send_action(self, action)
-            if publisher.should_publish():
-                mirror_action, source, source_error, source_selection = publisher.action_from_follower(
-                    self,
-                    sent_action,
-                    leader_action=dict(action),
-                )
-                publisher.publish_action(mirror_action, source=source, source_error=source_error, source_selection=source_selection)
-            return sent_action
+            return original_send_action(self, action)
         leader_action_for_mirror = dict(action)
         request_reason = active_robot_cam.consume_capture_request_reason() if active_robot_cam is not None else ""
         if active_robot_cam is not None and (request_reason or active_robot_cam.should_run_on_action()):
@@ -2027,6 +2044,11 @@ def patch_record_loop(
             return publisher.collection_scope(enabled, reason=reason)
         return nullcontext()
 
+    def _publish_scope(enabled: bool, *, reason: str) -> Iterator[None]:
+        if publisher is not None and hasattr(publisher, "publish_scope"):
+            return publisher.publish_scope(enabled, reason=reason)
+        return nullcontext()
+
     def _reset_collection_frame_context() -> None:
         if publisher is not None and hasattr(publisher, "reset_collection_frame_context"):
             publisher.reset_collection_frame_context()
@@ -2154,7 +2176,8 @@ def patch_record_loop(
         robot, dataset, events, display_data = _record_loop_context(args, kwargs)
         if dataset is None:
             with _collection_scope(False, reason="reset"):
-                return original_record_loop(*args, **kwargs)
+                with _publish_scope(False, reason="record_reset"):
+                    return original_record_loop(*args, **kwargs)
 
         episode_index = _episode_index_for_dataset(dataset)
         blocking_preflight = bool(active_robot_cam is not None and active_robot_cam.enabled and active_robot_cam.record_start_enabled)
@@ -2165,17 +2188,18 @@ def patch_record_loop(
                     attempt_sidecar.begin_episode(episode_index=episode_index, reason="record_start")
                 with _collection_scope(False, reason="record_start_preflight"):
                     if blocking_preflight:
-                        current_action_reader = getattr(active_robot_cam, "present_action", None)
-                        record_start_action = current_action_reader(robot) if callable(current_action_reader) else {}
-                        _send_recording_rerun_blueprint(display_data=display_data)
-                        _seed_rerun_observation(robot, record_start_action, display_data=display_data)
-                        result = active_robot_cam.capture_once(
-                            robot,
-                            send_action=lambda active_robot, action: active_robot.send_action(action),
-                            current_action=record_start_action,
-                            reason="record_start",
-                            force=True,
-                        )
+                        with _publish_scope(False, reason="active_robot_cam_preflight"):
+                            current_action_reader = getattr(active_robot_cam, "present_action", None)
+                            record_start_action = current_action_reader(robot) if callable(current_action_reader) else {}
+                            _send_recording_rerun_blueprint(display_data=display_data)
+                            _seed_rerun_observation(robot, record_start_action, display_data=display_data)
+                            result = active_robot_cam.capture_once(
+                                robot,
+                                send_action=lambda active_robot, action: active_robot.send_action(action),
+                                current_action=record_start_action,
+                                reason="record_start",
+                                force=True,
+                            )
                         if isinstance(result, dict) and bool(result.get("ok", True)):
                             resume_action = (
                                 result.get("resume_action")
