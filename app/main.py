@@ -1027,6 +1027,9 @@ class LeRobotAPIRequest(BaseModel):
     isaac_rgbd_post_render_auto_on_record_success: bool = True
     isaac_rgbd_post_render_inline: bool = False
     isaac_rgbd_post_render_poll_timeout_s: float = 10.0
+    isaac_rgbd_post_render_overwrite: bool = False
+    isaac_rgbd_post_render_episode_indices: str = ""
+    isaac_rgbd_post_render_execution_mode: str = "headless_preplay_replay"
     record_attempt_overwrite: bool = True
     active_robot_cam_enabled: bool = False
     active_robot_cam_record_start_enabled: bool = True
@@ -1078,6 +1081,10 @@ class LeRobotAPIRequest(BaseModel):
     wandb_base_url: str = ""
     wandb_local_port: int = 8081
     train_extra_args: list[str] = Field(default_factory=list)
+    dataset_include_real_original: bool = True
+    dataset_include_isaac_rgbd: bool = True
+    dataset_include_isaac_augmentation: bool = True
+    dataset_include_isaac_lab_synthetic: bool = True
     dataset_mix_real_original_weight: float = 1.0
     dataset_mix_isaac_rgbd_weight: float = 0.5
     dataset_mix_isaac_augmentation_weight: float = 0.5
@@ -1087,6 +1094,7 @@ class LeRobotAPIRequest(BaseModel):
     dataset_mix_isaac_augmentation_max_samples: int | None = None
     dataset_mix_isaac_lab_synthetic_max_samples: int | None = None
     dataset_mix_seed: int = 0
+    dataset_exclude_flagged_episodes: bool = True
     fidelity_weighting_enabled: bool = True
     fidelity_real_original_weight: float = 1.0
     fidelity_isaac_rgbd_weight: float = 0.5
@@ -1100,8 +1108,9 @@ class LeRobotAPIRequest(BaseModel):
     reset_s: float = 2.0
     num_episodes: int = 1
     continuous_rollout: bool = False
-    rollout_action_clamp: bool = True
+    rollout_action_clamp: bool = False
     rollout_max_relative_target: int = 5
+    rollout_shoulder_lift_backstop: bool = True
     rollout_temporal_ensemble: bool = True
     rollout_temporal_ensemble_coeff: float = 0.01
     rollout_inference_type: str = ""
@@ -1146,6 +1155,8 @@ class LeRobotAPIRequest(BaseModel):
     isaac_data_augmentation_render_domain_strength: float = 1.0
     isaac_data_augmentation_camera_pose_strength: float = 1.0
     isaac_data_augmentation_preview_count: int = 20
+    isaac_data_augmentation_async: bool = False
+    isaac_data_augmentation_job_id: str = ""
     observation: dict[str, object] = Field(default_factory=dict)
     fault: str = ""
     dry_run: bool = True
@@ -13054,6 +13065,13 @@ async def post_lerobot_augment_isaac(req: LeRobotAPIRequest) -> dict[str, object
     return await _publish_lerobot_result(result)
 
 
+@app.post("/api/lerobot/augment/status")
+async def post_lerobot_augment_status(req: LeRobotAPIRequest) -> dict[str, object]:
+    """Return Isaac Sim augmentation job progress."""
+    result = _lerobot_bridge().augment_isaac_status(req.model_dump())
+    return await _publish_lerobot_result(result)
+
+
 @app.post("/api/lerobot/augment/preview")
 async def post_lerobot_augment_preview(req: LeRobotAPIRequest) -> dict[str, object]:
     """Return deterministic side-by-side preview rows for Isaac augmentation variants."""
@@ -13101,6 +13119,74 @@ async def post_lerobot_isaac_lab_export_hdf5(req: IsaacLabSyntheticRequest) -> d
     """Write HDF5 export hook summaries for the latest Isaac Lab synthetic run."""
     result = _lerobot_bridge().isaac_lab_export_hdf5(req.model_dump(mode="json"))
     return await _publish_lerobot_result(result)
+
+
+@app.post("/api/lerobot/isaac-lab/annotate")
+async def post_lerobot_isaac_lab_annotate(req: IsaacLabSyntheticRequest) -> dict[str, object]:
+    """Write the Isaac Lab Mimic annotation command summary."""
+    result = _lerobot_bridge().isaac_lab_annotate(req.model_dump(mode="json"))
+    return await _publish_lerobot_result(result)
+
+
+@app.post("/api/lerobot/isaac-lab/generate-mimic")
+async def post_lerobot_isaac_lab_generate_mimic(req: IsaacLabSyntheticRequest) -> dict[str, object]:
+    """Run the named Isaac Lab Mimic generation step."""
+    result = _lerobot_bridge().isaac_lab_generate_mimic(req.model_dump(mode="json"))
+    return await _publish_lerobot_result(result)
+
+
+@app.post("/api/lerobot/isaac-lab/mimic-rgbd/render-missing")
+async def post_lerobot_isaac_lab_mimic_rgbd_render_missing(req: IsaacLabSyntheticRequest) -> dict[str, object]:
+    """Render the Isaac Lab Mimic RGB-D sidecar without using the recording RGB-D renderer."""
+    result = _lerobot_bridge().isaac_lab_render_mimic_rgbd(req.model_dump(mode="json"))
+    return await _publish_lerobot_result(result)
+
+
+@app.post("/api/lerobot/isaac-lab/train-il")
+async def post_lerobot_isaac_lab_train_il(req: IsaacLabSyntheticRequest) -> dict[str, object]:
+    """Write the Isaac Lab robomimic IL training command summary."""
+    result = _lerobot_bridge().isaac_lab_train_il(req.model_dump(mode="json"))
+    return await _publish_lerobot_result(result)
+
+
+@app.post("/api/lerobot/isaac-lab/eval-il")
+async def post_lerobot_isaac_lab_eval_il(req: IsaacLabSyntheticRequest) -> dict[str, object]:
+    """Write the Isaac Lab robomimic IL evaluation command summary."""
+    result = _lerobot_bridge().isaac_lab_eval_il(req.model_dump(mode="json"))
+    return await _publish_lerobot_result(result)
+
+
+@app.post("/api/lerobot/isaac-lab/run-e2e")
+async def post_lerobot_isaac_lab_run_e2e(req: IsaacLabSyntheticRequest) -> dict[str, object]:
+    """Run the non-actuating Isaac Lab Mimic + IL sidecar sequence."""
+    result = _lerobot_bridge().isaac_lab_run_e2e(req.model_dump(mode="json"))
+    return await _publish_lerobot_result(result)
+
+
+@app.post("/api/lerobot/isaac-lab/domain-mimic/run")
+async def post_lerobot_isaac_lab_domain_mimic_run(req: IsaacLabSyntheticRequest) -> dict[str, object]:
+    """Run the live Domain Randomization + Mimic launcher sequence."""
+    result = _lerobot_bridge().isaac_lab_run_e2e(req.model_dump(mode="json"))
+    return await _publish_lerobot_result(result)
+
+
+@app.post("/api/lerobot/isaac-lab/run-live-e2e-check")
+async def post_lerobot_isaac_lab_run_live_e2e_check(req: IsaacLabSyntheticRequest) -> dict[str, object]:
+    """Launch the live Isaac Lab Mimic + IL 10s x 3 validation runner."""
+    result = _lerobot_bridge().isaac_lab_run_live_e2e_check(req.model_dump(mode="json"))
+    return await _publish_lerobot_result(result)
+
+
+@app.post("/api/lerobot/isaac-lab/live-e2e/status")
+async def post_lerobot_isaac_lab_live_e2e_status(req: IsaacLabSyntheticRequest) -> dict[str, object]:
+    """Return the latest or requested live Isaac Lab E2E validation job."""
+    return _lerobot_bridge().isaac_lab_live_e2e_status(req.model_dump(mode="json"))
+
+
+@app.post("/api/lerobot/isaac-lab/live-e2e/stop")
+async def post_lerobot_isaac_lab_live_e2e_stop(req: IsaacLabSyntheticRequest) -> dict[str, object]:
+    """Stop the latest or requested live Isaac Lab E2E validation job."""
+    return _lerobot_bridge().isaac_lab_live_e2e_stop(req.model_dump(mode="json"))
 
 
 @app.post("/api/lerobot/isaac-lab/run-mimic-smoke")
@@ -13168,6 +13254,12 @@ async def post_lerobot_isaac_lab_status(req: IsaacLabSyntheticRequest) -> dict[s
     return _lerobot_bridge().isaac_lab_status(req.model_dump(mode="json"))
 
 
+@app.post("/api/lerobot/isaac-lab/check-outputs")
+async def post_lerobot_isaac_lab_check_outputs(req: IsaacLabSyntheticRequest) -> dict[str, object]:
+    """Check latest Isaac Lab synthetic artifacts without launching runtimes."""
+    return _lerobot_bridge().isaac_lab_check_outputs(req.model_dump(mode="json"))
+
+
 @app.post("/api/lerobot/isaac-rgbd/render/start")
 async def post_lerobot_isaac_rgbd_render_start(req: LeRobotAPIRequest) -> dict[str, object]:
     """Start or resume post-record Isaac RGB-D rendering for missing frames."""
@@ -13179,6 +13271,12 @@ async def post_lerobot_isaac_rgbd_render_start(req: LeRobotAPIRequest) -> dict[s
 async def post_lerobot_isaac_rgbd_render_status(req: LeRobotAPIRequest) -> dict[str, object]:
     """Return post-record Isaac RGB-D render progress."""
     return _lerobot_bridge().isaac_rgbd_render_status(req.model_dump())
+
+
+@app.post("/api/lerobot/isaac-rgbd/render/stop")
+async def post_lerobot_isaac_rgbd_render_stop(req: LeRobotAPIRequest) -> dict[str, object]:
+    """Request a safe stop for post-record Isaac RGB-D rendering."""
+    return _lerobot_bridge().isaac_rgbd_render_stop(req.model_dump())
 
 
 @app.post("/api/lerobot/visualize/start")
@@ -13438,6 +13536,7 @@ def _manipulation_profile_from_request(req: ManipulationAgentBridgeRequest) -> d
         "continuous_rollout": req.continuous_rollout,
         "rollout_action_clamp": req.rollout_action_clamp,
         "rollout_max_relative_target": req.rollout_max_relative_target,
+        "rollout_shoulder_lift_backstop": req.rollout_shoulder_lift_backstop,
         "rollout_temporal_ensemble": req.rollout_temporal_ensemble,
         "rollout_temporal_ensemble_coeff": req.rollout_temporal_ensemble_coeff,
         "rollout_inference_type": req.rollout_inference_type,
@@ -13489,6 +13588,7 @@ def _manipulation_spec_from_request(req: ManipulationAgentBridgeRequest) -> dict
         "continuous_rollout": profile.get("continuous_rollout"),
         "rollout_action_clamp": profile.get("rollout_action_clamp"),
         "rollout_max_relative_target": profile.get("rollout_max_relative_target"),
+        "rollout_shoulder_lift_backstop": profile.get("rollout_shoulder_lift_backstop"),
         "rollout_temporal_ensemble": profile.get("rollout_temporal_ensemble"),
         "rollout_temporal_ensemble_coeff": profile.get("rollout_temporal_ensemble_coeff"),
         "rollout_inference_type": profile.get("rollout_inference_type"),

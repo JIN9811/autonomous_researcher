@@ -126,6 +126,12 @@ def test_manipulation_profile_accepts_smolvla_policy_type() -> None:
     assert profile["rollout_inference_type"] == "sync"
 
 
+def test_manipulation_profile_defaults_action_clamp_off() -> None:
+    profile = normalize_manipulation_agent_profile({})
+
+    assert profile["rollout_action_clamp"] is False
+
+
 @pytest.mark.asyncio
 async def test_manipulation_agent_calls_lerobot_rollout(tmp_path: Path, monkeypatch: Any) -> None:
     _isolate_manipulation_profile(tmp_path, monkeypatch)
@@ -141,7 +147,7 @@ async def test_manipulation_agent_calls_lerobot_rollout(tmp_path: Path, monkeypa
     assert "--dataset.episode_time_s=86400.0" in result.data["manipulation"]["command_preview"]
     assert "--policy.temporal_ensemble_coeff=0.01" in result.data["manipulation"]["command_preview"]
     assert "--policy.n_action_steps=1" in result.data["manipulation"]["command_preview"]
-    assert "--robot.max_relative_target=5" in result.data["manipulation"]["command_preview"]
+    assert all(not item.startswith("--robot.max_relative_target=") for item in result.data["manipulation"]["command_preview"])
     assert result.data["sarm"]["stage_name"] == "post_place_verify"
     assert result.data["sarm"]["failure_precursor"] >= 0
     assert result.data["manipulation_report"]["schema"] == "manipulation_report.v1"

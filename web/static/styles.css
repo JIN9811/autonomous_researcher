@@ -36,6 +36,9 @@ Modification guide:
   --idle: #6d7f9f;
   --radius: 22px;
   --shadow: 0 24px 64px rgba(28, 53, 112, 0.12);
+  --lerobot-page-max-width: 1500px;
+  --lerobot-lab-launcher-action-min: 170px;
+  --lerobot-lab-episode-input-width: 15ch;
 }
 
 * {
@@ -56,7 +59,7 @@ body {
 .page {
   position: relative;
   z-index: 2;
-  max-width: 1500px;
+  max-width: var(--lerobot-page-max-width);
   margin: 0 auto;
   padding: 24px;
   display: grid;
@@ -2537,6 +2540,59 @@ textarea {
   background: #fff;
 }
 
+.lerobot-tab-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
+}
+
+.lerobot-tab-bar .btn.active {
+  border-color: rgba(20, 54, 179, 0.36);
+  background: rgba(20, 54, 179, 0.1);
+  color: var(--primary);
+}
+
+.lerobot-tab-panel {
+  display: none;
+  scroll-margin-top: 86px;
+}
+
+.lerobot-tab-panel.active {
+  display: block;
+}
+
+.lerobot-lab-launcher {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  align-items: stretch;
+  margin: 12px 0;
+}
+
+.lerobot-lab-launcher .btn {
+  align-self: center;
+  white-space: nowrap;
+}
+
+.isaac-lab-launcher-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  justify-content: flex-start;
+  width: 100%;
+}
+
+.isaac-lab-launcher-actions .btn {
+  min-width: var(--lerobot-lab-launcher-action-min);
+}
+
+.isaac-lab-launcher-actions .checkbox-line {
+  margin: 0;
+  white-space: nowrap;
+}
+
 .lerobot-control-grid {
   grid-template-columns: repeat(4, minmax(170px, 1fr));
 }
@@ -2680,6 +2736,46 @@ textarea {
   margin-top: 10px;
 }
 
+.isaac-lab-basic-settings {
+  border-color: rgba(20, 54, 179, 0.22);
+  background: rgba(241, 246, 255, 0.82);
+}
+
+.isaac-lab-basic-layout {
+  display: grid;
+  gap: 12px;
+}
+
+.isaac-lab-basic-actions-panel {
+  border-color: rgba(20, 54, 179, 0.2);
+  background: rgba(248, 251, 255, 0.9);
+}
+
+.isaac-lab-basic-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding-top: 2px;
+}
+
+.isaac-lab-advanced-settings {
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.isaac-lab-advanced-actions {
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.lerobot-section-subtitle {
+  margin: 14px 0 8px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
 .lerobot-panel-summary {
   cursor: pointer;
   list-style: none;
@@ -2795,6 +2891,17 @@ textarea {
   flex-wrap: wrap;
   gap: 12px;
   margin: 10px 0 0;
+}
+
+.lerobot-inline-options .lerobot-episode-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.lerobot-inline-options .lerobot-episode-option input {
+  width: var(--lerobot-lab-episode-input-width);
+  min-width: 9ch;
 }
 
 .lerobot-device-grid {
@@ -2980,6 +3087,41 @@ textarea {
   font-size: 0.76rem;
 }
 
+.lerobot-warning-strip {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid rgba(217, 140, 18, 0.28);
+  border-radius: 8px;
+  background: rgba(255, 247, 224, 0.86);
+  color: #7a4d00;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.lerobot-render-failure-list {
+  margin-top: 10px;
+  font-size: 0.82rem;
+}
+
+.lerobot-render-failure-title {
+  margin-bottom: 4px;
+  font-weight: 800;
+}
+
+.lerobot-render-failure-list ul {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--muted);
+}
+
+.lerobot-render-failure-list li {
+  margin: 3px 0;
+}
+
+.lerobot-render-failure-empty {
+  color: var(--muted);
+}
+
 .lerobot-inline-log {
   grid-column: 1 / -1;
   max-height: 220px;
@@ -3037,6 +3179,24 @@ textarea {
   border-radius: inherit;
   background: linear-gradient(90deg, var(--primary), var(--accent));
   transition: width 0.25s ease;
+}
+
+.training-progress-track span.is-indeterminate {
+  min-width: 46px;
+  background:
+    linear-gradient(90deg, var(--primary), var(--accent)),
+    repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.34) 0 8px, rgba(255, 255, 255, 0) 8px 16px);
+  background-blend-mode: screen;
+  animation: lerobot-progress-stripes 1.1s linear infinite;
+}
+
+@keyframes lerobot-progress-stripes {
+  from {
+    background-position: 0 0, 0 0;
+  }
+  to {
+    background-position: 0 0, 32px 0;
+  }
 }
 
 .lerobot-port-list {

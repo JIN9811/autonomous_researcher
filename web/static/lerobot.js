@@ -59,6 +59,7 @@ const rolloutInstructionInput = $("lerobot-rollout-instruction-input");
 const rolloutDurationInput = $("lerobot-rollout-duration-input");
 const rolloutActionClampInput = $("lerobot-rollout-action-clamp-input");
 const rolloutMaxRelativeTargetInput = $("lerobot-rollout-max-relative-target-input");
+const rolloutShoulderLiftBackstopInput = $("lerobot-rollout-shoulder-lift-backstop-input");
 const rolloutTemporalEnsembleInput = $("lerobot-rollout-temporal-ensemble-input");
 const rolloutTemporalCoeffInput = $("lerobot-rollout-temporal-coeff-input");
 const rolloutRtcHorizonInput = $("lerobot-rollout-rtc-horizon-input");
@@ -117,6 +118,11 @@ const datasetMixIsaacRgbdMaxInput = $("lerobot-dataset-mix-isaac-rgbd-max-input"
 const datasetMixIsaacAugmentationMaxInput = $("lerobot-dataset-mix-isaac-augmentation-max-input");
 const datasetMixIsaacLabSyntheticMaxInput = $("lerobot-dataset-mix-isaac-lab-synthetic-max-input");
 const datasetMixSeedInput = $("lerobot-dataset-mix-seed-input");
+const datasetExcludeFlaggedEpisodesInput = $("lerobot-dataset-exclude-flagged-episodes-input");
+const datasetIncludeRealOriginalInput = $("lerobot-dataset-include-real-original-input");
+const datasetIncludeIsaacRgbdInput = $("lerobot-dataset-include-isaac-rgbd-input");
+const datasetIncludeIsaacAugmentationInput = $("lerobot-dataset-include-isaac-augmentation-input");
+const datasetIncludeIsaacLabSyntheticInput = $("lerobot-dataset-include-isaac-lab-synthetic-input");
 const fidelityWeightingEnabledInput = $("lerobot-fidelity-weighting-enabled-input");
 const fidelityRealWeightInput = $("lerobot-fidelity-real-weight-input");
 const fidelityIsaacRgbdWeightInput = $("lerobot-fidelity-isaac-rgbd-weight-input");
@@ -155,12 +161,13 @@ const isaacAugmentSensorNoiseInput = $("lerobot-isaac-augment-sensor-noise-input
 const isaacAugmentDepthNoiseInput = $("lerobot-isaac-augment-depth-noise-input");
 const isaacAugmentRenderDomainInput = $("lerobot-isaac-augment-render-domain-input");
 const isaacAugmentCameraPoseInput = $("lerobot-isaac-augment-camera-pose-input");
+const isaacAugmentExcludeFlaggedEpisodesInput = $("lerobot-isaac-augment-exclude-flagged-episodes-input");
 const isaacAugmentRgbStrengthInput = $("lerobot-isaac-augment-rgb-strength-input");
 const isaacAugmentDepthStrengthInput = $("lerobot-isaac-augment-depth-strength-input");
 const isaacAugmentRenderDomainStrengthInput = $("lerobot-isaac-augment-render-domain-strength-input");
 const isaacAugmentCameraPoseStrengthInput = $("lerobot-isaac-augment-camera-pose-strength-input");
 const isaacAugmentPreviewCountInput = $("lerobot-isaac-augment-preview-count-input");
-const isaacSyntheticPanelEl = $("isaac-synthetic-panel");
+const isaacSyntheticPanelEl = $("isaac-lab-advanced-settings");
 const isaacSyntheticPipelineModeInput = $("isaac-synthetic-pipeline-mode");
 const isaacSyntheticFallbackPolicyInput = $("isaac-synthetic-fallback-policy");
 const isaacSyntheticSourceIntentInput = $("isaac-synthetic-source-intent");
@@ -169,14 +176,28 @@ const isaacSyntheticIsaacSimPythonInput = $("isaac-synthetic-isaac-sim-python");
 const isaacSyntheticStagePathInput = $("isaac-synthetic-stage-path");
 const isaacSyntheticMimicTrialsInput = $("isaac-synthetic-mimic-trials");
 const isaacSyntheticMimicNumEnvsInput = $("isaac-synthetic-mimic-num-envs");
+const isaacSyntheticMimicBackendInput = $("isaac-synthetic-mimic-backend");
+const isaacLabDomainRandomizationProfileInput = $("isaac-lab-domain-randomization-profile");
 const isaacSyntheticRlTeacherStepsInput = $("isaac-synthetic-rl-teacher-steps");
 const isaacSyntheticEnableReplicatorInput = $("isaac-synthetic-enable-replicator");
 const isaacSyntheticEnableHdf5ExportInput = $("isaac-synthetic-enable-hdf5-export");
 const isaacSyntheticEnableMimicInput = $("isaac-synthetic-enable-mimic");
 const isaacSyntheticEnableRlTeacherInput = $("isaac-synthetic-enable-rl-teacher");
+const isaacLabVisualizeGenerationInput = $("isaac-lab-visualize-generation-input");
+const isaacLabMimicCamerasInput = $("isaac-lab-mimic-cameras-input");
+const isaacLabDomainMimicRgbdInput = $("isaac-lab-domain-mimic-rgbd-input");
+const isaacLabDomainMimicOverwriteInput = $("isaac-lab-domain-mimic-overwrite-input");
+const isaacLabDomainMimicOverwriteAllInput = $("isaac-lab-domain-mimic-overwrite-all-input");
+const isaacLabDomainMimicEpisodesInput = $("isaac-lab-domain-mimic-episodes-input");
+const isaacLabDomainMimicRenderMissingRgbdInput = $("isaac-lab-domain-mimic-render-missing-rgbd");
 const isaacRgbdRenderProgressEl = $("lerobot-isaac-rgbd-render-progress");
 const isaacRgbdRenderProgressLabelEl = $("lerobot-isaac-rgbd-render-progress-label");
 const isaacRgbdRenderProgressBarEl = $("lerobot-isaac-rgbd-render-progress-bar");
+const isaacRgbdRenderFailureListEl = $("lerobot-isaac-rgbd-render-failure-list");
+const isaacRgbdRenderOverwriteInput = $("lerobot-isaac-rgbd-render-overwrite-input");
+const isaacRgbdRenderSessionOverrideInput = $("lerobot-isaac-rgbd-render-session-override-input");
+const isaacRgbdRenderOverrideAllInput = $("lerobot-isaac-rgbd-render-override-all-input");
+const isaacRgbdRenderEpisodesInput = $("lerobot-isaac-rgbd-render-episodes-input");
 const isaacAugmentationProgressEl = $("lerobot-isaac-augmentation-progress");
 const isaacAugmentationProgressLabelEl = $("lerobot-isaac-augmentation-progress-label");
 const isaacAugmentationProgressBarEl = $("lerobot-isaac-augmentation-progress-bar");
@@ -189,6 +210,9 @@ const ISAAC_RGBD_RENDER_PROGRESS_MIN_STEP = 0.15;
 let isaacRgbdRenderDisplayedPercent = 0;
 let isaacRgbdRenderTargetPercent = 0;
 let isaacRgbdRenderProgressTimer = null;
+let isaacRgbdRenderValidateAfterCompletion = false;
+let lastIsaacRgbdRenderJob = null;
+let lastIsaacRgbdHealth = null;
 const smoothProgressControllers = {};
 const outputEl = $("lerobot-output");
 const sessionListEl = $("lerobot-session-list");
@@ -210,6 +234,13 @@ const isaacSyntheticCanonicalIndexEl = $("isaac-synthetic-status-canonical-index
 const isaacSyntheticGenerationEl = $("isaac-synthetic-status-generation");
 const isaacSyntheticHdf5El = $("isaac-synthetic-status-hdf5");
 const isaacSyntheticTrainingExposureEl = $("isaac-synthetic-status-training-exposure");
+const isaacLabE2eStatusCardEl = $("isaac-lab-e2e-status-card");
+const isaacLabLauncherProgressEl = $("isaac-lab-launcher-progress");
+const isaacLabLauncherProgressLabelEl = $("isaac-lab-launcher-progress-label");
+const isaacLabLauncherProgressBarEl = $("isaac-lab-launcher-progress-bar");
+const isaacLabLauncherFailureListEl = $("isaac-lab-launcher-failure-list");
+const lerobotTabButtons = Array.from(document.querySelectorAll("[data-lerobot-tab-target]"));
+const lerobotTabPanels = Array.from(document.querySelectorAll(".lerobot-tab-panel"));
 const statusDotEl = $("lerobot-status-dot");
 const statusLabelEl = $("lerobot-status-label");
 const statusDetailEl = $("lerobot-status-detail");
@@ -248,6 +279,7 @@ let lastBrowseOptions = {};
 let lastPortCandidates = [];
 let lastConfigData = null;
 let extraCameraKeys = [];
+let policyCatalogByValue = new Map();
 const defaultRealsenseCameraKeys = new Set(["top", "wrist"]);
 const cameraRealsenseOverrides = new Map();
 const cameraFpsOverrides = new Map();
@@ -256,6 +288,9 @@ let trainStatusTimer = null;
 let rolloutStatusTimer = null;
 let isaacRgbdRenderStatusTimer = null;
 let lastIsaacRgbdRenderSessionId = "";
+let lastIsaacLiveE2eJobId = "";
+let lastIsaacDomainMimicJobId = "";
+let lastIsaacLabOutputCheck = null;
 let manipulationProfileLoaded = false;
 let profileSelectionInitialized = false;
 let observationPipelineProfileId = "";
@@ -268,6 +303,10 @@ function setStatusDot(el, state) {
 
 function boolValue(el) {
   return Boolean(el && el.checked);
+}
+
+function checkboxValue(el) {
+  return boolValue(el);
 }
 
 function numberValue(el, fallback = null) {
@@ -339,6 +378,23 @@ function setTtsHelpVisible(visible) {
   if (!ttsHelpButton || !ttsHelpPopover) return;
   ttsHelpPopover.hidden = !visible;
   ttsHelpButton.setAttribute("aria-expanded", visible ? "true" : "false");
+}
+
+function activateLeRobotGuiTab(targetId) {
+  const target = $(targetId);
+  if (!target) return;
+  lerobotTabPanels.forEach((panel) => {
+    const active = panel.id === targetId;
+    panel.classList.toggle("active", active);
+    panel.hidden = !active;
+  });
+  lerobotTabButtons.forEach((button) => {
+    const active = button.dataset.lerobotTabTarget === targetId;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", active ? "true" : "false");
+  });
+  target.scrollIntoView({ block: "start" });
+  target.focus({ preventScroll: false });
 }
 
 function trainExtraArgs() {
@@ -694,6 +750,81 @@ function applyPolicyTypeDefaults(options = {}) {
   }
 }
 
+function objectValue(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+function setInputFromConfig(input, value) {
+  if (!input || value === undefined || value === null || value === "") return;
+  input.value = String(value);
+}
+
+function setCheckboxFromConfig(input, value) {
+  if (!input || value === undefined || value === null) return;
+  input.checked = Boolean(value);
+}
+
+function firstConfigValue(...values) {
+  for (const value of values) {
+    if (value !== undefined && value !== null && value !== "") return value;
+  }
+  return "";
+}
+
+function applyTrainConfigDefaults(config = {}) {
+  const dataset = objectValue(config.dataset);
+  const policy = objectValue(config.policy);
+  const optimizer = objectValue(config.optimizer);
+  const scheduler = objectValue(config.scheduler);
+  const evalConfig = objectValue(config.eval);
+  const wandb = objectValue(config.wandb);
+  setInputFromConfig(datasetInput, dataset.repo_id);
+  setInputFromConfig(policyTypeInput, firstConfigValue(policy.type, policy.policy_type));
+  setInputFromConfig(trainSourcePolicyInput, firstConfigValue(policy.pretrained_path, policy.path));
+  setInputFromConfig(trainPolicyRepoInput, policy.repo_id);
+  setInputFromConfig(trainBatchSizeInput, config.batch_size);
+  setInputFromConfig(trainStepsInput, config.steps);
+  setInputFromConfig(trainWorkersInput, config.num_workers);
+  setInputFromConfig(trainEvalFreqInput, config.eval_freq);
+  setInputFromConfig(trainLogFreqInput, config.log_freq);
+  setInputFromConfig(trainSaveFreqInput, config.save_freq);
+  setInputFromConfig(trainSeedInput, config.seed);
+  setCheckboxFromConfig(trainSaveCheckpointInput, config.save_checkpoint);
+  setInputFromConfig(trainEvalBatchInput, evalConfig.batch_size);
+  setInputFromConfig(trainOptimizerInput, optimizer.type);
+  setInputFromConfig(trainLrInput, firstConfigValue(optimizer.lr, policy.optimizer_lr));
+  setInputFromConfig(trainWeightDecayInput, firstConfigValue(optimizer.weight_decay, policy.optimizer_weight_decay));
+  setInputFromConfig(trainGradClipInput, firstConfigValue(optimizer.grad_clip_norm, policy.optimizer_grad_clip_norm));
+  setInputFromConfig(trainSchedulerInput, scheduler.type);
+  setInputFromConfig(trainWarmupInput, firstConfigValue(scheduler.num_warmup_steps, policy.scheduler_warmup_steps));
+  setInputFromConfig(trainDecayStepsInput, firstConfigValue(scheduler.num_decay_steps, policy.scheduler_decay_steps));
+  setInputFromConfig(trainPeakLrInput, firstConfigValue(scheduler.peak_lr, policy.scheduler_peak_lr));
+  setInputFromConfig(trainDecayLrInput, firstConfigValue(scheduler.decay_lr, policy.scheduler_decay_lr));
+  setInputFromConfig(trainNObsInput, policy.n_obs_steps);
+  setInputFromConfig(trainChunkInput, policy.chunk_size);
+  setInputFromConfig(trainNActionInput, policy.n_action_steps);
+  setCheckboxFromConfig(trainUseAmpInput, policy.use_amp);
+  setCheckboxFromConfig(trainWandbInput, wandb.enable);
+  setInputFromConfig(trainWandbProjectInput, wandb.project);
+  setInputFromConfig(trainWandbModeInput, wandb.mode);
+  setInputFromConfig(outputDirInput, config.output_dir);
+  setInputFromConfig(jobNameInput, config.job_name);
+}
+
+function applyLocalPolicyTrainingResume(policy) {
+  if (!policy) return;
+  const configPolicy = objectValue(objectValue(policy.train_config || {}).policy);
+  const policyType = policy.policy_type || configPolicy.type || configPolicy.policy_type || "";
+  if (policyType && policyTypeInput) policyTypeInput.value = policyType;
+  applyPolicyTypeDefaults({ force: true });
+  applyTrainConfigDefaults(policy.train_config || {});
+  if (trainResumeInput) trainResumeInput.checked = true;
+  if (outputDirInput && policy.output_dir) outputDirInput.value = policy.output_dir;
+  if (jobNameInput && policy.job_name) jobNameInput.value = policy.job_name;
+  if (outputDirInput) markUserEdited(outputDirInput);
+  if (jobNameInput) markUserEdited(jobNameInput);
+}
+
 function selectedRolloutPolicyType() {
   const rolloutType = rolloutPolicyTypeInput ? String(rolloutPolicyTypeInput.value || "").trim() : "";
   if (rolloutType) return rolloutType;
@@ -781,6 +912,24 @@ function datasetRepoValueFromPath(path) {
   if (root && cleanPath === root) return "";
   if (root && cleanPath.startsWith(`${root}/`)) return cleanPath.slice(root.length + 1);
   return cleanPath;
+}
+
+function currentDatasetRepoValue() {
+  const datasetValue = datasetInput ? datasetInput.value.trim() : "";
+  const datasetSplit = splitPathOrRepo(datasetValue);
+  return datasetSplit.repo || lastWorkflowDefaults.dataset_repo_id || "";
+}
+
+function freshDatasetRepoValue() {
+  return currentDatasetRepoValue() || `jin/${todayRunNameFallback()}`;
+}
+
+function recordDatasetRepoValue() {
+  return freshDatasetRepoValue();
+}
+
+function trainDatasetRepoValue() {
+  return boolValue(trainResumeInput) ? currentDatasetRepoValue() : freshDatasetRepoValue();
 }
 
 function browseSelectionValue(path) {
@@ -914,7 +1063,7 @@ function basePayload(overrides = {}) {
     observation_pipeline_id: observationPipelineSelect ? observationPipelineSelect.value : "raw_depth_adapter",
     task_instruction: taskInput ? taskInput.value : DEFAULT_LEROBOT_TASK_INSTRUCTION,
     dataset_root: datasetRootInput ? datasetRootInput.value.trim() : "",
-    dataset_repo_id: datasetSplit.repo || lastWorkflowDefaults.dataset_repo_id || `jin/${todayRunNameFallback()}`,
+    dataset_repo_id: datasetSplit.repo || lastWorkflowDefaults.dataset_repo_id || "",
     dataset_path: datasetSplit.path,
     policy_path: policy.policy_path,
     policy_checkpoint_path: policy.policy_checkpoint_path,
@@ -954,20 +1103,25 @@ function basePayload(overrides = {}) {
     wandb_base_url: trainWandbBaseUrlInput ? trainWandbBaseUrlInput.value.trim() : "",
     wandb_local_port: wandbLocalPortValue(),
     train_extra_args: trainExtraArgs(),
+    dataset_include_real_original: boolValue(datasetIncludeRealOriginalInput),
+    dataset_include_isaac_rgbd: boolValue(datasetIncludeIsaacRgbdInput),
+    dataset_include_isaac_augmentation: boolValue(datasetIncludeIsaacAugmentationInput),
+    dataset_include_isaac_lab_synthetic: boolValue(datasetIncludeIsaacLabSyntheticInput),
     dataset_mix_real_original_weight: numberValue(datasetMixRealWeightInput, 1),
-    dataset_mix_isaac_rgbd_weight: numberValue(datasetMixIsaacRgbdWeightInput, 0.5),
-    dataset_mix_isaac_augmentation_weight: numberValue(datasetMixIsaacAugmentationWeightInput, 0.5),
-    dataset_mix_isaac_lab_synthetic_weight: numberValue(datasetMixIsaacLabSyntheticWeightInput, 0.5),
+    dataset_mix_isaac_rgbd_weight: numberValue(datasetMixIsaacRgbdWeightInput, 0.6),
+    dataset_mix_isaac_augmentation_weight: numberValue(datasetMixIsaacAugmentationWeightInput, 0),
+    dataset_mix_isaac_lab_synthetic_weight: numberValue(datasetMixIsaacLabSyntheticWeightInput, 0.35),
     dataset_mix_real_original_max_samples: numberValue(datasetMixRealMaxInput, null),
     dataset_mix_isaac_rgbd_max_samples: numberValue(datasetMixIsaacRgbdMaxInput, null),
     dataset_mix_isaac_augmentation_max_samples: numberValue(datasetMixIsaacAugmentationMaxInput, null),
     dataset_mix_isaac_lab_synthetic_max_samples: numberValue(datasetMixIsaacLabSyntheticMaxInput, null),
     dataset_mix_seed: numberValue(datasetMixSeedInput, 0),
+    dataset_exclude_flagged_episodes: excludeFlaggedEpisodesValue(),
     fidelity_weighting_enabled: boolValue(fidelityWeightingEnabledInput),
     fidelity_real_original_weight: numberValue(fidelityRealWeightInput, 1),
-    fidelity_isaac_rgbd_weight: numberValue(fidelityIsaacRgbdWeightInput, 0.5),
-    fidelity_isaac_augmentation_weight: numberValue(fidelityIsaacAugmentationWeightInput, 0.3),
-    fidelity_isaac_lab_synthetic_weight: numberValue(fidelityIsaacLabSyntheticWeightInput, 0.2),
+    fidelity_isaac_rgbd_weight: numberValue(fidelityIsaacRgbdWeightInput, 0.55),
+    fidelity_isaac_augmentation_weight: numberValue(fidelityIsaacAugmentationWeightInput, 0),
+    fidelity_isaac_lab_synthetic_weight: numberValue(fidelityIsaacLabSyntheticWeightInput, 0.25),
     fps: numberValue(fpsInput, 15),
     camera_fps: numberValue(cameraFpsInput, 15),
     warmup_s: 2,
@@ -1054,8 +1208,9 @@ function rolloutPayload(overrides = {}) {
     payload.num_episodes = 1;
     payload.continuous_rollout = true;
   }
-  payload.rollout_action_clamp = rolloutActionClampInput ? boolValue(rolloutActionClampInput) : true;
+  payload.rollout_action_clamp = rolloutActionClampInput ? boolValue(rolloutActionClampInput) : false;
   payload.rollout_max_relative_target = numberValue(rolloutMaxRelativeTargetInput, 5);
+  payload.rollout_shoulder_lift_backstop = rolloutShoulderLiftBackstopInput ? boolValue(rolloutShoulderLiftBackstopInput) : true;
   payload.rollout_temporal_ensemble = rolloutPolicyTypeKey === "act" && (rolloutTemporalEnsembleInput ? boolValue(rolloutTemporalEnsembleInput) : true);
   payload.rollout_temporal_ensemble_coeff = numberValue(rolloutTemporalCoeffInput, 0.01);
   payload.rollout_inference_type = rolloutPolicyTypeKey === "pi05" ? "rtc" : "";
@@ -1134,8 +1289,9 @@ function manipulationAgentPayload(overrides = {}) {
   payload.max_duration_s = numberValue(manipulationMaxDurationInput, 30);
   payload.fps = numberValue(fpsInput, 15);
   payload.camera_fps = numberValue(cameraFpsInput, 15);
-  payload.rollout_action_clamp = rolloutActionClampInput ? boolValue(rolloutActionClampInput) : true;
+  payload.rollout_action_clamp = rolloutActionClampInput ? boolValue(rolloutActionClampInput) : false;
   payload.rollout_max_relative_target = numberValue(rolloutMaxRelativeTargetInput, 5);
+  payload.rollout_shoulder_lift_backstop = rolloutShoulderLiftBackstopInput ? boolValue(rolloutShoulderLiftBackstopInput) : true;
   payload.rollout_temporal_ensemble = rolloutTemporalEnsembleInput ? boolValue(rolloutTemporalEnsembleInput) : true;
   payload.rollout_temporal_ensemble_coeff = numberValue(rolloutTemporalCoeffInput, 0.01);
   payload.rollout_rtc_execution_horizon = numberValue(rolloutRtcHorizonInput, numberValue(manipulationRtcHorizonInput, 20));
@@ -1200,6 +1356,9 @@ function applyManipulationProfile(profile, force = false) {
   if (rolloutMaxRelativeTargetInput && profile.rollout_max_relative_target !== undefined) {
     rolloutMaxRelativeTargetInput.value = String(profile.rollout_max_relative_target);
   }
+  if (rolloutShoulderLiftBackstopInput && profile.rollout_shoulder_lift_backstop !== undefined) {
+    rolloutShoulderLiftBackstopInput.checked = Boolean(profile.rollout_shoulder_lift_backstop);
+  }
   if (rolloutTemporalEnsembleInput && profile.rollout_temporal_ensemble !== undefined) {
     rolloutTemporalEnsembleInput.checked = Boolean(profile.rollout_temporal_ensemble);
   }
@@ -1220,11 +1379,11 @@ async function refreshManipulationProfile({ force = false } = {}) {
 }
 
 function recordPayload(overrides = {}) {
-  return basePayload({ resume: boolValue(resumeInput), ...overrides });
+  return basePayload({ dataset_repo_id: recordDatasetRepoValue(), resume: recordResumeValue(), ...overrides });
 }
 
 function trainPayload(overrides = {}) {
-  return basePayload({ resume: boolValue(trainResumeInput), ...overrides });
+  return basePayload({ dataset_repo_id: trainDatasetRepoValue(), resume: boolValue(trainResumeInput), ...overrides });
 }
 
 function prepareLocalWandbForTraining() {
@@ -1255,7 +1414,7 @@ function visualizationPayload(overrides = {}) {
 }
 
 function isaacAugmentationPayload(overrides = {}) {
-  return visualizationPayload(overrides);
+  return visualizationPayload({ isaac_data_augmentation_async: true, ...overrides });
 }
 
 function isaacSyntheticPayload(overrides = {}) {
@@ -1278,7 +1437,7 @@ function isaacSyntheticPayload(overrides = {}) {
     isaac_sim_python: isaacSyntheticIsaacSimPythonInput ? isaacSyntheticIsaacSimPythonInput.value.trim() : "",
     stage_path: isaacSyntheticStagePathInput ? isaacSyntheticStagePathInput.value.trim() : "",
     cameras: cameraList.length ? cameraList : ["top", "front", "right"],
-    max_source_frames: numberValue(isaacAugmentMaxFramesInput, 150),
+    max_source_frames: numberValue(isaacAugmentMaxFramesInput, 5000),
     attempts_per_source_frame: numberValue(isaacAugmentVariantsInput, 1),
     seed: numberValue(isaacAugmentSeedInput, 42),
     augmentation_profile: isaacAugmentProfileInput ? isaacAugmentProfileInput.value || "conservative" : "conservative",
@@ -1286,19 +1445,108 @@ function isaacSyntheticPayload(overrides = {}) {
     depth_strength: numberValue(isaacAugmentDepthStrengthInput, 0.15),
     render_strength: numberValue(isaacAugmentRenderDomainStrengthInput, 0.15),
     camera_pose_strength: numberValue(isaacAugmentCameraPoseStrengthInput, 0.05),
-    mimic_trials: numberValue(isaacSyntheticMimicTrialsInput, 20),
-    mimic_num_envs: numberValue(isaacSyntheticMimicNumEnvsInput, 1),
+    mimic_trials: numberValue(isaacSyntheticMimicTrialsInput, 3),
+    mimic_num_envs: numberValue(isaacSyntheticMimicNumEnvsInput, 3),
+    mimic_generation_backend: isaacSyntheticMimicBackendInput
+      ? isaacSyntheticMimicBackendInput.value || "official"
+      : "official",
+    domain_randomization_profile: isaacLabDomainRandomizationProfileInput
+      ? isaacLabDomainRandomizationProfileInput.value || "standard"
+      : "standard",
     rl_teacher_steps: numberValue(isaacSyntheticRlTeacherStepsInput, 0),
     enable_replicator: boolValue(isaacSyntheticEnableReplicatorInput),
     enable_hdf5_export: boolValue(isaacSyntheticEnableHdf5ExportInput),
     enable_mimic: boolValue(isaacSyntheticEnableMimicInput),
     enable_rl_teacher: boolValue(isaacSyntheticEnableRlTeacherInput),
+    isaac_lab_visualize_generation: checkboxValue(isaacLabVisualizeGenerationInput),
+    mimic_enable_cameras: checkboxValue(isaacLabMimicCamerasInput),
+    dataset_exclude_flagged_episodes: excludeFlaggedEpisodesValue(),
     real_weight: numberValue(datasetMixRealWeightInput, 1),
-    isaac_rgbd_weight: numberValue(datasetMixIsaacRgbdWeightInput, 0.35),
-    isaac_lab_synthetic_weight: numberValue(datasetMixIsaacLabSyntheticWeightInput, 0.5),
-    legacy_sidecar_weight: numberValue(datasetMixIsaacAugmentationWeightInput, 0.5),
+    isaac_rgbd_weight: numberValue(datasetMixIsaacRgbdWeightInput, 0.6),
+    isaac_lab_synthetic_weight: numberValue(datasetMixIsaacLabSyntheticWeightInput, 0.35),
+    legacy_sidecar_weight: numberValue(datasetMixIsaacAugmentationWeightInput, 0),
     ...overrides,
   };
+}
+
+function setInputValue(input, value) {
+  if (input) input.value = String(value);
+}
+
+function setCheckboxValue(input, value) {
+  if (input) input.checked = Boolean(value);
+}
+
+function syncIsaacLabMimicRgbdInputs(value) {
+  setCheckboxValue(isaacLabMimicCamerasInput, value);
+  setCheckboxValue(isaacLabDomainMimicRgbdInput, value);
+}
+
+function excludeFlaggedEpisodesValue() {
+  if (datasetExcludeFlaggedEpisodesInput) return boolValue(datasetExcludeFlaggedEpisodesInput);
+  if (isaacAugmentExcludeFlaggedEpisodesInput) return boolValue(isaacAugmentExcludeFlaggedEpisodesInput);
+  return true;
+}
+
+function syncExcludeFlaggedEpisodesCheckboxes(source = null) {
+  const value = source ? boolValue(source) : excludeFlaggedEpisodesValue();
+  if (datasetExcludeFlaggedEpisodesInput && datasetExcludeFlaggedEpisodesInput !== source) {
+    datasetExcludeFlaggedEpisodesInput.checked = value;
+  }
+  if (isaacAugmentExcludeFlaggedEpisodesInput && isaacAugmentExcludeFlaggedEpisodesInput !== source) {
+    isaacAugmentExcludeFlaggedEpisodesInput.checked = value;
+  }
+}
+
+function applyIsaacLabStandardDefaults() {
+  setInputValue(isaacSyntheticIsaacLabPathInput, "/home/jin/IsaacLab");
+  setInputValue(isaacSyntheticIsaacSimPythonInput, "/home/jin/IsaacSim/python.sh");
+  setInputValue(isaacSyntheticStagePathInput, "/home/jin/autonomous_researcher/sim/robotis_omx/scene/omx_table_layout.usda");
+  setInputValue(isaacSyntheticMimicTrialsInput, 3);
+  setInputValue(isaacSyntheticMimicNumEnvsInput, 3);
+  setInputValue(isaacSyntheticRlTeacherStepsInput, 0);
+  setInputValue(isaacAugmentVariantsInput, 8);
+  setInputValue(isaacAugmentMaxFramesInput, 5000);
+  setInputValue(isaacAugmentSeedInput, 0);
+  setInputValue(isaacAugmentRgbStrengthInput, 1);
+  setInputValue(isaacAugmentDepthStrengthInput, 1);
+  setInputValue(isaacAugmentRenderDomainStrengthInput, 1);
+  setInputValue(isaacAugmentCameraPoseStrengthInput, 1);
+  setInputValue(datasetMixRealWeightInput, 1);
+  setInputValue(datasetMixIsaacRgbdWeightInput, 0.6);
+  setInputValue(datasetMixIsaacAugmentationWeightInput, 0);
+  setInputValue(datasetMixIsaacLabSyntheticWeightInput, 0.35);
+  setCheckboxValue(datasetIncludeRealOriginalInput, true);
+  setCheckboxValue(datasetIncludeIsaacRgbdInput, true);
+  setCheckboxValue(datasetIncludeIsaacAugmentationInput, false);
+  setCheckboxValue(datasetIncludeIsaacLabSyntheticInput, true);
+  setCheckboxValue(datasetExcludeFlaggedEpisodesInput, true);
+  setCheckboxValue(isaacAugmentExcludeFlaggedEpisodesInput, true);
+  syncExcludeFlaggedEpisodesCheckboxes(datasetExcludeFlaggedEpisodesInput);
+  setInputValue(fidelityRealWeightInput, 1);
+  setInputValue(fidelityIsaacRgbdWeightInput, 0.55);
+  setInputValue(fidelityIsaacAugmentationWeightInput, 0);
+  setInputValue(fidelityIsaacLabSyntheticWeightInput, 0.25);
+  if (isaacSyntheticPipelineModeInput) isaacSyntheticPipelineModeInput.value = "isaac_lab_replicator";
+  if (isaacSyntheticFallbackPolicyInput) isaacSyntheticFallbackPolicyInput.value = "block_on_primary_failure";
+  if (isaacSyntheticSourceIntentInput) isaacSyntheticSourceIntentInput.value = "train_ready_success_only";
+  if (isaacSyntheticMimicBackendInput) isaacSyntheticMimicBackendInput.value = "official";
+  if (isaacLabDomainRandomizationProfileInput) isaacLabDomainRandomizationProfileInput.value = "standard";
+  if (isaacAugmentProfileInput) isaacAugmentProfileInput.value = "conservative";
+  setCheckboxValue(isaacSyntheticEnableReplicatorInput, false);
+  setCheckboxValue(isaacSyntheticEnableHdf5ExportInput, true);
+  setCheckboxValue(isaacSyntheticEnableMimicInput, true);
+  setCheckboxValue(isaacSyntheticEnableRlTeacherInput, false);
+  setCheckboxValue(isaacLabVisualizeGenerationInput, true);
+  syncIsaacLabMimicRgbdInputs(true);
+  setCheckboxValue(isaacAugmentImageInput, true);
+  setCheckboxValue(isaacAugmentPhotometricInput, true);
+  setCheckboxValue(isaacAugmentSensorNoiseInput, true);
+  setCheckboxValue(isaacAugmentDepthNoiseInput, true);
+  setCheckboxValue(isaacAugmentRenderDomainInput, true);
+  setCheckboxValue(isaacAugmentCameraPoseInput, true);
+  setCheckboxValue(isaacAugmentExcludeFlaggedEpisodesInput, true);
+  syncExcludeFlaggedEpisodesCheckboxes(isaacAugmentExcludeFlaggedEpisodesInput);
 }
 
 function devicePayload(role, overrides = {}) {
@@ -1411,6 +1659,43 @@ function isActiveSession(session) {
   return session.returncode === undefined || session.returncode === null;
 }
 
+function latestRecordSession() {
+  for (let index = lastSessions.length - 1; index >= 0; index -= 1) {
+    const session = lastSessions[index];
+    if (session && String(session.workflow || "") === "record") return session;
+  }
+  return null;
+}
+
+function recordSessionDatasetIdentifier(session) {
+  if (!session) return "";
+  const repo = String(session.dataset_repo_id || "").trim();
+  if (repo) return repo;
+  const pathValue = String(session.dataset_path || "").trim();
+  return datasetRepoValueFromPath(pathValue) || pathValue.replace(/\/+$/, "");
+}
+
+function currentRecordDatasetIdentifier() {
+  const datasetValue = datasetInput ? datasetInput.value.trim() : "";
+  const split = splitPathOrRepo(datasetValue);
+  if (split.repo) return split.repo;
+  if (split.path) return datasetRepoValueFromPath(split.path) || split.path.replace(/\/+$/, "");
+  return "";
+}
+
+function recordRestartShouldResume() {
+  const latest = latestRecordSession();
+  if (!latest || isActiveSession(latest)) return false;
+  if (String(latest.status || "").toUpperCase() !== "STOPPED") return false;
+  const currentDataset = currentRecordDatasetIdentifier();
+  const latestDataset = recordSessionDatasetIdentifier(latest);
+  return Boolean(currentDataset && latestDataset && currentDataset === latestDataset);
+}
+
+function recordResumeValue() {
+  return boolValue(resumeInput) || recordRestartShouldResume();
+}
+
 function rememberWorkflowSession(session) {
   const workflow = session && session.workflow ? String(session.workflow) : "";
   const sessionId = session && session.session_id ? String(session.session_id) : "";
@@ -1497,6 +1782,25 @@ function reportListHtml(items) {
   return `<ul class="lerobot-report-list">${clean.map((item) => `<li>${escapeHtml(typeof item === "object" ? JSON.stringify(item) : item)}</li>`).join("")}</ul>`;
 }
 
+function contactAuditEpisodeHtml(episodes) {
+  const clean = Array.isArray(episodes) ? episodes.filter(Boolean).slice(0, 10) : [];
+  if (!clean.length) return `<span class="hint">none</span>`;
+  return `<ul class="lerobot-report-list">${clean.map((episode) => {
+    const ranges = []
+      .concat(Array.isArray(episode.closed_not_near_ranges) ? episode.closed_not_near_ranges : [])
+      .concat(Array.isArray(episode.near_closed_without_contact_ranges) ? episode.near_closed_without_contact_ranges : [])
+      .slice(0, 4)
+      .join(", ");
+    const detail = [
+      `closed=${compactValue(episode.closed_frame_count)}`,
+      `lifted=${compactValue(episode.lifted_frame_count)}`,
+      `contact=${compactValue(episode.any_contact_frame_count)}`,
+      ranges ? `frames ${ranges}` : "",
+    ].filter(Boolean).join(" · ");
+    return `<li><strong>ep ${escapeHtml(compactValue(episode.episode_index))}</strong> · ${escapeHtml(detail)}</li>`;
+  }).join("")}</ul>`;
+}
+
 function renderDatasetHealth(data) {
   if (!datasetHealthEl) return;
   const health = data && data.dataset_health ? data.dataset_health : null;
@@ -1504,15 +1808,24 @@ function renderDatasetHealth(data) {
     datasetHealthEl.innerHTML = "";
     return;
   }
+  lastIsaacRgbdHealth = health;
+  renderIsaacRgbdRenderFailureList();
   const metrics = health.metrics || {};
   const sidecars = health.sidecars || {};
   const raw_depth = sidecars.raw_depth || {};
   const isaac_rgbd = sidecars.isaac_rgbd || {};
   const isaac_augmentation = sidecars.isaac_augmentation || {};
+  const training_exclusions = sidecars.training_exclusions || {};
+  const contact_audit = isaac_rgbd.contact_audit || {};
   const mix = health.dataset_mix || {};
   const dataset_mix_effective_counts = mix.effective_counts || {};
   const severity = String(health.severity || "unknown");
   const issues = Array.isArray(health.issues) ? health.issues : [];
+  const severe_episodes = Array.isArray(contact_audit.severe_episodes) ? contact_audit.severe_episodes : [];
+  const transient_episodes = Array.isArray(contact_audit.transient_episodes) ? contact_audit.transient_episodes : [];
+  const excluded_episode_indices = Array.isArray(training_exclusions.episode_indices)
+    ? training_exclusions.episode_indices
+    : [];
   datasetHealthEl.innerHTML = `
     <article class="lerobot-report-card wide">
       <div class="lerobot-report-card-title">
@@ -1525,6 +1838,7 @@ function renderDatasetHealth(data) {
         ["Raw depth frames", metrics.raw_depth_total_frames],
         ["Isaac RGB-D rendered", metrics.isaac_rgbd_rendered_frames],
         ["Aug valid variants", metrics.augmentation_valid_variants],
+        ["Flagged train exclusions", metrics.excluded_flagged_episode_count || training_exclusions.episode_count || 0],
         ["Train effective frames", metrics.train_effective_frame_count],
       ])}
       <div class="lerobot-report-subtitle">Training mix</div>
@@ -1539,7 +1853,17 @@ function renderDatasetHealth(data) {
         ["raw_depth", raw_depth.available ? JSON.stringify(raw_depth.camera_counts || {}) : "missing"],
         ["isaac_rgbd", `${isaac_rgbd.rendered_count || 0}/${isaac_rgbd.row_count || 0}`],
         ["isaac_augmentation", `${isaac_augmentation.valid_variant_count || 0}/${isaac_augmentation.variant_count || 0}`],
+        ["training_exclusions", training_exclusions.available ? `episodes ${excluded_episode_indices.join(", ") || "none"}` : "missing"],
       ])}
+      <div class="lerobot-report-subtitle">Isaac RGB-D Contact Audit</div>
+      ${reportRowsHtml([
+        ["unique frames", contact_audit.unique_frame_count || 0],
+        ["severe contact episodes", contact_audit.severe_episode_count || 0],
+        ["transient contact dropouts", contact_audit.transient_episode_count || 0],
+      ])}
+      ${severe_episodes.length ? `<div class="lerobot-warning-strip">Check contact replay: ${escapeHtml(severe_episodes.length)} episode(s) closed without reliable contact/lift.</div>` : ""}
+      ${contactAuditEpisodeHtml(severe_episodes)}
+      ${transient_episodes.length ? `<div class="lerobot-report-subtitle">Transient contact dropouts</div>${contactAuditEpisodeHtml(transient_episodes)}` : ""}
       <div class="lerobot-report-subtitle">Issues</div>
       ${reportListHtml(issues.map((issue) => `${issue.severity || "warning"} · ${issue.code || "UNKNOWN"} · ${issue.message || ""}`))}
     </article>
@@ -1763,6 +2087,30 @@ function parseTrainingActiveStepsPerSec(log) {
   return avg > 0 ? 1 / avg : 0;
 }
 
+function parseTrainingEffectiveBatchSize(log, training) {
+  const configured = Number((training && training.batch_size) || (training && training.config && training.config.batch_size) || 0);
+  for (const line of String(log || "").split("\n").reverse()) {
+    const match = line.match(/\bEffective batch size:\s*\d+\s*x\s*\d+\s*=\s*(\d+)\b/i);
+    if (match) {
+      const parsed = Number(match[1]);
+      if (Number.isFinite(parsed) && parsed > 0) return parsed;
+    }
+  }
+  return Number.isFinite(configured) && configured > 0 ? configured : 0;
+}
+
+function parseTrainingSampleStep(log, training) {
+  const countPattern = "(\\d{1,9}(?:\\.\\d+)?)([kKmM]?)";
+  const effectiveBatchSize = parseTrainingEffectiveBatchSize(log, training);
+  if (!(effectiveBatchSize > 0)) return 0;
+  let samples = 0;
+  for (const line of String(log || "").split("\n")) {
+    const match = line.match(new RegExp(`\\b(?:smpl|samples|sample)\\s*[=:]\\s*${countPattern}`, "i"));
+    if (match) samples = Math.max(samples, parseTrainingCount(match[1], match[2]));
+  }
+  return samples > 0 ? Math.round(samples / effectiveBatchSize) : 0;
+}
+
 function parseTrainingLogProgress(data, training) {
   const log = String((data && data.log_tail) || "");
   const countPattern = "(\\d{1,9}(?:\\.\\d+)?)([kKmM]?)";
@@ -1778,6 +2126,9 @@ function parseTrainingLogProgress(data, training) {
     const lossMatch = line.match(/\b(?:loss|train_loss|l1_loss)\s*[=:]\s*([0-9]+(?:\.[0-9]+)?(?:e[-+]?\d+)?)/i);
     if (lossMatch) lastLoss = Number(lossMatch[1]);
   }
+
+  const sampleStep = parseTrainingSampleStep(log, training);
+  if (sampleStep > current) current = sampleStep;
 
   const elapsed = Number(training.elapsed_sec || 0);
   const activeRate = parseTrainingActiveStepsPerSec(log);
@@ -2194,6 +2545,11 @@ async function refreshPolicies() {
     data = { ok: false, policies: [], error: String(err) };
   }
   const policies = data.policies || [];
+  policyCatalogByValue = new Map();
+  for (const policy of policies) {
+    const value = policy.value || policy.path || policy.repo_id || "";
+    if (value) policyCatalogByValue.set(value, policy);
+  }
   if (policySelect) {
     const prior = policySelect.value;
     policySelect.innerHTML = "";
@@ -2208,7 +2564,8 @@ async function refreshPolicies() {
   }
   if (policyListEl) {
     const displayPolicies = policies.slice().sort((a, b) => policySortRank(a) - policySortRank(b));
-    policyListEl.innerHTML = displayPolicies.slice(0, 12).map((p) => {
+    const trainingPolicies = displayPolicies.filter((p) => p.source === "local");
+    policyListEl.innerHTML = trainingPolicies.slice(0, 12).map((p) => {
       const value = p.value || p.path || p.repo_id || "";
       const label = p.label || value || "policy";
       const source = p.source || "policy";
@@ -2225,8 +2582,10 @@ async function refreshPolicies() {
     }).join("");
     for (const button of policyListEl.querySelectorAll(".policy-chip-select")) {
       button.addEventListener("click", () => {
-        applyPolicySelection(button.dataset.policy || "", button.dataset.policyType || "");
-        setActionStatus("lerobot-train-action-status", "ok", "policy selected", { policy_path: button.dataset.policy || "" });
+        const value = button.dataset.policy || "";
+        const policy = policyCatalogByValue.get(value) || null;
+        applyPolicySelection(value, button.dataset.policyType || "", policy);
+        setActionStatus("lerobot-train-action-status", "ok", "resume policy selected", { policy_path: value, output_dir: policy ? policy.output_dir || "" : "" });
       });
     }
   }
@@ -2253,25 +2612,31 @@ function policySortRank(policy) {
   return 3;
 }
 
-function applyPolicySelection(value, policyType = "") {
+function applyPolicySelection(value, policyType = "", selectedPolicy = null) {
   const clean = String(value || "").trim();
+  const policy = selectedPolicy || policyCatalogByValue.get(clean) || {};
   const selectedOption = policySelect
     ? Array.from(policySelect.options || []).find((opt) => opt.value === clean)
     : null;
   const inferredPolicyType = String(
     policyType
+    || (policy && policy.policy_type)
     || (selectedOption && selectedOption.dataset.policyType)
     || inferPolicyTypeFromPolicy(clean, selectedOption ? selectedOption.textContent : ""),
   ).trim();
   if (policyInput) policyInput.value = clean;
   if (rolloutPolicyInput) rolloutPolicyInput.value = clean;
-  if (trainSourcePolicyInput) trainSourcePolicyInput.value = clean;
+  if (trainSourcePolicyInput && policy.source !== "local") trainSourcePolicyInput.value = clean;
   if (manipulationPolicyInput && !manipulationPolicyInput.value.trim()) manipulationPolicyInput.value = clean;
   if (policySelect) policySelect.value = clean;
   if (inferredPolicyType && policyTypeInput) policyTypeInput.value = inferredPolicyType;
   if (inferredPolicyType && rolloutPolicyTypeInput) rolloutPolicyTypeInput.value = inferredPolicyType;
   if (inferredPolicyType && manipulationPolicyTypeInput) manipulationPolicyTypeInput.value = inferredPolicyType;
-  applyPolicyTypeDefaults();
+  if (policy && policy.source === "local") {
+    applyLocalPolicyTrainingResume(policy);
+  } else {
+    applyPolicyTypeDefaults();
+  }
   syncRolloutPolicyOptions();
   return clean;
 }
@@ -2287,8 +2652,8 @@ async function useLatestLocalPolicy(statusTarget = null) {
   }
   const value = local.path || local.value || "";
   const policyType = local.policy_type || inferPolicyTypeFromPolicy(value, local.label || "");
-  applyPolicySelection(value, policyType);
-  setActionStatus(statusTarget, "ok", "use latest policy", { policy_path: value, label: local.label, policy_type: policyType });
+  applyPolicySelection(value, policyType, local);
+  setActionStatus(statusTarget, "ok", "use latest policy", { policy_path: value, label: local.label, policy_type: policyType, output_dir: local.output_dir || "" });
   return local;
 }
 
@@ -2967,19 +3332,130 @@ function syntheticCameraPrimLabel(cameraPrims) {
 
 function renderIsaacSyntheticProgress(data) {
   const progress = (data && data.progress) || {};
+  const isDomainMimicJob = Boolean(
+    data
+    && (
+      data.job_id
+      || data.job
+      || (data.summary && data.summary.mimic)
+      || String(progress.stage || "").includes("rgbd_render")
+    )
+    && (
+      data.mimic
+      || (data.summary && data.summary.mimic)
+      || String(data.kind || data.job?.kind || "").includes("mimic")
+      || String(progress.stage || "").includes("rgbd_render")
+    )
+  );
+  const unifiedProgress = isDomainMimicJob
+    ? isaacDomainMimicProgressPayload(data)
+    : {
+        stage: data && data.status ? data.status : "waiting",
+        done: Number(progress.percent || 0),
+        total: 100,
+        percent: Number(progress.percent || (data && data.ok ? 100 : 0)),
+        message: data && data.status ? data.status : "waiting",
+      };
   renderUnifiedProgress(
     "isaac_synthetic",
     isaacSyntheticProgressEl,
     isaacSyntheticProgressLabelEl,
     isaacSyntheticProgressBarEl,
-    {
-      stage: data && data.status ? data.status : "waiting",
-      done: Number(progress.percent || 0),
-      total: 100,
-      percent: Number(progress.percent || (data && data.ok ? 100 : 0)),
-      message: data && data.status ? data.status : "waiting",
-    },
+    unifiedProgress,
+    isDomainMimicJob ? { label: "7", stage: data && data.status ? data.status : "waiting" } : {},
   );
+}
+
+function isaacLabPreviewMediaHtml(title, ref) {
+  const serveUrl = ref && ref.serve_url ? String(ref.serve_url) : "";
+  const rawPath = ref && ref.path ? String(ref.path) : "";
+  if (!serveUrl) {
+    return `
+      <figure>
+        <div class="visual-placeholder">missing</div>
+        <figcaption>${escapeHtml(title)}</figcaption>
+      </figure>
+    `;
+  }
+  const lowerPath = rawPath.toLowerCase();
+  if (lowerPath.endsWith(".html") || lowerPath.endsWith(".htm")) {
+    return `
+      <figure>
+        <div class="visual-placeholder">
+          <a class="btn mini" href="${escapeHtml(serveUrl)}" target="_blank" rel="noopener">Open preview</a>
+        </div>
+        <figcaption>${escapeHtml(title)}</figcaption>
+      </figure>
+    `;
+  }
+  return `
+    <figure>
+      <img src="${escapeHtml(serveUrl)}" alt="${escapeHtml(title)}" loading="lazy" />
+      <figcaption>${escapeHtml(title)}</figcaption>
+    </figure>
+  `;
+}
+
+function renderIsaacLabPreviewCards(sourceLabels) {
+  const cards = Array.isArray(sourceLabels.cards) ? sourceLabels.cards : [];
+  if (!cards.length) return "";
+  const cardHtml = cards.map((card) => {
+    const media = card.media || {};
+    const trajectory = card.trajectory || {};
+    const qa = card.qa || card.metrics || {};
+    const eligible = Boolean(card.train_eligible);
+    const state = eligible ? "ok" : "warning";
+    const title = [
+      card.source_type || "source",
+      card.episode_index !== undefined ? `ep=${card.episode_index}` : "",
+      card.frame_index !== undefined ? `frame=${card.frame_index}` : "",
+      card.camera ? `cam=${card.camera}` : "",
+      card.variant_index !== undefined ? `v=${card.variant_index}` : "",
+    ].filter(Boolean).join(" · ");
+    const mediaHtml = [
+      ["real rgb", media.real_rgb],
+      ["raw depth", media.raw_depth_preview],
+      ["isaac rgbd", media.isaac_rgbd],
+      ["replicator rgb", media.replicator_rgb],
+      ["replicator depth", media.replicator_depth_preview],
+      ["generated rgb", media.generated_rgb_preview],
+      ["generated depth", media.generated_depth_preview],
+      ["trajectory preview", trajectory.preview],
+    ]
+      .filter(([, ref]) => ref && (ref.available || ref.serve_url))
+      .map(([label, ref]) => isaacLabPreviewMediaHtml(label, ref))
+      .join("");
+    return `
+      <article class="lerobot-report-card wide">
+        <div class="lerobot-report-card-title">
+          <strong>${escapeHtml(title || card.row_id || "Isaac Lab source")}</strong>
+          <span class="state-pill ${escapeHtml(state)}">${escapeHtml(eligible ? "train" : (card.train_exclusion_reason || "preview"))}</span>
+        </div>
+        <div class="visual-media-grid">${mediaHtml || "<p>No preview media available.</p>"}</div>
+        ${reportRowsHtml([
+          ["source", card.source_type || "-"],
+          ["episode", card.episode_index ?? "-"],
+          ["frame", card.frame_index ?? "-"],
+          ["camera", card.camera || "-"],
+          ["trajectory", trajectory.trajectory_id || card.source_id || "-"],
+        ])}
+        <details><summary>Source metadata</summary><pre class="command-output">${escapeHtml(JSON.stringify({
+          row_id: card.row_id || "",
+          qa,
+          metrics: card.metrics || {},
+          trajectory,
+          train_exclusion_reason: card.train_exclusion_reason || "",
+        }, null, 2))}</pre></details>
+      </article>
+    `;
+  }).join("");
+  return `
+    <div class="visual-summary">
+      <strong>Isaac Lab preview sources</strong>
+      <span>preview cards=${escapeHtml(String(cards.length))} · requested=${escapeHtml(String(sourceLabels.requested_count ?? ""))}</span>
+    </div>
+    <div class="lerobot-report-grid">${cardHtml}</div>
+  `;
 }
 
 function renderIsaacSynthetic(data) {
@@ -3088,6 +3564,22 @@ function renderIsaacSynthetic(data) {
     ["synthetic effective", syntheticTrajectoryTotal.effective_training_samples ?? "-"],
     ["blocked", blockers.length],
   ]);
+  const e2e = trainingExposure.e2e || {};
+  const ilTrain = trainingExposure.il_train || {};
+  const ilEval = trainingExposure.il_eval || {};
+  const annotation = hdf5.annotation || {};
+  const domainProfile = data?.domain_randomization_profile || data?.request?.domain_randomization_profile || (e2e.domain_randomization_profile) || (isaacLabDomainRandomizationProfileInput ? isaacLabDomainRandomizationProfileInput.value : "conservative");
+  setSyntheticCard(isaacLabE2eStatusCardEl, "Isaac Lab Mimic + IL E2E", [
+    ["Version Gate", compatibility.compatibility_status || data?.status || "-"],
+    ["HDF5 Source", hdf5.status || "not run"],
+    ["Annotation", annotation.status || e2e.annotation?.status || "not run"],
+    ["Mimic Generation", data?.mimic?.status || e2e.mimic?.status || "not run"],
+    ["Domain Randomization Profile", domainProfile || "conservative"],
+    ["Generated Success Import", syntheticTrajectoryMetricLabel("mimic")],
+    ["Isaac Lab IL Training", ilTrain.status || e2e.train?.status || "not run"],
+    ["Isaac Lab IL Evaluation", ilEval.status || e2e.eval?.status || "not run"],
+    ["LeRobot Training Exposure", trainingExposure.validation_status || syntheticEffectiveSampleLabel()],
+  ]);
   if (isaacSyntheticStepTraceEl) {
     const trace = Array.isArray(data && data.step_trace) ? data.step_trace : [];
     const items = trace.map((item) => `
@@ -3101,6 +3593,7 @@ function renderIsaacSynthetic(data) {
       <span>status=${escapeHtml(data && data.status ? data.status : "unknown")} · blockers=${escapeHtml(String(blockers.length))}</span>
       <span>${escapeHtml(data && data.pipeline_mode ? data.pipeline_mode : "")}</span>
     </div>
+    ${renderIsaacLabPreviewCards(sourceLabels)}
     <details><summary>Validation report</summary><pre class="command-output">${escapeHtml(JSON.stringify(validation, null, 2))}</pre></details>
     <details><summary>Full response</summary><pre class="command-output">${escapeHtml(JSON.stringify(data || {}, null, 2))}</pre></details>
   `;
@@ -3111,9 +3604,12 @@ async function runIsaacAugmentation(statusTarget = null) {
   renderIsaacAugmentationProgress({ status: "request_sent" });
   setActionStatus(statusTarget, "running", "Isaac data augmentation", { status: "request sent" });
   try {
-    const data = await postJson("/api/lerobot/augment/isaac", payload, 300000);
+    const data = await postJson("/api/lerobot/augment/isaac", payload, 30000);
     renderIsaacAugmentation(data);
     renderResult("Isaac data augmentation", data);
+    if (data && data.ok && data.job_id && String(data.status || "").toUpperCase() === "RUNNING") {
+      return await pollIsaacAugmentationJob(data.job_id, payload, statusTarget);
+    }
     setActionStatus(statusTarget, data && data.ok ? "ok" : "error", "Isaac data augmentation", data);
     return data;
   } catch (err) {
@@ -3122,6 +3618,30 @@ async function runIsaacAugmentation(statusTarget = null) {
     renderResult("Isaac data augmentation", error);
     setActionStatus(statusTarget, "error", "Isaac data augmentation", error);
     return error;
+  }
+}
+
+function delay(ms) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+async function pollIsaacAugmentationJob(jobId, basePayload, statusTarget = null) {
+  const payload = {
+    ...basePayload,
+    isaac_data_augmentation_job_id: jobId,
+  };
+  let latest = null;
+  for (;;) {
+    await delay(1500);
+    latest = await postJson("/api/lerobot/augment/status", payload, 30000);
+    renderIsaacAugmentation(latest);
+    renderResult("Isaac data augmentation", latest);
+    const status = String(latest && latest.status ? latest.status : "").toUpperCase();
+    if (status === "COMPLETED" || status === "FAILED" || !latest || latest.ok === false) {
+      setActionStatus(statusTarget, latest && latest.ok ? "ok" : "error", "Isaac data augmentation", latest);
+      return latest;
+    }
+    setActionStatus(statusTarget, "running", "Isaac data augmentation", latest);
   }
 }
 
@@ -3134,6 +3654,448 @@ async function runIsaacSyntheticAction(label, endpoint, statusTarget = null, tim
     renderIsaacSynthetic(data);
     renderResult(label, data);
     setActionStatus(statusTarget, data && data.ok ? "ok" : "error", label, data);
+    return data;
+  } catch (err) {
+    const error = { ok: false, status: "request_failed", error: String(err) };
+    renderIsaacSynthetic(error);
+    renderResult(label, error);
+    setActionStatus(statusTarget, "error", label, error);
+    return error;
+  }
+}
+
+function isaacDomainMimicPayload(overrides = {}) {
+  const rgbdEnabled = checkboxValue(isaacLabDomainMimicRgbdInput || isaacLabMimicCamerasInput);
+  const domainMimicOverwrite = boolValue(isaacLabDomainMimicOverwriteInput) || boolValue(isaacLabDomainMimicOverwriteAllInput);
+  const domainMimicEpisodeIndices = boolValue(isaacLabDomainMimicOverwriteAllInput) ? "" : (isaacLabDomainMimicEpisodesInput ? isaacLabDomainMimicEpisodesInput.value.trim() : "");
+  syncIsaacLabMimicRgbdInputs(rgbdEnabled);
+  return isaacSyntheticPayload({
+    mode: "live",
+    runtime_mode: "live",
+    dry_run: false,
+    force_rebuild: domainMimicOverwrite,
+    resume: !domainMimicOverwrite,
+    overwrite_latest: domainMimicOverwrite,
+    isaac_lab_episode_indices: domainMimicEpisodeIndices,
+    enable_mimic: true,
+    enable_hdf5_export: true,
+    enable_replicator: false,
+    mimic_generation_backend: "official",
+    require_digital_twin_pass: false,
+    require_depth_pass: false,
+    require_physics_pass: false,
+    require_articulation_pass: false,
+    max_source_frames: 0,
+    attempts_per_source_frame: 3,
+    mimic_trials: 3,
+    mimic_num_envs: 3,
+    mimic_camera_width: 320,
+    mimic_camera_height: 240,
+    mimic_annotation_mode: "auto",
+    isaac_lab_visualize_generation: checkboxValue(isaacLabVisualizeGenerationInput),
+    domain_randomization_profile: isaacLabDomainRandomizationProfileInput
+      ? isaacLabDomainRandomizationProfileInput.value || "standard"
+      : "standard",
+    mimic_enable_cameras: rgbdEnabled,
+    ...overrides,
+  });
+}
+
+function isaacDomainMimicFollowupPayload(payload = null) {
+  return {
+    ...(payload || isaacDomainMimicPayload()),
+    force_rebuild: false,
+    overwrite_latest: false,
+    resume: true,
+  };
+}
+
+function formatElapsedFromIso(value) {
+  const startedMs = Date.parse(String(value || ""));
+  if (!Number.isFinite(startedMs)) return "";
+  const elapsedSeconds = Math.max(0, Math.floor((Date.now() - startedMs) / 1000));
+  const hours = Math.floor(elapsedSeconds / 3600);
+  const minutes = Math.floor((elapsedSeconds % 3600) / 60);
+  const seconds = elapsedSeconds % 60;
+  if (hours > 0) return `${hours}h ${String(minutes).padStart(2, "0")}m`;
+  if (minutes > 0) return `${minutes}m ${String(seconds).padStart(2, "0")}s`;
+  return `${seconds}s`;
+}
+
+function isaacDomainMimicProgressMessage(...parts) {
+  return parts.map((part) => String(part || "").trim()).filter(Boolean).join(" · ");
+}
+
+function isaacDomainMimicProgressPayload(data) {
+  const responseProgress = data && typeof data.progress === "object" ? data.progress : {};
+  const jobProgress = data && data.job && typeof data.job.progress === "object" ? data.job.progress : {};
+  const progress = Object.keys(jobProgress).length ? jobProgress : responseProgress;
+  const mimic = data && data.summary && typeof data.summary.mimic === "object"
+    ? data.summary.mimic
+    : data && typeof data.mimic === "object"
+      ? data.mimic
+      : {};
+  const success = Number(mimic.success_count ?? 0);
+  const failure = Number(mimic.failure_count ?? 0);
+  const status = String(data && data.status ? data.status : "waiting").toUpperCase();
+  const stage = String(progress.stage || status || "waiting").toUpperCase();
+  const progressDone = Number(progress.done ?? progress.current_step ?? 0);
+  const progressTotal = Number(progress.total ?? progress.total_steps ?? 0);
+  const configuredTotal = Number(mimic.candidate_count ?? progressTotal ?? mimic.mimic_trials ?? 100);
+  const useBackendProgressOnly = status === "RUNNING" && (stage.includes("RGBD_RENDER") || progressTotal > 0);
+  const done = useBackendProgressOnly ? progressDone : success + failure;
+  const total = Math.max(
+    progressTotal > 0 ? progressTotal : configuredTotal > 0 ? configuredTotal : 100,
+    done,
+  );
+  const countPercent = total > 0 && done > 0 ? (done / total) * 100 : 0;
+  const backendPercent = Number(progress.percent ?? 0);
+  const percent = status === "COMPLETED" ? 100 : Math.max(backendPercent, countPercent);
+  const jobLabel = data && data.job_id ? `job=${data.job_id}` : "";
+  const elapsed = formatElapsedFromIso(data && data.job ? data.job.started_at : data && data.started_at);
+  const runningDetails = useBackendProgressOnly
+    ? [
+        configuredTotal > 0 ? `target=${configuredTotal}` : "",
+        elapsed ? `elapsed=${elapsed}` : "",
+      ].filter(Boolean).join(" · ")
+    : "";
+  const message = progress.message
+    ? String(progress.message || "")
+    : isaacDomainMimicProgressMessage(jobLabel, runningDetails);
+  return {
+    stage: stage || "WAITING",
+    done: done > 0 ? done : progressDone,
+    total: total > 0 ? total : Number(progress.total ?? 100),
+    percent,
+    message,
+    indeterminate: useBackendProgressOnly && backendPercent <= 5 && done <= 0,
+  };
+}
+
+function renderIsaacDomainMimicLauncherProgress(data) {
+  renderUnifiedProgress(
+    "isaac_domain_mimic_launcher",
+    isaacLabLauncherProgressEl,
+    isaacLabLauncherProgressLabelEl,
+    isaacLabLauncherProgressBarEl,
+    isaacDomainMimicProgressPayload(data),
+    { label: "7", stage: data && data.status ? data.status : "waiting" },
+  );
+}
+
+function isaacLabOutputIssueLabel(issue) {
+  const code = String(issue && issue.code ? issue.code : "").trim();
+  const message = String(issue && issue.message ? issue.message : "").trim();
+  if (code === "MIMIC_CANDIDATE_COUNT_MISMATCH") return `Mimic candidate mismatch · ${message || code}`;
+  if (code === "MIMIC_REPLAY_FAILURES_PRESENT") return `Mimic replay failed · ${message || code}`;
+  if (code === "MIMIC_REPLAY_VALIDATION_PENDING") return `Mimic replay pending · ${message || code}`;
+  if (code) return `${code} · ${message || "check failed"}`;
+  return message || "Isaac Lab output check failed";
+}
+
+function renderIsaacLabOutputCheckList(data = null) {
+  if (!isaacLabLauncherFailureListEl) return;
+  if (data) lastIsaacLabOutputCheck = data;
+  const result = data || lastIsaacLabOutputCheck || {};
+  const issues = Array.isArray(result.issues) ? result.issues : [];
+  const checks = Array.isArray(result.checks) ? result.checks : [];
+  const summary = result.check_summary || {};
+  if (!issues.length && checks.length) {
+    isaacLabLauncherFailureListEl.innerHTML = `
+      <div class="lerobot-render-failure-empty">
+        Isaac Lab output check passed · episodes=${escapeHtml(String(summary.episode_count ?? 0))}
+        · mimic=${escapeHtml(String(summary.mimic_success_count ?? 0))}/${escapeHtml(String(summary.expected_mimic_candidates ?? 0))}
+        · train=${escapeHtml(String(summary.training_row_count ?? 0))}
+      </div>
+    `;
+    return;
+  }
+  if (!issues.length) {
+    isaacLabLauncherFailureListEl.innerHTML = "";
+    return;
+  }
+  const lines = issues.slice(0, 16).map(isaacLabOutputIssueLabel);
+  if (issues.length > 16) lines.push(`+${issues.length - 16} more issue(s)`);
+  isaacLabLauncherFailureListEl.innerHTML = `
+    <div class="lerobot-render-failure-title">Isaac Lab Failed / Blocked Outputs</div>
+    <ul>${lines.map((line) => `<li>${escapeHtml(line)}</li>`).join("")}</ul>
+  `;
+}
+
+async function checkIsaacDomainMimicOutputs(statusTarget = null, status = "checking Isaac Lab outputs", payload = null) {
+  const label = "Isaac Lab output check";
+  const checkPayload = isaacDomainMimicFollowupPayload(payload);
+  setActionStatus(statusTarget, "running", label, { status });
+  try {
+    const data = await postJson("/api/lerobot/isaac-lab/check-outputs", checkPayload, 60000);
+    renderIsaacLabOutputCheckList(data);
+    renderIsaacSynthetic(data);
+    renderResult(label, data);
+    setActionStatus(
+      statusTarget,
+      data && data.ok ? "ok" : "error",
+      label,
+      data && data.ok ? { status: "Isaac Lab output check passed", check_summary: data.check_summary || {} } : data,
+    );
+    return data;
+  } catch (err) {
+    const error = { ok: false, status: "check_failed", error: String(err) };
+    renderIsaacLabOutputCheckList(error);
+    renderResult(label, error);
+    setActionStatus(statusTarget, "error", label, error);
+    return error;
+  }
+}
+
+async function refreshIsaacDomainMimicTrainingImport(payload, statusTarget = null) {
+  const label = "Domain randomization + mimic pipeline";
+  setActionStatus(statusTarget, "running", label, { status: "refreshing training import" });
+  renderIsaacDomainMimicLauncherProgress({ status: "refreshing_training_import", progress: { percent: 95 } });
+  const refreshed = await postJson("/api/lerobot/isaac-lab/build-synthetic", payload, 300000);
+  renderIsaacSynthetic(refreshed);
+  renderResult(label, refreshed);
+  renderIsaacDomainMimicLauncherProgress({ status: refreshed && refreshed.ok ? "COMPLETED" : "FAILED", progress: { percent: refreshed && refreshed.ok ? 100 : 95 } });
+  setActionStatus(statusTarget, refreshed && refreshed.ok ? "ok" : "error", label, refreshed);
+  if (refreshed && refreshed.ok) {
+    return await checkIsaacDomainMimicOutputs(statusTarget, "checking completed Isaac Lab outputs", payload);
+  }
+  return refreshed;
+}
+
+function shouldRenderIsaacLabMimicRgbdAfterGeneration(payload = {}) {
+  return Boolean(payload && payload.isaac_lab_visualize_generation && payload.mimic_enable_cameras);
+}
+
+function isaacLabMimicStatusPostRunStage(data = {}) {
+  const jobPostRun = data && data.job && typeof data.job.post_run === "object" ? data.job.post_run : {};
+  const directPostRun = data && typeof data.post_run === "object" ? data.post_run : {};
+  const summary = data && data.summary && typeof data.summary === "object" ? data.summary : {};
+  const summaryMimic = summary && typeof summary.mimic === "object" ? summary.mimic : {};
+  const summaryRunner = summary && typeof summary.runner === "object" ? summary.runner : {};
+  const mimicRunner = summaryMimic && typeof summaryMimic.runner === "object" ? summaryMimic.runner : {};
+  const summaryPostRun = summaryRunner && typeof summaryRunner.post_run === "object" ? summaryRunner.post_run : {};
+  const mimicPostRun = mimicRunner && typeof mimicRunner.post_run === "object" ? mimicRunner.post_run : {};
+  return String(jobPostRun.stage || directPostRun.stage || summaryPostRun.stage || mimicPostRun.stage || "").trim().toLowerCase();
+}
+
+function isaacLabMimicStatusIsRgbdRender(data = {}) {
+  return isaacLabMimicStatusPostRunStage(data) === "rgbd_render_after_generation";
+}
+
+async function pollIsaacDomainMimicJob(jobId, basePayload, statusTarget = null) {
+  const label = "Domain randomization + mimic pipeline";
+  const payload = { ...isaacDomainMimicFollowupPayload(basePayload), job_id: jobId };
+  let latest = null;
+  for (;;) {
+    await delay(2000);
+    latest = await postJson("/api/lerobot/isaac-lab/mimic/status", payload, 30000);
+    renderIsaacDomainMimicLauncherProgress(latest);
+    renderIsaacSynthetic(latest);
+    renderResult(label, latest);
+    if (isaacSyntheticJobIsTerminal(latest)) {
+      const status = String(latest && latest.status ? latest.status : "").toUpperCase();
+      if (latest && latest.ok && status === "COMPLETED") {
+        const refreshed = await refreshIsaacDomainMimicTrainingImport(isaacDomainMimicFollowupPayload(basePayload), statusTarget);
+        if (refreshed && refreshed.ok && shouldRenderIsaacLabMimicRgbdAfterGeneration(basePayload) && !isaacLabMimicStatusIsRgbdRender(latest)) {
+          return await renderMissingIsaacLabMimicRgbd(statusTarget, basePayload);
+        }
+        return refreshed;
+      }
+      setActionStatus(statusTarget, latest && latest.ok ? "ok" : "error", label, latest);
+      return latest;
+    }
+    setActionStatus(statusTarget, "running", label, latest);
+  }
+}
+
+async function runIsaacDomainMimicPipeline(statusTarget = null) {
+  const label = "Domain randomization + mimic pipeline";
+  const payload = isaacDomainMimicPayload();
+  const followupPayload = isaacDomainMimicFollowupPayload(payload);
+  renderIsaacLabOutputCheckList({ issues: [], checks: [] });
+  renderIsaacSyntheticProgress({ status: "request_sent", progress: { percent: 5 } });
+  renderIsaacDomainMimicLauncherProgress({ status: "request_sent", progress: { percent: 5 } });
+  setActionStatus(statusTarget, "running", label, { status: "request sent" });
+  try {
+    const data = await postJson("/api/lerobot/isaac-lab/domain-mimic/run", payload, 300000);
+    renderIsaacDomainMimicLauncherProgress(data);
+    renderIsaacSynthetic(data);
+    renderResult(label, data);
+    lastIsaacDomainMimicJobId = String(data && (data.job_id || (data.job && data.job.job_id)) || lastIsaacDomainMimicJobId || "");
+    if (lastIsaacDomainMimicJobId && !isaacSyntheticJobIsTerminal(data)) {
+      setActionStatus(statusTarget, "running", label, data);
+      return await pollIsaacDomainMimicJob(lastIsaacDomainMimicJobId, followupPayload, statusTarget);
+    }
+    setActionStatus(statusTarget, data && data.ok ? "ok" : "error", label, data);
+    if (data && data.ok) {
+      const checked = await checkIsaacDomainMimicOutputs(statusTarget, "checking completed Isaac Lab outputs", followupPayload);
+      if (checked && checked.ok && shouldRenderIsaacLabMimicRgbdAfterGeneration(followupPayload)) {
+        return await renderMissingIsaacLabMimicRgbd(statusTarget, followupPayload);
+      }
+      return checked;
+    }
+    return data;
+  } catch (err) {
+    const error = { ok: false, status: "request_failed", error: String(err) };
+    renderIsaacSynthetic(error);
+    renderResult(label, error);
+    setActionStatus(statusTarget, "error", label, error);
+    return error;
+  }
+}
+
+async function renderMissingIsaacLabMimicRgbd(statusTarget = null, basePayload = null) {
+  const label = "Render missing Mirror RGB-D";
+  const payload = isaacDomainMimicFollowupPayload(basePayload || isaacDomainMimicPayload({
+    isaac_lab_visualize_generation: true,
+    mimic_enable_cameras: true,
+  }));
+  payload.isaac_lab_visualize_generation = true;
+  payload.mimic_enable_cameras = true;
+  renderIsaacLabOutputCheckList({ issues: [], checks: [] });
+  renderIsaacSyntheticProgress({ status: "lab_rgbd_render_requested", progress: { percent: 5 } });
+  renderIsaacDomainMimicLauncherProgress({ status: "lab_rgbd_render_requested", progress: { percent: 5 } });
+  setActionStatus(statusTarget, "running", label, { status: "request sent" });
+  try {
+    const data = await postJson("/api/lerobot/isaac-lab/mimic-rgbd/render-missing", payload, 300000);
+    renderIsaacDomainMimicLauncherProgress(data);
+    renderIsaacSynthetic(data);
+    renderResult(label, data);
+    lastIsaacDomainMimicJobId = String(data && (data.job_id || (data.job && data.job.job_id)) || lastIsaacDomainMimicJobId || "");
+    if (lastIsaacDomainMimicJobId && !isaacSyntheticJobIsTerminal(data)) {
+      setActionStatus(statusTarget, "running", label, data);
+      return await pollIsaacDomainMimicJob(lastIsaacDomainMimicJobId, payload, statusTarget);
+    }
+    setActionStatus(statusTarget, data && data.ok ? "ok" : "error", label, data);
+    if (data && data.ok) {
+      return await checkIsaacDomainMimicOutputs(statusTarget, "checking completed Mirror RGB-D output", payload);
+    }
+    return data;
+  } catch (err) {
+    const error = { ok: false, status: "request_failed", error: String(err) };
+    renderIsaacSynthetic(error);
+    renderResult(label, error);
+    setActionStatus(statusTarget, "error", label, error);
+    return error;
+  }
+}
+
+async function stopIsaacDomainMimicPipeline(statusTarget = null) {
+  const label = "Domain randomization + mimic stop";
+  const payload = isaacDomainMimicFollowupPayload(
+    isaacDomainMimicPayload(lastIsaacDomainMimicJobId ? { job_id: lastIsaacDomainMimicJobId } : {}),
+  );
+  setActionStatus(statusTarget, "running", label, { status: "request sent" });
+  try {
+    const data = await postJson("/api/lerobot/isaac-lab/mimic/stop", payload, 30000);
+    lastIsaacDomainMimicJobId = String(data && (data.job_id || (data.job && data.job.job_id)) || lastIsaacDomainMimicJobId || "");
+    renderIsaacDomainMimicLauncherProgress(data);
+    renderIsaacSynthetic(data);
+    renderResult(label, data);
+    setActionStatus(statusTarget, data && data.ok ? "ok" : "error", label, data);
+    return data;
+  } catch (err) {
+    const error = { ok: false, status: "request_failed", error: String(err) };
+    renderIsaacSynthetic(error);
+    renderResult(label, error);
+    setActionStatus(statusTarget, "error", label, error);
+    return error;
+  }
+}
+
+async function restoreIsaacDomainMimicPipelineStatus() {
+  const statusTarget = $("isaac-lab-launcher-action-status");
+  try {
+    const data = await postJson("/api/lerobot/isaac-lab/mimic/status", isaacDomainMimicPayload(), 30000);
+    if (!data || !data.ok || !data.job_id) return null;
+    lastIsaacDomainMimicJobId = String(data.job_id || "");
+    renderIsaacDomainMimicLauncherProgress(data);
+    renderIsaacSynthetic(data);
+    setActionStatus(statusTarget, isaacSyntheticJobIsTerminal(data) ? "ok" : "running", "Domain randomization + mimic pipeline", data);
+    if (!isaacSyntheticJobIsTerminal(data)) {
+      pollIsaacDomainMimicJob(lastIsaacDomainMimicJobId, isaacDomainMimicFollowupPayload(), statusTarget);
+    }
+    return data;
+  } catch (err) {
+    return null;
+  }
+}
+
+function isaacSyntheticLiveE2ePayload(overrides = {}) {
+  return isaacSyntheticPayload({
+    mode: "live",
+    runtime_mode: "live",
+    dry_run: false,
+    e2e_create_fixture: false,
+    e2e_episodes: 3,
+    e2e_episode_s: 10,
+    e2e_fps: 15,
+    mimic_trials: 3,
+    mimic_enable_cameras: checkboxValue(isaacLabMimicCamerasInput),
+    mimic_camera_width: 320,
+    mimic_camera_height: 240,
+    enable_mimic: true,
+    enable_hdf5_export: true,
+    enable_replicator: false,
+    isaac_lab_visualize_generation: checkboxValue(isaacLabVisualizeGenerationInput),
+    ...overrides,
+  });
+}
+
+function isaacSyntheticJobIsTerminal(data) {
+  const status = String(data && data.status ? data.status : data && data.job && data.job.status ? data.job.status : "").toUpperCase();
+  return ["BLOCKED", "COMPLETED", "FAILED", "STOPPED", "CANCELLED"].includes(status);
+}
+
+async function pollIsaacLiveE2eJob(jobId, basePayload, statusTarget = null) {
+  const payload = { ...basePayload, job_id: jobId };
+  let latest = null;
+  for (;;) {
+    await delay(2000);
+    latest = await postJson("/api/lerobot/isaac-lab/live-e2e/status", payload, 30000);
+    renderIsaacSynthetic(latest);
+    renderResult("Isaac Lab 10s x 3 live check", latest);
+    if (isaacSyntheticJobIsTerminal(latest)) {
+      setActionStatus(statusTarget, latest && latest.ok ? "ok" : "error", "Isaac Lab 10s x 3 live check", latest);
+      return latest;
+    }
+    setActionStatus(statusTarget, "running", "Isaac Lab 10s x 3 live check", latest);
+  }
+}
+
+async function runIsaacLiveE2eCheck(statusTarget = null) {
+  const payload = isaacSyntheticLiveE2ePayload();
+  renderIsaacSyntheticProgress({ status: "request_sent", progress: { percent: 5 } });
+  setActionStatus(statusTarget, "running", "Isaac Lab 10s x 3 live check", { status: "request sent" });
+  try {
+    const data = await postJson("/api/lerobot/isaac-lab/run-live-e2e-check", payload, 30000);
+    renderIsaacSynthetic(data);
+    renderResult("Isaac Lab 10s x 3 live check", data);
+    lastIsaacLiveE2eJobId = String(data && (data.job_id || (data.job && data.job.job_id)) || lastIsaacLiveE2eJobId || "");
+    if (lastIsaacLiveE2eJobId && !isaacSyntheticJobIsTerminal(data)) {
+      setActionStatus(statusTarget, "running", "Isaac Lab 10s x 3 live check", data);
+      return await pollIsaacLiveE2eJob(lastIsaacLiveE2eJobId, payload, statusTarget);
+    }
+    setActionStatus(statusTarget, data && data.ok ? "ok" : "error", "Isaac Lab 10s x 3 live check", data);
+    return data;
+  } catch (err) {
+    const error = { ok: false, status: "request_failed", error: String(err) };
+    renderIsaacSynthetic(error);
+    renderResult("Isaac Lab 10s x 3 live check", error);
+    setActionStatus(statusTarget, "error", "Isaac Lab 10s x 3 live check", error);
+    return error;
+  }
+}
+
+async function runIsaacLiveE2eControl(label, endpoint, statusTarget = null) {
+  const payload = isaacSyntheticLiveE2ePayload(lastIsaacLiveE2eJobId ? { job_id: lastIsaacLiveE2eJobId } : {});
+  setActionStatus(statusTarget, "running", label, { status: "request sent" });
+  try {
+    const data = await postJson(endpoint, payload, 30000);
+    renderIsaacSynthetic(data);
+    renderResult(label, data);
+    lastIsaacLiveE2eJobId = String(data && (data.job_id || (data.job && data.job.job_id)) || lastIsaacLiveE2eJobId || "");
+    setActionStatus(statusTarget, data && data.ok ? (isaacSyntheticJobIsTerminal(data) ? "ok" : "running") : "error", label, data);
     return data;
   } catch (err) {
     const error = { ok: false, status: "request_failed", error: String(err) };
@@ -3254,6 +4216,7 @@ function renderUnifiedProgress(key, progressEl, labelEl, barEl, progress, option
     const countText = total > 0 ? `${done} / ${total}` : `${done} / ?`;
     labelEl.textContent = `${prefix ? `${prefix} · ` : ""}${countText} · ${percent.toFixed(1)}% · ${stage}${message ? ` · ${message}` : ""}`;
   }
+  if (barEl) barEl.classList.toggle("is-indeterminate", Boolean(progress.indeterminate));
   smoothProgressController(key, barEl).update(percent);
 }
 
@@ -3307,6 +4270,66 @@ function resetIsaacRgbdRenderProgressBar() {
   controller.reset();
 }
 
+function rgbdEpisodeLabel(episodeIndex) {
+  const parsed = Number(episodeIndex);
+  return Number.isFinite(parsed) ? `episode ${parsed}` : `episode ${episodeIndex}`;
+}
+
+function renderIsaacRgbdRenderFailureList() {
+  if (!isaacRgbdRenderFailureListEl) return;
+  const job = lastIsaacRgbdRenderJob || {};
+  const health = lastIsaacRgbdHealth || {};
+  const sidecars = health.sidecars || {};
+  const trainingExclusions = sidecars.training_exclusions || {};
+  const isaacRgbd = sidecars.isaac_rgbd || {};
+  const contactAudit = isaacRgbd.contact_audit || {};
+  const coverage = isaacRgbd.coverage || {};
+  const failedFrames = Array.isArray(job.failed_frames) ? job.failed_frames : [];
+  const excludedEpisodes = Array.isArray(trainingExclusions.episode_indices)
+    ? trainingExclusions.episode_indices
+    : [];
+  const severeEpisodes = Array.isArray(contactAudit.severe_episodes)
+    ? contactAudit.severe_episodes
+    : [];
+  const missingEpisodes = Array.isArray(coverage.missing_episode_indices)
+    ? coverage.missing_episode_indices
+    : [];
+  const lines = [];
+  if (failedFrames.length) {
+    lines.push(...failedFrames.slice(0, 12).map((frame) => {
+      const episode = rgbdEpisodeLabel(frame.episode_index);
+      const frameIndex = frame.frame_index ?? "-";
+      const message = frame.message || frame.status || "render failed";
+      return `Render failed · ${episode} · frame ${frameIndex} · ${message}`;
+    }));
+    if (failedFrames.length > 12) lines.push(`Render failed · +${failedFrames.length - 12} more frame(s)`);
+  } else if (Number(job.failed || 0) > 0 && job.last_error) {
+    lines.push(`Render failed · ${job.failed} frame(s) · ${job.last_error}`);
+  }
+  if (excludedEpisodes.length) {
+    lines.push(`Excluded from sim/synthetic data · ${excludedEpisodes.map(rgbdEpisodeLabel).join(", ")}`);
+  }
+  if (missingEpisodes.length || Number(coverage.missing_episode_count || 0) > 0) {
+    const listed = missingEpisodes.slice(0, 16).map(rgbdEpisodeLabel).join(", ");
+    const hidden = Math.max(0, Number(coverage.missing_episode_count || 0) - missingEpisodes.slice(0, 16).length);
+    lines.push(`Incomplete RGB-D coverage · missing ${coverage.missing_episode_count || missingEpisodes.length} episode(s)${listed ? ` · ${listed}` : ""}${hidden ? `, +${hidden} more` : ""}`);
+  }
+  for (const episode of severeEpisodes.slice(0, 8)) {
+    const episodeIndex = episode.episode_index;
+    const badFrames = episode.bad_frame_count ?? 0;
+    const liftedFrames = episode.lifted_frame_count ?? 0;
+    lines.push(`Contact warning · ${rgbdEpisodeLabel(episodeIndex)} · bad=${badFrames} · lifted=${liftedFrames}`);
+  }
+  if (!lines.length) {
+    isaacRgbdRenderFailureListEl.innerHTML = `<div class="lerobot-render-failure-empty">No failed/excluded RGB-D episodes detected.</div>`;
+    return;
+  }
+  isaacRgbdRenderFailureListEl.innerHTML = `
+    <div class="lerobot-render-failure-title">RGB-D Failed / Excluded Data</div>
+    <ul>${lines.map((line) => `<li>${escapeHtml(line)}</li>`).join("")}</ul>
+  `;
+}
+
 function renderIsaacRgbdRenderProgress(data) {
   const job = data && data.post_render
     ? data.post_render
@@ -3314,6 +4337,7 @@ function renderIsaacRgbdRenderProgress(data) {
       ? data.isaac_rgbd_post_render
       : data || {};
   if (!isaacRgbdRenderProgressEl || !job || !Object.keys(job).length) return;
+  lastIsaacRgbdRenderJob = job;
   isaacRgbdRenderProgressEl.classList.remove("hidden");
   const done = Number(job.done || 0);
   const total = Number(job.total || 0);
@@ -3327,6 +4351,7 @@ function renderIsaacRgbdRenderProgress(data) {
     isaacRgbdRenderProgressLabelEl.textContent = `${done} / ${total} · ${clampedPercent.toFixed(1)}% · rendered=${rendered} · skipped=${skipped} · failed=${failed} · ${status}`;
   }
   updateIsaacRgbdRenderProgressBar(clampedPercent);
+  renderIsaacRgbdRenderFailureList();
 }
 
 function isaacRgbdRenderIsActive(data) {
@@ -3335,7 +4360,7 @@ function isaacRgbdRenderIsActive(data) {
     : data && data.isaac_rgbd_post_render
       ? data.isaac_rgbd_post_render
       : data || {};
-  return String(job.status || "").toUpperCase() === "RUNNING";
+  return ["RUNNING", "STOPPING"].includes(String(job.status || "").toUpperCase());
 }
 
 function handleIsaacRgbdRenderResponse(data) {
@@ -3346,7 +4371,12 @@ function handleIsaacRgbdRenderResponse(data) {
       : null;
   if (!job) return;
   renderIsaacRgbdRenderProgress(job);
-  lastIsaacRgbdRenderSessionId = String(job.session_id || data.session_id || lastIsaacRgbdRenderSessionId || "");
+  const responseSessionId = Object.prototype.hasOwnProperty.call(job, "session_id")
+    ? job.session_id
+    : data && Object.prototype.hasOwnProperty.call(data, "session_id")
+      ? data.session_id
+      : "";
+  lastIsaacRgbdRenderSessionId = String(responseSessionId ?? "");
   const target = $("lerobot-isaac-rgbd-render-action-status");
   setActionStatus(target, isaacRgbdRenderIsActive(job) ? "running" : (Number(job.failed || 0) > 0 ? "error" : "ok"), "Isaac RGB-D render", job);
   if (isaacRgbdRenderIsActive(job)) {
@@ -3356,9 +4386,82 @@ function handleIsaacRgbdRenderResponse(data) {
   }
 }
 
-async function runIsaacRgbdRender(statusTarget = null) {
-  const sessionId = lastIsaacRgbdRenderSessionId || lastSessionByWorkflow.record || "";
-  const payload = basePayload({ session_id: sessionId, isaac_rgbd_post_render_inline: false });
+function syncIsaacRgbdRenderEpisodeOverride() {
+  if (!isaacRgbdRenderEpisodesInput) return;
+  isaacRgbdRenderEpisodesInput.disabled = boolValue(isaacRgbdRenderOverrideAllInput);
+}
+
+function handleIsaacRgbdRenderOverrideAllChange() {
+  syncIsaacRgbdRenderEpisodeOverride();
+  if (boolValue(isaacRgbdRenderOverrideAllInput) && isaacRgbdRenderOverwriteInput) isaacRgbdRenderOverwriteInput.checked = true;
+}
+
+function syncIsaacDomainMimicEpisodeOverride() {
+  if (!isaacLabDomainMimicEpisodesInput) return;
+  isaacLabDomainMimicEpisodesInput.disabled = boolValue(isaacLabDomainMimicOverwriteAllInput);
+}
+
+function handleIsaacDomainMimicOverwriteAllChange() {
+  syncIsaacDomainMimicEpisodeOverride();
+  if (boolValue(isaacLabDomainMimicOverwriteAllInput) && isaacLabDomainMimicOverwriteInput) {
+    isaacLabDomainMimicOverwriteInput.checked = true;
+  }
+}
+
+function isaacRgbdContactWarningCount(data) {
+  const health = data && data.dataset_health ? data.dataset_health : {};
+  const sidecars = health.sidecars || {};
+  const isaacRgbd = sidecars.isaac_rgbd || {};
+  const audit = isaacRgbd.contact_audit || {};
+  const coverage = isaacRgbd.coverage || {};
+  return Number(audit.severe_episode_count || 0) + Number(coverage.missing_episode_count || 0);
+}
+
+async function validateIsaacRgbdRenderContactAfterCompletion(statusTarget = null) {
+  if (!isaacRgbdRenderValidateAfterCompletion) return null;
+  isaacRgbdRenderValidateAfterCompletion = false;
+  return runIsaacRgbdRenderContactCheck(statusTarget, "checking completed render output");
+}
+
+async function checkIsaacRgbdRenderContact(statusTarget = null) {
+  isaacRgbdRenderValidateAfterCompletion = false;
+  return runIsaacRgbdRenderContactCheck(statusTarget, "checking rendered output");
+}
+
+async function runIsaacRgbdRenderContactCheck(statusTarget = null, status = "checking rendered output") {
+  setActionStatus(statusTarget, "running", "Isaac RGB-D contact check", { status });
+  try {
+    const data = await postJson("/api/lerobot/dataset/inspect", basePayload(), 60000);
+    renderDatasetHealth(data);
+    renderResult("Isaac RGB-D contact check", data);
+    const severeCount = isaacRgbdContactWarningCount(data);
+    setActionStatus(
+      statusTarget,
+      severeCount > 0 ? "error" : "ok",
+      "Isaac RGB-D contact check",
+      severeCount > 0
+        ? { status: "RGB-D warnings remain", rgbd_warning_count: severeCount }
+        : { status: "RGB-D check passed", rgbd_warning_count: 0 },
+    );
+    return data;
+  } catch (err) {
+    const error = { ok: false, status: "contact_check_failed", error: String(err) };
+    renderResult("Isaac RGB-D contact check", error);
+    setActionStatus(statusTarget, "error", "Isaac RGB-D contact check", error);
+    return error;
+  }
+}
+
+async function runIsaacRgbdRender(statusTarget = null, options = {}) {
+  lastIsaacRgbdRenderSessionId = "";
+  syncIsaacRgbdRenderEpisodeOverride();
+  if (options.validateAfterCompletion) isaacRgbdRenderValidateAfterCompletion = true;
+  const renderSessionId = boolValue(isaacRgbdRenderSessionOverrideInput) ? (lastSessionByWorkflow.record || "") : "";
+  const payload = basePayload({ session_id: renderSessionId, isaac_rgbd_post_render_inline: false });
+  payload.isaac_rgbd_post_render_execution_mode = "headless_preplay_replay";
+  payload.isaac_rgbd_post_render_overwrite = options.forceAll ? true : boolValue(isaacRgbdRenderOverwriteInput);
+  const renderEpisodeIndices = options.forceAll || boolValue(isaacRgbdRenderOverrideAllInput) ? "" : (isaacRgbdRenderEpisodesInput ? isaacRgbdRenderEpisodesInput.value.trim() : "");
+  payload.isaac_rgbd_post_render_episode_indices = renderEpisodeIndices;
   resetIsaacRgbdRenderProgressBar();
   setActionStatus(statusTarget, "running", "Isaac RGB-D render", { status: "request sent" });
   try {
@@ -3367,11 +4470,38 @@ async function runIsaacRgbdRender(statusTarget = null) {
     renderResult("Isaac RGB-D render", data);
     setActionStatus(statusTarget, data && data.ok ? "ok" : "error", "Isaac RGB-D render", data);
     handleIsaacRgbdRenderResponse(data);
+    if (!isaacRgbdRenderIsActive(data)) await validateIsaacRgbdRenderContactAfterCompletion(statusTarget);
     return data;
   } catch (err) {
     const error = { ok: false, status: "request_failed", error: String(err) };
+    isaacRgbdRenderValidateAfterCompletion = false;
     renderResult("Isaac RGB-D render", error);
     setActionStatus(statusTarget, "error", "Isaac RGB-D render", error);
+    return error;
+  }
+}
+
+function isaacRgbdRenderStopPayload() {
+  const sessionId = lastIsaacRgbdRenderSessionId || "";
+  const renderDatasetPath = String((lastIsaacRgbdRenderJob && lastIsaacRgbdRenderJob.dataset_path) || "").trim();
+  return basePayload({ session_id: sessionId, dataset_path: renderDatasetPath, dataset_repo_id: "" });
+}
+
+async function stopIsaacRgbdRender(statusTarget = null) {
+  isaacRgbdRenderValidateAfterCompletion = false;
+  const payload = isaacRgbdRenderStopPayload();
+  setActionStatus(statusTarget, "running", "Isaac RGB-D render stop", { status: "request sent" });
+  try {
+    const data = await postJson("/api/lerobot/isaac-rgbd/render/stop", payload, 30000);
+    renderIsaacRgbdRenderProgress(data);
+    renderResult("Isaac RGB-D render stop", data);
+    setActionStatus(statusTarget, data && data.ok ? (isaacRgbdRenderIsActive(data) ? "running" : "ok") : "error", "Isaac RGB-D render stop", data);
+    handleIsaacRgbdRenderResponse(data);
+    return data;
+  } catch (err) {
+    const error = { ok: false, status: "request_failed", error: String(err) };
+    renderResult("Isaac RGB-D render stop", error);
+    setActionStatus(statusTarget, "error", "Isaac RGB-D render stop", error);
     return error;
   }
 }
@@ -3379,14 +4509,16 @@ async function runIsaacRgbdRender(statusTarget = null) {
 function startIsaacRgbdRenderStatusPolling(sessionId = "") {
   stopIsaacRgbdRenderStatusPolling();
   const target = $("lerobot-isaac-rgbd-render-action-status");
+  const pollingSessionId = String(sessionId ?? "");
   isaacRgbdRenderStatusTimer = window.setInterval(async () => {
     try {
-      const payload = basePayload({ session_id: sessionId || lastIsaacRgbdRenderSessionId || lastSessionByWorkflow.record || "" });
+      const payload = basePayload({ session_id: pollingSessionId });
       const data = await postJson("/api/lerobot/isaac-rgbd/render/status", payload);
       renderIsaacRgbdRenderProgress(data);
       setActionStatus(target, data && data.ok ? (isaacRgbdRenderIsActive(data) ? "running" : "ok") : "error", "Isaac RGB-D render", data);
       if (!isaacRgbdRenderIsActive(data)) {
         stopIsaacRgbdRenderStatusPolling();
+        await validateIsaacRgbdRenderContactAfterCompletion(target);
         await refreshConfig();
       }
     } catch (err) {
@@ -3446,6 +4578,21 @@ async function previewDataset(statusTarget = null) {
 function bind(id, handler) {
   const el = $(id);
   if (el) el.addEventListener("click", handler);
+}
+
+lerobotTabButtons.forEach((button) => {
+  button.addEventListener("click", () => activateLeRobotGuiTab(button.dataset.lerobotTabTarget || "lerobot-main-tab"));
+});
+
+if (isaacLabDomainMimicRgbdInput) {
+  isaacLabDomainMimicRgbdInput.addEventListener("change", () => {
+    syncIsaacLabMimicRgbdInputs(checkboxValue(isaacLabDomainMimicRgbdInput));
+  });
+}
+if (isaacLabMimicCamerasInput) {
+  isaacLabMimicCamerasInput.addEventListener("change", () => {
+    syncIsaacLabMimicRgbdInputs(checkboxValue(isaacLabMimicCamerasInput));
+  });
 }
 
 bind("btn-lerobot-refresh", async (event) => {
@@ -3625,7 +4772,21 @@ bind("btn-record-stop", (event) => runRecordControl("record force stop", "stop",
 bind("btn-record-retry", (event) => runRecordControl("record retry", "retry", event));
 bind("btn-record-next", (event) => runRecordControl("record next", "next", event));
 bind("btn-record-finish", (event) => runRecordControl("record finish", "finish", event));
-bind("btn-isaac-rgbd-render-start", (event) => runIsaacRgbdRender(actionStatusFromEvent(event)));
+if (isaacRgbdRenderOverrideAllInput) {
+  isaacRgbdRenderOverrideAllInput.addEventListener("change", handleIsaacRgbdRenderOverrideAllChange);
+  syncIsaacRgbdRenderEpisodeOverride();
+}
+if (isaacLabDomainMimicOverwriteAllInput) {
+  isaacLabDomainMimicOverwriteAllInput.addEventListener("change", handleIsaacDomainMimicOverwriteAllChange);
+  syncIsaacDomainMimicEpisodeOverride();
+}
+for (const input of [datasetExcludeFlaggedEpisodesInput, isaacAugmentExcludeFlaggedEpisodesInput]) {
+  if (input) input.addEventListener("change", () => syncExcludeFlaggedEpisodesCheckboxes(input));
+}
+syncExcludeFlaggedEpisodesCheckboxes();
+bind("btn-isaac-rgbd-render-start", (event) => runIsaacRgbdRender(actionStatusFromEvent(event), { validateAfterCompletion: true }));
+bind("btn-isaac-rgbd-render-check", (event) => checkIsaacRgbdRenderContact(actionStatusFromEvent(event)));
+bind("btn-isaac-rgbd-render-stop", (event) => stopIsaacRgbdRender(actionStatusFromEvent(event)));
 
 bind("btn-train-start", () => runTrainAction("train start", "/api/lerobot/train/start", trainPayload()));
 bind("btn-train-cancel", () => runTrainAction("train cancel", "/api/lerobot/train/cancel", sessionPayload("train")));
@@ -3697,19 +4858,58 @@ bind("btn-dataset-visualize", (event) => visualizeDataset(actionStatusFromEvent(
 bind("isaac-synthetic-check-digital-twin", (event) => runIsaacSyntheticAction("Isaac Lab synthetic prepare", "/api/lerobot/isaac-lab/prepare", actionStatusFromEvent(event), 120000));
 bind("isaac-synthetic-build", (event) => runIsaacSyntheticAction("Isaac Lab synthetic build", "/api/lerobot/isaac-lab/build-synthetic", actionStatusFromEvent(event), 300000));
 bind("isaac-synthetic-run-replicator-worker", (event) => runIsaacSyntheticAction("Isaac Lab Replicator worker", "/api/lerobot/isaac-lab/run-replicator-worker", actionStatusFromEvent(event), 900000, { enable_replicator: true }));
+bind("isaac-synthetic-run-replicator-visual", (event) => runIsaacSyntheticAction("Isaac Lab visual Replicator", "/api/lerobot/isaac-lab/run-replicator-worker", actionStatusFromEvent(event), 900000, { enable_replicator: true, isaac_lab_visualize_generation: true }));
 bind("isaac-synthetic-run-replicator-smoke", (event) => runIsaacSyntheticAction("Isaac Lab Replicator smoke", "/api/lerobot/isaac-lab/run-replicator-worker", actionStatusFromEvent(event), 180000, { enable_replicator: true, max_source_frames: 1, attempts_per_source_frame: 1, cameras: ["top"] }));
 bind("isaac-synthetic-preview", (event) => runIsaacSyntheticAction("Isaac Lab synthetic preview", "/api/lerobot/isaac-lab/preview", actionStatusFromEvent(event), 60000));
 bind("isaac-synthetic-export-hdf5", (event) => runIsaacSyntheticAction("Isaac Lab HDF5 export", "/api/lerobot/isaac-lab/export-hdf5", actionStatusFromEvent(event), 120000));
+bind("isaac-lab-annotate-source", (event) => runIsaacSyntheticAction("Isaac Lab Mimic annotation", "/api/lerobot/isaac-lab/annotate", actionStatusFromEvent(event), 300000));
+bind("isaac-lab-generate-mimic", (event) => runIsaacSyntheticAction("Isaac Lab Mimic generation", "/api/lerobot/isaac-lab/generate-mimic", actionStatusFromEvent(event), 900000, { enable_mimic: true }));
+bind("isaac-lab-train-il", (event) => runIsaacSyntheticAction("Isaac Lab IL train", "/api/lerobot/isaac-lab/train-il", actionStatusFromEvent(event), 900000));
+bind("isaac-lab-eval-il", (event) => runIsaacSyntheticAction("Isaac Lab IL eval", "/api/lerobot/isaac-lab/eval-il", actionStatusFromEvent(event), 900000));
+bind("isaac-lab-run-e2e", (event) => runIsaacSyntheticAction("Isaac Lab Mimic + IL E2E", "/api/lerobot/isaac-lab/run-e2e", actionStatusFromEvent(event), 1800000, { enable_mimic: true }));
+bind("isaac-synthetic-mimic-stop", (event) => stopIsaacDomainMimicPipeline(actionStatusFromEvent(event)));
+bind("isaac-lab-domain-mimic-pipeline", (event) => runIsaacDomainMimicPipeline(actionStatusFromEvent(event)));
+bind("isaac-lab-domain-mimic-check", (event) => checkIsaacDomainMimicOutputs(actionStatusFromEvent(event)));
+bind("isaac-lab-domain-mimic-render-missing-rgbd", (event) => renderMissingIsaacLabMimicRgbd(actionStatusFromEvent(event)));
+bind("isaac-lab-domain-mimic-stop", (event) => stopIsaacDomainMimicPipeline(actionStatusFromEvent(event)));
+bind("isaac-synthetic-run-live-e2e-check", (event) => runIsaacLiveE2eCheck(actionStatusFromEvent(event)));
+bind("isaac-synthetic-live-e2e-status", (event) => runIsaacLiveE2eControl("Isaac Lab 10s x 3 live status", "/api/lerobot/isaac-lab/live-e2e/status", actionStatusFromEvent(event)));
+bind("isaac-synthetic-live-e2e-stop", (event) => runIsaacLiveE2eControl("Isaac Lab 10s x 3 live stop", "/api/lerobot/isaac-lab/live-e2e/stop", actionStatusFromEvent(event)));
 bind("isaac-synthetic-run-mimic", (event) => runIsaacSyntheticAction("Isaac Lab Mimic runner", "/api/lerobot/isaac-lab/run-mimic", actionStatusFromEvent(event), 300000, { enable_mimic: true }));
 bind("isaac-synthetic-run-mimic-smoke", (event) => runIsaacSyntheticAction("Isaac Lab Mimic smoke", "/api/lerobot/isaac-lab/run-mimic-smoke", actionStatusFromEvent(event), 120000, { enable_mimic: true }));
 bind("isaac-synthetic-mimic-status", (event) => runIsaacSyntheticAction("Isaac Lab Mimic status", "/api/lerobot/isaac-lab/mimic/status", actionStatusFromEvent(event), 60000, { enable_mimic: true }));
-bind("isaac-synthetic-mimic-stop", (event) => runIsaacSyntheticAction("Isaac Lab Mimic stop", "/api/lerobot/isaac-lab/mimic/stop", actionStatusFromEvent(event), 60000, { enable_mimic: true }));
 bind("isaac-synthetic-run-rl-teacher", (event) => runIsaacSyntheticAction("Isaac Lab RL teacher runner", "/api/lerobot/isaac-lab/run-rl-teacher", actionStatusFromEvent(event), 300000, { enable_rl_teacher: true }));
 bind("isaac-synthetic-run-rl-teacher-smoke", (event) => runIsaacSyntheticAction("Isaac Lab RL teacher smoke", "/api/lerobot/isaac-lab/run-rl-teacher-smoke", actionStatusFromEvent(event), 120000, { enable_rl_teacher: true }));
 bind("isaac-synthetic-rl-teacher-status", (event) => runIsaacSyntheticAction("Isaac Lab RL teacher status", "/api/lerobot/isaac-lab/rl-teacher/status", actionStatusFromEvent(event), 60000, { enable_rl_teacher: true }));
 bind("isaac-synthetic-rl-teacher-stop", (event) => runIsaacSyntheticAction("Isaac Lab RL teacher stop", "/api/lerobot/isaac-lab/rl-teacher/stop", actionStatusFromEvent(event), 60000, { enable_rl_teacher: true }));
 bind("isaac-synthetic-e2e-smoke", (event) => runIsaacSyntheticAction("Isaac Lab 5x10 E2E smoke", "/api/lerobot/isaac-lab/e2e-smoke", actionStatusFromEvent(event), 300000, { e2e_create_fixture: true, e2e_episodes: 5, e2e_episode_s: 10, e2e_fps: 15, e2e_train_steps: 2, enable_replicator: false, require_physics_pass: false, require_articulation_pass: false }));
 bind("isaac-synthetic-status", (event) => runIsaacSyntheticAction("Isaac Lab synthetic status", "/api/lerobot/isaac-lab/status", actionStatusFromEvent(event), 60000));
+bind("isaac-lab-apply-standard-defaults", (event) => {
+  applyIsaacLabStandardDefaults();
+  const result = {
+    ok: true,
+    status: "standard_defaults_applied",
+    mimic_trials: 3,
+    mimic_num_envs: 3,
+    domain_randomization_profile: "standard",
+    visual: true,
+    rgbd_cameras: true,
+    dataset_mix: {
+      real: 1,
+      isaac_rgbd: 0.6,
+      isaac_lab_synthetic: 0.35,
+      legacy_augmentation: 0,
+    },
+    fidelity: {
+      real: 1,
+      isaac_rgbd: 0.55,
+      isaac_lab_synthetic: 0.25,
+      legacy_augmentation: 0,
+    },
+  };
+  renderResult("Isaac Lab standard defaults", result);
+  setActionStatus(actionStatusFromEvent(event), "ok", "Isaac Lab standard defaults", result);
+});
 bind("btn-isaac-augment-run", (event) => runIsaacAugmentation(actionStatusFromEvent(event)));
 bind("btn-isaac-augment-preview", (event) => previewIsaacAugmentation(actionStatusFromEvent(event)));
 bind("btn-dataset-visualize-status", async (event) => {
@@ -3789,3 +4989,4 @@ syncManipulationTaskPreset(false);
 applyPolicyTypeDefaults();
 syncRolloutPolicyOptions();
 refreshConfig();
+restoreIsaacDomainMimicPipelineStatus();

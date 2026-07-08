@@ -883,6 +883,83 @@ def test_extension_startup_skips_duplicate_play_after_delayed_pending_apply(tmp_
         extension.on_shutdown()
 
 
+def test_extension_timeline_play_request_can_skip_specimen_pose_on_play(tmp_path: Path, monkeypatch) -> None:
+    port = _free_tcp_port()
+    cube_path = "/World/Workspace/RedSpecimenBlock"
+    stage = _FakeStage([cube_path])
+    callbacks, _opened_stages, timeline_events = _install_fake_isaac_modules(
+        monkeypatch,
+        _FakeSettings(
+            {
+                "/exts/atr.omx.mirror/enabled": True,
+                "/exts/atr.omx.mirror/host": "127.0.0.1",
+                "/exts/atr.omx.mirror/port": port,
+                "/exts/atr.omx.mirror/scene": str(REPO_ROOT / "sim" / "robotis_omx" / "scene" / "omx_table_layout.usda"),
+                "/exts/atr.omx.mirror/useCurrentStage": True,
+                "/exts/atr.omx.mirror/openSceneOnStartup": False,
+                "/exts/atr.omx.mirror/playTimelineOnStartup": False,
+                "/exts/atr.omx.mirror/specimenPoseOnPlay": True,
+                "/exts/atr.omx.mirror/specimenPoseRedCubePath": cube_path,
+                "/exts/atr.omx.mirror/specimenPosePendingPath": str(tmp_path / "missing_pending_pose.json"),
+            }
+        ),
+        current_stage=stage,
+    )
+    module = _load_extension_module()
+    calls = []
+
+    def _fake_snapshot(repo_root, script_path, payload, *, timeout_sec, runner=None):
+        calls.append(payload)
+        return {
+            "ok": True,
+            "pose": {
+                "position_isaac_world_mm": {
+                    "x": 111,
+                    "y": 222,
+                    "z": 15.2,
+                }
+            },
+        }
+
+    monkeypatch.setattr(module, "_run_specimen_pose_snapshot", _fake_snapshot)
+    extension = module.AtrOmxMirrorExtension()
+
+    try:
+        extension.on_startup("atr.omx.mirror")
+        deadline = time.time() + 3
+        while time.time() < deadline:
+            try:
+                _json_get(f"http://127.0.0.1:{port}/health")
+                break
+            except OSError:
+                time.sleep(0.05)
+        apply_update = next(callback for name, callback in callbacks if name == "atr-isaac-omx-mirror-apply")
+        play_event = next(callback for name, callback in callbacks if name == "timeline-event:1")
+
+        body = json.dumps(
+            {
+                "reason": "isaac_rgbd_post_render_preplay",
+                "skip_specimen_pose_on_play": True,
+            }
+        ).encode("utf-8")
+        request = Request(f"http://127.0.0.1:{port}/timeline/play", data=body, method="POST", headers={"Content-Type": "application/json"})
+        with urlopen(request, timeout=2) as response:
+            queued = json.loads(response.read().decode("utf-8"))
+
+        apply_update(object())
+        play_event(types.SimpleNamespace(type=1))
+
+        assert queued["ok"] is True
+        assert timeline_events == ["play"]
+        assert calls == []
+
+        play_event(types.SimpleNamespace(type=1))
+
+        assert len(calls) == 1
+    finally:
+        extension.on_shutdown()
+
+
 def test_active_robot_cam_request_timeout_removes_current_request(tmp_path: Path) -> None:
     module = _load_extension_module()
     request_path = tmp_path / "active_robot_cam_request.json"

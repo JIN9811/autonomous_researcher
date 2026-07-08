@@ -362,10 +362,16 @@ class ManipulationAgent(BaseAgent):
             "max_duration_s": self._safe_float(spec.get("max_duration_s"), episode_s),
             "num_episodes": self._safe_int(spec.get("lerobot_rollout_num_episodes") or spec.get("rollout_num_episodes"), 1),
             "continuous_rollout": self._bool_spec(spec, "lerobot_continuous_rollout", "continuous_rollout", default=True),
-            "rollout_action_clamp": self._bool_spec(spec, "lerobot_rollout_action_clamp", "rollout_action_clamp", default=True),
+            "rollout_action_clamp": self._bool_spec(spec, "lerobot_rollout_action_clamp", "rollout_action_clamp", default=False),
             "rollout_max_relative_target": self._safe_int(
                 spec.get("lerobot_rollout_max_relative_target") or spec.get("rollout_max_relative_target"),
                 5,
+            ),
+            "rollout_shoulder_lift_backstop": self._bool_spec(
+                spec,
+                "lerobot_rollout_shoulder_lift_backstop",
+                "rollout_shoulder_lift_backstop",
+                default=True,
             ),
             "rollout_temporal_ensemble": self._bool_spec(
                 spec,
@@ -479,6 +485,8 @@ class ManipulationAgent(BaseAgent):
                 warnings.append("pi05_camera_disabled")
             if not payload.get("rollout_action_clamp"):
                 warnings.append("action_clamp_disabled")
+            if not payload.get("rollout_shoulder_lift_backstop"):
+                warnings.append("shoulder_lift_backstop_disabled")
         if vision_context.get("anomaly"):
             blocking.append("vision_anomaly_detected")
         status = "fail" if blocking else "warn" if warnings else "pass"
@@ -496,6 +504,7 @@ class ManipulationAgent(BaseAgent):
             "rtc_enabled": str(payload.get("rollout_inference_type") or "").lower() == "rtc",
             "action_clamp_enabled": bool(payload.get("rollout_action_clamp")),
             "max_relative_target": payload.get("rollout_max_relative_target"),
+            "shoulder_lift_backstop_enabled": bool(payload.get("rollout_shoulder_lift_backstop")),
         }
 
     async def _call_tool(self, ctx: AgentContext, tool: str, payload: dict[str, Any]) -> dict[str, Any]:

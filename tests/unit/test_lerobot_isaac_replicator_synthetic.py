@@ -269,6 +269,79 @@ def test_replicator_worker_initializes_simulation_app_before_replicator_import(t
     assert state["simulation_app_closed"] is True
 
 
+def test_replicator_worker_visual_generation_starts_simulation_app_non_headless(tmp_path: Path) -> None:
+    canonical_index = tmp_path / "canonical_episode_index" / "manifest.jsonl"
+    _jsonl_write(
+        canonical_index,
+        [
+            {
+                "schema": "atr.lerobot.canonical_episode_frame.v1",
+                "episode_index": 0,
+                "frame_index": 0,
+                "timestamp_s": 0.0,
+                "episode_success": True,
+            }
+        ],
+    )
+    stage = tmp_path / "scene.usda"
+    stage.write_text("#usda 1.0\n", encoding="utf-8")
+    output_dir = tmp_path / "replicator"
+    state = {"headless": None}
+
+    class FakeSimulationApp:
+        def __init__(self, launch_config):
+            state["headless"] = launch_config["headless"]
+
+        def close(self):
+            pass
+
+    class FakeIsaacSim:
+        SimulationApp = FakeSimulationApp
+
+    def importer(name: str):
+        if name == "isaacsim":
+            return FakeIsaacSim
+        if name == "omni.replicator.core":
+            return object()
+        raise ModuleNotFoundError(name)
+
+    def render_backend(context: dict) -> list[dict]:
+        rgb_path = context["output_dir"] / "rgb" / "top" / "e000000_f000000_v000.png"
+        depth_path = context["output_dir"] / "depth" / "top" / "e000000_f000000_v000.png"
+        for path, payload in [(rgb_path, b"rgb"), (depth_path, b"depth")]:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(payload)
+        return [
+            {
+                "canonical_episode_index": 0,
+                "canonical_frame_index": 0,
+                "camera_name": "top",
+                "variant_index": 0,
+                "rgb_path": "rgb/top/e000000_f000000_v000.png",
+                "depth_path": "depth/top/e000000_f000000_v000.png",
+            }
+        ]
+
+    summary = run_replicator_worker(
+        canonical_index=canonical_index,
+        stage_url=stage,
+        output_dir=output_dir,
+        cameras=["top"],
+        variants=1,
+        rgb_strength=0.2,
+        depth_strength=0.3,
+        render_strength=0.4,
+        camera_pose_strength=0.05,
+        importer=importer,
+        render_backend=render_backend,
+        visualize_generation=True,
+    )
+
+    assert summary["ok"] is True
+    assert state["headless"] is False
+    assert summary["runtime_probe"]["simulation_app"]["headless"] is False
+
+
 def test_replicator_worker_persists_summary_before_simulation_app_close_can_exit(tmp_path: Path) -> None:
     canonical_index = tmp_path / "canonical_episode_index" / "manifest.jsonl"
     _jsonl_write(

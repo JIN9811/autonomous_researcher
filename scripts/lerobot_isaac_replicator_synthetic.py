@@ -105,11 +105,12 @@ def _probe_replicator_runtime(importer: Callable[[str], Any]) -> dict[str, Any]:
     }
 
 
-def _start_simulation_app(importer: Callable[[str], Any], *, enabled: bool) -> tuple[Any | None, dict[str, Any]]:
+def _start_simulation_app(importer: Callable[[str], Any], *, enabled: bool, headless: bool = True) -> tuple[Any | None, dict[str, Any]]:
     if not enabled:
         return None, {
             "status": "skipped",
             "reason": "SimulationApp initialization disabled by caller.",
+            "headless": bool(headless),
         }
     errors: list[dict[str, str]] = []
     for module_name in ("isaacsim", "omni.isaac.kit"):
@@ -122,7 +123,7 @@ def _start_simulation_app(importer: Callable[[str], Any], *, enabled: bool) -> t
         if not callable(simulation_app_cls):
             errors.append({"module": module_name, "error": "SimulationApp attribute is not callable."})
             continue
-        launch_config = {"headless": True}
+        launch_config = {"headless": bool(headless)}
         try:
             app = simulation_app_cls(launch_config)
         except TypeError:
@@ -133,19 +134,19 @@ def _start_simulation_app(importer: Callable[[str], Any], *, enabled: bool) -> t
                     "status": "blocked",
                     "module": module_name,
                     "error": f"{type(exc).__name__}: {exc}",
-                    "headless": True,
+                    "headless": bool(headless),
                 }
         except Exception as exc:  # noqa: BLE001 - preserve Isaac runtime startup failure.
             return None, {
                 "status": "blocked",
                 "module": module_name,
                 "error": f"{type(exc).__name__}: {exc}",
-                "headless": True,
+                "headless": bool(headless),
             }
         return app, {
             "status": "passed",
             "module": module_name,
-            "headless": True,
+            "headless": bool(headless),
         }
     return None, {
         "status": "unavailable",
@@ -669,6 +670,7 @@ def run_replicator_worker(
     importer: Callable[[str], Any] = _default_importer,
     render_backend: Callable[[dict[str, Any]], list[dict[str, Any]]] | None = None,
     initialize_simulation_app: bool = True,
+    visualize_generation: bool = False,
 ) -> dict[str, Any]:
     """Run the Replicator worker contract and write `summary.json`.
 
@@ -693,7 +695,11 @@ def run_replicator_worker(
         augmentation_config=augmentation_config.expanduser().resolve() if augmentation_config is not None else None,
     )
     _atomic_write_json(output_dir / "post_render_augmentation.json", post_render_augmentation)
-    simulation_app, simulation_app_probe = _start_simulation_app(importer, enabled=initialize_simulation_app)
+    simulation_app, simulation_app_probe = _start_simulation_app(
+        importer,
+        enabled=initialize_simulation_app,
+        headless=not bool(visualize_generation),
+    )
     if simulation_app_probe.get("status") == "blocked":
         runtime_probe = {
             "status": "blocked",
@@ -884,6 +890,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--depth-strength", type=float, default=1.0)
     parser.add_argument("--render-strength", type=float, default=1.0)
     parser.add_argument("--camera-pose-strength", type=float, default=1.0)
+    parser.add_argument(
+        "--visualize-generation",
+        action="store_true",
+        help="Open an Isaac Sim viewport while generating instead of launching SimulationApp headless.",
+    )
     args = parser.parse_args(argv)
 
     summary = run_replicator_worker(
@@ -897,6 +908,7 @@ def main(argv: list[str] | None = None) -> int:
         render_strength=args.render_strength,
         camera_pose_strength=args.camera_pose_strength,
         augmentation_config=Path(args.augmentation_config) if args.augmentation_config else None,
+        visualize_generation=bool(args.visualize_generation),
     )
     print(json.dumps(summary, indent=2, ensure_ascii=False, default=_json_default))
     return 0 if summary.get("ok") else 2

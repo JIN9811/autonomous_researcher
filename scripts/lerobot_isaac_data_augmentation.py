@@ -174,8 +174,37 @@ def _resolve_file_path(raw_path: Any, *, dataset_path: Path, manifest_path: Path
     return None
 
 
-def _source_frames(dataset_path: Path, cameras: list[str], max_source_frames: int) -> list[dict[str, Any]]:
+def _contact_training_excluded_episode_indices(dataset_path: Path, *, enabled: bool = True) -> list[int]:
+    if not enabled:
+        return []
+    manifest_path = dataset_path / "sidecar" / "train_exclusions" / "contact_audit.json"
+    if not manifest_path.is_file():
+        return []
+    try:
+        loaded = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    if not isinstance(loaded, dict):
+        return []
+    return sorted(
+        {
+            _safe_int(item, -1)
+            for item in loaded.get("episode_indices", [])
+            if _safe_int(item, -1) >= 0
+        }
+    )
+
+
+def _source_frames(
+    dataset_path: Path,
+    cameras: list[str],
+    max_source_frames: int,
+    *,
+    excluded_episode_indices: set[int] | None = None,
+) -> tuple[list[dict[str, Any]], int]:
     selected_cameras = set(cameras)
+    excluded = excluded_episode_indices or set()
+    excluded_keys: set[tuple[str, int, int]] = set()
     by_key: dict[tuple[str, int, int], dict[str, Any]] = {}
     manifest_paths = sorted((dataset_path / "sidecar" / "isaac_rgbd").glob("**/manifest.jsonl"))
     for manifest_path in manifest_paths:
@@ -186,6 +215,10 @@ def _source_frames(dataset_path: Path, cameras: list[str], max_source_frames: in
             attempt_id = str(row.get("attempt_id") or manifest_path.parent.name)
             episode_index = _safe_int(row.get("episode_index"), 0, minimum=0)
             frame_index = _safe_int(row.get("frame_index"), _safe_int(row.get("sample_index"), 0, minimum=0), minimum=0)
+            key = (attempt_id, episode_index, frame_index)
+            if episode_index in excluded:
+                excluded_keys.add(key)
+                continue
             files: dict[str, dict[str, Path]] = {}
             if isinstance(row.get("files"), list):
                 for file_info in row["files"]:
@@ -200,7 +233,6 @@ def _source_frames(dataset_path: Path, cameras: list[str], max_source_frames: in
                     resolved = _resolve_file_path(file_info.get("path"), dataset_path=dataset_path, manifest_path=manifest_path)
                     if resolved is not None:
                         files.setdefault(camera, {})[kind] = resolved
-            key = (attempt_id, episode_index, frame_index)
             source = {
                 "source_id": f"{attempt_id}:e{episode_index:03d}:f{frame_index:06d}",
                 "manifest_path": str(manifest_path),
@@ -219,7 +251,7 @@ def _source_frames(dataset_path: Path, cameras: list[str], max_source_frames: in
             if current is None or (not current.get("has_images") and source["has_images"]):
                 by_key[key] = source
     frames = sorted(by_key.values(), key=lambda item: (int(item["episode_index"]), int(item["frame_index"]), str(item["attempt_id"])))
-    return frames[: max(1, max_source_frames)]
+    return frames[: max(1, max_source_frames)], len(excluded_keys)
 
 
 def _raw_depth_camera_hints(dataset_path: Path) -> dict[str, str]:
@@ -877,6 +909,7 @@ def build_augmentation_sidecar(
     depth_strength: float | None = 1.0,
     render_domain_strength: float | None = 1.0,
     camera_pose_strength: float | None = 1.0,
+    exclude_flagged_episodes: bool = True,
     progress_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     dataset = Path(dataset_path).expanduser().resolve()
@@ -914,7 +947,13 @@ def build_augmentation_sidecar(
     if output.exists():
         shutil.rmtree(output)
     output.mkdir(parents=True, exist_ok=True)
-    sources = _source_frames(dataset, selected_cameras, max_frames)
+    excluded_episode_indices = _contact_training_excluded_episode_indices(dataset, enabled=exclude_flagged_episodes)
+    sources, excluded_source_frame_count = _source_frames(
+        dataset,
+        selected_cameras,
+        max_frames,
+        excluded_episode_indices=set(excluded_episode_indices),
+    )
     manifest_path = output / "manifest.jsonl"
     summary_path = output / "summary.json"
     qa_summary_path = output / "qa_summary.json"
@@ -951,6 +990,9 @@ def build_augmentation_sidecar(
             "summary_path": str(summary_path),
             "qa_summary_path": str(qa_summary_path),
             "source_frame_count": 0,
+            "excluded_source_episode_indices": excluded_episode_indices,
+            "excluded_source_frame_count": excluded_source_frame_count,
+            "source_exclusion_manifest_path": str(dataset / "sidecar" / "train_exclusions" / "contact_audit.json"),
             "variant_count": 0,
             "valid_variant_count": 0,
             "failed_variant_count": 0,
@@ -1119,6 +1161,9 @@ def build_augmentation_sidecar(
         "summary_path": str(summary_path),
         "qa_summary_path": str(qa_summary_path),
         "source_frame_count": len(sources),
+        "excluded_source_episode_indices": excluded_episode_indices,
+        "excluded_source_frame_count": excluded_source_frame_count,
+        "source_exclusion_manifest_path": str(dataset / "sidecar" / "train_exclusions" / "contact_audit.json"),
         "variant_count": variant_count,
         "valid_variant_count": valid_variant_count,
         "failed_variant_count": failed_variant_count,
@@ -1157,6 +1202,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--depth-strength", type=float, default=1.0)
     parser.add_argument("--render-domain-strength", type=float, default=1.0)
     parser.add_argument("--camera-pose-strength", type=float, default=1.0)
+    parser.add_argument("--exclude-flagged-episodes", type=int, default=1)
     return parser.parse_args(argv)
 
 
@@ -1180,6 +1226,7 @@ def main(argv: list[str] | None = None) -> int:
         depth_strength=args.depth_strength,
         render_domain_strength=args.render_domain_strength,
         camera_pose_strength=args.camera_pose_strength,
+        exclude_flagged_episodes=bool(args.exclude_flagged_episodes),
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0 if result.get("ok") else 2

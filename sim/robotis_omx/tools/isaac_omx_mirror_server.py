@@ -32,7 +32,7 @@ MM_TO_M = 0.001
 LEISAAC_GRIPPER_EFFORT_MASS_DIVISOR_KG = 0.15
 GRIPPER_CONTACT_FORCE_HOLD_THRESHOLD_N = 12.0
 GRIPPER_CONTACT_PROBE_MAX_CLOSE_STEP_DEG = 6.0
-GRIPPER_CONTACT_HOLD_OVERTRAVEL_DEG = 0.1
+GRIPPER_CONTACT_HOLD_OVERTRAVEL_DEG = 1.0
 GRIPPER_CONTACT_RELEASE_MARGIN_DEG = 1.0
 GRIPPER_CONTACT_PENETRATION_BACKOFF_THRESHOLD_M = 0.0005
 GRIPPER_CLOSED_TARGET_THRESHOLD_DEG = 6.0
@@ -146,16 +146,19 @@ def _single_yaw_xform_order(ops: list[Any], yaw_op: Any) -> list[Any]:
             scale_ops.append(op)
         else:
             other_ops.append(op)
-    return other_ops + [yaw_op] + scale_ops + translate_ops
+    return translate_ops + [yaw_op] + scale_ops + other_ops
 
 
-def _yaw_quaternion_value(yaw_deg: float) -> Any:
+def _yaw_quaternion_value(yaw_deg: float, precision: Any = None) -> Any:
     half_rad = math.radians(float(yaw_deg)) * 0.5
     real = math.cos(half_rad)
     imag_z = math.sin(half_rad)
     try:
         from pxr import Gf  # type: ignore
 
+        precision_name = str(precision or "").lower()
+        if "float" in precision_name and "double" not in precision_name:
+            return Gf.Quatf(float(real), Gf.Vec3f(0.0, 0.0, float(imag_z)))
         return Gf.Quatd(real, Gf.Vec3d(0.0, 0.0, imag_z))
     except Exception:
         return (real, 0.0, 0.0, imag_z)
@@ -173,7 +176,9 @@ def _apply_specimen_yaw_to_prim(prim: Any, yaw_deg: float | None) -> dict[str, A
         orient_op = next((op for op in ops if _xform_op_name(op) == "xformOp:orient"), None)
         if orient_op is not None:
             yaw_op = orient_op
-            yaw_op.Set(_yaw_quaternion_value(yaw))
+            precision_getter = getattr(yaw_op, "GetPrecision", None)
+            precision = precision_getter() if callable(precision_getter) else None
+            yaw_op.Set(_yaw_quaternion_value(yaw, precision))
         else:
             yaw_op = next((op for op in ops if _xform_op_name(op) == "xformOp:rotateZ"), None)
             if yaw_op is None:
@@ -393,14 +398,11 @@ class IsaacReplicatorRgbdRenderBackend:
             camera_dir = output_dir / camera_key
             camera_dir.mkdir(parents=True, exist_ok=True)
             depth_path = camera_dir / f"frame_{frame_index:06d}_depth.png"
-            depth_npy_path = camera_dir / f"frame_{frame_index:06d}_depth_m.npy"
             try:
                 depth_m = np.asarray(annotator.get_data(), dtype=np.float32)
-                np.save(depth_npy_path, depth_m)
                 depth_u16 = np.clip(np.nan_to_num(depth_m, nan=0.0, posinf=0.0, neginf=0.0) * 1000.0, 0, 65535).astype(np.uint16)
                 self._write_depth_png(depth_path, depth_u16)
                 files.append({"camera": camera_key, "kind": "depth", "path": str(depth_path), "encoding": "png16", "unit": "mm"})
-                files.append({"camera": camera_key, "kind": "depth_m", "path": str(depth_npy_path), "encoding": "npy", "unit": "m"})
             except Exception as exc:
                 camera_results.append(
                     {
@@ -438,7 +440,7 @@ class IsaacReplicatorRgbdRenderBackend:
     def _step_orchestrator(self, rep: Any, request: dict[str, Any], *, pending_key: str) -> dict[str, Any]:
         kwargs = {
             "rt_subframes": _safe_int(request.get("rt_subframes"), 1, minimum=1),
-            "delta_time": 0.0,
+            "delta_time": self._render_physics_delta_time(request),
             "pause_timeline": False,
         }
         try:
@@ -453,6 +455,14 @@ class IsaacReplicatorRgbdRenderBackend:
             if scheduled == "scheduled":
                 return {"ok": True, "mode": "async_scheduled", "pending_key": pending_key}
             return {"ok": True, "mode": "async_fallback"}
+
+    @staticmethod
+    def _render_physics_delta_time(request: dict[str, Any]) -> float:
+        explicit = request.get("physics_delta_time_s", request.get("delta_time"))
+        if explicit is not None:
+            return min(1.0, max(0.0, _safe_float(explicit, 0.0)))
+        target_fps = min(240.0, max(0.1, _safe_float(request.get("target_fps"), 15.0)))
+        return 1.0 / target_fps
 
     def _run_or_schedule_awaitable(self, awaitable: Any, *, pending_key: str) -> str:
         if not hasattr(awaitable, "__await__"):
@@ -681,6 +691,7 @@ class IsaacMirrorState:
         rgbd_render_backend: Callable[..., dict[str, Any]] | None = None,
         viewport_frame_callback: Callable[..., dict[str, Any]] | None = None,
         timeline_play_callback: Callable[..., dict[str, Any]] | None = None,
+        timeline_stop_callback: Callable[..., dict[str, Any]] | None = None,
     ) -> None:
         self.scene_path = scene_path
         self.use_current_stage = use_current_stage
@@ -691,6 +702,7 @@ class IsaacMirrorState:
         self.rgbd_render_backend = rgbd_render_backend if rgbd_render_backend is not None else IsaacReplicatorRgbdRenderBackend()
         self.viewport_frame_callback = viewport_frame_callback
         self.timeline_play_callback = timeline_play_callback
+        self.timeline_stop_callback = timeline_stop_callback
         self.lock = threading.Lock()
         self.last_payload: dict[str, Any] = {}
         self.pending_payload: dict[str, Any] | None = None
@@ -699,11 +711,13 @@ class IsaacMirrorState:
         self.pending_render_jobs: list[dict[str, Any]] = []
         self.pending_viewport_frame: dict[str, Any] | None = None
         self.pending_timeline_play: dict[str, Any] | None = None
+        self.pending_timeline_stop: dict[str, Any] | None = None
         self.last_apply_result: dict[str, Any] = {}
         self.last_specimen_pose_result: dict[str, Any] = {}
         self.last_render_request_result: dict[str, Any] = {}
         self.last_viewport_frame_result: dict[str, Any] = {}
         self.last_timeline_play_result: dict[str, Any] = {}
+        self.last_timeline_stop_result: dict[str, Any] = {}
         self.last_error = ""
         self.last_scene_open_status = ""
         self.scene_open_request_count = 0
@@ -906,7 +920,15 @@ class IsaacMirrorState:
         return result
 
     def apply_render(self, payload: dict[str, Any]) -> dict[str, Any]:
-        result = self.apply(payload, record_received=False)
+        render_payload = dict(payload)
+        specimen_result: dict[str, Any] = {}
+        specimen_payload = payload.get("specimen_pose") if isinstance(payload.get("specimen_pose"), dict) else {}
+        if isinstance(specimen_payload, dict) and specimen_payload:
+            specimen_result = self.apply_specimen_pose(specimen_payload)
+            render_payload["specimen_pose_result"] = dict(specimen_result)
+        result = self.apply(render_payload, record_received=False)
+        if specimen_result:
+            result["specimen_pose"] = specimen_result
         render_result = result.get("render_request")
         if isinstance(render_result, dict):
             result["status"] = str(render_result.get("status") or result.get("status") or "render_processed")
@@ -936,6 +958,18 @@ class IsaacMirrorState:
             }
         return self.apply_timeline_play(payload or {})
 
+    def receive_timeline_stop(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Stop Isaac's timeline from the Kit update thread when available."""
+        if self.defer_apply:
+            with self.lock:
+                self.pending_timeline_stop = dict(payload or {})
+            return {
+                "ok": True,
+                "status": "timeline_stop_queued",
+                "reason": str((payload or {}).get("reason") or ""),
+            }
+        return self.apply_timeline_stop(payload or {})
+
     def apply_pending_timeline_play(self) -> dict[str, Any]:
         with self.lock:
             payload = dict(self.pending_timeline_play or {})
@@ -944,8 +978,17 @@ class IsaacMirrorState:
             return {}
         return self.apply_timeline_play(payload)
 
+    def apply_pending_timeline_stop(self) -> dict[str, Any]:
+        with self.lock:
+            payload = dict(self.pending_timeline_stop or {})
+            self.pending_timeline_stop = None
+        if not payload:
+            return {}
+        return self.apply_timeline_stop(payload)
+
     def apply_timeline_play(self, payload: dict[str, Any]) -> dict[str, Any]:
         reason = str((payload or {}).get("reason") or "")
+        skip_specimen_pose_on_play = bool((payload or {}).get("skip_specimen_pose_on_play"))
         if self.timeline_play_callback is None:
             result = {
                 "ok": False,
@@ -956,7 +999,10 @@ class IsaacMirrorState:
             }
         else:
             try:
-                raw_result = self.timeline_play_callback(reason=reason)
+                callback_kwargs: dict[str, Any] = {"reason": reason}
+                if skip_specimen_pose_on_play:
+                    callback_kwargs["skip_specimen_pose_on_play"] = True
+                raw_result = self.timeline_play_callback(**callback_kwargs)
             except Exception as exc:
                 raw_result = {
                     "ok": False,
@@ -972,6 +1018,8 @@ class IsaacMirrorState:
                     "reason": reason,
                     **raw_result,
                 }
+                if skip_specimen_pose_on_play:
+                    result["skip_specimen_pose_on_play"] = True
             else:
                 result = {
                     "ok": False,
@@ -983,6 +1031,47 @@ class IsaacMirrorState:
         with self.lock:
             self.last_timeline_play_result = result
             self.last_apply_result = {**dict(self.last_apply_result or {}), "timeline_play": result}
+        return result
+
+    def apply_timeline_stop(self, payload: dict[str, Any]) -> dict[str, Any]:
+        reason = str((payload or {}).get("reason") or "")
+        if self.timeline_stop_callback is None:
+            result = {
+                "ok": False,
+                "status": "timeline_stop_unavailable",
+                "failure_code": "TIMELINE_STOP_CALLBACK_UNAVAILABLE",
+                "message": "Timeline stop callback is not available in this receiver.",
+                "reason": reason,
+            }
+        else:
+            try:
+                raw_result = self.timeline_stop_callback(reason=reason)
+            except Exception as exc:
+                raw_result = {
+                    "ok": False,
+                    "status": "timeline_stop_failed",
+                    "failure_code": "TIMELINE_STOP_CALLBACK_FAILED",
+                    "message": f"{exc.__class__.__name__}: {exc}",
+                    "reason": reason,
+                }
+            if isinstance(raw_result, dict):
+                result = {
+                    "ok": bool(raw_result.get("ok", True)),
+                    "status": str(raw_result.get("status") or "timeline_stop_requested"),
+                    "reason": reason,
+                    **raw_result,
+                }
+            else:
+                result = {
+                    "ok": False,
+                    "status": "timeline_stop_failed",
+                    "failure_code": "TIMELINE_STOP_INVALID_RESULT",
+                    "message": "Timeline stop callback did not return a dictionary.",
+                    "reason": reason,
+                }
+        with self.lock:
+            self.last_timeline_stop_result = result
+            self.last_apply_result = {**dict(self.last_apply_result or {}), "timeline_stop": result}
         return result
 
     def apply_pending_viewport_frame(self) -> dict[str, Any]:
@@ -1162,6 +1251,9 @@ class IsaacMirrorState:
             "source": str(pose.get("source") or payload.get("reason") or ""),
             "velocity_reset": velocity_reset,
         }
+        source_path = str(payload.get("source_path") or "").strip()
+        if source_path:
+            result["source_path"] = source_path
         if yaw_result.get("applied"):
             result["orientation_deg"] = {"yaw": yaw_result["yaw"]}
             result["xformOpOrder"] = yaw_result.get("xformOpOrder", [])
@@ -1181,6 +1273,8 @@ class IsaacMirrorState:
             self.pending_viewport_frame = None
             timeline_play = dict(self.pending_timeline_play or {})
             self.pending_timeline_play = None
+            timeline_stop = dict(self.pending_timeline_stop or {})
+            self.pending_timeline_stop = None
         if not payload:
             result: dict[str, Any] = {
                 "ok": True,
@@ -1189,6 +1283,8 @@ class IsaacMirrorState:
                 "target_count": 0,
                 "latest_state_path": str(LATEST_STATE_PATH),
             }
+            if timeline_stop:
+                result = {**result, "timeline_stop": self.apply_timeline_stop(timeline_stop)}
             if specimen_pose:
                 specimen_result = self.apply_specimen_pose(specimen_pose)
                 result = {**result, **specimen_result, "specimen_pose": specimen_result}
@@ -1196,7 +1292,7 @@ class IsaacMirrorState:
                 result = {**result, "viewport_frame": self.apply_viewport_frame(viewport_frame)}
             if timeline_play:
                 result = {**result, "timeline_play": self.apply_timeline_play(timeline_play)}
-            if specimen_pose or viewport_frame or timeline_play:
+            if specimen_pose or viewport_frame or timeline_stop or timeline_play:
                 with self.lock:
                     self.last_apply_result = result
             return result
@@ -1209,6 +1305,11 @@ class IsaacMirrorState:
         if viewport_frame:
             viewport_result = self.apply_viewport_frame(viewport_frame)
             result = {**result, "viewport_frame": viewport_result}
+            with self.lock:
+                self.last_apply_result = result
+        if timeline_stop:
+            timeline_result = self.apply_timeline_stop(timeline_stop)
+            result = {**result, "timeline_stop": timeline_result}
             with self.lock:
                 self.last_apply_result = result
         if timeline_play:
@@ -1389,6 +1490,9 @@ class IsaacMirrorState:
                 metadata[key] = payload[key]
             if key in metadata:
                 row[key] = metadata[key]
+        specimen_result = payload.get("specimen_pose_result") if isinstance(payload.get("specimen_pose_result"), dict) else {}
+        if specimen_result:
+            row["specimen_pose"] = dict(specimen_result)
         render_payload: dict[str, Any] = {}
         if render:
             render_payload = self._run_rgbd_render_backend(dict(request), output_dir=output_dir, stage=stage, payload=payload)
@@ -2103,6 +2207,11 @@ class IsaacMirrorState:
                 self._gripper_contact_hold_target_value = None
                 hold_reason = "released_opening"
                 released_this_tick = True
+            elif not contact_reliable:
+                hold_target_value = None
+                self._gripper_contact_hold_target_value = None
+                hold_reason = "released_contact_lost"
+                released_this_tick = True
 
         if (
             hold_target_value is None
@@ -2113,34 +2222,12 @@ class IsaacMirrorState:
         ):
             closing_or_unknown = previous_gripper_target is None or primary_value <= previous_gripper_target
             if closing_or_unknown:
-                if previous_gripper_target is None:
-                    hold_target_value = primary_value
-                else:
-                    hold_target_value = max(
-                        primary_value,
-                        previous_gripper_target - GRIPPER_CONTACT_HOLD_OVERTRAVEL_DEG,
-                    )
+                hold_target_value = primary_value - GRIPPER_CONTACT_HOLD_OVERTRAVEL_DEG
                 self._gripper_contact_hold_target_value = hold_target_value
                 hold_reason = "contact_hold_armed"
 
         hold_active = hold_target_value is not None
         probe_limited = False
-        if (
-            not hold_active
-            and primary_target is not None
-            and primary_value == primary_value
-            and previous_gripper_target is not None
-        ):
-            max_close_target_value = previous_gripper_target - GRIPPER_CONTACT_PROBE_MAX_CLOSE_STEP_DEG
-            if primary_value < max_close_target_value:
-                for target in gripper_targets:
-                    value = _safe_float(target.get("target_value"), float("nan"))
-                    if value == value and value < max_close_target_value:
-                        target["target_value"] = max_close_target_value
-                        target["contact_probe_limited"] = True
-                        probe_limited = True
-                if probe_limited and not hold_reason:
-                    hold_reason = "contact_probe_limited"
 
         clamped = False
         if hold_active:
@@ -2218,6 +2305,7 @@ class IsaacMirrorState:
                 "pending_render_jobs": len(self.pending_render_jobs),
                 "pending_viewport_frame": self.pending_viewport_frame is not None,
                 "pending_timeline_play": self.pending_timeline_play is not None,
+                "pending_timeline_stop": self.pending_timeline_stop is not None,
                 "sample_count": self.sample_count,
                 "scene_path": str(self.scene_path),
                 "last_scene_open_status": self.last_scene_open_status,
@@ -2229,6 +2317,7 @@ class IsaacMirrorState:
                 "last_render_request_result": dict(self.last_render_request_result),
                 "last_viewport_frame_result": dict(self.last_viewport_frame_result),
                 "last_timeline_play_result": dict(self.last_timeline_play_result),
+                "last_timeline_stop_result": dict(self.last_timeline_stop_result),
                 "last_payload_summary": self._last_payload_summary_locked(),
             }
 
@@ -2448,7 +2537,7 @@ def make_handler(state: IsaacMirrorState) -> type[BaseHTTPRequestHandler]:
             self._json_response(200, state.status_payload())
 
         def do_POST(self) -> None:  # noqa: N802
-            if self.path not in {"/joints", "/specimen_pose", "/viewport/frame", "/timeline/play", "/render"}:
+            if self.path not in {"/joints", "/specimen_pose", "/viewport/frame", "/timeline/play", "/timeline/stop", "/render"}:
                 self._json_response(404, {"ok": False, "error": "not_found"})
                 return
             try:
@@ -2463,6 +2552,8 @@ def make_handler(state: IsaacMirrorState) -> type[BaseHTTPRequestHandler]:
                     result = state.receive_viewport_frame(payload)
                 elif self.path == "/timeline/play":
                     result = state.receive_timeline_play(payload)
+                elif self.path == "/timeline/stop":
+                    result = state.receive_timeline_stop(payload)
                 elif self.path == "/render":
                     result = state.receive_render(payload)
                 else:

@@ -679,8 +679,8 @@ class IsaacLabSyntheticRequest(BaseModel):
     require_articulation_pass: bool = True
 
     real_weight: float = Field(default=1.0, ge=0.0, le=2.0)
-    isaac_rgbd_weight: float = Field(default=0.35, ge=0.0, le=1.0)
-    isaac_lab_synthetic_weight: float = Field(default=0.25, ge=0.0, le=1.0)
+    isaac_rgbd_weight: float = Field(default=0.6, ge=0.0, le=1.0)
+    isaac_lab_synthetic_weight: float = Field(default=0.35, ge=0.0, le=1.0)
     legacy_sidecar_weight: float = Field(default=0.0, ge=0.0, le=1.0)
 ```
 
@@ -1106,9 +1106,9 @@ effective_weight = source_weight * fidelity_weight
 Default weights:
 
 - `real_lerobot`: `source_weight=1.0`, `fidelity_weight=1.0`.
-- `isaac_rgbd_render`: `source_weight=0.35`, `fidelity_weight=0.5`.
+- `isaac_rgbd_render`: `source_weight=0.6`, `fidelity_weight=0.55`.
 - `replicator_render_only`: `source_weight=0.25`, `fidelity_weight=0.4`.
-- `isaac_lab_mimic`: `source_weight=0.25`, `fidelity_weight=0.5`.
+- `isaac_lab_mimic`: `source_weight=0.35`, `fidelity_weight=0.25`.
 - `isaac_lab_rl_teacher`: `source_weight=0.1`, `fidelity_weight=0.3`, disabled by default.
 - `legacy_sidecar`: `source_weight=0.0`, `fidelity_weight=0.2`, disabled by default.
 
@@ -1117,6 +1117,7 @@ Rules:
 - `effective_weight` must be computed and stored; training code should not recompute it differently.
 - A GUI change to fidelity weights must rewrite `lerobot_source_config.json`, not the original manifests.
 - If a row has `success=false`, it cannot appear in `training_import/manifest.jsonl` in the first slice.
+- For the joint-replay Mimic backend, the stitched joint-plan HDF5 is not a trainable trajectory by itself. The pipeline must replay the joint plan through Isaac Lab and record the final Lab-stepped `mimic/generated_dataset.hdf5`; only rows with `metrics.lab_step_replay=true` may enter `training_import/manifest.jsonl`.
 
 #### Progress Event Schema
 

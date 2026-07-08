@@ -50,7 +50,7 @@ DEFAULT_MANIPULATION_AGENT_PROFILE: dict[str, Any] = {
     "camera_enabled": True,
     "display_data": False,
     "continuous_rollout": True,
-    "rollout_action_clamp": True,
+    "rollout_action_clamp": False,
     "rollout_max_relative_target": 5,
     "rollout_temporal_ensemble": True,
     "rollout_temporal_ensemble_coeff": 0.01,

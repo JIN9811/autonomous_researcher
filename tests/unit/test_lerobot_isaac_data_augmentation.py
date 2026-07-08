@@ -50,6 +50,34 @@ def _write_rendered_source(dataset: Path) -> Path:
     return render_dir
 
 
+def _write_rendered_source_for_episode(dataset: Path, *, episode_index: int, frame_index: int = 0) -> Path:
+    render_dir = dataset / "sidecar" / "isaac_rgbd" / f"episode_{episode_index:03d}" / "attempt_filter"
+    camera_dir = render_dir / "top"
+    camera_dir.mkdir(parents=True, exist_ok=True)
+    rgb_path = camera_dir / f"frame_{frame_index:06d}_rgb.png"
+    depth_path = camera_dir / f"frame_{frame_index:06d}_depth.png"
+    Image.fromarray(np.full((8, 8, 3), [80 + episode_index, 120, 160], dtype=np.uint8), mode="RGB").save(rgb_path)
+    Image.fromarray(np.full((8, 8), 430 + episode_index, dtype=np.uint16)).save(depth_path)
+    row = {
+        "schema": "atr.isaac_rgbd.render_manifest.v1",
+        "status": "rendered",
+        "attempt_id": "attempt_filter",
+        "episode_index": episode_index,
+        "frame_index": frame_index,
+        "sample_index": frame_index + 1,
+        "record_timestamp": "2026-06-28T00:00:00+00:00",
+        "target_fps": 15.0,
+        "cameras": ["top"],
+        "output_dir": str(render_dir),
+        "files": [
+            {"camera": "top", "kind": "rgb", "path": str(rgb_path), "encoding": "png"},
+            {"camera": "top", "kind": "depth", "path": str(depth_path), "encoding": "png16", "unit": "mm"},
+        ],
+    }
+    (render_dir / "manifest.jsonl").write_text(json.dumps(row) + "\n", encoding="utf-8")
+    return render_dir
+
+
 def _write_rendered_source_with_files(
     dataset: Path,
     *,
@@ -79,6 +107,46 @@ def _write_rendered_source_with_files(
 
 def _read_single_variant(output_dir: Path) -> dict[str, object]:
     return json.loads((output_dir / "manifest.jsonl").read_text(encoding="utf-8").splitlines()[0])
+
+
+def test_isaac_augmentation_excludes_contact_flagged_source_episodes(tmp_path: Path) -> None:
+    dataset = tmp_path / "dataset"
+    _write_rendered_source_for_episode(dataset, episode_index=0)
+    _write_rendered_source_for_episode(dataset, episode_index=1)
+    exclusion_path = dataset / "sidecar" / "train_exclusions" / "contact_audit.json"
+    exclusion_path.parent.mkdir(parents=True, exist_ok=True)
+    exclusion_path.write_text(
+        json.dumps(
+            {
+                "schema": "atr.lerobot.training_exclusions.contact_audit.v1",
+                "policy": "exclude_severe_contact_episodes",
+                "source": "isaac_rgbd_contact_audit",
+                "episode_indices": [0],
+                "episode_count": 1,
+                "original_data_preserved": True,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = build_augmentation_sidecar(
+        dataset_path=dataset,
+        output_dir=dataset / "sidecar" / "isaac_augmentation" / "latest",
+        variants_per_frame=1,
+        max_source_frames=10,
+        seed=7,
+        cameras=["top"],
+    )
+
+    rows = [
+        json.loads(line)
+        for line in Path(result["manifest_path"]).read_text(encoding="utf-8").splitlines()
+    ]
+    assert result["ok"] is True
+    assert result["source_frame_count"] == 1
+    assert result["excluded_source_episode_indices"] == [0]
+    assert result["excluded_source_frame_count"] == 1
+    assert [row["source"]["episode_index"] for row in rows] == [1]
 
 
 def _write_single_camera_rendered_source(

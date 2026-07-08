@@ -11,7 +11,12 @@ from __future__ import annotations
 
 import os
 import runpy
+import sys
 from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 # Importing the module registers the ROBOTIS OMX robot config with LeRobot's parser.
 try:  # pragma: no cover - depends on the installed Pi0.5 LeRobot package.
@@ -19,6 +24,9 @@ try:  # pragma: no cover - depends on the installed Pi0.5 LeRobot package.
 except Exception:
     # The delegated script will raise a clearer parser/runtime error if OMX is unavailable.
     pass
+
+from scripts.lerobot_live_depth_observation_patch import install_live_depth_observation_patch
+from scripts.lerobot_omx_runtime_units_patch import install_omx_follower_runtime_units_patch
 
 
 def _install_atr_action_logger() -> None:
@@ -81,7 +89,9 @@ def _install_atr_action_logger() -> None:
     OmxFollower.send_action = _logged_send_action
 
 
+install_omx_follower_runtime_units_patch()
 _install_atr_action_logger()
+install_live_depth_observation_patch()
 
 DEFAULT_RTC_SCRIPT = "/home/jin/lerobot_pi05/examples/rtc/eval_with_real_robot.py"
 script_path = Path(os.environ.get("ATR_PI05_RTC_SCRIPT", DEFAULT_RTC_SCRIPT)).expanduser()

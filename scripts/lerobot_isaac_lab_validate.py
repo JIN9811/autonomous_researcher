@@ -104,7 +104,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--enable-mimic", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--enable-rl-teacher", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--real-weight", type=float, default=1.0)
-    parser.add_argument("--isaac-rgbd-weight", type=float, default=0.35)
+    parser.add_argument("--isaac-rgbd-weight", type=float, default=0.6)
     parser.add_argument("--replicator-render-weight", type=float, default=0.25)
     parser.add_argument("--isaac-lab-synthetic-weight", type=float, default=0.25)
     parser.add_argument("--legacy-sidecar-weight", type=float, default=0.0)

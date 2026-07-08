@@ -683,6 +683,38 @@ def _play_timeline() -> str:
         return f"failed:{exc.__class__.__name__}: {exc}"
 
 
+def _stop_timeline() -> str:
+    """Stop Isaac's timeline so the next episode starts from a reset simulation boundary."""
+    try:
+        import omni.timeline  # type: ignore
+
+        timeline = omni.timeline.get_timeline_interface()
+        if timeline is None:
+            return "skipped:no_timeline"
+        timeline.stop()
+        commit = getattr(timeline, "commit", None)
+        if callable(commit):
+            try:
+                commit()
+            except Exception:
+                pass
+        try:
+            playing = bool(timeline.is_playing())
+        except Exception:
+            playing = False
+        try:
+            stopped = bool(timeline.is_stopped())
+        except Exception:
+            stopped = True
+        try:
+            current_time = float(timeline.get_current_time())
+        except Exception:
+            current_time = 0.0
+        return f"playing:{playing};stopped:{stopped};current:{current_time:.3f}"
+    except Exception as exc:
+        return f"failed:{exc.__class__.__name__}: {exc}"
+
+
 def install_delayed_timeline_play_subscription(
     delay_ticks: int,
     *,
@@ -924,8 +956,19 @@ class AtrOmxMirrorExtension(_BaseExtension):
             open_status = _open_gui_stage(scene_path)
             _log_info(f"[{ext_id}] ATR OMX mirror requested GUI stage scene={scene_path} status={open_status}")
 
-        def timeline_play_callback(*, reason: str = "") -> dict[str, Any]:
+        def timeline_play_callback(*, reason: str = "", skip_specimen_pose_on_play: bool = False) -> dict[str, Any]:
+            if skip_specimen_pose_on_play:
+                delayed_play_skip_until["deadline"] = time.monotonic() + 3.0
             status = _play_timeline()
+            return {
+                "ok": not status.startswith("failed:"),
+                "status": status,
+                "reason": reason,
+                "skip_specimen_pose_on_play": bool(skip_specimen_pose_on_play),
+            }
+
+        def timeline_stop_callback(*, reason: str = "") -> dict[str, Any]:
+            status = _stop_timeline()
             return {
                 "ok": not status.startswith("failed:"),
                 "status": status,
@@ -936,6 +979,7 @@ class AtrOmxMirrorExtension(_BaseExtension):
             scene_path,
             use_current_stage=use_current_stage,
             timeline_play_callback=timeline_play_callback,
+            timeline_stop_callback=timeline_stop_callback,
         )
         self._subscription = install_kit_update_subscription(self._state)
         before_play = None

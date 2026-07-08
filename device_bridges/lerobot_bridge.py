@@ -60,6 +60,7 @@ from utils.isaac_omx_mirror_mapping import (
     ISAAC_OMX_JOINT_MAP,
     ISAAC_OMX_SCENE_RELATIVE_PATH,
     ISAAC_OMX_TEST_JOINT_STATE_DEG,
+    action_to_joint_state,
     default_isaac_omx_mirror_calibration_path,
     load_isaac_omx_mirror_calibration,
     positions_to_joint_state,
@@ -77,6 +78,12 @@ MANUAL_STOP_ROLLOUT_EPISODE_S = 86400.0
 LEROBOT_REALSENSE_BACKENDS = {"realsense", "intelrealsense", "intel_realsense", "realsense_sdk"}
 LEROBOT_REALSENSE_TYPE = "intelrealsense"
 LEROBOT_DEFAULT_REALSENSE_FPS = 15
+
+
+def _command_script_path(command: list[str]) -> Path:
+    if len(command) > 2 and command[1] == "-p":
+        return Path(command[2]).expanduser()
+    return Path(command[1]).expanduser() if len(command) > 1 else Path("")
 LEROBOT_DEFAULT_REALSENSE_WARMUP_S = 5
 LEROBOT_DEFAULT_CAMERA_WIDTH = 640
 LEROBOT_DEFAULT_CAMERA_HEIGHT = 480
@@ -91,7 +98,7 @@ LEROBOT_REALSENSE_MODEL_NAMES = {
     "455f": "Intel(R) RealSense(TM) Depth Camera 455f",
 }
 LEROBOT_REALSENSE_DEFAULT_IDENTIFIERS = {
-    "top": "Intel RealSense D455F",
+    "top": "341522300873",
     "wrist": "352122273019",
 }
 LEROBOT_REALSENSE_CAMERA_MODEL_HINTS = {
@@ -103,6 +110,8 @@ LEROBOT_DEFAULT_RECORD_NUM_EPISODES = 60
 LEROBOT_DEFAULT_OBSERVATION_PIPELINE_ID = "raw_depth_adapter"
 LEROBOT_DEFAULT_TRAIN_POLICY_TYPE = "smolvla"
 LEROBOT_DEFAULT_ISAAC_RGBD_RENDER_CAMERAS = "top,front,right"
+ISAAC_RGBD_POST_RENDER_EXECUTION_MODE = "headless_preplay_replay"
+ISAAC_RGBD_POST_RENDER_PREPLAY_POLICY = "stop_specimen_play_settle_per_episode"
 LEROBOT_OBSERVATION_PIPELINES: dict[str, dict[str, Any]] = {
     "legacy_lerobot": {
         "pipeline_id": "legacy_lerobot",
@@ -522,6 +531,10 @@ class LeRobotBridge:
         self._isaac_rgbd_render_jobs: dict[str, dict[str, Any]] = {}
         self._isaac_rgbd_render_threads: dict[str, threading.Thread] = {}
         self._isaac_rgbd_render_lock = threading.Lock()
+        self._isaac_augmentation_jobs: dict[str, dict[str, Any]] = {}
+        self._isaac_augmentation_threads: dict[str, threading.Thread] = {}
+        self._isaac_augmentation_lock = threading.Lock()
+        self._isaac_augmentation_latest_job_id = ""
         self._isaac_lab_mimic_jobs: dict[str, dict[str, Any]] = {}
         self._isaac_lab_mimic_processes: dict[str, subprocess.Popen[str]] = {}
         self._isaac_lab_mimic_threads: dict[str, threading.Thread] = {}
@@ -532,6 +545,38 @@ class LeRobotBridge:
         self._isaac_lab_rl_teacher_threads: dict[str, threading.Thread] = {}
         self._isaac_lab_rl_teacher_lock = threading.Lock()
         self._isaac_lab_rl_teacher_latest_job_id = ""
+        self._isaac_lab_runner_jobs: dict[str, dict[str, dict[str, Any]]] = {
+            "annotate": {},
+            "mimic": {},
+            "il_train": {},
+            "il_eval": {},
+            "rl_teacher": {},
+            "live_e2e": {},
+        }
+        self._isaac_lab_runner_processes: dict[str, dict[str, subprocess.Popen[str]]] = {
+            "annotate": {},
+            "mimic": {},
+            "il_train": {},
+            "il_eval": {},
+            "rl_teacher": {},
+            "live_e2e": {},
+        }
+        self._isaac_lab_runner_locks: dict[str, threading.Lock] = {
+            "annotate": threading.Lock(),
+            "mimic": threading.Lock(),
+            "il_train": threading.Lock(),
+            "il_eval": threading.Lock(),
+            "rl_teacher": threading.Lock(),
+            "live_e2e": threading.Lock(),
+        }
+        self._isaac_lab_runner_latest_job_id: dict[str, str] = {
+            "annotate": "",
+            "mimic": "",
+            "il_train": "",
+            "il_eval": "",
+            "rl_teacher": "",
+            "live_e2e": "",
+        }
         self._counter = 0
         self._selected_profile_id = config.default_profile_id
         self._selected_observation_pipeline_id = _normalize_observation_pipeline_id(config.default_observation_pipeline_id)
@@ -1366,10 +1411,12 @@ class LeRobotBridge:
         profile_memory = self._profile_device_memory(memory, profile.profile_id)
         baseline_key = self._device_memory_key(request.device_role, request.camera_key)
         baseline = dict(profile_memory.get("baselines", {}).get(baseline_key, {}))
+        camera_backend = self._normalize_camera_backend(request.camera_backend)
+        is_realsense_camera = request.device_role == "camera" and camera_backend == LEROBOT_REALSENSE_TYPE
         if mode == "test":
             candidates = [
                 self._default_realsense_identifier(request.camera_key)
-                if request.device_role == "camera" and self._normalize_camera_backend(request.camera_backend) == LEROBOT_REALSENSE_TYPE
+                if is_realsense_camera
                 else self._fake_camera_port(profile, request.camera_key)
                 if request.device_role == "camera"
                 else self._fake_port(profile, request.device_role)
@@ -1380,13 +1427,17 @@ class LeRobotBridge:
             before = baseline.get("camera_ports" if request.device_role == "camera" else "serial_ports", [])
             added = sorted(set(now) - set(before))
             removed = sorted(set(before) - set(now))
-            candidates = added or removed or list(now)
-            change_type = "added" if added else "removed" if removed else "unchanged"
+            if mode == "live" and is_realsense_camera:
+                candidates = added or list(now)
+                change_type = "added" if added else "unchanged" if now else "removed"
+            else:
+                candidates = added or removed or list(now)
+                change_type = "added" if added else "removed" if removed else "unchanged"
         chosen = request.port or ""
         role_verification: dict[str, Any] = {}
         role_verifications: list[dict[str, Any]] = []
         save_source = f"detect_delta:{change_type}"
-        if not chosen and candidates and request.device_role == "camera" and self._normalize_camera_backend(request.camera_backend) == LEROBOT_REALSENSE_TYPE:
+        if not chosen and candidates and is_realsense_camera:
             preferred = self._preferred_realsense_identifier(request.camera_key)
             if preferred not in candidates:
                 return self._error(
@@ -1500,12 +1551,25 @@ class LeRobotBridge:
         if profile is None:
             return self._error("lerobot.ports.save", mode, request.profile_id, "LEROBOT_PROFILE_NOT_FOUND", "Robot profile not found.")
         port = request.port or (f"/dev/video{request.camera_index}" if request.device_role == "camera" and request.camera_index is not None else "")
-        if not port and request.device_role == "camera" and self._normalize_camera_backend(request.camera_backend) == LEROBOT_REALSENSE_TYPE:
+        camera_backend = self._normalize_camera_backend(request.camera_backend)
+        is_realsense_camera = request.device_role == "camera" and camera_backend == LEROBOT_REALSENSE_TYPE
+        if not port and is_realsense_camera:
             port = self._preferred_realsense_identifier(request.camera_key)
         if not port:
             return self._error("lerobot.ports.save", mode, profile.profile_id, "LEROBOT_PORT_REQUIRED", "A port or camera index is required.")
         raw_port = port
         port = self._normalize_realsense_selected_identifier(request, port, mode=mode)
+        if mode == "live" and is_realsense_camera:
+            realsense_entries = self._scan_live_realsense_camera_entries()
+            if not self._realsense_identifier_available(port, realsense_entries):
+                visible = self._realsense_visible_summary(realsense_entries)
+                return self._error(
+                    "lerobot.ports.save",
+                    mode,
+                    profile.profile_id,
+                    "LEROBOT_REALSENSE_CAMERA_UNAVAILABLE",
+                    f"Selected RealSense camera for {request.camera_key} is not available: {port}; visible RealSense devices: {visible}.",
+                )
         saved = self._save_device_port(
             profile.profile_id,
             request.device_role,
@@ -1726,6 +1790,14 @@ class LeRobotBridge:
                     }
                 )
             self._refresh_record_isaac_mirror_metadata(stopped.get("session_id", ""), stopped["isaac_mirror_stop"])
+            session = self._resolve_session(str(stopped.get("session_id") or ""), "record", prefer_active=False)
+            if session is not None and self._record_session_has_isaac_rgbd_post_render_candidates(session):
+                self._start_isaac_rgbd_post_render_after_record(session)
+                if isinstance(session.get("isaac_rgbd_post_render"), dict):
+                    stopped["isaac_rgbd_post_render"] = dict(session["isaac_rgbd_post_render"])
+                    stopped["isaac_rgbd_post_render_auto_started"] = bool(session.get("isaac_rgbd_post_render_auto_started"))
+                    stopped["step_trace"] = list(session.get("step_trace", stopped.get("step_trace", [])))
+                    stopped["events"] = list(stopped["step_trace"])
             extra_cleanup = self.cleanup_all_lerobot_processes(exclude_workflows={"record"})
             if extra_cleanup:
                 step_trace = list(stopped.get("step_trace", [])) + extra_cleanup
@@ -1815,6 +1887,7 @@ class LeRobotBridge:
             if pipeline_block:
                 return pipeline_block
             request, dataset_version_detail = self._train_request_with_pi05_dataset_version(request)
+            metadata_detail = self._ensure_train_dataset_jsonl_metadata_compat(request)
             pipeline_block = self._dataset_pipeline_block_if_needed("lerobot.train.start", mode, profile, request, "train")
             if pipeline_block:
                 return pipeline_block
@@ -1836,7 +1909,7 @@ class LeRobotBridge:
         status = "COMPLETED" if mode != "live" else "TRAINING"
         trace = [
             ("PRECHECK", "ok", f"{train_detail}; {runtime_detail}; {resume_detail}"),
-            ("LOAD_DATASET", "ok", f"{dataset_detail}; {dataset_version_detail}"),
+            ("LOAD_DATASET", "ok", f"{dataset_detail}; {dataset_version_detail}; {metadata_detail}"),
             *list(augmentation_qa.get("trace", [])),
             ("TRAINING", "ok" if mode != "live" else "active", f"steps={request.steps} batch_size={request.batch_size}"),
             ("CHECKPOINT", "ok" if mode != "live" else "pending", self._train_checkpoint_path(profile, request)),
@@ -2125,63 +2198,92 @@ class LeRobotBridge:
             "step_trace": step_trace,
             "events": step_trace,
         }
+        env_overrides = {"WANDB_BASE_URL": url, "DOCKER_DEFAULT_PLATFORM": "linux/amd64"}
+
+        def fail_start(failure_code: str, message: str) -> dict[str, Any]:
+            session["status"] = "FAILED"
+            session.setdefault("step_trace", []).append({"step": failure_code, "status": "failed", "detail": message})
+            self._sessions[session_id] = session
+            return self._session_response(
+                "lerobot.wandb_local.start",
+                mode,
+                session,
+                session["step_trace"],
+                ok=False,
+                failure_code=failure_code,
+                message=message,
+                error=message,
+                url=url,
+                port=port,
+            )
+
+        def start_process(step_name: str) -> dict[str, Any]:
+            live_start = self._start_live_process(session_id=session_id, command=command, env_overrides=env_overrides)
+            if live_start.get("session_updates"):
+                session.update(dict(live_start["session_updates"]))
+            if not live_start["ok"]:
+                message = str(live_start.get("message", "Local W&B server failed during startup."))
+                return {
+                    "ok": False,
+                    "response": fail_start(str(live_start.get("failure_code", "WANDB_LOCAL_PROCESS_START_FAILED")), message),
+                }
+            session.setdefault("step_trace", []).append({"step": step_name, "status": "active", "detail": f"pid={session.get('pid')}"})
+            return {"ok": True}
+
+        def stop_failed_process_for_retry() -> None:
+            process = self._processes.get(session_id)
+            if process and process.poll() is None:
+                self._terminate_live_process(process, signal.SIGTERM)
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    self._terminate_live_process(process, signal.SIGKILL)
+                    process.wait(timeout=5)
+            if process:
+                session["returncode"] = process.returncode
+                self._processes.pop(session_id, None)
+            self._close_log_handle(session_id)
+
         if mode != "test":
             if self._wandb_local_port_ready(url):
                 session["status"] = "WANDB_LOCAL_RUNNING"
                 session.setdefault("step_trace", []).append({"step": "PORT_READY", "status": "ok", "detail": url})
                 self._sessions[session_id] = session
                 return self._session_response("lerobot.wandb_local.start", mode, session, session["step_trace"], url=url, port=port, idempotent=True)
-            live_start = self._start_live_process(
-                session_id=session_id,
-                command=command,
-                env_overrides={"WANDB_BASE_URL": url, "DOCKER_DEFAULT_PLATFORM": "linux/amd64"},
-            )
-            if live_start.get("session_updates"):
-                session.update(dict(live_start["session_updates"]))
-            if not live_start["ok"]:
-                session["status"] = "FAILED"
-                session["step_trace"] = step_trace + [
-                    {
-                        "step": str(live_start.get("failure_code", "WANDB_LOCAL_PROCESS_START_FAILED")),
-                        "status": "failed",
-                        "detail": str(live_start.get("message", "Local W&B server failed during startup.")),
-                    }
-                ]
-                self._sessions[session_id] = session
-                return self._session_response(
-                    "lerobot.wandb_local.start",
-                    mode,
-                    session,
-                    session["step_trace"],
-                    ok=False,
-                    failure_code=str(live_start.get("failure_code", "WANDB_LOCAL_PROCESS_START_FAILED")),
-                    message=str(live_start.get("message", "")),
-                    error=str(live_start.get("message", "")),
-                    url=url,
-                    port=port,
-                )
-            session.setdefault("step_trace", []).append({"step": "PROCESS_STARTED", "status": "active", "detail": f"pid={session.get('pid')}"})
+            started = start_process("PROCESS_STARTED")
+            if not started["ok"]:
+                return dict(started["response"])
             ready, failure = self._wait_for_wandb_local_ready(url, session, timeout_s=45.0)
             if ready:
                 session["status"] = "WANDB_LOCAL_RUNNING"
                 session.setdefault("step_trace", []).append({"step": "PORT_READY", "status": "ok", "detail": url})
             elif failure:
                 failure_code, message = failure
-                session["status"] = "FAILED"
-                session.setdefault("step_trace", []).append({"step": failure_code, "status": "failed", "detail": message})
-                self._sessions[session_id] = session
-                return self._session_response(
-                    "lerobot.wandb_local.start",
-                    mode,
-                    session,
-                    session["step_trace"],
-                    ok=False,
-                    failure_code=failure_code,
-                    message=message,
-                    error=message,
-                    url=url,
-                    port=port,
-                )
+                if failure_code == "WANDB_LOCAL_PLATFORM_EMULATION_REQUIRED":
+                    install = self._install_wandb_local_amd64_binfmt()
+                    install_detail = str(install.get("output") or install.get("error") or " ".join(map(str, install.get("command", []))))
+                    if not bool(install.get("ok")):
+                        session.setdefault("step_trace", []).append(
+                            {"step": "WANDB_LOCAL_AMD64_BINFMT", "status": "failed", "detail": install_detail}
+                        )
+                        return fail_start(failure_code, message)
+                    session.setdefault("step_trace", []).append({"step": "WANDB_LOCAL_AMD64_BINFMT", "status": "ok", "detail": install_detail})
+                    stop_failed_process_for_retry()
+                    restarted = start_process("PROCESS_RESTARTED")
+                    if not restarted["ok"]:
+                        return dict(restarted["response"])
+                    ready, failure = self._wait_for_wandb_local_ready(url, session, timeout_s=45.0)
+                    if ready:
+                        session["status"] = "WANDB_LOCAL_RUNNING"
+                        session.setdefault("step_trace", []).append({"step": "PORT_READY", "status": "ok", "detail": url})
+                    elif failure:
+                        failure_code, message = failure
+                        return fail_start(failure_code, message)
+                    else:
+                        session["status"] = "STARTING"
+                        session.setdefault("step_trace", []).append({"step": "PORT_WAITING", "status": "active", "detail": url})
+                else:
+                    return fail_start(failure_code, message)
             else:
                 session["status"] = "STARTING"
                 session.setdefault("step_trace", []).append({"step": "PORT_WAITING", "status": "active", "detail": url})
@@ -2341,6 +2443,42 @@ class LeRobotBridge:
                     "message": "Isaac RGB-D sidecar is missing; synthetic render coverage is unavailable.",
                 }
             )
+        else:
+            coverage = isaac_rgbd.get("coverage") if isinstance(isaac_rgbd.get("coverage"), dict) else {}
+            if _safe_bool(coverage.get("incomplete"), False):
+                missing_count = _safe_int(coverage.get("missing_episode_count"), 0, minimum=0)
+                missing_indices = coverage.get("missing_episode_indices") if isinstance(coverage.get("missing_episode_indices"), list) else []
+                missing_label = ", ".join(str(index) for index in missing_indices[:8])
+                if len(missing_indices) > 8:
+                    missing_label = f"{missing_label}, +{len(missing_indices) - 8} more"
+                issues.append(
+                    {
+                        "severity": "warning",
+                        "code": "LEROBOT_ISAAC_RGBD_COVERAGE_INCOMPLETE",
+                        "message": (
+                            "Isaac RGB-D render coverage is incomplete: "
+                            f"{missing_count} episode(s) have no rendered RGB-D output"
+                            f"{f': {missing_label}' if missing_label else ''}."
+                        ),
+                    }
+                )
+            contact_audit = isaac_rgbd.get("contact_audit") if isinstance(isaac_rgbd.get("contact_audit"), dict) else {}
+            severe_episodes = contact_audit.get("severe_episodes") if isinstance(contact_audit.get("severe_episodes"), list) else []
+            if severe_episodes:
+                episode_labels = ", ".join(str(item.get("episode_index")) for item in severe_episodes[:8] if isinstance(item, dict))
+                if len(severe_episodes) > 8:
+                    episode_labels = f"{episode_labels}, +{len(severe_episodes) - 8} more"
+                issues.append(
+                    {
+                        "severity": "warning",
+                        "code": "LEROBOT_ISAAC_RGBD_CONTACT_WARNINGS",
+                        "message": (
+                            "Isaac RGB-D contact audit found "
+                            f"{len(severe_episodes)} episode(s) where the gripper closed without reliable object contact/lift"
+                            f"{f': {episode_labels}' if episode_labels else ''}."
+                        ),
+                    }
+                )
         if not isaac_augmentation.get("available"):
             issues.append(
                 {
@@ -2375,6 +2513,7 @@ class LeRobotBridge:
         original_frames = _safe_int(dataset.get("frame_count"), 0, minimum=0)
         rendered_count = _safe_int(isaac_rgbd.get("rendered_count"), 0, minimum=0)
         valid_variant_count = _safe_int(isaac_augmentation.get("valid_variant_count"), 0, minimum=0)
+        training_exclusions = self._write_contact_training_exclusion_manifest(dataset_path, isaac_rgbd.get("contact_audit"))
         dataset_mix = self._dataset_mix_summary_for_counts(
             request or LeRobotSessionRequest(),
             real_available=original_frames,
@@ -2394,6 +2533,7 @@ class LeRobotBridge:
                 "isaac_rgbd_rendered_frames": rendered_count,
                 "augmentation_valid_variants": valid_variant_count,
                 "active_robot_cam_attempt_count": _safe_int(active_robot_cam.get("attempt_count"), 0, minimum=0),
+                "excluded_flagged_episode_count": _safe_int(training_exclusions.get("episode_count"), 0, minimum=0),
                 "train_effective_frame_count": dataset_mix["effective_counts"]["total"],
             },
             "dataset_mix": dataset_mix,
@@ -2402,6 +2542,7 @@ class LeRobotBridge:
                 "isaac_rgbd": isaac_rgbd,
                 "isaac_augmentation": isaac_augmentation,
                 "active_robot_cam": active_robot_cam,
+                "training_exclusions": training_exclusions,
             },
         }
 
@@ -2442,6 +2583,8 @@ class LeRobotBridge:
         failed_count = 0
         skipped_count = 0
         cameras: set[str] = set()
+        rendered_episode_indices: set[int] = set()
+        contact_audit = self._dataset_isaac_rgbd_contact_audit(manifest_paths)
         for manifest_path in manifest_paths:
             for row in self._read_jsonl_file(manifest_path):
                 row_count += 1
@@ -2455,6 +2598,10 @@ class LeRobotBridge:
                     skipped_count += 1
                 elif has_files or status in {"rendered", "metadata_only", "ok", "complete", "completed"}:
                     rendered_count += 1
+                    episode_index = _safe_int(row.get("episode_index"), -1)
+                    if episode_index >= 0:
+                        rendered_episode_indices.add(episode_index)
+        coverage = self._dataset_isaac_rgbd_coverage(dataset_path, rendered_episode_indices)
         return {
             "available": bool(manifest_paths),
             "root": str(dataset_path / "sidecar" / "isaac_rgbd"),
@@ -2464,7 +2611,293 @@ class LeRobotBridge:
             "failed_count": failed_count,
             "skipped_count": skipped_count,
             "cameras": sorted(cameras),
+            "coverage": coverage,
+            "contact_audit": contact_audit,
         }
+
+    def _dataset_isaac_rgbd_coverage(self, dataset_path: Path, rendered_episode_indices: set[int]) -> dict[str, Any]:
+        expected_episode_indices = self._dataset_expected_episode_indices(dataset_path)
+        missing_episode_indices = [index for index in expected_episode_indices if index not in rendered_episode_indices]
+        extra_episode_indices = sorted(index for index in rendered_episode_indices if index not in set(expected_episode_indices))
+        return {
+            "schema": "atr.lerobot.isaac_rgbd_coverage.v1",
+            "expected_episode_indices": expected_episode_indices[:200],
+            "expected_episode_count": len(expected_episode_indices),
+            "rendered_episode_indices": sorted(rendered_episode_indices)[:200],
+            "rendered_episode_count": len(rendered_episode_indices),
+            "missing_episode_indices": missing_episode_indices[:200],
+            "missing_episode_count": len(missing_episode_indices),
+            "extra_episode_indices": extra_episode_indices[:200],
+            "extra_episode_count": len(extra_episode_indices),
+            "incomplete": bool(expected_episode_indices and missing_episode_indices),
+        }
+
+    def _dataset_expected_episode_indices(self, dataset_path: Path) -> list[int]:
+        episodes_path = dataset_path / "meta" / "episodes.jsonl"
+        indices = sorted(
+            {
+                _safe_int(row.get("episode_index"), -1)
+                for row in self._read_jsonl_file(episodes_path)
+                if _safe_int(row.get("episode_index"), -1) >= 0
+            }
+        )
+        if indices:
+            return indices
+        info_path = dataset_path / "meta" / "info.json"
+        try:
+            info = json.loads(info_path.read_text(encoding="utf-8")) if info_path.is_file() else {}
+        except (OSError, json.JSONDecodeError):
+            info = {}
+        total_episodes = _safe_int(info.get("total_episodes") if isinstance(info, dict) else 0, 0, minimum=0)
+        return list(range(total_episodes))
+
+    def _dataset_isaac_rgbd_contact_audit(self, manifest_paths: list[Path]) -> dict[str, Any]:
+        status_counts: dict[str, int] = {}
+        severe_episodes: list[dict[str, Any]] = []
+        transient_episodes: list[dict[str, Any]] = []
+        unique_frame_count = 0
+        for manifest_path in manifest_paths:
+            rows_by_frame: dict[int, dict[str, Any]] = {}
+            for row in self._read_jsonl_file(manifest_path):
+                frame_index = _safe_int(row.get("frame_index"), -1)
+                if frame_index >= 0:
+                    rows_by_frame[frame_index] = row
+            if not rows_by_frame:
+                continue
+            unique_frame_count += len(rows_by_frame)
+            episode_index = _safe_int(next(iter(rows_by_frame.values())).get("episode_index"), 0, minimum=0)
+            summary = self._isaac_rgbd_contact_episode_summary(episode_index, rows_by_frame, manifest_path, status_counts)
+            if summary["severe"]:
+                severe_episodes.append(summary)
+            elif summary["near_closed_without_contact_ranges"]:
+                transient_episodes.append(summary)
+        severe_episodes.sort(key=lambda item: (-_safe_int(item.get("bad_frame_count"), 0), _safe_int(item.get("episode_index"), 0)))
+        transient_episodes.sort(key=lambda item: (-_safe_int(item.get("bad_frame_count"), 0), _safe_int(item.get("episode_index"), 0)))
+        return {
+            "schema": "atr.lerobot.isaac_rgbd_contact_audit.v1",
+            "available": bool(manifest_paths),
+            "unique_frame_count": unique_frame_count,
+            "status_counts": status_counts,
+            "severe_episode_count": len(severe_episodes),
+            "transient_episode_count": len(transient_episodes),
+            "severe_episodes": severe_episodes[:50],
+            "transient_episodes": transient_episodes[:50],
+            "thresholds": {
+                "closed_frame_min_for_severe": 20,
+                "lifted_frame_max_for_severe": 4,
+                "contact_frame_min_for_severe": 10,
+                "closed_not_near_frame_min_for_severe": 50,
+                "force_spike_n": 30.0,
+                "penetration_spike_m": 0.01,
+            },
+        }
+
+    def _isaac_rgbd_contact_episode_summary(
+        self,
+        episode_index: int,
+        rows_by_frame: dict[int, dict[str, Any]],
+        manifest_path: Path,
+        status_counts: dict[str, int],
+    ) -> dict[str, Any]:
+        closed_frames: list[int] = []
+        lifted_frames: list[int] = []
+        any_contact_frames: list[int] = []
+        both_contact_frames: list[int] = []
+        closed_not_near_frames: list[int] = []
+        near_no_contact_frames: list[int] = []
+        force_spike_frames: list[int] = []
+        penetration_spike_frames: list[int] = []
+        object_positions: list[tuple[float, float, float]] = []
+        for frame_index, row in sorted(rows_by_frame.items()):
+            grasp = row.get("grasp_diagnostics") if isinstance(row.get("grasp_diagnostics"), dict) else {}
+            contact = row.get("gripper_contact") if isinstance(row.get("gripper_contact"), dict) else {}
+            grasp_status = str(grasp.get("status") or "unknown")
+            status_counts[grasp_status] = status_counts.get(grasp_status, 0) + 1
+            gripper_closed = bool(grasp.get("gripper_closed"))
+            near_object = bool(grasp.get("near_object"))
+            has_contact = bool(grasp.get("contact")) or bool(contact.get("contact"))
+            if gripper_closed:
+                closed_frames.append(frame_index)
+            if bool(grasp.get("object_lifted")):
+                lifted_frames.append(frame_index)
+            if has_contact:
+                any_contact_frames.append(frame_index)
+            if bool(contact.get("both_sides_contact")):
+                both_contact_frames.append(frame_index)
+            if grasp_status == "closed_not_near_object":
+                closed_not_near_frames.append(frame_index)
+            if grasp_status == "near_closed_without_contact" or (gripper_closed and near_object and not has_contact):
+                near_no_contact_frames.append(frame_index)
+            if _safe_float(contact.get("force_n", grasp.get("contact_force_n")), 0.0) >= 30.0:
+                force_spike_frames.append(frame_index)
+            if _safe_float(contact.get("penetration_m", grasp.get("contact_penetration_m")), 0.0) >= 0.01:
+                penetration_spike_frames.append(frame_index)
+            position = grasp.get("object_position")
+            if isinstance(position, list) and len(position) >= 3:
+                object_positions.append(
+                    (
+                        _safe_float(position[0], 0.0),
+                        _safe_float(position[1], 0.0),
+                        _safe_float(position[2], 0.0),
+                    )
+                )
+        severe = (
+            (len(closed_frames) >= 20 and len(lifted_frames) < 5)
+            or (len(closed_frames) >= 20 and len(any_contact_frames) < 10)
+            or len(closed_not_near_frames) >= 50
+        )
+        return {
+            "episode_index": episode_index,
+            "manifest_path": str(manifest_path),
+            "severe": severe,
+            "frame_count": len(rows_by_frame),
+            "bad_frame_count": len(closed_not_near_frames) + len(near_no_contact_frames),
+            "closed_frame_count": len(closed_frames),
+            "lifted_frame_count": len(lifted_frames),
+            "any_contact_frame_count": len(any_contact_frames),
+            "both_sides_contact_frame_count": len(both_contact_frames),
+            "closed_not_near_ranges": self._frame_range_strings(closed_not_near_frames),
+            "near_closed_without_contact_ranges": self._frame_range_strings(near_no_contact_frames),
+            "force_spike_ranges": self._frame_range_strings(force_spike_frames),
+            "penetration_spike_ranges": self._frame_range_strings(penetration_spike_frames),
+            "object_position_range_m": self._object_position_range(object_positions),
+        }
+
+    @staticmethod
+    def _frame_range_strings(frame_indices: list[int]) -> list[str]:
+        values = sorted(set(frame_indices))
+        if not values:
+            return []
+        ranges: list[str] = []
+        start = end = values[0]
+        for value in values[1:]:
+            if value == end + 1:
+                end = value
+                continue
+            ranges.append(f"{start}-{end}" if start != end else str(start))
+            start = end = value
+        ranges.append(f"{start}-{end}" if start != end else str(start))
+        return ranges
+
+    @staticmethod
+    def _object_position_range(positions: list[tuple[float, float, float]]) -> dict[str, list[float]]:
+        if not positions:
+            return {}
+        xs = [item[0] for item in positions]
+        ys = [item[1] for item in positions]
+        zs = [item[2] for item in positions]
+        return {
+            "x": [round(min(xs), 4), round(max(xs), 4)],
+            "y": [round(min(ys), 4), round(max(ys), 4)],
+            "z": [round(min(zs), 4), round(max(zs), 4)],
+        }
+
+    @staticmethod
+    def _contact_training_exclusion_manifest_path(dataset_path: Path) -> Path:
+        return dataset_path / "sidecar" / "train_exclusions" / "contact_audit.json"
+
+    def _write_contact_training_exclusion_manifest(self, dataset_path: Path, contact_audit: Any) -> dict[str, Any]:
+        manifest_path = self._contact_training_exclusion_manifest_path(dataset_path)
+        audit = contact_audit if isinstance(contact_audit, dict) else {}
+        if not _safe_bool(audit.get("available"), False):
+            existing = self._read_contact_training_exclusion_manifest(dataset_path)
+            if existing.get("available"):
+                return existing
+            return {
+                "schema": "atr.lerobot.training_exclusions.contact_audit.v1",
+                "available": False,
+                "manifest_path": str(manifest_path),
+                "created_at": "",
+                "policy": "exclude_severe_contact_episodes",
+                "source": "isaac_rgbd_contact_audit",
+                "episode_indices": [],
+                "episode_count": 0,
+                "severe_episodes": [],
+                "original_data_preserved": True,
+            }
+        severe_episodes = [item for item in audit.get("severe_episodes", []) if isinstance(item, dict)]
+        episode_indices = sorted(
+            {
+                _safe_int(item.get("episode_index"), -1)
+                for item in severe_episodes
+                if _safe_int(item.get("episode_index"), -1) >= 0
+            }
+        )
+        payload = {
+            "schema": "atr.lerobot.training_exclusions.contact_audit.v1",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "dataset_path": str(dataset_path),
+            "manifest_path": str(manifest_path),
+            "policy": "exclude_severe_contact_episodes",
+            "source": "isaac_rgbd_contact_audit",
+            "episode_indices": episode_indices,
+            "episode_count": len(episode_indices),
+            "severe_episodes": severe_episodes,
+            "original_data_preserved": True,
+        }
+        try:
+            manifest_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp_path = manifest_path.with_suffix(f"{manifest_path.suffix}.tmp")
+            tmp_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
+            tmp_path.replace(manifest_path)
+        except OSError as exc:
+            payload["write_error"] = str(exc)
+        return self._read_contact_training_exclusion_manifest(dataset_path, default=payload)
+
+    def _read_contact_training_exclusion_manifest(self, dataset_path: Path, *, default: dict[str, Any] | None = None) -> dict[str, Any]:
+        manifest_path = self._contact_training_exclusion_manifest_path(dataset_path)
+        loaded: dict[str, Any] = {}
+        if manifest_path.is_file():
+            try:
+                raw = json.loads(manifest_path.read_text(encoding="utf-8"))
+                if isinstance(raw, dict):
+                    loaded = raw
+            except (OSError, json.JSONDecodeError):
+                loaded = {}
+        if not loaded and default is not None:
+            loaded = dict(default)
+        indices = sorted(
+            {
+                _safe_int(item, -1)
+                for item in loaded.get("episode_indices", [])
+                if _safe_int(item, -1) >= 0
+            }
+        )
+        severe_episodes = loaded.get("severe_episodes") if isinstance(loaded.get("severe_episodes"), list) else []
+        return {
+            "schema": str(loaded.get("schema") or "atr.lerobot.training_exclusions.contact_audit.v1"),
+            "available": manifest_path.is_file() or bool(loaded),
+            "manifest_path": str(manifest_path),
+            "created_at": str(loaded.get("created_at") or ""),
+            "policy": str(loaded.get("policy") or "exclude_severe_contact_episodes"),
+            "source": str(loaded.get("source") or "isaac_rgbd_contact_audit"),
+            "episode_indices": indices,
+            "episode_count": len(indices),
+            "severe_episodes": severe_episodes,
+            "original_data_preserved": bool(loaded.get("original_data_preserved", True)),
+            **({"write_error": str(loaded.get("write_error"))} if loaded.get("write_error") else {}),
+        }
+
+    def _contact_training_excluded_episode_indices(self, dataset_path: Path, request: LeRobotSessionRequest | None = None) -> list[int]:
+        if request is not None and not _safe_bool(getattr(request, "dataset_exclude_flagged_episodes", True), True):
+            return []
+        manifest = self._read_contact_training_exclusion_manifest(dataset_path)
+        return [int(item) for item in manifest.get("episode_indices", [])]
+
+    def _ensure_contact_training_exclusion_manifest(self, dataset_path: Path, *, enabled: bool = True) -> dict[str, Any]:
+        if not enabled:
+            return self._read_contact_training_exclusion_manifest(dataset_path)
+        existing = self._read_contact_training_exclusion_manifest(dataset_path)
+        if existing.get("available"):
+            return existing
+        isaac_rgbd = self._dataset_isaac_rgbd_health(dataset_path)
+        return self._write_contact_training_exclusion_manifest(dataset_path, isaac_rgbd.get("contact_audit"))
+
+    def _ensure_contact_training_exclusion_manifest_for_request(self, request: Any) -> dict[str, Any]:
+        enabled = _safe_bool(getattr(request, "dataset_exclude_flagged_episodes", True), True)
+        raw_dataset_path = str(getattr(request, "dataset_path", "") or "").strip()
+        dataset_path = Path(raw_dataset_path).expanduser() if raw_dataset_path else Path(self._dataset_path_for(request)).expanduser()
+        return self._ensure_contact_training_exclusion_manifest(dataset_path.resolve(), enabled=enabled)
 
     @staticmethod
     def _dataset_active_robot_cam_health(dataset_path: Path) -> dict[str, Any]:
@@ -2490,7 +2923,7 @@ class LeRobotBridge:
         mode = self._mode(payload or {})
         policies = self._discover_local_policies()
         policies.extend(self._policy_presets())
-        unique: dict[str, dict[str, str]] = {}
+        unique: dict[str, dict[str, Any]] = {}
         for item in policies:
             key = item.get("value") or item.get("path") or item.get("repo_id") or item.get("label")
             if key:
@@ -2702,6 +3135,8 @@ class LeRobotBridge:
         depth_noise_enabled = bool(getattr(request, "isaac_data_augmentation_depth_noise_enabled", True))
         render_domain_enabled = bool(getattr(request, "isaac_data_augmentation_render_domain_enabled", True))
         camera_pose_enabled = bool(getattr(request, "isaac_data_augmentation_camera_pose_enabled", True))
+        exclude_flagged_episodes = _safe_bool(getattr(request, "dataset_exclude_flagged_episodes", True), True)
+        self._ensure_contact_training_exclusion_manifest(dataset_path, enabled=exclude_flagged_episodes)
         rgb_strength = _safe_float(getattr(request, "isaac_data_augmentation_rgb_strength", 1.0), 1.0, minimum=0.0, maximum=2.0)
         depth_strength = _safe_float(getattr(request, "isaac_data_augmentation_depth_strength", 1.0), 1.0, minimum=0.0, maximum=2.0)
         render_domain_strength = _safe_float(getattr(request, "isaac_data_augmentation_render_domain_strength", 1.0), 1.0, minimum=0.0, maximum=2.0)
@@ -2726,29 +3161,41 @@ class LeRobotBridge:
             f"--depth-strength={depth_strength:g}",
             f"--render-domain-strength={render_domain_strength:g}",
             f"--camera-pose-strength={camera_pose_strength:g}",
+            f"--exclude-flagged-episodes={1 if exclude_flagged_episodes else 0}",
         ]
-        progress_events: list[dict[str, Any]] = []
-        try:
-            from scripts.lerobot_isaac_data_augmentation import build_augmentation_sidecar
-
-            summary = build_augmentation_sidecar(
+        build_kwargs = {
+            "dataset_path": dataset_path,
+            "output_dir": output_dir,
+            "variants_per_frame": variants,
+            "max_source_frames": max_frames,
+            "seed": seed_value,
+            "cameras": cameras,
+            "augmentation_profile": augmentation_profile,
+            "image_augmentation_enabled": image_enabled,
+            "photometric_enabled": photometric_enabled,
+            "sensor_noise_enabled": sensor_noise_enabled,
+            "depth_noise_enabled": depth_noise_enabled,
+            "render_domain_enabled": render_domain_enabled,
+            "camera_pose_enabled": camera_pose_enabled,
+            "rgb_strength": rgb_strength,
+            "depth_strength": depth_strength,
+            "render_domain_strength": render_domain_strength,
+            "camera_pose_strength": camera_pose_strength,
+            "exclude_flagged_episodes": exclude_flagged_episodes,
+        }
+        if bool(getattr(request, "isaac_data_augmentation_async", False)):
+            return self._start_isaac_augmentation_job(
+                mode=mode,
+                profile_id=profile_id,
                 dataset_path=dataset_path,
                 output_dir=output_dir,
-                variants_per_frame=variants,
-                max_source_frames=max_frames,
-                seed=seed_value,
-                cameras=cameras,
-                augmentation_profile=augmentation_profile,
-                image_augmentation_enabled=image_enabled,
-                photometric_enabled=photometric_enabled,
-                sensor_noise_enabled=sensor_noise_enabled,
-                depth_noise_enabled=depth_noise_enabled,
-                render_domain_enabled=render_domain_enabled,
-                camera_pose_enabled=camera_pose_enabled,
-                rgb_strength=rgb_strength,
-                depth_strength=depth_strength,
-                render_domain_strength=render_domain_strength,
-                camera_pose_strength=camera_pose_strength,
+                command_preview=command_preview,
+                build_kwargs=build_kwargs,
+            )
+        progress_events: list[dict[str, Any]] = []
+        try:
+            summary = self._build_isaac_augmentation_sidecar(
+                build_kwargs,
                 progress_callback=lambda event: progress_events.append(dict(event)),
             )
         except Exception as exc:
@@ -2759,6 +3206,38 @@ class LeRobotBridge:
                 "LEROBOT_ISAAC_AUGMENTATION_FAILED",
                 f"{exc.__class__.__name__}: {exc}",
             )
+        return self._isaac_augmentation_completed_response(
+            mode=mode,
+            profile_id=profile_id,
+            dataset_path=dataset_path,
+            output_dir=output_dir,
+            command_preview=command_preview,
+            summary=summary,
+            progress_events=progress_events,
+        )
+
+    @staticmethod
+    def _build_isaac_augmentation_sidecar(
+        build_kwargs: dict[str, Any],
+        *,
+        progress_callback: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
+        from scripts.lerobot_isaac_data_augmentation import build_augmentation_sidecar
+
+        return build_augmentation_sidecar(**build_kwargs, progress_callback=progress_callback)
+
+    def _isaac_augmentation_completed_response(
+        self,
+        *,
+        mode: str,
+        profile_id: str,
+        dataset_path: Path,
+        output_dir: Path,
+        command_preview: list[str],
+        summary: dict[str, Any],
+        progress_events: list[dict[str, Any]],
+        job_id: str = "",
+    ) -> dict[str, Any]:
         status = "completed" if summary.get("ok") else "failed"
         augmentation_progress = dict(summary.get("progress") or (progress_events[-1] if progress_events else {}))
         step_trace = [
@@ -2772,6 +3251,7 @@ class LeRobotBridge:
             "mode": mode,
             "profile_id": profile_id,
             "status": status,
+            "job_id": job_id,
             "dataset_path": str(dataset_path),
             "output_dir": str(output_dir),
             "summary": summary,
@@ -2781,6 +3261,167 @@ class LeRobotBridge:
             "events": step_trace,
             "error": None if summary.get("ok") else summary.get("message"),
         }
+
+    @staticmethod
+    def _new_isaac_augmentation_job_id() -> str:
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        return f"isaac_aug_{stamp}_{uuid.uuid4().hex[:8]}"
+
+    def _isaac_augmentation_job_snapshot(self, job_id: str = "") -> dict[str, Any] | None:
+        with self._isaac_augmentation_lock:
+            resolved = job_id or self._isaac_augmentation_latest_job_id
+            if not resolved:
+                return None
+            job = self._isaac_augmentation_jobs.get(resolved)
+            return copy.deepcopy(job) if job else None
+
+    def _store_isaac_augmentation_job(self, job: dict[str, Any]) -> None:
+        with self._isaac_augmentation_lock:
+            job_id = str(job.get("job_id") or "")
+            if not job_id:
+                return
+            self._isaac_augmentation_jobs[job_id] = copy.deepcopy(job)
+            self._isaac_augmentation_latest_job_id = job_id
+
+    def _update_isaac_augmentation_job(self, job_id: str, **updates: Any) -> None:
+        with self._isaac_augmentation_lock:
+            job = self._isaac_augmentation_jobs.setdefault(job_id, {"job_id": job_id})
+            job.update(copy.deepcopy(updates))
+            job["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+    def _start_isaac_augmentation_job(
+        self,
+        *,
+        mode: str,
+        profile_id: str,
+        dataset_path: Path,
+        output_dir: Path,
+        command_preview: list[str],
+        build_kwargs: dict[str, Any],
+    ) -> dict[str, Any]:
+        job_id = self._new_isaac_augmentation_job_id()
+        now = datetime.now(timezone.utc).isoformat()
+        progress = {
+            "stage": "queued",
+            "done": 0,
+            "total": 1,
+            "percent": 0.0,
+            "message": "Isaac augmentation job queued",
+        }
+        step_trace = [
+            {"step": "RESOLVE_DATASET", "status": "ok", "detail": str(dataset_path)},
+            {"step": "QUEUE_ISAAC_AUGMENTATION", "status": "active", "detail": job_id},
+        ]
+        job = {
+            "ok": True,
+            "tool": "lerobot.augment.isaac",
+            "mode": mode,
+            "profile_id": profile_id,
+            "status": "RUNNING",
+            "job_id": job_id,
+            "dataset_path": str(dataset_path),
+            "output_dir": str(output_dir),
+            "summary": {},
+            "augmentation_progress": progress,
+            "command_preview": list(command_preview),
+            "step_trace": step_trace,
+            "events": step_trace,
+            "started_at": now,
+            "updated_at": now,
+            "completed_at": "",
+            "error": None,
+        }
+        self._store_isaac_augmentation_job(job)
+        worker = threading.Thread(
+            target=self._run_isaac_augmentation_job,
+            args=(job_id,),
+            kwargs={
+                "mode": mode,
+                "profile_id": profile_id,
+                "dataset_path": dataset_path,
+                "output_dir": output_dir,
+                "command_preview": list(command_preview),
+                "build_kwargs": copy.deepcopy(build_kwargs),
+            },
+            name=f"atr-isaac-augmentation-{job_id[-8:]}",
+            daemon=True,
+        )
+        with self._isaac_augmentation_lock:
+            self._isaac_augmentation_threads[job_id] = worker
+        worker.start()
+        snapshot = self._isaac_augmentation_job_snapshot(job_id)
+        return snapshot or job
+
+    def _run_isaac_augmentation_job(
+        self,
+        job_id: str,
+        *,
+        mode: str,
+        profile_id: str,
+        dataset_path: Path,
+        output_dir: Path,
+        command_preview: list[str],
+        build_kwargs: dict[str, Any],
+    ) -> None:
+        progress_events: list[dict[str, Any]] = []
+
+        def progress_callback(event: dict[str, Any]) -> None:
+            progress = dict(event)
+            progress_events.append(progress)
+            self._update_isaac_augmentation_job(job_id, status="RUNNING", augmentation_progress=progress)
+
+        try:
+            summary = self._build_isaac_augmentation_sidecar(build_kwargs, progress_callback=progress_callback)
+            completed = self._isaac_augmentation_completed_response(
+                mode=mode,
+                profile_id=profile_id,
+                dataset_path=dataset_path,
+                output_dir=output_dir,
+                command_preview=command_preview,
+                summary=summary,
+                progress_events=progress_events,
+                job_id=job_id,
+            )
+            completed["status"] = "COMPLETED" if completed.get("ok") else "FAILED"
+            completed["completed_at"] = datetime.now(timezone.utc).isoformat()
+            updates = dict(completed)
+            updates.pop("job_id", None)
+            self._update_isaac_augmentation_job(job_id, **updates)
+        except Exception as exc:
+            progress = {
+                "stage": "failed",
+                "done": 1,
+                "total": 1,
+                "percent": 100.0,
+                "message": f"{exc.__class__.__name__}: {exc}",
+            }
+            self._update_isaac_augmentation_job(
+                job_id,
+                ok=False,
+                status="FAILED",
+                augmentation_progress=progress,
+                completed_at=datetime.now(timezone.utc).isoformat(),
+                error=f"{exc.__class__.__name__}: {exc}",
+            )
+
+    def augment_isaac_status(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Return the current Isaac augmentation job status."""
+        raw_payload = dict(payload or {})
+        request = LeRobotSessionRequest.model_validate(raw_payload)
+        mode = request.runtime_mode or request.mode
+        profile_id = request.profile_id or self._selected_profile_id
+        job_id = str(raw_payload.get("job_id") or request.isaac_data_augmentation_job_id or "").strip()
+        job = self._isaac_augmentation_job_snapshot(job_id)
+        if job is None:
+            return self._error(
+                "lerobot.augment.status",
+                mode,
+                profile_id,
+                "LEROBOT_ISAAC_AUGMENTATION_JOB_NOT_FOUND",
+                f"Isaac augmentation job not found: {job_id or 'latest'}",
+            )
+        job["tool"] = "lerobot.augment.status"
+        return job
 
     def augment_isaac_preview(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         """Return deterministic preview rows for the latest Isaac augmentation sidecar."""
@@ -2909,11 +3550,13 @@ class LeRobotBridge:
     def isaac_lab_build_synthetic(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         """Build canonical indexes and training import manifests for synthetic workflow."""
         request = self._isaac_lab_synthetic_request(payload)
+        self._ensure_contact_training_exclusion_manifest_for_request(request)
         return self._isaac_lab_synthetic_pipeline().build_synthetic(request)
 
     def isaac_lab_run_replicator_worker(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         """Run the Replicator worker from the latest build plan, then refresh synthetic summaries."""
         request = self._isaac_lab_synthetic_request(payload)
+        self._ensure_contact_training_exclusion_manifest_for_request(request)
         pipeline = self._isaac_lab_synthetic_pipeline()
         build = pipeline.build_synthetic(request)
         output_root = Path(str(build.get("output_root") or "")).expanduser().resolve()
@@ -3070,6 +3713,255 @@ class LeRobotBridge:
         request = self._isaac_lab_synthetic_request(payload)
         return self._isaac_lab_synthetic_pipeline().export_hdf5(request)
 
+    def isaac_lab_annotate(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Run or summarize the Isaac Lab Mimic annotation command."""
+        request = self._isaac_lab_synthetic_request(payload)
+        result = self._isaac_lab_synthetic_pipeline().annotate_source(request)
+        annotation = ((result.get("hdf5") or {}).get("annotation") if isinstance(result.get("hdf5"), dict) else {})
+        if isinstance(annotation, dict) and str(annotation.get("status") or "") == "completed":
+            return self._record_isaac_lab_immediate_job("annotate", result)
+        return self._record_or_launch_isaac_lab_runner("annotate", request, result)
+
+    def isaac_lab_train_il(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Run or summarize the Isaac Lab robomimic IL training command."""
+        request = self._isaac_lab_synthetic_request(payload)
+        result = self._isaac_lab_synthetic_pipeline().train_il(request)
+        return self._record_or_launch_isaac_lab_runner("il_train", request, result)
+
+    def isaac_lab_eval_il(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Run or summarize the Isaac Lab robomimic IL evaluation command."""
+        request = self._isaac_lab_synthetic_request(payload)
+        result = self._isaac_lab_synthetic_pipeline().eval_il(request)
+        return self._record_or_launch_isaac_lab_runner("il_eval", request, result)
+
+    def isaac_lab_run_e2e(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Run the Isaac Lab domain-randomized Mimic sidecar sequence."""
+        data = dict(payload or {})
+        data["enable_mimic"] = True
+        request = self._isaac_lab_synthetic_request(data)
+        if self._isaac_lab_live_runner_requested(request):
+            return self._run_live_isaac_lab_domain_mimic_pipeline(request)
+        return self._isaac_lab_synthetic_pipeline().run_e2e(request)
+
+    @staticmethod
+    def _isaac_lab_annotation_completed(result: dict[str, Any]) -> bool:
+        hdf5_summary = result.get("hdf5") if isinstance(result.get("hdf5"), dict) else {}
+        annotation = hdf5_summary.get("annotation") if isinstance(hdf5_summary.get("annotation"), dict) else {}
+        if str(annotation.get("status") or "").lower() == "completed":
+            return True
+        job = result.get("job") if isinstance(result.get("job"), dict) else {}
+        return str(job.get("status") or result.get("status") or "").upper() == "COMPLETED"
+
+    @staticmethod
+    def _write_isaac_lab_e2e_summary(output_root: Path, summary: dict[str, Any]) -> None:
+        try:
+            output_root.mkdir(parents=True, exist_ok=True)
+            (output_root / "summary_e2e.json").write_text(
+                json.dumps(summary, indent=2, ensure_ascii=False, default=str),
+                encoding="utf-8",
+            )
+        except OSError:
+            pass
+
+    def _run_live_isaac_lab_domain_mimic_pipeline(self, request: IsaacLabSyntheticRequest) -> dict[str, Any]:
+        pipeline = self._isaac_lab_synthetic_pipeline()
+        dataset_path = Path(self._dataset_path_for(request)).expanduser().resolve()
+        output_root = Path(request.output_root).expanduser().resolve() if request.output_root else self._dataset_isaac_lab_synthetic_root(dataset_path)
+        self._ensure_contact_training_exclusion_manifest_for_request(request)
+        build = pipeline.build_synthetic(request)
+        export = pipeline.export_hdf5(request) if build.get("ok") else {}
+        annotation = pipeline.annotate_source(request) if export.get("ok") else {}
+        annotation_ready = bool(annotation.get("ok")) and (
+            request.mimic_generation_backend == "official"
+            or self._isaac_lab_annotation_completed(annotation)
+        )
+        if not (build.get("ok") and export.get("ok") and annotation_ready):
+            summary = {
+                "schema": "atr.lerobot.isaac_lab.e2e.summary.v1",
+                "ok": False,
+                "status": "blocked",
+                "build": {"ok": bool(build.get("ok")), "status": build.get("status")},
+                "export": {"ok": bool(export.get("ok")), "status": export.get("status")},
+                "annotation": {"ok": bool(annotation.get("ok")), "status": annotation.get("status")},
+                "mimic": {},
+                "training_import_refresh": {},
+                "train": {},
+                "eval": {},
+            }
+            self._write_isaac_lab_e2e_summary(output_root, summary)
+            blocked = {
+                "ok": False,
+                "tool": "lerobot.isaac_lab.run_e2e",
+                "status": "BLOCKED",
+                "dataset_path": str(dataset_path),
+                "output_root": str(output_root),
+                "validation_report": build.get("validation_report") if isinstance(build.get("validation_report"), dict) else {},
+                "hdf5": export.get("hdf5") if isinstance(export.get("hdf5"), dict) else {},
+                "mimic": {},
+                "training_exposure": {"e2e": summary, "train": {}, "eval": {}},
+                "step_trace": [
+                    {"stage": "build", "status": build.get("status", "missing")},
+                    {"stage": "export", "status": export.get("status", "missing")},
+                    {"stage": "annotation", "status": annotation.get("status", "missing")},
+                ],
+                "error": {
+                    "code": "ISAAC_LAB_E2E_PREP_BLOCKED",
+                    "message": "Domain-randomized Mimic pipeline could not launch because build/export/annotation is not complete.",
+                },
+            }
+            return self._record_isaac_lab_immediate_job("mimic", blocked)
+        mimic = pipeline.run_mimic(request)
+        launched = self._record_or_launch_isaac_lab_runner("mimic", request, mimic)
+        status = str(launched.get("status") or "").upper()
+        summary = {
+            "schema": "atr.lerobot.isaac_lab.e2e.summary.v1",
+            "ok": bool(launched.get("ok")),
+            "status": "MIMIC_RUNNING" if status == "RUNNING" else "READY_FOR_VLA_TRAINING_IMPORT" if status == "COMPLETED" else "blocked",
+            "build": {"ok": bool(build.get("ok")), "status": build.get("status")},
+            "export": {"ok": bool(export.get("ok")), "status": export.get("status")},
+            "annotation": {"ok": bool(annotation.get("ok")), "status": annotation.get("status")},
+            "mimic": {
+                "ok": bool(launched.get("ok")),
+                "status": launched.get("status"),
+                "job_id": launched.get("job_id", ""),
+            },
+            "training_import_refresh": {},
+            "train": {},
+            "eval": {},
+        }
+        self._write_isaac_lab_e2e_summary(output_root, summary)
+        training_exposure = dict(launched.get("training_exposure") if isinstance(launched.get("training_exposure"), dict) else {})
+        training_exposure["e2e"] = summary
+        training_exposure.setdefault("train", {})
+        training_exposure.setdefault("eval", {})
+        launched["tool"] = "lerobot.isaac_lab.run_e2e"
+        launched["training_exposure"] = training_exposure
+        launched["step_trace"] = list(launched.get("step_trace") or []) + [
+            {"stage": "domain_randomization", "status": str(request.domain_randomization_profile or "standard")},
+            {"stage": "mimic_runner", "status": status.lower(), "message": str(launched.get("job_id") or "")},
+        ]
+        return launched
+
+    def isaac_lab_run_live_e2e_check(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Launch the real Isaac Lab Mimic + IL 10s x 3 validation runner."""
+        request = self._isaac_lab_live_e2e_request(self._isaac_lab_synthetic_request(payload))
+        mode = request.runtime_mode or request.mode
+        profile_id = request.profile_id or self._selected_profile_id
+        dataset_path = Path(self._dataset_path_for(request)).expanduser().resolve()
+        if not self._is_under_allowed_roots(dataset_path):
+            return self._error(
+                "lerobot.isaac_lab.run_live_e2e_check",
+                mode,
+                profile_id,
+                "LEROBOT_PATH_OUTSIDE_ALLOWED_ROOTS",
+                f"Dataset path is outside allowed roots: {dataset_path}",
+            )
+        active_live_sessions = self._active_live_control_sessions(mode=str(mode or ""))
+        if active_live_sessions:
+            return self._isaac_lab_live_e2e_blocked_response(
+                request,
+                dataset_path,
+                "ISAAC_LAB_LIVE_E2E_ACTIVE_SESSION",
+                "Isaac Lab live E2E check is blocked while live teleoperation, recording, or rollout is active.",
+                {"active_sessions": active_live_sessions},
+            )
+        command = self._isaac_lab_live_e2e_command(request)
+        runtime_path = Path(command[0]).expanduser()
+        script_path = _command_script_path(command)
+        if not runtime_path.is_file():
+            return self._isaac_lab_live_e2e_blocked_response(
+                request,
+                dataset_path,
+                "ISAAC_LAB_LIVE_E2E_PYTHON_MISSING",
+                f"LeRobot Python runtime is missing: {runtime_path}",
+                {"command": command},
+            )
+        if not script_path.is_file():
+            return self._isaac_lab_live_e2e_blocked_response(
+                request,
+                dataset_path,
+                "ISAAC_LAB_LIVE_E2E_SCRIPT_MISSING",
+                f"Live E2E runner script is missing: {script_path}",
+                {"command": command},
+            )
+        job_id = self._new_isaac_lab_job_id("live_e2e")
+        now = datetime.now(timezone.utc).isoformat()
+        output_root = self._isaac_lab_live_e2e_output_root(request, dataset_path)
+        log_path = output_root / "live_e2e" / "logs" / f"{job_id}.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        env = os.environ.copy()
+        repo_root_text = str(self.config.repo_root.resolve())
+        existing_pythonpath = str(env.get("PYTHONPATH") or "")
+        env["PYTHONPATH"] = repo_root_text if not existing_pythonpath else repo_root_text + os.pathsep + existing_pythonpath
+        if request.isaac_lab_visualize_generation:
+            env["ROBOTIS_OMX_USE_FABRIC"] = "0"
+        try:
+            with log_path.open("a", encoding="utf-8") as log:
+                process = subprocess.Popen(
+                    command,
+                    cwd=str(self.config.repo_root),
+                    env=env,
+                    stdin=subprocess.DEVNULL,
+                    stdout=log,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    start_new_session=True,
+                )
+        except OSError as exc:
+            return self._isaac_lab_live_e2e_blocked_response(
+                request,
+                dataset_path,
+                "ISAAC_LAB_LIVE_E2E_LAUNCH_FAILED",
+                f"Live E2E runner could not be launched: {exc}",
+                {"command": command, "log_path": str(log_path)},
+            )
+        job = {
+            "job_id": job_id,
+            "kind": "live_e2e",
+            "status": "RUNNING",
+            "progress": {"percent": 5.0, "stage": "running", "message": "live 10s x 3 check started"},
+            "summary": {
+                "tool": "lerobot.isaac_lab.run_live_e2e_check",
+                "dataset_path": str(dataset_path),
+                "output_root": str(output_root),
+                "visualize_generation": bool(request.isaac_lab_visualize_generation),
+                "episodes": request.e2e_episodes,
+                "episode_s": request.e2e_episode_s,
+                "mimic_trials": request.mimic_trials,
+                "mimic_num_envs": request.mimic_num_envs,
+            },
+            "command_preview": {"operation": "live_e2e_check", "visual": bool(request.isaac_lab_visualize_generation)},
+            "command": command,
+            "cwd": str(self.config.repo_root),
+            "pid": int(process.pid),
+            "log_path": str(log_path),
+            "output_root": str(output_root),
+            "artifact_checks": self._isaac_lab_live_e2e_artifact_checks(output_root),
+            "error": None,
+            "created_at": now,
+            "started_at": now,
+            "updated_at": now,
+            "completed_at": None,
+            "stop_requested": False,
+        }
+        self._store_isaac_lab_runner_process("live_e2e", job_id, process)
+        self._store_isaac_lab_job("live_e2e", job)
+        return self._isaac_lab_job_response("lerobot.isaac_lab.live_e2e.start", job)
+
+    def isaac_lab_live_e2e_status(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Return the latest or requested live Isaac Lab E2E job state."""
+        return self._isaac_lab_live_e2e_job_response("lerobot.isaac_lab.live_e2e.status", payload or {})
+
+    def isaac_lab_live_e2e_stop(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Stop the latest or requested live Isaac Lab E2E job."""
+        stopped = self._isaac_lab_job_stop("live_e2e", payload or {})
+        job = stopped.get("job") if isinstance(stopped.get("job"), dict) else {}
+        if job:
+            stopped["job"] = self._decorate_isaac_lab_live_e2e_job(dict(job))
+            stopped["summary"] = copy.deepcopy(stopped["job"].get("summary") or {})
+        stopped["tool"] = "lerobot.isaac_lab.live_e2e.stop"
+        return stopped
+
     def isaac_lab_run_mimic_smoke(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         """Validate and write the non-actuating Isaac Lab Mimic smoke launch artifact."""
         data = dict(payload or {})
@@ -3085,6 +3977,142 @@ class LeRobotBridge:
         request = self._isaac_lab_synthetic_request(data)
         result = self._isaac_lab_synthetic_pipeline().run_mimic(request)
         return self._record_or_launch_isaac_lab_runner("mimic", request, result)
+
+    def isaac_lab_generate_mimic(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Alias for the E2E GUI's named Mimic generation step."""
+        return self.isaac_lab_run_mimic(payload)
+
+    def isaac_lab_render_mimic_rgbd(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Render the Isaac Lab Mimic RGB-D sidecar without using the recording RGB-D renderer."""
+        data = dict(payload or {})
+        data["enable_mimic"] = True
+        data["mimic_enable_cameras"] = True
+        data["isaac_lab_visualize_generation"] = True
+        request = self._isaac_lab_synthetic_request(data)
+        dataset_path = Path(self._dataset_path_for(request)).expanduser().resolve()
+        output_root = Path(request.output_root).expanduser().resolve() if request.output_root else self._dataset_isaac_lab_synthetic_root(dataset_path).resolve()
+        generated_hdf5 = output_root / "mimic" / "generated_dataset.hdf5"
+        mimic_summary = self._read_json_dict(output_root / "mimic" / "summary.json")
+        if not generated_hdf5.is_file():
+            blocked = {
+                "ok": False,
+                "tool": "lerobot.isaac_lab.mimic_rgbd.render_missing",
+                "status": "BLOCKED",
+                "dataset_path": str(dataset_path),
+                "output_root": str(output_root),
+                "mimic": mimic_summary,
+                "training_exposure": {},
+                "error": {
+                    "code": "ISAAC_LAB_MIMIC_RGBD_SOURCE_MISSING",
+                    "message": "Mimic RGB-D rendering requires the generated Mimic HDF5 dataset.",
+                    "input_file": str(generated_hdf5),
+                },
+            }
+            return self._record_isaac_lab_immediate_job("mimic", blocked)
+
+        pipeline = self._isaac_lab_synthetic_pipeline()
+        runner = dict(mimic_summary.get("runner") if isinstance(mimic_summary.get("runner"), dict) else {})
+        post_run = dict(runner.get("post_run") if isinstance(runner.get("post_run"), dict) else {})
+        command = [str(item) for item in list(post_run.get("command") or []) if str(item)]
+        if str(post_run.get("stage") or "") != "rgbd_render_after_generation":
+            command = pipeline._joint_replay_rgbd_render_command(  # noqa: SLF001 - Section 7 intentionally reuses the Lab RGB-D render command.
+                request,
+                output_root=output_root,
+                hook_summary=mimic_summary,
+            )
+            post_run = {
+                "enabled": True,
+                "stage": "rgbd_render_after_generation",
+                "trigger": "manual_render_missing",
+                "fps": 0,
+                "max_demos": 0,
+                "command": command,
+                "script_path": str(_command_script_path(command)) if command else "",
+                "script_exists": _command_script_path(command).is_file() if command else False,
+                "input_file": str(output_root / "mimic" / "generated_dataset.hdf5"),
+                "output_file": str(output_root / "mimic_rgbd" / "generated_dataset_rgbd.hdf5"),
+                "success_manifest_path": str(output_root / "mimic_rgbd" / "successes.jsonl"),
+                "failure_manifest_path": str(output_root / "mimic_rgbd" / "failures.jsonl"),
+                "render_manifest_path": str(output_root / "mimic_rgbd" / "manifest.jsonl"),
+                "render_root": str(output_root / "mimic_rgbd" / "renders"),
+            }
+        elif len(command) < 2:
+            post_run = pipeline._runner_post_run_summary(  # noqa: SLF001 - section 7 uses the pipeline's Lab RGB-D command contract.
+                request,
+                kind="mimic",
+                output_root=output_root,
+                hook_summary=mimic_summary,
+            )
+            command = [str(item) for item in list(post_run.get("command") or []) if str(item)]
+        if len(command) < 2:
+            blocked = {
+                "ok": False,
+                "tool": "lerobot.isaac_lab.mimic_rgbd.render_missing",
+                "status": "BLOCKED",
+                "dataset_path": str(dataset_path),
+                "output_root": str(output_root),
+                "mimic": {**mimic_summary, "runner": {**runner, "post_run": post_run}},
+                "training_exposure": {},
+                "error": {
+                    "code": "ISAAC_LAB_MIMIC_RGBD_RENDER_COMMAND_MISSING",
+                    "message": "Mimic RGB-D render command is missing from the Mimic summary.",
+                },
+            }
+            return self._record_isaac_lab_immediate_job("mimic", blocked)
+
+        job_id = self._new_isaac_lab_job_id("mimic")
+        now = datetime.now(timezone.utc).isoformat()
+        log_path = output_root / "mimic_rgbd" / "logs" / f"{job_id}.log"
+        runner.update(
+            {
+                "post_run": {
+                    **post_run,
+                    "enabled": True,
+                    "status": "pending",
+                    "started_at": "",
+                    "command": command,
+                    "log_path": str(log_path),
+                }
+            }
+        )
+        result = {
+            "ok": True,
+            "tool": "lerobot.isaac_lab.mimic_rgbd.render_missing",
+            "status": "READY_FOR_TRAINING",
+            "dataset_path": str(dataset_path),
+            "output_root": str(output_root),
+            "hdf5": self._read_json_dict(output_root / "hdf5" / "export_summary.json"),
+            "mimic": {**mimic_summary, "runner": runner},
+            "training_exposure": self._read_json_dict(output_root / "training_import" / "summary.json"),
+        }
+        summary = self._isaac_lab_result_summary("mimic", result)
+        job = {
+            "job_id": job_id,
+            "kind": "mimic",
+            "status": "COMPLETED",
+            "progress": {"percent": 90.0, "stage": "lab_rgbd_render_pending"},
+            "summary": summary,
+            "command_preview": {},
+            "command": [],
+            "primary_command": [],
+            "post_run": copy.deepcopy(runner["post_run"]),
+            "cwd": str(self.config.repo_root),
+            "pid": None,
+            "log_path": str(log_path),
+            "runtime_smoke": {},
+            "job_manifest_path": "",
+            "error": None,
+            "created_at": now,
+            "started_at": now,
+            "updated_at": now,
+            "completed_at": now,
+            "stop_requested": False,
+        }
+        running, process = self._start_isaac_lab_post_run_process("mimic", job)
+        if process is not None:
+            self._store_isaac_lab_runner_process("mimic", job_id, process)
+        self._store_isaac_lab_job("mimic", running)
+        return self._isaac_lab_job_response("lerobot.isaac_lab.mimic_rgbd.render_missing", running)
 
     def isaac_lab_mimic_status(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         """Return the latest or requested Isaac Lab Mimic job state."""
@@ -3180,6 +4208,11 @@ class LeRobotBridge:
         request = self._isaac_lab_synthetic_request(payload)
         return self._isaac_lab_synthetic_pipeline().status(request)
 
+    def isaac_lab_check_outputs(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Check latest Isaac Lab synthetic artifacts without launching external runtimes."""
+        request = self._isaac_lab_synthetic_request(payload)
+        return self._isaac_lab_synthetic_pipeline().check_outputs(request)
+
     def _record_or_launch_isaac_lab_runner(
         self,
         kind: str,
@@ -3205,9 +4238,222 @@ class LeRobotBridge:
     def _isaac_lab_live_runner_requested(request: IsaacLabSyntheticRequest) -> bool:
         return str(request.mode or "").lower() == "live" and not bool(request.dry_run)
 
+    def _isaac_lab_live_e2e_request(self, request: IsaacLabSyntheticRequest) -> IsaacLabSyntheticRequest:
+        visual_enabled = bool(request.isaac_lab_visualize_generation)
+        camera_enabled = bool(request.mimic_enable_cameras)
+        return request.model_copy(
+            update={
+                "mode": "live",
+                "runtime_mode": "live",
+                "dry_run": False,
+                "e2e_create_fixture": False,
+                "e2e_episodes": 3,
+                "e2e_episode_s": 10,
+                "e2e_fps": 15,
+                "mimic_trials": 3,
+                "mimic_enable_cameras": camera_enabled,
+                "mimic_camera_width": 320,
+                "mimic_camera_height": 240,
+                "mimic_annotation_mode": "preannotated_passthrough",
+                "isaac_lab_policy_task_name": (
+                    "ATR-Robotis-OMX-PickPlace-Physical-v0"
+                    if camera_enabled
+                    else "ATR-Robotis-OMX-PickPlace-Physical-State-v0"
+                ),
+                "enable_mimic": True,
+                "enable_hdf5_export": True,
+                "enable_replicator": False,
+            }
+        )
+
+    def _isaac_lab_live_e2e_command(self, request: IsaacLabSyntheticRequest) -> list[str]:
+        request = self._isaac_lab_live_e2e_request(request)
+        dataset_path = Path(self._dataset_path_for(request)).expanduser().resolve()
+        script = self.config.repo_root / "scripts" / "lerobot_isaac_lab_e2e_smoke.py"
+        env_python = Path.home() / "miniconda3" / "envs" / self.config.conda_env_name / "bin" / "python"
+        python_executable = str(env_python if env_python.is_file() else Path(sys.executable or "python"))
+        command = [
+            python_executable,
+            str(script),
+            "--mode",
+            "live",
+            "--dataset-path",
+            str(dataset_path),
+            "--isaac-lab-path",
+            str(Path(request.isaac_lab_path or "/home/jin/IsaacLab").expanduser()),
+            "--isaac-sim-python",
+            str(Path(request.isaac_sim_python or "/home/jin/IsaacSim/python.sh").expanduser()),
+            "--trials",
+            str(request.mimic_trials),
+            "--num-envs",
+            str(request.mimic_num_envs),
+            "--domain-randomization-profile",
+            str(request.domain_randomization_profile or "conservative"),
+            "--repo-root",
+            str(self.config.repo_root),
+            "--no-create-fixture",
+            "--episodes",
+            str(request.e2e_episodes),
+            "--episode-s",
+            str(request.e2e_episode_s),
+            "--fps",
+            str(request.e2e_fps),
+            "--mimic-camera-width",
+            str(request.mimic_camera_width),
+            "--mimic-camera-height",
+            str(request.mimic_camera_height),
+            "--stage-timeout-s",
+            str(float(request.e2e_stage_timeout_s)),
+        ]
+        if request.isaac_lab_visualize_generation:
+            command.append("--visualize-generation")
+        command.append("--mimic-enable-cameras" if request.mimic_enable_cameras else "--no-mimic-enable-cameras")
+        return command
+
+    @staticmethod
+    def _isaac_lab_live_e2e_output_root(request: IsaacLabSyntheticRequest, dataset_path: Path) -> Path:
+        if request.output_root:
+            return Path(request.output_root).expanduser().resolve()
+        return dataset_path / "sidecar" / "isaac_lab_synthetic" / "latest"
+
+    @staticmethod
+    def _isaac_lab_live_e2e_artifact_checks(output_root: Path) -> list[dict[str, Any]]:
+        specs = [
+            ("hdf5_source", output_root / "hdf5" / "exported_successful_real_episodes.hdf5", "file"),
+            ("hdf5_annotated", output_root / "hdf5" / "source_real_success_annotated.hdf5", "file"),
+            ("mimic_generated_dataset", output_root / "mimic" / "generated_dataset.hdf5", "file"),
+            ("mimic_successes", output_root / "mimic" / "successes.jsonl", "file"),
+            ("il_robomimic", output_root / "il" / "robomimic", "dir"),
+        ]
+        checks: list[dict[str, Any]] = []
+        for name, path, kind in specs:
+            exists = path.is_dir() if kind == "dir" else path.is_file()
+            checks.append(
+                {
+                    "name": name,
+                    "path": str(path),
+                    "kind": kind,
+                    "status": "present" if exists else "missing",
+                    "exists": exists,
+                }
+            )
+        return checks
+
+    @classmethod
+    def _isaac_lab_live_e2e_artifact_error(cls, job: dict[str, Any]) -> str:
+        output_root = Path(str(job.get("output_root") or (job.get("summary") or {}).get("output_root") or "")).expanduser()
+        if not str(output_root):
+            return "LIVE_E2E_OUTPUT_ROOT_MISSING"
+        missing = [check["name"] for check in cls._isaac_lab_live_e2e_artifact_checks(output_root) if check.get("status") != "present"]
+        return "LIVE_E2E_ARTIFACTS_MISSING:" + ",".join(missing) if missing else ""
+
+    def _decorate_isaac_lab_live_e2e_job(self, job: dict[str, Any]) -> dict[str, Any]:
+        output_root = Path(str(job.get("output_root") or (job.get("summary") or {}).get("output_root") or "")).expanduser()
+        if str(output_root):
+            job["artifact_checks"] = self._isaac_lab_live_e2e_artifact_checks(output_root)
+            summary = dict(job.get("summary") or {})
+            summary["artifact_checks"] = copy.deepcopy(job["artifact_checks"])
+            job["summary"] = summary
+        return job
+
+    def _isaac_lab_live_e2e_job_response(self, tool: str, payload: dict[str, Any]) -> dict[str, Any]:
+        job_id = str(payload.get("job_id") or "").strip()
+        self._refresh_isaac_lab_runner_process("live_e2e", job_id)
+        job = self._isaac_lab_job_snapshot("live_e2e", job_id)
+        if not job:
+            job = self._read_isaac_lab_job_manifest("live_e2e", payload)
+        if not job:
+            return self._isaac_lab_job_not_found_response(tool, job_id)
+        job = self._decorate_isaac_lab_live_e2e_job(job)
+        self._store_isaac_lab_job("live_e2e", job)
+        return self._isaac_lab_job_response(tool, job)
+
+    def _isaac_lab_live_e2e_blocked_response(
+        self,
+        request: IsaacLabSyntheticRequest,
+        dataset_path: Path,
+        code: str,
+        message: str,
+        details: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        now = datetime.now(timezone.utc).isoformat()
+        output_root = self._isaac_lab_live_e2e_output_root(request, dataset_path)
+        job = {
+            "job_id": self._new_isaac_lab_job_id("live_e2e"),
+            "kind": "live_e2e",
+            "status": "BLOCKED",
+            "progress": {"percent": 100.0, "stage": "blocked", "message": message},
+            "summary": {
+                "tool": "lerobot.isaac_lab.run_live_e2e_check",
+                "dataset_path": str(dataset_path),
+                "output_root": str(output_root),
+                "artifact_checks": self._isaac_lab_live_e2e_artifact_checks(output_root),
+            },
+            "command": list((details or {}).get("command") or []),
+            "output_root": str(output_root),
+            "artifact_checks": self._isaac_lab_live_e2e_artifact_checks(output_root),
+            "error": {"code": code, "message": message, **copy.deepcopy(details or {})},
+            "created_at": now,
+            "updated_at": now,
+            "completed_at": now,
+            "stop_requested": False,
+        }
+        self._store_isaac_lab_job("live_e2e", job)
+        return self._isaac_lab_job_response("lerobot.isaac_lab.live_e2e.start", job)
+
     @staticmethod
     def _isaac_lab_summary_key(kind: str) -> str:
-        return "mimic" if kind == "mimic" else "rl_teacher"
+        return {
+            "annotate": "hdf5",
+            "mimic": "mimic",
+            "il_train": "training_exposure",
+            "il_eval": "training_exposure",
+            "rl_teacher": "rl_teacher",
+            "live_e2e": "live_e2e",
+        }.get(kind, kind)
+
+    @staticmethod
+    def _isaac_lab_hook_dir(kind: str) -> str:
+        return {
+            "annotate": "hdf5",
+            "mimic": "mimic",
+            "il_train": "il/robomimic",
+            "il_eval": "il/eval",
+            "rl_teacher": "rl_teacher",
+            "live_e2e": "live_e2e",
+        }.get(kind, kind)
+
+    @staticmethod
+    def _isaac_lab_hook_summary(kind: str, result: dict[str, Any]) -> dict[str, Any]:
+        if kind == "annotate":
+            hdf5_summary = result.get("hdf5") if isinstance(result.get("hdf5"), dict) else {}
+            annotation = hdf5_summary.get("annotation") if isinstance(hdf5_summary.get("annotation"), dict) else {}
+            return copy.deepcopy(annotation)
+        if kind == "il_train":
+            exposure = result.get("training_exposure") if isinstance(result.get("training_exposure"), dict) else {}
+            return copy.deepcopy(exposure.get("il_train") if isinstance(exposure.get("il_train"), dict) else {})
+        if kind == "il_eval":
+            exposure = result.get("training_exposure") if isinstance(result.get("training_exposure"), dict) else {}
+            return copy.deepcopy(exposure.get("il_eval") if isinstance(exposure.get("il_eval"), dict) else {})
+        summary_key = LeRobotBridge._isaac_lab_summary_key(kind)
+        return copy.deepcopy(result.get(summary_key) if isinstance(result.get(summary_key), dict) else {})
+
+    @staticmethod
+    def _with_isaac_lab_hook_summary(kind: str, result: dict[str, Any], hook_summary: dict[str, Any]) -> dict[str, Any]:
+        decorated = copy.deepcopy(result)
+        if kind == "annotate":
+            hdf5_summary = dict(decorated.get("hdf5") if isinstance(decorated.get("hdf5"), dict) else {})
+            hdf5_summary["annotation"] = hook_summary
+            decorated["hdf5"] = hdf5_summary
+            return decorated
+        if kind in {"il_train", "il_eval"}:
+            exposure = dict(decorated.get("training_exposure") if isinstance(decorated.get("training_exposure"), dict) else {})
+            exposure["il_train" if kind == "il_train" else "il_eval"] = hook_summary
+            decorated["training_exposure"] = exposure
+            return decorated
+        summary_key = LeRobotBridge._isaac_lab_summary_key(kind)
+        decorated[summary_key] = hook_summary
+        return decorated
 
     def _isaac_lab_result_summary(self, kind: str, result: dict[str, Any]) -> dict[str, Any]:
         summary_key = self._isaac_lab_summary_key(kind)
@@ -3217,6 +4463,7 @@ class LeRobotBridge:
             "output_root": result.get("output_root", ""),
             "hdf5": copy.deepcopy(result.get("hdf5") or {}),
             summary_key: copy.deepcopy(result.get(summary_key) or {}),
+            "runner": self._isaac_lab_hook_summary(kind, result),
             "validation_report": {
                 "status": (result.get("validation_report") or {}).get("status"),
                 "blockers": copy.deepcopy((result.get("validation_report") or {}).get("blockers") or []),
@@ -3233,8 +4480,7 @@ class LeRobotBridge:
         details: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         summary_key = self._isaac_lab_summary_key(kind)
-        decorated = copy.deepcopy(result)
-        hook_summary = dict(decorated.get(summary_key) or {})
+        hook_summary = self._isaac_lab_hook_summary(kind, result)
         runner = dict(hook_summary.get("runner") or {})
         runner.update(
             {
@@ -3245,7 +4491,7 @@ class LeRobotBridge:
             }
         )
         hook_summary["runner"] = runner
-        decorated[summary_key] = hook_summary
+        decorated = self._with_isaac_lab_hook_summary(kind, result, hook_summary)
         decorated["ok"] = False
         decorated["status"] = "BLOCKED"
         decorated["error"] = {
@@ -3269,8 +4515,10 @@ class LeRobotBridge:
         result: dict[str, Any],
     ) -> dict[str, Any]:
         summary_key = self._isaac_lab_summary_key(kind)
-        hook_summary = dict(result.get(summary_key) or {})
+        hook_summary = self._isaac_lab_hook_summary(kind, result)
         runner = dict(hook_summary.get("runner") or {})
+        if not runner and hook_summary.get("command"):
+            runner = dict(hook_summary)
         command = [str(item) for item in list(runner.get("command") or []) if str(item)]
         if len(command) < 2:
             return self._record_isaac_lab_blocked_runner(
@@ -3280,7 +4528,7 @@ class LeRobotBridge:
                 message="Isaac Lab runner command is missing from the synthetic summary.",
             )
         runtime_path = Path(command[0]).expanduser()
-        script_path = Path(command[1]).expanduser()
+        script_path = _command_script_path(command)
         if not runtime_path.is_file():
             return self._record_isaac_lab_blocked_runner(
                 kind,
@@ -3300,14 +4548,25 @@ class LeRobotBridge:
         job_id = self._new_isaac_lab_job_id(kind)
         now = datetime.now(timezone.utc).isoformat()
         output_root = Path(str(result.get("output_root") or "")).expanduser().resolve()
-        log_path = output_root / summary_key / "logs" / f"{job_id}.log"
+        log_path = output_root / self._isaac_lab_hook_dir(kind) / "logs" / f"{job_id}.log"
         log_path.parent.mkdir(parents=True, exist_ok=True)
         cwd = Path(request.isaac_lab_path).expanduser().resolve() if request.isaac_lab_path else self.config.repo_root
+        env = os.environ.copy()
+        repo_root_text = str(self.config.repo_root.resolve())
+        existing_pythonpath = str(env.get("PYTHONPATH") or "")
+        env["PYTHONPATH"] = (
+            repo_root_text
+            if not existing_pythonpath
+            else repo_root_text + os.pathsep + existing_pythonpath
+        )
+        if request.isaac_lab_visualize_generation:
+            env["ROBOTIS_OMX_USE_FABRIC"] = "0"
         try:
             with log_path.open("a", encoding="utf-8") as log:
                 process = subprocess.Popen(
                     command,
                     cwd=str(cwd),
+                    env=env,
                     stdin=subprocess.DEVNULL,
                     stdout=log,
                     stderr=subprocess.STDOUT,
@@ -3327,13 +4586,14 @@ class LeRobotBridge:
                 "status": "running",
                 "pid": int(process.pid),
                 "command": command,
+                "cwd": str(cwd),
+                "pythonpath_prefix": repo_root_text,
                 "log_path": str(log_path),
                 "started_at": now,
             }
         )
         hook_summary["runner"] = runner
-        decorated = copy.deepcopy(result)
-        decorated[summary_key] = hook_summary
+        decorated = self._with_isaac_lab_hook_summary(kind, result, hook_summary)
         summary = self._isaac_lab_result_summary(kind, decorated)
         progress = {"percent": 5.0, "stage": "running"}
         job_manifest_path = self._isaac_lab_job_manifest_path(kind, result.get("output_root"))
@@ -3345,10 +4605,14 @@ class LeRobotBridge:
             "summary": summary,
             "command_preview": copy.deepcopy(runner.get("command_preview") or {}),
             "command": command,
+            "primary_command": command,
+            "post_run": copy.deepcopy(runner.get("post_run") or {}),
+            "cwd": str(cwd),
             "pid": int(process.pid),
             "log_path": str(log_path),
             "runtime_smoke": copy.deepcopy(runner.get("runtime_smoke") or {}),
             "job_manifest_path": str(job_manifest_path) if job_manifest_path else "",
+            "request_payload": request.model_dump(mode="json"),
             "error": None,
             "created_at": now,
             "started_at": now,
@@ -3366,20 +4630,41 @@ class LeRobotBridge:
         return decorated
 
     def _store_isaac_lab_runner_process(self, kind: str, job_id: str, process: subprocess.Popen[str]) -> None:
+        lock = self._isaac_lab_runner_locks.setdefault(kind, threading.Lock())
+        with lock:
+            self._isaac_lab_runner_processes.setdefault(kind, {})[job_id] = process
         if kind == "mimic":
             with self._isaac_lab_mimic_lock:
                 self._isaac_lab_mimic_processes[job_id] = process
             return
-        with self._isaac_lab_rl_teacher_lock:
-            self._isaac_lab_rl_teacher_processes[job_id] = process
+        if kind == "rl_teacher":
+            with self._isaac_lab_rl_teacher_lock:
+                self._isaac_lab_rl_teacher_processes[job_id] = process
+            return
+
+    def _store_isaac_lab_job(self, kind: str, job: dict[str, Any]) -> None:
+        lock = self._isaac_lab_runner_locks.setdefault(kind, threading.Lock())
+        with lock:
+            self._isaac_lab_runner_jobs.setdefault(kind, {})[str(job["job_id"])] = job
+            self._isaac_lab_runner_latest_job_id[kind] = str(job["job_id"])
+        if kind == "mimic":
+            with self._isaac_lab_mimic_lock:
+                self._isaac_lab_mimic_jobs[str(job["job_id"])] = job
+                self._isaac_lab_mimic_latest_job_id = str(job["job_id"])
+            self._write_isaac_lab_job_manifest(job)
+            return
+        if kind == "rl_teacher":
+            with self._isaac_lab_rl_teacher_lock:
+                self._isaac_lab_rl_teacher_jobs[str(job["job_id"])] = job
+                self._isaac_lab_rl_teacher_latest_job_id = str(job["job_id"])
+        self._write_isaac_lab_job_manifest(job)
 
     def _record_isaac_lab_immediate_job(self, kind: str, result: dict[str, Any]) -> dict[str, Any]:
         job_id = self._new_isaac_lab_job_id(kind)
         status = self._isaac_lab_job_status_from_result(result)
         now = datetime.now(timezone.utc).isoformat()
-        summary_key = self._isaac_lab_summary_key(kind)
         job_manifest_path = self._isaac_lab_job_manifest_path(kind, result.get("output_root"))
-        hook_summary = result.get(summary_key) if isinstance(result.get(summary_key), dict) else {}
+        hook_summary = self._isaac_lab_hook_summary(kind, result)
         smoke_summary = hook_summary.get("smoke") if isinstance(hook_summary.get("smoke"), dict) else {}
         summary = self._isaac_lab_result_summary(kind, result)
         progress = {"percent": 100.0, "stage": status.lower()}
@@ -3416,7 +4701,7 @@ class LeRobotBridge:
             return None
         if not self._is_under_allowed_roots(output_root):
             return None
-        hook_dir = "mimic" if kind == "mimic" else "rl_teacher"
+        hook_dir = self._isaac_lab_hook_dir(kind)
         return output_root / hook_dir / "job.json"
 
     def _write_isaac_lab_job_manifest(self, job: dict[str, Any]) -> None:
@@ -3461,7 +4746,13 @@ class LeRobotBridge:
 
     @staticmethod
     def _new_isaac_lab_job_id(kind: str) -> str:
-        prefix = "isaac_lab_mimic" if kind == "mimic" else "isaac_lab_rl_teacher"
+        prefix = {
+            "annotate": "isaac_lab_annotate",
+            "mimic": "isaac_lab_mimic",
+            "il_train": "isaac_lab_il_train",
+            "il_eval": "isaac_lab_il_eval",
+            "rl_teacher": "isaac_lab_rl_teacher",
+        }.get(kind, f"isaac_lab_{kind}")
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
         return f"{prefix}_{stamp}_{uuid.uuid4().hex[:8]}"
 
@@ -3474,19 +4765,13 @@ class LeRobotBridge:
             return "BLOCKED"
         return "FAILED"
 
-    def _store_isaac_lab_job(self, kind: str, job: dict[str, Any]) -> None:
-        if kind == "mimic":
-            with self._isaac_lab_mimic_lock:
-                self._isaac_lab_mimic_jobs[str(job["job_id"])] = job
-                self._isaac_lab_mimic_latest_job_id = str(job["job_id"])
-            self._write_isaac_lab_job_manifest(job)
-            return
-        with self._isaac_lab_rl_teacher_lock:
-            self._isaac_lab_rl_teacher_jobs[str(job["job_id"])] = job
-            self._isaac_lab_rl_teacher_latest_job_id = str(job["job_id"])
-        self._write_isaac_lab_job_manifest(job)
-
     def _isaac_lab_job_snapshot(self, kind: str, job_id: str = "") -> dict[str, Any] | None:
+        lock = self._isaac_lab_runner_locks.setdefault(kind, threading.Lock())
+        with lock:
+            resolved = job_id or self._isaac_lab_runner_latest_job_id.get(kind, "")
+            job = self._isaac_lab_runner_jobs.setdefault(kind, {}).get(resolved)
+            if job:
+                return copy.deepcopy(job)
         if kind == "mimic":
             with self._isaac_lab_mimic_lock:
                 resolved = job_id or self._isaac_lab_mimic_latest_job_id
@@ -3499,49 +4784,501 @@ class LeRobotBridge:
 
     def _refresh_isaac_lab_runner_process(self, kind: str, job_id: str = "") -> None:
         refreshed: dict[str, Any] | None = None
+        lock = self._isaac_lab_runner_locks.setdefault(kind, threading.Lock())
+        with lock:
+            resolved = job_id or self._isaac_lab_runner_latest_job_id.get(kind, "")
+            job = self._isaac_lab_runner_jobs.setdefault(kind, {}).get(resolved)
+            process = self._isaac_lab_runner_processes.setdefault(kind, {}).get(resolved)
+            if not job or not process or str(job.get("status") or "").upper() != "RUNNING":
+                return
+            returncode = process.poll()
+            if returncode is None:
+                active_failure = self._isaac_lab_active_runner_failure(kind, job)
+                if active_failure:
+                    self._terminate_live_process(process, signal.SIGTERM)
+                    self._isaac_lab_runner_processes.setdefault(kind, {}).pop(resolved, None)
+                    refreshed = self._fail_isaac_lab_runner_job(job, **active_failure)
+                    self._isaac_lab_runner_jobs.setdefault(kind, {})[resolved] = refreshed
+                else:
+                    return
+            else:
+                self._isaac_lab_runner_processes.setdefault(kind, {}).pop(resolved, None)
+                refreshed = self._complete_isaac_lab_runner_job(job, int(returncode))
+                if self._isaac_lab_post_run_was_running(job):
+                    post_run = dict(refreshed.get("post_run") or {})
+                    post_run["status"] = "completed" if refreshed.get("status") == "COMPLETED" else "failed"
+                    post_run["returncode"] = int(returncode)
+                    post_run["completed_at"] = refreshed.get("completed_at")
+                    refreshed["post_run"] = post_run
+                    if (
+                        kind == "mimic"
+                        and refreshed.get("status") == "COMPLETED"
+                        and int(returncode) == 0
+                        and str(post_run.get("stage") or "") in {"replay_validate_after_generation", "rgbd_render_after_generation"}
+                    ):
+                        refreshed = self._refresh_isaac_lab_training_import_after_post_run(refreshed)
+                elif refreshed.get("status") == "COMPLETED" and self._isaac_lab_post_run_enabled(refreshed):
+                    refreshed, post_process = self._start_isaac_lab_post_run_process(kind, refreshed)
+                    if post_process is not None:
+                        self._isaac_lab_runner_processes.setdefault(kind, {})[resolved] = post_process
+                self._isaac_lab_runner_jobs.setdefault(kind, {})[resolved] = refreshed
+        if refreshed is None:
+            return
         if kind == "mimic":
             with self._isaac_lab_mimic_lock:
-                resolved = job_id or self._isaac_lab_mimic_latest_job_id
-                job = self._isaac_lab_mimic_jobs.get(resolved)
-                process = self._isaac_lab_mimic_processes.get(resolved)
-                if not job or not process or str(job.get("status") or "").upper() != "RUNNING":
-                    return
-                returncode = process.poll()
-                if returncode is None:
-                    return
                 self._isaac_lab_mimic_processes.pop(resolved, None)
-                refreshed = self._complete_isaac_lab_runner_job(job, int(returncode))
-        else:
+                self._isaac_lab_mimic_jobs[resolved] = refreshed
+        elif kind == "rl_teacher":
             with self._isaac_lab_rl_teacher_lock:
-                resolved = job_id or self._isaac_lab_rl_teacher_latest_job_id
-                job = self._isaac_lab_rl_teacher_jobs.get(resolved)
-                process = self._isaac_lab_rl_teacher_processes.get(resolved)
-                if not job or not process or str(job.get("status") or "").upper() != "RUNNING":
-                    return
-                returncode = process.poll()
-                if returncode is None:
-                    return
                 self._isaac_lab_rl_teacher_processes.pop(resolved, None)
-                refreshed = self._complete_isaac_lab_runner_job(job, int(returncode))
+                self._isaac_lab_rl_teacher_jobs[resolved] = refreshed
         if refreshed is not None:
             self._write_isaac_lab_job_manifest(refreshed)
 
     @staticmethod
+    def _isaac_lab_post_run_was_running(job: dict[str, Any]) -> bool:
+        post_run = job.get("post_run") if isinstance(job.get("post_run"), dict) else {}
+        return str(post_run.get("status") or "").lower() == "running"
+
+    def _refresh_isaac_lab_training_import_after_post_run(self, job: dict[str, Any]) -> dict[str, Any]:
+        payload = dict(job.get("request_payload") if isinstance(job.get("request_payload"), dict) else {})
+        summary = job.get("summary") if isinstance(job.get("summary"), dict) else {}
+        dataset_path = str(payload.get("dataset_path") or summary.get("dataset_path") or "").strip()
+        output_root = str(payload.get("output_root") or summary.get("output_root") or "").strip()
+        post_run = dict(job.get("post_run") if isinstance(job.get("post_run"), dict) else {})
+        if not dataset_path or not output_root:
+            post_run["training_import_refresh"] = {
+                "ok": False,
+                "status": "BLOCKED",
+                "error": {
+                    "code": "ISAAC_LAB_POST_RUN_REFRESH_CONTEXT_MISSING",
+                    "message": "Cannot refresh Isaac Lab training import after post-run without dataset_path and output_root.",
+                },
+            }
+            job["post_run"] = post_run
+            return job
+        refresh_payload = {
+            **payload,
+            "dataset_path": dataset_path,
+            "output_root": output_root,
+            "enable_mimic": True,
+            "force_rebuild": False,
+            "overwrite_latest": False,
+            "resume": True,
+            "require_physics_pass": False,
+            "require_articulation_pass": False,
+        }
+        try:
+            request = self._isaac_lab_synthetic_request(refresh_payload)
+            refreshed = self._isaac_lab_synthetic_pipeline().build_synthetic(request)
+        except Exception as exc:  # noqa: BLE001 - status response should preserve refresh failures.
+            refreshed = {
+                "ok": False,
+                "status": "BLOCKED",
+                "error": {
+                    "code": "ISAAC_LAB_POST_RUN_REFRESH_FAILED",
+                    "message": f"Training import refresh after Isaac Lab post-run failed: {exc}",
+                },
+            }
+        post_run["training_import_refresh"] = copy.deepcopy(refreshed)
+        job["post_run"] = post_run
+        summary = dict(summary)
+        if isinstance(refreshed, dict):
+            if isinstance(refreshed.get("training_exposure"), dict):
+                summary["training_exposure"] = copy.deepcopy(refreshed["training_exposure"])
+            if isinstance(refreshed.get("mimic"), dict):
+                summary["mimic"] = copy.deepcopy(refreshed["mimic"])
+                summary["runner"] = copy.deepcopy(refreshed["mimic"])
+            if isinstance(refreshed.get("validation_report"), dict):
+                summary["validation_report"] = {
+                    "status": refreshed["validation_report"].get("status"),
+                    "blockers": copy.deepcopy(refreshed["validation_report"].get("blockers") or []),
+                }
+        job["summary"] = summary
+        if not bool(refreshed.get("ok")):
+            job["status"] = "BLOCKED"
+            job["progress"] = {"percent": 100.0, "stage": "training_import_refresh_blocked"}
+            job["error"] = copy.deepcopy(refreshed.get("error")) or {
+                "code": "ISAAC_LAB_POST_RUN_REFRESH_BLOCKED",
+                "message": "Isaac Lab post-run completed, but training import refresh did not pass.",
+            }
+        return job
+
+    @staticmethod
+    def _isaac_lab_post_run_enabled(job: dict[str, Any]) -> bool:
+        post_run = job.get("post_run") if isinstance(job.get("post_run"), dict) else {}
+        command = [str(item) for item in list(post_run.get("command") or []) if str(item)]
+        return bool(post_run.get("enabled") and len(command) >= 2 and not post_run.get("started_at"))
+
+    def _start_isaac_lab_post_run_process(
+        self,
+        kind: str,
+        job: dict[str, Any],
+    ) -> tuple[dict[str, Any], subprocess.Popen[str] | None]:
+        post_run = dict(job.get("post_run") if isinstance(job.get("post_run"), dict) else {})
+        command = [str(item) for item in list(post_run.get("command") or []) if str(item)]
+        now = datetime.now(timezone.utc).isoformat()
+        if len(command) < 2:
+            failed = copy.deepcopy(job)
+            failed["status"] = "FAILED"
+            failed["progress"] = {"percent": 100.0, "stage": "failed"}
+            failed["updated_at"] = now
+            failed["completed_at"] = now
+            failed["error"] = {
+                "code": "ISAAC_LAB_POST_RUN_COMMAND_MISSING",
+                "message": "Isaac Lab post-run preview command is missing.",
+            }
+            post_run["status"] = "failed"
+            post_run["completed_at"] = now
+            failed["post_run"] = post_run
+            return failed, None
+        runtime_path = Path(command[0]).expanduser()
+        script_path = _command_script_path(command)
+        if not runtime_path.is_file() or not script_path.is_file():
+            failed = copy.deepcopy(job)
+            failed["status"] = "FAILED"
+            failed["progress"] = {"percent": 100.0, "stage": "failed"}
+            failed["updated_at"] = now
+            failed["completed_at"] = now
+            failed["error"] = {
+                "code": "ISAAC_LAB_POST_RUN_COMMAND_INVALID",
+                "message": "Isaac Lab post-run preview runtime or script is missing.",
+                "runtime": str(runtime_path),
+                "script": str(script_path),
+            }
+            post_run["status"] = "failed"
+            post_run["completed_at"] = now
+            failed["post_run"] = post_run
+            return failed, None
+
+        cwd = str(job.get("cwd") or self.config.repo_root)
+        log_path = Path(str(job.get("log_path") or "")).expanduser()
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        env = os.environ.copy()
+        repo_root_text = str(self.config.repo_root.resolve())
+        existing_pythonpath = str(env.get("PYTHONPATH") or "")
+        env["PYTHONPATH"] = (
+            repo_root_text
+            if not existing_pythonpath
+            else repo_root_text + os.pathsep + existing_pythonpath
+        )
+        env["ROBOTIS_OMX_USE_FABRIC"] = "0"
+        try:
+            with log_path.open("a", encoding="utf-8") as log:
+                process = subprocess.Popen(
+                    command,
+                    cwd=cwd,
+                    env=env,
+                    stdin=subprocess.DEVNULL,
+                    stdout=log,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    start_new_session=True,
+                )
+        except OSError as exc:
+            failed = copy.deepcopy(job)
+            failed["status"] = "FAILED"
+            failed["progress"] = {"percent": 100.0, "stage": "failed"}
+            failed["updated_at"] = now
+            failed["completed_at"] = now
+            failed["error"] = {
+                "code": "ISAAC_LAB_POST_RUN_LAUNCH_FAILED",
+                "message": f"Isaac Lab post-run preview could not be launched: {exc}",
+                "command": command,
+            }
+            post_run["status"] = "failed"
+            post_run["completed_at"] = now
+            failed["post_run"] = post_run
+            return failed, None
+
+        running = copy.deepcopy(job)
+        running["status"] = "RUNNING"
+        stage = str(post_run.get("stage") or "")
+        if stage == "rgbd_render_after_generation":
+            progress_stage = "rgbd_render_running"
+        elif stage == "replay_validate_after_generation":
+            progress_stage = "replay_validation_running"
+        else:
+            progress_stage = "preview_running"
+        running["progress"] = {"percent": 95.0, "stage": progress_stage}
+        running["primary_command"] = list(job.get("primary_command") or job.get("command") or [])
+        running["command"] = command
+        running["pid"] = int(process.pid)
+        running["updated_at"] = now
+        running["completed_at"] = None
+        running["error"] = None
+        post_run.update(
+            {
+                "enabled": True,
+                "status": "running",
+                "pid": int(process.pid),
+                "started_at": now,
+                "command": command,
+                "log_path": str(log_path),
+            }
+        )
+        running["post_run"] = post_run
+        return running, process
+
+    @staticmethod
+    def _isaac_lab_job_log_text(job: dict[str, Any], *, max_chars: int = 200000) -> str:
+        log_path = Path(str(job.get("log_path") or "")).expanduser()
+        if not log_path.is_file():
+            return ""
+        try:
+            return log_path.read_text(encoding="utf-8", errors="replace")[-max_chars:]
+        except OSError:
+            return ""
+
+    @classmethod
+    def _isaac_lab_active_runner_failure(cls, kind: str, job: dict[str, Any]) -> dict[str, str] | None:
+        if kind != "mimic":
+            return None
+        text = cls._isaac_lab_job_log_text(job)
+        attempts = [int(match.group(1)) for match in re.finditer(r"0/(\d+)\s+\(0\.0%\)\s+successful demos generated by mimic", text)]
+        if not attempts:
+            return None
+        max_attempts = max(attempts)
+        if max_attempts < 9:
+            return None
+        return {
+            "code": "ISAAC_LAB_MIMIC_ZERO_SUCCESS_ATTEMPTS",
+            "message": (
+                "Isaac Lab Mimic generated zero successful demos after "
+                f"{max_attempts} attempts; stopping the runner instead of waiting indefinitely."
+            ),
+            "log_tail": text[-2000:],
+        }
+
+    @staticmethod
+    def _fail_isaac_lab_runner_job(job: dict[str, Any], *, code: str, message: str, log_tail: str = "") -> dict[str, Any]:
+        now = datetime.now(timezone.utc).isoformat()
+        failed = copy.deepcopy(job)
+        failed["status"] = "FAILED"
+        failed["returncode"] = None
+        failed["progress"] = {"percent": 100.0, "stage": "failed"}
+        failed["updated_at"] = now
+        failed["completed_at"] = now
+        failed["error"] = {"code": code, "message": message, "log_tail": log_tail[-2000:]}
+        return failed
+
+    def _normalize_isaac_lab_runner_status(self, kind: str, job: dict[str, Any]) -> dict[str, Any]:
+        if str(job.get("status") or "").upper() != "RUNNING":
+            return job
+        active_failure = self._isaac_lab_active_runner_failure(kind, job)
+        if active_failure:
+            normalized = self._fail_isaac_lab_runner_job(job, **active_failure)
+        elif self._isaac_lab_tracked_runner_process_alive(kind, job):
+            return job
+        elif not self._isaac_lab_runner_pid_alive(job):
+            normalized = self._fail_isaac_lab_runner_job(
+                job,
+                code="ISAAC_LAB_RUNNER_PROCESS_EXITED",
+                message="Isaac Lab runner process is no longer alive while the manifest still says RUNNING.",
+                log_tail=self._isaac_lab_job_log_text(job, max_chars=2000),
+            )
+        else:
+            return job
+        resolved = str(normalized.get("job_id") or "")
+        if resolved:
+            lock = self._isaac_lab_runner_locks.setdefault(kind, threading.Lock())
+            with lock:
+                self._isaac_lab_runner_jobs.setdefault(kind, {})[resolved] = copy.deepcopy(normalized)
+            if kind == "mimic":
+                with self._isaac_lab_mimic_lock:
+                    self._isaac_lab_mimic_jobs[resolved] = copy.deepcopy(normalized)
+            elif kind == "rl_teacher":
+                with self._isaac_lab_rl_teacher_lock:
+                    self._isaac_lab_rl_teacher_jobs[resolved] = copy.deepcopy(normalized)
+        self._write_isaac_lab_job_manifest(normalized)
+        return normalized
+
+    @staticmethod
+    def _jsonl_line_count(path: Path) -> int:
+        try:
+            with path.open("r", encoding="utf-8", errors="replace") as handle:
+                return sum(1 for line in handle if line.strip())
+        except OSError:
+            return 0
+
+    @staticmethod
+    def _command_option_value(command: list[Any], option: str) -> str:
+        items = [str(item) for item in command]
+        if option not in items:
+            return ""
+        index = items.index(option)
+        if index + 1 >= len(items):
+            return ""
+        return items[index + 1]
+
+    def _decorate_isaac_lab_mimic_rgbd_progress(self, job: dict[str, Any]) -> dict[str, Any]:
+        if str(job.get("status") or "").upper() != "RUNNING":
+            return job
+        post_run = job.get("post_run") if isinstance(job.get("post_run"), dict) else {}
+        if str(post_run.get("stage") or "") != "rgbd_render_after_generation":
+            return job
+        render_root_text = str(post_run.get("render_root") or "").strip()
+        if not render_root_text:
+            render_root_text = self._command_option_value(list(post_run.get("command") or job.get("command") or []), "--rgbd-output-dir")
+        if not render_root_text:
+            return job
+        render_root = Path(render_root_text).expanduser()
+        output_root = render_root.parent.parent if render_root.name == "renders" and render_root.parent.name == "mimic_rgbd" else Path()
+        expected_demos = 0
+        if str(output_root):
+            replay_successes = output_root / "mimic" / "replay_successes.jsonl"
+            mimic_successes = output_root / "mimic" / "successes.jsonl"
+            expected_demos = max(self._jsonl_line_count(replay_successes), self._jsonl_line_count(mimic_successes))
+        staging_parent = render_root.parent / ".render_staging"
+        staging_demo_dirs: list[Path] = []
+        if staging_parent.is_dir():
+            for staging_render_root in sorted(staging_parent.glob("*/renders")):
+                if staging_render_root.is_dir():
+                    staging_demo_dirs.extend(sorted(path for path in staging_render_root.glob("demo_*") if path.is_dir()))
+        demo_dirs = staging_demo_dirs
+        if not demo_dirs and render_root.is_dir():
+            demo_dirs = sorted(path for path in render_root.glob("demo_*") if path.is_dir())
+        if expected_demos <= 0:
+            expected_demos = max(1, len(demo_dirs))
+        manifest_counts = [self._jsonl_line_count(path / "manifest.jsonl") for path in demo_dirs]
+        rendered_files = 0
+        for path in demo_dirs:
+            try:
+                rendered_files += sum(1 for child in path.rglob("*") if child.is_file())
+            except OSError:
+                continue
+        per_demo_units = max(manifest_counts) if manifest_counts else 0
+        rendered_units = sum(min(count, per_demo_units) for count in manifest_counts) if per_demo_units > 0 else 0
+        total_units = expected_demos * per_demo_units if per_demo_units > 0 else expected_demos
+        if total_units > 0 and rendered_units > 0:
+            percent = min(99.0, max(5.0, (rendered_units / total_units) * 100.0))
+        else:
+            percent = 5.0
+        decorated = copy.deepcopy(job)
+        decorated["progress"] = {
+            "percent": round(percent, 2),
+            "stage": "rgbd_render_running",
+            "done": rendered_units,
+            "total": total_units,
+            "message": f"demos={len(demo_dirs)}/{expected_demos} · files={rendered_files}",
+            "rendered_demos": len(demo_dirs),
+            "expected_demos": expected_demos,
+            "render_manifest_lines": rendered_units,
+        }
+        return decorated
+
+    def _isaac_lab_tracked_runner_process_alive(self, kind: str, job: dict[str, Any]) -> bool:
+        job_id = str(job.get("job_id") or "")
+        if not job_id:
+            return False
+        lock = self._isaac_lab_runner_locks.setdefault(kind, threading.Lock())
+        with lock:
+            process = self._isaac_lab_runner_processes.setdefault(kind, {}).get(job_id)
+        if process is None:
+            return False
+        try:
+            return process.poll() is None
+        except Exception:
+            return False
+
+    @staticmethod
+    def _isaac_lab_runner_pid_alive(job: dict[str, Any]) -> bool:
+        try:
+            pid = int(job.get("pid") or 0)
+        except (TypeError, ValueError):
+            return False
+        if pid <= 0:
+            return False
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        return True
+
+    @staticmethod
     def _complete_isaac_lab_runner_job(job: dict[str, Any], returncode: int) -> dict[str, Any]:
-        status = "COMPLETED" if returncode == 0 else "FAILED"
+        log_tail = ""
+        log_scan = ""
+        log_path = Path(str(job.get("log_path") or "")).expanduser()
+        if log_path.is_file():
+            try:
+                log_text = log_path.read_text(encoding="utf-8", errors="replace")
+                log_scan = log_text[-200000:]
+                log_tail = log_text[-8000:]
+            except OSError:
+                log_tail = ""
+                log_scan = ""
+        failure_markers = (
+            "Traceback (most recent call last):",
+            "NotImplementedError:",
+            "KeyError:",
+            "TypeError:",
+            "AttributeError:",
+            "ValueError:",
+            "RuntimeError:",
+            "There was an error running python",
+        )
+        log_failed = any(marker in log_scan for marker in failure_markers)
+        artifact_error = ""
+        if returncode == 0 and not log_failed:
+            if str(job.get("kind") or "") == "live_e2e":
+                artifact_error = LeRobotBridge._isaac_lab_live_e2e_artifact_error(job)
+            else:
+                artifact_error = LeRobotBridge._isaac_lab_runner_hdf5_output_error(job)
+        status = "COMPLETED" if returncode == 0 and not log_failed and not artifact_error else "FAILED"
         now = datetime.now(timezone.utc).isoformat()
         job["status"] = status
         job["returncode"] = returncode
         job["progress"] = {"percent": 100.0, "stage": status.lower()}
+        if str(job.get("kind") or "") == "live_e2e":
+            output_root = Path(str(job.get("output_root") or (job.get("summary") or {}).get("output_root") or "")).expanduser()
+            job["artifact_checks"] = LeRobotBridge._isaac_lab_live_e2e_artifact_checks(output_root)
+            summary = dict(job.get("summary") or {})
+            summary["artifact_checks"] = copy.deepcopy(job["artifact_checks"])
+            job["summary"] = summary
         job["updated_at"] = now
         job["completed_at"] = now
         job["error"] = None
         if status == "FAILED":
             job["error"] = {
                 "code": "ISAAC_LAB_RUNNER_FAILED",
-                "message": f"Isaac Lab runner exited with returncode={returncode}.",
+                "message": (
+                    f"Isaac Lab runner exited with returncode={returncode}; "
+                    f"log_failed={log_failed}; artifact_error={artifact_error or 'none'}."
+                ),
+                "log_tail": log_tail[-2000:],
             }
         return copy.deepcopy(job)
+
+    @staticmethod
+    def _isaac_lab_runner_hdf5_output_error(job: dict[str, Any]) -> str:
+        kind = str(job.get("kind") or "")
+        if kind not in {"annotate", "mimic"}:
+            return ""
+        command = [str(item) for item in list(job.get("command") or [])]
+        output_flag = "--output_file" if "--output_file" in command else "--output-file" if "--output-file" in command else ""
+        if not output_flag:
+            return ""
+        index = command.index(output_flag)
+        if index + 1 >= len(command):
+            return "HDF5_OUTPUT_ARGUMENT_MISSING"
+        output_path = Path(command[index + 1]).expanduser()
+        if not output_path.is_file():
+            return f"HDF5_OUTPUT_MISSING:{output_path}"
+        try:
+            import h5py
+
+            with h5py.File(output_path, "r") as handle:
+                data = handle.get("data")
+                if data is None:
+                    return f"HDF5_DATA_GROUP_MISSING:{output_path}"
+                if len(data.keys()) <= 0:
+                    return f"HDF5_DATA_EMPTY:{output_path}"
+        except Exception as exc:  # noqa: BLE001 - job status must preserve HDF5 open failures.
+            return f"HDF5_OUTPUT_INVALID:{exc.__class__.__name__}:{exc}"
+        return ""
 
     def _isaac_lab_job_status(self, kind: str, payload: dict[str, Any]) -> dict[str, Any]:
         job_id = str(payload.get("job_id") or "").strip()
@@ -3552,6 +5289,9 @@ class LeRobotBridge:
         tool = f"lerobot.isaac_lab.{kind}.status"
         if not job:
             return self._isaac_lab_job_not_found_response(tool, job_id)
+        job = self._normalize_isaac_lab_runner_status(kind, job)
+        if kind == "mimic":
+            job = self._decorate_isaac_lab_mimic_rgbd_progress(job)
         return self._isaac_lab_job_response(tool, job)
 
     def _isaac_lab_job_stop(self, kind: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -3561,38 +5301,33 @@ class LeRobotBridge:
         self._refresh_isaac_lab_runner_process(kind, job_id)
         if not self._isaac_lab_job_snapshot(kind, job_id):
             self._read_isaac_lab_job_manifest(kind, payload)
+        lock = self._isaac_lab_runner_locks.setdefault(kind, threading.Lock())
+        with lock:
+            resolved = job_id or self._isaac_lab_runner_latest_job_id.get(kind, "")
+            job = self._isaac_lab_runner_jobs.setdefault(kind, {}).get(resolved)
+            if not job:
+                return self._isaac_lab_job_not_found_response(tool, resolved)
+            if str(job.get("status") or "").upper() not in terminal:
+                process = self._isaac_lab_runner_processes.setdefault(kind, {}).pop(resolved, None)
+                if process is not None:
+                    self._terminate_live_process(process, signal.SIGTERM)
+                job["status"] = "STOPPED"
+                job["progress"] = {"percent": 100.0, "stage": "stopped"}
+                job["stop_requested"] = True
+                job["completed_at"] = datetime.now(timezone.utc).isoformat()
+            elif str(job.get("status") or "").upper() == "STOPPED":
+                job["progress"] = {"percent": 100.0, "stage": "stopped"}
+            job["updated_at"] = datetime.now(timezone.utc).isoformat()
+            public_job = copy.deepcopy(job)
         if kind == "mimic":
             with self._isaac_lab_mimic_lock:
-                resolved = job_id or self._isaac_lab_mimic_latest_job_id
-                job = self._isaac_lab_mimic_jobs.get(resolved)
-                if not job:
-                    return self._isaac_lab_job_not_found_response(tool, resolved)
-                if str(job.get("status") or "").upper() not in terminal:
-                    process = self._isaac_lab_mimic_processes.pop(resolved, None)
-                    if process is not None:
-                        self._terminate_live_process(process, signal.SIGTERM)
-                    job["status"] = "STOPPED"
-                    job["stop_requested"] = True
-                    job["completed_at"] = datetime.now(timezone.utc).isoformat()
-                job["updated_at"] = datetime.now(timezone.utc).isoformat()
-                self._write_isaac_lab_job_manifest(job)
-                public_job = copy.deepcopy(job)
-        else:
+                self._isaac_lab_mimic_processes.pop(resolved, None)
+                self._isaac_lab_mimic_jobs[resolved] = public_job
+        elif kind == "rl_teacher":
             with self._isaac_lab_rl_teacher_lock:
-                resolved = job_id or self._isaac_lab_rl_teacher_latest_job_id
-                job = self._isaac_lab_rl_teacher_jobs.get(resolved)
-                if not job:
-                    return self._isaac_lab_job_not_found_response(tool, resolved)
-                if str(job.get("status") or "").upper() not in terminal:
-                    process = self._isaac_lab_rl_teacher_processes.pop(resolved, None)
-                    if process is not None:
-                        self._terminate_live_process(process, signal.SIGTERM)
-                    job["status"] = "STOPPED"
-                    job["stop_requested"] = True
-                    job["completed_at"] = datetime.now(timezone.utc).isoformat()
-                job["updated_at"] = datetime.now(timezone.utc).isoformat()
-                self._write_isaac_lab_job_manifest(job)
-                public_job = copy.deepcopy(job)
+                self._isaac_lab_rl_teacher_processes.pop(resolved, None)
+                self._isaac_lab_rl_teacher_jobs[resolved] = public_job
+        self._write_isaac_lab_job_manifest(public_job)
         return self._isaac_lab_job_response(tool, public_job)
 
     @staticmethod
@@ -3644,7 +5379,7 @@ class LeRobotBridge:
         job_id = self._isaac_rgbd_post_render_job_id(dataset_path, request.session_id)
         with self._isaac_rgbd_render_lock:
             existing = self._isaac_rgbd_render_jobs.get(job_id)
-            if existing and str(existing.get("status") or "").upper() == "RUNNING":
+            if existing and str(existing.get("status") or "").upper() in {"RUNNING", "STOPPING"}:
                 return self._isaac_rgbd_post_render_response(
                     "lerobot.isaac_rgbd.render.start",
                     mode,
@@ -3653,8 +5388,22 @@ class LeRobotBridge:
                     dict(existing),
                     idempotent=True,
                 )
-        candidates = self._isaac_rgbd_post_render_candidates(dataset_path, request.session_id)
+        episode_indices = self._isaac_rgbd_post_render_episode_filter(
+            getattr(request, "isaac_rgbd_post_render_episode_indices", "")
+        )
+        candidates = self._isaac_rgbd_post_render_candidates(
+            dataset_path,
+            request.session_id,
+            episode_indices=episode_indices,
+        )
+        overwrite = bool(getattr(request, "isaac_rgbd_post_render_overwrite", False))
+        overwrite_summary = self._stage_isaac_rgbd_overwrite_candidates(dataset_path, candidates, job_id) if overwrite else {}
         job = self._new_isaac_rgbd_post_render_job(job_id, dataset_path, request.session_id, candidates)
+        if episode_indices is not None:
+            job["episode_indices"] = sorted(episode_indices)
+        if overwrite:
+            job["overwrite"] = True
+            job["overwrite_summary"] = overwrite_summary
         with self._isaac_rgbd_render_lock:
             self._isaac_rgbd_render_jobs[job_id] = job
         if bool(getattr(request, "isaac_rgbd_post_render_inline", False)):
@@ -3705,11 +5454,21 @@ class LeRobotBridge:
         with self._isaac_rgbd_render_lock:
             job = dict(self._isaac_rgbd_render_jobs.get(job_id, {}))
         if not job:
-            candidates = self._isaac_rgbd_post_render_candidates(dataset_path, request.session_id)
+            episode_indices = self._isaac_rgbd_post_render_episode_filter(
+                getattr(request, "isaac_rgbd_post_render_episode_indices", "")
+            )
+            candidates = self._isaac_rgbd_post_render_candidates(
+                dataset_path,
+                request.session_id,
+                episode_indices=episode_indices,
+            )
             job = self._new_isaac_rgbd_post_render_job(job_id, dataset_path, request.session_id, candidates)
+            if episode_indices is not None:
+                job["episode_indices"] = sorted(episode_indices)
+            done_index = self._isaac_rgbd_render_done_index(candidates)
             done = skipped = 0
             for candidate in candidates:
-                if self._isaac_rgbd_render_candidate_done(candidate):
+                if self._isaac_rgbd_render_candidate_done(candidate, done_index=done_index):
                     done += 1
                     skipped += 1
             job.update(
@@ -3724,6 +5483,96 @@ class LeRobotBridge:
             )
         return self._isaac_rgbd_post_render_response("lerobot.isaac_rgbd.render.status", mode, profile_id, dataset_path, job)
 
+    def _isaac_rgbd_post_render_dataset_path_for_stop_request(self, request: LeRobotSessionRequest) -> Path:
+        if request.dataset_path or request.dataset_repo_id:
+            return Path(self._dataset_path_for(request)).expanduser().resolve()
+        requested_session = str(request.session_id or "")
+        with self._isaac_rgbd_render_lock:
+            jobs = list(self._isaac_rgbd_render_jobs.values())
+        for active_only in (True, False):
+            for job in reversed(jobs):
+                if requested_session and str(job.get("session_id") or "") != requested_session:
+                    continue
+                status = str(job.get("status") or "").upper()
+                if active_only and status not in {"RUNNING", "STOPPING"}:
+                    continue
+                dataset_path = str(job.get("dataset_path") or "").strip()
+                if dataset_path:
+                    return Path(dataset_path).expanduser().resolve()
+        return Path(self._dataset_path_for(request)).expanduser().resolve()
+
+    def isaac_rgbd_render_stop(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Request a safe stop for post-record Isaac RGB-D rendering."""
+        request = LeRobotSessionRequest.model_validate(payload or {})
+        mode = request.runtime_mode or request.mode
+        profile_id = request.profile_id or self._selected_profile_id
+        dataset_path = self._isaac_rgbd_post_render_dataset_path_for_stop_request(request)
+        if not self._is_under_allowed_roots(dataset_path):
+            return self._error(
+                "lerobot.isaac_rgbd.render.stop",
+                mode,
+                profile_id,
+                "LEROBOT_PATH_OUTSIDE_ALLOWED_ROOTS",
+                f"Dataset path is outside allowed roots: {dataset_path}",
+            )
+        job_id = self._isaac_rgbd_post_render_job_id(dataset_path, request.session_id)
+        now = datetime.now(timezone.utc).isoformat()
+        with self._isaac_rgbd_render_lock:
+            job = dict(self._isaac_rgbd_render_jobs.get(job_id, {}))
+            worker = self._isaac_rgbd_render_threads.get(job_id)
+            worker_alive = bool(worker and worker.is_alive())
+            if not job:
+                episode_indices = self._isaac_rgbd_post_render_episode_filter(
+                    getattr(request, "isaac_rgbd_post_render_episode_indices", "")
+                )
+                candidates = self._isaac_rgbd_post_render_candidates(
+                    dataset_path,
+                    request.session_id,
+                    episode_indices=episode_indices,
+                )
+                job = self._new_isaac_rgbd_post_render_job(job_id, dataset_path, request.session_id, candidates)
+                if episode_indices is not None:
+                    job["episode_indices"] = sorted(episode_indices)
+                done_index = self._isaac_rgbd_render_done_index(candidates)
+                done = skipped = 0
+                for candidate in candidates:
+                    if self._isaac_rgbd_render_candidate_done(candidate, done_index=done_index):
+                        done += 1
+                        skipped += 1
+                job.update(
+                    {
+                        "status": "STOPPED",
+                        "stop_requested": True,
+                        "done": done,
+                        "skipped": skipped,
+                        "pending": max(0, len(candidates) - done),
+                        "percent": self._percent(done, len(candidates)),
+                        "stopped_at": now,
+                        "completed_at": now,
+                    }
+                )
+            else:
+                status = str(job.get("status") or "").upper()
+                if status in {"RUNNING", "STOPPING"} and worker_alive:
+                    job["status"] = "STOPPING"
+                    job["stop_requested"] = True
+                elif status in {"COMPLETED", "FAILED", "STOPPED"}:
+                    job["stop_requested"] = True
+                    if not job.get("stopped_at"):
+                        job["stopped_at"] = now
+                else:
+                    job["status"] = "STOPPED"
+                    job["stop_requested"] = True
+                    job["pending"] = max(0, int(job.get("total") or 0) - int(job.get("done") or 0))
+                    if not job.get("stopped_at"):
+                        job["stopped_at"] = now
+                    if not job.get("completed_at"):
+                        job["completed_at"] = now
+            job["updated_at"] = now
+            self._isaac_rgbd_render_jobs[job_id] = job
+            public_job = dict(job)
+        return self._isaac_rgbd_post_render_response("lerobot.isaac_rgbd.render.stop", mode, profile_id, dataset_path, public_job)
+
     def _new_isaac_rgbd_post_render_job(
         self,
         job_id: str,
@@ -3732,12 +5581,17 @@ class LeRobotBridge:
         candidates: list[dict[str, Any]],
     ) -> dict[str, Any]:
         now = datetime.now(timezone.utc).isoformat()
+        gap_filled = sum(1 for candidate in candidates if candidate.get("gap_filled"))
         return {
             "job_id": job_id,
             "status": "RUNNING" if candidates else "COMPLETED",
+            "execution_mode": ISAAC_RGBD_POST_RENDER_EXECUTION_MODE,
+            "preplay_policy": ISAAC_RGBD_POST_RENDER_PREPLAY_POLICY,
             "dataset_path": str(dataset_path),
             "session_id": session_id,
             "total": len(candidates),
+            "gap_filled": gap_filled,
+            "coverage_warning": f"{gap_filled} canonical frames were filled from nearest mirror samples." if gap_filled else "",
             "done": 0,
             "rendered": 0,
             "skipped": 0,
@@ -3747,8 +5601,11 @@ class LeRobotBridge:
             "started_at": now,
             "updated_at": now,
             "completed_at": now if not candidates else "",
+            "stop_requested": False,
+            "stopped_at": "",
             "last_frame_index": None,
             "last_error": "",
+            "failed_frames": [],
         }
 
     @staticmethod
@@ -3770,7 +5627,7 @@ class LeRobotBridge:
             {"step": "RESOLVE_DATASET", "status": "ok", "detail": str(dataset_path)},
             {
                 "step": "ISAAC_RGBD_POST_RENDER",
-                "status": "active" if str(job.get("status") or "").upper() == "RUNNING" else "ok",
+                "status": "active" if str(job.get("status") or "").upper() in {"RUNNING", "STOPPING"} else "ok",
                 "detail": f"{job.get('done', 0)}/{job.get('total', 0)} frames ({job.get('percent', 0.0)}%)",
             },
         ]
@@ -3788,6 +5645,35 @@ class LeRobotBridge:
             "error": job.get("last_error") or None,
         }
 
+    def _isaac_rgbd_post_render_stop_requested(self, job_id: str) -> bool:
+        with self._isaac_rgbd_render_lock:
+            return bool(self._isaac_rgbd_render_jobs.get(job_id, {}).get("stop_requested"))
+
+    def _stop_isaac_rgbd_post_render_job(
+        self,
+        job_id: str,
+        *,
+        total: int,
+        done: int,
+        rendered: int,
+        skipped: int,
+        failed: int,
+    ) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        self._update_isaac_rgbd_post_render_job(
+            job_id,
+            status="STOPPED",
+            stop_requested=True,
+            done=done,
+            rendered=rendered,
+            skipped=skipped,
+            failed=failed,
+            pending=max(0, total - done),
+            percent=self._percent(done, total),
+            stopped_at=now,
+            completed_at=now,
+        )
+
     def _run_isaac_rgbd_post_render_job(
         self,
         job_id: str,
@@ -3797,13 +5683,40 @@ class LeRobotBridge:
         poll_timeout_s: float,
     ) -> None:
         total = len(candidates)
+        if self._isaac_rgbd_post_render_stop_requested(job_id):
+            self._stop_isaac_rgbd_post_render_job(job_id, total=total, done=0, rendered=0, skipped=0, failed=0)
+            return
         if total == 0:
             self._update_isaac_rgbd_post_render_job(job_id, status="COMPLETED", done=0, pending=0, percent=100.0, completed_at=datetime.now(timezone.utc).isoformat())
             return
         done = rendered = skipped = failed = 0
+        failed_frames: list[dict[str, Any]] = []
+        preplay_warnings = 0
+        done_index = self._isaac_rgbd_render_done_index(candidates)
+        preplayed_groups: set[tuple[str, int]] = set()
+        overwrite_groups: dict[str, dict[str, Any]] = {}
+        overwrite_committed: list[dict[str, Any]] = []
+        overwrite_commit_failures: list[dict[str, Any]] = []
         for candidate in candidates:
+            overwrite_key = self._isaac_rgbd_overwrite_group_key(candidate)
+            if not overwrite_key:
+                continue
+            group = overwrite_groups.setdefault(overwrite_key, {"total": 0, "done": 0, "failed": 0, "candidates": []})
+            group["total"] += 1
+            group["candidates"].append(candidate)
+        for candidate in candidates:
+            if self._isaac_rgbd_post_render_stop_requested(job_id):
+                self._stop_isaac_rgbd_post_render_job(
+                    job_id,
+                    total=total,
+                    done=done,
+                    rendered=rendered,
+                    skipped=skipped,
+                    failed=failed,
+                )
+                return
             frame_index = candidate.get("frame_index")
-            if self._isaac_rgbd_render_candidate_done(candidate):
+            if self._isaac_rgbd_render_candidate_done(candidate, done_index=done_index):
                 skipped += 1
                 done += 1
                 self._update_isaac_rgbd_post_render_job(
@@ -3816,6 +5729,34 @@ class LeRobotBridge:
                 )
                 continue
             endpoint = str(candidate.get("endpoint") or "http://127.0.0.1:8766/render")
+            group_key = (
+                str(candidate.get("attempt_id") or (candidate.get("request") or {}).get("attempt_id") or ""),
+                _safe_int(candidate.get("episode_index"), 0, minimum=0),
+            )
+            if group_key not in preplayed_groups:
+                preplay = self._preplay_isaac_rgbd_first_frame(
+                    candidate,
+                    endpoint=endpoint,
+                    post_timeout_s=post_timeout_s,
+                    settle_timeout_s=max(2.0, min(8.0, poll_timeout_s)),
+                )
+                preplayed_groups.add(group_key)
+                self._update_isaac_rgbd_post_render_job(
+                    job_id,
+                    preplay_count=len(preplayed_groups),
+                    last_preplay=preplay,
+                )
+                if not preplay.get("ok"):
+                    preplay_warnings += 1
+                    self._update_isaac_rgbd_post_render_job(
+                        job_id,
+                        preplay_warning_count=preplay_warnings,
+                        last_preplay_warning=preplay,
+                        last_frame_index=frame_index,
+                        last_preplay_warning_message=str(
+                            preplay.get("message") or preplay.get("status") or "Isaac RGB-D preplay did not stabilize"
+                        ),
+                    )
             post_result = self._post_isaac_rgbd_render_payload(dict(candidate.get("payload") or {}), endpoint=endpoint, timeout_s=post_timeout_s)
             wait_result = (
                 self._wait_for_isaac_rgbd_render_completion(candidate, endpoint=endpoint, timeout_s=poll_timeout_s)
@@ -3826,18 +5767,72 @@ class LeRobotBridge:
                 rendered += 1
             else:
                 failed += 1
+                failure_message = str(wait_result.get("message") or post_result.get("error") or wait_result.get("status") or "")
+                failed_frames.append(
+                    {
+                        "attempt_id": str(candidate.get("attempt_id") or ""),
+                        "episode_index": _safe_int(candidate.get("episode_index"), 0, minimum=0),
+                        "frame_index": _safe_int(candidate.get("frame_index"), 0, minimum=0),
+                        "sample_index": _safe_int(candidate.get("sample_index"), 0, minimum=0),
+                        "message": failure_message,
+                        "status": str(wait_result.get("status") or post_result.get("status") or "failed"),
+                    }
+                )
+            candidate_success = bool(post_result.get("ok") and wait_result.get("ok"))
+            last_error = "" if candidate_success else str(wait_result.get("message") or post_result.get("error") or wait_result.get("status") or "")
+            overwrite_key = self._isaac_rgbd_overwrite_group_key(candidate)
+            if overwrite_key:
+                group = overwrite_groups[overwrite_key]
+                group["done"] += 1
+                if not candidate_success:
+                    group["failed"] += 1
+                if group["done"] >= group["total"]:
+                    if group["failed"] == 0:
+                        commit_result = self._commit_isaac_rgbd_overwrite_group(list(group["candidates"]))
+                        if commit_result.get("ok"):
+                            overwrite_committed.append(commit_result)
+                        else:
+                            overwrite_commit_failures.append(commit_result)
+                            failed += 1
+                            last_error = str(commit_result.get("message") or commit_result.get("status") or "overwrite_commit_failed")
+                    else:
+                        overwrite_commit_failures.append(
+                            {
+                                "ok": False,
+                                "status": "overwrite_group_failed_before_commit",
+                                "final_output_dir": overwrite_key,
+                                "failed_frame_count": group["failed"],
+                            }
+                        )
             done += 1
-            self._update_isaac_rgbd_post_render_job(
-                job_id,
-                done=done,
-                rendered=rendered,
-                skipped=skipped,
-                failed=failed,
-                pending=max(0, total - done),
-                percent=self._percent(done, total),
-                last_frame_index=frame_index,
-                last_error="" if post_result.get("ok") and wait_result.get("ok") else str(wait_result.get("message") or post_result.get("error") or wait_result.get("status") or ""),
-            )
+            progress_updates = {
+                "done": done,
+                "rendered": rendered,
+                "skipped": skipped,
+                "failed": failed,
+                "pending": max(0, total - done),
+                "percent": self._percent(done, total),
+                "last_frame_index": frame_index,
+                "last_error": last_error,
+                "failed_frames": failed_frames[-50:],
+            }
+            if overwrite_groups:
+                progress_updates["overwrite_summary"] = self._isaac_rgbd_overwrite_summary(
+                    candidates,
+                    overwrite_committed,
+                    overwrite_commit_failures,
+                )
+            self._update_isaac_rgbd_post_render_job(job_id, **progress_updates)
+            if self._isaac_rgbd_post_render_stop_requested(job_id):
+                self._stop_isaac_rgbd_post_render_job(
+                    job_id,
+                    total=total,
+                    done=done,
+                    rendered=rendered,
+                    skipped=skipped,
+                    failed=failed,
+                )
+                return
         final_status = "COMPLETED" if failed == 0 else "FAILED"
         self._update_isaac_rgbd_post_render_job(
             job_id,
@@ -3848,6 +5843,7 @@ class LeRobotBridge:
             failed=failed,
             pending=0,
             percent=100.0,
+            failed_frames=failed_frames[-50:],
             completed_at=datetime.now(timezone.utc).isoformat(),
         )
 
@@ -3857,7 +5853,559 @@ class LeRobotBridge:
             job.update(updates)
             job["updated_at"] = datetime.now(timezone.utc).isoformat()
 
-    def _isaac_rgbd_post_render_candidates(self, dataset_path: Path, session_id: str = "") -> list[dict[str, Any]]:
+    def _preplay_isaac_rgbd_first_frame(
+        self,
+        candidate: dict[str, Any],
+        *,
+        endpoint: str,
+        post_timeout_s: float,
+        settle_timeout_s: float,
+    ) -> dict[str, Any]:
+        payload = copy.deepcopy(candidate.get("payload") if isinstance(candidate.get("payload"), dict) else {})
+        if not payload:
+            return {"ok": False, "status": "empty_preplay_payload", "message": "Isaac RGB-D preplay payload is empty."}
+        payload.pop("render_request", None)
+        payload["isaac_rgbd_preplay"] = {
+            "reason": "first_frame_settle_before_render",
+            "attempt_id": str(candidate.get("attempt_id") or ""),
+            "episode_index": _safe_int(candidate.get("episode_index"), 0, minimum=0),
+            "frame_index": _safe_int(candidate.get("frame_index"), 0, minimum=0),
+        }
+        stop = self._post_isaac_mirror_timeline_stop(
+            endpoint,
+            reason="isaac_rgbd_post_render_preplay_stop",
+            timeout_s=post_timeout_s,
+        )
+        if not stop.get("ok"):
+            return {
+                "ok": False,
+                "status": "timeline_stop_failed",
+                "timeline_stop": stop,
+                "message": str(stop.get("message") or stop.get("status") or "Isaac timeline stop failed."),
+            }
+        specimen_pose = payload.get("specimen_pose") if isinstance(payload.get("specimen_pose"), dict) else {}
+        specimen_result: dict[str, Any] = {}
+        if specimen_pose:
+            specimen_result = self._post_isaac_mirror_specimen_pose(
+                endpoint,
+                dict(specimen_pose),
+                timeout_s=post_timeout_s,
+            )
+            if not specimen_result.get("ok"):
+                return {
+                    "ok": False,
+                    "status": "specimen_pose_failed",
+                    "timeline_stop": stop,
+                    "specimen_pose": specimen_result,
+                    "message": str(
+                        specimen_result.get("message")
+                        or specimen_result.get("status")
+                        or "Recorded specimen pose was not accepted by Isaac."
+                    ),
+                }
+        timeline = self._post_isaac_mirror_timeline_play(
+            endpoint,
+            reason="isaac_rgbd_post_render_preplay",
+            timeout_s=post_timeout_s,
+        )
+        if not timeline.get("ok"):
+            return {
+                "ok": False,
+                "status": "timeline_play_failed",
+                "timeline": timeline,
+                "message": str(timeline.get("message") or timeline.get("status") or "Isaac timeline play failed."),
+            }
+        joint_endpoint = self._isaac_mirror_joint_url(endpoint)
+        settle = self._wait_for_isaac_rgbd_joint_settle(
+            joint_endpoint,
+            payload,
+            timeout_s=settle_timeout_s,
+            tolerance_deg=5.0,
+            velocity_tolerance_deg_s=10.0,
+        )
+        return {
+            "ok": bool(settle.get("ok")),
+            "status": "preplay_stable" if settle.get("ok") else "preplay_unstable",
+            "timeline_stop": stop,
+            "specimen_pose": specimen_result,
+            "timeline": timeline,
+            "joint_endpoint": joint_endpoint,
+            "settle": settle,
+            "message": "" if settle.get("ok") else str(settle.get("message") or settle.get("status") or "Isaac preplay did not stabilize."),
+        }
+
+    def _wait_for_isaac_rgbd_joint_settle(
+        self,
+        endpoint: str,
+        payload: dict[str, object],
+        *,
+        timeout_s: float,
+        tolerance_deg: float,
+        velocity_tolerance_deg_s: float,
+    ) -> dict[str, object]:
+        deadline = time.monotonic() + max(0.1, timeout_s)
+        last_summary: dict[str, object] = {"ok": False, "status": "not_checked"}
+        attempts = 0
+        while time.monotonic() <= deadline:
+            attempts += 1
+            post = self._post_isaac_mirror_state(endpoint, dict(payload), timeout_s=0.5)
+            if not post.get("ok"):
+                return {
+                    "ok": False,
+                    "status": "joint_post_failed",
+                    "attempts": attempts,
+                    "post": post,
+                    "message": str(post.get("message") or post.get("error") or post.get("status") or "failed to post joint preplay payload"),
+                }
+            time.sleep(0.2)
+            state = self._fetch_isaac_mirror_receiver_state(endpoint, timeout_s=0.5)
+            last_summary = self._isaac_rgbd_joint_settle_summary(
+                state,
+                tolerance_deg=tolerance_deg,
+                velocity_tolerance_deg_s=velocity_tolerance_deg_s,
+            )
+            last_summary["attempts"] = attempts
+            if last_summary.get("ok"):
+                return last_summary
+            time.sleep(0.3)
+        return {
+            **last_summary,
+            "ok": False,
+            "status": "settle_timeout",
+            "attempts": attempts,
+            "message": (
+                f"Timed out waiting for Isaac joint readback to settle within {tolerance_deg:g} deg "
+                f"and {velocity_tolerance_deg_s:g} deg/s."
+            ),
+        }
+
+    @staticmethod
+    def _isaac_rgbd_joint_settle_summary(
+        state: dict[str, Any],
+        *,
+        tolerance_deg: float,
+        velocity_tolerance_deg_s: float,
+    ) -> dict[str, object]:
+        last_apply = state.get("last_apply_result") if isinstance(state.get("last_apply_result"), dict) else {}
+        rows = last_apply.get("joint_readback") if isinstance(last_apply, dict) else []
+        comparable: list[dict[str, object]] = []
+        for row in rows if isinstance(rows, list) else []:
+            if not isinstance(row, dict):
+                continue
+            if row.get("state_position") is None or row.get("target_value") is None:
+                continue
+            error = row.get("target_minus_state")
+            if error is None:
+                error = _safe_float(row.get("target_value"), 0.0) - _safe_float(row.get("state_position"), 0.0)
+            velocity = _safe_float(row.get("state_velocity"), 0.0)
+            comparable.append(
+                {
+                    "motor_id": row.get("motor_id"),
+                    "name": str(row.get("name") or ""),
+                    "target_value": _safe_float(row.get("target_value"), 0.0),
+                    "state_position": _safe_float(row.get("state_position"), 0.0),
+                    "target_minus_state": _safe_float(error, 0.0),
+                    "state_velocity": velocity,
+                    "abs_error_deg": abs(_safe_float(error, 0.0)),
+                    "abs_velocity_deg_s": abs(velocity),
+                }
+            )
+        if not comparable:
+            return {
+                "ok": False,
+                "status": "joint_readback_unavailable",
+                "sample_count": state.get("sample_count"),
+                "comparable_count": 0,
+                "message": "Isaac receiver state did not include comparable joint_readback rows.",
+            }
+        max_error = max(_safe_float(row.get("abs_error_deg"), 0.0) for row in comparable)
+        max_velocity = max(_safe_float(row.get("abs_velocity_deg_s"), 0.0) for row in comparable)
+        stable = max_error <= tolerance_deg and max_velocity <= velocity_tolerance_deg_s
+        return {
+            "ok": stable,
+            "status": "stable" if stable else "settling",
+            "sample_count": state.get("sample_count"),
+            "comparable_count": len(comparable),
+            "max_abs_error_deg": max_error,
+            "max_abs_velocity_deg_s": max_velocity,
+            "tolerance_deg": tolerance_deg,
+            "velocity_tolerance_deg_s": velocity_tolerance_deg_s,
+            "joints": comparable[:12],
+        }
+
+    @staticmethod
+    def _isaac_rgbd_expected_episode_lengths(dataset_path: Path) -> dict[int, int]:
+        lengths: dict[int, int] = {}
+        episodes_path = dataset_path / "meta" / "episodes.jsonl"
+        for index, row in enumerate(LeRobotBridge._read_jsonl_rows(episodes_path)):
+            episode_index = _safe_int(row.get("episode_index"), index, minimum=0)
+            length = _safe_int(row.get("length", row.get("num_frames", row.get("frame_count"))), 0, minimum=0)
+            if length > 0:
+                lengths[episode_index] = length
+        if lengths:
+            return lengths
+        info_path = dataset_path / "meta" / "info.json"
+        try:
+            info = json.loads(info_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        if not isinstance(info, dict):
+            return {}
+        episode_count = _safe_int(info.get("total_episodes"), 0, minimum=0)
+        frame_count = _safe_int(info.get("total_frames"), 0, minimum=0)
+        if episode_count <= 0 or frame_count <= 0:
+            return {}
+        base = frame_count // episode_count
+        remainder = frame_count % episode_count
+        return {episode_index: base + (1 if episode_index < remainder else 0) for episode_index in range(episode_count)}
+
+    @staticmethod
+    def _isaac_rgbd_nearest_source_candidate(candidates: list[dict[str, Any]], frame_index: int) -> dict[str, Any]:
+        previous = [
+            candidate
+            for candidate in candidates
+            if _safe_int(candidate.get("frame_index"), 0, minimum=0) <= frame_index
+        ]
+        if previous:
+            return max(previous, key=lambda candidate: _safe_int(candidate.get("frame_index"), 0, minimum=0))
+        return min(candidates, key=lambda candidate: _safe_int(candidate.get("frame_index"), 0, minimum=0))
+
+    @staticmethod
+    def _isaac_rgbd_gap_fill_candidate(source: dict[str, Any], frame_index: int) -> dict[str, Any]:
+        candidate = copy.deepcopy(source)
+        request = copy.deepcopy(source.get("request") if isinstance(source.get("request"), dict) else {})
+        payload = copy.deepcopy(source.get("payload") if isinstance(source.get("payload"), dict) else {})
+        source_frame_index = _safe_int(source.get("frame_index"), frame_index, minimum=0)
+        source_sample_index = _safe_int(source.get("sample_index"), _safe_int(request.get("sample_index"), frame_index + 1, minimum=1), minimum=1)
+        sample_index = max(1, source_sample_index + (frame_index - source_frame_index))
+        request["frame_index"] = frame_index
+        request["sample_index"] = sample_index
+        payload["sample_index"] = sample_index
+        payload["render_request"] = dict(request)
+        payload["isaac_rgbd_gap_fill"] = {
+            "reason": "canonical_frame_missing_from_mirror",
+            "source_frame_index": source_frame_index,
+            "source_sample_index": source_sample_index,
+            "filled_frame_index": frame_index,
+            "filled_sample_index": sample_index,
+        }
+        candidate.update(
+            {
+                "key": (str(source.get("attempt_id") or ""), _safe_int(source.get("episode_index"), 0, minimum=0), frame_index),
+                "frame_index": frame_index,
+                "sample_index": sample_index,
+                "request": request,
+                "payload": payload,
+                "gap_filled": True,
+                "gap_fill_source_frame_index": source_frame_index,
+                "gap_fill_source_sample_index": source_sample_index,
+            }
+        )
+        return candidate
+
+    def _fill_missing_isaac_rgbd_post_render_candidates(
+        self,
+        dataset_path: Path,
+        candidates_by_key: dict[tuple[str, int, int], dict[str, Any]],
+    ) -> None:
+        expected_lengths = self._isaac_rgbd_expected_episode_lengths(dataset_path)
+        if not expected_lengths or not candidates_by_key:
+            return
+        groups: dict[tuple[str, int], list[dict[str, Any]]] = {}
+        for (attempt_id, episode_index, _frame_index), candidate in candidates_by_key.items():
+            groups.setdefault((attempt_id, episode_index), []).append(candidate)
+        for (attempt_id, episode_index), candidates in groups.items():
+            expected_length = expected_lengths.get(episode_index)
+            if not expected_length:
+                continue
+            frame_indices = {_safe_int(candidate.get("frame_index"), 0, minimum=0) for candidate in candidates}
+            for frame_index in range(expected_length):
+                if frame_index in frame_indices:
+                    continue
+                source = self._isaac_rgbd_nearest_source_candidate(candidates, frame_index)
+                filled = self._isaac_rgbd_gap_fill_candidate(source, frame_index)
+                key = (attempt_id, episode_index, frame_index)
+                if key not in candidates_by_key:
+                    candidates_by_key[key] = filled
+                    candidates.append(filled)
+                    frame_indices.add(frame_index)
+
+    @staticmethod
+    def _isaac_rgbd_episode_action_joint_states(
+        dataset_path: Path,
+        episode_index: int,
+        *,
+        calibration: dict[str, Any] | None = None,
+    ) -> dict[int, list[dict[str, Any]]]:
+        data_root = dataset_path / "data"
+        episode_name = f"episode_{episode_index:06d}.parquet"
+        episode_paths = [data_root / "chunk-000" / episode_name]
+        episode_paths.extend(sorted(data_root.glob(f"chunk-*/{episode_name}")))
+        episode_path = next((path for path in episode_paths if path.is_file()), None)
+        if episode_path is None:
+            return {}
+        try:
+            import pyarrow.parquet as pq
+        except Exception:
+            return {}
+        try:
+            table = pq.read_table(episode_path, columns=["action", "frame_index"])
+        except Exception:
+            try:
+                table = pq.read_table(episode_path, columns=["action"])
+            except Exception:
+                return {}
+        data = table.to_pydict()
+        actions = data.get("action") or []
+        frame_indices = data.get("frame_index")
+        joint_states: dict[int, list[dict[str, Any]]] = {}
+        for row_index, raw_action in enumerate(actions):
+            if not isinstance(raw_action, (list, tuple)):
+                continue
+            frame_index = row_index
+            if isinstance(frame_indices, list) and row_index < len(frame_indices):
+                frame_index = _safe_int(frame_indices[row_index], row_index, minimum=0)
+            action: dict[str, Any] = {}
+            for joint_index, item in enumerate(ISAAC_OMX_JOINT_MAP):
+                if joint_index >= len(raw_action):
+                    break
+                action[f"{item['motor_name']}.pos"] = raw_action[joint_index]
+            converted = action_to_joint_state(action, calibration=calibration)
+            if converted:
+                joint_states[frame_index] = converted
+        return joint_states
+
+    def _attach_lerobot_action_pose_to_isaac_rgbd_candidates(
+        self,
+        dataset_path: Path,
+        candidates_by_key: dict[tuple[str, int, int], dict[str, Any]],
+    ) -> None:
+        default_calibration = self._isaac_mirror_calibration()
+        cache: dict[tuple[int, str], dict[int, list[dict[str, Any]]]] = {}
+        for (_attempt_id, episode_index, frame_index), candidate in candidates_by_key.items():
+            payload = candidate.get("payload") if isinstance(candidate.get("payload"), dict) else {}
+            if not isinstance(payload, dict):
+                continue
+            calibration = payload.get("calibration") if isinstance(payload.get("calibration"), dict) else default_calibration
+            try:
+                calibration_key = json.dumps(calibration or {}, sort_keys=True, default=str)
+            except TypeError:
+                calibration_key = ""
+            cache_key = (episode_index, calibration_key)
+            if cache_key not in cache:
+                cache[cache_key] = self._isaac_rgbd_episode_action_joint_states(
+                    dataset_path,
+                    episode_index,
+                    calibration=calibration if isinstance(calibration, dict) else None,
+                )
+            joint_state = cache[cache_key].get(frame_index)
+            if not joint_state:
+                continue
+            payload["joint_state"] = [dict(item) for item in joint_state]
+            payload["isaac_rgbd_pose_source"] = "lerobot_episode_action"
+            payload["isaac_rgbd_pose_frame_index"] = frame_index
+
+    @staticmethod
+    def _isaac_rgbd_post_render_episode_filter(raw_value: Any) -> set[int] | None:
+        if raw_value is None:
+            return None
+        if isinstance(raw_value, (list, tuple, set)):
+            values = raw_value
+        else:
+            raw = str(raw_value or "").strip()
+            if not raw or raw.lower() in {"all", "*"}:
+                return None
+            values = re.split(r"[\s,]+", raw)
+        selected: set[int] = set()
+        for item in values:
+            token = str(item).strip()
+            if not token:
+                continue
+            if "-" in token:
+                left, right = token.split("-", 1)
+                start = _safe_int(left, -1)
+                end = _safe_int(right, -1)
+                if start >= 0 and end >= start:
+                    selected.update(range(start, end + 1))
+                continue
+            index = _safe_int(token, -1)
+            if index >= 0:
+                selected.add(index)
+        return selected if selected else None
+
+    @staticmethod
+    def _isaac_rgbd_specimen_pose_for_attempt(dataset_path: Path, *, episode_index: int, attempt_id: str) -> dict[str, Any]:
+        attempts_root = (dataset_path / "sidecar" / "attempts").expanduser()
+        pose_path = attempts_root / f"episode_{episode_index:03d}" / attempt_id / "specimen_pose.json"
+        try:
+            resolved = pose_path.resolve()
+            resolved.relative_to(attempts_root.resolve())
+        except (OSError, ValueError):
+            return {}
+        try:
+            loaded = json.loads(resolved.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        if not isinstance(loaded, dict):
+            return {}
+        enriched = copy.deepcopy(loaded)
+        enriched["source_path"] = str(resolved)
+        enriched.setdefault("source", "record_attempt_specimen_pose")
+        return enriched
+
+    def _stage_isaac_rgbd_overwrite_candidates(self, dataset_path: Path, candidates: list[dict[str, Any]], job_id: str) -> dict[str, Any]:
+        render_root = (dataset_path / "sidecar" / "isaac_rgbd").expanduser()
+        try:
+            resolved_root = render_root.resolve()
+        except OSError:
+            return {"mode": "staged_commit", "planned": [], "denied": [], "failure_code": "ISAAC_RGBD_RENDER_ROOT_UNRESOLVABLE"}
+        staging_root = render_root / ".overwrite_staging" / uuid.uuid5(uuid.NAMESPACE_URL, job_id).hex
+        if staging_root.exists():
+            shutil.rmtree(staging_root)
+        planned: dict[str, dict[str, str]] = {}
+        denied: list[str] = []
+        for candidate in candidates:
+            output_dir = Path(str(candidate.get("output_dir") or "")).expanduser()
+            if not str(output_dir):
+                continue
+            try:
+                resolved = output_dir.resolve()
+                resolved.relative_to(resolved_root)
+            except (OSError, ValueError):
+                denied.append(str(output_dir))
+                continue
+            episode_index = _safe_int(candidate.get("episode_index"), 0, minimum=0)
+            attempt_id = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(candidate.get("attempt_id") or "attempt").strip()).strip("._-") or "attempt"
+            staging_dir = staging_root / f"episode_{episode_index:03d}" / attempt_id
+            final_output_dir = str(output_dir)
+            staging_output_dir = str(staging_dir)
+            candidate["overwrite_output_dir"] = final_output_dir
+            candidate["overwrite_staging_dir"] = staging_output_dir
+            candidate["output_dir"] = staging_output_dir
+            candidate["manifest_path"] = str(staging_dir / "manifest.jsonl")
+            request = candidate.get("request") if isinstance(candidate.get("request"), dict) else {}
+            request["output_dir"] = staging_output_dir
+            candidate["request"] = request
+            payload = candidate.get("payload") if isinstance(candidate.get("payload"), dict) else {}
+            render_request = payload.get("render_request") if isinstance(payload.get("render_request"), dict) else {}
+            render_request["output_dir"] = staging_output_dir
+            payload["render_request"] = render_request
+            candidate["payload"] = payload
+            planned.setdefault(
+                final_output_dir,
+                {
+                    "final_output_dir": final_output_dir,
+                    "staging_output_dir": staging_output_dir,
+                    "episode_index": str(episode_index),
+                    "attempt_id": attempt_id,
+                },
+            )
+        return {
+            "mode": "staged_commit",
+            "staging_root": str(staging_root),
+            "planned": list(planned.values()),
+            "planned_count": len(planned),
+            "denied": denied,
+            "denied_count": len(denied),
+            "committed": [],
+            "committed_count": 0,
+            "commit_failures": [],
+            "commit_failure_count": 0,
+        }
+
+    @staticmethod
+    def _isaac_rgbd_overwrite_group_key(candidate: dict[str, Any]) -> str:
+        return str(candidate.get("overwrite_output_dir") or "")
+
+    @staticmethod
+    def _rewrite_isaac_rgbd_overwrite_manifest_paths(manifest_path: Path, staging_dir: Path, final_dir: Path) -> None:
+        if not manifest_path.is_file():
+            return
+        staging_text = str(staging_dir)
+        final_text = str(final_dir)
+        text = manifest_path.read_text(encoding="utf-8")
+        if staging_text in text:
+            manifest_path.write_text(text.replace(staging_text, final_text), encoding="utf-8")
+
+    @staticmethod
+    def _cleanup_empty_isaac_rgbd_overwrite_staging_dirs(staging_dir: Path) -> None:
+        parent = staging_dir.parent
+        while parent.name and parent.name != "isaac_rgbd":
+            try:
+                parent.rmdir()
+            except OSError:
+                return
+            parent = parent.parent
+
+    def _commit_isaac_rgbd_overwrite_group(self, candidates: list[dict[str, Any]]) -> dict[str, Any]:
+        if not candidates:
+            return {"ok": False, "status": "empty_overwrite_group"}
+        final_dir = Path(str(candidates[0].get("overwrite_output_dir") or "")).expanduser()
+        staging_dir = Path(str(candidates[0].get("overwrite_staging_dir") or "")).expanduser()
+        if len(final_dir.parents) < 2:
+            return {"ok": False, "status": "overwrite_final_path_invalid", "final_output_dir": str(final_dir), "staging_output_dir": str(staging_dir)}
+        render_root = final_dir.parents[1].expanduser().resolve()
+        try:
+            final_resolved = final_dir.resolve()
+            staging_resolved = staging_dir.resolve()
+            final_resolved.relative_to(render_root)
+            staging_resolved.relative_to(render_root)
+        except (OSError, ValueError) as exc:
+            return {"ok": False, "status": "overwrite_path_denied", "message": str(exc), "final_output_dir": str(final_dir), "staging_output_dir": str(staging_dir)}
+        if not staging_dir.is_dir():
+            return {"ok": False, "status": "overwrite_staging_missing", "final_output_dir": str(final_dir), "staging_output_dir": str(staging_dir)}
+        for candidate in candidates:
+            if not self._isaac_rgbd_render_candidate_done(candidate):
+                return {
+                    "ok": False,
+                    "status": "overwrite_staging_incomplete",
+                    "final_output_dir": str(final_dir),
+                    "staging_output_dir": str(staging_dir),
+                    "frame_index": _safe_int(candidate.get("frame_index"), 0, minimum=0),
+                }
+        final_dir.parent.mkdir(parents=True, exist_ok=True)
+        if final_dir.is_dir():
+            shutil.rmtree(final_dir)
+        elif final_dir.exists():
+            final_dir.unlink()
+        shutil.move(str(staging_dir), str(final_dir))
+        self._rewrite_isaac_rgbd_overwrite_manifest_paths(final_dir / "manifest.jsonl", staging_dir, final_dir)
+        self._cleanup_empty_isaac_rgbd_overwrite_staging_dirs(staging_dir)
+        return {
+            "ok": True,
+            "status": "committed",
+            "final_output_dir": str(final_dir),
+            "staging_output_dir": str(staging_dir),
+            "frame_count": len(candidates),
+        }
+
+    @staticmethod
+    def _isaac_rgbd_overwrite_summary(
+        candidates: list[dict[str, Any]],
+        committed: list[dict[str, Any]],
+        failures: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        planned = {
+            str(candidate.get("overwrite_output_dir") or "")
+            for candidate in candidates
+            if candidate.get("overwrite_output_dir")
+        }
+        return {
+            "mode": "staged_commit",
+            "planned_count": len(planned),
+            "committed": committed[-50:],
+            "committed_count": len(committed),
+            "commit_failures": failures[-50:],
+            "commit_failure_count": len(failures),
+        }
+
+    def _isaac_rgbd_post_render_candidates(
+        self,
+        dataset_path: Path,
+        session_id: str = "",
+        *,
+        episode_indices: set[int] | None = None,
+    ) -> list[dict[str, Any]]:
         mirror_paths = self._isaac_rgbd_post_render_mirror_paths(dataset_path, session_id)
         candidates_by_key: dict[tuple[str, int, int], dict[str, Any]] = {}
         for mirror_path in mirror_paths:
@@ -3874,6 +6422,8 @@ class LeRobotBridge:
                 attempt_id = str(request.get("attempt_id") or render_queue.get("attempt_id") or "").strip()
                 episode_index = _safe_int(request.get("episode_index"), _safe_int(render_queue.get("episode_index"), 0, minimum=0), minimum=0)
                 frame_index = _safe_int(request.get("frame_index"), _safe_int(render_queue.get("frame_index"), 0, minimum=0), minimum=0)
+                if episode_indices is not None and episode_index not in episode_indices:
+                    continue
                 if not attempt_id:
                     continue
                 output_dir = Path(str(request.get("output_dir") or "")).expanduser()
@@ -3900,11 +6450,42 @@ class LeRobotBridge:
                     "request": dict(request),
                     "payload": payload,
                     "mirror_record_path": str(mirror_path),
+                    "gap_filled": False,
                 }
+        self._fill_missing_isaac_rgbd_post_render_candidates(dataset_path, candidates_by_key)
+        self._attach_lerobot_action_pose_to_isaac_rgbd_candidates(dataset_path, candidates_by_key)
+        self._attach_initial_specimen_pose_to_isaac_rgbd_candidates(dataset_path, candidates_by_key)
         return [
             candidates_by_key[key]
             for key in sorted(candidates_by_key, key=lambda item: (item[1], item[2], item[0]))
         ]
+
+    def _attach_initial_specimen_pose_to_isaac_rgbd_candidates(
+        self,
+        dataset_path: Path,
+        candidates_by_key: dict[tuple[str, int, int], dict[str, Any]],
+    ) -> None:
+        groups: dict[tuple[str, int], list[dict[str, Any]]] = {}
+        for (attempt_id, episode_index, _frame_index), candidate in candidates_by_key.items():
+            payload = candidate.get("payload") if isinstance(candidate.get("payload"), dict) else {}
+            if isinstance(payload, dict):
+                payload.pop("specimen_pose", None)
+                payload.pop("isaac_rgbd_episode_initial_state", None)
+            groups.setdefault((attempt_id, episode_index), []).append(candidate)
+        for (attempt_id, episode_index), candidates in groups.items():
+            if not candidates:
+                continue
+            first = min(candidates, key=lambda item: _safe_int(item.get("frame_index"), 0, minimum=0))
+            payload = first.get("payload") if isinstance(first.get("payload"), dict) else {}
+            specimen_pose = self._isaac_rgbd_specimen_pose_for_attempt(
+                dataset_path,
+                episode_index=episode_index,
+                attempt_id=attempt_id,
+            )
+            if not specimen_pose:
+                continue
+            if isinstance(payload, dict):
+                payload["specimen_pose"] = specimen_pose
 
     @staticmethod
     def _read_jsonl_rows(path: Path) -> list[dict[str, Any]]:
@@ -3932,7 +6513,58 @@ class LeRobotBridge:
             return [direct] if direct.is_file() else []
         return sorted(mirror_root.glob("*.jsonl"))
 
-    def _isaac_rgbd_render_candidate_done(self, candidate: dict[str, Any]) -> bool:
+    @staticmethod
+    def _isaac_rgbd_render_candidate_done_key(candidate: dict[str, Any]) -> tuple[str, str, int, int, tuple[str, ...]]:
+        manifest_path = str(Path(str(candidate.get("manifest_path") or "")).expanduser())
+        request = candidate.get("request") if isinstance(candidate.get("request"), dict) else {}
+        cameras = tuple(sorted({str(item).strip() for item in request.get("cameras", []) if str(item).strip()})) if isinstance(request.get("cameras"), list) else ()
+        return (
+            manifest_path,
+            str(candidate.get("attempt_id") or ""),
+            _safe_int(candidate.get("episode_index"), 0, minimum=0),
+            _safe_int(candidate.get("frame_index"), 0, minimum=0),
+            cameras,
+        )
+
+    @staticmethod
+    def _isaac_rgbd_render_manifest_row_key(row: dict[str, Any]) -> tuple[str, int, int]:
+        return (
+            str(row.get("attempt_id") or ""),
+            _safe_int(row.get("episode_index"), 0, minimum=0),
+            _safe_int(row.get("frame_index"), 0, minimum=0),
+        )
+
+    def _isaac_rgbd_render_done_index(self, candidates: list[dict[str, Any]]) -> set[tuple[str, str, int, int, tuple[str, ...]]]:
+        candidates_by_manifest: dict[Path, dict[tuple[str, int, int], list[dict[str, Any]]]] = {}
+        for candidate in candidates:
+            manifest_path = Path(str(candidate.get("manifest_path") or "")).expanduser()
+            if not manifest_path.is_file():
+                continue
+            row_key = (
+                str(candidate.get("attempt_id") or ""),
+                _safe_int(candidate.get("episode_index"), 0, minimum=0),
+                _safe_int(candidate.get("frame_index"), 0, minimum=0),
+            )
+            candidates_by_manifest.setdefault(manifest_path, {}).setdefault(row_key, []).append(candidate)
+        done: set[tuple[str, str, int, int, tuple[str, ...]]] = set()
+        for manifest_path, candidates_by_row_key in candidates_by_manifest.items():
+            for row in reversed(self._read_jsonl_rows(manifest_path)):
+                if str(row.get("status") or "").lower() != "rendered":
+                    continue
+                matching_candidates = candidates_by_row_key.get(self._isaac_rgbd_render_manifest_row_key(row), [])
+                for candidate in matching_candidates:
+                    if self._isaac_rgbd_manifest_files_exist(row, manifest_path=manifest_path, request=dict(candidate.get("request") or {})):
+                        done.add(self._isaac_rgbd_render_candidate_done_key(candidate))
+        return done
+
+    def _isaac_rgbd_render_candidate_done(
+        self,
+        candidate: dict[str, Any],
+        *,
+        done_index: set[tuple[str, str, int, int, tuple[str, ...]]] | None = None,
+    ) -> bool:
+        if done_index is not None:
+            return self._isaac_rgbd_render_candidate_done_key(candidate) in done_index
         manifest_path = Path(str(candidate.get("manifest_path") or "")).expanduser()
         if not manifest_path.is_file():
             return False
@@ -5139,9 +7771,9 @@ class LeRobotBridge:
             if stop_event.is_set() and str(session.get("status") or "").upper() not in {"COMPLETED", "FAILED"}:
                 session["status"] = "STOPPED"
                 session["returncode"] = 0
-                session.setdefault("step_trace", []).append(
-                    {"step": "MIRROR_LOOP_STOPPED", "status": "ok", "detail": f"samples={session.get('sample_count', 0)}"}
-                )
+            session.setdefault("step_trace", []).append(
+                {"step": "MIRROR_LOOP_STOPPED", "status": "ok", "detail": f"samples={session.get('sample_count', 0)}"}
+            )
 
     @staticmethod
     def _isaac_mirror_receiver_sample_count(post_result: dict[str, Any]) -> int | None:
@@ -5327,7 +7959,10 @@ class LeRobotBridge:
 
     def _post_isaac_mirror_timeline_play(self, endpoint: str, *, reason: str, timeout_s: float = 0.5) -> dict[str, Any]:
         play_url = self._isaac_mirror_timeline_play_url(endpoint)
-        body = json.dumps({"reason": reason}).encode("utf-8")
+        payload: dict[str, Any] = {"reason": reason}
+        if str(reason).startswith("isaac_rgbd_post_render"):
+            payload["skip_specimen_pose_on_play"] = True
+        body = json.dumps(payload).encode("utf-8")
         request = Request(play_url, data=body, method="POST", headers={"Content-Type": "application/json", "Accept": "application/json"})
         try:
             with urlopen(request, timeout=timeout_s) as response:
@@ -5349,6 +7984,56 @@ class LeRobotBridge:
             return {"ok": False, "status_code": exc.code, "timeline_play_url": play_url, "message": exc.reason or str(exc)}
         except (URLError, TimeoutError, OSError) as exc:
             return {"ok": False, "status_code": None, "timeline_play_url": play_url, "message": f"{exc.__class__.__name__}: {exc}"}
+
+    def _post_isaac_mirror_specimen_pose(self, endpoint: str, payload: dict[str, Any], *, timeout_s: float = 0.5) -> dict[str, Any]:
+        specimen_url = self._isaac_mirror_specimen_pose_url(endpoint)
+        body = json.dumps(payload).encode("utf-8")
+        request = Request(specimen_url, data=body, method="POST", headers={"Content-Type": "application/json", "Accept": "application/json"})
+        try:
+            with urlopen(request, timeout=timeout_s) as response:
+                raw = response.read(8192).decode("utf-8", errors="replace")
+                parsed: dict[str, Any] = {}
+                if raw.strip():
+                    try:
+                        parsed = json.loads(raw)
+                    except json.JSONDecodeError:
+                        parsed = {"body": raw}
+                status_code = int(getattr(response, "status", 200))
+                return {
+                    "ok": 200 <= status_code < 300 and bool(parsed.get("ok", True)),
+                    "status_code": status_code,
+                    "specimen_pose_url": specimen_url,
+                    **parsed,
+                }
+        except HTTPError as exc:
+            return {"ok": False, "status_code": exc.code, "specimen_pose_url": specimen_url, "message": exc.reason or str(exc)}
+        except (URLError, TimeoutError, OSError) as exc:
+            return {"ok": False, "status_code": None, "specimen_pose_url": specimen_url, "message": f"{exc.__class__.__name__}: {exc}"}
+
+    def _post_isaac_mirror_timeline_stop(self, endpoint: str, *, reason: str, timeout_s: float = 0.5) -> dict[str, Any]:
+        stop_url = self._isaac_mirror_timeline_stop_url(endpoint)
+        body = json.dumps({"reason": reason}).encode("utf-8")
+        request = Request(stop_url, data=body, method="POST", headers={"Content-Type": "application/json", "Accept": "application/json"})
+        try:
+            with urlopen(request, timeout=timeout_s) as response:
+                raw = response.read(8192).decode("utf-8", errors="replace")
+                parsed: dict[str, Any] = {}
+                if raw.strip():
+                    try:
+                        parsed = json.loads(raw)
+                    except json.JSONDecodeError:
+                        parsed = {"body": raw}
+                status_code = int(getattr(response, "status", 200))
+                return {
+                    "ok": 200 <= status_code < 300 and bool(parsed.get("ok", True)),
+                    "status_code": status_code,
+                    "timeline_stop_url": stop_url,
+                    **parsed,
+                }
+        except HTTPError as exc:
+            return {"ok": False, "status_code": exc.code, "timeline_stop_url": stop_url, "message": exc.reason or str(exc)}
+        except (URLError, TimeoutError, OSError) as exc:
+            return {"ok": False, "status_code": None, "timeline_stop_url": stop_url, "message": f"{exc.__class__.__name__}: {exc}"}
 
     def _wait_for_isaac_mirror_receiver(
         self,
@@ -5681,6 +8366,13 @@ class LeRobotBridge:
         return parsed._replace(path="/state", params="", query="", fragment="").geturl()
 
     @staticmethod
+    def _isaac_mirror_joint_url(endpoint: str) -> str:
+        parsed = urlparse(str(endpoint or "http://127.0.0.1:8766/joints").strip())
+        if not parsed.scheme or not parsed.netloc:
+            return "http://127.0.0.1:8766/joints"
+        return parsed._replace(path="/joints", params="", query="", fragment="").geturl()
+
+    @staticmethod
     def _isaac_mirror_viewport_frame_url(endpoint: str) -> str:
         parsed = urlparse(str(endpoint or "http://127.0.0.1:8766/joints").strip())
         if not parsed.scheme or not parsed.netloc:
@@ -5693,6 +8385,20 @@ class LeRobotBridge:
         if not parsed.scheme or not parsed.netloc:
             return "http://127.0.0.1:8766/timeline/play"
         return parsed._replace(path="/timeline/play", params="", query="", fragment="").geturl()
+
+    @staticmethod
+    def _isaac_mirror_specimen_pose_url(endpoint: str) -> str:
+        parsed = urlparse(str(endpoint or "http://127.0.0.1:8766/joints").strip())
+        if not parsed.scheme or not parsed.netloc:
+            return "http://127.0.0.1:8766/specimen_pose"
+        return parsed._replace(path="/specimen_pose", params="", query="", fragment="").geturl()
+
+    @staticmethod
+    def _isaac_mirror_timeline_stop_url(endpoint: str) -> str:
+        parsed = urlparse(str(endpoint or "http://127.0.0.1:8766/joints").strip())
+        if not parsed.scheme or not parsed.netloc:
+            return "http://127.0.0.1:8766/timeline/stop"
+        return parsed._replace(path="/timeline/stop", params="", query="", fragment="").geturl()
 
     @staticmethod
     def _isaac_mirror_sample_hz(request: LeRobotBaseRequest) -> float:
@@ -6093,10 +8799,16 @@ class LeRobotBridge:
             row_count = sum(_safe_int(value, 0, minimum=0) for value in source_counts.values())
         if not source_counts and row_count > 0:
             source_counts = {"isaac_lab_synthetic": row_count}
+        lab_synthetic_sources = {
+            "isaac_lab_synthetic",
+            "isaac_lab_mimic",
+            "isaac_lab_mimic_rgbd",
+            "isaac_lab_rl_teacher",
+        }
         synthetic_row_count = sum(
             _safe_int(value, 0, minimum=0)
             for source_type, value in source_counts.items()
-            if str(source_type) != "real_lerobot"
+            if str(source_type) in lab_synthetic_sources
         )
         return {
             "available": bool(training_summary_path.is_file() and manifest_path.is_file() and synthetic_row_count > 0),
@@ -6521,6 +9233,10 @@ class LeRobotBridge:
         current_step, detected_total = self._parse_training_step(log_tail)
         if detected_total:
             total_steps = detected_total
+        sample_count = self._parse_training_sample_count(log_tail)
+        effective_batch_size = self._parse_training_effective_batch_size(log_tail, int(config.get("batch_size") or 0))
+        if sample_count > 0 and effective_batch_size > 0:
+            current_step = max(current_step, int(round(sample_count / effective_batch_size)))
         status = str(session.get("status") or "").upper()
         synthetic_complete = status == "COMPLETED" and not log_tail and bool(total_steps)
         if status == "COMPLETED" and total_steps:
@@ -6593,6 +9309,14 @@ class LeRobotBridge:
             if match:
                 samples = max(samples, LeRobotBridge._parse_training_count(match.group(1), match.group(2)))
         return samples
+
+    @staticmethod
+    def _parse_training_effective_batch_size(log: str, fallback: int = 0) -> int:
+        for line in reversed(log.splitlines()):
+            match = re.search(r"\bEffective batch size:\s*\d+\s*x\s*\d+\s*=\s*(\d+)\b", line, flags=re.IGNORECASE)
+            if match:
+                return _safe_int(match.group(1), fallback, minimum=1)
+        return max(0, int(fallback or 0))
 
     @staticmethod
     def _parse_training_loss(log: str) -> float | None:
@@ -7140,6 +9864,8 @@ class LeRobotBridge:
             command.extend(["python", str(self.config.repo_root / "scripts" / "lerobot_isaac_mirror_runtime_wrapper.py"), workflow])
         elif workflow == "rollout" and self._is_pi05_policy(request.policy_type):
             command.extend(["python", str(self.config.repo_root / "scripts" / "lerobot_pi05_rollout_wrapper.py")])
+        elif workflow == "rollout" and self._uses_live_rollout_wrapper(request):
+            command.extend(["python", str(self.config.repo_root / "scripts" / "lerobot_live_rollout_wrapper.py")])
         else:
             command.extend(self._workflow_entrypoint(profile, workflow))
         if workflow in {"teleoperate", "record", "rollout"}:
@@ -7148,6 +9874,9 @@ class LeRobotBridge:
             command.extend(self._teleop_args(profile, request=request, allow_fake=mode != "live"))
         command.extend([arg for arg in args if arg and not arg.endswith("=")])
         return command
+
+    def _uses_live_rollout_wrapper(self, request: LeRobotSessionRequest) -> bool:
+        return not self._is_pi05_policy(request.policy_type)
 
     def _workflow_conda_env_name(self, workflow: str, request: LeRobotSessionRequest) -> str:
         if workflow in {"train", "rollout"} and self._is_pi05_policy(request.policy_type):
@@ -7159,7 +9888,8 @@ class LeRobotBridge:
         return self.config.conda_env_name
 
     def _workflow_env_overrides(self, workflow: str, request: LeRobotSessionRequest, *, session_id: str = "") -> dict[str, str]:
-        pipeline_id = self._request_observation_pipeline_id(request, self._profile(request.profile_id or self._selected_profile_id))
+        profile = self._profile(request.profile_id or self._selected_profile_id)
+        pipeline_id = self._request_observation_pipeline_id(request, profile)
         env: dict[str, str] = {
             "ATR_LEROBOT_OBSERVATION_PIPELINE_ID": pipeline_id,
         }
@@ -7207,6 +9937,8 @@ class LeRobotBridge:
             env["ATR_LEROBOT_RAW_DEPTH_ADAPTER"] = "1"
             if workflow in {"train", "rollout"}:
                 env.update(self._raw_depth_adapter_env_overrides(request))
+            if workflow == "rollout":
+                env.update(self._live_depth_env_overrides(request))
         if workflow == "train":
             env["ATR_LEROBOT_STANDARD_DATA_PIPELINE"] = "1"
             env.update(self._dataset_mix_env_overrides(request))
@@ -7232,6 +9964,9 @@ class LeRobotBridge:
             if hf_token:
                 env["HF_TOKEN"] = hf_token
                 env["HUGGING_FACE_HUB_TOKEN"] = hf_token
+        if mode == "live" and workflow == "rollout" and profile and profile.robot_type == "omx_follower":
+            env.update(self._omx_action_log_env_overrides(session_id or request.session_id or "live"))
+            env["ATR_LEROBOT_SHOULDER_LIFT_BACKSTOP"] = "1" if request.rollout_shoulder_lift_backstop else "0"
         wandb_mode = str(request.wandb_mode or "").strip().lower()
         if workflow == "train" and request.wandb_enable:
             wandb_base_url = str(request.wandb_base_url or "").strip().rstrip("/")
@@ -7246,9 +9981,62 @@ class LeRobotBridge:
             env.update(self._raw_depth_env_overrides(request))
         return env
 
+    def _omx_action_log_env_overrides(self, session_id: str) -> dict[str, str]:
+        clean_session_id = self._safe_session_id(session_id or "live")
+        log_dir = self.config.session_log_root.parent / "lerobot_action_logs" / clean_session_id
+        return {
+            "ATR_LEROBOT_OMX_ACTION_LOG": "1",
+            "ATR_LEROBOT_OMX_ACTION_LOG_SESSION_ID": clean_session_id,
+            "ATR_LEROBOT_OMX_ACTION_LOG_DIR": str(log_dir),
+            "ATR_LEROBOT_OMX_ACTION_LOG_MOTORS": "shoulder_pan,shoulder_lift,elbow_flex,wrist_flex,wrist_roll,gripper",
+        }
+
+    @staticmethod
+    def _safe_session_id(value: str) -> str:
+        clean = "".join(ch if ch.isalnum() or ch in {"-", "_", "."} else "-" for ch in str(value or "").strip()).strip(".-")
+        return clean or "live"
+
+    def _live_depth_env_overrides(self, request: LeRobotSessionRequest) -> dict[str, str]:
+        profile = self._profile(request.profile_id or self._selected_profile_id)
+        if profile is None:
+            return {}
+        sidecar = self._record_raw_depth_sidecar(profile, request)
+        if not sidecar.get("enabled"):
+            return {}
+        camera_keys = [str(item) for item in sidecar.get("expected_camera_keys", []) if str(item).strip()]
+        env = {
+            "ATR_LEROBOT_LIVE_DEPTH_FEATURES": "1",
+            "ATR_LEROBOT_LIVE_DEPTH_STRICT": "1",
+            "ATR_LEROBOT_RAW_DEPTH_CAMERA_KEYS": ",".join(camera_keys),
+            "ATR_LEROBOT_DEPTH_ALIGNED_TO": str(sidecar.get("aligned_to") or "color"),
+            "ATR_LEROBOT_DEPTH_SCALE_M_PER_UNIT": str(sidecar.get("depth_scale_m_per_unit")),
+            "ATR_LEROBOT_DEPTH_CLIP_MIN_MM": str(sidecar.get("depth_clip_min_mm")),
+            "ATR_LEROBOT_DEPTH_CLIP_MAX_MM": str(sidecar.get("depth_clip_max_mm")),
+        }
+        formatted = self._format_camera_depth_scale_env(sidecar.get("camera_depth_scale_m_per_unit"))
+        if formatted:
+            env["ATR_LEROBOT_CAMERA_DEPTH_SCALE_M_PER_UNIT"] = formatted
+        formatted_clips = self._format_camera_depth_clip_env(sidecar.get("camera_depth_clip_mm"))
+        if formatted_clips:
+            env["ATR_LEROBOT_CAMERA_DEPTH_CLIP_MM"] = formatted_clips
+        return env
+
     @staticmethod
     def _dataset_mix_weight(value: Any, default: float) -> float:
         return _safe_float(value, default, minimum=0.0)
+
+    @staticmethod
+    def _dataset_source_selection(request: LeRobotSessionRequest) -> dict[str, bool]:
+        return {
+            "real_original": _safe_bool(getattr(request, "dataset_include_real_original", True), True),
+            "isaac_rgbd": _safe_bool(getattr(request, "dataset_include_isaac_rgbd", True), True),
+            "isaac_augmentation": _safe_bool(getattr(request, "dataset_include_isaac_augmentation", True), True),
+            "isaac_lab_synthetic": _safe_bool(getattr(request, "dataset_include_isaac_lab_synthetic", True), True),
+        }
+
+    @classmethod
+    def _dataset_source_enabled(cls, request: LeRobotSessionRequest, source: str) -> bool:
+        return cls._dataset_source_selection(request).get(str(source), True)
 
     @staticmethod
     def _dataset_mix_max_samples(value: Any) -> int | None:
@@ -7287,10 +10075,14 @@ class LeRobotBridge:
     ) -> dict[str, Any]:
         weights = {
             "real_original": self._dataset_mix_weight(getattr(request, "dataset_mix_real_original_weight", 1.0), 1.0),
-            "isaac_rgbd": self._dataset_mix_weight(getattr(request, "dataset_mix_isaac_rgbd_weight", 0.5), 0.5),
-            "isaac_augmentation": self._dataset_mix_weight(getattr(request, "dataset_mix_isaac_augmentation_weight", 0.5), 0.5),
-            "isaac_lab_synthetic": self._dataset_mix_weight(getattr(request, "dataset_mix_isaac_lab_synthetic_weight", 0.5), 0.5),
+            "isaac_rgbd": self._dataset_mix_weight(getattr(request, "dataset_mix_isaac_rgbd_weight", 0.6), 0.6),
+            "isaac_augmentation": self._dataset_mix_weight(getattr(request, "dataset_mix_isaac_augmentation_weight", 0.0), 0.0),
+            "isaac_lab_synthetic": self._dataset_mix_weight(getattr(request, "dataset_mix_isaac_lab_synthetic_weight", 0.35), 0.35),
         }
+        source_selection = self._dataset_source_selection(request)
+        for source, enabled in source_selection.items():
+            if not enabled:
+                weights[source] = 0.0
         max_samples = {
             "real_original": self._dataset_mix_max_samples(getattr(request, "dataset_mix_real_original_max_samples", None)),
             "isaac_rgbd": self._dataset_mix_max_samples(getattr(request, "dataset_mix_isaac_rgbd_max_samples", None)),
@@ -7312,6 +10104,7 @@ class LeRobotBridge:
         return {
             "schema": "atr.lerobot.dataset_mix.v1",
             "weights": weights,
+            "source_selection": source_selection,
             "max_samples": max_samples,
             "available_counts": available_counts,
             "effective_counts": effective_counts,
@@ -7334,25 +10127,52 @@ class LeRobotBridge:
         isaac_lab_synthetic = self._read_latest_isaac_lab_synthetic_summary(dataset_path)
         variant_count = _safe_int(isaac_augmentation.get("variant_count"), 0, minimum=0)
         valid_variant_count = _safe_int(isaac_augmentation.get("valid_variant_count"), variant_count, minimum=0)
-        return self._dataset_mix_summary_for_counts(
+        summary = self._dataset_mix_summary_for_counts(
             request,
             real_available=real_available,
             isaac_rgbd_available=_safe_int(isaac_rgbd.get("rendered_count"), 0, minimum=0),
             isaac_augmentation_available=valid_variant_count,
             isaac_lab_synthetic_available=_safe_int(isaac_lab_synthetic.get("synthetic_row_count"), 0, minimum=0),
         )
+        exclusions = self._read_contact_training_exclusion_manifest(dataset_path)
+        if not exclusions.get("available") and isaac_rgbd.get("available"):
+            exclusions = self._write_contact_training_exclusion_manifest(dataset_path, isaac_rgbd.get("contact_audit"))
+        enabled = _safe_bool(getattr(request, "dataset_exclude_flagged_episodes", True), True)
+        summary["training_exclusions"] = {
+            **exclusions,
+            "enabled": enabled,
+            "applied_episode_indices": list(exclusions.get("episode_indices", [])) if enabled else [],
+            "applied_episode_count": _safe_int(exclusions.get("episode_count"), 0, minimum=0) if enabled else 0,
+        }
+        return summary
 
     def _dataset_mix_env_overrides(self, request: LeRobotSessionRequest) -> dict[str, str]:
         summary = self._train_dataset_mix_summary(request)
         weights = dict(summary.get("weights") or {})
         max_samples = dict(summary.get("max_samples") or {})
+        exclusions = summary.get("training_exclusions") if isinstance(summary.get("training_exclusions"), dict) else {}
+        exclusion_indices = [
+            str(_safe_int(item, -1))
+            for item in exclusions.get("applied_episode_indices", [])
+            if _safe_int(item, -1) >= 0
+        ]
         env = {
+            "ATR_LEROBOT_DATA_SOURCE_INCLUDE_REAL_ORIGINAL": "1" if self._dataset_source_enabled(request, "real_original") else "0",
+            "ATR_LEROBOT_DATA_SOURCE_INCLUDE_ISAAC_RGBD": "1" if self._dataset_source_enabled(request, "isaac_rgbd") else "0",
+            "ATR_LEROBOT_DATA_SOURCE_INCLUDE_ISAAC_AUGMENTATION": "1" if self._dataset_source_enabled(request, "isaac_augmentation") else "0",
+            "ATR_LEROBOT_DATA_SOURCE_INCLUDE_ISAAC_LAB_SYNTHETIC": "1" if self._dataset_source_enabled(request, "isaac_lab_synthetic") else "0",
             "ATR_LEROBOT_DATA_MIX_REAL_ORIGINAL_WEIGHT": self._format_dataset_mix_env_float(weights.get("real_original", 1.0)),
-            "ATR_LEROBOT_DATA_MIX_ISAAC_RGBD_WEIGHT": self._format_dataset_mix_env_float(weights.get("isaac_rgbd", 0.5)),
-            "ATR_LEROBOT_DATA_MIX_ISAAC_AUGMENTATION_WEIGHT": self._format_dataset_mix_env_float(weights.get("isaac_augmentation", 0.5)),
-            "ATR_LEROBOT_DATA_MIX_ISAAC_LAB_SYNTHETIC_WEIGHT": self._format_dataset_mix_env_float(weights.get("isaac_lab_synthetic", 0.5)),
+            "ATR_LEROBOT_DATA_MIX_ISAAC_RGBD_WEIGHT": self._format_dataset_mix_env_float(weights.get("isaac_rgbd", 0.6)),
+            "ATR_LEROBOT_DATA_MIX_ISAAC_AUGMENTATION_WEIGHT": self._format_dataset_mix_env_float(weights.get("isaac_augmentation", 0.0)),
+            "ATR_LEROBOT_DATA_MIX_ISAAC_LAB_SYNTHETIC_WEIGHT": self._format_dataset_mix_env_float(weights.get("isaac_lab_synthetic", 0.35)),
             "ATR_LEROBOT_DATA_MIX_SEED": str(_safe_int(summary.get("seed"), 0)),
+            "ATR_LEROBOT_KEEP_REAL_FLAGGED_EPISODES": "1",
+            "ATR_LEROBOT_SIM_EXCLUDE_FLAGGED_EPISODES": "1" if exclusion_indices else "0",
+            "ATR_LEROBOT_SIM_EXCLUDED_EPISODES": ",".join(exclusion_indices),
         }
+        manifest_path = str(exclusions.get("manifest_path") or "").strip()
+        if manifest_path:
+            env["ATR_LEROBOT_TRAINING_EXCLUSION_MANIFEST"] = manifest_path
         max_env_keys = {
             "real_original": "ATR_LEROBOT_DATA_MIX_REAL_ORIGINAL_MAX_SAMPLES",
             "isaac_rgbd": "ATR_LEROBOT_DATA_MIX_ISAAC_RGBD_MAX_SAMPLES",
@@ -7372,14 +10192,19 @@ class LeRobotBridge:
     def _train_fidelity_summary(self, request: LeRobotSessionRequest) -> dict[str, Any]:
         weights = {
             "real_original": self._fidelity_weight(getattr(request, "fidelity_real_original_weight", 1.0), 1.0),
-            "isaac_rgbd": self._fidelity_weight(getattr(request, "fidelity_isaac_rgbd_weight", 0.5), 0.5),
-            "isaac_augmentation": self._fidelity_weight(getattr(request, "fidelity_isaac_augmentation_weight", 0.3), 0.3),
-            "isaac_lab_synthetic": self._fidelity_weight(getattr(request, "fidelity_isaac_lab_synthetic_weight", 0.2), 0.2),
+            "isaac_rgbd": self._fidelity_weight(getattr(request, "fidelity_isaac_rgbd_weight", 0.55), 0.55),
+            "isaac_augmentation": self._fidelity_weight(getattr(request, "fidelity_isaac_augmentation_weight", 0.0), 0.0),
+            "isaac_lab_synthetic": self._fidelity_weight(getattr(request, "fidelity_isaac_lab_synthetic_weight", 0.25), 0.25),
         }
+        source_selection = self._dataset_source_selection(request)
+        for source, enabled in source_selection.items():
+            if not enabled:
+                weights[source] = 0.0
         return {
             "schema": "atr.lerobot.fidelity_weights.v1",
             "enabled": _safe_bool(getattr(request, "fidelity_weighting_enabled", True), True),
             "mode": "source_loss_weight",
+            "source_selection": source_selection,
             "weights": weights,
         }
 
@@ -7391,12 +10216,14 @@ class LeRobotBridge:
             "ATR_LEROBOT_FIDELITY_WEIGHTING_ENABLED": "1" if summary.get("enabled") else "0",
             "ATR_LEROBOT_FIDELITY_MODE": str(summary.get("mode") or "source_loss_weight"),
             "ATR_LEROBOT_FIDELITY_REAL_ORIGINAL_WEIGHT": self._format_dataset_mix_env_float(weights.get("real_original", 1.0)),
-            "ATR_LEROBOT_FIDELITY_ISAAC_RGBD_WEIGHT": self._format_dataset_mix_env_float(weights.get("isaac_rgbd", 0.5)),
-            "ATR_LEROBOT_FIDELITY_ISAAC_AUGMENTATION_WEIGHT": self._format_dataset_mix_env_float(weights.get("isaac_augmentation", 0.3)),
-            "ATR_LEROBOT_FIDELITY_ISAAC_LAB_SYNTHETIC_WEIGHT": self._format_dataset_mix_env_float(weights.get("isaac_lab_synthetic", 0.2)),
+            "ATR_LEROBOT_FIDELITY_ISAAC_RGBD_WEIGHT": self._format_dataset_mix_env_float(weights.get("isaac_rgbd", 0.55)),
+            "ATR_LEROBOT_FIDELITY_ISAAC_AUGMENTATION_WEIGHT": self._format_dataset_mix_env_float(weights.get("isaac_augmentation", 0.0)),
+            "ATR_LEROBOT_FIDELITY_ISAAC_LAB_SYNTHETIC_WEIGHT": self._format_dataset_mix_env_float(weights.get("isaac_lab_synthetic", 0.25)),
         }
 
     def _raw_depth_adapter_env_overrides(self, request: LeRobotSessionRequest) -> dict[str, str]:
+        if not self._dataset_source_enabled(request, "real_original"):
+            return {}
         dataset_path = Path(self._dataset_path_for(request)).expanduser()
         manifest_path = self._dataset_raw_depth_manifest_path(dataset_path)
         env = {
@@ -7444,6 +10271,8 @@ class LeRobotBridge:
         return env
 
     def _isaac_augmentation_train_env_overrides(self, request: LeRobotSessionRequest) -> dict[str, str]:
+        if not self._dataset_source_enabled(request, "isaac_augmentation"):
+            return {}
         dataset_path = Path(self._dataset_path_for(request)).expanduser()
         summary = self._read_latest_isaac_augmentation_summary(dataset_path)
         if not summary.get("available") or _safe_int(summary.get("variant_count"), 0, minimum=0) <= 0:
@@ -7456,7 +10285,13 @@ class LeRobotBridge:
         valid_variant_count = _safe_int(summary.get("valid_variant_count"), variant_count, minimum=0)
         failed_variant_count = _safe_int(summary.get("failed_variant_count"), max(0, variant_count - valid_variant_count), minimum=0)
         qa_summary_path = Path(str(summary.get("qa_summary_path") or summary_path.parent / "qa_summary.json")).expanduser()
-        return {
+        exclusions = self._read_contact_training_exclusion_manifest(dataset_path)
+        exclusion_indices = ",".join(
+            str(_safe_int(item, -1))
+            for item in exclusions.get("episode_indices", [])
+            if _safe_int(item, -1) >= 0 and _safe_bool(getattr(request, "dataset_exclude_flagged_episodes", True), True)
+        )
+        env = {
             "ATR_LEROBOT_ISAAC_AUGMENTATION_ADAPTER": "1",
             "ATR_LEROBOT_ISAAC_AUGMENTATION_MANIFEST": str(manifest_path),
             "ATR_LEROBOT_ISAAC_AUGMENTATION_SUMMARY": str(summary_path),
@@ -7468,8 +10303,14 @@ class LeRobotBridge:
             "ATR_LEROBOT_ISAAC_AUGMENTATION_VALID_VARIANT_COUNT": str(valid_variant_count),
             "ATR_LEROBOT_ISAAC_AUGMENTATION_FAILED_VARIANT_COUNT": str(failed_variant_count),
         }
+        if exclusion_indices:
+            env["ATR_LEROBOT_ISAAC_AUGMENTATION_EXCLUDE_SOURCE_EPISODES"] = exclusion_indices
+            env["ATR_LEROBOT_ISAAC_AUGMENTATION_EXCLUSION_MANIFEST"] = str(exclusions.get("manifest_path") or "")
+        return env
 
     def _isaac_lab_synthetic_train_env_overrides(self, request: LeRobotSessionRequest) -> dict[str, str]:
+        if not self._dataset_source_enabled(request, "isaac_lab_synthetic"):
+            return {}
         dataset_path = Path(self._dataset_path_for(request)).expanduser()
         summary = self._read_latest_isaac_lab_synthetic_summary(dataset_path)
         if not summary.get("available") or _safe_int(summary.get("row_count"), 0, minimum=0) <= 0:
@@ -7492,16 +10333,28 @@ class LeRobotBridge:
         }
 
     def _isaac_rgbd_source_train_env_overrides(self, request: LeRobotSessionRequest) -> dict[str, str]:
+        if not self._dataset_source_enabled(request, "isaac_rgbd"):
+            return {}
         dataset_path = Path(self._dataset_path_for(request)).expanduser()
         source_root = dataset_path / "sidecar" / "isaac_rgbd"
         if not any(source_root.glob("**/manifest.jsonl")):
             return {}
-        return {
+        exclusions = self._read_contact_training_exclusion_manifest(dataset_path)
+        exclusion_indices = ",".join(
+            str(_safe_int(item, -1))
+            for item in exclusions.get("episode_indices", [])
+            if _safe_int(item, -1) >= 0 and _safe_bool(getattr(request, "dataset_exclude_flagged_episodes", True), True)
+        )
+        env = {
             "ATR_LEROBOT_ISAAC_RGBD_SOURCE_ADAPTER": "1",
             "ATR_LEROBOT_ISAAC_RGBD_SOURCE_ROOT": str(source_root),
             "ATR_LEROBOT_ISAAC_RGBD_SOURCE_INCLUDE_ALL": "1",
             "ATR_LEROBOT_ISAAC_RGBD_SOURCE_STRICT": "0",
         }
+        if exclusion_indices:
+            env["ATR_LEROBOT_ISAAC_RGBD_SOURCE_EXCLUDE_EPISODES"] = exclusion_indices
+            env["ATR_LEROBOT_ISAAC_RGBD_SOURCE_EXCLUSION_MANIFEST"] = str(exclusions.get("manifest_path") or "")
+        return env
 
     def _raw_depth_env_overrides(self, request: LeRobotSessionRequest) -> dict[str, str]:
         profile = self._profile(request.profile_id or self._selected_profile_id)
@@ -8016,6 +10869,31 @@ class LeRobotBridge:
         if action == "stop":
             return base + ["stop"]
         return base + ["start", "--port", str(port), "--no-daemon"]
+
+    @staticmethod
+    def _wandb_local_amd64_binfmt_command() -> list[str]:
+        return ["docker", "run", "--privileged", "--rm", "tonistiigi/binfmt", "--install", "amd64"]
+
+    def _install_wandb_local_amd64_binfmt(self) -> dict[str, Any]:
+        command = self._wandb_local_amd64_binfmt_command()
+        try:
+            completed = subprocess.run(
+                command,
+                cwd=str(self.config.repo_root),
+                text=True,
+                capture_output=True,
+                timeout=120,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            return {"ok": False, "command": command, "error": str(exc)}
+        output = "\n".join(part for part in (completed.stdout, completed.stderr) if part).strip()
+        return {
+            "ok": completed.returncode == 0,
+            "command": command,
+            "returncode": completed.returncode,
+            "output": output[-4000:],
+        }
 
     @staticmethod
     def _wandb_local_port_ready(url: str, *, timeout_s: float = 0.8) -> bool:
@@ -8579,7 +11457,9 @@ class LeRobotBridge:
         converted_path = (converted_root / converted_repo_id).resolve()
         if not self._is_under_allowed_roots(converted_path):
             raise ValueError(f"Pi0.5 converted dataset path is outside allowed roots: {converted_path}")
-        if not self._pi05_v30_dataset_is_current(dataset_path, converted_path):
+        if self._pi05_v30_dataset_is_current(dataset_path, converted_path):
+            self._attach_pi05_sidecar_from_source(dataset_path, converted_path)
+        else:
             self._prepare_pi05_v30_dataset_copy(dataset_path, converted_repo_id, converted_root)
         if self._lerobot_dataset_codebase_version(converted_path) != "v3.0":
             raise ValueError(f"Pi0.5 dataset conversion did not produce a v3.0 dataset at {converted_path}")
@@ -8589,6 +11469,318 @@ class LeRobotBridge:
             self._train_request_for_dataset(request, converted_repo_id, converted_path),
             f"{runtime_label} converted {request.dataset_repo_id or dataset_path.name} v2.1 -> {converted_repo_id} v3.0 at {converted_path}",
         )
+
+    def _ensure_train_dataset_jsonl_metadata_compat(self, request: LeRobotSessionRequest) -> str:
+        """Materialize JSONL metadata that the installed LeRobot train runtime still requires.
+
+        Some local v3 datasets keep metadata in parquet files only. The current
+        training runtime loaded in this workspace still opens tasks.jsonl,
+        episodes.jsonl, and episodes_stats.jsonl, then falls back to the Hub if
+        those files are absent. Generate the compatibility files inside the
+        selected local dataset without changing frames, videos, actions, or
+        source parquet files.
+        """
+        if (request.runtime_mode or request.mode) != "live":
+            return "metadata compatibility unchanged"
+        raw_dataset_path = str(request.dataset_path or request.dataset_root or "").strip()
+        if not raw_dataset_path:
+            return "metadata compatibility unchanged"
+        dataset_path = _resolve_path(self.config.repo_root, raw_dataset_path).resolve()
+        info_path = dataset_path / "meta" / "info.json"
+        if not info_path.is_file():
+            return "metadata compatibility unchanged"
+        try:
+            info = json.loads(info_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return "metadata compatibility unchanged"
+        if str(info.get("codebase_version") or "") != "v3.0":
+            return "metadata compatibility unchanged"
+
+        generated: list[str] = []
+        tasks_path = dataset_path / "meta" / "tasks.jsonl"
+        if not tasks_path.is_file():
+            self._write_jsonl(tasks_path, self._v30_tasks_jsonl_rows(dataset_path))
+            generated.append("meta/tasks.jsonl")
+        episodes_path = dataset_path / "meta" / "episodes.jsonl"
+        episode_rows, episode_stats_rows = self._v30_episode_jsonl_rows(dataset_path)
+        if self._ensure_v30_legacy_loader_path_templates(dataset_path, info_path, info, episode_rows):
+            generated.append("meta/info.json path templates")
+        if not episodes_path.is_file():
+            self._write_jsonl(episodes_path, episode_rows)
+            generated.append("meta/episodes.jsonl")
+        episode_stats_path = dataset_path / "meta" / "episodes_stats.jsonl"
+        if not episode_stats_path.is_file():
+            self._write_jsonl(episode_stats_path, episode_stats_rows)
+            generated.append("meta/episodes_stats.jsonl")
+        if generated:
+            return "LeRobot v3 parquet metadata jsonl materialized: " + ", ".join(generated)
+        return "LeRobot v3 metadata jsonl ready"
+
+    def _ensure_v30_legacy_loader_path_templates(
+        self,
+        dataset_path: Path,
+        info_path: Path,
+        info: dict[str, Any],
+        episode_rows: list[dict[str, Any]],
+    ) -> bool:
+        updates: dict[str, str] = {}
+        data_path = str(info.get("data_path") or "")
+        if self._has_v30_chunk_file_placeholders(data_path):
+            data_file_index = self._constant_episode_metadata_int(episode_rows, "data/file_index")
+            if data_file_index is not None and self._chunk_files_exist(dataset_path, episode_rows, "data", data_file_index, ".parquet"):
+                updates["data_path"] = f"data/chunk-{{episode_chunk:03d}}/file-{data_file_index:03d}.parquet"
+
+        video_path = str(info.get("video_path") or "")
+        if self._has_v30_chunk_file_placeholders(video_path):
+            video_keys = self._video_keys_from_info(info)
+            video_file_index = self._constant_video_file_index(video_keys, episode_rows)
+            if video_file_index is not None and self._video_chunk_files_exist(dataset_path, episode_rows, video_keys, video_file_index):
+                updates["video_path"] = f"videos/{{video_key}}/chunk-{{episode_chunk:03d}}/file-{video_file_index:03d}.mp4"
+
+        changed = False
+        for key, value in updates.items():
+            if info.get(key) != value:
+                info[key] = value
+                changed = True
+        if changed:
+            info_path.write_text(json.dumps(info, indent=4, ensure_ascii=False), encoding="utf-8")
+        return changed
+
+    @staticmethod
+    def _has_v30_chunk_file_placeholders(template: str) -> bool:
+        return "{chunk_index" in template or "{file_index" in template
+
+    @staticmethod
+    def _constant_episode_metadata_int(episode_rows: list[dict[str, Any]], key: str) -> int | None:
+        values = {
+            _safe_int(row.get(key), -1, minimum=-1)
+            for row in episode_rows
+            if row.get(key) is not None
+        }
+        if len(values) != 1:
+            return None
+        value = next(iter(values))
+        return value if value >= 0 else None
+
+    @staticmethod
+    def _chunk_files_exist(dataset_path: Path, episode_rows: list[dict[str, Any]], prefix: str, file_index: int, suffix: str) -> bool:
+        chunks = {
+            _safe_int(row.get(f"{prefix}/chunk_index"), _safe_int(row.get("episode_index"), 0, minimum=0), minimum=0)
+            for row in episode_rows
+        }
+        if not chunks:
+            chunks = {0}
+        for chunk_index in chunks:
+            candidate = dataset_path / prefix / f"chunk-{chunk_index:03d}" / f"file-{file_index:03d}{suffix}"
+            if not candidate.is_file():
+                return False
+        return True
+
+    @staticmethod
+    def _video_keys_from_info(info: dict[str, Any]) -> list[str]:
+        return [
+            key
+            for key, feature in (info.get("features") or {}).items()
+            if isinstance(feature, dict) and str(feature.get("dtype") or "") == "video"
+        ]
+
+    def _constant_video_file_index(self, video_keys: list[str], episode_rows: list[dict[str, Any]]) -> int | None:
+        if not video_keys:
+            return None
+        values: set[int] = set()
+        for video_key in video_keys:
+            value = self._constant_episode_metadata_int(episode_rows, f"videos/{video_key}/file_index")
+            if value is None:
+                return None
+            values.add(value)
+        if len(values) != 1:
+            return None
+        return next(iter(values))
+
+    @staticmethod
+    def _video_chunk_files_exist(dataset_path: Path, episode_rows: list[dict[str, Any]], video_keys: list[str], file_index: int) -> bool:
+        for video_key in video_keys:
+            chunks = {
+                _safe_int(row.get(f"videos/{video_key}/chunk_index"), _safe_int(row.get("episode_index"), 0, minimum=0), minimum=0)
+                for row in episode_rows
+            }
+            if not chunks:
+                chunks = {0}
+            for chunk_index in chunks:
+                candidate = dataset_path / "videos" / video_key / f"chunk-{chunk_index:03d}" / f"file-{file_index:03d}.mp4"
+                if not candidate.is_file():
+                    return False
+        return True
+
+    @staticmethod
+    def _write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("\n".join(json.dumps(row, ensure_ascii=False) for row in rows) + "\n", encoding="utf-8")
+
+    def _v30_tasks_jsonl_rows(self, dataset_path: Path) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        for parquet_path in self._v30_metadata_parquet_paths(dataset_path, "tasks"):
+            table = self._read_v30_metadata_parquet(parquet_path, "tasks")
+            data = table.to_pydict()
+            row_count = self._column_row_count(data)
+            for row_index in range(row_count):
+                task_index = _safe_int(self._column_value(data, "task_index", row_index), len(rows), minimum=0)
+                task = self._task_name_from_v30_task_row(data, row_index)
+                if not task:
+                    continue
+                rows.append({"task_index": task_index, "task": task})
+        unique: dict[int, dict[str, Any]] = {}
+        for row in rows:
+            unique[int(row["task_index"])] = row
+        if not unique:
+            raise ValueError(f"LeRobot v3 metadata compatibility could not read any tasks from {dataset_path / 'meta'}")
+        return [unique[index] for index in sorted(unique)]
+
+    def _v30_episode_jsonl_rows(self, dataset_path: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        episode_rows: list[dict[str, Any]] = []
+        episode_stats_rows: list[dict[str, Any]] = []
+        global_stats = self._read_json_dict(dataset_path / "meta" / "stats.json")
+        for parquet_path in self._v30_metadata_parquet_paths(dataset_path, "episodes"):
+            table = self._read_v30_metadata_parquet(parquet_path, "episodes")
+            data = table.to_pydict()
+            row_count = self._column_row_count(data)
+            for row_index in range(row_count):
+                episode_index = _safe_int(self._column_value(data, "episode_index", row_index), len(episode_rows), minimum=0)
+                length = _safe_int(self._column_value(data, "length", row_index), 0, minimum=0)
+                if length <= 0:
+                    start = _safe_int(self._column_value(data, "dataset_from_index", row_index), 0, minimum=0)
+                    end = _safe_int(self._column_value(data, "dataset_to_index", row_index), start, minimum=start)
+                    length = end - start
+                tasks = self._episode_tasks_from_v30_row(data, row_index)
+                episode_row = {
+                    "episode_index": episode_index,
+                    "tasks": tasks,
+                    "length": length,
+                }
+                for key, values in data.items():
+                    if key.startswith("stats/") or key in episode_row:
+                        continue
+                    if row_index < len(values):
+                        episode_row[key] = self._json_safe(values[row_index])
+                episode_rows.append(episode_row)
+
+                stats = self._episode_stats_from_v30_row(data, row_index)
+                if not stats:
+                    stats = global_stats
+                episode_stats_rows.append({"episode_index": episode_index, "stats": stats})
+
+        episode_rows_by_index = {int(row["episode_index"]): row for row in episode_rows}
+        episode_stats_by_index = {int(row["episode_index"]): row for row in episode_stats_rows}
+        if not episode_rows_by_index:
+            raise ValueError(f"LeRobot v3 metadata compatibility could not read any episodes from {dataset_path / 'meta'}")
+        if not episode_stats_by_index:
+            raise ValueError(f"LeRobot v3 metadata compatibility could not read any episode stats from {dataset_path / 'meta'}")
+        return (
+            [episode_rows_by_index[index] for index in sorted(episode_rows_by_index)],
+            [episode_stats_by_index[index] for index in sorted(episode_stats_by_index)],
+        )
+
+    @staticmethod
+    def _v30_metadata_parquet_paths(dataset_path: Path, stem: str) -> list[Path]:
+        meta = dataset_path / "meta"
+        direct = meta / f"{stem}.parquet"
+        paths: list[Path] = []
+        if direct.is_file():
+            paths.append(direct)
+        paths.extend(sorted((meta / stem).rglob("*.parquet")) if (meta / stem).is_dir() else [])
+        return list(dict.fromkeys(path.resolve() for path in paths))
+
+    @staticmethod
+    def _read_v30_metadata_parquet(parquet_path: Path, label: str) -> Any:
+        try:
+            import pyarrow.parquet as pq
+        except Exception as exc:  # noqa: BLE001 - optional outside the LeRobot runtime.
+            raise ValueError(f"LeRobot v3 metadata compatibility requires pyarrow to read {label} parquet files.") from exc
+        try:
+            return pq.read_table(parquet_path)
+        except Exception as exc:  # noqa: BLE001 - pyarrow has several concrete failures.
+            raise ValueError(f"LeRobot v3 metadata compatibility could not read {label} parquet: {parquet_path}: {exc}") from exc
+
+    @staticmethod
+    def _read_json_dict(path: Path) -> dict[str, Any]:
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        return value if isinstance(value, dict) else {}
+
+    @staticmethod
+    def _column_row_count(data: dict[str, list[Any]]) -> int:
+        return max((len(values) for values in data.values() if isinstance(values, list)), default=0)
+
+    @staticmethod
+    def _column_value(data: dict[str, list[Any]], key: str, row_index: int) -> Any:
+        values = data.get(key)
+        if not isinstance(values, list) or row_index >= len(values):
+            return None
+        return values[row_index]
+
+    def _task_name_from_v30_task_row(self, data: dict[str, list[Any]], row_index: int) -> str:
+        for key in ("task", "__index_level_0__", "name"):
+            value = self._column_value(data, key, row_index)
+            if value is None:
+                continue
+            if isinstance(value, (list, tuple)):
+                value = value[0] if value else ""
+            task = str(value).strip()
+            if task:
+                return task
+        return ""
+
+    def _episode_tasks_from_v30_row(self, data: dict[str, list[Any]], row_index: int) -> list[str]:
+        value = self._column_value(data, "tasks", row_index)
+        if isinstance(value, (list, tuple)):
+            return [str(item).strip() for item in value if str(item).strip()]
+        if value is not None:
+            task = str(value).strip()
+            if task:
+                return [task]
+        return [row["task"] for row in self._v30_tasks_jsonl_rows_from_cacheable_data(data, row_index) if row.get("task")]
+
+    def _v30_tasks_jsonl_rows_from_cacheable_data(self, data: dict[str, list[Any]], row_index: int) -> list[dict[str, Any]]:
+        task = self._task_name_from_v30_task_row(data, row_index)
+        if not task:
+            return []
+        return [{"task_index": _safe_int(self._column_value(data, "task_index", row_index), 0, minimum=0), "task": task}]
+
+    def _episode_stats_from_v30_row(self, data: dict[str, list[Any]], row_index: int) -> dict[str, Any]:
+        stats: dict[str, Any] = {}
+        for key, values in data.items():
+            if not key.startswith("stats/") or row_index >= len(values):
+                continue
+            self._set_nested_stats_value(stats, key.removeprefix("stats/").split("/"), self._json_safe(values[row_index]))
+        return stats
+
+    @classmethod
+    def _set_nested_stats_value(cls, target: dict[str, Any], parts: list[str], value: Any) -> None:
+        if not parts:
+            return
+        cursor = target
+        for part in parts[:-1]:
+            child = cursor.get(part)
+            if not isinstance(child, dict):
+                child = {}
+                cursor[part] = child
+            cursor = child
+        cursor[parts[-1]] = value
+
+    @classmethod
+    def _json_safe(cls, value: Any) -> Any:
+        if isinstance(value, dict):
+            return {str(key): cls._json_safe(item) for key, item in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [cls._json_safe(item) for item in value]
+        if hasattr(value, "item"):
+            try:
+                return value.item()
+            except Exception:
+                pass
+        return value
 
     def _prepare_pi05_v30_dataset_copy(self, source_path: Path, converted_repo_id: str, converted_root: Path) -> None:
         converted_root = converted_root.resolve()
@@ -8611,7 +11803,7 @@ class LeRobotBridge:
             else:
                 path.unlink()
         target_path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copytree(source_path, target_path, symlinks=True)
+        shutil.copytree(source_path, target_path, symlinks=True, ignore=shutil.ignore_patterns("sidecar"))
         self._run_pi05_v30_dataset_conversion(converted_repo_id, converted_root)
         self._attach_pi05_sidecar_from_source(source_path, target_path)
 
@@ -8671,6 +11863,12 @@ class LeRobotBridge:
         target_sidecar = target_path / "sidecar"
         if not source_sidecar.is_dir():
             return
+        if target_sidecar.is_symlink():
+            try:
+                if target_sidecar.resolve() == source_sidecar.resolve():
+                    return
+            except OSError:
+                pass
         if target_sidecar.exists() or target_sidecar.is_symlink():
             if target_sidecar.is_symlink() or target_sidecar.is_file():
                 target_sidecar.unlink()
@@ -8680,8 +11878,8 @@ class LeRobotBridge:
         try:
             relative_source = os.path.relpath(source_sidecar, target_sidecar.parent)
             target_sidecar.symlink_to(relative_source, target_is_directory=True)
-        except OSError:
-            shutil.copytree(source_sidecar, target_sidecar, symlinks=True)
+        except OSError as exc:
+            raise ValueError(f"Pi0.5 v3.0 cache sidecar must be symlinked, not copied: {source_sidecar} -> {target_sidecar}") from exc
 
     def _ensure_pi05_quantile_stats(self, repo_id: str, dataset_root: Path) -> None:
         dataset_path = (Path(dataset_root).resolve() / repo_id).resolve()
@@ -8821,7 +12019,10 @@ print("Updated Pi0.5 quantile stats for " + ", ".join(updated))
             return False
         if self._dataset_raw_depth_manifest_path(source_path).is_file() and not self._dataset_raw_depth_manifest_path(converted_path).is_file():
             return False
-        return self._dataset_tree_mtime(converted_path) >= self._dataset_tree_mtime(source_path)
+        return self._dataset_tree_mtime(converted_path, exclude_dir_names={"sidecar"}) >= self._dataset_tree_mtime(
+            source_path,
+            exclude_dir_names={"sidecar"},
+        )
 
     def _is_generated_pi05_dataset_path(self, path: Path) -> bool:
         generated_root = (self.config.dataset_root.resolve() / "local-pi05-v30").resolve()
@@ -8838,17 +12039,21 @@ print("Updated Pi0.5 quantile stats for " + ", ".join(updated))
         return f"local-pi05-v30/{slug or 'dataset'}"
 
     @staticmethod
-    def _dataset_tree_mtime(path: Path) -> float:
+    def _dataset_tree_mtime(path: Path, *, exclude_dir_names: set[str] | None = None) -> float:
         if not path.exists():
             return 0.0
         newest = path.stat().st_mtime
         if not path.is_dir():
             return newest
-        for item in path.rglob("*"):
-            try:
-                newest = max(newest, item.stat().st_mtime)
-            except OSError:
-                continue
+        excluded = set(exclude_dir_names or set())
+        for root, dirnames, filenames in os.walk(path):
+            dirnames[:] = [name for name in dirnames if name not in excluded]
+            for name in [*dirnames, *filenames]:
+                item = Path(root) / name
+                try:
+                    newest = max(newest, item.stat().st_mtime)
+                except OSError:
+                    continue
         return newest
 
     @staticmethod
@@ -8993,7 +12198,8 @@ print("Updated Pi0.5 quantile stats for " + ", ".join(updated))
                         saved_camera,
                         camera_key=camera_key,
                         request_fps=request.camera_fps or request.fps or profile.fps,
-                        include_color_format=not (workflow == "rollout" and self._is_pi05_policy(request.policy_type)),
+                        include_color_format=workflow != "rollout",
+                        include_depth_metadata=workflow != "rollout",
                     )
         if camera_map:
             args.append(f"--robot.cameras={json.dumps(camera_map, ensure_ascii=True)}")
@@ -9007,6 +12213,7 @@ print("Updated Pi0.5 quantile stats for " + ", ".join(updated))
         camera_key: str = "",
         request_fps: int | None = None,
         include_color_format: bool = True,
+        include_depth_metadata: bool = True,
     ) -> dict[str, Any]:
         device = camera_device or {}
         backend = self._normalize_camera_backend(device.get("backend", "opencv"))
@@ -9021,6 +12228,7 @@ print("Updated Pi0.5 quantile stats for " + ", ".join(updated))
                 width=_safe_int(device.get("width"), LEROBOT_DEFAULT_CAMERA_WIDTH, minimum=1),
                 height=_safe_int(device.get("height"), LEROBOT_DEFAULT_CAMERA_HEIGHT, minimum=1),
                 color_format=self._realsense_color_format(identifier=identifier, camera_device=device) if include_color_format else "",
+                include_depth_metadata=include_depth_metadata,
             )
         return self._opencv_camera_config(port_or_identifier, request_fps)
 
@@ -9048,6 +12256,7 @@ print("Updated Pi0.5 quantile stats for " + ", ".join(updated))
         width: int,
         height: int,
         color_format: str,
+        include_depth_metadata: bool = True,
     ) -> dict[str, Any]:
         clip_min_mm, clip_max_mm = self._realsense_depth_clip_range_mm(camera_key)
         data = {
@@ -9057,15 +12266,20 @@ print("Updated Pi0.5 quantile stats for " + ", ".join(updated))
             "height": height,
             "fps": fps,
             "use_depth": bool(use_depth),
-            "align_depth_to_color": bool(self.config.realsense_depth_align_to_color),
-            "depth_scale_m_per_unit": self._realsense_depth_scale_m_per_unit(camera_key, serial_number_or_name, camera_device),
-            "depth_clip_min_mm": clip_min_mm,
-            "depth_clip_max_mm": clip_max_mm,
             # LeRobot / RealSense D405 needs a real warmup period before
             # consuming frames; disabling warmup makes status=False failures
             # more likely after a previous session.
             "warmup_s": LEROBOT_DEFAULT_REALSENSE_WARMUP_S,
         }
+        if include_depth_metadata:
+            data["align_depth_to_color"] = bool(self.config.realsense_depth_align_to_color)
+            data["depth_scale_m_per_unit"] = self._realsense_depth_scale_m_per_unit(
+                camera_key,
+                serial_number_or_name,
+                camera_device,
+            )
+            data["depth_clip_min_mm"] = clip_min_mm
+            data["depth_clip_max_mm"] = clip_max_mm
         if color_format:
             data["color_format"] = color_format
         return data
@@ -9386,6 +12600,16 @@ print("Updated Pi0.5 quantile stats for " + ", ".join(updated))
             }
         )
 
+    def _record_session_has_isaac_rgbd_post_render_candidates(self, session: dict[str, Any]) -> bool:
+        dataset_path = str(session.get("dataset_path") or "").strip()
+        session_id = str(session.get("session_id") or "").strip()
+        if not dataset_path or not session_id:
+            return False
+        path = Path(dataset_path).expanduser()
+        if not path.exists():
+            return False
+        return bool(self._isaac_rgbd_post_render_candidates(path, session_id))
+
     @staticmethod
     def _rollout_log_has_fatal_runtime_failure(log_tail: str) -> bool:
         text = str(log_tail or "")
@@ -9510,6 +12734,7 @@ print("Updated Pi0.5 quantile stats for " + ", ".join(updated))
                 "lerobot-rollout",
                 "lerobot.rollout",
                 "lerobot_pi05_rollout_wrapper.py",
+                "lerobot_live_rollout_wrapper.py",
                 "eval_with_real_robot.py",
                 "rtc.enabled",
             ),
@@ -9771,6 +12996,10 @@ print(json.dumps({"ok": True, "key": key_name}))
         if mode != "live":
             return request, False, "existing dataset detected; test mode keeps resume=false"
 
+        if self._record_start_should_resume_stopped_dataset(request, target):
+            next_request = request.model_copy(update={"resume": True})
+            return next_request, True, "existing stopped record dataset detected; resume=true"
+
         suffix = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         updates: dict[str, Any] = {"resume": False}
         if request.dataset_path:
@@ -9781,6 +13010,34 @@ print(json.dumps({"ok": True, "key": key_name}))
             updates["dataset_repo_id"] = self._dataset_repo_id_with_suffix(repo_id, suffix)
         next_request = request.model_copy(update=updates)
         return next_request, False, f"existing dataset detected; recording to fresh dataset {self._dataset_path_for(next_request)}"
+
+    def _record_start_should_resume_stopped_dataset(self, request: LeRobotSessionRequest, target: Path) -> bool:
+        """Resume only when restarting the same explicitly stopped live record dataset."""
+        request_repo = str(request.dataset_repo_id or "").strip().strip("/")
+        try:
+            target_path = target.expanduser().resolve()
+        except Exception:
+            target_path = target.expanduser()
+        for session in sorted(self._sessions.values(), key=lambda item: item.get("created_at", ""), reverse=True):
+            if str(session.get("workflow") or "").lower() != "record":
+                continue
+            if str(session.get("mode") or "").lower() != "live":
+                continue
+            if str(session.get("status") or "").upper() != "STOPPED":
+                continue
+            session_repo = str(session.get("dataset_repo_id") or "").strip().strip("/")
+            if request_repo and session_repo and request_repo == session_repo:
+                return True
+            session_path_value = str(session.get("dataset_path") or "").strip()
+            if not session_path_value:
+                continue
+            try:
+                session_path = Path(session_path_value).expanduser().resolve()
+            except Exception:
+                session_path = Path(session_path_value).expanduser()
+            if session_path == target_path:
+                return True
+        return False
 
     @classmethod
     def _strip_generated_name_suffixes(cls, name: str) -> str:
@@ -10961,7 +14218,7 @@ finally:
                 unique[key] = item
         return list(unique.values())
 
-    def _discover_local_policies(self) -> list[dict[str, str]]:
+    def _discover_local_policies(self) -> list[dict[str, Any]]:
         roots = [self.config.policy_root, self.config.output_root]
         candidates: list[Path] = []
         for root in roots:
@@ -10970,13 +14227,15 @@ finally:
             candidates.extend(root.glob("*/checkpoints/last/pretrained_model"))
             candidates.extend(root.glob("*/checkpoints/*/pretrained_model"))
             candidates.extend(root.glob("*/pretrained_model"))
-        policies: list[dict[str, str]] = []
+        policies: list[dict[str, Any]] = []
         ordered = sorted({item.resolve() for item in candidates if item.exists()}, key=lambda item: (item.stat().st_mtime, str(item)), reverse=True)
         for path in ordered:
             if not self._is_pretrained_policy_dir(path):
                 continue
             repo_id = ""
             policy_type = ""
+            train_config_path = path / "train_config.json"
+            train_config: dict[str, Any] = {}
             try:
                 config = json.loads((path / "config.json").read_text(encoding="utf-8"))
                 repo_id = str(config.get("repo_id") or "")
@@ -10984,10 +14243,38 @@ finally:
             except Exception:
                 repo_id = ""
                 policy_type = ""
+            try:
+                loaded_train_config = json.loads(train_config_path.read_text(encoding="utf-8"))
+                if isinstance(loaded_train_config, dict):
+                    train_config = loaded_train_config
+            except Exception:
+                train_config = {}
+            if not policy_type and isinstance(train_config.get("policy"), dict):
+                policy_type = self._canonical_policy_type(str(train_config["policy"].get("type") or train_config["policy"].get("policy_type") or ""))
             label = path.parent.parent.parent.name if "checkpoints" in str(path) else path.name
             if repo_id:
                 label = f"{label} ({repo_id})"
-            policies.append({"label": label, "value": str(path), "path": str(path), "repo_id": repo_id, "source": "local", "policy_type": policy_type})
+            output_dir = str(train_config.get("output_dir") or "")
+            if not output_dir and path.name == "pretrained_model" and path.parent.parent.name == "checkpoints":
+                output_dir = str(path.parent.parent.parent)
+            job_name = str(train_config.get("job_name") or (Path(output_dir).name if output_dir else ""))
+            policy: dict[str, Any] = {
+                "label": label,
+                "value": str(path),
+                "path": str(path),
+                "repo_id": repo_id,
+                "source": "local",
+                "policy_type": policy_type,
+            }
+            if output_dir:
+                policy["output_dir"] = output_dir
+            if job_name:
+                policy["job_name"] = job_name
+            if train_config_path.is_file():
+                policy["train_config_path"] = str(train_config_path)
+            if train_config:
+                policy["train_config"] = train_config
+            policies.append(policy)
         return policies[:100]
 
     def _allowed_roots(self) -> list[Path]:

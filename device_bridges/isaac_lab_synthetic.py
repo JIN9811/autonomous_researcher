@@ -8,8 +8,10 @@ contracts that later Isaac Lab/Replicator workers consume.
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
+import shutil
 import subprocess
 from collections import defaultdict
 from dataclasses import dataclass
@@ -19,6 +21,15 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
+from device_bridges.isaac_lab_hdf5 import (
+    blocked_hdf5_summary,
+    ensure_isaac_lab_mimic_object_pose_refs,
+    ensure_isaac_lab_mimic_signal_aliases,
+    export_lerobot_success_episodes_to_isaac_lab_hdf5,
+    validate_isaac_lab_datagen_pool_contract,
+    validate_isaac_lab_hdf5_contract,
+)
+from integrations.isaac_lab_robotis_omx.domain_randomization import get_profile
 from mcp_tools.lerobot_schemas import (
     IsaacLabSyntheticRequest,
     IsaacSyntheticPipelineMode,
@@ -37,9 +48,10 @@ TRAINING_IMPORT_SCHEMA = "atr.lerobot.training_import_row.v1"
 REPLICATOR_SUMMARY_SCHEMA = "atr.lerobot.replicator_synthetic.summary.v1"
 MIMIC_SUMMARY_SCHEMA = "atr.lerobot.isaac_lab_mimic.summary.v1"
 RL_TEACHER_SUMMARY_SCHEMA = "atr.lerobot.isaac_lab_rl_teacher.summary.v1"
-MIMIC_REQUIRED_SUBTASKS = ["approach", "grasp", "lift", "place", "release"]
+MIMIC_REQUIRED_SUBTASKS = ["approach", "grasp", "lift", "place", "cube_lifted", "released_at_target"]
 MIMIC_SUCCESS_CRITERIA = ["object_grasped", "object_lifted", "object_placed", "gripper_released"]
 RL_TEACHER_SUCCESS_CRITERIA = ["bounded_workspace", "grasp_stable", "place_success", "simulation_only"]
+GENERATED_TRAINING_MIN_FRAMES = 40
 ISAAC_LAB_OMX_ENV_HELPERS = [
     "get_robot_eef_pose",
     "target_eef_pose_to_action",
@@ -59,6 +71,12 @@ MIMIC_SCRIPT_RELATIVE_PATHS = {
     "annotate_demos": "scripts/imitation_learning/isaaclab_mimic/annotate_demos.py",
     "record_demos": "scripts/tools/record_demos.py",
 }
+ISAAC_LAB_VIEWPORT_KIT_ARGS = (
+    "--/app/useFabricSceneDelegate=false "
+    "--/physics/updateToUsd=true "
+    "--/physics/updateVelocitiesToUsd=true "
+    "--/physics/updateForceSensorsToUsd=true"
+)
 ROBOMIMIC_TRAIN_RELATIVE_PATH = "scripts/imitation_learning/robomimic/train.py"
 RL_WRAPPER_RELATIVE_PATHS = {
     "rsl_rl_train": "scripts/reinforcement_learning/rsl_rl/train.py",
@@ -98,6 +116,20 @@ class ValidationCheck:
 
 def _now() -> str:
     return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
+
+
+def _python_script_command(python_executable: Path, script: Path) -> list[str]:
+    command = [str(python_executable)]
+    if python_executable.name == "isaaclab.sh":
+        command.append("-p")
+    command.append(str(script))
+    return command
+
+
+def _command_script_path(command: list[str]) -> str:
+    if len(command) > 2 and command[1] == "-p":
+        return command[2]
+    return command[1] if len(command) > 1 else ""
 
 
 def _json_default(value: Any) -> Any:
@@ -278,12 +310,13 @@ class IsaacLabSyntheticPipeline:
         )
 
     def build_synthetic(self, request: IsaacLabSyntheticRequest) -> dict[str, Any]:
+        dataset_path = self._dataset_path(request)
+        output_root = self._output_root(request, dataset_path)
+        self._maybe_reset_latest_output(request, dataset_path, output_root)
         prepared = self.prepare(request)
         if not prepared.get("ok"):
             prepared["tool"] = "lerobot.isaac_lab.build_synthetic"
             return prepared
-        dataset_path = self._dataset_path(request)
-        output_root = self._output_root(request, dataset_path)
         canonical_rows = self._build_canonical_index(request, dataset_path)
         generated_rows = self._generated_success_rows(output_root)
         canonical_summary = {
@@ -310,10 +343,32 @@ class IsaacLabSyntheticPipeline:
             validation_report = self._validation_report_with_replicator_blocker(validation_report, replicator_summary)
         replicator_rows = self._replicator_manifest_rows(output_root, valid_only=True)
         source_labels = self._source_labels(request, canonical_rows, replicator_rows=replicator_rows, generated_rows=generated_rows)
+        contact_exclusions = self._contact_training_exclusion_manifest(dataset_path, request)
+        flagged_episode_indices = set(contact_exclusions.get("episode_indices", []))
         training_rows: list[dict[str, Any]] = []
         if request.source_intent == IsaacSyntheticSourceIntent.TRAIN_READY_SUCCESS_ONLY:
-            training_rows = self._training_import_rows(request, dataset_path, canonical_rows)
-            training_rows.extend(self._generated_training_import_rows(request, dataset_path, output_root, generated_rows))
+            training_rows = self._training_import_rows(
+                request,
+                dataset_path,
+                canonical_rows,
+            )
+            training_rows.extend(
+                self._isaac_rgbd_training_import_rows(
+                    request,
+                    dataset_path,
+                    canonical_rows,
+                    excluded_episode_indices=flagged_episode_indices,
+                )
+            )
+            training_rows.extend(
+                self._generated_training_import_rows(
+                    request,
+                    dataset_path,
+                    output_root,
+                    generated_rows,
+                    excluded_episode_indices=flagged_episode_indices,
+                )
+            )
         failed_episode_indices = self._failed_episode_indices(canonical_rows)
         source_config = self._training_source_config(
             request=request,
@@ -322,6 +377,7 @@ class IsaacLabSyntheticPipeline:
             source_labels=source_labels,
             training_rows=training_rows,
             replicator_summary=replicator_summary,
+            contact_exclusions=contact_exclusions,
         )
         training_validation = self._training_import_validation(
             request=request,
@@ -340,6 +396,9 @@ class IsaacLabSyntheticPipeline:
             "candidate_source_counts": self._count_by(training_rows, "source_type"),
             "excluded_failed_episode_count": len(failed_episode_indices),
             "excluded_failed_episodes": failed_episode_indices,
+            "excluded_flagged_episode_count": len(flagged_episode_indices),
+            "excluded_flagged_episodes": sorted(flagged_episode_indices),
+            "exclusion_manifest_path": str(contact_exclusions.get("manifest_path") or ""),
             "manifest_path": str(output_root / "training_import" / "manifest.jsonl"),
             "source_config_path": str(output_root / "training_import" / "lerobot_source_config.json"),
             "validation_path": str(output_root / "training_import" / "training_import_validation.json"),
@@ -428,7 +487,7 @@ class IsaacLabSyntheticPipeline:
             self._generated_preview_card(row, output_root=output_root)
             for row in self._generated_preview_rows(output_root)
         ]
-        cards = (real_cards + replicator_cards + generated_cards)[:preview_limit]
+        cards = (generated_cards + replicator_cards + real_cards)[:preview_limit]
         if cards:
             _atomic_write_jsonl(output_root / "previews" / "cards.jsonl", cards)
         preview_status = IsaacSyntheticRunStatus.READY_FOR_PREVIEW if cards or run_summary else IsaacSyntheticRunStatus.BLOCKED
@@ -458,7 +517,7 @@ class IsaacLabSyntheticPipeline:
         canonical_frame_count = _safe_int(canonical_summary.get("frame_count"), 0, minimum=0)
         output_path = output_root / "hdf5" / "exported_successful_real_episodes.hdf5"
         if not canonical_summary or not canonical_rows:
-            export_summary = self._blocked_hdf5_summary(
+            export_summary = blocked_hdf5_summary(
                 blocker="HDF5_EXPORT_CANONICAL_INDEX_MISSING",
                 message="Canonical episode index is missing; build synthetic artifacts before exporting HDF5.",
                 canonical_manifest_path=canonical_manifest_path,
@@ -469,7 +528,7 @@ class IsaacLabSyntheticPipeline:
             return self._hdf5_response(request, dataset_path, output_root, export_summary)
         missing_dependencies = self._missing_hdf5_dependencies()
         if missing_dependencies:
-            export_summary = self._blocked_hdf5_summary(
+            export_summary = blocked_hdf5_summary(
                 blocker="HDF5_EXPORT_DEPENDENCY_MISSING",
                 message="HDF5 export requires pyarrow and h5py in the active Python environment.",
                 canonical_manifest_path=canonical_manifest_path,
@@ -479,7 +538,8 @@ class IsaacLabSyntheticPipeline:
                 extra={"missing_dependencies": missing_dependencies},
             )
             return self._hdf5_response(request, dataset_path, output_root, export_summary)
-        export_summary = self._export_canonical_to_hdf5(
+        export_summary = export_lerobot_success_episodes_to_isaac_lab_hdf5(
+            request=request,
             dataset_path=dataset_path,
             canonical_manifest_path=canonical_manifest_path,
             canonical_rows=canonical_rows,
@@ -554,6 +614,547 @@ class IsaacLabSyntheticPipeline:
                 _atomic_write_json(output_root / "mimic" / "runner.json", mimic_summary["runner"])
                 _atomic_write_json(output_root / "mimic" / "generation_config.json", mimic_summary["runner"]["generation_config"])
         return response
+
+    def annotate_source(self, request: IsaacLabSyntheticRequest) -> dict[str, Any]:
+        dataset_path = self._dataset_path(request)
+        output_root = self._output_root(request, dataset_path)
+        hdf5_summary = _read_json(output_root / "hdf5" / "export_summary.json")
+        input_file = Path(str(hdf5_summary.get("output_path") or output_root / "hdf5" / "exported_successful_real_episodes.hdf5"))
+        output_file = output_root / "hdf5" / "source_real_success_annotated.hdf5"
+        if not input_file.is_file():
+            summary = {
+                "schema": "atr.lerobot.isaac_lab.annotation.summary.v1",
+                "ok": False,
+                "status": "blocked",
+                "blocker": "ANNOTATION_INPUT_HDF5_MISSING",
+                "message": "Annotation requires an exported HDF5 source file.",
+                "input_file": str(input_file),
+                "output_file": str(output_file),
+            }
+            _atomic_write_json(output_root / "hdf5" / "annotation_summary.json", summary)
+            return self._response(
+                tool="lerobot.isaac_lab.annotate",
+                request=request,
+                dataset_path=dataset_path,
+                output_root=output_root,
+                status=IsaacSyntheticRunStatus.BLOCKED,
+                hdf5={**hdf5_summary, "annotation": summary},
+            )
+        if request.mimic_annotation_mode == "preannotated_passthrough":
+            output_file.parent.mkdir(parents=True, exist_ok=True)
+            if input_file.resolve() != output_file.resolve():
+                shutil.copy2(input_file, output_file)
+            alias_report = ensure_isaac_lab_mimic_signal_aliases(output_file)
+            object_ref_report = ensure_isaac_lab_mimic_object_pose_refs(output_file)
+            contract_report = validate_isaac_lab_hdf5_contract(
+                output_file,
+                expected_env_name=request.isaac_lab_task_name,
+            )
+            datagen_pool_report = validate_isaac_lab_datagen_pool_contract(
+                output_file,
+                expected_env_name=request.isaac_lab_task_name,
+                subtask_term_signals=["cube_lifted", "released_at_target", None],
+            )
+            _atomic_write_json(output_root / "hdf5" / "annotation_signal_alias_report.json", alias_report)
+            _atomic_write_json(output_root / "hdf5" / "annotation_object_ref_report.json", object_ref_report)
+            _atomic_write_json(output_root / "hdf5" / "annotation_contract_report.json", contract_report)
+            _atomic_write_json(output_root / "hdf5" / "annotation_datagen_pool_report.json", datagen_pool_report)
+            annotation_ok = (
+                bool(alias_report.get("ok"))
+                and bool(object_ref_report.get("ok"))
+                and bool(contract_report.get("ok"))
+                and bool(datagen_pool_report.get("ok"))
+            )
+            summary = {
+                "schema": "atr.lerobot.isaac_lab.annotation.summary.v1",
+                "ok": annotation_ok,
+                "status": "completed" if annotation_ok else "blocked",
+                "mode": "preannotated_passthrough",
+                "dry_run": False,
+                "input_file": str(input_file),
+                "output_file": str(output_file),
+                "command": [],
+                "script_path": "",
+                "script_exists": False,
+                "signal_alias_report_path": str(output_root / "hdf5" / "annotation_signal_alias_report.json"),
+                "signal_alias_ok": bool(alias_report.get("ok")),
+                "signal_alias_blockers": list(alias_report.get("blockers") or []),
+                "signal_alias_added": list(alias_report.get("added") or []),
+                "object_ref_report_path": str(output_root / "hdf5" / "annotation_object_ref_report.json"),
+                "object_ref_ok": bool(object_ref_report.get("ok")),
+                "object_ref_blockers": list(object_ref_report.get("blockers") or []),
+                "object_ref_added": list(object_ref_report.get("added") or []),
+                "contract_report_path": str(output_root / "hdf5" / "annotation_contract_report.json"),
+                "contract_ok": bool(contract_report.get("ok")),
+                "contract_blockers": list(contract_report.get("blockers") or []),
+                "datagen_pool_report_path": str(output_root / "hdf5" / "annotation_datagen_pool_report.json"),
+                "datagen_pool_ok": bool(datagen_pool_report.get("ok")),
+                "datagen_pool_blockers": list(datagen_pool_report.get("blockers") or []),
+                "datagen_pool_num_infos": int(datagen_pool_report.get("num_datagen_infos") or 0),
+                "message": "Exported HDF5 already contains datagen_info; copied it as the annotated Mimic source.",
+            }
+            _atomic_write_json(output_root / "hdf5" / "annotation_summary.json", summary)
+            return self._response(
+                tool="lerobot.isaac_lab.annotate",
+                request=request,
+                dataset_path=dataset_path,
+                output_root=output_root,
+                status=IsaacSyntheticRunStatus.READY_FOR_HDF5 if summary["ok"] else IsaacSyntheticRunStatus.BLOCKED,
+                hdf5={**hdf5_summary, "annotation": summary},
+            )
+        command = self._annotation_command(request, input_file, output_file)
+        dry_run = bool(request.dry_run or request.mode != "live")
+        summary = {
+            "schema": "atr.lerobot.isaac_lab.annotation.summary.v1",
+            "ok": True,
+            "status": "dry_run_ready" if dry_run else "ready_to_launch",
+            "dry_run": dry_run,
+            "input_file": str(input_file),
+            "output_file": str(output_file),
+            "command": command,
+            "script_path": _command_script_path(command),
+            "script_exists": Path(_command_script_path(command)).is_file() if _command_script_path(command) else False,
+        }
+        _atomic_write_json(output_root / "hdf5" / "annotation_summary.json", summary)
+        return self._response(
+            tool="lerobot.isaac_lab.annotate",
+            request=request,
+            dataset_path=dataset_path,
+            output_root=output_root,
+            status=IsaacSyntheticRunStatus.READY_FOR_HDF5,
+            hdf5={**hdf5_summary, "annotation": summary},
+        )
+
+    def train_il(self, request: IsaacLabSyntheticRequest) -> dict[str, Any]:
+        dataset_path = self._dataset_path(request)
+        output_root = self._output_root(request, dataset_path)
+        dataset_file = output_root / "mimic" / "generated_dataset.hdf5"
+        dry_run = bool(request.dry_run or request.mode != "live")
+        if not dataset_file.is_file() and not dry_run:
+            summary = {
+                "schema": "atr.lerobot.isaac_lab.il_train.summary.v1",
+                "ok": False,
+                "status": "blocked",
+                "blocker": "IL_TRAIN_DATASET_MISSING",
+                "message": "IL training requires a generated Mimic HDF5 dataset.",
+                "dataset_file": str(dataset_file),
+            }
+            _atomic_write_json(output_root / "il" / "robomimic" / "train_job.json", summary)
+            return self._response(
+                tool="lerobot.isaac_lab.train_il",
+                request=request,
+                dataset_path=dataset_path,
+                output_root=output_root,
+                status=IsaacSyntheticRunStatus.BLOCKED,
+                mimic=_read_json(output_root / "mimic" / "summary.json"),
+                training_exposure={"il_train": summary},
+            )
+        command = self._il_train_command(request, dataset_file)
+        summary = {
+            "schema": "atr.lerobot.isaac_lab.il_train.summary.v1",
+            "ok": True,
+            "status": "dry_run_ready" if dry_run else "ready_to_launch",
+            "dry_run": dry_run,
+            "dataset_file": str(dataset_file),
+            "dataset_exists": dataset_file.is_file(),
+            "command": command,
+            "script_path": _command_script_path(command),
+            "script_exists": Path(_command_script_path(command)).is_file() if _command_script_path(command) else False,
+            "log_dir": str(output_root / "il" / "robomimic"),
+        }
+        _atomic_write_json(output_root / "il" / "robomimic" / "train_job.json", summary)
+        return self._response(
+            tool="lerobot.isaac_lab.train_il",
+            request=request,
+            dataset_path=dataset_path,
+            output_root=output_root,
+            status=IsaacSyntheticRunStatus.READY_FOR_TRAINING,
+            mimic=_read_json(output_root / "mimic" / "summary.json"),
+            training_exposure={"il_train": summary},
+        )
+
+    def eval_il(self, request: IsaacLabSyntheticRequest) -> dict[str, Any]:
+        dataset_path = self._dataset_path(request)
+        output_root = self._output_root(request, dataset_path)
+        checkpoint = self._resolve_robomimic_checkpoint(output_root)
+        if checkpoint is None:
+            checkpoint = self._default_robomimic_checkpoint(output_root)
+        dry_run = bool(request.dry_run or request.mode != "live")
+        if not checkpoint.is_file() and not dry_run:
+            summary = {
+                "schema": "atr.lerobot.isaac_lab.il_eval.summary.v1",
+                "ok": False,
+                "status": "blocked",
+                "blocker": "IL_EVAL_CHECKPOINT_MISSING",
+                "message": "IL evaluation requires a trained robomimic checkpoint.",
+                "checkpoint": str(checkpoint),
+            }
+            _atomic_write_json(output_root / "il" / "eval" / "eval_job.json", summary)
+            return self._response(
+                tool="lerobot.isaac_lab.eval_il",
+                request=request,
+                dataset_path=dataset_path,
+                output_root=output_root,
+                status=IsaacSyntheticRunStatus.BLOCKED,
+                training_exposure={"il_eval": summary},
+            )
+        command = self._il_play_command(request, checkpoint)
+        summary = {
+            "schema": "atr.lerobot.isaac_lab.il_eval.summary.v1",
+            "ok": True,
+            "status": "dry_run_ready" if dry_run else "ready_to_launch",
+            "dry_run": dry_run,
+            "checkpoint": str(checkpoint),
+            "checkpoint_exists": checkpoint.is_file(),
+            "command": command,
+            "script_path": _command_script_path(command),
+            "script_exists": Path(_command_script_path(command)).is_file() if _command_script_path(command) else False,
+        }
+        _atomic_write_json(output_root / "il" / "eval" / "eval_job.json", summary)
+        return self._response(
+            tool="lerobot.isaac_lab.eval_il",
+            request=request,
+            dataset_path=dataset_path,
+            output_root=output_root,
+            status=IsaacSyntheticRunStatus.READY_FOR_TRAINING,
+            training_exposure={"il_eval": summary},
+        )
+
+    def run_e2e(self, request: IsaacLabSyntheticRequest) -> dict[str, Any]:
+        dataset_path = self._dataset_path(request)
+        output_root = self._output_root(request, dataset_path)
+        self._maybe_reset_latest_output(request, dataset_path, output_root)
+        step_request = request.model_copy(update={"force_rebuild": False})
+        build = self.build_synthetic(step_request)
+        export = self.export_hdf5(step_request)
+        annotation = self.annotate_source(step_request)
+        mimic = self.run_mimic(step_request)
+        training_import_refresh = self.build_synthetic(step_request) if mimic.get("ok") else {}
+        ok = bool(
+            build.get("ok")
+            and export.get("ok")
+            and annotation.get("ok")
+            and mimic.get("ok")
+            and training_import_refresh.get("ok")
+        )
+        summary = {
+            "schema": "atr.lerobot.isaac_lab.e2e.summary.v1",
+            "ok": ok,
+            "status": "READY_FOR_VLA_TRAINING_IMPORT" if ok else "blocked",
+            "build": {"ok": bool(build.get("ok")), "status": build.get("status")},
+            "export": {"ok": bool(export.get("ok")), "status": export.get("status")},
+            "annotation": {"ok": bool(annotation.get("ok")), "status": annotation.get("status")},
+            "mimic": {"ok": bool(mimic.get("ok")), "status": mimic.get("status")},
+            "training_import_refresh": {
+                "ok": bool(training_import_refresh.get("ok")),
+                "status": training_import_refresh.get("status"),
+                "row_count": ((training_import_refresh.get("training_exposure") or {}).get("row_count"))
+                if isinstance(training_import_refresh.get("training_exposure"), dict)
+                else 0,
+            },
+            "train": {},
+            "eval": {},
+        }
+        _atomic_write_json(output_root / "summary_e2e.json", summary)
+        final_build = training_import_refresh if isinstance(training_import_refresh, dict) and training_import_refresh.get("ok") else build
+        return self._response(
+            tool="lerobot.isaac_lab.run_e2e",
+            request=request,
+            dataset_path=dataset_path,
+            output_root=output_root,
+            status=IsaacSyntheticRunStatus.READY_FOR_TRAINING if ok else IsaacSyntheticRunStatus.BLOCKED,
+            validation_report=final_build.get("validation_report") if isinstance(final_build.get("validation_report"), dict) else {},
+            canonical_episode_index=final_build.get("canonical_episode_index") if isinstance(final_build.get("canonical_episode_index"), dict) else {},
+            hdf5=export.get("hdf5") if isinstance(export.get("hdf5"), dict) else {},
+            mimic=mimic.get("mimic") if isinstance(mimic.get("mimic"), dict) else {},
+            training_exposure={
+                "e2e": summary,
+                "training_import_refresh": final_build.get("training_exposure") if isinstance(final_build.get("training_exposure"), dict) else {},
+                "train": {},
+                "eval": {},
+            },
+        )
+
+    def check_outputs(self, request: IsaacLabSyntheticRequest) -> dict[str, Any]:
+        dataset_path = self._dataset_path(request)
+        output_root = self._output_root(request, dataset_path)
+        canonical_summary = _read_json(output_root / "canonical_episode_index" / "summary.json")
+        hdf5_summary = _read_json(output_root / "hdf5" / "export_summary.json")
+        mimic_summary = _read_json(output_root / "mimic" / "summary.json")
+        training_summary = _read_json(output_root / "training_import" / "summary.json")
+        canonical_rows = _read_jsonl(output_root / "canonical_episode_index" / "manifest.jsonl")
+        mimic_candidates = _read_jsonl(output_root / "mimic" / "candidates.jsonl")
+        mimic_successes = _read_jsonl(output_root / "mimic" / "successes.jsonl")
+        mimic_failures = _read_jsonl(output_root / "mimic" / "failures.jsonl")
+        mimic_replay_successes = _read_jsonl(output_root / "mimic" / "replay_successes.jsonl")
+        mimic_replay_failures = _read_jsonl(output_root / "mimic" / "replay_failures.jsonl")
+
+        episode_count = _safe_int(canonical_summary.get("episode_count"), 0, minimum=0)
+        canonical_frame_count = _safe_int(canonical_summary.get("frame_count"), 0, minimum=0)
+        expected_mimic_candidates = (
+            episode_count
+            * self._mimic_domain_variant_count(request)
+            * max(1, _safe_int(request.mimic_trials, 1, minimum=1))
+        )
+        hdf5_output_text = str(hdf5_summary.get("output_path") or "").strip()
+        hdf5_output_path = Path(hdf5_output_text).expanduser() if hdf5_output_text else Path()
+        training_manifest_text = str(training_summary.get("manifest_path") or "").strip()
+        training_manifest_path = Path(training_manifest_text).expanduser() if training_manifest_text else Path()
+        training_manifest_rows = _read_jsonl(training_manifest_path) if training_manifest_path.is_file() else []
+        mimic_training_rows = [
+            row
+            for row in training_manifest_rows
+            if str(row.get("source_type") or "") == ISAAC_LAB_SYNTHETIC_AGGREGATE_SOURCE
+            and str(row.get("source_label") or row.get("generator_source_type") or "")
+            == IsaacSyntheticSourceType.ISAAC_LAB_MIMIC.value
+        ]
+        issues: list[dict[str, Any]] = []
+        checks: list[dict[str, Any]] = []
+
+        def add_check(
+            check_id: str,
+            status: str,
+            message: str,
+            evidence: dict[str, Any],
+            *,
+            code: str = "",
+        ) -> None:
+            checks.append(
+                {
+                    "id": check_id,
+                    "status": status,
+                    "message": message,
+                    "evidence": evidence,
+                    "blocker_code": code if status == "blocked" else "",
+                }
+            )
+            if status == "blocked":
+                issues.append(
+                    {
+                        "code": code or check_id.upper(),
+                        "check": check_id,
+                        "message": message,
+                        "evidence": evidence,
+                    }
+                )
+
+        canonical_status = "passed"
+        canonical_code = ""
+        canonical_message = "Canonical episode index is present."
+        if not canonical_summary or not canonical_rows:
+            canonical_status = "blocked"
+            canonical_code = "CANONICAL_INDEX_MISSING"
+            canonical_message = "Canonical episode index is missing."
+        elif canonical_frame_count != len(canonical_rows):
+            canonical_status = "blocked"
+            canonical_code = "CANONICAL_FRAME_COUNT_MISMATCH"
+            canonical_message = "Canonical episode index summary does not match the manifest row count."
+        add_check(
+            "validate_canonical_episode_index",
+            canonical_status,
+            canonical_message,
+            {
+                "episode_count": episode_count,
+                "summary_frame_count": canonical_frame_count,
+                "manifest_frame_count": len(canonical_rows),
+                "manifest_path": str(output_root / "canonical_episode_index" / "manifest.jsonl"),
+            },
+            code=canonical_code,
+        )
+
+        exported_episode_count = _safe_int(hdf5_summary.get("exported_episode_count"), 0, minimum=0)
+        exported_frame_count = _safe_int(hdf5_summary.get("exported_frame_count"), 0, minimum=0)
+        hdf5_exists = bool(hdf5_output_text and hdf5_output_path.is_file())
+        hdf5_status = "passed"
+        hdf5_code = ""
+        hdf5_message = "HDF5 export is present."
+        if not hdf5_summary or not bool(hdf5_summary.get("ok")) or not hdf5_exists:
+            hdf5_status = "blocked"
+            hdf5_code = "HDF5_EXPORT_MISSING"
+            hdf5_message = "HDF5 export summary or output file is missing."
+        elif exported_episode_count != episode_count or exported_frame_count != canonical_frame_count:
+            hdf5_status = "blocked"
+            hdf5_code = "HDF5_EXPORT_COUNT_MISMATCH"
+            hdf5_message = "HDF5 export counts do not match the canonical episode index."
+        add_check(
+            "validate_hdf5_export",
+            hdf5_status,
+            hdf5_message,
+            {
+                "output_path": hdf5_output_text,
+                "output_exists": hdf5_exists,
+                "exported_episode_count": exported_episode_count,
+                "expected_episode_count": episode_count,
+                "exported_frame_count": exported_frame_count,
+                "expected_frame_count": canonical_frame_count,
+            },
+            code=hdf5_code,
+        )
+
+        summary_candidate_count = _safe_int(mimic_summary.get("candidate_count"), len(mimic_candidates), minimum=0)
+        summary_success_count = _safe_int(mimic_summary.get("success_count"), len(mimic_successes), minimum=0)
+        summary_failure_count = _safe_int(mimic_summary.get("failure_count"), len(mimic_failures), minimum=0)
+        mimic_candidate_count = len(mimic_candidates)
+        mimic_success_count = len(mimic_successes)
+        mimic_failure_count = len(mimic_failures)
+        official_mimic_backend = request.mimic_generation_backend == "official"
+        mimic_status = "passed"
+        mimic_code = ""
+        mimic_message = "Mimic generated the expected candidate set."
+        if not mimic_summary or not mimic_candidates:
+            mimic_status = "blocked"
+            mimic_code = "MIMIC_OUTPUT_MISSING"
+            mimic_message = "Mimic output summary or candidate manifest is missing."
+        elif expected_mimic_candidates and len(mimic_candidates) != expected_mimic_candidates:
+            mimic_status = "blocked"
+            mimic_code = "MIMIC_CANDIDATE_COUNT_MISMATCH"
+            mimic_message = "Mimic candidate mismatch: generated count does not match episodes x domain variants x trials."
+        elif (
+            not official_mimic_backend
+            and (
+                summary_candidate_count != len(mimic_candidates)
+                or summary_success_count != len(mimic_successes)
+                or summary_failure_count != len(mimic_failures)
+            )
+        ):
+            mimic_status = "blocked"
+            mimic_code = "MIMIC_SUMMARY_MANIFEST_COUNT_MISMATCH"
+            mimic_message = "Mimic summary counts do not match manifest row counts."
+        add_check(
+            "validate_mimic_generation",
+            mimic_status,
+            mimic_message,
+            {
+                "expected_candidate_count": expected_mimic_candidates,
+                "summary_candidate_count": summary_candidate_count,
+                "candidate_manifest_count": len(mimic_candidates),
+                "summary_success_count": summary_success_count,
+                "success_manifest_count": len(mimic_successes),
+                "summary_failure_count": summary_failure_count,
+                "failure_manifest_count": len(mimic_failures),
+                "domain_variants_per_source_episode": self._mimic_domain_variant_count(request),
+                "mimic_trials_per_source_episode": max(1, _safe_int(request.mimic_trials, 1, minimum=1)),
+                "failure_episode_indices": sorted(
+                    {
+                        _safe_int(row.get("source_episode_index"), -1, minimum=-1)
+                        for row in mimic_failures
+                    }
+                    - {-1}
+                ),
+            },
+            code=mimic_code,
+        )
+
+        replay_pending_rows = [
+            row
+            for row in mimic_successes
+            if _safe_bool((row.get("metrics") if isinstance(row.get("metrics"), dict) else {}).get("official_mimic"), False)
+            and _safe_bool((row.get("metrics") if isinstance(row.get("metrics"), dict) else {}).get("replay_required"), False)
+        ]
+        replay_status = "passed"
+        replay_code = ""
+        replay_message = "Mimic replay validation has no failed generated demos."
+        if mimic_replay_failures:
+            replay_status = "blocked"
+            replay_code = "MIMIC_REPLAY_FAILURES_PRESENT"
+            replay_message = "Official Mimic replay validation failed for one or more generated demos."
+        elif replay_pending_rows:
+            replay_status = "blocked"
+            replay_code = "MIMIC_REPLAY_VALIDATION_PENDING"
+            replay_message = "Official Mimic generated demos exist but replay validation has not promoted them yet."
+        add_check(
+            "validate_mimic_replay",
+            replay_status,
+            replay_message,
+            {
+                "replay_success_count": len(mimic_replay_successes),
+                "replay_failure_count": len(mimic_replay_failures),
+                "replay_pending_count": len(replay_pending_rows),
+                "replay_success_manifest_path": str(output_root / "mimic" / "replay_successes.jsonl"),
+                "replay_failure_manifest_path": str(output_root / "mimic" / "replay_failures.jsonl"),
+                "failed_generated_demos": [
+                    str(row.get("generated_demo") or "")
+                    for row in mimic_replay_failures
+                    if str(row.get("generated_demo") or "").strip()
+                ],
+                "pending_generated_demos": [
+                    str(row.get("generated_demo") or "")
+                    for row in replay_pending_rows
+                    if str(row.get("generated_demo") or "").strip()
+                ],
+            },
+            code=replay_code,
+        )
+
+        training_row_count = _safe_int(training_summary.get("row_count"), 0, minimum=0)
+        training_candidate_count = _safe_int(training_summary.get("candidate_row_count"), 0, minimum=0)
+        training_manifest_exists = bool(training_manifest_text and training_manifest_path.is_file())
+        training_status = "passed"
+        training_code = ""
+        training_message = "Training import manifest exposes generated rows."
+        if not training_summary:
+            training_status = "blocked"
+            training_code = "TRAINING_IMPORT_MISSING"
+            training_message = "Training import summary is missing."
+        elif str(training_summary.get("status") or "").lower() == "blocked" or not bool(training_summary.get("train_exposed", True)):
+            training_status = "blocked"
+            training_code = "TRAINING_IMPORT_BLOCKED"
+            training_message = "Training import validation is blocked."
+        elif training_row_count <= 0 or not training_manifest_exists:
+            training_status = "blocked"
+            training_code = "TRAINING_IMPORT_MANIFEST_MISSING"
+            training_message = "Training import manifest is missing or empty."
+        elif mimic_success_count > 0 and len(mimic_training_rows) < mimic_success_count:
+            training_status = "blocked"
+            training_code = "TRAINING_IMPORT_SYNTHETIC_ROWS_MISSING"
+            training_message = "Training import does not include the generated Mimic successes."
+        add_check(
+            "validate_training_import",
+            training_status,
+            training_message,
+            {
+                "row_count": training_row_count,
+                "candidate_row_count": training_candidate_count,
+                "manifest_path": training_manifest_text,
+                "manifest_exists": training_manifest_exists,
+                "source_counts": dict(training_summary.get("source_counts") or {}),
+                "candidate_source_counts": dict(training_summary.get("candidate_source_counts") or {}),
+                "mimic_training_row_count": len(mimic_training_rows),
+                "required_mimic_success_rows": mimic_success_count,
+            },
+            code=training_code,
+        )
+
+        ok = not issues
+        return {
+            "ok": ok,
+            "tool": "lerobot.isaac_lab.check_outputs",
+            "schema": "atr.lerobot.isaac_lab.output_check.v1",
+            "status": "PASSED" if ok else "BLOCKED",
+            "dataset_path": str(dataset_path),
+            "output_root": str(output_root),
+            "run_id": "latest",
+            "check_summary": {
+                "episode_count": episode_count,
+                "canonical_frame_count": canonical_frame_count,
+                "expected_mimic_candidates": expected_mimic_candidates,
+                "mimic_candidate_count": len(mimic_candidates),
+                "mimic_success_count": len(mimic_successes),
+                "mimic_failure_count": len(mimic_failures),
+                "mimic_replay_success_count": len(mimic_replay_successes),
+                "mimic_replay_failure_count": len(mimic_replay_failures),
+                "mimic_replay_pending_count": len(replay_pending_rows),
+                "training_row_count": training_row_count,
+                "training_candidate_row_count": training_candidate_count,
+            },
+            "checks": checks,
+            "issues": issues,
+            "canonical_episode_index": canonical_summary,
+            "hdf5": hdf5_summary,
+            "mimic": mimic_summary,
+            "training_exposure": training_summary,
+            "progress": {"percent": 100.0 if ok else 0.0, "status": "PASSED" if ok else "BLOCKED"},
+        }
 
     def run_rl_teacher_smoke(self, request: IsaacLabSyntheticRequest) -> dict[str, Any]:
         dataset_path = self._dataset_path(request)
@@ -634,10 +1235,16 @@ class IsaacLabSyntheticPipeline:
         smoke = hook_summary.get("smoke") if isinstance(hook_summary.get("smoke"), dict) else {}
         dry_run = bool(request.dry_run or request.mode != "live")
         command = self._runner_command(request, kind=kind, hook_summary=hook_summary, smoke_summary=smoke)
-        script_path = command[1] if len(command) > 1 else ""
+        script_path = _command_script_path(command)
         isaac_python = command[0] if command else ""
         output_root = Path(str(smoke.get("output_root") or ""))
         generation_config = self._runner_generation_config(
+            request,
+            kind=kind,
+            output_root=output_root,
+            hook_summary=hook_summary,
+        )
+        post_run = self._runner_post_run_summary(
             request,
             kind=kind,
             output_root=output_root,
@@ -648,6 +1255,8 @@ class IsaacLabSyntheticPipeline:
             "status": "completed" if dry_run else "ready_to_launch",
             "dry_run": dry_run,
             "operation": operation,
+            "backend": request.mimic_generation_backend if kind == "mimic" else "rl_teacher",
+            "backend_contract": self._mimic_backend_contract(request) if kind == "mimic" else {},
             "generated_at": _now(),
             "generation_config": generation_config,
             "generation_config_path": str(output_root / kind / "generation_config.json") if str(output_root) else "",
@@ -665,6 +1274,123 @@ class IsaacLabSyntheticPipeline:
             "success_manifest_path": str(hook_summary.get("success_manifest_path") or ""),
             "job_lifecycle": "file_backed_sidecar_manifest",
             "external_launch_required": not dry_run,
+            "post_run": post_run,
+        }
+
+    def _runner_post_run_summary(
+        self,
+        request: IsaacLabSyntheticRequest,
+        *,
+        kind: str,
+        output_root: Path,
+        hook_summary: dict[str, Any],
+    ) -> dict[str, Any]:
+        if kind != "mimic":
+            return {"enabled": False, "stage": "none", "command": []}
+        if request.mimic_generation_backend == "official":
+            command = self._official_mimic_replay_promote_command(request, output_root=output_root)
+            return {
+                "enabled": True,
+                "stage": "replay_validate_after_generation",
+                "trigger": "after_successful_generation",
+                "command": command,
+                "script_path": _command_script_path(command),
+                "script_exists": Path(_command_script_path(command)).is_file() if _command_script_path(command) else False,
+                "input_file": str(output_root / "mimic" / "generated_dataset.hdf5"),
+                "success_manifest_path": str(output_root / "mimic" / "successes.jsonl"),
+                "replay_success_manifest_path": str(output_root / "mimic" / "replay_successes.jsonl"),
+                "replay_failure_manifest_path": str(output_root / "mimic" / "replay_failures.jsonl"),
+                "summary_file": str(output_root / "mimic" / "replay_validation_summary.json"),
+                "log_dir": str(output_root / "mimic" / "replay_logs"),
+            }
+        if request.mimic_generation_backend != "joint_replay":
+            return {"enabled": False, "stage": "none", "command": []}
+        if not request.isaac_lab_visualize_generation:
+            return {"enabled": False, "stage": "rgbd_render_after_generation", "command": []}
+        command = self._joint_replay_rgbd_render_command(request, output_root=output_root, hook_summary=hook_summary)
+        return {
+            "enabled": True,
+            "stage": "rgbd_render_after_generation",
+            "trigger": "after_successful_generation",
+            "fps": 0,
+            "max_demos": 0,
+            "command": command,
+            "script_path": _command_script_path(command),
+            "script_exists": Path(_command_script_path(command)).is_file() if _command_script_path(command) else False,
+            "input_file": str(output_root / "mimic" / "generated_dataset.hdf5"),
+            "output_file": str(output_root / "mimic_rgbd" / "generated_dataset_rgbd.hdf5"),
+            "success_manifest_path": str(output_root / "mimic_rgbd" / "successes.jsonl"),
+            "failure_manifest_path": str(output_root / "mimic_rgbd" / "failures.jsonl"),
+            "render_manifest_path": str(output_root / "mimic_rgbd" / "manifest.jsonl"),
+            "render_root": str(output_root / "mimic_rgbd" / "renders"),
+            "log_policy": "append_to_generation_log",
+        }
+
+    def _official_mimic_replay_promote_command(
+        self,
+        request: IsaacLabSyntheticRequest,
+        *,
+        output_root: Path,
+    ) -> list[str]:
+        isaac_python = Path(request.isaac_sim_python).expanduser() if request.isaac_sim_python else DEFAULT_ISAAC_SIM_PYTHON
+        isaac_lab_root = self._isaac_lab_path(request)
+        script = self.repo_root / "scripts" / "lerobot_isaac_lab_official_mimic_replay_promote.py"
+        replay_script = isaac_lab_root / "scripts" / "tools" / "replay_demos.py"
+        command = [
+            *_python_script_command(isaac_python, script),
+            "--isaac-python",
+            str(isaac_python),
+            "--replay-script",
+            str(replay_script),
+            "--task",
+            request.isaac_lab_task_name,
+            "--dataset-file",
+            str(output_root / "mimic" / "generated_dataset.hdf5"),
+            "--success-manifest",
+            str(output_root / "mimic" / "successes.jsonl"),
+            "--replay-success-manifest",
+            str(output_root / "mimic" / "replay_successes.jsonl"),
+            "--replay-failure-manifest",
+            str(output_root / "mimic" / "replay_failures.jsonl"),
+            "--summary-file",
+            str(output_root / "mimic" / "replay_validation_summary.json"),
+            "--log-dir",
+            str(output_root / "mimic" / "replay_logs"),
+            "--external-callback",
+            request.mimic_external_callback,
+            "--rendering-mode",
+            request.mimic_rendering_mode,
+            "--enable-cameras",
+            "--headless",
+        ]
+        return command
+
+    def _mimic_post_generation_rgbd_render_summary(
+        self,
+        request: IsaacLabSyntheticRequest,
+        *,
+        output_root: Path,
+        hook_summary: dict[str, Any],
+    ) -> dict[str, Any]:
+        enabled = bool(
+            request.isaac_lab_visualize_generation
+            and request.mimic_generation_backend == "joint_replay"
+            and str(output_root)
+        )
+        return {
+            "enabled": enabled,
+            "stage": "rgbd_render_after_generation",
+            "trigger": "after_successful_generation",
+            "fps": 0,
+            "max_demos": 0,
+            "source": "runner.post_run.command" if enabled else "disabled",
+            "input_file": str(output_root / "mimic" / "generated_dataset.hdf5") if str(output_root) else "",
+            "output_file": str(output_root / "mimic_rgbd" / "generated_dataset_rgbd.hdf5") if str(output_root) else "",
+            "success_manifest_path": str(output_root / "mimic_rgbd" / "successes.jsonl") if str(output_root) else "",
+            "failure_manifest_path": str(output_root / "mimic_rgbd" / "failures.jsonl") if str(output_root) else "",
+            "render_manifest_path": str(output_root / "mimic_rgbd" / "manifest.jsonl") if str(output_root) else "",
+            "render_root": str(output_root / "mimic_rgbd" / "renders") if str(output_root) else "",
+            "hdf5_source_path": str(hook_summary.get("hdf5_path") or ""),
         }
 
     def _runner_generation_config(
@@ -675,28 +1401,59 @@ class IsaacLabSyntheticPipeline:
         output_root: Path,
         hook_summary: dict[str, Any],
     ) -> dict[str, Any]:
+        action_contract = self._robotis_mimic_action_contract()
+        rgbd_contract = self._robotis_mimic_rgbd_contract(request)
+        scene_contract = self._robotis_mimic_scene_contract(request)
         if kind == "mimic":
+            rgbd_render_after_generation = self._mimic_post_generation_rgbd_render_summary(
+                request,
+                output_root=output_root,
+                hook_summary=hook_summary,
+            )
+            environment_randomization = self._environment_domain_randomization_contract(request)
+            source_object_reset = self._source_object_reset_contract(str(hook_summary.get("hdf5_path") or ""))
+            per_episode_generation = self._per_episode_generation_contract(output_root)
             return {
                 "schema": "atr.lerobot.isaac_lab_mimic.generation_config.v1",
                 "workspace": "a4_sheet",
+                "action_contract": action_contract,
+                "rgbd_contract": rgbd_contract,
+                "scene_contract": scene_contract,
+                "source_object_reset": source_object_reset,
+                "per_episode_generation": per_episode_generation,
                 "object_pose_randomization": {
                     "workspace": "a4_sheet",
-                    "bounds_m": {"x": [-0.105, 0.105], "y": [-0.1485, 0.1485]},
-                    "yaw_bounds_rad": [-0.785398, 0.785398],
-                    "source": "a4_bounded_cube_pose_randomization",
+                    "enabled": False,
+                    "bounds_m": {"x": [0.0, 0.0], "y": [0.0, 0.0]},
+                    "yaw_bounds_rad": [0.0, 0.0],
+                    "source": "recorded_specimen_pose",
                 },
+                "physics_randomization": {
+                    "enabled": False,
+                    "source": "recorded_physics_materials",
+                    "locked": ["red_cube_pose", "red_cube_material", "red_cube_mass", "gripper_material", "contact_offsets"],
+                },
+                "environment_randomization": environment_randomization,
                 "success_filter": {
                     "success_only": True,
                     "success_manifest": str(output_root / "mimic" / "successes.jsonl") if str(output_root) else "",
                     "excluded_manifest": str(output_root / "mimic" / "failures.jsonl") if str(output_root) else "",
                     "criteria": list(hook_summary.get("success_criteria") or MIMIC_SUCCESS_CRITERIA),
                 },
+                "backend": request.mimic_generation_backend,
+                "backend_contract": self._mimic_backend_contract(request),
                 "trials": request.mimic_trials,
+                "trials_per_source_episode": request.mimic_trials,
+                "domain_variants_per_source_episode": self._mimic_domain_variant_count(request),
                 "num_envs": request.mimic_num_envs,
+                "rgbd_render_after_generation": rgbd_render_after_generation,
             }
         return {
             "schema": "atr.lerobot.isaac_lab_rl_teacher.generation_config.v1",
             "workspace": "a4_sheet",
+            "action_contract": action_contract,
+            "rgbd_contract": rgbd_contract,
+            "scene_contract": scene_contract,
             "observations": ["eef_pose", "joint_pos", "gripper_state", "object_pose"],
             "state_policy": "conservative_state_observations_only",
             "success_metrics": list(hook_summary.get("success_criteria") or RL_TEACHER_SUCCESS_CRITERIA),
@@ -710,6 +1467,81 @@ class IsaacLabSyntheticPipeline:
             "simulation_only": True,
         }
 
+    def _robotis_mimic_action_contract(self) -> dict[str, Any]:
+        return {
+            "control_mode": "joint_position_physical_articulation",
+            "joint_names": ["Joint1", "Joint2", "Joint3", "Joint4", "Joint5", "Gripper", "Gripper_mimic"],
+            "unit": "radians",
+            "source": "leader_joint_targets_exported_from_isaac_mirror",
+            "source_fallback": "lerobot_action_vector_when_mirror_targets_missing",
+        }
+
+    def _mimic_backend_contract(self, request: IsaacLabSyntheticRequest) -> dict[str, Any]:
+        if request.mimic_generation_backend == "official":
+            return {
+                "backend": "official",
+                "is_official_isaac_lab_mimic": True,
+                "trajectory_source": "isaac_lab_mimic_datagen",
+                "source_hdf5_role": "successful_demonstrations_with_datagen_info",
+                "generation_semantics": "subtask_aware_mimic_rollouts",
+                "domain_randomization_scope": "environment_locked_object_pose_unless_task_randomizes",
+                "rgbd_policy": "optional_post_generation_render",
+            }
+        return {
+            "backend": "joint_replay",
+            "is_official_isaac_lab_mimic": False,
+            "trajectory_source": "recorded_leader_joint_targets",
+            "source_hdf5_role": "recorded_successful_real_episodes",
+            "generation_semantics": "deterministic_joint_replay_with_domain_variants",
+            "domain_randomization_scope": "environment_only_locked_object_pose_and_physics",
+            "rgbd_policy": "mirror_http_post_generation_render",
+        }
+
+    def _robotis_mimic_rgbd_contract(self, request: IsaacLabSyntheticRequest) -> dict[str, Any]:
+        return {
+            "cameras": ["top", "front", "right"],
+            "enabled": bool(request.mimic_enable_cameras),
+            "fps": 15,
+            "width": int(request.mimic_camera_width),
+            "height": int(request.mimic_camera_height),
+            "rgb_encoding": "png",
+            "depth_encoding": "png16",
+            "depth_scale_m_per_unit": 0.001,
+            "source": "isaac_rgbd_post_render_or_lab_camera_observation",
+        }
+
+    def _robotis_mimic_scene_contract(self, request: IsaacLabSyntheticRequest) -> dict[str, Any]:
+        return {
+            "layout_basis": "omx_table_layout_usda_static_props",
+            "source_stage_path": str(self._stage_path(request)),
+            "robot_stage_prim": "/World/Robot",
+            "red_cube_stage_prim": "/World/Workspace/RedSpecimenBlock",
+            "managed_robot_prim": "{ENV_REGEX_NS}/Robot",
+            "managed_red_cube_prim": "{ENV_REGEX_NS}/red_cube",
+            "robot_initial_root_pose": [0.315, 0.06, -0.02, 0.0, 0.0, 0.7071068, 0.7071068],
+            "red_cube_lab_scene_default_root_pose": [0.4, 0.3, 0.0152, 0.0, 0.0, 0.0, 1.0],
+            "red_cube_initial_pose_source": "isaac_rgbd_render_attempt_specimen_pose_or_lab_scene_default",
+            "a4_sheet": {
+                "center_m": [0.315, 0.265, 0.00006],
+                "size_m": [0.297, 0.21, 0.00012],
+            },
+            "static_prim_names": [
+                "TableTop",
+                "TableTopFrontLeft",
+                "TableTopFrontRight",
+                "RobotBasePocketFloor",
+                "A4Sheet",
+                "A4CornerMarker_1",
+                "A4CornerMarker_2",
+                "A4CornerMarker_3",
+                "A4CornerMarker_4",
+                "A4CenterMarker",
+                "RightDiskAluminumTop",
+                "RightDiskBlackBase",
+                "RightDiskCenterYellowMarker",
+            ],
+        }
+
     def _runner_command(
         self,
         request: IsaacLabSyntheticRequest,
@@ -719,32 +1551,125 @@ class IsaacLabSyntheticPipeline:
         smoke_summary: dict[str, Any],
     ) -> list[str]:
         isaac_python = Path(request.isaac_sim_python).expanduser() if request.isaac_sim_python else DEFAULT_ISAAC_SIM_PYTHON
-        isaac_lab_root = Path(request.isaac_lab_path).expanduser() if request.isaac_lab_path else Path("")
+        isaac_lab_root = self._isaac_lab_path(request)
         output_root = Path(str(smoke_summary.get("output_root") or self._output_root(request, self._dataset_path(request))))
         env_wrapper_manifest = str(smoke_summary.get("env_wrapper_manifest") or "")
         hdf5_path = str(hook_summary.get("hdf5_path") or smoke_summary.get("hdf5_path") or "")
         if kind == "mimic":
-            script = isaac_lab_root / MIMIC_SCRIPT_RELATIVE_PATHS["generate_dataset"]
-            return [
+            generated_hdf5 = output_root / "mimic" / "generated_dataset.hdf5"
+            if request.mimic_generation_backend == "joint_replay":
+                script = self.repo_root / "scripts" / "lerobot_isaac_lab_joint_replay_mimic.py"
+                command = [
+                    *_python_script_command(isaac_python, script),
+                    "--backend",
+                    "joint_replay",
+                    "--input-file",
+                    hdf5_path,
+                    "--output-file",
+                    str(generated_hdf5),
+                    "--success-manifest",
+                    str(output_root / "mimic" / "successes.jsonl"),
+                    "--failure-manifest",
+                    str(output_root / "mimic" / "failures.jsonl"),
+                    "--trials",
+                    str(request.mimic_trials),
+                    "--domain-variants",
+                    str(self._mimic_domain_variant_count(request)),
+                    "--seed",
+                    str(request.seed),
+                    "--env-name",
+                    request.isaac_lab_policy_task_name,
+                    "--robotis-domain-randomization-profile",
+                    self._generation_domain_randomization_profile(request),
+                ]
+                command.extend(
+                    [
+                        "--sim-step-generation",
+                        "--visual-task",
+                        request.isaac_lab_task_name,
+                        "--visual-num-envs",
+                        "1",
+                        "--external-callback",
+                        request.mimic_external_callback,
+                        "--robotis-camera-mode",
+                        self._camera_mode(request),
+                        "--robotis-camera-width",
+                        str(request.mimic_camera_width),
+                        "--robotis-camera-height",
+                        str(request.mimic_camera_height),
+                        "--rendering-mode",
+                        "performance",
+                        "--viz",
+                        "none",
+                        "--visual-fps",
+                        "0",
+                        "--visual-max-demos",
+                        "0",
+                    ]
+                )
+                if request.mimic_enable_cameras:
+                    command.append("--enable-cameras")
+                return command
+            annotate_script = isaac_lab_root / MIMIC_SCRIPT_RELATIVE_PATHS["annotate_demos"]
+            generate_script = isaac_lab_root / MIMIC_SCRIPT_RELATIVE_PATHS["generate_dataset"]
+            script = self.repo_root / "scripts" / "lerobot_isaac_lab_official_mimic_generate.py"
+            # The Robotis OMX USD has fixed-joint articulation assumptions that are stable
+            # for one Lab env, but cloned parallel envs can produce zero successful Mimic
+            # rollouts. Keep the requested domain-variant x mimic-trial count, and run it
+            # serially through the official wrapper.
+            official_trials_per_episode = max(1, _safe_int(request.mimic_trials, 1, minimum=1)) * self._mimic_domain_variant_count(request)
+            command = [
+                *_python_script_command(isaac_python, script),
+                "--isaac-python",
                 str(isaac_python),
-                str(script),
-                "--hdf5",
+                "--annotate-script",
+                str(annotate_script),
+                "--generate-script",
+                str(generate_script),
+                "--annotation-mode",
+                "auto",
+                "--task",
+                request.isaac_lab_task_name,
+                "--input-file",
                 hdf5_path,
-                "--env-wrapper",
-                env_wrapper_manifest,
-                "--output-dir",
-                str(output_root / "mimic"),
-                "--trials",
-                str(request.mimic_trials),
+                "--output-file",
+                str(generated_hdf5),
+                "--shard-dir",
+                str(output_root / "mimic" / "official_per_episode"),
+                "--success-manifest",
+                str(output_root / "mimic" / "successes.jsonl"),
+                "--failure-manifest",
+                str(output_root / "mimic" / "failures.jsonl"),
+                "--summary-file",
+                str(output_root / "mimic" / "official_mimic_summary.json"),
+                "--trials-per-episode",
+                str(official_trials_per_episode),
                 "--num-envs",
-                str(request.mimic_num_envs),
-                "--seed",
-                str(request.seed),
+                "1",
+                "--process-cooldown-sec",
+                "3.0",
+                "--external-callback",
+                request.mimic_external_callback,
+                "--robotis-domain-randomization-profile",
+                self._mimic_generation_domain_randomization_profile(request),
+                "--robotis-camera-mode",
+                "off",
+                "--robotis-camera-width",
+                str(request.mimic_camera_width),
+                "--robotis-camera-height",
+                str(request.mimic_camera_height),
             ]
+            if str(request.isaac_lab_episode_indices or "").strip():
+                command.extend(["--episode-indices", str(request.isaac_lab_episode_indices)])
+            command.append("--headless")
+            if request.mimic_enable_cameras:
+                command.extend(["--rendering-mode", request.mimic_rendering_mode])
+            if request.mimic_use_skillgen:
+                command.append("--use-skillgen")
+            return command
         script = isaac_lab_root / RL_WRAPPER_RELATIVE_PATHS["rsl_rl_train"]
-        return [
-            str(isaac_python),
-            str(script),
+        command = [
+            *_python_script_command(isaac_python, script),
             "--env-wrapper",
             env_wrapper_manifest,
             "--output-dir",
@@ -753,8 +1678,463 @@ class IsaacLabSyntheticPipeline:
             str(request.rl_teacher_steps),
             "--seed",
             str(request.seed),
+        ]
+        if not request.isaac_lab_visualize_generation:
+            command.append("--headless")
+        return command
+
+    def _joint_replay_preview_command(
+        self,
+        request: IsaacLabSyntheticRequest,
+        *,
+        output_root: Path,
+        hook_summary: dict[str, Any],
+    ) -> list[str]:
+        isaac_python = Path(request.isaac_sim_python).expanduser() if request.isaac_sim_python else DEFAULT_ISAAC_SIM_PYTHON
+        script = self.repo_root / "scripts" / "lerobot_isaac_lab_joint_replay_mimic.py"
+        generated_hdf5 = output_root / "mimic" / "generated_dataset.hdf5"
+        command = [
+            *_python_script_command(isaac_python, script),
+            "--backend",
+            "joint_replay",
+            "--preview-only",
+            "--input-file",
+            str(generated_hdf5),
+            "--output-file",
+            str(generated_hdf5),
+            "--success-manifest",
+            str(output_root / "mimic" / "successes.jsonl"),
+            "--failure-manifest",
+            str(output_root / "mimic" / "failures.jsonl"),
+            "--trials",
+            "1",
+            "--domain-variants",
+            "1",
+            "--seed",
+            str(request.seed),
+            "--env-name",
+            request.isaac_lab_policy_task_name,
+            "--robotis-domain-randomization-profile",
+            self._generation_domain_randomization_profile(request),
+            "--visualize-generation",
+            "--visual-task",
+            request.isaac_lab_policy_task_name,
+            "--visual-num-envs",
+            str(max(1, min(3, _safe_int(request.mimic_num_envs, 3, minimum=1)))),
+            "--external-callback",
+            request.mimic_external_callback,
+            "--robotis-camera-mode",
+            self._camera_mode(request),
+            "--robotis-camera-width",
+            str(request.mimic_camera_width),
+            "--robotis-camera-height",
+            str(request.mimic_camera_height),
+            "--rendering-mode",
+            "balanced",
+            "--viz",
+            "kit",
+            "--kit-args",
+            ISAAC_LAB_VIEWPORT_KIT_ARGS,
+            "--visual-fps",
+            "15",
+            "--visual-max-demos",
+            "3",
+            "--summary-file",
+            str(output_root / "mimic" / "joint_replay_preview_summary.json"),
+        ]
+        if request.mimic_enable_cameras:
+            command.append("--enable-cameras")
+        return command
+
+    def _joint_replay_rgbd_render_command(
+        self,
+        request: IsaacLabSyntheticRequest,
+        *,
+        output_root: Path,
+        hook_summary: dict[str, Any],
+    ) -> list[str]:
+        isaac_python = Path(request.isaac_sim_python).expanduser() if request.isaac_sim_python else DEFAULT_ISAAC_SIM_PYTHON
+        script = self.repo_root / "scripts" / "lerobot_isaac_lab_joint_replay_mimic.py"
+        generated_hdf5 = output_root / "mimic" / "generated_dataset.hdf5"
+        rgbd_dir = output_root / "mimic_rgbd"
+        command = [
+            *_python_script_command(isaac_python, script),
+            "--backend",
+            "joint_replay",
+            "--rgbd-render-only",
+            "--rgbd-render-backend",
+            "mirror_http",
+            "--mirror-endpoint",
+            self._mirror_render_endpoint(request),
+            "--mirror-timeout-s",
+            str(request.isaac_mirror_timeout_s),
+            "--input-file",
+            str(generated_hdf5),
+            "--output-file",
+            str(rgbd_dir / "generated_dataset_rgbd.hdf5"),
+            "--success-manifest",
+            str(rgbd_dir / "successes.jsonl"),
+            "--failure-manifest",
+            str(rgbd_dir / "failures.jsonl"),
+            "--rgbd-output-dir",
+            str(rgbd_dir / "renders"),
+            "--rgbd-manifest",
+            str(rgbd_dir / "manifest.jsonl"),
+            "--trials",
+            "1",
+            "--domain-variants",
+            "1",
+            "--seed",
+            str(request.seed),
+            "--env-name",
+            request.isaac_lab_policy_task_name,
+            "--robotis-domain-randomization-profile",
+            self._generation_domain_randomization_profile(request),
+            "--visual-task",
+            request.isaac_lab_policy_task_name,
+            "--visual-num-envs",
+            "1",
+            "--external-callback",
+            request.mimic_external_callback,
+            "--robotis-camera-mode",
+            self._camera_mode(request),
+            "--robotis-camera-width",
+            str(request.mimic_camera_width),
+            "--robotis-camera-height",
+            str(request.mimic_camera_height),
+            "--rendering-mode",
+            "balanced",
+            "--viz",
+            "kit",
+            "--kit-args",
+            ISAAC_LAB_VIEWPORT_KIT_ARGS,
+            "--visual-fps",
+            "0",
+            "--visual-max-demos",
+            "0",
+            "--summary-file",
+            str(rgbd_dir / "summary.json"),
+        ]
+        if request.mimic_enable_cameras:
+            command.append("--enable-cameras")
+        return command
+
+    @staticmethod
+    def _mirror_render_endpoint(request: IsaacLabSyntheticRequest) -> str:
+        endpoint = str(getattr(request, "isaac_mirror_endpoint", "") or "http://127.0.0.1:8766/joints").strip()
+        trimmed = endpoint.rstrip("/")
+        if trimmed.endswith("/render"):
+            return trimmed
+        if trimmed.endswith("/joints"):
+            return trimmed[: -len("/joints")] + "/render"
+        return trimmed + "/render"
+
+    def _annotation_command(self, request: IsaacLabSyntheticRequest, input_file: Path, output_file: Path) -> list[str]:
+        isaac_python = Path(request.isaac_sim_python).expanduser() if request.isaac_sim_python else DEFAULT_ISAAC_SIM_PYTHON
+        isaac_lab_root = Path(request.isaac_lab_path).expanduser() if request.isaac_lab_path else Path("/home/jin/IsaacLab")
+        script = isaac_lab_root / MIMIC_SCRIPT_RELATIVE_PATHS["annotate_demos"]
+        command = [
+            *_python_script_command(isaac_python, script),
+            "--task",
+            request.isaac_lab_task_name,
+            "--input_file",
+            str(input_file),
+            "--output_file",
+            str(output_file),
+            "--external_callback",
+            request.mimic_external_callback,
+            "--robotis-domain-randomization-profile",
+            self._generation_domain_randomization_profile(request),
+            "--robotis-camera-mode",
+            self._camera_mode(request),
+            "--robotis-camera-width",
+            str(request.mimic_camera_width),
+            "--robotis-camera-height",
+            str(request.mimic_camera_height),
             "--headless",
         ]
+        if request.mimic_enable_cameras:
+            command.append("--enable_cameras")
+            command.extend(["--rendering_mode", request.mimic_rendering_mode])
+        if request.mimic_annotate_auto:
+            command.append("--auto")
+        return command
+
+    def _il_train_command(self, request: IsaacLabSyntheticRequest, dataset_file: Path) -> list[str]:
+        isaac_python = Path(request.isaac_sim_python).expanduser() if request.isaac_sim_python else DEFAULT_ISAAC_SIM_PYTHON
+        isaac_lab_root = Path(request.isaac_lab_path).expanduser() if request.isaac_lab_path else Path("/home/jin/IsaacLab")
+        output_root = self._output_root(request, self._dataset_path(request))
+        wrapper = self.repo_root / "scripts" / "lerobot_isaac_lab_robomimic_train.py"
+        command = [
+            *_python_script_command(isaac_python, wrapper),
+            "--isaac-lab-path",
+            str(isaac_lab_root),
+            "--task",
+            request.isaac_lab_policy_task_name,
+            "--algo",
+            request.robomimic_algo,
+            "--dataset",
+            str(dataset_file),
+            "--name",
+            request.robomimic_train_name,
+            "--log_dir",
+            str(output_root / "il" / "robomimic"),
+            "--epochs",
+            str(request.e2e_train_steps),
+            "--robotis-domain-randomization-profile",
+            request.domain_randomization_profile,
+            "--robotis-camera-mode",
+            self._camera_mode(request),
+            "--robotis-camera-width",
+            str(request.mimic_camera_width),
+            "--robotis-camera-height",
+            str(request.mimic_camera_height),
+        ]
+        if request.robomimic_normalize_training_actions:
+            command.append("--normalize_training_actions")
+        return command
+
+    @staticmethod
+    def _generation_domain_randomization_profile(request: IsaacLabSyntheticRequest) -> str:
+        if request.domain_randomization_profile == "stress":
+            return "conservative"
+        return request.domain_randomization_profile
+
+    @staticmethod
+    def _mimic_generation_domain_randomization_profile(request: IsaacLabSyntheticRequest) -> str:
+        return IsaacLabSyntheticPipeline._generation_domain_randomization_profile(request)
+
+    @staticmethod
+    def _per_episode_generation_contract(output_root: Path) -> dict[str, Any]:
+        return {
+            "enabled": True,
+            "shard_policy": "one_demo_hdf5_per_source_episode",
+            "source_object_reset_policy": "per_episode_initial_red_cube_pose",
+            "shard_dir": str(output_root / "mimic" / "official_per_episode") if str(output_root) else "",
+            "summary_file": str(output_root / "mimic" / "official_mimic_summary.json") if str(output_root) else "",
+            "success_manifest": str(output_root / "mimic" / "successes.jsonl") if str(output_root) else "",
+            "failure_manifest": str(output_root / "mimic" / "failures.jsonl") if str(output_root) else "",
+        }
+
+    @staticmethod
+    def _source_red_cube_reset_pose(hdf5_path: str) -> dict[str, Any]:
+        path = Path(str(hdf5_path or "")).expanduser()
+        if not path.is_file():
+            return {"ok": False, "path": str(path), "blocker": "HDF5_FILE_MISSING"}
+        try:
+            import h5py
+            import numpy as np
+        except Exception as exc:  # noqa: BLE001 - dependency availability differs in lightweight tests.
+            return {"ok": False, "path": str(path), "blocker": "HDF5_IMPORT_FAILED", "detail": str(exc)}
+        try:
+            with h5py.File(path, "r") as handle:
+                data = handle.get("data")
+                if data is None:
+                    return {"ok": False, "path": str(path), "blocker": "DATA_GROUP_MISSING"}
+                demo_names = sorted(str(name) for name in data.keys() if str(name).startswith("demo_"))
+                if not demo_names:
+                    return {"ok": False, "path": str(path), "blocker": "DEMO_GROUPS_MISSING"}
+                demo_name = demo_names[0]
+                demo = data[demo_name]
+                root_pose = demo.get("initial_state/rigid_object/red_cube/root_pose")
+                if root_pose is not None and root_pose.shape[0] >= 1 and root_pose.shape[-1] >= 7:
+                    pose = np.asarray(root_pose[0], dtype=float)
+                    xyz = pose[:3].tolist()
+                    yaw = IsaacLabSyntheticPipeline._yaw_from_quat_xyzw(pose[3:7])
+                    if yaw is None:
+                        yaw = 0.0
+                    return {
+                        "ok": IsaacLabSyntheticPipeline._finite_values([*xyz, yaw]),
+                        "path": str(path),
+                        "demo": demo_name,
+                        "source": "initial_state/rigid_object/red_cube/root_pose",
+                        "xyz_m": [float(value) for value in xyz],
+                        "yaw_rad": float(yaw),
+                    }
+                matrix = demo.get("obs/datagen_info/object_pose/red_cube")
+                if matrix is None:
+                    matrix = demo.get("obs/object_pose")
+                if matrix is not None and matrix.shape[0] >= 1 and matrix.shape[-2:] == (4, 4):
+                    pose = np.asarray(matrix[0], dtype=float)
+                    xyz = pose[:3, 3].tolist()
+                    yaw = float(math.atan2(float(pose[1, 0]), float(pose[0, 0])))
+                    return {
+                        "ok": IsaacLabSyntheticPipeline._finite_values([*xyz, yaw]),
+                        "path": str(path),
+                        "demo": demo_name,
+                        "source": "obs/datagen_info/object_pose/red_cube",
+                        "xyz_m": [float(value) for value in xyz],
+                        "yaw_rad": yaw,
+                    }
+        except Exception as exc:  # noqa: BLE001 - HDF5 files may be partial or legacy.
+            return {"ok": False, "path": str(path), "blocker": "HDF5_READ_FAILED", "detail": str(exc)}
+        return {"ok": False, "path": str(path), "blocker": "RED_CUBE_POSE_MISSING"}
+
+    @staticmethod
+    def _source_object_reset_contract(hdf5_path: str) -> dict[str, Any]:
+        source_reset = IsaacLabSyntheticPipeline._source_red_cube_reset_pose(hdf5_path)
+        if not source_reset.get("ok"):
+            return {
+                "enabled": False,
+                "object_name": "red_cube",
+                "blocker": str(source_reset.get("blocker") or "RED_CUBE_POSE_MISSING"),
+                "path": str(source_reset.get("path") or hdf5_path),
+            }
+        xyz = [float(IsaacLabSyntheticPipeline._format_float(value)) for value in source_reset["xyz_m"]]
+        yaw = float(IsaacLabSyntheticPipeline._format_float(source_reset["yaw_rad"]))
+        return {
+            "enabled": True,
+            "object_name": "red_cube",
+            "policy": "lock_generation_reset_to_source_demo_initial_pose",
+            "path": str(source_reset.get("path") or hdf5_path),
+            "demo": str(source_reset.get("demo") or ""),
+            "source": str(source_reset.get("source") or ""),
+            "xyz_m": xyz,
+            "yaw_rad": yaw,
+        }
+
+    @staticmethod
+    def _yaw_from_quat_xyzw(quat: Any) -> float | None:
+        try:
+            x, y, z, w = [float(value) for value in quat]
+        except (TypeError, ValueError):
+            return None
+        values = [x, y, z, w]
+        if not IsaacLabSyntheticPipeline._finite_values(values):
+            return None
+        siny_cosp = 2.0 * (w * z + x * y)
+        cosy_cosp = 1.0 - 2.0 * (y * y + z * z)
+        return float(math.atan2(siny_cosp, cosy_cosp))
+
+    @staticmethod
+    def _finite_values(values: list[float]) -> bool:
+        return all(math.isfinite(float(value)) for value in values)
+
+    @staticmethod
+    def _format_csv_floats(values: list[float]) -> str:
+        return ",".join(IsaacLabSyntheticPipeline._format_float(value) for value in values)
+
+    @staticmethod
+    def _format_float(value: float) -> str:
+        text = f"{float(value):.6f}".rstrip("0").rstrip(".")
+        return text or "0"
+
+    @staticmethod
+    def _camera_mode(request: IsaacLabSyntheticRequest) -> str:
+        return "rgbd" if request.mimic_enable_cameras else "off"
+
+    def _il_play_command(self, request: IsaacLabSyntheticRequest, checkpoint: Path) -> list[str]:
+        isaac_python = Path(request.isaac_sim_python).expanduser() if request.isaac_sim_python else DEFAULT_ISAAC_SIM_PYTHON
+        isaac_lab_root = Path(request.isaac_lab_path).expanduser() if request.isaac_lab_path else Path("/home/jin/IsaacLab")
+        wrapper = self.repo_root / "scripts" / "lerobot_isaac_lab_robomimic_play.py"
+        command = [
+            *_python_script_command(isaac_python, wrapper),
+            "--isaac-lab-path",
+            str(isaac_lab_root),
+            "--task",
+            request.isaac_lab_policy_task_name,
+            "--checkpoint",
+            str(checkpoint),
+            "--num_rollouts",
+            str(request.il_eval_num_rollouts),
+            "--horizon",
+            str(request.il_eval_horizon),
+            "--robotis-domain-randomization-profile",
+            request.domain_randomization_profile,
+        ]
+        if not request.isaac_lab_visualize_generation:
+            command.append("--headless")
+        else:
+            command.extend(["--viz", "kit", "--kit_args", ISAAC_LAB_VIEWPORT_KIT_ARGS])
+            command.extend(["--rendering_mode", "balanced"])
+        if request.mimic_enable_cameras:
+            command.append("--enable_cameras")
+            if "--rendering_mode" not in command:
+                command.extend(["--rendering_mode", request.mimic_rendering_mode])
+        return command
+
+    def _default_robomimic_checkpoint(self, output_root: Path) -> Path:
+        return output_root / "il" / "robomimic" / "models" / "model_epoch_best.pth"
+
+    def _resolve_robomimic_checkpoint(self, output_root: Path) -> Path | None:
+        root = output_root / "il" / "robomimic"
+        if not root.is_dir():
+            return None
+        candidates = [path for path in root.rglob("*.pth") if path.is_file()]
+        if not candidates:
+            return None
+        by_models_dir: dict[Path, list[Path]] = defaultdict(list)
+        for checkpoint in candidates:
+            by_models_dir[checkpoint.parent].append(checkpoint)
+        latest_models_dir = max(
+            by_models_dir,
+            key=lambda path: max(self._checkpoint_mtime_ns(checkpoint) for checkpoint in by_models_dir[path]),
+        )
+        latest_candidates = by_models_dir[latest_models_dir]
+        best_candidates = [path for path in latest_candidates if path.name == "model_epoch_best.pth"]
+        if best_candidates:
+            return max(best_candidates, key=self._checkpoint_mtime_ns)
+        return max(
+            latest_candidates,
+            key=lambda path: (
+                self._checkpoint_epoch(path),
+                self._checkpoint_mtime_ns(path),
+                str(path),
+            ),
+        )
+
+    @staticmethod
+    def _checkpoint_mtime_ns(path: Path) -> int:
+        try:
+            return path.stat().st_mtime_ns
+        except OSError:
+            return 0
+
+    @staticmethod
+    def _checkpoint_epoch(path: Path) -> int:
+        match = re.search(r"model_epoch_(\d+)", path.name)
+        if match:
+            return int(match.group(1))
+        return -1
+
+    def _il_robust_eval_command(self, request: IsaacLabSyntheticRequest, input_dir: Path) -> list[str]:
+        isaac_python = Path(request.isaac_sim_python).expanduser() if request.isaac_sim_python else DEFAULT_ISAAC_SIM_PYTHON
+        isaac_lab_root = Path(request.isaac_lab_path).expanduser() if request.isaac_lab_path else Path("/home/jin/IsaacLab")
+        output_root = self._output_root(request, self._dataset_path(request))
+        wrapper = self.repo_root / "scripts" / "lerobot_isaac_lab_robomimic_robust_eval.py"
+        command = [
+            *_python_script_command(isaac_python, wrapper),
+            "--isaac-lab-path",
+            str(isaac_lab_root),
+            "--task",
+            request.isaac_lab_policy_task_name,
+            "--input_dir",
+            str(input_dir),
+            "--num_rollouts",
+            str(request.il_eval_num_rollouts),
+            "--horizon",
+            str(request.il_eval_horizon),
+            "--robotis-domain-randomization-profile",
+            request.domain_randomization_profile,
+            "--robotis-camera-mode",
+            self._camera_mode(request),
+            "--robotis-camera-width",
+            str(request.mimic_camera_width),
+            "--robotis-camera-height",
+            str(request.mimic_camera_height),
+            "--log_file",
+            str(output_root / "il" / "eval" / "results"),
+        ]
+        if not request.isaac_lab_visualize_generation:
+            command.append("--headless")
+        else:
+            command.extend(["--viz", "kit", "--kit_args", ISAAC_LAB_VIEWPORT_KIT_ARGS])
+            command.extend(["--rendering_mode", "balanced"])
+        if request.mimic_enable_cameras:
+            command.append("--enable_cameras")
+            if "--rendering_mode" not in command:
+                command.extend(["--rendering_mode", request.mimic_rendering_mode])
+        return command
 
     def _hdf5_response(
         self,
@@ -830,6 +2210,7 @@ class IsaacLabSyntheticPipeline:
     def _export_canonical_to_hdf5(
         self,
         *,
+        request: IsaacLabSyntheticRequest,
         dataset_path: Path,
         canonical_manifest_path: Path,
         canonical_rows: list[dict[str, Any]],
@@ -849,7 +2230,7 @@ class IsaacLabSyntheticPipeline:
             if any(row.get("episode_success") is False for row in episode_rows):
                 skipped.append({"episode_index": episode_index, "reason": "EPISODE_MARKED_FAILED"})
                 continue
-            episode_path = dataset_path / "data" / "chunk-000" / f"episode_{episode_index:06d}.parquet"
+            episode_path = self._episode_data_file_path(dataset_path, episode_index)
             if not episode_path.is_file():
                 skipped.append({"episode_index": episode_index, "reason": "PARQUET_MISSING", "path": str(episode_path)})
                 continue
@@ -927,10 +2308,15 @@ class IsaacLabSyntheticPipeline:
             tmp_path.unlink()
         with h5py.File(tmp_path, "w") as handle:
             handle.attrs["schema"] = "atr.lerobot.isaac_lab_hdf5_export.v1"
+            handle.attrs["format_version"] = 1
             handle.attrs["dataset_path"] = str(dataset_path)
             handle.attrs["canonical_manifest_path"] = str(canonical_manifest_path)
             handle.attrs["total"] = sum(int(item["frame_count"]) for item in exported)
+            env_args_json = json.dumps({"env_name": request.isaac_lab_task_name, "type": 2, "env_kwargs": {}})
+            handle.attrs["env_args"] = env_args_json
             data_group = handle.create_group("data")
+            data_group.attrs["total"] = sum(int(item["frame_count"]) for item in exported)
+            data_group.attrs["env_args"] = env_args_json
             for episode_index, parsed in sorted(parsed_episodes.items()):
                 demo = data_group.create_group(f"demo_{episode_index:06d}")
                 demo.attrs["episode_index"] = episode_index
@@ -941,6 +2327,20 @@ class IsaacLabSyntheticPipeline:
                 demo.create_dataset("frame_indices", data=parsed["frame_indices"])
                 obs = demo.create_group("obs")
                 obs.create_dataset("robot_state", data=parsed["states"])
+                obs.create_dataset("joint_pos", data=parsed["joint_pos"])
+                obs.create_dataset("gripper_state", data=parsed["gripper_state"])
+                obs.create_dataset("object_pose", data=parsed["object_pose"])
+                obs.create_dataset("eef_pose", data=parsed["eef_pose"])
+                datagen = obs.create_group("datagen_info")
+                object_pose_group = datagen.create_group("object_pose")
+                object_pose_group.create_dataset("red_cube", data=parsed["object_pose"])
+                eef_pose_group = datagen.create_group("eef_pose")
+                eef_pose_group.create_dataset("omx", data=parsed["eef_pose"])
+                target_eef_pose_group = datagen.create_group("target_eef_pose")
+                target_eef_pose_group.create_dataset("omx", data=parsed["target_eef_pose"])
+                subtask_term_signals = datagen.create_group("subtask_term_signals")
+                for signal_name, values in parsed["subtask_term_signals"].items():
+                    subtask_term_signals.create_dataset(signal_name, data=values)
                 canonical = demo.create_group("canonical")
                 canonical.attrs["schema"] = "atr.lerobot.canonical_episode_hdf5_sidecar.v1"
                 string_dtype = h5py.string_dtype(encoding="utf-8")
@@ -952,6 +2352,8 @@ class IsaacLabSyntheticPipeline:
                     availability.create_dataset(source, data=np.asarray(values, dtype=np.bool_))
         tmp_path.replace(output_path)
         exported_frame_count = sum(int(item["frame_count"]) for item in exported)
+        contract_report = validate_isaac_lab_hdf5_contract(output_path, expected_env_name=request.isaac_lab_task_name)
+        _atomic_write_json(output_path.with_name("hdf5_contract_report.json"), contract_report)
         return {
             "schema": "atr.lerobot.isaac_lab_hdf5_export.summary.v1",
             "ok": True,
@@ -966,6 +2368,9 @@ class IsaacLabSyntheticPipeline:
             "exported_frame_count": exported_frame_count,
             "exported_episodes": exported,
             "skipped_episodes": skipped,
+            "contract_report_path": str(output_path.with_name("hdf5_contract_report.json")),
+            "contract_ok": bool(contract_report.get("ok")),
+            "contract_blockers": list(contract_report.get("blockers") or []),
             "required_next_parser_fields": [],
         }
 
@@ -978,6 +2383,7 @@ class IsaacLabSyntheticPipeline:
     ) -> dict[str, Any]:
         import numpy as np
 
+        data = self._episode_filtered_table_data(data, episode_index)
         frame_values = data.get("frame_index") or list(range(len(data["action"])))
         row_by_frame = {_safe_int(frame, index, minimum=0): index for index, frame in enumerate(frame_values)}
         ordered_rows = sorted(canonical_rows, key=lambda item: _safe_int(item.get("frame_index"), 0, minimum=0))
@@ -1018,16 +2424,129 @@ class IsaacLabSyntheticPipeline:
             missing_sources.append(",".join(str(item) for item in missing))
             raw_depth = row.get("raw_depth") if isinstance(row.get("raw_depth"), dict) else {}
             raw_depth_paths.append(str(raw_depth.get("path") or ""))
+        states_array = np.asarray(states, dtype=np.float64)
+        actions_array = np.asarray(actions, dtype=np.float64)
+        object_pose = self._pose_matrices_from_xyz(np.zeros((len(actions), 3), dtype=np.float64))
+        eef_pose = self._eef_pose_matrices_from_states(states_array)
         return {
-            "actions": np.asarray(actions, dtype=np.float64),
-            "states": np.asarray(states, dtype=np.float64),
+            "actions": actions_array,
+            "states": states_array,
             "timestamps": np.asarray(timestamps, dtype=np.float64),
             "frame_indices": np.asarray(frame_indices, dtype=np.int64),
+            "joint_pos": states_array,
+            "gripper_state": self._gripper_state_from_actions(actions_array),
+            "object_pose": object_pose,
+            "eef_pose": eef_pose,
+            "target_eef_pose": eef_pose.copy(),
+            "subtask_term_signals": self._subtask_term_signals(len(actions)),
             "source_availability": dict(source_availability),
             "grasp_event_labels": grasp_event_labels,
             "missing_sources": missing_sources,
             "raw_depth_paths": raw_depth_paths,
         }
+
+    @staticmethod
+    def _episode_filtered_table_data(data: dict[str, list[Any]], episode_index: int) -> dict[str, list[Any]]:
+        episode_values = data.get("episode_index")
+        if not isinstance(episode_values, list):
+            return data
+        selected = [
+            index
+            for index, value in enumerate(episode_values)
+            if _safe_int(value, -1, minimum=-1) == int(episode_index)
+        ]
+        if not selected:
+            return data
+        row_count = len(episode_values)
+        filtered: dict[str, list[Any]] = {}
+        for key, values in data.items():
+            if isinstance(values, list) and len(values) == row_count:
+                filtered[key] = [values[index] for index in selected]
+            else:
+                filtered[key] = values
+        return filtered
+
+    @staticmethod
+    def _episode_data_file_path(dataset_path: Path, episode_index: int) -> Path:
+        info = _read_json(dataset_path / "meta" / "info.json")
+        chunks_size = _safe_int(info.get("chunks_size"), 1000, minimum=1)
+        episode_chunk = int(episode_index) // chunks_size
+        template = str(info.get("data_path") or "").strip()
+        format_values = {
+            "episode_index": int(episode_index),
+            "episode_chunk": episode_chunk,
+            "chunk_index": episode_chunk,
+            "file_index": episode_chunk,
+        }
+        candidates: list[Path] = []
+        if template:
+            try:
+                candidates.append(dataset_path / template.format(**format_values))
+            except (KeyError, ValueError):
+                pass
+        candidates.extend(
+            [
+                dataset_path / "data" / f"chunk-{episode_chunk:03d}" / f"episode_{episode_index:06d}.parquet",
+                dataset_path / "data" / "chunk-000" / f"episode_{episode_index:06d}.parquet",
+                dataset_path / "data" / f"chunk-{episode_chunk:03d}" / f"file-{episode_chunk:03d}.parquet",
+            ]
+        )
+        for candidate in candidates:
+            if candidate.is_file():
+                return candidate
+        return candidates[0]
+
+    @staticmethod
+    def _pose_matrices_from_xyz(xyz: Any) -> Any:
+        import numpy as np
+
+        positions = np.asarray(xyz, dtype=np.float64)
+        if positions.ndim != 2 or positions.shape[1] != 3:
+            positions = np.zeros((max(1, positions.shape[0] if positions.ndim else 1), 3), dtype=np.float64)
+        poses = np.repeat(np.eye(4, dtype=np.float64)[None, :, :], positions.shape[0], axis=0)
+        poses[:, :3, 3] = positions
+        return poses
+
+    @classmethod
+    def _eef_pose_matrices_from_states(cls, states: Any) -> Any:
+        import numpy as np
+
+        state_array = np.asarray(states, dtype=np.float64)
+        positions = np.zeros((state_array.shape[0], 3), dtype=np.float64)
+        if state_array.ndim == 2 and state_array.shape[1] > 0:
+            dims = min(3, state_array.shape[1])
+            positions[:, :dims] = state_array[:, :dims]
+        return cls._pose_matrices_from_xyz(positions)
+
+    @staticmethod
+    def _gripper_state_from_actions(actions: Any) -> Any:
+        import numpy as np
+
+        action_array = np.asarray(actions, dtype=np.float64)
+        if action_array.ndim != 2 or action_array.shape[1] == 0:
+            return np.zeros((max(1, action_array.shape[0] if action_array.ndim else 1), 1), dtype=np.float64)
+        return action_array[:, -1:].astype(np.float64)
+
+    @staticmethod
+    def _subtask_term_signals(frame_count: int) -> dict[str, Any]:
+        import numpy as np
+
+        count = max(1, int(frame_count))
+        fractions = {
+            "approach": 0.25,
+            "grasp": 0.45,
+            "lift": 0.65,
+            "cube_lifted": 0.65,
+            "place": 0.85,
+            "released_at_target": 0.85,
+        }
+        signals: dict[str, Any] = {}
+        for name, fraction in fractions.items():
+            index = min(count - 1, max(1, int(round(count * fraction)))) if count > 1 else 0
+            values = np.zeros((count, 1), dtype=np.bool_)
+            values[index:] = True
+            signals[name] = values
+        return signals
 
     @staticmethod
     def _numeric_vector(value: Any, *, field: str, frame_index: int) -> list[float]:
@@ -1095,6 +2614,12 @@ class IsaacLabSyntheticPipeline:
             expected_render_rows=expected_render_rows,
         )
         action_consistency_validation = self._replicator_action_consistency_validation(output_root, manifest_rows)
+        visualization = {
+            "enabled": bool(request.isaac_lab_visualize_generation),
+            "headless": not bool(request.isaac_lab_visualize_generation),
+            "mode": "viewport" if request.isaac_lab_visualize_generation else "headless",
+            "applies_to": ["replicator_worker", "mimic_generation", "il_eval", "rl_teacher"],
+        }
         base = {
             "schema": REPLICATOR_SUMMARY_SCHEMA,
             "enabled": bool(request.enable_replicator),
@@ -1137,6 +2662,7 @@ class IsaacLabSyntheticPipeline:
             "fidelity_weight": 1.0,
             "runtime_probe": runtime_probe,
             "isaac_sim_smoke": isaac_sim_smoke,
+            "visualization": visualization,
         }
         if not request.enable_replicator:
             return {
@@ -1576,6 +3102,9 @@ class IsaacLabSyntheticPipeline:
             "--camera-pose-strength",
             str((post_render_augmentation.get("camera_pose") or {}).get("strength", 0.0)),
         ]
+        visualization = dict(summary.get("visualization") or {})
+        if bool(visualization.get("enabled")):
+            command.append("--visualize-generation")
         return {
             "schema": "atr.lerobot.replicator_synthetic.build_plan.v1",
             "status": summary.get("status", "skipped"),
@@ -1599,10 +3128,12 @@ class IsaacLabSyntheticPipeline:
             "attempts_per_source_frame": summary.get("attempts_per_source_frame", 1),
             "runtime_probe": dict(summary.get("runtime_probe") or {}),
             "isaac_sim_smoke": dict(summary.get("isaac_sim_smoke") or {}),
+            "visualization": visualization,
             "worker": {
                 "script": str(worker_script),
                 "python": isaac_sim_python or "<isaac-sim-python>",
                 "command": command,
+                "visualization": visualization,
             },
             "outputs": {
                 "rgb_root": "rgb",
@@ -1718,23 +3249,28 @@ class IsaacLabSyntheticPipeline:
                 "grasp": "grasp_candidate_or_two_finger_contact",
                 "lift": "object_lifted",
                 "place": "object_pose_in_place_region",
-                "release": "grasp_event_label_released",
+                "cube_lifted": "object_lifted",
+                "released_at_target": "place_region_and_gripper_released",
             },
             "reset_events": {
                 "object_pose_randomization": {
                     "workspace": "a4_sheet",
-                    "xy_bounds_m": {"x": [-0.105, 0.105], "y": [-0.1485, 0.1485]},
-                    "yaw_bounds_rad": [-3.14159265, 3.14159265],
+                    "enabled": False,
+                    "source": "recorded_specimen_pose",
+                    "xy_bounds_m": {"x": [0.0, 0.0], "y": [0.0, 0.0]},
+                    "yaw_bounds_rad": [0.0, 0.0],
                     "attempts_per_source_frame": request.attempts_per_source_frame,
                 },
                 "physics_material_randomization": {
-                    "enabled": request.render_strength > 0.0,
-                    "strength": request.render_strength,
+                    "enabled": False,
+                    "source": "recorded_physics_materials",
+                    "strength": 0.0,
                     "objects": ["red_cube", "paper_table", "gripper_inner_pad"],
                 },
+                "environment_randomization": self._environment_domain_randomization_contract(request),
                 "camera_randomization": {
-                    "enabled": request.camera_pose_strength > 0.0,
-                    "strength": request.camera_pose_strength,
+                    "enabled": False,
+                    "strength": 0.0,
                     "cameras": list(request.cameras),
                 },
                 "sensor_noise": {
@@ -1763,9 +3299,10 @@ class IsaacLabSyntheticPipeline:
         output_root: Path,
         event_config_path: Path,
     ) -> dict[str, Any]:
+        environment = self._environment_domain_randomization_contract(request)
         return {
             "schema": "atr.lerobot.isaac_lab_domain_randomization_events.v1",
-            "owner": "isaac_lab_reset_events",
+            "owner": "isaac_lab_environment_visual_events",
             "generated_at": _now(),
             "dataset_path": str(dataset_path),
             "output_root": str(output_root),
@@ -1773,35 +3310,41 @@ class IsaacLabSyntheticPipeline:
             "docs_api": "EventTermCfg",
             "events": [
                 {
-                    "name": "randomize_cube_pose_a4",
+                    "name": "randomize_environment_lighting",
                     "phase": "reset",
-                    "mode": "pose",
+                    "mode": "visual_lighting",
                     "params": {
-                        "workspace": "a4_sheet",
-                        "frame": "robot_base",
-                        "xy_bounds_m": {"x": [-0.105, 0.105], "y": [-0.1485, 0.1485]},
-                        "yaw_bounds_rad": [-3.14159265, 3.14159265],
-                        "attempts_per_source_frame": request.attempts_per_source_frame,
+                        "cube_pose_locked": True,
+                        "cube_material_locked": True,
+                        "lighting_intensity_scale": environment["lighting_intensity_scale"],
+                        "color_temperature_shift_k": environment["color_temperature_shift_k"],
+                        "shadow_softness_scale": environment["shadow_softness_scale"],
                     },
                 },
                 {
-                    "name": "randomize_physics_materials",
+                    "name": "randomize_environment_appearance",
                     "phase": "reset",
-                    "mode": "physics_material",
+                    "mode": "visual_material",
                     "params": {
-                        "strength": request.render_strength,
-                        "cube_material": "3d_printed_pla",
-                        "table_material": "paper",
-                        "gripper_inner_pad_material": "anti_slip_tape",
+                        "cube_material_locked": True,
+                        "physics_material_locked": True,
+                        "table_color_brightness": environment["table_color_brightness"],
+                        "background_brightness": environment["background_brightness"],
+                        "a4_brightness": environment["a4_brightness"],
                     },
                 },
                 {
-                    "name": "randomize_camera_pose",
+                    "name": "randomize_camera_sensor",
                     "phase": "reset",
-                    "mode": "camera_pose",
+                    "mode": "camera_sensor",
                     "params": {
-                        "strength": request.camera_pose_strength,
+                        "camera_pose_locked": True,
                         "cameras": list(request.cameras),
+                        "camera_exposure_scale": environment["camera_exposure_scale"],
+                        "camera_gamma": environment["camera_gamma"],
+                        "white_balance_rgb_scale": environment["white_balance_rgb_scale"],
+                        "rgb_noise_sigma": environment["rgb_noise_sigma"],
+                        "rgb_blur_px": environment["rgb_blur_px"],
                     },
                 },
                 {
@@ -1811,10 +3354,46 @@ class IsaacLabSyntheticPipeline:
                     "params": {
                         "rgb_strength": request.rgb_strength,
                         "depth_strength": request.depth_strength,
+                        "depth_noise_mm": environment["depth_noise_mm"],
+                        "depth_dropout_ratio": environment["depth_dropout_ratio"],
                         "depth_source": "d405_raw_depth_profile",
                     },
                 },
             ],
+        }
+
+    @staticmethod
+    def _environment_domain_randomization_contract(request: IsaacLabSyntheticRequest) -> dict[str, Any]:
+        profile = get_profile(str(request.domain_randomization_profile or "standard"))
+
+        def as_list(key: str) -> list[float]:
+            lo, hi = profile[key]
+            return [float(lo), float(hi)]
+
+        return {
+            "profile": str(request.domain_randomization_profile or "standard"),
+            "mode": "environment_only",
+            "locked": {
+                "cube_pose": True,
+                "cube_material": True,
+                "cube_mass": True,
+                "cube_friction": True,
+                "gripper_physics": True,
+                "contact_offsets": True,
+            },
+            "lighting_intensity_scale": as_list("lighting_intensity_scale"),
+            "color_temperature_shift_k": as_list("color_temperature_shift_k"),
+            "shadow_softness_scale": as_list("shadow_softness_scale"),
+            "table_color_brightness": as_list("table_color_brightness"),
+            "background_brightness": as_list("background_brightness"),
+            "a4_brightness": as_list("a4_brightness"),
+            "camera_exposure_scale": as_list("camera_exposure_scale"),
+            "camera_gamma": as_list("camera_gamma"),
+            "white_balance_rgb_scale": as_list("white_balance_rgb_scale"),
+            "rgb_noise_sigma": as_list("rgb_noise_sigma"),
+            "rgb_blur_px": as_list("rgb_blur_px"),
+            "depth_noise_mm": as_list("depth_noise_mm"),
+            "depth_dropout_ratio": as_list("depth_dropout_ratio"),
         }
 
     @staticmethod
@@ -1881,7 +3460,11 @@ class IsaacLabSyntheticPipeline:
             "output_root": str(output_root),
             "hdf5_path": str(mimic_summary.get("hdf5_path") or ""),
             "env_wrapper_manifest": env_manifest,
+            "mimic_generation_backend": request.mimic_generation_backend,
+            "backend_contract": self._mimic_backend_contract(request),
             "mimic_trials": request.mimic_trials,
+            "mimic_trials_per_source_episode": request.mimic_trials,
+            "domain_variants_per_source_episode": self._mimic_domain_variant_count(request),
             "mimic_num_envs": request.mimic_num_envs,
             "required_subtasks": list(mimic_summary.get("required_subtasks") or MIMIC_REQUIRED_SUBTASKS),
             "success_criteria": list(mimic_summary.get("success_criteria") or MIMIC_SUCCESS_CRITERIA),
@@ -1892,7 +3475,9 @@ class IsaacLabSyntheticPipeline:
                 "operation": "mimic_generate_dataset",
                 "hdf5": str(mimic_summary.get("hdf5_path") or ""),
                 "env_wrapper": env_manifest,
+                "backend": request.mimic_generation_backend,
                 "trials": request.mimic_trials,
+                "domain_variants": self._mimic_domain_variant_count(request),
                 "num_envs": request.mimic_num_envs,
             },
         }
@@ -2014,7 +3599,7 @@ class IsaacLabSyntheticPipeline:
         mimic_summary: dict[str, Any],
     ) -> dict[str, Any]:
         rows = self._dry_run_mimic_trajectory_rows(request, output_root, mimic_summary)
-        successes = [row for row in rows if row.get("metrics", {}).get("success") is True]
+        successes = self._with_hdf5_demo_names([row for row in rows if row.get("metrics", {}).get("success") is True])
         failures = [row for row in rows if row.get("metrics", {}).get("success") is not True]
         mimic_root = output_root / "mimic"
         _atomic_write_jsonl(mimic_root / "candidates.jsonl", rows)
@@ -2027,14 +3612,20 @@ class IsaacLabSyntheticPipeline:
             successes,
             source_type=IsaacSyntheticSourceType.ISAAC_LAB_MIMIC.value,
             output_root=output_root,
+            env_name=request.isaac_lab_policy_task_name,
+            preview_stem="mimic_generated",
         )
         small_hdf5_summary = self._write_generated_trajectory_hdf5(
             generated_dataset_small_path,
             successes[: min(len(successes), max(1, request.mimic_num_envs))],
             source_type=IsaacSyntheticSourceType.ISAAC_LAB_MIMIC.value,
             output_root=output_root,
+            env_name=request.isaac_lab_policy_task_name,
+            preview_stem="mimic_generated_small",
         )
         return {
+            "mimic_generation_backend": request.mimic_generation_backend,
+            "backend_contract": self._mimic_backend_contract(request),
             "candidate_count": len(rows),
             "success_count": len(successes),
             "failure_count": len(failures),
@@ -2045,6 +3636,7 @@ class IsaacLabSyntheticPipeline:
             "generated_dataset_small_path": str(generated_dataset_small_path),
             "generated_hdf5": generated_hdf5_summary,
             "generated_hdf5_small": small_hdf5_summary,
+            "preview": generated_hdf5_summary.get("preview", {}),
         }
 
     def _write_rl_teacher_generation_manifests(
@@ -2054,7 +3646,7 @@ class IsaacLabSyntheticPipeline:
         rl_teacher_summary: dict[str, Any],
     ) -> dict[str, Any]:
         rows = self._dry_run_rl_teacher_trajectory_rows(request, output_root, rl_teacher_summary)
-        successes = [row for row in rows if row.get("metrics", {}).get("success") is True]
+        successes = self._with_hdf5_demo_names([row for row in rows if row.get("metrics", {}).get("success") is True])
         failures = [row for row in rows if row.get("metrics", {}).get("success") is not True]
         rl_root = output_root / "rl_teacher"
         _atomic_write_jsonl(rl_root / "candidates.jsonl", rows)
@@ -2066,6 +3658,8 @@ class IsaacLabSyntheticPipeline:
             successes,
             source_type=IsaacSyntheticSourceType.ISAAC_LAB_RL_TEACHER.value,
             output_root=output_root,
+            env_name=request.isaac_lab_policy_task_name,
+            preview_stem="rl_teacher_generated",
         )
         return {
             "candidate_count": len(rows),
@@ -2076,7 +3670,16 @@ class IsaacLabSyntheticPipeline:
             "failure_manifest_path": str(rl_root / "failures.jsonl"),
             "generated_dataset_path": str(generated_dataset_path),
             "generated_hdf5": generated_hdf5_summary,
+            "preview": generated_hdf5_summary.get("preview", {}),
         }
+
+    @staticmethod
+    def _with_hdf5_demo_names(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        named_rows: list[dict[str, Any]] = []
+        for index, row in enumerate(rows):
+            generated_demo = str(row.get("generated_demo") or "").strip() or f"demo_{index}"
+            named_rows.append({**row, "generated_demo": generated_demo})
+        return named_rows
 
     def _write_generated_trajectory_hdf5(
         self,
@@ -2085,6 +3688,8 @@ class IsaacLabSyntheticPipeline:
         *,
         source_type: str,
         output_root: Path,
+        env_name: str,
+        preview_stem: str,
     ) -> dict[str, Any]:
         import h5py
         import numpy as np
@@ -2095,16 +3700,22 @@ class IsaacLabSyntheticPipeline:
             tmp_path.unlink()
         string_dtype = h5py.string_dtype(encoding="utf-8")
         with h5py.File(tmp_path, "w") as handle:
+            total_samples = sum(max(1, _safe_int(row.get("num_frames"), 1, minimum=1)) for row in rows)
+            env_args_json = json.dumps({"env_name": env_name, "type": 2, "env_kwargs": {}})
             handle.attrs["schema"] = "atr.lerobot.generated_trajectory_hdf5.v1"
             handle.attrs["source_type"] = source_type
             handle.attrs["output_root"] = str(output_root)
             handle.attrs["generated_at"] = _now()
             handle.attrs["success_count"] = len(rows)
             handle.attrs["trajectory_ids"] = json.dumps([str(row.get("trajectory_id") or "") for row in rows])
+            handle.attrs["total"] = total_samples
+            handle.attrs["env_args"] = env_args_json
             data_group = handle.create_group("data")
+            data_group.attrs["total"] = total_samples
+            data_group.attrs["env_args"] = env_args_json
             for index, row in enumerate(rows):
                 trajectory_id = str(row.get("trajectory_id") or row.get("source_id") or f"trajectory_{index:06d}")
-                trajectory = data_group.create_group(trajectory_id)
+                trajectory = data_group.create_group(f"demo_{index}")
                 actions = self._generated_hdf5_actions(row)
                 states = self._generated_hdf5_states(row, actions.shape[0])
                 frame_start = self._generated_frame_start(row)
@@ -2123,6 +3734,29 @@ class IsaacLabSyntheticPipeline:
                 trajectory.create_dataset("actions", data=actions)
                 trajectory.create_dataset("states", data=states)
                 trajectory.create_dataset("frame_indices", data=frame_indices)
+                obs_payload = self._generated_hdf5_observations(row, actions=actions, states=states)
+                obs_group = trajectory.create_group("obs")
+                obs_group.attrs["schema"] = "atr.lerobot.generated_trajectory_obs.v1"
+                obs_group.attrs["visual_source"] = "generated_pose_raster_v1"
+                for obs_name, values in obs_payload.items():
+                    dataset = obs_group.create_dataset(obs_name, data=values)
+                    if obs_name.endswith("_rgb"):
+                        dataset.attrs["encoding"] = "uint8_rgb"
+                        dataset.attrs["visual_source"] = "generated_pose_raster_v1"
+                    if obs_name.endswith("_depth"):
+                        dataset.attrs["encoding"] = "float32_meters"
+                        dataset.attrs["depth_scale_m_per_unit"] = 1.0
+                        dataset.attrs["visual_source"] = "generated_pose_raster_v1"
+                datagen = obs_group.create_group("datagen_info")
+                object_pose_datagen = datagen.create_group("object_pose")
+                object_pose_datagen.create_dataset("red_cube", data=obs_payload["object_pose"])
+                eef_pose_datagen = datagen.create_group("eef_pose")
+                eef_pose_datagen.create_dataset("omx", data=obs_payload["eef_pose"])
+                target_eef_pose_datagen = datagen.create_group("target_eef_pose")
+                target_eef_pose_datagen.create_dataset("omx", data=obs_payload["eef_pose"])
+                signals_datagen = datagen.create_group("subtask_term_signals")
+                for signal_name, values in self._subtask_term_signals(actions.shape[0]).items():
+                    signals_datagen.create_dataset(signal_name, data=values)
                 object_pose = row.get("object_pose_randomization") if isinstance(row.get("object_pose_randomization"), dict) else {}
                 object_pose_group = trajectory.create_group("object_pose_randomization")
                 for key, value in sorted(object_pose.items()):
@@ -2148,6 +3782,11 @@ class IsaacLabSyntheticPipeline:
                 artifact_json = json.dumps(row.get("artifacts") if isinstance(row.get("artifacts"), dict) else {})
                 trajectory.create_dataset("artifact_metadata", data=artifact_json, dtype=string_dtype)
         tmp_path.replace(output_path)
+        preview_summary = self._write_generated_hdf5_preview_contact_sheets(
+            output_path,
+            output_root=output_root,
+            preview_stem=preview_stem,
+        )
         return {
             "schema": "atr.lerobot.generated_trajectory_hdf5.summary.v1",
             "status": "passed",
@@ -2155,6 +3794,164 @@ class IsaacLabSyntheticPipeline:
             "source_type": source_type,
             "success_count": len(rows),
             "trajectory_ids": [str(row.get("trajectory_id") or "") for row in rows],
+            "preview": preview_summary,
+        }
+
+    @staticmethod
+    def _write_generated_hdf5_preview_contact_sheets(
+        hdf5_path: Path,
+        *,
+        output_root: Path,
+        preview_stem: str,
+        max_demos: int = 3,
+    ) -> dict[str, Any]:
+        try:
+            import h5py
+            import numpy as np
+            from PIL import Image, ImageDraw, ImageFont
+        except ImportError as exc:
+            return {
+                "schema": "atr.lerobot.generated_trajectory_preview.v1",
+                "status": "skipped",
+                "blocker": "PREVIEW_DEPENDENCY_MISSING",
+                "message": f"Preview generation requires h5py, numpy, and Pillow: {exc}",
+                "hdf5_path": str(hdf5_path),
+            }
+        if not hdf5_path.is_file():
+            return {
+                "schema": "atr.lerobot.generated_trajectory_preview.v1",
+                "status": "skipped",
+                "blocker": "PREVIEW_HDF5_MISSING",
+                "hdf5_path": str(hdf5_path),
+            }
+        preview_root = output_root / "previews"
+        preview_root.mkdir(parents=True, exist_ok=True)
+        rgb_path = preview_root / f"{preview_stem}_rgb_contact_sheet.png"
+        depth_path = preview_root / f"{preview_stem}_depth_contact_sheet.png"
+
+        def _font(size: int) -> Any:
+            try:
+                return ImageFont.truetype("DejaVuSans.ttf", size)
+            except OSError:
+                return None
+
+        label_font = _font(13)
+
+        def _label(image: Any, text: str) -> Any:
+            label_h = 22
+            canvas = Image.new("RGB", (image.width, image.height + label_h), (28, 28, 28))
+            canvas.paste(image.convert("RGB"), (0, label_h))
+            draw = ImageDraw.Draw(canvas)
+            draw.text((5, 3), text, fill=(235, 235, 235), font=label_font)
+            return canvas
+
+        def _save_atomic(image: Any, path: Path) -> None:
+            tmp_path = path.with_name(f"{path.name}.tmp.{os.getpid()}")
+            image.save(tmp_path, format="PNG")
+            tmp_path.replace(path)
+
+        def _depth_to_rgb(depth: Any) -> Any:
+            arr = np.asarray(depth).squeeze().astype(np.float32)
+            finite = np.isfinite(arr)
+            if finite.any():
+                vals = arr[finite]
+                lo, hi = np.percentile(vals, [2, 98])
+                if float(hi) <= float(lo):
+                    hi = float(lo) + 1e-6
+                norm = np.clip((arr - lo) / (hi - lo), 0.0, 1.0)
+            else:
+                norm = np.zeros_like(arr, dtype=np.float32)
+            red = np.clip((norm - 0.5) * 2.0, 0.0, 1.0)
+            green = 1.0 - np.abs(norm - 0.5) * 2.0
+            blue = np.clip((0.5 - norm) * 2.0, 0.0, 1.0)
+            rgb = np.stack([red, green, blue], axis=-1)
+            return Image.fromarray((rgb * 255.0).astype(np.uint8))
+
+        def _frame_indices(frame_count: int) -> list[int]:
+            if frame_count <= 1:
+                return [0]
+            return sorted({0, frame_count // 2, frame_count - 1})
+
+        def _sheet(tiles: list[Any]) -> Any:
+            if not tiles:
+                return Image.new("RGB", (1, 1), (28, 28, 28))
+            width = max(tile.width for tile in tiles)
+            height = sum(tile.height for tile in tiles)
+            canvas = Image.new("RGB", (width, height), (40, 40, 40))
+            y = 0
+            for tile in tiles:
+                canvas.paste(tile, (0, y))
+                y += tile.height
+            return canvas
+
+        demo_names: list[str] = []
+        rgb_rows: list[Any] = []
+        depth_rows: list[Any] = []
+        camera_names = ["top", "front", "right"]
+        frame_selection: list[int] = []
+        total_demo_count = 0
+        with h5py.File(hdf5_path, "r") as handle:
+            data_group = handle.get("data")
+            if data_group is None:
+                return {
+                    "schema": "atr.lerobot.generated_trajectory_preview.v1",
+                    "status": "skipped",
+                    "blocker": "PREVIEW_HDF5_DATA_GROUP_MISSING",
+                    "hdf5_path": str(hdf5_path),
+                }
+            all_demo_names = sorted(str(name) for name in data_group.keys())
+            total_demo_count = len(all_demo_names)
+            demo_names = all_demo_names[: max(1, max_demos)]
+            for demo_name in demo_names:
+                obs = data_group[demo_name].get("obs")
+                if obs is None:
+                    continue
+                first_rgb = next((obs.get(f"{camera}_rgb") for camera in camera_names if obs.get(f"{camera}_rgb") is not None), None)
+                first_depth = next((obs.get(f"{camera}_depth") for camera in camera_names if obs.get(f"{camera}_depth") is not None), None)
+                sample_dataset = first_rgb if first_rgb is not None else first_depth
+                if sample_dataset is None or not sample_dataset.shape:
+                    continue
+                frame_selection = _frame_indices(int(sample_dataset.shape[0]))
+                for frame_index in frame_selection:
+                    rgb_tiles: list[Any] = []
+                    depth_tiles: list[Any] = []
+                    for camera in camera_names:
+                        rgb_dataset = obs.get(f"{camera}_rgb")
+                        if rgb_dataset is not None and frame_index < int(rgb_dataset.shape[0]):
+                            rgb = Image.fromarray(np.asarray(rgb_dataset[frame_index]).astype(np.uint8))
+                            rgb_tiles.append(_label(rgb, f"{demo_name} {camera}_rgb f{frame_index:03d}"))
+                        depth_dataset = obs.get(f"{camera}_depth")
+                        if depth_dataset is not None and frame_index < int(depth_dataset.shape[0]):
+                            depth_tiles.append(_label(_depth_to_rgb(depth_dataset[frame_index]), f"{demo_name} {camera}_depth f{frame_index:03d}"))
+                    if rgb_tiles:
+                        row = Image.new("RGB", (sum(tile.width for tile in rgb_tiles), max(tile.height for tile in rgb_tiles)), (40, 40, 40))
+                        x = 0
+                        for tile in rgb_tiles:
+                            row.paste(tile, (x, 0))
+                            x += tile.width
+                        rgb_rows.append(row)
+                    if depth_tiles:
+                        row = Image.new("RGB", (sum(tile.width for tile in depth_tiles), max(tile.height for tile in depth_tiles)), (40, 40, 40))
+                        x = 0
+                        for tile in depth_tiles:
+                            row.paste(tile, (x, 0))
+                            x += tile.width
+                        depth_rows.append(row)
+        if rgb_rows:
+            _save_atomic(_sheet(rgb_rows), rgb_path)
+        if depth_rows:
+            _save_atomic(_sheet(depth_rows), depth_path)
+        return {
+            "schema": "atr.lerobot.generated_trajectory_preview.v1",
+            "status": "passed" if rgb_rows or depth_rows else "skipped",
+            "frame_selection": "first_middle_last",
+            "frame_indices": frame_selection,
+            "demo_names": demo_names,
+            "demo_count": len(demo_names),
+            "total_demo_count": total_demo_count,
+            "rgb_contact_sheet_path": str(rgb_path) if rgb_rows else "",
+            "depth_contact_sheet_path": str(depth_path) if depth_rows else "",
+            "hdf5_path": str(hdf5_path),
         }
 
     @staticmethod
@@ -2201,6 +3998,126 @@ class IsaacLabSyntheticPipeline:
         states[:, 7] = 1.0
         return states
 
+    @classmethod
+    def _generated_hdf5_observations(cls, row: dict[str, Any], *, actions: Any, states: Any) -> dict[str, Any]:
+        import numpy as np
+
+        action_array = np.asarray(actions, dtype=np.float64)
+        state_array = np.asarray(states, dtype=np.float64)
+        frame_count = max(1, action_array.shape[0] if action_array.ndim else state_array.shape[0])
+        joint_pos = np.zeros((frame_count, 7), dtype=np.float64)
+        if action_array.ndim == 2:
+            dims = min(joint_pos.shape[1], action_array.shape[1])
+            joint_pos[:, :dims] = action_array[:frame_count, :dims]
+        object_pose = cls._generated_object_pose_matrices(state_array, frame_count)
+        eef_pose = cls._generated_eef_pose_matrices(action_array, frame_count)
+        visual_obs = cls._generated_pose_raster_observations(row, object_pose=object_pose, frame_count=frame_count)
+        return {
+            "robot_state": state_array[:frame_count].astype(np.float64, copy=False),
+            "joint_pos": joint_pos,
+            "gripper_state": cls._gripper_state_from_actions(action_array)[:frame_count],
+            "object_pose": object_pose,
+            "eef_pose": eef_pose,
+            **visual_obs,
+        }
+
+    @staticmethod
+    def _generated_object_pose_matrices(states: Any, frame_count: int) -> Any:
+        import numpy as np
+
+        state_array = np.asarray(states, dtype=np.float64)
+        poses = np.repeat(np.eye(4, dtype=np.float64)[None, :, :], frame_count, axis=0)
+        if state_array.ndim == 2 and state_array.shape[1] >= 5:
+            x_values = state_array[:frame_count, 2]
+            y_values = state_array[:frame_count, 3]
+            yaw_values = state_array[:frame_count, 4]
+            cos_yaw = np.cos(yaw_values)
+            sin_yaw = np.sin(yaw_values)
+            poses[:, 0, 0] = cos_yaw
+            poses[:, 0, 1] = -sin_yaw
+            poses[:, 1, 0] = sin_yaw
+            poses[:, 1, 1] = cos_yaw
+            poses[:, 0, 3] = x_values
+            poses[:, 1, 3] = y_values
+            poses[:, 2, 3] = 0.025
+        return poses
+
+    @staticmethod
+    def _generated_eef_pose_matrices(actions: Any, frame_count: int) -> Any:
+        import numpy as np
+
+        action_array = np.asarray(actions, dtype=np.float64)
+        poses = np.repeat(np.eye(4, dtype=np.float64)[None, :, :], frame_count, axis=0)
+        if action_array.ndim == 2 and action_array.shape[1] >= 6:
+            poses[:, 0, 3] = action_array[:frame_count, 0]
+            poses[:, 1, 3] = action_array[:frame_count, 1]
+            poses[:, 2, 3] = action_array[:frame_count, 2]
+            yaw_values = action_array[:frame_count, 5]
+            cos_yaw = np.cos(yaw_values)
+            sin_yaw = np.sin(yaw_values)
+            poses[:, 0, 0] = cos_yaw
+            poses[:, 0, 1] = -sin_yaw
+            poses[:, 1, 0] = sin_yaw
+            poses[:, 1, 1] = cos_yaw
+        return poses
+
+    @staticmethod
+    def _generated_pose_raster_observations(
+        row: dict[str, Any],
+        *,
+        object_pose: Any,
+        frame_count: int,
+        image_size: int = 84,
+    ) -> dict[str, Any]:
+        import numpy as np
+
+        pose_array = np.asarray(object_pose, dtype=np.float64)
+        workspace_x = 0.105
+        workspace_y = 0.1485
+        yy, xx = np.indices((image_size, image_size))
+        camera_palette = {
+            "top": np.asarray([42, 54, 62], dtype=np.uint8),
+            "front": np.asarray([48, 45, 52], dtype=np.uint8),
+            "right": np.asarray([44, 50, 47], dtype=np.uint8),
+        }
+        camera_offsets = {
+            "top": (0, 0),
+            "front": (4, -3),
+            "right": (-4, 3),
+        }
+        object_pose_randomization = row.get("object_pose_randomization") if isinstance(row.get("object_pose_randomization"), dict) else {}
+        yaw_hint = _safe_float(object_pose_randomization.get("yaw_rad"), 0.0)
+        observations: dict[str, Any] = {}
+        for camera, background in camera_palette.items():
+            rgb = np.zeros((frame_count, image_size, image_size, 3), dtype=np.uint8)
+            depth = np.full((frame_count, image_size, image_size, 1), 0.34, dtype=np.float32)
+            offset_x, offset_y = camera_offsets[camera]
+            for frame in range(frame_count):
+                rgb[frame, :, :, :] = background
+                x_m = float(pose_array[frame, 0, 3]) if frame < pose_array.shape[0] else 0.0
+                y_m = float(pose_array[frame, 1, 3]) if frame < pose_array.shape[0] else 0.0
+                yaw_rad = float(np.arctan2(pose_array[frame, 1, 0], pose_array[frame, 0, 0])) if frame < pose_array.shape[0] else yaw_hint
+                center_x = int(round(np.clip((x_m + workspace_x) / (2.0 * workspace_x), 0.0, 1.0) * (image_size - 1))) + offset_x
+                center_y = int(round(np.clip((y_m + workspace_y) / (2.0 * workspace_y), 0.0, 1.0) * (image_size - 1))) + offset_y
+                center_x = int(np.clip(center_x, 8, image_size - 9))
+                center_y = int(np.clip(center_y, 8, image_size - 9))
+                rel_x = xx - center_x
+                rel_y = yy - center_y
+                cos_yaw = float(np.cos(yaw_rad))
+                sin_yaw = float(np.sin(yaw_rad))
+                rot_x = rel_x * cos_yaw + rel_y * sin_yaw
+                rot_y = -rel_x * sin_yaw + rel_y * cos_yaw
+                cube_mask = (np.abs(rot_x) <= 7) & (np.abs(rot_y) <= 7)
+                border_mask = (np.abs(rot_x) <= 8) & (np.abs(rot_y) <= 8) & ~cube_mask
+                rgb[frame, cube_mask, :] = np.asarray([202, 63, 48], dtype=np.uint8)
+                rgb[frame, border_mask, :] = np.asarray([238, 118, 78], dtype=np.uint8)
+                depth[frame, :, :, 0] += np.float32(0.01 * frame / max(1, frame_count - 1))
+                depth[frame, cube_mask, 0] = np.float32(0.255)
+                depth[frame, border_mask, 0] = np.float32(0.265)
+            observations[f"{camera}_rgb"] = rgb
+            observations[f"{camera}_depth"] = depth
+        return observations
+
     def _dry_run_mimic_trajectory_rows(
         self,
         request: IsaacLabSyntheticRequest,
@@ -2209,19 +4126,56 @@ class IsaacLabSyntheticPipeline:
     ) -> list[dict[str, Any]]:
         canonical_rows = _read_jsonl(output_root / "canonical_episode_index" / "manifest.jsonl")
         trial_count = max(1, request.mimic_trials)
+        domain_variant_count = self._mimic_domain_variant_count(request)
+        source_rows_by_episode: dict[int, dict[str, Any]] = {}
+        for row in canonical_rows:
+            if row.get("episode_success") is False:
+                continue
+            episode_index = _safe_int(row.get("episode_index"), 0, minimum=0)
+            source_rows_by_episode.setdefault(episode_index, row)
+        if not source_rows_by_episode and canonical_rows:
+            source_rows_by_episode[0] = canonical_rows[0]
         rows: list[dict[str, Any]] = []
+        for episode_index, source_row in sorted(source_rows_by_episode.items()):
+            for domain_variant_index in range(domain_variant_count):
+                for mimic_trial_index in range(trial_count):
+                    index = len(rows)
+                    trajectory_id = f"mimic_ep{episode_index:06d}_d{domain_variant_index:03d}_m{mimic_trial_index:03d}"
+                    row = self._generated_trajectory_row(
+                        source_type=IsaacSyntheticSourceType.ISAAC_LAB_MIMIC.value,
+                        trajectory_id=trajectory_id,
+                        source_row=source_row,
+                        index=index,
+                        success=True,
+                        failure_label="",
+                        hdf5_path="mimic/generated_dataset.hdf5",
+                        preview_path=f"mimic/previews/{trajectory_id}.html",
+                        fidelity_weight=0.25,
+                        generator="isaac_lab_mimic_dry_run",
+                        hdf5_source_path=str(mimic_summary.get("hdf5_path") or ""),
+                    )
+                    object_pose = dict(row.get("object_pose_randomization") or {})
+                    object_pose["domain_variant_index"] = domain_variant_index
+                    object_pose["mimic_trial_index"] = mimic_trial_index
+                    row.update(
+                        {
+                            "domain_variant_index": domain_variant_index,
+                            "mimic_trial_index": mimic_trial_index,
+                            "object_pose_randomization": object_pose,
+                        }
+                    )
+                    rows.append(row)
+        if rows:
+            return rows
         for index in range(trial_count):
-            source_row = canonical_rows[index % len(canonical_rows)] if canonical_rows else {}
-            success = not (trial_count > 1 and index % 4 == 3)
-            failure_label = "" if success else "grasp_missed"
             trajectory_id = f"mimic_{index:06d}"
             row = self._generated_trajectory_row(
                 source_type=IsaacSyntheticSourceType.ISAAC_LAB_MIMIC.value,
                 trajectory_id=trajectory_id,
-                source_row=source_row,
+                source_row={},
                 index=index,
-                success=success,
-                failure_label=failure_label,
+                success=True,
+                failure_label="",
                 hdf5_path="mimic/generated_dataset.hdf5",
                 preview_path=f"mimic/previews/{trajectory_id}.html",
                 fidelity_weight=0.25,
@@ -2230,6 +4184,10 @@ class IsaacLabSyntheticPipeline:
             )
             rows.append(row)
         return rows
+
+    @staticmethod
+    def _mimic_domain_variant_count(request: IsaacLabSyntheticRequest) -> int:
+        return max(1, _safe_int(request.attempts_per_source_frame, 1, minimum=1))
 
     def _dry_run_rl_teacher_trajectory_rows(
         self,
@@ -2273,10 +4231,13 @@ class IsaacLabSyntheticPipeline:
         source_episode_index = _safe_int(source_row.get("episode_index"), 0, minimum=0)
         source_frame_index = _safe_int(source_row.get("frame_index"), index, minimum=0)
         frame_start = max(0, source_frame_index)
-        frame_end = frame_start + 4
-        x_m = round(((index % 5) - 2) * 0.01, 4)
-        y_m = round(((index % 7) - 3) * 0.01, 4)
-        yaw_rad = round(((index % 9) - 4) * 0.05, 4)
+        frame_end = frame_start + GENERATED_TRAINING_MIN_FRAMES - 1
+        approach_end = frame_start + max(1, int(round(GENERATED_TRAINING_MIN_FRAMES * 0.25)))
+        grasp_end = frame_start + max(2, int(round(GENERATED_TRAINING_MIN_FRAMES * 0.45)))
+        lift_end = frame_start + max(3, int(round(GENERATED_TRAINING_MIN_FRAMES * 0.65)))
+        x_m = 0.0
+        y_m = 0.0
+        yaw_rad = 0.0
         return {
             "schema": "atr.lerobot.generated_trajectory.v1",
             "source_type": source_type,
@@ -2290,16 +4251,18 @@ class IsaacLabSyntheticPipeline:
             "num_frames": frame_end - frame_start + 1,
             "object_pose_randomization": {
                 "workspace": "a4_sheet",
+                "enabled": False,
+                "source": "recorded_specimen_pose",
                 "x_m": x_m,
                 "y_m": y_m,
                 "yaw_rad": yaw_rad,
-                "bounds_m": {"x": [-0.105, 0.105], "y": [-0.1485, 0.1485]},
+                "bounds_m": {"x": [0.0, 0.0], "y": [0.0, 0.0]},
             },
             "subtasks": {
-                "approach": {"start_frame": frame_start, "end_frame": frame_start + 1},
-                "grasp": {"start_frame": frame_start + 1, "end_frame": frame_start + 2},
-                "lift": {"start_frame": frame_start + 2, "end_frame": frame_start + 3},
-                "place": {"start_frame": frame_start + 3, "end_frame": frame_end},
+                "approach": {"start_frame": frame_start, "end_frame": approach_end},
+                "grasp": {"start_frame": approach_end, "end_frame": grasp_end},
+                "lift": {"start_frame": grasp_end, "end_frame": lift_end},
+                "place": {"start_frame": lift_end, "end_frame": frame_end},
                 "release": {"start_frame": frame_end, "end_frame": frame_end},
             },
             "metrics": {
@@ -2397,6 +4360,16 @@ class IsaacLabSyntheticPipeline:
             "failure_manifest_path": str(hook_root / "failures.jsonl"),
         }
 
+    @staticmethod
+    def _preferred_mimic_input_hdf5(output_root: Path, hdf5_summary: dict[str, Any]) -> tuple[str, str]:
+        annotated_path = output_root / "hdf5" / "source_real_success_annotated.hdf5"
+        if annotated_path.is_file():
+            return str(annotated_path), "annotated"
+        return (
+            str(hdf5_summary.get("output_path") or output_root / "hdf5" / "exported_successful_real_episodes.hdf5"),
+            "exported",
+        )
+
     def _synthetic_trajectory_metrics(
         self,
         output_root: Path,
@@ -2415,6 +4388,7 @@ class IsaacLabSyntheticPipeline:
             source_label = str(row.get("source_label") or row.get("generator_source_type") or "").strip()
             if source_label not in {
                 IsaacSyntheticSourceType.ISAAC_LAB_MIMIC.value,
+                IsaacSyntheticSourceType.ISAAC_LAB_MIMIC_RGBD.value,
                 IsaacSyntheticSourceType.ISAAC_LAB_RL_TEACHER.value,
             }:
                 continue
@@ -2446,24 +4420,26 @@ class IsaacLabSyntheticPipeline:
             }
 
         mimic_metric = metric("mimic", IsaacSyntheticSourceType.ISAAC_LAB_MIMIC.value, mimic)
+        mimic_rgbd_metric = metric("mimic_rgbd", IsaacSyntheticSourceType.ISAAC_LAB_MIMIC_RGBD.value, None)
         rl_metric = metric("rl_teacher", IsaacSyntheticSourceType.ISAAC_LAB_RL_TEACHER.value, rl_teacher)
         training_exposure = training_exposure or {}
         synthetic_training_count = _safe_int(
             dict(training_exposure.get("source_counts") or {}).get(ISAAC_LAB_SYNTHETIC_AGGREGATE_SOURCE),
-            mimic_metric["training_row_count"] + rl_metric["training_row_count"],
+            mimic_metric["training_row_count"] + mimic_rgbd_metric["training_row_count"] + rl_metric["training_row_count"],
             minimum=0,
         )
         return {
             "schema": "atr.lerobot.synthetic_trajectory_metrics.v1",
             "mimic": mimic_metric,
+            "mimic_rgbd": mimic_rgbd_metric,
             "rl_teacher": rl_metric,
             "total": {
-                "candidate_count": mimic_metric["candidate_count"] + rl_metric["candidate_count"],
-                "success_count": mimic_metric["success_count"] + rl_metric["success_count"],
-                "failure_count": mimic_metric["failure_count"] + rl_metric["failure_count"],
+                "candidate_count": mimic_metric["candidate_count"] + mimic_rgbd_metric["candidate_count"] + rl_metric["candidate_count"],
+                "success_count": mimic_metric["success_count"] + mimic_rgbd_metric["success_count"] + rl_metric["success_count"],
+                "failure_count": mimic_metric["failure_count"] + mimic_rgbd_metric["failure_count"] + rl_metric["failure_count"],
                 "training_row_count": synthetic_training_count,
                 "effective_training_samples": round(
-                    mimic_metric["effective_training_samples"] + rl_metric["effective_training_samples"],
+                    mimic_metric["effective_training_samples"] + mimic_rgbd_metric["effective_training_samples"] + rl_metric["effective_training_samples"],
                     6,
                 ),
             },
@@ -2505,7 +4481,7 @@ class IsaacLabSyntheticPipeline:
                 "hdf5_path": "",
                 "checks": [{"id": "mimic_enabled", "status": "skipped"}],
             }
-        hdf5_path = str(hdf5_summary.get("output_path") or output_root / "hdf5" / "exported_successful_real_episodes.hdf5")
+        hdf5_path, hdf5_input_kind = self._preferred_mimic_input_hdf5(output_root, hdf5_summary)
         if not hdf5_summary.get("hdf5_available"):
             return {
                 **base,
@@ -2542,6 +4518,7 @@ class IsaacLabSyntheticPipeline:
             "blocker": "",
             "message": "Mimic small-batch generation is ready to launch from exported HDF5 demonstrations.",
             "hdf5_path": hdf5_path,
+            "hdf5_input_kind": hdf5_input_kind,
             "checks": [
                 {"id": "mimic_enabled", "status": "passed"},
                 {"id": "hdf5_available", "status": "passed"},
@@ -2653,6 +4630,27 @@ class IsaacLabSyntheticPipeline:
         if request.output_root:
             return Path(request.output_root).expanduser().resolve()
         return dataset_path / "sidecar" / "isaac_lab_synthetic" / "latest"
+
+    def _maybe_reset_latest_output(
+        self,
+        request: IsaacLabSyntheticRequest,
+        dataset_path: Path,
+        output_root: Path,
+    ) -> None:
+        if not bool(request.force_rebuild and request.overwrite_latest):
+            return
+        if not output_root.exists():
+            return
+        try:
+            resolved_output = output_root.expanduser().resolve()
+            expected_root = (dataset_path / "sidecar" / "isaac_lab_synthetic" / "latest").expanduser().resolve()
+        except OSError:
+            return
+        if resolved_output != expected_root:
+            return
+        if not self._path_allowed(resolved_output):
+            return
+        shutil.rmtree(resolved_output, ignore_errors=True)
 
     def _path_allowed(self, path: Path) -> bool:
         try:
@@ -4238,25 +6236,32 @@ class IsaacLabSyntheticPipeline:
     def _build_canonical_index(self, request: IsaacLabSyntheticRequest, dataset_path: Path) -> list[dict[str, Any]]:
         episodes = _read_jsonl(dataset_path / "meta" / "episodes.jsonl")
         if not episodes:
+            episodes = self._episodes_from_lerobot_data_files(dataset_path)
+        if not episodes:
             info = _read_json(dataset_path / "meta" / "info.json")
             total_frames = _safe_int(info.get("total_frames"), 0, minimum=0)
             episodes = [{"episode_index": 0, "length": max(total_frames, 1)}]
+        requested_episodes = self._requested_episode_indices(request)
         rows: list[dict[str, Any]] = []
         depth = self._depth_summary(dataset_path)
         grasp_diagnostics_by_frame = self._mirror_grasp_diagnostics_by_frame(dataset_path)
-        max_rows = request.max_source_frames
+        isaac_rgbd_by_frame = self._isaac_rgbd_frames_by_frame(dataset_path)
+        max_rows = _safe_int(request.max_source_frames, 0, minimum=0)
         success_by_episode = self._episode_success_by_index(dataset_path)
         for episode in episodes:
             episode_index = _safe_int(episode.get("episode_index"), 0, minimum=0)
+            if requested_episodes is not None and episode_index not in requested_episodes:
+                continue
             length = _safe_int(episode.get("length"), 1, minimum=1)
             episode_success = success_by_episode.get(episode_index, True)
             for frame_index in range(length):
-                if len(rows) >= max_rows:
+                if max_rows > 0 and len(rows) >= max_rows:
                     return rows
                 grasp_diagnostics = grasp_diagnostics_by_frame.get((episode_index, frame_index))
                 grasp_event_label = (
                     str(grasp_diagnostics.get("event_label") or "") if isinstance(grasp_diagnostics, dict) else ""
                 )
+                isaac_rgbd_frames = isaac_rgbd_by_frame.get((episode_index, frame_index), {})
                 row = {
                     "schema": CANONICAL_FRAME_SCHEMA,
                     "dataset_id": dataset_path.name,
@@ -4265,7 +6270,7 @@ class IsaacLabSyntheticPipeline:
                     "frame_index": frame_index,
                     "timestamp_s": round(frame_index / 15.0, 6),
                     "lerobot": {
-                        "observation_path": f"data/chunk-000/episode_{episode_index:06d}.parquet",
+                        "observation_path": str(self._episode_data_file_path(dataset_path, episode_index).relative_to(dataset_path)),
                         "action_index": frame_index,
                         "action_valid": True,
                     },
@@ -4278,9 +6283,10 @@ class IsaacLabSyntheticPipeline:
                         "scale_m_per_unit": depth.get("depth_scale_m_per_unit"),
                     },
                     "isaac_rgbd": {
-                        "available": bool(list((dataset_path / "sidecar" / "isaac_rgbd").glob("**/manifest.jsonl"))),
+                        "available": bool(isaac_rgbd_frames),
                         "camera_names": list(request.cameras),
                         "manifest_row": frame_index,
+                        "frames": isaac_rgbd_frames,
                     },
                     "active_robot_cam": {"available": False},
                     "grasp_diagnostics": grasp_diagnostics or {"available": False},
@@ -4288,6 +6294,161 @@ class IsaacLabSyntheticPipeline:
                 }
                 rows.append(self._canonical_row_with_source_markers(row))
         return rows
+
+    @staticmethod
+    def _episodes_from_lerobot_data_files(dataset_path: Path) -> list[dict[str, Any]]:
+        try:
+            import pyarrow.parquet as pq
+        except Exception:  # noqa: BLE001 - pyarrow is optional outside the LeRobot runtime.
+            return []
+        counts: dict[int, int] = defaultdict(int)
+        max_frame: dict[int, int] = defaultdict(lambda: -1)
+        for parquet_path in sorted((dataset_path / "data").glob("**/*.parquet")):
+            try:
+                table = pq.read_table(parquet_path, columns=["episode_index", "frame_index"])
+            except Exception:
+                continue
+            data = table.to_pydict()
+            episode_values = data.get("episode_index") or []
+            frame_values = data.get("frame_index") or []
+            for row_index, value in enumerate(episode_values):
+                episode_index = _safe_int(value, -1, minimum=-1)
+                if episode_index < 0:
+                    continue
+                counts[episode_index] += 1
+                if row_index < len(frame_values):
+                    max_frame[episode_index] = max(max_frame[episode_index], _safe_int(frame_values[row_index], -1, minimum=-1))
+        rows: list[dict[str, Any]] = []
+        for episode_index in sorted(counts):
+            inferred_length = max(counts[episode_index], max_frame[episode_index] + 1)
+            rows.append({"episode_index": episode_index, "length": max(1, inferred_length), "success": True})
+        return rows
+
+    @staticmethod
+    def _requested_episode_indices(request: IsaacLabSyntheticRequest) -> set[int] | None:
+        raw = str(getattr(request, "isaac_lab_episode_indices", "") or "").strip().lower()
+        if not raw or raw in {"all", "*"}:
+            return None
+        indices: set[int] = set()
+        for token in re.split(r"[\s,]+", raw):
+            if not token:
+                continue
+            if "-" in token:
+                start_text, end_text = token.split("-", 1)
+                try:
+                    start = int(start_text)
+                    end = int(end_text)
+                except ValueError:
+                    continue
+                if start > end:
+                    start, end = end, start
+                indices.update(range(max(0, start), max(0, end) + 1))
+                continue
+            try:
+                indices.add(max(0, int(token)))
+            except ValueError:
+                continue
+        return indices if indices else None
+
+    def _isaac_rgbd_frames_by_frame(self, dataset_path: Path) -> dict[tuple[int, int], dict[str, dict[str, Any]]]:
+        indexed: dict[tuple[int, int], dict[str, dict[str, Any]]] = {}
+        root = dataset_path / "sidecar" / "isaac_rgbd"
+        for manifest_path in sorted(root.glob("**/manifest.jsonl")):
+            for row in _read_jsonl(manifest_path):
+                episode_index = _safe_int(row.get("episode_index"), self._episode_index_from_path(manifest_path), minimum=0)
+                frame_index = _safe_int(row.get("frame_index"), self._frame_index_from_row(row), minimum=0)
+                camera_entries = self._isaac_rgbd_camera_entries(row, manifest_path=manifest_path, dataset_path=dataset_path)
+                if not camera_entries:
+                    continue
+                frame_bucket = indexed.setdefault((episode_index, frame_index), {})
+                for camera, entry in camera_entries.items():
+                    frame_bucket.setdefault(camera, {}).update(entry)
+        return indexed
+
+    @staticmethod
+    def _episode_index_from_path(path: Path) -> int:
+        for part in path.parts:
+            match = re.fullmatch(r"episode_(\d+)", part)
+            if match:
+                return int(match.group(1))
+        return 0
+
+    @staticmethod
+    def _frame_index_from_row(row: dict[str, Any]) -> int:
+        for key in ("frame_index", "source_frame_index", "canonical_frame_index"):
+            if key in row:
+                return _safe_int(row.get(key), 0, minimum=0)
+        for value in row.values():
+            if not isinstance(value, str):
+                continue
+            match = re.search(r"frame[_-](\d+)", value)
+            if match:
+                return int(match.group(1))
+        return 0
+
+    def _isaac_rgbd_camera_entries(
+        self,
+        row: dict[str, Any],
+        *,
+        manifest_path: Path,
+        dataset_path: Path,
+    ) -> dict[str, dict[str, Any]]:
+        entries: dict[str, dict[str, Any]] = {}
+        files = row.get("files") if isinstance(row.get("files"), list) else []
+        if files:
+            for item in files:
+                if not isinstance(item, dict):
+                    continue
+                camera = str(item.get("camera") or "").strip()
+                kind = str(item.get("kind") or item.get("type") or "").strip().lower()
+                path = self._resolve_manifest_file_path(item.get("path"), manifest_path=manifest_path, dataset_path=dataset_path)
+                if not camera or not kind or not path:
+                    continue
+                key = "rgb_path" if kind == "rgb" else "depth_path" if "depth" in kind else ""
+                if not key:
+                    continue
+                entry = entries.setdefault(camera, {})
+                entry[key] = path
+                if key == "depth_path":
+                    entry["depth_scale_m_per_unit"] = _safe_float(
+                        item.get("depth_scale_m_per_unit", row.get("depth_scale_m_per_unit", 0.001)),
+                        0.001,
+                        minimum=0.0,
+                    )
+                    entry["depth_encoding"] = str(item.get("encoding") or row.get("depth_encoding") or "png16")
+            return entries
+        camera = str(row.get("camera") or "").strip()
+        if not camera:
+            return entries
+        entry: dict[str, Any] = {}
+        rgb_path = self._resolve_manifest_file_path(row.get("rgb_path") or row.get("path"), manifest_path=manifest_path, dataset_path=dataset_path)
+        depth_path = self._resolve_manifest_file_path(row.get("depth_path"), manifest_path=manifest_path, dataset_path=dataset_path)
+        if rgb_path:
+            entry["rgb_path"] = rgb_path
+        if depth_path:
+            entry["depth_path"] = depth_path
+            entry["depth_scale_m_per_unit"] = _safe_float(row.get("depth_scale_m_per_unit"), 0.001, minimum=0.0)
+            entry["depth_encoding"] = str(row.get("depth_encoding") or "png16")
+        if entry:
+            entries[camera] = entry
+        return entries
+
+    @staticmethod
+    def _resolve_manifest_file_path(value: Any, *, manifest_path: Path, dataset_path: Path) -> str:
+        raw = str(value or "").strip()
+        if not raw:
+            return ""
+        candidate = Path(raw)
+        if candidate.is_absolute():
+            return str(candidate)
+        for path in (
+            manifest_path.parent / raw,
+            dataset_path / raw,
+            dataset_path / "sidecar" / "isaac_rgbd" / raw,
+        ):
+            if path.exists():
+                return str(path)
+        return str((manifest_path.parent / raw).resolve())
 
     def _mirror_grasp_diagnostics_by_frame(self, dataset_path: Path) -> dict[tuple[int, int], dict[str, Any]]:
         indexed: dict[tuple[int, int], dict[str, Any]] = {}
@@ -4451,6 +6612,7 @@ class IsaacLabSyntheticPipeline:
                 row
                 for row in generated_rows
                 if str(((row.get("artifacts") if isinstance(row.get("artifacts"), dict) else {}) or {}).get("hdf5_path") or "").strip()
+                and self._generated_row_is_trainable_sim_output(row)
             ],
             "source_type",
         )
@@ -4460,6 +6622,11 @@ class IsaacLabSyntheticPipeline:
             IsaacSyntheticSourceType.REPLICATOR_RENDER_ONLY.value: len(replicator_rows),
             IsaacSyntheticSourceType.ISAAC_TELEOP_REPLAY_RENDER.value: 0,
             IsaacSyntheticSourceType.ISAAC_LAB_MIMIC.value: _safe_int(generated_counts.get(IsaacSyntheticSourceType.ISAAC_LAB_MIMIC.value), 0, minimum=0),
+            IsaacSyntheticSourceType.ISAAC_LAB_MIMIC_RGBD.value: _safe_int(
+                generated_counts.get(IsaacSyntheticSourceType.ISAAC_LAB_MIMIC_RGBD.value),
+                0,
+                minimum=0,
+            ),
             IsaacSyntheticSourceType.ISAAC_LAB_RL_TEACHER.value: _safe_int(generated_counts.get(IsaacSyntheticSourceType.ISAAC_LAB_RL_TEACHER.value), 0, minimum=0),
             IsaacSyntheticSourceType.LEGACY_SIDECAR.value: 0,
         }
@@ -4486,6 +6653,15 @@ class IsaacLabSyntheticPipeline:
         )
         details[IsaacSyntheticSourceType.ISAAC_LAB_MIMIC.value]["train_default"] = (
             details[IsaacSyntheticSourceType.ISAAC_LAB_MIMIC.value]["trainable_count"] > 0
+            and train_ready_intent
+        )
+        details[IsaacSyntheticSourceType.ISAAC_LAB_MIMIC_RGBD.value]["trainable_count"] = _safe_int(
+            generated_trainable_counts.get(IsaacSyntheticSourceType.ISAAC_LAB_MIMIC_RGBD.value),
+            0,
+            minimum=0,
+        )
+        details[IsaacSyntheticSourceType.ISAAC_LAB_MIMIC_RGBD.value]["train_default"] = (
+            details[IsaacSyntheticSourceType.ISAAC_LAB_MIMIC_RGBD.value]["trainable_count"] > 0
             and train_ready_intent
         )
         details[IsaacSyntheticSourceType.ISAAC_LAB_RL_TEACHER.value]["trainable_count"] = _safe_int(
@@ -4692,6 +6868,8 @@ class IsaacLabSyntheticPipeline:
         manifests = [
             (IsaacSyntheticSourceType.ISAAC_LAB_MIMIC.value, output_root / "mimic" / "successes.jsonl", "successes"),
             (IsaacSyntheticSourceType.ISAAC_LAB_MIMIC.value, output_root / "mimic" / "failures.jsonl", "failures"),
+            (IsaacSyntheticSourceType.ISAAC_LAB_MIMIC_RGBD.value, output_root / "mimic_rgbd" / "successes.jsonl", "successes"),
+            (IsaacSyntheticSourceType.ISAAC_LAB_MIMIC_RGBD.value, output_root / "mimic_rgbd" / "failures.jsonl", "failures"),
             (IsaacSyntheticSourceType.ISAAC_LAB_RL_TEACHER.value, output_root / "rl_teacher" / "successes.jsonl", "successes"),
             (IsaacSyntheticSourceType.ISAAC_LAB_RL_TEACHER.value, output_root / "rl_teacher" / "failures.jsonl", "failures"),
         ]
@@ -4722,6 +6900,7 @@ class IsaacLabSyntheticPipeline:
         rows: list[dict[str, Any]] = []
         manifests = [
             (IsaacSyntheticSourceType.ISAAC_LAB_MIMIC.value, output_root / "mimic" / "successes.jsonl"),
+            (IsaacSyntheticSourceType.ISAAC_LAB_MIMIC_RGBD.value, output_root / "mimic_rgbd" / "successes.jsonl"),
             (IsaacSyntheticSourceType.ISAAC_LAB_RL_TEACHER.value, output_root / "rl_teacher" / "successes.jsonl"),
         ]
         for expected_source_type, manifest_path in manifests:
@@ -4755,14 +6934,18 @@ class IsaacLabSyntheticPipeline:
         metrics = row.get("metrics") if isinstance(row.get("metrics"), dict) else {}
         artifact_path = str(artifacts.get("hdf5_path") or "")
         preview_path = str(artifacts.get("preview_path") or "")
+        contact_sheet_refs = cls._generated_contact_sheet_refs(artifact_path, output_root=output_root)
         source_type = str(row.get("source_type") or "")
         source_id = str(row.get("trajectory_id") or row.get("source_id") or "")
         train_eligible = (
             _safe_bool(training.get("eligible"), False)
             and _safe_bool(metrics.get("success"), False)
+            and cls._generated_row_is_trainable_sim_output(row)
             and bool(artifact_path.strip())
         )
         exclusion_reason = str(training.get("exclusion_reason") or "")
+        if not train_eligible and not exclusion_reason and not cls._generated_row_is_trainable_sim_output(row):
+            exclusion_reason = "lab_step_replay_required"
         if not train_eligible and not exclusion_reason and not artifact_path.strip():
             exclusion_reason = "artifact_path_missing"
         return {
@@ -4778,7 +6961,11 @@ class IsaacLabSyntheticPipeline:
             "train_exclusion_reason": exclusion_reason,
             "metrics": dict(metrics),
             "qa": dict(metrics),
-            "media": cls._preview_media(),
+            "media": {
+                **cls._preview_media(),
+                "generated_rgb_preview": cls._preview_file_ref(contact_sheet_refs["rgb"], root=output_root),
+                "generated_depth_preview": cls._preview_file_ref(contact_sheet_refs["depth"], root=output_root),
+            },
             "trajectory": {
                 "available": bool(artifact_path.strip()),
                 "source": source_type,
@@ -4786,9 +6973,29 @@ class IsaacLabSyntheticPipeline:
                 "artifact_path": artifact_path,
                 "preview_path": preview_path,
                 "preview": cls._preview_file_ref(preview_path, root=output_root),
+                "rgb_preview": cls._preview_file_ref(contact_sheet_refs["rgb"], root=output_root),
+                "depth_preview": cls._preview_file_ref(contact_sheet_refs["depth"], root=output_root),
                 "manifest_path": str(row.get("manifest_path") or ""),
                 "manifest_kind": str(row.get("manifest_kind") or ""),
             },
+        }
+
+    @staticmethod
+    def _generated_contact_sheet_refs(artifact_path: str, *, output_root: Path) -> dict[str, str]:
+        first_part = Path(artifact_path).parts[0] if artifact_path else ""
+        if first_part == "mimic":
+            stem = "mimic_generated"
+        elif first_part == "mimic_rgbd":
+            stem = "mimic_rgbd_generated"
+        elif first_part == "rl_teacher":
+            stem = "rl_teacher_generated"
+        else:
+            stem = ""
+        if not stem:
+            return {"rgb": "", "depth": ""}
+        return {
+            "rgb": str(output_root / "previews" / f"{stem}_rgb_contact_sheet.png"),
+            "depth": str(output_root / "previews" / f"{stem}_depth_contact_sheet.png"),
         }
 
     def _training_import_rows(
@@ -4807,6 +7014,7 @@ class IsaacLabSyntheticPipeline:
                 continue
             frame_start = min(int(row["frame_index"]) for row in episode_rows)
             frame_end = max(int(row["frame_index"]) for row in episode_rows)
+            artifact_path = str(self._episode_data_file_path(dataset_path, episode_index).relative_to(dataset_path))
             rows.append(
                 {
                     "schema": TRAINING_IMPORT_SCHEMA,
@@ -4814,7 +7022,7 @@ class IsaacLabSyntheticPipeline:
                     "source_label": IsaacSyntheticSourceType.REAL_LEROBOT.value,
                     "source_id": f"real_episode_{episode_index:06d}",
                     "dataset_path": str(dataset_path),
-                    "artifact_path": f"data/chunk-000/episode_{episode_index:06d}.parquet",
+                    "artifact_path": artifact_path,
                     "episode_index": episode_index,
                     "frame_start": frame_start,
                     "frame_end": frame_end,
@@ -4828,51 +7036,150 @@ class IsaacLabSyntheticPipeline:
             )
         return rows
 
+    def _isaac_rgbd_training_import_rows(
+        self,
+        request: IsaacLabSyntheticRequest,
+        dataset_path: Path,
+        canonical_rows: list[dict[str, Any]],
+        *,
+        excluded_episode_indices: set[int] | None = None,
+    ) -> list[dict[str, Any]]:
+        if not canonical_rows:
+            return []
+        rows: list[dict[str, Any]] = []
+        excluded = excluded_episode_indices or set()
+        episode_indices = sorted({int(row["episode_index"]) for row in canonical_rows})
+        fidelity_weight = 0.35
+        for episode_index in episode_indices:
+            if episode_index in excluded:
+                continue
+            episode_rows = [row for row in canonical_rows if int(row["episode_index"]) == episode_index]
+            if any(row.get("episode_success") is False for row in episode_rows):
+                continue
+            rgbd_rows = [
+                row
+                for row in episode_rows
+                if isinstance(row.get("isaac_rgbd"), dict) and bool(row["isaac_rgbd"].get("available"))
+            ]
+            if not rgbd_rows:
+                continue
+            frame_start = min(int(row["frame_index"]) for row in rgbd_rows)
+            frame_end = max(int(row["frame_index"]) for row in rgbd_rows)
+            cameras = sorted(
+                {
+                    str(camera)
+                    for row in rgbd_rows
+                    for camera in (
+                        (row.get("isaac_rgbd") if isinstance(row.get("isaac_rgbd"), dict) else {})
+                        .get("frames", {})
+                        .keys()
+                    )
+                    if str(camera).strip()
+                }
+            )
+            rows.append(
+                {
+                    "schema": TRAINING_IMPORT_SCHEMA,
+                    "source_type": IsaacSyntheticSourceType.ISAAC_RGBD_RENDER.value,
+                    "source_label": IsaacSyntheticSourceType.ISAAC_RGBD_RENDER.value,
+                    "source_id": f"isaac_rgbd_episode_{episode_index:06d}",
+                    "dataset_path": str(dataset_path),
+                    "artifact_path": "sidecar/isaac_rgbd",
+                    "episode_index": episode_index,
+                    "frame_start": frame_start,
+                    "frame_end": frame_end,
+                    "render_frame_count": len(rgbd_rows),
+                    "cameras": cameras,
+                    "success": True,
+                    "source_weight": request.isaac_rgbd_weight,
+                    "fidelity_weight": fidelity_weight,
+                    "effective_weight": round(request.isaac_rgbd_weight * fidelity_weight, 6),
+                    "validation_report": "../validation_report.json",
+                    "generation_manifest": "../canonical_episode_index/manifest.jsonl",
+                }
+            )
+        return rows
+
     def _generated_training_import_rows(
         self,
         request: IsaacLabSyntheticRequest,
         dataset_path: Path,
         output_root: Path,
         generated_rows: list[dict[str, Any]],
+        *,
+        excluded_episode_indices: set[int] | None = None,
     ) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
+        excluded = excluded_episode_indices or set()
         for row in generated_rows:
+            if self._generated_episode_index(row) in excluded:
+                continue
             source_type = str(row.get("source_type") or "")
             if source_type == IsaacSyntheticSourceType.ISAAC_LAB_RL_TEACHER.value and not request.enable_rl_teacher:
                 continue
             if source_type not in {
                 IsaacSyntheticSourceType.ISAAC_LAB_MIMIC.value,
+                IsaacSyntheticSourceType.ISAAC_LAB_MIMIC_RGBD.value,
                 IsaacSyntheticSourceType.ISAAC_LAB_RL_TEACHER.value,
             }:
+                continue
+            if not self._generated_row_is_trainable_sim_output(row):
                 continue
             artifacts = row.get("artifacts") if isinstance(row.get("artifacts"), dict) else {}
             training = row.get("training") if isinstance(row.get("training"), dict) else {}
             source_id = str(row.get("trajectory_id") or row.get("source_id") or "").strip()
             artifact_path = str(artifacts.get("hdf5_path") or "").strip()
-            fidelity_default = 0.25 if source_type == IsaacSyntheticSourceType.ISAAC_LAB_MIMIC.value else 0.3
+            fidelity_default = 0.3 if source_type == IsaacSyntheticSourceType.ISAAC_LAB_RL_TEACHER.value else 0.25
             fidelity_weight = _safe_float(training.get("fidelity_weight"), fidelity_default, minimum=0.0, maximum=1.0)
             source_weight = request.isaac_lab_synthetic_weight
-            rows.append(
-                {
-                    "schema": TRAINING_IMPORT_SCHEMA,
-                    "source_type": ISAAC_LAB_SYNTHETIC_AGGREGATE_SOURCE,
-                    "source_label": source_type,
-                    "generator_source_type": source_type,
-                    "source_id": source_id,
-                    "dataset_path": str(dataset_path),
-                    "artifact_path": artifact_path,
-                    "episode_index": _safe_int(row.get("source_episode_index"), 0, minimum=0),
-                    "frame_start": self._generated_frame_start(row),
-                    "frame_end": self._generated_frame_end(row),
-                    "success": True,
-                    "source_weight": source_weight,
-                    "fidelity_weight": fidelity_weight,
-                    "effective_weight": round(source_weight * fidelity_weight, 6),
-                    "validation_report": "../validation_report.json",
-                    "generation_manifest": self._relative_generation_manifest(output_root, Path(str(row.get("manifest_path") or ""))),
-                }
-            )
+            training_row = {
+                "schema": TRAINING_IMPORT_SCHEMA,
+                "source_type": ISAAC_LAB_SYNTHETIC_AGGREGATE_SOURCE,
+                "source_label": source_type,
+                "generator_source_type": source_type,
+                "source_id": source_id,
+                "dataset_path": str(dataset_path),
+                "artifact_path": artifact_path,
+                "episode_index": self._generated_episode_index(row),
+                "frame_start": self._generated_frame_start(row),
+                "frame_end": self._generated_frame_end(row),
+                "success": True,
+                "source_weight": source_weight,
+                "fidelity_weight": fidelity_weight,
+                "effective_weight": round(source_weight * fidelity_weight, 6),
+                "validation_report": "../validation_report.json",
+                "generation_manifest": self._relative_generation_manifest(output_root, Path(str(row.get("manifest_path") or ""))),
+            }
+            generated_demo = str(row.get("generated_demo") or "").strip()
+            if generated_demo:
+                training_row["generated_demo"] = generated_demo
+            rows.append(training_row)
         return rows
+
+    @staticmethod
+    def _generated_row_is_trainable_sim_output(row: dict[str, Any]) -> bool:
+        source_type = str(row.get("source_type") or "")
+        if source_type != IsaacSyntheticSourceType.ISAAC_LAB_MIMIC.value:
+            return True
+        metrics = row.get("metrics") if isinstance(row.get("metrics"), dict) else {}
+        is_joint_replay = _safe_bool(metrics.get("joint_replay"), False)
+        is_lab_step_replay = _safe_bool(metrics.get("lab_step_replay"), False)
+        is_official_mimic = _safe_bool(metrics.get("official_mimic"), False)
+        replay_required = _safe_bool(metrics.get("replay_required"), False)
+        if is_official_mimic and replay_required and not is_lab_step_replay:
+            return False
+        return not is_joint_replay or is_lab_step_replay
+
+    @staticmethod
+    def _generated_episode_index(row: dict[str, Any]) -> int:
+        for key in ("source_episode_index", "episode_index"):
+            if row.get(key) is not None:
+                return _safe_int(row.get(key), 0, minimum=0)
+        generated_demo = str(row.get("generated_demo") or "").strip()
+        match = re.fullmatch(r"demo_(\d+)", generated_demo)
+        if match:
+            return int(match.group(1))
+        return 0
 
     @staticmethod
     def _generated_frame_start(row: dict[str, Any]) -> int:
@@ -4885,6 +7192,10 @@ class IsaacLabSyntheticPipeline:
     def _generated_frame_end(row: dict[str, Any]) -> int:
         if row.get("frame_end") is not None:
             return _safe_int(row.get("frame_end"), 0, minimum=0)
+        if row.get("frame_count") is not None:
+            return max(0, _safe_int(row.get("frame_count"), 1, minimum=1) - 1)
+        if row.get("num_frames") is not None:
+            return max(0, _safe_int(row.get("num_frames"), 1, minimum=1) - 1)
         subtasks = row.get("subtasks") if isinstance(row.get("subtasks"), dict) else {}
         ends = [
             _safe_int(value.get("end_frame"), 0, minimum=0)
@@ -4893,8 +7204,6 @@ class IsaacLabSyntheticPipeline:
         ]
         if ends:
             return max(ends)
-        if row.get("num_frames") is not None:
-            return max(0, _safe_int(row.get("num_frames"), 1, minimum=1) - 1)
         return _safe_int(row.get("source_frame_index"), 0, minimum=0)
 
     @staticmethod
@@ -4910,6 +7219,44 @@ class IsaacLabSyntheticPipeline:
     @staticmethod
     def _failed_episode_indices(canonical_rows: list[dict[str, Any]]) -> list[int]:
         return sorted({int(row["episode_index"]) for row in canonical_rows if row.get("episode_success") is False})
+
+    @staticmethod
+    def _contact_training_exclusion_manifest_path(dataset_path: Path) -> Path:
+        return dataset_path / "sidecar" / "train_exclusions" / "contact_audit.json"
+
+    def _contact_training_exclusion_manifest(
+        self,
+        dataset_path: Path,
+        request: IsaacLabSyntheticRequest,
+    ) -> dict[str, Any]:
+        manifest_path = self._contact_training_exclusion_manifest_path(dataset_path)
+        enabled = _safe_bool(getattr(request, "dataset_exclude_flagged_episodes", True), True)
+        loaded: dict[str, Any] = {}
+        if manifest_path.is_file():
+            try:
+                raw = json.loads(manifest_path.read_text(encoding="utf-8"))
+                if isinstance(raw, dict):
+                    loaded = raw
+            except (OSError, json.JSONDecodeError):
+                loaded = {}
+        episode_indices = sorted(
+            {
+                _safe_int(item, -1)
+                for item in loaded.get("episode_indices", [])
+                if _safe_int(item, -1) >= 0
+            }
+        )
+        return {
+            "schema": str(loaded.get("schema") or "atr.lerobot.training_exclusions.contact_audit.v1"),
+            "enabled": enabled,
+            "available": manifest_path.is_file(),
+            "manifest_path": str(manifest_path),
+            "policy": str(loaded.get("policy") or "exclude_severe_contact_episodes"),
+            "source": str(loaded.get("source") or "isaac_rgbd_contact_audit"),
+            "episode_indices": episode_indices if enabled else [],
+            "episode_count": len(episode_indices) if enabled else 0,
+            "original_data_preserved": bool(loaded.get("original_data_preserved", True)),
+        }
 
     def _episode_success_by_index(self, dataset_path: Path) -> dict[int, bool]:
         result: dict[int, bool] = {}
@@ -4940,6 +7287,7 @@ class IsaacLabSyntheticPipeline:
         source_labels: dict[str, Any],
         training_rows: list[dict[str, Any]],
         replicator_summary: dict[str, Any],
+        contact_exclusions: dict[str, Any],
     ) -> dict[str, Any]:
         counts = dict(source_labels.get("counts") or {})
         training_counts = self._count_by(training_rows, "source_type")
@@ -4949,6 +7297,7 @@ class IsaacLabSyntheticPipeline:
             IsaacSyntheticSourceType.ISAAC_RGBD_RENDER.value,
             IsaacSyntheticSourceType.REPLICATOR_RENDER_ONLY.value,
             IsaacSyntheticSourceType.ISAAC_LAB_MIMIC.value,
+            IsaacSyntheticSourceType.ISAAC_LAB_MIMIC_RGBD.value,
             IsaacSyntheticSourceType.ISAAC_LAB_RL_TEACHER.value,
             aggregate_lab_source,
             IsaacSyntheticSourceType.LEGACY_SIDECAR.value,
@@ -4958,18 +7307,20 @@ class IsaacLabSyntheticPipeline:
             IsaacSyntheticSourceType.ISAAC_RGBD_RENDER.value: request.isaac_rgbd_weight,
             IsaacSyntheticSourceType.REPLICATOR_RENDER_ONLY.value: request.replicator_render_weight,
             IsaacSyntheticSourceType.ISAAC_LAB_MIMIC.value: request.isaac_lab_synthetic_weight,
+            IsaacSyntheticSourceType.ISAAC_LAB_MIMIC_RGBD.value: request.isaac_lab_synthetic_weight,
             IsaacSyntheticSourceType.ISAAC_LAB_RL_TEACHER.value: request.isaac_lab_synthetic_weight,
             aggregate_lab_source: request.isaac_lab_synthetic_weight,
             IsaacSyntheticSourceType.LEGACY_SIDECAR.value: request.legacy_sidecar_weight,
         }
         fidelity_weights = {
             IsaacSyntheticSourceType.REAL_LEROBOT.value: 1.0,
-            IsaacSyntheticSourceType.ISAAC_RGBD_RENDER.value: 0.5,
+            IsaacSyntheticSourceType.ISAAC_RGBD_RENDER.value: 0.35,
             IsaacSyntheticSourceType.REPLICATOR_RENDER_ONLY.value: 0.4,
-            IsaacSyntheticSourceType.ISAAC_LAB_MIMIC.value: 0.3,
+            IsaacSyntheticSourceType.ISAAC_LAB_MIMIC.value: 0.25,
+            IsaacSyntheticSourceType.ISAAC_LAB_MIMIC_RGBD.value: 0.25,
             IsaacSyntheticSourceType.ISAAC_LAB_RL_TEACHER.value: 0.0,
             aggregate_lab_source: 0.25,
-            IsaacSyntheticSourceType.LEGACY_SIDECAR.value: 0.2,
+            IsaacSyntheticSourceType.LEGACY_SIDECAR.value: 0.0,
         }
         train_defaults: dict[str, dict[str, Any]] = {}
         for source in sources:
@@ -4992,6 +7343,14 @@ class IsaacLabSyntheticPipeline:
             "source_config_path": str(output_root / "training_import" / "lerobot_source_config.json"),
             "weights": weights,
             "fidelity_weights": fidelity_weights,
+            "episode_exclusions": {
+                "enabled": bool(contact_exclusions.get("enabled")),
+                "source": str(contact_exclusions.get("source") or ""),
+                "manifest_path": str(contact_exclusions.get("manifest_path") or ""),
+                "episode_indices": list(contact_exclusions.get("episode_indices") or []),
+                "episode_count": _safe_int(contact_exclusions.get("episode_count"), 0, minimum=0),
+                "original_data_preserved": bool(contact_exclusions.get("original_data_preserved", True)),
+            },
             "train_defaults": train_defaults,
             "replicator": {
                 "status": replicator_summary.get("status", "skipped"),
@@ -5205,6 +7564,7 @@ class IsaacLabSyntheticPipeline:
             IsaacSyntheticSourceType.ISAAC_RGBD_RENDER.value,
             IsaacSyntheticSourceType.REPLICATOR_RENDER_ONLY.value,
             IsaacSyntheticSourceType.ISAAC_LAB_MIMIC.value,
+            IsaacSyntheticSourceType.ISAAC_LAB_MIMIC_RGBD.value,
             IsaacSyntheticSourceType.ISAAC_LAB_RL_TEACHER.value,
             ISAAC_LAB_SYNTHETIC_AGGREGATE_SOURCE,
             IsaacSyntheticSourceType.LEGACY_SIDECAR.value,
@@ -5276,8 +7636,16 @@ class IsaacLabSyntheticPipeline:
             for index, row in enumerate(training_rows)
             if (
                 str(row.get("source_label") or "")
-                in {IsaacSyntheticSourceType.ISAAC_LAB_MIMIC.value, IsaacSyntheticSourceType.ISAAC_LAB_RL_TEACHER.value}
-                or str(row.get("source_type") or "") in {IsaacSyntheticSourceType.ISAAC_LAB_MIMIC.value, IsaacSyntheticSourceType.ISAAC_LAB_RL_TEACHER.value}
+                in {
+                    IsaacSyntheticSourceType.ISAAC_LAB_MIMIC.value,
+                    IsaacSyntheticSourceType.ISAAC_LAB_MIMIC_RGBD.value,
+                    IsaacSyntheticSourceType.ISAAC_LAB_RL_TEACHER.value,
+                }
+                or str(row.get("source_type") or "") in {
+                    IsaacSyntheticSourceType.ISAAC_LAB_MIMIC.value,
+                    IsaacSyntheticSourceType.ISAAC_LAB_MIMIC_RGBD.value,
+                    IsaacSyntheticSourceType.ISAAC_LAB_RL_TEACHER.value,
+                }
             )
             and str(row.get("source_type") or "") != ISAAC_LAB_SYNTHETIC_AGGREGATE_SOURCE
         ]

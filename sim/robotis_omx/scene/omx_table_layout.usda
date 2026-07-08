@@ -13,12 +13,12 @@ def Xform "World"
     {
         vector3f physics:gravityDirection = (0, 0, -1)
         float physics:gravityMagnitude = 9.81
+        custom float physxScene:bounceThresholdVelocity = 0.01
+        uniform token physxScene:broadphaseType = "GPU"
         custom bool physxScene:enableCCD = 1
         custom bool physxScene:enableStabilization = 1
-        custom float physxScene:bounceThresholdVelocity = 0.01
         custom float physxScene:frictionCorrelationDistance = 0.00625
         custom float physxScene:frictionOffsetThreshold = 0.002
-        uniform token physxScene:broadphaseType = "GPU"
         uint physxScene:gpuFoundLostAggregatePairsCapacity = 8192
         uint physxScene:gpuTotalAggregatePairsCapacity = 8192
         uniform token physxScene:solverType = "TGS"
@@ -434,9 +434,11 @@ def Xform "World"
         {
             rel material:binding = </World/Materials/red_test_cube>
             custom rel material:binding:physics = </World/Materials/pla_specimen_contact_physics>
+            vector3f physics:angularVelocity = (0, 0, 0)
             bool physics:collisionEnabled = 1
             float physics:mass = 0.03
             bool physics:rigidBodyEnabled = 1
+            vector3f physics:velocity = (0, 0, 0)
             custom float physxCollision:contactOffset = 0.003
             custom float physxCollision:restOffset = 0
             custom float physxContactReport:threshold = 0.2
@@ -445,9 +447,10 @@ def Xform "World"
             custom int physxRigidBody:solverPositionIterationCount = 32
             custom int physxRigidBody:solverVelocityIterationCount = 4
             double size = 1
+            double xformOp:rotateZ = 0.660172474693212
             float3 xformOp:scale = (0.03, 0.03, 0.03)
-            double3 xformOp:translate = (0.4, 0.3, 0.0152)
-            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            double3 xformOp:translate = (0.39176446199417114, 0.29575082659721375, 0.015200000256299973)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateZ", "xformOp:scale"]
         }
     }
 
@@ -458,6 +461,103 @@ def Xform "World"
         float xformOp:rotateZ = 90
         double3 xformOp:translate = (0.315, 0.06, -0.02)
         uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateZ"]
+
+        over "Geometry"
+        {
+            over "link0"
+            {
+                over "link1"
+                {
+                    over "Joint1" (
+                        prepend apiSchemas = ["PhysicsDriveAPI:angular"]
+                    )
+                    {
+                        float drive:angular:physics:damping = 60
+                        float drive:angular:physics:maxForce = 1.5
+                        float drive:angular:physics:stiffness = 450
+                        float drive:angular:physics:targetPosition = 1.7762377
+                    }
+
+                    over "link2"
+                    {
+                        over "Joint2" (
+                            prepend apiSchemas = ["PhysicsDriveAPI:angular"]
+                        )
+                        {
+                            float drive:angular:physics:damping = 60
+                            float drive:angular:physics:maxForce = 1.5
+                            float drive:angular:physics:stiffness = 450
+                            float drive:angular:physics:targetPosition = -122.29011
+                        }
+
+                        over "link3"
+                        {
+                            over "Joint3" (
+                                prepend apiSchemas = ["PhysicsDriveAPI:angular"]
+                            )
+                            {
+                                float drive:angular:physics:damping = 60
+                                float drive:angular:physics:maxForce = 1.5
+                                float drive:angular:physics:stiffness = 450
+                                float drive:angular:physics:targetPosition = 100.87645
+                            }
+
+                            over "link4"
+                            {
+                                over "Joint4" (
+                                    prepend apiSchemas = ["PhysicsDriveAPI:angular"]
+                                )
+                                {
+                                    float drive:angular:physics:damping = 60
+                                    float drive:angular:physics:maxForce = 1.5
+                                    float drive:angular:physics:stiffness = 450
+                                    float drive:angular:physics:targetPosition = 89.19087
+                                }
+
+                                over "link5"
+                                {
+                                    over "Joint5" (
+                                        prepend apiSchemas = ["PhysicsDriveAPI:angular"]
+                                    )
+                                    {
+                                        float drive:angular:physics:damping = 60
+                                        float drive:angular:physics:maxForce = 1.5
+                                        float drive:angular:physics:stiffness = 450
+                                        float drive:angular:physics:targetPosition = 0.04930277
+                                    }
+
+                                    over "link6"
+                                    {
+                                        over "Gripper" (
+                                            prepend apiSchemas = ["PhysicsDriveAPI:angular"]
+                                        )
+                                        {
+                                            float drive:angular:physics:damping = 18
+                                            float drive:angular:physics:maxForce = 4
+                                            float drive:angular:physics:stiffness = 180
+                                            float drive:angular:physics:targetPosition = 34.945053
+                                        }
+                                    }
+
+                                    over "link7"
+                                    {
+                                        over "Gripper_mimic" (
+                                            prepend apiSchemas = ["PhysicsDriveAPI:angular"]
+                                        )
+                                        {
+                                            float drive:angular:physics:damping = 18
+                                            float drive:angular:physics:maxForce = 4
+                                            float drive:angular:physics:stiffness = 180
+                                            float drive:angular:physics:targetPosition = -34.945053
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     def "Lights"
@@ -474,3 +574,4 @@ def Xform "World"
         }
     }
 }
+

@@ -65,6 +65,7 @@ class IsaacSyntheticSourceType(str, Enum):
     REPLICATOR_RENDER_ONLY = "replicator_render_only"
     ISAAC_TELEOP_REPLAY_RENDER = "isaac_teleop_replay_render"
     ISAAC_LAB_MIMIC = "isaac_lab_mimic"
+    ISAAC_LAB_MIMIC_RGBD = "isaac_lab_mimic_rgbd"
     ISAAC_LAB_RL_TEACHER = "isaac_lab_rl_teacher"
     LEGACY_SIDECAR = "legacy_sidecar"
 
@@ -130,13 +131,17 @@ class IsaacLabSyntheticRequest(BaseModel):
     isaac_sim_version: str = ""
     isaac_sim_docs_version: str = ""
     stage_path: str = ""
+    isaac_mirror_endpoint: str = "http://127.0.0.1:8766/joints"
+    isaac_mirror_timeout_s: float = Field(default=0.5, ge=0.1, le=30.0)
 
     cameras: list[str] = Field(default_factory=lambda: ["top", "front", "right"])
-    max_source_frames: int = Field(default=150, ge=1, le=5000)
+    isaac_lab_episode_indices: str = ""
+    max_source_frames: int = Field(default=0, ge=0, le=1000000)
     attempts_per_source_frame: int = Field(default=1, ge=1, le=100)
     seed: int = Field(default=42, ge=0)
     isaac_data_augmentation_preview_count: int = Field(default=20, ge=1, le=200)
     validation_checks: list[str] = Field(default_factory=lambda: ["all"])
+    dataset_exclude_flagged_episodes: bool = True
 
     augmentation_profile: str = "conservative"
     rgb_strength: float = Field(default=0.15, ge=0.0, le=1.0)
@@ -149,9 +154,27 @@ class IsaacLabSyntheticRequest(BaseModel):
     enable_mimic: bool = False
     enable_rl_teacher: bool = False
     enable_legacy_fallback: bool = False
+    isaac_lab_visualize_generation: bool = False
 
-    mimic_trials: int = Field(default=20, ge=1, le=5000)
-    mimic_num_envs: int = Field(default=1, ge=1, le=256)
+    mimic_trials: int = Field(default=10, ge=1, le=5000)
+    mimic_num_envs: int = Field(default=10, ge=1, le=256)
+    isaac_lab_task_name: str = "ATR-Robotis-OMX-PickPlace-Physical-Mimic-v0"
+    isaac_lab_policy_task_name: str = "ATR-Robotis-OMX-PickPlace-Physical-v0"
+    mimic_external_callback: str = "integrations.isaac_lab_robotis_omx.external_callback.register"
+    mimic_annotate_auto: bool = True
+    mimic_annotation_mode: Literal["auto", "preannotated_passthrough"] = "auto"
+    mimic_generation_backend: Literal["joint_replay", "official"] = "official"
+    mimic_enable_cameras: bool = True
+    mimic_use_skillgen: bool = False
+    mimic_rendering_mode: str = "performance"
+    mimic_camera_width: int = Field(default=640, ge=64, le=1920)
+    mimic_camera_height: int = Field(default=480, ge=64, le=1080)
+    domain_randomization_profile: str = "standard"
+    robomimic_algo: str = "bc"
+    robomimic_train_name: str = "robotis_omx_pickplace_bc"
+    robomimic_normalize_training_actions: bool = False
+    il_eval_num_rollouts: int = Field(default=10, ge=1, le=200)
+    il_eval_horizon: int = Field(default=400, ge=1, le=5000)
     rl_teacher_steps: int = Field(default=0, ge=0)
 
     e2e_create_fixture: bool = True
@@ -159,6 +182,7 @@ class IsaacLabSyntheticRequest(BaseModel):
     e2e_episode_s: int = Field(default=10, ge=1, le=600)
     e2e_fps: int = Field(default=15, ge=1, le=120)
     e2e_train_steps: int = Field(default=2, ge=1, le=1000)
+    e2e_stage_timeout_s: float = Field(default=1800.0, ge=30.0, le=7200.0)
 
     require_digital_twin_pass: bool = True
     require_physics_pass: bool = True
@@ -166,9 +190,9 @@ class IsaacLabSyntheticRequest(BaseModel):
     require_articulation_pass: bool = True
 
     real_weight: float = Field(default=1.0, ge=0.0, le=2.0)
-    isaac_rgbd_weight: float = Field(default=0.35, ge=0.0, le=1.0)
+    isaac_rgbd_weight: float = Field(default=0.6, ge=0.0, le=1.0)
     replicator_render_weight: float = Field(default=0.25, ge=0.0, le=1.0)
-    isaac_lab_synthetic_weight: float = Field(default=0.25, ge=0.0, le=1.0)
+    isaac_lab_synthetic_weight: float = Field(default=0.35, ge=0.0, le=1.0)
     legacy_sidecar_weight: float = Field(default=0.0, ge=0.0, le=1.0)
 
 
@@ -275,6 +299,9 @@ class LeRobotBaseRequest(BaseModel):
     isaac_rgbd_post_render_auto_on_record_success: bool = True
     isaac_rgbd_post_render_inline: bool = False
     isaac_rgbd_post_render_poll_timeout_s: float = 10.0
+    isaac_rgbd_post_render_overwrite: bool = False
+    isaac_rgbd_post_render_episode_indices: str = ""
+    isaac_rgbd_post_render_execution_mode: str = "headless_preplay_replay"
     record_attempt_overwrite: bool = True
     active_robot_cam_enabled: bool = False
     active_robot_cam_record_start_enabled: bool = True
@@ -331,20 +358,25 @@ class LeRobotSessionRequest(LeRobotBaseRequest):
     wandb_base_url: str = ""
     wandb_local_port: int = 8081
     train_extra_args: list[str] = Field(default_factory=list)
+    dataset_include_real_original: bool = True
+    dataset_include_isaac_rgbd: bool = True
+    dataset_include_isaac_augmentation: bool = True
+    dataset_include_isaac_lab_synthetic: bool = True
     dataset_mix_real_original_weight: float = 1.0
-    dataset_mix_isaac_rgbd_weight: float = 0.5
-    dataset_mix_isaac_augmentation_weight: float = 0.5
-    dataset_mix_isaac_lab_synthetic_weight: float = 0.5
+    dataset_mix_isaac_rgbd_weight: float = 0.6
+    dataset_mix_isaac_augmentation_weight: float = 0.0
+    dataset_mix_isaac_lab_synthetic_weight: float = 0.35
     dataset_mix_real_original_max_samples: int | None = None
     dataset_mix_isaac_rgbd_max_samples: int | None = None
     dataset_mix_isaac_augmentation_max_samples: int | None = None
     dataset_mix_isaac_lab_synthetic_max_samples: int | None = None
     dataset_mix_seed: int = 0
+    dataset_exclude_flagged_episodes: bool = True
     fidelity_weighting_enabled: bool = True
     fidelity_real_original_weight: float = 1.0
-    fidelity_isaac_rgbd_weight: float = 0.5
-    fidelity_isaac_augmentation_weight: float = 0.3
-    fidelity_isaac_lab_synthetic_weight: float = 0.2
+    fidelity_isaac_rgbd_weight: float = 0.55
+    fidelity_isaac_augmentation_weight: float = 0.0
+    fidelity_isaac_lab_synthetic_weight: float = 0.25
     fps: int | None = None
     camera_fps: int | None = None
     teleop_time_s: float | None = None
@@ -353,8 +385,9 @@ class LeRobotSessionRequest(LeRobotBaseRequest):
     reset_s: float = 2.0
     num_episodes: int = 1
     continuous_rollout: bool = False
-    rollout_action_clamp: bool = True
+    rollout_action_clamp: bool = False
     rollout_max_relative_target: int = 5
+    rollout_shoulder_lift_backstop: bool = True
     rollout_temporal_ensemble: bool = True
     rollout_temporal_ensemble_coeff: float = 0.01
     rollout_inference_type: str = ""
@@ -400,6 +433,8 @@ class LeRobotSessionRequest(LeRobotBaseRequest):
     isaac_data_augmentation_render_domain_strength: float = 1.0
     isaac_data_augmentation_camera_pose_strength: float = 1.0
     isaac_data_augmentation_preview_count: int = 20
+    isaac_data_augmentation_async: bool = False
+    isaac_data_augmentation_job_id: str = ""
     observation: dict[str, Any] = Field(default_factory=dict)
 
 
