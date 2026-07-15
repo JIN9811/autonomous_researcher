@@ -65,7 +65,10 @@ def _bridge(tmp_path: Path) -> LeRobotBridge:
             },
         }
     }
-    return LeRobotBridge(LeRobotBridgeConfig.from_config(config, repo_root=tmp_path))
+    bridge = LeRobotBridge(LeRobotBridgeConfig.from_config(config, repo_root=tmp_path))
+    # Unit tests must not inherit physical RealSense devices from the host.
+    bridge._realsense_sysfs_root = tmp_path / "sysfs"  # noqa: SLF001
+    return bridge
 
 
 def test_record_attempt_default_rgbd_render_cameras_are_top_front_right(tmp_path: Path) -> None:
@@ -1184,6 +1187,10 @@ def test_live_record_active_robot_cam_metadata_and_home_resume_env(tmp_path: Pat
 
 def test_live_record_active_robot_cam_enables_saved_cameras_when_camera_flag_omitted(tmp_path: Path) -> None:
     bridge = _bridge(tmp_path)
+    bridge._scan_live_realsense_camera_entries = lambda: [  # type: ignore[method-assign]
+        {"name": "Intel RealSense D455F", "serial": "341522300873", "product_line": "D400"},
+        {"name": "Intel RealSense D405", "serial": "352122273019", "product_line": "D400"},
+    ]
     bridge.config.profiles["fake_omx_ai"]["safety_limits"].update({"live_enabled": True, "allow_recording": True})
     follower = tmp_path / "omx_follower"
     leader = tmp_path / "omx_leader"
@@ -1389,6 +1396,196 @@ def test_camera_test_returns_synthetic_preview_in_test_mode(tmp_path: Path) -> N
     assert Path(result["capture"]["path"]).exists()
 
 
+def test_live_camera_test_preserves_saved_realsense_backend_when_request_omits_backend(tmp_path: Path, monkeypatch) -> None:
+    bridge = _bridge(tmp_path)
+    bridge.ports_save({
+        "mode": "test",
+        "profile_id": "fake_omx_ai",
+        "device_role": "camera",
+        "camera_key": "wrist",
+        "camera_backend": "realsense",
+        "port": "352122273019",
+        "camera_fps": 15,
+    })
+    captured = {}
+
+    def fake_realsense_capture(camera_device, path):
+        captured["camera_device"] = dict(camera_device)
+        return {
+            "ok": True,
+            "path": str(path),
+            "serve_url": "/api/lerobot/visualization/file?path=fake",
+            "width": 640,
+            "height": 480,
+            "synthetic": False,
+            "backend": "intelrealsense",
+        }
+
+    monkeypatch.setattr(bridge, "_live_realsense_camera_capture", fake_realsense_capture)
+
+    result = bridge.camera_test({
+        "mode": "live",
+        "profile_id": "fake_omx_ai",
+        "device_role": "camera",
+        "camera_key": "wrist",
+        "confirm_live_execute": True,
+    })
+
+    assert result["ok"] is True
+    assert result["capture"]["backend"] == "intelrealsense"
+    assert result["capture"]["port_released"] is True
+    assert result["camera_returned_to_vla"] is True
+    assert result["camera_owner_after"] == "vla_runtime"
+    assert [event["step"] for event in result["step_trace"]][-1] == "RELEASE_CAMERA_PORT"
+    assert captured["camera_device"]["backend"] == "intelrealsense"
+    assert captured["camera_device"]["serial_number_or_name"] == "352122273019"
+
+
+def test_realsense_camera_capture_falls_back_to_conda_lerobot_env(tmp_path: Path, monkeypatch) -> None:
+    import builtins
+
+    bridge = _bridge(tmp_path)
+    path = tmp_path / "frame.jpg"
+    device = {
+        "backend": "intelrealsense",
+        "serial_number_or_name": "352122273019",
+        "camera_key": "wrist",
+        "fps": 15,
+        "width": 640,
+        "height": 480,
+        "use_depth": True,
+    }
+    captured = {}
+
+    def fake_conda_capture(camera_device, output_path, import_error):
+        captured["camera_device"] = dict(camera_device)
+        captured["path"] = output_path
+        captured["import_error"] = import_error
+        return {"ok": True, "path": str(output_path), "width": 640, "height": 480, "backend": "conda_lerobot_realsense"}
+
+    real_import = builtins.__import__
+
+    def fake_import(name, *args, **kwargs):
+        if name == "lerobot.cameras.realsense":
+            raise ModuleNotFoundError("No module named 'lerobot'")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+    monkeypatch.setattr(bridge, "_live_realsense_camera_capture_via_lerobot_env", fake_conda_capture, raising=False)
+
+    result = bridge._live_realsense_camera_capture(device, path)
+
+    assert result["ok"] is True
+    assert result["backend"] == "conda_lerobot_realsense"
+    assert captured["camera_device"]["serial_number_or_name"] == "352122273019"
+    assert captured["path"] == path
+
+
+def test_live_active_robot_cam_capture_uses_pose_driver_and_saved_realsense(tmp_path: Path, monkeypatch) -> None:
+    bridge = _bridge(tmp_path)
+    bridge.config.profiles["fake_omx_ai"]["safety_limits"].update({"live_enabled": True, "allow_policy_rollout": True})
+    bridge._scan_live_realsense_camera_entries = lambda: [  # type: ignore[method-assign]
+        {"serial": "352122273019", "name": "Intel RealSense D405"}
+    ]
+    follower = tmp_path / "omx_follower"
+    follower.touch()
+    bridge.ports_save({"mode": "live", "profile_id": "fake_omx_ai", "device_role": "follower", "port": str(follower)})
+    bridge.ports_save(
+        {
+            "mode": "live",
+            "profile_id": "fake_omx_ai",
+            "device_role": "camera",
+            "camera_key": "wrist",
+            "camera_backend": "realsense",
+            "port": "352122273019",
+            "camera_fps": 15,
+        }
+    )
+    bridge._live_camera_block_if_needed = lambda **_: None  # type: ignore[method-assign]
+    captured: dict[str, Any] = {"commands": []}
+
+    def fake_run(command, **kwargs):  # type: ignore[no-untyped-def]
+        captured["commands"].append(list(command))
+        captured["env"] = dict(kwargs.get("env") or {})
+        payload = {
+            "ok": True,
+            "status": "applied",
+            "camera": "d405",
+            "capture": {
+                "ok": True,
+                "path": str(tmp_path / "active_cam.jpg"),
+                "serve_url": "/api/lerobot/visualization/file?path=active_cam.jpg",
+                "width": 640,
+                "height": 480,
+                "synthetic": False,
+            },
+            "capture_pose": {"status": "reached"},
+            "resume_pose": {"status": "reached"},
+        }
+        return subprocess.CompletedProcess(command, 0, stdout=json.dumps(payload), stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    result = bridge.active_robot_cam_capture(
+        {
+            "mode": "live",
+            "runtime_mode": "live",
+            "profile_id": "fake_omx_ai",
+            "camera_key": "wrist",
+            "confirm_live_execute": True,
+        }
+    )
+
+    assert result["ok"] is True
+    assert result["tool"] == "lerobot.active_robot_cam.capture"
+    assert result["robot_pose_included"] is True
+    assert result["camera_key"] == "wrist"
+    assert result["camera_returned_to_vla"] is True
+    assert result["port_released"] is True
+    assert result["release_status"] == "process_exit_verified"
+    assert result["release_verification"]["method"] == "child_process_exit"
+    assert any(
+        any(Path(str(item)).name == "lerobot_active_robot_cam_once.py" for item in command)
+        for command in captured["commands"]
+    )
+    assert len(captured["commands"]) == 1
+    assert not any(
+        Path(str(item)).name == "lerobot_camera_reacquire_probe.py"
+        for command in captured["commands"]
+        for item in command
+    )
+    assert captured["env"]["ATR_ACTIVE_ROBOT_CAM_ENABLED"] == "1"
+    assert captured["env"]["ATR_ACTIVE_ROBOT_CAM_PRIMARY_CAMERA_KEY"] == "wrist"
+    assert captured["env"]["ATR_ACTIVE_ROBOT_CAM_CAMERA_PRIORITY"] == "d405,d455f"
+
+
+def test_camera_release_contract_does_not_assume_missing_release_fields_are_true(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+
+    result = bridge._camera_release_contract({"ok": True, "path": "/tmp/frame.png"})
+
+    assert result["port_released"] is False
+    assert result["camera_returned_to_vla"] is False
+    assert result["camera_owner_after"] == "unknown"
+    assert result["release_status"] == "release_unverified"
+
+
+def test_visualization_file_allows_active_robot_cam_latest_frame_dir(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    frame_dir = Path("/tmp/atr_lerobot_latest_frame")
+    frame_dir.mkdir(parents=True, exist_ok=True)
+    frame_path = frame_dir / f"pytest_active_cam_frame_{os.getpid()}.png"
+    frame_path.write_bytes(b"active-cam-frame")
+
+    try:
+        assert bridge.visualization_file_path(str(frame_path)) == frame_path.resolve()
+    finally:
+        try:
+            frame_path.unlink()
+        except FileNotFoundError:
+            pass
+
+
 def test_multiple_camera_ports_are_saved_per_key_and_used_in_commands(tmp_path: Path) -> None:
     bridge = _bridge(tmp_path)
 
@@ -1478,7 +1675,7 @@ def test_realsense_camera_mode_uses_depth_rgb_for_top_and_wrist_at_default_15fps
         "depth_scale_m_per_unit": 0.001,
         "depth_clip_min_mm": 0.0,
         "depth_clip_max_mm": 2000.0,
-        "warmup_s": 5,
+        "warmup_s": 20,
     }
     assert cameras["wrist"] == {
         "type": "intelrealsense",
@@ -1492,7 +1689,7 @@ def test_realsense_camera_mode_uses_depth_rgb_for_top_and_wrist_at_default_15fps
         "depth_scale_m_per_unit": 0.0001,
         "depth_clip_min_mm": 50.0,
         "depth_clip_max_mm": 150.0,
-        "warmup_s": 5,
+        "warmup_s": 20,
     }
 
 
@@ -1799,6 +1996,152 @@ def test_dataset_inspect_health_blocks_raw_depth_adapter_without_raw_depth(tmp_p
     assert health["issues"][0]["code"] == "LEROBOT_RAW_DEPTH_SIDECAR_MISSING"
 
 
+def _write_usb_sysfs_fixture(root: Path, device_name: str, *, serial: str, speed: str, version: str) -> None:
+    device = root / device_name
+    device.mkdir(parents=True, exist_ok=True)
+    (device / "idVendor").write_text("8086\n", encoding="utf-8")
+    (device / "serial").write_text(f"{serial}\n", encoding="utf-8")
+    (device / "speed").write_text(f"{speed}\n", encoding="utf-8")
+    (device / "version").write_text(f"{version}\n", encoding="utf-8")
+
+
+def test_realsense_usb_link_metadata_uses_negotiated_sysfs_speed(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    sysfs_root = tmp_path / "sys" / "bus" / "usb" / "devices"
+    _write_usb_sysfs_fixture(sysfs_root, "4-1.1", serial="254743060206", speed="5000", version="3.20")
+
+    metadata = bridge._realsense_usb_link_metadata(  # noqa: SLF001
+        {
+            "serial": "341522300873",
+            "name": "Intel RealSense D455F",
+            "usb_type": "3.2",
+            "physical_port": "4-1.1-3",
+            "asic_serial": "254743060206",
+        },
+        sysfs_root=sysfs_root,
+    )
+
+    assert metadata == {
+        "usb_type": "3.2",
+        "usb_speed_mbps": 5000,
+        "usb_link_label": "USB 3.2 · 5000 Mbps",
+        "usb_link_status": "ok",
+    }
+
+
+def test_realsense_usb_link_metadata_warns_for_usb2(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    sysfs_root = tmp_path / "sys" / "bus" / "usb" / "devices"
+    _write_usb_sysfs_fixture(sysfs_root, "5-1.3.3", serial="254723073433", speed="480", version="2.10")
+
+    metadata = bridge._realsense_usb_link_metadata(  # noqa: SLF001
+        {"usb_type": "2.1", "physical_port": "5-1.3.3-4", "asic_serial": "254723073433"},
+        sysfs_root=sysfs_root,
+    )
+
+    assert metadata == {
+        "usb_type": "2.1",
+        "usb_speed_mbps": 480,
+        "usb_link_label": "USB 2.1 · 480 Mbps · rollout risk",
+        "usb_link_status": "warning",
+    }
+
+
+def test_realsense_usb_link_metadata_is_unknown_without_link_data(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+
+    metadata = bridge._realsense_usb_link_metadata({}, sysfs_root=tmp_path / "missing")  # noqa: SLF001
+
+    assert metadata == {
+        "usb_type": "",
+        "usb_speed_mbps": None,
+        "usb_link_label": "USB link unknown",
+        "usb_link_status": "unknown",
+    }
+
+
+def test_realsense_live_detect_persists_usb_link(tmp_path: Path, monkeypatch) -> None:
+    bridge = _bridge(tmp_path)
+    entries = [
+        {
+            "name": "Intel RealSense D455F",
+            "serial": "341522300873",
+            "product_line": "D400",
+            "usb_type": "3.2",
+            "physical_port": "4-1.1-3",
+            "asic_serial": "254743060206",
+        }
+    ]
+    monkeypatch.setattr(bridge, "_scan_live_realsense_camera_entries", lambda: list(entries), raising=False)
+    monkeypatch.setattr(
+        bridge,
+        "_realsense_usb_link_metadata",
+        lambda _entry: {
+            "usb_type": "3.2",
+            "usb_speed_mbps": 5000,
+            "usb_link_label": "USB 3.2 · 5000 Mbps",
+            "usb_link_status": "ok",
+        },
+        raising=False,
+    )
+
+    result = bridge.ports_detect(
+        {
+            "mode": "live",
+            "profile_id": "fake_omx_ai",
+            "device_role": "camera",
+            "camera_key": "top",
+            "camera_backend": "realsense",
+        }
+    )
+
+    saved = result["saved_devices"]["cameras"]["top"]
+    assert saved["usb_link_status"] == "ok"
+    assert saved["usb_speed_mbps"] == 5000
+    assert saved["usb_link_label"] == "USB 3.2 · 5000 Mbps"
+
+
+def test_realsense_live_save_persists_usb_link(tmp_path: Path, monkeypatch) -> None:
+    bridge = _bridge(tmp_path)
+    entries = [
+        {
+            "name": "Intel RealSense D405",
+            "serial": "352122273019",
+            "product_line": "D400",
+            "usb_type": "2.1",
+            "physical_port": "5-1.3.3-4",
+            "asic_serial": "254723073433",
+        }
+    ]
+    monkeypatch.setattr(bridge, "_scan_live_realsense_camera_entries", lambda: list(entries), raising=False)
+    monkeypatch.setattr(
+        bridge,
+        "_realsense_usb_link_metadata",
+        lambda _entry: {
+            "usb_type": "2.1",
+            "usb_speed_mbps": 480,
+            "usb_link_label": "USB 2.1 · 480 Mbps · rollout risk",
+            "usb_link_status": "warning",
+        },
+        raising=False,
+    )
+
+    result = bridge.ports_save(
+        {
+            "mode": "live",
+            "profile_id": "fake_omx_ai",
+            "device_role": "camera",
+            "camera_key": "wrist",
+            "camera_backend": "realsense",
+        }
+    )
+
+    saved = result["saved_devices"]["cameras"]["wrist"]
+    assert saved["usb_link_status"] == "warning"
+    assert saved["usb_speed_mbps"] == 480
+    assert saved["usb_link_label"] == "USB 2.1 · 480 Mbps · rollout risk"
+
+
 def test_realsense_scan_does_not_fallback_to_v4l_by_id_when_sdk_query_fails(tmp_path: Path, monkeypatch) -> None:
     bridge = _bridge(tmp_path)
 
@@ -1819,6 +2162,96 @@ def test_realsense_scan_does_not_fallback_to_v4l_by_id_when_sdk_query_fails(tmp_
     monkeypatch.setattr("device_bridges.lerobot_bridge.glob.glob", fake_glob)
 
     assert bridge._scan_realsense_camera_ids() == []
+
+
+def test_realsense_scan_uses_sdk_identity_when_usb_descriptor_differs(tmp_path: Path, monkeypatch) -> None:
+    bridge = _bridge(tmp_path)
+    sysfs_root = tmp_path / "sys" / "bus" / "usb" / "devices"
+    d405 = sysfs_root / "6-1.3.3"
+    d405.mkdir(parents=True)
+    (d405 / "idVendor").write_text("8086\n", encoding="utf-8")
+    (d405 / "idProduct").write_text("0b5b\n", encoding="utf-8")
+    (d405 / "product").write_text("Intel(R) RealSense(TM) Depth Camera 405\n", encoding="utf-8")
+    # The USB descriptor serial is not the SDK serial accepted by rs.config.enable_device().
+    (d405 / "serial").write_text("254723073433\n", encoding="utf-8")
+    (d405 / "speed").write_text("5000\n", encoding="utf-8")
+
+    camera_info = SimpleNamespace(
+        serial_number="serial_number",
+        name="name",
+        product_line="product_line",
+        usb_type_descriptor="usb_type_descriptor",
+        physical_port="physical_port",
+        asic_serial_number="asic_serial_number",
+    )
+    info = {
+        "serial_number": "352122273019",
+        "name": "Intel RealSense D405",
+        "product_line": "D400",
+        "usb_type_descriptor": "3.2",
+        "physical_port": "6-1.3.3",
+        "asic_serial_number": "254723073433",
+    }
+
+    class FakeDevice:
+        @staticmethod
+        def supports(key: str) -> bool:
+            return key in info
+
+        @staticmethod
+        def get_info(key: str) -> str:
+            return info[key]
+
+    class FakeContext:
+        @staticmethod
+        def query_devices() -> list[FakeDevice]:
+            return [FakeDevice()]
+
+    monkeypatch.setitem(
+        sys.modules,
+        "pyrealsense2",
+        SimpleNamespace(camera_info=camera_info, context=lambda: FakeContext()),
+    )
+    bridge._realsense_sysfs_root = sysfs_root  # noqa: SLF001
+
+    entries = bridge._scan_live_realsense_camera_entries(sysfs_root=sysfs_root)
+
+    assert entries == [
+        {
+            "serial": "352122273019",
+            "name": "Intel RealSense D405",
+            "product_line": "D400",
+            "usb_type": "3.2",
+            "physical_port": "6-1.3.3",
+            "asic_serial": "254723073433",
+            "usb_speed_mbps": 5000,
+            "usb_link_label": "USB 3.2 · 5000 Mbps",
+            "usb_link_status": "ok",
+        }
+    ]
+
+
+def test_realsense_sysfs_metadata_keeps_serialless_d455f_with_configured_identity(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    sysfs_root = tmp_path / "sys" / "bus" / "usb" / "devices"
+    d455 = sysfs_root / "3-1.1"
+    d455.mkdir(parents=True)
+    (d455 / "idVendor").write_text("8086\n", encoding="utf-8")
+    (d455 / "idProduct").write_text("0b5c\n", encoding="utf-8")
+    (d455 / "product").write_text("Intel(R) RealSense(TM) Depth Camera 455f\n", encoding="utf-8")
+    (d455 / "serial").write_text("\n", encoding="utf-8")
+    (d455 / "speed").write_text("480\n", encoding="utf-8")
+
+    bridge._realsense_sysfs_root = sysfs_root  # noqa: SLF001
+
+    entries = bridge._scan_realsense_camera_entries_from_sysfs(sysfs_root=sysfs_root)
+
+    assert len(entries) == 1
+    assert entries[0]["serial"] == ""
+    assert entries[0]["configured_identifier"] == "341522300873"
+    assert entries[0]["usb_speed_mbps"] == 480
+    assert entries[0]["usb_link_status"] == "warning"
+    assert bridge._realsense_identifier_available("341522300873", entries) is True
 
 
 def test_realsense_wrist_detect_does_not_save_top_camera_when_d405_missing(tmp_path: Path, monkeypatch) -> None:
@@ -2094,6 +2527,124 @@ def test_leader_and_follower_save_does_not_block_same_serial_port(tmp_path: Path
     assert leader["saved_devices"]["leader"]["port"] == "/dev/ttyUSB0"
 
 
+def test_rollout_start_returns_runtime_supervisor_status_blocks(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+
+    result = bridge.rollout_start(
+        {
+            "mode": "test",
+            "profile_id": "fake_omx_ai",
+            "policy_path": "fake://policy",
+            "dataset_repo_id": "jin/eval_pick_and_place_cube_rollout",
+        }
+    )
+
+    assert result["ok"] is True
+    assert result["port_lease"]["schema"] == "atr.lerobot.port_lease.v1"
+    assert result["port_lease"]["follower_port"] == "/dev/ttyUSB_FAKE_FOLLOWER"
+    assert result["port_lease"]["leader_port"] == "/dev/ttyUSB_FAKE_LEADER"
+    assert result["active_camera_lease"]["schema"] == "atr.lerobot.active_camera_lease.v1"
+    assert result["active_camera_lease"]["returned_to_vla"] is True
+    assert result["policy_runtime"]["schema"] == "atr.lerobot.policy_runtime.v1"
+    assert result["policy_runtime"]["policy_type"] == "act"
+    assert result["policy_runtime"]["session_id"] == result["session_id"]
+    assert result["rerun_telemetry"]["schema"] == "atr.lerobot.rerun_telemetry.v1"
+    assert result["rerun_telemetry"]["status"] in {"disabled", "waiting", "available"}
+    assert "home_pose" not in result
+
+
+def test_rollout_status_omits_home_pose_without_probe(tmp_path: Path, monkeypatch) -> None:
+    bridge = _bridge(tmp_path)
+    monkeypatch.setattr(
+        bridge,
+        "_read_follower_joint_positions",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("rollout status must not open a serial reader")),
+    )
+    session = {
+        "session_id": "lr-rollout-status",
+        "workflow": "rollout",
+        "profile_id": "fake_omx_ai",
+        "mode": "live",
+        "status": "POLICY_ACTIVE",
+        "pid": 123,
+        "returncode": None,
+    }
+
+    result = bridge._session_response("lerobot.rollout.status", "live", session, [])
+
+    assert result["ok"] is True
+    assert "home_pose" not in result
+
+
+def test_rollout_status_exposes_post_place_interlock_from_action_log(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+
+    class _FakeJointTelemetryObserver:
+        def poll(self, _path: Path, _session: dict[str, Any]) -> list[dict[str, Any]]:
+            return [
+                {
+                    "session_id": "lr-rollout-post-place",
+                    "sequence": 10,
+                    "motion_state": {
+                        "measured": {
+                            "base_state": "moving",
+                            "gripper_state": "ungrasping",
+                            "home_gate": {"passed": False},
+                        },
+                        "policy": {
+                            "base_state": "home",
+                            "gripper_state": "idle",
+                            "home_gate": {"passed": True},
+                        },
+                    },
+                },
+                {
+                    "session_id": "lr-rollout-post-place",
+                    "sequence": 11,
+                    "motion_state": {
+                        "measured": {
+                            "base_state": "home",
+                            "gripper_state": "idle",
+                            "home_gate": {"passed": True},
+                        },
+                        "policy": {
+                            "base_state": "home",
+                            "gripper_state": "idle",
+                            "home_gate": {"passed": True},
+                        },
+                    },
+                },
+            ]
+
+    bridge._joint_telemetry_observer = _FakeJointTelemetryObserver()  # type: ignore[attr-defined]
+    session = {
+        "session_id": "lr-rollout-post-place",
+        "workflow": "rollout",
+        "profile_id": "fake_omx_ai",
+        "mode": "live",
+        "status": "POLICY_ACTIVE",
+        "pid": 123,
+        "returncode": None,
+    }
+
+    result = bridge._session_response("lerobot.rollout.status", "live", session, [])
+
+    assert result["joint_telemetry"]["schema"] == "atr.robot_joint_telemetry.v1"
+    assert result["joint_telemetry"]["packet"]["sequence"] == 11
+    assert result["post_place_interlock"] == {
+        "schema": "post_place_interlock.v1",
+        "session_id": "lr-rollout-post-place",
+        "ungrasping_seen": True,
+        "ungrasping_sequence": 10,
+        "measured_base_state": "home",
+        "measured_gripper_state": "idle",
+        "home_gate_passed": True,
+        "home_after_ungrasping": True,
+        "ready_for_utm_snapshot": True,
+        "latest_sequence": 11,
+    }
+
+
 def test_live_rollout_blocks_unavailable_saved_follower_port(tmp_path: Path) -> None:
     bridge = _bridge(tmp_path)
     policy_dir = tmp_path / "outputs" / "train" / "job" / "checkpoints" / "last" / "pretrained_model"
@@ -2116,10 +2667,43 @@ def test_live_rollout_blocks_unavailable_saved_follower_port(tmp_path: Path) -> 
     assert result["ok"] is False
     assert result["failure_code"] == "LEROBOT_DEVICE_PORT_UNAVAILABLE"
     assert str(missing_port) in result["message"]
+    assert result["port_lease"]["status"] == "blocked"
+    assert result["port_lease"]["follower_port"] == str(missing_port)
+    assert result["port_lease"]["unavailable_roles"] == ["follower"]
+
+
+def test_port_lease_reports_discoverable_occupant_process(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    port = tmp_path / "busy-follower"
+    port.touch()
+
+    with port.open("rb"):
+        blocks = bridge._session_runtime_contract_blocks(  # noqa: SLF001 - validates bridge status contract.
+            {
+                "workflow": "rollout",
+                "profile_id": "fake_omx_ai",
+                "status": "ACTIVE",
+                "command_preview": [f"--robot.port={port}", "--teleop.port=/dev/ttyUSB_FAKE_LEADER"],
+            },
+            {},
+        )
+
+    assert blocks["port_lease"]["current_availability"] == "occupied"
+    assert blocks["port_lease"]["occupant_process"]
+    assert blocks["port_lease"]["occupant_processes"][0]["pid"] > 0
 
 
 def test_live_teleoperate_blocks_missing_saved_realsense_camera_before_process_start(tmp_path: Path, monkeypatch) -> None:
     bridge = _bridge(tmp_path)
+    monkeypatch.setattr(
+        bridge,
+        "_scan_live_realsense_camera_entries",
+        lambda: [
+            {"name": "Intel RealSense D455F", "serial": "341522300873", "product_line": "D400"},
+            {"name": "Intel RealSense D405", "serial": "352122273019", "product_line": "D400"},
+        ],
+        raising=False,
+    )
     follower = tmp_path / "omx_follower"
     leader = tmp_path / "omx_leader"
     follower.touch()
@@ -2170,11 +2754,23 @@ def test_live_teleoperate_blocks_missing_saved_realsense_camera_before_process_s
     assert result["ok"] is False
     assert result["failure_code"] == "LEROBOT_REALSENSE_CAMERA_UNAVAILABLE"
     assert "wrist=352122273019" in result["message"]
+    assert result["active_camera_lease"]["status"] == "blocked"
+    assert result["active_camera_lease"]["owner"] == "unknown"
+    assert result["active_camera_lease"]["conflict_reason"] == "LEROBOT_REALSENSE_CAMERA_UNAVAILABLE"
     assert "visible RealSense devices: 341522300873" in result["message"]
 
 
 def test_live_rollout_blocks_missing_saved_realsense_camera_before_policy_process_start(tmp_path: Path, monkeypatch) -> None:
     bridge = _bridge(tmp_path)
+    monkeypatch.setattr(
+        bridge,
+        "_scan_live_realsense_camera_entries",
+        lambda: [
+            {"name": "Intel RealSense D455F", "serial": "341522300873", "product_line": "D400"},
+            {"name": "Intel RealSense D405", "serial": "352122273019", "product_line": "D400"},
+        ],
+        raising=False,
+    )
     follower = tmp_path / "omx_follower"
     follower.touch()
     policy_dir = tmp_path / "outputs" / "train" / "job" / "checkpoints" / "last" / "pretrained_model"
@@ -2229,6 +2825,15 @@ def test_live_rollout_blocks_missing_saved_realsense_camera_before_policy_proces
 
 def test_pi05_live_rollout_omits_realsense_color_format_for_pi05_runtime(tmp_path: Path, monkeypatch) -> None:
     bridge = _bridge(tmp_path)
+    monkeypatch.setattr(
+        bridge,
+        "_scan_live_realsense_camera_entries",
+        lambda: [
+            {"name": "Intel RealSense D455F", "serial": "341522300873", "product_line": "D400"},
+            {"name": "Intel RealSense D405", "serial": "352122273019", "product_line": "D400"},
+        ],
+        raising=False,
+    )
     follower = tmp_path / "omx_follower"
     follower.touch()
     policy_dir = tmp_path / "outputs" / "train" / "job" / "checkpoints" / "000500" / "pretrained_model"
@@ -3937,6 +4542,63 @@ def test_rollout_normalizes_selected_model_file_to_checkpoint_dir(tmp_path: Path
     assert result["checkpoint_path"] == str(policy_dir)
 
 
+def test_live_manipulation_rollout_does_not_fall_back_to_latest_checkpoint(tmp_path: Path) -> None:
+    older = tmp_path / "outputs" / "train" / "job" / "checkpoints" / "040000" / "pretrained_model"
+    newer = tmp_path / "outputs" / "train" / "job" / "checkpoints" / "085000" / "pretrained_model"
+    _make_policy_checkpoint(older)
+    _make_policy_checkpoint(newer)
+    bridge = _bridge(tmp_path)
+    follower_port = tmp_path / "follower-port"
+    follower_port.touch()
+    bridge.ports_save(
+        {
+            "mode": "live",
+            "profile_id": "fake_omx_ai",
+            "device_role": "follower",
+            "port": str(follower_port),
+        }
+    )
+    bridge._live_block_if_needed = lambda **_: None  # type: ignore[method-assign]
+
+    result = bridge.rollout_start(
+        {
+            "mode": "test",
+            "runtime_mode": "live",
+            "profile_id": "fake_omx_ai",
+            "task_id": "transfer_to_utm",
+            "skill_id": "transfer_to_utm",
+            "confirm_live_execute": True,
+        }
+    )
+
+    assert result["ok"] is False
+    assert result["failure_code"] == "LEROBOT_POLICY_PATH_REQUIRED"
+    assert not any("085000" in str(item) for item in result.get("command_preview", []))
+
+
+def test_manipulation_rollout_keeps_explicit_older_checkpoint_when_newer_exists(tmp_path: Path) -> None:
+    selected = tmp_path / "outputs" / "train" / "job" / "checkpoints" / "040000" / "pretrained_model"
+    newer = tmp_path / "outputs" / "train" / "job" / "checkpoints" / "085000" / "pretrained_model"
+    _make_policy_checkpoint(selected)
+    _make_policy_checkpoint(newer)
+    bridge = _bridge(tmp_path)
+
+    result = bridge.rollout_start(
+        {
+            "mode": "test",
+            "profile_id": "fake_omx_ai",
+            "task_id": "transfer_to_utm",
+            "skill_id": "transfer_to_utm",
+            "policy_path": str(selected),
+        }
+    )
+
+    assert result["ok"] is True
+    assert result["checkpoint_path"] == str(selected)
+    assert f"--policy.path={selected}" in result["command_preview"]
+    assert not any("085000" in str(item) for item in result["command_preview"])
+
+
 def test_rollout_uses_eval_dataset_name_and_manual_stop_duration(tmp_path: Path) -> None:
     bridge = _bridge(tmp_path)
 
@@ -4162,6 +4824,7 @@ def test_rollout_stop_resets_all_tracked_rollout_sessions(tmp_path: Path) -> Non
     assert bridge._sessions["rollout-b"]["status"] == "STOPPED"
     assert bridge._sessions["teleop-active"]["status"] == "TELEOP_ACTIVE"
     assert cleanup_called == ["rollout"]
+    assert result["port_lease"]["reclaim_status"] == "attempted"
     assert any(item["step"] == "CLEANUP_LEROBOT_PROCESS_GROUPS" for item in result["step_trace"])
 
 
@@ -8061,6 +8724,97 @@ def test_live_isaac_lab_mimic_runner_refreshes_training_import_after_post_run(
     assert refresh_payload["require_articulation_pass"] is False
     assert completed["summary"]["training_exposure"]["source_counts"]["isaac_lab_synthetic"] == 2
     assert completed["job"]["post_run"]["training_import_refresh"]["status"] == "READY_FOR_TRAINING"
+
+
+def test_live_isaac_lab_mimic_status_recovers_completed_replay_after_process_loss(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    bridge = _bridge(tmp_path)
+    dataset = tmp_path / "hf_datasets" / "jin" / "mimic-replay-recovery"
+    output_root = dataset / "sidecar" / "isaac_lab_synthetic" / "latest"
+    mimic_dir = output_root / "mimic"
+    mimic_dir.mkdir(parents=True)
+    replay_summary = {
+        "schema": "atr.lerobot.isaac_lab_mimic.replay_promotion.summary.v1",
+        "ok": True,
+        "status": "completed",
+        "candidate_count": 3,
+        "replay_success_count": 2,
+        "replay_failure_count": 1,
+        "promoted_count": 2,
+        "training_eligible_count": 2,
+    }
+    replay_summary_path = mimic_dir / "replay_validation_summary.json"
+    replay_summary_path.write_text(json.dumps(replay_summary), encoding="utf-8")
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    class FakePipeline:
+        def build_synthetic(self, request):
+            calls.append(("build_synthetic", request.model_dump()))
+            return {
+                "ok": True,
+                "status": "READY_FOR_TRAINING",
+                "dataset_path": str(dataset),
+                "output_root": str(output_root),
+                "validation_report": {"status": "passed", "blockers": []},
+                "mimic": {"status": "partial_success", "replay_success_count": 2},
+                "training_exposure": {
+                    "status": "passed",
+                    "row_count": 2,
+                    "source_counts": {"isaac_lab_synthetic": 2},
+                    "train_exposed": True,
+                },
+            }
+
+    monkeypatch.setattr(bridge, "_isaac_lab_synthetic_pipeline", lambda: FakePipeline())
+    now = datetime.now().isoformat()
+    job = {
+        "job_id": "isaac_lab_mimic_recovery",
+        "kind": "mimic",
+        "status": "FAILED",
+        "progress": {"percent": 100.0, "stage": "failed"},
+        "summary": {"dataset_path": str(dataset), "output_root": str(output_root)},
+        "post_run": {
+            "enabled": True,
+            "status": "running",
+            "stage": "replay_validate_after_generation",
+            "summary_file": str(replay_summary_path),
+        },
+        "request_payload": {
+            "mode": "live",
+            "dataset_path": str(dataset),
+            "output_root": str(output_root),
+            "enable_mimic": True,
+            "dry_run": False,
+        },
+        "pid": 99999999,
+        "error": {
+            "code": "ISAAC_LAB_RUNNER_PROCESS_EXITED",
+            "message": "stale runner lost after server restart",
+        },
+        "created_at": now,
+        "started_at": now,
+        "updated_at": now,
+        "completed_at": now,
+        "stop_requested": False,
+    }
+    bridge._store_isaac_lab_job("mimic", job)  # noqa: SLF001
+
+    status = bridge.isaac_lab_mimic_status({"job_id": job["job_id"], "dataset_path": str(dataset)})
+
+    assert status["status"] == "COMPLETED"
+    assert status["job"]["error"] is None
+    assert status["job"]["post_run"]["status"] == "completed"
+    assert status["job"]["post_run"]["replay_validation_summary"]["training_eligible_count"] == 2
+    assert status["job"]["post_run"]["training_import_refresh"]["status"] == "READY_FOR_TRAINING"
+    assert status["summary"]["training_exposure"]["source_counts"]["isaac_lab_synthetic"] == 2
+    assert [name for name, _ in calls] == ["build_synthetic"]
+    refresh_payload = calls[0][1]
+    assert refresh_payload["resume"] is True
+    assert refresh_payload["overwrite_latest"] is False
+    persisted = json.loads(Path(status["job"]["job_manifest_path"]).read_text(encoding="utf-8"))
+    assert persisted["status"] == "COMPLETED"
 
 
 def test_live_isaac_lab_mimic_stop_marks_progress_stopped(tmp_path: Path, monkeypatch) -> None:

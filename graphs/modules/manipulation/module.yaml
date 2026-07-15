@@ -11,6 +11,8 @@ module:
     guardian_stop_authority: true
   tools:
   - lerobot.rollout.start
+  - lerobot.rollout.stop
+  - lerobot.rollout.status
   - robot.pick_place
   runtime_contract:
     policy_executor: pi05_or_lerobot_policy
@@ -96,7 +98,6 @@ module:
   io_contract:
     input:
     - OrchestratorState with specimen_result, latest Vision observation, and manipulation profile
-    - specimen_pose.v1
     - transfer_readiness.camera_returned_to_vla
     output:
     - manipulation

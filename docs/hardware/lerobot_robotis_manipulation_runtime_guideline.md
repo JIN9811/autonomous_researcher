@@ -184,7 +184,7 @@ Pi0.5 3DP-to-UTM transfer payload extension:
     "specimen_id": "specimen-id"
   },
   "completion_status": "reported_complete",
-  "handoff_status": "ready_for_equipment_agent"
+  "handoff_status": "ready_for_equipment"
 }
 ```
 
@@ -616,7 +616,7 @@ Teleoperation GUI requirements:
 - `legacy_lerobot` disables ATR raw 16-bit sidecar emission but does not disable normal LeRobot visual features. `rgbd_sidecar` keeps standard LeRobot RGB-D features and additionally writes raw 16-bit depth evidence. `raw_depth_adapter` requires the raw sidecar manifest and enables the patched LeRobot dataset loader with `ATR_LEROBOT_RAW_DEPTH_ADAPTER=1`, `ATR_LEROBOT_RAW_DEPTH_SOURCE_DIR=<dataset>/sidecar/depth_raw`, `ATR_LEROBOT_RAW_DEPTH_CAMERA_KEYS`, and the recorded clip/scale env values. During training, the loader replaces existing `observation.images.<camera>_depth` tensors with tensors reconstructed from the 16-bit raw sidecar, so this path actually consumes raw depth instead of only recording metadata.
 - Training must not silently switch contracts. If the GUI-selected pipeline conflicts with `<dataset>/meta/atr_pipeline.json`, return `LEROBOT_OBSERVATION_PIPELINE_MISMATCH`; if `raw_depth_adapter` is selected without a raw depth manifest, return `LEROBOT_RAW_DEPTH_ADAPTER_SOURCE_MISSING`.
 - Pi0.5 v2.1 -> v3.0 conversion must preserve `sidecar/depth_raw`. If the source dataset has `sidecar/depth_raw/transform_manifest.json` but the generated `local-pi05-v30/...` copy does not, the bridge must treat the conversion as stale and regenerate before training.
-- D405 must be configured with `color_format=bgr8` and `warmup_s>=5`. D455F/top uses `color_format=rgb8`. This mirrors the LeRobot D405 startup fix: D405 exposes color through the stereo module, and forcing `rgb8` or disabling warmup can cause `status=False`, no-frame warmup failures, or a stuck camera after a previous session.
+- D405 must be configured with `color_format=bgr8` and `warmup_s>=20`. D455F/top uses `color_format=rgb8`. This mirrors the LeRobot D405 startup fix: D405 exposes color through the stereo module, and forcing `rgb8` or disabling warmup can cause `status=False`, no-frame warmup failures, or a stuck camera after a previous session.
 - `/lerobot` Device Port Setup exposes a per-camera `RealSense SDK` checkbox. When checked for a camera key, baseline/detect/save/test payloads store `backend=intelrealsense`, `use_depth=true`, `fps=15` by default, and downstream teleoperation, recording, rollout, and Manipulation Agent bridge commands all receive the RealSense camera config instead of OpenCV `/dev/video*` config.
 - When `top` or `wrist` is saved without an explicit RealSense identifier, the backend must resolve the role through SDK enumeration before writing memory: `top` prefers a detected D455/D455F serial, and `wrist` prefers a detected D405 serial. If `wrist` D405 is not visible, Device Port Setup must fail with `LEROBOT_REALSENSE_ROLE_CAMERA_NOT_FOUND` instead of saving D455F as wrist.
 - RealSense discovery must enumerate devices without opening camera streams and must use the official SDK path only. The bridge uses `pyrealsense2.context().query_devices()` and returns no RealSense candidates if SDK enumeration fails; it must not silently substitute OpenCV/V4L paths because downstream recording and rollout require the official LeRobot `intelrealsense` backend.
@@ -1174,6 +1174,12 @@ Rollout guard rule:
 - The bridge also blocks duplicate live rollout starts while an active rollout session exists.
 - If the same active `session_id` is passed again, the bridge returns the existing session idempotently instead of launching another process.
 - If a different/no `session_id` is passed while rollout is active, the bridge returns `LEROBOT_ROLLOUT_ALREADY_ACTIVE` and requires `lerobot.rollout.stop` before the next inference session.
+- When Vision emits `vision_manipulation_completion.v1`, Manipulation Agent
+  must call `lerobot.rollout.stop` against the existing rollout session instead
+  of launching a duplicate rollout. The stop response's runtime contract is the
+  authoritative final state, so `home_pose`, port lease, camera lease, policy
+  runtime, and Rerun telemetry from the stop response should be reflected in the
+  final Manipulation report.
 
 Pi0.5 rollout execution rule:
 
@@ -1208,3 +1214,57 @@ Current behavior:
 - Concurrent live rollout requests produce a warning/blocking scheduler alert depending on the underlying bridge result.
 - Policy/runtime/calibration errors are preserved in the original `log_tail` but summarized as hardware-specific alerts for GUI and Guardian.
 - Guardian loop review reads `run_metadata.hardware_alerts` and `device_health` prefixes so later stages do not ignore a blocked robot state.
+
+## Read-Only Joint Telemetry And Terminal Evidence
+
+Manipulation visualization must observe the existing rollout path rather than become another controller:
+
+- `scripts/lerobot_omx_action_logger.py` wraps the existing follower `get_observation()` and `send_action()` calls and records measured, requested, and sent joint values without an additional serial read.
+- `utils/lerobot_joint_telemetry.py` converts those existing values through the shared OMX-to-Isaac joint mapping. It must never instantiate `MotorBus`, reclaim a port, or issue an action.
+- `GET /api/lerobot/joint-telemetry/snapshot` supplies the newest sample for initial page hydration.
+- `WS /ws/lerobot/joint-telemetry` tails the current rollout `motor_events.jsonl` at 50 ms polling intervals. The initial and catch-up reads are byte-bounded, and the browser retains at most 1200 samples.
+- `/assets/robotis-omx/*` serves the checked-in `sim/robotis_omx/omx.xml` and STL geometry used by the browser pose viewer.
+
+Live GUI semantics:
+
+- solid model: measured follower joint state;
+- translucent ghost: requested policy target;
+- graph: selected-joint measured versus target position in degrees over elapsed seconds;
+- no active rollout: idle/waiting state, with no hardware side effect;
+- terminal rollout: retain the last pose/history and expose saved evidence links.
+
+Terminal evidence is stored beside the action log:
+
+```text
+runs/lerobot_action_logs/<session_id>/
+  motor_events.jsonl
+  motor_events.csv
+  policy_tracking.png
+  policy_tracking_summary.json
+```
+
+`policy_tracking.png` is a six-joint Matplotlib figure with a white background, labeled axes, and a measured/target legend. The summary JSON records sample count, duration, source fingerprint, and per-joint MAE/RMSE/maximum absolute error. Artifact generation is idempotent for an unchanged source log.
+
+## One-Shot ActiveCam Camera Lease
+
+Two ActiveCam ownership models exist and must remain separate:
+
+- Teleoperation/recording ActiveCam is a parallel observer inside the existing
+  session wrapper. It shares that session lifecycle and is not subject to the
+  one-shot process-exit release contract.
+- Live GUI autoejection verification calls
+  `lerobot.active_robot_cam.capture`. This route temporarily owns one saved
+  camera, moves the follower to the capture pose, records one frame, restores
+  the robot pose, and exits its child process before rollout may start.
+
+For the Live GUI one-shot route, camera ownership is isolated in the child
+process. A valid capture response followed by return code zero establishes the
+OS-handle boundary and emits `release_status=process_exit_verified`. The parent
+must not start another RGB-D stream to verify release because that second stream
+can race with Manipulation rollout. Routine identity and USB-link checks read
+Linux sysfs; the configured rollout performs the next actual camera acquisition.
+No fallback camera is selected by this lease check.
+
+If a D455F is visible in sysfs with an empty serial during USB 2.0 enumeration,
+the bridge associates its model with the configured `top` identity and exposes
+the 480 Mbps warning. It does not open `pyrealsense2` solely to fill that serial.

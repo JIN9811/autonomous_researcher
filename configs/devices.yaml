@@ -64,7 +64,8 @@ devices:
     bambu:
       mqtt:
         port: 8883
-        timeout_sec: 5
+        timeout_sec: 15
+        publish_timeout_sec: 180
         username: bblp
         report_topic_template: device/{serial}/report
         request_topic_template: device/{serial}/request
@@ -203,8 +204,9 @@ devices:
         bed_back_y_mm: 6.0
         head_center_x_mm: 125.0
         head_z_mm: 1.0
-        travel_feedrate_mm_min: 3000.0
-        z_feedrate_mm_min: 1000.0
+        object_z_offset_mm: 10.0
+        travel_feedrate_mm_min: 6000.0
+        z_feedrate_mm_min: 3000.0
         eject_feedrate_mm_min: 25000.0
         cycles: 2
         use_object_bounds: true

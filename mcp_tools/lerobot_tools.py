@@ -56,6 +56,7 @@ def register_lerobot_tools(
     registry.register("lerobot.ports.save", lambda payload: bridge.ports_save(dict(payload or {})))
     registry.register("lerobot.ports.delete", lambda payload: bridge.ports_delete(dict(payload or {})))
     registry.register("lerobot.camera.test", lambda payload: bridge.camera_test(dict(payload or {})))
+    registry.register("lerobot.active_robot_cam.capture", lambda payload: bridge.active_robot_cam_capture(dict(payload or {})), device="robot:lerobot")
     registry.register("lerobot.teleoperate.start", lambda payload: bridge.teleoperate_start(dict(payload or {})), device="robot:lerobot")
     registry.register("lerobot.teleoperate.stop", lambda payload: bridge.teleoperate_stop(dict(payload or {})))
     registry.register("lerobot.teleoperate.status", lambda payload: bridge.teleoperate_status(dict(payload or {})))

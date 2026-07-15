@@ -51,9 +51,12 @@
 - BambuLab X2D bridge의 provider 계층, MQTT/FTPS/HTTP/camera plane, native G-code autoejection gate는 `docs/hardware/bambulab_x2d_device_bridge_runtime_guideline.md`에 별도 설명한다. 이 문서는 closed-loop와 page/API contract만 고정한다.
 - Bambu bridge evidence는 `artifact`, `validation`, `transport`, `runtime`, `bed-clear` 5개 plane으로 나뉜다. Live GUI와 3DP GUI는 이 plane을 같은 의미로 표시해야 하며, `published=true`만으로 physical ejection success를 표시하면 안 된다.
 - Live GUI는 별도 fake 상태를 만들지 않는다. Specimen Making Agent report는 3DP GUI/API가 반환한 `selected_printer`, `device_screen`, `preprint_gate`, `readiness_levels`, `operator_actions`, `autoejection`, `bed_clear`를 그대로 요약한다.
+- Live GUI의 Specimen Making report는 3DP GUI와 같은 bridge evidence를 `Live Job Monitor` 중심으로 재배치한다. 고정 brand card가 아니라 active printer profile의 `printer_status`, `build_queue`, `layer_preview`, `camera_evidence`, `autoejection_gate`, `artifact_ledger`를 읽어 `Build Intent`, `Printer Telemetry`, `Readiness Gate`, `Slice Profile`, `Thermal / Material`, `Transfer Queue`, `Live Job Monitor`, `Layer Preview`, `Camera Evidence`, `Post-Print Automation`, `G-code Validation`, `Handoff / Artifacts` 카드에 표시한다. 값이 없을 때는 unknown/pending으로 표시하고 임의 진행률이나 fake camera frame을 만들지 않는다.
 - Design Agent는 Bambu autoejection을 사용할 수 있는 후보에 대해 `bambu_autoejection_readiness`를 authoritative experiment spec과 design report에 기록한다. 이 객체는 `ejection_contact_edge`, `bed_contact_area_mm2`, `bed_contact_area_ratio`, `minimum_pushable_height_mm`, `pushable_edge_height_mm`, skirt/brim/raft policy를 포함한다. Specimen Making Agent는 이 객체를 `fabrication_report.process_plan.bambu_autoejection_readiness`와 `specimen_agent_report.bambu_autoejection_readiness`에 그대로 보존해 설계-side 접촉면/밀림 edge/skirt-brim-raft 정책과 printer-side validator evidence가 같은 trace에서 읽히게 한다.
 - Bambu autoejection의 primary path는 Bambu 전용 deterministic G-code patch/validation이다. `bambu_gcode_patch` provider는 sliced `.gcode.3mf` 또는 plain `.gcode`를 원본 보존 방식으로 `.autoeject.*` artifact로 만들고, actual publish는 owner-managed publish defaults, backend start gate, camera/bed-clear evidence, printer safe-state 검증 이후에만 가능하다. Manipulation Agent는 primary ejection executor가 아니라 failed ejection recovery 또는 downstream specimen transfer 계층으로 남긴다.
 - Bambu bed-clear gate는 operator checkbox만으로 닫히지 않는다. 3DP GUI의 `Video Status` 또는 `Pre-start Check`가 최신 camera preview/proxy evidence를 확보하고, `Mark Bed Clear`가 그 값을 `/api/printer/bed-clear`의 `camera_snapshot_path`로 저장해야 다음 cycle gate evidence와 Live GUI report가 같은 근거를 참조한다. Guarded `.autoeject.*` publish 성공 시 backend는 가능하면 `artifacts/bambu_camera_evidence/` 아래 로컬 JPEG를 저장하고 그 파일을 evidence로 사용한다.
+- 3DP GUI의 direct workspace action도 Live GUI runtime과 분리하지 않는다. `/api/printer/autoejection-test` 같은 standalone autoejection route는 `/printer` 로그, `/api/events/recent`, active Live GUI transcript를 모두 갱신해야 한다. Live GUI frontend는 run-scoped event와 recent workspace event를 merge/dedupe해 보여주며, run event가 존재한다는 이유로 workspace result를 숨기면 안 된다.
+- Live GUI 상시 상태 갱신은 action result와 구분한다. Live GUI가 열린 동안 `/api/printer/status?mode=live&emit=1`는 `workspace_monitor_snapshot` event를 생성해 Live GUI device strip이 `monitor_snapshot.device_screen`을 읽게 하지만, transcript message와 artifact registration은 만들지 않는다. 이 event는 control panel heartbeat/progress/connection 반영용이다.
 - `/api/bridges`와 `/api/printer/fleet`는 같은 계층이 아니다. `/api/bridges`는 Runtime IDE/Live GUI가 graph metadata bridge boundary를 읽는 normalized discovery API이며, workspace, health/preflight endpoint, `actions[]`에 들어간 standard/custom action descriptor, evidence contract를 같은 shape로 반환한다. Bambu/Prusa active printer 선택은 `/api/printer/fleet`가 담당한다. 현재 Bambu Lab X2D 기본 profile은 `/api/printer/fleet`에서 확인한다.
 - 현재 route/API/manifest 스냅샷은 [current_code_snapshot.md](current_code_snapshot.md)를 기준으로 갱신한다.
 
@@ -188,7 +191,7 @@ dispatch -> idle -> design -> specimen -> vision -> manipulation -> equipment ->
 - **Printer fleet 연계**: 3DP GUI의 `/api/printer/fleet`는 active printer profile을 조회/저장한다. 기본값은 `bambulab_x2d_lab_01`이고, Prusa MK4S는 fallback이 아니라 operator가 명시 선택한 profile로만 실행된다. 선택값은 local-only `memory/printer_fleet.json`에 저장된다.
 - **Fleet UI 상태 유지**: `/api/printer/fleet`가 반환한 `available_printers` 목록은 `/api/printer/status` 또는 `/api/printer/spc-readiness` 응답을 렌더링한 뒤에도 유지되어야 한다. 후속 응답이 selected printer만 포함하더라도 GUI가 Bambu/Prusa 선택 목록을 비어 있는 것으로 표시하면 안 된다.
 - **Bambu slicer resolver**: Bambu profile의 slicer payload는 `BAMBU_STUDIO_EXECUTABLE` env var, configured wrapper path, `PATH`의 `bambu-studio` 순서로 executable을 해석한다. `/api/printer/profile`과 `/api/printer/status`는 `resolved_executable_path`, `available`, `source`, `output_dir`를 반환한다. Profile route는 Bambu Studio 설치 감지만 수행하며 upload/start readiness를 만들지 않는다.
-- **Bambu slicer runner**: `/api/printer/bambu-slice-artifact`는 active profile이 Bambu일 때만 동작한다. 입력 source는 실제 로컬 `.stl` 또는 `.3mf`여야 하며, backend가 Bambu Studio CLI를 `--slice 0 --arrange 1 --ensure-on-bed --outputdir <artifact-dir> --export-3mf <safe-id>.gcode.3mf --debug 2` 형태로 실행한다. `--export-3mf` 값은 output directory 안의 basename이어야 하며, absolute path를 넘기면 Bambu Studio가 output directory를 중복 결합할 수 있다. 명시 `load_settings`가 없으면 runner는 X2D 기본 machine/process/filament profile을 output directory 아래 `_atr_no_skirt_profile/`로 복사하고 process JSON에 `skirt_loops=0`, `brim_type=no_brim`, `brim_width=0`, `raft_layers=0`을 주입한 뒤 `--load-settings`/`--load-filaments`로 사용한다. 결과는 `.gcode`, `.3mf`, `.gcode.3mf` 중 실제 생성된 파일 경로, size, sha256, command preview, stdout/stderr tail, `slicer_profile` evidence를 반환한다. 이 route는 slicing artifact 생성만 수행하며 upload, MQTT publish, print start를 수행하지 않는다.
+- **Bambu slicer runner**: `/api/printer/bambu-slice-artifact`는 active profile이 Bambu일 때만 동작한다. 입력 source는 실제 로컬 `.stl` 또는 `.3mf`여야 하며, backend가 Bambu Studio CLI를 `--slice 0 --arrange 1 --ensure-on-bed --outputdir <artifact-dir> --export-3mf <safe-id>.gcode.3mf --debug 2` 형태로 실행한다. `--export-3mf` 값은 output directory 안의 basename이어야 하며, absolute path를 넘기면 Bambu Studio가 output directory를 중복 결합할 수 있다. 명시 `load_settings`가 없으면 runner는 Bambu Studio 기본 preset을 보존하고 `--load-settings`/`--load-filaments`를 자동 주입하지 않는다. purge/cleaning/filament start-end G-code는 유지하며, 산출된 `.gcode` 또는 `.gcode.3mf` 내부 plate G-code에서 front build-plate test/intro/nozzle-load line block만 제거하고 md5 sidecar를 갱신한다. 결과는 `.gcode`, `.3mf`, `.gcode.3mf` 중 실제 생성된 파일 경로, size, sha256, command preview, stdout/stderr tail, `slicer_profile`, `front_test_line_removal` evidence를 반환한다. 이 route는 slicing artifact 생성만 수행하며 upload, MQTT publish, print start를 수행하지 않는다.
 - **Bambu pre-start checklist**: `/api/printer/bambu-prestart-check`는 사용자용 출력 직전 점검 route다. 실제 backend path를 `camera_status -> slice_artifact -> native_autoejection_patch_when_enabled -> http_artifact_route -> start_gate -> spc_readiness` 순서로 실행하고 stage별 결과를 반환한다. 이 route도 `will_publish=false`, `published=false`를 유지하며 MQTT `project_file` command를 보내지 않는다. `ready_to_publish=true`는 기술적으로 publish 가능한 조건이 검증됐다는 뜻이지, 출력이 시작됐다는 뜻이 아니다.
 - **Bambu pre-start aggregate**: Pre-start Check는 Bambu Studio Device 탭처럼 camera, thermal/progress, AMS/material, transfer/start, autoejection, bed-clear evidence를 한 번에 갱신한다. Camera/video plane은 status plane과 독립이다. Video probe 실패 또는 `/api/printer/video-status` 재호출이 기존 MQTT/progress/material evidence를 지우면 안 된다. 최신 camera preview/evidence reference는 operator bed-clear evidence의 `camera_snapshot_path`로 재사용된다. `Mark Bed Clear`는 bed-clear verified 상태와 최신 camera reference를 갱신하되, 이전 `.autoeject.*` publish로 잠긴 remote path, artifact hashes, manifest, publish sequence/topic 같은 추적 필드를 지우면 안 된다.
 - **Bambu bridge 연계**: 3DP GUI의 `/api/printer/spc-readiness`는 Specimen Making handoff용 집계 상태를 제공한다. 이 API는 현재 active printer profile이 Bambu일 때 Bambu live `prepare`, start gate, device screen, native G-code autoejection gate, bed-clear gate를 합쳐 `ready_for_live_print`, `autonomous_cycle_ready`, section별 blocker를 반환하지만 MQTT publish/start는 수행하지 않는다. SPC 응답에 포함된 `device_screen`은 frontend의 상단 Bambu Device Screen도 같이 갱신해야 하며, 이전 virtual/test evidence를 그대로 남기면 안 된다. Bambu autoejection은 `/api/printer/autoejection-config`가 저장한 local `memory/bambu_autoejection.json` overlay를 통해서만 configured로 바뀐다.
@@ -204,8 +207,9 @@ dispatch -> idle -> design -> specimen -> vision -> manipulation -> equipment ->
 
 ### Vision Agent (`modules/vision`, `agent.vision_agent`)
 - **목적**: 촬영/상태 관측 및 후단 조작용 관측값 생성
-- **핵심 툴**: `camera.capture`
+- **핵심 툴**: `camera.capture`, `lerobot.active_robot_cam.capture`, optional `lerobot.camera.test`
 - **필수 결과 키**: `observation`
+- **Active-cam/SPC handback**: printer-side autoejection 이후 Vision Agent는 LeRobot active camera one-shot evidence를 `active_cam_ejection_check.v1`로 저장할 수 있다. `lerobot.camera.test` 성공 응답은 `RELEASE_CAMERA_PORT`, `port_released`, `camera_returned_to_vla`, `camera_owner_after=vla_runtime`을 포함해야 한다. 시편이 확인되고 camera가 VLA runtime으로 반환되면 `spc_autoejection_confirmation.v1`과 `spc_autoejection_confirmed` signal을 `specimen_agent` 대상으로 발행한다. 반환 실패 시 `transfer_readiness.camera_returned_to_vla=false`로 downstream manipulation/VLA handoff를 막는다. Live GUI Vision report는 `Live Observation`, `Active Cam Ejection`, `Specimen Pose`, `Camera / Runtime`, `Handoff Signal`, `Agentic Progress` 카드를 사용하며, active-cam capture image/path/status/release state는 `Active Cam Ejection` 카드에 표시한다.
 
 ### Manipulation Agent (`modules/manipulation`, `agent.manipulation_agent`)
 - **목적**: 로봇 조작 계획/실행, 시편 이동 연동
@@ -317,14 +321,14 @@ dispatch -> idle -> design -> specimen -> vision -> manipulation -> equipment ->
 
 이 프로젝트는 `graphs/configs/atr_closed_loop.yaml`에 정의된 stage graph를 FastAPI runtime이 실행하고, 각 stage는 `graphs/modules/*`의 agent module을 통해 LLM/tool/device bridge를 호출하며, Live GUI와 Runtime IDE가 같은 runtime state/event/artifact API를 공유하는 구조입니다.
 
-## Specimen Pose Tracking Gate
+## Active Cam Handoff Gate
 
 Closed-loop order around manipulation:
 
 ```text
 Specimen/3DP auto-ejection
--> VisionAgent D455F one-shot pose
--> D455F returned to VLA
+-> VisionAgent wrist Active Cam one-shot confirmation
+-> Active Cam port returned to VLA runtime
 -> ManipulationAgent VLA inference
 -> VisionAgent BRIO/UTM placement verification contract
 -> Lab Equipment Agent
@@ -332,7 +336,29 @@ Specimen/3DP auto-ejection
 
 Runtime representation:
 
-- `graphs/modules/vision/module.yaml` declares `vision.specimen_pose_snapshot`, `vision.specimen_pose.release`, and `specimen_pose.v1`.
-- `graphs/modules/manipulation/module.yaml` consumes `specimen_pose.v1` and `transfer_readiness.camera_returned_to_vla`.
+- `graphs/modules/vision/module.yaml` declares `lerobot.active_robot_cam.capture` and emits the active-camera confirmation contract.
+- `graphs/modules/manipulation/module.yaml` consumes `transfer_readiness.camera_returned_to_vla`; it does not request a separate RGB-D pose snapshot before rollout.
 - `graphs/configs/atr_closed_loop.yaml` keeps the executable stage transition `manipulation -> equipment` unchanged because the current compiler requires one executable node per stage. Post-place Vision verification is represented as a non-executable `vision_verify` sidecar/contract node and as a ManipulationAgent handoff gate.
-- Live GUI Vision cards show `D455F Pose / VLA Return` from `vision_agent_report.specimen_pose` and `transfer_readiness`.
+- Live GUI Vision cards show Active Cam confirmation and VLA camera-return state from `active_cam_ejection_check` and `transfer_readiness`.
+
+## Active Cam 실행 산출물 수명주기
+
+SPC autoejection 확인에 성공한 Active Cam 프레임은 카메라 런타임의 임시
+경로를 그대로 노출하지 않고 다음의 일반 run artifact로 복사한다.
+
+```text
+runs/<run_id>/vision/<observation_id>/active_cam_capture_<timestamp>.<ext>
+```
+
+- Vision Agent는 `active_cam_run_artifact.v1` descriptor를
+  `active_cam_artifact_update`로 반환한다.
+- LangGraph 실행과 Live GUI 수동 handoff 실행은 모두 성공 descriptor를
+  `run_metadata.latest_active_cam_artifact`에 저장한다.
+- Active Cam을 호출하지 않는 후속 Manipulation/UTM Vision handoff는 이 값을
+  덮어쓰지 않는다. 따라서 다음 명시적 Active Cam 시도 완료 전까지 화면이
+  유지되고, 페이지 상태 재조회에도 같은 artifact URL이 반환된다.
+- 다음 시도가 성공하면 새 artifact로 교체한다. 다음 시도가
+  `failed`, `blocked`, `error`이면 현재 표시 포인터만 제거하며 기존 run
+  artifact 파일은 삭제하지 않는다.
+- Live GUI는 `/api/runs/<run_id>/artifact-file/...` 경로를 우선 사용한다.
+  Base64 또는 브라우저 세션 캐시는 증거 보존 수단으로 사용하지 않는다.

@@ -35,6 +35,8 @@ Vision Agent calls:
 
 ```text
 camera.capture
+lerobot.active_robot_cam.capture  # wrist active-cam one-shot evidence
+lerobot.camera.test               # optional camera diagnostics
 ```
 
 Minimum request:
@@ -63,6 +65,38 @@ Minimum tool response:
 
 Live camera bridges may add image paths, measured pose fields, confidence, or
 camera-specific metadata. The agent must tolerate absent optional fields.
+
+When the LeRobot active-camera bridge is available, Vision Agent calls
+`lerobot.active_robot_cam.capture` once after the Specimen Making / printer
+autoejection handoff. The default active camera key is `wrist`; experiment specs
+may override it with `active_cam_camera_key`, `vision_active_camera_key`, or
+`active_robot_cam_primary_camera_key`. This Live GUI one-shot route temporarily
+owns the saved camera port while the follower moves to the capture pose, records
+one frame, and returns to its resume pose. It is distinct from the parallel
+Active Cam observer embedded in teleoperation/recording sessions.
+
+The one-shot bridge isolates camera ownership in a child process. A successful
+child exit closes all camera handles at the operating-system boundary and may
+produce `port_released=true`, `camera_returned_to_vla=true`,
+`camera_owner_after=vla_runtime`, and `release_status=process_exit_verified`.
+The bridge must not reopen RGB-D merely to prove release because doing so races
+with the next Manipulation/VLA rollout owner. Routine presence and USB-link
+checks use Linux sysfs without opening an SDK context; the rollout performs the
+next actual stream acquisition. This lease rule does not alter or restart the
+teleoperation/recording parallel observer.
+
+Some D455F USB 2.0 enumerations expose the product/model and link speed in
+sysfs but leave the USB serial field empty. The bridge keeps that device visible
+through the configured `top` identity, reports the 480 Mbps rollout warning,
+and still does not open an SDK context merely to recover the serial.
+
+When the previous Manipulation result requests post-place Vision verification,
+Vision Agent must switch to the UTM verification path instead of running the
+active-camera ejection check again. In that path `camera.capture` uses
+`purpose=utm_placement_verification` and `camera_key=utm` unless overridden by
+`utm_camera_key` / `vision_utm_camera_key`. The resulting
+`vision_manipulation_completion.v1` signal is consumed by Manipulation Agent to
+stop the existing rollout and complete the handoff.
 
 ## 4. Output Contract
 
@@ -98,7 +132,19 @@ Vision Agent returns:
       "ready": true,
       "camera_ok": true,
       "specimen_ready": true,
-      "pose_confidence": 0.82
+      "pose_confidence": 0.82,
+      "spc_autoejection_confirmed": true
+    },
+    "spc_autoejection_confirmation": {
+      "schema": "spc_autoejection_confirmation.v1",
+      "signal": "SPC_AUTOEJECTION_CONFIRMED_BY_ACTIVE_CAM",
+      "status": "confirmed",
+      "specimen_detected": true,
+      "confirmed": true,
+      "source_agent": "vision_agent",
+      "consumer_agent": "specimen_agent",
+      "camera_key": "wrist",
+      "capture_path": "runs/.../active_cam.jpg"
     },
     "raw_capture": {}
   },
@@ -172,8 +218,8 @@ New runtime outputs:
 - `scene_map` / `zones`: printer bed, ejection basket, robot workspace, robot gripper, UTM platen, UTM screen state.
 - `detections`: label, zone, bbox/mask path when available, confidence, source.
 - `events`: visual transition events such as `printer_bed_clear`, `specimen_ejected_to_basket`, `basket_contains_specimen`, or `anomaly_detected`.
-- `signal_board` / `agent_signals`: freshness-bounded signals including `printer_output_visible`, `specimen_ejected_to_basket`, `basket_contains_specimen`, `pickup_ready`, `basket_empty_after_pick`, `gripper_holding_specimen`, `specimen_on_utm_platen`, `fixture_alignment_ok`, `utm_motion_observed`, `utm_home_restored`, `equipment_screen_state`, `robot_workspace_clear`, `visual_test_evidence_ready`, `data_quality_low`, and `anomaly_detected`. Signals that are outside the current observation stage are emitted as `not_checked` rather than silently omitted.
-- `artifacts`: raw frame path when supplied, generated annotated scene SVG, detection JSON, before/after path when supplied.
+- `signal_board` / `agent_signals`: freshness-bounded signals including `printer_output_visible`, `specimen_ejected_to_basket`, `spc_autoejection_confirmed`, `basket_contains_specimen`, `pickup_ready`, `basket_empty_after_pick`, `gripper_holding_specimen`, `specimen_on_utm_platen`, `fixture_alignment_ok`, `utm_motion_observed`, `utm_home_restored`, `equipment_screen_state`, `robot_workspace_clear`, `visual_test_evidence_ready`, `data_quality_low`, and `anomaly_detected`. Signals that are outside the current observation stage are emitted as `not_checked` rather than silently omitted.
+- `artifacts`: raw frame path when supplied, active-camera ejection capture path when supplied, generated annotated scene SVG, detection JSON, before/after path when supplied.
 - `dataset_ledger`: LeRobot/data-reuse metadata for future policy improvement.
 - `knowledge_payload`: success/failure labels and visual notes for Knowledge Agent memory.
 - `cross_agent_contract`: explicit statement that Vision observes only and downstream agents execute actions.
@@ -210,6 +256,12 @@ Current implementation scope:
 
 - Test mode and camera unavailable paths use deterministic simulator/rule output.
 - When the LeRobot bridge is available, test mode can attach `/api/lerobot/camera/test` frame evidence; live mode requires explicit camera/live confirmation before any camera test is called.
+- Active-camera ejection confirmation is represented by
+  `active_cam_ejection_check.v1`, `spc_autoejection_confirmation.v1`, and the
+  `spc_autoejection_confirmed` signal targeted at `specimen_agent`. This is the
+  visual completion signal for printer-side autoejection. It does not authorize
+  Manipulation Agent rollout by itself; Manipulation still consumes
+  `pickup_ready` and pose freshness.
 - The current `camera.capture` registration remains a deterministic typed
   observation tool. It should not be documented as directly opening RealSense or
   webcam streams in the main closed-loop path.
@@ -224,6 +276,22 @@ Current implementation scope:
 - The runtime writes Vision evidence artifacts and registers nested visual
   evidence paths in the event/artifact stream.
 
+Active Cam run-artifact lifecycle:
+
+- A confirmed Active Cam frame is copied from the transient camera runtime path
+  into `runs/<run_id>/vision/<observation_id>/active_cam_capture_<timestamp>.*`.
+  The copied file, not the transient `/tmp` path, is the canonical loop artifact.
+- Vision emits `active_cam_artifact_update` with schema
+  `active_cam_run_artifact.v1`; both LangGraph and Live GUI handoff paths store
+  the successful descriptor as `run_metadata.latest_active_cam_artifact`.
+- Later agent handoffs that do not perform an Active Cam attempt preserve that
+  pointer, so the frame remains visible until another Active Cam attempt ends.
+- A later confirmed capture replaces the pointer. An explicit failed, blocked,
+  or error result clears only the current display pointer and does not delete
+  immutable Active Cam artifacts from earlier observations.
+- The Live GUI reads the canonical `/api/runs/<run_id>/artifact-file/...` URL.
+  It must not use Base64/session-only state as the persistence mechanism.
+
 Live GUI chat message contract:
 
 - Planning/runtime Vision completion messages should be emitted as
@@ -236,33 +304,18 @@ Live GUI chat message contract:
   `confidence`, `stability_ms`, `vision_report`, `vision_signal`, and
   `agent_signals` so the Live GUI chat and report view stay consistent.
 
-## 2026-06-24 D455F One-Shot Specimen Pose Update
+## Active Cam Autoejection Confirmation
 
-After 3DP auto-ejection, the ejection output location for manipulation is the A4 robot workspace. VisionAgent requests a one-shot D455F RGB-D pose snapshot through `vision.specimen_pose_snapshot` before ManipulationAgent starts VLA inference.
-
-The D455F is not shared between ROS and VLA. The camera is borrowed from the VLA route, used by ROS for one snapshot, then returned before ManipulationAgent may start inference.
+After 3DP auto-ejection, VisionAgent uses the configured LeRobot wrist Active Cam routine to capture one confirmation frame. The same routine includes the robot capture pose and returns the camera port to the VLA runtime before ManipulationAgent starts inference. No separate pose-camera path is part of this route.
 
 Required readiness fields:
 
 ```json
 {
-  "specimen_pose_ready": true,
+  "spc_autoejection_confirmed": true,
   "camera_returned_to_vla": true,
   "vla_camera_precheck_ok": true
 }
 ```
 
-Live mode blocks ManipulationAgent if the D455F is not returned to the VLA route. Test mode may use a deterministic virtual `specimen_pose.v1`, but the returned payload must include a fallback trace so it is never mistaken for physical camera evidence.
-
-Current physical caveat: the D455F must enumerate as a USB3 RealSense device before live snapshot validation. If the D455F is unavailable, the bridge/API/agent/GUI path can be tested up to the live camera boundary only.
-
-Runtime topic contract:
-
-- Color: `/camera/d455f/color/image_raw`
-- Depth: `/camera/d455f/aligned_depth_to_color/image_raw`
-- Camera info: `/camera/d455f/color/camera_info`
-
-If kernel logs show `xHCI host controller not responding, assume dead` on the
-D455F host controller, the VisionAgent must report a hardware-boundary failure
-instead of retrying indefinitely. Use the virtual pose path only in test mode and
-include the fallback trace in the report.
+Live mode blocks ManipulationAgent when the Active Cam frame is missing, specimen confirmation fails, or the camera port is not returned to the VLA route. Test mode uses the same contract with deterministic bridge evidence; it must not introduce a separate pose-camera path.

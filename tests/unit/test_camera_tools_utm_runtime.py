@@ -2,17 +2,29 @@
 
 from __future__ import annotations
 
+import base64
+from io import BytesIO
+from pathlib import Path
 from typing import Any
+
+import numpy as np
+from PIL import Image
 
 from mcp_tools.camera_tools import register_camera_tools
 from mcp_tools.tool_registry import ToolRegistry
 
 
 class FakeRuntimeManager:
-    def __init__(self, *, probe: dict[str, Any] | None = None) -> None:
+    def __init__(self, *, probe: dict[str, Any] | None = None, frame: dict[str, Any] | None = None) -> None:
         self.start_calls = 0
         self.probe_calls = 0
+        self.frame_calls = 0
         self._probe = probe or {"ok": True, "diagnostics": {"ros2_available": True, "topic_seen": True}}
+        self._frame = frame or {
+            "ok": False,
+            "frame_available": False,
+            "failure_code": "ROS_IMAGE_FRAME_UNAVAILABLE",
+        }
 
     def start(self) -> dict[str, Any]:
         self.start_calls += 1
@@ -21,9 +33,32 @@ class FakeRuntimeManager:
     def status(self) -> dict[str, Any]:
         return {"ok": True, "status": "running", "pid": 1234}
 
+    def stop(self) -> dict[str, Any]:
+        return {"ok": True, "status": "stopped", "was_running": True}
+
     def probe(self) -> dict[str, Any]:
         self.probe_calls += 1
         return dict(self._probe)
+
+    def frame(self) -> dict[str, Any]:
+        self.frame_calls += 1
+        return dict(self._frame)
+
+
+def _red_specimen_frame() -> dict[str, Any]:
+    image = np.full((120, 180, 3), 215, dtype=np.uint8)
+    image[30:100, 65:130] = [230, 20, 25]
+    buffer = BytesIO()
+    Image.fromarray(image, mode="RGB").save(buffer, format="JPEG", quality=95)
+    return {
+        "ok": True,
+        "frame_available": True,
+        "frame_id": "utm-frame-tool-1",
+        "topic": "/image_utm",
+        "width": 180,
+        "height": 120,
+        "data_url": "data:image/jpeg;base64," + base64.b64encode(buffer.getvalue()).decode("ascii"),
+    }
 
 
 def test_live_utm_motion_check_uses_observer_and_runtime_manager() -> None:
@@ -68,6 +103,98 @@ def test_live_utm_motion_check_uses_observer_and_runtime_manager() -> None:
     assert result["runtime_status"]["status"] == "running"
     assert result["results"][0]["status"] == "verified"
     assert result["results"][0]["evidence"]["transition"] == "NOT_WORKING_TO_WORKING"
+
+
+def test_camera_tools_register_vision_utm_runtime_controls() -> None:
+    manager = FakeRuntimeManager()
+    registry = ToolRegistry()
+    register_camera_tools(registry, utm_runtime_manager=manager)
+
+    assert "vision.utm_runtime.start" in registry.list_tools()
+    assert "vision.utm_runtime.status" in registry.list_tools()
+    assert "vision.utm_runtime.stop" in registry.list_tools()
+
+    start = registry.call("vision.utm_runtime.start", {"source": "test"})
+    status = registry.call("vision.utm_runtime.status", {})
+    stop = registry.call("vision.utm_runtime.stop", {})
+
+    assert manager.start_calls == 1
+    assert start["status"] == "running"
+    assert status["status"] == "running"
+    assert stop["status"] == "stopped"
+
+
+def test_utm_specimen_presence_captures_exactly_one_runtime_frame(tmp_path: Path) -> None:
+    manager = FakeRuntimeManager(frame=_red_specimen_frame())
+    registry = ToolRegistry()
+    register_camera_tools(registry, utm_runtime_manager=manager)
+
+    result = registry.call(
+        "vision.utm_specimen_presence.capture",
+        {
+            "runtime_mode": "live",
+            "auto_start_runtime": True,
+            "run_id": "run-1",
+            "session_id": "rollout-1",
+            "specimen_id": "specimen-1",
+            "output_dir": str(tmp_path / "evidence"),
+            "min_area_px": 300,
+        },
+    )
+
+    assert manager.start_calls == 1
+    assert manager.frame_calls == 1
+    assert result["ok"] is True
+    assert result["detected"] is True
+    assert result["source"] == "utm_ros_frame"
+    assert result["run_id"] == "run-1"
+    assert result["session_id"] == "rollout-1"
+    assert Path(result["annotated_frame_path"]).is_file()
+
+
+def test_live_utm_specimen_presence_fails_closed_without_frame(tmp_path: Path) -> None:
+    manager = FakeRuntimeManager()
+    registry = ToolRegistry()
+    register_camera_tools(registry, utm_runtime_manager=manager)
+
+    result = registry.call(
+        "vision.utm_specimen_presence.capture",
+        {
+            "runtime_mode": "live",
+            "output_dir": str(tmp_path),
+            "allow_virtual_bridge_in_test": True,
+        },
+    )
+
+    assert manager.frame_calls == 1
+    assert result["ok"] is False
+    assert result["detected"] is False
+    assert result["virtualized"] is False
+    assert result["failure_code"] == "ROS_IMAGE_FRAME_UNAVAILABLE"
+
+
+def test_test_utm_specimen_presence_virtualizes_only_when_explicitly_allowed(tmp_path: Path) -> None:
+    manager = FakeRuntimeManager()
+    registry = ToolRegistry()
+    register_camera_tools(registry, utm_runtime_manager=manager)
+
+    result = registry.call(
+        "vision.utm_specimen_presence.capture",
+        {
+            "runtime_mode": "test",
+            "output_dir": str(tmp_path),
+            "run_id": "virtual-run",
+            "session_id": "virtual-rollout",
+            "specimen_id": "virtual-specimen",
+            "allow_virtual_bridge_in_test": True,
+        },
+    )
+
+    assert manager.frame_calls == 1
+    assert result["ok"] is True
+    assert result["detected"] is True
+    assert result["virtualized"] is True
+    assert result["source"] == "virtual_utm_bridge"
 
 
 def test_test_mode_falls_back_to_virtual_utm_bridge_with_visible_trace() -> None:

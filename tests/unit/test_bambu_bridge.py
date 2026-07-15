@@ -5,6 +5,7 @@ from __future__ import annotations
 import socket
 import ssl
 import json
+import hashlib
 import zipfile
 from ftplib import FTP
 from pathlib import Path
@@ -110,35 +111,41 @@ echo "fake slice complete"
     assert result["will_publish"] is False
 
 
-def test_bambu_studio_slicer_runner_applies_default_no_skirt_profile(tmp_path: Path) -> None:
+def test_bambu_studio_slicer_runner_preserves_defaults_and_removes_front_test_line_only(tmp_path: Path) -> None:
     fake_cli = tmp_path / "bambu-studio"
     fake_cli.write_text(
-        """#!/bin/sh
-set -eu
-out=""
-prev=""
-for arg in "$@"; do
-  if [ "$prev" = "--outputdir" ]; then
-    out="$arg"
-  fi
-  prev="$arg"
-done
-mkdir -p "$out"
-printf '%s\\n' "$@" > "$out/args.txt"
-printf 'sliced payload' > "$out/specimen.gcode"
-""",
+        '''#!/usr/bin/env python3
+import pathlib
+import sys
+import zipfile
+
+out = ""
+export_name = "specimen.gcode.3mf"
+for idx, arg in enumerate(sys.argv):
+    if arg == "--outputdir" and idx + 1 < len(sys.argv):
+        out = sys.argv[idx + 1]
+    if arg == "--export-3mf" and idx + 1 < len(sys.argv):
+        export_name = sys.argv[idx + 1]
+output_dir = pathlib.Path(out)
+output_dir.mkdir(parents=True, exist_ok=True)
+gcode = """; filament start gcode
+M104 S220 ; keep Bambu purge/temperature defaults
+;===== nozzle load line ===============================
+G1 X18 Y1 Z0.3 F18000
+G1 X200 Y1 E20 F1500 ; front build-plate test line to remove
+;===== nozzle load line end ===========================
+;===== wipe nozzle ===============================
+G1 X70 Y265 F12000 ; keep Bambu cleaning/wipe defaults
+; printing object
+G1 X50 Y50 E1
+"""
+with zipfile.ZipFile(output_dir / export_name, "w") as archive:
+    archive.writestr("Metadata/plate_1.gcode", gcode)
+    archive.writestr("3D/3dmodel.model", "<model />")
+''',
         encoding="utf-8",
     )
     fake_cli.chmod(0o755)
-    machine = tmp_path / "machine.json"
-    process = tmp_path / "process.json"
-    filament = tmp_path / "filament.json"
-    machine.write_text('{"type":"machine","name":"Bambu Lab X2D 0.4 nozzle"}\n', encoding="utf-8")
-    process.write_text(
-        '{"type":"process","name":"0.20mm Standard @BBL X2D","skirt_loops":"1","brim_width":"5","raft_layers":"1"}\n',
-        encoding="utf-8",
-    )
-    filament.write_text('{"type":"filament","name":"Bambu PLA Basic @BBL X2D 0.4 nozzle"}\n', encoding="utf-8")
     source = tmp_path / "specimen.stl"
     source.write_text("solid specimen\nendsolid specimen\n", encoding="utf-8")
     config = BambuSlicerConfig(
@@ -146,27 +153,85 @@ printf 'sliced payload' > "$out/specimen.gcode"
         executable_path=str(fake_cli),
         output_dir=str(tmp_path / "bambu_sliced"),
         timeout_sec=5,
-        default_machine_profile=str(machine),
-        default_process_profile=str(process),
-        default_filament_profile=str(filament),
     )
     runner = BambuStudioSlicerRunner(config, repo_root=tmp_path)
 
     result = runner.slice(source_path=source, specimen_id="specimen")
 
     assert result["ok"] is True
-    assert "--load-settings" in result["command"]
-    assert "--load-filaments" in result["command"]
+    assert "--load-settings" not in result["command"]
+    assert "--load-filaments" not in result["command"]
     profile = result["slicer_profile"]
-    assert profile["auto_no_skirt_profile"] is True
-    process_override = Path(profile["process_override_path"])
-    assert process_override.exists()
-    process_payload = json.loads(process_override.read_text(encoding="utf-8"))
-    assert process_payload["skirt_loops"] == "0"
-    assert process_payload["skirt_height"] == "0"
-    assert process_payload["brim_type"] == "no_brim"
-    assert process_payload["brim_width"] == "0"
-    assert process_payload["raft_layers"] == "0"
+    assert profile["preserve_bambu_defaults"] is True
+    assert profile["auto_no_skirt_profile"] is False
+    assert result["front_test_line_removal"]["removed"] is True
+    with zipfile.ZipFile(result["sliced_artifact_path"]) as archive:
+        plate_gcode = archive.read("Metadata/plate_1.gcode").decode("utf-8")
+        plate_md5 = archive.read("Metadata/plate_1.gcode.md5").decode("utf-8")
+    assert "nozzle load line" not in plate_gcode
+    assert "front build-plate test line to remove" not in plate_gcode
+    assert "keep Bambu purge/temperature defaults" in plate_gcode
+    assert "keep Bambu cleaning/wipe defaults" in plate_gcode
+    assert "; printing object" in plate_gcode
+    assert plate_md5 == hashlib.md5(plate_gcode.encode("utf-8")).hexdigest()
+
+
+def test_bambu_studio_slicer_runner_packages_plate_gcode_when_cli_export_crashes(tmp_path: Path) -> None:
+    fake_cli = tmp_path / "bambu-studio"
+    fake_cli.write_text(
+        '''#!/usr/bin/env python3
+import pathlib
+import sys
+
+out = ""
+for idx, arg in enumerate(sys.argv):
+    if arg == "--outputdir" and idx + 1 < len(sys.argv):
+        out = sys.argv[idx + 1]
+output_dir = pathlib.Path(out)
+output_dir.mkdir(parents=True, exist_ok=True)
+(output_dir / "plate_1.gcode").write_text("""; HEADER_BLOCK_START
+; BambuStudio fallback path
+; HEADER_BLOCK_END
+;===== nozzle load line ===============================
+G1 X18 Y1 Z0.3 F18000
+G1 X200 Y1 E20 F1500
+;===== nozzle load line end ===========================
+G1 X50 Y50 E1
+""", encoding="utf-8")
+print("Wayland: Failed to connect to display")
+sys.exit(139)
+''',
+        encoding="utf-8",
+    )
+    fake_cli.chmod(0o755)
+    source = tmp_path / "specimen.stl"
+    source.write_text("solid specimen\nendsolid specimen\n", encoding="utf-8")
+    config = BambuSlicerConfig(
+        enabled=True,
+        executable_path=str(fake_cli),
+        output_dir=str(tmp_path / "bambu_sliced"),
+        timeout_sec=5,
+    )
+    runner = BambuStudioSlicerRunner(config, repo_root=tmp_path)
+
+    result = runner.slice(source_path=source, specimen_id="specimen")
+
+    assert result["ok"] is True
+    assert result["returncode"] == 139
+    assert result["slicer_profile"]["fallback_packaged_plate_gcode"] is True
+    sliced_path = Path(result["sliced_artifact_path"])
+    assert sliced_path.name == "specimen.gcode.3mf"
+    with zipfile.ZipFile(sliced_path) as archive:
+        plate_gcode = archive.read("Metadata/plate_1.gcode").decode("utf-8")
+        plate_md5 = archive.read("Metadata/plate_1.gcode.md5").decode("utf-8")
+        names = set(archive.namelist())
+        assert "3D/3dmodel.model" in names
+        assert "3D/_rels/3dmodel.model.rels" in names
+        assert "3D/Objects/object_1.model" in names
+        assert "Metadata/_rels/model_settings.config.rels" in names
+    assert "nozzle load line" not in plate_gcode
+    assert "G1 X50 Y50 E1" in plate_gcode
+    assert plate_md5 == hashlib.md5(plate_gcode.encode("utf-8")).hexdigest()
 
 
 def test_bambu_studio_slicer_runner_accepts_overwritten_existing_artifact(tmp_path: Path) -> None:
@@ -338,9 +403,9 @@ def test_bambu_native_autoejection_memory_caps_motion_parameters_to_safe_bounds(
     native = saved.status_payload()["native_gcode_parameters"]
     assert native["z_push_offset_mm"] == 200.0
     assert native["push_lane_offset_mm"] == 120.0
-    assert native["push_speed_mm_min"] == 1000
+    assert native["push_speed_mm_min"] == 12000
     assert native["sweep_z_mm"] == 50.0
-    assert native["sweep_speed_mm_min"] == 1000
+    assert native["sweep_speed_mm_min"] == 12000
     persisted = memory.load()
     assert persisted["z_push_offset_mm"] == 200.0
     assert persisted["push_lane_offset_mm"] == 120.0
@@ -428,8 +493,9 @@ def test_bambu_manager_applies_saved_native_autoejection_motion_parameters(tmp_p
     assert "; atr_push_lane_offset_mm=18.0" in patched_text
     assert "; atr_z_push_offset_mm=22.5" in patched_text
     assert "; atr_full_bed_sweep_enabled=true" in patched_text
-    assert "G0 X68.000" in patched_text
+    assert "G0 X50.000" in patched_text
     assert "F420" in patched_text
+    assert "G0 Z17.500" in patched_text
     assert "G0 Z1.500" in patched_text
     assert "F260" in patched_text
 
@@ -1367,6 +1433,7 @@ def test_bambu_mqtt_client_publishes_project_file_command_without_leaking_secret
     from device_bridges import bambu_bridge
 
     published: list[dict[str, object]] = []
+    gcode_lines: list[dict[str, object]] = []
 
     class FakePublishInfo:
         rc = 0
@@ -1934,6 +2001,68 @@ def test_live_bambu_post_publish_observation_forces_mqtt_refresh(tmp_path: Path)
     assert result["device_screen"]["progress_panel"]["state"] == "RUNNING"
 
 
+def test_bambu_post_publish_running_snapshot_carries_progress_evidence(tmp_path: Path) -> None:
+    manager = PrinterDeviceBridgeManager.from_devices_config(_devices_config(tmp_path), repo_root=tmp_path)
+
+    running = manager._classify_bambu_post_publish_snapshot(
+        {
+            "ok": True,
+            "received_at": "2026-07-10T09:00:00+09:00",
+            "report": {
+                "print": {
+                    "gcode_state": "RUNNING",
+                    "mc_percent": 1,
+                    "subtask_name": "specimen-cand-1",
+                    "task_id": "task-123",
+                }
+            },
+        }
+    )
+    idle = manager._classify_bambu_post_publish_snapshot(
+        {
+            "ok": True,
+            "received_at": "2026-07-10T09:00:01+09:00",
+            "report": {"print": {"gcode_state": "IDLE", "mc_percent": 0}},
+        }
+    )
+
+    assert running["status"] == "running"
+    assert running["progress_observed"] is True
+    assert running["progress_percent"] == 1
+    assert running["file_name"] == "specimen-cand-1"
+    assert running["task_id"] == "task-123"
+    assert idle["status"] == "idle"
+    assert idle["failure_code"] == "BAMBU_PROJECT_FILE_ACCEPTED_BUT_NOT_STARTED"
+
+
+def test_bambu_post_publish_fast_ejection_done_snapshot_is_completed(tmp_path: Path) -> None:
+    manager = PrinterDeviceBridgeManager.from_devices_config(_devices_config(tmp_path), repo_root=tmp_path)
+
+    completed = manager._classify_bambu_post_publish_snapshot(
+        {
+            "ok": True,
+            "received_at": "2026-07-10T09:00:02+09:00",
+            "report": {
+                "print": {
+                    "gcode_state": "FINISH",
+                    "mc_percent": 100,
+                    "stg_cur": 1,
+                    "stg": [1],
+                    "subtask_name": "specimen-cand-1.ejection-test",
+                    "task_id": "task-456",
+                }
+            },
+        },
+        expected_subtask_name="specimen-cand-1.ejection-test",
+    )
+
+    assert completed["status"] == "completed"
+    assert completed["failure_code"] == ""
+    assert completed["progress_observed"] is True
+    assert completed["progress_percent"] == 100
+    assert completed["file_name"] == "specimen-cand-1.ejection-test"
+
+
 def test_live_bambu_marks_ftps_read_only_as_transfer_read_only(tmp_path: Path) -> None:
     manager = PrinterDeviceBridgeManager.from_devices_config(_devices_config(tmp_path), repo_root=tmp_path)
     profile = manager.config.default_profile
@@ -2130,6 +2259,1212 @@ def test_live_bambu_uploads_explicit_sliced_artifact_without_starting_print(tmp_
     assert result["device_screen"]["upload"]["start_command_draft"]["payload"]["print"]["command"] == "project_file"
     assert result["device_screen"]["actions"]["can_start_print"] is True
     assert result["device_screen"]["actions"]["requires_guardian"] is True
+
+
+def test_live_bambu_prepare_physical_stl_uses_http_artifact_and_publishes_when_ftps_is_busy(
+    tmp_path: Path,
+) -> None:
+    fake_cli = tmp_path / "bambu-studio"
+    fake_cli.write_text(
+        """#!/bin/sh
+set -eu
+out=""
+name="specimen.gcode.3mf"
+prev=""
+for arg in "$@"; do
+  if [ "$prev" = "--outputdir" ]; then
+    out="$arg"
+  fi
+  if [ "$prev" = "--export-3mf" ]; then
+    name="$arg"
+  fi
+  prev="$arg"
+done
+mkdir -p "$out"
+python3 - "$out/$name" <<'PY'
+import sys, zipfile
+with zipfile.ZipFile(sys.argv[1], "w") as archive:
+    archive.writestr("Metadata/plate_1.gcode", "G90\\nG1 X10 Y10 Z10 F1200\\nM84\\n")
+    archive.writestr("3D/3dmodel.model", "<model />")
+PY
+""",
+        encoding="utf-8",
+    )
+    fake_cli.chmod(0o755)
+    raw = _devices_config(tmp_path)
+    raw["devices"]["printer"]["bambu"]["slicer"] = {
+        "enabled": True,
+        "executable_path": str(fake_cli),
+        "output_dir": str(tmp_path / "bambu_sliced"),
+        "timeout_sec": 5,
+    }
+    manager = PrinterDeviceBridgeManager.from_devices_config(raw, repo_root=tmp_path)
+    profile = manager.config.default_profile
+    BambuConnectionMemory(profile.connection_memory_path).save_from_payload(
+        {
+            "host": "192.0.2.42",
+            "serial": "20PTEST000001",
+            "lan_mode_confirmed": True,
+            "developer_mode_confirmed": True,
+            "auth": {"mode": "lan_access_code", "username": "bblp", "access_code": "secret"},
+        }
+    )
+    stl = tmp_path / "specimen.stl"
+    stl.write_text("solid specimen\nendsolid specimen\n", encoding="utf-8")
+    published: dict[str, object] = {}
+    snapshots: list[bool] = []
+
+    class FakeProbe:
+        def probe_tls_port(self, host: str, port: int, timeout_sec: float) -> dict:
+            return {"ok": True, "port": port}
+
+    class FakeMqttClient:
+        def read_snapshot(
+            self,
+            *,
+            host: str,
+            serial: str,
+            username: str,
+            access_code: str,
+            timeout_sec: float,
+            force_refresh: bool = False,
+        ) -> dict:
+            snapshots.append(force_refresh)
+            state = "RUNNING" if force_refresh else "FINISH"
+            return {
+                "ok": True,
+                "received_at": "2026-06-14T01:00:02+09:00",
+                "report": {"print": {"gcode_state": state, "mc_percent": 100}},
+            }
+
+        def publish_project_file_command(self, **kwargs) -> dict:
+            published.update(kwargs)
+            return {
+                "ok": True,
+                "status": "published",
+                "will_publish": True,
+                "published": True,
+                "sequence_id": "seq-test",
+                "topic": kwargs.get("topic"),
+            }
+
+    class FakeFtpsClient:
+        def probe_storage(
+            self, *, host: str, username: str, access_code: str, timeout_sec: float, write_probe: bool = False
+        ) -> dict:
+            return {
+                "ok": False,
+                "storage": "ftps",
+                "failure_code": "BAMBU_FTPS_TOO_MANY_CONNECTIONS",
+                "error": "421 There are too many connections from your internet address.",
+            }
+
+    manager.live_probe = FakeProbe()
+    manager.mqtt_client = FakeMqttClient()
+    manager.ftps_client = FakeFtpsClient()
+
+    result = manager.prepare(
+        {
+            "runtime_mode": "live",
+            "run_id": "run-1",
+            "specimen_id": "sp-physical",
+            "stl_path": str(stl),
+            "print": {
+                "start_immediately": True,
+                "physical_intent": True,
+                "confirm_physical_print": True,
+                "public_base_url": "http://192.0.2.10:7860",
+            },
+        }
+    )
+
+    assert result["ok"] is True
+    assert result["status"] == "PRINT_STARTED"
+    assert result["slicer_result"]["ok"] is True
+    assert result["http_artifact_route"]["ok"] is True
+    assert result["upload"]["route"] == "http_artifact"
+    assert result["device_screen"]["connection"]["transfer"] == "connected"
+    assert result["device_screen"]["actions"]["can_start_print"] is True
+    assert result["print_result"]["published"] is True
+    assert result["print_result"]["post_publish_status"]["status"] == "running"
+    assert published["payload"]["print"]["command"] == "project_file"
+    assert str(published["payload"]["print"]["url"]).startswith("http://192.0.2.10:7860/printer-artifacts/bambu/")
+    assert snapshots == [False, True]
+
+
+def test_test_mode_installed_printer_uploads_starts_then_stops_before_autoejection(tmp_path: Path) -> None:
+    manager = PrinterDeviceBridgeManager.from_devices_config(_devices_config(tmp_path), repo_root=tmp_path)
+    profile = manager.config.default_profile
+    BambuConnectionMemory(profile.connection_memory_path).save_from_payload(
+        {
+            "host": "192.0.2.42",
+            "serial": "20PTEST000001",
+            "lan_mode_confirmed": True,
+            "developer_mode_confirmed": True,
+            "auth": {"mode": "lan_access_code", "username": "bblp", "access_code": "secret"},
+        }
+    )
+    sliced = tmp_path / "specimen.gcode.3mf"
+    _write_minimal_bambu_gcode_3mf(
+        sliced,
+        gcode="\n".join(
+            [
+                "G90",
+                "M82",
+                "G92 E0",
+                "G1 X110 Y110 Z0.2 E0.1 F1200",
+                "G1 X146 Y110 Z0.2 E0.2 F1200",
+                "G1 X146 Y143 Z12.0 E0.3 F1200",
+                "G1 X110 Y143 Z20.0 E0.4 F1200",
+                "M84",
+            ]
+        ),
+    )
+    published: dict[str, object] = {}
+    controls: list[dict[str, object]] = []
+    uploaded: dict[str, object] = {}
+    snapshots: list[bool] = []
+
+    class FakeProbe:
+        def probe_tls_port(self, host: str, port: int, timeout_sec: float) -> dict:
+            return {"ok": True, "port": port}
+
+    class FakeMqttClient:
+        def read_snapshot(
+            self,
+            *,
+            host: str,
+            serial: str,
+            username: str,
+            access_code: str,
+            timeout_sec: float,
+            force_refresh: bool = False,
+        ) -> dict:
+            snapshots.append(force_refresh)
+            state = "RUNNING" if force_refresh else "IDLE"
+            return {"ok": True, "received_at": "now", "report": {"print": {"gcode_state": state, "mc_percent": 1}}}
+
+        def publish_project_file_command(self, **kwargs) -> dict:
+            published.update(kwargs)
+            return {
+                "ok": True,
+                "status": "published",
+                "will_publish": True,
+                "published": True,
+                "sequence_id": "seq-start",
+                "topic": kwargs.get("topic"),
+            }
+
+        def publish_print_control_command(self, **kwargs) -> dict:
+            controls.append(kwargs)
+            return {
+                "ok": True,
+                "status": "published",
+                "will_publish": True,
+                "published": True,
+                "sequence_id": "seq-stop",
+                "command": kwargs.get("command"),
+                "topic": kwargs.get("topic"),
+            }
+
+        def publish_gcode_line_command(self, **kwargs) -> dict:
+            gcode_lines.append(kwargs)
+            return {
+                "ok": True,
+                "tool": "printer.bambu.mqtt_gcode_line",
+                "status": "published",
+                "will_publish": True,
+                "published": True,
+                "sequence_id": "seq-gcode-line",
+                "command": "gcode_line",
+                "gcode_line_count": len(str(kwargs.get("gcode") or "").splitlines()),
+                "topic": kwargs.get("topic"),
+            }
+
+    class FakeFtpsClient:
+        def probe_storage(
+            self, *, host: str, username: str, access_code: str, timeout_sec: float, write_probe: bool = False
+        ) -> dict:
+            assert write_probe is True
+            return {"ok": True, "storage": "ftps", "selected_remote_dir": "cache"}
+
+        def upload_file(
+            self,
+            *,
+            local_path: Path,
+            remote_path: str,
+            host: str,
+            username: str,
+            access_code: str,
+            timeout_sec: float,
+            delete_after: bool = False,
+        ) -> dict:
+            uploaded.update({"local_path": str(local_path), "remote_path": remote_path, "delete_after": delete_after})
+            return {
+                "ok": True,
+                "status": "uploaded",
+                "storage": "ftps",
+                "remote_path": remote_path,
+                "sha256": hashlib.sha256(Path(local_path).read_bytes()).hexdigest(),
+                "delete_after": delete_after,
+            }
+
+    manager.live_probe = FakeProbe()
+    manager.mqtt_client = FakeMqttClient()
+    manager.ftps_client = FakeFtpsClient()
+
+    result = manager.prepare(
+        {
+            "runtime_mode": "test",
+            "test_printer_path": "installed_printer",
+            "allow_test_printer_live": True,
+            "test_printer_transport": "real",
+            "bambu_artifact_path": str(sliced),
+            "print": {
+                "start_immediately": True,
+                "physical_intent": True,
+                "confirm_physical_print": True,
+                "stop_after_start": True,
+            },
+        }
+    )
+
+    assert result["ok"] is True
+    assert result["status"] == "TEST_PRINTER_STARTED_THEN_STOPPED"
+    assert result["mode"] == "test"
+    assert result["physical_transport"] is True
+    assert result["device_screen"]["connection"]["mqtt"] == "connected"
+    assert result["device_screen"]["connection"]["transfer"] == "connected"
+    assert result["preprint_gate"]["checks"]["storage_transfer_path_verified"] is True
+    assert result["step_trace"][1]["step"] == "BAMBU_MQTT_TLS_PREFLIGHT"
+    assert uploaded["remote_path"].endswith(".gcode.3mf")
+    assert published["payload"]["print"]["command"] == "project_file"
+    assert controls and controls[0]["command"] == "stop"
+    assert result["print_result"]["published"] is True
+    assert result["print_result"]["stop_after_start"] is True
+    assert result["print_result"]["stop"]["published"] is True
+    assert snapshots == [False, True]
+
+
+def test_test_mode_installed_printer_uploads_ejection_only_project_file_from_actual_slice(tmp_path: Path) -> None:
+    manager = PrinterDeviceBridgeManager.from_devices_config(_devices_config(tmp_path), repo_root=tmp_path)
+    profile = manager.config.default_profile
+    BambuConnectionMemory(profile.connection_memory_path).save_from_payload(
+        {
+            "host": "192.0.2.42",
+            "serial": "20PTEST000001",
+            "lan_mode_confirmed": True,
+            "developer_mode_confirmed": True,
+            "auth": {"mode": "lan_access_code", "username": "bblp", "access_code": "secret"},
+        }
+    )
+    manager.save_autoejection_config(
+        {
+            "enabled": True,
+            "provider": "bambu_gcode_patch",
+            "push_direction": "center",
+            "object_size_mm": [30.0, 30.0, 20.0],
+        }
+    )
+    sliced = tmp_path / "specimen.gcode.3mf"
+    _write_minimal_bambu_gcode_3mf(
+        sliced,
+        gcode="\n".join(
+            [
+                "G90",
+                "M82",
+                "G92 E0",
+                "G1 X110 Y110 Z0.2 E0.1 F1200",
+                "G1 X146 Y110 Z0.2 E0.2 F1200",
+                "G1 X146 Y143 Z12.0 E0.3 F1200",
+                "G1 X110 Y143 Z20.0 E0.4 F1200",
+                "M84",
+            ]
+        ),
+    )
+    published: list[dict[str, object]] = []
+    controls: list[dict[str, object]] = []
+    uploads: list[dict[str, object]] = []
+    gcode_lines: list[dict[str, object]] = []
+
+    class FakeProbe:
+        def probe_tls_port(self, host: str, port: int, timeout_sec: float) -> dict:
+            return {"ok": True, "port": port}
+
+    class FakeMqttClient:
+        def read_snapshot(
+            self,
+            *,
+            host: str,
+            serial: str,
+            username: str,
+            access_code: str,
+            timeout_sec: float,
+            force_refresh: bool = False,
+        ) -> dict:
+            state = "RUNNING" if force_refresh else "IDLE"
+            return {
+                "ok": True,
+                "received_at": "now",
+                "report": {"print": {"gcode_state": state, "mc_percent": 1, "bed_temper": 29}},
+            }
+
+        def publish_project_file_command(self, **kwargs) -> dict:
+            published.append(kwargs)
+            return {
+                "ok": True,
+                "status": "published",
+                "will_publish": True,
+                "published": True,
+                "sequence_id": f"seq-start-{len(published)}",
+                "topic": kwargs.get("topic"),
+            }
+
+        def publish_print_control_command(self, **kwargs) -> dict:
+            controls.append(kwargs)
+            return {
+                "ok": True,
+                "status": "published",
+                "will_publish": True,
+                "published": True,
+                "sequence_id": "seq-stop",
+                "command": kwargs.get("command"),
+                "topic": kwargs.get("topic"),
+            }
+
+        def publish_gcode_line_command(self, **kwargs) -> dict:
+            gcode_lines.append(kwargs)
+            return {
+                "ok": True,
+                "tool": "printer.bambu.mqtt_gcode_line",
+                "status": "published",
+                "will_publish": True,
+                "published": True,
+                "sequence_id": "seq-gcode-line",
+                "command": "gcode_line",
+                "gcode_line_count": len(str(kwargs.get("gcode") or "").splitlines()),
+                "topic": kwargs.get("topic"),
+            }
+
+    class FakeFtpsClient:
+        def probe_storage(
+            self, *, host: str, username: str, access_code: str, timeout_sec: float, write_probe: bool = False
+        ) -> dict:
+            assert write_probe is True
+            return {"ok": True, "storage": "ftps", "selected_remote_dir": "cache"}
+
+        def upload_file(
+            self,
+            *,
+            local_path: Path,
+            remote_path: str,
+            host: str,
+            username: str,
+            access_code: str,
+            timeout_sec: float,
+            delete_after: bool = False,
+        ) -> dict:
+            uploads.append({"local_path": str(local_path), "remote_path": remote_path, "delete_after": delete_after})
+            return {
+                "ok": True,
+                "status": "uploaded",
+                "storage": "ftps",
+                "remote_path": remote_path,
+                "sha256": hashlib.sha256(Path(local_path).read_bytes()).hexdigest(),
+                "delete_after": delete_after,
+            }
+
+    manager.live_probe = FakeProbe()
+    manager.mqtt_client = FakeMqttClient()
+    manager.ftps_client = FakeFtpsClient()
+
+    result = manager.prepare(
+        {
+            "runtime_mode": "test",
+            "test_printer_path": "installed_printer",
+            "allow_test_printer_live": True,
+            "test_printer_transport": "real",
+            "bambu_artifact_path": str(sliced),
+            "print": {
+                "start_immediately": True,
+                "physical_intent": True,
+                "confirm_physical_print": True,
+                "stop_after_start": True,
+            },
+            "ejection": {
+                "enabled": True,
+                "allow_ejection": True,
+                "standalone_after_start_stop": True,
+                "use_ejection_only_project_file": True,
+                "position": "center",
+                "object_size_mm": [30.0, 30.0, 20.0],
+            },
+        }
+    )
+
+    assert result["ok"] is True
+    assert result["status"] == "TEST_PRINTER_EJECTION_PROJECT_STARTED"
+    assert controls == []
+    assert len(published) == 1
+    assert len(uploads) == 1
+    assert len(gcode_lines) == 0
+    assert str(uploads[0]["local_path"]).endswith(".ejection-test.gcode.3mf")
+    assert str(uploads[0]["remote_path"]).endswith(".ejection-test.gcode.3mf")
+    assert result["ejection_only_project_file"] is True
+    assert result["autoejection_patch"]["ok"] is True
+    assert result["autoejection_patch"]["patched_artifact_path"] == uploads[0]["local_path"]
+    with zipfile.ZipFile(uploads[0]["local_path"]) as archive:
+        patched_gcode = archive.read("Metadata/plate_1.gcode").decode("utf-8")
+    assert "G0 X128.000 Y245.000" in patched_gcode
+    assert "E0.1" not in patched_gcode
+    assert "; atr_print_body_omitted=true" in patched_gcode
+    assert "G28 ; atr_autoejection_home_all_axes" not in patched_gcode
+    assert result["ejection_result"] == {}
+    assert any(item["step"] == "BAMBU_NATIVE_AUTOEJECTION_PATCH" and item["status"] == "ok" for item in result["step_trace"])
+
+
+def test_test_mode_installed_printer_autoejection_uses_actual_sliced_artifact_bounds(tmp_path: Path) -> None:
+    manager = PrinterDeviceBridgeManager.from_devices_config(_devices_config(tmp_path), repo_root=tmp_path)
+    profile = manager.config.default_profile
+    BambuConnectionMemory(profile.connection_memory_path).save_from_payload(
+        {
+            "host": "192.0.2.42",
+            "serial": "20PTEST000001",
+            "lan_mode_confirmed": True,
+            "developer_mode_confirmed": True,
+            "auth": {"mode": "lan_access_code", "username": "bblp", "access_code": "secret"},
+        }
+    )
+    manager.save_autoejection_config({"enabled": True, "provider": "bambu_gcode_patch", "push_direction": "center"})
+    sliced = tmp_path / "specimen.gcode.3mf"
+    _write_minimal_bambu_gcode_3mf(
+        sliced,
+        gcode="\n".join(
+            [
+                "G90",
+                "M82",
+                "G92 E0",
+                "G1 X30 Y40 Z0.2 E0.1 F1200",
+                "G1 X70 Y40 Z0.2 E0.2 F1200",
+                "G1 X70 Y80 Z6.0 E0.3 F1200",
+                "G1 X30 Y80 Z12.0 E0.4 F1200",
+                "M84",
+            ]
+        ),
+    )
+    gcode_lines: list[dict[str, object]] = []
+    uploads: list[dict[str, object]] = []
+    published: list[dict[str, object]] = []
+    controls: list[dict[str, object]] = []
+
+    class FakeProbe:
+        def probe_tls_port(self, host: str, port: int, timeout_sec: float) -> dict:
+            return {"ok": True, "port": port}
+
+    class FakeMqttClient:
+        def read_snapshot(self, **kwargs) -> dict:
+            state = "RUNNING" if kwargs.get("force_refresh") else "IDLE"
+            return {"ok": True, "received_at": "now", "report": {"print": {"gcode_state": state, "mc_percent": 1, "bed_temper": 29}}}
+
+        def publish_project_file_command(self, **kwargs) -> dict:
+            published.append(kwargs)
+            return {"ok": True, "status": "published", "will_publish": True, "published": True, "sequence_id": "seq-start", "topic": kwargs.get("topic")}
+
+        def publish_print_control_command(self, **kwargs) -> dict:
+            controls.append(kwargs)
+            return {"ok": True, "status": "published", "will_publish": True, "published": True, "sequence_id": "seq-stop", "command": kwargs.get("command"), "topic": kwargs.get("topic")}
+
+        def publish_gcode_line_command(self, **kwargs) -> dict:
+            gcode_lines.append(kwargs)
+            return {"ok": True, "tool": "printer.bambu.mqtt_gcode_line", "status": "published", "will_publish": True, "published": True, "sequence_id": "seq-gcode-line", "command": "gcode_line", "topic": kwargs.get("topic")}
+
+    class FakeFtpsClient:
+        def probe_storage(self, *, host: str, username: str, access_code: str, timeout_sec: float, write_probe: bool = False) -> dict:
+            return {"ok": True, "storage": "ftps", "selected_remote_dir": "cache"}
+
+        def upload_file(self, *, local_path: Path, remote_path: str, host: str, username: str, access_code: str, timeout_sec: float, delete_after: bool = False) -> dict:
+            uploads.append({"local_path": str(local_path), "remote_path": remote_path, "delete_after": delete_after})
+            return {
+                "ok": True,
+                "status": "uploaded",
+                "storage": "ftps",
+                "local_path": str(local_path),
+                "remote_path": remote_path,
+                "sha256": hashlib.sha256(Path(local_path).read_bytes()).hexdigest(),
+                "delete_after": delete_after,
+            }
+
+    manager.live_probe = FakeProbe()
+    manager.mqtt_client = FakeMqttClient()
+    manager.ftps_client = FakeFtpsClient()
+
+    result = manager.prepare(
+        {
+            "runtime_mode": "test",
+            "test_printer_path": "installed_printer",
+            "allow_test_printer_live": True,
+            "test_printer_transport": "real",
+            "bambu_artifact_path": str(sliced),
+            "print": {
+                "start_immediately": True,
+                "physical_intent": True,
+                "confirm_physical_print": True,
+                "stop_after_start": False,
+                "use_ejection_only_project_file": True,
+            },
+            "ejection": {
+                "enabled": True,
+                "allow_ejection": True,
+                "standalone_after_start_stop": True,
+                "use_ejection_only_project_file": True,
+                "position": "center",
+                "object_size_mm": [30.0, 30.0, 30.0],
+            },
+        }
+    )
+
+    assert result["ok"] is True
+    assert len(gcode_lines) == 0
+    assert len(uploads) == 1
+    assert len(published) == 1
+    assert controls == []
+    assert result["status"] == "TEST_PRINTER_EJECTION_PROJECT_STARTED"
+    assert result["ejection_only_project_file"] is True
+    assert result["upload"]["remote_path"].endswith(".ejection-test.gcode.3mf")
+    assert result["print_result"].get("stop_after_start") is not True
+    assert result["ejection_result"] == {}
+    assert result["autoejection_patch"]["source_object_bounds_mm"]["source"] == "extrusion_moves"
+    assert result["autoejection_patch"]["source_object_bounds_mm"]["center_x_mm"] == 50.0
+    assert result["autoejection_patch"]["source_object_bounds_mm"]["center_y_mm"] == 60.0
+    assert result["autoejection_patch"]["source_object_bounds_mm"]["max_z"] == 12.0
+    assert uploads[0]["local_path"].endswith(".ejection-test.gcode.3mf")
+    with zipfile.ZipFile(uploads[0]["local_path"]) as archive:
+        gcode = archive.read("Metadata/plate_1.gcode").decode("utf-8")
+    assert "E0.1" not in gcode
+    assert "E0.4" not in gcode
+    assert "; atr_print_body_omitted=true" in gcode
+    assert "; atr_assumed_object_bounds_mm=" in gcode
+    assert "G0 Z10.000 F3000" in gcode
+    assert gcode.index("G0 Z10.000 F3000") < gcode.index("G0 X50.000 Y245.000")
+    assert "G0 Z2.000 F3000" not in gcode
+    assert "G0 Z22.000 F3000" not in gcode
+    assert "G0 X50.000 Y245.000" in gcode
+    assert "G0 X128.000 Y245.000" not in gcode
+
+
+def test_test_mode_physical_print_keeps_actual_print_body_when_autoejection_is_enabled(tmp_path: Path) -> None:
+    manager = PrinterDeviceBridgeManager.from_devices_config(_devices_config(tmp_path), repo_root=tmp_path)
+    profile = manager.config.default_profile
+    BambuConnectionMemory(profile.connection_memory_path).save_from_payload(
+        {
+            "host": "192.0.2.42",
+            "serial": "20PTEST000001",
+            "lan_mode_confirmed": True,
+            "developer_mode_confirmed": True,
+            "auth": {"mode": "lan_access_code", "username": "bblp", "access_code": "secret"},
+        }
+    )
+    manager.save_autoejection_config({"enabled": True, "provider": "bambu_gcode_patch", "push_direction": "center"})
+    sliced = tmp_path / "specimen.gcode.3mf"
+    _write_minimal_bambu_gcode_3mf(
+        sliced,
+        gcode="\n".join(
+            [
+                "G90",
+                "M82",
+                "G92 E0",
+                "G1 X30 Y40 Z0.2 E0.1 F1200",
+                "G1 X70 Y40 Z0.2 E0.2 F1200",
+                "G1 X70 Y80 Z6.0 E0.3 F1200",
+                "G1 X30 Y80 Z30.0 E0.4 F1200",
+                "M84",
+                "M73 P100 R0",
+            ]
+        ),
+    )
+
+    class FakeProbe:
+        def probe_tls_port(self, host: str, port: int, timeout_sec: float) -> dict:
+            return {"ok": True, "port": port}
+
+    class FakeMqttClient:
+        def read_snapshot(self, **kwargs) -> dict:
+            state = "RUNNING" if kwargs.get("force_refresh") else "IDLE"
+            return {"ok": True, "received_at": "now", "report": {"print": {"gcode_state": state, "mc_percent": 1, "bed_temper": 29}}}
+
+        def publish_project_file_command(self, **kwargs) -> dict:
+            return {"ok": True, "status": "published", "will_publish": True, "published": True, "sequence_id": "seq-start", "topic": kwargs.get("topic")}
+
+        def publish_print_control_command(self, **kwargs) -> dict:
+            return {"ok": True, "status": "published", "will_publish": True, "published": True, "sequence_id": "seq-stop", "command": kwargs.get("command"), "topic": kwargs.get("topic")}
+
+        def publish_gcode_line_command(self, **kwargs) -> dict:
+            raise AssertionError("physical print must not use direct gcode_line autoejection")
+
+    class FakeFtpsClient:
+        def probe_storage(self, *, host: str, username: str, access_code: str, timeout_sec: float, write_probe: bool = False) -> dict:
+            return {"ok": True, "storage": "ftps", "selected_remote_dir": "cache"}
+
+        def upload_file(self, *, local_path: Path, remote_path: str, host: str, username: str, access_code: str, timeout_sec: float, delete_after: bool = False) -> dict:
+            return {
+                "ok": True,
+                "status": "uploaded",
+                "storage": "ftps",
+                "local_path": str(local_path),
+                "remote_path": remote_path,
+                "sha256": hashlib.sha256(Path(local_path).read_bytes()).hexdigest(),
+                "delete_after": delete_after,
+            }
+
+    manager.live_probe = FakeProbe()
+    manager.mqtt_client = FakeMqttClient()
+    manager.ftps_client = FakeFtpsClient()
+
+    result = manager.prepare(
+        {
+            "runtime_mode": "test",
+            "test_printer_path": "physical_print",
+            "allow_test_printer_live": True,
+            "test_printer_transport": "real",
+            "bambu_artifact_path": str(sliced),
+            "print": {
+                "start_immediately": True,
+                "physical_intent": True,
+                "confirm_physical_print": True,
+                "stop_after_start": False,
+            },
+            "ejection": {
+                "enabled": True,
+                "allow_ejection": True,
+                "position": "center",
+            },
+        }
+    )
+
+    assert result["ok"] is True
+    assert result["ejection_only_project_file"] is False
+    assert result["upload"]["local_path"].endswith(".autoeject.gcode.3mf")
+    assert not result["upload"]["local_path"].endswith(".ejection-test.gcode.3mf")
+    with zipfile.ZipFile(result["upload"]["local_path"]) as archive:
+        gcode = archive.read("Metadata/plate_1.gcode").decode("utf-8")
+    assert "E0.1" in gcode
+    assert "E0.4" in gcode
+    assert "; atr_print_body_omitted=true" not in gcode
+    assert "; atr.bambu.autoejection.v1" in gcode
+    assert "; atr_z_push_offset_mm=15.0" in gcode
+    assert "G0 Z15.000 F3000" in gcode
+    assert "G0 Z10.000 F3000" not in gcode
+    assert "M73 P100 R0" in gcode
+    assert gcode.index("; atr.bambu.autoejection.end") < gcode.index("M73 P100 R0")
+
+
+def test_prefer_http_artifact_skips_ftps_upload_for_installed_printer_ejection_project(tmp_path: Path) -> None:
+    manager = PrinterDeviceBridgeManager.from_devices_config(_devices_config(tmp_path), repo_root=tmp_path)
+    profile = manager.config.default_profile
+    BambuConnectionMemory(profile.connection_memory_path).save_from_payload(
+        {
+            "host": "192.0.2.42",
+            "serial": "20PTEST000001",
+            "lan_mode_confirmed": True,
+            "developer_mode_confirmed": True,
+            "auth": {"mode": "lan_access_code", "username": "bblp", "access_code": "secret"},
+        }
+    )
+    manager.save_autoejection_config({"enabled": True, "provider": "bambu_gcode_patch", "push_direction": "center"})
+    sliced = tmp_path / "specimen.gcode.3mf"
+    _write_minimal_bambu_gcode_3mf(
+        sliced,
+        gcode="\n".join(
+            [
+                "G90",
+                "M82",
+                "G92 E0",
+                "G1 X30 Y40 Z0.2 E0.1 F1200",
+                "G1 X70 Y40 Z0.2 E0.2 F1200",
+                "G1 X70 Y80 Z6.0 E0.3 F1200",
+                "G1 X30 Y80 Z12.0 E0.4 F1200",
+                "M84",
+            ]
+        ),
+    )
+
+    class FakeProbe:
+        def probe_tls_port(self, host: str, port: int, timeout_sec: float) -> dict:
+            return {"ok": True, "port": port}
+
+    class FakeMqttClient:
+        def read_snapshot(self, **kwargs) -> dict:
+            return {"ok": True, "received_at": "now", "report": {"print": {"gcode_state": "IDLE", "mc_percent": 0, "bed_temper": 29}}}
+
+    class FakeFtpsClient:
+        def probe_storage(self, *, host: str, username: str, access_code: str, timeout_sec: float, write_probe: bool = False) -> dict:
+            return {"ok": True, "storage": "ftps", "selected_remote_dir": "cache"}
+
+        def upload_file(self, **kwargs) -> dict:
+            raise AssertionError("prefer_http_artifact must not fall back to FTPS upload")
+
+    manager.live_probe = FakeProbe()
+    manager.mqtt_client = FakeMqttClient()
+    manager.ftps_client = FakeFtpsClient()
+
+    result = manager.prepare(
+        {
+            "runtime_mode": "test",
+            "test_printer_path": "installed_printer",
+            "allow_test_printer_live": True,
+            "test_printer_transport": "real",
+            "bambu_artifact_path": str(sliced),
+            "prefer_http_artifact": True,
+            "public_base_url": "http://192.0.2.100:7860",
+            "print": {
+                "start_immediately": False,
+                "physical_intent": False,
+                "confirm_physical_print": False,
+                "stop_after_start": True,
+            },
+            "ejection": {
+                "enabled": True,
+                "allow_ejection": True,
+                "use_ejection_only_project_file": True,
+                "position": "center",
+            },
+        }
+    )
+
+    assert result["ok"] is True
+    assert result["ejection_only_project_file"] is True
+    assert result["upload"]["route"] == "http_artifact"
+    assert result["upload"]["remote_path"].startswith("http://192.0.2.100:7860/printer-artifacts/bambu/")
+    assert result["upload"]["filename"].endswith(".gcode.3mf")
+    assert result["project_file_draft"]["payload"]["print"]["url"].startswith("http://192.0.2.100:7860/printer-artifacts/bambu/")
+    assert result["project_file_draft"]["payload"]["print"]["subtask_name"] == Path(result["upload"]["filename"]).stem
+
+
+def test_test_mode_installed_printer_blocks_autoejection_without_actual_extrusion_bounds(tmp_path: Path) -> None:
+    manager = PrinterDeviceBridgeManager.from_devices_config(_devices_config(tmp_path), repo_root=tmp_path)
+    profile = manager.config.default_profile
+    BambuConnectionMemory(profile.connection_memory_path).save_from_payload(
+        {
+            "host": "192.0.2.42",
+            "serial": "20PTEST000001",
+            "lan_mode_confirmed": True,
+            "developer_mode_confirmed": True,
+            "auth": {"mode": "lan_access_code", "username": "bblp", "access_code": "secret"},
+        }
+    )
+    manager.save_autoejection_config({"enabled": True, "provider": "bambu_gcode_patch", "push_direction": "center"})
+    sliced = tmp_path / "travel-only.gcode.3mf"
+    _write_minimal_bambu_gcode_3mf(sliced, gcode="G90\nG0 X10 Y10 Z10 F1200\nM84\n")
+    gcode_lines: list[dict[str, object]] = []
+
+    class FakeProbe:
+        def probe_tls_port(self, host: str, port: int, timeout_sec: float) -> dict:
+            return {"ok": True, "port": port}
+
+    class FakeMqttClient:
+        def read_snapshot(self, **kwargs) -> dict:
+            state = "RUNNING" if kwargs.get("force_refresh") else "IDLE"
+            return {"ok": True, "received_at": "now", "report": {"print": {"gcode_state": state, "mc_percent": 1, "bed_temper": 29}}}
+
+        def publish_project_file_command(self, **kwargs) -> dict:
+            return {"ok": True, "status": "published", "will_publish": True, "published": True, "sequence_id": "seq-start", "topic": kwargs.get("topic")}
+
+        def publish_print_control_command(self, **kwargs) -> dict:
+            return {"ok": True, "status": "published", "will_publish": True, "published": True, "sequence_id": "seq-stop", "command": kwargs.get("command"), "topic": kwargs.get("topic")}
+
+        def publish_gcode_line_command(self, **kwargs) -> dict:
+            gcode_lines.append(kwargs)
+            return {"ok": True, "status": "published", "published": True}
+
+    class FakeFtpsClient:
+        def probe_storage(self, *, host: str, username: str, access_code: str, timeout_sec: float, write_probe: bool = False) -> dict:
+            return {"ok": True, "storage": "ftps", "selected_remote_dir": "cache"}
+
+        def upload_file(self, *, local_path: Path, remote_path: str, host: str, username: str, access_code: str, timeout_sec: float, delete_after: bool = False) -> dict:
+            return {"ok": True, "status": "uploaded", "storage": "ftps", "remote_path": remote_path, "sha256": hashlib.sha256(Path(local_path).read_bytes()).hexdigest(), "delete_after": delete_after}
+
+    manager.live_probe = FakeProbe()
+    manager.mqtt_client = FakeMqttClient()
+    manager.ftps_client = FakeFtpsClient()
+
+    result = manager.prepare(
+        {
+            "runtime_mode": "test",
+            "test_printer_path": "installed_printer",
+            "allow_test_printer_live": True,
+            "test_printer_transport": "real",
+            "bambu_artifact_path": str(sliced),
+            "print": {
+                "start_immediately": True,
+                "physical_intent": True,
+                "confirm_physical_print": True,
+                "stop_after_start": True,
+            },
+            "ejection": {
+                "enabled": True,
+                "allow_ejection": True,
+                "standalone_after_start_stop": True,
+                "position": "center",
+                "object_size_mm": [30.0, 30.0, 30.0],
+            },
+        }
+    )
+
+    assert result["ok"] is False
+    assert result["failure_code"] == "BAMBU_AUTOEJECTION_SOURCE_EXTRUSION_BOUNDS_REQUIRED"
+    assert result["autoejection_patch"]["ok"] is False
+    assert result["autoejection_patch"]["failure_code"] == "BAMBU_AUTOEJECTION_SOURCE_EXTRUSION_BOUNDS_REQUIRED"
+    assert result["ejection_result"] == {}
+    assert gcode_lines == []
+
+
+def test_test_mode_installed_printer_can_start_after_previous_cancelled_failed_state(tmp_path: Path) -> None:
+    manager = PrinterDeviceBridgeManager.from_devices_config(_devices_config(tmp_path), repo_root=tmp_path)
+    profile = manager.config.default_profile
+    BambuConnectionMemory(profile.connection_memory_path).save_from_payload(
+        {
+            "host": "192.0.2.42",
+            "serial": "20PTEST000001",
+            "lan_mode_confirmed": True,
+            "developer_mode_confirmed": True,
+            "auth": {"mode": "lan_access_code", "username": "bblp", "access_code": "secret"},
+        }
+    )
+    sliced = tmp_path / "specimen.gcode.3mf"
+    _write_minimal_bambu_gcode_3mf(sliced)
+    controls: list[dict[str, object]] = []
+
+    class FakeProbe:
+        def probe_tls_port(self, host: str, port: int, timeout_sec: float) -> dict:
+            return {"ok": True, "port": port}
+
+    class FakeMqttClient:
+        def read_snapshot(
+            self,
+            *,
+            host: str,
+            serial: str,
+            username: str,
+            access_code: str,
+            timeout_sec: float,
+            force_refresh: bool = False,
+        ) -> dict:
+            state = "PREPARE" if force_refresh else "FAILED"
+            return {"ok": True, "received_at": "now", "report": {"print": {"gcode_state": state}}}
+
+        def publish_project_file_command(self, **kwargs) -> dict:
+            return {
+                "ok": True,
+                "status": "published",
+                "will_publish": True,
+                "published": True,
+                "sequence_id": "seq-start",
+                "topic": kwargs.get("topic"),
+            }
+
+        def publish_print_control_command(self, **kwargs) -> dict:
+            controls.append(kwargs)
+            return {
+                "ok": True,
+                "status": "published",
+                "will_publish": True,
+                "published": True,
+                "sequence_id": "seq-stop",
+                "command": kwargs.get("command"),
+                "topic": kwargs.get("topic"),
+            }
+
+    class FakeFtpsClient:
+        def probe_storage(
+            self, *, host: str, username: str, access_code: str, timeout_sec: float, write_probe: bool = False
+        ) -> dict:
+            return {"ok": True, "storage": "ftps", "selected_remote_dir": "cache"}
+
+        def upload_file(
+            self,
+            *,
+            local_path: Path,
+            remote_path: str,
+            host: str,
+            username: str,
+            access_code: str,
+            timeout_sec: float,
+            delete_after: bool = False,
+        ) -> dict:
+            return {
+                "ok": True,
+                "status": "uploaded",
+                "storage": "ftps",
+                "remote_path": remote_path,
+                "sha256": hashlib.sha256(Path(local_path).read_bytes()).hexdigest(),
+                "delete_after": delete_after,
+            }
+
+    manager.live_probe = FakeProbe()
+    manager.mqtt_client = FakeMqttClient()
+    manager.ftps_client = FakeFtpsClient()
+
+    result = manager.prepare(
+        {
+            "runtime_mode": "test",
+            "test_printer_path": "installed_printer",
+            "allow_test_printer_live": True,
+            "test_printer_transport": "real",
+            "bambu_artifact_path": str(sliced),
+            "print": {
+                "start_immediately": True,
+                "physical_intent": True,
+                "confirm_physical_print": True,
+                "stop_after_start": True,
+            },
+        }
+    )
+
+    assert result["ok"] is True
+    assert result["status"] == "TEST_PRINTER_STARTED_THEN_STOPPED"
+    assert result["print_result"]["published"] is True
+    assert result["print_result"]["stop"]["published"] is True
+    assert result["preprint_gate"]["checks"]["printer_safe_state_verified"] is True
+    assert controls and controls[0]["command"] == "stop"
+
+
+def test_test_mode_installed_printer_blocks_when_start_publish_is_not_observed(tmp_path: Path) -> None:
+    manager = PrinterDeviceBridgeManager.from_devices_config(_devices_config(tmp_path), repo_root=tmp_path)
+    profile = manager.config.default_profile
+    BambuConnectionMemory(profile.connection_memory_path).save_from_payload(
+        {
+            "host": "192.0.2.42",
+            "serial": "20PTEST000001",
+            "lan_mode_confirmed": True,
+            "developer_mode_confirmed": True,
+            "auth": {"mode": "lan_access_code", "username": "bblp", "access_code": "secret"},
+        }
+    )
+    sliced = tmp_path / "specimen.gcode.3mf"
+    _write_minimal_bambu_gcode_3mf(sliced)
+    controls: list[dict[str, object]] = []
+
+    class FakeProbe:
+        def probe_tls_port(self, host: str, port: int, timeout_sec: float) -> dict:
+            return {"ok": True, "port": port}
+
+    class FakeMqttClient:
+        def read_snapshot(
+            self,
+            *,
+            host: str,
+            serial: str,
+            username: str,
+            access_code: str,
+            timeout_sec: float,
+            force_refresh: bool = False,
+        ) -> dict:
+            return {"ok": True, "received_at": "now", "report": {"print": {"gcode_state": "FAILED"}}}
+
+        def publish_project_file_command(self, **kwargs) -> dict:
+            return {
+                "ok": True,
+                "status": "published",
+                "will_publish": True,
+                "published": True,
+                "sequence_id": "seq-start",
+                "topic": kwargs.get("topic"),
+            }
+
+        def publish_print_control_command(self, **kwargs) -> dict:
+            controls.append(kwargs)
+            return {
+                "ok": True,
+                "status": "published",
+                "will_publish": True,
+                "published": True,
+                "sequence_id": "seq-stop",
+                "command": kwargs.get("command"),
+                "topic": kwargs.get("topic"),
+            }
+
+    class FakeFtpsClient:
+        def probe_storage(
+            self, *, host: str, username: str, access_code: str, timeout_sec: float, write_probe: bool = False
+        ) -> dict:
+            return {"ok": True, "storage": "ftps", "selected_remote_dir": "cache"}
+
+        def upload_file(
+            self,
+            *,
+            local_path: Path,
+            remote_path: str,
+            host: str,
+            username: str,
+            access_code: str,
+            timeout_sec: float,
+            delete_after: bool = False,
+        ) -> dict:
+            return {
+                "ok": True,
+                "status": "uploaded",
+                "storage": "ftps",
+                "remote_path": remote_path,
+                "sha256": hashlib.sha256(Path(local_path).read_bytes()).hexdigest(),
+                "delete_after": delete_after,
+            }
+
+    manager.live_probe = FakeProbe()
+    manager.mqtt_client = FakeMqttClient()
+    manager.ftps_client = FakeFtpsClient()
+
+    result = manager.prepare(
+        {
+            "runtime_mode": "test",
+            "test_printer_path": "installed_printer",
+            "allow_test_printer_live": True,
+            "test_printer_transport": "real",
+            "bambu_artifact_path": str(sliced),
+            "print": {
+                "start_immediately": True,
+                "physical_intent": True,
+                "confirm_physical_print": True,
+                "stop_after_start": True,
+            },
+        }
+    )
+
+    assert result["ok"] is False
+    assert result["failure_code"] == "BAMBU_PROJECT_FILE_START_FAILED"
+    assert result["print_result"]["published"] is True
+    assert result["print_result"]["post_publish_status"]["status"] == "failed"
+    assert result["print_result"].get("stop_after_start") is not True
+    assert result["preprint_gate"]["checks"]["start_command_draft_prepared"] is True
+    assert controls == []
+
+
+def test_test_mode_installed_printer_does_not_send_second_standalone_project_file(tmp_path: Path) -> None:
+    manager = PrinterDeviceBridgeManager.from_devices_config(_devices_config(tmp_path), repo_root=tmp_path)
+    profile = manager.config.default_profile
+    BambuConnectionMemory(profile.connection_memory_path).save_from_payload(
+        {
+            "host": "192.0.2.42",
+            "serial": "20PTEST000001",
+            "lan_mode_confirmed": True,
+            "developer_mode_confirmed": True,
+            "auth": {"mode": "lan_access_code", "username": "bblp", "access_code": "secret"},
+        }
+    )
+    manager.save_autoejection_config({"enabled": True, "provider": "bambu_gcode_patch", "push_direction": "center"})
+    sliced = tmp_path / "specimen.gcode.3mf"
+    _write_minimal_bambu_gcode_3mf(
+        sliced,
+        gcode="\n".join(
+            [
+                "G90",
+                "M82",
+                "G92 E0",
+                "G1 X30 Y40 Z0.2 E0.1 F1200",
+                "G1 X70 Y40 Z0.2 E0.2 F1200",
+                "G1 X70 Y80 Z6.0 E0.3 F1200",
+                "G1 X30 Y80 Z12.0 E0.4 F1200",
+                "M84",
+            ]
+        ),
+    )
+    controls: list[dict[str, object]] = []
+    published: list[dict[str, object]] = []
+    force_reads = 0
+
+    class FakeProbe:
+        def probe_tls_port(self, host: str, port: int, timeout_sec: float) -> dict:
+            return {"ok": True, "port": port}
+
+    class FakeMqttClient:
+        def read_snapshot(self, **kwargs) -> dict:
+            nonlocal force_reads
+            if kwargs.get("force_refresh"):
+                force_reads += 1
+                state = "RUNNING" if force_reads == 1 else "FAILED"
+            else:
+                state = "IDLE"
+            return {
+                "ok": True,
+                "received_at": "now",
+                "report": {"print": {"gcode_state": state, "mc_percent": 1, "bed_temper": 29}},
+            }
+
+        def publish_project_file_command(self, **kwargs) -> dict:
+            published.append(kwargs)
+            return {
+                "ok": True,
+                "status": "published",
+                "will_publish": True,
+                "published": True,
+                "sequence_id": f"seq-start-{len(published)}",
+                "topic": kwargs.get("topic"),
+            }
+
+        def publish_print_control_command(self, **kwargs) -> dict:
+            controls.append(kwargs)
+            return {
+                "ok": True,
+                "status": "published",
+                "will_publish": True,
+                "published": True,
+                "sequence_id": "seq-stop",
+                "command": kwargs.get("command"),
+                "topic": kwargs.get("topic"),
+            }
+
+    class FakeFtpsClient:
+        def probe_storage(self, *, host: str, username: str, access_code: str, timeout_sec: float, write_probe: bool = False) -> dict:
+            return {"ok": True, "storage": "ftps", "selected_remote_dir": "cache"}
+
+        def upload_file(self, *, local_path: Path, remote_path: str, host: str, username: str, access_code: str, timeout_sec: float, delete_after: bool = False) -> dict:
+            return {
+                "ok": True,
+                "status": "uploaded",
+                "storage": "ftps",
+                "local_path": str(local_path),
+                "remote_path": remote_path,
+                "sha256": hashlib.sha256(Path(local_path).read_bytes()).hexdigest(),
+                "delete_after": delete_after,
+            }
+
+    manager.live_probe = FakeProbe()
+    manager.mqtt_client = FakeMqttClient()
+    manager.ftps_client = FakeFtpsClient()
+
+    result = manager.prepare(
+        {
+            "runtime_mode": "test",
+            "test_printer_path": "installed_printer",
+            "allow_test_printer_live": True,
+            "test_printer_transport": "real",
+            "bambu_artifact_path": str(sliced),
+            "print": {
+                "start_immediately": True,
+                "physical_intent": True,
+                "confirm_physical_print": True,
+                "stop_after_start": True,
+            },
+            "ejection": {
+                "enabled": True,
+                "allow_ejection": True,
+                "standalone_after_start_stop": False,
+                "use_ejection_only_project_file": True,
+                "position": "center",
+                "object_size_mm": [30.0, 30.0, 30.0],
+            },
+        }
+    )
+
+    assert result["ok"] is True
+    assert result["status"] == "TEST_PRINTER_EJECTION_PROJECT_STARTED"
+    assert len(published) == 1
+    assert controls == []
+    assert result["ejection_only_project_file"] is True
+    assert result["ejection_result"] == {}
+    assert any(
+        item["step"] == "BAMBU_NATIVE_AUTOEJECTION_PATCH" and item["status"] == "ok"
+        for item in result["step_trace"]
+    )
 
 
 def test_live_bambu_uploads_explicit_artifact_to_verified_cache_dir_when_remote_path_not_overridden(
@@ -2544,7 +3879,7 @@ def test_live_bambu_does_not_treat_plain_remote_path_as_http_artifact_route_when
     assert result["device_screen"]["connection"]["transfer"] == "read_only"
 
 
-def test_live_bambu_blocks_physical_upload_when_only_stl_is_available(tmp_path: Path) -> None:
+def test_live_bambu_blocks_physical_stl_upload_when_slicer_is_disabled(tmp_path: Path) -> None:
     manager = PrinterDeviceBridgeManager.from_devices_config(_devices_config(tmp_path), repo_root=tmp_path)
     profile = manager.config.default_profile
     BambuConnectionMemory(profile.connection_memory_path).save_from_payload(
@@ -2590,6 +3925,6 @@ def test_live_bambu_blocks_physical_upload_when_only_stl_is_available(tmp_path: 
     )
 
     assert result["ok"] is False
-    assert result["failure_code"] == "BAMBU_SLICED_ARTIFACT_REQUIRED"
-    assert result["preprint_gate"]["blockers"] == ["BAMBU_SLICED_ARTIFACT_REQUIRED"]
+    assert result["failure_code"] == "BAMBU_STUDIO_SLICER_DISABLED"
+    assert result["preprint_gate"]["blockers"] == ["BAMBU_STUDIO_SLICER_DISABLED"]
     assert result["device_screen"]["actions"]["can_start_print"] is False

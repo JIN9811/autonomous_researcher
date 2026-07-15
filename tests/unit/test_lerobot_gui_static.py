@@ -5,6 +5,23 @@ from __future__ import annotations
 from pathlib import Path
 
 
+def test_lerobot_camera_usb_link_badge_is_rendered_from_saved_device_metadata() -> None:
+    template = Path("web/templates/lerobot.html").read_text(encoding="utf-8")
+    script = Path("web/static/lerobot.js").read_text(encoding="utf-8")
+    styles = Path("web/static/styles.css").read_text(encoding="utf-8")
+
+    assert "function cameraUsbLinkBadge" in script
+    assert 'camera.usb_link_label || "USB link unknown"' in script
+    assert 'camera.usb_link_status' in script
+    assert 'lerobot-camera-usb-link ${status}' in script
+    assert "cameraUsbLinkBadge(camera, realsense)" in script
+    assert ".lerobot-camera-usb-link.ok" in styles
+    assert ".lerobot-camera-usb-link.warning" in styles
+    assert ".lerobot-camera-usb-link.unknown" in styles
+    assert "/static/styles.css?v=20260715-camera-usb-link-1" in template
+    assert "/static/lerobot.js?v=20260715-camera-usb-link-1" in template
+
+
 def test_lerobot_active_robot_cam_controls_and_payload_are_wired() -> None:
     template = Path("web/templates/lerobot.html").read_text(encoding="utf-8")
     script = Path("web/static/lerobot.js").read_text(encoding="utf-8")
@@ -41,6 +58,20 @@ def test_lerobot_rollout_shoulder_lift_backstop_defaults_on_in_gui() -> None:
         "payload.rollout_shoulder_lift_backstop = rolloutShoulderLiftBackstopInput ? "
         "boolValue(rolloutShoulderLiftBackstopInput) : true;"
     ) in script
+
+
+def test_lerobot_rollout_restores_saved_profile_instead_of_selecting_latest() -> None:
+    template = Path("web/templates/lerobot.html").read_text(encoding="utf-8")
+    script = Path("web/static/lerobot.js").read_text(encoding="utf-8")
+
+    assert 'id="btn-rollout-save"' in template
+    assert "Save Rollout Defaults" in template
+    assert "function applyRolloutProfile" in script
+    assert "async function refreshRolloutProfile" in script
+    assert 'fetch("/api/lerobot/rollout/config")' in script
+    assert 'postJson("/api/lerobot/rollout/config", currentRolloutProfile())' in script
+    assert "await refreshPolicies();\n    await refreshRolloutProfile();" in script
+    assert "savedPolicyOptionLabel" in script
 
 
 def test_lerobot_training_progress_uses_sample_count_when_step_is_abbreviated() -> None:
@@ -201,8 +232,8 @@ def test_lerobot_isaac_lab_gui_tab_shell_is_wired() -> None:
 
     assert 'id="lerobot-main-tab"' in template
     assert 'id="isaac-lab-tab"' in template
-    assert "/static/lerobot.js?v=20260708-official-mimic-rgbd-render-1" in template
-    assert "/static/styles.css?v=20260705-section7-one-row-1" in template
+    assert "/static/lerobot.js?v=20260715-camera-usb-link-1" in template
+    assert "/static/styles.css?v=20260715-camera-usb-link-1" in template
     assert 'data-lerobot-tab-target="isaac-lab-tab"' in template
     assert "function activateLeRobotGuiTab" in script
     assert 'target.scrollIntoView({ block: "start" })' in script
@@ -705,6 +736,15 @@ def test_lerobot_manipulation_profile_does_not_override_global_pipeline_select()
     assert "observationPipelineSelect.value = profile.observation_pipeline_id" not in body
 
 
+def test_lerobot_manipulation_save_reapplies_canonical_server_profile() -> None:
+    script = Path("web/static/lerobot.js").read_text(encoding="utf-8")
+    body = script.split("async function persistManipulationTaskProfile", 1)[1].split(
+        "function setInputValue", 1
+    )[0]
+
+    assert "applyManipulationProfile(data.profile || {}, true);" in body
+
+
 def test_lerobot_gui_defaults_to_official_rerun_visualizer() -> None:
     template = Path("web/templates/lerobot.html").read_text(encoding="utf-8")
     script = Path("web/static/lerobot.js").read_text(encoding="utf-8")
@@ -835,3 +875,96 @@ def test_lerobot_dataset_mix_controls_are_wired() -> None:
     assert "fidelity_isaac_lab_synthetic_weight: numberValue(fidelityIsaacLabSyntheticWeightInput, 0.25)" in script
     assert "dataset_mix_effective_counts" in script
     assert "fidelity_weights" in script
+
+
+def test_manipulation_bridge_runtime_supervisor_cards_are_wired() -> None:
+    template = Path("web/templates/lerobot.html").read_text(encoding="utf-8")
+    script = Path("web/static/lerobot.js").read_text(encoding="utf-8")
+
+    for label in [
+        "Bridge State",
+        "Port Lease",
+        "Active Camera",
+        "Robot Policy Runtime",
+        "Rerun Telemetry",
+        "Observation Preview",
+        "Joint State",
+        "Action Stream",
+        "Viewer Evidence",
+        "Vision Completion Gate",
+        "Execution Safety",
+    ]:
+        assert label in template
+    assert "Home Pose / Interlock" not in script
+    assert "Pi0.5/SARM state" not in template
+    assert "Pi0.5 / Policy Runtime" not in script
+    assert "SARM Stage Progress" not in script
+    assert "function executionSafetyFromReport" in script
+    assert "function rerunTelemetryFromReport" in script
+    assert "telemetry.latest_frame_artifact" in script
+    assert "telemetry.joint_state" in script
+    assert "telemetry.action_rate_hz" in script
+    assert "renderManipulationAgentReport(data);" in script
+
+
+def test_manipulation_bridge_defaults_match_rollout_inference_policy() -> None:
+    template = Path("web/templates/lerobot.html").read_text(encoding="utf-8")
+    script = Path("web/static/lerobot.js").read_text(encoding="utf-8")
+
+    assert '<option value="smolvla" selected>smolvla (SmolVLA)</option>' in template
+    for policy_type in ["act", "diffusion", "pi0", "pi05", "pi0fast", "xvla", "vqbet"]:
+        assert f'<option value="{policy_type}">' in template
+    assert 'selectedManipulationPolicyType() || "smolvla"' in script
+    assert 'rollout_inference_type: policyTypeKey === "pi05" ? "rtc" : "",' in script
+    assert "rollout_action_clamp: manipulationActionClampInput ? boolValue(manipulationActionClampInput) : false," in script
+    assert "rollout_max_relative_target: numberValue(manipulationMaxRelativeTargetInput, 5)," in script
+    assert (
+        "rollout_shoulder_lift_backstop: manipulationShoulderLiftBackstopInput ? "
+        "boolValue(manipulationShoulderLiftBackstopInput) : true,"
+    ) in script
+
+
+def test_manipulation_bridge_reuses_rollout_configuration_layout() -> None:
+    template = Path("web/templates/lerobot.html").read_text(encoding="utf-8")
+    script = Path("web/static/lerobot.js").read_text(encoding="utf-8")
+
+    assert "Use Rollout Settings" not in template
+    assert "btn-manipulation-use-rollout-settings" not in template
+    for element_id in [
+        "lerobot-manipulation-task-id-input",
+        "lerobot-manipulation-policy-select",
+        "lerobot-manipulation-policy-type-input",
+        "lerobot-manipulation-policy-input",
+        "btn-browse-manipulation-policy",
+        "btn-manipulation-latest-policy",
+        "lerobot-manipulation-instruction-input",
+        "lerobot-manipulation-duration-input",
+        "lerobot-manipulation-action-clamp-input",
+        "lerobot-manipulation-max-relative-target-input",
+        "lerobot-manipulation-shoulder-lift-backstop-input",
+        "lerobot-manipulation-temporal-ensemble-input",
+        "lerobot-manipulation-temporal-coeff-input",
+        "lerobot-manipulation-rtc-horizon-input",
+        "lerobot-manipulation-rtc-guidance-input",
+        "lerobot-manipulation-action-queue-input",
+        "lerobot-manipulation-observation-input",
+    ]:
+        assert element_id in template
+    for obsolete_id in [
+        "lerobot-manipulation-strategy-input",
+        "lerobot-manipulation-policy-backend-input",
+        "lerobot-manipulation-source-input",
+        "lerobot-manipulation-target-input",
+        "lerobot-manipulation-specimen-id-input",
+        "lerobot-manipulation-candidate-id-input",
+        "lerobot-manipulation-stl-input",
+        "lerobot-manipulation-camera-input",
+        "lerobot-manipulation-display-input",
+    ]:
+        assert obsolete_id not in template
+    assert "function manipulationRolloutPayload" in script
+    assert "function applyManipulationTaskProfile" in script
+    assert "async function persistManipulationTaskProfile" in script
+    assert "await persistManipulationTaskProfile" in script
+    assert "onSelect: persistSelectedManipulationPolicy" in script
+    assert "task_profiles" in script

@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 import app.main as main_module
 from device_bridges.lerobot_bridge import LeRobotBridge, LeRobotBridgeConfig
 from utils.config_loader import load_all_configs
+import utils.lerobot_rollout_profile as rollout_profile_module
 import utils.manipulation_profile as manipulation_profile_module
 from utils.paths import resolve_path
 
@@ -31,6 +32,9 @@ def test_lerobot_gui_and_test_mode_api_workflow(tmp_path: Path, monkeypatch: Any
     manipulation_profile_path = tmp_path / "memory" / "manipulation_agent_bridge.json"
     monkeypatch.setattr(manipulation_profile_module, "MANIPULATION_AGENT_PROFILE_PATH", manipulation_profile_path)
     monkeypatch.setattr(main_module, "MANIPULATION_AGENT_PROFILE_PATH", manipulation_profile_path)
+    rollout_profile_path = tmp_path / "memory" / "lerobot_rollout_profile.json"
+    monkeypatch.setattr(rollout_profile_module, "LEROBOT_ROLLOUT_PROFILE_PATH", rollout_profile_path)
+    monkeypatch.setattr(main_module, "LEROBOT_ROLLOUT_PROFILE_PATH", rollout_profile_path)
     client = TestClient(main_module.app)
 
     page = client.get("/lerobot")
@@ -42,7 +46,7 @@ def test_lerobot_gui_and_test_mode_api_workflow(tmp_path: Path, monkeypatch: Any
     assert "D455F top / D405 wrist" in page.text
     assert '<option value="xvla">xvla (X-VLA)</option>' in page.text
     assert '<option value="smolvla" selected>smolvla (SmolVLA)</option>' in page.text
-    assert 'id="lerobot-train-source-policy-input" type="text" value="lerobot/smolvla_base"' in page.text
+    assert 'id="lerobot-train-source-policy-input" type="hidden" value="lerobot/smolvla_base"' in page.text
     assert "lerobot/smolvla_base" in page.text
     assert "lerobot/xvla-base" in page.text
     assert "jin/record-test" not in page.text
@@ -61,7 +65,7 @@ def test_lerobot_gui_and_test_mode_api_workflow(tmp_path: Path, monkeypatch: Any
     assert "Rollout Policy Type" in page.text
     assert "Pi0.5 RTC Execution Horizon" in page.text
     assert "Manipulation Agent Runtime Report" in page.text
-    assert "Save Agent Defaults" in page.text
+    assert "Save Task Defaults" in page.text
     assert "Test Agent Bridge" in page.text
     assert "3. Isaac Sim Link" in page.text
     assert "Mirror during Teleop / Recording" in page.text
@@ -107,6 +111,7 @@ def test_lerobot_gui_and_test_mode_api_workflow(tmp_path: Path, monkeypatch: Any
     assert "8. Dataset Visualization" in page.text
     assert "9. Training" in page.text
     assert "10. Inference / Rollout" in page.text
+    assert "Save Rollout Defaults" in page.text
     assert "11. Manipulation Agent Bridge" in page.text
     assert "12. Session Output" in page.text
 
@@ -277,7 +282,8 @@ def test_lerobot_gui_and_test_mode_api_workflow(tmp_path: Path, monkeypatch: Any
 
     manipulation_config = client.get("/api/lerobot/manipulation-agent/config").json()
     assert manipulation_config["ok"] is True
-    assert manipulation_config["profile"]["manipulation_strategy"] == "pi05_lerobot_policy"
+    assert manipulation_config["profile"]["manipulation_strategy"] == "lerobot_policy"
+    assert manipulation_config["profile"]["policy_type"] == "smolvla"
 
     manipulation_save = client.post(
         "/api/lerobot/manipulation-agent/config",
@@ -313,6 +319,35 @@ def test_lerobot_gui_and_test_mode_api_workflow(tmp_path: Path, monkeypatch: Any
     assert manipulation_save["profile"]["fps"] == 60
     assert manipulation_save["profile"]["camera_fps"] == 30
     assert manipulation_profile_path.exists()
+
+    rollout_migration = client.get("/api/lerobot/rollout/config").json()
+    assert rollout_migration["ok"] is True
+    assert rollout_migration["source"] == "manipulation_agent_profile"
+    assert rollout_migration["profile"]["policy_path"] == "fake://pi05_policy_saved"
+
+    rollout_save = client.post(
+        "/api/lerobot/rollout/config",
+        json={
+            "mode": "test",
+            "profile_id": "fake_omx_ai",
+            "policy_type": "smolvla",
+            "policy_path": "fake://saved-standalone-rollout",
+            "policy_checkpoint_path": "fake://saved-standalone-rollout",
+            "task_instruction": "Saved standalone rollout",
+            "continuous_rollout": False,
+            "max_duration_s": 90,
+            "rollout_action_clamp": True,
+            "rollout_max_relative_target": 4,
+        },
+    ).json()
+    assert rollout_save["ok"] is True
+    assert rollout_save["profile"]["policy_path"] == "fake://saved-standalone-rollout"
+    assert rollout_profile_path.exists()
+
+    rollout_reloaded = client.get("/api/lerobot/rollout/config").json()
+    assert rollout_reloaded["source"] == "saved_rollout_profile"
+    assert rollout_reloaded["profile"]["policy_path"] == "fake://saved-standalone-rollout"
+    assert rollout_reloaded["profile"]["max_duration_s"] == 90.0
 
     manipulation_test = client.post(
         "/api/lerobot/manipulation-agent/test",

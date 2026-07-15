@@ -49,7 +49,7 @@ import httpx
 from dotenv import dotenv_values
 from typing import Any, AsyncIterator, Literal
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, Response, StreamingResponse
 from fastapi.routing import APIRoute
 from fastapi.staticfiles import StaticFiles
@@ -91,12 +91,28 @@ from orchestrator.state import Mode, OrchestratorState, Stage
 from orchestrator.supervisor import build_mission_contract, build_orchestration_plan, build_orchestrator_control_plane_snapshot
 from policies.guardian_gate import gate_blocks_execution, guardian_gate
 from utils.config_loader import load_all_configs
+from utils.lerobot_rollout_profile import (
+    LEROBOT_ROLLOUT_PROFILE_PATH,
+    load_lerobot_rollout_profile,
+    save_lerobot_rollout_profile,
+)
+from utils.lerobot_joint_telemetry import (
+    GRASP_OUTCOME_SCHEMA,
+    JointTelemetryFileObserver,
+    TELEMETRY_SCHEMA,
+    TERMINAL_SESSION_STATUSES,
+    empty_grasp_outcome_summary,
+    finalize_grasp_outcome_artifact,
+    finalize_policy_tracking_artifacts,
+    session_status_label,
+)
 from utils.manipulation_profile import (
     MANIPULATION_AGENT_PROFILE_PATH,
     load_manipulation_agent_profile,
     normalize_manipulation_agent_profile,
     save_manipulation_agent_profile,
 )
+from utils.recording_specimen_pose import load_recording_specimen_pose
 from utils.ids import make_event_id
 from utils.paths import resolve_path
 from utils.printer_profile import (
@@ -109,6 +125,11 @@ from utils.printer_profile import (
 app = FastAPI(title="Autonomous Researcher")
 templates = Jinja2Templates(directory=str(resolve_path("web/templates")))
 app.mount("/static", StaticFiles(directory=str(resolve_path("web/static"))), name="static")
+app.mount(
+    "/assets/robotis-omx",
+    StaticFiles(directory=str(resolve_path("sim/robotis_omx"))),
+    name="robotis-omx-assets",
+)
 
 
 @app.get("/favicon.ico", include_in_schema=False)
@@ -130,7 +151,13 @@ RUNTIME_GRAPH_VERSION_ROOT = resolve_path("memory/graph_versions")
 RUNTIME_MODULE_ROOT = resolve_path("graphs/modules")
 RUNTIME_MODULE_VERSION_ROOT = resolve_path("memory/module_versions")
 API_KEY_SETTINGS_PATH = resolve_path("memory/api_keys.json")
+LEROBOT_ACTION_LOG_ROOT = resolve_path("runs/lerobot_action_logs")
+ACTIVE_ROBOT_CAM_LATEST_RESULT_PATH = resolve_path("runs/active_robot_cam/latest_active_robot_cam_result.json")
 BAMBU_HTTP_EXPORT_ROOT = resolve_path("artifacts/bambu_http_exports")
+BAMBU_DIRECT_COOLDOWN_POLL_SEC = 5.0
+BAMBU_DIRECT_COOLDOWN_MAX_WAIT_SEC = 1800.0
+_BAMBU_DIRECT_COOLDOWN_POLL_SEC = BAMBU_DIRECT_COOLDOWN_POLL_SEC
+_BAMBU_DIRECT_COOLDOWN_MAX_WAIT_SEC = BAMBU_DIRECT_COOLDOWN_MAX_WAIT_SEC
 _RUNTIME_GRAPH_DRY_RUN_RECORDS: dict[str, dict[str, object]] = {}
 _SYSTEM_RESOURCE_CACHE: dict[str, object] = {"updated_at_monotonic": 0.0, "payload": {}, "last_good_gpu": {}}
 try:
@@ -213,14 +240,14 @@ LIVE_AGENT_REPORT_PROFILES: dict[str, dict[str, object]] = {
         "checklist": ["Check camera heartbeat", "Review zone state", "Verify signal freshness", "Inspect visual evidence", "Gate manipulation handoff"],
     },
     "manipulation": {
-        "title": "Manipulation Agent / Pi0.5 Skill Supervision",
-        "summary": "Supervises bounded LeRobot/Pi0.5 skills, preflight readiness, SARM-lite progress/risk, Vision verification dependency, and robot_task_result handoff.",
+        "title": "Manipulation Agent / Runtime Supervision",
+        "summary": "Supervises bounded LeRobot policy skills, preflight readiness, execution safety, Vision verification dependency, and robot_task_result handoff.",
         "focus_rows": [
             {"label": "Task", "value": "transfer_to_utm or clear_utm_to_disposal with source/target/terminal pose"},
             {"label": "Policy boundary", "value": "LeRobot bridge executes; Manipulation Agent supervises stage, safety, and handoff"},
-            {"label": "SARM/Vision gate", "value": "stage progress, failure precursor, recovery hint, and post-place verification"},
+            {"label": "Execution safety", "value": "stage progress, failure precursor, recovery hint, and post-place verification"},
         ],
-        "checklist": ["Confirm Vision freshness", "Validate robot/profile/policy preflight", "Run bounded rollout", "Check SARM risk", "Require post-place Vision verification"],
+        "checklist": ["Confirm Vision freshness", "Validate robot/profile/policy preflight", "Run bounded rollout", "Check execution safety", "Require post-place Vision verification"],
     },
     "equipment": {
         "title": "Lab Equipment / UTM Visual Control",
@@ -682,12 +709,12 @@ class PrinterAutoejectionConfigRequest(BaseModel):
     recovery_to_robot_pickoff: bool = False
     fallback_to_robot_pickoff: bool | None = None
     push_direction: Literal["left", "center", "right"] = "center"
-    z_push_offset_mm: float = Field(default=30.0, ge=0.0, le=200.0)
+    z_push_offset_mm: float = Field(default=15.0, ge=0.0, le=200.0)
     push_lane_offset_mm: float = Field(default=30.0, ge=0.0, le=120.0)
-    push_speed_mm_min: int = Field(default=300, ge=100, le=1000)
+    push_speed_mm_min: int = Field(default=6000, ge=100, le=12000)
     enable_full_bed_sweep: bool = False
     sweep_z_mm: float = Field(default=1.0, ge=0.5, le=50.0)
-    sweep_speed_mm_min: int = Field(default=300, ge=100, le=1000)
+    sweep_speed_mm_min: int = Field(default=6000, ge=100, le=12000)
 
 
 class PrinterBambuAutoejectionPatchRequest(BaseModel):
@@ -1171,6 +1198,7 @@ class ManipulationAgentBridgeRequest(LeRobotAPIRequest):
     source_location: str = "3dp_output_area"
     target_location: str = "utm_fixture"
     specimen_result: dict[str, object] = Field(default_factory=dict)
+    task_profiles: dict[str, object] = Field(default_factory=dict)
 
 
 class LeRobotRecordControlAPIRequest(BaseModel):
@@ -1619,6 +1647,90 @@ def _lerobot_bridge() -> LeRobotBridge:
         _LEROBOT_BRIDGE = LeRobotBridge(config)
         _LEROBOT_CONFIG_MTIME_NS = config_mtime_ns
     return _LEROBOT_BRIDGE
+
+
+def _joint_telemetry_session_context() -> dict[str, Any] | None:
+    """Select the current rollout log without opening robot or camera devices."""
+
+    sessions: list[dict[str, Any]] = []
+    seen_sessions: set[str] = set()
+    seen_bridges: set[int] = set()
+    for bridge in (_lerobot_bridge(), _registered_lerobot_bridge()):
+        if bridge is None or id(bridge) in seen_bridges:
+            continue
+        seen_bridges.add(id(bridge))
+        try:
+            recent = bridge.sessions_recent()
+        except Exception:
+            continue
+        for raw_session in recent:
+            if not isinstance(raw_session, dict) or str(raw_session.get("workflow") or "") != "rollout":
+                continue
+            session_id = str(raw_session.get("session_id") or "").strip()
+            if not session_id or session_id in seen_sessions:
+                continue
+            seen_sessions.add(session_id)
+            sessions.append(dict(raw_session))
+    if not sessions:
+        return None
+
+    active = [
+        session
+        for session in sessions
+        if str(session.get("status") or "").upper() not in TERMINAL_SESSION_STATUSES
+    ]
+    selected = max(
+        active or sessions,
+        key=lambda session: (
+            str(session.get("created_at") or session.get("updated_at") or ""),
+            str(session.get("session_id") or ""),
+        ),
+    )
+    session_id = str(selected.get("session_id") or "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+", session_id):
+        return None
+    return {
+        "session": selected,
+        "log_path": LEROBOT_ACTION_LOG_ROOT / session_id / "motor_events.jsonl",
+    }
+
+
+def _joint_telemetry_public_session(session: dict[str, Any]) -> dict[str, Any]:
+    """Keep WebSocket status packets compact and free of command previews."""
+
+    keys = (
+        "session_id",
+        "workflow",
+        "status",
+        "mode",
+        "profile_id",
+        "policy_type",
+        "policy_path",
+        "policy_checkpoint_path",
+        "created_at",
+    )
+    return {key: session[key] for key in keys if session.get(key) not in (None, "")}
+
+
+def _joint_telemetry_artifacts(log_path: Path, session: dict[str, Any]) -> dict[str, Any]:
+    """Finalize policy-tracking evidence and expose allowed local file URLs."""
+
+    artifacts = finalize_policy_tracking_artifacts(log_path, session)
+    if not artifacts.get("ok"):
+        return artifacts
+    for path_key in (
+        "plot_png_path",
+        "summary_json_path",
+        "raw_jsonl_path",
+        "raw_csv_path",
+        "grasp_outcomes_path",
+    ):
+        value = str(artifacts.get(path_key) or "").strip()
+        if not value or not Path(value).is_file():
+            continue
+        url_key = path_key.removesuffix("_path") + "_url"
+        artifacts[url_key] = f"/api/lerobot/visualization/file?path={quote(value, safe='')}"
+    return artifacts
 
 
 def _utm_runtime_bridge() -> UTMRuntimeProcessManager:
@@ -2314,7 +2426,7 @@ def _guardian_status_payload(run_id: str | None = None, *, snapshot: dict[str, o
         )
 
     safe_stop_gates = [gate for gate in gates if str(gate.get("decision") or "") in {"safe_stop", "safe_stop_verified"}]
-    safe_stop_requested = bool(state.get("safe_stop_requested") or state.get("stop_requested") or any(str(gate.get("decision") or "") == "safe_stop" for gate in safe_stop_gates))
+    safe_stop_requested = bool(state.get("safe_stop_requested") or any(str(gate.get("decision") or "") == "safe_stop" for gate in safe_stop_gates))
     explicit_safe_stop_verified = bool(metadata.get("safe_stop_verified") or metadata.get("safe_stop_confirmed"))
     inferred_safe_stop_verified = bool(safe_stop_requested and not bool(snapshot.get("is_running")) and str(state.get("stage") or "").lower() in {"complete", "idle", "guardian", "error"})
     safe_stop_verified = explicit_safe_stop_verified or inferred_safe_stop_verified or any(str(gate.get("decision") or "") == "safe_stop_verified" for gate in safe_stop_gates)
@@ -5604,7 +5716,7 @@ def _agent_report_payload(agent_id: str, run_id: str | None = None) -> dict[str,
             robot_task_result = agent_payload["robot_task_result"]
         if isinstance(manipulation_report, dict):
             task = manipulation_report.get("task") if isinstance(manipulation_report.get("task"), dict) else {}
-            role_specific["summary"] = "Bounded Pi0.5/LeRobot skill execution, preflight readiness, SARM-lite progress/risk state, Vision dependency, and robot_task_result handoff evidence."
+            role_specific["summary"] = "Bounded policy execution, preflight readiness, execution supervision, Vision dependency, and robot_task_result handoff evidence."
             role_specific["task"] = task
             role_specific["skill_episode_board"] = {
                 "task_id": task.get("task_id", ""),
@@ -10108,15 +10220,30 @@ async def post_windows_equipment_request_log(req: WindowsBridgeRequestLogRequest
 
 
 @app.get("/api/printer/status")
-async def get_printer_status(mode: Literal["live", "test"] = "live") -> dict[str, object]:
+async def get_printer_status(mode: Literal["live", "test"] = "live", emit: bool = False) -> dict[str, object]:
     """Return selected-printer fleet/device status for GUI display."""
     manager = _printer_bridge_manager()
-    health = manager.prepare({"runtime_mode": mode, "health_only": mode != "live"})
+    snapshot = controller.snapshot()
+    state = snapshot.get("state") if isinstance(snapshot.get("state"), dict) else {}
+    specimen_stage_running = bool(snapshot.get("is_running")) and str(state.get("stage") or "") == Stage.SPECIMEN.value
+    skip_ftps_probe = not specimen_stage_running
+    health = await asyncio.to_thread(
+        manager.prepare,
+        {
+            "runtime_mode": mode,
+            "health_only": True,
+            "status_only": True,
+            "skip_ftps_probe": skip_ftps_probe,
+        },
+    )
     connection = _redacted_selected_printer_connection(manager)
     profile = _selected_print_profile(manager)
     config = manager.config
-    return {
+    result = {
         "ok": bool(health.get("ok")),
+        "tool": "printer.status",
+        "status": health.get("state") or health.get("status") or ("ready" if health.get("ok") else "blocked"),
+        "failure_code": health.get("failure_code", ""),
         "mode": mode,
         "provider": health.get("provider", config.default_profile.provider),
         "selected_printer": health.get("selected_printer", {}),
@@ -10142,6 +10269,19 @@ async def get_printer_status(mode: Literal["live", "test"] = "live") -> dict[str
         "operator_actions": health.get("operator_actions", []),
         "health": health,
     }
+    if emit:
+        await controller.emit_workspace_result(
+            workspace="printer",
+            tool="printer.status",
+            result=result,
+            stage=Stage.SPECIMEN,
+            module_id="specimen",
+            agent="specimen_agent",
+            workflow="printer_status_monitor",
+            event_type="workspace_monitor_snapshot",
+            mirror_live_message=False,
+        )
+    return result
 
 
 @app.get("/api/printer/video-status")
@@ -10736,14 +10876,19 @@ def _bambu_direct_standalone_gcode(standalone_artifact: dict[str, object]) -> di
             "source_path": str(path),
         }
     direct_lines: list[str] = []
-    skipped_waits: list[str] = []
+    skipped_wait_commands: list[str] = []
+    cooldown_threshold_c: float | None = None
     for raw_line in gcode_text.splitlines():
         line = raw_line.strip()
         if not line or line.startswith(";"):
             continue
-        upper = line.upper()
-        if upper.startswith("M190"):
-            skipped_waits.append(line)
+        cooldown_match = re.search(r"^\s*M190\b.*\b[RS]\s*(-?\d+(?:\.\d+)?)", line, flags=re.IGNORECASE)
+        if cooldown_match:
+            skipped_wait_commands.append(line)
+            try:
+                cooldown_threshold_c = float(cooldown_match.group(1))
+            except (TypeError, ValueError):
+                cooldown_threshold_c = None
             continue
         direct_lines.append(line)
     if not direct_lines:
@@ -10757,8 +10902,108 @@ def _bambu_direct_standalone_gcode(standalone_artifact: dict[str, object]) -> di
         "schema": "bambu_direct_standalone_gcode.v1",
         "source_path": str(path),
         "line_count": len(direct_lines),
-        "skipped_wait_commands": skipped_waits,
+        "skipped_wait_commands": skipped_wait_commands,
+        "cooldown_threshold_c": cooldown_threshold_c,
         "gcode": "\n".join(direct_lines).rstrip() + "\n",
+    }
+
+
+def _bambu_direct_bed_cooldown_status(
+    *,
+    direct_gcode: dict[str, object],
+    prepare_result: dict[str, object],
+    waited_sec: float = 0.0,
+    attempts: int = 1,
+) -> dict[str, object]:
+    """Return whether direct standalone motion is allowed by current bed temperature."""
+    threshold = direct_gcode.get("cooldown_threshold_c")
+    if not isinstance(threshold, (int, float)):
+        return {
+            "ok": True,
+            "status": "not_required",
+            "bed_current_c": None,
+            "cooldown_threshold_c": None,
+            "waited_sec": float(waited_sec),
+            "attempts": int(attempts),
+        }
+    device_screen = prepare_result.get("device_screen") if isinstance(prepare_result.get("device_screen"), dict) else {}
+    thermal = device_screen.get("thermal") if isinstance(device_screen.get("thermal"), dict) else {}
+    raw_bed = thermal.get("bed_current_c")
+    try:
+        bed_current = float(raw_bed)
+    except (TypeError, ValueError):
+        return {
+            "ok": False,
+            "status": "unknown",
+            "failure_code": "BAMBU_BED_TEMPERATURE_UNKNOWN",
+            "bed_current_c": raw_bed,
+            "cooldown_threshold_c": float(threshold),
+            "waited_sec": float(waited_sec),
+            "attempts": int(attempts),
+        }
+    clear = bed_current <= float(threshold) + 0.5
+    return {
+        "ok": clear,
+        "status": "clear" if clear else "cooldown_pending",
+        "failure_code": "" if clear else "BAMBU_BED_COOLDOWN_PENDING",
+        "bed_current_c": bed_current,
+        "cooldown_threshold_c": float(threshold),
+        "waited_sec": float(waited_sec),
+        "attempts": int(attempts),
+    }
+
+
+def _wait_for_bambu_direct_bed_cooldown(
+    *,
+    manager: PrinterDeviceBridgeManager,
+    direct_gcode: dict[str, object],
+    initial_prepare_result: dict[str, object],
+    prepare_payload: dict[str, object],
+) -> tuple[dict[str, object], dict[str, object]]:
+    """Poll Bambu MQTT telemetry until direct standalone ejection is cool enough."""
+    status = _bambu_direct_bed_cooldown_status(
+        direct_gcode=direct_gcode,
+        prepare_result=initial_prepare_result,
+        waited_sec=0.0,
+        attempts=1,
+    )
+    if status.get("ok") or status.get("status") == "not_required":
+        return initial_prepare_result, status
+
+    waited = 0.0
+    attempts = 1
+    max_wait = max(0.0, float(globals().get("_BAMBU_DIRECT_COOLDOWN_MAX_WAIT_SEC", BAMBU_DIRECT_COOLDOWN_MAX_WAIT_SEC)))
+    poll = max(0.0, float(globals().get("_BAMBU_DIRECT_COOLDOWN_POLL_SEC", BAMBU_DIRECT_COOLDOWN_POLL_SEC)))
+    latest_prepare = initial_prepare_result
+    while waited < max_wait:
+        sleep_for = min(poll, max_wait - waited)
+        if sleep_for > 0:
+            time.sleep(sleep_for)
+            waited += sleep_for
+        attempts += 1
+        latest_prepare = manager.prepare(prepare_payload)
+        status = _bambu_direct_bed_cooldown_status(
+            direct_gcode=direct_gcode,
+            prepare_result=latest_prepare,
+            waited_sec=waited,
+            attempts=attempts,
+        )
+        if status.get("ok"):
+            return latest_prepare, status
+        if status.get("status") == "unknown":
+            return latest_prepare, status
+        if poll <= 0 and waited >= max_wait:
+            break
+        if poll <= 0 and not status.get("ok"):
+            # Test paths can set zero delay; still avoid a tight infinite loop.
+            waited = max_wait
+    return latest_prepare, {
+        **status,
+        "ok": False,
+        "status": "timeout",
+        "failure_code": "BAMBU_BED_COOLDOWN_TIMEOUT",
+        "waited_sec": float(waited),
+        "attempts": int(attempts),
     }
 
 
@@ -10766,6 +11011,7 @@ def _bambu_direct_gcode_gate_blockers(
     *,
     direct_gcode: dict[str, object],
     prepare_result: dict[str, object],
+    bed_cooldown: dict[str, object] | None = None,
     operator_confirmed: bool,
     guardian_approved: bool,
     dry_run: bool,
@@ -10804,6 +11050,13 @@ def _bambu_direct_gcode_gate_blockers(
     for key, code in required_check_codes.items():
         if key in checks and not bool(checks.get(key)):
             add(code)
+    if bed_cooldown is None:
+        bed_cooldown = _bambu_direct_bed_cooldown_status(
+            direct_gcode=direct_gcode,
+            prepare_result=prepare_result,
+        )
+    if not bed_cooldown.get("ok"):
+        add(str(bed_cooldown.get("failure_code") or "BAMBU_BED_COOLDOWN_PENDING"))
     return blockers, {
         "direct_gcode_valid": bool(direct_gcode.get("ok")),
         "operator_confirmed": bool(operator_confirmed),
@@ -10812,6 +11065,7 @@ def _bambu_direct_gcode_gate_blockers(
         "mqtt": connection.get("mqtt", "unknown"),
         "preprint_gate_state": preprint_gate.get("state", ""),
         "preprint_gate_checks": checks,
+        "bed_cooldown": bed_cooldown,
         "project_file_storage_ignored": True,
     }
 
@@ -12475,27 +12729,19 @@ async def post_printer_autoejection_test(req: PrinterAutoejectionTestRequest, re
                 and req.start_immediately
                 and standalone_artifact.get("ok")
             ):
-                direct_gcode = _bambu_direct_standalone_gcode(standalone_artifact)
-                memory = BambuConnectionMemory(selected_profile.connection_memory_path)
-                raw_connection = memory.load()
-                raw_auth = raw_connection.get("auth") if isinstance(raw_connection.get("auth"), dict) else {}
-                connection = memory.redacted()
-                topic = manager.config.mqtt.request_topic_template.format(serial=str(connection.get("serial") or ""))
-                prepare_result = manager.prepare(
-                    {
-                        "runtime_mode": "live",
-                        "health_only": False,
-                        "bambu_direct_gcode": True,
-                        "subtask_name": f"bambu-eject-{req.position}",
-                    }
-                )
-                blockers, gate_checks = _bambu_direct_gcode_gate_blockers(
-                    direct_gcode=direct_gcode,
-                    prepare_result=prepare_result,
-                    operator_confirmed=req.operator_confirmed,
-                    guardian_approved=req.guardian_approved,
-                    dry_run=req.dry_run,
-                )
+                blockers: list[str] = []
+                gate_checks = {
+                    "operator_confirmed": bool(req.operator_confirmed),
+                    "guardian_approved": bool(req.guardian_approved),
+                    "dry_run": bool(req.dry_run),
+                    "transport": "project_file",
+                }
+                if req.dry_run:
+                    blockers.append("DRY_RUN_ENABLED")
+                if not req.operator_confirmed:
+                    blockers.append("OPERATOR_CONFIRMATION_REQUIRED")
+                if not req.guardian_approved:
+                    blockers.append("GUARDIAN_APPROVAL_REQUIRED")
                 camera_status = _bambu_autoejection_camera_gate(manager, ".autoeject.gcode")
                 for code in camera_status.get("blockers", []) if isinstance(camera_status.get("blockers"), list) else []:
                     if code and code not in blockers:
@@ -12514,67 +12760,74 @@ async def post_printer_autoejection_test(req: PrinterAutoejectionTestRequest, re
                         **result,
                         "ok": False,
                         "status": "blocked",
-                        "failure_code": "BAMBU_STANDALONE_GCODE_GATE_BLOCKED",
+                        "failure_code": "BAMBU_AUTOEJECTION_PROJECT_FILE_GATE_BLOCKED",
                         "blockers": blockers,
                         "gate_checks": gate_checks,
-                        "direct_gcode": {key: value for key, value in direct_gcode.items() if key != "gcode"},
-                        "connection": connection,
                         "camera_status": camera_status,
                         "autoejection_operator_checklist": autoejection_operator_checklist,
                         "bed_clear": bed_clear,
                         "remote_path": "",
-                        "message": "Bambu standalone direct G-code autoejection was blocked by live safety gates.",
+                        "message": "Bambu autoejection project-file publish was blocked by live safety gates.",
                         "step_trace": [
                             *result["step_trace"],
                             {
-                                "step": "DIRECT_GCODE_GATE",
+                                "step": "PROJECT_FILE_GATE",
                                 "status": "blocked",
                                 "detail": ",".join(blockers),
                             },
                         ],
                     }
                 else:
-                    standalone_publish = manager.mqtt_client.publish_gcode_line_command(
-                        host=str(raw_connection.get("host") or ""),
-                        serial=str(connection.get("serial") or ""),
-                        username=str(connection.get("username") or "bblp"),
-                        access_code=str(raw_auth.get("access_code") or ""),
-                        topic=topic,
-                        gcode=str(direct_gcode.get("gcode") or ""),
-                        timeout_sec=manager.config.mqtt.publish_timeout_sec,
+                    prepare_result = manager.prepare(
+                        {
+                            "runtime_mode": "live",
+                            "bambu_artifact_path": str(standalone_artifact.get("startable_artifact_path") or ""),
+                            "public_base_url": req.public_base_url,
+                            "subtask_name": f"bambu-eject-{req.position}",
+                            "print": {
+                                "start_immediately": True,
+                                "physical_intent": True,
+                                "confirm_physical_print": True,
+                                "stop_after_start": False,
+                            },
+                        }
                     )
-                    motion_started = bool(standalone_publish.get("ok"))
+                    print_result = (
+                        prepare_result.get("print_result")
+                        if isinstance(prepare_result.get("print_result"), dict)
+                        else {}
+                    )
+                    motion_started = bool(prepare_result.get("ok") and print_result.get("ok"))
                     result = {
                         **result,
-                        "ok": bool(standalone_publish.get("ok")),
+                        "ok": bool(prepare_result.get("ok") and motion_started),
                         "status": "standalone_motion_started" if motion_started else "blocked",
-                        "failure_code": "" if motion_started else str(standalone_publish.get("failure_code") or "BAMBU_STANDALONE_GCODE_LINE_PUBLISH_FAILED"),
+                        "failure_code": "" if motion_started else str(prepare_result.get("failure_code") or "BAMBU_AUTOEJECTION_PROJECT_FILE_START_FAILED"),
                         "motion_started": motion_started,
-                        "will_publish": bool(standalone_publish.get("will_publish")),
-                        "published": bool(standalone_publish.get("published")),
-                        "remote_path": "",
-                        "direct_gcode": {key: value for key, value in direct_gcode.items() if key != "gcode"},
+                        "will_publish": bool(print_result.get("will_publish")),
+                        "published": bool(print_result.get("published")),
+                        "remote_path": str(prepare_result.get("upload", {}).get("remote_path") or ""),
+                        "prepare_result": prepare_result,
                         "gate_checks": gate_checks,
                         "camera_status": camera_status,
                         "autoejection_operator_checklist": autoejection_operator_checklist,
                         "bed_clear": bed_clear,
-                        "standalone_publish": standalone_publish,
                         "message": (
-                            "Bambu standalone autoejection G-code was published through MQTT gcode_line."
+                            "Bambu autoejection artifact was started through the normal project_file path."
                             if motion_started
-                            else str(standalone_publish.get("message") or "Bambu standalone autoejection gcode_line publish failed.")
+                            else str(prepare_result.get("message") or "Bambu autoejection project_file start failed.")
                         ),
                         "step_trace": [
                             *result["step_trace"],
                             {
-                                "step": "DIRECT_GCODE_GATE",
+                                "step": "PROJECT_FILE_GATE",
                                 "status": "ok",
-                                "detail": f"lines={direct_gcode.get('line_count')}",
+                                "detail": "approved",
                             },
                             {
-                                "step": "GCODE_LINE_PUBLISH",
+                                "step": "PROJECT_FILE_PUBLISH",
                                 "status": "published" if motion_started else "blocked",
-                                "detail": str(standalone_publish.get("status") or standalone_publish.get("failure_code") or ""),
+                                "detail": str(prepare_result.get("status") or prepare_result.get("failure_code") or ""),
                             },
                         ],
                     }
@@ -13033,6 +13286,190 @@ async def get_lerobot_sessions() -> dict[str, object]:
     return {"ok": True, "sessions": sessions}
 
 
+@app.get("/api/lerobot/joint-telemetry/snapshot")
+async def get_lerobot_joint_telemetry_snapshot() -> dict[str, object]:
+    """Return the latest read-only follower/policy sample and terminal artifacts."""
+
+    context = _joint_telemetry_session_context()
+    if context is None:
+        return {
+            "ok": True,
+            "schema": TELEMETRY_SCHEMA,
+            "type": "telemetry_state",
+            "status": "idle",
+            "session": {},
+            "packet": None,
+            "artifacts": {},
+        }
+    session = dict(context["session"])
+    log_path = Path(context["log_path"])
+    observer = JointTelemetryFileObserver(max_initial_samples=1, max_batch_samples=1)
+    packets = await asyncio.to_thread(observer.poll, log_path, session)
+    status = session_status_label(session.get("status"))
+    if status == "idle":
+        status = "live" if packets else "waiting"
+    artifacts: dict[str, Any] = {}
+    if str(session.get("status") or "").upper() in TERMINAL_SESSION_STATUSES:
+        artifacts = await asyncio.to_thread(_joint_telemetry_artifacts, log_path, session)
+    return {
+        "ok": True,
+        "schema": TELEMETRY_SCHEMA,
+        "type": "telemetry_snapshot",
+        "status": status,
+        "session": _joint_telemetry_public_session(session),
+        "packet": packets[-1] if packets else None,
+        "artifacts": artifacts,
+    }
+
+
+@app.get("/api/lerobot/grasp-outcomes")
+async def get_lerobot_grasp_outcomes() -> dict[str, object]:
+    """Expose deterministic read-only grasp evidence for a separate aggregate card."""
+
+    context = _joint_telemetry_session_context()
+    if context is None:
+        return {
+            "ok": True,
+            "schema": GRASP_OUTCOME_SCHEMA,
+            "status": "idle",
+            "session": {},
+            "attempts": [],
+            "summary": empty_grasp_outcome_summary(),
+            "artifact_path": "",
+            "artifact_url": "",
+        }
+
+    session = dict(context["session"])
+    log_path = Path(context["log_path"])
+    result = await asyncio.to_thread(finalize_grasp_outcome_artifact, log_path, session)
+    artifact_path = str(result.get("artifact_path") or "").strip()
+    artifact_url = ""
+    if artifact_path and Path(artifact_path).is_file():
+        artifact_url = f"/api/lerobot/visualization/file?path={quote(artifact_path, safe='')}"
+    return {
+        "ok": bool(result.get("ok")),
+        "schema": str(result.get("schema") or GRASP_OUTCOME_SCHEMA),
+        "status": session_status_label(session.get("status")),
+        "session": _joint_telemetry_public_session(session),
+        "attempts": list(result.get("attempts") or []),
+        "summary": dict(result.get("summary") or empty_grasp_outcome_summary()),
+        "artifact_path": artifact_path,
+        "artifact_url": artifact_url,
+    }
+
+
+def _recording_active_cam_specimen_pose() -> dict[str, Any]:
+    return load_recording_specimen_pose(ACTIVE_ROBOT_CAM_LATEST_RESULT_PATH)
+
+
+@app.get("/api/lerobot/active-robot-cam/specimen-pose")
+async def get_lerobot_active_robot_cam_specimen_pose() -> dict[str, object]:
+    """Expose Recording Active Cam's latest accepted pose without acquiring the camera."""
+
+    return {
+        "ok": True,
+        "source": "recording_active_robot_cam",
+        "pose": await asyncio.to_thread(_recording_active_cam_specimen_pose),
+    }
+
+
+@app.websocket("/ws/lerobot/joint-telemetry")
+async def stream_lerobot_joint_telemetry(websocket: WebSocket) -> None:
+    """Stream existing rollout action logs without touching the control process."""
+
+    await websocket.accept()
+    observer = JointTelemetryFileObserver(max_initial_samples=300, max_batch_samples=128)
+    active_session_id = ""
+    history_sent = False
+    last_state_signature = ""
+    finalized_sessions: set[str] = set()
+    try:
+        while True:
+            context = _joint_telemetry_session_context()
+            if context is None:
+                signature = "idle"
+                if signature != last_state_signature:
+                    await websocket.send_json(
+                        {
+                            "ok": True,
+                            "schema": TELEMETRY_SCHEMA,
+                            "type": "telemetry_state",
+                            "status": "idle",
+                            "session": {},
+                        }
+                    )
+                    last_state_signature = signature
+                await asyncio.sleep(0.05)
+                continue
+
+            session = dict(context["session"])
+            log_path = Path(context["log_path"])
+            session_id = str(session.get("session_id") or "")
+            if session_id != active_session_id:
+                observer.reset()
+                active_session_id = session_id
+                history_sent = False
+                last_state_signature = ""
+
+            packets = await asyncio.to_thread(observer.poll, log_path, session)
+            public_session = _joint_telemetry_public_session(session)
+            status = session_status_label(session.get("status"))
+            if status == "idle":
+                status = "live" if packets else "waiting"
+
+            if not history_sent:
+                await websocket.send_json(
+                    {
+                        "ok": True,
+                        "schema": TELEMETRY_SCHEMA,
+                        "type": "joint_history",
+                        "status": status,
+                        "session": public_session,
+                        "samples": packets,
+                    }
+                )
+                history_sent = True
+            elif packets:
+                # Browser rendering needs only the newest complete control-loop sample.
+                await websocket.send_json(
+                    {
+                        **packets[-1],
+                        "session": public_session,
+                    }
+                )
+            else:
+                signature = f"{session_id}:{status}:{session.get('status', '')}"
+                if signature != last_state_signature:
+                    await websocket.send_json(
+                        {
+                            "ok": True,
+                            "schema": TELEMETRY_SCHEMA,
+                            "type": "telemetry_state",
+                            "status": status,
+                            "session": public_session,
+                        }
+                    )
+                    last_state_signature = signature
+
+            terminal = str(session.get("status") or "").upper() in TERMINAL_SESSION_STATUSES
+            if terminal and session_id not in finalized_sessions:
+                artifacts = await asyncio.to_thread(_joint_telemetry_artifacts, log_path, session)
+                await websocket.send_json(
+                    {
+                        "ok": bool(artifacts.get("ok")),
+                        "schema": TELEMETRY_SCHEMA,
+                        "type": "telemetry_artifacts",
+                        "status": status,
+                        "session": public_session,
+                        "artifacts": artifacts,
+                    }
+                )
+                finalized_sessions.add(session_id)
+            await asyncio.sleep(0.05)
+    except (WebSocketDisconnect, RuntimeError):
+        return
+
+
 @app.get("/api/lerobot/policies")
 async def get_lerobot_policies() -> dict[str, object]:
     """Return configured and locally discovered LeRobot policy choices."""
@@ -13350,7 +13787,7 @@ async def post_lerobot_ports_delete(req: LeRobotDevicePortAPIRequest) -> dict[st
 @app.post("/api/lerobot/camera/test")
 async def post_lerobot_camera_test(req: LeRobotDevicePortAPIRequest) -> dict[str, object]:
     """Capture one LeRobot camera test frame or a deterministic test-mode preview."""
-    result = _lerobot_bridge().camera_test(req.model_dump())
+    result = _lerobot_bridge().camera_test(req.model_dump(exclude_unset=True))
     return await _publish_lerobot_result(result)
 
 
@@ -13503,6 +13940,67 @@ async def post_lerobot_wandb_local_status(req: LeRobotAPIRequest) -> dict[str, o
     return await _call_lerobot_backend_tool("lerobot.wandb_local.status", req.model_dump(), publish=False)
 
 
+def _rollout_profile_from_request(req: LeRobotAPIRequest) -> dict[str, object]:
+    """Convert a standalone rollout request to persisted GUI defaults."""
+    policy_path = req.policy_path or req.policy_checkpoint_path
+    return {
+        "profile_id": req.profile_id,
+        "observation_pipeline_id": req.observation_pipeline_id,
+        "policy_type": req.policy_type,
+        "policy_path": policy_path,
+        "policy_checkpoint_path": req.policy_checkpoint_path or policy_path,
+        "policy_repo_id": req.policy_repo_id,
+        "task_instruction": req.task_instruction,
+        "continuous_rollout": req.continuous_rollout,
+        "max_duration_s": req.max_duration_s,
+        "rollout_action_clamp": req.rollout_action_clamp,
+        "rollout_max_relative_target": req.rollout_max_relative_target,
+        "rollout_shoulder_lift_backstop": req.rollout_shoulder_lift_backstop,
+        "rollout_temporal_ensemble": req.rollout_temporal_ensemble,
+        "rollout_temporal_ensemble_coeff": req.rollout_temporal_ensemble_coeff,
+        "rollout_inference_type": req.rollout_inference_type,
+        "rollout_rtc_execution_horizon": req.rollout_rtc_execution_horizon,
+        "rollout_rtc_max_guidance_weight": req.rollout_rtc_max_guidance_weight,
+        "rollout_action_queue_size_to_get_new_actions": req.rollout_action_queue_size_to_get_new_actions,
+        "observation": req.observation,
+    }
+
+
+def _saved_manipulation_rollout_fallback() -> dict[str, object]:
+    """Use the selected saved manipulation task as the first standalone rollout profile."""
+    profile = load_manipulation_agent_profile()
+    task_id = str(profile.get("task_id") or "transfer_to_utm")
+    task_profiles = profile.get("task_profiles") if isinstance(profile.get("task_profiles"), dict) else {}
+    task_profile = task_profiles.get(task_id) if isinstance(task_profiles, dict) else None
+    return {**profile, **(task_profile if isinstance(task_profile, dict) else {})}
+
+
+@app.get("/api/lerobot/rollout/config")
+async def get_lerobot_rollout_config() -> dict[str, object]:
+    """Return saved standalone rollout defaults without selecting the newest checkpoint."""
+    saved = LEROBOT_ROLLOUT_PROFILE_PATH.exists()
+    return {
+        "ok": True,
+        "profile": load_lerobot_rollout_profile(fallback=_saved_manipulation_rollout_fallback()),
+        "profile_path": str(LEROBOT_ROLLOUT_PROFILE_PATH),
+        "source": "saved_rollout_profile" if saved else "manipulation_agent_profile",
+    }
+
+
+@app.post("/api/lerobot/rollout/config")
+async def post_lerobot_rollout_config(req: LeRobotAPIRequest) -> dict[str, object]:
+    """Persist the standalone rollout selection and safety options."""
+    profile = save_lerobot_rollout_profile(_rollout_profile_from_request(req))
+    return {
+        "ok": True,
+        "tool": "lerobot.rollout.config.save",
+        "profile": profile,
+        "profile_path": str(LEROBOT_ROLLOUT_PROFILE_PATH),
+        "source": "saved_rollout_profile",
+        "message": "Standalone rollout defaults saved.",
+    }
+
+
 @app.post("/api/lerobot/rollout/start")
 async def post_lerobot_rollout_start(req: LeRobotAPIRequest) -> dict[str, object]:
     """Start LeRobot policy rollout/inference."""
@@ -13544,6 +14042,8 @@ def _manipulation_profile_from_request(req: ManipulationAgentBridgeRequest) -> d
         "rollout_rtc_max_guidance_weight": req.rollout_rtc_max_guidance_weight,
         "rollout_action_queue_size_to_get_new_actions": req.rollout_action_queue_size_to_get_new_actions,
         "max_duration_s": req.max_duration_s,
+        "observation": req.observation,
+        "task_profiles": req.task_profiles,
     }
 
 
@@ -14405,6 +14905,24 @@ async def safe_stop_run() -> dict[str, object]:
     return await controller.safe_stop()
 
 
+@app.post("/api/run/emergency-stop")
+async def emergency_stop_run() -> dict[str, object]:
+    """Immediately stop runtime and latch E-STOP recovery controls."""
+    return await controller.emergency_stop()
+
+
+@app.post("/api/run/emergency-resume")
+async def emergency_resume_run() -> dict[str, object]:
+    """Clear E-STOP latch while preserving the current session."""
+    return await controller.emergency_resume()
+
+
+@app.post("/api/run/emergency-reset")
+async def emergency_reset_run() -> dict[str, object]:
+    """Reset runtime state to fresh-server defaults after E-STOP."""
+    return await controller.emergency_reset()
+
+
 @app.post("/api/runtime/start")
 async def start_runtime_compat(req: StartRunRequest) -> dict[str, object]:
     """Compatibility alias for package-specified runtime start."""
@@ -14433,6 +14951,24 @@ async def stop_runtime_compat() -> dict[str, object]:
 async def safe_stop_runtime_compat() -> dict[str, object]:
     """Compatibility alias for package-specified runtime safe-stop."""
     return await controller.safe_stop()
+
+
+@app.post("/api/runtime/emergency-stop")
+async def emergency_stop_runtime_compat() -> dict[str, object]:
+    """Compatibility alias for package-specified runtime emergency-stop."""
+    return await controller.emergency_stop()
+
+
+@app.post("/api/runtime/emergency-resume")
+async def emergency_resume_runtime_compat() -> dict[str, object]:
+    """Compatibility alias for package-specified runtime emergency resume."""
+    return await controller.emergency_resume()
+
+
+@app.post("/api/runtime/emergency-reset")
+async def emergency_reset_runtime_compat() -> dict[str, object]:
+    """Compatibility alias for package-specified runtime emergency reset."""
+    return await controller.emergency_reset()
 
 
 @app.get("/api/runs/{run_id}")
@@ -14467,6 +15003,27 @@ async def stop_runtime_run(run_id: str) -> dict[str, object]:
     """Stop the active run addressed by run_id."""
     _require_current_run(run_id)
     return await controller.stop()
+
+
+@app.post("/api/runs/{run_id}/emergency-stop")
+async def emergency_stop_runtime_run(run_id: str) -> dict[str, object]:
+    """Emergency-stop the active run addressed by run_id."""
+    _require_current_run(run_id)
+    return await controller.emergency_stop()
+
+
+@app.post("/api/runs/{run_id}/emergency-resume")
+async def emergency_resume_runtime_run(run_id: str) -> dict[str, object]:
+    """Clear E-STOP latch for the active run addressed by run_id."""
+    _require_current_run(run_id)
+    return await controller.emergency_resume()
+
+
+@app.post("/api/runs/{run_id}/emergency-reset")
+async def emergency_reset_runtime_run(run_id: str) -> dict[str, object]:
+    """Reset the active run addressed by run_id to fresh-server defaults."""
+    _require_current_run(run_id)
+    return await controller.emergency_reset()
 
 
 @app.get("/api/runs/{run_id}/approvals")

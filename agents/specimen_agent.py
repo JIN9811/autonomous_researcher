@@ -82,8 +82,8 @@ class SpecimenMakingAgent(BaseAgent):
 
     @staticmethod
     def _is_live_gui_test_spec(state: OrchestratorState, spec: dict[str, Any]) -> bool:
-        """Detect Live GUI's LLM-generated test-mode handoff while runtime mode remains live."""
-        return state.mode == Mode.LIVE and bool(
+        """Detect Live GUI's LLM-generated test-mode handoff across live/test execution modes."""
+        return state.mode in {Mode.LIVE, Mode.TEST} and bool(
             spec.get("test_mode_autofill")
             or spec.get("test_mode_llm_generated")
             or spec.get("printer_test_path")
@@ -533,7 +533,7 @@ class SpecimenMakingAgent(BaseAgent):
                 },
             ),
             self._gate("execution_gate", "pass" if tool_result.get("ok") else ("blocked" if tool_result.get("requires_connection_info") else "fail"), {"physical_intent": physical_intent, "printer_path": printer_path, "status": tool_result.get("status"), "failure_code": tool_result.get("failure_code")}),
-            self._gate("ejection", "pass" if str(ejection_result.get("status", "disabled")) in {"disabled", "appended_to_print_gcode", "simulated_verified_ejected", "virtual_ack", "started"} else "warn", {"status": ejection_result.get("status"), "failure_code": ejection_result.get("failure_code")}),
+            self._gate("ejection", "pass" if str(ejection_result.get("status", "disabled")) in {"disabled", "appended_to_print_gcode", "simulated_verified_ejected", "virtual_ack", "started", "standalone_motion_started"} else "warn", {"status": ejection_result.get("status"), "failure_code": ejection_result.get("failure_code")}),
         ]
         warnings = [
             *[str(item) for item in mesh_result.get("warnings", [])],
@@ -547,12 +547,29 @@ class SpecimenMakingAgent(BaseAgent):
             gcode_validation.get("failure_code"),
             default=None,
         )
+        ejection_status = str(ejection_result.get("status") or "").strip().lower()
+        physical_printer_path = printer_path in {"installed_printer", "physical_print", "actual_print", "bambulab_x2d", "live"}
+        standalone_ejection_started = ejection_status in {"standalone_motion_started", "started", "simulated_verified_ejected", "virtual_ack"}
+        virtual_bridge_ejection_complete = bool(
+            printer_path == "virtual_bridge"
+            and tool_result.get("ok", False)
+            and not tool_result.get("requires_connection_info")
+        )
         if tool_result.get("requires_connection_info"):
             outcome_status = "blocked"
             location = "unknown"
         elif not tool_result.get("ok", False):
             outcome_status = "failed"
             location = "unknown"
+        elif virtual_bridge_ejection_complete:
+            outcome_status = "ready_for_vision"
+            location = "a4_workspace"
+        elif physical_intent and physical_printer_path and standalone_ejection_started:
+            outcome_status = "ready_for_vision"
+            location = "a4_workspace"
+        elif physical_intent and physical_printer_path:
+            outcome_status = "ready_for_vision"
+            location = "printer_bed"
         elif printer_path == "virtual_prusalink" or str(tool_result.get("mode", "")).startswith("test"):
             outcome_status = "virtual_finished"
             location = "virtual_bridge"
@@ -590,6 +607,7 @@ class SpecimenMakingAgent(BaseAgent):
                 "observe_printer_bridge_status": bool(prusalink or printer or selected_printer or device_screen),
                 "observe_transfer_idle": bool(print_result.get("transfer_wait")),
                 "observe_camera_after_print": True,
+                "active_cam_verification_required": bool(location in {"a4_workspace", "robot_workspace", "ejection_basket", "3dp_output_area"}),
                 "layerwise_monitoring_available": False,
                 "defect_classes": ["warping", "stringing", "under_extrusion", "layer_adhesion"],
                 "expected_location": location,
@@ -617,6 +635,7 @@ class SpecimenMakingAgent(BaseAgent):
             "fabrication_outcome": {
                 "status": outcome_status,
                 "location": location,
+                "autoejection_status": "complete" if standalone_ejection_started or virtual_bridge_ejection_complete else ejection_status or "not_requested",
                 "warnings": warnings,
                 "failure_code": failure_code,
                 "requires_after_print_confirmation": bool(physical_intent),
@@ -1007,8 +1026,8 @@ class SpecimenMakingAgent(BaseAgent):
         prompt = (
             "Specimen Making Agent가 테스트 프린터 경로 선택을 기다립니다.\n\n"
             "- 가상 브릿지: 선택된 3DP bridge의 slicing/upload/start boundary를 가상 통신으로 검증합니다.\n"
-            "- 설치 프린터 통신 테스트: 저장된 active printer 연결정보로 실제 프린터 read-only 상태 통신을 확인합니다.\n"
-            "- 실제 출력: 테스트 모드에서 생성한 시편을 active printer bridge로 실제 slicing/upload/start 경로까지 실행합니다. 기본 profile은 Bambu Lab X2D이며, Prusa MK4S는 명시 선택 시만 사용합니다.\n\n"
+            "- 설치 프린터: 실제 STL을 slicing한 뒤 출력 구간을 제거한 ejection-only project file 하나만 active printer로 전송해 실행합니다.\n"
+            "- 실제 출력: 테스트 모드에서 생성한 시편을 active printer bridge로 실제 slicing/upload/start 및 출력 경로까지 실행하고, 출력 G-code 끝에 autoejection tail을 붙입니다. 기본 profile은 Bambu Lab X2D이며, Prusa MK4S는 명시 선택 시만 사용합니다.\n\n"
             "답변은 `가상 브릿지`, `설치 프린터`, `실제 출력` 중 하나로 보내주세요."
         )
         fabrication_report = self._build_pending_fabrication_report(
@@ -1239,16 +1258,43 @@ class SpecimenMakingAgent(BaseAgent):
             printer_payload["test_printer_path"] = printer_test_path
             printer_payload["allow_test_printer_live"] = printer_test_path in {"installed_printer", "physical_print"}
             printer_payload["test_printer_transport"] = "real" if printer_test_path in {"installed_printer", "physical_print"} else "virtual"
-            if printer_test_path == "physical_print":
+            if printer_test_path == "installed_printer":
+                printer_payload["prefer_http_artifact"] = True
+            if printer_test_path in {"installed_printer", "physical_print"}:
                 print_request = dict(printer_payload["print"]) if isinstance(printer_payload.get("print"), dict) else {}
                 print_request.update(
                     {
                         "start_immediately": True,
                         "physical_intent": True,
                         "confirm_physical_print": True,
+                        "stop_after_start": False,
+                        "use_ejection_only_project_file": printer_test_path == "installed_printer",
+                        "prefer_http_artifact": printer_test_path == "installed_printer",
                     }
                 )
                 printer_payload["print"] = print_request
+                ejection_request = dict(printer_payload["ejection"]) if isinstance(printer_payload.get("ejection"), dict) else {}
+                ejection_request.update(
+                    {
+                        "enabled": True,
+                        "allow_ejection": True,
+                        "object_size_mm": self._first_value(
+                            ejection_request.get("object_size_mm"),
+                            spec.get("object_size_mm"),
+                            spec.get("specimen_size_mm"),
+                        ),
+                    }
+                )
+                if printer_test_path == "installed_printer":
+                    ejection_request.update(
+                        {
+                            "use_ejection_only_project_file": True,
+                            "source": "installed_printer_ejection_only_project_file",
+                        }
+                    )
+                else:
+                    ejection_request.setdefault("source", "physical_print_tail")
+                printer_payload["ejection"] = ejection_request
 
         tool_event_callback = getattr(ctx, "on_tool_event", None)
         if callable(tool_event_callback):

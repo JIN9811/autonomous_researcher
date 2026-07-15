@@ -80,7 +80,7 @@ Rules:
   `wrist=352122273019` for D405.
 - Command generation must preserve role-specific RealSense stream settings:
   `top/D455F -> color_format=rgb8`, `wrist/D405 -> color_format=bgr8`, both
-  with `warmup_s>=5`, `use_depth=true`, and the saved FPS/resolution.
+  with `warmup_s>=20`, `use_depth=true`, and the saved FPS/resolution.
 - Device Port Setup must not save top/D455F as wrist when D405 is absent. Missing
   D405 is represented as `LEROBOT_REALSENSE_ROLE_CAMERA_NOT_FOUND` during
   detect/save or `LEROBOT_REALSENSE_CAMERA_UNAVAILABLE` during live startup.

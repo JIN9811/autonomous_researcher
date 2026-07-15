@@ -25,7 +25,7 @@ Modification guide:
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>{{ title }}</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
-    <link rel="stylesheet" href="/static/styles.css?v=20260705-section7-one-row-1" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260715-camera-usb-link-1" />
   </head>
   <body>
     <main class="page lerobot-page">
@@ -920,6 +920,7 @@ Modification guide:
             </label>
           </div>
           <div class="button-row compact">
+            <button id="btn-rollout-save" class="btn">Save Rollout Defaults</button>
             <button id="btn-rollout-start" class="btn primary">Start Rollout</button>
             <button id="btn-rollout-stop" class="btn danger">Stop Rollout</button>
             <button id="btn-rollout-status" class="btn">Status</button>
@@ -931,12 +932,58 @@ Modification guide:
         <article id="manipulation-agent-card" class="panel lerobot-workflow-card">
           <div class="panel-title-row">
             <h2>11. Manipulation Agent Bridge</h2>
-            <span class="hint">agent-level 3DP to UTM policy execution</span>
+            <span class="hint">robot execution supervisor</span>
           </div>
           <p class="lerobot-card-note">
-            This panel calls the actual Manipulation Agent. It builds the same LeRobot rollout payload used by the autonomous pipeline, including specimen handoff, vision observation, and Pi0.5 policy settings.
+            This panel calls the actual Manipulation Agent. It uses the same policy rollout configuration pattern as Inference / Rollout, with one task selector and task-specific saved defaults.
           </p>
-          <div class="lerobot-form-grid">
+          <div class="lerobot-agent-report-grid manipulation-bridge-runtime-grid" aria-label="Manipulation runtime supervisor summary">
+            <article class="lerobot-report-card">
+              <div class="lerobot-report-card-title"><strong>Bridge State</strong><span class="state-pill">idle</span></div>
+              <div class="hint">Agent bridge requests are routed through the active LeRobot profile.</div>
+            </article>
+            <article class="lerobot-report-card">
+              <div class="lerobot-report-card-title"><strong>Port Lease</strong><span class="state-pill">waiting</span></div>
+              <div class="hint">Follower and leader ownership are checked before live motion.</div>
+            </article>
+            <article class="lerobot-report-card">
+              <div class="lerobot-report-card-title"><strong>Active Camera</strong><span class="state-pill">waiting</span></div>
+              <div class="hint">Camera ownership must be clear before policy inference starts.</div>
+            </article>
+            <article class="lerobot-report-card">
+              <div class="lerobot-report-card-title"><strong>Robot Policy Runtime</strong><span class="state-pill">idle</span></div>
+              <div class="hint">Policy family is shown as metadata, not as the bridge identity.</div>
+            </article>
+            <article class="lerobot-report-card">
+              <div class="lerobot-report-card-title"><strong>Rerun Telemetry</strong><span class="state-pill">waiting</span></div>
+              <div class="hint">Viewer/process evidence is summarized here when available.</div>
+            </article>
+            <article class="lerobot-report-card">
+              <div class="lerobot-report-card-title"><strong>Observation Preview</strong><span class="state-pill">waiting</span></div>
+              <div class="hint">Latest RGB/depth frame evidence is shown when the backend publishes it.</div>
+            </article>
+            <article class="lerobot-report-card">
+              <div class="lerobot-report-card-title"><strong>Joint State</strong><span class="state-pill">waiting</span></div>
+              <div class="hint">Follower joints, policy target, and delta summary are displayed from telemetry.</div>
+            </article>
+            <article class="lerobot-report-card">
+              <div class="lerobot-report-card-title"><strong>Action Stream</strong><span class="state-pill">waiting</span></div>
+              <div class="hint">Action rate, queue, timestamp, and clamp/filter state are tracked here.</div>
+            </article>
+            <article class="lerobot-report-card">
+              <div class="lerobot-report-card-title"><strong>Viewer Evidence</strong><span class="state-pill">waiting</span></div>
+              <div class="hint">Viewer URL, PID, RRD path, and rollout log are preserved as evidence.</div>
+            </article>
+            <article class="lerobot-report-card">
+              <div class="lerobot-report-card-title"><strong>Vision Completion Gate</strong><span class="state-pill">waiting</span></div>
+              <div class="hint">Vision completion is the normal signal to stop active rollout.</div>
+            </article>
+            <article class="lerobot-report-card">
+              <div class="lerobot-report-card-title"><strong>Execution Safety</strong><span class="state-pill">waiting</span></div>
+              <div class="hint">Safety monitor remains compatible with legacy backend reports.</div>
+            </article>
+          </div>
+          <div class="lerobot-form-grid single">
             <label>
               Manipulation Task
               <select id="lerobot-manipulation-task-id-input">
@@ -945,89 +992,84 @@ Modification guide:
               </select>
             </label>
             <label>
-              Agent Strategy
-              <select id="lerobot-manipulation-strategy-input">
-                <option value="pi05_lerobot_policy" selected>Pi0.5 LeRobot Policy</option>
-                <option value="lerobot_policy">Generic LeRobot Policy</option>
-                <option value="fixed_kinematic">Fixed Kinematic Compatibility</option>
-              </select>
+              Policy Preset / Existing HF Policy
+              <select id="lerobot-manipulation-policy-select"></select>
             </label>
             <label>
-              Policy Backend
-              <select id="lerobot-manipulation-policy-backend-input">
-                <option value="lerobot_cli" selected>LeRobot CLI boundary</option>
-                <option value="openpi_server">OpenPI server (reserved)</option>
-                <option value="fixed_kinematic">Fixed kinematic compatibility</option>
-              </select>
-            </label>
-            <label>
-              Policy Type
+              Rollout Policy Type
               <select id="lerobot-manipulation-policy-type-input">
-                <option value="pi05" selected>pi05</option>
-                <option value="xvla">xvla</option>
-                <option value="smolvla">smolvla</option>
                 <option value="act">act</option>
+                <option value="diffusion">diffusion</option>
+                <option value="smolvla" selected>smolvla (SmolVLA)</option>
+                <option value="pi0">pi0</option>
+                <option value="pi05">pi05 (Pi0.5)</option>
+                <option value="pi0fast">pi0fast</option>
+                <option value="xvla">xvla (X-VLA)</option>
+                <option value="vqbet">vqbet</option>
               </select>
             </label>
             <label>
-              Source Location
-              <input id="lerobot-manipulation-source-input" type="text" value="3dp_output_area" />
-            </label>
-            <label>
-              Target Location
-              <input id="lerobot-manipulation-target-input" type="text" value="utm_fixture" />
-            </label>
-            <label>
-              Max Duration Seconds
-              <input id="lerobot-manipulation-max-duration-input" type="number" min="1" step="1" value="30" />
-            </label>
-            <label>
-              Agent RTC Execution Horizon
-              <input id="lerobot-manipulation-rtc-horizon-input" type="number" min="1" max="200" step="1" value="20" title="Saved fallback. Runtime uses the Rollout panel horizon when present." />
-            </label>
-            <label>
-              Agent RTC Max Guidance Weight
-              <input id="lerobot-manipulation-rtc-guidance-input" type="number" min="0" max="20" step="0.1" value="1.0" title="Saved fallback. Runtime uses the Rollout panel guidance weight when present." />
-            </label>
-            <label>
-              Specimen ID
-              <input id="lerobot-manipulation-specimen-id-input" type="text" value="manual-specimen" />
-            </label>
-            <label>
-              Candidate ID
-              <input id="lerobot-manipulation-candidate-id-input" type="text" value="manual-candidate" />
-            </label>
-            <label>
-              Manipulation Policy Checkpoint / Repo
+              Rollout Policy Checkpoint / Output File
               <span class="input-action-row">
-                <input id="lerobot-manipulation-policy-input" type="text" placeholder="outputs/train/.../checkpoints/last/pretrained_model, model.safetensors, or HF repo id" />
+                <input id="lerobot-manipulation-policy-input" type="text" placeholder="outputs/train/.../checkpoints/last/pretrained_model or model.safetensors" />
                 <button id="btn-browse-manipulation-policy" class="btn mini" type="button">Browse</button>
-                <button id="btn-manipulation-use-rollout-policy" class="btn mini" type="button">Use Rollout Policy</button>
+                <button id="btn-manipulation-latest-policy" class="btn mini" type="button">Use Latest</button>
               </span>
             </label>
             <label>
-              STL Path / Printed Specimen Artifact
+              Rollout Task Instruction
+              <textarea id="lerobot-manipulation-instruction-input" rows="3" placeholder="e.g. Move the printed specimen from the 3D printer pickup area to the UTM fixture.">Move the printed specimen from the 3D printer pickup area to the UTM fixture datum, release safely, retreat to standby_clear_of_utm, then wait for Vision verification.</textarea>
+            </label>
+            <label>
+              Rollout Duration Seconds (optional)
+              <input id="lerobot-manipulation-duration-input" type="number" min="1" step="1" placeholder="blank = run until Stop Rollout" />
+            </label>
+            <label>
+              Safe Action Clamp
               <span class="input-action-row">
-                <input id="lerobot-manipulation-stl-input" type="text" placeholder="optional: generated specimen STL path" />
-                <button id="btn-browse-manipulation-stl" class="btn mini" type="button">Browse</button>
+                <span class="checkbox-inline">
+                  <input id="lerobot-manipulation-action-clamp-input" type="checkbox" />
+                  Enabled
+                </span>
+                <input id="lerobot-manipulation-max-relative-target-input" type="number" min="1" step="1" value="5" title="LeRobot expects robot.max_relative_target as an integer safety limit" />
               </span>
             </label>
-            <label class="planning-message-label train-extra-args">
-              Agent Task Instruction
-              <textarea id="lerobot-manipulation-task-input" rows="3">Move the printed specimen from the 3D printer pickup area to the UTM fixture, place it on the fixture datum, release safely, then report transfer complete.</textarea>
+            <label>
+              Shoulder Lift Frame Backstop
+              <span class="checkbox-inline">
+                <input id="lerobot-manipulation-shoulder-lift-backstop-input" type="checkbox" checked />
+                Enabled
+              </span>
+            </label>
+            <label>
+              ACT Temporal Ensemble
+              <span class="input-action-row">
+                <span class="checkbox-inline">
+                  <input id="lerobot-manipulation-temporal-ensemble-input" type="checkbox" checked />
+                  Enabled
+                </span>
+                <input id="lerobot-manipulation-temporal-coeff-input" type="number" min="0" step="0.001" value="0.01" title="LeRobot policy.temporal_ensemble_coeff; enables policy.n_action_steps=1" />
+              </span>
+            </label>
+            <label>
+              Pi0.5 RTC Execution Horizon
+              <input id="lerobot-manipulation-rtc-horizon-input" type="number" min="1" max="200" step="1" value="20" title="Pi0.5 RTC execution horizon. Higher values help when inference latency is high." />
+            </label>
+            <label>
+              Pi0.5 RTC Guidance Weight
+              <input id="lerobot-manipulation-rtc-guidance-input" type="number" min="0" max="20" step="0.1" value="1.0" title="Pi0.5 RTC max guidance weight." />
+            </label>
+            <label>
+              Pi0.5 Action Queue Refresh Threshold
+              <input id="lerobot-manipulation-action-queue-input" type="number" min="1" max="300" step="1" value="60" title="action_queue_size_to_get_new_actions. Must be larger than inference delay plus RTC horizon." />
             </label>
             <label class="planning-message-label train-extra-args">
-              Vision Observation JSON
+              Observation / Note JSON
               <textarea id="lerobot-manipulation-observation-input" rows="4">{"observation_id":"manual-transfer","anomaly":false,"transfer_readiness":{"ready":true,"pose_confidence":0.82}}</textarea>
             </label>
           </div>
-          <div class="lerobot-inline-options">
-            <label class="checkbox-line"><input id="lerobot-manipulation-camera-input" type="checkbox" checked /> Pass saved cameras to policy</label>
-            <label class="checkbox-line"><input id="lerobot-manipulation-display-input" type="checkbox" /> Display LeRobot data stream</label>
-            <label class="checkbox-line"><input id="lerobot-manipulation-continuous-input" type="checkbox" checked /> Run until Stop Rollout</label>
-          </div>
           <div class="button-row compact">
-            <button id="btn-manipulation-save" class="btn">Save Agent Defaults</button>
+            <button id="btn-manipulation-save" class="btn">Save Task Defaults</button>
             <button id="btn-manipulation-test" class="btn">Test Agent Bridge</button>
             <button id="btn-manipulation-preview" class="btn">Preview Agent Payload</button>
             <button id="btn-manipulation-run" class="btn primary">Run Manipulation Agent</button>
@@ -1038,7 +1080,7 @@ Modification guide:
           <details class="lerobot-details" open>
             <summary>Manipulation Agent Runtime Report</summary>
             <div id="lerobot-manipulation-report" class="lerobot-agent-report-grid">
-              <div class="lerobot-report-empty">Run Save, Test, Preview, or Run to inspect task, preflight, Pi0.5/SARM state, and handoff packet.</div>
+              <div class="lerobot-report-empty">Run Save, Test, Preview, or Run to inspect bridge state, leases, policy runtime, telemetry, completion gate, interlock, and handoff packet.</div>
             </div>
           </details>
         </article>
@@ -1306,6 +1348,6 @@ Modification guide:
         </article>
       </section>
     </main>
-    <script src="/static/lerobot.js?v=20260708-official-mimic-rgbd-render-1" defer></script>
+    <script src="/static/lerobot.js?v=20260715-camera-usb-link-1" defer></script>
   </body>
 </html>

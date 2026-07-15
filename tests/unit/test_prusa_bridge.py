@@ -207,11 +207,11 @@ def test_gcode_safety_validator_accepts_bed_sweep_cooling_and_progress_codes() -
                 "M400",
                 "M190 R40",
                 "G90",
-                "G0 Y210 F3000",
+                "G0 Y210 F6000",
                 "M73 P99 R0",
                 "M73 Q99 S0",
-                "G0 X125 F3000",
-                "G0 Z1 F1000",
+                "G0 X125 F6000",
+                "G0 Z1 F3000",
                 "G0 Y6 F25000",
                 "G28 X Y",
                 "M84 X Y E",
@@ -322,12 +322,34 @@ def test_bed_sweep_ejection_builder_generates_video_style_append_gcode() -> None
     assert result["ok"] is True
     assert "AUTO-GENERATED BED-SWEEP EJECTION" in result["gcode"]
     assert "M190 R40" in result["gcode"]
-    assert "G0 X60 F3000" in result["gcode"]
+    assert "G0 X60 F6000" in result["gcode"]
+    assert "G0 Z10 F3000" in result["gcode"]
     assert "G0 Y6 F25000" in result["gcode"]
     assert "G28 X Y" in result["gcode"]
     assert "M73 Q100 S0" in result["gcode"]
     assert result["gcode"].rstrip().endswith("M73 Q100 S0")
     assert result["resolved"]["head_x_source"] == "gcode_object_bounds"
+    assert result["resolved"]["head_z_mm"] == 10.0
+    assert result["resolved"]["head_z_source"] == "gcode_object_top_minus_offset"
+
+
+def test_bed_sweep_ejection_builder_clamps_short_object_push_height_to_one_mm() -> None:
+    ejection = EjectionConfig.from_dict(
+        {
+            "enabled": True,
+            "method": "bed_sweep",
+            "mode": "append_end_gcode",
+            "max_bed_temp_c": 40.0,
+            "max_feedrate_mm_min": 25000,
+        }
+    )
+    builder = PaddleEjectionRoutineBuilder(ejection)
+
+    result = builder.build(object_bounds=GCodeObjectBounds(40.0, 80.0, 60.0, 90.0, 0.2, 11.0, 4))
+
+    assert result["ok"] is True
+    assert "G0 Z1 F3000" in result["gcode"]
+    assert result["resolved"]["head_z_mm"] == 1.0
 
 
 def test_virtual_prusalink_dry_run_reaches_action_boundary(tmp_path: Path) -> None:
@@ -1202,7 +1224,8 @@ def test_append_end_gcode_ejection_uploads_autoeject_gcode(tmp_path: Path, monke
     assert result["sliced_path"] == str(appended_path)
     assert uploaded["local_path"] == str(appended_path)
     assert "M190 R40" in appended_path.read_text(encoding="utf-8")
-    assert "G0 X100 F3000" in appended_path.read_text(encoding="utf-8")
+    assert "G0 X100 F6000" in appended_path.read_text(encoding="utf-8")
+    assert "G0 Z1 F3000" in appended_path.read_text(encoding="utf-8")
     assert "G0 Y6 F25000" in appended_path.read_text(encoding="utf-8")
     assert result["ejection_result"]["resolved"]["head_x_source"] == "gcode_object_bounds"
     assert result["ejection_result"]["object_bounds"]["center_x_mm"] == 100.0
@@ -1289,12 +1312,13 @@ def test_standalone_autoejection_test_uses_same_builder_without_printing(tmp_pat
     assert result["status"] == "started"
     assert result["program_mode"] == "standalone_same_bed_sweep_builder"
     assert result["resolved"]["head_x_source"] == "gcode_object_bounds"
-    assert result["resolved"]["temperature_commands_included"] is False
+    assert result["resolved"]["temperature_commands_included"] is True
     assert result["object_bounds"]["center_x_mm"] == 210.0
-    assert "G0 X210 F3000" in text
-    assert "M190" not in text
-    assert "M104" not in text
-    assert "M140" not in text
+    assert "G0 X210 F6000" in text
+    assert "G0 Z10 F3000" in text
+    assert "M190 R40" in text
+    assert "M104 S0" in text
+    assert "M140 S0" in text
     assert "M73 Q100 S0" in text
     assert text.rstrip().endswith("M73 Q100 S0")
     assert uploaded["local_path"] == str(ejection_path)

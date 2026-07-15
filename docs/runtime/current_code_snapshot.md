@@ -888,7 +888,7 @@ Important RealSense rules in the current code:
 - LeRobotBridge owns policy-camera command generation. The current ROBOTIS OMX
   profile uses `top=341522300873` D455F with `color_format=rgb8` and
   `wrist=352122273019` D405 with `color_format=bgr8`; both RealSense cameras
-  keep `warmup_s>=5`.
+  keep `warmup_s>=20`.
 - `Detect & Save` must not store a visible D455F as the wrist camera when D405
   is absent. That failure is reported as `LEROBOT_REALSENSE_ROLE_CAMERA_NOT_FOUND`.
 - `scripts/realsense_usb_stabilize.py` inspects RealSense/BRIO USB sysfs power

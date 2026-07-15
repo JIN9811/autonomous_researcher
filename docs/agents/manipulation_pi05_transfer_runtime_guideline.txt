@@ -1,7 +1,7 @@
 # Manipulation Pi0.5 / SARM Runtime Guideline
 
 Status: implemented runtime guideline
-Last reviewed: 2026-06-17
+Last reviewed: 2026-07-14
 Scope: Manipulation Agent supervision for bounded LeRobot/Pi0.5 skills between 3DP, UTM, and disposal stages.
 
 ## 1. Role Boundary
@@ -44,6 +44,20 @@ Default route:
 - terminal pose: `standby_clear_of_utm`
 - verification signal: `specimen_on_utm_platen`
 - verified next agent: `lab_equipment_agent`
+
+Active-cam / UTM completion route:
+
+```text
+Vision active-cam one-shot confirms ejected specimen and returns the camera route
+-> Manipulation checks home/interlock through LeRobotBridge runtime contract
+-> Manipulation starts policy rollout/inference
+-> Vision captures UTM placement with purpose=utm_placement_verification
+-> Manipulation consumes vision_manipulation_completion.v1
+-> Manipulation stops the existing rollout without starting a second rollout
+-> Manipulation promotes the stop response home_pose as the final post-rollout
+   home/interlock check
+-> robot_task_result.handoff_status=ready_for_equipment
+```
 
 Stage taxonomy:
 
@@ -171,6 +185,11 @@ Rules:
 - Test mode may use `fake://pi05_policy` and `fake_omx_ai`.
 - Manipulation Agent must not bypass LeRobotBridge or generate shell commands.
 - The GUI can save defaults, but explicit experiment spec values override them.
+- During the completion pass, Manipulation Agent must not call
+  `lerobot.rollout.start` again when Vision provides
+  `vision_manipulation_completion.v1` and an existing rollout session id. It
+  calls `lerobot.rollout.stop` once and uses that stop response's runtime
+  contract, including `home_pose`, for the final report state.
 - For Pi0.5 live rollout, LeRobotBridge injects
   `--robot.disable_torque_on_disconnect=false` at command construction time.
   Manipulation Agent must not set this manually or store a separate arbitrary
@@ -191,7 +210,7 @@ Rules:
   `top` prefers D455/D455F serials and `wrist` prefers D405 serials. This keeps
   D405 and D455F on the same RSUSB-backed `intelrealsense` runtime path.
 - D405 is not a generic RGB RealSense path. The generated LeRobot camera config
-  must use `color_format=bgr8` and `warmup_s>=5` for `wrist=352122273019`.
+  must use `color_format=bgr8` and `warmup_s>=20` for `wrist=352122273019`.
   D455F/top uses `color_format=rgb8`. Manipulation Agent must treat
   `LEROBOT_REALSENSE_ROLE_CAMERA_NOT_FOUND` and
   `LEROBOT_REALSENSE_CAMERA_UNAVAILABLE` as operator/device issues instead of
@@ -268,7 +287,7 @@ If LeRobot reports ok but the Vision verification signal is not present:
 If Vision verification is present:
 
 - `completion_status=verified_complete`
-- `handoff_status=ready_for_equipment_agent` or `completed_disposal`
+- `handoff_status=ready_for_equipment` or `completed_disposal`
 - recommended next agent is the verified downstream agent
 
 This preserves the current graph while exposing the correct gate for the planned
@@ -334,6 +353,61 @@ The `Manipulation Agent Bridge` panel exposes:
 
 Live GUI agent report must show the same information through the Manipulation
 Agent selected-report panel without dumping raw JSON.
+
+The Live GUI report begins with three read-only telemetry cards sourced only
+from the existing rollout action log:
+
+- `Live Robot Pose`: Isaac/Three.js visualization values only; no MotorBus open
+  and no robot command.
+- `Policy Tracking`: plots unmodified `latest_observation` and
+  `requested_action` values. It must not substitute Isaac-converted degrees for
+  these graph values. The full elapsed span remains visible under bounded
+  downsampling, and each selected joint keeps a non-shrinking Y domain for the
+  session.
+- `Robot Motion State`: classifies measured and requested-policy evidence on two
+  simultaneous axes. `home/moving` is the arm base state, while
+  `grasping/ungrasping/idle` is the independent gripper state. One shared state
+  track uses white glow for measured evidence and cyan glow for policy target;
+  both glows remain visible when they occupy the same state.
+
+Measured Home Gate requires a 0.5-second stable dwell and all six native values
+inside these inclusive ranges:
+
+```text
+Joint1  -15 .. -6.5
+Joint2  -61 .. -53
+Joint3   52 .. 61
+Joint4   43 .. 52
+Joint5  -11 .. -3
+Gripper  55 .. 65
+```
+
+Requested-policy Home is classified separately from measured feedback. It uses
+the same table except `Joint2 -72 .. -65`, because the follower motor-2 limit
+causes measured Home to settle in `-61 .. -53` while the policy target remains
+near `-69`. Never apply the policy Joint2 range to measured interlocks, and
+never substitute measured feedback for `target_source` policy annotation.
+
+These cards are observation-only. Their state annotation does not replace the
+Manipulation Agent interlock, Vision completion gate, rollout stop, or final
+handoff decision.
+
+Motion-state stability contract:
+
+- arm enters moving at >= 4.0 native units/s
+- arm motion hysteresis exits after <= 2.0 native units/s for >= 0.3 s, but a
+  stable pose outside the Home ranges remains classified as moving
+- gripper enters grasping/ungrasping at <= -2.0 / >= 2.0 native units/s
+- gripper returns to idle only after absolute speed <= 0.5 native units/s for
+  >= 0.2 s
+- Home entry requires in-range arm values and low arm speed for >= 0.5 s
+- measured and requested-policy channels maintain independent state latches
+- grasp succeeds when the absolute measured-versus-policy Gripper gap is at
+  least 2.0 native units; arm movement is retained as diagnostic evidence but
+  does not override that result
+- the read-only pose viewer attaches the specimen to the measured gripper on a
+  successful grasp, releases it on ungrasping, and clamps a released specimen
+  above the target cylinder surface so the cube cannot intersect the fixture
 
 ## 10. Test and Live Behavior
 

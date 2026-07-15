@@ -62,6 +62,8 @@ from policies.guardian_gate import gate_blocks_execution, guardian_gate, tool_re
 from policies.retry_policy import bump_retry, should_retry
 from policies.safe_stop_policy import safe_stop_reason
 from policies.validation_policy import validate_agent_output
+from utils.active_cam_artifact import apply_active_cam_artifact_update
+from utils.utm_completion_artifact import apply_utm_completion_artifact_update
 from utils.ids import make_event_id
 
 EventCallback = Callable[[dict[str, Any]], Awaitable[None] | None]
@@ -1327,6 +1329,16 @@ class LangGraphRunLoop:
                 self._state.run_metadata["latest_vision_agent_report"] = compact_runtime_payload(data["vision_agent_report"])
             if isinstance(data.get("vision_signal"), dict):
                 self._state.run_metadata["vision_signal"] = compact_runtime_payload(data["vision_signal"])
+            if isinstance(data.get("active_cam_artifact_update"), dict):
+                apply_active_cam_artifact_update(
+                    self._state.run_metadata,
+                    compact_runtime_payload(data["active_cam_artifact_update"]),
+                )
+            if isinstance(data.get("utm_completion_artifact_update"), dict):
+                apply_utm_completion_artifact_update(
+                    self._state.run_metadata,
+                    compact_runtime_payload(data["utm_completion_artifact_update"]),
+                )
             if isinstance(data.get("manipulation_report"), dict):
                 self._state.run_metadata["manipulation_report"] = compact_runtime_payload(data["manipulation_report"])
                 self._state.run_metadata[f"{stage.value}_manipulation_report"] = compact_runtime_payload(data["manipulation_report"])
@@ -1350,6 +1362,7 @@ class LangGraphRunLoop:
             self._state.latest_observations = compact_runtime_payload(data["observation"])
             if isinstance(data["observation"], dict):
                 self._state.run_metadata["latest_vision_observation"] = compact_runtime_payload(data["observation"])
+                self._merge_vision_completion_into_specimen_result(data["observation"], data)
         if "analysis" in data:
             analysis_payload = compact_runtime_payload(data["analysis"])
             if isinstance(analysis_payload, dict):
@@ -1423,6 +1436,41 @@ class LangGraphRunLoop:
         if "guardian" in data:
             self._state.run_metadata["guardian"] = compact_runtime_payload(data["guardian"])
         self._state.run_metadata["last_stage_payload"] = {"stage": stage.value, "data": compact_data}
+
+    def _merge_vision_completion_into_specimen_result(
+        self,
+        observation: dict[str, Any],
+        data: dict[str, Any] | None = None,
+    ) -> None:
+        """Attach active-cam Vision verification back to the specimen completion record."""
+        if not isinstance(observation, dict):
+            return
+        confirmation = observation.get("spc_autoejection_confirmation")
+        active_check = observation.get("active_cam_ejection_check")
+        if not isinstance(confirmation, dict) and not isinstance(active_check, dict):
+            return
+        specimen = self._state.run_metadata.get("specimen_result")
+        if not isinstance(specimen, dict):
+            return
+        updated = dict(specimen)
+        if isinstance(confirmation, dict):
+            updated["vision_completion_signal"] = compact_runtime_payload(dict(confirmation))
+        if isinstance(active_check, dict):
+            updated["active_cam_ejection_check"] = compact_runtime_payload(dict(active_check))
+        signal = data.get("vision_signal") if isinstance(data, dict) and isinstance(data.get("vision_signal"), dict) else {}
+        confirmed = bool(
+            (isinstance(confirmation, dict) and confirmation.get("confirmed"))
+            or (isinstance(active_check, dict) and active_check.get("spc_autoejection_confirmed"))
+        )
+        updated["vision_verification"] = {
+            "schema": "specimen_completion_vision_verification.v1",
+            "status": "confirmed" if confirmed else "observed",
+            "confirmed": confirmed,
+            "source_agent": "vision_agent",
+            "consumer_agent": "specimen_agent",
+            "vision_signal": compact_runtime_payload(dict(signal)) if isinstance(signal, dict) else {},
+        }
+        self._state.run_metadata["specimen_result"] = compact_runtime_payload(updated)
 
     def _apply_fault_injection(self) -> None:
         fault_stage = str(self._state.fault_injection.get("stage", ""))

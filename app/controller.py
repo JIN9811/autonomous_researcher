@@ -59,6 +59,7 @@ from orchestrator.supervisor import (
     normalize_operator_intent,
 )
 from policies.validation_policy import validate_agent_output
+from utils.active_cam_artifact import apply_active_cam_artifact_update
 from utils.ids import make_event_id, make_experiment_id, make_run_id
 from device_bridges.bambu_bridge import PrinterDeviceBridgeManager
 from utils.config_loader import load_all_configs
@@ -70,6 +71,7 @@ WORKSPACE_ARTIFACT_COPY_LIMIT_BYTES = 50 * 1024 * 1024
 PLANNING_TRANSCRIPT_MEMORY_LIMIT = 50
 PLANNING_TRANSCRIPT_PAGE_LIMIT = 160
 PLANNING_TRANSCRIPT_MAX_PAGE_LIMIT = 240
+PLANNING_RESUME_CONTEXT_KEY = "_planning_resume_context"
 
 
 @dataclass(slots=True)
@@ -90,6 +92,15 @@ class MainController:
 
     TEST_MODE_FIXED_GEOMETRY = "gyroid"
     TEST_MODE_LOOP_CYCLES = 5
+    TRANSIENT_PRINTER_COMMUNICATION_FAILURE_CODES = {
+        "BAMBU_MQTT_REPORT_TIMEOUT",
+        "BAMBU_MQTT_REPORT_NOT_FRESH",
+    }
+    TRANSIENT_PRINTER_COMMUNICATION_STATUSES = {
+        "preprint_communication_failed",
+        "communication_timeout",
+    }
+    PRINTER_COMPLETION_TRANSIENT_FAILURE_LIMIT = 30
     CLOSED_LOOP_FREE_SHAPE_KEYS = {
         "candidate_id",
         "specimen_id",
@@ -183,6 +194,23 @@ class MainController:
                 if found:
                     return found
         return ""
+
+    @classmethod
+    def _is_transient_printer_communication_issue(cls, payload: Any) -> bool:
+        """Treat short printer telemetry gaps as recoverable, not as final hardware faults."""
+        failure_code = cls._first_failure_code(payload).upper()
+        if failure_code in cls.TRANSIENT_PRINTER_COMMUNICATION_FAILURE_CODES:
+            return True
+        texts: list[str] = []
+        if isinstance(payload, dict):
+            for key in ("status", "state", "message", "error", "detail"):
+                value = payload.get(key)
+                if value not in (None, ""):
+                    texts.append(str(value))
+        else:
+            texts.append(str(payload or ""))
+        haystack = " ".join(texts).lower()
+        return any(status in haystack for status in cls.TRANSIENT_PRINTER_COMMUNICATION_STATUSES)
 
     @staticmethod
     def _hardware_alert_component(workspace: str, tool: str, failure_code: str, message: str) -> tuple[str, str, str]:
@@ -346,10 +374,15 @@ class MainController:
         workflow: str,
         status: str,
     ) -> dict[str, Any] | None:
+        clean_status = status.lower()
+        if bool(result.get("ok", False)) and clean_status not in {"blocked", "failed", "error", "not_enabled"}:
+            explicit_failure = result.get("failure_code") or result.get("error_code")
+            if not explicit_failure:
+                return None
         failure_code = self._first_failure_code(result)
         if bool(result.get("ok", False)) and not failure_code:
             return None
-        if not failure_code and status.lower() not in {"blocked", "failed", "error", "not_enabled"}:
+        if not failure_code and clean_status not in {"blocked", "failed", "error", "not_enabled"}:
             return None
         message = str(result.get("message") or result.get("error") or result.get("status") or failure_code or "hardware alert")
         device_class, component, hardware = self._hardware_alert_component(workspace, tool, failure_code, message)
@@ -884,6 +917,8 @@ class MainController:
                     for k in ("path", "key", "type", "label", "kind", "mime_type")
                     if k in value and (isinstance(value.get(k), (str, int, float, bool)) or value.get(k) is None)
                 }
+            elif key_text == "monitor_snapshot" and isinstance(value, dict):
+                out[key_text] = compact_runtime_payload(value)
         return out
 
     def _compact_event_for_buffer(self, event: dict[str, Any]) -> dict[str, Any]:
@@ -1244,10 +1279,13 @@ class MainController:
         workflow: str = "",
         node_event: bool = False,
         event_type: str = "workspace_tool_result",
+        mirror_live_message: bool | None = None,
     ) -> None:
         """Broadcast dedicated workspace actions using the Runtime IDE event schema."""
         if not isinstance(result, dict):
             return
+        if mirror_live_message is None:
+            mirror_live_message = event_type != "workspace_monitor_snapshot"
         ok = bool(result.get("ok", False))
         status = str(result.get("status") or ("done" if ok else "error"))
         node_id = stage.value if isinstance(stage, Stage) else workspace
@@ -1271,7 +1309,30 @@ class MainController:
             "status": status,
             "module_runtime": module_runtime,
         }
-        hardware_alert = self._hardware_alert_for_result(
+        if workspace == "printer" and event_type == "workspace_monitor_snapshot":
+            base_payload["monitor_snapshot"] = {
+                key: compact_runtime_payload(result.get(key))
+                for key in (
+                    "ok",
+                    "tool",
+                    "status",
+                    "mode",
+                    "provider",
+                    "selected_printer",
+                    "device_screen",
+                    "preprint_gate",
+                    "operator_actions",
+                    "live_gates",
+                    "auto_ejection",
+                )
+                if key in result
+            }
+        transient_printer_monitor = (
+            workspace == "printer"
+            and event_type == "workspace_monitor_snapshot"
+            and self._is_transient_printer_communication_issue(result)
+        )
+        hardware_alert = None if transient_printer_monitor else self._hardware_alert_for_result(
             workspace=workspace,
             tool=tool,
             result=result,
@@ -1284,12 +1345,16 @@ class MainController:
             result["hardware_alert"] = hardware_alert
             base_payload["hardware_alert"] = hardware_alert
             self._record_hardware_alert(hardware_alert)
-        registered_artifacts = self._register_workspace_artifacts(workspace=workspace, tool=tool, result=result)
+        registered_artifacts = (
+            []
+            if event_type == "workspace_monitor_snapshot"
+            else self._register_workspace_artifacts(workspace=workspace, tool=tool, result=result)
+        )
         if registered_artifacts:
             base_payload["runtime_artifacts"] = registered_artifacts
-        level = "INFO" if ok else "ERROR"
+        level = "INFO" if ok else "WARNING" if transient_printer_monitor else "ERROR"
         severity = level.lower()
-        runtime_type = "tool.completed" if ok else "tool.failed"
+        runtime_type = "tool.completed" if ok else "tool.warning" if transient_printer_monitor else "tool.failed"
         await self._broadcast_controller_event(
             {
                 "event_id": make_event_id(),
@@ -1376,7 +1441,8 @@ class MainController:
                     "state": self._state.model_dump(mode="json"),
                 }
             )
-        for artifact in self._workspace_artifact_payloads(result):
+        artifact_payloads = [] if event_type == "workspace_monitor_snapshot" else self._workspace_artifact_payloads(result)
+        for artifact in artifact_payloads:
             await self._broadcast_controller_event(
                 {
                     "event_id": make_event_id(),
@@ -1397,6 +1463,13 @@ class MainController:
                     "state": self._state.model_dump(mode="json"),
                 }
             )
+        if workspace == "printer" and "autoejection" in tool and mirror_live_message:
+            await self._append_printer_workspace_live_message(
+                tool=tool,
+                result=result,
+                status=status,
+                ok=ok,
+            )
         events = self._state.run_metadata.setdefault("workspace_runtime_events", [])
         if isinstance(events, list):
             events.append(
@@ -1411,6 +1484,132 @@ class MainController:
                 }
             )
             del events[:-50]
+
+    def _printer_workspace_live_specimen_payload(
+        self,
+        *,
+        tool: str,
+        result: dict[str, Any],
+        status: str,
+    ) -> dict[str, Any]:
+        """Shape direct 3DP workspace results like Specimen Agent runtime evidence."""
+        selected_printer = result.get("selected_printer") if isinstance(result.get("selected_printer"), dict) else {}
+        autoejection = result.get("autoejection") if isinstance(result.get("autoejection"), dict) else {}
+        standalone_artifact = (
+            result.get("standalone_artifact")
+            if isinstance(result.get("standalone_artifact"), dict)
+            else {}
+        )
+        handoff = (
+            result.get("autoejection_handoff")
+            if isinstance(result.get("autoejection_handoff"), dict)
+            else result.get("handoff")
+            if isinstance(result.get("handoff"), dict)
+            else {}
+        )
+        if not handoff:
+            handoff = {
+                "schema": "printer_autoejection_direct_gcode.v1",
+                "status": status,
+                "provider": result.get("provider") or autoejection.get("provider"),
+                "next_tool": "printer.bambu.mqtt_gcode_line" if result.get("published") else tool,
+                "motion_started": bool(result.get("motion_started")),
+                "requires_guardian_approval": False,
+                "requires_operator_confirmation": False,
+            }
+        return {
+            "specimen_id": result.get("specimen_id")
+            or standalone_artifact.get("specimen_id")
+            or standalone_artifact.get("id")
+            or "post-print-autoejection",
+            "printer_prepare_status": status,
+            "printer_mode": result.get("mode") or "workspace_api",
+            "printer_path": result.get("provider") or selected_printer.get("provider") or "selected_printer",
+            "selected_printer": selected_printer,
+            "tool_result": result,
+            "autoejection": {
+                **autoejection,
+                "status": status,
+                "requested": True,
+                "method": result.get("provider") or autoejection.get("provider") or "printer_bridge",
+            },
+            "autoejection_handoff": handoff,
+            "ejection_result": {
+                "status": status,
+                "failure_code": result.get("failure_code", ""),
+                "method": result.get("provider") or autoejection.get("provider") or "printer_bridge",
+                "resolved": bool(result.get("motion_started") or result.get("published")),
+                "attempts": 1 if result.get("requested_start_immediately") else 0,
+            },
+            "printer": {
+                "provider": result.get("provider") or selected_printer.get("provider"),
+                "state": status,
+                "status": status,
+            },
+            "step_trace": result.get("step_trace") if isinstance(result.get("step_trace"), list) else [],
+        }
+
+    def _format_printer_workspace_live_message(
+        self,
+        *,
+        tool: str,
+        result: dict[str, Any],
+        status: str,
+    ) -> str:
+        """Return an operator-facing Live GUI summary for direct printer workspace actions."""
+        selected_printer = result.get("selected_printer") if isinstance(result.get("selected_printer"), dict) else {}
+        autoejection = result.get("autoejection") if isinstance(result.get("autoejection"), dict) else {}
+        artifact = result.get("standalone_artifact") if isinstance(result.get("standalone_artifact"), dict) else {}
+        lines = [
+            "Specimen Making Agent가 3DP bridge의 autoejection 결과를 Live GUI에 반영했습니다.",
+            "",
+            "Post-print automation result:",
+            f"- tool: {self._runtime_value(tool)}",
+            f"- status: {self._runtime_value(status)}",
+            f"- provider: {self._runtime_value(result.get('provider') or autoejection.get('provider'))}",
+            f"- selected_printer: {self._runtime_value(selected_printer.get('label') or selected_printer.get('profile_id'))}",
+            f"- motion_started: {self._runtime_value(result.get('motion_started'))}",
+            f"- published: {self._runtime_value(result.get('published'))}",
+            f"- failure_code: {self._runtime_value(result.get('failure_code'), 'none')}",
+            f"- artifact: {self._runtime_value(artifact.get('patched_artifact_path') or artifact.get('artifact_path'))}",
+            "",
+            "적용 중인 단계:",
+            *self._runtime_step_lines(result.get("step_trace")),
+        ]
+        return "\n".join(lines)
+
+    async def _append_printer_workspace_live_message(
+        self,
+        *,
+        tool: str,
+        result: dict[str, Any],
+        status: str,
+        ok: bool,
+    ) -> None:
+        """Mirror direct printer workspace actions into the Live GUI conversation."""
+        specimen_payload = self._printer_workspace_live_specimen_payload(
+            tool=tool,
+            result=result,
+            status=status,
+        )
+        await self._append_planning_message(
+            {
+                "role": "printer_ai",
+                "content": self._format_printer_workspace_live_message(
+                    tool=tool,
+                    result=result,
+                    status=status,
+                ),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "model": "specimen_agent",
+                "ok": ok,
+                "specimen": specimen_payload,
+                "render_artifacts": False,
+            },
+            event_type="planning_printer_workspace_result",
+            message=f"SpecimenMakingAgent printer workspace {tool} {status}.",
+            level="INFO" if ok else "ERROR",
+        )
 
     async def emit_lerobot_result(self, result: dict[str, Any]) -> None:
         """Broadcast a LeRobot GUI/tool result and stream its steps into Live GUI when active."""
@@ -1809,6 +2008,7 @@ class MainController:
                 "printer_prepare_status",
                 "printer_mode",
                 "printer_path",
+                "autoejection_completion_verified",
                 "expected_mass_g",
                 "expected_print_time_min",
             ),
@@ -1861,7 +2061,23 @@ class MainController:
                 "slicer_result": cls._select_runtime_fields(specimen.get("slicer_result") or tool_result.get("slicer_result"), ("ok", "failure_code", "elapsed_sec", "simulated", "sliced_path")),
                 "gcode_validation": cls._select_runtime_fields(specimen.get("gcode_validation") or tool_result.get("gcode_validation"), ("ok", "failure_code", "violations")),
                 "print_result": cls._select_runtime_fields(print_result, ("status", "failure_code", "set_ready", "upload", "transfer_wait", "start")),
+                "printer_completion_wait": cls._select_runtime_fields(
+                    specimen.get("printer_completion_wait"),
+                    ("schema", "status", "source", "printer_path", "poll_count", "last_status", "samples"),
+                ),
                 "ejection_result": cls._select_runtime_fields(specimen.get("ejection_result") or tool_result.get("ejection_result"), ("status", "failure_code", "method", "resolved", "object_bounds", "attempts")),
+                "vision_completion_signal": cls._select_runtime_fields(
+                    specimen.get("vision_completion_signal"),
+                    ("schema", "signal", "status", "confirmed", "specimen_detected", "consumer_agent"),
+                ),
+                "vision_verification": cls._select_runtime_fields(
+                    specimen.get("vision_verification"),
+                    ("schema", "status", "confirmed", "source_agent", "consumer_agent", "vision_signal"),
+                ),
+                "active_cam_ejection_check": cls._select_runtime_fields(
+                    specimen.get("active_cam_ejection_check"),
+                    ("schema", "status", "specimen_detected", "spc_autoejection_confirmed", "image_path"),
+                ),
                 "step_trace": compact_runtime_payload((specimen.get("step_trace") or tool_result.get("step_trace") or [])[-16:]),
             }
         )
@@ -2700,6 +2916,7 @@ class MainController:
             "specimen_fabricated",
             "vision_report",
             "latest_vision_agent_report",
+            "latest_active_cam_artifact",
             "vision_signal",
             "manipulation_report",
             "latest_manipulation_agent_report",
@@ -2846,6 +3063,7 @@ class MainController:
             "is_paused": bool(state_json.get("is_paused", False)),
             "stop_requested": bool(state_json.get("stop_requested", False)),
             "safe_stop_requested": bool(state_json.get("safe_stop_requested", False)),
+            "emergency_stop_requested": bool(state_json.get("emergency_stop_requested", False)),
             "loop_count": state_json.get("loop_count", 0),
         }
 
@@ -3426,6 +3644,127 @@ class MainController:
         )
         return {"ok": True, "message": "Safe stop requested", "state": self._state.model_dump(mode="json")}
 
+    async def _cancel_active_runtime_task(self, *, stage: Stage | None = Stage.COMPLETE) -> None:
+        """Cancel active run/planning tasks without changing non-control state."""
+        if self._run_task and not self._run_task.done():
+            if stage is not None:
+                self._state.stage = stage
+            self._run_task.cancel()
+            try:
+                await self._run_task
+            except asyncio.CancelledError:
+                pass
+        if self._planning_handoff_task and not self._planning_handoff_task.done():
+            if stage is not None:
+                self._state.stage = stage
+            self._planning_handoff_task.cancel()
+            try:
+                await self._planning_handoff_task
+            except asyncio.CancelledError:
+                pass
+            self._planning_handoff_task = None
+
+    async def emergency_stop(self) -> dict[str, Any]:
+        """Immediately stop active runtime and latch E-STOP recovery controls."""
+        self._state.emergency_stop_requested = True
+        self._state.stop_requested = True
+        self._state.safe_stop_requested = False
+        self._state.is_paused = False
+        resume_context = self._capture_planning_resume_context(reason="emergency_stop")
+        await self._cancel_active_runtime_task(stage=Stage.COMPLETE)
+        await self._emit_control_event(
+            "run_emergency_stop",
+            "Emergency stop requested by operator (immediate runtime cancel)",
+            {
+                "status": "emergency_stop_requested",
+                "control": "emergency_stop",
+                "operator_action": True,
+                "resume_available": bool(resume_context),
+                "resume_context": {
+                    "cycle_index": resume_context.get("cycle_index"),
+                    "total_cycles": resume_context.get("total_cycles"),
+                    "interrupted_stage": resume_context.get("interrupted_stage"),
+                } if resume_context else {},
+            },
+            level="ERROR",
+        )
+        await self._emit_control_event("run_complete", "Run finished in stage=complete after emergency stop", level="WARNING")
+        self._last_completed_trace = self._trace.snapshot()
+        return {"ok": True, "message": "Emergency stop requested", "state": self._state.model_dump(mode="json")}
+
+    def _reset_orchestrator_decision_layer(self) -> None:
+        """Start E-STOP recovery with an empty active decision layer."""
+        metadata = self._state.run_metadata
+        metadata["orchestrator_decision_register"] = []
+        metadata.pop("latest_orchestrator_decision", None)
+
+        control_plane = metadata.get("latest_orchestrator_control_plane")
+        if not isinstance(control_plane, dict):
+            control_plane = build_orchestrator_control_plane_snapshot(state=self._state)
+        else:
+            control_plane = dict(control_plane)
+            decision_register = control_plane.get("decision_register")
+            decision_register = dict(decision_register) if isinstance(decision_register, dict) else {}
+            decision_register.update(
+                {
+                    "decision_count": 0,
+                    "blocked_count": 0,
+                    "latest_decision": {},
+                    "items": [],
+                }
+            )
+            control_plane["decision_register"] = decision_register
+        metadata["latest_orchestrator_control_plane"] = control_plane
+
+    async def emergency_resume(self) -> dict[str, Any]:
+        """Clear E-STOP latch while preserving the current session and transcript."""
+        self._state.emergency_stop_requested = False
+        self._state.stop_requested = False
+        self._state.safe_stop_requested = False
+        self._state.is_paused = False
+        self._reset_orchestrator_decision_layer()
+        resume_context = self._state.run_metadata.get(PLANNING_RESUME_CONTEXT_KEY)
+        resume_payload: dict[str, Any] = {"started": False, "reason": "no_resume_context"}
+        if isinstance(resume_context, dict):
+            if self._planning_handoff_active():
+                resume_payload = {"started": False, "reason": "planning_handoff_already_active"}
+            else:
+                task = asyncio.create_task(self._resume_planning_handoff_from_context(dict(resume_context)))
+                self._set_planning_handoff_task(task)
+                resume_payload = {
+                    "started": True,
+                    "cycle_index": int(resume_context.get("cycle_index") or 1),
+                    "total_cycles": int(resume_context.get("total_cycles") or 1),
+                    "interrupted_stage": str(resume_context.get("interrupted_stage") or ""),
+                }
+        await self._emit_control_event(
+            "run_emergency_resume",
+            "Emergency stop latch cleared; runtime can continue from the current session",
+            {"status": "resumed", "control": "emergency_resume", "operator_action": True, "resume": resume_payload},
+            level="WARNING",
+        )
+        return {"ok": True, "message": "Emergency stop latch cleared", "resume": resume_payload, "state": self._state.model_dump(mode="json")}
+
+    async def emergency_reset(self) -> dict[str, Any]:
+        """Reset runtime/controller state to the same shape as a fresh server start."""
+        await self._cancel_active_runtime_task(stage=None)
+        self._reset_planning_transcript()
+        self._trace = RunTrace(max_events=int(self._deps.system_config.get("event_buffer_size", 300)))
+        self._logger_bundle = self._new_logger_bundle()
+        self._state = self._new_state(mode=Mode(self._deps.system_config.get("default_mode", "test")))
+        self._last_completed_trace = []
+        self._planning_messages = []
+        self._planning_message_total = 0
+        self._planning_session_id = None
+        self._planning_bootstrapped = False
+        await self._emit_control_event(
+            "run_emergency_reset",
+            "Emergency reset completed; runtime state returned to fresh-server defaults",
+            {"status": "reset", "control": "emergency_reset", "operator_action": True},
+            level="WARNING",
+        )
+        return {"ok": True, "message": "Emergency reset complete", "state": self._state.model_dump(mode="json")}
+
     async def planning_message(
         self,
         *,
@@ -3563,14 +3902,16 @@ class MainController:
             if bool(constraints.get("live_runtime_followup_queue_only")):
                 return {"ok": True, "message": "Runtime follow-up queued.", "session": self.planning_snapshot(session_id=session_id)}
 
+        if not runtime_followup_active and self._state.run_metadata.get("pending_specimen_input"):
+            if self._should_route_specimen_printer_choice(message):
+                self._ensure_pending_specimen_printer_choice()
+            return await self._handle_pending_specimen_operator_input(message=message, session_id=session_id)
+
         if not runtime_followup_active and self._should_trigger_test_design(message):
             return await self._run_test_mode_planning(goal=goal, constraints=constraints, operator_message=message)
 
         if not runtime_followup_active and self._should_route_specimen_printer_choice(message):
             self._ensure_pending_specimen_printer_choice()
-            return await self._handle_pending_specimen_operator_input(message=message, session_id=session_id)
-
-        if not runtime_followup_active and self._state.run_metadata.get("pending_specimen_input"):
             return await self._handle_pending_specimen_operator_input(message=message, session_id=session_id)
 
         if not runtime_followup_active and self._should_trigger_design(message):
@@ -3736,6 +4077,8 @@ class MainController:
             test_constraints = self._normalize_test_mode_constraints(defaults, llm_constraints)
             if inline_printer_choice:
                 test_constraints = self._apply_specimen_printer_choice_to_spec(test_constraints, inline_printer_choice)
+            else:
+                test_constraints = self._strip_specimen_printer_choice_from_spec(test_constraints)
             assistant_entry = {
                 "role": "orchestrator",
                 "content": (
@@ -3781,6 +4124,132 @@ class MainController:
         task = self._planning_handoff_task
         return bool(task and not task.done())
 
+    def _set_planning_handoff_task(self, task: asyncio.Task[dict[str, Any]]) -> None:
+        """Track a Live GUI background handoff task and clear the handle on completion."""
+        self._planning_handoff_task = task
+
+        def _clear(done: asyncio.Task[dict[str, Any]]) -> None:
+            if self._planning_handoff_task is done:
+                self._planning_handoff_task = None
+            try:
+                done.result()
+            except Exception:
+                pass
+
+        task.add_done_callback(_clear)
+
+    def _store_planning_resume_context(
+        self,
+        *,
+        goal: str | None,
+        current_spec: dict[str, Any] | None,
+        design_constraints: dict[str, Any] | None,
+        cycle_index: int,
+        total_cycles: int,
+        phase: str,
+    ) -> None:
+        """Persist the current Live GUI test-loop boundary for E-STOP resume."""
+        context = {
+            "kind": "planning_cycle_series",
+            "goal": goal or self._state.active_goal,
+            "mode": self._state.mode.value,
+            "current_spec": dict(current_spec or self._state.current_experiment_spec or {}),
+            "design_constraints": dict(design_constraints or {}),
+            "cycle_index": int(cycle_index),
+            "total_cycles": int(total_cycles),
+            "phase": phase,
+            "interrupted_stage": self._state.stage.value,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        self._state.run_metadata[PLANNING_RESUME_CONTEXT_KEY] = context
+
+    def _capture_planning_resume_context(self, *, reason: str) -> dict[str, Any]:
+        """Capture an E-STOP resume point before the active background task is cancelled."""
+        existing = self._state.run_metadata.get(PLANNING_RESUME_CONTEXT_KEY)
+        context = dict(existing) if isinstance(existing, dict) else {}
+        if not context and not self._planning_handoff_active():
+            return {}
+        current_spec = self._state.current_experiment_spec if isinstance(self._state.current_experiment_spec, dict) else {}
+        design_constraints = context.get("design_constraints") if isinstance(context.get("design_constraints"), dict) else {}
+        if not design_constraints:
+            spec_constraints = current_spec.get("constraints") if isinstance(current_spec.get("constraints"), dict) else {}
+            design_constraints = {**spec_constraints, **current_spec}
+        context.update(
+            {
+                "kind": context.get("kind") or "planning_cycle_series",
+                "goal": context.get("goal") or self._state.active_goal,
+                "mode": context.get("mode") or self._state.mode.value,
+                "current_spec": context.get("current_spec") if isinstance(context.get("current_spec"), dict) else dict(current_spec),
+                "design_constraints": dict(design_constraints),
+                "cycle_index": int(context.get("cycle_index") or max(1, int(self._state.loop_count or 0) + 1)),
+                "total_cycles": int(context.get("total_cycles") or self._planning_cycle_limit(current_spec or design_constraints)),
+                "interrupted_stage": self._state.stage.value,
+                "stopped_reason": reason,
+                "stopped_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+        self._state.run_metadata[PLANNING_RESUME_CONTEXT_KEY] = context
+        return context
+
+    async def _resume_planning_handoff_from_context(self, context: dict[str, Any]) -> dict[str, Any]:
+        """Resume a Live GUI test-loop from the last stored planning boundary."""
+        goal = str(context.get("goal") or self._state.active_goal or "")
+        mode = str(context.get("mode") or self._state.mode.value or "").strip()
+        if mode:
+            try:
+                self._state.mode = Mode(mode)
+            except ValueError:
+                pass
+        interrupted_stage = str(context.get("interrupted_stage") or "").strip()
+        try:
+            resume_stage = Stage(interrupted_stage)
+        except ValueError:
+            resume_stage = Stage.DESIGN
+        if resume_stage in {Stage.IDLE, Stage.COMPLETE, Stage.ERROR}:
+            resume_stage = Stage.DESIGN
+        self._state.stage = resume_stage
+
+        current_spec = context.get("current_spec") if isinstance(context.get("current_spec"), dict) else {}
+        design_constraints = context.get("design_constraints") if isinstance(context.get("design_constraints"), dict) else {}
+        if not design_constraints:
+            spec_constraints = current_spec.get("constraints") if isinstance(current_spec.get("constraints"), dict) else {}
+            design_constraints = {**spec_constraints, **current_spec}
+        cycle_index = max(1, int(context.get("cycle_index") or 1))
+        total_cycles = max(cycle_index, int(context.get("total_cycles") or self._planning_cycle_limit(current_spec or design_constraints)))
+        self._store_planning_resume_context(
+            goal=goal,
+            current_spec=current_spec,
+            design_constraints=design_constraints,
+            cycle_index=cycle_index,
+            total_cycles=total_cycles,
+            phase="resumed",
+        )
+        await self._append_planning_message(
+            {
+                "role": "system",
+                "content": (
+                    "SYSTEM_EVENT: WORKFLOW_RESUME\n"
+                    f"cycle={cycle_index}\n"
+                    f"total_cycles={total_cycles}\n"
+                    f"stage={resume_stage.value}"
+                ),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "ok": True,
+                "cycle_index": cycle_index,
+                "total_cycles": total_cycles,
+            },
+            event_type="planning_handoff",
+            level="WARNING",
+            message="Planning LangGraph handoff resumed after E-STOP.",
+        )
+        if current_spec:
+            return await self._run_planning_cycle_series(
+                first_spec=current_spec,
+                design_constraints=design_constraints,
+                start_cycle=cycle_index,
+            )
+        return await self._handoff_planning_to_design(goal=goal, constraints=design_constraints)
+
     async def _start_planning_handoff_background(self, *, goal: str | None, constraints: dict[str, Any]) -> dict[str, Any]:
         """Return the Live GUI request before the full test/live planning loop blocks fetch."""
         if self._planning_handoff_active():
@@ -3802,7 +4271,7 @@ class MainController:
             background_content = "테스트 모드 실제 출력 workflow를 시작했습니다. 슬라이싱, G-code 업로드, 출력 시작은 시간이 걸릴 수 있어 백그라운드에서 계속 진행하고 이 창에 단계별 결과를 갱신합니다."
             schedule_message = "Physical-print planning handoff scheduled in background."
         elif printer_path == "installed_printer":
-            background_content = "테스트 모드 설치 프린터 통신 검증 workflow를 시작했습니다. Specimen Making 이후 Vision, Manipulation, Equipment, Analysis, Knowledge, BO, Guardian까지 백그라운드 closed-loop로 진행하고 단계별 결과를 이 창에 갱신합니다."
+            background_content = "테스트 모드 설치 프린터 workflow를 시작했습니다. 실제 slicing 결과에서 출력 구간을 제거한 ejection-only project file 하나만 전송해 실행합니다."
             schedule_message = "Installed-printer test planning handoff scheduled in background."
         elif printer_path == "virtual_bridge":
             background_content = "테스트 모드 가상 브릿지 workflow를 시작했습니다. Specimen Making의 virtual 3DP bridge boundary를 통과한 뒤 Vision, Manipulation, Equipment, Analysis, Knowledge, BO, Guardian까지 백그라운드 closed-loop로 진행하고 단계별 결과를 이 창에 갱신합니다."
@@ -3840,17 +4309,7 @@ class MainController:
                 return {"ok": False, "message": "Background planning handoff failed.", "session": self.planning_snapshot()}
 
         task = asyncio.create_task(_runner())
-        self._planning_handoff_task = task
-
-        def _clear(done: asyncio.Task[dict[str, Any]]) -> None:
-            if self._planning_handoff_task is done:
-                self._planning_handoff_task = None
-            try:
-                done.result()
-            except Exception:
-                pass
-
-        task.add_done_callback(_clear)
+        self._set_planning_handoff_task(task)
         return {"ok": True, "message": "Planning handoff started in background.", "session": self.planning_snapshot()}
 
     async def _build_live_orchestrator_prompt(
@@ -3874,7 +4333,7 @@ class MainController:
             "Do not add runtime-safety disclaimers. Focus on mission contract, missing values, and the next handoff.\n"
             "Do not use LaTeX math notation. Use plain text arrows like '->' for routes.\n"
             "For normal Live GUI execution, `실험 수행` means generate the design and proceed to the selected printer bridge through Specimen Making Agent. The default selected printer bridge is Bambu Lab X2D.\n"
-            "For `테스트 모드`, keep printer actions virtual/read-only unless Specimen Making Agent later asks for the printer path and the operator explicitly chooses `실제 출력`.\n"
+            "For `테스트 모드`, keep hardware virtual unless Specimen Making Agent receives a printer path. `설치 프린터` means build an ejection-only project_file from the actual sliced artifact and run the selected physical printer upload/start path; `실제 출력` means full physical print.\n"
             "Use validated active-printer defaults unless the operator overrides them. Bambu Lab X2D uses guarded HTTP artifact/SPC Readiness/start gates; Prusa MK4S is explicit profile selection only.\n"
             "Ask for experimental objective, material, specimen size, structure/domain, and any printer/slicer override needed before handoff.\n"
             "If the operator includes `실험 수행` and required design inputs are complete, the controller will hand off to DesignAgent and then continue to the Specimen Making Agent.\n"
@@ -3933,7 +4392,7 @@ class MainController:
             "Use conversation_memory as short-lived Live GUI session memory.\n"
             "Choose concrete test experiment values yourself, then prepare the DesignAgent handoff.\n"
             "The default specimen must be an FDM-printable closed-shell gyroid TPMS, not a visual-only thin TPMS surface.\n"
-            "Test-mode printer handling first asks Specimen Making Agent for `가상 브릿지`, `설치 프린터`, or `실제 출력`; only `실제 출력` may physically upload/start.\n"
+            "Test-mode printer handling first asks Specimen Making Agent for `가상 브릿지`, `설치 프린터`, or `실제 출력`. `설치 프린터` slices the generated STL, removes the print body from the sliced artifact, and uploads/starts the resulting ejection-only project_file on the selected physical printer. `실제 출력` performs the full physical print.\n"
             "If operator_message already contains one of those choices, set constraints.printer_test_path accordingly so Specimen Making Agent can continue without asking again.\n"
             "Do not add runtime-safety disclaimers; focus on generated values and handoff.\n"
             "Do not use LaTeX math notation. Use plain text arrows like '->' for routes.\n"
@@ -3993,8 +4452,8 @@ class MainController:
             "Design Agent chooses metamaterial parameters; deterministic geometry tools create STL; "
             "Specimen Making Agent owns printer.prepare and printer/ejection preparation. "
             "Validated live printer path uses the selected printer bridge. Default is Bambu Lab X2D -> Bambu slicer artifact -> Bambu MQTT/FTPS/HTTP artifact readiness -> guarded SPC Readiness/start gates. Prusa MK4S remains explicit profile selection only. "
-            "Live mode may physically print after `실험 수행`; test modes stay virtual/read-only unless the operator explicitly selects `실제 출력` at the Specimen Making Agent printer-path prompt or sends `테스트 모드, 실제 출력`. "
-            "Bambu actual-print autoejection uses native bambu_gcode_patch artifacts; Bambu standalone ejection tests use direct MQTT gcode_line after live gates. Prusa auto ejection uses a gated bed-sweep append G-code path only when Prusa is explicitly selected. "
+            "Live mode may physically print after `실험 수행`. Test mode stays virtual unless the operator selects a printer path: `설치 프린터` builds and runs the selected-printer ejection-only project_file derived from the actual sliced artifact; `실제 출력` runs the full physical print. "
+            "Bambu installed-printer testing sends one ejection-only project_file derived from the sliced artifact. Bambu actual-print autoejection appends the native bambu_gcode_patch tail to the full print artifact. Prusa auto ejection uses a gated bed-sweep append G-code path only when Prusa is explicitly selected. "
             "Do not use LaTeX route notation such as $\\rightarrow$; use '->' only."
         )
 
@@ -4810,7 +5269,9 @@ class MainController:
         """Clear stale operator-control flags before a newly requested Live GUI workflow."""
         self._state.safe_stop_requested = False
         self._state.stop_requested = False
+        self._state.emergency_stop_requested = False
         self._state.is_paused = False
+        self._state.run_metadata.pop(PLANNING_RESUME_CONTEXT_KEY, None)
         self._state.run_metadata["_planning_workflow_controls_reset"] = True
 
     def _design_constraints_for_cycle(self, base_constraints: dict[str, Any]) -> dict[str, Any]:
@@ -4966,6 +5427,7 @@ class MainController:
         )
         self._state.stage = stage
         await loop.step()
+        self._state = loop._state
         if self._state.is_paused:
             raise RuntimeError(f"Planning LangGraph stage={stage.value} paused for approval.")
         if self._state.stage == Stage.ERROR:
@@ -5119,18 +5581,17 @@ class MainController:
                 },
                 event_type="planning_handoff",
                 message="Planning handoff to Specimen Making Agent started.",
-            )
-        remembered_printer_choice = str(self._state.run_metadata.get("last_specimen_printer_choice") or "").strip()
-        if remembered_printer_choice and not self._specimen_printer_path(experiment_spec):
-            experiment_spec = self._apply_specimen_printer_choice_to_spec(dict(experiment_spec), remembered_printer_choice)
-            experiment_spec.setdefault("test_mode_autofill", True)
-            experiment_spec.setdefault("test_mode_llm_generated", True)
-
+        )
         self._state.stage = Stage.SPECIMEN
         self._state.current_experiment_spec = experiment_spec
+        self._state.run_metadata.pop("specimen_result", None)
         await self._run_planning_langgraph_stage(Stage.SPECIMEN)
         specimen_payload = self._state.run_metadata.get("specimen_result", {})
-        if not isinstance(specimen_payload, dict):
+        if not isinstance(specimen_payload, dict) or not specimen_payload:
+            status = self._state.agent_status.get("specimen_agent")
+            if status and status.success is False:
+                detail = status.last_result or "SpecimenMakingAgent failed."
+                raise RuntimeError(str(detail))
             raise RuntimeError("SpecimenMakingAgent did not return specimen_result.")
         if specimen_payload.get("requires_operator_input"):
             self._state.stage = Stage.SPECIMEN
@@ -5143,6 +5604,17 @@ class MainController:
                 level="WARNING",
             )
             return {"pending": True, "specimen": specimen_payload}
+        completion_wait = await self._await_specimen_printer_completion_before_vision(experiment_spec, specimen_payload)
+        if completion_wait:
+            specimen_payload = self._apply_printer_completion_wait_to_specimen(specimen_payload, completion_wait)
+            self._state.run_metadata["specimen_result"] = specimen_payload
+            fabrication_report = specimen_payload.get("fabrication_report")
+            if isinstance(fabrication_report, dict):
+                self._state.run_metadata["fabrication_report"] = fabrication_report
+                self._state.run_metadata["specimen_fabrication_report"] = fabrication_report
+            fabricated = specimen_payload.get("specimen_fabricated")
+            if isinstance(fabricated, dict):
+                self._state.run_metadata["specimen_fabricated"] = fabricated
         next_stage = self._planning_tail_start_stage() or Stage.COMPLETE
         await self._record_planning_orchestrator_transition(
             from_stage=Stage.SPECIMEN,
@@ -5190,13 +5662,37 @@ class MainController:
         last_tail: dict[str, Any] = {"ok": True, "decision": "continue", "message": "Planning cycle started."}
 
         for cycle_index in range(start_cycle, total_cycles + 1):
+            self._store_planning_resume_context(
+                goal=self._state.active_goal,
+                current_spec=current_spec,
+                design_constraints=static_design_constraints,
+                cycle_index=cycle_index,
+                total_cycles=total_cycles,
+                phase="cycle_start",
+            )
             if cycle_index > start_cycle:
+                self._store_planning_resume_context(
+                    goal=self._state.active_goal,
+                    current_spec=current_spec,
+                    design_constraints=static_design_constraints,
+                    cycle_index=cycle_index,
+                    total_cycles=total_cycles,
+                    phase="design",
+                )
                 current_spec = await self._run_planning_design_stage(
                     previous_spec=previous_spec,
                     design_constraints=static_design_constraints,
                     cycle_index=cycle_index,
                     total_cycles=total_cycles,
                     emit_handoff=True,
+                )
+                self._store_planning_resume_context(
+                    goal=self._state.active_goal,
+                    current_spec=current_spec,
+                    design_constraints=static_design_constraints,
+                    cycle_index=cycle_index,
+                    total_cycles=total_cycles,
+                    phase="specimen",
                 )
                 specimen = await self._run_planning_specimen_stage(current_spec)
                 if specimen.get("pending"):
@@ -5206,6 +5702,14 @@ class MainController:
                         "decision": "pending_operator_input",
                     }
 
+            self._store_planning_resume_context(
+                goal=self._state.active_goal,
+                current_spec=current_spec,
+                design_constraints=static_design_constraints,
+                cycle_index=cycle_index,
+                total_cycles=total_cycles,
+                phase="tail",
+            )
             last_tail = await self._run_planning_loop_tail(
                 current_spec,
                 cycle_index=cycle_index,
@@ -5496,6 +6000,7 @@ class MainController:
         pending = self._state.run_metadata.get("pending_specimen_input")
         pending = pending if isinstance(pending, dict) else {}
         request_type = str(pending.get("type", "")).strip()
+        input_request = pending.get("input_request") if isinstance(pending.get("input_request"), dict) else {}
         if request_type == "printer_test_path_choice":
             choice = self._parse_specimen_printer_choice(message)
             if not choice:
@@ -5633,14 +6138,19 @@ class MainController:
         updated["printer_test_path"] = normalized
         updated["test_printer_transport"] = "real" if normalized in {"installed_printer", "physical_print"} else "virtual"
         updated["allow_test_printer_live"] = normalized in {"installed_printer", "physical_print"}
+        updated["prefer_http_artifact"] = normalized == "installed_printer"
 
         print_request = dict(updated.get("print", {})) if isinstance(updated.get("print"), dict) else {}
-        if normalized == "physical_print":
+        if normalized in {"installed_printer", "physical_print"}:
             print_request.update(
                 {
                     "start_immediately": True,
                     "physical_intent": True,
                     "confirm_physical_print": True,
+                    "stop_after_start": False,
+                    "use_ejection_only_project_file": normalized == "installed_printer",
+                    "prefer_http_artifact": normalized == "installed_printer",
+                    "post_publish_observation_timeout_sec": 180 if normalized == "physical_print" else 120,
                 }
             )
         else:
@@ -5649,9 +6159,340 @@ class MainController:
                     "start_immediately": False,
                     "physical_intent": False,
                     "confirm_physical_print": False,
+                    "stop_after_start": False,
+                    "use_ejection_only_project_file": False,
+                    "prefer_http_artifact": False,
                 }
             )
         updated["print"] = print_request
+        ejection_request = dict(updated.get("ejection", {})) if isinstance(updated.get("ejection"), dict) else {}
+        if normalized == "installed_printer":
+            ejection_request.update(
+                {
+                    "enabled": True,
+                    "allow_ejection": True,
+                    "use_ejection_only_project_file": True,
+                    "source": "installed_printer_ejection_only_project_file",
+                }
+            )
+        elif normalized == "physical_print":
+            ejection_request.update(
+                {
+                    "enabled": True,
+                    "allow_ejection": True,
+                    "use_ejection_only_project_file": False,
+                    "source": "physical_print_tail",
+                }
+            )
+        elif ejection_request:
+            ejection_request.update(
+                {
+                    "use_ejection_only_project_file": False,
+                }
+            )
+        if ejection_request:
+            updated["ejection"] = ejection_request
+        return updated
+
+    @staticmethod
+    def _strip_specimen_printer_choice_from_spec(spec: dict[str, Any]) -> dict[str, Any]:
+        """Force bare Live GUI `테스트 모드` to ask SpecimenMakingAgent for the printer path."""
+        updated = dict(spec)
+        for key in (
+            "printer_test_path",
+            "test_printer_path",
+            "printer_bridge_mode",
+            "printer_test_mode",
+            "test_printer_transport",
+            "allow_test_printer_live",
+        ):
+            updated.pop(key, None)
+        print_request = dict(updated.get("print", {})) if isinstance(updated.get("print"), dict) else {}
+        if print_request:
+            print_request.update(
+                {
+                    "start_immediately": False,
+                    "physical_intent": False,
+                    "confirm_physical_print": False,
+                    "stop_after_start": False,
+                }
+            )
+            updated["print"] = print_request
+        return updated
+
+    @staticmethod
+    def _float_or_none(value: Any) -> float | None:
+        try:
+            if value in ("", None):
+                return None
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    @classmethod
+    def _specimen_printer_completion_wait_required(
+        cls,
+        experiment_spec: dict[str, Any],
+        specimen_payload: dict[str, Any],
+    ) -> bool:
+        if specimen_payload.get("requires_operator_input") or specimen_payload.get("ok") is False:
+            return False
+        printer_path = str(
+            specimen_payload.get("printer_path")
+            or cls._specimen_printer_path(experiment_spec)
+            or ""
+        ).strip()
+        if printer_path not in {"installed_printer", "physical_print", "actual_print", "bambulab_x2d", "live"}:
+            return False
+        status = str(specimen_payload.get("printer_prepare_status") or "").upper()
+        start_statuses = {
+            "TEST_PRINTER_EJECTION_PROJECT_STARTED",
+            "PRINT_STARTED",
+            "PRINT_STARTED_WITH_AUTOEJECTION_TAIL",
+        }
+        print_result = specimen_payload.get("print_result") if isinstance(specimen_payload.get("print_result"), dict) else {}
+        post_publish = print_result.get("post_publish_status") if isinstance(print_result.get("post_publish_status"), dict) else {}
+        return bool(
+            status in start_statuses
+            or print_result.get("published")
+            or str(print_result.get("status") or "").strip().lower() == "started"
+            or str(post_publish.get("status") or "").strip().lower() == "running"
+        )
+
+    @classmethod
+    def _printer_completion_wait_timing(
+        cls,
+        experiment_spec: dict[str, Any],
+        specimen_payload: dict[str, Any],
+    ) -> tuple[float, float]:
+        print_request = experiment_spec.get("print") if isinstance(experiment_spec.get("print"), dict) else {}
+        configured_timeout = cls._float_or_none(
+            experiment_spec.get("printer_completion_timeout_sec")
+            or print_request.get("printer_completion_timeout_sec")
+            or specimen_payload.get("printer_completion_timeout_sec")
+        )
+        configured_poll = cls._float_or_none(
+            experiment_spec.get("printer_completion_poll_sec")
+            or print_request.get("printer_completion_poll_sec")
+            or specimen_payload.get("printer_completion_poll_sec")
+        )
+        if configured_timeout is not None:
+            timeout_sec = max(0.0, configured_timeout)
+        else:
+            expected_min = cls._float_or_none(
+                specimen_payload.get("expected_print_time_min")
+                or experiment_spec.get("expected_print_time_min")
+            )
+            printer_path = str(specimen_payload.get("printer_path") or cls._specimen_printer_path(experiment_spec)).strip()
+            timeout_sec = 900.0 if printer_path == "installed_printer" else max(1800.0, (expected_min or 30.0) * 60.0 + 900.0)
+        poll_sec = 2.0 if configured_poll is None else max(0.0, configured_poll)
+        return timeout_sec, min(poll_sec, 10.0)
+
+    @staticmethod
+    def _printer_completion_progress_fields(status_payload: dict[str, Any]) -> dict[str, Any]:
+        device_screen = status_payload.get("device_screen") if isinstance(status_payload.get("device_screen"), dict) else {}
+        progress_panel = device_screen.get("progress_panel") if isinstance(device_screen.get("progress_panel"), dict) else {}
+        job = device_screen.get("job") if isinstance(device_screen.get("job"), dict) else {}
+        progress = MainController._float_or_none(progress_panel.get("progress_percent"))
+        if progress is None:
+            progress = MainController._float_or_none(job.get("progress_percent"))
+        return {
+            "state": str(progress_panel.get("state") or job.get("state") or status_payload.get("state") or status_payload.get("status") or ""),
+            "progress_percent": progress,
+            "job_name": str(progress_panel.get("job_name") or job.get("name") or ""),
+            "current_layer": progress_panel.get("current_layer") if progress_panel.get("current_layer") is not None else job.get("current_layer"),
+            "total_layers": progress_panel.get("total_layers") if progress_panel.get("total_layers") is not None else job.get("total_layers"),
+            "remaining_min": progress_panel.get("remaining_min"),
+            "failure_code": str(status_payload.get("failure_code") or MainController._first_failure_code(status_payload) or ""),
+        }
+
+    @classmethod
+    def _classify_specimen_printer_completion_status(
+        cls,
+        status_payload: dict[str, Any],
+        *,
+        started_seen: bool,
+    ) -> dict[str, Any]:
+        fields = cls._printer_completion_progress_fields(status_payload)
+        state = str(fields.get("state") or "").strip()
+        upper = state.upper()
+        progress = cls._float_or_none(fields.get("progress_percent"))
+        failure_code = str(fields.get("failure_code") or "")
+        failed_states = {"FAILED", "FAIL", "ERROR", "CANCELLED", "CANCELED", "ABORTED"}
+        running_states = {"RUNNING", "PRINTING", "PREPARE", "PREPARING", "HEATING", "SLICING"}
+        complete_states = {"FINISH", "FINISHED", "IDLE", "READY", "COMMUNICATION_READY", "INSTALLED_PRINTER_COMMUNICATION_READY"}
+        if cls._is_transient_printer_communication_issue(status_payload):
+            return {"status": "transient", **fields, "message": failure_code or "Transient printer communication issue."}
+        if upper in failed_states:
+            return {"status": "failed", **fields, "message": f"Printer reported failed state: {state or 'unknown'}"}
+        if upper in running_states or (progress is not None and progress < 100.0 and upper not in complete_states):
+            return {"status": "running", **fields, "message": "Printer job is still active."}
+        if started_seen and (upper in complete_states or (progress is not None and progress >= 100.0)):
+            return {"status": "complete", **fields, "message": "Printer job completed before Vision handoff."}
+        if failure_code in {"BAMBU_CONNECTION_INFO_REQUIRED"}:
+            return {"status": "failed", **fields, "message": failure_code}
+        return {"status": "waiting", **fields, "message": "Waiting for printer completion state."}
+
+    async def _read_specimen_printer_completion_status(self) -> dict[str, Any]:
+        manager = PrinterDeviceBridgeManager.from_devices_config(load_all_configs(resolve_path("configs")))
+        return await asyncio.to_thread(
+            manager.prepare,
+            {
+                "runtime_mode": "live",
+                "health_only": True,
+                "status_only": True,
+                "skip_ftps_probe": True,
+                "force_mqtt_refresh": True,
+                "post_publish_observation": True,
+            },
+        )
+
+    @classmethod
+    def _completed_post_publish_status_from_specimen(cls, specimen_payload: dict[str, Any]) -> dict[str, Any]:
+        print_result = specimen_payload.get("print_result") if isinstance(specimen_payload.get("print_result"), dict) else {}
+        post_publish = print_result.get("post_publish_status") if isinstance(print_result.get("post_publish_status"), dict) else {}
+        status = str(post_publish.get("status") or "").strip().lower()
+        if status != "completed":
+            return {}
+        complete_payload = compact_runtime_payload(post_publish)
+        return {
+            "schema": "specimen_printer_completion_wait.v1",
+            "status": "complete",
+            "source": "prepare_post_publish_status",
+            "printer_path": specimen_payload.get("printer_path"),
+            "poll_count": 0,
+            "last_status": complete_payload,
+            "samples": [complete_payload],
+        }
+
+    async def _await_specimen_printer_completion_before_vision(
+        self,
+        experiment_spec: dict[str, Any],
+        specimen_payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        if not self._specimen_printer_completion_wait_required(experiment_spec, specimen_payload):
+            return {}
+        already_completed = self._completed_post_publish_status_from_specimen(specimen_payload)
+        if already_completed:
+            await self._append_planning_message(
+                {
+                    "role": "printer_ai",
+                    "content": "프린터 작업 완료가 시작 관측 단계에서 확인되었습니다. ActiveCam 검증을 진행합니다.",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "model": "specimen_agent",
+                    "ok": True,
+                    "printer_wait": already_completed,
+                },
+                event_type="planning_printer_completion_wait",
+                message="Specimen printer completion was already observed during publish.",
+            )
+            return already_completed
+        timeout_sec, poll_sec = self._printer_completion_wait_timing(experiment_spec, specimen_payload)
+        deadline = asyncio.get_running_loop().time() + timeout_sec
+        started_seen = True
+        transient_failures = 0
+        samples: list[dict[str, Any]] = []
+        await self._append_planning_message(
+            {
+                "role": "printer_ai",
+                "content": "Specimen Making Agent가 프린터 작업 완료를 확인한 뒤 Vision Agent로 넘깁니다.",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "model": "specimen_agent",
+                "ok": True,
+                "printer_wait": {"status": "started", "printer_path": specimen_payload.get("printer_path")},
+            },
+            event_type="planning_printer_completion_wait",
+            message="Specimen printer completion wait started.",
+        )
+        while True:
+            status_payload = await self._read_specimen_printer_completion_status()
+            classified = self._classify_specimen_printer_completion_status(status_payload, started_seen=started_seen)
+            if classified.get("status") == "running":
+                started_seen = True
+                transient_failures = 0
+            elif classified.get("status") in {"waiting", "complete"}:
+                transient_failures = 0
+            if len(samples) < 8 or classified.get("status") in {"complete", "failed", "transient"}:
+                samples.append(compact_runtime_payload(classified))
+            if classified.get("status") == "complete":
+                result = {
+                    "schema": "specimen_printer_completion_wait.v1",
+                    "status": "complete",
+                    "printer_path": specimen_payload.get("printer_path"),
+                    "poll_count": len(samples),
+                    "last_status": compact_runtime_payload(classified),
+                    "samples": samples[-8:],
+                }
+                await self._append_planning_message(
+                    {
+                        "role": "printer_ai",
+                        "content": "프린터 작업 완료를 확인했습니다. ActiveCam 검증을 진행합니다.",
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "model": "specimen_agent",
+                        "ok": True,
+                        "printer_wait": result,
+                    },
+                    event_type="planning_printer_completion_wait",
+                    message="Specimen printer completion wait completed.",
+                )
+                return result
+            if classified.get("status") == "transient":
+                transient_failures += 1
+                if transient_failures >= self.PRINTER_COMPLETION_TRANSIENT_FAILURE_LIMIT:
+                    raise RuntimeError(
+                        "printer completion wait failed: transient printer communication did not recover "
+                        f"after {transient_failures} attempts: {classified.get('message') or classified}"
+                    )
+                await asyncio.sleep(poll_sec)
+                continue
+            if classified.get("status") == "failed":
+                raise RuntimeError(f"printer completion wait failed: {classified.get('message') or classified}")
+            if asyncio.get_running_loop().time() >= deadline:
+                raise RuntimeError(f"printer completion wait timed out: {classified.get('message') or classified}")
+            await asyncio.sleep(poll_sec)
+
+    @staticmethod
+    def _apply_printer_completion_wait_to_specimen(
+        specimen_payload: dict[str, Any],
+        completion_wait: dict[str, Any],
+    ) -> dict[str, Any]:
+        updated = dict(specimen_payload)
+        updated["printer_completion_wait"] = completion_wait
+        updated["autoejection_completion_verified"] = True
+        report = dict(updated.get("fabrication_report")) if isinstance(updated.get("fabrication_report"), dict) else {}
+        if report:
+            outcome = dict(report.get("fabrication_outcome")) if isinstance(report.get("fabrication_outcome"), dict) else {}
+            outcome.update(
+                {
+                    "status": "ready_for_vision",
+                    "location": "a4_workspace",
+                    "autoejection_status": "complete",
+                    "print_completion_status": "complete",
+                }
+            )
+            report["fabrication_outcome"] = outcome
+            monitoring = dict(report.get("monitoring_plan")) if isinstance(report.get("monitoring_plan"), dict) else {}
+            monitoring.update(
+                {
+                    "expected_location": "a4_workspace",
+                    "observe_camera_after_print": True,
+                    "active_cam_verification_required": True,
+                }
+            )
+            report["monitoring_plan"] = monitoring
+            updated["fabrication_report"] = report
+        fabricated = dict(updated.get("specimen_fabricated")) if isinstance(updated.get("specimen_fabricated"), dict) else {}
+        if fabricated:
+            summary = dict(fabricated.get("fabrication_summary")) if isinstance(fabricated.get("fabrication_summary"), dict) else {}
+            summary.update(
+                {
+                    "outcome_status": "ready_for_vision",
+                    "location": "a4_workspace",
+                    "autoejection_status": "complete",
+                }
+            )
+            fabricated["fabrication_summary"] = summary
+            updated["specimen_fabricated"] = fabricated
         return updated
 
     @staticmethod
@@ -5668,7 +6509,18 @@ class MainController:
     @staticmethod
     def _is_connection_retry_message(message: str) -> bool:
         normalized = re.sub(r"\s+", "", message.lower())
-        return any(token in normalized for token in ("완료", "입력", "저장", "재시도", "retry", "done"))
+        if normalized in {"완료", "재시도", "retry", "done"}:
+            return True
+        retry_tokens = (
+            "연결정보입력완료",
+            "연결정보저장완료",
+            "입력완료",
+            "저장완료",
+            "설정완료",
+            "connectiondone",
+            "connectionready",
+        )
+        return any(token in normalized for token in retry_tokens)
 
     async def _resume_specimen_after_operator_input(self, *, experiment_spec: dict[str, Any], session_id: str | None) -> dict[str, Any]:
         try:
@@ -5785,6 +6637,11 @@ class MainController:
                 self._state.run_metadata["latest_vision_agent_report"] = data["vision_agent_report"]
             if isinstance(data.get("vision_signal"), dict):
                 self._state.run_metadata["vision_signal"] = data["vision_signal"]
+            if isinstance(data.get("active_cam_artifact_update"), dict):
+                apply_active_cam_artifact_update(
+                    self._state.run_metadata,
+                    data["active_cam_artifact_update"],
+                )
             if isinstance(data.get("manipulation_report"), dict):
                 self._state.run_metadata["manipulation_report"] = data["manipulation_report"]
                 self._state.run_metadata[f"{stage.value}_manipulation_report"] = data["manipulation_report"]
@@ -5801,13 +6658,17 @@ class MainController:
             self._state.experiment_evaluations.append(data["experiment_evaluation"])
         specimen_result = data.get("specimen_result") if isinstance(data.get("specimen_result"), dict) else {}
         if specimen_result:
-            self._state.run_metadata["specimen_result"] = specimen_result
+            self._state.run_metadata["specimen_result"] = self._merge_specimen_runtime_evidence(
+                existing=self._state.run_metadata.get("specimen_result"),
+                incoming=specimen_result,
+            )
         if isinstance(specimen_result.get("experiment_evaluation"), dict):
             self._state.experiment_evaluations.append(specimen_result["experiment_evaluation"])
         if "observation" in data:
             self._state.latest_observations = data["observation"]
             if isinstance(data["observation"], dict):
                 self._state.run_metadata["latest_vision_observation"] = data["observation"]
+                self._merge_vision_completion_into_specimen_result(data["observation"], data)
         if "analysis" in data:
             self._state.latest_analysis.update(data["analysis"])
         if "sarm" in data:
@@ -5829,6 +6690,7 @@ class MainController:
                 self._state.run_metadata["equipment_handoff"] = data["equipment_handoff"]
             self._state.latest_analysis["equipment_ok"] = bool(equipment_result.get("ok", False))
             self._state.latest_analysis["equipment_status"] = str(equipment_result.get("status") or "")
+
             self._state.latest_analysis["equipment_program_id"] = str(equipment_result.get("program_id") or "")
             result_file = equipment_result.get("result_file") or equipment_result.get("utm_csv_path")
             if result_file:
@@ -5886,6 +6748,41 @@ class MainController:
         self._state.run_metadata["last_stage_payload"] = {"stage": stage.value, "data": data}
         self._compact_planning_runtime_state()
 
+    def _merge_vision_completion_into_specimen_result(
+        self,
+        observation: dict[str, Any],
+        data: dict[str, Any] | None = None,
+    ) -> None:
+        """Attach active-cam Vision verification back to the specimen completion record."""
+        if not isinstance(observation, dict):
+            return
+        confirmation = observation.get("spc_autoejection_confirmation")
+        active_check = observation.get("active_cam_ejection_check")
+        if not isinstance(confirmation, dict) and not isinstance(active_check, dict):
+            return
+        specimen = self._state.run_metadata.get("specimen_result")
+        if not isinstance(specimen, dict):
+            return
+        updated = dict(specimen)
+        if isinstance(confirmation, dict):
+            updated["vision_completion_signal"] = dict(confirmation)
+        if isinstance(active_check, dict):
+            updated["active_cam_ejection_check"] = dict(active_check)
+        signal = data.get("vision_signal") if isinstance(data, dict) and isinstance(data.get("vision_signal"), dict) else {}
+        confirmed = bool(
+            (isinstance(confirmation, dict) and confirmation.get("confirmed"))
+            or (isinstance(active_check, dict) and active_check.get("spc_autoejection_confirmed"))
+        )
+        updated["vision_verification"] = {
+            "schema": "specimen_completion_vision_verification.v1",
+            "status": "confirmed" if confirmed else "observed",
+            "confirmed": confirmed,
+            "source_agent": "vision_agent",
+            "consumer_agent": "specimen_agent",
+            "vision_signal": dict(signal) if isinstance(signal, dict) else {},
+        }
+        self._state.run_metadata["specimen_result"] = updated
+
     def _compact_planning_runtime_state(self) -> None:
         """Keep Live GUI handoff state bounded after agent payload merges."""
         self._state.run_metadata = self._compact_planning_run_metadata(self._state.run_metadata)
@@ -5895,6 +6792,29 @@ class MainController:
         self._state.latest_analysis = compact_runtime_payload(self._state.latest_analysis)
         self._state.experiment_evaluations = compact_runtime_payload(self._state.experiment_evaluations)
         trim_runtime_memory()
+
+    @staticmethod
+    def _merge_specimen_runtime_evidence(*, existing: Any, incoming: dict[str, Any]) -> dict[str, Any]:
+        """Preserve physical completion evidence when a later stage carries a stale specimen payload."""
+        if not isinstance(existing, dict):
+            return incoming
+        if incoming.get("printer_completion_wait"):
+            return incoming
+        if not existing.get("printer_completion_wait"):
+            return incoming
+        merged = dict(incoming)
+        for key in (
+            "printer_completion_wait",
+            "autoejection_completion_verified",
+            "fabrication_report",
+            "specimen_fabricated",
+            "vision_completion_signal",
+            "active_cam_ejection_check",
+            "vision_verification",
+        ):
+            if key in existing:
+                merged[key] = existing[key]
+        return merged
 
     def _planning_stage_role(self, stage: Stage, module_runtime: dict[str, Any] | None = None) -> str:
         fixed_role = {
@@ -6242,7 +7162,12 @@ class MainController:
         cycle_context = {"cycle_index": cycle_index, "total_cycles": total_cycles}
 
         async def halt_for_control_flag() -> dict[str, Any]:
-            reason = "safe_stop_requested" if self._state.safe_stop_requested else "stop_requested"
+            if self._state.emergency_stop_requested:
+                reason = "emergency_stop_requested"
+            elif self._state.safe_stop_requested:
+                reason = "safe_stop_requested"
+            else:
+                reason = "stop_requested"
             self._state.stage = Stage.COMPLETE
             await self._append_planning_message(
                 {
@@ -6267,7 +7192,7 @@ class MainController:
                 "message": f"Planning LangGraph handoff stopped because {reason} is set.",
             }
 
-        if self._state.safe_stop_requested or self._state.stop_requested:
+        if self._state.emergency_stop_requested or self._state.safe_stop_requested or self._state.stop_requested:
             return await halt_for_control_flag()
 
         async def planning_runtime_event(event: dict[str, Any]) -> None:
@@ -6483,7 +7408,7 @@ class MainController:
             for _ in range(max_steps):
                 before_stage = self._state.stage
                 await loop.step()
-                if self._state.safe_stop_requested or self._state.stop_requested:
+                if self._state.emergency_stop_requested or self._state.safe_stop_requested or self._state.stop_requested:
                     return await halt_for_control_flag()
                 if self._state.is_paused:
                     return {
@@ -6496,8 +7421,22 @@ class MainController:
             else:
                 raise RuntimeError("Planning LangGraph tail exceeded max_steps without reaching Guardian/terminal stage.")
 
-            decision = str(guardian_payload.get("decision", "continue")).strip() or "continue"
-            planned_final_stop = decision == "stop" and effective_mode == Mode.TEST and cycle_index >= total_cycles
+            runtime_terminal_without_guardian = self._state.stage == Stage.COMPLETE and not guardian_payload
+            if self._state.stage == Stage.ERROR:
+                decision = "error"
+            elif runtime_terminal_without_guardian:
+                # A stage-level Guardian gate may terminate the graph before the
+                # Guardian node. Preserve that terminal decision instead of
+                # allowing the outer test-cycle loop to restart at Design.
+                decision = "stop"
+            else:
+                decision = str(guardian_payload.get("decision", "continue")).strip() or "continue"
+            planned_final_stop = (
+                bool(guardian_payload)
+                and decision == "stop"
+                and effective_mode == Mode.TEST
+                and cycle_index >= total_cycles
+            )
             if self._state.stage == Stage.ERROR or decision == "error":
                 self._state.stage = Stage.ERROR
                 await self._append_planning_message(
@@ -6511,6 +7450,25 @@ class MainController:
                     event_type="planning_handoff",
                     message="Planning LangGraph tail halted by Guardian decision.",
                     level="ERROR",
+                )
+            elif runtime_terminal_without_guardian:
+                self._state.stage = Stage.COMPLETE
+                await self._append_planning_message(
+                    {
+                        "role": "system",
+                        "content": (
+                            "SYSTEM_EVENT: WORKFLOW_HALTED\n"
+                            "agent=RuntimeGraph\n"
+                            "decision=terminal_complete\n"
+                            f"cycle={cycle_index}"
+                        ),
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "ok": True,
+                        **cycle_context,
+                    },
+                    event_type="planning_handoff",
+                    message="Planning LangGraph tail preserved an early terminal completion.",
+                    level="WARNING",
                 )
             elif planned_final_stop or cycle_index >= total_cycles:
                 self._state.stage = Stage.COMPLETE

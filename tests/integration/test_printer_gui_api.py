@@ -84,8 +84,13 @@ def test_printer_gui_route_loads() -> None:
     assert "Native Provider" in response.text
     assert "printer-autoejection-push-direction-input" in response.text
     assert "printer-autoejection-z-push-offset-input" in response.text
+    assert 'id="printer-autoejection-z-push-offset-input"' in response.text
+    assert 'value="15"' in response.text
     assert "printer-autoejection-push-lane-offset-input" in response.text
     assert "printer-autoejection-push-speed-input" in response.text
+    assert 'id="printer-autoejection-push-speed-input"' in response.text
+    assert 'max="12000"' in response.text
+    assert 'value="6000"' in response.text
     assert "printer-autoejection-full-bed-sweep-input" in response.text
     assert "printer-autoejection-sweep-z-input" in response.text
     assert "printer-autoejection-sweep-speed-input" in response.text
@@ -177,6 +182,9 @@ def test_printer_gui_does_not_treat_profile_ejection_checkbox_as_bambu_ejection_
     assert "const position = options.positionOverride ||" in script
     assert "Native G-code patch preset filled locally" in script
     assert "Press Save Autoejection Config" in script
+    assert "autoejectionZPushOffsetInput.value = 15" in script
+    assert "autoejectionPushSpeedInput.value = 6000" in script
+    assert "autoejectionSweepSpeedInput.value = 6000" in script
     assert "Save Autoejection Gate" not in script
     assert "btnAutoejectionValidatePreview" in script
     assert "Validate G-code Preview" in script
@@ -257,10 +265,84 @@ def test_printer_gui_does_not_treat_profile_ejection_checkbox_as_bambu_ejection_
     assert "white-space: pre-wrap" in styles
     assert "printerStatusManualOverride" in script
     assert 'refreshStatus("live", { initial: true })' in script
-    assert 'refreshStatus("live", { manual: true })' in script
+    assert 'refreshStatus("live", { manual: true, emit: true })' in script
+    assert "function startPrinterLiveMonitor()" not in script
+    assert "function runPrinterMonitorTick()" not in script
+    assert 'params.set("emit", "1")' in script
+    assert 'event_type != "workspace_monitor_snapshot"' in Path("app/controller.py").read_text(encoding="utf-8")
     assert "renderConfig(data);\n  renderDeviceScreen(data);" in script
     sweep_body = script.split("async function runBambuSweepTestArtifact()", 1)[1].split("async function refreshAutoejectionStatus()", 1)[0]
     assert sweep_body.index('await refreshStatus("live");') < sweep_body.rindex("renderAutoejectionStatus(data);")
+
+
+def test_printer_live_status_emit_updates_runtime_monitor_without_chat(tmp_path, monkeypatch) -> None:
+    manager = PrinterDeviceBridgeManager.from_devices_config(
+        {
+            "devices": {
+                "printer": {
+                    "mode": "test",
+                    "default_profile_id": "bambulab_x2d_lab_01",
+                    "connection_memory_path": str(tmp_path / "printer_fleet.json"),
+                    "profiles": {
+                        "bambulab_x2d_lab_01": {
+                            "provider": "bambulab_x2d",
+                            "connection_memory_path": str(tmp_path / "bambu_connection.json"),
+                            "enabled": True,
+                        }
+                    },
+                }
+            }
+        },
+        repo_root=tmp_path,
+    )
+    BambuConnectionMemory(manager.config.default_profile.connection_memory_path).save_from_payload(
+        {
+            "host": "192.0.2.42",
+            "serial": "SERIAL123",
+            "auth": {"mode": "lan_access_code", "username": "bblp", "access_code": "secret-code"},
+        }
+    )
+
+    def fake_prepare(payload: dict) -> dict:
+        assert payload == {"runtime_mode": "live", "health_only": True, "status_only": True, "skip_ftps_probe": True}
+        return {
+            "ok": True,
+            "state": "RUNNING",
+            "provider": "bambulab_x2d",
+            "selected_printer": manager._selected_printer_payload(manager.config.default_profile, "default_profile"),
+            "device_screen": {
+                "actions": {"can_upload": True, "can_start_print": False},
+                "connection": {"mqtt": "connected", "transfer": "connected"},
+                "progress_panel": {"state": "RUNNING", "progress_percent": 42},
+            },
+            "preprint_gate": {"state": "printing", "blockers": [], "checks": {}},
+            "operator_actions": [],
+        }
+
+    manager.prepare = fake_prepare  # type: ignore[method-assign]
+    monkeypatch.setattr(app_main, "_printer_bridge_manager", lambda: manager)
+    client = TestClient(app)
+    session_id = "printer-monitor-status-session"
+    before_session = client.get(f"/api/planning/session?session_id={session_id}").json()
+    before_total = before_session["message_total"]
+    cursor = len(app_main.controller.recent_events())
+
+    response = client.get("/api/printer/status?mode=live&emit=1")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["tool"] == "printer.status"
+    assert payload["status"] == "RUNNING"
+    new_events = app_main.controller.recent_events()[cursor:]
+    assert any(
+        event.get("event_type") == "workspace_monitor_snapshot"
+        and event.get("payload", {}).get("tool") == "printer.status"
+        and event.get("payload", {}).get("monitor_snapshot", {}).get("device_screen", {}).get("progress_panel", {}).get("progress_percent") == 42
+        for event in new_events
+    )
+    assert not any(event.get("type") == "artifact.created" for event in new_events)
+    after_session = client.get(f"/api/planning/session?session_id={session_id}").json()
+    assert after_session["message_total"] == before_total
 
 
 def test_printer_bambu_physical_proof_template_api_writes_fail_closed_template(tmp_path, monkeypatch) -> None:
@@ -538,7 +620,7 @@ def test_printer_fleet_api_saves_explicit_active_profile_without_fallback(tmp_pa
     assert payload["automatic_fallback"] is False
 
 
-def test_printer_live_status_api_uses_preprint_gate_not_health_only(tmp_path, monkeypatch) -> None:
+def test_printer_live_status_api_uses_read_only_health_check(tmp_path, monkeypatch) -> None:
     manager = PrinterDeviceBridgeManager.from_devices_config(
         {
             "devices": {
@@ -591,10 +673,74 @@ def test_printer_live_status_api_uses_preprint_gate_not_health_only(tmp_path, mo
 
     assert response.status_code == 200
     payload = response.json()
-    assert calls == [{"runtime_mode": "live", "health_only": False}]
+    assert calls == [{"runtime_mode": "live", "health_only": True, "status_only": True, "skip_ftps_probe": True}]
     assert payload["live_gates"]["allow_upload"] is False
     assert payload["device_screen"]["connection"]["transfer"] == "read_only"
     assert payload["operator_actions"][0]["code"] == "BAMBU_DEVELOPER_MODE_NOT_CONFIRMED"
+
+
+def test_printer_live_status_api_probes_transfer_while_specimen_stage_is_running(tmp_path, monkeypatch) -> None:
+    manager = PrinterDeviceBridgeManager.from_devices_config(
+        {
+            "devices": {
+                "printer": {
+                    "mode": "test",
+                    "default_profile_id": "bambulab_x2d_lab_01",
+                    "connection_memory_path": str(tmp_path / "printer_fleet.json"),
+                    "profiles": {
+                        "bambulab_x2d_lab_01": {
+                            "provider": "bambulab_x2d",
+                            "connection_memory_path": str(tmp_path / "bambu_connection.json"),
+                            "enabled": True,
+                        }
+                    },
+                }
+            }
+        },
+        repo_root=tmp_path,
+    )
+    calls: list[dict] = []
+
+    def fake_prepare(payload: dict) -> dict:
+        calls.append(dict(payload))
+        return {
+            "ok": True,
+            "state": "READY_TO_UPLOAD",
+            "provider": "bambulab_x2d",
+            "selected_printer": {
+                "profile_id": "bambulab_x2d_lab_01",
+                "provider": "bambulab_x2d",
+                "label": "Bambu Lab X2D - Lab 01",
+            },
+            "available_printers": manager.available_printers(),
+            "automatic_fallback": False,
+            "device_screen": {
+                "schema": "printer_device_screen.v1",
+                "connection": {"mqtt": "connected", "transfer": "connected"},
+                "actions": {"can_upload": True, "can_start_print": False},
+                "control_panel": {"blockers": []},
+            },
+            "preprint_gate": {"schema": "preprint_real_communication_gate.v1", "state": "ready_to_upload", "blockers": []},
+            "operator_actions": [],
+            "autoejection": {"enabled": True, "provider": "bambu_gcode_patch", "status": "configured"},
+        }
+
+    monkeypatch.setattr(app_main, "_printer_bridge_manager", lambda: manager)
+    monkeypatch.setattr(
+        app_main.controller,
+        "snapshot",
+        lambda: {"is_running": True, "state": {"stage": "specimen", "mode": "test"}},
+    )
+    manager.prepare = fake_prepare  # type: ignore[method-assign]
+    client = TestClient(app)
+
+    response = client.get("/api/printer/status?mode=live&emit=1")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert calls == [{"runtime_mode": "live", "health_only": True, "status_only": True, "skip_ftps_probe": False}]
+    assert payload["device_screen"]["connection"]["transfer"] == "connected"
+    assert payload["live_gates"]["allow_upload"] is True
 
 
 def test_printer_video_status_api_probes_bambu_live_view_without_echoing_secret(tmp_path, monkeypatch) -> None:
@@ -2670,8 +2816,11 @@ def test_printer_autoejection_config_api_defaults_to_native_patch_without_robot_
     assert payload["autoejection"]["recovery_to_robot_pickoff"] is False
     assert payload["autoejection"]["can_run_test"] is False
     assert payload["autoejection"]["blockers"] == ["BAMBU_AUTOEJECTION_NOT_REQUESTED"]
+    assert payload["autoejection"]["native_gcode_parameters"]["z_push_offset_mm"] == 15.0
+    assert payload["autoejection"]["native_gcode_parameters"]["push_speed_mm_min"] == 6000
+    assert payload["autoejection"]["native_gcode_parameters"]["sweep_speed_mm_min"] == 6000
     assert payload["autoejection"]["runtime_paths"]["standalone_endpoint"] == "/api/printer/autoejection-test"
-    assert payload["autoejection"]["runtime_paths"]["standalone_transport"] == "mqtt_gcode_line"
+    assert payload["autoejection"]["runtime_paths"]["standalone_transport"] == "project_file"
     assert payload["autoejection"]["runtime_paths"]["actual_print_transport"] == "project_file"
     assert payload["autoejection"]["runtime_paths"]["home_after_standalone"] is False
 
@@ -3250,7 +3399,7 @@ def test_configured_native_bambu_autoejection_test_returns_standalone_gcode_with
     assert "atr_position=right" in artifact_path.read_text(encoding="utf-8")
 
 
-def test_live_native_bambu_standalone_autoejection_publishes_direct_gcode_line_when_explicitly_armed(tmp_path, monkeypatch) -> None:
+def test_live_native_bambu_standalone_autoejection_publishes_project_file_when_explicitly_armed(tmp_path, monkeypatch) -> None:
     manager = PrinterDeviceBridgeManager.from_devices_config(
         {
             "devices": {
@@ -3293,7 +3442,6 @@ def test_live_native_bambu_standalone_autoejection_publishes_direct_gcode_line_w
             "verification_method": "operator",
         }
     )
-    published: dict[str, object] = {}
     prepare_calls: list[dict[str, object]] = []
 
     async def fake_fetch_probe(artifact_url: str, *, expected_sha256: str, timeout_sec: float = 3.0) -> dict[str, object]:
@@ -3303,31 +3451,21 @@ def test_live_native_bambu_standalone_autoejection_publishes_direct_gcode_line_w
 
     def fake_prepare(payload: dict) -> dict:
         prepare_calls.append(dict(payload))
-        if payload.get("post_publish_observation"):
-            return {
-                "ok": True,
-                "provider": "bambulab_x2d",
-                "device_screen": {
-                    "progress_panel": {
-                        "gcode_state": "RUNNING",
-                        "mc_percent": 1,
-                        "subtask_name": payload.get("subtask_name"),
-                    },
-                    "actions": {"can_start_print": False, "can_prepare_start_command": False},
-                },
-                "preprint_gate": {
-                    "state": "published_observed",
-                    "blockers": [],
-                    "checks": {"latest_report_fresh": True},
-                },
-            }
         return {
             "ok": True,
             "provider": "bambulab_x2d",
             "selected_printer": manager._selected_printer_payload(manager.config.default_profile, "default_profile"),
+            "upload": {"remote_path": "http://192.0.2.10/printer-artifacts/bambu/eject.gcode.3mf"},
+            "print_result": {
+                "ok": True,
+                "will_publish": True,
+                "published": True,
+                "post_publish_status": {"status": "running"},
+            },
             "device_screen": {
                 "actions": {"can_start_print": False, "can_prepare_start_command": False},
                 "connection": {"mqtt": "connected", "transfer": "connected", "video": "available"},
+                "thermal": {"bed_current_c": 29, "bed_target_c": 0},
             },
             "preprint_gate": {
                 "state": "blocked",
@@ -3354,28 +3492,13 @@ def test_live_native_bambu_standalone_autoejection_publishes_direct_gcode_line_w
             "device_screen": {"camera_panel": {"snapshot_url": "http://192.0.2.10/bambu/snapshot.jpg"}},
         }
 
-    class FakeMqttClient:
-        def publish_project_file_command(self, **kwargs) -> dict:
-            raise AssertionError("standalone autoejection must not start through project_file")
-
-        def publish_gcode_line_command(self, **kwargs) -> dict:
-            published.update(kwargs)
-            return {
-                "ok": True,
-                "status": "published",
-                "tool": "printer.bambu.mqtt_publish",
-                "topic": kwargs["topic"],
-                "sequence_id": "seq-standalone-1",
-                "will_publish": True,
-                "published": True,
-            }
-
     manager.prepare = fake_prepare  # type: ignore[method-assign]
     manager.video_status = fake_video_status  # type: ignore[method-assign]
-    manager.mqtt_client = FakeMqttClient()
     monkeypatch.setattr(app_main, "_printer_bridge_manager", lambda: manager)
     monkeypatch.setattr(app_main, "_probe_bambu_http_artifact_fetch", fake_fetch_probe)
     client = TestClient(app)
+    session_id = "autoeject-live-gui-session"
+    client.get(f"/api/planning/session?session_id={session_id}")
 
     response = client.post(
         "/api/printer/autoejection-test",
@@ -3404,13 +3527,143 @@ def test_live_native_bambu_standalone_autoejection_publishes_direct_gcode_line_w
     assert payload["motion_started"] is True
     assert payload["published"] is True
     assert payload["will_publish"] is True
-    assert payload["remote_path"] == ""
-    assert "http_artifact_route" not in payload
-    assert payload["standalone_publish"]["status"] == "published"
-    assert "M190" not in str(published["gcode"])
-    assert "G28" not in str(published["gcode"])
-    assert "G0 X128.000 Y245.000 F300" in str(published["gcode"])
+    assert payload["remote_path"] == "http://192.0.2.10/printer-artifacts/bambu/eject.gcode.3mf"
     assert len(prepare_calls) == 1
+    assert prepare_calls[0]["print"]["start_immediately"] is True
+    assert prepare_calls[0]["print"]["physical_intent"] is True
+    assert str(prepare_calls[0]["bambu_artifact_path"]).endswith(".autoeject.gcode.3mf")
+    session = client.get(f"/api/planning/session?session_id={session_id}").json()
+    assert any(
+        message.get("role") == "printer_ai"
+        and "autoejection" in json.dumps(message, ensure_ascii=False).lower()
+        and message.get("specimen", {}).get("autoejection_handoff", {}).get("motion_started") is True
+        for message in session["messages"]
+    )
+
+
+def test_live_native_bambu_standalone_autoejection_uses_project_file_artifact_with_cooldown_tail(tmp_path, monkeypatch) -> None:
+    manager = PrinterDeviceBridgeManager.from_devices_config(
+        {
+            "devices": {
+                "printer": {
+                    "mode": "test",
+                    "default_profile_id": "bambulab_x2d_lab_01",
+                    "connection_memory_path": str(tmp_path / "printer_fleet.json"),
+                    "profiles": {
+                        "bambulab_x2d_lab_01": {
+                            "provider": "bambulab_x2d",
+                            "connection_memory_path": str(tmp_path / "bambu_connection.json"),
+                            "enabled": True,
+                        }
+                    },
+                    "autoejection": {
+                        "enabled": False,
+                        "provider": "bambu_gcode_patch",
+                        "memory_path": str(tmp_path / "bambu_autoejection.json"),
+                    },
+                }
+            }
+        },
+        repo_root=tmp_path,
+    )
+    BambuConnectionMemory(tmp_path / "bambu_connection.json").save_from_payload(
+        {
+            "host": "192.0.2.42",
+            "serial": "SERIAL123",
+            "printer_name": "x2d-test",
+            "auth": {"username": "bblp", "access_code": "secret-code"},
+            "lan_mode_confirmed": True,
+            "developer_mode_confirmed": True,
+        }
+    )
+    manager.save_autoejection_config({"enabled": True, "provider": "bambu_gcode_patch"})
+    manager.save_bed_clear_evidence(
+        {
+            "bed_clear_required": True,
+            "bed_clear_verified": True,
+            "verification_method": "operator",
+        }
+    )
+    prepare_calls: list[dict[str, object]] = []
+
+    def fake_prepare(payload: dict) -> dict:
+        prepare_calls.append(dict(payload))
+        return {
+            "ok": True,
+            "provider": "bambulab_x2d",
+            "selected_printer": manager._selected_printer_payload(manager.config.default_profile, "default_profile"),
+            "upload": {"remote_path": "file:///cache/bambu-eject-center.autoeject.gcode.3mf"},
+            "print_result": {
+                "ok": True,
+                "will_publish": True,
+                "published": True,
+                "post_publish_status": {"status": "running"},
+            },
+            "device_screen": {
+                "actions": {"can_start_print": False, "can_prepare_start_command": False},
+                "connection": {"mqtt": "connected", "transfer": "connected", "video": "available"},
+                "thermal": {"bed_current_c": 39, "bed_target_c": 0},
+            },
+            "preprint_gate": {
+                "state": "blocked",
+                "blockers": ["BAMBU_FTPS_TOO_MANY_CONNECTIONS"],
+                "checks": {
+                    "mqtt_authenticated_or_virtual": True,
+                    "latest_report_fresh": True,
+                    "printer_safe_state_verified": True,
+                    "storage_transfer_path_verified": False,
+                    "start_command_draft_prepared": False,
+                },
+            },
+            "operator_actions": [],
+        }
+
+    def fake_video_status(_payload: dict) -> dict:
+        return {
+            "ok": True,
+            "video_status": {
+                "ok": True,
+                "snapshot_url": "http://192.0.2.10/bambu/snapshot.jpg",
+                "snapshot_bytes": b"\xff\xd8\xff\xe0test",
+            },
+            "device_screen": {"camera_panel": {"snapshot_url": "http://192.0.2.10/bambu/snapshot.jpg"}},
+        }
+
+    manager.prepare = fake_prepare  # type: ignore[method-assign]
+    manager.video_status = fake_video_status  # type: ignore[method-assign]
+    monkeypatch.setattr(app_main, "_printer_bridge_manager", lambda: manager)
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/printer/autoejection-test",
+        json={
+            "mode": "live",
+            "position": "center",
+            "start_immediately": True,
+            "object_size_mm": [30, 30, 12],
+            "operator_confirmed": True,
+            "guardian_approved": True,
+            "dry_run": False,
+            "door_or_front_path_clear": True,
+            "ejection_ramp_or_bin_ready": True,
+            "toolhead_cover_secured": True,
+            "release_surface_confirmed": True,
+            "release_surface_profile": "cool-plate-pla",
+            "first_ejection_supervised": True,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ok"] is True
+    assert payload["status"] == "standalone_motion_started"
+    assert len(prepare_calls) == 1
+    artifact_path = Path(str(prepare_calls[0]["bambu_artifact_path"]))
+    assert artifact_path.exists()
+    with zipfile.ZipFile(artifact_path) as archive:
+        plate_gcode = archive.read("Metadata/plate_1.gcode").decode("utf-8")
+    assert "M190 R40" in plate_gcode
+    assert "G28 ; atr_autoejection_home_all_axes" not in plate_gcode
 
 
 def test_configured_native_bambu_sweep_test_api_returns_full_bed_sweep_artifact(tmp_path, monkeypatch) -> None:

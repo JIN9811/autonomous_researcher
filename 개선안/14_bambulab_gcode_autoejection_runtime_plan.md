@@ -448,12 +448,12 @@ Spark workstation 검증 결과:
 
 - BambuStudio `02.07.01.57`는 `--export-3mf`에 absolute path를 넘기면 `<outputdir>/<absolute-path>`처럼 output directory를 중복 결합해 export에 실패할 수 있었다.
 - runner는 `--export-3mf`에 basename만 넘겨야 한다.
-- 명시 `load_settings`가 없으면 runner가 output directory 아래 `_atr_no_skirt_profile/`에 X2D machine/process/filament preset 복사본을 만들고 process copy에 no-skirt/no-brim/no-raft 값을 주입한다.
-- `/home/jin/다운로드/specimen(4).stl` 기준으로 no-skirt profile + basename export는 `.gcode.3mf`를 생성했고, `.autoeject.gcode.3mf` patch/validator도 blocker 없이 통과했다.
+- 명시 `load_settings`가 없으면 runner는 Bambu Studio 기본 machine/process/filament preset을 보존하고 `--load-settings`/`--load-filaments`를 자동 주입하지 않는다. purge, cleaning, filament start/end G-code는 유지한다.
+- `/home/jin/다운로드/specimen(4).stl` 기준으로 default preset + basename export는 `.gcode.3mf`를 생성하고, sliced artifact 후처리에서 front build-plate test/intro/nozzle-load line block만 제거한 뒤 `.autoeject.gcode.3mf` patch/validator로 이어지는 것이 목표다.
 
-skirt/brim/raft off는 CLI flag 이름이 환경/버전에 따라 다를 수 있으므로 다음 우선순위로 처리한다.
+front build-plate test line 제거는 CLI flag 이름이 환경/버전에 따라 다를 수 있으므로 다음 우선순위로 처리한다.
 
-1. 명시 profile이 없으면 runner가 output directory에 local process/profile 복사본을 만들고 skirt/brim/raft 관련 값을 OFF로 저장한다. 원본 Bambu Studio preset은 수정하지 않는다.
+1. 명시 profile이 없으면 runner는 Bambu Studio 기본 preset을 그대로 쓰고, slicing 이후 `.gcode` 또는 `.gcode.3mf` 내부 `Metadata/plate_*.gcode`에서 front test/intro/nozzle-load line block만 제거한다. 원본 Bambu Studio preset은 수정하지 않는다.
 2. operator가 explicit `load_settings`를 제공하면 그 profile을 우선 사용한다.
 3. Bambu Studio CLI에서 해당 key를 직접 받을 수 있으면 extra args로 주입할 수 있다.
 4. slicing 결과 G-code에서 skirt/brim/raft 잔류 path를 validator가 탐지한다.
@@ -752,8 +752,8 @@ TDD 우선순위:
 현재 검증 상태:
 
 - 단위/통합 테스트와 정적 검사는 `tests/unit/test_design_agent.py`, `tests/unit/test_specimen_agent.py`, `tests/unit/test_bambu_autoejection.py`, `tests/unit/test_bambu_bridge.py`, `tests/integration/test_printer_gui_api.py` 기준으로 통과해야 한다.
-- `/home/jin/다운로드/specimen(4).stl` 기준 BambuStudio `02.07.01.57` CLI에서 no-skirt profile copy + basename `--export-3mf` 방식으로 `.gcode.3mf` 생성이 확인됐다.
-- 생성 artifact의 `Metadata/plate_1.gcode` patch, md5 sidecar 갱신, `BAMBU_AUTOEJECTION_UNEXPECTED_HOME` 및 `BAMBU_AUTOEJECTION_RESIDUAL_PRIME_OR_SKIRT_RISK` 없는 validator 통과가 확인됐다.
+- `/home/jin/다운로드/specimen(4).stl` 기준 BambuStudio `02.07.01.57` CLI에서 default preset + basename `--export-3mf` 방식으로 `.gcode.3mf` 생성하고 front test line만 post-process 제거하는 경로를 기준으로 검증한다.
+- 생성 artifact의 `Metadata/plate_1.gcode` front test line removal, md5 sidecar 갱신, `BAMBU_AUTOEJECTION_UNEXPECTED_HOME` 및 `BAMBU_AUTOEJECTION_RESIDUAL_PRIME_OR_SKIRT_RISK` 없는 validator 통과를 확인해야 한다.
 - `Validate G-code Preview`와 left/center/right validation은 `validate_only=true` 경로로 `.autoeject.*` artifact와 manifest를 만들지 않는 비파괴 검증으로 분리됐다.
 - standalone ejection artifact generation은 left/center/right 세 위치 모두 unit test로 고정한다. 각 artifact는 `*.left|center|right.autoeject.gcode` 이름, `atr_position=<position>` marker, 위치별 sweep X 좌표, `will_publish=false`, validator pass를 증거로 삼는다.
 - `.gcode.3mf` patch는 요청한 `plate_id`의 `Metadata/plate_<id>.gcode`만 허용한다. 요청 plate가 없으면 다른 plate를 fallback으로 쓰지 않고 `BAMBU_3MF_PLATE_GCODE_NOT_FOUND`로 차단한다.

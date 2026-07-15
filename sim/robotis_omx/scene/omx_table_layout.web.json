@@ -1,0 +1,160 @@
+{
+  "schema": "atr.omx_web_scene.v1",
+  "source": "omx_table_layout.usda",
+  "meters_per_unit": 1.0,
+  "up_axis": "Z",
+  "robot_anchor": {
+    "position": [0.315, 0.06, -0.02],
+    "rotation_z_deg": 90.0
+  },
+  "grid": {
+    "visible": false,
+    "origin": [0.0, 0.0, 0.0002],
+    "size": [0.7, 0.45],
+    "spacing_m": 0.005,
+    "major_spacing_m": 0.05,
+    "minor_color": "#63809a",
+    "major_color": "#8fa9bd",
+    "minor_opacity": 0.1,
+    "major_opacity": 0.22
+  },
+  "wireframe": {
+    "spacing_m": 0.005,
+    "color": "#8fb7cc",
+    "opacity": 0.16,
+    "surface_offset_m": 0.00015,
+    "max_divisions": 180
+  },
+  "objects": [
+    {
+      "name": "TableTop",
+      "source_prim": "/World/Table/TableTop",
+      "primitive": "box",
+      "position": [0.35, 0.285, -0.015],
+      "size": [0.7, 0.33, 0.03],
+      "color": "#9a6a58",
+      "opacity": 0.46
+    },
+    {
+      "name": "TableTopFrontLeft",
+      "source_prim": "/World/Table/TableTopFrontLeft",
+      "primitive": "box",
+      "position": [0.12, 0.06, -0.015],
+      "size": [0.24, 0.12, 0.03],
+      "color": "#9a6a58",
+      "opacity": 0.46
+    },
+    {
+      "name": "TableTopFrontRight",
+      "source_prim": "/World/Table/TableTopFrontRight",
+      "primitive": "box",
+      "position": [0.545, 0.06, -0.015],
+      "size": [0.31, 0.12, 0.03],
+      "color": "#9a6a58",
+      "opacity": 0.46
+    },
+    {
+      "name": "RobotBasePocketFloor",
+      "source_prim": "/World/Table/RobotBasePocketFloor",
+      "primitive": "box",
+      "position": [0.315, 0.06, -0.022],
+      "size": [0.15, 0.12, 0.004],
+      "color": "#765448",
+      "opacity": 0.42
+    },
+    {
+      "name": "A4Sheet",
+      "source_prim": "/World/Workspace/A4Sheet",
+      "primitive": "box",
+      "position": [0.315, 0.265, 0.00006],
+      "size": [0.297, 0.21, 0.00012],
+      "color": "#dbeafe",
+      "opacity": 0.72,
+      "surface_grid": false
+    },
+    {
+      "name": "A4CornerMarker_1",
+      "source_prim": "/World/Workspace/A4CornerMarker_1",
+      "primitive": "circle",
+      "position": [0.1665, 0.16, 0.00014],
+      "radius": 0.004,
+      "color": "#38bdf8",
+      "opacity": 0.9
+    },
+    {
+      "name": "A4CornerMarker_2",
+      "source_prim": "/World/Workspace/A4CornerMarker_2",
+      "primitive": "circle",
+      "position": [0.4635, 0.16, 0.00014],
+      "radius": 0.004,
+      "color": "#38bdf8",
+      "opacity": 0.9
+    },
+    {
+      "name": "A4CornerMarker_3",
+      "source_prim": "/World/Workspace/A4CornerMarker_3",
+      "primitive": "circle",
+      "position": [0.1665, 0.37, 0.00014],
+      "radius": 0.004,
+      "color": "#38bdf8",
+      "opacity": 0.9
+    },
+    {
+      "name": "A4CornerMarker_4",
+      "source_prim": "/World/Workspace/A4CornerMarker_4",
+      "primitive": "circle",
+      "position": [0.4635, 0.37, 0.00014],
+      "radius": 0.004,
+      "color": "#38bdf8",
+      "opacity": 0.9
+    },
+    {
+      "name": "A4CenterMarker",
+      "source_prim": "/World/Workspace/A4CenterMarker",
+      "primitive": "circle",
+      "position": [0.315, 0.265, 0.00014],
+      "radius": 0.004,
+      "color": "#38bdf8",
+      "opacity": 0.9
+    },
+    {
+      "name": "RightDiskAluminumTop",
+      "source_prim": "/World/Workspace/RightDiskAluminumTop",
+      "primitive": "cylinder",
+      "position": [0.59, 0.078, 0.052],
+      "radius": 0.05,
+      "height": 0.104,
+      "color": "#cbd5e1",
+      "opacity": 0.68
+    },
+    {
+      "name": "RightDiskBlackBase",
+      "source_prim": "/World/Workspace/RightDiskBlackBase",
+      "primitive": "cylinder",
+      "position": [0.59, 0.078, 0.012],
+      "radius": 0.052,
+      "height": 0.024,
+      "color": "#64748b",
+      "opacity": 0.62
+    },
+    {
+      "name": "RightDiskCenterYellowMarker",
+      "source_prim": "/World/Workspace/RightDiskCenterYellowMarker",
+      "primitive": "circle",
+      "position": [0.59, 0.078, 0.1043],
+      "radius": 0.0045,
+      "color": "#facc15",
+      "opacity": 0.95
+    },
+    {
+      "name": "RedSpecimenBlock",
+      "source_prim": "/World/Workspace/RedSpecimenBlock",
+      "primitive": "box",
+      "position": [0.39176446199417114, 0.29575082659721375, 0.015200000256299973],
+      "size": [0.03, 0.03, 0.03],
+      "rotation_z_deg": 0.660172474693212,
+      "color": "#fb7185",
+      "opacity": 0.88
+    }
+  ]
+}

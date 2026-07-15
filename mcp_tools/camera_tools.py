@@ -9,9 +9,11 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 
 from mcp_tools.tool_registry import ToolRegistry
+from utils.utm_specimen_presence import inspect_specimen_presence, virtual_specimen_frame_data_url
 
 UTM_CHECK_IDS = {"utm_pre_start", "utm_motion_confirm", "utm_test_complete"}
 UTM_MOTION_TRANSITIONS = {"NOT_WORKING_TO_WORKING", "WORKING_TO_NOT_WORKING"}
@@ -143,6 +145,109 @@ def _operator_attention(failure_code: str, message: str) -> dict[str, Any]:
         "message": message,
         "actions": ["Retry UTM probe", "Open UTM runtime log", "Check camera/topic graph", "Use virtual bridge only in test mode"],
     }
+
+
+def _utm_specimen_presence_capture(
+    payload: dict[str, Any],
+    *,
+    utm_runtime_manager: Any | None,
+) -> dict[str, Any]:
+    mode = str(payload.get("runtime_mode") or payload.get("mode") or "test").strip().lower()
+    allow_virtual = mode == "test" and bool(payload.get("allow_virtual_bridge_in_test", False))
+    runtime_status: dict[str, Any] = {}
+    frame: dict[str, Any] = {}
+    if utm_runtime_manager is not None:
+        runtime_status = dict(
+            utm_runtime_manager.start()
+            if bool(payload.get("auto_start_runtime", True))
+            else utm_runtime_manager.status()
+        )
+        frame = dict(utm_runtime_manager.frame())
+    else:
+        runtime_status = {
+            "ok": False,
+            "status": "not_configured",
+            "failure_code": "UTM_RUNTIME_MANAGER_NOT_CONFIGURED",
+        }
+
+    virtualized = False
+    if not (frame.get("ok") and frame.get("data_url")):
+        if not allow_virtual:
+            failure_code = str(
+                frame.get("failure_code")
+                or runtime_status.get("failure_code")
+                or "UTM_FRAME_UNAVAILABLE"
+            )
+            return {
+                "ok": False,
+                "tool": "vision.utm_specimen_presence.capture",
+                "schema": "vision_utm_specimen_presence.v1",
+                "runtime_mode": mode,
+                "status": "frame_unavailable",
+                "detected": False,
+                "virtualized": False,
+                "source": "utm_ros_frame",
+                "failure_code": failure_code,
+                "message": str(frame.get("message") or "UTM observation frame is unavailable."),
+                "runtime_status": runtime_status,
+                "frame_capture": frame,
+                "run_id": str(payload.get("run_id") or ""),
+                "session_id": str(payload.get("session_id") or ""),
+                "specimen_id": str(payload.get("specimen_id") or ""),
+            }
+        virtualized = True
+        frame = {
+            "ok": True,
+            "frame_available": True,
+            "frame_id": str(payload.get("frame_id") or "virtual-utm-specimen-frame"),
+            "topic": "virtual://utm-observation",
+            "width": 640,
+            "height": 480,
+            "data_url": virtual_specimen_frame_data_url(),
+        }
+
+    output_dir = Path(str(payload.get("output_dir") or "runs/utm_specimen_presence")).expanduser()
+    frame_id = str(frame.get("frame_id") or f"utm-frame-{int(_now().timestamp() * 1000)}")
+    try:
+        result = inspect_specimen_presence(
+            str(frame.get("data_url") or ""),
+            output_dir=output_dir,
+            specimen_id=str(payload.get("specimen_id") or ""),
+            frame_id=frame_id,
+            min_area_px=float(payload.get("min_area_px") or 300.0),
+        )
+    except Exception as exc:
+        return {
+            "ok": False,
+            "tool": "vision.utm_specimen_presence.capture",
+            "schema": "vision_utm_specimen_presence.v1",
+            "runtime_mode": mode,
+            "status": "inspection_failed",
+            "detected": False,
+            "virtualized": virtualized,
+            "source": "virtual_utm_bridge" if virtualized else "utm_ros_frame",
+            "failure_code": "UTM_SPECIMEN_PRESENCE_INSPECTION_FAILED",
+            "message": f"{type(exc).__name__}: {exc}",
+            "runtime_status": runtime_status,
+            "frame_capture": {key: value for key, value in frame.items() if key != "data_url"},
+            "run_id": str(payload.get("run_id") or ""),
+            "session_id": str(payload.get("session_id") or ""),
+            "specimen_id": str(payload.get("specimen_id") or ""),
+        }
+    result.update(
+        {
+            "tool": "vision.utm_specimen_presence.capture",
+            "runtime_mode": mode,
+            "virtualized": virtualized,
+            "source": "virtual_utm_bridge" if virtualized else "utm_ros_frame",
+            "topic": str(frame.get("topic") or ""),
+            "runtime_status": runtime_status,
+            "frame_capture": {key: value for key, value in frame.items() if key != "data_url"},
+            "run_id": str(payload.get("run_id") or ""),
+            "session_id": str(payload.get("session_id") or ""),
+        }
+    )
+    return result
 
 
 def _equipment_cross_check(
@@ -305,6 +410,63 @@ def register_camera_tools(
             "pose_confidence": 0.86,
             "anomaly": False,
         },
+    )
+    registry.register(
+        "vision.utm_runtime.start",
+        lambda payload: (
+            {
+                **dict(utm_runtime_manager.start()),
+                "tool": "vision.utm_runtime.start",
+                "request": payload if isinstance(payload, dict) else {},
+            }
+            if utm_runtime_manager is not None
+            else {
+                "ok": False,
+                "tool": "vision.utm_runtime.start",
+                "status": "not_configured",
+                "failure_code": "UTM_RUNTIME_MANAGER_NOT_CONFIGURED",
+            }
+        ),
+    )
+    registry.register(
+        "vision.utm_runtime.status",
+        lambda payload: (
+            {
+                **dict(utm_runtime_manager.status()),
+                "tool": "vision.utm_runtime.status",
+            }
+            if utm_runtime_manager is not None
+            else {
+                "ok": False,
+                "tool": "vision.utm_runtime.status",
+                "status": "not_configured",
+                "failure_code": "UTM_RUNTIME_MANAGER_NOT_CONFIGURED",
+            }
+        ),
+    )
+    registry.register(
+        "vision.utm_runtime.stop",
+        lambda payload: (
+            {
+                **dict(utm_runtime_manager.stop()),
+                "tool": "vision.utm_runtime.stop",
+                "request": payload if isinstance(payload, dict) else {},
+            }
+            if utm_runtime_manager is not None
+            else {
+                "ok": False,
+                "tool": "vision.utm_runtime.stop",
+                "status": "not_configured",
+                "failure_code": "UTM_RUNTIME_MANAGER_NOT_CONFIGURED",
+            }
+        ),
+    )
+    registry.register(
+        "vision.utm_specimen_presence.capture",
+        lambda payload: _utm_specimen_presence_capture(
+            payload if isinstance(payload, dict) else {},
+            utm_runtime_manager=utm_runtime_manager,
+        ),
     )
     registry.register(
         "vision.specimen_pose_snapshot",

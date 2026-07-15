@@ -69,16 +69,18 @@ const btnLiveBottomCollapse = document.getElementById("btn-live-bottom-collapse"
 const btnLiveChatCollapse = document.getElementById("btn-live-chat-collapse");
 const btnLiveChatRestore = document.getElementById("btn-live-chat-restore");
 const btnLiveSafeStop = document.getElementById("btn-live-safe-stop");
+const liveEmergencyRecovery = document.getElementById("live-emergency-recovery");
+const btnLiveEmergencyResume = document.getElementById("btn-live-emergency-resume");
+const btnLiveEmergencyReset = document.getElementById("btn-live-emergency-reset");
 const liveQuickActionButtons = Array.from(document.querySelectorAll(".live-quick-action"));
 const liveHoverTooltip = document.getElementById("live-hover-tooltip");
 const liveShortcutOverlay = document.getElementById("live-shortcut-overlay");
 const btnLiveShortcutsClose = document.getElementById("btn-live-shortcuts-close");
 const LIVE_UI_STATE_KEY = "autonomousLiveGuiUiState";
-const LIVE_SESSION_CACHE_KEY_PREFIX = "autonomousLivePlanningSessionCache:v3:";
+const LIVE_SESSION_CACHE_KEY_PREFIX = "autonomousLivePlanningSessionCache:v4:";
 const LIVE_BOX_CACHE_IDS = [
   "live-agent-binder-list",
   "live-focus-strip",
-  "live-report-panel",
   "live-backend-panel",
   "live-graph-panel",
   "live-artifact-panel",
@@ -184,7 +186,16 @@ let liveUtmCameraConfig = null;
 let liveUtmRuntimeGraphHash = "";
 let liveUtmRuntimeGraphFetchedAt = 0;
 let liveUtmRuntimeRefreshInFlight = null;
+let liveUtmRuntimeRefreshSeq = 0;
 let liveUtmRuntimeFrameInFlight = null;
+let liveUtmRuntimeActionInFlight = null;
+let livePrinterMonitorInFlight = null;
+let liveSpecimenVideoPlaying = false;
+let liveSpecimenVideoStartedAt = 0;
+let liveSpecimenVideoStartSeq = 0;
+let livePrinterVideoStatusInFlight = null;
+let livePrinterMonitorOverride = null;
+let livePrinterVideoOverride = null;
 let liveUtmRuntimeStreamUrlCache = "";
 let liveUtmRuntimeStreamUrlKey = "";
 const LIVE_UTM_GRAPH_REFRESH_INTERVAL_MS = 15000;
@@ -198,6 +209,7 @@ let liveGraphLastFocusKey = "";
 let liveSelectedReportSectionTitle = "Overview / Summary";
 let liveDesignCaptureViewerOpen = false;
 let liveDesignCaptureViewerIndex = 0;
+let liveSpecimenProgressDetailStep = "";
 let liveTimelineFilter = "all";
 let liveApprovals = { approvals: [], pending: [], resolved: [] };
 let liveGuardianStatus = null;
@@ -230,6 +242,7 @@ let liveOrcChartInstances = [];
 let liveOrcChartRenderFrame = null;
 let liveOrcEchartsLoadPromise = null;
 let liveOrcChartHydrationTimer = null;
+let liveBrowserCacheRestoredRunId = "";
 
 let queryGoal = "Design and validate a live-mode specimen plan before hardware execution.";
 let queryBackend = "vllm";
@@ -820,6 +833,7 @@ function compactPlanningStateForStorage(state = {}) {
     is_paused: Boolean(state.is_paused),
     stop_requested: Boolean(state.stop_requested),
     safe_stop_requested: Boolean(state.safe_stop_requested),
+    emergency_stop_requested: Boolean(state.emergency_stop_requested),
     loop_count: Number(state.loop_count || 0),
     run_metadata: compactMetadata,
   };
@@ -904,6 +918,11 @@ function restoreCachedPlanningState() {
     }
     const payload = JSON.parse(raw);
     if (!payload || typeof payload !== "object" || !payload.session) return false;
+    liveBrowserCacheRestoredRunId = String(
+      (payload.session && payload.session.state && payload.session.state.run_id)
+      || (payload.snapshot && payload.snapshot.state && payload.snapshot.state.run_id)
+      || ""
+    );
     liveLastSnapshot = payload.snapshot || liveLastSnapshot || {};
     liveGuardianStatus = normalizeGuardianStatusPayload(payload.guardianStatus) || liveGuardianStatus;
     liveRecentEvents = Array.isArray(payload.recentEvents) ? payload.recentEvents : liveRecentEvents;
@@ -917,6 +936,26 @@ function restoreCachedPlanningState() {
   } catch (err) {
     return false;
   }
+}
+
+function discardStaleLivePlanningCache(serverSession = {}) {
+  const serverRunId = String((serverSession.state && serverSession.state.run_id) || "");
+  if (!liveBrowserCacheRestoredRunId || !serverRunId || liveBrowserCacheRestoredRunId === serverRunId) return false;
+  const storage = liveSessionStorage();
+  const key = planningSessionCacheKey(planningSessionId);
+  if (storage && key) {
+    try {
+      storage.removeItem(key);
+    } catch (err) {
+      // Browser storage cleanup is best-effort; server state remains authoritative.
+    }
+  }
+  resetPlanningMessageDisplayState();
+  liveLastSession = {};
+  liveLastSnapshot = {};
+  liveBrowserCacheRestoredRunId = "";
+  if (planningChatLog) planningChatLog.innerHTML = "";
+  return true;
 }
 
 function restoreLiveUiState() {
@@ -1137,6 +1176,23 @@ function ensurePlanningSessionId() {
     }
     return planningSessionId;
   }
+}
+
+function resetPlanningSessionIdForEmergencyReset() {
+  const key = "autonomousLivePlanningSessionId";
+  const storage = liveSessionStorage();
+  const oldCacheKey = planningSessionCacheKey(planningSessionId);
+  planningSessionId = `live-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  planningFreshSessionInitialized = true;
+  try {
+    if (storage) {
+      if (oldCacheKey) storage.removeItem(oldCacheKey);
+      storage.setItem(key, planningSessionId);
+    }
+  } catch (err) {
+    // Session reset must not fail because browser storage is unavailable.
+  }
+  return planningSessionId;
 }
 
 function applyQueryGoal() {
@@ -1699,8 +1755,31 @@ function groupPlanningChatMessages(messages) {
   return groups;
 }
 
+function planningStableTextHash(value) {
+  const text = String(value || "");
+  let hash = 2166136261;
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+function planningMessageStableToken(msg, fallbackIndex = 0) {
+  if (!msg || typeof msg !== "object") return `fallback:${fallbackIndex}`;
+  if (msg?.message_id) return `message:${msg.message_id}`;
+  if (msg?.transcript_index !== undefined && msg?.transcript_index !== null) return `idx:${msg.transcript_index}`;
+  if (msg?.id) return `id:${msg.id}`;
+  if (msg?.event_id) return `event:${msg.event_id}`;
+  if (msg?.trace_id) return `trace:${msg.trace_id}`;
+  if (msg?.timestamp) return `ts:${msg.timestamp}`;
+  const content = String(msg.content || msg.message || "").trim();
+  if (content) return `content:${planningStableTextHash(`${msg.role || ""}:${msg.model || ""}:${content}`)}`;
+  return `fallback:${fallbackIndex}`;
+}
+
 function makePlanningChatGroupKey(baseKey, msg, fallbackIndex) {
-  const stablePart = msg?.transcript_index ?? msg?.timestamp ?? msg?.id ?? fallbackIndex;
+  const stablePart = planningMessageStableToken(msg, fallbackIndex);
   const safeBase = String(baseKey || "agent").replace(/[^a-zA-Z0-9_-]+/g, "_").slice(0, 32) || "agent";
   const safeStable = String(stablePart ?? fallbackIndex).replace(/[^a-zA-Z0-9_-]+/g, "_").slice(0, 48) || String(fallbackIndex);
   return `${safeBase}:${safeStable}`;
@@ -1730,7 +1809,7 @@ function buildPlanningChatItems(chatMessages) {
     let group = loopGroups.get(cycle);
     if (!group) {
       group = {
-        key: `loop:${cycleStartIndex}:${cycle}`,
+        key: `loop:${cycle}:${planningMessageStableToken(entry.msg, entry.index)}`,
         baseKey: "loop_summary",
         role: "loop_summary",
         kind: "loop_summary",
@@ -3731,14 +3810,76 @@ function markLiveAgentRead(agentId = liveSelectedAgent, session = liveLastSessio
   liveReadMarkers[safeAgent] = counts[safeAgent] || 0;
 }
 
+function nestedPrinterRuntimeObjects(event) {
+  const payload = eventPayload(event);
+  const result = payload.result && typeof payload.result === "object" ? payload.result : {};
+  const monitor = payload.monitor_snapshot && typeof payload.monitor_snapshot === "object" ? payload.monitor_snapshot : {};
+  const health = result.health && typeof result.health === "object" ? result.health : {};
+  const monitorHealth = monitor.health && typeof monitor.health === "object" ? monitor.health : {};
+  return [payload, result, monitor, health, monitorHealth].filter((item) => item && typeof item === "object");
+}
+
+function isTransientPrinterCommunicationEvent(event) {
+  const values = [event, ...nestedPrinterRuntimeObjects(event)];
+  const failureCodes = values
+    .map((item) => String(item.failure_code || item.error_code || item.code || "").toUpperCase())
+    .filter(Boolean);
+  if (failureCodes.some((code) => code === "BAMBU_MQTT_REPORT_TIMEOUT" || code === "BAMBU_MQTT_REPORT_NOT_FRESH")) return true;
+  const haystack = values
+    .map((item) => `${item.status || ""} ${item.state || ""} ${item.message || ""} ${item.error || ""} ${item.detail || ""}`)
+    .join(" ")
+    .toLowerCase();
+  return haystack.includes("preprint_communication_failed") || haystack.includes("communication_timeout");
+}
+
+function specimenPrinterRuntimeState() {
+  const events = currentRunEventSources();
+  const runningStates = new Set(["RUNNING", "PRINTING", "PREPARE", "PREPARING", "HEATING", "SLICING"]);
+  const failedStates = new Set(["FAILED", "FAIL", "ERROR", "CANCELLED", "CANCELED", "ABORTED"]);
+  const completeStates = new Set(["FINISH", "FINISHED", "IDLE", "READY", "COMPLETE", "COMPLETED"]);
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    const eventType = String(event.event_type || event.type || "");
+    const payload = eventPayload(event);
+    if (eventType === "planning_printer_completion_wait") {
+      const wait = payload.printer_wait && typeof payload.printer_wait === "object" ? payload.printer_wait : {};
+      const waitStatus = String(wait.status || event.status || "").toLowerCase();
+      if (waitStatus === "started") return "running";
+      if (waitStatus === "complete" || waitStatus === "completed") return "complete";
+    }
+    for (const source of nestedPrinterRuntimeObjects(event)) {
+      const deviceScreen = source.device_screen && typeof source.device_screen === "object" ? source.device_screen : {};
+      const progress = deviceScreen.progress_panel && typeof deviceScreen.progress_panel === "object" ? deviceScreen.progress_panel : {};
+      const job = deviceScreen.job && typeof deviceScreen.job === "object" ? deviceScreen.job : {};
+      const state = String(progress.state || job.state || source.state || source.status || event.status || "").toUpperCase();
+      if (!state) continue;
+      if (isTransientPrinterCommunicationEvent(event)) return "running";
+      if (runningStates.has(state)) return "running";
+      if (failedStates.has(state)) return "failed";
+      if (completeStates.has(state)) return "complete";
+    }
+  }
+  return "";
+}
+
 function eventStatusForAgent(agentId, state, running) {
   const events = currentRunEventSources();
   const agentEvents = events.filter((event) => agentIdFromEvent(event) === agentId);
-  const hasError = agentEvents.some((event) => String(event.level || event.severity || "").toLowerCase() === "error" || String(event.status || "").toLowerCase() === "failed");
+  const activeAgent = agentIdFromStage(state.stage || "");
+  const pendingInput = agentEvents.some(eventRequiresOperatorInput)
+    || planningMessagesCache.some((msg) => agentIdFromMessage(msg) === agentId && Boolean(msg.pending_operator_input));
+  if (pendingInput) return running && activeAgent === agentId ? "running" : "waiting";
+  const printerRuntime = agentId === "specimen" ? specimenPrinterRuntimeState() : "";
+  if (printerRuntime === "running") return "running";
+  const hasError = agentEvents.some((event) => !eventRequiresOperatorInput(event) && (
+    !isTransientPrinterCommunicationEvent(event) && (
+    String(event.level || event.severity || "").toLowerCase() === "error"
+    || String(event.status || "").toLowerCase() === "failed"
+    )
+  ));
   if (hasError) return "error";
   const pendingApproval = (liveApprovals.pending || []).some((item) => agentIdFromFreeText(`${item.stage || ""} ${item.title || ""} ${item.reason || ""}`) === agentId);
   if (pendingApproval) return "waiting";
-  const activeAgent = agentIdFromStage(state.stage || "");
   if (running && activeAgent === agentId) return "running";
   const agentMessages = planningMessagesCache.filter((msg) => agentIdFromMessage(msg) === agentId);
   if (agentEvents.length || agentMessages.length) return "done";
@@ -4424,6 +4565,62 @@ function latestVisionAgentReport(report) {
   return latestReportPayload(report, ["latest_vision_agent_report", "vision_agent_report", "data.vision_agent_report", "role_specific.vision_agent_report", "sections.vision_agent_report"]);
 }
 
+function latestActiveCamArtifact(report) {
+  const state = report && report.state ? report.state : {};
+  const metadata = state && state.run_metadata && typeof state.run_metadata === "object"
+    ? state.run_metadata
+    : {};
+  const artifact = metadata.latest_active_cam_artifact;
+  return artifact && typeof artifact === "object" ? artifact : {};
+}
+
+function latestUtmCompletionArtifact(report) {
+  const state = report && report.state ? report.state : {};
+  const metadata = state && state.run_metadata && typeof state.run_metadata === "object"
+    ? state.run_metadata
+    : {};
+  const artifact = metadata.latest_utm_completion_artifact;
+  if (!artifact || typeof artifact !== "object") return {};
+  const robotTask = metadata.robot_task_result && typeof metadata.robot_task_result === "object"
+    ? metadata.robot_task_result
+    : {};
+  const manipulation = metadata.manipulation_result && typeof metadata.manipulation_result === "object"
+    ? metadata.manipulation_result
+    : {};
+  const specimen = metadata.specimen_result && typeof metadata.specimen_result === "object"
+    ? metadata.specimen_result
+    : {};
+  const spec = state.current_experiment_spec && typeof state.current_experiment_spec === "object"
+    ? state.current_experiment_spec
+    : {};
+  const runId = String(state.run_id || "");
+  const sessionId = String(robotTask.rollout_session_id || robotTask.episode_id || manipulation.session_id || "");
+  const specimenId = String(robotTask.specimen_id || specimen.specimen_id || spec.specimen_id || "");
+  if (artifact.run_id && runId && String(artifact.run_id) !== runId) return {};
+  if (artifact.session_id && sessionId && String(artifact.session_id) !== sessionId) return {};
+  if (artifact.specimen_id && specimenId && String(artifact.specimen_id) !== specimenId) return {};
+  return artifact;
+}
+
+function latestVisionManipulationCompletion(report) {
+  const state = report && report.state ? report.state : {};
+  const metadata = state && state.run_metadata && typeof state.run_metadata === "object"
+    ? state.run_metadata
+    : {};
+  const candidates = [
+    state.latest_observations,
+    metadata.latest_vision_observation,
+    metadata.vision_agent_payload && metadata.vision_agent_payload.observation,
+    metadata.vision_agent_payload,
+  ];
+  for (const candidate of candidates) {
+    if (!candidate || typeof candidate !== "object") continue;
+    const completion = candidate.vision_manipulation_completion;
+    if (completion && typeof completion === "object") return completion;
+  }
+  return {};
+}
+
 function latestVisionSignalPacket(report) {
   const state = report && report.state ? report.state : {};
   const metadata = state && typeof state.run_metadata === "object" && state.run_metadata ? state.run_metadata : {};
@@ -4801,8 +4998,8 @@ function agentSpecificReportProfile(report, status, agentLabel) {
       checklist: ["Check camera heartbeat", "Inspect zone state", "Verify signal freshness", "Review visual evidence", "Gate manipulation handoff"],
     },
     manipulation: {
-      title: "Manipulation Agent / Pi0.5 Skill Supervision",
-      summary: "Shows bounded manipulation task selection, Pi0.5/LeRobot execution boundary, preflight gates, SARM-lite stage/risk state, Vision dependency, and robot_task_result handoff.",
+      title: "Manipulation Agent / Runtime Supervision",
+      summary: "Shows bounded manipulation task selection, LeRobot execution boundary, preflight gates, execution safety state, Vision dependency, and robot_task_result handoff.",
       rows: [
         ["task", manipulationTask.task_id || robotTaskResult.task_id || "-"],
         ["route", `${manipulationTask.source_location || "-"} -> ${manipulationTask.target_location || "-"}`],
@@ -4811,12 +5008,12 @@ function agentSpecificReportProfile(report, status, agentLabel) {
         ["policy_ref", manipulationPolicy.policy_ref || latestReportPayload(report, ["policy_path", "checkpoint_path", "policy_repo_id"]) || "-"],
         ["preflight", manipulationPreflight.status || "-"],
         ["current_stage", manipulationStage.current_stage || "-"],
-        ["sarm_progress", manipulationSarm.progress_score === undefined ? "-" : manipulationSarm.progress_score],
+        ["execution_safety_progress", manipulationSarm.progress_score === undefined ? "-" : manipulationSarm.progress_score],
         ["failure_precursor", manipulationSarm.failure_precursor === undefined ? "-" : manipulationSarm.failure_precursor],
         ["handoff_status", robotTaskResult.handoff_status || manipulationDecision.handoff_status || "-"],
         ["next_agent", robotTaskResult.next_action || manipulationDecision.recommended_next_agent || "-"],
       ],
-      checklist: ["Confirm Vision signal freshness", "Check robot/profile/policy preflight", "Run bounded LeRobot/Pi0.5 rollout", "Use SARM risk/recovery gate", "Require post-place Vision verification"],
+      checklist: ["Confirm Vision signal freshness", "Check robot/profile/policy preflight", "Run bounded policy rollout", "Check execution supervision", "Require post-place Vision verification"],
     },
     equipment: {
       title: "Lab Equipment / UTM Visual Control",
@@ -5252,7 +5449,7 @@ function renderManipulationReportDetails(report) {
         ["route", `${task.source_location || "-"} -> ${task.target_location || "-"}`],
         ["terminal_pose", packet.terminal_pose || task.intended_terminal_pose || "-"],
       ])}
-      <h5>Pi0.5 / LeRobot Boundary</h5>
+      <h5>Policy Runtime</h5>
       ${runtimeRows([
         ["policy_backend", policy.policy_backend || "-"],
         ["policy_type", policy.policy_type || "-"],
@@ -5277,7 +5474,7 @@ function renderManipulationReportDetails(report) {
       ])}
       <h5>Blocking / Warning Signals</h5>
       ${renderReportList(blockers, "No Manipulation preflight blockers recorded.", 16)}
-      <h5>SARM-lite Stage Machine</h5>
+      <h5>Execution Supervision</h5>
       ${runtimeRows([
         ["current_stage", stage.current_stage || "-"],
         ["completed", `${completedStages.length}/${taxonomy.length || "?"}`],
@@ -6433,8 +6630,15 @@ function renderDashboardCard(title, body, options = {}) {
   const meta = options.meta ? `<small>${escapeHtml(options.meta)}</small>` : "";
   const action = options.action || "";
   const extraClass = options.className ? ` ${escapeHtml(options.className)}` : "";
+  const dataAttrs = options.data && typeof options.data === "object"
+    ? Object.entries(options.data).map(([key, value]) => {
+      const safeKey = String(key).replace(/[^a-zA-Z0-9_-]/g, "");
+      if (!safeKey || value === undefined || value === null) return "";
+      return ` data-${escapeHtml(safeKey)}="${escapeHtml(value)}"`;
+    }).join("")
+    : "";
   return `
-    <section class="ar-report-card live-report-section ${dashboardSectionClass(options.span, options.tone)}${extraClass}${selected ? " selected" : ""}" data-report-section-title="${escapeHtml(sectionTitle)}" data-report-section-key="${escapeHtml(sectionKey)}" tabindex="0" role="button" aria-selected="${selected ? "true" : "false"}" aria-label="Select report section: ${escapeHtml(sectionTitle)}">
+    <section class="ar-report-card live-report-section ${dashboardSectionClass(options.span, options.tone)}${extraClass}${selected ? " selected" : ""}" data-report-section-title="${escapeHtml(sectionTitle)}" data-report-section-key="${escapeHtml(sectionKey)}"${dataAttrs} tabindex="0" role="button" aria-selected="${selected ? "true" : "false"}" aria-label="Select report section: ${escapeHtml(sectionTitle)}">
       <div class="ar-report-card-head">
         <div>
           ${eyebrow}
@@ -6468,6 +6672,32 @@ function renderDashboardRows(rows) {
       `).join("")}
     </dl>
   `;
+}
+
+function meaningfulDashboardValue(value) {
+  if (value === null || value === undefined) return false;
+  if (typeof value === "boolean") return true;
+  if (typeof value === "number") return Number.isFinite(value);
+  if (Array.isArray(value)) return value.length > 0;
+  if (typeof value === "object") return Object.keys(value).length > 0;
+  const text = String(value).trim();
+  if (!text) return false;
+  return !["-", "--", "unknown", "n/a", "none", "null", "undefined"].includes(text.toLowerCase());
+}
+
+function renderMeaningfulDashboardRows(rows, emptyText = "No evidence.") {
+  const seen = new Set();
+  const clean = (rows || []).filter((row) => {
+    if (!Array.isArray(row) || row.length < 2) return false;
+    const key = String(row[0] || "").trim();
+    const value = row[1];
+    if (!key || !meaningfulDashboardValue(value)) return false;
+    const dedupeKey = `${key.toLowerCase()}::${renderRuntimeValue(value)}`;
+    if (seen.has(dedupeKey)) return false;
+    seen.add(dedupeKey);
+    return true;
+  });
+  return clean.length ? renderDashboardRows(clean) : `<p class="hint">${escapeHtml(emptyText)}</p>`;
 }
 
 function renderDashboardMetric(label, value, meta = "", tone = "idle") {
@@ -7327,7 +7557,7 @@ function agentDataChannels(report, agentId) {
       dashboardChannel("Policy", manipulation.policy_plan || latestReportPayload(report, ["policy_path", "checkpoint_path", "policy_repo_id"])),
       dashboardChannel("Preflight", manipulation.preflight),
       dashboardChannel("Vision Context", manipulation.vision_context),
-      dashboardChannel("SARM State", manipulation.sarm),
+      dashboardChannel("Execution Supervision", manipulation.execution_safety || manipulation.sarm),
       dashboardChannel("Robot Result", robot),
       ...baseChannels,
     ];
@@ -7932,14 +8162,14 @@ function renderAgentVisualizationCard(report, status, agentLabel) {
       ? renderMiniBarChart(rows, { label: histRows.length ? "vision confidence histogram" : "vision signal confidence", emptyText: "No confidence-bearing vision signals are present yet." })
       : renderAgentEvidenceBoard(report, status, agentLabel, { title: "Vision Evidence Board" });
   } else if (agentId === "manipulation") {
-    title = "SARM / Preflight";
+    title = "Execution Supervision";
     const manipulation = latestManipulationReport(report) || {};
-    const sarm = manipulation.sarm || {};
+    const supervision = manipulation.execution_safety || manipulation.sarm || {};
     const preflight = manipulation.preflight || {};
     const numericRows = [
-      ["progress_score", sarm.progress_score, "running"],
-      ["risk_score", sarm.risk_score, "warning"],
-      ["failure_precursor", sarm.failure_precursor, "danger"],
+      ["progress_score", supervision.progress_score, "running"],
+      ["risk_score", supervision.risk_score, "warning"],
+      ["failure_precursor", supervision.failure_precursor, "danger"],
     ].map(([label, value, tone]) => {
       const number = dashboardFiniteNumber(value);
       return number === null ? null : { label, value: number, max: number <= 1 ? 1 : 100, meta: numberText(number, 3), tone };
@@ -7950,7 +8180,7 @@ function renderAgentVisualizationCard(report, status, agentLabel) {
       { label: "workspace_clear", status: preflight.workspace_clear },
     ].filter((item) => item.status !== undefined);
     const sections = [];
-    if (dashboardMiniBarItemCount(numericRows)) sections.push(renderMiniBarChart(numericRows, { label: "manipulation SARM scores", emptyText: "No SARM numeric scores are present yet." }));
+    if (dashboardMiniBarItemCount(numericRows)) sections.push(renderMiniBarChart(numericRows, { label: "manipulation supervision scores", emptyText: "No manipulation supervision scores are present yet." }));
     if (dashboardGateItemCount(gates)) sections.push(renderGateStatusBars(gates, { label: "manipulation preflight gates", compact: true, emptyText: "No manipulation preflight booleans are present yet." }));
     body = sections.length ? sections.join("") : renderAgentEvidenceBoard(report, status, agentLabel, { title: "Manipulation Evidence Board" });
   } else if (agentId === "equipment") {
@@ -11255,7 +11485,7 @@ function openDesignCaptureViewer(index = 0) {
 
 function renderDesignCaptureViewerOverlay() {
   if (!liveReportPanel) return;
-  const previous = liveReportPanel.querySelector(".ar-design-gallery-overlay");
+  const previous = liveReportPanel.querySelector(".ar-design-gallery-overlay:not(.ar-spm-progress-detail-overlay)");
   if (previous) previous.remove();
   if (!liveDesignCaptureViewerOpen) return;
   const items = designCaptureGalleryItems();
@@ -11297,6 +11527,69 @@ function renderDesignCaptureViewerOverlay() {
     </section>
   `;
   liveReportPanel.appendChild(overlay);
+}
+
+function specimenProgressStepLabel(step) {
+  const labels = {
+    stl_input: "STL input",
+    printability_check: "Printability check",
+    gcode_generation: "Gcode Generation",
+    print_connection: "Print Connection",
+    print: "Print",
+    auto_ejection: "Auto Ejection",
+  };
+  return labels[step] || "Agentic Progress";
+}
+
+function removeSpecimenProgressDetailOverlay() {
+  const existing = liveReportPanel && liveReportPanel.querySelector(".ar-spm-progress-detail-overlay");
+  if (existing) existing.remove();
+}
+
+function closeSpecimenProgressDetail() {
+  liveSpecimenProgressDetailStep = "";
+  removeSpecimenProgressDetailOverlay();
+}
+
+function renderSpecimenProgressDetailOverlay() {
+  if (!liveReportPanel) return;
+  removeSpecimenProgressDetailOverlay();
+  if (!liveSpecimenProgressDetailStep) return;
+  if (liveCurrentView !== "report" || liveReportPage === "attention" || liveSelectedAgent !== "specimen") return;
+  const report = selectedReportModel(liveLastSession || {});
+  const agentLabel = liveAgentLabel("specimen");
+  const status = eventStatusForAgent("specimen", report.state || {}, liveRunningFlag(liveLastSession || {}, liveLastSnapshot || {}, report.state || {}));
+  const step = liveSpecimenProgressDetailStep;
+  const label = specimenProgressStepLabel(step);
+  const overlay = document.createElement("div");
+  overlay.className = "ar-design-gallery-overlay ar-spm-progress-detail-overlay";
+  overlay.setAttribute("role", "dialog");
+  overlay.setAttribute("aria-modal", "false");
+  overlay.setAttribute("aria-label", `${label} detail`);
+  overlay.innerHTML = `
+    <div class="ar-design-gallery-scrim" data-spm-progress-action="close"></div>
+    <section class="ar-design-gallery-modal ar-spm-progress-detail-modal">
+      <header class="ar-design-gallery-head">
+        <div>
+          <span>Specimen Making Agent</span>
+          <strong>${escapeHtml(label)}</strong>
+          <em>${escapeHtml(status)} · detailed runtime cards</em>
+        </div>
+        <button type="button" class="ar-design-gallery-close" data-spm-progress-action="close" aria-label="Close ${escapeHtml(label)} details">Close</button>
+      </header>
+      <div class="ar-spm-progress-detail-grid live-report-grid">
+        ${renderSpecimenProgressDetailCards(report, status, agentLabel, null, step)}
+      </div>
+    </section>
+  `;
+  liveReportPanel.appendChild(overlay);
+  scheduleOrcEchartsRender();
+  hydrateDesignCaptureCanvases(overlay);
+}
+
+function openSpecimenProgressDetail(step = "stl_input") {
+  liveSpecimenProgressDetailStep = step;
+  renderSpecimenProgressDetailOverlay();
 }
 
 function drawDesignCaptureCanvas(canvas, payload = {}) {
@@ -11878,6 +12171,800 @@ function renderSpecimenArtifactLedger(items) {
   return dashboardList(rows, "No specimen artifact ledger recorded.", 8);
 }
 
+function specimenFirstValue(...values) {
+  for (const value of values) {
+    if (value === null || value === undefined || value === "") continue;
+    if (Array.isArray(value) && !value.length) continue;
+    return value;
+  }
+  return "";
+}
+
+function specimenStatusTone(value) {
+  return dashboardStatusTone(value || "pending");
+}
+
+function specimenProgressPercent(...values) {
+  const raw = specimenFirstValue(...values);
+  const value = dashboardFiniteNumber(raw);
+  if (value === null) return null;
+  return value > 0 && value <= 1 ? dashboardPercent(value * 100) : dashboardPercent(value);
+}
+
+function renderSpecimenProgressBar(value, label = "print progress") {
+  const pct = specimenProgressPercent(value);
+  const display = pct === null ? "unknown" : `${numberText(pct, 1)}%`;
+  return `
+    <div class="ar-spm-progress" role="group" aria-label="${escapeHtml(label)}">
+      <div class="ar-spm-progress-head">
+        <span>${escapeHtml(label)}</span>
+        <strong>${escapeHtml(display)}</strong>
+      </div>
+      <div class="ar-spm-progress-track" aria-hidden="true"><span style="--progress:${pct === null ? "0" : numberText(pct, 2)}%;"></span></div>
+    </div>
+  `;
+}
+
+function renderSpecimenTransferQueue(buildQueue, printerProfile, thread) {
+  const queueItems = Array.isArray(buildQueue.items) ? buildQueue.items : [];
+  const rows = queueItems.map((item) => ({
+    id: item.queue_id || "queue",
+    status: item.status || "recorded",
+    detail: item.remote_path || item.detail || item.message || "",
+  }));
+  if (!rows.length) {
+    rows.push({
+      id: "transfer",
+      status: buildQueue.queue_status || "pending",
+      detail: printerProfile.remote_gcode_path || thread.remote_gcode_path || "",
+    });
+  }
+  return `
+    <div class="ar-spm-transfer-list" role="list" aria-label="specimen transfer queue">
+      ${rows.slice(0, 5).map((item) => `
+        <div class="ar-spm-transfer-row tone-${escapeHtml(specimenStatusTone(item.status))}" role="listitem">
+          <span>${escapeHtml(compactText(item.id, 28))}</span>
+          <strong>${escapeHtml(compactText(renderRuntimeValue(item.status), 26))}</strong>
+          <small>${escapeHtml(compactText(renderRuntimeValue(item.detail || "-"), 72))}</small>
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderSpecimenTemperaturePanel(printerStatus, slicer, plan, spec) {
+  const telemetry = printerStatus.telemetry || {};
+  const temperatures = printerStatus.temperatures || telemetry.temperatures || {};
+  const nozzle = temperatures.nozzle || temperatures.hotend || {};
+  const bed = temperatures.bed || {};
+  const chamber = temperatures.chamber || {};
+  const rows = [
+    {
+      label: "Nozzle",
+      current: specimenFirstValue(nozzle.current_c, nozzle.current, telemetry.nozzle_temperature_c, telemetry.nozzle_temp_c),
+      target: specimenFirstValue(nozzle.target_c, nozzle.target, slicer.nozzle_temperature_c, plan.nozzle_temperature_c, spec.nozzle_temperature_c),
+    },
+    {
+      label: "Bed",
+      current: specimenFirstValue(bed.current_c, bed.current, telemetry.bed_temperature_c, telemetry.bed_temp_c),
+      target: specimenFirstValue(bed.target_c, bed.target, slicer.bed_temperature_c, plan.bed_temperature_c, spec.bed_temperature_c),
+    },
+    {
+      label: "Chamber",
+      current: specimenFirstValue(chamber.current_c, chamber.current, telemetry.chamber_temperature_c, telemetry.chamber_temp_c),
+      target: specimenFirstValue(chamber.target_c, chamber.target, slicer.chamber_temperature_c, plan.chamber_temperature_c, spec.chamber_temperature_c),
+    },
+  ];
+  return `
+    <div class="ar-spm-temp-panel">
+      ${rows.map((item) => `
+        <div>
+          <span>${escapeHtml(item.label)}</span>
+          <strong>${escapeHtml(renderRuntimeValue(specimenFirstValue(item.current, "-")))}<small> / ${escapeHtml(renderRuntimeValue(specimenFirstValue(item.target, "-")))} °C</small></strong>
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderSpecimenLiveJobMonitor(context) {
+  const printerStatus = context.printerStatus || {};
+  const buildQueue = context.buildQueue || {};
+  const estimatedPrintTime = context.estimatedPrintTime || {};
+  const layerPreview = context.layerPreview || {};
+  const thread = context.thread || {};
+  const outcome = context.outcome || {};
+  const packet = context.packet || {};
+  const job = printerStatus.job || printerStatus.print_job || printerStatus.current_job || buildQueue.job || {};
+  const progress = specimenProgressPercent(
+    job.progress_percent,
+    job.progress,
+    printerStatus.progress_percent,
+    printerStatus.progress,
+    outcome.progress_percent,
+    packet.progress_percent,
+  );
+  const currentLayer = specimenFirstValue(job.current_layer, printerStatus.current_layer, layerPreview.current_layer);
+  const totalLayers = specimenFirstValue(job.total_layers, printerStatus.total_layers, layerPreview.total_layers);
+  const remainingMin = specimenFirstValue(job.remaining_time_min, printerStatus.remaining_time_min, estimatedPrintTime.remaining_time_min, estimatedPrintTime.estimated_print_time_min);
+  const state = specimenFirstValue(job.state, job.status, printerStatus.state, printerStatus.prepare_status, buildQueue.queue_status, outcome.status, packet.status, "pending");
+  const hasLayer = currentLayer !== "" || totalLayers !== "";
+  const layerDisplay = hasLayer ? `${renderRuntimeValue(specimenFirstValue(currentLayer, "-"))} / ${renderRuntimeValue(specimenFirstValue(totalLayers, "-"))}` : "-";
+  return `
+    <div class="ar-spm-live-job-layout">
+      <div class="ar-spm-live-job-main">
+        ${renderSpecimenProgressBar(progress, "live job progress")}
+        <div class="ar-report-metrics">
+          ${renderDashboardMetric("State", state, "printer job", specimenStatusTone(state))}
+          ${renderDashboardMetric("Layer", layerDisplay, "current / total", "info")}
+          ${renderDashboardMetric("Remaining", specimenFirstValue(remainingMin, "-"), "min", "metrics")}
+          ${renderDashboardMetric("Queue", buildQueue.queue_status || "-", "handoff", specimenStatusTone(buildQueue.queue_status))}
+        </div>
+      </div>
+      <div class="ar-spm-live-job-side">
+        ${renderDashboardRows([
+          ["job_id", specimenFirstValue(job.job_id, job.id, buildQueue.printer_job_id, thread.printer_job_id, "-")],
+          ["remote_gcode", specimenFirstValue(job.remote_gcode_path, thread.remote_gcode_path, "-")],
+          ["local_gcode", specimenFirstValue(layerPreview.gcode_path, thread.gcode_path, "-")],
+          ["location", specimenFirstValue(outcome.location, printerStatus.location, "-")],
+        ])}
+      </div>
+    </div>
+  `;
+}
+
+function renderSpecimenCameraEvidence(screenReport, printerStatus) {
+  const camera = screenReport.camera_evidence || printerStatus.camera || printerStatus.video || {};
+  const frame = camera.frame || camera.latest_frame || {};
+  const src = specimenFirstValue(camera.data_url, camera.image_url, camera.frame_url, frame.data_url, frame.image_url);
+  const status = specimenFirstValue(camera.status, printerStatus.video_status, printerStatus.camera_status, "not linked");
+  return `
+    <div class="ar-spm-camera-evidence">
+      ${src ? `<img src="${escapeHtml(src)}" alt="printer camera evidence frame" loading="lazy" />` : `<div class="ar-spm-camera-placeholder"><span>CAM</span><strong>${escapeHtml(compactText(status, 42))}</strong></div>`}
+      ${renderDashboardRows([
+        ["status", status],
+        ["fps", specimenFirstValue(camera.fps, frame.fps, "-")],
+        ["resolution", specimenFirstValue(camera.resolution, frame.resolution, camera.width && camera.height ? `${camera.width}x${camera.height}` : "", "-")],
+        ["updated_at", specimenFirstValue(camera.updated_at, frame.updated_at, "-")],
+      ])}
+    </div>
+  `;
+}
+
+function renderSpecimenAutomationGate(autoejectionGate, printerStatus) {
+  const postPrint = printerStatus.post_print || printerStatus.autoejection || {};
+  const handoff = autoejectionGate.handoff || {};
+  const status = specimenFirstValue(autoejectionGate.status, postPrint.status, handoff.status, "pending");
+  return `
+    <div class="ar-spm-automation-grid">
+      ${renderDashboardMetric("Automation", status, "post-print", specimenStatusTone(status))}
+      ${renderDashboardMetric("Requested", autoejectionGate.requested === undefined ? "-" : autoejectionGate.requested, "operator option", autoejectionGate.requested ? "success" : "info")}
+      ${renderDashboardMetric("Method", specimenFirstValue(autoejectionGate.method, postPrint.method, "-"), "g-code/API", "info")}
+      ${renderDashboardMetric("Blockers", Array.isArray(autoejectionGate.blockers) ? autoejectionGate.blockers.length : "-", "count", Array.isArray(autoejectionGate.blockers) && autoejectionGate.blockers.length ? "warning" : "success")}
+    </div>
+    ${dashboardList(Array.isArray(autoejectionGate.blockers) ? autoejectionGate.blockers : [], "No post-print automation blockers recorded.", 4)}
+  `;
+}
+
+function renderSpecimenGcodeValidation(gcodeValidation, thread) {
+  const slicerGate = gcodeValidation.slicer_gate || {};
+  const gcodeGate = gcodeValidation.gcode_gate || {};
+  const rows = [
+    `slicer / ${slicerGate.status || "-"} / ${slicerGate.repair || slicerGate.reason || ""}`,
+    `gcode / ${gcodeGate.status || "-"} / ${gcodeGate.repair || gcodeGate.reason || ""}`,
+  ];
+  return `
+    <div class="ar-report-metrics">
+      ${renderDashboardMetric("Status", gcodeValidation.status || "-", "validation", specimenStatusTone(gcodeValidation.status))}
+      ${renderDashboardMetric("Slicer", slicerGate.status || "-", "gate", specimenStatusTone(slicerGate.status))}
+      ${renderDashboardMetric("G-code", gcodeGate.status || "-", "gate", specimenStatusTone(gcodeGate.status))}
+      ${renderDashboardMetric("File", gcodeValidation.gcode_path || thread.gcode_path ? "ready" : "pending", "artifact", gcodeValidation.gcode_path || thread.gcode_path ? "success" : "warning")}
+    </div>
+    ${renderDashboardRows([
+      ["gcode_path", gcodeValidation.gcode_path || thread.gcode_path || "-"],
+      ["slicer_message", slicerGate.repair || slicerGate.reason || slicerGate.detail || "-"],
+      ["gcode_message", gcodeGate.repair || gcodeGate.reason || gcodeGate.detail || "-"],
+    ])}
+    ${dashboardList(rows, "No validation gate rows recorded.", 3)}
+  `;
+}
+
+function specimenPrinterMonitorSnapshot() {
+  const event = latestPrinterMonitorEvent();
+  const payload = eventPayload(event);
+  const snapshot = payload.monitor_snapshot || {};
+  return { event, payload, snapshot, screen: snapshot.device_screen || {} };
+}
+
+function specimenRuntimeContext(report) {
+  const spec = report.spec || {};
+  const screenReport = latestSpecimenAgentReport(report) || {};
+  const fabrication = latestSpecimenFabricationReport(report) || {};
+  const packet = latestSpecimenFabricatedPacket(report) || {};
+  const monitor = specimenPrinterMonitorSnapshot();
+  const screen = monitor.screen || {};
+  const progressPanel = screen.progress_panel || {};
+  const controlPanel = screen.control_panel || {};
+  const cameraPanel = printerVideoCameraPanel(screen.camera_panel || screen.camera || {});
+  const materialPanel = screen.material_panel || screen.materials || {};
+  const thermal = screen.thermal || {};
+  const connection = screen.connection || {};
+  const actions = screen.actions || {};
+  const intent = fabrication.fabrication_intent || {};
+  const thread = fabrication.digital_thread || {};
+  const plan = fabrication.process_plan || {};
+  const outcome = fabrication.fabrication_outcome || {};
+  const slicer = screenReport.slicer_configuration || {};
+  const printerProfile = screenReport.printer_profile || {};
+  const buildQueue = screenReport.build_queue || {};
+  const estimatedPrintTime = screenReport.estimated_print_time || {};
+  const filamentUsage = screenReport.filament_usage || {};
+  const gcodeValidation = screenReport.gcode_validation || {};
+  const printReadiness = screenReport.print_readiness || {};
+  const spcReadiness = screenReport.spc_readiness || {};
+  const autoejectionGate = screenReport.autoejection_gate || monitor.snapshot.auto_ejection || {};
+  const buildTimeline = screenReport.build_timeline || {};
+  const layerPreview = screenReport.layer_preview || {};
+  const handoffStatus = screenReport.handoff_status || {};
+  const artifactLedger = Array.isArray(screenReport.artifact_ledger) ? screenReport.artifact_ledger : [];
+  const printerStatus = {
+    ...(screenReport.printer_status || {}),
+    mode: specimenFirstValue((screenReport.printer_status || {}).mode, monitor.snapshot.mode, screen.provider),
+    state: specimenFirstValue(progressPanel.state, screen.state, monitor.snapshot.status, (screenReport.printer_status || {}).state),
+    job: screen.job || (screenReport.printer_status || {}).job || {},
+    progress_percent: specimenFirstValue(progressPanel.progress_percent, (screenReport.printer_status || {}).progress_percent),
+    current_layer: specimenFirstValue(progressPanel.current_layer, (screenReport.printer_status || {}).current_layer),
+    total_layers: specimenFirstValue(progressPanel.total_layers, (screenReport.printer_status || {}).total_layers),
+    remaining_time_min: specimenFirstValue(progressPanel.remaining_min, (screenReport.printer_status || {}).remaining_time_min),
+    temperatures: screen.temperatures || (screenReport.printer_status || {}).temperatures || {},
+    telemetry: {
+      ...((screenReport.printer_status || {}).telemetry || {}),
+      nozzle_temperature_c: thermal.main_nozzle_current_c,
+      bed_temperature_c: thermal.bed_current_c,
+      chamber_temperature_c: thermal.chamber_current_c,
+    },
+    camera: cameraPanel,
+    actions: { ...actions, ...controlPanel },
+    connection,
+    material_panel: materialPanel,
+  };
+  return {
+    spec,
+    screenReport,
+    fabrication,
+    packet,
+    monitor,
+    screen,
+    progressPanel,
+    controlPanel,
+    cameraPanel,
+    materialPanel,
+    thermal,
+    connection,
+    actions,
+    intent,
+    thread,
+    plan,
+    outcome,
+    slicer,
+    printerProfile,
+    buildQueue,
+    estimatedPrintTime,
+    filamentUsage,
+    gcodeValidation,
+    printReadiness,
+    spcReadiness,
+    autoejectionGate,
+    buildTimeline,
+    layerPreview,
+    handoffStatus,
+    artifactLedger,
+    printerStatus,
+  };
+}
+
+function renderSpecimenNowPrinting(ctx, report = selectedReportModel(liveLastSession || {})) {
+  return `
+    <section class="ar-spm-control-cell ar-spm-now-printing">
+      <header><span>Now printing</span></header>
+      ${renderSpecimenNowPrintingBody(ctx, report)}
+    </section>
+  `;
+}
+
+function selectSpecimenDesignPreviewRecord(rows, refs = {}) {
+  const ordered = Array.isArray(rows) ? rows.filter((item) => item && typeof item === "object") : [];
+  if (!ordered.length) return null;
+  const specimenId = String(refs.specimenId || "").trim();
+  const candidateId = String(refs.candidateId || "").trim();
+  const loopIndex = Number(refs.loopIndex);
+  if (specimenId) {
+    const exactSpecimen = ordered.find((item) => String(item.specimen_id || "").trim() === specimenId);
+    if (exactSpecimen) return exactSpecimen;
+  }
+  if (candidateId) {
+    const exactCandidate = ordered.find((item) => String(item.candidate_id || item.id || "").trim() === candidateId);
+    if (exactCandidate) return exactCandidate;
+  }
+  if (Number.isFinite(loopIndex) && loopIndex > 0) {
+    const exactLoop = ordered.find((item) => Number(item.loop_index || item.rank) === loopIndex);
+    if (exactLoop) return exactLoop;
+  }
+  return ordered[ordered.length - 1];
+}
+
+function specimenDesignPreviewRecord(ctx, report) {
+  const designScreenReport = latestDesignAgentReport(report) || {};
+  const designReport = latestDesignReport(report) || {};
+  const rows = designActualSpecimenRows(designScreenReport, designReport, report);
+  const specimenId = specimenFirstValue(
+    ctx.screenReport && ctx.screenReport.specimen_id,
+    ctx.packet && ctx.packet.specimen_id,
+    ctx.thread && ctx.thread.specimen_id,
+    ctx.spec && ctx.spec.specimen_id,
+  );
+  const candidateId = specimenFirstValue(
+    ctx.screenReport && ctx.screenReport.candidate_id,
+    ctx.packet && ctx.packet.candidate_id,
+    ctx.thread && ctx.thread.candidate_id,
+    ctx.spec && ctx.spec.candidate_id,
+    designCandidateIdFromSpecimenId(specimenId),
+  );
+  const loopIndex = specimenFirstValue(
+    ctx.screenReport && ctx.screenReport.loop_index,
+    ctx.packet && ctx.packet.loop_index,
+    ctx.packet && ctx.packet.loop_id,
+    ctx.thread && ctx.thread.loop_index,
+    ctx.spec && ctx.spec.loop_index,
+    designLoopIndexFromIds(specimenId, candidateId),
+  );
+  return selectSpecimenDesignPreviewRecord(rows, { specimenId, candidateId, loopIndex });
+}
+
+function renderSpecimenNowPrintingBody(ctx, report = selectedReportModel(liveLastSession || {})) {
+  const designRecord = specimenDesignPreviewRecord(ctx, report);
+  const designScreenReport = latestDesignAgentReport(report) || {};
+  const designReport = latestDesignReport(report) || {};
+  const previewUrl = designRecord
+    ? designCandidateCaptureUrl(designRecord, designScreenReport, designReport, report)
+    : "";
+  const fileName = specimenFirstValue(
+    ctx.progressPanel.job_name,
+    ctx.printerStatus.job && ctx.printerStatus.job.name,
+    ctx.thread.gcode_path,
+    ctx.thread.stl_path,
+    ctx.spec.specimen_id,
+    "Waiting for print file",
+  );
+  return `
+    <div class="ar-spm-now-printing-body" data-preview-source="dsn">
+      ${previewUrl
+        ? `<img src="${escapeHtml(designCaptureImageUrl(previewUrl))}" alt="DSN generated STL preview" loading="lazy">`
+        : `<div class="ar-spm-file-placeholder"><strong>STL</strong><span>preview</span></div>`}
+      <strong title="${escapeHtml(renderRuntimeValue(fileName))}">${escapeHtml(compactText(renderRuntimeValue(fileName), 44))}</strong>
+      <small>${escapeHtml(compactText((designRecord && (designRecord.geometry_type || designRecord.geometry || designRecord.structure_type)) || ctx.spec.geometry_type || ctx.spec.geometry || ctx.thread.geometry_type || "specimen file", 36))}</small>
+    </div>
+  `;
+}
+
+function renderSpecimenPrintMonitoring(ctx) {
+  return `
+    <section class="ar-spm-control-cell ar-spm-print-monitoring">
+      <header><span>Print Monitoring</span></header>
+      ${renderSpecimenPrintMonitoringBody(ctx)}
+    </section>
+  `;
+}
+
+function renderSpecimenPrintMonitoringBody(ctx) {
+  const camera = ctx.cameraPanel || {};
+  const previewUrl = specimenVideoPreviewUrl(camera);
+  const streamUrl = specimenVideoStreamUrl(camera);
+  const active = Boolean(liveSpecimenVideoPlaying && streamUrl);
+  const frameUrl = active ? streamUrl : previewUrl;
+  const frameSrc = active ? specimenVideoUrlWithCacheBuster(frameUrl) : frameUrl;
+  const previewSrc = previewUrl ? specimenVideoUrlWithCacheBuster(previewUrl) : "";
+  const loadingAttr = active ? "" : " loading=\"lazy\"";
+  const cameraStatus = specimenFirstValue(camera.status, camera.summary, camera.mode, "waiting");
+  return `
+    <div class="ar-spm-video-frame ${active ? "is-playing" : "is-preview"}" data-spm-video-state="${active ? "playing" : "preview"}">
+      ${previewSrc && active
+        ? `<img class="ar-spm-video-snapshot" src="${escapeHtml(previewSrc)}" alt="3DP video snapshot fallback">`
+        : ""}
+      ${frameSrc
+        ? `<img class="${active ? "ar-spm-video-stream" : "ar-spm-video-snapshot"}" src="${escapeHtml(frameSrc)}" alt="3DP video ${active ? "stream" : "preview"}"${loadingAttr}>`
+        : `<div><strong>3DP video</strong><span>${escapeHtml(compactText(cameraStatus, 48))}</span></div>`}
+    </div>
+  `;
+}
+
+function specimenVideoPreviewUrl(camera = {}) {
+  return specimenFirstValue(camera.snapshot_url, camera.image_url, camera.frame_url, camera.data_url, camera.proxy_url);
+}
+
+function specimenVideoStreamUrl(camera = {}) {
+  const proxyUrl = camera.proxy_ready === false ? "" : camera.proxy_url;
+  return specimenFirstValue(proxyUrl, camera.stream_url, camera.mjpeg_url, camera.video_url);
+}
+
+function specimenVideoUrlWithCacheBuster(url) {
+  const value = String(url || "").trim();
+  if (!value || /^data:/i.test(value)) return value;
+  const stamp = liveSpecimenVideoStartedAt || Date.now();
+  const joiner = value.includes("?") ? "&" : "?";
+  return `${value}${joiner}spm_video=${encodeURIComponent(stamp)}`;
+}
+
+function printerVideoCameraPanel(baseCamera = {}) {
+  const base = baseCamera && typeof baseCamera === "object" ? baseCamera : {};
+  const override = livePrinterVideoOverride && livePrinterVideoOverride.cameraPanel && typeof livePrinterVideoOverride.cameraPanel === "object"
+    ? livePrinterVideoOverride.cameraPanel
+    : {};
+  return { ...base, ...override };
+}
+
+function renderSpecimenVideoHeaderControls(ctx) {
+  const camera = ctx.cameraPanel || {};
+  const active = Boolean(liveSpecimenVideoPlaying && specimenVideoStreamUrl(camera));
+  const status = active ? "streaming" : (liveSpecimenVideoPlaying ? "snapshot" : compactText(specimenFirstValue(camera.status, camera.summary, camera.mode, "preview"), 22));
+  return `
+    <div class="ar-spm-video-header-controls" aria-label="3DP video controls" title="${escapeHtml(`3DP video: ${status}`)}">
+      <button type="button" class="ar-spm-video-icon-button primary" data-spm-video-action="play" aria-label="Play 3DP video" title="Play 3DP video" ${active ? "disabled" : ""}><span aria-hidden="true">▶</span></button>
+      <button type="button" class="ar-spm-video-icon-button" data-spm-video-action="stop" aria-label="Stop 3DP video" title="Stop 3DP video"><span aria-hidden="true">■</span></button>
+      <small>${escapeHtml(status)}</small>
+    </div>
+  `;
+}
+
+function applyPrinterMonitorSnapshotResult(result) {
+  if (!result || typeof result !== "object") return null;
+  const monitorSnapshot = {};
+  ["ok", "tool", "status", "mode", "provider", "selected_printer", "device_screen", "preprint_gate", "operator_actions", "live_gates", "auto_ejection", "video_probe"].forEach((key) => {
+    if (Object.prototype.hasOwnProperty.call(result, key)) monitorSnapshot[key] = result[key];
+  });
+  const event = {
+    ts: new Date().toISOString(),
+    event_type: "workspace_monitor_snapshot",
+    level: result.ok === false ? "WARNING" : "INFO",
+    node_id: "specimen",
+    module_id: "specimen",
+    agent: "specimen_agent",
+    status: result.status || (result.ok === false ? "blocked" : "ready"),
+    message: "3DP printer monitor snapshot refreshed from Live GUI video play.",
+    payload: {
+      tool: "printer.status",
+      workflow: "printer_status_monitor",
+      monitor_snapshot: monitorSnapshot,
+      result,
+    },
+  };
+  livePrinterMonitorOverride = event;
+  liveRecentEvents = dedupeRuntimeEvents([...(Array.isArray(liveRecentEvents) ? liveRecentEvents : []), event]).slice(-160);
+  return event;
+}
+
+function applyPrinterVideoStatusResult(result) {
+  const payload = result && typeof result === "object" ? result : {};
+  const screen = payload.device_screen && typeof payload.device_screen === "object" ? payload.device_screen : {};
+  const panel = screen.camera_panel && typeof screen.camera_panel === "object" ? screen.camera_panel : {};
+  const camera = screen.camera && typeof screen.camera === "object" ? screen.camera : {};
+  livePrinterVideoOverride = {
+    tool: "printer.bambu.video_status",
+    updated_at: new Date().toISOString(),
+    cameraPanel: { ...camera, ...panel },
+    result: payload,
+  };
+  return livePrinterVideoOverride;
+}
+
+function stopSpecimenVideoPlayback(reason = "manual", options = {}) {
+  liveSpecimenVideoStartSeq += 1;
+  if (!liveSpecimenVideoPlaying && !liveSpecimenVideoStartedAt) return false;
+  liveSpecimenVideoPlaying = false;
+  liveSpecimenVideoStartedAt = 0;
+  if (options.render !== false) renderLiveRuntime(liveLastSession);
+  if (reason === "manual") setChatStatus("3DP VIDEO STOP", "idle");
+  return true;
+}
+
+async function startSpecimenVideoPlayback() {
+  const requestSeq = liveSpecimenVideoStartSeq + 1;
+  liveSpecimenVideoStartSeq = requestSeq;
+  liveSpecimenVideoPlaying = true;
+  liveSpecimenVideoStartedAt = Date.now();
+  setChatStatus("3DP VIDEO PLAY", "running");
+  renderLiveRuntime(liveLastSession);
+  const statusResult = await refreshLivePrinterMonitorStatus(liveLastSession, { force: true });
+  if (!liveSpecimenVideoPlaying || requestSeq !== liveSpecimenVideoStartSeq) return;
+  applyPrinterMonitorSnapshotResult(statusResult);
+  renderLiveRuntime(liveLastSession);
+  const videoResult = await refreshLivePrinterVideoStatus();
+  if (!liveSpecimenVideoPlaying || requestSeq !== liveSpecimenVideoStartSeq) return;
+  applyPrinterVideoStatusResult(videoResult);
+  await refreshPlanningAuxiliaryState(liveLastSession);
+  if (!liveSpecimenVideoPlaying || requestSeq !== liveSpecimenVideoStartSeq) return;
+  renderLiveRuntime(liveLastSession);
+  setChatStatus("3DP VIDEO", "idle");
+}
+
+async function runSpecimenConnectionTest(button = null) {
+  if (button) button.disabled = true;
+  setChatStatus("SPC CONNECTION TEST", "running");
+  try {
+    const statusResult = await refreshLivePrinterMonitorStatus(liveLastSession, { force: true });
+    applyPrinterMonitorSnapshotResult(statusResult);
+    renderLiveRuntime(liveLastSession);
+    setChatStatus("SPC CONNECTION TEST", "idle");
+  } catch (err) {
+    setChatStatus(`SPC CONNECTION TEST ERROR: ${err && err.message ? err.message : err}`, "warning");
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+function renderSpecimenPrinterStatusCharts(ctx) {
+  return `
+    <section class="ar-spm-control-cell ar-spm-printer-status">
+      <header><span>Printer Status</span></header>
+      ${renderSpecimenPrinterStatusBody(ctx)}
+    </section>
+  `;
+}
+
+function specimenMaterialSlotColor(slot = {}) {
+  const color = String(slot.tray_color || slot.color || "").replace(/[^0-9a-fA-F]/g, "").slice(0, 6);
+  return color ? `#${color}` : "#94a3b8";
+}
+
+function renderSpecimenMaterialSlots(ctx) {
+  const slots = Array.isArray(ctx.materialPanel.slots) ? ctx.materialPanel.slots.slice(0, 4) : [];
+  const visibleSlots = slots.length ? slots : [{ label: "Material", tray_type: ctx.printerProfile.material || ctx.spec.material || "-" }];
+  while (visibleSlots.length < 4) {
+    visibleSlots.push({ label: `Slot ${visibleSlots.length + 1}`, state: "empty", color: "334155" });
+  }
+  return `
+    <div class="ar-spm-material-strip">
+      ${visibleSlots.map((slot) => {
+        const swatch = specimenMaterialSlotColor(slot);
+        return `
+          <span class="ar-spm-material-chip" title="${escapeHtml(renderRuntimeValue(slot))}">
+            <i class="ar-spm-material-swatch" style="background:${escapeHtml(swatch)}"></i>
+            <b>${escapeHtml(compactText(slot.tray_type || slot.label || "slot", 18))}</b>
+            <em>${escapeHtml(compactText(slot.tray_sub_brands || slot.state || slot.label || "-", 22))}</em>
+            <small>${escapeHtml(renderRuntimeValue(slot.remain_percent === undefined ? "" : `${slot.remain_percent}%`, ""))}</small>
+          </span>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function renderSpecimenThermalDonut(item) {
+  const current = dashboardFiniteNumber(item.current);
+  const target = dashboardFiniteNumber(item.target);
+  const defaultMax = dashboardFiniteNumber(item.max) || 1;
+  const scaleMax = Math.max(defaultMax, target || 0, current || 0, 1);
+  const progress = current === null ? 0 : Math.max(0, Math.min(100, (current / scaleMax) * 100));
+  const tempLabel = current === null ? "--" : `${numberText(current, 0)}°`;
+  const targetLabel = target === null ? "target -" : `target ${numberText(target, 0)}°`;
+  return `
+    <article class="ar-spm-thermal-donut ar-spm-thermal-${escapeHtml(item.tone || "info")}" style="--thermal-progress:${progress.toFixed(1)}%">
+      <div class="ar-spm-thermal-core">
+        <strong>${escapeHtml(tempLabel)}</strong>
+        <span>${escapeHtml(item.label)}</span>
+        <em>${escapeHtml(targetLabel)}</em>
+      </div>
+    </article>
+  `;
+}
+
+function renderSpecimenThermalDonuts(ctx) {
+  const thermalItems = [
+    { label: "Nozzle", current: ctx.thermal.main_nozzle_current_c, target: ctx.thermal.main_nozzle_target_c, max: 260, tone: "nozzle" },
+    { label: "Bed", current: ctx.thermal.bed_current_c, target: ctx.thermal.bed_target_c, max: 120, tone: "bed" },
+    { label: "Chamber", current: ctx.thermal.chamber_current_c, target: ctx.thermal.chamber_target_c, max: 80, tone: "chamber" },
+  ];
+  return `
+    <div class="ar-spm-thermal-donuts" aria-label="Nozzle, bed, and chamber temperatures">
+      ${thermalItems.map((item) => renderSpecimenThermalDonut(item)).join("")}
+    </div>
+  `;
+}
+
+function renderSpecimenPrinterStatusBody(ctx) {
+  return `
+    ${renderSpecimenThermalDonuts(ctx)}
+    ${renderSpecimenMaterialSlots(ctx)}
+  `;
+}
+
+function renderSpecimenPrintConnection(ctx) {
+  return `
+    <section class="ar-spm-control-cell ar-spm-print-connection">
+      <header><span>Print Connection</span></header>
+      ${renderSpecimenPrintConnectionBody(ctx)}
+    </section>
+  `;
+}
+
+function renderSpecimenConnectionTestHeaderAction(ctx) {
+  const status = specimenFirstValue(ctx.connection.mqtt, ctx.connection.transfer, ctx.monitor.snapshot.status, "test");
+  return `
+    <button type="button" class="ar-spm-card-test-button" data-spm-connection-action="test" title="${escapeHtml(`Test print connection: ${status}`)}" aria-label="Test print connection">Test</button>
+  `;
+}
+
+function renderSpecimenPrintConnectionBody(ctx) {
+  const upload = ctx.actions.can_upload === undefined ? "-" : ctx.actions.can_upload ? "ready" : "blocked";
+  const start = ctx.actions.can_start_print === undefined ? "-" : ctx.actions.can_start_print ? "enabled" : "guarded";
+  return `
+    <div class="ar-spm-connection-grid">
+      ${renderDashboardMetric("MQTT", ctx.connection.mqtt || "-", "telemetry", specimenStatusTone(ctx.connection.mqtt))}
+      ${renderDashboardMetric("Transfer", ctx.connection.transfer || "-", "artifact", specimenStatusTone(ctx.connection.transfer))}
+      ${renderDashboardMetric("Upload", upload, "gate", specimenStatusTone(upload))}
+      ${renderDashboardMetric("Start", start, "gate", specimenStatusTone(start))}
+    </div>
+  `;
+}
+
+function specimenGateText(value) {
+  if (value === true) return "enabled";
+  if (value === false) return "blocked";
+  return value;
+}
+
+function specimenConnectionEvidenceRows(data = {}) {
+  const selected = data.selectedPrinter || {};
+  const connection = data.connection || {};
+  const actions = data.actions || {};
+  const gates = data.liveGates || {};
+  const camera = data.cameraPanel || {};
+  const upload = data.upload || {};
+  const storage = data.storage || {};
+  const autoEjection = data.autoEjection || {};
+  return [
+    ["printer", selected.label || selected.profile_id],
+    ["provider", selected.provider || data.provider],
+    ["MQTT telemetry", connection.mqtt || connection.status],
+    ["video stream", camera.status || connection.video],
+    ["transfer bridge", connection.transfer || upload.status],
+    ["upload gate", specimenGateText(gates.allow_upload ?? actions.can_upload)],
+    ["start print gate", specimenGateText(gates.allow_start_print ?? actions.can_start_print)],
+    ["auto ejection gate", specimenGateText(gates.allow_ejection ?? autoEjection.enabled)],
+    ["storage", storage.sdcard_available === undefined ? "" : storage.sdcard_available ? "SD ready" : "SD unavailable"],
+    ["last seen", connection.last_seen_at],
+  ];
+}
+
+function specimenAgenticProgressSteps(ctx) {
+  const gcodeReady = Boolean(ctx.gcodeValidation.gcode_path || ctx.thread.gcode_path);
+  const printState = specimenFirstValue(ctx.progressPanel.state, ctx.monitor.snapshot.status, ctx.buildQueue.queue_status, "pending");
+  return [
+    { id: "stl_input", label: "STL input", status: ctx.thread.stl_path || ctx.spec.stl_path ? "done" : "pending" },
+    { id: "printability_check", label: "Printability check", status: (ctx.spcReadiness.ready_for_live_print || ctx.printReadiness.pass_count) ? "done" : "checking" },
+    { id: "gcode_generation", label: "Gcode Generation", status: gcodeReady ? "done" : "pending" },
+    { id: "print", label: "Print", status: printState },
+    { id: "auto_ejection", label: "Auto Ejection", status: specimenFirstValue(ctx.autoejectionGate.status, ctx.monitor.snapshot.auto_ejection && ctx.monitor.snapshot.auto_ejection.mode, "pending") },
+  ];
+}
+
+function specimenProgressActionLabel(status) {
+  const clean = String(status || "").toLowerCase();
+  if (["done", "ok", "ready", "success", "completed", "complete", "finished"].some((token) => clean.includes(token))) return "Complete";
+  if (["checking", "running", "working", "active", "started", "printing", "processing", "in_progress"].some((token) => clean.includes(token))) return "Working";
+  if (["blocked", "error", "failed", "fault"].some((token) => clean.includes(token))) return "Blocked";
+  if (["warning", "waiting", "pending", "queued"].some((token) => clean.includes(token))) return clean.includes("pending") || clean.includes("queued") ? "Queued" : "Waiting";
+  return status ? "Action" : "Queued";
+}
+
+function specimenProgressToneClass(status) {
+  const clean = String(status || "").toLowerCase();
+  if (["done", "ok", "ready", "success", "completed", "complete", "finished"].some((token) => clean.includes(token))) return "tone-done";
+  if (["checking", "running", "working", "active", "started", "printing", "processing", "in_progress"].some((token) => clean.includes(token))) return "tone-active";
+  if (["blocked", "error", "failed", "fault"].some((token) => clean.includes(token))) return "tone-blocked";
+  return "tone-idle";
+}
+
+function specimenAgenticOrchestratorMessages(report = selectedReportModel(liveLastSession || {})) {
+  const items = [];
+  const pushItem = (label, status, detail) => {
+    const cleanDetail = compactText(renderRuntimeValue(detail || status || label || ""), 96);
+    if (!cleanDetail) return;
+    const key = `${label}:${status}:${cleanDetail}`;
+    if (items.some((item) => item.key === key)) return;
+    items.push({ key, label, status, detail: cleanDetail });
+  };
+  for (const item of (report.toolItems || []).slice(-4)) {
+    pushItem("Tool call", "tool", item);
+  }
+  const events = (report.events && report.events.length ? report.events : currentRunEventSources()).slice(-16);
+  for (const event of events) {
+    const payload = eventPayload(event);
+    const toolValue = backendField(payload, ["tool_calls", "tools", "tool_call", "tool", "tool_name", "tool_result", "tool_results"]);
+    const agent = String(event.agent || payload.agent || payload.role || event.role || "").toLowerCase();
+    const type = String(event.event_type || event.type || payload.event_type || "").toLowerCase();
+    const text = `${type} ${agent} ${event.message || ""} ${JSON.stringify(payload || {})}`.toLowerCase();
+    if (toolValue) {
+      pushItem("Tool call", payload.status || event.status || "active", toolValue);
+    } else if (text.includes("orchestrator") || text.includes("handoff") || text.includes("stage_changed")) {
+      pushItem("Orchestrator", payload.status || event.status || type || "event", reportEventText(event));
+    }
+  }
+  if (!items.length) {
+    pushItem("Orchestrator", "waiting", "Waiting for orchestrator tool-call trace.");
+  }
+  return items.slice(-3);
+}
+
+function renderSpecimenAgenticOrchestratorMessagePanel(report = selectedReportModel(liveLastSession || {})) {
+  const messages = specimenAgenticOrchestratorMessages(report);
+  const latest = messages[messages.length - 1] || { label: "Orchestrator", status: "waiting", detail: "Waiting for orchestrator tool-call trace." };
+  return `
+    <section class="ar-spm-orchestrator-message-panel" aria-label="Orchestrator tool-calling messages">
+      <strong>Orchestrator Message</strong>
+      <span>${escapeHtml(`${latest.label}: ${latest.detail}`)}</span>
+      <em>${escapeHtml(specimenProgressActionLabel(latest.status))}</em>
+    </section>
+  `;
+}
+
+function renderSpecimenAgenticProgress(ctx) {
+  return `
+    <section class="ar-spm-control-cell ar-spm-agentic-progress">
+      <header><span>Agentic Progress</span></header>
+      ${renderSpecimenAgenticProgressBody(ctx)}
+    </section>
+  `;
+}
+
+function renderSpecimenAgenticProgressNode(step, index, total) {
+  const tone = specimenStatusTone(step.status);
+  const progressTone = specimenProgressToneClass(step.status);
+  const hasNext = index < total - 1;
+  return `
+    <button type="button" class="ar-spm-progress-node tone-${escapeHtml(tone)} ${escapeHtml(progressTone)}" data-spm-progress-step="${escapeHtml(step.id)}" aria-label="${escapeHtml(`Open ${step.label} details`)}">
+      <i>${escapeHtml(String(index + 1).padStart(2, "0"))}</i>
+      <span>${escapeHtml(step.label)}</span>
+      <b class="ar-spm-progress-action">${escapeHtml(specimenProgressActionLabel(step.status))}</b>
+    </button>
+    ${hasNext ? `<span class="ar-spm-progress-edge tone-${escapeHtml(tone)} ${escapeHtml(progressTone)}" aria-hidden="true"></span>` : ""}
+  `;
+}
+
+function renderSpecimenAgenticProgressBody(ctx) {
+  const steps = specimenAgenticProgressSteps(ctx);
+  const report = selectedReportModel(liveLastSession || {});
+  return `
+    <div class="ar-spm-progress-steps">
+      ${renderSpecimenAgenticOrchestratorMessagePanel(report)}
+      <div class="ar-spm-progress-node-rail" role="list" aria-label="Specimen making connected workflow nodes">
+        ${steps.map((step, index) => renderSpecimenAgenticProgressNode(step, index, steps.length)).join("")}
+      </div>
+    </div>
+  `;
+}
+
+function renderSpecimenPrintControlPanel(report, status, agentLabel, profile) {
+  const ctx = specimenRuntimeContext(report);
+  const progressPanel = ctx.progressPanel || {};
+  const progress = specimenProgressPercent(progressPanel.progress_percent, ctx.printerStatus.progress_percent, ctx.outcome.progress_percent, ctx.packet.progress_percent);
+  return `
+    ${renderDashboardCard("Now printing", renderSpecimenNowPrintingBody(ctx, report), { span: 3, tone: "specimen", eyebrow: "DSN STL preview", className: "ar-spm-panel-card ar-spm-now-printing-card" })}
+    ${renderDashboardCard("Printing Progress", `
+      ${renderSpecimenProgressBar(progress, "live job monitor")}
+      <div class="ar-report-metrics">
+        ${renderDashboardMetric("State", specimenFirstValue(progressPanel.state, ctx.monitor.snapshot.status, status, "-"), "job", specimenStatusTone(specimenFirstValue(progressPanel.state, ctx.monitor.snapshot.status, status)))}
+        ${renderDashboardMetric("Layer", `${renderRuntimeValue(specimenFirstValue(progressPanel.current_layer, "-"))} / ${renderRuntimeValue(specimenFirstValue(progressPanel.total_layers, "-"))}`, "current / total", "info")}
+        ${renderDashboardMetric("Remain", specimenFirstValue(progressPanel.remaining_min, ctx.printerStatus.remaining_time_min, "-"), "min", "metrics")}
+      </div>
+    `, { span: 9, tone: "specimen", eyebrow: "live job monitor", className: "ar-spm-panel-card ar-spm-progress-card" })}
+    ${renderDashboardCard("Print Monitoring", renderSpecimenPrintMonitoringBody(ctx), { span: 4, tone: "activity", eyebrow: "3DP video", className: "ar-spm-panel-card ar-spm-monitoring-card", action: renderSpecimenVideoHeaderControls(ctx) })}
+    ${renderDashboardCard("Printer Status", renderSpecimenPrinterStatusBody(ctx), { span: 4, tone: "metrics", eyebrow: "thermal + material", className: "ar-spm-panel-card ar-spm-status-card" })}
+    ${renderDashboardCard("Print Connection", renderSpecimenPrintConnectionBody(ctx), { span: 4, tone: "info", eyebrow: "bridge state", className: "ar-spm-panel-card ar-spm-connection-card", action: renderSpecimenConnectionTestHeaderAction(ctx), data: { "spm-progress-step": "print_connection" } })}
+    ${renderDashboardCard("Agentic Progress", renderSpecimenAgenticProgressBody(ctx), { span: 12, tone: "specimen", eyebrow: "click for details", className: "ar-spm-panel-card ar-spm-agentic-card" })}
+  `;
+}
+
 function specimenReadinessGateRows(screenReport, fabrication) {
   const readiness = screenReport && screenReport.print_readiness ? screenReport.print_readiness : {};
   if (Array.isArray(readiness.gates) && readiness.gates.length) return readiness.gates;
@@ -11892,7 +12979,7 @@ function specimenReadinessGateRows(screenReport, fabrication) {
   return Array.isArray(fabrication.quality_gates) ? fabrication.quality_gates : [];
 }
 
-function renderSpecimenDashboardCards(report, status, agentLabel, profile) {
+function renderSpecimenProgressDetailCards(report, status, agentLabel, profile, detailStep = "all") {
   const spec = report.spec || {};
   const screenReport = latestSpecimenAgentReport(report) || {};
   const fabrication = latestSpecimenFabricationReport(report) || {};
@@ -11911,6 +12998,15 @@ function renderSpecimenDashboardCards(report, status, agentLabel, profile) {
   const printReadiness = screenReport.print_readiness || {};
   const printerStatus = screenReport.printer_status || {};
   const spcReadiness = screenReport.spc_readiness || {};
+  const monitor = specimenPrinterMonitorSnapshot();
+  const runtimeScreen = monitor.screen || {};
+  const runtimeConnection = runtimeScreen.connection || {};
+  const runtimeActions = { ...((runtimeScreen.actions || {})), ...((runtimeScreen.control_panel || {})) };
+  const runtimeSelectedPrinter = monitor.snapshot.selected_printer || {};
+  const runtimeLiveGates = monitor.snapshot.live_gates || {};
+  const runtimeCameraPanel = printerVideoCameraPanel(runtimeScreen.camera_panel || runtimeScreen.camera || {});
+  const runtimeUpload = runtimeScreen.upload || {};
+  const runtimeStorage = runtimeScreen.storage || {};
   const spcSelectedPrinter = spcReadiness.selected_printer || printerProfile.selected_printer || {};
   const spcDeviceActions = spcReadiness.device_actions || printerStatus.actions || {};
   const spcDeviceConnection = spcReadiness.device_connection || printerStatus.connection || {};
@@ -11922,92 +13018,182 @@ function renderSpecimenDashboardCards(report, status, agentLabel, profile) {
   const artifactLedger = Array.isArray(screenReport.artifact_ledger) ? screenReport.artifact_ledger : [];
   const gates = specimenReadinessGateRows(screenReport, fabrication);
   const gateItems = gates.map((gate) => `${gate.name || gate.gate || "gate"} / ${gate.status || "unknown"} / ${gate.reason || gate.summary || ""}`);
-  const queueItems = Array.isArray(buildQueue.items) ? buildQueue.items.map((item) => `${item.queue_id || "queue"} / ${item.status || "recorded"} / ${item.remote_path || item.detail || ""}`) : [];
   const readinessBars = [
     { label: "pass", value: printReadiness.pass_count, tone: "success", meta: renderRuntimeValue(printReadiness.pass_count, "0") },
     { label: "warn", value: printReadiness.warn_count, tone: "warning", meta: renderRuntimeValue(printReadiness.warn_count, "0") },
     { label: "blocked", value: printReadiness.blocked_count, tone: "danger", meta: renderRuntimeValue(printReadiness.blocked_count, "0") },
     { label: "fail", value: printReadiness.fail_count, tone: "danger", meta: renderRuntimeValue(printReadiness.fail_count, "0") },
   ];
+  if (detailStep && detailStep !== "all") {
+    const stepCards = {
+      stl_input: `
+        ${renderDashboardCard("STL Input", `
+          <div class="ar-report-metrics">
+            ${renderDashboardMetric("Layer", slicer.layer_height_mm || plan.layer_height_mm || spec.layer_height_mm || "-", "mm", "info")}
+            ${renderDashboardMetric("Nozzle", slicer.nozzle_diameter_mm || plan.nozzle_diameter_mm || spec.nozzle_diameter_mm || "-", "mm", "running")}
+            ${renderDashboardMetric("Mass", filamentUsage.estimated_mass_g || plan.estimated_mass_g || spec.expected_mass_g || "-", "g", "specimen")}
+          </div>
+          ${renderDashboardRows([
+            ["specimen_id", thread.specimen_id || spec.specimen_id || "-"],
+            ["candidate_id", thread.candidate_id || spec.candidate_id || "-"],
+            ["material", printerProfile.material || thread.material || spec.material || "-"],
+            ["stl_path", thread.stl_path || latestReportPayload(report, ["stl_path"]) || "-"],
+          ])}
+        `, { span: 6, tone: "specimen", eyebrow: "authoritative input" })}
+        ${renderDashboardCard("Layer Preview", renderSpecimenLayerPreview(layerPreview), { span: 6, tone: layerPreview.preview_available ? "success" : "activity", eyebrow: "sliced path" })}
+      `,
+      printability_check: `
+        ${renderDashboardCard("Readiness Gate", `<div class="ar-report-metrics">
+          ${renderDashboardMetric("Pass", gates.filter((gate) => gate.status === "pass").length, "quality gates", "success")}
+          ${renderDashboardMetric("Blocked", gates.filter((gate) => gate.status === "blocked").length, "quality gates", "warning")}
+          ${renderDashboardMetric("Fail", gates.filter((gate) => gate.status === "fail").length, "quality gates", "danger")}
+          ${renderDashboardMetric("Total", gates.length, "checks", "info")}
+        </div>${renderMiniBarChart(readinessBars, { label: "specimen readiness gate counts", compact: true, limit: 4 })}${dashboardList(gateItems, "No fabrication quality gates recorded.", 8)}`, { span: 12, tone: gates.some((gate) => gate.status === "blocked" || gate.status === "fail") ? "warning" : "success", eyebrow: "printability + start gates" })}
+      `,
+      gcode_generation: `
+        ${renderDashboardCard("Slice Profile", `
+          ${renderDashboardRows([
+            ["slicer_profile", slicer.slicer_profile_hint || thread.slicer_profile_hint || spec.slicer_profile_hint || "-"],
+            ["layer_height_mm", slicer.layer_height_mm || plan.layer_height_mm || spec.layer_height_mm || "-"],
+            ["first_layer_height_mm", slicer.first_layer_height_mm || plan.first_layer_height_mm || spec.first_layer_height_mm || "-"],
+            ["nozzle_diameter_mm", slicer.nozzle_diameter_mm || plan.nozzle_diameter_mm || spec.nozzle_diameter_mm || "-"],
+            ["slicer_command", Array.isArray(slicer.slicer_command) ? slicer.slicer_command.join(" ") : slicer.slicer_command || "-"],
+          ])}
+        `, { span: 6, tone: "metrics", eyebrow: "slicer input" })}
+        ${renderDashboardCard("G-code Validation", renderSpecimenGcodeValidation(gcodeValidation, thread), { span: 6, tone: specimenStatusTone(gcodeValidation.status), eyebrow: "slicer output" })}
+      `,
+      print: `
+        ${renderDashboardCard("Live Job Monitor", renderSpecimenLiveJobMonitor({ printerStatus, buildQueue, estimatedPrintTime, layerPreview, thread, outcome, packet }), { span: 12, tone: specimenStatusTone(buildQueue.queue_status || outcome.status || printerStatus.prepare_status), eyebrow: "active print job", className: "ar-spc-live-job-monitor-card" })}
+        ${renderDashboardCard("Transfer Queue", `
+          ${renderSpecimenTransferQueue(buildQueue, printerProfile, thread)}
+          ${renderDashboardRows([
+            ["can_upload", spcDeviceActions.can_upload === undefined ? "-" : spcDeviceActions.can_upload],
+            ["can_start_print", spcDeviceActions.can_start_print === undefined ? "-" : spcDeviceActions.can_start_print],
+            ["printer_job_id", buildQueue.printer_job_id || thread.printer_job_id || "-"],
+            ["remote_gcode_path", printerProfile.remote_gcode_path || thread.remote_gcode_path || "-"],
+          ])}
+        `, { span: 6, tone: specimenStatusTone(buildQueue.queue_status || outcome.status), eyebrow: "upload + start" })}
+        ${renderDashboardCard("Camera Evidence", renderSpecimenCameraEvidence(screenReport, printerStatus), { span: 6, tone: "activity", eyebrow: "live frame / evidence" })}
+      `,
+      print_connection: `
+        ${renderDashboardCard("Connection State", `
+          ${renderMeaningfulDashboardRows(specimenConnectionEvidenceRows({
+            selectedPrinter: runtimeSelectedPrinter.profile_id ? runtimeSelectedPrinter : spcSelectedPrinter,
+            provider: monitor.snapshot.provider || spcReadiness.provider || printerProfile.provider || thread.printer_provider,
+            connection: { ...spcDeviceConnection, ...runtimeConnection },
+            actions: { ...spcDeviceActions, ...runtimeActions },
+            liveGates: runtimeLiveGates,
+            cameraPanel: runtimeCameraPanel,
+            upload: runtimeUpload,
+            storage: runtimeStorage,
+            autoEjection: monitor.snapshot.auto_ejection || autoejectionGate,
+          }), "No current connection evidence.")}
+        `, { span: 12, tone: specimenStatusTone(runtimeConnection.mqtt || spcDeviceConnection.mqtt || monitor.snapshot.status), eyebrow: "current bridge evidence" })}
+      `,
+      auto_ejection: `
+        ${renderDashboardCard("Post-Print Automation", renderSpecimenAutomationGate(autoejectionGate, printerStatus), { span: 6, tone: specimenStatusTone(autoejectionGate.status), eyebrow: "ejection + handoff" })}
+        ${renderDashboardCard("Handoff / Artifacts", `
+          <div class="ar-report-metrics">
+            ${renderDashboardMetric("Handoff", handoffStatus.status || packet.status || "-", "specimen", /ready|virtual|printed/i.test(String(handoffStatus.status || packet.status || "")) ? "success" : "warning")}
+            ${renderDashboardMetric("Feedback", feedback.quality_score === undefined ? "-" : feedback.quality_score, "quality", "info")}
+            ${renderDashboardMetric("Artifacts", artifactLedger.length, "ledger", "artifact")}
+            ${renderDashboardMetric("Physical", printerProfile.physical_intent === undefined ? intent.physical_intent : printerProfile.physical_intent, "intent", printerProfile.physical_intent || intent.physical_intent ? "warning" : "info")}
+          </div>
+          ${renderDashboardRows([
+            ["printer_path", printerProfile.printer_path || intent.printer_path || "-"],
+            ["consumer_agent", handoffStatus.consumer_agent || packet.consumer_agent || "-"],
+            ["physical_location", handoffStatus.physical_location || packet.physical_location || outcome.location || "-"],
+            ["next_action", handoffStatus.next_action || packet.next_action || "-"],
+          ])}
+          ${renderSpecimenArtifactLedger(artifactLedger)}
+        `, { span: 6, tone: /ready|virtual|printed/i.test(String(handoffStatus.status || packet.status || "")) ? "success" : "warning", eyebrow: "digital thread" })}
+      `,
+    };
+    return stepCards[detailStep] || stepCards.stl_input;
+  }
   return `
-    ${renderDashboardCard("Fabrication Plan", `
+    ${renderDashboardCard("Build Intent", `
       <div class="ar-report-metrics">
         ${renderDashboardMetric("Layer", slicer.layer_height_mm || plan.layer_height_mm || spec.layer_height_mm || "-", "mm", "info")}
         ${renderDashboardMetric("Nozzle", slicer.nozzle_diameter_mm || plan.nozzle_diameter_mm || spec.nozzle_diameter_mm || "-", "mm", "running")}
         ${renderDashboardMetric("Time", estimatedPrintTime.estimated_print_time_min || plan.estimated_print_time_min || spec.expected_print_time_min || "-", "min", "metrics")}
+        ${renderDashboardMetric("Mass", filamentUsage.estimated_mass_g || plan.estimated_mass_g || spec.expected_mass_g || "-", "g", "specimen")}
       </div>
       ${renderDashboardRows([
         ["specimen_id", thread.specimen_id || spec.specimen_id || "-"],
         ["candidate_id", thread.candidate_id || spec.candidate_id || "-"],
-        ["slicer_profile", slicer.slicer_profile_hint || thread.slicer_profile_hint || spec.slicer_profile_hint || "-"],
         ["material", printerProfile.material || thread.material || spec.material || "-"],
-        ["bed_temperature_c", slicer.bed_temperature_c || plan.bed_temperature_c || spec.bed_temperature_c || "-"],
         ["stl_path", thread.stl_path || latestReportPayload(report, ["stl_path"]) || "-"],
       ])}
-    `, { span: 4, tone: "specimen", eyebrow: "slicer + digital thread" })}
-    ${renderDashboardCard("Printer Runtime", `
+    `, { span: 4, tone: "specimen", eyebrow: "part + digital thread" })}
+    ${renderDashboardCard("Printer Telemetry", `
       <div class="ar-report-metrics">
-        ${renderDashboardMetric("Queue", buildQueue.queue_status || outcome.status || "-", "status", /blocked|fail/i.test(String(buildQueue.queue_status || outcome.status || "")) ? "warning" : "success")}
-        ${renderDashboardMetric("Storage", printerProfile.storage_status || "-", "profile", "info")}
         ${renderDashboardMetric("Mode", printerStatus.mode || "-", "printer", "running")}
+        ${renderDashboardMetric("Conn", spcDeviceConnection.mqtt || spcDeviceConnection.status || "-", "bridge", specimenStatusTone(spcDeviceConnection.mqtt || spcDeviceConnection.status))}
+        ${renderDashboardMetric("Storage", printerProfile.storage_status || spcDeviceConnection.storage || "-", "profile", "info")}
+        ${renderDashboardMetric("Ready", spcReadiness.ready_for_live_print === undefined ? "-" : spcReadiness.ready_for_live_print, "start gate", spcReadiness.ready_for_live_print ? "success" : "warning")}
       </div>
       ${renderDashboardRows([
         ["provider", spcReadiness.provider || printerProfile.provider || thread.printer_provider || "-"],
         ["selected_printer", spcSelectedPrinter.label || spcSelectedPrinter.profile_id || "-"],
         ["mqtt", spcDeviceConnection.mqtt || "-"],
         ["transfer", spcDeviceConnection.transfer || "-"],
-        ["can_upload", spcDeviceActions.can_upload === undefined ? "-" : spcDeviceActions.can_upload],
-        ["can_start_print", spcDeviceActions.can_start_print === undefined ? "-" : spcDeviceActions.can_start_print],
-        ["preprint_gate", spcPreprintGate.state || spcReadiness.preprint_gate_state || "-"],
-        ["ready_for_live_print", spcReadiness.ready_for_live_print === undefined ? "-" : spcReadiness.ready_for_live_print],
-        ["autoejection", autoejectionGate.status || "-"],
-        ["printer_profile", printerProfile.printer_profile || thread.printer_profile || spec.printer_profile || "-"],
-        ["printer_path", printerProfile.printer_path || intent.printer_path || "-"],
-        ["printer_job_id", buildQueue.printer_job_id || thread.printer_job_id || "-"],
-        ["remote_gcode_path", printerProfile.remote_gcode_path || thread.remote_gcode_path || "-"],
-        ["physical_intent", printerProfile.physical_intent === undefined ? intent.physical_intent : printerProfile.physical_intent],
+        ["profile", printerProfile.printer_profile || thread.printer_profile || spec.printer_profile || "-"],
       ])}
-      ${dashboardList(queueItems, "No build queue items recorded.", 3)}
-    `, { span: 4, tone: buildQueue.queue_status === "blocked" ? "warning" : "specimen", eyebrow: "printer + queue" })}
-    ${renderDashboardCard("Material Budget", `
-      ${renderSpecimenDonut(filamentUsage.donut || [], { unit: "g", emptyText: "No filament usage data is present." })}
-      ${renderMiniBarChart((estimatedPrintTime.bars || []).map((item) => ({ label: item.label, value: item.value, tone: item.label === "print" ? "running" : "info", meta: `${renderRuntimeValue(item.value, "0")} ${item.unit || "min"}` })), { label: "specimen print time bars", compact: true, emptyText: "No print-time bar data is present." })}
-    `, { span: 4, tone: "metrics", eyebrow: "filament + time" })}
+    `, { span: 4, tone: buildQueue.queue_status === "blocked" ? "warning" : "specimen", eyebrow: "device bridge" })}
     ${renderDashboardCard("Readiness Gate", `<div class="ar-report-metrics">
       ${renderDashboardMetric("Pass", gates.filter((gate) => gate.status === "pass").length, "quality gates", "success")}
       ${renderDashboardMetric("Blocked", gates.filter((gate) => gate.status === "blocked").length, "quality gates", "warning")}
       ${renderDashboardMetric("Fail", gates.filter((gate) => gate.status === "fail").length, "quality gates", "danger")}
       ${renderDashboardMetric("Total", gates.length, "checks", "info")}
-    </div>${renderMiniBarChart(readinessBars, { label: "specimen readiness gate counts", compact: true, limit: 4 })}${dashboardList(gateItems, "No fabrication quality gates recorded.", 6)}`, { span: 6, tone: gates.some((gate) => gate.status === "blocked" || gate.status === "fail") ? "warning" : "success", eyebrow: "quality + gcode gates" })}
-    ${renderDashboardCard("Build Evidence", `
-      <div class="ar-spm-evidence-grid">
-        <section>
-          <h5>Timeline</h5>
-          ${renderSpecimenTimeline((buildTimeline.timeline || []))}
-        </section>
-        <section>
-          <h5>Layer Preview</h5>
-          ${renderSpecimenLayerPreview(layerPreview)}
-        </section>
-      </div>
-    `, { span: 6, tone: "activity", eyebrow: "timeline + layer preview" })}
-    ${renderDashboardCard("G-code / Handoff", `
+    </div>${renderMiniBarChart(readinessBars, { label: "specimen readiness gate counts", compact: true, limit: 4 })}${dashboardList(gateItems, "No fabrication quality gates recorded.", 5)}`, { span: 4, tone: gates.some((gate) => gate.status === "blocked" || gate.status === "fail") ? "warning" : "success", eyebrow: "quality + start gates" })}
+    ${renderDashboardCard("Live Job Monitor", renderSpecimenLiveJobMonitor({ printerStatus, buildQueue, estimatedPrintTime, layerPreview, thread, outcome, packet }), { span: 12, tone: specimenStatusTone(buildQueue.queue_status || outcome.status || printerStatus.prepare_status), eyebrow: "active print job", className: "ar-spc-live-job-monitor-card" })}
+    ${renderDashboardCard("Slice Profile", `
+      ${renderDashboardRows([
+        ["slicer_profile", slicer.slicer_profile_hint || thread.slicer_profile_hint || spec.slicer_profile_hint || "-"],
+        ["layer_height_mm", slicer.layer_height_mm || plan.layer_height_mm || spec.layer_height_mm || "-"],
+        ["first_layer_height_mm", slicer.first_layer_height_mm || plan.first_layer_height_mm || spec.first_layer_height_mm || "-"],
+        ["nozzle_diameter_mm", slicer.nozzle_diameter_mm || plan.nozzle_diameter_mm || spec.nozzle_diameter_mm || "-"],
+        ["slicer_command", Array.isArray(slicer.slicer_command) ? slicer.slicer_command.join(" ") : slicer.slicer_command || "-"],
+      ])}
+    `, { span: 4, tone: "metrics", eyebrow: "slicer input" })}
+    ${renderDashboardCard("Thermal / Material", `
+      ${renderSpecimenTemperaturePanel(printerStatus, slicer, plan, spec)}
+      ${renderSpecimenDonut(filamentUsage.donut || [], { unit: "g", emptyText: "No filament usage data is present." })}
+    `, { span: 4, tone: "metrics", eyebrow: "temperature + filament" })}
+    ${renderDashboardCard("Transfer Queue", `
+      ${renderSpecimenTransferQueue(buildQueue, printerProfile, thread)}
+      ${renderDashboardRows([
+        ["can_upload", spcDeviceActions.can_upload === undefined ? "-" : spcDeviceActions.can_upload],
+        ["can_start_print", spcDeviceActions.can_start_print === undefined ? "-" : spcDeviceActions.can_start_print],
+        ["printer_job_id", buildQueue.printer_job_id || thread.printer_job_id || "-"],
+        ["remote_gcode_path", printerProfile.remote_gcode_path || thread.remote_gcode_path || "-"],
+      ])}
+    `, { span: 4, tone: specimenStatusTone(buildQueue.queue_status || outcome.status), eyebrow: "upload + start" })}
+    ${renderDashboardCard("Layer Preview", renderSpecimenLayerPreview(layerPreview), { span: 4, tone: layerPreview.preview_available ? "success" : "activity", eyebrow: "sliced path" })}
+    ${renderDashboardCard("Camera Evidence", renderSpecimenCameraEvidence(screenReport, printerStatus), { span: 4, tone: "activity", eyebrow: "live frame / evidence" })}
+    ${renderDashboardCard("Post-Print Automation", renderSpecimenAutomationGate(autoejectionGate, printerStatus), { span: 4, tone: specimenStatusTone(autoejectionGate.status), eyebrow: "ejection + handoff" })}
+    ${renderDashboardCard("G-code Validation", renderSpecimenGcodeValidation(gcodeValidation, thread), { span: 6, tone: specimenStatusTone(gcodeValidation.status), eyebrow: "slicer output" })}
+    ${renderDashboardCard("Handoff / Artifacts", `
       <div class="ar-report-metrics">
-        ${renderDashboardMetric("G-code", gcodeValidation.status || "-", "validation", /blocked|fail/i.test(String(gcodeValidation.status || "")) ? "warning" : "success")}
         ${renderDashboardMetric("Handoff", handoffStatus.status || packet.status || "-", "specimen", /ready|virtual|printed/i.test(String(handoffStatus.status || packet.status || "")) ? "success" : "warning")}
         ${renderDashboardMetric("Feedback", feedback.quality_score === undefined ? "-" : feedback.quality_score, "quality", "info")}
+        ${renderDashboardMetric("Artifacts", artifactLedger.length, "ledger", "artifact")}
+        ${renderDashboardMetric("Physical", printerProfile.physical_intent === undefined ? intent.physical_intent : printerProfile.physical_intent, "intent", printerProfile.physical_intent || intent.physical_intent ? "warning" : "info")}
       </div>
       ${renderDashboardRows([
-        ["gcode_path", gcodeValidation.gcode_path || thread.gcode_path || latestReportPayload(report, ["sliced_path", "gcode_path", "output_gcode"]) || "-"],
-        ["slicer_gate", (gcodeValidation.slicer_gate || {}).status || "-"],
-        ["gcode_gate", (gcodeValidation.gcode_gate || {}).status || "-"],
+        ["printer_path", printerProfile.printer_path || intent.printer_path || "-"],
         ["consumer_agent", handoffStatus.consumer_agent || packet.consumer_agent || "-"],
         ["physical_location", handoffStatus.physical_location || packet.physical_location || outcome.location || "-"],
         ["next_action", handoffStatus.next_action || packet.next_action || "-"],
       ])}
-    `, { span: 6, tone: /ready|virtual|printed/i.test(String(handoffStatus.status || packet.status || "")) ? "success" : "warning", eyebrow: "validated output" })}
-    ${renderDashboardCard("Artifact Ledger", renderSpecimenArtifactLedger(artifactLedger), { span: 6, tone: "artifact", eyebrow: "artifact_ledger" })}
+      ${renderSpecimenArtifactLedger(artifactLedger)}
+    `, { span: 6, tone: /ready|virtual|printed/i.test(String(handoffStatus.status || packet.status || "")) ? "success" : "warning", eyebrow: "digital thread" })}
   `;
+}
+
+function renderSpecimenDashboardCards(report, status, agentLabel, profile) {
+  return renderSpecimenPrintControlPanel(report, status, agentLabel, profile);
 }
 
 function renderVisionHistogram(distribution) {
@@ -12150,6 +13336,22 @@ function renderVisionLiveFrameEvidence(frame, profile) {
   `;
 }
 
+function renderVisionRuntimeHeaderActions() {
+  const runtimeStatus = String((liveUtmRuntimeStatus && liveUtmRuntimeStatus.status) || "unknown");
+  const isRunning = runtimeStatus === "running";
+  const busy = Boolean(liveUtmRuntimeActionInFlight);
+  return `
+    <div class="ar-vis-runtime-actions ar-vis-runtime-actions-header" aria-label="Vision ROS runtime controls">
+      <button type="button" class="ar-vis-runtime-action" data-vision-runtime-action="start" ${busy || isRunning ? "disabled" : ""}>LOAD</button>
+      <button type="button" class="ar-vis-runtime-action" data-vision-runtime-action="stop" ${busy || !isRunning ? "disabled" : ""}>UNLOAD</button>
+    </div>
+  `;
+}
+
+function renderVisionRuntimeControls(liveFrame, liveProfile) {
+  return "";
+}
+
 function renderVisionCameraHealthBoard(screenReport, visionReport, frame, profile) {
   const cameraHealth = screenReport.camera_health || {};
   const diagnostics = (liveUtmRuntimeGraph && liveUtmRuntimeGraph.diagnostics) || {};
@@ -12240,13 +13442,203 @@ function renderSpecimenPoseGate(screenReport, visionReport) {
   `;
 }
 
+function renderVisionCardDetails(label, body) {
+  return `
+    <details class="ar-vis-card-details">
+      <summary>${escapeHtml(label)}</summary>
+      <div class="ar-vis-card-details-body">${body}</div>
+    </details>
+  `;
+}
+
+function visionProgressTone(status) {
+  const text = String(status || "").toLowerCase();
+  if (/complete|ready|ok|success/.test(text)) return "complete";
+  if (/active|running|working|started/.test(text)) return "active";
+  if (/blocked|fail|error/.test(text)) return "blocked";
+  return "waiting";
+}
+
+function derivedVisionProgressSteps(screenReport, visionReport, packet, liveFrame) {
+  const progress = screenReport.agentic_progress || {};
+  if (Array.isArray(progress.steps) && progress.steps.length) return progress.steps;
+  const pose = screenReport.pose_estimation || {};
+  const readiness = screenReport.transfer_readiness || visionReport.transfer_readiness || {};
+  const captureOk = (screenReport.camera_health || {}).capture_ok === true || Boolean(liveFrame.data_url);
+  const poseReady = pose.ready === true || Number(pose.confidence || 0) >= 0.6;
+  const releaseOk = readiness.camera_returned_to_vla === true || (visionReport.specimen_pose || {}).port_released === true;
+  const activeCam = screenReport.active_cam_ejection_check || {};
+  const activeCamKnown = Boolean(activeCam.status || activeCam.capture_path || activeCam.capture_url);
+  const activeCamOk = activeCam.spc_autoejection_confirmed === true || activeCam.specimen_detected === true;
+  const utmCompletion = screenReport.utm_completion_confirmation || {};
+  const utmKnown = Boolean(utmCompletion.status || utmCompletion.session_id || utmCompletion.evidence_path);
+  const utmReady = utmCompletion.detected === true && utmCompletion.ready_to_stop_rollout === true;
+  const handoffReady = /ready/i.test(String(packet.status || (screenReport.handoff_recommendations || {}).status || ""));
+  return [
+    { id: "capture", label: "Capture", status: captureOk ? "complete" : "waiting", detail: captureOk ? "frame ready" : "waiting for frame" },
+    { id: "specimen_pose", label: "Specimen Pose", status: poseReady ? "complete" : captureOk ? "active" : "waiting", detail: pose.confidence ? `confidence=${renderRuntimeValue(pose.confidence)}` : "pose pending" },
+    { id: "camera_release", label: "Camera Return", status: releaseOk ? "complete" : captureOk ? "active" : "waiting", detail: releaseOk ? "returned to VLA route" : "release pending" },
+    { id: "active_cam", label: "Active Cam", status: activeCamOk ? "complete" : activeCamKnown ? "active" : captureOk ? "complete" : "waiting", detail: activeCam.status || (activeCamKnown ? "active cam evidence pending" : "not required for current route") },
+    { id: "utm_confirmation", label: "UTM Confirmation", status: utmReady ? "complete" : utmKnown ? "active" : "waiting", detail: utmCompletion.blocking_reason || utmCompletion.status || "post-place verification pending" },
+    { id: "handoff", label: "Handoff", status: handoffReady ? "complete" : "waiting", detail: packet.next_action || packet.status || "handoff pending" },
+  ];
+}
+
+function renderVisionAgenticProgress(screenReport, visionReport, packet, liveFrame) {
+  const steps = derivedVisionProgressSteps(screenReport, visionReport, packet, liveFrame);
+  return `
+    <div class="ar-vis-agentic-progress">
+      ${steps.map((step, index) => {
+        const tone = visionProgressTone(step.status);
+        return `
+          <div class="ar-vis-agentic-step is-${tone}">
+            <span class="ar-vis-agentic-step-index">${String(index + 1).padStart(2, "0")}</span>
+            <strong>${escapeHtml(step.label || step.id || "step")}</strong>
+            <em>${escapeHtml(step.status || "waiting")}</em>
+            <small>${escapeHtml(compactText(step.detail || "", 80))}</small>
+          </div>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function renderVisionCameraRuntimeSummary(screenReport, visionReport, liveFrame, liveProfile) {
+  const cameraHealth = screenReport.camera_health || {};
+  const diagnostics = (liveUtmRuntimeGraph && liveUtmRuntimeGraph.diagnostics) || {};
+  const runtimeStatus = (liveUtmRuntimeStatus && liveUtmRuntimeStatus.status) || "unknown";
+  const frameAvailable = liveFrame.frame_available === true || Boolean(liveFrame.data_url);
+  const frameSize = liveFrame.width && liveFrame.height
+    ? `${liveFrame.width}x${liveFrame.height}`
+    : liveProfile.width && liveProfile.height ? `${liveProfile.width}x${liveProfile.height}` : "-";
+  return `
+    <div class="ar-vis-summary-stack">
+      <div class="ar-report-metrics">
+        ${renderDashboardMetric("Runtime", runtimeStatus, "ROS", runtimeStatus === "running" ? "success" : "warning")}
+        ${renderDashboardMetric("Camera", diagnostics.camera_seen === undefined ? "-" : diagnostics.camera_seen, "seen", diagnostics.camera_seen ? "success" : "warning")}
+        ${renderDashboardMetric("Frame", frameAvailable ? "ready" : "waiting", frameSize, frameAvailable ? "success" : "warning")}
+      </div>
+      ${renderDashboardRows([
+        ["topic", utmRuntimeLiveStreamTopic(liveFrame, liveProfile)],
+        ["device", liveProfile.device_path || cameraHealth.camera_key || "-"],
+        ["fps", liveProfile.fps || liveFrame.fps || "-"],
+        ["status", cameraHealth.status || visionReport.status || "-"],
+      ])}
+    </div>
+  `;
+}
+
+function renderVisionHandoffSignal(screenReport, packet) {
+  const handoff = screenReport.handoff_recommendations || {};
+  const status = handoff.status || packet.status || "-";
+  const warnings = Array.isArray(handoff.warnings) ? handoff.warnings.filter(Boolean) : [];
+  return `
+    <div class="ar-vis-summary-stack">
+      <div class="ar-report-metrics">
+        ${renderDashboardMetric("Status", status, "handoff", /ready/i.test(String(status)) ? "success" : "warning")}
+        ${renderDashboardMetric("Confidence", handoff.confidence || packet.confidence || "-", "signal", "info")}
+        ${renderDashboardMetric("Warnings", warnings.length, "count", warnings.length ? "warning" : "success")}
+      </div>
+      ${renderDashboardRows([
+        ["signal_id", handoff.signal_id || packet.signal_id || "-"],
+        ["zone_id", handoff.zone_id || packet.zone_id || "-"],
+        ["next_action", handoff.next_action || packet.next_action || "-"],
+        ["expires_at", handoff.expires_at || packet.expires_at || "-"],
+      ])}
+    </div>
+  `;
+}
+
+function renderVisionActiveCamEjectionCheck(screenReport, persistedArtifact = {}) {
+  const active = screenReport.active_cam_ejection_check || {};
+  const status = active.status || (persistedArtifact.path ? "confirmed" : "waiting");
+  const failed = /failed|blocked|error/i.test(String(status));
+  const capturePath = failed ? "" : persistedArtifact.path || active.capture_path || "";
+  const captureUrl = failed
+    ? ""
+    : persistedArtifact.url || active.capture_url
+      || (capturePath ? `/api/lerobot/visualization/file?path=${encodeURIComponent(capturePath)}` : "");
+  const confirmed = !failed && (
+    active.spc_autoejection_confirmed === true
+    || active.specimen_detected === true
+    || persistedArtifact.status === "stored"
+  );
+  const frameWidth = persistedArtifact.frame_width || active.frame_width;
+  const frameHeight = persistedArtifact.frame_height || active.frame_height;
+  const cameraKey = persistedArtifact.camera_key || active.camera_key || "";
+  const resolution = frameWidth && frameHeight ? `${frameWidth}x${frameHeight}` : "-";
+  return `
+    <div class="ar-vis-active-cam-card">
+      <div class="ar-vis-active-cam-frame ${captureUrl ? "has-frame" : "is-empty"}">
+        ${captureUrl
+          ? `<img src="${escapeHtml(captureUrl)}" alt="active cam ejection evidence frame" loading="lazy">`
+          : `<div><strong>Active Cam</strong><span>${escapeHtml(compactText(status, 42))}</span></div>`}
+      </div>
+      <div class="ar-report-metrics ar-vis-active-cam-metrics">
+        ${renderDashboardMetric("SPC", confirmed ? "confirmed" : "waiting", "autoejection", confirmed ? "success" : "warning")}
+        ${renderDashboardMetric("Detected", active.specimen_detected === true ? "yes" : "no", "specimen", active.specimen_detected === true ? "success" : "warning")}
+        ${renderDashboardMetric("Frame", resolution, cameraKey || "active cam", captureUrl ? "success" : "warning")}
+      </div>
+      ${renderVisionCardDetails("Inspection details", renderDashboardRows([
+        ["status", status],
+        ["camera", cameraKey || "-"],
+        ["port", active.camera_port || "-"],
+        ["source", active.detection_source || active.source || "-"],
+        ["capture_path", capturePath || "-"],
+      ]))}
+    </div>
+  `;
+}
+
+function renderVisionUtmPlacementConfirmation(screenReport, completion = {}, persistedArtifact = {}) {
+  const reportCompletion = screenReport.utm_completion_confirmation || {};
+  const signal = Object.keys(completion || {}).length ? completion : reportCompletion;
+  const stored = persistedArtifact.status === "stored" && Boolean(persistedArtifact.path);
+  const detected = stored || signal.detected === true;
+  const status = stored ? "confirmed" : signal.status || "waiting";
+  const capturePath = stored ? persistedArtifact.path : "";
+  const captureUrl = stored ? persistedArtifact.url || "" : "";
+  const frameWidth = persistedArtifact.frame_width || signal.frame_width;
+  const frameHeight = persistedArtifact.frame_height || signal.frame_height;
+  const resolution = frameWidth && frameHeight ? `${frameWidth}x${frameHeight}` : "-";
+  const confidence = persistedArtifact.confidence ?? signal.confidence;
+  return `
+    <div class="ar-vis-active-cam-card ar-vis-utm-confirmation-card">
+      <div class="ar-vis-active-cam-frame ${captureUrl ? "has-frame" : "is-empty"}">
+        ${captureUrl
+          ? `<img src="${escapeHtml(captureUrl)}" alt="UTM specimen placement confirmation frame" loading="lazy">`
+          : `<div><strong>UTM Observation</strong><span>${escapeHtml(compactText(signal.blocking_reason || status, 42))}</span></div>`}
+      </div>
+      <div class="ar-report-metrics ar-vis-active-cam-metrics">
+        ${renderDashboardMetric("Placement", detected ? "confirmed" : "waiting", "UTM", detected ? "success" : "warning")}
+        ${renderDashboardMetric("Detected", detected ? "yes" : "no", "specimen", detected ? "success" : "warning")}
+        ${renderDashboardMetric("Frame", resolution, confidence === undefined ? "confidence -" : `conf ${renderRuntimeValue(confidence, "-")}`, captureUrl ? "success" : "warning")}
+      </div>
+      ${renderVisionCardDetails("Inspection details", renderDashboardRows([
+        ["status", status],
+        ["run_id", persistedArtifact.run_id || signal.run_id || "-"],
+        ["session_id", persistedArtifact.session_id || signal.session_id || "-"],
+        ["specimen_id", persistedArtifact.specimen_id || signal.specimen_id || "-"],
+        ["capture_path", capturePath || signal.evidence_path || "-"],
+      ]))}
+    </div>
+  `;
+}
+
 function renderVisionDashboardCards(report, status, agentLabel, profile) {
   const screenReport = latestVisionAgentReport(report) || {};
+  const activeCamArtifact = latestActiveCamArtifact(report);
+  const activeCamCheck = screenReport.active_cam_ejection_check || {};
+  const activeCamConfirmed = activeCamArtifact.status === "stored"
+    || activeCamCheck.spc_autoejection_confirmed === true;
+  const utmCompletionArtifact = latestUtmCompletionArtifact(report);
+  const utmCompletion = latestVisionManipulationCompletion(report);
+  const utmCompletionConfirmed = utmCompletionArtifact.status === "stored"
+    || (utmCompletion.detected === true && utmCompletion.ready_to_stop_rollout === true);
   const visionReport = latestVisionReport(report) || {};
   const packet = latestVisionSignalPacket(report) || {};
   const liveProfile = visionLiveCameraProfile();
   const liveFrame = visionLiveFrameEvidence(report, screenReport, visionReport);
-  const cameraHealth = screenReport.camera_health || {};
   const calibration = screenReport.calibration_summary || {};
   const confidenceDistribution = screenReport.confidence_distribution || {};
   const inspectionFeed = screenReport.inspection_feed || {};
@@ -12256,54 +13648,37 @@ function renderVisionDashboardCards(report, status, agentLabel, profile) {
   const confusion = screenReport.confusion_matrix || {};
   const quality = screenReport.quality_metrics || {};
   const evidence = screenReport.evidence_review || {};
-  const handoff = screenReport.handoff_recommendations || {};
-  const camera = visionReport.camera_source || {};
   const signals = Array.isArray(visionReport.signal_board) ? visionReport.signal_board : Array.isArray(visionReport.agent_signals) ? visionReport.agent_signals : [];
   const zones = visionReport.scene_map || visionReport.zones || {};
   const anomaly = visionReport.safety_anomaly || {};
   const calibrationRows = Array.isArray(calibration.line_chart) ? calibration.line_chart.map((item) => ({ label: item.x || "metric", value: item.value, tone: "info", meta: renderRuntimeValue(item.value, "-") })) : [];
   const signalItems = signals.map((signal) => `${signal.signal || signal.name || "signal"} / ${signal.status || "unknown"} / conf=${renderRuntimeValue(signal.confidence)} / ttl=${renderRuntimeValue(signal.expires_at)}`);
   const artifactRows = evidence.artifacts && typeof evidence.artifacts === "object" ? Object.entries(evidence.artifacts).map(([key, value]) => `${key} / ${renderRuntimeValue(value)}`) : [];
+  const liveFrameReady = Boolean(liveFrame.data_url) || ((liveUtmRuntimeStatus && liveUtmRuntimeStatus.status) === "running");
   return `
-    ${renderDashboardCard("Camera Health", renderVisionCameraHealthBoard(screenReport, visionReport, liveFrame, liveProfile), { span: 4, tone: liveFrame.data_url ? "success" : "vision", eyebrow: "device bridge" })}
-    ${renderDashboardCard("D455F Pose / VLA Return", renderSpecimenPoseGate(screenReport, visionReport), { span: 4, tone: "vision", eyebrow: "specimen_pose" })}
-    ${renderDashboardCard("Live Inspection Feed", renderVisionLiveFrameEvidence(liveFrame, liveProfile), { span: 5, tone: liveFrame.data_url ? "success" : "warning", eyebrow: "camera frame" })}
-    ${renderDashboardCard("Runtime Node Flow", renderVisionRuntimeNodeFlow(), { span: 3, tone: "vision", eyebrow: "rqt-like" })}
-    ${renderDashboardCard("Perception Bus", `
-      <div class="ar-report-metrics">
-        ${renderDashboardMetric("Camera", cameraHealth.status || visionReport.status || "-", "status", cameraHealth.status === "review_required" ? "warning" : cameraHealth.status ? "success" : "idle")}
-        ${renderDashboardMetric("Signals", quality.signal_count || signals.length, "bounded", "info")}
-        ${renderDashboardMetric("Frame Age", cameraHealth.frame_age_ms === undefined ? camera.frame_age_ms || "-" : cameraHealth.frame_age_ms, "ms", "running")}
-      </div>
-      <div class="ar-vis-two-up">
-        <section>
-          <h5>Camera</h5>
-          ${renderDashboardRows([
-            ["camera_key", cameraHealth.camera_key || camera.camera_key || "-"],
-            ["source", cameraHealth.source || camera.source || "-"],
-            ["frame_id", cameraHealth.frame_id || camera.frame_id || "-"],
-            ["calibration_id", calibration.calibration_id || camera.calibration_id || "-"],
-          ])}
-        </section>
-        <section>
-          <h5>Confidence</h5>
-          ${renderVisionHistogram(confidenceDistribution)}
-        </section>
-      </div>
-    `, { span: 6, tone: cameraHealth.status === "review_required" ? "warning" : "vision", eyebrow: "camera + signal distribution" })}
-    ${renderDashboardCard("Scene Understanding", `
-      <div class="ar-vis-two-up">
-        <section>
-          <h5>Inspection</h5>
-          ${renderVisionInspectionFeed(inspectionFeed)}
-        </section>
-        <section>
-          <h5>Segmentation</h5>
-          ${renderVisionSegmentationPanels(segmentation)}
-        </section>
-      </div>
-    `, { span: 6, tone: "vision", eyebrow: "feed + segmentation" })}
-    ${renderDashboardCard("Quality Gate", `
+    ${renderDashboardCard("Live Observation", `
+      ${renderVisionRuntimeControls(liveFrame, liveProfile)}
+      ${renderVisionLiveFrameEvidence(liveFrame, liveProfile)}
+      ${renderVisionCardDetails("Inspection details", `
+        <div class="ar-vis-two-up">
+          <section>${renderVisionInspectionFeed(inspectionFeed)}</section>
+          <section>${renderVisionSegmentationPanels(segmentation)}</section>
+        </div>
+      `)}
+    `, { span: 4, tone: liveFrameReady ? "success" : "warning", eyebrow: "camera frame", action: renderVisionRuntimeHeaderActions() })}
+    ${renderDashboardCard("Active Cam Ejection", renderVisionActiveCamEjectionCheck(screenReport, latestActiveCamArtifact(report)), { span: 4, tone: activeCamConfirmed ? "success" : "warning", eyebrow: "SPC confirmation" })}
+    ${renderDashboardCard("UTM Placement Confirmation", renderVisionUtmPlacementConfirmation(screenReport, utmCompletion, utmCompletionArtifact), { span: 4, tone: utmCompletionConfirmed ? "success" : "warning", eyebrow: "post-place evidence" })}
+    ${renderDashboardCard("Camera / Runtime", `
+      ${renderVisionCameraRuntimeSummary(screenReport, visionReport, liveFrame, liveProfile)}
+      ${renderVisionCardDetails("Runtime graph details", `${renderVisionCameraHealthBoard(screenReport, visionReport, liveFrame, liveProfile)}${renderVisionRuntimeNodeFlow()}`)}
+    `, { span: 4, tone: (liveUtmRuntimeStatus && liveUtmRuntimeStatus.status) === "running" ? "success" : "vision", eyebrow: "device bridge" })}
+    ${renderDashboardCard("Handoff Signal", `
+      ${renderVisionHandoffSignal(screenReport, packet)}
+      ${renderVisionCardDetails("Evidence and signal details", `${renderVisionEvidenceReviewBoard(evidence, liveFrame, packet)}${dashboardList(signalItems, "No bounded vision signals recorded.", 5)}`)}
+    `, { span: 4, tone: /ready/i.test(String((screenReport.handoff_recommendations || {}).status || packet.status || "")) ? "success" : "warning", eyebrow: "bounded signal" })}
+    ${renderDashboardCard("Agentic Progress", `
+      ${renderVisionAgenticProgress(screenReport, visionReport, packet, liveFrame)}
+      ${renderVisionCardDetails("Quality and evidence details", `
       <div class="ar-report-metrics">
         ${renderDashboardMetric("Transfer", quality.transfer_ready === undefined ? "-" : quality.transfer_ready, "ready", quality.transfer_ready ? "success" : "warning")}
         ${renderDashboardMetric("Anomaly", defectSummary.anomaly === undefined ? anomaly.anomaly : defectSummary.anomaly, "vision", defectSummary.anomaly ? "warning" : "success")}
@@ -12324,31 +13699,17 @@ function renderVisionDashboardCards(report, status, agentLabel, profile) {
           ${renderVisionConfusionMatrix(confusion)}
         </section>
       </div>
-    `, { span: 6, tone: defectSummary.anomaly || !quality.transfer_ready ? "warning" : "success", eyebrow: "quality + anomaly" })}
-    ${renderDashboardCard("Pose / Handoff", `
-      <div class="ar-report-metrics">
-        ${renderDashboardMetric("Pose", pose.ready === undefined ? "-" : pose.ready, "ready", pose.ready ? "success" : "warning")}
-        ${renderDashboardMetric("Handoff", handoff.status || packet.status || "-", "next", /ready/i.test(String(handoff.status || packet.status || "")) ? "success" : "warning")}
-        ${renderDashboardMetric("Conf", handoff.confidence || packet.confidence || pose.confidence || "-", "signal", "info")}
-      </div>
       ${renderDashboardRows([
-        ["signal_id", handoff.signal_id || packet.signal_id || "-"],
-        ["zone_id", handoff.zone_id || packet.zone_id || "-"],
         ["x_mm", pose.x_mm || "-"],
         ["y_mm", pose.y_mm || "-"],
         ["z_mm", pose.z_mm || "-"],
-        ["expires_at", handoff.expires_at || packet.expires_at || "-"],
+        ["evidence_refs", Array.isArray(evidence.evidence_refs) ? evidence.evidence_refs.length : 0],
+        ["zone_count", zones && typeof zones === "object" ? Object.keys(zones).length : 0],
       ])}
-      ${dashboardList(signalItems, "No bounded vision signals recorded.", 5)}
-    `, { span: 6, tone: /ready/i.test(String(handoff.status || packet.status || "")) ? "success" : "warning", eyebrow: "pose + bounded signals" })}
-    ${renderDashboardCard("Operator Review / Evidence", renderVisionEvidenceReviewBoard(evidence, liveFrame, packet), { span: 4, tone: evidence.priority === "High" || evidence.priority === "Critical" ? "warning" : "artifact", eyebrow: "review" })}
-    ${renderDashboardCard("Evidence Ledger", `${renderDashboardRows([
-      ["evidence_refs", Array.isArray(evidence.evidence_refs) ? evidence.evidence_refs.length : 0],
-      ["dataset_ledger", evidence.dataset_ledger && typeof evidence.dataset_ledger === "object" ? Object.keys(evidence.dataset_ledger).length : 0],
-      ["zone_count", zones && typeof zones === "object" ? Object.keys(zones).length : 0],
-      ["pose_backend", calibration.pose_backend || "-"],
-      ["frame_size", `${calibration.frame_width || "-"} x ${calibration.frame_height || "-"}`],
-    ])}${dashboardList(artifactRows, "No visual evidence artifacts recorded.", 6)}${calibrationRows.length ? renderMiniBarChart(calibrationRows, { label: "vision calibration trend", compact: true, emptyText: "No calibration trend data recorded." }) : ""}`, { span: 8, tone: "artifact", eyebrow: "trace summary" })}
+      ${dashboardList(artifactRows, "No visual evidence artifacts recorded.", 6)}
+      ${calibrationRows.length ? renderMiniBarChart(calibrationRows, { label: "vision calibration trend", compact: true, emptyText: "No calibration trend data recorded." }) : ""}
+      `)}
+    `, { span: 4, tone: defectSummary.anomaly || !quality.transfer_ready ? "warning" : "success", eyebrow: "runtime steps" })}
   `;
 }
 
@@ -12648,12 +14009,126 @@ function renderManipulationArtifacts(artifacts = []) {
   `;
 }
 
+function renderManipulationTelemetryCards() {
+  const jointOptions = ["Joint1", "Joint2", "Joint3", "Joint4", "Joint5", "Gripper"]
+    .map((joint) => `<option value="${joint}">${joint}</option>`)
+    .join("");
+  const motionStates = ["home", "moving", "grasping", "ungrasping"];
+  const motionSummary = (channel, label) => `
+    <div class="ar-man-motion-summary" data-atr-motion-summary="${channel}">
+      <small><i aria-hidden="true"></i>${label}</small>
+      <strong data-atr-motion-current>waiting</strong>
+      <span data-atr-motion-confidence>0%</span>
+    </div>
+  `;
+  const homeRanges = [
+    ["Joint1", -15, -6.5],
+    ["Joint2", -61, -53],
+    ["Joint3", 52, 61],
+    ["Joint4", 43, 52],
+    ["Joint5", -11, -3],
+    ["Gripper", 55, 65],
+  ];
+  const poseFitAction = `
+    <button type="button" class="ar-man-pose-fit" data-atr-pose-fit aria-label="Zoom to fit" title="Zoom to fit">
+      FIT
+    </button>
+  `;
+  return `
+    ${renderDashboardCard("Live Robot Pose", `
+      <div class="ar-man-telemetry-head">
+        <div>
+          <strong>Follower joint state</strong>
+          <small>Measured pose from the existing rollout action log</small>
+          <div class="ar-man-robot-motion-label">
+            <span>Robot motion state :</span>
+            <strong data-atr-robot-motion-state data-state="waiting">waiting</strong>
+          </div>
+        </div>
+        <span class="ar-man-telemetry-status" data-atr-robot-pose-status data-tone="idle">idle</span>
+      </div>
+      <div class="ar-man-pose-viewer" data-atr-robot-pose role="img" aria-label="Live OMX measured follower pose and translucent policy target pose">
+        <span>Loading repository OMX model...</span>
+      </div>
+      <div class="ar-man-pose-legend" aria-label="robot pose legend">
+        <span><i class="measured"></i>Measured follower</span>
+        <span><i class="target"></i>Policy target ghost</span>
+      </div>
+    `, { span: 6, tone: "manipulation", eyebrow: "measured joints + policy target", action: poseFitAction, data: { "live-preserve": "manipulation-pose" } })}
+    ${renderDashboardCard("Policy Tracking", `
+      <div class="ar-man-telemetry-head">
+        <label class="ar-man-joint-selector">Joint selector
+          <select data-atr-joint-selector aria-label="Joint selector">${jointOptions}</select>
+        </label>
+        <span class="ar-man-telemetry-status" data-atr-policy-status data-tone="idle">idle</span>
+      </div>
+      <div class="ar-man-policy-chart" data-atr-policy-tracking role="img" aria-label="Measured follower and policy target joint position over elapsed time"></div>
+      <footer class="ar-man-policy-artifacts" aria-label="Policy tracking artifacts">
+        <strong>Policy tracking artifacts</strong>
+        <a data-atr-policy-artifact="png" aria-disabled="true">PNG</a>
+        <a data-atr-policy-artifact="csv" aria-disabled="true">CSV</a>
+        <a data-atr-policy-artifact="jsonl" aria-disabled="true">JSONL</a>
+        <a data-atr-policy-artifact="summary" aria-disabled="true">Summary</a>
+      </footer>
+    `, { span: 6, tone: "metrics", eyebrow: "actual versus requested action", data: { "live-preserve": "manipulation-policy" } })}
+    ${renderDashboardCard("Robot Motion State", `
+      <div class="ar-man-motion-state" data-atr-motion-state>
+        <section class="ar-man-motion-unified">
+          <header class="ar-man-motion-legend">
+            ${motionSummary("measured", "Measured follower")}
+            ${motionSummary("policy", "Policy target")}
+          </header>
+          <div class="ar-man-motion-segments" role="list" aria-label="Measured follower and policy target motion states">
+            ${motionStates.map((state) => `<span role="listitem" data-motion-state="${state}">${state}</span>`).join("")}
+          </div>
+          <div class="ar-man-motion-reasons">
+            <p data-atr-motion-reason="measured">Waiting for measured joint telemetry.</p>
+            <p data-atr-motion-reason="policy">Waiting for policy target telemetry.</p>
+          </div>
+        </section>
+        <section class="ar-man-grasp-outcome" data-atr-grasp-outcome data-status="idle">
+          <header>
+            <div>
+              <small>Grasp Result</small>
+              <strong data-atr-grasp-status>idle</strong>
+            </div>
+            <p data-atr-grasp-reason>Waiting for a measured grasp attempt.</p>
+          </header>
+          <div class="ar-man-grasp-evidence" role="list" aria-label="Latest grasp attempt evidence">
+            <div role="listitem"><small>Measured</small><strong data-atr-grasp-measured>-</strong></div>
+            <div role="listitem"><small>Policy target</small><strong data-atr-grasp-target>-</strong></div>
+            <div role="listitem"><small>Contact gap</small><strong data-atr-grasp-gap>- / 2.00</strong></div>
+            <div role="listitem"><small>Transport overlap</small><strong data-atr-grasp-overlap>no</strong></div>
+          </div>
+        </section>
+        <section class="ar-man-home-gate" data-atr-home-gate>
+          <header>
+            <div><small>Home Gate</small><strong>0.5 s stable dwell</strong></div>
+            <span data-atr-home-status data-tone="waiting">waiting</span>
+          </header>
+          <div class="ar-man-home-grid" role="list" aria-label="Home joint thresholds">
+            ${homeRanges.map(([joint, minimum, maximum]) => `
+              <div role="listitem" data-home-joint="${joint}" data-pass="waiting">
+                <strong>${joint}</strong>
+                <span data-home-value>-</span>
+                <small>${minimum} to ${maximum}</small>
+              </div>
+            `).join("")}
+          </div>
+        </section>
+      </div>
+    `, { span: 12, tone: "manipulation", eyebrow: "home / moving + grasping / ungrasping", data: { "live-preserve": "manipulation-motion" } })}
+  `;
+}
+
 function renderManipulationDashboardCards(report, status, agentLabel, profile) {
+  const telemetryCards = renderManipulationTelemetryCards();
   const screen = latestManipulationAgentReport(report) || {};
   if (screen.schema === "manipulation_agent_report.v1") {
     const brief = screen.execution_brief || {};
     const summary = screen.summary || {};
     return `
+      ${telemetryCards}
       ${renderDashboardCard("Execution Control", `
         <div class="ar-report-metrics">
           ${renderDashboardMetric("Outcome", summary.outcome || screen.status || "-", "run", manipulationReportTone(summary.outcome || screen.status))}
@@ -12683,7 +14158,7 @@ function renderManipulationDashboardCards(report, status, agentLabel, profile) {
           </section>
         </div>
       `, { span: 6, tone: "manipulation", eyebrow: "candidate scoring + route" })}
-      ${renderDashboardCard("Workspace Map", `
+      ${renderDashboardCard("Active Camera / Workspace", `
         <div class="ar-man-two-up">
           <section>
             <h5>Workspace</h5>
@@ -12695,7 +14170,7 @@ function renderManipulationDashboardCards(report, status, agentLabel, profile) {
           </section>
         </div>
       `, { span: 6, tone: "manipulation", eyebrow: "workspace + feasibility" })}
-      ${renderDashboardCard("Safety / Pose Gate", `
+      ${renderDashboardCard("Safety Gate / Object Pose", `
         <div class="ar-man-two-up">
           <section>
             <h5>Safety</h5>
@@ -12719,7 +14194,7 @@ function renderManipulationDashboardCards(report, status, agentLabel, profile) {
           </section>
         </div>
       `, { span: 8, tone: "metrics", eyebrow: "checks + trajectory" })}
-      ${renderDashboardCard("Scene Snapshot", `
+      ${renderDashboardCard("Vision / UTM Verification", `
         <div class="ar-man-two-up">
           <section>
             <h5>Scene</h5>
@@ -12745,11 +14220,13 @@ function renderManipulationDashboardCards(report, status, agentLabel, profile) {
   const policy = manipulation.policy_plan || {};
   const preflight = manipulation.preflight || {};
   const vision = manipulation.vision_context || {};
-  const stage = manipulation.stage_machine || {};
-  const sarm = manipulation.sarm || {};
+  const supervision = manipulation.execution_safety || manipulation.sarm || {};
   const decision = manipulation.decision || {};
-  const preflightItems = Array.isArray(preflight.checks) ? preflight.checks.map((item) => `${item.name || "check"} / ${item.status || item.ok || "unknown"} / ${item.reason || ""}`) : [];
+  const preflightItems = Array.isArray(preflight.checks)
+    ? preflight.checks.map((item) => `${item.name || "check"} / ${item.status || item.ok || "unknown"} / ${item.reason || ""}`)
+    : [];
   return `
+    ${telemetryCards}
     ${renderDashboardCard("Task Route", renderDashboardRows([
       ["task_id", task.task_id || robotResult.task_id || "-"],
       ["source", task.source_location || "-"],
@@ -12757,11 +14234,11 @@ function renderManipulationDashboardCards(report, status, agentLabel, profile) {
       ["object", task.object_id || robotResult.object_id || "-"],
       ["vision_signal", vision.signal_id || vision.signal || "-"],
     ]), { span: 4, tone: "manipulation", eyebrow: "bounded action" })}
-    ${renderDashboardCard("Policy / Pi0.5", renderDashboardRows([
+    ${renderDashboardCard("Policy Runtime", renderDashboardRows([
       ["policy_backend", policy.policy_backend || "-"],
       ["policy_type", policy.policy_type || latestReportPayload(report, ["policy_type"]) || "-"],
       ["policy_ref", policy.policy_ref || latestReportPayload(report, ["policy_path", "checkpoint_path", "policy_repo_id"]) || "-"],
-      ["lerobot_env", policy.lerobot_env || "-"],
+      ["runtime_env", policy.lerobot_env || "-"],
       ["execution_boundary", policy.execution_boundary || "bounded rollout"],
     ]), { span: 4, tone: "manipulation", eyebrow: "control policy" })}
     ${renderDashboardCard("Preflight Gates", `${renderDashboardRows([
@@ -12770,20 +14247,27 @@ function renderManipulationDashboardCards(report, status, agentLabel, profile) {
       ["vision_ready", preflight.vision_ready === undefined ? "-" : preflight.vision_ready],
       ["workspace_clear", preflight.workspace_clear === undefined ? "-" : preflight.workspace_clear],
     ])}${dashboardList(preflightItems, "No manipulation preflight checklist recorded.", 6)}`, { span: 4, tone: preflight.status === "blocked" ? "warning" : "manipulation", eyebrow: "safety checks" })}
-    ${renderDashboardCard("SARM Progress", renderDashboardRows([
-      ["current_stage", stage.current_stage || "-"],
-      ["progress_score", sarm.progress_score === undefined ? "-" : sarm.progress_score],
-      ["risk_score", sarm.risk_score === undefined ? "-" : sarm.risk_score],
-      ["failure_precursor", sarm.failure_precursor === undefined ? "-" : sarm.failure_precursor],
-      ["recovery_action", sarm.recovery_action || "-"],
-    ]), { span: 6, tone: "manipulation", eyebrow: "runtime supervision" })}
+    ${renderDashboardCard("Execution Supervision", renderDashboardRows([
+      ["current_stage", (manipulation.stage_machine || {}).current_stage || "-"],
+      ["progress_score", supervision.progress_score === undefined ? "-" : supervision.progress_score],
+      ["risk_score", supervision.risk_score === undefined ? "-" : supervision.risk_score],
+      ["failure_precursor", supervision.failure_precursor === undefined ? "-" : supervision.failure_precursor],
+      ["recovery_action", supervision.recovery_action || supervision.recovery_suggested || "-"],
+    ]), { span: 4, tone: "manipulation", eyebrow: "runtime supervision" })}
+    ${renderDashboardCard("Vision / UTM Verification", renderDashboardRows([
+      ["active_camera", vision.camera || vision.active_camera || "-"],
+      ["pickup_ready", vision.pickup_target_ready === undefined ? "-" : vision.pickup_target_ready],
+      ["fixture_visible", vision.fixture_visible === undefined ? "-" : vision.fixture_visible],
+      ["post_place_verified", robotResult.post_place_verified === undefined ? "-" : robotResult.post_place_verified],
+      ["completion_signal", robotResult.completion_signal || decision.completion_signal || "-"],
+    ]), { span: 4, tone: "artifact", eyebrow: "camera + run evidence" })}
     ${renderDashboardCard("Robot Task Result", renderDashboardRows([
       ["status", robotResult.status || decision.status || "-"],
       ["handoff_status", robotResult.handoff_status || decision.handoff_status || "-"],
       ["next_agent", robotResult.next_action || decision.recommended_next_agent || "-"],
       ["trace_id", robotResult.trace_id || "-"],
-      ["post_place_verified", robotResult.post_place_verified === undefined ? "-" : robotResult.post_place_verified],
-    ]), { span: 6, tone: "manipulation", eyebrow: "physical result" })}
+      ["terminal_pose", robotResult.terminal_pose || task.intended_terminal_pose || "-"],
+    ]), { span: 4, tone: "manipulation", eyebrow: "physical result" })}
   `;
 }
 
@@ -13537,18 +15021,113 @@ function renderLiveReportToolbar() {
   syncLiveChatUnreadIndicators(liveReportToolbar);
 }
 
+function syncLiveReportAttributes(current, next, options = {}) {
+  const preserveRendererState = Boolean(options.preserveRendererState);
+  const protectedAttribute = (name) => preserveRendererState && (name === "style" || name.startsWith("_echarts_"));
+  Array.from(current.attributes || []).forEach((attribute) => {
+    if (!protectedAttribute(attribute.name) && !next.hasAttribute(attribute.name)) current.removeAttribute(attribute.name);
+  });
+  Array.from(next.attributes || []).forEach((attribute) => {
+    if (protectedAttribute(attribute.name)) return;
+    if (current.getAttribute(attribute.name) !== attribute.value) current.setAttribute(attribute.name, attribute.value);
+  });
+}
+
+function liveReportPreserveKey(node) {
+  if (!node || node.nodeType !== 1) return "";
+  const stableKey = String(node.getAttribute("data-live-preserve") || "").trim();
+  if (stableKey) return `stable:${stableKey}`;
+  const chartKey = String(node.getAttribute("data-orc-echart") || "").trim();
+  return chartKey ? `echart:${chartKey}` : "";
+}
+
+function patchLiveReportNode(current, next, result) {
+  if (!current || !next || current.nodeType !== next.nodeType) {
+    if (current && next) current.replaceWith(next.cloneNode(true));
+    result.structureChanged = true;
+    return;
+  }
+  if (current.nodeType === 3) {
+    if (current.nodeValue !== next.nodeValue) current.nodeValue = next.nodeValue;
+    return;
+  }
+  if (current.nodeType !== 1) return;
+  if (current.tagName !== next.tagName) {
+    current.replaceWith(next.cloneNode(true));
+    result.structureChanged = true;
+    return;
+  }
+
+  const currentSectionKey = current.getAttribute("data-report-section-key") || "";
+  const nextSectionKey = next.getAttribute("data-report-section-key") || "";
+  if (currentSectionKey && nextSectionKey && currentSectionKey !== nextSectionKey) {
+    current.replaceWith(next.cloneNode(true));
+    result.structureChanged = true;
+    return;
+  }
+
+  const currentPreserveKey = liveReportPreserveKey(current);
+  const nextPreserveKey = liveReportPreserveKey(next);
+  if (currentPreserveKey && currentPreserveKey === nextPreserveKey) {
+    if (currentPreserveKey.startsWith("echart:")) {
+      const previousPayload = current.getAttribute("data-orc-payload") || "";
+      const nextPayload = next.getAttribute("data-orc-payload") || "";
+      syncLiveReportAttributes(current, next, { preserveRendererState: true });
+      if (previousPayload !== nextPayload) result.chartChanged = true;
+    } else {
+      syncLiveReportAttributes(current, next);
+    }
+    return;
+  }
+
+  syncLiveReportAttributes(current, next);
+  const currentChildren = Array.from(current.childNodes);
+  const nextChildren = Array.from(next.childNodes);
+  const childCount = Math.max(currentChildren.length, nextChildren.length);
+  for (let index = 0; index < childCount; index += 1) {
+    const currentChild = currentChildren[index];
+    const nextChild = nextChildren[index];
+    if (!currentChild && nextChild) {
+      current.appendChild(nextChild.cloneNode(true));
+      result.structureChanged = true;
+    } else if (currentChild && !nextChild) {
+      currentChild.remove();
+      result.structureChanged = true;
+    } else {
+      patchLiveReportNode(currentChild, nextChild, result);
+    }
+  }
+}
+
+function updateLiveReportPanel(reportHtml, reportContextKey) {
+  const template = document.createElement("template");
+  template.innerHTML = String(reportHtml || "").trim();
+  const nextRoot = template.content.firstElementChild;
+  if (!nextRoot) return { fullRender: false, structureChanged: false, chartChanged: false };
+  nextRoot.setAttribute("data-live-report-context", reportContextKey);
+  const currentRoot = liveReportPanel.querySelector(":scope > [data-live-report-context]");
+  if (!currentRoot || currentRoot.getAttribute("data-live-report-context") !== reportContextKey) {
+    liveReportPanel.replaceChildren(nextRoot);
+    return { fullRender: true, structureChanged: true, chartChanged: true };
+  }
+  const result = { fullRender: false, structureChanged: false, chartChanged: false };
+  patchLiveReportNode(currentRoot, nextRoot, result);
+  return result;
+}
+
 function renderReportPanel(session) {
   if (!liveReportPanel) return;
   if (liveReportPage === "attention") {
     renderLiveReportToolbar();
-    liveReportPanel.innerHTML = renderAttentionReportPage(session);
+    updateLiveReportPanel(renderAttentionReportPage(session), "attention");
     return;
   }
   const report = selectedReportModel(session);
   const agentLabel = liveAgentLabel(liveSelectedAgent);
   const status = eventStatusForAgent(liveSelectedAgent, report.state, liveRunningFlag(session, liveLastSnapshot || {}, report.state));
   renderLiveReportToolbar();
-  liveReportPanel.innerHTML = `
+  const reportContextKey = `agent:${liveSelectedAgent}`;
+  const reportHtml = `
     <div class="ar-live-report-page live-report-page">
       <div class="ar-report-grid live-report-grid">
         ${renderLiveDashboardReportSections(session, report, status, agentLabel)}
@@ -13557,9 +15136,14 @@ function renderReportPanel(session) {
       </div>
     </div>
   `;
-  scheduleOrcEchartsRender();
+  const patchResult = updateLiveReportPanel(reportHtml, reportContextKey);
+  if (patchResult.fullRender || patchResult.structureChanged || patchResult.chartChanged) scheduleOrcEchartsRender();
   hydrateDesignCaptureCanvases();
   renderDesignCaptureViewerOverlay();
+  renderSpecimenProgressDetailOverlay();
+  if (window.ATRRobotTelemetryCards && typeof window.ATRRobotTelemetryCards.hydrate === "function") {
+    window.ATRRobotTelemetryCards.hydrate();
+  }
   return;
   const designEvidence = liveSelectedAgent === "design" ? latestDesignReport(report) : null;
   const specimenEvidence = liveSelectedAgent === "specimen" ? latestSpecimenFabricationReport(report) : null;
@@ -13574,7 +15158,7 @@ function renderReportPanel(session) {
         : visionEvidence
           ? " · Scene map, signal board, visual evidence, and freshness-gated handoff are available."
           : manipulationEvidence
-            ? " · Pi0.5/LeRobot preflight, SARM progress, and robot_task_result handoff are available."
+            ? " · Policy runtime, execution supervision, and robot_task_result handoff are available."
             : " · No report yet. Backend/Timeline remain available.";
   const messageCards = messages.slice(-4).map((msg, index) => `
     <article class="live-report-message">
@@ -13664,10 +15248,26 @@ function eventMatchesCurrentRun(event, runId = liveCurrentRunId()) {
   return Boolean(sourceRunId && sourceRunId === safeRunId);
 }
 
+function dedupeRuntimeEvents(events = []) {
+  const seen = new Set();
+  const out = [];
+  for (const event of events) {
+    if (!event || typeof event !== "object") continue;
+    const key = eventStableKey(event) || `${event.event_type || event.type || "event"}:${event.ts || event.timestamp || ""}:${event.message || ""}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(event);
+  }
+  return out;
+}
+
+function mergeRuntimeEventSources(runEvents = [], recentEvents = []) {
+  return dedupeRuntimeEvents([...(Array.isArray(runEvents) ? runEvents : []), ...(Array.isArray(recentEvents) ? recentEvents : [])]);
+}
+
 function currentRunEventSources() {
-  const runScoped = (Array.isArray(liveRunEvents) ? liveRunEvents : []).filter((event) => eventMatchesCurrentRun(event) || !eventRunId(event));
-  if (runScoped.length) return runScoped;
-  return (Array.isArray(liveRecentEvents) ? liveRecentEvents : []).filter((event) => eventMatchesCurrentRun(event));
+  const merged = mergeRuntimeEventSources(liveRunEvents, liveRecentEvents);
+  return merged.filter((event) => eventMatchesCurrentRun(event) || !eventRunId(event));
 }
 
 function isAgentNotificationEvent(event) {
@@ -14359,10 +15959,28 @@ function timelineSourceEvents() {
   return liveEventSources().slice(-80);
 }
 
+function eventRequiresOperatorInput(event) {
+  const payload = eventPayload(event);
+  const type = String(event.event_type || event.type || "").toLowerCase();
+  return type.includes("agent_question")
+    || type.includes("user_input")
+    || type.includes("clarification")
+    || Boolean(
+      payload.requires_user_input
+      || payload.requires_operator_input
+      || payload.needs_operator_input
+      || payload.pending_operator_input
+      || payload.requires_response
+      || payload.question
+      || payload.missing_fields
+    );
+}
+
 function eventTimelineKind(event) {
   const type = String(event.event_type || event.type || "").toLowerCase();
   const level = String(event.level || event.severity || "").toLowerCase();
   const msg = String(event.message || "").toLowerCase();
+  if (eventRequiresOperatorInput(event)) return "warning";
   if (level.includes("error") || type.includes("error") || type.includes("failed") || msg.includes("failed")) return "error";
   if (level.includes("warn") || type.includes("warning") || type.includes("approval")) return "warning";
   if (type.includes("tool") || msg.includes("tool")) return "tool";
@@ -14754,6 +16372,71 @@ function renderDeviceStatusCard(title, event, fallbackStatus = "idle") {
   `;
 }
 
+function latestPrinterMonitorEvent() {
+  if (livePrinterMonitorOverride) return livePrinterMonitorOverride;
+  const events = timelineSourceEvents().slice().reverse();
+  return events.find((event) => {
+    const payload = eventPayload(event);
+    const snapshot = payload.monitor_snapshot || {};
+    return payload.tool === "printer.status" || snapshot.tool === "printer.status";
+  }) || latestRuntimeEvent([/printer/, /prusa/, /slicer/, /gcode/, /specimen/]);
+}
+
+function printerMonitorBridgeStatus(snapshot, event) {
+  const rawStatus = String(snapshot.status || event?.status || "").toLowerCase();
+  const ok = snapshot.ok;
+  if (ok === false || /error|fail|blocked|alarm|offline/.test(rawStatus)) return "error";
+  if (/running|print|busy|working/.test(rawStatus)) return "active";
+  if (/ready|idle|finish|virtual/.test(rawStatus) || ok === true) return "ready";
+  return eventBridgeStatus(event, "idle");
+}
+
+function renderPrinterDeviceStatusCard() {
+  const event = latestPrinterMonitorEvent();
+  const payload = eventPayload(event);
+  const snapshot = payload.monitor_snapshot || {};
+  const screen = snapshot.device_screen || {};
+  const progress = screen.progress_panel || {};
+  const connection = screen.connection || {};
+  const actions = screen.actions || {};
+  const selected = snapshot.selected_printer || {};
+  const status = printerMonitorBridgeStatus(snapshot, event);
+  const label = selected.label || selected.profile_id || snapshot.provider || "3D Printer";
+  const progressValue = progress.progress_percent ?? progress.percent ?? progress.progress ?? "-";
+  const state = progress.state || screen.state || snapshot.status || event?.status || "-";
+  const heartbeat = event ? formatTime(event.ts || event.timestamp) : "-";
+  const mqtt = connection.mqtt || connection.mqtt_status || "-";
+  const transfer = connection.transfer || connection.storage || "-";
+  const upload = actions.can_upload === undefined ? "-" : actions.can_upload ? "ready" : "blocked";
+  const start = actions.can_start_print === undefined ? "-" : actions.can_start_print ? "enabled" : "guarded";
+  const tooltip = [
+    label,
+    `state: ${state}`,
+    `progress: ${progressValue}`,
+    `mqtt: ${mqtt}`,
+    `transfer: ${transfer}`,
+    `upload: ${upload}`,
+    `start: ${start}`,
+    `heartbeat: ${heartbeat}`,
+  ].join("\n");
+  const eventKey = event ? eventStableKey(event) : "";
+  const eventAttrs = eventKey
+    ? ` role="button" data-device-event-key="${escapeHtml(eventKey)}" data-agent-id="${escapeHtml(agentIdFromEvent(event))}" data-device-name="3D Printer" data-device-event-type="${escapeHtml(event.event_type || event.type || "")}" aria-label="${escapeHtml(`3D Printer: ${status}. Click to inspect backend trace.`)}"`
+    : "";
+  return `
+    <article class="live-device-card status-${escapeHtml(status)}${eventKey ? " has-event" : ""}" title="${escapeHtml(tooltip)}" tabindex="0"${eventAttrs}>
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(String(state))}</strong>
+      <dl>
+        <div class="live-device-field"><dt>progress</dt><dd>${escapeHtml(String(progressValue))}</dd></div>
+        <div class="live-device-field"><dt>mqtt</dt><dd>${escapeHtml(String(mqtt))}</dd></div>
+        <div class="live-device-field"><dt>transfer</dt><dd>${escapeHtml(String(transfer))}</dd></div>
+        <div class="live-device-field"><dt>start</dt><dd>${escapeHtml(String(start))}</dd></div>
+      </dl>
+    </article>
+  `;
+}
+
 function renderUtmRuntimeDeviceCard() {
   const statusPayload = liveUtmRuntimeStatus || {};
   const graphPayload = liveUtmRuntimeGraph || {};
@@ -14875,22 +16558,24 @@ async function refreshLiveUtmRuntimeFrame(options = {}) {
 }
 
 async function refreshLiveUtmRuntimeStatus(options = {}) {
-  if (liveUtmRuntimeRefreshInFlight) return liveUtmRuntimeRefreshInFlight;
+  if (!options.force && liveUtmRuntimeRefreshInFlight) return liveUtmRuntimeRefreshInFlight;
+  const refreshSeq = ++liveUtmRuntimeRefreshSeq;
   liveUtmRuntimeRefreshInFlight = (async () => {
     try {
       const [statusResult, cameraConfigResult] = await Promise.allSettled([
         fetch("/api/equipment/utm-runtime/status"),
         fetch("/api/equipment/utm-runtime/camera-config"),
       ]);
-      if (statusResult.status === "fulfilled" && statusResult.value.ok) {
+      const isLatestRefresh = refreshSeq === liveUtmRuntimeRefreshSeq;
+      if (isLatestRefresh && statusResult.status === "fulfilled" && statusResult.value.ok) {
         liveUtmRuntimeStatus = await statusResult.value.json();
       }
-      if (cameraConfigResult.status === "fulfilled" && cameraConfigResult.value.ok) {
+      if (isLatestRefresh && cameraConfigResult.status === "fulfilled" && cameraConfigResult.value.ok) {
         liveUtmCameraConfig = await cameraConfigResult.value.json();
       }
       refreshLiveUtmRuntimeGraphSnapshot()
         .then(() => {
-          if (options.render && liveLastSession) renderLiveRuntime(liveLastSession);
+          if (refreshSeq === liveUtmRuntimeRefreshSeq && options.render && liveLastSession) renderLiveRuntime(liveLastSession);
         })
         .catch(() => {});
       const diagnostics = liveUtmRuntimeGraph?.diagnostics || {};
@@ -14900,18 +16585,58 @@ async function refreshLiveUtmRuntimeStatus(options = {}) {
         refreshLiveUtmRuntimeFrame({ render: Boolean(options.render) }).catch(() => {});
       }
     } catch (err) {
-      liveUtmRuntimeStatus = {
-        ok: false,
-        status: "error",
-        failure_code: "UTM_RUNTIME_STATUS_UNAVAILABLE",
-        message: String(err),
-      };
+      if (refreshSeq === liveUtmRuntimeRefreshSeq) {
+        liveUtmRuntimeStatus = {
+          ok: false,
+          status: "error",
+          failure_code: "UTM_RUNTIME_STATUS_UNAVAILABLE",
+          message: String(err),
+        };
+      }
     } finally {
-      liveUtmRuntimeRefreshInFlight = null;
+      if (refreshSeq === liveUtmRuntimeRefreshSeq) liveUtmRuntimeRefreshInFlight = null;
     }
     return { status: liveUtmRuntimeStatus, graph: liveUtmRuntimeGraph, frame: liveUtmRuntimeFrame };
   })();
   return liveUtmRuntimeRefreshInFlight;
+}
+
+async function runLiveUtmRuntimeAction(action, button = null) {
+  if (liveUtmRuntimeActionInFlight) return liveUtmRuntimeActionInFlight;
+  const normalized = String(action || "").toLowerCase();
+  const endpoint = normalized === "start"
+    ? "/api/equipment/utm-runtime/start"
+    : normalized === "stop"
+      ? "/api/equipment/utm-runtime/stop"
+      : "";
+  if (!endpoint) return null;
+  liveUtmRuntimeActionInFlight = normalized;
+  if (button) button.disabled = true;
+  if (liveLastSession) renderLiveRuntime(liveLastSession);
+  setChatStatus(`ROS ${normalized === "start" ? "LOADING" : "UNLOADING"}`, "running");
+  try {
+    const payload = normalized === "start"
+      ? await fetchJsonOrThrow("/api/equipment/utm-runtime/start", { method: "POST" })
+      : await fetchJsonOrThrow("/api/equipment/utm-runtime/stop", { method: "POST" });
+    liveUtmRuntimeStatus = payload;
+    liveUtmRuntimeGraphFetchedAt = 0;
+    if (normalized === "stop") {
+      liveUtmRuntimeFrame = null;
+      liveUtmRuntimeStreamUrlCache = "";
+      liveUtmRuntimeStreamUrlKey = "";
+    }
+    await refreshLiveUtmRuntimeStatus({ render: false, force: true });
+    if (liveLastSession) renderLiveRuntime(liveLastSession);
+    setChatStatus(`ROS ${String(liveUtmRuntimeStatus?.status || payload.status || "updated").toUpperCase()}`, "idle");
+    return payload;
+  } catch (err) {
+    setChatStatus(`ROS ACTION ERROR: ${err}`, "warning");
+    throw err;
+  } finally {
+    liveUtmRuntimeActionInFlight = null;
+    if (button) button.disabled = false;
+    if (liveLastSession) renderLiveRuntime(liveLastSession);
+  }
 }
 
 async function focusDeviceEventFromCard(card) {
@@ -15154,7 +16879,7 @@ function renderDeviceStrip(session) {
     renderResourceStatusCard("GPU", gpuValue, `util=${renderRuntimeValue(gpuAgg.utilization_percent)}% · ${gpu.status || "unknown"}`, gpu.status || "ready"),
     renderResourceStatusCard("LLM", backend.label || backend.name || "-", `backend=${backend.name || "configured"}`, backend.status || "ready"),
     ...bridgeCards,
-    renderDeviceStatusCard("3D Printer", latestRuntimeEvent([/printer/, /prusa/, /slicer/, /gcode/, /specimen/]), "idle"),
+    renderPrinterDeviceStatusCard(),
     renderDeviceStatusCard("Robot Arm", latestRuntimeEvent([/robot/, /lerobot/, /manipulation/, /rollout/, /teleop/]), "idle"),
     renderDeviceStatusCard("UTM", latestRuntimeEvent([/utm/, /tensile/, /compression/, /equipment/]), "idle"),
     renderUtmRuntimeDeviceCard(),
@@ -15256,6 +16981,7 @@ function renderLiveMissionProgressSlim(session = liveLastSession) {
 
 function renderLiveRuntime(session) {
   if (!session) return;
+  if (liveSelectedAgent !== "specimen") stopSpecimenVideoPlayback("agent_page_change", { render: false });
   const snapshot = liveLastSnapshot || {};
   const state = session.state || snapshot.state || {};
   ensureOperatorReportStateRun(state.run_id || liveCurrentRunId());
@@ -15275,6 +17001,7 @@ function renderLiveRuntime(session) {
   renderTimelinePanels();
   renderLiveMissionProgressSlim(session);
   updateLiveFaultChip();
+  updateLiveEmergencyStopControls(session);
   applyLiveAttentionStatus();
   renderLiveChatContextStrip();
   renderLiveExperimentSetupPanel(session);
@@ -15444,6 +17171,7 @@ window.__liveGuiDebugRestoreOperatorReportState = function liveGuiDebugRestoreOp
 };
 
 function applyPlanningSession(session) {
+  discardStaleLivePlanningCache(session || {});
   liveLastSession = session || {};
   if (liveLastSession.planning_session_id) {
     persistPlanningSessionId(liveLastSession.planning_session_id);
@@ -15498,13 +17226,72 @@ async function refreshLiveGraphPayload() {
   return liveGraphPayload;
 }
 
+function liveSpecimenAgentWorking(session = liveLastSession) {
+  const snapshot = liveLastSnapshot || {};
+  const state = (session && session.state) || snapshot.state || {};
+  const running = liveRunningFlag(session || {}, snapshot, state);
+  const activeAgent = agentIdFromStage(state.stage || "");
+  if (running && activeAgent === "specimen") return true;
+  const activePattern = /started|running|working|active|printing|print|upload|slice|slicer|gcode|autoejection|ejection/i;
+  return currentRunEventSources().slice(-40).some((event) => {
+    if (!event || event.event_type === "workspace_monitor_snapshot") return false;
+    if (agentIdFromEvent(event) !== "specimen") return false;
+    const payload = eventPayload(event);
+    const text = [
+      event.status,
+      event.event_type,
+      event.type,
+      event.message,
+      payload.tool,
+      payload.status,
+      payload.workflow,
+    ].map((value) => String(value || "")).join(" ");
+    return activePattern.test(text);
+  });
+}
+
+async function refreshLivePrinterMonitorStatus(session = liveLastSession, options = {}) {
+  if (!options.force && !liveSpecimenAgentWorking(session)) return null;
+  if (livePrinterMonitorInFlight) return livePrinterMonitorInFlight;
+  livePrinterMonitorInFlight = (async () => {
+    try {
+      return await fetchJsonOrThrow("/api/printer/status?mode=live&emit=1");
+    } catch (err) {
+      return null;
+    } finally {
+      livePrinterMonitorInFlight = null;
+    }
+  })();
+  return livePrinterMonitorInFlight;
+}
+
+async function refreshLivePrinterVideoStatus() {
+  if (livePrinterVideoStatusInFlight) return livePrinterVideoStatusInFlight;
+  livePrinterVideoStatusInFlight = (async () => {
+    try {
+      return await fetchJsonOrThrow("/api/printer/video-status");
+    } catch (err) {
+      return {
+        ok: false,
+        tool: "printer.bambu.video_status",
+        status: "video_status_failed",
+        error: err && err.message ? err.message : String(err || "video status failed"),
+      };
+    } finally {
+      livePrinterVideoStatusInFlight = null;
+    }
+  })();
+  return livePrinterVideoStatusInFlight;
+}
+
 async function refreshPlanningAuxiliaryState(session) {
   if (liveAuxRefreshInFlight) return liveAuxRefreshInFlight;
   liveAuxRefreshInFlight = (async () => {
     try {
-      const [guardianResult, eventsResult] = await Promise.allSettled([
+      const [guardianResult, eventsResult, printerStatusResult] = await Promise.allSettled([
         fetch("/api/guardian/status"),
         fetch("/api/events/recent"),
+        refreshLivePrinterMonitorStatus(session),
       ]);
       let guardianPayload = null;
       if (guardianResult.status === "fulfilled" && guardianResult.value.ok) {
@@ -15514,6 +17301,42 @@ async function refreshPlanningAuxiliaryState(session) {
       if (eventsResult.status === "fulfilled" && eventsResult.value.ok) {
         const recentPayload = await eventsResult.value.json();
         liveRecentEvents = Array.isArray(recentPayload.events) ? recentPayload.events : [];
+      }
+      if (printerStatusResult.status === "fulfilled" && printerStatusResult.value) {
+        const status = printerStatusResult.value;
+        liveRecentEvents.push({
+          event_id: `live-printer-monitor-${Date.now()}`,
+          event_type: "workspace_monitor_snapshot",
+          type: "tool.completed",
+          level: status.ok ? "INFO" : "WARNING",
+          severity: status.ok ? "info" : "warning",
+          node_id: "specimen",
+          module_id: "specimen",
+          agent: "specimen_agent",
+          status: status.status || (status.ok ? "ready" : "blocked"),
+          message: `printer workspace printer.status ${status.status || ""}`.trim(),
+          ts: new Date().toISOString(),
+          timestamp: new Date().toISOString(),
+          payload: {
+            workspace: "printer",
+            tool: "printer.status",
+            workflow: "printer_status_monitor",
+            monitor_snapshot: {
+              ok: status.ok,
+              tool: status.tool || "printer.status",
+              status: status.status,
+              mode: status.mode,
+              provider: status.provider,
+              selected_printer: status.selected_printer,
+              device_screen: status.device_screen,
+              preprint_gate: status.preprint_gate,
+              operator_actions: status.operator_actions,
+              live_gates: status.live_gates,
+              auto_ejection: status.auto_ejection,
+            },
+          },
+        });
+        liveRecentEvents = dedupeRuntimeEvents(liveRecentEvents).slice(-160);
       }
       liveLastSnapshot = {
         state: (session && session.state) || (liveLastSession && liveLastSession.state) || {},
@@ -15535,7 +17358,7 @@ async function refreshPlanningAuxiliaryState(session) {
 }
 
 async function refreshPlanningState(options = {}) {
-  if (liveRefreshInFlight) return liveRefreshInFlight;
+  if (liveRefreshInFlight && !options.force) return liveRefreshInFlight;
   const background = Boolean(options.background);
   markLiveSyncRefreshStart();
   liveRefreshInFlight = (async () => {
@@ -16393,6 +18216,12 @@ document.addEventListener("keydown", (event) => {
     runBridgeContractAction(bridgeAction).catch((err) => setChatStatus(`BRIDGE ACTION ERROR: ${err}`, "warning"));
     return;
   }
+  const visionRuntimeAction = event.target.closest && event.target.closest("[data-vision-runtime-action]");
+  if (visionRuntimeAction && (event.key === "Enter" || event.key === " ")) {
+    event.preventDefault();
+    runLiveUtmRuntimeAction(visionRuntimeAction.dataset.visionRuntimeAction || "", visionRuntimeAction).catch(() => {});
+    return;
+  }
   const descriptorAction = event.target.closest && event.target.closest("[data-descriptor-api-action]");
   if (descriptorAction && (event.key === "Enter" || event.key === " ")) {
     event.preventDefault();
@@ -16413,6 +18242,54 @@ if (btnLiveShortcutsClose) {
 }
 
 document.addEventListener("click", (event) => {
+  const specimenConnectionButton = event.target.closest("[data-spm-connection-action]");
+  if (specimenConnectionButton && liveReportPanel && liveReportPanel.contains(specimenConnectionButton)) {
+    event.preventDefault();
+    event.stopPropagation();
+    const action = specimenConnectionButton.dataset.spmConnectionAction || "";
+    if (action === "test") {
+      runSpecimenConnectionTest(specimenConnectionButton);
+    }
+    return;
+  }
+  const visionRuntimeAction = event.target.closest("[data-vision-runtime-action]");
+  if (visionRuntimeAction && liveReportPanel && liveReportPanel.contains(visionRuntimeAction)) {
+    event.preventDefault();
+    event.stopPropagation();
+    runLiveUtmRuntimeAction(visionRuntimeAction.dataset.visionRuntimeAction || "", visionRuntimeAction).catch(() => {});
+    return;
+  }
+  const specimenVideoButton = event.target.closest("[data-spm-video-action]");
+  if (specimenVideoButton && liveReportPanel && liveReportPanel.contains(specimenVideoButton)) {
+    event.preventDefault();
+    event.stopPropagation();
+    const action = specimenVideoButton.dataset.spmVideoAction || "";
+    if (action === "play") {
+      specimenVideoButton.disabled = true;
+      startSpecimenVideoPlayback().catch((err) => {
+        liveSpecimenVideoPlaying = false;
+        setChatStatus(`3DP VIDEO ERROR: ${err}`, "warning");
+        renderLiveRuntime(liveLastSession);
+      });
+    } else if (action === "stop") {
+      stopSpecimenVideoPlayback("manual");
+    }
+    return;
+  }
+  const specimenProgressAction = event.target.closest("[data-spm-progress-action]");
+  if (specimenProgressAction) {
+    event.preventDefault();
+    event.stopPropagation();
+    if ((specimenProgressAction.dataset.spmProgressAction || "") === "close") closeSpecimenProgressDetail();
+    return;
+  }
+  const specimenProgressButton = event.target.closest("[data-spm-progress-step]");
+  if (specimenProgressButton && liveReportPanel && liveReportPanel.contains(specimenProgressButton)) {
+    event.preventDefault();
+    event.stopPropagation();
+    openSpecimenProgressDetail(specimenProgressButton.dataset.spmProgressStep || "stl_input");
+    return;
+  }
   const designGalleryAction = event.target.closest("[data-design-gallery-action]");
   if (designGalleryAction) {
     event.preventDefault();
@@ -16692,6 +18569,26 @@ function resetLiveEmergencyStopArm() {
   btnLiveSafeStop.setAttribute("aria-label", "Emergency Stop");
 }
 
+function liveEmergencyStopLatched(session = liveLastSession) {
+  const state = (session && session.state) || (liveLastSnapshot && liveLastSnapshot.state) || {};
+  return Boolean(state.emergency_stop_requested);
+}
+
+function liveEmergencyEndpoint(action, fallback) {
+  const state = (liveLastSession && liveLastSession.state) || (liveLastSnapshot && liveLastSnapshot.state) || {};
+  const runId = String(state.run_id || "").trim();
+  return runId ? `/api/runs/${encodeURIComponent(runId)}/${action}` : fallback;
+}
+
+function updateLiveEmergencyStopControls(session = liveLastSession) {
+  const latched = liveEmergencyStopLatched(session);
+  const cell = btnLiveSafeStop ? btnLiveSafeStop.closest(".mission-status-stop") : null;
+  if (cell) cell.classList.toggle("is-emergency-latched", latched);
+  if (btnLiveSafeStop) btnLiveSafeStop.hidden = latched;
+  if (liveEmergencyRecovery) liveEmergencyRecovery.hidden = !latched;
+  if (!latched) resetLiveEmergencyStopArm();
+}
+
 function armLiveEmergencyStop() {
   liveEmergencyStopArmedUntil = Date.now() + 6000;
   if (liveEmergencyStopArmTimer) window.clearTimeout(liveEmergencyStopArmTimer);
@@ -16713,13 +18610,12 @@ async function confirmOrRequestLiveEmergencyStop() {
   }
   resetLiveEmergencyStopArm();
   try {
-    const state = (liveLastSession && liveLastSession.state) || (liveLastSnapshot && liveLastSnapshot.state) || {};
-    const endpoint = state.run_id ? `/api/runs/${encodeURIComponent(state.run_id)}/stop` : "/api/run/stop";
+    const endpoint = liveEmergencyEndpoint("emergency-stop", "/api/run/emergency-stop");
     setChatStatus("EMERGENCY STOP", "warning");
-    await fetchJsonOrThrow("/api/run/safe-stop", { method: "POST" });
     await recordLiveIntentEvent("runtime_command_requested", "emergency_stop", "Live GUI emergency stop confirmed and forced runtime termination requested.", { command: "emergency_stop", confirmation: "double_click_within_6s", endpoint });
-    await fetchJsonOrThrow(endpoint, { method: "POST" });
-    await refreshPlanningState();
+    const result = await fetchJsonOrThrow(endpoint, { method: "POST" });
+    if (result && result.state) applyPlanningSession({ ...(liveLastSession || {}), state: result.state });
+    await refreshPlanningState({ force: true });
     setChatStatus("EMERGENCY STOPPED", "warning");
   } catch (err) {
     appendLiveRuntimeEvent({
@@ -16733,12 +18629,69 @@ async function confirmOrRequestLiveEmergencyStop() {
   }
 }
 
+async function requestLiveEmergencyResume() {
+  try {
+    setChatStatus("E-STOP RESUME", "warning");
+    const endpoint = liveEmergencyEndpoint("emergency-resume", "/api/run/emergency-resume");
+    await recordLiveIntentEvent("runtime_command_requested", "emergency_resume", "Live GUI emergency resume requested.", { command: "emergency_resume", endpoint });
+    const result = await fetchJsonOrThrow(endpoint, { method: "POST" });
+    if (result && result.state) applyPlanningSession({ ...(liveLastSession || {}), state: result.state });
+    await refreshPlanningState({ force: true });
+    setChatStatus("RESUMED", "ok");
+  } catch (err) {
+    appendLiveRuntimeEvent({
+      event_type: "run_emergency_resume_failed",
+      level: "ERROR",
+      node_id: liveSelectedAgent || "guardian",
+      message: `Emergency resume failed: ${String(err)}`,
+      payload: { error: String(err) },
+    });
+    setChatStatus("RESUME ERROR", "warning");
+  }
+}
+
+async function requestLiveEmergencyReset() {
+  try {
+    setChatStatus("E-STOP RESET", "warning");
+    const endpoint = liveEmergencyEndpoint("emergency-reset", "/api/run/emergency-reset");
+    await recordLiveIntentEvent("runtime_command_requested", "emergency_reset", "Live GUI emergency reset requested.", { command: "emergency_reset", endpoint });
+    await fetchJsonOrThrow(endpoint, { method: "POST" });
+    resetPlanningMessageDisplayState();
+    resetPlanningSessionIdForEmergencyReset();
+    await refreshPlanningState({ force: true });
+    setChatStatus("RESET", "ok");
+  } catch (err) {
+    appendLiveRuntimeEvent({
+      event_type: "run_emergency_reset_failed",
+      level: "ERROR",
+      node_id: liveSelectedAgent || "guardian",
+      message: `Emergency reset failed: ${String(err)}`,
+      payload: { error: String(err) },
+    });
+    setChatStatus("RESET ERROR", "warning");
+  }
+}
+
 document.addEventListener("click", (event) => {
   if (!event.target.closest || !event.target.closest("#btn-live-safe-stop")) return;
   event.preventDefault();
   event.stopImmediatePropagation();
   confirmOrRequestLiveEmergencyStop().catch((err) => setChatStatus(`EMERGENCY ERROR: ${err}`, "warning"));
 }, true);
+
+if (btnLiveEmergencyResume) {
+  btnLiveEmergencyResume.addEventListener("click", (event) => {
+    event.preventDefault();
+    requestLiveEmergencyResume().catch((err) => setChatStatus(`RESUME ERROR: ${err}`, "warning"));
+  });
+}
+
+if (btnLiveEmergencyReset) {
+  btnLiveEmergencyReset.addEventListener("click", (event) => {
+    event.preventDefault();
+    requestLiveEmergencyReset().catch((err) => setChatStatus(`RESET ERROR: ${err}`, "warning"));
+  });
+}
 
 setInterval(() => {
   tickLiveRuntimeClock();

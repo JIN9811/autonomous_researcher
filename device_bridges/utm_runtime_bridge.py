@@ -189,10 +189,10 @@ topic = sys.argv[1]
 fps = max(float(sys.argv[2]), 1.0)
 quality = max(min(int(sys.argv[3]), 95), 40)
 min_interval = 1.0 / fps
-# USB/ROS camera timers jitter by a few ms. Without tolerance, a requested
-# 15fps stream drops legitimate 63-66ms source frames and collapses near 7fps.
+# USB/ROS camera timers jitter by a few ms. The tolerance keeps 15fps sources
+# stable while still preventing 30fps sources from overfeeding a 15fps GUI.
 emit_interval_tolerance = 0.80
-rate_limit_enabled = fps < 15.0
+rate_limit_enabled = True
 
 try:
     import cv2

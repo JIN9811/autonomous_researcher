@@ -113,8 +113,9 @@ class EjectionConfig:
             "bed_back_y_mm": 6.0,
             "head_center_x_mm": 125.0,
             "head_z_mm": 1.0,
-            "travel_feedrate_mm_min": 3000.0,
-            "z_feedrate_mm_min": 1000.0,
+            "object_z_offset_mm": 10.0,
+            "travel_feedrate_mm_min": 6000.0,
+            "z_feedrate_mm_min": 3000.0,
             "eject_feedrate_mm_min": 25000.0,
             "cycles": 2,
             "use_object_bounds": True,
@@ -124,7 +125,7 @@ class EjectionConfig:
             "turn_off_heaters_after": True,
         }
     )
-    max_feedrate_mm_min: float = 6000.0
+    max_feedrate_mm_min: float = 25000.0
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any] | None) -> "EjectionConfig":
@@ -1190,10 +1191,14 @@ class PaddleEjectionRoutineBuilder:
         cycles = max(1, int(p.get("cycles", 2)))
         env = self.ejection.safe_envelope
         configured_head_x = float(p["head_center_x_mm"])
+        configured_head_z = float(p["head_z_mm"])
         object_x_offset = float(p.get("object_x_offset_mm", 0.0) or 0.0)
+        object_z_offset = float(p.get("object_z_offset_mm", 10.0) or 10.0)
         object_bounds_payload = object_bounds.to_dict() if object_bounds is not None else None
         head_x = configured_head_x
         head_x_source = "configured"
+        head_z = configured_head_z
+        head_z_source = "configured"
         if bool(p.get("use_object_bounds", True)) and object_bounds is not None:
             head_x = self._clamp(
                 float(object_bounds.center_x) + object_x_offset,
@@ -1201,12 +1206,19 @@ class PaddleEjectionRoutineBuilder:
                 float(env["x_max_mm"]),
             )
             head_x_source = "gcode_object_bounds"
+            head_z = self._clamp(
+                max(1.0, float(object_bounds.z_max) - object_z_offset),
+                max(1.0, float(env["z_min_mm"])),
+                float(env["z_max_mm"]),
+            )
+            head_z_source = "gcode_object_top_minus_offset"
         lines = [
             "; AUTO-GENERATED BED-SWEEP EJECTION ROUTINE",
             "; adapted_for=Prusa MK4S Buddy firmware",
             f"; calibration_id={self.ejection.calibration_id}",
             f"; object_bounds_source={head_x_source}",
             f"; resolved_head_x_mm={head_x:g}",
+            f"; resolved_head_z_mm={head_z:g}",
         ]
         if object_bounds_payload:
             lines.append(
@@ -1223,7 +1235,7 @@ class PaddleEjectionRoutineBuilder:
                 "M73 P99 R0",
                 "M73 Q99 S0",
                 f"G0 X{head_x:g} F{float(p['travel_feedrate_mm_min']):g}",
-                f"G0 Z{float(p['head_z_mm']):g} F{float(p['z_feedrate_mm_min']):g}",
+                f"G0 Z{head_z:g} F{float(p['z_feedrate_mm_min']):g}",
             ]
         )
         for cycle in range(cycles):
@@ -1255,6 +1267,10 @@ class PaddleEjectionRoutineBuilder:
                 "head_x_mm": round(head_x, 4),
                 "head_x_source": head_x_source,
                 "configured_head_x_mm": configured_head_x,
+                "head_z_mm": round(head_z, 4),
+                "head_z_source": head_z_source,
+                "configured_head_z_mm": configured_head_z,
+                "object_z_offset_mm": object_z_offset,
                 "object_x_offset_mm": object_x_offset,
                 "object_bounds": object_bounds_payload,
                 "temperature_commands_included": bool(include_temperature_commands),
@@ -2029,7 +2045,7 @@ class PrinterAgenticWorkflow:
         object_bounds = self._synthetic_ejection_test_bounds(position, payload.get("object_size_mm"))
         built = self.ejection_builder.build(
             object_bounds=object_bounds,
-            include_temperature_commands=False,
+            include_temperature_commands=True,
         )
         record_step("BUILD_EJECTION_GCODE", "ok" if built.get("ok") else "blocked", built.get("failure_code"))
         if not built.get("ok"):

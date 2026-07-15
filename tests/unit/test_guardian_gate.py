@@ -73,6 +73,27 @@ def test_guardian_gate_reads_nested_agent_warning_and_low_confidence() -> None:
     assert any(alarm["reason_code"] == "VISION_CONFIDENCE_LOW" for alarm in gate["alarms"])
 
 
+def test_guardian_gate_safe_stops_physical_active_cam_failure() -> None:
+    gate = guardian_gate(
+        state=_state(Stage.VISION),
+        stage="vision",
+        phase="post",
+        agent="vision_agent",
+        payload={
+            "ok": False,
+            "failure_code": "ACTIVE_ROBOT_CAM_SPECIMEN_POSE_FAILED",
+            "safe_stop_recommended": True,
+            "observation": {
+                "source": "lerobot_active_robot_cam",
+                "camera_key": "wrist",
+            },
+        },
+    )
+
+    assert gate["decision"] == "safe_stop"
+    assert gate_blocks_execution(gate) is True
+
+
 def test_guardian_gate_does_not_treat_signal_ack_as_operator_approval() -> None:
     gate = guardian_gate(
         state=_state(Stage.VISION),

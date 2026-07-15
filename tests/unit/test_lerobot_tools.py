@@ -19,6 +19,7 @@ def test_register_lerobot_tools_exposes_runtime_contract(tmp_path: Path) -> None
     assert "lerobot.profiles.list" in names
     assert "lerobot.ports.detect" in names
     assert "lerobot.camera.test" in names
+    assert "lerobot.active_robot_cam.capture" in names
     assert "lerobot.rollout.start" in names
     assert bridge.config_status()["ok"] is True
     assert tools.resource("lerobot.bridge") is bridge

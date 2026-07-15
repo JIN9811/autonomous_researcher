@@ -8,6 +8,7 @@ from typing import Any
 
 from orchestrator.langgraph_runtime import ModuleToolRegistryProxy
 from orchestrator.state import Mode, OrchestratorState, Stage
+from policies.guardian_gate import guardian_gate
 
 
 class FakeTools:
@@ -132,6 +133,57 @@ def test_guardian_tool_shield_passes_non_side_effect_tool_without_gate() -> None
     assert records[-1]["tool"] == "geometry.check_mesh_quality"
 
 
+def test_guardian_allows_vision_handoff_when_active_cam_confirms_spc_despite_pose_snapshot_failure() -> None:
+    state = OrchestratorState(run_id="run-activecam-spc", experiment_id="exp-activecam-spc", mode=Mode.TEST, stage=Stage.VISION)
+
+    gate = guardian_gate(
+        state=state,
+        stage="vision",
+        phase="post",
+        agent="vision_agent",
+        payload={
+            "observation": {
+                "transfer_readiness": {
+                    "ready": True,
+                    "camera_ok": True,
+                    "camera_returned_to_vla": True,
+                    "vla_camera_precheck_ok": True,
+                    "spc_autoejection_confirmed": True,
+                    "blocking_reason": None,
+                },
+                "raw_capture": {
+                    "active_cam_ejection_check": {
+                        "status": "confirmed",
+                        "specimen_detected": True,
+                        "spc_autoejection_confirmed": True,
+                        "camera_returned_to_vla": True,
+                        "camera_owner_after": "vla_runtime",
+                        "capture_path": "/tmp/active-cam.jpg",
+                    },
+                    "specimen_pose_result": {
+                        "ok": False,
+                        "status": "error",
+                        "failure_code": "MISSING_REQUIRED_INPUT",
+                        "message": "ROS2 camera topics are missing; D455F is not publishing RGB-D frames for specimen pose tracking.",
+                    },
+                },
+            },
+            "vision_signal": {"status": "ready", "confidence": 0.86, "warnings": []},
+            "evidence_refs": ["/tmp/active-cam.jpg"],
+        },
+    )
+
+    assert gate["decision"] in {"allow", "allow_with_warning"}
+    assert gate["ok_for_next_stage"] is True
+    assert all(
+        not (
+            alarm["reason_code"] == "MISSING_REQUIRED_INPUT"
+            and "specimen_pose_result" in str(alarm.get("source_path") or "")
+        )
+        for alarm in gate["alarms"]
+    )
+
+
 def test_guardian_tool_shield_modifies_disabled_rollout_clamp_before_execution() -> None:
     state = _state(Stage.MANIPULATION)
     tools = FakeTools()
@@ -165,3 +217,131 @@ def test_guardian_tool_shield_modifies_disabled_rollout_clamp_before_execution()
     records = state.run_metadata["tool_call_records"]
     assert [record["status"] for record in records] == ["requested", "modified", "completed"]
     assert records[1]["guardian_decision"] == "modify"
+
+
+def test_guardian_tool_shield_allows_rollout_after_bambu_http_artifact_handoff() -> None:
+    state = _state(Stage.MANIPULATION)
+    tools = FakeTools()
+    recorded: list[dict[str, Any]] = []
+    proxy = ModuleToolRegistryProxy(
+        tools,
+        ["lerobot.rollout.start"],
+        Stage.MANIPULATION,
+        state=state,
+        gate_recorder=recorded.append,
+    )
+
+    result = proxy.call(
+        "lerobot.rollout.start",
+        {
+            "mode": "test",
+            "runtime_mode": "test",
+            "dry_run": True,
+            "profile_id": "robotis_omx_ai",
+            "policy_path": "fake://policy",
+            "rollout_action_clamp": True,
+            "specimen": {
+                "status": "ready",
+                "spc_readiness": {
+                    "preprint_gate_state": "test_printer_started_then_stopped",
+                    "blockers": [],
+                    "operator_actions": [
+                        {
+                            "code": "BAMBU_HTTP_ARTIFACT_ROUTE_ACTIVE",
+                            "severity": "warning",
+                            "message": "HTTP artifact routing is active.",
+                        },
+                        {
+                            "code": "BAMBU_FTPS_TOO_MANY_CONNECTIONS",
+                            "severity": "warning",
+                            "message": "FTPS still reports too many active sessions; HTTP artifact routing is active.",
+                        },
+                    ],
+                },
+                "build_timeline": {
+                    "timeline": [
+                        {"step": "BAMBU_FTPS_STORAGE", "status": "blocked", "failure_code": "BAMBU_FTPS_TOO_MANY_CONNECTIONS"},
+                        {"step": "BAMBU_ARTIFACT_ROUTE", "status": "ok", "detail": "http://printer-artifact/job.gcode.3mf"},
+                        {"step": "BAMBU_START_PUBLISH", "status": "published"},
+                        {"step": "BAMBU_STOP_AFTER_START", "status": "published"},
+                    ]
+                },
+                "print_result": {
+                    "status": "TEST_PRINTER_STARTED_THEN_STOPPED",
+                    "upload": {"ok": True, "route": "http_artifact", "url": "http://printer-artifact/job.gcode.3mf"},
+                    "start": {"ok": True, "status": "published", "published": True, "command": "project_file"},
+                    "stop": {"ok": True, "status": "published", "published": True},
+                },
+            },
+        },
+    )
+
+    assert result["ok"] is True
+    assert tools.calls[0][0] == "lerobot.rollout.start"
+    assert all(gate["reason_code"] != "BAMBU_FTPS_TOO_MANY_CONNECTIONS" for gate in recorded)
+
+
+def test_guardian_tool_shield_allows_rollout_after_completed_printer_wait_handoff() -> None:
+    state = _state(Stage.MANIPULATION)
+    tools = FakeTools()
+    recorded: list[dict[str, Any]] = []
+    proxy = ModuleToolRegistryProxy(
+        tools,
+        ["lerobot.rollout.start"],
+        Stage.MANIPULATION,
+        state=state,
+        gate_recorder=recorded.append,
+    )
+
+    result = proxy.call(
+        "lerobot.rollout.start",
+        {
+            "mode": "test",
+            "runtime_mode": "live",
+            "dry_run": False,
+            "confirm_live_execute": True,
+            "profile_id": "robotis_omx_ai",
+            "policy_path": "/tmp/policy.ckpt",
+            "rollout_action_clamp": True,
+            "physical_printer_tail": True,
+            "specimen": {
+                "status": "ready",
+                "handoff_status": "ready",
+                "printer_completion_wait": {
+                    "schema": "specimen_printer_completion_wait.v1",
+                    "status": "complete",
+                    "last_status": {
+                        "status": "complete",
+                        "failure_code": "131184",
+                        "message": "Printer job completed before Vision handoff.",
+                    },
+                    "samples": [
+                        {
+                            "status": "printing",
+                            "failure_code": "131184",
+                            "message": "Printer job is still active.",
+                        }
+                    ],
+                },
+                "active_cam_ejection_check": {
+                    "status": "confirmed",
+                    "specimen_detected": True,
+                    "spc_autoejection_confirmed": True,
+                    "camera_returned_to_vla": True,
+                    "camera_owner_after": "vla_runtime",
+                    "capture_path": "/tmp/active-cam.jpg",
+                },
+            },
+        },
+    )
+
+    assert result["ok"] is True
+    assert tools.calls[0][0] == "lerobot.rollout.start"
+    assert all(
+        not (
+            "printer_completion_wait" in str(alarm.get("source_path") or "")
+            and alarm.get("reason_code") == "131184"
+        )
+        for gate in recorded
+        for alarm in gate.get("alarms", [])
+    )

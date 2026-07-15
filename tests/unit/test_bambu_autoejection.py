@@ -12,6 +12,7 @@ import pytest
 from device_bridges.bambu_autoejection import (
     BambuGcodeAutoejectionPatcher,
     BambuGcodeAutoejectionValidator,
+    extract_object_bounds_mm,
 )
 
 
@@ -90,6 +91,108 @@ def test_plain_gcode_patch_records_required_runtime_tail_metadata(tmp_path: Path
     assert "; atr_patched_artifact_sha256=stored_in_manifest" in patched_text
 
 
+def test_plain_gcode_patch_pushes_at_object_center_after_bed_cooldown(tmp_path: Path) -> None:
+    source = tmp_path / "specimen.gcode"
+    source.write_text(
+        "\n".join(
+            [
+                "G90",
+                "M82",
+                "G1 X30 Y40 Z0.2 E0.02 F1200",
+                "G1 X70 Y90 Z12.0 E1.20 F1800",
+                "G0 X240 Y240 F9000 ; non-extrusion travel must not move ejection center",
+                "M84",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    patcher = BambuGcodeAutoejectionPatcher(output_dir=tmp_path / "patched")
+
+    result = patcher.patch_artifact(source, specimen_id="specimen-cand-1", position="center")
+
+    patched_text = Path(result["patched_artifact_path"]).read_text(encoding="utf-8")
+    assert result["ok"] is True
+    assert result["object_bounds_mm"]["min_x"] == 30.0
+    assert result["object_bounds_mm"]["max_x"] == 70.0
+    assert result["object_bounds_mm"]["center_x_mm"] == 50.0
+    assert result["object_bounds_mm"]["center_y_mm"] == 65.0
+    assert "; atr_object_center_mm=[50.0, 65.0, 6.1]" in patched_text
+    assert patched_text.index("M190 R40") < patched_text.index("G0 X50.000")
+    assert "G0 Z10.000 F3000" in patched_text
+    assert "G28 ; atr_autoejection_home_all_axes" not in patched_text
+    assert "G1 Z5.000 F5000 ; atr_autoejection_lift_after_home" not in patched_text
+    assert "; atr_home_initialization=preserve_print_job_coordinates" in patched_text
+    assert "G90" in patched_text
+    assert patched_text.index("G0 Z10.000 F3000") < patched_text.index("G0 X50.000 Y245.000")
+    assert "G0 Z2.000 F3000" not in patched_text
+    assert "G0 X50.000 Y245.000 F6000" in patched_text
+    assert "atr_sweep_height_fraction=0.90" not in patched_text
+
+
+def test_bambu_bounds_parser_accepts_leading_dot_relative_extrusion() -> None:
+    gcode = "\n".join(
+        [
+            "G90",
+            "M83 ; use relative distances for extrusion",
+            "G1 X82.731 Y87.536 F7200",
+            "G1 Z.4",
+            "G1 X117.269 Y112.464 E.02821",
+            "G1 X100.000 Y120.000 Z12.0 E.5",
+        ]
+    )
+
+    bounds = extract_object_bounds_mm(gcode)
+
+    assert bounds["source"] == "extrusion_moves"
+    assert bounds["extrusion_move_count"] == 2
+    assert bounds["min_x"] == 82.731
+    assert bounds["max_x"] == 117.269
+    assert bounds["max_z"] == 12.0
+
+
+def test_standalone_bambu_autoejection_builds_virtual_object_bounds_for_motion(tmp_path: Path) -> None:
+    patcher = BambuGcodeAutoejectionPatcher(output_dir=tmp_path / "patched")
+
+    result = patcher.build_standalone_ejection_artifact(
+        specimen_id="standalone-right",
+        position="right",
+        object_size_mm=[30.0, 30.0, 12.0],
+    )
+
+    patched_text = Path(result["patched_artifact_path"]).read_text(encoding="utf-8")
+    bounds = result["object_bounds_mm"]
+    assert result["ok"] is True
+    assert bounds["center_x_mm"] == 208.0
+    assert bounds["center_y_mm"] == 126.5
+    assert bounds["max_z"] == 12.0
+    assert "G0 Z10.000 F3000" in patched_text
+    assert "G28 ; atr_autoejection_home_all_axes" not in patched_text
+    assert "G1 Z5.000 F5000 ; atr_autoejection_lift_after_home" not in patched_text
+    assert "; atr_home_initialization=preserve_print_job_coordinates" in patched_text
+    assert patched_text.index("G0 Z10.000 F3000") < patched_text.index("G0 X208.000 Y245.000")
+    assert "G0 Z2.000 F3000" not in patched_text
+    assert "G0 X208.000 Y245.000 F6000" in patched_text
+    assert patched_text.index("M190 R40") < patched_text.index("G0 X208.000")
+
+
+def test_standalone_bambu_autoejection_uses_absolute_push_height_from_object_top(tmp_path: Path) -> None:
+    patcher = BambuGcodeAutoejectionPatcher(output_dir=tmp_path / "patched")
+
+    result = patcher.build_standalone_ejection_artifact(
+        specimen_id="standalone-tall",
+        position="center",
+        object_size_mm=[30.0, 30.0, 40.0],
+    )
+
+    patched_text = Path(result["patched_artifact_path"]).read_text(encoding="utf-8")
+    assert result["ok"] is True
+    assert result["object_bounds_mm"]["max_z"] == 40.0
+    assert "G0 Z25.000 F3000" in patched_text
+    assert patched_text.index("G0 Z25.000 F3000") < patched_text.index("G0 X128.000 Y245.000")
+    assert "G0 Z50.000 F3000" not in patched_text
+
+
 def test_plain_gcode_patch_is_idempotent_for_already_autoeject_artifact(tmp_path: Path) -> None:
     source = tmp_path / "specimen.gcode"
     source.write_text(BASE_GCODE, encoding="utf-8")
@@ -159,6 +262,98 @@ def test_gcode_3mf_patch_replaces_plate_gcode_and_updates_md5(tmp_path: Path) ->
     assert patched_gcode.count("atr.bambu.autoejection.v1") == 1
     assert patched_md5 == hashlib.md5(patched_gcode.encode("utf-8")).hexdigest()
     assert result["validation"]["ok"] is True
+
+
+def test_gcode_3mf_ejection_only_patch_uses_source_bounds_without_print_body(tmp_path: Path) -> None:
+    source = tmp_path / "actual_specimen.gcode.3mf"
+    original_gcode = "\n".join(
+        [
+            "; HEADER_BLOCK_START",
+            "; BambuStudio test slice",
+            "; estimated printing time (normal mode) = 2h 16m 39s",
+            "; total layer number: 151",
+            "; total filament length [mm] : 3575.51",
+            "; HEADER_BLOCK_END",
+            "; EXECUTABLE_BLOCK_START",
+            "M73 P0 R1",
+            "M201 X1000 Y1000 Z500 E5000",
+            "M106 S0",
+            "M190 S35 ; original print bed wait must not be needed for ejection-only validation",
+            "M104 S200 ; original print nozzle heat must not be needed for ejection-only validation",
+            "; FEATURE: Custom",
+            "G28 ; home all axes",
+            "G1 Z5 F5000 ; lift nozzle",
+            "; MACHINE_START_GCODE_END",
+            "M109 S200 ; original print nozzle wait must not be needed for ejection-only validation",
+            "G90",
+            "G21",
+            "M83 ; use relative distances for extrusion",
+            "; FEATURE: Outer wall",
+            "G1 X30 Y40 Z0.2 E0.1 F1200",
+            "G1 X70 Y40 Z0.2 E0.2 F1200",
+            "G1 X70 Y80 Z12.0 E0.3 F1200",
+            "G1 X30 Y80 Z12.0 E0.4 F1200",
+            "; MACHINE_END_GCODE_START",
+            "M104 S0 ; turn off temperature",
+            "G28 X0  ; home X axis",
+            "M84     ; disable motors",
+            "M73 P100 R0",
+            "; EXECUTABLE_BLOCK_END",
+        ]
+    )
+    with zipfile.ZipFile(source, "w") as archive:
+        archive.writestr("Metadata/plate_1.gcode", original_gcode)
+        archive.writestr(
+            "Metadata/slice_info.config",
+            '<?xml version="1.0" encoding="UTF-8"?><config><plate><metadata key="prediction" value="8199"/></plate></config>',
+        )
+        archive.writestr("3D/3dmodel.model", "<model />")
+    patcher = BambuGcodeAutoejectionPatcher(output_dir=tmp_path / "patched")
+
+    result = patcher.build_ejection_only_from_sliced_artifact(
+        source,
+        specimen_id="actual-specimen-test",
+        position="center",
+        plate_id=1,
+        loop_index=2,
+    )
+
+    patched_path = Path(result["patched_artifact_path"])
+    assert result["ok"] is True
+    assert patched_path.name == "actual_specimen.ejection-test.gcode.3mf"
+    assert result["object_bounds_mm"]["source"] == "extrusion_moves"
+    assert result["object_bounds_mm"]["center_x_mm"] == 50.0
+    assert result["object_bounds_mm"]["center_y_mm"] == 60.0
+    assert result["object_bounds_mm"]["max_z"] == 12.0
+    with zipfile.ZipFile(patched_path) as archive:
+        patched_gcode = archive.read("Metadata/plate_1.gcode").decode("utf-8")
+        patched_md5 = archive.read("Metadata/plate_1.gcode.md5").decode("utf-8").strip()
+        slice_info = archive.read("Metadata/slice_info.config").decode("utf-8")
+    assert patched_md5 == hashlib.md5(patched_gcode.encode("utf-8")).hexdigest()
+    assert "G28 ; home all axes" in patched_gcode
+    assert "G28 X0" not in patched_gcode
+    assert "M190 S35" not in patched_gcode
+    assert "M104 S200" not in patched_gcode
+    assert "M109 S200" not in patched_gcode
+    assert "M73 P0 R1" not in patched_gcode
+    assert "M73 P100 R0" in patched_gcode
+    assert "2h 16m 39s" not in patched_gcode
+    assert "; total layer number: 151" not in patched_gcode
+    assert "; estimated printing time (normal mode) = 2m 0s" in patched_gcode
+    assert "; total layer number: 1" in patched_gcode
+    assert "; total filament length [mm] : 0.00" in patched_gcode
+    assert 'key="prediction" value="120"' in slice_info
+    assert 'value="8199"' not in slice_info
+    assert "E0.1" not in patched_gcode
+    assert "E0.4" not in patched_gcode
+    assert "; FEATURE: Outer wall" not in patched_gcode
+    assert "; atr_print_body_omitted=true" in patched_gcode
+    assert "; atr_actual_object_bounds_mm=" in patched_gcode
+    assert "G0 Z10.000 F3000" in patched_gcode
+    assert "G0 X50.000 Y245.000 F6000" in patched_gcode
+    tail = patched_gcode[patched_gcode.index("atr.bambu.autoejection.v1") :]
+    assert "G28" not in tail
+    assert tail.index("atr.bambu.autoejection.end") < tail.index("M73 P100 R0")
 
 
 def test_gcode_3mf_patch_blocks_missing_requested_plate_instead_of_falling_back(tmp_path: Path) -> None:
@@ -335,9 +530,9 @@ G1 X30 Y30 Z10.0 E0.5
 M400
 M190 R40
 G90
-G0 Z20 F1200
-G0 X30 Y245 F5000
-G0 X30 Y8 F5000
+G0 Z20 F3000
+G0 X30 Y245 F15000
+G0 X30 Y8 F15000
 M400
 ; atr.bambu.autoejection.end
 """
@@ -348,7 +543,7 @@ M400
     assert "BAMBU_AUTOEJECTION_UNSAFE_FEEDRATE" in result["blockers"]
 
 
-def test_plain_gcode_patch_generates_object_height_multi_sweep_tail(tmp_path: Path) -> None:
+def test_plain_gcode_patch_generates_single_object_top_offset_sweep_tail(tmp_path: Path) -> None:
     source = tmp_path / "specimen.gcode"
     source.write_text(BASE_GCODE, encoding="utf-8")
     patcher = BambuGcodeAutoejectionPatcher(output_dir=tmp_path / "patched")
@@ -357,10 +552,36 @@ def test_plain_gcode_patch_generates_object_height_multi_sweep_tail(tmp_path: Pa
 
     patched_text = Path(result["patched_artifact_path"]).read_text(encoding="utf-8")
     assert result["ok"] is True
-    assert patched_text.count("atr_sweep_height_fraction=") >= 3
-    assert "G0 Z9.000" in patched_text
-    assert "G0 Z6.000" in patched_text
-    assert "G0 Z4.000" in patched_text
+    assert patched_text.count("atr_sweep_height_fraction=") == 1
+    assert "atr_sweep_height_fraction=1.00" in patched_text
+    assert "G0 Z10.000 F3000" in patched_text
+    assert "G0 Z1.000 F3000" not in patched_text
+    assert "G0 Z9.000" not in patched_text
+
+
+def test_plain_gcode_patch_defaults_to_fifteen_mm_below_object_top_with_ten_mm_floor(tmp_path: Path) -> None:
+    source = tmp_path / "tall_specimen.gcode"
+    source.write_text(
+        "\n".join(
+            [
+                "G90",
+                "G1 X30 Y40 Z0.2 E0.1 F1200",
+                "G1 X70 Y80 Z30.0 E0.4 F1200",
+                "M84",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    patcher = BambuGcodeAutoejectionPatcher(output_dir=tmp_path / "patched")
+
+    result = patcher.patch_artifact(source, specimen_id="tall-specimen", position="center")
+
+    patched_text = Path(result["patched_artifact_path"]).read_text(encoding="utf-8")
+    assert result["ok"] is True
+    assert result["object_bounds_mm"]["max_z"] == 30.0
+    assert "; atr_z_push_offset_mm=15.0" in patched_text
+    assert "G0 Z15.000 F3000" in patched_text
+    assert "G0 Z20.000 F3000" not in patched_text
 
 
 @pytest.mark.parametrize(

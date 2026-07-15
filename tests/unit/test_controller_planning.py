@@ -3,6 +3,7 @@ Unit tests for Live GUI planning handoff adaptation.
 """
 
 import asyncio
+import copy
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -11,9 +12,10 @@ import yaml
 import pytest
 
 from agents.base_agent import AgentResult
+from agents.specimen_agent import SpecimenMakingAgent
 from app.bootstrap import load_runtime
 from graphs import load_graph_config
-from orchestrator.state import Mode, Stage
+from orchestrator.state import AgentRuntimeStatus, Mode, Stage
 
 
 def test_live_gui_test_mode_flags_survive_design_adaptation() -> None:
@@ -44,6 +46,87 @@ def test_live_gui_test_mode_flags_survive_design_adaptation() -> None:
     assert spec["print"]["start_immediately"] is False
     assert spec["print"]["physical_intent"] is False
     assert "printer_test_path" not in spec
+
+
+def test_controller_merge_vision_confirmation_marks_specimen_completion() -> None:
+    controller = load_runtime()
+    controller._state.run_metadata["specimen_result"] = {
+        "ok": True,
+        "specimen_id": "specimen-vision-001",
+        "handoff_status": "ready",
+    }
+
+    controller._merge_planning_agent_data(
+        Stage.VISION,
+        {
+            "observation": {
+                "active_cam_ejection_check": {
+                    "schema": "active_cam_ejection_check.v1",
+                    "status": "confirmed",
+                    "specimen_detected": True,
+                    "spc_autoejection_confirmed": True,
+                    "image_path": "/tmp/active-cam.png",
+                },
+                "spc_autoejection_confirmation": {
+                    "schema": "spc_autoejection_confirmation.v1",
+                    "signal": "SPC_AUTOEJECTION_CONFIRMED_BY_ACTIVE_CAM",
+                    "status": "confirmed",
+                    "confirmed": True,
+                    "specimen_detected": True,
+                    "consumer_agent": "specimen_agent",
+                },
+            },
+            "vision_signal": {
+                "schema": "vision_signal.v1",
+                "signal": "pickup_ready",
+                "value": True,
+            },
+        },
+    )
+
+    specimen = controller._state.run_metadata["specimen_result"]
+    assert specimen["vision_completion_signal"]["confirmed"] is True
+    assert specimen["vision_completion_signal"]["signal"] == "SPC_AUTOEJECTION_CONFIRMED_BY_ACTIVE_CAM"
+    assert specimen["vision_verification"]["status"] == "confirmed"
+    assert specimen["active_cam_ejection_check"]["spc_autoejection_confirmed"] is True
+
+
+def test_controller_retains_active_cam_artifact_until_explicit_failure() -> None:
+    controller = load_runtime()
+    stored = {
+        "schema": "active_cam_run_artifact.v1",
+        "status": "stored",
+        "path": "/runs/new.jpg",
+        "url": "/api/runs/run-active-cam/artifact-file/vision/frame/new.jpg",
+    }
+
+    controller._merge_planning_agent_data(Stage.VISION, {"active_cam_artifact_update": stored})
+    controller._merge_planning_agent_data(
+        Stage.MANIPULATION,
+        {"manipulation_report": {"status": "running"}},
+    )
+
+    assert controller._state.run_metadata["latest_active_cam_artifact"] == stored
+    assert controller._compact_planning_run_metadata(controller._state.run_metadata)["latest_active_cam_artifact"] == stored
+
+    controller._merge_planning_agent_data(
+        Stage.VISION,
+        {"active_cam_artifact_update": {"schema": "active_cam_run_artifact.v1", "status": "failed"}},
+    )
+
+    assert "latest_active_cam_artifact" not in controller._state.run_metadata
+
+
+def test_specimen_agent_test_mode_handoff_requires_printer_choice_in_mode_test() -> None:
+    state = load_runtime()._state
+    state.mode = Mode.TEST
+    spec = {
+        "test_mode_llm_generated": True,
+        "candidate_id": "cand-test",
+        "specimen_id": "specimen-test",
+    }
+
+    assert SpecimenMakingAgent._is_live_gui_test_spec(state, spec) is True
 
 
 def test_live_gui_regenerates_specimen_id_when_geometry_is_overridden() -> None:
@@ -136,6 +219,34 @@ def test_equipment_alert_merge_persists_incident_records_and_guardian_event() ->
         controller._state.run_metadata.update(original_metadata)
         controller._state.device_health.clear()
         controller._state.device_health.update(original_health)
+
+
+def test_printer_status_hms_code_does_not_create_blocking_hardware_alert() -> None:
+    controller = load_runtime()
+
+    alert = controller._hardware_alert_for_result(
+        workspace="printer",
+        tool="printer.status",
+        result={
+            "ok": True,
+            "status": "COMMUNICATION_READY",
+            "device_screen": {
+                "health": {
+                    "hms_count": 1,
+                    "hms": [{"code": 131184, "attr": 83887616}],
+                    "error": "0",
+                    "fail_reason": "0",
+                },
+                "job": {"state": "IDLE"},
+            },
+        },
+        stage=Stage.IDLE,
+        agent="printer_status_monitor",
+        workflow="printer_status_monitor",
+        status="COMMUNICATION_READY",
+    )
+
+    assert alert is None
 
 
 def test_live_gui_test_defaults_use_3dp_gui_saved_test_size(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -508,6 +619,141 @@ async def test_printer_choice_routes_to_specimen_agent_when_pending_connection_i
 
 
 @pytest.mark.asyncio
+async def test_installed_printer_connection_info_pending_reprompts_without_crashing(monkeypatch: pytest.MonkeyPatch) -> None:
+    controller = load_runtime()
+    controller._state.mode = Mode.LIVE
+    controller._state.current_experiment_spec = {
+        "candidate_id": "cand-installed",
+        "specimen_id": "specimen-installed",
+        "geometry_type": "gyroid",
+        "specimen_size_mm": [30, 30, 30],
+        "test_mode_llm_generated": True,
+        "printer_test_path": "installed_printer",
+    }
+    controller._state.run_metadata["pending_specimen_input"] = {
+        "type": "printer_connection_info",
+        "specimen_id": "specimen-installed",
+        "input_request": {
+            "type": "printer_connection_info",
+            "connection_memory_path": "/home/jin/autonomous_researcher/memory/printer_connection.json",
+            "provider": "selected active printer",
+        },
+    }
+    resume_called = False
+
+    async def fake_resume(*, experiment_spec: dict, session_id: str | None) -> dict:
+        nonlocal resume_called
+        resume_called = True
+        return {"ok": False, "message": "resume should not run", "session": controller.planning_snapshot(session_id=session_id)}
+
+    monkeypatch.setattr(controller, "_resume_specimen_after_operator_input", fake_resume)
+
+    result = await controller._planning_message_locked(
+        message="아직 연결정보 입력 전",
+        goal=None,
+        constraints={},
+        session_id="s-installed-pending",
+    )
+
+    assert result["ok"] is True
+    assert result["message"] == "SpecimenMakingAgent waiting for selected printer bridge connection info."
+    assert resume_called is False
+    assert controller._state.run_metadata["pending_specimen_input"]["type"] == "printer_connection_info"
+    assert any(
+        "/home/jin/autonomous_researcher/memory/printer_connection.json" in str(entry.get("content", ""))
+        for entry in controller._planning_messages
+    )
+
+
+@pytest.mark.asyncio
+async def test_pending_printer_choice_phrase_routes_to_specimen_before_new_test_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    controller = load_runtime()
+    controller._state.mode = Mode.LIVE
+    controller._state.current_experiment_spec = {
+        "candidate_id": "cand-installed",
+        "specimen_id": "specimen-installed",
+        "geometry_type": "gyroid",
+        "specimen_size_mm": [30, 30, 30],
+        "test_mode_llm_generated": True,
+        "printer_test_path": "installed_printer",
+    }
+    controller._state.run_metadata["pending_specimen_input"] = {
+        "type": "printer_connection_info",
+        "specimen_id": "specimen-installed",
+        "input_request": {
+            "type": "printer_connection_info",
+            "connection_memory_path": "/home/jin/autonomous_researcher/memory/printer_connection.json",
+            "provider": "selected active printer",
+        },
+    }
+    captured: dict[str, object] = {}
+
+    async def fake_resume(*, experiment_spec: dict, session_id: str | None) -> dict:
+        captured.update(experiment_spec)
+        return {"ok": True, "message": "resumed installed printer choice", "session": controller.planning_snapshot(session_id=session_id)}
+
+    async def fail_test_mode(**_: object) -> dict:
+        raise AssertionError("pending specimen input must not restart a fresh test-mode workflow")
+
+    monkeypatch.setattr(controller, "_resume_specimen_after_operator_input", fake_resume)
+    monkeypatch.setattr(controller, "_run_test_mode_planning", fail_test_mode)
+
+    result = await controller._planning_message_locked(
+        message="테스트 모드, 설치 프린터",
+        goal=None,
+        constraints={},
+        session_id="s-installed-priority",
+    )
+
+    assert result["ok"] is True
+    assert result["message"] == "resumed installed printer choice"
+    assert captured["printer_test_path"] == "installed_printer"
+    assert captured["test_printer_transport"] == "real"
+
+
+@pytest.mark.asyncio
+async def test_installed_printer_connection_info_done_retries_same_specimen_stage(monkeypatch: pytest.MonkeyPatch) -> None:
+    controller = load_runtime()
+    controller._state.mode = Mode.LIVE
+    controller._state.current_experiment_spec = {
+        "candidate_id": "cand-installed",
+        "specimen_id": "specimen-installed",
+        "geometry_type": "gyroid",
+        "specimen_size_mm": [30, 30, 30],
+        "test_mode_llm_generated": True,
+        "printer_test_path": "installed_printer",
+    }
+    controller._state.run_metadata["pending_specimen_input"] = {
+        "type": "printer_connection_info",
+        "specimen_id": "specimen-installed",
+        "input_request": {
+            "type": "printer_connection_info",
+            "connection_memory_path": "/home/jin/autonomous_researcher/memory/printer_connection.json",
+            "provider": "selected active printer",
+        },
+    }
+    captured: dict[str, object] = {}
+
+    async def fake_resume(*, experiment_spec: dict, session_id: str | None) -> dict:
+        captured.update(experiment_spec)
+        return {"ok": True, "message": "resumed installed printer", "session": controller.planning_snapshot(session_id=session_id)}
+
+    monkeypatch.setattr(controller, "_resume_specimen_after_operator_input", fake_resume)
+
+    result = await controller._planning_message_locked(
+        message="연결정보 입력 완료",
+        goal=None,
+        constraints={},
+        session_id="s-installed-done",
+    )
+
+    assert result["ok"] is True
+    assert result["message"] == "resumed installed printer"
+    assert captured["printer_test_path"] == "installed_printer"
+    assert "pending_specimen_input" not in controller._state.run_metadata
+
+
+@pytest.mark.asyncio
 async def test_printer_choice_routes_to_specimen_agent_when_pending_state_was_lost(monkeypatch: pytest.MonkeyPatch) -> None:
     controller = load_runtime()
     controller._state.mode = Mode.LIVE
@@ -537,6 +783,443 @@ async def test_printer_choice_routes_to_specimen_agent_when_pending_state_was_lo
     assert captured["printer_test_path"] == "installed_printer"
     assert captured["test_printer_transport"] == "real"
     assert captured["allow_test_printer_live"] is True
+
+
+@pytest.mark.asyncio
+async def test_planning_langgraph_stage_syncs_returned_runloop_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    import app.controller as controller_module
+
+    controller = load_runtime()
+    controller._state.mode = Mode.LIVE
+    controller._state.current_experiment_spec = {
+        "candidate_id": "cand-sync",
+        "specimen_id": "specimen-sync",
+        "geometry_type": "gyroid",
+        "specimen_size_mm": [30, 30, 30],
+        "test_mode_llm_generated": True,
+        "printer_test_path": "installed_printer",
+    }
+
+    class FakeRunLoop:
+        def __init__(self, *, state, **_: object) -> None:
+            self._state = state
+
+        async def step(self) -> None:
+            returned_state = copy.deepcopy(self._state)
+            returned_state.stage = Stage.VISION
+            returned_state.run_metadata["specimen_result"] = {
+                "ok": True,
+                "requires_operator_input": False,
+                "printer_prepare_status": "prepared",
+            }
+            returned_state.current_experiment_spec["printer_test_path"] = "installed_printer"
+            self._state = returned_state
+
+    monkeypatch.setattr(controller_module, "RunLoop", FakeRunLoop)
+
+    await controller._run_planning_langgraph_stage(Stage.SPECIMEN)
+
+    assert controller._state.stage == Stage.VISION
+    assert controller._state.run_metadata["specimen_result"]["printer_prepare_status"] == "prepared"
+    assert controller._state.current_experiment_spec["printer_test_path"] == "installed_printer"
+
+
+@pytest.mark.asyncio
+async def test_specimen_stage_does_not_reuse_stale_operator_prompt_after_agent_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller = load_runtime()
+    controller._state.mode = Mode.TEST
+    spec = {
+        "candidate_id": "cand-stale",
+        "specimen_id": "specimen-stale",
+        "geometry_type": "gyroid",
+        "specimen_size_mm": [30, 30, 30],
+        "test_mode_llm_generated": True,
+        "printer_test_path": "installed_printer",
+    }
+    controller._state.current_experiment_spec = spec
+    controller._state.run_metadata["specimen_result"] = {
+        "ok": False,
+        "requires_operator_input": True,
+        "printer_prepare_status": "printer_test_path_required",
+        "input_request": {"type": "printer_test_path_choice"},
+    }
+
+    async def fake_langgraph_stage(stage: Stage) -> None:
+        assert stage == Stage.SPECIMEN
+        controller._state.agent_status["specimen_agent"] = AgentRuntimeStatus(
+            state="error",
+            success=False,
+            mode="test",
+            last_result="printer.prepare failed: BAMBU_FTPS_TOO_MANY_CONNECTIONS",
+        )
+
+    monkeypatch.setattr(controller, "_run_planning_langgraph_stage", fake_langgraph_stage)
+
+    with pytest.raises(RuntimeError, match="BAMBU_FTPS_TOO_MANY_CONNECTIONS"):
+        await controller._run_planning_specimen_stage(spec, emit_handoff=False)
+
+
+@pytest.mark.asyncio
+async def test_specimen_stage_waits_for_physical_printer_completion_before_vision(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller = load_runtime()
+    controller._state.mode = Mode.LIVE
+    spec = {
+        "candidate_id": "cand-wait",
+        "specimen_id": "specimen-wait",
+        "geometry_type": "gyroid",
+        "specimen_size_mm": [30, 30, 30],
+        "test_mode_llm_generated": True,
+        "printer_test_path": "installed_printer",
+        "printer_completion_timeout_sec": 5,
+        "printer_completion_poll_sec": 0,
+    }
+
+    async def fake_langgraph_stage(stage: Stage) -> None:
+        assert stage == Stage.SPECIMEN
+        controller._state.run_metadata["specimen_result"] = {
+            "ok": True,
+            "printer_path": "installed_printer",
+            "printer_prepare_status": "TEST_PRINTER_EJECTION_PROJECT_STARTED",
+            "print_result": {
+                "published": True,
+                "post_publish_status": {"status": "running", "progress_percent": 5},
+            },
+            "fabrication_report": {
+                "fabrication_intent": {"printer_path": "installed_printer", "physical_intent": True},
+                "fabrication_outcome": {"status": "ready_for_vision", "location": "printer_bed", "autoejection_status": "not_requested"},
+                "monitoring_plan": {"observe_camera_after_print": True},
+            },
+            "specimen_fabricated": {
+                "schema": "specimen_fabricated.v1",
+                "fabrication_summary": {"outcome_status": "ready_for_vision", "location": "printer_bed"},
+            },
+        }
+
+    statuses = [
+        {
+            "ok": True,
+            "status": "PRINT_STARTED",
+            "device_screen": {"progress_panel": {"state": "RUNNING", "progress_percent": 42, "job_name": "specimen.gcode.3mf"}},
+        },
+        {
+            "ok": True,
+            "status": "ready",
+            "device_screen": {"progress_panel": {"state": "FINISH", "progress_percent": 100, "job_name": "specimen.gcode.3mf"}},
+        },
+    ]
+
+    async def fake_completion_status() -> dict:
+        return statuses.pop(0)
+
+    monkeypatch.setattr(controller, "_run_planning_langgraph_stage", fake_langgraph_stage)
+    monkeypatch.setattr(controller, "_read_specimen_printer_completion_status", fake_completion_status)
+
+    result = await controller._run_planning_specimen_stage(spec, emit_handoff=False)
+
+    assert result["pending"] is False
+    specimen = result["specimen"]
+    assert specimen["printer_completion_wait"]["status"] == "complete"
+    outcome = specimen["fabrication_report"]["fabrication_outcome"]
+    assert outcome["location"] == "a4_workspace"
+    assert outcome["autoejection_status"] == "complete"
+    assert controller._state.run_metadata["fabrication_report"]["fabrication_outcome"]["location"] == "a4_workspace"
+
+
+def test_printer_completion_classifier_treats_communication_ready_as_complete_after_start() -> None:
+    controller = load_runtime()
+
+    result = type(controller)._classify_specimen_printer_completion_status(
+        {
+            "ok": True,
+            "status": "COMMUNICATION_READY",
+            "device_screen": {
+                "progress_panel": {
+                    "state": "COMMUNICATION_READY",
+                    "job_name": "specimen.gcode.3mf",
+                }
+            },
+        },
+        started_seen=True,
+    )
+
+    assert result["status"] == "complete"
+    assert result["state"] == "COMMUNICATION_READY"
+
+
+@pytest.mark.asyncio
+async def test_printer_completion_wait_recovers_from_transient_mqtt_timeouts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller = load_runtime()
+    controller._state.mode = Mode.LIVE
+    spec = {
+        "candidate_id": "cand-wait",
+        "specimen_id": "specimen-wait",
+        "geometry_type": "gyroid",
+        "specimen_size_mm": [30, 30, 30],
+        "test_mode_llm_generated": True,
+        "printer_test_path": "installed_printer",
+        "printer_completion_timeout_sec": 5,
+        "printer_completion_poll_sec": 0,
+    }
+    specimen_payload = {
+        "ok": True,
+        "printer_path": "installed_printer",
+        "printer_prepare_status": "TEST_PRINTER_EJECTION_PROJECT_STARTED",
+        "print_result": {
+            "published": True,
+            "post_publish_status": {"status": "running", "progress_percent": 5},
+        },
+    }
+    statuses = [
+        {
+            "ok": False,
+            "status": "preprint_communication_failed",
+            "failure_code": "BAMBU_MQTT_REPORT_TIMEOUT",
+            "message": "Timed out waiting for Bambu MQTT report.",
+        },
+        {
+            "ok": False,
+            "status": "preprint_communication_failed",
+            "failure_code": "BAMBU_MQTT_REPORT_TIMEOUT",
+            "message": "Timed out waiting for Bambu MQTT report.",
+        },
+        {
+            "ok": True,
+            "status": "ready",
+            "device_screen": {"progress_panel": {"state": "RUNNING", "progress_percent": 24, "job_name": "specimen.gcode.3mf"}},
+        },
+        {
+            "ok": True,
+            "status": "ready",
+            "device_screen": {"progress_panel": {"state": "FINISH", "progress_percent": 100, "job_name": "specimen.gcode.3mf"}},
+        },
+    ]
+
+    async def fake_completion_status() -> dict:
+        return statuses.pop(0)
+
+    monkeypatch.setattr(controller, "_read_specimen_printer_completion_status", fake_completion_status)
+
+    result = await controller._await_specimen_printer_completion_before_vision(spec, specimen_payload)
+
+    assert result["status"] == "complete"
+    assert result["samples"][0]["status"] == "transient"
+    assert result["last_status"]["status"] == "complete"
+
+
+@pytest.mark.asyncio
+async def test_printer_completion_wait_short_circuits_completed_post_publish(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller = load_runtime()
+    controller._state.mode = Mode.LIVE
+    spec = {
+        "candidate_id": "cand-wait",
+        "specimen_id": "specimen-wait",
+        "geometry_type": "gyroid",
+        "specimen_size_mm": [30, 30, 30],
+        "test_mode_llm_generated": True,
+        "printer_test_path": "installed_printer",
+    }
+    specimen_payload = {
+        "ok": True,
+        "printer_path": "installed_printer",
+        "printer_prepare_status": "TEST_PRINTER_EJECTION_PROJECT_COMPLETED",
+        "print_result": {
+            "published": True,
+            "post_publish_status": {
+                "status": "completed",
+                "state": "FINISH",
+                "progress_percent": 100,
+                "file_name": "specimen.gcode.3mf",
+            },
+        },
+    }
+
+    async def fail_if_polled() -> dict:
+        raise AssertionError("completed post-publish evidence should not poll MQTT again")
+
+    monkeypatch.setattr(controller, "_read_specimen_printer_completion_status", fail_if_polled)
+
+    result = await controller._await_specimen_printer_completion_before_vision(spec, specimen_payload)
+
+    assert result["status"] == "complete"
+    assert result["poll_count"] == 0
+    assert result["last_status"]["status"] == "completed"
+    assert result["source"] == "prepare_post_publish_status"
+
+
+def test_merge_planning_agent_data_preserves_printer_completion_evidence_from_stale_specimen_payload() -> None:
+    controller = load_runtime()
+    controller._state.run_metadata["specimen_result"] = {
+        "specimen_id": "specimen-wait",
+        "printer_path": "installed_printer",
+        "printer_prepare_status": "TEST_PRINTER_EJECTION_PROJECT_STARTED",
+        "printer_completion_wait": {
+            "schema": "specimen_printer_completion_wait.v1",
+            "status": "complete",
+            "source": "prepare_post_publish_status",
+        },
+        "autoejection_completion_verified": True,
+        "fabrication_report": {
+            "fabrication_outcome": {
+                "status": "ready_for_vision",
+                "location": "a4_workspace",
+                "autoejection_status": "complete",
+            }
+        },
+        "specimen_fabricated": {
+            "fabrication_summary": {
+                "outcome_status": "ready_for_vision",
+                "location": "a4_workspace",
+                "autoejection_status": "complete",
+            }
+        },
+    }
+    stale_payload = {
+        "specimen_id": "specimen-wait",
+        "printer_path": "installed_printer",
+        "printer_prepare_status": "TEST_PRINTER_EJECTION_PROJECT_STARTED",
+        "fabrication_report": {
+            "fabrication_outcome": {
+                "status": "ready_for_vision",
+                "location": "printer_bed",
+                "autoejection_status": "not_requested",
+            }
+        },
+    }
+
+    controller._merge_planning_agent_data(Stage.VISION, {"specimen_result": stale_payload})
+
+    specimen = controller._state.run_metadata["specimen_result"]
+    assert specimen["printer_completion_wait"]["status"] == "complete"
+    assert specimen["autoejection_completion_verified"] is True
+    assert specimen["fabrication_report"]["fabrication_outcome"]["location"] == "a4_workspace"
+    assert specimen["fabrication_report"]["fabrication_outcome"]["autoejection_status"] == "complete"
+
+
+@pytest.mark.asyncio
+async def test_printer_completion_wait_tolerates_extended_transient_printer_gaps(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller = load_runtime()
+    controller._state.mode = Mode.LIVE
+    spec = {
+        "candidate_id": "cand-wait",
+        "specimen_id": "specimen-wait",
+        "geometry_type": "gyroid",
+        "specimen_size_mm": [30, 30, 30],
+        "test_mode_llm_generated": True,
+        "printer_test_path": "installed_printer",
+        "printer_completion_timeout_sec": 5,
+        "printer_completion_poll_sec": 0,
+    }
+    specimen_payload = {
+        "ok": True,
+        "printer_path": "installed_printer",
+        "printer_prepare_status": "TEST_PRINTER_EJECTION_PROJECT_STARTED",
+        "print_result": {
+            "published": True,
+            "post_publish_status": {"status": "running", "progress_percent": 5},
+        },
+    }
+    statuses = [
+        {
+            "ok": False,
+            "status": "preprint_communication_failed",
+            "failure_code": "BAMBU_PORT_UNREACHABLE",
+            "message": "The printer did not answer a short MQTT probe.",
+        }
+        for _ in range(6)
+    ]
+    statuses.append(
+        {
+            "ok": True,
+            "status": "ready",
+            "device_screen": {"progress_panel": {"state": "FINISH", "progress_percent": 100, "job_name": "specimen.gcode.3mf"}},
+        }
+    )
+
+    async def fake_completion_status() -> dict:
+        return statuses.pop(0)
+
+    monkeypatch.setattr(controller, "_read_specimen_printer_completion_status", fake_completion_status)
+
+    result = await controller._await_specimen_printer_completion_before_vision(spec, specimen_payload)
+
+    assert result["status"] == "complete"
+    assert result["last_status"]["status"] == "complete"
+
+
+@pytest.mark.asyncio
+async def test_printer_completion_wait_fails_after_repeated_transient_mqtt_timeouts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller = load_runtime()
+    controller._state.mode = Mode.LIVE
+    spec = {
+        "candidate_id": "cand-wait",
+        "specimen_id": "specimen-wait",
+        "geometry_type": "gyroid",
+        "specimen_size_mm": [30, 30, 30],
+        "test_mode_llm_generated": True,
+        "printer_test_path": "installed_printer",
+        "printer_completion_timeout_sec": 5,
+        "printer_completion_poll_sec": 0,
+    }
+    specimen_payload = {
+        "ok": True,
+        "printer_path": "installed_printer",
+        "printer_prepare_status": "TEST_PRINTER_EJECTION_PROJECT_STARTED",
+        "print_result": {"published": True},
+    }
+
+    async def fake_completion_status() -> dict:
+        return {
+            "ok": False,
+            "status": "preprint_communication_failed",
+            "failure_code": "BAMBU_MQTT_REPORT_TIMEOUT",
+            "message": "Timed out waiting for Bambu MQTT report.",
+        }
+
+    monkeypatch.setattr(controller, "_read_specimen_printer_completion_status", fake_completion_status)
+
+    with pytest.raises(RuntimeError, match="transient printer communication did not recover"):
+        await controller._await_specimen_printer_completion_before_vision(spec, specimen_payload)
+
+
+@pytest.mark.asyncio
+async def test_printer_monitor_transient_mqtt_snapshot_does_not_raise_hardware_alert() -> None:
+    controller = load_runtime()
+    controller._state.mode = Mode.LIVE
+
+    await controller.emit_workspace_result(
+        workspace="printer",
+        tool="printer.status",
+        result={
+            "ok": False,
+            "tool": "printer.status",
+            "status": "preprint_communication_failed",
+            "failure_code": "BAMBU_MQTT_REPORT_TIMEOUT",
+            "message": "Timed out waiting for Bambu MQTT report.",
+        },
+        stage=Stage.SPECIMEN,
+        module_id="specimen",
+        agent="specimen_agent",
+        workflow="printer_status_monitor",
+        event_type="workspace_monitor_snapshot",
+        mirror_live_message=False,
+    )
+
+    assert controller._state.run_metadata.get("hardware_alerts") in (None, [])
+    event = controller.recent_events()[-1]
+    assert event["level"] == "WARNING"
+    assert event["type"] == "tool.warning"
 
 
 @pytest.mark.asyncio
@@ -579,11 +1262,12 @@ async def test_actual_print_choice_promotes_test_specimen_to_physical_print(monk
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("message", "choice", "transport", "physical"),
+    ("message", "choice", "transport", "physical", "stop_after_start"),
     [
-        ("테스트 모드, 가상 브릿지", "virtual_bridge", "virtual", False),
-        ("테스트 모드, 설치 프린터", "installed_printer", "real", False),
-        ("테스트 모드, 실제 출력", "physical_print", "real", True),
+        ("테스트 모드, 가상 브릿지", "virtual_bridge", "virtual", False, False),
+        ("테스트 모드, 설치 프린터", "installed_printer", "real", True, False),
+        ("테스트 모드, 실제 프린터", "installed_printer", "real", True, False),
+        ("테스트 모드, 실제 출력", "physical_print", "real", True, False),
     ],
 )
 async def test_live_gui_test_mode_inline_printer_choice_handoffs_without_prompt(
@@ -592,6 +1276,7 @@ async def test_live_gui_test_mode_inline_printer_choice_handoffs_without_prompt(
     choice: str,
     transport: str,
     physical: bool,
+    stop_after_start: bool,
 ) -> None:
     controller = load_runtime()
     monkeypatch.setattr(
@@ -672,17 +1357,133 @@ async def test_live_gui_test_mode_inline_printer_choice_handoffs_without_prompt(
     assert constraints["printer_test_path"] == choice
     assert constraints["test_printer_transport"] == transport
     assert constraints["allow_test_printer_live"] is (choice != "virtual_bridge")
+    assert constraints["prefer_http_artifact"] is (choice == "installed_printer")
     print_request = constraints["print"]
     assert isinstance(print_request, dict)
     assert print_request["start_immediately"] is physical
     assert print_request["physical_intent"] is physical
     assert print_request["confirm_physical_print"] is physical
+    assert print_request.get("stop_after_start", False) is stop_after_start
+    if physical:
+        assert print_request["post_publish_observation_timeout_sec"] >= 120
+    if choice == "installed_printer":
+        assert print_request["use_ejection_only_project_file"] is True
+        assert print_request["prefer_http_artifact"] is True
+        assert constraints["ejection"]["enabled"] is True
+        assert constraints["ejection"]["allow_ejection"] is True
+        assert "standalone_after_start_stop" not in constraints["ejection"]
+        assert constraints["ejection"]["use_ejection_only_project_file"] is True
+        assert constraints["ejection"]["source"] == "installed_printer_ejection_only_project_file"
+    elif choice == "physical_print":
+        assert print_request["use_ejection_only_project_file"] is False
+        assert constraints["ejection"]["enabled"] is True
+        assert constraints["ejection"]["allow_ejection"] is True
+        assert constraints["ejection"]["use_ejection_only_project_file"] is False
+        assert constraints["ejection"]["source"] == "physical_print_tail"
     assert constraints["top_cap_enabled"] is False
     assert constraints["bottom_cap_enabled"] is True
     assert constraints["top_bottom_cap"] is True
     assert constraints["require_flat_compression_faces"] is False
     assert constraints["skin_thickness_mm"] == 0.8
     assert not controller._state.run_metadata.get("pending_specimen_input")
+
+
+@pytest.mark.asyncio
+async def test_live_gui_bare_test_mode_ignores_remembered_printer_choice_and_prompts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller = load_runtime()
+    controller._state.mode = Mode.LIVE
+    controller._state.run_metadata["last_specimen_printer_choice"] = "virtual_bridge"
+    spec = controller._build_planning_spec(
+        base_spec={
+            "candidate_id": "cand-bare-test",
+            "geometry_type": "gyroid",
+            "specimen_size_mm": [30, 30, 30],
+        },
+        constraints={
+            "test_mode_autofill": True,
+            "test_mode_llm_generated": True,
+        },
+    )
+    assert "printer_test_path" not in spec
+
+    async def fake_langgraph_stage(stage: Stage) -> None:
+        current_spec = controller._state.current_experiment_spec
+        if controller._specimen_printer_path(current_spec):
+            controller._state.run_metadata["specimen_result"] = {
+                "ok": True,
+                "requires_operator_input": False,
+                "printer_test_path": controller._specimen_printer_path(current_spec),
+            }
+            return
+        controller._state.run_metadata["specimen_result"] = {
+            "ok": False,
+            "requires_operator_input": True,
+            "printer_prepare_status": "printer_test_path_required",
+            "input_request": {
+                "type": "printer_test_path_choice",
+                "prompt": "가상 브릿지, 설치 프린터, 실제 출력 중 하나를 선택해주세요.",
+                "choices": ["virtual_bridge", "installed_printer", "physical_print"],
+            },
+        }
+
+    monkeypatch.setattr(controller, "_run_planning_langgraph_stage", fake_langgraph_stage)
+
+    result = await controller._run_planning_specimen_stage(spec, emit_handoff=False)
+
+    assert result["pending"] is True
+    assert "printer_test_path" not in controller._state.current_experiment_spec
+    pending = controller._state.run_metadata.get("pending_specimen_input")
+    assert isinstance(pending, dict)
+    assert pending["input_request"]["type"] == "printer_test_path_choice"
+
+
+@pytest.mark.asyncio
+async def test_live_gui_bare_test_mode_strips_llm_printer_choice_until_agent_prompt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller = load_runtime()
+    controller._state.mode = Mode.LIVE
+    captured: dict[str, object] = {}
+
+    async def fake_complete(*, prompt: str):
+        return (
+            SimpleNamespace(
+                text=(
+                    "테스트 실험값을 생성했습니다.\n"
+                    "```json\n"
+                    "{\"goal\":\"fake test\",\"constraints\":{\"geometry_type\":\"gyroid\","
+                    "\"printer_test_path\":\"virtual_bridge\",\"test_printer_transport\":\"virtual\","
+                    "\"allow_test_printer_live\":true}}\n"
+                    "```"
+                ),
+                raw={},
+                model="fake-orchestrator",
+            ),
+            "ok",
+        )
+
+    async def fake_handoff(*, goal: str | None, constraints: dict) -> dict:
+        captured["constraints"] = constraints
+        return {"ok": True, "message": "handoff", "session": controller.planning_snapshot(session_id="s-bare")}
+
+    monkeypatch.setattr(controller, "_complete_live_planning_prompt", fake_complete)
+    monkeypatch.setattr(controller, "_handoff_planning_to_design", fake_handoff)
+
+    result = await controller._planning_message_locked(
+        message="테스트 모드",
+        goal=None,
+        constraints={},
+        session_id="s-bare",
+    )
+
+    assert result["ok"] is True
+    constraints = captured["constraints"]
+    assert isinstance(constraints, dict)
+    assert "printer_test_path" not in constraints
+    assert "test_printer_transport" not in constraints
+    assert "allow_test_printer_live" not in constraints
 
 
 @pytest.mark.asyncio
@@ -1140,6 +1941,132 @@ async def test_live_gui_planning_tail_reports_operator_safe_stop_without_silent_
     assert "safe_stop_requested" in result["message"]
     system_messages = [message["content"] for message in controller.planning_snapshot()["messages"] if message["role"] == "system"]
     assert any("SYSTEM_EVENT: WORKFLOW_HALTED" in content and "safe_stop_requested" in content for content in system_messages)
+
+
+@pytest.mark.asyncio
+async def test_live_gui_planning_tail_preserves_runtime_terminal_complete_without_restarting_design(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller = load_runtime()
+    controller._state.mode = Mode.LIVE
+    spec = controller._build_planning_spec(
+        base_spec={
+            "candidate_id": "cand-vision-safe-stop",
+            "geometry_type": "gyroid",
+            "specimen_size_mm": [30, 30, 30],
+        },
+        constraints={
+            "geometry_type": "gyroid",
+            "specimen_size_mm": [30, 30, 30],
+            "test_mode_autofill": True,
+            "test_mode_llm_generated": True,
+            "printer_test_path": "installed_printer",
+        },
+    )
+
+    class TerminalVisionRunLoop:
+        def __init__(self, *, state, **_: object) -> None:
+            self._state = state
+
+        async def step(self) -> None:
+            assert self._state.stage == Stage.VISION
+            self._state.stage = Stage.COMPLETE
+
+    monkeypatch.setattr("app.controller.RunLoop", TerminalVisionRunLoop)
+
+    result = await controller._run_planning_loop_tail(spec, cycle_index=1, total_cycles=5)
+
+    assert result["ok"] is True
+    assert result["decision"] == "stop"
+    assert controller._state.stage == Stage.COMPLETE
+    system_messages = [message["content"] for message in controller.planning_snapshot()["messages"] if message["role"] == "system"]
+    assert not any("SYSTEM_EVENT: CYCLE_COMPLETE" in content for content in system_messages)
+
+
+@pytest.mark.asyncio
+async def test_emergency_resume_restarts_interrupted_planning_test_loop(monkeypatch: pytest.MonkeyPatch) -> None:
+    controller = load_runtime()
+    spec = controller._build_planning_spec(
+        base_spec={
+            "candidate_id": "cand-estop-resume",
+            "geometry_type": "gyroid",
+            "specimen_size_mm": [30, 30, 30],
+        },
+        constraints={
+            "geometry_type": "gyroid",
+            "specimen_size_mm": [30, 30, 30],
+            "test_mode_autofill": True,
+            "test_mode_llm_generated": True,
+            "printer_test_path": "virtual_bridge",
+        },
+    )
+    controller._state.current_experiment_spec = dict(spec)
+    controller._state.active_goal = "resume interrupted virtual-printer test loop"
+    controller._state.stage = Stage.VISION
+    stale_decision = {
+        "decision_id": "decision-before-estop",
+        "decision": "planning_route_next_stage",
+        "selected": "vision",
+    }
+    controller._state.run_metadata["orchestrator_decision_register"] = [dict(stale_decision)]
+    controller._state.run_metadata["latest_orchestrator_decision"] = dict(stale_decision)
+    controller._state.run_metadata["latest_orchestrator_control_plane"] = {
+        "schema": "orchestrator_control_plane.v1",
+        "decision_register": {
+            "decision_count": 1,
+            "items": [dict(stale_decision)],
+        },
+    }
+    controller._state.run_metadata["_planning_resume_context"] = {
+        "kind": "planning_cycle_series",
+        "goal": controller._state.active_goal,
+        "current_spec": dict(spec),
+        "design_constraints": {**dict(spec.get("constraints", {})), **spec},
+        "cycle_index": 2,
+        "total_cycles": 5,
+        "interrupted_stage": "vision",
+    }
+    controller._state.emergency_stop_requested = True
+    controller._state.stop_requested = True
+
+    started = asyncio.Event()
+    release = asyncio.Event()
+    observed: list[tuple[int, str, bool, bool]] = []
+
+    async def fake_cycle_series(*, first_spec: dict, design_constraints: dict, start_cycle: int) -> dict:
+        observed.append(
+            (
+                start_cycle,
+                controller._state.stage.value,
+                bool(controller._state.emergency_stop_requested),
+                bool(controller._state.stop_requested),
+            )
+        )
+        started.set()
+        await release.wait()
+        return {"ok": True, "decision": "stop", "message": "resumed test loop"}
+
+    monkeypatch.setattr(controller, "_run_planning_cycle_series", fake_cycle_series)
+
+    response = await controller.emergency_resume()
+    assert response["ok"] is True
+    assert response["resume"]["started"] is True
+    response_metadata = response["state"]["run_metadata"]
+    assert response_metadata["orchestrator_decision_register"] == []
+    assert response_metadata["latest_orchestrator_control_plane"]["decision_register"]["decision_count"] == 0
+    assert response_metadata["latest_orchestrator_control_plane"]["decision_register"]["items"] == []
+    session_metadata = controller.planning_snapshot()["state"]["run_metadata"]
+    assert session_metadata["orchestrator_decision_register"] == []
+    assert session_metadata["latest_orchestrator_control_plane"]["decision_register"]["decision_count"] == 0
+    await asyncio.wait_for(started.wait(), timeout=1.0)
+
+    assert observed == [(2, "vision", False, False)]
+    assert controller._planning_handoff_active() is True
+
+    release.set()
+    task = controller._planning_handoff_task
+    assert task is not None
+    await asyncio.wait_for(task, timeout=1.0)
 
 
 @pytest.mark.asyncio

@@ -17820,6 +17820,811 @@ body.planning-live-body .ar-spm-layer-preview.pending .ar-spm-layer-stack span {
   background: linear-gradient(90deg, rgba(100, 116, 139, 0.24), rgba(148, 163, 184, 0.46));
 }
 
+/* v20260708 SPM live print monitor: central job monitor and generic device cards. */
+body.planning-live-body .ar-spc-live-job-monitor-card {
+  border-color: rgba(45, 212, 191, 0.42);
+  background:
+    linear-gradient(135deg, rgba(15, 23, 42, 0.9), rgba(8, 47, 73, 0.52)),
+    rgba(15, 23, 42, 0.84);
+  box-shadow:
+    inset 0 0 0 1px rgba(125, 211, 252, 0.12),
+    0 18px 48px rgba(8, 47, 73, 0.28);
+}
+
+body.planning-live-body .ar-spm-live-job-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(250px, 0.72fr);
+  gap: 12px;
+  align-items: stretch;
+  min-width: 0;
+}
+
+body.planning-live-body .ar-spm-live-job-main,
+body.planning-live-body .ar-spm-live-job-side,
+body.planning-live-body .ar-spm-camera-evidence,
+body.planning-live-body .ar-spm-temp-panel,
+body.planning-live-body .ar-spm-transfer-list,
+body.planning-live-body .ar-spm-automation-grid {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+body.planning-live-body .ar-spm-live-job-side,
+body.planning-live-body .ar-spm-camera-evidence,
+body.planning-live-body .ar-spm-transfer-row,
+body.planning-live-body .ar-spm-temp-panel > div {
+  padding: 9px;
+  border: 1px solid rgba(148, 163, 184, 0.13);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.48);
+}
+
+body.planning-live-body .ar-spm-progress {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid rgba(45, 212, 191, 0.26);
+  border-radius: 10px;
+  background: rgba(2, 6, 23, 0.34);
+}
+
+body.planning-live-body .ar-spm-progress-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  color: var(--ar-muted);
+  font-family: SFMono-Regular, ui-monospace, Menlo, Consolas, monospace;
+  font-size: 0.62rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+body.planning-live-body .ar-spm-progress-head strong {
+  color: #ccfbf1;
+  font-size: 0.85rem;
+}
+
+body.planning-live-body .ar-spm-progress-track {
+  height: 13px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.92);
+  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.18);
+}
+
+body.planning-live-body .ar-spm-progress-track span {
+  display: block;
+  width: var(--progress, 0%);
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgba(34, 197, 94, 0.92), rgba(45, 212, 191, 0.95), rgba(96, 165, 250, 0.9));
+  box-shadow: 0 0 18px rgba(45, 212, 191, 0.36);
+}
+
+body.planning-live-body .ar-spm-transfer-row {
+  display: grid;
+  grid-template-columns: minmax(74px, 0.6fr) minmax(82px, 0.54fr) minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  border-left: 3px solid #38bdf8;
+}
+
+body.planning-live-body .ar-spm-transfer-row.tone-success {
+  border-left-color: #22c55e;
+}
+
+body.planning-live-body .ar-spm-transfer-row.tone-warning {
+  border-left-color: #f59e0b;
+}
+
+body.planning-live-body .ar-spm-transfer-row.tone-danger {
+  border-left-color: #fb7185;
+}
+
+body.planning-live-body .ar-spm-transfer-row span,
+body.planning-live-body .ar-spm-transfer-row strong,
+body.planning-live-body .ar-spm-transfer-row small,
+body.planning-live-body .ar-spm-temp-panel span,
+body.planning-live-body .ar-spm-temp-panel strong,
+body.planning-live-body .ar-spm-temp-panel small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.planning-live-body .ar-spm-transfer-row span,
+body.planning-live-body .ar-spm-transfer-row small,
+body.planning-live-body .ar-spm-temp-panel span,
+body.planning-live-body .ar-spm-temp-panel small {
+  color: var(--ar-subtle);
+  font-family: SFMono-Regular, ui-monospace, Menlo, Consolas, monospace;
+  font-size: 0.55rem;
+  font-weight: 800;
+}
+
+body.planning-live-body .ar-spm-transfer-row strong,
+body.planning-live-body .ar-spm-temp-panel strong {
+  color: #e0f2fe;
+  font-size: 0.66rem;
+  font-weight: 900;
+}
+
+body.planning-live-body .ar-spm-temp-panel {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+body.planning-live-body .ar-spm-temp-panel > div {
+  align-content: center;
+  min-height: 58px;
+}
+
+body.planning-live-body .ar-spm-camera-evidence img {
+  width: 100%;
+  max-height: 160px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  background: rgba(2, 6, 23, 0.72);
+}
+
+body.planning-live-body .ar-spm-camera-placeholder {
+  display: grid;
+  place-items: center;
+  gap: 5px;
+  min-height: 132px;
+  border: 1px dashed rgba(125, 211, 252, 0.26);
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, rgba(14, 165, 233, 0.08), rgba(15, 23, 42, 0.42)),
+    repeating-linear-gradient(135deg, rgba(148, 163, 184, 0.06) 0 1px, transparent 1px 10px);
+  color: var(--ar-subtle);
+  text-align: center;
+}
+
+body.planning-live-body .ar-spm-camera-placeholder span {
+  color: #7dd3fc;
+  font-family: SFMono-Regular, ui-monospace, Menlo, Consolas, monospace;
+  font-size: 0.62rem;
+  font-weight: 950;
+  letter-spacing: 0.08em;
+}
+
+body.planning-live-body .ar-spm-camera-placeholder strong {
+  max-width: 92%;
+  color: #dbeafe;
+  font-size: 0.74rem;
+  overflow-wrap: anywhere;
+}
+
+body.planning-live-body .ar-spm-automation-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+/* v20260709 SPM live cards: separated control cards + step detail overlay. */
+body.planning-live-body .ar-spm-panel-card {
+  border-color: rgba(125, 211, 252, 0.30);
+  background:
+    linear-gradient(180deg, rgba(30, 41, 59, 0.78), rgba(15, 23, 42, 0.86)),
+    rgba(15, 23, 42, 0.72);
+}
+
+body.planning-live-body .ar-spm-panel-card .ar-report-card-body {
+  min-height: 118px;
+}
+
+body.planning-live-body .ar-spm-progress-card .ar-report-card-body,
+body.planning-live-body .ar-spm-status-card .ar-report-card-body,
+body.planning-live-body .ar-spm-connection-card .ar-report-card-body,
+body.planning-live-body .ar-spm-agentic-card .ar-report-card-body {
+  display: grid;
+  align-content: stretch;
+  gap: 8px;
+}
+
+body.planning-live-body .ar-spm-connection-card {
+  cursor: pointer;
+}
+
+body.planning-live-body .ar-spm-connection-card:hover {
+  border-color: rgba(125, 211, 252, 0.52);
+  background:
+    linear-gradient(180deg, rgba(30, 64, 175, 0.30), rgba(15, 23, 42, 0.88)),
+    rgba(15, 23, 42, 0.72);
+}
+
+body.planning-live-body .ar-spm-control-cell {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 8px;
+  min-width: 0;
+  min-height: 108px;
+  overflow: hidden;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 6px;
+  background: rgba(9, 14, 24, 0.56);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.025);
+}
+
+body.planning-live-body .ar-spm-control-cell > header {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 24px;
+  padding: 3px 8px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(51, 65, 85, 0.42);
+}
+
+body.planning-live-body .ar-spm-control-cell > header span {
+  min-width: 0;
+  color: #dbeafe;
+  font-size: 0.72rem;
+  font-weight: 850;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.planning-live-body .ar-spm-now-printing { grid-area: now; }
+body.planning-live-body .ar-spm-print-progress { grid-area: progress; }
+body.planning-live-body .ar-spm-print-monitoring { grid-area: video; }
+body.planning-live-body .ar-spm-printer-status { grid-area: status; }
+body.planning-live-body .ar-spm-print-connection { grid-area: connection; }
+body.planning-live-body .ar-spm-agentic-progress { grid-area: agentic; }
+
+body.planning-live-body .ar-spm-now-printing-body,
+body.planning-live-body .ar-spm-video-frame {
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 0;
+  padding: 8px;
+  text-align: center;
+}
+
+body.planning-live-body .ar-spm-monitoring-card .ar-report-card-body {
+  display: grid;
+  place-items: center;
+}
+
+body.planning-live-body .ar-spm-monitoring-card .ar-spm-video-frame {
+  position: relative;
+  width: 100%;
+  min-height: 280px;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border: 1px solid rgba(96, 165, 250, 0.20);
+  border-radius: 5px;
+  background: #07111f;
+}
+
+body.planning-live-body .ar-spm-now-printing-body img,
+body.planning-live-body .ar-spm-video-frame img {
+  display: block;
+  width: 100%;
+  max-height: 170px;
+  object-fit: contain;
+  border: 1px solid rgba(96, 165, 250, 0.20);
+  border-radius: 5px;
+  background: #07111f;
+}
+
+body.planning-live-body .ar-spm-monitoring-card .ar-spm-video-frame img {
+  position: absolute;
+  inset: 0;
+  height: 100%;
+  max-height: none;
+  object-fit: cover;
+  border: 0;
+  border-radius: 0;
+}
+
+body.planning-live-body .ar-spm-video-frame.is-preview img {
+  object-fit: contain;
+}
+
+body.planning-live-body .ar-spm-video-frame .ar-spm-video-snapshot {
+  z-index: 1;
+}
+
+body.planning-live-body .ar-spm-video-frame.is-playing .ar-spm-video-snapshot {
+  opacity: 0.88;
+}
+
+body.planning-live-body .ar-spm-video-frame .ar-spm-video-stream {
+  z-index: 2;
+}
+
+body.planning-live-body .ar-spm-video-frame > div {
+  position: relative;
+  z-index: 3;
+}
+
+body.planning-live-body .ar-spm-video-header-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+  min-width: 0;
+}
+
+body.planning-live-body .ar-spm-video-icon-button {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.68);
+  color: #dbeafe;
+  font-size: 0.62rem;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+body.planning-live-body .ar-spm-video-icon-button.primary {
+  border-color: rgba(34, 211, 238, 0.44);
+  background: rgba(14, 116, 144, 0.34);
+  color: #ecfeff;
+}
+
+body.planning-live-body .ar-spm-video-icon-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+body.planning-live-body .ar-spm-card-test-button {
+  position: relative;
+  z-index: 2;
+  align-self: start;
+  justify-self: end;
+  min-width: 46px;
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid rgba(34, 211, 238, 0.34);
+  border-radius: 5px;
+  background: rgba(15, 23, 42, 0.68);
+  color: #dbeafe;
+  font-size: 0.58rem;
+  font-weight: 850;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+body.planning-live-body .ar-spm-card-test-button:disabled {
+  cursor: progress;
+  opacity: 0.55;
+}
+
+body.planning-live-body .ar-spm-video-header-controls small {
+  min-width: 0;
+  max-width: 78px;
+  color: var(--ar-subtle);
+  font-family: SFMono-Regular, ui-monospace, Menlo, Consolas, monospace;
+  font-size: 0.54rem;
+  font-weight: 800;
+  overflow: hidden;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.planning-live-body .ar-spm-now-printing-body strong,
+body.planning-live-body .ar-spm-video-frame strong {
+  max-width: 100%;
+  color: #f8fafc;
+  font-size: 0.72rem;
+  font-weight: 850;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.planning-live-body .ar-spm-now-printing-body small,
+body.planning-live-body .ar-spm-video-frame span {
+  max-width: 100%;
+  color: var(--ar-subtle);
+  font-size: 0.58rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.planning-live-body .ar-spm-file-placeholder {
+  display: grid;
+  place-items: center;
+  width: min(100%, 132px);
+  min-height: 74px;
+  border: 1px dashed rgba(125, 211, 252, 0.30);
+  border-radius: 5px;
+  background: rgba(15, 23, 42, 0.58);
+  color: #bae6fd;
+}
+
+body.planning-live-body .ar-spm-printer-status,
+body.planning-live-body .ar-spm-print-connection,
+body.planning-live-body .ar-spm-agentic-progress,
+body.planning-live-body .ar-spm-print-progress {
+  padding-bottom: 8px;
+}
+
+body.planning-live-body .ar-spm-printer-status .ar-spm-thermal-donuts,
+body.planning-live-body .ar-spm-print-progress .ar-spm-progress,
+body.planning-live-body .ar-spm-print-progress .ar-report-metrics,
+body.planning-live-body .ar-spm-print-connection .ar-spm-connection-grid,
+body.planning-live-body .ar-spm-agentic-progress .ar-spm-progress-steps,
+body.planning-live-body .ar-spm-material-strip {
+  margin-inline: 8px;
+}
+
+body.planning-live-body .ar-spm-thermal-donuts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  align-items: center;
+  margin-top: 8px;
+}
+
+body.planning-live-body .ar-spm-thermal-donut {
+  --thermal-color: #38bdf8;
+  --thermal-progress: 0%;
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  min-height: 96px;
+  aspect-ratio: 1;
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 50% 50%, rgba(15, 23, 42, 0.98) 0 48%, transparent 49%),
+    conic-gradient(var(--thermal-color) var(--thermal-progress), rgba(51, 65, 85, 0.76) 0);
+  box-shadow:
+    inset 0 0 0 1px rgba(226, 232, 240, 0.08),
+    0 0 20px color-mix(in srgb, var(--thermal-color) 22%, transparent);
+}
+
+body.planning-live-body .ar-spm-thermal-donut::before {
+  content: "";
+  position: absolute;
+  inset: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: inherit;
+  background: rgba(8, 13, 25, 0.96);
+  box-shadow: inset 0 0 18px rgba(2, 6, 23, 0.7);
+}
+
+body.planning-live-body .ar-spm-thermal-nozzle {
+  --thermal-color: #fb7185;
+}
+
+body.planning-live-body .ar-spm-thermal-bed {
+  --thermal-color: #34d399;
+}
+
+body.planning-live-body .ar-spm-thermal-chamber {
+  --thermal-color: #60a5fa;
+}
+
+body.planning-live-body .ar-spm-thermal-core {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  min-width: 0;
+  padding: 4px;
+  text-align: center;
+}
+
+body.planning-live-body .ar-spm-thermal-core strong {
+  color: #f8fafc;
+  font-size: 1.18rem;
+  font-weight: 900;
+  letter-spacing: -0.04em;
+  line-height: 1;
+}
+
+body.planning-live-body .ar-spm-thermal-core span {
+  color: #cbd5e1;
+  font-size: 0.68rem;
+  font-weight: 850;
+  letter-spacing: 0.02em;
+  line-height: 1.05;
+}
+
+body.planning-live-body .ar-spm-thermal-core em {
+  color: var(--ar-subtle);
+  font-size: 0.53rem;
+  font-style: normal;
+  font-weight: 700;
+  line-height: 1;
+}
+
+body.planning-live-body .ar-spm-material-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 7px;
+  margin-top: 10px;
+}
+
+body.planning-live-body .ar-spm-material-chip {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: 10px auto auto auto;
+  gap: 4px;
+  align-items: stretch;
+  min-width: 0;
+  min-height: 62px;
+  padding: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.52);
+}
+
+body.planning-live-body .ar-spm-material-swatch {
+  display: block;
+  width: 100%;
+  height: 9px;
+  border: 1px solid rgba(226, 232, 240, 0.26);
+  border-radius: 7px;
+  box-shadow: 0 0 10px rgba(148, 163, 184, 0.08);
+}
+
+body.planning-live-body .ar-spm-material-chip b,
+body.planning-live-body .ar-spm-material-chip em,
+body.planning-live-body .ar-spm-material-chip small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.planning-live-body .ar-spm-material-chip b {
+  color: #bfdbfe;
+  font-size: 0.68rem;
+  line-height: 1.05;
+}
+
+body.planning-live-body .ar-spm-material-chip em {
+  color: var(--ar-subtle);
+  font-size: 0.61rem;
+  font-style: normal;
+  line-height: 1.05;
+}
+
+body.planning-live-body .ar-spm-material-chip small {
+  color: #dbeafe;
+  font-family: SFMono-Regular, ui-monospace, Menlo, Consolas, monospace;
+  font-size: 0.59rem;
+  font-weight: 850;
+  text-align: left;
+  line-height: 1;
+}
+
+@media (max-width: 1100px) {
+  body.planning-live-body .ar-spm-material-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+body.planning-live-body .ar-spm-connection-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+
+body.planning-live-body .ar-spm-progress-steps {
+  display: block;
+  min-width: 0;
+}
+
+body.planning-live-body .ar-spm-orchestrator-message-panel {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  margin: 0 8px 10px;
+  min-height: 38px;
+  padding: 8px 10px;
+  border: 1px solid rgba(125, 211, 252, 0.22);
+  border-left: 3px solid rgba(96, 165, 250, 0.78);
+  border-radius: 7px;
+  background:
+    linear-gradient(90deg, rgba(30, 41, 59, 0.82), rgba(15, 23, 42, 0.70)),
+    rgba(8, 13, 25, 0.74);
+}
+
+body.planning-live-body .ar-spm-orchestrator-message-panel strong,
+body.planning-live-body .ar-spm-orchestrator-message-panel span,
+body.planning-live-body .ar-spm-orchestrator-message-panel em {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.planning-live-body .ar-spm-orchestrator-message-panel strong {
+  color: #f8fafc;
+  font-size: 0.86rem;
+  font-weight: 950;
+}
+
+body.planning-live-body .ar-spm-orchestrator-message-panel span {
+  color: #dbeafe;
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+body.planning-live-body .ar-spm-orchestrator-message-panel em {
+  justify-self: end;
+  color: #fde68a;
+  font-size: 0.68rem;
+  font-style: normal;
+  font-weight: 950;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+body.planning-live-body .ar-spm-progress-node-rail {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  min-width: 0;
+  width: 100%;
+}
+
+body.planning-live-body .ar-spm-progress-node {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  align-content: center;
+  gap: 4px 8px;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 68px;
+  padding: 10px 8px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 7px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0)),
+    rgba(15, 23, 42, 0.66);
+  color: #e2e8f0;
+  cursor: pointer;
+  text-align: left;
+}
+
+body.planning-live-body .ar-spm-progress-node:hover {
+  border-color: rgba(125, 211, 252, 0.56);
+  background: rgba(30, 41, 59, 0.76);
+}
+
+body.planning-live-body .ar-spm-progress-node i {
+  grid-row: 1 / 3;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  align-self: center;
+  border: 1px solid rgba(125, 211, 252, 0.28);
+  border-radius: 999px;
+  background: rgba(8, 18, 38, 0.92);
+  color: #bfdbfe;
+  font-family: SFMono-Regular, ui-monospace, Menlo, Consolas, monospace;
+  font-size: 0.54rem;
+  font-style: normal;
+  font-weight: 900;
+}
+
+body.planning-live-body .ar-spm-progress-edge {
+  flex: 0 0 18px;
+  height: 2px;
+  margin-inline: 4px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(125, 211, 252, 0.28), rgba(125, 211, 252, 0.70));
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.16);
+}
+
+body.planning-live-body .ar-spm-progress-node span,
+body.planning-live-body .ar-spm-progress-node .ar-spm-progress-action {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.planning-live-body .ar-spm-progress-node span {
+  color: #f8fafc;
+  font-size: 0.76rem;
+  font-weight: 920;
+  letter-spacing: -0.01em;
+}
+
+body.planning-live-body .ar-spm-progress-node .ar-spm-progress-action {
+  color: #f8fafc;
+  font-family: SFMono-Regular, ui-monospace, Menlo, Consolas, monospace;
+  font-size: 0.61rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+body.planning-live-body .ar-spm-progress-node.tone-success { border-color: rgba(34, 197, 94, 0.36); }
+body.planning-live-body .ar-spm-progress-node.tone-warning { border-color: rgba(245, 158, 11, 0.38); }
+body.planning-live-body .ar-spm-progress-node.tone-danger { border-color: rgba(251, 113, 133, 0.42); }
+body.planning-live-body .ar-spm-progress-node.tone-done {
+  border-color: rgba(34, 197, 94, 0.74);
+  box-shadow: 0 0 16px rgba(34, 197, 94, 0.24), inset 0 0 0 1px rgba(34, 197, 94, 0.13);
+}
+body.planning-live-body .ar-spm-progress-node.tone-active {
+  border-color: rgba(251, 146, 60, 0.86);
+  box-shadow: 0 0 18px rgba(251, 146, 60, 0.34), inset 0 0 0 1px rgba(251, 146, 60, 0.13);
+}
+body.planning-live-body .ar-spm-progress-node.tone-active .ar-spm-progress-action {
+  color: #fed7aa;
+}
+body.planning-live-body .ar-spm-progress-node.tone-done .ar-spm-progress-action {
+  color: #bbf7d0;
+}
+body.planning-live-body .ar-spm-progress-node.tone-blocked {
+  border-color: rgba(251, 113, 133, 0.82);
+  box-shadow: 0 0 16px rgba(251, 113, 133, 0.24), inset 0 0 0 1px rgba(251, 113, 133, 0.12);
+}
+body.planning-live-body .ar-spm-progress-edge.tone-success { background: linear-gradient(90deg, rgba(34, 197, 94, 0.32), rgba(34, 197, 94, 0.72)); }
+body.planning-live-body .ar-spm-progress-edge.tone-warning { background: linear-gradient(90deg, rgba(245, 158, 11, 0.32), rgba(245, 158, 11, 0.72)); }
+body.planning-live-body .ar-spm-progress-edge.tone-danger { background: linear-gradient(90deg, rgba(251, 113, 133, 0.30), rgba(251, 113, 133, 0.70)); }
+body.planning-live-body .ar-spm-progress-edge.tone-done { background: linear-gradient(90deg, rgba(34, 197, 94, 0.44), rgba(34, 197, 94, 0.92)); }
+body.planning-live-body .ar-spm-progress-edge.tone-active { background: linear-gradient(90deg, rgba(251, 146, 60, 0.42), rgba(251, 146, 60, 0.92)); }
+
+body.planning-live-body .ar-spm-progress-detail-modal {
+  width: min(96vw, 1280px);
+  height: min(92dvh, 900px);
+  max-height: calc(100dvh - 32px);
+}
+
+body.planning-live-body .ar-spm-progress-detail-grid {
+  overflow: auto;
+  padding-right: 2px;
+}
+
+body.planning-live-body .ar-spm-progress-detail-overlay {
+  position: fixed;
+  inset: clamp(12px, 2dvh, 24px);
+  z-index: 80;
+  place-items: center;
+}
+
+body.planning-live-body .ar-spm-progress-detail-overlay .ar-design-gallery-scrim {
+  position: fixed;
+  inset: 0;
+  border-radius: 0;
+}
+
+@media (max-width: 1100px) {
+  body.planning-live-body .ar-spm-progress-node-rail {
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+
+  body.planning-live-body .ar-spm-progress-node {
+    flex-basis: 146px;
+    min-width: 146px;
+  }
+
+  body.planning-live-body .ar-spm-monitoring-card .ar-spm-video-frame {
+    width: 100%;
+    min-height: 190px;
+  }
+}
+
 /* v20260612 VIS report pass: inspection panels and confusion matrix. */
 body.planning-live-body .ar-vis-two-up {
   display: grid;
@@ -17935,6 +18740,12 @@ body.planning-live-body .ar-vis-confusion span {
   }
 
   body.planning-live-body .ar-spm-evidence-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  body.planning-live-body .ar-spm-live-job-layout,
+  body.planning-live-body .ar-spm-temp-panel,
+  body.planning-live-body .ar-spm-automation-grid {
     grid-template-columns: minmax(0, 1fr);
   }
 
@@ -22845,6 +23656,43 @@ body .bambu-printer-page .printer-evidence-details pre {
   opacity: 0.45;
 }
 
+.lerobot-camera-usb-link {
+  display: inline-flex;
+  align-items: center;
+  width: max-content;
+  max-width: 100%;
+  min-height: 24px;
+  margin-top: 1px;
+  padding: 3px 9px;
+  border: 1px solid rgba(100, 116, 139, 0.32);
+  border-radius: 999px;
+  background: rgba(241, 245, 249, 0.92);
+  color: #64748b;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.lerobot-camera-usb-link.ok {
+  border-color: rgba(5, 150, 105, 0.34);
+  background: rgba(209, 250, 229, 0.9);
+  color: #047857;
+}
+
+.lerobot-camera-usb-link.warning {
+  border-color: rgba(217, 119, 6, 0.4);
+  background: rgba(254, 243, 199, 0.92);
+  color: #b45309;
+}
+
+.lerobot-camera-usb-link.unknown {
+  border-color: rgba(100, 116, 139, 0.3);
+  background: rgba(226, 232, 240, 0.82);
+  color: #64748b;
+}
+
 /* Vision / UTM Camera Bridge workspace */
 .vision-camera-page-tabs {
   display: flex;
@@ -23141,4 +23989,958 @@ body.planning-live-body .vision-pose-gate-grid strong {
   color: #e5edf7;
   font-size: 0.9rem;
   overflow-wrap: anywhere;
+}
+
+body.planning-live-body .ar-vis-summary-stack {
+  display: grid;
+  gap: 0.75rem;
+}
+
+body.planning-live-body .ar-vis-runtime-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+body.planning-live-body .ar-report-card-head .ar-vis-runtime-actions-header {
+  justify-self: end;
+  align-self: center;
+  gap: 0.35rem;
+}
+
+body.planning-live-body .ar-vis-runtime-action {
+  min-width: 4.4rem;
+  padding: 0.42rem 0.58rem;
+  border: 1px solid rgba(61, 214, 255, 0.44);
+  border-radius: 4px;
+  background: rgba(15, 23, 42, 0.78);
+  color: rgba(226, 242, 255, 0.94);
+  font-size: 0.7rem;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+}
+
+body.planning-live-body .ar-report-card-head .ar-vis-runtime-action {
+  min-width: 3.95rem;
+  padding: 0.34rem 0.5rem;
+  font-size: 0.66rem;
+}
+
+body.planning-live-body .ar-vis-runtime-action:hover:not(:disabled),
+body.planning-live-body .ar-vis-runtime-action:focus-visible:not(:disabled) {
+  border-color: rgba(125, 211, 252, 0.9);
+  box-shadow: 0 0 14px rgba(56, 189, 248, 0.18);
+}
+
+body.planning-live-body .ar-vis-runtime-action:disabled {
+  opacity: 0.46;
+  cursor: not-allowed;
+}
+
+body.planning-live-body .ar-vis-card-details {
+  margin-top: 0.75rem;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(15, 23, 42, 0.34);
+}
+
+body.planning-live-body .ar-vis-card-details summary {
+  cursor: pointer;
+  padding: 0.65rem 0.75rem;
+  color: rgba(219, 234, 254, 0.88);
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  list-style-position: inside;
+}
+
+body.planning-live-body .ar-vis-card-details[open] summary {
+  border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+body.planning-live-body .ar-vis-card-details-body {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+body.planning-live-body .ar-vis-active-cam-card {
+  display: grid;
+  gap: 0.75rem;
+}
+
+body.planning-live-body .ar-vis-active-cam-frame {
+  min-height: 10.5rem;
+  aspect-ratio: 4 / 3;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid rgba(61, 214, 255, 0.22);
+  background:
+    linear-gradient(135deg, rgba(8, 18, 32, 0.74), rgba(15, 23, 42, 0.52)),
+    rgba(8, 18, 32, 0.72);
+}
+
+body.planning-live-body .ar-vis-active-cam-frame img {
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  object-fit: contain;
+  display: block;
+  background: rgba(3, 7, 18, 0.52);
+}
+
+body.planning-live-body .ar-vis-active-cam-frame > div {
+  display: grid;
+  place-items: center;
+  gap: 0.35rem;
+  color: rgba(226, 242, 255, 0.72);
+  text-align: center;
+}
+
+body.planning-live-body .ar-vis-active-cam-frame strong {
+  color: rgba(241, 245, 249, 0.94);
+  font-size: 0.92rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+body.planning-live-body .ar-vis-active-cam-metrics {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+body.planning-live-body .ar-vis-agentic-progress {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+body.planning-live-body .ar-vis-agentic-step {
+  min-height: 6.2rem;
+  display: grid;
+  align-content: start;
+  gap: 0.35rem;
+  padding: 0.75rem;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  background: rgba(15, 23, 42, 0.42);
+}
+
+body.planning-live-body .ar-vis-agentic-step.is-complete {
+  border-color: rgba(52, 211, 153, 0.72);
+  box-shadow: 0 0 18px rgba(52, 211, 153, 0.12);
+}
+
+body.planning-live-body .ar-vis-agentic-step.is-active {
+  border-color: rgba(251, 191, 36, 0.72);
+  box-shadow: 0 0 18px rgba(251, 191, 36, 0.12);
+}
+
+body.planning-live-body .ar-vis-agentic-step.is-blocked {
+  border-color: rgba(248, 113, 113, 0.7);
+  box-shadow: 0 0 18px rgba(248, 113, 113, 0.1);
+}
+
+body.planning-live-body .ar-vis-agentic-step-index {
+  color: rgba(125, 211, 252, 0.82);
+  font-size: 0.7rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+}
+
+body.planning-live-body .ar-vis-agentic-step strong {
+  color: rgba(241, 245, 249, 0.94);
+  font-size: 0.9rem;
+}
+
+body.planning-live-body .ar-vis-agentic-step em,
+body.planning-live-body .ar-vis-agentic-step small {
+  color: rgba(203, 213, 225, 0.72);
+  font-size: 0.72rem;
+  font-style: normal;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 980px) {
+  body.planning-live-body .ar-vis-agentic-progress {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* v20260709 separate hard E-STOP recovery from soft Safe Stop. */
+body.planning-live-body .mission-status-stop {
+  display: grid !important;
+  align-items: stretch !important;
+  justify-items: stretch !important;
+  gap: 0 !important;
+  padding: 0 !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  overflow: hidden !important;
+}
+
+body.planning-live-body #live-emergency-recovery[hidden] {
+  display: none !important;
+}
+
+body.planning-live-body .mission-status-stop #btn-live-safe-stop,
+body.planning-live-body .mission-status-stop #btn-live-safe-stop.is-armed {
+  place-self: stretch !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  height: 100% !important;
+  min-height: 100% !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border-radius: 0 !important;
+  line-height: 1 !important;
+}
+
+body.planning-live-body #live-emergency-recovery {
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 100% !important;
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) !important;
+  gap: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
+body.planning-live-body .mission-status-stop.is-emergency-latched #btn-live-safe-stop {
+  display: none !important;
+}
+
+body.planning-live-body #btn-live-emergency-resume,
+body.planning-live-body #btn-live-emergency-reset {
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 100% !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  border-radius: 0 !important;
+  border: 1px solid rgba(255, 255, 255, 0.18) !important;
+  color: #ffffff !important;
+  font-size: 0.72rem !important;
+  font-weight: 900 !important;
+  letter-spacing: 0.02em !important;
+  text-transform: uppercase !important;
+  box-shadow: none !important;
+}
+
+body.planning-live-body #btn-live-emergency-resume {
+  border-right-width: 0 !important;
+}
+
+body.planning-live-body #btn-live-emergency-resume {
+  background: #256f5d !important;
+}
+
+body.planning-live-body #btn-live-emergency-reset {
+  background: #9f3641 !important;
+}
+
+/* v20260710 hard E-STOP fill: button states occupy the full control cell. */
+body.planning-live-body .mission-status-stop {
+  display: grid !important;
+  grid-template: "control" minmax(0, 1fr) / minmax(0, 1fr) !important;
+  align-content: stretch !important;
+  align-items: stretch !important;
+  justify-content: stretch !important;
+  justify-items: stretch !important;
+  block-size: 100% !important;
+  min-block-size: 100% !important;
+  max-block-size: 100% !important;
+  inline-size: 100% !important;
+  min-inline-size: 0 !important;
+  padding: 0 !important;
+  gap: 0 !important;
+  overflow: hidden !important;
+}
+
+body.planning-live-body .mission-status-stop::before,
+body.planning-live-body .mission-status-stop::after {
+  display: none !important;
+  content: none !important;
+}
+
+body.planning-live-body .mission-status-stop #btn-live-safe-stop,
+body.planning-live-body .mission-status-stop #btn-live-safe-stop.is-armed,
+body.planning-live-body #live-emergency-recovery {
+  grid-area: control !important;
+  align-self: stretch !important;
+  justify-self: stretch !important;
+  block-size: 100% !important;
+  min-block-size: 100% !important;
+  max-block-size: none !important;
+  inline-size: 100% !important;
+  min-inline-size: 0 !important;
+  max-inline-size: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+body.planning-live-body .mission-status-stop #btn-live-safe-stop,
+body.planning-live-body .mission-status-stop #btn-live-safe-stop.is-armed {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  min-height: 100% !important;
+  height: 100% !important;
+  max-height: none !important;
+  border-radius: 0 !important;
+}
+
+/* Read-only OMX telemetry cards. The plot intentionally uses a paper-style surface. */
+body.planning-live-body .ar-man-telemetry-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+body.planning-live-body .ar-man-telemetry-head > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+body.planning-live-body .ar-man-telemetry-head strong {
+  color: #e5edf7;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+body.planning-live-body .ar-man-telemetry-head small {
+  color: #8ea0b8;
+  font-size: 0.65rem;
+}
+
+body.planning-live-body .ar-man-robot-motion-label {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  margin-top: 0.28rem;
+  color: #d4dfec;
+  font-size: 0.76rem;
+  font-weight: 650;
+  line-height: 1.25;
+}
+
+body.planning-live-body .ar-man-robot-motion-label > strong {
+  color: #e5edf7;
+  font-size: 0.76rem;
+  font-weight: 780;
+  text-transform: lowercase;
+}
+
+body.planning-live-body [data-atr-robot-motion-state][data-state="home"] {
+  color: #86efac;
+}
+
+body.planning-live-body [data-atr-robot-motion-state][data-state="moving"] {
+  color: #67e8f9;
+}
+
+body.planning-live-body [data-atr-robot-motion-state][data-state="grasping"],
+body.planning-live-body [data-atr-robot-motion-state][data-state="ungrasping"] {
+  color: #fbbf24;
+}
+
+body.planning-live-body .ar-man-telemetry-status {
+  flex: 0 0 auto;
+  min-width: 70px;
+  padding: 4px 8px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 999px;
+  color: #cbd5e1;
+  background: rgba(15, 23, 42, 0.72);
+  font: 600 0.62rem/1.1 "IBM Plex Mono", Consolas, monospace;
+  text-align: center;
+}
+
+body.planning-live-body .ar-man-telemetry-status[data-tone="live"] {
+  border-color: rgba(52, 211, 153, 0.54);
+  color: #86efac;
+}
+
+body.planning-live-body .ar-man-telemetry-status[data-tone="failed"] {
+  border-color: rgba(248, 113, 113, 0.58);
+  color: #fca5a5;
+}
+
+body.planning-live-body .ar-man-pose-fit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 38px;
+  height: 24px;
+  padding: 0 9px;
+  border: 1px solid rgba(125, 211, 252, 0.56);
+  border-radius: 5px;
+  background: rgba(11, 27, 45, 0.92);
+  color: #bfe9ff;
+  font: 700 0.61rem/1 "IBM Plex Mono", Consolas, monospace;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+}
+
+body.planning-live-body .ar-man-pose-fit:hover,
+body.planning-live-body .ar-man-pose-fit:focus-visible {
+  border-color: #67d8ff;
+  background: rgba(20, 52, 78, 0.96);
+  color: #ffffff;
+  outline: none;
+}
+
+body.planning-live-body .ar-man-pose-viewer {
+  position: relative;
+  width: 100%;
+  min-height: 320px;
+  overflow: hidden;
+  border: 1px solid rgba(125, 211, 252, 0.22);
+  border-radius: 8px;
+  background: #091321;
+  color: #91a4bb;
+}
+
+body.planning-live-body .ar-man-pose-viewer > span {
+  position: absolute;
+  inset: 50% auto auto 50%;
+  transform: translate(-50%, -50%);
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+body.planning-live-body .ar-man-pose-viewer canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 320px;
+}
+
+body.planning-live-body .ar-man-pose-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+  color: #b7c5d8;
+  font-size: 0.68rem;
+}
+
+body.planning-live-body .ar-man-pose-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+body.planning-live-body .ar-man-pose-legend i {
+  width: 20px;
+  height: 3px;
+  border-radius: 2px;
+  background: #dce7ef;
+}
+
+body.planning-live-body .ar-man-pose-legend i.target {
+  height: 8px;
+  border: 1px solid rgba(56, 189, 248, 0.9);
+  background: rgba(56, 189, 248, 0.28);
+}
+
+body.planning-live-body .ar-man-joint-selector {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #d9e3f0;
+  font-size: 0.7rem;
+  font-weight: 650;
+}
+
+body.planning-live-body .ar-man-joint-selector select {
+  min-width: 112px;
+  padding: 5px 24px 5px 8px;
+  border: 1px solid rgba(148, 163, 184, 0.34);
+  border-radius: 5px;
+  color: #e5edf7;
+  background: #111d2e;
+  font: 600 0.68rem/1.2 "IBM Plex Mono", Consolas, monospace;
+}
+
+body.planning-live-body .ar-man-policy-chart {
+  width: 100%;
+  min-height: 320px;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  background: #ffffff;
+}
+
+body.planning-live-body .ar-man-policy-artifacts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  color: #aebdd0;
+  font-size: 0.66rem;
+}
+
+body.planning-live-body .ar-man-policy-artifacts strong {
+  margin-right: auto;
+  color: #d8e3f0;
+  font-size: 0.68rem;
+}
+
+body.planning-live-body .ar-man-policy-artifacts a {
+  padding: 4px 7px;
+  border: 1px solid rgba(96, 165, 250, 0.38);
+  border-radius: 4px;
+  color: #93c5fd;
+  text-decoration: none;
+}
+
+body.planning-live-body .ar-man-policy-artifacts a.is-disabled,
+body.planning-live-body .ar-man-policy-artifacts a[aria-disabled="true"] {
+  border-color: rgba(148, 163, 184, 0.18);
+  color: #64748b;
+  pointer-events: none;
+}
+
+body.planning-live-body .ar-man-motion-state {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+body.planning-live-body .ar-man-motion-unified,
+body.planning-live-body .ar-man-grasp-outcome,
+body.planning-live-body .ar-man-home-gate {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 7px;
+  background: rgba(9, 19, 33, 0.66);
+}
+
+body.planning-live-body .ar-man-grasp-outcome {
+  display: grid;
+  grid-template-columns: minmax(210px, 0.72fr) minmax(0, 1.8fr);
+  align-items: center;
+  gap: 12px;
+  border-left: 3px solid rgba(148, 163, 184, 0.42);
+}
+
+body.planning-live-body .ar-man-grasp-outcome > header {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+body.planning-live-body .ar-man-grasp-outcome > header > div {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+body.planning-live-body .ar-man-grasp-outcome header small,
+body.planning-live-body .ar-man-grasp-evidence small {
+  color: #8fa4bd;
+  font: 600 0.59rem/1.2 "IBM Plex Mono", Consolas, monospace;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+body.planning-live-body .ar-man-grasp-outcome header strong {
+  padding: 4px 8px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 4px;
+  color: #cbd5e1;
+  background: rgba(15, 23, 42, 0.72);
+  font: 700 0.68rem/1.1 "IBM Plex Mono", Consolas, monospace;
+  text-transform: uppercase;
+}
+
+body.planning-live-body .ar-man-grasp-outcome header p {
+  margin: 0;
+  overflow: hidden;
+  color: #8799af;
+  font-size: 0.63rem;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.planning-live-body .ar-man-grasp-evidence {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+body.planning-live-body .ar-man-grasp-evidence > div {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 4px;
+  background: rgba(15, 23, 42, 0.56);
+}
+
+body.planning-live-body .ar-man-grasp-evidence strong {
+  overflow: hidden;
+  color: #edf5fd;
+  font: 700 0.73rem/1.1 "IBM Plex Mono", Consolas, monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.planning-live-body .ar-man-grasp-outcome[data-status="pending"] {
+  border-left-color: #fbbf24;
+}
+
+body.planning-live-body .ar-man-grasp-outcome[data-status="pending"] [data-atr-grasp-status] {
+  border-color: rgba(251, 191, 36, 0.58);
+  color: #fde68a;
+  background: rgba(245, 158, 11, 0.12);
+}
+
+body.planning-live-body .ar-man-grasp-outcome[data-status="success"] {
+  border-left-color: #34d399;
+}
+
+body.planning-live-body .ar-man-grasp-outcome[data-status="success"] [data-atr-grasp-status] {
+  border-color: rgba(52, 211, 153, 0.62);
+  color: #a7f3d0;
+  background: rgba(16, 185, 129, 0.14);
+}
+
+body.planning-live-body .ar-man-grasp-outcome[data-status="failed"] {
+  border-left-color: #f87171;
+}
+
+body.planning-live-body .ar-man-grasp-outcome[data-status="failed"] [data-atr-grasp-status] {
+  border-color: rgba(248, 113, 113, 0.62);
+  color: #fecaca;
+  background: rgba(239, 68, 68, 0.13);
+}
+
+body.planning-live-body .ar-man-home-gate > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+body.planning-live-body .ar-man-home-gate > header > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+body.planning-live-body .ar-man-home-gate header small {
+  color: #8fa4bd;
+  font: 600 0.61rem/1.2 "IBM Plex Mono", Consolas, monospace;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+body.planning-live-body .ar-man-home-gate header strong {
+  color: #eef5fc;
+  font-size: 0.82rem;
+  font-weight: 720;
+  text-transform: capitalize;
+}
+
+body.planning-live-body .ar-man-home-gate header > span {
+  flex: 0 0 auto;
+  min-width: 68px;
+  padding: 5px 8px;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 4px;
+  color: #aebdd0;
+  background: rgba(15, 23, 42, 0.75);
+  font: 650 0.65rem/1.1 "IBM Plex Mono", Consolas, monospace;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+body.planning-live-body .ar-man-motion-legend {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 24px;
+  padding-bottom: 11px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+body.planning-live-body .ar-man-motion-summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "label confidence"
+    "state confidence";
+  align-items: center;
+  gap: 3px 12px;
+  min-width: 0;
+}
+
+body.planning-live-body .ar-man-motion-summary small {
+  grid-area: label;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #8fa4bd;
+  font: 600 0.61rem/1.2 "IBM Plex Mono", Consolas, monospace;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+body.planning-live-body .ar-man-motion-summary small i {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #dce7ef;
+  box-shadow: 0 0 9px rgba(220, 231, 239, 0.72);
+}
+
+body.planning-live-body .ar-man-motion-summary[data-atr-motion-summary="policy"] small i {
+  border: 1px solid #38bdf8;
+  background: rgba(56, 189, 248, 0.3);
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.78);
+}
+
+body.planning-live-body .ar-man-motion-summary strong {
+  grid-area: state;
+  overflow: hidden;
+  color: #eef5fc;
+  font-size: 0.82rem;
+  font-weight: 720;
+  text-overflow: ellipsis;
+  text-transform: capitalize;
+  white-space: nowrap;
+}
+
+body.planning-live-body .ar-man-motion-summary > span {
+  grid-area: confidence;
+  min-width: 78px;
+  padding: 5px 8px;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 4px;
+  color: #aebdd0;
+  background: rgba(15, 23, 42, 0.75);
+  font: 650 0.65rem/1.1 "IBM Plex Mono", Consolas, monospace;
+  text-align: center;
+}
+
+body.planning-live-body .ar-man-motion-segments {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 5px;
+  margin-top: 10px;
+}
+
+body.planning-live-body .ar-man-motion-segments [data-motion-state] {
+  min-width: 0;
+  padding: 7px 4px;
+  overflow: hidden;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 4px;
+  color: #71839a;
+  background: rgba(15, 23, 42, 0.58);
+  font: 650 0.59rem/1.1 "IBM Plex Mono", Consolas, monospace;
+  text-align: center;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+  transition: border-color 140ms ease, box-shadow 140ms ease, color 140ms ease, background 140ms ease;
+}
+
+body.planning-live-body .ar-man-motion-segments [data-motion-state].is-measured {
+  border-color: rgba(220, 231, 239, 0.94);
+  color: #f8fafc;
+  background: rgba(220, 231, 239, 0.08);
+  box-shadow: 0 0 13px rgba(220, 231, 239, 0.44);
+}
+
+body.planning-live-body .ar-man-motion-segments [data-motion-state].is-policy {
+  border-color: rgba(56, 189, 248, 0.94);
+  color: #7dd3fc;
+  background: rgba(56, 189, 248, 0.13);
+  box-shadow: 0 0 13px rgba(56, 189, 248, 0.42), inset 0 0 9px rgba(56, 189, 248, 0.15);
+}
+
+body.planning-live-body .ar-man-motion-segments [data-motion-state].is-measured.is-policy {
+  border-color: rgba(220, 231, 239, 0.98);
+  color: #f8fafc;
+  background: rgba(56, 189, 248, 0.11);
+  box-shadow:
+    0 0 14px rgba(220, 231, 239, 0.48),
+    inset 0 0 0 2px rgba(56, 189, 248, 0.92),
+    inset 0 0 12px rgba(56, 189, 248, 0.24);
+}
+
+body.planning-live-body .ar-man-motion-reasons {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 24px;
+  margin-top: 9px;
+}
+
+body.planning-live-body .ar-man-motion-reasons p {
+  min-height: 1.1em;
+  margin: 0;
+  overflow: hidden;
+  color: #8799af;
+  font-size: 0.63rem;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.planning-live-body .ar-man-home-gate > header > span[data-tone="home"] {
+  border-color: rgba(52, 211, 153, 0.72);
+  color: #a7f3d0;
+  background: rgba(16, 185, 129, 0.16);
+}
+
+body.planning-live-body .ar-man-home-gate > header > span[data-tone="pending"] {
+  border-color: rgba(251, 191, 36, 0.54);
+  color: #fde68a;
+}
+
+body.planning-live-body .ar-man-home-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 10px;
+}
+
+body.planning-live-body .ar-man-home-grid > [data-home-joint] {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: 3px 7px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 5px;
+  background: rgba(15, 23, 42, 0.62);
+}
+
+body.planning-live-body .ar-man-home-grid > [data-home-joint] strong {
+  color: #b8c7d9;
+  font: 650 0.62rem/1.1 "IBM Plex Mono", Consolas, monospace;
+}
+
+body.planning-live-body .ar-man-home-grid > [data-home-joint] span {
+  justify-self: end;
+  color: #edf5fd;
+  font: 720 0.76rem/1.1 "IBM Plex Mono", Consolas, monospace;
+}
+
+body.planning-live-body .ar-man-home-grid > [data-home-joint] small {
+  grid-column: 1 / -1;
+  color: #71849b;
+  font: 500 0.56rem/1.1 "IBM Plex Mono", Consolas, monospace;
+  white-space: nowrap;
+}
+
+body.planning-live-body .ar-man-home-grid > [data-home-joint][data-pass="yes"] {
+  border-color: rgba(52, 211, 153, 0.58);
+  background: rgba(16, 185, 129, 0.1);
+}
+
+body.planning-live-body .ar-man-home-grid > [data-home-joint][data-pass="yes"] span {
+  color: #86efac;
+}
+
+body.planning-live-body .ar-man-home-grid > [data-home-joint][data-pass="no"] {
+  border-color: rgba(248, 113, 113, 0.46);
+  background: rgba(239, 68, 68, 0.08);
+}
+
+body.planning-live-body .ar-man-home-grid > [data-home-joint][data-pass="no"] span {
+  color: #fca5a5;
+}
+
+@media (max-width: 900px) {
+  body.planning-live-body .ar-man-pose-viewer,
+  body.planning-live-body .ar-man-pose-viewer canvas,
+  body.planning-live-body .ar-man-policy-chart {
+    min-height: 260px;
+  }
+
+  body.planning-live-body .ar-man-home-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  body.planning-live-body .ar-man-grasp-outcome {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 560px) {
+  body.planning-live-body .ar-man-motion-legend,
+  body.planning-live-body .ar-man-motion-reasons {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  body.planning-live-body .ar-man-motion-segments {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  body.planning-live-body .ar-man-home-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+
+  body.planning-live-body .ar-man-grasp-evidence {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+body.planning-live-body #live-emergency-recovery {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) !important;
+  grid-template-rows: minmax(0, 1fr) !important;
+  gap: 0 !important;
+}
+
+body.planning-live-body #live-emergency-recovery[hidden] {
+  display: none !important;
+}
+
+body.planning-live-body #btn-live-emergency-resume,
+body.planning-live-body #btn-live-emergency-reset {
+  align-self: stretch !important;
+  justify-self: stretch !important;
+  block-size: 100% !important;
+  min-block-size: 100% !important;
+  max-block-size: none !important;
+  inline-size: 100% !important;
+  min-inline-size: 0 !important;
+  max-inline-size: none !important;
+  height: 100% !important;
+  min-height: 100% !important;
+  max-height: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border-radius: 0 !important;
+}
+
+@media (max-width: 760px) {
+  body.planning-live-body .planning-runtime-shell.live-agent-report-focus .ar-report-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  body.planning-live-body .planning-runtime-shell.live-agent-report-focus .ar-report-grid > .ar-report-card {
+    grid-column: 1 / -1 !important;
+  }
 }

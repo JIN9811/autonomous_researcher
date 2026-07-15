@@ -83,6 +83,9 @@ def guardian_gate(
     alarms.extend(_tool_action_alarm_signals(payload=payload, state=state, stage=stage, phase=phase, tool=tool, action=action))
     alarms.extend(_state_alarm_signals(state=state, stage=stage, phase=phase))
     alarms = _filter_expected_non_actuating_print_alarms(alarms, payload=payload, state=state)
+    alarms = _filter_compensated_bambu_transport_alarms(alarms, payload=payload)
+    alarms = _filter_completed_printer_wait_handoff_alarms(alarms, payload=payload)
+    alarms = _filter_compensated_active_cam_pose_snapshot_alarms(alarms, payload=payload, stage=stage, phase=phase)
     alarms = _dedupe_alarms(alarms)
 
     risk_vector = _risk_vector_for_alarms(alarms, stage=stage)
@@ -509,6 +512,177 @@ def _filter_expected_non_actuating_print_alarms(
             continue
         filtered.append(alarm)
     return filtered
+
+
+def _filter_compensated_bambu_transport_alarms(
+    alarms: list[dict[str, Any]],
+    *,
+    payload: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Suppress Bambu FTPS blockers once the HTTP artifact start path succeeded.
+
+    The Bambu bridge can intentionally fall back from FTPS to a printer-fetchable
+    HTTP artifact URL. In that state FTPS remains a recorded warning for the SPC
+    report, but it must not block downstream robot rollout tools.
+    """
+    if not alarms or not _has_bambu_http_artifact_handoff(payload):
+        return alarms
+    compensated_codes = {
+        "BAMBU_FTPS_TOO_MANY_CONNECTIONS",
+        "BAMBU_PROJECT_FILE_START_FAILED",
+    }
+    filtered: list[dict[str, Any]] = []
+    for alarm in alarms:
+        reason = str(alarm.get("reason_code") or "").upper()
+        message = str(alarm.get("message") or "").upper()
+        source = str(alarm.get("source_path") or "").lower()
+        if reason in compensated_codes:
+            continue
+        if any(code in message for code in compensated_codes):
+            continue
+        if (
+            reason == "CONTRACT_SCHEMA_INVALID"
+            and "specimen" in source
+            and ("build_timeline" in source or "spc_readiness" in source or "print_result" in source)
+            and ("BLOCKED" in message or "FAILED" in message)
+        ):
+            continue
+        filtered.append(alarm)
+    return filtered
+
+
+def _filter_completed_printer_wait_handoff_alarms(
+    alarms: list[dict[str, Any]],
+    *,
+    payload: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Suppress stale printer wait samples after SPC has produced a robot-ready handoff.
+
+    printer_completion_wait stores the status polling history. Bambu can report
+    transient HMS/project states such as 131184 while the same SPC report also
+    records a completed wait and active-cam ejection confirmation. Those samples
+    are useful evidence, but they must not block the downstream robot rollout.
+    """
+    if not alarms or not _has_completed_printer_handoff_for_robot_rollout(payload):
+        return alarms
+    filtered: list[dict[str, Any]] = []
+    for alarm in alarms:
+        source = str(alarm.get("source_path") or "").lower()
+        reason = str(alarm.get("reason_code") or "").upper()
+        message = str(alarm.get("message") or "").lower()
+        if "printer_completion_wait" in source and (
+            reason in {"131184", "CONTRACT_SCHEMA_INVALID", "RESULT_NOT_OK"}
+            or "printer job completed before vision handoff" in message
+            or "printer job is still active" in message
+        ):
+            continue
+        filtered.append(alarm)
+    return filtered
+
+
+def _filter_compensated_active_cam_pose_snapshot_alarms(
+    alarms: list[dict[str, Any]],
+    *,
+    payload: dict[str, Any],
+    stage: str,
+    phase: str,
+) -> list[dict[str, Any]]:
+    """Do not block SPC-to-VLA handoff on auxiliary pose-snapshot failure after active-cam confirmation."""
+    if not alarms or str(stage or "").lower() != "vision" or str(phase or "").lower() != "post":
+        return alarms
+    if not _has_confirmed_active_cam_ejection(payload):
+        return alarms
+    filtered: list[dict[str, Any]] = []
+    for alarm in alarms:
+        source = str(alarm.get("source_path") or "").lower()
+        reason = str(alarm.get("reason_code") or "").upper()
+        if "specimen_pose_result" in source and reason in {"MISSING_REQUIRED_INPUT", "CONTRACT_SCHEMA_INVALID", "RESULT_NOT_OK"}:
+            continue
+        filtered.append(alarm)
+    return filtered
+
+
+def _has_confirmed_active_cam_ejection(value: Any) -> bool:
+    confirmed = False
+    returned = False
+
+    def walk(item: Any) -> None:
+        nonlocal confirmed, returned
+        if isinstance(item, dict):
+            if item.get("spc_autoejection_confirmed") is True or item.get("confirmed") is True:
+                confirmed = True
+            if item.get("camera_returned_to_vla") is True or str(item.get("camera_owner_after") or "").lower() == "vla_runtime":
+                returned = True
+            for child in item.values():
+                walk(child)
+        elif isinstance(item, list):
+            for child in item:
+                walk(child)
+
+    walk(value)
+    return confirmed and returned
+
+
+def _has_completed_printer_handoff_for_robot_rollout(value: Any) -> bool:
+    seen_complete_wait = False
+    seen_active_cam = _has_confirmed_active_cam_ejection(value)
+
+    def walk(item: Any) -> None:
+        nonlocal seen_complete_wait
+        if isinstance(item, dict):
+            wait = item.get("printer_completion_wait")
+            if isinstance(wait, dict):
+                status = str(wait.get("status") or wait.get("handoff_status") or "").strip().lower()
+                if status in {"complete", "completed", "done", "success", "confirmed"}:
+                    seen_complete_wait = True
+            for child in item.values():
+                walk(child)
+        elif isinstance(item, list):
+            for child in item:
+                walk(child)
+
+    walk(value)
+    return (seen_complete_wait or _has_bambu_http_artifact_handoff(value)) and seen_active_cam
+
+
+def _has_bambu_http_artifact_handoff(value: Any) -> bool:
+    markers = {
+        "test_printer_started_then_stopped",
+        "test_printer_published_then_stopped",
+        "TEST_PRINTER_STARTED_THEN_STOPPED",
+        "TEST_PRINTER_PUBLISHED_THEN_STOPPED",
+    }
+    seen_gate = False
+    seen_artifact = False
+    seen_start = False
+    seen_stop = False
+
+    def walk(item: Any) -> None:
+        nonlocal seen_gate, seen_artifact, seen_start, seen_stop
+        if isinstance(item, dict):
+            status = str(item.get("status") or item.get("state") or item.get("preprint_gate_state") or "")
+            if status in markers or status.lower() in markers:
+                seen_gate = True
+            route = str(item.get("route") or item.get("upload_route") or "").lower()
+            detail = str(item.get("detail") or item.get("url") or item.get("remote_path") or "")
+            step = str(item.get("step") or item.get("queue_id") or "").upper()
+            if route == "http_artifact" or step == "BAMBU_ARTIFACT_ROUTE" or "printer-artifacts" in detail:
+                if str(item.get("status") or "").lower() in {"", "ok", "ready", "http_artifact_ready", "published"} or item.get("ok") is True:
+                    seen_artifact = True
+            if step in {"BAMBU_START_PUBLISH", "START"} or str(item.get("command") or "").lower() == "project_file":
+                if str(item.get("status") or "").lower() in {"published", "started", "ok"} or item.get("published") is True or item.get("ok") is True:
+                    seen_start = True
+            if step in {"BAMBU_STOP_AFTER_START", "STOP"} or str(item.get("command") or "").lower() == "stop":
+                if str(item.get("status") or "").lower() in {"published", "stopped", "ok"} or item.get("published") is True or item.get("ok") is True:
+                    seen_stop = True
+            for child in item.values():
+                walk(child)
+        elif isinstance(item, list):
+            for child in item:
+                walk(child)
+
+    walk(value)
+    return seen_artifact and seen_start and (seen_gate or seen_stop)
 
 
 def _is_expected_non_actuating_print_payload(*, payload: dict[str, Any], state: Any) -> bool:

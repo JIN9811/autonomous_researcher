@@ -479,6 +479,125 @@ def test_langgraph_runtime_equipment_alert_merge_persists_incident_records(tmp_p
     assert "incident-runtime-001" in guardian_log.read_text(encoding="utf-8")
 
 
+def test_langgraph_runtime_vision_confirmation_updates_specimen_result(tmp_path: Path) -> None:
+    state = OrchestratorState(run_id="run-vision-confirm", experiment_id="exp-vision-confirm", mode=Mode.TEST)
+    state.run_metadata["specimen_result"] = {
+        "ok": True,
+        "specimen_id": "specimen-vision-001",
+        "handoff_status": "ready",
+    }
+    logger = StructuredLogger(tmp_path / "runtime.jsonl", tmp_path / "summary.log")
+    runtime = LangGraphRunLoop(
+        state=state,
+        agent_registry=AgentRegistry(),
+        orchestrator_agent_name="orchestrator",
+        ctx=object(),
+        logger=logger,
+        graph_config_path="graphs/configs/atr_closed_loop.yaml",
+    )
+
+    runtime._merge_agent_data(
+        Stage.VISION,
+        {
+            "observation": {
+                "active_cam_ejection_check": {
+                    "schema": "active_cam_ejection_check.v1",
+                    "status": "confirmed",
+                    "specimen_detected": True,
+                    "spc_autoejection_confirmed": True,
+                    "image_path": "/tmp/active-cam.png",
+                },
+                "spc_autoejection_confirmation": {
+                    "schema": "spc_autoejection_confirmation.v1",
+                    "signal": "SPC_AUTOEJECTION_CONFIRMED_BY_ACTIVE_CAM",
+                    "status": "confirmed",
+                    "confirmed": True,
+                    "specimen_detected": True,
+                    "consumer_agent": "specimen_agent",
+                },
+            },
+            "vision_signal": {
+                "schema": "vision_signal.v1",
+                "signal": "pickup_ready",
+                "value": True,
+            },
+        },
+    )
+
+    specimen = state.run_metadata["specimen_result"]
+    assert specimen["vision_completion_signal"]["confirmed"] is True
+    assert specimen["vision_verification"]["status"] == "confirmed"
+    assert specimen["active_cam_ejection_check"]["image_path"] == "/tmp/active-cam.png"
+
+
+def test_langgraph_runtime_retains_active_cam_artifact_until_explicit_failure(tmp_path: Path) -> None:
+    state = OrchestratorState(run_id="run-active-cam", experiment_id="exp-active-cam", mode=Mode.TEST)
+    runtime = LangGraphRunLoop(
+        state=state,
+        agent_registry=AgentRegistry(),
+        orchestrator_agent_name="orchestrator",
+        ctx=object(),
+        logger=StructuredLogger(tmp_path / "runtime.jsonl", tmp_path / "summary.log"),
+        graph_config_path="graphs/configs/atr_closed_loop.yaml",
+    )
+    stored = {
+        "schema": "active_cam_run_artifact.v1",
+        "status": "stored",
+        "path": "/runs/new.jpg",
+        "url": "/api/runs/run-active-cam/artifact-file/vision/frame/new.jpg",
+    }
+
+    runtime._merge_agent_data(Stage.VISION, {"active_cam_artifact_update": stored})
+    runtime._merge_agent_data(Stage.MANIPULATION, {"manipulation_report": {"status": "running"}})
+
+    assert state.run_metadata["latest_active_cam_artifact"] == stored
+
+    runtime._merge_agent_data(
+        Stage.VISION,
+        {"active_cam_artifact_update": {"schema": "active_cam_run_artifact.v1", "status": "failed"}},
+    )
+
+    assert "latest_active_cam_artifact" not in state.run_metadata
+
+
+def test_langgraph_runtime_retains_utm_completion_artifact_until_next_attempt_fails(tmp_path: Path) -> None:
+    state = OrchestratorState(run_id="run-utm", experiment_id="exp-utm", mode=Mode.TEST)
+    runtime = LangGraphRunLoop(
+        state=state,
+        agent_registry=AgentRegistry(),
+        orchestrator_agent_name="orchestrator",
+        ctx=object(),
+        logger=StructuredLogger(tmp_path / "runtime.jsonl", tmp_path / "summary.log"),
+        graph_config_path="graphs/configs/atr_closed_loop.yaml",
+    )
+    stored = {
+        "schema": "utm_completion_run_artifact.v1",
+        "status": "stored",
+        "path": "/runs/utm-confirmed.png",
+        "url": "/api/runs/run-utm/artifact-file/vision/frame/utm-confirmed.png",
+        "session_id": "rollout-utm-001",
+        "specimen_id": "specimen-utm-001",
+    }
+
+    runtime._merge_agent_data(Stage.VISION, {"utm_completion_artifact_update": stored})
+    runtime._merge_agent_data(Stage.MANIPULATION, {"manipulation_report": {"status": "running"}})
+
+    assert state.run_metadata["latest_utm_completion_artifact"] == stored
+
+    runtime._merge_agent_data(
+        Stage.VISION,
+        {
+            "utm_completion_artifact_update": {
+                "schema": "utm_completion_run_artifact.v1",
+                "status": "not_detected",
+                "session_id": "rollout-utm-002",
+            }
+        },
+    )
+
+    assert "latest_utm_completion_artifact" not in state.run_metadata
+
+
 def test_atr_graph_config_validates_and_compiles() -> None:
     config = load_graph_config("graphs/configs/atr_closed_loop.yaml")
     compiler = ATRLangGraphCompiler(config, _noop_registry())
@@ -3328,15 +3447,16 @@ class _FailingBackend(BaseLLMBackend):
 class _FakeToolRegistry:
     """Small ToolRegistry-compatible object for module allowlist tests."""
 
-    def __init__(self) -> None:
+    def __init__(self, tools: list[str] | None = None) -> None:
         self.calls: list[dict[str, object]] = []
+        self._tools = tools or ["blocked.tool", "experiment.evaluate", "geometry.generate_metamaterial_stl"]
 
     def call(self, name: str, payload: dict[str, object] | None = None) -> dict[str, object]:
         self.calls.append({"name": name, "payload": payload or {}})
         return {"ok": True, "tool": name, "payload": payload or {}}
 
     def list_tools(self) -> list[str]:
-        return ["blocked.tool", "experiment.evaluate", "geometry.generate_metamaterial_stl"]
+        return list(self._tools)
 
     def queue_status(self) -> dict[str, object]:
         return {"ok": True, "queues": []}
@@ -3469,6 +3589,29 @@ def test_module_runtime_context_filters_tools_by_module_allowlist() -> None:
         module_ctx.tools.call("blocked.tool", {})
     assert "Tool not allowed for stage=specimen: blocked.tool" in str(exc_info.value)
     assert module_ctx.tools.queue_status() == {"ok": True, "queues": []}
+
+
+def test_vision_module_runtime_exposes_active_cam_and_utm_tools() -> None:
+    backend = _CaptureBackend()
+    base_ctx = _FakeAgentContext(backend)
+    base_ctx.tools = _FakeToolRegistry(
+        [
+            "camera.capture",
+            "lerobot.camera.test",
+            "lerobot.active_robot_cam.capture",
+            "vision.specimen_pose_snapshot",
+            "vision.specimen_pose.release",
+            "vision.utm_runtime.start",
+        ]
+    )
+    raw = yaml.safe_load(Path("graphs/modules/vision/module.yaml").read_text(encoding="utf-8")) or {}
+    module = raw.get("module", raw)
+
+    module_ctx = ModuleRuntimeContext(base_ctx, module, Stage.VISION)  # type: ignore[arg-type]
+
+    assert "lerobot.camera.test" in module_ctx.tools.list_tools()
+    assert "lerobot.active_robot_cam.capture" in module_ctx.tools.list_tools()
+    assert "vision.utm_runtime.start" in module_ctx.tools.list_tools()
 
 
 def test_generated_module_adapter_executes_as_stage_handler(tmp_path) -> None:

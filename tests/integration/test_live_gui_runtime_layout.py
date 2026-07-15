@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app, controller, _package_runtime_event
@@ -42,6 +43,9 @@ def test_live_gui_runtime_shell_contains_operational_panels() -> None:
         "live-timeline-strip",
         "live-device-strip",
         "btn-live-safe-stop",
+        "live-emergency-recovery",
+        "btn-live-emergency-resume",
+        "btn-live-emergency-reset",
         "btn-live-bottom-collapse",
         "planning-chat-log",
         "planning-message-input",
@@ -51,6 +55,8 @@ def test_live_gui_runtime_shell_contains_operational_panels() -> None:
     assert "planning-live-body" in html
     assert "/static/styles.css?v=20260527-live-focus" in html
     assert "/static/planning.js?v=20260613-clean-stl-render-1" in html
+    assert 'href="/static/styles.css?v=20260715-grasp-attach-1"' in html
+    assert 'src="/static/planning.js?v=20260715-report-patch-1"' in html
     assert "Runtime Chat" in html
     assert "Safe Stop" in html
     assert "Pause Run" in html
@@ -70,6 +76,52 @@ def test_live_gui_runtime_shell_contains_operational_panels() -> None:
         "Safety Gate / Continue-Stop Decision",
     ]:
         assert role_label in script_text
+
+
+def test_live_gui_specimen_report_uses_live_print_job_cards() -> None:
+    client = TestClient(app)
+    script_text = client.get("/static/planning.js").text
+
+    for card_title in [
+        "Build Intent",
+        "Printer Telemetry",
+        "Readiness Gate",
+        "Slice Profile",
+        "Thermal / Material",
+        "Transfer Queue",
+        "Live Job Monitor",
+        "Layer Preview",
+        "Camera Evidence",
+        "Post-Print Automation",
+        "G-code Validation",
+        "Handoff / Artifacts",
+    ]:
+        assert card_title in script_text
+
+    assert "ar-spc-live-job-monitor-card" in script_text
+
+
+def test_live_gui_chat_expand_keys_are_stable_across_rerenders() -> None:
+    client = TestClient(app)
+    script_text = client.get("/static/planning.js").text
+
+    assert "function planningStableTextHash(" in script_text
+    assert "function planningMessageStableToken(" in script_text
+    assert "msg?.message_id" in script_text
+    assert "msg?.event_id" in script_text
+    assert "content:" in script_text
+    assert 'key: `loop:${cycle}:${planningMessageStableToken(entry.msg, entry.index)}`' in script_text
+    assert 'key: `loop:${cycleStartIndex}:${cycle}`' not in script_text
+
+
+def test_live_gui_specimen_pending_input_is_not_rendered_as_hard_error() -> None:
+    client = TestClient(app)
+    script_text = client.get("/static/planning.js").text
+
+    assert "function eventRequiresOperatorInput(event)" in script_text
+    assert 'if (eventRequiresOperatorInput(event)) return "warning";' in script_text
+    assert "const pendingInput = agentEvents.some(eventRequiresOperatorInput)" in script_text
+    assert 'if (pendingInput) return running && activeAgent === agentId ? "running" : "waiting";' in script_text
 
 
 def test_gui_favicon_is_available_to_all_runtime_pages() -> None:
@@ -347,6 +399,110 @@ def test_live_gui_analysis_report_exposes_multifidelity_contract() -> None:
     assert "live_graph.run_test" in script
     assert "liveNotificationCountsByAgent(session)" in script
     assert "currentRunEventSources()" in script
+    assert "mergeRuntimeEventSources(liveRunEvents, liveRecentEvents)" in script
+    assert "dedupeRuntimeEvents" in script
+    assert "function renderPrinterDeviceStatusCard()" in script
+    assert "payload.monitor_snapshot" in script
+    assert 'snapshot.tool === "printer.status"' in script
+    assert "async function refreshLivePrinterMonitorStatus(session = liveLastSession, options = {})" in script
+    assert "function liveSpecimenAgentWorking(" in script
+    assert "if (!options.force && !liveSpecimenAgentWorking(session)) return null;" in script
+    assert 'fetchJsonOrThrow("/api/printer/status?mode=live&emit=1")' in script
+    assert "workspace_monitor_snapshot" in script
+    assert "function renderSpecimenPrintControlPanel(" in script
+    assert "function renderSpecimenAgenticProgress(" in script
+    assert "function openSpecimenProgressDetail(" in script
+    assert 'let liveSpecimenProgressDetailStep = "";' in script
+    assert "function renderSpecimenProgressDetailOverlay(" in script
+    assert 'liveSpecimenProgressDetailStep = step;' in script
+    assert 'liveSpecimenProgressDetailStep = "";' in script
+    assert "renderSpecimenProgressDetailOverlay();" in script
+    assert 'querySelector(".ar-design-gallery-overlay:not(.ar-spm-progress-detail-overlay)")' in script
+    assert "renderDashboardCard(\"Now printing\"" in script
+    assert "renderDashboardCard(\"Printing Progress\"" in script
+    assert "renderDashboardCard(\"Print Monitoring\"" in script
+    assert "renderDashboardCard(\"Printer Status\"" in script
+    assert "renderDashboardCard(\"Print Connection\"" in script
+    assert "renderDashboardCard(\"Agentic Progress\"" in script
+    assert 'renderDashboardCard("Print Monitoring", renderSpecimenPrintMonitoringBody(ctx), { span: 4' in script
+    assert 'renderDashboardCard("Printer Status", renderSpecimenPrinterStatusBody(ctx), { span: 4' in script
+    assert 'renderDashboardCard("Print Connection", renderSpecimenPrintConnectionBody(ctx), { span: 4' in script
+    assert 'renderDashboardCard("Agentic Progress", renderSpecimenAgenticProgressBody(ctx), { span: 12' in script
+    assert 'data: { "spm-progress-step": "print_connection" }' in script
+    assert "print_connection: \"Print Connection\"" in script
+    assert "function renderSpecimenAgenticProgressNode(" in script
+    assert "function specimenProgressActionLabel(" in script
+    assert "function specimenProgressToneClass(" in script
+    assert "function specimenAgenticOrchestratorMessages(" in script
+    assert "function renderSpecimenAgenticOrchestratorMessagePanel(" in script
+    assert "ar-spm-progress-node-rail" in script
+    assert "ar-spm-orchestrator-message-panel" in script
+    assert "ar-spm-progress-action" in script
+    assert "tone-active" in script
+    assert "tone-done" in script
+    assert "ar-spm-progress-edge" in script
+    assert "function renderMeaningfulDashboardRows(" in script
+    assert "function specimenConnectionEvidenceRows(" in script
+    assert "No current connection evidence." in script
+    assert "const dataAttrs = options.data" in script
+    assert "className: \"ar-spm-panel-card" in script
+    assert "ar-spm-control-card" not in script
+    assert "function specimenMaterialSlotColor(" in script
+    assert "function renderSpecimenThermalDonut(" in script
+    assert "function renderSpecimenThermalDonuts(" in script
+    assert "ar-spm-thermal-donuts" in script
+    assert "ar-spm-thermal-donut" in script
+    assert "renderMiniBarChart(thermalRows" not in script
+    assert "slot.tray_color" in script
+    assert "ar-spm-material-swatch" in script
+    assert "slice(0, 4)" in script
+    assert "let liveSpecimenVideoPlaying = false" in script
+    assert "let liveSpecimenVideoStartedAt = 0" in script
+    assert "let liveSpecimenVideoStartSeq = 0" in script
+    assert "let livePrinterMonitorOverride = null" in script
+    assert "let livePrinterVideoOverride = null" in script
+    assert "function specimenVideoPreviewUrl(" in script
+    assert "function specimenVideoStreamUrl(" in script
+    assert "function specimenVideoUrlWithCacheBuster(" in script
+    assert 'fetchJsonOrThrow("/api/printer/video-status")' in script
+    assert "function printerVideoCameraPanel(" in script
+    assert "const cameraPanel = printerVideoCameraPanel(screen.camera_panel || screen.camera || {});" in script
+    assert "function applyPrinterVideoStatusResult(" in script
+    assert "livePrinterVideoOverride = {" in script
+    assert "mergePrinterMonitorVideoStatusResult(" not in script
+    assert "livePrinterMonitorOverride = event" in script
+    assert "if (livePrinterMonitorOverride) return livePrinterMonitorOverride;" in script
+    assert "const frameSrc = active ? specimenVideoUrlWithCacheBuster(frameUrl) : frameUrl;" in script
+    assert 'const loadingAttr = active ? "" : " loading=\\"lazy\\"";' in script
+    assert 'data-spm-video-action="stop" aria-label="Stop 3DP video" title="Stop 3DP video"><span aria-hidden="true">■</span></button>' in script
+    assert "const requestSeq = liveSpecimenVideoStartSeq + 1;" in script
+    assert "if (!liveSpecimenVideoPlaying || requestSeq !== liveSpecimenVideoStartSeq) return;" in script
+    assert "const statusResult = await refreshLivePrinterMonitorStatus(liveLastSession, { force: true });" in script
+    assert "applyPrinterMonitorSnapshotResult(statusResult);" in script
+    assert "const videoResult = await refreshLivePrinterVideoStatus();" in script
+    assert "applyPrinterVideoStatusResult(videoResult);" in script
+    assert "function renderSpecimenConnectionTestHeaderAction(" in script
+    assert 'data-spm-connection-action="test"' in script
+    assert 'action: renderSpecimenConnectionTestHeaderAction(ctx)' in script
+    assert "async function runSpecimenConnectionTest(" in script
+    assert "SPC CONNECTION TEST" in script
+    assert 'tool: "printer.bambu.video_status"' in script
+    assert "function renderSpecimenVideoHeaderControls(" in script
+    assert 'data-spm-video-action="play"' in script
+    assert 'data-spm-video-action="stop"' in script
+    assert 'aria-label="Play 3DP video"' in script
+    assert 'aria-label="Stop 3DP video"' in script
+    assert 'action: renderSpecimenVideoHeaderControls(ctx)' in script
+    assert 'refreshLivePrinterMonitorStatus(liveLastSession, { force: true })' in script
+    assert "applyPrinterMonitorSnapshotResult(result)" in script
+    assert "function startSpecimenVideoPlayback(" in script
+    assert "function stopSpecimenVideoPlayback(" in script
+    assert 'if (liveSelectedAgent !== "specimen") stopSpecimenVideoPlayback("agent_page_change", { render: false });' in script
+    assert "data-spm-video-action" in script
+    assert "data-spm-progress-step" in script
+    assert "Print Monitoring" in script
+    assert "Printer Status" in script
+    assert "Agentic Progress" in script
     assert "isAgentNotificationEvent(event)" in script
     assert "eventMatchesCurrentRun(event)" in script
     assert "markLiveAgentRead(liveSelectedAgent, liveLastSession);" in script
@@ -431,6 +587,24 @@ def test_live_gui_analysis_report_exposes_multifidelity_contract() -> None:
     assert "live-pinned-compare" in styles
     assert "live-pinned-compare-grid" in styles
     assert "live-pinned-finding-action" in styles
+    assert ".ar-spm-panel-card" in styles
+    assert ".ar-spm-monitoring-card .ar-spm-video-frame" in styles
+    assert "aspect-ratio: 16 / 9" in styles
+    assert "min-height: 280px" in styles
+    assert ".ar-spm-thermal-donuts" in styles
+    assert ".ar-spm-thermal-donut" in styles
+    assert "conic-gradient" in styles
+    assert "grid-template-columns: repeat(4, minmax(0, 1fr))" in styles
+    assert ".ar-spm-material-chip" in styles
+    assert ".ar-spm-material-swatch" in styles
+    assert ".ar-spm-video-header-controls" in styles
+    assert ".ar-spm-video-icon-button" in styles
+    assert ".ar-spm-progress-node-rail" in styles
+    assert ".ar-spm-progress-edge" in styles
+    assert ".ar-spm-progress-detail-overlay" in styles
+    assert "position: fixed" in styles
+    assert "100dvh" in styles
+    assert ".ar-spm-control-card" not in styles
     assert "Runtime IDE visual effects" in styles or "IDE-effect unification" in styles
     icon_response = client.get("/static/live_gui_icons/orchestrator.svg")
     assert icon_response.status_code == 200
@@ -612,6 +786,9 @@ def test_live_gui_package_compatibility_endpoints_expose_existing_runtime_contra
         "/api/runtime/resume",
         "/api/runtime/stop",
         "/api/runtime/safe-stop",
+        "/api/runtime/emergency-stop",
+        "/api/runtime/emergency-resume",
+        "/api/runtime/emergency-reset",
         "/api/devices/state",
         "/api/agents",
         "/api/agents/{agent_id}/report",
@@ -671,7 +848,8 @@ def test_live_gui_package_compatibility_endpoints_expose_existing_runtime_contra
     assert vision_report["role_specific"]["title"] == "Lab Perception Signal Bus / Visual Evidence"
     assert "vision_report" in vision_report["sections"]
     manipulation_report = client.get("/api/agents/manipulation/report").json()["report"]
-    assert manipulation_report["role_specific"]["title"] == "Manipulation Agent / Pi0.5 Skill Supervision"
+    assert manipulation_report["role_specific"]["title"] == "Manipulation Agent / Runtime Supervision"
+    assert "Pi0.5" not in manipulation_report["role_specific"]["title"]
     assert "manipulation_report" in manipulation_report["sections"]
     assert "robot_task_result" in manipulation_report["sections"]
     bo_report = client.get("/api/agents/bo/report").json()["report"]
@@ -3041,3 +3219,631 @@ def test_windows_equipment_request_log_api_contract(monkeypatch) -> None:
     assert data["request_log"].endswith("bridge_requests.jsonl")
     assert data["events"][0]["token_header_present"] is True
     assert "token_value" not in data["events"][0]
+
+
+def test_live_gui_emergency_stop_controls_are_distinct_from_safe_stop() -> None:
+    client = TestClient(app)
+    html = client.get("/live").text
+    script = client.get("/static/planning.js").text
+    styles = client.get("/static/styles.css").text
+
+    assert 'id="btn-live-safe-stop"' in html
+    assert 'id="live-emergency-recovery"' in html
+    assert 'id="btn-live-emergency-resume"' in html
+    assert 'id="btn-live-emergency-reset"' in html
+    assert "/api/run/emergency-stop" in script
+    assert "/api/run/emergency-resume" in script
+    assert "/api/run/emergency-reset" in script
+    assert "function updateLiveEmergencyStopControls" in script
+    assert "emergency_stop_requested" in script
+    assert "grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) !important;" in styles
+    assert "body.planning-live-body .mission-status-stop #btn-live-safe-stop" in styles
+    assert "place-self: stretch !important;" in styles
+
+
+def test_emergency_stop_resume_reset_runtime_contract() -> None:
+    client = TestClient(app)
+
+    stop_response = client.post("/api/run/emergency-stop")
+    assert stop_response.status_code == 200
+    stop_payload = stop_response.json()
+    assert stop_payload["ok"] is True
+    stop_state = stop_payload["state"]
+    assert stop_state["emergency_stop_requested"] is True
+    assert stop_state["stop_requested"] is True
+    assert stop_state["safe_stop_requested"] is False
+
+    resume_response = client.post("/api/run/emergency-resume")
+    assert resume_response.status_code == 200
+    resume_state = resume_response.json()["state"]
+    assert resume_state["emergency_stop_requested"] is False
+    assert resume_state["stop_requested"] is False
+    assert resume_state["safe_stop_requested"] is False
+
+    client.post("/api/run/emergency-stop")
+    reset_response = client.post("/api/run/emergency-reset")
+    assert reset_response.status_code == 200
+    reset_state = reset_response.json()["state"]
+    assert reset_state["emergency_stop_requested"] is False
+    assert reset_state["stop_requested"] is False
+    assert reset_state["safe_stop_requested"] is False
+    assert reset_state["stage"] == "idle"
+
+
+def test_run_scoped_emergency_resume_reset_runtime_contract() -> None:
+    client = TestClient(app)
+    run_id = controller.snapshot()["state"]["run_id"]
+
+    stop_response = client.post(f"/api/runs/{run_id}/emergency-stop")
+    assert stop_response.status_code == 200
+    assert stop_response.json()["state"]["emergency_stop_requested"] is True
+
+    resume_response = client.post(f"/api/runs/{run_id}/emergency-resume")
+    assert resume_response.status_code == 200
+    assert resume_response.json()["state"]["emergency_stop_requested"] is False
+
+    client.post(f"/api/runs/{run_id}/emergency-stop")
+    reset_response = client.post(f"/api/runs/{run_id}/emergency-reset")
+    assert reset_response.status_code == 200
+    reset_state = reset_response.json()["state"]
+    assert reset_state["emergency_stop_requested"] is False
+    assert reset_state["stage"] == "idle"
+
+
+def test_live_gui_emergency_controls_use_run_scoped_endpoints_and_clear_stale_cache() -> None:
+    client = TestClient(app)
+    script = client.get("/static/planning.js").text
+
+    assert "liveEmergencyEndpoint" in script
+    assert 'liveEmergencyEndpoint("emergency-stop", "/api/run/emergency-stop")' in script
+    assert 'liveEmergencyEndpoint("emergency-resume", "/api/run/emergency-resume")' in script
+    assert 'liveEmergencyEndpoint("emergency-reset", "/api/run/emergency-reset")' in script
+    assert "discardStaleLivePlanningCache" in script
+    assert "liveBrowserCacheRestoredRunId" in script
+
+
+def test_live_gui_manipulation_agent_uses_current_supervisor_language() -> None:
+    client = TestClient(app)
+    script = client.get("/static/planning.js").text
+    report = client.get("/api/agents/manipulation/report").json()["report"]
+
+    assert "Policy Runtime" in script
+    assert "Execution Supervision" in script
+    assert "Vision / UTM Verification" in script
+    assert "Active Camera" in script
+    assert "Safety Gate / Object Pose" in script
+    assert "Home Pose" not in script
+    assert "Current Manipulation Report Missing" not in script
+    for stale_label in [
+        "Policy / Pi0.5",
+        "Pi0.5 / LeRobot Boundary",
+        "SARM Progress",
+        "SARM / Preflight",
+        "manipulation SARM scores",
+        "Pi0.5/LeRobot preflight",
+        "Run bounded LeRobot/Pi0.5 rollout",
+        "Use SARM risk/recovery gate",
+        "Bounded Pi0.5/LeRobot skill execution",
+    ]:
+        assert stale_label not in script
+        assert stale_label not in json.dumps(report, ensure_ascii=False)
+
+
+def test_live_gui_manipulation_pose_and_policy_tracking_cards_are_locally_bundled() -> None:
+    client = TestClient(app)
+
+    html = client.get("/live").text
+    script = client.get("/static/planning.js").text
+    styles = client.get("/static/styles.css").text
+    bundle_response = client.get("/static/omx_telemetry_viewer.bundle.js")
+
+    assert '/static/styles.css?v=20260715-grasp-attach-1' in html
+    assert '/static/omx_telemetry_viewer.bundle.js?v=20260715-terminal-memory-fix-1' in html
+    assert '/static/planning.js?v=20260715-report-patch-1' in html
+    assert bundle_response.status_code == 200
+    bundle = bundle_response.text
+    for required in [
+        "Live Robot Pose",
+        "Robot motion state :",
+        "Policy Tracking",
+        "Robot Motion State",
+        "data-atr-robot-pose",
+        "data-atr-robot-motion-state",
+        "data-atr-policy-tracking",
+        "data-atr-motion-state",
+        "Joint selector",
+        "Home Gate",
+        "Grasp Result",
+        "data-atr-grasp-outcome",
+        "data-atr-grasp-status",
+        "data-atr-grasp-gap",
+        'data-atr-motion-summary="${channel}"',
+        'motionSummary("measured", "Measured follower")',
+        'motionSummary("policy", "Policy target")',
+        "ar-man-motion-unified",
+        "Policy tracking artifacts",
+        "ATRRobotTelemetryCards.hydrate",
+    ]:
+        assert required in script
+    assert '["Joint1", -15, -6.5]' in script
+    for required in [
+        "/ws/lerobot/joint-telemetry",
+        "/assets/robotis-omx/omx.xml",
+        "/assets/robotis-omx/scene/omx_table_layout.web.json",
+        "/api/lerobot/active-robot-cam/specimen-pose",
+        "STLLoader",
+        "EdgesGeometry",
+        "environmentGroup",
+        "RedSpecimenBlock",
+        "measuredRobot",
+        "policyTargetGhost",
+        "Measured follower",
+        "Policy target",
+        "Elapsed time (s)",
+        "LeRobot joint value",
+        "actual_source",
+        "target_source",
+        "compactHistory",
+        "normalizedElapsed",
+        "stableYDomains",
+        "formatAxisValue",
+        "motion_state",
+        "base_state",
+        "gripper_state",
+        "grasp_outcome",
+        "applyGraspOutcome",
+        "applyRobotMotionLabel",
+        "applySpecimenGraspVisualization",
+        "attachSpecimenToGripper",
+        "releaseSpecimenFromGripper",
+        "setGripperOutcomeGlow",
+        "graspAnchor",
+        "specimenGraspState",
+        "#22c55e",
+        "#ef4444",
+        "is-measured",
+        "is-policy",
+        "home",
+        "moving",
+        "grasping",
+        "ungrasping",
+        "#ffffff",
+        "MAX_HISTORY_SAMPLES",
+        "CAMERA_FIT_PADDING",
+        "buildBoxSurfaceGrid",
+        "buildCylinderSurfaceGrid",
+        "environment-surface-grid-5mm",
+        "replaceJointHistory",
+        "telemetry_artifacts",
+        "latest_grasp_outcome",
+        "applyGraspOutcome(runtime.artifacts.latest_grasp_outcome)",
+        "settleSpecimenOnSupport",
+        "RightDiskAluminumTop",
+        "supportTop",
+    ]:
+        assert required in bundle
+    assert 'BASE_MOTION_STATES = ["home", "moving"]' in bundle
+    assert "Joint position (deg)" not in bundle
+    for required in [
+        ".ar-man-motion-state",
+        ".ar-man-motion-unified",
+        ".ar-man-motion-legend",
+        ".ar-man-motion-segments",
+        ".is-measured",
+        ".is-policy",
+        ".is-measured.is-policy",
+        ".ar-man-home-gate",
+        ".ar-man-home-grid",
+        ".ar-man-grasp-outcome",
+        '[data-status="pending"]',
+        '[data-status="success"]',
+        '[data-status="failed"]',
+        '[data-pass="yes"]',
+        '[data-pass="no"]',
+    ]:
+        assert required in styles
+    assert "Environment mesh 5 mm" not in script
+    assert ".ar-man-pose-legend i.environment" not in styles
+    assert "ar-man-motion-channels" not in script
+    assert "data-atr-grasp-success-rate" not in script
+    assert "grid-template-columns: repeat(4, minmax(0, 1fr));" in styles
+
+
+def test_live_robot_pose_has_repeatable_zoom_to_fit_control() -> None:
+    client = TestClient(app)
+
+    html = client.get("/live").text
+    script = client.get("/static/planning.js").text
+    styles = client.get("/static/styles.css").text
+    bundle = client.get("/static/omx_telemetry_viewer.bundle.js").text
+
+    assert 'data-atr-pose-fit' in script
+    assert 'aria-label="Zoom to fit"' in script
+    assert "CAMERA_FIT_DISTANCE_SCALE = 1.34" in bundle
+    assert "CAMERA_FIT_VERTICAL_OFFSET_M = -0.115" in bundle
+    assert "new Vector3(0.03, 0, CAMERA_FIT_VERTICAL_OFFSET_M)" in bundle
+    assert "zoomToFit" in bundle
+    assert "bindPoseFitButtons" in bundle
+    assert ".ar-man-pose-fit" in styles
+    assert '/static/styles.css?v=20260715-grasp-attach-1' in html
+    assert '/static/omx_telemetry_viewer.bundle.js?v=20260715-terminal-memory-fix-1' in html
+    assert '/static/planning.js?v=20260715-report-patch-1' in html
+
+
+def test_live_gui_serves_repository_omx_model_assets() -> None:
+    client = TestClient(app)
+
+    model = client.get("/assets/robotis-omx/omx.xml")
+    mesh = client.get("/assets/robotis-omx/assets/follower_01_base.stl")
+
+    assert model.status_code == 200
+    assert '<mujoco model="omx">' in model.text
+    assert mesh.status_code == 200
+    assert len(mesh.content) > 100
+
+
+def test_live_gui_serves_lightweight_omx_environment_manifest() -> None:
+    client = TestClient(app)
+
+    response = client.get("/assets/robotis-omx/scene/omx_table_layout.web.json")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["schema"] == "atr.omx_web_scene.v1"
+    assert payload["source"] == "omx_table_layout.usda"
+    assert payload["meters_per_unit"] == 1.0
+    assert payload["up_axis"] == "Z"
+    assert payload["robot_anchor"] == {
+        "position": [0.315, 0.06, -0.02],
+        "rotation_z_deg": 90.0,
+    }
+    assert payload["grid"]["spacing_m"] == 0.005
+    assert payload["grid"]["major_spacing_m"] == 0.05
+    assert payload["wireframe"]["spacing_m"] == 0.005
+    assert payload["wireframe"]["color"] == "#8fb7cc"
+    names = {item["name"] for item in payload["objects"]}
+    assert {
+        "TableTop",
+        "A4Sheet",
+        "RightDiskAluminumTop",
+        "RedSpecimenBlock",
+    }.issubset(names)
+    assert "Robot" not in names
+
+
+def test_live_gui_active_robot_cam_specimen_pose_endpoint(monkeypatch) -> None:
+    import app.main as main_module
+
+    pose = {
+        "schema": "specimen_pose.v1",
+        "frame_id": "record-frame-9",
+        "position_isaac_world_mm": {"x": 250.0, "y": 300.0, "z": 15.0},
+        "orientation_deg": {"yaw": 8.0},
+    }
+    monkeypatch.setattr(main_module, "_recording_active_cam_specimen_pose", lambda: pose)
+    client = TestClient(app)
+
+    response = client.get("/api/lerobot/active-robot-cam/specimen-pose")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "ok": True,
+        "source": "recording_active_robot_cam",
+        "pose": pose,
+    }
+
+
+def test_joint_telemetry_snapshot_reports_idle_without_rollout(monkeypatch) -> None:
+    import app.main as main_module
+
+    monkeypatch.setattr(main_module, "_joint_telemetry_session_context", lambda: None)
+    client = TestClient(app)
+
+    response = client.get("/api/lerobot/joint-telemetry/snapshot")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "ok": True,
+        "schema": "atr.robot_joint_telemetry.v1",
+        "type": "telemetry_state",
+        "status": "idle",
+        "session": {},
+        "packet": None,
+        "artifacts": {},
+    }
+
+
+def test_grasp_outcomes_api_reports_idle_without_rollout(monkeypatch) -> None:
+    import app.main as main_module
+
+    monkeypatch.setattr(main_module, "_joint_telemetry_session_context", lambda: None)
+    client = TestClient(app)
+
+    response = client.get("/api/lerobot/grasp-outcomes")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "ok": True,
+        "schema": "atr.grasp_outcomes.v1",
+        "status": "idle",
+        "session": {},
+        "attempts": [],
+        "summary": {
+            "total_attempts": 0,
+            "completed_attempts": 0,
+            "success_count": 0,
+            "failed_count": 0,
+            "pending_count": 0,
+            "success_rate": None,
+        },
+        "artifact_path": "",
+        "artifact_url": "",
+    }
+
+
+def test_grasp_outcomes_api_exposes_current_session_artifact(tmp_path, monkeypatch) -> None:
+    import app.main as main_module
+
+    log_path = tmp_path / "rollout-grasp-api" / "motor_events.jsonl"
+    log_path.parent.mkdir(parents=True)
+    log_path.write_text("{}\n", encoding="utf-8")
+    artifact_path = log_path.with_name("grasp_outcomes.json")
+    artifact_path.write_text("{}", encoding="utf-8")
+    context = {
+        "session": {
+            "session_id": "rollout-grasp-api",
+            "workflow": "rollout",
+            "status": "COMPLETED",
+            "mode": "live",
+        },
+        "log_path": log_path,
+    }
+    aggregate = {
+        "total_attempts": 4,
+        "completed_attempts": 4,
+        "success_count": 3,
+        "failed_count": 1,
+        "pending_count": 0,
+        "success_rate": 0.75,
+    }
+    monkeypatch.setattr(main_module, "_joint_telemetry_session_context", lambda: context)
+    monkeypatch.setattr(
+        main_module,
+        "finalize_grasp_outcome_artifact",
+        lambda path, session: {
+            "ok": True,
+            "schema": "atr.grasp_outcomes.v1",
+            "attempts": [{"attempt_index": 1, "status": "success"}],
+            "summary": aggregate,
+            "artifact_path": str(artifact_path),
+        },
+        raising=False,
+    )
+    client = TestClient(app)
+
+    response = client.get("/api/lerobot/grasp-outcomes")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "complete"
+    assert payload["session"]["session_id"] == "rollout-grasp-api"
+    assert payload["attempts"] == [{"attempt_index": 1, "status": "success"}]
+    assert payload["summary"] == aggregate
+    assert payload["artifact_path"] == str(artifact_path)
+    assert payload["artifact_url"].startswith("/api/lerobot/visualization/file?path=")
+
+
+def test_joint_telemetry_snapshot_reads_existing_rollout_action_log(tmp_path, monkeypatch) -> None:
+    import app.main as main_module
+
+    log_path = tmp_path / "runs" / "lerobot_action_logs" / "rollout-api-test" / "motor_events.jsonl"
+    log_path.parent.mkdir(parents=True)
+    event = {
+        "event": "action",
+        "sequence": 9,
+        "session_id": "rollout-api-test",
+        "timestamp": "2026-07-13T00:00:00+00:00",
+        "monotonic_s": 10.0,
+        "latest_observation": {
+            "shoulder_pan.pos": 5.0,
+            "shoulder_lift.pos": 0.0,
+            "elbow_flex.pos": 0.0,
+            "wrist_flex.pos": 0.0,
+            "wrist_roll.pos": 0.0,
+            "gripper.pos": 50.0,
+        },
+        "requested_action": {
+            "shoulder_pan.pos": 7.0,
+            "shoulder_lift.pos": 0.0,
+            "elbow_flex.pos": 0.0,
+            "wrist_flex.pos": 0.0,
+            "wrist_roll.pos": 0.0,
+            "gripper.pos": 50.0,
+        },
+        "sent_action": {
+            "shoulder_pan.pos": 6.5,
+            "shoulder_lift.pos": 0.0,
+            "elbow_flex.pos": 0.0,
+            "wrist_flex.pos": 0.0,
+            "wrist_roll.pos": 0.0,
+            "gripper.pos": 50.0,
+        },
+    }
+    log_path.write_text(json.dumps(event) + "\n", encoding="utf-8")
+    context = {
+        "session": {
+            "session_id": "rollout-api-test",
+            "workflow": "rollout",
+            "status": "POLICY_ACTIVE",
+            "mode": "live",
+        },
+        "log_path": log_path,
+    }
+    monkeypatch.setattr(main_module, "_joint_telemetry_session_context", lambda: context)
+    client = TestClient(app)
+
+    response = client.get("/api/lerobot/joint-telemetry/snapshot")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ok"] is True
+    assert payload["status"] == "live"
+    assert payload["session"]["session_id"] == "rollout-api-test"
+    assert payload["packet"]["sequence"] == 9
+    assert payload["packet"]["actual_deg"]["Joint1"] == pytest.approx(5.0)
+    assert payload["packet"]["target_deg"]["Joint1"] == pytest.approx(7.0)
+
+
+def test_joint_telemetry_context_prefers_active_rollout(tmp_path, monkeypatch) -> None:
+    import app.main as main_module
+
+    class FakeBridge:
+        def __init__(self, sessions):
+            self._sessions = sessions
+
+        def sessions_recent(self):
+            return list(self._sessions)
+
+    active = {
+        "session_id": "rollout-active",
+        "workflow": "rollout",
+        "status": "POLICY_ACTIVE",
+        "mode": "live",
+        "created_at": "2026-07-13T00:00:00+00:00",
+    }
+    newer_terminal = {
+        "session_id": "rollout-complete",
+        "workflow": "rollout",
+        "status": "COMPLETED",
+        "mode": "live",
+        "created_at": "2026-07-13T01:00:00+00:00",
+    }
+    backend = FakeBridge([active, newer_terminal])
+    registered = FakeBridge([dict(active)])
+    monkeypatch.setattr(main_module, "_lerobot_bridge", lambda: backend)
+    monkeypatch.setattr(main_module, "_registered_lerobot_bridge", lambda: registered)
+    monkeypatch.setattr(main_module, "LEROBOT_ACTION_LOG_ROOT", tmp_path)
+
+    context = main_module._joint_telemetry_session_context()
+
+    assert context is not None
+    assert context["session"]["session_id"] == "rollout-active"
+    assert context["log_path"] == tmp_path / "rollout-active" / "motor_events.jsonl"
+
+
+def test_joint_telemetry_websocket_emits_existing_history(tmp_path, monkeypatch) -> None:
+    import app.main as main_module
+
+    log_path = tmp_path / "rollout-ws-test" / "motor_events.jsonl"
+    log_path.parent.mkdir(parents=True)
+    event = {
+        "event": "action",
+        "sequence": 3,
+        "session_id": "rollout-ws-test",
+        "timestamp": "2026-07-13T00:00:00+00:00",
+        "monotonic_s": 20.0,
+        "latest_observation": {
+            "shoulder_pan.pos": 1.0,
+            "shoulder_lift.pos": 2.0,
+            "elbow_flex.pos": 3.0,
+            "wrist_flex.pos": 4.0,
+            "wrist_roll.pos": 5.0,
+            "gripper.pos": 50.0,
+        },
+        "requested_action": {
+            "shoulder_pan.pos": 1.5,
+            "shoulder_lift.pos": 2.5,
+            "elbow_flex.pos": 3.5,
+            "wrist_flex.pos": 4.5,
+            "wrist_roll.pos": 5.5,
+            "gripper.pos": 55.0,
+        },
+        "sent_action": {
+            "shoulder_pan.pos": 1.25,
+            "shoulder_lift.pos": 2.25,
+            "elbow_flex.pos": 3.25,
+            "wrist_flex.pos": 4.25,
+            "wrist_roll.pos": 5.25,
+            "gripper.pos": 52.5,
+        },
+    }
+    log_path.write_text(json.dumps(event) + "\n", encoding="utf-8")
+    context = {
+        "session": {
+            "session_id": "rollout-ws-test",
+            "workflow": "rollout",
+            "status": "POLICY_ACTIVE",
+            "mode": "live",
+        },
+        "log_path": log_path,
+    }
+    monkeypatch.setattr(main_module, "_joint_telemetry_session_context", lambda: context)
+    client = TestClient(app)
+
+    with client.websocket_connect("/ws/lerobot/joint-telemetry") as websocket:
+        payload = websocket.receive_json()
+
+    assert payload["schema"] == "atr.robot_joint_telemetry.v1"
+    assert payload["type"] == "joint_history"
+    assert payload["session"]["session_id"] == "rollout-ws-test"
+    assert payload["samples"][0]["sequence"] == 3
+
+
+def test_joint_telemetry_terminal_snapshot_finalizes_artifacts(tmp_path, monkeypatch) -> None:
+    import app.main as main_module
+
+    log_path = tmp_path / "rollout-finished" / "motor_events.jsonl"
+    log_path.parent.mkdir(parents=True)
+    event = {
+        "event": "action",
+        "sequence": 1,
+        "session_id": "rollout-finished",
+        "timestamp": "2026-07-13T00:00:00+00:00",
+        "monotonic_s": 1.0,
+        "latest_observation": {
+            "shoulder_pan.pos": 1.0,
+            "shoulder_lift.pos": 2.0,
+            "elbow_flex.pos": 3.0,
+            "wrist_flex.pos": 4.0,
+            "wrist_roll.pos": 5.0,
+            "gripper.pos": 50.0,
+        },
+        "requested_action": {
+            "shoulder_pan.pos": 2.0,
+            "shoulder_lift.pos": 3.0,
+            "elbow_flex.pos": 4.0,
+            "wrist_flex.pos": 5.0,
+            "wrist_roll.pos": 6.0,
+            "gripper.pos": 55.0,
+        },
+        "sent_action": {
+            "shoulder_pan.pos": 1.5,
+            "shoulder_lift.pos": 2.5,
+            "elbow_flex.pos": 3.5,
+            "wrist_flex.pos": 4.5,
+            "wrist_roll.pos": 5.5,
+            "gripper.pos": 52.5,
+        },
+    }
+    log_path.write_text(json.dumps(event) + "\n", encoding="utf-8")
+    monkeypatch.setattr(
+        main_module,
+        "_joint_telemetry_session_context",
+        lambda: {
+            "session": {
+                "session_id": "rollout-finished",
+                "workflow": "rollout",
+                "status": "COMPLETED",
+                "mode": "live",
+            },
+            "log_path": log_path,
+        },
+    )
+    client = TestClient(app)
+
+    payload = client.get("/api/lerobot/joint-telemetry/snapshot").json()
+
+    assert payload["status"] == "complete"
+    assert payload["artifacts"]["ok"] is True
+    assert Path(payload["artifacts"]["plot_png_path"]).is_file()
+    assert payload["artifacts"]["plot_png_url"].startswith("/api/lerobot/visualization/file?path=")

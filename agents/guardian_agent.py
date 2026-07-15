@@ -301,7 +301,27 @@ class GuardianAgent(BaseAgent):
     def _resolve_device_health(self, state: OrchestratorState, ctx: AgentContext) -> dict[str, Any]:
         snapshot = dict(state.device_health or {})
         try:
-            health_payload = ctx.tools.call("device.health", {})
+            spec = state.current_experiment_spec if isinstance(state.current_experiment_spec, dict) else {}
+            printer_test_path = str(
+                spec.get("printer_test_path")
+                or spec.get("test_printer_path")
+                or spec.get("printer_bridge_mode")
+                or ""
+            ).strip()
+            real_test_printer = printer_test_path in {"installed_printer", "physical_print", "actual_print", "bambulab_x2d"}
+            health_request = {
+                "runtime_mode": "test" if real_test_printer else state.mode.value,
+                "printer_test_path": printer_test_path,
+                "test_printer_path": printer_test_path,
+                "allow_test_printer_live": bool(spec.get("allow_test_printer_live") or real_test_printer),
+                "test_printer_transport": "real"
+                if real_test_printer
+                else str(spec.get("test_printer_transport") or ""),
+            }
+            for key in ("printer_profile_id", "printer_profile", "printer_provider", "provider", "printer_model"):
+                if spec.get(key):
+                    health_request[key] = spec[key]
+            health_payload = ctx.tools.call("device.health", health_request)
             if isinstance(health_payload, dict):
                 for key in ("printer", "camera", "robot", "utm", "simulator"):
                     if key in health_payload:

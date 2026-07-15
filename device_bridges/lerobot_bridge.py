@@ -65,6 +65,11 @@ from utils.isaac_omx_mirror_mapping import (
     load_isaac_omx_mirror_calibration,
     positions_to_joint_state,
 )
+from utils.lerobot_joint_telemetry import (
+    TELEMETRY_SCHEMA,
+    JointTelemetryFileObserver,
+    PostPlaceInterlock,
+)
 
 
 EventCallback = Callable[[dict[str, Any]], None]
@@ -84,7 +89,7 @@ def _command_script_path(command: list[str]) -> Path:
     if len(command) > 2 and command[1] == "-p":
         return Path(command[2]).expanduser()
     return Path(command[1]).expanduser() if len(command) > 1 else Path("")
-LEROBOT_DEFAULT_REALSENSE_WARMUP_S = 5
+LEROBOT_DEFAULT_REALSENSE_WARMUP_S = 20
 LEROBOT_DEFAULT_CAMERA_WIDTH = 640
 LEROBOT_DEFAULT_CAMERA_HEIGHT = 480
 LEROBOT_DEFAULT_DEPTH_SCALE_M_PER_UNIT = 0.001
@@ -581,6 +586,16 @@ class LeRobotBridge:
         self._selected_profile_id = config.default_profile_id
         self._selected_observation_pipeline_id = _normalize_observation_pipeline_id(config.default_observation_pipeline_id)
         self._module_available_cache: dict[tuple[str, str], bool] = {}
+        self._joint_telemetry_observer = JointTelemetryFileObserver(
+            max_initial_samples=0,
+            max_batch_samples=0,
+            max_initial_bytes=16 * 1024 * 1024,
+            max_batch_bytes=4 * 1024 * 1024,
+        )
+        self._post_place_interlocks: dict[str, PostPlaceInterlock] = {}
+        self._latest_joint_telemetry_packets: dict[str, dict[str, Any]] = {}
+        self._joint_telemetry_gate_lock = threading.Lock()
+        self._realsense_sysfs_root = Path("/sys/bus/usb/devices")
 
     def shutdown(self) -> dict[str, Any]:
         """Stop tracked and stale LeRobot live subprocesses before the GUI server exits."""
@@ -1428,7 +1443,9 @@ class LeRobotBridge:
             added = sorted(set(now) - set(before))
             removed = sorted(set(before) - set(now))
             if mode == "live" and is_realsense_camera:
-                candidates = added or list(now)
+                # RealSense role selection is identity-based, not reconnect-delta based.
+                # Keep an already-present configured camera eligible when another camera appears.
+                candidates = list(now)
                 change_type = "added" if added else "unchanged" if now else "removed"
             else:
                 candidates = added or removed or list(now)
@@ -1504,6 +1521,11 @@ class LeRobotBridge:
         if mode == "live" and request.device_role in {"follower", "leader"}:
             chosen = self._baseline_serial_identity_port(baseline, chosen)
         chosen = self._normalize_realsense_selected_identifier(request, chosen, mode=mode)
+        camera_metadata: dict[str, Any] | None = None
+        if mode == "live" and is_realsense_camera:
+            entry = self._realsense_entry_for_identifier(chosen, self._scan_live_realsense_camera_entries())
+            if entry:
+                camera_metadata = self._realsense_usb_link_metadata(entry)
         saved = self._save_device_port(
             profile.profile_id,
             request.device_role,
@@ -1518,6 +1540,7 @@ class LeRobotBridge:
             camera_fps=request.camera_fps,
             camera_width=request.camera_width,
             camera_height=request.camera_height,
+            camera_metadata=camera_metadata,
         )
         step_trace = [
             {"step": "COMPARE_BASELINE", "status": "ok", "detail": f"candidates={len(candidates)}"},
@@ -1559,6 +1582,7 @@ class LeRobotBridge:
             return self._error("lerobot.ports.save", mode, profile.profile_id, "LEROBOT_PORT_REQUIRED", "A port or camera index is required.")
         raw_port = port
         port = self._normalize_realsense_selected_identifier(request, port, mode=mode)
+        realsense_entries: list[dict[str, Any]] = []
         if mode == "live" and is_realsense_camera:
             realsense_entries = self._scan_live_realsense_camera_entries()
             if not self._realsense_identifier_available(port, realsense_entries):
@@ -1570,6 +1594,11 @@ class LeRobotBridge:
                     "LEROBOT_REALSENSE_CAMERA_UNAVAILABLE",
                     f"Selected RealSense camera for {request.camera_key} is not available: {port}; visible RealSense devices: {visible}.",
                 )
+        camera_metadata: dict[str, Any] | None = None
+        if mode == "live" and is_realsense_camera:
+            entry = self._realsense_entry_for_identifier(port, realsense_entries)
+            if entry:
+                camera_metadata = self._realsense_usb_link_metadata(entry)
         saved = self._save_device_port(
             profile.profile_id,
             request.device_role,
@@ -1582,6 +1611,7 @@ class LeRobotBridge:
             camera_fps=request.camera_fps,
             camera_width=request.camera_width,
             camera_height=request.camera_height,
+            camera_metadata=camera_metadata,
         )
         step_trace = [{"step": "SAVE_DEVICE_PORT", "status": "ok", "detail": f"{request.device_role}={saved.get('port', port)}"}]
         return {
@@ -1656,7 +1686,8 @@ class LeRobotBridge:
 
     def camera_test(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         """Run a camera capture smoke test without robot motion."""
-        request = LeRobotDevicePortRequest.model_validate(payload or {})
+        raw_payload = dict(payload or {})
+        request = LeRobotDevicePortRequest.model_validate(raw_payload)
         mode = request.runtime_mode or request.mode
         profile = self._profile(request.profile_id)
         if profile is None:
@@ -1669,7 +1700,7 @@ class LeRobotBridge:
             return self._error("lerobot.camera.test", mode, profile.profile_id, "LEROBOT_CAMERA_PORT_REQUIRED", "Save a camera port before testing capture.")
         runtime_camera_port = self._runtime_device_port(camera_port, "camera", live=mode == "live")
         saved_camera = self._saved_camera_device(profile.profile_id, camera_key)
-        request_camera = self._request_camera_metadata(request)
+        request_camera = self._request_camera_metadata(request) if self._camera_request_has_explicit_metadata(raw_payload) else {}
         camera_device = {**saved_camera, **{key: value for key, value in request_camera.items() if value not in ("", None)}}
         capture = (
             self._fake_camera_capture(profile, camera_key, runtime_camera_port)
@@ -1678,10 +1709,24 @@ class LeRobotBridge:
         )
         if not capture.get("ok"):
             return self._error("lerobot.camera.test", mode, profile.profile_id, str(capture.get("failure_code")), str(capture.get("message")))
+        capture = self._camera_release_contract(
+            {
+                **capture,
+                "port_released": True,
+                "camera_returned_to_vla": True,
+                "camera_owner_after": "vla_runtime",
+                "release_status": "released",
+            }
+        )
         step_trace = [
             {"step": "RESOLVE_CAMERA_PORT", "status": "ok", "detail": f"{camera_port} -> {runtime_camera_port}"},
             {"step": "OPEN_CAMERA", "status": "ok", "detail": runtime_camera_port},
             {"step": "CAPTURE_FRAME", "status": "ok", "detail": str(capture.get("path", ""))},
+            {
+                "step": "RELEASE_CAMERA_PORT",
+                "status": "ok" if capture.get("camera_returned_to_vla") else "warning",
+                "detail": str(capture.get("release_status") or "released"),
+            },
         ]
         return {
             "ok": True,
@@ -1692,11 +1737,309 @@ class LeRobotBridge:
             "camera_key": camera_key,
             "camera_port": runtime_camera_port,
             "camera_identity_port": camera_port,
+            "port_released": bool(capture.get("port_released")),
+            "camera_returned_to_vla": bool(capture.get("camera_returned_to_vla")),
+            "camera_owner_after": str(capture.get("camera_owner_after") or ""),
+            "release_status": str(capture.get("release_status") or ""),
             "capture": capture,
             "step_trace": step_trace,
             "events": step_trace,
             "error": None,
         }
+
+    def active_robot_cam_capture(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Run the LeRobot ActiveCam routine: move follower, capture, and return pose/camera lease."""
+        raw_payload = dict(payload or {})
+        request = LeRobotSessionRequest.model_validate(raw_payload)
+        mode = request.runtime_mode or request.mode
+        profile = self._profile(request.profile_id)
+        if profile is None:
+            return self._error("lerobot.active_robot_cam.capture", mode, request.profile_id, "LEROBOT_PROFILE_NOT_FOUND", "Robot profile not found.")
+        camera_key = str(raw_payload.get("camera_key") or request.active_robot_cam_primary_camera_key or "wrist").strip() or "wrist"
+        if mode != "live":
+            capture = self._camera_release_contract(
+                {
+                    **self._fake_camera_capture(profile, camera_key, self._fake_camera_port(profile, camera_key)),
+                    "port_released": True,
+                    "camera_returned_to_vla": True,
+                    "camera_owner_after": "vla_runtime",
+                    "release_status": "simulated",
+                }
+            )
+            return self._active_robot_cam_capture_response(
+                request=request,
+                profile=profile,
+                camera_key=camera_key,
+                camera_identity_port=self._fake_camera_port(profile, camera_key),
+                camera_port=self._fake_camera_port(profile, camera_key),
+                capture=capture,
+                driver_result={
+                    "ok": True,
+                    "status": "simulated",
+                    "robot_pose_included": True,
+                    "capture_pose": {"status": "simulated"},
+                    "resume_pose": {"status": "simulated"},
+                },
+                command=[],
+                env_overrides={},
+            )
+        if not request.confirm_live_execute:
+            return self._blocked(
+                "lerobot.active_robot_cam.capture",
+                mode,
+                profile.profile_id,
+                "LEROBOT_LIVE_CONFIRMATION_REQUIRED",
+                "Live ActiveCam capture requires confirm_live_execute=true.",
+                "active_robot_cam_capture",
+            )
+        blocked = self._live_block_if_needed(
+            tool="lerobot.active_robot_cam.capture",
+            mode=mode,
+            profile=profile,
+            workflow="rollout",
+            allow_key="allow_policy_rollout",
+        )
+        if blocked:
+            return blocked
+        port_blocked = self._live_port_block_if_needed(tool="lerobot.active_robot_cam.capture", mode=mode, profile=profile, workflow="rollout")
+        if port_blocked:
+            return port_blocked
+        camera_identity_port = self._device_port(profile, "camera", camera_key=camera_key, allow_fake=False)
+        if not camera_identity_port:
+            return self._blocked(
+                "lerobot.active_robot_cam.capture",
+                mode,
+                profile.profile_id,
+                "LEROBOT_ACTIVE_CAM_PORT_REQUIRED",
+                f"Save the ActiveCam camera port before live capture: {camera_key}.",
+                "active_robot_cam_capture",
+            )
+        saved_camera = self._saved_camera_device(profile.profile_id, camera_key)
+        backend = self._normalize_camera_backend(saved_camera.get("backend", "opencv"))
+        if backend == LEROBOT_REALSENSE_TYPE:
+            realsense_entries = self._scan_live_realsense_camera_entries()
+            identifier = str(saved_camera.get("serial_number_or_name") or camera_identity_port).strip()
+            if not self._realsense_identifier_available(identifier, realsense_entries):
+                visible = self._realsense_visible_summary(realsense_entries)
+                return self._blocked(
+                    "lerobot.active_robot_cam.capture",
+                    mode,
+                    profile.profile_id,
+                    "LEROBOT_REALSENSE_CAMERA_UNAVAILABLE",
+                    f"Saved ActiveCam camera is not available: {camera_key}={identifier}; visible RealSense devices: {visible}.",
+                    "active_robot_cam_capture",
+                )
+        elif not self._camera_port_available(camera_identity_port):
+            return self._blocked(
+                "lerobot.active_robot_cam.capture",
+                mode,
+                profile.profile_id,
+                "LEROBOT_CAMERA_PORT_UNAVAILABLE",
+                f"Saved ActiveCam camera is not available: {camera_key}={camera_identity_port}.",
+                "active_robot_cam_capture",
+            )
+        active_request = request.model_copy(
+            update={
+                "active_robot_cam_enabled": True,
+                "active_robot_cam_primary_camera_key": camera_key,
+                "camera_enabled": True,
+            }
+        )
+        env_overrides = self._active_robot_cam_env_overrides(active_request)
+        env_overrides.update(self._live_depth_env_overrides(active_request))
+        env_overrides["ATR_LEROBOT_OBSERVATION_PIPELINE_ID"] = self._request_observation_pipeline_id(active_request, profile)
+        env_overrides["ATR_LEROBOT_SPECIMEN_CAMERA_KEY"] = camera_key
+        env_overrides["ATR_ACTIVE_ROBOT_CAM_PRIMARY_CAMERA_KEY"] = camera_key
+        driver_payload = self._active_robot_cam_driver_payload(profile, active_request, camera_key=camera_key)
+        script_path = self.config.repo_root / "scripts" / "lerobot_active_robot_cam_once.py"
+        command = [
+            self.config.conda_executable,
+            "run",
+            "-n",
+            self.config.conda_env_name,
+            "python",
+            str(script_path),
+            json.dumps(driver_payload, ensure_ascii=True),
+        ]
+        run_env = {**os.environ, **env_overrides, "PYTHONUNBUFFERED": "1"}
+        try:
+            completed = subprocess.run(
+                command,
+                cwd=str(self.config.repo_root),
+                env=run_env,
+                text=True,
+                capture_output=True,
+                timeout=180,
+            )
+        except subprocess.TimeoutExpired:
+            return self._error(
+                "lerobot.active_robot_cam.capture",
+                mode,
+                profile.profile_id,
+                "LEROBOT_ACTIVE_CAM_TIMEOUT",
+                "ActiveCam pose/capture routine timed out.",
+            )
+        driver_result = self._json_object_from_stdout(completed.stdout)
+        if not driver_result:
+            return self._error(
+                "lerobot.active_robot_cam.capture",
+                mode,
+                profile.profile_id,
+                "LEROBOT_ACTIVE_CAM_OUTPUT_INVALID",
+                f"ActiveCam runner did not return JSON; returncode={completed.returncode}; stderr={completed.stderr[-1000:]}",
+            )
+        if completed.returncode != 0 or not bool(driver_result.get("ok")):
+            error_response = self._error(
+                "lerobot.active_robot_cam.capture",
+                mode,
+                profile.profile_id,
+                str(driver_result.get("failure_code") or "LEROBOT_ACTIVE_CAM_FAILED"),
+                str(driver_result.get("message") or driver_result.get("status") or "ActiveCam capture failed."),
+            )
+            error_response["active_robot_cam_result"] = driver_result
+            error_response["command_preview"] = command
+            return error_response
+        # The isolated child has exited, so the OS has closed every camera handle it owned.
+        # Reopening RGB-D here only to prove release races with the next rollout owner.
+        release_verification = {
+            "ok": True,
+            "status": "process_exit_verified",
+            "method": "child_process_exit",
+            "returncode": completed.returncode,
+        }
+        capture = self._camera_release_contract(
+            {
+                **dict(driver_result.get("capture") or {}),
+                "port_released": True,
+                "camera_returned_to_vla": True,
+                "camera_owner_after": "vla_runtime",
+                "release_status": "process_exit_verified",
+            }
+        )
+        return self._active_robot_cam_capture_response(
+            request=active_request,
+            profile=profile,
+            camera_key=camera_key,
+            camera_identity_port=camera_identity_port,
+            camera_port=self._runtime_device_port(camera_identity_port, "camera", live=True),
+            capture=capture,
+            driver_result=driver_result,
+            command=command,
+            env_overrides=env_overrides,
+            release_verification=release_verification,
+        )
+
+    def _active_robot_cam_driver_payload(self, profile: RobotProfile, request: LeRobotSessionRequest, *, camera_key: str) -> dict[str, Any]:
+        follower_port = self._device_port(profile, "follower", allow_fake=False)
+        calibration_dir = self._profile_calibration_dir(profile)
+        camera_identity_port = self._device_port(profile, "camera", camera_key=camera_key, allow_fake=False)
+        runtime_camera_port = self._runtime_device_port(camera_identity_port, "camera", live=True)
+        saved_camera = self._saved_camera_device(profile.profile_id, camera_key)
+        camera_config = self._camera_config_for_command(
+            runtime_camera_port,
+            saved_camera,
+            camera_key=camera_key,
+            request_fps=request.camera_fps or request.fps or profile.fps,
+            include_color_format=True,
+            include_depth_metadata=True,
+        )
+        return {
+            "profile_id": profile.profile_id,
+            "robot_type": profile.robot_type,
+            "robot_id": profile.robot_id,
+            "robot_port": self._runtime_device_port(follower_port, "follower", live=True),
+            "calibration_dir": calibration_dir,
+            "camera_key": camera_key,
+            "cameras": {camera_key: camera_config},
+            "reason": "spc_autoejection_verification",
+        }
+
+    def _active_robot_cam_capture_response(
+        self,
+        *,
+        request: LeRobotSessionRequest,
+        profile: RobotProfile,
+        camera_key: str,
+        camera_identity_port: str,
+        camera_port: str,
+        capture: dict[str, Any],
+        driver_result: dict[str, Any],
+        command: list[str],
+        env_overrides: dict[str, str],
+        release_verification: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        mode = request.runtime_mode or request.mode
+        port_released = bool(capture.get("port_released", True))
+        camera_returned = bool(capture.get("camera_returned_to_vla", port_released))
+        step_trace = [
+            {"step": "RESOLVE_ACTIVE_CAM", "status": "ok", "detail": f"{camera_key}={camera_identity_port}"},
+            {"step": "MOVE_TO_CAPTURE_POSE", "status": "ok", "detail": str((driver_result.get("capture_pose") or {}).get("status") or "applied")},
+            {"step": "CAPTURE_FRAME", "status": "ok", "detail": str(capture.get("path") or "")},
+            {"step": "RETURN_ROBOT_POSE", "status": "ok", "detail": str((driver_result.get("resume_pose") or {}).get("status") or "applied")},
+            {"step": "RELEASE_CAMERA_PORT", "status": "ok" if camera_returned else "warning", "detail": str(capture.get("release_status") or "released")},
+        ]
+        return {
+            "ok": True,
+            "tool": "lerobot.active_robot_cam.capture",
+            "mode": mode,
+            "runtime_mode": mode,
+            "profile_id": profile.profile_id,
+            "workflow": "active_robot_cam_capture",
+            "status": str(driver_result.get("status") or "applied"),
+            "camera_key": camera_key,
+            "camera_port": camera_port,
+            "camera_identity_port": camera_identity_port,
+            "robot_pose_included": bool(driver_result.get("robot_pose_included", True)),
+            "capture_pose": dict(driver_result.get("capture_pose") or driver_result.get("capture_wait") or {}),
+            "resume_pose": dict(driver_result.get("resume_pose") or {}),
+            "port_released": port_released,
+            "camera_returned_to_vla": camera_returned,
+            "camera_owner_after": str(capture.get("camera_owner_after") or ("vla_runtime" if camera_returned else "unknown")),
+            "release_status": str(capture.get("release_status") or ""),
+            "release_verification": dict(release_verification or {}),
+            "capture": capture,
+            "active_robot_cam_result": driver_result,
+            "command_preview": command,
+            "env_overrides": env_overrides,
+            "step_trace": step_trace,
+            "events": step_trace,
+            "error": None,
+        }
+
+    @staticmethod
+    def _json_object_from_stdout(stdout: str) -> dict[str, Any] | None:
+        for line in reversed((stdout or "").splitlines()):
+            line = line.strip()
+            if not line.startswith("{"):
+                continue
+            try:
+                parsed = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(parsed, dict):
+                return parsed
+        return None
+
+    @staticmethod
+    def _camera_release_contract(capture: dict[str, Any]) -> dict[str, Any]:
+        """Normalize one-shot camera capture results so downstream VLA can reclaim the camera."""
+        normalized = dict(capture or {})
+        released = bool(normalized.get("port_released", False))
+        owner_after = str(normalized.get("camera_owner_after") or ("vla_runtime" if released else "unknown"))
+        returned_to_vla = bool(normalized.get("camera_returned_to_vla", released and owner_after == "vla_runtime"))
+        normalized["port_released"] = released
+        normalized["camera_owner_after"] = owner_after
+        normalized["camera_returned_to_vla"] = returned_to_vla
+        normalized["release_status"] = str(normalized.get("release_status") or ("released" if returned_to_vla else "release_unverified"))
+        return normalized
+
+    @staticmethod
+    def _camera_request_has_explicit_metadata(payload: dict[str, Any]) -> bool:
+        """Return true only when the caller intentionally overrides saved camera metadata."""
+        return any(
+            key in payload and payload.get(key) not in ("", None)
+            for key in ("camera_backend", "camera_use_depth", "camera_fps", "camera_width", "camera_height")
+        )
 
     def teleoperate_start(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         """Start a deterministic fake teleoperation session."""
@@ -5063,7 +5406,13 @@ class LeRobotBridge:
         return failed
 
     def _normalize_isaac_lab_runner_status(self, kind: str, job: dict[str, Any]) -> dict[str, Any]:
-        if str(job.get("status") or "").upper() != "RUNNING":
+        status = str(job.get("status") or "").upper()
+        if status != "RUNNING":
+            error = job.get("error") if isinstance(job.get("error"), dict) else {}
+            if status == "FAILED" and str(error.get("code") or "") == "ISAAC_LAB_RUNNER_PROCESS_EXITED":
+                recovered = self._recover_completed_isaac_lab_post_run_job(kind, job)
+                if recovered is not None:
+                    return recovered
             return job
         active_failure = self._isaac_lab_active_runner_failure(kind, job)
         if active_failure:
@@ -5071,6 +5420,9 @@ class LeRobotBridge:
         elif self._isaac_lab_tracked_runner_process_alive(kind, job):
             return job
         elif not self._isaac_lab_runner_pid_alive(job):
+            recovered = self._recover_completed_isaac_lab_post_run_job(kind, job)
+            if recovered is not None:
+                return recovered
             normalized = self._fail_isaac_lab_runner_job(
                 job,
                 code="ISAAC_LAB_RUNNER_PROCESS_EXITED",
@@ -5092,6 +5444,55 @@ class LeRobotBridge:
                     self._isaac_lab_rl_teacher_jobs[resolved] = copy.deepcopy(normalized)
         self._write_isaac_lab_job_manifest(normalized)
         return normalized
+
+    def _recover_completed_isaac_lab_post_run_job(self, kind: str, job: dict[str, Any]) -> dict[str, Any] | None:
+        if kind != "mimic":
+            return None
+        post_run = dict(job.get("post_run") if isinstance(job.get("post_run"), dict) else {})
+        if str(post_run.get("stage") or "") != "replay_validate_after_generation":
+            return None
+        summary_path_text = str(post_run.get("summary_file") or "").strip()
+        if not summary_path_text:
+            command = [str(item) for item in list(post_run.get("command") or [])]
+            summary_path_text = self._command_option_value(command, "--summary-file")
+        if not summary_path_text:
+            return None
+        replay_summary = self._read_json_dict(Path(summary_path_text).expanduser())
+        if not replay_summary:
+            return None
+        if not bool(replay_summary.get("ok")):
+            return None
+        if str(replay_summary.get("status") or "").lower() not in {"completed", "passed", "ok"}:
+            return None
+
+        now = datetime.now(timezone.utc).isoformat()
+        recovered = copy.deepcopy(job)
+        recovered["status"] = "COMPLETED"
+        recovered["returncode"] = 0
+        recovered["progress"] = {"percent": 100.0, "stage": "completed"}
+        recovered["updated_at"] = now
+        recovered["completed_at"] = now
+        recovered["error"] = None
+        post_run.update(
+            {
+                "status": "completed",
+                "returncode": 0,
+                "completed_at": now,
+                "replay_validation_summary": copy.deepcopy(replay_summary),
+            }
+        )
+        recovered["post_run"] = post_run
+        recovered = self._refresh_isaac_lab_training_import_after_post_run(recovered)
+
+        resolved = str(recovered.get("job_id") or "")
+        if resolved:
+            lock = self._isaac_lab_runner_locks.setdefault(kind, threading.Lock())
+            with lock:
+                self._isaac_lab_runner_jobs.setdefault(kind, {})[resolved] = copy.deepcopy(recovered)
+            with self._isaac_lab_mimic_lock:
+                self._isaac_lab_mimic_jobs[resolved] = copy.deepcopy(recovered)
+        self._write_isaac_lab_job_manifest(recovered)
+        return recovered
 
     @staticmethod
     def _jsonl_line_count(path: Path) -> int:
@@ -7256,6 +7657,13 @@ class LeRobotBridge:
             else request.policy_checkpoint_path
             or request.policy_path
             or str(self.config.fake_checkpoint_root / "policy.ckpt"),
+            "policy_type": request.policy_type,
+            "policy_path": request.policy_path,
+            "policy_checkpoint_path": request.policy_checkpoint_path,
+            "policy_repo_id": request.policy_repo_id,
+            "rollout_inference_type": request.rollout_inference_type,
+            "active_robot_cam_home_pose_path": self._active_robot_cam_home_pose_path(request),
+            "active_robot_cam_capture_pose_path": self._active_robot_cam_capture_pose_path(request),
             "log_path": "",
             "pid": None,
             "returncode": None,
@@ -7387,6 +7795,7 @@ class LeRobotBridge:
         cleanup_trace = self._cleanup_lerobot_processes(workflow)
         self._close_log_handle(str(session.get("session_id", "")))
         session["status"] = stopped_status
+        session["port_reclaim_status"] = "attempted"
         step_trace = [
             {"step": "STOPPING", "status": "ok", "detail": workflow},
             {"step": stopped_status, "status": "ok", "detail": "session stopped"},
@@ -7443,6 +7852,8 @@ class LeRobotBridge:
                 stopped_session_ids.append(session_id)
 
         cleanup_trace = self._cleanup_lerobot_processes(workflow)
+        for session in sessions:
+            session["port_reclaim_status"] = "attempted"
         step_trace.extend(cleanup_trace)
         step_trace.append({"step": stopped_status, "status": "ok", "detail": f"{workflow}: reset complete; sessions={len(stopped_session_ids)}"})
 
@@ -7518,6 +7929,162 @@ class LeRobotBridge:
             job = dict(self._isaac_rgbd_render_jobs.get(job_id, {}))
         return job or (dict(session.get("isaac_rgbd_post_render") or {}) if isinstance(session.get("isaac_rgbd_post_render"), dict) else {})
 
+    @staticmethod
+    def _command_preview_option(command_preview: list[Any], option: str) -> str:
+        prefix = f"{option}="
+        for item in command_preview:
+            text = str(item)
+            if text.startswith(prefix):
+                return text[len(prefix) :]
+        return ""
+
+    def _device_port_occupants(self, port: str, *, limit: int = 8) -> list[dict[str, Any]]:
+        """Return processes currently holding a device/file path open."""
+        raw = str(port or "").strip()
+        if not raw:
+            return []
+        try:
+            target = Path(raw).expanduser().resolve(strict=False)
+        except OSError:
+            target = Path(raw).expanduser()
+        proc_root = Path("/proc")
+        if not proc_root.exists():
+            return []
+        occupants: list[dict[str, Any]] = []
+        for proc_dir in proc_root.iterdir():
+            if not proc_dir.name.isdigit():
+                continue
+            fd_dir = proc_dir / "fd"
+            if not fd_dir.is_dir():
+                continue
+            try:
+                fd_entries = list(fd_dir.iterdir())
+            except (OSError, PermissionError):
+                continue
+            matched_fd = ""
+            for fd in fd_entries:
+                try:
+                    linked = Path(os.readlink(fd)).resolve(strict=False)
+                except (OSError, PermissionError):
+                    continue
+                if linked == target:
+                    matched_fd = fd.name
+                    break
+            if not matched_fd:
+                continue
+            try:
+                pid = int(proc_dir.name)
+            except ValueError:
+                continue
+            try:
+                name = (proc_dir / "comm").read_text(encoding="utf-8", errors="replace").strip()
+            except OSError:
+                name = ""
+            try:
+                raw_cmdline = (proc_dir / "cmdline").read_bytes()
+                cmdline = " ".join(part.decode("utf-8", "replace") for part in raw_cmdline.split(b"\0") if part)
+            except OSError:
+                cmdline = ""
+            occupants.append({"pid": pid, "name": name or cmdline.split(" ", 1)[0], "fd": matched_fd, "cmdline": cmdline})
+            if len(occupants) >= limit:
+                break
+        return sorted(occupants, key=lambda item: int(item.get("pid") or 0))
+
+    def _session_runtime_contract_blocks(self, session: dict[str, Any], runtime: dict[str, Any]) -> dict[str, dict[str, Any]]:
+        command_preview = list(session.get("command_preview", []))
+        workflow = str(session.get("workflow") or "").strip().lower()
+        status = str(session.get("status") or "unknown").strip() or "unknown"
+        profile_id = str(session.get("profile_id") or "").strip()
+        profile = self._profile(profile_id) if profile_id else None
+        follower_port = self._command_preview_option(command_preview, "--robot.port")
+        leader_port = self._command_preview_option(command_preview, "--teleop.port")
+        if profile is not None:
+            follower_port = follower_port or self._device_port(profile, "follower", allow_fake=True)
+            leader_port = leader_port or self._device_port(profile, "leader", allow_fake=True)
+        port_status = "ready" if follower_port or leader_port else "unknown"
+        port_occupants: list[dict[str, Any]] = []
+        for role, port in (("follower", follower_port), ("leader", leader_port)):
+            for occupant in self._device_port_occupants(port):
+                decorated = dict(occupant)
+                decorated["role"] = role
+                decorated["port"] = port
+                port_occupants.append(decorated)
+        availability = "occupied" if port_occupants else "available" if follower_port or leader_port else "unknown"
+        occupant_process = ""
+        if port_occupants:
+            first = port_occupants[0]
+            occupant_process = f"pid={first.get('pid')} {first.get('name') or first.get('cmdline') or 'process'}"
+
+        active_robot_cam = session.get("active_robot_cam") if isinstance(session.get("active_robot_cam"), dict) else {}
+        active_camera_status = str(active_robot_cam.get("status") or "").strip()
+        camera_conflict = str(active_robot_cam.get("conflict_reason") or active_robot_cam.get("blocking_reason") or "").strip()
+        if not active_camera_status:
+            active_camera_status = "blocked" if camera_conflict else "ready" if workflow in {"teleoperate", "record", "rollout"} else "unknown"
+
+        policy_ref = (
+            str(session.get("policy_path") or "").strip()
+            or str(session.get("policy_checkpoint_path") or "").strip()
+            or str(session.get("policy_repo_id") or "").strip()
+            or str(session.get("checkpoint_path") or "").strip()
+        )
+        visualization = session.get("visualization") if isinstance(session.get("visualization"), dict) else {}
+        viewer_url = str(visualization.get("viewer_url") or visualization.get("rerun_web_url") or "").strip()
+        rerun_status = "available" if viewer_url else "waiting" if bool(visualization) else "disabled"
+
+        return {
+            "port_lease": {
+                "schema": "atr.lerobot.port_lease.v1",
+                "status": port_status,
+                "profile_id": profile_id,
+                "workflow": workflow,
+                "follower_port": follower_port,
+                "leader_port": leader_port,
+                "current_availability": availability,
+                "occupant_process": occupant_process,
+                "occupant_processes": port_occupants,
+                "reclaim_status": str(session.get("port_reclaim_status") or "not_attempted"),
+            },
+            "active_camera_lease": {
+                "schema": "atr.lerobot.active_camera_lease.v1",
+                "status": active_camera_status,
+                "owner": str(active_robot_cam.get("owner") or workflow or "idle"),
+                "camera_key": str(active_robot_cam.get("camera_key") or active_robot_cam.get("primary_camera_key") or ""),
+                "physical_path": str(active_robot_cam.get("physical_path") or active_robot_cam.get("path") or ""),
+                "serial": str(active_robot_cam.get("serial") or ""),
+                "returned_to_vla": bool(active_robot_cam.get("returned_to_vla", True)),
+                "conflict_reason": camera_conflict,
+            },
+            "policy_runtime": {
+                "schema": "atr.lerobot.policy_runtime.v1",
+                "policy_type": str(session.get("policy_type") or "").strip(),
+                "policy_ref": policy_ref,
+                "inference_type": str(session.get("rollout_inference_type") or "").strip(),
+                "session_id": str(session.get("session_id") or ""),
+                "pid": session.get("pid"),
+                "status": status,
+                "phase": runtime.get("phase"),
+                "message": runtime.get("message"),
+                "action_count": runtime.get("action_count", 0),
+                "max_abs_delta": runtime.get("max_abs_delta"),
+                "action_rate_hz": runtime.get("action_rate_hz"),
+                "latency_ms": runtime.get("latency_ms"),
+                "warnings": list(runtime.get("warnings") or []),
+                "log_path": str(session.get("log_path") or runtime.get("log_path") or ""),
+                "fatal_marker": bool(str(runtime.get("phase") or "").upper() == "FAILED"),
+            },
+            "rerun_telemetry": {
+                "schema": "atr.lerobot.rerun_telemetry.v1",
+                "status": rerun_status,
+                "viewer_pid": visualization.get("pid"),
+                "viewer_url": str(visualization.get("viewer_url") or ""),
+                "rerun_web_url": str(visualization.get("rerun_web_url") or ""),
+                "rerun_ws_url": str(visualization.get("rerun_ws_url") or ""),
+                "rrd_path": str(visualization.get("rrd_path") or visualization.get("output_path") or ""),
+                "stream_keys": list(visualization.get("stream_keys") or []),
+                "latest_frame_artifact": str(visualization.get("latest_frame_artifact") or ""),
+            },
+        }
+
     def _session_response(self, tool: str, mode: str, session: dict[str, Any], step_trace: list[dict[str, Any]], **extra: Any) -> dict[str, Any]:
         self._refresh_in_process_isaac_mirror_progress(session)
         post_render = self._current_isaac_rgbd_post_render_for_session(session)
@@ -7573,6 +8140,9 @@ class LeRobotBridge:
             "monitor": session.get("monitor", {}),
             "error": None,
         }
+        payload.update(self._session_runtime_contract_blocks(session, runtime))
+        if str(session.get("workflow") or "").lower() == "rollout":
+            payload.update(self._rollout_joint_telemetry_contract(session))
         if str(session.get("workflow") or "").lower() == "isaac_mirror":
             payload.update(
                 {
@@ -7625,6 +8195,33 @@ class LeRobotBridge:
             payload["visualization"] = session.get("visualization", {})
         payload.update(extra)
         return payload
+
+    def _rollout_joint_telemetry_contract(self, session: dict[str, Any]) -> dict[str, Any]:
+        """Expose measured motion state and the post-place gate without opening robot ports."""
+        session_id = self._safe_session_id(str(session.get("session_id") or "live"))
+        log_path = self._omx_action_log_path(session_id)
+        with self._joint_telemetry_gate_lock:
+            packets = self._joint_telemetry_observer.poll(log_path, session)
+            interlock = self._post_place_interlocks.setdefault(
+                session_id,
+                PostPlaceInterlock(session_id=session_id),
+            )
+            for packet in packets:
+                interlock.observe(packet)
+            if packets:
+                self._latest_joint_telemetry_packets[session_id] = dict(packets[-1])
+            latest_packet = self._latest_joint_telemetry_packets.get(session_id)
+            interlock_snapshot = interlock.snapshot()
+        return {
+            "joint_telemetry": {
+                "schema": TELEMETRY_SCHEMA,
+                "status": "available" if latest_packet else "waiting",
+                "session_id": session_id,
+                "log_path": str(log_path),
+                "packet": dict(latest_packet) if latest_packet else None,
+            },
+            "post_place_interlock": interlock_snapshot,
+        }
 
     def _run_isaac_mirror_loop(
         self,
@@ -9557,7 +10154,7 @@ class LeRobotBridge:
         if not missing:
             if not unavailable:
                 return None
-            return self._blocked(
+            blocked = self._blocked(
                 tool,
                 mode,
                 profile.profile_id,
@@ -9565,7 +10162,21 @@ class LeRobotBridge:
                 f"Saved LeRobot device ports are not present: {', '.join(unavailable)}. Reconnect the robot or rerun port detection.",
                 workflow,
             )
-        return self._blocked(
+            blocked["port_lease"] = {
+                "schema": "atr.lerobot.port_lease.v1",
+                "status": "blocked",
+                "profile_id": profile.profile_id,
+                "workflow": workflow,
+                "follower_port": self._device_port(profile, "follower", allow_fake=False),
+                "leader_port": self._device_port(profile, "leader", allow_fake=False),
+                "current_availability": "unavailable",
+                "occupant_process": "",
+                "reclaim_status": "not_attempted",
+                "unavailable_roles": [item.split("=", 1)[0] for item in unavailable],
+                "missing_roles": [],
+            }
+            return blocked
+        blocked = self._blocked(
             tool,
             mode,
             profile.profile_id,
@@ -9573,6 +10184,20 @@ class LeRobotBridge:
             f"Save required LeRobot device ports before live {workflow}: {', '.join(missing)}.",
             workflow,
         )
+        blocked["port_lease"] = {
+            "schema": "atr.lerobot.port_lease.v1",
+            "status": "blocked",
+            "profile_id": profile.profile_id,
+            "workflow": workflow,
+            "follower_port": self._device_port(profile, "follower", allow_fake=False),
+            "leader_port": self._device_port(profile, "leader", allow_fake=False),
+            "current_availability": "missing",
+            "occupant_process": "",
+            "reclaim_status": "not_attempted",
+            "unavailable_roles": [],
+            "missing_roles": list(missing),
+        }
+        return blocked
 
     def _live_camera_block_if_needed(
         self,
@@ -9748,7 +10373,12 @@ class LeRobotBridge:
                 product_line = str(entry.get("product_line") or "").lower()
                 match_text = f"{name} {product_line}"
                 if any(hint in match_text for hint in hints):
-                    return str(entry.get("serial") or entry.get("name") or self._default_realsense_identifier(camera_key))
+                    return str(
+                        entry.get("serial")
+                        or entry.get("configured_identifier")
+                        or entry.get("name")
+                        or self._default_realsense_identifier(camera_key)
+                    )
         return self._default_realsense_identifier(camera_key)
 
     def _normalize_realsense_selected_identifier(self, request: LeRobotDevicePortRequest, selected: str, *, mode: str) -> str:
@@ -9983,13 +10613,20 @@ class LeRobotBridge:
 
     def _omx_action_log_env_overrides(self, session_id: str) -> dict[str, str]:
         clean_session_id = self._safe_session_id(session_id or "live")
-        log_dir = self.config.session_log_root.parent / "lerobot_action_logs" / clean_session_id
+        log_dir = self._omx_action_log_dir(clean_session_id)
         return {
             "ATR_LEROBOT_OMX_ACTION_LOG": "1",
             "ATR_LEROBOT_OMX_ACTION_LOG_SESSION_ID": clean_session_id,
             "ATR_LEROBOT_OMX_ACTION_LOG_DIR": str(log_dir),
             "ATR_LEROBOT_OMX_ACTION_LOG_MOTORS": "shoulder_pan,shoulder_lift,elbow_flex,wrist_flex,wrist_roll,gripper",
         }
+
+    def _omx_action_log_dir(self, session_id: str) -> Path:
+        clean_session_id = self._safe_session_id(session_id or "live")
+        return self.config.session_log_root.parent / "lerobot_action_logs" / clean_session_id
+
+    def _omx_action_log_path(self, session_id: str) -> Path:
+        return self._omx_action_log_dir(session_id) / "motor_events.jsonl"
 
     @staticmethod
     def _safe_session_id(value: str) -> str:
@@ -13100,7 +13737,7 @@ print(json.dumps({"ok": True, "key": key_name}))
         )
 
     def _rollout_request_with_local_policy(self, request: LeRobotSessionRequest) -> LeRobotSessionRequest:
-        """Prefer local trained checkpoints for rollout and normalize selected output files."""
+        """Normalize explicit policy refs; only standalone rollout may select the latest local policy."""
         mode = request.runtime_mode or request.mode
         raw_path = str(request.policy_checkpoint_path or request.policy_path or "").strip()
         if raw_path and not raw_path.startswith("fake://"):
@@ -13129,7 +13766,8 @@ print(json.dumps({"ok": True, "key": key_name}))
                 )
             return request
 
-        if mode == "live":
+        manipulation_task = bool(str(request.task_id or request.skill_id or "").strip())
+        if mode == "live" and not manipulation_task:
             latest = self._latest_local_policy_checkpoint()
             if latest:
                 return request.model_copy(
@@ -13266,10 +13904,13 @@ print(json.dumps({"ok": True, "key": key_name}))
         ids: list[str] = []
         for entry in self._scan_live_realsense_camera_entries():
             serial = str(entry.get("serial") or "").strip()
+            configured_identifier = str(entry.get("configured_identifier") or "").strip()
             name = str(entry.get("name") or "").strip()
             product_line = str(entry.get("product_line") or "").strip()
             if serial:
                 ids.append(serial)
+            elif configured_identifier:
+                ids.append(configured_identifier)
             if name:
                 ids.append(name)
             if product_line and name and product_line not in name:
@@ -13291,9 +13932,9 @@ print(json.dumps({"ok": True, "key": key_name}))
                 ids.append(f"{name} {product_line}")
         return sorted(dict.fromkeys(ids))
 
-    def _scan_realsense_camera_entries(self) -> list[dict[str, str]]:
+    def _scan_realsense_camera_entries(self) -> list[dict[str, Any]]:
         """Enumerate RealSense devices as SDK entries without starting streams."""
-        entries: list[dict[str, str]] = []
+        entries: list[dict[str, Any]] = []
         try:
             import pyrealsense2 as rs  # type: ignore[import-not-found]
         except Exception:
@@ -13307,8 +13948,20 @@ print(json.dumps({"ok": True, "key": key_name}))
                 serial = self._safe_realsense_info(rs, device, "serial_number")
                 name = self._safe_realsense_info(rs, device, "name")
                 product_line = self._safe_realsense_info(rs, device, "product_line")
+                usb_type = self._safe_realsense_info(rs, device, "usb_type_descriptor")
+                physical_port = self._safe_realsense_info(rs, device, "physical_port")
+                asic_serial = self._safe_realsense_info(rs, device, "asic_serial_number")
                 if serial or name:
-                    entries.append({"serial": serial, "name": name, "product_line": product_line})
+                    entry: dict[str, Any] = {
+                        "serial": serial,
+                        "name": name,
+                        "product_line": product_line,
+                        "usb_type": usb_type,
+                        "physical_port": physical_port,
+                        "asic_serial": asic_serial,
+                    }
+                    entry.update(self._realsense_usb_link_metadata(entry))
+                    entries.append(entry)
         except Exception:
             return []
         return entries
@@ -13323,14 +13976,57 @@ print(json.dumps({"ok": True, "key": key_name}))
             return ""
         return ""
 
-    def _scan_live_realsense_camera_entries(self) -> list[dict[str, str]]:
+    def _scan_live_realsense_camera_entries(
+        self,
+        *,
+        sysfs_root: Path | None = None,
+    ) -> list[dict[str, Any]]:
         """Enumerate RealSense devices from the runtime env used by LeRobot."""
+        # The USB descriptor serial exposed through sysfs is not necessarily the
+        # SDK serial accepted by rs.config.enable_device() (notably on D405).
+        # Keep the committed, proven rollout route: runtime identities come from
+        # the RealSense SDK; sysfs is used only to enrich USB link metadata.
         entries = self._scan_realsense_camera_entries()
         if entries:
             return entries
         return self._scan_realsense_camera_entries_via_lerobot_env()
 
-    def _scan_realsense_camera_entries_via_lerobot_env(self) -> list[dict[str, str]]:
+    def _scan_realsense_camera_entries_from_sysfs(self, *, sysfs_root: Path) -> list[dict[str, Any]]:
+        """Read physical RealSense identity/link state without opening a camera SDK context."""
+        if not sysfs_root.is_dir():
+            return []
+        entries: list[dict[str, Any]] = []
+        for device_path in sorted(sysfs_root.iterdir()):
+            if not device_path.is_dir():
+                continue
+            vendor = self._read_sysfs_text(device_path / "idVendor").lower()
+            product_name = self._read_sysfs_text(device_path / "product")
+            if vendor != "8086" or "realsense" not in product_name.lower():
+                continue
+            serial = self._read_sysfs_text(device_path / "serial")
+            configured_identifier = ""
+            product_text = product_name.lower()
+            for camera_key, hints in LEROBOT_REALSENSE_CAMERA_MODEL_HINTS.items():
+                if any(hint in product_text for hint in hints):
+                    configured_identifier = LEROBOT_REALSENSE_DEFAULT_IDENTIFIERS.get(camera_key, "")
+                    break
+            if not serial and not configured_identifier:
+                continue
+            entry: dict[str, Any] = {
+                "serial": serial,
+                "name": product_name,
+                "product_line": "D400" if re.search(r"\b(?:d)?4\d{2}f?\b", product_name, re.IGNORECASE) else "",
+                "usb_type": "",
+                "physical_port": device_path.name,
+                "asic_serial": "",
+            }
+            if not serial:
+                entry["configured_identifier"] = configured_identifier
+            entry.update(self._realsense_usb_link_metadata(entry, sysfs_root=sysfs_root))
+            entries.append(entry)
+        return entries
+
+    def _scan_realsense_camera_entries_via_lerobot_env(self) -> list[dict[str, Any]]:
         script = r"""
 import json
 import pyrealsense2 as rs
@@ -13339,12 +14035,20 @@ entries = []
 ctx = rs.context()
 for device in ctx.query_devices():
     row = {}
-    for key in ("name", "serial_number", "product_line"):
+    key_map = {
+        "name": "name",
+        "serial_number": "serial",
+        "product_line": "product_line",
+        "usb_type_descriptor": "usb_type",
+        "physical_port": "physical_port",
+        "asic_serial_number": "asic_serial",
+    }
+    for key, output_key in key_map.items():
         try:
             info = getattr(rs.camera_info, key)
-            row["serial" if key == "serial_number" else key] = str(device.get_info(info) or "").strip() if device.supports(info) else ""
+            row[output_key] = str(device.get_info(info) or "").strip() if device.supports(info) else ""
         except Exception:
-            row["serial" if key == "serial_number" else key] = ""
+            row[output_key] = ""
     if row.get("serial") or row.get("name"):
         entries.append(row)
 print(json.dumps(entries))
@@ -13382,33 +14086,117 @@ print(json.dumps(entries))
             except Exception:
                 continue
             if isinstance(parsed, list):
-                return [dict(item) for item in parsed if isinstance(item, dict)]
+                entries: list[dict[str, Any]] = []
+                for item in parsed:
+                    if not isinstance(item, dict):
+                        continue
+                    entry = dict(item)
+                    entry.update(self._realsense_usb_link_metadata(entry))
+                    entries.append(entry)
+                return entries
         return []
 
     @classmethod
-    def _realsense_identifier_available(cls, identifier: str, entries: list[dict[str, str]]) -> bool:
+    def _realsense_entry_for_identifier(cls, identifier: str, entries: list[dict[str, Any]]) -> dict[str, Any]:
         needle = cls._device_match_token(identifier)
         if not needle:
-            return False
+            return {}
         for entry in entries:
             values = [
                 str(entry.get("serial") or ""),
+                str(entry.get("configured_identifier") or ""),
                 str(entry.get("name") or ""),
                 str(entry.get("product_line") or ""),
                 f"{entry.get('name') or ''} {entry.get('product_line') or ''}",
             ]
             if any(needle == cls._device_match_token(value) for value in values):
-                return True
-        return False
+                return dict(entry)
+        return {}
 
     @classmethod
-    def _realsense_visible_summary(cls, entries: list[dict[str, str]]) -> str:
+    def _realsense_usb_link_metadata(
+        cls,
+        entry: dict[str, Any],
+        *,
+        sysfs_root: Path = Path("/sys/bus/usb/devices"),
+    ) -> dict[str, Any]:
+        raw_usb_type = str(entry.get("usb_type") or entry.get("usb_type_descriptor") or "").strip()
+        type_match = re.search(r"(\d+(?:\.\d+)?)", raw_usb_type)
+        usb_type = type_match.group(1) if type_match else ""
+        speed = cls._realsense_sysfs_usb_speed_mbps(entry, sysfs_root=sysfs_root)
+        major = int(usb_type.split(".", 1)[0]) if usb_type else 0
+        if speed is None:
+            speed = 5000 if major >= 3 else 480 if major == 2 else 12 if major == 1 else None
+        if not usb_type and speed is not None:
+            usb_type = "3.x" if speed >= 5000 else "2.x" if speed >= 480 else "1.x"
+        if speed is None and not usb_type:
+            return {
+                "usb_type": "",
+                "usb_speed_mbps": None,
+                "usb_link_label": "USB link unknown",
+                "usb_link_status": "unknown",
+            }
+        status = "ok" if speed is not None and speed >= 5000 else "warning"
+        label = f"USB {usb_type}"
+        if speed is not None:
+            label += f" · {speed} Mbps"
+        if status == "warning":
+            label += " · rollout risk"
+        return {
+            "usb_type": usb_type,
+            "usb_speed_mbps": speed,
+            "usb_link_label": label,
+            "usb_link_status": status,
+        }
+
+    @classmethod
+    def _realsense_sysfs_usb_speed_mbps(cls, entry: dict[str, Any], *, sysfs_root: Path) -> int | None:
+        if not sysfs_root.is_dir():
+            return None
+        asic_serial = str(entry.get("asic_serial") or entry.get("asic_serial_number") or "").strip()
+        physical_port = str(entry.get("physical_port") or "").strip()
+        topology_match = re.search(r"(\d+-\d+(?:\.\d+)*)", physical_port)
+        topology = topology_match.group(1) if topology_match else ""
+        for device_path in sorted(sysfs_root.iterdir()):
+            if not device_path.is_dir():
+                continue
+            vendor = cls._read_sysfs_text(device_path / "idVendor").lower()
+            if vendor and vendor != "8086":
+                continue
+            serial = cls._read_sysfs_text(device_path / "serial")
+            serial_match = bool(asic_serial and serial == asic_serial)
+            topology_match_found = bool(topology and device_path.name == topology)
+            if not serial_match and not topology_match_found:
+                continue
+            raw_speed = cls._read_sysfs_text(device_path / "speed")
+            try:
+                return int(round(float(raw_speed)))
+            except (TypeError, ValueError):
+                return None
+        return None
+
+    @staticmethod
+    def _read_sysfs_text(path: Path) -> str:
+        try:
+            return path.read_text(encoding="utf-8").strip()
+        except (OSError, UnicodeError):
+            return ""
+
+    @classmethod
+    def _realsense_identifier_available(cls, identifier: str, entries: list[dict[str, Any]]) -> bool:
+        return bool(cls._realsense_entry_for_identifier(identifier, entries))
+
+    @classmethod
+    def _realsense_visible_summary(cls, entries: list[dict[str, Any]]) -> str:
         visible: list[str] = []
         for entry in entries:
             serial = str(entry.get("serial") or "").strip()
+            configured_identifier = str(entry.get("configured_identifier") or "").strip()
             name = str(entry.get("name") or "").strip()
             if serial:
                 visible.append(serial)
+            elif configured_identifier:
+                visible.append(f"{configured_identifier} ({name})" if name else configured_identifier)
             elif name:
                 visible.append(name)
         return ", ".join(visible) if visible else "none"
@@ -13476,6 +14264,7 @@ print(json.dumps(entries))
         camera_width: int = LEROBOT_DEFAULT_CAMERA_WIDTH,
         camera_height: int = LEROBOT_DEFAULT_CAMERA_HEIGHT,
         raw_port: str = "",
+        camera_metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         data = memory or self._load_device_memory()
         profile_memory = self._profile_device_memory(data, profile_id)
@@ -13516,6 +14305,9 @@ print(json.dumps(entries))
                 device["width"] = _safe_int(camera_width, LEROBOT_DEFAULT_CAMERA_WIDTH, minimum=1)
                 device["height"] = _safe_int(camera_height, LEROBOT_DEFAULT_CAMERA_HEIGHT, minimum=1)
                 device["channel_plan"] = "rgb_plus_depth"
+                link_metadata = camera_metadata or self._realsense_usb_link_metadata({})
+                for field in ("usb_type", "usb_speed_mbps", "usb_link_label", "usb_link_status"):
+                    device[field] = link_metadata.get(field)
             devices = profile_memory.setdefault("devices", {})
             devices.setdefault("cameras", {})[key] = device
             if key == "top":
@@ -13987,7 +14779,7 @@ print(json.dumps(ids))
         try:
             from lerobot.cameras.realsense import RealSenseCamera, RealSenseCameraConfig  # type: ignore[import-not-found]
         except Exception as exc:
-            return {"ok": False, "failure_code": "LEROBOT_REALSENSE_BACKEND_MISSING", "message": f"RealSense backend import failed: {exc}"}
+            return self._live_realsense_camera_capture_via_lerobot_env(camera_device, path, exc)
         try:
             config = RealSenseCameraConfig(
                 serial_number_or_name=identifier,
@@ -14021,6 +14813,129 @@ print(json.dumps(ids))
             "synthetic": False,
             "backend": LEROBOT_REALSENSE_TYPE,
             "use_depth": self._camera_use_depth(camera_device, default=True),
+        }
+
+    def _live_realsense_camera_capture_via_lerobot_env(
+        self,
+        camera_device: dict[str, Any],
+        path: Path,
+        import_error: Exception,
+    ) -> dict[str, Any]:
+        """Capture a RealSense frame from the LeRobot conda env when the app env lacks lerobot."""
+        device = dict(camera_device or {})
+        identifier = str(device.get("serial_number_or_name") or device.get("port") or "").strip()
+        if not identifier:
+            return {"ok": False, "failure_code": "LEROBOT_REALSENSE_IDENTIFIER_REQUIRED", "message": "RealSense serial_number_or_name is required."}
+        payload = {
+            "serial_number_or_name": identifier,
+            "fps": self._camera_fps(device),
+            "width": _safe_int(device.get("width"), LEROBOT_DEFAULT_CAMERA_WIDTH, minimum=1),
+            "height": _safe_int(device.get("height"), LEROBOT_DEFAULT_CAMERA_HEIGHT, minimum=1),
+            "color_format": self._realsense_color_format(identifier=identifier, camera_device=device),
+            "use_depth": self._camera_use_depth(device, default=True),
+            "align_depth_to_color": bool(self.config.realsense_depth_align_to_color),
+            "depth_scale_m_per_unit": self._realsense_depth_scale_m_per_unit(
+                str(device.get("camera_key") or ""),
+                identifier,
+                device,
+            ),
+            "depth_clip_min_mm": float(self.config.realsense_depth_clip_min_mm),
+            "depth_clip_max_mm": float(self.config.realsense_depth_clip_max_mm),
+            "warmup_s": LEROBOT_DEFAULT_REALSENSE_WARMUP_S,
+        }
+        script = """
+import cv2
+import json
+import sys
+
+from lerobot.cameras.realsense import RealSenseCamera, RealSenseCameraConfig
+
+device = json.loads(sys.argv[1])
+output_path = sys.argv[2]
+camera = RealSenseCamera(
+    RealSenseCameraConfig(
+        serial_number_or_name=device["serial_number_or_name"],
+        fps=int(device["fps"]),
+        width=int(device["width"]),
+        height=int(device["height"]),
+        color_format=str(device["color_format"]),
+        use_depth=bool(device["use_depth"]),
+        align_depth_to_color=bool(device["align_depth_to_color"]),
+        depth_scale_m_per_unit=float(device["depth_scale_m_per_unit"]),
+        depth_clip_min_mm=float(device["depth_clip_min_mm"]),
+        depth_clip_max_mm=float(device["depth_clip_max_mm"]),
+        warmup_s=int(device["warmup_s"]),
+    )
+)
+try:
+    camera.connect(warmup=True)
+    frame = camera.read()
+finally:
+    try:
+        camera.disconnect()
+    except Exception:
+        pass
+if frame is None:
+    print(json.dumps({"ok": False, "failure_code": "LEROBOT_REALSENSE_FRAME_FAILED", "message": "RealSense frame is empty"}))
+    sys.exit(3)
+height, width = frame.shape[:2]
+frame_to_write = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR) if len(frame.shape) == 3 and frame.shape[2] >= 3 else frame
+if not cv2.imwrite(output_path, frame_to_write):
+    print(json.dumps({"ok": False, "failure_code": "LEROBOT_CAMERA_WRITE_FAILED", "message": f"Could not write RealSense frame: {output_path}"}))
+    sys.exit(4)
+print(json.dumps({"ok": True, "width": int(width), "height": int(height)}))
+""".strip()
+        command = [
+            self.config.conda_executable,
+            "run",
+            "-n",
+            self.config.conda_env_name,
+            "python",
+            "-c",
+            script,
+            json.dumps(payload, ensure_ascii=True),
+            str(path),
+        ]
+        try:
+            result = subprocess.run(command, cwd=str(self.config.repo_root), text=True, capture_output=True, timeout=60)
+        except Exception as exc:
+            return {
+                "ok": False,
+                "failure_code": "LEROBOT_REALSENSE_BACKEND_MISSING",
+                "message": (
+                    f"RealSense import failed in app env ({import_error.__class__.__name__}: {import_error}) "
+                    f"and conda capture failed: {exc.__class__.__name__}: {exc}"
+                ),
+            }
+        parsed: dict[str, Any] = {}
+        for line in reversed((result.stdout or "").splitlines()):
+            try:
+                value = json.loads(line)
+            except Exception:
+                continue
+            if isinstance(value, dict):
+                parsed = value
+                break
+        if not parsed:
+            return {
+                "ok": False,
+                "failure_code": "LEROBOT_REALSENSE_BACKEND_MISSING",
+                "message": (
+                    f"RealSense import failed in app env ({import_error.__class__.__name__}: {import_error}); "
+                    f"conda capture returncode={result.returncode}; stderr={result.stderr[-1000:]}"
+                ),
+            }
+        if not parsed.get("ok"):
+            return parsed
+        return {
+            "ok": True,
+            "path": str(path),
+            "serve_url": f"/api/lerobot/visualization/file?path={quote(str(path))}",
+            "width": int(parsed.get("width", 0) or 0),
+            "height": int(parsed.get("height", 0) or 0),
+            "synthetic": False,
+            "backend": "conda_lerobot_realsense",
+            "use_depth": self._camera_use_depth(device, default=True),
         }
 
     @staticmethod
@@ -14287,6 +15202,7 @@ finally:
             self.config.fake_dataset_root.resolve(),
             self.config.fake_checkpoint_root.resolve(),
             self.config.session_log_root.resolve(),
+            Path("/tmp/atr_lerobot_latest_frame").resolve(),
         ]
 
     def _is_under_allowed_roots(self, path: Path) -> bool:

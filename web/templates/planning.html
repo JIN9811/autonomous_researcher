@@ -30,8 +30,20 @@ Modification guide:
       /static/planning.js?v=20260613-clean-stl-render-1
       /static/styles.css?v=20260622-utm-rqt-flow-1
       /static/planning.js?v=20260622-utm-rqt-flow-1
+      /static/styles.css?v=20260709-spc-live-thermal-donut-1
+      /static/planning.js?v=20260709-spc-live-thermal-donut-1
+      /static/styles.css?v=20260709-chat-spc-pending-1
+      /static/planning.js?v=20260710-manip-cards-1
+      /static/styles.css?v=20260710-estop-fill-2
+      /static/styles.css?v=20260713-activecam-card-1
+      /static/planning.js?v=20260713-activecam-card-1
+      /static/styles.css?v=20260713-activecam-details-bottom-1
+      /static/planning.js?v=20260713-activecam-details-bottom-1
+      /static/styles.css?v=20260713-vision-pose-hidden-1
+      /static/planning.js?v=20260713-vision-pose-hidden-1
+      /static/planning.js?v=20260714-motion-stability-1
     -->
-    <link rel="stylesheet" href="/static/styles.css?v=20260622-utm-rqt-flow-1" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260715-grasp-attach-1" />
   </head>
   <body class="planning-live-body">
     <main class="planning-runtime-shell" aria-label="ATR Live Runtime GUI">
@@ -67,6 +79,10 @@ Modification guide:
           </section>
           <section class="mission-status-cell mission-status-stop" data-label="CONTROL" title="Emergency runtime control">
             <button id="btn-live-safe-stop" class="btn danger" title="Emergency Stop: force terminate the active runtime" aria-label="Emergency Stop">E-STOP</button>
+            <div id="live-emergency-recovery" class="live-emergency-recovery" hidden aria-label="Emergency stop recovery controls">
+              <button id="btn-live-emergency-resume" class="btn live-emergency-resume" title="Resume from E-STOP latch">Resume</button>
+              <button id="btn-live-emergency-reset" class="btn live-emergency-reset" title="Reset runtime state to fresh-server defaults">Reset</button>
+            </div>
           </section>
         </div>
       </header>
@@ -215,6 +231,7 @@ Modification guide:
 
     <script src="/static/runtime_graph_geometry.js?v=atr-ui-20260531-graph-geometry-3"></script>
     <script src="/static/vendor/echarts.min.js?v=5.6.0"></script>
-    <script src="/static/planning.js?v=20260622-utm-rqt-flow-1" defer></script>
+    <script src="/static/omx_telemetry_viewer.bundle.js?v=20260715-terminal-memory-fix-1" defer></script>
+    <script src="/static/planning.js?v=20260715-report-patch-1" defer></script>
   </body>
 </html>

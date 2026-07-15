@@ -39,6 +39,43 @@ class ManipulationAgent(BaseAgent):
 
     name = "manipulation_agent"
 
+    # Live orchestration consumes the saved Manipulation Agent task profile.  The
+    # experiment spec may contain stale aliases from an earlier run, so every
+    # supported alias must be synchronized at this boundary.
+    AGENT_PROFILE_ALIASES: dict[str, tuple[str, ...]] = {
+        "manipulation_strategy": ("robot_strategy", "policy_execution"),
+        "profile_id": ("lerobot_profile_id", "robot_profile_id"),
+        "observation_pipeline_id": ("lerobot_observation_pipeline_id",),
+        "policy_type": ("lerobot_policy_type",),
+        "policy_path": ("lerobot_policy_path",),
+        "policy_checkpoint_path": ("lerobot_policy_checkpoint_path",),
+        "policy_repo_id": ("lerobot_policy_repo_id",),
+        "dataset_root": ("lerobot_dataset_root",),
+        "dataset_repo_id": ("lerobot_rollout_dataset_repo_id", "rollout_dataset_repo_id"),
+        "policy_backend": ("lerobot_policy_backend",),
+        "device": ("lerobot_device",),
+        "fps": (),
+        "camera_fps": (),
+        "camera_enabled": ("lerobot_camera_enabled",),
+        "display_data": ("lerobot_display_data",),
+        "task_instruction": ("manipulation_task",),
+        "source_location": (),
+        "target_location": (),
+        "continuous_rollout": ("lerobot_continuous_rollout",),
+        "rollout_action_clamp": ("lerobot_rollout_action_clamp",),
+        "rollout_max_relative_target": ("lerobot_rollout_max_relative_target",),
+        "rollout_shoulder_lift_backstop": ("lerobot_rollout_shoulder_lift_backstop",),
+        "rollout_temporal_ensemble": ("lerobot_rollout_temporal_ensemble",),
+        "rollout_temporal_ensemble_coeff": ("lerobot_rollout_temporal_ensemble_coeff",),
+        "rollout_inference_type": ("lerobot_rollout_inference_type",),
+        "rollout_rtc_execution_horizon": ("lerobot_rollout_rtc_execution_horizon",),
+        "rollout_rtc_max_guidance_weight": ("lerobot_rollout_rtc_max_guidance_weight",),
+        "rollout_action_queue_size_to_get_new_actions": (
+            "lerobot_rollout_action_queue_size_to_get_new_actions",
+        ),
+        "max_duration_s": (),
+    }
+
     TASKS: dict[str, dict[str, Any]] = {
         "transfer_to_utm": {
             "task_sequence_index": 1,
@@ -46,7 +83,7 @@ class ManipulationAgent(BaseAgent):
             "source_location": "3dp_output_area",
             "target_location": "utm_fixture",
             "terminal_pose": "standby_clear_of_utm",
-            "verified_handoff": "ready_for_equipment_agent",
+            "verified_handoff": "ready_for_equipment",
             "verification_signal": "specimen_on_utm_platen",
             "recommended_next_if_unverified": "vision_agent",
             "recommended_next_if_verified": "lab_equipment_agent",
@@ -92,13 +129,64 @@ class ManipulationAgent(BaseAgent):
     def _now_iso() -> str:
         return datetime.now(timezone.utc).isoformat()
 
-    @staticmethod
-    def _spec(state: OrchestratorState) -> dict[str, Any]:
+    def _spec(self, state: OrchestratorState) -> dict[str, Any]:
         saved = load_manipulation_agent_profile()
         spec = state.current_experiment_spec if isinstance(state.current_experiment_spec, dict) else {}
+        direct_bridge = (
+            isinstance(state.run_metadata, dict)
+            and str(state.run_metadata.get("source") or "") == "lerobot_gui_manipulation_bridge"
+        )
+        equipment = state.run_metadata.get("equipment_result") if isinstance(state.run_metadata, dict) else {}
+        equipment_complete = isinstance(equipment, dict) and str(equipment.get("status") or "").lower() in {
+            "complete",
+            "completed",
+            "done",
+            "success",
+        }
+        requested_task_id = (
+            "clear_utm_to_disposal"
+            if equipment_complete and not direct_bridge
+            else self._task_id(state, spec)
+        )
+        task_profiles = saved.get("task_profiles") if isinstance(saved.get("task_profiles"), dict) else {}
+        task_profile = task_profiles.get(requested_task_id) if isinstance(task_profiles, dict) else None
         merged = dict(saved)
+        if isinstance(task_profile, dict):
+            merged.update(task_profile)
         merged.update({key: value for key, value in spec.items() if value not in (None, "")})
-        merged["__explicit_keys"] = set(spec.keys())
+
+        saved_profile_authoritative = state.mode == Mode.LIVE or self._physical_printer_tail_requested(state)
+        if direct_bridge or not saved_profile_authoritative:
+            merged["__explicit_keys"] = set(spec.keys())
+            merged["__configuration_source"] = (
+                "direct_manipulation_bridge_request" if direct_bridge else "explicit_test_or_replay_spec"
+            )
+            return merged
+
+        authoritative = dict(saved)
+        if isinstance(task_profile, dict):
+            authoritative.update(task_profile)
+        explicit_keys = set(spec.keys())
+        for canonical, aliases in self.AGENT_PROFILE_ALIASES.items():
+            value = authoritative.get(canonical)
+            merged[canonical] = value
+            # Vision-derived physical pickup context remains dynamic even though
+            # the saved task profile provides logical source/target defaults.
+            if canonical not in {"source_location", "target_location"}:
+                explicit_keys.add(canonical)
+            for alias in aliases:
+                merged[alias] = value
+                if canonical not in {"source_location", "target_location"}:
+                    explicit_keys.add(alias)
+
+        # Task selection belongs to the graph/runtime; task execution settings
+        # belong to the matching saved task profile.
+        merged["task_id"] = requested_task_id
+        merged["skill_id"] = requested_task_id
+        merged["manipulation_task_id"] = requested_task_id
+        explicit_keys.update({"task_id", "skill_id", "manipulation_task_id"})
+        merged["__explicit_keys"] = explicit_keys
+        merged["__configuration_source"] = "saved_manipulation_task_profile"
         return merged
 
     @staticmethod
@@ -115,6 +203,71 @@ class ManipulationAgent(BaseAgent):
         if specimen.get("ok") is False:
             return False
         return str(specimen.get("handoff_status") or "").strip().lower() in {"ready", "complete", "completed", ""}
+
+    @staticmethod
+    def _physical_printer_tail_requested(state: OrchestratorState) -> bool:
+        """Test-mode installed-printer paths still require the real robot tail."""
+        if state.mode != Mode.TEST or not isinstance(state.run_metadata, dict):
+            return False
+        metadata = state.run_metadata
+        fabricated = metadata.get("specimen_fabricated") if isinstance(metadata.get("specimen_fabricated"), dict) else {}
+        summary = fabricated.get("fabrication_summary") if isinstance(fabricated.get("fabrication_summary"), dict) else {}
+        report = metadata.get("fabrication_report") if isinstance(metadata.get("fabrication_report"), dict) else {}
+        intent = report.get("fabrication_intent") if isinstance(report.get("fabrication_intent"), dict) else {}
+        spc = report.get("spc_readiness") if isinstance(report.get("spc_readiness"), dict) else {}
+        printer_profile = report.get("printer_profile") if isinstance(report.get("printer_profile"), dict) else {}
+        printer_status = report.get("printer_status") if isinstance(report.get("printer_status"), dict) else {}
+        specimen = metadata.get("specimen_result") if isinstance(metadata.get("specimen_result"), dict) else {}
+
+        path_values = {
+            str(value or "").strip().lower()
+            for value in (
+                summary.get("printer_path"),
+                intent.get("printer_path"),
+                printer_profile.get("printer_path"),
+                printer_status.get("path"),
+                printer_status.get("printer_path"),
+                specimen.get("printer_path"),
+            )
+            if str(value or "").strip()
+        }
+        physical_paths = {
+            "installed_printer",
+            "physical_print",
+            "actual_print",
+            "test_printer_live",
+            "test_printer_physical_print",
+            "bambulab_x2d",
+        }
+        if not (path_values & physical_paths):
+            return False
+
+        physical_intent = any(
+            bool(value)
+            for value in (
+                summary.get("physical_intent"),
+                intent.get("physical_intent"),
+                printer_profile.get("physical_intent"),
+                specimen.get("physical_intent"),
+            )
+        )
+        if not physical_intent:
+            return False
+
+        gate_state = str(
+            spc.get("preprint_gate_state")
+            or (spc.get("preprint_gate") or {}).get("state")
+            or printer_status.get("preprint_gate_state")
+            or ""
+        ).strip().lower()
+        if gate_state in {
+            "blocked",
+            "failed",
+            "connection_info_required",
+            "operator_selection_required",
+        }:
+            return False
+        return True
 
     @staticmethod
     def _canonical_policy_type(value: Any) -> str:
@@ -285,6 +438,7 @@ class ManipulationAgent(BaseAgent):
 
     def _lerobot_payload(self, state: OrchestratorState, protocol_note: str, strategy: str) -> dict[str, Any]:
         spec = self._spec(state)
+        physical_printer_tail = self._physical_printer_tail_requested(state)
         task_id = self._task_id(state, spec)
         task_def = self._task_definition(task_id)
         specimen = self._specimen_result(state)
@@ -314,7 +468,7 @@ class ManipulationAgent(BaseAgent):
                 "policy_repo_id",
             )
         )
-        if state.mode == Mode.TEST and not explicit_policy:
+        if state.mode == Mode.TEST and not explicit_policy and not physical_printer_tail:
             policy_path = ""
             policy_checkpoint_path = ""
             policy_repo_id = ""
@@ -333,9 +487,10 @@ class ManipulationAgent(BaseAgent):
         if not any(spec.get(key) for key in ("manipulation_task", "task_instruction")):
             task_instruction = self._canonical_instruction(task_id=task_id, specimen_id=specimen_id, source=source, target=target)
         episode_s = self._safe_float(spec.get("lerobot_rollout_episode_s") or spec.get("rollout_episode_s"), 30.0 if is_pi05 else 5.0)
+        runtime_mode = "live" if state.mode == Mode.LIVE or physical_printer_tail else state.mode.value
         return {
             "mode": state.mode.value,
-            "runtime_mode": state.mode.value,
+            "runtime_mode": runtime_mode,
             "profile_id": profile_id,
             "session_id": str(spec.get("lerobot_session_id") or f"rollout-{state.run_id}-{task_id}"),
             "task_id": task_id,
@@ -398,7 +553,7 @@ class ManipulationAgent(BaseAgent):
                 spec,
                 "confirm_live_execute",
                 "confirm_manipulation_execute",
-                default=state.mode == Mode.LIVE,
+                default=state.mode == Mode.LIVE or physical_printer_tail,
             ),
             "observation": vision_observation,
             "pickup_pose": pickup_pose,
@@ -407,7 +562,8 @@ class ManipulationAgent(BaseAgent):
             "source_location": source,
             "target_location": target,
             "terminal_pose": str(task_def.get("terminal_pose") or "standby_clear_of_utm"),
-            "dry_run": state.mode != Mode.LIVE,
+            "dry_run": runtime_mode != "live",
+            "physical_printer_tail": physical_printer_tail,
             "protocol_note": protocol_note,
         }
 
@@ -436,6 +592,84 @@ class ManipulationAgent(BaseAgent):
             )
         return signals
 
+    @staticmethod
+    def _vision_completion_signal(observation: dict[str, Any]) -> dict[str, Any]:
+        candidates: list[Any] = [
+            observation.get("vision_manipulation_completion"),
+            observation.get("manipulation_completion"),
+            observation.get("completion_signal"),
+        ]
+        vision_signal = observation.get("vision_signal") if isinstance(observation.get("vision_signal"), dict) else {}
+        candidates.append(vision_signal)
+        raw_signals = observation.get("agent_signals") if isinstance(observation.get("agent_signals"), list) else []
+        if isinstance(vision_signal.get("signals"), list):
+            raw_signals = raw_signals + [item for item in vision_signal["signals"] if isinstance(item, dict)]
+        candidates.extend(raw_signals)
+        for candidate in candidates:
+            if not isinstance(candidate, dict):
+                continue
+            schema = str(candidate.get("schema") or "").strip()
+            signal_name = str(candidate.get("signal") or candidate.get("type") or "").strip()
+            if schema != "vision_manipulation_completion.v1" and signal_name != "vision_manipulation_completion":
+                continue
+            detected = bool(candidate.get("detected") or candidate.get("value"))
+            ready_to_stop = bool(candidate.get("ready_to_stop_rollout", detected))
+            normalized = dict(candidate)
+            normalized["schema"] = "vision_manipulation_completion.v1"
+            normalized["detected"] = detected
+            normalized["ready_to_stop_rollout"] = ready_to_stop
+            normalized["status"] = "detected" if detected and ready_to_stop else "waiting"
+            return normalized
+        return {
+            "schema": "vision_manipulation_completion.v1",
+            "detected": False,
+            "ready_to_stop_rollout": False,
+            "status": "waiting",
+        }
+
+    @staticmethod
+    def _post_place_interlock(response: dict[str, Any]) -> dict[str, Any]:
+        raw = response.get("post_place_interlock") if isinstance(response.get("post_place_interlock"), dict) else {}
+        return {
+            "schema": "post_place_interlock.v1",
+            "session_id": str(raw.get("session_id") or response.get("session_id") or ""),
+            "ungrasping_seen": bool(raw.get("ungrasping_seen")),
+            "ungrasping_sequence": raw.get("ungrasping_sequence"),
+            "measured_base_state": str(raw.get("measured_base_state") or "unknown"),
+            "measured_gripper_state": str(raw.get("measured_gripper_state") or "idle"),
+            "home_gate_passed": bool(raw.get("home_gate_passed")),
+            "home_after_ungrasping": bool(raw.get("home_after_ungrasping")),
+            "ready_for_utm_snapshot": bool(raw.get("ready_for_utm_snapshot")),
+            "latest_sequence": raw.get("latest_sequence"),
+        }
+
+    def _completion_signal_identity(
+        self,
+        *,
+        state: OrchestratorState,
+        response: dict[str, Any],
+        completion: dict[str, Any],
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        expected = {
+            "run_id": str(state.run_id or ""),
+            "session_id": str(response.get("session_id") or ""),
+            "specimen_id": str((payload.get("specimen") or {}).get("specimen_id") or ""),
+        }
+        received = {key: str(completion.get(key) or "") for key in expected}
+        mismatches = [
+            f"{key}_mismatch"
+            for key in expected
+            if expected[key] and received[key] and expected[key] != received[key]
+        ]
+        return {
+            "schema": "vision_completion_identity_check.v1",
+            "valid": not mismatches,
+            "expected": expected,
+            "received": received,
+            "mismatches": mismatches,
+        }
+
     def _vision_context(self, state: OrchestratorState, freshness: dict[str, Any]) -> dict[str, Any]:
         observation = self._vision_observation(state)
         raw = observation.get("raw") if isinstance(observation.get("raw"), dict) else {}
@@ -443,11 +677,14 @@ class ManipulationAgent(BaseAgent):
         pickup = signals.get("pickup_ready", {}) if isinstance(signals.get("pickup_ready"), dict) else {}
         fixture = signals.get("specimen_on_utm_platen", {}) if isinstance(signals.get("specimen_on_utm_platen"), dict) else {}
         anomaly = signals.get("anomaly_detected", {}) if isinstance(signals.get("anomaly_detected"), dict) else {}
+        completion_signal = self._vision_completion_signal(raw)
         return {
             "observation_id": observation.get("observation_id", ""),
             "camera": observation.get("camera", ""),
             "pickup_target_ready": bool(pickup.get("value", observation.get("transfer_readiness", {}).get("ready", False))),
             "fixture_visible": bool(fixture.get("value", False)),
+            "completion_status": completion_signal.get("status", "waiting"),
+            "manipulation_completion": completion_signal,
             "anomaly": bool(raw.get("anomaly", False) or anomaly.get("value", False)),
             "signals": signals,
             "freshness": freshness,
@@ -466,7 +703,7 @@ class ManipulationAgent(BaseAgent):
         readiness = vision_context.get("transfer_readiness") if isinstance(vision_context.get("transfer_readiness"), dict) else {}
         if strategy in {"lerobot_policy", "pi05_lerobot_policy"}:
             if readiness.get("camera_returned_to_vla") is False:
-                blocking.append("d455f_not_returned_to_vla")
+                blocking.append("active_camera_not_returned_to_vla")
             if readiness.get("vla_camera_precheck_ok") is False:
                 blocking.append("vla_camera_precheck_failed")
         requires_specimen = strategy == "pi05_lerobot_policy" and payload.get("task_id") == "transfer_to_utm"
@@ -510,6 +747,220 @@ class ManipulationAgent(BaseAgent):
     async def _call_tool(self, ctx: AgentContext, tool: str, payload: dict[str, Any]) -> dict[str, Any]:
         return await asyncio.to_thread(ctx.tools.call, tool, payload)
 
+    @staticmethod
+    def _rollout_execution_evidence(response: dict[str, Any]) -> dict[str, Any]:
+        runtime = response.get("runtime") if isinstance(response.get("runtime"), dict) else {}
+        tool = str(response.get("tool") or "").strip().lower()
+        workflow = str(response.get("workflow") or "").strip().lower()
+        required = workflow == "rollout" or tool.startswith("lerobot.rollout.")
+        phase = str(response.get("runtime_phase") or runtime.get("phase") or "").strip().upper()
+        raw_count = response.get("action_count", runtime.get("action_count", 0))
+        try:
+            action_count = max(0, int(raw_count or 0))
+        except (TypeError, ValueError):
+            action_count = 0
+        observed = bool(not required or (phase == "ACTION_ACTIVE" and action_count > 0))
+        return {
+            "schema": "rollout_execution_evidence.v1",
+            "required": required,
+            "observed": observed,
+            "runtime_phase": phase or "UNKNOWN",
+            "action_count": action_count,
+            "session_id": str(response.get("session_id") or ""),
+        }
+
+    async def _refresh_existing_rollout_status(
+        self,
+        *,
+        state: OrchestratorState,
+        ctx: AgentContext,
+        payload: dict[str, Any],
+        response: dict[str, Any],
+    ) -> dict[str, Any]:
+        merged = dict(response)
+        if "lerobot.rollout.status" not in set(ctx.tools.list_tools()):
+            merged["rollout_status_refresh"] = {
+                "ok": False,
+                "failure_code": "ROLLOUT_STATUS_TOOL_NOT_REGISTERED",
+            }
+            merged["execution_evidence"] = self._rollout_execution_evidence(merged)
+            return merged
+
+        status_payload = {
+            "mode": state.mode.value,
+            "runtime_mode": str(payload.get("runtime_mode") or state.mode.value),
+            "profile_id": str(response.get("profile_id") or payload.get("profile_id") or ""),
+            "session_id": str(response.get("session_id") or ""),
+        }
+        try:
+            status_response = await self._call_tool(ctx, "lerobot.rollout.status", status_payload)
+        except Exception as exc:
+            merged["rollout_status_refresh"] = {
+                "ok": False,
+                "failure_code": "ROLLOUT_STATUS_REFRESH_FAILED",
+                "message": f"{exc.__class__.__name__}: {exc}",
+            }
+            merged["execution_evidence"] = self._rollout_execution_evidence(merged)
+            return merged
+
+        status_response = dict(status_response)
+        merged.update(status_response)
+        merged["strategy"] = response.get("strategy", merged.get("strategy", ""))
+        merged["transfer_task"] = response.get("transfer_task", merged.get("transfer_task", {}))
+        merged["grasp_score"] = response.get("grasp_score", merged.get("grasp_score", 0.0))
+        merged["reused_active_rollout"] = True
+        merged["completion_pass"] = bool(response.get("completion_pass"))
+        merged["rollout_status_refresh"] = status_response
+        merged["execution_evidence"] = self._rollout_execution_evidence(merged)
+        return merged
+
+    async def _stop_rollout_for_completion(
+        self,
+        *,
+        state: OrchestratorState,
+        ctx: AgentContext,
+        payload: dict[str, Any],
+        response: dict[str, Any],
+        vision_context: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        completion = vision_context.get("manipulation_completion") if isinstance(vision_context.get("manipulation_completion"), dict) else {}
+        if not (completion.get("detected") and completion.get("ready_to_stop_rollout")):
+            return None
+        identity = self._completion_signal_identity(
+            state=state,
+            response=response,
+            completion=completion,
+            payload=payload,
+        )
+        response["completion_signal_identity"] = identity
+        if not identity.get("valid"):
+            return None
+        interlock = self._post_place_interlock(response)
+        response["post_place_interlock"] = interlock
+        if not interlock.get("ready_for_utm_snapshot"):
+            return None
+        execution = self._rollout_execution_evidence(response)
+        response["execution_evidence"] = execution
+        if execution.get("required") and not execution.get("observed"):
+            return None
+        if "lerobot.rollout.stop" not in set(ctx.tools.list_tools()):
+            return {
+                "ok": False,
+                "tool": "lerobot.rollout.stop",
+                "status": "FAILED",
+                "failure_code": "STOP_FAILED",
+                "message": "lerobot.rollout.stop tool is not registered.",
+                "log_tail": "",
+                "step_trace": [{"step": "STOP_FAILED", "status": "failed", "detail": "tool_not_registered"}],
+            }
+        stop_payload = {
+            "mode": state.mode.value,
+            "runtime_mode": str(payload.get("runtime_mode") or state.mode.value),
+            "profile_id": payload.get("profile_id", response.get("profile_id", "")),
+            "session_id": response.get("session_id", ""),
+            "reason": "vision_manipulation_completion",
+            "completion_signal": completion,
+        }
+        callback = self._tool_event_callback(state, ctx)
+        if callback:
+            stop_payload["_event_callback"] = callback
+        return await self._call_tool(ctx, "lerobot.rollout.stop", stop_payload)
+
+    def _existing_rollout_response_for_completion(
+        self,
+        *,
+        state: OrchestratorState,
+        payload: dict[str, Any],
+        strategy: str,
+        task_id: str,
+        vision_context: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        completion = vision_context.get("manipulation_completion") if isinstance(vision_context.get("manipulation_completion"), dict) else {}
+        completion_ready = bool(completion.get("detected") and completion.get("ready_to_stop_rollout"))
+        metadata = state.run_metadata if isinstance(state.run_metadata, dict) else {}
+        previous = metadata.get("manipulation_result") if isinstance(metadata.get("manipulation_result"), dict) else {}
+        robot_task = metadata.get("robot_task_result") if isinstance(metadata.get("robot_task_result"), dict) else {}
+        session_id = str(
+            previous.get("session_id")
+            or robot_task.get("rollout_session_id")
+            or robot_task.get("episode_id")
+            or completion.get("session_id")
+            or ""
+        ).strip()
+        if not session_id:
+            return None
+        previous_status = str(previous.get("status") or "").strip().upper()
+        if not completion_ready and previous_status not in {"ACTIVE", "POLICY_ACTIVE", "RUNNING", "STOPPING"}:
+            return None
+        response = dict(previous)
+        response.update(
+            {
+                "ok": bool(previous.get("ok", True)),
+                "tool": str(previous.get("tool") or "lerobot.rollout.start"),
+                "status": str(previous.get("status") or "ACTIVE"),
+                "session_id": session_id,
+                "profile_id": str(previous.get("profile_id") or payload.get("profile_id") or ""),
+                "workflow": str(previous.get("workflow") or "rollout"),
+                "strategy": strategy,
+                "completion_pass": completion_ready,
+                "reused_active_rollout": True,
+                "transfer_task": {
+                    "task_id": task_id,
+                    "source": payload["source_location"],
+                    "target": payload["target_location"],
+                    "task_instruction": payload["task_instruction"],
+                    "policy_type": payload["policy_type"],
+                    "policy_backend": payload["policy_backend"],
+                    "specimen_id": payload.get("specimen", {}).get("specimen_id", ""),
+                    "terminal_pose": payload.get("terminal_pose", "standby_clear_of_utm"),
+                },
+                "grasp_score": float(previous.get("grasp_score", 0.86)),
+            }
+        )
+        identity = self._completion_signal_identity(
+            state=state,
+            response=response,
+            completion=completion,
+            payload=payload,
+        )
+        response["completion_signal_identity"] = identity
+        response["completion_pass"] = bool(completion_ready and identity.get("valid"))
+        return response
+
+    @staticmethod
+    def _merge_completion_stop_result(response: dict[str, Any], stop_response: dict[str, Any] | None) -> None:
+        if stop_response is None:
+            response["stop_rollout_on_completion"] = False
+            response["stop_confirmed"] = False
+            return
+        response["stop_rollout_on_completion"] = True
+        response["rollout_stop"] = dict(stop_response)
+        for key in ("port_lease", "active_camera_lease", "policy_runtime", "rerun_telemetry"):
+            if isinstance(stop_response.get(key), dict):
+                response[key] = dict(stop_response[key])
+        stop_status = str(stop_response.get("status") or "").strip().upper()
+        if stop_response.get("ok") and stop_status == "STOPPED":
+            response["stop_status"] = "STOPPED"
+            response["stop_confirmed"] = True
+            if response.get("completion_pass"):
+                response["tool"] = "lerobot.rollout.stop"
+                response["status"] = "STOPPED"
+            return
+        if stop_response.get("ok"):
+            response["stop_status"] = stop_status or "STOPPING"
+            response["stop_confirmed"] = False
+            response["completion_pass"] = False
+            response["status"] = response["stop_status"]
+            response["message"] = str(stop_response.get("message") or "rollout stop is not yet confirmed")
+            return
+        response["ok"] = False
+        response["status"] = "STOP_FAILED"
+        response["failure_code"] = "STOP_FAILED"
+        response["message"] = str(stop_response.get("message") or stop_response.get("error") or "rollout stop failed")
+        response["log_tail"] = str(stop_response.get("log_tail") or response.get("log_tail") or "")
+        response["stop_status"] = "STOP_FAILED"
+        response["stop_confirmed"] = False
+
     def _tool_event_callback(self, state: OrchestratorState, ctx: AgentContext):
         callback = getattr(ctx, "on_tool_event", None)
         if not callable(callback):
@@ -532,6 +983,54 @@ class ManipulationAgent(BaseAgent):
 
     def _verification_status(self, task_id: str, vision_context: dict[str, Any], response: dict[str, Any]) -> dict[str, Any]:
         task_def = self._task_definition(task_id)
+        completion = vision_context.get("manipulation_completion") if isinstance(vision_context.get("manipulation_completion"), dict) else {}
+        if completion.get("detected") and completion.get("ready_to_stop_rollout"):
+            identity = response.get("completion_signal_identity") if isinstance(response.get("completion_signal_identity"), dict) else {}
+            if identity and not identity.get("valid"):
+                return {
+                    "verified": False,
+                    "verification_signal": "vision_manipulation_completion",
+                    "status": "waiting",
+                    "reason": "completion_signal_identity_mismatch",
+                    "signal": completion,
+                    "identity": identity,
+                }
+            interlock = self._post_place_interlock(response)
+            if not interlock.get("ready_for_utm_snapshot"):
+                return {
+                    "verified": False,
+                    "verification_signal": "post_place_interlock",
+                    "status": "executing",
+                    "reason": "measured_ungrasping_then_stable_home_required",
+                    "signal": completion,
+                    "post_place_interlock": interlock,
+                }
+            execution = self._rollout_execution_evidence(response)
+            if execution.get("required") and not execution.get("observed"):
+                return {
+                    "verified": False,
+                    "verification_signal": "rollout_execution_evidence",
+                    "status": "executing",
+                    "reason": "rollout_action_evidence_required",
+                    "signal": completion,
+                    "execution_evidence": execution,
+                }
+            stop_confirmed = bool(response.get("stop_confirmed")) and str(response.get("stop_status") or "").upper() == "STOPPED"
+            if not stop_confirmed:
+                return {
+                    "verified": False,
+                    "verification_signal": "vision_manipulation_completion",
+                    "status": "stopping",
+                    "reason": "rollout_stop_not_confirmed",
+                    "signal": completion,
+                }
+            return {
+                "verified": True,
+                "verification_signal": "vision_manipulation_completion",
+                "status": "verified",
+                "reason": "vision_manipulation_completion_detected",
+                "signal": completion,
+            }
         signal_name = str(task_def.get("verification_signal") or "")
         signals = vision_context.get("signals") if isinstance(vision_context.get("signals"), dict) else {}
         signal = signals.get(signal_name) if isinstance(signals.get(signal_name), dict) else {}
@@ -645,9 +1144,18 @@ class ManipulationAgent(BaseAgent):
             reason = str(verification.get("reason") or "vision_verified")
         else:
             handoff = "needs_post_place_vision" if task_id == "transfer_to_utm" else "needs_post_disposal_vision"
-            completion = "reported_complete"
+            interlock = self._post_place_interlock(response)
+            completion = (
+                "reported_complete"
+                if task_id != "transfer_to_utm" or interlock.get("ready_for_utm_snapshot")
+                else "awaiting_post_place_home"
+            )
             next_agent = str(task_def.get("recommended_next_if_unverified") or "vision_agent")
-            reason = str(verification.get("reason") or "vision_verification_required")
+            reason = (
+                str(verification.get("reason") or "vision_verification_required")
+                if completion == "reported_complete"
+                else "measured_ungrasping_then_stable_home_required"
+            )
         return {
             "handoff_status": handoff,
             "completion_status": completion,
@@ -680,6 +1188,7 @@ class ManipulationAgent(BaseAgent):
         decisions: list[dict[str, Any]],
     ) -> dict[str, Any]:
         status = "ready" if decision.get("completion_status") == "verified_complete" else "warning" if response.get("ok") else "blocked"
+        requested_next_stage = "vision" if decision.get("recommended_next_agent") == "vision_agent" else ""
         return {
             "schema": "robot_task_result.v1",
             "run_id": state.run_id,
@@ -703,10 +1212,122 @@ class ManipulationAgent(BaseAgent):
             "evidence_refs": evidence_refs,
             "pickup_pose": payload.get("pickup_pose", {}),
             "pickup_target": payload.get("pickup_target", {}),
+            "post_place_interlock": self._post_place_interlock(response),
+            "completion_signal_identity": (
+                dict(response.get("completion_signal_identity"))
+                if isinstance(response.get("completion_signal_identity"), dict)
+                else {}
+            ),
+            "stop_rollout_on_completion": bool(response.get("stop_rollout_on_completion")),
+            "rollout_stop": response.get("rollout_stop", {}),
             "guardian_status": "warn" if decision.get("recommended_next_agent") == "guardian_agent" else "not_checked",
             "decisions": decisions,
             "warnings": list(preflight.get("warnings") or []) + list(preflight.get("blocking_reasons") or []),
             "next_action": decision.get("recommended_next_agent", ""),
+            "requested_next_stage": requested_next_stage,
+        }
+
+    @staticmethod
+    def _first_dict(*items: Any) -> dict[str, Any]:
+        for item in items:
+            if isinstance(item, dict):
+                return dict(item)
+        return {}
+
+    @staticmethod
+    def _command_preview_option(response: dict[str, Any], option: str) -> str:
+        prefix = f"{option}="
+        for item in response.get("command_preview", []) or []:
+            text = str(item)
+            if text.startswith(prefix):
+                return text[len(prefix) :]
+        return ""
+
+    def _runtime_contract_blocks(
+        self,
+        *,
+        payload: dict[str, Any],
+        response: dict[str, Any],
+        preflight: dict[str, Any],
+        vision_context: dict[str, Any],
+    ) -> dict[str, dict[str, Any]]:
+        port_lease = self._first_dict(response.get("port_lease"))
+        if not port_lease:
+            follower_port = self._command_preview_option(response, "--robot.port")
+            leader_port = self._command_preview_option(response, "--teleop.port")
+            port_lease = {
+                "schema": "atr.lerobot.port_lease.v1",
+                "status": "ready" if follower_port or leader_port else "unknown",
+                "profile_id": payload.get("profile_id", preflight.get("profile_id", "")),
+                "workflow": response.get("workflow", "rollout"),
+                "follower_port": follower_port,
+                "leader_port": leader_port,
+                "current_availability": "unknown",
+                "occupant_process": "",
+                "reclaim_status": "not_attempted",
+            }
+
+        active_camera_lease = self._first_dict(response.get("active_camera_lease"), response.get("active_robot_cam"))
+        readiness = vision_context.get("transfer_readiness") if isinstance(vision_context.get("transfer_readiness"), dict) else {}
+        if not active_camera_lease:
+            conflict_reason = "vla_camera_precheck_failed" if readiness.get("vla_camera_precheck_ok") is False else ""
+            active_camera_lease = {
+                "schema": "atr.lerobot.active_camera_lease.v1",
+                "status": "blocked" if conflict_reason else "ready" if preflight.get("camera_ready") else "unknown",
+                "owner": "rollout" if response.get("workflow") == "rollout" else "idle",
+                "camera_key": vision_context.get("camera", ""),
+                "physical_path": "",
+                "serial": "",
+                "returned_to_vla": bool(readiness.get("camera_returned_to_vla", True)),
+                "conflict_reason": conflict_reason,
+            }
+        active_camera_lease.setdefault("returned_to_vla", bool(readiness.get("camera_returned_to_vla", True)))
+
+        policy_runtime = self._first_dict(response.get("policy_runtime"))
+        runtime = response.get("runtime") if isinstance(response.get("runtime"), dict) else {}
+        if not policy_runtime:
+            policy_runtime = {
+                "schema": "atr.lerobot.policy_runtime.v1",
+                "policy_type": payload.get("policy_type", ""),
+                "policy_ref": payload.get("policy_path") or payload.get("policy_checkpoint_path") or payload.get("policy_repo_id") or response.get("checkpoint_path", ""),
+                "inference_type": payload.get("rollout_inference_type", ""),
+                "session_id": response.get("session_id", ""),
+                "pid": response.get("pid"),
+                "status": response.get("status", ""),
+                "phase": runtime.get("phase"),
+                "message": runtime.get("message"),
+                "action_count": runtime.get("action_count", response.get("action_count", 0)),
+                "max_abs_delta": runtime.get("max_abs_delta", response.get("max_abs_delta")),
+                "action_rate_hz": runtime.get("action_rate_hz"),
+                "latency_ms": runtime.get("latency_ms"),
+                "warnings": list(runtime.get("warnings") or []),
+                "log_path": response.get("log_path", ""),
+                "fatal_marker": str(runtime.get("phase") or "").upper() == "FAILED" or response.get("status") == "FAILED",
+            }
+        policy_runtime.setdefault("policy_type", payload.get("policy_type", ""))
+        policy_runtime.setdefault("session_id", response.get("session_id", ""))
+
+        rerun_telemetry = self._first_dict(response.get("rerun_telemetry"))
+        visualization = response.get("visualization") if isinstance(response.get("visualization"), dict) else {}
+        if not rerun_telemetry:
+            viewer_url = str(visualization.get("viewer_url") or visualization.get("rerun_web_url") or "").strip()
+            rerun_telemetry = {
+                "schema": "atr.lerobot.rerun_telemetry.v1",
+                "status": "available" if viewer_url else "waiting" if visualization else "disabled",
+                "viewer_pid": visualization.get("pid"),
+                "viewer_url": visualization.get("viewer_url", ""),
+                "rerun_web_url": visualization.get("rerun_web_url", ""),
+                "rerun_ws_url": visualization.get("rerun_ws_url", ""),
+                "rrd_path": visualization.get("rrd_path") or visualization.get("output_path", ""),
+                "stream_keys": list(visualization.get("stream_keys") or []),
+                "latest_frame_artifact": visualization.get("latest_frame_artifact", ""),
+            }
+
+        return {
+            "port_lease": port_lease,
+            "active_camera_lease": active_camera_lease,
+            "policy_runtime": policy_runtime,
+            "rerun_telemetry": rerun_telemetry,
         }
 
     def _manipulation_report(
@@ -726,6 +1347,7 @@ class ManipulationAgent(BaseAgent):
     ) -> dict[str, Any]:
         task_def = self._task_definition(task_id)
         policy_ref = payload.get("policy_path") or payload.get("policy_checkpoint_path") or payload.get("policy_repo_id") or ""
+        runtime_contract = self._runtime_contract_blocks(payload=payload, response=response, preflight=preflight, vision_context=vision_context)
         return {
             "schema": "manipulation_report.v1",
             "report_version": "manipulation_pi05_sarm_v1",
@@ -771,8 +1393,17 @@ class ManipulationAgent(BaseAgent):
                 "step_trace": response.get("step_trace", []),
                 "events": response.get("events", []),
                 "session_id": response.get("session_id", ""),
+                "log_tail": response.get("log_tail", ""),
+                "policy_runtime": runtime_contract["policy_runtime"],
+                "rerun_telemetry": runtime_contract["rerun_telemetry"],
             },
+            "rollout_stop": response.get("rollout_stop", {}),
+            "port_lease": runtime_contract["port_lease"],
+            "active_camera_lease": runtime_contract["active_camera_lease"],
+            "policy_runtime": runtime_contract["policy_runtime"],
+            "rerun_telemetry": runtime_contract["rerun_telemetry"],
             "stage_machine": stage_machine,
+            "execution_safety": sarm,
             "sarm": sarm,
             "decision": decision,
             "knowledge_payload": {
@@ -1125,7 +1756,29 @@ class ManipulationAgent(BaseAgent):
             return self._blocked_result(state=state, strategy=strategy, payload=payload, preflight=preflight, vision_context=vision_context, protocol_note=protocol_note)
 
         available_tools = set(ctx.tools.list_tools())
-        if strategy in {"lerobot_policy", "pi05_lerobot_policy"} and "lerobot.rollout.start" in available_tools:
+        existing_completion_response = self._existing_rollout_response_for_completion(
+            state=state,
+            payload=payload,
+            strategy=strategy,
+            task_id=task_id,
+            vision_context=vision_context,
+        )
+        if existing_completion_response is not None:
+            response = await self._refresh_existing_rollout_status(
+                state=state,
+                ctx=ctx,
+                payload=payload,
+                response=existing_completion_response,
+            )
+            stop_response = await self._stop_rollout_for_completion(
+                state=state,
+                ctx=ctx,
+                payload=payload,
+                response=response,
+                vision_context=vision_context,
+            )
+            self._merge_completion_stop_result(response, stop_response)
+        elif strategy in {"lerobot_policy", "pi05_lerobot_policy"} and "lerobot.rollout.start" in available_tools:
             callback = self._tool_event_callback(state, ctx)
             tool_payload = dict(payload)
             if callback:
@@ -1146,12 +1799,24 @@ class ManipulationAgent(BaseAgent):
                 "terminal_pose": payload.get("terminal_pose", "standby_clear_of_utm"),
             }
             response["grasp_score"] = 0.86 if response.get("ok") else 0.2
+            response["execution_evidence"] = self._rollout_execution_evidence(response)
+            stop_response = await self._stop_rollout_for_completion(
+                state=state,
+                ctx=ctx,
+                payload=payload,
+                response=response,
+                vision_context=vision_context,
+            )
+            self._merge_completion_stop_result(response, stop_response)
         else:
             response = ctx.tools.call("robot.pick_place", {"task": task_id, "source": payload.get("source_location"), "target": payload.get("target_location")})
             response = dict(response)
             response["strategy"] = "fixed_kinematic"
             response.setdefault("grasp_score", 0.78 if response.get("ok") else 0.2)
+            response["stop_rollout_on_completion"] = False
 
+        if str(response.get("workflow") or "").lower() == "rollout" or str(response.get("tool") or "").startswith("lerobot.rollout."):
+            response["post_place_interlock"] = self._post_place_interlock(response)
         verification = self._verification_status(task_id, vision_context, response)
         stage_machine = self._stage_machine(task_id=task_id, response=response, preflight=preflight, verification=verification)
         sarm = self._sarm_state(
@@ -1197,6 +1862,7 @@ class ManipulationAgent(BaseAgent):
             evidence_refs=evidence_refs,
             robot_task_result=packet,
         )
+        requested_next_stage = packet.get("requested_next_stage", "")
         screen_report = self._manipulation_agent_report_snapshot(
             state=state,
             manipulation_report=report,
@@ -1224,6 +1890,7 @@ class ManipulationAgent(BaseAgent):
                 "metrics": self._metrics(report),
                 "evidence_refs": evidence_refs,
                 "protocol_note": protocol_note,
+                "requested_next_stage": requested_next_stage,
             },
             next_hint=decision.get("recommended_next_agent", "guardian_review"),
         )

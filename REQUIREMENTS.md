@@ -830,7 +830,7 @@ LeRobot D405 issue-cleaning rules:
 
 - D405 must be passed to LeRobot as `type=intelrealsense`,
   `serial_number_or_name=352122273019`, `color_format=bgr8`,
-  `use_depth=true`, `warmup_s>=5`.
+  `use_depth=true`, `warmup_s>=20`.
 - D455F/top remains `color_format=rgb8`.
 - After recording with RealSense depth enabled, inspect `meta/info.json`.
   A valid ATR RGB-D LeRobotDataset contains `observation.images.top_depth` and

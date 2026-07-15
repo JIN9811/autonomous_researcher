@@ -11,25 +11,24 @@ def _yaml(path: str) -> dict:
     return yaml.safe_load(Path(path).read_text(encoding="utf-8"))
 
 
-def test_vision_module_declares_specimen_pose_tool_and_steps() -> None:
+def test_vision_module_uses_active_cam_without_d455_snapshot_steps() -> None:
     payload = _yaml("graphs/modules/vision/module.yaml")
     module = payload["module"]
     step_ids = {item["id"] for item in module["internal_graph"]}
 
-    assert "vision.specimen_pose_snapshot" in module["tools"]
-    assert "03a_acquire_d455f_lease" in step_ids
-    assert "03b_one_shot_specimen_pose" in step_ids
-    assert "03c_release_d455f_to_vla" in step_ids
-    assert "specimen_pose.v1" in module["io_contract"]["produces"]
+    assert "lerobot.active_robot_cam.capture" in module["tools"]
+    assert "vision.specimen_pose_snapshot" not in module["tools"]
+    assert not any("d455" in step_id.lower() for step_id in step_ids)
+    assert "specimen_pose.v1" not in module["io_contract"]["produces"]
 
 
-def test_manipulation_module_consumes_camera_return_gate() -> None:
+def test_manipulation_module_consumes_active_camera_return_gate() -> None:
     payload = _yaml("graphs/modules/manipulation/module.yaml")
     module = payload["module"]
     contract = module["runtime_contract"]
 
     assert contract["requires_camera_return_to_vla"] is True
-    assert "specimen_pose.v1" in module["io_contract"]["input"]
+    assert "specimen_pose.v1" not in module["io_contract"]["input"]
 
 
 def test_closed_loop_graph_has_post_place_vision_verification() -> None:
@@ -51,3 +50,4 @@ def test_closed_loop_graph_has_post_place_vision_verification() -> None:
     assert ("manipulation", "vision_verify") in sidecar_edges
     assert ("vision_verify", "equipment") in sidecar_edges
     assert config.transitions["manipulation"] == "equipment"
+    assert config.next_stage("manipulation", state_metadata={"agent_result": {"requested_next_stage": "vision"}}) == "vision"

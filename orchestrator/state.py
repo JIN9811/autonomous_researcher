@@ -101,4 +101,5 @@ class OrchestratorState(BaseModel):
     is_paused: bool = False
     stop_requested: bool = False
     safe_stop_requested: bool = False
+    emergency_stop_requested: bool = False
     loop_count: int = 0

@@ -50,8 +50,10 @@ class _ToolsStub:
             "utm": "ready",
             "simulator": "active",
         }
+        self.calls: list[tuple[str, dict[str, object]]] = []
 
     def call(self, name: str, payload: dict[str, object] | None = None) -> dict[str, object]:
+        self.calls.append((name, dict(payload or {})))
         if name != "device.health":
             raise KeyError(name)
         return dict(self._health)
@@ -108,6 +110,33 @@ async def test_guardian_passes_valid_spec_with_continue_action() -> None:
     assert guardian["decision"] == "continue"
     assert guardian["action"] == "continue"
     assert guardian["design_validation"]["status"] == "pass"
+
+
+@pytest.mark.asyncio
+async def test_guardian_health_preserves_live_gui_installed_printer_route() -> None:
+    agent = GuardianAgent()
+    ctx = _CtxStub()
+    spec = {
+        **_valid_spec(),
+        "test_mode_autofill": True,
+        "printer_test_path": "installed_printer",
+        "allow_test_printer_live": True,
+        "test_printer_transport": "real",
+        "printer_profile": "bambulab_x2d_pla_0p4_nozzle",
+    }
+
+    result = await agent.run(_state(mode=Mode.LIVE, spec=spec), ctx)
+
+    assert result.success is True
+    assert ctx.tools.calls
+    name, payload = ctx.tools.calls[0]
+    assert name == "device.health"
+    assert payload["runtime_mode"] == "test"
+    assert payload["printer_test_path"] == "installed_printer"
+    assert payload["test_printer_path"] == "installed_printer"
+    assert payload["allow_test_printer_live"] is True
+    assert payload["test_printer_transport"] == "real"
+    assert payload["printer_profile"] == "bambulab_x2d_pla_0p4_nozzle"
 
 
 @pytest.mark.asyncio

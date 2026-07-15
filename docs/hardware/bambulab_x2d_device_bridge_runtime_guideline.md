@@ -137,8 +137,8 @@ ATR bridge는 slicing을 upload/start와 분리한다. `Slice Bambu Artifact`는
 검증된 CLI/route 주의사항:
 
 - `--export-3mf`에는 absolute path가 아니라 `--outputdir` 내부의 basename을 넘긴다. Spark workstation의 BambuStudio `02.07.01.57`에서는 absolute path를 넘기면 output directory가 중복 결합되어 export가 실패할 수 있었다.
-- 명시 `load_settings`가 없으면 bridge runner는 Bambu Studio 원본 preset을 덮어쓰지 않고 output directory 아래 `_atr_no_skirt_profile/`에 machine/process/filament 복사본을 만든다. process 복사본은 `skirt_loops=0`, `skirt_height=0`, `brim_type=no_brim`, `brim_width=0`, `raft_layers=0`, `prime_tower_brim_width=0`을 적용한다.
-- 실제 검증에서 위 profile copy와 basename export를 사용하면 `/home/jin/다운로드/specimen(4).stl` 기준 `.gcode.3mf` 생성, 내부 `Metadata/plate_1.gcode` patch, md5 sidecar 갱신, validator 통과가 가능했다. 이 검증은 artifact 생성/patch까지만 의미하며 실제 publish/ejection 성공을 뜻하지 않는다.
+- 명시 `load_settings`가 없으면 bridge runner는 Bambu Studio 기본 machine/process/filament preset을 그대로 사용한다. purge, cleaning, filament start/end G-code 같은 기본 동작은 유지하고, build plate front에 그어지는 test/intro/nozzle-load line만 sliced artifact 후처리에서 제거한다.
+- 실제 검증에서 basename export를 사용하면 `/home/jin/다운로드/specimen(4).stl` 기준 `.gcode.3mf` 생성, 내부 `Metadata/plate_1.gcode` patch, front test line removal, md5 sidecar 갱신, validator 통과가 가능했다. 이 검증은 artifact 생성/patch까지만 의미하며 실제 publish/ejection 성공을 뜻하지 않는다.
 - 실제 장비에 대해 HTTP artifact route는 ATR 서버 LAN IP URL로 server-side fetch와 sha256 match까지 확인됐다. 현재 GUI는 owner-managed publish 기본값을 보내므로 artifact/camera/bed-clear/start-state blocker가 없으면 `Pre-start Check`가 `ready_to_publish_not_started`까지 도달할 수 있다. 이 route는 여전히 `published=false`, `will_publish=false`를 유지한다.
 - `.gcode.3mf` patch는 요청한 `plate_id`와 정확히 일치하는 `Metadata/plate_<id>.gcode`만 대상으로 한다. 요청 plate가 없고 다른 plate G-code가 존재하더라도 fallback으로 대체하지 않는다. 이는 MQTT `project_file.param`과 내부 plate path가 어긋난 채로 시작되는 것을 막기 위한 live-start gate 계약이다.
 - 로컬 `.gcode.3mf` artifact를 `printer.prepare` 또는 HTTP artifact route에 넘길 때도 같은 검사를 수행한다. 요청한 `plate_id`의 `Metadata/plate_<id>.gcode`가 없으면 FTPS upload나 HTTP export를 만들기 전에 `BAMBU_PROJECT_FILE_PARAM_MISMATCH`로 차단한다.
@@ -221,8 +221,8 @@ Bambu autoejection은 `bambu_gcode_patch` provider로 표시한다. 이는 외�
 3DP GUI standalone button
   -> POST /api/printer/autoejection-test
   -> build_standalone_bambu_autoejection_artifact()
-  -> _bambu_direct_standalone_gcode()
-  -> MQTT device/{serial}/request command=gcode_line
+  -> standalone .autoeject.gcode.3mf artifact
+  -> guarded upload/start through MQTT project_file
 ```
 
 현재 검증된 장비 경로:
@@ -232,18 +232,26 @@ Bambu autoejection은 `bambu_gcode_patch` provider로 표시한다. 이는 외�
 - MQTT request topic: `device/20P6BJ642001425/request`
 - config/evidence memory: `memory/bambu_autoejection.json`
 - generated standalone artifact directory: `artifacts/bambu_autoejection/`
-- physical validation summary: `runs/manual_bambu_validation/direct_gcode_line_validation_summary.json`
+- physical validation summary: `runs/manual_bambu_validation/`
 
-Standalone test는 HTTP artifact route, FTPS upload, `project_file` start를 쓰지 않는다. 단독 테스트용 `.autoeject.gcode`에서 direct MQTT command로 보낼 때는 대기 명령 `M190`을 제거해 즉시 motion을 확인한다. `G28` homing은 현재 보류이며, standalone tail 내부에 예상 밖 `G28`이 있으면 validator가 `BAMBU_AUTOEJECTION_UNEXPECTED_HOME`으로 차단한다.
+Standalone test도 direct MQTT `gcode_line` motion을 쓰지 않는다. 3DP GUI live gate를 통과한 경우에만 `.autoeject.gcode.3mf` artifact를 일반 upload/start gate로 넘긴다. Tail 내부에서는 전체축 `G28`을 실행하지 않는다. Bambu/X2D full homing은 중앙 probing/접촉 동작을 포함할 수 있으므로 autoejection tail은 프린트 job 시작 시 확립된 좌표계를 보존한다.
+
+`Live GUI 테스트 모드, 설치 프린터` 경로는 실제 출력 시간을 기다리지 않는 route validation이다. 실제 STL을 active slicer로 `.gcode.3mf`까지 만들고, 그 artifact를 일반 `project_file` upload/start gate로 publish한다. 성공 기준은 MQTT ack가 아니라 fresh post-publish observation에서 `RUNNING`/preparing 계열 state와 progress-panel evidence가 관측되는 것이다. 이후 즉시 stop을 보내고, 같은 sliced artifact의 `Metadata/plate_#.gcode`에서 extrusion move 기반 object bounds를 추출해 standalone autoejection artifact를 publish한다. extrusion bounds가 없거나 plate G-code를 읽을 수 없으면 `BAMBU_AUTOEJECTION_SOURCE_EXTRUSION_BOUNDS_REQUIRED` 계열 failure로 ejection publish를 차단한다.
+
+`Live GUI 테스트 모드, 실제 출력`과 일반 Live actual print 경로는 출력 본문을 제거하지 않는다. sliced `.gcode.3mf` 내부 plate G-code에 autoejection tail을 append해 `.autoeject.gcode.3mf`를 만들고, 그 patched artifact를 일반 upload/start gate로 보낸다.
+
+기본 push Z 규칙은 `max(10 mm absolute Z, object max Z - 15 mm)`이다. 예를 들어 12 mm object는 Z10.000, 30 mm object는 Z15.000으로 sweep한다. 이 값은 `memory/bambu_autoejection.json`의 `z_push_offset_mm`과 `min_absolute_push_z_mm` 계약으로 해석한다.
+
+Z motion은 절대좌표 기준으로 계산한다. 오토이젝션 push 높이는 `push_z_mm = max(10.0, object_bounds.max_z - z_push_offset_mm)`이며 기본 `z_push_offset_mm`는 15mm다. 즉 object `max_z <= 25mm`이면 무조건 `G0 Z10.000`, `max_z=26mm`이면 `G0 Z11.000`, `max_z=30mm`이면 `G0 Z15.000`이다. `object max Z + 10mm` 방식은 금지한다.
 
 구분해야 하는 runtime path:
 
 | Mode | Transport | Physical motion |
 |---|---|---|
 | Main GUI test / Live GUI `테스트 모드, 가상 브릿지` | `virtual` | 없음 |
-| Live GUI `테스트 모드, 설치 프린터` | MQTT/status/video read-only | 없음 |
-| 3DP GUI standalone autoejection test with live gates | MQTT `gcode_line` | ejection-only motion |
-| Live GUI `테스트 모드, 실제 출력` / normal Live actual print | `.autoeject.gcode.3mf` + MQTT `project_file` | print job + optional patched end-tail |
+| Live GUI `테스트 모드, 설치 프린터` | actual sliced `.gcode.3mf` -> MQTT `project_file` start -> progress observation -> stop -> source-bounds-derived standalone `.autoeject.gcode.3mf` + MQTT `project_file` | actual-printer upload/start validation plus physical ejection-route validation; full print body is started only long enough to prove the progress panel receives a real job |
+| 3DP GUI standalone autoejection test with live gates | standalone `.autoeject.gcode.3mf` + MQTT `project_file` | ejection-only artifact through the same upload/start gate; no direct `gcode_line` |
+| Live GUI `테스트 모드, 실제 출력` / normal Live actual print | `.autoeject.gcode.3mf` + MQTT `project_file` | real print body is preserved and deterministic autoejection tail is appended |
 
 ---
 
@@ -325,7 +333,7 @@ Looprint 계열은 already-sliced G-code/3MF에 cooldown/push-off/loop logic을 
 비파괴 검증 완료 범위:
 
 - Bambu Studio CLI runner가 `--export-3mf`에 absolute path가 아니라 output directory 내부 basename을 전달한다.
-- 명시 `load_settings`가 없을 때 runner가 output directory 아래 `_atr_no_skirt_profile/` 복사본을 만들고 skirt/brim/raft 관련 값을 off/zero로 고정한다.
+- 명시 `load_settings`가 없을 때 runner는 Bambu Studio 기본 preset을 보존한다. `--load-settings`/`--load-filaments`를 자동 주입하지 않으며, 산출된 `.gcode` 또는 `.gcode.3mf`의 plate G-code에서 front test/intro/nozzle-load line block만 제거하고 md5 sidecar를 갱신한다.
 - `/home/jin/다운로드/specimen(4).stl` 기준으로 `.gcode.3mf` 생성, 내부 `Metadata/plate_1.gcode` patch, md5 sidecar 갱신, validator 통과가 확인됐다.
 - Bambu autoejection tail은 `source_plate_path`, `plate_id`, `loop_index`, material/bed placeholder, cooldown policy, purge/parking strategy, door/front assumption, toolhead-cover risk note를 artifact comment로 기록한다.
 - `Validate G-code Preview` / `Validate Left|Center|Right`는 `validate_only=true`로 동작해 would-be tail과 validator evidence만 반환하며, `.autoeject.*` artifact나 manifest를 쓰지 않는다.

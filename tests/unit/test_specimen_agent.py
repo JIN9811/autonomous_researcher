@@ -382,6 +382,237 @@ def test_specimen_fabrication_report_includes_bambu_spc_readiness_contract() -> 
     assert screen_report["autoejection_gate"]["handoff"]["next_tool"] == "lerobot.manipulation-agent.run"
 
 
+def test_installed_printer_standalone_autoejection_marks_a4_workspace_for_vision() -> None:
+    agent = SpecimenMakingAgent()
+    state = OrchestratorState(run_id="run-bambu-tail", experiment_id="exp-bambu-tail", mode=Mode.TEST, stage=Stage.SPECIMEN)
+    spec = {
+        **_valid_spec(),
+        "printer_test_path": "installed_printer",
+        "allow_test_printer_live": True,
+        "printer_profile": "bambulab_x2d_pla_0p4_nozzle",
+    }
+    printer_response = {
+        "ok": True,
+        "provider": "bambulab_x2d",
+        "mode": "test",
+        "path": "installed_printer",
+        "physical_transport": True,
+        "selected_printer": {"profile_id": "bambulab_x2d_lab_01", "provider": "bambulab_x2d", "label": "Bambu Lab X2D - Lab 01"},
+        "slicer_result": {"ok": True, "sliced_artifact_path": "/tmp/specimen.gcode.3mf"},
+        "gcode_validation": {"ok": True, "violations": []},
+        "print_result": {
+            "published": True,
+            "status": "published_then_stopped",
+            "stop_after_start": True,
+            "stop": {"ok": True, "published": True},
+            "upload": {"remote_path": "specimen.gcode.3mf"},
+        },
+        "ejection_result": {
+            "ok": True,
+            "status": "standalone_motion_started",
+            "transport": "project_file",
+            "source_object_bounds_mm": {"center_x_mm": 50.0, "center_y_mm": 60.0, "max_z": 30.0},
+        },
+        "autoejection": {"enabled": True, "status": "configured", "provider": "bambu_gcode_patch"},
+        "step_trace": [
+            {"step": "BAMBU_FTPS_UPLOAD", "status": "ok", "detail": "specimen.gcode.3mf"},
+            {"step": "BAMBU_STANDALONE_AUTOEJECTION", "status": "published", "detail": "standalone_motion_started"},
+        ],
+    }
+
+    report = agent._build_fabrication_report(
+        state=state,
+        spec=spec,
+        candidate="cand-1-01",
+        specimen_id="specimen-cand-1-01-gyroid",
+        geometry_result={"ok": True, "stl_path": "/tmp/specimen.stl", "geometry_hash": "geom-hash"},
+        mesh_result={"ok": True, "mesh_status": "pass", "warnings": []},
+        manufacturability_result={"ok": True, "manufacturability_status": "pass", "warnings": []},
+        handoff_result={"handoff_package_path": "/tmp/handoff.json", "status": "ready"},
+        experiment_response={"job": {"device": "printer:bambulab_x2d"}},
+        printer_response=printer_response,
+        printer_payload={
+            "runtime_mode": "test",
+            "test_printer_path": "installed_printer",
+            "allow_test_printer_live": True,
+            "print": {"physical_intent": True, "stop_after_start": True},
+        },
+        protocol_note="installed printer tail",
+        live_gui_test_spec=True,
+        printer_test_path="installed_printer",
+        top_cap_enabled=False,
+        bottom_cap_enabled=False,
+        geometry_payload={"skin_thickness_mm": 0.0},
+    )
+    handoff = agent._build_specimen_fabricated_packet(
+        state=state,
+        candidate="cand-1-01",
+        specimen_id="specimen-cand-1-01-gyroid",
+        report=report,
+        decisions=[],
+        evidence_refs=[],
+    )
+
+    assert report["fabrication_outcome"]["status"] == "ready_for_vision"
+    assert report["fabrication_outcome"]["location"] == "a4_workspace"
+    assert report["fabrication_outcome"]["autoejection_status"] == "complete"
+    assert report["process_plan"]["ejection_policy"]["status"] == "standalone_motion_started"
+    assert handoff["physical_location"] == "a4_workspace"
+    assert handoff["fabrication_summary"]["printer_path"] == "installed_printer"
+
+
+def test_virtual_bridge_marks_autoejected_workspace_for_active_cam_handoff() -> None:
+    agent = SpecimenMakingAgent()
+    state = OrchestratorState(run_id="run-virtual", experiment_id="exp-virtual", mode=Mode.TEST, stage=Stage.SPECIMEN)
+    spec = {
+        **_valid_spec(),
+        "printer_test_path": "virtual_bridge",
+        "printer_profile": "bambulab_x2d_pla_0p4_nozzle",
+    }
+    printer_response = {
+        "ok": True,
+        "provider": "bambulab_x2d",
+        "mode": "test",
+        "printer_path": "virtual_bridge",
+        "status": "VIRTUAL_BAMBU_READY",
+        "selected_printer": {"profile_id": "bambulab_x2d_lab_01", "provider": "bambulab_x2d", "label": "Bambu Lab X2D - Lab 01"},
+        "slicer_result": {"ok": True, "sliced_artifact_path": ""},
+        "gcode_validation": {"ok": True, "violations": []},
+        "printer": {"provider": "bambulab_x2d", "transport": "virtual"},
+        "print_result": {"status": "virtual_bridge_ack"},
+        "ejection_result": {"ok": True, "status": "virtual_ack", "transport": "virtual"},
+        "autoejection": {"enabled": True, "status": "virtual_ack", "provider": "virtual_bambu_bridge"},
+        "step_trace": [{"step": "VIRTUAL_BAMBU_AUTOEJECTION", "status": "ok", "detail": "virtual_ack"}],
+    }
+
+    report = agent._build_fabrication_report(
+        state=state,
+        spec=spec,
+        candidate="cand-1-01",
+        specimen_id="specimen-cand-1-01-gyroid",
+        geometry_result={"ok": True, "stl_path": "/tmp/specimen.stl", "geometry_hash": "geom-hash"},
+        mesh_result={"ok": True, "mesh_status": "pass", "warnings": []},
+        manufacturability_result={"ok": True, "manufacturability_status": "pass", "warnings": []},
+        handoff_result={"handoff_package_path": "/tmp/handoff.json", "status": "ready"},
+        experiment_response={"job": {"device": "printer:bambulab_x2d"}},
+        printer_response=printer_response,
+        printer_payload={"runtime_mode": "test", "test_printer_path": "virtual_bridge"},
+        protocol_note="virtual printer handoff",
+        live_gui_test_spec=True,
+        printer_test_path="virtual_bridge",
+        top_cap_enabled=False,
+        bottom_cap_enabled=False,
+        geometry_payload={"skin_thickness_mm": 0.0},
+    )
+    handoff = agent._build_specimen_fabricated_packet(
+        state=state,
+        candidate="cand-1-01",
+        specimen_id="specimen-cand-1-01-gyroid",
+        report=report,
+        decisions=[],
+        evidence_refs=[],
+    )
+
+    outcome = report["fabrication_outcome"]
+    assert outcome["status"] == "ready_for_vision"
+    assert outcome["location"] == "a4_workspace"
+    assert outcome["autoejection_status"] == "complete"
+    assert report["monitoring_plan"]["expected_location"] == "a4_workspace"
+    assert report["monitoring_plan"]["active_cam_verification_required"] is True
+    assert handoff["physical_location"] == "a4_workspace"
+
+
+@pytest.mark.asyncio
+async def test_specimen_agent_installed_printer_uses_single_ejection_only_project_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent = SpecimenMakingAgent()
+    spec = _valid_spec()
+    spec["test_mode_autofill"] = True
+    spec["printer_test_path"] = "설치 프린터"
+    spec["printer_profile"] = "bambulab_x2d_pla_0p4_nozzle"
+    spec["tpms_resolution"] = 18
+    state = OrchestratorState(
+        run_id="run-test",
+        experiment_id="exp-test",
+        mode=Mode.LIVE,
+        stage=Stage.SPECIMEN,
+        active_goal="live gui test mode",
+        current_experiment_spec=spec,
+    )
+    ctx = _CtxStub()
+    captured_payloads: list[dict[str, Any]] = []
+
+    def fake_printer_prepare(payload: dict[str, Any]) -> dict[str, Any]:
+        captured_payloads.append(payload)
+        stl_path = str(payload.get("stl_path") or "")
+        return {
+            "ok": True,
+            "tool": "printer.prepare",
+            "mode": payload.get("runtime_mode", "test"),
+            "printer_path": "installed_printer",
+            "path": "installed_printer",
+            "provider": "bambulab_x2d",
+            "selected_printer": {"profile_id": "bambulab_x2d_lab_01", "provider": "bambulab_x2d"},
+            "physical_transport": True,
+            "specimen_id": payload.get("specimen_id"),
+            "stl_path": stl_path,
+            "sliced_path": "/tmp/specimen.gcode.3mf",
+            "slicer_result": {"ok": True, "sliced_artifact_path": "/tmp/specimen.gcode.3mf"},
+            "gcode_validation": {"ok": True, "violations": []},
+            "print_result": {
+                "published": True,
+                "status": "started",
+                "stop_after_start": False,
+                "post_publish_status": {
+                    "status": "running",
+                    "progress_observed": True,
+                    "progress_percent": 1,
+                },
+            },
+            "ejection_result": {},
+            "autoejection_patch": {
+                "ok": True,
+                "schema": "bambu_ejection_only_project_file.v1",
+                "status": "ejection_only_validated",
+            },
+            "autoejection": {"enabled": True, "status": "configured", "provider": "bambu_gcode_patch"},
+            "step_trace": [{"step": "BAMBU_NATIVE_AUTOEJECTION_PATCH", "status": "ok"}],
+            "status": "TEST_PRINTER_EJECTION_PROJECT_STARTED",
+            "ejection_only_project_file": True,
+        }
+
+    ctx.tools.register("printer.prepare", fake_printer_prepare)
+    monkeypatch.setattr(
+        SpecimenMakingAgent,
+        "_artifact_dir",
+        staticmethod(lambda _state, specimen_id: tmp_path / specimen_id),
+    )
+
+    result = await agent.run(state, ctx)
+
+    assert result.success is True
+    assert captured_payloads, "SpecimenAgent must call printer.prepare for installed printer path"
+    payload = captured_payloads[0]
+    assert payload["test_printer_path"] == "installed_printer"
+    assert payload["allow_test_printer_live"] is True
+    assert payload["test_printer_transport"] == "real"
+    assert payload["prefer_http_artifact"] is True
+    assert payload["print"]["start_immediately"] is True
+    assert payload["print"]["physical_intent"] is True
+    assert payload["print"]["confirm_physical_print"] is True
+    assert payload["print"]["stop_after_start"] is False
+    assert payload["print"]["use_ejection_only_project_file"] is True
+    assert payload["print"]["prefer_http_artifact"] is True
+    assert payload["ejection"]["enabled"] is True
+    assert payload["ejection"]["allow_ejection"] is True
+    assert "standalone_after_start_stop" not in payload["ejection"]
+    assert payload["ejection"]["use_ejection_only_project_file"] is True
+    assert payload["ejection"]["source"] == "installed_printer_ejection_only_project_file"
+    assert result.data["specimen_result"]["printer_path"] == "installed_printer"
+
+
 @pytest.mark.asyncio
 async def test_specimen_agent_executes_geometry_handoff_and_printer_prepare(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     agent = SpecimenMakingAgent()
@@ -676,6 +907,79 @@ async def test_specimen_agent_live_gui_test_mode_virtual_choice_runs_virtual_bri
     assert specimen_result["printer_path"] == "virtual_prusalink"
     assert specimen_result["printer_mode"] == "test_printer_live_virtual"
     assert specimen_result["print_result"]["status"] == "virtual_finished"
+
+
+@pytest.mark.asyncio
+async def test_specimen_agent_live_gui_test_mode_physical_print_enables_print_tail_autoejection(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent = SpecimenMakingAgent()
+    spec = _valid_spec()
+    spec["test_mode_autofill"] = True
+    spec["printer_test_path"] = "실제 출력"
+    spec["printer_profile"] = "bambulab_x2d_pla_0p4_nozzle"
+    spec["tpms_resolution"] = 18
+    state = OrchestratorState(
+        run_id="run-test",
+        experiment_id="exp-test",
+        mode=Mode.LIVE,
+        stage=Stage.SPECIMEN,
+        active_goal="live gui test mode",
+        current_experiment_spec=spec,
+    )
+    ctx = _CtxStub()
+    captured_payloads: list[dict[str, Any]] = []
+
+    def fake_printer_prepare(payload: dict[str, Any]) -> dict[str, Any]:
+        captured_payloads.append(payload)
+        stl_path = str(payload.get("stl_path") or "")
+        sliced_path = str(Path(stl_path).with_suffix(".autoeject.gcode.3mf")) if stl_path else "/tmp/specimen.autoeject.gcode.3mf"
+        return {
+            "ok": True,
+            "tool": "printer.prepare",
+            "mode": payload.get("runtime_mode", "test"),
+            "printer_path": "physical_print",
+            "path": "physical_print",
+            "provider": "bambulab_x2d",
+            "selected_printer": {"profile_id": "bambulab_x2d_lab_01", "provider": "bambulab_x2d"},
+            "physical_transport": True,
+            "specimen_id": payload.get("specimen_id"),
+            "stl_path": stl_path,
+            "sliced_path": sliced_path,
+            "slicer_result": {"ok": True, "sliced_artifact_path": sliced_path, "sliced_path": sliced_path},
+            "gcode_validation": {"ok": True, "violations": []},
+            "slicer_settings": {"output_gcode_path": sliced_path, "printer_profile": payload.get("printer_profile")},
+            "printer": {"provider": "bambulab_x2d", "state": "MOCK_READY"},
+            "print_result": {"published": True, "status": "started", "stop_after_start": False},
+            "ejection_result": {"ok": True, "status": "appended_to_print_gcode", "transport": "project_file"},
+            "autoejection": {"enabled": True, "status": "configured", "provider": "bambu_gcode_patch"},
+            "step_trace": [{"step": "BAMBU_NATIVE_AUTOEJECTION_PATCH", "status": "ok"}],
+            "status": "PRINT_STARTED_WITH_AUTOEJECTION_TAIL",
+        }
+
+    ctx.tools.register("printer.prepare", fake_printer_prepare)
+    monkeypatch.setattr(
+        SpecimenMakingAgent,
+        "_artifact_dir",
+        staticmethod(lambda _state, specimen_id: tmp_path / specimen_id),
+    )
+
+    result = await agent.run(state, ctx)
+
+    assert result.success is True
+    assert captured_payloads, "SpecimenAgent must call printer.prepare for physical print"
+    payload = captured_payloads[0]
+    assert payload["test_printer_path"] == "physical_print"
+    assert payload["allow_test_printer_live"] is True
+    assert payload["test_printer_transport"] == "real"
+    assert payload["print"]["physical_intent"] is True
+    assert payload["print"]["confirm_physical_print"] is True
+    assert payload["print"]["stop_after_start"] is False
+    assert payload["ejection"]["enabled"] is True
+    assert payload["ejection"]["allow_ejection"] is True
+    assert payload["ejection"].get("standalone_after_start_stop") in {None, False}
+    assert result.data["specimen_result"]["printer_path"] == "physical_print"
 
 
 @pytest.mark.asyncio

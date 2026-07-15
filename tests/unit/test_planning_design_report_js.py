@@ -96,6 +96,41 @@ console.log(JSON.stringify([
     assert labels == ["STL VIEWER PNG", "SVG PREVIEW", "CANVAS FALLBACK"]
 
 
+def test_spc_preview_selects_exact_dsn_specimen_one_at_a_time() -> None:
+    source = PLANNING_JS.read_text(encoding="utf-8")
+    helper = _extract_function(source, "selectSpecimenDesignPreviewRecord")
+    script = f"""
+{helper}
+const rows = [
+  {{ specimen_id: "specimen-cand-1-01", candidate_id: "cand-1-01", loop_index: 1 }},
+  {{ specimen_id: "specimen-cand-2-04", candidate_id: "cand-2-04", loop_index: 2 }},
+  {{ specimen_id: "specimen-cand-3-02", candidate_id: "cand-3-02", loop_index: 3 }},
+];
+console.log(JSON.stringify({{
+  exactSpecimen: selectSpecimenDesignPreviewRecord(rows, {{ specimenId: "specimen-cand-2-04" }}),
+  exactCandidate: selectSpecimenDesignPreviewRecord(rows, {{ candidateId: "cand-1-01" }}),
+  exactLoop: selectSpecimenDesignPreviewRecord(rows, {{ loopIndex: 3 }}),
+  latestFallback: selectSpecimenDesignPreviewRecord(rows, {{}}),
+}}));
+"""
+    selected = json.loads(_node_eval(script))
+
+    assert selected["exactSpecimen"]["specimen_id"] == "specimen-cand-2-04"
+    assert selected["exactCandidate"]["candidate_id"] == "cand-1-01"
+    assert selected["exactLoop"]["loop_index"] == 3
+    assert selected["latestFallback"]["specimen_id"] == "specimen-cand-3-02"
+
+
+def test_spc_now_printing_preview_uses_dsn_capture_contract() -> None:
+    source = PLANNING_JS.read_text(encoding="utf-8")
+    body = _extract_function(source, "renderSpecimenNowPrintingBody")
+
+    assert "specimenDesignPreviewRecord(ctx, report)" in body
+    assert "designCandidateCaptureUrl" in body
+    assert "ctx.layerPreview.viewer_capture_url" not in body
+    assert "ctx.thread.viewer_capture_url" not in body
+
+
 def test_live_agent_events_are_scoped_to_current_run() -> None:
     source = PLANNING_JS.read_text(encoding="utf-8")
     helpers = "\n".join(

@@ -25,7 +25,9 @@ from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 from pathlib import Path
+import shutil
 from typing import Any
+from urllib.parse import quote
 
 from agents.base_agent import AgentContext, AgentResult, BaseAgent
 from orchestrator.state import Mode, OrchestratorState
@@ -47,6 +49,165 @@ class VisionAgent(BaseAgent):
         path.mkdir(parents=True, exist_ok=True)
         return path
 
+    @classmethod
+    def _persist_active_cam_run_artifact(
+        cls,
+        *,
+        state: OrchestratorState,
+        observation_id: str,
+        active_check: dict[str, Any],
+    ) -> dict[str, Any]:
+        captured_at_dt = datetime.now(timezone.utc)
+        captured_at = captured_at_dt.isoformat()
+        source_text = str(active_check.get("capture_path") or "").strip()
+        base = {
+            "schema": "active_cam_run_artifact.v1",
+            "path": "",
+            "url": "",
+            "source_path": source_text,
+            "run_id": state.run_id,
+            "observation_id": observation_id,
+            "loop_index": int(state.loop_count or 0),
+            "specimen_id": str(active_check.get("specimen_id") or ""),
+            "camera_key": str(active_check.get("camera_key") or ""),
+            "frame_width": active_check.get("frame_width"),
+            "frame_height": active_check.get("frame_height"),
+            "captured_at": captured_at,
+        }
+        if (
+            str(active_check.get("status") or "").strip().lower() != "confirmed"
+            or active_check.get("spc_autoejection_confirmed") is not True
+        ):
+            return {
+                **base,
+                "status": "failed",
+                "failure_code": "ACTIVE_CAM_ATTEMPT_FAILED",
+            }
+
+        source = Path(source_text).expanduser() if source_text else None
+        if source is None or not source.is_file():
+            return {
+                **base,
+                "status": "failed",
+                "failure_code": "ACTIVE_CAM_ARTIFACT_SOURCE_MISSING",
+            }
+        suffix = source.suffix.lower()
+        if suffix not in {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".svg"}:
+            return {
+                **base,
+                "status": "failed",
+                "failure_code": "ACTIVE_CAM_ARTIFACT_FORMAT_UNSUPPORTED",
+            }
+
+        output_dir = cls._artifact_dir(state, observation_id)
+        stamp = captured_at_dt.strftime("%Y%m%dT%H%M%S%fZ")
+        target = output_dir / f"active_cam_capture_{stamp}{suffix}"
+        try:
+            shutil.copy2(source, target)
+            run_dir = (cls._repo_root() / "runs" / state.run_id).resolve()
+            relative = target.resolve().relative_to(run_dir).as_posix()
+        except (OSError, ValueError) as exc:
+            target.unlink(missing_ok=True)
+            return {
+                **base,
+                "status": "failed",
+                "failure_code": "ACTIVE_CAM_ARTIFACT_COPY_FAILED",
+                "message": f"{exc.__class__.__name__}: {exc}",
+            }
+        return {
+            **base,
+            "status": "stored",
+            "path": str(target.resolve()),
+            "url": f"/api/runs/{quote(state.run_id, safe='')}/artifact-file/{quote(relative, safe='/')}",
+            "relative_path": relative,
+            "source_path": str(source.resolve()),
+        }
+
+    @classmethod
+    def _persist_utm_completion_run_artifact(
+        cls,
+        *,
+        state: OrchestratorState,
+        observation_id: str,
+        capture: dict[str, Any],
+    ) -> dict[str, Any]:
+        captured_at_dt = datetime.now(timezone.utc)
+        captured_at = captured_at_dt.isoformat()
+        source_text = str(
+            capture.get("annotated_frame_path")
+            or capture.get("frame_path")
+            or capture.get("raw_frame_path")
+            or ""
+        ).strip()
+        base = {
+            "schema": "utm_completion_run_artifact.v1",
+            "path": "",
+            "url": "",
+            "source_path": source_text,
+            "run_id": state.run_id,
+            "loop_id": int(state.loop_count or 0),
+            "observation_id": observation_id,
+            "frame_id": str(capture.get("frame_id") or ""),
+            "session_id": str(capture.get("session_id") or ""),
+            "specimen_id": str(capture.get("specimen_id") or ""),
+            "camera_key": str(capture.get("camera_key") or "utm"),
+            "frame_width": capture.get("frame_width", capture.get("width")),
+            "frame_height": capture.get("frame_height", capture.get("height")),
+            "confidence": cls._as_float(capture.get("confidence"), 0.0),
+            "captured_at": captured_at,
+        }
+        if not bool(capture.get("ok")):
+            return {
+                **base,
+                "status": "failed",
+                "failure_code": str(capture.get("failure_code") or "UTM_CAPTURE_FAILED"),
+            }
+        if capture.get("detected") is not True:
+            return {
+                **base,
+                "status": "not_detected",
+                "failure_code": str(capture.get("failure_code") or "UTM_SPECIMEN_NOT_DETECTED"),
+            }
+
+        source = Path(source_text).expanduser() if source_text else None
+        if source is None or not source.is_file():
+            return {
+                **base,
+                "status": "failed",
+                "failure_code": "UTM_COMPLETION_ARTIFACT_SOURCE_MISSING",
+            }
+        suffix = source.suffix.lower()
+        if suffix not in {".jpg", ".jpeg", ".png", ".webp", ".bmp"}:
+            return {
+                **base,
+                "status": "failed",
+                "failure_code": "UTM_COMPLETION_ARTIFACT_FORMAT_UNSUPPORTED",
+            }
+
+        output_dir = cls._artifact_dir(state, observation_id)
+        stamp = captured_at_dt.strftime("%Y%m%dT%H%M%S%fZ")
+        target = output_dir / f"utm_completion_{stamp}{suffix}"
+        try:
+            shutil.copy2(source, target)
+            run_dir = (cls._repo_root() / "runs" / state.run_id).resolve()
+            relative = target.resolve().relative_to(run_dir).as_posix()
+        except (OSError, ValueError) as exc:
+            target.unlink(missing_ok=True)
+            return {
+                **base,
+                "status": "failed",
+                "failure_code": "UTM_COMPLETION_ARTIFACT_COPY_FAILED",
+                "message": f"{exc.__class__.__name__}: {exc}",
+            }
+        return {
+            **base,
+            "status": "stored",
+            "path": str(target.resolve()),
+            "url": f"/api/runs/{quote(state.run_id, safe='')}/artifact-file/{quote(relative, safe='/')}",
+            "relative_path": relative,
+            "source_path": str(source.resolve()),
+        }
+
     @staticmethod
     def _specimen_result(state: OrchestratorState) -> dict[str, Any]:
         raw = state.run_metadata.get("specimen_result") if isinstance(state.run_metadata, dict) else {}
@@ -54,10 +215,87 @@ class VisionAgent(BaseAgent):
 
     @staticmethod
     def _fabrication_report(state: OrchestratorState, specimen: dict[str, Any]) -> dict[str, Any]:
-        if isinstance(state.run_metadata, dict) and isinstance(state.run_metadata.get("fabrication_report"), dict):
-            return state.run_metadata["fabrication_report"]
+        if isinstance(state.run_metadata, dict):
+            for key in ("fabrication_report", "specimen_fabrication_report"):
+                if isinstance(state.run_metadata.get(key), dict):
+                    return state.run_metadata[key]
         report = specimen.get("fabrication_report") if isinstance(specimen.get("fabrication_report"), dict) else {}
         return report if isinstance(report, dict) else {}
+
+    @classmethod
+    def _physical_printer_tail_requested(cls, state: OrchestratorState) -> bool:
+        """Test-mode installed/physical printer paths must use real camera tools."""
+        if state.mode != Mode.TEST or not isinstance(state.run_metadata, dict):
+            return False
+        specimen = cls._specimen_result(state)
+        report = cls._fabrication_report(state, specimen)
+        spec = state.current_experiment_spec if isinstance(state.current_experiment_spec, dict) else {}
+        intent = report.get("fabrication_intent") if isinstance(report.get("fabrication_intent"), dict) else {}
+        status = report.get("printer_status") if isinstance(report.get("printer_status"), dict) else {}
+        profile = report.get("printer_profile") if isinstance(report.get("printer_profile"), dict) else {}
+        fabricated = state.run_metadata.get("specimen_fabricated") if isinstance(state.run_metadata.get("specimen_fabricated"), dict) else {}
+        summary = fabricated.get("fabrication_summary") if isinstance(fabricated.get("fabrication_summary"), dict) else {}
+
+        paths = {
+            str(value or "").strip().lower()
+            for value in (
+                spec.get("printer_test_path"),
+                spec.get("test_printer_path"),
+                specimen.get("printer_path"),
+                intent.get("printer_path"),
+                status.get("printer_path"),
+                status.get("path"),
+                profile.get("printer_path"),
+                summary.get("printer_path"),
+            )
+            if str(value or "").strip()
+        }
+        if not (paths & {"installed_printer", "physical_print", "actual_print", "test_printer_physical_print", "bambulab_x2d"}):
+            return False
+        return any(
+            bool(value)
+            for value in (
+                spec.get("allow_test_printer_live"),
+                specimen.get("physical_intent"),
+                intent.get("physical_intent"),
+                profile.get("physical_intent"),
+                summary.get("physical_intent"),
+                paths & {"installed_printer", "physical_print", "actual_print", "test_printer_physical_print", "bambulab_x2d"},
+            )
+        )
+
+    @classmethod
+    def _camera_runtime_mode(cls, state: OrchestratorState) -> str:
+        return "live" if state.mode == Mode.LIVE or cls._physical_printer_tail_requested(state) else state.mode.value
+
+    @staticmethod
+    def _rollout_execution_evidence(state: OrchestratorState) -> dict[str, Any]:
+        metadata = state.run_metadata if isinstance(state.run_metadata, dict) else {}
+        manipulation = metadata.get("manipulation_result") if isinstance(metadata.get("manipulation_result"), dict) else {}
+        runtime = manipulation.get("runtime") if isinstance(manipulation.get("runtime"), dict) else {}
+        embedded = manipulation.get("execution_evidence") if isinstance(manipulation.get("execution_evidence"), dict) else {}
+        tool = str(manipulation.get("tool") or "").strip().lower()
+        workflow = str(manipulation.get("workflow") or "").strip().lower()
+        required = bool(embedded.get("required", workflow == "rollout" or tool.startswith("lerobot.rollout.")))
+        phase = str(
+            embedded.get("runtime_phase")
+            or manipulation.get("runtime_phase")
+            or runtime.get("phase")
+            or ""
+        ).strip().upper()
+        raw_count = embedded.get("action_count", manipulation.get("action_count", runtime.get("action_count", 0)))
+        try:
+            action_count = max(0, int(raw_count or 0))
+        except (TypeError, ValueError):
+            action_count = 0
+        observed = bool(not required or embedded.get("observed") or (phase == "ACTION_ACTIVE" and action_count > 0))
+        return {
+            "required": required,
+            "observed": observed,
+            "runtime_phase": phase or "UNKNOWN",
+            "action_count": action_count,
+            "session_id": str(manipulation.get("session_id") or ""),
+        }
 
     @staticmethod
     def _as_float(value: Any, default: float) -> float:
@@ -97,6 +335,8 @@ class VisionAgent(BaseAgent):
     def _resolve_task(self, state: OrchestratorState, capture: dict[str, Any]) -> str:
         purpose = str(capture.get("purpose") or "").strip()
         if purpose:
+            if purpose == "utm_placement_verification":
+                return "post_manipulation_utm_verification"
             if purpose == "3dp_output_pickup_check":
                 return "post_ejection_basket_check"
             return purpose
@@ -165,6 +405,8 @@ class VisionAgent(BaseAgent):
         existing = capture.get("detections")
         if isinstance(existing, list):
             return [item for item in existing if isinstance(item, dict)]
+        if "detected" in capture and not bool(capture.get("detected")):
+            return []
         if not (capture_ok and specimen_ready and not anomaly):
             return []
         return [
@@ -181,135 +423,331 @@ class VisionAgent(BaseAgent):
         ]
 
     def _attach_lerobot_camera_evidence(self, state: OrchestratorState, ctx: AgentContext, capture: dict[str, Any]) -> dict[str, Any]:
-        available_tools = set(ctx.tools.list_tools())
-        if "lerobot.camera.test" not in available_tools:
+        if self._post_manipulation_completion_requested(state):
             return capture
+        available_tools = set(ctx.tools.list_tools())
         spec = state.current_experiment_spec if isinstance(state.current_experiment_spec, dict) else {}
+        active_cam_requested = self._should_request_active_cam_ejection_check(state)
+        active_cam_tool = "lerobot.active_robot_cam.capture" if "lerobot.active_robot_cam.capture" in available_tools else ""
+        camera_test_tool = "lerobot.camera.test" if "lerobot.camera.test" in available_tools else ""
+        if active_cam_requested and not active_cam_tool:
+            enriched = dict(capture)
+            enriched["camera_bridge_warning"] = "lerobot_active_robot_cam_capture_tool_missing"
+            enriched["active_cam_ejection_check"] = {
+                "schema": "active_cam_ejection_check.v1",
+                "status": "blocked",
+                "specimen_detected": False,
+                "spc_autoejection_confirmed": False,
+                "blocking_reason": "lerobot_active_robot_cam_capture_tool_missing",
+                "source": "lerobot.active_robot_cam.capture",
+            }
+            return enriched
+        if not active_cam_requested and not camera_test_tool:
+            return capture
         live_confirmed = bool(
             spec.get("confirm_live_execute")
             or spec.get("confirm_camera_capture")
             or spec.get("vision_confirm_camera_capture")
+            or active_cam_requested
         )
         requested = (
             state.mode == Mode.TEST
             or str(spec.get("vision_camera_backend") or "").strip().lower() == "lerobot"
             or bool(spec.get("camera_enabled") or spec.get("vision_use_lerobot_camera"))
+            or active_cam_requested
         )
         if not requested:
             return capture
         if state.mode == Mode.LIVE and not live_confirmed:
             enriched = dict(capture)
             enriched["camera_bridge_warning"] = "lerobot_camera_test_requires_live_confirmation"
+            enriched["active_cam_ejection_check"] = {
+                "schema": "active_cam_ejection_check.v1",
+                "status": "blocked",
+                "specimen_detected": False,
+                "spc_autoejection_confirmed": False,
+                "blocking_reason": "lerobot_camera_test_requires_live_confirmation",
+                "source": active_cam_tool or camera_test_tool or "lerobot.camera.test",
+            }
             return enriched
+        active_camera_key = self._active_cam_camera_key(state, capture)
+        runtime_mode = self._camera_runtime_mode(state)
+        tool_name = active_cam_tool if active_cam_requested else camera_test_tool
         payload = {
-            "mode": state.mode.value,
-            "runtime_mode": state.mode.value,
-            "camera_key": capture.get("camera_key") or "top",
+            "mode": runtime_mode,
+            "runtime_mode": runtime_mode,
+            "camera_key": active_camera_key,
             "profile_id": str(spec.get("lerobot_profile_id") or spec.get("robot_profile_id") or ""),
-            "confirm_live_execute": live_confirmed,
+            "confirm_live_execute": live_confirmed or runtime_mode == "live",
+            "reason": "spc_autoejection_verification" if active_cam_requested else "vision_camera_evidence",
         }
+        if active_cam_requested:
+            payload.update(
+                {
+                    "active_robot_cam_camera_priority": "d405",
+                    "active_robot_cam_d455f_fallback_enabled": False,
+                }
+            )
         try:
-            result = ctx.tools.call("lerobot.camera.test", payload)
+            result = ctx.tools.call(tool_name, payload)
         except Exception as exc:
             enriched = dict(capture)
-            enriched["lerobot_camera_test"] = {"ok": False, "failure_code": exc.__class__.__name__, "message": str(exc)}
+            result_key = "lerobot_active_robot_cam_capture" if active_cam_requested else "lerobot_camera_test"
+            enriched[result_key] = {"ok": False, "tool": tool_name, "failure_code": exc.__class__.__name__, "message": str(exc)}
+            enriched["active_cam_ejection_check"] = self._active_cam_ejection_check(
+                state=state,
+                capture=capture,
+                result=enriched[result_key],
+                active_camera_key=active_camera_key,
+            )
             return enriched
         enriched = dict(capture)
-        enriched["lerobot_camera_test"] = result
+        result_key = "lerobot_active_robot_cam_capture" if active_cam_requested else "lerobot_camera_test"
+        enriched[result_key] = result
         capture_result = result.get("capture") if isinstance(result.get("capture"), dict) else {}
+        active_check = self._active_cam_ejection_check(
+            state=state,
+            capture=capture,
+            result=result,
+            active_camera_key=active_camera_key,
+        )
+        enriched["active_cam_ejection_check"] = active_check
+        enriched["camera_returned_to_vla"] = bool(active_check.get("camera_returned_to_vla", enriched.get("camera_returned_to_vla", True)))
+        enriched["vla_camera_precheck_ok"] = bool(active_check.get("port_released", enriched.get("vla_camera_precheck_ok", True)))
+        enriched["spc_autoejection_confirmation"] = {
+            "schema": "spc_autoejection_confirmation.v1",
+            "signal": "SPC_AUTOEJECTION_CONFIRMED_BY_ACTIVE_CAM",
+            "status": active_check.get("status"),
+            "specimen_detected": bool(active_check.get("specimen_detected")),
+            "confirmed": bool(active_check.get("spc_autoejection_confirmed")),
+            "source_agent": self.name,
+            "consumer_agent": "specimen_agent",
+            "camera_key": active_check.get("camera_key"),
+            "capture_path": active_check.get("capture_path"),
+            "capture_url": active_check.get("capture_url"),
+        }
+        if active_cam_requested:
+            confirmed = bool(active_check.get("status") == "confirmed" and active_check.get("spc_autoejection_confirmed"))
+            enriched.update(
+                {
+                    "ok": confirmed,
+                    "source": "lerobot_active_robot_cam",
+                    "camera_key": active_check.get("camera_key") or active_camera_key,
+                    "detected": bool(active_check.get("specimen_detected")),
+                    "confidence": 0.86 if confirmed else 0.0,
+                    "pose_confidence": 0.86 if confirmed else 0.0,
+                    "stable_for_ms": 1200 if confirmed else 0,
+                    "failure_code": "" if confirmed else str(active_check.get("blocking_reason") or result.get("failure_code") or "ACTIVE_CAM_CONFIRMATION_REQUIRED"),
+                    "backend_mode": "active_cam",
+                    "detector": "active_cam_specimen_pose",
+                }
+            )
         if result.get("ok") and capture_result.get("path"):
             enriched["frame_path"] = str(capture_result.get("path"))
             enriched["frame_url"] = str(capture_result.get("serve_url") or "")
-            enriched["source"] = "lerobot_camera_test"
+            enriched["source"] = "lerobot_active_robot_cam" if active_cam_requested else "lerobot_camera_test"
             enriched["camera_key"] = result.get("camera_key") or enriched.get("camera_key") or "top"
             enriched["frame_width"] = capture_result.get("width")
             enriched["frame_height"] = capture_result.get("height")
             enriched["synthetic_frame"] = capture_result.get("synthetic")
         return enriched
 
-    def _should_request_specimen_pose_snapshot(self, state: OrchestratorState) -> bool:
+    def _should_request_active_cam_ejection_check(self, state: OrchestratorState) -> bool:
         specimen = self._specimen_result(state)
         if not specimen or specimen.get("ok") is False:
             return False
-        fabricated = state.run_metadata.get("specimen_fabricated") if isinstance(state.run_metadata, dict) else {}
-        handoff = state.run_metadata.get("specimen_handoff_packet") if isinstance(state.run_metadata, dict) else {}
-        for packet in (fabricated, handoff):
-            if isinstance(packet, dict) and packet.get("schema") == "specimen_fabricated.v1":
-                if str(packet.get("status") or "").strip().lower() in {"ready", "ok", "completed"}:
-                    return True
         report = self._fabrication_report(state, specimen)
-        intent = report.get("fabrication_intent") if isinstance(report.get("fabrication_intent"), dict) else {}
-        printer_path = str(intent.get("printer_path") or "").strip().lower()
-        if printer_path in {"virtual_bridge", "live", "installed_printer", "actual_print", "bambulab_x2d"}:
-            return True
+        if not report:
+            fabricated = state.run_metadata.get("specimen_fabricated") if isinstance(state.run_metadata, dict) else {}
+            return isinstance(fabricated, dict) and fabricated.get("schema") == "specimen_fabricated.v1"
         outcome = report.get("fabrication_outcome") if isinstance(report.get("fabrication_outcome"), dict) else {}
-        location = str(outcome.get("location") or "").strip().lower()
-        return location in {"a4_workspace", "robot_workspace", "ejection_basket", "3dp_output_area", ""}
-
-    def _specimen_pose_snapshot(self, state: OrchestratorState, ctx: AgentContext, frame_id: str) -> dict[str, Any]:
-        if "vision.specimen_pose_snapshot" not in set(ctx.tools.list_tools()):
-            return {}
-        if not self._should_request_specimen_pose_snapshot(state):
-            return {}
-        specimen = self._specimen_result(state)
-        payload = {
-            "mode": state.mode.value,
-            "runtime_mode": state.mode.value,
-            "run_id": state.run_id,
-            "experiment_id": state.experiment_id,
-            "frame_id": frame_id,
-            "specimen_id": specimen.get("specimen_id", ""),
-            "output_dir": str(self._artifact_dir(state, f"pose-{frame_id}")),
+        gate = report.get("autoejection_gate") if isinstance(report.get("autoejection_gate"), dict) else {}
+        statuses = {
+            str(outcome.get("autoejection_status") or "").strip().lower(),
+            str(outcome.get("status") or "").strip().lower(),
+            str(gate.get("status") or "").strip().lower(),
         }
-        try:
-            return ctx.tools.call("vision.specimen_pose_snapshot", payload)
-        except Exception as exc:
-            if state.mode == Mode.TEST:
-                return {"ok": False, "failure_code": exc.__class__.__name__, "message": str(exc), "tool": "vision.specimen_pose_snapshot"}
-            raise
+        if statuses.intersection({"complete", "completed", "confirmed", "ready", "ok", "success"}):
+            return True
+        location = str(outcome.get("location") or "").strip().lower()
+        return location in {"a4_workspace", "robot_workspace", "ejection_basket", "3dp_output_area"}
 
-    def _merge_specimen_pose_capture(self, capture: dict[str, Any], pose_result: dict[str, Any]) -> dict[str, Any]:
-        if not isinstance(pose_result, dict) or not pose_result:
-            return capture
-        merged = dict(capture)
-        merged["specimen_pose_result"] = pose_result
-        pose = pose_result.get("pose") if isinstance(pose_result.get("pose"), dict) else {}
-        if not pose_result.get("ok") or not pose:
-            merged["pose_snapshot_failure_code"] = pose_result.get("failure_code", "SPECIMEN_POSE_FAILED")
-            return merged
-        position = pose.get("position_robot_base_mm") if isinstance(pose.get("position_robot_base_mm"), dict) else {}
-        orientation = pose.get("orientation_deg") if isinstance(pose.get("orientation_deg"), dict) else {}
-        camera_returned = bool(pose.get("port_released") and pose.get("camera_owner_after") == "vla_runtime")
-        merged.update(
-            {
-                "x_mm": position.get("x", 0.0),
-                "y_mm": position.get("y", 0.0),
-                "z_mm": position.get("z", 0.0),
-                "yaw_deg": orientation.get("yaw", 0.0),
-                "pose_confidence": pose.get("confidence", merged.get("confidence", 0.0)),
-                "confidence": pose.get("confidence", merged.get("confidence", 0.0)),
-                "camera_returned_to_vla": camera_returned,
-                "vla_camera_precheck_ok": bool(pose.get("vla_camera_precheck_ok")),
-                "specimen_pose": pose,
-                "source": "d455f_ros_snapshot",
-                "detector": "atr_specimen_pose_tracker",
-                "pose_backend": "d455f_rgbd_one_shot",
+    def _active_cam_camera_key(self, state: OrchestratorState, capture: dict[str, Any]) -> str:
+        spec = state.current_experiment_spec if isinstance(state.current_experiment_spec, dict) else {}
+        for key in ("active_cam_camera_key", "vision_active_camera_key", "active_robot_cam_primary_camera_key"):
+            value = str(spec.get(key) or "").strip()
+            if value:
+                return value
+        value = str(capture.get("active_cam_camera_key") or "").strip()
+        return value or "wrist"
+
+    @staticmethod
+    def _post_manipulation_context(state: OrchestratorState) -> dict[str, Any]:
+        metadata = state.run_metadata if isinstance(state.run_metadata, dict) else {}
+        manipulation = metadata.get("manipulation_result") if isinstance(metadata.get("manipulation_result"), dict) else {}
+        robot_task = metadata.get("robot_task_result") if isinstance(metadata.get("robot_task_result"), dict) else {}
+        handoff = str(robot_task.get("handoff_status") or manipulation.get("handoff_status") or "").strip().lower()
+        completion = str(robot_task.get("completion_status") or manipulation.get("completion_status") or "").strip().lower()
+        interlock = (
+            robot_task.get("post_place_interlock")
+            if isinstance(robot_task.get("post_place_interlock"), dict)
+            else manipulation.get("post_place_interlock")
+            if isinstance(manipulation.get("post_place_interlock"), dict)
+            else {}
+        )
+        session_id = str(
+            robot_task.get("rollout_session_id")
+            or robot_task.get("episode_id")
+            or manipulation.get("session_id")
+            or interlock.get("session_id")
+            or ""
+        )
+        return {
+            "handoff_status": handoff,
+            "completion_status": completion,
+            "post_place_interlock": dict(interlock),
+            "session_id": session_id,
+            "requested": handoff == "needs_post_place_vision",
+        }
+
+    @classmethod
+    def _post_manipulation_handoff_requested(cls, state: OrchestratorState) -> bool:
+        return bool(cls._post_manipulation_context(state).get("requested"))
+
+    @classmethod
+    def _post_manipulation_completion_requested(cls, state: OrchestratorState) -> bool:
+        context = cls._post_manipulation_context(state)
+        completion = str(context.get("completion_status") or "")
+        interlock = context.get("post_place_interlock") if isinstance(context.get("post_place_interlock"), dict) else {}
+        session_id = str(context.get("session_id") or "")
+        interlock_session_id = str(interlock.get("session_id") or "")
+        session_matches = not (session_id and interlock_session_id and session_id != interlock_session_id)
+        return bool(context.get("requested")) and completion in {
+            "reported_complete",
+            "complete",
+            "completed",
+        } and bool(interlock.get("ready_for_utm_snapshot")) and session_matches
+
+    def _capture_request(self, state: OrchestratorState, *, frame_id: str, specimen: dict[str, Any]) -> dict[str, Any]:
+        if self._post_manipulation_completion_requested(state):
+            spec = state.current_experiment_spec if isinstance(state.current_experiment_spec, dict) else {}
+            return {
+                "frame_id": frame_id,
+                "camera_key": str(spec.get("utm_camera_key") or spec.get("vision_utm_camera_key") or "utm"),
+                "purpose": "utm_placement_verification",
+                "specimen_id": specimen.get("specimen_id", ""),
+                "mode": state.mode.value,
             }
+        return {
+            "frame_id": frame_id,
+            "camera_key": "top",
+            "purpose": "3dp_output_pickup_check",
+            "specimen_id": specimen.get("specimen_id", ""),
+            "mode": state.mode.value,
+        }
+
+    def _post_place_interlock_waiting_capture(
+        self,
+        state: OrchestratorState,
+        *,
+        frame_id: str,
+        specimen: dict[str, Any],
+    ) -> dict[str, Any]:
+        context = self._post_manipulation_context(state)
+        return {
+            "ok": True,
+            "tool": "vision.post_place_interlock.wait",
+            "frame_id": frame_id,
+            "observation_id": f"obs-{frame_id}",
+            "camera_key": "utm",
+            "purpose": "utm_placement_verification",
+            "source": "post_place_interlock",
+            "specimen_id": specimen.get("specimen_id", ""),
+            "session_id": context.get("session_id", ""),
+            "detected": False,
+            "confidence": 0.0,
+            "pose_confidence": 0.0,
+            "stable_for_ms": 0,
+            "anomaly": False,
+            "capture_skipped": True,
+            "completion_blocking_reason": "post_place_interlock_waiting",
+            "post_place_interlock": context.get("post_place_interlock", {}),
+        }
+
+    def _active_cam_ejection_check(
+        self,
+        *,
+        state: OrchestratorState,
+        capture: dict[str, Any],
+        result: dict[str, Any],
+        active_camera_key: str,
+    ) -> dict[str, Any]:
+        specimen = self._specimen_result(state)
+        driver_result = result.get("active_robot_cam_result") if isinstance(result.get("active_robot_cam_result"), dict) else {}
+        capture_result = result.get("capture") if isinstance(result.get("capture"), dict) else {}
+        if not capture_result and isinstance(driver_result.get("capture"), dict):
+            capture_result = driver_result["capture"]
+        capture_pose = result.get("capture_pose") if isinstance(result.get("capture_pose"), dict) else {}
+        if not capture_pose and isinstance(driver_result.get("capture_pose"), dict):
+            capture_pose = driver_result["capture_pose"]
+        if not capture_pose and isinstance(driver_result.get("capture_wait"), dict):
+            capture_pose = driver_result["capture_wait"]
+        resume_pose = result.get("resume_pose") if isinstance(result.get("resume_pose"), dict) else {}
+        if not resume_pose and isinstance(driver_result.get("resume_pose"), dict):
+            resume_pose = driver_result["resume_pose"]
+        tool_ok = bool(result.get("ok"))
+        capture_ok = bool(capture_result.get("ok", True) and capture_result.get("path"))
+        detector_ready = bool(capture.get("ok") and specimen and specimen.get("ok") is not False and not capture.get("anomaly"))
+        port_released = bool(result.get("port_released") or capture_result.get("port_released") or driver_result.get("port_released"))
+        owner_after = str(capture_result.get("camera_owner_after") or result.get("camera_owner_after") or driver_result.get("camera_owner_after") or "")
+        camera_returned_to_vla = bool(
+            result.get("camera_returned_to_vla")
+            or capture_result.get("camera_returned_to_vla")
+            or driver_result.get("camera_returned_to_vla")
+            or (port_released and owner_after == "vla_runtime")
         )
-        merged.setdefault(
-            "detections",
-            [
-                {
-                    "label": "printed_specimen",
-                    "zone": "a4_workspace",
-                    "specimen_id": pose.get("specimen_id", ""),
-                    "bbox_xyxy": pose.get("bbox_xyxy", []),
-                    "confidence": pose.get("confidence", 0.0),
-                    "source": "d455f_ros_snapshot",
-                }
-            ],
+        specimen_detected = bool(capture_ok and detector_ready)
+        release_ok = bool(port_released and camera_returned_to_vla)
+        confirmed = bool(tool_ok and specimen_detected and release_ok)
+        status = (
+            "confirmed"
+            if confirmed
+            else "blocked"
+            if not tool_ok or (capture_ok and not release_ok)
+            else "not_detected"
+            if capture_ok
+            else "blocked"
         )
-        return merged
+        blocking_reason = str(
+            result.get("failure_code")
+            or driver_result.get("failure_code")
+            or result.get("message")
+            or driver_result.get("message")
+            or ("camera_not_returned_to_vla" if specimen_detected and not release_ok else "specimen_not_confirmed")
+        )
+        return {
+            "schema": "active_cam_ejection_check.v1",
+            "status": status,
+            "source": str(result.get("tool") or "lerobot.camera.test"),
+            "camera_key": result.get("camera_key") or active_camera_key,
+            "camera_port": result.get("camera_port") or result.get("camera_identity_port") or "",
+            "specimen_id": specimen.get("specimen_id", ""),
+            "specimen_detected": specimen_detected,
+            "spc_autoejection_confirmed": confirmed,
+            "capture_path": str(capture_result.get("path") or ""),
+            "capture_url": str(capture_result.get("serve_url") or ""),
+            "frame_width": capture_result.get("width"),
+            "frame_height": capture_result.get("height"),
+            "synthetic_frame": capture_result.get("synthetic"),
+            "port_released": port_released,
+            "camera_returned_to_vla": camera_returned_to_vla,
+            "camera_owner_after": owner_after,
+            "robot_pose_included": bool(result.get("robot_pose_included") or driver_result.get("robot_pose_included") or capture_pose or resume_pose),
+            "capture_pose": capture_pose,
+            "resume_pose": resume_pose,
+            "detection_source": "active_cam_capture_plus_vision_signal",
+            "blocking_reason": "" if confirmed else blocking_reason,
+        }
 
     def _events(
         self,
@@ -431,6 +869,7 @@ class VisionAgent(BaseAgent):
         confidence: float,
         timestamp: str,
         stable_for_ms: int,
+        active_cam_confirmed: bool = False,
     ) -> list[dict[str, Any]]:
         blocking_reason = None
         if not capture_ok:
@@ -467,6 +906,18 @@ class VisionAgent(BaseAgent):
                 status="observed" if ready else "blocked",
                 timestamp=timestamp,
                 blocking_reason=blocking_reason,
+            ),
+            self._signal(
+                state=state,
+                signal="spc_autoejection_confirmed",
+                zone_id="active_cam_ejection_area",
+                value=active_cam_confirmed,
+                confidence=ready_conf if active_cam_confirmed else 0.0,
+                stable_for_ms=stable_for_ms if active_cam_confirmed else 0,
+                target_agent="specimen_agent",
+                status="confirmed" if active_cam_confirmed else "not_checked",
+                timestamp=timestamp,
+                blocking_reason=None if active_cam_confirmed else "active_cam_confirmation_not_available",
             ),
             self._signal(
                 state=state,
@@ -627,6 +1078,94 @@ class VisionAgent(BaseAgent):
         ]
         return signals
 
+    def _post_manipulation_signals(
+        self,
+        *,
+        state: OrchestratorState,
+        ready: bool,
+        capture_ok: bool,
+        anomaly: bool,
+        confidence: float,
+        timestamp: str,
+        stable_for_ms: int,
+    ) -> list[dict[str, Any]]:
+        waiting_status = "verified" if ready else "waiting" if capture_ok and not anomaly else "blocked"
+        wait_reason = None if capture_ok and not anomaly else "utm_camera_capture_failed"
+        return [
+            self._signal(
+                state=state,
+                signal="specimen_on_utm_platen",
+                zone_id="utm_platen",
+                value=ready,
+                confidence=confidence if ready else 0.0,
+                stable_for_ms=stable_for_ms if ready else 0,
+                target_agent="manipulation_agent",
+                status=waiting_status,
+                timestamp=timestamp,
+                blocking_reason=wait_reason,
+            ),
+            self._signal(
+                state=state,
+                signal="fixture_alignment_ok",
+                zone_id="utm_platen",
+                value=ready,
+                confidence=confidence if ready else 0.0,
+                stable_for_ms=stable_for_ms if ready else 0,
+                target_agent="equipment_agent",
+                status=waiting_status,
+                timestamp=timestamp,
+                blocking_reason=wait_reason,
+            ),
+            self._signal(
+                state=state,
+                signal="robot_workspace_clear",
+                zone_id="robot_workspace",
+                value=bool(capture_ok and not anomaly),
+                confidence=0.82 if capture_ok and not anomaly else 0.0,
+                stable_for_ms=stable_for_ms if capture_ok and not anomaly else 0,
+                target_agent="guardian_agent",
+                status="clear" if capture_ok and not anomaly else "blocked",
+                timestamp=timestamp,
+                blocking_reason=None if capture_ok and not anomaly else "workspace_review_required",
+            ),
+            self._signal(
+                state=state,
+                signal="visual_test_evidence_ready",
+                zone_id="utm_camera",
+                value=capture_ok,
+                confidence=1.0 if capture_ok else 0.0,
+                stable_for_ms=stable_for_ms if capture_ok else 0,
+                target_agent="knowledge_agent",
+                status="record" if capture_ok else "blocked",
+                timestamp=timestamp,
+                blocking_reason=None if capture_ok else "no_frame_evidence",
+            ),
+            self._signal(
+                state=state,
+                signal="data_quality_low",
+                zone_id="utm_camera",
+                value=bool(capture_ok and not anomaly and confidence < 0.6),
+                confidence=round(1.0 - max(0.0, min(1.0, confidence)), 3) if capture_ok else 1.0,
+                stable_for_ms=stable_for_ms if capture_ok else 0,
+                target_agent="knowledge_agent",
+                status="warning" if capture_ok and not anomaly and confidence < 0.6 else "clear" if capture_ok and not anomaly else "blocked",
+                timestamp=timestamp,
+                blocking_reason=None if capture_ok and not anomaly else "low_quality_visual_evidence",
+            ),
+            self._signal(
+                state=state,
+                signal="anomaly_detected",
+                zone_id="robot_workspace",
+                value=anomaly or not capture_ok,
+                confidence=0.9 if anomaly or not capture_ok else 0.1,
+                stable_for_ms=stable_for_ms if anomaly else 0,
+                target_agent="guardian_agent",
+                status="warning" if anomaly else "clear" if capture_ok else "blocked",
+                timestamp=timestamp,
+                blocking_reason="operator_review_required" if anomaly or not capture_ok else None,
+            ),
+        ]
+
     def _scene_svg(self, zones: dict[str, Any], signals: list[dict[str, Any]], *, observation_id: str) -> str:
         zone_order = ["printer_bed", "ejection_basket", "robot_workspace", "robot_gripper", "utm_platen", "utm_screen"]
         colors = {"loaded": "#3fbf7f", "clear": "#7aa7ff", "review_required": "#f5b95b", "empty_or_unknown": "#d6dde8", "unknown": "#d6dde8"}
@@ -667,6 +1206,8 @@ class VisionAgent(BaseAgent):
     ) -> dict[str, Any]:
         output_dir = self._artifact_dir(state, observation_id)
         timestamp = self.now_iso()
+        active_check = capture.get("active_cam_ejection_check") if isinstance(capture.get("active_cam_ejection_check"), dict) else {}
+        active_run_artifact = active_check.get("run_artifact") if isinstance(active_check.get("run_artifact"), dict) else {}
         detection_payload = {
             "schema": "vision_detection_evidence.v1",
             "observation_id": observation_id,
@@ -690,6 +1231,9 @@ class VisionAgent(BaseAgent):
         scene_path.write_text(self._scene_svg(zones, signals, observation_id=observation_id), encoding="utf-8")
         return {
             "frame_path": str(capture.get("frame_path") or capture.get("image_path") or ""),
+            "active_cam_capture_path": str(active_check.get("capture_path") or ""),
+            "active_cam_capture_url": str(active_check.get("capture_url") or ""),
+            "active_cam_run_artifact": dict(active_run_artifact),
             "annotated_frame_path": str(scene_path),
             "before_after_path": str(capture.get("before_after_path") or ""),
             "detection_json_path": str(detection_path),
@@ -700,6 +1244,7 @@ class VisionAgent(BaseAgent):
         refs: list[dict[str, Any]] = []
         for key, label in (
             ("frame_path", "frame"),
+            ("active_cam_capture_path", "active_cam_capture"),
             ("annotated_frame_path", "annotated_scene"),
             ("before_after_path", "before_after"),
             ("detection_json_path", "detection_json"),
@@ -707,6 +1252,15 @@ class VisionAgent(BaseAgent):
             path = artifacts.get(key)
             if path:
                 refs.append({"type": label, "path": str(path)})
+        active_run_artifact = artifacts.get("active_cam_run_artifact")
+        if isinstance(active_run_artifact, dict) and active_run_artifact.get("path"):
+            refs.append(
+                {
+                    "type": "active_cam_run_artifact",
+                    "path": str(active_run_artifact["path"]),
+                    "url": str(active_run_artifact.get("url") or ""),
+                }
+            )
         return refs
 
     def _decisions(self, *, task: str, ready: bool, capture_ok: bool, anomaly: bool, signal_count: int) -> list[dict[str, Any]]:
@@ -810,6 +1364,11 @@ class VisionAgent(BaseAgent):
         safety = vision_report.get("safety_anomaly", {}) if isinstance(vision_report.get("safety_anomaly"), dict) else {}
         pose = observation.get("pose_estimate", {}) if isinstance(observation.get("pose_estimate"), dict) else {}
         readiness = observation.get("transfer_readiness", {}) if isinstance(observation.get("transfer_readiness"), dict) else {}
+        active_cam = capture.get("active_cam_ejection_check") if isinstance(capture.get("active_cam_ejection_check"), dict) else {}
+        spc_confirmation = observation.get("spc_autoejection_confirmation") if isinstance(observation.get("spc_autoejection_confirmation"), dict) else {}
+        utm_completion = observation.get("vision_manipulation_completion") if isinstance(observation.get("vision_manipulation_completion"), dict) else {}
+        utm_run_artifact = capture.get("utm_completion_run_artifact") if isinstance(capture.get("utm_completion_run_artifact"), dict) else {}
+        pickup_target = observation.get("pickup_target", {}) if isinstance(observation.get("pickup_target"), dict) else {}
         confidences = [self._as_float(signal.get("confidence"), 0.0) for signal in signals]
         bins = [
             {"bin": "0.00-0.25", "count": sum(1 for value in confidences if 0.0 <= value < 0.25)},
@@ -853,6 +1412,13 @@ class VisionAgent(BaseAgent):
                 )
         failure_labels = vision_report.get("knowledge_payload", {}).get("failure_labels", []) if isinstance(vision_report.get("knowledge_payload"), dict) else []
         success_labels = vision_report.get("knowledge_payload", {}).get("success_labels", []) if isinstance(vision_report.get("knowledge_payload"), dict) else []
+        agentic_progress = self._vision_agentic_progress(
+            observation=observation,
+            vision_packet=vision_packet,
+            capture=capture,
+            ready=ready,
+            anomaly=anomaly,
+        )
         return {
             "schema": "vision_agent_report.v1",
             "source_report_schema": vision_report.get("schema"),
@@ -873,6 +1439,7 @@ class VisionAgent(BaseAgent):
                 "capture_ok": bool(capture.get("ok")),
                 "status": "ready" if capture.get("ok") and not anomaly else "review_required",
                 "frame_path": artifacts.get("frame_path") or capture.get("frame_path") or capture.get("image_path") or "",
+                "utm_runtime_status": capture.get("utm_runtime_status", {}),
             },
             "calibration_summary": {
                 "calibration_id": camera.get("calibration_id"),
@@ -898,6 +1465,35 @@ class VisionAgent(BaseAgent):
                 "frame_path": artifacts.get("frame_path"),
                 "events": events,
                 "detections": detections,
+            },
+            "active_cam_ejection_check": {
+                "schema": "active_cam_ejection_check.v1",
+                "status": active_cam.get("status") or ("not_configured" if not active_cam else "unknown"),
+                "source": active_cam.get("source") or "lerobot.camera.test",
+                "camera_key": active_cam.get("camera_key") or "",
+                "camera_port": active_cam.get("camera_port") or "",
+                "specimen_id": active_cam.get("specimen_id") or pickup_target.get("specimen_id", ""),
+                "specimen_detected": bool(active_cam.get("specimen_detected")),
+                "spc_autoejection_confirmed": bool(active_cam.get("spc_autoejection_confirmed") or spc_confirmation.get("confirmed")),
+                "capture_path": active_cam.get("capture_path") or artifacts.get("active_cam_capture_path") or "",
+                "capture_url": active_cam.get("capture_url") or artifacts.get("active_cam_capture_url") or "",
+                "frame_width": active_cam.get("frame_width"),
+                "frame_height": active_cam.get("frame_height"),
+                "synthetic_frame": active_cam.get("synthetic_frame"),
+                "port_released": bool(active_cam.get("port_released")),
+                "camera_returned_to_vla": bool(active_cam.get("camera_returned_to_vla")),
+                "camera_owner_after": active_cam.get("camera_owner_after") or "",
+                "robot_pose_included": bool(active_cam.get("robot_pose_included")),
+                "capture_pose": active_cam.get("capture_pose") if isinstance(active_cam.get("capture_pose"), dict) else {},
+                "resume_pose": active_cam.get("resume_pose") if isinstance(active_cam.get("resume_pose"), dict) else {},
+                "detection_source": active_cam.get("detection_source") or "",
+                "spc_signal": spc_confirmation.get("signal") or "",
+                "blocking_reason": active_cam.get("blocking_reason") or spc_confirmation.get("blocking_reason") or "",
+                "run_artifact": dict(active_cam.get("run_artifact")) if isinstance(active_cam.get("run_artifact"), dict) else {},
+            },
+            "utm_completion_confirmation": {
+                **dict(utm_completion),
+                "run_artifact": dict(utm_run_artifact),
             },
             "segmentation": {
                 "panels": segmentation_panels,
@@ -941,13 +1537,98 @@ class VisionAgent(BaseAgent):
                 "next_action": vision_packet.get("next_action"),
                 "warnings": vision_packet.get("warnings", []),
             },
+            "agentic_progress": agentic_progress,
             "visualization_manifest": [
                 {"id": "inspection_feed", "section": "inspection_feed", "type": "image_overlays"},
+                {"id": "active_cam_ejection_check", "section": "active_cam_ejection_check", "type": "image_evidence"},
                 {"id": "confidence_distribution", "section": "confidence_distribution", "type": "histogram"},
                 {"id": "calibration_summary", "section": "calibration_summary", "type": "calibration_line_chart"},
                 {"id": "segmentation", "section": "segmentation", "type": "segmentation_panels"},
                 {"id": "confusion_matrix", "section": "confusion_matrix", "type": "confusion_matrix"},
             ],
+        }
+
+    def _vision_agentic_progress(
+        self,
+        *,
+        observation: dict[str, Any],
+        vision_packet: dict[str, Any],
+        capture: dict[str, Any],
+        ready: bool,
+        anomaly: bool,
+    ) -> dict[str, Any]:
+        """Compact Vision progress contract for Live GUI cards."""
+        pose = observation.get("pose_estimate", {}) if isinstance(observation.get("pose_estimate"), dict) else {}
+        specimen_pose = observation.get("specimen_pose", {}) if isinstance(observation.get("specimen_pose"), dict) else {}
+        readiness = observation.get("transfer_readiness", {}) if isinstance(observation.get("transfer_readiness"), dict) else {}
+        capture_ok = bool(capture.get("ok"))
+        pose_confidence = self._as_float(pose.get("confidence") or specimen_pose.get("confidence"), 0.0)
+        pose_ready = bool(capture_ok and not anomaly and (ready or pose_confidence >= 0.6 or specimen_pose))
+        camera_release_ok = bool(readiness.get("camera_returned_to_vla") is True or specimen_pose.get("port_released") is True)
+        handoff_ready = bool(ready and str(vision_packet.get("status", "")).lower() == "ready")
+        active_cam = capture.get("active_cam_ejection_check") if isinstance(capture.get("active_cam_ejection_check"), dict) else {}
+        if active_cam:
+            active_status = "complete" if active_cam.get("spc_autoejection_confirmed") else "blocked" if active_cam.get("status") == "blocked" else "waiting"
+            active_detail = str(active_cam.get("status") or "active cam pending")
+        else:
+            active_status = "complete" if capture_ok else "blocked"
+            active_detail = "not required for current route" if capture_ok else "camera capture failed"
+        utm_completion = observation.get("vision_manipulation_completion") if isinstance(observation.get("vision_manipulation_completion"), dict) else {}
+        utm_requested = str(capture.get("purpose") or "").strip().lower() == "utm_placement_verification"
+        utm_status = "complete" if ready and utm_completion.get("detected") is True else "waiting" if capture_ok else "blocked"
+        utm_detail = str(
+            utm_completion.get("blocking_reason")
+            or utm_completion.get("status")
+            or "post-place verification pending"
+        )
+        steps = [
+            {
+                "id": "capture",
+                "label": "Capture",
+                "status": "complete" if capture_ok else "blocked",
+                "detail": "camera frame acquired" if capture_ok else str(capture.get("failure_code") or "camera capture failed"),
+            },
+            {
+                "id": "specimen_pose",
+                "label": "Specimen Pose",
+                "status": "complete" if pose_ready else "waiting" if capture_ok else "blocked",
+                "detail": f"confidence={pose_confidence:.2f}" if pose_confidence else "pose not available",
+            },
+            {
+                "id": "camera_release",
+                "label": "Camera Return",
+                "status": "complete" if camera_release_ok else "waiting" if capture_ok else "blocked",
+                "detail": "camera route returned to VLA" if camera_release_ok else str(readiness.get("blocking_reason") or "waiting for camera release"),
+            },
+            {
+                "id": "active_cam",
+                "label": "Active Cam",
+                "status": active_status,
+                "detail": active_detail,
+            },
+        ]
+        if utm_requested:
+            steps.append(
+                {
+                    "id": "utm_confirmation",
+                    "label": "UTM Confirmation",
+                    "status": utm_status,
+                    "detail": utm_detail,
+                }
+            )
+        steps.append(
+            {
+                "id": "handoff",
+                "label": "Handoff",
+                "status": "complete" if handoff_ready else "waiting" if capture_ok else "blocked",
+                "detail": str(vision_packet.get("next_action") or vision_packet.get("status") or "handoff pending"),
+            }
+        )
+        current = next((step["id"] for step in steps if step["status"] != "complete"), steps[-1]["id"])
+        return {
+            "schema": "vision_agentic_progress.v1",
+            "current_step": current,
+            "steps": steps,
         }
 
     def _transfer_observation(self, state: OrchestratorState, capture: dict[str, Any]) -> dict[str, Any]:
@@ -959,23 +1640,207 @@ class VisionAgent(BaseAgent):
         specimen_ready = bool(specimen) and not bool(specimen.get("requires_operator_input")) and specimen.get("ok") is not False
         capture_ok = bool(capture.get("ok"))
         anomaly = bool(capture.get("anomaly", False)) or not capture_ok
+        spc_confirmation = capture.get("spc_autoejection_confirmation") if isinstance(capture.get("spc_autoejection_confirmation"), dict) else {}
+        active_cam_confirmed = bool(spc_confirmation.get("confirmed") or spc_confirmation.get("spc_autoejection_confirmed"))
         pose_confidence = self._as_float(capture.get("pose_confidence", capture.get("confidence")), 0.82 if capture_ok and specimen_ready else 0.55 if capture_ok else 0.0)
         pose_confidence = max(0.0, min(1.0, pose_confidence))
         frame_id = str(capture.get("frame_id", f"frame-{state.run_id}"))
         observation_id = str(capture.get("observation_id") or frame_id or f"obs-{state.run_id}")
+        active_cam_payload = capture.get("active_cam_ejection_check") if isinstance(capture.get("active_cam_ejection_check"), dict) else {}
+        active_cam_artifact_update: dict[str, Any] = {}
+        if active_cam_payload:
+            active_cam_artifact_update = self._persist_active_cam_run_artifact(
+                state=state,
+                observation_id=observation_id,
+                active_check=active_cam_payload,
+            )
+            active_cam_payload = dict(active_cam_payload)
+            if active_cam_artifact_update.get("status") == "stored":
+                active_cam_payload["capture_path"] = active_cam_artifact_update["path"]
+                active_cam_payload["capture_url"] = active_cam_artifact_update["url"]
+                active_cam_payload["run_artifact"] = dict(active_cam_artifact_update)
+                spc_confirmation = {
+                    **dict(spc_confirmation),
+                    "schema": str(spc_confirmation.get("schema") or "spc_autoejection_confirmation.v1"),
+                    "signal": str(
+                        spc_confirmation.get("signal")
+                        or "SPC_AUTOEJECTION_CONFIRMED_BY_ACTIVE_CAM"
+                    ),
+                    "status": "confirmed",
+                    "confirmed": True,
+                    "capture_path": active_cam_artifact_update["path"],
+                    "capture_url": active_cam_artifact_update["url"],
+                    "run_artifact": dict(active_cam_artifact_update),
+                }
+            else:
+                active_cam_payload.update(
+                    {
+                        "status": "blocked",
+                        "spc_autoejection_confirmed": False,
+                        "capture_path": "",
+                        "capture_url": "",
+                        "run_artifact": {},
+                        "artifact_failure_code": active_cam_artifact_update.get(
+                            "failure_code",
+                            "ACTIVE_CAM_ARTIFACT_FAILED",
+                        ),
+                    }
+                )
+                spc_confirmation = {
+                    **dict(spc_confirmation),
+                    "schema": str(spc_confirmation.get("schema") or "spc_autoejection_confirmation.v1"),
+                    "signal": str(
+                        spc_confirmation.get("signal")
+                        or "SPC_AUTOEJECTION_CONFIRMED_BY_ACTIVE_CAM"
+                    ),
+                    "status": "blocked",
+                    "confirmed": False,
+                    "capture_path": "",
+                    "capture_url": "",
+                    "run_artifact": {},
+                    "artifact_failure_code": active_cam_artifact_update.get(
+                        "failure_code",
+                        "ACTIVE_CAM_ARTIFACT_FAILED",
+                    ),
+                }
+            capture["active_cam_ejection_check"] = active_cam_payload
+            capture["spc_autoejection_confirmation"] = spc_confirmation
         timestamp = str(capture.get("timestamp") or self.now_iso())
         stable_for_ms = self._as_int(capture.get("stable_for_ms"), 1200 if capture_ok and specimen_ready and not anomaly else 0)
         task = self._resolve_task(state, capture)
+        placement_verification = task == "post_manipulation_utm_verification"
+        utm_completion_artifact_update: dict[str, Any] = {}
+        if placement_verification and not bool(capture.get("capture_skipped")):
+            utm_completion_artifact_update = self._persist_utm_completion_run_artifact(
+                state=state,
+                observation_id=observation_id,
+                capture=capture,
+            )
+            capture["utm_completion_run_artifact"] = dict(utm_completion_artifact_update)
+            if utm_completion_artifact_update.get("status") == "stored":
+                capture["annotated_frame_path"] = utm_completion_artifact_update["path"]
+                capture["frame_path"] = utm_completion_artifact_update["path"]
         ready = bool(capture_ok and specimen_ready and not anomaly and pose_confidence >= 0.6)
+        completion_blocking_reason = ""
+        if placement_verification and capture.get("detected") is not True:
+            ready = False
+            completion_blocking_reason = str(
+                capture.get("completion_blocking_reason")
+                or capture.get("failure_code")
+                or "specimen_not_detected_on_utm"
+            )
+        if placement_verification and capture.get("detected") is True and utm_completion_artifact_update.get("status") != "stored":
+            ready = False
+            completion_blocking_reason = str(
+                utm_completion_artifact_update.get("failure_code")
+                or "utm_completion_artifact_required"
+            )
+        rollout_execution = self._rollout_execution_evidence(state)
+        if placement_verification and rollout_execution.get("required") and not rollout_execution.get("observed"):
+            ready = False
+            completion_blocking_reason = completion_blocking_reason or "rollout_action_evidence_required"
+        if placement_verification and (state.mode == Mode.LIVE or self._physical_printer_tail_requested(state)):
+            source = str(capture.get("source") or "").strip().lower()
+            if source in {"", "simulator", "simulation", "mock", "virtual", "virtual_utm_bridge"}:
+                ready = False
+                completion_blocking_reason = "physical_utm_evidence_required"
         pose_payload = capture.get("specimen_pose") if isinstance(capture.get("specimen_pose"), dict) else {}
         camera_returned_to_vla = bool(capture.get("camera_returned_to_vla", True if not pose_payload else False))
         vla_camera_precheck_ok = bool(capture.get("vla_camera_precheck_ok", True if not pose_payload else False))
-        if pose_payload and not camera_returned_to_vla:
+        if active_cam_payload:
+            active_cam_confirmed = bool(
+                active_cam_confirmed
+                and active_cam_payload.get("spc_autoejection_confirmed")
+                and active_cam_payload.get("status") == "confirmed"
+            )
+            camera_returned_to_vla = bool(camera_returned_to_vla and active_cam_payload.get("camera_returned_to_vla"))
+            vla_camera_precheck_ok = bool(vla_camera_precheck_ok and active_cam_payload.get("port_released"))
+            if not active_cam_confirmed:
+                ready = False
+        if (pose_payload or active_cam_payload) and (not camera_returned_to_vla or not vla_camera_precheck_ok):
             ready = False
         zones = self._zone_state(capture=capture, specimen_ready=specimen_ready, capture_ok=capture_ok, anomaly=anomaly, confidence=pose_confidence)
         detections = self._detections(capture=capture, specimen=specimen, specimen_ready=specimen_ready, capture_ok=capture_ok, anomaly=anomaly, confidence=pose_confidence)
         events = self._events(capture=capture, capture_ok=capture_ok, specimen_ready=specimen_ready, anomaly=anomaly, confidence=pose_confidence, frame_id=frame_id)
-        signals = self._agent_signals(state=state, ready=ready, capture_ok=capture_ok, anomaly=anomaly, confidence=pose_confidence, timestamp=timestamp, stable_for_ms=stable_for_ms)
+        signals = (
+            self._post_manipulation_signals(
+                state=state,
+                ready=ready,
+                capture_ok=capture_ok,
+                anomaly=anomaly,
+                confidence=pose_confidence,
+                timestamp=timestamp,
+                stable_for_ms=stable_for_ms,
+            )
+            if placement_verification
+            else self._agent_signals(
+                state=state,
+                ready=ready,
+                capture_ok=capture_ok,
+                anomaly=anomaly,
+                confidence=pose_confidence,
+                timestamp=timestamp,
+                stable_for_ms=stable_for_ms,
+                active_cam_confirmed=active_cam_confirmed,
+            )
+        )
+        completion_signal: dict[str, Any] = {}
+        if placement_verification:
+            utm_status = "verified" if ready else "waiting" if capture_ok and not anomaly else "blocked"
+            zones["utm_platen"] = {
+                **(zones.get("utm_platen") if isinstance(zones.get("utm_platen"), dict) else {}),
+                "specimen_present": ready,
+                "aligned": ready,
+                "confidence": round(pose_confidence if ready else 0.0, 3),
+                "state": "loaded_and_aligned" if ready else "placement_not_confirmed",
+            }
+            for signal in signals:
+                if signal.get("signal") in {"specimen_on_utm_platen", "fixture_alignment_ok"}:
+                    signal["value"] = ready
+                    signal["confidence"] = round(pose_confidence if ready else 0.0, 3)
+                    signal["stable_for_ms"] = stable_for_ms if ready else 0
+                    signal["status"] = utm_status
+                    signal["blocking_reason"] = None
+            metadata = state.run_metadata if isinstance(state.run_metadata, dict) else {}
+            manipulation = metadata.get("manipulation_result") if isinstance(metadata.get("manipulation_result"), dict) else {}
+            robot_task = metadata.get("robot_task_result") if isinstance(metadata.get("robot_task_result"), dict) else {}
+            session_id = str(
+                capture.get("session_id")
+                or robot_task.get("rollout_session_id")
+                or robot_task.get("episode_id")
+                or manipulation.get("session_id")
+                or ""
+            )
+            completion_signal = {
+                "schema": "vision_manipulation_completion.v1",
+                "signal": "vision_manipulation_completion",
+                "run_id": state.run_id,
+                "loop_id": int(state.loop_count or 0),
+                "specimen_id": specimen.get("specimen_id", ""),
+                "detected": ready,
+                "value": ready,
+                "confidence": round(pose_confidence if ready else 0.0, 3),
+                "camera": capture.get("camera_key") or capture.get("camera") or "utm",
+                "timestamp": timestamp,
+                "evidence_path": str(
+                    capture.get("annotated_frame_path")
+                    or capture.get("frame_path")
+                    or capture.get("path")
+                    or ""
+                ),
+                "ready_to_stop_rollout": ready,
+                "session_id": session_id,
+                "target_agent": "manipulation_agent",
+                "status": "detected" if ready else "waiting",
+                "blocking_reason": completion_blocking_reason,
+                "rollout_execution": rollout_execution,
+                "post_place_interlock": (
+                    dict(capture.get("post_place_interlock"))
+                    if isinstance(capture.get("post_place_interlock"), dict)
+                    else {}
+                ),
+            }
+            signals.append(completion_signal)
         artifacts = self._write_evidence_artifacts(
             state=state,
             observation_id=observation_id,
@@ -987,6 +1852,11 @@ class VisionAgent(BaseAgent):
         )
         evidence_refs = self._evidence_refs(artifacts)
         decisions = self._decisions(task=task, ready=ready, capture_ok=capture_ok, anomaly=anomaly, signal_count=len(signals))
+        if placement_verification and capture_ok and not anomaly and not ready:
+            for decision in decisions:
+                if decision.get("decision_id") in {"vision.signal.arbitrated", "vision.handoff.prepared"}:
+                    decision["status"] = "waiting"
+                    decision["rationale"] = "UTM placement monitoring is active; the rollout remains in the current session."
         metrics = self._metrics(zones=zones, detections=detections, signals=signals, ready=ready, anomaly=anomaly)
         source_location = "3dp_output_area"
         fabrication_outcome = fabrication_report.get("fabrication_outcome") if isinstance(fabrication_report.get("fabrication_outcome"), dict) else {}
@@ -994,6 +1864,9 @@ class VisionAgent(BaseAgent):
         if pose_payload:
             source_location = str(pose_payload.get("workspace") or physical_location or "a4_workspace")
             physical_location = source_location
+        if placement_verification:
+            source_location = "utm_fixture"
+            physical_location = "utm_fixture"
         pose = {
             "x_mm": self._as_float(capture.get("x_mm"), 0.0),
             "y_mm": self._as_float(capture.get("y_mm"), 0.0),
@@ -1045,7 +1918,7 @@ class VisionAgent(BaseAgent):
                 "camera_key": capture.get("camera_key") or "top",
                 "frame_ts": timestamp,
                 "source_stage": state.stage.value,
-                "signal_type": "pickup_ready",
+                "signal_type": "vision_manipulation_completion" if placement_verification else "pickup_ready",
                 "candidate_for_lerobot_dataset": bool(capture_ok),
             },
             "knowledge_payload": {
@@ -1053,7 +1926,15 @@ class VisionAgent(BaseAgent):
                 "candidate_id": specimen.get("candidate_id", ""),
                 "success_labels": [event.get("event_type") for event in events if event.get("status") in {"observed", "ready"} and not event.get("blocking")],
                 "failure_labels": [event.get("event_type") for event in events if event.get("blocking")],
-                "visual_notes": "pickup zone ready" if ready else "vision review required before manipulation",
+                "visual_notes": (
+                    "UTM placement verified"
+                    if placement_verification and ready
+                    else "UTM placement monitoring in progress"
+                    if placement_verification and capture_ok and not anomaly
+                    else "pickup zone ready"
+                    if ready
+                    else "vision review required before manipulation"
+                ),
                 "store_in_memory": True,
             },
             "cross_agent_contract": {
@@ -1067,6 +1948,7 @@ class VisionAgent(BaseAgent):
                 "stale_action": "block_downstream_use",
             },
             "specimen_pose": pose_payload,
+            "spc_autoejection_confirmation": spc_confirmation,
         }
         vision_packet = self._vision_packet(
             state=state,
@@ -1077,19 +1959,31 @@ class VisionAgent(BaseAgent):
             ready=ready,
             anomaly=anomaly,
         )
+        if placement_verification and capture_ok and not anomaly and not ready:
+            vision_packet["status"] = "waiting"
+            vision_packet["next_action"] = "continue_utm_monitoring"
+            vision_packet["warnings"] = []
         observation = {
             "observation_id": observation_id,
             "frame_id": frame_id,
             "camera_key": capture.get("camera_key") or capture.get("camera") or "top",
             "source": capture.get("source") or ("live_camera" if state.mode == Mode.LIVE else "simulator"),
-            "summary": "specimen detected in ejection basket; pickup_ready signal emitted" if ready else "vision review required before robot transfer",
+            "summary": (
+                "specimen detected on UTM platen; manipulation completion signal emitted"
+                if placement_verification and ready
+                else "monitoring UTM placement; rollout remains active"
+                if placement_verification and capture_ok and not anomaly
+                else "specimen detected in ejection basket; pickup_ready signal emitted"
+                if ready
+                else "vision review required before robot transfer"
+            ),
             "anomaly": anomaly,
             "pose_estimate": pose,
             "pickup_target": {
                 "specimen_id": specimen.get("specimen_id", ""),
                 "candidate_id": specimen.get("candidate_id", ""),
                 "source_location": source_location,
-                "source_zone": "ejection_basket",
+                "source_zone": "utm_platen" if placement_verification else "ejection_basket",
                 "physical_location": physical_location,
                 "target_location": "utm_fixture",
                 "stl_path": specimen.get("stl_path", ""),
@@ -1102,7 +1996,12 @@ class VisionAgent(BaseAgent):
                 "pose_confidence": round(pose_confidence, 3),
                 "camera_returned_to_vla": camera_returned_to_vla,
                 "vla_camera_precheck_ok": vla_camera_precheck_ok,
-                "blocking_reason": "D455F_PORT_RETURN_FAILED" if pose_payload and not camera_returned_to_vla else None if ready else next((signal.get("blocking_reason") for signal in signals if signal.get("signal") == "pickup_ready"), "unknown"),
+                "spc_autoejection_confirmed": active_cam_confirmed,
+                "blocking_reason": (
+                    None
+                    if ready or (placement_verification and capture_ok and not anomaly)
+                    else next((signal.get("blocking_reason") for signal in signals if signal.get("signal") == "pickup_ready"), "unknown")
+                ),
                 "signal_id": vision_packet.get("signal_id"),
                 "expires_at": vision_packet.get("expires_at"),
             },
@@ -1111,6 +2010,9 @@ class VisionAgent(BaseAgent):
             "vision_signal": vision_packet,
             "raw_capture": capture,
             "specimen_pose": pose_payload,
+            "vision_manipulation_completion": completion_signal,
+            "spc_autoejection_confirmation": spc_confirmation,
+            "utm_runtime_status": capture.get("utm_runtime_status", {}),
         }
         vision_agent_report = self._vision_agent_report_snapshot(
             state=state,
@@ -1124,7 +2026,8 @@ class VisionAgent(BaseAgent):
             anomaly=anomaly,
         )
         observation["vision_agent_report"] = vision_agent_report
-        return {
+        route_to_manipulation = placement_verification
+        payload = {
             "observation": observation,
             "vision_report": vision_report,
             "vision_agent_report": vision_agent_report,
@@ -1133,11 +2036,44 @@ class VisionAgent(BaseAgent):
             "metrics": metrics,
             "evidence_refs": evidence_refs,
         }
+        if active_cam_artifact_update:
+            payload["active_cam_artifact_update"] = dict(active_cam_artifact_update)
+        if utm_completion_artifact_update:
+            payload["utm_completion_artifact_update"] = dict(utm_completion_artifact_update)
+        if route_to_manipulation:
+            payload["requested_next_stage"] = "manipulation"
+            payload["transition_decision"] = (
+                "vision_manipulation_completion"
+                if completion_signal.get("detected") and completion_signal.get("ready_to_stop_rollout")
+                else "vision_manipulation_monitoring"
+            )
+        return payload
+
+    def _auto_start_utm_runtime(self, state: OrchestratorState, ctx: AgentContext) -> dict[str, Any]:
+        """Start the Vision ROS runtime when the shared device bridge tool exists."""
+        if state.mode not in {Mode.TEST, Mode.LIVE}:
+            return {}
+        if "vision.utm_runtime.start" not in ctx.tools.list_tools():
+            return {}
+        try:
+            return ctx.tools.call(
+                "vision.utm_runtime.start",
+                {"mode": state.mode.value, "source": "vision_agent.preflight", "agent": self.name},
+            )
+        except Exception as exc:
+            return {
+                "ok": False,
+                "tool": "vision.utm_runtime.start",
+                "status": "error",
+                "failure_code": "VISION_UTM_RUNTIME_START_FAILED",
+                "message": str(exc),
+            }
 
     async def run(self, state: OrchestratorState, ctx: AgentContext) -> AgentResult:
         frame_id = f"frame-{state.loop_count}-{state.stage.value}"
         timeout_s = 30.0 if state.mode == Mode.TEST else None
         specimen = self._specimen_result(state)
+        utm_runtime_status = self._auto_start_utm_runtime(state, ctx)
         try:
             protocol = await ctx.complete(
                 "tool_formatting",
@@ -1154,33 +2090,148 @@ class VisionAgent(BaseAgent):
                 protocol_note = f"Vision LLM degraded in test mode: {exc.__class__.__name__}"
             else:
                 raise
-        response = ctx.tools.call(
-            "camera.capture",
-            {
-                "frame_id": frame_id,
-                "camera_key": "top",
-                "purpose": "3dp_output_pickup_check",
-                "specimen_id": specimen.get("specimen_id", ""),
-                "mode": state.mode.value,
-            },
-        )
-        pose_result = self._specimen_pose_snapshot(state, ctx, frame_id)
-        response = self._merge_specimen_pose_capture(dict(response), pose_result)
-        response = self._attach_lerobot_camera_evidence(state, ctx, dict(response))
+        placement_handoff = self._post_manipulation_handoff_requested(state)
+        placement_verification = self._post_manipulation_completion_requested(state)
+        post_place_context = self._post_manipulation_context(state)
+        if placement_verification:
+            tool_name = "vision.utm_specimen_presence.capture"
+            if tool_name not in set(ctx.tools.list_tools()):
+                response = {
+                    "ok": False,
+                    "tool": tool_name,
+                    "frame_id": frame_id,
+                    "observation_id": f"obs-{frame_id}",
+                    "camera_key": "utm",
+                    "purpose": "utm_placement_verification",
+                    "source": "utm_ros_frame",
+                    "detected": False,
+                    "failure_code": "UTM_SPECIMEN_PRESENCE_TOOL_NOT_REGISTERED",
+                    "message": "UTM specimen-presence capture tool is not registered.",
+                }
+            else:
+                output_dir = self._artifact_dir(state, frame_id) / "utm_completion"
+                tool_payload = {
+                    "mode": self._camera_runtime_mode(state),
+                    "runtime_mode": self._camera_runtime_mode(state),
+                    "run_id": state.run_id,
+                    "session_id": str(post_place_context.get("session_id") or ""),
+                    "specimen_id": str(specimen.get("specimen_id") or ""),
+                    "frame_id": frame_id,
+                    "output_dir": str(output_dir),
+                    "auto_start_runtime": not bool(utm_runtime_status.get("ok")),
+                    "allow_virtual_bridge_in_test": bool(
+                        state.mode == Mode.TEST and not self._physical_printer_tail_requested(state)
+                    ),
+                    "min_area_px": self._as_float(
+                        (state.current_experiment_spec or {}).get("utm_specimen_min_area_px")
+                        if isinstance(state.current_experiment_spec, dict)
+                        else None,
+                        300.0,
+                    ),
+                }
+                response = dict(ctx.tools.call(tool_name, tool_payload))
+                response.setdefault("frame_id", frame_id)
+                response.setdefault("observation_id", f"obs-{response['frame_id']}")
+                response["camera_key"] = "utm"
+                response["purpose"] = "utm_placement_verification"
+                response["session_id"] = str(response.get("session_id") or post_place_context.get("session_id") or "")
+                response["pose_confidence"] = self._as_float(response.get("confidence"), 0.0)
+                response["frame_path"] = str(
+                    response.get("annotated_frame_path") or response.get("raw_frame_path") or ""
+                )
+                response["frame_width"] = response.get("width")
+                response["frame_height"] = response.get("height")
+            response["post_place_interlock"] = dict(post_place_context.get("post_place_interlock") or {})
+        elif placement_handoff:
+            response = self._post_place_interlock_waiting_capture(
+                state,
+                frame_id=frame_id,
+                specimen=specimen,
+            )
+        elif self._should_request_active_cam_ejection_check(state):
+            active_camera_key = self._active_cam_camera_key(state, {})
+            response = self._attach_lerobot_camera_evidence(
+                state,
+                ctx,
+                {
+                    "ok": True,
+                    "tool": "lerobot.active_robot_cam.capture",
+                    "frame_id": frame_id,
+                    "observation_id": f"obs-{frame_id}",
+                    "camera_key": active_camera_key,
+                    "purpose": "3dp_output_pickup_check",
+                    "specimen_id": specimen.get("specimen_id", ""),
+                    "source": "lerobot_active_robot_cam",
+                    "timestamp": self.now_iso(),
+                    "stable_for_ms": 0,
+                    "confidence": 0.0,
+                    "pose_confidence": 0.0,
+                    "detected": False,
+                    "anomaly": False,
+                    "backend_mode": "active_cam",
+                    "detector": "active_cam_specimen_pose",
+                },
+            )
+        else:
+            response = dict(
+                ctx.tools.call(
+                    "camera.capture",
+                    self._capture_request(state, frame_id=frame_id, specimen=specimen),
+                )
+            )
+            response = self._attach_lerobot_camera_evidence(state, ctx, response)
+        response = dict(response)
+        response["utm_runtime_status"] = utm_runtime_status
         payload = self._transfer_observation(state, dict(response))
         observation = payload["observation"]
+        monitoring_ok = bool(response.get("ok")) and not bool(observation.get("anomaly"))
+        active_cam_physical_failure = bool(
+            self._should_request_active_cam_ejection_check(state)
+            and (state.mode == Mode.LIVE or self._physical_printer_tail_requested(state))
+            and not response.get("ok")
+        )
+        result_data = {
+            "observation": observation,
+            "vision_report": payload["vision_report"],
+            "vision_agent_report": payload["vision_agent_report"],
+            "vision_signal": payload["vision_signal"],
+            "handoff_packet": payload["vision_signal"],
+            "decisions": payload["decisions"],
+            "metrics": payload["metrics"],
+            "evidence_refs": payload["evidence_refs"],
+            "protocol_note": protocol_note,
+            **(
+                {"active_cam_artifact_update": payload["active_cam_artifact_update"]}
+                if payload.get("active_cam_artifact_update")
+                else {}
+            ),
+            **(
+                {"utm_completion_artifact_update": payload["utm_completion_artifact_update"]}
+                if payload.get("utm_completion_artifact_update")
+                else {}
+            ),
+            **(
+                {
+                    "requested_next_stage": payload["requested_next_stage"],
+                    "transition_decision": payload["transition_decision"],
+                }
+                if payload.get("requested_next_stage")
+                else {}
+            ),
+        }
+        if active_cam_physical_failure:
+            result_data.update(
+                {
+                    "failure_code": str(
+                        response.get("failure_code")
+                        or response.get("active_cam_ejection_check", {}).get("blocking_reason")
+                        or "ACTIVE_CAM_CONFIRMATION_REQUIRED"
+                    ),
+                    "safe_stop_recommended": True,
+                }
+            )
         return AgentResult(
-            success=bool(response.get("ok")) and bool(observation["transfer_readiness"]["ready"]),
+            success=monitoring_ok if placement_handoff else bool(response.get("ok")) and bool(observation["transfer_readiness"]["ready"]),
             summary="Vision lab perception signal complete",
-            data={
-                "observation": observation,
-                "vision_report": payload["vision_report"],
-                "vision_agent_report": payload["vision_agent_report"],
-                "vision_signal": payload["vision_signal"],
-                "handoff_packet": payload["vision_signal"],
-                "decisions": payload["decisions"],
-                "metrics": payload["metrics"],
-                "evidence_refs": payload["evidence_refs"],
-                "protocol_note": protocol_note,
-            },
+            data=result_data,
         )

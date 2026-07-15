@@ -62,10 +62,10 @@ Live GUI (planning route) behavior currently expected:
 - BOAgent must attach current/prior evaluation points to `experiment.benchmark` and treat them as already-seen candidates so the next recommended TPMS shape signature is not identical to the current one.
 - BOAgent and DesignAgent must keep gyroid `relative_density >= 0.20`; values below this violate the FDM continuous-shell rule and must be clamped before SpecimenMakingAgent manufacturability checks.
 - In test-mode loop cycle 2 and later, set `top_cap_enabled=false`, `bottom_cap_enabled=false`, `top_bottom_cap=false`, `skin_thickness_mm=0.0`, and `test_loop_surface_caps_disabled=true` before STL generation. This prevents unintended plates from being carried into subsequent generated specimens.
-- In Live GUI `테스트 모드`, the generated print block starts with `start_immediately=false` unless `printer_test_path=physical_print` is already explicitly selected, and asks SpecimenMakingAgent for one of three printer paths when no inline path is provided:
+- In Live GUI `테스트 모드`, the generated print block starts with `start_immediately=false` unless `printer_test_path=installed_printer` or `printer_test_path=physical_print` is already explicitly selected, and asks SpecimenMakingAgent for one of three printer paths when no inline path is provided:
   - `virtual_bridge`: real active-slicer preparation, then virtual selected-printer upload/start-boundary validation.
-  - `installed_printer`: real active-slicer preparation, then installed selected-printer read-only communication.
-  - `physical_print`: real active-slicer preparation, then selected-printer upload/start for the test-generated specimen.
+  - `installed_printer`: real active-slicer preparation, actual sliced project-file upload/start, fresh printer progress observation, immediate stop, then source-bounds-derived standalone Bambu autoejection before the downstream active-cam/manipulation/vision-verification tail.
+  - `physical_print`: real active-slicer preparation, `.autoeject.gcode.3mf` print-tail patching, then selected-printer upload/start for the test-generated specimen.
 - Design handoff should move to Specimen stage in the planning transcript before Guardian validation.
 - DesignAgent is the only Live GUI role that should render STL preview/viewer artifacts. In test-mode cycles it renders a two-card pair: previous shape and next shape.
 - SpecimenMakingAgent should render manufacturing runtime state:
@@ -665,8 +665,8 @@ In test mode:
 - Mock geometry tool may write a minimal dummy STL or a placeholder file path.
 - Mesh/manufacturability validators may return synthetic pass reports.
 - The same handoff_package schema must still be produced.
-- printer.prepare must remain mock/simulator, virtual-bridge, or read-only installed-printer by default.
-- Exception: when the Specimen Making Agent printer-path prompt is answered with `physical_print` / `실제 출력`, or when the Live GUI one-shot command is `테스트 모드, 실제 출력`, the test-generated specimen may proceed through real PrusaSlicer slicing and real PrusaLink upload/start using the same physical-print gates as Live GUI.
+- printer.prepare must remain mock/simulator or virtual-bridge by default until the operator selects a printer path.
+- Exception: `installed_printer` / `설치 프린터` slices the generated job, publishes the actual sliced project file, requires a fresh printer progress observation, stops the job, then publishes the source-bounds-derived standalone autoejection artifact before continuing active-cam/manipulation/vision-verification. `physical_print` / `실제 출력` proceeds through the full physical upload/start/print path using the same physical-print gates as Live GUI and keeps the print body inside the patched `.autoeject.gcode.3mf` artifact.
 
 Required test scenarios:
 1. Valid TPMS gyroid candidate creates handoff package successfully.
@@ -949,6 +949,7 @@ Live GUI behavior:
 - Specimen report title: `Manufacturing Digital Thread / Printer Runtime`.
 - Specimen chat/runtime card shows Fabrication Digital Thread before PrusaSlicer/PrusaLink details.
 - Specimen report must show Fabrication Intent, Digital Thread, Process Plan, Quality Gates, Printer Runtime, Monitoring/Feedback, and Handoff Packet.
+- Live GUI selected Specimen report presents these fields as generic 3DP cards: Build Intent, Printer Telemetry, Readiness Gate, Slice Profile, Thermal / Material, Transfer Queue, central Live Job Monitor, Layer Preview, Camera Evidence, Post-Print Automation, G-code Validation, and Handoff / Artifacts. The Live Job Monitor is the only full-width focus card and must read backend evidence rather than fabricating progress.
 - STL visual preview remains Design Agent territory. Specimen Agent surfaces manufacturing runtime visibility: slicer settings, G-code path, PrusaLink storage/readiness, upload/start/transfer/ejection, step trace, and handoff readiness.
 
 Runtime persistence:

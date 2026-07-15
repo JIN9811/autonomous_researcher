@@ -463,6 +463,21 @@ graph:
       contracts:
       - robot_task_result.v1
       - placement_verification.v1
+  - source: manipulation
+    target: vision
+    condition: next_stage:vision
+    label: 'conditional transition: manipulation -> vision verification'
+    metadata:
+      runtime_edge: logical_transition
+      from_stage: manipulation
+      to_stage: vision
+      condition: next_stage:vision
+      transition_condition: next_stage:vision
+      default_transition: false
+      auto_ports: true
+      contracts:
+      - robot_task_result.v1
+      - vision_manipulation_completion.v1
   - source: vision_verify
     target: equipment
     condition: null
@@ -860,6 +875,7 @@ graph:
       contract:
       - printer.prepare
       - lerobot.rollout.start
+      - lerobot.rollout.stop
       - equipment.pyautogui.run
       - cae.run_static_analysis
     - id: knowledge_memory_evolution
@@ -885,7 +901,10 @@ graph:
       - lerobot.teleoperate.start
       - lerobot.record.start
       - lerobot.rollout.start
+      - lerobot.rollout.stop
+      - lerobot.rollout.status
       - lerobot.camera.test
+      - lerobot.active_robot_cam.capture
       config: memory/lerobot/profiles
       live_boundary: robot policy process and camera capture via LeRobot bridge
     - id: windows_pyautogui_bridge
@@ -910,6 +929,7 @@ graph:
       workspace: /lerobot
       tools:
       - lerobot.camera.test
+      - lerobot.active_robot_cam.capture
       - vision.equipment_cross_check
       - utm.run_protocol
       config: memory/lerobot + equipment profiles

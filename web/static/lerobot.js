@@ -66,23 +66,20 @@ const rolloutRtcHorizonInput = $("lerobot-rollout-rtc-horizon-input");
 const rolloutRtcGuidanceInput = $("lerobot-rollout-rtc-guidance-input");
 const rolloutActionQueueInput = $("lerobot-rollout-action-queue-input");
 const manipulationTaskIdInput = $("lerobot-manipulation-task-id-input");
-const manipulationStrategyInput = $("lerobot-manipulation-strategy-input");
-const manipulationPolicyBackendInput = $("lerobot-manipulation-policy-backend-input");
+const manipulationPolicySelect = $("lerobot-manipulation-policy-select");
 const manipulationPolicyTypeInput = $("lerobot-manipulation-policy-type-input");
-const manipulationSourceInput = $("lerobot-manipulation-source-input");
-const manipulationTargetInput = $("lerobot-manipulation-target-input");
-const manipulationMaxDurationInput = $("lerobot-manipulation-max-duration-input");
+const manipulationPolicyInput = $("lerobot-manipulation-policy-input");
+const manipulationInstructionInput = $("lerobot-manipulation-instruction-input");
+const manipulationDurationInput = $("lerobot-manipulation-duration-input");
+const manipulationActionClampInput = $("lerobot-manipulation-action-clamp-input");
+const manipulationMaxRelativeTargetInput = $("lerobot-manipulation-max-relative-target-input");
+const manipulationShoulderLiftBackstopInput = $("lerobot-manipulation-shoulder-lift-backstop-input");
+const manipulationTemporalEnsembleInput = $("lerobot-manipulation-temporal-ensemble-input");
+const manipulationTemporalCoeffInput = $("lerobot-manipulation-temporal-coeff-input");
 const manipulationRtcHorizonInput = $("lerobot-manipulation-rtc-horizon-input");
 const manipulationRtcGuidanceInput = $("lerobot-manipulation-rtc-guidance-input");
-const manipulationSpecimenIdInput = $("lerobot-manipulation-specimen-id-input");
-const manipulationCandidateIdInput = $("lerobot-manipulation-candidate-id-input");
-const manipulationPolicyInput = $("lerobot-manipulation-policy-input");
-const manipulationStlInput = $("lerobot-manipulation-stl-input");
-const manipulationTaskInput = $("lerobot-manipulation-task-input");
+const manipulationActionQueueInput = $("lerobot-manipulation-action-queue-input");
 const manipulationObservationInput = $("lerobot-manipulation-observation-input");
-const manipulationCameraInput = $("lerobot-manipulation-camera-input");
-const manipulationDisplayInput = $("lerobot-manipulation-display-input");
-const manipulationContinuousInput = $("lerobot-manipulation-continuous-input");
 const manipulationReportEl = $("lerobot-manipulation-report");
 const policySelect = $("lerobot-policy-select");
 const jobNameInput = $("lerobot-job-name-input");
@@ -280,6 +277,8 @@ let lastPortCandidates = [];
 let lastConfigData = null;
 let extraCameraKeys = [];
 let policyCatalogByValue = new Map();
+let manipulationTaskProfiles = {};
+let activeManipulationTaskId = "transfer_to_utm";
 const defaultRealsenseCameraKeys = new Set(["top", "wrist"]);
 const cameraRealsenseOverrides = new Map();
 const cameraFpsOverrides = new Map();
@@ -291,7 +290,9 @@ let lastIsaacRgbdRenderSessionId = "";
 let lastIsaacLiveE2eJobId = "";
 let lastIsaacDomainMimicJobId = "";
 let lastIsaacLabOutputCheck = null;
+let rolloutProfileLoaded = false;
 let manipulationProfileLoaded = false;
+let manipulationProfileSavePromise = Promise.resolve();
 let profileSelectionInitialized = false;
 let observationPipelineProfileId = "";
 
@@ -832,6 +833,12 @@ function selectedRolloutPolicyType() {
   return trainType || "smolvla";
 }
 
+function selectedManipulationPolicyType() {
+  const manipulationType = manipulationPolicyTypeInput ? String(manipulationPolicyTypeInput.value || "").trim() : "";
+  if (manipulationType) return manipulationType;
+  return selectedRolloutPolicyType() || "smolvla";
+}
+
 function setRolloutOptionDisabled(input, disabled) {
   if (!input) return;
   input.disabled = Boolean(disabled);
@@ -848,6 +855,17 @@ function syncRolloutPolicyOptions() {
   setRolloutOptionDisabled(rolloutRtcHorizonInput, !isPi05);
   setRolloutOptionDisabled(rolloutRtcGuidanceInput, !isPi05);
   setRolloutOptionDisabled(rolloutActionQueueInput, !isPi05);
+}
+
+function syncManipulationPolicyOptions() {
+  const type = selectedManipulationPolicyType().toLowerCase();
+  const isAct = type === "act";
+  const isPi05 = type === "pi05";
+  setRolloutOptionDisabled(manipulationTemporalEnsembleInput, !isAct);
+  setRolloutOptionDisabled(manipulationTemporalCoeffInput, !isAct);
+  setRolloutOptionDisabled(manipulationRtcHorizonInput, !isPi05);
+  setRolloutOptionDisabled(manipulationRtcGuidanceInput, !isPi05);
+  setRolloutOptionDisabled(manipulationActionQueueInput, !isPi05);
 }
 
 function parseObservation() {
@@ -939,6 +957,15 @@ function browseSelectionValue(path) {
   return path || "";
 }
 
+async function applyBrowseSelection(path) {
+  const value = browseSelectionValue(path);
+  if (lastBrowseTargetInput) lastBrowseTargetInput.value = value;
+  if (lastBrowseOptions && typeof lastBrowseOptions.onSelect === "function") {
+    await lastBrowseOptions.onSelect(value);
+  }
+  return value;
+}
+
 function applyDatasetProfileFromInspect(data) {
   const dataset = (data && data.dataset) || {};
   const changes = [];
@@ -1009,8 +1036,8 @@ function syncFieldsFromWorkflowResponse(data) {
   }
 }
 
-function policyFields(inputEl = policyInput) {
-  const selected = policySelect ? policySelect.value : "";
+function policyFields(inputEl = policyInput, selectEl = policySelect) {
+  const selected = selectEl ? selectEl.value : "";
   const raw = inputEl && inputEl.value.trim() ? inputEl.value.trim() : selected;
   const split = splitPathOrRepo(raw);
   return {
@@ -1025,9 +1052,7 @@ function rolloutPolicyFields() {
 }
 
 function manipulationPolicyFields() {
-  if (manipulationPolicyInput && manipulationPolicyInput.value.trim()) return policyFields(manipulationPolicyInput);
-  if (rolloutPolicyInput && rolloutPolicyInput.value.trim()) return policyFields(rolloutPolicyInput);
-  return policyFields(policyInput);
+  return policyFields(manipulationPolicyInput || rolloutPolicyInput || policyInput, manipulationPolicySelect || policySelect);
 }
 
 function parseJsonText(inputEl, fallback = {}) {
@@ -1220,6 +1245,105 @@ function rolloutPayload(overrides = {}) {
   return payload;
 }
 
+function currentRolloutProfile() {
+  const policy = rolloutPolicyFields();
+  const policyType = selectedRolloutPolicyType();
+  const policyTypeKey = policyType.toLowerCase();
+  const durationRaw = rolloutDurationInput && rolloutDurationInput.value.trim()
+    ? rolloutDurationInput.value.trim()
+    : "";
+  return {
+    profile_id: profileSelect ? profileSelect.value : "",
+    observation_pipeline_id: observationPipelineSelect ? observationPipelineSelect.value : "",
+    policy_type: policyType,
+    policy_path: policy.policy_path,
+    policy_checkpoint_path: policy.policy_checkpoint_path,
+    policy_repo_id: policy.policy_path ? "" : policy.policy_repo_id,
+    task_instruction: rolloutInstructionInput && rolloutInstructionInput.value.trim()
+      ? rolloutInstructionInput.value.trim()
+      : DEFAULT_PI05_ROLLOUT_TASK,
+    continuous_rollout: !durationRaw,
+    max_duration_s: durationRaw ? Number(durationRaw) : null,
+    rollout_action_clamp: rolloutActionClampInput ? boolValue(rolloutActionClampInput) : false,
+    rollout_max_relative_target: numberValue(rolloutMaxRelativeTargetInput, 5),
+    rollout_shoulder_lift_backstop: rolloutShoulderLiftBackstopInput ? boolValue(rolloutShoulderLiftBackstopInput) : true,
+    rollout_temporal_ensemble: policyTypeKey === "act" && (rolloutTemporalEnsembleInput ? boolValue(rolloutTemporalEnsembleInput) : true),
+    rollout_temporal_ensemble_coeff: numberValue(rolloutTemporalCoeffInput, 0.01),
+    rollout_inference_type: policyTypeKey === "pi05" ? "rtc" : "",
+    rollout_rtc_execution_horizon: policyTypeKey === "pi05" ? numberValue(rolloutRtcHorizonInput, 20) : null,
+    rollout_rtc_max_guidance_weight: policyTypeKey === "pi05" ? numberValue(rolloutRtcGuidanceInput, 1.0) : null,
+    rollout_action_queue_size_to_get_new_actions: policyTypeKey === "pi05" ? numberValue(rolloutActionQueueInput, 60) : null,
+    observation: parseObservation(),
+  };
+}
+
+function savedPolicyOptionLabel(value, policyType = "") {
+  const clean = String(value || "").trim();
+  const checkpointMatch = clean.match(/\/checkpoints\/([^/]+)\/pretrained_model\/?$/);
+  const checkpoint = checkpointMatch ? checkpointMatch[1] : "";
+  const typeLabel = String(policyType || inferPolicyTypeFromPolicy(clean)).trim();
+  const parts = ["Saved rollout"];
+  if (typeLabel) parts.push(typeLabel);
+  if (checkpoint) parts.push(`checkpoint ${checkpoint}`);
+  return parts.join(" · ");
+}
+
+function ensureSavedPolicyOption(selectEl, value, policyType = "") {
+  const clean = String(value || "").trim();
+  if (!selectEl || !clean) return null;
+  let option = Array.from(selectEl.options || []).find((item) => item.value === clean) || null;
+  if (!option) {
+    option = document.createElement("option");
+    option.value = clean;
+    selectEl.appendChild(option);
+  }
+  option.textContent = savedPolicyOptionLabel(clean, policyType);
+  option.dataset.policyType = policyType || inferPolicyTypeFromPolicy(clean);
+  option.dataset.savedRollout = "1";
+  return option;
+}
+
+function applyRolloutProfile(profile, force = false) {
+  if (!profile || (rolloutProfileLoaded && !force)) return;
+  rolloutProfileLoaded = true;
+  const policyRef = profile.policy_path || profile.policy_checkpoint_path || profile.policy_repo_id || "";
+  setInputValue(rolloutPolicyTypeInput, profile.policy_type || "smolvla");
+  setInputValue(rolloutPolicyInput, policyRef);
+  if (policySelect && policyRef) {
+    ensureSavedPolicyOption(policySelect, policyRef, profile.policy_type || "");
+    policySelect.value = policyRef;
+  }
+  setInputValue(rolloutInstructionInput, profile.task_instruction || DEFAULT_PI05_ROLLOUT_TASK);
+  if (rolloutDurationInput) {
+    rolloutDurationInput.value = profile.continuous_rollout === false && profile.max_duration_s
+      ? String(profile.max_duration_s)
+      : "";
+  }
+  setCheckboxValue(rolloutActionClampInput, profile.rollout_action_clamp);
+  setInputValue(rolloutMaxRelativeTargetInput, profile.rollout_max_relative_target);
+  setCheckboxValue(rolloutShoulderLiftBackstopInput, profile.rollout_shoulder_lift_backstop);
+  setCheckboxValue(rolloutTemporalEnsembleInput, profile.rollout_temporal_ensemble);
+  setInputValue(rolloutTemporalCoeffInput, profile.rollout_temporal_ensemble_coeff);
+  setInputValue(rolloutRtcHorizonInput, profile.rollout_rtc_execution_horizon);
+  setInputValue(rolloutRtcGuidanceInput, profile.rollout_rtc_max_guidance_weight);
+  setInputValue(rolloutActionQueueInput, profile.rollout_action_queue_size_to_get_new_actions);
+  if (observationInput && profile.observation && typeof profile.observation === "object") {
+    observationInput.value = JSON.stringify(profile.observation);
+  }
+  syncRolloutPolicyOptions();
+}
+
+async function refreshRolloutProfile({ force = false } = {}) {
+  try {
+    const res = await fetch("/api/lerobot/rollout/config");
+    const data = await res.json();
+    applyRolloutProfile(data.profile || {}, force);
+    return data;
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
 const MANIPULATION_TASK_PRESETS = {
   transfer_to_utm: {
     source: "3dp_output_area",
@@ -1240,19 +1364,6 @@ function selectedManipulationTaskId() {
   return MANIPULATION_TASK_PRESETS[value] ? value : "transfer_to_utm";
 }
 
-function syncManipulationTaskPreset(force = false) {
-  const taskId = selectedManipulationTaskId();
-  const preset = MANIPULATION_TASK_PRESETS[taskId] || MANIPULATION_TASK_PRESETS.transfer_to_utm;
-  const sourceDefault = Object.values(MANIPULATION_TASK_PRESETS).some((item) => manipulationSourceInput && manipulationSourceInput.value === item.source);
-  const targetDefault = Object.values(MANIPULATION_TASK_PRESETS).some((item) => manipulationTargetInput && manipulationTargetInput.value === item.target);
-  if (manipulationSourceInput && (force || !manipulationSourceInput.value.trim() || sourceDefault)) manipulationSourceInput.value = preset.source;
-  if (manipulationTargetInput && (force || !manipulationTargetInput.value.trim() || targetDefault)) manipulationTargetInput.value = preset.target;
-  if (manipulationTaskInput && (force || !manipulationTaskInput.value.trim())) manipulationTaskInput.value = preset.instruction;
-  if (manipulationObservationInput && (force || !manipulationObservationInput.value.trim())) {
-    manipulationObservationInput.value = JSON.stringify(preset.observation);
-  }
-}
-
 function manipulationDefaultInstruction(taskId, specimenId, sourceLocation, targetLocation) {
   const preset = MANIPULATION_TASK_PRESETS[taskId] || MANIPULATION_TASK_PRESETS.transfer_to_utm;
   if (taskId === "clear_utm_to_disposal") {
@@ -1261,60 +1372,193 @@ function manipulationDefaultInstruction(taskId, specimenId, sourceLocation, targ
   return `Move ${specimenId} from ${sourceLocation} to ${targetLocation}, place the flat compression face on the UTM datum, release, retreat to standby_clear_of_utm, then request Vision verification.`;
 }
 
-function manipulationAgentPayload(overrides = {}) {
-  const payload = rolloutPayload(overrides);
-  const policy = manipulationPolicyFields();
-  const taskId = selectedManipulationTaskId();
+function defaultManipulationTaskProfile(taskId = selectedManipulationTaskId()) {
   const preset = MANIPULATION_TASK_PRESETS[taskId] || MANIPULATION_TASK_PRESETS.transfer_to_utm;
-  const policyType = manipulationPolicyTypeInput && manipulationPolicyTypeInput.value
-    ? manipulationPolicyTypeInput.value
-    : rolloutPolicyTypeInput && rolloutPolicyTypeInput.value
-      ? rolloutPolicyTypeInput.value
-      : selectedRolloutPolicyType() || "pi05";
-  if (manipulationPolicyTypeInput) manipulationPolicyTypeInput.value = policyType;
-  const strategy = manipulationStrategyInput ? manipulationStrategyInput.value || "pi05_lerobot_policy" : "pi05_lerobot_policy";
-  const specimenId = manipulationSpecimenIdInput ? manipulationSpecimenIdInput.value.trim() || "manual-specimen" : "manual-specimen";
-  const candidateId = manipulationCandidateIdInput ? manipulationCandidateIdInput.value.trim() || "manual-candidate" : "manual-candidate";
-  const sourceLocation = manipulationSourceInput ? manipulationSourceInput.value.trim() || preset.source : preset.source;
-  const targetLocation = manipulationTargetInput ? manipulationTargetInput.value.trim() || preset.target : preset.target;
-  payload.policy_path = policy.policy_path;
-  payload.policy_checkpoint_path = policy.policy_checkpoint_path;
-  payload.policy_repo_id = policy.policy_path ? "" : policy.policy_repo_id;
-  payload.policy_type = policyType;
-  payload.rollout_inference_type = policyType === "pi05" ? "rtc" : "";
-  payload.manipulation_strategy = strategy;
+  return {
+    manipulation_strategy: "lerobot_policy",
+    policy_backend: "lerobot_cli",
+    policy_type: "smolvla",
+    policy_path: "",
+    policy_checkpoint_path: "",
+    policy_repo_id: "",
+    task_instruction: preset.instruction,
+    source_location: preset.source,
+    target_location: preset.target,
+    continuous_rollout: true,
+    max_duration_s: null,
+    rollout_action_clamp: false,
+    rollout_max_relative_target: 5,
+    rollout_shoulder_lift_backstop: true,
+    rollout_temporal_ensemble: true,
+    rollout_temporal_ensemble_coeff: 0.01,
+    rollout_inference_type: "",
+    rollout_rtc_execution_horizon: 20,
+    rollout_rtc_max_guidance_weight: 1.0,
+    rollout_action_queue_size_to_get_new_actions: 60,
+    observation: preset.observation,
+  };
+}
+
+function applyManipulationTaskProfile(taskId, profile = {}) {
+  const presetProfile = defaultManipulationTaskProfile(taskId);
+  const merged = { ...presetProfile, ...(profile || {}) };
+  activeManipulationTaskId = taskId;
+  const policyRef = merged.policy_path || merged.policy_checkpoint_path || merged.policy_repo_id || "";
+  setInputValue(manipulationPolicyTypeInput, merged.policy_type || "smolvla");
+  setInputValue(manipulationPolicyInput, policyRef);
+  if (manipulationPolicySelect && policyRef) {
+    ensureSavedPolicyOption(manipulationPolicySelect, policyRef, merged.policy_type || "");
+    manipulationPolicySelect.value = policyRef;
+  }
+  setInputValue(manipulationInstructionInput, merged.task_instruction || presetProfile.task_instruction);
+  if (manipulationDurationInput) {
+    manipulationDurationInput.value = merged.continuous_rollout === false && merged.max_duration_s ? String(merged.max_duration_s) : "";
+  }
+  setCheckboxValue(manipulationActionClampInput, merged.rollout_action_clamp);
+  setInputValue(manipulationMaxRelativeTargetInput, merged.rollout_max_relative_target);
+  setCheckboxValue(manipulationShoulderLiftBackstopInput, merged.rollout_shoulder_lift_backstop);
+  setCheckboxValue(manipulationTemporalEnsembleInput, merged.rollout_temporal_ensemble);
+  setInputValue(manipulationTemporalCoeffInput, merged.rollout_temporal_ensemble_coeff);
+  setInputValue(manipulationRtcHorizonInput, merged.rollout_rtc_execution_horizon);
+  setInputValue(manipulationRtcGuidanceInput, merged.rollout_rtc_max_guidance_weight);
+  setInputValue(manipulationActionQueueInput, merged.rollout_action_queue_size_to_get_new_actions);
+  if (manipulationObservationInput) {
+    manipulationObservationInput.value = JSON.stringify(merged.observation || presetProfile.observation);
+  }
+  syncManipulationPolicyOptions();
+}
+
+async function handleManipulationTaskChange() {
+  if (activeManipulationTaskId && MANIPULATION_TASK_PRESETS[activeManipulationTaskId]) {
+    manipulationTaskProfiles[activeManipulationTaskId] = currentManipulationTaskProfile(activeManipulationTaskId);
+  }
+  const taskId = selectedManipulationTaskId();
+  applyManipulationTaskProfile(taskId, manipulationTaskProfiles[taskId] || defaultManipulationTaskProfile(taskId));
+  await persistManipulationTaskProfile();
+}
+
+function currentManipulationTaskProfile(taskId = selectedManipulationTaskId()) {
+  const preset = MANIPULATION_TASK_PRESETS[taskId] || MANIPULATION_TASK_PRESETS.transfer_to_utm;
+  const policy = manipulationPolicyFields();
+  const policyType = selectedManipulationPolicyType() || "smolvla";
+  const durationRaw = manipulationDurationInput && manipulationDurationInput.value.trim()
+    ? manipulationDurationInput.value.trim()
+    : "";
+  const continuous = !durationRaw;
+  const policyTypeKey = policyType.toLowerCase();
+  return {
+    manipulation_strategy: "lerobot_policy",
+    policy_backend: "lerobot_cli",
+    policy_type: policyType,
+    policy_path: policy.policy_path,
+    policy_checkpoint_path: policy.policy_checkpoint_path,
+    policy_repo_id: policy.policy_path ? "" : policy.policy_repo_id,
+    task_instruction: manipulationInstructionInput && manipulationInstructionInput.value.trim()
+      ? manipulationInstructionInput.value.trim()
+      : preset.instruction,
+    source_location: preset.source,
+    target_location: preset.target,
+    continuous_rollout: continuous,
+    max_duration_s: continuous ? null : Number(durationRaw),
+    rollout_action_clamp: manipulationActionClampInput ? boolValue(manipulationActionClampInput) : false,
+    rollout_max_relative_target: numberValue(manipulationMaxRelativeTargetInput, 5),
+    rollout_shoulder_lift_backstop: manipulationShoulderLiftBackstopInput ? boolValue(manipulationShoulderLiftBackstopInput) : true,
+    rollout_temporal_ensemble: policyTypeKey === "act" && (manipulationTemporalEnsembleInput ? boolValue(manipulationTemporalEnsembleInput) : true),
+    rollout_temporal_ensemble_coeff: numberValue(manipulationTemporalCoeffInput, 0.01),
+    rollout_inference_type: policyTypeKey === "pi05" ? "rtc" : "",
+    rollout_rtc_execution_horizon: policyTypeKey === "pi05" ? numberValue(manipulationRtcHorizonInput, 20) : null,
+    rollout_rtc_max_guidance_weight: policyTypeKey === "pi05" ? numberValue(manipulationRtcGuidanceInput, 1.0) : null,
+    rollout_action_queue_size_to_get_new_actions: policyTypeKey === "pi05" ? numberValue(manipulationActionQueueInput, 60) : null,
+    observation: parseJsonText(manipulationObservationInput, preset.observation),
+  };
+}
+
+function manipulationRolloutPayload(overrides = {}) {
+  const taskId = selectedManipulationTaskId();
+  const taskProfile = currentManipulationTaskProfile();
+  const payload = basePayload(overrides);
+  const taskProfiles = { ...(manipulationTaskProfiles || {}), [taskId]: taskProfile };
+  const specimen = overrides.specimen_result && typeof overrides.specimen_result === "object" ? overrides.specimen_result : {};
+  payload.policy_type = taskProfile.policy_type;
+  payload.policy_path = taskProfile.policy_path;
+  payload.policy_checkpoint_path = taskProfile.policy_checkpoint_path;
+  payload.policy_repo_id = taskProfile.policy_repo_id;
+  payload.task_instruction = taskProfile.task_instruction;
+  payload.manipulation_strategy = taskProfile.manipulation_strategy;
   payload.task_id = taskId;
   payload.skill_id = taskId;
-  payload.policy_backend = manipulationPolicyBackendInput ? manipulationPolicyBackendInput.value || "lerobot_cli" : "lerobot_cli";
-  payload.max_duration_s = numberValue(manipulationMaxDurationInput, 30);
+  payload.policy_backend = taskProfile.policy_backend;
   payload.fps = numberValue(fpsInput, 15);
   payload.camera_fps = numberValue(cameraFpsInput, 15);
-  payload.rollout_action_clamp = rolloutActionClampInput ? boolValue(rolloutActionClampInput) : false;
-  payload.rollout_max_relative_target = numberValue(rolloutMaxRelativeTargetInput, 5);
-  payload.rollout_shoulder_lift_backstop = rolloutShoulderLiftBackstopInput ? boolValue(rolloutShoulderLiftBackstopInput) : true;
-  payload.rollout_temporal_ensemble = rolloutTemporalEnsembleInput ? boolValue(rolloutTemporalEnsembleInput) : true;
-  payload.rollout_temporal_ensemble_coeff = numberValue(rolloutTemporalCoeffInput, 0.01);
-  payload.rollout_rtc_execution_horizon = numberValue(rolloutRtcHorizonInput, numberValue(manipulationRtcHorizonInput, 20));
-  payload.rollout_rtc_max_guidance_weight = numberValue(rolloutRtcGuidanceInput, numberValue(manipulationRtcGuidanceInput, 1.0));
-  payload.rollout_action_queue_size_to_get_new_actions = numberValue(rolloutActionQueueInput, 60);
-  payload.task_instruction = manipulationTaskInput && manipulationTaskInput.value.trim()
-    ? manipulationTaskInput.value.trim()
-    : manipulationDefaultInstruction(taskId, specimenId, sourceLocation, targetLocation);
-  payload.camera_enabled = manipulationCameraInput ? boolValue(manipulationCameraInput) : true;
-  payload.display_data = manipulationDisplayInput ? boolValue(manipulationDisplayInput) : false;
-  payload.continuous_rollout = manipulationContinuousInput ? boolValue(manipulationContinuousInput) : true;
-  payload.source_location = sourceLocation;
-  payload.target_location = targetLocation;
-  payload.observation = parseJsonText(manipulationObservationInput, preset.observation);
+  payload.camera_enabled = true;
+  payload.display_data = boolValue(displayDataInput);
+  payload.source_location = taskProfile.source_location;
+  payload.target_location = taskProfile.target_location;
+  payload.observation = taskProfile.observation;
+  payload.continuous_rollout = taskProfile.continuous_rollout;
+  payload.max_duration_s = taskProfile.max_duration_s;
+  if (taskProfile.continuous_rollout) {
+    payload.num_episodes = 1;
+  } else {
+    payload.episode_s = taskProfile.max_duration_s;
+    payload.num_episodes = 1;
+  }
+  payload.rollout_action_clamp = taskProfile.rollout_action_clamp;
+  payload.rollout_max_relative_target = taskProfile.rollout_max_relative_target;
+  payload.rollout_shoulder_lift_backstop = taskProfile.rollout_shoulder_lift_backstop;
+  payload.rollout_temporal_ensemble = taskProfile.rollout_temporal_ensemble;
+  payload.rollout_temporal_ensemble_coeff = taskProfile.rollout_temporal_ensemble_coeff;
+  payload.rollout_inference_type = taskProfile.rollout_inference_type;
+  payload.rollout_rtc_execution_horizon = taskProfile.rollout_rtc_execution_horizon;
+  payload.rollout_rtc_max_guidance_weight = taskProfile.rollout_rtc_max_guidance_weight;
+  payload.rollout_action_queue_size_to_get_new_actions = taskProfile.rollout_action_queue_size_to_get_new_actions;
+  payload.task_profiles = taskProfiles;
   payload.specimen_result = {
     ok: true,
-    specimen_id: specimenId,
-    candidate_id: candidateId,
+    specimen_id: specimen.specimen_id || `${taskId}-manual-specimen`,
+    candidate_id: specimen.candidate_id || `${taskId}-manual-candidate`,
     handoff_status: "ready",
-    stl_path: manipulationStlInput ? manipulationStlInput.value.trim() : "",
-    sliced_path: "",
+    stl_path: specimen.stl_path || "",
+    sliced_path: specimen.sliced_path || "",
   };
   return payload;
+}
+
+function manipulationAgentPayload(overrides = {}) {
+  return manipulationRolloutPayload(overrides);
+}
+
+async function persistManipulationTaskProfile({ statusTarget = null, render = false, refresh = false } = {}) {
+  const taskId = selectedManipulationTaskId();
+  manipulationTaskProfiles[taskId] = currentManipulationTaskProfile(taskId);
+  const payload = manipulationAgentPayload();
+  const target = statusTarget || $("lerobot-manipulation-action-status");
+  setActionStatus(target, "running", "manipulation task save", { status: "saving", task_id: taskId });
+
+  const save = async () => {
+    try {
+      const data = await postJson("/api/lerobot/manipulation-agent/config", payload);
+      if (data && data.profile && data.profile.task_profiles) {
+        manipulationTaskProfiles = { ...data.profile.task_profiles };
+      }
+      if (data && data.ok) {
+        manipulationProfileLoaded = true;
+        applyManipulationProfile(data.profile || {}, true);
+      }
+      if (render) renderResult("manipulation defaults save", data);
+      setActionStatus(target, data && data.ok ? "ok" : "error", "manipulation task save", data);
+      if (refresh) await refreshConfig();
+      return data;
+    } catch (err) {
+      const error = { ok: false, status: "request_failed", error: String(err), task_id: taskId };
+      if (render) renderResult("manipulation defaults save", error);
+      setActionStatus(target, "error", "manipulation task save", error);
+      return error;
+    }
+  };
+
+  manipulationProfileSavePromise = manipulationProfileSavePromise.catch(() => null).then(save);
+  return manipulationProfileSavePromise;
 }
 
 function setInputValue(input, value) {
@@ -1330,41 +1574,14 @@ function setCheckboxValue(input, value) {
 function applyManipulationProfile(profile, force = false) {
   if (!profile || (manipulationProfileLoaded && !force)) return;
   manipulationProfileLoaded = true;
-  setInputValue(manipulationTaskIdInput, profile.task_id || profile.skill_id);
-  setInputValue(manipulationStrategyInput, profile.manipulation_strategy);
-  setInputValue(manipulationPolicyBackendInput, profile.policy_backend);
-  setInputValue(manipulationPolicyTypeInput, profile.policy_type);
-  setInputValue(manipulationSourceInput, profile.source_location);
-  setInputValue(manipulationTargetInput, profile.target_location);
-  setInputValue(manipulationMaxDurationInput, profile.max_duration_s);
-  setInputValue(manipulationRtcHorizonInput, profile.rollout_rtc_execution_horizon);
-  setInputValue(manipulationRtcGuidanceInput, profile.rollout_rtc_max_guidance_weight);
-  setInputValue(
-    manipulationPolicyInput,
-    profile.policy_path || profile.policy_checkpoint_path || profile.policy_repo_id || "",
-  );
-  if (profile.task_instruction) setInputValue(manipulationTaskInput, profile.task_instruction);
-  setCheckboxValue(manipulationCameraInput, profile.camera_enabled);
-  setCheckboxValue(manipulationDisplayInput, profile.display_data);
-  setCheckboxValue(manipulationContinuousInput, profile.continuous_rollout);
+  manipulationTaskProfiles = profile.task_profiles && typeof profile.task_profiles === "object" ? { ...profile.task_profiles } : {};
+  const taskId = MANIPULATION_TASK_PRESETS[profile.task_id] ? profile.task_id : selectedManipulationTaskId();
+  setInputValue(manipulationTaskIdInput, taskId);
+  const taskProfile = manipulationTaskProfiles[taskId] || profile;
+  applyManipulationTaskProfile(taskId, taskProfile);
   if (deviceInput && profile.device) deviceInput.value = profile.device;
   if (fpsInput && profile.fps) fpsInput.value = String(profile.fps);
   if (cameraFpsInput && profile.camera_fps) cameraFpsInput.value = String(profile.camera_fps);
-  if (rolloutActionClampInput && profile.rollout_action_clamp !== undefined) {
-    rolloutActionClampInput.checked = Boolean(profile.rollout_action_clamp);
-  }
-  if (rolloutMaxRelativeTargetInput && profile.rollout_max_relative_target !== undefined) {
-    rolloutMaxRelativeTargetInput.value = String(profile.rollout_max_relative_target);
-  }
-  if (rolloutShoulderLiftBackstopInput && profile.rollout_shoulder_lift_backstop !== undefined) {
-    rolloutShoulderLiftBackstopInput.checked = Boolean(profile.rollout_shoulder_lift_backstop);
-  }
-  if (rolloutTemporalEnsembleInput && profile.rollout_temporal_ensemble !== undefined) {
-    rolloutTemporalEnsembleInput.checked = Boolean(profile.rollout_temporal_ensemble);
-  }
-  if (rolloutTemporalCoeffInput && profile.rollout_temporal_ensemble_coeff !== undefined) {
-    rolloutTemporalCoeffInput.value = String(profile.rollout_temporal_ensemble_coeff);
-  }
 }
 
 async function refreshManipulationProfile({ force = false } = {}) {
@@ -1884,26 +2101,96 @@ function robotTaskResultFromResponse(data, report = null) {
   return report && report.handoff_packet ? report.handoff_packet : null;
 }
 
+function manipulationResponseFromData(data) {
+  if (!data || typeof data !== "object") return {};
+  if (data.manipulation && typeof data.manipulation === "object") return data.manipulation;
+  if (data.data && data.data.manipulation && typeof data.data.manipulation === "object") return data.data.manipulation;
+  return data;
+}
+
+function executionSafetyFromReport(report) {
+  if (!report || typeof report !== "object") return {};
+  if (report.execution_safety && typeof report.execution_safety === "object") return report.execution_safety;
+  if (report.runtime_safety_monitor && typeof report.runtime_safety_monitor === "object") return report.runtime_safety_monitor;
+  return report.sarm && typeof report.sarm === "object" ? report.sarm : {};
+}
+
+function rerunTelemetryFromReport(report, data = {}) {
+  const runtime = report && typeof report.rollout_runtime === "object" ? report.rollout_runtime : {};
+  const response = manipulationResponseFromData(data);
+  for (const candidate of [
+    runtime.rerun_telemetry,
+    runtime.rerun,
+    report && report.rerun_telemetry,
+    response && response.rerun_telemetry,
+    response && response.visualization,
+    data && data.visualization,
+    data && data.data && data.data.visualization,
+  ]) {
+    if (candidate && typeof candidate === "object") return candidate;
+  }
+  return {};
+}
+
+function statusPillClass(status) {
+  const value = String(status || "").toLowerCase();
+  if (!value || value === "-" || value === "unknown" || value === "waiting") return "";
+  if (/(ok|pass|ready|returned|complete|completed|active|running|policy_active|idle)/.test(value)) return "ok";
+  if (/(fail|failed|blocked|error|timeout|missing|stale|conflict|interlock)/.test(value)) return "warning";
+  return "";
+}
+
+function boolStatus(value, trueLabel = "ok", falseLabel = "blocked") {
+  if (value === undefined || value === null || value === "") return "unknown";
+  return value ? trueLabel : falseLabel;
+}
+
+function runtimeCardHtml(title, status, rows = [], extra = "") {
+  return `
+    <article class="lerobot-report-card">
+      <div class="lerobot-report-card-title">
+        <strong>${escapeHtml(title)}</strong>
+        <span class="state-pill ${escapeHtml(statusPillClass(status))}">${escapeHtml(compactValue(status))}</span>
+      </div>
+      ${reportRowsHtml(rows)}
+      ${extra || ""}
+    </article>
+  `;
+}
+
 function renderManipulationAgentReport(data) {
   if (!manipulationReportEl) return;
   const report = manipulationReportFromResponse(data);
   if (!report) return;
   const packet = robotTaskResultFromResponse(data, report) || {};
+  const response = manipulationResponseFromData(data);
   const task = report.task || {};
   const policy = report.policy_plan || {};
   const preflight = report.preflight || {};
   const vision = report.vision_context || {};
   const stage = report.stage_machine || {};
-  const sarm = report.sarm || {};
+  const safety = executionSafetyFromReport(report);
   const decision = report.decision || {};
   const runtime = report.rollout_runtime || {};
+  const telemetry = rerunTelemetryFromReport(report, data);
+  const activeCamera = report.active_camera_lease || response.active_camera_lease || response.active_robot_cam || {};
+  const portLease = report.port_lease || response.port_lease || {};
   const evidence = packet.evidence_refs || (report.knowledge_payload && report.knowledge_payload.evidence_paths) || [];
   const preflightState = String(preflight.status || "unknown");
+  const runtimeState = runtime.status || response.status || data.status || "unknown";
   const handoffState = String(packet.handoff_status || decision.handoff_status || "unknown");
+  const viewerUrl = telemetry.viewer_url || telemetry.rerun_web_url || "";
+  const observationPreview = telemetry.observation_preview || telemetry.latest_frame || {};
+  const latestFrameArtifact = telemetry.latest_frame_artifact || observationPreview.latest_frame_artifact || observationPreview.path || "";
+  const jointState = telemetry.joint_state || {};
+  const actionStream = telemetry.action_stream || {};
+  const viewerLink = viewerUrl
+    ? `<a class="btn mini primary" href="${escapeHtml(viewerUrl)}" target="_blank" rel="noopener">Open Full Rerun Viewer</a>`
+    : `<span class="hint">Rerun viewer evidence is waiting for an active display-data session.</span>`;
   manipulationReportEl.innerHTML = `
     <article class="lerobot-report-card wide">
       <div class="lerobot-report-card-title">
-        <strong>Skill Episode Board</strong>
+        <strong>Bridge State</strong>
         <span class="state-pill ${escapeHtml(handoffState === "blocked" ? "warning" : handoffState.includes("ready") ? "ok" : "")}">${escapeHtml(handoffState)}</span>
       </div>
       ${reportRowsHtml([
@@ -1915,56 +2202,82 @@ function renderManipulationAgentReport(data) {
         ["Terminal Pose", packet.terminal_pose || task.intended_terminal_pose],
       ])}
     </article>
-    <article class="lerobot-report-card">
-      <div class="lerobot-report-card-title"><strong>Preflight</strong><span class="state-pill ${escapeHtml(preflightState === "pass" ? "ok" : preflightState === "fail" ? "warning" : "")}">${escapeHtml(preflightState)}</span></div>
-      ${reportRowsHtml([
+    ${runtimeCardHtml("Port Lease", portLease.status || preflightState, [
         ["Profile", preflight.profile_id],
         ["Robot Ready", preflight.robot_ready],
-        ["Camera Ready", preflight.camera_ready],
-        ["Policy Ready", preflight.policy_ready],
+        ["Follower", portLease.follower_port || portLease.follower || "-"],
+        ["Leader", portLease.leader_port || portLease.leader || "-"],
+        ["Reclaim", portLease.reclaim_status || portLease.reclaim_attempt || "-"],
         ["Operator Confirmed", preflight.operator_confirmed],
-        ["RTC", preflight.rtc_enabled],
-        ["Action Clamp", preflight.action_clamp_enabled],
-      ])}
+      ], `
       <div class="lerobot-report-subtitle">Warnings / blockers</div>
       ${reportListHtml([...(preflight.blocking_reasons || []), ...(preflight.warnings || [])])}
-    </article>
-    <article class="lerobot-report-card">
-      <div class="lerobot-report-card-title"><strong>Pi0.5 / Policy Runtime</strong></div>
-      ${reportRowsHtml([
+    `)}
+    ${runtimeCardHtml("Active Camera", activeCamera.status || boolStatus(preflight.camera_ready, "ready", "blocked"), [
+        ["Camera Ready", preflight.camera_ready],
+        ["Owner", activeCamera.owner || activeCamera.camera_owner || "-"],
+        ["Camera", activeCamera.camera_key || vision.camera || "-"],
+        ["Returned to VLA", vision.camera_returned_to_vla ?? activeCamera.camera_returned_to_vla],
+        ["Conflict", activeCamera.conflict_reason || activeCamera.blocking_reason || "-"],
+      ])}
+    ${runtimeCardHtml("Robot Policy Runtime", runtimeState, [
         ["Backend", policy.policy_backend],
         ["Policy Type", policy.policy_type],
         ["Policy Ref", policy.policy_ref],
         ["Inference", policy.inference_type],
         ["RTC Horizon", policy.rtc_execution_horizon],
         ["RTC Guidance", policy.rtc_max_guidance_weight],
+        ["Action Clamp", policy.action_clamp_enabled ?? preflight.action_clamp_enabled],
         ["Max Duration", policy.max_duration_s],
-        ["Rollout Status", runtime.status],
         ["Session", runtime.session_id],
       ])}
-    </article>
-    <article class="lerobot-report-card">
-      <div class="lerobot-report-card-title"><strong>Vision Dependency</strong></div>
-      ${reportRowsHtml([
+    ${runtimeCardHtml("Rerun Telemetry", telemetry.status || telemetry.viewer_status || (viewerUrl ? "available" : "waiting"), [
+        ["Viewer PID", telemetry.viewer_pid || telemetry.pid || "-"],
+        ["Viewer URL", viewerUrl || "-"],
+        ["WebSocket", telemetry.rerun_ws_url || telemetry.ws_url || "-"],
+        ["RRD", telemetry.rrd_path || telemetry.output_path || "-"],
+        ["Log", response.log_path || runtime.log_path || "-"],
+      ], viewerLink)}
+    ${runtimeCardHtml("Observation Preview", observationPreview.status || (latestFrameArtifact ? "available" : "waiting"), [
+        ["RGB/Depth Frame", latestFrameArtifact || "waiting for streamed frame"],
+        ["Frame Artifact", observationPreview.artifact_path || observationPreview.path || "-"],
+        ["Frame Time", observationPreview.timestamp || observationPreview.frame_ts || "-"],
+        ["Stream Keys", (telemetry.stream_keys || []).join(", ") || "-"],
+      ])}
+    ${runtimeCardHtml("Joint State", jointState.status || (jointState.current || jointState.follower ? "available" : "waiting"), [
+        ["Follower", jointState.current || jointState.follower || jointState.follower_joint_vector || "-"],
+        ["Policy Target", jointState.policy_target || jointState.action_target || "-"],
+        ["Delta", jointState.delta_summary || jointState.max_abs_delta || runtime.max_abs_delta || "-"],
+      ])}
+    ${runtimeCardHtml("Action Stream", actionStream.status || (telemetry.action_rate_hz || runtime.action_count ? "active" : "waiting"), [
+        ["Action Rate", actionStream.action_rate_hz || telemetry.action_rate_hz || "-"],
+        ["Queue Depth", actionStream.action_queue_depth || telemetry.action_queue_depth || "-"],
+        ["Last Action", actionStream.last_action_timestamp || telemetry.last_action_timestamp || "-"],
+        ["Clamp / Filter", actionStream.clamp_status || actionStream.filter_status || telemetry.clamp_status || "-"],
+      ])}
+    ${runtimeCardHtml("Viewer Evidence", telemetry.status || telemetry.viewer_status || (viewerUrl ? "available" : "waiting"), [
+        ["Viewer PID", telemetry.viewer_pid || telemetry.pid || "-"],
+        ["Viewer URL", viewerUrl || "-"],
+        ["RRD", telemetry.rrd_path || telemetry.output_path || "-"],
+        ["Log", response.log_path || runtime.log_path || "-"],
+      ], viewerLink)}
+    ${runtimeCardHtml("Vision Completion Gate", decision.completion_status || vision.completion_status || "waiting", [
         ["Observation", vision.observation_id],
         ["Camera", vision.camera],
         ["Pickup Ready", vision.pickup_target_ready],
         ["Fixture Visible", vision.fixture_visible],
         ["Anomaly", vision.anomaly],
         ["Freshness", vision.freshness && vision.freshness.reason],
+        ["Stop On Detection", decision.stop_rollout_on_completion ?? packet.stop_rollout_on_completion ?? "-"],
       ])}
-    </article>
-    <article class="lerobot-report-card">
-      <div class="lerobot-report-card-title"><strong>SARM Stage Progress</strong></div>
-      ${reportRowsHtml([
+    ${runtimeCardHtml("Execution Safety", safety.status || boolStatus(!safety.recovery_suggested, "nominal", "recovery"), [
         ["Current Stage", stage.current_stage],
         ["Next Expected", stage.next_expected_stage],
         ["Completed", (stage.completed_stages || []).length],
-        ["Progress", sarm.progress_score],
-        ["Failure Precursor", sarm.failure_precursor],
-        ["Recovery", sarm.recovery_suggested],
+        ["Progress", safety.progress_score],
+        ["Failure Precursor", safety.failure_precursor],
+        ["Recovery", safety.recovery_suggested],
       ])}
-    </article>
     <article class="lerobot-report-card wide">
       <div class="lerobot-report-card-title"><strong>Decision / Handoff</strong></div>
       ${reportRowsHtml([
@@ -2286,6 +2599,18 @@ function cameraUsesRealsense(camera) {
   return backend === "intelrealsense" || backend === "realsense" || backend === "realsense_sdk";
 }
 
+function cameraUsbLinkBadge(camera, realsense) {
+  if (!realsense) return "";
+  camera = camera || {};
+  const rawStatus = String(camera.usb_link_status || "").toLowerCase();
+  const status = ["ok", "warning"].includes(rawStatus) ? rawStatus : "unknown";
+  let label = camera.usb_link_label || "USB link unknown";
+  if (status === "warning" && !String(label).toLowerCase().includes("rollout risk")) {
+    label = `${label} · rollout risk`;
+  }
+  return `<span class="lerobot-camera-usb-link ${status}" title="Negotiated camera USB link">${escapeHtml(label)}</span>`;
+}
+
 function cameraRealsenseDefaultChecked(cameraKey, camera) {
   const key = normalizeCameraKey(cameraKey);
   if (cameraRealsenseOverrides.has(key)) return Boolean(cameraRealsenseOverrides.get(key));
@@ -2376,6 +2701,7 @@ function renderDeviceMemory(data) {
             ${removable ? `<button class="btn mini danger camera-remove" data-camera-key="${escapeHtml(key)}" type="button">-</button>` : `<span class="state-pill">default</span>`}
           </div>
           <code>${escapeHtml(cameraIdentity || "not saved")}</code>
+          ${cameraUsbLinkBadge(camera, realsense)}
           ${camera.raw_port ? `<span class="hint">raw: ${escapeHtml(camera.raw_port)}</span>` : ""}
           <div class="button-row compact">
             <button class="btn mini camera-action" data-camera-action="baseline" data-camera-key="${escapeHtml(key)}">Baseline</button>
@@ -2527,6 +2853,7 @@ async function refreshConfig() {
     const data = await res.json();
     renderConfig(data);
     await refreshPolicies();
+    await refreshRolloutProfile();
     await refreshManipulationProfile();
     return data;
   } catch (err) {
@@ -2551,7 +2878,7 @@ async function refreshPolicies() {
     if (value) policyCatalogByValue.set(value, policy);
   }
   if (policySelect) {
-    const prior = policySelect.value;
+    const prior = (rolloutPolicyInput && rolloutPolicyInput.value.trim()) || policySelect.value;
     policySelect.innerHTML = "";
     for (const policy of policies) {
       const opt = document.createElement("option");
@@ -2560,7 +2887,27 @@ async function refreshPolicies() {
       opt.dataset.policyType = policy.policy_type || "";
       policySelect.appendChild(opt);
     }
-    if (policies.some((p) => (p.value || p.path || p.repo_id || "") === prior)) policySelect.value = prior;
+    if (prior) {
+      const priorPolicy = policyCatalogByValue.get(prior) || {};
+      ensureSavedPolicyOption(policySelect, prior, priorPolicy.policy_type || selectedRolloutPolicyType());
+      policySelect.value = prior;
+    }
+  }
+  if (manipulationPolicySelect) {
+    const prior = (manipulationPolicyInput && manipulationPolicyInput.value.trim()) || manipulationPolicySelect.value;
+    manipulationPolicySelect.innerHTML = "";
+    for (const policy of policies) {
+      const opt = document.createElement("option");
+      opt.value = policy.value || policy.path || policy.repo_id || "";
+      opt.textContent = `${policy.label || opt.value || "manual"} · ${policy.source || "policy"}`;
+      opt.dataset.policyType = policy.policy_type || "";
+      manipulationPolicySelect.appendChild(opt);
+    }
+    if (prior) {
+      const priorPolicy = policyCatalogByValue.get(prior) || {};
+      ensureSavedPolicyOption(manipulationPolicySelect, prior, priorPolicy.policy_type || selectedManipulationPolicyType());
+      manipulationPolicySelect.value = prior;
+    }
   }
   if (policyListEl) {
     const displayPolicies = policies.slice().sort((a, b) => policySortRank(a) - policySortRank(b));
@@ -2627,11 +2974,9 @@ function applyPolicySelection(value, policyType = "", selectedPolicy = null) {
   if (policyInput) policyInput.value = clean;
   if (rolloutPolicyInput) rolloutPolicyInput.value = clean;
   if (trainSourcePolicyInput && policy.source !== "local") trainSourcePolicyInput.value = clean;
-  if (manipulationPolicyInput && !manipulationPolicyInput.value.trim()) manipulationPolicyInput.value = clean;
   if (policySelect) policySelect.value = clean;
   if (inferredPolicyType && policyTypeInput) policyTypeInput.value = inferredPolicyType;
   if (inferredPolicyType && rolloutPolicyTypeInput) rolloutPolicyTypeInput.value = inferredPolicyType;
-  if (inferredPolicyType && manipulationPolicyTypeInput) manipulationPolicyTypeInput.value = inferredPolicyType;
   if (policy && policy.source === "local") {
     applyLocalPolicyTrainingResume(policy);
   } else {
@@ -2639,6 +2984,33 @@ function applyPolicySelection(value, policyType = "", selectedPolicy = null) {
   }
   syncRolloutPolicyOptions();
   return clean;
+}
+
+function applyManipulationPolicySelection(value, policyType = "", selectedPolicy = null) {
+  const clean = String(value || "").trim();
+  const policy = selectedPolicy || policyCatalogByValue.get(clean) || {};
+  const selectedOption = manipulationPolicySelect
+    ? Array.from(manipulationPolicySelect.options || []).find((opt) => opt.value === clean)
+    : null;
+  const inferredPolicyType = String(
+    policyType
+    || (policy && policy.policy_type)
+    || (selectedOption && selectedOption.dataset.policyType)
+    || inferPolicyTypeFromPolicy(clean, selectedOption ? selectedOption.textContent : ""),
+  ).trim();
+  if (manipulationPolicyInput) manipulationPolicyInput.value = clean;
+  if (manipulationPolicySelect) manipulationPolicySelect.value = clean;
+  if (inferredPolicyType && manipulationPolicyTypeInput) manipulationPolicyTypeInput.value = inferredPolicyType;
+  syncManipulationPolicyOptions();
+  return clean;
+}
+
+async function persistSelectedManipulationPolicy(value, policyType = "", selectedPolicy = null) {
+  const clean = applyManipulationPolicySelection(value, policyType, selectedPolicy);
+  if (!clean) {
+    return { ok: false, status: "policy_required", error: "Select a Manipulation policy checkpoint before saving." };
+  }
+  return persistManipulationTaskProfile();
 }
 
 
@@ -2657,12 +3029,36 @@ async function useLatestLocalPolicy(statusTarget = null) {
   return local;
 }
 
+async function useLatestManipulationPolicy(statusTarget = null) {
+  setActionStatus(statusTarget, "running", "use latest manipulation policy", { status: "refreshing local policies" });
+  const data = await refreshPolicies();
+  const local = (data.policies || []).find((item) => item.source === "local" && (item.path || item.value));
+  if (!local) {
+    setActionStatus(statusTarget, "error", "use latest manipulation policy", { error: "No local LeRobot policy checkpoint found under outputs/train." });
+    return null;
+  }
+  const value = local.path || local.value || "";
+  const policyType = local.policy_type || inferPolicyTypeFromPolicy(value, local.label || "");
+  const saved = await persistSelectedManipulationPolicy(value, policyType, local);
+  setActionStatus(statusTarget, saved && saved.ok ? "ok" : "error", "use latest manipulation policy", {
+    ...saved,
+    policy_path: value,
+    label: local.label,
+    policy_type: policyType,
+    output_dir: local.output_dir || "",
+  });
+  return local;
+}
+
 async function runAction(label, url, payload = null, statusTarget = null, timeoutMs = 30000) {
   renderResult(`${label} running`, { ok: true, status: "request_sent" });
   setActionStatus(statusTarget, "running", label, { status: "request sent" });
   try {
     const data = await postJson(url, payload || basePayload(), timeoutMs);
     renderResult(label, data);
+    if (String(url || "").includes("/api/lerobot/manipulation-agent/") || String(label || "").includes("manipulation agent")) {
+      renderManipulationAgentReport(data);
+    }
     setActionStatus(statusTarget, data && data.ok ? "ok" : "error", label, data);
     syncFieldsFromWorkflowResponse(data);
     handleRecordProgressResponse(data);
@@ -2905,7 +3301,7 @@ function renderBrowser(data) {
   const useCurrentBtn = $("btn-browser-use-current");
   if (useCurrentBtn) {
     useCurrentBtn.addEventListener("click", async () => {
-      if (lastBrowseTargetInput) lastBrowseTargetInput.value = browseSelectionValue(data.path || "");
+      await applyBrowseSelection(data.path || "");
       browserEl.classList.add("hidden");
       if (lastBrowseKind === "dataset" && lastBrowseTargetInput === datasetInput) {
         await restoreDatasetProfileFromCurrentInput();
@@ -2937,7 +3333,7 @@ function renderBrowser(data) {
         }
         browsePath(lastBrowseKind, path, lastBrowseTargetInput, lastBrowseOptions);
       } else if (lastBrowseTargetInput) {
-        lastBrowseTargetInput.value = browseSelectionValue(path);
+        await applyBrowseSelection(path);
         browserEl.classList.add("hidden");
         if (lastBrowseKind === "dataset" && lastBrowseTargetInput === datasetInput) {
           await restoreDatasetProfileFromCurrentInput();
@@ -3035,7 +3431,7 @@ async function openNativePathPicker(path = "") {
   const picked = await postJson("/api/lerobot/files/pick", { kind: lastBrowseKind, path, include_files: includeFiles, select }, 300000);
   renderResult("native path picker", picked);
   if (picked && picked.ok && picked.selected_path) {
-    if (lastBrowseTargetInput) lastBrowseTargetInput.value = browseSelectionValue(picked.selected_path);
+    await applyBrowseSelection(picked.selected_path);
     if (browserEl) browserEl.classList.add("hidden");
     if (lastBrowseKind === "dataset" && lastBrowseTargetInput === datasetInput) {
       await restoreDatasetProfileFromCurrentInput();
@@ -4718,19 +5114,15 @@ bind("btn-browse-rollout-policy", () => {
   return browsePath("policy", startPath, rolloutPolicyInput || policyInput, { select: "file", include_files: true });
 });
 bind("btn-browse-manipulation-policy", () => {
-  const startPath = (manipulationPolicyInput && manipulationPolicyInput.value.trim())
-    || (rolloutPolicyInput && rolloutPolicyInput.value.trim())
-    || "";
-  return browsePath("policy", startPath, manipulationPolicyInput || rolloutPolicyInput || policyInput, { select: "file", include_files: true });
-});
-bind("btn-browse-manipulation-stl", () => browsePath("any", manipulationStlInput ? manipulationStlInput.value : "", manipulationStlInput, { select: "file", include_files: true }));
-bind("btn-manipulation-use-rollout-policy", (event) => {
-  if (manipulationPolicyInput && rolloutPolicyInput) manipulationPolicyInput.value = rolloutPolicyInput.value;
-  if (manipulationPolicyTypeInput && rolloutPolicyTypeInput) manipulationPolicyTypeInput.value = rolloutPolicyTypeInput.value;
-  const statusTarget = actionStatusFromEvent(event);
-  setActionStatus(statusTarget, "ok", "use rollout policy", { status: "rollout policy copied to Manipulation Agent Bridge" });
+  const startPath = (manipulationPolicyInput && manipulationPolicyInput.value.trim()) || "";
+  return browsePath("policy", startPath, manipulationPolicyInput || rolloutPolicyInput || policyInput, {
+    select: "file",
+    include_files: true,
+    onSelect: persistSelectedManipulationPolicy,
+  });
 });
 bind("btn-rollout-latest-policy", (event) => useLatestLocalPolicy(actionStatusFromEvent(event)));
+bind("btn-manipulation-latest-policy", (event) => useLatestManipulationPolicy(actionStatusFromEvent(event)));
 bind("btn-browse-visualization", () => browsePath("dataset", visualizationPathInput ? visualizationPathInput.value : "", visualizationPathInput));
 bind("btn-browse-visualization-output", () => browsePath("output", visualizationOutputDirInput ? visualizationOutputDirInput.value : "", visualizationOutputDirInput));
 bind("btn-browse-isaac-augment-output", () => browsePath("output", isaacAugmentOutputDirInput ? isaacAugmentOutputDirInput.value : "", isaacAugmentOutputDirInput));
@@ -4813,22 +5205,28 @@ bind("btn-policy-refresh", async (event) => {
 bind("btn-rollout-start", () => runRolloutAction("rollout start", "/api/lerobot/rollout/start", rolloutPayload()));
 bind("btn-rollout-stop", () => runRolloutAction("rollout stop", "/api/lerobot/rollout/stop", sessionPayload("rollout")));
 bind("btn-rollout-status", () => runRolloutAction("rollout status", "/api/lerobot/rollout/status", sessionPayload("rollout")));
-bind("btn-manipulation-save", async (event) => {
+bind("btn-rollout-save", async (event) => {
   const statusTarget = actionStatusFromEvent(event);
-  setActionStatus(statusTarget, "running", "manipulation defaults save", { status: "request sent" });
+  setActionStatus(statusTarget, "running", "rollout defaults save", { status: "request sent" });
   try {
-    const data = await postJson("/api/lerobot/manipulation-agent/config", manipulationAgentPayload());
-    renderResult("manipulation defaults save", data);
-    setActionStatus(statusTarget, data && data.ok ? "ok" : "error", "manipulation defaults save", data);
-    applyManipulationProfile(data.profile || {}, true);
-    await refreshConfig();
+    const data = await postJson("/api/lerobot/rollout/config", currentRolloutProfile());
+    renderResult("rollout defaults save", data);
+    setActionStatus(statusTarget, data && data.ok ? "ok" : "error", "rollout defaults save", data);
+    applyRolloutProfile(data.profile || {}, true);
     return data;
   } catch (err) {
     const error = { ok: false, status: "request_failed", error: String(err) };
-    renderResult("manipulation defaults save", error);
-    setActionStatus(statusTarget, "error", "manipulation defaults save", error);
+    renderResult("rollout defaults save", error);
+    setActionStatus(statusTarget, "error", "rollout defaults save", error);
     return error;
   }
+});
+bind("btn-manipulation-save", async (event) => {
+  return persistManipulationTaskProfile({
+    statusTarget: actionStatusFromEvent(event),
+    render: true,
+    refresh: true,
+  });
 });
 bind("btn-manipulation-test", (event) => runAction("manipulation agent test", "/api/lerobot/manipulation-agent/test", manipulationAgentPayload(), actionStatusFromEvent(event), 300000));
 bind("btn-manipulation-preview", (event) => {
@@ -4983,10 +5381,31 @@ if (policySelect) {
     applyPolicySelection(policySelect.value, policyType);
   });
 }
-if (manipulationTaskIdInput) manipulationTaskIdInput.addEventListener("change", () => syncManipulationTaskPreset(true));
+if (manipulationTaskIdInput) manipulationTaskIdInput.addEventListener("change", handleManipulationTaskChange);
+if (manipulationPolicySelect) {
+  manipulationPolicySelect.addEventListener("change", async () => {
+    const selectedOption = manipulationPolicySelect.options[manipulationPolicySelect.selectedIndex] || null;
+    const policyType = selectedOption
+      ? selectedOption.dataset.policyType || inferPolicyTypeFromPolicy(manipulationPolicySelect.value, selectedOption.textContent || "")
+      : "";
+    await persistSelectedManipulationPolicy(manipulationPolicySelect.value, policyType);
+  });
+}
+if (manipulationPolicyInput) {
+  manipulationPolicyInput.addEventListener("change", async () => {
+    await persistSelectedManipulationPolicy(manipulationPolicyInput.value, selectedManipulationPolicyType());
+  });
+}
+if (manipulationPolicyTypeInput) {
+  manipulationPolicyTypeInput.addEventListener("change", async () => {
+    syncManipulationPolicyOptions();
+    await persistManipulationTaskProfile();
+  });
+}
 initializeTtsControls();
-syncManipulationTaskPreset(false);
+applyManipulationTaskProfile(selectedManipulationTaskId(), defaultManipulationTaskProfile(selectedManipulationTaskId()));
 applyPolicyTypeDefaults();
 syncRolloutPolicyOptions();
+syncManipulationPolicyOptions();
 refreshConfig();
 restoreIsaacDomainMimicPipelineStatus();

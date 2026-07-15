@@ -986,7 +986,7 @@ def scenario_live_runtime_ide(audit: WebDriverAudit, base_url: str, out_dir: Pat
     agent_specific_reports = result.get("agentSpecificReports") or {}
     expected_agent_phrases = {
         "design": "DOE Map / Design Space",
-        "specimen": "Printer Runtime",
+        "specimen": "Live Job Monitor",
         "bo": "BO Candidate Ranking",
         "guardian": "Stop / Continue Decision",
     }

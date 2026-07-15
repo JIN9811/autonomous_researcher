@@ -134,6 +134,8 @@ atr down
 - Timeline: runtime event 순서
 - Device strip: GPU/LLM/Printer/Robot/Camera/Windows bridge 등 상태
 
+Specimen Making Agent를 선택하면 Report 영역은 3DP 작업 모니터로 동작합니다. 중앙의 `Live Job Monitor`가 현재 job progress, layer, queue, remaining time, local/remote G-code path를 보여주고, 주변에 `Build Intent`, `Printer Telemetry`, `Readiness Gate`, `Slice Profile`, `Thermal / Material`, `Transfer Queue`, `Layer Preview`, `Camera Evidence`, `Post-Print Automation`, `G-code Validation`, `Handoff / Artifacts` card가 배치됩니다. 이 값들은 `specimen_agent_report.v1`과 3DP bridge API evidence에서 읽으며, 값이 없으면 임의로 만들지 않고 pending/unknown으로 표시합니다.
+
 Live GUI agent 목록은 `web/static/planning.js` 하드코딩 값보다 `/api/runtime/agent-manifests`를 우선합니다. 이 manifest는 graph YAML, module YAML, 선택적 `ui.yaml`을 합칩니다. `ui.yaml`은 label, short name, icon, report card selector 같은 화면 표시만 바꿀 수 있고, handler/tool/graph transition/live device 권한은 바꾸지 않습니다.
 
 ### 1.7 작업 결과가 저장되는 곳

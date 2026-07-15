@@ -421,8 +421,8 @@ Frequently written by run loop merge:
   - `storage=internal`
 - In normal Live GUI mode, `실험 수행` builds `experiment_spec.print` with `start_immediately=true` and `confirm_physical_print=true`, so Specimen Making Agent proceeds through the active printer bridge. The default bridge is Bambu Lab X2D; PrusaLink upload/start is used only when Prusa MK4S is explicitly selected.
 - In Live GUI `테스트 모드` and Main GUI `test`, the generated TPMS gyroid cell size comes from the 3DP GUI saved `test_unit_cell_size_mm`, defaulting to `cell_size_mm=10.0`.
-- In Live GUI `테스트 모드` and Main GUI `test`, `print.start_immediately` remains false until Specimen Making Agent asks for a printer path; choosing `실제 출력` promotes only the printer step to real PrusaSlicer -> PrusaLink upload/start.
-- Live GUI one-shot commands `테스트 모드, 가상 브릿지`, `테스트 모드, 설치 프린터`, and `테스트 모드, 실제 출력` inject the selected `printer_test_path` before DesignAgent handoff, so Specimen Making Agent proceeds without the separate printer-path prompt.
+- In Live GUI `테스트 모드` and Main GUI `test`, `print.start_immediately` remains false until Specimen Making Agent asks for a printer path. Choosing `설치 프린터` promotes the printer step to the selected-printer ejection-only project-file path derived from the actual sliced artifact. Choosing `실제 출력` promotes the printer step to the full physical upload/start/print path.
+- Live GUI one-shot commands `테스트 모드, 가상 브릿지`, `테스트 모드, 설치 프린터`, `테스트 모드, 실제 프린터`, and `테스트 모드, 실제 출력` inject the selected `printer_test_path` before DesignAgent handoff, so Specimen Making Agent proceeds without the separate printer-path prompt.
 - If any required value is missing, the Live GUI must append an Orchestrator message that includes:
   - current confirmed values
   - missing values

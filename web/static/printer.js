@@ -502,12 +502,12 @@ function readAutoejectionConfig() {
     pre_eject_vision_profile: autoejectionPreVisionInput ? autoejectionPreVisionInput.value.trim() : "",
     post_eject_vision_profile: autoejectionPostVisionInput ? autoejectionPostVisionInput.value.trim() : "",
     push_direction: autoejectionPushDirectionInput ? autoejectionPushDirectionInput.value : "center",
-    z_push_offset_mm: Number(autoejectionZPushOffsetInput ? autoejectionZPushOffsetInput.value : 30) || 30,
+    z_push_offset_mm: Number(autoejectionZPushOffsetInput ? autoejectionZPushOffsetInput.value : 15) || 15,
     push_lane_offset_mm: Number(autoejectionPushLaneOffsetInput ? autoejectionPushLaneOffsetInput.value : 30) || 30,
-    push_speed_mm_min: Number(autoejectionPushSpeedInput ? autoejectionPushSpeedInput.value : 300) || 300,
+    push_speed_mm_min: Number(autoejectionPushSpeedInput ? autoejectionPushSpeedInput.value : 6000) || 6000,
     enable_full_bed_sweep: autoejectionFullBedSweepInput ? autoejectionFullBedSweepInput.checked : false,
     sweep_z_mm: Number(autoejectionSweepZInput ? autoejectionSweepZInput.value : 1) || 1,
-    sweep_speed_mm_min: Number(autoejectionSweepSpeedInput ? autoejectionSweepSpeedInput.value : 300) || 300,
+    sweep_speed_mm_min: Number(autoejectionSweepSpeedInput ? autoejectionSweepSpeedInput.value : 6000) || 6000,
     require_verified_routine: !nativePatch,
     require_pre_eject_vision: !nativePatch,
     require_post_eject_vision: !nativePatch,
@@ -524,12 +524,12 @@ function fillAutoejectionConfig(status) {
   if (autoejectionPreVisionInput) autoejectionPreVisionInput.value = data.pre_eject_vision_profile || "";
   if (autoejectionPostVisionInput) autoejectionPostVisionInput.value = data.post_eject_vision_profile || "";
   if (autoejectionPushDirectionInput) autoejectionPushDirectionInput.value = native.push_direction || data.push_direction || "center";
-  if (autoejectionZPushOffsetInput) autoejectionZPushOffsetInput.value = Number(native.z_push_offset_mm ?? data.z_push_offset_mm ?? 30);
+  if (autoejectionZPushOffsetInput) autoejectionZPushOffsetInput.value = Number(native.z_push_offset_mm ?? data.z_push_offset_mm ?? 15);
   if (autoejectionPushLaneOffsetInput) autoejectionPushLaneOffsetInput.value = Number(native.push_lane_offset_mm ?? data.push_lane_offset_mm ?? 30);
-  if (autoejectionPushSpeedInput) autoejectionPushSpeedInput.value = Number(native.push_speed_mm_min ?? data.push_speed_mm_min ?? 300);
+  if (autoejectionPushSpeedInput) autoejectionPushSpeedInput.value = Number(native.push_speed_mm_min ?? data.push_speed_mm_min ?? 6000);
   if (autoejectionFullBedSweepInput) autoejectionFullBedSweepInput.checked = Boolean(native.enable_full_bed_sweep ?? data.enable_full_bed_sweep ?? false);
   if (autoejectionSweepZInput) autoejectionSweepZInput.value = Number(native.sweep_z_mm ?? data.sweep_z_mm ?? 1);
-  if (autoejectionSweepSpeedInput) autoejectionSweepSpeedInput.value = Number(native.sweep_speed_mm_min ?? data.sweep_speed_mm_min ?? 300);
+  if (autoejectionSweepSpeedInput) autoejectionSweepSpeedInput.value = Number(native.sweep_speed_mm_min ?? data.sweep_speed_mm_min ?? 6000);
   if (autoejectionReleaseSurfaceProfileInput) {
     autoejectionReleaseSurfaceProfileInput.value = data.release_surface_profile || "cool-plate-pla";
   }
@@ -542,12 +542,12 @@ function fillNativeGcodeAutoejectionDefaults() {
   if (autoejectionPreVisionInput) autoejectionPreVisionInput.value = "";
   if (autoejectionPostVisionInput) autoejectionPostVisionInput.value = "";
   if (autoejectionPushDirectionInput) autoejectionPushDirectionInput.value = "center";
-  if (autoejectionZPushOffsetInput) autoejectionZPushOffsetInput.value = 30;
+  if (autoejectionZPushOffsetInput) autoejectionZPushOffsetInput.value = 15;
   if (autoejectionPushLaneOffsetInput) autoejectionPushLaneOffsetInput.value = 30;
-  if (autoejectionPushSpeedInput) autoejectionPushSpeedInput.value = 300;
+  if (autoejectionPushSpeedInput) autoejectionPushSpeedInput.value = 6000;
   if (autoejectionFullBedSweepInput) autoejectionFullBedSweepInput.checked = false;
   if (autoejectionSweepZInput) autoejectionSweepZInput.value = 1;
-  if (autoejectionSweepSpeedInput) autoejectionSweepSpeedInput.value = 300;
+  if (autoejectionSweepSpeedInput) autoejectionSweepSpeedInput.value = 6000;
   if (autoejectionReleaseSurfaceProfileInput) autoejectionReleaseSurfaceProfileInput.value = "cool-plate-pla";
   if (autoejectionStatusDetail) {
     autoejectionStatusDetail.textContent = "Native G-code patch preset filled locally. Press Save Autoejection Config, then Generate Patched Artifact before routing or publishing.";
@@ -697,7 +697,7 @@ function renderBambuAutoejectionValidationEvidence(data) {
     `blockers=${blockers.length ? blockers.join(", ") : "none"}`,
     `object_bounds_mm=${formatBoundsSummary(objectBounds)}`,
     `sweep_path=${sweepPath}`,
-    `standalone_path=${runtimePaths.standalone_endpoint || "/api/printer/autoejection-test"} -> ${runtimePaths.standalone_transport || "mqtt_gcode_line"}`,
+    `standalone_path=${runtimePaths.standalone_endpoint || "/api/printer/autoejection-test"} -> ${runtimePaths.standalone_transport || "project_file"}`,
     `virtual_bridge_path=${runtimePaths.virtual_bridge_transport || "virtual"}`,
     `actual_print_path=${runtimePaths.actual_print_transport || "project_file"}${runtimePaths.home_after_standalone === false ? " · no_home_after_standalone" : ""}`,
     `patched_artifact_path=${artifact.patched_artifact_path || "n/a"}`,
@@ -1311,12 +1311,14 @@ async function refreshStatus(mode, options = {}) {
   if (options.manual) {
     printerStatusManualOverride = true;
   }
-  const data = await apiJson(`/api/printer/status?mode=${encodeURIComponent(mode)}`);
+  const params = new URLSearchParams({ mode });
+  if (options.emit) params.set("emit", "1");
+  const data = await apiJson(`/api/printer/status?${params.toString()}`);
   if (options.initial && printerStatusManualOverride) {
     return data;
   }
   renderStatus(data);
-  writeLog(data);
+  if (!options.silentLog) writeLog(data);
   return data;
 }
 
@@ -2007,8 +2009,8 @@ if (btnAutoejectionValidateRight) {
 }
 if (btnBedClearMark) btnBedClearMark.addEventListener("click", () => markBedClear(true, btnBedClearMark));
 if (btnBedClearNotClear) btnBedClearNotClear.addEventListener("click", () => markBedClear(false, btnBedClearNotClear));
-if (btnStatusTest) btnStatusTest.addEventListener("click", () => refreshStatus("test", { manual: true }).catch((err) => writeLog({ ok: false, error: err.message })));
-if (btnStatusLive) btnStatusLive.addEventListener("click", () => refreshStatus("live", { manual: true }).catch((err) => writeLog({ ok: false, error: err.message })));
+if (btnStatusTest) btnStatusTest.addEventListener("click", () => refreshStatus("test", { manual: true, emit: true }).catch((err) => writeLog({ ok: false, error: err.message })));
+if (btnStatusLive) btnStatusLive.addEventListener("click", () => refreshStatus("live", { manual: true, emit: true }).catch((err) => writeLog({ ok: false, error: err.message })));
 if (btnVideoStatus) btnVideoStatus.addEventListener("click", () => runVideoStatus());
 if (btnUploadPathProbe) btnUploadPathProbe.addEventListener("click", () => runUploadPathProbe());
 if (btnBambuSliceArtifact) btnBambuSliceArtifact.addEventListener("click", () => runBambuSliceArtifact());
