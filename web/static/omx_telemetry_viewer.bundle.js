@@ -27166,6 +27166,13 @@ void main() {
   var TARGET_SUPPORT_NAME = "RightDiskAluminumTop";
   var SPECIMEN_NAME = "RedSpecimenBlock";
   var SPECIMEN_SUPPORT_CLEARANCE_M = 5e-4;
+  var WORLD_UP_AXIS = new Vector3(0, 0, 1);
+  var anchorWorldPosition = new Vector3();
+  var anchorWorldQuaternion = new Quaternion();
+  var parentWorldQuaternion = new Quaternion();
+  var desiredWorldQuaternion = new Quaternion();
+  var localUprightQuaternion = new Quaternion();
+  var anchorWorldEuler = new Euler();
   var runtime = {
     sessionId: "",
     status: "idle",
@@ -27581,23 +27588,40 @@ void main() {
     const state = viewer && viewer.specimenGraspState;
     const specimen = specimenObject(viewer);
     const graspAnchor = viewer && viewer.graspAnchor;
-    if (!state || !specimen || !graspAnchor) return false;
+    if (!state || !specimen || !graspAnchor || !viewer.environmentGroup) return false;
     if (!state.original) captureSpecimenOrigin(viewer, specimen);
-    graspAnchor.add(specimen);
-    specimen.position.set(0, 0, 0);
-    specimen.quaternion.identity();
+    viewer.environmentGroup.add(specimen);
     specimen.scale.copy(state.original ? state.original.scale : new Vector3(1, 1, 1));
     state.held = true;
+    return syncHeldSpecimenPose(viewer);
+  }
+  function syncHeldSpecimenPose(viewer = runtime.viewer) {
+    const state = viewer && viewer.specimenGraspState;
+    const specimen = specimenObject(viewer);
+    const graspAnchor = viewer && viewer.graspAnchor;
+    if (!state || !state.held || !specimen || !graspAnchor || !viewer.environmentGroup) return false;
+    viewer.scene.updateMatrixWorld(true);
+    graspAnchor.getWorldPosition(anchorWorldPosition);
+    graspAnchor.getWorldQuaternion(anchorWorldQuaternion);
+    const yaw = anchorWorldEuler.setFromQuaternion(anchorWorldQuaternion, "ZYX").z;
+    desiredWorldQuaternion.setFromAxisAngle(WORLD_UP_AXIS, yaw);
+    viewer.environmentGroup.getWorldQuaternion(parentWorldQuaternion);
+    localUprightQuaternion.copy(parentWorldQuaternion).invert();
+    localUprightQuaternion.multiply(desiredWorldQuaternion);
+    if (specimen.parent !== viewer.environmentGroup) viewer.environmentGroup.add(specimen);
+    viewer.environmentGroup.worldToLocal(anchorWorldPosition);
+    specimen.position.copy(anchorWorldPosition);
+    specimen.quaternion.copy(localUprightQuaternion);
+    specimen.scale.copy(state.original ? state.original.scale : specimen.scale);
     return true;
   }
   function releaseSpecimenFromGripper(viewer = runtime.viewer) {
     const state = viewer && viewer.specimenGraspState;
     const specimen = specimenObject(viewer);
     if (!state || !state.held || !specimen || !viewer.environmentGroup) return false;
-    viewer.scene.updateMatrixWorld(true);
-    viewer.environmentGroup.attach(specimen);
-    settleSpecimenOnSupport(viewer, specimen);
+    syncHeldSpecimenPose(viewer);
     state.held = false;
+    settleSpecimenOnSupport(viewer, specimen);
     state.releasedAttemptIndex = state.attemptIndex;
     return true;
   }
@@ -27626,6 +27650,7 @@ void main() {
       state.original = null;
       captureSpecimenOrigin(viewer, specimen);
       state.poseLocked = true;
+      attachSpecimenToGripper(viewer);
       setGripperOutcomeGlow("idle", viewer);
       return true;
     }
@@ -27847,6 +27872,7 @@ void main() {
       interpolateJointMap(currentTarget, runtime.latestTargetRad, 0.28);
       applyJointRadians(measuredRobot, currentActual);
       applyJointRadians(policyTargetGhost, currentTarget);
+      syncHeldSpecimenPose();
       policyTargetGhost.root.visible = Object.keys(runtime.latestTargetRad || {}).length > 0;
       controls.update();
       renderer.render(scene, camera);

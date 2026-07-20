@@ -577,6 +577,20 @@ def test_grasp_outcome_persists_through_ungrasping_until_next_attempt() -> None:
     assert packets[-1]["motion_state"]["grasp_outcome"]["attempt_index"] == 1
 
 
+def test_grasp_outcome_finalizes_when_grasp_transitions_directly_to_ungrasping() -> None:
+    samples = _grasp_attempt_samples()[:4]
+    policy_open = {**POLICY_HOME_POSE, "Gripper": 60.0}
+    samples.append((32.0, {**HOME_POSE, "Gripper": 60.0}, policy_open))
+
+    packets = _annotated_sequence(samples)
+
+    assert packets[-1]["motion_state"]["measured"]["gripper_state"] == "ungrasping"
+    outcome = packets[-1]["motion_state"]["grasp_outcome"]
+    assert outcome["status"] != "pending"
+    assert outcome["attempt_index"] == 1
+    assert outcome["completed_s"] == pytest.approx(2.0)
+
+
 def test_normalize_action_event_rejects_non_action_and_incomplete_rows() -> None:
     assert normalize_action_event({"event": "observation"}) is None
     assert normalize_action_event({"event": "action", "latest_observation": {}}) is None

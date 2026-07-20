@@ -3338,7 +3338,7 @@ def test_live_gui_manipulation_pose_and_policy_tracking_cards_are_locally_bundle
     bundle_response = client.get("/static/omx_telemetry_viewer.bundle.js")
 
     assert '/static/styles.css?v=20260715-grasp-attach-1' in html
-    assert '/static/omx_telemetry_viewer.bundle.js?v=20260715-terminal-memory-fix-1' in html
+    assert '/static/omx_telemetry_viewer.bundle.js?v=20260720-upright-regrasp-1' in html
     assert '/static/planning.js?v=20260715-report-patch-1' in html
     assert bundle_response.status_code == 200
     bundle = bundle_response.text
@@ -3466,7 +3466,7 @@ def test_live_robot_pose_has_repeatable_zoom_to_fit_control() -> None:
     assert "bindPoseFitButtons" in bundle
     assert ".ar-man-pose-fit" in styles
     assert '/static/styles.css?v=20260715-grasp-attach-1' in html
-    assert '/static/omx_telemetry_viewer.bundle.js?v=20260715-terminal-memory-fix-1' in html
+    assert '/static/omx_telemetry_viewer.bundle.js?v=20260720-upright-regrasp-1' in html
     assert '/static/planning.js?v=20260715-report-patch-1' in html
 
 

@@ -16,7 +16,7 @@ from utils.isaac_omx_mirror_mapping import ISAAC_OMX_JOINT_MAP, action_to_joint_
 TELEMETRY_SCHEMA = "atr.robot_joint_telemetry.v1"
 ARTIFACT_SCHEMA = "atr.policy_tracking_artifact.v1"
 GRASP_OUTCOME_SCHEMA = "atr.grasp_outcomes.v1"
-GRASP_OUTCOME_RULE_VERSION = "absolute_contact_gap_v2"
+GRASP_OUTCOME_RULE_VERSION = "absolute_contact_gap_v3"
 GRASP_CONTACT_GAP_THRESHOLD = 2.0
 JOINT_NAMES = tuple(str(item["isaac_joint_name"]) for item in ISAAC_OMX_JOINT_MAP)
 TERMINAL_SESSION_STATUSES = {"STOPPED", "FAILED", "COMPLETED", "CANCELLED", "DATASET_COMPLETE"}
@@ -346,7 +346,7 @@ def _update_grasp_outcome(
     leaving_grasp = (
         latch.active
         and latch.previous_gripper_state == "grasping"
-        and gripper_state == "idle"
+        and gripper_state != "grasping"
     )
     if latch.active:
         latch.current["measured_gripper"] = _gripper_value(packet, "actual_source")

@@ -38,3 +38,21 @@ def test_terminal_grasp_artifact_hydration_does_not_rewrite_unchanged_dom_text()
     assert "setNodeTextIfChanged(targetNode, formatNativeValue(value.policy_target_gripper));" in source
     assert "setNodeTextIfChanged(gapNode, `${gap} / ${threshold}`);" in source
     assert 'setNodeTextIfChanged(overlapNode, value.transport_overlap ? "yes" : "no");' in source
+
+
+def test_held_specimen_follows_gripper_with_world_yaw_only() -> None:
+    source = SOURCE_PATH.read_text(encoding="utf-8")
+
+    assert "function syncHeldSpecimenPose(viewer = runtime.viewer)" in source
+    assert 'setFromQuaternion(anchorWorldQuaternion, "ZYX").z' in source
+    assert "desiredWorldQuaternion.setFromAxisAngle(WORLD_UP_AXIS, yaw);" in source
+    assert "viewer.environmentGroup.worldToLocal(anchorWorldPosition);" in source
+    assert "syncHeldSpecimenPose();" in source
+
+
+def test_new_pending_grasp_attempt_reacquires_released_specimen() -> None:
+    source = SOURCE_PATH.read_text(encoding="utf-8")
+
+    pending_branch = source.split('if (status === "pending" && attemptIndex !== state.attemptIndex) {', 1)[1]
+    pending_branch = pending_branch.split("return true;", 1)[0]
+    assert "attachSpecimenToGripper(viewer);" in pending_branch
