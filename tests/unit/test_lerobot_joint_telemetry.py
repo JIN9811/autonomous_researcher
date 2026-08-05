@@ -158,6 +158,187 @@ def _post_place_interlock():
     return gate_type()
 
 
+def _task_cycle_annotator():
+    annotator_type = getattr(joint_telemetry, "TaskCycleAnnotator", None)
+    assert annotator_type is not None, "TaskCycleAnnotator is not implemented"
+    return annotator_type()
+
+
+def _task_cycle_packet(
+    sequence: int,
+    *,
+    base: str,
+    gripper: str = "idle",
+    home: bool = False,
+    grasp_status: str = "idle",
+    grasp_index: int = 0,
+) -> dict[str, object]:
+    packet = _motion_packet(
+        sequence,
+        measured_base=base,
+        measured_gripper=gripper,
+        measured_home=home,
+    )
+    packet["motion_state"]["grasp_outcome"] = {
+        "status": grasp_status,
+        "attempt_index": grasp_index,
+    }
+    return packet
+
+
+def test_task_cycle_counts_one_ordered_home_to_home_task() -> None:
+    annotator = _task_cycle_annotator()
+    packets = [
+        _task_cycle_packet(1, base="home", home=True),
+        _task_cycle_packet(2, base="moving"),
+        _task_cycle_packet(3, base="moving", gripper="grasping", grasp_status="pending", grasp_index=1),
+        _task_cycle_packet(4, base="moving", grasp_status="success", grasp_index=1),
+        _task_cycle_packet(5, base="moving", gripper="ungrasping", grasp_status="success", grasp_index=1),
+        _task_cycle_packet(6, base="home", home=True, grasp_status="success", grasp_index=1),
+    ]
+
+    result = {}
+    for packet in packets:
+        result = annotator.observe(packet)
+
+    assert result["attempt_count"] == 1
+    assert result["completed_count"] == 1
+    assert result["success_rate"] == pytest.approx(1.0)
+    assert result["state"] == "complete"
+    assert result["milestones"] == {
+        "home_start": True,
+        "moving": True,
+        "grasping": True,
+        "ungrasping": True,
+        "home_return": True,
+    }
+    assert result["grasp"] == {
+        "task_index": 1,
+        "attempt_count": 1,
+        "completed_count": 1,
+        "success_count": 1,
+        "failed_count": 0,
+        "pending_count": 0,
+        "success_rate": pytest.approx(1.0),
+    }
+
+
+def test_task_cycle_deduplicates_samples_and_keeps_multiple_grasps_in_one_task() -> None:
+    annotator = _task_cycle_annotator()
+    packets = [
+        _task_cycle_packet(1, base="home", home=True),
+        _task_cycle_packet(2, base="moving"),
+        _task_cycle_packet(3, base="moving"),
+        _task_cycle_packet(4, base="moving", gripper="grasping", grasp_status="pending", grasp_index=1),
+        _task_cycle_packet(5, base="moving", grasp_status="failed", grasp_index=1),
+        _task_cycle_packet(6, base="moving", gripper="grasping", grasp_status="pending", grasp_index=2),
+        _task_cycle_packet(7, base="moving", grasp_status="success", grasp_index=2),
+        _task_cycle_packet(8, base="moving", gripper="ungrasping", grasp_status="success", grasp_index=2),
+        _task_cycle_packet(9, base="home", home=True, grasp_status="success", grasp_index=2),
+    ]
+
+    result = {}
+    for packet in packets:
+        result = annotator.observe(packet)
+
+    assert result["attempt_count"] == 1
+    assert result["completed_count"] == 1
+    assert result["grasp"]["attempt_count"] == 2
+    assert result["grasp"]["completed_count"] == 2
+    assert result["grasp"]["success_count"] == 1
+    assert result["grasp"]["failed_count"] == 1
+    assert result["grasp"]["success_rate"] == pytest.approx(0.5)
+
+
+def test_task_cycle_accumulates_five_tasks_and_reports_latest_task_grasp_retry() -> None:
+    annotator = _task_cycle_annotator()
+    sequence = 0
+    result: dict[str, object] = {}
+
+    for task_index in range(1, 6):
+        sequence += 1
+        result = annotator.observe(_task_cycle_packet(sequence, base="home", home=True))
+        sequence += 1
+        result = annotator.observe(_task_cycle_packet(sequence, base="moving"))
+
+        if task_index == 5:
+            sequence += 1
+            result = annotator.observe(
+                _task_cycle_packet(
+                    sequence,
+                    base="moving",
+                    gripper="grasping",
+                    grasp_status="pending",
+                    grasp_index=1,
+                )
+            )
+            sequence += 1
+            result = annotator.observe(
+                _task_cycle_packet(sequence, base="moving", grasp_status="failed", grasp_index=1)
+            )
+
+        grasp_index = 2 if task_index == 5 else 1
+        sequence += 1
+        result = annotator.observe(
+            _task_cycle_packet(
+                sequence,
+                base="moving",
+                gripper="grasping",
+                grasp_status="pending",
+                grasp_index=grasp_index,
+            )
+        )
+        sequence += 1
+        result = annotator.observe(
+            _task_cycle_packet(sequence, base="moving", grasp_status="success", grasp_index=grasp_index)
+        )
+        sequence += 1
+        result = annotator.observe(
+            _task_cycle_packet(
+                sequence,
+                base="moving",
+                gripper="ungrasping",
+                grasp_status="success",
+                grasp_index=grasp_index,
+            )
+        )
+        sequence += 1
+        result = annotator.observe(
+            _task_cycle_packet(
+                sequence,
+                base="home",
+                home=True,
+                grasp_status="success",
+                grasp_index=grasp_index,
+            )
+        )
+
+    assert result["attempt_count"] == 5
+    assert result["completed_count"] == 5
+    assert result["success_rate"] == pytest.approx(1.0)
+    assert result["state"] == "complete"
+    assert result["grasp"]["task_index"] == 5
+    assert result["grasp"]["attempt_count"] == 2
+    assert result["grasp"]["completed_count"] == 2
+    assert result["grasp"]["success_count"] == 1
+    assert result["grasp"]["failed_count"] == 1
+    assert result["grasp"]["success_rate"] == pytest.approx(0.5)
+
+
+def test_task_cycle_does_not_start_without_stable_measured_home() -> None:
+    annotator = _task_cycle_annotator()
+
+    result = annotator.observe(_task_cycle_packet(1, base="moving"))
+    result = annotator.observe(
+        _task_cycle_packet(2, base="moving", gripper="grasping", grasp_status="success", grasp_index=1)
+    )
+
+    assert result["attempt_count"] == 0
+    assert result["completed_count"] == 0
+    assert result["success_rate"] is None
+    assert result["state"] == "not_started"
+
+
 def test_post_place_interlock_requires_measured_ungrasping_before_stable_home() -> None:
     gate = _post_place_interlock()
 
@@ -627,6 +808,45 @@ def test_file_observer_bounds_initial_backlog(tmp_path: Path) -> None:
     packets = observer.poll(path, {"session_id": "rollout-test", "workflow": "rollout", "status": "POLICY_ACTIVE"})
 
     assert [packet["sequence"] for packet in packets] == [8, 9, 10]
+
+
+def test_file_observer_replays_bounded_preroll_for_task_cycle_totals(tmp_path: Path) -> None:
+    path = tmp_path / "motor_events.jsonl"
+    moving = {**HOME_POSE, "Joint1": 20.0}
+    closing = {**moving, "Gripper": 55.0}
+    contact = {**moving, "Gripper": 53.5}
+    policy_moving = {**POLICY_HOME_POSE, "Joint1": 20.0}
+    policy_contact = {**policy_moving, "Gripper": 50.0}
+    samples = [
+        (0.0, HOME_POSE, POLICY_HOME_POSE),
+        (0.6, HOME_POSE, POLICY_HOME_POSE),
+        (1.2, moving, policy_moving),
+        (1.8, closing, policy_contact),
+        (2.4, contact, policy_contact),
+        (3.0, contact, policy_contact),
+        (3.6, moving, policy_moving),
+        (4.2, moving, policy_moving),
+        (4.8, HOME_POSE, POLICY_HOME_POSE),
+        (5.4, HOME_POSE, POLICY_HOME_POSE),
+        (6.0, HOME_POSE, POLICY_HOME_POSE),
+    ]
+    _write_jsonl(
+        path,
+        [
+            _pose_event(index, monotonic_s, actual=actual, target=target)
+            for index, (monotonic_s, actual, target) in enumerate(samples, start=1)
+        ],
+    )
+    observer = JointTelemetryFileObserver(max_initial_samples=2, max_batch_samples=2)
+
+    packets = observer.poll(
+        path,
+        {"session_id": "motion-state-test", "workflow": "rollout", "status": "POLICY_ACTIVE"},
+    )
+
+    assert [packet["sequence"] for packet in packets] == [10, 11]
+    assert packets[-1]["motion_state"]["task_cycle"]["attempt_count"] == 1
+    assert packets[-1]["motion_state"]["task_cycle"]["completed_count"] == 1
 
 
 def test_file_observer_uses_a_bounded_initial_file_read(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

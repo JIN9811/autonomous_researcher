@@ -1378,7 +1378,7 @@ class ActiveRobotCamTracker:
         self.teleop_transition_max_step = _env_float("ATR_ACTIVE_ROBOT_CAM_TELEOP_TRANSITION_MAX_STEP", 3.0, minimum=0.1)
         self.resume_wait_timeout_s = _env_float("ATR_ACTIVE_ROBOT_CAM_RESUME_WAIT_TIMEOUT_S", 4.0, minimum=0.0)
         self.resume_wait_poll_s = _env_float("ATR_ACTIVE_ROBOT_CAM_RESUME_WAIT_POLL_S", 0.05, minimum=0.0)
-        self.resume_wait_tolerance_deg = _env_float("ATR_ACTIVE_ROBOT_CAM_RESUME_WAIT_TOLERANCE_DEG", 2.0, minimum=0.0)
+        self.resume_wait_tolerance_deg = _env_float("ATR_ACTIVE_ROBOT_CAM_RESUME_WAIT_TOLERANCE_DEG", 3.0, minimum=0.0)
         self.capture_wait_timeout_s = _env_float("ATR_ACTIVE_ROBOT_CAM_CAPTURE_WAIT_TIMEOUT_S", 0.0, minimum=0.0)
         self.capture_wait_poll_s = _env_float(
             "ATR_ACTIVE_ROBOT_CAM_CAPTURE_WAIT_POLL_S",

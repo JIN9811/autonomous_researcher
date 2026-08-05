@@ -31,11 +31,13 @@ Modification guide:
       <section class="hero panel">
         <div class="hero-copy">
           <p class="eyebrow">Equipment Agent</p>
-          <h1>Windows PyAutoGUI Bridge</h1>
+          <h1>Lab Equipment Workspace</h1>
           <p class="subhead">
-            현재 내부망에서 Windows bridge 프로그램이 실행 중인 PC를 검색하고, 선택한 candidate를 alias와 설정으로 저장한 뒤
-            <code>program1</code> 데모 매크로로 통신과 GUI 제어를 확인합니다. Scan 결과는 토큰이 맞는 bridge만 표시됩니다.
+            공통 장비 프로파일을 선택해 연결, 테스트, 런타임, 증거를 같은 계약으로 관리합니다. 현재 UTM은 Windows PyAutoGUI bridge 패키지를 사용하는 첫 번째 장비 프로파일입니다.
           </p>
+          <div class="equipment-workspace-actions">
+            <button id="btn-equipment-open-bridge-gui" class="btn primary">Open Windows GUI</button>
+          </div>
         </div>
         <article class="status-card">
           <div class="status-head">
@@ -52,6 +54,50 @@ Modification guide:
           </div>
           <strong id="equipment-action-label">Idle</strong>
           <p id="equipment-action-detail">Scan, select, preflight, run, then verify evidence before Analysis handoff.</p>
+        </article>
+      </section>
+
+      <section id="equipment-local-bridge-panel" class="panel equipment-local-bridge-panel" aria-label="Local development PyAutoGUI bridge">
+        <div class="equipment-local-bridge-copy">
+          <span class="eyebrow">Local Development Target</span>
+          <h2>PyAutoGUI Bridge on This PC</h2>
+          <p>현재 Ubuntu 데스크톱에서 동일한 API, GUI, Program Manager, 매크로 계약을 실제로 검증합니다. Windows 배포 대상과 자동 전환되지 않습니다.</p>
+        </div>
+        <div class="equipment-local-bridge-state">
+          <span id="equipment-local-bridge-dot" class="status-dot idle"></span>
+          <div>
+            <strong id="equipment-local-bridge-status">Stopped</strong>
+            <p id="equipment-local-bridge-detail">localhost:8767 · not selected</p>
+          </div>
+        </div>
+        <div class="equipment-local-bridge-actions">
+          <button id="btn-equipment-local-start" class="btn primary">Start</button>
+          <button id="btn-equipment-local-stop" class="btn danger">Stop</button>
+          <button id="btn-equipment-local-health" class="btn">Health</button>
+          <button id="btn-equipment-local-select" class="btn">Select</button>
+        </div>
+      </section>
+
+      <section class="panel equipment-profile-overview" aria-label="Common equipment profile workspace">
+        <article id="equipment-profile-list">
+          <h2>Equipment Profiles</h2>
+          <div id="equipment-profile-items" class="equipment-candidates">Loading profiles.</div>
+        </article>
+        <article id="equipment-profile-connection">
+          <h2>Connection / Readiness</h2>
+          <p id="equipment-profile-connection-status" class="hint">Loading selected profile state.</p>
+        </article>
+        <article id="equipment-profile-runtime">
+          <h2>Test / Runtime</h2>
+          <div class="button-row">
+            <button id="btn-equipment-profile-preflight" class="btn">Preflight</button>
+            <button id="btn-equipment-profile-test" class="btn primary">Run Test Bridge</button>
+          </div>
+          <p class="hint">Test uses the selected UTM profile and existing bridge contract with simulation enabled. Live execution remains available through the UTM controls below.</p>
+        </article>
+        <article id="equipment-profile-evidence">
+          <h2>Evidence / Analysis Handoff</h2>
+          <p id="equipment-profile-evidence-status" class="hint">No profile test result yet.</p>
         </article>
       </section>
 
@@ -136,7 +182,8 @@ Modification guide:
         </div>
       </section>
 
-      <section class="panel equipment-setup-grid">
+      <div id="equipment-inline-controls" class="equipment-inline-controls">
+      <section class="panel equipment-inline-grid">
         <article>
           <h2>1. Scan Network</h2>
           <label class="planning-message-label">
@@ -163,7 +210,7 @@ Modification guide:
         </article>
       </section>
 
-      <section class="panel equipment-setup-grid">
+      <section class="panel equipment-inline-grid">
         <article>
           <h2>3. Saved Candidates</h2>
           <p class="hint">저장된 candidate를 Quick Select하거나 삭제합니다. 선택된 candidate가 아래 테스트에 사용됩니다.</p>
@@ -219,7 +266,6 @@ Modification guide:
             <div class="button-row">
               <button id="btn-equipment-load-utm-profile" class="btn">Load UTM Profile</button>
               <button id="btn-equipment-save-utm-profile" class="btn primary">Save UTM Profile</button>
-              <button id="btn-equipment-open-bridge-gui" class="btn">Open Windows GUI</button>
               <button id="btn-equipment-readiness" class="btn">Check Readiness</button>
               <button id="btn-equipment-live-preflight" class="btn">Live Preflight</button>
               <button id="btn-equipment-live-validation" class="btn">Live Validation Report</button>
@@ -321,6 +367,7 @@ Modification guide:
           <pre id="equipment-result-log" class="equipment-result-log">{}</pre>
         </article>
       </section>
+      </div>
     </main>
 
     <script src="/static/windows_equipment.js" defer></script>

@@ -1,5 +1,97 @@
 # Windows PyAutoGUI Bridge Setup Guide
 
+## Common Equipment Profile Use
+
+The Windows package remains the execution driver for the Lab Equipment
+Workspace. In ATR, select the UTM profile (`utm_windows_v1`) from
+`/equipment/windows`. The Workspace uses this package for both modes:
+
+- **Test**: invokes the registered UTM protocol with
+  `simulate_utm_protocol=true`; it creates simulated screen evidence, request
+  log entries, and a parseable CSV without controlling the physical UTM.
+- **Live**: invokes the same selected bridge and registered program with
+  `simulate_utm_protocol=false`; the UTM application, locators, export path,
+  and evidence gates must be ready before execution.
+
+No second mock bridge server is required or supported. Keep this package
+running on the Windows PC for physical operation.
+
+## Local Ubuntu Development Target
+
+ATR can run the same bridge server, Web GUI, Program Manager, authenticated API,
+allowlist, request audit, and `atr.pyautogui_program.v1` macro schema on the
+current Ubuntu workstation. This is an actual X11 desktop-control target, not a
+simulator and not an automatic fallback for Windows.
+
+Install once:
+
+```bash
+bash install/bootstrap_linux.sh --with-local-pyautogui
+```
+
+Then open `/equipment/windows` and use **PyAutoGUI Bridge on This PC**:
+
+1. `Start` launches the ATR-owned process at `127.0.0.1:8767` and registers
+   `local_development` as a standby candidate.
+2. `Health` must show X11 and PyAutoGUI ready.
+3. `Select` explicitly changes the shared bridge candidate. Start never changes
+   an existing Windows selection by itself.
+4. `Open Windows GUI` opens the same complete console through the selected
+   bridge proxy. Program Manager files are stored under
+   `memory/local_pyautogui_programs`.
+5. `Stop` terminates only the ATR-owned localhost process.
+
+The token is generated once at `memory/local_pyautogui_bridge.token` with mode
+`0600`; GUI/API responses expose only whether it is configured. Runtime logs and
+artifacts are under `runs/local_pyautogui_bridge`. Keep the mouse away from a
+screen corner when intentionally running `program1`, because PyAutoGUI fail-safe
+remains enabled. A JSON macro can be transferred to Windows, but window titles,
+coordinates, image locators, and file paths must be recalibrated there.
+
+Port `8766` is not used by this bridge because it belongs to the Isaac Sim OMX
+mirror receiver.
+
+### Open the Same Console in ATR
+
+After saving and selecting this Windows bridge in ATR, open
+`http://localhost:7860/equipment/windows`. The **Windows Bridge Console**
+opened from that workspace is the same HTML console this server serves at
+`http://<windows-host>:8765/`. ATR proxies the console's API calls to the
+selected bridge and injects the saved token on the Linux server. Do not add the
+token to browser URLs. A directly opened Windows console keeps a manually
+entered token in that browser profile's local storage until Clear Token is
+pressed. Use a dedicated trusted Windows browser profile.
+
+## 2026-08-04 Complete Windows Bridge Console
+
+The Windows-local screen exposes the complete bridge backend. The bridge protocol,
+allowlisted program definitions, and execution behavior remain unchanged.
+
+The page contains these operator areas:
+
+1. **Connection and Safe Diagnostics**: bridge URL, token, Health, readiness, Safe Preflight, request log, screenshot, and locator state.
+2. **Default program controls**: `program1`, UTM simulation/live/abort, payload preview, and generic JSON execution.
+3. **Evidence**: result trace, screenshots, artifacts, request audit, proof checklist, and run timeline.
+4. **Program Manager**: search, filter, inspect built-ins, and edit, enable, validate, test, or delete registered custom JSON macros.
+5. **Browse / Template / Add**: `Browse JSON` loads a definition into the editor only, `Download Template` saves an editable starter file, and `Add to Registry` validates and persists the macro.
+
+Simplification means grouping and labeling controls. It must not delete a backend-supported function or remove its only operator UI. Program Manager supplements the fixed bridge controls; it does not replace them.
+
+The default registry contains `program1`, `utm_compression_start_v1`, `utm_export_csv_v1`, `utm_manual_save_csv_v1`, and `utm_stop_or_abort_v1`.
+
+Custom macros are stored as one validated JSON file per program under
+`WINDOWS_PYAUTOGUI_PROGRAM_DIR` (default `C:\ATR\programs`). Built-in programs
+are immutable. `Browse JSON` and `Download Template` do not modify this
+directory. Only authenticated `POST /programs/register` persists a definition;
+`DELETE /programs/{program_id}` removes a custom definition. The validator
+accepts only schema `atr.pyautogui_program.v1` and bounded bridge actions, so
+the manager cannot register arbitrary shell scripts or executables. Test uses
+the existing authenticated `POST /execute` contract.
+
+The Windows console exposes local UTM readiness and evidence operations, while the Linux Lab Equipment Workspace remains authoritative for orchestration and final handoff trust. When opened through ATR, the proxy injects
+the saved token. When opened directly on Windows, a manually entered token is
+kept in browser `localStorage` until Clear Token is pressed.
+
 Purpose:
 
 - Define how to prepare a Windows PC so the autonomous researcher `equipment_agent` can control GUI software through PyAutoGUI over an internal network.
@@ -58,13 +150,11 @@ Linux-side setup GUI:
 Windows-side local Web GUI:
 
 - Open `http://127.0.0.1:8765/` on the Windows PC running the bridge.
-- The GUI provides workflow status for Auth, GUI Driver, Program, Evidence, and Artifact.
-- `Last Run Summary` shows the active program/run id, CSV/artifact reference, and the next required gate.
-- `Step Trace` and `Artifacts` provide operator-visible evidence for UTM macro execution.
-- `Live UTM situation matrix` summarizes Bridge, Locators, Request Audit, Export, and Live Gate state above the operator console.
-- `Readiness locator shortcuts` turn readiness results into clickable missing/captured locator chips for faster calibration.
-- `Recent live execute identity` shows the latest run/specimen/program ids that Linux will audit before handoff.
-- Live UTM remains guarded by a physical safety confirmation checkbox.
+- Use Connection to verify token authentication and PyAutoGUI availability.
+- Use Safe Diagnostics and UTM Protocol for readiness, simulation, live execution, recovery, screenshots, locators, and evidence.
+- Use Program Manager to inspect built-ins and create, edit, enable, validate, test, or delete custom JSON macros.
+- Use Browse JSON to load an edited definition without registering it. Use Add to Registry only after validation.
+- Inspect local readiness, run evidence, artifacts, request audit, and timeline directly in the Windows console; use the Linux workspace for orchestration and final handoff trust.
 
 The Windows PC must not:
 
@@ -150,11 +240,24 @@ If this command fails with `ModuleNotFoundError`, keep the bridge communication 
 3. Bridge Service Requirements
 ============================================================
 
-The Windows bridge service should expose only these endpoints:
+Core authenticated program endpoints remain:
 
 - `GET /health`
 - `GET /programs`
+- `POST /programs/validate`
+- `POST /programs/register`
+- `DELETE /programs/{program_id}`
 - `POST /execute`
+
+Custom macro storage can be configured with either:
+
+```powershell
+$env:WINDOWS_PYAUTOGUI_PROGRAM_DIR = "C:\ATR\programs"
+py windows_pyautogui_bridge_server.py --program-dir "C:\ATR\programs"
+```
+
+The environment variable is the service default. The CLI option overrides it
+for the current process.
 
 Discovery expectation:
 
@@ -1296,3 +1399,56 @@ The Windows bridge page has a compact operations layout for live UTM work.
 - The overview area uses two columns on wide monitors and keeps proof/evidence cards full-width for readability.
 - Connection, diagnostics, UTM protocol, locator capture, and operator log sections have `Collapse` / `Expand` controls. These preferences are local to the browser.
 - The GUI layout is only an operator convenience layer. Live control remains blocked unless token auth, safe preflight, locator readiness, physical safety confirmation, and `/execute` audit requirements are satisfied.
+
+## 2026-08-04 Essential Windows Operator Surface
+
+The Windows-local bridge page now opens on a compact essential surface intended for normal operation:
+
+1. `Bridge Connection`: token, Health/Refresh, bridge reachability, and PyAutoGUI availability.
+2. `Latest Test Result`: the latest validation, registration, deletion, or bounded test response.
+3. `Program Manager`: immutable built-ins plus persistent custom JSON macros.
+
+The Program Manager editor is closed by default. It opens only for New, Edit,
+View, or Browse JSON and closes after Add to Registry or Cancel. Browse and
+template download are deliberately separate from registration.
+
+`Advanced Tools` is closed by default and contains deployment helpers,
+readiness, locator calibration, screenshots, UTM controls, timeline, evidence,
+artifacts, and generic JSON execution. Duplicate Program Manager and command
+proxy controls are not repeated there.
+
+The repeatable browser audit is:
+
+```bash
+python tests/ui/windows_bridge_gui_browser_audit.py \
+  --base-url http://127.0.0.1:8765 \
+  --token '<bridge-token>' \
+  --width 1920 --height 1080
+```
+
+### Windows Console Device Bridge Layout
+
+The complete standalone console uses the same pale blue-gray workspace, white
+cards, cobalt headings/actions, and responsive card grids as the ATR Device
+Bridge pages. This covers the header, Bridge Connection, Latest Test Result,
+Program Manager, and the collapsed or expanded `Advanced Tools` workspace. The
+CSS remains embedded in the Windows server so the packaged GUI does not depend
+on the Linux ATR web server.
+
+Operational button labels, status text, and guidance wrap instead of being
+truncated. Paths, commands, and JSON remain contained in their own wrapping or
+scrolling fields. The browser audit opens the Advanced panel and fails when a
+visible operational element clips horizontally. Run the audit at both target
+desktop sizes when changing the embedded GUI:
+
+```bash
+python tests/ui/windows_bridge_gui_browser_audit.py \
+  --base-url http://127.0.0.1:8765 --token '<bridge-token>' \
+  --width 1920 --height 1080 \
+  --out-dir artifacts/ui/windows_bridge_advanced_1920
+
+python tests/ui/windows_bridge_gui_browser_audit.py \
+  --base-url http://127.0.0.1:8765 --token '<bridge-token>' \
+  --width 1366 --height 768 \
+  --out-dir artifacts/ui/windows_bridge_advanced_1366
+```

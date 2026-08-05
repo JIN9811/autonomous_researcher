@@ -48,7 +48,7 @@ from mcp_tools.tpms_geometry import (
 from graphs import load_graph_config, load_module_config
 from orchestrator.run_loop import RunLoop
 from orchestrator.langgraph_runtime import compact_runtime_payload, trim_runtime_memory
-from orchestrator.state import Mode, OrchestratorState, Stage
+from orchestrator.state import AgentRuntimeStatus, Mode, OrchestratorState, Stage
 from orchestrator.supervisor import (
     build_decision_record,
     build_mission_contract,
@@ -61,6 +61,12 @@ from orchestrator.supervisor import (
 from policies.validation_policy import validate_agent_output
 from utils.active_cam_artifact import apply_active_cam_artifact_update
 from utils.ids import make_event_id, make_experiment_id, make_run_id
+from utils.utm_completion_artifact import apply_utm_completion_artifact_update
+from utils.vision_operator_intervention import (
+    INTERVENTION_SCHEMA,
+    VALID_CHECKPOINTS,
+    mark_intervention_retrying,
+)
 from device_bridges.bambu_bridge import PrinterDeviceBridgeManager
 from utils.config_loader import load_all_configs
 from utils.paths import resolve_path
@@ -144,6 +150,8 @@ class MainController:
         self._planning_request_lock = asyncio.Lock()
         self._planning_handoff_task: asyncio.Task[dict[str, Any]] | None = None
         self._vllm_transition_task: asyncio.Task[dict[str, Any]] | None = None
+        self._vision_specimen_retry_locks: dict[str, asyncio.Lock] = {}
+        self._vision_intervention_resume_event = asyncio.Event()
         self._deps.agent_context.on_model_call = self._on_model_call
         self._deps.agent_context.on_tool_event = self._on_tool_event
 
@@ -2008,6 +2016,7 @@ class MainController:
                 "printer_prepare_status",
                 "printer_mode",
                 "printer_path",
+                "printer_completion_verified",
                 "autoejection_completion_verified",
                 "expected_mass_g",
                 "expected_print_time_min",
@@ -2077,6 +2086,10 @@ class MainController:
                 "active_cam_ejection_check": cls._select_runtime_fields(
                     specimen.get("active_cam_ejection_check"),
                     ("schema", "status", "specimen_detected", "spc_autoejection_confirmed", "image_path"),
+                ),
+                "specimen_agent_report": cls._select_runtime_fields(
+                    specimen.get("specimen_agent_report"),
+                    ("schema", "printer_completion", "autoejection_gate", "handoff_status"),
                 ),
                 "step_trace": compact_runtime_payload((specimen.get("step_trace") or tool_result.get("step_trace") or [])[-16:]),
             }
@@ -2917,7 +2930,9 @@ class MainController:
             "vision_report",
             "latest_vision_agent_report",
             "latest_active_cam_artifact",
+            "latest_utm_completion_artifact",
             "vision_signal",
+            "vision_operator_intervention",
             "manipulation_report",
             "latest_manipulation_agent_report",
             "manipulation_result",
@@ -3617,6 +3632,176 @@ class MainController:
         self._state.is_paused = False
         await self._emit_control_event("run_resume", "Run resumed by operator", {"status": "resumed", "control": "resume", "operator_action": True})
         return {"ok": True, "message": "Resumed", "state": self._state.model_dump(mode="json")}
+
+    @staticmethod
+    def _vision_retry_response(
+        record: dict[str, Any],
+        *,
+        ok: bool = True,
+        idempotent: bool = False,
+        message: str = "",
+    ) -> dict[str, Any]:
+        """Return a bounded run-scoped Vision retry response for Live GUI."""
+        return {
+            "ok": bool(ok),
+            "run_id": str(record.get("run_id") or ""),
+            "checkpoint": str(record.get("checkpoint") or ""),
+            "status": "retrying" if idempotent else str(record.get("status") or "unknown"),
+            "reason": str(record.get("reason") or ""),
+            "capture_path": str(record.get("capture_path") or ""),
+            "capture_url": str(record.get("capture_url") or ""),
+            "camera_key": str(record.get("camera_key") or ""),
+            "retry_deadline_at": str(record.get("retry_deadline_at") or ""),
+            "retry_count": int(record.get("retry_count") or 0),
+            "rollout_stopped": bool(record.get("rollout_stopped")),
+            "rollout_restarted": False,
+            "idempotent": bool(idempotent),
+            "message": message,
+        }
+
+    async def retry_vision_specimen_placement(
+        self,
+        *,
+        run_id: str,
+        checkpoint: str,
+    ) -> dict[str, Any]:
+        """Re-run only the existing Vision checkpoint for an operator placement retry."""
+        if run_id != self._state.run_id:
+            raise LookupError(f"Unknown active run_id={run_id}")
+        if checkpoint not in VALID_CHECKPOINTS:
+            raise ValueError(f"Unsupported vision intervention checkpoint={checkpoint!r}")
+
+        record = self._state.run_metadata.get("vision_operator_intervention")
+        if not isinstance(record, dict) or record.get("schema") != INTERVENTION_SCHEMA:
+            raise ValueError("No active vision specimen-placement intervention is available")
+        if record.get("checkpoint") != checkpoint:
+            raise ValueError(
+                "Vision intervention checkpoint mismatch: "
+                f"expected={record.get('checkpoint')!r} received={checkpoint!r}"
+            )
+        if record.get("status") == "resolved":
+            return self._vision_retry_response(record, idempotent=True, message="Vision checkpoint is already resolved.")
+        if checkpoint == "utm_post_place" and record.get("status") == "retrying":
+            return self._vision_retry_response(record, idempotent=True, message="UTM automatic recovery is still active.")
+        if checkpoint == "utm_post_place" and not bool(record.get("rollout_stopped")):
+            raise ValueError("UTM operator retry requires controlled rollout stop and camera-port return evidence")
+
+        lock = self._vision_specimen_retry_locks.setdefault(run_id, asyncio.Lock())
+        if lock.locked():
+            return self._vision_retry_response(record, idempotent=True, message="Vision retry is already running.")
+
+        async with lock:
+            retry_record = mark_intervention_retrying(
+                self._state.run_metadata,
+                checkpoint=checkpoint,
+                now=datetime.now(timezone.utc),
+            )
+            self._state.stage = Stage.VISION
+            self._state.is_paused = True
+            status = self._state.agent_status.setdefault(
+                "vision_agent",
+                AgentRuntimeStatus(mode=self._state.mode.value),
+            )
+            status.state = "running"
+            status.success = None
+            status.last_result = "operator_specimen_placement_retry"
+            await self.emit_runtime_event(
+                event_type="vision_specimen_retry_started",
+                message="Vision specimen placement retry started.",
+                payload={
+                    "agent": "vision_agent",
+                    "node_id": Stage.VISION.value,
+                    "status": "running",
+                    "checkpoint": checkpoint,
+                    "vision_operator_intervention": retry_record,
+                },
+                run_id=run_id,
+            )
+
+            vision_agent = self._deps.agent_registry.get("vision_agent")
+            result = await vision_agent.run(self._state, self._deps.agent_context)
+            data = result.data if isinstance(result.data, dict) else {}
+            self._merge_planning_agent_data(Stage.VISION, data)
+            updated = self._state.run_metadata.get("vision_operator_intervention")
+            if not isinstance(updated, dict) or updated.get("schema") != INTERVENTION_SCHEMA:
+                status.state = "error"
+                status.success = False
+                status.last_result = "missing_vision_operator_intervention"
+                raise RuntimeError("Vision retry did not return vision_operator_intervention.v1")
+
+            resolved = updated.get("status") == "resolved"
+            if resolved:
+                requested_stage = str(data.get("requested_next_stage") or Stage.MANIPULATION.value)
+                self._state.stage = Stage(requested_stage)
+                self._state.is_paused = False
+                status.state = "done"
+                status.success = True
+                status.last_result = result.summary
+                self._vision_intervention_resume_event.set()
+                event_type = "vision_specimen_retry_resolved"
+                level = "INFO"
+            elif updated.get("status") == "waiting_for_specimen":
+                self._state.stage = Stage.VISION
+                self._state.is_paused = True
+                status.state = "waiting"
+                status.success = None
+                status.last_result = "specimen_not_detected"
+                event_type = "operator_input_required"
+                level = "WARNING"
+            else:
+                self._state.stage = Stage.VISION
+                status.state = "waiting"
+                status.success = None
+                event_type = "vision_recovery_waiting"
+                level = "WARNING"
+
+            await self.emit_runtime_event(
+                event_type=event_type,
+                message=(
+                    "Vision specimen placement checkpoint resolved."
+                    if resolved
+                    else "Place the specimen into the working area."
+                ),
+                payload={
+                    "agent": "vision_agent",
+                    "node_id": Stage.VISION.value,
+                    "status": updated.get("status"),
+                    "checkpoint": checkpoint,
+                    "vision_operator_intervention": updated,
+                    "pending_operator_input": not resolved,
+                    "requires_response": not resolved,
+                },
+                level=level,
+                run_id=run_id,
+            )
+            return self._vision_retry_response(
+                updated,
+                ok=bool(result.success),
+                message=result.summary,
+            )
+
+    async def _wait_for_vision_intervention_resume(self) -> bool:
+        """Keep the current Live tail alive while Vision waits for operator placement."""
+        record = self._state.run_metadata.get("vision_operator_intervention")
+        if not (
+            isinstance(record, dict)
+            and record.get("schema") == INTERVENTION_SCHEMA
+            and record.get("status") == "waiting_for_specimen"
+        ):
+            return False
+        if not self._state.is_paused:
+            return True
+        if self._vision_intervention_resume_event.is_set():
+            self._vision_intervention_resume_event.clear()
+        while self._state.is_paused:
+            if self._state.emergency_stop_requested or self._state.safe_stop_requested or self._state.stop_requested:
+                return False
+            try:
+                await asyncio.wait_for(self._vision_intervention_resume_event.wait(), timeout=0.25)
+            except TimeoutError:
+                continue
+            self._vision_intervention_resume_event.clear()
+        return True
 
     async def stop(self) -> dict[str, Any]:
         """Request stop for active run."""
@@ -5274,6 +5459,42 @@ class MainController:
         self._state.run_metadata.pop(PLANNING_RESUME_CONTEXT_KEY, None)
         self._state.run_metadata["_planning_workflow_controls_reset"] = True
 
+    def _clear_previous_specimen_tail_state(self, specimen_id: str) -> None:
+        """Discard control signals from a different specimen before a new tail starts.
+
+        The last camera artifacts intentionally remain visible until the next
+        capture updates them. They are evidence only and must not drive routing.
+        """
+        metadata = self._state.run_metadata
+        previous = metadata.get("specimen_result") if isinstance(metadata.get("specimen_result"), dict) else {}
+        previous_specimen_id = str(previous.get("specimen_id") or "").strip()
+        current_specimen_id = str(specimen_id or "").strip()
+        if not previous_specimen_id or not current_specimen_id or previous_specimen_id == current_specimen_id:
+            return
+
+        for key in (
+            "latest_vision_observation",
+            "vision_agent_payload",
+            "vision_handoff_packet",
+            "vision_decision_register",
+            "vision_metrics",
+            "vision_report",
+            "latest_vision_agent_report",
+            "vision_signal",
+            "vision_operator_intervention",
+            "manipulation_agent_payload",
+            "manipulation_handoff_packet",
+            "manipulation_decision_register",
+            "manipulation_metrics",
+            "manipulation_report",
+            "latest_manipulation_agent_report",
+            "manipulation_result",
+            "robot_task_result",
+        ):
+            metadata.pop(key, None)
+        self._state.latest_observations = {}
+        self._state.latest_analysis.pop("sarm", None)
+
     def _design_constraints_for_cycle(self, base_constraints: dict[str, Any]) -> dict[str, Any]:
         """Merge BO recommendation into DesignAgent constraints for the next cycle."""
         constraints = dict(base_constraints)
@@ -5584,6 +5805,7 @@ class MainController:
         )
         self._state.stage = Stage.SPECIMEN
         self._state.current_experiment_spec = experiment_spec
+        self._clear_previous_specimen_tail_state(str(experiment_spec.get("specimen_id") or ""))
         self._state.run_metadata.pop("specimen_result", None)
         await self._run_planning_langgraph_stage(Stage.SPECIMEN)
         specimen_payload = self._state.run_metadata.get("specimen_result", {})
@@ -5717,8 +5939,23 @@ class MainController:
             )
             if not bool(last_tail.get("ok", False)):
                 return last_tail
+            intervention = self._state.run_metadata.get("vision_operator_intervention")
+            unresolved_utm_verification = bool(
+                isinstance(intervention, dict)
+                and intervention.get("schema") == INTERVENTION_SCHEMA
+                and intervention.get("checkpoint") == "utm_post_place"
+                and intervention.get("status") in {"retrying", "waiting_for_specimen"}
+            )
+            if unresolved_utm_verification:
+                self._state.stage = Stage.VISION
+                return {
+                    **last_tail,
+                    "ok": True,
+                    "decision": "pending_vision_verification",
+                    "message": "UTM placement verification must succeed before the next design cycle.",
+                }
             decision = str(last_tail.get("decision", "continue"))
-            if decision in {"stop", "error"}:
+            if decision != "continue":
                 return last_tail
             previous_spec = dict(current_spec)
 
@@ -6306,32 +6543,133 @@ class MainController:
             "failure_code": str(status_payload.get("failure_code") or MainController._first_failure_code(status_payload) or ""),
         }
 
+    @staticmethod
+    def _normalize_printer_job_name(value: Any) -> str:
+        name = str(value or "").strip().replace("\\", "/").rsplit("/", 1)[-1]
+        name = name.split("?", 1)[0].split("#", 1)[0].strip().lower()
+        suffixes = (
+            ".gcode.3mf",
+            ".ejection-test",
+            ".ejection_test",
+            ".autoeject",
+            ".gcode",
+            ".3mf",
+        )
+        changed = True
+        while changed and name:
+            changed = False
+            for suffix in suffixes:
+                if name.endswith(suffix):
+                    name = name[: -len(suffix)].rstrip("._- ")
+                    changed = True
+                    break
+        return name
+
+    @classmethod
+    def _expected_specimen_printer_job_names(
+        cls,
+        experiment_spec: dict[str, Any],
+        specimen_payload: dict[str, Any],
+    ) -> tuple[str, ...]:
+        report = specimen_payload.get("fabrication_report") if isinstance(specimen_payload.get("fabrication_report"), dict) else {}
+        thread = report.get("digital_thread") if isinstance(report.get("digital_thread"), dict) else {}
+        print_result = specimen_payload.get("print_result") if isinstance(specimen_payload.get("print_result"), dict) else {}
+        upload = print_result.get("upload") if isinstance(print_result.get("upload"), dict) else {}
+        post_publish = print_result.get("post_publish_status") if isinstance(print_result.get("post_publish_status"), dict) else {}
+        values = (
+            specimen_payload.get("specimen_id"),
+            experiment_spec.get("specimen_id"),
+            thread.get("specimen_id"),
+            upload.get("filename"),
+            upload.get("file_name"),
+            upload.get("remote_path"),
+            upload.get("url"),
+            print_result.get("sliced_path"),
+            print_result.get("gcode_path"),
+            post_publish.get("file_name"),
+            post_publish.get("job_name"),
+        )
+        names = {
+            normalized
+            for value in values
+            if (normalized := cls._normalize_printer_job_name(value))
+        }
+        return tuple(sorted(names))
+
+    @classmethod
+    def _printer_job_matches_expected(cls, observed: Any, expected_names: tuple[str, ...]) -> bool | None:
+        observed_name = cls._normalize_printer_job_name(observed)
+        if not expected_names:
+            return True
+        if not observed_name:
+            return None
+        return any(
+            observed_name == expected
+            or (len(expected) >= 8 and expected in observed_name)
+            or (len(observed_name) >= 8 and observed_name in expected)
+            for expected in expected_names
+        )
+
     @classmethod
     def _classify_specimen_printer_completion_status(
         cls,
         status_payload: dict[str, Any],
         *,
         started_seen: bool,
+        expected_job_names: tuple[str, ...] = (),
     ) -> dict[str, Any]:
         fields = cls._printer_completion_progress_fields(status_payload)
         state = str(fields.get("state") or "").strip()
         upper = state.upper()
         progress = cls._float_or_none(fields.get("progress_percent"))
         failure_code = str(fields.get("failure_code") or "")
+        job_matches_current = cls._printer_job_matches_expected(fields.get("job_name"), expected_job_names)
         failed_states = {"FAILED", "FAIL", "ERROR", "CANCELLED", "CANCELED", "ABORTED"}
         running_states = {"RUNNING", "PRINTING", "PREPARE", "PREPARING", "HEATING", "SLICING"}
         complete_states = {"FINISH", "FINISHED", "IDLE", "READY", "COMMUNICATION_READY", "INSTALLED_PRINTER_COMMUNICATION_READY"}
         if cls._is_transient_printer_communication_issue(status_payload):
-            return {"status": "transient", **fields, "message": failure_code or "Transient printer communication issue."}
+            return {
+                "status": "transient",
+                **fields,
+                "job_matches_current": job_matches_current,
+                "message": failure_code or "Transient printer communication issue.",
+            }
+        if job_matches_current is False:
+            return {
+                "status": "stale_job",
+                **fields,
+                "job_matches_current": False,
+                "message": "Ignoring printer state from a different job.",
+            }
         if upper in failed_states:
-            return {"status": "failed", **fields, "message": f"Printer reported failed state: {state or 'unknown'}"}
+            return {
+                "status": "failed",
+                **fields,
+                "job_matches_current": job_matches_current,
+                "message": f"Printer reported failed state: {state or 'unknown'}",
+            }
         if upper in running_states or (progress is not None and progress < 100.0 and upper not in complete_states):
-            return {"status": "running", **fields, "message": "Printer job is still active."}
-        if started_seen and (upper in complete_states or (progress is not None and progress >= 100.0)):
-            return {"status": "complete", **fields, "message": "Printer job completed before Vision handoff."}
+            return {
+                "status": "running",
+                **fields,
+                "job_matches_current": job_matches_current,
+                "message": "Printer job is still active.",
+            }
+        if started_seen and job_matches_current is not None and (upper in complete_states or (progress is not None and progress >= 100.0)):
+            return {
+                "status": "complete",
+                **fields,
+                "job_matches_current": job_matches_current,
+                "message": "Printer job completed before Vision handoff.",
+            }
         if failure_code in {"BAMBU_CONNECTION_INFO_REQUIRED"}:
-            return {"status": "failed", **fields, "message": failure_code}
-        return {"status": "waiting", **fields, "message": "Waiting for printer completion state."}
+            return {"status": "failed", **fields, "job_matches_current": job_matches_current, "message": failure_code}
+        return {
+            "status": "waiting",
+            **fields,
+            "job_matches_current": job_matches_current,
+            "message": "Waiting for the current printer job completion state.",
+        }
 
     async def _read_specimen_printer_completion_status(self) -> dict[str, Any]:
         manager = PrinterDeviceBridgeManager.from_devices_config(load_all_configs(resolve_path("configs")))
@@ -6348,11 +6686,18 @@ class MainController:
         )
 
     @classmethod
-    def _completed_post_publish_status_from_specimen(cls, specimen_payload: dict[str, Any]) -> dict[str, Any]:
+    def _completed_post_publish_status_from_specimen(
+        cls,
+        specimen_payload: dict[str, Any],
+        expected_job_names: tuple[str, ...] = (),
+    ) -> dict[str, Any]:
         print_result = specimen_payload.get("print_result") if isinstance(specimen_payload.get("print_result"), dict) else {}
         post_publish = print_result.get("post_publish_status") if isinstance(print_result.get("post_publish_status"), dict) else {}
         status = str(post_publish.get("status") or "").strip().lower()
         if status != "completed":
+            return {}
+        observed_job = post_publish.get("job_name") or post_publish.get("file_name")
+        if observed_job and cls._printer_job_matches_expected(observed_job, expected_job_names) is False:
             return {}
         complete_payload = compact_runtime_payload(post_publish)
         return {
@@ -6372,7 +6717,8 @@ class MainController:
     ) -> dict[str, Any]:
         if not self._specimen_printer_completion_wait_required(experiment_spec, specimen_payload):
             return {}
-        already_completed = self._completed_post_publish_status_from_specimen(specimen_payload)
+        expected_job_names = self._expected_specimen_printer_job_names(experiment_spec, specimen_payload)
+        already_completed = self._completed_post_publish_status_from_specimen(specimen_payload, expected_job_names)
         if already_completed:
             await self._append_planning_message(
                 {
@@ -6389,7 +6735,12 @@ class MainController:
             return already_completed
         timeout_sec, poll_sec = self._printer_completion_wait_timing(experiment_spec, specimen_payload)
         deadline = asyncio.get_running_loop().time() + timeout_sec
-        started_seen = True
+        print_result = specimen_payload.get("print_result") if isinstance(specimen_payload.get("print_result"), dict) else {}
+        post_publish = print_result.get("post_publish_status") if isinstance(print_result.get("post_publish_status"), dict) else {}
+        started_seen = bool(
+            str(post_publish.get("status") or "").strip().lower() in {"running", "started", "printing"}
+            or str(print_result.get("status") or "").strip().lower() in {"running", "started", "printing"}
+        )
         transient_failures = 0
         samples: list[dict[str, Any]] = []
         await self._append_planning_message(
@@ -6406,13 +6757,17 @@ class MainController:
         )
         while True:
             status_payload = await self._read_specimen_printer_completion_status()
-            classified = self._classify_specimen_printer_completion_status(status_payload, started_seen=started_seen)
+            classified = self._classify_specimen_printer_completion_status(
+                status_payload,
+                started_seen=started_seen,
+                expected_job_names=expected_job_names,
+            )
             if classified.get("status") == "running":
                 started_seen = True
                 transient_failures = 0
-            elif classified.get("status") in {"waiting", "complete"}:
+            elif classified.get("status") in {"waiting", "stale_job", "complete"}:
                 transient_failures = 0
-            if len(samples) < 8 or classified.get("status") in {"complete", "failed", "transient"}:
+            if len(samples) < 8 or classified.get("status") in {"complete", "failed", "transient", "stale_job"}:
                 samples.append(compact_runtime_payload(classified))
             if classified.get("status") == "complete":
                 result = {
@@ -6458,7 +6813,8 @@ class MainController:
     ) -> dict[str, Any]:
         updated = dict(specimen_payload)
         updated["printer_completion_wait"] = completion_wait
-        updated["autoejection_completion_verified"] = True
+        updated["printer_completion_verified"] = True
+        updated["autoejection_completion_verified"] = False
         report = dict(updated.get("fabrication_report")) if isinstance(updated.get("fabrication_report"), dict) else {}
         if report:
             outcome = dict(report.get("fabrication_outcome")) if isinstance(report.get("fabrication_outcome"), dict) else {}
@@ -6466,7 +6822,7 @@ class MainController:
                 {
                     "status": "ready_for_vision",
                     "location": "a4_workspace",
-                    "autoejection_status": "complete",
+                    "autoejection_status": "awaiting_vision_confirmation",
                     "print_completion_status": "complete",
                 }
             )
@@ -6488,11 +6844,20 @@ class MainController:
                 {
                     "outcome_status": "ready_for_vision",
                     "location": "a4_workspace",
-                    "autoejection_status": "complete",
+                    "autoejection_status": "awaiting_vision_confirmation",
                 }
             )
             fabricated["fabrication_summary"] = summary
             updated["specimen_fabricated"] = fabricated
+        agent_report = dict(updated.get("specimen_agent_report")) if isinstance(updated.get("specimen_agent_report"), dict) else {}
+        if agent_report:
+            completion = dict(agent_report.get("printer_completion")) if isinstance(agent_report.get("printer_completion"), dict) else {}
+            completion.update({"status": "complete", "verified": True})
+            agent_report["printer_completion"] = completion
+            gate = dict(agent_report.get("autoejection_gate")) if isinstance(agent_report.get("autoejection_gate"), dict) else {}
+            gate.update({"status": "awaiting_vision_confirmation", "vision_confirmation_required": True})
+            agent_report["autoejection_gate"] = gate
+            updated["specimen_agent_report"] = agent_report
         return updated
 
     @staticmethod
@@ -6637,10 +7002,17 @@ class MainController:
                 self._state.run_metadata["latest_vision_agent_report"] = data["vision_agent_report"]
             if isinstance(data.get("vision_signal"), dict):
                 self._state.run_metadata["vision_signal"] = data["vision_signal"]
+            if isinstance(data.get("vision_operator_intervention"), dict):
+                self._state.run_metadata["vision_operator_intervention"] = data["vision_operator_intervention"]
             if isinstance(data.get("active_cam_artifact_update"), dict):
                 apply_active_cam_artifact_update(
                     self._state.run_metadata,
                     data["active_cam_artifact_update"],
+                )
+            if isinstance(data.get("utm_completion_artifact_update"), dict):
+                apply_utm_completion_artifact_update(
+                    self._state.run_metadata,
+                    data["utm_completion_artifact_update"],
                 )
             if isinstance(data.get("manipulation_report"), dict):
                 self._state.run_metadata["manipulation_report"] = data["manipulation_report"]
@@ -6756,6 +7128,11 @@ class MainController:
         """Attach active-cam Vision verification back to the specimen completion record."""
         if not isinstance(observation, dict):
             return
+        # Post-manipulation Vision controls UTM placement only. Preserve the
+        # earlier active-camera confirmation that completed SPC ejection.
+        decision = str((data or {}).get("transition_decision") or "")
+        if decision in {"vision_utm_monitoring", "vision_equipment_handoff"}:
+            return
         confirmation = observation.get("spc_autoejection_confirmation")
         active_check = observation.get("active_cam_ejection_check")
         if not isinstance(confirmation, dict) and not isinstance(active_check, dict):
@@ -6764,15 +7141,21 @@ class MainController:
         if not isinstance(specimen, dict):
             return
         updated = dict(specimen)
+        existing_verification = specimen.get("vision_verification") if isinstance(specimen.get("vision_verification"), dict) else {}
+        existing_confirmation = specimen.get("vision_completion_signal") if isinstance(specimen.get("vision_completion_signal"), dict) else {}
+        existing_active_check = specimen.get("active_cam_ejection_check") if isinstance(specimen.get("active_cam_ejection_check"), dict) else {}
+        confirmed_now = bool(
+            (isinstance(confirmation, dict) and confirmation.get("confirmed"))
+            or (isinstance(active_check, dict) and active_check.get("spc_autoejection_confirmed"))
+        )
+        # A newer active-camera observation is authoritative.  Do not retain a
+        # prior confirmation after the next capture reports a failure.
+        confirmed = confirmed_now
         if isinstance(confirmation, dict):
             updated["vision_completion_signal"] = dict(confirmation)
         if isinstance(active_check, dict):
             updated["active_cam_ejection_check"] = dict(active_check)
         signal = data.get("vision_signal") if isinstance(data, dict) and isinstance(data.get("vision_signal"), dict) else {}
-        confirmed = bool(
-            (isinstance(confirmation, dict) and confirmation.get("confirmed"))
-            or (isinstance(active_check, dict) and active_check.get("spc_autoejection_confirmed"))
-        )
         updated["vision_verification"] = {
             "schema": "specimen_completion_vision_verification.v1",
             "status": "confirmed" if confirmed else "observed",
@@ -6781,6 +7164,36 @@ class MainController:
             "consumer_agent": "specimen_agent",
             "vision_signal": dict(signal) if isinstance(signal, dict) else {},
         }
+        updated["autoejection_completion_verified"] = confirmed
+        fabrication = dict(updated.get("fabrication_report")) if isinstance(updated.get("fabrication_report"), dict) else {}
+        if fabrication:
+            outcome = dict(fabrication.get("fabrication_outcome")) if isinstance(fabrication.get("fabrication_outcome"), dict) else {}
+            outcome.update({
+                "autoejection_status": "complete" if confirmed else "awaiting_vision_confirmation",
+                "vision_confirmation_status": "confirmed" if confirmed else "not_confirmed",
+            })
+            fabrication["fabrication_outcome"] = outcome
+            updated["fabrication_report"] = fabrication
+            self._state.run_metadata["fabrication_report"] = fabrication
+            self._state.run_metadata["specimen_fabrication_report"] = fabrication
+        fabricated = dict(updated.get("specimen_fabricated")) if isinstance(updated.get("specimen_fabricated"), dict) else {}
+        if fabricated:
+            summary = dict(fabricated.get("fabrication_summary")) if isinstance(fabricated.get("fabrication_summary"), dict) else {}
+            summary.update({
+                "autoejection_status": "complete" if confirmed else "awaiting_vision_confirmation",
+                "vision_confirmation_status": "confirmed" if confirmed else "not_confirmed",
+            })
+            fabricated["fabrication_summary"] = summary
+            updated["specimen_fabricated"] = fabricated
+            self._state.run_metadata["specimen_fabricated"] = fabricated
+        agent_report = dict(updated.get("specimen_agent_report")) if isinstance(updated.get("specimen_agent_report"), dict) else {}
+        if agent_report:
+            gate = dict(agent_report.get("autoejection_gate")) if isinstance(agent_report.get("autoejection_gate"), dict) else {}
+            gate.update({"status": "complete" if confirmed else "waiting", "vision_confirmed": confirmed})
+            agent_report["autoejection_gate"] = gate
+            updated["specimen_agent_report"] = agent_report
+            self._state.run_metadata["specimen_agent_report"] = agent_report
+            self._state.run_metadata["latest_specimen_agent_report"] = agent_report
         self._state.run_metadata["specimen_result"] = updated
 
     def _compact_planning_runtime_state(self) -> None:
@@ -7411,6 +7824,10 @@ class MainController:
                 if self._state.emergency_stop_requested or self._state.safe_stop_requested or self._state.stop_requested:
                     return await halt_for_control_flag()
                 if self._state.is_paused:
+                    if await self._wait_for_vision_intervention_resume():
+                        continue
+                    if self._state.emergency_stop_requested or self._state.safe_stop_requested or self._state.stop_requested:
+                        return await halt_for_control_flag()
                     return {
                         "ok": True,
                         "decision": "pending_operator_approval",

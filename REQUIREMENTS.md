@@ -70,6 +70,15 @@ Optional but commonly used:
 - `conda` or Miniconda for LeRobot-specific environments.
 - `nvidia-smi` and NVIDIA driver stack for local GPU runtime checks.
 - Docker for PrusaSlicer, CalculiX, local Neo4j, or local vLLM/NemoClaw paths.
+- Local Ubuntu PyAutoGUI bridge development requires an X11 desktop session,
+  `PyAutoGUI` and `python3-xlib` from `requirements.txt`, plus `python3-tk`,
+  `scrot`, `wmctrl`, and `xdotool`. Install the complete local-control option:
+  ```bash
+  bash install/bootstrap_linux.sh --with-local-pyautogui
+  ```
+  The managed bridge binds only to `127.0.0.1:8767`; port `8766` remains
+  reserved for the Isaac Sim OMX mirror receiver. Wayland sessions are reported
+  as unsupported instead of silently running degraded control.
 - `ffmpeg` for the Bambu Lab live camera browser proxy. Without it, the Bambu
   video status API can still report that the printer's LAN video port is
   reachable, but `/api/printer/video-stream.mjpeg` stays unavailable.

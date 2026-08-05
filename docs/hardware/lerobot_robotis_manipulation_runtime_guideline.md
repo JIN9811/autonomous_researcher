@@ -1268,3 +1268,70 @@ No fallback camera is selected by this lease check.
 If a D455F is visible in sysfs with an empty serial during USB 2.0 enumeration,
 the bridge associates its model with the configured `top` identity and exposes
 the 480 Mbps warning. It does not open `pyrealsense2` solely to fill that serial.
+
+## Grounded Manipulation Runtime Cards
+
+The Manipulation Agent report is an operational runtime surface, not a conceptual
+planning report. It always renders the same eight cards so layout and operator
+muscle memory remain stable before, during, and after rollout:
+
+1. `Live Robot Pose`
+2. `Policy Tracking`
+3. `Runtime State Strip`
+4. `Runtime Execution`
+5. `Runtime Interlocks`
+6. `Completion Verification`
+7. `Run Result`
+8. `Run Metrics`
+
+Cards remain visible when evidence is missing. Unknown fields show `-`, unknown
+gates show `UNKNOWN`, pending completion steps show `WAITING`, and rates with no
+attempts show `-` rather than a fabricated zero-percent result. Runtime updates
+patch existing DOM nodes in place; they must not recreate the Three.js pose view,
+the policy chart, or the report card tree on every telemetry packet.
+
+### Task and grasp definitions
+
+One manipulation task is the ordered measured-state sequence:
+
+```text
+HOME_START -> MOVING -> GRASPING -> UNGRASPING -> HOME_RETURN
+```
+
+The sequence starts only after the measured follower satisfies the stable-home
+gate. Duplicate telemetry samples do not create attempts. A task completes only
+after a later stable measured home is observed following ungrasping.
+
+```text
+task_success_rate = completed_task_count / attempted_task_count
+```
+
+Grasp statistics are scoped to the current or most recently completed task.
+Each measured grasp attempt is counted once, including retries.
+
+```text
+grasp_success_rate = successful_grasp_count / completed_grasp_attempt_count
+```
+
+The UI displays both rates as donut charts and displays attempt, completed,
+success, failed, and pending counts beside each chart.
+
+### Runtime view contract and evidence
+
+`build_manipulation_runtime_view()` publishes
+`manipulation_runtime_view.v1` through both the joint-telemetry snapshot endpoint
+and every joint-telemetry WebSocket message. It is read-only and does not acquire
+MotorBus, camera, or policy-process ownership.
+
+Permitted evidence classes are:
+
+- `CONFIGURED`: selected task, instruction, policy, checkpoint, and route;
+- `MEASURED`: joint state, port/camera lease, process status, and Vision result;
+- `DERIVED`: home gate, ordered task cycle, grasp outcome, rates, and latencies;
+- `EVENT`: stop state, completion milestones, handoff, and terminal result;
+- `ARTIFACT`: action logs, plots, summaries, Vision frames, and run directory.
+
+E-stop and Resume update the emergency-stop interlock only. They do not erase or
+increment task/grasp counters. A new telemetry session resets the annotator;
+browser reconnect replays the byte-bounded initial action-log window through the
+same state machine before retaining only the display tail.

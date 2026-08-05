@@ -73,6 +73,100 @@ def test_guardian_gate_reads_nested_agent_warning_and_low_confidence() -> None:
     assert any(alarm["reason_code"] == "VISION_CONFIDENCE_LOW" for alarm in gate["alarms"])
 
 
+def test_guardian_gate_allows_valid_frame_specimen_non_detection_wait() -> None:
+    state = _state(Stage.VISION)
+
+    gate = guardian_gate(
+        state=state,
+        stage="vision",
+        phase="post",
+        agent="vision_agent",
+        payload={
+            "pending_operator_input": True,
+            "requires_response": True,
+            "vision_operator_intervention": {
+                "schema": "vision_operator_intervention.v1",
+                "run_id": state.run_id,
+                "checkpoint": "active_cam_ejection",
+                "status": "waiting_for_specimen",
+                "reason": "specimen_not_detected",
+                "capture_path": "/tmp/fresh-empty-workspace.png",
+            },
+        },
+    )
+
+    assert gate["decision"] == "allow_with_warning"
+    assert gate["reason_code"] == "SPECIMEN_NOT_DETECTED"
+    assert gate_blocks_execution(gate) is False
+
+
+def test_guardian_gate_allows_utm_retry_after_a_fallback_topic_returns_a_valid_frame() -> None:
+    state = _state(Stage.VISION)
+
+    gate = guardian_gate(
+        state=state,
+        stage="vision",
+        phase="post",
+        agent="vision_agent",
+        payload={
+            "observation": {
+                "raw_capture": {
+                    "ok": True,
+                    "status": "not_detected",
+                    "detected": False,
+                    "failure_code": "SPECIMEN_NOT_DETECTED",
+                    "frame_capture": {
+                        "ok": True,
+                        "frame_available": True,
+                        "topic": "/camera/image_raw",
+                        "attempts": [
+                            {
+                                "ok": False,
+                                "failure_code": "ROS_IMAGE_TIMEOUT",
+                                "message": "No image received on /image_utm within 1.25s",
+                            },
+                            {"ok": True, "failure_code": "", "topic": "/camera/image_raw"},
+                        ],
+                    },
+                    "utm_completion_run_artifact": {
+                        "status": "not_detected",
+                        "failure_code": "SPECIMEN_NOT_DETECTED",
+                    },
+                }
+            },
+            "vision_operator_intervention": {
+                "schema": "vision_operator_intervention.v1",
+                "run_id": state.run_id,
+                "checkpoint": "utm_post_place",
+                "status": "retrying",
+                "reason": "specimen_not_detected",
+                "rollout_stopped": False,
+            },
+        },
+    )
+
+    assert gate["decision"] == "allow_with_warning"
+    assert gate["reason_code"] == "SPECIMEN_NOT_DETECTED"
+    assert gate_blocks_execution(gate) is False
+    assert not [alarm for alarm in gate["alarms"] if alarm["severity"] == "blocking"]
+
+
+def test_guardian_gate_still_blocks_active_cam_port_release_failure() -> None:
+    gate = guardian_gate(
+        state=_state(Stage.VISION),
+        stage="vision",
+        phase="post",
+        agent="vision_agent",
+        payload={
+            "status": "blocked",
+            "failure_code": "CAMERA_PORT_RELEASE_FAILED",
+            "camera_returned_to_vla": False,
+        },
+    )
+
+    assert gate_blocks_execution(gate) is True
+
+
 def test_guardian_gate_safe_stops_physical_active_cam_failure() -> None:
     gate = guardian_gate(
         state=_state(Stage.VISION),
@@ -210,3 +304,56 @@ def test_guardian_gate_allows_expected_test_dry_run_print_disabled_marker() -> N
     assert gate["decision"] == "allow"
     assert gate_blocks_execution(gate) is False
     assert not any(alarm["reason_code"] == "START_PRINT_DISABLED" for alarm in gate["alarms"])
+
+
+def test_guardian_gate_allows_specimen_http_start_after_ftps_probe_failure() -> None:
+    state = OrchestratorState(
+        run_id="run-gate-http",
+        experiment_id="exp-gate-http",
+        mode=Mode.TEST,
+        stage=Stage.SPECIMEN,
+    )
+    gate = guardian_gate(
+        state=state,
+        stage="specimen",
+        phase="post",
+        agent="specimen_agent",
+        payload={
+            "specimen_result": {
+                "ok": True,
+                "status": "TEST_PRINTER_EJECTION_PROJECT_STARTED",
+                "experiment_evaluation": {
+                    "bridge_result": {
+                        "ok": True,
+                        "status": "TEST_PRINTER_EJECTION_PROJECT_STARTED",
+                        "ftps_probe": {
+                            "ok": False,
+                            "status": "blocked",
+                            "failure_code": "BAMBU_FTPS_PROBE_FAILED",
+                            "message": "TLS handshake timed out",
+                        },
+                        "print_result": {
+                            "ok": True,
+                            "status": "started",
+                            "upload": {
+                                "ok": True,
+                                "status": "http_artifact_ready",
+                                "route": "http_artifact",
+                                "url": "http://printer-artifacts/job.gcode.3mf",
+                            },
+                            "start": {
+                                "ok": True,
+                                "status": "published",
+                                "published": True,
+                                "command": "project_file",
+                            },
+                        },
+                    }
+                },
+            }
+        },
+    )
+
+    assert gate_blocks_execution(gate) is False
+    assert gate["decision"] in {"allow", "allow_with_warning"}
+    assert not any(alarm["reason_code"] == "BAMBU_FTPS_PROBE_FAILED" for alarm in gate["alarms"])

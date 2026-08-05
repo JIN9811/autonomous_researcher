@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -203,6 +204,35 @@ def test_manipulation_profile_defaults_to_smolvla_rollout_options() -> None:
     assert profile["rollout_temporal_ensemble_coeff"] == 0.01
 
 
+def test_existing_rollout_is_not_reused_for_a_different_specimen() -> None:
+    """A new specimen must not inherit an active rollout from the prior cycle."""
+    state = _post_specimen_state()
+    state.run_metadata["manipulation_result"] = {
+        "ok": True,
+        "tool": "lerobot.rollout.start",
+        "status": "ACTIVE",
+        "session_id": "rollout-cycle-1",
+        "workflow": "rollout",
+    }
+    state.run_metadata["robot_task_result"] = {
+        "schema": "robot_task_result.v1",
+        "specimen_id": "specimen-cycle-1",
+        "rollout_session_id": "rollout-cycle-1",
+    }
+    agent = ManipulationAgent()
+    payload = agent._lerobot_payload(state, protocol_note="test", strategy="lerobot_policy")
+
+    reused = agent._existing_rollout_response_for_completion(
+        state=state,
+        payload=payload,
+        strategy="lerobot_policy",
+        task_id="transfer_to_utm",
+        vision_context={},
+    )
+
+    assert reused is None
+
+
 def test_manipulation_profile_persists_task_specific_rollout_settings() -> None:
     profile = normalize_manipulation_agent_profile(
         {
@@ -261,6 +291,31 @@ def test_manipulation_profile_policy_path_replaces_stale_checkpoint_path() -> No
     assert profile["policy_checkpoint_path"] == "/tmp/policies/selected/pretrained_model"
     assert profile["task_profiles"]["transfer_to_utm"]["policy_path"] == "/tmp/policies/selected/pretrained_model"
     assert profile["task_profiles"]["transfer_to_utm"]["policy_checkpoint_path"] == "/tmp/policies/selected/pretrained_model"
+
+
+def test_manipulation_profile_file_persists_one_policy_path_per_task(tmp_path: Path, monkeypatch: Any) -> None:
+    _isolate_manipulation_profile(tmp_path, monkeypatch)
+    selected = "/tmp/policies/selected/pretrained_model"
+
+    manipulation_profile_module.save_manipulation_agent_profile(
+        {
+            "task_id": "transfer_to_utm",
+            "policy_type": "smolvla",
+            "policy_path": selected,
+            "policy_checkpoint_path": "/tmp/policies/stale/pretrained_model",
+        }
+    )
+
+    stored = json.loads(manipulation_profile_module.MANIPULATION_AGENT_PROFILE_PATH.read_text(encoding="utf-8"))
+    assert "policy_path" not in stored
+    assert "policy_checkpoint_path" not in stored
+    assert stored["task_profiles"]["transfer_to_utm"]["policy_path"] == selected
+    assert "policy_checkpoint_path" not in stored["task_profiles"]["transfer_to_utm"]
+    assert manipulation_profile_module.MANIPULATION_AGENT_PROFILE_PATH.read_text(encoding="utf-8").count(selected) == 1
+
+    reloaded = manipulation_profile_module.load_manipulation_agent_profile()
+    assert reloaded["policy_path"] == selected
+    assert reloaded["task_profiles"]["transfer_to_utm"]["policy_path"] == selected
 
 
 def test_manipulation_agent_reloads_changed_saved_policy_path(tmp_path: Path, monkeypatch: Any) -> None:
@@ -387,7 +442,7 @@ def test_live_workflow_saved_task_profile_overrides_stale_experiment_policy(monk
     assert payload["rollout_temporal_ensemble"] is False
 
 
-def test_direct_manipulation_bridge_request_can_override_saved_task_profile(monkeypatch: Any) -> None:
+def test_direct_manipulation_bridge_run_uses_saved_task_profile_policy(monkeypatch: Any) -> None:
     monkeypatch.setattr(
         "agents.manipulation_agent.load_manipulation_agent_profile",
         lambda: normalize_manipulation_agent_profile(
@@ -413,9 +468,9 @@ def test_direct_manipulation_bridge_request_can_override_saved_task_profile(monk
 
     payload = ManipulationAgent()._lerobot_payload(state, "direct bridge", "lerobot_policy")
 
-    assert payload["policy_type"] == "xvla"
-    assert payload["policy_path"] == "/tmp/policies/direct/pretrained_model"
-    assert payload["policy_checkpoint_path"] == "/tmp/policies/direct/pretrained_model"
+    assert payload["policy_type"] == "smolvla"
+    assert payload["policy_path"] == "/tmp/policies/saved/pretrained_model"
+    assert payload["policy_checkpoint_path"] == "/tmp/policies/saved/pretrained_model"
 
 
 def test_live_workflow_selects_clear_task_after_equipment_completion(monkeypatch: Any) -> None:
@@ -526,6 +581,7 @@ async def test_manipulation_agent_calls_lerobot_rollout(tmp_path: Path, monkeypa
     assert manipulation_response["policy_runtime"]["session_id"] == report["session_id"]
     assert result.data["robot_task_result"]["schema"] == "robot_task_result.v1"
     assert result.data["robot_task_result"]["handoff_status"] == "needs_post_place_vision"
+    assert result.data["requested_next_stage"] == "vision"
     assert ctx.events
     assert ctx.events[0]["tool"] == "lerobot.rollout.start"
 
@@ -556,6 +612,60 @@ async def test_manipulation_agent_defaults_to_smolvla_transfer_after_specimen(tm
     assert "--dataset.repo_id=jin/eval_3dp_to_utm_smolvla_rollout" in manipulation["command_preview"]
     assert "--dataset.single_task=Move specimen-transfer-001" in " ".join(manipulation["command_preview"])
     assert all("--rtc.enabled=true" not in item for item in manipulation["command_preview"])
+
+
+@pytest.mark.asyncio
+async def test_manipulation_does_not_reenter_before_vision_handoff(tmp_path: Path, monkeypatch: Any) -> None:
+    """The rollout launch hands the existing session to Vision exactly once."""
+    _isolate_manipulation_profile(tmp_path, monkeypatch)
+    agent = ManipulationAgent()
+    ctx = _CtxStub(_tools(tmp_path))
+    calls: list[str] = []
+
+    async def fake_call_tool(_ctx: Any, tool: str, payload: dict[str, Any]) -> dict[str, Any]:
+        calls.append(tool)
+        if tool == "lerobot.rollout.start":
+            return {
+                "ok": True,
+                "tool": tool,
+                "workflow": "rollout",
+                "status": "POLICY_ACTIVE",
+                "runtime_phase": "PROCESS_STARTED",
+                "action_count": 0,
+                "runtime": {"phase": "PROCESS_STARTED", "action_count": 0},
+                "session_id": payload["session_id"],
+                "profile_id": payload["profile_id"],
+            }
+        if tool == "lerobot.rollout.status":
+            return {
+                "ok": True,
+                "tool": tool,
+                "workflow": "rollout",
+                "status": "POLICY_ACTIVE",
+                "runtime_phase": "ACTION_ACTIVE",
+                "action_count": 1,
+                "runtime": {"phase": "ACTION_ACTIVE", "action_count": 1},
+                "session_id": payload["session_id"],
+                "profile_id": payload["profile_id"],
+                "post_place_interlock": {
+                    "schema": "post_place_interlock.v1",
+                    "session_id": payload["session_id"],
+                    "ungrasping_seen": False,
+                    "home_after_ungrasping": False,
+                    "ready_for_utm_snapshot": False,
+                },
+            }
+        raise AssertionError(f"unexpected tool: {tool}")
+
+    monkeypatch.setattr(agent, "_call_tool", fake_call_tool)
+    state = _post_specimen_state()
+
+    started = await agent.run(state, ctx)
+
+    assert started.success is True
+    assert started.data["requested_next_stage"] == "vision"
+    assert started.data["manipulation"]["completion_status"] == "awaiting_post_place_home"
+    assert calls == ["lerobot.rollout.start"]
 
 
 def test_manipulation_agent_test_mode_accepts_recently_expired_vision_signal() -> None:

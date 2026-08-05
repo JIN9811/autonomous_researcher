@@ -19,6 +19,7 @@ class FakeRuntimeManager:
         self.start_calls = 0
         self.probe_calls = 0
         self.frame_calls = 0
+        self.raw_frame_calls = 0
         self._probe = probe or {"ok": True, "diagnostics": {"ros2_available": True, "topic_seen": True}}
         self._frame = frame or {
             "ok": False,
@@ -44,8 +45,12 @@ class FakeRuntimeManager:
         self.frame_calls += 1
         return dict(self._frame)
 
+    def raw_frame(self) -> dict[str, Any]:
+        self.raw_frame_calls += 1
+        return dict(self._frame)
 
-def _red_specimen_frame() -> dict[str, Any]:
+
+def _red_specimen_frame(*, topic: str = "/camera/image_raw") -> dict[str, Any]:
     image = np.full((120, 180, 3), 215, dtype=np.uint8)
     image[30:100, 65:130] = [230, 20, 25]
     buffer = BytesIO()
@@ -54,7 +59,7 @@ def _red_specimen_frame() -> dict[str, Any]:
         "ok": True,
         "frame_available": True,
         "frame_id": "utm-frame-tool-1",
-        "topic": "/image_utm",
+        "topic": topic,
         "width": 180,
         "height": 120,
         "data_url": "data:image/jpeg;base64," + base64.b64encode(buffer.getvalue()).decode("ascii"),
@@ -143,13 +148,52 @@ def test_utm_specimen_presence_captures_exactly_one_runtime_frame(tmp_path: Path
     )
 
     assert manager.start_calls == 1
-    assert manager.frame_calls == 1
+    assert manager.raw_frame_calls == 1
+    assert manager.frame_calls == 0
     assert result["ok"] is True
     assert result["detected"] is True
-    assert result["source"] == "utm_ros_frame"
+    assert result["source"] == "utm_ros_raw_frame"
     assert result["run_id"] == "run-1"
     assert result["session_id"] == "rollout-1"
     assert Path(result["annotated_frame_path"]).is_file()
+
+
+def test_utm_specimen_presence_retries_transient_ros_frame_failure(tmp_path: Path) -> None:
+    class SequencedRuntimeManager(FakeRuntimeManager):
+        def __init__(self) -> None:
+            super().__init__()
+            self._frames = [
+                {
+                    "ok": False,
+                    "frame_available": False,
+                    "failure_code": "ROS_IMAGE_FRAME_UNAVAILABLE",
+                },
+                _red_specimen_frame(),
+            ]
+
+        def raw_frame(self) -> dict[str, Any]:
+            self.raw_frame_calls += 1
+            return dict(self._frames[min(self.raw_frame_calls - 1, len(self._frames) - 1)])
+
+    manager = SequencedRuntimeManager()
+    registry = ToolRegistry()
+    register_camera_tools(registry, utm_runtime_manager=manager)
+
+    result = registry.call(
+        "vision.utm_specimen_presence.capture",
+        {
+            "runtime_mode": "live",
+            "output_dir": str(tmp_path),
+            "frame_attempts": 3,
+            "frame_retry_delay_sec": 0,
+        },
+    )
+
+    assert manager.raw_frame_calls == 2
+    assert manager.frame_calls == 0
+    assert result["ok"] is True
+    assert result["detected"] is True
+    assert result["frame_attempt_count"] == 2
 
 
 def test_live_utm_specimen_presence_fails_closed_without_frame(tmp_path: Path) -> None:
@@ -166,7 +210,8 @@ def test_live_utm_specimen_presence_fails_closed_without_frame(tmp_path: Path) -
         },
     )
 
-    assert manager.frame_calls == 1
+    assert manager.raw_frame_calls == 1
+    assert manager.frame_calls == 0
     assert result["ok"] is False
     assert result["detected"] is False
     assert result["virtualized"] is False
@@ -190,7 +235,8 @@ def test_test_utm_specimen_presence_virtualizes_only_when_explicitly_allowed(tmp
         },
     )
 
-    assert manager.frame_calls == 1
+    assert manager.raw_frame_calls == 1
+    assert manager.frame_calls == 0
     assert result["ok"] is True
     assert result["detected"] is True
     assert result["virtualized"] is True

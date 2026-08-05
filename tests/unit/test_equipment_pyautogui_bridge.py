@@ -163,6 +163,48 @@ def test_save_connection_requires_name_and_token(tmp_path: Path) -> None:
     assert missing_token["failure_code"] == "PYAUTOGUI_TOKEN_REQUIRED"
 
 
+def test_save_local_candidate_preserves_platform_metadata_without_selecting(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    bridge.save_connection({"candidate_alias": "win_a", "host": "192.168.0.20", "port": 8765, "token": "secret-a"})
+
+    status = bridge.save_connection(
+        {
+            "candidate_alias": "local_development",
+            "host": "127.0.0.1",
+            "port": 8766,
+            "token": "local-secret",
+            "platform": "linux",
+            "scope": "localhost",
+            "managed_local": True,
+            "select": False,
+        }
+    )
+
+    assert status["selected_candidate"] == "win_a"
+    local = next(item for item in status["candidates"] if item["candidate_alias"] == "local_development")
+    assert local["platform"] == "linux"
+    assert local["scope"] == "localhost"
+    assert local["managed_local"] is True
+
+
+def test_first_unselected_candidate_remains_standby(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+
+    status = bridge.save_connection(
+        {
+            "candidate_alias": "local_development",
+            "host": "127.0.0.1",
+            "port": 8766,
+            "token": "local-secret",
+            "select": False,
+        }
+    )
+
+    assert status["selected"] is False
+    assert status["selected_candidate"] == ""
+    assert status["candidates"][0]["selected"] is False
+
+
 def test_select_and_delete_saved_candidate(tmp_path: Path) -> None:
     bridge = _bridge(tmp_path)
 
@@ -233,6 +275,43 @@ def test_live_health_normalizes_bridge_identity_and_latency(tmp_path: Path, monk
     assert response["client_latency_ms"] >= 0
     assert response["server_version"] == "WindowsPyAutoGUIBridge/0.1"
     assert response["script_version"] == "windows_pyautogui_bridge_server.py:utm_visual_control_v1"
+
+
+def test_bridge_ui_proxy_injects_saved_token_without_accepting_browser_token(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    bridge = _bridge(tmp_path, mode="live")
+    monkeypatch.setenv("WINDOWS_PYAUTOGUI_BRIDGE_URL", "http://192.168.50.58:8765")
+    monkeypatch.setenv("WINDOWS_PYAUTOGUI_BRIDGE_TOKEN", "server-only-token")
+
+    class _Reply:
+        status_code = 200
+        headers = {"content-type": "text/html; charset=utf-8"}
+        content = b"<html>bridge</html>"
+
+    class _Client:
+        def __init__(self, timeout: float, follow_redirects: bool) -> None:
+            assert timeout == bridge.config.request_timeout_sec
+            assert follow_redirects is False
+
+        def __enter__(self) -> "_Client":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def request(self, method: str, url: str, headers: dict[str, str], content: bytes) -> _Reply:
+            assert method == "GET"
+            assert url == "http://192.168.50.58:8765/health"
+            assert headers["X-Bridge-Token"] == "server-only-token"
+            assert content == b""
+            return _Reply()
+
+    monkeypatch.setattr("device_bridges.windows_pyautogui_bridge.httpx.Client", _Client)
+
+    response = bridge.proxy_ui_request(method="GET", resource_path="health")
+
+    assert response["ok"] is True
+    assert response["status_code"] == 200
+    assert response["content"] == b"<html>bridge</html>"
 
 
 def test_register_equipment_tools_exposes_pyautogui_tools(tmp_path: Path) -> None:

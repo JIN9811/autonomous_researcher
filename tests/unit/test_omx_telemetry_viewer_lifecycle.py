@@ -24,7 +24,27 @@ def test_live_report_updates_in_place_and_preserves_telemetry_surfaces() -> None
     assert '"live-preserve": "manipulation-pose"' in source
     assert '"live-preserve": "manipulation-policy"' in source
     assert '"live-preserve": "manipulation-motion"' in source
+    assert '"live-preserve": "manipulation-execution"' in source
+    assert '"live-preserve": "manipulation-interlocks"' in source
+    assert '"live-preserve": "manipulation-completion"' in source
+    assert '"live-preserve": "manipulation-result"' in source
+    assert '"live-preserve": "manipulation-metrics"' in source
     assert "liveReportPanel.innerHTML = reportHtml" not in source
+
+
+def test_runtime_view_patches_fixed_cards_and_css_donuts_in_place() -> None:
+    source = SOURCE_PATH.read_text(encoding="utf-8")
+
+    assert "runtimeView: {}" in source
+    assert "function applyRuntimeView(view)" in source
+    assert "function applyRuntimeExecution(execution)" in source
+    assert "function applyRuntimeInterlocks(interlocks)" in source
+    assert "function applyCompletionVerification(completion)" in source
+    assert "function applyRunResult(result)" in source
+    assert "function applyRunMetrics(metrics)" in source
+    assert 'setProperty("--rate", `${rate * 100}%`)' in source
+    assert "applyRuntimeView(packet.runtime_view);" in source
+    assert "applyRuntimeView(payload.runtime_view);" in source
 
 
 def test_terminal_grasp_artifact_hydration_does_not_rewrite_unchanged_dom_text() -> None:

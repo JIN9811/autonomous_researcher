@@ -12,7 +12,10 @@ module:
   - camera.capture
   - lerobot.camera.test
   - lerobot.active_robot_cam.capture
+  - lerobot.rollout.status
+  - lerobot.rollout.stop
   - vision.utm_runtime.start
+  - vision.utm_specimen_presence.capture
   internal_graph:
     - id: 01_observation_task_resolve
       label: Observation Task Resolve
@@ -48,6 +51,12 @@ module:
     - id: 09_handoff_signal_bus
       label: Handoff vision_signal.v1
       kind: internal_step
+    - id: 10_stop_verified_rollout
+      label: Stop rollout after verified UTM placement
+      kind: tool_step
+      tool: lerobot.rollout.stop
+      emits:
+      - vision_manipulation_completion.v1
   io_contract:
     input: OrchestratorState
     output: AgentResult.data merged into OrchestratorState
@@ -63,6 +72,7 @@ module:
     - evidence_refs
   notes: >-
     Vision Agent observes and emits freshness-bounded lab perception signals. It
-    never directly commands printer, robot, UTM, or PyAutoGUI actions. Downstream
-    agents must reject stale `vision_signal.v1` signals whose `expires_at` has
-    passed.
+    may stop the active robot rollout only after UTM placement is verified; it
+    does not start robot motion or command printer, UTM, or PyAutoGUI actions.
+    Downstream agents must reject stale `vision_signal.v1` signals whose
+    `expires_at` has passed.

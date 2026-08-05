@@ -1,5 +1,70 @@
 # Windows PyAutoGUI Equipment Agent Runtime Guideline
 
+## Common Equipment Workspace
+
+`/equipment/windows` is the common Lab Equipment Workspace. It selects a
+registered equipment profile, then uses one shared sequence for connection,
+test, runtime, evidence, and Analysis handoff. The initial profile is
+`utm_windows_v1`; additional equipment must be registered as profiles rather
+than copied into a separate agent path.
+
+### Embedded Windows Console
+
+The **Open Windows GUI** action opens the original HTML GUI served by the
+selected Windows bridge in a separate tab through
+`/equipment/windows/bridge-ui/`; it does not recreate the Windows controls.
+All console calls are proxied only to the saved candidate, and ATR injects the
+stored bridge token server-side. The browser receives neither the token value
+nor a token-bearing target URL. If the selected bridge is unreachable, the
+embedded console returns its bridge failure response while the surrounding ATR
+profile state remains available.
+
+### Complete Windows Program Console
+
+As of 2026-08-04, the Windows page exposes a setup-first surface backed by a persistent bounded-macro registry.
+
+- `GET /programs` remains the only source of executable program IDs.
+- Built-in programs are immutable and remain visible inside Program Manager.
+- Custom macros are validated and stored under `WINDOWS_PYAUTOGUI_PROGRAM_DIR` (default `C:\ATR\programs`).
+- `Browse JSON` loads an edited file into the editor without registering it.
+- `Download Template` saves an `atr.pyautogui_program.v1` starter definition without registering it.
+- `Validate` calls `POST /programs/validate`; `Add to Registry` separately calls `POST /programs/register`.
+- Custom enable/disable edits the persisted definition; delete calls `DELETE /programs/{program_id}`.
+- Arbitrary `.py`, `.ps1`, `.bat`, `.cmd`, and `.exe` registration is rejected; only bounded bridge actions are accepted.
+- Test uses the existing authenticated `POST /execute` route.
+- Health, readiness, safe preflight, UTM simulation/live/abort, locator capture, screenshots, artifacts, request audit, generic sequence execution, trace, and timeline remain directly accessible.
+- `program1` and the four UTM defaults remain visible after the registry loads.
+- Simplification may regroup controls but must not delete a capability or leave a backend function without an operator-accessible control.
+
+The Linux workspace remains authoritative for orchestration, physical validation, handoff trust, and Guardian-visible alarms. The Windows console provides the local control and evidence view of the same bridge.
+
+### Local Development Candidate
+
+The same Workspace can supervise an ATR-owned Linux/X11 bridge at
+`127.0.0.1:8767`. It is persisted as candidate `local_development` with
+`platform=linux`, `scope=localhost`, and `managed_local=true`. Starting it only
+registers a standby candidate; the operator must explicitly select it. This
+keeps Windows and local development targets switchable without fallback or a
+second Equipment execution implementation. Once selected, agents and GUI/CUI
+calls still traverse `WindowsPyAutoGUIBridge` and the existing
+`equipment.pyautogui.*` tools.
+
+Local program definitions use the same schema and allowlist. Portable actions
+remain reusable, while Windows UIA selectors, target window titles, image
+locators, coordinates, and absolute paths are marked for Windows recalibration.
+The local bridge requires X11 and fails closed on Wayland or a missing display.
+
+UTM Test and Live use the same saved Windows bridge target, registered program
+IDs, locator contract, request log, screenshot contract, CSV contract, and
+Analysis payload. Test sends `simulate_utm_protocol=true` to the existing
+Windows bridge package. Live sends the same program with simulation disabled.
+Live must never silently fall back to simulation.
+
+The Test Bridge is not a second service. It is the existing
+`Pyautogui_server_for_window` bridge executing its bounded UTM simulation.
+Successful test evidence requires a simulated screenshot, bridge request log,
+parseable CSV, and an Analysis-ready handoff payload.
+
 Status: implementation guideline only. No runtime code is defined in this document.
 
 Purpose:
@@ -22,8 +87,8 @@ Primary target:
 - The Windows bridge performs GUI automation, returns step traces, screenshots or screenshot metadata, and health status.
 - Operators can open `/equipment/windows` from Main GUI -> Device Workspaces to discover, select, save, and test a Windows bridge host.
 - The Linux-side `/equipment/windows` GUI exposes `Live Validation Report` as a non-actuating bridge readiness report. It checks live request-log, health, and program registry, persists `lab_equipment_utm_live_validation.json`, and never sends `/execute`. The adjacent `Run Physical Validation` path is guarded by explicit physical-safety confirmation and only then may send `/execute`.
-- The standalone Windows bridge Web GUI also renders an operator Program Registry so field users can inspect allowlisted macros/protocols and run non-live simulations without raw JSON editing.
-- The Windows-side GUI must expose a live situation matrix, readiness locator shortcuts, and recent `/execute` identity so the field operator can see exactly why a UTM handoff is trusted or blocked.
+- The standalone Windows bridge Web GUI renders a persistent Program Manager backed by the Windows bridge registry.
+- Live situation, readiness, `/execute` evidence, and handoff trust remain in the Linux Lab Equipment Workspace; the Windows page does not duplicate them.
 
 Reference sources:
 
@@ -1863,14 +1928,14 @@ The standalone Windows PyAutoGUI bridge GUI is now covered by a repeatable Selen
 
 Audit scope:
 
-- Opens the Windows bridge root page without calling live equipment actions.
-- Verifies the operator console, payload preview, UTM protocol controls, preflight/live/abort command rail, proof checklist, result JSON, step trace, artifact ledger, artifact preview, and operator log are present.
-- Injects a fake blocked `step_trace` containing `WAIT_FOR_EXPORT` and `UTM_DATA_NO_FORCE_SIGNAL` into the browser timeline, proving the Run Timeline renders blocked evidence and data-quality failure text.
-- Checks that the 1920px viewport has no horizontal overflow and that control-rail buttons remain operator-clickable.
+- Opens the Windows bridge root page without calling equipment actions.
+- Verifies Bridge Connection, full UTM controls, evidence controls, Program Manager, Browse JSON, Download Template, and manager result are present together.
+- Exercises the actual `Browse -> no registration -> Validate -> Add to Registry -> Delete` lifecycle and verifies built-ins remain immutable.
+- Checks that the 1920px viewport has no horizontal overflow and that buttons remain operator-clickable.
 
 Latest local audit evidence:
 
-- Command: `.venv/bin/python tests/ui/windows_bridge_gui_browser_audit.py --base-url http://127.0.0.1:18765 --out-dir artifacts/ui --width 1920 --height 1080 --geckodriver /snap/bin/geckodriver`
+- Command: `.venv/bin/python tests/ui/windows_bridge_gui_browser_audit.py --base-url http://127.0.0.1:18765 --out-dir artifacts/ui --width 1920 --height 1080 --geckodriver /snap/bin/geckodriver --token <bridge-token>`
 - Result: PASS for both `install/windows_pyautogui_bridge_server.py` and `Pyautogui_server_for_window/bridge/windows_pyautogui_bridge_server.py`.
 - Screenshot: `artifacts/ui/windows_bridge_gui_browser_audit.png` (`1920x994`).
 - Layout check: `scrollWidth=1908`, `clientWidth=1908`.
@@ -1878,7 +1943,7 @@ Latest local audit evidence:
 
 Operational boundary:
 
-- This audit is non-actuating. It verifies the browser evidence surface and timeline rendering only. Real UTM handoff still requires live bridge auth, safe preflight, screen-state screenshots, Vision physical evidence, Linux-local CSV pull, UTM CSV signal-quality probe, request-log proof, and Guardian-compatible handoff gates.
+- This audit never presses a program's Test button. It registers and deletes one bounded audit macro in an isolated program directory; real UTM handoff remains a Linux Lab Equipment Workspace responsibility.
 
 
 ### 2026-05-30 Windows packaged bridge smoke-test update
@@ -2015,6 +2080,19 @@ Guardian now reads blocked Analysis state directly in addition to Lab Equipment 
 This makes a rejected CSV or incomplete Equipment proof gate trigger recovery review rather than looking like a normal completed analysis with a poor score.
 
 ## 2026-05-30 Windows Bridge GUI Compact Operations Update
+
+This complete operator layout was restored on 2026-08-04. Program Manager remains additive; the UTM controls and proof panels below are part of the Windows-local backend view, while Linux remains authoritative for orchestration and handoff trust.
+
+### 2026-08-04 Essential Surface and Advanced Tools
+
+The standalone bridge root uses an essential-first presentation without changing Equipment Agent behavior.
+
+- The default surface exposes bridge/PyAutoGUI state, latest manager/test result, and Program Manager.
+- Program Manager uses compact rows. Its editor opens only for New, View, Edit, or Browse JSON and closes after Add to Registry or Cancel.
+- `Advanced Tools` retains the complete original Windows console and is closed by default.
+- Advanced Tools does not duplicate Program Manager or proxy its controls.
+- Program persistence is authoritative from the Windows JSON registry; execution remains authoritative from `GET /programs` and authenticated `POST /execute`.
+- Linux Lab Equipment Agent remains authoritative for orchestration, evidence acceptance, and downstream handoff.
 
 The standalone Windows PyAutoGUI bridge GUI now prioritizes live-use status over raw payload editing.
 

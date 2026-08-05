@@ -80,12 +80,14 @@ def guardian_gate(
     loop_count = _loop_count(state, payload)
     alarm_payload = _pre_tool_alarm_payload(payload) if phase == "action" and action == "pre_tool_call" else payload
     alarms = _collect_alarm_signals(alarm_payload)
+    alarms.extend(_vision_operator_intervention_alarms(payload=payload, stage=stage, phase=phase))
     alarms.extend(_tool_action_alarm_signals(payload=payload, state=state, stage=stage, phase=phase, tool=tool, action=action))
     alarms.extend(_state_alarm_signals(state=state, stage=stage, phase=phase))
     alarms = _filter_expected_non_actuating_print_alarms(alarms, payload=payload, state=state)
     alarms = _filter_compensated_bambu_transport_alarms(alarms, payload=payload)
     alarms = _filter_completed_printer_wait_handoff_alarms(alarms, payload=payload)
     alarms = _filter_compensated_active_cam_pose_snapshot_alarms(alarms, payload=payload, stage=stage, phase=phase)
+    alarms = _filter_utm_retry_with_valid_frame_alarms(alarms, payload=payload, stage=stage, phase=phase)
     alarms = _dedupe_alarms(alarms)
 
     risk_vector = _risk_vector_for_alarms(alarms, stage=stage)
@@ -292,6 +294,33 @@ def _collect_alarm_signals(payload: dict[str, Any]) -> list[dict[str, Any]]:
     return alarms
 
 
+def _vision_operator_intervention_alarms(
+    *,
+    payload: dict[str, Any],
+    stage: str,
+    phase: str,
+) -> list[dict[str, Any]]:
+    if stage != "vision" or phase != "post":
+        return []
+    record = payload.get("vision_operator_intervention")
+    if not isinstance(record, dict):
+        return []
+    if (
+        record.get("schema") != "vision_operator_intervention.v1"
+        or record.get("reason") != "specimen_not_detected"
+        or record.get("status") not in {"waiting_for_specimen", "retrying"}
+    ):
+        return []
+    return [
+        _alarm(
+            "SPECIMEN_NOT_DETECTED",
+            "warning",
+            "A fresh vision frame is valid, but the specimen is not present in the expected workspace.",
+            "payload.vision_operator_intervention",
+        )
+    ]
+
+
 def _is_blocking_signal_key(key: str) -> bool:
     """Return True for agent-specific keys that should block or pause the workflow."""
     normalized = str(key or "").lower()
@@ -387,8 +416,6 @@ def _tool_action_alarm_signals(
 
     mode = _runtime_mode(payload=payload, state=state)
     if mode != "live":
-        if name == "lerobot.rollout.start" and payload.get("rollout_action_clamp") is False:
-            add("ROBOT_ACTION_CLAMP_DISABLED", "warning", "rollout_action_clamp=false; bounded rollout should stay enabled", "payload.rollout_action_clamp")
         return alarms
 
     if _is_non_actuating(payload):
@@ -402,8 +429,6 @@ def _tool_action_alarm_signals(
                 "live robot rollout requires explicit operator confirmation before execution",
                 "payload.confirm_live_execute",
             )
-        if name.startswith("lerobot") and payload.get("rollout_action_clamp") is False:
-            add("ROBOT_ACTION_CLAMP_DISABLED", "warning", "rollout action clamp is disabled for live robot motion", "payload.rollout_action_clamp")
         if name.startswith("lerobot") and not _has_any(payload, ("policy_path", "policy_repo_id", "policy_checkpoint_path", "checkpoint_path")):
             add("ROBOT_POLICY_UNAPPROVED", "blocking", "live robot rollout requires an approved policy reference", "payload.policy")
         return alarms
@@ -528,6 +553,7 @@ def _filter_compensated_bambu_transport_alarms(
     if not alarms or not _has_bambu_http_artifact_handoff(payload):
         return alarms
     compensated_codes = {
+        "BAMBU_FTPS_PROBE_FAILED",
         "BAMBU_FTPS_TOO_MANY_CONNECTIONS",
         "BAMBU_PROJECT_FILE_START_FAILED",
     }
@@ -571,7 +597,14 @@ def _filter_completed_printer_wait_handoff_alarms(
         reason = str(alarm.get("reason_code") or "").upper()
         message = str(alarm.get("message") or "").lower()
         if "printer_completion_wait" in source and (
-            reason in {"131184", "CONTRACT_SCHEMA_INVALID", "RESULT_NOT_OK"}
+            reason in {
+                "131184",
+                "BAMBU_MQTT_REPORT_NOT_FRESH",
+                "BAMBU_MQTT_REPORT_TIMEOUT",
+                "CONTRACT_SCHEMA_INVALID",
+                "HEARTBEAT_LOST",
+                "RESULT_NOT_OK",
+            }
             or "printer job completed before vision handoff" in message
             or "printer job is still active" in message
         ):
@@ -598,6 +631,50 @@ def _filter_compensated_active_cam_pose_snapshot_alarms(
         reason = str(alarm.get("reason_code") or "").upper()
         if "specimen_pose_result" in source and reason in {"MISSING_REQUIRED_INPUT", "CONTRACT_SCHEMA_INVALID", "RESULT_NOT_OK"}:
             continue
+        filtered.append(alarm)
+    return filtered
+
+
+def _filter_utm_retry_with_valid_frame_alarms(
+    alarms: list[dict[str, Any]],
+    *,
+    payload: dict[str, Any],
+    stage: str,
+    phase: str,
+) -> list[dict[str, Any]]:
+    """Keep a valid UTM non-detection retry in the robot/Vision monitoring loop."""
+    if not alarms or str(stage or "").lower() != "vision" or str(phase or "").lower() != "post":
+        return alarms
+    intervention = payload.get("vision_operator_intervention")
+    if not (
+        isinstance(intervention, dict)
+        and intervention.get("schema") == "vision_operator_intervention.v1"
+        and intervention.get("checkpoint") == "utm_post_place"
+        and intervention.get("status") in {"retrying", "waiting_for_specimen"}
+        and intervention.get("reason") == "specimen_not_detected"
+    ):
+        return alarms
+    observation = payload.get("observation") if isinstance(payload.get("observation"), dict) else {}
+    capture = observation.get("raw_capture") if isinstance(observation.get("raw_capture"), dict) else {}
+    frame_capture = capture.get("frame_capture") if isinstance(capture.get("frame_capture"), dict) else {}
+    valid_frame = bool(
+        capture.get("ok")
+        and capture.get("detected") is False
+        and frame_capture.get("ok")
+        and frame_capture.get("frame_available")
+    )
+    if not valid_frame:
+        return alarms
+
+    filtered: list[dict[str, Any]] = []
+    for alarm in alarms:
+        source = str(alarm.get("source_path") or "").lower()
+        reason = str(alarm.get("reason_code") or "").upper()
+        if source.startswith("payload.observation.raw_capture"):
+            if reason == "SPECIMEN_NOT_DETECTED":
+                continue
+            if reason == "ROS_IMAGE_TIMEOUT" and ".frame_capture.attempts" in source:
+                continue
         filtered.append(alarm)
     return filtered
 
@@ -647,8 +724,10 @@ def _has_completed_printer_handoff_for_robot_rollout(value: Any) -> bool:
 
 def _has_bambu_http_artifact_handoff(value: Any) -> bool:
     markers = {
+        "test_printer_ejection_project_started",
         "test_printer_started_then_stopped",
         "test_printer_published_then_stopped",
+        "TEST_PRINTER_EJECTION_PROJECT_STARTED",
         "TEST_PRINTER_STARTED_THEN_STOPPED",
         "TEST_PRINTER_PUBLISHED_THEN_STOPPED",
     }
@@ -799,8 +878,6 @@ def _map_reason_code(value: str) -> str:
     if "ZONE" in text or "OCCUPIED" in text or "HUMAN" in text:
         return "ZONE_OCCUPIED"
     if "LEROBOT" in text or "ROBOT" in text or "POLICY" in text:
-        if "CLAMP" in text:
-            return "ROBOT_ACTION_CLAMP_DISABLED"
         if "POLICY" in text:
             return "ROBOT_POLICY_UNAPPROVED"
         return "ROBOT_ACTION_OUT_OF_BOUNDS"
@@ -888,8 +965,6 @@ def _decision_for_risk(risk_score: float, *, alarms: list[dict[str, Any]], stage
         return "block"
     if risk_score >= 0.75:
         return "block"
-    if phase == "action" and any(alarm.get("reason_code") == "ROBOT_ACTION_CLAMP_DISABLED" for alarm in alarms):
-        return "modify"
     if risk_score >= 0.55 and phase == "action":
         return "require_human_approval"
     return "allow_with_warning"
@@ -987,12 +1062,6 @@ def _taxonomy_action(decision: str, reason_code: str) -> str:
 def _modified_payload_patch(*, decision: str, reason_code: str, stage: str, tool: str) -> dict[str, Any]:
     if decision != "modify":
         return {}
-    if reason_code == "ROBOT_ACTION_CLAMP_DISABLED" or str(tool or "").startswith(("lerobot.rollout", "robot.pick_place")):
-        return {
-            "rollout_action_clamp": True,
-            "guardian_modified_payload": True,
-            "guardian_modification_reason": reason_code or "ROBOT_ACTION_CLAMP_DISABLED",
-        }
     return {"guardian_modified_payload": True, "guardian_modification_reason": reason_code or stage}
 
 

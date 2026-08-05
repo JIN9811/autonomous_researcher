@@ -155,12 +155,14 @@ class ManipulationAgent(BaseAgent):
             merged.update(task_profile)
         merged.update({key: value for key, value in spec.items() if value not in (None, "")})
 
-        saved_profile_authoritative = state.mode == Mode.LIVE or self._physical_printer_tail_requested(state)
-        if direct_bridge or not saved_profile_authoritative:
+        saved_profile_authoritative = (
+            direct_bridge
+            or state.mode == Mode.LIVE
+            or self._physical_printer_tail_requested(state)
+        )
+        if not saved_profile_authoritative:
             merged["__explicit_keys"] = set(spec.keys())
-            merged["__configuration_source"] = (
-                "direct_manipulation_bridge_request" if direct_bridge else "explicit_test_or_replay_spec"
-            )
+            merged["__configuration_source"] = "explicit_test_or_replay_spec"
             return merged
 
         authoritative = dict(saved)
@@ -880,6 +882,26 @@ class ManipulationAgent(BaseAgent):
         metadata = state.run_metadata if isinstance(state.run_metadata, dict) else {}
         previous = metadata.get("manipulation_result") if isinstance(metadata.get("manipulation_result"), dict) else {}
         robot_task = metadata.get("robot_task_result") if isinstance(metadata.get("robot_task_result"), dict) else {}
+        expected_specimen_id = str((payload.get("specimen") or {}).get("specimen_id") or "").strip()
+        previous_transfer = previous.get("transfer_task") if isinstance(previous.get("transfer_task"), dict) else {}
+        prior_specimen_ids = {
+            str(value or "").strip()
+            for value in (
+                previous.get("specimen_id"),
+                previous_transfer.get("specimen_id"),
+                robot_task.get("specimen_id"),
+            )
+            if str(value or "").strip()
+        }
+        prior_run_ids = {
+            str(value or "").strip()
+            for value in (previous.get("run_id"), robot_task.get("run_id"))
+            if str(value or "").strip()
+        }
+        if expected_specimen_id and prior_specimen_ids and expected_specimen_id not in prior_specimen_ids:
+            return None
+        if state.run_id and prior_run_ids and str(state.run_id) not in prior_run_ids:
+            return None
         session_id = str(
             previous.get("session_id")
             or robot_task.get("rollout_session_id")
@@ -1188,7 +1210,9 @@ class ManipulationAgent(BaseAgent):
         decisions: list[dict[str, Any]],
     ) -> dict[str, Any]:
         status = "ready" if decision.get("completion_status") == "verified_complete" else "warning" if response.get("ok") else "blocked"
-        requested_next_stage = "vision" if decision.get("recommended_next_agent") == "vision_agent" else ""
+        requested_next_stage = {
+            "vision_agent": "vision",
+        }.get(str(decision.get("recommended_next_agent") or ""), "")
         return {
             "schema": "robot_task_result.v1",
             "run_id": state.run_id,

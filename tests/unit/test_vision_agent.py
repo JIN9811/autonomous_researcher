@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import numpy as np
 import pytest
+from PIL import Image
 
 from agents.vision_agent import VisionAgent
 from mcp_tools.mock_tools import register_mock_tools
@@ -41,6 +44,16 @@ def _state() -> OrchestratorState:
             }
         },
     )
+
+
+def _write_active_cam_frame(path: Path, *, specimen: bool) -> None:
+    image = np.full((480, 640, 3), 205, dtype=np.uint8)
+    if specimen:
+        image[85:180, 360:440] = [210, 25, 30]
+    image[350:470, 50:210] = [225, 20, 25]
+    image[350:470, 455:620] = [225, 20, 25]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    Image.fromarray(image, mode="RGB").save(path)
 
 
 def test_active_cam_capture_is_copied_into_current_vision_run_artifacts(
@@ -123,6 +136,31 @@ def test_blocked_active_cam_attempt_never_becomes_current_run_artifact(
     assert artifact["status"] == "failed"
     assert artifact["failure_code"] == "ACTIVE_CAM_ATTEMPT_FAILED"
     assert artifact.get("path", "") == ""
+
+
+def test_active_cam_non_detection_frame_is_preserved_as_run_artifact(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = _state()
+    source = tmp_path / "camera-runtime" / "specimen-not-detected.jpg"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"fresh-empty-workspace-frame")
+    monkeypatch.setattr(VisionAgent, "_repo_root", staticmethod(lambda: tmp_path))
+
+    artifact = VisionAgent()._persist_active_cam_run_artifact(
+        state=state,
+        observation_id="frame-2-vision",
+        active_check={
+            "status": "not_detected",
+            "spc_autoejection_confirmed": False,
+            "capture_path": str(source),
+            "camera_key": "wrist",
+        },
+    )
+
+    assert artifact["status"] == "stored"
+    assert Path(artifact["path"]).read_bytes() == b"fresh-empty-workspace-frame"
 
 
 def test_transfer_observation_publishes_active_cam_run_artifact_update(
@@ -372,7 +410,7 @@ async def test_vision_agent_verifies_utm_placement_after_manipulation(
             "camera_key": payload["camera_key"],
             "purpose": payload["purpose"],
             "source": "utm_camera",
-            "confidence": 0.91,
+            "confidence": 0.05,
             "pose_confidence": 0.91,
         },
     )
@@ -386,7 +424,7 @@ async def test_vision_agent_verifies_utm_placement_after_manipulation(
             "detected": True,
             "source": "utm_ros_frame",
             "frame_id": payload["frame_id"],
-            "confidence": 0.91,
+            "confidence": 0.05,
             "bbox_xyxy": [20, 30, 90, 110],
             "annotated_frame_path": str(annotated_frame),
             "raw_frame_path": str(annotated_frame),
@@ -397,6 +435,7 @@ async def test_vision_agent_verifies_utm_placement_after_manipulation(
         },
     )
     state = _state()
+    state.mode = Mode.LIVE
     interlock = {
         "schema": "post_place_interlock.v1",
         "session_id": "lr-rollout-utm-001",
@@ -421,6 +460,16 @@ async def test_vision_agent_verifies_utm_placement_after_manipulation(
         "completion_status": "reported_complete",
         "post_place_interlock": interlock,
     }
+    rollout_stop_calls: list[dict[str, Any]] = []
+    tools.register(
+        "lerobot.rollout.stop",
+        lambda payload: rollout_stop_calls.append(dict(payload)) or {
+            "ok": True,
+            "tool": "lerobot.rollout.stop",
+            "status": "STOPPED",
+            "session_id": payload["session_id"],
+        },
+    )
 
     result = await VisionAgent().run(state, _CtxStub(tools))
 
@@ -428,6 +477,7 @@ async def test_vision_agent_verifies_utm_placement_after_manipulation(
     assert capture_calls == []
     assert len(utm_calls) == 1
     assert utm_calls[0]["session_id"] == "lr-rollout-utm-001"
+    assert utm_calls[0]["frame_attempts"] == 3
     observation = result.data["observation"]
     assert observation["vision_report"]["task"] == "post_manipulation_utm_verification"
     assert observation["vision_report"]["zones"]["utm_platen"]["specimen_present"] is True
@@ -436,6 +486,7 @@ async def test_vision_agent_verifies_utm_placement_after_manipulation(
     assert completion["schema"] == "vision_manipulation_completion.v1"
     assert completion["detected"] is True
     assert completion["ready_to_stop_rollout"] is True
+    assert completion["confidence"] == pytest.approx(0.05)
     assert completion["session_id"] == "lr-rollout-utm-001"
     artifact = result.data["utm_completion_artifact_update"]
     assert artifact["schema"] == "utm_completion_run_artifact.v1"
@@ -454,13 +505,20 @@ async def test_vision_agent_verifies_utm_placement_after_manipulation(
         if step["id"] == "utm_confirmation"
     )
     assert utm_step["status"] == "complete"
-    assert result.data["requested_next_stage"] == "manipulation"
-    assert result.data["transition_decision"] == "vision_manipulation_completion"
+    assert len(rollout_stop_calls) == 1
+    assert rollout_stop_calls[0]["session_id"] == "lr-rollout-utm-001"
+    assert rollout_stop_calls[0]["reason"] == "vision_utm_placement_verified"
+    assert rollout_stop_calls[0]["completion_signal"]["detected"] is True
+    assert rollout_stop_calls[0]["completion_signal"]["session_id"] == "lr-rollout-utm-001"
+    assert completion["rollout_stopped"] is True
+    assert result.data["rollout_stop"]["status"] == "STOPPED"
+    assert result.data["requested_next_stage"] == "equipment"
+    assert result.data["transition_decision"] == "vision_equipment_handoff"
     gate = guardian_gate(state=state, stage="vision", phase="post", agent="vision_agent", payload=result.data)
     assert gate_blocks_execution(gate) is False
     signal = next(item for item in observation["agent_signals"] if item["signal"] == "vision_manipulation_completion")
     assert signal["status"] == "detected"
-    assert signal["target_agent"] == "manipulation_agent"
+    assert signal["target_agent"] == "equipment_agent"
 
 
 @pytest.mark.asyncio
@@ -525,20 +583,119 @@ async def test_vision_agent_utm_not_detected_emits_failed_attempt_and_keeps_roll
     assert completion["detected"] is False
     assert completion["ready_to_stop_rollout"] is False
     assert completion["blocking_reason"] == "specimen_not_detected_on_utm"
-    assert result.data["requested_next_stage"] == "manipulation"
-    assert result.data["transition_decision"] == "vision_manipulation_monitoring"
+    assert result.data["requested_next_stage"] == "vision"
+    assert result.data["transition_decision"] == "vision_utm_monitoring"
     artifact = result.data["utm_completion_artifact_update"]
     assert artifact["status"] == "not_detected"
     assert artifact["session_id"] == "lr-rollout-utm-empty"
     assert artifact["specimen_id"] == state.run_metadata["specimen_result"]["specimen_id"]
     screen_report = result.data["vision_agent_report"]
     assert screen_report["utm_completion_confirmation"]["detected"] is False
+    intervention = result.data["vision_operator_intervention"]
+    assert intervention["checkpoint"] == "utm_post_place"
+    assert intervention["status"] == "retrying"
+    assert intervention["retry_deadline_at"]
+    assert intervention["rollout_session_id"] == "lr-rollout-utm-empty"
+    assert intervention["rollout_stopped"] is False
     utm_step = next(
         step
         for step in screen_report["agentic_progress"]["steps"]
         if step["id"] == "utm_confirmation"
     )
     assert utm_step["status"] == "waiting"
+
+
+@pytest.mark.asyncio
+async def test_vision_agent_utm_expiry_stops_rollout_before_operator_wait(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(VisionAgent, "_repo_root", staticmethod(lambda: tmp_path))
+    evidence = tmp_path / "incoming" / "utm-expired-empty.png"
+    evidence.parent.mkdir(parents=True)
+    evidence.write_bytes(b"utm-expired-empty")
+    stop_calls: list[dict[str, Any]] = []
+    tools = ToolRegistry()
+    tools.register(
+        "vision.utm_specimen_presence.capture",
+        lambda payload: {
+            "ok": True,
+            "tool": "vision.utm_specimen_presence.capture",
+            "status": "not_detected",
+            "detected": False,
+            "frame_id": payload["frame_id"],
+            "annotated_frame_path": str(evidence),
+            "raw_frame_path": str(evidence),
+            "width": 160,
+            "height": 120,
+            "session_id": payload["session_id"],
+            "specimen_id": payload["specimen_id"],
+        },
+    )
+    tools.register(
+        "lerobot.rollout.stop",
+        lambda payload: stop_calls.append(dict(payload)) or {
+            "ok": True,
+            "tool": "lerobot.rollout.stop",
+            "status": "STOPPED",
+            "session_id": payload["session_id"],
+            "port_reclaim_status": "attempted",
+            "stopped_session_ids": [payload["session_id"]],
+        },
+    )
+    state = _state()
+    session_id = "lr-rollout-utm-expired"
+    interlock = {
+        "schema": "post_place_interlock.v1",
+        "session_id": session_id,
+        "ungrasping_seen": True,
+        "home_after_ungrasping": True,
+        "ready_for_utm_snapshot": True,
+    }
+    state.run_metadata["manipulation_result"] = {
+        "ok": True,
+        "session_id": session_id,
+        "workflow": "rollout",
+        "handoff_status": "needs_post_place_vision",
+        "completion_status": "reported_complete",
+        "post_place_interlock": interlock,
+    }
+    state.run_metadata["robot_task_result"] = {
+        "schema": "robot_task_result.v1",
+        "rollout_session_id": session_id,
+        "handoff_status": "needs_post_place_vision",
+        "completion_status": "reported_complete",
+        "post_place_interlock": interlock,
+    }
+    now = datetime.now(timezone.utc)
+    state.run_metadata["vision_operator_intervention"] = {
+        "schema": "vision_operator_intervention.v1",
+        "run_id": state.run_id,
+        "checkpoint": "utm_post_place",
+        "status": "retrying",
+        "reason": "specimen_not_detected",
+        "capture_path": "/tmp/old.png",
+        "capture_url": "",
+        "camera_key": "utm",
+        "requested_at": (now - timedelta(seconds=301)).isoformat(),
+        "retry_started_at": (now - timedelta(seconds=301)).isoformat(),
+        "retry_deadline_at": (now - timedelta(seconds=1)).isoformat(),
+        "retry_count": 3,
+        "rollout_session_id": session_id,
+        "rollout_stopped": False,
+    }
+
+    result = await VisionAgent().run(state, _CtxStub(tools))
+
+    assert len(stop_calls) == 1
+    assert stop_calls[0]["session_id"] == session_id
+    assert stop_calls[0]["reason"] == "utm_specimen_detection_timeout"
+    intervention = result.data["vision_operator_intervention"]
+    assert intervention["status"] == "waiting_for_specimen"
+    assert intervention["rollout_stopped"] is True
+    assert intervention["camera_port_returned"] is True
+    assert result.data["pending_operator_input"] is True
+    assert result.data["requires_response"] is True
 
 
 @pytest.mark.asyncio
@@ -579,7 +736,7 @@ async def test_vision_agent_does_not_capture_utm_before_measured_post_place_gate
     assert capture_calls == []
     assert result.data["observation"]["vision_manipulation_completion"]["detected"] is False
     assert result.data["observation"]["vision_manipulation_completion"]["blocking_reason"] == "post_place_interlock_waiting"
-    assert result.data["requested_next_stage"] == "manipulation"
+    assert result.data["requested_next_stage"] == "vision"
 
 
 @pytest.mark.asyncio
@@ -653,13 +810,112 @@ async def test_vision_agent_captures_one_utm_frame_after_measured_post_place_gat
 
 
 @pytest.mark.asyncio
+async def test_vision_agent_stops_rollout_when_fresh_session_telemetry_confirms_actions(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """UTM confirmation must use current same-session telemetry, not launch-time log text."""
+    tools = ToolRegistry()
+    monkeypatch.setattr(VisionAgent, "_repo_root", staticmethod(lambda: tmp_path))
+    evidence = tmp_path / "utm-confirmed.png"
+    evidence.write_bytes(b"utm-confirmed")
+    session_id = "lr-rollout-telemetry-refresh"
+    gate = {
+        "schema": "post_place_interlock.v1",
+        "session_id": session_id,
+        "ungrasping_seen": True,
+        "home_after_ungrasping": True,
+        "ready_for_utm_snapshot": True,
+    }
+    tools.register(
+        "vision.utm_specimen_presence.capture",
+        lambda payload: {
+            "ok": True,
+            "tool": "vision.utm_specimen_presence.capture",
+            "status": "confirmed",
+            "detected": True,
+            "source": "utm_ros_frame",
+            "frame_id": payload["frame_id"],
+            "confidence": 0.95,
+            "annotated_frame_path": str(evidence),
+            "raw_frame_path": str(evidence),
+            "width": 160,
+            "height": 120,
+            "session_id": session_id,
+            "specimen_id": payload["specimen_id"],
+        },
+    )
+    status_calls: list[dict[str, Any]] = []
+    tools.register(
+        "lerobot.rollout.status",
+        lambda payload: status_calls.append(dict(payload)) or {
+            "ok": True,
+            "tool": "lerobot.rollout.status",
+            "status": "POLICY_ACTIVE",
+            "session_id": session_id,
+            "runtime": {"phase": "ROBOT_CONNECTED", "action_count": 0},
+            "joint_telemetry": {
+                "status": "available",
+                "session_id": session_id,
+                "packet": {
+                    "type": "joint_sample",
+                    "session_id": session_id,
+                    "sequence": 24,
+                    "actual_source": {"Joint1": -9.0},
+                    "target_source": {"Joint1": -9.2},
+                    "workflow": "rollout",
+                },
+            },
+        },
+    )
+    stop_calls: list[dict[str, Any]] = []
+    tools.register(
+        "lerobot.rollout.stop",
+        lambda payload: stop_calls.append(dict(payload)) or {
+            "ok": True,
+            "tool": "lerobot.rollout.stop",
+            "status": "STOPPED",
+            "session_id": session_id,
+        },
+    )
+    state = _state()
+    state.mode = Mode.LIVE
+    state.run_metadata["manipulation_result"] = {
+        "ok": True,
+        "workflow": "rollout",
+        "session_id": session_id,
+        "runtime_phase": "ROBOT_CONNECTED",
+        "action_count": 0,
+        "handoff_status": "needs_post_place_vision",
+        "completion_status": "reported_complete",
+        "post_place_interlock": gate,
+    }
+    state.run_metadata["robot_task_result"] = {
+        "schema": "robot_task_result.v1",
+        "rollout_session_id": session_id,
+        "handoff_status": "needs_post_place_vision",
+        "completion_status": "reported_complete",
+        "post_place_interlock": gate,
+    }
+
+    result = await VisionAgent().run(state, _CtxStub(tools))
+
+    assert status_calls == [{"mode": "live", "runtime_mode": "live", "profile_id": "", "session_id": session_id}]
+    completion = result.data["observation"]["vision_manipulation_completion"]
+    assert completion["ready_to_stop_rollout"] is True
+    assert completion["rollout_execution"]["observed"] is True
+    assert completion["rollout_execution"]["telemetry_sequence"] == 24
+    assert len(stop_calls) == 1
+    assert stop_calls[0]["session_id"] == session_id
+
+
+@pytest.mark.asyncio
 async def test_vision_agent_uses_lerobot_active_robot_cam_routine_for_ejection_check(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     active_frame = tmp_path / "camera-runtime" / "active-robot-cam-ejection.jpg"
-    active_frame.parent.mkdir(parents=True)
-    active_frame.write_bytes(b"active-robot-cam-ejection")
+    _write_active_cam_frame(active_frame, specimen=True)
     monkeypatch.setattr(VisionAgent, "_repo_root", staticmethod(lambda: tmp_path))
     tools = ToolRegistry()
     camera_test_calls: list[dict[str, Any]] = []
@@ -744,8 +1000,7 @@ async def test_vision_agent_confirms_spc_autoejection_with_active_cam_capture(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     active_frame = tmp_path / "camera-runtime" / "active_cam_ejection.jpg"
-    active_frame.parent.mkdir(parents=True)
-    active_frame.write_bytes(b"active-cam")
+    _write_active_cam_frame(active_frame, specimen=True)
     monkeypatch.setattr(VisionAgent, "_repo_root", staticmethod(lambda: tmp_path))
     tools = ToolRegistry()
     active_cam_calls: list[dict[str, Any]] = []
@@ -806,9 +1061,20 @@ async def test_vision_agent_confirms_spc_autoejection_with_active_cam_capture(
     assert active["status"] == "confirmed"
     assert active["specimen_detected"] is True
     assert active["spc_autoejection_confirmed"] is True
+    assert active["bbox_xyxy"]
+    assert active["confidence"] > 0
+    assert Path(active["annotated_capture_path"]).is_file()
     assert Path(active["capture_path"]).is_file()
     assert active["capture_path"] != str(active_frame)
     assert active["capture_url"].startswith(f"/api/runs/{state.run_id}/artifact-file/vision/")
+    artifact = result.data["active_cam_artifact_update"]
+    assert artifact["decision_status"] == "confirmed"
+    assert artifact["specimen_detected"] is True
+    assert artifact["spc_autoejection_confirmed"] is True
+    assert artifact["placement_status"] == "inside"
+    assert artifact["bbox_xyxy"] == active["bbox_xyxy"]
+    assert artifact["confidence"] == active["confidence"]
+    assert Path(artifact["path"]).is_file()
     assert active["port_released"] is True
     assert active["camera_returned_to_vla"] is True
     assert active["camera_owner_after"] == "vla_runtime"
@@ -820,6 +1086,74 @@ async def test_vision_agent_confirms_spc_autoejection_with_active_cam_capture(
     assert signal["target_agent"] == "specimen_agent"
     progress_ids = [step["id"] for step in screen_report["agentic_progress"]["steps"]]
     assert "active_cam" in progress_ids
+
+
+@pytest.mark.asyncio
+async def test_vision_agent_ignores_prior_specimen_manipulation_handoff_before_active_cam(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A new specimen must use ActiveCam, never a prior specimen's UTM handoff."""
+    active_frame = tmp_path / "camera-runtime" / "active-cam-current.jpg"
+    _write_active_cam_frame(active_frame, specimen=True)
+    monkeypatch.setattr(VisionAgent, "_repo_root", staticmethod(lambda: tmp_path))
+    tools = ToolRegistry()
+    active_cam_calls: list[dict[str, Any]] = []
+    tools.register(
+        "lerobot.active_robot_cam.capture",
+        lambda payload: active_cam_calls.append(dict(payload or {})) or {
+            "ok": True,
+            "tool": "lerobot.active_robot_cam.capture",
+            "camera_key": "wrist",
+            "camera_port": "352122273019",
+            "port_released": True,
+            "camera_returned_to_vla": True,
+            "camera_owner_after": "vla_runtime",
+            "capture": {
+                "ok": True,
+                "path": str(active_frame),
+                "width": 640,
+                "height": 480,
+                "port_released": True,
+                "camera_returned_to_vla": True,
+                "camera_owner_after": "vla_runtime",
+            },
+        },
+    )
+    state = _state()
+    state.current_experiment_spec = {**state.current_experiment_spec, "active_cam_camera_key": "wrist"}
+    state.run_metadata["fabrication_report"] = {
+        "fabrication_outcome": {"location": "a4_workspace", "autoejection_status": "complete"},
+        "autoejection_gate": {"status": "complete"},
+    }
+    state.run_metadata["manipulation_result"] = {
+        "specimen_id": "specimen-prior",
+        "handoff_status": "needs_post_place_vision",
+        "completion_status": "reported_complete",
+        "session_id": "rollout-prior",
+        "post_place_interlock": {
+            "session_id": "rollout-prior",
+            "ready_for_utm_snapshot": True,
+        },
+    }
+    state.run_metadata["robot_task_result"] = {
+        "specimen_id": "specimen-prior",
+        "handoff_status": "needs_post_place_vision",
+        "completion_status": "reported_complete",
+        "rollout_session_id": "rollout-prior",
+        "post_place_interlock": {
+            "session_id": "rollout-prior",
+            "ready_for_utm_snapshot": True,
+        },
+    }
+
+    result = await VisionAgent().run(state, _CtxStub(tools))
+
+    assert active_cam_calls
+    assert result.data["vision_agent_report"]["active_cam_ejection_check"]["status"] == "confirmed"
+    # The stale post-place record must not bypass the fresh active-camera gate.
+    # A confirmed current specimen enters Manipulation, not Equipment.
+    assert result.data["requested_next_stage"] == "manipulation"
 
 
 @pytest.mark.asyncio
@@ -900,7 +1234,13 @@ async def test_test_mode_installed_printer_uses_live_active_cam_capture(
 
 
 @pytest.mark.asyncio
-async def test_test_mode_installed_printer_active_cam_failure_has_no_simulator_observation() -> None:
+async def test_test_mode_installed_printer_active_cam_non_detection_waits_for_operator(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    active_frame = tmp_path / "camera-runtime" / "active-cam-no-specimen.png"
+    _write_active_cam_frame(active_frame, specimen=False)
+    monkeypatch.setattr(VisionAgent, "_repo_root", staticmethod(lambda: tmp_path))
     tools = ToolRegistry()
     generic_camera_calls: list[dict[str, Any]] = []
     tools.register(
@@ -930,7 +1270,8 @@ async def test_test_mode_installed_printer_active_cam_failure_has_no_simulator_o
                 "failure_code": "ACTIVE_ROBOT_CAM_SPECIMEN_POSE_FAILED",
                 "capture": {
                     "ok": True,
-                    "path": "/tmp/active-cam-no-specimen.png",
+                    "path": str(active_frame),
+                    "serve_url": f"/api/lerobot/visualization/file?path={active_frame}",
                     "width": 640,
                     "height": 480,
                     "synthetic": False,
@@ -961,15 +1302,21 @@ async def test_test_mode_installed_printer_active_cam_failure_has_no_simulator_o
 
     observation = result.data["observation"]
     assert generic_camera_calls == []
-    assert result.success is False
+    assert result.success is True
     assert observation["source"] == "lerobot_active_robot_cam"
     assert observation["camera_key"] == "wrist"
     assert observation["vision_report"]["detections"] == []
     assert observation["transfer_readiness"]["ready"] is False
     assert observation["raw_capture"]["source"] == "lerobot_active_robot_cam"
-    assert observation["raw_capture"]["failure_code"] == "ACTIVE_ROBOT_CAM_SPECIMEN_POSE_FAILED"
-    assert result.data["failure_code"] == "ACTIVE_ROBOT_CAM_SPECIMEN_POSE_FAILED"
-    assert result.data["safe_stop_recommended"] is True
+    assert observation["raw_capture"].get("failure_code", "") == ""
+    assert result.data.get("failure_code", "") == ""
+    assert result.data.get("safe_stop_recommended") is not True
+    assert result.data["pending_operator_input"] is True
+    assert result.data["requires_response"] is True
+    intervention = result.data["vision_operator_intervention"]
+    assert intervention["checkpoint"] == "active_cam_ejection"
+    assert intervention["status"] == "waiting_for_specimen"
+    assert Path(intervention["capture_path"]).is_file()
 
 
 @pytest.mark.asyncio
@@ -978,8 +1325,7 @@ async def test_test_mode_installed_printer_uses_specimen_fabrication_report_alia
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     active_frame = tmp_path / "camera-runtime" / "alias-active-cam.jpg"
-    active_frame.parent.mkdir(parents=True)
-    active_frame.write_bytes(b"alias-active-cam")
+    _write_active_cam_frame(active_frame, specimen=True)
     monkeypatch.setattr(VisionAgent, "_repo_root", staticmethod(lambda: tmp_path))
     tools = ToolRegistry()
     active_cam_calls: list[dict[str, Any]] = []
@@ -1047,8 +1393,7 @@ async def test_live_vision_agent_allows_active_cam_after_autoejection_handoff_wi
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     active_frame = tmp_path / "camera-runtime" / "live-active-cam.jpg"
-    active_frame.parent.mkdir(parents=True)
-    active_frame.write_bytes(b"live-active-cam")
+    _write_active_cam_frame(active_frame, specimen=True)
     monkeypatch.setattr(VisionAgent, "_repo_root", staticmethod(lambda: tmp_path))
     tools = ToolRegistry()
     active_cam_calls: list[dict[str, Any]] = []
@@ -1213,7 +1558,7 @@ async def test_vision_agent_clears_active_cam_display_on_resume_timeout() -> Non
 
     active = result.data["vision_agent_report"]["active_cam_ejection_check"]
     assert active["status"] == "blocked"
-    assert active["specimen_detected"] is True
+    assert active["specimen_detected"] is False
     assert active["spc_autoejection_confirmed"] is False
     assert active["capture_path"] == ""
     assert active["capture_url"] == ""

@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- Bind the local bridge only to `127.0.0.1:8766`.
+- Bind the local bridge only to `127.0.0.1:8767`; keep `8766` reserved for Isaac Sim OMX mirror.
 - Keep `X-Bridge-Token`, the existing action allowlist, and `pyautogui.FAILSAFE = True`.
 - Do not add shell-command or arbitrary-executable actions.
 - Local and Windows bridge selections are explicit; neither is a fallback.
@@ -149,5 +149,5 @@
 - [ ] **Step 3: Select `local_development` and verify proxied Health reports Linux/X11 readiness.**
 - [ ] **Step 4: Execute `program1` through the Equipment Workspace API and confirm bounded mouse movement plus `program1 completed`.**
 - [ ] **Step 5: Use the proxied Program Manager to validate/register/run/delete one custom macro.**
-- [ ] **Step 6: Stop the local bridge through the API and verify port 8766 closes while ATR stays running.**
+- [ ] **Step 6: Stop the local bridge through the API and verify port 8767 closes while ATR stays running.**
 - [ ] **Step 7: Run all touched unit, integration, and browser tests; run `git diff --check`; report residual Windows-only validation requirements.**

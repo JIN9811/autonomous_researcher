@@ -485,6 +485,13 @@ def test_langgraph_runtime_vision_confirmation_updates_specimen_result(tmp_path:
         "ok": True,
         "specimen_id": "specimen-vision-001",
         "handoff_status": "ready",
+        "fabrication_report": {
+            "fabrication_outcome": {
+                "print_completion_status": "complete",
+                "autoejection_status": "awaiting_vision_confirmation",
+            }
+        },
+        "specimen_agent_report": {"autoejection_gate": {"status": "waiting"}},
     }
     logger = StructuredLogger(tmp_path / "runtime.jsonl", tmp_path / "summary.log")
     runtime = LangGraphRunLoop(
@@ -528,6 +535,32 @@ def test_langgraph_runtime_vision_confirmation_updates_specimen_result(tmp_path:
     assert specimen["vision_completion_signal"]["confirmed"] is True
     assert specimen["vision_verification"]["status"] == "confirmed"
     assert specimen["active_cam_ejection_check"]["image_path"] == "/tmp/active-cam.png"
+    assert specimen["autoejection_completion_verified"] is True
+    assert specimen["fabrication_report"]["fabrication_outcome"]["autoejection_status"] == "complete"
+    assert specimen["specimen_agent_report"]["autoejection_gate"]["status"] == "complete"
+
+    runtime._merge_agent_data(
+        Stage.VISION,
+        {
+            "transition_decision": "vision_utm_monitoring",
+            "observation": {
+                "active_cam_ejection_check": {
+                    "status": "not_checked",
+                    "spc_autoejection_confirmed": False,
+                },
+                "spc_autoejection_confirmation": {
+                    "status": "not_checked",
+                    "confirmed": False,
+                },
+            }
+        },
+    )
+
+    specimen = state.run_metadata["specimen_result"]
+    # A post-manipulation UTM retry must not overwrite the completed SPC gate.
+    assert specimen["vision_verification"]["status"] == "confirmed"
+    assert specimen["autoejection_completion_verified"] is True
+    assert specimen["active_cam_ejection_check"]["spc_autoejection_confirmed"] is True
 
 
 def test_langgraph_runtime_retains_active_cam_artifact_until_explicit_failure(tmp_path: Path) -> None:
@@ -842,6 +875,42 @@ def test_logical_transition_candidates_drive_runtime_next_stage() -> None:
     candidate_config = GraphConfig.model_validate(payload)
     assert candidate_config.next_stage("design") == "specimen"
     assert candidate_config.next_stage("design", state_metadata={"agent_result": {"next_stage": "guardian"}}) == "guardian"
+
+
+def test_manipulation_has_no_self_retry_transition() -> None:
+    config = load_graph_config("graphs/configs/atr_closed_loop.yaml")
+
+    assert all(
+        not (
+            candidate["to_stage"] == "manipulation"
+            and candidate["condition"] == "next_stage:manipulation"
+        )
+        for candidate in config.transition_candidates("manipulation")
+    )
+
+
+def test_vision_monitoring_reenters_vision_without_restarting_manipulation() -> None:
+    config = load_graph_config("graphs/configs/atr_closed_loop.yaml")
+
+    assert config.next_stage(
+        "vision",
+        state_metadata={"agent_result": {"requested_next_stage": "vision"}},
+    ) == "vision"
+
+
+def test_manipulation_routes_to_vision_before_equipment() -> None:
+    """Manipulation always enters Vision; only Vision may release Equipment."""
+    config = load_graph_config("graphs/configs/atr_closed_loop.yaml")
+
+    assert config.next_stage("manipulation") == "vision"
+    assert config.next_stage(
+        "vision",
+        state_metadata={"agent_result": {"requested_next_stage": "manipulation"}},
+    ) == "manipulation"
+    assert config.next_stage(
+        "vision",
+        state_metadata={"agent_result": {"requested_next_stage": "equipment"}},
+    ) == "equipment"
 
 
 def test_module_config_schema_validates_active_modules() -> None:
@@ -2648,6 +2717,84 @@ class _ContextProbeAgent(BaseAgent):
         return AgentResult(success=True, summary=f"{self.name} probe", data={"step_output": {"agent": self.name}})
 
 
+@pytest.mark.asyncio
+async def test_langgraph_runtime_pauses_active_cam_operator_wait_at_vision(tmp_path: Path) -> None:
+    state = OrchestratorState(
+        run_id="run-vision-operator-wait",
+        experiment_id="exp-vision-operator-wait",
+        mode=Mode.TEST,
+        stage=Stage.VISION,
+    )
+    events: list[dict[str, object]] = []
+    runtime = LangGraphRunLoop(
+        state=state,
+        agent_registry=AgentRegistry(),
+        orchestrator_agent_name="orchestrator_agent",
+        ctx=object(),
+        logger=StructuredLogger(tmp_path / "runtime.jsonl", tmp_path / "summary.log"),
+        graph_config_path="graphs/configs/atr_closed_loop.yaml",
+        on_event=events.append,
+    )
+    intervention = {
+        "schema": "vision_operator_intervention.v1",
+        "run_id": state.run_id,
+        "checkpoint": "active_cam_ejection",
+        "status": "waiting_for_specimen",
+        "reason": "specimen_not_detected",
+        "capture_path": "/tmp/fresh-empty-workspace.png",
+    }
+
+    paused = await runtime._pause_for_vision_intervention(  # type: ignore[attr-defined]
+        stage=Stage.VISION,
+        agent_name="vision_agent",
+        status=runtime._ensure_agent_status("vision_agent"),
+        result_data={"vision_operator_intervention": intervention},
+    )
+
+    assert paused is True
+    assert state.stage == Stage.VISION
+    assert state.is_paused is True
+    assert state.agent_status["vision_agent"].state == "waiting"
+    assert state.run_metadata["vision_operator_intervention"] == intervention
+    assert any(event["event_type"] == "operator_input_required" for event in events)
+
+
+@pytest.mark.asyncio
+async def test_langgraph_runtime_does_not_pause_utm_automatic_recovery(tmp_path: Path) -> None:
+    state = OrchestratorState(
+        run_id="run-utm-automatic-recovery",
+        experiment_id="exp-utm-automatic-recovery",
+        mode=Mode.TEST,
+        stage=Stage.VISION,
+    )
+    runtime = LangGraphRunLoop(
+        state=state,
+        agent_registry=AgentRegistry(),
+        orchestrator_agent_name="orchestrator_agent",
+        ctx=object(),
+        logger=StructuredLogger(tmp_path / "runtime.jsonl", tmp_path / "summary.log"),
+        graph_config_path="graphs/configs/atr_closed_loop.yaml",
+    )
+
+    paused = await runtime._pause_for_vision_intervention(  # type: ignore[attr-defined]
+        stage=Stage.VISION,
+        agent_name="vision_agent",
+        status=runtime._ensure_agent_status("vision_agent"),
+        result_data={
+            "vision_operator_intervention": {
+                "schema": "vision_operator_intervention.v1",
+                "run_id": state.run_id,
+                "checkpoint": "utm_post_place",
+                "status": "retrying",
+                "reason": "specimen_not_detected",
+            }
+        },
+    )
+
+    assert paused is False
+    assert state.is_paused is False
+
+
 def test_runtime_handler_registry_exposes_new_registered_agents_to_graph_and_module_validation() -> None:
     app_main.controller._deps.agent_registry.register(_StaticAgent("experimental_agent", {}))
     client = TestClient(app_main.app)
@@ -3599,6 +3746,7 @@ def test_vision_module_runtime_exposes_active_cam_and_utm_tools() -> None:
             "camera.capture",
             "lerobot.camera.test",
             "lerobot.active_robot_cam.capture",
+            "lerobot.rollout.status",
             "vision.specimen_pose_snapshot",
             "vision.specimen_pose.release",
             "vision.utm_runtime.start",
@@ -3611,6 +3759,7 @@ def test_vision_module_runtime_exposes_active_cam_and_utm_tools() -> None:
 
     assert "lerobot.camera.test" in module_ctx.tools.list_tools()
     assert "lerobot.active_robot_cam.capture" in module_ctx.tools.list_tools()
+    assert "lerobot.rollout.status" in module_ctx.tools.list_tools()
     assert "vision.utm_runtime.start" in module_ctx.tools.list_tools()
 
 

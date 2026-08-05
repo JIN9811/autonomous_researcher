@@ -1888,7 +1888,9 @@ class LeRobotBridge:
                 "LEROBOT_ACTIVE_CAM_OUTPUT_INVALID",
                 f"ActiveCam runner did not return JSON; returncode={completed.returncode}; stderr={completed.stderr[-1000:]}",
             )
-        if completed.returncode != 0 or not bool(driver_result.get("ok")):
+        detection_failure_code = self._active_robot_cam_specimen_detection_failure_code(driver_result)
+        specimen_not_detected = bool(detection_failure_code)
+        if (completed.returncode != 0 or not bool(driver_result.get("ok"))) and not specimen_not_detected:
             error_response = self._error(
                 "lerobot.active_robot_cam.capture",
                 mode,
@@ -1916,7 +1918,7 @@ class LeRobotBridge:
                 "release_status": "process_exit_verified",
             }
         )
-        return self._active_robot_cam_capture_response(
+        response = self._active_robot_cam_capture_response(
             request=active_request,
             profile=profile,
             camera_key=camera_key,
@@ -1928,6 +1930,17 @@ class LeRobotBridge:
             env_overrides=env_overrides,
             release_verification=release_verification,
         )
+        if specimen_not_detected:
+            response.update(
+                {
+                    "status": "not_detected",
+                    "specimen_detected": False,
+                    "placement_status": "outside" if detection_failure_code == "SPECIMEN_OUTSIDE_A4" else "not_detected",
+                    "detection_failure_code": detection_failure_code,
+                    "message": detection_failure_code,
+                }
+            )
+        return response
 
     def _active_robot_cam_driver_payload(self, profile: RobotProfile, request: LeRobotSessionRequest, *, camera_key: str) -> dict[str, Any]:
         follower_port = self._device_port(profile, "follower", allow_fake=False)
@@ -2005,6 +2018,40 @@ class LeRobotBridge:
             "events": step_trace,
             "error": None,
         }
+
+    @staticmethod
+    def _active_robot_cam_specimen_detection_failure_code(driver_result: dict[str, Any]) -> str:
+        """Return a placement-negative detector code when a valid evidence frame exists."""
+        capture = driver_result.get("capture") if isinstance(driver_result.get("capture"), dict) else {}
+        if not bool(capture.get("ok") and capture.get("path")):
+            return ""
+
+        detected_codes: set[str] = set()
+        pending: list[Any] = [driver_result]
+        while pending:
+            current = pending.pop()
+            if isinstance(current, dict):
+                for key, value in current.items():
+                    if key in {"failure_code", "message", "status"}:
+                        marker = str(value).strip().lower()
+                        if "specimen_outside_a4" in marker:
+                            detected_codes.add("SPECIMEN_OUTSIDE_A4")
+                        elif "specimen_not_detected" in marker:
+                            detected_codes.add("SPECIMEN_NOT_DETECTED")
+                    if isinstance(value, (dict, list)):
+                        pending.append(value)
+            elif isinstance(current, list):
+                pending.extend(current)
+        if "SPECIMEN_OUTSIDE_A4" in detected_codes:
+            return "SPECIMEN_OUTSIDE_A4"
+        if "SPECIMEN_NOT_DETECTED" in detected_codes:
+            return "SPECIMEN_NOT_DETECTED"
+        return ""
+
+    @classmethod
+    def _active_robot_cam_specimen_not_detected(cls, driver_result: dict[str, Any]) -> bool:
+        """Recognize a valid placement-negative observation without treating it as a bridge failure."""
+        return bool(cls._active_robot_cam_specimen_detection_failure_code(driver_result))
 
     @staticmethod
     def _json_object_from_stdout(stdout: str) -> dict[str, Any] | None:
@@ -12999,7 +13046,7 @@ print("Updated Pi0.5 quantile stats for " + ", ".join(updated))
             "ATR_ACTIVE_ROBOT_CAM_CAPTURE_WAIT_TOLERANCE_DEG": "2.0",
             "ATR_ACTIVE_ROBOT_CAM_RESUME_WAIT_TIMEOUT_S": "4.0",
             "ATR_ACTIVE_ROBOT_CAM_RESUME_WAIT_POLL_S": "0.05",
-            "ATR_ACTIVE_ROBOT_CAM_RESUME_WAIT_TOLERANCE_DEG": "2.0",
+            "ATR_ACTIVE_ROBOT_CAM_RESUME_WAIT_TOLERANCE_DEG": "3.0",
             "ATR_ACTIVE_ROBOT_CAM_SETTLE_S": "1.0",
             "ATR_ACTIVE_ROBOT_CAM_HOLD_AFTER_CAPTURE_S": "1.0",
             "ATR_SPECIMEN_POSE_PENDING_PATH": "/tmp/atr_specimen_pose_pending/latest_specimen_pose_payload.json",
@@ -13739,7 +13786,7 @@ print(json.dumps({"ok": True, "key": key_name}))
     def _rollout_request_with_local_policy(self, request: LeRobotSessionRequest) -> LeRobotSessionRequest:
         """Normalize explicit policy refs; only standalone rollout may select the latest local policy."""
         mode = request.runtime_mode or request.mode
-        raw_path = str(request.policy_checkpoint_path or request.policy_path or "").strip()
+        raw_path = str(request.policy_path or request.policy_checkpoint_path or "").strip()
         if raw_path and not raw_path.startswith("fake://"):
             path = _resolve_path(self.config.repo_root, raw_path).resolve()
             if not self._is_under_allowed_roots(path):
@@ -13838,7 +13885,7 @@ print(json.dumps({"ok": True, "key": key_name}))
 
     @staticmethod
     def _policy_ref(request: LeRobotSessionRequest) -> str:
-        return request.policy_checkpoint_path or request.policy_path or request.policy_repo_id
+        return request.policy_path or request.policy_checkpoint_path or request.policy_repo_id
 
     def _rollout_task_instruction(self, request: LeRobotSessionRequest, *, is_pi05: bool) -> str:
         """Use the trained language command for known Pi0.5 local policies when safe to normalize."""

@@ -14,6 +14,146 @@ from app.main import app, controller, _package_runtime_event
 TINY_PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"atr-test-screen-evidence"
 
 
+def test_common_equipment_profiles_expose_token_safe_utm_profile() -> None:
+    client = TestClient(app)
+
+    response = client.get("/api/equipment/profiles")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["selected_profile_id"] == "utm_windows_v1"
+    assert payload["profiles"][0]["profile_id"] == "utm_windows_v1"
+    assert '"token":' not in json.dumps(payload).lower()
+
+
+def test_common_equipment_profile_state_and_unknown_profile() -> None:
+    client = TestClient(app)
+
+    state = client.get("/api/equipment/profiles/utm_windows_v1/state")
+    missing = client.get("/api/equipment/profiles/not-registered/state")
+
+    assert state.status_code == 200
+    assert state.json()["profile"]["label"] == "UTM"
+    assert '"token":' not in json.dumps(state.json()).lower()
+    assert missing.status_code == 404
+
+
+def test_windows_equipment_page_exposes_common_profile_workspace() -> None:
+    client = TestClient(app)
+
+    response = client.get("/equipment/windows")
+
+    assert response.status_code == 200
+    for element_id in (
+        "equipment-profile-list",
+        "equipment-profile-items",
+        "equipment-profile-connection",
+        "equipment-profile-runtime",
+        "equipment-profile-evidence",
+        "btn-equipment-profile-preflight",
+        "btn-equipment-profile-test",
+    ):
+        assert f'id="{element_id}"' in response.text
+    script = client.get("/static/windows_equipment.js").text
+    assert "/api/equipment/profiles" in script
+    assert "selectedEquipmentProfileId" in script
+
+
+def test_windows_equipment_opens_the_saved_windows_bridge_console_in_a_separate_window() -> None:
+    client = TestClient(app)
+
+    response = client.get("/equipment/windows")
+
+    assert response.status_code == 200
+    assert 'id="btn-equipment-open-bridge-gui"' in response.text
+    assert 'id="equipment-bridge-console-frame"' not in response.text
+    script = client.get("/static/windows_equipment.js").text
+    assert 'window.open("/equipment/windows/console", "_blank", "noopener,noreferrer")' in script
+
+
+def test_windows_equipment_console_renders_locally_without_contacting_selected_bridge(monkeypatch) -> None:
+    client = TestClient(app)
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("The local operator console must not contact the selected bridge while rendering.")
+
+    monkeypatch.setattr("app.main._equipment_bridge", fail_if_called)
+
+    response = client.get("/equipment/windows/console")
+
+    assert response.status_code == 200
+    assert "ATR Windows PyAutoGUI Bridge" in response.text
+    assert 'id="programManagerPanel"' in response.text
+    assert "/equipment/windows/bridge-ui" in response.text
+    assert 'localStorage.setItem("bridgeToken","atr-proxy-session")' in response.text
+    assert "server-only-token" not in response.text
+
+
+def test_windows_equipment_keeps_bridge_controls_in_the_primary_dashboard() -> None:
+    client = TestClient(app)
+
+    response = client.get("/equipment/windows")
+
+    assert response.status_code == 200
+    html = response.text
+    assert 'class="equipment-workspace-actions"' in html
+    assert 'id="equipment-inline-controls"' in html
+    assert 'id="equipment-advanced-controls"' not in html
+    assert "Advanced Bridge Setup &amp; Audit" not in html
+    assert html.index('id="equipment-inline-controls"') < html.index('id="equipment-subnet-input"')
+
+
+def test_windows_equipment_uses_equal_profile_overview_cards() -> None:
+    client = TestClient(app)
+
+    response = client.get("/equipment/windows")
+
+    assert response.status_code == 200
+    assert 'class="panel equipment-profile-overview"' in response.text
+
+
+def test_windows_equipment_bridge_ui_proxy_keeps_token_server_side(monkeypatch) -> None:
+    class FakeBridge:
+        def proxy_ui_request(self, *, method, resource_path, query_string, body, content_type):
+            assert method == "GET"
+            assert resource_path == ""
+            assert query_string == ""
+            assert body == b""
+            assert content_type == ""
+            return {
+                "ok": True,
+                "status_code": 200,
+                "content_type": "text/html; charset=utf-8",
+                "content": b"<html><body>Windows Bridge Console</body></html>",
+            }
+
+    monkeypatch.setattr("app.main._equipment_bridge", lambda: FakeBridge())
+    client = TestClient(app)
+
+    response = client.get("/equipment/windows/bridge-ui/")
+
+    assert response.status_code == 200
+    assert "Windows Bridge Console" in response.text
+    assert "'/equipment/windows/bridge-ui'+input" in response.text
+    assert "server-only-token" not in response.text
+
+
+def test_common_equipment_profile_test_generates_simulated_analysis_ready_evidence() -> None:
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/equipment/profiles/utm_windows_v1/test",
+        json={"confirm_execute": True},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ok"] is True
+    assert payload["profile"]["simulate_utm_protocol"] is True
+    assert payload["analysis_handoff"]["status"] == "ready"
+    assert all(payload["evidence"][key] for key in ("screenshot", "request_log", "csv"))
+
+
 def test_live_gui_runtime_shell_contains_operational_panels() -> None:
     client = TestClient(app)
     response = client.get("/live")
@@ -55,8 +195,8 @@ def test_live_gui_runtime_shell_contains_operational_panels() -> None:
     assert "planning-live-body" in html
     assert "/static/styles.css?v=20260527-live-focus" in html
     assert "/static/planning.js?v=20260613-clean-stl-render-1" in html
-    assert 'href="/static/styles.css?v=20260715-grasp-attach-1"' in html
-    assert 'src="/static/planning.js?v=20260715-report-patch-1"' in html
+    assert 'href="/static/styles.css?v=20260720-manipulation-grounded-1"' in html
+    assert 'src="/static/planning.js?v=20260722-utm-raw-single-source-1"' in html
     assert "Runtime Chat" in html
     assert "Safe Stop" in html
     assert "Pause Run" in html
@@ -99,6 +239,18 @@ def test_live_gui_specimen_report_uses_live_print_job_cards() -> None:
         assert card_title in script_text
 
     assert "ar-spc-live-job-monitor-card" in script_text
+
+
+def test_live_gui_specimen_agentic_progress_uses_current_run_completion_evidence() -> None:
+    client = TestClient(app)
+    script_text = client.get("/static/planning.js").text
+
+    assert "function specimenCurrentPrintProgressStatus(" in script_text
+    assert "function specimenCurrentAutoejectionProgressStatus(" in script_text
+    assert "ctx.printerCompletionWait.status" in script_text
+    assert "ctx.activeCamArtifact.spc_autoejection_confirmed === true" in script_text
+    assert "specimenMonitorMatchesCurrentJob(ctx)" in script_text
+    assert "ctx.autoejectionGate.status, ctx.monitor.snapshot.auto_ejection" not in script_text
 
 
 def test_live_gui_chat_expand_keys_are_stable_across_rerenders() -> None:
@@ -471,7 +623,7 @@ def test_live_gui_analysis_report_exposes_multifidelity_contract() -> None:
     assert "livePrinterVideoOverride = {" in script
     assert "mergePrinterMonitorVideoStatusResult(" not in script
     assert "livePrinterMonitorOverride = event" in script
-    assert "if (livePrinterMonitorOverride) return livePrinterMonitorOverride;" in script
+    assert "livePrinterMonitorOverride && eventMatchesCurrentRun(livePrinterMonitorOverride, runId)" in script
     assert "const frameSrc = active ? specimenVideoUrlWithCacheBuster(frameUrl) : frameUrl;" in script
     assert 'const loadingAttr = active ? "" : " loading=\\"lazy\\"";' in script
     assert 'data-spm-video-action="stop" aria-label="Stop 3DP video" title="Stop 3DP video"><span aria-hidden="true">■</span></button>' in script
@@ -3307,11 +3459,17 @@ def test_live_gui_manipulation_agent_uses_current_supervisor_language() -> None:
     script = client.get("/static/planning.js").text
     report = client.get("/api/agents/manipulation/report").json()["report"]
 
-    assert "Policy Runtime" in script
-    assert "Execution Supervision" in script
-    assert "Vision / UTM Verification" in script
-    assert "Active Camera" in script
-    assert "Safety Gate / Object Pose" in script
+    assert "Runtime Execution" in script
+    assert "Runtime Interlocks" in script
+    assert "Completion Verification" in script
+    assert "Run Result" in script
+    assert "Run Metrics" in script
+    assert "Task Success Rate" in script
+    assert "Grasp Success Rate" in script
+    assert 'renderDashboardCard("Policy Runtime"' not in script
+    assert 'renderDashboardCard("Execution Supervision"' not in script
+    assert 'renderDashboardCard("Vision / UTM Verification"' not in script
+    assert 'renderDashboardCard("Safety Gate / Object Pose"' not in script
     assert "Home Pose" not in script
     assert "Current Manipulation Report Missing" not in script
     for stale_label in [
@@ -3337,16 +3495,21 @@ def test_live_gui_manipulation_pose_and_policy_tracking_cards_are_locally_bundle
     styles = client.get("/static/styles.css").text
     bundle_response = client.get("/static/omx_telemetry_viewer.bundle.js")
 
-    assert '/static/styles.css?v=20260715-grasp-attach-1' in html
-    assert '/static/omx_telemetry_viewer.bundle.js?v=20260720-upright-regrasp-1' in html
-    assert '/static/planning.js?v=20260715-report-patch-1' in html
+    assert '/static/styles.css?v=20260720-manipulation-grounded-1' in html
+    assert '/static/omx_telemetry_viewer.bundle.js?v=20260720-manipulation-grounded-1' in html
+    assert '/static/planning.js?v=20260722-utm-raw-single-source-1' in html
     assert bundle_response.status_code == 200
     bundle = bundle_response.text
     for required in [
         "Live Robot Pose",
         "Robot motion state :",
         "Policy Tracking",
-        "Robot Motion State",
+        "Runtime State Strip",
+        "Runtime Execution",
+        "Runtime Interlocks",
+        "Completion Verification",
+        "Run Result",
+        "Run Metrics",
         "data-atr-robot-pose",
         "data-atr-robot-motion-state",
         "data-atr-policy-tracking",
@@ -3363,6 +3526,15 @@ def test_live_gui_manipulation_pose_and_policy_tracking_cards_are_locally_bundle
         "ar-man-motion-unified",
         "Policy tracking artifacts",
         "ATRRobotTelemetryCards.hydrate",
+        "data-atr-runtime-execution",
+        "data-atr-runtime-interlocks",
+        "data-atr-runtime-completion",
+        "data-atr-runtime-result",
+        "data-atr-runtime-metrics",
+        'data-atr-runtime-donut="task"',
+        'data-atr-runtime-donut="grasp"',
+        "Task Success Rate",
+        "Grasp Success Rate",
     ]:
         assert required in script
     assert '["Joint1", -15, -6.5]' in script
@@ -3445,7 +3617,21 @@ def test_live_gui_manipulation_pose_and_policy_tracking_cards_are_locally_bundle
     assert "Environment mesh 5 mm" not in script
     assert ".ar-man-pose-legend i.environment" not in styles
     assert "ar-man-motion-channels" not in script
-    assert "data-atr-grasp-success-rate" not in script
+    assert "data-atr-task-success-rate" in script
+    assert "data-atr-grasp-success-rate" in script
+    for conceptual_title in [
+        "Execution Control",
+        "Performance KPIs",
+        "Grasp / Path Plan",
+        "Active Camera / Workspace",
+        "Safety Gate / Object Pose",
+        "Motion Trace",
+        "Task Route",
+        "Policy Runtime",
+        "Preflight Gates",
+        "Execution Supervision",
+    ]:
+        assert f'renderDashboardCard("{conceptual_title}"' not in script
     assert "grid-template-columns: repeat(4, minmax(0, 1fr));" in styles
 
 
@@ -3465,9 +3651,9 @@ def test_live_robot_pose_has_repeatable_zoom_to_fit_control() -> None:
     assert "zoomToFit" in bundle
     assert "bindPoseFitButtons" in bundle
     assert ".ar-man-pose-fit" in styles
-    assert '/static/styles.css?v=20260715-grasp-attach-1' in html
-    assert '/static/omx_telemetry_viewer.bundle.js?v=20260720-upright-regrasp-1' in html
-    assert '/static/planning.js?v=20260715-report-patch-1' in html
+    assert '/static/styles.css?v=20260720-manipulation-grounded-1' in html
+    assert '/static/omx_telemetry_viewer.bundle.js?v=20260720-manipulation-grounded-1' in html
+    assert '/static/planning.js?v=20260722-utm-raw-single-source-1' in html
 
 
 def test_live_gui_serves_repository_omx_model_assets() -> None:
@@ -3542,7 +3728,9 @@ def test_joint_telemetry_snapshot_reports_idle_without_rollout(monkeypatch) -> N
     response = client.get("/api/lerobot/joint-telemetry/snapshot")
 
     assert response.status_code == 200
-    assert response.json() == {
+    payload = response.json()
+    runtime_view = payload.pop("runtime_view")
+    assert payload == {
         "ok": True,
         "schema": "atr.robot_joint_telemetry.v1",
         "type": "telemetry_state",
@@ -3551,6 +3739,9 @@ def test_joint_telemetry_snapshot_reports_idle_without_rollout(monkeypatch) -> N
         "packet": None,
         "artifacts": {},
     }
+    assert runtime_view["schema"] == "manipulation_runtime_view.v1"
+    assert runtime_view["status"] == "not_started"
+    assert runtime_view["metrics"]["task_cycle"]["success_rate"] is None
 
 
 def test_grasp_outcomes_api_reports_idle_without_rollout(monkeypatch) -> None:
@@ -3692,6 +3883,8 @@ def test_joint_telemetry_snapshot_reads_existing_rollout_action_log(tmp_path, mo
     assert payload["packet"]["sequence"] == 9
     assert payload["packet"]["actual_deg"]["Joint1"] == pytest.approx(5.0)
     assert payload["packet"]["target_deg"]["Joint1"] == pytest.approx(7.0)
+    assert payload["runtime_view"]["schema"] == "manipulation_runtime_view.v1"
+    assert payload["runtime_view"]["metrics"]["sample_count"] == 9
 
 
 def test_joint_telemetry_context_prefers_active_rollout(tmp_path, monkeypatch) -> None:
@@ -3787,6 +3980,7 @@ def test_joint_telemetry_websocket_emits_existing_history(tmp_path, monkeypatch)
     assert payload["type"] == "joint_history"
     assert payload["session"]["session_id"] == "rollout-ws-test"
     assert payload["samples"][0]["sequence"] == 3
+    assert payload["runtime_view"]["schema"] == "manipulation_runtime_view.v1"
 
 
 def test_joint_telemetry_terminal_snapshot_finalizes_artifacts(tmp_path, monkeypatch) -> None:

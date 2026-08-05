@@ -17,6 +17,8 @@ def test_vision_module_uses_active_cam_without_d455_snapshot_steps() -> None:
     step_ids = {item["id"] for item in module["internal_graph"]}
 
     assert "lerobot.active_robot_cam.capture" in module["tools"]
+    assert "lerobot.rollout.stop" in module["tools"]
+    assert "vision.utm_specimen_presence.capture" in module["tools"]
     assert "vision.specimen_pose_snapshot" not in module["tools"]
     assert not any("d455" in step_id.lower() for step_id in step_ids)
     assert "specimen_pose.v1" not in module["io_contract"]["produces"]
@@ -51,3 +53,8 @@ def test_closed_loop_graph_has_post_place_vision_verification() -> None:
     assert ("vision_verify", "equipment") in sidecar_edges
     assert config.transitions["manipulation"] == "equipment"
     assert config.next_stage("manipulation", state_metadata={"agent_result": {"requested_next_stage": "vision"}}) == "vision"
+    assert config.next_stage("vision", state_metadata={"agent_result": {"requested_next_stage": "equipment"}}) == "equipment"
+    assert [
+        config.transitions[stage]
+        for stage in ("equipment", "analysis", "knowledge", "bo")
+    ] == ["analysis", "knowledge", "bo", "guardian"]

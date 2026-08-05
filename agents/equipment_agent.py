@@ -32,6 +32,7 @@ from typing import Any
 
 from agents.base_agent import AgentContext, AgentResult, BaseAgent
 from orchestrator.state import Mode, OrchestratorState
+from utils.equipment_profiles import DEFAULT_UTM_PROFILE_ID, EquipmentProfile, EquipmentProfileRegistry, build_execution_contract
 
 
 class LabEquipmentAgent(BaseAgent):
@@ -258,6 +259,12 @@ class LabEquipmentAgent(BaseAgent):
                 "analysis": dict(state.latest_analysis or {}),
             },
         }
+
+    @staticmethod
+    def _selected_profile(state: OrchestratorState) -> EquipmentProfile:
+        spec = state.current_experiment_spec if isinstance(state.current_experiment_spec, dict) else {}
+        profile_id = str(spec.get("equipment_profile_id") or DEFAULT_UTM_PROFILE_ID).strip()
+        return EquipmentProfileRegistry.default().get(profile_id)
 
     async def _call_tool(self, ctx: AgentContext, tool: str, payload: dict[str, Any]) -> dict[str, Any]:
         return await asyncio.to_thread(ctx.tools.call, tool, payload)
@@ -2043,6 +2050,8 @@ class LabEquipmentAgent(BaseAgent):
         if "equipment.pyautogui.run" not in available_tools:
             return await self._legacy_utm(state, ctx)
 
+        profile = self._selected_profile(state)
+        runtime_mode = self._effective_runtime_mode(state)
         test_like = self._test_like_mode(state)
         timeout_s = 30.0 if test_like else None
         raw_plan: dict[str, Any] | None = None
@@ -2068,6 +2077,7 @@ class LabEquipmentAgent(BaseAgent):
 
         protocol_note, calls = self._normalize_plan(raw_plan or {}, state)
         base_payload = self._base_run_payload(state)
+        base_payload["equipment_profile_id"] = profile.profile_id
         tool_results: list[dict[str, Any]] = []
         source_stage_context = base_payload["source_stage_context"]
         program_catalog: set[str] = set()
@@ -2158,6 +2168,17 @@ class LabEquipmentAgent(BaseAgent):
                     merged["program_id"] = self._program_hint(state)
                 if "sequence" not in merged and self._sequence_hint(state):
                     merged["sequence"] = self._sequence_hint(state)
+                requested_program = str(merged.get("program_id") or "").strip()
+                if not requested_program or requested_program.startswith("utm_"):
+                    contract = build_execution_contract(
+                        profile,
+                        runtime_mode=runtime_mode,
+                        bridge_config={},
+                        program_id=requested_program,
+                    )
+                    merged["program_id"] = contract.program_id
+                    merged["simulate_utm_protocol"] = contract.simulate_utm_protocol
+                    merged["equipment_profile"] = contract.to_safe_dict()
                 merged["_event_callback"] = emit_tool_event
                 if program_catalog and str(merged.get("program_id") or ""):
                     program_id = str(merged.get("program_id"))
@@ -2234,6 +2255,7 @@ class LabEquipmentAgent(BaseAgent):
             summary="Equipment PyAutoGUI workflow verified" if package["verified"] else "Equipment PyAutoGUI workflow blocked before analysis handoff",
             data={
                 "equipment_result": package["equipment_result"],
+                "equipment_profile": profile.to_safe_dict(),
                 "protocol_note": protocol_note,
                 "equipment_bridge": "windows_pyautogui",
                 "tool_results": tool_results,

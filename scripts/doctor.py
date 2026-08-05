@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -276,6 +277,30 @@ class Doctor:
         backend = models.get("backend", {}) if isinstance(models, dict) else {}
         self.ok("model backend config", f"default={backend.get('default')} fallback={backend.get('fallback')}")
 
+    def check_local_pyautogui(self) -> None:
+        """Check localhost bridge dependencies without moving the pointer."""
+        modules = {name: importlib.util.find_spec(name) is not None for name in ("pyautogui", "Xlib")}
+        if all(modules.values()):
+            self.ok("local PyAutoGUI Python", "PyAutoGUI and python3-xlib are installed")
+        else:
+            missing = [name for name, available in modules.items() if not available]
+            self.warn(
+                "local PyAutoGUI Python",
+                "missing: " + ", ".join(missing),
+                "Run pip install -r requirements.txt.",
+            )
+        if not sys.platform.startswith("linux"):
+            return
+        missing_tools = [name for name in ("scrot", "wmctrl", "xdotool") if shutil.which(name) is None]
+        if missing_tools:
+            self.warn(
+                "local PyAutoGUI X11 tools",
+                "missing: " + ", ".join(missing_tools),
+                "Run bash install/bootstrap_linux.sh --with-local-pyautogui.",
+            )
+        else:
+            self.ok("local PyAutoGUI X11 tools", "scrot, wmctrl, and xdotool are installed")
+
     def check_secrets_policy(self) -> None:
         git = shutil.which("git")
         if not git:
@@ -312,6 +337,7 @@ class Doctor:
             self.check_lerobot()
             self.check_realsense()
             self.check_models()
+            self.check_local_pyautogui()
         return self.results
 
     def exit_code(self) -> int:

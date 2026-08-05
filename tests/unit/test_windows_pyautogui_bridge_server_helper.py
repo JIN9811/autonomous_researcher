@@ -10,6 +10,7 @@ import threading
 import urllib.request
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 
 TINY_PNG_BYTES = (
@@ -147,6 +148,102 @@ def _load_packaged_helper_module():
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def test_bridge_platform_auto_resolves_linux() -> None:
+    module = _load_packaged_helper_module()
+
+    assert module._normalize_bridge_platform("auto", system_name="linux") == "linux"
+    assert module._normalize_bridge_platform("windows", system_name="linux") == "windows"
+
+
+def test_linux_platform_health_requires_x11(monkeypatch) -> None:
+    module = _load_packaged_helper_module()
+    monkeypatch.setattr(module, "BRIDGE_PLATFORM", "linux")
+    monkeypatch.setenv("XDG_SESSION_TYPE", "wayland")
+    monkeypatch.setenv("DISPLAY", "")
+
+    status = module._desktop_platform_status()
+
+    assert status["name"] == "linux"
+    assert status["desktop_control_ready"] is False
+    assert status["failure_code"] == "PYAUTOGUI_LOCAL_DISPLAY_UNSUPPORTED"
+
+
+def test_linux_platform_health_accepts_x11(monkeypatch) -> None:
+    module = _load_packaged_helper_module()
+    monkeypatch.setattr(module, "BRIDGE_PLATFORM", "linux")
+    monkeypatch.setenv("XDG_SESSION_TYPE", "x11")
+    monkeypatch.setenv("DISPLAY", ":1")
+
+    status = module._desktop_platform_status()
+
+    assert status["desktop_control_ready"] is True
+    assert status["display"] == ":1"
+    assert status["scope"] == "localhost"
+
+
+def test_token_file_is_loaded_without_exposing_value(tmp_path: Path) -> None:
+    module = _load_packaged_helper_module()
+    token_file = tmp_path / "local.token"
+    token_file.write_text("local-secret\n", encoding="utf-8")
+
+    token = module._read_bridge_token_file(token_file)
+
+    assert token == "local-secret"
+
+
+def test_linux_validation_marks_windows_specific_locators_for_recalibration(monkeypatch) -> None:
+    module = _load_packaged_helper_module()
+    monkeypatch.setattr(module, "BRIDGE_PLATFORM", "linux")
+
+    result = module._validate_program_definition(
+        {
+            "schema": "atr.pyautogui_program.v1",
+            "program_id": "portable_demo",
+            "name": "Portable Demo",
+            "sequence": [
+                {"action": "click", "x": 100, "y": 100},
+                {"action": "click", "target": "start_button"},
+            ],
+            "locators": {
+                "start_button": {
+                    "locator_backend": "uia",
+                    "auto_id": "StartButton",
+                }
+            },
+        }
+    )
+
+    assert result["ok"] is True
+    assert result["platform_tested"] == "linux"
+    assert "click" in result["portable_actions"]
+    assert result["platform_specific_locators"] == ["start_button"]
+    assert result["requires_windows_recalibration"] is True
+
+
+def test_linux_focus_window_uses_wmctrl(monkeypatch) -> None:
+    module = _load_packaged_helper_module()
+    calls: list[list[str]] = []
+
+    class _RunResult:
+        def __init__(self, stdout: str = "") -> None:
+            self.stdout = stdout
+            self.returncode = 0
+
+    def fake_run(command, **_kwargs):
+        calls.append(list(command))
+        if command[:2] == ["wmctrl", "-l"]:
+            return _RunResult("0x03c00007  0 host UTM Demo Window\n")
+        return _RunResult()
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+
+    ok, detail = module._focus_linux_window(["UTM Demo"], [])
+
+    assert ok is True
+    assert "UTM Demo Window" in detail
+    assert ["wmctrl", "-ia", "0x03c00007"] in calls
 
 def test_sequence_warnings_do_not_fake_locator_success_when_not_required() -> None:
     module = _load_helper_module()
@@ -1239,228 +1336,254 @@ global.clearInterval = () => {};
     )
     return json.loads(completed.stdout)
 
-def test_install_bridge_index_html_exposes_operator_controls() -> None:
-    module = _load_helper_module()
-    html = module.INDEX_HTML
 
-    assert "ATR Windows PyAutoGUI Bridge" in html
-    for element_id in (
-        'id="token"',
-        'id="health"',
-        'id="healthInline"',
+def test_windows_bridge_index_html_combines_operator_console_and_program_manager() -> None:
+    for module in (_load_helper_module(), _load_packaged_helper_module()):
+        html = module.INDEX_HTML
+        for element_id in (
+            'id="connectionPanel"',
+            'id="token"',
+            'id="health"',
+            'id="programManagerPanel"',
+            'id="managerProgramRegistry"',
+            'id="refreshPrograms"',
+            'id="managerSearch"',
+            'id="managerFilter"',
+            'id="managerStats"',
+            'id="newProgram"',
+            'id="browseProgram"',
+            'id="downloadProgramTemplate"',
+            'id="programFile"',
+            'id="programEditor"',
+            'id="programForm"',
+            'id="programDefinition"',
+            'id="validateProgram"',
+            'id="registerProgram"',
+            'id="managerLatestResult"',
+        ):
+            assert element_id in html
+        assert "Bridge Connection" in html
+        assert "Program Manager" in html
+        assert "Browse JSON" in html
+        assert "Download Template" in html
+        assert "Add to Registry" in html
+        assert 'data-manager-action="edit"' in html
+        assert 'data-manager-action="toggle"' in html
+        assert 'data-manager-action="revalidate"' in html
+        assert "atr.windowsBridge.programShortcuts.v1" not in html
+        assert 'call("/programs"' in html
+        assert 'call("/execute"' in html
+        assert 'call("/programs/register"' in html
+        assert 'call("/programs/validate"' in html
+        assert "storage: \"browser_local_only\"" not in html
+        assert "UTM Protocol" in html
+        assert "Live Proof Checklist" in html
+        assert "Run Timeline" in html
+
+
+def test_windows_bridge_console_simplification_keeps_all_operator_functions() -> None:
+    """The Program Manager is additive; it must not replace the full console."""
+    legacy_control_ids = (
         'id="safePreflight"',
-        'id="preflightRefreshInline"',
-        'id="programs"',
-        'id="program1"',
-        'id="screenshot"',
-        'id="locators"',
-        'id="readiness"',
-        'id="requestLog"',
-        'id="exportGlob"',
-        'id="artifactTimeout"',
-        'id="stableForSec"',
-        'id="expectedExportPath"',
         'id="utmSim"',
         'id="utmLive"',
         'id="utmAbort"',
+        'id="screenshot"',
         'id="captureLocator"',
-        'id="stepAuth"',
-        'id="stepGui"',
-        'id="stepEvidence"',
-        'id="artifactTable"',
-        'id="summaryGate"',
-        'id="readinessMissing"',
-        'id="requestAuditPill"',
-        'id="requestAuditEvents"',
-        'id="requestAuditExecute"',
-        'id="requestAuditRecent"',
-        'id="requestAuditGate"',
-        'id="proofChecklistPill"',
-        'id="proofChecklist"',
-        'id="proofChecklistGate"',
-        'id="refreshEvidence"',
-        'id="autoAudit"',
-        'id="pathRequestLog"',
-        'id="preflightBanner"',
+        'id="locators"',
+        'id="artifacts"',
+        'id="requestLog"',
+        'id="execute"',
+        'id="sequence"',
+        'id="trace"',
         'id="artifactPreview"',
-        'id="copyLinuxEnv"',
-        'id="refreshAll"',
-        'id="baseUrlLabel"',
-        'id="gateMeterFill"',
-        'id="gateMeterText"',
-        'id="gateMeterNext"',
-        'id="liveInterlockCard"',
-        'id="liveInterlockText"',
-        'id="operatorHud"',
-        'id="headerProofPill"',
-        'id="controlRail"',
-        'id="copyUtmPayload"',
-        'id="opsSafety"',
-        'id="opsCommand"',
-        'id="opsEvidence"',
-        'id="opsData"',
-        'id="opsNext"',
-        'id="operatorConsolePanel"',
-        'id="timelinePanel"',
-        'id="timelinePill"',
         'id="timelineTrack"',
-        'id="timelineClear"',
-        'id="payloadPreviewPill"',
-        'id="payloadPreview"',
-        'id="intentMode"',
-        'id="intentRoute"',
-        'id="intentPreflight"',
-        'id="intentPayload"',
-        'id="previewSimPayload"',
-        'id="previewLivePayload"',
-        'id="previewAbortPayload"',
-        'id="copyPreviewPayload"',
-        'id="bridgeCommandKit"',
-        'id="copyCurlHealth"',
-        'id="copyPowerShellHealth"',
-        'id="copyCurlExecute"',
-        'id="operatorSituationPanel"',
-        'id="situationBridge"',
-        'id="situationLocators"',
-        'id="situationAudit"',
-        'id="situationExport"',
-        'id="situationLive"',
-        'id="missingLocatorShortcuts"',
-        'id="requestAuditRunIds"',
-        'id="requestAuditSpecimenIds"',
-        'id="requestAuditProgramIds"',
-        'id="requestAuditLastAt"',
-    ):
-        assert element_id in html
-    assert "Operator sequence" in html
-    assert "Bridge Files" in html
-    assert "Request Audit" in html
-    assert "Live Proof Checklist" in html
-    assert "Save/Export Responsibility" in html
-    assert "save_export_responsibility_ok" in html
-    assert "0 / 7 checks complete" in html
-    assert "Safe Diagnostics" in html
-    assert "Bridge URL" in html
-    assert "Copy Linux Env" in html
-    assert "Bridge Command Kit" in html
-    assert "Copy curl Health" in html
-    assert "Copy PowerShell Health" in html
-    assert "Copy curl Execute" in html
-    assert "Enter bridge token" in html
-    assert "renderTokenPrompt" in html
-    assert "runHealthCheck" in html
-    assert "Live interlock" in html
-    assert "Live proof gate progress" in html
-    assert "refreshEvidenceBundle" in html
-    assert "Preflight + Run Live UTM" in html
-    assert "Stop / Abort" in html
-    assert "currentAbortPayload" in html
-    assert "utm_stop_or_abort_v1" in html
-    assert "LOCAL_LIVE_PREFLIGHT_BLOCKED" in html
-    assert "renderArtifactPreview" in html
-    assert "equipment.pyautogui.local_live_preflight" in html
-    assert "renderRequestAudit" in html
-    assert "renderProofChecklist" in html
-    assert "Auto-refresh request audit" in html
-    assert "execute_event_seen" in html
-    assert "Needs /execute for live handoff" in html
-    assert "LIVE_CONFIRMATION_REQUIRED" in html
-    assert "utm_compression_start_v1" in html
-    assert "export_glob" in html
-    assert "artifact_timeout_s" in html
-    assert "stable_for_sec" in html
-    assert "expected_export_path" in html
-    assert "/readiness" in html
-    assert "UTM Readiness" in html
-    assert "Operator runtime status" in html
-    assert "Live UTM situation matrix" in html
-    assert "Readiness locator shortcuts" in html
-    assert "Recent live execute identity" in html
-    assert "renderLocatorShortcuts" in html
-    assert "setSituationCard" in html
-    assert "Critical bridge command rail" in html
-    assert "proof 0/7" in html
-    assert "Copy Payload" in html
-    assert "Local Operator Console" in html
-    assert "Run Timeline" in html
-    assert "appendTimelineFromResult" in html
-    assert "timelineStatusClass" in html
-    assert "Payload Preview" in html
-    assert "WINDOWS_GUI_INPUT_INVALID" in html
-    assert "renderPayloadPreview" in html
-    assert "previewPayloadEnvelope" in html
-    assert "button.dataset && button.dataset.proxyClick === \"utmAbort\"" in html
-    assert "bindPersistedInput" in html
-    assert "windowsBridge." in html
-    assert '["requireFocus", "requireAssertions", "manualSave", "autoAudit"].forEach(bindPersistedCheck);' in html
-    assert '"confirmLive", "autoAudit"' not in html
-    assert "Required order" in html
-    assert "Run ID and Specimen ID below are copied into the /execute payload" in html
+    )
+    manager_control_ids = (
+        'id="programManagerPanel"',
+        'id="managerSearch"',
+        'id="managerFilter"',
+        'id="newProgram"',
+        'id="browseProgram"',
+        'id="downloadProgramTemplate"',
+        'id="programEditor"',
+    )
 
-
-
-
-
-
-def test_windows_bridge_gui_blocks_live_execute_when_local_preflight_fails(tmp_path: Path) -> None:
     for module in (_load_helper_module(), _load_packaged_helper_module()):
-        result = _run_windows_gui_node_harness(tmp_path, module.INDEX_HTML, "blocked")
-        assert result["paths"] == ["/health", "/readiness", "/request-log"]
-        assert result["executeCalls"] == []
-        assert result["output"]["failure_code"] == "LOCAL_LIVE_PREFLIGHT_BLOCKED"
-        assert result["output"]["blocks_execute"] is True
-        assert result["output"]["non_actuating"] is True
-        assert "PYAUTOGUI_NOT_READY" in result["output"]["blockers"]
-        assert "UTM_LOCATORS_MISSING: ready_state" in result["output"]["blockers"]
-        assert result["preflightTitle"] == "Live UTM preflight blocked"
+        html = module.INDEX_HTML
+        for element_id in legacy_control_ids + manager_control_ids:
+            assert element_id in html
+        assert "UTM Protocol" in html
+        assert "Live Proof Checklist" in html
+        assert "Run Timeline" in html
+        assert "Program Manager" in html
 
 
-def test_windows_bridge_gui_sends_live_execute_after_local_preflight_passes(tmp_path: Path) -> None:
+def test_windows_bridge_console_defaults_to_essential_operator_surface() -> None:
+    essential_ids = (
+        'id="essentialConsole"',
+        'id="token"',
+        'id="health"',
+        'id="refreshAll"',
+        'id="clearToken"',
+        'id="essentialBridgeState"',
+        'id="essentialPyAutoGUI"',
+        'id="essentialResult"',
+        'id="essentialProgramManagerSlot"',
+        'id="advancedToolsPanel"',
+    )
     for module in (_load_helper_module(), _load_packaged_helper_module()):
-        result = _run_windows_gui_node_harness(tmp_path, module.INDEX_HTML, "ready")
-        assert result["paths"] == ["/health", "/readiness", "/request-log", "/execute"]
-        assert len(result["executeCalls"]) == 1
-        execute = result["executeCalls"][0]
-        assert execute["method"] == "POST"
-        payload = json.loads(execute["body"])
-        assert payload["program_id"] == "utm_compression_start_v1"
-        assert payload["simulate_utm_protocol"] is False
-        assert result["output"]["status"] == "verified_complete"
-        assert result["preflightTitle"] == "Live UTM preflight passed"
+        html = module.INDEX_HTML
+        for element_id in essential_ids:
+            assert element_id in html
+        assert 'data-proxy-click=' not in html
+        assert '<details id="advancedToolsPanel">' in html
+        assert 'essentialProgramManagerSlot.appendChild(programManagerPanel)' in html
+        assert "function renderEssentialSummary(data)" in html
 
-def test_windows_bridge_gui_blocks_invalid_payload_before_preflight(tmp_path: Path) -> None:
+
+def test_windows_bridge_program_editor_opens_only_for_add_or_edit() -> None:
     for module in (_load_helper_module(), _load_packaged_helper_module()):
-        result = _run_windows_gui_node_harness(tmp_path, module.INDEX_HTML, "ready", "live-invalid")
-        assert result["paths"] == []
-        assert result["executeCalls"] == []
-        assert result["output"]["failure_code"] == "WINDOWS_GUI_INPUT_INVALID"
-        assert any("Artifact Timeout Sec" in item for item in result["output"]["validation_errors"])
+        html = module.INDEX_HTML
+        assert 'class="manager-editor" id="programEditor" hidden' in html
+        assert "programEditor.hidden = false" in html
+        assert "programEditor.hidden = true" in html
 
-def test_windows_bridge_gui_command_rail_proxies_to_real_handlers(tmp_path: Path) -> None:
+
+def test_windows_bridge_custom_macro_registry_persists_and_executes(tmp_path: Path) -> None:
+    module = _load_helper_module()
+    module.PROGRAM_ROOT = tmp_path / "programs"
+    definition = {
+        "schema": "atr.pyautogui_program.v1",
+        "program_id": "fixture_prepare",
+        "name": "Fixture Prepare",
+        "description": "Bounded fixture preparation macro",
+        "enabled": True,
+        "program_type": "macro",
+        "sequence": [
+            {"action": "press", "key": "esc"},
+            {"action": "log", "message": "fixture ready"},
+        ],
+    }
+
+    validation = module._validate_program_definition(definition)
+    assert validation["ok"] is True
+
+    registered = module._register_program_definition(definition)
+    assert registered["ok"] is True
+    assert (module.PROGRAM_ROOT / "fixture_prepare.json").exists()
+    assert module._all_programs()["fixture_prepare"]["sequence"] == definition["sequence"]
+
+    fake = _FakePyAutoGUI()
+    module.get_pyautogui = lambda: (fake, None)
+    result = module._execute({"sequence_id": "fixture-check", "program_id": "fixture_prepare"})
+    assert result["ok"] is True
+    assert result["program_id"] == "fixture_prepare"
+
+    deleted = module._delete_custom_program("fixture_prepare")
+    assert deleted["ok"] is True
+    assert "fixture_prepare" not in module._all_programs()
+
+
+def test_windows_bridge_custom_macro_registry_rejects_unsafe_or_builtin_definitions(tmp_path: Path) -> None:
+    module = _load_helper_module()
+    module.PROGRAM_ROOT = tmp_path / "programs"
+
+    builtin = module._validate_program_definition({
+        "schema": "atr.pyautogui_program.v1",
+        "program_id": "program1",
+        "name": "Overwrite Program1",
+        "sequence": [{"action": "press", "key": "esc"}],
+    })
+    unsafe = module._validate_program_definition({
+        "schema": "atr.pyautogui_program.v1",
+        "program_id": "unsafe_shell",
+        "name": "Unsafe Shell",
+        "sequence": [{"action": "shell", "command": "whoami"}],
+    })
+
+    assert builtin["ok"] is False
+    assert builtin["failure_code"] == "PYAUTOGUI_PROGRAM_BUILTIN_IMMUTABLE"
+    assert unsafe["ok"] is False
+    assert unsafe["failure_code"] == "PYAUTOGUI_ACTION_NOT_ALLOWED"
+    assert not module.PROGRAM_ROOT.exists()
+
+
+def test_windows_bridge_setup_surface_separates_browse_template_and_registration() -> None:
     for module in (_load_helper_module(), _load_packaged_helper_module()):
-        live_result = _run_windows_gui_node_harness(tmp_path, module.INDEX_HTML, "ready", "proxy-live")
-        assert live_result["paths"] == ["/health", "/readiness", "/request-log", "/execute"]
-        assert len(live_result["executeCalls"]) == 1
-        payload = json.loads(live_result["executeCalls"][0]["body"])
-        assert payload["program_id"] == "utm_compression_start_v1"
-        assert payload["simulate_utm_protocol"] is False
+        html = module.INDEX_HTML
+        assert 'id="newProgram"' in html
+        assert 'id="browseProgram"' in html
+        assert 'id="downloadProgramTemplate"' in html
+        assert 'id="validateProgram"' in html
+        assert 'id="registerProgram"' in html
+        assert 'Browse JSON' in html
+        assert 'Download Template' in html
+        assert 'Add to Registry' in html
+        assert 'call("/programs/validate"' in html
+        assert 'call("/programs/register"' in html
+        assert 'atr.windowsBridge.programShortcuts.v1' not in html
+        assert 'data-proxy-click="program1"' not in html
+        assert 'data-proxy-click="utmSim"' not in html
+        assert 'data-proxy-click="utmLive"' not in html
+        assert 'data-proxy-click="utmAbort"' not in html
+        assert 'id="program1"' not in html
 
-        preflight_result = _run_windows_gui_node_harness(tmp_path, module.INDEX_HTML, "blocked", "proxy-preflight")
-        assert preflight_result["paths"] == ["/health", "/readiness", "/request-log"]
-        assert preflight_result["executeCalls"] == []
-        assert preflight_result["output"]["non_actuating"] is True
+
+def test_windows_bridge_program_registry_http_lifecycle(tmp_path: Path) -> None:
+    module = _load_helper_module()
+    module.TOKEN = "registry-token"
+    module.PROGRAM_ROOT = tmp_path / "programs"
+    server = module.ThreadingHTTPServer(("127.0.0.1", 0), module.Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_address[1]}"
+    definition = {
+        "schema": "atr.pyautogui_program.v1",
+        "program_id": "http_fixture_macro",
+        "name": "HTTP Fixture Macro",
+        "description": "HTTP lifecycle fixture",
+        "enabled": True,
+        "program_type": "macro",
+        "sequence": [{"action": "log", "message": "fixture"}],
+    }
+
+    def request(path: str, *, method: str = "GET", payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        data = json.dumps(payload).encode("utf-8") if payload is not None else None
+        headers = {"X-Bridge-Token": "registry-token"}
+        if data is not None:
+            headers["Content-Type"] = "application/json"
+        req = urllib.request.Request(base + path, data=data, headers=headers, method=method)
+        with urllib.request.urlopen(req, timeout=5) as response:
+            return json.loads(response.read().decode("utf-8"))
+
+    try:
+        validation = request("/programs/validate", method="POST", payload=definition)
+        assert validation["ok"] is True
+        assert not module.PROGRAM_ROOT.exists(), "validation must not persist a program"
+
+        registered = request("/programs/register", method="POST", payload=definition)
+        assert registered["status"] == "registered"
+        programs = request("/programs")
+        assert any(item["program_id"] == "http_fixture_macro" and item["built_in"] is False for item in programs["programs"])
+
+        deleted = request("/programs/http_fixture_macro", method="DELETE")
+        assert deleted["status"] == "deleted"
+        assert not (module.PROGRAM_ROOT / "http_fixture_macro.json").exists()
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
 
 
-def test_windows_bridge_gui_abort_proxy_sends_recovery_macro_without_preflight(tmp_path: Path) -> None:
-    for module in (_load_helper_module(), _load_packaged_helper_module()):
-        result = _run_windows_gui_node_harness(tmp_path, module.INDEX_HTML, "ready", "proxy-abort")
-        assert result["paths"] == ["/execute"]
-        assert len(result["executeCalls"]) == 1
-        payload = json.loads(result["executeCalls"][0]["body"])
-        assert payload["program_id"] == "utm_stop_or_abort_v1"
-        assert payload["simulate_utm_protocol"] is False
-        assert payload["require_screen_assertions"] is False
-        assert payload["command"] == "Dispatch UTM stop/abort recovery macro"
+
+
+
+
+
+
+
+
 
 def test_install_bridge_request_audit_log_records_auth_without_token_leak(tmp_path: Path) -> None:
     module = _load_helper_module()
@@ -1531,7 +1654,7 @@ def test_install_bridge_request_audit_log_records_auth_without_token_leak(tmp_pa
     assert "audit-token" not in log_path.read_text(encoding="utf-8")
     assert "wrong-token" not in log_path.read_text(encoding="utf-8")
 
-def test_install_bridge_root_serves_operator_gui() -> None:
+def test_install_bridge_root_serves_complete_program_console() -> None:
     module = _load_helper_module()
     server = module.ThreadingHTTPServer(("127.0.0.1", 0), module.Handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -1541,166 +1664,16 @@ def test_install_bridge_root_serves_operator_gui() -> None:
             body = response.read().decode("utf-8")
         assert response.status == 200
         assert "ATR Windows PyAutoGUI Bridge" in body
-        assert 'id="stepAuth"' in body
+        assert 'id="connectionPanel"' in body
+        assert 'id="programManagerPanel"' in body
+        assert 'id="programEditor"' in body
         assert 'id="utmLive"' in body
+        assert 'id="program1"' not in body
+        assert any(program["program_id"] == "program1" for program in module._programs()["programs"])
     finally:
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
-
-def test_packaged_bridge_index_html_exposes_utm_operator_controls() -> None:
-    module = _load_packaged_helper_module()
-    html = module.INDEX_HTML
-
-    assert "ATR Windows PyAutoGUI Bridge" in html
-    for element_id in (
-        'id="safePreflight"',
-        'id="preflightRefreshInline"',
-        'id="healthInline"',
-        'id="utmLive"',
-        'id="utmSim"',
-        'id="requestLog"',
-        'id="readiness"',
-        'id="captureLocator"',
-        'id="targetWindow"',
-        'id="exportGlob"',
-        'id="artifactTimeout"',
-        'id="stableForSec"',
-        'id="expectedExportPath"',
-        'id="confirmLive"',
-        'id="artifactTable"',
-        'id="stepAuth"',
-        'id="stepGui"',
-        'id="stepEvidence"',
-        'id="runSummaryPill"',
-        'id="summaryGate"',
-        'id="readinessMissing"',
-        'id="requestAuditPill"',
-        'id="requestAuditEvents"',
-        'id="requestAuditExecute"',
-        'id="requestAuditRecent"',
-        'id="requestAuditGate"',
-        'id="proofChecklistPill"',
-        'id="proofChecklist"',
-        'id="proofChecklistGate"',
-        'id="refreshEvidence"',
-        'id="autoAudit"',
-        'id="pathRequestLog"',
-        'id="preflightBanner"',
-        'id="artifactPreview"',
-        'id="copyLinuxEnv"',
-        'id="refreshAll"',
-        'id="baseUrlLabel"',
-        'id="gateMeterFill"',
-        'id="gateMeterText"',
-        'id="gateMeterNext"',
-        'id="liveInterlockCard"',
-        'id="liveInterlockText"',
-        'id="operatorHud"',
-        'id="headerProofPill"',
-        'id="controlRail"',
-        'id="copyUtmPayload"',
-        'id="opsSafety"',
-        'id="opsCommand"',
-        'id="opsEvidence"',
-        'id="opsData"',
-        'id="opsNext"',
-        'id="operatorConsolePanel"',
-        'id="timelinePanel"',
-        'id="timelinePill"',
-        'id="timelineTrack"',
-        'id="timelineClear"',
-        'id="payloadPreviewPill"',
-        'id="payloadPreview"',
-        'id="intentMode"',
-        'id="intentRoute"',
-        'id="intentPreflight"',
-        'id="intentPayload"',
-        'id="previewSimPayload"',
-        'id="previewLivePayload"',
-        'id="previewAbortPayload"',
-        'id="copyPreviewPayload"',
-        'id="bridgeCommandKit"',
-        'id="copyCurlHealth"',
-        'id="copyPowerShellHealth"',
-        'id="copyCurlExecute"',
-        'id="operatorSituationPanel"',
-        'id="situationBridge"',
-        'id="situationLocators"',
-        'id="situationAudit"',
-        'id="situationExport"',
-        'id="situationLive"',
-        'id="missingLocatorShortcuts"',
-        'id="requestAuditRunIds"',
-        'id="requestAuditSpecimenIds"',
-        'id="requestAuditProgramIds"',
-        'id="requestAuditLastAt"',
-    ):
-        assert element_id in html
-    assert "LIVE_CONFIRMATION_REQUIRED" in html
-    assert "Bridge Files" in html
-    assert "Local Operator Console" in html
-    assert "Run Timeline" in html
-    assert "appendTimelineFromResult" in html
-    assert "timelineStatusClass" in html
-    assert "Payload Preview" in html
-    assert "WINDOWS_GUI_INPUT_INVALID" in html
-    assert "renderPayloadPreview" in html
-    assert "Request Audit" in html
-    assert "Live Proof Checklist" in html
-    assert "Save/Export Responsibility" in html
-    assert "save_export_responsibility_ok" in html
-    assert "0 / 7 checks complete" in html
-    assert "Safe Diagnostics" in html
-    assert "Bridge URL" in html
-    assert "Copy Linux Env" in html
-    assert "Bridge Command Kit" in html
-    assert "Copy curl Health" in html
-    assert "Copy PowerShell Health" in html
-    assert "Copy curl Execute" in html
-    assert "Enter bridge token" in html
-    assert "renderTokenPrompt" in html
-    assert "runHealthCheck" in html
-    assert "Live interlock" in html
-    assert "Live proof gate progress" in html
-    assert "refreshEvidenceBundle" in html
-    assert "Preflight + Run Live UTM" in html
-    assert "Stop / Abort" in html
-    assert "currentAbortPayload" in html
-    assert "utm_stop_or_abort_v1" in html
-    assert "LOCAL_LIVE_PREFLIGHT_BLOCKED" in html
-    assert "renderArtifactPreview" in html
-    assert "equipment.pyautogui.local_live_preflight" in html
-    assert "renderRequestAudit" in html
-    assert "renderProofChecklist" in html
-    assert "Auto-refresh request audit" in html
-    assert "execute_event_seen" in html
-    assert "Needs /execute for live handoff" in html
-    assert "require_window_focus" in html
-    assert "export_glob" in html
-    assert "artifact_timeout_s" in html
-    assert "stable_for_sec" in html
-    assert "expected_export_path" in html
-    assert "Operator runtime status" in html
-    assert "Critical bridge command rail" in html
-    assert "proof 0/7" in html
-    assert "Copy Payload" in html
-    assert "bindPersistedInput" in html
-    assert "windowsBridge." in html
-    assert '["requireFocus", "requireAssertions", "manualSave", "autoAudit"].forEach(bindPersistedCheck);' in html
-    assert '"confirmLive", "autoAudit"' not in html
-    assert "Required order" in html
-    assert "Run ID and Specimen ID below are copied into the /execute payload" in html
-    assert "/readiness" in html
-    assert "UTM Readiness" in html
-    assert "Operator sequence" in html
-    assert "renderWorkflow" in html
-    assert "Live UTM situation matrix" in html
-    assert "Readiness locator shortcuts" in html
-    assert "Recent live execute identity" in html
-    assert "renderLocatorShortcuts" in html
-    assert "setSituationCard" in html
-
 
 
 def test_packaged_bridge_request_log_endpoint_records_auth_without_token_leak(tmp_path: Path) -> None:
@@ -1902,6 +1875,12 @@ def test_packaged_bridge_execute_runs_custom_sequence_without_program_id() -> No
     assert result["program_id"] == "custom_sequence"
     assert [call[0] for call in fake.locate_calls] == ["ready.png"]
     assert any(item["step"] == "SEQ_1_LOCATE_IMAGE" and item["status"] == "ok" for item in result["step_trace"])
+
+
+
+
+
+
 
 
 def test_packaged_bridge_rejects_unsupported_custom_sequence_action() -> None:

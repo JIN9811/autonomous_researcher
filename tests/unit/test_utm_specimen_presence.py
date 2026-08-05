@@ -9,7 +9,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-from utils.utm_specimen_presence import inspect_specimen_presence
+from utils.utm_specimen_presence import inspect_specimen_presence, inspect_specimen_presence_path
 
 
 def _data_url(image: np.ndarray) -> str:
@@ -58,3 +58,63 @@ def test_frame_without_red_specimen_is_recorded_but_not_confirmed(tmp_path: Path
     assert Path(result["raw_frame_path"]).is_file()
     assert Path(result["annotated_frame_path"]).is_file()
     assert Path(result["evidence_path"]).is_file()
+
+
+def test_vivid_red_specimen_is_selected_over_larger_red_brown_table(tmp_path: Path) -> None:
+    image = np.full((120, 180, 3), 190, dtype=np.uint8)
+    image[75:120, :] = [58, 39, 30]
+    image[30:70, 78:108] = [120, 25, 20]
+
+    result = inspect_specimen_presence(
+        _data_url(image),
+        output_dir=tmp_path,
+        specimen_id="specimen-on-red-brown-table",
+        frame_id="utm-table-frame",
+        min_area_px=200,
+    )
+
+    assert result["detected"] is True
+    assert 75 <= result["center_px"][0] <= 110
+    assert 30 <= result["center_px"][1] <= 70
+    assert result["bbox_xyxy"][3] < 75
+
+
+def test_path_detector_limits_active_cam_detection_to_workspace_roi(tmp_path: Path) -> None:
+    image = np.full((480, 640, 3), 205, dtype=np.uint8)
+    image[90:170, 360:430] = [210, 25, 30]
+    image[350:470, 60:240] = [225, 20, 25]
+    frame_path = tmp_path / "active-cam-positive.png"
+    Image.fromarray(image, mode="RGB").save(frame_path)
+
+    result = inspect_specimen_presence_path(
+        frame_path,
+        output_dir=tmp_path / "evidence",
+        specimen_id="specimen-1",
+        frame_id="active-cam-positive",
+        roi_normalized=(0.18, 0.0, 0.84, 0.62),
+    )
+
+    assert result["detected"] is True
+    assert result["bbox_xyxy"] == [360, 90, 430, 170]
+    assert 394 <= result["center_px"][0] <= 395
+    assert result["center_px"][1] == 130
+    assert Path(result["annotated_frame_path"]).is_file()
+
+
+def test_path_detector_ignores_red_robot_parts_outside_workspace_roi(tmp_path: Path) -> None:
+    image = np.full((480, 640, 3), 205, dtype=np.uint8)
+    image[350:470, 60:240] = [225, 20, 25]
+    image[340:475, 440:610] = [225, 20, 25]
+    frame_path = tmp_path / "active-cam-empty.png"
+    Image.fromarray(image, mode="RGB").save(frame_path)
+
+    result = inspect_specimen_presence_path(
+        frame_path,
+        output_dir=tmp_path / "evidence",
+        specimen_id="specimen-2",
+        frame_id="active-cam-empty",
+        roi_normalized=(0.18, 0.0, 0.84, 0.62),
+    )
+
+    assert result["detected"] is False
+    assert result["bbox_xyxy"] == []

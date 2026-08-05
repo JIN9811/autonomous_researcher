@@ -92,7 +92,7 @@ Windows에서 local AI 없이 쓰려면 `.env`에 `AUTONOMOUS_BACKEND=openai`와
 | LeRobot Workspace | `http://localhost:7860/lerobot` | `web/templates/lerobot.html`, `web/static/lerobot.js` | 포트 탐색, teleop, recording, training, visualization, rollout |
 | BO Workspace | `http://localhost:7860/bo` | `web/templates/bo.html`, `web/static/bo.js` | BO/MBO/LLM preference 전략, lightweight/BoTorch optional backend, reasoning audit, 후보 ranking/추천 |
 | CAE Workspace | `http://localhost:7860/cae` | `web/templates/cae.html`, `web/static/cae.js` | STL 기반 해석 설정, bottom fixed/top cyclic load, 결과 확인 |
-| Windows Equipment | `http://localhost:7860/equipment/windows` | `web/templates/windows_equipment.html`, `web/static/windows_equipment.js` | Windows PyAutoGUI bridge 검색, 저장, 테스트, 프로그램 실행 |
+| Lab Equipment Workspace | `http://localhost:7860/equipment/windows` | `web/templates/windows_equipment.html`, `web/static/windows_equipment.js` | 공통 장비 프로파일 선택, Windows 또는 localhost PyAutoGUI bridge 연결, UTM Test/Live 실행, 증거/Analysis handoff 확인 |
 | Self-Evolution Lab | `http://localhost:7860/evolution-lab` | `web/templates/evolution_lab.html`, `web/static/evolution_lab.js` | 프롬프트/모듈/그래프 변형, 검증, 승인, rollback |
 
 API 문서는 서버 실행 후 `http://localhost:7860/docs`에서 확인합니다.

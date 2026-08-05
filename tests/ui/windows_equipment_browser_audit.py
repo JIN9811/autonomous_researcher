@@ -138,6 +138,13 @@ def run_audit(base_url: str, out_dir: Path, *, width: int, height: int, geckodri
               "equipment-request-audit-card",
               "equipment-utm-proof-checklist",
               "equipment-result-log",
+              "equipment-local-bridge-panel",
+              "equipment-local-bridge-status",
+              "equipment-local-bridge-detail",
+              "btn-equipment-local-start",
+              "btn-equipment-local-stop",
+              "btn-equipment-local-health",
+              "btn-equipment-local-select",
               "btn-equipment-open-bridge-gui",
               "btn-equipment-live-preflight",
               "btn-equipment-live-validation",
@@ -191,6 +198,8 @@ def run_audit(base_url: str, out_dir: Path, *, width: int, height: int, geckodri
             "Build Proof Package",
             "Verify Proof Package",
             "Open Windows GUI",
+            "PyAutoGUI Bridge on This PC",
+            "Local Development Target",
             "Run UTM Stop/Abort",
             "UTM Proof Gates",
             "Windows Bridge",
@@ -216,6 +225,7 @@ def run_audit(base_url: str, out_dir: Path, *, width: int, height: int, geckodri
         if too_small:
             raise AssertionError(f"Operator command cards are too small: {too_small}")
         out_dir.mkdir(parents=True, exist_ok=True)
+        time.sleep(0.7)
         screenshot = out_dir / "windows_equipment_browser_audit.png"
         driver.save_screenshot(str(screenshot))
         result["screenshot"] = str(screenshot)

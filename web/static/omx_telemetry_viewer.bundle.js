@@ -27182,6 +27182,7 @@ void main() {
     latestTargetRad: {},
     latestMotionState: {},
     artifacts: {},
+    runtimeView: {},
     websocket: null,
     reconnectTimer: null,
     reconnectAttempt: 0,
@@ -28063,6 +28064,89 @@ void main() {
     node.textContent = text;
     return true;
   }
+  function runtimeDisplayValue(value, field = "") {
+    if (value === null || value === void 0 || value === "") return "-";
+    const number = Number(value);
+    if (field === "elapsed_s" && Number.isFinite(number)) return `${number.toFixed(1)} s`;
+    if (field === "duration_s" && Number.isFinite(number)) return `${number.toFixed(1)} s`;
+    if (field.endsWith("latency_s") && Number.isFinite(number)) return `${number.toFixed(2)} s`;
+    if (field === "effective_action_rate_hz" && Number.isFinite(number)) return `${number.toFixed(1)} Hz`;
+    if (typeof value === "boolean") return value ? "yes" : "no";
+    return String(value);
+  }
+  function applyRuntimeFields(section, values) {
+    const clean = values && typeof values === "object" ? values : {};
+    document.querySelectorAll(`[data-atr-runtime-field^="${section}."]`).forEach((node) => {
+      const key = String(node.dataset.atrRuntimeField || "").split(".").slice(1).join(".");
+      setNodeTextIfChanged(node, runtimeDisplayValue(clean[key], key));
+    });
+  }
+  function applyRuntimeExecution(execution) {
+    applyRuntimeFields("execution", execution);
+  }
+  function applyRuntimeInterlocks(interlocks) {
+    const gates = new Map((Array.isArray(interlocks) ? interlocks : []).map((gate) => [String(gate.id || ""), gate]));
+    document.querySelectorAll("[data-atr-runtime-gate]").forEach((row) => {
+      const gate = gates.get(String(row.dataset.atrRuntimeGate || "")) || {};
+      const status = String(gate.status || "unknown");
+      row.dataset.status = status;
+      setNodeTextIfChanged(row.querySelector("strong"), status);
+      setNodeTextIfChanged(row.querySelector("small"), gate.reason || gate.source || "");
+    });
+  }
+  function applyCompletionVerification(completion) {
+    const value = completion && typeof completion === "object" ? completion : {};
+    const steps = new Map((Array.isArray(value.steps) ? value.steps : []).map((step) => [String(step.id || ""), step]));
+    const currentStep = String(value.current_step || "");
+    document.querySelectorAll("[data-atr-runtime-step]").forEach((row) => {
+      const step = steps.get(String(row.dataset.atrRuntimeStep || "")) || {};
+      let status = String(step.status || "waiting");
+      if (status === "waiting" && row.dataset.atrRuntimeStep === currentStep) status = "active";
+      row.dataset.status = status;
+      setNodeTextIfChanged(row.querySelector("strong"), status);
+      const evidence = step.evidence_path || step.reason || (step.sequence ? `sequence ${step.sequence}` : "");
+      setNodeTextIfChanged(row.querySelector("small"), evidence);
+    });
+  }
+  function applyRunResult(result) {
+    const value = result && typeof result === "object" ? result : {};
+    document.querySelectorAll("[data-atr-runtime-result]").forEach((container) => {
+      const status = String(value.status || "not_started").toLowerCase();
+      container.dataset.status = status;
+      setNodeTextIfChanged(container.querySelector("[data-atr-runtime-result-status]"), status.replaceAll("_", " ").toUpperCase());
+      setNodeTextIfChanged(container.querySelector("[data-atr-runtime-result-terminal]"), value.terminal ? "terminal state" : "live state");
+    });
+    applyRuntimeFields("result", value);
+  }
+  function applyMetricDonut(kind, metric) {
+    const value = metric && typeof metric === "object" ? metric : {};
+    const attempts = Math.max(0, Number(value.attempt_count) || 0);
+    const rate = attempts > 0 && Number.isFinite(Number(value.success_rate)) ? Math.max(0, Math.min(1, Number(value.success_rate))) : 0;
+    document.querySelectorAll(`[data-atr-runtime-donut="${kind}"]`).forEach((donut) => {
+      donut.style.setProperty("--rate", `${rate * 100}%`);
+    });
+    document.querySelectorAll(`[data-atr-${kind}-success-rate]`).forEach((node) => {
+      setNodeTextIfChanged(node, attempts > 0 ? `${Math.round(rate * 100)}%` : "\u2014");
+    });
+    ["attempt_count", "completed_count", "success_count", "failed_count", "pending_count"].forEach((field) => {
+      const attribute = `[data-atr-${kind}-${field.replaceAll("_", "-")}]`;
+      document.querySelectorAll(attribute).forEach((node) => setNodeTextIfChanged(node, Math.max(0, Number(value[field]) || 0)));
+    });
+  }
+  function applyRunMetrics(metrics) {
+    const value = metrics && typeof metrics === "object" ? metrics : {};
+    applyMetricDonut("task", value.task_cycle);
+    applyMetricDonut("grasp", value.grasp);
+    applyRuntimeFields("metrics", value);
+  }
+  function applyRuntimeView(view) {
+    runtime.runtimeView = view && typeof view === "object" ? view : {};
+    applyRuntimeExecution(runtime.runtimeView.execution);
+    applyRuntimeInterlocks(runtime.runtimeView.interlocks);
+    applyCompletionVerification(runtime.runtimeView.completion);
+    applyRunResult(runtime.runtimeView.result);
+    applyRunMetrics(runtime.runtimeView.metrics);
+  }
   function normalizedMotionAxes(annotation) {
     const value = annotation && typeof annotation === "object" ? annotation : {};
     const legacy = MOTION_STATES.includes(value.state) ? value.state : "";
@@ -28221,7 +28305,9 @@ void main() {
     runtime.latestMotionState = {};
     runtime.stableYDomains = {};
     runtime.artifacts = {};
+    runtime.runtimeView = {};
     applyArtifacts({});
+    applyRuntimeView({});
     applyGraspOutcome(null);
     applyRobotMotionLabel(null);
     scheduleChartRender();
@@ -28254,6 +28340,7 @@ void main() {
     const sessionId = String(packet.session && packet.session.session_id || packet.session_id || "");
     if (sessionId && sessionId !== runtime.sessionId) resetSession(sessionId);
     runtime.status = String(packet.status || runtime.status || "idle");
+    if (packet.runtime_view) applyRuntimeView(packet.runtime_view);
     if (packet.type === "joint_history") {
       replaceJointHistory(packet.samples);
     } else if (packet.type === "joint_sample") {
@@ -28315,6 +28402,7 @@ void main() {
       const payload = await response.json();
       if (payload.packet) consumePacket(payload.packet);
       if (payload.artifacts) applyArtifacts(payload.artifacts);
+      if (payload.runtime_view) applyRuntimeView(payload.runtime_view);
       runtime.status = payload.status || runtime.status;
     } catch (_error) {
     }
@@ -28352,6 +28440,7 @@ void main() {
     bindJointSelectors();
     bindPoseFitButtons();
     applyArtifacts(runtime.artifacts);
+    applyRuntimeView(runtime.runtimeView);
     if (poseMount && poseMount !== runtime.poseMount) hydratePoseViewer(poseMount);
     else if (poseMount && runtime.viewer) runtime.viewer.start();
     if (chartMount && chartMount !== runtime.chartMount) hydrateTrackingChart(chartMount);

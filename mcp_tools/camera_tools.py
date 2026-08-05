@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+import time
 from typing import Any
 
 from mcp_tools.tool_registry import ToolRegistry
@@ -156,13 +157,37 @@ def _utm_specimen_presence_capture(
     allow_virtual = mode == "test" and bool(payload.get("allow_virtual_bridge_in_test", False))
     runtime_status: dict[str, Any] = {}
     frame: dict[str, Any] = {}
+    frame_attempt_count = 0
     if utm_runtime_manager is not None:
         runtime_status = dict(
             utm_runtime_manager.start()
             if bool(payload.get("auto_start_runtime", True))
             else utm_runtime_manager.status()
         )
-        frame = dict(utm_runtime_manager.frame())
+        try:
+            frame_attempts = max(1, min(int(payload.get("frame_attempts") or 1), 5))
+        except (TypeError, ValueError):
+            frame_attempts = 1
+        try:
+            frame_retry_delay_sec = max(0.0, min(float(payload.get("frame_retry_delay_sec") or 0.0), 2.0))
+        except (TypeError, ValueError):
+            frame_retry_delay_sec = 0.0
+        for attempt_index in range(frame_attempts):
+            frame_attempt_count = attempt_index + 1
+            raw_frame = getattr(utm_runtime_manager, "raw_frame", None)
+            if not callable(raw_frame):
+                frame = {
+                    "ok": False,
+                    "frame_available": False,
+                    "failure_code": "UTM_RAW_FRAME_CAPTURE_UNAVAILABLE",
+                    "message": "UTM runtime does not expose the required raw camera frame capture path.",
+                }
+                break
+            frame = dict(raw_frame())
+            if frame.get("ok") and frame.get("data_url"):
+                break
+            if attempt_index + 1 < frame_attempts and frame_retry_delay_sec:
+                time.sleep(frame_retry_delay_sec)
     else:
         runtime_status = {
             "ok": False,
@@ -186,11 +211,12 @@ def _utm_specimen_presence_capture(
                 "status": "frame_unavailable",
                 "detected": False,
                 "virtualized": False,
-                "source": "utm_ros_frame",
+                "source": "utm_ros_raw_frame",
                 "failure_code": failure_code,
                 "message": str(frame.get("message") or "UTM observation frame is unavailable."),
                 "runtime_status": runtime_status,
                 "frame_capture": frame,
+                "frame_attempt_count": frame_attempt_count,
                 "run_id": str(payload.get("run_id") or ""),
                 "session_id": str(payload.get("session_id") or ""),
                 "specimen_id": str(payload.get("specimen_id") or ""),
@@ -225,11 +251,12 @@ def _utm_specimen_presence_capture(
             "status": "inspection_failed",
             "detected": False,
             "virtualized": virtualized,
-            "source": "virtual_utm_bridge" if virtualized else "utm_ros_frame",
+            "source": "virtual_utm_bridge" if virtualized else "utm_ros_raw_frame",
             "failure_code": "UTM_SPECIMEN_PRESENCE_INSPECTION_FAILED",
             "message": f"{type(exc).__name__}: {exc}",
             "runtime_status": runtime_status,
             "frame_capture": {key: value for key, value in frame.items() if key != "data_url"},
+            "frame_attempt_count": frame_attempt_count,
             "run_id": str(payload.get("run_id") or ""),
             "session_id": str(payload.get("session_id") or ""),
             "specimen_id": str(payload.get("specimen_id") or ""),
@@ -239,10 +266,11 @@ def _utm_specimen_presence_capture(
             "tool": "vision.utm_specimen_presence.capture",
             "runtime_mode": mode,
             "virtualized": virtualized,
-            "source": "virtual_utm_bridge" if virtualized else "utm_ros_frame",
+            "source": "virtual_utm_bridge" if virtualized else "utm_ros_raw_frame",
             "topic": str(frame.get("topic") or ""),
             "runtime_status": runtime_status,
             "frame_capture": {key: value for key, value in frame.items() if key != "data_url"},
+            "frame_attempt_count": frame_attempt_count,
             "run_id": str(payload.get("run_id") or ""),
             "session_id": str(payload.get("session_id") or ""),
         }

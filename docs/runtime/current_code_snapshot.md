@@ -138,7 +138,7 @@ verification did not change the DSN/design-window layout contract.
 | Live planning APIs | `app/controller.py`, `app/main.py` | Chat/session transcript and orchestrator handoff |
 | Printer APIs/artifacts | `device_bridges/bambu_*`, `device_bridges/prusa_bridge.py`, `app/main.py` | 3DP provider fleet, Bambu/Prusa status, slicing, start, autoejection, proof, Bambu HTTP artifact fetch route |
 | LeRobot APIs | `device_bridges/lerobot_bridge.py`, `app/main.py` | ROBOTIS/LeRobot teleop, record, train, rollout, manipulation bridge, Isaac Sim mirror-state probe and mirror loop |
-| Windows equipment APIs | `device_bridges/windows_pyautogui_bridge.py`, `app/main.py` | Windows PyAutoGUI/UTM bridge discovery, proof, execution |
+| PyAutoGUI equipment APIs | `device_bridges/windows_pyautogui_bridge.py`, `utils/local_pyautogui_bridge.py`, `app/main.py` | Windows bridge discovery plus managed localhost development target, proof, execution |
 | BO/CAE APIs | `agents/bo_agent.py`, `device_bridges/cae_bridge.py` | Optimizer and analysis workspaces |
 | Knowledge/Evolution APIs | `knowledge/`, `self_evolution/`, `app/main.py` | Graphify/Neo4j optional memory and self-evolution tasks |
 
@@ -226,7 +226,7 @@ The FastAPI app currently serves these operator pages:
 | `/lerobot` | `web/templates/lerobot.html` | `web/static/lerobot.js` | ROBOTIS/LeRobot port, teleop, record, train, rollout, manipulation bridge |
 | `/bo` | `web/templates/bo.html` | `web/static/bo.js` | BO/MBO strategy, benchmark, candidate ranking |
 | `/cae` | `web/templates/cae.html` | `web/static/cae.js` | CAE/FEM analysis workspace |
-| `/equipment/windows` | `web/templates/windows_equipment.html` | `web/static/windows_equipment.js` | Windows PyAutoGUI/UTM bridge workspace |
+| `/equipment/windows` | `web/templates/windows_equipment.html` | `web/static/windows_equipment.js` | Windows/local PyAutoGUI target management and UTM bridge workspace |
 | `/evolution-lab` | `web/templates/evolution_lab.html` | `web/static/evolution_lab.js` | Self-evolution task/variant/approval workspace |
 
 ## 2. Runtime Graph And Agent Manifest

@@ -8,6 +8,7 @@ Environment:
   WINDOWS_PYAUTOGUI_BRIDGE_HOST=0.0.0.0
   WINDOWS_PYAUTOGUI_BRIDGE_PORT=8765
   WINDOWS_PYAUTOGUI_BRIDGE_TOKEN=<token>
+  WINDOWS_PYAUTOGUI_PROGRAM_DIR=C:/ATR/programs
 
 Endpoints:
   GET  / or /index.html
@@ -16,6 +17,9 @@ Endpoints:
   GET  /artifacts
   GET  /artifacts/{artifact_id}
   GET  /locators
+  POST /programs/validate
+  POST /programs/register
+  DELETE /programs/{program_id}
   POST /execute
   POST /screenshot
   POST /locators/capture
@@ -30,12 +34,55 @@ import hashlib
 import json
 import os
 import re
+import subprocess
+import sys
 import time
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
+
+
+def _normalize_bridge_platform(value: str, *, system_name: str | None = None) -> str:
+    requested = str(value or "auto").strip().lower()
+    if requested in {"windows", "linux"}:
+        return requested
+    detected = str(system_name or sys.platform).strip().lower()
+    return "windows" if detected.startswith("win") else "linux"
+
+
+def _read_bridge_token_file(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
+BRIDGE_PLATFORM = _normalize_bridge_platform(os.getenv("ATR_PYAUTOGUI_BRIDGE_PLATFORM", "windows"))
+
+
+def _desktop_platform_status() -> dict[str, Any]:
+    if BRIDGE_PLATFORM == "windows":
+        return {
+            "name": "windows",
+            "session_type": "windows",
+            "display": "desktop",
+            "scope": "lan",
+            "desktop_control_ready": True,
+            "failure_code": None,
+        }
+    session_type = str(os.getenv("XDG_SESSION_TYPE", "")).strip().lower()
+    display = str(os.getenv("DISPLAY", "")).strip()
+    ready = session_type == "x11" and bool(display)
+    return {
+        "name": "linux",
+        "session_type": session_type or "unknown",
+        "display": display,
+        "scope": "localhost",
+        "desktop_control_ready": ready,
+        "failure_code": None if ready else "PYAUTOGUI_LOCAL_DISPLAY_UNSUPPORTED",
+    }
 
 
 HOST = os.getenv("WINDOWS_PYAUTOGUI_BRIDGE_HOST", "0.0.0.0")
@@ -45,6 +92,7 @@ TOKEN_HEADER = os.getenv("WINDOWS_PYAUTOGUI_BRIDGE_TOKEN_HEADER", "X-Bridge-Toke
 ARTIFACT_ROOT = Path(os.getenv("WINDOWS_PYAUTOGUI_BRIDGE_ARTIFACT_ROOT", r"C:\ATR\bridge_artifacts"))
 LOCATOR_ROOT = Path(os.getenv("WINDOWS_PYAUTOGUI_LOCATOR_ROOT", r"C:\ATR\equipment_locators"))
 UTM_EXPORT_ROOT = Path(os.getenv("WINDOWS_PYAUTOGUI_UTM_EXPORT_DIR", r"C:\ATR\utm_exports"))
+PROGRAM_ROOT = Path(os.getenv("WINDOWS_PYAUTOGUI_PROGRAM_DIR", r"C:\ATR\programs"))
 UTM_EXPORT_GLOB = os.getenv("WINDOWS_PYAUTOGUI_UTM_EXPORT_GLOB", "*.csv")
 UTM_FILE_STABLE_SEC = float(os.getenv("WINDOWS_PYAUTOGUI_UTM_FILE_STABLE_SEC", "2.0"))
 ALLOW_SIMULATED_UTM = os.getenv("WINDOWS_PYAUTOGUI_ALLOW_SIMULATED_UTM", "0").strip().lower() in {"1", "true", "yes", "on"}
@@ -53,6 +101,7 @@ ARTIFACT_INDEX: dict[str, dict[str, Any]] = {}
 
 PROGRAMS = {
     "program1": {
+        "name": "Program 1 Demo",
         "description": "Demo macro: verify PyAutoGUI, move mouse briefly, and return completion log.",
         "requires_pyautogui": True,
         "safe_test": True,
@@ -164,6 +213,138 @@ PROGRAMS = {
     },
 }
 
+BUILTIN_PROGRAM_IDS = frozenset(PROGRAMS)
+PROGRAM_SCHEMA = "atr.pyautogui_program.v1"
+PROGRAM_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+ALLOWED_SEQUENCE_ACTIONS = frozenset({
+    "health",
+    "focus_window",
+    "screenshot",
+    "assert_visible",
+    "wait_until",
+    "locate_image",
+    "wait_until_image",
+    "assert_text",
+    "wait_until_text",
+    "click",
+    "hotkey",
+    "press",
+    "write",
+    "type_path",
+    "wait",
+    "log",
+    "wait_for_file",
+})
+
+
+def _validate_program_definition(definition: Any) -> dict[str, Any]:
+    if not isinstance(definition, dict):
+        return {"ok": False, "status": "invalid", "failure_code": "PYAUTOGUI_PROGRAM_INVALID", "message": "Program definition must be a JSON object."}
+    if str(definition.get("schema") or "") != PROGRAM_SCHEMA:
+        return {"ok": False, "status": "invalid", "failure_code": "PYAUTOGUI_PROGRAM_SCHEMA_INVALID", "message": f"schema must be {PROGRAM_SCHEMA}."}
+    program_id = str(definition.get("program_id") or "").strip()
+    if not PROGRAM_ID_PATTERN.fullmatch(program_id):
+        return {"ok": False, "status": "invalid", "failure_code": "PYAUTOGUI_PROGRAM_ID_INVALID", "message": "program_id must match [A-Za-z0-9_-]{1,64}."}
+    if program_id in BUILTIN_PROGRAM_IDS:
+        return {"ok": False, "status": "blocked", "failure_code": "PYAUTOGUI_PROGRAM_BUILTIN_IMMUTABLE", "message": f"Built-in program cannot be overwritten: {program_id}"}
+    name = str(definition.get("name") or "").strip()
+    if not name:
+        return {"ok": False, "status": "invalid", "failure_code": "PYAUTOGUI_PROGRAM_NAME_REQUIRED", "message": "name is required."}
+    sequence = definition.get("sequence")
+    if not isinstance(sequence, list) or not 1 <= len(sequence) <= 100:
+        return {"ok": False, "status": "invalid", "failure_code": "PYAUTOGUI_PROGRAM_SEQUENCE_INVALID", "message": "sequence must contain 1 to 100 action objects."}
+    normalized_sequence: list[dict[str, Any]] = []
+    for index, step in enumerate(sequence):
+        if not isinstance(step, dict):
+            return {"ok": False, "status": "invalid", "failure_code": "PYAUTOGUI_PROGRAM_SEQUENCE_INVALID", "message": f"sequence[{index}] must be an object."}
+        action = str(step.get("action") or "").strip()
+        if action not in ALLOWED_SEQUENCE_ACTIONS:
+            return {"ok": False, "status": "blocked", "failure_code": "PYAUTOGUI_ACTION_NOT_ALLOWED", "message": f"Unsupported PyAutoGUI bridge action: {action or '<empty>'}"}
+        normalized_sequence.append(dict(step))
+    normalized = {
+        "schema": PROGRAM_SCHEMA,
+        "program_id": program_id,
+        "name": name[:160],
+        "description": str(definition.get("description") or "").strip()[:1000],
+        "enabled": definition.get("enabled") is not False,
+        "program_type": "macro",
+        "requires_pyautogui": True,
+        "safe_test": bool(definition.get("safe_test", False)),
+        "sequence": normalized_sequence,
+    }
+    locators = definition.get("locators") if isinstance(definition.get("locators"), dict) else {}
+    if locators:
+        normalized["locators"] = {str(name): dict(locator) for name, locator in locators.items() if isinstance(locator, dict)}
+    portable_actions = sorted({str(step.get("action") or "") for step in normalized_sequence if step.get("action")})
+    platform_specific_locators = sorted(
+        str(name)
+        for name, locator in locators.items()
+        if isinstance(locator, dict)
+        and str(locator.get("locator_backend") or locator.get("backend") or "").lower() in {"uia", "pywinauto", "windows_uia"}
+    )
+    return {
+        "ok": True,
+        "status": "valid",
+        "program": normalized,
+        "failure_code": None,
+        "platform_tested": BRIDGE_PLATFORM,
+        "portable_actions": portable_actions,
+        "platform_specific_locators": platform_specific_locators,
+        "requires_windows_recalibration": BRIDGE_PLATFORM == "linux" and bool(platform_specific_locators),
+    }
+
+
+def _load_custom_programs() -> dict[str, dict[str, Any]]:
+    programs: dict[str, dict[str, Any]] = {}
+    if not PROGRAM_ROOT.exists():
+        return programs
+    for path in sorted(PROGRAM_ROOT.glob("*.json")):
+        try:
+            definition = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        validation = _validate_program_definition(definition)
+        if not validation.get("ok"):
+            continue
+        program = dict(validation["program"])
+        program["built_in"] = False
+        program["source_file"] = str(path)
+        programs[program["program_id"]] = program
+    return programs
+
+
+def _all_programs() -> dict[str, dict[str, Any]]:
+    programs = {key: {**value, "built_in": True, "enabled": True} for key, value in PROGRAMS.items()}
+    programs.update(_load_custom_programs())
+    return programs
+
+
+def _register_program_definition(definition: Any) -> dict[str, Any]:
+    validation = _validate_program_definition(definition)
+    if not validation.get("ok"):
+        return validation
+    program = dict(validation["program"])
+    PROGRAM_ROOT.mkdir(parents=True, exist_ok=True)
+    destination = PROGRAM_ROOT / f"{program['program_id']}.json"
+    temporary = destination.with_suffix(".json.tmp")
+    temporary.write_text(json.dumps(program, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+    temporary.replace(destination)
+    public = {**program, "built_in": False, "source_file": str(destination)}
+    return {"ok": True, "status": "registered", "program": public, "program_path": str(destination), "failure_code": None}
+
+
+def _delete_custom_program(program_id: str) -> dict[str, Any]:
+    program_id = str(program_id or "").strip()
+    if program_id in BUILTIN_PROGRAM_IDS:
+        return {"ok": False, "status": "blocked", "failure_code": "PYAUTOGUI_PROGRAM_BUILTIN_IMMUTABLE", "message": f"Built-in program cannot be deleted: {program_id}"}
+    if not PROGRAM_ID_PATTERN.fullmatch(program_id):
+        return {"ok": False, "status": "invalid", "failure_code": "PYAUTOGUI_PROGRAM_ID_INVALID", "message": "Invalid program_id."}
+    path = PROGRAM_ROOT / f"{program_id}.json"
+    if not path.exists():
+        return {"ok": False, "status": "not_found", "failure_code": "PYAUTOGUI_PROGRAM_NOT_FOUND", "message": f"Unknown custom program: {program_id}"}
+    path.unlink()
+    return {"ok": True, "status": "deleted", "program_id": program_id, "failure_code": None}
+
 
 
 def _load_pyautogui() -> tuple[Any | None, str]:
@@ -194,6 +375,7 @@ def _load_pyautogui() -> tuple[Any | None, str]:
 
 def _health() -> dict[str, Any]:
     pyautogui, error = _load_pyautogui()
+    platform_status = _desktop_platform_status()
     if pyautogui is None:
         return {
             "ok": True,
@@ -202,6 +384,7 @@ def _health() -> dict[str, Any]:
             "auth": {"token_required": True, "authenticated": True},
             "screen": None,
             "pyautogui": {"available": False, "error": error},
+            "platform": platform_status,
             "server_version": "WindowsPyAutoGUIBridge/0.1",
             "script_version": "windows_pyautogui_bridge_server.py:utm_visual_control_v1",
             "artifacts": {"root": str(ARTIFACT_ROOT), "request_log": str(ARTIFACT_ROOT / "bridge_requests.jsonl"), "locator_root": str(LOCATOR_ROOT), "utm_export_root": str(UTM_EXPORT_ROOT)},
@@ -215,6 +398,7 @@ def _health() -> dict[str, Any]:
         "auth": {"token_required": True, "authenticated": True},
         "screen": {"width": int(width), "height": int(height)},
         "pyautogui": {"available": True, "failsafe": bool(pyautogui.FAILSAFE), "pause": float(pyautogui.PAUSE)},
+        "platform": platform_status,
         "server_version": "WindowsPyAutoGUIBridge/0.1",
         "script_version": "windows_pyautogui_bridge_server.py:utm_visual_control_v1",
         "artifacts": {"root": str(ARTIFACT_ROOT), "request_log": str(ARTIFACT_ROOT / "bridge_requests.jsonl"), "locator_root": str(LOCATOR_ROOT), "utm_export_root": str(UTM_EXPORT_ROOT)},
@@ -251,7 +435,8 @@ def _programs() -> dict[str, Any]:
         "status": "ready",
         "bridge": "windows_pyautogui",
         "auth": {"token_required": True, "authenticated": True},
-        "programs": [program_payload(key, value) for key, value in sorted(PROGRAMS.items())],
+        "program_root": str(PROGRAM_ROOT),
+        "programs": [program_payload(key, value) for key, value in sorted(_all_programs().items())],
     }
 
 
@@ -664,7 +849,7 @@ def _program_sequence(program_id: str, payload: dict[str, Any]) -> list[dict[str
     raw = payload.get("sequence")
     if isinstance(raw, list) and raw:
         return [dict(item) for item in raw if isinstance(item, dict)]
-    program = PROGRAMS.get(program_id, {})
+    program = _all_programs().get(program_id, {})
     raw = program.get("sequence")
     if isinstance(raw, list):
         return [dict(item) for item in raw if isinstance(item, dict)]
@@ -1021,8 +1206,56 @@ def _activate_window(window: Any) -> bool:
         return False
 
 
+def _focus_linux_window(titles: list[str], regexes: list[str]) -> tuple[bool, str]:
+    try:
+        listing = subprocess.run(
+            ["wmctrl", "-l"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=2.0,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return False, f"wmctrl unavailable: {exc.__class__.__name__}"
+    windows: list[tuple[str, str]] = []
+    for line in listing.stdout.splitlines():
+        parts = line.split(None, 3)
+        if len(parts) == 4:
+            windows.append((parts[0], parts[3]))
+    compiled_patterns = []
+    for pattern in regexes:
+        try:
+            compiled_patterns.append(re.compile(pattern))
+        except re.error:
+            continue
+    for window_id, window_title in windows:
+        title_match = any(title.casefold() in window_title.casefold() for title in titles)
+        regex_match = any(pattern.search(window_title) for pattern in compiled_patterns)
+        if not (title_match or regex_match):
+            continue
+        try:
+            activated = subprocess.run(
+                ["wmctrl", "-ia", window_id],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=2.0,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            return False, f"window activation failed: {exc.__class__.__name__}"
+        if activated.returncode == 0:
+            time.sleep(0.2)
+            return True, f"title={window_title}"
+        return False, f"window activation failed: {window_title}"
+    selectors = titles + [f"regex:{pattern}" for pattern in regexes]
+    return False, "window not found: " + ", ".join(selectors)
+
+
 def _focus_window(pyautogui: Any, action: dict[str, Any], payload: dict[str, Any], program: dict[str, Any]) -> tuple[bool, str]:
     titles, regexes = _window_selector_candidates(action, payload, program)
+
+    if BRIDGE_PLATFORM == "linux" and (titles or regexes):
+        return _focus_linux_window(titles, regexes)
 
     if regexes and hasattr(pyautogui, "getAllWindows"):
         try:
@@ -1136,7 +1369,7 @@ def _execute_protocol_sequence(
     screen_artifacts: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     sequence = _program_sequence(program_id, payload)
-    program = PROGRAMS.get(program_id, {})
+    program = _all_programs().get(program_id, {})
     require_assertions = bool(REQUIRE_UTM_SCREEN_ASSERTIONS or payload.get("require_screen_assertions"))
     last_successful_click = False
 
@@ -2205,7 +2438,7 @@ def _run_program1(sequence_id: str) -> dict[str, Any]:
     }
 
 
-def _run_custom_sequence(sequence_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+def _run_custom_sequence(sequence_id: str, payload: dict[str, Any], *, program_id: str = "custom_sequence") -> dict[str, Any]:
     """Execute an operator-supplied JSON sequence without promoting it to UTM handoff evidence."""
     trace: list[dict[str, Any]] = []
 
@@ -2224,7 +2457,7 @@ def _run_custom_sequence(sequence_id: str, payload: dict[str, Any]) -> dict[str,
             "status": "blocked",
             "bridge": "windows_pyautogui",
             "sequence_id": sequence_id,
-            "program_id": "custom_sequence",
+            "program_id": program_id,
             "program_type": "operator_sequence",
             "failure_code": "PYAUTOGUI_NOT_INSTALLED",
             "requires_install": True,
@@ -2253,7 +2486,7 @@ def _run_custom_sequence(sequence_id: str, payload: dict[str, Any]) -> dict[str,
         "status": status,
         "bridge": "windows_pyautogui",
         "sequence_id": sequence_id,
-        "program_id": "custom_sequence",
+        "program_id": program_id,
         "program_type": "operator_sequence",
         "output_artifacts": screen_artifacts,
         "step_trace": trace,
@@ -2264,9 +2497,22 @@ def _run_custom_sequence(sequence_id: str, payload: dict[str, Any]) -> dict[str,
 
 def _execute(payload: dict[str, Any]) -> dict[str, Any]:
     sequence_id = str(payload.get("sequence_id") or f"win-{int(time.time())}")
+    platform_status = _desktop_platform_status()
+    if not platform_status.get("desktop_control_ready"):
+        return {
+            "ok": False,
+            "status": "blocked",
+            "bridge": "windows_pyautogui",
+            "platform": platform_status,
+            "sequence_id": sequence_id,
+            "failure_code": str(platform_status.get("failure_code") or "PYAUTOGUI_LOCAL_DISPLAY_UNSUPPORTED"),
+            "message": "Actual desktop control requires an active X11 display.",
+            "step_trace": [{"step": "PLATFORM_PRECHECK", "status": "blocked", "detail": str(platform_status)}],
+        }
     program_id = str(payload.get("program_id") or "").strip()
     if program_id:
-        if program_id not in PROGRAMS:
+        programs = _all_programs()
+        if program_id not in programs:
             return {
                 "ok": False,
                 "status": "blocked",
@@ -2279,8 +2525,22 @@ def _execute(payload: dict[str, Any]) -> dict[str, Any]:
             }
         if program_id == "program1":
             return _run_program1(sequence_id)
-        if str(PROGRAMS[program_id].get("program_type") or "").startswith("utm_") or program_id.startswith("utm_"):
+        program = programs[program_id]
+        if program.get("enabled") is False:
+            return {
+                "ok": False,
+                "status": "blocked",
+                "bridge": "windows_pyautogui",
+                "sequence_id": sequence_id,
+                "program_id": program_id,
+                "failure_code": "PYAUTOGUI_PROGRAM_DISABLED",
+                "message": f"Program is disabled: {program_id}",
+                "step_trace": [{"step": "RESOLVE_PROGRAM", "status": "blocked", "detail": "disabled"}],
+            }
+        if str(program.get("program_type") or "").startswith("utm_") or program_id.startswith("utm_"):
             return _run_utm_protocol(sequence_id, program_id, payload)
+        custom_payload = {**payload, "sequence": list(program.get("sequence") or [])}
+        return _run_custom_sequence(sequence_id, custom_payload, program_id=program_id)
     sequence = payload.get("sequence")
     if isinstance(sequence, list) and sequence:
         return _run_custom_sequence(sequence_id, payload)
@@ -2304,10 +2564,11 @@ class BridgeConfig:
     token_header: str = "X-Bridge-Token"
     artifact_dir: Path = ARTIFACT_ROOT
     reference_dir: Path = LOCATOR_ROOT
+    program_dir: Path = PROGRAM_ROOT
 
 
 def _apply_bridge_config(config: BridgeConfig) -> None:
-    global HOST, PORT, TOKEN, TOKEN_HEADER, ARTIFACT_ROOT, LOCATOR_ROOT
+    global HOST, PORT, TOKEN, TOKEN_HEADER, ARTIFACT_ROOT, LOCATOR_ROOT, PROGRAM_ROOT
     HOST = str(config.host)
     PORT = int(config.port)
     TOKEN = str(config.token or "")
@@ -2315,6 +2576,8 @@ def _apply_bridge_config(config: BridgeConfig) -> None:
     ARTIFACT_ROOT = Path(config.artifact_dir)
     if config.reference_dir:
         LOCATOR_ROOT = Path(config.reference_dir)
+    if config.program_dir:
+        PROGRAM_ROOT = Path(config.program_dir)
 
 
 def public_programs() -> list[dict[str, Any]]:
@@ -3594,9 +3857,601 @@ INDEX_HTML = r"""<!doctype html>
       .row4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .header-pill-stack { align-items: flex-start; width: 100%; }
     }
+
+    /* Program Manager augments the full operator console; it never replaces controls. */
+    .manager-toolbar {
+      display: grid;
+      grid-template-columns: minmax(220px, 1fr) 150px repeat(4, auto);
+      gap: 8px;
+      align-items: end;
+    }
+    .manager-toolbar label { margin: 0; }
+    .manager-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 12px;
+      margin-top: 12px;
+      align-items: start;
+    }
+    .manager-registry { display: grid; gap: 8px; min-width: 0; }
+    .manager-program-card {
+      display: grid;
+      grid-template-columns: minmax(260px, 1fr) auto;
+      gap: 12px;
+      align-items: center;
+    }
+    .manager-program-info { min-width: 0; display: grid; gap: 4px; }
+    .manager-program-info p { margin: 0; }
+    .manager-editor {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--panel-soft);
+      overflow: hidden;
+    }
+    .manager-editor[hidden] { display: none; }
+    .manager-editor-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 10px;
+      border-bottom: 1px solid var(--line);
+      background: #fff;
+    }
+    .manager-editor-body { padding: 10px; }
+    .manager-stats { margin-top: 9px; color: var(--muted); font-size: 11px; }
+    .manager-badges { display: flex; flex-wrap: wrap; gap: 5px; }
+    .manager-badge {
+      display: inline-flex;
+      align-items: center;
+      min-height: 22px;
+      padding: 3px 7px;
+      border-radius: 999px;
+      background: #eef2f5;
+      color: #3a4a5f;
+      font-size: 10px;
+      font-weight: 800;
+    }
+    .manager-badge.ok { background: #e7f6ef; color: var(--ok); }
+    .manager-badge.warn { background: #fff7df; color: var(--warn); }
+    .manager-badge.bad { background: #fff0ed; color: var(--danger); }
+    .manager-actions {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(76px, auto));
+      gap: 6px;
+      min-width: min(100%, 480px);
+    }
+    .manager-actions button { min-height: 30px; padding: 5px 7px; font-size: 11px; }
+    .manager-empty {
+      border: 1px dashed var(--line);
+      border-radius: 10px;
+      padding: 18px;
+      color: var(--muted);
+      text-align: center;
+      background: var(--panel-soft);
+    }
+    .manager-file-meta {
+      margin-top: 9px;
+      padding: 8px;
+      border: 1px dashed var(--line);
+      border-radius: 8px;
+      color: var(--muted);
+      font-size: 11px;
+      overflow-wrap: anywhere;
+    }
+    .manager-result { margin-top: 10px; }
+    .manager-result pre { min-height: 120px; max-height: 260px; }
+    .manager-hidden { display: none !important; }
+    #bridgeCommandKit .compact-tools { grid-template-columns: 1fr; }
+    @media (max-width: 1080px) {
+      .manager-toolbar, .manager-grid { grid-template-columns: 1fr; }
+      .manager-program-card { grid-template-columns: 1fr; }
+      .manager-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+
+
+    .quick-nav { display: none; }
+    .essential-console {
+      width: min(1760px, calc(100vw - 28px));
+      margin: 12px auto 10px;
+      display: grid;
+      gap: 12px;
+    }
+    .essential-grid {
+      display: grid;
+      grid-template-columns: minmax(280px, .72fr) minmax(0, 1.28fr);
+      gap: 12px;
+    }
+    .essential-card {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--panel);
+      box-shadow: var(--shadow);
+      padding: 14px;
+      min-width: 0;
+    }
+    .essential-card h2 { margin-bottom: 4px; }
+    .essential-card .section-intro { margin: 0 0 10px; }
+    .essential-fields {
+      display: grid;
+      grid-template-columns: minmax(240px, 1fr) repeat(3, auto);
+      gap: 8px;
+      align-items: end;
+    }
+    .essential-fields label { margin: 0; }
+    .essential-metrics {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .essential-metric {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--panel-soft);
+      padding: 9px 10px;
+      min-width: 0;
+    }
+    .essential-metric strong {
+      display: block;
+      margin-bottom: 4px;
+      color: var(--muted);
+      font-size: 10px;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+    }
+    .essential-metric span {
+      display: block;
+      color: var(--ink);
+      font-size: 14px;
+      font-weight: 800;
+      overflow-wrap: anywhere;
+    }
+    .essential-result {
+      border-left: 4px solid #9aa8b7;
+      border-radius: 8px;
+      background: var(--panel-soft);
+      padding: 10px 12px;
+      color: #263548;
+      font-size: 13px;
+      overflow-wrap: anywhere;
+    }
+    .essential-result[data-tone="ok"] { border-left-color: var(--ok); background: var(--ok-bg); }
+    .essential-result[data-tone="bad"] { border-left-color: var(--danger); background: var(--bad-bg); }
+    .essential-result[data-tone="warn"] { border-left-color: #f59e0b; background: var(--warn-bg); }
+    #essentialProgramManagerSlot > #programManagerPanel { margin: 0; }
+    #advancedToolsPanel {
+      --panel: #ffffff;
+      --panel-soft: #f4f7fc;
+      --ink: #17233d;
+      --muted: #60708d;
+      --line: #cdd9ee;
+      --accent: #2557d6;
+      --accent-2: #173f9f;
+      --ok-bg: #eaf8f1;
+      --bad-bg: #fff1ef;
+      --warn-bg: #fff8e8;
+      width: min(1760px, calc(100vw - 28px));
+      margin: 0 auto 28px;
+      padding: 0;
+      border: 1px solid #bdcce6;
+      border-radius: 16px;
+      background: #eaf0f9;
+      box-shadow: 0 12px 34px rgba(38, 72, 132, .10);
+      overflow: clip;
+    }
+    #advancedToolsPanel > summary {
+      padding: 15px 18px;
+      color: #173f9f;
+      font-size: 14px;
+      font-weight: 900;
+      line-height: 1.35;
+      list-style-position: inside;
+      background: linear-gradient(135deg, #ffffff 0%, #f1f6ff 100%);
+      cursor: pointer;
+      overflow-wrap: anywhere;
+    }
+    #advancedToolsPanel > summary::marker { color: #2557d6; }
+    #advancedToolsPanel[open] > summary { border-bottom: 1px solid #bdcce6; }
+    #advancedToolsPanel > main {
+      width: 100%;
+      margin: 0;
+      padding: 16px;
+      grid-template-columns: minmax(300px, 350px) minmax(0, 1fr);
+      gap: 16px;
+      align-items: start;
+    }
+    #advancedToolsPanel .sidebar,
+    #advancedToolsPanel .workspace {
+      gap: 16px;
+      min-width: 0;
+    }
+    #advancedToolsPanel .sidebar {
+      top: 112px;
+      max-height: calc(100vh - 128px);
+      padding-right: 5px;
+    }
+    #advancedToolsPanel section,
+    #advancedToolsPanel .card {
+      min-width: 0;
+      border-color: #cdd9ee;
+      border-radius: 14px;
+      background: #ffffff;
+      box-shadow: 0 8px 24px rgba(34, 68, 130, .07);
+    }
+    #advancedToolsPanel section { padding: 15px; }
+    #advancedToolsPanel h2 {
+      color: #173f9f;
+      font-size: 14px;
+      line-height: 1.35;
+      overflow-wrap: anywhere;
+    }
+    #advancedToolsPanel h3 { color: #294575; }
+    #advancedToolsPanel .section-intro,
+    #advancedToolsPanel .hint,
+    #advancedToolsPanel .operator-compact-note,
+    #advancedToolsPanel .identity-pill,
+    #advancedToolsPanel .runbook-step small,
+    #advancedToolsPanel .command-banner span,
+    #advancedToolsPanel .ops-card span,
+    #advancedToolsPanel .proof-gate span {
+      white-space: normal;
+      overflow: visible;
+      text-overflow: clip;
+      overflow-wrap: anywhere;
+    }
+    #advancedToolsPanel button {
+      min-width: 0;
+      height: auto;
+      min-height: 38px;
+      white-space: normal;
+      overflow: visible;
+      text-overflow: clip;
+      overflow-wrap: anywhere;
+      line-height: 1.2;
+      border-color: #1e48b5;
+      background: #2557d6;
+    }
+    #advancedToolsPanel button.secondary {
+      border-color: #c4d1e7;
+      background: #ffffff;
+      color: #294575;
+    }
+    #advancedToolsPanel button.blue {
+      border-color: #173f9f;
+      background: #173f9f;
+    }
+    #advancedToolsPanel button.danger {
+      border-color: #a52a22;
+      background: #bd352b;
+    }
+    #advancedToolsPanel input,
+    #advancedToolsPanel textarea,
+    #advancedToolsPanel select {
+      min-width: 0;
+      border-color: #c4d1e7;
+      border-radius: 9px;
+      background: #ffffff;
+    }
+    #advancedToolsPanel input:focus,
+    #advancedToolsPanel textarea:focus,
+    #advancedToolsPanel select:focus {
+      border-color: #5c83e7;
+      box-shadow: 0 0 0 3px rgba(37, 87, 214, .13);
+    }
+    #advancedToolsPanel .action-group,
+    #advancedToolsPanel .tile,
+    #advancedToolsPanel .workflow-step,
+    #advancedToolsPanel .ops-card,
+    #advancedToolsPanel .summary-card,
+    #advancedToolsPanel .proof-gate,
+    #advancedToolsPanel .connection-readout,
+    #advancedToolsPanel .command-kit,
+    #advancedToolsPanel .operator-runbook {
+      min-width: 0;
+      border-color: #d5dfef;
+      background: #f5f8fd;
+    }
+    #advancedToolsPanel .row3,
+    #advancedToolsPanel .row4,
+    #advancedToolsPanel .buttons,
+    #advancedToolsPanel .compact-tools,
+    #advancedToolsPanel .status-grid,
+    #advancedToolsPanel .workflow-strip,
+    #advancedToolsPanel .summary-grid,
+    #advancedToolsPanel .proof-list,
+    #advancedToolsPanel .proof-gate-strip,
+    #advancedToolsPanel .control-rail,
+    #advancedToolsPanel .ops-hud {
+      grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+    }
+    #advancedToolsPanel .row {
+      grid-template-columns: repeat(auto-fit, minmax(138px, 1fr));
+    }
+    #advancedToolsPanel .next-action-button span,
+    #advancedToolsPanel .control-rail button small {
+      max-width: 100%;
+      white-space: normal;
+      overflow: visible;
+      text-overflow: clip;
+      overflow-wrap: anywhere;
+    }
+    #advancedToolsPanel pre,
+    #advancedToolsPanel code,
+    #advancedToolsPanel .mono {
+      max-width: 100%;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+    #advancedToolsPanel pre {
+      overflow: auto;
+      white-space: pre-wrap;
+    }
+    #advancedToolsPanel .command-shell {
+      position: static;
+      top: auto;
+      z-index: auto;
+    }
+    @media (max-width: 1500px) {
+      #advancedToolsPanel .command-shell {
+        grid-template-columns: 1fr;
+      }
+    }
+    @media (max-width: 1100px) {
+      .essential-grid, .essential-fields { grid-template-columns: 1fr; }
+      .essential-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .essential-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      #advancedToolsPanel > main { grid-template-columns: 1fr; }
+      #advancedToolsPanel .sidebar {
+        position: static;
+        max-height: none;
+        overflow: visible;
+        padding-right: 0;
+      }
+    }
+    @media (max-width: 680px) {
+      #advancedToolsPanel {
+        width: calc(100vw - 16px);
+        border-radius: 12px;
+      }
+      #advancedToolsPanel > summary { padding: 13px 14px; }
+      #advancedToolsPanel > main { padding: 10px; gap: 10px; }
+      #advancedToolsPanel .sidebar,
+      #advancedToolsPanel .workspace { gap: 10px; }
+      #advancedToolsPanel .row,
+      #advancedToolsPanel .row3,
+      #advancedToolsPanel .row4,
+      #advancedToolsPanel .buttons,
+      #advancedToolsPanel .compact-tools,
+      #advancedToolsPanel .status-grid,
+      #advancedToolsPanel .workflow-strip,
+      #advancedToolsPanel .summary-grid,
+      #advancedToolsPanel .proof-list,
+      #advancedToolsPanel .proof-gate-strip,
+      #advancedToolsPanel .control-rail,
+      #advancedToolsPanel .ops-hud {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    /* Self-contained ATR Device Bridge theme for the complete Windows console. */
+    body.device-bridge-shell {
+      --bg: #f5f8ff;
+      --panel: #ffffff;
+      --panel-soft: #f1f6ff;
+      --ink: #091225;
+      --muted: #5a6883;
+      --line: rgba(26, 60, 160, .22);
+      --accent: #1436b3;
+      --accent-2: #2f72ff;
+      --danger: #c84c3b;
+      --warn: #d98c12;
+      --ok: #1d9150;
+      --ok-bg: #eaf8f1;
+      --bad-bg: #fff1ef;
+      --warn-bg: #fff8e8;
+      --shadow: 0 20px 52px rgba(28, 53, 112, .11);
+      --shadow-soft: 0 10px 28px rgba(28, 53, 112, .08);
+      background:
+        radial-gradient(circle at top left, rgba(47, 114, 255, .12), transparent 28%),
+        linear-gradient(180deg, #fbfcff 0%, #f5f8ff 35%, #eef4ff 100%);
+      color: var(--ink);
+    }
+    body.device-bridge-shell ::selection { background: rgba(47, 114, 255, .20); }
+    body.device-bridge-shell > header {
+      width: min(1760px, calc(100vw - 28px));
+      margin: 16px auto 0;
+      padding: 20px 22px;
+      position: relative;
+      top: auto;
+      border: 1.5px solid var(--line);
+      border-radius: 22px;
+      background: rgba(255, 255, 255, .94);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(12px);
+    }
+    body.device-bridge-shell h1 {
+      color: var(--ink);
+      font-size: clamp(24px, 2vw, 32px);
+      line-height: 1.05;
+      letter-spacing: -.02em;
+    }
+    body.device-bridge-shell .sub {
+      max-width: 76ch;
+      margin-top: 7px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+    body.device-bridge-shell .brandline { gap: 12px; }
+    body.device-bridge-shell .brandmark {
+      width: 42px;
+      height: 42px;
+      border-radius: 14px;
+      background: linear-gradient(135deg, #1436b3, #2f72ff);
+      box-shadow: 0 10px 22px rgba(20, 54, 179, .24);
+      font-size: 13px;
+    }
+    body.device-bridge-shell .header-pill-stack {
+      flex-direction: row;
+      align-items: center;
+      justify-content: flex-end;
+      min-width: 0;
+    }
+    body.device-bridge-shell .pill {
+      border-color: rgba(20, 54, 179, .18);
+      background: linear-gradient(180deg, #ffffff, #f1f6ff);
+      color: #435271;
+      box-shadow: 0 7px 18px rgba(34, 58, 120, .06);
+    }
+    body.device-bridge-shell .essential-console {
+      margin-top: 18px;
+      margin-bottom: 16px;
+      gap: 18px;
+    }
+    body.device-bridge-shell .essential-grid { gap: 18px; }
+    body.device-bridge-shell section,
+    body.device-bridge-shell .card,
+    body.device-bridge-shell .essential-card,
+    body.device-bridge-shell #programManagerPanel {
+      border: 1.5px solid var(--line);
+      border-radius: 22px;
+      background: rgba(255, 255, 255, .94);
+      box-shadow: var(--shadow);
+    }
+    body.device-bridge-shell .essential-card { padding: 20px; }
+    body.device-bridge-shell h2 {
+      color: #1436b3;
+      font-size: 15px;
+      line-height: 1.35;
+    }
+    body.device-bridge-shell h3 { color: #27447c; }
+    body.device-bridge-shell label { color: var(--muted); }
+    body.device-bridge-shell input,
+    body.device-bridge-shell textarea,
+    body.device-bridge-shell select {
+      min-width: 0;
+      border: 1px solid rgba(20, 54, 179, .20);
+      border-radius: 12px;
+      background: rgba(255, 255, 255, .98);
+      color: var(--ink);
+    }
+    body.device-bridge-shell input:focus,
+    body.device-bridge-shell textarea:focus,
+    body.device-bridge-shell select:focus {
+      border-color: #2f72ff;
+      box-shadow: 0 0 0 3px rgba(47, 114, 255, .14);
+    }
+    body.device-bridge-shell button {
+      min-width: 0;
+      min-height: 40px;
+      border: 1px solid transparent;
+      border-radius: 12px;
+      background: linear-gradient(120deg, #1436b3, #2f72ff);
+      color: #ffffff;
+      box-shadow: 0 8px 18px rgba(20, 54, 179, .16);
+      white-space: normal;
+      overflow-wrap: anywhere;
+      line-height: 1.2;
+    }
+    body.device-bridge-shell button.secondary {
+      border-color: rgba(20, 54, 179, .18);
+      background: rgba(255, 255, 255, .96);
+      color: #1f3159;
+      box-shadow: 0 7px 16px rgba(34, 58, 120, .05);
+    }
+    body.device-bridge-shell button.blue {
+      border-color: transparent;
+      background: linear-gradient(120deg, #1436b3, #2f72ff);
+    }
+    body.device-bridge-shell button.danger {
+      border-color: rgba(200, 76, 59, .32);
+      background: rgba(255, 242, 239, .98);
+      color: #a43d31;
+      box-shadow: none;
+    }
+    body.device-bridge-shell button:hover:not(:disabled) {
+      transform: translateY(-1px);
+      box-shadow: 0 11px 24px rgba(20, 54, 179, .16);
+    }
+    body.device-bridge-shell .essential-metric,
+    body.device-bridge-shell .manager-editor,
+    body.device-bridge-shell .manager-empty,
+    body.device-bridge-shell .action-group,
+    body.device-bridge-shell .tile,
+    body.device-bridge-shell .workflow-step,
+    body.device-bridge-shell .status-card {
+      border-color: rgba(20, 54, 179, .16);
+      border-radius: 16px;
+      background: linear-gradient(180deg, #ffffff, #f1f6ff);
+      box-shadow: 0 9px 22px rgba(34, 58, 120, .06);
+    }
+    body.device-bridge-shell .essential-result {
+      border: 1px solid rgba(20, 54, 179, .16);
+      border-left: 5px solid #6d7f9f;
+      border-radius: 14px;
+      background: #f5f8ff;
+      color: #223252;
+    }
+    body.device-bridge-shell .essential-result[data-tone="ok"] { border-left-color: var(--ok); }
+    body.device-bridge-shell .essential-result[data-tone="bad"] { border-left-color: var(--danger); }
+    body.device-bridge-shell .essential-result[data-tone="warn"] { border-left-color: var(--warn); }
+    body.device-bridge-shell .manager-toolbar { gap: 10px; }
+    body.device-bridge-shell .manager-program-card {
+      border: 1px solid rgba(20, 54, 179, .16);
+      border-radius: 16px;
+      background: linear-gradient(180deg, #ffffff, #f6f9ff);
+      box-shadow: 0 8px 20px rgba(34, 58, 120, .05);
+      padding: 12px;
+    }
+    body.device-bridge-shell .manager-badge {
+      background: #eaf0ff;
+      color: #294b9d;
+    }
+    body.device-bridge-shell #advancedToolsPanel {
+      border-width: 1.5px;
+      border-radius: 22px;
+      background: rgba(235, 242, 255, .92);
+      box-shadow: var(--shadow);
+    }
+    body.device-bridge-shell #advancedToolsPanel > summary {
+      padding: 17px 20px;
+      color: #1436b3;
+      font-size: 15px;
+      background: rgba(255, 255, 255, .94);
+    }
+    body.device-bridge-shell #advancedToolsPanel section,
+    body.device-bridge-shell #advancedToolsPanel .card {
+      border-radius: 18px;
+      box-shadow: 0 10px 26px rgba(34, 68, 130, .07);
+    }
+    @media (max-width: 1500px) and (min-width: 761px) {
+      body.device-bridge-shell .essential-fields {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+      body.device-bridge-shell .essential-fields > label {
+        grid-column: 1 / -1;
+      }
+    }
+    @media (max-width: 760px) {
+      body.device-bridge-shell > header {
+        width: calc(100vw - 16px);
+        margin-top: 8px;
+        padding: 16px;
+        border-radius: 16px;
+        align-items: flex-start;
+        flex-direction: column;
+      }
+      body.device-bridge-shell .header-pill-stack {
+        justify-content: flex-start;
+        flex-wrap: wrap;
+      }
+      body.device-bridge-shell .essential-console { width: calc(100vw - 16px); }
+      body.device-bridge-shell .essential-card { padding: 16px; }
+    }
+
   </style>
 </head>
-<body>
+<body class="device-bridge-shell">
   <header>
     <div>
       <div class="brandline"><span class="brandmark">ATR</span><h1>ATR Windows PyAutoGUI Bridge</h1></div>
@@ -3607,9 +4462,6 @@ INDEX_HTML = r"""<!doctype html>
         <span class="pill" id="authPill"><span class="dot"></span><span>auth not checked</span></span>
         <span class="pill" id="headerProofPill"><span class="dot warn"></span><span>proof 0/7</span></span>
       </div>
-      <button class="secondary" id="focusMode" title="Show only the controls needed during live operation">Focus Mode</button>
-      <button class="secondary" id="copyBase">Copy URL</button>
-      <button id="healthTop">Health</button>
     </div>
   </header>
   <nav class="quick-nav" aria-label="Windows bridge workspace navigation">
@@ -3619,25 +4471,50 @@ INDEX_HTML = r"""<!doctype html>
     <a href="#utmProtocolPanel">UTM Control</a>
     <a href="#evidencePanel">Evidence</a>
     <a href="#resultPanel">Result JSON</a>
+    <a href="#programManagerPanel">Programs</a>
     <a href="#operatorLogPanel">Operator Log</a>
   </nav>
+
+  <div id="essentialConsole" class="essential-console">
+    <div class="essential-grid">
+      <section class="essential-card" aria-label="Essential bridge connection">
+        <h2>Bridge Connection</h2>
+        <div class="section-intro">Connect this Windows bridge, then create or manage bounded macro programs below.</div>
+        <div class="essential-fields">
+          <label>Bridge Token<input id="token" type="password" autocomplete="off" placeholder="X-Bridge-Token"></label>
+          <button id="health">Health</button>
+          <button class="secondary" id="refreshAll">Refresh</button>
+          <button class="secondary" id="clearToken">Clear Token</button>
+        </div>
+        <div class="essential-metrics" style="margin-top:10px">
+          <div class="essential-metric"><strong>Bridge</strong><span id="essentialBridgeState">Not checked</span></div>
+          <div class="essential-metric"><strong>PyAutoGUI</strong><span id="essentialPyAutoGUI">Unknown</span></div>
+        </div>
+      </section>
+      <section class="essential-card" aria-label="Latest macro manager result">
+        <h2>Latest Test Result</h2>
+        <div class="section-intro">Validation, registration, deletion, and bounded test results appear here.</div>
+        <div id="essentialResult" class="essential-result" data-tone="warn">No bridge request yet.</div>
+      </section>
+    </div>
+
+    <div id="essentialProgramManagerSlot"></div>
+  </div>
+
+  <details id="advancedToolsPanel">
+    <summary>Advanced Tools · readiness, locators, screenshots, artifacts, timeline, and JSON execution</summary>
+
   <main>
     <div class="sidebar">
       <section id="connectionPanel">
-        <h2>Connection</h2>
-        <label for="token">Bridge Token</label>
-        <input id="token" type="password" autocomplete="off" placeholder="X-Bridge-Token">
-        <div class="row">
-          <button id="health">Health</button>
-          <button class="secondary" id="clearToken">Clear Token</button>
-        </div>
+        <h2>Deployment Details</h2>
         <div class="connection-readout">
           <span>Bridge URL</span>
           <code id="baseUrlLabel">-</code>
         </div>
         <div class="row">
           <button class="secondary" id="copyLinuxEnv">Copy Linux Env</button>
-          <button class="secondary" id="refreshAll">Refresh All</button>
+          <button class="secondary" id="copyBase">Copy URL</button>
         </div>
         <div class="command-kit" id="bridgeCommandKit" aria-label="Bridge command copy kit">
           <div class="command-kit-head"><strong>Bridge Command Kit</strong><span>Linux / Windows parity</span></div>
@@ -3665,10 +4542,6 @@ INDEX_HTML = r"""<!doctype html>
           <div class="runbook-step warn" id="runbookCalibrate"><span class="runbook-index">2</span><div><strong>Calibrate UTM locators</strong><small>Run Readiness and capture missing screen locators.</small></div></div>
           <div class="runbook-step warn" id="runbookExecute"><span class="runbook-index">3</span><div><strong>Execute registered protocol</strong><small>Send only an allowlisted /execute request after preflight.</small></div></div>
           <div class="runbook-step warn" id="runbookVerify"><span class="runbook-index">4</span><div><strong>Verify handoff evidence</strong><small>Check screen evidence, save/export proof, and CSV parse probe.</small></div></div>
-          <div class="runbook-actions">
-            <button class="secondary" data-proxy-click="safePreflight">Preflight</button>
-            <button class="secondary" data-proxy-click="refreshEvidence">Refresh Evidence</button>
-          </div>
         </div>
       </section>
 
@@ -3678,7 +4551,6 @@ INDEX_HTML = r"""<!doctype html>
           <div class="action-group-title"><span>Before live control</span><span class="muted">no /execute</span></div>
           <div class="buttons compact-tools">
             <button class="blue" id="safePreflight">Safe Preflight</button>
-            <button id="healthInline">Health</button>
             <button id="readiness">Readiness</button>
             <button id="requestLog">Request Log</button>
             <button id="screenshot">Capture Screen</button>
@@ -3688,20 +4560,8 @@ INDEX_HTML = r"""<!doctype html>
         <div class="action-group">
           <div class="action-group-title"><span>Registry / demo</span><span class="muted">allowlisted</span></div>
           <div class="buttons compact-tools">
-            <button id="programs">Programs</button>
-            <button id="program1">Program1 Demo</button>
             <button id="artifacts">Artifacts</button>
             <button class="secondary" id="fillUtmJson">Fill UTM JSON</button>
-          </div>
-        </div>
-        <div class="program-registry-title">
-          <strong>Program registry</strong>
-          <span>allowlisted macros</span>
-        </div>
-        <div class="program-registry" id="programRegistry" aria-label="Registered PyAutoGUI programs">
-          <div class="program-card">
-            <div class="program-card-head"><strong>Waiting for program list</strong><span class="program-kind">not loaded</span></div>
-            <p>Click Programs or wait for page load to show allowlisted Windows macros and UTM protocols here.</p>
           </div>
         </div>
       </section>
@@ -3799,13 +4659,6 @@ INDEX_HTML = r"""<!doctype html>
               <span id="nextActionLabel">Run Health</span>
             </button>
           </div>
-        </div>
-        <div class="control-rail" id="controlRail" aria-label="Critical bridge command rail">
-          <button class="secondary" data-proxy-click="safePreflight">Preflight<small>no movement</small></button>
-          <button class="secondary" data-proxy-click="refreshEvidence">Evidence<small>refresh audit</small></button>
-          <button class="blue" data-proxy-click="utmSim">Simulate<small>bridge dry run</small></button>
-          <button class="danger" data-proxy-click="utmLive">Live UTM<small>requires safety</small></button>
-          <button class="danger" data-proxy-click="utmAbort">Abort<small>recovery macro</small></button>
         </div>
       </div>
       <section class="ops-hud" id="operatorHud" aria-label="Operator runtime status">
@@ -3955,6 +4808,43 @@ INDEX_HTML = r"""<!doctype html>
         </div>
       </section>
 
+
+      <section id="programManagerPanel">
+        <h2>Program Manager <span class="pill"><span class="dot ok"></span><span id="programCount">0 programs</span></span></h2>
+        <div class="section-intro">Create, import, validate, register, and test bounded JSON macros. Built-in programs such as Program1 are read-only.</div>
+        <div class="manager-toolbar">
+          <label>Search<input id="managerSearch" type="search" placeholder="Name or program ID"></label>
+          <label>Status<select id="managerFilter"><option value="all">All</option><option value="builtin">Built-in</option><option value="custom">Custom</option><option value="enabled">Enabled</option><option value="disabled">Disabled</option></select></label>
+          <button id="newProgram" type="button">New Program</button>
+          <button class="secondary" id="browseProgram" type="button">Browse JSON</button>
+          <button class="secondary" id="downloadProgramTemplate" type="button">Download Template</button>
+          <button class="secondary" id="refreshPrograms" type="button">Refresh Registry</button>
+          <input class="manager-hidden" id="programFile" type="file" accept=".json,application/json">
+        </div>
+        <div id="managerStats" class="manager-stats">0 built-in · 0 custom · 0 disabled</div>
+        <div class="manager-grid">
+          <div id="managerProgramRegistry" class="manager-registry"><div class="manager-empty">Run Health or Refresh to load registered programs.</div></div>
+          <aside class="manager-editor" id="programEditor" hidden>
+            <div class="manager-editor-head"><strong id="editorTitle">New Macro Program</strong><span id="editorState" class="manager-badge">DRAFT</span></div>
+            <form class="manager-editor-body" id="programForm">
+              <label>Macro Definition JSON<textarea id="programDefinition" spellcheck="false" style="min-height:280px"></textarea></label>
+              <div id="programFileMeta" class="manager-file-meta">New draft. Browse only loads a file; it does not register it.</div>
+              <div class="row3" style="margin-top:10px">
+                <button class="secondary" id="validateProgram" type="button">Validate</button>
+                <button id="registerProgram" type="submit">Add to Registry</button>
+                <button class="secondary" id="clearProgramForm" type="button">Cancel</button>
+              </div>
+              <div class="hint">Only atr.pyautogui_program.v1 JSON and bounded bridge actions are accepted. Browse and Download Template never register a program.</div>
+            </form>
+          </aside>
+        </div>
+        <details class="manager-result">
+          <summary>Program Manager Result</summary>
+          <pre id="managerLatestResult">No manager request yet.</pre>
+        </details>
+      </section>
+
+
       <div class="split">
         <section id="resultPanel">
           <div class="result-head">
@@ -4004,6 +4894,7 @@ INDEX_HTML = r"""<!doctype html>
       </section>
     </div>
   </main>
+  </details>
   <script>
     const tokenInput = document.getElementById("token");
     const output = document.getElementById("output");
@@ -4086,7 +4977,6 @@ INDEX_HTML = r"""<!doctype html>
     const timelineTrack = document.getElementById("timelineTrack");
     const timelinePill = document.getElementById("timelinePill");
     const focusModeButton = document.getElementById("focusMode");
-    const programRegistry = document.getElementById("programRegistry");
     let selectedProgramId = "utm_compression_start_v1";
     let lastResult = {};
     let previewMode = "live";
@@ -4392,40 +5282,10 @@ INDEX_HTML = r"""<!doctype html>
       setIntentCard("payload", errors.length ? errors[0] : `${payload.program_id || "program"} ready`, errors.length ? "bad" : "ok");
       return errors.length === 0;
     }
-    function programMeta(program) {
-      const sequence = Array.isArray(program.sequence) ? program.sequence : [];
-      const required = Array.isArray(program.required_locator_names) ? program.required_locator_names : [];
-      const parts = [];
-      if (program.program_type) parts.push(program.program_type);
-      if (sequence.length) parts.push(`${sequence.length} step(s)`);
-      if (required.length) parts.push(`${required.length} locator(s)`);
-      return parts;
-    }
     function renderProgramRegistry(data) {
-      if (!programRegistry || !data || !Array.isArray(data.programs)) return;
+      if (!data || !Array.isArray(data.programs)) return;
       const programs = data.programs.slice().sort((a, b) => String(a.program_id || "").localeCompare(String(b.program_id || "")));
-      if (!programs.length) {
-        programRegistry.innerHTML = '<div class="program-card"><div class="program-card-head"><strong>No programs returned</strong><span class="program-kind">empty</span></div><p>The bridge returned an empty registry. Check server configuration.</p></div>';
-        return;
-      }
-      programRegistry.innerHTML = "";
-      for (const program of programs) {
-        const id = program.program_id || "unknown";
-        const kind = program.program_type || "macro";
-        const meta = programMeta(program).map((item) => `<span>${escapeHtml(item)}</span>`).join("");
-        const card = document.createElement("div");
-        card.className = "program-card" + (id === selectedProgramId ? " selected" : "");
-        card.dataset.programId = id;
-        card.innerHTML = `
-          <div class="program-card-head"><strong>${escapeHtml(id)}</strong><span class="program-kind">${escapeHtml(kind)}</span></div>
-          <p>${escapeHtml(program.description || "Allowlisted Windows bridge program.")}</p>
-          <div class="program-meta">${meta || "<span>ready</span>"}</div>
-          <div class="program-card-actions">
-            <button class="secondary" data-program-load="${escapeHtml(id)}">Load</button>
-            <button data-program-sim="${escapeHtml(id)}">Simulate</button>
-          </div>`;
-        programRegistry.appendChild(card);
-      }
+      managerAcceptPrograms(programs);
     }
     function buildProgramPayload(programId, simulate) {
       if (programId === "program1") return {sequence_id: "program1-check-001", program_id: "program1", command: "program1"};
@@ -4435,23 +5295,6 @@ INDEX_HTML = r"""<!doctype html>
       payload.sequence_id = `${payload.sequence_id}-${payload.program_id}`;
       return payload;
     }
-    function loadProgramIntoConsole(programId) {
-      selectedProgramId = programId || selectedProgramId;
-      if (programId === "utm_stop_or_abort_v1") renderPayloadPreview("abort");
-      else if (programId === "program1") {
-        previewPayloadEnvelope = {ok_to_send: true, mode: "demo", route: "POST /execute", preflight: "non-actuating demo", validation_errors: [], payload: buildProgramPayload(programId, false)};
-        if (payloadPreview) payloadPreview.textContent = JSON.stringify(previewPayloadEnvelope, null, 2);
-        setPayloadPreviewPill("program1 demo ready", "ok");
-        setIntentCard("mode", "Program1 demo", "ok");
-        setIntentCard("route", "POST /execute", "ok");
-        setIntentCard("preflight", "non-actuating", "ok");
-        setIntentCard("payload", "program1 ready", "ok");
-      } else renderPayloadPreview("live");
-      appendLog(`selected program: ${selectedProgramId}`);
-      const currentPrograms = bridgeState.programs ? {programs: bridgeState.programs} : null;
-      if (currentPrograms) renderProgramRegistry(currentPrograms);
-    }
-
     function renderInputBlocker(mode) {
       const errors = validateUtmInputs();
       render({
@@ -4844,6 +5687,7 @@ INDEX_HTML = r"""<!doctype html>
       if (Array.isArray(lastResult.programs)) renderProgramRegistry(lastResult);
       renderProofChecklist(lastResult);
       renderArtifactPreview(lastResult);
+      renderEssentialSummary(lastResult);
     }
     async function call(path, options = {}) {
       const fetchOptions = {...options};
@@ -5075,34 +5919,11 @@ Invoke-RestMethod -Uri ${psDoubleQuote(window.location.origin + "/health")} -Hea
       };
     }
 
-    if (programRegistry) {
-      programRegistry.addEventListener("click", (event) => {
-        const loadButton = event.target.closest("button[data-program-load]");
-        const simButton = event.target.closest("button[data-program-sim]");
-        const card = event.target.closest(".program-card[data-program-id]");
-        const programId = (loadButton && loadButton.dataset.programLoad) || (simButton && simButton.dataset.programSim) || (card && card.dataset.programId);
-        if (!programId) return;
-        if (simButton) {
-          selectedProgramId = programId;
-          call("/execute", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(buildProgramPayload(programId, true))});
-          return;
-        }
-        loadProgramIntoConsole(programId);
-      });
-    }
-
     document.getElementById("health").addEventListener("click", runHealthCheck);
-    document.getElementById("healthInline").addEventListener("click", runHealthCheck);
-    document.getElementById("healthTop").addEventListener("click", runHealthCheck);
     document.getElementById("safePreflight").addEventListener("click", () => runSafePreflight(true));
     document.getElementById("preflightRefreshInline").addEventListener("click", () => runSafePreflight(true));
-    document.getElementById("programs").addEventListener("click", () => call("/programs"));
     document.getElementById("locators").addEventListener("click", () => call("/locators"));
     document.getElementById("readiness").addEventListener("click", () => call("/readiness"));
-    document.getElementById("program1").addEventListener("click", () => call("/execute", {
-      method: "POST", headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({sequence_id: "program1-check-001", program_id: "program1", command: "program1"})
-    }));
     document.getElementById("utmSim").addEventListener("click", () => {
       if (!renderPayloadPreview("sim")) {
         renderInputBlocker("sim");
@@ -5187,12 +6008,6 @@ Invoke-RestMethod -Uri ${psDoubleQuote(window.location.origin + "/health")} -Hea
       await navigator.clipboard.writeText(JSON.stringify(currentUtmPayload(false), null, 2));
       appendLog("current UTM payload copied to clipboard");
     });
-    document.querySelectorAll("[data-proxy-click]").forEach((button) => {
-      button.addEventListener("click", () => {
-        const target = document.getElementById(button.dataset.proxyClick || "");
-        if (target && typeof target.click === "function") target.click();
-      });
-    });
     document.getElementById("formatJson").addEventListener("click", () => {
       try { sequenceInput.value = JSON.stringify(JSON.parse(sequenceInput.value), null, 2); }
       catch (error) { render({ok: false, status: "failed", failure_code: "BAD_JSON", message: String(error)}); }
@@ -5233,6 +6048,280 @@ export WINDOWS_PYAUTOGUI_BRIDGE_TOKEN="${token}"`;
       const element = document.getElementById(id);
       if (element) element.addEventListener("change", () => renderPayloadPreview(previewMode));
     });
+
+
+
+    const essentialProgramManagerSlot = document.getElementById("essentialProgramManagerSlot");
+    const programManagerPanel = document.getElementById("programManagerPanel");
+    if (essentialProgramManagerSlot && programManagerPanel) essentialProgramManagerSlot.appendChild(programManagerPanel);
+
+    function renderEssentialSummary(data) {
+      const payload = data && typeof data === "object" ? data : {};
+      const health = payload.health && typeof payload.health === "object" ? payload.health : payload;
+      const py = health.pyautogui || (bridgeState.health && bridgeState.health.pyautogui) || {};
+      const ok = payload.ok === true;
+      const status = String(payload.status || (ok ? "ready" : "idle"));
+      const resultText = payload.message || payload.failure_code || (payload.program_id ? `${payload.program_id}: ${status}` : status);
+      const resultTone = payload.failure_code || payload.ok === false ? "bad" : ok ? "ok" : "warn";
+
+      document.getElementById("essentialBridgeState").textContent = ok ? (status === "degraded" ? "Reachable / degraded" : "Reachable") : (payload.failure_code ? "Blocked" : "Not checked");
+      document.getElementById("essentialPyAutoGUI").textContent = py.available === true ? "Ready" : py.available === false ? "Unavailable" : "Unknown";
+      const result = document.getElementById("essentialResult");
+      result.textContent = resultText;
+      result.dataset.tone = resultTone;
+    }
+
+
+    const managerRegistry = document.getElementById("managerProgramRegistry");
+    const managerSearchInput = document.getElementById("managerSearch");
+    const managerFilterInput = document.getElementById("managerFilter");
+    const managerProgramFile = document.getElementById("programFile");
+    const managerDefinitionInput = document.getElementById("programDefinition");
+    const programEditor = document.getElementById("programEditor");
+    let managerBridgePrograms = [];
+    let managerEditingProgramId = "";
+    let managerEditingBuiltin = false;
+
+    function managerShowResult(payload) {
+      const element = document.getElementById("managerLatestResult");
+      if (element) element.textContent = JSON.stringify(payload, null, 2);
+      const summary = document.getElementById("essentialResult");
+      if (summary) {
+        summary.textContent = payload.message || payload.failure_code || payload.status || "Program Manager updated.";
+        summary.dataset.tone = payload.ok === false ? "bad" : payload.ok === true ? "ok" : "warn";
+      }
+    }
+    function managerBadge(text, tone = "") {
+      return `<span class="manager-badge ${tone}">${escapeHtml(text)}</span>`;
+    }
+    function managerVisiblePrograms() {
+      return managerBridgePrograms.slice().sort((left, right) => String(left.name || left.program_id).localeCompare(String(right.name || right.program_id)));
+    }
+    function managerFilteredPrograms() {
+      const query = managerSearchInput.value.trim().toLowerCase();
+      const filter = managerFilterInput.value;
+      return managerVisiblePrograms().filter((program) => {
+        const builtIn = program.built_in !== false;
+        const enabled = program.enabled !== false;
+        const searchable = `${program.name || ""} ${program.program_id || ""} ${program.description || ""}`.toLowerCase();
+        if (query && !searchable.includes(query)) return false;
+        if (filter === "builtin" && !builtIn) return false;
+        if (filter === "custom" && builtIn) return false;
+        if (filter === "enabled" && !enabled) return false;
+        if (filter === "disabled" && enabled) return false;
+        return true;
+      });
+    }
+    function managerRenderPrograms() {
+      const allPrograms = managerVisiblePrograms();
+      const programs = managerFilteredPrograms();
+      const builtInCount = allPrograms.filter((item) => item.built_in !== false).length;
+      const customCount = allPrograms.length - builtInCount;
+      const disabledCount = allPrograms.filter((item) => item.enabled === false).length;
+      document.getElementById("programCount").textContent = `${programs.length} / ${allPrograms.length}`;
+      document.getElementById("managerStats").textContent = `${builtInCount} built-in · ${customCount} custom · ${disabledCount} disabled`;
+      if (!programs.length) {
+        managerRegistry.innerHTML = '<div class="manager-empty">No programs match the current filter.</div>';
+        return;
+      }
+      managerRegistry.innerHTML = programs.map((program) => {
+        const builtIn = program.built_in !== false;
+        const enabled = program.enabled !== false;
+        return `<article class="program-card manager-program-card" data-manager-program-id="${escapeHtml(program.program_id)}">
+          <div class="manager-program-info">
+            <div class="program-card-head"><strong>${escapeHtml(program.name || program.program_id)}</strong><span class="program-kind">${escapeHtml(program.program_type || "bridge program")}</span></div>
+            <p><code>${escapeHtml(program.program_id)}</code> · ${escapeHtml(program.description || "No description")}</p>
+            <div class="manager-badges">${managerBadge(builtIn ? "BUILT-IN" : "CUSTOM")}${managerBadge(enabled ? "ENABLED" : "DISABLED", enabled ? "ok" : "warn")}</div>
+          </div>
+          <div class="manager-actions">
+            <button class="secondary" data-manager-action="edit">${builtIn ? "View" : "Edit"}</button>
+            <button class="secondary" data-manager-action="toggle" ${builtIn ? "disabled" : ""}>${builtIn ? "Built-in" : enabled ? "Disable" : "Enable"}</button>
+            <button class="secondary" data-manager-action="revalidate">${builtIn ? "Refresh" : "Validate"}</button>
+            <button data-manager-action="run" ${enabled ? "" : "disabled"}>Test</button>
+            <button class="secondary" data-manager-action="delete" ${builtIn ? "disabled" : ""}>${builtIn ? "Built-in" : "Delete"}</button>
+          </div>
+        </article>`;
+      }).join("");
+    }
+    function managerAcceptPrograms(programs) {
+      managerBridgePrograms = Array.isArray(programs) ? programs.slice() : [];
+      managerRenderPrograms();
+    }
+    async function managerRefreshPrograms() {
+      const payload = await call("/programs", {quiet: true, render: false});
+      managerAcceptPrograms(payload && Array.isArray(payload.programs) ? payload.programs : []);
+      managerShowResult(payload);
+      return payload;
+    }
+    function managerTemplate() {
+      return {
+        schema: "atr.pyautogui_program.v1",
+        program_id: "my_macro",
+        name: "My Macro",
+        description: "Bounded Windows GUI operation",
+        enabled: true,
+        program_type: "macro",
+        safe_test: false,
+        sequence: [
+          {action: "press", key: "esc"},
+          {action: "log", message: "macro completed"},
+        ],
+      };
+    }
+    function managerEditableDefinition(program) {
+      return {
+        schema: "atr.pyautogui_program.v1",
+        program_id: String(program.program_id || ""),
+        name: String(program.name || program.program_id || ""),
+        description: String(program.description || ""),
+        enabled: program.enabled !== false,
+        program_type: "macro",
+        safe_test: Boolean(program.safe_test),
+        sequence: Array.isArray(program.sequence) ? program.sequence : [],
+      };
+    }
+    function managerDefinition() {
+      let definition;
+      try { definition = JSON.parse(managerDefinitionInput.value); }
+      catch (error) { throw new Error(`Invalid JSON: ${error.message || error}`); }
+      if (!definition || typeof definition !== "object" || Array.isArray(definition)) throw new Error("Macro definition must be a JSON object.");
+      return definition;
+    }
+    function managerClearForm() {
+      document.getElementById("programForm").reset();
+      managerEditingProgramId = "";
+      managerEditingBuiltin = false;
+      managerDefinitionInput.readOnly = false;
+      document.getElementById("validateProgram").disabled = false;
+      document.getElementById("registerProgram").disabled = false;
+      document.getElementById("editorTitle").textContent = "New Macro Program";
+      document.getElementById("editorState").textContent = "DRAFT";
+      document.getElementById("programFileMeta").textContent = "New draft. Browse only loads a file; it does not register it.";
+      programEditor.hidden = true;
+    }
+    function managerOpenEditor(definition, title, state, meta, readOnly = false) {
+      programEditor.hidden = false;
+      managerDefinitionInput.value = JSON.stringify(definition, null, 2);
+      managerDefinitionInput.readOnly = readOnly;
+      document.getElementById("validateProgram").disabled = readOnly;
+      document.getElementById("registerProgram").disabled = readOnly;
+      document.getElementById("editorTitle").textContent = title;
+      document.getElementById("editorState").textContent = state;
+      document.getElementById("programFileMeta").textContent = meta;
+      programEditor.scrollIntoView({behavior: "smooth", block: "nearest"});
+    }
+    function managerEditProgram(program) {
+      const builtIn = program.built_in !== false;
+      managerEditingProgramId = program.program_id;
+      managerEditingBuiltin = builtIn;
+      managerOpenEditor(
+        managerEditableDefinition(program),
+        builtIn ? "Built-in Program" : "Edit Registered Macro",
+        builtIn ? "READ-ONLY" : "REGISTERED",
+        builtIn ? "Built-in programs are immutable and can only be tested." : String(program.source_file || "Registered macro definition."),
+        builtIn,
+      );
+    }
+    async function managerImportFile(file) {
+      if (!file.name.toLowerCase().endsWith(".json")) throw new Error("Browse accepts JSON macro definitions only.");
+      const definition = JSON.parse(await file.text());
+      managerEditingProgramId = "";
+      managerEditingBuiltin = false;
+      const fileMeta = {name: file.name, size: file.size, type: file.type || "application/json", last_modified: file.lastModified};
+      managerOpenEditor(definition, "Loaded JSON Macro", "FILE", `${file.name} · ${file.size} bytes · not registered`);
+      managerShowResult({ok: true, status: "file_loaded", file: fileMeta, registered: false, bridge_unchanged: true});
+    }
+
+    document.getElementById("programForm").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      try {
+        if (managerEditingBuiltin) throw new Error("Built-in programs cannot be overwritten.");
+        const definition = managerDefinition();
+        const previousId = managerEditingProgramId;
+        const result = await call("/programs/register", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(definition), render: false});
+        managerShowResult(result);
+        if (!result.ok) return;
+        if (previousId && previousId !== definition.program_id) {
+          await call(`/programs/${encodeURIComponent(previousId)}`, {method: "DELETE", render: false, quiet: true});
+        }
+        await managerRefreshPrograms();
+        managerClearForm();
+      } catch (error) { managerShowResult({ok: false, error: String(error)}); }
+    });
+    managerRegistry.addEventListener("click", async (event) => {
+      const button = event.target.closest("button[data-manager-action]");
+      const card = event.target.closest("[data-manager-program-id]");
+      if (!button || !card) return;
+      const program = managerVisiblePrograms().find((item) => item.program_id === card.dataset.managerProgramId);
+      if (!program) return;
+      const action = button.dataset.managerAction;
+      if (action === "edit") { managerEditProgram(program); return; }
+      if (action === "toggle") {
+        if (program.built_in !== false) return;
+        const definition = managerEditableDefinition(program);
+        definition.enabled = program.enabled === false;
+        const result = await call("/programs/register", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(definition), render: false});
+        managerShowResult(result);
+        if (result.ok) await managerRefreshPrograms();
+        return;
+      }
+      if (action === "delete") {
+        if (program.built_in !== false) return;
+        const result = await call(`/programs/${encodeURIComponent(program.program_id)}`, {method: "DELETE", render: false});
+        managerShowResult(result);
+        if (result.ok) await managerRefreshPrograms();
+        return;
+      }
+      if (action === "revalidate") {
+        if (program.built_in !== false) { await managerRefreshPrograms(); return; }
+        const result = await call("/programs/validate", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(managerEditableDefinition(program)), render: false});
+        managerShowResult(result);
+        return;
+      }
+      if (action === "run") {
+        const payload = program.built_in === false
+          ? {sequence_id: `manager-${Date.now()}`, program_id: program.program_id}
+          : buildProgramPayload(program.program_id, true);
+        const result = await call("/execute", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(payload)});
+        managerShowResult(result);
+      }
+    });
+    document.getElementById("refreshPrograms").addEventListener("click", managerRefreshPrograms);
+    document.getElementById("clearProgramForm").addEventListener("click", managerClearForm);
+    document.getElementById("newProgram").addEventListener("click", () => {
+      managerClearForm();
+      managerOpenEditor(managerTemplate(), "New Macro Program", "DRAFT", "Template loaded locally. Validate or add it when ready.");
+      managerDefinitionInput.focus();
+    });
+    document.getElementById("browseProgram").addEventListener("click", () => managerProgramFile.click());
+    document.getElementById("downloadProgramTemplate").addEventListener("click", () => {
+      const blob = new Blob([JSON.stringify(managerTemplate(), null, 2) + "\n"], {type: "application/json"});
+      const href = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = href;
+      anchor.download = "atr_pyautogui_program_template.json";
+      anchor.click();
+      URL.revokeObjectURL(href);
+      managerShowResult({ok: true, status: "template_downloaded", registered: false, file_name: anchor.download});
+    });
+    document.getElementById("validateProgram").addEventListener("click", async () => {
+      try {
+        const result = await call("/programs/validate", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(managerDefinition()), render: false});
+        managerShowResult(result);
+      } catch (error) { managerShowResult({ok: false, status: "validation_failed", error: String(error)}); }
+    });
+    managerProgramFile.addEventListener("change", async () => {
+      const file = managerProgramFile.files && managerProgramFile.files[0];
+      if (!file) return;
+      try { await managerImportFile(file); }
+      catch (error) { managerShowResult({ok: false, status: "file_import_failed", error: String(error)}); }
+      finally { managerProgramFile.value = ""; }
+    });
+    managerSearchInput.addEventListener("input", managerRenderPrograms);
+    managerFilterInput.addEventListener("change", managerRenderPrograms);
+    managerRenderPrograms();
+
+
     renderPayloadPreview("live");
     if (tokenInput.value.trim()) {
       runHealthCheck();
@@ -5332,7 +6421,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         if not self._require_auth():
             return
-        if self.path not in {"/execute", "/screenshot", "/locators/capture"}:
+        if self.path not in {"/execute", "/screenshot", "/locators/capture", "/programs/validate", "/programs/register"}:
             self._send(404, {"ok": False, "status": "not_found"})
             return
         length = int(self.headers.get("Content-Length", "0") or "0")
@@ -5349,6 +6438,16 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/locators/capture":
             self._send(200, _capture_locator(payload))
             return
+        if self.path == "/programs/validate":
+            result = _validate_program_definition(payload)
+            self._write_audit_event({"auth_ok": True, "status": "program_validate", "program_id": str(payload.get("program_id") or ""), "result_ok": bool(result.get("ok")), "failure_code": str(result.get("failure_code") or "")})
+            self._send(200, result)
+            return
+        if self.path == "/programs/register":
+            result = _register_program_definition(payload)
+            self._write_audit_event({"auth_ok": True, "status": "program_register", "program_id": str(payload.get("program_id") or ""), "result_ok": bool(result.get("ok")), "failure_code": str(result.get("failure_code") or "")})
+            self._send(200 if result.get("ok") else 400, result)
+            return
         self._write_audit_event({"auth_ok": True, "status": "execute_payload", "audit_kind": "execute_payload", **_request_audit_event_from_payload(payload)})
         result = _execute(payload)
         self._write_audit_event({
@@ -5364,6 +6463,19 @@ class Handler(BaseHTTPRequestHandler):
             "failure_code": str(result.get("failure_code") or ""),
         })
         self._send(200, result)
+
+    def do_DELETE(self) -> None:
+        if not self._require_auth():
+            return
+        path = urlparse(self.path).path
+        if not path.startswith("/programs/"):
+            self._send(404, {"ok": False, "status": "not_found"})
+            return
+        program_id = unquote(path.split("/programs/", 1)[1].strip("/"))
+        result = _delete_custom_program(program_id)
+        self._write_audit_event({"auth_ok": True, "status": "program_delete", "program_id": program_id, "result_ok": bool(result.get("ok")), "failure_code": str(result.get("failure_code") or "")})
+        status = 200 if result.get("ok") else 404 if result.get("failure_code") == "PYAUTOGUI_PROGRAM_NOT_FOUND" else 400
+        self._send(status, result)
 
     def log_message(self, format: str, *args: Any) -> None:
         print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {self.address_string()} {format % args}")
@@ -5383,15 +6495,18 @@ BridgeRequestHandler = Handler
 
 def _parse_cli_args() -> argparse.Namespace:
     """Apply optional CLI overrides used by the Windows packaging scripts."""
-    global HOST, PORT, TOKEN, TOKEN_HEADER, ARTIFACT_ROOT, LOCATOR_ROOT, UTM_EXPORT_ROOT
+    global HOST, PORT, TOKEN, TOKEN_HEADER, ARTIFACT_ROOT, LOCATOR_ROOT, UTM_EXPORT_ROOT, PROGRAM_ROOT, BRIDGE_PLATFORM
     parser = argparse.ArgumentParser(description="ATR Windows PyAutoGUI bridge server")
     parser.add_argument("--host", default=None, help="Bind host. Overrides WINDOWS_PYAUTOGUI_BRIDGE_HOST.")
     parser.add_argument("--port", type=int, default=None, help="Bind port. Overrides WINDOWS_PYAUTOGUI_BRIDGE_PORT.")
     parser.add_argument("--token", default=None, help="Bridge token. Overrides WINDOWS_PYAUTOGUI_BRIDGE_TOKEN.")
+    parser.add_argument("--token-file", default=None, help="Read the bridge token from a private text file.")
+    parser.add_argument("--platform", choices=("auto", "windows", "linux"), default=None, help="Desktop control platform.")
     parser.add_argument("--token-header", default=None, help="HTTP token header name.")
     parser.add_argument("--artifact-dir", default=None, help="Directory for request logs, screenshots, and exported artifacts.")
     parser.add_argument("--reference-dir", default=None, help="Directory for locator/reference images.")
     parser.add_argument("--utm-export-dir", default=None, help="Directory watched for UTM CSV exports.")
+    parser.add_argument("--program-dir", default=None, help="Directory containing registered JSON macro programs.")
     parser.add_argument("--allow-no-token", action="store_true", help="Allow local bench use without token authentication.")
     parser.add_argument("--open-browser", action="store_true", help="Open the local bridge Web GUI after startup.")
     args = parser.parse_args()
@@ -5401,6 +6516,10 @@ def _parse_cli_args() -> argparse.Namespace:
         PORT = int(args.port)
     if args.token is not None:
         TOKEN = str(args.token)
+    elif args.token_file:
+        TOKEN = _read_bridge_token_file(Path(args.token_file))
+    if args.platform:
+        BRIDGE_PLATFORM = _normalize_bridge_platform(args.platform)
     if args.token_header:
         TOKEN_HEADER = str(args.token_header)
     if args.artifact_dir:
@@ -5409,6 +6528,8 @@ def _parse_cli_args() -> argparse.Namespace:
         LOCATOR_ROOT = Path(args.reference_dir)
     if args.utm_export_dir:
         UTM_EXPORT_ROOT = Path(args.utm_export_dir)
+    if args.program_dir:
+        PROGRAM_ROOT = Path(args.program_dir)
     if args.allow_no_token and args.token is None and not TOKEN:
         TOKEN = ""
     return args

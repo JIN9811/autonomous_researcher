@@ -435,19 +435,49 @@ graph:
       auto_ports: true
   - source: vision
     target: manipulation
-    condition: null
-    label: 'default transition: vision -> manipulation'
+    condition: next_stage:manipulation
+    label: 'conditional transition: active-cam-approved vision -> manipulation'
     metadata:
       runtime_edge: logical_transition
       from_stage: vision
       to_stage: manipulation
-      condition: specimen_pose_ready_and_camera_returned_to_vla
-      transition_condition: specimen_pose_ready_and_camera_returned_to_vla
-      default_transition: true
+      condition: next_stage:manipulation
+      transition_condition: next_stage:manipulation
+      default_transition: false
       auto_ports: true
       contracts:
       - specimen_pose.v1
       - transfer_readiness.camera_returned_to_vla
+  - source: vision
+    target: equipment
+    condition: null
+    label: 'default transition: verified vision -> equipment'
+    metadata:
+      runtime_edge: logical_transition
+      from_stage: vision
+      to_stage: equipment
+      condition: default
+      transition_condition: default
+      default_transition: true
+      auto_ports: true
+      contracts:
+      - vision_manipulation_completion.v1
+      - placement_verification.v1
+  - source: vision
+    target: vision
+    condition: next_stage:vision
+    label: 'conditional transition: monitor active rollout in vision'
+    metadata:
+      runtime_edge: logical_transition
+      from_stage: vision
+      to_stage: vision
+      condition: next_stage:vision
+      transition_condition: next_stage:vision
+      default_transition: false
+      auto_ports: true
+      contracts:
+      - robot_task_result.v1
+      - post_place_interlock.v1
   - source: manipulation
     target: vision_verify
     condition: null
@@ -465,15 +495,15 @@ graph:
       - placement_verification.v1
   - source: manipulation
     target: vision
-    condition: next_stage:vision
-    label: 'conditional transition: manipulation -> vision verification'
+    condition: null
+    label: 'default transition: manipulation -> vision verification'
     metadata:
       runtime_edge: logical_transition
       from_stage: manipulation
       to_stage: vision
-      condition: next_stage:vision
-      transition_condition: next_stage:vision
-      default_transition: false
+      condition: default
+      transition_condition: default
+      default_transition: true
       auto_ports: true
       contracts:
       - robot_task_result.v1
@@ -492,18 +522,6 @@ graph:
       auto_ports: true
       contracts:
       - placement_verification.v1
-  - source: manipulation
-    target: equipment
-    condition: null
-    label: 'default transition: manipulation -> equipment'
-    metadata:
-      runtime_edge: logical_transition
-      from_stage: manipulation
-      to_stage: equipment
-      condition: default
-      transition_condition: default
-      default_transition: true
-      auto_ports: true
   - source: equipment
     target: analysis
     condition: null
@@ -834,8 +852,8 @@ graph:
     idle: design
     design: specimen
     specimen: vision
-    vision: manipulation
-    manipulation: equipment
+    vision: equipment
+    manipulation: vision
     equipment: analysis
     analysis: knowledge
     knowledge: bo

@@ -7,18 +7,19 @@ ui:
   cards:
   - id: equipment_bridge_descriptor
     type: bridge_status
-    title: Equipment Bridge Descriptor
+    title: Equipment Profile / Bridge
     eyebrow: module descriptor
     span: 4
     tone: equipment
     selectors:
+      profile_id: metadata.latest_equipment_profile.profile_id
       bridge: metadata.latest_equipment_report.bridge
       profile: metadata.latest_equipment_report.control_plan.profile
       data_file: metadata.latest_equipment_result.result_file
       handoff: metadata.latest_equipment_handoff_packet.status
   - id: utm_data_descriptor
     type: evidence_summary
-    title: UTM Data Descriptor
+    title: UTM Runtime Evidence
     eyebrow: module descriptor
     span: 4
     tone: success

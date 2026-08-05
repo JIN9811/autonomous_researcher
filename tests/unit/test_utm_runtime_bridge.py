@@ -456,6 +456,86 @@ def test_frame_capture_uses_ros_image_topic_and_returns_data_url(tmp_path: Path)
     assert commands and commands[0][:2] == ["python3", "-c"]
 
 
+def test_raw_frame_capture_prioritizes_unannotated_camera_topic(tmp_path: Path) -> None:
+    script_path = tmp_path / "start_utm_vision_stack.sh"
+    script_path.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    manager = UTMRuntimeProcessManager(
+        UTMRuntimeConfig(
+            workspace_root=tmp_path,
+            script_path=script_path,
+            log_dir=tmp_path / "logs",
+            frame_topic="/image_utm",
+            ros_setup_paths=[],
+        )
+    )
+    commands: list[list[str]] = []
+    manager._process = _FakeRunningProcess()  # type: ignore[assignment]
+
+    def fake_ros_command(command: list[str], *, timeout_sec: float = 3.0) -> tuple[int, str, str]:
+        commands.append(command)
+        topic = command[-2]
+        return (
+            0,
+            json.dumps(
+                {
+                    "ok": True,
+                    "topic": topic,
+                    "width": 640,
+                    "height": 480,
+                    "encoding": "rgb8",
+                    "format": "jpeg",
+                    "data_url": "data:image/jpeg;base64,ZmFrZS1qcGVn",
+                }
+            ),
+            "",
+        )
+
+    manager._run_ros_frame_command = fake_ros_command  # type: ignore[method-assign]
+
+    frame = manager.raw_frame()
+
+    assert frame["ok"] is True
+    assert frame["mode"] == "ros_raw_image_topic"
+    assert frame["topic"] == "/camera/image_raw"
+    assert commands[0][-2] == "/camera/image_raw"
+
+
+def test_raw_frame_capture_keeps_live_observation_stream_running(tmp_path: Path) -> None:
+    script_path = tmp_path / "start_utm_vision_stack.sh"
+    script_path.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    manager = UTMRuntimeProcessManager(
+        UTMRuntimeConfig(
+            workspace_root=tmp_path,
+            script_path=script_path,
+            log_dir=tmp_path / "logs",
+            frame_topic="/image_utm",
+            ros_setup_paths=[],
+        )
+    )
+    stream = _FakeStream()
+    manager._process = _FakeRunningProcess()  # type: ignore[assignment]
+    manager._mjpeg_streams["/image_utm|15|82"] = stream  # type: ignore[assignment]
+    manager._run_ros_frame_command = lambda command, timeout_sec=3.0: (  # type: ignore[method-assign]
+        0,
+        json.dumps(
+            {
+                "ok": True,
+                "topic": command[-2],
+                "width": 640,
+                "height": 480,
+                "data_url": "data:image/jpeg;base64,ZmFrZS1qcGVn",
+            }
+        ),
+        "",
+    )
+
+    frame = manager.raw_frame()
+
+    assert frame["ok"] is True
+    assert manager._mjpeg_streams["/image_utm|15|82"] is stream
+    assert stream.stopped is False
+
+
 def test_frame_capture_skips_ros_when_runtime_is_stopped(tmp_path: Path) -> None:
     script_path = tmp_path / "start_utm_vision_stack.sh"
     script_path.write_text("#!/usr/bin/env bash\n", encoding="utf-8")

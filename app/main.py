@@ -28,6 +28,7 @@ import copy
 import csv
 import ctypes
 import hashlib
+import importlib.util
 import ipaddress
 import json
 import mimetypes
@@ -37,6 +38,7 @@ import shutil
 import signal
 import socket
 import subprocess
+import sys
 import threading
 import time
 import uuid
@@ -106,6 +108,7 @@ from utils.lerobot_joint_telemetry import (
     finalize_policy_tracking_artifacts,
     session_status_label,
 )
+from utils.manipulation_runtime_view import build_manipulation_runtime_view
 from utils.manipulation_profile import (
     MANIPULATION_AGENT_PROFILE_PATH,
     load_manipulation_agent_profile,
@@ -114,6 +117,8 @@ from utils.manipulation_profile import (
 )
 from utils.recording_specimen_pose import load_recording_specimen_pose
 from utils.ids import make_event_id
+from utils.equipment_profiles import DEFAULT_UTM_PROFILE_ID, EquipmentProfileRegistry, build_execution_contract
+from utils.local_pyautogui_bridge import LocalPyAutoGUIBridgeSupervisor
 from utils.paths import resolve_path
 from utils.printer_profile import (
     PRUSA_PRINT_PROFILE_PATH,
@@ -130,6 +135,8 @@ app.mount(
     StaticFiles(directory=str(resolve_path("sim/robotis_omx"))),
     name="robotis-omx-assets",
 )
+
+_LOCAL_PYAUTOGUI_BRIDGE_SUPERVISOR: LocalPyAutoGUIBridgeSupervisor | None = None
 
 
 @app.get("/favicon.ico", include_in_schema=False)
@@ -436,6 +443,8 @@ async def shutdown_lerobot_subprocesses() -> None:
     _cleanup_bambu_video_stream_processes(include_orphans=True)
     _lerobot_bridge().shutdown()
     _utm_runtime_bridge().shutdown()
+    if _LOCAL_PYAUTOGUI_BRIDGE_SUPERVISOR is not None:
+        _LOCAL_PYAUTOGUI_BRIDGE_SUPERVISOR.stop()
 
 
 class StartRunRequest(BaseModel):
@@ -465,6 +474,12 @@ class PlanningBootstrapRequest(BaseModel):
     backend: Literal["openai", "nemoclaw", "ollama", "vllm"] | None = None
     constraints: dict[str, object] = Field(default_factory=dict)
     session_id: str | None = None
+
+
+class VisionSpecimenPlacementRetryRequest(BaseModel):
+    """Operator retry for one run-scoped Vision specimen checkpoint."""
+
+    checkpoint: Literal["active_cam_ejection", "utm_post_place"]
 
 
 class BackendSwitchRequest(BaseModel):
@@ -917,6 +932,14 @@ class WindowsBridgeRunProgramRequest(BaseModel):
     sequence: list[dict[str, object]] = Field(default_factory=list)
 
 
+class EquipmentProfileActionRequest(BaseModel):
+    """Bounded action request for a registered common equipment profile."""
+
+    confirm_execute: bool = False
+    program_id: str = ""
+    include_screenshot: bool = True
+
+
 class WindowsBridgeScreenshotRequest(BaseModel):
     """Request body for manual Windows bridge screenshot capture."""
 
@@ -1309,6 +1332,13 @@ def _equipment_bridge() -> WindowsPyAutoGUIBridge:
     cfg = load_all_configs(resolve_path("configs"))
     config = WindowsPyAutoGUIBridgeConfig.from_devices_config(cfg.get("devices", {}), repo_root=resolve_path("."))
     return WindowsPyAutoGUIBridge(config)
+
+
+def _local_pyautogui_bridge_supervisor() -> LocalPyAutoGUIBridgeSupervisor:
+    global _LOCAL_PYAUTOGUI_BRIDGE_SUPERVISOR
+    if _LOCAL_PYAUTOGUI_BRIDGE_SUPERVISOR is None:
+        _LOCAL_PYAUTOGUI_BRIDGE_SUPERVISOR = LocalPyAutoGUIBridgeSupervisor(resolve_path("."))
+    return _LOCAL_PYAUTOGUI_BRIDGE_SUPERVISOR
 
 
 def _printer_workflow() -> PrinterAgenticWorkflow:
@@ -1733,6 +1763,37 @@ def _joint_telemetry_artifacts(log_path: Path, session: dict[str, Any]) -> dict[
     return artifacts
 
 
+def _manipulation_runtime_state() -> dict[str, Any]:
+    """Return only state fields needed by the read-only manipulation dashboard."""
+
+    state = controller._state
+    metadata = state.run_metadata if isinstance(state.run_metadata, dict) else {}
+    return {
+        "run_id": state.run_id,
+        "stage": state.stage.value,
+        "safe_stop_requested": state.safe_stop_requested,
+        "emergency_stop_requested": state.emergency_stop_requested,
+        "run_metadata": {
+            key: metadata[key]
+            for key in ("manipulation_report", "robot_task_result")
+            if isinstance(metadata.get(key), dict)
+        },
+    }
+
+
+def _manipulation_runtime_view(
+    session: dict[str, Any] | None = None,
+    packet: dict[str, Any] | None = None,
+    artifacts: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return build_manipulation_runtime_view(
+        session=session or {},
+        state=_manipulation_runtime_state(),
+        packet=packet,
+        artifacts=artifacts or {},
+    )
+
+
 def _utm_runtime_bridge() -> UTMRuntimeProcessManager:
     """Return the shared UTM ROS runtime manager used by GUI routes and tools."""
     global _utm_runtime_manager
@@ -1886,6 +1947,75 @@ async def windows_equipment_gui(request: Request) -> HTMLResponse:
         request=request,
         name="windows_equipment.html",
         context={"title": "Windows Equipment Bridge"},
+    )
+
+
+def _rewrite_windows_bridge_console_html(html: str) -> str:
+    """Keep the Windows bridge's absolute API calls inside the ATR proxy namespace."""
+    prefix = "/equipment/windows/bridge-ui"
+    shim = (
+        "<script>"
+        "(()=>{localStorage.setItem(\"bridgeToken\",\"atr-proxy-session\");"
+        "const f=window.fetch.bind(window);window.fetch=(input,init)=>{"
+        "if(typeof input==='string'&&input.startsWith('/'))input='" + prefix + "'+input;"
+        "return f(input,init);};})();"
+        "</script>"
+    )
+    if "</head>" in html:
+        return html.replace("</head>", shim + "</head>", 1)
+    return shim + html
+
+
+_BUNDLED_WINDOWS_CONSOLE_HTML: str | None = None
+
+
+def _bundled_windows_bridge_console_html() -> str:
+    """Load the packaged Windows console locally so the operator UI is always viewable."""
+    global _BUNDLED_WINDOWS_CONSOLE_HTML
+    if _BUNDLED_WINDOWS_CONSOLE_HTML is not None:
+        return _BUNDLED_WINDOWS_CONSOLE_HTML
+    source_path = Path(__file__).resolve().parents[1] / "Pyautogui_server_for_window" / "bridge" / "windows_pyautogui_bridge_server.py"
+    module_name = "atr_bundled_windows_pyautogui_console"
+    spec = importlib.util.spec_from_file_location(module_name, source_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Unable to load bundled Windows console source: {source_path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    _BUNDLED_WINDOWS_CONSOLE_HTML = _rewrite_windows_bridge_console_html(str(module.INDEX_HTML))
+    return _BUNDLED_WINDOWS_CONSOLE_HTML
+
+
+@app.get("/equipment/windows/console", response_class=HTMLResponse)
+async def local_windows_equipment_console() -> HTMLResponse:
+    """Render the packaged Windows operator console without requiring the remote bridge to be online."""
+    return HTMLResponse(content=_bundled_windows_bridge_console_html(), headers={"Cache-Control": "no-store"})
+
+
+@app.api_route(
+    "/equipment/windows/bridge-ui/{resource_path:path}",
+    methods=["GET", "POST"],
+    response_class=Response,
+)
+async def proxy_windows_equipment_bridge_ui(resource_path: str, request: Request) -> Response:
+    """Serve the selected Windows bridge GUI through ATR without exposing its token."""
+    bridge = _equipment_bridge()
+    result = bridge.proxy_ui_request(
+        method=request.method,
+        resource_path=resource_path,
+        query_string=request.url.query,
+        body=await request.body(),
+        content_type=request.headers.get("content-type", ""),
+    )
+    content = result.get("content", b"")
+    content_type = str(result.get("content_type") or "application/octet-stream")
+    if content_type.lower().startswith("text/html") and isinstance(content, bytes):
+        content = _rewrite_windows_bridge_console_html(content.decode("utf-8", errors="replace")).encode("utf-8")
+    return Response(
+        content=content,
+        status_code=int(result.get("status_code") or 502),
+        media_type=content_type.split(";", 1)[0],
+        headers={"Cache-Control": "no-store"},
     )
 
 
@@ -7752,6 +7882,7 @@ def _physical_validation_identity_gate(
         and str(source.get("status") or "") == "verified_complete"
     )
     identity_ok = bool(not missing and not mismatched)
+    screenshot_artifact = screenshot_result.get("artifact") if isinstance(screenshot_result.get("artifact"), dict) else {}
     evidence = {
         "dispatch_ok": dispatch_ok,
         "identity_ok": identity_ok,
@@ -10065,6 +10196,139 @@ async def post_windows_equipment_live_validation(req: WindowsBridgeLiveValidatio
         node_event=True,
     )
     return report
+
+
+def _equipment_profile_registry() -> EquipmentProfileRegistry:
+    """Return the common equipment registry used by Workspace and Agent adapters."""
+    return EquipmentProfileRegistry.default()
+
+
+def _equipment_profile_state(profile_id: str) -> dict[str, object]:
+    """Build token-safe state for one selected common equipment profile."""
+    try:
+        profile = _equipment_profile_registry().get(profile_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    bridge = _equipment_bridge()
+    connection = bridge.connection_status()
+    readiness = _windows_utm_readiness_from_bridge(bridge)
+    profile_status = bridge.utm_profile_status()
+    return {
+        "ok": True,
+        "profile": profile.to_safe_dict(),
+        "connection": {
+            "selected_candidate": connection.get("selected_candidate", ""),
+            "selected": bool(connection.get("selected")),
+            "token_configured": bool(connection.get("token_configured")),
+            "status": str(connection.get("status") or "unknown"),
+        },
+        "readiness": readiness,
+        "programs": bridge.list_programs({"runtime_mode": "test"}).get("programs", []),
+        "utm_profile": profile_status,
+        "evidence": controller._state.run_metadata.get("last_windows_utm_protocol_result", {}),
+    }
+
+
+@app.get("/api/equipment/profiles")
+async def get_equipment_profiles() -> dict[str, object]:
+    """List registered equipment profiles without exposing bridge secrets."""
+    registry = _equipment_profile_registry()
+    return {
+        "ok": True,
+        "selected_profile_id": DEFAULT_UTM_PROFILE_ID,
+        "profiles": [profile.to_safe_dict() for profile in registry.list()],
+    }
+
+
+@app.get("/api/equipment/profiles/{profile_id}/state")
+async def get_equipment_profile_state(profile_id: str) -> dict[str, object]:
+    """Return selected profile connection, readiness, programs, and evidence."""
+    return _equipment_profile_state(profile_id)
+
+
+@app.post("/api/equipment/profiles/{profile_id}/preflight")
+async def post_equipment_profile_preflight(profile_id: str, req: EquipmentProfileActionRequest) -> dict[str, object]:
+    """Run non-actuating profile readiness checks only."""
+    del req
+    state = _equipment_profile_state(profile_id)
+    state["action"] = "preflight"
+    state["non_actuating"] = True
+    return state
+
+
+@app.post("/api/equipment/profiles/{profile_id}/test")
+async def post_equipment_profile_test(profile_id: str, req: EquipmentProfileActionRequest) -> dict[str, object]:
+    """Run a registered profile through the existing bridge simulation contract."""
+    if not req.confirm_execute:
+        raise HTTPException(status_code=400, detail="confirm_execute=true is required for equipment profile tests")
+    try:
+        profile = _equipment_profile_registry().get(profile_id)
+        contract = build_execution_contract(
+            profile,
+            runtime_mode="test",
+            bridge_config={},
+            program_id=req.program_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404 if profile_id != DEFAULT_UTM_PROFILE_ID else 400, detail=str(exc)) from exc
+    bridge = _equipment_bridge()
+    payload: dict[str, object] = {
+        "runtime_mode": "test",
+        "run_id": controller._state.run_id,
+        "sequence_id": f"equipment-profile-test-{profile_id}",
+        "specimen_id": str(controller._state.current_experiment_spec.get("specimen_id") or "specimen-test"),
+        "program_id": contract.program_id,
+        "simulate_utm_protocol": contract.simulate_utm_protocol,
+        "confirm_setup_gui_execute": True,
+        "command": f"{profile.label} simulated protocol test",
+    }
+    result = bridge.run(payload)
+    screenshot_result = bridge.screenshot(
+        {
+            "runtime_mode": "test",
+            "run_id": controller._state.run_id,
+            "checkpoint": f"{profile_id}_protocol_test",
+        }
+    ) if req.include_screenshot else {}
+    request_log = bridge.request_log({"runtime_mode": "test"})
+    screenshot_artifact = screenshot_result.get("artifact") if isinstance(screenshot_result.get("artifact"), dict) else {}
+    evidence = {
+        "screenshot": (
+            result.get("screenshot_path")
+            or result.get("screen_evidence_path")
+            or screenshot_result.get("screenshot_path")
+            or screenshot_result.get("path")
+            or screenshot_result.get("artifact_path")
+            or screenshot_artifact.get("local_path")
+            or screenshot_artifact.get("path")
+            or ""
+        ),
+        "request_log": request_log.get("request_log") or request_log.get("path") or "",
+        "csv": result.get("csv_path") or result.get("utm_csv_path") or result.get("result_file") or "",
+    }
+    missing = [key for key in contract.required_evidence if not evidence.get(key)]
+    response = {
+        "ok": bool(result.get("ok")) and not missing,
+        "profile": contract.to_safe_dict(),
+        "mode": "test",
+        "simulation": True,
+        "result": result,
+        "screenshot_result": screenshot_result,
+        "evidence": evidence,
+        "analysis_handoff": {"status": "ready" if bool(result.get("ok")) and not missing else "blocked", "missing_evidence": missing},
+    }
+    controller._state.run_metadata["last_windows_utm_protocol_result"] = response
+    await controller.emit_workspace_result(
+        workspace="equipment",
+        tool="equipment.profile.test",
+        result=response,
+        stage=Stage.EQUIPMENT,
+        module_id="equipment",
+        agent="equipment_agent",
+        workflow="equipment_profile_test",
+        node_event=True,
+    )
+    return response
 
 
 @app.get("/api/equipment/windows/config")
@@ -12930,6 +13194,50 @@ async def post_printer_autoejection_test(req: PrinterAutoejectionTestRequest, re
     return result
 
 
+@app.get("/api/equipment/windows/local-bridge/status")
+async def get_local_pyautogui_bridge_status() -> dict[str, object]:
+    """Return the ATR-owned localhost PyAutoGUI bridge process state."""
+    status = _local_pyautogui_bridge_supervisor().status()
+    status["connection"] = _equipment_bridge().connection_status()
+    return status
+
+
+@app.post("/api/equipment/windows/local-bridge/start")
+async def post_local_pyautogui_bridge_start() -> dict[str, object]:
+    """Start the localhost bridge and register it as a standby candidate."""
+    supervisor = _local_pyautogui_bridge_supervisor()
+    status = supervisor.start()
+    candidate = supervisor.ensure_candidate(_equipment_bridge(), select=False) if status.get("running") else {}
+    return {**status, "candidate": candidate}
+
+
+@app.post("/api/equipment/windows/local-bridge/stop")
+async def post_local_pyautogui_bridge_stop() -> dict[str, object]:
+    """Stop only the localhost bridge process owned by ATR."""
+    status = _local_pyautogui_bridge_supervisor().stop()
+    status["connection"] = _equipment_bridge().connection_status()
+    return status
+
+
+@app.post("/api/equipment/windows/local-bridge/select")
+async def post_local_pyautogui_bridge_select() -> dict[str, object]:
+    """Select the localhost bridge only after live health is ready."""
+    supervisor = _local_pyautogui_bridge_supervisor()
+    status = supervisor.status()
+    if not status.get("running") or not status.get("healthy"):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "ok": False,
+                "status": "blocked",
+                "failure_code": "LOCAL_PYAUTOGUI_NOT_READY",
+                "message": "Start the local bridge and resolve its desktop-control health before selecting it.",
+            },
+        )
+    candidate = supervisor.ensure_candidate(_equipment_bridge(), select=True)
+    return {**status, "candidate": candidate}
+
+
 @app.post("/api/equipment/windows/discover")
 async def post_windows_equipment_discover(req: WindowsBridgeDiscoverRequest) -> dict[str, object]:
     """Scan the current network for Windows PyAutoGUI bridge hosts."""
@@ -13300,6 +13608,7 @@ async def get_lerobot_joint_telemetry_snapshot() -> dict[str, object]:
             "session": {},
             "packet": None,
             "artifacts": {},
+            "runtime_view": _manipulation_runtime_view(),
         }
     session = dict(context["session"])
     log_path = Path(context["log_path"])
@@ -13311,14 +13620,16 @@ async def get_lerobot_joint_telemetry_snapshot() -> dict[str, object]:
     artifacts: dict[str, Any] = {}
     if str(session.get("status") or "").upper() in TERMINAL_SESSION_STATUSES:
         artifacts = await asyncio.to_thread(_joint_telemetry_artifacts, log_path, session)
+    packet = packets[-1] if packets else None
     return {
         "ok": True,
         "schema": TELEMETRY_SCHEMA,
         "type": "telemetry_snapshot",
         "status": status,
         "session": _joint_telemetry_public_session(session),
-        "packet": packets[-1] if packets else None,
+        "packet": packet,
         "artifacts": artifacts,
+        "runtime_view": _manipulation_runtime_view(session, packet, artifacts),
     }
 
 
@@ -13383,6 +13694,7 @@ async def stream_lerobot_joint_telemetry(websocket: WebSocket) -> None:
     history_sent = False
     last_state_signature = ""
     finalized_sessions: set[str] = set()
+    latest_packet: dict[str, Any] | None = None
     try:
         while True:
             context = _joint_telemetry_session_context()
@@ -13396,6 +13708,7 @@ async def stream_lerobot_joint_telemetry(websocket: WebSocket) -> None:
                             "type": "telemetry_state",
                             "status": "idle",
                             "session": {},
+                            "runtime_view": _manipulation_runtime_view(),
                         }
                     )
                     last_state_signature = signature
@@ -13410,8 +13723,11 @@ async def stream_lerobot_joint_telemetry(websocket: WebSocket) -> None:
                 active_session_id = session_id
                 history_sent = False
                 last_state_signature = ""
+                latest_packet = None
 
             packets = await asyncio.to_thread(observer.poll, log_path, session)
+            if packets:
+                latest_packet = packets[-1]
             public_session = _joint_telemetry_public_session(session)
             status = session_status_label(session.get("status"))
             if status == "idle":
@@ -13426,6 +13742,7 @@ async def stream_lerobot_joint_telemetry(websocket: WebSocket) -> None:
                         "status": status,
                         "session": public_session,
                         "samples": packets,
+                        "runtime_view": _manipulation_runtime_view(session, latest_packet),
                     }
                 )
                 history_sent = True
@@ -13435,6 +13752,7 @@ async def stream_lerobot_joint_telemetry(websocket: WebSocket) -> None:
                     {
                         **packets[-1],
                         "session": public_session,
+                        "runtime_view": _manipulation_runtime_view(session, latest_packet),
                     }
                 )
             else:
@@ -13447,6 +13765,7 @@ async def stream_lerobot_joint_telemetry(websocket: WebSocket) -> None:
                             "type": "telemetry_state",
                             "status": status,
                             "session": public_session,
+                            "runtime_view": _manipulation_runtime_view(session, latest_packet),
                         }
                     )
                     last_state_signature = signature
@@ -13462,6 +13781,7 @@ async def stream_lerobot_joint_telemetry(websocket: WebSocket) -> None:
                         "status": status,
                         "session": public_session,
                         "artifacts": artifacts,
+                        "runtime_view": _manipulation_runtime_view(session, latest_packet, artifacts),
                     }
                 )
                 finalized_sessions.add(session_id)
@@ -14996,6 +15316,22 @@ async def resume_runtime_run(run_id: str) -> dict[str, object]:
     """Resume the active run addressed by run_id."""
     _require_current_run(run_id)
     return await controller.resume()
+
+
+@app.post("/api/runs/{run_id}/vision/specimen-placement-retry")
+async def retry_vision_specimen_placement(
+    run_id: str,
+    req: VisionSpecimenPlacementRetryRequest,
+) -> dict[str, object]:
+    """Retry only the active Vision specimen-placement checkpoint for this run."""
+    _require_current_run(run_id)
+    try:
+        return await controller.retry_vision_specimen_placement(
+            run_id=run_id,
+            checkpoint=req.checkpoint,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @app.post("/api/runs/{run_id}/stop")

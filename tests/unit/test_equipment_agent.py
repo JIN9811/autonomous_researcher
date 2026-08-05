@@ -135,6 +135,7 @@ async def test_equipment_agent_test_mode_falls_back_to_safe_plan(tmp_path: Path)
 
     assert result.success is True
     assert result.data["equipment_result"]["program_id"] == "utm_compression_start_v1"
+    assert result.data["equipment_profile"]["profile_id"] == "utm_windows_v1"
     assert result.data["equipment_result"]["status"] == "verified_complete"
     assert result.data["equipment_handoff"]["status"] == "ready_for_analysis"
     assert result.data["tool_results"][0]["tool"] == "vision.equipment_cross_check"

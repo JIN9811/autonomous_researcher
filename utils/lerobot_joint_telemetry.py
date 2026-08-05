@@ -266,6 +266,143 @@ class _GraspOutcomeLatch:
         return rows
 
 
+def _empty_task_cycle_milestones() -> dict[str, bool]:
+    return {
+        "home_start": False,
+        "moving": False,
+        "grasping": False,
+        "ungrasping": False,
+        "home_return": False,
+    }
+
+
+@dataclass
+class TaskCycleAnnotator:
+    """Count ordered measured home-to-home manipulation cycles."""
+
+    session_id: str = ""
+    attempt_count: int = 0
+    completed_count: int = 0
+    failed_count: int = 0
+    active: bool = False
+    home_armed: bool = False
+    state: str = "not_started"
+    last_sequence: int = -1
+    ungrasping_sequence: int | None = None
+    milestones: dict[str, bool] = field(default_factory=_empty_task_cycle_milestones)
+    grasp_attempts: dict[int, str] = field(default_factory=dict)
+
+    def reset(self, session_id: str = "") -> None:
+        self.session_id = session_id
+        self.attempt_count = 0
+        self.completed_count = 0
+        self.failed_count = 0
+        self.active = False
+        self.home_armed = False
+        self.state = "not_started"
+        self.last_sequence = -1
+        self.ungrasping_sequence = None
+        self.milestones = _empty_task_cycle_milestones()
+        self.grasp_attempts.clear()
+
+    def _start_task(self) -> None:
+        self.attempt_count += 1
+        self.active = True
+        self.home_armed = False
+        self.state = "active"
+        self.ungrasping_sequence = None
+        self.milestones = {
+            **_empty_task_cycle_milestones(),
+            "home_start": True,
+            "moving": True,
+        }
+        self.grasp_attempts.clear()
+
+    def _grasp_summary(self) -> dict[str, int | float | None]:
+        statuses = list(self.grasp_attempts.values())
+        success_count = sum(status == "success" for status in statuses)
+        failed_count = sum(status == "failed" for status in statuses)
+        completed_count = success_count + failed_count
+        pending_count = len(statuses) - completed_count
+        return {
+            "task_index": self.attempt_count,
+            "attempt_count": len(statuses),
+            "completed_count": completed_count,
+            "success_count": success_count,
+            "failed_count": failed_count,
+            "pending_count": pending_count,
+            "success_rate": success_count / completed_count if completed_count else None,
+        }
+
+    def snapshot(self) -> dict[str, Any]:
+        return {
+            "state": self.state,
+            "current_task_index": self.attempt_count,
+            "attempt_count": self.attempt_count,
+            "completed_count": self.completed_count,
+            "failed_count": self.failed_count,
+            "success_rate": self.completed_count / self.attempt_count if self.attempt_count else None,
+            "milestones": dict(self.milestones),
+            "grasp": self._grasp_summary(),
+        }
+
+    def observe(self, packet: Mapping[str, Any]) -> dict[str, Any]:
+        packet_session_id = str(packet.get("session_id") or "")
+        sequence = _safe_int(packet.get("sequence"), self.last_sequence + 1)
+        if packet_session_id and self.session_id and packet_session_id != self.session_id:
+            self.reset(packet_session_id)
+        elif packet_session_id and not self.session_id:
+            self.session_id = packet_session_id
+        if sequence <= self.last_sequence:
+            return self.snapshot()
+        self.last_sequence = sequence
+
+        motion = packet.get("motion_state") if isinstance(packet.get("motion_state"), Mapping) else {}
+        measured = motion.get("measured") if isinstance(motion.get("measured"), Mapping) else {}
+        home_gate = measured.get("home_gate") if isinstance(measured.get("home_gate"), Mapping) else {}
+        base_state = str(measured.get("base_state") or "unknown")
+        gripper_state = str(measured.get("gripper_state") or "idle")
+        stable_home = base_state == "home" and gripper_state == "idle" and bool(home_gate.get("passed"))
+
+        if not self.active:
+            if stable_home:
+                self.home_armed = True
+                if self.state == "not_started":
+                    self.milestones["home_start"] = True
+            elif self.home_armed and base_state == "moving":
+                self._start_task()
+
+        if self.active:
+            if base_state == "moving":
+                self.milestones["moving"] = True
+            if gripper_state == "grasping":
+                self.milestones["grasping"] = True
+
+            outcome = motion.get("grasp_outcome") if isinstance(motion.get("grasp_outcome"), Mapping) else {}
+            attempt_index = _safe_int(outcome.get("attempt_index"), 0)
+            if attempt_index > 0:
+                status = str(outcome.get("status") or "pending")
+                self.grasp_attempts[attempt_index] = status if status in {"success", "failed"} else "pending"
+
+            if gripper_state == "ungrasping" and self.milestones["grasping"]:
+                self.milestones["ungrasping"] = True
+                self.ungrasping_sequence = sequence
+
+            if (
+                self.milestones["ungrasping"]
+                and self.ungrasping_sequence is not None
+                and sequence > self.ungrasping_sequence
+                and stable_home
+            ):
+                self.milestones["home_return"] = True
+                self.completed_count += 1
+                self.active = False
+                self.home_armed = True
+                self.state = "complete"
+
+        return self.snapshot()
+
+
 def _gripper_value(packet: Mapping[str, Any], field: str) -> float | None:
     values = packet.get(field)
     if not isinstance(values, Mapping) or values.get("Gripper") is None:
@@ -570,6 +707,7 @@ class MotionStateAnnotator:
     _measured_latch: _ChannelMotionLatch = field(default_factory=_ChannelMotionLatch, init=False)
     _policy_latch: _ChannelMotionLatch = field(default_factory=_ChannelMotionLatch, init=False)
     _grasp_latch: _GraspOutcomeLatch = field(default_factory=_GraspOutcomeLatch, init=False)
+    _task_cycle: TaskCycleAnnotator = field(default_factory=TaskCycleAnnotator, init=False)
 
     @property
     def grasp_attempts(self) -> list[dict[str, Any]]:
@@ -606,6 +744,7 @@ class MotionStateAnnotator:
                 measured_motion,
             ),
         }
+        annotated["motion_state"]["task_cycle"] = self._task_cycle.observe(annotated)
         self._history[-1] = annotated
         return annotated
 
@@ -766,8 +905,6 @@ class JointTelemetryFileObserver:
                 state.origin_monotonic_s = _first_action_monotonic(action_events)
             limit = self.max_initial_samples if not state.initialized else self.max_batch_samples
             state.initialized = True
-            if limit > 0 and len(action_events) > limit:
-                action_events = action_events[-limit:]
             packets = [
                 normalize_action_event(event, origin_monotonic_s=state.origin_monotonic_s)
                 for event in action_events
@@ -776,7 +913,7 @@ class JointTelemetryFileObserver:
             workflow = str(session.get("workflow") or "rollout")
             mode = str(session.get("mode") or "")
             status = session_status_label(session.get("status"))
-            return [
+            annotated = [
                 state.motion_annotator.annotate({
                     **packet,
                     "session_id": str(packet.get("session_id") or session_id),
@@ -787,6 +924,11 @@ class JointTelemetryFileObserver:
                 for packet in packets
                 if packet is not None
             ]
+            # Replay the bounded initial chunk through the state machines, then
+            # retain only the display-sized tail for the browser.
+            if limit > 0 and len(annotated) > limit:
+                return annotated[-limit:]
+            return annotated
 
     def reset(self, path: Path | str | None = None) -> None:
         with self._lock:

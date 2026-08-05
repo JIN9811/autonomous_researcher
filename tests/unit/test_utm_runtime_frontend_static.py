@@ -58,11 +58,22 @@ def test_live_gui_js_renders_utm_runtime_device_card() -> None:
     assert "function renderVisionActiveCamEjectionCheck(" in js
     assert "function latestActiveCamArtifact(report)" in js
     assert "metadata.latest_active_cam_artifact" in js
+    assert "function canonicalActiveCamEvidence(" in js
     assert "function renderVisionActiveCamEjectionCheck(screenReport, persistedArtifact" in js
     active_cam_source = js[js.index("function renderVisionActiveCamEjectionCheck("):js.index("function renderVisionDashboardCards")]
     assert 'const failed = /failed|blocked|error/i.test(String(status));' in active_cam_source
-    assert 'persistedArtifact.url || active.capture_url' in active_cam_source
-    assert 'renderVisionActiveCamEjectionCheck(screenReport, latestActiveCamArtifact(report))' in js
+    assert "const evidence = canonicalActiveCamEvidence(active, persistedArtifact, intervention);" in active_cam_source
+    assert 'evidence.status === "confirmed"' in active_cam_source
+    assert "const detected = !failed && evidence.specimen_detected === true;" in active_cam_source
+    assert "evidence.confidence" in active_cam_source
+    assert "function visionSpecimenPlacementLabel(" in js
+    assert 'renderDashboardMetric("Placement", placementLabel' in active_cam_source
+    assert 'const capturePath = evidence.path || evidence.capture_path || "";' in active_cam_source
+    assert 'const captureUrl = evidence.url || evidence.capture_url' in active_cam_source
+    assert 'const capturePath = failed ? ""' not in active_cam_source
+    assert 'const captureUrl = failed' not in active_cam_source
+    assert 'renderVisionActiveCamEjectionCheck(screenReport, latestActiveCamArtifact(report), activeCamIntervention)' in js
+    assert 'const activeCamConfirmed = activeCamCheck.status === "confirmed"' in vision_dashboard_source
     assert "function latestUtmCompletionArtifact(report)" in js
     assert "metadata.latest_utm_completion_artifact" in js
     utm_artifact_source = js[js.index("function latestUtmCompletionArtifact(report)"):js.index("function latestVisionSignalPacket(report)")]
@@ -123,8 +134,34 @@ def test_live_gui_js_renders_utm_runtime_device_card() -> None:
     assert ".ar-vis-active-cam-details" not in css
 
     html = (ROOT / "web/templates/planning.html").read_text(encoding="utf-8")
-    assert "/static/styles.css?v=20260715-pose-fit-6" in html
-    assert "/static/planning.js?v=20260715-pose-fit-6" in html
+    assert "/static/styles.css?v=20260720-manipulation-grounded-1" in html
+    assert "/static/planning.js?v=20260722-utm-raw-single-source-1" in html
+    assert "const detected = artifact.detected === true;" in js
+    assert "artifact.detected === true || signal.detected === true" not in js
+
+
+def test_live_gui_vision_specimen_intervention_actions_are_run_scoped() -> None:
+    js = (ROOT / "web/static/planning.js").read_text(encoding="utf-8")
+
+    assert "function renderVisionSpecimenIntervention(" in js
+    assert "Place the specimen into the working area" in js
+    assert "Checking specimen..." in js
+    assert "data-vision-specimen-retry" in js
+    assert "data-vision-specimen-deadline" in js
+    assert "/vision/specimen-placement-retry" in js
+    assert 'checkpoint: "active_cam_ejection"' in js
+    assert 'checkpoint: "utm_post_place"' in js
+    assert "renderVisionSpecimenIntervention(intervention, \"active_cam_ejection\")" in js
+    assert "renderVisionSpecimenIntervention(intervention, \"utm_post_place\")" in js
+
+
+def test_utm_confirmation_card_uses_report_artifact_when_metadata_merge_is_delayed() -> None:
+    js = Path("web/static/planning.js").read_text(encoding="utf-8")
+
+    assert "signal.run_artifact" in js
+    assert "persistedArtifact : reportArtifact" in js
+    assert "artifact.url" in js
+    assert "artifact.path" in js
 
 
 def test_live_gui_utm_runtime_actions_force_fresh_status_after_click() -> None:

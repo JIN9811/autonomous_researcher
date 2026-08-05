@@ -184,7 +184,7 @@ def test_guardian_allows_vision_handoff_when_active_cam_confirms_spc_despite_pos
     )
 
 
-def test_guardian_tool_shield_modifies_disabled_rollout_clamp_before_execution() -> None:
+def test_guardian_tool_shield_preserves_disabled_rollout_clamp_from_gui() -> None:
     state = _state(Stage.MANIPULATION)
     tools = FakeTools()
     recorded: list[dict[str, Any]] = []
@@ -209,14 +209,38 @@ def test_guardian_tool_shield_modifies_disabled_rollout_clamp_before_execution()
     )
 
     assert result["ok"] is True
-    assert recorded[0]["decision"] == "modify"
-    assert recorded[0]["modified_payload_patch"]["rollout_action_clamp"] is True
-    assert events[-1]["status"] == "modified"
-    assert tools.calls[0][1]["rollout_action_clamp"] is True
-    assert tools.calls[0][1]["guardian_modified_payload"] is True
+    assert recorded[0]["decision"] == "allow"
+    assert recorded[0]["modified_payload_patch"] == {}
+    assert events == []
+    assert tools.calls[0][1]["rollout_action_clamp"] is False
+    assert "guardian_modified_payload" not in tools.calls[0][1]
     records = state.run_metadata["tool_call_records"]
-    assert [record["status"] for record in records] == ["requested", "modified", "completed"]
-    assert records[1]["guardian_decision"] == "modify"
+    assert [record["status"] for record in records] == ["requested", "completed"]
+
+
+def test_guardian_tool_shield_preserves_enabled_rollout_clamp_from_gui() -> None:
+    state = _state(Stage.MANIPULATION)
+    tools = FakeTools()
+    proxy = ModuleToolRegistryProxy(
+        tools,
+        ["lerobot.rollout.start"],
+        Stage.MANIPULATION,
+        state=state,
+    )
+
+    result = proxy.call(
+        "lerobot.rollout.start",
+        {
+            "mode": "test",
+            "dry_run": False,
+            "policy_path": "/tmp/policy.ckpt",
+            "rollout_action_clamp": True,
+        },
+    )
+
+    assert result["ok"] is True
+    assert tools.calls[0][1]["rollout_action_clamp"] is True
+    assert "guardian_modified_payload" not in tools.calls[0][1]
 
 
 def test_guardian_tool_shield_allows_rollout_after_bambu_http_artifact_handoff() -> None:
@@ -317,6 +341,16 @@ def test_guardian_tool_shield_allows_rollout_after_completed_printer_wait_handof
                     },
                     "samples": [
                         {
+                            "status": "transient",
+                            "failure_code": "BAMBU_PORT_UNREACHABLE",
+                            "message": "Bambu printer port was temporarily unreachable.",
+                        },
+                        {
+                            "status": "transient",
+                            "failure_code": "BAMBU_MQTT_REPORT_TIMEOUT",
+                            "message": "Timed out waiting for Bambu MQTT report.",
+                        },
+                        {
                             "status": "printing",
                             "failure_code": "131184",
                             "message": "Printer job is still active.",
@@ -340,7 +374,7 @@ def test_guardian_tool_shield_allows_rollout_after_completed_printer_wait_handof
     assert all(
         not (
             "printer_completion_wait" in str(alarm.get("source_path") or "")
-            and alarm.get("reason_code") == "131184"
+            and alarm.get("reason_code") in {"131184", "BAMBU_MQTT_REPORT_TIMEOUT", "HEARTBEAT_LOST"}
         )
         for gate in recorded
         for alarm in gate.get("alarms", [])

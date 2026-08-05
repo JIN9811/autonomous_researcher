@@ -7,6 +7,8 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+import numpy as np
+from PIL import Image
 
 from agents.manipulation_agent import ManipulationAgent
 from agents.vision_agent import VisionAgent
@@ -85,7 +87,9 @@ async def test_active_cam_to_utm_completion_loop_preserves_camera_and_stop_flow(
     utm_presence_calls: list[dict[str, Any]] = []
     active_cam_frame = tmp_path / "camera" / "active-cam-ejection.jpg"
     active_cam_frame.parent.mkdir(parents=True)
-    active_cam_frame.write_bytes(b"active-cam-ejection")
+    active_cam_image = np.full((480, 640, 3), 205, dtype=np.uint8)
+    active_cam_image[85:180, 360:440] = [210, 25, 30]
+    Image.fromarray(active_cam_image, mode="RGB").save(active_cam_frame)
     monkeypatch.setattr(VisionAgent, "_repo_root", staticmethod(lambda: tmp_path))
 
     def camera_capture(payload: dict[str, Any]) -> dict[str, Any]:
@@ -162,6 +166,9 @@ async def test_active_cam_to_utm_completion_loop_preserves_camera_and_stop_flow(
             "tool": "lerobot.rollout.start",
             "workflow": "rollout",
             "status": "POLICY_ACTIVE",
+            "runtime_phase": "ACTION_ACTIVE",
+            "action_count": 1,
+            "runtime": {"phase": "ACTION_ACTIVE", "action_count": 1},
             "session_id": payload["session_id"],
             "profile_id": payload["profile_id"],
             "command_preview": ["lerobot-record", "--policy.type=smolvla"],
@@ -233,63 +240,25 @@ async def test_active_cam_to_utm_completion_loop_preserves_camera_and_stop_flow(
     state.run_metadata["manipulation_result"] = first_manipulation.data["manipulation"]
     state.run_metadata["robot_task_result"] = first_manipulation.data["robot_task_result"]
     state.stage = Stage.VISION
-    waiting_vision = await VisionAgent().run(state, ctx)
-    assert waiting_vision.success is True
-    assert len(active_cam_calls) == 1
-    assert specimen_pose_calls == []
-    waiting_completion = waiting_vision.data["observation"]["vision_manipulation_completion"]
-    assert waiting_completion["status"] == "waiting"
-    assert waiting_completion["detected"] is False
-    assert waiting_vision.data["vision_signal"]["status"] == "waiting"
-    assert waiting_vision.data["observation"]["summary"] == "monitoring UTM placement; rollout remains active"
-    assert waiting_vision.data["requested_next_stage"] == "manipulation"
-    signal_names = {item["signal"] for item in waiting_vision.data["observation"]["agent_signals"]}
-    assert "spc_autoejection_confirmed" not in signal_names
-    assert all(item.get("status") != "blocked" for item in waiting_vision.data["observation"]["agent_signals"])
-    waiting_gate = guardian_gate(
-        state=state,
-        stage="vision",
-        phase="post",
-        agent="vision_agent",
-        payload=waiting_vision.data,
-    )
-    assert gate_blocks_execution(waiting_gate) is False
-
-    state.latest_observations = waiting_vision.data["observation"]
-    state.stage = Stage.MANIPULATION
-    waiting_manipulation = await ManipulationAgent().run(state, ctx)
-    assert waiting_manipulation.success is True
-    assert len(rollout_start_calls) == 1
-    assert len(rollout_status_calls) == 1
-    assert rollout_stop_calls == []
-    assert waiting_manipulation.data["manipulation"]["session_id"] == first_manipulation.data["manipulation"]["session_id"]
-    assert waiting_manipulation.data["requested_next_stage"] == "vision"
-
-    state.run_metadata["manipulation_result"] = waiting_manipulation.data["manipulation"]
-    state.run_metadata["robot_task_result"] = waiting_manipulation.data["robot_task_result"]
-    state.stage = Stage.VISION
     completed_vision = await VisionAgent().run(state, ctx)
     assert completed_vision.success is True
     assert len(active_cam_calls) == 1
     assert specimen_pose_calls == []
-    assert [call["purpose"] for call in capture_calls] == ["3dp_output_pickup_check"]
+    assert capture_calls == []
     assert len(utm_presence_calls) == 1
     completion = completed_vision.data["observation"]["vision_manipulation_completion"]
     assert completion["camera"] == "utm"
     assert completion["detected"] is True
     assert completion["session_id"] == first_manipulation.data["manipulation"]["session_id"]
-
-    state.latest_observations = completed_vision.data["observation"]
-    state.stage = Stage.MANIPULATION
-    final_manipulation = await ManipulationAgent().run(state, ctx)
-    assert final_manipulation.success is True
+    assert completion["rollout_stopped"] is True
+    assert completed_vision.data["requested_next_stage"] == "equipment"
+    assert completed_vision.data["transition_decision"] == "vision_equipment_handoff"
     assert len(rollout_start_calls) == 1
-    assert len(rollout_status_calls) == 2
+    assert len(rollout_status_calls) == 1
     assert len(rollout_stop_calls) == 1
-    assert rollout_stop_calls[0]["reason"] == "vision_manipulation_completion"
-    assert final_manipulation.data["manipulation"]["tool"] == "lerobot.rollout.stop"
-    assert final_manipulation.data["robot_task_result"]["handoff_status"] == "ready_for_equipment"
-    assert "home_pose" not in final_manipulation.data["manipulation_report"]
+    assert rollout_stop_calls[0]["reason"] == "vision_utm_placement_verified"
+    assert state.run_metadata["manipulation_result"]["handoff_status"] == "ready_for_equipment"
+    assert state.run_metadata["robot_task_result"]["handoff_status"] == "ready_for_equipment"
 
 
 def test_rollout_completion_requires_observed_robot_actions() -> None:
@@ -327,6 +296,40 @@ def test_rollout_completion_requires_observed_robot_actions() -> None:
     assert verification["verified"] is False
     assert verification["status"] == "executing"
     assert verification["reason"] == "rollout_action_evidence_required"
+
+
+def test_rollout_start_hands_off_to_vision_without_graph_reentry() -> None:
+    """Vision owns the same-session completion gate after a rollout starts."""
+    agent = ManipulationAgent()
+    response = {
+        "ok": True,
+        "tool": "lerobot.rollout.start",
+        "workflow": "rollout",
+        "status": "POLICY_ACTIVE",
+        "runtime_phase": "PROCESS_STARTED",
+        "action_count": 0,
+        "runtime": {"phase": "PROCESS_STARTED", "action_count": 0},
+    }
+    verification = agent._verification_status("transfer_to_utm", {"signals": {}}, response)
+    stage_machine = agent._stage_machine(
+        task_id="transfer_to_utm",
+        response=response,
+        preflight={"status": "pass"},
+        verification=verification,
+    )
+    decision = agent._decision(
+        task_id="transfer_to_utm",
+        response=response,
+        preflight={"status": "pass"},
+        verification=verification,
+        sarm={"recovery_suggested": False},
+    )
+
+    assert stage_machine["current_stage"] == "post_place_verify"
+    assert stage_machine["next_expected_stage"] == "vision_verification"
+    assert decision["handoff_status"] == "needs_post_place_vision"
+    assert decision["completion_status"] == "awaiting_post_place_home"
+    assert decision["recommended_next_agent"] == "vision_agent"
 
 
 def test_physical_utm_verification_rejects_simulator_capture(tmp_path: Path, monkeypatch: Any) -> None:

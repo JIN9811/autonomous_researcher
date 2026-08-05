@@ -240,6 +240,12 @@ GUI에서:
 3. saved target을 select한다.
 4. `test` 또는 `program1` 실행으로 통신을 확인한다.
 
+현재 Ubuntu PC에서 먼저 실제 GUI macro를 개발하려면 같은 화면의
+`PyAutoGUI Bridge on This PC`에서 `Start -> Health -> Select`를 누른다.
+로컬 브릿지는 `127.0.0.1:8767`, 후보명 `local_development`를 사용하며
+Windows 후보로 자동 전환하거나 자동 fallback하지 않는다. 최초 설치는
+`bash install/bootstrap_linux.sh --with-local-pyautogui`로 수행한다.
+
 ### 2.4 BO / CAE
 
 BO:

@@ -709,6 +709,9 @@ class WindowsPyAutoGUIBridge(BaseBridge):
                     "selected": str(alias) == selected_alias,
                     "token_configured": bool(candidate.get("token")),
                     "allow_live_execute": bool(candidate.get("allow_live_execute", False)),
+                    "platform": str(candidate.get("platform") or "windows"),
+                    "scope": str(candidate.get("scope") or "network"),
+                    "managed_local": bool(candidate.get("managed_local", False)),
                     "last_status": candidate.get("last_status"),
                     "last_checked": candidate.get("last_checked"),
                 }
@@ -727,6 +730,9 @@ class WindowsPyAutoGUIBridge(BaseBridge):
             "selected": bool(url),
             "last_checked": selected.get("last_checked", memory.get("last_checked")),
             "last_status": selected.get("last_status", memory.get("last_status")),
+            "platform": str(selected.get("platform") or memory.get("platform") or ""),
+            "scope": str(selected.get("scope") or memory.get("scope") or ""),
+            "managed_local": bool(selected.get("managed_local", memory.get("managed_local", False))),
             "candidates": candidates,
         }
 
@@ -774,6 +780,7 @@ class WindowsPyAutoGUIBridge(BaseBridge):
                 message="A valid token is required before saving a Windows PyAutoGUI bridge candidate.",
                 step_trace=[{"step": "SAVE_CANDIDATE", "status": "blocked", "detail": "missing token"}],
             )
+        should_select = bool(payload.get("select", True))
         candidate = {
             "candidate_alias": alias,
             "bridge_url": raw_url,
@@ -782,15 +789,18 @@ class WindowsPyAutoGUIBridge(BaseBridge):
             "token": token,
             "token_header": str(payload.get("token_header") or self.config.token_header),
             "allow_live_execute": bool(payload.get("allow_live_execute", True)),
+            "platform": str(payload.get("platform") or previous.get("platform") or "windows"),
+            "scope": str(payload.get("scope") or previous.get("scope") or "network"),
+            "managed_local": bool(payload.get("managed_local", previous.get("managed_local", False))),
             "last_checked": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            "last_status": str(payload.get("last_status") or "selected"),
+            "last_status": str(payload.get("last_status") or ("selected" if should_select else "standby")),
         }
         candidates[alias] = candidate
-        memory = {
-            "selected_candidate": alias,
-            "candidates": candidates,
-            **candidate,
-        }
+        selected_alias = alias if should_select else str(existing.get("selected_candidate") or "").strip()
+        memory = {"selected_candidate": selected_alias, "candidates": candidates}
+        selected_candidate = candidates.get(selected_alias)
+        if isinstance(selected_candidate, dict):
+            memory.update(selected_candidate)
         self._write_connection_memory(memory)
         return self.connection_status()
 
@@ -1630,6 +1640,69 @@ class WindowsPyAutoGUIBridge(BaseBridge):
     def _url(self, path: str) -> str:
         return urljoin(self._bridge_url() + "/", path.lstrip("/"))
 
+    def proxy_ui_request(
+        self,
+        *,
+        method: str,
+        resource_path: str,
+        query_string: str = "",
+        body: bytes = b"",
+        content_type: str = "",
+    ) -> dict[str, Any]:
+        """Proxy the selected Windows bridge UI without exposing its token to the browser."""
+        normalized_method = str(method or "GET").upper()
+        normalized_path = str(resource_path or "").strip().lstrip("/")
+        if normalized_method not in {"GET", "POST"}:
+            return self._proxy_ui_failure(405, "PYAUTOGUI_UI_METHOD_NOT_ALLOWED", "Only GET and POST are supported.")
+        if ".." in normalized_path.split("/") or "://" in normalized_path or normalized_path.startswith("//"):
+            return self._proxy_ui_failure(400, "PYAUTOGUI_UI_INVALID_PATH", "Bridge UI path is invalid.")
+
+        precheck = self._live_precheck(
+            require_execute=False,
+            payload={"runtime_mode": "live", "force_live_bridge": True},
+        )
+        if precheck:
+            return self._proxy_ui_failure(
+                503,
+                str(precheck.get("failure_code") or "PYAUTOGUI_UI_UNAVAILABLE"),
+                str(precheck.get("message") or "Windows bridge UI is unavailable."),
+            )
+
+        target = self._url(normalized_path or "/")
+        if query_string:
+            target = f"{target}?{str(query_string).lstrip('?')}"
+        headers = self._headers()
+        headers["Accept"] = "text/html, application/json, */*"
+        if content_type:
+            headers["Content-Type"] = str(content_type)
+        try:
+            with httpx.Client(timeout=self.config.request_timeout_sec, follow_redirects=False) as client:
+                response = client.request(normalized_method, target, headers=headers, content=body)
+        except Exception as exc:
+            return self._proxy_ui_failure(
+                503,
+                "PYAUTOGUI_BRIDGE_UNREACHABLE",
+                f"Windows PyAutoGUI bridge unreachable: {exc.__class__.__name__}",
+            )
+        return {
+            "ok": response.status_code < 400,
+            "status_code": int(response.status_code),
+            "content_type": response.headers.get("content-type", "application/octet-stream"),
+            "content": bytes(response.content),
+        }
+
+    @staticmethod
+    def _proxy_ui_failure(status_code: int, failure_code: str, message: str) -> dict[str, Any]:
+        return {
+            "ok": False,
+            "status_code": int(status_code),
+            "content_type": "application/json; charset=utf-8",
+            "content": json.dumps(
+                {"ok": False, "status": "blocked", "failure_code": failure_code, "message": message},
+                ensure_ascii=True,
+            ).encode("utf-8"),
+        }
+
     def _headers(self) -> dict[str, str]:
         token = self._token()
         headers = {"Accept": "application/json"}
@@ -1687,6 +1760,8 @@ class WindowsPyAutoGUIBridge(BaseBridge):
         selected_alias = str(memory.get("selected_candidate") or memory.get("selected", "")).strip()
         if selected_alias and isinstance(candidates.get(selected_alias), dict):
             return selected_alias, dict(candidates[selected_alias])
+        if "selected_candidate" in memory:
+            return "", {}
         if candidates:
             first_alias = sorted(str(alias) for alias in candidates)[0]
             raw = candidates.get(first_alias)

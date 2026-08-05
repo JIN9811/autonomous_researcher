@@ -102,6 +102,30 @@ def _load_latest_frame_capture(manifest_path: Path) -> dict[str, Any]:
     }
 
 
+def _accept_soft_resume_tolerance(wait_result: dict[str, Any], *, soft_tolerance_deg: float) -> dict[str, Any]:
+    """Accept small Dynamixel settling error without masking a real return failure."""
+    if str(wait_result.get("failure_code") or "") != "ACTIVE_ROBOT_CAM_RESUME_NOT_REACHED":
+        return wait_result
+    try:
+        max_error_deg = float(wait_result.get("max_error_deg"))
+        tolerance_deg = float(soft_tolerance_deg)
+    except (TypeError, ValueError):
+        return wait_result
+    if max_error_deg > tolerance_deg:
+        return wait_result
+    recovered = dict(wait_result)
+    recovered.pop("failure_code", None)
+    recovered.update(
+        {
+            "ok": True,
+            "status": "reached_within_soft_tolerance",
+            "warning_only": True,
+            "soft_tolerance_deg": tolerance_deg,
+        }
+    )
+    return recovered
+
+
 def _connect_robot(payload: dict[str, Any]) -> Any:
     from lerobot.robots.omx_follower.config_omx_follower import OmxFollowerConfig
     from lerobot.robots.omx_follower.omx_follower import OmxFollower
@@ -162,6 +186,10 @@ def main() -> None:
                 robot,
                 resume_action,
                 reason="active_robot_cam_resume",
+            )
+            resume_pose = _accept_soft_resume_tolerance(
+                resume_pose,
+                soft_tolerance_deg=tracker.resume_wait_soft_tolerance_deg,
             )
             if resume_pose and not resume_pose.get("ok"):
                 _print_json(

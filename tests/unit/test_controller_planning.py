@@ -54,6 +54,15 @@ def test_controller_merge_vision_confirmation_marks_specimen_completion() -> Non
         "ok": True,
         "specimen_id": "specimen-vision-001",
         "handoff_status": "ready",
+        "fabrication_report": {
+            "fabrication_outcome": {
+                "print_completion_status": "complete",
+                "autoejection_status": "awaiting_vision_confirmation",
+            }
+        },
+        "specimen_agent_report": {
+            "autoejection_gate": {"status": "waiting"},
+        },
     }
 
     controller._merge_planning_agent_data(
@@ -89,6 +98,31 @@ def test_controller_merge_vision_confirmation_marks_specimen_completion() -> Non
     assert specimen["vision_completion_signal"]["signal"] == "SPC_AUTOEJECTION_CONFIRMED_BY_ACTIVE_CAM"
     assert specimen["vision_verification"]["status"] == "confirmed"
     assert specimen["active_cam_ejection_check"]["spc_autoejection_confirmed"] is True
+    assert specimen["autoejection_completion_verified"] is True
+    assert specimen["fabrication_report"]["fabrication_outcome"]["autoejection_status"] == "complete"
+    assert specimen["specimen_agent_report"]["autoejection_gate"]["status"] == "complete"
+
+    controller._merge_planning_agent_data(
+        Stage.VISION,
+        {
+            "observation": {
+                "active_cam_ejection_check": {
+                    "status": "not_checked",
+                    "specimen_detected": False,
+                    "spc_autoejection_confirmed": False,
+                },
+                "spc_autoejection_confirmation": {
+                    "status": "not_checked",
+                    "confirmed": False,
+                },
+            }
+        },
+    )
+
+    specimen = controller._state.run_metadata["specimen_result"]
+    assert specimen["vision_verification"]["status"] == "confirmed"
+    assert specimen["autoejection_completion_verified"] is True
+    assert specimen["active_cam_ejection_check"]["spc_autoejection_confirmed"] is True
 
 
 def test_controller_retains_active_cam_artifact_until_explicit_failure() -> None:
@@ -115,6 +149,57 @@ def test_controller_retains_active_cam_artifact_until_explicit_failure() -> None
     )
 
     assert "latest_active_cam_artifact" not in controller._state.run_metadata
+
+
+def test_controller_retains_utm_completion_artifact_for_live_gui() -> None:
+    controller = load_runtime()
+    stored = {
+        "schema": "utm_completion_run_artifact.v1",
+        "status": "stored",
+        "path": "/runs/utm-confirmed.png",
+        "url": "/api/runs/run-utm/artifact-file/vision/frame/utm-confirmed.png",
+        "run_id": "run-utm",
+        "session_id": "rollout-utm-001",
+        "specimen_id": "specimen-utm-001",
+    }
+
+    controller._merge_planning_agent_data(
+        Stage.VISION,
+        {"utm_completion_artifact_update": stored},
+    )
+
+    assert controller._state.run_metadata["latest_utm_completion_artifact"] == stored
+    assert (
+        controller._compact_planning_run_metadata(controller._state.run_metadata)[
+            "latest_utm_completion_artifact"
+        ]
+        == stored
+    )
+
+
+def test_controller_exposes_vision_operator_intervention_to_live_gui() -> None:
+    controller = load_runtime()
+    intervention = {
+        "schema": "vision_operator_intervention.v1",
+        "run_id": controller._state.run_id,
+        "checkpoint": "active_cam_ejection",
+        "status": "waiting_for_specimen",
+        "reason": "specimen_not_detected",
+        "placement_status": "outside",
+        "detection_failure_code": "SPECIMEN_OUTSIDE_A4",
+        "capture_path": "/tmp/active-cam-outside.png",
+        "capture_url": "/api/runs/run-test/artifact-file/vision/active-cam-outside.png",
+        "camera_key": "wrist",
+        "requested_at": "2026-07-21T13:17:07+00:00",
+        "retry_count": 0,
+    }
+
+    controller._merge_planning_agent_data(
+        Stage.VISION,
+        {"vision_operator_intervention": intervention},
+    )
+
+    assert controller.planning_snapshot()["state"]["run_metadata"]["vision_operator_intervention"] == intervention
 
 
 def test_specimen_agent_test_mode_handoff_requires_printer_choice_in_mode_test() -> None:
@@ -925,8 +1010,83 @@ async def test_specimen_stage_waits_for_physical_printer_completion_before_visio
     assert specimen["printer_completion_wait"]["status"] == "complete"
     outcome = specimen["fabrication_report"]["fabrication_outcome"]
     assert outcome["location"] == "a4_workspace"
-    assert outcome["autoejection_status"] == "complete"
+    assert outcome["autoejection_status"] == "awaiting_vision_confirmation"
+    assert specimen["printer_completion_verified"] is True
+    assert specimen.get("autoejection_completion_verified") is not True
     assert controller._state.run_metadata["fabrication_report"]["fabrication_outcome"]["location"] == "a4_workspace"
+
+
+@pytest.mark.asyncio
+async def test_printer_completion_wait_ignores_stale_finished_job_before_current_job(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller = load_runtime()
+    controller._state.mode = Mode.LIVE
+    spec = {
+        "candidate_id": "cand-current",
+        "specimen_id": "specimen-current",
+        "printer_test_path": "installed_printer",
+        "printer_completion_timeout_sec": 5,
+        "printer_completion_poll_sec": 0,
+    }
+    specimen_payload = {
+        "ok": True,
+        "specimen_id": "specimen-current",
+        "printer_path": "installed_printer",
+        "printer_prepare_status": "TEST_PRINTER_EJECTION_PROJECT_STARTED",
+        "print_result": {
+            "published": True,
+            "upload": {"filename": "specimen-current.ejection-test.gcode.3mf"},
+            "post_publish_status": {"status": "running", "progress_percent": 0},
+        },
+    }
+    statuses = [
+        {
+            "ok": True,
+            "status": "ready",
+            "device_screen": {
+                "progress_panel": {
+                    "state": "FINISH",
+                    "progress_percent": 100,
+                    "job_name": "specimen-previous",
+                }
+            },
+        },
+        {
+            "ok": True,
+            "status": "PRINT_STARTED",
+            "device_screen": {
+                "progress_panel": {
+                    "state": "RUNNING",
+                    "progress_percent": 10,
+                    "job_name": "specimen-current",
+                }
+            },
+        },
+        {
+            "ok": True,
+            "status": "ready",
+            "device_screen": {
+                "progress_panel": {
+                    "state": "FINISH",
+                    "progress_percent": 100,
+                    "job_name": "specimen-current",
+                }
+            },
+        },
+    ]
+
+    async def fake_completion_status() -> dict:
+        return statuses.pop(0)
+
+    monkeypatch.setattr(controller, "_read_specimen_printer_completion_status", fake_completion_status)
+
+    result = await controller._await_specimen_printer_completion_before_vision(spec, specimen_payload)
+
+    assert result["status"] == "complete"
+    assert result["poll_count"] == 3
+    assert result["samples"][0]["status"] == "stale_job"
+    assert result["last_status"]["job_name"] == "specimen-current"
 
 
 def test_printer_completion_classifier_treats_communication_ready_as_complete_after_start() -> None:
@@ -1537,9 +1697,62 @@ async def test_live_gui_test_mode_virtual_bridge_handoff_returns_before_loop_fin
 
 
 @pytest.mark.asyncio
-async def test_planning_tail_continues_original_loop_after_specimen() -> None:
+async def test_planning_tail_continues_original_loop_after_specimen(tmp_path: Path) -> None:
     controller = load_runtime()
     controller._state.mode = Mode.LIVE
+    rollout_session_id = "rollout-cand-tail"
+    utm_frame = tmp_path / "utm-confirmed.png"
+    utm_frame.write_bytes(b"utm-confirmed")
+    controller._deps.agent_context.tools.register(
+        "lerobot.rollout.start",
+        lambda payload: {
+            "ok": True,
+            "tool": "lerobot.rollout.start",
+            "workflow": "rollout",
+            "status": "POLICY_ACTIVE",
+            "runtime_phase": "ACTION_ACTIVE",
+            "action_count": 120,
+            "session_id": rollout_session_id,
+            "profile_id": payload.get("profile_id", ""),
+            "post_place_interlock": {
+                "schema": "post_place_interlock.v1",
+                "session_id": rollout_session_id,
+                "ungrasping_seen": True,
+                "home_after_ungrasping": True,
+                "ready_for_utm_snapshot": True,
+            },
+        },
+    )
+    controller._deps.agent_context.tools.register(
+        "vision.utm_specimen_presence.capture",
+        lambda payload: {
+            "ok": True,
+            "tool": "vision.utm_specimen_presence.capture",
+            "schema": "vision_utm_specimen_presence.v1",
+            "status": "confirmed",
+            "detected": True,
+            "source": "virtual_utm_camera",
+            "frame_id": payload["frame_id"],
+            "annotated_frame_path": str(utm_frame),
+            "raw_frame_path": str(utm_frame),
+            "confidence": 0.95,
+            "width": 640,
+            "height": 480,
+            "run_id": payload["run_id"],
+            "session_id": payload["session_id"],
+            "specimen_id": payload["specimen_id"],
+        },
+    )
+    controller._deps.agent_context.tools.register(
+        "lerobot.rollout.stop",
+        lambda payload: {
+            "ok": True,
+            "tool": "lerobot.rollout.stop",
+            "workflow": "rollout",
+            "status": "STOPPED",
+            "session_id": payload["session_id"],
+        },
+    )
     spec = controller._build_planning_spec(
         base_spec={
             "candidate_id": "cand-tail",
@@ -1564,6 +1777,21 @@ async def test_planning_tail_continues_original_loop_after_specimen() -> None:
     }
 
     result = await controller._run_planning_loop_tail(spec)
+    events = controller.recent_events()
+    completed_stages = [
+        event.get("node_id")
+        for event in events
+        if event.get("type") == "node.completed"
+    ]
+    post_place_vision_index = max(index for index, stage in enumerate(completed_stages) if stage == "vision")
+    assert completed_stages[post_place_vision_index : post_place_vision_index + 6] == [
+        "vision",
+        "equipment",
+        "analysis",
+        "knowledge",
+        "bo",
+        "guardian",
+    ], completed_stages
 
     assert result["ok"] is True
     assert controller._state.mode == Mode.LIVE
@@ -1581,7 +1809,6 @@ async def test_planning_tail_continues_original_loop_after_specimen() -> None:
     assert "bo_ai" in roles
     assert "guardian" in roles
     assert controller._state.run_metadata["bo_agent"]["knowledge_context"]
-    events = controller.recent_events()
     assert any(event.get("type") == "node.completed" and event.get("node_id") == "bo" for event in events)
     assert any(event.get("type") == "module.step.planned" and event.get("node_id") == "vision" for event in events)
     assert any(
@@ -1877,6 +2104,57 @@ async def test_live_gui_planning_series_clears_stale_control_flags(monkeypatch: 
 
 
 @pytest.mark.asyncio
+async def test_specimen_stage_discards_previous_cycle_vision_and_manipulation_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A new specimen must not consume the prior cycle's robot/vision handoff."""
+    controller = load_runtime()
+    controller._state.mode = Mode.TEST
+    controller._state.run_metadata.update(
+        {
+            "specimen_result": {"ok": True, "specimen_id": "specimen-cycle-1"},
+            "latest_vision_observation": {"specimen_id": "specimen-cycle-1", "detected": True},
+            "vision_signal": {"specimen_id": "specimen-cycle-1", "value": True},
+            "vision_operator_intervention": {"checkpoint": "utm_post_place"},
+            "manipulation_result": {"session_id": "rollout-cycle-1", "status": "ACTIVE"},
+            "robot_task_result": {
+                "specimen_id": "specimen-cycle-1",
+                "rollout_session_id": "rollout-cycle-1",
+            },
+        }
+    )
+    spec = {
+        "candidate_id": "cand-cycle-2",
+        "specimen_id": "specimen-cycle-2",
+        "geometry_type": "gyroid",
+        "specimen_size_mm": [30, 30, 30],
+        "test_mode_llm_generated": True,
+        "printer_test_path": "virtual_bridge",
+    }
+
+    async def fake_langgraph_stage(stage: Stage) -> None:
+        assert stage == Stage.SPECIMEN
+        controller._state.run_metadata["specimen_result"] = {
+            "ok": True,
+            "specimen_id": "specimen-cycle-2",
+            "printer_path": "virtual_bridge",
+        }
+
+    monkeypatch.setattr(controller, "_run_planning_langgraph_stage", fake_langgraph_stage)
+
+    await controller._run_planning_specimen_stage(spec, emit_handoff=False)
+
+    for key in (
+        "latest_vision_observation",
+        "vision_signal",
+        "vision_operator_intervention",
+        "manipulation_result",
+        "robot_task_result",
+    ):
+        assert key not in controller._state.run_metadata
+
+
+@pytest.mark.asyncio
 async def test_live_gui_planning_series_preserves_stop_after_workflow_reset(monkeypatch: pytest.MonkeyPatch) -> None:
     controller = load_runtime()
     controller._state.mode = Mode.LIVE
@@ -1912,6 +2190,60 @@ async def test_live_gui_planning_series_preserves_stop_after_workflow_reset(monk
 
     assert result["decision"] == "stop"
     assert observed_flags == [True]
+
+
+@pytest.mark.asyncio
+async def test_live_gui_planning_series_does_not_start_next_design_for_pending_vision(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller = load_runtime()
+    controller._state.mode = Mode.LIVE
+    spec = controller._build_planning_spec(
+        base_spec={
+            "candidate_id": "cand-utm-pending",
+            "geometry_type": "gyroid",
+            "specimen_size_mm": [30, 30, 30],
+        },
+        constraints={
+            "test_mode_autofill": True,
+            "test_mode_llm_generated": True,
+            "printer_test_path": "installed_printer",
+        },
+    )
+    design_calls: list[int] = []
+
+    async def fake_loop_tail(experiment_spec: dict, **_: object) -> dict:
+        controller._state.run_metadata["vision_operator_intervention"] = {
+            "schema": "vision_operator_intervention.v1",
+            "checkpoint": "utm_post_place",
+            "status": "retrying",
+            "reason": "specimen_not_detected",
+        }
+        return {
+            "ok": True,
+            "message": "UTM placement verification is still active.",
+            "decision": "continue",
+        }
+
+    async def unexpected_design_stage(**kwargs: object) -> dict:
+        design_calls.append(int(kwargs.get("cycle_index", 0)))
+        return spec
+
+    async def fake_specimen_stage(experiment_spec: dict, *, emit_handoff: bool = True) -> dict:
+        return {"pending": False, "specimen": {"specimen_id": experiment_spec["specimen_id"]}}
+
+    monkeypatch.setattr(controller, "_run_planning_loop_tail", fake_loop_tail)
+    monkeypatch.setattr(controller, "_run_planning_design_stage", unexpected_design_stage)
+    monkeypatch.setattr(controller, "_run_planning_specimen_stage", fake_specimen_stage)
+
+    result = await controller._run_planning_cycle_series(
+        first_spec=spec,
+        design_constraints={**dict(spec.get("constraints", {})), **spec},
+        start_cycle=1,
+    )
+
+    assert result["decision"] == "pending_vision_verification"
+    assert design_calls == []
 
 
 @pytest.mark.asyncio
@@ -2141,9 +2473,64 @@ async def test_live_gui_planning_tail_agent_messages_keep_cycle_metadata(monkeyp
 
 
 @pytest.mark.asyncio
-async def test_live_gui_test_planning_series_runs_five_design_cycles(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_live_gui_test_planning_series_runs_five_design_cycles(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     controller = load_runtime()
     controller._state.mode = Mode.LIVE
+    utm_frame = tmp_path / "utm-confirmed.png"
+    utm_frame.write_bytes(b"utm-confirmed")
+    controller._deps.agent_context.tools.register(
+        "lerobot.rollout.start",
+        lambda payload: {
+            "ok": True,
+            "tool": "lerobot.rollout.start",
+            "workflow": "rollout",
+            "status": "POLICY_ACTIVE",
+            "runtime_phase": "ACTION_ACTIVE",
+            "action_count": 120,
+            "session_id": payload["session_id"],
+            "profile_id": payload.get("profile_id", ""),
+            "post_place_interlock": {
+                "schema": "post_place_interlock.v1",
+                "session_id": payload["session_id"],
+                "ungrasping_seen": True,
+                "home_after_ungrasping": True,
+                "ready_for_utm_snapshot": True,
+            },
+        },
+    )
+    controller._deps.agent_context.tools.register(
+        "vision.utm_specimen_presence.capture",
+        lambda payload: {
+            "ok": True,
+            "tool": "vision.utm_specimen_presence.capture",
+            "schema": "vision_utm_specimen_presence.v1",
+            "status": "confirmed",
+            "detected": True,
+            "source": "virtual_utm_camera",
+            "frame_id": payload["frame_id"],
+            "annotated_frame_path": str(utm_frame),
+            "raw_frame_path": str(utm_frame),
+            "confidence": 0.95,
+            "width": 640,
+            "height": 480,
+            "run_id": payload["run_id"],
+            "session_id": payload["session_id"],
+            "specimen_id": payload["specimen_id"],
+        },
+    )
+    controller._deps.agent_context.tools.register(
+        "lerobot.rollout.stop",
+        lambda payload: {
+            "ok": True,
+            "tool": "lerobot.rollout.stop",
+            "workflow": "rollout",
+            "status": "STOPPED",
+            "session_id": payload["session_id"],
+        },
+    )
     spec = controller._build_planning_spec(
         base_spec={
             "candidate_id": "cand-series-1",

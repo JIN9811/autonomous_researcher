@@ -18,6 +18,8 @@ from skimage.morphology import closing, disk, opening, remove_small_objects
 
 SPECIMEN_PRESENCE_SCHEMA = "vision_utm_specimen_presence.v1"
 _SAFE_NAME_RE = re.compile(r"[^A-Za-z0-9_.-]+")
+_RED_MIN_SATURATION = 0.50
+_RED_MIN_VALUE = 0.25
 
 
 def _safe_name(value: Any, default: str) -> str:
@@ -50,7 +52,9 @@ def _red_region(image_rgb: np.ndarray, *, min_area_px: float) -> tuple[Any | Non
     saturation = hsv[..., 1]
     value = hsv[..., 2]
     red = ((hue <= (12.0 / 180.0)) | (hue >= (168.0 / 180.0)))
-    mask = red & (saturation >= (70.0 / 255.0)) & (value >= (35.0 / 255.0))
+    # The UTM table is red-brown and can occupy more pixels than the specimen.
+    # Keep only chromatic red material instead of selecting the largest warm surface.
+    mask = red & (saturation >= _RED_MIN_SATURATION) & (value >= _RED_MIN_VALUE)
     footprint = disk(2)
     mask = opening(mask, footprint=footprint)
     mask = closing(mask, footprint=footprint)
@@ -65,17 +69,36 @@ def _red_region(image_rgb: np.ndarray, *, min_area_px: float) -> tuple[Any | Non
     return region, mask
 
 
-def inspect_specimen_presence(
-    data_url: str,
+def _normalized_roi_box(
+    image: Image.Image,
+    roi_normalized: tuple[float, float, float, float] | None,
+) -> tuple[int, int, int, int]:
+    if roi_normalized is None:
+        return 0, 0, image.width, image.height
+    if len(roi_normalized) != 4:
+        raise ValueError("roi_normalized must contain left, top, right, bottom.")
+    left, top, right, bottom = [float(value) for value in roi_normalized]
+    left_px = max(0, min(image.width - 1, int(round(left * image.width))))
+    top_px = max(0, min(image.height - 1, int(round(top * image.height))))
+    right_px = max(left_px + 1, min(image.width, int(round(right * image.width))))
+    bottom_px = max(top_px + 1, min(image.height, int(round(bottom * image.height))))
+    return left_px, top_px, right_px, bottom_px
+
+
+def _inspect_specimen_presence_image(
+    image: Image.Image,
     *,
     output_dir: Path | str,
     specimen_id: str,
     frame_id: str,
     min_area_px: float = 300.0,
+    roi_normalized: tuple[float, float, float, float] | None = None,
 ) -> dict[str, Any]:
     """Inspect one RGB frame, persist raw/annotated evidence, and return a bounded contract."""
-    image = _decode_data_url(data_url)
-    image_rgb = np.asarray(image, dtype=np.uint8)
+    image = image.convert("RGB")
+    roi_xyxy = _normalized_roi_box(image, roi_normalized)
+    roi_image = image.crop(roi_xyxy)
+    image_rgb = np.asarray(roi_image, dtype=np.uint8)
     region, _mask = _red_region(image_rgb, min_area_px=max(float(min_area_px), 1.0))
 
     target_dir = Path(output_dir).expanduser()
@@ -95,8 +118,12 @@ def inspect_specimen_presence(
     confidence = 0.0
     if region is not None:
         min_row, min_col, max_row, max_col = [int(value) for value in region.bbox]
-        bbox_xyxy = [min_col, min_row, max_col, max_row]
-        center_px = [int(round(float(region.centroid[1]))), int(round(float(region.centroid[0])))]
+        roi_left, roi_top, _roi_right, _roi_bottom = roi_xyxy
+        bbox_xyxy = [min_col + roi_left, min_row + roi_top, max_col + roi_left, max_row + roi_top]
+        center_px = [
+            int(round(float(region.centroid[1]))) + roi_left,
+            int(round(float(region.centroid[0]))) + roi_top,
+        ]
         contour_area_px = float(region.area)
         image_area = float(max(1, image.width * image.height))
         confidence = min(0.99, max(0.05, (contour_area_px / image_area) * 6.0))
@@ -116,14 +143,56 @@ def inspect_specimen_presence(
         "frame_id": str(frame_id or safe_frame_id),
         "width": int(image.width),
         "height": int(image.height),
+        "roi_xyxy": list(roi_xyxy),
         "bbox_xyxy": bbox_xyxy,
         "center_px": center_px,
         "contour_area_px": round(contour_area_px, 3),
         "confidence": round(confidence, 4),
-        "detector": "dual_red_hsv_largest_component",
+        "detector": "high_chroma_red_hsv_largest_component",
         "raw_frame_path": str(raw_path),
         "annotated_frame_path": str(annotated_path),
         "evidence_path": str(evidence_path),
     }
     evidence_path.write_text(json.dumps(result, ensure_ascii=True, indent=2), encoding="utf-8")
     return result
+
+
+def inspect_specimen_presence(
+    data_url: str,
+    *,
+    output_dir: Path | str,
+    specimen_id: str,
+    frame_id: str,
+    min_area_px: float = 300.0,
+    roi_normalized: tuple[float, float, float, float] | None = None,
+) -> dict[str, Any]:
+    """Inspect an image data URL and persist deterministic specimen evidence."""
+    return _inspect_specimen_presence_image(
+        _decode_data_url(data_url),
+        output_dir=output_dir,
+        specimen_id=specimen_id,
+        frame_id=frame_id,
+        min_area_px=min_area_px,
+        roi_normalized=roi_normalized,
+    )
+
+
+def inspect_specimen_presence_path(
+    image_path: Path | str,
+    *,
+    output_dir: Path | str,
+    specimen_id: str,
+    frame_id: str,
+    min_area_px: float = 300.0,
+    roi_normalized: tuple[float, float, float, float] | None = None,
+) -> dict[str, Any]:
+    """Inspect a local RGB frame while keeping detections in full-frame coordinates."""
+    with Image.open(Path(image_path).expanduser()) as image:
+        return _inspect_specimen_presence_image(
+            image,
+            output_dir=output_dir,
+            specimen_id=specimen_id,
+            frame_id=frame_id,
+            min_area_px=min_area_px,
+            roi_normalized=roi_normalized,
+        )

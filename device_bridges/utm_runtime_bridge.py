@@ -1257,13 +1257,13 @@ class UTMRuntimeProcessManager:
     def graph(self, *, previous_hash: str = "") -> dict[str, Any]:
         return self._graph_builder.snapshot(previous_hash=previous_hash)
 
-    def frame(self) -> dict[str, Any]:
+    def _capture_ros_frame(self, topics: list[str], *, mode: str) -> dict[str, Any]:
         status = self.status()
         if status.get("status") != "running":
             return {
                 "ok": False,
-                "mode": "ros_image_topic",
-                "topic": self.config.frame_topic,
+                "mode": mode,
+                "topic": topics[0] if topics else self.config.frame_topic,
                 "frame_available": False,
                 "runtime_status": status.get("status"),
                 "runtime_pid": status.get("pid"),
@@ -1272,7 +1272,6 @@ class UTMRuntimeProcessManager:
                 "attempts": [],
                 "generated_at": _now_iso(),
             }
-        topics = self._frame_topic_candidates()
         attempts: list[dict[str, Any]] = []
         timeout_sec = max(min(self.config.probe_timeout_sec, 1.25), 0.5)
         for topic in topics:
@@ -1299,7 +1298,7 @@ class UTMRuntimeProcessManager:
             attempts.append(attempt)
             if code == 0 and parsed and parsed.get("ok") and parsed.get("data_url"):
                 parsed.update({
-                    "mode": "ros_image_topic",
+                    "mode": mode,
                     "frame_available": True,
                     "runtime_status": status.get("status"),
                     "runtime_pid": status.get("pid"),
@@ -1310,7 +1309,7 @@ class UTMRuntimeProcessManager:
 
         return {
             "ok": False,
-            "mode": "ros_image_topic",
+            "mode": mode,
             "topic": topics[0] if topics else self.config.frame_topic,
             "frame_available": False,
             "runtime_status": status.get("status"),
@@ -1320,6 +1319,14 @@ class UTMRuntimeProcessManager:
             "attempts": attempts,
             "generated_at": _now_iso(),
         }
+
+    def frame(self) -> dict[str, Any]:
+        """Capture the configured display/overlay frame for GUI presentation."""
+        return self._capture_ros_frame(self._frame_topic_candidates(), mode="ros_image_topic")
+
+    def raw_frame(self) -> dict[str, Any]:
+        """Capture an unannotated camera frame for specimen-presence decisions."""
+        return self._capture_ros_frame(self._raw_frame_topic_candidates(), mode="ros_raw_image_topic")
 
     def frame_stream(self, *, topic: str = "", fps: float | int | None = None, quality: int = 82) -> Iterator[bytes]:
         """Yield an MJPEG stream from the configured ROS image topic at the requested GUI FPS."""
@@ -1849,6 +1856,23 @@ class UTMRuntimeProcessManager:
             "/camera/image_raw",
             "/yolo/dbg_image",
             "/compression_tester/debug_image",
+            "/camera/image_rect",
+        ]
+        seen: set[str] = set()
+        topics: list[str] = []
+        for topic in preferred:
+            clean = str(topic or "").strip()
+            if clean and clean not in seen:
+                seen.add(clean)
+                topics.append(clean)
+        return topics
+
+    def _raw_frame_topic_candidates(self) -> list[str]:
+        profile = self._active_camera_profile()
+        preferred = [
+            profile.ros_image_topic,
+            "/camera/image_raw",
+            profile.ros_rect_topic,
             "/camera/image_rect",
         ]
         seen: set[str] = set()

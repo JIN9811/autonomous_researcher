@@ -10,7 +10,7 @@ Add a second, localhost-only PyAutoGUI bridge that controls the current Ubuntu d
 - Session: X11 on `DISPLAY=:1`
 - ATR GUI: port `7860`
 - Windows bridge default: port `8765`
-- Local development bridge: `127.0.0.1:8766`
+- Local development bridge: `127.0.0.1:8767` (`8766` is reserved for the Isaac Sim OMX mirror receiver)
 - Pillow and OpenCV are installed.
 - PyAutoGUI, python3-xlib, scrot, wmctrl, and xdotool must be added to the project installation requirements.
 
@@ -48,7 +48,7 @@ ATR owns one supervised local process with this effective command:
 python Pyautogui_server_for_window/bridge/windows_pyautogui_bridge_server.py \
   --platform linux \
   --host 127.0.0.1 \
-  --port 8766 \
+  --port 8767 \
   --token-file memory/local_pyautogui_bridge.token \
   --artifact-dir runs/local_pyautogui_bridge/artifacts \
   --reference-dir memory/local_pyautogui_locators \
@@ -66,7 +66,7 @@ The workspace adds a `Local Development Bridge` control group with:
 - Health;
 - Select.
 
-The local bridge appears as a distinct saved candidate using alias `local_development`, URL `http://127.0.0.1:8766`, platform `linux`, and scope `localhost`. Selecting it uses the existing connection-memory and Linux-side HTTP client paths. Windows candidates remain selectable and are not fallback targets.
+The local bridge appears as a distinct saved candidate using alias `local_development`, URL `http://127.0.0.1:8767`, platform `linux`, and scope `localhost`. Selecting it uses the existing connection-memory and Linux-side HTTP client paths. Windows candidates remain selectable and are not fallback targets.
 
 `Open Bridge GUI` opens the selected candidate through the existing authenticated ATR proxy. The local and remote bridges therefore expose the same operator screen and Program Manager behavior.
 
@@ -101,7 +101,7 @@ Equipment Workspace
   -> local bridge supervisor start
   -> token-backed local candidate registration
   -> existing WindowsPyAutoGUIBridge HTTP client
-  -> http://127.0.0.1:8766
+  -> http://127.0.0.1:8767
   -> shared bridge HTTP/API and Program Manager
   -> Linux desktop adapter
   -> actual Ubuntu X11 mouse, keyboard, window, and screenshot operations
@@ -116,7 +116,7 @@ Windows deployment uses the same flow after selecting a Windows candidate; only 
 
 - Unit-test platform selection, X11 readiness, token-file persistence, process idempotency, stop ownership, candidate registration, and explicit selection.
 - Run the existing Windows bridge helper suite unchanged to protect Windows behavior.
-- Run browser audits against port `8766` and verify the full Device Bridge GUI and Program Manager.
+- Run browser audits against port `8767` and verify the full Device Bridge GUI and Program Manager.
 - Verify the install copy remains byte-identical.
 
 ### Actual local desktop

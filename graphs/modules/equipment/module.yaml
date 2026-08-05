@@ -13,17 +13,17 @@ module:
   - equipment.pyautogui.run
   - utm.run_protocol
   internal_graph:
-    - id: 01_check_windows_bridge
-      label: Check Windows Bridge
+    - id: 01_resolve_equipment_profile
+      label: Resolve Equipment Profile
       kind: internal_step
-    - id: 02_select_program
-      label: Select Program
+    - id: 02_validate_bridge_contract
+      label: Validate Bridge Contract
       kind: internal_step
-    - id: 03_run_utm_macro
-      label: Run Utm Macro
+    - id: 03_execute_registered_protocol
+      label: Execute Registered Protocol
       kind: internal_step
-    - id: 04_handoff_analysis
-      label: Handoff Analysis
+    - id: 04_validate_evidence_handoff
+      label: Validate Evidence and Handoff
       kind: internal_step
   io_contract:
     input: OrchestratorState

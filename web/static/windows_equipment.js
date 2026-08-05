@@ -48,6 +48,13 @@ const btnListLocators = document.getElementById("btn-equipment-list-locators");
 const btnCaptureLocator = document.getElementById("btn-equipment-capture-locator");
 const btnLoadUtmProfile = document.getElementById("btn-equipment-load-utm-profile");
 const btnOpenBridgeGui = document.getElementById("btn-equipment-open-bridge-gui");
+const localBridgeDot = document.getElementById("equipment-local-bridge-dot");
+const localBridgeStatus = document.getElementById("equipment-local-bridge-status");
+const localBridgeDetail = document.getElementById("equipment-local-bridge-detail");
+const btnLocalStart = document.getElementById("btn-equipment-local-start");
+const btnLocalStop = document.getElementById("btn-equipment-local-stop");
+const btnLocalHealth = document.getElementById("btn-equipment-local-health");
+const btnLocalSelect = document.getElementById("btn-equipment-local-select");
 const btnSaveUtmProfile = document.getElementById("btn-equipment-save-utm-profile");
 const btnReadiness = document.getElementById("btn-equipment-readiness");
 const btnLivePreflight = document.getElementById("btn-equipment-live-preflight");
@@ -81,6 +88,11 @@ const completionAuditCard = document.getElementById("equipment-completion-audit-
 const completionAuditStatus = document.getElementById("equipment-completion-audit-status");
 const completionAuditDetail = document.getElementById("equipment-completion-audit-detail");
 const requestAuditCard = document.getElementById("equipment-request-audit-card");
+const profileItems = document.getElementById("equipment-profile-items");
+const profileConnectionStatus = document.getElementById("equipment-profile-connection-status");
+const profileEvidenceStatus = document.getElementById("equipment-profile-evidence-status");
+const btnProfilePreflight = document.getElementById("btn-equipment-profile-preflight");
+const btnProfileTest = document.getElementById("btn-equipment-profile-test");
 const requestAuditStatus = document.getElementById("equipment-request-audit-status");
 const requestAuditDetail = document.getElementById("equipment-request-audit-detail");
 const utmExportGlobInput = document.getElementById("equipment-utm-export-glob");
@@ -109,6 +121,60 @@ let latestRequestAudit = {};
 let latestProofVerification = {};
 let latestCompletionAudit = {};
 let latestVisionProofDraft = {};
+let selectedEquipmentProfileId = "utm_windows_v1";
+
+function renderEquipmentProfiles(payload) {
+  const profiles = Array.isArray(payload && payload.profiles) ? payload.profiles : [];
+  selectedEquipmentProfileId = String((payload && payload.selected_profile_id) || selectedEquipmentProfileId || "utm_windows_v1");
+  if (!profileItems) return;
+  profileItems.innerHTML = profiles.map((profile) => {
+    const selected = profile.profile_id === selectedEquipmentProfileId;
+    return `<button class="btn ${selected ? "primary" : ""}" data-equipment-profile="${profile.profile_id}">${profile.label} · ${profile.bridge_provider}</button>`;
+  }).join("") || "No registered equipment profile.";
+  profileItems.querySelectorAll("[data-equipment-profile]").forEach((button) => {
+    button.addEventListener("click", () => {
+      selectedEquipmentProfileId = button.getAttribute("data-equipment-profile") || "utm_windows_v1";
+      loadEquipmentProfileState().catch((err) => writeLog({ ok: false, error: err.message }));
+    });
+  });
+}
+
+async function loadEquipmentProfileState() {
+  const [profiles, state] = await Promise.all([
+    apiJson("/api/equipment/profiles"),
+    apiJson(`/api/equipment/profiles/${encodeURIComponent(selectedEquipmentProfileId)}/state`),
+  ]);
+  renderEquipmentProfiles(profiles);
+  const connection = state.connection || {};
+  const readiness = state.readiness || {};
+  if (profileConnectionStatus) {
+    profileConnectionStatus.textContent = `profile=${state.profile?.label || "UTM"} · bridge=${connection.status || "unknown"} · readiness=${readiness.status || "unknown"}`;
+  }
+  const evidence = state.evidence && typeof state.evidence === "object" ? state.evidence : {};
+  if (profileEvidenceStatus) {
+    profileEvidenceStatus.textContent = evidence.analysis_handoff?.status || evidence.status || "No profile test result yet.";
+  }
+  return state;
+}
+
+async function runEquipmentProfileAction(action, button) {
+  setBusy(button, true);
+  try {
+    const data = await apiJson(`/api/equipment/profiles/${encodeURIComponent(selectedEquipmentProfileId)}/${action}`, {
+      method: "POST",
+      body: JSON.stringify(action === "test" ? { confirm_execute: true } : {}),
+    });
+    if (profileEvidenceStatus && action === "test") {
+      profileEvidenceStatus.textContent = data.analysis_handoff?.status || data.status || "test completed";
+    }
+    writeLog(data);
+    await loadEquipmentProfileState();
+  } catch (err) {
+    writeLog({ ok: false, error: err.message });
+  } finally {
+    setBusy(button, false);
+  }
+}
 
 function proofGateRef(baseId) {
   return {
@@ -274,7 +340,7 @@ function setBusy(button, busy) {
 }
 
 function rememberButtonLabels() {
-  [btnScan, btnRefresh, btnTest, btnProgram1, btnUtm, btnAbort, btnScreenshot, btnListLocators, btnCaptureLocator, btnLoadUtmProfile, btnSaveUtmProfile, btnOpenBridgeGui, btnReadiness, btnLivePreflight, btnLiveValidation, btnVisionProofDraft, btnLivePhysicalValidation, btnEvidenceAudit, btnProofPackage, btnVerifyProofPackage, btnCompletionAudit, btnRequestLog].forEach((button) => {
+  [btnScan, btnRefresh, btnTest, btnProgram1, btnUtm, btnAbort, btnScreenshot, btnListLocators, btnCaptureLocator, btnLoadUtmProfile, btnSaveUtmProfile, btnOpenBridgeGui, btnLocalStart, btnLocalStop, btnLocalHealth, btnLocalSelect, btnReadiness, btnLivePreflight, btnLiveValidation, btnVisionProofDraft, btnLivePhysicalValidation, btnEvidenceAudit, btnProofPackage, btnVerifyProofPackage, btnCompletionAudit, btnRequestLog].forEach((button) => {
     if (button && !button.dataset.originalText) {
       button.dataset.originalText = button.textContent;
     }
@@ -501,9 +567,55 @@ async function apiJson(url, options = {}) {
   });
   const data = await response.json();
   if (!response.ok) {
-    throw new Error(data.detail || data.message || `HTTP ${response.status}`);
+    const detail = data && data.detail;
+    throw new Error((detail && typeof detail === "object" ? detail.message || detail.failure_code : detail) || data.message || `HTTP ${response.status}`);
   }
   return data;
+}
+
+function renderLocalBridgeStatus(payload) {
+  const data = payload && typeof payload === "object" ? payload : {};
+  const running = data.running === true;
+  const healthy = data.healthy === true;
+  const connection = data.connection && typeof data.connection === "object" ? data.connection : {};
+  const selected = connection.selected_candidate === "local_development";
+  const pyautogui = data.health && data.health.pyautogui && data.health.pyautogui.available === true;
+  if (localBridgeDot) localBridgeDot.className = `status-dot ${healthy ? "running" : running ? "warning" : "idle"}`;
+  if (localBridgeStatus) localBridgeStatus.textContent = healthy ? "Ready" : running ? "Running · desktop control unavailable" : "Stopped";
+  if (localBridgeDetail) {
+    localBridgeDetail.textContent = `localhost:8767 · ${pyautogui ? "PyAutoGUI ready" : "PyAutoGUI not ready"} · ${selected ? "selected" : "standby"}`;
+  }
+  if (btnLocalStart) btnLocalStart.disabled = running;
+  if (btnLocalStop) btnLocalStop.disabled = !running;
+  if (btnLocalSelect) btnLocalSelect.disabled = !healthy || selected;
+}
+
+function setLocalBridgeBusy(busy) {
+  [btnLocalStart, btnLocalStop, btnLocalHealth, btnLocalSelect].forEach((button) => setBusy(button, busy));
+}
+
+async function refreshLocalBridgeStatus() {
+  const data = await apiJson("/api/equipment/windows/local-bridge/status");
+  renderLocalBridgeStatus(data);
+  return data;
+}
+
+async function runLocalBridgeAction(action) {
+  setLocalBridgeBusy(true);
+  try {
+    const data = action === "health"
+      ? await apiJson("/api/equipment/windows/local-bridge/status")
+      : await apiJson(`/api/equipment/windows/local-bridge/${action}`, { method: "POST", body: "{}" });
+    writeLog(data);
+    await refreshConfig();
+    await refreshLocalBridgeStatus();
+  } catch (err) {
+    writeLog({ ok: false, status: "blocked", error: err.message });
+    await refreshLocalBridgeStatus().catch(() => {});
+  } finally {
+    setLocalBridgeBusy(false);
+    await refreshLocalBridgeStatus().catch(() => {});
+  }
 }
 
 async function refreshConfig() {
@@ -562,10 +674,11 @@ function renderSavedCandidates(candidates) {
     const card = document.createElement("div");
     card.className = "equipment-candidate-card";
     const selected = candidate.selected ? "selected" : "standby";
+    const target = candidate.managed_local ? "local managed" : `${candidate.platform || "windows"} · ${candidate.scope || "network"}`;
     card.innerHTML = `
       <div>
         <strong>${candidate.candidate_alias}</strong>
-        <p class="hint">${candidate.bridge_url} · ${selected} · ${candidate.allow_live_execute ? "live enabled" : "live blocked"}</p>
+        <p class="hint">${candidate.bridge_url} · ${target} · ${selected} · ${candidate.allow_live_execute ? "live enabled" : "live blocked"}</p>
       </div>
       <div class="button-row">
         <button class="btn mini" data-action="select">Select</button>
@@ -763,12 +876,8 @@ function hydrateUtmProfile(data) {
 }
 
 function openSelectedBridgeGui() {
-  if (!selectedBridgeUrl) {
-    writeLog({ ok: false, failure_code: "PYAUTOGUI_BRIDGE_GUI_URL_MISSING", message: "Select a saved Windows bridge candidate before opening the Windows-side GUI." });
-    return;
-  }
-  window.open(selectedBridgeUrl, "_blank", "noopener,noreferrer");
-  setActionStatus("Windows GUI opened", selectedBridgeUrl, "ok");
+  window.open("/equipment/windows/console", "_blank", "noopener,noreferrer");
+  setActionStatus("Windows GUI opened", "Opened locally; bridge connectivity is checked only when a console action is requested.", "ok");
 }
 
 async function checkReadiness() {
@@ -1182,6 +1291,10 @@ if (btnCaptureLocator) btnCaptureLocator.addEventListener("click", captureLocato
 if (btnLoadUtmProfile) btnLoadUtmProfile.addEventListener("click", loadUtmProfile);
 if (btnSaveUtmProfile) btnSaveUtmProfile.addEventListener("click", saveUtmProfile);
 if (btnOpenBridgeGui) btnOpenBridgeGui.addEventListener("click", openSelectedBridgeGui);
+if (btnLocalStart) btnLocalStart.addEventListener("click", () => runLocalBridgeAction("start"));
+if (btnLocalStop) btnLocalStop.addEventListener("click", () => runLocalBridgeAction("stop"));
+if (btnLocalHealth) btnLocalHealth.addEventListener("click", () => runLocalBridgeAction("health"));
+if (btnLocalSelect) btnLocalSelect.addEventListener("click", () => runLocalBridgeAction("select"));
 if (btnReadiness) btnReadiness.addEventListener("click", checkReadiness);
 if (btnLivePreflight) btnLivePreflight.addEventListener("click", runLivePreflight);
 if (btnLiveValidation) btnLiveValidation.addEventListener("click", buildLiveValidationReport);
@@ -1194,4 +1307,6 @@ if (btnCompletionAudit) btnCompletionAudit.addEventListener("click", runCompleti
 if (btnRequestLog) btnRequestLog.addEventListener("click", checkRequestLog);
 if (btnUtm) btnUtm.addEventListener("click", runUtmProtocol);
 if (btnAbort) btnAbort.addEventListener("click", runUtmAbort);
-refreshConfig().catch((err) => writeLog({ ok: false, error: err.message }));
+if (btnProfilePreflight) btnProfilePreflight.addEventListener("click", () => runEquipmentProfileAction("preflight", btnProfilePreflight));
+if (btnProfileTest) btnProfileTest.addEventListener("click", () => runEquipmentProfileAction("test", btnProfileTest));
+Promise.all([refreshConfig(), refreshLocalBridgeStatus(), loadEquipmentProfileState()]).catch((err) => writeLog({ ok: false, error: err.message }));

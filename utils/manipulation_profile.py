@@ -117,6 +117,17 @@ _TASK_PROFILE_KEYS = {
     "observation",
 }
 
+_PROFILE_STORAGE_KEYS = {
+    "profile_id",
+    "observation_pipeline_id",
+    "device",
+    "fps",
+    "camera_fps",
+    "camera_enabled",
+    "display_data",
+    "task_id",
+}
+
 
 def _clean_string(value: Any, default: str, *, max_len: int) -> str:
     text = str(value if value is not None else default).strip()
@@ -322,10 +333,31 @@ def normalize_manipulation_agent_profile(raw: dict[str, Any] | None) -> dict[str
         {**task_profiles.get(current_task, {}), **current_task_overrides},
     )
     profile["task_profiles"] = task_profiles
+    selected_task_profile = task_profiles[current_task]
+    for key in _TASK_PROFILE_KEYS:
+        if key in selected_task_profile:
+            profile[key] = selected_task_profile[key]
     profile["skill_id"] = current_task
     profile["source_location"] = task_profiles[current_task]["source_location"]
     profile["target_location"] = task_profiles[current_task]["target_location"]
     return profile
+
+
+def _profile_for_storage(profile: dict[str, Any]) -> dict[str, Any]:
+    """Serialize task policy references once, under their owning task profile."""
+    stored = {key: profile[key] for key in _PROFILE_STORAGE_KEYS if key in profile}
+    raw_task_profiles = profile.get("task_profiles") if isinstance(profile.get("task_profiles"), dict) else {}
+    task_profiles: dict[str, dict[str, Any]] = {}
+    for task_id in MANIPULATION_TASK_IDS:
+        task_profile = dict(raw_task_profiles.get(task_id) or {})
+        task_profile.pop("policy_checkpoint_path", None)
+        if not str(task_profile.get("policy_path") or "").strip():
+            task_profile.pop("policy_path", None)
+        if not str(task_profile.get("policy_repo_id") or "").strip():
+            task_profile.pop("policy_repo_id", None)
+        task_profiles[task_id] = task_profile
+    stored["task_profiles"] = task_profiles
+    return stored
 
 
 def load_manipulation_agent_profile() -> dict[str, Any]:
@@ -343,5 +375,8 @@ def save_manipulation_agent_profile(raw: dict[str, Any] | None) -> dict[str, Any
     """Persist normalized Manipulation Agent defaults."""
     profile = normalize_manipulation_agent_profile(raw)
     MANIPULATION_AGENT_PROFILE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    MANIPULATION_AGENT_PROFILE_PATH.write_text(json.dumps(profile, indent=2, ensure_ascii=False), encoding="utf-8")
+    MANIPULATION_AGENT_PROFILE_PATH.write_text(
+        json.dumps(_profile_for_storage(profile), indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
     return profile

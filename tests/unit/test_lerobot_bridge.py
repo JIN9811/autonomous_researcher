@@ -17,11 +17,19 @@ from typing import Any
 
 import numpy as np
 import pytest
+import yaml
 from PIL import Image
 
 from device_bridges.lerobot_bridge import LeRobotBridge, LeRobotBridgeConfig
 from mcp_tools.lerobot_schemas import LeRobotSessionRequest
 from utils.isaac_omx_mirror_mapping import ISAAC_OMX_JOINT_MAP
+
+
+def test_robotis_omx_profile_uses_validated_default_calibration() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    config = yaml.safe_load((repo_root / "configs" / "lerobot.yaml").read_text(encoding="utf-8"))
+
+    assert config["lerobot"]["profiles"]["robotis_omx_ai"]["calibration_dir"] == ""
 
 
 def _bridge(tmp_path: Path) -> LeRobotBridge:
@@ -1139,7 +1147,7 @@ def test_live_teleoperate_active_robot_cam_uses_wrapper_and_d405_direct_env(tmp_
     assert env["ATR_ACTIVE_ROBOT_CAM_CAPTURE_WAIT_TOLERANCE_DEG"] == "2.0"  # type: ignore[index]
     assert env["ATR_ACTIVE_ROBOT_CAM_RESUME_WAIT_TIMEOUT_S"] == "4.0"  # type: ignore[index]
     assert env["ATR_ACTIVE_ROBOT_CAM_RESUME_WAIT_POLL_S"] == "0.05"  # type: ignore[index]
-    assert env["ATR_ACTIVE_ROBOT_CAM_RESUME_WAIT_TOLERANCE_DEG"] == "2.0"  # type: ignore[index]
+    assert env["ATR_ACTIVE_ROBOT_CAM_RESUME_WAIT_TOLERANCE_DEG"] == "3.0"  # type: ignore[index]
     assert env["ATR_ACTIVE_ROBOT_CAM_SETTLE_S"] == "1.0"  # type: ignore[index]
     assert env["ATR_ACTIVE_ROBOT_CAM_HOLD_AFTER_CAPTURE_S"] == "1.0"  # type: ignore[index]
     assert env["ATR_SPECIMEN_POSE_PENDING_PATH"] == "/tmp/atr_specimen_pose_pending/latest_specimen_pose_payload.json"  # type: ignore[index]
@@ -1557,6 +1565,90 @@ def test_live_active_robot_cam_capture_uses_pose_driver_and_saved_realsense(tmp_
     assert captured["env"]["ATR_ACTIVE_ROBOT_CAM_ENABLED"] == "1"
     assert captured["env"]["ATR_ACTIVE_ROBOT_CAM_PRIMARY_CAMERA_KEY"] == "wrist"
     assert captured["env"]["ATR_ACTIVE_ROBOT_CAM_CAMERA_PRIORITY"] == "d405,d455f"
+
+
+@pytest.mark.parametrize("failure_code", ["SPECIMEN_NOT_DETECTED", "SPECIMEN_OUTSIDE_A4"])
+def test_live_active_robot_cam_non_detection_preserves_frame_and_release_contract(
+    tmp_path: Path,
+    monkeypatch,
+    failure_code: str,
+) -> None:
+    bridge = _bridge(tmp_path)
+    bridge.config.profiles["fake_omx_ai"]["safety_limits"].update({"live_enabled": True, "allow_policy_rollout": True})
+    bridge._scan_live_realsense_camera_entries = lambda: [  # type: ignore[method-assign]
+        {"serial": "352122273019", "name": "Intel RealSense D405"}
+    ]
+    follower = tmp_path / "omx_follower"
+    follower.touch()
+    frame = tmp_path / "active_cam_no_specimen.png"
+    frame.write_bytes(b"frame")
+    bridge.ports_save({"mode": "live", "profile_id": "fake_omx_ai", "device_role": "follower", "port": str(follower)})
+    bridge.ports_save(
+        {
+            "mode": "live",
+            "profile_id": "fake_omx_ai",
+            "device_role": "camera",
+            "camera_key": "wrist",
+            "camera_backend": "realsense",
+            "port": "352122273019",
+            "camera_fps": 15,
+        }
+    )
+    bridge._live_camera_block_if_needed = lambda **_: None  # type: ignore[method-assign]
+
+    def fake_run(command, **kwargs):  # type: ignore[no-untyped-def]
+        payload = {
+            "ok": False,
+            "status": "failed",
+            "failure_code": "ACTIVE_ROBOT_CAM_SPECIMEN_POSE_FAILED",
+            "attempts": [
+                {
+                    "camera": "d405",
+                    "result": {
+                        "ok": False,
+                        "failure_code": failure_code,
+                        "snapshot": {"ok": False, "failure_code": failure_code},
+                    },
+                }
+            ],
+            "capture": {
+                "ok": True,
+                "path": str(frame),
+                "serve_url": f"/api/lerobot/visualization/file?path={frame}",
+                "width": 640,
+                "height": 480,
+                "synthetic": False,
+            },
+            "capture_wait": {"ok": True, "status": "reached"},
+            "resume_action": {"shoulder_pan.pos": 0.0},
+            "robot_pose_included": True,
+        }
+        return subprocess.CompletedProcess(command, 4, stdout=json.dumps(payload), stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    result = bridge.active_robot_cam_capture(
+        {
+            "mode": "live",
+            "runtime_mode": "live",
+            "profile_id": "fake_omx_ai",
+            "camera_key": "wrist",
+            "confirm_live_execute": True,
+        }
+    )
+
+    assert result["ok"] is True
+    assert result["status"] == "not_detected"
+    assert result["specimen_detected"] is False
+    assert result["placement_status"] == (
+        "outside" if failure_code == "SPECIMEN_OUTSIDE_A4" else "not_detected"
+    )
+    assert result["detection_failure_code"] == failure_code
+    assert result["message"] == failure_code
+    assert result["capture"]["path"] == str(frame)
+    assert result["port_released"] is True
+    assert result["camera_returned_to_vla"] is True
+    assert result["release_verification"]["method"] == "child_process_exit"
 
 
 def test_camera_release_contract_does_not_assume_missing_release_fields_are_true(tmp_path: Path) -> None:
@@ -4590,6 +4682,30 @@ def test_manipulation_rollout_keeps_explicit_older_checkpoint_when_newer_exists(
             "task_id": "transfer_to_utm",
             "skill_id": "transfer_to_utm",
             "policy_path": str(selected),
+        }
+    )
+
+    assert result["ok"] is True
+    assert result["checkpoint_path"] == str(selected)
+    assert f"--policy.path={selected}" in result["command_preview"]
+    assert not any("085000" in str(item) for item in result["command_preview"])
+
+
+def test_manipulation_rollout_policy_path_overrides_stale_checkpoint_alias(tmp_path: Path) -> None:
+    selected = tmp_path / "outputs" / "train" / "job" / "checkpoints" / "040000" / "pretrained_model"
+    stale = tmp_path / "outputs" / "train" / "job" / "checkpoints" / "085000" / "pretrained_model"
+    _make_policy_checkpoint(selected)
+    _make_policy_checkpoint(stale)
+    bridge = _bridge(tmp_path)
+
+    result = bridge.rollout_start(
+        {
+            "mode": "test",
+            "profile_id": "fake_omx_ai",
+            "task_id": "transfer_to_utm",
+            "skill_id": "transfer_to_utm",
+            "policy_path": str(selected),
+            "policy_checkpoint_path": str(stale),
         }
     )
 

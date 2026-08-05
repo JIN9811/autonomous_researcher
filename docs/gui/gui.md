@@ -158,6 +158,11 @@ Windows PyAutoGUI Bridge GUI route:
 - Route: `/equipment/windows`
 - The Live GUI no longer contains a Windows Bridge button; hardware workspace entry points live under Main GUI Device Workspaces.
 - Saved bridge candidates are still persisted in `memory/windows_pyautogui_connection.json` and are shared by all GUI windows.
+- The Workspace also exposes a manually controlled `local_development` target
+  at `127.0.0.1:8767`. Start registers it as standby, Health verifies X11 and
+  PyAutoGUI, Select switches the shared candidate, and Stop terminates only the
+  ATR-owned local process. It uses the same proxied console and Program Manager
+  as Windows; `8766` remains reserved for Isaac Sim OMX mirror.
 
 Module Management route:
 - Main dashboard/runtime entry: `/module-management`
