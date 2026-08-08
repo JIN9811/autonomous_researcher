@@ -73,6 +73,7 @@ from knowledge.graph_importer import import_store_to_graph
 from knowledge.graphify_bridge import import_project_graph, scan_project_graph
 from knowledge.schemas import EvolutionOutcomeRecord
 from knowledge.service import KnowledgeService
+from knowledge.reconciliation_service import KnowledgeReconciliationService, KnowledgeReconciliationWorker
 from knowledge.stores import JsonlKnowledgeStore
 from device_bridges.bambu_bridge import (
     BambuConnectionMemory,
@@ -139,6 +140,9 @@ app.mount(
 )
 
 _LOCAL_PYAUTOGUI_BRIDGE_SUPERVISOR: LocalPyAutoGUIBridgeSupervisor | None = None
+_KNOWLEDGE_RECONCILIATION_SERVICE: KnowledgeReconciliationService | None = None
+_KNOWLEDGE_RECONCILIATION_WORKER: KnowledgeReconciliationWorker | None = None
+_KNOWLEDGE_RECONCILIATION_KNOWLEDGE_SERVICE: KnowledgeService | None = None
 
 
 @app.get("/favicon.ico", include_in_schema=False)
@@ -438,6 +442,9 @@ async def keep_startup_side_effect_free() -> None:
     _cleanup_bambu_video_stream_processes(include_orphans=True)
     settings = _read_api_key_settings(import_env=True)
     await _apply_runtime_api_key_settings(settings, emit_event=False)
+    worker = _knowledge_reconciliation_worker()
+    controller._deps.agent_context.on_knowledge_ingest = lambda **_: worker.wake()
+    worker.start()
 
 
 @app.on_event("shutdown")
@@ -448,6 +455,10 @@ async def shutdown_lerobot_subprocesses() -> None:
     _utm_runtime_bridge().shutdown()
     if _LOCAL_PYAUTOGUI_BRIDGE_SUPERVISOR is not None:
         _LOCAL_PYAUTOGUI_BRIDGE_SUPERVISOR.stop()
+    if _KNOWLEDGE_RECONCILIATION_WORKER is not None:
+        await _KNOWLEDGE_RECONCILIATION_WORKER.shutdown()
+    if _KNOWLEDGE_RECONCILIATION_KNOWLEDGE_SERVICE is not None:
+        _KNOWLEDGE_RECONCILIATION_KNOWLEDGE_SERVICE.close()
 
 
 class StartRunRequest(BaseModel):
@@ -3156,6 +3167,24 @@ def _knowledge_graph_backend():
 def _knowledge_service() -> KnowledgeService:
     """Return the shared durable Knowledge service for API and CLI parity."""
     return KnowledgeService.from_env(resolve_path("."))
+
+
+def _knowledge_reconciliation_worker() -> KnowledgeReconciliationWorker:
+    """Return one app-owned relation worker without loading an LLM model."""
+    global _KNOWLEDGE_RECONCILIATION_SERVICE
+    global _KNOWLEDGE_RECONCILIATION_WORKER
+    global _KNOWLEDGE_RECONCILIATION_KNOWLEDGE_SERVICE
+    if _KNOWLEDGE_RECONCILIATION_WORKER is None:
+        knowledge_service = KnowledgeService.from_env(resolve_path("."))
+        reconciliation = KnowledgeReconciliationService(
+            project_root=resolve_path("."),
+            knowledge_service=knowledge_service,
+            agent_context=controller._deps.agent_context,
+        )
+        _KNOWLEDGE_RECONCILIATION_KNOWLEDGE_SERVICE = knowledge_service
+        _KNOWLEDGE_RECONCILIATION_SERVICE = reconciliation
+        _KNOWLEDGE_RECONCILIATION_WORKER = KnowledgeReconciliationWorker(reconciliation)
+    return _KNOWLEDGE_RECONCILIATION_WORKER
 
 
 def _self_evolution_service() -> SelfEvolutionService:

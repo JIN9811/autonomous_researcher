@@ -578,6 +578,7 @@ class ModuleRuntimeContext:
         timeout_s: float | None = None,
         priority: int | None = None,
         owner: str = "",
+        lease_wait: bool = True,
     ):
         """Call the module-selected LLM route without changing Python agent code."""
         lease = getattr(self._base, "llm_lease", None)
@@ -587,7 +588,7 @@ class ModuleRuntimeContext:
         if priority is not None:
             resolved_priority = int(priority)
         lease_owner = owner or f"module:{self._module.get('id', self._stage.value)}:{task_type}"
-        async with lease.acquire(priority=resolved_priority, owner=lease_owner):
+        async with lease.acquire(priority=resolved_priority, owner=lease_owner, wait=lease_wait):
             return await self._complete_unleased(task_type, user_prompt, timeout_s=timeout_s)
 
     async def _complete_unleased(

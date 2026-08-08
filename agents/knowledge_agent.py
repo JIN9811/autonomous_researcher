@@ -24,6 +24,7 @@ Modification guide:
 from __future__ import annotations
 
 from pathlib import Path
+import inspect
 from typing import Any
 
 from agents.base_agent import AgentContext, AgentResult, BaseAgent
@@ -202,6 +203,7 @@ class KnowledgeAgent(BaseAgent):
             },
             activity_consumers=["orchestrator"],
         )
+        await _notify_reconciliation_worker(ctx, graph_event_status)
         knowledge_context = {
             "schema": "knowledge_context.v1",
             "run_id": state.run_id,
@@ -414,6 +416,21 @@ def _ingest_graph_event(
     finally:
         if service is not None:
             service.close()
+
+
+async def _notify_reconciliation_worker(ctx: AgentContext, graph_event_status: dict[str, Any]) -> None:
+    """Wake the app-owned worker after a durable Knowledge event without coupling failures."""
+    if not graph_event_status.get("enabled") or not graph_event_status.get("ok", False):
+        return
+    callback = getattr(ctx, "on_knowledge_ingest", None)
+    if callback is None:
+        return
+    try:
+        result = callback(graph_event_status=graph_event_status)
+        if inspect.isawaitable(result):
+            await result
+    except Exception:
+        return
 
 
 

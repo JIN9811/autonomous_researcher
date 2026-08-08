@@ -68,6 +68,7 @@ class AgentContext:
     active_backend: str = "vllm"
     on_model_call: Callable[..., Awaitable[None] | None] | None = None
     on_tool_event: Callable[[dict[str, Any]], Awaitable[None] | None] | None = None
+    on_knowledge_ingest: Callable[..., Awaitable[None] | None] | None = None
     model_routers: dict[str, ModelRouter] = field(default_factory=dict)
     primary_backends: dict[str, BaseLLMBackend] = field(default_factory=dict)
     fallback_backends: dict[str, BaseLLMBackend] = field(default_factory=dict)
@@ -109,6 +110,7 @@ class AgentContext:
         timeout_s: float | None = None,
         priority: int | None = None,
         owner: str = "",
+        lease_wait: bool = True,
     ) -> LLMResponse:
         """Call selected model with fallback backend on failure."""
         if self.llm_lease is None:
@@ -117,7 +119,7 @@ class AgentContext:
         if priority is not None:
             resolved_priority = int(priority)
         lease_owner = owner or f"agent:{task_type}"
-        async with self.llm_lease.acquire(priority=resolved_priority, owner=lease_owner):
+        async with self.llm_lease.acquire(priority=resolved_priority, owner=lease_owner, wait=lease_wait):
             return await self._complete_unleased(task_type, user_prompt, timeout_s=timeout_s)
 
     async def _complete_unleased(

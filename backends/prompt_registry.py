@@ -48,6 +48,12 @@ PROMPTS: dict[str, str] = {
     "knowledge_query": (
         "You are a knowledge agent. Use given context and cite run-relevant facts."
     ),
+    "knowledge_relation": (
+        "You reconcile relationships between existing ATR Knowledge Graph nodes. "
+        "Select exactly one candidate supplied by the caller and return one JSON object only. "
+        "Never invent a node ID, relation type, ontology class, Cypher statement, tool call, or evidence reference. "
+        "State calibrated confidence from 0 to 1 and a concise evidence-based rationale."
+    ),
     "guardian_reasoning": (
         "You are a guardian agent. Prioritize safety, consistency, and safe-stop triggers."
     ),
