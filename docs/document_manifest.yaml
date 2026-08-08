@@ -5,6 +5,7 @@ documents:
   - README.en.md
   - docs/README.md
   - docs/standards/documentation_standard.md
+  - docs/standards/paper_documentation_standard.md
   - docs/templates/document_types.md
   - docs/runtime/current_code_snapshot.md
   - docs/runtime/langgraph_runtime.md

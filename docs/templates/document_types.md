@@ -11,6 +11,7 @@ scope:
 summary: Copy-ready YAML metadata and body structures for all canonical ATR document types.
 related_docs:
   - docs/standards/documentation_standard.md
+  - docs/standards/paper_documentation_standard.md
   - docs/superpowers/specs/2026-08-08-documentation-governance-design.md
 supersedes: []
 ---
@@ -45,6 +46,23 @@ technical review.
 - Split mixed current/future documents instead of hiding the difference in one
   label.
 - Remove instructional comments and angle-bracket prompts before activation.
+
+Paper-facing chapters MUST also follow
+`docs/standards/paper_documentation_standard.md`. Use this copy-ready extension
+after the shared front matter fields:
+
+```yaml
+paper_section: system_architecture
+research_questions:
+  - RQ1
+claim_ids:
+  - C-SYS-ARCH-01
+```
+
+For a code-backed paper Reference, use repository-relative `source_of_truth`,
+an ISO date in `last_verified`, and the inspected commit in
+`verified_against`. Replace the example section and identifiers with values
+actually addressed by the chapter.
 
 ## Index Template
 

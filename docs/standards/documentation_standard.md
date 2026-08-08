@@ -12,6 +12,7 @@ scope:
 summary: Normative rules for classifying, authoring, verifying, and retiring ATR documentation.
 related_docs:
   - docs/templates/document_types.md
+  - docs/standards/paper_documentation_standard.md
   - docs/superpowers/specs/2026-08-08-documentation-governance-design.md
 supersedes: []
 ---
@@ -44,6 +45,8 @@ configuration remain the source of truth for current implemented behavior.
 - Governed document set and snapshot expectations:
   `docs/document_manifest.yaml`
 - Copy-ready structures: `docs/templates/document_types.md`
+- Paper-facing claim and release rules:
+  `docs/standards/paper_documentation_standard.md`
 - Automated checks: `scripts/validate_documentation.py`
 - Validator tests: `tests/unit/test_documentation_validation.py`
 
@@ -266,6 +269,11 @@ from code before updating expected values in the manifest.
 - The agent-plan heading exception is defined under the Plan rules above.
 - An exception MUST NOT be used to label proposed behavior as current behavior
   or to omit safety and recovery information from an operations Guide.
+
+Paper-facing documents have additional narrative, evidence, figure, language,
+privacy, and release constraints in
+`docs/standards/paper_documentation_standard.md`. Those constraints are not an
+exception to this Standard; both Standards apply.
 
 ## Compliance Examples
 
