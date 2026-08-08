@@ -9,6 +9,7 @@ import re
 from collections import Counter
 from collections.abc import Sequence
 from typing import Any
+from urllib.parse import unquote
 
 import yaml
 
@@ -130,12 +131,48 @@ def _validate_paths(
     return errors
 
 
+def _markdown_link_targets(body: str) -> list[str]:
+    targets: list[str] = []
+    for match in re.finditer(r"!?\[[^\]]*\]\(([^)\n]+)\)", body):
+        raw = match.group(1).strip()
+        if raw.startswith("<") and ">" in raw:
+            target = raw[1 : raw.index(">")]
+        else:
+            target = raw.split(maxsplit=1)[0]
+        targets.append(unquote(target))
+    return targets
+
+
+def _validate_local_links(path: Path, body: str, root: Path, label: str) -> list[str]:
+    errors: list[str] = []
+    resolved_root = root.resolve()
+    for target in _markdown_link_targets(body):
+        if (
+            not target
+            or target.startswith(("#", "/"))
+            or re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", target)
+        ):
+            continue
+        local_part = target.split("#", 1)[0].split("?", 1)[0]
+        if not local_part:
+            continue
+        resolved = (path.parent / local_part).resolve()
+        try:
+            resolved.relative_to(resolved_root)
+        except ValueError:
+            errors.append(f"{label}: escaping local link is not allowed: {target}")
+            continue
+        if not resolved.exists():
+            errors.append(f"{label}: missing local link: {target}")
+    return errors
+
+
 def validate_document(path: Path, root: Path) -> list[str]:
     """Return all governance defects found in one Markdown document."""
 
     label = _document_label(path, root)
     try:
-        metadata, _ = split_front_matter(path.read_text(encoding="utf-8"))
+        metadata, body = split_front_matter(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, ValueError, yaml.YAMLError) as exc:
         return [f"{label}: {exc}"]
 
@@ -194,6 +231,7 @@ def validate_document(path: Path, root: Path) -> list[str]:
         errors.append(f"{label}: superseded document requires a replacement path")
 
     errors.extend(_validate_paths(metadata, root, label))
+    errors.extend(_validate_local_links(path, body, root, label))
     return errors
 
 

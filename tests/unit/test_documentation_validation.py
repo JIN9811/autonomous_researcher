@@ -158,6 +158,33 @@ def test_valid_reference_has_no_errors(tmp_path: Path) -> None:
     assert module.validate_document(document, tmp_path) == []
 
 
+def test_document_rejects_missing_local_markdown_link(tmp_path: Path) -> None:
+    module = _load_validator()
+    document = _write(
+        tmp_path,
+        "docs/index.md",
+        VALID_INDEX + "\n[Missing Guide](guides/missing.md)\n",
+    )
+
+    errors = module.validate_document(document, tmp_path)
+
+    assert any("missing local link: guides/missing.md" in error for error in errors)
+
+
+def test_document_accepts_existing_local_and_external_links(tmp_path: Path) -> None:
+    module = _load_validator()
+    _write(tmp_path, "docs/guides/ready.md", "# Ready\n")
+    document = _write(
+        tmp_path,
+        "docs/index.md",
+        VALID_INDEX
+        + "\n[Ready](guides/ready.md#start)\n"
+        + "[API](http://localhost:7860/docs)\n",
+    )
+
+    assert module.validate_document(document, tmp_path) == []
+
+
 def test_manifest_rejects_duplicate_documents(tmp_path: Path) -> None:
     module = _load_validator()
     _write(tmp_path, "README.md", VALID_INDEX)
