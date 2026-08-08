@@ -18,6 +18,7 @@ related_docs:
   - docs/paper/03_closed_loop_method.md
   - docs/paper/05_experimental_setup.md
   - docs/paper/06_evaluation_and_results.md
+  - SECURITY.md
 supersedes: []
 paper_section: safety_ethics_and_limitations
 research_questions:

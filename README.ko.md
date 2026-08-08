@@ -4,293 +4,213 @@ subtype: index
 status: active
 authority: navigation
 audience:
-  - user
+  - researcher
+  - reviewer
   - operator
   - developer
 scope:
   - repository
-  - korean_documentation
-summary: Autonomous Researcher Framework의 한국어 사용·운영·개발 문서 진입점.
+  - paper
+  - korean_companion
+summary: 시스템 기여를 우선하는 Autonomous Researcher Framework 한국어 진입 문서.
 related_docs:
   - README.md
+  - README.en.md
+  - docs/paper/README.md
   - docs/README.md
-  - docs/standards/documentation_standard.md
-  - docs/runtime/current_code_snapshot.md
+  - docs/standards/paper_documentation_standard.md
+  - REQUIREMENTS.md
+  - SECURITY.md
 supersedes: []
 ---
 
 # Autonomous Researcher Framework
 
-Autonomous Researcher Framework는 실험 설계, 시편 제작, 장비 제어, 해석, 최적화를 하나의 폐루프 파이프라인으로 연결하는 로컬 멀티 에이전트 연구 자동화 시스템입니다.
-현재 코드는 FastAPI 서버, Live GUI, LangGraph 런타임, 장비 브릿지, BO/CAE 워크스페이스, LeRobot 워크스페이스, Self-Evolution/Runtime IDE를 포함합니다.
+> **연구 아티팩트 상태:** 소프트웨어 저장소는 활성 상태이며 논문 문서
+> 패키지는 검토 중입니다. 종단간 과학 성능과 실제 장비 성능은 아직
+> `not_evaluated`입니다.
 
-## 1. 빠른 시작
+Autonomous Researcher Framework(ATR)는 연구 목표, 실험 설계, 시편 제작,
+비전, 조작, 장비 실행, 분석, 영속 지식, 베이지안 최적화를 하나의 재개
+가능한 폐루프로 연결하는 안전 게이트·증거 중심 멀티에이전트 시스템입니다.
 
-처음 사용하는 사람은 먼저 [사용자 종합 매뉴얼](docs/tutorials/user_manual.ko.md)을 읽으면 됩니다. 이 문서는 설치, 첫 실행, GUI 사용, 장비 설정, 상급자용 API/graph/module 구조까지 한 번에 정리합니다.
+[English paper landing page](README.md) · [상세 영문 가이드](README.en.md) ·
+[논문 문서 패키지](docs/paper/README.md) · [전체 문서 인덱스](docs/README.md)
 
-현재 코드와 문서가 다르게 보일 때는
-[현재 코드/API 스냅샷](docs/runtime/current_code_snapshot.md)을 먼저
-확인하세요. 이 스냅샷은 `app/main.py`, `graphs/configs/*.yaml`,
-`graphs/modules/*`, `device_bridges/*`, `web/templates/*`,
-`web/static/*` 기준으로 현재 route/API/manifest 상태를 정리합니다.
-2026-08-08 커밋 `09bbe32` 기준 FastAPI `APIRoute` 객체는 332개입니다.
-`/openapi.json`, `/docs`, `/docs/oauth2-redirect`, `/redoc`, `/static`까지
-포함한 전체 `app.routes` 등록 수는 339개입니다. 이 수치는
-문서 갱신 시 실제 코드와 맞는지 확인하는 sanity check로 사용합니다.
-단순 decorator grep가 아니라 FastAPI app을 import해 `APIRoute` 객체를
-세는 기준입니다. 일부 route는 단일 줄 decorator literal이 아니기 때문에
-grep 수치와 다를 수 있습니다.
+## 그래피컬 애브스트랙트
 
-Windows에서 로컬 AI 없이 API key만 사용할 때는 `.env`에
-`AUTONOMOUS_BACKEND=openai`와 `OPENAI_API_KEY`를 설정한 뒤
-`python -m app.serve`로 실행합니다. Linux 로컬 우선 워크스테이션은
-`AUTONOMOUS_BACKEND=vllm`을 유지하고, `configs/models.yaml`의
-`backend.fallback: openai`를 통해 OpenAI를 최종 fallback으로 사용합니다.
-Main GUI의 `Current Models` 영역에는 `API Key` 버튼이 있으며,
-저장된 key는 `memory/api_keys.json`에 로컬 전용으로 보관됩니다.
-`Loading` 상태에서는 OpenAI API가 첫 inference route가 되고,
-`Unloading`하면 저장값은 유지하되 로컬 vLLM route가 다시 우선됩니다.
-현재 관리되는 로컬 vLLM 모델은 `gemma4:31b`와
-`gemma4:e4b-it-nvfp4` 두 개입니다. `e2b`는 Main GUI/API의 managed model
-목록에서 제거된 상태입니다. `31b`는 MTP speculative decoding을 사용하고,
-`e4b`는 안정성을 위해 NVFP4 target-only로 서빙합니다.
+![안전 게이트 기반 ATR 폐루프](docs/paper/assets/figures/01_graphical_abstract.svg)
 
-### Linux 설치 - 기본 경로
+**그림 1.** ATR은 연구 자동화를 개별 도구 묶음이 아니라 통제된 시스템
+루프로 다룹니다. 주황색 다이아몬드는 Guardian/운영자 게이트, 초록색
+문서는 영속 증거를 뜻합니다. 구조는 코드 조사로 확인했지만 과학적 효과와
+실장비 강건성은 평가하지 않았습니다.
 
-Linux/WSL 기본 설치는 저장소 루트에서 bootstrap을 실행합니다. 이 경로는
-서버, GUI, Python 의존성, `atr` CLI, `.env` 템플릿까지 준비합니다.
-LeRobot, RealSense RSUSB, Bambu Studio, Docker/vLLM 같은 장비별 외부
-프로그램은 [REQUIREMENTS.md](REQUIREMENTS.md)의 해당 섹션을 이어서
-설치합니다.
+## 논문 요약
 
-```bash
-git clone <private-repo-url> autonomous_researcher
-cd autonomous_researcher
-bash install/bootstrap_linux.sh
-atr doctor
-atr up
-```
+**작업 제목:** *Autonomous Researcher Framework: A Safety-Gated
+Closed-Loop Multi-Agent System and Extensible Platform for Laboratory
+Automation*
 
-종료:
+논문 기여의 우선순위는 다음과 같습니다.
 
-```bash
-atr down
-```
+1. **주 기여 — 시스템:** 타입이 있는 단계 간 핸드오프, 체크포인트,
+   Guardian/운영자 게이트, 영속 증거, 지식 피드백, 명시적 종료 상태를 가진
+   폐루프 연구 시스템
+2. **부 기여 — 플랫폼:** 시스템 계약을 우회하지 않고 모듈, 그래프, 모델,
+   장비 브리지, 운영 화면을 확장하는 구조
 
-직접 실행:
+| ID | 연구 질문 |
+|---|---|
+| RQ1 | 서로 다른 연구 단계를 완전하고 재개 가능한 폐루프로 어떻게 구성하는가? |
+| RQ2 | 의사결정·실행·관찰·분석·지식 갱신 전반의 증거를 어떻게 감사 가능하게 보존하는가? |
+| RQ3 | Guardian과 운영자 게이트가 위험하거나 불확실하거나 되돌리기 어려운 동작을 어떻게 제한하는가? |
+| RQ4 | 시스템 계약을 약화하지 않으면서 에이전트·장비·모델·워크스페이스를 어떻게 추가하는가? |
 
-```bash
-.venv/bin/python -m app.serve
-```
+## 문제
 
-### Windows 설치 - 지원 범위와 제한사항
+실험실 연구 루프는 추론, 소프트웨어, 물리 상태, 측정, 분석, 반복 의사결정을
+가로지릅니다. 단계가 바뀔 때마다 최초 목표, 아티팩트 출처, 승인 상태,
+물리 동작 발생 여부, 복구 문맥이 끊길 수 있습니다. 독립 도구 호출은 데모를
+쉽게 만들지만 과학 실행의 감사를 어렵게 하고, 하나의 불투명한 에이전트는
+정책과 실패 경계를 숨깁니다.
 
-Windows 기본 설치는 API key 기반 GUI/API 실행과 Windows PyAutoGUI bridge
-운영을 우선 지원합니다. Bash 기반 `atr` 런처, Linux Docker/RSUSB/vLLM
-경로, ROBOTIS/RealSense live robot 경로는 WSL/Linux 또는 별도 conda 설정이
-필요합니다.
+ATR은 도메인 단계, 사이드카, 제어 게이트, 증거 경로, 피드백 간선, 종료
+상태를 명시한 실행 그래프로 이 문제를 다룹니다.
 
-```powershell
-git clone <private-repo-url> autonomous_researcher
-cd autonomous_researcher
-powershell -ExecutionPolicy Bypass -File .\install\bootstrap_windows.ps1
-python -m app.serve
-```
+## 시스템 기여
 
-Windows에서 local AI 없이 쓰려면 `.env`에 `AUTONOMOUS_BACKEND=openai`와
-`OPENAI_API_KEY`를 설정합니다. 장비 제어용 Windows PyAutoGUI bridge는
-별도 PowerShell에서 `install\windows_pyautogui_bridge_server.py`를 실행합니다.
+코드 기준선 `0b7627b`에서 기본 그래프는 노드 19개, 선언 간선 68개,
+단계 디스패치 항목 12개입니다. 이 수치는 특정 커밋의 아키텍처 관찰값이며
+성능이나 안정성 보장이 아닙니다.
 
-## 2. 주요 접속 경로
+| 시스템 메커니즘 | 역할 | 현재 증거 경계 |
+|---|---|---|
+| 실행 그래프 | 디스패치·피드백·종료 경로를 명시 | 구조 조사 완료, 완전한 실장비 캠페인은 미평가 |
+| 타입 기반 핸드오프 | 목표·결정·도메인 아티팩트·오류를 구분 | 종단간 계약 행렬 미평가 |
+| 체크포인트 상태 | 명시적 재개와 복구 문맥 제공 | 실패 유형별 복구 효과 미평가 |
+| Guardian/운영자 게이트 | 중요하거나 불확실한 동작 제한 | 제어 지점 조사 완료, 실제 안전 효과 미평가 |
+| 증거·Knowledge 경로 | 아티팩트·ledger/outbox·출처·문맥 보존 | 문서 계약 시험 완료, 전체 과학 계보 미평가 |
+| BO 피드백 | 다음 후보를 통제된 경로로 제안 | 경로 조사 완료, 과학적 이점 미평가 |
 
-| 화면 | URL | 실제 템플릿/스크립트 | 역할 |
-|---|---|---|---|
-| Main GUI | `http://localhost:7860/` | `web/templates/index.html`, `web/static/app.js` | 전체 상태, 런 시작/정지, 모델/장비 워크스페이스 진입 |
-| Live GUI | `http://localhost:7860/live` | `web/templates/planning.html`, `web/static/planning.js` | 채팅 기반 오케스트레이터, 에이전트 진행, 아티팩트/trace 확인 |
-| Runtime IDE | `http://localhost:7860/ide` | `web/templates/runtime_ide.html`, `web/static/runtime_ide.js` | LangGraph 그래프/노드/에지 편집, 검증, dry-run, 실행 |
-| Module Management | `http://localhost:7860/module-management` | `web/templates/module_management.html`, `web/static/module_management.js` | 모듈 로드/검증/버전 관리, draft module 생성, `ui.yaml` descriptor 관리, 생성 어댑터 관리 |
-| Knowledge Workspace | `http://localhost:7860/knowledge` | `web/templates/knowledge.html`, `web/static/knowledge.js`, `web/static/knowledge.css` | Graph Explorer, Memory, Ontology, Sync, Project Graph와 활동 상태 확인 |
-| 3DP Workspace | `http://localhost:7860/printer` | `web/templates/printer.html`, `web/static/printer.js` | Bambu Lab X2D 기본 브릿지, Prusa 명시 선택, live video/status, 슬라이싱/start gate, 오토이젝션, 테스트 출력 설정 |
-| LeRobot Workspace | `http://localhost:7860/lerobot` | `web/templates/lerobot.html`, `web/static/lerobot.js` | 포트 탐색, teleop, recording, training, visualization, rollout |
-| BO Workspace | `http://localhost:7860/bo` | `web/templates/bo.html`, `web/static/bo.js` | BO/MBO/LLM preference 전략, lightweight/BoTorch optional backend, reasoning audit, 후보 ranking/추천 |
-| CAE Workspace | `http://localhost:7860/cae` | `web/templates/cae.html`, `web/static/cae.js` | STL 기반 해석 설정, bottom fixed/top cyclic load, 결과 확인 |
-| Lab Equipment Workspace | `http://localhost:7860/equipment/windows` | `web/templates/windows_equipment.html`, `web/static/windows_equipment.js` | 공통 장비 프로파일 선택, Windows 또는 localhost PyAutoGUI bridge 연결, UTM Test/Live 실행, 증거/Analysis handoff 확인 |
-| Self-Evolution Lab | `http://localhost:7860/evolution-lab` | `web/templates/evolution_lab.html`, `web/static/evolution_lab.js` | 프롬프트/모듈/그래프 변형, 검증, 승인, rollback |
+## 시스템 아키텍처
 
-API 문서는 서버 실행 후 `http://localhost:7860/docs`에서 확인합니다.
+![ATR 계층형 아키텍처](docs/paper/assets/figures/02_layered_architecture.svg)
 
-기본 서버 바인딩은 `0.0.0.0:7860`입니다. 브라우저는 계속
-`http://localhost:7860/`로 접속해도 되지만, Bambu Lab HTTP artifact
-route를 실제 프린터가 가져가려면 같은 LAN에서 보이는
-`http://<ATR서버-LAN-IP>:7860/printer-artifacts/...` URL이 필요합니다.
-서버를 `127.0.0.1`에만 바인딩하면 GUI는 열리더라도 Bambu fetch probe와
-SPC Readiness transfer gate가 실패합니다.
-
-## 3. 실제 닫힌 루프 구조
-
-기본 실행 그래프는 [graphs/configs/atr_closed_loop.yaml](graphs/configs/atr_closed_loop.yaml)입니다.
-Run은 `POST /api/run/start` 또는 `POST /api/runtime/start`로 시작하고, 내부적으로 `LangGraphRunLoop`가 현재 stage를 읽어 다음 노드를 호출합니다.
+**그림 2.** 연구 의도와 운영자 제어가 오케스트레이터로 들어가고, 타입 기반
+에이전트·Guardian·모델/장비 어댑터를 거쳐 증거와 지식에 연결됩니다.
+점선은 부차적인 플랫폼 확장 경로입니다.
 
 ```text
-dispatch -> idle -> design -> specimen -> vision -> manipulation -> equipment -> analysis -> knowledge -> bo -> guardian
-                                                                                                      | continue
-                                                                                                      v
-                                                                                                    design
-
-guardian -> stop: complete
-guardian -> error: error
+design -> specimen -> vision/manipulation -> equipment -> analysis
+       -> knowledge -> Bayesian optimization -> Guardian
+       -> continue / review / complete / error
 ```
 
-루프가 실제로 돈다는 증거는 event stream에 남습니다.
+자세한 설명은 [시스템 아키텍처](docs/paper/02_system_architecture.md),
+[폐루프 방법](docs/paper/03_closed_loop_method.md),
+[현재 코드 스냅샷](docs/runtime/current_code_snapshot.md)을 봅니다.
 
-- `run.started`
-- `node.started`
-- `node.completed`
-- `edge.traversed` 또는 `stage_transition`
-- `approval.requested` / `approval.resolved`
-- `artifact.created`
-- `run.completed` 또는 `run.failed`
+## 안전 경계
 
-관련 API:
+중요 동작은 설정에 따라 스키마/기능 검증, Guardian 정책, 운영자 승인,
+dry-run/사전조건을 통과한 뒤 외부 실행으로 진행합니다. 거부, 승인 만료,
+dry-run 실패, 알 수 없는 외부 상태는 검토·중지·오류 경로로 분리해야 합니다.
 
-- `GET /api/runtime/state`
-- `GET /api/events/recent`
-- `GET /api/events/stream`
-- `GET /api/runs/{run_id}`
-- `GET /api/runs/{run_id}/events`
-- `GET /api/runs/{run_id}/artifacts`
+이 제어 계층은 범용 안전 인증이 아닙니다. 실험실별 인터록, 위험성 평가,
+책임 운영자, 최소 권한 배포, 비상 정지, 실행 증거가 별도로 필요합니다.
+물리 동작의 발생 여부가 불확실한 타임아웃은 상태를 다시 확인하기 전 자동
+재시도하면 안 됩니다.
 
-## 4. 에이전트 역할
+[안전·윤리·한계](docs/paper/08_safety_ethics_and_limitations.md)와
+[보안 정책](SECURITY.md)을 함께 읽습니다.
 
-| Stage | 모듈 위치 | 주 역할 | 대표 출력 |
-|---|---|---|---|
-| `design` | `graphs/modules/design` | 실험 목표를 TPMS/시편 설계 변수와 `experiment_spec`으로 변환 | `current_experiment_spec`, STL 후보 조건 |
-| `specimen` | `graphs/modules/specimen` | STL/제조 메타데이터 생성, 선택된 Bambu/Prusa/virtual printer bridge handoff | STL, gcode/sliced artifact, slicer settings, printer prepare result |
-| `vision` | `graphs/modules/vision` | 출력물/작업공간 관측, pickup/검사용 observation 작성 | `observation`, camera artifact |
-| `manipulation` | `graphs/modules/manipulation` | LeRobot policy rollout 또는 pick-place handoff | rollout status, policy path, transfer evidence |
-| `equipment` | `graphs/modules/equipment` | UTM/Windows bridge/장비 명령 실행 | equipment result, protocol note |
-| `analysis` | `graphs/modules/analysis` | UTM/CAE/FEM 기반 성능 지표와 objective score 산출 | metrics, contour artifact, objective_score |
-| `knowledge` | `graphs/modules/knowledge` | 실험 결과를 메모리/근거로 정리해 다음 최적화에 전달 | memory update, evidence summary |
-| `bo` | `graphs/modules/bo` | Analysis/Knowledge evidence 기반 numeric BO + LLM reasoning soft prior로 다음 후보 선택 | `bo_result`, `candidate_ranking`, `next_design_request` |
-| `guardian` | `graphs/modules/guardian` | 안전 게이트, 승인 상태, continue/stop/error 결정 | guardian decision |
+## 평가 상태
 
-기존 단독 `agents/` 폴더는 agent 구현/호환 레이어이고, 현재 runtime loop에서 우선 보는 실행 계약은 `graphs/modules/*/module.yaml`과 `graphs/configs/*.yaml`입니다.
+| 항목 | 상태 | 근거 |
+|---|---|---|
+| route·그래프 아키텍처 수치 | 조사 범위에서 `supported` | `E-INSPECT-ARCH-001` |
+| 논문 주장-증거/문서 계약 | `partially_supported` | `E-TEST-DOC-001` |
+| 전체 단계 계약 실행 | `not_evaluated` | 적합한 논문 증거 없음 |
+| 체크포인트/재개 효과 | `not_evaluated` | 적합한 논문 증거 없음 |
+| Guardian/실장비 안전 효과 | `not_evaluated` | 적합한 논문 증거 없음 |
+| Knowledge/BO의 과학적 효과 | `not_evaluated` | 비교 연구 없음 |
+| 종단간 물리·과학 결과 | `not_evaluated` | Tier 4 캠페인 증거 없음 |
 
-Live GUI의 agent 목록과 일부 report card/section은 `/api/runtime/agent-manifests`를 통해 graph/module/`ui.yaml`에서 읽습니다. 이 API는 `agents[]`를 포함한 manifest payload를 반환하고, `web/static/planning.js`의 `DEFAULT_LIVE_AGENTS`는 manifest 요청 실패 시 사용하는 fallback입니다. 현재 `design`, `equipment`, `guardian`은 `graphs/modules/<agent>/ui.yaml` descriptor card와 selector 기반 `report_sections`를 사용하며, descriptor가 없는 agent는 기존 generic renderer를 사용합니다. 현재 generic descriptor는 selector row/card/report section, `mini_bar_chart`, `scatter_plot`, `line_chart`, `table`, `heatmap`, `compound_chart`/`chart_grid`, 내부 GUI navigation action, read-only GET API action, 안전한 workspace handoff 버튼을 처리합니다. 백엔드는 chart/action descriptor를 표시용 계약으로 정규화해 `supported`, `render_mode`, `safe_navigation`, `live_card_runnable`, `handoff_required`, `handoff_workspace`, `execution_scope`, `blocked_reason`을 붙이고, 프론트엔드는 이 계약을 다시 안전 필터링해 렌더링합니다. `ui.renderer.dashboard/report/fallback`은 `descriptor`, `generic`, `<agent>_reference` allowlist 안에서만 presentation-only profile로 동작하며, 임의 외부 renderer/plugin 코드를 로드하지 않습니다. `kind=api`, `method=GET`, `read_only=true`이고 FastAPI GET route가 존재하는 내부 `/api/*`만 `read_only_api`로 호출됩니다. POST/confirmation/non-read-only API descriptor는 안전한 operator workspace로만 handoff할 수 있고, 물리 장비 action은 이 descriptor 경로에서 실행하지 않습니다. 새 draft module은 `/api/modules/templates/{agent|ui-only|bridge}`로 만들 수 있지만, 기본값은 `status=draft`, `enabled=false`, `graph.attached=false`라서 검증/graph attach/save 전에는 실행되지 않습니다.
+기준선에서 FastAPI `APIRoute` 346개, 전체 애플리케이션 route 353개,
+그래프 노드 19개, 간선 68개, 단계 디스패치 12개를 확인했습니다. 초기
+집중 문서 검증은 선택된 시험 23개 통과를 기록했습니다. 이는 아키텍처·문서
+결과이지 과학 성능 지표가 아닙니다.
 
-Live GUI 대화는 `runs/<active_run_id>/live_planning_transcript.jsonl`에 저장되고 `/api/planning/messages`로 페이지 단위 로딩됩니다. Module Management의 `Load/Unload`는 관리 화면 선택 상태이며 실제 runtime activation이 아닙니다. 실행에는 Runtime IDE에서 graph attach, validate, dry-run, save/version, live gate가 필요합니다. Graph에 아직 연결되지 않은 module은 Module Management의 Runtime IDE 버튼이 `/ide?module=<id>&action=attach`로 열어 Module Library attach 대상을 강조합니다.
+## 플랫폼 기여
 
-Custom stage는 현재 graph/module validation과 `Stage._missing_()`를 통해 최소 실행할 수 있습니다. Stage별 follow-up 문구를 바꾸려면 payload 또는 `module_runtime`의 `supervisor_policy`를 사용합니다. 현재 Module Management typed form은 handler/LLM/tool/prompt/safety/step과 `supervisor_policy`의 required outputs, opinion/recommendation template, response-required status, concern rules, options를 편집할 수 있습니다. Graph attach/save는 Runtime IDE의 main graph drag/drop과 validate/dry-run/Save Version gate를 사용합니다.
+부 기여인 플랫폼은 시스템 계약을 유지하면서 다음 확장면을 제공합니다.
 
-## 5. Live/Test/Virtual 모드
+- 에이전트 모듈: manifest, handler, schema, stage 등록
+- 실행 그래프: 버전이 있는 노드·간선·디스패치·검증·활성화 규칙
+- 모델 백엔드: provider/model 라우팅, readiness, 제한된 추론 계약
+- 장비 브리지: capability, allowlist, 인증, dry run, proof, timeout
+- Knowledge 백엔드: ontology, provenance, ledger/outbox, receipt, 제한 query
+- 운영 워크스페이스: 서버 정책을 권한 기준으로 하는 조회·검토·설정·변경 API
 
-- `live`: 실제 장비 호출 경로입니다. 선택된 printer bridge(Bambu Lab X2D가 기본, Prusa는 명시 선택), LeRobot, Windows bridge, UTM 등 장비 설정이 맞아야 합니다.
-- `test`: 실제 장비를 호출하지 않는 검증 경로입니다. 단, 테스트 안의 일부 옵션은 사용자가 선택하면 실제 bridge 직전까지 또는 실제 출력으로 갈 수 있습니다.
-- `virtual`: 장비 없이 experiment API, benchmark, dry-run 중심으로 검증합니다.
+기준선에서 애플리케이션은 FastAPI `APIRoute` 346개와 전체 route 353개를
+노출합니다. route 수는 표면 규모와 문서 드리프트를 확인하는 값이지 사용성
+점수가 아닙니다. [플랫폼 아키텍처](docs/paper/04_platform_architecture.md)와
+[인터페이스 부록](docs/paper/appendix_a_interfaces.md)을 봅니다.
 
-공통 계약:
+## 재현 단계
 
-- `experiment.evaluate`
-- `experiment.benchmark`
-- `experiment.queue.status`
-- graph dry-run gate
-- Guardian approval gate
+| Tier | 환경 | 초기 패키지 상태 |
+|---|---|---|
+| 0 | 저장소·문서·도표·증거 정적 조사 | 가능 |
+| 1 | 집중 단위/계약 시험 | 문서 하위 집합 가능 |
+| 2 | 결정적 replay 또는 simulation | `not_evaluated` |
+| 3 | 브라우저 운영 흐름 | 이 패키지에서는 `not_evaluated` |
+| 4 | 감독된 실장비 실행 | `not_evaluated` |
 
-## 6. 실제 폴더 구조와 책임
+저장소 루트에서 최소 문서 검증은 다음과 같습니다.
 
-| 폴더 | 설명 |
-|---|---|
-| `app/` | FastAPI 앱, route, runtime controller, API endpoint |
-| `web/templates/` | HTML 템플릿 |
-| `web/static/` | GUI JavaScript/CSS/icon 정적 파일 |
-| `graphs/configs/` | LangGraph 실행 그래프 YAML |
-| `graphs/modules/` | stage agent module 계약, handler, tool allowlist |
-| `device_bridges/` | Bambu, Prusa, LeRobot, Windows, UTM 등 장비 연동 레이어 |
-| `experiments/` | experiment objective/evaluate/benchmark/queue 계약 |
-| `orchestrator/` | 오케스트레이션 및 planning flow |
-| `backends/` | Ollama/vLLM/Nemoclaw 등 LLM backend 연결 |
-| `gui/` | GUI viewmodel/panel 보조 코드 |
-| `knowledge/` | memory/retrieval 관련 코드 |
-| `learning/` | LeRobot/학습 관련 helper |
-| `self_evolution/` | Self-Evolution variant/task/validation 로직 |
-| `mcp_tools/` | tool-call/MCP 연계 레이어 |
-| `memory/` | 로컬 설정/장비 연결/그래프 버전/세션성 메모리 |
-| `runs/` | run별 로그, artifact, printer/robot session 기록 |
-| `artifacts/` | STL, gcode, CAE, UI audit 결과물 |
-| `image/` | 시스템/에이전트 다이어그램 prompt, SVG, rendered image |
-| `install/` | `atr` CLI 설치, PrusaSlicer 등 설치 보조 |
-| `tests/` | unit/integration/UI audit 테스트 |
-| `docs/` | 설명 문서와 시스템 지시 문서 분리 보관 |
-| `user_files/` | 사용자 입력 파일/작업 파일 보관 영역 |
+```bash
+.venv/bin/python scripts/validate_documentation.py
+.venv/bin/python scripts/validate_paper_publication.py
+.venv/bin/python -m pytest -q \
+  tests/unit/test_documentation_validation.py \
+  tests/unit/test_paper_publication_validation.py
+```
 
-## 7. 주요 설정 파일
+설치·실행·선택 기능 요구사항은 [REQUIREMENTS.md](REQUIREMENTS.md),
+[상세 영문 가이드](README.en.md), [전체 문서 인덱스](docs/README.md)에
+있습니다. 하위 단계가 통과했다는 이유만으로 실장비 단계로 진행하면 안 됩니다.
 
-- [REQUIREMENTS.md](REQUIREMENTS.md): 설치 필요 항목, 외부 의존성, git clone/다운로드 항목
-- [requirements.txt](requirements.txt): Python 패키지
-- [pyproject.toml](pyproject.toml): 프로젝트/pytest 설정
-- [graphs/configs/atr_closed_loop.yaml](graphs/configs/atr_closed_loop.yaml): 기본 폐루프 그래프
-- `graphs/modules/*/module.yaml`: stage별 실행 계약, handler, tool allowlist, safety 설정
-- `graphs/modules/*/ui.yaml`: Live GUI 표시용 card/report section descriptor. 실행 권한은 바꾸지 않음
-- `memory/printer_fleet.json`: 현재 선택된 printer profile
-- `memory/bambu_connection.json`: Bambu Lab LAN 연결 정보
-- `memory/bambu_autoejection.json`: Bambu autoejection handoff용 provider routine 및 pre/post vision evidence
-- `memory/manipulation_agent_bridge.json`: Bambu handoff를 소비할 Manipulation Agent profile 및 policy 경로
-- `memory/prusa_connection.json`: PrusaLink 연결 정보
-- `memory/bo_workspace_settings.json`: BO GUI 저장 설정
-- `memory/cae_workspace_settings.json`: CAE GUI 저장 설정
-- `memory/lerobot/`: LeRobot profile/calibration/port memory
+## 논문 문서
 
-현재 코드가 실제로 노출하는 page route, API group, agent manifest,
-printer fleet, model/API-key 상태는
-[현재 코드 스냅샷](docs/runtime/current_code_snapshot.md)에 정리합니다.
-설계 문서와 코드가 다르게 보일 때는 이 스냅샷과 `app/main.py`의 route를
-먼저 확인합니다.
+논문식 정독 순서:
 
-주의: `/api/bridges`는 현재 `graphs/configs/atr_closed_loop.yaml`의
-graph metadata bridge registry를 normalized contract로 반환합니다.
-반환값에는 workspace, health/preflight endpoint, `actions[]`에 들어간
-standard/custom action descriptor, evidence contract, health snapshot이
-포함되며 같은 shape가
-`/api/runtime/state.runtime_ide_contract.device_bridges`에도 들어갑니다.
-Bambu Lab X2D는 이 목록이 아니라 `/api/printer/fleet`와 `/api/printer/*`
-provider 계층에서 기본 active profile로 관리됩니다. 따라서 Bambu가
-`/api/bridges`에 없다고 Bambu printer bridge가 비활성이라는 뜻은
-아닙니다.
+1. [문제와 기여](docs/paper/01_problem_and_contributions.md)
+2. [시스템 아키텍처](docs/paper/02_system_architecture.md)
+3. [폐루프 방법](docs/paper/03_closed_loop_method.md)
+4. [플랫폼 아키텍처](docs/paper/04_platform_architecture.md)
+5. [실험 설정](docs/paper/05_experimental_setup.md)
+6. [평가와 결과](docs/paper/06_evaluation_and_results.md)
+7. [재현성](docs/paper/07_reproducibility.md)
+8. [안전·윤리·한계](docs/paper/08_safety_ethics_and_limitations.md)
+9. [주장-증거 추적성](docs/paper/09_claim_evidence_traceability.md)
 
-## 8. 운영 순서
+문서 작성 규칙은
+[Paper Documentation Standard](docs/standards/paper_documentation_standard.md)에
+있습니다.
 
-1. `atr up`으로 서버를 시작합니다.
-2. Main GUI에서 모델과 장비 상태를 확인합니다.
-3. `/live`에서 목표를 입력하고 테스트 모드로 먼저 실행합니다.
-4. Live GUI의 Report, Backend, Graph, Artifacts, Timeline 탭에서 각 stage 결과를 확인합니다.
-5. 3DP/LeRobot/CAE/BO/Windows workspace에서 필요한 장비 설정을 저장합니다.
-6. Live 모드로 전환할 때는 Guardian approval과 장비 gate를 확인합니다.
-7. 실험 결과는 `runs/`, `artifacts/`, `memory/`에 남습니다.
+## 인용·라이선스·보안
 
-## 9. 문서 진입점
+소프트웨어 인용 메타데이터는 [CITATION.cff](CITATION.cff)를 사용합니다.
+승인된 저자·소속 목록과 DOI가 없으므로 꾸며 넣지 않았습니다.
 
-- [문서 전체 인덱스](docs/README.md)
-- [문서 작성 표준](docs/standards/documentation_standard.md)
-- [문서 종류별 템플릿](docs/templates/document_types.md)
-- [사용자 종합 매뉴얼](docs/tutorials/user_manual.ko.md)
-- [닫힌 루프와 페이지/에이전트 상세](docs/runtime/closed_loop_and_pages_reference.md)
-- [현재 코드/API 스냅샷](docs/runtime/current_code_snapshot.md)
-- [LangGraph runtime](docs/runtime/langgraph_runtime.md)
-- [Experiment runtime](docs/runtime/autonomous_experiment_runtime.md)
-- [Live GUI 설명](docs/gui/gui.md)
-- [API key / OpenAI fallback](docs/runtime/api_keys.md)
-- [Knowledge Graph 운영 가이드](docs/knowledge/knowledge_graph_operations.ko.md)
-- [문서 거버넌스 설계](docs/superpowers/specs/2026-08-08-documentation-governance-design.md)
-- [첫 자동 실행 튜토리얼](docs/tutorials/first_autonomous_run.ko.md)
-- [GitHub/버전관리 규칙](docs/repository/github_version_control.md)
+현재 이 저장소에는 오픈소스 라이선스가 부여되지 않았습니다. 사용·수정·재배포
+전에 [LICENSE](LICENSE)를 확인해야 하며, 공개 재사용을 의도한다면 권리자의
+명시적인 라이선스 결정이 필요합니다.
 
-## 10. 유지보수 규칙
+취약점은 [SECURITY.md](SECURITY.md)의 비공개 절차로 제보합니다. 비밀값,
+사설 endpoint, exploit 세부사항을 공개 issue에 올리면 안 됩니다.
 
-- 현재 사실은 코드/설정과 active Reference, 절차는 Guide, 목표 결정은 Design,
-  실행 순서는 Plan, 조사·감사 결과는 Evidence로 구분합니다.
-- 문서 분류, 메타데이터, 검증 규칙은
-  [문서 작성 표준](docs/standards/documentation_standard.md)을 따릅니다.
-- 런타임 동작을 바꾸면 관련 `docs/runtime`, `docs/gui`, `docs/agents`, `docs/hardware`를 같이 수정합니다.
-- 위험한 변경은 요청받은 경우에만 브랜치를 만들고, 검증 후 병합합니다.
-- `main`은 항상 실행 가능한 기준선으로 유지합니다.
-- 시스템 지시 문서는 `docs/system/`에, 사용자/협업용 설명 문서는 그 외 docs 하위 폴더에 둡니다.
+기여 절차: [CONTRIBUTING.md](CONTRIBUTING.md) · 변경 이력:
+[CHANGELOG.md](CHANGELOG.md)

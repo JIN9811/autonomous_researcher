@@ -1,0 +1,22 @@
+cff-version: 1.2.0
+message: >-
+  If you use this software, cite it using the metadata in this file and name
+  the exact repository version used.
+title: >-
+  Autonomous Researcher Framework: A Safety-Gated Closed-Loop Multi-Agent
+  System and Extensible Platform for Laboratory Automation
+type: software
+authors:
+  - name: Autonomous Researcher Framework contributors
+version: 0.1.0-dev
+date-released: 2026-08-09
+repository-code: https://github.com/JIN9811/autonomous_researcher
+abstract: >-
+  A safety-gated, evidence-aware multi-agent system and supporting platform for
+  closed-loop laboratory automation.
+keywords:
+  - laboratory automation
+  - multi-agent systems
+  - closed-loop experimentation
+  - research software
+  - scientific workflows

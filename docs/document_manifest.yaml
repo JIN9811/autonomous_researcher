@@ -3,6 +3,9 @@ documents:
   - README.md
   - README.ko.md
   - README.en.md
+  - CONTRIBUTING.md
+  - SECURITY.md
+  - CHANGELOG.md
   - docs/README.md
   - docs/standards/documentation_standard.md
   - docs/standards/paper_documentation_standard.md
