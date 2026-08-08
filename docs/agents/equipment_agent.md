@@ -89,16 +89,16 @@ completion audit, decisions, metrics, errors, and artifact references.
 | Class | Method | Path/family | Effect | Notes |
 |---|---|---|---|---|
 | shared | GET/POST | `/api/bridges`, `/api/bridges/{bridge_id}/actions` | read_only/local_state | normalized registry and descriptors |
-| connected | GET/POST | `/api/equipment/utm-runtime/{status|start|stop|probe|graph|frame*}` | external_service/read_only | ROS/runtime lifecycle and evidence |
+| connected | GET/POST | `/api/equipment/utm-runtime/status`, `/start`, `/stop`, `/probe`, `/graph`, `/frame`, `/frame-stream.mjpeg` | external_service/read_only | ROS/runtime lifecycle and evidence |
 | operator | GET/POST | `/api/equipment/utm-runtime/camera-*` | read_only/local_state/external_service | devices, probe, apply, calibrate |
 | operator | POST | `/api/equipment/windows/live-preflight`, `/live-validation` | read_only/local_state | live gates/evidence |
 | operator | GET/POST/DELETE | `/api/equipment/skills*` | local_state | draft, annotate, compile, validate, deploy, enable, test, delete |
 | operator | GET/POST | `/api/equipment/profiles*` | read_only/local_state/physical_possible | state, preflight, test |
-| operator | GET/POST | `/api/equipment/windows/{config|readiness|discover|connect|select|delete|test}` | read_only/local_state/external_service | worker lifecycle |
+| operator | GET/POST | `/api/equipment/windows/config`, `/readiness`, `/discover`, `/connect`, `/select`, `/delete`, `/test` | read_only/local_state/external_service | worker lifecycle |
 | operator | GET/POST | `/api/equipment/windows/local-bridge/*` | local_state/external_service | managed local bridge |
 | connected | POST | `/api/equipment/windows/run-program` | physical_possible | executes allowlisted program |
-| connected | GET/POST | `/api/equipment/windows/{locators|screenshot|capture-locator}` | read_only/local_state | visual automation evidence |
-| operator | GET/POST | `/api/equipment/windows/{proof-package|evidence-audit|completion-audit|vision-proof-draft}` | read_only/local_state | proof/release review |
+| connected | GET/POST | `/api/equipment/windows/locators`, `/screenshot`, `/capture-locator` | read_only/local_state | visual automation evidence |
+| operator | GET/POST | `/api/equipment/windows/proof-package`, `/proof-package/verify`, `/evidence-audit`, `/completion-audit`, `/vision-proof-draft` | read_only/local_state | proof/release review |
 
 ## Tools and Connections
 

@@ -100,7 +100,7 @@ autoejection/bed-clear evidence, decisions, metrics, and handoff packet.
 | connected | POST | `/api/printer/start-command-draft`, `/start-gate` | printer start service | local_state | no publish by itself |
 | connected | POST | `/api/printer/start-publish` | provider bridge | physical_possible | requires current gates/proof context |
 | connected | GET/POST | `/api/printer/bed-clear`, `/autoejection-status`, `/autoejection-*` | autoejection service | read_only/physical_possible | test/sweep can move printer when live |
-| operator | POST | `/api/printer/bambu-autoejection-proof-template`, `/completion-audit` | audit service | local_state | verifies proof package |
+| operator | POST | `/api/printer/bambu-autoejection-proof-template`, `/bambu-autoejection-completion-audit` | audit service | local_state | verifies proof package |
 | shared | GET/POST | `/api/modules/*` | module platform | read_only/local_state | module lifecycle, not specimen execution |
 
 ## Tools and Connections

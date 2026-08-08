@@ -114,7 +114,7 @@ scheduled top-level graph nodes.
 | shared | GET/POST | `/api/runs/{run_id}/*` | run service | read_only/local_state/physical_possible | state, pause/resume/stop, events, artifacts, approvals |
 | shared | GET | `/api/events/recent`, `/api/events/stream` | event service | read_only | snapshot and SSE |
 | shared | GET/POST | `/api/runtime/*` | runtime compatibility/model service | read_only/local_state/model | state, lifecycle, backend, model, API-key status |
-| operator | POST | `/api/approvals/{approval_id}/{approve|reject|revise}` | approval service | local_state/physical_possible | resolution can enable/block downstream work |
+| operator | POST | `/api/approvals/{approval_id}/approve`, `/api/approvals/{approval_id}/reject`, `/api/approvals/{approval_id}/revise` | approval service | local_state/physical_possible | resolution can enable/block downstream work |
 
 The exhaustive source is `/openapi.json`. Compatibility runtime routes do not
 create a second Orchestrator implementation.

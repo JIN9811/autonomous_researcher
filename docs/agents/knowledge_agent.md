@@ -112,14 +112,15 @@ evolution_evidence_packs exists or explicit no_evolution_needed reason exists
 
 | Class | Method | Path/family | Effect | Notes |
 |---|---|---|---|---|
-| owned | GET | `/api/knowledge/{evolution-packs|agent-performance|failure-patterns|success-patterns}` | read_only | typed Knowledge outputs |
+| owned | GET | `/api/knowledge/evolution-packs`, `/agent-performance`, `/failure-patterns`, `/success-patterns` | read_only | typed Knowledge outputs |
 | connected | GET/POST | `/api/knowledge/evolution-outcomes` | read_only/local_state | records reviewed outcomes |
 | operator | GET/POST | `/api/knowledge/relations/*` | read_only/local_state/model | status, scan, reconcile, proposals, decisions, approve/revise/reject/defer/re-evaluate |
-| operator | POST | `/api/knowledge/graph/edit/{validate|apply}` | local_state/external_service | existing-node bounded edits |
-| connected | GET/POST | `/api/knowledge/graph/{health|stats|activity|sync|query|import}` | read_only/local_state/external_service | bounded graph operations |
+| operator | POST | `/api/knowledge/graph/edit/validate`, `/graph/edit/apply` | local_state/external_service | existing-node bounded edits |
+| connected | GET/POST | `/api/knowledge/graph/health`, `/graph/stats`, `/graph/sync`, `/graph/query`, `/graph/import` | read_only/local_state/external_service | bounded graph operations |
+| connected | GET | `/api/knowledge/activity` | read_only | recent bounded Knowledge activity |
 | connected | GET/POST | `/api/knowledge/ontology*` | read_only/local_state | registry and validation |
-| operator | POST | `/api/knowledge/graphify/{scan|import}` | local_state/external_service | controlled import path |
-| owned/connected | GET | `/api/knowledge/{run-context|bo-context|safety-context}` | read_only | bounded consumer context |
+| operator | POST | `/api/knowledge/graphify/scan`, `/graphify/import` | local_state/external_service | controlled import path |
+| owned/connected | GET | `/api/knowledge/run-context`, `/bo-context`, `/safety-context` | read_only | bounded consumer context |
 
 ## Tools and Connections
 

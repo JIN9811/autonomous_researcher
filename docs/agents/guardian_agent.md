@@ -95,7 +95,7 @@ by Orchestrator.
 | operator | POST | `/api/guardian/incidents/{incident_id}/notes` | incident service | local_state | appends operator note |
 | operator | POST | `/api/runs/{run_id}/guardian/incidents/{incident_id}/notes` | run incident service | local_state | run-scoped note |
 | shared | GET/POST | `/api/runs/{run_id}/approvals*` | approval service | read_only/local_state/physical_possible | request/list/resolve |
-| operator | POST | `/api/approvals/{approval_id}/{approve|reject|revise}` | compatibility approval service | local_state/physical_possible | explicit human resolution |
+| operator | POST | `/api/approvals/{approval_id}/approve`, `/api/approvals/{approval_id}/reject`, `/api/approvals/{approval_id}/revise` | compatibility approval service | local_state/physical_possible | explicit human resolution |
 
 ## Tools and Connections
 

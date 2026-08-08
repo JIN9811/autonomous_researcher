@@ -103,7 +103,7 @@ evidence refs, `active_cam_ejection_check.v1`,
 | owned | POST | `/api/vision/specimen-pose/release` | pose tracker | local_state | releases current tracking lock/state |
 | connected | GET | `/api/lerobot/active-robot-cam/specimen-pose` | LeRobot camera | read_only | active robot-camera pose |
 | connected | POST | `/api/lerobot/camera/test` | LeRobot bridge | read_only/local_state | camera probe |
-| connected | GET/POST | `/api/equipment/utm-runtime/{status|start|stop|probe|graph|frame*}` | UTM runtime | read_only/local_state/external_service | runtime and evidence capture |
+| connected | GET/POST | `/api/equipment/utm-runtime/status`, `/start`, `/stop`, `/probe`, `/graph`, `/frame`, `/frame-stream.mjpeg` | UTM runtime | read_only/local_state/external_service | runtime and evidence capture |
 | operator | GET/POST | `/api/equipment/utm-runtime/camera-*` | UTM camera service | read_only/local_state | device selection/probe/calibration |
 
 ## Tools and Connections
