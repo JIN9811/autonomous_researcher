@@ -264,6 +264,11 @@ Writing and review rules are normative in the
 Developer/operator navigation remains in the
 [Documentation Index](docs/README.md).
 
+Detailed current roles, handoffs, APIs, services, device connections, safety
+gates, and recovery boundaries for all ten agents are indexed in the
+[Agent References](docs/agents/README.md), with a cross-agent
+[API and Connection Matrix](docs/agents/agent_api_connection_matrix.md).
+
 ## Citation
 
 Use [CITATION.cff](CITATION.cff) for software citation metadata. The current

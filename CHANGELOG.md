@@ -45,6 +45,11 @@ changes. Detailed implementation history remains in Git.
   claim/evidence IDs, evidence paths and hashes, figure pairs, and private-path
   rejection.
 - Public citation, contribution, security, license-status, and changelog files.
+- Canonical References for all ten executable agents, covering actual roles,
+  handoffs, contracts, internal execution, APIs, tools, services, device
+  connections, safety gates, evidence, recovery, and operator surfaces.
+- Cross-agent API and connection matrix for responsibility, contract, service,
+  external-effect, safety, and recovery comparisons.
 
 ### Changed
 

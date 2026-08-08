@@ -10,6 +10,18 @@ documents:
   - docs/standards/documentation_standard.md
   - docs/standards/paper_documentation_standard.md
   - docs/templates/document_types.md
+  - docs/agents/README.md
+  - docs/agents/agent_api_connection_matrix.md
+  - docs/agents/orchestrator_agent.md
+  - docs/agents/design_agent.md
+  - docs/agents/specimen_agent.md
+  - docs/agents/vision_agent.md
+  - docs/agents/manipulation_agent.md
+  - docs/agents/equipment_agent.md
+  - docs/agents/analysis_agent.md
+  - docs/agents/knowledge_agent.md
+  - docs/agents/bo_agent.md
+  - docs/agents/guardian_agent.md
   - docs/paper/README.md
   - docs/paper/01_problem_and_contributions.md
   - docs/paper/02_system_architecture.md

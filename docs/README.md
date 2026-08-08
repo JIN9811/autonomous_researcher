@@ -17,6 +17,8 @@ related_docs:
   - docs/standards/documentation_standard.md
   - docs/standards/paper_documentation_standard.md
   - docs/templates/document_types.md
+  - docs/agents/README.md
+  - docs/agents/agent_api_connection_matrix.md
   - docs/runtime/current_code_snapshot.md
 supersedes: []
 ---
@@ -54,6 +56,8 @@ Reference, 절차 Guide, 목표 Design, 실행 Plan, 조사·감사 Evidence를 
 | 주장-증거 추적성 | [paper/09_claim_evidence_traceability.md](paper/09_claim_evidence_traceability.md), [paper/artifact_manifest.yaml](paper/artifact_manifest.yaml) |
 | 전체 프로젝트 흐름 | [../README.ko.md](../README.ko.md), [../README.en.md](../README.en.md) |
 | 초보자/상급자 통합 매뉴얼 | [tutorials/user_manual.ko.md](tutorials/user_manual.ko.md), [tutorials/user_manual.en.md](tutorials/user_manual.en.md) |
+| 에이전트별 실제 역할·API·연결·안전 계약 | [agents/README.md](agents/README.md) |
+| 10개 에이전트 교차 비교 | [agents/agent_api_connection_matrix.md](agents/agent_api_connection_matrix.md) |
 | 실제 닫힌 루프, 페이지, 에이전트 | [runtime/closed_loop_and_pages_reference.md](runtime/closed_loop_and_pages_reference.md) |
 | 현재 코드/API 스냅샷 | [runtime/current_code_snapshot.md](runtime/current_code_snapshot.md) |
 | LangGraph 실행 계약 | [runtime/langgraph_runtime.md](runtime/langgraph_runtime.md) |
@@ -73,7 +77,7 @@ Reference, 절차 Guide, 목표 Design, 실행 Plan, 조사·감사 Evidence를 
 |---|---|---|
 | Index | [../README.md](../README.md), 이 문서 | 언어·대상·도메인별 탐색 |
 | Standard | [standards/documentation_standard.md](standards/documentation_standard.md), [standards/paper_documentation_standard.md](standards/paper_documentation_standard.md) | 문서 분류·권한·메타데이터·검증 및 논문 주장·증거·도표·공개 규칙 |
-| Reference | [runtime/current_code_snapshot.md](runtime/current_code_snapshot.md), [runtime/langgraph_runtime.md](runtime/langgraph_runtime.md), [runtime/closed_loop_and_pages_reference.md](runtime/closed_loop_and_pages_reference.md) | 현재 코드가 실제로 제공하는 동작 |
+| Reference | [agents/README.md](agents/README.md), [agents/agent_api_connection_matrix.md](agents/agent_api_connection_matrix.md), [runtime/current_code_snapshot.md](runtime/current_code_snapshot.md), [runtime/langgraph_runtime.md](runtime/langgraph_runtime.md), [runtime/closed_loop_and_pages_reference.md](runtime/closed_loop_and_pages_reference.md) | 현재 코드가 실제로 제공하는 역할·계약·동작 |
 | Guide | [knowledge/knowledge_graph_operations.ko.md](knowledge/knowledge_graph_operations.ko.md), `tutorials/` | 사용자·운영자 절차와 성공/복구 기준 |
 | Design | [superpowers/specs/2026-08-08-documentation-governance-design.md](superpowers/specs/2026-08-08-documentation-governance-design.md) | 승인 또는 제안된 목표 결정; 현재 구현 사실이 아님 |
 | Plan | `superpowers/plans/` | Design을 실현하는 작업 순서 |
@@ -194,17 +198,23 @@ UTM ROS Vision Runtime은 현재 Windows/PyAutoGUI UTM 제어 증거를 대체�
 
 ## 4. 에이전트별 문서 맵
 
-| Agent | Runtime module | 문서 |
-|---|---|---|
-| Design | `graphs/modules/design` | [agents/specimen_design_existing_runtime_guideline.txt](agents/specimen_design_existing_runtime_guideline.txt) |
-| Specimen Making | `graphs/modules/specimen` | [hardware/bambulab_x2d_device_bridge_runtime_guideline.md](hardware/bambulab_x2d_device_bridge_runtime_guideline.md), [../개선안/13_bambulab_x2d_spc_device_bridge_research.md](../개선안/13_bambulab_x2d_spc_device_bridge_research.md), [../개선안/14_bambulab_gcode_autoejection_runtime_plan.md](../개선안/14_bambulab_gcode_autoejection_runtime_plan.md), [hardware/printer_agent_prusabridge_phase1_runtime_guideline.txt](hardware/printer_agent_prusabridge_phase1_runtime_guideline.txt) |
-| Vision | `graphs/modules/vision` | [agents/vision_pickup_observation_runtime_guideline.txt](agents/vision_pickup_observation_runtime_guideline.txt) |
-| Manipulation | `graphs/modules/manipulation` | [agents/manipulation_pi05_transfer_runtime_guideline.txt](agents/manipulation_pi05_transfer_runtime_guideline.txt) |
-| Lab Equipment | `graphs/modules/equipment` | [hardware/windows_pyautogui_equipment_agent_guideline.md](hardware/windows_pyautogui_equipment_agent_guideline.md), [hardware/lab_equipment_utm_visual_control_completion_audit.md](hardware/lab_equipment_utm_visual_control_completion_audit.md), [../개선안/16_utm_ros_runtime_bridge_live_gui_plan.md](../개선안/16_utm_ros_runtime_bridge_live_gui_plan.md) |
-| Analysis | `graphs/modules/analysis` | [agents/analysis_utm_runtime_guideline.txt](agents/analysis_utm_runtime_guideline.txt), [agents/cae_analysis_runtime_guideline.txt](agents/cae_analysis_runtime_guideline.txt) |
-| Knowledge | `graphs/modules/knowledge` | [agents/knowledge_agent_self_evolution_runtime_guideline.md](agents/knowledge_agent_self_evolution_runtime_guideline.md), [runtime/self_evolution.md](runtime/self_evolution.md), [runtime/knowledge_graphify_graph_backend_plan.md](runtime/knowledge_graphify_graph_backend_plan.md) |
-| BO | `graphs/modules/bo` | [agents/bo_agent_runtime_guideline.txt](agents/bo_agent_runtime_guideline.txt) |
-| Guardian | `graphs/modules/guardian` | [runtime/agent_program_baseline.md](runtime/agent_program_baseline.md), [runtime/guardian_graphwide_safety.md](runtime/guardian_graphwide_safety.md) |
+기준 진입점은 [Agent Reference Index](agents/README.md)이며, API·서비스·장비·효과
+경계를 한눈에 비교할 때는 [Agent API and Connection Matrix](agents/agent_api_connection_matrix.md)를
+사용합니다. 아래 `Reference`가 현재 역할과 계약의 기준이고 `운용 상세`는 특정
+장비·알고리즘·절차를 보충하는 기존 문서입니다.
+
+| Agent | Runtime module | Reference | 운용 상세 |
+|---|---|---|---|
+| Orchestrator | `graphs/modules/orchestrator` | [Orchestrator](agents/orchestrator_agent.md) | [LangGraph runtime](runtime/langgraph_runtime.md), [Closed loop and pages](runtime/closed_loop_and_pages_reference.md) |
+| Design | `graphs/modules/design` | [Design](agents/design_agent.md) | [기존 Design/Specimen guideline](agents/specimen_design_existing_runtime_guideline.txt) |
+| Specimen Making | `graphs/modules/specimen` | [Specimen Making](agents/specimen_agent.md) | [BambuLab X2D bridge](hardware/bambulab_x2d_device_bridge_runtime_guideline.md), [기존 Prusa bridge guideline](hardware/printer_agent_prusabridge_phase1_runtime_guideline.txt) |
+| Vision | `graphs/modules/vision` | [Vision](agents/vision_agent.md) | [기존 pickup observation guideline](agents/vision_pickup_observation_runtime_guideline.txt), [UTM ROS Vision bridge](hardware/utm_ros_vision_runtime_bridge.md) |
+| Manipulation | `graphs/modules/manipulation` | [Manipulation](agents/manipulation_agent.md) | [기존 Pi0.5 transfer guideline](agents/manipulation_pi05_transfer_runtime_guideline.txt), [LeRobot runtime](hardware/lerobot_robotis_manipulation_runtime_guideline.md) |
+| Lab Equipment | `graphs/modules/equipment` | [Lab Equipment](agents/equipment_agent.md) | [Windows equipment guideline](hardware/windows_pyautogui_equipment_agent_guideline.md), [UTM completion audit](hardware/lab_equipment_utm_visual_control_completion_audit.md) |
+| Analysis | `graphs/modules/analysis` | [Analysis](agents/analysis_agent.md) | [기존 UTM guideline](agents/analysis_utm_runtime_guideline.txt), [기존 CAE guideline](agents/cae_analysis_runtime_guideline.txt) |
+| Knowledge | `graphs/modules/knowledge` | [Knowledge](agents/knowledge_agent.md) | [Self-evolution guideline](agents/knowledge_agent_self_evolution_runtime_guideline.md), [Knowledge operations](knowledge/knowledge_graph_operations.ko.md) |
+| BO | `graphs/modules/bo` | [Bayesian Optimization](agents/bo_agent.md) | [기존 BO guideline](agents/bo_agent_runtime_guideline.txt) |
+| Guardian | `graphs/modules/guardian` | [Guardian](agents/guardian_agent.md) | [Guardian graph-wide safety](runtime/guardian_graphwide_safety.md), [Agent program baseline](runtime/agent_program_baseline.md) |
 
 ## 5. 폴더별 책임
 

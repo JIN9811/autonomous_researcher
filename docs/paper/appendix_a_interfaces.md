@@ -34,6 +34,8 @@ claim_ids:
 related_docs:
   - docs/paper/02_system_architecture.md
   - docs/paper/04_platform_architecture.md
+  - docs/agents/README.md
+  - docs/agents/agent_api_connection_matrix.md
   - docs/runtime/current_code_snapshot.md
 supersedes: []
 ---
@@ -44,7 +46,12 @@ supersedes: []
 
 This appendix connects the paper abstraction to repository interface families.
 It is a map, not a generated API specification. Exact payload fields remain in
-code schemas, manifests, and endpoint responses.
+code schemas, manifests, and endpoint responses. The canonical per-agent role,
+API, connection, effect, and recovery contracts are maintained in the
+[Agent Reference Index](../agents/README.md) and compared in the
+[Agent API and Connection Matrix](../agents/agent_api_connection_matrix.md);
+this appendix summarizes those boundaries for the paper instead of duplicating
+them.
 
 ## Scope
 
@@ -129,6 +136,8 @@ the current code snapshot.
 
 ## Related Documents
 
+- [Agent Reference Index](../agents/README.md)
+- [Agent API and Connection Matrix](../agents/agent_api_connection_matrix.md)
 - [System architecture](02_system_architecture.md)
 - [Platform architecture](04_platform_architecture.md)
 - [Current code snapshot](../runtime/current_code_snapshot.md)
