@@ -223,8 +223,8 @@ def test_live_gui_runtime_shell_contains_operational_panels() -> None:
     assert "planning-live-body" in html
     assert "/static/styles.css?v=20260527-live-focus" in html
     assert "/static/planning.js?v=20260613-clean-stl-render-1" in html
-    assert 'href="/static/styles.css?v=20260720-manipulation-grounded-1"' in html
-    assert 'src="/static/planning.js?v=20260722-utm-raw-single-source-1"' in html
+    assert 'href="/static/styles.css?v=20260720-manipulation-grounded-1&knowledge-activity-1"' in html
+    assert 'src="/static/planning.js?v=20260722-utm-raw-single-source-1&knowledge-activity-1&knowledge-relations-1"' in html
     assert "Runtime Chat" in html
     assert "Safe Stop" in html
     assert "Pause Run" in html
@@ -716,6 +716,10 @@ def test_live_gui_analysis_report_exposes_multifidelity_contract() -> None:
     assert "operator.context" in script
     assert "operator.attention" in script
     assert "attention_event_key" in script
+    assert "/api/knowledge/relations/summary" in script
+    assert "knowledge_relation_review" in script
+    assert 'href="/knowledge#relations"' in script
+    assert "Relation Reconciliation" in script
     assert '<div class="binder-title binder-title-att" title="Operator Attention">ATT</div>' in script
     assert '<div class="binder-title binder-title-att" title="Operator Attention">ATTENTION</div>' not in script
     assert "Operator attention is surfaced only through the ATT binder/report page." in script

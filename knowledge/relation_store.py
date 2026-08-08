@@ -157,8 +157,11 @@ class RelationStore:
         queue = self._read_json(self.queue_path, default=[])
         proposals = self.list_proposals(limit=10000)
         counts = {
+            "examined_work": len(queue),
             "pending_work": sum(1 for item in queue if str(item.get("status") or "pending") == "pending"),
             "processing_work": sum(1 for item in queue if str(item.get("status") or "") == "processing"),
+            "completed_work": sum(1 for item in queue if str(item.get("status") or "") == "completed"),
+            "proposed": len(proposals),
             "pending": 0,
             "approved": 0,
             "rejected": 0,

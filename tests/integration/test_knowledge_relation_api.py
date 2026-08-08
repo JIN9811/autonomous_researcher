@@ -124,6 +124,22 @@ def test_relation_status_and_pending_proposal_listing(relation_api) -> None:
     assert proposals["proposals"][0]["proposal_id"] == "proposal:1"
 
 
+def test_relation_summary_is_bounded_and_does_not_scan_the_graph(relation_api, monkeypatch) -> None:
+    client, service, _ = relation_api
+
+    def fail_if_scanned(*args, **kwargs):
+        raise AssertionError("compact relation summary must not scan the graph")
+
+    monkeypatch.setattr(service, "scan_gaps", fail_if_scanned)
+    summary = client.get("/api/knowledge/relations/summary").json()
+
+    assert summary["ok"] is True
+    assert summary["relation_reconciliation"]["proposed"] == 1
+    assert summary["relation_reconciliation"]["pending"] == 1
+    assert summary["relation_reconciliation"]["worker_status"] == "idle"
+    assert summary["relation_reconciliation"]["review_url"] == "/knowledge#relations"
+
+
 def test_revised_approval_rejects_new_target_node(relation_api) -> None:
     client, _, _ = relation_api
 

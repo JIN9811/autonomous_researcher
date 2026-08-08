@@ -3212,6 +3212,44 @@ def _knowledge_reconciliation_service() -> KnowledgeReconciliationService:
     return worker.service
 
 
+def _knowledge_relation_summary() -> dict[str, object]:
+    """Return compact persisted relation state without scanning or invoking an LLM."""
+    defaults: dict[str, object] = {
+        "examined": 0,
+        "proposed": 0,
+        "auto_approved": 0,
+        "pending": 0,
+        "rejected_deferred": 0,
+        "worker_status": "unavailable",
+        "worker_running": False,
+        "review_url": "/knowledge#relations",
+    }
+    try:
+        worker = _knowledge_reconciliation_worker()
+        store = worker.service.store
+        stats = store.stats()
+        decisions = store.list_decisions(limit=2000)
+        automatic = sum(
+            1
+            for item in decisions
+            if str(item.get("decision_source") or "") == "automatic"
+            and str(item.get("decision") or "") in {"approved", "revised_approved"}
+        )
+        worker_state = worker.status()
+        return {
+            "examined": int(stats.get("examined_work", 0)),
+            "proposed": int(stats.get("proposed", 0)),
+            "auto_approved": automatic,
+            "pending": int(stats.get("pending", 0)),
+            "rejected_deferred": int(stats.get("rejected", 0)) + int(stats.get("deferred", 0)),
+            "worker_status": str(worker_state.get("status") or "idle"),
+            "worker_running": bool(worker_state.get("running", False)),
+            "review_url": "/knowledge#relations",
+        }
+    except Exception as exc:
+        return {**defaults, "error": str(exc)[:500]}
+
+
 def _self_evolution_service() -> SelfEvolutionService:
     """Return the file-backed ATR self-evolution service."""
     return SelfEvolutionService(
@@ -5984,6 +6022,7 @@ def _agent_report_payload(agent_id: str, run_id: str | None = None) -> dict[str,
         knowledge_report = knowledge_payload.get("knowledge_report") if isinstance(knowledge_payload.get("knowledge_report"), dict) else {}
         knowledge_context = knowledge_payload.get("knowledge_context") if isinstance(knowledge_payload.get("knowledge_context"), dict) else {}
         evolution_proposal = knowledge_payload.get("evolution_proposal") if isinstance(knowledge_payload.get("evolution_proposal"), dict) else {}
+        role_specific["relation_reconciliation"] = _knowledge_relation_summary()
         if knowledge_report:
             memory_intake = knowledge_report.get("memory_intake") if isinstance(knowledge_report.get("memory_intake"), dict) else {}
             self_evolution = knowledge_report.get("self_evolution") if isinstance(knowledge_report.get("self_evolution"), dict) else evolution_proposal
@@ -15025,6 +15064,12 @@ async def get_knowledge_relation_status() -> dict[str, object]:
         "gap_count": len(scan.get("gaps", [])),
         "graph_revision": scan.get("graph_revision", ""),
     }
+
+
+@app.get("/api/knowledge/relations/summary")
+async def get_knowledge_relation_summary() -> dict[str, object]:
+    """Return compact persisted relation review state without a graph scan."""
+    return {"ok": True, "relation_reconciliation": _knowledge_relation_summary()}
 
 
 @app.post("/api/knowledge/relations/scan")

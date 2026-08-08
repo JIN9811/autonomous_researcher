@@ -184,6 +184,20 @@ def test_knowledge_evolution_outcome_api_appends_reviewed_attribution(tmp_path: 
 
 
 def test_knowledge_agent_report_exposes_memory_and_evolution_boards(monkeypatch) -> None:
+    monkeypatch.setattr(
+        app_main,
+        "_knowledge_relation_summary",
+        lambda: {
+            "examined": 14,
+            "proposed": 6,
+            "auto_approved": 2,
+            "pending": 3,
+            "rejected_deferred": 1,
+            "worker_status": "idle",
+            "worker_running": False,
+            "review_url": "/knowledge#relations",
+        },
+    )
     knowledge_payload = {
         "retrieval_coverage": 0.87,
         "local_chunks": 3,
@@ -266,6 +280,9 @@ def test_knowledge_agent_report_exposes_memory_and_evolution_boards(monkeypatch)
     assert report["role_specific"]["self_evolution_board"]["top_packs"][0]["pack_id"] == "evo-pack-analysis-1"
     assert report["role_specific"]["self_evolution_board"]["outcomes"][0]["outcome_id"] == "outcome-analysis-1"
     assert report["role_specific"]["handoff_packet"]["knowledge_context"]["schema"] == "knowledge_context.v1"
+    assert report["role_specific"]["relation_reconciliation"]["examined"] == 14
+    assert report["role_specific"]["relation_reconciliation"]["pending"] == 3
+    assert report["role_specific"]["relation_reconciliation"]["review_url"] == "/knowledge#relations"
     assert report["decisions"][0]["decision"] == "prepare_self_evolution_evidence_pack"
     assert report["metrics"]["agent_report_coverage"] == 1.0
 
