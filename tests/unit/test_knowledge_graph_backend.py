@@ -115,6 +115,30 @@ def test_json_graph_backend_upserts_and_queries_target_context(tmp_path) -> None
     assert any(edge["type"] in {"RECOMMENDS", "AFFECTS", "ASSOCIATED_WITH"} for edge in result["edges"])
 
 
+def test_json_graph_backend_exposes_bounded_reconciliation_queries(tmp_path) -> None:
+    backend = JsonGraphBackend(tmp_path / "knowledge_graph.json")
+    backend.upsert_nodes(
+        [
+            {"id": "specimen:1", "kind": "Specimen", "run_id": "run-1"},
+            {"id": "observation:1", "kind": "Observation", "run_id": "run-1"},
+            {"id": "observation:2", "kind": "Observation", "run_id": "run-2"},
+        ]
+    )
+    backend.upsert_edges(
+        [{"id": "observed", "source": "specimen:1", "target": "observation:1", "type": "OBSERVED_BY"}]
+    )
+
+    snapshot = backend.query({"kind": "reconciliation_gaps", "limit": 2, "include_properties": True})
+    context = backend.query({"kind": "reconciliation_context", "node_id": "specimen:1", "limit": 2, "include_properties": True})
+    lookup = backend.query({"kind": "node_lookup", "node_ids": ["observation:2", "missing"], "limit": 2})
+
+    assert snapshot["kind"] == "reconciliation_gaps"
+    assert len(snapshot["nodes"]) == 2
+    assert len(snapshot["edges"]) <= 2
+    assert {node["id"] for node in context["nodes"]} >= {"specimen:1", "observation:1"}
+    assert [node["id"] for node in lookup["nodes"]] == ["observation:2"]
+
+
 def test_import_store_to_graph_uses_jsonl_memory(tmp_path) -> None:
     experiment, performance, failures, successes, packs = _records()
     store = JsonlKnowledgeStore(memory_root=tmp_path / "memory" / "knowledge", run_root=tmp_path / "runs")

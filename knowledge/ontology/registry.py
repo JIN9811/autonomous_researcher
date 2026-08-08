@@ -27,6 +27,14 @@ class OntologyRegistry:
     required_event_fields: tuple[str, ...]
     maxima: Mapping[str, int]
 
+    def relations_from(self, source_class: str) -> tuple[RelationRule, ...]:
+        """Return deterministic relation options allowed for an existing source class."""
+        return tuple(
+            rule
+            for _, rule in sorted(self.relation_rules.items())
+            if source_class in rule.source_classes
+        )
+
     @classmethod
     def load_default(cls, project_root: Path) -> "OntologyRegistry":
         root = project_root / "knowledge" / "ontology"

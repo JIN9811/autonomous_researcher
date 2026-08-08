@@ -111,6 +111,48 @@ class JsonGraphBackend:
         include_properties = bool(query.get("include_properties", False))
         nodes = list(graph.get("nodes", []))
         edges = list(graph.get("edges", []))
+        if kind == "reconciliation_gaps":
+            return {
+                "ok": True,
+                "backend": "json",
+                "kind": kind,
+                "nodes": _compact_nodes(nodes[:limit], include_properties=include_properties),
+                "edges": _compact_edges(edges[:limit], include_properties=include_properties),
+                "graph_revision": str(graph.get("updated_at") or graph.get("created_at") or ""),
+            }
+        if kind == "node_lookup":
+            requested = [str(item) for item in query.get("node_ids", []) if str(item)][:limit]
+            by_id = {str(node.get("id") or ""): node for node in nodes}
+            matched = [by_id[node_id] for node_id in requested if node_id in by_id]
+            return {"ok": True, "backend": "json", "kind": kind, "nodes": _compact_nodes(matched, include_properties=include_properties), "edges": []}
+        if kind == "reconciliation_context":
+            node_id = str(query.get("node_id") or "")
+            root = next((node for node in nodes if str(node.get("id") or "") == node_id), None)
+            if root is None:
+                return {"ok": True, "backend": "json", "kind": kind, "nodes": [], "edges": [], "graph_revision": str(graph.get("updated_at") or "")}
+            related_edges = [edge for edge in edges if edge.get("source") == node_id or edge.get("target") == node_id]
+            neighbor_ids = {
+                str(endpoint)
+                for edge in related_edges
+                for endpoint in (edge.get("source"), edge.get("target"))
+                if endpoint
+            }
+            root_run = str(root.get("run_id") or "")
+            ordered = [root]
+            ordered.extend(node for node in nodes if str(node.get("id") or "") in neighbor_ids and node is not root)
+            ordered.extend(node for node in nodes if root_run and str(node.get("run_id") or "") == root_run and node not in ordered)
+            ordered.extend(node for node in nodes if node not in ordered)
+            bounded_nodes = ordered[:limit]
+            bounded_ids = {str(node.get("id") or "") for node in bounded_nodes}
+            bounded_edges = [edge for edge in edges if edge.get("source") in bounded_ids and edge.get("target") in bounded_ids][:limit]
+            return {
+                "ok": True,
+                "backend": "json",
+                "kind": kind,
+                "nodes": _compact_nodes(bounded_nodes, include_properties=include_properties),
+                "edges": _compact_edges(bounded_edges, include_properties=include_properties),
+                "graph_revision": str(graph.get("updated_at") or graph.get("created_at") or ""),
+            }
         if kind == "neighbors":
             node_id = str(query.get("node_id") or "")
             related_edges = [edge for edge in edges if edge.get("source") == node_id or edge.get("target") == node_id][:limit]
@@ -261,6 +303,40 @@ class Neo4jGraphBackend:
         limit = max(1, min(int(query.get("limit") or 50), 500))
         include_properties = bool(query.get("include_properties", False))
         with self._driver.session(database=self.database) as session:
+            if kind == "reconciliation_gaps":
+                records = session.run(
+                    "MATCH (n:ATRKnowledgeNode) "
+                    "WITH collect(n)[0..$limit] AS nodes "
+                    "UNWIND CASE WHEN size(nodes) = 0 THEN [null] ELSE nodes END AS n "
+                    "OPTIONAL MATCH (n)-[r:ATR_KNOWLEDGE_REL]-(:ATRKnowledgeNode) "
+                    "RETURN nodes, collect(DISTINCT r)[0..$limit] AS edges",
+                    limit=limit,
+                ).single()
+                return _neo4j_records_to_result(records, kind=kind, include_properties=include_properties)
+            if kind == "node_lookup":
+                node_ids = [str(item) for item in query.get("node_ids", []) if str(item)][:limit]
+                records = session.run(
+                    "UNWIND $node_ids AS requested_id "
+                    "OPTIONAL MATCH (n:ATRKnowledgeNode {id: requested_id}) "
+                    "WITH requested_id, n ORDER BY requested_id "
+                    "RETURN collect(n)[0..$limit] AS nodes, [] AS edges",
+                    node_ids=node_ids,
+                    limit=limit,
+                ).single()
+                return _neo4j_records_to_result(records, kind=kind, include_properties=include_properties)
+            if kind == "reconciliation_context":
+                node_id = str(query.get("node_id") or "")
+                records = session.run(
+                    "MATCH (root:ATRKnowledgeNode {id: $node_id}) "
+                    "OPTIONAL MATCH (root)-[r:ATR_KNOWLEDGE_REL]-(neighbor:ATRKnowledgeNode) "
+                    "WITH root, collect(DISTINCT neighbor)[0..$limit] AS adjacent, collect(DISTINCT r)[0..$limit] AS edges "
+                    "OPTIONAL MATCH (same_run:ATRKnowledgeNode) "
+                    "WHERE root.run_id IS NOT NULL AND same_run.run_id = root.run_id "
+                    "RETURN root, adjacent + collect(DISTINCT same_run)[0..$limit] AS nodes, edges",
+                    node_id=node_id,
+                    limit=limit,
+                ).single()
+                return _neo4j_records_to_result(records, kind=kind, include_properties=include_properties)
             if kind == "neighbors":
                 node_id = str(query.get("node_id") or "")
                 records = session.run(
