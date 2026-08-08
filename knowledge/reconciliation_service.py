@@ -5,12 +5,14 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from backends.llm_lease import LLMLeaseBusy, RECONCILIATION_PRIORITY
 from knowledge.relation_reconciliation import (
+    GraphEditDraft,
     GraphGapDetector,
     RelationCandidate,
     RelationCandidateGenerator,
@@ -21,9 +23,15 @@ from knowledge.relation_reconciliation import (
 from knowledge.relation_store import RelationStore
 
 
+class GraphRevisionConflict(RuntimeError):
+    """Raised when an optimistic graph/proposal revision no longer matches."""
+
+
 class KnowledgeReconciliationService:
     AUTO_CONFIDENCE = 0.90
     AUTO_EVIDENCE_SCORE = 0.80
+    EDITABLE_METADATA = frozenset({"label", "alias", "note", "tags"})
+    RELATION_LIFECYCLE = frozenset({"deprecated", "revoked"})
 
     def __init__(
         self,
@@ -273,6 +281,239 @@ class KnowledgeReconciliationService:
         )
         return {"ok": True, "status": "queued", "proposal_id": proposal_id, "next_version": proposal.version + 1}
 
+    def assert_proposal_current(self, proposal_id: str, *, version: int, graph_context_hash: str) -> RelationProposal:
+        proposal = self._require_proposal(proposal_id)
+        if proposal.version != int(version):
+            raise GraphRevisionConflict(
+                f"proposal version changed: expected={version} current={proposal.version}"
+            )
+        if proposal.graph_context_hash != str(graph_context_hash):
+            raise GraphRevisionConflict("proposal graph context changed; re-evaluation is required")
+        if proposal.status not in {"pending", "deferred"}:
+            raise GraphRevisionConflict(f"proposal is already resolved: {proposal.status}")
+        return proposal
+
+    def validate_graph_edit(
+        self,
+        *,
+        graph_revision: str,
+        changes: list[dict[str, Any]],
+        operator: str,
+        draft_id: str = "",
+    ) -> dict[str, Any]:
+        snapshot = self.backend.query(
+            {"kind": "reconciliation_gaps", "limit": 500, "include_properties": True}
+        )
+        current_revision = str(snapshot.get("graph_revision") or self._snapshot_hash(snapshot))
+        if str(graph_revision) != current_revision:
+            raise GraphRevisionConflict(
+                f"graph revision changed: expected={graph_revision} current={current_revision}"
+            )
+        if not isinstance(changes, list) or len(changes) > 100:
+            raise ValueError("graph edit changes must be a list with at most 100 entries")
+        nodes = {
+            str(node.get("id") or ""): dict(node)
+            for node in snapshot.get("nodes", [])
+            if isinstance(node, dict) and node.get("id")
+        }
+        edges = {
+            str(edge.get("id") or ""): dict(edge)
+            for edge in snapshot.get("edges", [])
+            if isinstance(edge, dict) and edge.get("id")
+        }
+        normalized: list[dict[str, Any]] = []
+        staged_relations = {
+            (str(edge.get("source") or ""), str(edge.get("type") or ""), str(edge.get("target") or ""))
+            for edge in edges.values()
+        }
+        for raw in changes:
+            if not isinstance(raw, dict):
+                raise ValueError("each graph edit change must be an object")
+            operation = str(raw.get("operation") or "")
+            if operation == "move_node":
+                node_id = self._require_existing_node(raw.get("node_id"), nodes)
+                normalized.append({"operation": operation, "node_id": node_id, "x": float(raw.get("x", 0)), "y": float(raw.get("y", 0))})
+                continue
+            if operation == "update_node_metadata":
+                node_id = self._require_existing_node(raw.get("node_id"), nodes)
+                metadata = raw.get("metadata")
+                if not isinstance(metadata, dict) or not metadata:
+                    raise ValueError("metadata edit requires a non-empty metadata object")
+                unknown = sorted(set(metadata) - self.EDITABLE_METADATA)
+                if unknown:
+                    raise ValueError(f"metadata fields are not editable: {', '.join(unknown)}")
+                clean_metadata = self._normalize_edit_metadata(metadata)
+                normalized.append({"operation": operation, "node_id": node_id, "metadata": clean_metadata})
+                continue
+            if operation == "add_relation":
+                relation = self._normalized_edit_relation(raw, nodes)
+                key = (relation["source_id"], relation["relation_type"], relation["target_id"])
+                if key in staged_relations:
+                    raise ValueError("duplicate relationship is forbidden")
+                staged_relations.add(key)
+                normalized.append({"operation": operation, **relation})
+                continue
+            if operation == "revise_relation":
+                edge_id = str(raw.get("edge_id") or "")
+                original = edges.get(edge_id)
+                if original is None:
+                    raise ValueError(f"relationship does not exist: {edge_id}")
+                relation = self._normalized_edit_relation(
+                    {
+                        "source_id": original.get("source"),
+                        "target_id": raw.get("target_id") or original.get("target"),
+                        "relation_type": raw.get("relation_type") or original.get("type"),
+                    },
+                    nodes,
+                )
+                key = (relation["source_id"], relation["relation_type"], relation["target_id"])
+                if key in staged_relations and key != (
+                    str(original.get("source") or ""),
+                    str(original.get("type") or ""),
+                    str(original.get("target") or ""),
+                ):
+                    raise ValueError("duplicate revised relationship is forbidden")
+                normalized.append({"operation": operation, "edge_id": edge_id, "original": original, **relation})
+                continue
+            if operation == "set_relation_status":
+                edge_id = str(raw.get("edge_id") or "")
+                edge = edges.get(edge_id)
+                status = str(raw.get("status") or "")
+                if edge is None:
+                    raise ValueError(f"relationship does not exist: {edge_id}")
+                if status not in self.RELATION_LIFECYCLE:
+                    raise ValueError("relationship status must be deprecated or revoked")
+                relation = self._normalized_edit_relation(
+                    {"source_id": edge.get("source"), "target_id": edge.get("target"), "relation_type": edge.get("type")},
+                    nodes,
+                )
+                normalized.append({"operation": operation, "edge_id": edge_id, "status": status, **relation})
+                continue
+            raise ValueError(f"unsupported graph edit operation: {operation}")
+        resolved_draft_id = draft_id or stable_relation_id(
+            graph_revision,
+            operator,
+            json.dumps(normalized, ensure_ascii=True, sort_keys=True, default=str),
+            prefix="graph-edit-draft",
+        )
+        validation = {
+            "ok": True,
+            "graph_revision": current_revision,
+            "change_count": len(normalized),
+            "semantic_change_count": sum(1 for item in normalized if item["operation"] != "move_node"),
+        }
+        draft = GraphEditDraft(
+            draft_id=resolved_draft_id,
+            graph_revision=current_revision,
+            operator=str(operator or "local-operator"),
+            changes=tuple(normalized),
+            validation=validation,
+        )
+        self.store.save_edit_draft(draft)
+        return {"ok": True, "draft": draft.as_dict(), "validation": validation}
+
+    def apply_graph_edit(
+        self,
+        *,
+        graph_revision: str,
+        changes: list[dict[str, Any]],
+        operator: str,
+        draft_id: str = "",
+    ) -> dict[str, Any]:
+        validated = self.validate_graph_edit(
+            graph_revision=graph_revision,
+            changes=changes,
+            operator=operator,
+            draft_id=draft_id,
+        )
+        draft = GraphEditDraft(**validated["draft"])
+        snapshot = self.backend.query(
+            {"kind": "reconciliation_gaps", "limit": 500, "include_properties": True}
+        )
+        nodes = {
+            str(node.get("id") or ""): dict(node)
+            for node in snapshot.get("nodes", [])
+            if isinstance(node, dict) and node.get("id")
+        }
+        entity_refs: list[dict[str, Any]] = []
+        relationship_intents: list[dict[str, Any]] = []
+        for change in draft.changes:
+            operation = str(change["operation"])
+            if operation == "update_node_metadata":
+                node = nodes[change["node_id"]]
+                entity_refs.append(
+                    {
+                        "entity_id": change["node_id"],
+                        "entity_class": str(node.get("kind") or "KnowledgeNode"),
+                        **dict(change["metadata"]),
+                    }
+                )
+            elif operation == "add_relation":
+                relationship_intents.append(self._edit_intent(change, status="active", operator=operator))
+            elif operation == "revise_relation":
+                original = dict(change["original"])
+                relationship_intents.append(
+                    self._edit_intent(
+                        {
+                            "relation_id": change["edge_id"],
+                            "source_id": original["source"],
+                            "source_class": str(nodes[original["source"]].get("kind") or "KnowledgeNode"),
+                            "target_id": original["target"],
+                            "target_class": str(nodes[original["target"]].get("kind") or "KnowledgeNode"),
+                            "relation_type": original["type"],
+                        },
+                        status="deprecated",
+                        operator=operator,
+                    )
+                )
+                relationship_intents.append(self._edit_intent(change, status="active", operator=operator))
+            elif operation == "set_relation_status":
+                relationship_intents.append(self._edit_intent(change, status=change["status"], operator=operator))
+        receipt: dict[str, Any] = {"ok": True, "status": "layout_only"}
+        if entity_refs or relationship_intents:
+            now = datetime.now(timezone.utc).isoformat()
+            receipt = self.knowledge_service.ingest(
+                {
+                    "run_id": "knowledge-graph-edit",
+                    "cycle_id": draft.draft_id,
+                    "source_agent": "knowledge_agent",
+                    "event_type": "agent.completed",
+                    "occurred_at": now,
+                    "entity_refs": entity_refs,
+                    "relationship_intents": relationship_intents,
+                    "artifact_refs": [],
+                    "payload_summary": {
+                        "operation": "knowledge_graph_edit",
+                        "draft_id": draft.draft_id,
+                        "operator": operator,
+                        "change_count": len(draft.changes),
+                    },
+                    "provenance": {
+                        "draft_id": draft.draft_id,
+                        "graph_revision": draft.graph_revision,
+                        "operator": operator,
+                    },
+                }
+            )
+            if not receipt.get("ok", False):
+                raise RuntimeError(f"knowledge graph edit ingest failed: {receipt}")
+        applied = replace(draft, status="applied", updated_at=datetime.now(timezone.utc).isoformat())
+        self.store.save_edit_draft(applied)
+        decision = {
+            "schema": "knowledge_graph_edit_decision.v1",
+            "decision_id": stable_relation_id(draft.draft_id, "applied", prefix="graph-edit-decision"),
+            "draft_id": draft.draft_id,
+            "graph_revision": draft.graph_revision,
+            "operator": operator,
+            "status": "applied",
+            "changes": list(draft.changes),
+            "validation": validated["validation"],
+            "promotion_receipt": receipt,
+            "decided_at": applied.updated_at,
+        }
+        self.store.append_graph_edit_decision(decision)
+        return {"ok": True, "status": "applied", "draft": applied.as_dict(), "decision": decision, "receipt": receipt}
+
     def _record_nonpromotion(self, proposal_id: str, decision_name: str, operator: str, rationale: str) -> dict[str, Any]:
         proposal = self._require_proposal(proposal_id)
         decision = RelationDecision(
@@ -373,6 +614,66 @@ class KnowledgeReconciliationService:
             str(node.get("id") or ""): dict(node)
             for node in result.get("nodes", [])
             if isinstance(node, dict) and node.get("id")
+        }
+
+    @staticmethod
+    def _require_existing_node(raw_node_id: Any, nodes: dict[str, dict[str, Any]]) -> str:
+        node_id = str(raw_node_id or "")
+        if node_id not in nodes:
+            raise ValueError(f"graph edit cannot create or reference a new node: {node_id}")
+        return node_id
+
+    @classmethod
+    def _normalize_edit_metadata(cls, metadata: dict[str, Any]) -> dict[str, Any]:
+        normalized: dict[str, Any] = {}
+        for key, value in metadata.items():
+            if key == "tags":
+                if not isinstance(value, list):
+                    raise ValueError("metadata tags must be a list")
+                normalized[key] = [str(item)[:120] for item in value if str(item).strip()][:50]
+            elif isinstance(value, (str, int, float, bool)) or value is None:
+                normalized[key] = str(value)[:2000] if isinstance(value, str) else value
+            else:
+                raise ValueError(f"metadata field {key} must be scalar")
+        return normalized
+
+    def _normalized_edit_relation(
+        self,
+        raw: dict[str, Any],
+        nodes: dict[str, dict[str, Any]],
+    ) -> dict[str, Any]:
+        source_id = self._require_existing_node(raw.get("source_id"), nodes)
+        target_id = self._require_existing_node(raw.get("target_id"), nodes)
+        if source_id == target_id:
+            raise ValueError("self-referential relationships are forbidden")
+        relation_type = str(raw.get("relation_type") or "")
+        relation = {
+            "relation_id": str(raw.get("relation_id") or stable_relation_id(source_id, relation_type, target_id, prefix="relation")),
+            "source_id": source_id,
+            "source_class": str(nodes[source_id].get("kind") or "KnowledgeNode"),
+            "target_id": target_id,
+            "target_class": str(nodes[target_id].get("kind") or "KnowledgeNode"),
+            "relation_type": relation_type,
+        }
+        report = self.knowledge_service.validator.validate_relationship(relation)
+        if not report.ok:
+            raise ValueError("; ".join(report.errors))
+        return relation
+
+    @staticmethod
+    def _edit_intent(change: dict[str, Any], *, status: str, operator: str) -> dict[str, Any]:
+        return {
+            "relation_id": str(change.get("relation_id") or stable_relation_id(change["source_id"], change["relation_type"], change["target_id"], prefix="relation")),
+            "relation_type": change["relation_type"],
+            "source_id": change["source_id"],
+            "source_class": change["source_class"],
+            "target_id": change["target_id"],
+            "target_class": change["target_class"],
+            "properties": {
+                "lifecycle_status": status,
+                "edited_by": operator,
+                "edit_mode": True,
+            },
         }
 
     def _node_run_id(self, node_id: str) -> str:

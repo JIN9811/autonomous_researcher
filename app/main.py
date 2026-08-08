@@ -73,7 +73,7 @@ from knowledge.graph_importer import import_store_to_graph
 from knowledge.graphify_bridge import import_project_graph, scan_project_graph
 from knowledge.schemas import EvolutionOutcomeRecord
 from knowledge.service import KnowledgeService
-from knowledge.reconciliation_service import KnowledgeReconciliationService, KnowledgeReconciliationWorker
+from knowledge.reconciliation_service import GraphRevisionConflict, KnowledgeReconciliationService, KnowledgeReconciliationWorker
 from knowledge.stores import JsonlKnowledgeStore
 from device_bridges.bambu_bridge import (
     BambuConnectionMemory,
@@ -488,6 +488,25 @@ class PlanningBootstrapRequest(BaseModel):
     backend: Literal["openai", "nemoclaw", "ollama", "vllm"] | None = None
     constraints: dict[str, object] = Field(default_factory=dict)
     session_id: str | None = None
+
+
+class KnowledgeRelationDecisionRequest(BaseModel):
+    proposal_version: int = Field(..., ge=1)
+    graph_context_hash: str = Field(..., min_length=1, max_length=128)
+    operator: str = Field(default="local-operator", min_length=1, max_length=120)
+    rationale: str = Field(default="", max_length=2000)
+
+
+class KnowledgeRelationRevisionRequest(KnowledgeRelationDecisionRequest):
+    target_id: str = Field(..., min_length=1, max_length=512)
+    relation_type: str = Field(..., min_length=1, max_length=80)
+
+
+class KnowledgeGraphEditRequest(BaseModel):
+    graph_revision: str = Field(..., min_length=1, max_length=256)
+    operator: str = Field(default="local-operator", min_length=1, max_length=120)
+    draft_id: str = Field(default="", max_length=256)
+    changes: list[dict[str, Any]] = Field(default_factory=list, max_length=100)
 
 
 class VisionSpecimenPlacementRetryRequest(BaseModel):
@@ -3185,6 +3204,12 @@ def _knowledge_reconciliation_worker() -> KnowledgeReconciliationWorker:
         _KNOWLEDGE_RECONCILIATION_SERVICE = reconciliation
         _KNOWLEDGE_RECONCILIATION_WORKER = KnowledgeReconciliationWorker(reconciliation)
     return _KNOWLEDGE_RECONCILIATION_WORKER
+
+
+def _knowledge_reconciliation_service() -> KnowledgeReconciliationService:
+    """Return the service owned by the shared app worker."""
+    worker = _knowledge_reconciliation_worker()
+    return worker.service
 
 
 def _self_evolution_service() -> SelfEvolutionService:
@@ -14984,6 +15009,167 @@ async def post_knowledge_evolution_outcome(payload: dict[str, object]) -> dict[s
         level="INFO",
     )
     return {"ok": True, "record": record.model_dump(mode="json")}
+
+
+@app.get("/api/knowledge/relations/status")
+async def get_knowledge_relation_status() -> dict[str, object]:
+    """Return one shared reconciliation queue and worker status."""
+    worker = _knowledge_reconciliation_worker()
+    service = worker.service
+    scan = service.scan_gaps(limit=100)
+    return {
+        "ok": bool(scan.get("ok", False)),
+        "worker": worker.status(),
+        "relations": service.store.stats(),
+        "gaps": scan.get("gaps", []),
+        "gap_count": len(scan.get("gaps", [])),
+    }
+
+
+@app.post("/api/knowledge/relations/scan")
+async def post_knowledge_relation_scan(payload: dict[str, object] | None = None) -> dict[str, object]:
+    """Run bounded deterministic gap detection without invoking an LLM."""
+    raw = payload or {}
+    try:
+        limit = max(1, min(int(raw.get("limit") or 100), 500))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail="limit must be an integer") from exc
+    return _knowledge_reconciliation_service().scan_gaps(limit=limit)
+
+
+@app.post("/api/knowledge/relations/reconcile")
+async def post_knowledge_relation_reconcile(payload: dict[str, object] | None = None) -> dict[str, object]:
+    """Run one operator-requested reconciliation batch using the selected loaded model."""
+    raw = payload or {}
+    try:
+        limit = max(1, min(int(raw.get("limit") or 10), 10))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail="limit must be an integer") from exc
+    return await _knowledge_reconciliation_service().reconcile_batch(limit=limit, background=False)
+
+
+@app.get("/api/knowledge/relations/proposals")
+async def get_knowledge_relation_proposals(status: str = "", limit: int = 100) -> dict[str, object]:
+    """List immutable relation proposals with their resolved status."""
+    service = _knowledge_reconciliation_service()
+    proposals = service.store.list_proposals(status=status.strip(), limit=max(1, min(limit, 500)))
+    return {"ok": True, "status": status.strip(), "proposals": [item.as_dict() for item in proposals]}
+
+
+@app.get("/api/knowledge/relations/decisions")
+async def get_knowledge_relation_decisions(limit: int = 200) -> dict[str, object]:
+    """Return immutable relation and graph-edit decision history."""
+    store = _knowledge_reconciliation_service().store
+    return {
+        "ok": True,
+        "decisions": store.list_decisions(limit=max(1, min(limit, 1000))),
+        "graph_edit_decisions": store.list_graph_edit_decisions(limit=max(1, min(limit, 1000))),
+    }
+
+
+@app.get("/api/knowledge/relations/{proposal_id}")
+async def get_knowledge_relation_proposal(proposal_id: str) -> dict[str, object]:
+    """Return one proposal and bounded accepted graph context."""
+    service = _knowledge_reconciliation_service()
+    proposal = service.store.get_proposal(proposal_id)
+    if proposal is None:
+        raise HTTPException(status_code=404, detail="relation proposal not found")
+    context = service.backend.query(
+        {"kind": "reconciliation_context", "node_id": proposal.source_id, "limit": 100, "include_properties": True}
+    )
+    return {"ok": True, "proposal": proposal.as_dict(), "context": context}
+
+
+def _assert_relation_request_current(
+    proposal_id: str,
+    req: KnowledgeRelationDecisionRequest,
+) -> KnowledgeReconciliationService:
+    service = _knowledge_reconciliation_service()
+    try:
+        service.assert_proposal_current(
+            proposal_id,
+            version=req.proposal_version,
+            graph_context_hash=req.graph_context_hash,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except GraphRevisionConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return service
+
+
+@app.post("/api/knowledge/relations/{proposal_id}/approve")
+async def post_knowledge_relation_approve(proposal_id: str, req: KnowledgeRelationDecisionRequest) -> dict[str, object]:
+    service = _assert_relation_request_current(proposal_id, req)
+    try:
+        return service.approve(proposal_id, operator=req.operator, rationale=req.rationale)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.post("/api/knowledge/relations/{proposal_id}/revise-approve")
+async def post_knowledge_relation_revise_approve(proposal_id: str, req: KnowledgeRelationRevisionRequest) -> dict[str, object]:
+    service = _assert_relation_request_current(proposal_id, req)
+    try:
+        return service.revise_and_approve(
+            proposal_id,
+            target_id=req.target_id,
+            relation_type=req.relation_type,
+            rationale=req.rationale,
+            operator=req.operator,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.post("/api/knowledge/relations/{proposal_id}/reject")
+async def post_knowledge_relation_reject(proposal_id: str, req: KnowledgeRelationDecisionRequest) -> dict[str, object]:
+    service = _assert_relation_request_current(proposal_id, req)
+    return service.reject(proposal_id, operator=req.operator, rationale=req.rationale)
+
+
+@app.post("/api/knowledge/relations/{proposal_id}/defer")
+async def post_knowledge_relation_defer(proposal_id: str, req: KnowledgeRelationDecisionRequest) -> dict[str, object]:
+    service = _assert_relation_request_current(proposal_id, req)
+    return service.defer(proposal_id, operator=req.operator, rationale=req.rationale)
+
+
+@app.post("/api/knowledge/relations/{proposal_id}/re-evaluate")
+async def post_knowledge_relation_re_evaluate(proposal_id: str, req: KnowledgeRelationDecisionRequest) -> dict[str, object]:
+    service = _assert_relation_request_current(proposal_id, req)
+    result = service.re_evaluate(proposal_id)
+    _knowledge_reconciliation_worker().wake()
+    return result
+
+
+@app.post("/api/knowledge/graph/edit/validate")
+async def post_knowledge_graph_edit_validate(req: KnowledgeGraphEditRequest) -> dict[str, object]:
+    try:
+        return _knowledge_reconciliation_service().validate_graph_edit(
+            graph_revision=req.graph_revision,
+            changes=req.changes,
+            operator=req.operator,
+            draft_id=req.draft_id,
+        )
+    except GraphRevisionConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/api/knowledge/graph/edit/apply")
+async def post_knowledge_graph_edit_apply(req: KnowledgeGraphEditRequest) -> dict[str, object]:
+    try:
+        return _knowledge_reconciliation_service().apply_graph_edit(
+            graph_revision=req.graph_revision,
+            changes=req.changes,
+            operator=req.operator,
+            draft_id=req.draft_id,
+        )
+    except GraphRevisionConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @app.get("/api/knowledge/graph/health")

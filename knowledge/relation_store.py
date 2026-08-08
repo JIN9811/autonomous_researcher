@@ -26,6 +26,7 @@ class RelationStore:
         self.queue_path = self.root / "work_queue.json"
         self.proposals_path = self.root / "proposals.jsonl"
         self.decisions_path = self.root / "decisions.jsonl"
+        self.graph_edit_decisions_path = self.root / "graph_edit_decisions.jsonl"
         self.drafts_root = self.root / "drafts"
         self.drafts_root.mkdir(parents=True, exist_ok=True)
 
@@ -139,6 +140,18 @@ class RelationStore:
 
     def list_decisions(self, *, limit: int = 500) -> list[dict[str, Any]]:
         return list(reversed(self._read_jsonl(self.decisions_path)))[: max(1, min(int(limit), 2000))]
+
+    def append_graph_edit_decision(self, decision: dict[str, Any]) -> dict[str, Any]:
+        decision_id = str(decision.get("decision_id") or "")
+        if not decision_id:
+            raise ValueError("graph edit decision_id is required")
+        existing = {str(item.get("decision_id") or "") for item in self._read_jsonl(self.graph_edit_decisions_path)}
+        if decision_id not in existing:
+            self._append_jsonl(self.graph_edit_decisions_path, dict(decision))
+        return dict(decision)
+
+    def list_graph_edit_decisions(self, *, limit: int = 200) -> list[dict[str, Any]]:
+        return list(reversed(self._read_jsonl(self.graph_edit_decisions_path)))[: max(1, min(int(limit), 1000))]
 
     def stats(self) -> dict[str, int]:
         queue = self._read_json(self.queue_path, default=[])
