@@ -18,8 +18,8 @@ legacy_scope:
 snapshot:
   document: docs/runtime/current_code_snapshot.md
   expected:
-    api_routes: 332
-    app_routes: 339
+    api_routes: 346
+    app_routes: 353
     graph_nodes: 19
     graph_edges: 68
     stage_dispatch_edges: 12

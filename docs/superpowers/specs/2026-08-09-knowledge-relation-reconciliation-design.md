@@ -1,7 +1,7 @@
 ---
 doc_type: design
 subtype: architecture
-status: review
+status: active
 authority: proposal
 audience:
   - researcher
@@ -576,3 +576,28 @@ The feature is complete when:
   and synchronization receipts;
 - failure and restart behavior preserve work without blocking experiments;
 - Knowledge Workspace, Live GUI, and ATT expose consistent reconciliation state.
+
+## 19. Implementation Status (2026-08-09)
+
+This approved design is implemented without replacing the existing Knowledge
+Agent, Graphify, ontology, ledger, durable outbox, or Neo4j synchronization
+boundaries.
+
+- Durable contracts and records: `knowledge/relation_reconciliation.py`,
+  `knowledge/relation_store.py`, `knowledge/ontology/relation_rules.v1.yaml`.
+- Deterministic gap detection and candidate ranking: bounded graph query plans
+  in `knowledge/graph_backend.py` and `knowledge/relation_reconciliation.py`.
+- Shared inference scheduling: `backends/llm_lease.py` with priorities
+  Guardian `0`, workflow `10`, chat `20`, reconciliation `30`.
+- Proposal, validation, promotion, decisions, edits, and background worker:
+  `knowledge/reconciliation_service.py`.
+- Bounded API and optimistic concurrency: `/api/knowledge/relations/*` and
+  `/api/knowledge/graph/edit/{validate,apply}` in `app/main.py`.
+- Operator surfaces: Relation Review plus Graph Explorer View/Edit modes in
+  `/knowledge`; compact persisted metrics in Live GUI Knowledge Report; one
+  aggregate pending-review item in ATT.
+
+Implementation commits from the staged delivery are `dbf9d7a`, `4661c51`,
+`5352ee0`, `0740155`, `dc78517`, `8f9d5b0`, and `4329853`. Final verification
+commands and browser evidence are recorded in the operator guide and execution
+plan rather than changing the architectural decisions above.

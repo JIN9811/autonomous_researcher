@@ -12,6 +12,11 @@ Knowledge Agent = Research Memory + Failure/Success Pattern Memory + Agent Perfo
 
 Knowledge recommends what should be evolved. It does not activate variants. `SelfEvolutionService`, Guardian gates, and the operator keep ownership of candidate lifecycle, approval, and next-run activation.
 
+Knowledge Agent also owns evidence-bounded relation reconciliation for the
+existing Knowledge Graph. The LLM proposes links between existing nodes; it
+does not create nodes, edit the core ontology, execute Cypher, or bypass the
+KnowledgeService ledger/outbox path.
+
 ## Runtime Flow
 
 The active module graph is `graphs/modules/knowledge/module.yaml` and uses this internal flow:
@@ -71,6 +76,11 @@ memory/knowledge/failure_patterns.jsonl
 memory/knowledge/success_patterns.jsonl
 memory/knowledge/evolution_evidence_packs.jsonl
 memory/knowledge/evolution_outcomes.jsonl
+memory/knowledge/reconciliation/work_queue.json
+memory/knowledge/reconciliation/proposals.jsonl
+memory/knowledge/reconciliation/decisions.jsonl
+memory/knowledge/reconciliation/graph_edit_decisions.jsonl
+memory/knowledge/reconciliation/drafts/
 ```
 
 This can later migrate to SQLite, DuckDB, vector index, or graph/RDF export without changing the runtime packet contract.
@@ -125,6 +135,19 @@ Knowledge API endpoints:
 - `GET /api/knowledge/run-context?agent_id=&run_id=`
 - `GET /api/knowledge/bo-context?objective_id=&limit=`
 - `GET /api/knowledge/safety-context?stage=&limit=`
+- `GET /api/knowledge/relations/summary`
+- `GET /api/knowledge/relations/status`
+- `POST /api/knowledge/relations/scan`
+- `POST /api/knowledge/relations/reconcile`
+- `GET /api/knowledge/relations/proposals?status=&limit=`
+- `GET /api/knowledge/relations/decisions?limit=`
+- `POST /api/knowledge/relations/{proposal_id}/approve`
+- `POST /api/knowledge/relations/{proposal_id}/revise-approve`
+- `POST /api/knowledge/relations/{proposal_id}/reject`
+- `POST /api/knowledge/relations/{proposal_id}/defer`
+- `POST /api/knowledge/relations/{proposal_id}/re-evaluate`
+- `POST /api/knowledge/graph/edit/validate`
+- `POST /api/knowledge/graph/edit/apply`
 
 Evolution Lab uses `/api/knowledge/evolution-packs` to prefill task objective, constraints, source runs, and evidence pack id.
 
@@ -138,8 +161,36 @@ Knowledge Agent report should show:
 - Agent performance memory: status, score, missing fields, warnings, retry count.
 - Self-evolution board: top packs, target ids, objectives, prefill tasks, approval boundary.
 - Data quality map: artifact link coverage and missing artifacts.
+- Relation reconciliation: examined nodes, proposals, automatic approvals,
+  pending reviews, rejected/deferred count, and worker status.
 
 Live chat should report memory/evidence update counts and top evolution target, not raw JSON.
+
+The `/knowledge` workspace owns detailed relation review and graph editing.
+Live GUI exposes only compact persisted counts. ATT emits one aggregate review
+item when pending proposals exist; proposal count never becomes one ATT item per
+proposal and never blocks the closed loop.
+
+## Relation Reconciliation Runtime
+
+`KnowledgeReconciliationWorker` performs bounded incremental work every 60
+seconds or when explicitly woken. It never prewarms a model. If the selected
+Live GUI route is not already loaded, the worker reports `model_unloaded` and
+leaves durable work queued.
+
+Shared LLM lease priority is Guardian `0`, active workflow `10`, operator chat
+`20`, reconciliation `30`. Background reconciliation uses a non-waiting lease,
+so an active higher-value call is not delayed.
+
+Automatic promotion requires all gates: confidence `>=0.90`, deterministic
+evidence `>=0.80`, ontology-valid domain/range, provenance, existing endpoints,
+and no duplicate/self relation. Every other proposal remains durable for an
+operator to approve, revise and approve, reject, defer, or re-evaluate.
+
+Graph Explorer Edit Mode is a separate draft transaction over existing graph
+entities. Only `label`, `alias`, `note`, and `tags` metadata are editable. A
+validated apply operation emits the same audited KnowledgeService event path;
+it is not a direct Neo4j mutation.
 
 ## Safety Rules
 
@@ -150,6 +201,10 @@ Live chat should report memory/evidence update counts and top evolution target, 
 - Code patch variants remain diff-only.
 - Every memory/evidence record must include provenance and confidence/quality fields.
 - Failed self-evolution attempts should also remain as memory evidence.
+- Relation proposals are untrusted input until deterministic and ontology
+  validation succeeds.
+- Relation reconciliation failure is non-blocking for experiment and device
+  handoff state.
 
 ## Current Verification Evidence
 

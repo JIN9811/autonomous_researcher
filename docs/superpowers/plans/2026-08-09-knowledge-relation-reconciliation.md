@@ -35,7 +35,7 @@
 - Produces: `RelationStore.enqueue_node()`, `claim_pending()`, `append_proposal()`, `append_decision()`, `list_proposals()`, `get_proposal()`, `stats()`, `save_edit_draft()`, and `get_edit_draft()`.
 - Persistence root: `memory/knowledge/reconciliation/` with atomic queue state and append-only proposal/decision JSONL files.
 
-- [ ] **Step 1: Write failing store lifecycle tests**
+- [x] **Step 1: Write failing store lifecycle tests**
 
 ```python
 def test_relation_store_deduplicates_work_and_preserves_decisions(tmp_path):
@@ -49,19 +49,19 @@ def test_relation_store_deduplicates_work_and_preserves_decisions(tmp_path):
     assert decision.proposal_version == 1
 ```
 
-- [ ] **Step 2: Run the test and confirm missing imports/contracts fail**
+- [x] **Step 2: Run the test and confirm missing imports/contracts fail**
 
 Run: `.venv/bin/python -m pytest -q tests/unit/test_knowledge_relation_store.py`
 
-- [ ] **Step 3: Implement immutable contracts and lock-protected atomic persistence**
+- [x] **Step 3: Implement immutable contracts and lock-protected atomic persistence**
 
 Use stable SHA-256 IDs, timezone-aware timestamps, bounded string/list fields, `fcntl` file locks, atomic replacement for mutable queue/draft indexes, and append-only JSONL for proposals/decisions.
 
-- [ ] **Step 4: Verify store tests pass**
+- [x] **Step 4: Verify store tests pass**
 
 Run: `.venv/bin/python -m pytest -q tests/unit/test_knowledge_relation_store.py`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add knowledge/relation_reconciliation.py knowledge/relation_store.py tests/unit/test_knowledge_relation_store.py
@@ -82,7 +82,7 @@ git commit -m "feat: add durable knowledge relation store"
 - Produces: `RelationCandidateGenerator.rank(source, nodes, edges, registry, *, limit=8) -> list[RelationCandidate]`.
 - Adds internal backend query kinds `reconciliation_gaps`, `reconciliation_context`, and `node_lookup`; none accepts Cypher.
 
-- [ ] **Step 1: Write failing isolated, disconnected, missing-link, and ranking tests**
+- [x] **Step 1: Write failing isolated, disconnected, missing-link, and ranking tests**
 
 ```python
 def test_gap_detector_finds_isolated_and_weak_nodes():
@@ -97,19 +97,19 @@ def test_candidate_ranking_excludes_ontology_incompatible_targets():
     assert all(candidate.target_class in candidate.allowed_target_classes for candidate in candidates)
 ```
 
-- [ ] **Step 2: Run focused tests and verify expected failures**
+- [x] **Step 2: Run focused tests and verify expected failures**
 
 Run: `.venv/bin/python -m pytest -q tests/unit/test_knowledge_relation_reconciliation.py tests/unit/test_knowledge_graph_backend.py`
 
-- [ ] **Step 3: Implement bounded backend queries and deterministic scoring**
+- [x] **Step 3: Implement bounded backend queries and deterministic scoring**
 
 Score same run/cycle, shared provenance/artifact, ontology compatibility, temporal proximity, and neighbor overlap. Return score factors with each candidate; do not use an LLM in this task.
 
-- [ ] **Step 4: Verify focused tests pass**
+- [x] **Step 4: Verify focused tests pass**
 
 Run: `.venv/bin/python -m pytest -q tests/unit/test_knowledge_relation_reconciliation.py tests/unit/test_knowledge_graph_backend.py`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add knowledge/graph_backend.py knowledge/ontology/registry.py knowledge/relation_reconciliation.py tests/unit/test_knowledge_relation_reconciliation.py tests/unit/test_knowledge_graph_backend.py
@@ -133,7 +133,7 @@ git commit -m "feat: detect knowledge graph relation gaps"
 - Adds `AgentContext.llm_lease` and optional `priority`/`owner` parameters to internal completion routing while preserving existing call signatures.
 - Produces: `AgentContext.selected_model_loaded(task_type) -> Awaitable[bool]` without calling `prepare_model()`.
 
-- [ ] **Step 1: Write failing scheduling tests**
+- [x] **Step 1: Write failing scheduling tests**
 
 ```python
 @pytest.mark.asyncio
@@ -148,19 +148,19 @@ async def test_background_readiness_does_not_load_model():
     assert backend.prepare_calls == []
 ```
 
-- [ ] **Step 2: Run tests and verify they fail for missing lease behavior**
+- [x] **Step 2: Run tests and verify they fail for missing lease behavior**
 
 Run: `.venv/bin/python -m pytest -q tests/unit/test_llm_lease.py tests/unit/test_model_router.py tests/unit/test_langgraph_runtime.py`
 
-- [ ] **Step 3: Implement the coordinator and integrate both AgentContext paths**
+- [x] **Step 3: Implement the coordinator and integrate both AgentContext paths**
 
 Use an `asyncio.Condition`, monotonic sequence numbers, and a priority heap. Existing calls use their current behavior inside the lease. Background readiness inspects `managed_model_statuses()` when available and treats unmanaged remote APIs as available without invoking model loading.
 
-- [ ] **Step 4: Verify routing and runtime tests pass**
+- [x] **Step 4: Verify routing and runtime tests pass**
 
 Run: `.venv/bin/python -m pytest -q tests/unit/test_llm_lease.py tests/unit/test_model_router.py tests/unit/test_langgraph_runtime.py`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backends/llm_lease.py agents/base_agent.py orchestrator/langgraph_runtime.py app/bootstrap.py tests/unit/test_llm_lease.py tests/unit/test_model_router.py tests/unit/test_langgraph_runtime.py
@@ -185,7 +185,7 @@ git commit -m "feat: coordinate prioritized llm access"
 - Produces automatic promotion only when all confirmed thresholds and validators pass.
 - Adds app-owned `KnowledgeReconciliationWorker.start()`, `wake()`, `status()`, and `shutdown()`.
 
-- [ ] **Step 1: Write failing proposal and promotion tests**
+- [x] **Step 1: Write failing proposal and promotion tests**
 
 ```python
 @pytest.mark.asyncio
@@ -201,19 +201,19 @@ async def test_high_confidence_proposal_uses_knowledge_ingest(service):
     assert service.knowledge_service.ingest_calls[0]["relationship_intents"]
 ```
 
-- [ ] **Step 2: Run focused tests and verify expected failures**
+- [x] **Step 2: Run focused tests and verify expected failures**
 
 Run: `.venv/bin/python -m pytest -q tests/unit/test_knowledge_reconciliation_service.py tests/unit/test_knowledge_agent.py`
 
-- [ ] **Step 3: Implement strict parsing, validation, promotion, and worker lifecycle**
+- [x] **Step 3: Implement strict parsing, validation, promotion, and worker lifecycle**
 
 The worker is woken after successful Knowledge ingest, processes at most 10 nodes, acquires priority `30`, skips when the selected model is unloaded, and records degraded status without raising into the experiment loop.
 
-- [ ] **Step 4: Verify service and Knowledge Agent tests pass**
+- [x] **Step 4: Verify service and Knowledge Agent tests pass**
 
 Run: `.venv/bin/python -m pytest -q tests/unit/test_knowledge_reconciliation_service.py tests/unit/test_knowledge_agent.py`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backends/prompt_registry.py configs/models.yaml knowledge/reconciliation_service.py knowledge/service.py agents/knowledge_agent.py app/main.py tests/unit/test_knowledge_reconciliation_service.py tests/unit/test_knowledge_agent.py
@@ -232,7 +232,7 @@ git commit -m "feat: reconcile knowledge relations with selected llm"
 - Adds `/api/knowledge/graph/edit/validate` and `/api/knowledge/graph/edit/apply` with graph revision optimistic concurrency.
 - Manual edits use `knowledge_graph_edit_decision.v1`; accepted semantic changes enter `KnowledgeService.ingest()`.
 
-- [ ] **Step 1: Write failing API contract tests**
+- [x] **Step 1: Write failing API contract tests**
 
 ```python
 def test_revised_approval_rejects_new_target_node(client):
@@ -246,19 +246,19 @@ def test_graph_edit_apply_requires_matching_revision(client):
     assert response.status_code == 409
 ```
 
-- [ ] **Step 2: Run API tests and verify missing routes fail**
+- [x] **Step 2: Run API tests and verify missing routes fail**
 
 Run: `.venv/bin/python -m pytest -q tests/integration/test_knowledge_relation_api.py`
 
-- [ ] **Step 3: Implement request models, bounded routes, and conflict responses**
+- [x] **Step 3: Implement request models, bounded routes, and conflict responses**
 
 Use existing graph/service factories, no arbitrary query payloads, no direct backend mutation, and explicit operator identity from the local runtime context.
 
-- [ ] **Step 4: Verify API tests pass**
+- [x] **Step 4: Verify API tests pass**
 
 Run: `.venv/bin/python -m pytest -q tests/integration/test_knowledge_relation_api.py`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add app/main.py knowledge/reconciliation_service.py tests/integration/test_knowledge_relation_api.py
@@ -279,7 +279,7 @@ git commit -m "feat: expose knowledge relation review api"
 - Adds explicit `VIEW / EDIT` mode switch and draft toolbar to Graph Explorer.
 - Pending proposals render as amber dashed edges; drafts never alter the accepted graph rendering until apply succeeds.
 
-- [ ] **Step 1: Write failing static and browser contract assertions**
+- [x] **Step 1: Write failing static and browser contract assertions**
 
 ```python
 for required in [
@@ -292,21 +292,21 @@ for required in [
     assert required in html
 ```
 
-- [ ] **Step 2: Run workspace tests and verify missing controls fail**
+- [x] **Step 2: Run workspace tests and verify missing controls fail**
 
 Run: `.venv/bin/python -m pytest -q tests/integration/test_knowledge_workspace.py`
 
-- [ ] **Step 3: Implement the responsive workspace UI**
+- [x] **Step 3: Implement the responsive workspace UI**
 
 Preserve current visual language, add keyboard-accessible controls, keep View Mode default, persist unsaved drafts in browser session storage, and disable apply until server validation succeeds.
 
-- [ ] **Step 4: Run static tests and 1920 x 1080 Selenium audit**
+- [x] **Step 4: Run static tests and 1920 x 1080 Selenium audit**
 
 Run: `.venv/bin/python -m pytest -q tests/integration/test_knowledge_workspace.py`
 
 Run: `.venv/bin/python tests/ui/knowledge_workspace_browser_audit.py --base-url http://127.0.0.1:7860 --screenshot artifacts/ui/knowledge_relation_workspace_1920x1080.png`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add web/templates/knowledge.html web/static/knowledge.js web/static/knowledge.css tests/integration/test_knowledge_workspace.py tests/ui/knowledge_workspace_browser_audit.py
@@ -327,26 +327,26 @@ git commit -m "feat: add knowledge relation review workspace"
 - ATT receives one aggregated review item linking to `/knowledge#relations`.
 - Relation review state never blocks stage completion or physical-device handoff.
 
-- [ ] **Step 1: Write failing report and ATT aggregation tests**
+- [x] **Step 1: Write failing report and ATT aggregation tests**
 
 ```python
 assert report["role_specific"]["relation_reconciliation"]["pending"] == 3
 assert len([item for item in attention if item["source"] == "knowledge_relation_review"]) == 1
 ```
 
-- [ ] **Step 2: Run focused tests and verify failures**
+- [x] **Step 2: Run focused tests and verify failures**
 
 Run: `.venv/bin/python -m pytest -q tests/integration/test_knowledge_api.py tests/integration/test_live_gui_runtime_layout.py`
 
-- [ ] **Step 3: Implement compact report state and aggregated ATT mapping**
+- [x] **Step 3: Implement compact report state and aggregated ATT mapping**
 
 Use persisted reconciliation status as the source of truth. Do not poll or rerender the entire Knowledge report when only counts change.
 
-- [ ] **Step 4: Verify focused tests pass**
+- [x] **Step 4: Verify focused tests pass**
 
 Run: `.venv/bin/python -m pytest -q tests/integration/test_knowledge_api.py tests/integration/test_live_gui_runtime_layout.py`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add app/main.py app/controller.py web/static/live_runtime.js tests/integration/test_knowledge_api.py tests/integration/test_live_gui_runtime_layout.py
@@ -365,19 +365,19 @@ git commit -m "feat: surface knowledge relation review state"
 **Interfaces:**
 - Documents operator review, edit mode, LLM scheduling, persistence, recovery, and exact API/GUI behavior.
 
-- [ ] **Step 1: Update current-state and operator documentation only after implementation exists**
+- [x] **Step 1: Update current-state and operator documentation only after implementation exists**
 
 Document View/Edit Mode, Relation Review actions, automatic thresholds, background lease priority, unloaded-model behavior, Neo4j recovery, and audit locations.
 
-- [ ] **Step 2: Run focused Knowledge test suite**
+- [x] **Step 2: Run focused Knowledge test suite**
 
 Run: `.venv/bin/python -m pytest -q tests/unit/test_knowledge_*.py tests/integration/test_knowledge_*.py`
 
-- [ ] **Step 3: Run routing and Live GUI regressions**
+- [x] **Step 3: Run routing and Live GUI regressions**
 
 Run: `.venv/bin/python -m pytest -q tests/unit/test_model_router.py tests/unit/test_langgraph_runtime.py tests/integration/test_live_gui_runtime_layout.py`
 
-- [ ] **Step 4: Validate documentation and browser evidence**
+- [x] **Step 4: Validate documentation and browser evidence**
 
 Run: `.venv/bin/python scripts/validate_documentation.py`
 
@@ -385,7 +385,7 @@ Run: `.venv/bin/python -m pytest -q tests/unit/test_documentation_validation.py`
 
 Run: `.venv/bin/python tests/ui/knowledge_workspace_browser_audit.py --base-url http://127.0.0.1:7860 --screenshot artifacts/ui/knowledge_relation_workspace_1920x1080.png`
 
-- [ ] **Step 5: Verify working-tree scope and commit documentation**
+- [x] **Step 5: Verify working-tree scope and commit documentation**
 
 ```bash
 git diff --check

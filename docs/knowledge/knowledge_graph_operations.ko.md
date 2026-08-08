@@ -13,14 +13,16 @@ scope:
 summary: ATR Knowledge ledger, durable outbox, Neo4j sync, bounded query, and workspace를 안전하게 운영하는 절차.
 source_of_truth:
   - knowledge/service.py
+  - knowledge/reconciliation_service.py
+  - knowledge/relation_store.py
   - knowledge/durable_outbox.py
   - knowledge/graph_sync_worker.py
   - knowledge/ontology/atr_core.v1.yaml
   - scripts/knowledge_graph_cli.py
   - app/main.py
   - web/static/knowledge.js
-last_verified: 2026-08-08
-verified_against: 09bbe32
+last_verified: 2026-08-09
+verified_against: 4329853
 related_docs:
   - docs/runtime/current_code_snapshot.md
   - docs/runtime/langgraph_runtime.md
@@ -33,7 +35,8 @@ supersedes: []
 ## Summary
 
 ATR Knowledge 계층의 append-only ledger, durable outbox, 선택적 Neo4j
-동기화, allowlisted graph query, `/knowledge` Workspace를 운영하는 runbook입니다.
+동기화, allowlisted graph query, 관계 reconciliation, `/knowledge` Workspace를
+운영하는 runbook입니다.
 Neo4j 장애 시 기록을 보존한 채 degraded 상태를 확인하고, 연결 복구 뒤
 bounded sync로 재전송하는 것이 기본 경로입니다.
 
@@ -102,6 +105,11 @@ memory/knowledge/outbox/pending/             미동기화 이벤트
 memory/knowledge/outbox/acknowledged/        Neo4j 동기화 영수증 포함 이벤트
 memory/knowledge/outbox/dead_letter/         재시도 한도 초과 이벤트
 memory/knowledge/neo4j/                      로컬 Neo4j 데이터와 로그
+memory/knowledge/reconciliation/work_queue.json        증분 관계 검사 대기열
+memory/knowledge/reconciliation/proposals.jsonl         변경 불가능한 LLM 관계 제안
+memory/knowledge/reconciliation/decisions.jsonl         승인/반려/보류 결정 원장
+memory/knowledge/reconciliation/graph_edit_decisions.jsonl  Graph Edit 적용 원장
+memory/knowledge/reconciliation/drafts/                 검증 중인 graph edit 초안
 ```
 
 `memory/`는 Git에 포함되지 않습니다.
@@ -172,8 +180,61 @@ Main GUI의 `Device Workspaces > Knowledge Workspace` 또는 `/knowledge`에서 
 | Ontology | 활성 ontology 버전, class, relation domain/range |
 | Sync | durable outbox의 pending 이벤트를 제한된 batch로 Neo4j에 재전송 |
 | Project Graph | Graphify로 적재한 file/module/API/tool/concept 연결 조회 |
+| Relation Review | 관계 gap, LLM 제안, 근거, 승인/수정 승인/반려/보류/재평가와 결정 이력 |
 
 상단 상태 스트립은 `/api/knowledge/graph/stats`에서 backend, ontology, node/edge, pending/dead-letter 값을 직접 읽습니다. Graph Explorer와 Project Graph는 전체 그래프를 내려받지 않고 bounded subgraph만 렌더링합니다. 노드를 더블클릭하거나 `Expand provenance`를 누르면 해당 식별자를 대상으로 `provenance_trace` query plan을 실행합니다.
+
+### Relation Review
+
+관계 reconciliation은 기존 노드와 활성 ontology의 관계 유형만 사용합니다. LLM은
+후보를 제안할 뿐 Neo4j나 raw Cypher를 직접 실행하지 않습니다.
+
+```bash
+curl -s http://127.0.0.1:7860/api/knowledge/relations/summary
+curl -s http://127.0.0.1:7860/api/knowledge/relations/status
+curl -s -X POST http://127.0.0.1:7860/api/knowledge/relations/scan \
+  -H 'Content-Type: application/json' -d '{"limit":100}'
+curl -s -X POST http://127.0.0.1:7860/api/knowledge/relations/reconcile \
+  -H 'Content-Type: application/json' -d '{"limit":10}'
+curl -s 'http://127.0.0.1:7860/api/knowledge/relations/proposals?status=pending&limit=100'
+curl -s 'http://127.0.0.1:7860/api/knowledge/relations/decisions?limit=200'
+```
+
+- `scan`은 graph gap을 제한적으로 검사하고 LLM을 호출하지 않습니다.
+- `reconcile`은 현재 선택되어 이미 로딩된 모델로 최대 10개를 처리합니다.
+- 백그라운드 worker는 60초 간격 또는 wake 신호로 동작하지만 모델을 직접
+  로딩하지 않습니다. 모델이 없으면 `model_unloaded`, lease가 사용 중이면
+  비차단 상태로 다음 기회를 기다립니다.
+- LLM lease 우선순위는 Guardian `0`, 실험 workflow `10`, 운영자 chat `20`,
+  relation reconciliation `30`입니다.
+- 자동 승인은 LLM confidence `>=0.90`, deterministic evidence `>=0.80`, ontology
+  검증, provenance, 중복/자기참조 검사를 모두 통과할 때만 가능합니다.
+- 그 외 제안은 Relation Review에서 승인, 수정 승인, 반려, 보류, 재평가합니다.
+  수정 승인은 source node를 유지하고 target, relation type, rationale만 바꿉니다.
+- version 또는 graph-context hash가 오래되면 mutation API가 `409`를 반환하므로
+  최신 proposal/context를 다시 불러온 뒤 결정합니다.
+
+### Graph Explorer Edit Mode
+
+`View Mode`가 기본이며 `Edit Mode`는 기존 node/relation만 편집합니다. 새 node
+생성, raw Cypher, identity/provenance 수정은 허용하지 않습니다. metadata는
+`label`, `alias`, `note`, `tags`만 변경할 수 있습니다.
+
+1. `EDIT`로 전환하고 기존 relation 또는 허용 metadata를 draft에 추가합니다.
+2. Undo/Redo와 draft 목록으로 변경 범위를 확인합니다.
+3. `Validate`로 ontology, 기존 node, 중복, self-reference, graph revision을 검사합니다.
+4. 검증 성공 뒤에만 `Apply`합니다. 적용 전 accepted graph는 바뀌지 않습니다.
+5. stale revision이면 draft를 보존한 채 새 graph context와 충돌을 해결합니다.
+
+semantic 변경은 항상 `KnowledgeService.ingest`를 거쳐 ledger, outbox, graph sync
+증거를 남깁니다. layout 좌표는 UI preference이며 semantic event가 아닙니다.
+
+### Live GUI와 ATT
+
+Live GUI의 Knowledge Report는 `examined`, `proposed`, `auto-approved`, `pending`,
+`rejected/deferred`, worker 상태를 영속 store에서 읽습니다. pending이 있으면 ATT에
+제안별 카드가 아니라 `/knowledge#relations`로 연결되는 집계 카드 하나만 생깁니다.
+이 상태는 실험 stage 완료나 물리 장비 handoff를 차단하지 않습니다.
 
 ## Procedure: 안전한 Graph Query
 
@@ -220,8 +281,10 @@ pending/dead-letter 파일을 직접 삭제해서 동기화 상태를 조작하�
   않습니다.
 - `/api/knowledge/activity`의 cycle 값은 append-only ledger의 기록과
   일치하며 UI가 누락값을 추정하지 않습니다.
-- `/knowledge`는 5개 탭과 bounded subgraph만 렌더링하고 raw Cypher 입력을
+- `/knowledge`는 6개 탭과 bounded subgraph만 렌더링하고 raw Cypher 입력을
   제공하지 않습니다.
+- Relation Review 수치, Knowledge Report 수치, ATT 집계가 같은 durable relation
+  store를 반영합니다.
 
 ## Rollback or Stop Procedure
 
@@ -242,6 +305,8 @@ pending/dead-letter 파일을 직접 삭제해서 동기화 상태를 조작하�
 - Graph Explorer는 depth 4, result limit 100의 bounded view이며 전체 graph
   export가 아닙니다.
 - `used` 활동은 명시적으로 기록된 consumer만 집계합니다.
+- relation worker는 선택 모델이 이미 로딩된 경우에만 제안을 생성하며, 모델을
+  자동 load하거나 실험/Guardian 호출을 기다리게 하지 않습니다.
 - dead-letter 자동 수정은 제공하지 않으며 원인과 ontology/migration을
   검토한 reconciliation이 필요합니다.
 
@@ -255,10 +320,13 @@ pending/dead-letter 파일을 직접 삭제해서 동기화 상태를 조작하�
   --geckodriver /snap/bin/geckodriver
 ```
 
-검사는 그래프 canvas 생성, 5개 탭 전환, 가로 overflow, 그래프/인스펙터 최소 폭을 확인하고 `artifacts/ui/knowledge_workspace_1920x1080.png`를 남깁니다.
+검사는 그래프 canvas 생성, 6개 탭 전환, Relation Review/Edit Mode, 가로 overflow,
+그래프/인스펙터 최소 폭을 확인하고
+`artifacts/ui/knowledge_relation_workspace_1920x1080.png`를 남깁니다.
 
-2026-08-08 커밋 `09bbe32` 기준 API source, ontology, durable outbox/sync
-구현, Knowledge Workspace frontend와 관련 unit/integration/browser 검증을
+2026-08-09 구현 커밋 `4329853` 기준 API source, ontology, durable outbox/sync,
+relation reconciliation 구현, Knowledge Workspace frontend와 관련
+unit/integration/browser 검증을
 대조했습니다. 실제 Neo4j health와 node/edge 수는 로컬 데이터에 따라 달라질
 수 있으므로 고정 contract로 취급하지 않습니다.
 

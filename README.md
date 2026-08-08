@@ -71,6 +71,7 @@ Fast entry points:
 - [Closed Loop / Page / Agent Reference](docs/runtime/closed_loop_and_pages_reference.md)
 - [Current Code Snapshot](docs/runtime/current_code_snapshot.md)
 - [Knowledge Graph Operations KR](docs/knowledge/knowledge_graph_operations.ko.md)
+- [Knowledge Relation Reconciliation Design](docs/superpowers/specs/2026-08-09-knowledge-relation-reconciliation-design.md)
 - [Documentation Governance Design](docs/superpowers/specs/2026-08-08-documentation-governance-design.md)
 - [Requirements](REQUIREMENTS.md)
 - [API Docs](http://localhost:7860/docs)

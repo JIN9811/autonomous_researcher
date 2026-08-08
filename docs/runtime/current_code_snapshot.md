@@ -12,15 +12,15 @@ scope:
   - api
   - gui
   - knowledge
-summary: Reproducible snapshot of the routes, graph, workspaces, and runtime contracts implemented at commit 09bbe32.
+summary: Reproducible snapshot of the routes, graph, workspaces, and runtime contracts, including Knowledge relation reconciliation.
 source_of_truth:
   - app/main.py
   - graphs/configs/atr_closed_loop.yaml
   - orchestrator/langgraph_runtime.py
   - web/templates/knowledge.html
   - web/static/knowledge.js
-last_verified: 2026-08-08
-verified_against: 09bbe32
+last_verified: 2026-08-09
+verified_against: 4329853
 related_docs:
   - docs/runtime/langgraph_runtime.md
   - docs/runtime/closed_loop_and_pages_reference.md
@@ -33,8 +33,9 @@ supersedes: []
 ## Summary
 
 This Reference records the current routes, executable graph, module/runtime
-contracts, workspace surfaces, and selected source-size checks implemented at
-commit `09bbe32`. Counts are observations used to detect documentation drift,
+contracts, workspace surfaces, and selected source-size checks. The Knowledge
+relation reconciliation layer is verified against implementation commit
+`4329853`. Counts are observations used to detect documentation drift,
 not stability guarantees.
 
 ## Scope
@@ -53,7 +54,7 @@ are available in every environment.
 - `web/templates/` and `web/static/`
 - `knowledge/` and `scripts/knowledge_graph_cli.py`
 
-## Knowledge Graph Runtime (2026-08-08)
+## Knowledge Graph Runtime (2026-08-09)
 
 - ATR Core Ontology `atr-core-1.0.0` is defined under `knowledge/ontology/` with class, relation domain/range, event-family, and lifecycle validation.
 - `knowledge_event.v1` records use deterministic event/idempotency identifiers.
@@ -64,10 +65,16 @@ are available in every environment.
 - Knowledge Agent adds `graph_event_status` without replacing `knowledge_context.v1`, `knowledge_report.v1`, or `evolution_proposal.v1`.
 - Knowledge ledger events record cycle-level `collected`, `updated`, `retrieved`, and `used` activity; `/api/knowledge/activity` provides a bounded aggregation.
 - Live GUI renders the recorded activity as a preserved paper-style histogram only while the Knowledge report is selected.
-- `/knowledge` provides Graph Explorer, Memory, Ontology, Sync, and Project Graph views; Main GUI exposes it as a status-aware workspace card.
-- Operational endpoints: `/api/knowledge/ontology`, `/api/knowledge/ontology/validate`, `/api/knowledge/graph/stats`, `/api/knowledge/activity`, `/api/knowledge/graph/sync`, and POST `/api/knowledge/graph/query`.
+- `/knowledge` provides Graph Explorer, Memory, Ontology, Sync, Project Graph, and Relation Review views; Main GUI exposes it as a status-aware workspace card.
+- `RelationStore` persists incremental work, immutable proposals, operator decisions, graph edit decisions, and drafts under `memory/knowledge/reconciliation/`.
+- `KnowledgeReconciliationService` detects isolated/weakly connected nodes, ranks existing-node candidates, invokes the selected already-loaded LLM through the shared priority lease, validates ontology/provenance/duplicate constraints, and promotes accepted relations through `KnowledgeService.ingest`.
+- Automatic promotion requires LLM confidence `>=0.90` and deterministic evidence `>=0.80` plus all structural gates. Other proposals stay in the operator queue.
+- The 60-second background worker reports `model_unloaded` instead of loading a model and uses reconciliation priority `30`, below Guardian `0`, workflow `10`, and chat `20`.
+- Graph Explorer defaults to View Mode. Edit Mode supports drafts over existing nodes/relations and allowlisted metadata only, with undo/redo, server validation, optimistic graph revision, and audited apply.
+- Live GUI Knowledge report exposes compact persisted reconciliation metrics. ATT produces at most one aggregate pending-review item and does not block the experiment loop.
+- Operational endpoints also include `/api/knowledge/relations/*` review actions and `/api/knowledge/graph/edit/{validate,apply}` in addition to ontology, graph stats/activity/sync/query endpoints.
 
-Last checked against the local source tree on 2026-08-08.
+Last checked against the local source tree on 2026-08-09.
 
 This document records what the current code exposes. It is not a target design
 document. If this conflicts with an older guideline, the files below are the
@@ -91,18 +98,18 @@ FastAPI outside the simple `@app.<method>("...")` pattern.
 The current FastAPI `APIRoute` scan finds:
 
 ```text
-operator page paths: 15
+operator page paths: 16
 favicon route entries: 2
-API/artifact APIRoute entries: 315
-total FastAPI APIRoute entries in app/main.py: 332
-total app.routes entries including docs/openapi/static: 339
+API/artifact APIRoute entries: 328
+total FastAPI APIRoute entries in app/main.py: 346
+total app.routes entries including docs/openapi/static: 353
 ```
 
 Machine-checked snapshot labels used by `docs/document_manifest.yaml`:
 
 ```text
-FastAPI APIRoute count: 332
-Total app.routes count: 339
+FastAPI APIRoute count: 346
+Total app.routes count: 353
 Graph nodes: 19
 Graph edges: 68
 stage_dispatch edges: 12
@@ -229,7 +236,7 @@ verification did not change the DSN/design-window layout contract.
 | PyAutoGUI equipment APIs | `device_bridges/windows_pyautogui_bridge.py`, `utils/local_pyautogui_bridge.py`, `app/main.py` | Windows bridge discovery plus managed localhost development target, proof, execution |
 | Recorded Equipment Skills | `utils/equipment_skill_runtime.py`, `Pyautogui_server_for_window/bridge/windows_pyautogui_bridge_server.py`, `agents/equipment_agent.py`, `policies/guardian_gate.py` | Versioned demonstration packages, v2 image-first click/drag locators, deterministic segment execution, exact-model bounded recovery |
 | BO/CAE APIs | `agents/bo_agent.py`, `device_bridges/cae_bridge.py` | Optimizer and analysis workspaces |
-| Knowledge/Evolution APIs | `knowledge/`, `self_evolution/`, `app/main.py`, `web/templates/knowledge.html`, `web/static/knowledge.*` | Durable memory, bounded Neo4j/Graphify inspection, ontology, activity visualization, and self-evolution tasks |
+| Knowledge/Evolution APIs | `knowledge/`, `self_evolution/`, `app/main.py`, `web/templates/knowledge.html`, `web/static/knowledge.*` | Durable memory, bounded Neo4j/Graphify inspection, ontology, relation review/edit, activity visualization, and self-evolution tasks |
 
 Do not use this document as an instruction prompt. Use it as the "what the code
 currently does" layer when updating operator docs, README files, or improvement
