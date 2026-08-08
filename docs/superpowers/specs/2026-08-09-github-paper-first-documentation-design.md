@@ -312,6 +312,9 @@ docs/paper/
   assets/
     figures/
     tables/
+
+docs/standards/
+  paper_documentation_standard.md
 ```
 
 ### File responsibilities
@@ -331,6 +334,7 @@ docs/paper/
 | `appendix_a_interfaces.md` | Selected API/event/schema contracts required to interpret results | `reference/api` |
 | `appendix_b_hardware_and_deployment.md` | Evaluated deployment topology and device-specific boundaries | `reference/system` |
 | `artifact_manifest.yaml` | Machine-readable IDs, hashes, commands, environments, and release locations | Manifest governed by the publication schema |
+| `docs/standards/paper_documentation_standard.md` | Normative academic writing, claim, citation, figure/table, command, and review rules for public paper documents | `standard/documentation` |
 
 Mixed authority MUST be split. In particular, current system architecture and
 future platform proposals MUST NOT share one active Reference.
@@ -542,6 +546,279 @@ private, so the selected publishing source must contain only public material:
   source. Translations link to that source rather than maintaining independent
   result values.
 
+## Paper Documentation Authoring Rules
+
+The implementation MUST create
+`docs/standards/paper_documentation_standard.md`. It extends, but does not
+replace, `docs/standards/documentation_standard.md`.
+
+The authority order is:
+
+```text
+Documentation Standard
+-> Paper Documentation Standard
+-> active paper Reference/Guide/Evidence
+-> README summary
+```
+
+If the Standards conflict, the general Documentation Standard wins. If a
+paper summary conflicts with an active Reference or Evidence record, the
+summary is corrected; the underlying evidence is not rewritten to preserve the
+summary.
+
+### Academic voice and argument
+
+- Public paper documents MUST use an evidence-led academic voice rather than
+  promotional product language.
+- Each section MUST begin with the question or claim it answers, then present
+  method, evidence, interpretation, and limitation in that order where
+  applicable.
+- Each paragraph SHOULD carry one main argumentative function. Long feature
+  enumerations SHOULD be converted into a table or moved to platform
+  documentation.
+- Current implemented behavior uses present tense. Completed evaluation uses
+  past tense. Future or unevaluated behavior uses `proposed`, `planned`, or
+  `not evaluated` explicitly.
+- Terms such as `fully autonomous`, `end-to-end`, `safe`, `robust`, `general`,
+  `real-time`, `state of the art`, and `production-ready` MUST NOT appear as
+  unbounded claims. The evaluated boundary and supporting evidence must be
+  stated.
+- Novelty claims MUST identify the comparison scope and cite primary related
+  work. Absence of a discovered comparator is not proof of novelty.
+- The system contribution MUST appear before the platform contribution in the
+  abstract, contribution list, README, figures, results, and conclusion.
+
+### Claim writing
+
+Every scientific claim MUST be classified as one of:
+
+| Claim class | Meaning | Required support |
+|---|---|---|
+| Architecture claim | What committed components and contracts currently exist | Active Reference, source paths, and verified commit |
+| Behavior claim | What the system did under a defined execution | Command/protocol, environment, event/artifact evidence, and result |
+| Comparative claim | How ATR differs from a baseline or ablation | Named comparator, equivalent protocol, metric, repetitions, and uncertainty |
+| Safety claim | What action was permitted, blocked, stopped, or recovered | Gate condition, failure/decision code, event trace, and operator boundary |
+| Platform claim | What can be extended or reused through a defined interface | Interface contract, validation gate, and exercised example |
+| Limitation claim | What is unsupported, uncertain, or environment dependent | Affected RQ/claim and observed or reasoned consequence |
+
+- A supported claim MUST carry a stable claim ID and link to the traceability
+  matrix.
+- Architecture presence alone MUST NOT support a behavior, performance, safety,
+  or generalization claim.
+- A passing test is described as contract verification unless that test
+  executes the experimental protocol required by the research question.
+- Test mode, replay, simulation, browser verification, and physical-device
+  execution MUST be named explicitly. Evidence from one mode MUST NOT be
+  generalized to another.
+- Negative and blocked outcomes MUST remain visible when they affect claim
+  interpretation.
+- Incomplete evidence is marked `partially supported` or `not evaluated`; it is
+  not softened into an ambiguous positive sentence.
+
+### Quantitative reporting
+
+- Every result MUST identify metric definition, unit, direction of improvement,
+  sample count, aggregation method, and uncertainty when repeated measurements
+  exist.
+- Physical quantities MUST use SI units or state their conversion. The same
+  quantity uses the same unit across prose, figures, tables, and artifacts.
+- Precision MUST reflect measurement resolution and uncertainty. Extra decimal
+  places MUST NOT imply unmeasured precision.
+- Percentages identify their denominator. Rates identify their time or trial
+  basis.
+- Runtime and latency results name hardware, model/backend, concurrency,
+  warm-up policy, and whether setup time is included.
+- Counts of routes, lines, modules, tests, or GUI pages describe implementation
+  scale only. They MUST NOT be interpreted as effectiveness, autonomy, safety,
+  or novelty metrics.
+- Dates use ISO `YYYY-MM-DD`; timestamps include timezone. Software, firmware,
+  models, datasets, and graph schemas use exact versions or immutable hashes.
+
+### Terminology and naming
+
+`docs/paper/README.md` MUST link a canonical terminology table. At minimum it
+defines:
+
+| Term | Required meaning |
+|---|---|
+| ATR | The complete Autonomous Researcher Framework system described by the release |
+| closed loop | The configured stage cycle with explicit continue, stop, and error behavior |
+| stage | A graph-level execution phase such as Design, Analysis, or Guardian |
+| agent | A bounded reasoning/execution role invoked through a registered handler |
+| module | Versioned configuration binding a stage to handler, tools, prompts, and internal steps |
+| handler | Allowlisted executable entry point resolved by the runtime registry |
+| tool | Bounded callable capability allowed by a module contract |
+| device bridge | Validated software boundary to external equipment or a device service |
+| workspace | Operator-facing GUI/API surface for a bounded device or research function |
+| event | Structured runtime state-transition or action record |
+| artifact | Persisted file or descriptor produced by execution |
+| evidence | Artifact, event, measurement, or audit record used to support a claim |
+| safety gate | Condition that must pass before a bounded action or transition is permitted |
+
+- A term MUST retain one meaning across README, paper documents, figures,
+  tables, API descriptions, and captions.
+- Acronyms are expanded on first use in each independently readable document.
+- Product names and third-party systems use their official spelling.
+- `Agent`, `Module`, `Stage`, `Tool`, `Bridge`, and `Workspace` MUST NOT be used
+  interchangeably.
+
+### Document structure and headings
+
+- Paper documents use sentence-case headings and MUST NOT skip heading levels.
+- Each independently readable paper document starts with `Summary`, `Scope`,
+  and `Source of Truth` or `Evidence Basis`, following the general Standard.
+- Evaluation documents SHOULD use the local sequence `Question`, `Method`,
+  `Evidence`, `Interpretation`, and `Limitations`.
+- Headings MUST describe content rather than use vague labels such as `Misc`,
+  `Other`, `Details`, or `Notes`.
+- README sections remain concise and link to one canonical detailed document.
+  The same long explanation MUST NOT be copied into multiple entry points.
+- Every document ends with its verification baseline and related documents.
+
+### Citations and related work
+
+- Assertions about external systems MUST cite the original paper, official
+  repository, official documentation, standard, or dataset record whenever
+  available.
+- Secondary summaries MAY help discovery but MUST NOT be the only support for a
+  technical comparison when a primary source exists.
+- Citations use a persistent DOI, archival record, paper page, or official
+  project location where possible.
+- Related-work prose distinguishes reported facts from ATR's inference or
+  interpretation.
+- Borrowed algorithms, schemas, figures, datasets, device protocols, and code
+  identify source, version, license, and modifications.
+- Verbatim quotations are avoided unless exact wording is necessary; quoted
+  text is clearly marked and attributed.
+- Citation metadata, README citation text, paper bibliography, and release
+  metadata agree on authors, title, version, year, and DOI.
+
+### Figures, screenshots, and tables
+
+- Figures and tables follow the Figure System and Table System in this Design.
+- Every figure and table is referenced and interpreted in prose. Displaying a
+  figure alone does not establish a result.
+- Captions state what is shown, evaluation mode, important encoding, and the
+  conclusion the reader may draw. A caption MUST NOT make a stronger claim
+  than its evidence.
+- Axes include quantity and unit. Legends use canonical terminology. Error bars
+  identify their definition.
+- Truncated axes, normalized values, smoothing, excluded runs, and post-hoc
+  filtering are disclosed.
+- Screenshots MUST NOT be the sole evidence for backend behavior. They link to
+  the corresponding event, API response, artifact, or browser audit.
+- Large tables move to the paper documentation or appendix; README keeps only
+  contribution and principal-result summaries.
+- All images require meaningful alt text in Markdown or HTML.
+
+### Commands and code examples
+
+- Commands are written from repository root unless the preceding sentence
+  names another working directory.
+- Commands identify required environment, execution mode, expected exit state,
+  expected artifact, and approximate time/resource envelope when nontrivial.
+- Safe, read-only, test-mode, or dry-run commands appear before live or mutating
+  commands.
+- A live physical-device command includes the required operator approval,
+  safety precondition, stop action, and recovery reference immediately nearby.
+- Examples use synthetic identifiers and non-secret values. They MUST NOT
+  contain personal absolute paths, credentials, local device identifiers, or
+  private network addresses.
+- Shell examples use the supported launcher or `.venv/bin/python`
+  consistently. Alternatives are labeled Linux, Windows, WSL, or container.
+- Output excerpts are short, stable, and labeled as examples. Machine
+  validation SHOULD assert structured fields instead of decorative log text.
+- A reproduction command is executable as written for its declared tier.
+  Pseudocode is labeled `pseudocode` and is not presented as runnable.
+
+### Links and repository paths
+
+- Local Markdown links are relative to the containing document and pass
+  documentation validation.
+- Code and configuration references use repository-relative paths.
+- Paper-facing documents MUST NOT publish absolute home paths, temporary
+  directories, editor-specific URIs, or machine-local artifact paths.
+- A changing external webpage SHOULD be accompanied by a DOI, version, release,
+  or access date when the claim depends on its state.
+- Large external evidence uses persistent links and artifact-manifest checksums.
+- A renamed document, figure, table, or evidence ID updates inbound links and
+  traceability records in the same change.
+
+### English and Korean synchronization
+
+- English paper documents are the single source for scientific claims,
+  numerical results, figure captions, and citation metadata.
+- Korean documents MAY translate explanations and add local operating context,
+  but link to canonical English results instead of maintaining independent
+  values.
+- A translation states its canonical source and last synchronized commit.
+- Translation lag is explicit; a contradictory translation cannot retain
+  `active` status.
+- Commands, paths, identifiers, schema fields, failure codes, and units are not
+  translated.
+
+### Review and change workflow
+
+Every paper-document change passes five gates:
+
+| Gate | Reviewer question | Required evidence |
+|---|---|---|
+| Scientific claim | Does wording match evidence and evaluation boundary? | Claim ID and traceability entry |
+| Reproducibility | Can the declared tier run in a clean environment? | Executed command and archived output |
+| Safety/privacy | Could publication or execution expose secrets or unsafe guidance? | Publication scan and safety review |
+| Editorial consistency | Do terminology, units, versions, figures, and citations agree? | Documentation validation and checklist |
+| Release integrity | Does the document describe the tagged release rather than a moving tree? | Release commit, tag, manifest, and checksum |
+
+- A source change affecting an architecture claim invalidates its verification
+  baseline until the corresponding Reference is reviewed.
+- A source change affecting evaluated behavior does not authorize silent result
+  updates. The evaluation is rerun or the paper continues to cite its frozen
+  release.
+- README result values are generated from or checked against the canonical
+  result record rather than maintained independently.
+- Corrections after release are recorded in `CHANGELOG.md` and, when scientific
+  interpretation changes, in an errata or new archived version.
+
+### Prohibited patterns
+
+Paper-facing documents MUST NOT contain:
+
+- unsupported marketing claims or competitive superlatives;
+- invented benchmark, hardware, user, or deployment results;
+- a `pass` claim without command, environment, commit, and evidence;
+- a physical success claim based only on request acceptance or publish
+  acknowledgement;
+- figures merging implemented and proposed components without distinction;
+- copied result values with no canonical source;
+- screenshots used as the only proof of execution;
+- credentials, personal paths, device serials, or private network information;
+- unresolved instructional markers in active documents;
+- future work phrased in present tense;
+- raw AI-generated prose accepted without source and evidence review.
+
+### Author checklist
+
+Before requesting review, the author confirms:
+
+1. The document has valid type, status, authority, source, and verification
+   metadata.
+2. System contribution precedes platform contribution.
+3. Every supported claim has a claim ID and evidence path.
+4. Every quantitative value has definition, unit, denominator/sample count,
+   and canonical source.
+5. Evaluation mode is explicit.
+6. Terminology matches the canonical glossary.
+7. Figures, tables, captions, alt text, and prose agree.
+8. Commands declare prerequisites, expected result, and safety boundary.
+9. Citations use primary and persistent sources where available.
+10. Limitations and failed/blocked evidence are not omitted.
+11. Local links, metadata, manifest references, and validation pass.
+12. No secret, personal path, private identifier, or unlicensed artifact is
+    present.
+
+The paper-specific Standard includes this checklist and the exact validation
+commands once implementation defines the publication tooling.
+
 ## Publication Safety and Privacy Gate
 
 Before public push or archived release, scan the complete tracked file set for:
@@ -639,6 +916,10 @@ ethics, licensing, and physical-device safety.
   labeled as the secondary contribution.
 - `docs/paper/` contains the defined scientific narrative and reproduction
   structure without duplicating full operator manuals.
+- `docs/standards/paper_documentation_standard.md` defines the academic voice,
+  claim classes, quantitative reporting, terminology, citations,
+  figures/tables, commands, links, translations, prohibited patterns, author
+  checklist, and five review gates specified in this Design.
 - Every supported paper claim maps to source, verification command, evidence,
   environment, and commit.
 - Every principal result maps to an RQ and reports its evaluation mode.
