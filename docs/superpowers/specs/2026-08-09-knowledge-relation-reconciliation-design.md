@@ -62,6 +62,21 @@ append-only audit ledger, durable outbox, and graph synchronization path.
 11. Original proposals are immutable. Revisions create versioned decisions and
     preserve a complete before/after audit trail.
 12. Relation reconciliation failure does not block the experiment loop.
+13. Knowledge Workspace reports detected graph gaps and recommends a manual
+    reconciliation run; opening the workspace does not automatically occupy an
+    LLM.
+14. During an active closed loop, reconciliation may run automatically only
+    while the selected LLM route is already loaded and its central lease is
+    idle.
+15. Background reconciliation has lower priority than Guardian, active
+    experiment-stage calls, and operator chat, and never loads a model solely
+    for graph maintenance.
+16. Graph Explorer has explicit `View Mode` and `Edit Mode`; View Mode remains
+    the default.
+17. Edit Mode is limited to existing nodes, existing relationships, and
+    operator-editable metadata. It cannot create new graph nodes.
+18. Edit Mode changes remain in a draft layer until the operator validates and
+    applies the complete change set.
 
 ## 3. Current Baseline
 
@@ -182,6 +197,33 @@ Recommended initial limits:
 
 A manual `Scan gaps` action may enqueue a bounded audit scan, but it uses the
 same worker and cannot create a parallel full-graph job.
+
+### 6.1 LLM Lease and Priority
+
+All reconciliation model calls acquire a shared LLM lease instead of inferring
+availability from UI state. The priority order is:
+
+1. E-STOP and Guardian safety reasoning;
+2. active closed-loop stage reasoning and tool planning;
+3. operator chat;
+4. Knowledge relation reconciliation.
+
+The background worker starts one bounded proposal call only when no higher
+priority request is queued or active. A higher-priority request prevents the
+next reconciliation item from starting; the worker does not corrupt or discard
+the current proposal. Reconciliation does not load an unloaded model and does
+not switch the selected backend or model.
+
+### 6.2 Workspace and Closed-loop Triggers
+
+Knowledge Workspace performs deterministic gap detection and displays a
+recommendation with the unresolved count and estimated bounded work. The
+operator starts reconciliation with `Run Reconciliation`.
+
+During a closed loop, successful Knowledge ingest enqueues changed nodes. The
+background worker processes them opportunistically while the selected LLM
+lease is idle. Workspace and closed-loop triggers feed one durable queue and
+cannot produce duplicate jobs.
 
 ## 7. Candidate Generation
 
@@ -331,6 +373,36 @@ The lower section presents immutable proposal and decision versions, including:
 - promotion event ID;
 - ledger receipt and Neo4j sync status.
 
+### 10.6 Graph Explorer Edit Mode
+
+Graph Explorer provides a deliberate `View Mode / Edit Mode` switch. Switching
+to Edit Mode creates a local draft change set and changes the canvas and toolbar
+appearance so an operator cannot confuse pending edits with accepted graph
+state.
+
+Allowed operations are limited to:
+
+- move existing nodes for layout purposes;
+- connect two existing nodes with an ontology-compatible relationship;
+- revise the target or relationship type of an existing edge;
+- mark an existing edge `deprecated` or `revoked`;
+- edit allowlisted metadata such as label, alias, note, and tags.
+
+Edit Mode does not create nodes and cannot modify node IDs, entity classes,
+original provenance, ontology versions, or audit receipts. Physical deletion
+is prohibited.
+
+The toolbar provides `Undo`, `Redo`, `Validate`, `Apply Changes`, and `Discard`.
+Draft relationships render as cyan dashed edges, revisions as amber edges,
+deprecations as red struck edges, and invalid changes with a red boundary.
+
+`Apply Changes` is the operator approval action for that draft. It creates an
+immutable `knowledge_graph_edit_decision.v1` record and emits validated
+`knowledge_event.v1` relationship intents through the normal ledger, outbox,
+and synchronization path. These operator-authored changes do not require a
+second Relation Review approval. Validation failures leave the draft intact
+and produce no graph mutation.
+
 ## 11. Operator Processing Rules
 
 - Approval requires a currently valid proposal and successful validation.
@@ -388,6 +460,12 @@ The workspace requires bounded APIs for:
 - bounded manual gap scan;
 - decision history;
 - accepted-event and synchronization receipts.
+
+Graph Edit Mode additionally requires bounded APIs for draft validation and
+atomic application of an optimistic-concurrency-protected change set. Layout
+coordinates may be saved as UI preferences without producing semantic graph
+events; semantic and metadata changes always produce decision and ledger
+records.
 
 All mutation endpoints require optimistic concurrency using proposal version or
 graph-context hash. Arbitrary Cypher, arbitrary node creation, and unvalidated
@@ -453,6 +531,12 @@ Relation review does not block the physical experiment loop.
 - decisions update counts and remove resolved items from the active queue;
 - refresh and server restart preserve pending and resolved state;
 - 1920 x 1080 browser audit without clipped controls or overlapping text.
+- View Mode is the default and cannot mutate graph state;
+- Edit Mode supports only existing-node relation and allowlisted metadata
+  drafts;
+- Undo, redo, validation, apply, and discard preserve the accepted graph until
+  apply succeeds;
+- stale graph revisions prevent draft application without losing the draft.
 
 ### End-to-end acceptance
 
@@ -466,6 +550,10 @@ Relation review does not block the physical experiment loop.
 8. Restart the server and confirm queue and decision history persist.
 9. Disconnect Neo4j, approve another proposal, reconnect, and confirm replay.
 10. Confirm the experiment workflow was never blocked by reconciliation.
+11. Enter Edit Mode, revise an existing relation, validate, and apply it.
+12. Confirm the original edge remains in history as deprecated and the revised
+    edge is synchronized once.
+13. Confirm Edit Mode cannot create a new node or alter identity/provenance.
 
 ## 17. Non-goals
 
