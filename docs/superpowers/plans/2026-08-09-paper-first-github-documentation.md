@@ -1,6 +1,6 @@
 # Paper-First GitHub Documentation Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Publish a paper-shaped, evidence-aware GitHub documentation surface that presents Autonomous Researcher Framework primarily as a safety-gated closed-loop system and secondarily as an extensible platform.
 
@@ -39,7 +39,7 @@
 - Required claim statuses: `supported`, `partially_supported`, `not_evaluated`, `contradicted`.
 - Required evidence environments: `inspection`, `test`, `replay`, `simulation`, `browser`, `live`.
 
-- [ ] **Step 1: Write failing tests for structural, narrative, evidence, checksum, and privacy rules**
+- [x] **Step 1: Write failing tests for structural, narrative, evidence, checksum, and privacy rules**
 
 ```python
 def test_supported_claim_requires_existing_evidence(tmp_path: Path) -> None:
@@ -82,13 +82,13 @@ def test_public_paper_rejects_personal_absolute_paths(tmp_path: Path) -> None:
     assert any("personal absolute path" in error for error in errors)
 ```
 
-- [ ] **Step 2: Run the tests and verify the missing module fails**
+- [x] **Step 2: Run the tests and verify the missing module fails**
 
 Run: `.venv/bin/python -m pytest -q tests/unit/test_paper_publication_validation.py`
 
 Expected: FAIL because `scripts/validate_paper_publication.py` does not exist.
 
-- [ ] **Step 3: Implement the validator and CLI**
+- [x] **Step 3: Implement the validator and CLI**
 
 ```python
 CLAIM_STATUSES = {"supported", "partially_supported", "not_evaluated", "contradicted"}
@@ -132,13 +132,13 @@ def validate_publication(root: Path) -> list[str]:
 
 The implementation validates unique IDs, status values, evidence references, required evidence fields, repository-contained input/output paths, output hashes, required files, README heading order, missing Graphviz/SVG pairs, and personal POSIX or Windows user-profile paths in `README.md`, `README.ko.md`, and `docs/paper/**/*.md`.
 
-- [ ] **Step 4: Run the focused tests and verify they pass**
+- [x] **Step 4: Run the focused tests and verify they pass**
 
 Run: `.venv/bin/python -m pytest -q tests/unit/test_paper_publication_validation.py`
 
 Expected: all tests PASS.
 
-- [ ] **Step 5: Commit the validator**
+- [x] **Step 5: Commit the validator**
 
 ```bash
 git add scripts/validate_paper_publication.py tests/unit/test_paper_publication_validation.py
@@ -158,11 +158,11 @@ git commit -m "test: enforce paper publication contracts"
 - Produces: normative rules for chapter front matter, claim IDs, evidence IDs, quantitative statements, terminology, figures, tables, links, commands, language synchronization, review gates, and publication safety.
 - Produces: a reusable paper chapter front-matter template with `paper_section`, `research_questions`, `claim_ids`, `last_verified`, and `verified_against`.
 
-- [ ] **Step 1: Write the normative paper standard**
+- [x] **Step 1: Write the normative paper standard**
 
 The standard defines these exact claim prefixes: `C-SYS`, `C-SAFE`, `C-TRACE`, `C-PLAT`, `C-EVAL`, and `C-LIMIT`. It defines evidence prefixes `E-INSPECT`, `E-TEST`, `E-REPLAY`, `E-SIM`, `E-BROWSER`, and `E-LIVE`, requires SI units, requires denominator/sample size for rates, prohibits causal wording without causal evidence, and requires every figure caption to state the message, scope, and evidence state.
 
-- [ ] **Step 2: Add the paper chapter template and governance cross-reference**
+- [x] **Step 2: Add the paper chapter template and governance cross-reference**
 
 ```yaml
 ---
@@ -193,13 +193,13 @@ supersedes: []
 
 If the implementation baseline moves before this task starts, replace `0b7627b` with the newly measured short commit in every new paper document.
 
-- [ ] **Step 3: Register the standard and run documentation governance validation**
+- [x] **Step 3: Register the standard and run documentation governance validation**
 
 Run: `.venv/bin/python scripts/validate_documentation.py`
 
 Expected: `Documentation validation passed`.
 
-- [ ] **Step 4: Commit the standard**
+- [x] **Step 4: Commit the standard**
 
 ```bash
 git add docs/standards/paper_documentation_standard.md docs/standards/documentation_standard.md docs/templates/document_types.md docs/document_manifest.yaml
@@ -234,17 +234,17 @@ git commit -m "docs: define paper documentation standard"
 - Produces: the canonical RQ1–RQ4 narrative, six editable figures, and contribution/stage/safety/extension tables.
 - Narrative order: problem → thesis → research questions → system contributions → platform contribution → evidence limits.
 
-- [ ] **Step 1: Measure the latest code-backed architecture snapshot**
+- [x] **Step 1: Measure the latest code-backed architecture snapshot**
 
 Run the existing snapshot commands documented in `docs/runtime/current_code_snapshot.md`, record the short Git commit, and reconcile the observed FastAPI route count, total app route count, graph nodes, graph edges, and `stage_dispatch` edges with `docs/document_manifest.yaml`.
 
 Expected baseline at planning time: FastAPI routes `346`, total routes `353`, graph nodes `19`, graph edges `68`, stage dispatch edges `12`. If execution observes different values, the observed values are authoritative and all new prose uses them consistently.
 
-- [ ] **Step 2: Write the paper index and system-first core chapters**
+- [x] **Step 2: Write the paper index and system-first core chapters**
 
 The paper index contains the working title, one-paragraph abstract, RQ1–RQ4, chapter map, claim-status legend, figure index, table index, and explicit statement that physical end-to-end scientific performance is not yet evaluated. The system chapters distinguish code inspection, automated tests, simulation/replay, browser validation, and live-hardware evidence.
 
-- [ ] **Step 3: Write focused Graphviz sources**
+- [x] **Step 3: Write focused Graphviz sources**
 
 ```dot
 digraph closed_loop {
@@ -262,19 +262,19 @@ digraph closed_loop {
 
 Each figure uses the same visual grammar: blue rounded boxes for system components, amber diamonds for safety/operator gates, green notes for durable evidence, solid arrows for control/data flow, and dashed arrows for optional or secondary platform paths.
 
-- [ ] **Step 4: Render and syntax-check all figures**
+- [x] **Step 4: Render and syntax-check all figures**
 
 Run: `for source in docs/paper/assets/figures/*.dot; do /usr/bin/dot -Tsvg "$source" -o "${source%.dot}.svg"; done`
 
 Expected: six non-empty SVG files and no Graphviz parser errors.
 
-- [ ] **Step 5: Register the chapters and table-source policy, then validate**
+- [x] **Step 5: Register the chapters and table-source policy, then validate**
 
 Run: `.venv/bin/python scripts/validate_documentation.py`
 
 Expected: `Documentation validation passed`.
 
-- [ ] **Step 6: Commit the paper core**
+- [x] **Step 6: Commit the paper core**
 
 ```bash
 git add docs/paper docs/document_manifest.yaml
@@ -301,11 +301,11 @@ git commit -m "docs: add system-first paper core"
 - Produces: evaluation matrix, principal-results table, reproduction tiers 0–4, risk/limitation register, interface appendix, deployment appendix, claim-evidence table, and machine-readable evidence records.
 - Artifact manifest schema version: `1`; release status: `development`.
 
-- [ ] **Step 1: Write evidence records from real inspection and test output**
+- [x] **Step 1: Write evidence records from real inspection and test output**
 
 `architecture_inspection.md` records the exact command, commit, environment, timestamp, measured counts, and interpretation boundary. `documentation_validation.md` records the exact pytest and validator commands, passed test counts, exit status, and explicitly states that documentation validation is not scientific or live-hardware validation.
 
-- [ ] **Step 2: Write the evaluation and reproducibility chapters**
+- [x] **Step 2: Write the evaluation and reproducibility chapters**
 
 The evaluation matrix has rows for architecture completeness, stage-contract integrity, checkpoint/resume behavior, Guardian/operator gate behavior, evidence traceability, Bayesian optimization feedback, knowledge reconciliation, backend substitution, browser workflows, and live equipment. Rows without executed evidence show `not_evaluated`; no empty result cells are allowed.
 
@@ -317,11 +317,11 @@ Reproduction tiers are exact:
 4. Tier 3 — browser-level platform validation.
 5. Tier 4 — supervised live-hardware execution.
 
-- [ ] **Step 3: Write safety, traceability, and appendices**
+- [x] **Step 3: Write safety, traceability, and appendices**
 
 The safety chapter distinguishes implemented controls from validation status and lists human oversight, least privilege, secrets handling, data governance, physical hazards, model uncertainty, and dual-use concerns. The interface appendix maps agent/stage inputs, outputs, schemas, and failure behavior. The deployment appendix separates local, remote Windows worker, and optional service backends without promising unsupported deployment modes.
 
-- [ ] **Step 4: Create the artifact manifest with evidence hashes**
+- [x] **Step 4: Create the artifact manifest with evidence hashes**
 
 ```yaml
 version: 1
@@ -360,7 +360,7 @@ evidence:
 
 The real manifest must contain the literal digest printed by `sha256sum docs/paper/evidence/architecture_inspection.md`; the descriptive value in this plan is not copied into the manifest. The second evidence entry uses `E-TEST-DOC-001` and the literal digest from `sha256sum docs/paper/evidence/documentation_validation.md`.
 
-- [ ] **Step 5: Run governance and publication validation**
+- [x] **Step 5: Run governance and publication validation**
 
 Run: `.venv/bin/python scripts/validate_documentation.py`
 
@@ -368,7 +368,7 @@ Run: `.venv/bin/python scripts/validate_paper_publication.py`
 
 Expected at this stage: documentation governance passes; publication validation reports only the root public files intentionally scheduled for Task 5.
 
-- [ ] **Step 6: Commit the evidence-aware paper chapters**
+- [x] **Step 6: Commit the evidence-aware paper chapters**
 
 ```bash
 git add docs/paper docs/document_manifest.yaml
@@ -393,15 +393,15 @@ git commit -m "docs: add paper evaluation and traceability"
 - Produces: a reviewer-first English README, synchronized Korean companion, citation metadata without invented personal authorship, current no-license notice, contribution workflow, private vulnerability-reporting guidance, and an auditable changelog.
 - Root README exact order: title/status → one-sentence thesis → graphical abstract → paper summary → problem → system contribution → architecture → closed loop → safety → evaluation status → platform contribution → reproducibility → paper documentation → citation → license/security.
 
-- [ ] **Step 1: Rewrite `README.md` as the paper landing page**
+- [x] **Step 1: Rewrite `README.md` as the paper landing page**
 
 Use code-backed current counts only in an explicitly dated architecture snapshot table. Show principal results as evidence status rather than performance marketing: inspected architecture and documentation checks may be supported, while scientific efficacy, live-hardware robustness, and comparative performance remain `not_evaluated`.
 
-- [ ] **Step 2: Synchronize `README.ko.md` and update the documentation index**
+- [x] **Step 2: Synchronize `README.ko.md` and update the documentation index**
 
 The Korean README mirrors thesis, RQs, contribution priority, figures, evidence status, setup path, paper links, citation status, and license/security status. `docs/README.md` places the paper reader path before developer/operator paths while retaining links to governed runtime references.
 
-- [ ] **Step 3: Add citation, contribution, security, changelog, and license-status files**
+- [x] **Step 3: Add citation, contribution, security, changelog, and license-status files**
 
 ```yaml
 cff-version: 1.2.0
@@ -418,7 +418,7 @@ license: LicenseRef-Proprietary
 
 Confirm the GitHub repository URL with `git remote get-url origin`. `LICENSE` states that no open-source license has been granted and that permissions require maintainer approval. `SECURITY.md` instructs reporters to use GitHub private vulnerability reporting when available and not to open public issues containing exploit details or secrets.
 
-- [ ] **Step 4: Register governed Markdown files and validate the public surface**
+- [x] **Step 4: Register governed Markdown files and validate the public surface**
 
 Run: `.venv/bin/python scripts/validate_documentation.py`
 
@@ -426,7 +426,7 @@ Run: `.venv/bin/python scripts/validate_paper_publication.py`
 
 Expected: both commands exit zero.
 
-- [ ] **Step 5: Commit the public repository surface**
+- [x] **Step 5: Commit the public repository surface**
 
 ```bash
 git add README.md README.ko.md docs/README.md CITATION.cff LICENSE CONTRIBUTING.md SECURITY.md CHANGELOG.md docs/document_manifest.yaml
@@ -443,19 +443,19 @@ git commit -m "docs: publish paper-first GitHub surface"
 - Consumes: complete public documentation surface.
 - Produces: verified repository state with deterministic diagrams, valid governed documents, internally consistent evidence hashes, and passing focused tests.
 
-- [ ] **Step 1: Verify the worktree scope**
+- [x] **Step 1: Verify the worktree scope**
 
 Run: `git status --short`
 
 Expected: `.env.example` remains the only unrelated modification; all implementation files are committed before the final verification-fix commit.
 
-- [ ] **Step 2: Re-render figures and prove deterministic output**
+- [x] **Step 2: Re-render figures and prove deterministic output**
 
 Run: `for source in docs/paper/assets/figures/*.dot; do /usr/bin/dot -Tsvg "$source" -o "${source%.dot}.verify.svg"; cmp "${source%.dot}.svg" "${source%.dot}.verify.svg"; done`
 
 Expected: all `cmp` calls exit zero. Remove only the explicit `*.verify.svg` verification files after successful comparison.
 
-- [ ] **Step 3: Run focused and governance tests**
+- [x] **Step 3: Run focused and governance tests**
 
 Run: `.venv/bin/python -m pytest -q tests/unit/test_documentation_validation.py tests/unit/test_paper_publication_validation.py`
 
@@ -465,19 +465,19 @@ Run: `.venv/bin/python scripts/validate_paper_publication.py`
 
 Expected: all tests pass and both validators exit zero.
 
-- [ ] **Step 4: Run public-content safety scans**
+- [x] **Step 4: Run public-content safety scans**
 
 Run: `rg -n '/home/[^/[:space:]]+|C:\\Users\\|BEGIN (RSA |OPENSSH |EC )?PRIVATE KEY|api[_-]?key\s*[:=]|token\s*[:=]' README.md README.ko.md CITATION.cff CONTRIBUTING.md SECURITY.md CHANGELOG.md LICENSE docs/paper docs/standards/paper_documentation_standard.md`
 
 Expected: no personal path, private key, or credential assignment matches. Normative prose that names a prohibited token pattern without containing a credential is reviewed manually and may be retained only if it cannot be mistaken for a secret.
 
-- [ ] **Step 5: Validate all artifact hashes and inspect the final diff**
+- [x] **Step 5: Validate all artifact hashes and inspect the final diff**
 
 Run: `.venv/bin/python scripts/validate_paper_publication.py && git diff HEAD~5 --check`
 
 Expected: publication validation passes and `git diff --check` reports no whitespace errors.
 
-- [ ] **Step 6: Commit verification corrections if any tracked file changed**
+- [x] **Step 6: Commit verification corrections if any tracked file changed**
 
 ```bash
 git add scripts/validate_paper_publication.py tests/unit/test_paper_publication_validation.py docs README.md README.ko.md CITATION.cff LICENSE CONTRIBUTING.md SECURITY.md CHANGELOG.md

@@ -14,7 +14,7 @@ summary: Records public, research-artifact-relevant changes to ATR.
 source_of_truth:
   - .git
 last_verified: 2026-08-09
-verified_against: cec9522
+verified_against: beca57f
 related_docs:
   - README.md
   - docs/paper/README.md

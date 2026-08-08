@@ -68,12 +68,13 @@ evidence:
       graph nodes, 68 graph edges, and 12 stage_dispatch mappings.
   - id: E-TEST-DOC-001
     environment: test
-    verified_commit: d0b7063
+    verified_commit: beca57f
     command: >-
       .venv/bin/python -m pytest -q
       tests/unit/test_documentation_validation.py
       tests/unit/test_paper_publication_validation.py && .venv/bin/python
-      scripts/validate_documentation.py
+      scripts/validate_documentation.py && .venv/bin/python
+      scripts/validate_paper_publication.py
     inputs:
       - scripts/validate_documentation.py
       - scripts/validate_paper_publication.py
@@ -81,7 +82,8 @@ evidence:
       - tests/unit/test_paper_publication_validation.py
     outputs:
       - path: docs/paper/evidence/documentation_validation.md
-        sha256: 07638cccdea3855f5921b1ab480515c8ff200d8410f5c78922a2ba24f429ae4a
+        sha256: e5cb003fd9e9f127e72535edd2e0f57407024a35f8e38fbba1d08504b29a8a40
     result: >-
-      pass: 23 focused tests passed with zero failures, and the governed
-      documentation validator exited successfully at the recorded stage.
+      pass: 23 focused tests passed with zero failures, and both the governed
+      documentation and complete paper-publication validators exited
+      successfully at package commit beca57f.
