@@ -7,6 +7,21 @@ documents:
   - docs/standards/documentation_standard.md
   - docs/standards/paper_documentation_standard.md
   - docs/templates/document_types.md
+  - docs/paper/README.md
+  - docs/paper/01_problem_and_contributions.md
+  - docs/paper/02_system_architecture.md
+  - docs/paper/03_closed_loop_method.md
+  - docs/paper/04_platform_architecture.md
+  - docs/paper/05_experimental_setup.md
+  - docs/paper/06_evaluation_and_results.md
+  - docs/paper/07_reproducibility.md
+  - docs/paper/08_safety_ethics_and_limitations.md
+  - docs/paper/09_claim_evidence_traceability.md
+  - docs/paper/appendix_a_interfaces.md
+  - docs/paper/appendix_b_hardware_and_deployment.md
+  - docs/paper/evidence/architecture_inspection.md
+  - docs/paper/evidence/documentation_validation.md
+  - docs/paper/assets/tables/README.md
   - docs/runtime/current_code_snapshot.md
   - docs/runtime/langgraph_runtime.md
   - docs/runtime/closed_loop_and_pages_reference.md

@@ -1,0 +1,21 @@
+digraph safety_gated_sequence {
+  graph [rankdir=LR, bgcolor="transparent", pad="0.25", nodesep="0.32", ranksep="0.45", fontname="DejaVu Sans", label="Safety-gated consequential action sequence", labelloc="t", fontsize=18];
+  node [shape=box, style="rounded,filled", fillcolor="#EEF4FF", color="#315C9B", fontname="DejaVu Sans", fontsize=9, margin="0.1,0.07"];
+  edge [color="#52667A", fontname="DejaVu Sans", fontsize=8, arrowsize=0.7];
+
+  request [label="Typed action\nrequest"];
+  schema [label="Schema +\ncapability", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];
+  guardian [label="Guardian", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];
+  approval [label="Operator\napproval", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];
+  dryrun [label="Dry run +\npreconditions", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];
+  execute [label="Bounded live\ninvocation"];
+  proof [label="Proof + event", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
+  review [label="Review / stop /\nerror", fillcolor="#FFE9E7", color="#A33A32"];
+
+  request -> schema -> guardian -> approval -> dryrun -> execute -> proof;
+  schema -> review [label="invalid"];
+  guardian -> review [label="deny/uncertain"];
+  approval -> review [label="reject/expire"];
+  dryrun -> review [label="fail"];
+  execute -> review [label="timeout/unknown effect"];
+}

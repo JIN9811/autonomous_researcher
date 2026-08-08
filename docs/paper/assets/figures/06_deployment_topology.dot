@@ -1,0 +1,28 @@
+digraph deployment_topology {
+  graph [rankdir=LR, bgcolor="transparent", pad="0.25", nodesep="0.35", ranksep="0.55", fontname="DejaVu Sans", label="ATR deployment topology and optional boundaries", labelloc="t", fontsize=18];
+  node [shape=box, style="rounded,filled", fillcolor="#EEF4FF", color="#315C9B", fontname="DejaVu Sans", fontsize=9, margin="0.11,0.07"];
+  edge [color="#52667A", fontname="DejaVu Sans", fontsize=8, arrowsize=0.7];
+
+  subgraph cluster_primary {
+    label="Primary application host";
+    color="#8AA8CE";
+    style="rounded";
+    web [label="FastAPI +\noperator workspaces"];
+    orchestrator [label="Orchestrator +\nagents"];
+    stores [label="Checkpoints +\nartifacts + ledger", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
+    web -> orchestrator -> stores;
+  }
+
+  worker [label="Remote Windows\nworker", style="rounded,dashed,filled", fillcolor="#F5F3FF", color="#7157A8"];
+  devices [label="Laboratory devices\nrobots / printers", style="rounded,dashed,filled", fillcolor="#F5F3FF", color="#7157A8"];
+  models [label="Local or remote\nmodel service", style="rounded,dashed,filled", fillcolor="#F5F3FF", color="#7157A8"];
+  graphdb [label="Optional graph\nbackend", shape=note, style="dashed,filled", fillcolor="#E9F7EF", color="#2E7D59"];
+  operator [label="Researcher /\noperator"];
+
+  operator -> web [label="review + control"];
+  orchestrator -> worker [style=dashed, label="allowlisted bridge"];
+  worker -> devices [style=dashed];
+  orchestrator -> devices [style=dashed, label="device bridge"];
+  orchestrator -> models [style=dashed, label="routed inference"];
+  stores -> graphdb [style=dashed, color="#2E7D59", label="durable sync"];
+}

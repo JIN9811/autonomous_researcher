@@ -1,0 +1,21 @@
+digraph graphical_abstract {
+  graph [rankdir=LR, bgcolor="transparent", pad="0.25", nodesep="0.35", ranksep="0.55", fontname="DejaVu Sans", label="ATR safety-gated closed research loop", labelloc="t", fontsize=18];
+  node [shape=box, style="rounded,filled", fillcolor="#EEF4FF", color="#315C9B", fontname="DejaVu Sans", fontsize=10, margin="0.12,0.08"];
+  edge [color="#52667A", fontname="DejaVu Sans", fontsize=9, arrowsize=0.75];
+
+  objective [label="Research\nobjective"];
+  design [label="Design"];
+  physical [label="Prepare +\nexecute"];
+  observe [label="Observe"];
+  analyze [label="Analyze"];
+  knowledge [label="Durable\nknowledge", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
+  bo [label="Next candidate\n(BO)"];
+  gate [label="Guardian +\noperator gate", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];
+  evidence [label="Evidence\npackage", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
+
+  objective -> design -> gate -> physical -> observe -> analyze -> knowledge -> bo -> gate;
+  gate -> design [label="continue next cycle", constraint=false];
+  observe -> evidence [color="#2E7D59", label="artifacts"];
+  analyze -> evidence [color="#2E7D59"];
+  knowledge -> evidence [color="#2E7D59"];
+}

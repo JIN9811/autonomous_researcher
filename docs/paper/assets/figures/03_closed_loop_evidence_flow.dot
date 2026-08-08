@@ -1,0 +1,23 @@
+digraph closed_loop_evidence_flow {
+  graph [rankdir=LR, bgcolor="transparent", pad="0.25", nodesep="0.32", ranksep="0.5", fontname="DejaVu Sans", label="Closed-loop control, artifact, and evidence flow", labelloc="t", fontsize=18];
+  node [shape=box, style="rounded,filled", fillcolor="#EEF4FF", color="#315C9B", fontname="DejaVu Sans", fontsize=9, margin="0.1,0.07"];
+  edge [color="#315C9B", fontname="DejaVu Sans", fontsize=8, arrowsize=0.7];
+
+  design [label="Design"];
+  prepare [label="Specimen +\nmanipulation"];
+  equipment [label="Equipment"];
+  analysis [label="Analysis"];
+  knowledge [label="Knowledge"];
+  bo [label="Bayesian\noptimization"];
+  gate [label="Guardian", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];
+  artifacts [label="Versioned artifacts", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
+  ledger [label="Evidence ledger +\ncheckpoint state", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
+
+  design -> prepare -> equipment -> analysis -> knowledge -> bo -> gate -> design;
+  design -> artifacts [color="#2E7D59"];
+  equipment -> artifacts [color="#2E7D59"];
+  analysis -> artifacts [color="#2E7D59"];
+  artifacts -> ledger [color="#2E7D59"];
+  knowledge -> ledger [color="#2E7D59"];
+  ledger -> design [color="#2E7D59", label="prior accepted evidence", constraint=false];
+}

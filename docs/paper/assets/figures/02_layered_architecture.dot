@@ -1,0 +1,21 @@
+digraph layered_architecture {
+  graph [rankdir=TB, bgcolor="transparent", pad="0.25", nodesep="0.28", ranksep="0.35", fontname="DejaVu Sans", label="ATR layered system architecture", labelloc="t", fontsize=18];
+  node [shape=box, style="rounded,filled", fillcolor="#EEF4FF", color="#315C9B", fontname="DejaVu Sans", fontsize=10, margin="0.12,0.08"];
+  edge [color="#52667A", arrowsize=0.7];
+
+  operator [label="Research intent + operator control"];
+  orchestration [label="Orchestrator / executable graph / checkpoints"];
+  agents [label="Typed agent stages + sidecars"];
+  guardian [label="Guardian and approval gates", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];
+  adapters [label="Device bridges + model backends"];
+  evidence [label="Ledger / artifacts / knowledge graph / reports", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
+  platform [label="Modules / graph management / workspaces", style="rounded,dashed,filled", fillcolor="#F5F3FF", color="#7157A8"];
+
+  operator -> orchestration -> agents -> guardian -> adapters;
+  agents -> evidence [color="#2E7D59"];
+  adapters -> evidence [color="#2E7D59"];
+  evidence -> orchestration [label="validated context", color="#2E7D59"];
+  platform -> orchestration [style=dashed, color="#7157A8"];
+  platform -> agents [style=dashed, color="#7157A8"];
+  platform -> adapters [style=dashed, color="#7157A8"];
+}

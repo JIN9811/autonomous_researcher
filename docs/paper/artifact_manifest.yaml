@@ -1,0 +1,87 @@
+version: 1
+release_status: development
+verified_commit: 0b7627b
+claims:
+  - id: C-SYS-ARCH-01
+    proposition: >-
+      ATR declares a closed-loop graph spanning research stages with explicit
+      dispatch, feedback, and terminal structure.
+    research_questions:
+      - RQ1
+    status: supported
+    evidence_ids:
+      - E-INSPECT-ARCH-001
+  - id: C-TRACE-DOC-01
+    proposition: >-
+      The paper package enforces machine-readable links from supported claims
+      to bounded evidence outputs.
+    research_questions:
+      - RQ2
+    status: partially_supported
+    evidence_ids:
+      - E-TEST-DOC-001
+  - id: C-SAFE-LIVE-01
+    proposition: >-
+      Guardian and operator gates prevent or safely contain consequential live
+      actions.
+    research_questions:
+      - RQ3
+    status: not_evaluated
+    evidence_ids: []
+  - id: C-PLAT-EXT-01
+    proposition: >-
+      ATR exposes contract-oriented module, graph, backend, bridge, and
+      workspace extension surfaces.
+    research_questions:
+      - RQ4
+    status: supported
+    evidence_ids:
+      - E-INSPECT-ARCH-001
+  - id: C-LIMIT-EVAL-01
+    proposition: >-
+      The current paper package does not establish end-to-end physical or
+      scientific efficacy.
+    research_questions:
+      - RQ1
+      - RQ2
+      - RQ3
+    status: partially_supported
+    evidence_ids:
+      - E-TEST-DOC-001
+evidence:
+  - id: E-INSPECT-ARCH-001
+    environment: inspection
+    verified_commit: 0b7627b
+    command: >-
+      Import app.main.app and count FastAPI APIRoute and total app.routes
+      entries; parse graphs/configs/atr_closed_loop.yaml and count graph nodes,
+      edges, and stage_dispatch mappings using the exact commands recorded in
+      the output document.
+    inputs:
+      - app/main.py
+      - graphs/configs/atr_closed_loop.yaml
+    outputs:
+      - path: docs/paper/evidence/architecture_inspection.md
+        sha256: adf2e12be22f2184ad6893aeeaba26e67b95ba0edbeb949207e076f7d2997e14
+    result: >-
+      pass: 346 FastAPI APIRoute entries, 353 total application routes, 19
+      graph nodes, 68 graph edges, and 12 stage_dispatch mappings.
+  - id: E-TEST-DOC-001
+    environment: test
+    verified_commit: d0b7063
+    command: >-
+      .venv/bin/python -m pytest -q
+      tests/unit/test_documentation_validation.py
+      tests/unit/test_paper_publication_validation.py && .venv/bin/python
+      scripts/validate_documentation.py
+    inputs:
+      - scripts/validate_documentation.py
+      - scripts/validate_paper_publication.py
+      - tests/unit/test_documentation_validation.py
+      - tests/unit/test_paper_publication_validation.py
+    outputs:
+      - path: docs/paper/evidence/documentation_validation.md
+        sha256: 07638cccdea3855f5921b1ab480515c8ff200d8410f5c78922a2ba24f429ae4a
+    result: >-
+      pass: 23 focused tests passed with zero failures, and the governed
+      documentation validator exited successfully at the recorded stage.
