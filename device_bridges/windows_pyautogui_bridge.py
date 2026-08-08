@@ -57,12 +57,35 @@ DEFAULT_ALLOWED_ACTIONS = {
     "focus_window",
     "wait",
     "move_to",
+    "move_rel",
+    "query_pointer",
+    "query_screen",
     "click",
     "double_click",
+    "triple_click",
+    "mouse_down",
+    "mouse_up",
+    "drag_to",
+    "drag_rel",
     "press",
+    "key_down",
+    "key_up",
     "hotkey",
     "write",
     "scroll",
+    "hscroll",
+    "vscroll",
+    "pixel",
+    "pixel_matches_color",
+    "locate_all_images",
+    "window_activate",
+    "window_minimize",
+    "window_maximize",
+    "window_restore",
+    "window_move",
+    "window_resize",
+    "alert",
+    "confirm",
     "run_registered_program",
     "demo_mouse_wiggle",
     "log",
@@ -415,6 +438,10 @@ class WindowsPyAutoGUIBridge(BaseBridge):
             return self.list_programs(payload)
         if command == "run":
             return self.run(payload)
+        if command == "register_program":
+            return self.register_program(payload)
+        if command == "delete_program":
+            return self.delete_program(payload)
         if command == "screenshot":
             return self.screenshot(payload)
         if command == "list_locators":
@@ -489,6 +516,145 @@ class WindowsPyAutoGUIBridge(BaseBridge):
         if isinstance(response.get("programs"), dict):
             response["programs"] = self._program_metadata(response["programs"])
         return response
+
+    def register_program(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Register one exact existing-schema macro without actuating equipment."""
+        payload = dict(payload or {})
+        program = payload.get("program") if isinstance(payload.get("program"), dict) else payload
+        program = dict(program)
+        program_id = str(program.get("program_id") or "").strip()
+        sequence = program.get("sequence") if isinstance(program.get("sequence"), list) else []
+        if program.get("schema") != "atr.pyautogui_program.v1":
+            return self._failure(
+                tool="equipment.pyautogui.register_program",
+                status="invalid",
+                failure_code="PYAUTOGUI_PROGRAM_SCHEMA_INVALID",
+                message="schema must be atr.pyautogui_program.v1",
+            )
+        if not program_id or program_id in DEFAULT_REGISTERED_PROGRAMS:
+            return self._failure(
+                tool="equipment.pyautogui.register_program",
+                status="blocked",
+                failure_code="PYAUTOGUI_PROGRAM_ID_INVALID",
+                message="Compiled Skill program_id is missing or collides with a built-in program.",
+            )
+        if not 1 <= len(sequence) <= 100:
+            return self._failure(
+                tool="equipment.pyautogui.register_program",
+                status="invalid",
+                failure_code="PYAUTOGUI_PROGRAM_SEQUENCE_INVALID",
+                message="sequence must contain 1 to 100 actions.",
+            )
+        invalid_actions = [
+            str(item.get("action") or "")
+            for item in sequence
+            if not isinstance(item, dict) or str(item.get("action") or "") not in self.config.allowed_actions
+        ]
+        if invalid_actions:
+            return self._failure(
+                tool="equipment.pyautogui.register_program",
+                status="blocked",
+                failure_code="PYAUTOGUI_ACTION_NOT_ALLOWED",
+                message=f"Compiled Skill contains unsupported actions: {', '.join(invalid_actions[:5])}",
+            )
+        public_program = {**program, "built_in": False}
+        digest = hashlib.sha256(
+            json.dumps(program, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        if not self._should_use_live(payload, for_execution=False):
+            self.config.registered_programs[program_id] = dict(public_program)
+            return {
+                "ok": True,
+                "tool": "equipment.pyautogui.register_program",
+                "mode": "simulator",
+                "status": "registered",
+                "program": public_program,
+                "program_id": program_id,
+                "program_sha256": digest,
+                "failure_code": None,
+            }
+        precheck = self._live_precheck(require_execute=False, payload=payload)
+        if precheck:
+            precheck["tool"] = "equipment.pyautogui.register_program"
+            return precheck
+        result = self._live_post("equipment.pyautogui.register_program", "/programs/register", program)
+        if result.get("ok"):
+            result["program_sha256"] = digest
+        return result
+
+    def delete_program(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Delete one custom compiled program; built-ins stay immutable."""
+        payload = dict(payload or {})
+        program_id = str(payload.get("program_id") or "").strip()
+        if not program_id or program_id in DEFAULT_REGISTERED_PROGRAMS:
+            return self._failure(
+                tool="equipment.pyautogui.delete_program",
+                status="blocked",
+                failure_code="PYAUTOGUI_PROGRAM_BUILTIN_IMMUTABLE",
+                message="Only custom Skill programs can be deleted.",
+                step_trace=[{"step": "DELETE_PROGRAM", "status": "blocked", "detail": "immutable program"}],
+            )
+        if not self._should_use_live(payload, for_execution=False):
+            existed = self.config.registered_programs.pop(program_id, None) is not None
+            return {
+                "ok": existed,
+                "tool": "equipment.pyautogui.delete_program",
+                "mode": "simulator",
+                "status": "deleted" if existed else "not_found",
+                "program_id": program_id,
+                "failure_code": None if existed else "PYAUTOGUI_PROGRAM_NOT_FOUND",
+            }
+        precheck = self._live_precheck(require_execute=False, payload=payload)
+        if precheck:
+            precheck["tool"] = "equipment.pyautogui.delete_program"
+            return precheck
+        try:
+            with httpx.Client(timeout=self.config.request_timeout_sec) as client:
+                response = client.delete(self._url(f"/programs/{program_id}"), headers=self._headers())
+                response.raise_for_status()
+                result = response.json()
+                return dict(result) if isinstance(result, dict) else {"ok": False, "status": "invalid_response"}
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 404:
+                try:
+                    result = exc.response.json()
+                except ValueError:
+                    result = {}
+                if isinstance(result, dict):
+                    return {
+                        "ok": False,
+                        "tool": "equipment.pyautogui.delete_program",
+                        "mode": "live",
+                        "status": "not_found",
+                        "program_id": program_id,
+                        "failure_code": "PYAUTOGUI_PROGRAM_NOT_FOUND",
+                        **result,
+                    }
+            return self._failure(
+                tool="equipment.pyautogui.delete_program",
+                mode="live",
+                status="failed",
+                failure_code="PYAUTOGUI_BRIDGE_HTTP_ERROR",
+                message=f"Windows PyAutoGUI bridge delete failed: HTTP {exc.response.status_code}",
+                step_trace=[
+                    {
+                        "step": "DELETE_PROGRAM",
+                        "status": "failed",
+                        "detail": f"HTTP {exc.response.status_code}",
+                    }
+                ],
+            )
+        except Exception as exc:
+            return self._failure(
+                tool="equipment.pyautogui.delete_program",
+                mode="live",
+                status="unreachable",
+                failure_code="PYAUTOGUI_BRIDGE_UNREACHABLE",
+                message=f"Windows PyAutoGUI bridge delete failed: {exc.__class__.__name__}",
+                step_trace=[
+                    {"step": "DELETE_PROGRAM", "status": "blocked", "detail": exc.__class__.__name__}
+                ],
+            )
 
     @staticmethod
     def _request_log_execute_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
@@ -1036,6 +1202,8 @@ class WindowsPyAutoGUIBridge(BaseBridge):
             "bridge": "windows_pyautogui",
             "status": "completed",
             "sequence_id": sequence_id,
+            "program_id": program_id,
+            "program_type": str(self.config.registered_programs.get(program_id, {}).get("program_type") or "macro") if program_id else "sequence",
             "step_trace": trace,
             "failure_code": None,
         }

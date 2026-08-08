@@ -47,3 +47,44 @@ jobs:
             tests/unit/test_printer_tools.py \
             tests/unit/test_printer_profile.py \
             tests/unit/test_guardian_agent.py
+
+  windows-bridge:
+    runs-on: windows-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Windows bridge test dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pytest
+
+      - name: Parse PowerShell deployment scripts
+        shell: pwsh
+        run: |
+          Get-ChildItem Pyautogui_server_for_window/scripts/*.ps1 | ForEach-Object {
+            [scriptblock]::Create((Get-Content -LiteralPath $_.FullName -Raw)) | Out-Null
+          }
+
+      - name: Validate bridge source and packaging contracts
+        shell: pwsh
+        run: |
+          python -m py_compile Pyautogui_server_for_window/bridge/windows_pyautogui_bridge_server.py
+          pytest -q tests/unit/test_windows_pyautogui_bridge_server_helper.py
+          pytest -q `
+            tests/unit/test_install_packaging.py::test_windows_bridge_release_contains_reproducible_installer_and_runtime_dependencies `
+            tests/unit/test_install_packaging.py::test_windows_bridge_scripts_use_one_data_root_and_bundle_demo_assets `
+            tests/unit/test_install_packaging.py::test_basic_ci_has_windows_bridge_job
+
+      - name: Validate native acceptance command surface
+        shell: pwsh
+        run: |
+          Get-Help ./Pyautogui_server_for_window/scripts/native_acceptance.ps1 | Out-Null

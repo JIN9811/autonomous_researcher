@@ -190,6 +190,11 @@ let liveUtmRuntimeRefreshInFlight = null;
 let liveUtmRuntimeRefreshSeq = 0;
 let liveUtmRuntimeFrameInFlight = null;
 let liveUtmRuntimeActionInFlight = null;
+let liveEquipmentRuntimeSnapshot = null;
+let liveEquipmentRuntimeError = "";
+let liveEquipmentRuntimeActionInFlight = "";
+let liveEquipmentRuntimeRefreshInFlight = null;
+let liveEquipmentRuntimeRefreshedAt = 0;
 let livePrinterMonitorInFlight = null;
 let liveSpecimenVideoPlaying = false;
 let liveSpecimenVideoStartedAt = 0;
@@ -4704,6 +4709,28 @@ function latestEquipmentResult(report) {
   if (payload && typeof payload === "object" && payload.equipment_result) return payload.equipment_result;
   if (metadata.last_stage_payload && metadata.last_stage_payload.data && metadata.last_stage_payload.data.equipment_result) return metadata.last_stage_payload.data.equipment_result;
   return latestReportPayload(report, ["equipment_result", "data.equipment_result"]);
+}
+
+function latestEquipmentSkillExecution(report) {
+  const state = report && report.state ? report.state : {};
+  const metadata = state && typeof state.run_metadata === "object" && state.run_metadata ? state.run_metadata : {};
+  if (metadata.equipment_skill_execution && typeof metadata.equipment_skill_execution === "object") return metadata.equipment_skill_execution;
+  const payload = metadata.equipment_agent_payload;
+  if (payload && typeof payload === "object" && payload.equipment_skill_execution) return payload.equipment_skill_execution;
+  const lastData = metadata.last_stage_payload && metadata.last_stage_payload.data;
+  if (lastData && typeof lastData === "object" && lastData.equipment_skill_execution) return lastData.equipment_skill_execution;
+  return latestReportPayload(report, ["equipment_skill_execution", "data.equipment_skill_execution"]);
+}
+
+function latestEquipmentSkillException(report) {
+  const state = report && report.state ? report.state : {};
+  const metadata = state && typeof state.run_metadata === "object" && state.run_metadata ? state.run_metadata : {};
+  if (metadata.equipment_skill_exception && typeof metadata.equipment_skill_exception === "object") return metadata.equipment_skill_exception;
+  const payload = metadata.equipment_agent_payload;
+  if (payload && typeof payload === "object" && payload.equipment_skill_exception) return payload.equipment_skill_exception;
+  const lastData = metadata.last_stage_payload && metadata.last_stage_payload.data;
+  if (lastData && typeof lastData === "object" && lastData.equipment_skill_exception) return lastData.equipment_skill_exception;
+  return latestReportPayload(report, ["equipment_skill_exception", "data.equipment_skill_exception"]);
 }
 
 function latestUtmDataReadyPacket(report) {
@@ -14828,51 +14855,279 @@ function renderBoGateState(report) {
   `;
 }
 
-function renderEquipmentDashboardCards(report, status, agentLabel, profile) {
+async function refreshEquipmentRuntimeSnapshot(options = {}) {
+  if (!options.force && liveEquipmentRuntimeRefreshInFlight) return liveEquipmentRuntimeRefreshInFlight;
+  liveEquipmentRuntimeRefreshInFlight = (async () => {
+    try {
+      const payload = await fetchJsonOrThrow("/api/equipment/windows/config");
+      const lastTest = liveEquipmentRuntimeSnapshot && liveEquipmentRuntimeSnapshot.last_test;
+      liveEquipmentRuntimeSnapshot = lastTest ? { ...payload, last_test: lastTest } : payload;
+      liveEquipmentRuntimeError = "";
+      liveEquipmentRuntimeRefreshedAt = Date.now();
+      return liveEquipmentRuntimeSnapshot;
+    } catch (err) {
+      liveEquipmentRuntimeError = String(err);
+      liveEquipmentRuntimeRefreshedAt = Date.now();
+      return liveEquipmentRuntimeSnapshot;
+    } finally {
+      liveEquipmentRuntimeRefreshInFlight = null;
+      if (options.render && liveLastSession) renderLiveRuntime(liveLastSession);
+    }
+  })();
+  return liveEquipmentRuntimeRefreshInFlight;
+}
+
+function ensureEquipmentRuntimeSnapshot() {
+  if (liveEquipmentRuntimeRefreshedAt || liveEquipmentRuntimeRefreshInFlight) return;
+  refreshEquipmentRuntimeSnapshot({ render: true }).catch(() => {});
+}
+
+async function runEquipmentLiveAction(action, button = null) {
+  const normalized = String(action || "").trim().toLowerCase();
+  if (normalized === "open") {
+    window.open("/equipment/windows", "_blank", "noopener,noreferrer");
+    return null;
+  }
+  if (!["test", "refresh"].includes(normalized) || liveEquipmentRuntimeActionInFlight) return null;
+  liveEquipmentRuntimeActionInFlight = normalized;
+  if (button) button.disabled = true;
+  if (liveLastSession) renderLiveRuntime(liveLastSession);
+  setChatStatus(normalized === "test" ? "EQUIPMENT TEST" : "EQUIPMENT REFRESH", "running");
+  try {
+    let testPayload = null;
+    if (normalized === "test") {
+      const response = await fetch("/api/equipment/windows/test", { method: "POST" });
+      testPayload = await response.json().catch(() => ({ ok: false, message: `HTTP ${response.status}` }));
+      if (!response.ok) throw new Error(testPayload.detail || testPayload.message || `HTTP ${response.status}`);
+    }
+    await refreshEquipmentRuntimeSnapshot({ force: true, render: false });
+    if (testPayload) {
+      liveEquipmentRuntimeSnapshot = { ...(liveEquipmentRuntimeSnapshot || {}), last_test: testPayload };
+      liveEquipmentRuntimeError = testPayload.ok === false
+        ? String(testPayload.message || testPayload.health?.message || "Bridge health test failed")
+        : "";
+    }
+    setChatStatus(testPayload && testPayload.ok === false ? "EQUIPMENT CHECK" : "EQUIPMENT READY", testPayload && testPayload.ok === false ? "warning" : "ok");
+    return liveEquipmentRuntimeSnapshot;
+  } catch (err) {
+    liveEquipmentRuntimeError = String(err);
+    setChatStatus(`EQUIPMENT ACTION ERROR: ${err}`, "warning");
+    return null;
+  } finally {
+    liveEquipmentRuntimeActionInFlight = "";
+    if (button) button.disabled = false;
+    if (liveLastSession) renderLiveRuntime(liveLastSession);
+  }
+}
+
+function renderEquipmentLiveHeaderActions() {
+  const busy = liveEquipmentRuntimeActionInFlight;
+  return `
+    <div class="ar-vis-runtime-actions ar-vis-runtime-actions-header" aria-label="Equipment bridge controls">
+      <button type="button" class="ar-vis-runtime-action" data-equipment-live-action="test" ${busy === "test" ? "disabled" : ""}>TEST</button>
+      <button type="button" class="ar-vis-runtime-action" data-equipment-live-action="open">OPEN</button>
+      <button type="button" class="ar-vis-runtime-action" data-equipment-live-action="refresh" ${busy === "refresh" ? "disabled" : ""}>REFRESH</button>
+    </div>
+  `;
+}
+
+function equipmentRuntimeContext(report) {
   const equipment = latestEquipmentReport(report) || {};
   const result = latestEquipmentResult(report) || {};
   const packet = latestUtmDataReadyPacket(report) || {};
   const handoff = latestEquipmentHandoffPacket(report) || {};
-  const bridge = equipment.bridge || {};
-  const controlPlan = equipment.control_plan || {};
-  const controlProfile = controlPlan.profile || {};
-  const screenChecks = Array.isArray(equipment.screen_checks) ? equipment.screen_checks : [];
-  const visionChecks = equipment.vision_cross_checks || {};
-  const physical = equipment.physical_checks || {};
-  const data = equipment.data_acquisition || {};
-  const cross = equipment.cross_checks || {};
-  const decision = equipment.decision || {};
+  const skill = latestEquipmentSkillExecution(report) || {};
+  const exception = latestEquipmentSkillException(report) || skill.exception || {};
+  const snapshot = liveEquipmentRuntimeSnapshot || {};
+  return {
+    report,
+    equipment,
+    result,
+    packet,
+    handoff,
+    skill,
+    exception,
+    snapshot,
+    connection: snapshot.connection || {},
+    readiness: snapshot.utm_readiness || {},
+    evidenceAudit: snapshot.utm_evidence_audit || {},
+    programs: Array.isArray(snapshot.programs) ? snapshot.programs : [],
+    test: snapshot.last_test || {},
+  };
+}
+
+function equipmentBridgeState(ctx) {
+  const bridge = ctx.equipment.bridge || {};
+  const health = ctx.test.health || {};
+  const explicit = bridge.connection_status || bridge.status || ctx.result.connection_status;
+  if (explicit) return String(explicit);
+  if (ctx.test.ok === true || health.ok === true) return "connected";
+  if (ctx.test.ok === false || health.ok === false) return "unreachable";
+  if (ctx.connection.last_status) return String(ctx.connection.last_status);
+  return ctx.connection.selected ? "configured" : "not configured";
+}
+
+function equipmentActiveProgram(ctx) {
+  const controlPlan = ctx.equipment.control_plan || {};
+  const profile = controlPlan.profile || {};
+  const decision = ctx.equipment.decision || {};
+  const requested = controlPlan.program_id || ctx.result.program_id || ctx.handoff.program_id || ctx.skill.target_profile || "";
+  const registered = ctx.programs.find((item) => item && (item.program_id === requested || item.id === requested || item.name === requested));
+  return {
+    programId: requested || registered?.program_id || registered?.id || "-",
+    skillId: ctx.skill.skill_id || "-",
+    version: ctx.skill.version || registered?.version || "-",
+    profileId: profile.program_id || profile.id || ctx.skill.target_profile || "-",
+    state: ctx.skill.state || ctx.result.status || decision.equipment_status || ctx.equipment.status || "idle",
+  };
+}
+
+function equipmentEvidenceVerified(ctx) {
+  const checks = Array.isArray(ctx.equipment.screen_checks) ? ctx.equipment.screen_checks : [];
+  const cross = ctx.equipment.cross_checks || {};
+  const audit = ctx.evidenceAudit || {};
+  const checkOk = checks.length > 0 && checks.every((item) => item && item.ok === true);
+  const parseOk = cross.data_parse_probe_ok === true || audit.data_parse_probe_ok === true || audit.ok === true;
+  return checkOk && parseOk;
+}
+
+function equipmentProgressSteps(ctx) {
+  const active = equipmentActiveProgram(ctx);
+  const bridgeReady = /connected|ready|healthy|ok/i.test(equipmentBridgeState(ctx));
+  const resolved = active.programId !== "-" || active.skillId !== "-";
+  const validated = bridgeReady && resolved;
+  const decision = ctx.equipment.decision || {};
+  const skillState = String(ctx.skill.state || ctx.result.status || decision.equipment_status || "").toLowerCase();
+  const failed = Boolean(ctx.exception.failure_code || ctx.skill.failure_code || ctx.result.failure_code) || /fail|error|block/.test(skillState);
+  const executed = /complete|success|done/.test(skillState);
+  const executing = /run|active|execut|working|start/.test(skillState);
+  const verified = equipmentEvidenceVerified(ctx);
+  const handoffStatus = String((ctx.equipment.decision || {}).handoff_status || ctx.handoff.status || "");
+  const handedOff = verified && /ready|complete|success|done/.test(handoffStatus.toLowerCase());
+  return [
+    { label: "Resolve", status: resolved ? "complete" : "waiting", detail: resolved ? `${active.programId} / ${active.skillId}` : "program or skill pending" },
+    { label: "Validate", status: validated ? "complete" : bridgeReady ? "active" : failed ? "blocked" : "waiting", detail: `${equipmentBridgeState(ctx)} / ${active.profileId}` },
+    { label: "Execute", status: failed ? "blocked" : executed ? "complete" : executing ? "active" : validated ? "active" : "waiting", detail: ctx.skill.current_segment || ctx.result.status || "execution pending" },
+    { label: "Verify", status: verified ? "complete" : failed ? "blocked" : executed ? "active" : "waiting", detail: verified ? "screen and data evidence verified" : "evidence pending" },
+    { label: "Handoff", status: handedOff ? "complete" : failed ? "blocked" : verified ? "active" : "waiting", detail: ctx.handoff.next_agent || handoffStatus || "Analysis handoff pending" },
+  ];
+}
+
+function renderEquipmentAgenticProgress(ctx) {
   return `
-    ${renderDashboardCard("Equipment Readiness", renderEquipmentReadinessBoard(equipment, result, packet, handoff), { span: 8, tone: "equipment", eyebrow: "readiness" })}
-    ${renderDashboardCard("Live Test Status", `<div class="ar-report-metrics">
-      ${renderDashboardMetric("Screen", `${screenChecks.filter((item) => item && item.ok).length}/${screenChecks.length}`, "checks", screenChecks.some((item) => item && !item.ok) ? "warning" : "success")}
-      ${renderDashboardMetric("Rows", data.row_count_probe || "-", "probe", data.row_count_probe ? "success" : "idle")}
-      ${renderDashboardMetric("Vision", visionChecks.all_required_ok === undefined ? "-" : visionChecks.all_required_ok, "required", visionChecks.all_required_ok === false ? "danger" : "success")}
-      ${renderDashboardMetric("Handoff", decision.handoff_status || handoff.status || "-", "analysis", decision.failure_code ? "warning" : "success")}
-    </div>`, { span: 4, tone: "equipment", eyebrow: "live" })}
-    ${renderDashboardCard("Control Profile", renderDashboardRows([
-      ["provider", bridge.provider || "-"],
-      ["connection_status", bridge.connection_status || "-"],
-      ["program_id", controlPlan.program_id || result.program_id || handoff.program_id || "-"],
-      ["profile_id", controlProfile.program_id || controlProfile.id || "-"],
-      ["locator_count", controlProfile.locator_count || "-"],
-    ]), { span: 4, tone: "equipment", eyebrow: "control" })}
-    ${renderDashboardCard("Gate Matrix", renderEquipmentGatePanel(equipment), { span: 4, tone: screenChecks.some((item) => item && !item.ok) ? "warning" : "equipment", eyebrow: "screen + vision" })}
-    ${renderDashboardCard("Sensor Channels", renderEquipmentSensorTable(equipment), { span: 4, tone: "metrics", eyebrow: "audit" })}
-    ${renderDashboardCard("UTM Data Ledger", renderDashboardRows([
-      ["status", data.status || result.status || "-"],
-      ["row_count_probe", data.row_count_probe || "-"],
-      ["parse_probe_ok", cross.data_parse_probe_ok === undefined ? "-" : cross.data_parse_probe_ok],
-      ["linux_csv", data.linux_path || result.result_file || packet.result_file || handoff.result_file || "-"],
-      ["checksum", data.checksum || packet.checksum || "-"],
-    ]), { span: 4, tone: "equipment", eyebrow: "csv" })}
-    ${renderDashboardCard("Analysis Handoff", renderDashboardRows([
-      ["decision", decision.handoff_status || handoff.status || "-"],
-      ["failure_code", decision.failure_code || result.failure_code || handoff.failure_code || "-"],
-      ["next_agent", handoff.next_agent || decision.next_agent || "Analysis"],
-      ["packet_schema", packet.schema || handoff.schema || "-"],
-      ["guardian_required", decision.guardian_required === undefined ? "-" : decision.guardian_required],
-    ]), { span: 4, tone: decision.failure_code ? "warning" : "equipment", eyebrow: "handoff" })}
+    <div class="ar-vis-agentic-progress">
+      ${equipmentProgressSteps(ctx).map((step, index) => `
+        <div class="ar-vis-agentic-step is-${visionProgressTone(step.status)}">
+          <span class="ar-vis-agentic-step-index">${String(index + 1).padStart(2, "0")}</span>
+          <strong>${escapeHtml(step.label)}</strong>
+          <em>${escapeHtml(step.status)}</em>
+          <small>${escapeHtml(compactText(step.detail, 80))}</small>
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderEquipmentBridgeRuntime(ctx) {
+  const state = equipmentBridgeState(ctx);
+  const provider = (ctx.equipment.bridge || {}).provider || ctx.connection.bridge || "windows_pyautogui";
+  const health = ctx.test.health || {};
+  const screen = health.screen || {};
+  const pyautogui = health.pyautogui || {};
+  const refreshed = liveEquipmentRuntimeRefreshedAt ? new Date(liveEquipmentRuntimeRefreshedAt).toLocaleTimeString() : "not checked";
+  return `
+    <div class="ar-vis-summary-stack">
+      <div class="ar-report-metrics">
+        ${renderDashboardMetric("Bridge", state, provider, /connected|ready|healthy|ok/i.test(state) ? "success" : "warning")}
+        ${renderDashboardMetric("Target", ctx.connection.selected_candidate || "-", ctx.connection.scope || "saved", ctx.connection.selected ? "success" : "idle")}
+        ${renderDashboardMetric("Token", ctx.connection.token_configured === undefined ? "-" : ctx.connection.token_configured, "configured", ctx.connection.token_configured ? "success" : "warning")}
+      </div>
+      ${renderDashboardRows([
+        ["endpoint", ctx.connection.bridge_url || "-"],
+        ["platform", ctx.connection.platform || "-"],
+        ["desktop", screen.width && screen.height ? `${screen.width}x${screen.height}` : "-"],
+        ["pyautogui", pyautogui.available === undefined ? "-" : pyautogui.available],
+        ["server", health.server_version || health.script_version || "-"],
+        ["programs", health.program_count ?? ctx.programs.length ?? "-"],
+        ["last refresh", refreshed],
+        ["diagnostic", liveEquipmentRuntimeError || "-"],
+      ])}
+    </div>
+  `;
+}
+
+function renderEquipmentActiveExecution(ctx) {
+  const active = equipmentActiveProgram(ctx);
+  const model = ctx.skill.model_snapshot || {};
+  const completedSegments = Array.isArray(ctx.skill.completed_segments) ? ctx.skill.completed_segments : [];
+  return renderDashboardRows([
+    ["program", active.programId],
+    ["skill", active.skillId === "-" ? "-" : `${active.skillId}@${active.version}`],
+    ["profile", active.profileId],
+    ["state", active.state],
+    ["completed_segments", completedSegments.length ? completedSegments.join(", ") : "-"],
+    ["segment", ctx.skill.current_segment || ctx.skill.failed_segment || "-"],
+    ["recovery model", [model.provider, model.model].filter(Boolean).join(" / ") || "not invoked"],
+  ]);
+}
+
+function renderEquipmentRecoveryBoundary(ctx) {
+  const allowed = Array.isArray(ctx.exception.allowed_recovery_operations) ? ctx.exception.allowed_recovery_operations : [];
+  const history = Array.isArray(ctx.skill.recovery_history) ? ctx.skill.recovery_history : [];
+  return renderDashboardRows([
+    ["attempt", ctx.skill.attempt || 0],
+    ["failure", ctx.exception.failure_code || ctx.skill.failure_code || ctx.result.failure_code || "none"],
+    ["checkpoint", ctx.exception.checkpoint_id || "-"],
+    ["allowed", allowed.length ? allowed.join(", ") : "none recorded"],
+    ["last recovery", history.length ? `${history.at(-1).operation || "action"}:${history.at(-1).status || "recorded"}` : "-"],
+  ]);
+}
+
+function renderEquipmentExecutionEvidence(ctx) {
+  const checks = Array.isArray(ctx.equipment.screen_checks) ? ctx.equipment.screen_checks : [];
+  const data = ctx.equipment.data_acquisition || {};
+  const cross = ctx.equipment.cross_checks || {};
+  const lastEvent = ((ctx.report && ctx.report.events) || []).filter((event) => {
+    const text = `${event.event_type || event.type || ""} ${event.node_id || ""} ${event.message || ""}`.toLowerCase();
+    return /equipment|utm|windows|bridge|pyautogui|analysis/.test(text);
+  }).at(-1) || {};
+  return `
+    <div class="ar-vis-summary-stack">
+      <div class="ar-report-metrics">
+        ${renderDashboardMetric("Screen", `${checks.filter((item) => item && item.ok).length}/${checks.length}`, "verified", checks.length && checks.every((item) => item && item.ok) ? "success" : "warning")}
+        ${renderDashboardMetric("Rows", data.row_count_probe || "-", "probe", data.row_count_probe ? "success" : "idle")}
+        ${renderDashboardMetric("Parse", cross.data_parse_probe_ok === undefined ? "-" : cross.data_parse_probe_ok, "data", cross.data_parse_probe_ok ? "success" : "warning")}
+        ${renderDashboardMetric("Event", lastEvent.event_type || lastEvent.type || "-", formatTime(lastEvent.ts || lastEvent.timestamp), lastEvent.level === "ERROR" ? "danger" : "info")}
+      </div>
+      ${renderVisionCardDetails("Inspection details", `${renderEquipmentGatePanel(ctx.equipment)}${renderEquipmentSensorTable(ctx.equipment)}${renderEquipmentEventLog(ctx.report || {})}`)}
+    </div>
+  `;
+}
+
+function renderEquipmentHandoff(ctx) {
+  const decision = ctx.equipment.decision || {};
+  const data = ctx.equipment.data_acquisition || {};
+  return renderDashboardRows([
+    ["status", decision.handoff_status || ctx.handoff.status || "waiting"],
+    ["next agent", ctx.handoff.next_agent || decision.next_agent || "Analysis"],
+    ["schema", ctx.packet.schema || ctx.handoff.schema || "-"],
+    ["result", data.linux_path || ctx.result.result_file || ctx.packet.result_file || ctx.handoff.result_file || "-"],
+    ["checksum", data.checksum || ctx.packet.checksum || "-"],
+    ["guardian", decision.guardian_required === undefined ? "-" : decision.guardian_required],
+  ]);
+}
+
+function renderEquipmentDashboardCards(report, status, agentLabel, profile) {
+  ensureEquipmentRuntimeSnapshot();
+  const ctx = equipmentRuntimeContext(report);
+  const failed = Boolean(ctx.exception.failure_code || ctx.skill.failure_code || ctx.result.failure_code);
+  return `
+    ${renderDashboardCard("Bridge / Runtime", renderEquipmentBridgeRuntime(ctx), { span: 4, tone: /connected|ready|healthy|ok/i.test(equipmentBridgeState(ctx)) ? "success" : "equipment", eyebrow: "device bridge", action: renderEquipmentLiveHeaderActions() })}
+    ${renderDashboardCard("Active Program / Skill", renderEquipmentActiveExecution(ctx), { span: 4, tone: "equipment", eyebrow: "Equipment Skill Execution" })}
+    ${renderDashboardCard("Recovery Boundary", renderEquipmentRecoveryBoundary(ctx), { span: 4, tone: failed ? "warning" : "equipment", eyebrow: "exception only" })}
+    ${renderDashboardCard("Agentic Progress", renderEquipmentAgenticProgress(ctx), { span: 12, tone: failed ? "warning" : "equipment", eyebrow: "resolve to handoff" })}
+    ${renderDashboardCard("Execution Evidence", renderEquipmentExecutionEvidence(ctx), { span: 8, tone: equipmentEvidenceVerified(ctx) ? "success" : "equipment", eyebrow: "screen + data" })}
+    ${renderDashboardCard("Handoff", renderEquipmentHandoff(ctx), { span: 4, tone: ctx.result.failure_code ? "warning" : "equipment", eyebrow: "analysis contract" })}
   `;
 }
 
@@ -17928,6 +18183,7 @@ if (liveAgentBinderList) {
     const button = event.target.closest("[data-agent-id]");
     if (!button) return;
     liveSelectedAgent = button.dataset.agentId || "orchestrator";
+    if (liveSelectedAgent === "equipment") ensureEquipmentRuntimeSnapshot();
     liveReportPage = "agent";
     invalidateLiveCenterRender("report");
     requestLiveGraphFocusForAgent(liveSelectedAgent);
@@ -17954,6 +18210,7 @@ if (liveAgentBinderList) {
     const button = event.target.closest("[data-agent-id]");
     if (!button) return;
     liveSelectedAgent = button.dataset.agentId || "orchestrator";
+    if (liveSelectedAgent === "equipment") ensureEquipmentRuntimeSnapshot();
     liveReportPage = "agent";
     invalidateLiveCenterRender("report");
     requestLiveGraphFocusForAgent(liveSelectedAgent);
@@ -17969,6 +18226,7 @@ if (liveChatTarget) {
     const target = liveChatTarget.value || "selected_agent";
     if (knownLiveAgent(target)) {
       liveSelectedAgent = target;
+      if (liveSelectedAgent === "equipment") ensureEquipmentRuntimeSnapshot();
       liveReportPage = "agent";
       invalidateLiveCenterRender("report");
       requestLiveGraphFocusForAgent(liveSelectedAgent);
@@ -18396,6 +18654,12 @@ document.addEventListener("keydown", (event) => {
     runLiveUtmRuntimeAction(visionRuntimeAction.dataset.visionRuntimeAction || "", visionRuntimeAction).catch(() => {});
     return;
   }
+  const equipmentLiveAction = event.target.closest && event.target.closest("[data-equipment-live-action]");
+  if (equipmentLiveAction && (event.key === "Enter" || event.key === " ")) {
+    event.preventDefault();
+    runEquipmentLiveAction(equipmentLiveAction.dataset.equipmentLiveAction || "", equipmentLiveAction).catch(() => {});
+    return;
+  }
   const descriptorAction = event.target.closest && event.target.closest("[data-descriptor-api-action]");
   if (descriptorAction && (event.key === "Enter" || event.key === " ")) {
     event.preventDefault();
@@ -18473,6 +18737,13 @@ document.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
     runLiveUtmRuntimeAction(visionRuntimeAction.dataset.visionRuntimeAction || "", visionRuntimeAction).catch(() => {});
+    return;
+  }
+  const equipmentLiveAction = event.target.closest("[data-equipment-live-action]");
+  if (equipmentLiveAction && liveReportPanel && liveReportPanel.contains(equipmentLiveAction)) {
+    event.preventDefault();
+    event.stopPropagation();
+    runEquipmentLiveAction(equipmentLiveAction.dataset.equipmentLiveAction || "", equipmentLiveAction).catch(() => {});
     return;
   }
   const specimenVideoButton = event.target.closest("[data-spm-video-action]");

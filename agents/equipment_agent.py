@@ -33,6 +33,13 @@ from typing import Any
 from agents.base_agent import AgentContext, AgentResult, BaseAgent
 from orchestrator.state import Mode, OrchestratorState
 from utils.equipment_profiles import DEFAULT_UTM_PROFILE_ID, EquipmentProfile, EquipmentProfileRegistry, build_execution_contract
+from policies.guardian_gate import equipment_skill_recovery_gate, gate_blocks_execution
+from utils.equipment_skill_runtime import (
+    EquipmentSkillRegistry,
+    SkillContractError,
+    build_exception_packet,
+    validate_recovery_decision,
+)
 
 
 class LabEquipmentAgent(BaseAgent):
@@ -2045,10 +2052,320 @@ class LabEquipmentAgent(BaseAgent):
             },
         )
 
+    @staticmethod
+    def _equipment_skill_request(state: OrchestratorState) -> dict[str, Any]:
+        spec = state.current_experiment_spec if isinstance(state.current_experiment_spec, dict) else {}
+        value = spec.get("equipment_skill")
+        if not isinstance(value, dict):
+            return {}
+        skill_id = str(value.get("skill_id") or "").strip()
+        version = str(value.get("version") or "").strip()
+        return dict(value) if skill_id and version else {}
+
+    @staticmethod
+    def _skill_execution_model_snapshot(ctx: AgentContext, manifest: dict[str, Any]) -> dict[str, Any]:
+        creation = manifest.get("model_snapshot") if isinstance(manifest.get("model_snapshot"), dict) else {}
+        active_backend = str(getattr(ctx, "active_backend", "") or creation.get("provider") or "unknown")
+        model = str(creation.get("model") or "")
+        routers = getattr(ctx, "model_routers", {})
+        router = routers.get(active_backend) if isinstance(routers, dict) else None
+        if router is not None:
+            try:
+                model = str(router.select("tool_formatting").primary or model)
+            except Exception:
+                pass
+        return {
+            "provider": active_backend,
+            "model": model,
+            "endpoint_profile": str(creation.get("endpoint_profile") or active_backend),
+            "fallback_allowed": False,
+            "snapshotted_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    @staticmethod
+    def _skill_segment_retry_is_safe(result: dict[str, Any]) -> bool:
+        """Retry only failures proven to have happened before the recorded segment actuated."""
+        try:
+            executed_action_count = int(result.get("executed_action_count", -1))
+        except (TypeError, ValueError):
+            return False
+        return executed_action_count == 0 and str(result.get("failure_code") or "") in {
+            "PYAUTOGUI_WINDOW_NOT_FOUND",
+            "PYAUTOGUI_WINDOW_NOT_FOCUSED",
+            "PYAUTOGUI_LOCATOR_NOT_FOUND",
+        }
+
+    async def _selected_skill_recovery_decision(
+        self,
+        ctx: AgentContext,
+        *,
+        model_snapshot: dict[str, Any],
+        exception: dict[str, Any],
+    ) -> dict[str, Any]:
+        provider = str(model_snapshot.get("provider") or "").strip()
+        model = str(model_snapshot.get("model") or "").strip()
+        backends = getattr(ctx, "primary_backends", {})
+        backend = backends.get(provider) if isinstance(backends, dict) else None
+        if backend is None and provider == str(getattr(ctx, "active_backend", "") or ""):
+            backend = getattr(ctx, "primary_backend", None)
+        if backend is None or not model:
+            raise SkillContractError("snapshotted recovery model is unavailable")
+        response = await backend.complete(
+            model=model,
+            system_prompt=(
+                "Return one JSON object only for a bounded Windows GUI recovery. "
+                "Choose exactly one operation from allowed_recovery_operations. "
+                "Do not add shell, Python, clicks, credentials, or physical-equipment actions."
+            ),
+            user_prompt=json.dumps(exception, ensure_ascii=True, sort_keys=True),
+            metadata={
+                "task_type": "equipment_skill_recovery",
+                "role": "equipment_skill_recovery",
+                "no_fallback": True,
+            },
+        )
+        raw = self._extract_json_object(str(response.text or ""))
+        if raw is None:
+            raise SkillContractError("selected recovery model returned invalid JSON")
+        return validate_recovery_decision(raw, exception=exception, max_attempts=1)
+
+    async def _run_equipment_skill(
+        self,
+        state: OrchestratorState,
+        ctx: AgentContext,
+        request: dict[str, Any],
+    ) -> AgentResult:
+        skill_id = str(request.get("skill_id") or "").strip()
+        version = str(request.get("version") or "").strip()
+        target_profile = str(request.get("target_profile") or "").strip()
+        registry_root = Path(
+            str(request.get("registry_root") or Path(__file__).resolve().parents[1] / "memory" / "equipment_skills")
+        )
+        registry = EquipmentSkillRegistry(registry_root)
+        try:
+            package = registry.get(skill_id, version)
+            manifest = package["manifest"]
+            if manifest.get("lifecycle") != "deployed" or manifest.get("enabled") is False:
+                raise SkillContractError("exact Skill version is not deployed and enabled")
+            expected_profile = str(manifest.get("target_profile") or "")
+            if target_profile and target_profile != expected_profile:
+                raise SkillContractError("target profile mismatch")
+            target_profile = target_profile or expected_profile
+            model_snapshot = self._skill_execution_model_snapshot(ctx, manifest)
+            execution = registry.begin_execution(
+                skill_id=skill_id,
+                version=version,
+                sequence_id=str(request.get("sequence_id") or f"{state.run_id}-{skill_id}-{version}"),
+                target_profile=target_profile,
+                model_snapshot=model_snapshot,
+            )
+        except SkillContractError as exc:
+            return AgentResult(
+                success=False,
+                summary="Equipment Skill contract blocked execution",
+                data={
+                    "equipment_skill_execution": {"state": "ABORTED", "skill_id": skill_id, "version": version},
+                    "equipment_handoff": {"status": "blocked", "failure_code": "SKILL_CONTRACT_INVALID", "message": str(exc)},
+                    "hardware_alerts": [],
+                },
+            )
+
+        if execution.get("state") == "COMPLETED":
+            return AgentResult(
+                success=True,
+                summary="Equipment Skill already completed",
+                data={
+                    "equipment_skill_execution": execution,
+                    "equipment_handoff": {"status": "ready_for_analysis", "skill_id": skill_id, "version": version},
+                    "tool_results": [],
+                    "hardware_alerts": [],
+                },
+            )
+
+        completed = set(str(item) for item in execution.get("completed_segments", []))
+        tool_results: list[dict[str, Any]] = []
+        for index, program_id in enumerate(package["workflow"].get("program_ids", []), start=1):
+            program_id = str(program_id)
+            if program_id in completed:
+                continue
+            payload = {
+                "runtime_mode": self._effective_runtime_mode(state),
+                "program_id": program_id,
+                "sequence_id": f"{execution['execution_id']}-segment-{index:03d}",
+                "run_id": state.run_id,
+                "experiment_id": state.experiment_id,
+                "equipment_skill_id": skill_id,
+                "equipment_skill_version": version,
+                "equipment_skill_execution_id": execution["execution_id"],
+            }
+            result = await self._call_tool(ctx, "equipment.pyautogui.run", payload)
+            tool_results.append({"tool": "equipment.pyautogui.run", "payload": payload, "result": result})
+            if not result.get("ok"):
+                evidence = result.get("screen_artifacts") if isinstance(result.get("screen_artifacts"), list) else []
+                if not evidence:
+                    evidence = [{"artifact_id": "bridge-result", "sha256": hashlib.sha256(json.dumps(result, sort_keys=True, default=str).encode()).hexdigest()}]
+                exception = build_exception_packet(
+                    skill_id=skill_id,
+                    version=version,
+                    execution_id=str(execution["execution_id"]),
+                    segment_id=program_id,
+                    checkpoint_id=str(result.get("step_trace", [{}])[-1].get("step") if result.get("step_trace") else "segment"),
+                    failure_code=str(result.get("failure_code") or "SKILL_CHECKPOINT_FAILED"),
+                    message=str(result.get("message") or "compiled Skill segment failed"),
+                    evidence=evidence,
+                    allowed_recovery_operations=["focus_window", "screenshot", "wait", "press"],
+                )
+                execution = registry.transition_execution(
+                    str(execution["execution_id"]),
+                    "EXCEPTION",
+                    exception=exception,
+                    failed_segment=program_id,
+                )
+                auto_recover = bool(request.get("auto_recover", True))
+                if auto_recover and self._skill_segment_retry_is_safe(result):
+                    try:
+                        recovery = await self._selected_skill_recovery_decision(
+                            ctx,
+                            model_snapshot=model_snapshot,
+                            exception=exception,
+                        )
+                        recovery_gate = equipment_skill_recovery_gate(
+                            state=state,
+                            recovery=recovery,
+                            allowed_operations=list(exception.get("allowed_recovery_operations", [])),
+                            max_attempts=1,
+                        )
+                        if gate_blocks_execution(recovery_gate):
+                            raise SkillContractError(
+                                f"Guardian rejected recovery: {recovery_gate.get('reason_code') or 'blocked'}"
+                            )
+                        execution = registry.transition_execution(
+                            str(execution["execution_id"]),
+                            "RECOVERING",
+                            attempt=1,
+                            recovery_candidate=recovery,
+                            recovery_guardian=recovery_gate,
+                        )
+                        recovery_action = {"action": recovery["operation"], **dict(recovery["payload"])}
+                        recovery_payload = {
+                            "runtime_mode": self._effective_runtime_mode(state),
+                            "sequence": [recovery_action],
+                            "sequence_id": f"{execution['execution_id']}-recovery-001",
+                            "run_id": state.run_id,
+                            "experiment_id": state.experiment_id,
+                            "equipment_skill_id": skill_id,
+                            "equipment_skill_version": version,
+                            "equipment_skill_execution_id": execution["execution_id"],
+                        }
+                        recovery_result = await self._call_tool(ctx, "equipment.pyautogui.run", recovery_payload)
+                        tool_results.append(
+                            {"tool": "equipment.pyautogui.run", "payload": recovery_payload, "result": recovery_result}
+                        )
+                        if not recovery_result.get("ok"):
+                            raise SkillContractError("bounded recovery action failed verification")
+                        execution = registry.transition_execution(
+                            str(execution["execution_id"]),
+                            "RECOVERY_VERIFY",
+                            recovery_result=recovery_result,
+                        )
+                        history = list(execution.get("recovery_history", []))
+                        history.append(
+                            {
+                                "operation": recovery["operation"],
+                                "attempt": 1,
+                                "confidence": recovery["confidence"],
+                                "status": "verified",
+                            }
+                        )
+                        execution = registry.transition_execution(
+                            str(execution["execution_id"]),
+                            "RESUMED",
+                            recovery_history=history,
+                        )
+                        resume_payload = {
+                            **payload,
+                            "sequence_id": f"{execution['execution_id']}-segment-{index:03d}-resume-001",
+                        }
+                        result = await self._call_tool(ctx, "equipment.pyautogui.run", resume_payload)
+                        tool_results.append(
+                            {"tool": "equipment.pyautogui.run", "payload": resume_payload, "result": result}
+                        )
+                        if not result.get("ok"):
+                            execution = registry.transition_execution(
+                                str(execution["execution_id"]),
+                                "ESCALATED",
+                                failed_segment=program_id,
+                                failure_code=str(result.get("failure_code") or "SKILL_RESUME_FAILED"),
+                            )
+                    except (SkillContractError, RuntimeError, KeyError, TypeError, ValueError) as exc:
+                        execution = registry.transition_execution(
+                            str(execution["execution_id"]),
+                            "ESCALATED",
+                            recovery_error=str(exc),
+                            failed_segment=program_id,
+                        )
+                if not result.get("ok") or execution.get("state") == "ESCALATED":
+                    failure_code = str(
+                        execution.get("failure_code")
+                        or exception.get("failure_code")
+                        or "SKILL_RECOVERY_ESCALATED"
+                    )
+                    return AgentResult(
+                        success=False,
+                        summary=(
+                            "Equipment Skill recovery escalated"
+                            if execution.get("state") == "ESCALATED"
+                            else "Equipment Skill paused at a verified exception boundary"
+                        ),
+                        data={
+                            "equipment_skill_execution": execution,
+                            "equipment_skill_exception": exception,
+                            "equipment_handoff": {"status": "blocked", "failure_code": failure_code},
+                            "tool_results": tool_results,
+                            "hardware_alerts": [],
+                        },
+                    )
+            completed.add(program_id)
+            execution = registry.transition_execution(
+                str(execution["execution_id"]),
+                "RUNNING",
+                completed_segments=sorted(completed),
+                current_segment=program_id,
+            )
+
+        execution = registry.transition_execution(
+            str(execution["execution_id"]),
+            "COMPLETED",
+            completed_segments=sorted(completed),
+            completed_at=datetime.now(timezone.utc).isoformat(),
+        )
+        return AgentResult(
+            success=True,
+            summary=f"Equipment Skill completed: {skill_id}@{version}",
+            data={
+                "equipment_skill_execution": execution,
+                "equipment_result": tool_results[-1]["result"] if tool_results else {},
+                "equipment_report": {
+                    "schema": "equipment_skill_report.v1",
+                    "skill_id": skill_id,
+                    "version": version,
+                    "state": "COMPLETED",
+                    "program_ids": list(package["workflow"].get("program_ids", [])),
+                },
+                "equipment_handoff": {"status": "ready_for_analysis", "skill_id": skill_id, "version": version},
+                "tool_results": tool_results,
+                "hardware_alerts": [],
+            },
+        )
+
     async def run(self, state: OrchestratorState, ctx: AgentContext) -> AgentResult:
         available_tools = set(ctx.tools.list_tools())
         if "equipment.pyautogui.run" not in available_tools:
             return await self._legacy_utm(state, ctx)
+
+        skill_request = self._equipment_skill_request(state)
+        if skill_request:
+            return await self._run_equipment_skill(state, ctx, skill_request)
 
         profile = self._selected_profile(state)
         runtime_mode = self._effective_runtime_mode(state)

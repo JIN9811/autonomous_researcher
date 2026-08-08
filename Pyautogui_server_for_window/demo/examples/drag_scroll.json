@@ -1,0 +1,19 @@
+{
+  "schema": "atr.pyautogui_program.v1",
+  "program_id": "example_drag_scroll",
+  "name": "Drag and scroll capability",
+  "description": "Exercises bounded drag and vertical/horizontal scrolling.",
+  "safe_test": true,
+  "example": {"family": "mouse", "manual_confirmation_required": false},
+  "sequence": [
+    {"action": "move_to", "x": 690, "y": 205, "duration_sec": 0.2},
+    {"action": "mouse_down", "button": "left"},
+    {"action": "mouse_up", "button": "left"},
+    {"action": "drag_to", "x": 1000, "y": 205, "button": "left", "duration_sec": 0.8},
+    {"action": "drag_rel", "x": -20, "y": 0, "button": "left", "duration_sec": 0.2},
+    {"action": "move_to", "x": 820, "y": 330, "duration_sec": 0.2},
+    {"action": "scroll", "clicks": -4},
+    {"action": "hscroll", "clicks": 2},
+    {"action": "vscroll", "clicks": 2}
+  ]
+}

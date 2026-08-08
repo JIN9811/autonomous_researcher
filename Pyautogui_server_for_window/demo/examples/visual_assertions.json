@@ -1,0 +1,13 @@
+{
+  "schema": "atr.pyautogui_program.v1",
+  "program_id": "example_visual_assertions",
+  "name": "Visual and pixel capability",
+  "description": "Captures bounded evidence and checks a known RGB swatch.",
+  "safe_test": true,
+  "example": {"family": "screen", "manual_confirmation_required": false},
+  "sequence": [
+    {"action": "screenshot", "checkpoint": "capability_lab", "region": [0, 0, 1280, 800]},
+    {"action": "pixel", "x": 1040, "y": 540},
+    {"action": "pixel_matches_color", "x": 1040, "y": 540, "color": [10, 20, 30], "tolerance": 8}
+  ]
+}

@@ -1,13 +1,40 @@
 # Windows PyAutoGUI Bridge
 
-Windows PC에서 PyAutoGUI를 안전한 HTTP bridge로 노출하고, Linux 쪽
-autonomous researcher가 내부망에서 붙어 테스트할 수 있게 만든 MVP입니다.
+Windows PC에서 PyAutoGUI를 인증된 HTTP bridge로 노출하고 Linux ATR
+Equipment Agent가 내부망에서 제어하도록 만든 독립 배포 패키지입니다.
+
+## 표준 설치
+
+release ZIP을 풀고 `INSTALL_WINDOWS_BRIDGE.cmd`를 더블클릭합니다. 압축을
+푼 위치가 어디든 런처가 자기 경로를 자동으로 인식하므로 `cd`나 폴더 경로
+입력이 필요 없습니다. 설치 완료 후 브리지가 별도 창에서 시작되고 Web GUI가
+열립니다. 오류가 발생하면 설치 창이 닫히지 않고 원인을 표시합니다.
+
+PowerShell로 직접 설치해야 할 때만 아래 명령을 사용합니다.
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install_bridge.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_bridge.ps1 -OpenBrowser -ShowToken
+```
+
+- 프로그램: `%LOCALAPPDATA%\Programs\ATR\PyAutoGUIBridge`
+- 사용자 데이터: `%LOCALAPPDATA%\ATR\PyAutoGUIBridge`
+- Python: 패키지 전용 `.venv`와 `requirements-windows.txt`
+- 자동 시작: 설치 시 `-RegisterLogonTask`를 명시한 경우에만 대화형 사용자 로그온 작업으로 등록
+- 제거: `scripts\uninstall_bridge.ps1`; 데이터도 지우려면 `-RemoveData`
+- 클릭 시작: 바탕화면 `ATR Windows Bridge`
+- 클릭 제거: 바탕화면 `Uninstall ATR Windows Bridge`; 사용자 데이터는 기본 보존
+
+Windows 서비스로 실행하면 대화형 데스크톱을 제어할 수 없으므로 지원하지
+않습니다. Linux/Xvfb 검증은 프로토콜 검증이며 실제 Windows 수락은
+`scripts\native_acceptance.ps1`로 별도 수행합니다.
 
 ## 현재 구조
 
 ```text
 .
 ├─ bridge/                  # 실제 Python bridge 서버
+├─ demo/                    # capability lab과 안전 예제
 ├─ scripts/                 # 실행, 테스트, 빌드, 방화벽 helper
 ├─ examples/                # Windows/Linux 환경변수 샘플
 ├─ tests/                   # 로컬 smoke test
@@ -17,6 +44,7 @@ autonomous researcher가 내부망에서 붙어 테스트할 수 있게 만든 M
 ├─ run_bridge.ps1           # 루트 호환 wrapper
 ├─ local_e2e_test.ps1       # 루트 호환 wrapper
 ├─ requirements.txt
+├─ requirements-windows.txt # Windows 전용 고정 런타임
 └─ README.md
 ```
 
@@ -40,7 +68,8 @@ Web GUI HTML served with Run Timeline / Live Proof Checklist
 
 ## 실행
 
-`run_bridge.ps1`가 넘기는 `--host`, `--port`, `--token`, `--artifact-dir`, `--reference-dir` 인자는 Python 서버가 직접 반영합니다. 따라서 다른 PC에 배포할 때는 PowerShell wrapper를 쓰거나 같은 인자를 Python에 직접 넘겨도 동일하게 동작합니다.
+`run_bridge.ps1`는 artifact, locator, UTM export, program, recording을 단일
+사용자 데이터 루트에 연결하고 demo 자산 경로까지 서버에 전달합니다.
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\run_bridge.ps1
@@ -49,8 +78,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\run_bridge.ps1
 출력 예:
 
 ```text
-Generated session token. Use this value on the Linux side:
-Ab3Xy9Kq
+Generated a saved bridge token.
 Windows PyAutoGUI bridge listening on 0.0.0.0:8765
 Web GUI: http://127.0.0.1:8765/
 ```
@@ -60,6 +88,10 @@ Web GUI: http://127.0.0.1:8765/
 ```text
 http://127.0.0.1:8765/
 ```
+
+`Program Manager > RECORD`는 5초 카운트다운 후 녹화를 시작합니다. 녹화
+중에는 Windows 최상위에 빨간 점과 경과 시간이 있는 작은 배너가 표시되고,
+같은 `STOP RECORDING` 버튼을 누르면 녹화와 배너가 함께 종료됩니다.
 
 상태 확인:
 
@@ -73,7 +105,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\check_bridge.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\stop_bridge.ps1
 ```
 
-토큰 칸에 출력된 8글자 토큰을 넣고 `Health`, `Programs`, `Run program1`을
+초기 연결 시 `-ShowToken`으로 한 번 확인한 토큰을 넣고 `Health`, `Programs`, `Run program1`을
 누르면 됩니다. Web GUI는 현장 운용용으로 다음 정보를 바로 보여줍니다.
 
 - Auth, GUI Driver, Program, Evidence, Artifact workflow 상태
@@ -98,12 +130,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\stop_bridge.ps1
 - `/readiness`, `/request-log`, `/artifacts`가 정상 응답합니다.
 - PyAutoGUI 미설치 환경에서는 실행 요청이 성공으로 위장되지 않고 `PYAUTOGUI_NOT_INSTALLED` 또는 allowlist 실패로 명확히 차단됩니다.
 
-## PyAutoGUI 설치
+## Windows 런타임 설치
 
 실제 마우스 제어까지 하려면:
 
 ```powershell
-py -m pip install pyautogui
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install_bridge.ps1
 ```
 
 `py`가 없으면:
@@ -116,7 +148,7 @@ python -m pip install pyautogui
 
 ```bash
 export WINDOWS_PYAUTOGUI_BRIDGE_URL="http://<windows-private-ip>:8765"
-export WINDOWS_PYAUTOGUI_BRIDGE_TOKEN="<8-char-token>"
+export WINDOWS_PYAUTOGUI_BRIDGE_TOKEN="<saved-token>"
 
 curl -s -H "X-Bridge-Token: $WINDOWS_PYAUTOGUI_BRIDGE_TOKEN" \
   "$WINDOWS_PYAUTOGUI_BRIDGE_URL/health"

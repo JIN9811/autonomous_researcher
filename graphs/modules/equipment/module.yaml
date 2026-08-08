@@ -14,15 +14,18 @@ module:
   - utm.run_protocol
   internal_graph:
     - id: 01_resolve_equipment_profile
-      label: Resolve Equipment Profile
+      label: Resolve Exact Equipment Profile or Skill Version
       kind: internal_step
     - id: 02_validate_bridge_contract
-      label: Validate Bridge Contract
+      label: Validate Bridge and Skill Contract
       kind: internal_step
     - id: 03_execute_registered_protocol
-      label: Execute Registered Protocol
+      label: Execute Deterministic Program Segments
       kind: internal_step
-    - id: 04_validate_evidence_handoff
+    - id: 04_exception_recovery_gate
+      label: Bound Exception Recovery Through Guardian
+      kind: internal_step
+    - id: 05_validate_evidence_handoff
       label: Validate Evidence and Handoff
       kind: internal_step
   io_contract:

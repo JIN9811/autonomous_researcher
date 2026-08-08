@@ -1,5 +1,27 @@
 # Windows PyAutoGUI Bridge 사용법
 
+## 0. 최초 설치
+
+release ZIP을 푼 다음 `INSTALL_WINDOWS_BRIDGE.cmd`를 더블클릭합니다. 설치
+파일은 현재 폴더를 자동 감지하고 설치 후 브리지와 브라우저를 시작합니다.
+이후에는 바탕화면의 `ATR Windows Bridge`로 실행하고
+`Uninstall ATR Windows Bridge`로 제거할 수 있습니다.
+
+명령행 설치가 필요한 경우:
+
+```powershell
+cd "C:\path\to\Pyautogui_server_for_window"
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install_bridge.ps1
+```
+
+설치기는 `%LOCALAPPDATA%\Programs\ATR\PyAutoGUIBridge`에 프로그램을,
+`%LOCALAPPDATA%\ATR\PyAutoGUIBridge`에 변경 가능한 데이터와 토큰을 두고
+전용 `.venv`에 `requirements-windows.txt`를 설치합니다. 로그온 자동 시작은
+`-RegisterLogonTask`를 명시할 때만 등록됩니다.
+
+더블클릭 제거는 사용자 데이터와 토큰을 보존합니다. 데이터까지 제거하려면
+PowerShell에서 `scripts\uninstall_bridge.ps1 -RemoveData`를 실행합니다.
+
 ## 1. 로컬 E2E 테스트
 
 먼저 Web GUI와 API가 뜨는지만 확인합니다.
@@ -44,18 +66,18 @@ PyAutoGUI 설치 전이면 `program1`은 아래처럼 막히는 게 정상입니
 - `/readiness`, `/request-log`, `/artifacts`가 응답합니다.
 - PyAutoGUI가 설치되지 않은 PC에서도 실행 성공으로 위장하지 않고 명확한 block 결과를 반환합니다.
 
-## 2. PyAutoGUI 설치
+## 2. Windows 런타임 설치 확인
 
 실제 GUI 제어가 필요하면 Windows PC에서 설치합니다.
 
 ```powershell
-py -m pip install pyautogui
+& "$env:LOCALAPPDATA\Programs\ATR\PyAutoGUIBridge\.venv\Scripts\python.exe" -m pip check
 ```
 
 설치 확인:
 
 ```powershell
-py -c "import pyautogui; print(pyautogui.size()); print(pyautogui.FAILSAFE)"
+& "$env:LOCALAPPDATA\Programs\ATR\PyAutoGUIBridge\.venv\Scripts\python.exe" -c "import pyautogui, pynput, cv2; print(pyautogui.size()); print(pyautogui.FAILSAFE)"
 ```
 
 `True`가 출력되어야 fail-safe가 켜진 상태입니다.
@@ -81,8 +103,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\run_bridge.ps1 -LocalOnly
 $env:WINDOWS_PYAUTOGUI_BRIDGE_PORT = "8766"
 powershell -NoProfile -ExecutionPolicy Bypass -File .\run_bridge.ps1
 
-# 토큰 길이 변경, 기본은 8
-powershell -NoProfile -ExecutionPolicy Bypass -File .\run_bridge.ps1 -TokenLength 8
+# 새 토큰을 화면에 한 번 표시, 기본 길이는 32
+powershell -NoProfile -ExecutionPolicy Bypass -File .\run_bridge.ps1 -ResetToken -ShowToken
 
 # Python 경로 직접 지정
 powershell -NoProfile -ExecutionPolicy Bypass -File .\run_bridge.ps1 -Python "C:\Path\To\python.exe"
@@ -112,7 +134,7 @@ http://127.0.0.1:8765/
 
 순서:
 
-1. PowerShell에 출력된 8글자 토큰을 Token 칸에 입력
+1. `run_bridge.ps1 -ShowToken`으로 확인한 저장 토큰을 Token 칸에 입력
 2. `Health` 클릭 후 상단 `Auth`, `GUI Driver` 상태 확인
 3. `Programs` 또는 자동 로드된 `Program registry` 카드로 등록 macro/protocol 목록 확인
 4. `Program registry`에서 `Load`로 payload preview를 확인하거나 `Simulate`로 비구동 검증
@@ -152,7 +174,7 @@ Windows PC의 내부망 IP를 확인한 뒤 Linux에서:
 
 ```bash
 export WINDOWS_PYAUTOGUI_BRIDGE_URL="http://<windows-private-ip>:8765"
-export WINDOWS_PYAUTOGUI_BRIDGE_TOKEN="<8-char-token>"
+export WINDOWS_PYAUTOGUI_BRIDGE_TOKEN="<saved-token>"
 ```
 
 Health:
@@ -193,11 +215,16 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\firewall_allow_pri
 
 ## 7. 패키징
 
-나중에 `.exe`로 묶을 때:
+소스 ZIP:
 
 ```powershell
-py -m pip install pyinstaller pyautogui
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build_exe.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build_release.ps1 -Version "0.1.0"
+```
+
+데모 자산을 포함한 `.exe`로 묶을 때:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build_exe.ps1 -InstallBuildDeps
 ```
 
 결과:
@@ -209,7 +236,7 @@ dist\WindowsPyAutoGUIBridge.exe
 실행:
 
 ```powershell
-$env:WINDOWS_PYAUTOGUI_BRIDGE_TOKEN = "Ab3Xy9Kq"
+$env:WINDOWS_PYAUTOGUI_BRIDGE_TOKEN = "<saved-token>"
 $env:WINDOWS_PYAUTOGUI_BRIDGE_HOST = "0.0.0.0"
 $env:WINDOWS_PYAUTOGUI_BRIDGE_PORT = "8765"
 .\dist\WindowsPyAutoGUIBridge.exe
@@ -222,6 +249,8 @@ $env:WINDOWS_PYAUTOGUI_BRIDGE_PORT = "8765"
 - `scripts/local_e2e_test.ps1`: 로컬 API/Web GUI 검증
 - `scripts/test_bridge.ps1`: 이미 실행 중인 bridge에 대한 수동 테스트
 - `scripts/build_exe.ps1`: PyInstaller 빌드
+- `scripts/build_release.ps1`: 전체 자산을 포함한 source ZIP 빌드
+- `scripts/native_acceptance.ps1`: 실제 Windows 데스크톱 수락 증거 생성
 - `scripts/firewall_allow_private.ps1`: Private profile 방화벽 룰 생성
 - `examples/windows_bridge.env.example.ps1`: Windows 환경변수 예시
 - `examples/linux_env.example.sh`: Linux 환경변수 예시

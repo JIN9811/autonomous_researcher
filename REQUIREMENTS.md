@@ -79,6 +79,12 @@ Optional but commonly used:
   The managed bridge binds only to `127.0.0.1:8767`; port `8766` remains
   reserved for the Isaac Sim OMX mirror receiver. Wayland sessions are reported
   as unsupported instead of silently running degraded control.
+- Recording Equipment Skills requires `pynput>=1.7.7,<2` on the bridge host.
+  Browser-level validation of the Capability Lab and Program Manager examples
+  uses Selenium, Firefox, and geckodriver. The Python packages are declared in
+  `requirements.txt`; install Firefox/geckodriver through the host package or
+  Snap channel used by the workstation. These browser tools are validation-only
+  and are not required to execute an already registered Skill.
 - `ffmpeg` for the Bambu Lab live camera browser proxy. Without it, the Bambu
   video status API can still report that the printer's LAN video port is
   reachable, but `/api/printer/video-stream.mjpeg` stays unavailable.
@@ -1015,12 +1021,24 @@ Keep physical UTM data as the measured source of truth. CAE output is simulation
 
 Required when controlling Windows GUI/macros from the Equipment Agent:
 
+- Use `Pyautogui_server_for_window/requirements-windows.txt` in the bridge's
+  dedicated `.venv`. It installs PyAutoGUI, Pillow, OpenCV, pynput, pywinauto,
+  pytesseract, and the release builder. `pynput` is required for demonstration
+  recording; missing listeners fail closed instead of creating an empty
+  successful recording.
+- Image-first demonstration recording uses Pillow through PyAutoGUI to capture
+  bounded target crops. Install `opencv-python` to use confidence-based image
+  matching during replay.
+- Configure `WINDOWS_PYAUTOGUI_RECORDING_DIR` for persisted recordings and
+  `WINDOWS_PYAUTOGUI_ATR_API_URL` for Linux-authoritative Skill lifecycle
+  operations. Do not store ATR API/model credentials on Windows.
+
 - Windows PC on a reachable local network.
 - Python launcher on Windows (`py`).
-- PyAutoGUI installed on Windows:
+- Reproducible standalone installation on Windows:
 
 ```powershell
-py -m pip install pyautogui
+powershell -NoProfile -ExecutionPolicy Bypass -File .\Pyautogui_server_for_window\scripts\install_bridge.ps1
 ```
 
 Optional but recommended for UTM software that exposes Windows UI Automation selectors:
@@ -1031,6 +1049,12 @@ py -m pip install pywinauto
 
 When `pywinauto` is installed, UTM locators may use `locator_backend: uia` with `auto_id`, `title`/`name`, `control_type`, `class_name`, or `best_match`. The bridge tries UIA first, then falls back to PyAutoGUI image matching or explicit coordinates when configured.
 
+New recordings use `atr.equipment_recording.v2` with image tracking enabled and
+coordinate fallback disabled. Clicks record tight and contextual PNG targets;
+drags record source and destination targets. Replay searches the images first
+and returns `UI_LOCATOR_NOT_FOUND` with screen evidence instead of silently
+clicking the old coordinate. Legacy v1 coordinate recordings remain readable.
+
 Optional for OCR/text state checks used by `assert_text` and `wait_until_text`:
 
 ```powershell
@@ -1039,16 +1063,16 @@ py -m pip install pytesseract Pillow
 
 `pytesseract` requires the Tesseract OCR executable on Windows. Without it, required text checks fail closed and the Equipment Agent will not promote the run to Analysis.
 
-Run the tracked bridge server on Windows:
+Run the installed bridge on Windows:
 
 ```powershell
-py windows_pyautogui_bridge_server.py
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\Programs\ATR\PyAutoGUIBridge\scripts\run_bridge.ps1"
 ```
 
-Source file:
+Source package:
 
 ```text
-install/windows_pyautogui_bridge_server.py
+Pyautogui_server_for_window/
 ```
 
 Set the bridge token through an environment variable on Windows. Do not commit

@@ -1,0 +1,18 @@
+{
+  "schema": "atr.pyautogui_program.v1",
+  "program_id": "example_window_control",
+  "name": "Window control capability",
+  "description": "Activates, moves, resizes, minimizes, restores, and maximizes the lab window.",
+  "safe_test": true,
+  "example": {"family": "window", "manual_confirmation_required": false},
+  "sequence": [
+    {"action": "focus_window", "window": "PyAutoGUI Capability Lab", "required": false},
+    {"action": "window_activate", "title": "PyAutoGUI Capability Lab"},
+    {"action": "window_move", "title": "PyAutoGUI Capability Lab", "x": 40, "y": 40},
+    {"action": "window_resize", "title": "PyAutoGUI Capability Lab", "width": 1280, "height": 900},
+    {"action": "window_minimize", "title": "PyAutoGUI Capability Lab"},
+    {"action": "wait", "seconds": 0.5},
+    {"action": "window_restore", "title": "PyAutoGUI Capability Lab"},
+    {"action": "window_maximize", "title": "PyAutoGUI Capability Lab"}
+  ]
+}

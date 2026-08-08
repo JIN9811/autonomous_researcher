@@ -12,10 +12,12 @@ from typing import Any
 import pytest
 
 from agents.equipment_agent import LabEquipmentAgent
+from backends.llm_backend import LLMResponse
 from mcp_tools.equipment_tools import register_equipment_tools
 from mcp_tools.mock_tools import register_mock_tools
 from mcp_tools.tool_registry import ToolRegistry
 from orchestrator.state import Mode, OrchestratorState, Stage
+from utils.equipment_skill_runtime import EquipmentSkillRegistry, canonical_sha256
 
 
 class _CtxStub:
@@ -71,6 +73,147 @@ def _tools(tmp_path: Path) -> ToolRegistry:
         repo_root=tmp_path,
     )
     return tools
+
+
+def _saved_recording() -> dict[str, Any]:
+    return {
+        "schema": "atr.equipment_recording.v1",
+        "recording_id": "rec-agent-program1",
+        "name": "Program 1 Skill",
+        "target_app": "Program 1",
+        "target_window": "Program 1",
+        "status": "saved",
+        "events": [{"kind": "key_press", "at_ms": 10, "key": "enter"}],
+        "checkpoints": [],
+    }
+
+
+@pytest.mark.asyncio
+async def test_equipment_skill_executes_segments_without_llm_call(tmp_path: Path) -> None:
+    tools = _tools(tmp_path)
+    registry = EquipmentSkillRegistry(tmp_path / "skills")
+    registry.create_draft(
+        recording=_saved_recording(),
+        skill_id="program1_skill",
+        version="1.0.0",
+        target_profile="local_program1",
+        model_snapshot={"provider": "vllm", "model": "gemma4:e4b-it-nvfp4"},
+    )
+    package = registry.compile("program1_skill", "1.0.0")
+    registry.validate("program1_skill", "1.0.0")
+    for program in package["programs"]:
+        assert tools.call("equipment.pyautogui.register_program", {"runtime_mode": "test", "program": program})["ok"] is True
+    registry.mark_deployed(
+        "program1_skill",
+        "1.0.0",
+        bridge_id="simulator",
+        deployment_sha256=canonical_sha256(package["programs"]),
+    )
+    ctx = _CtxStub(tools, "must not be used")
+    state = _state(
+        experiment_spec={
+            "equipment_skill": {
+                "skill_id": "program1_skill",
+                "version": "1.0.0",
+                "target_profile": "local_program1",
+                "registry_root": str(tmp_path / "skills"),
+            }
+        }
+    )
+
+    result = await LabEquipmentAgent().run(state, ctx)
+
+    assert result.success is True
+    assert result.data["equipment_skill_execution"]["state"] == "COMPLETED"
+    assert result.data["equipment_handoff"]["status"] == "ready_for_analysis"
+    assert ctx.prompts == []
+
+
+@pytest.mark.asyncio
+async def test_equipment_skill_uses_one_exact_model_recovery_then_resumes(tmp_path: Path) -> None:
+    tools = _tools(tmp_path)
+    registry = EquipmentSkillRegistry(tmp_path / "skills")
+    registry.create_draft(
+        recording=_saved_recording(),
+        skill_id="program1_skill",
+        version="1.0.0",
+        target_profile="local_program1",
+        model_snapshot={"provider": "vllm", "model": "gemma4:e4b-it-nvfp4"},
+    )
+    package = registry.compile("program1_skill", "1.0.0")
+    registry.validate("program1_skill", "1.0.0")
+    registry.mark_deployed(
+        "program1_skill",
+        "1.0.0",
+        bridge_id="simulator",
+        deployment_sha256=canonical_sha256(package["programs"]),
+    )
+    program_id = package["programs"][0]["program_id"]
+    run_calls: list[dict[str, Any]] = []
+
+    def run(payload: dict[str, Any]) -> dict[str, Any]:
+        run_calls.append(dict(payload))
+        if payload.get("program_id") == program_id and sum(call.get("program_id") == program_id for call in run_calls) == 1:
+            return {
+                "ok": False,
+                "status": "blocked",
+                "failure_code": "PYAUTOGUI_WINDOW_NOT_FOUND",
+                "message": "target window focus was lost before actuation",
+                "executed_action_count": 0,
+                "screen_artifacts": [{"artifact_id": "screen-failure", "sha256": "a" * 64}],
+            }
+        return {"ok": True, "status": "completed", "program_id": payload.get("program_id", "recovery")}
+
+    tools.register("equipment.pyautogui.run", run)
+
+    class ExactBackend:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, Any]] = []
+
+        async def complete(self, **kwargs: Any) -> LLMResponse:
+            self.calls.append(dict(kwargs))
+            return LLMResponse(
+                text=json.dumps(
+                    {
+                        "schema": "atr.equipment_skill_recovery.v1",
+                        "operation": "focus_window",
+                        "payload": {"target_window": "Program 1"},
+                        "expected_verification": {"window_focused": True},
+                        "confidence": 0.93,
+                        "attempt": 1,
+                    }
+                ),
+                model=kwargs["model"],
+            )
+
+    backend = ExactBackend()
+    ctx = _CtxStub(tools, "fallback path must not be used")
+    ctx.active_backend = "vllm"
+    ctx.primary_backends = {"vllm": backend}
+    ctx.primary_backend = backend
+    state = _state(
+        experiment_spec={
+            "equipment_skill": {
+                "skill_id": "program1_skill",
+                "version": "1.0.0",
+                "target_profile": "local_program1",
+                "registry_root": str(tmp_path / "skills"),
+                "auto_recover": True,
+            }
+        }
+    )
+
+    result = await LabEquipmentAgent().run(state, ctx)
+
+    assert result.success is True
+    assert [call.get("program_id", "recovery") for call in run_calls] == [program_id, "recovery", program_id]
+    assert run_calls[1]["sequence"][0]["action"] == "focus_window"
+    assert len(backend.calls) == 1
+    assert backend.calls[0]["model"] == "gemma4:e4b-it-nvfp4"
+    assert backend.calls[0]["metadata"]["no_fallback"] is True
+    assert ctx.prompts == []
+    assert result.data["equipment_skill_execution"]["state"] == "COMPLETED"
+    assert result.data["equipment_skill_execution"]["recovery_history"][0]["operation"] == "focus_window"
 
 
 @pytest.mark.asyncio

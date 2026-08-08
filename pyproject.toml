@@ -30,6 +30,7 @@ dependencies = [
   "pyrealsense2==2.58.2.10647",
   "PyAutoGUI>=0.9.54",
   "python3-xlib>=0.15",
+  "pynput>=1.7.7,<2",
 ]
 
 [project.optional-dependencies]

@@ -5,6 +5,29 @@ ui:
   chat:
     mode: open_on_demand
   cards:
+  - id: equipment_skill_execution
+    type: evidence_summary
+    title: Equipment Skill Execution
+    eyebrow: deterministic runtime
+    span: 8
+    tone: equipment
+    selectors:
+      skill_id: metadata.equipment_skill_execution.skill_id
+      version: metadata.equipment_skill_execution.version
+      state: metadata.equipment_skill_execution.state
+      completed_segments: metadata.equipment_skill_execution.completed_segments
+      model: metadata.equipment_skill_execution.model_snapshot.model
+  - id: equipment_skill_recovery
+    type: evidence_summary
+    title: Recovery Boundary
+    eyebrow: bounded recovery
+    span: 4
+    tone: warning
+    selectors:
+      attempt: metadata.equipment_skill_execution.attempt
+      failed_segment: metadata.equipment_skill_execution.failed_segment
+      failure_code: metadata.equipment_skill_exception.failure_code
+      allowed_operations: metadata.equipment_skill_exception.allowed_recovery_operations
   - id: equipment_bridge_descriptor
     type: bridge_status
     title: Equipment Profile / Bridge

@@ -1,0 +1,17 @@
+{
+  "schema": "atr.pyautogui_program.v1",
+  "program_id": "example_file_wait",
+  "name": "File completion wait capability",
+  "description": "Template for waiting until an equipment export file exists and becomes stable.",
+  "safe_test": false,
+  "example": {"family": "timing", "manual_confirmation_required": false, "setup_required": "export pattern"},
+  "sequence": [
+    {
+      "action": "wait_for_file",
+      "pattern": "C:\\ATR\\utm_exports\\*.csv",
+      "timeout_s": 20.0,
+      "stable_for_sec": 2.0,
+      "required": true
+    }
+  ]
+}

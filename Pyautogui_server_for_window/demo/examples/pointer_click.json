@@ -1,0 +1,17 @@
+{
+  "schema": "atr.pyautogui_program.v1",
+  "program_id": "example_pointer_click",
+  "name": "Pointer and click capability",
+  "description": "Moves to and clicks the deterministic capability-lab target.",
+  "safe_test": true,
+  "example": {"family": "mouse", "manual_confirmation_required": false},
+  "sequence": [
+    {"action": "query_screen"},
+    {"action": "query_pointer"},
+    {"action": "move_to", "x": 210, "y": 210, "duration_sec": 0.3},
+    {"action": "move_rel", "x": 8, "y": 0, "duration_sec": 0.1},
+    {"action": "click", "x": 210, "y": 210, "button": "left"},
+    {"action": "double_click", "x": 210, "y": 210, "interval_sec": 0.08},
+    {"action": "triple_click", "x": 210, "y": 210, "interval_sec": 0.08}
+  ]
+}

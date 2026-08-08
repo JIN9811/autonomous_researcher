@@ -118,6 +118,7 @@ from utils.manipulation_profile import (
 from utils.recording_specimen_pose import load_recording_specimen_pose
 from utils.ids import make_event_id
 from utils.equipment_profiles import DEFAULT_UTM_PROFILE_ID, EquipmentProfileRegistry, build_execution_contract
+from utils.equipment_skill_runtime import EquipmentSkillRegistry, SkillContractError, canonical_sha256
 from utils.local_pyautogui_bridge import LocalPyAutoGUIBridgeSupervisor
 from utils.paths import resolve_path
 from utils.printer_profile import (
@@ -148,6 +149,7 @@ async def favicon() -> FileResponse:
 controller = load_runtime()
 AGENT_BASELINE_DOC_PATH = resolve_path("docs/runtime/agent_program_baseline.md")
 BO_WORKSPACE_SETTINGS_PATH = resolve_path("memory/bo_workspace_settings.json")
+EQUIPMENT_SKILL_ROOT = resolve_path("memory/equipment_skills")
 CAE_WORKSPACE_SETTINGS_PATH = resolve_path("memory/cae_workspace_settings.json")
 SELF_EVOLUTION_ROOT = resolve_path("memory/evolution")
 KNOWLEDGE_MEMORY_ROOT = resolve_path("memory/knowledge")
@@ -938,6 +940,42 @@ class EquipmentProfileActionRequest(BaseModel):
     confirm_execute: bool = False
     program_id: str = ""
     include_screenshot: bool = True
+
+
+class EquipmentSkillDraftRequest(BaseModel):
+    """Create one exact Skill draft from a saved operator demonstration."""
+
+    recording: dict[str, Any]
+    skill_id: str = Field(..., min_length=1, max_length=96)
+    version: str = Field(default="1.0.0", min_length=5, max_length=64)
+    target_profile: str = Field(..., min_length=1, max_length=96)
+
+
+class EquipmentSkillAnnotationRequest(BaseModel):
+    """Run selected-model annotation or persist reviewed annotations."""
+
+    annotations: dict[str, Any] = Field(default_factory=dict)
+    use_model: bool = True
+
+
+class EquipmentSkillDeploymentRequest(BaseModel):
+    """Bind one validated Skill version to an exact bridge deployment."""
+
+    bridge_id: str = Field(..., min_length=1, max_length=96)
+    deployment_sha256: str = Field(default="", min_length=0, max_length=64)
+
+
+class EquipmentSkillEnabledRequest(BaseModel):
+    """Enable or disable one exact deployed Skill version."""
+
+    enabled: bool
+
+
+class EquipmentSkillTestRequest(BaseModel):
+    """Execute an exact deployed Skill version through the configured bridge."""
+
+    runtime_mode: str = "test"
+    confirm_execute: bool = False
 
 
 class WindowsBridgeScreenshotRequest(BaseModel):
@@ -2000,11 +2038,13 @@ async def local_windows_equipment_console() -> HTMLResponse:
 async def proxy_windows_equipment_bridge_ui(resource_path: str, request: Request) -> Response:
     """Serve the selected Windows bridge GUI through ATR without exposing its token."""
     bridge = _equipment_bridge()
-    result = bridge.proxy_ui_request(
+    request_body = await request.body()
+    result = await asyncio.to_thread(
+        bridge.proxy_ui_request,
         method=request.method,
         resource_path=resource_path,
         query_string=request.url.query,
-        body=await request.body(),
+        body=request_body,
         content_type=request.headers.get("content-type", ""),
     )
     content = result.get("content", b"")
@@ -7882,7 +7922,6 @@ def _physical_validation_identity_gate(
         and str(source.get("status") or "") == "verified_complete"
     )
     identity_ok = bool(not missing and not mismatched)
-    screenshot_artifact = screenshot_result.get("artifact") if isinstance(screenshot_result.get("artifact"), dict) else {}
     evidence = {
         "dispatch_ok": dispatch_ok,
         "identity_ok": identity_ok,
@@ -10196,6 +10235,310 @@ async def post_windows_equipment_live_validation(req: WindowsBridgeLiveValidatio
         node_event=True,
     )
     return report
+
+
+def _equipment_skill_registry() -> EquipmentSkillRegistry:
+    return EquipmentSkillRegistry(EQUIPMENT_SKILL_ROOT)
+
+
+def _equipment_skill_success(package: dict[str, Any]) -> dict[str, Any]:
+    """Return one lifecycle package with the success flag expected by both GUIs."""
+    return {"ok": True, **package}
+
+
+def _equipment_skill_model_snapshot() -> dict[str, Any]:
+    """Snapshot the server-authoritative first inference route without secrets."""
+    ctx = controller._deps.agent_context
+    api_settings = _read_api_key_settings(import_env=False)
+    provider = "openai" if api_settings.get("enabled") and "openai" in ctx.primary_backends else ctx.active_backend
+    router = ctx.model_routers.get(provider, ctx.model_router)
+    selection = router.select("tool_formatting")
+    runtime_profile = dict(ctx.runtime_profiles.get(provider, {}))
+    backend_profile = runtime_profile.get("backend") if isinstance(runtime_profile.get("backend"), dict) else {}
+    return {
+        "provider": provider,
+        "model": selection.primary,
+        "role": selection.role,
+        "endpoint_profile": str(backend_profile.get("label") or provider),
+        "capabilities": {
+            "text": True,
+            "vision": bool(backend_profile.get("vision") or runtime_profile.get("vision")),
+        },
+        "snapshotted_at": datetime.now(timezone.utc).isoformat(),
+        "fallback_allowed": False,
+    }
+
+
+async def _annotate_equipment_skill_with_selected_model(package: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Call exactly one selected backend/model; never traverse the fallback chain."""
+    ctx = controller._deps.agent_context
+    snapshot = _equipment_skill_model_snapshot()
+    provider = str(snapshot["provider"])
+    model = str(snapshot["model"])
+    backend = ctx.primary_backends.get(provider)
+    if backend is None:
+        raise RuntimeError(f"selected backend unavailable: {provider}")
+    prepare_model = getattr(backend, "prepare_model", None)
+    if callable(prepare_model):
+        await prepare_model(model)
+    workflow = package.get("workflow") if isinstance(package.get("workflow"), dict) else {}
+    annotations = package.get("annotations") if isinstance(package.get("annotations"), dict) else {}
+    response = await backend.complete(
+        model=model,
+        system_prompt=(
+            "You annotate an already recorded bounded Windows equipment workflow. Return one JSON object only. "
+            "Preserve every step_id. For each step provide label, confidence from 0 to 1, review_required, "
+            "optional locator, and checkpoint_after. Do not add executable actions or credentials."
+        ),
+        user_prompt=json.dumps(
+            {"workflow": workflow, "current_annotations": annotations},
+            ensure_ascii=False,
+        ),
+        metadata={"task_type": "equipment_skill_annotation", "role": snapshot["role"], "no_fallback": True},
+    )
+    if not str(response.text or "").strip():
+        raise RuntimeError("selected model returned an empty annotation")
+    payload = _extract_json_object(response.text)
+    if not isinstance(payload.get("steps"), list):
+        raise RuntimeError("selected model annotation did not contain steps")
+    return payload, snapshot
+
+
+def _skill_contract_http_error(exc: SkillContractError) -> HTTPException:
+    message = str(exc)
+    status = 404 if "not found" in message.lower() else 409 if "already exists" in message.lower() else 400
+    return HTTPException(
+        status_code=status,
+        detail={"ok": False, "failure_code": "SKILL_CONTRACT_INVALID", "message": message},
+    )
+
+
+@app.get("/api/equipment/skills")
+async def get_equipment_skills() -> dict[str, Any]:
+    return {"ok": True, "skills": _equipment_skill_registry().list(), "root": str(EQUIPMENT_SKILL_ROOT)}
+
+
+@app.get("/api/equipment/skills/{skill_id}/{version}")
+async def get_equipment_skill(skill_id: str, version: str) -> dict[str, Any]:
+    try:
+        return _equipment_skill_registry().get(skill_id, version)
+    except SkillContractError as exc:
+        raise _skill_contract_http_error(exc) from exc
+
+
+@app.post("/api/equipment/skills/drafts")
+async def post_equipment_skill_draft(req: EquipmentSkillDraftRequest) -> dict[str, Any]:
+    try:
+        return _equipment_skill_success(
+            _equipment_skill_registry().create_draft(
+                recording=dict(req.recording),
+                skill_id=req.skill_id,
+                version=req.version,
+                target_profile=req.target_profile,
+                model_snapshot=_equipment_skill_model_snapshot(),
+            )
+        )
+    except SkillContractError as exc:
+        raise _skill_contract_http_error(exc) from exc
+
+
+@app.post("/api/equipment/skills/{skill_id}/{version}/annotate")
+async def post_equipment_skill_annotation(
+    skill_id: str,
+    version: str,
+    req: EquipmentSkillAnnotationRequest,
+) -> dict[str, Any]:
+    registry = _equipment_skill_registry()
+    try:
+        package = registry.get(skill_id, version)
+        annotations = dict(req.annotations)
+        snapshot = _equipment_skill_model_snapshot()
+        if req.use_model:
+            try:
+                annotations, snapshot = await _annotate_equipment_skill_with_selected_model(package)
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=503,
+                    detail={
+                        "ok": False,
+                        "failure_code": "SKILL_SELECTED_MODEL_UNAVAILABLE",
+                        "message": str(exc),
+                        "fallback_used": False,
+                        "model_snapshot": snapshot,
+                    },
+                ) from exc
+        return _equipment_skill_success(registry.annotate(skill_id, version, annotations, model_snapshot=snapshot))
+    except SkillContractError as exc:
+        raise _skill_contract_http_error(exc) from exc
+
+
+@app.post("/api/equipment/skills/{skill_id}/{version}/compile")
+async def post_equipment_skill_compile(skill_id: str, version: str) -> dict[str, Any]:
+    try:
+        return _equipment_skill_success(_equipment_skill_registry().compile(skill_id, version))
+    except SkillContractError as exc:
+        raise _skill_contract_http_error(exc) from exc
+
+
+@app.post("/api/equipment/skills/{skill_id}/{version}/validate")
+async def post_equipment_skill_validate(skill_id: str, version: str) -> dict[str, Any]:
+    try:
+        return _equipment_skill_registry().validate(skill_id, version)
+    except SkillContractError as exc:
+        raise _skill_contract_http_error(exc) from exc
+
+
+@app.post("/api/equipment/skills/{skill_id}/{version}/deploy")
+async def post_equipment_skill_deploy(
+    skill_id: str,
+    version: str,
+    req: EquipmentSkillDeploymentRequest,
+) -> dict[str, Any]:
+    registry = _equipment_skill_registry()
+    try:
+        package = registry.get(skill_id, version)
+        if package.get("manifest", {}).get("lifecycle") != "validated":
+            raise SkillContractError("Skill must be validated before deployment")
+        programs = [dict(item) for item in package.get("programs", []) if isinstance(item, dict)]
+        if not programs:
+            raise SkillContractError("Skill has no compiled programs to deploy")
+        expected_hashes = {str(item.get("program_id") or ""): canonical_sha256(item) for item in programs}
+        deployment_digest = canonical_sha256(expected_hashes)
+        if req.deployment_sha256 and req.deployment_sha256.lower() != deployment_digest:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "ok": False,
+                    "failure_code": "SKILL_DEPLOYMENT_HASH_MISMATCH",
+                    "message": "Requested deployment hash does not match the validated Skill package.",
+                    "expected_sha256": deployment_digest,
+                },
+            )
+        bridge = _equipment_bridge()
+        registered: list[str] = []
+        for program in programs:
+            program_id = str(program.get("program_id") or "")
+            result = bridge.register_program({"program": program, "force_live_bridge": True})
+            actual_hash = str(result.get("program_sha256") or "").lower()
+            if not result.get("ok") or actual_hash != expected_hashes.get(program_id):
+                for registered_id in reversed(registered):
+                    bridge.delete_program({"program_id": registered_id, "force_live_bridge": True})
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "ok": False,
+                        "failure_code": "SKILL_DEPLOYMENT_HASH_MISMATCH"
+                        if result.get("ok")
+                        else "SKILL_BRIDGE_REGISTRATION_FAILED",
+                        "message": str(result.get("message") or f"Bridge rejected exact program {program_id}."),
+                        "program_id": program_id,
+                        "expected_sha256": expected_hashes.get(program_id),
+                        "actual_sha256": actual_hash,
+                    },
+                )
+            registered.append(program_id)
+        return _equipment_skill_success(
+            registry.mark_deployed(
+                skill_id,
+                version,
+                bridge_id=req.bridge_id,
+                deployment_sha256=deployment_digest,
+                program_sha256=expected_hashes,
+            )
+        )
+    except SkillContractError as exc:
+        raise _skill_contract_http_error(exc) from exc
+
+
+@app.post("/api/equipment/skills/{skill_id}/{version}/enabled")
+async def post_equipment_skill_enabled(
+    skill_id: str,
+    version: str,
+    req: EquipmentSkillEnabledRequest,
+) -> dict[str, Any]:
+    try:
+        return _equipment_skill_success(_equipment_skill_registry().set_enabled(skill_id, version, req.enabled))
+    except SkillContractError as exc:
+        raise _skill_contract_http_error(exc) from exc
+
+
+@app.post("/api/equipment/skills/{skill_id}/{version}/test")
+async def post_equipment_skill_test(
+    skill_id: str,
+    version: str,
+    req: EquipmentSkillTestRequest,
+) -> dict[str, Any]:
+    registry = _equipment_skill_registry()
+    try:
+        package = registry.get(skill_id, version)
+        manifest = package["manifest"]
+        if manifest.get("lifecycle") != "deployed" or manifest.get("enabled") is False:
+            raise SkillContractError("exact Skill version must be deployed and enabled before test")
+        runtime_mode = str(req.runtime_mode or "test").strip().lower()
+        if runtime_mode == "live" and not req.confirm_execute:
+            raise SkillContractError("live Skill test requires confirm_execute=true")
+        bridge = _equipment_bridge()
+        results: list[dict[str, Any]] = []
+        for index, program_id in enumerate(package["workflow"].get("program_ids", []), start=1):
+            result = bridge.run(
+                {
+                    "program_id": str(program_id),
+                    "runtime_mode": runtime_mode,
+                    "confirm_execute": bool(req.confirm_execute),
+                    "force_live_bridge": True,
+                    "sequence_id": f"skill-test-{skill_id}-{version}-{index:03d}",
+                }
+            )
+            results.append(result)
+            if not result.get("ok"):
+                break
+        ok = bool(results) and all(item.get("ok") for item in results)
+        summary = {
+            "schema": "atr.equipment_skill_test.v1",
+            "ok": ok,
+            "status": "passed" if ok else "failed",
+            "runtime_mode": runtime_mode,
+            "program_results": results,
+            "tested_at": datetime.now(timezone.utc).isoformat(),
+        }
+        registry.record_test(skill_id, version, summary)
+        if not ok:
+            raise HTTPException(status_code=409, detail=summary)
+        return summary
+    except SkillContractError as exc:
+        raise _skill_contract_http_error(exc) from exc
+
+
+@app.delete("/api/equipment/skills/{skill_id}/{version}")
+async def delete_equipment_skill(skill_id: str, version: str) -> dict[str, Any]:
+    registry = _equipment_skill_registry()
+    try:
+        package = registry.get(skill_id, version)
+        if package["manifest"].get("lifecycle") == "deployed":
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "ok": False,
+                    "failure_code": "SKILL_DISABLE_REQUIRED",
+                    "message": "deployed Skill must be disabled before deletion",
+                },
+            )
+        bridge = _equipment_bridge()
+        for program_id in package["workflow"].get("program_ids", []):
+            result = bridge.delete_program({"program_id": str(program_id), "force_live_bridge": True})
+            if not result.get("ok") and result.get("failure_code") != "PYAUTOGUI_PROGRAM_NOT_FOUND":
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "ok": False,
+                        "failure_code": "SKILL_BRIDGE_DELETE_FAILED",
+                        "program_id": str(program_id),
+                        "message": result.get("message") or "Bridge program deletion failed.",
+                    },
+                )
+        return registry.delete(skill_id, version)
+    except SkillContractError as exc:
+        raise _skill_contract_http_error(exc) from exc
 
 
 def _equipment_profile_registry() -> EquipmentProfileRegistry:

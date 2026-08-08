@@ -6,6 +6,7 @@ import base64
 import hashlib
 from pathlib import Path
 
+import httpx
 import pytest
 
 from device_bridges.windows_pyautogui_bridge import (
@@ -46,6 +47,28 @@ def test_simulator_program1_returns_completion_log(tmp_path: Path) -> None:
     assert response["program_id"] == "program1"
     assert response["program_log"] == "program1 completed"
     assert any(step["step"] == "EXECUTE_PROGRAM" for step in response["step_trace"])
+
+
+def test_simulator_registers_and_executes_compiled_skill_program(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    program = {
+        "schema": "atr.pyautogui_program.v1",
+        "program_id": "program1_skill_1_0_0_segment_001",
+        "name": "Program 1 Skill segment",
+        "description": "compiled segment",
+        "enabled": True,
+        "program_type": "macro",
+        "safe_test": True,
+        "sequence": [{"action": "press", "key": "enter"}, {"action": "log", "message": "done"}],
+    }
+
+    registered = bridge.register_program({"runtime_mode": "test", "program": program})
+    result = bridge.run({"runtime_mode": "test", "program_id": program["program_id"], "sequence_id": "skill-seq-1"})
+
+    assert registered["ok"] is True
+    assert registered["program_sha256"]
+    assert result["ok"] is True
+    assert result["program_id"] == program["program_id"]
 
 
 def test_simulator_program1_reports_missing_pyautogui(tmp_path: Path) -> None:
@@ -117,6 +140,46 @@ def test_unknown_program_rejected_in_simulator(tmp_path: Path) -> None:
 
     assert response["ok"] is False
     assert response["failure_code"] == "PYAUTOGUI_PROGRAM_NOT_FOUND"
+
+
+def test_live_delete_program_preserves_remote_not_found(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    bridge = _bridge(tmp_path, mode="live", allow_live=True)
+    monkeypatch.setenv("WINDOWS_PYAUTOGUI_BRIDGE_URL", "http://127.0.0.1:8765")
+    monkeypatch.setenv("WINDOWS_PYAUTOGUI_BRIDGE_TOKEN", "token")
+
+    class _Client:
+        def __init__(self, timeout: float) -> None:
+            self.timeout = timeout
+
+        def __enter__(self) -> "_Client":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def delete(self, url: str, headers: dict[str, str]) -> httpx.Response:
+            request = httpx.Request("DELETE", url, headers=headers)
+            return httpx.Response(
+                404,
+                request=request,
+                json={
+                    "ok": False,
+                    "status": "not_found",
+                    "failure_code": "PYAUTOGUI_PROGRAM_NOT_FOUND",
+                    "program_id": "missing_skill_program",
+                },
+            )
+
+    monkeypatch.setattr("device_bridges.windows_pyautogui_bridge.httpx.Client", _Client)
+
+    response = bridge.delete_program(
+        {"program_id": "missing_skill_program", "runtime_mode": "live", "force_live_bridge": True}
+    )
+
+    assert response["ok"] is False
+    assert response["status"] == "not_found"
+    assert response["failure_code"] == "PYAUTOGUI_PROGRAM_NOT_FOUND"
+    assert response["program_id"] == "missing_skill_program"
 
 
 def test_live_execution_requires_explicit_allow_or_setup_confirmation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

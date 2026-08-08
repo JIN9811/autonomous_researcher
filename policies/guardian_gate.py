@@ -203,6 +203,59 @@ def gate_blocks_execution(gate: dict[str, Any]) -> bool:
     return str(gate.get("decision") or "") in {"block", "safe_stop"}
 
 
+def equipment_skill_recovery_gate(
+    *,
+    state: Any,
+    recovery: dict[str, Any],
+    allowed_operations: list[str] | tuple[str, ...] | set[str],
+    max_attempts: int = 1,
+) -> dict[str, Any]:
+    """Apply an independent Guardian bound to one non-physical Skill recovery proposal."""
+    operation = str(recovery.get("operation") or "").strip()
+    try:
+        attempt = int(recovery.get("attempt", 0))
+        confidence = float(recovery.get("confidence", 0.0))
+    except (TypeError, ValueError):
+        attempt, confidence = 0, 0.0
+    allowed = {str(item).strip() for item in allowed_operations if str(item).strip()}
+    rejected = operation not in allowed or not 1 <= attempt <= max(1, int(max_attempts)) or confidence < 0.6
+    gate = guardian_gate(
+        state=state,
+        stage="equipment",
+        phase="action",
+        payload={
+            "schema": recovery.get("schema") or "atr.equipment_skill_recovery.v1",
+            "operation": operation,
+            "attempt": attempt,
+            "confidence": confidence,
+        },
+        agent="equipment_agent",
+        tool="equipment.pyautogui.run",
+        action="skill_exception_recovery",
+    )
+    if not rejected:
+        return gate
+    reason = "EQUIPMENT_SKILL_RECOVERY_REJECTED"
+    gate["decision"] = "block"
+    gate["status"] = "blocked"
+    gate["reason_code"] = reason
+    gate["ok_for_next_stage"] = False
+    gate["alarms"] = [
+        *list(gate.get("alarms", [])),
+        {
+            "reason_code": reason,
+            "severity": "blocking",
+            "message": "Recovery operation, confidence, or attempt exceeds the deployed Skill boundary.",
+            "source_path": "equipment_skill_recovery",
+        },
+    ]
+    contract = gate.get("guardian_contract") if isinstance(gate.get("guardian_contract"), dict) else {}
+    contract.update({"status": "blocked", "failure_code": reason, "ok_for_next_stage": False})
+    decision = gate.get("guardian_decision") if isinstance(gate.get("guardian_decision"), dict) else {}
+    decision.update({"decision": "block", "reason_code": reason, "requires_human_approval": False})
+    return gate
+
+
 def tool_requires_action_shield(tool: str) -> bool:
     """Return True when a tool has physical, persistent, or runtime-mutating side effects."""
     name = str(tool or "").strip()

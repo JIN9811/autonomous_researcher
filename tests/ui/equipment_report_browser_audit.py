@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 """Browser-level audit for the Live GUI Lab Equipment UTM report.
 
-This verifies the operator-facing report surface that cannot be fully proven by
-backend tests alone:
+This verifies the operator-facing operations surface that cannot be fully proven
+by backend tests alone:
 - `/live` renders the Equipment selected-agent report at 1920x1080
-- the report uses the UTM visual-control/data-loop vocabulary, not generic macro text
-- screen assertions, Vision physical checks, UTM data ledger, and handoff gate
-  are visible in the actual DOM
+- bridge, active execution, recovery, progress, evidence, and handoff cards render
+- TEST/OPEN/REFRESH controls remain available without exposing execute controls
 - the page does not horizontally overflow the viewport
 
 It expects the FastAPI server to be running, default http://127.0.0.1:7862.
@@ -190,50 +189,48 @@ def run_audit(base_url: str, out_dir: Path, *, width: int, height: int, geckodri
             } catch (err) {}
             window.__liveGuiDebugSetState(payload);
             window.__liveGuiDebugRestoreOperatorReportState('equipment', 'report');
-            const report = document.querySelector('.live-agent-specific-equipment-details');
             const panel = document.getElementById('live-report-panel');
+            const cards = panel ? Array.from(panel.querySelectorAll('.ar-report-card')) : [];
             const text = panel ? (panel.innerText || panel.textContent || '') : '';
-            const headings = Array.from(document.querySelectorAll('.live-agent-specific-equipment-details h5')).map((item) => item.textContent || '');
+            const headings = cards.map((item) => item.querySelector('h4')?.textContent || '');
+            const actions = Array.from(panel?.querySelectorAll('[data-equipment-live-action]') || []).map((item) => item.textContent || '');
             const doc = document.documentElement;
-            const reportRect = report ? report.getBoundingClientRect() : null;
+            const reportRect = panel ? panel.getBoundingClientRect() : null;
             return {
-              ok: Boolean(report),
+              ok: cards.length >= 6,
               title: document.title,
               viewport: {width: window.innerWidth, height: window.innerHeight},
               scrollWidth: doc.scrollWidth,
               clientWidth: doc.clientWidth,
               reportRect: reportRect ? {x: reportRect.x, y: reportRect.y, width: reportRect.width, height: reportRect.height} : null,
               headings,
+              actions,
               text,
             };
             """,
             equipment_payload(),
         )
         required_text = [
-            "Lab Equipment / UTM Visual Control",
-            "Bridge / Protocol Profile",
-            "Screen-State Assertions",
-            "Vision Physical Cross-Checks",
-            "UTM Data Ledger",
-            "Handoff Gate / Blocking Reasons",
-            "Safety Gate / Guardian",
-            "Live Evidence Audit",
-            "Artifact / Evidence Ledger",
-            "Failure / Recovery",
+            "Bridge / Runtime",
+            "Active Program / Skill",
+            "Recovery Boundary",
+            "Agentic Progress",
+            "Execution Evidence",
+            "Handoff",
+            "Resolve",
+            "Validate",
+            "Execute",
+            "Verify",
             "utm_compression_start_v1",
             "ready_for_analysis",
-            "data_parse_probe_ok",
-            "save_export_responsibility_ok",
-            "Save/Export",
-            "time_s",
-            "displacement_mm",
-            "force_N",
         ]
         missing = [token for token in required_text if token not in result.get("text", "")]
         if missing:
             raise AssertionError(f"Equipment report missing required text: {missing}")
         if not result.get("ok"):
-            raise AssertionError("Equipment report detail container was not rendered")
+            raise AssertionError("Equipment operational dashboard was not rendered")
+        if result.get("actions") != ["TEST", "OPEN", "REFRESH"]:
+            raise AssertionError(f"Equipment header actions are incomplete: {result.get('actions')}")
         if result.get("scrollWidth", 0) > result.get("clientWidth", 0) + 24:
             raise AssertionError(f"Live GUI report horizontally overflows viewport: {result}")
         out_dir.mkdir(parents=True, exist_ok=True)

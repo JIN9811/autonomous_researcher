@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ATR Browser Form Workflow</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #121821;
+      --panel: #1d2734;
+      --line: #3f5369;
+      --text: #edf5fc;
+      --muted: #9fb1c3;
+      --accent: #36d399;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      background: linear-gradient(145deg, #0d131b, var(--bg));
+      color: var(--text);
+      font: 16px/1.45 "DejaVu Sans", sans-serif;
+    }
+    main {
+      width: min(620px, calc(100vw - 40px));
+      padding: 30px;
+      border: 1px solid var(--line);
+      background: var(--panel);
+      box-shadow: 0 24px 70px #0008;
+    }
+    h1 { margin: 0 0 6px; font-size: 24px; }
+    p { margin: 0 0 24px; color: var(--muted); }
+    label { display: grid; gap: 7px; margin: 16px 0; font-weight: 700; }
+    input, select, button {
+      min-height: 44px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 0 12px;
+      background: #101722;
+      color: var(--text);
+      font: inherit;
+    }
+    button {
+      width: 100%;
+      margin-top: 10px;
+      border-color: #2fa77c;
+      background: #187451;
+      cursor: pointer;
+      font-weight: 800;
+    }
+    #result {
+      min-height: 52px;
+      margin-top: 22px;
+      padding: 14px;
+      border-left: 4px solid var(--line);
+      background: #101722;
+      color: var(--muted);
+    }
+    #result[data-status="completed"] {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Equipment Skill Form</h1>
+    <p>Local deterministic target for recorded browser automation.</p>
+    <form id="workflow-form">
+      <label>Specimen name
+        <input id="name" name="name" autocomplete="off" required>
+      </label>
+      <label>Sample count
+        <input id="sample_count" name="sample_count" type="number" min="1" required>
+      </label>
+      <label>Workflow mode
+        <select id="mode" name="mode">
+          <option value="training">Training</option>
+          <option value="validation">Validation</option>
+          <option value="inference">Inference</option>
+        </select>
+      </label>
+      <button id="submit" type="submit">Run Local Validation</button>
+    </form>
+    <div id="result" role="status" aria-live="polite" data-status="idle">Waiting for submission</div>
+  </main>
+  <script>
+    document.getElementById("workflow-form").addEventListener("submit", (event) => {
+      event.preventDefault();
+      const name = document.getElementById("name").value.trim();
+      const count = document.getElementById("sample_count").value;
+      const mode = document.getElementById("mode").value;
+      const result = document.getElementById("result");
+      result.dataset.status = "completed";
+      result.textContent = `FORM WORKFLOW COMPLETED | ${name} | ${count} | ${mode}`;
+    });
+  </script>
+</body>
+</html>

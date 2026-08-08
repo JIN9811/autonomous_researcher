@@ -27,7 +27,7 @@ if (-not $Token) {
 
 Write-Host "Checking bridge: $Url"
 if ($Token) {
-    Write-Host "Using token: $Token"
+    Write-Host "Using configured bridge token."
     curl.exe -s -H "X-Bridge-Token: $Token" "$Url/health"
 } else {
     Write-Host "No token found. Request may return auth_required."

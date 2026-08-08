@@ -36,6 +36,10 @@ REQUIRED_IDS = (
     "managerSearch",
     "managerFilter",
     "managerStats",
+    "recordImageTracking",
+    "recordCoordinateFallback",
+    "recordToggle",
+    "recordingLocatorPreview",
     "newProgram",
     "browseProgram",
     "downloadProgramTemplate",
@@ -228,6 +232,51 @@ def run_audit(
         screenshot = out_dir / "windows_bridge_gui_browser_audit.png"
         driver.save_screenshot(str(screenshot))
         result["screenshot"] = str(screenshot)
+
+        driver.find_element(By.CSS_SELECTOR, '[data-manager-tab="record"]').click()
+        WebDriverWait(driver, 5).until(
+            lambda item: item.find_element(By.ID, "managerRecordView").is_displayed()
+        )
+        record_result = driver.execute_script(
+            """
+            const view = document.getElementById('managerRecordView');
+            const rect = view.getBoundingClientRect();
+            return {
+              visible: !view.hidden,
+              imageTracking: document.getElementById('recordImageTracking').checked,
+              coordinateFallback: document.getElementById('recordCoordinateFallback').checked,
+              toggleText: document.getElementById('recordToggle').textContent.trim(),
+              toggleState: document.getElementById('recordToggle').dataset.state,
+              legacyStart: Boolean(document.getElementById('recordStart')),
+              legacyStop: Boolean(document.getElementById('recordStop')),
+              width: rect.width,
+              previewText: document.getElementById('recordingLocatorPreview').textContent.trim(),
+            };
+            """
+        )
+        if not record_result.get("visible") or not record_result.get("imageTracking"):
+            raise AssertionError(f"Image-first recording controls are not active by default: {record_result}")
+        if record_result.get("coordinateFallback"):
+            raise AssertionError(f"Coordinate fallback must be disabled by default: {record_result}")
+        if record_result.get("toggleText") != "RECORD" or record_result.get("toggleState") != "idle":
+            raise AssertionError(f"Recording toggle did not initialize in idle state: {record_result}")
+        if record_result.get("legacyStart") or record_result.get("legacyStop"):
+            raise AssertionError(f"Legacy split recording controls remain visible: {record_result}")
+        driver.find_element(By.ID, "recordToggle").click()
+        WebDriverWait(driver, 2).until(
+            lambda item: item.find_element(By.ID, "recordToggle").text.startswith("STARTING IN ")
+        )
+        record_result["countdownText"] = driver.find_element(By.ID, "recordToggle").text
+        driver.find_element(By.ID, "recordToggle").click()
+        WebDriverWait(driver, 2).until(
+            lambda item: item.find_element(By.ID, "recordToggle").text == "RECORD"
+        )
+        record_result["cancelledText"] = driver.find_element(By.ID, "recordToggle").text
+        driver.find_element(By.ID, "managerRecordView").location_once_scrolled_into_view
+        record_screenshot = out_dir / f"windows_bridge_gui_record_{width}x{height}.png"
+        driver.save_screenshot(str(record_screenshot))
+        result["record"] = record_result
+        result["record_screenshot"] = str(record_screenshot)
 
         advanced_result = driver.execute_script(
             """

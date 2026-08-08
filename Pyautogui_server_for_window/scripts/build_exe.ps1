@@ -31,7 +31,7 @@ function Resolve-Python {
 $pythonCmd = Resolve-Python -ExplicitPython $Python
 
 if ($InstallBuildDeps) {
-    & $pythonCmd -m pip install --upgrade pyinstaller pyautogui
+    & $pythonCmd -m pip install -r (Join-Path $projectRoot "requirements-windows.txt")
 }
 
 try {
@@ -47,8 +47,13 @@ $hiddenImports = @(
     "--hidden-import=pygetwindow",
     "--hidden-import=pymsgbox",
     "--hidden-import=pytweening",
-    "--hidden-import=PIL"
+    "--hidden-import=PIL",
+    "--hidden-import=cv2",
+    "--hidden-import=pynput",
+    "--hidden-import=pywinauto",
+    "--hidden-import=pytesseract"
 )
+$demoData = "$projectRoot\demo;demo"
 
 & $pythonCmd -m PyInstaller `
     --noconfirm `
@@ -59,6 +64,7 @@ $hiddenImports = @(
     --distpath (Join-Path $projectRoot "dist") `
     --workpath (Join-Path $projectRoot "build\pyinstaller") `
     --specpath (Join-Path $projectRoot "build") `
+    --add-data $demoData `
     $hiddenImports `
     (Join-Path $projectRoot "bridge\windows_pyautogui_bridge_server.py")
 

@@ -1,5 +1,46 @@
 # Windows PyAutoGUI Bridge Setup Guide
 
+## Current Standalone Deployment
+
+The canonical deployment is the complete `Pyautogui_server_for_window`
+package, not the compatibility copy in `install/`. Install and start it from an
+interactive Windows user session:
+
+```text
+Double-click INSTALL_WINDOWS_BRIDGE.cmd from any extracted directory.
+```
+
+The launcher resolves its own directory, installs the dedicated environment,
+creates Desktop and Start Menu shortcuts, and starts the bridge. The equivalent
+manual commands are:
+
+```powershell
+cd C:\path\to\Pyautogui_server_for_window
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install_bridge.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_bridge.ps1 -OpenBrowser -ShowToken
+```
+
+The installer creates a package-specific `.venv`. Mutable artifacts, locators,
+UTM exports, registered programs, recordings, and the protected token are all
+stored under `%LOCALAPPDATA%\ATR\PyAutoGUIBridge`. Use
+`-RegisterLogonTask` only when logon startup is wanted. A Windows service is
+not supported because PyAutoGUI requires the interactive desktop.
+
+Before deployment approval, run the non-actuating checks and then the explicit
+Windows-native acceptance:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check_bridge.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\native_acceptance.ps1
+# Moves the pointer only when explicitly approved:
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\native_acceptance.ps1 -RunProgram1
+```
+
+Linux/X11/Xvfb evidence validates the protocol and demo logic but does not
+constitute Windows-native acceptance. The acceptance JSON records the actual
+Windows host, desktop readiness, dependency readiness, assets, and optional
+bounded Program 1 result.
+
 ## Common Equipment Profile Use
 
 The Windows package remains the execution driver for the Lab Equipment
@@ -74,10 +115,61 @@ The page contains these operator areas:
 3. **Evidence**: result trace, screenshots, artifacts, request audit, proof checklist, and run timeline.
 4. **Program Manager**: search, filter, inspect built-ins, and edit, enable, validate, test, or delete registered custom JSON macros.
 5. **Browse / Template / Add**: `Browse JSON` loads a definition into the editor only, `Download Template` saves an editable starter file, and `Add to Registry` validates and persists the macro.
+6. **Capability Examples**: `EXAMPLES` loads eight read-only examples into the editor and opens a deterministic local Capability Lab. Loading an example never registers or deploys it.
 
 Simplification means grouping and labeling controls. It must not delete a backend-supported function or remove its only operator UI. Program Manager supplements the fixed bridge controls; it does not replace them.
 
 The default registry contains `program1`, `utm_compression_start_v1`, `utm_export_csv_v1`, `utm_manual_save_csv_v1`, and `utm_stop_or_abort_v1`.
+
+### Recording And Skill Management
+
+Program Manager provides `PROGRAMS`, `EXAMPLES`, `RECORD`, and `SKILLS` tabs. Recording is optional
+and requires `pynput`; ordinary registered-program execution does not.
+
+```powershell
+py -m pip install "pynput>=1.7.7,<2" Pillow opencv-python
+$env:WINDOWS_PYAUTOGUI_RECORDING_DIR = "C:\ATR\recordings"
+$env:WINDOWS_PYAUTOGUI_ATR_API_URL = "http://<linux-atr-host>:7860"
+py windows_pyautogui_bridge_server.py --recording-dir "C:\ATR\recordings"
+```
+
+Recording routes are authenticated with the existing bridge token:
+
+- `GET /recordings`, `GET /recordings/status`, `GET /recordings/{recording_id}`
+- `POST /recordings/start`, `/recordings/checkpoint`, `/recordings/stop`
+- `POST /recordings/{recording_id}/save`
+
+The Record page uses one `RECORD` button for both start and stop. The first
+click runs a five-second preparation countdown; clicking again during the
+countdown cancels it. After the countdown, the button changes to
+`STOP RECORDING` and a small borderless Windows topmost banner shows a red
+recording dot and the elapsed `HH:MM:SS` time. Clicking the same button stops
+the listeners and removes the banner. Refreshing the page restores the button
+from `/recordings/status`. Bridge shutdown also stops an active recording and
+removes the native banner. If Tkinter cannot create a desktop window, recording
+continues and only the optional indicator is reported unavailable.
+
+The recorder captures sampled pointer motion, click-versus-drag transitions,
+two-axis scroll events, key/hotkey events, and explicit screenshot checkpoints.
+New recordings are image-first (`atr.equipment_recording.v2`). At pointer press
+the bridge keeps local full-frame evidence and embeds bounded 64x64 tight and
+192x128 contextual PNG crops in the portable recording. A drag additionally
+captures its release target. Full frames are not forwarded inside the Skill.
+Consecutive printable keys compile into one bounded `write` action; special
+keys and shortcuts remain explicit. Only one recording may be active. Stop and
+save are idempotent. The recorder cannot infer whether an arbitrary third-party
+field contains a credential, so never record password, token, or secret entry.
+`Image tracking` is enabled by default. `Allow coordinate fallback` is disabled
+by default and must remain off unless an operator has reviewed the exact target
+window and accepts coordinate replay. Missing required locator images block
+draft compilation or replay; they never trigger an implicit coordinate click.
+The Record tab shows locator readiness and both crop previews before draft
+creation. Inline crops are SHA-256 verified, PNG-only, and bounded to 256 KiB
+per crop, 32 MiB per recording, and 200 pointer events.
+Create Draft forwards the exact saved
+recording to Linux; Skill lifecycle actions proxy `/api/equipment/skills/*`.
+Test uses the deployed exact version in test mode. Delete requires Disable
+first. The Windows browser never receives ATR model credentials.
 
 Custom macros are stored as one validated JSON file per program under
 `WINDOWS_PYAUTOGUI_PROGRAM_DIR` (default `C:\ATR\programs`). Built-in programs
@@ -87,6 +179,35 @@ directory. Only authenticated `POST /programs/register` persists a definition;
 accepts only schema `atr.pyautogui_program.v1` and bounded bridge actions, so
 the manager cannot register arbitrary shell scripts or executables. Test uses
 the existing authenticated `POST /execute` contract.
+
+### Capability Lab And Safe Examples
+
+Open `EXAMPLES -> Open Capability Lab`. The lab supplies deterministic targets
+for mouse, drag/scroll, keyboard/shortcut, visual/pixel, window, and manual
+dialog examples. The authenticated read-only routes are:
+
+- `GET /capabilities`: supported action families and explicit exclusions.
+- `GET /examples`: eight validated example definitions. Five are bounded safe tests; image calibration, export-file waiting, and operator dialogs remain explicit manual examples.
+- `GET /examples/<example_id>`: one exact example definition.
+- `GET /capability-lab`: local target page; no bridge token is embedded.
+
+`Run Safe Test` is enabled only for examples with `safe_test=true`. Manual
+dialogs stay disabled in unattended test mode and require
+`confirm_execute=true`. Supported bounded actions include relative/absolute
+movement, click variants, mouse down/up, drag, vertical/horizontal scroll,
+write/press/hotkey/key down/up, screenshot regions, image/pixel checks, and
+window activate/minimize/maximize/restore/move/resize. Any held button or key is
+released in a `finally` cleanup on both success and failure. PyAutoGUI fail-safe
+must remain enabled.
+
+Together, the eight examples cover every action exposed by the safe-core
+capability catalog, including relative movement, triple click, explicit
+button/key down-up, relative drag, image matching, stable-file waiting, and
+window focus. The image and file examples are templates: configure their
+locator/export path before registering and running them.
+
+Excluded by design: shell commands, arbitrary Python, file deletion, password
+entry, window close, and process termination.
 
 The Windows console exposes local UTM readiness and evidence operations, while the Linux Lab Equipment Workspace remains authoritative for orchestration and final handoff trust. When opened through ATR, the proxy injects
 the saved token. When opened directly on Windows, a manually entered token is
@@ -546,18 +667,16 @@ Remove-NetFirewallRule -DisplayName "Autonomous Researcher PyAutoGUI Bridge"
 7. Starting The Bridge
 ============================================================
 
-The exact command depends on the bridge server implementation file.
-
-Recommended future file location in this project:
+The canonical package location in this project is:
 
 ```text
-install/windows_pyautogui_bridge_server.py
+Pyautogui_server_for_window/
 ```
 
 Expected start command on Windows:
 
 ```powershell
-py C:\path\to\windows_pyautogui_bridge_server.py
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_bridge.ps1 -ShowToken
 ```
 
 The bridge should print:
@@ -569,7 +688,8 @@ PyAutoGUI available: true|false
 PyAutoGUI FAILSAFE: True when available
 ```
 
-Keep this terminal open during live operation unless the bridge is installed as a Windows service later.
+Keep this terminal open during live operation, or install the optional
+interactive-logon Scheduled Task. Do not run the bridge as a Windows service.
 
 ============================================================
 8. Linux Server Configuration
@@ -816,7 +936,8 @@ As of this document:
 
 - The Linux-side bridge client exists in `device_bridges/windows_pyautogui_bridge.py`.
 - MCP tool registration exists through `mcp_tools/equipment_tools.py`.
-- The Windows helper exists in `install/windows_pyautogui_bridge_server.py`.
+- The standalone Windows package exists in `Pyautogui_server_for_window/`.
+- `install/windows_pyautogui_bridge_server.py` is a byte-identical compatibility copy for repository tests, not a standalone deployment artifact.
 - `/health`, `/programs`, `/execute`, `/artifacts`, and `/artifacts/{artifact_id}` are supported by the helper.
 - `program1` remains only a connectivity demo and must not be treated as UTM completion.
 - `utm_compression_start_v1` is the registered UTM protocol used by Equipment Agent for Analysis handoff.
@@ -1452,3 +1573,59 @@ python tests/ui/windows_bridge_gui_browser_audit.py \
   --width 1366 --height 768 \
   --out-dir artifacts/ui/windows_bridge_advanced_1366
 ```
+
+## Inline Advanced Visual Work Queue Reproduction
+
+The advanced work-queue verification runs on Linux against the exact packaged
+Windows bridge source. It uses an isolated X11 display and bridge port so the
+ATR main GUI on `7860` and active model servers are not restarted or modified.
+
+Required local components are Tkinter, PyAutoGUI, pynput, Pillow, OpenCV,
+pytest, and Xvfb. Install them through the project requirements before running
+these commands; do not substitute another bridge implementation.
+
+Run the focused contracts:
+
+```bash
+.venv/bin/pytest -q \
+  tests/unit/test_advanced_visual_work_queue_demo.py \
+  tests/unit/test_advanced_visual_work_queue_e2e.py \
+  tests/unit/test_equipment_skill_runtime.py \
+  tests/unit/test_windows_pyautogui_bridge_server_helper.py \
+  tests/unit/test_windows_pyautogui_demo_assets.py
+```
+
+Create and verify a new immutable Skill version:
+
+```bash
+.venv/bin/python scripts/advanced_visual_work_queue_e2e.py \
+  --scenario all \
+  --version 1.0.6 \
+  --display :99 \
+  --bridge-port 8878
+```
+
+Use a higher unused version for later recordings. Use `--reuse-skill` only to
+replay an already validated package without lifecycle mutation. The runner
+refuses port `7860`.
+
+Expected evidence:
+
+```text
+runs/equipment_skill_advanced_queue_e2e/e2e_summary.json
+runs/equipment_skill_advanced_queue_e2e/evidence/recorded_before.png
+runs/equipment_skill_advanced_queue_e2e/evidence/recorded_validation_failed.png
+runs/equipment_skill_advanced_queue_e2e/evidence/recorded_completed.png
+runs/equipment_skill_advanced_queue_e2e/evidence/recorded_exported.png
+runs/equipment_skill_advanced_queue_e2e/evidence/shifted_reordered_before.png
+runs/equipment_skill_advanced_queue_e2e/evidence/shifted_reordered_exported.png
+runs/equipment_skill_advanced_queue_e2e/demo_runtime/output/advanced_queue_result.json
+runs/equipment_skill_advanced_queue_e2e/demo_runtime/output/advanced_queue_result.csv
+memory/equipment_skills/advanced_visual_work_queue_demo/1.0.6/
+```
+
+Success requires shifted/reordered replay to export `specimen-beta`,
+`Compression`, `evidence_enabled=true`, and `load_limit=12.5` after exactly one
+bounded recovery. The missing-target scenario is successful only when replay
+returns `UI_LOCATOR_NOT_FOUND`, preserves an empty queue, performs zero analysis
+attempts, and writes screenshot evidence without creating JSON or CSV output.

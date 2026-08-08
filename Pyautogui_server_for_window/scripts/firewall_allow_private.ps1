@@ -1,6 +1,7 @@
 param(
     [int]$Port = 8765,
-    [string]$RemoteAddress = ""
+    [string]$RemoteAddress = "",
+    [switch]$AllowPrivateSubnet
 )
 
 $ErrorActionPreference = "Stop"
@@ -20,8 +21,14 @@ $params = @{
     Profile = "Private"
 }
 
+if (-not $RemoteAddress -and -not $AllowPrivateSubnet) {
+    throw "Pass -RemoteAddress <Linux-controller-IP> or explicitly opt in with -AllowPrivateSubnet."
+}
+
 if ($RemoteAddress) {
     $params.RemoteAddress = $RemoteAddress
+} else {
+    $params.RemoteAddress = "LocalSubnet"
 }
 
 New-NetFirewallRule @params
@@ -30,5 +37,5 @@ Write-Host "Port: $Port"
 if ($RemoteAddress) {
     Write-Host "RemoteAddress: $RemoteAddress"
 } else {
-    Write-Host "RemoteAddress: any private-profile host"
+    Write-Host "RemoteAddress: LocalSubnet (explicit opt-in)"
 }

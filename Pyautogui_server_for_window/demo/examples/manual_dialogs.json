@@ -1,0 +1,12 @@
+{
+  "schema": "atr.pyautogui_program.v1",
+  "program_id": "example_manual_dialogs",
+  "name": "Manual dialog capability",
+  "description": "Demonstrates blocking operator dialogs; never runs as an unattended safe test.",
+  "safe_test": false,
+  "example": {"family": "dialog", "manual_confirmation_required": true},
+  "sequence": [
+    {"action": "alert", "text": "ATR manual dialog capability check", "title": "ATR Equipment Skill"},
+    {"action": "confirm", "text": "Continue the manual capability check?", "title": "ATR Equipment Skill", "buttons": ["Continue", "Cancel"]}
+  ]
+}

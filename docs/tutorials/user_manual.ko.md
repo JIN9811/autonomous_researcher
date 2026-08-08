@@ -219,18 +219,61 @@ Live GUI agent 목록은 `web/static/planning.js` 하드코딩 값보다 `/api/r
 
 ### 2.3 Windows PyAutoGUI Bridge
 
+#### 녹화 기반 Equipment Skill
+
+처음 사용하는 기능은 Windows 로컬 Program Manager의 `EXAMPLES` 탭에서
+확인한다. `Open Capability Lab`은 마우스, 드래그/스크롤, 키보드/단축키,
+화면/픽셀, 창 제어를 시험할 수 있는 로컬 페이지를 연다. `Load Example`은
+JSON 편집기에만 불러오며 등록하지 않는다. `Run Safe Test`는 안전 예제만
+실행되고 수동 대화상자 예제에는 비활성화된다.
+
+기본 예제는 총 8개다. 마우스 고급 동작, 키 입력 수명주기, 화면/픽셀,
+창 제어를 포함한 5개 예제는 제한된 안전 테스트로 실행할 수 있다. 이미지
+탐색, 장비 출력 파일 대기, 운영자 대화상자 예제는 실제 locator/경로 또는
+확인이 필요하므로 자동 실행되지 않는다. 8개 예제를 합치면 브리지에서
+공개한 안전 코어 액션 전체를 확인할 수 있다.
+
+Windows 로컬 Program Manager의 `RECORD` 탭에서 대상 창을 지정하고
+`Record -> Checkpoint -> Stop -> Save` 순서로 데모를 저장한다. 저장된
+recording을 선택해 Skill ID, version, target profile을 입력하고 `Create
+Draft Skill`을 누른다.
+
+녹화기는 클릭과 드래그를 구분하고 가로/세로 스크롤을 보존한다. 연속
+문자는 하나의 `write` 액션으로 정리되며 단축키와 특수키는 별도 액션으로
+남는다. 선택한 녹화의 `Coverage`에서 실제 포함된 기능군을 확인한다.
+비밀번호, 토큰, API key를 입력하는 과정은 녹화하지 않는다.
+
+새 녹화는 이미지 추적이 기본으로 켜진 `atr.equipment_recording.v2`다.
+클릭 위치의 작은 target crop과 주변 문맥 crop을 함께 저장하며, 드래그는
+시작점과 종료점을 각각 저장한다. `Coverage` 옆의 image locator 준비 수와
+아래 미리보기에서 실제 대상이 잘렸는지 확인한다. `Allow coordinate
+fallback`은 기본 해제 상태로 둔다. 이 옵션을 켜지 않은 상태에서 대상
+이미지를 찾지 못하면 브리지는 현재 화면 증거를 남기고 멈추며, 녹화 당시
+좌표를 임의로 클릭하지 않는다. 기존 v1 recording만 호환을 위해 좌표
+방식으로 읽을 수 있다.
+
+`SKILLS` 탭에서는 같은 정확 버전에 대해 `Annotate -> Compile -> Validate
+-> Deploy -> Test`를 수행한다. 배포 버전을 지우려면 먼저 Disable 해야
+한다. Test는 물리 동작 없는 test mode가 기본이며 live 시험은 Linux API
+에서 명시적 실행 확인이 필요하다.
+
+정상 Skill 실행은 LLM을 호출하지 않는다. 예외 복구가 필요한 경우에만
+Skill에 기록된 정확 provider/model을 한 번 호출하며 다른 모델로
+폴백하지 않는다. 실행 상태와 복구 경계는 Live GUI의 Equipment 보고서에
+표시된다.
+
 설정 위치:
 
 - GUI: `/equipment/windows`
-- Windows server: `install/windows_pyautogui_bridge_server.py`
+- Windows server package: `Pyautogui_server_for_window/`
 - 연결 memory: `memory/windows_pyautogui_connection.json`
 
 Windows에서:
 
 ```powershell
-py -m pip install pyautogui
-$env:WINDOWS_PYAUTOGUI_BRIDGE_TOKEN = "<token>"
-py windows_pyautogui_bridge_server.py
+cd .\Pyautogui_server_for_window
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install_bridge.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_bridge.ps1 -ShowToken
 ```
 
 GUI에서:

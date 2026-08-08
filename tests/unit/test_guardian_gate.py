@@ -5,7 +5,7 @@ Unit tests for graph-wide Guardian gate alarm normalization.
 from __future__ import annotations
 
 from orchestrator.state import Mode, OrchestratorState, Stage
-from policies.guardian_gate import gate_blocks_execution, guardian_gate
+from policies.guardian_gate import equipment_skill_recovery_gate, gate_blocks_execution, guardian_gate
 
 
 def _state(stage: Stage = Stage.MANIPULATION) -> OrchestratorState:
@@ -32,6 +32,26 @@ def test_guardian_gate_blocks_boolean_workflow_alarm() -> None:
     assert gate["incident_records"]
     assert gate["corrective_actions"]
     assert any(alarm["reason_code"] == "MISSING_REQUIRED_INPUT" for alarm in gate["alarms"])
+
+
+def test_equipment_skill_recovery_gate_blocks_unbounded_or_disallowed_recovery() -> None:
+    allowed = equipment_skill_recovery_gate(
+        state=_state(Stage.EQUIPMENT),
+        recovery={"operation": "focus_window", "attempt": 1, "confidence": 0.91},
+        allowed_operations=["focus_window", "screenshot"],
+        max_attempts=1,
+    )
+    blocked = equipment_skill_recovery_gate(
+        state=_state(Stage.EQUIPMENT),
+        recovery={"operation": "click", "attempt": 2, "confidence": 0.99},
+        allowed_operations=["focus_window", "screenshot"],
+        max_attempts=1,
+    )
+
+    assert gate_blocks_execution(allowed) is False
+    assert blocked["decision"] == "block"
+    assert blocked["reason_code"] == "EQUIPMENT_SKILL_RECOVERY_REJECTED"
+    assert gate_blocks_execution(blocked) is True
 
 
 def test_guardian_gate_routes_human_approval_without_execution_block() -> None:

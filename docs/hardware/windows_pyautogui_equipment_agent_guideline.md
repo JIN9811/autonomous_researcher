@@ -1,5 +1,92 @@
 # Windows PyAutoGUI Equipment Agent Runtime Guideline
 
+## Recorded Equipment Skills
+
+New operator demonstrations use `atr.equipment_recording.v2` and image-first
+pointer targets. Click replay resolves a SHA-256-verified tight/context PNG pair;
+drag replay resolves separate source and destination pairs. Recorded x/y values
+are evidence only unless the operator explicitly enabled coordinate fallback.
+Required image misses save current-screen evidence and return
+`UI_LOCATOR_NOT_FOUND`; they do not silently execute the recorded coordinate.
+Legacy v1 coordinate recordings remain supported for compatibility.
+
+The Equipment stage can run a versioned recorded Skill without adding another
+top-level agent or graph stage. Linux is authoritative for Skill packages and
+execution state; Windows records demonstrations and executes the compiled
+bounded programs.
+
+Runtime path:
+
+`EquipmentAgent -> equipment.pyautogui.run -> WindowsPyAutoGUIBridge -> exact registered atr.pyautogui_program.v1 segment`
+
+Normal execution is deterministic and does not call an LLM. Annotation and a
+single bounded pre-actuation recovery decision use the provider/model snapshot
+stored with the Skill. If that exact model is unavailable, the operation is
+reported as unavailable; no model fallback is attempted. Windows stores no API
+key and exposes no model selector.
+
+Lifecycle:
+
+`recording -> draft -> annotated -> compiled -> validated -> deployed -> tested -> disabled -> deleted`
+
+- One exact `skill_id@version` is selected; there is no latest-version fallback.
+- Compilation preserves the 100-action maximum per registered segment.
+- Deployment verifies every canonical program SHA-256 before marking the Skill
+  deployed.
+- Deletion is blocked until the deployed version is disabled.
+- Recovery is limited to allowlisted pre-actuation operations and one Guardian-
+  approved attempt. Partial actuation escalates instead of replaying blindly.
+
+Authoritative storage:
+
+- Skill package: `memory/equipment_skills/<skill_id>/<version>/`
+- Execution state: `memory/equipment_skill_executions/<execution_id>/state.json`
+- Windows recordings: `WINDOWS_PYAUTOGUI_RECORDING_DIR`, default
+  `C:\ATR\recordings`
+
+The Windows Program Manager provides `PROGRAMS`, `EXAMPLES`, `RECORD`, and
+`SKILLS` tabs. `EXAMPLES` is a read-only catalog backed by `GET /examples`; it
+loads definitions into the normal editor without implicit registration. The
+local Capability Lab is served at `/capability-lab`.
+The eight bundled definitions collectively cover the complete exposed
+safe-core action catalog. Five coordinate-bounded examples are directly
+testable; image matching, stable-file waiting, and operator dialogs require
+their explicit setup or confirmation before execution.
+Its Test/Delete controls proxy the same Linux API used by CUI clients. Live GUI
+projects the exact version, target profile, completed segments, model snapshot,
+exception boundary, and recovery history into the Equipment report.
+
+Recording normalization classifies click and drag on button release, suppresses
+intermediate drag motion, captures horizontal/vertical scroll, and compacts
+consecutive printable keys into one `write` action. Every draft stores
+`capability_coverage` in both `manifest.json` and `workflow.json`, allowing GUI
+and CUI clients to inspect the exact mouse/keyboard/screen families exercised by
+the demonstration. Credentials must never be entered while recording because a
+global input recorder cannot reliably identify secret fields in third-party
+applications.
+
+The bounded runtime action surface covers mouse, keyboard, screen/pixel, window,
+timing, and manually confirmed dialog families. Runtime validation rejects
+out-of-screen absolute coordinates, unbounded repeats, oversized scrolls,
+invalid regions/colors, and unattended dialogs. A final cleanup releases held
+mouse buttons and keyboard keys on all exits. Shell execution, arbitrary Python,
+file deletion, password entry, window close, and process termination remain
+outside the Equipment Skill contract.
+
+HTTP/CUI examples:
+
+```bash
+curl -s http://127.0.0.1:7860/api/equipment/skills
+curl -s -X POST http://127.0.0.1:7860/api/equipment/skills/demo/1.0.0/test \
+  -H 'Content-Type: application/json' \
+  -d '{"runtime_mode":"test","confirm_execute":false}'
+curl -s -X POST http://127.0.0.1:7860/api/equipment/skills/demo/1.0.0/enabled \
+  -H 'Content-Type: application/json' -d '{"enabled":false}'
+curl -s -X DELETE http://127.0.0.1:7860/api/equipment/skills/demo/1.0.0
+```
+
+Live testing requires `runtime_mode=live` and `confirm_execute=true`.
+
 ## Common Equipment Workspace
 
 `/equipment/windows` is the common Lab Equipment Workspace. It selects a
@@ -1069,7 +1156,8 @@ Additional 2026-05-29 passive UTM readiness console update:
 
 Additional 2026-05-30 packaged Windows server update:
 
-- The project now keeps a Windows-distribution package under `Pyautogui_server_for_window/` in addition to the canonical helper under `install/windows_pyautogui_bridge_server.py`.
+- The canonical Windows distribution is `Pyautogui_server_for_window/`.
+  `install/windows_pyautogui_bridge_server.py` remains a byte-identical compatibility copy and must not be deployed without the package assets.
 - The packaged server is no longer limited to `program1`; it exposes the same UTM-oriented registered programs needed by the autonomous Equipment Agent: `utm_compression_start_v1`, `utm_export_csv_v1`, `utm_manual_save_csv_v1`, and `utm_stop_or_abort_v1`.
 - The packaged server supports artifact and calibration endpoints expected by the Linux bridge client: `/screenshot`, `/locators`, `/locators/capture`, `/artifacts`, and `/artifacts/<artifact_id>`.
 - The packaged Web GUI includes a bench-only UTM simulation trigger so operators can verify the endpoint/artifact contract before using a real UTM export folder.
@@ -2183,3 +2271,45 @@ If any checkpoint is missing, duplicated, or backed by a non-image file, the bri
 `scripts/lab_equipment_live_utm_validation.py` now checks the active UTM profile before a physical CLI run. The runner verifies the selected `program_id`, export glob, `require_screen_assertions`, locator coverage for ready/start/running/complete states, and that bench simulation is off. If `--confirm-live-execute` is passed while this passive profile is incomplete, `/execute` is not sent and the report records `UTM_PHYSICAL_VALIDATION_READINESS_BLOCKED` with `execute_sent=false`.
 
 Operational effect: the CLI path is no longer a weaker route around the GUI readiness gate. Operators can still run non-actuating preflight, but a physical UTM command requires the same autonomous-profile readiness assumptions used by the Equipment workspace.
+
+## 2026-08-08 Inline Advanced Visual Work Queue Skill
+
+`advanced_visual_work_queue_demo` is an inline Equipment Skill, not a resident
+subagent. The operator records the workflow once, ATR compiles the recording
+into immutable `atr.equipment_skill.v1` and `atr.pyautogui_program.v1`
+artifacts, and the Equipment runtime replays deterministic segments through the
+existing authenticated Windows PyAutoGUI bridge.
+
+The demonstrated workflow performs all of the following without executable
+coordinate fallback:
+
+- selects `specimen-beta` by visible identity after source rows reorder;
+- drags the selected row into `ANALYSIS QUEUE` after the window moves;
+- configures `Compression`, evidence capture, and load limit `12.5`;
+- handles exactly one visible `EVIDENCE REQUIRED` recovery;
+- exports matching JSON and CSV evidence;
+- blocks before queue mutation when `specimen-beta` is absent.
+
+Normal replay is deterministic and does not invoke an LLM. A future recovery
+agent may inspect a failure packet, but it must not mutate or bypass the
+recorded action contract. Pointer coordinates remain in `recording.json` only
+as audit metadata. Compiled `click`, drag-source `move_to`, and `drag_to`
+actions contain embedded PNG candidates and `coordinate_fallback=false`.
+
+The recorder keeps a short, recording-only history of pointer frames and uses
+a stable frame captured before pointer hover changes a target's appearance.
+The deterministic demo also keeps default and hover colors equal for recorded
+controls. The bridge searches the complete screenshot and chooses the globally
+highest normalized candidate score rather than the first scan-order match.
+
+Runtime evidence is written under:
+
+```text
+runs/equipment_skill_advanced_queue_e2e/
+memory/equipment_skills/advanced_visual_work_queue_demo/<version>/
+```
+
+Each Skill version is immutable. Rerecording requires a new explicit version;
+the runner never deletes or rewrites an existing validated package. A valid E2E
+summary reports `analysis_attempts=2`, `recovery_count=1`, one CSV row matching
+the JSON object, and missing-target failure code `UI_LOCATOR_NOT_FOUND`.

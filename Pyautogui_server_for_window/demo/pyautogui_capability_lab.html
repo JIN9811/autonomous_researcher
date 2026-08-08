@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>PyAutoGUI Capability Lab</title>
+  <style>
+    :root { color-scheme: light; --ink:#122033; --line:#b8c7d9; --blue:#1f62d0; --green:#14805e; --paper:#f4f7fb; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--paper); color:var(--ink); font:16px/1.45 "Segoe UI",sans-serif; }
+    main { width:min(1120px,calc(100% - 40px)); margin:24px auto; }
+    header { display:flex; justify-content:space-between; align-items:end; border-bottom:2px solid var(--ink); padding-bottom:12px; }
+    h1 { margin:0; font-size:24px; }
+    .ready { color:var(--green); font-weight:700; letter-spacing:.06em; }
+    .grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; margin-top:18px; }
+    section { background:#fff; border:1px solid var(--line); padding:18px; min-height:210px; }
+    h2 { margin:0 0 14px; font-size:17px; }
+    button,input { font:inherit; }
+    button { border:1px solid #174d9b; background:var(--blue); color:#fff; padding:10px 16px; cursor:pointer; }
+    #click-target { width:180px; height:54px; }
+    .drag-row { display:flex; align-items:center; justify-content:space-between; gap:20px; }
+    #drag-source,#drag-target { display:grid; place-items:center; width:110px; height:80px; border:2px solid var(--blue); user-select:none; }
+    #drag-source { background:#dce9ff; cursor:grab; }
+    #drag-target { border-style:dashed; background:#f8fbff; }
+    #scroll-lane { height:118px; overflow:auto; border:1px solid var(--line); padding:10px; }
+    #scroll-lane div { height:360px; background:linear-gradient(#eaf2ff,#d7f5e9); padding:8px; }
+    #keyboard-input { width:100%; padding:10px; border:1px solid var(--line); }
+    .visual-row { display:flex; align-items:center; gap:16px; }
+    #visual-target { width:170px; padding:16px; border:2px solid var(--green); text-align:center; font-weight:700; }
+    #pixel-swatch { width:70px; height:70px; background:rgb(10,20,30); border:1px solid #000; }
+    #lab-result { grid-column:1/-1; min-height:auto; border-color:var(--green); font-weight:700; }
+    @media(max-width:760px){ .grid{grid-template-columns:1fr;} #lab-result{grid-column:auto;} }
+  </style>
+</head>
+<body>
+<main>
+  <header><div><h1>PyAutoGUI Capability Lab</h1><div>Deterministic targets for Equipment Skill examples</div></div><div class="ready">CAPABILITY LAB READY</div></header>
+  <div class="grid">
+    <section><h2>Pointer and clicks</h2><button id="click-target" type="button">Click target</button><p id="click-status">Waiting</p></section>
+    <section><h2>Drag and scroll</h2><div class="drag-row"><div id="drag-source" draggable="true">DRAG</div><div id="drag-target">DROP</div></div><div id="scroll-lane"><div>Scroll lane<br>1<br>2<br>3<br>4<br>5<br>END</div></div></section>
+    <section><h2>Keyboard and shortcuts</h2><input id="keyboard-input" placeholder="Type here"><p id="shortcut-status">No shortcut received</p></section>
+    <section><h2>Visual and pixel assertions</h2><div class="visual-row"><div id="visual-target">VISUAL TARGET</div><div id="pixel-swatch" title="RGB 10,20,30"></div></div></section>
+    <section id="lab-result" data-status="ready">READY | no capability action completed yet</section>
+  </div>
+</main>
+<script>
+  const result = document.getElementById('lab-result');
+  const setResult = text => { result.dataset.status='completed'; result.textContent=text; };
+  document.getElementById('click-target').addEventListener('click',()=>{ document.getElementById('click-status').textContent='Clicked'; setResult('POINTER CLICK COMPLETED'); });
+  const source=document.getElementById('drag-source'); const target=document.getElementById('drag-target');
+  source.addEventListener('dragstart',event=>event.dataTransfer.setData('text/plain','ATR'));
+  target.addEventListener('dragover',event=>event.preventDefault());
+  target.addEventListener('drop',event=>{ event.preventDefault(); target.textContent='DROPPED'; setResult('DRAG COMPLETED'); });
+  document.getElementById('scroll-lane').addEventListener('scroll',()=>setResult('SCROLL OBSERVED'));
+  document.addEventListener('keydown',event=>{ if(event.ctrlKey&&event.key.toLowerCase()==='s'){ event.preventDefault(); document.getElementById('shortcut-status').textContent='Ctrl+S received'; setResult('KEYBOARD SHORTCUT COMPLETED'); } });
+</script>
+</body>
+</html>

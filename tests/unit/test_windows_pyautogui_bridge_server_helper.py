@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+import base64
 import importlib.util
 import json
 import subprocess
 import sys
 import threading
+import time
 import urllib.request
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+
+import pytest
 
 
 TINY_PNG_BYTES = (
@@ -45,6 +49,10 @@ class _FakeWindow:
         self.isMinimized = False
         self.activated = False
         self.restored = False
+        self.minimized = False
+        self.maximized = False
+        self.moves: list[tuple[int, int]] = []
+        self.resizes: list[tuple[int, int]] = []
 
     def activate(self) -> None:
         self.activated = True
@@ -52,6 +60,41 @@ class _FakeWindow:
     def restore(self) -> None:
         self.restored = True
         self.isMinimized = False
+
+    def minimize(self) -> None:
+        self.minimized = True
+
+    def maximize(self) -> None:
+        self.maximized = True
+
+    def moveTo(self, x: int, y: int) -> None:  # noqa: N802
+        self.moves.append((x, y))
+
+    def resizeTo(self, width: int, height: int) -> None:  # noqa: N802
+        self.resizes.append((width, height))
+
+
+class _FakeRecordingOverlay:
+    def __init__(self) -> None:
+        self.show_calls: list[tuple[str, float]] = []
+        self.hide_calls = 0
+        self.shutdown_calls = 0
+        self.visible = False
+
+    def show(self, recording_id: str, started_monotonic: float) -> None:
+        self.show_calls.append((recording_id, started_monotonic))
+        self.visible = True
+
+    def hide(self) -> None:
+        self.hide_calls += 1
+        self.visible = False
+
+    def shutdown(self) -> None:
+        self.shutdown_calls += 1
+        self.visible = False
+
+    def status(self) -> dict[str, Any]:
+        return {"available": True, "visible": self.visible, "error": None}
 
 
 class _FakeUiaElement:
@@ -70,6 +113,15 @@ class _FakePyAutoGUI:
         self.FAILSAFE = True
         self.PAUSE = 0.1
         self.clicks: list[tuple[int, int]] = []
+        self.moves: list[tuple[int, int, float]] = []
+        self.relative_moves: list[tuple[int, int, float]] = []
+        self.drags: list[tuple[str, int, int, float, str]] = []
+        self.button_events: list[tuple[str, str]] = []
+        self.scrolls: list[tuple[str, int]] = []
+        self.key_events: list[tuple[str, str]] = []
+        self.presses: list[tuple[str, int, float]] = []
+        self.alerts: list[str] = []
+        self.confirms: list[str] = []
         self.hotkeys: list[tuple[str, ...]] = []
         self.writes: list[str] = []
         self.save_csv_on_write = False
@@ -99,16 +151,49 @@ class _FakePyAutoGUI:
             return _FakeBox()
         return None
 
-    def click(self, x: int, y: int) -> None:
-        self.clicks.append((x, y))
+    def click(self, x: int | None = None, y: int | None = None, clicks: int = 1, interval: float = 0.0, button: str = "left") -> None:
+        self.clicks.extend((int(x or 0), int(y or 0)) for _ in range(clicks))
 
-    def hotkey(self, *keys: str) -> None:
+    def moveTo(self, x: int, y: int, duration: float = 0.0) -> None:  # noqa: N802 - mirrors PyAutoGUI API
+        self.moves.append((x, y, duration))
+
+    def moveRel(self, x: int, y: int, duration: float = 0.0) -> None:  # noqa: N802
+        self.relative_moves.append((x, y, duration))
+
+    def dragTo(self, x: int, y: int, duration: float = 0.0, button: str = "left") -> None:  # noqa: N802
+        self.drags.append(("to", x, y, duration, button))
+
+    def dragRel(self, x: int, y: int, duration: float = 0.0, button: str = "left") -> None:  # noqa: N802
+        self.drags.append(("rel", x, y, duration, button))
+
+    def mouseDown(self, button: str = "left") -> None:  # noqa: N802
+        self.button_events.append(("down", button))
+
+    def mouseUp(self, button: str = "left") -> None:  # noqa: N802
+        self.button_events.append(("up", button))
+
+    def scroll(self, clicks: int) -> None:
+        self.scrolls.append(("vertical", clicks))
+
+    def hscroll(self, clicks: int) -> None:
+        self.scrolls.append(("horizontal", clicks))
+
+    def vscroll(self, clicks: int) -> None:
+        self.scrolls.append(("vertical_explicit", clicks))
+
+    def hotkey(self, *keys: str, interval: float = 0.0) -> None:
         self.hotkeys.append(tuple(keys))
 
-    def press(self, key: str) -> None:
-        pass
+    def press(self, key: str, presses: int = 1, interval: float = 0.0) -> None:
+        self.presses.append((key, presses, interval))
 
-    def write(self, value: str) -> None:
+    def keyDown(self, key: str) -> None:  # noqa: N802
+        self.key_events.append(("down", key))
+
+    def keyUp(self, key: str) -> None:  # noqa: N802
+        self.key_events.append(("up", key))
+
+    def write(self, value: str, interval: float = 0.0) -> None:
         self.writes.append(value)
         if self.save_csv_on_write:
             path = Path(value)
@@ -121,6 +206,23 @@ class _FakePyAutoGUI:
     def screenshot(self, region: tuple[int, int, int, int] | None = None) -> _FakeImage:
         self.screenshot_regions.append(region)
         return _FakeImage()
+
+    def position(self) -> tuple[int, int]:
+        return (640, 360)
+
+    def pixel(self, x: int, y: int) -> tuple[int, int, int]:
+        return (10, 20, 30)
+
+    def pixelMatchesColor(self, x: int, y: int, color: tuple[int, int, int], tolerance: int = 0) -> bool:  # noqa: N802
+        return (x, y, color, tolerance) == (10, 20, (10, 20, 30), 5)
+
+    def alert(self, text: str, title: str = "") -> str:
+        self.alerts.append(text)
+        return "OK"
+
+    def confirm(self, text: str, title: str = "", buttons: list[str] | None = None) -> str:
+        self.confirms.append(text)
+        return (buttons or ["OK"])[0]
 
 
 class _FakeInvalidScreenshotPyAutoGUI(_FakePyAutoGUI):
@@ -1530,6 +1632,39 @@ def test_windows_bridge_setup_surface_separates_browse_template_and_registration
         assert 'id="program1"' not in html
 
 
+def test_program_manager_exposes_examples_without_implicit_registration() -> None:
+    for module in (_load_helper_module(), _load_packaged_helper_module()):
+        html = module.INDEX_HTML
+        assert 'data-manager-tab="examples"' in html
+        assert 'id="managerExamplesView"' in html
+        assert 'id="openCapabilityLab"' in html
+        assert 'id="refreshExamples"' in html
+        assert 'id="exampleRegistry"' in html
+        assert 'id="recordingCoverage"' in html
+        assert 'id="recordImageTracking"' in html
+        assert 'id="recordCoordinateFallback"' in html
+        assert 'id="recordingLocatorPreview"' in html
+        assert 'call("/examples"' in html
+        assert 'data-load-example' in html
+        assert 'data-run-example' in html
+        assert "loadExampleIntoEditor" in html
+        assert "registerProgramDefinition(example" not in html
+    assert "program_id:example.program.program_id" not in html
+
+
+def test_source_and_install_helpers_load_the_same_example_catalog() -> None:
+    source_module = _load_packaged_helper_module()
+    install_module = _load_helper_module()
+
+    source_examples = source_module._load_example_catalog()
+    install_examples = install_module._load_example_catalog()
+
+    assert len(source_examples) == 8
+    assert [item["example_id"] for item in install_examples] == [
+        item["example_id"] for item in source_examples
+    ]
+
+
 def test_windows_bridge_program_registry_http_lifecycle(tmp_path: Path) -> None:
     module = _load_helper_module()
     module.TOKEN = "registry-token"
@@ -2171,3 +2306,1082 @@ def test_windows_bridge_probe_accepts_monotonic_negative_displacement(tmp_path: 
         assert result["data_quality"]["displacement_monotonic"] is True
         assert result["data_quality"]["displacement_direction"] == "decreasing"
         assert result["data_quality"]["force_changes"] is True
+
+
+def test_recording_manager_persists_redacted_events_and_checkpoint(tmp_path: Path) -> None:
+    module = _load_packaged_helper_module()
+    manager = module.RecordingManager(tmp_path, listener_factory=lambda _manager: [])
+    fake = _FakePyAutoGUI()
+
+    started = manager.start(name="Program 1 demo", target_app="Program 1", target_window="Program 1")
+    manager.record_event({"kind": "key_press", "key": "a", "text": "secret-value"})
+    manager.record_event({"kind": "mouse_click", "x": 20, "y": 30, "button": "left"})
+    checkpoint = manager.checkpoint(label="Program completed", pyautogui=fake)
+    stopped = manager.stop()
+    saved = manager.save(started["recording_id"])
+
+    assert checkpoint["ok"] is True
+    assert stopped["status"] == "completed"
+    assert saved["status"] == "saved"
+    assert saved["events"][0] == {"kind": "key_press", "key": "a", "at_ms": saved["events"][0]["at_ms"]}
+    assert "text" not in saved["events"][0]
+    assert saved["checkpoints"][0]["sha256"]
+    assert (tmp_path / started["recording_id"] / "recording.json").exists()
+
+
+def test_recording_manager_fails_closed_when_listener_dependency_is_missing(tmp_path: Path) -> None:
+    module = _load_packaged_helper_module()
+
+    def missing_listener_dependency(_manager: object) -> list[object]:
+        raise ModuleNotFoundError("No module named 'pynput'")
+
+    manager = module.RecordingManager(tmp_path, listener_factory=missing_listener_dependency)
+    result = manager.start(name="recording", target_app="UTM", target_window="UTM")
+
+    assert result["ok"] is False
+    assert result["status"] == "blocked"
+    assert result["failure_code"] == "SKILL_RECORDING_DEPENDENCY_MISSING"
+    assert result["missing_dependencies"] == ["pynput"]
+    assert manager.status()["status"] == "idle"
+
+
+def test_recording_overlay_controller_shows_updates_and_hides_banner() -> None:
+    module = _load_packaged_helper_module()
+    windows: list[Any] = []
+
+    class FakeOverlayWindow:
+        def __init__(self) -> None:
+            self.elapsed: list[float] = []
+            self.closed = False
+
+        def update_elapsed(self, elapsed_s: float) -> None:
+            self.elapsed.append(elapsed_s)
+
+        def pump(self) -> None:
+            return None
+
+        def close(self) -> None:
+            self.closed = True
+
+    def create_window() -> FakeOverlayWindow:
+        window = FakeOverlayWindow()
+        windows.append(window)
+        return window
+
+    controller = module.RecordingOverlayController(
+        platform_name="win32",
+        window_factory=create_window,
+        monotonic=lambda: 12.5,
+        poll_interval=0.005,
+    )
+    controller.show("rec-overlay-test", 10.0)
+    deadline = time.monotonic() + 1.0
+    while not controller.status()["visible"] and time.monotonic() < deadline:
+        time.sleep(0.005)
+
+    assert controller.status() == {"available": True, "visible": True, "error": None}
+    assert windows and windows[0].elapsed[-1] == pytest.approx(2.5)
+
+    controller.hide()
+    deadline = time.monotonic() + 1.0
+    while controller.status()["visible"] and time.monotonic() < deadline:
+        time.sleep(0.005)
+
+    assert windows[0].closed is True
+    assert controller.status()["visible"] is False
+    controller.shutdown()
+
+
+def test_recording_manager_owns_overlay_lifecycle(tmp_path: Path) -> None:
+    module = _load_packaged_helper_module()
+    overlay = _FakeRecordingOverlay()
+    manager = module.RecordingManager(
+        tmp_path,
+        listener_factory=lambda _manager: [],
+        overlay_controller=overlay,
+    )
+
+    started = manager.start(name="Program 1 demo", target_app="Program 1", target_window="Program 1")
+
+    assert overlay.show_calls == [(started["recording_id"], manager._started_monotonic)]
+    assert manager.status()["overlay"]["visible"] is True
+
+    manager.stop()
+    assert overlay.hide_calls == 1
+    assert manager.status()["overlay"]["visible"] is False
+
+    manager.shutdown()
+    assert overlay.shutdown_calls == 1
+
+
+def test_recording_manager_keeps_overlay_hidden_when_listener_start_fails(tmp_path: Path) -> None:
+    module = _load_packaged_helper_module()
+    overlay = _FakeRecordingOverlay()
+
+    def fail_listener(_manager: object) -> list[object]:
+        raise RuntimeError("listener failed")
+
+    manager = module.RecordingManager(
+        tmp_path,
+        listener_factory=fail_listener,
+        overlay_controller=overlay,
+    )
+
+    result = manager.start(name="Program 1 demo", target_app="Program 1", target_window="Program 1")
+
+    assert result["failure_code"] == "SKILL_RECORDING_LISTENER_START_FAILED"
+    assert overlay.show_calls == []
+    assert overlay.hide_calls == 1
+
+
+def test_recording_manager_shutdown_stops_active_recording_and_overlay(tmp_path: Path) -> None:
+    module = _load_packaged_helper_module()
+    overlay = _FakeRecordingOverlay()
+    manager = module.RecordingManager(
+        tmp_path,
+        listener_factory=lambda _manager: [],
+        overlay_controller=overlay,
+    )
+    manager.start(name="Program 1 demo", target_app="Program 1", target_window="Program 1")
+
+    manager.shutdown()
+
+    assert manager.status()["status"] == "idle"
+    assert overlay.hide_calls == 1
+    assert overlay.shutdown_calls == 1
+
+
+def test_recording_manager_hides_overlay_when_listener_stop_raises(tmp_path: Path) -> None:
+    module = _load_packaged_helper_module()
+    overlay = _FakeRecordingOverlay()
+
+    class BadStopListener:
+        def start(self) -> None:
+            return None
+
+        def stop(self) -> None:
+            raise RuntimeError("listener stop failed")
+
+    manager = module.RecordingManager(
+        tmp_path,
+        listener_factory=lambda _manager: [BadStopListener()],
+        overlay_controller=overlay,
+    )
+    manager.start(name="Program 1 demo", target_app="Program 1", target_window="Program 1")
+
+    stopped = manager.stop()
+
+    assert stopped["status"] == "completed"
+    assert stopped["listener_stop_errors"] == ["RuntimeError: listener stop failed"]
+    assert overlay.hide_calls == 1
+
+
+def test_runtime_dependency_status_distinguishes_required_and_optional_packages() -> None:
+    module = _load_packaged_helper_module()
+    installed = {"pyautogui", "PIL", "cv2", "pynput"}
+
+    result = module._runtime_dependency_status(lambda name: name in installed)
+
+    assert result["core_ready"] is True
+    assert result["required"]["pynput"]["available"] is True
+    assert result["optional"]["pywinauto"]["available"] is False
+    assert result["optional"]["pytesseract"]["available"] is False
+
+
+def test_default_demo_root_supports_pyinstaller_bundle(monkeypatch, tmp_path: Path) -> None:
+    module = _load_packaged_helper_module()
+    bundled_demo = tmp_path / "demo"
+    bundled_demo.mkdir()
+    monkeypatch.setattr(module.sys, "_MEIPASS", str(tmp_path), raising=False)
+
+    assert module._default_demo_root() == bundled_demo
+
+
+def test_recording_manager_persists_mouse_move_coordinates(tmp_path: Path) -> None:
+    module = _load_packaged_helper_module()
+    manager = module.RecordingManager(tmp_path, listener_factory=lambda _manager: [])
+    started = manager.start(name="Mouse square", target_app="Desktop", target_window="Desktop")
+
+    accepted = manager.record_event({"kind": "mouse_move", "x": 780, "y": 440})
+    stopped = manager.stop()
+
+    assert accepted is True
+    assert stopped["events"] == [
+        {"kind": "mouse_move", "x": 780, "y": 440, "at_ms": stopped["events"][0]["at_ms"]}
+    ]
+    assert manager.save(started["recording_id"])["status"] == "saved"
+
+
+def test_image_first_recording_captures_click_locator_crops(tmp_path: Path) -> None:
+    image_module = pytest.importorskip("PIL.Image")
+    module = _load_packaged_helper_module()
+    screenshot = image_module.new("RGB", (320, 240), color=(20, 80, 120))
+    manager = module.RecordingManager(
+        tmp_path,
+        listener_factory=lambda _manager: [],
+        screenshot_provider=lambda: screenshot.copy(),
+    )
+    started = manager.start(name="visual click", target_app="lab", target_window="lab")
+    capture = module._RecordingMouseCapture(manager)
+
+    capture.on_click(100, 120, "Button.left", True)
+    capture.on_click(100, 120, "Button.left", False)
+    stopped = manager.stop()
+
+    event = stopped["events"][0]
+    locator = event["visual_locator"]
+    assert started["schema"] == "atr.equipment_recording.v2"
+    assert started["visual_locator_policy"]["coordinate_fallback"] is False
+    assert locator["status"] == "ready"
+    assert locator["recorded_coordinate"] == [100, 120]
+    assert [item["kind"] for item in locator["candidates"]] == ["tight", "context"]
+    assert all(base64.b64decode(item["png_base64"]).startswith(b"\x89PNG") for item in locator["candidates"])
+    assert Path(locator["full_frame_artifact_path"]).exists()
+
+
+def test_image_first_recording_uses_pointer_frame_from_before_click(tmp_path: Path) -> None:
+    from io import BytesIO
+
+    image_module = pytest.importorskip("PIL.Image")
+    module = _load_packaged_helper_module()
+    before_click = image_module.new("RGB", (320, 240), color=(20, 180, 90))
+    after_press = image_module.new("RGB", (320, 240), color=(210, 40, 60))
+    state = {"pressed": False}
+    manager = module.RecordingManager(
+        tmp_path,
+        listener_factory=lambda _manager: [],
+        screenshot_provider=lambda: (after_press if state["pressed"] else before_click).copy(),
+    )
+    manager.start(name="pre-action visual click", target_app="lab", target_window="lab")
+    capture = module._RecordingMouseCapture(manager)
+
+    capture.on_move(100, 120)
+    state["pressed"] = True
+    capture.on_click(100, 120, "Button.left", True)
+    capture.on_click(100, 120, "Button.left", False)
+    locator = manager.stop()["events"][-1]["visual_locator"]
+
+    tight = image_module.open(BytesIO(base64.b64decode(locator["candidates"][0]["png_base64"])))
+    assert tight.getpixel((32, 32)) == (20, 180, 90)
+
+
+def test_image_first_recording_uses_recent_frame_before_pointer_hover(tmp_path: Path) -> None:
+    from io import BytesIO
+    import time
+
+    image_module = pytest.importorskip("PIL.Image")
+    module = _load_packaged_helper_module()
+    stable = image_module.new("RGB", (320, 240), color=(20, 180, 90))
+    hovered = image_module.new("RGB", (320, 240), color=(240, 240, 240))
+    frames = iter((stable, hovered))
+    manager = module.RecordingManager(
+        tmp_path,
+        listener_factory=lambda _manager: [],
+        screenshot_provider=lambda: next(frames).copy(),
+    )
+    manager.start(name="hover-stable visual click", target_app="lab", target_window="lab")
+    capture = module._RecordingMouseCapture(manager)
+
+    capture.on_move(20, 20)
+    time.sleep(0.06)
+    capture.on_move(100, 120)
+    capture.on_click(100, 120, "Button.left", True)
+    capture.on_click(100, 120, "Button.left", False)
+    locator = manager.stop()["events"][-1]["visual_locator"]
+
+    tight = image_module.open(BytesIO(base64.b64decode(locator["candidates"][0]["png_base64"])))
+    assert tight.getpixel((32, 32)) == (20, 180, 90)
+
+
+def test_image_first_recording_captures_drag_source_and_target(tmp_path: Path) -> None:
+    image_module = pytest.importorskip("PIL.Image")
+    module = _load_packaged_helper_module()
+    screenshot = image_module.new("RGB", (320, 240), color=(100, 40, 20))
+    manager = module.RecordingManager(
+        tmp_path,
+        listener_factory=lambda _manager: [],
+        screenshot_provider=lambda: screenshot.copy(),
+    )
+    manager.start(name="visual drag", target_app="lab", target_window="lab")
+    capture = module._RecordingMouseCapture(manager, drag_threshold_px=5)
+
+    capture.on_click(30, 40, "Button.left", True)
+    capture.on_click(180, 160, "Button.left", False)
+    event = manager.stop()["events"][0]
+
+    assert event["source_visual_locator"]["recorded_coordinate"] == [30, 40]
+    assert event["target_visual_locator"]["recorded_coordinate"] == [180, 160]
+    assert event["source_visual_locator"]["locator_id"].endswith("-source")
+    assert event["target_visual_locator"]["locator_id"].endswith("-target")
+
+
+def test_image_first_recording_marks_capture_failure_without_fake_locator(tmp_path: Path) -> None:
+    module = _load_packaged_helper_module()
+
+    def fail_capture() -> object:
+        raise RuntimeError("screen unavailable")
+
+    manager = module.RecordingManager(
+        tmp_path,
+        listener_factory=lambda _manager: [],
+        screenshot_provider=fail_capture,
+    )
+    manager.start(name="failed visual", target_app="lab", target_window="lab")
+    capture = module._RecordingMouseCapture(manager)
+
+    capture.on_click(20, 30, "Button.left", True)
+    capture.on_click(20, 30, "Button.left", False)
+    locator = manager.stop()["events"][0]["visual_locator"]
+
+    assert locator["status"] == "unavailable"
+    assert locator["candidates"] == []
+    assert locator["failure_code"] == "VISUAL_LOCATOR_CAPTURE_FAILED"
+
+
+def test_recording_keyboard_capture_groups_modifier_chord_as_hotkey(tmp_path: Path) -> None:
+    module = _load_helper_module()
+    manager = module.RecordingManager(tmp_path, listener_factory=lambda _manager: [])
+    manager.start(name="shortcut", target_app="editor", target_window="editor")
+    capture = module._RecordingKeyboardCapture(manager)
+
+    capture.on_press("Key.ctrl_l")
+    capture.on_press("s")
+    capture.on_release("s")
+    capture.on_release("Key.ctrl_l")
+    stopped = manager.stop()
+
+    assert stopped["events"] == [{"kind": "hotkey", "at_ms": stopped["events"][0]["at_ms"], "keys": ["ctrl", "s"]}]
+
+
+def test_recording_keyboard_capture_keeps_plain_key_press(tmp_path: Path) -> None:
+    module = _load_helper_module()
+    manager = module.RecordingManager(tmp_path, listener_factory=lambda _manager: [])
+    manager.start(name="typing", target_app="editor", target_window="editor")
+    capture = module._RecordingKeyboardCapture(manager)
+
+    capture.on_press("a")
+    capture.on_release("a")
+    stopped = manager.stop()
+
+    assert stopped["events"][0]["kind"] == "key_press"
+    assert stopped["events"][0]["key"] == "a"
+
+
+def test_recording_keyboard_capture_preserves_unused_modifier(tmp_path: Path) -> None:
+    module = _load_helper_module()
+    manager = module.RecordingManager(tmp_path, listener_factory=lambda _manager: [])
+    manager.start(name="modifier", target_app="desktop", target_window="desktop")
+    capture = module._RecordingKeyboardCapture(manager)
+
+    capture.on_press("Key.shift")
+    capture.on_release("Key.shift")
+    stopped = manager.stop()
+
+    assert stopped["events"][0]["kind"] == "key_press"
+    assert stopped["events"][0]["key"] == "shift"
+
+
+def test_windows_bridge_executes_move_to_program_action() -> None:
+    for module in (_load_helper_module(), _load_packaged_helper_module()):
+        fake = _FakePyAutoGUI()
+        trace: list[dict[str, object]] = []
+
+        result = module._execute_protocol_sequence(
+            fake,
+            program_id="mouse_square_demo",
+            payload={"sequence": [{"action": "move_to", "x": 900, "y": 520, "duration_sec": 0.25}]},
+            run_id="run-mouse-square",
+            specimen_id="specimen-mouse-square",
+            trace=trace,
+        )
+
+        assert result["ok"] is True
+        assert fake.moves == [(900, 520, 0.25)]
+        assert any(item["step"] == "SEQ_1_MOVE_TO" and item["status"] == "ok" for item in trace)
+
+
+def _recorded_image_candidate(kind: str = "tight") -> dict[str, object]:
+    import hashlib
+
+    return {
+        "kind": kind,
+        "png_base64": base64.b64encode(TINY_PNG_BYTES).decode("ascii"),
+        "sha256": hashlib.sha256(TINY_PNG_BYTES).hexdigest(),
+        "width": 64,
+        "height": 64,
+        "confidence": 0.88,
+    }
+
+
+def _information_test_candidate(kind: str, *, informative: bool) -> dict[str, object]:
+    import hashlib
+    from io import BytesIO
+
+    from PIL import Image, ImageDraw
+
+    size = (192, 128) if kind == "context" else (64, 64)
+    image = Image.new("RGB", size, "#dceaff")
+    if informative:
+        draw = ImageDraw.Draw(image)
+        draw.rectangle((4, 4, size[0] - 5, size[1] - 5), outline="#17233a", width=3)
+        draw.text((12, 12), "SAMPLE COUNT", fill="#10213a")
+    buffer = BytesIO()
+    image.save(buffer, format="PNG")
+    raw = buffer.getvalue()
+    return {
+        "kind": kind,
+        "png_base64": base64.b64encode(raw).decode("ascii"),
+        "sha256": hashlib.sha256(raw).hexdigest(),
+        "width": size[0],
+        "height": size[1],
+        "confidence": 0.88,
+    }
+
+
+def test_windows_bridge_prefers_informative_context_over_uniform_tight(tmp_path: Path, monkeypatch) -> None:
+    for index, module in enumerate((_load_helper_module(), _load_packaged_helper_module())):
+        locator_root = tmp_path / f"locators-{index}"
+        monkeypatch.setattr(module, "LOCATOR_ROOT", locator_root)
+        tight = _information_test_candidate("tight", informative=False)
+        context = _information_test_candidate("context", informative=True)
+        context_path = locator_root / "inline" / f"{context['sha256']}.png"
+        fake = _FakePyAutoGUI()
+        fake.locate_match_paths.add(str(context_path))
+
+        match = module._locate_on_screen(
+            fake,
+            {"image_candidates": [tight, context]},
+            run_id="run-context-priority",
+            specimen_id="specimen-context-priority",
+        )
+
+        assert match is not None
+        assert fake.locate_calls[0][0] == str(context_path)
+
+
+def test_windows_bridge_inline_locator_selects_best_match_not_first_threshold_match(
+    tmp_path: Path, monkeypatch
+) -> None:
+    import hashlib
+    from io import BytesIO
+
+    from PIL import Image, ImageDraw
+
+    template = Image.new("RGB", (80, 48), "#dceaff")
+    draw = ImageDraw.Draw(template)
+    draw.rectangle((1, 1, 78, 46), outline="#17233a", width=3)
+    draw.text((8, 15), "COUNT", fill="#10213a")
+
+    similar = template.copy()
+    similar_draw = ImageDraw.Draw(similar)
+    similar_draw.rectangle((22, 14, 58, 31), fill="#7f91aa")
+
+    screen = Image.new("RGB", (360, 140), "#0f1828")
+    screen.paste(similar, (20, 46))
+    screen.paste(template, (240, 46))
+
+    buffer = BytesIO()
+    template.save(buffer, format="PNG")
+    raw = buffer.getvalue()
+    candidate = {
+        "kind": "context",
+        "png_base64": base64.b64encode(raw).decode("ascii"),
+        "sha256": hashlib.sha256(raw).hexdigest(),
+        "width": 80,
+        "height": 48,
+        "confidence": 0.80,
+    }
+
+    class _ScanOrderPyAutoGUI(_FakePyAutoGUI):
+        def screenshot(self, region: tuple[int, int, int, int] | None = None) -> Image.Image:
+            self.screenshot_regions.append(region)
+            return screen.copy()
+
+        def locateOnScreen(self, image_path: str, **kwargs: object) -> object:  # noqa: N802
+            self.locate_calls.append((image_path, dict(kwargs)))
+            return (20, 46, 80, 48)
+
+    for index, module in enumerate((_load_helper_module(), _load_packaged_helper_module())):
+        monkeypatch.setattr(module, "LOCATOR_ROOT", tmp_path / f"best-match-{index}")
+        match = module._locate_on_screen(
+            _ScanOrderPyAutoGUI(),
+            {"image_candidates": [candidate]},
+            run_id="run-best-match",
+            specimen_id="specimen-best-match",
+        )
+
+        assert match == (240, 46, 80, 48)
+
+
+def test_windows_bridge_inline_locator_selects_global_best_candidate(tmp_path: Path) -> None:
+    from PIL import Image, ImageDraw
+
+    screen = Image.new("RGB", (420, 160), "#0f1828")
+    weaker = Image.new("RGB", (100, 60), "#dceaff")
+    weaker_draw = ImageDraw.Draw(weaker)
+    weaker_draw.rectangle((2, 2, 97, 57), outline="#17233a", width=3)
+    weaker_draw.text((10, 20), "WEAKER", fill="#10213a")
+    similar = weaker.copy()
+    ImageDraw.Draw(similar).rectangle((70, 12, 88, 45), fill="#7f91aa")
+    stronger = Image.new("RGB", (100, 60), "#18345f")
+    stronger_draw = ImageDraw.Draw(stronger)
+    stronger_draw.rectangle((2, 2, 97, 57), outline="#55e6b1", width=3)
+    stronger_draw.text((10, 20), "STRONGER", fill="#ffffff")
+    screen.paste(similar, (30, 50))
+    screen.paste(stronger, (280, 50))
+
+    class _ScreenPyAutoGUI(_FakePyAutoGUI):
+        def screenshot(self, region: tuple[int, int, int, int] | None = None) -> Image.Image:
+            return screen.copy()
+
+    for index, module in enumerate((_load_helper_module(), _load_packaged_helper_module())):
+        paths = []
+        for name, image in (("weaker", weaker), ("stronger", stronger)):
+            path = tmp_path / f"{index}-{name}.png"
+            image.save(path)
+            paths.append(path)
+        attempted, match = module._best_inline_image_match(
+            _ScreenPyAutoGUI(),
+            [
+                (str(paths[0]), {"confidence": 0.75}, 100.0),
+                (str(paths[1]), {"confidence": 0.75}, 100.0),
+            ],
+        )
+
+        assert attempted is True
+        assert match == (280, 50, 100, 60)
+
+
+def test_windows_bridge_executes_image_resolved_move_and_drag(tmp_path: Path, monkeypatch) -> None:
+    module = _load_packaged_helper_module()
+    monkeypatch.setattr(module, "LOCATOR_ROOT", tmp_path / "locators")
+    fake = _FakePyAutoGUI()
+    fake.locate_matches = True
+
+    result = module._execute_protocol_sequence(
+        fake,
+        program_id="recorded_visual_drag",
+        payload={
+            "sequence": [
+                {
+                    "action": "move_to",
+                    "target": "drag-source",
+                    "required": True,
+                    "image_candidates": [_recorded_image_candidate("tight")],
+                    "duration_sec": 0.05,
+                },
+                {
+                    "action": "drag_to",
+                    "target": "drag-target",
+                    "required": True,
+                    "image_candidates": [_recorded_image_candidate("context")],
+                    "duration_sec": 0.2,
+                    "button": "left",
+                },
+            ]
+        },
+        run_id="run-image-drag",
+        specimen_id="specimen-image-drag",
+        trace=[],
+    )
+
+    assert result["ok"] is True
+    assert fake.moves == [(1, 1, 0.05)]
+    assert fake.drags == [("to", 1, 1, 0.2, "left")]
+    assert len(fake.locate_calls) == 2
+    assert all(Path(call[0]).exists() for call in fake.locate_calls)
+
+
+def test_required_recorded_image_miss_never_uses_recorded_coordinate(tmp_path: Path, monkeypatch) -> None:
+    module = _load_packaged_helper_module()
+    monkeypatch.setattr(module, "LOCATOR_ROOT", tmp_path / "locators")
+    monkeypatch.setattr(module, "ARTIFACT_ROOT", tmp_path / "artifacts")
+    fake = _FakePyAutoGUI()
+
+    result = module._execute_protocol_sequence(
+        fake,
+        program_id="recorded_visual_click",
+        payload={
+            "sequence": [
+                {
+                    "action": "click",
+                    "target": "save-button",
+                    "required": True,
+                    "recorded_coordinate": [900, 520],
+                    "image_candidates": [_recorded_image_candidate()],
+                }
+            ]
+        },
+        run_id="run-image-miss",
+        specimen_id="specimen-image-miss",
+        trace=[],
+    )
+
+    assert result["ok"] is False
+    assert result["failure_code"] == "UI_LOCATOR_NOT_FOUND"
+    assert fake.clicks == []
+    assert fake.moves == []
+    assert list((tmp_path / "artifacts").rglob("*.png"))
+
+
+def test_program_contract_rejects_tampered_inline_locator() -> None:
+    module = _load_packaged_helper_module()
+    candidate = _recorded_image_candidate()
+    candidate["sha256"] = "0" * 64
+
+    result = module._validate_program_definition(
+        {
+            "schema": module.PROGRAM_SCHEMA,
+            "program_id": "tampered_inline_locator",
+            "name": "Tampered inline locator",
+            "sequence": [
+                {
+                    "action": "click",
+                    "target": "button",
+                    "required": True,
+                    "image_candidates": [candidate],
+                }
+            ],
+        }
+    )
+
+    assert result["ok"] is False
+    assert result["failure_code"] == "PYAUTOGUI_ACTION_PARAMETER_INVALID"
+    assert "sha256" in result["message"]
+
+
+def test_extended_pyautogui_actions_are_accepted_by_program_contract() -> None:
+    module = _load_packaged_helper_module()
+    actions = [
+        {"action": "query_pointer"},
+        {"action": "move_rel", "x": 5, "y": -5},
+        {"action": "click", "x": 100, "y": 100, "clicks": 2, "button": "left"},
+        {"action": "double_click", "x": 100, "y": 100},
+        {"action": "triple_click", "x": 100, "y": 100},
+        {"action": "mouse_down", "button": "left"},
+        {"action": "mouse_up", "button": "left"},
+        {"action": "drag_to", "x": 200, "y": 200, "duration_sec": 0.2},
+        {"action": "drag_rel", "x": 20, "y": 20, "duration_sec": 0.2},
+        {"action": "scroll", "clicks": 2},
+        {"action": "hscroll", "clicks": -2},
+        {"action": "vscroll", "clicks": 2},
+        {"action": "key_down", "key": "shift"},
+        {"action": "key_up", "key": "shift"},
+        {"action": "pixel", "x": 10, "y": 20},
+        {"action": "pixel_matches_color", "x": 10, "y": 20, "color": [10, 20, 30], "tolerance": 5},
+        {"action": "window_activate", "title": "Capability Lab"},
+        {"action": "window_minimize", "title": "Capability Lab"},
+        {"action": "window_maximize", "title": "Capability Lab"},
+        {"action": "window_restore", "title": "Capability Lab"},
+        {"action": "window_move", "title": "Capability Lab", "x": 40, "y": 50},
+        {"action": "window_resize", "title": "Capability Lab", "width": 900, "height": 700},
+        {"action": "alert", "text": "Manual check"},
+        {"action": "confirm", "text": "Manual check", "buttons": ["Continue", "Cancel"]},
+    ]
+    definition = {
+        "schema": module.PROGRAM_SCHEMA,
+        "program_id": "capability_contract_demo",
+        "name": "Capability contract demo",
+        "safe_test": False,
+        "sequence": actions,
+    }
+
+    result = module._validate_program_definition(definition)
+
+    assert result["ok"] is True
+    assert result["portable_actions"] == sorted({item["action"] for item in actions})
+
+
+def test_extended_action_validation_rejects_unbounded_parameters() -> None:
+    module = _load_packaged_helper_module()
+    invalid_sequences = [
+        [{"action": "click", "x": 10, "y": 10, "clicks": 20}],
+        [{"action": "scroll", "clicks": 1000}],
+        [{"action": "drag_to", "x": 10, "y": 10, "duration_sec": 20}],
+        [{"action": "window_resize", "title": "Lab", "width": 10, "height": 10}],
+        [{"action": "pixel_matches_color", "x": 1, "y": 1, "color": [1, 2]}],
+    ]
+
+    for index, sequence in enumerate(invalid_sequences):
+        result = module._validate_program_definition(
+            {
+                "schema": module.PROGRAM_SCHEMA,
+                "program_id": f"invalid_capability_{index}",
+                "name": "Invalid capability",
+                "sequence": sequence,
+            }
+        )
+        assert result["ok"] is False
+        assert result["failure_code"] == "PYAUTOGUI_ACTION_PARAMETER_INVALID"
+
+
+def test_extended_pyautogui_actions_execute_and_emit_runtime_evidence(monkeypatch, tmp_path: Path) -> None:
+    module = _load_packaged_helper_module()
+    monkeypatch.setattr(module, "ARTIFACT_ROOT", tmp_path / "artifacts")
+    fake = _FakePyAutoGUI()
+    window = _FakeWindow("Capability Lab")
+    fake.windows_by_title["Capability Lab"] = [window]
+    trace: list[dict[str, object]] = []
+    sequence = [
+        {"action": "query_pointer"},
+        {"action": "move_rel", "x": 5, "y": -5, "duration_sec": 0.1},
+        {"action": "click", "x": 100, "y": 100, "clicks": 2, "interval_sec": 0.05, "button": "right"},
+        {"action": "drag_to", "x": 200, "y": 210, "duration_sec": 0.2, "button": "left"},
+        {"action": "drag_rel", "x": 20, "y": -10, "duration_sec": 0.2, "button": "middle"},
+        {"action": "scroll", "clicks": 3},
+        {"action": "hscroll", "clicks": -2},
+        {"action": "vscroll", "clicks": 1},
+        {"action": "press", "key": "tab", "presses": 2, "interval_sec": 0.1},
+        {"action": "key_down", "key": "shift"},
+        {"action": "key_up", "key": "shift"},
+        {"action": "write", "text": "atr", "interval_sec": 0.05},
+        {"action": "pixel", "x": 10, "y": 20},
+        {"action": "pixel_matches_color", "x": 10, "y": 20, "color": [10, 20, 30], "tolerance": 5},
+        {"action": "window_activate", "title": "Capability Lab"},
+        {"action": "window_move", "title": "Capability Lab", "x": 40, "y": 50},
+        {"action": "window_resize", "title": "Capability Lab", "width": 900, "height": 700},
+        {"action": "window_minimize", "title": "Capability Lab"},
+        {"action": "window_maximize", "title": "Capability Lab"},
+        {"action": "window_restore", "title": "Capability Lab"},
+    ]
+
+    result = module._execute_protocol_sequence(
+        fake,
+        program_id="capability_runtime_demo",
+        payload={"sequence": sequence, "runtime_mode": "test"},
+        run_id="run-capabilities",
+        specimen_id="specimen-capabilities",
+        trace=trace,
+    )
+
+    assert result["ok"] is True
+    assert fake.relative_moves == [(5, -5, 0.1)]
+    assert fake.clicks[-2:] == [(100, 100), (100, 100)]
+    assert fake.drags == [("to", 200, 210, 0.2, "left"), ("rel", 20, -10, 0.2, "middle")]
+    assert fake.scrolls == [("vertical", 3), ("horizontal", -2), ("vertical_explicit", 1)]
+    assert ("down", "shift") in fake.key_events and ("up", "shift") in fake.key_events
+    assert fake.presses == [("tab", 2, 0.1)]
+    assert fake.writes[-1] == "atr"
+    assert window.activated is True
+    assert window.moves == [(40, 50)]
+    assert window.resizes == [(900, 700)]
+    assert window.minimized is True and window.maximized is True and window.restored is True
+    assert any(item.get("step") == "SEQ_1_QUERY_POINTER" and "640,360" in str(item.get("detail")) for item in trace)
+    assert any(item.get("step") == "SEQ_14_PIXEL_MATCHES_COLOR" and item.get("status") == "ok" for item in trace)
+
+
+def test_blocking_dialog_requires_explicit_manual_confirmation() -> None:
+    module = _load_packaged_helper_module()
+    fake = _FakePyAutoGUI()
+    trace: list[dict[str, object]] = []
+
+    result = module._execute_protocol_sequence(
+        fake,
+        program_id="manual_dialog_demo",
+        payload={"sequence": [{"action": "alert", "text": "Review"}], "runtime_mode": "test", "confirm_execute": False},
+        run_id="run-dialog",
+        specimen_id="specimen-dialog",
+        trace=trace,
+    )
+
+    assert result["ok"] is False
+    assert result["failure_code"] == "PYAUTOGUI_MANUAL_CONFIRMATION_REQUIRED"
+    assert fake.alerts == []
+
+
+def test_executor_rejects_absolute_coordinate_outside_screen() -> None:
+    module = _load_packaged_helper_module()
+    result = module._execute_protocol_sequence(
+        _FakePyAutoGUI(),
+        program_id="bad_coordinate_demo",
+        payload={"sequence": [{"action": "move_to", "x": 5000, "y": 20}]},
+        run_id="run-bad-coordinate",
+        specimen_id="specimen-bad-coordinate",
+        trace=[],
+    )
+
+    assert result["ok"] is False
+    assert result["failure_code"] == "PYAUTOGUI_COORDINATE_OUT_OF_BOUNDS"
+
+
+def test_executor_releases_held_mouse_and_keyboard_inputs_after_failure() -> None:
+    module = _load_packaged_helper_module()
+    fake = _FakePyAutoGUI()
+
+    result = module._execute_protocol_sequence(
+        fake,
+        program_id="held_input_cleanup_demo",
+        payload={
+            "sequence": [
+                {"action": "mouse_down", "button": "left"},
+                {"action": "key_down", "key": "shift"},
+                {"action": "unsupported_after_hold"},
+            ]
+        },
+        run_id="run-held-cleanup",
+        specimen_id="specimen-held-cleanup",
+        trace=[],
+    )
+
+    assert result["ok"] is False
+    assert fake.button_events == [("down", "left"), ("up", "left")]
+    assert fake.key_events == [("down", "shift"), ("up", "shift")]
+
+
+def test_recording_mouse_capture_classifies_click_drag_and_scroll(tmp_path: Path) -> None:
+    module = _load_packaged_helper_module()
+    manager = module.RecordingManager(tmp_path, listener_factory=lambda _manager: [])
+    manager.start(name="mouse", target_app="lab", target_window="lab")
+    capture = module._RecordingMouseCapture(manager, drag_threshold_px=5)
+
+    capture.on_click(10, 20, "Button.left", True)
+    capture.on_click(10, 20, "Button.left", False)
+    capture.on_click(30, 40, "Button.left", True)
+    capture.on_move(80, 90)
+    capture.on_click(80, 90, "Button.left", False)
+    capture.on_scroll(80, 90, -2, 3)
+    stopped = manager.stop()
+
+    assert [item["kind"] for item in stopped["events"]] == ["mouse_click", "mouse_drag", "mouse_scroll"]
+    assert stopped["events"][1]["start_x"] == 30
+    assert stopped["events"][1]["start_y"] == 40
+    assert stopped["events"][1]["x"] == 80
+    assert stopped["events"][1]["y"] == 90
+    assert stopped["events"][2]["dx"] == -2
+    assert stopped["events"][2]["dy"] == 3
+
+
+def test_capability_and_example_catalog_endpoints_are_read_only() -> None:
+    module = _load_packaged_helper_module()
+    module.TOKEN = "catalog-token"
+    server = module.ThreadingHTTPServer(("127.0.0.1", 0), module.Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_address[1]}"
+
+    def get(path: str) -> dict[str, Any]:
+        request = urllib.request.Request(base + path, headers={"X-Bridge-Token": "catalog-token"})
+        with urllib.request.urlopen(request, timeout=5) as response:
+            return json.loads(response.read().decode("utf-8"))
+
+    try:
+        capabilities = get("/capabilities")
+        examples = get("/examples")
+        detail = get("/examples/drag_scroll")
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+        module.TOKEN = ""
+
+    assert capabilities["ok"] is True
+    assert set(capabilities["families"]) >= {"mouse", "keyboard", "screen", "window", "dialog"}
+    assert len(examples["examples"]) == 8
+    assert detail["program"]["program_id"] == "example_drag_scroll"
+    assert all(item.get("built_in") is not False for item in module._programs()["programs"])
+
+
+def test_recording_manager_allows_only_one_active_session(tmp_path: Path) -> None:
+    module = _load_packaged_helper_module()
+    manager = module.RecordingManager(tmp_path, listener_factory=lambda _manager: [])
+    first = manager.start(name="one", target_app="Program 1", target_window="Program 1")
+
+    second = manager.start(name="two", target_app="Program 1", target_window="Program 1")
+
+    assert second["ok"] is False
+    assert second["failure_code"] == "SKILL_RECORDING_ALREADY_ACTIVE"
+    assert second["recording_id"] == first["recording_id"]
+
+
+def test_recording_manager_stop_is_idempotent_and_reloads(tmp_path: Path) -> None:
+    module = _load_packaged_helper_module()
+    manager = module.RecordingManager(tmp_path, listener_factory=lambda _manager: [])
+    started = manager.start(name="Program 1 demo", target_app="Program 1", target_window="Program 1")
+    manager.record_event({"kind": "key_press", "key": "enter"})
+    first = manager.stop()
+    second = manager.stop()
+
+    assert second["recording_id"] == first["recording_id"]
+    assert second["idempotent"] is True
+    reloaded = module.RecordingManager(tmp_path, listener_factory=lambda _manager: []).get(started["recording_id"])
+    assert reloaded["content_sha256"] == first["content_sha256"]
+
+
+def test_recording_http_routes_cover_start_status_stop_save_and_list(tmp_path: Path) -> None:
+    module = _load_helper_module()
+    module.TOKEN = "record-token"
+    module.RECORDING_MANAGER = module.RecordingManager(tmp_path / "recordings", listener_factory=lambda _manager: [])
+    server = module.ThreadingHTTPServer(("127.0.0.1", 0), module.Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_address[1]}"
+
+    def request(path: str, *, method: str = "GET", payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        data = json.dumps(payload).encode("utf-8") if payload is not None else None
+        req = urllib.request.Request(
+            base + path,
+            data=data,
+            method=method,
+            headers={"X-Bridge-Token": "record-token", "Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=5) as response:
+            return json.loads(response.read().decode("utf-8"))
+
+    try:
+        started = request(
+            "/recordings/start",
+            method="POST",
+            payload={"name": "Program 1", "target_app": "Program 1", "target_window": "Program 1"},
+        )
+        recording_id = started["recording_id"]
+        status = request("/recordings/status")
+        stopped = request("/recordings/stop", method="POST", payload={})
+        saved = request(f"/recordings/{recording_id}/save", method="POST", payload={})
+        detail = request(f"/recordings/{recording_id}")
+        listed = request("/recordings")
+
+        assert status["status"] == "recording"
+        assert stopped["status"] == "completed"
+        assert saved["status"] == "saved"
+        assert detail["recording_id"] == recording_id
+        assert [item["recording_id"] for item in listed["recordings"]] == [recording_id]
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+def test_program_manager_exposes_program_record_and_skill_tabs_without_model_secrets() -> None:
+    module = _load_helper_module()
+    html = module.INDEX_HTML
+
+    assert 'data-manager-tab="programs"' in html
+    assert 'data-manager-tab="record"' in html
+    assert 'data-manager-tab="skills"' in html
+
+
+def test_recording_console_uses_one_five_second_start_stop_toggle() -> None:
+    for module in (_load_helper_module(), _load_packaged_helper_module()):
+        html = module.INDEX_HTML
+
+        assert 'id="recordToggle"' in html
+        assert 'id="recordStart"' not in html
+        assert 'id="recordStop"' not in html
+        assert "const RECORDING_COUNTDOWN_SECONDS = 5;" in html
+        assert "function beginRecordingCountdown()" in html
+        assert "async function stopActiveRecording()" in html
+        assert "function syncRecordingToggle()" in html
+        assert 'recordToggle.textContent = "STOP RECORDING"' in html
+        assert 'recordToggle.textContent = `STARTING IN ${recordingCountdownRemaining}`' in html
+    assert 'id="managerRecordView"' in html
+    assert 'id="managerSkillsView"' in html
+    assert 'id="recordSkill"' in html
+    assert 'id="skillRegistry"' in html
+    assert 'data-skill-action="test"' in html
+    assert 'data-skill-action="delete"' in html
+    manager_slice = html[html.index('id="programManagerPanel"') : html.index('id="resultPanel"')]
+    assert "api key" not in manager_slice.lower()
+    assert "base url" not in manager_slice.lower()
+
+
+def test_skill_manager_preserves_action_result_while_refreshing_registry() -> None:
+    module = _load_helper_module()
+    html = module.INDEX_HTML
+
+    assert "async function refreshSkills({showResult = true} = {})" in html
+    assert "if (showResult) managerShowResult(result);" in html
+    assert "await refreshSkills({showResult: false})" in html
+
+
+def test_skill_proxy_creates_draft_from_saved_windows_recording(tmp_path: Path) -> None:
+    module = _load_helper_module()
+    module.TOKEN = "skill-token"
+    module.RECORDING_MANAGER = module.RecordingManager(tmp_path / "recordings", listener_factory=lambda _manager: [])
+    started = module.RECORDING_MANAGER.start(name="Program 1", target_app="Program 1", target_window="Program 1")
+    module.RECORDING_MANAGER.record_event({"kind": "key_press", "key": "enter"})
+    module.RECORDING_MANAGER.stop()
+    module.RECORDING_MANAGER.save(started["recording_id"])
+    forwarded: list[tuple[str, str, dict[str, Any]]] = []
+
+    def atr_request(method: str, path: str, payload: dict[str, Any] | None = None) -> tuple[int, dict[str, Any]]:
+        forwarded.append((method, path, dict(payload or {})))
+        return 200, {"ok": True, "manifest": {"skill_id": "program1_skill", "version": "1.0.0"}}
+
+    module._atr_api_request = atr_request
+    server = module.ThreadingHTTPServer(("127.0.0.1", 0), module.Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_address[1]}"
+    try:
+        req = urllib.request.Request(
+            base + "/skills/drafts",
+            data=json.dumps(
+                {
+                    "recording_id": started["recording_id"],
+                    "skill_id": "program1_skill",
+                    "version": "1.0.0",
+                    "target_profile": "local_program1",
+                }
+            ).encode("utf-8"),
+            method="POST",
+            headers={"X-Bridge-Token": "skill-token", "Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=5) as response:
+            result = json.loads(response.read().decode("utf-8"))
+
+        assert result["ok"] is True
+        assert forwarded[0][0:2] == ("POST", "/api/equipment/skills/drafts")
+        assert forwarded[0][2]["recording"]["recording_id"] == started["recording_id"]
+        assert "token" not in json.dumps(forwarded[0][2]).lower()
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+def test_skill_proxy_forwards_test_and_delete_to_exact_linux_version() -> None:
+    module = _load_helper_module()
+    module.TOKEN = "skill-token"
+    forwarded: list[tuple[str, str, dict[str, Any]]] = []
+
+    def atr_request(method: str, path: str, payload: dict[str, Any] | None = None) -> tuple[int, dict[str, Any]]:
+        forwarded.append((method, path, dict(payload or {})))
+        return 200, {"ok": True, "status": "passed" if method == "POST" else "deleted"}
+
+    module._atr_api_request = atr_request
+    server = module.ThreadingHTTPServer(("127.0.0.1", 0), module.Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_address[1]}"
+    headers = {"X-Bridge-Token": "skill-token", "Content-Type": "application/json"}
+    try:
+        test_req = urllib.request.Request(
+            base + "/skills/program1_skill/1.0.0/test",
+            data=json.dumps({"runtime_mode": "test", "confirm_execute": False}).encode("utf-8"),
+            method="POST",
+            headers=headers,
+        )
+        with urllib.request.urlopen(test_req, timeout=5) as response:
+            tested = json.loads(response.read().decode("utf-8"))
+        delete_req = urllib.request.Request(
+            base + "/skills/program1_skill/1.0.0",
+            method="DELETE",
+            headers=headers,
+        )
+        with urllib.request.urlopen(delete_req, timeout=5) as response:
+            deleted = json.loads(response.read().decode("utf-8"))
+
+        assert tested["status"] == "passed"
+        assert deleted["status"] == "deleted"
+        assert forwarded == [
+            (
+                "POST",
+                "/api/equipment/skills/program1_skill/1.0.0/test",
+                {"runtime_mode": "test", "confirm_execute": False},
+            ),
+            ("DELETE", "/api/equipment/skills/program1_skill/1.0.0", {}),
+        ]
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)

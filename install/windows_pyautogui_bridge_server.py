@@ -20,6 +20,13 @@ Endpoints:
   POST /programs/validate
   POST /programs/register
   DELETE /programs/{program_id}
+  GET  /recordings
+  GET  /recordings/status
+  GET  /recordings/{recording_id}
+  POST /recordings/start
+  POST /recordings/checkpoint
+  POST /recordings/stop
+  POST /recordings/{recording_id}/save
   POST /execute
   POST /screenshot
   POST /locators/capture
@@ -29,19 +36,26 @@ from __future__ import annotations
 
 import argparse
 import base64
+from io import BytesIO
 from dataclasses import dataclass
 import hashlib
+import importlib.util
 import json
 import os
+import queue
 import re
 import subprocess
 import sys
+import threading
 import time
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
-from urllib.parse import unquote, urlparse
+from typing import Any, Callable
+from urllib.error import HTTPError, URLError
+from urllib.parse import quote, unquote, urlparse
+from urllib.request import Request as URLRequest, urlopen
+from uuid import uuid4
 
 
 def _normalize_bridge_platform(value: str, *, system_name: str | None = None) -> str:
@@ -93,11 +107,829 @@ ARTIFACT_ROOT = Path(os.getenv("WINDOWS_PYAUTOGUI_BRIDGE_ARTIFACT_ROOT", r"C:\AT
 LOCATOR_ROOT = Path(os.getenv("WINDOWS_PYAUTOGUI_LOCATOR_ROOT", r"C:\ATR\equipment_locators"))
 UTM_EXPORT_ROOT = Path(os.getenv("WINDOWS_PYAUTOGUI_UTM_EXPORT_DIR", r"C:\ATR\utm_exports"))
 PROGRAM_ROOT = Path(os.getenv("WINDOWS_PYAUTOGUI_PROGRAM_DIR", r"C:\ATR\programs"))
+RECORDING_ROOT = Path(os.getenv("WINDOWS_PYAUTOGUI_RECORDING_DIR", r"C:\ATR\recordings"))
+
+
+def _default_demo_root() -> Path:
+    script_path = Path(__file__).resolve()
+    candidates = []
+    bundle_root = getattr(sys, "_MEIPASS", None)
+    if bundle_root:
+        candidates.append(Path(bundle_root) / "demo")
+    candidates.extend((
+        script_path.parents[1] / "demo",
+        script_path.parents[1] / "Pyautogui_server_for_window" / "demo",
+        script_path.parent / "demo",
+    ))
+    return next((candidate for candidate in candidates if candidate.is_dir()), candidates[0])
+
+
+DEMO_ROOT = Path(os.getenv("WINDOWS_PYAUTOGUI_DEMO_DIR", str(_default_demo_root())))
+ATR_API_URL = os.getenv("WINDOWS_PYAUTOGUI_ATR_API_URL", "http://127.0.0.1:7860").rstrip("/")
 UTM_EXPORT_GLOB = os.getenv("WINDOWS_PYAUTOGUI_UTM_EXPORT_GLOB", "*.csv")
 UTM_FILE_STABLE_SEC = float(os.getenv("WINDOWS_PYAUTOGUI_UTM_FILE_STABLE_SEC", "2.0"))
 ALLOW_SIMULATED_UTM = os.getenv("WINDOWS_PYAUTOGUI_ALLOW_SIMULATED_UTM", "0").strip().lower() in {"1", "true", "yes", "on"}
 REQUIRE_UTM_SCREEN_ASSERTIONS = os.getenv("WINDOWS_PYAUTOGUI_REQUIRE_UTM_SCREEN_ASSERTIONS", "0").strip().lower() in {"1", "true", "yes", "on"}
 ARTIFACT_INDEX: dict[str, dict[str, Any]] = {}
+
+
+def _recording_hash(payload: dict[str, Any]) -> str:
+    normalized = dict(payload)
+    normalized.pop("content_sha256", None)
+    normalized.pop("idempotent", None)
+    encoded = json.dumps(normalized, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _recording_atomic_write(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
+    temporary.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+    temporary.replace(path)
+
+
+class _RecordingKeyboardCapture:
+    """Convert raw key transitions into replayable key and hotkey events."""
+
+    _MODIFIERS = {
+        "alt": "alt",
+        "alt_l": "alt",
+        "alt_r": "alt",
+        "cmd": "win",
+        "cmd_l": "win",
+        "cmd_r": "win",
+        "ctrl": "ctrl",
+        "ctrl_l": "ctrl",
+        "ctrl_r": "ctrl",
+        "shift": "shift",
+        "shift_l": "shift",
+        "shift_r": "shift",
+    }
+    _ORDER = ("ctrl", "alt", "shift", "win")
+
+    def __init__(self, manager: "RecordingManager") -> None:
+        self.manager = manager
+        self._pressed_modifiers: set[str] = set()
+        self._used_modifiers: set[str] = set()
+
+    @staticmethod
+    def key_name(key: Any) -> str:
+        char = getattr(key, "char", None)
+        if char:
+            return str(char).lower()[:32]
+        return str(key).replace("Key.", "").lower()[:32]
+
+    def on_press(self, key: Any) -> None:
+        name = self.key_name(key)
+        modifier = self._MODIFIERS.get(name)
+        if modifier:
+            self._pressed_modifiers.add(modifier)
+            return
+        if self._pressed_modifiers:
+            modifiers = [item for item in self._ORDER if item in self._pressed_modifiers]
+            self._used_modifiers.update(modifiers)
+            self.manager.record_event({"kind": "hotkey", "keys": [*modifiers, name]})
+            return
+        self.manager.record_event({"kind": "key_press", "key": name})
+
+    def on_release(self, key: Any) -> None:
+        modifier = self._MODIFIERS.get(self.key_name(key))
+        if not modifier:
+            return
+        if modifier not in self._used_modifiers:
+            self.manager.record_event({"kind": "key_press", "key": modifier})
+        self._pressed_modifiers.discard(modifier)
+        self._used_modifiers.discard(modifier)
+
+
+class _RecordingMouseCapture:
+    """Classify pointer input into sampled moves, clicks, drags, and scrolls."""
+
+    def __init__(self, manager: "RecordingManager", *, drag_threshold_px: int = 5) -> None:
+        self.manager = manager
+        self.drag_threshold_px = max(1, int(drag_threshold_px))
+        self._pressed: dict[str, tuple[int, int, float, dict[str, Any], Any]] = {}
+        self._last_position: tuple[int, int] | None = None
+
+    @staticmethod
+    def button_name(button: Any) -> str:
+        return str(button).split(".")[-1].lower()[:16]
+
+    def on_move(self, x: int, y: int) -> None:
+        self._last_position = (int(x), int(y))
+        if not self._pressed:
+            self.manager.cache_pointer_frame(int(x), int(y))
+            self.manager.record_mouse_move(int(x), int(y))
+
+    def on_click(self, x: int, y: int, button: Any, pressed: bool) -> None:
+        name = self.button_name(button)
+        if pressed:
+            event_number = self.manager.next_event_number()
+            pre_action_frame = self.manager.pre_action_frame(int(x), int(y))
+            source_locator = self.manager.capture_visual_locator(
+                int(x), int(y), locator_id=f"evt-{event_number:04d}-source", frame=pre_action_frame
+            )
+            self._pressed[name] = (int(x), int(y), time.monotonic(), source_locator, pre_action_frame)
+            self._last_position = (int(x), int(y))
+            return
+        start = self._pressed.pop(name, None)
+        if start is None:
+            return
+        start_x, start_y, started_at, source_locator, pre_action_frame = start
+        end_x, end_y = int(x), int(y)
+        event_number = self.manager.next_event_number()
+        distance = ((end_x - start_x) ** 2 + (end_y - start_y) ** 2) ** 0.5
+        if distance >= self.drag_threshold_px:
+            target_locator = self.manager.capture_visual_locator(
+                end_x,
+                end_y,
+                locator_id=f"evt-{event_number:04d}-target",
+                frame=pre_action_frame,
+            )
+            self.manager.record_event(
+                {
+                    "kind": "mouse_drag",
+                    "start_x": start_x,
+                    "start_y": start_y,
+                    "x": end_x,
+                    "y": end_y,
+                    "button": name,
+                    "duration_sec": max(0.05, time.monotonic() - started_at),
+                    "source_visual_locator": source_locator,
+                    "target_visual_locator": target_locator,
+                }
+            )
+        else:
+            target_locator = dict(source_locator)
+            target_locator["locator_id"] = f"evt-{event_number:04d}-target"
+            target_locator["recorded_coordinate"] = [end_x, end_y]
+            self.manager.record_event(
+                {
+                    "kind": "mouse_click",
+                    "x": end_x,
+                    "y": end_y,
+                    "button": name,
+                    "visual_locator": target_locator,
+                }
+            )
+
+    def on_scroll(self, x: int, y: int, dx: int, dy: int) -> None:
+        self.manager.record_event(
+            {"kind": "mouse_scroll", "x": int(x), "y": int(y), "dx": int(dx), "dy": int(dy)}
+        )
+
+
+class RecordingDependencyError(RuntimeError):
+    def __init__(self, dependency: str, detail: str = "") -> None:
+        super().__init__(detail or f"Missing recording dependency: {dependency}")
+        self.dependency = dependency
+
+
+def _pynput_recording_listeners(manager: "RecordingManager") -> list[Any]:
+    """Create global listeners only while a recording is active."""
+    try:
+        from pynput import keyboard, mouse  # type: ignore
+    except Exception as exc:
+        raise RecordingDependencyError("pynput", f"{exc.__class__.__name__}: {exc}") from exc
+
+    key_capture = _RecordingKeyboardCapture(manager)
+    mouse_capture = _RecordingMouseCapture(manager)
+
+    mouse_listener = mouse.Listener(
+        on_move=mouse_capture.on_move,
+        on_click=mouse_capture.on_click,
+        on_scroll=mouse_capture.on_scroll,
+    )
+    keyboard_listener = keyboard.Listener(on_press=key_capture.on_press, on_release=key_capture.on_release)
+    return [mouse_listener, keyboard_listener]
+
+
+class _TkRecordingOverlayWindow:
+    """Small Windows desktop indicator owned entirely by one Tk thread."""
+
+    def __init__(self) -> None:
+        import tkinter as tk
+
+        self._root = tk.Tk()
+        self._root.overrideredirect(True)
+        self._root.attributes("-topmost", True)
+        try:
+            self._root.attributes("-toolwindow", True)
+        except Exception:
+            pass
+        width, height = 260, 48
+        screen_width = max(width, int(self._root.winfo_screenwidth()))
+        x = max(0, (screen_width - width) // 2)
+        self._root.geometry(f"{width}x{height}+{x}+18")
+        self._root.configure(bg="#171a20")
+
+        frame = tk.Frame(self._root, bg="#171a20", highlightbackground="#4d535e", highlightthickness=1)
+        frame.pack(fill="both", expand=True)
+        tk.Label(frame, text="●", fg="#f4434d", bg="#171a20", font=("Segoe UI", 16, "bold")).pack(
+            side="left", padx=(14, 8)
+        )
+        tk.Label(frame, text="RECORDING", fg="#ffffff", bg="#171a20", font=("Segoe UI", 11, "bold")).pack(
+            side="left"
+        )
+        self._elapsed_label = tk.Label(
+            frame,
+            text="00:00:00",
+            fg="#d8dde7",
+            bg="#171a20",
+            font=("Consolas", 11, "bold"),
+        )
+        self._elapsed_label.pack(side="right", padx=(8, 14))
+        self.pump()
+
+    def update_elapsed(self, elapsed_s: float) -> None:
+        total = max(0, int(elapsed_s))
+        hours, remainder = divmod(total, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        self._elapsed_label.configure(text=f"{hours:02d}:{minutes:02d}:{seconds:02d}")
+
+    def pump(self) -> None:
+        self._root.update_idletasks()
+        self._root.update()
+
+    def close(self) -> None:
+        try:
+            self._root.destroy()
+        except Exception:
+            pass
+
+
+class RecordingOverlayController:
+    """Thread-confined native recording overlay with a non-blocking API."""
+
+    def __init__(
+        self,
+        *,
+        platform_name: str | None = None,
+        window_factory: Callable[[], Any] | None = None,
+        monotonic: Callable[[], float] = time.monotonic,
+        poll_interval: float = 0.1,
+    ) -> None:
+        self._enabled = str(platform_name or sys.platform).lower().startswith("win") or window_factory is not None
+        self._window_factory = window_factory or _TkRecordingOverlayWindow
+        self._monotonic = monotonic
+        self._poll_interval = max(0.005, float(poll_interval))
+        self._commands: queue.Queue[tuple[str, str, float]] = queue.Queue()
+        self._lock = threading.RLock()
+        self._thread: threading.Thread | None = None
+        self._available = self._enabled
+        self._visible = False
+        self._error: str | None = None if self._enabled else "windows_only"
+
+    def _ensure_thread(self) -> None:
+        with self._lock:
+            if not self._enabled or (self._thread is not None and self._thread.is_alive()):
+                return
+            self._thread = threading.Thread(target=self._run, name="atr-recording-overlay", daemon=True)
+            self._thread.start()
+
+    def show(self, recording_id: str, started_monotonic: float) -> None:
+        if not self._enabled:
+            return
+        self._ensure_thread()
+        self._commands.put(("show", str(recording_id), float(started_monotonic)))
+
+    def hide(self) -> None:
+        if self._enabled and self._thread is not None:
+            self._commands.put(("hide", "", 0.0))
+
+    def shutdown(self) -> None:
+        thread = self._thread
+        if thread is None:
+            return
+        self._commands.put(("shutdown", "", 0.0))
+        if thread is not threading.current_thread():
+            thread.join(timeout=2.0)
+        with self._lock:
+            self._thread = None
+            self._visible = False
+
+    def status(self) -> dict[str, Any]:
+        with self._lock:
+            return {"available": self._available, "visible": self._visible, "error": self._error}
+
+    def _run(self) -> None:
+        window: Any | None = None
+        started_monotonic = 0.0
+        running = True
+        while running:
+            try:
+                command, _recording_id, command_started = self._commands.get(timeout=self._poll_interval)
+            except queue.Empty:
+                command, command_started = "tick", started_monotonic
+            try:
+                if command == "show":
+                    if window is not None:
+                        window.close()
+                    window = self._window_factory()
+                    started_monotonic = command_started
+                    with self._lock:
+                        self._available = True
+                        self._visible = True
+                        self._error = None
+                elif command in {"hide", "shutdown"}:
+                    if window is not None:
+                        window.close()
+                        window = None
+                    with self._lock:
+                        self._visible = False
+                    if command == "shutdown":
+                        running = False
+                        continue
+                if window is not None:
+                    window.update_elapsed(max(0.0, self._monotonic() - started_monotonic))
+                    window.pump()
+            except Exception as exc:
+                if window is not None:
+                    try:
+                        window.close()
+                    except Exception:
+                        pass
+                    window = None
+                with self._lock:
+                    self._available = False
+                    self._visible = False
+                    self._error = f"{exc.__class__.__name__}: {str(exc)[:160]}"
+
+
+
+class RecordingManager:
+    """Persist one redacted operator demonstration without owning Skill reasoning."""
+
+    def __init__(
+        self,
+        root: str | Path,
+        *,
+        listener_factory: Callable[["RecordingManager"], list[Any]] | None = None,
+        screenshot_provider: Callable[[], Any] | None = None,
+        overlay_controller: Any | None = None,
+    ) -> None:
+        self.root = Path(root)
+        self._listener_factory = listener_factory or _pynput_recording_listeners
+        self._screenshot_provider = screenshot_provider
+        self._overlay = overlay_controller or RecordingOverlayController()
+        self._lock = threading.RLock()
+        self._active: dict[str, Any] | None = None
+        self._listeners: list[Any] = []
+        self._started_monotonic = 0.0
+        self._last_completed_id = ""
+        self._last_mouse_move_monotonic = 0.0
+        self._last_mouse_position: tuple[int, int] | None = None
+        self._last_pointer_frame: Any | None = None
+        self._last_pointer_frame_monotonic = 0.0
+        self._last_pointer_frame_position: tuple[int, int] | None = None
+        self._pointer_frame_history: list[tuple[Any, float, tuple[int, int]]] = []
+        self._visual_locator_bytes = 0
+
+    def next_event_number(self) -> int:
+        with self._lock:
+            return len(self._active.get("events", [])) + 1 if self._active is not None else 1
+
+    def _screenshot(self) -> Any:
+        if self._screenshot_provider is not None:
+            return self._screenshot_provider()
+        pyautogui, error = _load_pyautogui()
+        if pyautogui is None:
+            raise RuntimeError(error or "PyAutoGUI unavailable")
+        return pyautogui.screenshot()
+
+    @staticmethod
+    def _crop_box(x: int, y: int, width: int, height: int, image_size: tuple[int, int]) -> tuple[int, int, int, int]:
+        image_width, image_height = (max(1, int(value)) for value in image_size)
+        crop_width = min(max(1, int(width)), image_width)
+        crop_height = min(max(1, int(height)), image_height)
+        left = min(max(0, int(x) - crop_width // 2), image_width - crop_width)
+        top = min(max(0, int(y) - crop_height // 2), image_height - crop_height)
+        return left, top, left + crop_width, top + crop_height
+
+    def cache_pointer_frame(self, x: int, y: int) -> bool:
+        """Retain one recent pre-action frame without persisting pointer-motion screenshots."""
+        now = time.monotonic()
+        with self._lock:
+            if self._active is None:
+                return False
+            if self._last_pointer_frame_monotonic and now - self._last_pointer_frame_monotonic < 0.05:
+                return False
+        try:
+            frame = self._screenshot()
+        except Exception:
+            return False
+        with self._lock:
+            if self._active is None:
+                return False
+            self._last_pointer_frame = frame
+            self._last_pointer_frame_monotonic = time.monotonic()
+            self._last_pointer_frame_position = (int(x), int(y))
+            self._pointer_frame_history.append(
+                (frame, self._last_pointer_frame_monotonic, self._last_pointer_frame_position)
+            )
+            self._pointer_frame_history = self._pointer_frame_history[-8:]
+            return True
+
+    def pre_action_frame(self, x: int, y: int) -> Any | None:
+        """Prefer the latest frame captured before pointer hover changed the target."""
+        with self._lock:
+            now = time.monotonic()
+            for frame, captured_at, position in reversed(self._pointer_frame_history):
+                age = now - captured_at
+                distance = ((int(x) - position[0]) ** 2 + (int(y) - position[1]) ** 2) ** 0.5
+                if age <= 1.5 and distance >= 128:
+                    copy = getattr(frame, "copy", None)
+                    return copy() if callable(copy) else frame
+            position = self._last_pointer_frame_position
+            age = now - self._last_pointer_frame_monotonic
+            if self._last_pointer_frame is not None and position is not None and age <= 1.5:
+                distance = ((int(x) - position[0]) ** 2 + (int(y) - position[1]) ** 2) ** 0.5
+                if distance <= 64:
+                    copy = getattr(self._last_pointer_frame, "copy", None)
+                    return copy() if callable(copy) else self._last_pointer_frame
+        try:
+            return self._screenshot()
+        except Exception:
+            return None
+
+    def capture_visual_locator(self, x: int, y: int, *, locator_id: str, frame: Any | None = None) -> dict[str, Any]:
+        """Capture portable pointer-target crops and local full-frame evidence."""
+        coordinate = [int(x), int(y)]
+        unavailable = {
+            "locator_id": str(locator_id)[:96],
+            "status": "unavailable",
+            "recorded_coordinate": coordinate,
+            "candidates": [],
+            "failure_code": "VISUAL_LOCATOR_CAPTURE_FAILED",
+        }
+        with self._lock:
+            if self._active is None:
+                return unavailable
+            policy = self._active.get("visual_locator_policy") if isinstance(self._active.get("visual_locator_policy"), dict) else {}
+            if str(policy.get("mode") or "") != "image_first":
+                return {
+                    **unavailable,
+                    "status": "disabled",
+                    "failure_code": None,
+                    "detail": "image tracking disabled by operator",
+                }
+            pointer_count = sum(
+                1
+                for item in self._active.get("events", [])
+                if isinstance(item, dict) and item.get("kind") in {"mouse_click", "mouse_drag"}
+            )
+            if pointer_count >= 200:
+                return {
+                    **unavailable,
+                    "failure_code": "VISUAL_LOCATOR_EVENT_LIMIT",
+                    "detail": "image locator limit is 200 pointer events",
+                }
+            try:
+                frame = frame if frame is not None else self._screenshot()
+                size = tuple(int(value) for value in frame.size)
+                directory = self._path(str(self._active["recording_id"])).parent / "visual_evidence"
+                directory.mkdir(parents=True, exist_ok=True)
+                full_path = directory / f"{_safe_segment(locator_id, 'locator')}-frame.png"
+                frame.save(full_path, format="PNG")
+                candidates: list[dict[str, Any]] = []
+                capture_bytes = 0
+                for kind, crop_width, crop_height, confidence in (
+                    ("tight", 64, 64, 0.88),
+                    ("context", 192, 128, 0.82),
+                ):
+                    box = self._crop_box(int(x), int(y), crop_width, crop_height, size)
+                    crop = frame.crop(box)
+                    buffer = BytesIO()
+                    crop.save(buffer, format="PNG")
+                    raw = buffer.getvalue()
+                    if len(raw) > 256 * 1024 or not raw.startswith(b"\x89PNG\r\n\x1a\n"):
+                        raise ValueError("visual locator crop is invalid or exceeds 256 KiB")
+                    if self._visual_locator_bytes + capture_bytes + len(raw) > 32 * 1024 * 1024:
+                        raise ValueError("recording visual locator payload exceeds 32 MiB")
+                    capture_bytes += len(raw)
+                    candidates.append(
+                        {
+                            "kind": kind,
+                            "png_base64": base64.b64encode(raw).decode("ascii"),
+                            "sha256": hashlib.sha256(raw).hexdigest(),
+                            "width": box[2] - box[0],
+                            "height": box[3] - box[1],
+                            "crop_origin": [box[0], box[1]],
+                            "confidence": confidence,
+                        }
+                    )
+                self._visual_locator_bytes += capture_bytes
+                return {
+                    "locator_id": str(locator_id)[:96],
+                    "status": "ready",
+                    "recorded_coordinate": coordinate,
+                    "candidates": candidates,
+                    "full_frame_artifact_path": str(full_path),
+                    "full_frame_sha256": hashlib.sha256(full_path.read_bytes()).hexdigest(),
+                }
+            except Exception as exc:
+                unavailable["detail"] = f"{exc.__class__.__name__}: {str(exc)[:160]}"
+                return unavailable
+
+    def _path(self, recording_id: str) -> Path:
+        clean = str(recording_id or "").strip()
+        if not re.fullmatch(r"rec-[A-Za-z0-9_-]{8,80}", clean):
+            raise ValueError("invalid recording_id")
+        return self.root / clean / "recording.json"
+
+    def _persist(self, payload: dict[str, Any]) -> None:
+        stable = dict(payload)
+        stable["content_sha256"] = _recording_hash(stable)
+        payload["content_sha256"] = stable["content_sha256"]
+        _recording_atomic_write(self._path(str(payload["recording_id"])), stable)
+
+    def start(
+        self,
+        *,
+        name: str,
+        target_app: str,
+        target_window: str,
+        image_tracking: bool = True,
+        coordinate_fallback: bool = False,
+    ) -> dict[str, Any]:
+        with self._lock:
+            if self._active is not None:
+                return {
+                    "ok": False,
+                    "status": "recording",
+                    "failure_code": "SKILL_RECORDING_ALREADY_ACTIVE",
+                    "recording_id": self._active["recording_id"],
+                }
+            recording_id = f"rec-{time.strftime('%Y%m%dT%H%M%S')}-{uuid4().hex[:8]}"
+            now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            self._active = {
+                "schema": "atr.equipment_recording.v2" if image_tracking else "atr.equipment_recording.v1",
+                "recording_id": recording_id,
+                "name": str(name or "Equipment demonstration")[:160],
+                "target_app": str(target_app or "")[:160],
+                "target_window": str(target_window or "")[:240],
+                "status": "recording",
+                "events": [],
+                "checkpoints": [],
+                "created_at": now,
+                "updated_at": now,
+                "visual_locator_policy": {
+                    "mode": "image_first" if image_tracking else "coordinates",
+                    "required_for_pointer_actions": bool(image_tracking),
+                    "coordinate_fallback": bool(coordinate_fallback),
+                },
+            }
+            self._started_monotonic = time.monotonic()
+            self._last_mouse_move_monotonic = 0.0
+            self._last_mouse_position = None
+            self._last_pointer_frame = None
+            self._last_pointer_frame_monotonic = 0.0
+            self._last_pointer_frame_position = None
+            self._pointer_frame_history = []
+            self._visual_locator_bytes = 0
+            try:
+                self._listeners = list(self._listener_factory(self) or [])
+                for listener in self._listeners:
+                    start = getattr(listener, "start", None)
+                    if callable(start):
+                        start()
+            except Exception as exc:
+                for listener in self._listeners:
+                    stop = getattr(listener, "stop", None)
+                    if callable(stop):
+                        try:
+                            stop()
+                        except Exception:
+                            pass
+                dependency = getattr(exc, "dependency", "")
+                if not dependency and isinstance(exc, ModuleNotFoundError):
+                    dependency = str(getattr(exc, "name", "") or "")
+                    if not dependency and "pynput" in str(exc).lower():
+                        dependency = "pynput"
+                self._active = None
+                self._listeners = []
+                self._started_monotonic = 0.0
+                self._overlay.hide()
+                if dependency:
+                    return {
+                        "ok": False,
+                        "status": "blocked",
+                        "failure_code": "SKILL_RECORDING_DEPENDENCY_MISSING",
+                        "missing_dependencies": [dependency],
+                        "message": f"Recording requires the Windows dependency: {dependency}",
+                    }
+                return {
+                    "ok": False,
+                    "status": "blocked",
+                    "failure_code": "SKILL_RECORDING_LISTENER_START_FAILED",
+                    "message": f"Recording listeners could not start: {exc.__class__.__name__}: {str(exc)[:160]}",
+                }
+            self._overlay.show(recording_id, self._started_monotonic)
+            self._persist(self._active)
+            return {"ok": True, **dict(self._active)}
+
+    def record_event(self, event: dict[str, Any]) -> bool:
+        with self._lock:
+            if self._active is None:
+                return False
+            kind = str(event.get("kind") or "").strip().lower()
+            safe: dict[str, Any] = {"kind": kind, "at_ms": max(0, int((time.monotonic() - self._started_monotonic) * 1000))}
+            if kind == "key_press":
+                safe["key"] = str(event.get("key") or "").strip().lower()[:32]
+            elif kind == "mouse_click":
+                safe.update(
+                    {
+                        "x": int(event.get("x", 0)),
+                        "y": int(event.get("y", 0)),
+                        "button": str(event.get("button") or "left")[:16],
+                    }
+                )
+                if isinstance(event.get("visual_locator"), dict):
+                    safe["visual_locator"] = dict(event["visual_locator"])
+            elif kind == "mouse_move":
+                safe.update({"x": int(event.get("x", 0)), "y": int(event.get("y", 0))})
+            elif kind == "mouse_drag":
+                safe.update(
+                    {
+                        "start_x": int(event.get("start_x", 0)),
+                        "start_y": int(event.get("start_y", 0)),
+                        "x": int(event.get("x", 0)),
+                        "y": int(event.get("y", 0)),
+                        "button": str(event.get("button") or "left")[:16],
+                        "duration_sec": round(max(0.05, min(float(event.get("duration_sec", 0.25)), 5.0)), 3),
+                    }
+                )
+                for key in ("source_visual_locator", "target_visual_locator"):
+                    if isinstance(event.get(key), dict):
+                        safe[key] = dict(event[key])
+            elif kind == "mouse_scroll":
+                safe.update(
+                    {
+                        "x": int(event.get("x", 0)),
+                        "y": int(event.get("y", 0)),
+                        "dx": max(-100, min(100, int(event.get("dx", 0)))),
+                        "dy": max(-100, min(100, int(event.get("dy", 0)))),
+                    }
+                )
+            elif kind == "hotkey":
+                safe["keys"] = [str(item).strip().lower()[:32] for item in event.get("keys", [])][:8]
+            else:
+                return False
+            self._active["events"].append(safe)
+            self._active["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            self._persist(self._active)
+            return True
+
+    def record_mouse_move(self, x: int, y: int) -> bool:
+        """Sample pointer motion without flooding a recording with raw OS events."""
+        with self._lock:
+            if self._active is None:
+                return False
+            now = time.monotonic()
+            position = (int(x), int(y))
+            if position == self._last_mouse_position:
+                return False
+            if self._last_mouse_move_monotonic and now - self._last_mouse_move_monotonic < 0.065:
+                return False
+            self._last_mouse_move_monotonic = now
+            self._last_mouse_position = position
+            return self.record_event({"kind": "mouse_move", "x": position[0], "y": position[1]})
+
+    def checkpoint(self, *, label: str, pyautogui: Any | None = None) -> dict[str, Any]:
+        with self._lock:
+            if self._active is None:
+                return {"ok": False, "status": "idle", "failure_code": "SKILL_RECORDING_NOT_ACTIVE"}
+            capture = pyautogui
+            if capture is None:
+                capture, _error = _load_pyautogui()
+            checkpoint_id = f"cp-{len(self._active['checkpoints']) + 1:03d}"
+            directory = self._path(str(self._active["recording_id"])).parent / "checkpoints"
+            directory.mkdir(parents=True, exist_ok=True)
+            image_path = directory / f"{checkpoint_id}.png"
+            if capture is None:
+                return {"ok": False, "status": "blocked", "failure_code": "PYAUTOGUI_UNAVAILABLE"}
+            capture.screenshot().save(image_path)
+            digest = hashlib.sha256(image_path.read_bytes()).hexdigest()
+            checkpoint = {
+                "checkpoint_id": checkpoint_id,
+                "at_ms": max(0, int((time.monotonic() - self._started_monotonic) * 1000)),
+                "label": str(label or checkpoint_id)[:160],
+                "artifact_path": str(image_path),
+                "sha256": digest,
+            }
+            self._active["checkpoints"].append(checkpoint)
+            self._persist(self._active)
+            return {"ok": True, "status": "checkpoint_saved", **checkpoint}
+
+    def stop(self) -> dict[str, Any]:
+        with self._lock:
+            if self._active is None:
+                if self._last_completed_id:
+                    payload = self.get(self._last_completed_id)
+                    payload["idempotent"] = True
+                    return payload
+                return {"ok": False, "status": "idle", "failure_code": "SKILL_RECORDING_NOT_ACTIVE"}
+            listener_stop_errors: list[str] = []
+            for listener in self._listeners:
+                stop = getattr(listener, "stop", None)
+                if callable(stop):
+                    try:
+                        stop()
+                    except Exception as exc:
+                        listener_stop_errors.append(f"{exc.__class__.__name__}: {str(exc)[:160]}")
+            self._overlay.hide()
+            self._listeners = []
+            self._active["status"] = "completed"
+            if listener_stop_errors:
+                self._active["listener_stop_errors"] = listener_stop_errors
+            self._active["duration_ms"] = max(0, int((time.monotonic() - self._started_monotonic) * 1000))
+            self._active["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            self._persist(self._active)
+            completed = dict(self._active)
+            completed["ok"] = True
+            self._last_completed_id = str(self._active["recording_id"])
+            self._active = None
+            self._last_pointer_frame = None
+            self._last_pointer_frame_monotonic = 0.0
+            self._last_pointer_frame_position = None
+            self._pointer_frame_history = []
+            return completed
+
+    def shutdown(self) -> None:
+        with self._lock:
+            active = self._active is not None
+        if active:
+            self.stop()
+        self._overlay.shutdown()
+
+    def save(self, recording_id: str) -> dict[str, Any]:
+        with self._lock:
+            payload = self.get(recording_id)
+            if payload.get("status") not in {"completed", "saved"}:
+                return {"ok": False, **payload, "failure_code": "SKILL_RECORDING_NOT_COMPLETE"}
+            payload["status"] = "saved"
+            payload["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            payload.pop("ok", None)
+            self._persist(payload)
+            return {"ok": True, **payload}
+
+    def get(self, recording_id: str) -> dict[str, Any]:
+        path = self._path(recording_id)
+        if not path.exists():
+            return {"ok": False, "status": "not_found", "failure_code": "SKILL_RECORDING_NOT_FOUND", "recording_id": recording_id}
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        return {"ok": True, **payload}
+
+    def list(self) -> list[dict[str, Any]]:
+        items: list[dict[str, Any]] = []
+        if self.root.exists():
+            for path in sorted(self.root.glob("rec-*/recording.json"), reverse=True):
+                try:
+                    items.append(json.loads(path.read_text(encoding="utf-8")))
+                except Exception:
+                    continue
+        return items
+
+    def status(self) -> dict[str, Any]:
+        with self._lock:
+            if self._active is not None:
+                return {"ok": True, **dict(self._active), "elapsed_ms": max(0, int((time.monotonic() - self._started_monotonic) * 1000)), "overlay": self._overlay.status()}
+            return {"ok": True, "status": "idle", "recording_id": None, "overlay": self._overlay.status()}
+
+
+RECORDING_MANAGER = RecordingManager(RECORDING_ROOT)
+
+
+def _atr_api_request(
+    method: str,
+    path: str,
+    payload: dict[str, Any] | None = None,
+) -> tuple[int, dict[str, Any]]:
+    """Proxy token-free Skill metadata to Linux; model credentials never cross the bridge."""
+    data = json.dumps(payload, ensure_ascii=True).encode("utf-8") if payload is not None else None
+    request = URLRequest(
+        f"{ATR_API_URL}{path}",
+        data=data,
+        method=method,
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urlopen(request, timeout=20) as response:
+            body = json.loads(response.read().decode("utf-8"))
+            return int(response.status), body if isinstance(body, dict) else {"ok": False, "status": "invalid_response"}
+    except HTTPError as exc:
+        try:
+            body = json.loads(exc.read().decode("utf-8"))
+        except Exception:
+            body = {"ok": False, "status": "atr_api_error", "message": str(exc)}
+        return int(exc.code), body if isinstance(body, dict) else {"ok": False, "status": "atr_api_error"}
+    except (URLError, TimeoutError, OSError) as exc:
+        return 503, {
+            "ok": False,
+            "status": "unreachable",
+            "failure_code": "EQUIPMENT_SKILL_REGISTRY_UNREACHABLE",
+            "message": str(exc),
+        }
 
 PROGRAMS = {
     "program1": {
@@ -227,14 +1059,147 @@ ALLOWED_SEQUENCE_ACTIONS = frozenset({
     "assert_text",
     "wait_until_text",
     "click",
+    "double_click",
+    "triple_click",
+    "move_to",
+    "move_rel",
+    "query_pointer",
+    "query_screen",
+    "mouse_down",
+    "mouse_up",
+    "drag_to",
+    "drag_rel",
+    "scroll",
+    "hscroll",
+    "vscroll",
     "hotkey",
     "press",
+    "key_down",
+    "key_up",
     "write",
     "type_path",
     "wait",
     "log",
     "wait_for_file",
+    "pixel",
+    "pixel_matches_color",
+    "locate_all_images",
+    "window_activate",
+    "window_minimize",
+    "window_maximize",
+    "window_restore",
+    "window_move",
+    "window_resize",
+    "alert",
+    "confirm",
 })
+
+_MOUSE_BUTTONS = frozenset({"left", "middle", "right"})
+
+
+def _inline_image_candidates_error(step: dict[str, Any]) -> str:
+    candidates = step.get("image_candidates")
+    if candidates is None:
+        return ""
+    if not isinstance(candidates, list) or not 1 <= len(candidates) <= 2:
+        return "image_candidates must contain one or two PNG crops"
+    total = 0
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            return "image candidate must be an object"
+        encoded = str(candidate.get("png_base64") or "")
+        expected_sha = str(candidate.get("sha256") or "").lower()
+        try:
+            decoded = base64.b64decode(encoded, validate=True)
+        except Exception:
+            return "image candidate png_base64 is invalid"
+        if len(decoded) > 256 * 1024 or not decoded.startswith(b"\x89PNG\r\n\x1a\n"):
+            return "image candidate must be a PNG no larger than 256 KiB"
+        if not re.fullmatch(r"[0-9a-f]{64}", expected_sha) or hashlib.sha256(decoded).hexdigest() != expected_sha:
+            return "image candidate sha256 does not match PNG data"
+        width, height = int(candidate.get("width", 0)), int(candidate.get("height", 0))
+        if not 1 <= width <= 512 or not 1 <= height <= 512:
+            return "image candidate dimensions must be within 1..512"
+        total += len(decoded)
+    if total > 512 * 1024:
+        return "inline image candidates exceed 512 KiB per action"
+    return ""
+
+
+def _action_parameter_error(step: dict[str, Any]) -> str:
+    """Return a stable validation message for one bounded bridge action."""
+    action = str(step.get("action") or "").strip()
+    try:
+        image_error = _inline_image_candidates_error(step)
+        if image_error:
+            return image_error
+        if action in {"click", "double_click", "triple_click"}:
+            clicks = int(step.get("clicks", 2 if action == "double_click" else 3 if action == "triple_click" else 1))
+            if clicks not in {1, 2, 3}:
+                return "clicks must be between 1 and 3"
+            if str(step.get("button") or "left") not in _MOUSE_BUTTONS:
+                return "button must be left, middle, or right"
+            if not 0.0 <= float(step.get("interval_sec", 0.0)) <= 1.0:
+                return "click interval_sec must be between 0 and 1"
+        if action in {"mouse_down", "mouse_up", "drag_to", "drag_rel"} and str(step.get("button") or "left") not in _MOUSE_BUTTONS:
+            return "button must be left, middle, or right"
+        if action in {"drag_to", "drag_rel", "move_to", "move_rel", "window_move"}:
+            has_visual_locator = bool(
+                step.get("image_path")
+                or step.get("target_image")
+                or (isinstance(step.get("image_candidates"), list) and step.get("image_candidates"))
+            )
+            if (step.get("x") is None or step.get("y") is None) and not (
+                action in {"move_to", "drag_to"} and has_visual_locator
+            ):
+                return f"{action} requires x and y"
+            if action in {"drag_to", "drag_rel", "move_to", "move_rel"} and not 0.0 <= float(step.get("duration_sec", 0.1)) <= 5.0:
+                return f"{action} duration_sec must be between 0 and 5"
+        if action in {"scroll", "hscroll", "vscroll"}:
+            clicks = int(step.get("clicks", 0))
+            if clicks == 0 or abs(clicks) > 100:
+                return f"{action} clicks must be non-zero and within -100..100"
+        if action == "press":
+            if not str(step.get("key") or "").strip():
+                return "press requires key"
+            if not 1 <= int(step.get("presses", 1)) <= 20:
+                return "presses must be between 1 and 20"
+        if action in {"key_down", "key_up"} and not str(step.get("key") or "").strip():
+            return f"{action} requires key"
+        if action in {"pixel", "pixel_matches_color"}:
+            if step.get("x") is None or step.get("y") is None:
+                return f"{action} requires x and y"
+        if action == "pixel_matches_color":
+            color = step.get("color")
+            if not isinstance(color, (list, tuple)) or len(color) != 3 or any(not 0 <= int(item) <= 255 for item in color):
+                return "pixel_matches_color color must contain three RGB bytes"
+            if not 0 <= int(step.get("tolerance", 0)) <= 255:
+                return "pixel_matches_color tolerance must be between 0 and 255"
+        if action.startswith("window_"):
+            if not str(step.get("title") or step.get("window") or "").strip():
+                return f"{action} requires title"
+        if action == "window_resize":
+            if not 100 <= int(step.get("width", 0)) <= 10000 or not 100 <= int(step.get("height", 0)) <= 10000:
+                return "window_resize width and height must be between 100 and 10000"
+        if action in {"alert", "confirm"}:
+            if not str(step.get("text") or "").strip() or len(str(step.get("text") or "")) > 500:
+                return f"{action} text must contain 1 to 500 characters"
+        if action == "confirm":
+            buttons = step.get("buttons", ["OK", "Cancel"])
+            if not isinstance(buttons, list) or not 1 <= len(buttons) <= 4 or any(not str(item).strip() for item in buttons):
+                return "confirm buttons must contain 1 to 4 labels"
+        if action == "screenshot" and step.get("region") is not None:
+            region = step.get("region")
+            if not isinstance(region, (list, tuple)) or len(region) != 4:
+                return "screenshot region must be [x, y, width, height]"
+            x, y, width, height = (int(item) for item in region)
+            if x < 0 or y < 0 or width < 1 or height < 1 or width > 10000 or height > 10000:
+                return "screenshot region is outside bounded dimensions"
+        if action == "locate_all_images" and not 1 <= int(step.get("max_results", 20)) <= 100:
+            return "locate_all_images max_results must be between 1 and 100"
+    except (TypeError, ValueError, OverflowError):
+        return f"invalid parameters for {action}"
+    return ""
 
 
 def _validate_program_definition(definition: Any) -> dict[str, Any]:
@@ -260,6 +1225,14 @@ def _validate_program_definition(definition: Any) -> dict[str, Any]:
         action = str(step.get("action") or "").strip()
         if action not in ALLOWED_SEQUENCE_ACTIONS:
             return {"ok": False, "status": "blocked", "failure_code": "PYAUTOGUI_ACTION_NOT_ALLOWED", "message": f"Unsupported PyAutoGUI bridge action: {action or '<empty>'}"}
+        parameter_error = _action_parameter_error(step)
+        if parameter_error:
+            return {
+                "ok": False,
+                "status": "invalid",
+                "failure_code": "PYAUTOGUI_ACTION_PARAMETER_INVALID",
+                "message": f"sequence[{index}] {parameter_error}.",
+            }
         normalized_sequence.append(dict(step))
     normalized = {
         "schema": PROGRAM_SCHEMA,
@@ -272,6 +1245,8 @@ def _validate_program_definition(definition: Any) -> dict[str, Any]:
         "safe_test": bool(definition.get("safe_test", False)),
         "sequence": normalized_sequence,
     }
+
+
     locators = definition.get("locators") if isinstance(definition.get("locators"), dict) else {}
     if locators:
         normalized["locators"] = {str(name): dict(locator) for name, locator in locators.items() if isinstance(locator, dict)}
@@ -292,6 +1267,58 @@ def _validate_program_definition(definition: Any) -> dict[str, Any]:
         "platform_specific_locators": platform_specific_locators,
         "requires_windows_recalibration": BRIDGE_PLATFORM == "linux" and bool(platform_specific_locators),
     }
+
+
+def _capability_catalog() -> dict[str, Any]:
+    families = {
+        "mouse": ["query_pointer", "query_screen", "move_to", "move_rel", "click", "double_click", "triple_click", "mouse_down", "mouse_up", "drag_to", "drag_rel", "scroll", "hscroll", "vscroll"],
+        "keyboard": ["write", "press", "hotkey", "key_down", "key_up"],
+        "screen": ["screenshot", "locate_image", "locate_all_images", "assert_visible", "wait_until_image", "pixel", "pixel_matches_color"],
+        "window": ["focus_window", "window_activate", "window_minimize", "window_maximize", "window_restore", "window_move", "window_resize"],
+        "dialog": ["alert", "confirm"],
+        "timing": ["wait", "wait_for_file"],
+    }
+    return {
+        "ok": True,
+        "schema": PROGRAM_SCHEMA,
+        "families": families,
+        "action_count": len({action for actions in families.values() for action in actions}),
+        "excluded": ["shell", "arbitrary_python", "file_delete", "password_entry", "window_close", "process_terminate"],
+        "failsafe_required": True,
+    }
+
+
+def _load_example_catalog() -> list[dict[str, Any]]:
+    examples: list[dict[str, Any]] = []
+    root = DEMO_ROOT / "examples"
+    if not root.is_dir():
+        return examples
+    for path in sorted(root.glob("*.json")):
+        try:
+            program = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        validation = _validate_program_definition(program)
+        if not validation.get("ok"):
+            continue
+        metadata = dict(program.get("example") or {})
+        examples.append(
+            {
+                "example_id": path.stem,
+                "name": str(program.get("name") or path.stem),
+                "description": str(program.get("description") or ""),
+                "family": str(metadata.get("family") or "other"),
+                "safe_test": bool(program.get("safe_test")),
+                "manual_confirmation_required": bool(metadata.get("manual_confirmation_required")),
+                "action_count": len(program.get("sequence", [])),
+                "program": program,
+            }
+        )
+    return examples
+
+
+def _example_catalog_payload() -> dict[str, Any]:
+    return {"ok": True, "examples": _load_example_catalog(), "capability_lab_path": "/capability-lab"}
 
 
 def _load_custom_programs() -> dict[str, dict[str, Any]]:
@@ -373,9 +1400,44 @@ def _load_pyautogui() -> tuple[Any | None, str]:
     return pyautogui, "" if error is None else str(error)
 
 
+def _runtime_dependency_status(checker: Callable[[str], bool] | None = None) -> dict[str, Any]:
+    """Return import readiness without importing GUI packages into the server process."""
+    available = checker or (lambda name: importlib.util.find_spec(name) is not None)
+    required_imports = {
+        "pyautogui": "pyautogui",
+        "pillow": "PIL",
+        "opencv-python": "cv2",
+        "pynput": "pynput",
+    }
+    optional_imports = {
+        "pywinauto": "pywinauto",
+        "pytesseract": "pytesseract",
+    }
+
+    def inspect(packages: dict[str, str]) -> dict[str, dict[str, Any]]:
+        return {
+            package: {"available": bool(available(import_name)), "import_name": import_name}
+            for package, import_name in packages.items()
+        }
+
+    required = inspect(required_imports)
+    optional = inspect(optional_imports)
+    return {
+        "core_ready": all(item["available"] for item in required.values()),
+        "required": required,
+        "optional": optional,
+    }
+
+
 def _health() -> dict[str, Any]:
     pyautogui, error = _load_pyautogui()
     platform_status = _desktop_platform_status()
+    dependencies = _runtime_dependency_status()
+    demo_assets = {
+        "root": str(DEMO_ROOT),
+        "available": (DEMO_ROOT / "pyautogui_capability_lab.html").is_file()
+        and (DEMO_ROOT / "examples").is_dir(),
+    }
     if pyautogui is None:
         return {
             "ok": True,
@@ -384,6 +1446,8 @@ def _health() -> dict[str, Any]:
             "auth": {"token_required": True, "authenticated": True},
             "screen": None,
             "pyautogui": {"available": False, "error": error},
+            "dependencies": dependencies,
+            "demo_assets": demo_assets,
             "platform": platform_status,
             "server_version": "WindowsPyAutoGUIBridge/0.1",
             "script_version": "windows_pyautogui_bridge_server.py:utm_visual_control_v1",
@@ -398,6 +1462,8 @@ def _health() -> dict[str, Any]:
         "auth": {"token_required": True, "authenticated": True},
         "screen": {"width": int(width), "height": int(height)},
         "pyautogui": {"available": True, "failsafe": bool(pyautogui.FAILSAFE), "pause": float(pyautogui.PAUSE)},
+        "dependencies": dependencies,
+        "demo_assets": demo_assets,
         "platform": platform_status,
         "server_version": "WindowsPyAutoGUIBridge/0.1",
         "script_version": "windows_pyautogui_bridge_server.py:utm_visual_control_v1",
@@ -562,14 +1628,21 @@ def _rebuild_artifact_index() -> int:
     return indexed
 
 
-def _capture_screenshot_artifact(pyautogui: Any, *, run_id: str, checkpoint: str, trace: list[dict[str, Any]]) -> dict[str, Any] | None:
+def _capture_screenshot_artifact(
+    pyautogui: Any,
+    *,
+    run_id: str,
+    checkpoint: str,
+    trace: list[dict[str, Any]],
+    region: tuple[int, int, int, int] | None = None,
+) -> dict[str, Any] | None:
     try:
         screenshot_dir = ARTIFACT_ROOT / run_id / "screenshots"
         screenshot_dir.mkdir(parents=True, exist_ok=True)
         timestamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
         artifact_id = f"screen_{_safe_segment(checkpoint, 'checkpoint')}_{timestamp}"
         path = screenshot_dir / f"{artifact_id}.png"
-        image = pyautogui.screenshot()
+        image = pyautogui.screenshot(region=region) if region is not None else pyautogui.screenshot()
         image.save(path)
         if not _image_signature_ok(path):
             trace.append({"step": f"SCREENSHOT_{checkpoint.upper()}", "status": "blocked", "detail": f"invalid image signature: {path}"})
@@ -867,6 +1940,9 @@ def _locator_for(action: dict[str, Any], payload: dict[str, Any]) -> dict[str, A
     for key in (
         "image_path",
         "target_image",
+        "image_candidates",
+        "recorded_coordinate",
+        "coordinate_fallback",
         "confidence",
         "region",
         "x",
@@ -901,17 +1977,130 @@ def _locator_for(action: dict[str, Any], payload: dict[str, Any]) -> dict[str, A
     return merged
 
 
+def _png_visual_information_score(raw: bytes) -> float:
+    """Estimate whether a locator crop contains structure instead of a flat field."""
+    try:
+        from PIL import Image, ImageStat  # type: ignore
+
+        with Image.open(BytesIO(raw)) as image:
+            grayscale = image.convert("L")
+            return float(ImageStat.Stat(grayscale).var[0])
+    except Exception:
+        return 0.0
+
+
+def _best_inline_image_match(
+    pyautogui: Any,
+    candidates: list[tuple[str, dict[str, Any], float]],
+) -> tuple[bool, tuple[int, int, int, int] | None]:
+    """Return the global best inline-template match instead of scan-order first."""
+    try:
+        import cv2  # type: ignore
+        import numpy as np  # type: ignore
+
+        screenshot = pyautogui.screenshot()
+        screen_rgb = np.asarray(screenshot.convert("RGB"))
+        screen = cv2.cvtColor(screen_rgb, cv2.COLOR_RGB2GRAY)
+    except Exception:
+        return False, None
+
+    best_match: tuple[int, int, int, int] | None = None
+    global_best_score = float("-inf")
+    for candidate_path, candidate, _information_score in candidates:
+        template = cv2.imread(candidate_path, cv2.IMREAD_GRAYSCALE)
+        if template is None:
+            continue
+        region = candidate.get("region")
+        offset_x = 0
+        offset_y = 0
+        haystack = screen
+        if isinstance(region, (list, tuple)) and len(region) == 4:
+            offset_x, offset_y, width, height = (int(value) for value in region)
+            haystack = screen[offset_y : offset_y + height, offset_x : offset_x + width]
+        template_height, template_width = template.shape[:2]
+        if haystack.shape[0] < template_height or haystack.shape[1] < template_width:
+            continue
+        scores = cv2.matchTemplate(haystack, template, cv2.TM_CCOEFF_NORMED)
+        _minimum, candidate_score, _minimum_location, best_location = cv2.minMaxLoc(scores)
+        confidence = float(candidate.get("confidence", 0.999))
+        if float(candidate_score) < confidence:
+            continue
+        candidate_score = float(candidate_score)
+        if candidate_score <= global_best_score:
+            continue
+        global_best_score = candidate_score
+        best_match = (
+            int(best_location[0]) + offset_x,
+            int(best_location[1]) + offset_y,
+            int(template_width),
+            int(template_height),
+        )
+    return True, best_match
+
+
 def _locate_on_screen(pyautogui: Any, locator: dict[str, Any], *, run_id: str, specimen_id: str) -> Any | None:
+    candidates: list[tuple[str, dict[str, Any]]] = []
+    inline_candidates: list[tuple[str, dict[str, Any], float]] = []
     image_path = locator.get("image_path") or locator.get("target_image")
-    if not image_path:
-        return None
-    image_path = _format_runtime_value(image_path, run_id=run_id, specimen_id=specimen_id)
-    kwargs: dict[str, Any] = {}
-    if locator.get("confidence") is not None:
-        kwargs["confidence"] = float(locator.get("confidence"))
-    if isinstance(locator.get("region"), (list, tuple)) and len(locator["region"]) == 4:
-        kwargs["region"] = tuple(int(v) for v in locator["region"])
-    return pyautogui.locateOnScreen(image_path, **kwargs)
+    if image_path:
+        candidates.append((_format_runtime_value(image_path, run_id=run_id, specimen_id=specimen_id), locator))
+    for raw_candidate in locator.get("image_candidates", []):
+        if not isinstance(raw_candidate, dict):
+            continue
+        candidate = dict(raw_candidate)
+        encoded = str(candidate.get("png_base64") or "")
+        expected_sha = str(candidate.get("sha256") or "").lower()
+        if not encoded or not re.fullmatch(r"[0-9a-f]{64}", expected_sha):
+            continue
+        try:
+            raw = base64.b64decode(encoded, validate=True)
+        except Exception:
+            continue
+        if len(raw) > 256 * 1024 or not raw.startswith(b"\x89PNG\r\n\x1a\n"):
+            continue
+        if hashlib.sha256(raw).hexdigest() != expected_sha:
+            continue
+        inline_dir = LOCATOR_ROOT / "inline"
+        inline_dir.mkdir(parents=True, exist_ok=True)
+        materialized = inline_dir / f"{expected_sha}.png"
+        if not materialized.exists() or materialized.read_bytes() != raw:
+            temporary = materialized.with_suffix(f".{uuid4().hex}.tmp")
+            temporary.write_bytes(raw)
+            temporary.replace(materialized)
+        inline_candidates.append((str(materialized), candidate, _png_visual_information_score(raw)))
+    informative = [item for item in inline_candidates if item[2] >= 12.0]
+    ordered_inline = sorted(
+        informative,
+        key=lambda item: (str(item[1].get("kind") or "") == "context", item[2]),
+        reverse=True,
+    ) if informative else inline_candidates
+    for candidate_path, candidate in candidates:
+        kwargs: dict[str, Any] = {}
+        confidence = candidate.get("confidence", locator.get("confidence"))
+        if confidence is not None:
+            kwargs["confidence"] = float(confidence)
+        region = candidate.get("region", locator.get("region"))
+        if isinstance(region, (list, tuple)) and len(region) == 4:
+            kwargs["region"] = tuple(int(v) for v in region)
+        match = pyautogui.locateOnScreen(candidate_path, **kwargs)
+        if match:
+            return match
+    if ordered_inline:
+        attempted, match = _best_inline_image_match(pyautogui, ordered_inline)
+        if attempted:
+            return match
+    for candidate_path, candidate, _score in ordered_inline:
+        kwargs = {}
+        confidence = candidate.get("confidence", locator.get("confidence"))
+        if confidence is not None:
+            kwargs["confidence"] = float(confidence)
+        region = candidate.get("region", locator.get("region"))
+        if isinstance(region, (list, tuple)) and len(region) == 4:
+            kwargs["region"] = tuple(int(v) for v in region)
+        match = pyautogui.locateOnScreen(candidate_path, **kwargs)
+        if match:
+            return match
+    return None
 
 
 def _region_tuple(locator: dict[str, Any]) -> tuple[int, int, int, int] | None:
@@ -1358,7 +2547,7 @@ def _coordinate_click_context(pyautogui: Any, action: dict[str, Any], payload: d
     }
 
 
-def _execute_protocol_sequence(
+def _execute_protocol_sequence_impl(
     pyautogui: Any,
     *,
     program_id: str,
@@ -1367,11 +2556,15 @@ def _execute_protocol_sequence(
     specimen_id: str,
     trace: list[dict[str, Any]],
     screen_artifacts: list[dict[str, Any]] | None = None,
+    held_buttons: set[str] | None = None,
+    held_keys: set[str] | None = None,
 ) -> dict[str, Any]:
     sequence = _program_sequence(program_id, payload)
     program = _all_programs().get(program_id, {})
     require_assertions = bool(REQUIRE_UTM_SCREEN_ASSERTIONS or payload.get("require_screen_assertions"))
     last_successful_click = False
+    held_buttons = held_buttons if held_buttons is not None else set()
+    held_keys = held_keys if held_keys is not None else set()
 
     def add(step_name: str, status: str, detail: str = "") -> None:
         item = {"step": step_name, "status": status}
@@ -1389,6 +2582,32 @@ def _execute_protocol_sequence(
             "failure_code": "UTM_ERROR_POPUP_DETECTED",
             "message": f"Configured UTM error popup was detected: {detail}",
         }
+
+    def bounded_coordinate(x: int, y: int, step_name: str) -> dict[str, Any] | None:
+        try:
+            width, height = pyautogui.size()
+        except Exception:
+            return None
+        if 0 <= x < int(width) and 0 <= y < int(height):
+            return None
+        add(step_name, "blocked", f"coordinate=({x},{y}); screen={int(width)}x{int(height)}")
+        return {
+            "ok": False,
+            "failure_code": "PYAUTOGUI_COORDINATE_OUT_OF_BOUNDS",
+            "message": f"Absolute coordinate ({x}, {y}) is outside screen {int(width)}x{int(height)}.",
+        }
+
+    def selected_window(action: dict[str, Any], step_name: str) -> tuple[Any | None, dict[str, Any] | None]:
+        title = str(action.get("title") or action.get("window") or "").strip()
+        try:
+            windows = list(pyautogui.getWindowsWithTitle(title))
+        except Exception as exc:
+            add(step_name, "blocked", f"window lookup failed: {exc.__class__.__name__}")
+            return None, {"ok": False, "failure_code": "PYAUTOGUI_WINDOW_NOT_FOUND", "message": f"Window lookup failed: {title}"}
+        if not windows:
+            add(step_name, "blocked", f"window not found: {title}")
+            return None, {"ok": False, "failure_code": "PYAUTOGUI_WINDOW_NOT_FOUND", "message": f"Window not found: {title}"}
+        return windows[0], None
 
     for index, action in enumerate(sequence):
         action_name = str(action.get("action") or "").strip()
@@ -1412,7 +2631,8 @@ def _execute_protocol_sequence(
             continue
         if action_name == "screenshot":
             checkpoint = str(action.get("checkpoint") or action.get("name") or action.get("target") or "manual")
-            artifact = _capture_screenshot_artifact(pyautogui, run_id=run_id, checkpoint=checkpoint, trace=trace)
+            region = tuple(int(item) for item in action["region"]) if isinstance(action.get("region"), (list, tuple)) and len(action["region"]) == 4 else None
+            artifact = _capture_screenshot_artifact(pyautogui, run_id=run_id, checkpoint=checkpoint, trace=trace, region=region)
             if artifact:
                 if screen_artifacts is not None:
                     screen_artifacts.append(artifact)
@@ -1491,7 +2711,22 @@ def _execute_protocol_sequence(
                     return {"ok": False, "failure_code": failure_code, "message": f"Required screen target not found: {detail}", **extra}
                 add(step_name, "warning", f"not asserted: {detail}")
             continue
-        if action_name == "click":
+        if action_name == "locate_all_images":
+            locator = _locator_for(action, payload)
+            image_path = locator.get("image_path") or locator.get("target_image")
+            if not image_path or not hasattr(pyautogui, "locateAllOnScreen"):
+                add(step_name, "blocked", "image path or locateAllOnScreen unavailable")
+                return {"ok": False, "failure_code": "UI_LOCATOR_NOT_FOUND", "message": "locate_all_images requires an image locator."}
+            kwargs: dict[str, Any] = {}
+            if locator.get("confidence") is not None:
+                kwargs["confidence"] = float(locator["confidence"])
+            if isinstance(locator.get("region"), (list, tuple)) and len(locator["region"]) == 4:
+                kwargs["region"] = tuple(int(item) for item in locator["region"])
+            matches = list(pyautogui.locateAllOnScreen(_format_runtime_value(image_path, run_id=run_id, specimen_id=specimen_id), **kwargs))
+            matches = matches[: int(action.get("max_results", 20))]
+            add(step_name, "ok", f"matches={len(matches)}")
+            continue
+        if action_name in {"click", "double_click", "triple_click"}:
             locator = _locator_for(action, payload)
             resolved: dict[str, Any] | None = None
             last_detail = ""
@@ -1554,13 +2789,17 @@ def _execute_protocol_sequence(
                     return failure
             elif resolved and resolved.get("kind") == "image":
                 center = pyautogui.center(resolved["box"])
-                pyautogui.click(center.x, center.y)
+                clicks = int(action.get("clicks", 2 if action_name == "double_click" else 3 if action_name == "triple_click" else 1))
+                pyautogui.click(center.x, center.y, clicks=clicks, interval=float(action.get("interval_sec", 0.0)), button=str(action.get("button") or "left"))
                 add(step_name, "ok", str(locator.get("target") or locator.get("image_path") or "image"))
                 last_successful_click = True
                 failure = popup_failure(f"{step_name}_POPUP_AFTER")
                 if failure:
                     return failure
             elif locator.get("x") is not None and locator.get("y") is not None:
+                coordinate_failure = bounded_coordinate(int(locator["x"]), int(locator["y"]), step_name)
+                if coordinate_failure:
+                    return coordinate_failure
                 coord_context = _coordinate_click_context(pyautogui, action, payload, program)
                 before_artifact = _capture_screenshot_artifact(pyautogui, run_id=run_id, checkpoint=f"coordinate_before_{index + 1}", trace=trace)
                 if before_artifact and screen_artifacts is not None:
@@ -1570,7 +2809,14 @@ def _execute_protocol_sequence(
                     "ok" if before_artifact else "warning",
                     str((before_artifact or {}).get("artifact_id") or "coordinate_before"),
                 )
-                pyautogui.click(int(locator["x"]), int(locator["y"]))
+                clicks = int(action.get("clicks", 2 if action_name == "double_click" else 3 if action_name == "triple_click" else 1))
+                pyautogui.click(
+                    int(locator["x"]),
+                    int(locator["y"]),
+                    clicks=clicks,
+                    interval=float(action.get("interval_sec", 0.0)),
+                    button=str(action.get("button") or "left"),
+                )
                 after_artifact = _capture_screenshot_artifact(pyautogui, run_id=run_id, checkpoint=f"coordinate_after_{index + 1}", trace=trace)
                 if after_artifact and screen_artifacts is not None:
                     screen_artifacts.append(after_artifact)
@@ -1595,17 +2841,154 @@ def _execute_protocol_sequence(
                 if failure:
                     return failure
             elif require_assertions or action.get("required") is True:
+                target_name = str(locator.get("target") or action.get("target") or "click_target")
+                failure_artifact = next(
+                    (
+                        item
+                        for item in reversed(screen_artifacts or [])
+                        if f"retry_before_{_safe_segment(target_name, 'click_target')}" in str(item.get("artifact_id") or "")
+                    ),
+                    None,
+                )
+                if failure_artifact is None:
+                    failure_artifact = _capture_screenshot_artifact(
+                        pyautogui,
+                        run_id=run_id,
+                        checkpoint=f"locator_failure_{_safe_segment(target_name, 'click_target')}",
+                        trace=trace,
+                    )
+                if failure_artifact and screen_artifacts is not None:
+                    if failure_artifact not in screen_artifacts:
+                        screen_artifacts.append(failure_artifact)
                 add(step_name, "blocked", last_detail or str(locator.get("target") or "click target missing"))
-                return {"ok": False, "failure_code": "UI_LOCATOR_NOT_FOUND", "message": "Required click target is not configured or visible."}
+                return {
+                    "ok": False,
+                    "failure_code": "UI_LOCATOR_NOT_FOUND",
+                    "message": "Required click target is not configured or visible.",
+                    "target": target_name,
+                    "failure_artifact": failure_artifact,
+                }
             else:
                 add(step_name, "warning", "click skipped; no locator/coordinate configured")
+            continue
+        if action_name == "move_to":
+            locator = _locator_for(action, payload)
+            box = _locate_on_screen(pyautogui, locator, run_id=run_id, specimen_id=specimen_id)
+            if box:
+                center = pyautogui.center(box)
+                x, y = int(center.x), int(center.y)
+                resolution = f"image={locator.get('target') or action.get('target') or 'recorded'}"
+            elif action.get("coordinate_fallback") is True and action.get("x") is not None and action.get("y") is not None:
+                x, y = int(action["x"]), int(action["y"])
+                resolution = "explicit_coordinate_fallback"
+            elif action.get("x") is not None and action.get("y") is not None and not locator.get("image_candidates"):
+                x, y = int(action["x"]), int(action["y"])
+                resolution = "coordinate"
+            else:
+                target_name = str(locator.get("target") or action.get("target") or "move_target")
+                failure_artifact = _capture_screenshot_artifact(
+                    pyautogui,
+                    run_id=run_id,
+                    checkpoint=f"locator_failure_{_safe_segment(target_name, 'move_target')}",
+                    trace=trace,
+                )
+                if failure_artifact and screen_artifacts is not None:
+                    screen_artifacts.append(failure_artifact)
+                add(step_name, "blocked", f"visual target not found: {target_name}")
+                return {
+                    "ok": False,
+                    "failure_code": "UI_LOCATOR_NOT_FOUND",
+                    "message": f"Required move target not found: {target_name}",
+                    "failure_artifact": failure_artifact,
+                }
+            coordinate_failure = bounded_coordinate(x, y, step_name)
+            if coordinate_failure:
+                return coordinate_failure
+            duration_sec = max(0.0, min(float(action.get("duration_sec", 0.1)), 2.0))
+            pyautogui.moveTo(x, y, duration=duration_sec)
+            add(step_name, "ok", f"{resolution}; coordinate=({x},{y}); duration_sec={duration_sec:.3f}")
+            continue
+        if action_name == "query_pointer":
+            x, y = pyautogui.position()
+            add(step_name, "ok", f"coordinate=({int(x)},{int(y)})")
+            continue
+        if action_name == "query_screen":
+            width, height = pyautogui.size()
+            add(step_name, "ok", f"screen={int(width)}x{int(height)}")
+            continue
+        if action_name == "move_rel":
+            x, y = int(action["x"]), int(action["y"])
+            duration_sec = max(0.0, min(float(action.get("duration_sec", 0.1)), 5.0))
+            pyautogui.moveRel(x, y, duration=duration_sec)
+            add(step_name, "ok", f"delta=({x},{y}); duration_sec={duration_sec:.3f}")
+            continue
+        if action_name in {"mouse_down", "mouse_up"}:
+            button = str(action.get("button") or "left")
+            if action_name == "mouse_down":
+                pyautogui.mouseDown(button=button)
+                held_buttons.add(button)
+            else:
+                pyautogui.mouseUp(button=button)
+                held_buttons.discard(button)
+            add(step_name, "ok", button)
+            continue
+        if action_name in {"drag_to", "drag_rel"}:
+            if action_name == "drag_to":
+                locator = _locator_for(action, payload)
+                box = _locate_on_screen(pyautogui, locator, run_id=run_id, specimen_id=specimen_id)
+                if box:
+                    center = pyautogui.center(box)
+                    x, y = int(center.x), int(center.y)
+                    resolution = f"image={locator.get('target') or action.get('target') or 'recorded'}"
+                elif action.get("coordinate_fallback") is True and action.get("x") is not None and action.get("y") is not None:
+                    x, y = int(action["x"]), int(action["y"])
+                    resolution = "explicit_coordinate_fallback"
+                elif action.get("x") is not None and action.get("y") is not None and not locator.get("image_candidates"):
+                    x, y = int(action["x"]), int(action["y"])
+                    resolution = "coordinate"
+                else:
+                    target_name = str(locator.get("target") or action.get("target") or "drag_target")
+                    failure_artifact = _capture_screenshot_artifact(
+                        pyautogui,
+                        run_id=run_id,
+                        checkpoint=f"locator_failure_{_safe_segment(target_name, 'drag_target')}",
+                        trace=trace,
+                    )
+                    if failure_artifact and screen_artifacts is not None:
+                        screen_artifacts.append(failure_artifact)
+                    add(step_name, "blocked", f"visual target not found: {target_name}")
+                    return {
+                        "ok": False,
+                        "failure_code": "UI_LOCATOR_NOT_FOUND",
+                        "message": f"Required drag target not found: {target_name}",
+                        "failure_artifact": failure_artifact,
+                    }
+            else:
+                x, y = int(action["x"]), int(action["y"])
+                resolution = "relative_coordinate"
+            if action_name == "drag_to":
+                coordinate_failure = bounded_coordinate(x, y, step_name)
+                if coordinate_failure:
+                    return coordinate_failure
+            duration_sec = max(0.0, min(float(action.get("duration_sec", 0.1)), 5.0))
+            button = str(action.get("button") or "left")
+            if action_name == "drag_to":
+                pyautogui.dragTo(x, y, duration=duration_sec, button=button)
+            else:
+                pyautogui.dragRel(x, y, duration=duration_sec, button=button)
+            add(step_name, "ok", f"{resolution}; coordinate=({x},{y}); button={button}; duration_sec={duration_sec:.3f}")
+            continue
+        if action_name in {"scroll", "hscroll", "vscroll"}:
+            clicks = int(action.get("clicks", 0))
+            getattr(pyautogui, action_name)(clicks)
+            add(step_name, "ok", f"clicks={clicks}")
             continue
         if action_name == "hotkey":
             keys = action.get("keys") if isinstance(action.get("keys"), list) else []
             if not keys:
                 add(step_name, "warning", "hotkey keys missing")
                 continue
-            pyautogui.hotkey(*[str(key) for key in keys])
+            pyautogui.hotkey(*[str(key) for key in keys], interval=float(action.get("interval_sec", 0.0)))
             add(step_name, "ok", "+".join(str(key) for key in keys))
             continue
         if action_name == "press":
@@ -1613,7 +2996,19 @@ def _execute_protocol_sequence(
             if not key:
                 add(step_name, "warning", "key missing")
                 continue
-            pyautogui.press(key)
+            presses = int(action.get("presses", 1))
+            interval_sec = float(action.get("interval_sec", 0.0))
+            pyautogui.press(key, presses=presses, interval=interval_sec)
+            add(step_name, "ok", f"{key}; presses={presses}")
+            continue
+        if action_name in {"key_down", "key_up"}:
+            key = str(action.get("key") or "")
+            if action_name == "key_down":
+                pyautogui.keyDown(key)
+                held_keys.add(key)
+            else:
+                pyautogui.keyUp(key)
+                held_keys.discard(key)
             add(step_name, "ok", key)
             continue
         if action_name in {"write", "type_path"}:
@@ -1622,8 +3017,59 @@ def _execute_protocol_sequence(
             if not text_value:
                 add(step_name, "warning", "text/path missing")
                 continue
-            pyautogui.write(text_value)
+            pyautogui.write(text_value, interval=float(action.get("interval_sec", 0.0)))
             add(step_name, "ok", "typed value")
+            continue
+        if action_name == "pixel":
+            x, y = int(action["x"]), int(action["y"])
+            coordinate_failure = bounded_coordinate(x, y, step_name)
+            if coordinate_failure:
+                return coordinate_failure
+            color = tuple(int(item) for item in pyautogui.pixel(x, y))
+            add(step_name, "ok", f"coordinate=({x},{y}); rgb={color}")
+            continue
+        if action_name == "pixel_matches_color":
+            x, y = int(action["x"]), int(action["y"])
+            coordinate_failure = bounded_coordinate(x, y, step_name)
+            if coordinate_failure:
+                return coordinate_failure
+            color = tuple(int(item) for item in action["color"])
+            matched = bool(pyautogui.pixelMatchesColor(x, y, color, tolerance=int(action.get("tolerance", 0))))
+            add(step_name, "ok" if matched else "warning", f"coordinate=({x},{y}); matched={str(matched).lower()}")
+            continue
+        if action_name.startswith("window_"):
+            window, failure = selected_window(action, step_name)
+            if failure:
+                return failure
+            if action_name == "window_activate":
+                window.activate()
+            elif action_name == "window_minimize":
+                window.minimize()
+            elif action_name == "window_maximize":
+                window.maximize()
+            elif action_name == "window_restore":
+                window.restore()
+            elif action_name == "window_move":
+                window.moveTo(int(action["x"]), int(action["y"]))
+            elif action_name == "window_resize":
+                window.resizeTo(int(action["width"]), int(action["height"]))
+            add(step_name, "ok", str(action.get("title") or action.get("window") or "window"))
+            continue
+        if action_name in {"alert", "confirm"}:
+            if payload.get("confirm_execute") is not True:
+                add(step_name, "blocked", "explicit manual confirmation required")
+                return {
+                    "ok": False,
+                    "failure_code": "PYAUTOGUI_MANUAL_CONFIRMATION_REQUIRED",
+                    "message": "Blocking dialog actions require explicit manual confirmation.",
+                }
+            text_value = str(action.get("text") or "")
+            title = str(action.get("title") or "ATR Equipment Skill")
+            if action_name == "alert":
+                response = pyautogui.alert(text_value, title=title)
+            else:
+                response = pyautogui.confirm(text_value, title=title, buttons=[str(item) for item in action.get("buttons", ["OK", "Cancel"])])
+            add(step_name, "ok", f"response={response}")
             continue
         if action_name == "wait":
             seconds = min(float(action.get("seconds", action.get("duration_sec", 0.5))), 30.0)
@@ -1659,6 +3105,44 @@ def _execute_protocol_sequence(
             "message": f"Unsupported PyAutoGUI bridge action: {action_name}",
         }
     return {"ok": True}
+
+
+def _execute_protocol_sequence(
+    pyautogui: Any,
+    *,
+    program_id: str,
+    payload: dict[str, Any],
+    run_id: str,
+    specimen_id: str,
+    trace: list[dict[str, Any]],
+    screen_artifacts: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Execute a bounded sequence and release every held input on all exits."""
+    held_buttons: set[str] = set()
+    held_keys: set[str] = set()
+    try:
+        return _execute_protocol_sequence_impl(
+            pyautogui,
+            program_id=program_id,
+            payload=payload,
+            run_id=run_id,
+            specimen_id=specimen_id,
+            trace=trace,
+            screen_artifacts=screen_artifacts,
+            held_buttons=held_buttons,
+            held_keys=held_keys,
+        )
+    finally:
+        for button in sorted(held_buttons):
+            try:
+                pyautogui.mouseUp(button=button)
+            except Exception:
+                pass
+        for key in sorted(held_keys):
+            try:
+                pyautogui.keyUp(key)
+            except Exception:
+                pass
 
 
 def _probe_utm_csv(path: Path) -> dict[str, Any]:
@@ -2565,10 +4049,11 @@ class BridgeConfig:
     artifact_dir: Path = ARTIFACT_ROOT
     reference_dir: Path = LOCATOR_ROOT
     program_dir: Path = PROGRAM_ROOT
+    demo_dir: Path = DEMO_ROOT
 
 
 def _apply_bridge_config(config: BridgeConfig) -> None:
-    global HOST, PORT, TOKEN, TOKEN_HEADER, ARTIFACT_ROOT, LOCATOR_ROOT, PROGRAM_ROOT
+    global HOST, PORT, TOKEN, TOKEN_HEADER, ARTIFACT_ROOT, LOCATOR_ROOT, PROGRAM_ROOT, DEMO_ROOT
     HOST = str(config.host)
     PORT = int(config.port)
     TOKEN = str(config.token or "")
@@ -2578,6 +4063,8 @@ def _apply_bridge_config(config: BridgeConfig) -> None:
         LOCATOR_ROOT = Path(config.reference_dir)
     if config.program_dir:
         PROGRAM_ROOT = Path(config.program_dir)
+    if config.demo_dir:
+        DEMO_ROOT = Path(config.demo_dir)
 
 
 def public_programs() -> list[dict[str, Any]]:
@@ -3942,9 +5429,27 @@ INDEX_HTML = r"""<!doctype html>
     .manager-result { margin-top: 10px; }
     .manager-result pre { min-height: 120px; max-height: 260px; }
     .manager-hidden { display: none !important; }
+    .manager-tabs { display: flex; gap: 6px; margin: 10px 0; }
+    .manager-tabs button { min-height: 32px; padding: 6px 14px; }
+    .manager-tabs button.active { background: var(--accent); color: #fff; }
+    .manager-view[hidden] { display: none !important; }
+    .manager-record-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+    .recording-options { display:flex; flex-wrap:wrap; gap:10px; margin-top:10px; }
+    .recording-option { display:flex; align-items:center; gap:8px; min-height:38px; padding:0 12px; border:1px solid var(--line); border-radius:10px; background:var(--panel-soft); }
+    .recording-option input { width:auto; margin:0; }
+    .recording-locator-preview { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:10px; margin-top:10px; }
+    .recording-locator-card { border:1px solid var(--line); border-radius:10px; padding:8px; display:grid; gap:6px; background:var(--panel-soft); }
+    .recording-locator-images { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+    .recording-locator-images img { display:block; width:100%; height:76px; object-fit:contain; background:#0b1220; border:1px solid var(--line); border-radius:6px; }
+    #recordToggle[data-state="recording"] { background:var(--danger); border-color:#8c1d12; color:#fff; }
+    #recordToggle[data-state="countdown"] { background:#9b5c00; border-color:#6f4100; color:#fff; }
+    .manager-record-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+    .manager-skill-card { border: 1px solid var(--line); border-radius: 12px; padding: 10px; display: grid; gap: 7px; }
+    .manager-skill-card .manager-actions { grid-template-columns: repeat(7, minmax(0, 1fr)); }
     #bridgeCommandKit .compact-tools { grid-template-columns: 1fr; }
     @media (max-width: 1080px) {
       .manager-toolbar, .manager-grid { grid-template-columns: 1fr; }
+      .manager-record-grid { grid-template-columns: 1fr; }
       .manager-program-card { grid-template-columns: 1fr; }
       .manager-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     }
@@ -4811,7 +6316,14 @@ INDEX_HTML = r"""<!doctype html>
 
       <section id="programManagerPanel">
         <h2>Program Manager <span class="pill"><span class="dot ok"></span><span id="programCount">0 programs</span></span></h2>
-        <div class="section-intro">Create, import, validate, register, and test bounded JSON macros. Built-in programs such as Program1 are read-only.</div>
+        <div class="section-intro">Manage deterministic programs, record demonstrations, and deploy versioned Equipment Skills.</div>
+        <div class="manager-tabs" role="tablist" aria-label="Program Manager work areas">
+          <button class="active" type="button" data-manager-tab="programs">PROGRAMS</button>
+          <button class="secondary" type="button" data-manager-tab="examples">EXAMPLES</button>
+          <button class="secondary" type="button" data-manager-tab="record">RECORD</button>
+          <button class="secondary" type="button" data-manager-tab="skills">SKILLS</button>
+        </div>
+        <div class="manager-view" id="managerProgramsView">
         <div class="manager-toolbar">
           <label>Search<input id="managerSearch" type="search" placeholder="Name or program ID"></label>
           <label>Status<select id="managerFilter"><option value="all">All</option><option value="builtin">Built-in</option><option value="custom">Custom</option><option value="enabled">Enabled</option><option value="disabled">Disabled</option></select></label>
@@ -4842,6 +6354,50 @@ INDEX_HTML = r"""<!doctype html>
           <summary>Program Manager Result</summary>
           <pre id="managerLatestResult">No manager request yet.</pre>
         </details>
+        </div>
+        <div class="manager-view" id="managerExamplesView" hidden>
+          <div class="manager-record-actions">
+            <button id="openCapabilityLab" type="button">Open Capability Lab</button>
+            <button class="secondary" id="refreshExamples" type="button">Refresh Examples</button>
+          </div>
+          <div class="manager-file-meta">Examples load into the JSON editor without registering or deploying anything. Safe Test executes only examples marked safe.</div>
+          <div id="exampleRegistry" class="manager-registry"><div class="manager-empty">Refresh to load capability examples.</div></div>
+        </div>
+        <div class="manager-view" id="managerRecordView" hidden>
+          <div class="manager-record-grid">
+            <label>Name<input id="recordingName" value="Program 1 demonstration"></label>
+            <label>Target App<input id="recordingTargetApp" value="Program 1"></label>
+            <label>Target Window<input id="recordingTargetWindow" value="Program 1"></label>
+          </div>
+          <div class="recording-options">
+            <label class="recording-option"><input id="recordImageTracking" type="checkbox" checked>Image tracking</label>
+            <label class="recording-option"><input id="recordCoordinateFallback" type="checkbox">Allow coordinate fallback</label>
+          </div>
+          <div class="manager-record-actions">
+            <button id="recordToggle" type="button" data-state="idle">Record</button>
+            <button class="secondary" id="recordCheckpoint" type="button">Checkpoint</button>
+            <button class="secondary" id="recordSave" type="button">Save Recording</button>
+            <button class="secondary" id="refreshRecordings" type="button">Refresh</button>
+          </div>
+          <div class="manager-record-grid">
+            <label>Skill ID<input id="recordSkillId" value="program1_skill"></label>
+            <label>Version<input id="recordSkillVersion" value="1.0.0"></label>
+            <label>Target Profile<input id="recordSkillProfile" value="local_program1"></label>
+          </div>
+          <div class="manager-record-actions">
+            <button id="recordSkill" type="button">Create Draft Skill</button>
+          </div>
+          <div id="recordingStatus" class="manager-file-meta">No recording is active.</div>
+          <div id="recordingCoverage" class="manager-file-meta">Coverage: no recording selected.</div>
+          <div id="recordingLocatorPreview" class="recording-locator-preview"><div class="manager-empty">No image locators captured.</div></div>
+          <div id="recordingRegistry" class="manager-registry"></div>
+        </div>
+        <div class="manager-view" id="managerSkillsView" hidden>
+          <div class="manager-record-actions">
+            <button id="refreshSkills" type="button">Refresh Skills</button>
+          </div>
+          <div id="skillRegistry" class="manager-registry"><div class="manager-empty">Refresh to load Linux-authoritative Skill versions.</div></div>
+        </div>
       </section>
 
 
@@ -6321,6 +7877,296 @@ export WINDOWS_PYAUTOGUI_BRIDGE_TOKEN="${token}"`;
     managerFilterInput.addEventListener("change", managerRenderPrograms);
     managerRenderPrograms();
 
+    const managerViews = {
+      programs: document.getElementById("managerProgramsView"),
+      examples: document.getElementById("managerExamplesView"),
+      record: document.getElementById("managerRecordView"),
+      skills: document.getElementById("managerSkillsView"),
+    };
+    document.querySelectorAll("[data-manager-tab]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const selected = button.dataset.managerTab;
+        Object.entries(managerViews).forEach(([name, view]) => { view.hidden = name !== selected; });
+        document.querySelectorAll("[data-manager-tab]").forEach((item) => {
+          item.classList.toggle("active", item === button);
+          item.classList.toggle("secondary", item !== button);
+        });
+        if (selected === "record") refreshRecordings();
+        if (selected === "examples") refreshExamples();
+        if (selected === "skills") refreshSkills();
+      });
+    });
+
+    let activeRecordingId = "";
+    let selectedRecordingId = "";
+    const RECORDING_COUNTDOWN_SECONDS = 5;
+    let recordingCountdownRemaining = 0;
+    let recordingCountdownTimer = null;
+    let recordingToggleBusy = false;
+    const recordToggle = document.getElementById("recordToggle");
+    function syncRecordingToggle() {
+      if (recordingCountdownTimer !== null) {
+        recordToggle.dataset.state = "countdown";
+        recordToggle.textContent = `STARTING IN ${recordingCountdownRemaining}`;
+        recordToggle.disabled = false;
+        return;
+      }
+      if (activeRecordingId) {
+        recordToggle.dataset.state = "recording";
+        recordToggle.textContent = "STOP RECORDING";
+      } else {
+        recordToggle.dataset.state = "idle";
+        recordToggle.textContent = "RECORD";
+      }
+      recordToggle.disabled = recordingToggleBusy;
+    }
+    function cancelRecordingCountdown() {
+      if (recordingCountdownTimer !== null) window.clearInterval(recordingCountdownTimer);
+      recordingCountdownTimer = null;
+      recordingCountdownRemaining = 0;
+      document.getElementById("recordingStatus").textContent = "Recording start cancelled.";
+      syncRecordingToggle();
+    }
+    async function startRecordingAfterCountdown() {
+      recordingToggleBusy = true;
+      syncRecordingToggle();
+      const result = await call("/recordings/start", {
+        method: "POST", headers: {"Content-Type": "application/json"}, render: false,
+        body: JSON.stringify({
+          name: document.getElementById("recordingName").value.trim(),
+          target_app: document.getElementById("recordingTargetApp").value.trim(),
+          target_window: document.getElementById("recordingTargetWindow").value.trim(),
+          image_tracking: document.getElementById("recordImageTracking").checked,
+          coordinate_fallback: document.getElementById("recordCoordinateFallback").checked,
+        }),
+      });
+      if (result.ok) activeRecordingId = selectedRecordingId = String(result.recording_id || "");
+      recordingToggleBusy = false;
+      managerShowResult(result);
+      await refreshRecordings();
+    }
+    function beginRecordingCountdown() {
+      if (recordingToggleBusy || activeRecordingId || recordingCountdownTimer !== null) return;
+      recordingCountdownRemaining = RECORDING_COUNTDOWN_SECONDS;
+      document.getElementById("recordingStatus").textContent = "Recording starts after the safety countdown.";
+      recordingCountdownTimer = window.setInterval(async () => {
+        recordingCountdownRemaining -= 1;
+        if (recordingCountdownRemaining <= 0) {
+          window.clearInterval(recordingCountdownTimer);
+          recordingCountdownTimer = null;
+          recordingCountdownRemaining = 0;
+          syncRecordingToggle();
+          await startRecordingAfterCountdown();
+          return;
+        }
+        syncRecordingToggle();
+      }, 1000);
+      syncRecordingToggle();
+    }
+    async function stopActiveRecording() {
+      if (!activeRecordingId || recordingToggleBusy) return;
+      recordingToggleBusy = true;
+      syncRecordingToggle();
+      const result = await call("/recordings/stop", {method: "POST", headers: {"Content-Type": "application/json"}, body: "{}", render: false});
+      if (result.ok) selectedRecordingId = String(result.recording_id || selectedRecordingId);
+      activeRecordingId = "";
+      recordingToggleBusy = false;
+      managerShowResult(result);
+      await refreshRecordings();
+    }
+    function recordingCoverage(events) {
+      const actionByKind = {mouse_move:"move_to", mouse_click:"click", mouse_drag:"drag_to", mouse_scroll:"scroll", key_press:"press", hotkey:"hotkey", checkpoint:"screenshot", screenshot:"screenshot"};
+      const familyByAction = {move_to:"mouse", click:"mouse", drag_to:"mouse", scroll:"mouse", press:"keyboard", hotkey:"keyboard", screenshot:"screen"};
+      const actions = new Set(); const families = new Set();
+      (Array.isArray(events) ? events : []).forEach((event) => { const action = actionByKind[String(event.kind || "")]; if (action) { actions.add(action); families.add(familyByAction[action]); } });
+      return {actions:[...actions].sort(), families:[...families].sort()};
+    }
+    function renderRecordingCoverage(events) {
+      const coverage = recordingCoverage(events);
+      const pointerEvents = (Array.isArray(events) ? events : []).filter((event) => ["mouse_click", "mouse_drag"].includes(String(event.kind || "")));
+      const readyLocators = pointerEvents.reduce((count, event) => count + (event.kind === "mouse_drag"
+        ? Number(event.source_visual_locator && event.source_visual_locator.status === "ready") + Number(event.target_visual_locator && event.target_visual_locator.status === "ready")
+        : Number(event.visual_locator && event.visual_locator.status === "ready")), 0);
+      const expectedLocators = pointerEvents.reduce((count, event) => count + (event.kind === "mouse_drag" ? 2 : 1), 0);
+      document.getElementById("recordingCoverage").textContent = coverage.actions.length
+        ? `Coverage: ${coverage.families.join(", ")} | ${coverage.actions.join(", ")} | image locators ${readyLocators}/${expectedLocators}`
+        : "Coverage: no replayable actions captured.";
+    }
+    function recordingLocators(recording) {
+      const locators = [];
+      (Array.isArray(recording && recording.events) ? recording.events : []).forEach((event) => {
+        if (event && event.visual_locator) locators.push(event.visual_locator);
+        if (event && event.source_visual_locator) locators.push(event.source_visual_locator);
+        if (event && event.target_visual_locator) locators.push(event.target_visual_locator);
+      });
+      return locators;
+    }
+    function renderRecordingLocators(recording) {
+      const preview = document.getElementById("recordingLocatorPreview");
+      const locators = recordingLocators(recording);
+      preview.innerHTML = locators.length ? locators.map((locator) => {
+        const candidates = Array.isArray(locator.candidates) ? locator.candidates.slice(0, 2) : [];
+        const images = candidates.map((candidate) => `<img alt="${escapeHtml(candidate.kind || "locator")}" title="${escapeHtml(candidate.kind || "locator")}" src="data:image/png;base64,${escapeHtml(candidate.png_base64 || "")}">`).join("");
+        return `<article class="recording-locator-card"><strong>${escapeHtml(locator.locator_id || "locator")}</strong><span>${escapeHtml(locator.status || "unknown")} · ${escapeHtml((locator.recorded_coordinate || []).join(", "))}</span><div class="recording-locator-images">${images}</div></article>`;
+      }).join("") : '<div class="manager-empty">No image locators captured.</div>';
+    }
+    function renderRecordings(payload) {
+      const recordings = Array.isArray(payload && payload.recordings) ? payload.recordings : [];
+      const registry = document.getElementById("recordingRegistry");
+      registry.innerHTML = recordings.length ? recordings.map((item) => `
+        <article class="manager-skill-card" data-recording-id="${escapeHtml(item.recording_id || "")}">
+          <strong>${escapeHtml(item.name || item.recording_id || "Recording")}</strong>
+          <span><code>${escapeHtml(item.recording_id || "")}</code> · ${escapeHtml(item.status || "unknown")} · ${(item.events || []).length} events</span>
+          <button class="secondary" type="button" data-select-recording="${escapeHtml(item.recording_id || "")}">Select</button>
+        </article>`).join("") : '<div class="manager-empty">No saved recordings.</div>';
+    }
+    async function refreshRecordings() {
+      const status = await call("/recordings/status", {quiet: true, render: false});
+      activeRecordingId = status && status.status === "recording" ? String(status.recording_id || "") : "";
+      if (activeRecordingId && recordingCountdownTimer !== null) cancelRecordingCountdown();
+      document.getElementById("recordingStatus").textContent = activeRecordingId
+        ? `Recording ${activeRecordingId} · ${(status.events || []).length} events`
+        : selectedRecordingId ? `Selected ${selectedRecordingId}` : "No recording is active.";
+      syncRecordingToggle();
+      renderRecordingCoverage(status && Array.isArray(status.events) ? status.events : []);
+      if (activeRecordingId) renderRecordingLocators(status);
+      const listed = await call("/recordings", {quiet: true, render: false});
+      renderRecordings(listed);
+      return listed;
+    }
+    document.getElementById("recordingRegistry").addEventListener("click", async (event) => {
+      const button = event.target.closest("[data-select-recording]");
+      if (!button) return;
+      selectedRecordingId = String(button.dataset.selectRecording || "");
+      document.getElementById("recordingStatus").textContent = `Selected ${selectedRecordingId}`;
+      const selected = await call(`/recordings/${encodeURIComponent(selectedRecordingId)}`, {quiet:true, render:false});
+      renderRecordingCoverage(selected && selected.events);
+      renderRecordingLocators(selected);
+    });
+    recordToggle.addEventListener("click", async () => {
+      if (recordingCountdownTimer !== null) { cancelRecordingCountdown(); return; }
+      if (activeRecordingId) { await stopActiveRecording(); return; }
+      beginRecordingCountdown();
+    });
+    document.getElementById("recordCheckpoint").addEventListener("click", async () => {
+      const result = await call("/recordings/checkpoint", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({label: "operator checkpoint"}), render: false});
+      managerShowResult(result); await refreshRecordings();
+    });
+    document.getElementById("recordSave").addEventListener("click", async () => {
+      const recordingId = selectedRecordingId || activeRecordingId;
+      if (!recordingId) { managerShowResult({ok: false, failure_code: "SKILL_RECORDING_NOT_SELECTED"}); return; }
+      const result = await call(`/recordings/${encodeURIComponent(recordingId)}/save`, {method: "POST", headers: {"Content-Type": "application/json"}, body: "{}", render: false});
+      managerShowResult(result); await refreshRecordings();
+    });
+    document.getElementById("refreshRecordings").addEventListener("click", refreshRecordings);
+    document.getElementById("recordSkill").addEventListener("click", async () => {
+      const recordingId = selectedRecordingId || activeRecordingId;
+      if (!recordingId) { managerShowResult({ok: false, failure_code: "SKILL_RECORDING_NOT_SELECTED"}); return; }
+      const result = await call("/skills/drafts", {
+        method: "POST", headers: {"Content-Type": "application/json"}, render: false,
+        body: JSON.stringify({
+          recording_id: recordingId,
+          skill_id: document.getElementById("recordSkillId").value.trim(),
+          version: document.getElementById("recordSkillVersion").value.trim(),
+          target_profile: document.getElementById("recordSkillProfile").value.trim(),
+        }),
+      });
+      managerShowResult(result); if (result.ok) await refreshSkills({showResult: false});
+    });
+
+    let managerExamples = [];
+    function renderExamples() {
+      const registry = document.getElementById("exampleRegistry");
+      registry.innerHTML = managerExamples.length ? managerExamples.map((example) => `
+        <article class="manager-skill-card" data-example-id="${escapeHtml(example.example_id || "")}">
+          <div class="program-card-head"><strong>${escapeHtml(example.name || example.example_id || "Example")}</strong>${managerBadge(example.family || "other")}</div>
+          <span>${escapeHtml(example.description || "")}</span>
+          <div class="manager-badges">${managerBadge(`${example.action_count || 0} ACTIONS`)}${managerBadge(example.safe_test ? "SAFE TEST" : "MANUAL", example.safe_test ? "ok" : "warn")}</div>
+          <div class="manager-actions">
+            <button class="secondary" type="button" data-load-example>Load Example</button>
+            <button type="button" data-run-example ${example.safe_test ? "" : "disabled"}>Run Safe Test</button>
+          </div>
+        </article>`).join("") : '<div class="manager-empty">No valid examples found.</div>';
+    }
+    async function refreshExamples() {
+      const result = await call("/examples", {quiet:true, render:false});
+      managerExamples = Array.isArray(result && result.examples) ? result.examples : [];
+      renderExamples(); managerShowResult(result); return result;
+    }
+    function loadExampleIntoEditor(example) {
+      const program = example && example.program ? example.program : {};
+      managerEditingProgramId = ""; managerEditingBuiltin = false;
+      managerOpenEditor(program, "Capability Example", "EXAMPLE", `${example.example_id || "example"} loaded locally; registry unchanged.`);
+      document.querySelector('[data-manager-tab="programs"]').click();
+    }
+    document.getElementById("openCapabilityLab").addEventListener("click", () => window.open("/capability-lab", "_blank", "noopener"));
+    document.getElementById("refreshExamples").addEventListener("click", refreshExamples);
+    document.getElementById("exampleRegistry").addEventListener("click", async (event) => {
+      const card = event.target.closest("[data-example-id]");
+      if (!card) return;
+      const example = managerExamples.find((item) => item.example_id === card.dataset.exampleId);
+      if (!example) return;
+      if (event.target.closest("[data-load-example]")) { loadExampleIntoEditor(example); return; }
+      if (event.target.closest("[data-run-example]") && example.safe_test) {
+        const result = await call("/execute", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({sequence_id:`example-${Date.now()}`, example_id:example.example_id, sequence:example.program.sequence, runtime_mode:"test", confirm_execute:false}), render:false});
+        managerShowResult(result);
+      }
+    });
+
+    let managerSkills = [];
+    function renderSkills() {
+      const registry = document.getElementById("skillRegistry");
+      registry.innerHTML = managerSkills.length ? managerSkills.map((item) => {
+        const manifest = item.manifest || item;
+        const skillId = manifest.skill_id || item.skill_id || "";
+        const version = manifest.version || item.version || "";
+        const lifecycle = manifest.lifecycle || item.lifecycle || "unknown";
+        const model = (manifest.model_snapshot || {}).model || "not used";
+        const enabled = manifest.enabled !== false;
+        return `<article class="manager-skill-card" data-skill-id="${escapeHtml(skillId)}" data-skill-version="${escapeHtml(version)}">
+          <div class="program-card-head"><strong>${escapeHtml(skillId)}@${escapeHtml(version)}</strong>${managerBadge(lifecycle, lifecycle === "deployed" ? "ok" : "warn")}</div>
+          <span>Profile <code>${escapeHtml(manifest.target_profile || "-")}</code> · Model ${escapeHtml(model)} · ${enabled ? "enabled" : "disabled"}</span>
+          <div class="manager-actions">
+            <button class="secondary" data-skill-action="annotate">Annotate</button>
+            <button class="secondary" data-skill-action="compile">Compile</button>
+            <button class="secondary" data-skill-action="validate">Validate</button>
+            <button data-skill-action="deploy">Deploy</button>
+            <button class="secondary" data-skill-action="enabled">${enabled ? "Disable" : "Enable"}</button>
+            <button class="secondary" data-skill-action="test">Test</button>
+            <button class="danger" data-skill-action="delete">Delete</button>
+          </div>
+        </article>`;
+      }).join("") : '<div class="manager-empty">No Equipment Skills registered.</div>';
+    }
+    async function refreshSkills({showResult = true} = {}) {
+      const result = await call("/skills", {quiet: true, render: false});
+      managerSkills = Array.isArray(result && result.skills) ? result.skills : [];
+      renderSkills(); if (showResult) managerShowResult(result); return result;
+    }
+    document.getElementById("refreshSkills").addEventListener("click", refreshSkills);
+    document.getElementById("skillRegistry").addEventListener("click", async (event) => {
+      const button = event.target.closest("[data-skill-action]");
+      const card = event.target.closest("[data-skill-id]");
+      if (!button || !card) return;
+      const action = String(button.dataset.skillAction || "");
+      const skill = managerSkills.find((item) => String(item.skill_id || (item.manifest || {}).skill_id) === card.dataset.skillId && String(item.version || (item.manifest || {}).version) === card.dataset.skillVersion);
+      const enabled = !skill || (skill.manifest || skill).enabled !== false;
+      const body = action === "annotate" ? {use_model: true, annotations: {}}
+        : action === "enabled" ? {enabled: !enabled}
+        : action === "test" ? {runtime_mode: "test", confirm_execute: false}
+        : {};
+      if (action === "delete") {
+        const result = await call(`/skills/${encodeURIComponent(card.dataset.skillId)}/${encodeURIComponent(card.dataset.skillVersion)}`, {
+          method: "DELETE", render: false,
+        });
+        managerShowResult(result); await refreshSkills({showResult: false}); return;
+      }
+      const result = await call(`/skills/${encodeURIComponent(card.dataset.skillId)}/${encodeURIComponent(card.dataset.skillVersion)}/${action}`, {
+        method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body), render: false,
+      });
+      managerShowResult(result); await refreshSkills({showResult: false});
+    });
+
 
     renderPayloadPreview("live");
     if (tokenInput.value.trim()) {
@@ -6387,32 +8233,77 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def do_GET(self) -> None:
-        if self.path in {"/", "/index.html"}:
+        path = urlparse(self.path).path
+        if path in {"/", "/index.html"}:
             self._audit_request(auth_ok=None, status="served_gui")
             self._send_html(200, INDEX_HTML)
             return
+        if path == "/capability-lab":
+            try:
+                html = (DEMO_ROOT / "pyautogui_capability_lab.html").read_text(encoding="utf-8")
+            except OSError:
+                self._send_html(404, "<!doctype html><title>Capability Lab unavailable</title>")
+                return
+            self._audit_request(auth_ok=None, status="served_capability_lab")
+            self._send_html(200, html)
+            return
         if not self._require_auth():
             return
-        if self.path == "/health":
+        if path == "/health":
             self._send(200, _health())
             return
-        if self.path == "/programs":
+        if path == "/programs":
             self._send(200, _programs())
             return
-        if self.path == "/artifacts":
+        if path == "/capabilities":
+            self._send(200, _capability_catalog())
+            return
+        if path == "/examples":
+            self._send(200, _example_catalog_payload())
+            return
+        if path.startswith("/examples/"):
+            example_id = unquote(path.split("/examples/", 1)[1].strip("/"))
+            example = next((item for item in _load_example_catalog() if item["example_id"] == example_id), None)
+            self._send(200 if example else 404, {"ok": True, **example} if example else {"ok": False, "status": "not_found"})
+            return
+        if path == "/artifacts":
             self._send(200, _list_artifacts())
             return
-        if self.path == "/locators":
+        if path == "/locators":
             self._send(200, _list_locators())
             return
-        if self.path == "/readiness":
+        if path == "/readiness":
             self._send(200, _utm_readiness())
             return
-        if self.path == "/request-log":
+        if path == "/request-log":
             self._send(200, _request_log_payload())
             return
-        if self.path.startswith("/artifacts/"):
-            artifact_id = unquote(self.path.split("/artifacts/", 1)[1].strip("/"))
+        if path == "/recordings":
+            self._send(200, {"ok": True, "recordings": RECORDING_MANAGER.list()})
+            return
+        if path == "/recordings/status":
+            self._send(200, RECORDING_MANAGER.status())
+            return
+        if path == "/skills":
+            status, result = _atr_api_request("GET", "/api/equipment/skills")
+            self._send(status, result)
+            return
+        if path.startswith("/skills/"):
+            parts = [unquote(item) for item in path.split("/") if item]
+            if len(parts) == 3:
+                status, result = _atr_api_request(
+                    "GET",
+                    f"/api/equipment/skills/{quote(parts[1], safe='')}/{quote(parts[2], safe='')}",
+                )
+                self._send(status, result)
+                return
+        if path.startswith("/recordings/"):
+            recording_id = unquote(path.split("/recordings/", 1)[1].strip("/"))
+            result = RECORDING_MANAGER.get(recording_id)
+            self._send(200 if result.get("ok") else 404, result)
+            return
+        if path.startswith("/artifacts/"):
+            artifact_id = unquote(path.split("/artifacts/", 1)[1].strip("/"))
             status, payload = _get_artifact(artifact_id)
             self._send(status, payload)
             return
@@ -6421,7 +8312,13 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         if not self._require_auth():
             return
-        if self.path not in {"/execute", "/screenshot", "/locators/capture", "/programs/validate", "/programs/register"}:
+        path = urlparse(self.path).path
+        recording_save = path.startswith("/recordings/") and path.endswith("/save")
+        skill_action = path.startswith("/skills/")
+        if path not in {
+            "/execute", "/screenshot", "/locators/capture", "/programs/validate", "/programs/register",
+            "/recordings/start", "/recordings/checkpoint", "/recordings/stop",
+        } and not recording_save and not skill_action:
             self._send(404, {"ok": False, "status": "not_found"})
             return
         length = int(self.headers.get("Content-Length", "0") or "0")
@@ -6432,18 +8329,85 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             self._send(400, {"ok": False, "status": "bad_request", "failure_code": "PYAUTOGUI_BAD_JSON"})
             return
-        if self.path == "/screenshot":
+        if path == "/recordings/start":
+            result = RECORDING_MANAGER.start(
+                name=str(payload.get("name") or "Equipment demonstration"),
+                target_app=str(payload.get("target_app") or ""),
+                target_window=str(payload.get("target_window") or ""),
+                image_tracking=payload.get("image_tracking") is not False,
+                coordinate_fallback=payload.get("coordinate_fallback") is True,
+            )
+            self._send(200 if result.get("ok") else 409, result)
+            return
+        if path == "/recordings/checkpoint":
+            result = RECORDING_MANAGER.checkpoint(label=str(payload.get("label") or "checkpoint"))
+            self._send(200 if result.get("ok") else 409, result)
+            return
+        if path == "/recordings/stop":
+            result = RECORDING_MANAGER.stop()
+            self._send(200 if result.get("ok") else 409, result)
+            return
+        if recording_save:
+            recording_id = unquote(path.split("/recordings/", 1)[1].rsplit("/save", 1)[0].strip("/"))
+            result = RECORDING_MANAGER.save(recording_id)
+            self._send(200 if result.get("ok") else 409, result)
+            return
+        if path == "/skills/drafts":
+            recording_id = str(payload.get("recording_id") or "").strip()
+            recording = RECORDING_MANAGER.get(recording_id)
+            if not recording.get("ok") or recording.get("status") != "saved":
+                self._send(409, {"ok": False, "status": "blocked", "failure_code": "SKILL_RECORDING_NOT_SAVED"})
+                return
+            recording.pop("ok", None)
+            status, result = _atr_api_request(
+                "POST",
+                "/api/equipment/skills/drafts",
+                {
+                    "recording": recording,
+                    "skill_id": str(payload.get("skill_id") or ""),
+                    "version": str(payload.get("version") or "1.0.0"),
+                    "target_profile": str(payload.get("target_profile") or "local_program1"),
+                },
+            )
+            self._send(status, result)
+            return
+        if skill_action:
+            parts = [unquote(item) for item in path.split("/") if item]
+            if len(parts) == 4 and parts[0] == "skills":
+                skill_id, version, action = parts[1], parts[2], parts[3]
+                if action in {"annotate", "compile", "validate", "deploy", "enabled", "test"}:
+                    forwarded = dict(payload)
+                    if action == "annotate":
+                        forwarded.setdefault("use_model", True)
+                        forwarded.setdefault("annotations", {})
+                    elif action == "deploy":
+                        forwarded.setdefault("bridge_id", f"windows-{HOST}-{PORT}")
+                    elif action == "enabled":
+                        forwarded["enabled"] = bool(forwarded.get("enabled", True))
+                    elif action == "test":
+                        forwarded["runtime_mode"] = str(forwarded.get("runtime_mode") or "test")
+                        forwarded["confirm_execute"] = bool(forwarded.get("confirm_execute", False))
+                    status, result = _atr_api_request(
+                        "POST",
+                        f"/api/equipment/skills/{quote(skill_id, safe='')}/{quote(version, safe='')}/{action}",
+                        forwarded,
+                    )
+                    self._send(status, result)
+                    return
+            self._send(404, {"ok": False, "status": "not_found"})
+            return
+        if path == "/screenshot":
             self._send(200, _screenshot_response(payload))
             return
-        if self.path == "/locators/capture":
+        if path == "/locators/capture":
             self._send(200, _capture_locator(payload))
             return
-        if self.path == "/programs/validate":
+        if path == "/programs/validate":
             result = _validate_program_definition(payload)
             self._write_audit_event({"auth_ok": True, "status": "program_validate", "program_id": str(payload.get("program_id") or ""), "result_ok": bool(result.get("ok")), "failure_code": str(result.get("failure_code") or "")})
             self._send(200, result)
             return
-        if self.path == "/programs/register":
+        if path == "/programs/register":
             result = _register_program_definition(payload)
             self._write_audit_event({"auth_ok": True, "status": "program_register", "program_id": str(payload.get("program_id") or ""), "result_ok": bool(result.get("ok")), "failure_code": str(result.get("failure_code") or "")})
             self._send(200 if result.get("ok") else 400, result)
@@ -6468,6 +8432,15 @@ class Handler(BaseHTTPRequestHandler):
         if not self._require_auth():
             return
         path = urlparse(self.path).path
+        if path.startswith("/skills/"):
+            parts = [unquote(item) for item in path.split("/") if item]
+            if len(parts) == 3 and parts[0] == "skills":
+                status, result = _atr_api_request(
+                    "DELETE",
+                    f"/api/equipment/skills/{quote(parts[1], safe='')}/{quote(parts[2], safe='')}",
+                )
+                self._send(status, result)
+                return
         if not path.startswith("/programs/"):
             self._send(404, {"ok": False, "status": "not_found"})
             return
@@ -6495,7 +8468,7 @@ BridgeRequestHandler = Handler
 
 def _parse_cli_args() -> argparse.Namespace:
     """Apply optional CLI overrides used by the Windows packaging scripts."""
-    global HOST, PORT, TOKEN, TOKEN_HEADER, ARTIFACT_ROOT, LOCATOR_ROOT, UTM_EXPORT_ROOT, PROGRAM_ROOT, BRIDGE_PLATFORM
+    global HOST, PORT, TOKEN, TOKEN_HEADER, ARTIFACT_ROOT, LOCATOR_ROOT, UTM_EXPORT_ROOT, PROGRAM_ROOT, RECORDING_ROOT, DEMO_ROOT, RECORDING_MANAGER, BRIDGE_PLATFORM
     parser = argparse.ArgumentParser(description="ATR Windows PyAutoGUI bridge server")
     parser.add_argument("--host", default=None, help="Bind host. Overrides WINDOWS_PYAUTOGUI_BRIDGE_HOST.")
     parser.add_argument("--port", type=int, default=None, help="Bind port. Overrides WINDOWS_PYAUTOGUI_BRIDGE_PORT.")
@@ -6507,6 +8480,8 @@ def _parse_cli_args() -> argparse.Namespace:
     parser.add_argument("--reference-dir", default=None, help="Directory for locator/reference images.")
     parser.add_argument("--utm-export-dir", default=None, help="Directory watched for UTM CSV exports.")
     parser.add_argument("--program-dir", default=None, help="Directory containing registered JSON macro programs.")
+    parser.add_argument("--recording-dir", default=None, help="Directory containing operator demonstration recordings.")
+    parser.add_argument("--demo-dir", default=None, help="Directory containing the capability lab and example programs.")
     parser.add_argument("--allow-no-token", action="store_true", help="Allow local bench use without token authentication.")
     parser.add_argument("--open-browser", action="store_true", help="Open the local bridge Web GUI after startup.")
     args = parser.parse_args()
@@ -6530,6 +8505,11 @@ def _parse_cli_args() -> argparse.Namespace:
         UTM_EXPORT_ROOT = Path(args.utm_export_dir)
     if args.program_dir:
         PROGRAM_ROOT = Path(args.program_dir)
+    if args.recording_dir:
+        RECORDING_ROOT = Path(args.recording_dir)
+        RECORDING_MANAGER = RecordingManager(RECORDING_ROOT)
+    if args.demo_dir:
+        DEMO_ROOT = Path(args.demo_dir)
     if args.allow_no_token and args.token is None and not TOKEN:
         TOKEN = ""
     return args
@@ -6544,6 +8524,7 @@ def main() -> None:
         )
     ARTIFACT_ROOT.mkdir(parents=True, exist_ok=True)
     LOCATOR_ROOT.mkdir(parents=True, exist_ok=True)
+    RECORDING_ROOT.mkdir(parents=True, exist_ok=True)
     server = ThreadingHTTPServer((HOST, PORT), Handler)
     pyautogui, _ = _load_pyautogui()
     print(f"Windows PyAutoGUI bridge listening on {HOST}:{PORT}")
@@ -6555,7 +8536,11 @@ def main() -> None:
     print("PyAutoGUI FAILSAFE: True when available")
     if args.open_browser:
         webbrowser.open(f"http://127.0.0.1:{PORT}/")
-    server.serve_forever()
+    try:
+        server.serve_forever()
+    finally:
+        RECORDING_MANAGER.shutdown()
+        server.server_close()
 
 
 if __name__ == "__main__":

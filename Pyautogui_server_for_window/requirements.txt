@@ -1,12 +1,2 @@
-# Runtime package for real GUI actions.
-pyautogui>=0.9.54
-
-# Optional: required only for locate_image confidence matching.
-# opencv-python>=4.9.0
-
-# Optional: required only for assert_text / wait_until_text OCR checks.
-# pytesseract>=0.3.13
-# Pillow>=10.0.0
-
-# Optional: install when you are ready to build an .exe.
-# pyinstaller>=6.0
+# Compatibility entry point. Windows installs should use requirements-windows.txt.
+-r requirements-windows.txt

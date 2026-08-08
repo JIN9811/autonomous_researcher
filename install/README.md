@@ -421,17 +421,22 @@ allowlisted handler. If the generated handler is not registered yet, the module
 remains `pending_handler_registration` and uses `runtime.step_complete` until
 explicit `atr module register-generated <module-id>` approval.
 
-Windows PyAutoGUI bridge helper:
+Windows PyAutoGUI bridge standalone deployment:
+
+Do not copy only `install/windows_pyautogui_bridge_server.py`; recording,
+image matching, the capability lab, and examples require the complete
+`Pyautogui_server_for_window` package. On Windows, run:
 
 ```text
-install/windows_pyautogui_bridge_server.py
+Double-click: Pyautogui_server_for_window\INSTALL_WINDOWS_BRIDGE.cmd
 ```
 
-Copy this file to the Windows PC, then run in PowerShell:
+PowerShell alternative:
 
 ```powershell
-$env:WINDOWS_PYAUTOGUI_BRIDGE_TOKEN = "<random-token>"
-py windows_pyautogui_bridge_server.py
+cd .\Pyautogui_server_for_window
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install_bridge.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_bridge.ps1 -OpenBrowser -ShowToken
 ```
 
 From the Live GUI, open `Windows Bridge` to scan the internal network, select the Windows PC, save the connection, and test `program1`.

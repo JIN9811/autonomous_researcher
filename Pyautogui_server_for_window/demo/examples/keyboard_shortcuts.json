@@ -1,0 +1,16 @@
+{
+  "schema": "atr.pyautogui_program.v1",
+  "program_id": "example_keyboard_shortcuts",
+  "name": "Keyboard and shortcuts capability",
+  "description": "Types bounded text and emits repeated keys and a shortcut.",
+  "safe_test": true,
+  "example": {"family": "keyboard", "manual_confirmation_required": false},
+  "sequence": [
+    {"action": "click", "x": 260, "y": 535},
+    {"action": "key_down", "key": "shift"},
+    {"action": "key_up", "key": "shift"},
+    {"action": "write", "text": "ATR capability test", "interval_sec": 0.03},
+    {"action": "press", "key": "left", "presses": 3, "interval_sec": 0.05},
+    {"action": "hotkey", "keys": ["ctrl", "s"], "interval_sec": 0.05}
+  ]
+}

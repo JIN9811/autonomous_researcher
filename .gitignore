@@ -68,6 +68,7 @@ meta/
 
 # Local GUI/image rendering environments
 image/.render_venv/
+.superpowers/
 
 # OS/editor noise
 .DS_Store

@@ -1,0 +1,21 @@
+{
+  "schema": "atr.pyautogui_program.v1",
+  "program_id": "example_image_location",
+  "name": "Image location capability",
+  "description": "Template for calibrated single, repeated, and multi-match image location checks.",
+  "safe_test": false,
+  "example": {"family": "screen", "manual_confirmation_required": false, "setup_required": "calibrated image_path"},
+  "locators": {
+    "capability_target": {
+      "image_path": "C:\\ATR\\equipment_locators\\capability_target.png",
+      "confidence": 0.85,
+      "region": [0, 0, 1920, 1080]
+    }
+  },
+  "sequence": [
+    {"action": "assert_visible", "target": "capability_target", "required": false, "timeout_s": 1.0},
+    {"action": "locate_image", "target": "capability_target", "required": false, "timeout_s": 1.0},
+    {"action": "wait_until_image", "target": "capability_target", "required": false, "timeout_s": 3.0},
+    {"action": "locate_all_images", "target": "capability_target", "max_results": 20}
+  ]
+}

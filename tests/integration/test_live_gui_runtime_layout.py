@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 
@@ -136,6 +137,33 @@ def test_windows_equipment_bridge_ui_proxy_keeps_token_server_side(monkeypatch) 
     assert "Windows Bridge Console" in response.text
     assert "'/equipment/windows/bridge-ui'+input" in response.text
     assert "server-only-token" not in response.text
+
+
+def test_windows_equipment_bridge_ui_proxy_offloads_bridge_request(monkeypatch) -> None:
+    offloaded: list[str] = []
+    original_to_thread = asyncio.to_thread
+
+    async def tracked_to_thread(func, /, *args, **kwargs):
+        offloaded.append(getattr(func, "__name__", "callable"))
+        return await original_to_thread(func, *args, **kwargs)
+
+    class FakeBridge:
+        def proxy_ui_request(self, **kwargs):
+            return {
+                "ok": True,
+                "status_code": 200,
+                "content_type": "application/json; charset=utf-8",
+                "content": b'{"ok":true}',
+            }
+
+    monkeypatch.setattr("app.main._equipment_bridge", lambda: FakeBridge())
+    monkeypatch.setattr("app.main.asyncio.to_thread", tracked_to_thread)
+    client = TestClient(app)
+
+    response = client.get("/equipment/windows/bridge-ui/skills")
+
+    assert response.status_code == 200
+    assert offloaded == ["proxy_ui_request"]
 
 
 def test_common_equipment_profile_test_generates_simulated_analysis_ready_evidence() -> None:
@@ -1609,6 +1637,10 @@ def test_live_gui_equipment_report_exposes_utm_visual_control_contract() -> None
             "bridge_host",
             "remote_server_version",
             "remote_script_version",
+            "latestEquipmentSkillExecution",
+            "Equipment Skill Execution",
+            "Recovery Boundary",
+            "completed_segments",
             "client_latency_ms",
             "pyautogui_failsafe",
             "pyautogui_pause",
@@ -1649,6 +1681,45 @@ def test_live_gui_equipment_report_exposes_utm_visual_control_contract() -> None
     finally:
         controller._state.run_metadata.clear()
         controller._state.run_metadata.update(original_metadata)
+
+
+def test_live_gui_equipment_dashboard_uses_operational_card_layout() -> None:
+    client = TestClient(app)
+
+    script = client.get("/static/planning.js").text
+
+    for token in (
+        'renderDashboardCard("Bridge / Runtime", renderEquipmentBridgeRuntime',
+        'renderDashboardCard("Active Program / Skill", renderEquipmentActiveExecution',
+        'renderDashboardCard("Recovery Boundary", renderEquipmentRecoveryBoundary',
+        'renderDashboardCard("Agentic Progress", renderEquipmentAgenticProgress',
+        'renderDashboardCard("Execution Evidence", renderEquipmentExecutionEvidence',
+        'renderDashboardCard("Handoff", renderEquipmentHandoff',
+        "function equipmentProgressSteps(",
+        'class="ar-vis-agentic-progress"',
+    ):
+        assert token in script
+    assert 'renderEquipmentAgenticProgress(ctx), { span: 12' in script
+    assert 'renderEquipmentExecutionEvidence(ctx), { span: 8' in script
+
+
+def test_live_gui_equipment_actions_are_passive_and_reuse_existing_routes() -> None:
+    client = TestClient(app)
+
+    script = client.get("/static/planning.js").text
+
+    for token in (
+        'data-equipment-live-action="test"',
+        'data-equipment-live-action="open"',
+        'data-equipment-live-action="refresh"',
+        '"/api/equipment/windows/config"',
+        '"/api/equipment/windows/test"',
+        'window.open("/equipment/windows", "_blank", "noopener,noreferrer")',
+    ):
+        assert token in script
+    action_start = script.index("async function runEquipmentLiveAction")
+    action_end = script.index("function renderEquipmentLiveHeaderActions", action_start)
+    assert "/execute" not in script[action_start:action_end]
 
 
 def test_windows_equipment_gui_exposes_utm_calibration_controls() -> None:
@@ -1825,9 +1896,9 @@ def test_windows_equipment_gui_exposes_utm_calibration_controls() -> None:
         "utmProofChecklist",
         "collectUtmProfilePayload",
         "hydrateUtmProfile",
-        "openSelectedBridgeGui",
-        "selectedBridgeUrl",
-        "PYAUTOGUI_BRIDGE_GUI_URL_MISSING",
+            "openSelectedBridgeGui",
+            "selectedBridgeUrl",
+            'window.open("/equipment/windows/console"',
         "mergeLocatorOverride",
         "renderUtmReadiness",
         "checkReadiness",
