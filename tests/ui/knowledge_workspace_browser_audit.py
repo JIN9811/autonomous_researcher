@@ -27,10 +27,35 @@ def audit(base_url: str, screenshot_path: Path, *, geckodriver: str) -> dict[str
         wait.until(lambda item: item.execute_script("return document.querySelectorAll('#knowledge-graph canvas').length") > 0)
         wait.until(lambda item: "waiting" not in item.find_element(By.ID, "knowledge-query-summary").text.lower())
 
-        for tab_name in ("memory", "ontology", "project", "graph"):
+        for tab_name in ("memory", "ontology", "project", "relations"):
             driver.find_element(By.CSS_SELECTOR, f'[data-knowledge-tab="{tab_name}"]').click()
             wait.until(lambda item, name=tab_name: item.find_element(By.CSS_SELECTOR, f'[data-knowledge-panel="{name}"]').is_displayed())
             time.sleep(0.15)
+        relation_queue_width = driver.find_element(By.ID, "knowledge-relation-queue").rect["width"]
+
+        driver.find_element(By.CSS_SELECTOR, '[data-knowledge-tab="graph"]').click()
+        wait.until(lambda item: item.find_element(By.CSS_SELECTOR, '[data-knowledge-panel="graph"]').is_displayed())
+
+        driver.find_element(By.ID, "knowledge-edit-mode").click()
+        wait.until(lambda item: item.find_element(By.ID, "knowledge-edit-toolbar").is_displayed())
+        if driver.find_element(By.ID, "knowledge-edit-apply").is_enabled():
+            raise AssertionError("graph edit apply must remain disabled until server validation")
+        staged = driver.execute_script(
+            """
+            const chart = echarts.getInstanceByDom(document.getElementById('knowledge-graph'));
+            const node = chart?.getOption()?.series?.[0]?.data?.[0];
+            if (!node) return false;
+            stageGraphEdit({operation: 'update_node_metadata', node_id: String(node.id), metadata: {note: 'browser audit draft'}}, 'Browser audit draft staged.');
+            return true;
+            """
+        )
+        if not staged:
+            raise AssertionError("no bounded graph node available for edit validation audit")
+        wait.until(lambda item: item.find_element(By.ID, "knowledge-edit-validate").is_enabled())
+        driver.find_element(By.ID, "knowledge-edit-validate").click()
+        wait.until(lambda item: item.find_element(By.ID, "knowledge-edit-apply").is_enabled())
+        driver.find_element(By.ID, "knowledge-edit-discard").click()
+        wait.until(lambda item: not item.find_element(By.ID, "knowledge-edit-apply").is_enabled())
 
         layout = driver.execute_script(
             """
@@ -46,14 +71,19 @@ def audit(base_url: str, screenshot_path: Path, *, geckodriver: str) -> dict[str
               inspectorWidth: inspector.width,
               canvasCount: document.querySelectorAll('#knowledge-graph canvas').length,
               tabs: document.querySelectorAll('[data-knowledge-tab]').length,
+              editMode: document.getElementById('knowledge-edit-mode').getAttribute('aria-pressed'),
+              relationQueue: arguments[0],
             };
-            """
+            """,
+            relation_queue_width,
         )
         if layout["scrollWidth"] > layout["viewportWidth"] + 2:
             raise AssertionError(f"horizontal overflow detected: {layout}")
         if layout["graphWidth"] < 900 or layout["graphHeight"] < 500:
             raise AssertionError(f"graph canvas is undersized: {layout}")
-        if layout["inspectorWidth"] < 280 or layout["canvasCount"] < 1 or layout["tabs"] != 5:
+        if layout["inspectorWidth"] < 280 or layout["canvasCount"] < 1 or layout["tabs"] != 6:
+            raise AssertionError(f"workspace contract failed: {layout}")
+        if layout["editMode"] != "true" or layout["relationQueue"] < 260:
             raise AssertionError(f"workspace contract failed: {layout}")
 
         screenshot_path.parent.mkdir(parents=True, exist_ok=True)

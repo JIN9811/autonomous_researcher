@@ -19,12 +19,23 @@ def test_knowledge_workspace_exposes_graph_ontology_memory_and_sync_surfaces() -
         'data-knowledge-tab="ontology"',
         'data-knowledge-tab="sync"',
         'data-knowledge-tab="project"',
+        'data-knowledge-tab="relations"',
         'id="knowledge-graph"',
         'id="knowledge-node-inspector"',
+        'id="knowledge-edit-mode"',
+        'id="knowledge-edit-toolbar"',
+        'id="knowledge-edit-validate"',
+        'id="knowledge-edit-apply"',
+        'id="knowledge-edit-discard"',
         'id="knowledge-memory-grid"',
         'id="knowledge-ontology-classes"',
         'id="knowledge-sync-result"',
         'id="knowledge-project-graph"',
+        'id="knowledge-relation-summary"',
+        'id="knowledge-relation-queue"',
+        'id="knowledge-relation-context"',
+        'id="knowledge-relation-decision"',
+        'id="knowledge-relation-history"',
         "/static/vendor/echarts.min.js",
         "/static/knowledge.js",
         "/static/knowledge.css",
@@ -61,6 +72,11 @@ def test_knowledge_workspace_uses_only_bounded_knowledge_apis() -> None:
         "/api/knowledge/failure-patterns",
         "/api/knowledge/success-patterns",
         "/api/knowledge/evolution-packs",
+        "/api/knowledge/relations/status",
+        "/api/knowledge/relations/proposals",
+        "/api/knowledge/relations/decisions",
+        "/api/knowledge/graph/edit/validate",
+        "/api/knowledge/graph/edit/apply",
     ]:
         assert endpoint in script
     assert "queryPlan" in script
@@ -68,4 +84,8 @@ def test_knowledge_workspace_uses_only_bounded_knowledge_apis() -> None:
     assert "cypher" not in script.lower()
     assert "grid-template-columns: minmax(0, 7fr) minmax(280px, 3fr);" in styles
     assert ".knowledge-graph-canvas" in styles
+    assert ".knowledge-relation-layout" in styles
+    assert ".knowledge-edit-toolbar" in styles
     assert "background: #ffffff" in styles
+    assert "sessionStorage" in script
+    assert "knowledgeGraphEditDraft" in script

@@ -15023,6 +15023,7 @@ async def get_knowledge_relation_status() -> dict[str, object]:
         "relations": service.store.stats(),
         "gaps": scan.get("gaps", []),
         "gap_count": len(scan.get("gaps", [])),
+        "graph_revision": scan.get("graph_revision", ""),
     }
 
 

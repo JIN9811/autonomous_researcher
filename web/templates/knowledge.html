@@ -14,7 +14,7 @@ Runtime contract:
     <title>{{ title }}</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
     <link rel="stylesheet" href="/static/styles.css" />
-    <link rel="stylesheet" href="/static/knowledge.css?v=20260808-knowledge-workspace-1" />
+    <link rel="stylesheet" href="/static/knowledge.css?v=20260809-relation-review-1" />
   </head>
   <body class="knowledge-page">
     <main class="knowledge-shell">
@@ -44,6 +44,7 @@ Runtime contract:
         <button type="button" data-knowledge-tab="ontology">Ontology</button>
         <button type="button" data-knowledge-tab="sync">Sync</button>
         <button type="button" data-knowledge-tab="project">Project Graph</button>
+        <button type="button" data-knowledge-tab="relations">Relation Review</button>
       </nav>
 
       <section class="knowledge-tab-panel active" data-knowledge-panel="graph">
@@ -72,6 +73,21 @@ Runtime contract:
           </label>
           <button id="knowledge-run-query" class="knowledge-button primary" type="button">Run Query</button>
         </div>
+        <div class="knowledge-graph-controls">
+          <div class="knowledge-mode-switch" role="group" aria-label="Graph interaction mode">
+            <button id="knowledge-view-mode" class="active" type="button" aria-pressed="true">VIEW</button>
+            <button id="knowledge-edit-mode" type="button" aria-pressed="false">EDIT</button>
+          </div>
+          <div id="knowledge-edit-toolbar" class="knowledge-edit-toolbar" hidden>
+            <strong>Draft <span id="knowledge-edit-count">0</span></strong>
+            <button id="knowledge-edit-undo" class="knowledge-button secondary" type="button" disabled>Undo</button>
+            <button id="knowledge-edit-redo" class="knowledge-button secondary" type="button" disabled>Redo</button>
+            <button id="knowledge-edit-validate" class="knowledge-button secondary" type="button" disabled>Validate</button>
+            <button id="knowledge-edit-apply" class="knowledge-button primary" type="button" disabled>Apply</button>
+            <button id="knowledge-edit-discard" class="knowledge-button danger" type="button" disabled>Discard</button>
+            <small id="knowledge-edit-status">No unsaved graph edits.</small>
+          </div>
+        </div>
         <div class="knowledge-graph-layout">
           <article class="knowledge-card knowledge-graph-card">
             <div class="knowledge-card-head"><div><span>Bounded Graph View</span><h2>Runtime Knowledge Graph</h2></div><small id="knowledge-query-summary">waiting</small></div>
@@ -81,6 +97,18 @@ Runtime contract:
           <aside class="knowledge-card knowledge-inspector">
             <div class="knowledge-card-head"><div><span>Selection</span><h2>Node Inspector</h2></div></div>
             <div id="knowledge-node-inspector">그래프에서 노드를 선택하면 식별자와 저장된 속성을 표시합니다.</div>
+            <form id="knowledge-node-edit-form" class="knowledge-node-edit-form" hidden>
+              <label>Label<input id="knowledge-edit-label" maxlength="2000" /></label>
+              <label>Alias<input id="knowledge-edit-alias" maxlength="2000" /></label>
+              <label>Note<textarea id="knowledge-edit-note" maxlength="2000" rows="3"></textarea></label>
+              <label>Tags<input id="knowledge-edit-tags" placeholder="comma separated" /></label>
+              <button id="knowledge-stage-metadata" class="knowledge-button secondary" type="submit">Stage metadata</button>
+            </form>
+            <form id="knowledge-relation-edit-form" class="knowledge-node-edit-form" hidden>
+              <label>Target<select id="knowledge-edit-target"></select></label>
+              <label>Relation<select id="knowledge-edit-relation"></select></label>
+              <button id="knowledge-stage-relation" class="knowledge-button secondary" type="submit">Stage relation</button>
+            </form>
             <button id="knowledge-expand-node" class="knowledge-button secondary" type="button" disabled>Expand provenance</button>
           </aside>
         </div>
@@ -128,9 +156,53 @@ Runtime contract:
         </article>
       </section>
 
+      <section class="knowledge-tab-panel" data-knowledge-panel="relations">
+        <div id="knowledge-relation-summary" class="knowledge-relation-summary" aria-label="Relation reconciliation summary">
+          <article><span>Examined gaps</span><strong id="knowledge-relation-gaps">0</strong><small>bounded graph scan</small></article>
+          <article><span>Pending review</span><strong id="knowledge-relation-pending">0</strong><small>operator decision</small></article>
+          <article><span>Auto approved</span><strong id="knowledge-relation-approved">0</strong><small>strict threshold</small></article>
+          <article><span>Deferred / rejected</span><strong id="knowledge-relation-held">0</strong><small>durable decisions</small></article>
+          <article><span>Worker</span><strong id="knowledge-relation-worker">idle</strong><small id="knowledge-relation-model">loaded model only</small></article>
+        </div>
+        <div class="knowledge-relation-actions">
+          <button id="knowledge-relation-scan" class="knowledge-button secondary" type="button">Scan Graph</button>
+          <button id="knowledge-relation-run" class="knowledge-button primary" type="button">Run Reconciliation</button>
+          <small>Background reconciliation never loads an unloaded model or blocks an active experiment.</small>
+        </div>
+        <div class="knowledge-relation-layout">
+          <article class="knowledge-card knowledge-relation-queue-card">
+            <div class="knowledge-card-head"><div><span>Review Queue</span><h2>Relation Proposals</h2></div><small id="knowledge-relation-queue-count">0 pending</small></div>
+            <div id="knowledge-relation-queue" class="knowledge-relation-queue" role="list"></div>
+          </article>
+          <article class="knowledge-card knowledge-relation-context-card">
+            <div class="knowledge-card-head"><div><span>Graph Context</span><h2>Evidence &amp; Candidate Edge</h2></div><small>amber dashed = pending</small></div>
+            <div id="knowledge-relation-context" class="knowledge-relation-context" role="img" aria-label="Pending relation graph context"></div>
+            <pre id="knowledge-relation-evidence">Select a proposal to inspect its bounded evidence.</pre>
+          </article>
+          <aside id="knowledge-relation-decision" class="knowledge-card knowledge-relation-decision">
+            <div class="knowledge-card-head"><div><span>Operator Decision</span><h2>Review &amp; Revise</h2></div><small id="knowledge-relation-version">no selection</small></div>
+            <div id="knowledge-relation-selected">Select a pending proposal.</div>
+            <label>Target ID<select id="knowledge-relation-target" disabled></select></label>
+            <label>Relation type<select id="knowledge-relation-type" disabled></select></label>
+            <label>Decision rationale<textarea id="knowledge-relation-rationale" rows="4" maxlength="2000" disabled></textarea></label>
+            <div class="knowledge-decision-actions">
+              <button id="knowledge-relation-approve" class="knowledge-button primary" type="button" disabled>Approve</button>
+              <button id="knowledge-relation-revise" class="knowledge-button secondary" type="button" disabled>Edit &amp; Approve</button>
+              <button id="knowledge-relation-defer" class="knowledge-button secondary" type="button" disabled>Defer</button>
+              <button id="knowledge-relation-reject" class="knowledge-button danger" type="button" disabled>Reject</button>
+              <button id="knowledge-relation-reevaluate" class="knowledge-button secondary" type="button" disabled>Re-evaluate</button>
+            </div>
+          </aside>
+          <article class="knowledge-card knowledge-relation-history-card">
+            <div class="knowledge-card-head"><div><span>Audit History</span><h2>Relation &amp; Graph Decisions</h2></div><small>append-only</small></div>
+            <div id="knowledge-relation-history" class="knowledge-relation-history"></div>
+          </article>
+        </div>
+      </section>
+
       <footer class="knowledge-footer"><span id="knowledge-runtime-message">Initializing Knowledge Workspace.</span><time id="knowledge-updated-at">-</time></footer>
     </main>
     <script src="/static/vendor/echarts.min.js?v=5.6.0"></script>
-    <script src="/static/knowledge.js?v=20260808-knowledge-workspace-1" defer></script>
+    <script src="/static/knowledge.js?v=20260809-relation-review-1" defer></script>
   </body>
 </html>

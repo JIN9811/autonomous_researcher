@@ -119,6 +119,7 @@ def test_relation_status_and_pending_proposal_listing(relation_api) -> None:
     proposals = client.get("/api/knowledge/relations/proposals?status=pending").json()
 
     assert status["ok"] is True
+    assert status["graph_revision"] == "rev-1"
     assert status["relations"]["pending"] == 1
     assert proposals["proposals"][0]["proposal_id"] == "proposal:1"
 
