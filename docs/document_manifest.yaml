@@ -1,0 +1,25 @@
+version: 1
+documents:
+  - README.md
+  - README.ko.md
+  - README.en.md
+  - docs/README.md
+  - docs/standards/documentation_standard.md
+  - docs/templates/document_types.md
+  - docs/runtime/current_code_snapshot.md
+  - docs/runtime/langgraph_runtime.md
+  - docs/runtime/closed_loop_and_pages_reference.md
+  - docs/knowledge/knowledge_graph_operations.ko.md
+legacy_scope:
+  status: migration_debt
+  note: >-
+    Markdown documents outside this list retain their current locations and are
+    classified in later batches; they are not silently treated as compliant.
+snapshot:
+  document: docs/runtime/current_code_snapshot.md
+  expected:
+    api_routes: 332
+    app_routes: 339
+    graph_nodes: 19
+    graph_edges: 68
+    stage_dispatch_edges: 12
