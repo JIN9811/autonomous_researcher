@@ -1,3 +1,24 @@
+---
+doc_type: index
+subtype: index
+status: active
+authority: navigation
+audience:
+  - user
+  - operator
+  - developer
+scope:
+  - repository
+  - english_documentation
+summary: English entry point for using, operating, and developing the Autonomous Researcher Framework.
+related_docs:
+  - README.md
+  - docs/README.md
+  - docs/standards/documentation_standard.md
+  - docs/runtime/current_code_snapshot.md
+supersedes: []
+---
+
 # Autonomous Researcher Framework
 
 Autonomous Researcher Framework is a local multi-agent automation system for closed-loop experimental research.
@@ -11,8 +32,8 @@ If code and documentation appear to disagree, check the
 [Current Code Snapshot](docs/runtime/current_code_snapshot.md) first. That
 snapshot is refreshed against `app/main.py`, `graphs/configs/*.yaml`,
 `graphs/modules/*`, `device_bridges/*`, `web/templates/*`, and `web/static/*`.
-As of 2026-06-17, `app/main.py` exposes 224 FastAPI `APIRoute`
-endpoints. The full `app.routes` registry has 229 entries when
+At commit `09bbe32` on 2026-08-08, the application exposes 332 FastAPI
+`APIRoute` objects. The full `app.routes` registry has 339 entries when
 `/openapi.json`, `/docs`, `/docs/oauth2-redirect`, `/redoc`, and `/static`
 are included. These counts are used as documentation sanity checks when
 route/API contracts are updated. They are measured by importing the FastAPI
@@ -86,6 +107,7 @@ PowerShell process with `install\windows_pyautogui_bridge_server.py`.
 | Live GUI | `http://localhost:7860/live` | `web/templates/planning.html`, `web/static/planning.js` | Chat-based orchestration, agent progress, artifacts, backend trace |
 | Runtime IDE | `http://localhost:7860/ide` | `web/templates/runtime_ide.html`, `web/static/runtime_ide.js` | LangGraph graph/node/edge editing, validation, dry-run, execution |
 | Module Management | `http://localhost:7860/module-management` | `web/templates/module_management.html`, `web/static/module_management.js` | Module loading, validation, versioning, draft module creation, `ui.yaml` descriptor management, generated adapter management |
+| Knowledge Workspace | `http://localhost:7860/knowledge` | `web/templates/knowledge.html`, `web/static/knowledge.js`, `web/static/knowledge.css` | Graph Explorer, Memory, Ontology, Sync, Project Graph, and activity state |
 | 3DP Workspace | `http://localhost:7860/printer` | `web/templates/printer.html`, `web/static/printer.js` | Bambu Lab X2D default bridge, explicit Prusa selection, live video/status, slicing/start gates, auto-ejection, test-print settings |
 | LeRobot Workspace | `http://localhost:7860/lerobot` | `web/templates/lerobot.html`, `web/static/lerobot.js` | Port detection, teleop, recording, training, visualization, rollout |
 | BO Workspace | `http://localhost:7860/bo` | `web/templates/bo.html`, `web/static/bo.js` | BO/MBO/LLM preference strategy, lightweight/BoTorch optional backend, reasoning audit, candidate ranking/selection |
@@ -251,6 +273,8 @@ the Bambu printer bridge is inactive.
 ## 9. Documentation Entry Points
 
 - [Documentation index](docs/README.md)
+- [Documentation Standard](docs/standards/documentation_standard.md)
+- [Document type templates](docs/templates/document_types.md)
 - [Complete User Manual](docs/tutorials/user_manual.en.md)
 - [Closed loop and page/agent reference](docs/runtime/closed_loop_and_pages_reference.md)
 - [Current code/API snapshot](docs/runtime/current_code_snapshot.md)
@@ -258,11 +282,18 @@ the Bambu printer bridge is inactive.
 - [Experiment runtime](docs/runtime/autonomous_experiment_runtime.md)
 - [Live GUI guide](docs/gui/gui.md)
 - [API key / OpenAI fallback](docs/runtime/api_keys.md)
+- [Knowledge Graph operations guide (Korean)](docs/knowledge/knowledge_graph_operations.ko.md)
+- [Documentation governance Design](docs/superpowers/specs/2026-08-08-documentation-governance-design.md)
 - [First autonomous run tutorial](docs/tutorials/first_autonomous_run.en.md)
 - [GitHub/version-control rules](docs/repository/github_version_control.md)
 
 ## 10. Maintenance Rules
 
+- Separate current facts into References, procedures into Guides, target
+  decisions into Designs, execution order into Plans, and dated research or
+  audits into Evidence.
+- Follow the [Documentation Standard](docs/standards/documentation_standard.md)
+  for classification, metadata, and verification.
 - Runtime behavior changes must update related `docs/runtime`, `docs/gui`, `docs/agents`, and `docs/hardware` files.
 - Create branches for risky changes only when requested, then validate and merge.
 - Keep `main` as the stable runnable baseline.

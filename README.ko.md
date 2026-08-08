@@ -1,3 +1,24 @@
+---
+doc_type: index
+subtype: index
+status: active
+authority: navigation
+audience:
+  - user
+  - operator
+  - developer
+scope:
+  - repository
+  - korean_documentation
+summary: Autonomous Researcher Framework의 한국어 사용·운영·개발 문서 진입점.
+related_docs:
+  - README.md
+  - docs/README.md
+  - docs/standards/documentation_standard.md
+  - docs/runtime/current_code_snapshot.md
+supersedes: []
+---
+
 # Autonomous Researcher Framework
 
 Autonomous Researcher Framework는 실험 설계, 시편 제작, 장비 제어, 해석, 최적화를 하나의 폐루프 파이프라인으로 연결하는 로컬 멀티 에이전트 연구 자동화 시스템입니다.
@@ -12,9 +33,9 @@ Autonomous Researcher Framework는 실험 설계, 시편 제작, 장비 제어, 
 확인하세요. 이 스냅샷은 `app/main.py`, `graphs/configs/*.yaml`,
 `graphs/modules/*`, `device_bridges/*`, `web/templates/*`,
 `web/static/*` 기준으로 현재 route/API/manifest 상태를 정리합니다.
-2026-06-17 기준 `app/main.py`에는 FastAPI `APIRoute` endpoint 224개가
-있습니다. `/openapi.json`, `/docs`, `/docs/oauth2-redirect`, `/redoc`,
-`/static`까지 포함한 전체 `app.routes` 등록 수는 229개입니다. 이 수치는
+2026-08-08 커밋 `09bbe32` 기준 FastAPI `APIRoute` 객체는 332개입니다.
+`/openapi.json`, `/docs`, `/docs/oauth2-redirect`, `/redoc`, `/static`까지
+포함한 전체 `app.routes` 등록 수는 339개입니다. 이 수치는
 문서 갱신 시 실제 코드와 맞는지 확인하는 sanity check로 사용합니다.
 단순 decorator grep가 아니라 FastAPI app을 import해 `APIRoute` 객체를
 세는 기준입니다. 일부 route는 단일 줄 decorator literal이 아니기 때문에
@@ -88,6 +109,7 @@ Windows에서 local AI 없이 쓰려면 `.env`에 `AUTONOMOUS_BACKEND=openai`와
 | Live GUI | `http://localhost:7860/live` | `web/templates/planning.html`, `web/static/planning.js` | 채팅 기반 오케스트레이터, 에이전트 진행, 아티팩트/trace 확인 |
 | Runtime IDE | `http://localhost:7860/ide` | `web/templates/runtime_ide.html`, `web/static/runtime_ide.js` | LangGraph 그래프/노드/에지 편집, 검증, dry-run, 실행 |
 | Module Management | `http://localhost:7860/module-management` | `web/templates/module_management.html`, `web/static/module_management.js` | 모듈 로드/검증/버전 관리, draft module 생성, `ui.yaml` descriptor 관리, 생성 어댑터 관리 |
+| Knowledge Workspace | `http://localhost:7860/knowledge` | `web/templates/knowledge.html`, `web/static/knowledge.js`, `web/static/knowledge.css` | Graph Explorer, Memory, Ontology, Sync, Project Graph와 활동 상태 확인 |
 | 3DP Workspace | `http://localhost:7860/printer` | `web/templates/printer.html`, `web/static/printer.js` | Bambu Lab X2D 기본 브릿지, Prusa 명시 선택, live video/status, 슬라이싱/start gate, 오토이젝션, 테스트 출력 설정 |
 | LeRobot Workspace | `http://localhost:7860/lerobot` | `web/templates/lerobot.html`, `web/static/lerobot.js` | 포트 탐색, teleop, recording, training, visualization, rollout |
 | BO Workspace | `http://localhost:7860/bo` | `web/templates/bo.html`, `web/static/bo.js` | BO/MBO/LLM preference 전략, lightweight/BoTorch optional backend, reasoning audit, 후보 ranking/추천 |
@@ -248,6 +270,8 @@ provider 계층에서 기본 active profile로 관리됩니다. 따라서 Bambu�
 ## 9. 문서 진입점
 
 - [문서 전체 인덱스](docs/README.md)
+- [문서 작성 표준](docs/standards/documentation_standard.md)
+- [문서 종류별 템플릿](docs/templates/document_types.md)
 - [사용자 종합 매뉴얼](docs/tutorials/user_manual.ko.md)
 - [닫힌 루프와 페이지/에이전트 상세](docs/runtime/closed_loop_and_pages_reference.md)
 - [현재 코드/API 스냅샷](docs/runtime/current_code_snapshot.md)
@@ -255,11 +279,17 @@ provider 계층에서 기본 active profile로 관리됩니다. 따라서 Bambu�
 - [Experiment runtime](docs/runtime/autonomous_experiment_runtime.md)
 - [Live GUI 설명](docs/gui/gui.md)
 - [API key / OpenAI fallback](docs/runtime/api_keys.md)
+- [Knowledge Graph 운영 가이드](docs/knowledge/knowledge_graph_operations.ko.md)
+- [문서 거버넌스 설계](docs/superpowers/specs/2026-08-08-documentation-governance-design.md)
 - [첫 자동 실행 튜토리얼](docs/tutorials/first_autonomous_run.ko.md)
 - [GitHub/버전관리 규칙](docs/repository/github_version_control.md)
 
 ## 10. 유지보수 규칙
 
+- 현재 사실은 코드/설정과 active Reference, 절차는 Guide, 목표 결정은 Design,
+  실행 순서는 Plan, 조사·감사 결과는 Evidence로 구분합니다.
+- 문서 분류, 메타데이터, 검증 규칙은
+  [문서 작성 표준](docs/standards/documentation_standard.md)을 따릅니다.
 - 런타임 동작을 바꾸면 관련 `docs/runtime`, `docs/gui`, `docs/agents`, `docs/hardware`를 같이 수정합니다.
 - 위험한 변경은 요청받은 경우에만 브랜치를 만들고, 검증 후 병합합니다.
 - `main`은 항상 실행 가능한 기준선으로 유지합니다.

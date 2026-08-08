@@ -1,8 +1,45 @@
+---
+doc_type: index
+subtype: index
+status: active
+authority: navigation
+audience:
+  - user
+  - operator
+  - developer
+  - maintainer
+scope:
+  - repository_documentation
+summary: Audience-, type-, and domain-oriented index for ATR documentation.
+related_docs:
+  - README.md
+  - docs/standards/documentation_standard.md
+  - docs/templates/document_types.md
+  - docs/runtime/current_code_snapshot.md
+supersedes: []
+---
+
 # Documentation Index
+
+## Summary
 
 이 문서는 협업자와 운영자가 읽는 설명용 문서의 진입점입니다. 시스템 지시, Codex 실행 프롬프트, 패키지 원본 지침은 `docs/system/`과 각 `docs/ATR_*_Package/`에 분리되어 있습니다.
 
-## 1. 먼저 읽을 문서
+## Scope
+
+이 인덱스는 사용자·운영자·개발자가 읽는 문서, 문서 작성 규칙, 현재 구현
+Reference, 절차 Guide, 목표 Design, 실행 Plan, 조사·감사 Evidence를 안내합니다.
+`docs/document_manifest.yaml`에 아직 포함되지 않은 기존 문서는 그대로
+노출하되 1차 거버넌스 이관 완료 문서로 간주하지 않습니다.
+
+## Evidence Basis
+
+- 문서 유형과 권한: [standards/documentation_standard.md](standards/documentation_standard.md)
+- 이관 완료 집합: [document_manifest.yaml](document_manifest.yaml)
+- 현재 구현 수치: [runtime/current_code_snapshot.md](runtime/current_code_snapshot.md)
+- 실행 코드 기준: `app/`, `graphs/`, `web/`, `device_bridges/`, `knowledge/`
+
+## 1. Audience Paths
 
 | 목적 | 문서 |
 |---|---|
@@ -21,7 +58,22 @@
 | 첫 실행 튜토리얼 | [tutorials/first_autonomous_run.ko.md](tutorials/first_autonomous_run.ko.md), [tutorials/first_autonomous_run.en.md](tutorials/first_autonomous_run.en.md) |
 | Git/GitHub 운영 | [repository/github_version_control.md](repository/github_version_control.md) |
 
-## 1.1 현재 코드 기준 문서 읽는 순서
+## 1.1 Documents by Type
+
+| 유형 | 현재 진입점 | 읽는 기준 |
+|---|---|---|
+| Index | [../README.md](../README.md), 이 문서 | 언어·대상·도메인별 탐색 |
+| Standard | [standards/documentation_standard.md](standards/documentation_standard.md) | 문서 분류·권한·메타데이터·검증의 규범 |
+| Reference | [runtime/current_code_snapshot.md](runtime/current_code_snapshot.md), [runtime/langgraph_runtime.md](runtime/langgraph_runtime.md), [runtime/closed_loop_and_pages_reference.md](runtime/closed_loop_and_pages_reference.md) | 현재 코드가 실제로 제공하는 동작 |
+| Guide | [knowledge/knowledge_graph_operations.ko.md](knowledge/knowledge_graph_operations.ko.md), `tutorials/` | 사용자·운영자 절차와 성공/복구 기준 |
+| Design | [superpowers/specs/2026-08-08-documentation-governance-design.md](superpowers/specs/2026-08-08-documentation-governance-design.md) | 승인 또는 제안된 목표 결정; 현재 구현 사실이 아님 |
+| Plan | `superpowers/plans/` | Design을 실현하는 작업 순서 |
+| Evidence | 조사·감사·시험 보고서 및 `개선안/`의 미분류 연구 자료 | 기록된 날짜와 방법에 한정된 근거 |
+
+새 문서를 만들 때는 [templates/document_types.md](templates/document_types.md)의
+해당 유형 템플릿을 사용합니다.
+
+## 1.2 Authority and Conflict Resolution
 
 문서가 서로 다르게 보이면 아래 순서로 판단합니다.
 
@@ -38,7 +90,7 @@ editor 범위, bridge registry, printer fleet, model/API-key 상태를 요약하
 route 수치와 그룹 분류는 decorator grep가 아니라 `.venv/bin/python`으로
 FastAPI app을 import한 뒤 `APIRoute` 객체를 세는 기준입니다.
 
-## 2. 실제 런타임 구조 요약
+## 2. Documents by Domain: 실제 런타임 구조 요약
 
 기본 그래프는 `graphs/configs/atr_closed_loop.yaml`이며, 서버 route는 `app/main.py`에 정의되어 있습니다.
 
@@ -122,6 +174,7 @@ UTM ROS Vision Runtime은 현재 Windows/PyAutoGUI UTM 제어 증거를 대체�
 | Live GUI | `/live`, `/planning` | `web/templates/planning.html`, `web/static/planning.js` | [gui/gui.md](gui/gui.md), [runtime/closed_loop_and_pages_reference.md](runtime/closed_loop_and_pages_reference.md) |
 | Runtime IDE | `/ide` | `web/templates/runtime_ide.html`, `web/static/runtime_ide.js` | [runtime/langgraph_runtime.md](runtime/langgraph_runtime.md) |
 | Module Management | `/module-management` | `web/templates/module_management.html`, `web/static/module_management.js` | [runtime/langgraph_runtime.md](runtime/langgraph_runtime.md), [runtime/agent_program_baseline.md](runtime/agent_program_baseline.md) |
+| Knowledge Workspace | `/knowledge` | `web/templates/knowledge.html`, `web/static/knowledge.js`, `web/static/knowledge.css` | [knowledge/knowledge_graph_operations.ko.md](knowledge/knowledge_graph_operations.ko.md), [runtime/current_code_snapshot.md](runtime/current_code_snapshot.md) |
 | 3DP Workspace | `/printer` | `web/templates/printer.html`, `web/static/printer.js`, `device_bridges/bambu_bridge.py`, `device_bridges/bambu_autoejection.py` | [gui/gui.md](gui/gui.md), [runtime/closed_loop_and_pages_reference.md](runtime/closed_loop_and_pages_reference.md), [hardware/bambulab_x2d_device_bridge_runtime_guideline.md](hardware/bambulab_x2d_device_bridge_runtime_guideline.md), [../개선안/13_bambulab_x2d_spc_device_bridge_research.md](../개선안/13_bambulab_x2d_spc_device_bridge_research.md), [../개선안/14_bambulab_gcode_autoejection_runtime_plan.md](../개선안/14_bambulab_gcode_autoejection_runtime_plan.md), [tutorials/device_workspace_3dp_usage.ko.md](tutorials/device_workspace_3dp_usage.ko.md), [hardware/printer_agent_prusabridge_phase1_runtime_guideline.txt](hardware/printer_agent_prusabridge_phase1_runtime_guideline.txt) |
 | Vision Camera Bridge | `/device-bridge/vision-utm` | `web/templates/vision_utm_device_bridge.html`, `web/static/vision_utm_device_bridge.js`, `device_bridges/utm_runtime_bridge.py` | [hardware/utm_ros_vision_runtime_bridge.md](hardware/utm_ros_vision_runtime_bridge.md), [tutorials/device_workspace_vision_camera_bridge_usage.ko.md](tutorials/device_workspace_vision_camera_bridge_usage.ko.md), [../개선안/17_vision_agent_camera_device_bridge_live_gui_plan.md](../개선안/17_vision_agent_camera_device_bridge_live_gui_plan.md) |
 | LeRobot Workspace | `/lerobot` | `web/templates/lerobot.html`, `web/static/lerobot.js` | [hardware/lerobot_robotis_manipulation_runtime_guideline.md](hardware/lerobot_robotis_manipulation_runtime_guideline.md), [hardware/isaac_sim_robotis_omx_mirror_mode.md](hardware/isaac_sim_robotis_omx_mirror_mode.md), [runtime/lerobot_dataset_policy_naming.md](runtime/lerobot_dataset_policy_naming.md) |
@@ -177,6 +230,11 @@ UTM ROS Vision Runtime은 현재 Windows/PyAutoGUI UTM 제어 증거를 대체�
 - `docs/process/`: Codex 작업 절차
 - `docs/project/`: 프로젝트 기본 가이드
 - `docs/strategy/`: 시스템 개선 전략
+- `docs/knowledge/`: Knowledge Graph 운영 Guide
+- `docs/standards/`: active 규범 문서
+- `docs/templates/`: 문서 유형별 작성 틀
+- `docs/superpowers/specs/`: Design 문서
+- `docs/superpowers/plans/`: 실행 Plan 문서
 
 ## 7. 시스템 지시 문서
 
@@ -192,6 +250,10 @@ UTM ROS Vision Runtime은 현재 Windows/PyAutoGUI UTM 제어 증거를 대체�
 
 ## 8. 문서 유지 규칙
 
+- 분류, lifecycle, authority, metadata, 검증은
+  [standards/documentation_standard.md](standards/documentation_standard.md)를 따릅니다.
+- `docs/document_manifest.yaml` 밖의 기존 문서는 1차 이관 debt이며, active
+  Reference나 Guide처럼 자동으로 간주하지 않습니다.
 - 코드와 문서가 다르면 우선 `runtime/current_code_snapshot.md`를 갱신한 뒤
   관련 문서를 따라 수정합니다.
 - runtime loop나 API를 바꾸면 `runtime/closed_loop_and_pages_reference.md`를 같이 갱신합니다.
@@ -199,3 +261,33 @@ UTM ROS Vision Runtime은 현재 Windows/PyAutoGUI UTM 제어 증거를 대체�
 - GUI route/버튼/API가 바뀌면 `gui/gui.md`와 이 인덱스의 페이지 맵을 같이 갱신합니다.
 - agent module 계약이 바뀌면 해당 `docs/agents/*` 또는 `docs/hardware/*`를 같이 갱신합니다.
 - 설치 의존성이 바뀌면 루트 [REQUIREMENTS.md](../REQUIREMENTS.md)를 갱신합니다.
+
+## Migration Status
+
+1차 이관 범위는 root Index, 이 인덱스, 문서 Standard/템플릿, 세 개의 핵심
+runtime Reference, Knowledge operations Guide입니다. 그 외 Markdown과 기존
+`.txt` guideline은 경로를 유지한 채 도메인별 후속 분류 대상으로 남습니다.
+
+## Limitations and Known Gaps
+
+- 이 인덱스에는 아직 manifest 밖의 legacy 문서 링크가 포함됩니다.
+- 문서 유형은 파일 경로가 아니라 front matter가 기준이므로, 같은 폴더 안에
+  이관 완료 문서와 미분류 문서가 함께 있을 수 있습니다.
+- 생성 API 문서와 시스템 지시 패키지는 일반 설명 문서와 별도 lifecycle을
+  유지합니다.
+
+## Index Verification
+
+2026-08-08에 커밋 `09bbe32`의 route/page 구조와 현재 repository path를
+대조했습니다. 이관 완료 문서는 다음 명령으로 검사합니다.
+
+```bash
+.venv/bin/python scripts/validate_documentation.py
+```
+
+## Related Documents
+
+- [Documentation Standard](standards/documentation_standard.md)
+- [Document Type Templates](templates/document_types.md)
+- [Current Code Snapshot](runtime/current_code_snapshot.md)
+- [Documentation Governance Design](superpowers/specs/2026-08-08-documentation-governance-design.md)
