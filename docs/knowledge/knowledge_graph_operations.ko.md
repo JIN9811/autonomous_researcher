@@ -1,6 +1,84 @@
+---
+doc_type: guide
+subtype: operations_runbook
+status: active
+authority: procedural
+audience:
+  - operator
+  - developer
+scope:
+  - knowledge_graph
+  - neo4j_sync
+  - knowledge_workspace
+summary: ATR Knowledge ledger, durable outbox, Neo4j sync, bounded query, and workspace를 안전하게 운영하는 절차.
+source_of_truth:
+  - knowledge/service.py
+  - knowledge/durable_outbox.py
+  - knowledge/graph_sync_worker.py
+  - knowledge/ontology/atr_core.v1.yaml
+  - scripts/knowledge_graph_cli.py
+  - app/main.py
+  - web/static/knowledge.js
+last_verified: 2026-08-08
+verified_against: 09bbe32
+related_docs:
+  - docs/runtime/current_code_snapshot.md
+  - docs/runtime/langgraph_runtime.md
+  - docs/standards/documentation_standard.md
+supersedes: []
+---
+
 # Knowledge Graph 운영 가이드
 
-## 구성
+## Summary
+
+ATR Knowledge 계층의 append-only ledger, durable outbox, 선택적 Neo4j
+동기화, allowlisted graph query, `/knowledge` Workspace를 운영하는 runbook입니다.
+Neo4j 장애 시 기록을 보존한 채 degraded 상태를 확인하고, 연결 복구 뒤
+bounded sync로 재전송하는 것이 기본 경로입니다.
+
+## Audience and Outcome
+
+운영자는 이 Guide를 통해 Knowledge 상태와 적체를 진단하고, 데이터 손실 없이
+Neo4j를 시작·동기화·복구하며, 조회 결과와 UI가 기록된 ledger/graph 상태를
+반영하는지 확인할 수 있습니다.
+
+## Scope
+
+이 Guide는 로컬 ATR Knowledge runtime과 `/knowledge` Workspace를 다룹니다.
+ontology schema 변경, raw Cypher 운영, dead-letter 파일 수동 삭제, 물리 장비
+제어는 범위 밖입니다.
+
+## Source of Truth
+
+- `knowledge/service.py`, `knowledge/audit_ledger.py`,
+  `knowledge/durable_outbox.py`, `knowledge/graph_sync_worker.py`
+- `knowledge/ontology/atr_core.v1.yaml`과 ontology validator
+- `knowledge/neo4j_repository.py`와 migration Cypher
+- `scripts/knowledge_graph_cli.py`
+- `app/main.py`의 `/api/knowledge/*` routes
+- `web/templates/knowledge.html`과 `web/static/knowledge.js`
+
+## Prerequisites
+
+- repository의 `.venv`와 Python 의존성이 설치되어 있어야 합니다.
+- Neo4j backend를 사용할 때는 Docker/Neo4j runtime과 로컬 자격정보가
+  준비되어야 합니다.
+- ATR 서버 API 검증에는 `127.0.0.1:7860`에서 서버가 실행 중이어야 합니다.
+- 비밀번호와 연결정보는 `.env` 또는 Git에서 제외된 로컬 설정에만 둡니다.
+
+## Safety Boundary
+
+- `GET /api/knowledge/*` 조회와 allowlisted query plan은 read-only입니다.
+- `graph/sync`, `graph/import`, `graphify/import`, ontology/migration 작업은
+  저장 상태를 변경하므로 적체·backend·대상 범위를 먼저 확인해야 합니다.
+- 브라우저, LLM, API에서 raw Cypher를 실행하지 않습니다.
+- pending/dead-letter 파일을 직접 삭제하거나 acknowledged로 이동해 상태를
+  조작하지 않습니다.
+- Knowledge 작업은 물리 장비를 직접 구동하지 않지만, 안전/Guardian evidence를
+  훼손하면 후속 판단에 영향을 줄 수 있으므로 append-only 기록을 보존합니다.
+
+## Current Data Flow
 
 ATR Knowledge 계층은 다음 순서로 기록합니다.
 
@@ -28,7 +106,7 @@ memory/knowledge/neo4j/                      로컬 Neo4j 데이터와 로그
 
 `memory/`는 Git에 포함되지 않습니다.
 
-## Neo4j 시작
+## Procedure: Neo4j 시작
 
 ```bash
 cd /home/jin/autonomous_researcher
@@ -49,7 +127,7 @@ export ATR_NEO4J_DATABASE=neo4j
 export ATR_KNOWLEDGE_GRAPH_MAX_ATTEMPTS=5
 ```
 
-## 상태와 동기화
+## Procedure: 상태와 동기화
 
 ```bash
 curl -s http://127.0.0.1:7860/api/knowledge/graph/health
@@ -73,7 +151,7 @@ curl -s 'http://127.0.0.1:7860/api/knowledge/activity?run_id=<run-id>&limit=20'
 
 응답의 `cycles[]`에는 실험 cycle별 `collected`, `updated`, `retrieved`, `used` 수와 기록된 consumer가 포함됩니다. `limit`은 최대 100이며, Live GUI는 최근 20 cycle만 요청합니다.
 
-## Live GUI 활동 히스토그램
+## Procedure: Live GUI 활동 히스토그램
 
 1. `/live`에서 `KNW` Knowledge Agent를 선택합니다.
 2. Report 화면 상단의 `Knowledge Activity` 카드에서 cycle별 활동을 확인합니다.
@@ -83,7 +161,7 @@ curl -s 'http://127.0.0.1:7860/api/knowledge/activity?run_id=<run-id>&limit=20'
 
 현재 `used`는 이벤트에 명시된 실제 consumer 기록만 집계합니다. consumer가 기록되지 않은 호출을 UI에서 추정하거나 보정하지 않습니다.
 
-## Knowledge Workspace
+## Procedure: Knowledge Workspace
 
 Main GUI의 `Device Workspaces > Knowledge Workspace` 또는 `/knowledge`에서 엽니다.
 
@@ -97,7 +175,7 @@ Main GUI의 `Device Workspaces > Knowledge Workspace` 또는 `/knowledge`에서 
 
 상단 상태 스트립은 `/api/knowledge/graph/stats`에서 backend, ontology, node/edge, pending/dead-letter 값을 직접 읽습니다. Graph Explorer와 Project Graph는 전체 그래프를 내려받지 않고 bounded subgraph만 렌더링합니다. 노드를 더블클릭하거나 `Expand provenance`를 누르면 해당 식별자를 대상으로 `provenance_trace` query plan을 실행합니다.
 
-## 안전한 Graph Query
+## Procedure: 안전한 Graph Query
 
 브라우저, LLM, API는 raw Cypher를 실행할 수 없습니다. 다음과 같이 허용된 query plan만 사용합니다.
 
@@ -109,7 +187,7 @@ curl -s -X POST http://127.0.0.1:7860/api/knowledge/graph/query \
 
 허용 종류에는 `run_context`, `similar_experiments`, `failure_path`, `success_path`, `specimen_lineage`, `device_history`, `policy_history`, `bo_context`, `safety_context`, `project_context`, `impact_analysis`, `provenance_trace`가 있습니다. 최대 depth는 4, 최대 result limit은 100입니다.
 
-## Ontology 검증
+## Procedure: Ontology 검증
 
 ```bash
 curl -s http://127.0.0.1:7860/api/knowledge/ontology
@@ -119,7 +197,7 @@ curl -s -X POST http://127.0.0.1:7860/api/knowledge/ontology/validate \
 
 `atr-core-1.0.0` 클래스, 관계 domain/range, 이벤트 필드, 상태 전이에 맞지 않는 이벤트는 Neo4j에 기록되지 않습니다. 감사 원장에는 검증 실패 증거가 남습니다.
 
-## 장애 복구
+## Failure Recovery
 
 1. `/api/knowledge/graph/stats`에서 `degraded`와 pending 수를 확인합니다.
 2. Neo4j 컨테이너와 자격정보를 복구합니다.
@@ -129,7 +207,45 @@ curl -s -X POST http://127.0.0.1:7860/api/knowledge/ontology/validate \
 
 pending/dead-letter 파일을 직접 삭제해서 동기화 상태를 조작하지 않습니다.
 
-## UI 검증
+## Success Criteria
+
+정상 운영은 다음 조건으로 확인합니다.
+
+- `/api/knowledge/graph/stats`가 선택한 backend와 ontology
+  `atr-core-1.0.0`을 반환합니다.
+- Neo4j가 enabled/ready이면 sync 뒤 `outbox.pending=0`이고 acknowledged 수가
+  증가하며 `dead_letter=0`입니다.
+- Neo4j가 의도적으로 unavailable이면 ledger/outbox 기록이 보존되고 상태가
+  `degraded`로 명시됩니다. JSON graph로의 silent fallback은 성공으로 보지
+  않습니다.
+- `/api/knowledge/activity`의 cycle 값은 append-only ledger의 기록과
+  일치하며 UI가 누락값을 추정하지 않습니다.
+- `/knowledge`는 5개 탭과 bounded subgraph만 렌더링하고 raw Cypher 입력을
+  제공하지 않습니다.
+
+## Rollback or Stop Procedure
+
+1. 새로운 mutation 요청과 수동 sync 호출을 중단합니다.
+2. `/api/knowledge/graph/stats`와 outbox 디렉터리의 pending/dead-letter 수를
+   기록합니다.
+3. Neo4j container를 중지해야 하면 `knowledge_graph_cli.py`의 stop 경로를
+   사용하고 ledger/outbox 파일은 유지합니다.
+4. 잘못된 import 또는 ontology 변경은 파일을 삭제해 숨기지 말고, 원본
+   evidence를 보존한 reconciliation/migration으로 교정합니다.
+5. 복구 전에는 Guardian/safety evidence가 최신 graph에 반영되었다고 선언하지
+   않습니다.
+
+## Limitations and Known Gaps
+
+- Neo4j는 선택적 외부 runtime이므로 모든 개발 환경에서 ready 상태를
+  보장하지 않습니다.
+- Graph Explorer는 depth 4, result limit 100의 bounded view이며 전체 graph
+  export가 아닙니다.
+- `used` 활동은 명시적으로 기록된 consumer만 집계합니다.
+- dead-letter 자동 수정은 제공하지 않으며 원인과 ontology/migration을
+  검토한 reconciliation이 필요합니다.
+
+## Verification
 
 최신 코드를 별도 서버에 띄운 뒤 ARM64에 설치된 geckodriver로 1920×1080 레이아웃을 검사합니다.
 
@@ -140,3 +256,15 @@ pending/dead-letter 파일을 직접 삭제해서 동기화 상태를 조작하�
 ```
 
 검사는 그래프 canvas 생성, 5개 탭 전환, 가로 overflow, 그래프/인스펙터 최소 폭을 확인하고 `artifacts/ui/knowledge_workspace_1920x1080.png`를 남깁니다.
+
+2026-08-08 커밋 `09bbe32` 기준 API source, ontology, durable outbox/sync
+구현, Knowledge Workspace frontend와 관련 unit/integration/browser 검증을
+대조했습니다. 실제 Neo4j health와 node/edge 수는 로컬 데이터에 따라 달라질
+수 있으므로 고정 contract로 취급하지 않습니다.
+
+## Related Reference
+
+- [Current Code Snapshot](../runtime/current_code_snapshot.md)
+- [LangGraph Runtime](../runtime/langgraph_runtime.md)
+- [Closed Loop and Pages Reference](../runtime/closed_loop_and_pages_reference.md)
+- [Documentation Standard](../standards/documentation_standard.md)

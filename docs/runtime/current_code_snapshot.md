@@ -1,4 +1,57 @@
+---
+doc_type: reference
+subtype: current_snapshot
+status: active
+authority: descriptive
+audience:
+  - developer
+  - operator
+  - maintainer
+scope:
+  - runtime
+  - api
+  - gui
+  - knowledge
+summary: Reproducible snapshot of the routes, graph, workspaces, and runtime contracts implemented at commit 09bbe32.
+source_of_truth:
+  - app/main.py
+  - graphs/configs/atr_closed_loop.yaml
+  - orchestrator/langgraph_runtime.py
+  - web/templates/knowledge.html
+  - web/static/knowledge.js
+last_verified: 2026-08-08
+verified_against: 09bbe32
+related_docs:
+  - docs/runtime/langgraph_runtime.md
+  - docs/runtime/closed_loop_and_pages_reference.md
+  - docs/knowledge/knowledge_graph_operations.ko.md
+supersedes: []
+---
+
 # Current Code Snapshot
+
+## Summary
+
+This Reference records the current routes, executable graph, module/runtime
+contracts, workspace surfaces, and selected source-size checks implemented at
+commit `09bbe32`. Counts are observations used to detect documentation drift,
+not stability guarantees.
+
+## Scope
+
+The snapshot covers the checked-in FastAPI application, primary closed-loop
+graph, module/manifest surface, device/workspace API groups, and Knowledge
+workspace. It does not claim that optional live devices or external services
+are available in every environment.
+
+## Source of Truth
+
+- `app/main.py`
+- `graphs/configs/atr_closed_loop.yaml`
+- `graphs/modules/*/module.yaml` and committed `ui.yaml` descriptors
+- `orchestrator/langgraph_runtime.py`
+- `web/templates/` and `web/static/`
+- `knowledge/` and `scripts/knowledge_graph_cli.py`
 
 ## Knowledge Graph Runtime (2026-08-08)
 
@@ -45,6 +98,16 @@ total FastAPI APIRoute entries in app/main.py: 332
 total app.routes entries including docs/openapi/static: 339
 ```
 
+Machine-checked snapshot labels used by `docs/document_manifest.yaml`:
+
+```text
+FastAPI APIRoute count: 332
+Total app.routes count: 339
+Graph nodes: 19
+Graph edges: 68
+stage_dispatch edges: 12
+```
+
 The route count is a sanity check, not a stability contract. `APIRoute` entries
 are the operational API/page endpoints; the extra non-APIRoute entries are
 FastAPI's OpenAPI/docs routes plus the mounted static route. New routes may be
@@ -81,7 +144,7 @@ GET /api/modules/management-state -> ok=true, modules=10
 GET /api/runtime/state -> ok=true, runtime_ide_contract.device_bridges present
 GET /api/runtime/models -> managed models: gemma4:31b, gemma4:e4b-it-nvfp4
 GET /api/printer/fleet -> active_profile_id=bambulab_x2d_lab_01, automatic_fallback=false
-GET /api/graphs/atr_closed_loop -> ok=true, graph.nodes=18, graph.edges=64, graph.stage_dispatch=12
+GET /api/graphs/atr_closed_loop -> ok=true, graph.nodes=19, graph.edges=68, graph.stage_dispatch=12
 ```
 
 The descriptor-backed Live GUI examples are still Design, Equipment, and
@@ -1015,7 +1078,7 @@ Module Management lifecycle gate now also checks that
 `supervisor_policy.required_outputs[]` are declared by the module output
 contract before reporting the module as ready for live activation.
 
-## 11. Known Partial Areas
+## 11. Limitations and Known Gaps
 
 The current code has the first modularization layer in place, but not the full
 free-modularization goal:
@@ -1186,3 +1249,31 @@ for node in mod.body:
                     print(d.func.attr.upper(), path, node.name)
 PY
 ```
+
+For primary graph counts:
+
+```bash
+.venv/bin/python - <<'PY'
+from pathlib import Path
+import yaml
+
+graph = yaml.safe_load(
+    Path("graphs/configs/atr_closed_loop.yaml").read_text(encoding="utf-8")
+)["graph"]
+print("Graph nodes:", len(graph["nodes"]))
+print("Graph edges:", len(graph["edges"]))
+print("stage_dispatch edges:", len(graph["stage_dispatch"]))
+PY
+```
+
+The labeled counts were collected during the 2026-08-08 Asia/Seoul
+verification session from committed baseline `09bbe32`. Importing `app.main`
+may create an empty run directory; verification cleanup may remove only the
+directory proven to have been created by that import.
+
+## Related Documents
+
+- [LangGraph Runtime](langgraph_runtime.md)
+- [Closed Loop and Pages Reference](closed_loop_and_pages_reference.md)
+- [Knowledge Graph Operations Guide](../knowledge/knowledge_graph_operations.ko.md)
+- [Documentation Standard](../standards/documentation_standard.md)

@@ -1,9 +1,55 @@
+---
+doc_type: reference
+subtype: runtime
+status: active
+authority: descriptive
+audience:
+  - developer
+  - operator
+scope:
+  - langgraph_runtime
+  - graph_editor
+  - module_runtime
+summary: Current executable graph, module, runtime event, and Runtime IDE contracts.
+source_of_truth:
+  - graphs/configs/atr_closed_loop.yaml
+  - graphs/compiler.py
+  - graphs/registry.py
+  - orchestrator/langgraph_runtime.py
+  - app/main.py
+  - web/static/runtime_ide.js
+last_verified: 2026-08-08
+verified_against: 09bbe32
+related_docs:
+  - docs/runtime/current_code_snapshot.md
+  - docs/runtime/closed_loop_and_pages_reference.md
+  - docs/standards/documentation_standard.md
+supersedes: []
+---
+
 # LangGraph Runtime
 
-## Current Runtime
+## Summary
 
 ATR now uses a config-driven LangGraph runtime for the main closed-loop execution path.
 The public `orchestrator.run_loop.RunLoop` import remains as a compatibility alias, but it points to `LangGraphRunLoop`.
+
+## Scope
+
+This Reference covers executable graph configuration, compilation, routing,
+module activation, event contracts, and the Runtime IDE/Module Management
+surfaces that edit or inspect those contracts. Device-specific procedures and
+future modularization proposals are outside its authority.
+
+## Source of Truth
+
+- `graphs/configs/atr_closed_loop.yaml`
+- `graphs/schema.py`, `graphs/validator.py`, `graphs/compiler.py`, and
+  `graphs/registry.py`
+- `graphs/modules/*/module.yaml`
+- `orchestrator/langgraph_runtime.py`
+- `app/main.py`
+- `web/templates/runtime_ide.html` and `web/static/runtime_ide.js`
 
 Runtime chain. `OrchestrationGraph` is no longer injected into this path; YAML graph config is the execution source of truth:
 
@@ -588,7 +634,7 @@ Module runtime steps are editable through config-only step lists. Operators can 
 
 When an internal module graph tab is active, the top-level `Validate`, `Compile`, and `Dry Run` controls operate on that module draft instead of the main graph. Each module tab keeps its own module payload snapshot, so a later background load of another module cannot make a `design` tab validate or dry-run `analysis` payload. The module catalog loader respects the active tab: automatic background loads cannot hijack an already-open module tab, and explicit module navigation from Module Management deep links opens the selected module/node context instead of silently replacing the active tab's graph. Opening a module tab starts as a clean draft with missing validation/dry-run evidence; it is marked changed only after step movement, route edits, config edits, raw JSON edits, or generated-module changes. Evidence is shown in the central `Dry-run Trace` panel and in Module Management evidence cards, not in a second visible Runtime IDE config editor: validation displays schema/allowlist status and dry-run displays pre-execution/internal step counts plus the ordered checkpoint/handler-backed step list. Runtime IDE stores a fingerprint for the validated and dry-run module draft. `Save Version` from the internal module graph tab or Module Management Tool is blocked until both evidence records match the exact current draft, and any graph/step/config/raw JSON edit invalidates the evidence. The backend save API repeats the non-device module dry-run before writing a version and returns the resulting sequence/summary, so GUI, CUI, and direct API saves all leave the same validation/dry-run evidence trail. When a module graph tab is selected, the `Activation Checklist` switches from graph live-run gates to module gates (`Validate Module Draft`, `Dry-run Module Draft`, and `Save Module Version`) so operators can see whether the current module draft is ready before pressing save. This keeps graph-tab edits auditable before a module version is saved.
 
-### Operator Debug Plan
+### Operator Verification Procedure
 
 Before merging Runtime IDE changes, exercise these controls against the running FastAPI server and fix failures immediately:
 
@@ -631,3 +677,31 @@ edits alter the module metadata and graph contract but do not execute arbitrary
 uploaded Python. The runtime merge stores `manipulation_report.v1` and
 `robot_task_result.v1` in `run_metadata` so Live GUI report panes, backend trace,
 and downstream agents see the same state after page refresh or new GUI window.
+
+## Limitations and Known Gaps
+
+- Runtime IDE and Module Management expose bounded configuration and allowlisted
+  handler selection; they do not execute arbitrary uploaded Python or renderer
+  code.
+- Custom-stage graph activation still requires validate, dry-run, and saved
+  version evidence; a module merely appearing in management state does not make
+  it executable.
+- Browser screenshots and historical pass counts in this Reference are dated
+  evidence. They MUST be rerun when the corresponding GUI contract changes.
+- Device-specific live readiness remains governed by each bridge/workspace and
+  its Guardian gates, not by graph compilation alone.
+
+## Verification
+
+The runtime contract was compared on 2026-08-08 with commit `09bbe32`, including
+`graphs/configs/atr_closed_loop.yaml`, `graphs/compiler.py`,
+`orchestrator/langgraph_runtime.py`, the graph/module APIs in `app/main.py`, and
+the Runtime IDE frontend. The primary graph contains 19 nodes, 68 edges, and 12
+stage-dispatch mappings; reproduction commands are maintained in
+`current_code_snapshot.md`.
+
+## Related Documents
+
+- [Current Code Snapshot](current_code_snapshot.md)
+- [Closed Loop and Pages Reference](closed_loop_and_pages_reference.md)
+- [Documentation Standard](../standards/documentation_standard.md)

@@ -1,6 +1,36 @@
-# 닫힌 루프 실행 및 페이지/에이전트 상세 가이드
+---
+doc_type: reference
+subtype: system
+status: active
+authority: descriptive
+audience:
+  - user
+  - operator
+  - developer
+scope:
+  - closed_loop
+  - operator_pages
+  - agents
+summary: 현재 닫힌 루프 실행 순서와 페이지·에이전트·이벤트 계약을 연결한 시스템 Reference.
+source_of_truth:
+  - graphs/configs/atr_closed_loop.yaml
+  - orchestrator/langgraph_runtime.py
+  - app/controller.py
+  - app/main.py
+  - web/templates/planning.html
+  - web/static/planning.js
+last_verified: 2026-08-08
+verified_against: 09bbe32
+related_docs:
+  - docs/runtime/current_code_snapshot.md
+  - docs/runtime/langgraph_runtime.md
+  - docs/knowledge/knowledge_graph_operations.ko.md
+supersedes: []
+---
 
-## 0) 지금 상태 요약
+# 닫힌 루프 실행 및 페이지/에이전트 Reference
+
+## Summary
 
 요청하신 대로 핵심을 먼저 분리했습니다.
 
@@ -8,6 +38,20 @@
   - 닫힌 루프는 `POST /api/run/start` 또는 `POST /api/runtime/start` 호출 이후에만 실행됩니다.
   - `/home/jin/autonomous_researcher/graphs/configs/atr_closed_loop.yaml`의 `atr_closed_loop` 그래프가 기본 실행 그래프입니다.
 - 루프가 안 도는 것처럼 보이면 대부분은 **`run_start`가 안 되거나, 이벤트를 다른 창에서 못 보고 있거나, guardian/lifecycle 조건이 `complete/error`로 빠른 종료한 경우**입니다.
+
+## Scope
+
+이 문서는 커밋 `09bbe32`에서 실행되는 기본 closed loop, operator page,
+agent/module, runtime event와 artifact 연결을 설명합니다. 장비별 상세 조작
+절차와 향후 설계 제안은 각각 active Guide와 Design/Evidence 문서의 범위입니다.
+
+## Source of Truth
+
+- `graphs/configs/atr_closed_loop.yaml`
+- `orchestrator/langgraph_runtime.py`
+- `app/controller.py`와 `app/main.py`
+- `graphs/modules/*/module.yaml`
+- `web/templates/`와 `web/static/`
 
 ---
 
@@ -167,6 +211,7 @@ dispatch -> idle -> design -> specimen -> vision -> manipulation -> equipment ->
 | CAE Workspace | `/cae` | `cae.html` | 정적 CAE 분석 실행, 파라미터 저장, 결과 라인업 | `/api/cae/config`, `/api/cae/run` |
 | Runtime IDE | `/ide` | `runtime_ide.html` | 그래프/에지/모듈 편집, module attach deep-link, validate/dry-run/실행, 버전관리 | `/api/graphs*`, `/api/modules*`, `/api/handlers` |
 | Module Management | `/module-management` | `module_management.html` | 모듈 로드·언로드·검증·버전 저장, draft module 생성, `ui.yaml` descriptor 관리, handler/LLM/tool/prompt/safety/step typed edit, raw JSON edit | `/api/modules*`, `/api/modules/templates/*`, `/api/modules/{id}/ui`, `/api/runtime/agent-manifests`, `/api/bridges`, `/api/handlers` |
+| Knowledge Workspace | `/knowledge` | `knowledge.html` | Graph Explorer, Memory, Ontology, Sync, Project Graph와 기록된 활동 집계 확인 | `/api/knowledge/ontology`, `/api/knowledge/ontology/validate`, `/api/knowledge/graph/stats`, `/api/knowledge/activity`, `/api/knowledge/graph/sync`, `/api/knowledge/graph/query` |
 | Self-Evolution Lab | `/evolution-lab` | `evolution_lab.html` | 실험 변형/태스크 관리, variant 승인/롤백 | `/api/evolution/*` (설정/작업/태스크/variant) |
 | PyAutoGUI 장비 브릿지 | `/equipment/windows` | `windows_equipment.html` | Windows 후보 검색/선택과 Ubuntu localhost 개발 브릿지 시작/선택/프로그램 실행 | `/api/equipment/windows/config`, `/api/equipment/windows/local-bridge/*`, `/api/equipment/windows/discover`, `/api/equipment/windows/connect`, `/api/equipment/windows/select`, `/api/equipment/windows/delete`, `/api/equipment/windows/test`, `/api/equipment/windows/run-program` |
 | LeRobot GUI | `/lerobot` | `lerobot.html` | ROBOTIS teleop/record/train/rollout, 포트/카메라 구성, 조작 agent bridge, manipulation 연동, Isaac Sim follower-state probe/receiver process/receiver-health/receiver-verify 및 mirror loop | `/api/lerobot/config`, `/api/lerobot/ports*`, `/api/lerobot/camera/test`, `/api/lerobot/mirror/*`, `/api/lerobot/teleoperate/*`, `/api/lerobot/record/*`, `/api/lerobot/train/*`, `/api/lerobot/rollout/*`, `/api/lerobot/manipulation-agent/*` |
@@ -362,3 +407,28 @@ runs/<run_id>/vision/<observation_id>/active_cam_capture_<timestamp>.<ext>
   artifact 파일은 삭제하지 않는다.
 - Live GUI는 `/api/runs/<run_id>/artifact-file/...` 경로를 우선 사용한다.
   Base64 또는 브라우저 세션 캐시는 증거 보존 수단으로 사용하지 않는다.
+
+## Limitations and Known Gaps
+
+- 이 Reference는 현재 인터페이스를 설명하며, 장비별 live 실행을 승인하거나
+  장비 안전조건을 대체하지 않습니다.
+- `/api/bridges`의 graph bridge registry와 `/api/printer/fleet`의 printer
+  provider 선택은 서로 다른 계층입니다.
+- custom stage는 module/graph validation과 allowlisted handler를 통과해야 하며,
+  descriptor가 보인다는 사실만으로 runtime에 attach되지는 않습니다.
+- 과거 browser screenshot과 pass count는 해당 날짜의 Evidence이므로 GUI 또는
+  cache key가 바뀌면 다시 검증해야 합니다.
+
+## Verification
+
+2026-08-08에 커밋 `09bbe32`의 기본 graph, FastAPI page/API routes,
+agent/module registry, Knowledge Workspace, Live GUI event/artifact 경로를
+대조했습니다. 현재 총 route와 graph 수치는
+[Current Code Snapshot](current_code_snapshot.md)의 재현 명령으로 확인합니다.
+
+## Related Documents
+
+- [Current Code Snapshot](current_code_snapshot.md)
+- [LangGraph Runtime](langgraph_runtime.md)
+- [Knowledge Graph Operations Guide](../knowledge/knowledge_graph_operations.ko.md)
+- [Documentation Standard](../standards/documentation_standard.md)
