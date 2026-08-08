@@ -3,6 +3,7 @@ Unit tests for model router task selection.
 """
 
 from backends.model_router import ModelRouter
+from backends.llm_lease import LLMLeaseCoordinator
 from utils.config_loader import load_yaml
 from utils.paths import resolve_path
 
@@ -73,6 +74,21 @@ class _ModelBehaviorBackend(BaseLLMBackend):
         if isinstance(value, Exception):
             raise value
         return LLMResponse(text=str(value), model=model, raw={})
+
+
+class _ManagedStatusBackend(_OrderBackend):
+    def __init__(self, name: str, calls: list[tuple[str, str]], *, loaded: bool) -> None:
+        super().__init__(name, calls)
+        self.loaded = loaded
+        self.status_calls = 0
+        self.prepare_calls = 0
+
+    async def managed_model_statuses(self):
+        self.status_calls += 1
+        return {"enabled": True, "models": [{"model": "local-primary", "loaded": self.loaded}]}
+
+    async def prepare_model(self, model: str) -> None:
+        self.prepare_calls += 1
 
 
 @pytest.mark.asyncio
@@ -156,3 +172,58 @@ async def test_empty_openai_api_fallback_response_continues_to_local_model_fallb
 
     assert response.text == "ok:vllm:local-fallback"
     assert calls == [("openai", "api-primary"), ("vllm", "local-primary"), ("vllm", "local-fallback")]
+
+
+@pytest.mark.asyncio
+async def test_agent_context_uses_shared_lease_without_changing_existing_complete_contract() -> None:
+    calls: list[tuple[str, str]] = []
+    backend = _OrderBackend("vllm", calls)
+    router = ModelRouter(
+        {
+            "models": {"orchestrator": {"primary": "local-primary"}},
+            "task_routes": {"orchestrator_plan": "orchestrator"},
+        }
+    )
+    lease = LLMLeaseCoordinator()
+    ctx = AgentContext(
+        model_router=router,
+        primary_backend=backend,
+        fallback_backend=backend,
+        rag=HybridRAG(local_index=None, web_retriever=None),
+        experiment_db=ExperimentDB(),
+        failure_memory=FailureMemory(),
+        tools=ToolRegistry(),
+        llm_lease=lease,
+    )
+
+    response = await ctx.complete("orchestrator_plan", "hello", priority=10, owner="workflow:test")
+
+    assert response.text == "ok:vllm:local-primary"
+    assert lease.status()["last_owner"] == "workflow:test"
+
+
+@pytest.mark.asyncio
+async def test_selected_model_loaded_does_not_prepare_or_load_model() -> None:
+    calls: list[tuple[str, str]] = []
+    backend = _ManagedStatusBackend("vllm", calls, loaded=False)
+    router = ModelRouter(
+        {
+            "models": {"e4b": {"primary": "local-primary"}},
+            "task_routes": {"knowledge_relation": "e4b"},
+        }
+    )
+    ctx = AgentContext(
+        model_router=router,
+        primary_backend=backend,
+        fallback_backend=backend,
+        rag=HybridRAG(local_index=None, web_retriever=None),
+        experiment_db=ExperimentDB(),
+        failure_memory=FailureMemory(),
+        tools=ToolRegistry(),
+    )
+
+    loaded = await ctx.selected_model_loaded("knowledge_relation")
+
+    assert loaded is False
+    assert backend.status_calls == 1
+    assert backend.prepare_calls == 0

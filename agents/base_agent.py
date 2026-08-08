@@ -32,6 +32,7 @@ from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable
 
 from backends.llm_backend import BaseLLMBackend, LLMResponse
+from backends.llm_lease import GUARDIAN_PRIORITY, LLMLeaseCoordinator, WORKFLOW_PRIORITY
 from backends.model_router import ModelRouter
 from backends.prompt_registry import get_system_prompt
 from knowledge.experiment_db import ExperimentDB
@@ -72,6 +73,7 @@ class AgentContext:
     fallback_backends: dict[str, BaseLLMBackend] = field(default_factory=dict)
     backend_fallbacks: dict[str, str] = field(default_factory=dict)
     runtime_profiles: dict[str, dict[str, Any]] = field(default_factory=dict)
+    llm_lease: LLMLeaseCoordinator | None = None
 
     def set_active_backend(self, backend_name: str) -> dict[str, Any]:
         """Switch the shared inference backend for all agents."""
@@ -105,8 +107,26 @@ class AgentContext:
         user_prompt: str,
         *,
         timeout_s: float | None = None,
+        priority: int | None = None,
+        owner: str = "",
     ) -> LLMResponse:
         """Call selected model with fallback backend on failure."""
+        if self.llm_lease is None:
+            return await self._complete_unleased(task_type, user_prompt, timeout_s=timeout_s)
+        resolved_priority = GUARDIAN_PRIORITY if task_type.startswith("guardian") else WORKFLOW_PRIORITY
+        if priority is not None:
+            resolved_priority = int(priority)
+        lease_owner = owner or f"agent:{task_type}"
+        async with self.llm_lease.acquire(priority=resolved_priority, owner=lease_owner):
+            return await self._complete_unleased(task_type, user_prompt, timeout_s=timeout_s)
+
+    async def _complete_unleased(
+        self,
+        task_type: str,
+        user_prompt: str,
+        *,
+        timeout_s: float | None = None,
+    ) -> LLMResponse:
         router = self.model_routers.get(self.active_backend, self.model_router)
         primary_backend = self.primary_backends.get(self.active_backend, self.primary_backend)
         selection = router.select(task_type)
@@ -192,6 +212,35 @@ class AgentContext:
         raise RuntimeError(
             f"LLM call failed task={task_type} active_backend={self.active_backend} "
             f"fallback_backend={fallback_backend_name or self.active_backend}: {detail}"
+        )
+
+    async def selected_model_loaded(self, task_type: str) -> bool:
+        """Report readiness without invoking prepare/load behavior."""
+        router = self.model_routers.get(self.active_backend, self.model_router)
+        selection = router.select(task_type)
+        backend = self.primary_backends.get(self.active_backend, self.primary_backend)
+        status_method = getattr(backend, "managed_model_statuses", None)
+        if status_method is None:
+            return True
+        try:
+            payload = status_method()
+            if inspect.isawaitable(payload):
+                payload = await payload
+        except Exception:
+            return False
+        if not isinstance(payload, dict):
+            return False
+        if payload.get("enabled") is False:
+            # Direct non-managed endpoints do not expose deployment state.
+            return True
+        models = payload.get("models")
+        if not isinstance(models, list):
+            return False
+        return any(
+            isinstance(item, dict)
+            and str(item.get("model") or "") == selection.primary
+            and bool(item.get("loaded"))
+            for item in models
         )
 
     async def _notify_model_call(self, task_type: str, model: str, role: str, backend: str) -> None:

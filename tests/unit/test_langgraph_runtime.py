@@ -3686,6 +3686,25 @@ async def test_module_runtime_context_applies_llm_model_prompt_and_metadata() ->
 
 
 @pytest.mark.asyncio
+async def test_module_runtime_context_uses_shared_llm_lease() -> None:
+    from backends.llm_lease import LLMLeaseCoordinator
+
+    backend = _CaptureBackend()
+    base_ctx = _FakeAgentContext(backend)
+    base_ctx.llm_lease = LLMLeaseCoordinator()
+    module_ctx = ModuleRuntimeContext(
+        base_ctx,  # type: ignore[arg-type]
+        {"id": "design", "llm_role": "design_reasoning", "llm": {"backend": "vllm", "model": "module-model"}},
+        Stage.DESIGN,
+    )
+
+    await module_ctx.complete("design_reasoning", "prompt")
+
+    assert base_ctx.llm_lease.status()["last_owner"] == "module:design:design_reasoning"
+    assert base_ctx.llm_lease.status()["last_priority"] == 10
+
+
+@pytest.mark.asyncio
 async def test_module_runtime_context_uses_backend_fallback_after_active_models_fail() -> None:
     local_backend = _FailingBackend()
     openai_backend = _CaptureBackend()

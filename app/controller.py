@@ -4688,6 +4688,8 @@ class MainController:
                     "orchestrator_plan",
                     prompt,
                     timeout_s=timeout_s,
+                    priority=20,
+                    owner="operator:live-gui-chat",
                 )
                 suffix = " after retry" if attempt else ""
                 return response, f"Live GUI orchestrator_plan call completed{suffix}. model={response.model}"

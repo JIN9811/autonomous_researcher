@@ -42,6 +42,7 @@ from agents.specimen_agent import SpecimenMakingAgent
 from agents.vision_agent import VisionAgent
 from app.controller import ControllerDeps, MainController
 from backends.mock_llm import MockLLMBackend
+from backends.llm_lease import LLMLeaseCoordinator
 from backends.model_router import ModelRouter
 from backends.nemoclaw_client import NemoClawBackend
 from backends.nemoclaw_vllm_runtime import NemoClawVLLMRuntime
@@ -313,6 +314,7 @@ def load_runtime() -> MainController:
         fallback_backends=fallback_registry,
         backend_fallbacks=backend_fallbacks,
         runtime_profiles=runtime_profiles,
+        llm_lease=LLMLeaseCoordinator(),
     )
 
     agent_registry = AgentRegistry()
