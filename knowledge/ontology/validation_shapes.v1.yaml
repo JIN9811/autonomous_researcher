@@ -1,0 +1,22 @@
+schema: atr_ontology_validation_shapes.v1
+version_id: atr-core-1.0.0
+knowledge_event_required:
+  - schema
+  - event_id
+  - idempotency_key
+  - run_id
+  - cycle_id
+  - source_agent
+  - event_type
+  - occurred_at
+  - entity_refs
+  - relationship_intents
+  - artifact_refs
+  - payload_summary
+  - ontology_version
+  - provenance
+maxima:
+  entity_refs: 256
+  relationship_intents: 512
+  artifact_refs: 256
+  payload_summary_bytes: 65536

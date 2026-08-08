@@ -1,6 +1,20 @@
 # Current Code Snapshot
 
-Last checked against the local source tree on 2026-06-17.
+## Knowledge Graph Runtime (2026-08-08)
+
+- ATR Core Ontology `atr-core-1.0.0` is defined under `knowledge/ontology/` with class, relation domain/range, event-family, and lifecycle validation.
+- `knowledge_event.v1` records use deterministic event/idempotency identifiers.
+- `AuditLedger` performs append, flush, and fsync before `DurableOutbox` enqueue.
+- `GraphSyncWorker` acknowledges an outbox event only after the repository returns a matching Neo4j event receipt.
+- Neo4j outage preserves pending events and reports degraded state; the JSON graph remains a compatibility/import tool rather than a silent Neo4j fallback.
+- Graph queries use allowlisted plans with depth <= 4 and limit <= 100; raw Cypher from LLM/GUI/API is rejected.
+- Knowledge Agent adds `graph_event_status` without replacing `knowledge_context.v1`, `knowledge_report.v1`, or `evolution_proposal.v1`.
+- Knowledge ledger events record cycle-level `collected`, `updated`, `retrieved`, and `used` activity; `/api/knowledge/activity` provides a bounded aggregation.
+- Live GUI renders the recorded activity as a preserved paper-style histogram only while the Knowledge report is selected.
+- `/knowledge` provides Graph Explorer, Memory, Ontology, Sync, and Project Graph views; Main GUI exposes it as a status-aware workspace card.
+- Operational endpoints: `/api/knowledge/ontology`, `/api/knowledge/ontology/validate`, `/api/knowledge/graph/stats`, `/api/knowledge/activity`, `/api/knowledge/graph/sync`, and POST `/api/knowledge/graph/query`.
+
+Last checked against the local source tree on 2026-08-08.
 
 This document records what the current code exposes. It is not a target design
 document. If this conflicts with an older guideline, the files below are the
@@ -24,11 +38,11 @@ FastAPI outside the simple `@app.<method>("...")` pattern.
 The current FastAPI `APIRoute` scan finds:
 
 ```text
-operator page paths: 11
+operator page paths: 15
 favicon route entries: 2
-API/artifact APIRoute entries: 211
-total FastAPI APIRoute entries in app/main.py: 224
-total app.routes entries including docs/openapi/static: 229
+API/artifact APIRoute entries: 315
+total FastAPI APIRoute entries in app/main.py: 332
+total app.routes entries including docs/openapi/static: 339
 ```
 
 The route count is a sanity check, not a stability contract. `APIRoute` entries
@@ -42,20 +56,20 @@ Current endpoint group count from the same scan:
 bo: 4
 bridges: 2
 cae: 3
-equipment_windows: 21
-events_runs: 23
+equipment_windows: 25
+events_runs: 30
 evolution: 14
 favicon: 2
 graphs: 16
-knowledge: 14
-lerobot: 36
+knowledge: 20
+lerobot: 87
 modules: 15
-operator_pages: 11
-other_api: 10
+operator_pages: 15
+other_api: 43
 planning: 5
 printer: 27
 printer_artifacts: 3
-runtime: 18
+runtime: 21
 ```
 
 Current TestClient sanity checks from the same source tree report:
@@ -95,17 +109,28 @@ Current source-size sanity check for the files most likely to drift with this
 snapshot:
 
 ```text
-app/main.py: 14018 lines
-web/static/planning.js: 16390 lines
-web/static/styles.css: 22442 lines
-web/static/runtime_ide.js: 7656 lines
+app/main.py: 15977 lines
+web/static/planning.js: 19446 lines
+web/static/styles.css: 25484 lines
+web/static/runtime_ide.js: 7659 lines
 web/static/module_management.js: 1592 lines
-graphs/configs/atr_closed_loop.yaml: 876 lines
-app/controller.py: 7348 lines
+web/static/knowledge.js: 407 lines
+web/static/knowledge.css: 439 lines
+graphs/configs/atr_closed_loop.yaml: 963 lines
+app/controller.py: 8871 lines
 orchestrator/supervisor.py: 1251 lines
 ```
 
-2026-06-17 browser/runtime verification snapshot:
+2026-08-08 Knowledge browser/runtime verification snapshot:
+
+```text
+real Neo4j health -> ready, 1739 nodes, 4509 edges, outbox pending=0/dead-letter=0
+POST /api/knowledge/graph/query run_context limit=20 -> 26 nodes, 20 edges
+tests/ui/knowledge_workspace_browser_audit.py @ 1920x1080 -> PASS
+Knowledge graph canvas=1288.8x570, inspector width=551.2, horizontal overflow=none
+```
+
+Earlier 2026-06-17 browser/runtime verification snapshot:
 
 ```text
 node --check web/static/planning.js -> pass
@@ -141,7 +166,7 @@ verification did not change the DSN/design-window layout contract.
 | PyAutoGUI equipment APIs | `device_bridges/windows_pyautogui_bridge.py`, `utils/local_pyautogui_bridge.py`, `app/main.py` | Windows bridge discovery plus managed localhost development target, proof, execution |
 | Recorded Equipment Skills | `utils/equipment_skill_runtime.py`, `Pyautogui_server_for_window/bridge/windows_pyautogui_bridge_server.py`, `agents/equipment_agent.py`, `policies/guardian_gate.py` | Versioned demonstration packages, v2 image-first click/drag locators, deterministic segment execution, exact-model bounded recovery |
 | BO/CAE APIs | `agents/bo_agent.py`, `device_bridges/cae_bridge.py` | Optimizer and analysis workspaces |
-| Knowledge/Evolution APIs | `knowledge/`, `self_evolution/`, `app/main.py` | Graphify/Neo4j optional memory and self-evolution tasks |
+| Knowledge/Evolution APIs | `knowledge/`, `self_evolution/`, `app/main.py`, `web/templates/knowledge.html`, `web/static/knowledge.*` | Durable memory, bounded Neo4j/Graphify inspection, ontology, activity visualization, and self-evolution tasks |
 
 Do not use this document as an instruction prompt. Use it as the "what the code
 currently does" layer when updating operator docs, README files, or improvement
@@ -1087,7 +1112,9 @@ from app.main import app
 routes = [r for r in app.routes if isinstance(r, APIRoute)]
 page_paths = {
     "/", "/live", "/planning", "/ide", "/module-management", "/printer",
-    "/lerobot", "/bo", "/cae", "/equipment/windows", "/evolution-lab",
+    "/lerobot", "/bo", "/cae", "/knowledge", "/device-bridge/vision-utm",
+    "/equipment/windows", "/equipment/windows/console",
+    "/equipment/windows/bridge-ui/{resource_path:path}", "/evolution-lab",
 }
 favicon_paths = {"/favicon.ico", "/favicon.svg"}
 page = [r.path for r in routes if r.path in page_paths]

@@ -8905,6 +8905,66 @@ body.planning-live-body .ar-knw-memory-board {
   gap: 8px;
 }
 
+body.planning-live-body .ar-knw-activity-chart {
+  width: 100%;
+  min-height: 330px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  background: #ffffff;
+  overflow: hidden;
+}
+
+body.planning-live-body .ar-knw-activity-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(90px, 0.7fr)) minmax(180px, 1.2fr);
+  align-items: stretch;
+  gap: 8px;
+}
+
+body.planning-live-body .ar-knw-activity-summary > span,
+body.planning-live-body .ar-knw-activity-summary > em {
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 5px;
+  background: rgba(8, 18, 32, 0.58);
+}
+
+body.planning-live-body .ar-knw-activity-summary > span {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+body.planning-live-body .ar-knw-activity-summary small {
+  color: #9fb0c7;
+  font-size: 0.66rem;
+}
+
+body.planning-live-body .ar-knw-activity-summary strong {
+  color: #f8fafc;
+  font: 700 0.86rem/1 "IBM Plex Mono", Consolas, monospace;
+}
+
+body.planning-live-body .ar-knw-activity-summary > em {
+  overflow: hidden;
+  color: #77e1d2;
+  font: 600 0.68rem/1.3 "IBM Plex Mono", Consolas, monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 980px) {
+  body.planning-live-body .ar-knw-activity-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  body.planning-live-body .ar-knw-activity-summary > em {
+    grid-column: 1 / -1;
+  }
+}
+
 body.planning-live-body .ar-knw-memory-board .ar-mini-bar-list {
   grid-column: 1 / -1;
 }

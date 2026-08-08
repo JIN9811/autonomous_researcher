@@ -1,0 +1,84 @@
+schema: atr_ontology.v1
+version_id: atr-core-1.0.0
+immutable: true
+classes:
+  Execution: [Run, Cycle, Stage, AgentExecution, Handoff]
+  Research: [ResearchObjective, Experiment, Candidate, Specimen, ParameterSet]
+  Results: [Observation, Metric, AnalysisResult, Decision, Recommendation]
+  Devices: [Device, DeviceSession, Command, DeviceState, Calibration]
+  Software: [Agent, Module, Tool, Model, Policy, Skill, PromptVersion]
+  Evidence: [Artifact, Event, Provenance, EvidencePack]
+  Safety: [GuardianGate, Approval, Interlock, Incident, Failure]
+  Optimization: [OptimizationStudy, BOIteration, Acquisition, SurrogateModel]
+  Knowledge: [KnowledgeClaim, Constraint, FailurePattern, SuccessPattern, OntologyChangeProposal]
+event_families:
+  - run.created
+  - run.completed
+  - run.failed
+  - cycle.started
+  - cycle.completed
+  - agent.started
+  - agent.completed
+  - agent.failed
+  - agent.handoff
+  - tool.requested
+  - tool.completed
+  - tool.failed
+  - device.connected
+  - device.command_dispatched
+  - device.command_completed
+  - device.faulted
+  - specimen.designed
+  - specimen.validated
+  - specimen.sliced
+  - specimen.printed
+  - specimen.ejected
+  - specimen.transferred
+  - specimen.tested
+  - specimen.analyzed
+  - guardian.approved
+  - guardian.blocked
+  - guardian.incident
+  - bo.candidate_proposed
+  - bo.observation_received
+  - bo.surrogate_updated
+  - ontology.proposal_created
+  - ontology.version_applied
+state_transitions:
+  Run:
+    created: [running]
+    running: [paused, completed, failed, aborted]
+    paused: [running, completed, failed, aborted]
+  AgentExecution:
+    queued: [preparing, cancelled]
+    preparing: [running, blocked, failed, cancelled]
+    running: [waiting_operator, completed, blocked, failed, cancelled]
+    waiting_operator: [running, blocked, failed, cancelled]
+  DeviceSession:
+    discovered: [connecting]
+    connecting: [ready, degraded, disconnected, faulted]
+    ready: [busy, degraded, disconnected, faulted]
+    busy: [ready, degraded, disconnected, faulted]
+    degraded: [connecting, ready, disconnected, faulted]
+  Specimen:
+    designed: [validated]
+    validated: [sliced]
+    sliced: [queued]
+    queued: [printing]
+    printing: [manufactured]
+    manufactured: [ejected]
+    ejected: [transferred]
+    transferred: [tested]
+    tested: [analyzed]
+    analyzed: [archived]
+  Command:
+    proposed: [guardian_checked, cancelled]
+    guardian_checked: [approved, failed, cancelled]
+    approved: [dispatched, cancelled]
+    dispatched: [acknowledged, failed, cancelled]
+    acknowledged: [completed, failed, cancelled]
+  OntologyChangeProposal:
+    draft: [validated, rejected]
+    validated: [guardian_reviewed, rejected]
+    guardian_reviewed: [operator_approved, rejected]
+    operator_approved: [applied, rejected, superseded]

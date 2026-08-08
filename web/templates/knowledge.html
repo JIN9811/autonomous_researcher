@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<!--
+File purpose:
+- Dedicated operational workspace for ATR Knowledge memory, ontology, and graph retrieval.
+
+Runtime contract:
+- Uses bounded Knowledge APIs only; graph writes remain behind the sync endpoint.
+- JSONL memory is authoritative and the graph is an inspectable mirror/index.
+-->
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{ title }}</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
+    <link rel="stylesheet" href="/static/styles.css" />
+    <link rel="stylesheet" href="/static/knowledge.css?v=20260808-knowledge-workspace-1" />
+  </head>
+  <body class="knowledge-page">
+    <main class="knowledge-shell">
+      <header class="knowledge-hero">
+        <div>
+          <p class="knowledge-eyebrow">ATR Knowledge Runtime</p>
+          <h1>Knowledge Workspace</h1>
+          <p>운영 기록, 온톨로지, 근거 연결과 프로젝트 구조를 하나의 제한된 조회면에서 확인합니다.</p>
+        </div>
+        <div class="knowledge-hero-actions">
+          <a class="knowledge-button secondary" href="/">Main GUI</a>
+          <button id="knowledge-refresh" class="knowledge-button primary" type="button">Refresh</button>
+        </div>
+      </header>
+
+      <section class="knowledge-status-strip" aria-label="Knowledge runtime status">
+        <article><span>Backend</span><strong id="knowledge-backend-status">loading</strong><small id="knowledge-backend-detail">graph status</small></article>
+        <article><span>Ontology</span><strong id="knowledge-ontology-version">-</strong><small>immutable active version</small></article>
+        <article><span>Nodes</span><strong id="knowledge-node-count">0</strong><small>bounded graph index</small></article>
+        <article><span>Edges</span><strong id="knowledge-edge-count">0</strong><small>typed relationships</small></article>
+        <article><span>Outbox</span><strong id="knowledge-outbox-count">0</strong><small id="knowledge-outbox-detail">pending / dead letter</small></article>
+      </section>
+
+      <nav class="knowledge-tabs" aria-label="Knowledge workspace sections">
+        <button class="active" type="button" data-knowledge-tab="graph">Graph Explorer</button>
+        <button type="button" data-knowledge-tab="memory">Memory</button>
+        <button type="button" data-knowledge-tab="ontology">Ontology</button>
+        <button type="button" data-knowledge-tab="sync">Sync</button>
+        <button type="button" data-knowledge-tab="project">Project Graph</button>
+      </nav>
+
+      <section class="knowledge-tab-panel active" data-knowledge-panel="graph">
+        <div class="knowledge-query-bar">
+          <label>View
+            <select id="knowledge-query-kind">
+              <option value="run_context">Run context</option>
+              <option value="similar_experiments">Similar experiments</option>
+              <option value="failure_path">Failure path</option>
+              <option value="success_path">Success path</option>
+              <option value="specimen_lineage">Specimen lineage</option>
+              <option value="device_history">Device history</option>
+              <option value="policy_history">Policy history</option>
+              <option value="bo_context">BO context</option>
+              <option value="safety_context">Safety context</option>
+            </select>
+          </label>
+          <label>Run / entity / search
+            <input id="knowledge-query-value" type="text" placeholder="optional bounded filter" />
+          </label>
+          <label>Depth
+            <input id="knowledge-query-depth" type="number" min="1" max="4" value="2" />
+          </label>
+          <label>Limit
+            <input id="knowledge-query-limit" type="number" min="1" max="100" value="60" />
+          </label>
+          <button id="knowledge-run-query" class="knowledge-button primary" type="button">Run Query</button>
+        </div>
+        <div class="knowledge-graph-layout">
+          <article class="knowledge-card knowledge-graph-card">
+            <div class="knowledge-card-head"><div><span>Bounded Graph View</span><h2>Runtime Knowledge Graph</h2></div><small id="knowledge-query-summary">waiting</small></div>
+            <div id="knowledge-graph" class="knowledge-graph-canvas" role="img" aria-label="Knowledge graph"></div>
+            <div id="knowledge-graph-legend" class="knowledge-graph-legend"></div>
+          </article>
+          <aside class="knowledge-card knowledge-inspector">
+            <div class="knowledge-card-head"><div><span>Selection</span><h2>Node Inspector</h2></div></div>
+            <div id="knowledge-node-inspector">그래프에서 노드를 선택하면 식별자와 저장된 속성을 표시합니다.</div>
+            <button id="knowledge-expand-node" class="knowledge-button secondary" type="button" disabled>Expand provenance</button>
+          </aside>
+        </div>
+      </section>
+
+      <section class="knowledge-tab-panel" data-knowledge-panel="memory">
+        <div class="knowledge-section-head"><div><span>Authoritative Records</span><h2>Knowledge Memory</h2></div><small>JSONL-backed operational memory</small></div>
+        <div id="knowledge-memory-grid" class="knowledge-memory-grid"></div>
+        <article class="knowledge-card knowledge-activity-card">
+          <div class="knowledge-card-head"><div><span>Lifecycle</span><h2>Recorded Activity</h2></div><small>collected · updated · retrieved · used</small></div>
+          <div id="knowledge-activity-chart" class="knowledge-activity-chart"></div>
+        </article>
+      </section>
+
+      <section class="knowledge-tab-panel" data-knowledge-panel="ontology">
+        <div class="knowledge-section-head"><div><span>Semantic Contract</span><h2>Ontology Registry</h2></div><small id="knowledge-ontology-summary">loading</small></div>
+        <div class="knowledge-ontology-layout">
+          <article class="knowledge-card"><div class="knowledge-card-head"><div><span>Classes</span><h2>Entity Types</h2></div></div><div id="knowledge-ontology-classes" class="knowledge-chip-grid"></div></article>
+          <article class="knowledge-card"><div class="knowledge-card-head"><div><span>Relations</span><h2>Typed Edges</h2></div></div><div id="knowledge-ontology-relations" class="knowledge-relation-list"></div></article>
+        </div>
+      </section>
+
+      <section class="knowledge-tab-panel" data-knowledge-panel="sync">
+        <div class="knowledge-sync-layout">
+          <article class="knowledge-card">
+            <div class="knowledge-card-head"><div><span>Durable Outbox</span><h2>Graph Synchronization</h2></div><small>bounded replay</small></div>
+            <p>검증된 미처리 Knowledge 이벤트만 제한된 배치로 그래프 인덱스에 반영합니다.</p>
+            <label class="knowledge-field">Batch limit<input id="knowledge-sync-limit" type="number" min="1" max="1000" value="100" /></label>
+            <button id="knowledge-run-sync" class="knowledge-button primary" type="button">Sync Pending Events</button>
+          </article>
+          <article class="knowledge-card"><div class="knowledge-card-head"><div><span>Audit Result</span><h2>Last Sync</h2></div></div><pre id="knowledge-sync-result">No sync requested.</pre></article>
+        </div>
+      </section>
+
+      <section class="knowledge-tab-panel" data-knowledge-panel="project">
+        <div class="knowledge-query-bar project-query-bar">
+          <label>Module / agent / path
+            <input id="knowledge-project-query" type="text" placeholder="optional project graph filter" />
+          </label>
+          <button id="knowledge-run-project-query" class="knowledge-button primary" type="button">Load Project Context</button>
+        </div>
+        <article class="knowledge-card knowledge-graph-card">
+          <div class="knowledge-card-head"><div><span>Graphify Mirror</span><h2>ATR Project Graph</h2></div><small id="knowledge-project-summary">waiting</small></div>
+          <div id="knowledge-project-graph" class="knowledge-graph-canvas" role="img" aria-label="ATR project graph"></div>
+        </article>
+      </section>
+
+      <footer class="knowledge-footer"><span id="knowledge-runtime-message">Initializing Knowledge Workspace.</span><time id="knowledge-updated-at">-</time></footer>
+    </main>
+    <script src="/static/vendor/echarts.min.js?v=5.6.0"></script>
+    <script src="/static/knowledge.js?v=20260808-knowledge-workspace-1" defer></script>
+  </body>
+</html>

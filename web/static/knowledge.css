@@ -1,0 +1,439 @@
+:root {
+  --knw-bg: #111820;
+  --knw-panel: #18222d;
+  --knw-panel-2: #1d2936;
+  --knw-line: #344455;
+  --knw-text: #e8eef5;
+  --knw-muted: #9caec0;
+  --knw-cyan: #46c7d9;
+  --knw-green: #42c98b;
+  --knw-amber: #e8b85f;
+  --knw-blue: #6d9ff2;
+  --knw-red: #eb7881;
+}
+
+body.knowledge-page {
+  margin: 0;
+  min-width: 1180px;
+  color: var(--knw-text);
+  background: var(--knw-bg);
+  font-family: "IBM Plex Sans", "Noto Sans KR", sans-serif;
+}
+
+.knowledge-shell {
+  display: grid;
+  gap: 12px;
+  width: min(1880px, calc(100vw - 28px));
+  margin: 0 auto;
+  padding: 14px 0 18px;
+}
+
+.knowledge-hero,
+.knowledge-status-strip,
+.knowledge-tabs,
+.knowledge-tab-panel,
+.knowledge-footer {
+  border: 1px solid var(--knw-line);
+  background: var(--knw-panel);
+}
+
+.knowledge-hero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 18px 20px;
+}
+
+.knowledge-hero h1,
+.knowledge-card h2,
+.knowledge-section-head h2 {
+  margin: 0;
+  color: var(--knw-text);
+}
+
+.knowledge-hero h1 {
+  font-size: 1.55rem;
+  letter-spacing: 0.02em;
+}
+
+.knowledge-hero p:not(.knowledge-eyebrow) {
+  margin: 6px 0 0;
+  color: var(--knw-muted);
+}
+
+.knowledge-eyebrow,
+.knowledge-card-head span,
+.knowledge-section-head span {
+  margin: 0 0 3px;
+  color: var(--knw-cyan);
+  font: 700 0.68rem/1.2 "IBM Plex Mono", monospace;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.knowledge-hero-actions,
+.knowledge-query-bar,
+.knowledge-tabs {
+  display: flex;
+  align-items: center;
+}
+
+.knowledge-hero-actions {
+  gap: 8px;
+}
+
+.knowledge-button {
+  min-height: 36px;
+  padding: 0 14px;
+  border: 1px solid #496078;
+  border-radius: 4px;
+  color: var(--knw-text);
+  background: #223043;
+  font: 700 0.76rem/1 "IBM Plex Sans", sans-serif;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.knowledge-button.primary {
+  border-color: #2e9fb1;
+  background: #176c79;
+}
+
+.knowledge-button.secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.knowledge-button:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
+.knowledge-status-strip {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.knowledge-status-strip article {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 12px 14px;
+  border-right: 1px solid var(--knw-line);
+}
+
+.knowledge-status-strip article:last-child {
+  border-right: 0;
+}
+
+.knowledge-status-strip span,
+.knowledge-status-strip small,
+.knowledge-card-head small,
+.knowledge-section-head small {
+  color: var(--knw-muted);
+  font-size: 0.7rem;
+}
+
+.knowledge-status-strip strong {
+  overflow: hidden;
+  color: #f5f8fb;
+  font: 700 1rem/1.2 "IBM Plex Mono", monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.knowledge-tabs {
+  gap: 0;
+  padding: 0 10px;
+}
+
+.knowledge-tabs button {
+  min-height: 44px;
+  padding: 0 18px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--knw-muted);
+  background: transparent;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.knowledge-tabs button.active {
+  border-bottom-color: var(--knw-cyan);
+  color: #f4fbfc;
+}
+
+.knowledge-tab-panel {
+  display: none;
+  min-height: 620px;
+  padding: 12px;
+}
+
+.knowledge-tab-panel.active {
+  display: block;
+}
+
+.knowledge-query-bar {
+  display: grid;
+  grid-template-columns: minmax(170px, 0.8fr) minmax(280px, 1.7fr) 90px 90px auto;
+  gap: 9px;
+  margin-bottom: 10px;
+  padding: 10px;
+  border: 1px solid var(--knw-line);
+  background: var(--knw-panel-2);
+}
+
+.knowledge-query-bar label,
+.knowledge-field {
+  display: grid;
+  gap: 5px;
+  color: var(--knw-muted);
+  font-size: 0.69rem;
+}
+
+.knowledge-query-bar input,
+.knowledge-query-bar select,
+.knowledge-field input {
+  min-height: 36px;
+  box-sizing: border-box;
+  border: 1px solid #43566b;
+  border-radius: 3px;
+  padding: 0 10px;
+  color: var(--knw-text);
+  background: #111b27;
+}
+
+.knowledge-query-bar .knowledge-button {
+  align-self: end;
+}
+
+.knowledge-graph-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 7fr) minmax(280px, 3fr);
+  gap: 10px;
+}
+
+.knowledge-card {
+  min-width: 0;
+  border: 1px solid var(--knw-line);
+  background: #151f2b;
+}
+
+.knowledge-card-head,
+.knowledge-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 50px;
+  padding: 0 13px;
+  border-bottom: 1px solid var(--knw-line);
+}
+
+.knowledge-card h2,
+.knowledge-section-head h2 {
+  font-size: 0.93rem;
+}
+
+.knowledge-graph-card {
+  position: relative;
+}
+
+.knowledge-graph-canvas {
+  width: 100%;
+  height: 570px;
+  background: #ffffff;
+}
+
+.knowledge-graph-legend {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  max-width: 440px;
+  padding: 7px 9px;
+  border: 1px solid #cbd5e1;
+  color: #334155;
+  background: rgba(255, 255, 255, 0.94);
+  font-size: 0.65rem;
+}
+
+.knowledge-graph-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.knowledge-graph-legend i {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+
+.knowledge-inspector {
+  display: flex;
+  flex-direction: column;
+  min-height: 620px;
+}
+
+#knowledge-node-inspector {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 14px;
+  color: #c9d5e1;
+  font: 0.73rem/1.55 "IBM Plex Mono", monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.knowledge-inspector .knowledge-button {
+  margin: 12px;
+}
+
+.knowledge-section-head {
+  margin: -12px -12px 12px;
+  background: var(--knw-panel-2);
+}
+
+.knowledge-memory-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.knowledge-memory-card {
+  display: grid;
+  gap: 8px;
+  min-height: 145px;
+  padding: 13px;
+  border: 1px solid var(--knw-line);
+  background: #151f2b;
+}
+
+.knowledge-memory-card strong {
+  color: #f5f8fb;
+  font-size: 1.45rem;
+}
+
+.knowledge-memory-card span,
+.knowledge-memory-card small {
+  color: var(--knw-muted);
+}
+
+.knowledge-memory-card ul {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.knowledge-memory-card li {
+  overflow: hidden;
+  color: #cbd6e2;
+  font-size: 0.69rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.knowledge-activity-chart {
+  width: 100%;
+  height: 340px;
+  background: #ffffff;
+}
+
+.knowledge-ontology-layout,
+.knowledge-sync-layout {
+  display: grid;
+  grid-template-columns: 1fr 1.4fr;
+  gap: 10px;
+}
+
+.knowledge-chip-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  padding: 14px;
+}
+
+.knowledge-chip-grid span {
+  padding: 6px 9px;
+  border: 1px solid #3e7180;
+  border-radius: 3px;
+  color: #c8f2f4;
+  background: #17313c;
+  font: 0.7rem/1 "IBM Plex Mono", monospace;
+}
+
+.knowledge-relation-list {
+  display: grid;
+  gap: 1px;
+  max-height: 610px;
+  overflow: auto;
+  padding: 12px;
+}
+
+.knowledge-relation-list article {
+  display: grid;
+  grid-template-columns: minmax(130px, 0.7fr) minmax(0, 1.3fr);
+  gap: 10px;
+  padding: 8px 9px;
+  border-bottom: 1px solid #2d3d4d;
+}
+
+.knowledge-relation-list strong {
+  color: var(--knw-cyan);
+  font: 0.68rem/1.4 "IBM Plex Mono", monospace;
+}
+
+.knowledge-relation-list span {
+  color: #b5c3d1;
+  font-size: 0.69rem;
+}
+
+.knowledge-sync-layout .knowledge-card {
+  padding-bottom: 14px;
+}
+
+.knowledge-sync-layout p,
+.knowledge-sync-layout .knowledge-field,
+.knowledge-sync-layout .knowledge-button {
+  margin: 14px;
+}
+
+#knowledge-sync-result {
+  max-height: 500px;
+  overflow: auto;
+  margin: 12px;
+  padding: 12px;
+  border: 1px solid #2d3d4d;
+  color: #bcd0e1;
+  background: #0d1620;
+  font-size: 0.7rem;
+  white-space: pre-wrap;
+}
+
+.project-query-bar {
+  grid-template-columns: minmax(320px, 1fr) auto;
+}
+
+.knowledge-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 9px 12px;
+  color: var(--knw-muted);
+  font: 0.69rem/1.3 "IBM Plex Mono", monospace;
+}
+
+@media (max-width: 1380px) {
+  .knowledge-memory-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

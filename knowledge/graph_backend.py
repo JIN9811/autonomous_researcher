@@ -30,17 +30,22 @@ class KnowledgeGraphBackend(Protocol):
 class NullGraphBackend:
     """Disabled graph backend that preserves fail-open runtime behavior."""
 
+    def __init__(self, *, enabled: bool = False, status: str = "disabled", error: str = "") -> None:
+        self.enabled = enabled
+        self.status = status
+        self.error = error
+
     def health(self) -> dict[str, Any]:
-        return {"ok": True, "enabled": False, "backend": "disabled", "status": "disabled"}
+        return {"ok": not self.enabled, "enabled": self.enabled, "backend": "disabled", "status": self.status, "error": self.error}
 
     def upsert_nodes(self, nodes: list[dict[str, Any]]) -> dict[str, Any]:
-        return {"ok": True, "enabled": False, "backend": "disabled", "nodes_written": 0, "skipped": len(nodes)}
+        return {"ok": not self.enabled, "enabled": self.enabled, "backend": "disabled", "nodes_written": 0, "skipped": len(nodes), "error": self.error}
 
     def upsert_edges(self, edges: list[dict[str, Any]]) -> dict[str, Any]:
-        return {"ok": True, "enabled": False, "backend": "disabled", "edges_written": 0, "skipped": len(edges)}
+        return {"ok": not self.enabled, "enabled": self.enabled, "backend": "disabled", "edges_written": 0, "skipped": len(edges), "error": self.error}
 
     def query(self, query: dict[str, Any]) -> dict[str, Any]:
-        return {"ok": True, "enabled": False, "backend": "disabled", "query": query, "nodes": [], "edges": []}
+        return {"ok": not self.enabled, "enabled": self.enabled, "backend": "disabled", "query": query, "nodes": [], "edges": [], "error": self.error}
 
     def close(self) -> None:
         return None
@@ -316,12 +321,14 @@ def graph_backend_from_env(project_root: Path) -> KnowledgeGraphBackend:
         password = os.environ.get("ATR_NEO4J_PASSWORD", "")
         database = os.environ.get("ATR_NEO4J_DATABASE", "") or None
         if not password:
-            return JsonGraphBackend(project_root / "memory" / "knowledge" / "graph_backend" / "knowledge_graph.json")
+            if _env_bool("ATR_KNOWLEDGE_GRAPH_FAIL_OPEN", default=True):
+                return NullGraphBackend(enabled=True, status="degraded", error="ATR_NEO4J_PASSWORD is not configured")
+            raise RuntimeError("ATR_NEO4J_PASSWORD is required for Neo4j backend")
         try:
             return Neo4jGraphBackend(uri=uri, username=username, password=password, database=database)
         except Exception:
             if _env_bool("ATR_KNOWLEDGE_GRAPH_FAIL_OPEN", default=True):
-                return JsonGraphBackend(project_root / "memory" / "knowledge" / "graph_backend" / "knowledge_graph.json")
+                return NullGraphBackend(enabled=True, status="degraded", error="Neo4j backend initialization failed")
             raise
     return JsonGraphBackend(project_root / "memory" / "knowledge" / "graph_backend" / "knowledge_graph.json")
 

@@ -72,6 +72,7 @@ from knowledge.graph_backend import graph_backend_from_env
 from knowledge.graph_importer import import_store_to_graph
 from knowledge.graphify_bridge import import_project_graph, scan_project_graph
 from knowledge.schemas import EvolutionOutcomeRecord
+from knowledge.service import KnowledgeService
 from knowledge.stores import JsonlKnowledgeStore
 from device_bridges.bambu_bridge import (
     BambuConnectionMemory,
@@ -1917,6 +1918,16 @@ async def cae_gui(request: Request) -> HTMLResponse:
     )
 
 
+@app.get("/knowledge", response_class=HTMLResponse)
+async def knowledge_gui(request: Request) -> HTMLResponse:
+    """Serve the Knowledge Graph, ontology, memory, and sync workspace."""
+    return templates.TemplateResponse(
+        request=request,
+        name="knowledge.html",
+        context={"title": "Knowledge Workspace"},
+    )
+
+
 @app.get("/device-bridge/vision-utm", response_class=HTMLResponse)
 async def vision_utm_device_bridge_gui(request: Request) -> HTMLResponse:
     """Serve Camera/UTM Vision device bridge setup and verification GUI."""
@@ -3140,6 +3151,11 @@ def _knowledge_graph_backend():
     backend returns disabled/JSON fallback status and does not break runtime APIs.
     """
     return graph_backend_from_env(resolve_path("."))
+
+
+def _knowledge_service() -> KnowledgeService:
+    """Return the shared durable Knowledge service for API and CLI parity."""
+    return KnowledgeService.from_env(resolve_path("."))
 
 
 def _self_evolution_service() -> SelfEvolutionService:
@@ -14952,6 +14968,85 @@ async def get_knowledge_graph_health() -> dict[str, object]:
         return backend.health()
     finally:
         backend.close()
+
+
+@app.get("/api/knowledge/ontology")
+async def get_knowledge_ontology() -> dict[str, object]:
+    """Return the active immutable ATR ontology definition summary."""
+    service = _knowledge_service()
+    try:
+        registry = service.registry
+        return {
+            "ok": True,
+            "version_id": registry.version_id,
+            "classes": sorted(registry.class_names),
+            "relations": {
+                name: {"domain": list(rule.source_classes), "range": list(rule.target_classes)}
+                for name, rule in registry.relation_rules.items()
+            },
+            "event_families": sorted(registry.event_families),
+        }
+    finally:
+        service.close()
+
+
+@app.post("/api/knowledge/ontology/validate")
+async def post_knowledge_ontology_validate(payload: dict[str, object]) -> dict[str, object]:
+    """Validate a complete Knowledge event without mutating graph state."""
+    service = _knowledge_service()
+    try:
+        report = service.validator.validate_event(dict(payload))
+        return {"ok": report.ok, "errors": list(report.errors), "missing_fields": list(report.missing_fields)}
+    finally:
+        service.close()
+
+
+@app.get("/api/knowledge/graph/stats")
+async def get_knowledge_graph_stats() -> dict[str, object]:
+    """Return graph health, ontology version, and durable outbox counts."""
+    service = _knowledge_service()
+    try:
+        return service.status()
+    finally:
+        service.close()
+
+
+@app.get("/api/knowledge/activity")
+async def get_knowledge_activity(run_id: str = "", limit: int = 20) -> dict[str, object]:
+    """Return recorded per-cycle Knowledge activity for Live GUI and Workspace."""
+    service = _knowledge_service()
+    try:
+        return service.activity(run_id=run_id.strip(), limit=max(1, min(limit, 100)))
+    finally:
+        service.close()
+
+
+@app.post("/api/knowledge/graph/sync")
+async def post_knowledge_graph_sync(payload: dict[str, object] | None = None) -> dict[str, object]:
+    """Replay a bounded batch of pending Knowledge events."""
+    payload = payload or {}
+    try:
+        limit = max(1, min(int(payload.get("limit") or 100), 1000))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail="limit must be an integer") from exc
+    service = _knowledge_service()
+    try:
+        return service.sync(limit=limit)
+    finally:
+        service.close()
+
+
+@app.post("/api/knowledge/graph/query")
+async def post_knowledge_graph_query(payload: dict[str, object]) -> dict[str, object]:
+    """Execute an allowlisted graph query plan; raw Cypher is forbidden."""
+    service = _knowledge_service()
+    try:
+        try:
+            return service.query(dict(payload))
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+    finally:
+        service.close()
 
 
 @app.post("/api/knowledge/graph/import")

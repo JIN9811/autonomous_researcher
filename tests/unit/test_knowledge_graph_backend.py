@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from knowledge.graph_backend import JsonGraphBackend, NullGraphBackend
+from knowledge.graph_backend import JsonGraphBackend, NullGraphBackend, graph_backend_from_env
 from knowledge.graph_importer import import_store_to_graph, mirror_knowledge_records, records_to_graph
 from knowledge.schemas import AgentPerformanceRecord, EvolutionEvidencePack, ExperimentKnowledgeRecord, FailurePatternRecord, ProvenanceRef, SuccessPatternRecord
 from knowledge.stores import JsonlKnowledgeStore
@@ -148,3 +148,15 @@ def test_null_graph_backend_is_fail_open() -> None:
     assert result["ok"] is True
     assert result["enabled"] is False
     assert result["nodes_written"] == 0
+
+
+def test_neo4j_selection_without_credentials_degrades_without_json_graph_fallback(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("ATR_KNOWLEDGE_GRAPH_ENABLED", "1")
+    monkeypatch.setenv("ATR_KNOWLEDGE_GRAPH_BACKEND", "neo4j")
+    monkeypatch.setenv("ATR_KNOWLEDGE_GRAPH_FAIL_OPEN", "1")
+    monkeypatch.delenv("ATR_NEO4J_PASSWORD", raising=False)
+
+    backend = graph_backend_from_env(tmp_path)
+
+    assert isinstance(backend, NullGraphBackend)
+    assert backend.health()["status"] == "degraded"

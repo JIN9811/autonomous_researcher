@@ -1121,6 +1121,8 @@ export ATR_NEO4J_USERNAME=neo4j
 export ATR_NEO4J_PASSWORD='<local-password>'
 export ATR_NEO4J_DATABASE=neo4j
 export ATR_KNOWLEDGE_GRAPH_FAIL_OPEN=1
+export ATR_KNOWLEDGE_EVENT_PIPELINE_ENABLED=1
+export ATR_KNOWLEDGE_GRAPH_MAX_ATTEMPTS=5
 ```
 
 Graph memory API endpoints:
@@ -1136,6 +1138,8 @@ POST /api/knowledge/graphify/import
 The CLI also supports `--json-path` for routing the local JSON graph fallback to a specific file during tests or audits.
 The graph query endpoint supports `project_context` for project code/docs/module graph retrieval separate from runtime experiment memory.
 The installed `graphify` command is also exposed through `/home/jin/.local/bin/graphify`; ATR uses the installed Graphify Python API when `atr knowledge graphify-scan --external-graphify` is used.
+
+The operational Knowledge write path is ontology validation -> append-only JSONL/fsync -> durable outbox -> Neo4j -> acknowledgement. When Neo4j is selected but unavailable, ATR reports degraded state and retains pending outbox events; it does not silently switch operational writes to the JSON graph backend. See `docs/knowledge/knowledge_graph_operations.ko.md`.
 For `graphify query`, use the raw Graphify node-link file at `memory/knowledge/graphify/external_raw/graph.json`; use `memory/knowledge/graphify/project_graph.json` for ATR JSON/Neo4j import.
 
 Operational CLI commands:

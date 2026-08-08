@@ -195,6 +195,12 @@ let liveEquipmentRuntimeError = "";
 let liveEquipmentRuntimeActionInFlight = "";
 let liveEquipmentRuntimeRefreshInFlight = null;
 let liveEquipmentRuntimeRefreshedAt = 0;
+let liveKnowledgeActivitySnapshot = null;
+let liveKnowledgeActivityInFlight = null;
+let liveKnowledgeActivityRefreshedAt = 0;
+let liveKnowledgeActivityChart = null;
+let liveKnowledgeActivityChartMount = null;
+let liveKnowledgeActivityResizeObserver = null;
 let livePrinterMonitorInFlight = null;
 let liveSpecimenVideoPlaying = false;
 let liveSpecimenVideoStartedAt = 0;
@@ -14756,6 +14762,181 @@ function renderKnowledgePatternBoard(knowledgeReport) {
   `;
 }
 
+function emptyKnowledgeActivitySnapshot() {
+  return {
+    schema: "knowledge_activity_series.v1",
+    run_id: liveCurrentRunId(),
+    cycles: [],
+    totals: { collected: 0, updated: 0, retrieved: 0, used: 0 },
+  };
+}
+
+function knowledgeActivityChartOption(snapshot = {}) {
+  const cycles = Array.isArray(snapshot.cycles) ? snapshot.cycles : [];
+  const categories = cycles.map((item) => String(item.cycle_id || "cycle"));
+  const seriesConfig = [
+    ["Collected", "collected", "#2563eb"],
+    ["Updated", "updated", "#0d9488"],
+    ["Retrieved", "retrieved", "#d97706"],
+    ["Used", "used", "#16a34a"],
+  ];
+  return {
+    animation: false,
+    backgroundColor: "#ffffff",
+    color: seriesConfig.map((item) => item[2]),
+    grid: { left: 64, right: 22, top: 50, bottom: 54, containLabel: false },
+    legend: {
+      top: 12,
+      left: "center",
+      itemWidth: 16,
+      itemHeight: 9,
+      textStyle: { color: "#334155", fontSize: 11, fontFamily: "IBM Plex Sans, sans-serif" },
+    },
+    tooltip: {
+      trigger: "axis",
+      confine: true,
+      axisPointer: { type: "shadow" },
+      backgroundColor: "rgba(255,255,255,0.98)",
+      borderColor: "#cbd5e1",
+      textStyle: { color: "#0f172a", fontSize: 11 },
+      formatter: (params) => {
+        const index = params && params[0] ? params[0].dataIndex : -1;
+        const cycle = index >= 0 ? cycles[index] || {} : {};
+        const rows = (params || []).map((item) => `${item.marker}${escapeHtml(item.seriesName)}: <b>${escapeHtml(item.value)}</b>`).join("<br/>");
+        const consumers = Array.isArray(cycle.consumers) && cycle.consumers.length ? cycle.consumers.join(", ") : "not recorded";
+        return `<b>${escapeHtml(cycle.cycle_id || "cycle")}</b><br/>${rows}<br/><span style="color:#64748b">Consumers: ${escapeHtml(consumers)}</span>`;
+      },
+    },
+    xAxis: {
+      type: "category",
+      data: categories,
+      name: "Experiment cycle",
+      nameLocation: "middle",
+      nameGap: 34,
+      nameTextStyle: { color: "#334155", fontSize: 11 },
+      axisLine: { lineStyle: { color: "#475569", width: 1 } },
+      axisTick: { alignWithLabel: true, lineStyle: { color: "#64748b" } },
+      axisLabel: { color: "#334155", fontSize: 10, interval: 0, hideOverlap: true },
+    },
+    yAxis: {
+      type: "value",
+      minInterval: 1,
+      name: "Recorded activity count",
+      nameLocation: "middle",
+      nameGap: 44,
+      nameTextStyle: { color: "#334155", fontSize: 11 },
+      axisLine: { show: true, lineStyle: { color: "#475569", width: 1 } },
+      axisTick: { show: true, lineStyle: { color: "#64748b" } },
+      axisLabel: { color: "#334155", fontSize: 10 },
+      splitLine: { lineStyle: { color: "#dbe2ea", type: "dashed", width: 1 } },
+    },
+    series: seriesConfig.map(([name, key, color]) => ({
+      name,
+      type: "bar",
+      stack: "knowledge-activity",
+      barMaxWidth: 42,
+      emphasis: { focus: "series" },
+      itemStyle: { color, borderColor: "rgba(255,255,255,0.78)", borderWidth: 0.5 },
+      data: cycles.map((item, index) => ({
+        value: Math.max(0, Number(item[key]) || 0),
+        itemStyle: { opacity: index === cycles.length - 1 ? 1 : 0.82 },
+      })),
+    })),
+    graphic: categories.length ? [] : [{
+      type: "text",
+      left: "center",
+      top: "middle",
+      style: { text: "Waiting for recorded Knowledge activity", fill: "#64748b", fontSize: 12 },
+    }],
+  };
+}
+
+function updateKnowledgeActivitySummary(snapshot = {}) {
+  const totals = snapshot.totals && typeof snapshot.totals === "object" ? snapshot.totals : {};
+  document.querySelectorAll("[data-atr-knowledge-total]").forEach((node) => {
+    const key = node.dataset.atrKnowledgeTotal || "";
+    node.textContent = String(Math.max(0, Number(totals[key]) || 0));
+  });
+  document.querySelectorAll("[data-atr-knowledge-run]").forEach((node) => {
+    node.textContent = snapshot.run_id ? compactText(snapshot.run_id, 42) : "waiting for run";
+  });
+}
+
+function hydrateKnowledgeActivityChart() {
+  const mount = document.querySelector("[data-atr-knowledge-activity]");
+  if (!mount) {
+    if (liveKnowledgeActivityChart) liveKnowledgeActivityChart.dispose();
+    if (liveKnowledgeActivityResizeObserver) liveKnowledgeActivityResizeObserver.disconnect();
+    liveKnowledgeActivityChart = null;
+    liveKnowledgeActivityChartMount = null;
+    liveKnowledgeActivityResizeObserver = null;
+    return;
+  }
+  const echartsLib = liveEchartsLibrary();
+  if (!echartsLib) {
+    loadLiveEchartsLibrary().then(hydrateKnowledgeActivityChart).catch(() => {
+      mount.textContent = "Chart engine unavailable";
+    });
+    return;
+  }
+  if (!liveKnowledgeActivityChart || mount !== liveKnowledgeActivityChartMount) {
+    if (liveKnowledgeActivityChart) liveKnowledgeActivityChart.dispose();
+    if (liveKnowledgeActivityResizeObserver) liveKnowledgeActivityResizeObserver.disconnect();
+    liveKnowledgeActivityChartMount = mount;
+    liveKnowledgeActivityChart = echartsLib.init(mount, null, { renderer: "canvas" });
+    liveKnowledgeActivityResizeObserver = typeof ResizeObserver === "function"
+      ? new ResizeObserver(() => liveKnowledgeActivityChart && liveKnowledgeActivityChart.resize())
+      : null;
+    if (liveKnowledgeActivityResizeObserver) liveKnowledgeActivityResizeObserver.observe(mount);
+  }
+  liveKnowledgeActivityChart.setOption(knowledgeActivityChartOption(liveKnowledgeActivitySnapshot || emptyKnowledgeActivitySnapshot()), true);
+  updateKnowledgeActivitySummary(liveKnowledgeActivitySnapshot || emptyKnowledgeActivitySnapshot());
+}
+
+async function refreshKnowledgeActivity(options = {}) {
+  if (liveSelectedAgent !== "knowledge" || liveCurrentView !== "report") {
+    hydrateKnowledgeActivityChart();
+    return liveKnowledgeActivitySnapshot;
+  }
+  if (liveKnowledgeActivityInFlight) return liveKnowledgeActivityInFlight;
+  const runId = liveCurrentRunId();
+  const now = Date.now();
+  if (!options.force && now - liveKnowledgeActivityRefreshedAt < 900) return liveKnowledgeActivitySnapshot;
+  liveKnowledgeActivityInFlight = (async () => {
+    const query = new URLSearchParams({ limit: "20" });
+    if (runId) query.set("run_id", runId);
+    try {
+      const payload = await fetchJsonOrThrow(`/api/knowledge/activity?${query.toString()}`);
+      liveKnowledgeActivitySnapshot = payload && typeof payload === "object" ? payload : emptyKnowledgeActivitySnapshot();
+      liveKnowledgeActivityRefreshedAt = Date.now();
+      hydrateKnowledgeActivityChart();
+      return liveKnowledgeActivitySnapshot;
+    } catch (_err) {
+      liveKnowledgeActivityRefreshedAt = Date.now();
+      hydrateKnowledgeActivityChart();
+      return liveKnowledgeActivitySnapshot;
+    } finally {
+      liveKnowledgeActivityInFlight = null;
+    }
+  })();
+  return liveKnowledgeActivityInFlight;
+}
+
+function renderKnowledgeActivityCard() {
+  const snapshot = liveKnowledgeActivitySnapshot || emptyKnowledgeActivitySnapshot();
+  const totals = snapshot.totals || {};
+  return renderDashboardCard("Knowledge Activity", `
+    <div class="ar-knw-activity-chart" data-atr-knowledge-activity role="img" aria-label="Collected, updated, retrieved, and used Knowledge activity by experiment cycle"></div>
+    <footer class="ar-knw-activity-summary">
+      <span><small>Collected</small><strong data-atr-knowledge-total="collected">${escapeHtml(totals.collected || 0)}</strong></span>
+      <span><small>Updated</small><strong data-atr-knowledge-total="updated">${escapeHtml(totals.updated || 0)}</strong></span>
+      <span><small>Retrieved</small><strong data-atr-knowledge-total="retrieved">${escapeHtml(totals.retrieved || 0)}</strong></span>
+      <span><small>Used</small><strong data-atr-knowledge-total="used">${escapeHtml(totals.used || 0)}</strong></span>
+      <em data-atr-knowledge-run>${escapeHtml(snapshot.run_id || "waiting for run")}</em>
+    </footer>
+  `, { span: 12, tone: "knowledge", eyebrow: "continuous memory lifecycle", data: { "live-preserve": "knowledge-activity" } });
+}
+
 function renderBoRankingBoard(boResult) {
   const ranking = Array.isArray(boResult.candidate_ranking) ? boResult.candidate_ranking : Array.isArray(boResult.candidate_pool) ? boResult.candidate_pool.slice(0, 8) : [];
   if (!ranking.length) return renderVizEmpty("No BO candidate ranking recorded.");
@@ -15191,6 +15372,7 @@ function renderKnowledgeDashboardCards(report, status, agentLabel, profile) {
   const outcomes = Array.isArray(evolution.outcomes) ? evolution.outcomes : Array.isArray(knowledgeReport.evolution_outcomes) ? knowledgeReport.evolution_outcomes : [];
   const packItems = packs.map((item) => `${item.target_type || "target"}:${item.target_id || "unknown"} / ${item.status || "proposed"} / ${item.summary || ""}`);
   return `
+    ${renderKnowledgeActivityCard()}
     ${renderDashboardCard("Memory Ledger", renderKnowledgeMemoryBoard(knowledgeReport, evolution), { span: 8, tone: "knowledge", eyebrow: "memory" })}
     ${renderDashboardCard("Evidence Quality", renderDashboardRows([
       ["artifact_links", evidenceQuality.artifact_link_coverage ?? "-"],
@@ -15563,6 +15745,12 @@ function renderReportPanel(session) {
   renderSpecimenProgressDetailOverlay();
   if (window.ATRRobotTelemetryCards && typeof window.ATRRobotTelemetryCards.hydrate === "function") {
     window.ATRRobotTelemetryCards.hydrate();
+  }
+  if (liveSelectedAgent === "knowledge") {
+    hydrateKnowledgeActivityChart();
+    refreshKnowledgeActivity().catch(() => {});
+  } else {
+    hydrateKnowledgeActivityChart();
   }
   return;
   const designEvidence = liveSelectedAgent === "design" ? latestDesignReport(report) : null;
@@ -19186,6 +19374,9 @@ setInterval(() => {
   updateVisionSpecimenCountdowns();
   if (liveSyncIsStale() && !liveRefreshInFlight && planningThinkingCount === 0) {
     refreshPlanningState({ background: true }).catch(() => setChatStatus("SYNC ERROR", "warning"));
+  }
+  if (liveSelectedAgent === "knowledge" && liveCurrentView === "report") {
+    refreshKnowledgeActivity().catch(() => {});
   }
 }, 1000);
 tickLiveRuntimeClock();

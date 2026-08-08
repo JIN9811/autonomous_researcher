@@ -1,0 +1,33 @@
+schema: atr_ontology_relations.v1
+version_id: atr-core-1.0.0
+relations:
+  CONTAINS: {domain: [Run], range: [Cycle]}
+  EXECUTES: {domain: [Cycle], range: [AgentExecution]}
+  INSTANCE_OF: {domain: [AgentExecution], range: [Agent]}
+  USES: {domain: [AgentExecution], range: [Tool, Model, Policy, Skill]}
+  PRODUCES: {domain: [AgentExecution, Experiment], range: [Artifact, Observation, Decision, AnalysisResult]}
+  HANDS_OFF_TO: {domain: [AgentExecution], range: [AgentExecution]}
+  REALIZES: {domain: [Experiment], range: [ResearchObjective]}
+  EVALUATES: {domain: [Experiment], range: [Candidate]}
+  HAS_PARAMETERS: {domain: [Candidate], range: [ParameterSet]}
+  GENERATES: {domain: [Candidate], range: [Specimen]}
+  MANUFACTURED_BY: {domain: [Specimen], range: [DeviceSession]}
+  OBSERVED_BY: {domain: [Specimen], range: [Observation]}
+  TESTED_IN: {domain: [Specimen], range: [DeviceSession]}
+  DERIVED_FROM: {domain: [AnalysisResult], range: [Observation, Artifact]}
+  DESCRIBES: {domain: [Metric], range: [Specimen, Experiment, Run]}
+  OBSERVED_DURING: {domain: [Failure], range: [AgentExecution, DeviceSession]}
+  AFFECTS: {domain: [Failure], range: [Agent, Device, Specimen, Module]}
+  SUPPORTS: {domain: [Failure], range: [FailurePattern]}
+  SUPPORTED_BY: {domain: [SuccessPattern], range: [Run, Artifact]}
+  JUSTIFIED_BY: {domain: [Decision], range: [EvidencePack]}
+  CONSTRAINS: {domain: [Recommendation], range: [ParameterSet, AgentExecution]}
+  CONSUMES: {domain: [BOIteration], range: [KnowledgeClaim, AnalysisResult]}
+  PROPOSES: {domain: [BOIteration], range: [Candidate]}
+  VALIDATES: {domain: [GuardianGate], range: [AgentExecution, Command, Decision]}
+  AUTHORIZES: {domain: [Approval], range: [Command, OntologyChangeProposal]}
+  IMPLEMENTED_BY: {domain: [Agent], range: [Module]}
+  DECLARED_IN: {domain: [Module], range: [Artifact]}
+  DOCUMENTED_BY: {domain: [Module], range: [Artifact]}
+  VERIFIED_BY: {domain: [Module], range: [Artifact]}
+  GENERATED_BY: {domain: [Artifact], range: [Tool]}

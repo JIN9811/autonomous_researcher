@@ -3706,6 +3706,30 @@ def test_live_gui_manipulation_pose_and_policy_tracking_cards_are_locally_bundle
     assert "grid-template-columns: repeat(4, minmax(0, 1fr));" in styles
 
 
+def test_live_gui_knowledge_activity_uses_preserved_realtime_histogram() -> None:
+    client = TestClient(app)
+
+    html = client.get("/live").text
+    script = client.get("/static/planning.js").text
+    styles = client.get("/static/styles.css").text
+
+    assert "knowledge-activity-1" in html
+    for required in [
+        "Knowledge Activity",
+        "data-atr-knowledge-activity",
+        "knowledgeActivityChartOption",
+        "/api/knowledge/activity",
+        "Collected",
+        "Updated",
+        "Retrieved",
+        "Used",
+        '"live-preserve": "knowledge-activity"',
+    ]:
+        assert required in script
+    assert "ar-knw-activity-chart" in styles
+    assert "background: #ffffff" in styles
+
+
 def test_live_robot_pose_has_repeatable_zoom_to_fit_control() -> None:
     client = TestClient(app)
 

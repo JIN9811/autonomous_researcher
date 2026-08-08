@@ -88,6 +88,8 @@ const boWorkspaceDotEl = document.getElementById("bo-workspace-dot");
 const boWorkspaceDetailEl = document.getElementById("bo-workspace-detail");
 const caeWorkspaceDotEl = document.getElementById("cae-workspace-dot");
 const caeWorkspaceDetailEl = document.getElementById("cae-workspace-detail");
+const knowledgeWorkspaceDotEl = document.getElementById("knowledge-workspace-dot");
+const knowledgeWorkspaceDetailEl = document.getElementById("knowledge-workspace-detail");
 
 let events = [];
 let currentRunId = null;
@@ -1134,6 +1136,30 @@ async function refreshCaeWorkspaceStatus() {
   }
 }
 
+async function refreshKnowledgeWorkspaceStatus() {
+  if (!knowledgeWorkspaceDetailEl && !knowledgeWorkspaceDotEl) return;
+  try {
+    const res = await fetch("/api/knowledge/graph/stats");
+    const data = await res.json();
+    const graph = data.graph || {};
+    const outbox = data.outbox || {};
+    const ready = Boolean(data.ok && graph.ok);
+    setDotState(knowledgeWorkspaceDotEl, ready ? "active" : "warn");
+    if (knowledgeWorkspaceDetailEl) {
+      const backend = graph.backend || "disabled";
+      const nodes = Number(graph.node_count || 0);
+      const edges = Number(graph.edge_count || 0);
+      const pending = Number(outbox.pending || 0);
+      knowledgeWorkspaceDetailEl.textContent = `${backend} · ${nodes} nodes · ${edges} edges · pending=${pending}`;
+    }
+  } catch (err) {
+    setDotState(knowledgeWorkspaceDotEl, "warn");
+    if (knowledgeWorkspaceDetailEl) {
+      knowledgeWorkspaceDetailEl.textContent = `Knowledge status unavailable: ${err}`;
+    }
+  }
+}
+
 async function loadRecentEvents() {
   const res = await fetch("/api/events/recent");
   const data = await res.json();
@@ -1317,6 +1343,7 @@ async function bootstrap() {
   await safeBootstrapStep("refreshLerobotWorkspaceStatus", refreshLerobotWorkspaceStatus);
   await safeBootstrapStep("refreshBoWorkspaceStatus", refreshBoWorkspaceStatus);
   await safeBootstrapStep("refreshCaeWorkspaceStatus", refreshCaeWorkspaceStatus);
+  await safeBootstrapStep("refreshKnowledgeWorkspaceStatus", refreshKnowledgeWorkspaceStatus);
   await safeBootstrapStep("loadRecentEvents", loadRecentEvents);
   connectEventStream();
   if (!modelStatusTimer) {

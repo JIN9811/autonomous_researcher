@@ -34,6 +34,7 @@ from knowledge.pattern_miner import build_agent_performance_records, rank_evolut
 from knowledge.provenance import build_provenance_ref, stable_id, validate_artifact_refs
 from knowledge.retrieval import format_rag_context, retrieve_research_context
 from knowledge.schemas import ExperimentKnowledgeRecord, KnowledgeSourceRef, MemoryRecord
+from knowledge.service import KnowledgeService, event_pipeline_enabled
 from knowledge.stores import JsonlKnowledgeStore
 from orchestrator.state import OrchestratorState
 
@@ -187,6 +188,20 @@ class KnowledgeAgent(BaseAgent):
             evolution_outcomes=evolution_outcomes,
         )
         graph_backend.close()
+        graph_event_status = _ingest_graph_event(
+            project_root=project_root,
+            state=state,
+            experiment_record=experiment_record,
+            artifact_refs=artifact_refs,
+            occurred_at=now,
+            activity_counts={
+                "collected": 1 + len(performance_records) + len(artifact_refs),
+                "updated": len(failure_patterns) + len(success_patterns) + len(evidence_packs) + len(evolution_outcomes),
+                "retrieved": len(retrieval.get("local_chunks", [])) + len(retrieval.get("web_results", [])),
+                "used": 1,
+            },
+            activity_consumers=["orchestrator"],
+        )
         knowledge_context = {
             "schema": "knowledge_context.v1",
             "run_id": state.run_id,
@@ -211,12 +226,16 @@ class KnowledgeAgent(BaseAgent):
                 "evolution_pack_count": len(evidence_packs),
                 "evolution_outcome_count": len(evolution_outcomes),
                 "graph_backend_enabled": bool(graph_backend_status.get("enabled", False)),
+                "graph_event_pipeline_enabled": bool(graph_event_status.get("enabled", False)),
+                "graph_pending_event_count": int((graph_event_status.get("outbox") or {}).get("pending", 0)),
+                "graph_safety_lag_count": int((graph_event_status.get("sync") or {}).get("safety_lag", 0)),
                 "guardian_incident_count": guardian_incident_evidence.get("incident_count", 0),
                 "guardian_gate_count": guardian_incident_evidence.get("gate_count", 0),
                 "guardian_hardware_alert_count": guardian_incident_evidence.get("hardware_alert_count", 0),
             },
             "guardian_incident_evidence": guardian_incident_evidence,
             "graph_backend_status": graph_backend_status,
+            "graph_event_status": graph_event_status,
         }
         evolution_proposal = {
             "schema": "evolution_proposal.v1",
@@ -255,6 +274,7 @@ class KnowledgeAgent(BaseAgent):
             "guardian_incident_evidence": guardian_incident_evidence,
             "evidence_quality": knowledge_context["evidence_quality"],
             "graph_backend_status": graph_backend_status,
+            "graph_event_status": graph_event_status,
             "warnings": failure_tags,
         }
         full_evidence_packs = [pack.model_dump(mode="json") for pack in evidence_packs]
@@ -306,6 +326,7 @@ class KnowledgeAgent(BaseAgent):
                     "evolution_pack_count": len(evidence_packs),
                     "evolution_outcome_count": len(evolution_outcomes),
                     "graph_backend_status": graph_backend_status,
+                    "graph_event_status": graph_event_status,
                     "guardian_incident_evidence": guardian_incident_evidence,
                     "guardian_incident_count": guardian_incident_evidence.get("incident_count", 0),
                 },
@@ -313,6 +334,86 @@ class KnowledgeAgent(BaseAgent):
                 "evolution_proposal": compact_evolution_proposal,
             },
         )
+
+
+def _ingest_graph_event(
+    *,
+    project_root: Path,
+    state: OrchestratorState,
+    experiment_record: ExperimentKnowledgeRecord,
+    artifact_refs: list[dict[str, Any]],
+    occurred_at: str,
+    activity_counts: dict[str, int] | None = None,
+    activity_consumers: list[str] | None = None,
+) -> dict[str, Any]:
+    if not event_pipeline_enabled():
+        return {"ok": True, "enabled": False, "status": "disabled", "outbox": {"pending": 0, "acknowledged": 0, "dead_letter": 0}}
+    candidate_id = _candidate_id_from_state(state)
+    specimen_id = _specimen_id_from_state(state)
+    cycle_id = str(state.run_metadata.get("cycle_id") or state.run_metadata.get("cycle") or "cycle-unknown")
+    experiment_entity = f"runtime:experiment:{state.experiment_id}"
+    candidate_entity = f"runtime:candidate:{candidate_id}"
+    specimen_entity = f"runtime:specimen:{specimen_id}"
+    payload = {
+        "run_id": state.run_id,
+        "cycle_id": cycle_id,
+        "source_agent": "knowledge_agent",
+        "event_type": "specimen.analyzed",
+        "occurred_at": occurred_at,
+        "entity_refs": [
+            {"entity_id": f"runtime:run:{state.run_id}", "entity_class": "Run", "status": "running"},
+            {"entity_id": experiment_entity, "entity_class": "Experiment", "status": "analyzed"},
+            {"entity_id": candidate_entity, "entity_class": "Candidate"},
+            {"entity_id": specimen_entity, "entity_class": "Specimen", "status": "analyzed"},
+        ],
+        "relationship_intents": [
+            {
+                "relation_id": f"relation:{state.experiment_id}:evaluates:{candidate_id}",
+                "relation_type": "EVALUATES",
+                "source_id": experiment_entity,
+                "source_class": "Experiment",
+                "target_id": candidate_entity,
+                "target_class": "Candidate",
+            },
+            {
+                "relation_id": f"relation:{candidate_id}:generates:{specimen_id}",
+                "relation_type": "GENERATES",
+                "source_id": candidate_entity,
+                "source_class": "Candidate",
+                "target_id": specimen_entity,
+                "target_class": "Specimen",
+            },
+        ],
+        "artifact_refs": artifact_refs,
+        "payload_summary": {
+            "experiment_record_id": experiment_record.record_id,
+            "objective_score": experiment_record.metrics.get("objective_score", 0.0),
+            "uncertainty": experiment_record.metrics.get("uncertainty", 1.0),
+            "failure_tags": list(experiment_record.quality.get("warnings", []))[:50],
+            "activity": {
+                key: max(0, int((activity_counts or {}).get(key, 0)))
+                for key in ("collected", "updated", "retrieved", "used")
+            },
+            "activity_consumers": [str(item) for item in (activity_consumers or []) if str(item).strip()][:12],
+        },
+        "provenance": experiment_record.provenance.model_dump(mode="json"),
+    }
+    service: KnowledgeService | None = None
+    try:
+        service = KnowledgeService.from_env(project_root)
+        return {"enabled": True, **service.ingest(payload)}
+    except Exception as exc:
+        return {
+            "ok": True,
+            "enabled": True,
+            "status": "degraded",
+            "error": f"{exc.__class__.__name__}: {exc}",
+            "outbox": {"pending": 0, "acknowledged": 0, "dead_letter": 0},
+            "sync": {"acknowledged": 0, "safety_lag": 0},
+        }
+    finally:
+        if service is not None:
+            service.close()
 
 
 
@@ -394,6 +495,16 @@ def _candidate_id_from_state(state: OrchestratorState) -> str:
             if isinstance(value, str) and value:
                 return value
     return state.experiment_id
+
+
+def _specimen_id_from_state(state: OrchestratorState) -> str:
+    for source in (state.latest_analysis, state.current_experiment_spec, state.run_metadata):
+        if not isinstance(source, dict):
+            continue
+        value = source.get("specimen_id")
+        if isinstance(value, str) and value:
+            return value
+    return _candidate_id_from_state(state)
 
 
 def _parameters_from_state(state: OrchestratorState) -> dict[str, Any]:

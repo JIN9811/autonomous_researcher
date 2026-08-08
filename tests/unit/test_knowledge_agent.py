@@ -189,3 +189,39 @@ async def test_knowledge_agent_ingests_guardian_incidents_as_evolution_evidence(
     assert "UTM_NO_MOTION_AFTER_START" in knowledge["failure_tags"]
     assert knowledge["knowledge_report"]["guardian_incident_evidence"]["incident_count"] == 1
     assert knowledge["knowledge_context"]["evidence_quality"]["guardian_incident_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_knowledge_agent_adds_durable_graph_event_status_when_enabled(monkeypatch) -> None:
+    captured: dict[str, Any] = {}
+
+    class _Service:
+        @classmethod
+        def from_env(cls, project_root):
+            captured["project_root"] = project_root
+            return cls()
+
+        def ingest(self, payload):
+            captured["payload"] = payload
+            return {
+                "ok": True,
+                "status": "synchronized",
+                "event_id": "event:test",
+                "outbox": {"pending": 0, "acknowledged": 1, "dead_letter": 0},
+                "sync": {"acknowledged": 1, "safety_lag": 0},
+            }
+
+        def close(self):
+            captured["closed"] = True
+
+    monkeypatch.setattr("agents.knowledge_agent.event_pipeline_enabled", lambda: True)
+    monkeypatch.setattr("agents.knowledge_agent.KnowledgeService", _Service)
+
+    result = await KnowledgeAgent().run(_state(), _CtxStub())
+
+    graph_status = result.data["knowledge"]["graph_event_status"]
+    assert graph_status["status"] == "synchronized"
+    assert result.data["knowledge"]["knowledge_report"]["graph_event_status"] == graph_status
+    assert captured["payload"]["event_type"] == "specimen.analyzed"
+    assert captured["payload"]["run_id"] == "run-knowledge"
+    assert captured["closed"] is True
