@@ -65,6 +65,8 @@ class ExperimentObjective(BaseModel):
     """A measurable goal that can be evaluated by test, virtual, or live execution."""
 
     objective_id: str = "objective-default"
+    objective_version: int | None = None
+    objective_hash: str = ""
     name: str = "Autonomous experiment objective"
     description: str = ""
     metric_name: str = "objective_score"

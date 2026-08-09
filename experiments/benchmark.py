@@ -21,6 +21,7 @@ Modification guide:
 from __future__ import annotations
 
 import itertools
+import math
 import random
 from collections.abc import Callable
 from typing import Any
@@ -153,10 +154,11 @@ def _prior_points(payload: dict[str, Any], keys: list[str]) -> tuple[list[list[f
             continue
         vector = _numeric_vector(params, keys)
         score = item.get("score")
-        if isinstance(score, (int, float)):
-            score_value = float(score)
-        else:
-            score_value = _candidate_proxy(params)
+        if isinstance(score, bool) or not isinstance(score, (int, float)):
+            continue
+        score_value = float(score)
+        if not math.isfinite(score_value):
+            continue
         vectors.append(vector)
         scores.append(score_value)
         records.append(

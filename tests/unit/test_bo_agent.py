@@ -299,6 +299,144 @@ def test_bo_agent_reads_analysis_handoff_v2_trust_context() -> None:
     assert records[0]["quality_score"] == 0.61
 
 
+def test_bo_agent_filters_live_observations_by_hash_fidelity_and_lineage() -> None:
+    def observation(observation_id: str, objective_hash: str, fidelity: str) -> dict:
+        return {
+            "observation_id": observation_id,
+            "objective_hash": objective_hash,
+            "score": 0.7,
+            "feasible": True,
+            "fidelity": fidelity,
+            "parameters": {"relative_density": 0.32},
+            "provenance_refs": [f"artifact:{observation_id}"],
+            "ok_for_bo": True,
+        }
+
+    accepted, rejected = BOAgent.objective_observations(
+        [
+            observation("measured-a", "sha256:a", "measured"),
+            observation("measured-b", "sha256:b", "measured"),
+            observation("synthetic-a", "sha256:a", "synthetic"),
+        ],
+        objective_hash="sha256:a",
+        mode=Mode.LIVE,
+    )
+
+    assert [item["observation_id"] for item in accepted] == ["measured-a"]
+    assert {item["reason"] for item in rejected} == {"objective_hash_mismatch", "synthetic_live_proxy"}
+
+
+def test_bo_agent_test_mode_accepts_explicit_synthetic_observation() -> None:
+    accepted, rejected = BOAgent.objective_observations(
+        [
+            {
+                "observation_id": "synthetic-a",
+                "objective_hash": "sha256:a",
+                "score": 0.5,
+                "feasible": True,
+                "fidelity": "synthetic",
+                "parameters": {"relative_density": 0.3},
+                "provenance_refs": ["synthetic-fixture"],
+                "ok_for_bo": True,
+            },
+            {
+                "observation_id": "implicit-fidelity",
+                "objective_hash": "sha256:a",
+                "score": 0.4,
+                "feasible": True,
+                "parameters": {"relative_density": 0.28},
+                "provenance_refs": ["fixture"],
+                "ok_for_bo": True,
+            },
+        ],
+        objective_hash="sha256:a",
+        mode=Mode.TEST,
+    )
+
+    assert [item["observation_id"] for item in accepted] == ["synthetic-a"]
+    assert rejected[0]["reason"] == "fidelity_required"
+
+
+@pytest.mark.asyncio
+async def test_live_bo_blocks_without_hash_matched_measured_observation() -> None:
+    state = OrchestratorState(
+        run_id="run-live-objective",
+        experiment_id="exp-live-objective",
+        mode=Mode.LIVE,
+        stage=Stage.BO,
+        current_experiment_objective={
+            "schema_version": "objective_spec.v1",
+            "objective_id": "active-objective",
+            "version": 2,
+            "objective_hash": "sha256:active",
+        },
+    )
+    state.latest_analysis = {
+        "bo_handoff": {
+            "schema_version": "analysis_bo_handoff_v2",
+            "ok_for_bo": True,
+            "candidate_id": "wrong-objective",
+            "parameters": {"relative_density": 0.32},
+            "objective_evaluation": {
+                "observation_id": "obs-wrong",
+                "objective_hash": "sha256:other",
+                "score": 0.8,
+                "feasible": True,
+                "fidelity": "measured",
+                "provenance_refs": ["analysis-artifact"],
+            },
+        }
+    }
+
+    result = await BOAgent().run_with_settings(state, _CtxStub(), {"strategy": "bo", "budget": 2})
+
+    assert result.success is False
+    assert result.data["bo_result"]["failure_code"] == "BO_VALID_OBSERVATION_REQUIRED"
+    assert result.data["bo_result"]["observation_integrity"]["rejected"][0]["reason"] == "objective_hash_mismatch"
+
+
+@pytest.mark.asyncio
+async def test_next_design_request_carries_active_objective_identity() -> None:
+    state = OrchestratorState(
+        run_id="run-objective-design",
+        experiment_id="exp-objective-design",
+        mode=Mode.TEST,
+        stage=Stage.BO,
+        current_experiment_objective={
+            "schema_version": "objective_spec.v1",
+            "objective_id": "active-objective",
+            "version": 4,
+            "objective_hash": "sha256:active-4",
+            "direction": "maximize",
+        },
+    )
+    state.latest_analysis = {
+        "bo_handoff": {
+            "schema_version": "analysis_bo_handoff_v2",
+            "ok_for_bo": True,
+            "candidate_id": "measured-a",
+            "parameters": {"relative_density": 0.32},
+            "objective_evaluation": {
+                "observation_id": "obs-a",
+                "objective_id": "active-objective",
+                "objective_version": 4,
+                "objective_hash": "sha256:active-4",
+                "score": 0.8,
+                "feasible": True,
+                "fidelity": "measured",
+                "provenance_refs": ["analysis-artifact"],
+            },
+        }
+    }
+
+    result = await BOAgent().run_with_settings(state, _CtxStub(), {"strategy": "bo", "budget": 2})
+
+    request = result.data["next_design_request"]
+    assert request["objective_id"] == "active-objective"
+    assert request["objective_version"] == 4
+    assert request["objective_hash"] == "sha256:active-4"
+
+
 @pytest.mark.asyncio
 async def test_bo_agent_uses_llm_reasoning_as_soft_preference() -> None:
     agent = BOAgent()

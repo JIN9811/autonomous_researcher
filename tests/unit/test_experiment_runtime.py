@@ -154,3 +154,25 @@ def test_benchmark_accepts_optional_botorch_backend() -> None:
     assert bo["surrogate_trace"][0]["backend_active"] in {"lightweight_pool", "botorch_optional"}
     if not botorch_available():
         assert result["backend_warnings"]
+
+
+def test_benchmark_does_not_invent_proxy_score_for_missing_prior() -> None:
+    from experiments.benchmark import run_benchmark
+
+    result = run_benchmark(
+        {
+            "budget": 1,
+            "strategies": ["bo"],
+            "parameter_space": {"relative_density": [0.2, 0.4]},
+            "prior_evaluations": [
+                {
+                    "candidate_id": "missing-score",
+                    "parameters": {"relative_density": 0.3},
+                    "fidelity": "measured",
+                }
+            ],
+        }
+    )
+
+    trace = result["strategies"]["bo"]["surrogate_trace"][0]
+    assert all(item.get("candidate_id") != "missing-score" for item in trace["evaluated_points"])

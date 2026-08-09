@@ -259,6 +259,8 @@ class BOAgent(BaseAgent):
             constraints = {}
         objective = {
             "objective_id": raw.get("objective_id") or current.get("objective_id") or "bo-specimen-objective",
+            "objective_version": raw.get("objective_version") or raw.get("version") or current.get("objective_version") or current.get("version"),
+            "objective_hash": raw.get("objective_hash") or current.get("objective_hash") or "",
             "name": raw.get("name") or current.get("name") or "Specimen printability and performance proxy",
             "description": raw.get("description") or current.get("description") or state.active_goal,
             "metric_name": raw.get("metric_name") or current.get("metric_name") or "objective_score",
@@ -267,6 +269,66 @@ class BOAgent(BaseAgent):
             "tags": raw.get("tags") if isinstance(raw.get("tags"), list) else ["bo", "specimen", "tpms"],
         }
         return objective
+
+    @staticmethod
+    def _active_binding_from_context(state: OrchestratorState, ctx: AgentContext) -> dict[str, Any]:
+        tools = getattr(ctx, "tools", None)
+        resource = getattr(tools, "resource", None)
+        service = resource("objective.service") if callable(resource) else None
+        if service is None:
+            return {}
+        status = service.status(run_id=state.run_id)
+        binding = status.get("active_binding") if isinstance(status, dict) else None
+        return dict(binding) if isinstance(binding, dict) else {}
+
+    @staticmethod
+    def objective_observations(
+        records: list[dict[str, Any]],
+        *,
+        objective_hash: str,
+        mode: Mode,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """Select only finite, traceable observations for one immutable objective."""
+        accepted: list[dict[str, Any]] = []
+        rejected: list[dict[str, Any]] = []
+        for index, record in enumerate(records):
+            observation_id = str(record.get("observation_id") or record.get("candidate_id") or f"observation-{index + 1}")
+
+            def reject(reason: str) -> None:
+                rejected.append({"observation_id": observation_id, "reason": reason})
+
+            if str(record.get("objective_hash") or "") != objective_hash:
+                reject("objective_hash_mismatch")
+                continue
+            score = record.get("score")
+            if isinstance(score, bool) or not isinstance(score, (int, float)) or not math.isfinite(float(score)):
+                reject("finite_score_required")
+                continue
+            if record.get("feasible") is not True:
+                reject("infeasible")
+                continue
+            fidelity = str(record.get("fidelity") or "").strip().lower()
+            if not fidelity:
+                reject("fidelity_required")
+                continue
+            if mode == Mode.LIVE and fidelity != "measured":
+                reject("synthetic_live_proxy")
+                continue
+            if fidelity not in {"measured", "synthetic", "simulation"}:
+                reject("unsupported_fidelity")
+                continue
+            if not isinstance(record.get("parameters"), dict) or not record["parameters"]:
+                reject("parameters_required")
+                continue
+            provenance = record.get("provenance_refs")
+            if not isinstance(provenance, list) or not any(str(item).strip() for item in provenance):
+                reject("provenance_required")
+                continue
+            if record.get("ok_for_bo") is not True:
+                reject("quality_gate_blocked")
+                continue
+            accepted.append(dict(record))
+        return accepted, rejected
 
     @staticmethod
     def _best_strategy(benchmark: dict[str, Any]) -> tuple[str, dict[str, Any]]:
@@ -337,7 +399,8 @@ class BOAgent(BaseAgent):
             if not params:
                 continue
             objective = item.get("objective") if isinstance(item.get("objective"), dict) else {}
-            score = item.get("objective_score", objective.get("score"))
+            evaluation = item.get("objective_evaluation") if isinstance(item.get("objective_evaluation"), dict) else {}
+            score = evaluation.get("score", item.get("objective_score", objective.get("score")))
             ok_for_bo = item.get("ok_for_bo")
             if ok_for_bo is None:
                 ok_for_bo = item.get("ok", True) and str(item.get("status") or "ready") not in {"blocked", "failed"}
@@ -348,23 +411,30 @@ class BOAgent(BaseAgent):
             quality_score_source = trust_score.get("score") if trust_score else (
                 (item.get("quality") or {}).get("score") if isinstance(item.get("quality"), dict) else item.get("quality_score")
             )
-            records.append(
-                {
-                    "source": str(item.get("schema") or item.get("schema_version") or "analysis_handoff"),
-                    "candidate_id": str(item.get("candidate_id") or item.get("specimen_id") or state.experiment_id),
-                    "parameters": dict(params),
-                    "score": cls._safe_float(score, 0.0),
-                    "uncertainty": cls._safe_float(item.get("uncertainty", objective.get("uncertainty")), 0.5),
-                    "quality_score": cls._safe_float(quality_score_source, 0.7),
-                    "ok_for_bo": bool(ok_for_bo),
-                    "trust_score": dict(trust_score),
-                    "trust_gate": trust_gate,
-                    "multifidelity_comparison": item.get("multifidelity_comparison") if isinstance(item.get("multifidelity_comparison"), dict) else {},
-                    "fidelity_records": item.get("fidelity_records") if isinstance(item.get("fidelity_records"), dict) else {},
-                    "failure_tags": item.get("failure_tags") if isinstance(item.get("failure_tags"), list) else [],
-                    "artifact_refs": item.get("artifact_refs") or item.get("artifacts") or {},
-                }
-            )
+            record = {
+                "source": str(item.get("schema") or item.get("schema_version") or "analysis_handoff"),
+                "candidate_id": str(item.get("candidate_id") or item.get("specimen_id") or state.experiment_id),
+                "observation_id": str(evaluation.get("observation_id") or item.get("observation_id") or item.get("evaluation_id") or ""),
+                "parameters": dict(params),
+                "objective_id": str(evaluation.get("objective_id") or objective.get("objective_id") or ""),
+                "objective_version": evaluation.get("objective_version") or objective.get("objective_version") or objective.get("version"),
+                "objective_hash": str(evaluation.get("objective_hash") or item.get("objective_hash") or objective.get("objective_hash") or ""),
+                "feasible": evaluation.get("feasible") if "feasible" in evaluation else item.get("feasible"),
+                "fidelity": str(evaluation.get("fidelity") or item.get("fidelity") or ""),
+                "provenance_refs": evaluation.get("provenance_refs") if isinstance(evaluation.get("provenance_refs"), list) else item.get("provenance_refs", []),
+                "uncertainty": cls._safe_float(item.get("uncertainty", objective.get("uncertainty")), 0.5),
+                "quality_score": cls._safe_float(quality_score_source, 0.7),
+                "ok_for_bo": bool(ok_for_bo),
+                "trust_score": dict(trust_score),
+                "trust_gate": trust_gate,
+                "multifidelity_comparison": item.get("multifidelity_comparison") if isinstance(item.get("multifidelity_comparison"), dict) else {},
+                "fidelity_records": item.get("fidelity_records") if isinstance(item.get("fidelity_records"), dict) else {},
+                "failure_tags": item.get("failure_tags") if isinstance(item.get("failure_tags"), list) else [],
+                "artifact_refs": item.get("artifact_refs") or item.get("artifacts") or {},
+            }
+            if not isinstance(score, bool) and isinstance(score, (int, float)) and math.isfinite(float(score)):
+                record["score"] = float(score)
+            records.append(record)
         return records
 
     @classmethod
@@ -406,8 +476,20 @@ class BOAgent(BaseAgent):
                 "quality_score": cls._safe_float(metrics.get("quality_score"), 0.7),
                 "uncertainty": cls._safe_float(item.get("uncertainty"), 0.5),
             }
-            score = item.get("objective_score")
-            if isinstance(score, (int, float)):
+            evaluation = item.get("objective_evaluation") if isinstance(item.get("objective_evaluation"), dict) else {}
+            prior.update(
+                {
+                    "observation_id": str(evaluation.get("observation_id") or item.get("evaluation_id") or ""),
+                    "objective_id": str(evaluation.get("objective_id") or ""),
+                    "objective_version": evaluation.get("objective_version"),
+                    "objective_hash": str(evaluation.get("objective_hash") or item.get("objective_hash") or ""),
+                    "feasible": evaluation.get("feasible") if "feasible" in evaluation else item.get("feasible"),
+                    "fidelity": str(evaluation.get("fidelity") or item.get("fidelity") or ""),
+                    "provenance_refs": evaluation.get("provenance_refs") if isinstance(evaluation.get("provenance_refs"), list) else item.get("provenance_refs", []),
+                }
+            )
+            score = evaluation.get("score", item.get("objective_score"))
+            if not isinstance(score, bool) and isinstance(score, (int, float)) and math.isfinite(float(score)):
                 prior["score"] = float(score)
             priors.append(prior)
         return priors
@@ -950,9 +1032,52 @@ class BOAgent(BaseAgent):
             warnings.append("mbo requested without prior evaluations; degraded to bo benchmark")
             benchmark_strategies = ["bo"]
         objective = self._objective_from_state(state, settings or {})
+        active_binding = self._active_binding_from_context(state, ctx)
+        if active_binding:
+            objective.update(
+                {
+                    "objective_id": active_binding.get("objective_id"),
+                    "objective_version": active_binding.get("version"),
+                    "objective_hash": active_binding.get("objective_hash"),
+                }
+            )
         execution_mode = "virtual" if state.mode in {Mode.TEST, Mode.LIVE} else state.mode.value
         knowledge_context = self._knowledge_context_from_state(state)
-        priors = self._prior_evaluations_from_state(state)
+        raw_priors = self._prior_evaluations_from_state(state)
+        objective_hash = str(objective.get("objective_hash") or "")
+        if objective_hash:
+            priors, rejected_observations = self.objective_observations(
+                raw_priors,
+                objective_hash=objective_hash,
+                mode=state.mode,
+            )
+        else:
+            priors = raw_priors
+            rejected_observations = []
+        observation_integrity = {
+            "objective_hash": objective_hash,
+            "accepted_count": len(priors),
+            "rejected_count": len(rejected_observations),
+            "accepted_observation_ids": [str(item.get("observation_id") or item.get("candidate_id") or "") for item in priors],
+            "rejected": rejected_observations,
+        }
+        if state.mode == Mode.LIVE and objective_hash and not priors:
+            blocked_result = {
+                "ok": False,
+                "tool": "bo.agent",
+                "run_id": state.run_id,
+                "experiment_id": state.experiment_id,
+                "status": "blocked",
+                "failure_code": "BO_VALID_OBSERVATION_REQUIRED",
+                "objective": objective,
+                "observation_integrity": observation_integrity,
+                "warnings": ["Live BO requires at least one hash-matched measured observation."],
+            }
+            return AgentResult(
+                success=False,
+                summary="BO blocked: no valid measured observation for the active objective",
+                data={"bo_result": blocked_result, "experiment_objective": objective},
+            )
         failure_model = self._failure_model(priors)
         reasoning = await self._llm_reasoning(
             state,
@@ -1036,6 +1161,9 @@ class BOAgent(BaseAgent):
             "experiment_id": state.experiment_id,
             "producer_agent": self.name,
             "consumer_agent": "design_agent",
+            "objective_id": objective.get("objective_id"),
+            "objective_version": objective.get("objective_version"),
+            "objective_hash": objective_hash,
             "status": "ready" if recommendation.get("parameters") else "blocked",
             "candidate_id": recommendation.get("candidate_id"),
             "constraints": dict(recommendation.get("parameters") or {}),
@@ -1080,6 +1208,7 @@ class BOAgent(BaseAgent):
             "candidate_ranking": top_k,
             "recommendation": recommendation,
             "next_design_request": next_design_request,
+            "observation_integrity": observation_integrity,
             "best_so_far": self._best_so_far(benchmark, recommendation["source_strategy"]),
             "knowledge_context": knowledge_context,
             "warnings": warnings,
