@@ -58,6 +58,13 @@ This Reference does not claim that control presence proves safety effectiveness.
 
 ## Closed-Loop Position and Handoffs
 
+![Guardian closed-loop position and handoffs](assets/figures/guardian_01_closed_loop_handoffs.svg)
+
+**Figure Guardian-1.** Run state, failures, health, approvals, risk, and safety
+budget converge on a graph-wide continue/review/stop/error decision that the
+Orchestrator translates into a route. This is an `inspection`-backed projection
+of baseline `0b7627b`; it does not establish live safety effectiveness.
+
 | Direction | Component | Contract/state | Purpose | Gate |
 |---|---|---|---|---|
 | In | All stages | current state, decisions, failures, evidence | graph-wide review | evidence completeness |
@@ -85,6 +92,29 @@ by Orchestrator.
 | `01_check_safety_gates` | internal | stage/risk/evidence/health | pass/block/review facts | unknown or failed gate is not allow |
 | `02_review_recent_failures` | internal | errors/incidents/retries | failure context/corrective action | repeated/major failure escalates |
 | `03_decide_continue_stop_error` | internal | gate + failure + budget | continue/stop/error/review | invalid decision routes to error/review |
+
+![Guardian internal execution and effect boundary](assets/figures/guardian_02_execution_effect_boundary.svg)
+
+**Figure Guardian-2.** Three manifest steps combine bounded health and queue
+reads with deterministic policy, approval, failure, and safety-budget gates;
+model review remains advisory. Guardian can block or stop downstream work but
+has no direct device-action edge. This `inspection` figure describes internal
+contract structure, not independently scheduled graph nodes.
+
+### Execution trace details
+
+| Condition | State and evidence read | Decision | Persisted evidence | Resume requirement |
+|---|---|---|---|---|
+| Known safe continuation | current reports, fresh health, valid approvals, available budget | continue | gate history and decision contract | Orchestrator translates only the recorded decision |
+| Missing or expired approval | scoped request and validity window | review/wait | pending or expired approval state | new operator resolution bound to current action/run |
+| Stale or unavailable health | last health timestamp and capability status | review/stop | degraded health and blocker | fresh bounded health evidence |
+| Unknown external effect | command, timeout, device/proof mismatch | stop/review | incident, tool record, uncertainty state | independent device and proof inspection |
+| Repeated or major failure | failure history, retry count, corrective actions | stop/error | incident and budget consumption | operator review and accepted corrective action |
+| Exhausted safety budget | current budget and cycle context | stop/error | terminal budget decision | new governed run or explicitly authorized policy change |
+
+Unknown state never becomes an allow decision through model fallback. Approval
+resolution, incident notes, and corrective action may add evidence, but they do
+not rewrite the original failure or gate history.
 
 ## API Surface
 

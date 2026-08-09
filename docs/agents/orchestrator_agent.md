@@ -60,6 +60,14 @@ domain decisions, and Guardian policy are owned elsewhere.
 
 ## Closed-Loop Position and Handoffs
 
+![Orchestrator closed-loop position and handoffs](assets/figures/orchestrator_01_closed_loop_handoffs.svg)
+
+**Figure Orchestrator-1.** Accepted operator intent, prior state, and checkpoint
+context become bounded domain handoffs; agent and Guardian results return as
+explicit next routes. This is an `inspection`-backed projection of baseline
+`0b7627b`; the executable graph remains authoritative and runtime
+effectiveness is not evaluated here.
+
 | Direction | Component | Contract/state | Purpose | Gate |
 |---|---|---|---|---|
 | In | Operator/Live GUI | message, session memory, accepted inputs | establish intent | missing-input state machine |
@@ -69,6 +77,11 @@ domain decisions, and Guardian policy are owned elsewhere.
 | Out | Design pre-stage | `mission_contract.v1`, context | begin a governed cycle | required inputs complete |
 | Out | Active agent | `handoff_packet.v1` | bounded work request | graph-selected stage |
 | Out | Runtime | route/decision register | continue, ask, retry, stop, error | checkpoint and terminal rules |
+
+Trace interpretation: entering Orchestrator changes accepted planning and run
+state only after required-value and graph-state checks. Leaving Orchestrator
+changes the requested next route and handoff context; it does not itself change
+printer, robot, desktop, or instrument state.
 
 ## Inputs and Outputs
 
@@ -102,6 +115,31 @@ the controller contract requires it.
 
 These IDs describe the module's contract; they are not twelve independently
 scheduled top-level graph nodes.
+
+![Orchestrator internal execution and effect boundary](assets/figures/orchestrator_02_execution_effect_boundary.svg)
+
+**Figure Orchestrator-2.** Three pre-execution entries and nine internal
+contract steps separate intent, mission, checks, context, handoff, decision,
+reflection, and Guardian route translation. Model work is bounded advice and
+there is no direct device path. This `inspection` figure groups adjacent
+manifest entries; it does not claim separately scheduled runtime nodes.
+
+### Execution trace details
+
+| Phase | State read | Decision/transformation | State written | Evidence | Stop/recovery rule |
+|---|---|---|---|---|---|
+| Intent | message, session, accepted values | normalize intent and detect missing fields | intent or pending request | planning transcript | remain pending until a bounded value is accepted |
+| Mission | intent, constraints, graph state | compile mission and stage plan | mission/plan contracts | contract and validation event | invalid mission blocks dispatch |
+| Checks | capability and prior context | run read-only readiness/context checks | explicit available/degraded facts | check report | unavailable dependency is not silently healthy |
+| Handoff | plan and bounded context | select target and package request | context pack and handoff packet | handoff event/artifact | invalid target or schema blocks handoff |
+| Follow-up | agent result, concerns, evidence refs | register ask/retry/continue/stop | follow-up and decision register | result-linked decision | retry stays bounded and preserves prior evidence |
+| Reflection | completed cycle evidence | summarize accepted outcome | loop reflection | checkpoint/event | incomplete evidence remains visible |
+| Guardian translation | Guardian decision contract | map decision to authorized route | route decision | Guardian-linked route event | missing/unknown decision routes to review or error |
+
+Planning transcript, checkpointed `OrchestratorState`, append-only events, and
+external device state have different lifetimes. A recovered chat session does
+not prove a resumed device state, and a checkpoint does not resolve an
+uncertain external effect without new status or proof evidence.
 
 ## API Surface
 

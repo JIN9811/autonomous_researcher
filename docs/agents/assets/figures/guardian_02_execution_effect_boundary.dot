@@ -1,0 +1,36 @@
+digraph guardian_execution_effect_boundary {
+  graph [rankdir=TB, bgcolor="transparent", pad="0.25", nodesep="0.30", ranksep="0.52", fontname="DejaVu Sans", label="Guardian internal execution and effect boundary", labelloc="t", fontsize=18];
+  node [shape=box, style="rounded,filled", fillcolor="#EEF4FF", color="#315C9B", fontname="DejaVu Sans", fontsize=8.5, margin="0.09,0.06"];
+  edge [color="#52667A", fontname="DejaVu Sans", fontsize=7.5, arrowsize=0.65];
+
+  tools [label="device.health +\nexperiment.queue.status", shape=component, fillcolor="#F2ECFA", color="#6B4C9A"];
+  collect [label="01_check_safety_gates\nstate · evidence · health"];
+  gate [label="Policy / schema /\napproval gate", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];
+  failures [label="02_review_recent_failures\nincidents · retries · alerts"];
+  budget [label="Risk + safety\nbudget available?", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];
+  decide [label="03_decide_continue_stop_error", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];
+  model [label="guardian_review\npriority-0 model lease", shape=component, fillcolor="#F2ECFA", color="#6B4C9A"];
+  continue [label="Continue decision"];
+  review [label="Review / corrective action", fillcolor="#FFE9E7", color="#A33A32", penwidth=2];
+  stop [label="Stop / error", fillcolor="#FFE9E7", color="#A33A32", penwidth=2];
+  evidence [label="Gate history · decision · incident\napproval · corrective action", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
+  effect [label="Effect ceiling:\nblock or stop downstream", shape=octagon, fillcolor="#FFE9E7", color="#A33A32", penwidth=2];
+  device [label="No direct device action", fillcolor="#FFE9E7", color="#A33A32", penwidth=2];
+
+  tools -> collect -> gate;
+  gate -> failures [label="pass"];
+  gate -> review [label="missing / uncertain"];
+  failures -> budget -> decide;
+  model -> failures [style=dashed, label="advisory review"];
+  budget -> stop [label="exhausted"];
+  decide -> continue [label="allow"];
+  decide -> review [label="review"];
+  decide -> stop [label="stop / error"];
+  gate -> evidence [label="evidence", color="#2E7D59"];
+  failures -> evidence [label="evidence", color="#2E7D59"];
+  decide -> evidence [label="evidence", color="#2E7D59"];
+  continue -> effect;
+  review -> effect;
+  stop -> effect;
+  effect -> device [style=dashed, arrowhead=tee, label="prohibited bypass"];
+}

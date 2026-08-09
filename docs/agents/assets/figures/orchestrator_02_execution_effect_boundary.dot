@@ -1,0 +1,35 @@
+digraph orchestrator_execution_effect_boundary {
+  graph [rankdir=TB, bgcolor="transparent", pad="0.25", nodesep="0.28", ranksep="0.52", fontname="DejaVu Sans", label="Orchestrator internal execution and effect boundary", labelloc="t", fontsize=18];
+  node [shape=box, style="rounded,filled", fillcolor="#EEF4FF", color="#315C9B", fontname="DejaVu Sans", fontsize=8.5, margin="0.09,0.06"];
+  edge [color="#52667A", fontname="DejaVu Sans", fontsize=7.5, arrowsize=0.65];
+
+  receive [label="pre 01\nreceive intent"];
+  required [label="pre 02\nrequired values?", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];
+  mission [label="pre 03 + internal 01\nmission and intent state"];
+  plan [label="internal 02–03\nplan + read-only checks"];
+  context [label="internal 04–05\ncontext + handoff"];
+  followup [label="internal 06–07\nfollow-up + decision"];
+  reflection [label="internal 08\nloop reflection"];
+  translate [label="internal 09\ntranslate Guardian result", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];
+  model [label="orchestrator_supervisor\nmodel backend", shape=component, fillcolor="#F2ECFA", color="#6B4C9A"];
+  domain [label="Domain handler\nthrough graph/runtime", shape=component, fillcolor="#F2ECFA", color="#6B4C9A"];
+  evidence [label="Mission · plan · handoff\ndecision · reflection · events", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
+  pending [label="Pending input / review", fillcolor="#FFE9E7", color="#A33A32", penwidth=2];
+  route [label="Authorized next route"];
+  no_device [label="No direct printer / robot /\ndesktop / instrument path", fillcolor="#FFE9E7", color="#A33A32", penwidth=2];
+
+  receive -> required;
+  required -> mission [label="complete"];
+  required -> pending [label="missing"];
+  mission -> plan -> context -> domain -> followup -> reflection -> translate -> route;
+  model -> plan [style=dashed, label="bounded advice"];
+  model -> followup [style=dashed, label="bounded advice"];
+  required -> evidence [label="evidence", color="#2E7D59"];
+  context -> evidence [label="evidence", color="#2E7D59"];
+  followup -> evidence [label="evidence", color="#2E7D59"];
+  reflection -> evidence [label="evidence", color="#2E7D59"];
+  translate -> pending [label="unknown / review"];
+  orchestrator_boundary [label="Effect ceiling:\nmodel + local state", shape=octagon, fillcolor="#FFE9E7", color="#A33A32", penwidth=2];
+  route -> orchestrator_boundary [label="coordination only"];
+  orchestrator_boundary -> no_device [style=dashed, arrowhead=tee, label="prohibited bypass"];
+}

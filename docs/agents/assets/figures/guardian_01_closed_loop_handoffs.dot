@@ -1,0 +1,29 @@
+digraph guardian_closed_loop_handoffs {
+  graph [rankdir=LR, bgcolor="transparent", pad="0.25", nodesep="0.34", ranksep="0.55", fontname="DejaVu Sans", label="Guardian closed-loop position and handoffs", labelloc="t", fontsize=18];
+  node [shape=box, style="rounded,filled", fillcolor="#EEF4FF", color="#315C9B", fontname="DejaVu Sans", fontsize=9, margin="0.10,0.07"];
+  edge [color="#52667A", fontname="DejaVu Sans", fontsize=8, arrowsize=0.7];
+
+  state [label="Current run +\nstage state"];
+  failures [label="Failures · incidents ·\ntool records", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
+  health [label="Device health +\nqueue status", shape=component, fillcolor="#F2ECFA", color="#6B4C9A"];
+  approvals [label="Scoped approval\nstate", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];
+  budget [label="Risk vector +\nsafety budget", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
+  guardian [label="GUARDIAN\ngraph-wide safety decision", shape=diamond, fillcolor="#FFF1D6", color="#B26A00", penwidth=2.2];
+  orchestrator [label="Orchestrator\nroute translation"];
+  operator [label="Operator review /\ncorrective action", fillcolor="#FFE9E7", color="#A33A32", penwidth=2];
+  stop [label="Stop / error", fillcolor="#FFE9E7", color="#A33A32", penwidth=2];
+  continue [label="Continue next cycle"];
+  evidence [label="Decision · contract · incident\napproval · alert · budget", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
+
+  state -> guardian;
+  failures -> guardian;
+  health -> guardian;
+  approvals -> guardian;
+  budget -> guardian;
+  guardian -> orchestrator [label="continue / review / stop / error"];
+  orchestrator -> continue [label="continue"];
+  orchestrator -> operator [label="review"];
+  orchestrator -> stop [label="stop / error"];
+  guardian -> evidence [label="evidence", color="#2E7D59"];
+  operator -> approvals [style=dashed, label="new scoped decision"];
+}

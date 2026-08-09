@@ -1,0 +1,30 @@
+digraph orchestrator_closed_loop_handoffs {
+  graph [rankdir=LR, bgcolor="transparent", pad="0.25", nodesep="0.34", ranksep="0.55", fontname="DejaVu Sans", label="Orchestrator closed-loop position and handoffs", labelloc="t", fontsize=18];
+  node [shape=box, style="rounded,filled", fillcolor="#EEF4FF", color="#315C9B", fontname="DejaVu Sans", fontsize=9, margin="0.10,0.07"];
+  edge [color="#52667A", fontname="DejaVu Sans", fontsize=8, arrowsize=0.7];
+
+  operator [label="Operator intent +\naccepted inputs"];
+  prior [label="Prior Knowledge / BO /\nfailure context", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
+  checkpoint [label="Run checkpoint +\ncurrent stage", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
+  orchestrator [label="ORCHESTRATOR\nmission · context · handoff", penwidth=2.2];
+  agent [label="Graph-selected\ndomain agent"];
+  guardian [label="Guardian\ndecision", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];
+  design [label="Next Design\ncycle"];
+  review [label="Operator review /\nmissing input", fillcolor="#FFE9E7", color="#A33A32", penwidth=2];
+  terminal [label="Complete / stop /\nerror", fillcolor="#FFE9E7", color="#A33A32", penwidth=2];
+  evidence [label="Transcript · handoff · decision\ncheckpoint · event", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
+
+  operator -> orchestrator [label="operator_intent.v1"];
+  prior -> orchestrator [label="accepted prior state"];
+  checkpoint -> orchestrator [label="resume context"];
+  orchestrator -> agent [label="mission_contract.v1\nhandoff_packet.v1"];
+  agent -> orchestrator [label="result · concern · evidence"];
+  orchestrator -> guardian [label="cycle state + decision register"];
+  guardian -> orchestrator [label="continue / review / stop / error"];
+  orchestrator -> design [label="continue"];
+  orchestrator -> review [label="ask / review"];
+  orchestrator -> terminal [label="stop / complete / error"];
+  orchestrator -> evidence [label="evidence", color="#2E7D59"];
+  agent -> evidence [label="evidence", color="#2E7D59"];
+  guardian -> evidence [label="evidence", color="#2E7D59"];
+}
