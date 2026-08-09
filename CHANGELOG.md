@@ -50,6 +50,13 @@ changes. Detailed implementation history remains in Git.
   connections, safety gates, evidence, recovery, and operator surfaces.
 - Cross-agent API and connection matrix for responsibility, contract, service,
   external-effect, safety, and recovery comparisons.
+- Twenty-six agent architecture figures with editable Graphviz sources and
+  checked-in SVG renderings: closed-loop and execution/effect views for all ten
+  agents plus connection views for six bridge- or persistence-heavy agents.
+- Root README and agent-index navigation tables linking every canonical agent
+  Reference and figure directly.
+- Automated documentation checks for required agent figure sources,
+  renderings, embeddings, captions, and root README links.
 
 ### Changed
 
@@ -57,6 +64,8 @@ changes. Detailed implementation history remains in Git.
   pages while preserving links to detailed operator and developer guides.
 - Documentation navigation now places the paper/reviewer path before domain
   runtime paths.
+- Agent References now include step-to-state-to-evidence traces, connection
+  lifecycles, uncertain-effect recovery rules, and visual authority boundaries.
 
 ### Evidence Boundary
 

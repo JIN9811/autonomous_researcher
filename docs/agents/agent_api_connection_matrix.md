@@ -41,6 +41,11 @@ This Reference compares all ten ATR agents across responsibility, contracts,
 API classification, connections, effects, safety, and recovery. It is the
 cross-agent source; individual References own detailed behavior.
 
+The [Agent Reference Index](README.md#visual-contract) links all 26 editable
+and rendered agent figures. This matrix owns cross-agent comparison; each
+figure explains one agent's position, execution, effect, and—where required—
+connection boundary without duplicating the tables below.
+
 ## Scope
 
 The matrix covers current code baseline `0b7627b`. API entries are curated

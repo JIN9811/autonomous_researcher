@@ -154,6 +154,29 @@ approval, known no-effect timeout, uncertain external effect, analysis error,
 knowledge-sync degradation, and explicit policy stop. See the
 [Closed-Loop Method](docs/paper/03_closed_loop_method.md).
 
+## Agent References
+
+The [Agent Reference Index](docs/agents/README.md) provides the canonical
+per-agent reading path, and the
+[API and Connection Matrix](docs/agents/agent_api_connection_matrix.md)
+compares responsibilities, contracts, connections, effects, safety, and
+recovery. Each figure below is an implementation-inspection projection; code,
+manifests, the executable graph, imported routes, and bridge implementations
+remain authoritative.
+
+| Agent | Actual role | Primary input → output | Highest effect | Details | Figures |
+|---|---|---|---|---|---|
+| [Orchestrator](docs/agents/orchestrator_agent.md) | Compiles mission, context, handoffs, decisions, and routes | intent/run state → mission, handoff, decision, route | model/local state; no direct device | [Reference](docs/agents/orchestrator_agent.md) | [Flow](docs/agents/assets/figures/orchestrator_01_closed_loop_handoffs.svg) · [Execution](docs/agents/assets/figures/orchestrator_02_execution_effect_boundary.svg) |
+| [Design](docs/agents/design_agent.md) | Selects a deterministic constrained experiment candidate | objective/priors → experiment specification | model/local state; no physical action | [Reference](docs/agents/design_agent.md) | [Flow](docs/agents/assets/figures/design_01_closed_loop_handoffs.svg) · [Execution](docs/agents/assets/figures/design_02_execution_effect_boundary.svg) |
+| [Specimen Making](docs/agents/specimen_agent.md) | Creates and verifies the manufacturing digital thread | experiment specification → specimen evidence/handoff | physical possible after printer gates | [Reference](docs/agents/specimen_agent.md) | [Flow](docs/agents/assets/figures/specimen_01_closed_loop_handoffs.svg) · [Execution](docs/agents/assets/figures/specimen_02_execution_effect_boundary.svg) · [Connections](docs/agents/assets/figures/specimen_03_api_connection_architecture.svg) |
+| [Vision](docs/agents/vision_agent.md) | Emits freshness-bounded observation and verification | camera/context → vision report/signal/evidence | read-only observation; verified stop possible | [Reference](docs/agents/vision_agent.md) | [Flow](docs/agents/assets/figures/vision_01_closed_loop_handoffs.svg) · [Execution](docs/agents/assets/figures/vision_02_execution_effect_boundary.svg) · [Connections](docs/agents/assets/figures/vision_03_api_connection_architecture.svg) |
+| [Manipulation](docs/agents/manipulation_agent.md) | Supervises a bounded robot transfer and post-place verification | specimen/fresh Vision → verified transfer result | physical possible after robot gates | [Reference](docs/agents/manipulation_agent.md) | [Flow](docs/agents/assets/figures/manipulation_01_closed_loop_handoffs.svg) · [Execution](docs/agents/assets/figures/manipulation_02_execution_effect_boundary.svg) · [Connections](docs/agents/assets/figures/manipulation_03_api_connection_architecture.svg) |
+| [Lab Equipment](docs/agents/equipment_agent.md) | Executes an exact registered instrument protocol | verified placement/protocol → measurement/proof | desktop and physical possible after live gates | [Reference](docs/agents/equipment_agent.md) | [Flow](docs/agents/assets/figures/equipment_01_closed_loop_handoffs.svg) · [Execution](docs/agents/assets/figures/equipment_02_execution_effect_boundary.svg) · [Connections](docs/agents/assets/figures/equipment_03_api_connection_architecture.svg) |
+| [Analysis](docs/agents/analysis_agent.md) | Derives curves, metrics, objectives, uncertainty, and optional CAE comparison | raw measurement → evaluation/BO handoff | optional external analysis; no direct device | [Reference](docs/agents/analysis_agent.md) | [Flow](docs/agents/assets/figures/analysis_01_closed_loop_handoffs.svg) · [Execution](docs/agents/assets/figures/analysis_02_execution_effect_boundary.svg) · [Connections](docs/agents/assets/figures/analysis_03_api_connection_architecture.svg) |
+| [Knowledge](docs/agents/knowledge_agent.md) | Persists provenance, patterns, performance, and bounded context | accepted artifacts/reports → durable records/contexts | local/external persistence; no physical action | [Reference](docs/agents/knowledge_agent.md) | [Flow](docs/agents/assets/figures/knowledge_01_closed_loop_handoffs.svg) · [Execution](docs/agents/assets/figures/knowledge_02_execution_effect_boundary.svg) · [Connections](docs/agents/assets/figures/knowledge_03_api_connection_architecture.svg) |
+| [Bayesian Optimization](docs/agents/bo_agent.md) | Proposes the next constrained candidate | analysis/priors → ranked recommendation | model/local state; proposal only | [Reference](docs/agents/bo_agent.md) | [Flow](docs/agents/assets/figures/bo_01_closed_loop_handoffs.svg) · [Execution](docs/agents/assets/figures/bo_02_execution_effect_boundary.svg) |
+| [Guardian](docs/agents/guardian_agent.md) | Decides continue, review, stop, or error | risk/health/failures/approvals → route decision | blocks/stops downstream; no direct action | [Reference](docs/agents/guardian_agent.md) | [Flow](docs/agents/assets/figures/guardian_01_closed_loop_handoffs.svg) · [Execution](docs/agents/assets/figures/guardian_02_execution_effect_boundary.svg) |
+
 ## Safety
 
 ![Safety-gated consequential action sequence](docs/paper/assets/figures/04_safety_gated_sequence.svg)

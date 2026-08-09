@@ -56,7 +56,7 @@ Reference, 절차 Guide, 목표 Design, 실행 Plan, 조사·감사 Evidence를 
 | 주장-증거 추적성 | [paper/09_claim_evidence_traceability.md](paper/09_claim_evidence_traceability.md), [paper/artifact_manifest.yaml](paper/artifact_manifest.yaml) |
 | 전체 프로젝트 흐름 | [../README.ko.md](../README.ko.md), [../README.en.md](../README.en.md) |
 | 초보자/상급자 통합 매뉴얼 | [tutorials/user_manual.ko.md](tutorials/user_manual.ko.md), [tutorials/user_manual.en.md](tutorials/user_manual.en.md) |
-| 에이전트별 실제 역할·API·연결·안전 계약 | [agents/README.md](agents/README.md) |
+| 에이전트별 실제 역할·API·연결·안전 계약과 피겨 | [agents/README.md](agents/README.md) |
 | 10개 에이전트 교차 비교 | [agents/agent_api_connection_matrix.md](agents/agent_api_connection_matrix.md) |
 | 실제 닫힌 루프, 페이지, 에이전트 | [runtime/closed_loop_and_pages_reference.md](runtime/closed_loop_and_pages_reference.md) |
 | 현재 코드/API 스냅샷 | [runtime/current_code_snapshot.md](runtime/current_code_snapshot.md) |
@@ -77,7 +77,7 @@ Reference, 절차 Guide, 목표 Design, 실행 Plan, 조사·감사 Evidence를 
 |---|---|---|
 | Index | [../README.md](../README.md), 이 문서 | 언어·대상·도메인별 탐색 |
 | Standard | [standards/documentation_standard.md](standards/documentation_standard.md), [standards/paper_documentation_standard.md](standards/paper_documentation_standard.md) | 문서 분류·권한·메타데이터·검증 및 논문 주장·증거·도표·공개 규칙 |
-| Reference | [agents/README.md](agents/README.md), [agents/agent_api_connection_matrix.md](agents/agent_api_connection_matrix.md), [runtime/current_code_snapshot.md](runtime/current_code_snapshot.md), [runtime/langgraph_runtime.md](runtime/langgraph_runtime.md), [runtime/closed_loop_and_pages_reference.md](runtime/closed_loop_and_pages_reference.md) | 현재 코드가 실제로 제공하는 역할·계약·동작 |
+| Reference | [agents/README.md](agents/README.md), [agents/agent_api_connection_matrix.md](agents/agent_api_connection_matrix.md), [runtime/current_code_snapshot.md](runtime/current_code_snapshot.md), [runtime/langgraph_runtime.md](runtime/langgraph_runtime.md), [runtime/closed_loop_and_pages_reference.md](runtime/closed_loop_and_pages_reference.md) | 현재 코드가 실제로 제공하는 역할·계약·동작과 편집 가능한 Graphviz/SVG 피겨 |
 | Guide | [knowledge/knowledge_graph_operations.ko.md](knowledge/knowledge_graph_operations.ko.md), `tutorials/` | 사용자·운영자 절차와 성공/복구 기준 |
 | Design | [superpowers/specs/2026-08-08-documentation-governance-design.md](superpowers/specs/2026-08-08-documentation-governance-design.md) | 승인 또는 제안된 목표 결정; 현재 구현 사실이 아님 |
 | Plan | `superpowers/plans/` | Design을 실현하는 작업 순서 |

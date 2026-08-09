@@ -62,20 +62,32 @@ Excluded:
 - unsupported scientific, safety-effectiveness, or live-reliability claims;
 - legacy guideline files as current authority.
 
+## Visual Contract
+
+Every Reference includes `Flow` and `Execution` figures. Specimen, Vision,
+Manipulation, Equipment, Analysis, and Knowledge also include a `Connections`
+figure because their bridge, external-service, device, or persistence boundary
+needs a separate view. Each checked-in SVG has an editable same-stem Graphviz
+source under `assets/figures/`.
+
+Figures are `inspection`-backed explanatory projections. The executable code,
+primary graph, module manifests, imported FastAPI routes, and bridge/service
+implementations remain authoritative.
+
 ## Canonical Inventory
 
-| Plane/order | Agent | Python implementation | Module manifest | Canonical Reference |
-|---|---|---|---|---|
-| Control plane | Orchestrator | `agents/orchestrator_agent.py` | `graphs/modules/orchestrator/module.yaml` | [Orchestrator](orchestrator_agent.md) |
-| 1 | Design | `agents/design_agent.py` | `graphs/modules/design/module.yaml` | [Design](design_agent.md) |
-| 2 | Specimen Making | `agents/specimen_agent.py` | `graphs/modules/specimen/module.yaml` | [Specimen Making](specimen_agent.md) |
-| 3 + verification sidecars | Vision | `agents/vision_agent.py` | `graphs/modules/vision/module.yaml` | [Vision](vision_agent.md) |
-| Physical transfer branch | Manipulation | `agents/manipulation_agent.py` | `graphs/modules/manipulation/module.yaml` | [Manipulation](manipulation_agent.md) |
-| 4 | Lab Equipment | `agents/equipment_agent.py` | `graphs/modules/equipment/module.yaml` | [Lab Equipment](equipment_agent.md) |
-| 5 | Analysis | `agents/analysis_agent.py` | `graphs/modules/analysis/module.yaml` | [Analysis](analysis_agent.md) |
-| 6 | Knowledge | `agents/knowledge_agent.py` | `graphs/modules/knowledge/module.yaml` | [Knowledge](knowledge_agent.md) |
-| 7 | BO | `agents/bo_agent.py` | `graphs/modules/bo/module.yaml` | [Bayesian Optimization](bo_agent.md) |
-| Safety/control plane | Guardian | `agents/guardian_agent.py` | `graphs/modules/guardian/module.yaml` | [Guardian](guardian_agent.md) |
+| Plane/order | Agent | Python implementation | Module manifest | Canonical Reference | Figures |
+|---|---|---|---|---|---|
+| Control plane | Orchestrator | `agents/orchestrator_agent.py` | `graphs/modules/orchestrator/module.yaml` | [Orchestrator](orchestrator_agent.md) | [Flow](assets/figures/orchestrator_01_closed_loop_handoffs.svg) · [Execution](assets/figures/orchestrator_02_execution_effect_boundary.svg) |
+| 1 | Design | `agents/design_agent.py` | `graphs/modules/design/module.yaml` | [Design](design_agent.md) | [Flow](assets/figures/design_01_closed_loop_handoffs.svg) · [Execution](assets/figures/design_02_execution_effect_boundary.svg) |
+| 2 | Specimen Making | `agents/specimen_agent.py` | `graphs/modules/specimen/module.yaml` | [Specimen Making](specimen_agent.md) | [Flow](assets/figures/specimen_01_closed_loop_handoffs.svg) · [Execution](assets/figures/specimen_02_execution_effect_boundary.svg) · [Connections](assets/figures/specimen_03_api_connection_architecture.svg) |
+| 3 + verification sidecars | Vision | `agents/vision_agent.py` | `graphs/modules/vision/module.yaml` | [Vision](vision_agent.md) | [Flow](assets/figures/vision_01_closed_loop_handoffs.svg) · [Execution](assets/figures/vision_02_execution_effect_boundary.svg) · [Connections](assets/figures/vision_03_api_connection_architecture.svg) |
+| Physical transfer branch | Manipulation | `agents/manipulation_agent.py` | `graphs/modules/manipulation/module.yaml` | [Manipulation](manipulation_agent.md) | [Flow](assets/figures/manipulation_01_closed_loop_handoffs.svg) · [Execution](assets/figures/manipulation_02_execution_effect_boundary.svg) · [Connections](assets/figures/manipulation_03_api_connection_architecture.svg) |
+| 4 | Lab Equipment | `agents/equipment_agent.py` | `graphs/modules/equipment/module.yaml` | [Lab Equipment](equipment_agent.md) | [Flow](assets/figures/equipment_01_closed_loop_handoffs.svg) · [Execution](assets/figures/equipment_02_execution_effect_boundary.svg) · [Connections](assets/figures/equipment_03_api_connection_architecture.svg) |
+| 5 | Analysis | `agents/analysis_agent.py` | `graphs/modules/analysis/module.yaml` | [Analysis](analysis_agent.md) | [Flow](assets/figures/analysis_01_closed_loop_handoffs.svg) · [Execution](assets/figures/analysis_02_execution_effect_boundary.svg) · [Connections](assets/figures/analysis_03_api_connection_architecture.svg) |
+| 6 | Knowledge | `agents/knowledge_agent.py` | `graphs/modules/knowledge/module.yaml` | [Knowledge](knowledge_agent.md) | [Flow](assets/figures/knowledge_01_closed_loop_handoffs.svg) · [Execution](assets/figures/knowledge_02_execution_effect_boundary.svg) · [Connections](assets/figures/knowledge_03_api_connection_architecture.svg) |
+| 7 | BO | `agents/bo_agent.py` | `graphs/modules/bo/module.yaml` | [Bayesian Optimization](bo_agent.md) | [Flow](assets/figures/bo_01_closed_loop_handoffs.svg) · [Execution](assets/figures/bo_02_execution_effect_boundary.svg) |
+| Safety/control plane | Guardian | `agents/guardian_agent.py` | `graphs/modules/guardian/module.yaml` | [Guardian](guardian_agent.md) | [Flow](assets/figures/guardian_01_closed_loop_handoffs.svg) · [Execution](assets/figures/guardian_02_execution_effect_boundary.svg) |
 
 The [API and Connection Matrix](agent_api_connection_matrix.md) compares all ten
 agents without repeating full implementation prose.
