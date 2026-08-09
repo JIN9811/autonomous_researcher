@@ -1,0 +1,16 @@
+digraph cae_handoffs {
+  rankdir=LR; graph [bgcolor="transparent", fontname="DejaVu Sans", pad="0.25"];
+  node [fontname="DejaVu Sans", fontsize=9, margin="0.10,0.07", shape=box, style="rounded,filled", fillcolor="#e8f1fb", color="#285f8f"];
+  edge [fontname="DejaVu Sans", fontsize=8, arrowsize=0.7, color="#334155"];
+  analysis [label="Analysis Agent\ngeometry/material/loading + evidence"];
+  operator [label="Operator /cae\nconfig + explicit run"];
+  guardian [label="Guardian\nresource/policy gate", shape=diamond, fillcolor="#fff3cd", color="#946200"];
+  boundary [label="CAE Computation Boundary", penwidth=2];
+  facade [label="CAE facade\ndeterministic/preflight", shape=component, fillcolor="#eee8ff", color="#654ea3"];
+  calculix [label="CalculiX job adapter", shape=component, fillcolor="#eee8ff", color="#654ea3"];
+  pinn [label="PINN dataset/model adapter", shape=component, fillcolor="#eee8ff", color="#654ea3"];
+  evidence [label="decks + logs + DAT/FRD\nmetrics + registry + uncertainty", shape=note, fillcolor="#e7f6ec", color="#29733b"];
+  consumers [label="Analysis -> Knowledge / BO"];
+  unavailable [label="blocked / unavailable\n(no fabricated output)", style="filled,bold", fillcolor="#fde8e8", color="#a32929"];
+  analysis -> boundary; operator -> boundary; guardian -> boundary [label="gate"]; boundary -> facade; boundary -> calculix [label="optional", style=dashed]; boundary -> pinn [label="optional", style=dashed]; facade -> evidence [color="#29733b"]; calculix -> evidence [color="#29733b"]; pinn -> evidence [color="#29733b"]; evidence -> consumers [label="qualified handoff", color="#29733b"]; boundary -> unavailable [label="missing/gated", color="#a32929"];
+}

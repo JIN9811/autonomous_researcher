@@ -1,0 +1,16 @@
+digraph cae_connections {
+  rankdir=LR; graph [bgcolor="transparent", fontname="DejaVu Sans", pad="0.25", ranksep="0.55"];
+  node [fontname="DejaVu Sans", fontsize=9, margin="0.10,0.07", shape=box, style="rounded,filled", fillcolor="#e8f1fb", color="#285f8f"];
+  edge [fontname="DejaVu Sans", fontsize=8, arrowsize=0.7, color="#334155"];
+  api [label="/api/cae/config + /run"];
+  tools [label="cae.* / calculix.* / pinn.*\n+ bridge resources"];
+  facade [label="CAEBridge"];
+  calculix [label="CalculiXBridge"];
+  pinn [label="PINNBridge"];
+  gate [label="mode + executable/model +\nruntime permission", shape=diamond, fillcolor="#fff3cd", color="#946200"];
+  solver [label="Gmsh / CalculiX / postprocessor", shape=component, fillcolor="#eee8ff", color="#654ea3"];
+  registry [label="PINN datasets + model registry", shape=component, fillcolor="#eee8ff", color="#654ea3"];
+  store [label="CAE/CalculiX artifacts\nrequest/deck/log/DAT/FRD", shape=note, fillcolor="#e7f6ec", color="#29733b"];
+  result [label="metrics / fields / prediction\nstatus + uncertainty", shape=note, fillcolor="#e7f6ec", color="#29733b"];
+  api -> facade; tools -> facade; tools -> calculix; tools -> pinn; facade -> gate; calculix -> gate; pinn -> gate; gate -> solver [label="solver enabled", style=dashed]; gate -> registry [label="PINN enabled", style=dashed]; facade -> store [label="request/result", color="#29733b"]; solver -> store [label="artifacts", color="#29733b"]; registry -> result [label="model/dataset", color="#29733b"]; store -> result [label="postprocess", color="#29733b"];
+}

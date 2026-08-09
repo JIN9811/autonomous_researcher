@@ -1,0 +1,14 @@
+digraph simulator_execution {
+  rankdir=LR; graph [bgcolor="transparent", fontname="DejaVu Sans", pad="0.25"];
+  node [fontname="DejaVu Sans", fontsize=9, margin="0.10,0.07", shape=box, style="rounded,filled", fillcolor="#e8f1fb", color="#285f8f"];
+  edge [fontname="DejaVu Sans", fontsize=8, arrowsize=0.7, color="#334155"];
+  input [label="command + payload + mode"];
+  mode [label="test/simulator explicitly selected?", shape=diamond, fillcolor="#fff3cd", color="#946200"];
+  dispatch [label="In-process exact command dispatch"];
+  generate [label="Generate deterministic fields\nor local fixture file"];
+  label [label="Attach simulator/test/source identity", shape=note, fillcolor="#e7f6ec", color="#29733b"];
+  return_node [label="Schema-shaped result"];
+  reject [label="REJECT live intent / unknown command", style="filled,bold", fillcolor="#fde8e8", color="#a32929"];
+  prohibited [label="PROHIBITED BOUNDARY\nnetwork / serial / ROS / desktop / motion", shape=octagon, style="filled,bold", fillcolor="#fde8e8", color="#a32929"];
+  input -> mode; mode -> dispatch [label="yes"]; mode -> reject [label="no", color="#a32929"]; dispatch -> generate -> label -> return_node; generate -> prohibited [label="must not cross", style=dashed, color="#a32929"];
+}

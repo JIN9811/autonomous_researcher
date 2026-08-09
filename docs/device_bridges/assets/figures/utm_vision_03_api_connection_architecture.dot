@@ -1,0 +1,18 @@
+digraph utm_vision_connections {
+  rankdir=LR; graph [bgcolor="transparent", fontname="DejaVu Sans", pad="0.25", ranksep="0.55"];
+  node [fontname="DejaVu Sans", fontsize=9, margin="0.10,0.07", shape=box, style="rounded,filled", fillcolor="#e8f1fb", color="#285f8f"];
+  edge [fontname="DejaVu Sans", fontsize=8, arrowsize=0.7, color="#334155"];
+  api [label="/api/equipment/utm-runtime/*\nframe / camera / calibration\n+ specimen-pose APIs"];
+  tools [label="camera tools + utm.run_protocol\nVision cross-check"];
+  manager [label="UTMRuntimeProcessManager"];
+  pose [label="SpecimenPoseTrackerBridge"];
+  rs [label="RealSenseBridge"];
+  observer [label="UTM state observer"];
+  ros [label="ROS 2 subprocess + topics\nUTM / YOLO / camera", shape=component, fillcolor="#eee8ff", color="#654ea3"];
+  camera [label="D455F / USB camera\nROS or direct capture", shape=component, fillcolor="#eee8ff", color="#654ea3"];
+  stream [label="frame + MJPEG + calibration", shape=component, fillcolor="#eee8ff", color="#654ea3"];
+  virtual [label="virtual bridge / direct test CSV", shape=component, fillcolor="#f1f5f9", color="#64748b"];
+  evidence [label="logs / graph / frames / pose\nstate transition / release", shape=note, fillcolor="#e7f6ec", color="#29733b"];
+  api -> manager; api -> pose; tools -> manager; tools -> pose; tools -> rs; tools -> observer; manager -> ros; manager -> stream; pose -> camera; rs -> camera; observer -> ros [label="summary topic"];
+  ros -> evidence [label="graph/state", color="#29733b"]; camera -> evidence [label="image/identity", color="#29733b"]; stream -> evidence [label="frame/calibration", color="#29733b"]; tools -> virtual [label="test allowed", style=dashed]; virtual -> evidence [label="labeled synthetic", style=dashed, color="#29733b"];
+}
