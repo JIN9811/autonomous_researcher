@@ -1,0 +1,73 @@
+digraph runtime_ide_system_boundaries {
+  rankdir=TB;
+  graph [bgcolor="transparent", fontname="DejaVu Sans", pad="0.28", ranksep="0.62", nodesep="0.34", label="Runtime IDE system boundaries", labelloc=t, fontsize=15];
+  node [fontname="DejaVu Sans", fontsize=9, margin="0.12,0.08", shape=box, style="rounded,filled", fillcolor="#e8f1fb", color="#285f8f"];
+  edge [fontname="DejaVu Sans", fontsize=8, arrowsize=0.72, color="#334155"];
+
+  subgraph cluster_operator {
+    label="Operator surface"; color="#8aa9c2"; style="rounded,dashed";
+    entry [label="/ide + deep links\ngraph / node / module context", fillcolor="#f4f8fc"];
+    editor [label="Runtime IDE browser\ngraph + module drafts\nrun launcher + bottom dock", penwidth=2];
+    module_management [label="Module Management\nmanagement workspace", fillcolor="#f4f8fc"];
+    bridge_workspace [label="Bridge workspaces\ndevice-specific controls", fillcolor="#f4f8fc"];
+    entry -> editor [label="focus context"];
+    editor -> module_management [label="handoff only", style=dashed];
+    editor -> bridge_workspace [label="descriptor/workspace handoff", style=dashed];
+  }
+
+  subgraph cluster_control {
+    label="FastAPI control and configuration plane"; color="#8aa9c2"; style="rounded,dashed";
+    graph_api [label="Graph APIs\nvalidate / compile / import\ndry-run / save / run"];
+    module_api [label="Module APIs\nconfig / UI descriptor\nvalidate / dry-run / versions"];
+    bridge_api [label="Bridge registry APIs\ndiscovery + custom descriptors"];
+    run_api [label="Run APIs\npause / resume / stop\napprovals / events / artifacts"];
+    graph_store [label="Graph YAML +\nversion snapshots", shape=folder, fillcolor="#eee8ff", color="#654ea3"];
+    module_store [label="module.yaml / ui.yaml +\nmodule versions", shape=folder, fillcolor="#eee8ff", color="#654ea3"];
+    gate [label="Validation + compile +\nmatching dry-run digest", shape=diamond, fillcolor="#fff3cd", color="#946200"];
+  }
+
+  subgraph cluster_runtime {
+    label="Execution owners"; color="#8aa9c2"; style="rounded,dashed";
+    loop [label="LangGraphRunLoop\ncompiled executable stages", penwidth=2];
+    handlers [label="Handler / Agent / Tool registries"];
+    guardian [label="Guardian + approval gates", shape=diamond, fillcolor="#fff3cd", color="#946200"];
+    devices [label="Device bridge owners\nworkspace/API gates", shape=component, fillcolor="#eee8ff", color="#654ea3"];
+    physical [label="OPTIONAL PHYSICAL EFFECT\nmotion / printing / equipment", shape=octagon, style="filled,bold", fillcolor="#fde8e8", color="#a32929"];
+  }
+
+  subgraph cluster_evidence {
+    label="Observation and evidence"; color="#8aa9c2"; style="rounded,dashed";
+    events [label="Runtime events + run state\napproval records", shape=note, fillcolor="#e7f6ec", color="#29733b"];
+    artifacts [label="Logs + artifacts + previews", shape=folder, fillcolor="#e7f6ec", color="#29733b"];
+  }
+
+  editor -> graph_api [label="control/config", color="#285f8f"];
+  editor -> module_api [label="config", color="#285f8f"];
+  editor -> bridge_api [label="descriptor", style=dashed, color="#654ea3"];
+  editor -> run_api [label="run control/read", color="#285f8f"];
+  graph_api -> graph_store [label="versioned config", color="#654ea3"];
+  module_api -> module_store [label="versioned config", color="#654ea3"];
+  graph_store -> gate [label="active config"];
+  module_store -> gate [label="bound module config"];
+  gate -> loop [label="allowed saved target"];
+  loop -> handlers [label="effective handler"];
+  handlers -> guardian [label="stage/tool request"];
+  guardian -> devices [label="allowed effect path"];
+  devices -> physical [label="live + device-specific gates", style=dashed, color="#a32929"];
+  loop -> events [label="event/state", color="#29733b"];
+  handlers -> artifacts [label="outputs", color="#29733b"];
+  devices -> artifacts [label="device evidence", color="#29733b"];
+  physical -> artifacts [label="observations required", style=dashed, color="#29733b"];
+  events -> run_api [label="read", color="#29733b"];
+  artifacts -> run_api [label="preview/download", color="#29733b"];
+
+  legend [shape=plaintext, label=<
+    <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4">
+      <TR><TD><B>Edge</B></TD><TD><B>Meaning</B></TD></TR>
+      <TR><TD>solid blue/gray</TD><TD>required control or runtime path</TD></TR>
+      <TR><TD><FONT COLOR="#654ea3">dashed purple</FONT></TD><TD>descriptor or workspace handoff</TD></TR>
+      <TR><TD><FONT COLOR="#29733b">green</FONT></TD><TD>event or evidence flow</TD></TR>
+      <TR><TD><FONT COLOR="#a32929">dashed red</FONT></TD><TD>optional physical-effect boundary</TD></TR>
+    </TABLE>
+  >];
+}

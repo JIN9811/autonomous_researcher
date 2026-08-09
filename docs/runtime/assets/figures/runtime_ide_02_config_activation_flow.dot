@@ -1,0 +1,54 @@
+digraph runtime_ide_config_activation {
+  rankdir=TB;
+  graph [bgcolor="transparent", fontname="DejaVu Sans", pad="0.28", ranksep="0.58", nodesep="0.30", label="Runtime IDE configuration and activation flow", labelloc=t, fontsize=15];
+  node [fontname="DejaVu Sans", fontsize=9, margin="0.12,0.08", shape=box, style="rounded,filled", fillcolor="#e8f1fb", color="#285f8f"];
+  edge [fontname="DejaVu Sans", fontsize=8, arrowsize=0.72, color="#334155"];
+
+  draft [label="Browser draft\ngraph/module edits", penwidth=2];
+  validate [label="Schema + handler + route +\nsafety validation", shape=diamond, fillcolor="#fff3cd", color="#946200"];
+  compiled [label="Compile-checked summary\nentry / finish / edges / handlers", shape=note, fillcolor="#e7f6ec", color="#29733b"];
+  draft_dry [label="Draft dry-run\neffective handlers + module runtime", fillcolor="#f4f8fc"];
+  save [label="Save Version\nactivate=false or true"];
+  snapshot [label="Immutable version snapshot", shape=folder, fillcolor="#eee8ff", color="#654ea3"];
+  activate [label="Activate?", shape=diamond, fillcolor="#fff3cd", color="#946200"];
+  active [label="Active graph YAML", shape=folder, fillcolor="#eee8ff", color="#654ea3"];
+  active_dry [label="Active-config dry-run record\nsave activation or explicit refresh", fillcolor="#f4f8fc"];
+  digest [label="Digest matches active config?", shape=diamond, fillcolor="#fff3cd", color="#946200"];
+  mode [label="Run mode + preflight\ntest / replay / fault / live", shape=diamond, fillcolor="#fff3cd", color="#946200"];
+  run [label="Shared LangGraphRunLoop", penwidth=2];
+  effect [label="LIVE EFFECT POSSIBLE\nonly after explicit live confirmation\nand downstream gates", shape=octagon, style="filled,bold", fillcolor="#fde8e8", color="#a32929"];
+  test [label="Test/replay/fault execution\nno implied physical success", fillcolor="#e7f6ec", color="#29733b"];
+  invalid [label="BLOCKED\nrepair draft and revalidate", style="filled,bold", fillcolor="#fde8e8", color="#a32929"];
+  stale [label="GRAPH_DRY_RUN_REQUIRED\nrecord active digest again", style="filled,bold", fillcolor="#fde8e8", color="#a32929"];
+
+  draft -> validate [label="validate-draft"];
+  validate -> compiled [label="valid"];
+  validate -> invalid [label="errors", color="#a32929"];
+  invalid -> draft [label="edit", style=dashed, color="#a32929"];
+  compiled -> draft_dry [label="draft simulation"];
+  draft_dry -> save [label="does not satisfy live gate", style=dashed];
+  compiled -> save [label="version decision"];
+  save -> snapshot [label="always versioned", color="#654ea3"];
+  snapshot -> activate;
+  activate -> active [label="yes", color="#654ea3"];
+  activate -> draft [label="no: draft remains non-active", style=dashed];
+  active -> active_dry [label="record gate"];
+  active_dry -> digest [label="dry_run_record"];
+  active -> digest [label="current digest"];
+  digest -> stale [label="no", color="#a32929"];
+  stale -> active_dry [label="rerun after changes", style=dashed, color="#a32929"];
+  digest -> mode [label="yes"];
+  mode -> test [label="test/replay/fault", color="#29733b"];
+  mode -> run [label="allowed mode"];
+  test -> run [label="shared loop"];
+  run -> effect [label="live + confirmed + gated", style=dashed, color="#a32929"];
+
+  legend [shape=plaintext, label=<
+    <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4">
+      <TR><TD><B>Notation</B></TD><TD><B>Meaning</B></TD></TR>
+      <TR><TD>folder</TD><TD>persisted version/config</TD></TR>
+      <TR><TD>diamond</TD><TD>required decision or gate</TD></TR>
+      <TR><TD><FONT COLOR="#a32929">red/dashed</FONT></TD><TD>blocked, retry, or optional live-effect path</TD></TR>
+    </TABLE>
+  >];
+}

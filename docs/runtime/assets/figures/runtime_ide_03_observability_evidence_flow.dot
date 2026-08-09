@@ -1,0 +1,72 @@
+digraph runtime_ide_observability {
+  rankdir=LR;
+  graph [bgcolor="transparent", fontname="DejaVu Sans", pad="0.28", ranksep="0.58", nodesep="0.32", label="Runtime IDE observability and evidence flow", labelloc=t, fontsize=15];
+  node [fontname="DejaVu Sans", fontsize=9, margin="0.12,0.08", shape=box, style="rounded,filled", fillcolor="#e8f1fb", color="#285f8f"];
+  edge [fontname="DejaVu Sans", fontsize=8, arrowsize=0.72, color="#334155"];
+
+  subgraph cluster_producers {
+    label="Producers"; color="#8aa9c2"; style="rounded,dashed";
+    graph_ops [label="Graph validate / compile /\ndry-run / save / run"];
+    loop [label="LangGraphRunLoop\nnode/stage execution", penwidth=2];
+    operator [label="Operator controls\napproval / pause / resume / stop"];
+    workspace [label="Workspace/bridge results", style="rounded,filled,dashed", fillcolor="#f4f8fc"];
+    physical [label="Optional physical system", shape=octagon, style="filled,bold", fillcolor="#fde8e8", color="#a32929"];
+  }
+
+  subgraph cluster_records {
+    label="Runtime records"; color="#8aa9c2"; style="rounded,dashed";
+    event_bus [label="Structured runtime events\ngraph.* / run.* / node.* / artifact.*", shape=note, fillcolor="#e7f6ec", color="#29733b"];
+    run_state [label="Run snapshot + node state", shape=note, fillcolor="#e7f6ec", color="#29733b"];
+    approvals [label="Approval queue + resolutions", shape=note, fillcolor="#fff3cd", color="#946200"];
+    log [label="Run JSONL event log", shape=folder, fillcolor="#e7f6ec", color="#29733b"];
+    artifacts [label="Run artifact tree\ntext / image / data / reports", shape=folder, fillcolor="#e7f6ec", color="#29733b"];
+  }
+
+  subgraph cluster_api {
+    label="Read/control API"; color="#8aa9c2"; style="rounded,dashed";
+    endpoints [label="/api/runs/{id}\n/events / approvals / artifacts\n/artifact-file/{path}"];
+  }
+
+  subgraph cluster_ide {
+    label="Runtime IDE consumers"; color="#8aa9c2"; style="rounded,dashed";
+    timeline [label="Timeline + filters + detail"];
+    inspector [label="Node/agent/device/metric inspector"];
+    approval_ui [label="Approval queue + resolve"];
+    artifact_ui [label="Artifact lineage\npreview / safe download"];
+    replay [label="Replay / dry-run from stage", fillcolor="#f4f8fc"];
+    recovery [label="Operator recovery\ninspect -> decide -> pause/stop/edit", shape=diamond, fillcolor="#fff3cd", color="#946200"];
+  }
+
+  graph_ops -> event_bus [label="graph.compiled / validation_failed", color="#29733b"];
+  loop -> event_bus [label="run/node/tool events", color="#29733b"];
+  loop -> run_state [label="current state", color="#29733b"];
+  operator -> approvals [label="request/resolve", color="#946200"];
+  operator -> event_bus [label="operator/run control", color="#29733b"];
+  workspace -> event_bus [label="normalized result", style=dashed, color="#29733b"];
+  workspace -> artifacts [label="evidence", style=dashed, color="#29733b"];
+  physical -> artifacts [label="observations, not assumed success", style=dashed, color="#29733b"];
+  event_bus -> log [label="persist before broadcast", color="#29733b"];
+  event_bus -> endpoints [label="buffer/read", color="#29733b"];
+  run_state -> endpoints [label="snapshot", color="#29733b"];
+  approvals -> endpoints [label="queue", color="#946200"];
+  artifacts -> endpoints [label="path-safe access", color="#29733b"];
+  endpoints -> timeline [label="events", color="#29733b"];
+  endpoints -> inspector [label="state", color="#29733b"];
+  endpoints -> approval_ui [label="approval API", color="#946200"];
+  endpoints -> artifact_ui [label="artifact API", color="#29733b"];
+  timeline -> replay [label="selected stage", style=dashed];
+  timeline -> recovery [label="failure context"];
+  inspector -> recovery [label="state context"];
+  approval_ui -> recovery [label="human decision"];
+  artifact_ui -> recovery [label="evidence context", color="#29733b"];
+  recovery -> operator [label="bounded action"];
+
+  legend [shape=plaintext, label=<
+    <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4">
+      <TR><TD><B>Edge</B></TD><TD><B>Meaning</B></TD></TR>
+      <TR><TD><FONT COLOR="#29733b">green</FONT></TD><TD>event/evidence flow</TD></TR>
+      <TR><TD><FONT COLOR="#946200">gold</FONT></TD><TD>approval decision flow</TD></TR>
+      <TR><TD>dashed</TD><TD>optional workspace, replay, or physical observation path</TD></TR>
+    </TABLE>
+  >];
+}

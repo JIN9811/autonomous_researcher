@@ -126,26 +126,26 @@ git commit -m "test: define Runtime IDE documentation contract"
 - Consumes: `app/main.py`, `web/templates/runtime_ide.html`, `web/static/runtime_ide.js`, `web/static/runtime_ide.css`, `web/static/runtime_graph_geometry.js`, graph/module stores and configs, `orchestrator/langgraph_runtime.py`, and Runtime IDE tests.
 - Produces: the canonical 20-section Reference and the three stable figure pairs required by Task 1.
 
-- [ ] **Step 1: Draw the system-boundary figure**
+- [x] **Step 1: Draw the system-boundary figure**
 
 Show browser `/ide`, FastAPI control APIs, graph/module/version stores,
 LangGraph run loop, Module Management and bridge-workspace handoffs, approvals,
 events/artifacts, and optional physical effects. Distinguish descriptor-only
 and physical handoffs with dashed labeled edges.
 
-- [ ] **Step 2: Draw the configuration-activation figure**
+- [x] **Step 2: Draw the configuration-activation figure**
 
 Show draft edit, validation, compile summary, draft dry-run, version save,
 optional activation, matching active dry-run digest, test/live preflight, and
 run. Include failure loops for validation errors and stale digests.
 
-- [ ] **Step 3: Draw the observability-evidence figure**
+- [x] **Step 3: Draw the observability-evidence figure**
 
 Show run/controller actions producing structured events, approval records,
 node state, JSONL logs, and artifacts; show IDE timeline, filters, inspector,
 replay, artifact preview/download, and operator recovery actions as consumers.
 
-- [ ] **Step 4: Render all three figures**
+- [x] **Step 4: Render all three figures**
 
 ```bash
 for source in docs/runtime/assets/figures/runtime_ide_*.dot; do
@@ -155,7 +155,7 @@ done
 
 Expected: three SVG files with the same stems.
 
-- [ ] **Step 5: Write the Reference front matter and first ten sections**
+- [x] **Step 5: Write the Reference front matter and first ten sections**
 
 Use `doc_type: reference`, `subtype: runtime`, `status: active`,
 `authority: descriptive`, `last_verified: 2026-08-09`, and the implementation
@@ -163,14 +163,14 @@ source paths from the approved Design. Cover the system boundary, surface map,
 deep links, graph drafts, module/bridge descriptors, validation, compilation,
 dry-run, and activation without describing draft state as active execution.
 
-- [ ] **Step 6: Write the operator workflow and final ten sections**
+- [x] **Step 6: Write the operator workflow and final ten sections**
 
 Cover run modes/effects, grouped API families, timeline/artifacts, approvals and
 stop controls, persistence ownership, error recovery, verification evidence,
 known gaps, and related documents. Include the five required tables and embed
 all figures with exact captions.
 
-- [ ] **Step 7: Validate the Reference and figures**
+- [x] **Step 7: Validate the Reference and figures**
 
 ```bash
 .venv/bin/python scripts/validate_documentation.py
@@ -180,7 +180,7 @@ all figures with exact captions.
 Expected before manifest/navigation work: the document-level test passes; the
 repository validator may not yet inspect the ungoverned new Reference.
 
-- [ ] **Step 8: Commit the Reference and figures**
+- [x] **Step 8: Commit the Reference and figures**
 
 ```bash
 git add docs/runtime/runtime_ide.md docs/runtime/assets/figures
