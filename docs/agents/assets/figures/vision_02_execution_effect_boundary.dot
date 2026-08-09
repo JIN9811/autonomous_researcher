@@ -1,0 +1,26 @@
+digraph vision_execution_effect_boundary {
+  graph [rankdir=TB, bgcolor="transparent", pad="0.25", nodesep="0.30", ranksep="0.44", fontname="DejaVu Sans", label="Vision internal execution and effect boundary", labelloc="t", fontsize=18];
+  node [shape=box, style="rounded,filled", fillcolor="#EEF4FF", color="#315C9B", fontname="DejaVu Sans", fontsize=8.2, margin="0.09,0.06"];
+  edge [color="#52667A", fontname="DejaVu Sans", fontsize=7.2, arrowsize=0.65];
+  resolve [label="01 task resolve\n02 zone registry"];
+  capture [label="03 capture scene\n03 active-camera ejection check"];
+  perception [label="04 perception backend\n05 scene state"];
+  temporal [label="06 temporal events"];
+  arbitrate [label="07 signal arbitration\nquality · conflict · freshness", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];
+  package [label="08 visual evidence\n09 signal bus handoff"];
+  stopgate [label="Matching rollout +\nUTM placement?", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];
+  stop [label="10 stop verified rollout", shape=octagon, fillcolor="#FFE9E7", color="#A33A32", penwidth=2];
+  evidence [label="Raw/annotated frame · camera/zone ID\nconfidence · timestamp · expires_at", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
+  reject [label="Degrade / reject / review", fillcolor="#FFE9E7", color="#A33A32", penwidth=2];
+  no_start [label="No robot / printer / UTM start", fillcolor="#FFE9E7", color="#A33A32", penwidth=2];
+  resolve -> capture -> perception -> temporal -> arbitrate;
+  arbitrate -> package [label="accepted"];
+  arbitrate -> reject [label="stale / conflict / low quality"];
+  package -> stopgate [style=dashed, label="stop task only"];
+  stopgate -> stop [label="verified"];
+  stopgate -> reject [label="mismatch"];
+  capture -> evidence [label="evidence", color="#2E7D59"];
+  package -> evidence [label="evidence", color="#2E7D59"];
+  stop -> evidence [label="evidence", color="#2E7D59"];
+  package -> no_start [style=dashed, arrowhead=tee, label="prohibited bypass"];
+}

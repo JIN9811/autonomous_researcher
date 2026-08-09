@@ -1,0 +1,21 @@
+digraph vision_closed_loop_handoffs {
+  graph [rankdir=LR, bgcolor="transparent", pad="0.25", nodesep="0.34", ranksep="0.55", fontname="DejaVu Sans", label="Vision closed-loop position and handoffs", labelloc="t", fontsize=18];
+  node [shape=box, style="rounded,filled", fillcolor="#EEF4FF", color="#315C9B", fontname="DejaVu Sans", fontsize=9, margin="0.10,0.07"];
+  edge [color="#52667A", fontname="DejaVu Sans", fontsize=8, arrowsize=0.7];
+  context [label="Specimen / Manipulation /\nEquipment context"];
+  cameras [label="Camera + UTM runtime\nframes · pose · graph", shape=component, fillcolor="#F2ECFA", color="#6B4C9A"];
+  vision [label="VISION\nfreshness-bounded observation", penwidth=2.2];
+  fresh [label="Signal fresh + verified?", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];
+  consumers [label="Manipulation · Equipment ·\nSpecimen completion"];
+  stop [label="Verified rollout stop", shape=octagon, fillcolor="#FFE9E7", color="#A33A32", penwidth=2];
+  reject [label="Reject / degrade / review", fillcolor="#FFE9E7", color="#A33A32", penwidth=2];
+  evidence [label="vision_report.v1 · vision_signal.v1\nframe · pose · timestamp · expiry", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
+  context -> vision;
+  cameras -> vision;
+  vision -> fresh;
+  fresh -> consumers [label="accepted signal"];
+  fresh -> stop [label="matching session + placement"];
+  fresh -> reject [label="stale / conflict / low quality"];
+  vision -> evidence [label="evidence", color="#2E7D59"];
+  evidence -> consumers [label="provenance", color="#2E7D59"];
+}

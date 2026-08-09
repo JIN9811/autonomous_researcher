@@ -58,6 +58,14 @@ tracker routes, and current camera/UTM Guides.
 
 ## Closed-Loop Position and Handoffs
 
+![Vision closed-loop position and handoffs](assets/figures/vision_01_closed_loop_handoffs.svg)
+
+**Figure Vision-1.** Specimen, manipulation, equipment, and camera context
+becomes a freshness-bounded signal for downstream consumers; stale, conflicting,
+or low-quality observations are rejected, while only a matching verified task
+can stop an active rollout. This is an `inspection`-backed projection of
+baseline `0b7627b`, not perception-quality or live-safety evidence.
+
 | Direction | Component | Contract/state | Purpose | Gate |
 |---|---|---|---|---|
 | In | Specimen | specimen/fabrication/ejection context | observation target | specimen identity |
@@ -94,6 +102,26 @@ evidence refs, `active_cam_ejection_check.v1`,
 | `09_handoff_signal_bus` | emit `vision_signal.v1` | expiry enforced downstream |
 | `10_stop_verified_rollout` | stop after verified UTM placement | completion record or stop error |
 
+![Vision internal execution and effect boundary](assets/figures/vision_02_execution_effect_boundary.svg)
+
+**Figure Vision-2.** Eleven manifest entries—including both `03_*` entries—
+separate task/zone resolution, capture, perception, temporal events,
+arbitration, evidence, signal handoff, and verified rollout stop. This
+`inspection` figure groups internal contract steps and grants no robot,
+printer, UTM, or desktop start authority.
+
+### Execution trace details
+
+| Phase | Required identity/state | Decision/transformation | Evidence/output | Reject or recovery condition |
+|---|---|---|---|---|
+| Resolve | task, specimen, zone and calibration IDs | choose bounded observation contract | selected task/zone metadata | unsupported task or stale zone blocks/degrades |
+| Capture | camera source and current timestamp | acquire frame and active-camera check | raw frame, source, timestamp | capture failure does not invent pose |
+| Perception | labeled environment/backend | estimate pose, presence, readiness, uncertainty | estimate and quality fields | unavailable backend remains degraded |
+| Temporal events | prior compatible observation | detect change/ejection/placement event | timestamped event | mismatched identity is not compared |
+| Arbitration | confidence, expiry, conflicts, task policy | accept, degrade, or reject signal | `vision_report.v1` and `vision_signal.v1` | expired/conflicting signal blocks downstream use |
+| Evidence packaging | accepted frame and metadata | bind raw/annotated artifact to run/session/specimen | evidence references | stream display alone is not durable evidence |
+| Verified stop | matching rollout session and UTM placement | request stop and observe result | stop result/completion record | failed or unknown stop stays error/review |
+
 ## API Surface
 
 | Class | Method | Path/family | Service | Effect | Notes |
@@ -118,6 +146,27 @@ evidence refs, `active_cam_ejection_check.v1`,
 | `vision.utm_runtime.start` | UTM ROS/runtime process | external_service | graph/health |
 | `vision.utm_specimen_presence.capture` | UTM camera | read_only | annotated/raw frame |
 | LLM `vision_observation` | selected model | model | bounded observation rationale |
+
+![Vision API and connection architecture](assets/figures/vision_03_api_connection_architecture.svg)
+
+**Figure Vision-3.** Specimen-pose, LeRobot camera, and UTM runtime/camera
+surfaces feed pose tracking and signal arbitration; only a fresh task- and
+session-matched branch reaches the rollout-stop service. This `inspection`
+figure distinguishes observation from process stop and is not live validation.
+
+### Connection lifecycle
+
+| Connection | Resolve/preflight | Invoke/observe | Persist/recover |
+|---|---|---|---|
+| Pose tracker | specimen and tracker identity | status, bounded snapshot, release | retain snapshot metadata; release does not erase prior evidence |
+| LeRobot camera | active robot/session and camera probe | capture active pose/ejection evidence | reject session mismatch or stale camera result |
+| UTM runtime | runtime status, graph and camera mapping | start/probe/frame/stream as configured | capture referenced frame; unavailable graph remains explicit |
+| UTM calibration | device list and current configuration | probe, apply, calibrate with status | bind calibration identity; do not reuse stale zones silently |
+| Rollout stop | matching session plus verified placement | stop request followed by status/result | unknown result requires operator/Guardian inspection |
+
+The workspace or model can request observation, but neither grants an
+unregistered camera source nor a start path to robot, printer, UTM, or
+PyAutoGUI execution.
 
 ## State, Events, Artifacts, and Storage
 

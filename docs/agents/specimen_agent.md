@@ -58,6 +58,14 @@ geometry/artifact tools, and hardware Guides.
 
 ## Closed-Loop Position and Handoffs
 
+![Specimen closed-loop position and handoffs](assets/figures/specimen_01_closed_loop_handoffs.svg)
+
+**Figure Specimen-1.** A constrained Design specification becomes a
+manufacturing digital thread and then a Vision-verified handoff to
+Manipulation; invalid or uncertain fabrication returns to repair, review, or
+stop. This is an `inspection`-backed projection of baseline `0b7627b`, not
+evidence of a successful physical print.
+
 | Direction | Component | Contract/state | Purpose | Gate |
 |---|---|---|---|---|
 | In | Design | experiment specification | fabrication intent | required fields/constraints |
@@ -90,6 +98,26 @@ autoejection/bed-clear evidence, decisions, metrics, and handoff packet.
 | `10_repair_or_stop_decision` | bounded response | repair/review/stop |
 | `11_handoff_vision_manipulation` | specimen-ready packet | verification required |
 
+![Specimen internal execution and effect boundary](assets/figures/specimen_02_execution_effect_boundary.svg)
+
+**Figure Specimen-2.** Eleven internal entries keep specification intake,
+digital-thread identity, geometry, QA, slicing, execution gates, physical
+printing, monitoring, recovery, and handoff distinct. This `inspection` figure
+groups manifest entries and does not claim independent graph scheduling or
+physical reliability.
+
+### Execution trace details
+
+| Phase | State/identity | Operation and gate | Evidence written | Recovery boundary |
+|---|---|---|---|---|
+| Specification | candidate/specimen ID, geometry/process constraints | required-field and fabrication-intent validation | accepted intent or blocker | return incomplete input; do not infer defaults as accepted |
+| Geometry | design parameters and unit contract | generate STL, then mesh/dimension QA | STL path/hash and QA report | bounded regeneration followed by the same QA |
+| Process planning | material/profile/provider constraints | manufacturability and process validation | plan and rejection reasons | unsupported process blocks slicing |
+| Slicing | source STL and selected profile | slice, patch where configured, validate G-code | source/patched hashes, plate and settings | regenerate from tracked source on mismatch |
+| Start | current printer state, approval, bed-clear, prestart proof | draft, start gate, then publish | command draft, gate and publish response | a draft or ack alone is not physical start proof |
+| Monitoring | job/provider identity and fresh status/video | observe progress, completion, ejection, and bed state | fresh status, camera and bed-clear evidence | unknown state requires inspection, not blind republish |
+| Handoff | verified specimen and digital thread | package Vision/Manipulation request | specimen result and handoff artifact | no next job or transfer without matching proof |
+
 ## API Surface
 
 | Class | Method | Path/family | Service | Effect | Notes |
@@ -118,6 +146,28 @@ autoejection/bed-clear evidence, decisions, metrics, and handoff packet.
 
 The module LLM role is `tool_formatting`; tool selection and device gates remain
 outside unrestricted model authority.
+
+![Specimen API and connection architecture](assets/figures/specimen_03_api_connection_architecture.svg)
+
+**Figure Specimen-3.** Printer APIs and `printer.prepare` reach a selected
+provider only through the printer manager and artifact, approval, prestart, and
+bed-clear gates; device status and proof return on a separate evidence path.
+Bambu and operator-selected Prusa are different inspected configurations. This
+`inspection` figure is not comparative or live-reliability evidence.
+
+### Connection lifecycle
+
+| Lifecycle | Boundary | Required observation | Failure rule |
+|---|---|---|---|
+| Resolve | fleet/profile and provider selection | stable provider/job/profile identity | no silent provider fallback |
+| Prepare | geometry, slicer, G-code patch and artifact route | tracked source and patched hashes | mismatched or missing artifact blocks start |
+| Preflight | connection, safe state, approval and bed-clear | current prestart snapshot with no blocker | stale readiness cannot authorize publish |
+| Invoke | start gate then provider publish | command identity, topic/path, ack | retry requires known no-effect or resolved state |
+| Observe | fresh provider status, video/camera, progress | post-publish state tied to the job | accepted-but-not-started remains explicit |
+| Persist/release | proof package and completion audit | hashes, status, ejection and bed-clear evidence | next job remains blocked until release proof |
+
+No UI card, model response, or module display descriptor can bypass the
+printer manager, selected provider, Guardian/operator policy, or proof path.
 
 ## State, Events, Artifacts, and Storage
 

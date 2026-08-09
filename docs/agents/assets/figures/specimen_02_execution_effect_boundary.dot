@@ -1,0 +1,29 @@
+digraph specimen_execution_effect_boundary {
+  graph [rankdir=TB, bgcolor="transparent", pad="0.25", nodesep="0.30", ranksep="0.44", fontname="DejaVu Sans", label="Specimen internal execution and effect boundary", labelloc="t", fontsize=18];
+  node [shape=box, style="rounded,filled", fillcolor="#EEF4FF", color="#315C9B", fontname="DejaVu Sans", fontsize=8.2, margin="0.09,0.06"];
+  edge [color="#52667A", fontname="DejaVu Sans", fontsize=7.2, arrowsize=0.65];
+  intake [label="01 spec intake\n02 fabrication intent"];
+  thread [label="03 initialize digital thread"];
+  geometry [label="04 geometry / STL\ngeometry.generate_metamaterial_stl"];
+  qa [label="05 mesh QA\n06 printability plan", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];
+  slice [label="07 slice / G-code QA\nsource + patched hashes"];
+  gate [label="08 execution gate\napproval · prestart · bed clear", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];
+  printer [label="Selected printer\nphysical effect", shape=octagon, fillcolor="#FFE9E7", color="#A33A32", penwidth=2];
+  monitor [label="09 fabrication monitoring"];
+  decision [label="10 repair or stop", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];
+  handoff [label="11 Vision / Manipulation handoff"];
+  evidence [label="Digital thread · artifact hashes\npublish/status · camera · proof", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
+  review [label="Review / stop / unknown effect", fillcolor="#FFE9E7", color="#A33A32", penwidth=2];
+  intake -> thread -> geometry -> qa;
+  qa -> slice [label="pass"];
+  qa -> review [label="invalid"];
+  slice -> gate;
+  gate -> printer [label="authorized publish"];
+  gate -> review [label="blocked"];
+  printer -> monitor -> decision;
+  decision -> handoff [label="verified complete"];
+  decision -> review [label="repair / uncertain"];
+  thread -> evidence [label="evidence", color="#2E7D59"];
+  slice -> evidence [label="evidence", color="#2E7D59"];
+  monitor -> evidence [label="evidence", color="#2E7D59"];
+}

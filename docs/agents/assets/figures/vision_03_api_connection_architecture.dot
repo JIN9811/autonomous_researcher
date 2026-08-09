@@ -1,0 +1,24 @@
+digraph vision_api_connection_architecture {
+  graph [rankdir=LR, bgcolor="transparent", pad="0.25", nodesep="0.30", ranksep="0.52", fontname="DejaVu Sans", label="Vision API and connection architecture", labelloc="t", fontsize=18];
+  node [shape=box, style="rounded,filled", fillcolor="#EEF4FF", color="#315C9B", fontname="DejaVu Sans", fontsize=8.3, margin="0.09,0.06"];
+  edge [color="#52667A", fontname="DejaVu Sans", fontsize=7.3, arrowsize=0.65];
+  poseapi [label="/api/vision/specimen-pose/*\nstatus · snapshot · release"];
+  robotapi [label="LeRobot camera +\nactive pose APIs"];
+  utmapi [label="UTM runtime + camera APIs\nstatus · frame · calibration"];
+  tracker [label="Pose tracker", shape=component, fillcolor="#F2ECFA", color="#6B4C9A"];
+  camera [label="Camera / robot camera /\nROS image sources", shape=component, fillcolor="#F2ECFA", color="#6B4C9A"];
+  agent [label="Vision handler +\nsignal arbitration", penwidth=2];
+  fresh [label="Identity · quality ·\nfreshness gate", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];
+  stopservice [label="LeRobot rollout stop service", shape=component, fillcolor="#F2ECFA", color="#6B4C9A"];
+  effect [label="Verified process stop", shape=octagon, fillcolor="#FFE9E7", color="#A33A32", penwidth=2];
+  evidence [label="Frame · pose · signal · expiry\nstop result · session ID", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
+  poseapi -> tracker -> agent;
+  robotapi -> camera;
+  utmapi -> camera;
+  camera -> agent;
+  agent -> fresh;
+  fresh -> evidence [label="accepted observation", color="#2E7D59"];
+  fresh -> stopservice [style=dashed, label="matching stop task"];
+  stopservice -> effect;
+  effect -> evidence [label="evidence", color="#2E7D59"];
+}

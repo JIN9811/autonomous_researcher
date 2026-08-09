@@ -1,0 +1,22 @@
+digraph specimen_closed_loop_handoffs {
+  graph [rankdir=LR, bgcolor="transparent", pad="0.25", nodesep="0.34", ranksep="0.55", fontname="DejaVu Sans", label="Specimen closed-loop position and handoffs", labelloc="t", fontsize=18];
+  node [shape=box, style="rounded,filled", fillcolor="#EEF4FF", color="#315C9B", fontname="DejaVu Sans", fontsize=9, margin="0.10,0.07"];
+  edge [color="#52667A", fontname="DejaVu Sans", fontsize=8, arrowsize=0.7];
+  design [label="Design\nexperiment_spec"];
+  printer [label="Printer profile +\nprovider status", shape=component, fillcolor="#F2ECFA", color="#6B4C9A"];
+  specimen [label="SPECIMEN MAKING\nmanufacturing digital thread", penwidth=2.2];
+  gate [label="Verified specimen ready?", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];
+  vision [label="Vision\nejection / location verification"];
+  manipulation [label="Manipulation\ntransfer readiness"];
+  review [label="Repair / review / stop", fillcolor="#FFE9E7", color="#A33A32", penwidth=2];
+  evidence [label="STL · G-code · hashes · start proof\nmonitoring · bed-clear · handoff", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
+  design -> specimen [label="fabrication intent"];
+  printer -> specimen [label="selected provider"];
+  specimen -> gate [label="fabrication result"];
+  gate -> vision [label="verify"];
+  vision -> manipulation [label="fresh readiness"];
+  gate -> review [label="invalid / uncertain"];
+  specimen -> evidence [label="evidence", color="#2E7D59"];
+  evidence -> vision [label="identity + proof", color="#2E7D59"];
+  evidence -> manipulation [label="handoff evidence", color="#2E7D59"];
+}
