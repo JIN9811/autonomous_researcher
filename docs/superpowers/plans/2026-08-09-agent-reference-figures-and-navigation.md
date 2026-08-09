@@ -12,7 +12,7 @@ scope:
   - figures
   - repository_navigation
 summary: Implementation plan for 26 agent figures, deeper agent References, root README navigation, and figure validation.
-execution_status: planned
+execution_status: completed
 governing_design: docs/superpowers/specs/2026-08-09-agent-reference-figures-and-navigation-design.md
 related_docs:
   - docs/agents/README.md
@@ -62,7 +62,7 @@ supersedes: []
 - Produces: `AGENT_REFERENCE_FIGURES`, `_validate_agent_reference_figures(path, body, root, label)`, and `_validate_root_agent_navigation(root, documents, manifest_label)`.
 - Produces error messages used by focused tests: `missing agent figure source`, `missing agent figure rendering`, `missing agent figure link`, `missing agent figure caption`, and `missing root README agent link`.
 
-- [ ] **Step 1: Add failing agent-figure validation tests**
+- [x] **Step 1: Add failing agent-figure validation tests**
 
 Add a fixture helper that creates a valid active Reference at
 `docs/agents/<agent>_agent.md`, writes the required `.dot`/`.svg` pairs, embeds
@@ -99,7 +99,7 @@ def test_root_readme_requires_all_canonical_agent_links(tmp_path: Path) -> None:
 Also test missing SVG, missing Markdown image, missing caption, a valid
 three-figure complex agent, and a root README containing all ten links.
 
-- [ ] **Step 2: Run the focused tests and confirm failure**
+- [x] **Step 2: Run the focused tests and confirm failure**
 
 Run:
 
@@ -110,7 +110,7 @@ Run:
 Expected: new tests fail because the inventory and validation helpers do not
 exist.
 
-- [ ] **Step 3: Implement the validator inventory and checks**
+- [x] **Step 3: Implement the validator inventory and checks**
 
 Define stable mappings:
 
@@ -150,14 +150,14 @@ stable. Invoke the check from `validate_document()` after local-link
 validation. Invoke root navigation validation from `validate_manifest()` only
 when the canonical agent paths are present in `documents`.
 
-- [ ] **Step 4: Add the normative rule to the Documentation Standard**
+- [x] **Step 4: Add the normative rule to the Documentation Standard**
 
 Add `## Agent Reference Figures` before `Required Checks`. Include the exact
 two-plus-one inventory, source/render/caption rules, visual grammar, current
 versus optional distinction, root README navigation requirement, Graphviz
 render command, and legacy-guideline exception.
 
-- [ ] **Step 5: Run validator tests and syntax checks**
+- [x] **Step 5: Run validator tests and syntax checks**
 
 Run:
 
@@ -170,7 +170,7 @@ Expected: all documentation-validator tests pass. The repository-level
 validator is expected to fail until Tasks 2–6 create all required assets and
 embeddings.
 
-- [ ] **Step 6: Commit the enforceable figure contract**
+- [x] **Step 6: Commit the enforceable figure contract**
 
 ```bash
 git add tests/unit/test_documentation_validation.py scripts/validate_documentation.py docs/standards/documentation_standard.md
@@ -195,7 +195,7 @@ git commit -m "docs: enforce agent reference figures"
 - Consumes: Orchestrator/Guardian manifests, primary graph, controller/run lifecycle, approval/event services, and current Reference prose.
 - Produces: four figure pairs and step-to-state-to-evidence explanations that define coordination versus safety authority.
 
-- [ ] **Step 1: Create Orchestrator Figure 1 and embed it**
+- [x] **Step 1: Create Orchestrator Figure 1 and embed it**
 
 Show `Operator intent -> Orchestrator -> active domain agent`, prior accepted
 Knowledge/BO/failure context into Orchestrator, domain result back to
@@ -213,7 +213,7 @@ the executable graph remains authoritative and runtime effectiveness is not
 evaluated here.
 ```
 
-- [ ] **Step 2: Create Orchestrator Figure 2 and add execution detail**
+- [x] **Step 2: Create Orchestrator Figure 2 and add execution detail**
 
 Show pre-execution IDs `01`–`03`, internal IDs `01`–`09`, grouped only as:
 intent/mission, plan/read-only checks, context/handoff, follow-up/decision,
@@ -225,14 +225,14 @@ Add an `Execution trace details` table covering phase, state read, decision,
 state written, evidence, and stop/recovery rule. Explain session transcript
 versus checkpointed run state versus external device state.
 
-- [ ] **Step 3: Create Guardian Figure 1 and embed it**
+- [x] **Step 3: Create Guardian Figure 1 and embed it**
 
 Show current run state, agent failures, device health, queue state, approval
 state, and safety budget entering Guardian; show continue/review/stop/error
 leaving Guardian for Orchestrator route translation; show incidents,
 corrective actions, and approval records as evidence.
 
-- [ ] **Step 4: Create Guardian Figure 2 and add execution detail**
+- [x] **Step 4: Create Guardian Figure 2 and add execution detail**
 
 Show internal IDs `01_collect_graphwide_safety_state`,
 `02_evaluate_recent_failures`, and `03_decide_continue_stop_or_error`, the
@@ -244,12 +244,12 @@ Add detailed rows for known safe continuation, missing approval, uncertain
 effect, exhausted budget, corrective review, and terminal stop. State the
 evidence required before Orchestrator may resume routing.
 
-- [ ] **Step 5: Render and validate the four control-plane pairs**
+- [x] **Step 5: Render and validate the four control-plane pairs**
 
 Run `dot -Tsvg` for each source, direct `validate_document()` for both
 References, and `git diff --check`.
 
-- [ ] **Step 6: Commit control-plane figures**
+- [x] **Step 6: Commit control-plane figures**
 
 ```bash
 git add docs/agents/assets/figures/orchestrator_* docs/agents/assets/figures/guardian_* docs/agents/orchestrator_agent.md docs/agents/guardian_agent.md
@@ -270,7 +270,7 @@ git commit -m "docs: illustrate orchestrator and guardian agents"
 - Consumes: Design/BO manifests, deterministic selection/acquisition behavior, Knowledge/Analysis handoffs, and graph execution boundary.
 - Produces: four figure pairs explaining the governed proposal feedback loop without implying device authority.
 
-- [ ] **Step 1: Add Design handoff and execution figures**
+- [x] **Step 1: Add Design handoff and execution figures**
 
 Figure 1 shows Orchestrator objective plus Knowledge/BO/failure context entering
 Design and `experiment_spec`, candidate ledger, design report, decisions,
@@ -282,7 +282,7 @@ constraint/repair gate, scoring, authoritative selection, report, and handoff.
 Place LLM rationale review beside—not after—the authoritative selection path,
 with no edge granting it constraint bypass.
 
-- [ ] **Step 2: Expand Design execution and handoff detail**
+- [x] **Step 2: Expand Design execution and handoff detail**
 
 Add a trace table separating required objective/constraints, optional prior
 context, candidate repair versus rejection, authoritative deterministic score,
@@ -290,7 +290,7 @@ LLM rationale metadata, accepted state merge, and no-valid-candidate recovery.
 Explain why planning and graph-authoring APIs are connected/operator surfaces,
 not a dedicated Design execution API.
 
-- [ ] **Step 3: Add BO handoff and execution figures**
+- [x] **Step 3: Add BO handoff and execution figures**
 
 Figure 1 shows Analysis evidence and Knowledge priors/constraints entering BO,
 ranked candidates/recommendation returning through Guardian and Orchestrator to
@@ -302,14 +302,14 @@ preference, constraints/failure penalties, top-k critique, recommendation,
 artifacts, and Design handoff. Numeric acquisition and validators must be on
 the authoritative solid path; LLM preference is a bounded dashed input.
 
-- [ ] **Step 4: Expand BO evidence and proposal-boundary detail**
+- [x] **Step 4: Expand BO evidence and proposal-boundary detail**
 
 Add trace rows for analysis handoff validity, prior-trial deduplication,
 constraint rejection, acquisition score, failure penalty, critique, final
 proposal, and downstream governance. Distinguish config save, benchmark,
 direct workspace run, and closed-loop execution evidence.
 
-- [ ] **Step 5: Render, validate, and commit**
+- [x] **Step 5: Render, validate, and commit**
 
 Render all four sources, validate both documents directly, audit all 12 Design
 and 15 BO internal IDs, then commit:
@@ -335,7 +335,7 @@ git commit -m "docs: illustrate design and bo agents"
 - Consumes: Specimen/Vision manifests, printer manager/providers, camera/pose/UTM services, and manipulation verification contracts.
 - Produces: six figure pairs showing the manufacturing-observation boundary, freshness, proof, and physical-effect gates.
 
-- [ ] **Step 1: Add three Specimen figures**
+- [x] **Step 1: Add three Specimen figures**
 
 Figure 1 shows Design specification to Specimen, manufacturing artifacts and
 readiness to Vision/Manipulation, equipment-ready handoff, Guardian/operator
@@ -352,7 +352,7 @@ camera, bed-clear, hash, and completion proof returning to ATR. Bambu active
 selection and Prusa operator selection are labeled configurations, not
 equivalent validation.
 
-- [ ] **Step 2: Expand Specimen digital-thread and recovery detail**
+- [x] **Step 2: Expand Specimen digital-thread and recovery detail**
 
 Add trace/lifecycle rows for specification validation, geometry, mesh QA,
 manufacturability, slicing, source/patched hash, start draft/gate/publish,
@@ -360,7 +360,7 @@ post-publish observation, autoejection/bed-clear, completion audit, and
 Vision/Manipulation handoff. State exactly which evidence is inspected before
 republish or next-job release.
 
-- [ ] **Step 3: Add three Vision figures**
+- [x] **Step 3: Add three Vision figures**
 
 Figure 1 shows Specimen/Manipulation/Equipment context plus cameras entering
 Vision, then `vision_report.v1`, `vision_signal.v1`, pose/evidence, placement
@@ -376,14 +376,14 @@ test, UTM runtime and camera APIs, camera/ROS sources, signal arbitration,
 evidence, and rollout-stop service. Mark observation paths read-only and the
 verified stop path physical-process-affecting.
 
-- [ ] **Step 4: Expand Vision freshness and connection detail**
+- [x] **Step 4: Expand Vision freshness and connection detail**
 
 Add trace rows for capture source, timestamp/expiry, confidence/quality,
 degraded result, arbitration, downstream rejection, evidence reference, and
 verified stop. Add connection lifecycle rows for pose tracker, LeRobot camera,
 UTM runtime/camera, and rollout stop.
 
-- [ ] **Step 5: Render, validate, and commit**
+- [x] **Step 5: Render, validate, and commit**
 
 Render all six sources; audit 11/6 Specimen and 11/7 Vision step/tool coverage;
 validate both documents; commit:
@@ -409,7 +409,7 @@ git commit -m "docs: illustrate specimen and vision agents"
 - Consumes: Manipulation/Equipment manifests, LeRobot and equipment bridge APIs, Vision freshness and placement verification, and physical safety boundaries.
 - Produces: six figure pairs that expose robot and instrument execution, stop/status ownership, and unknown-effect recovery.
 
-- [ ] **Step 1: Add three Manipulation figures**
+- [x] **Step 1: Add three Manipulation figures**
 
 Figure 1 shows Specimen plus fresh Vision signal entering the two supported
 tasks, post-place Vision verification, verified handoff to Equipment or
@@ -426,7 +426,7 @@ mirror, and visualization APIs around LeRobot services. Show policy process,
 serial/camera, optional Isaac services, robot, stop/status, visual proof, and
 dataset/checkpoint evidence.
 
-- [ ] **Step 2: Expand Manipulation lifecycle and uncertain-effect detail**
+- [x] **Step 2: Expand Manipulation lifecycle and uncertain-effect detail**
 
 Add trace/lifecycle rows for task resolution, camera return, profile/policy
 preflight, rollout session identity, bounded motion, event monitoring, SARM
@@ -434,7 +434,7 @@ progress, stop/status, visual verification, post-place signal, and downstream
 handoff. Explicitly prohibit replay until status and visual proof resolve an
 unknown rollout effect.
 
-- [ ] **Step 3: Add three Equipment figures**
+- [x] **Step 3: Add three Equipment figures**
 
 Figure 1 shows verified specimen placement plus profile/skill/protocol and
 approval entering Equipment, raw measurement and proof leaving for Analysis,
@@ -451,7 +451,7 @@ worker/local bridge, locators/screenshots/run-program/proof audit, UTM ROS
 runtime/camera, PyAutoGUI/desktop application, UTM instrument, and evidence
 return. UI and module descriptors must have no bypass edge.
 
-- [ ] **Step 4: Expand Equipment protocol and proof detail**
+- [x] **Step 4: Expand Equipment protocol and proof detail**
 
 Add connection lifecycle rows for registered skill, profile, worker/bridge,
 desktop application, UTM runtime, physical instrument, and proof audit. Add
@@ -459,7 +459,7 @@ trace rows for segment identity, pre/post screenshot, command evidence,
 measurement artifact, completion audit, and unknown-effect inspection before
 segment retry.
 
-- [ ] **Step 5: Render, validate, and commit**
+- [x] **Step 5: Render, validate, and commit**
 
 Render all six sources; audit both supported tasks, 11/4 Manipulation and 5/4
 Equipment step/tool coverage; validate both documents; commit:
@@ -485,7 +485,7 @@ git commit -m "docs: illustrate manipulation and equipment agents"
 - Consumes: Analysis/Knowledge manifests, CAE bridge, run artifacts, Knowledge repositories/services, graph sync, relation review, and BO context contracts.
 - Produces: six figure pairs distinguishing raw/derived evidence and durable local/graph state.
 
-- [ ] **Step 1: Add three Analysis figures**
+- [x] **Step 1: Add three Analysis figures**
 
 Figure 1 shows Equipment artifact and metadata entering Analysis; canonical
 curve, UTM metrics, optional FEM comparison, objective/uncertainty, evaluation,
@@ -502,7 +502,7 @@ Figure 3 shows run artifacts -> parser/metric logic -> derived artifacts and
 `/api/cae/config`/`run` -> CAE bridge -> optional CalculiX process ->
 FEM/result evidence. No physical-device edge exists.
 
-- [ ] **Step 2: Expand Analysis lineage and optional-process detail**
+- [x] **Step 2: Expand Analysis lineage and optional-process detail**
 
 Add trace rows with input hash, parser, unit resolution, raw/derived identity,
 quality gate, metric formula category, solver config/probe, comparison,
@@ -510,7 +510,7 @@ objective uncertainty, and BO handoff. Add connection lifecycle rows for the
 optional CAE process including known-no-effect cancellation versus ambiguous
 external failure.
 
-- [ ] **Step 3: Add three Knowledge figures**
+- [x] **Step 3: Add three Knowledge figures**
 
 Figure 1 shows accepted stage artifacts/reports/decisions/provenance entering
 Knowledge and BO/Design/Guardian/Evolution contexts leaving, with durable
@@ -526,14 +526,14 @@ outbox, optional graph/Neo4j/Graphify, relation scan/reconcile/operator review,
 existing-node edit validation, bounded query, already-loaded model with
 priority lease, and graph receipts. No raw-Cypher or auto-activation edge exists.
 
-- [ ] **Step 4: Expand Knowledge durability and degraded-sync detail**
+- [x] **Step 4: Expand Knowledge durability and degraded-sync detail**
 
 Add trace/lifecycle rows for provenance normalization, ontology validation,
 ledger append, local record, outbox enqueue, graph write, receipt, context
 read, relation proposal/review, and evolution recommendation. Explain which
 state remains authoritative when optional graph sync is degraded.
 
-- [ ] **Step 5: Render, validate, and commit**
+- [x] **Step 5: Render, validate, and commit**
 
 Render all six sources; audit 22/1 Analysis and 12/8/5 Knowledge
 step/tool/output/transition coverage; validate both documents; commit:
@@ -557,7 +557,7 @@ git commit -m "docs: illustrate analysis and knowledge agents"
 - Consumes: all 26 rendered figures and ten canonical References.
 - Produces: a ten-row public entry table and consistent index/matrix/paper navigation.
 
-- [ ] **Step 1: Add the root README Agent References table**
+- [x] **Step 1: Add the root README Agent References table**
 
 Insert a top-level `## Agent References` section after the closed-loop system
 explanation. Link the Agent Index and API/Connection Matrix above the table.
@@ -579,14 +579,14 @@ Use exactly these rows and bounded role/effect messages:
 Add `Details` links to every agent document and `Figures` links to every SVG
 owned by that row.
 
-- [ ] **Step 2: Add figure navigation to the agent index**
+- [x] **Step 2: Add figure navigation to the agent index**
 
 Add a concise `Visual Contract` section and a `Figures` column to the canonical
 inventory. Each row links `Flow`, `Execution`, and `Connections` where present.
 State that figures are inspection-backed projections and the executable graph,
 manifest, routes, and bridges remain authoritative.
 
-- [ ] **Step 3: Update matrix, documentation index, paper appendix, and changelog**
+- [x] **Step 3: Update matrix, documentation index, paper appendix, and changelog**
 
 - Matrix: link to the visual inventory after Summary and explain that the
   matrix compares cross-agent facts while figures explain one agent.
@@ -597,13 +597,13 @@ manifest, routes, and bridges remain authoritative.
 - Changelog: add 26 paired figures, deeper execution/connection/recovery
   detail, root navigation table, and automated figure checks under Unreleased.
 
-- [ ] **Step 4: Run navigation and document validation**
+- [x] **Step 4: Run navigation and document validation**
 
 Run the general validator, paper validator, focused tests, and direct link scan.
 Expected: all ten root links, 26 image links, sources, renderings, and captions
 are accepted.
 
-- [ ] **Step 5: Commit navigation integration**
+- [x] **Step 5: Commit navigation integration**
 
 ```bash
 git add README.md docs/agents/README.md docs/agents/agent_api_connection_matrix.md docs/README.md docs/paper/appendix_a_interfaces.md CHANGELOG.md
@@ -619,32 +619,32 @@ git commit -m "docs: expose illustrated agent references"
 - Consumes: completed figure/document/navigation set.
 - Produces: fresh render equivalence, manifest coverage, route consistency, public-content safety, and a documentation-only final diff.
 
-- [ ] **Step 1: Verify exact asset and embedding inventory**
+- [x] **Step 1: Verify exact asset and embedding inventory**
 
 Assert 26 `.dot` and 26 `.svg` files, two figures in every agent document,
 three only in the six complex documents, and matching stable caption markers.
 Assert the root README contains exactly ten canonical agent rows.
 
-- [ ] **Step 2: Compare fresh Graphviz output**
+- [x] **Step 2: Compare fresh Graphviz output**
 
 Create a temporary directory with `mktemp -d`, render every `.dot` source using
 Graphviz 2.43.0-compatible `dot -Tsvg`, and compare each byte-for-byte with its
 checked-in SVG. Remove only the explicit temporary directory after comparison.
 
-- [ ] **Step 3: Re-audit manifest and API coverage**
+- [x] **Step 3: Re-audit manifest and API coverage**
 
 For all ten manifests, confirm every tool, pre-execution ID, internal-step ID,
 output contract, supported task, and transition condition still appears in the
 owning Reference. Import `app.main.app` and recheck every literal or grouped API
 path in the modified References against `APIRoute` objects.
 
-- [ ] **Step 4: Run public-content scans**
+- [x] **Step 4: Run public-content scans**
 
 Run unresolved-marker, personal-path, secret, malformed-table-pipe, and broken
 local-link scans over the ten References, index, matrix, root README, and SVG
 labels. Expected: no matches or validation defects.
 
-- [ ] **Step 5: Run final required checks**
+- [x] **Step 5: Run final required checks**
 
 ```bash
 .venv/bin/python scripts/validate_documentation.py
@@ -661,7 +661,7 @@ Expected: both validators pass; all focused tests pass; Python compilation
 passes; no whitespace errors; `.env.example` is the only unrelated
 modification.
 
-- [ ] **Step 6: Mark this Plan completed and commit audit corrections**
+- [x] **Step 6: Mark this Plan completed and commit audit corrections**
 
 Set all Plan checkboxes to complete and `execution_status: completed`. Stage
 only files in this Plan and commit:
