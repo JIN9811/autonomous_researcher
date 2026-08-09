@@ -60,6 +60,78 @@ SNAPSHOT_LABELS = {
     "graph_edges": "Graph edges",
     "stage_dispatch_edges": "stage_dispatch edges",
 }
+AGENT_REFERENCE_PATHS = {
+    "orchestrator": "docs/agents/orchestrator_agent.md",
+    "design": "docs/agents/design_agent.md",
+    "specimen": "docs/agents/specimen_agent.md",
+    "vision": "docs/agents/vision_agent.md",
+    "manipulation": "docs/agents/manipulation_agent.md",
+    "equipment": "docs/agents/equipment_agent.md",
+    "analysis": "docs/agents/analysis_agent.md",
+    "knowledge": "docs/agents/knowledge_agent.md",
+    "bo": "docs/agents/bo_agent.md",
+    "guardian": "docs/agents/guardian_agent.md",
+}
+AGENT_REFERENCE_FIGURES = {
+    "orchestrator": (
+        "orchestrator_01_closed_loop_handoffs",
+        "orchestrator_02_execution_effect_boundary",
+    ),
+    "design": (
+        "design_01_closed_loop_handoffs",
+        "design_02_execution_effect_boundary",
+    ),
+    "specimen": (
+        "specimen_01_closed_loop_handoffs",
+        "specimen_02_execution_effect_boundary",
+        "specimen_03_api_connection_architecture",
+    ),
+    "vision": (
+        "vision_01_closed_loop_handoffs",
+        "vision_02_execution_effect_boundary",
+        "vision_03_api_connection_architecture",
+    ),
+    "manipulation": (
+        "manipulation_01_closed_loop_handoffs",
+        "manipulation_02_execution_effect_boundary",
+        "manipulation_03_api_connection_architecture",
+    ),
+    "equipment": (
+        "equipment_01_closed_loop_handoffs",
+        "equipment_02_execution_effect_boundary",
+        "equipment_03_api_connection_architecture",
+    ),
+    "analysis": (
+        "analysis_01_closed_loop_handoffs",
+        "analysis_02_execution_effect_boundary",
+        "analysis_03_api_connection_architecture",
+    ),
+    "knowledge": (
+        "knowledge_01_closed_loop_handoffs",
+        "knowledge_02_execution_effect_boundary",
+        "knowledge_03_api_connection_architecture",
+    ),
+    "bo": (
+        "bo_01_closed_loop_handoffs",
+        "bo_02_execution_effect_boundary",
+    ),
+    "guardian": (
+        "guardian_01_closed_loop_handoffs",
+        "guardian_02_execution_effect_boundary",
+    ),
+}
+AGENT_REFERENCE_TITLES = {
+    "orchestrator": "Orchestrator",
+    "design": "Design",
+    "specimen": "Specimen",
+    "vision": "Vision",
+    "manipulation": "Manipulation",
+    "equipment": "Equipment",
+    "analysis": "Analysis",
+    "knowledge": "Knowledge",
+    "bo": "BO",
+    "guardian": "Guardian",
+}
 
 
 def split_front_matter(text: str) -> tuple[dict[str, Any], str]:
@@ -167,6 +239,48 @@ def _validate_local_links(path: Path, body: str, root: Path, label: str) -> list
     return errors
 
 
+def _validate_agent_reference_figures(
+    path: Path, body: str, root: Path, label: str
+) -> list[str]:
+    """Return missing source, rendering, embedding, and caption defects."""
+
+    try:
+        relative_path = path.resolve().relative_to(root.resolve()).as_posix()
+    except ValueError:
+        return []
+    agent_id = next(
+        (
+            candidate
+            for candidate, expected_path in AGENT_REFERENCE_PATHS.items()
+            if relative_path == expected_path
+        ),
+        None,
+    )
+    if agent_id is None:
+        return []
+
+    errors: list[str] = []
+    targets = set(_markdown_link_targets(body))
+    title = AGENT_REFERENCE_TITLES[agent_id]
+    figure_root = root / "docs/agents/assets/figures"
+    for index, stem in enumerate(AGENT_REFERENCE_FIGURES[agent_id], start=1):
+        source = figure_root / f"{stem}.dot"
+        rendering = figure_root / f"{stem}.svg"
+        link = f"assets/figures/{stem}.svg"
+        caption = f"**Figure {title}-{index}.**"
+        if not source.is_file():
+            errors.append(f"{label}: missing agent figure source: {source.relative_to(root)}")
+        if not rendering.is_file():
+            errors.append(
+                f"{label}: missing agent figure rendering: {rendering.relative_to(root)}"
+            )
+        if link not in targets:
+            errors.append(f"{label}: missing agent figure link: {link}")
+        if caption not in body:
+            errors.append(f"{label}: missing agent figure caption: {caption}")
+    return errors
+
+
 def validate_document(path: Path, root: Path) -> list[str]:
     """Return all governance defects found in one Markdown document."""
 
@@ -232,6 +346,7 @@ def validate_document(path: Path, root: Path) -> list[str]:
 
     errors.extend(_validate_paths(metadata, root, label))
     errors.extend(_validate_local_links(path, body, root, label))
+    errors.extend(_validate_agent_reference_figures(path, body, root, label))
     return errors
 
 
@@ -293,6 +408,29 @@ def _validate_snapshot(
     return errors
 
 
+def _validate_root_agent_navigation(
+    root: Path, documents: list[str], manifest_label: str
+) -> list[str]:
+    """Require root README links when the full canonical agent set is governed."""
+
+    required_paths = set(AGENT_REFERENCE_PATHS.values())
+    if not required_paths.issubset(set(documents)):
+        return []
+    readme = root / "README.md"
+    if not readme.is_file():
+        return [f"{manifest_label}: missing root README for agent navigation"]
+    try:
+        _, body = split_front_matter(readme.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ValueError, yaml.YAMLError) as exc:
+        return [f"{manifest_label}: cannot inspect root README agent navigation: {exc}"]
+    targets = set(_markdown_link_targets(body))
+    return [
+        f"{manifest_label}: missing root README agent link: {path}"
+        for path in AGENT_REFERENCE_PATHS.values()
+        if path not in targets
+    ]
+
+
 def validate_manifest(root: Path, manifest_path: Path) -> list[str]:
     """Validate the governed document set declared by one manifest."""
 
@@ -332,6 +470,7 @@ def validate_manifest(root: Path, manifest_path: Path) -> list[str]:
         else:
             errors.extend(validate_document(document_path, root))
 
+    errors.extend(_validate_root_agent_navigation(root, documents, label))
     errors.extend(_validate_snapshot(root, manifest.get("snapshot"), label))
     return errors
 

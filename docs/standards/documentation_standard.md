@@ -241,6 +241,67 @@ label them as legacy or unclassified when their authority could be ambiguous.
 Migration SHOULD happen in reviewable domain batches and MUST split mixed
 current/future content by authority rather than merely relabel it.
 
+## Agent Reference Figures
+
+The ten canonical `docs/agents/*_agent.md` References MUST include paired,
+implementation-backed architecture figures. This requirement does not apply
+retroactively to legacy agent guidelines.
+
+Every canonical agent Reference MUST include:
+
+1. a closed-loop position and handoff figure;
+2. an internal execution and effect-boundary figure.
+
+Specimen, Vision, Manipulation, Equipment, Analysis, and Knowledge MUST also
+include an API and connection architecture figure. These six agents have
+bridge, external-service, device, or persistence boundaries that would be
+ambiguous if compressed into the execution figure.
+
+All agent figure assets MUST:
+
+- live under `docs/agents/assets/figures/`;
+- use the stable stems defined by the approved
+  [Agent Reference Figures and Navigation Design](../superpowers/specs/2026-08-09-agent-reference-figures-and-navigation-design.md);
+- include an editable `.dot` source and same-stem checked-in `.svg` rendering;
+- be embedded through a repository-relative Markdown image link in the owning
+  Reference;
+- use a stable caption marker such as `**Figure Vision-2.**`;
+- state the figure's message, scope, and `inspection` evidence boundary in the
+  caption;
+- use text, shape, border, and edge style so meaning does not rely on color;
+- show current required paths with solid edges and label dashed optional,
+  compatibility, or fallback paths;
+- distinguish control flow, evidence flow, model advice, external service, and
+  physical or desktop effect;
+- avoid implying that manifest internal steps are separately scheduled
+  top-level graph nodes unless the executable graph establishes that fact.
+
+An agent figure is an explanatory projection. Executable code, the primary
+graph, module manifest, imported FastAPI routes, bridge implementations, and
+declared evidence remain authoritative. A figure MUST NOT promote inspection
+into runtime, browser, simulation, live, safety-effectiveness, or scientific
+evidence.
+
+The root `README.md` MUST link all ten canonical agent References whenever the
+complete set is governed by `docs/document_manifest.yaml`. The agent index MUST
+also expose direct figure navigation. Moving or renaming a figure therefore
+requires updating the owning Reference, root README, agent index, inbound
+links, validator inventory, and this Standard's governing Design when the
+semantic contract changes.
+
+Render changed sources from repository root:
+
+```bash
+find docs/agents/assets/figures -name '*.dot' -print0 \
+  | while IFS= read -r -d '' source; do
+      dot -Tsvg "$source" -o "${source%.dot}.svg"
+    done
+```
+
+Before completion, render every source into an explicit temporary directory
+and compare it byte-for-byte with the checked-in SVG. A missing pair, missing
+embedding, missing caption, or stale rendering is a documentation defect.
+
 ## Required Checks
 
 Every change to a governed document MUST run:

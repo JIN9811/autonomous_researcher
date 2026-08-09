@@ -65,6 +65,68 @@ VALID_SNAPSHOT = VALID_INDEX + dedent(
     """
 )
 
+TEST_AGENT_FIGURES = {
+    "orchestrator": (
+        "orchestrator_01_closed_loop_handoffs",
+        "orchestrator_02_execution_effect_boundary",
+    ),
+    "design": (
+        "design_01_closed_loop_handoffs",
+        "design_02_execution_effect_boundary",
+    ),
+    "specimen": (
+        "specimen_01_closed_loop_handoffs",
+        "specimen_02_execution_effect_boundary",
+        "specimen_03_api_connection_architecture",
+    ),
+    "vision": (
+        "vision_01_closed_loop_handoffs",
+        "vision_02_execution_effect_boundary",
+        "vision_03_api_connection_architecture",
+    ),
+    "manipulation": (
+        "manipulation_01_closed_loop_handoffs",
+        "manipulation_02_execution_effect_boundary",
+        "manipulation_03_api_connection_architecture",
+    ),
+    "equipment": (
+        "equipment_01_closed_loop_handoffs",
+        "equipment_02_execution_effect_boundary",
+        "equipment_03_api_connection_architecture",
+    ),
+    "analysis": (
+        "analysis_01_closed_loop_handoffs",
+        "analysis_02_execution_effect_boundary",
+        "analysis_03_api_connection_architecture",
+    ),
+    "knowledge": (
+        "knowledge_01_closed_loop_handoffs",
+        "knowledge_02_execution_effect_boundary",
+        "knowledge_03_api_connection_architecture",
+    ),
+    "bo": (
+        "bo_01_closed_loop_handoffs",
+        "bo_02_execution_effect_boundary",
+    ),
+    "guardian": (
+        "guardian_01_closed_loop_handoffs",
+        "guardian_02_execution_effect_boundary",
+    ),
+}
+
+TEST_AGENT_TITLES = {
+    "orchestrator": "Orchestrator",
+    "design": "Design",
+    "specimen": "Specimen",
+    "vision": "Vision",
+    "manipulation": "Manipulation",
+    "equipment": "Equipment",
+    "analysis": "Analysis",
+    "knowledge": "Knowledge",
+    "bo": "BO",
+    "guardian": "Guardian",
+}
+
 
 def _write(root: Path, relative_path: str, content: str = "") -> Path:
     path = root / relative_path
@@ -97,6 +159,32 @@ def _write_manifest(
         "docs/document_manifest.yaml",
         yaml.safe_dump(manifest, sort_keys=False),
     )
+
+
+def _write_agent_reference(
+    root: Path,
+    agent_id: str,
+    *,
+    figure_count: int | None = None,
+) -> Path:
+    _write(root, "app/main.py")
+    _write(root, "docs/related.md", "# Related\n")
+    stems = TEST_AGENT_FIGURES[agent_id]
+    if figure_count is not None:
+        stems = stems[:figure_count]
+    title = TEST_AGENT_TITLES[agent_id]
+    figures: list[str] = []
+    for index, stem in enumerate(stems, start=1):
+        _write(root, f"docs/agents/assets/figures/{stem}.dot", "digraph G {}\n")
+        _write(root, f"docs/agents/assets/figures/{stem}.svg", "<svg/>\n")
+        figures.extend(
+            (
+                f"![{title} figure {index}](assets/figures/{stem}.svg)",
+                f"**Figure {title}-{index}.** Inspection-backed architecture scope.",
+            )
+        )
+    body = VALID_REFERENCE + "\n" + "\n\n".join(figures) + "\n"
+    return _write(root, f"docs/agents/{agent_id}_agent.md", body)
 
 
 def _load_validator():
@@ -183,6 +271,94 @@ def test_document_accepts_existing_local_and_external_links(tmp_path: Path) -> N
     )
 
     assert module.validate_document(document, tmp_path) == []
+
+
+def test_simple_agent_reference_requires_two_complete_figure_pairs(tmp_path: Path) -> None:
+    module = _load_validator()
+    document = _write_agent_reference(tmp_path, "orchestrator")
+
+    assert module.validate_document(document, tmp_path) == []
+
+    source = (
+        tmp_path
+        / "docs/agents/assets/figures/orchestrator_01_closed_loop_handoffs.dot"
+    )
+    source.unlink()
+    errors = module.validate_document(document, tmp_path)
+
+    assert any("missing agent figure source" in error for error in errors)
+
+
+def test_complex_agent_reference_requires_third_figure(tmp_path: Path) -> None:
+    module = _load_validator()
+    document = _write_agent_reference(tmp_path, "specimen", figure_count=2)
+
+    errors = module.validate_document(document, tmp_path)
+
+    assert any(
+        "specimen_03_api_connection_architecture" in error for error in errors
+    )
+
+
+def test_agent_reference_rejects_missing_rendering_link_and_caption(
+    tmp_path: Path,
+) -> None:
+    module = _load_validator()
+    document = _write_agent_reference(tmp_path, "design")
+    rendering = (
+        tmp_path
+        / "docs/agents/assets/figures/design_01_closed_loop_handoffs.svg"
+    )
+    rendering.unlink()
+    text = document.read_text(encoding="utf-8")
+    text = text.replace(
+        "![Design figure 2](assets/figures/design_02_execution_effect_boundary.svg)\n\n",
+        "",
+    )
+    text = text.replace("**Figure Design-2.**", "**Execution boundary.**")
+    document.write_text(text, encoding="utf-8")
+
+    errors = module.validate_document(document, tmp_path)
+
+    assert any("missing agent figure rendering" in error for error in errors)
+    assert any("missing agent figure link" in error for error in errors)
+    assert any("missing agent figure caption" in error for error in errors)
+
+
+def test_manifest_requires_root_readme_links_for_all_canonical_agents(
+    tmp_path: Path,
+) -> None:
+    module = _load_validator()
+    _write(tmp_path, "README.md", VALID_INDEX)
+    documents = ["README.md"]
+    for agent_id in TEST_AGENT_FIGURES:
+        document = _write_agent_reference(tmp_path, agent_id)
+        documents.append(document.relative_to(tmp_path).as_posix())
+    manifest = _write_manifest(tmp_path, documents)
+
+    errors = module.validate_manifest(tmp_path, manifest)
+
+    assert len(
+        [error for error in errors if "missing root README agent link" in error]
+    ) == 10
+
+
+def test_manifest_accepts_root_readme_links_for_all_canonical_agents(
+    tmp_path: Path,
+) -> None:
+    module = _load_validator()
+    links = "\n".join(
+        f"[{agent_id}](docs/agents/{agent_id}_agent.md)"
+        for agent_id in TEST_AGENT_FIGURES
+    )
+    _write(tmp_path, "README.md", VALID_INDEX + "\n" + links + "\n")
+    documents = ["README.md"]
+    for agent_id in TEST_AGENT_FIGURES:
+        document = _write_agent_reference(tmp_path, agent_id)
+        documents.append(document.relative_to(tmp_path).as_posix())
+    manifest = _write_manifest(tmp_path, documents)
+
+    assert module.validate_manifest(tmp_path, manifest) == []
 
 
 def test_manifest_rejects_duplicate_documents(tmp_path: Path) -> None:
