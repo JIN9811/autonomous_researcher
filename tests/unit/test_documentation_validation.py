@@ -260,6 +260,55 @@ TEST_DEVICE_BRIDGE_SOURCE_CONTRACTS = {
     ),
 }
 
+TEST_RUNTIME_IDE_SECTIONS = (
+    "Summary",
+    "Scope",
+    "Source of Truth",
+    "System Position and Authority Boundary",
+    "Operator Surface Map",
+    "Entry Paths and Context Handoffs",
+    "Graph Draft Editing",
+    "Module and Bridge Descriptor Editing",
+    "Validation, Compilation, and Dry-Run Gates",
+    "Versioning, Save, and Activation",
+    "Operator Workflow",
+    "Run Modes and Execution Effects",
+    "API and Connection Architecture",
+    "Runtime Events, Timeline, and Artifact Evidence",
+    "Approvals, Safety, and Stop Controls",
+    "Persistence and Configuration Ownership",
+    "Errors and Recovery",
+    "Verification",
+    "Limitations and Known Gaps",
+    "Related Documents",
+)
+
+TEST_RUNTIME_IDE_FIGURES = (
+    "runtime_ide_01_system_boundaries",
+    "runtime_ide_02_config_activation_flow",
+    "runtime_ide_03_observability_evidence_flow",
+)
+
+TEST_RUNTIME_IDE_SOURCE_CONTRACTS = (
+    ("app/main.py", '@app.get("/ide", response_class=HTMLResponse)'),
+    ("app/main.py", '@app.put("/api/graphs/{graph_id}")'),
+    ("app/main.py", '@app.post("/api/graphs/{graph_id}/dry-run")'),
+    ("app/main.py", '@app.post("/api/graphs/{graph_id}/run")'),
+    (
+        "app/main.py",
+        '@app.post("/api/runs/{run_id}/approvals/{approval_id}/resolve")',
+    ),
+    (
+        "app/main.py",
+        '@app.get("/api/runs/{run_id}/artifact-file/{artifact_path:path}")',
+    ),
+    ("web/templates/runtime_ide.html", 'id="ide-run-live-confirm"'),
+    (
+        "web/static/runtime_ide.js",
+        'document.getElementById("ide-run-live-confirm")',
+    ),
+)
+
 
 def _write(root: Path, relative_path: str, content: str = "") -> Path:
     path = root / relative_path
@@ -341,6 +390,31 @@ def _write_device_bridge_reference(root: Path, bridge_id: str) -> Path:
     sections = "\n\n".join(f"## {heading}\n\nCurrent inspected behavior." for heading in TEST_DEVICE_BRIDGE_SECTIONS)
     body = VALID_REFERENCE + "\n" + sections + "\n\n" + "\n\n".join(figures) + "\n"
     return _write(root, path, body)
+
+
+def _write_runtime_ide_reference(root: Path) -> Path:
+    for source_path, token in TEST_RUNTIME_IDE_SOURCE_CONTRACTS:
+        path = root / source_path
+        existing = path.read_text(encoding="utf-8") if path.is_file() else ""
+        if token not in existing:
+            _write(root, source_path, existing + token + "\n")
+    _write(root, "docs/related.md", "# Related\n")
+    figures: list[str] = []
+    for index, stem in enumerate(TEST_RUNTIME_IDE_FIGURES, start=1):
+        _write(root, f"docs/runtime/assets/figures/{stem}.dot", "digraph G {}\n")
+        _write(root, f"docs/runtime/assets/figures/{stem}.svg", "<svg/>\n")
+        figures.extend(
+            (
+                f"![Runtime IDE figure {index}](assets/figures/{stem}.svg)",
+                f"**Figure Runtime IDE-{index}.** Inspection-backed architecture scope.",
+            )
+        )
+    sections = "\n\n".join(
+        f"## {heading}\n\nCurrent inspected behavior."
+        for heading in TEST_RUNTIME_IDE_SECTIONS
+    )
+    body = VALID_REFERENCE + "\n" + sections + "\n\n" + "\n\n".join(figures) + "\n"
+    return _write(root, "docs/runtime/runtime_ide.md", body)
 
 
 def _load_validator():
@@ -642,6 +716,105 @@ def test_manifest_rejects_undeclared_device_bridge_figure_assets(tmp_path: Path)
 
     assert any("undeclared device bridge figure source" in error for error in errors)
     assert any("undeclared device bridge figure rendering" in error for error in errors)
+
+
+def test_runtime_ide_reference_requires_all_sections_in_order(tmp_path: Path) -> None:
+    module = _load_validator()
+    document = _write_runtime_ide_reference(tmp_path)
+    text = document.read_text(encoding="utf-8")
+    text = text.replace(
+        "## Operator Surface Map\n\nCurrent inspected behavior.\n\n",
+        "",
+    )
+    text = text.replace(
+        "## Operator Workflow\n\nCurrent inspected behavior.\n\n"
+        "## Run Modes and Execution Effects\n\nCurrent inspected behavior.",
+        "## Run Modes and Execution Effects\n\nCurrent inspected behavior.\n\n"
+        "## Operator Workflow\n\nCurrent inspected behavior.",
+    )
+    document.write_text(text, encoding="utf-8")
+
+    errors = module.validate_document(document, tmp_path)
+
+    assert any("missing Runtime IDE section: Operator Surface Map" in error for error in errors)
+    assert any("Runtime IDE section out of order: Run Modes and Execution Effects" in error for error in errors)
+
+
+def test_runtime_ide_reference_requires_figure_pairs_embeds_and_captions(
+    tmp_path: Path,
+) -> None:
+    module = _load_validator()
+    document = _write_runtime_ide_reference(tmp_path)
+    source = tmp_path / "docs/runtime/assets/figures/runtime_ide_01_system_boundaries.dot"
+    rendering = tmp_path / "docs/runtime/assets/figures/runtime_ide_02_config_activation_flow.svg"
+    source.unlink()
+    rendering.unlink()
+    _write(
+        tmp_path,
+        "docs/runtime/assets/figures/runtime_ide_untracked.dot",
+        "digraph G {}\n",
+    )
+    _write(
+        tmp_path,
+        "docs/runtime/assets/figures/runtime_ide_untracked.svg",
+        "<svg/>\n",
+    )
+    text = document.read_text(encoding="utf-8")
+    text = text.replace(
+        "![Runtime IDE figure 3](assets/figures/runtime_ide_03_observability_evidence_flow.svg)\n\n",
+        "",
+    )
+    text = text.replace("**Figure Runtime IDE-1.**", "**System boundary.**")
+    document.write_text(text, encoding="utf-8")
+
+    errors = module.validate_document(document, tmp_path)
+
+    assert any("missing Runtime IDE figure source" in error for error in errors)
+    assert any("missing Runtime IDE figure rendering" in error for error in errors)
+    assert any("missing Runtime IDE figure link" in error for error in errors)
+    assert any("missing Runtime IDE figure caption" in error for error in errors)
+    assert any("undeclared Runtime IDE figure source" in error for error in errors)
+    assert any("undeclared Runtime IDE figure rendering" in error for error in errors)
+
+
+def test_runtime_ide_reference_detects_high_consequence_source_drift(
+    tmp_path: Path,
+) -> None:
+    module = _load_validator()
+    document = _write_runtime_ide_reference(tmp_path)
+    source = tmp_path / "app/main.py"
+    source.write_text("# graph run and gate routes removed\n", encoding="utf-8")
+
+    errors = module.validate_document(document, tmp_path)
+
+    assert any("missing Runtime IDE source contract" in error for error in errors)
+    assert any("/api/graphs/{graph_id}/dry-run" in error for error in errors)
+    assert any("/api/runs/{run_id}/approvals/{approval_id}/resolve" in error for error in errors)
+
+
+def test_manifest_requires_runtime_ide_navigation_links(tmp_path: Path) -> None:
+    module = _load_validator()
+    _write(tmp_path, "README.md", VALID_INDEX)
+    _write(tmp_path, "README.ko.md", VALID_INDEX)
+    _write(tmp_path, "README.en.md", VALID_INDEX)
+    _write(tmp_path, "docs/README.md", VALID_INDEX)
+    _write(tmp_path, "docs/runtime/langgraph_runtime.md", VALID_REFERENCE)
+    document = _write_runtime_ide_reference(tmp_path)
+    documents = [
+        "README.md",
+        "README.ko.md",
+        "README.en.md",
+        "docs/README.md",
+        "docs/runtime/langgraph_runtime.md",
+        document.relative_to(tmp_path).as_posix(),
+    ]
+    manifest = _write_manifest(tmp_path, documents)
+
+    errors = module.validate_manifest(tmp_path, manifest)
+
+    assert len(
+        [error for error in errors if "missing Runtime IDE navigation link" in error]
+    ) == 5
 
 
 def test_manifest_rejects_duplicate_documents(tmp_path: Path) -> None:

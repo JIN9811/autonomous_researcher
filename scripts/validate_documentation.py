@@ -250,6 +250,60 @@ DEVICE_BRIDGE_SOURCE_CONTRACTS = {
         ("device_bridges/simulator/printer_sim.py", "class PrinterSimulator(BaseBridge):"),
     ),
 }
+RUNTIME_IDE_REFERENCE_PATH = "docs/runtime/runtime_ide.md"
+RUNTIME_IDE_REQUIRED_SECTIONS = (
+    "Summary",
+    "Scope",
+    "Source of Truth",
+    "System Position and Authority Boundary",
+    "Operator Surface Map",
+    "Entry Paths and Context Handoffs",
+    "Graph Draft Editing",
+    "Module and Bridge Descriptor Editing",
+    "Validation, Compilation, and Dry-Run Gates",
+    "Versioning, Save, and Activation",
+    "Operator Workflow",
+    "Run Modes and Execution Effects",
+    "API and Connection Architecture",
+    "Runtime Events, Timeline, and Artifact Evidence",
+    "Approvals, Safety, and Stop Controls",
+    "Persistence and Configuration Ownership",
+    "Errors and Recovery",
+    "Verification",
+    "Limitations and Known Gaps",
+    "Related Documents",
+)
+RUNTIME_IDE_REFERENCE_FIGURES = (
+    "runtime_ide_01_system_boundaries",
+    "runtime_ide_02_config_activation_flow",
+    "runtime_ide_03_observability_evidence_flow",
+)
+RUNTIME_IDE_SOURCE_CONTRACTS = (
+    ("app/main.py", '@app.get("/ide", response_class=HTMLResponse)'),
+    ("app/main.py", '@app.put("/api/graphs/{graph_id}")'),
+    ("app/main.py", '@app.post("/api/graphs/{graph_id}/dry-run")'),
+    ("app/main.py", '@app.post("/api/graphs/{graph_id}/run")'),
+    (
+        "app/main.py",
+        '@app.post("/api/runs/{run_id}/approvals/{approval_id}/resolve")',
+    ),
+    (
+        "app/main.py",
+        '@app.get("/api/runs/{run_id}/artifact-file/{artifact_path:path}")',
+    ),
+    ("web/templates/runtime_ide.html", 'id="ide-run-live-confirm"'),
+    (
+        "web/static/runtime_ide.js",
+        'document.getElementById("ide-run-live-confirm")',
+    ),
+)
+RUNTIME_IDE_NAVIGATION_LINKS = {
+    "README.md": "docs/runtime/runtime_ide.md",
+    "README.ko.md": "docs/runtime/runtime_ide.md",
+    "README.en.md": "docs/runtime/runtime_ide.md",
+    "docs/README.md": "runtime/runtime_ide.md",
+    "docs/runtime/langgraph_runtime.md": "runtime_ide.md",
+}
 
 
 def split_front_matter(text: str) -> tuple[dict[str, Any], str]:
@@ -465,6 +519,77 @@ def _validate_device_bridge_reference(
     return errors
 
 
+def _validate_runtime_ide_reference(
+    path: Path, body: str, root: Path, label: str
+) -> list[str]:
+    """Validate the Runtime IDE outline, figures, and stable source anchors."""
+
+    try:
+        relative_path = path.resolve().relative_to(root.resolve()).as_posix()
+    except ValueError:
+        return []
+    if relative_path != RUNTIME_IDE_REFERENCE_PATH:
+        return []
+
+    errors: list[str] = []
+    headings = re.findall(r"^##\s+(.+?)\s*$", body, re.MULTILINE)
+    heading_positions = {heading: headings.index(heading) for heading in headings}
+    previous_position = -1
+    for section in RUNTIME_IDE_REQUIRED_SECTIONS:
+        position = heading_positions.get(section)
+        if position is None:
+            errors.append(f"{label}: missing Runtime IDE section: {section}")
+            continue
+        if position < previous_position:
+            errors.append(f"{label}: Runtime IDE section out of order: {section}")
+        previous_position = max(previous_position, position)
+
+    targets = set(_markdown_link_targets(body))
+    figure_root = root / "docs/runtime/assets/figures"
+    expected_stems = set(RUNTIME_IDE_REFERENCE_FIGURES)
+    for index, stem in enumerate(RUNTIME_IDE_REFERENCE_FIGURES, start=1):
+        source = figure_root / f"{stem}.dot"
+        rendering = figure_root / f"{stem}.svg"
+        link = f"assets/figures/{stem}.svg"
+        caption = f"**Figure Runtime IDE-{index}.**"
+        if not source.is_file():
+            errors.append(
+                f"{label}: missing Runtime IDE figure source: {source.relative_to(root)}"
+            )
+        if not rendering.is_file():
+            errors.append(
+                f"{label}: missing Runtime IDE figure rendering: {rendering.relative_to(root)}"
+            )
+        if link not in targets:
+            errors.append(f"{label}: missing Runtime IDE figure link: {link}")
+        if caption not in body:
+            errors.append(f"{label}: missing Runtime IDE figure caption: {caption}")
+    if figure_root.is_dir():
+        for source in sorted(figure_root.glob("runtime_ide_*.dot")):
+            if source.stem not in expected_stems:
+                errors.append(
+                    f"{label}: undeclared Runtime IDE figure source: "
+                    f"{source.relative_to(root)}"
+                )
+        for rendering in sorted(figure_root.glob("runtime_ide_*.svg")):
+            if rendering.stem not in expected_stems:
+                errors.append(
+                    f"{label}: undeclared Runtime IDE figure rendering: "
+                    f"{rendering.relative_to(root)}"
+                )
+    for source_path, token in RUNTIME_IDE_SOURCE_CONTRACTS:
+        source = root / source_path
+        try:
+            source_text = source.read_text(encoding="utf-8")
+        except (OSError, UnicodeError):
+            source_text = ""
+        if token not in source_text:
+            errors.append(
+                f"{label}: missing Runtime IDE source contract in {source_path}: {token}"
+            )
+    return errors
+
+
 def validate_document(path: Path, root: Path) -> list[str]:
     """Return all governance defects found in one Markdown document."""
 
@@ -532,6 +657,7 @@ def validate_document(path: Path, root: Path) -> list[str]:
     errors.extend(_validate_local_links(path, body, root, label))
     errors.extend(_validate_agent_reference_figures(path, body, root, label))
     errors.extend(_validate_device_bridge_reference(path, body, root, label))
+    errors.extend(_validate_runtime_ide_reference(path, body, root, label))
     return errors
 
 
@@ -692,6 +818,39 @@ def _validate_device_bridge_navigation(
     return errors
 
 
+def _validate_runtime_ide_navigation(
+    root: Path, documents: list[str], manifest_label: str
+) -> list[str]:
+    """Require every approved active entry point to link the Runtime IDE Reference."""
+
+    if RUNTIME_IDE_REFERENCE_PATH not in documents:
+        return []
+
+    errors: list[str] = []
+    for document_path, required_target in RUNTIME_IDE_NAVIGATION_LINKS.items():
+        path = root / document_path
+        if not path.is_file():
+            errors.append(
+                f"{manifest_label}: missing Runtime IDE navigation document: {document_path}"
+            )
+            continue
+        try:
+            _, body = split_front_matter(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, ValueError, yaml.YAMLError) as exc:
+            errors.append(
+                f"{manifest_label}: cannot inspect Runtime IDE navigation in "
+                f"{document_path}: {exc}"
+            )
+            continue
+        targets = set(_markdown_link_targets(body))
+        if required_target not in targets:
+            errors.append(
+                f"{manifest_label}: missing Runtime IDE navigation link: "
+                f"{document_path} -> {required_target}"
+            )
+    return errors
+
+
 def _validate_device_bridge_figure_inventory(
     root: Path, documents: list[str], manifest_label: str
 ) -> list[str]:
@@ -766,6 +925,7 @@ def validate_manifest(root: Path, manifest_path: Path) -> list[str]:
     errors.extend(_validate_root_agent_navigation(root, documents, label))
     errors.extend(_validate_device_bridge_navigation(root, documents, label))
     errors.extend(_validate_device_bridge_figure_inventory(root, documents, label))
+    errors.extend(_validate_runtime_ide_navigation(root, documents, label))
     errors.extend(_validate_snapshot(root, manifest.get("snapshot"), label))
     return errors
 
