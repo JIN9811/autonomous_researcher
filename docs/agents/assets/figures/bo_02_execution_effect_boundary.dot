@@ -1,0 +1,26 @@
+digraph bo_execution_effect_boundary {
+  graph [rankdir=TB, bgcolor="transparent", pad="0.25", nodesep="0.30", ranksep="0.46", fontname="DejaVu Sans", label="BO internal execution and effect boundary", labelloc="t", fontsize=18];
+  node [shape=box, style="rounded,filled", fillcolor="#EEF4FF", color="#315C9B", fontname="DejaVu Sans", fontsize=8.3, margin="0.09,0.06"];
+  edge [color="#52667A", fontname="DejaVu Sans", fontsize=7.3, arrowsize=0.65];
+  intake [label="01 analysis handoff\n02 priors · 03 evidence table"];
+  patch [label="04 bounded reasoning patch"];
+  space [label="05 search space\n06 candidate pool"];
+  acquisition [label="07 numeric acquisition"];
+  preference [label="08 LLM preference", shape=component, fillcolor="#F2ECFA", color="#6B4C9A"];
+  gate [label="09 constraints +\n10 failure penalties", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];
+  rank [label="11 rank top-k\n12 critique"];
+  recommend [label="13 recommendation", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];
+  output [label="14 artifacts\n15 Design handoff"];
+  tool [label="experiment.benchmark\noperator-bounded comparison", shape=component, fillcolor="#F2ECFA", color="#6B4C9A"];
+  evidence [label="Evidence table · scores · penalties\ncritique · recommendation", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
+  reject [label="No valid candidate / review", fillcolor="#FFE9E7", color="#A33A32", penwidth=2];
+  effect [label="Effect ceiling:\nproposal · model · local state", shape=octagon, fillcolor="#FFE9E7", color="#A33A32", penwidth=2];
+  intake -> patch -> space -> acquisition -> gate -> rank -> recommend -> output -> effect;
+  preference -> gate [style=dashed, label="bounded preference"];
+  tool -> intake [style=dashed, label="benchmark evidence"];
+  gate -> reject [label="invalid"];
+  recommend -> reject [label="none accepted"];
+  acquisition -> evidence [label="evidence", color="#2E7D59"];
+  gate -> evidence [label="evidence", color="#2E7D59"];
+  output -> evidence [label="evidence", color="#2E7D59"];
+}

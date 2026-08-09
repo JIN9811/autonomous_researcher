@@ -1,0 +1,28 @@
+digraph design_execution_effect_boundary {
+  graph [rankdir=TB, bgcolor="transparent", pad="0.25", nodesep="0.30", ranksep="0.48", fontname="DejaVu Sans", label="Design internal execution and effect boundary", labelloc="t", fontsize=18];
+  node [shape=box, style="rounded,filled", fillcolor="#EEF4FF", color="#315C9B", fontname="DejaVu Sans", fontsize=8.5, margin="0.09,0.06"];
+  edge [color="#52667A", fontname="DejaVu Sans", fontsize=7.5, arrowsize=0.65];
+  pre [label="pre orchestrator_plan\n01 receive objective context"];
+  normalize [label="02 normalize objective\n03 collect BO / Knowledge / failures"];
+  hypothesis [label="04 hypothesis\n05 constrained design space"];
+  pool [label="06 deterministic candidate pool"];
+  constraint [label="07 constraint gate", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];
+  repair [label="08 repair or reject"];
+  score [label="09 score objective · uncertainty\ninformation · risk"];
+  select [label="10 authoritative selection", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];
+  report [label="11 report + decision register\n12 Specimen handoff"];
+  model [label="design_reasoning\nrationale review", shape=component, fillcolor="#F2ECFA", color="#6B4C9A"];
+  evidence [label="experiment_spec · report\ncandidate ledger · metrics", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
+  invalid [label="No valid candidate /\nrequest bounded repair", fillcolor="#FFE9E7", color="#A33A32", penwidth=2];
+  effect [label="Effect ceiling:\nmodel + local state", shape=octagon, fillcolor="#FFE9E7", color="#A33A32", penwidth=2];
+  pre -> normalize -> hypothesis -> pool -> constraint;
+  constraint -> score [label="valid"];
+  constraint -> repair [label="repairable"];
+  repair -> constraint [label="recheck"];
+  repair -> invalid [label="reject"];
+  score -> select -> report -> effect;
+  model -> hypothesis [style=dashed, label="bounded rationale"];
+  model -> score [style=dashed, label="bounded review"];
+  select -> evidence [label="evidence", color="#2E7D59"];
+  report -> evidence [label="evidence", color="#2E7D59"];
+}

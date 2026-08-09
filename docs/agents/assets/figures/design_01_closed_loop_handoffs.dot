@@ -1,0 +1,19 @@
+digraph design_closed_loop_handoffs {
+  graph [rankdir=LR, bgcolor="transparent", pad="0.25", nodesep="0.34", ranksep="0.55", fontname="DejaVu Sans", label="Design closed-loop position and handoffs", labelloc="t", fontsize=18];
+  node [shape=box, style="rounded,filled", fillcolor="#EEF4FF", color="#315C9B", fontname="DejaVu Sans", fontsize=9, margin="0.10,0.07"];
+  edge [color="#52667A", fontname="DejaVu Sans", fontsize=8, arrowsize=0.7];
+  mission [label="Orchestrator mission +\nobjective · constraints"];
+  priors [label="Knowledge · BO ·\nfailure context", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
+  design [label="DESIGN\nconstrained candidate selection", penwidth=2.2];
+  gate [label="Valid candidate?", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];
+  specimen [label="Specimen Making\nexperiment_spec"];
+  review [label="Repair / ask / error", fillcolor="#FFE9E7", color="#A33A32", penwidth=2];
+  evidence [label="Design report · candidate ledger\ndecisions · metrics · handoff", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
+  mission -> design [label="mission_contract.v1"];
+  priors -> design [label="accepted prior evidence"];
+  design -> gate [label="ranked candidate"];
+  gate -> specimen [label="valid"];
+  gate -> review [label="none valid / incomplete"];
+  design -> evidence [label="evidence", color="#2E7D59"];
+  evidence -> specimen [label="handoff evidence", color="#2E7D59"];
+}

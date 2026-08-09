@@ -55,6 +55,14 @@ and transitions in the primary graph, and controller merge/handoff behavior.
 
 ## Closed-Loop Position and Handoffs
 
+![Design closed-loop position and handoffs](assets/figures/design_01_closed_loop_handoffs.svg)
+
+**Figure Design-1.** Orchestrator objectives and accepted Knowledge, BO, and
+failure context become a constrained experiment specification for Specimen
+Making; an empty or invalid candidate set returns to bounded repair or review.
+This is an `inspection`-backed projection of baseline `0b7627b`, not evidence
+of design quality or downstream fabrication success.
+
 | Direction | Component | Contract/state | Purpose | Gate |
 |---|---|---|---|---|
 | In | Orchestrator | mission/context/handoff | bounded objective and inputs | required values complete |
@@ -88,6 +96,31 @@ deterministic scores and selected candidate.
 | `10_select_authoritative_candidate` | choose winner | no valid candidate blocks |
 | `11_emit_design_report` | report/decision register | traceable rationale |
 | `12_handoff_specimen` | package downstream contract | schema/handoff validation |
+
+![Design internal execution and effect boundary](assets/figures/design_02_execution_effect_boundary.svg)
+
+**Figure Design-2.** The Orchestrator pre-stage and twelve internal entries
+separate objective normalization, prior evidence, deterministic candidate
+generation, constraint/repair gates, scoring, authoritative selection, and
+handoff. Model rationale is bounded advice. This `inspection` figure groups
+contract steps and does not imply independently scheduled graph nodes.
+
+### Execution trace details
+
+| Phase | Required/optional state | Authoritative operation | State/evidence written | Failure/recovery |
+|---|---|---|---|---|
+| Objective intake | objective and hard constraints required; priors optional | normalize schema, units, and bounds | normalized objective contract | missing/invalid input returns to Orchestrator |
+| Prior context | BO, Knowledge, and failure refs with provenance | accept only compatible bounded context | context references and absence reasons | absent evidence stays explicit |
+| Candidate construction | normalized variables and fixture/manufacturing rules | deterministic space and pool generation | reproducible candidate ledger | empty space blocks selection |
+| Constraint gate | each candidate and hard rules | reject or allowlisted repair, then recheck | rejection/repair reason | no constraint is silently removed |
+| Scoring | valid candidates | objective, uncertainty, information, and risk score | score ledger | unscorable candidate is rejected with reason |
+| Selection | complete score ledger | deterministic authoritative winner selection | `experiment_spec` and decision register | no valid winner yields revise/stop |
+| Handoff | selected spec and report | validate Specimen contract | report, metrics, handoff packet | invalid handoff cannot dispatch Specimen |
+
+`design_reasoning` may explain hypotheses or critique a candidate, but its text
+does not mutate hard constraints or replace deterministic scores. Planning and
+graph-authoring APIs configure shared runtime surfaces; the graph handler is
+the Design execution boundary.
 
 ## API Surface
 

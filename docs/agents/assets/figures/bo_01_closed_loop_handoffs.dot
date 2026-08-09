@@ -1,0 +1,22 @@
+digraph bo_closed_loop_handoffs {
+  graph [rankdir=LR, bgcolor="transparent", pad="0.25", nodesep="0.34", ranksep="0.55", fontname="DejaVu Sans", label="BO closed-loop position and handoffs", labelloc="t", fontsize=18];
+  node [shape=box, style="rounded,filled", fillcolor="#EEF4FF", color="#315C9B", fontname="DejaVu Sans", fontsize=9, margin="0.10,0.07"];
+  edge [color="#52667A", fontname="DejaVu Sans", fontsize=8, arrowsize=0.7];
+  analysis [label="Analysis objective +\nuncertainty · trial evidence"];
+  knowledge [label="Knowledge priors +\nconstraints · patterns", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
+  bo [label="BAYESIAN OPTIMIZATION\nconstrained ranking", penwidth=2.2];
+  gate [label="Valid recommendation?", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];
+  guardian [label="Guardian +\nOrchestrator", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];
+  design [label="Next Design cycle"];
+  review [label="Review / no candidate / error", fillcolor="#FFE9E7", color="#A33A32", penwidth=2];
+  evidence [label="Score table · reasoning patch\npenalties · recommendation", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
+  analysis -> bo [label="analysis handoff"];
+  knowledge -> bo [label="bounded BO context"];
+  bo -> gate [label="ranked candidates"];
+  gate -> guardian [label="proposal"];
+  gate -> review [label="none valid"];
+  guardian -> design [label="authorized continue"];
+  guardian -> review [label="review / stop / error"];
+  bo -> evidence [label="evidence", color="#2E7D59"];
+  evidence -> guardian [label="decision context", color="#2E7D59"];
+}

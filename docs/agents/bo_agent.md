@@ -57,6 +57,14 @@ Analysis/Knowledge/Design handoff state.
 
 ## Closed-Loop Position and Handoffs
 
+![BO closed-loop position and handoffs](assets/figures/bo_01_closed_loop_handoffs.svg)
+
+**Figure BO-1.** Valid Analysis evidence and provenance-bounded Knowledge
+context become a ranked recommendation that still passes Guardian,
+Orchestrator, and Design governance before another cycle. This is an
+`inspection`-backed projection of baseline `0b7627b`; it does not establish
+optimization benefit or authorize a physical action.
+
 | Direction | Component | Contract/state | Purpose | Gate |
 |---|---|---|---|---|
 | In | Analysis | objective/uncertainty/evaluation | current trial | valid evidence |
@@ -92,6 +100,31 @@ recommendation, artifacts, metrics, decisions, and Design constraints.
 | `13_select_recommendation` | validated selection | candidate/parameters |
 | `14_write_bo_artifacts` | score/reasoning records | evidence artifacts |
 | `15_handoff_design_constraints` | next-cycle packet | Design context |
+
+![BO internal execution and effect boundary](assets/figures/bo_02_execution_effect_boundary.svg)
+
+**Figure BO-2.** Fifteen internal entries preserve evidence intake, bounded
+reasoning, search construction, numeric acquisition, advisory model preference,
+constraints, penalties, critique, recommendation, artifacts, and Design
+handoff as distinct steps. This `inspection` figure groups manifest entries;
+numeric acquisition and validators remain authoritative.
+
+### Execution trace details
+
+| Phase | State read | Authoritative decision | State/evidence written | Failure/recovery |
+|---|---|---|---|---|
+| Trial intake | Analysis handoff and evidence identity | accept only valid objective/uncertainty records | current trial row | invalid handoff blocks BO |
+| Prior filtering | Knowledge BO context and prior trials | provenance/compatibility filtering and deduplication | accepted prior set and exclusions | missing priors may use explicit cold-start configuration |
+| Reasoning patch | bounded evidence table | schema/allowlist validation of model proposal | accepted or rejected reasoning patch | invalid patch is ignored and recorded |
+| Search and acquisition | strategy, space, budget, valid priors | deterministic pool plus numeric acquisition | candidate pool and numeric scores | empty/invalid space yields revise/stop |
+| Preference and penalty | numeric scores, model preference, constraints, failure memory | validators and penalties bound the combined rank | separate preference, exclusion, and penalty fields | model preference cannot restore an invalid candidate |
+| Top-k and recommendation | valid ranked candidates | bounded critique followed by validated selection | top-k, critique, recommendation | no accepted candidate remains explicit |
+| Handoff | recommendation, parameters, constraints | package next-cycle proposal | BO artifacts and Design context | downstream Guardian and Design gates remain required |
+
+`/api/bo/config` persists strategy, `/api/bo/benchmark` produces bounded
+comparison evidence, and `/api/bo/run` performs a direct workspace
+recommendation. None of those responses proves a subsequent graph cycle or
+physical experiment occurred.
 
 ## API Surface
 
