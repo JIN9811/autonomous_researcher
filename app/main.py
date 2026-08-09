@@ -92,6 +92,8 @@ from device_bridges.windows_pyautogui_bridge import (
     discover_windows_pyautogui_bridges,
 )
 from orchestrator.state import Mode, OrchestratorState, Stage
+from objectives.compiler import ObjectiveCompileError
+from objectives.service import ObjectiveConflict, ObjectiveNotFound, ObjectiveService
 from orchestrator.supervisor import build_mission_contract, build_orchestration_plan, build_orchestrator_control_plane_snapshot
 from policies.guardian_gate import gate_blocks_execution, guardian_gate
 from utils.config_loader import load_all_configs
@@ -183,6 +185,25 @@ _LEROBOT_BRIDGE: LeRobotBridge | None = None
 _LEROBOT_CONFIG_MTIME_NS: int = -1
 _utm_runtime_manager: UTMRuntimeProcessManager | None = None
 _specimen_pose_tracker: SpecimenPoseTrackerBridge | None = None
+
+
+def _objective_service() -> ObjectiveService:
+    """Return the ObjectiveService shared with the runtime ToolRegistry."""
+    service = controller._deps.agent_context.tools.resource("objective.service")
+    if not isinstance(service, ObjectiveService):
+        raise HTTPException(status_code=503, detail="Objective Compiler service is unavailable")
+    return service
+
+
+def _objective_http_error(exc: Exception) -> HTTPException:
+    """Map bounded objective failures without exposing local storage paths."""
+    if isinstance(exc, ObjectiveNotFound):
+        return HTTPException(status_code=404, detail=str(exc).strip("'"))
+    if isinstance(exc, ObjectiveConflict):
+        return HTTPException(status_code=409, detail=str(exc))
+    if isinstance(exc, (ObjectiveCompileError, ValueError, TypeError)):
+        return HTTPException(status_code=422, detail=str(exc))
+    return HTTPException(status_code=500, detail="Objective Compiler operation failed")
 
 LIVE_AGENT_DEFINITIONS: list[dict[str, str]] = [
     {"agent_id": "objective", "label": "Objective", "stage": "idle", "module_id": "objective"},
@@ -636,6 +657,49 @@ class BOAgentRequest(BaseModel):
     parameter_space: dict[str, object] = Field(default_factory=dict)
     objective: dict[str, object] = Field(default_factory=dict)
     mode: Literal["test", "live", "virtual", "replay"] = "test"
+
+
+class ObjectiveComposeRequest(BaseModel):
+    intent: str = Field(..., min_length=1, max_length=4000)
+
+
+class ObjectiveReferenceRequest(BaseModel):
+    objective_id: str = Field(..., min_length=1)
+    version: int | None = Field(default=None, ge=1)
+
+
+class ObjectivePreviewRequest(ObjectiveReferenceRequest):
+    observations: list[dict[str, object]] = Field(default_factory=list)
+
+
+class ObjectiveRevisionRequest(BaseModel):
+    objective_id: str = Field(..., min_length=1)
+    instruction: str = Field(..., min_length=1, max_length=4000)
+
+
+class ObjectiveApprovalRequest(ObjectiveReferenceRequest):
+    operator: str = Field(..., min_length=1)
+
+
+class ObjectiveActivationRequest(BaseModel):
+    objective_id: str = Field(..., min_length=1)
+    version: int = Field(..., ge=1)
+    run_id: str = Field(..., min_length=1)
+    operator: str = Field(..., min_length=1)
+
+
+class ObjectiveEvaluationRequest(BaseModel):
+    run_id: str = Field(..., min_length=1)
+    observation_id: str = Field(..., min_length=1)
+    metrics: dict[str, object] = Field(default_factory=dict)
+    uncertainty: float | dict[str, float] | None = None
+    provenance_refs: list[str] = Field(default_factory=list)
+    fidelity: str = "measured"
+
+
+class ObjectiveCompareRequest(BaseModel):
+    candidates: list[dict[str, object]] = Field(default_factory=list)
+    observations: list[dict[str, object]] = Field(default_factory=list)
 
 
 class CAEAnalysisRequest(BaseModel):
@@ -7310,6 +7374,122 @@ async def run_runtime_graph(graph_id: str, req: StartRunRequest) -> dict[str, ob
         "compiled_graph": compiled_graph,
         "dry_run_record": dry_run_record if req.mode == "live" else _RUNTIME_GRAPH_DRY_RUN_RECORDS.get(graph_id, {}),
     }
+
+
+@app.get("/api/objectives/metrics")
+async def get_objective_metrics() -> dict[str, object]:
+    """Return the allowlisted Metric Registry without filesystem metadata."""
+    service = _objective_service()
+    return {
+        "ok": True,
+        "registry_version": service.registry.version_id,
+        "metrics": [item.model_dump(mode="json") for item in service.registry.list()],
+    }
+
+
+@app.get("/api/objectives/metrics/{metric_id}")
+async def get_objective_metric(metric_id: str) -> dict[str, object]:
+    try:
+        metric = _objective_service().registry.get(metric_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"Unknown objective metric: {metric_id}") from exc
+    return {"ok": True, "metric": metric.model_dump(mode="json")}
+
+
+@app.post("/api/objectives/compose")
+async def post_objective_compose(req: ObjectiveComposeRequest) -> dict[str, object]:
+    try:
+        draft = await _objective_service().compose(req.intent)
+    except Exception as exc:
+        raise _objective_http_error(exc) from exc
+    return {"ok": True, "draft": draft.model_dump(mode="json")}
+
+
+@app.post("/api/objectives/validate")
+async def post_objective_validate(req: ObjectiveReferenceRequest) -> dict[str, object]:
+    try:
+        validation = _objective_service().validate(req.objective_id, req.version)
+    except Exception as exc:
+        raise _objective_http_error(exc) from exc
+    if not validation.valid:
+        raise HTTPException(status_code=422, detail=validation.model_dump(mode="json"))
+    return {"ok": True, "validation": validation.model_dump(mode="json")}
+
+
+@app.post("/api/objectives/preview")
+async def post_objective_preview(req: ObjectivePreviewRequest) -> dict[str, object]:
+    try:
+        preview = _objective_service().preview(req.objective_id, req.version, req.observations)
+    except Exception as exc:
+        raise _objective_http_error(exc) from exc
+    if preview.usable_rows < 1:
+        raise HTTPException(status_code=422, detail=preview.model_dump(mode="json"))
+    return {"ok": True, "preview": preview.model_dump(mode="json")}
+
+
+@app.post("/api/objectives/revise")
+async def post_objective_revise(req: ObjectiveRevisionRequest) -> dict[str, object]:
+    try:
+        draft = await _objective_service().revise(req.objective_id, req.instruction)
+    except Exception as exc:
+        raise _objective_http_error(exc) from exc
+    return {"ok": True, "draft": draft.model_dump(mode="json")}
+
+
+@app.post("/api/objectives/approve")
+async def post_objective_approve(req: ObjectiveApprovalRequest) -> dict[str, object]:
+    try:
+        decision = _objective_service().approve(req.objective_id, req.version, operator=req.operator)
+    except Exception as exc:
+        raise _objective_http_error(exc) from exc
+    return {"ok": True, "decision": decision.model_dump(mode="json")}
+
+
+@app.post("/api/objectives/activate")
+async def post_objective_activate(req: ObjectiveActivationRequest) -> dict[str, object]:
+    try:
+        binding = _objective_service().activate(
+            req.objective_id,
+            req.version,
+            run_id=req.run_id,
+            operator=req.operator,
+        )
+    except Exception as exc:
+        raise _objective_http_error(exc) from exc
+    return {"ok": True, "binding": binding.model_dump(mode="json")}
+
+
+@app.post("/api/objectives/evaluate")
+async def post_objective_evaluate(req: ObjectiveEvaluationRequest) -> dict[str, object]:
+    try:
+        evaluation = _objective_service().evaluate(
+            run_id=req.run_id,
+            metrics=req.metrics,
+            observation_id=req.observation_id,
+            uncertainty=req.uncertainty,
+            provenance_refs=req.provenance_refs,
+            fidelity=req.fidelity,
+        )
+    except Exception as exc:
+        raise _objective_http_error(exc) from exc
+    return {"ok": True, "evaluation": evaluation.model_dump(mode="json")}
+
+
+@app.post("/api/objectives/compare")
+async def post_objective_compare(req: ObjectiveCompareRequest) -> dict[str, object]:
+    try:
+        comparisons = _objective_service().compare(req.candidates, req.observations)
+    except Exception as exc:
+        raise _objective_http_error(exc) from exc
+    return {"ok": True, "comparisons": comparisons}
+
+
+@app.get("/api/objectives/status")
+async def get_objective_status(run_id: str = "") -> dict[str, object]:
+    try:
+        return _objective_service().status(run_id=run_id)
+    except Exception as exc:
+        raise _objective_http_error(exc) from exc
 
 
 @app.get("/api/bo/config")

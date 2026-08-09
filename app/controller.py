@@ -883,6 +883,7 @@ class MainController:
             "attention_kind", "attention_action", "attention_event_key", "attention_event_type",
             "attention_agent_id", "attention_node_id", "attention_trace_id", "attention_message",
             "operator_source",
+            "module_runtime",
         }
         out: dict[str, Any] = {}
         for key, value in payload.items():

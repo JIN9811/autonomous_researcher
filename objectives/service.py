@@ -39,6 +39,10 @@ class ObjectiveService:
 
     def create_draft(self, spec: ObjectiveSpec | dict[str, Any]) -> ObjectiveSpec:
         parsed = spec if isinstance(spec, ObjectiveSpec) else ObjectiveSpec.model_validate(spec)
+        validation = validate_objective(parsed, self.registry)
+        prohibited = [error for error in validation.errors if "unexpected fields" in error]
+        if prohibited:
+            raise ValueError(prohibited[0])
         if parsed.lifecycle != "draft":
             parsed = parsed.model_copy(update={"lifecycle": "draft"})
         self.store.save_spec(parsed)
@@ -48,7 +52,7 @@ class ObjectiveService:
                 action="compose",
                 objective_id=parsed.objective_id,
                 version=parsed.version,
-                objective_hash=validate_objective(parsed, self.registry).objective_hash,
+                objective_hash=validation.objective_hash,
                 reason=parsed.intent,
             )
         )

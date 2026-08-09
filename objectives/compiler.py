@@ -51,6 +51,39 @@ UNIT_DIMENSIONS: dict[str, Dimension] = {
     "min": DIMENSIONS["time"],
 }
 
+OPERATOR_KEYS: dict[str, frozenset[str]] = {
+    "literal": frozenset({"op", "value", "unit"}),
+    "metric": frozenset({"op", "metric_id"}),
+    "reference": frozenset({"op", "name"}),
+    "add": frozenset({"op", "args"}),
+    "subtract": frozenset({"op", "args"}),
+    "multiply": frozenset({"op", "args"}),
+    "divide": frozenset({"op", "numerator", "denominator", "epsilon"}),
+    "ratio": frozenset({"op", "numerator", "denominator", "epsilon"}),
+    "weighted_sum": frozenset({"op", "terms"}),
+    "abs": frozenset({"op", "arg"}),
+    "square": frozenset({"op", "arg"}),
+    "power": frozenset({"op", "arg", "exponent"}),
+    "sqrt": frozenset({"op", "arg"}),
+    "log1p": frozenset({"op", "arg"}),
+    "min": frozenset({"op", "args"}),
+    "max": frozenset({"op", "args"}),
+    "clip": frozenset({"op", "value", "min", "max"}),
+    "target_deviation": frozenset({"op", "value", "target", "scale"}),
+    "hinge_penalty": frozenset({"op", "value", "threshold", "scale", "side"}),
+    "piecewise_penalty": frozenset({"op", "value", "points"}),
+    "normalize": frozenset({"op", "value", "min", "max"}),
+    "aggregate": frozenset({"op", "args", "method"}),
+    "less_than": frozenset({"op", "args"}),
+    "less_equal": frozenset({"op", "args"}),
+    "greater_than": frozenset({"op", "args"}),
+    "greater_equal": frozenset({"op", "args"}),
+    "equal": frozenset({"op", "args"}),
+    "and": frozenset({"op", "args"}),
+    "or": frozenset({"op", "args"}),
+    "not": frozenset({"op", "arg"}),
+}
+
 
 def _combine(left: Dimension, right: Dimension, sign: int = 1) -> Dimension:
     values = dict(left)
@@ -125,6 +158,12 @@ class _Compiler:
         if not isinstance(operator, str):
             self.error(f"{path}.op", "operator is required")
             return NodeType("number")
+
+        allowed_keys = OPERATOR_KEYS.get(operator)
+        if allowed_keys is not None:
+            unexpected = sorted(set(node) - allowed_keys)
+            if unexpected:
+                self.error(path, f"unexpected fields for {operator}: {', '.join(unexpected)}")
 
         method = getattr(self, f"compile_{operator}", None)
         if method is None:
@@ -225,6 +264,9 @@ class _Compiler:
             if not isinstance(term, dict):
                 self.error(term_path, "weighted term must be an object")
                 continue
+            unexpected = sorted(set(term) - {"name", "weight", "expression"})
+            if unexpected:
+                self.error(term_path, f"unexpected weighted-term fields: {', '.join(unexpected)}")
             weight = term.get("weight")
             if isinstance(weight, bool) or not isinstance(weight, (int, float)) or not math.isfinite(float(weight)):
                 self.error(f"{term_path}.weight", "weight must be finite")
@@ -298,6 +340,9 @@ class _Compiler:
             if not isinstance(point, dict):
                 self.error(point_path, "point must be an object")
                 continue
+            unexpected = sorted(set(point) - {"x", "y"})
+            if unexpected:
+                self.error(point_path, f"unexpected piecewise-point fields: {', '.join(unexpected)}")
             x_nodes.append(self.child(point, "x", point_path, depth))
             y = point.get("y")
             if isinstance(y, bool) or not isinstance(y, (int, float)) or not math.isfinite(float(y)):

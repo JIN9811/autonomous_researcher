@@ -66,6 +66,10 @@ from mcp_tools.pinn_tools import register_pinn_tools
 from mcp_tools.printer_tools import register_printer_tools
 from mcp_tools.tool_registry import ToolRegistry
 from mcp_tools.utm_tools import register_utm_tools
+from objectives.metric_registry import MetricRegistry
+from objectives.service import ObjectiveService
+from objectives.store import ObjectiveStore
+from objectives.tools import register_objective_tools
 from utils.config_loader import load_all_configs
 from utils.paths import resolve_path
 
@@ -316,6 +320,13 @@ def load_runtime() -> MainController:
         runtime_profiles=runtime_profiles,
         llm_lease=LLMLeaseCoordinator(),
     )
+
+    objective_service = ObjectiveService(
+        store=ObjectiveStore(resolve_path("memory/objectives"), run_root=resolve_path(system_cfg.get("run_root", "./runs"))),
+        registry=MetricRegistry.default(),
+        context=agent_context,
+    )
+    register_objective_tools(tools, objective_service)
 
     agent_registry = AgentRegistry()
     agent_registry.register(OrchestratorAgent())
