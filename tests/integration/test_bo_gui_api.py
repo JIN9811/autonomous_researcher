@@ -8,6 +8,31 @@ from app import main as app_main
 from app.main import app
 
 
+def test_bo_workspace_contains_objective_compiler_surfaces() -> None:
+    client = TestClient(app)
+
+    response = client.get("/bo")
+
+    assert response.status_code == 200
+    html = response.text
+    for element_id in (
+        "objective-compiler-workspace",
+        "objective-intent-input",
+        "objective-metric-browser",
+        "objective-equation-tree",
+        "objective-validation-panel",
+        "objective-preview-panel",
+        "objective-version-diff",
+        "btn-objective-compose",
+        "btn-objective-validate",
+        "btn-objective-preview",
+        "btn-objective-approve",
+        "btn-objective-activate",
+    ):
+        assert f'id="{element_id}"' in html
+    assert "objective-template" not in html
+
+
 def test_bo_config_endpoint_reports_defaults() -> None:
     client = TestClient(app)
 

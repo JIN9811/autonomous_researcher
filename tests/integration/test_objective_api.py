@@ -102,6 +102,14 @@ def test_objective_api_exposes_metrics_and_full_lifecycle(tmp_path, monkeypatch)
     assert evaluated.status_code == 200 and evaluated.json()["evaluation"]["objective_hash"] == activated.json()["binding"]["objective_hash"]
     assert str(tmp_path) not in evaluated.text
 
+    status = client.get("/api/objectives/status", params={"run_id": "run-api"}).json()
+    lifecycle = status["objective_states"][0]
+    assert lifecycle["objective_id"] == "api-objective"
+    assert lifecycle["validation"]["valid"] is True
+    assert lifecycle["preview"]["usable_rows"] == 1
+    assert lifecycle["approved"] is True
+    assert lifecycle["active"] is True
+
 
 def test_objective_api_maps_lifecycle_and_validation_errors(tmp_path, monkeypatch) -> None:
     client, service = client_for(tmp_path, monkeypatch, payload=spec(incompatible=True))

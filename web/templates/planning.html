@@ -107,6 +107,22 @@ Modification guide:
           <div id="live-report-toolbar" class="live-report-toolbar" aria-label="report actions"></div>
         </div>
         <div id="live-focus-strip" class="live-focus-strip" title="Selected runtime focus" aria-label="selected runtime focus">Focus -</div>
+        <article id="live-objective-runtime-card" class="live-objective-runtime-card" aria-label="active objective runtime state">
+          <header>
+            <span>ACTIVE OBJECTIVE</span>
+            <strong id="live-objective-identity">No run binding</strong>
+            <code id="live-objective-hash">hash -</code>
+          </header>
+          <div class="live-objective-runtime-body">
+            <p id="live-objective-equation">No approved objective is bound to this run.</p>
+            <div class="live-objective-runtime-metrics">
+              <div><span>Score</span><strong id="live-objective-score">-</strong></div>
+              <div><span>Feasible</span><strong id="live-objective-feasibility">-</strong></div>
+              <div><span>Contributions</span><strong id="live-objective-contributions">-</strong></div>
+              <div><span>Readiness</span><strong id="live-objective-readiness">unbound</strong></div>
+            </div>
+          </div>
+        </article>
         <div id="live-approval-panel" class="live-approval-panel" aria-label="runtime approvals" aria-hidden="true" hidden></div>
         <div id="live-report-panel" class="live-center-view active"></div>
         <div id="live-backend-panel" class="live-center-view"></div>

@@ -48,8 +48,36 @@ const reasoningPanel = document.getElementById("bo-reasoning-panel");
 const candidateRankingPanel = document.getElementById("bo-candidate-ranking");
 const recommendationPanel = document.getElementById("bo-recommendation-panel");
 const resultJson = document.getElementById("bo-result-json");
+const objectiveIntentInput = document.getElementById("objective-intent-input");
+const objectiveOperatorInput = document.getElementById("objective-operator-input");
+const objectiveRunIdInput = document.getElementById("objective-run-id-input");
+const objectiveVersionSelect = document.getElementById("objective-version-select");
+const objectiveMetricBrowser = document.getElementById("objective-metric-browser");
+const objectiveEquationTree = document.getElementById("objective-equation-tree");
+const objectiveValidationPanel = document.getElementById("objective-validation-panel");
+const objectivePreviewPanel = document.getElementById("objective-preview-summary");
+const objectivePreviewObservationsInput = document.getElementById("objective-preview-observations-input");
+const objectiveScoreChart = document.getElementById("objective-preview-score-chart");
+const objectiveContributionChart = document.getElementById("objective-preview-contribution-chart");
+const objectiveSensitivityChart = document.getElementById("objective-preview-sensitivity-chart");
+const objectiveVersionDiff = document.getElementById("objective-version-diff");
+const objectiveLifecycleChip = document.getElementById("objective-lifecycle-chip");
+const objectiveActiveIdentity = document.getElementById("objective-active-identity");
+const objectiveActiveHash = document.getElementById("objective-active-hash");
+const objectiveActionStatus = document.getElementById("objective-action-status");
+const btnObjectiveCompose = document.getElementById("btn-objective-compose");
+const btnObjectiveRevise = document.getElementById("btn-objective-revise");
+const btnObjectiveRefresh = document.getElementById("btn-objective-refresh");
+const btnObjectiveValidate = document.getElementById("btn-objective-validate");
+const btnObjectivePreview = document.getElementById("btn-objective-preview");
+const btnObjectiveApprove = document.getElementById("btn-objective-approve");
+const btnObjectiveActivate = document.getElementById("btn-objective-activate");
 
 let defaults = {};
+let objectiveMetrics = [];
+let objectiveRuntimeStatus = {};
+let selectedObjectiveState = null;
+let objectiveActionBusy = false;
 
 function setDot(el, state) {
   if (!el) return;
@@ -62,7 +90,19 @@ async function postJson(url, body) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  return await res.json();
+  const payload = await res.json();
+  if (!res.ok) {
+    const detail = payload && payload.detail !== undefined ? payload.detail : payload;
+    throw new Error(typeof detail === "string" ? detail : pretty(detail));
+  }
+  return payload;
+}
+
+async function getJson(url) {
+  const res = await fetch(url);
+  const payload = await res.json();
+  if (!res.ok) throw new Error(payload.detail || `HTTP ${res.status}`);
+  return payload;
 }
 
 function pretty(value) {
@@ -136,13 +176,7 @@ function applyDefaults(data) {
   if (llmWeightInput) llmWeightInput.value = defaults.llm_candidate_weight ?? "auto";
   if (topKInput) topKInput.value = defaults.top_k || 5;
   parameterSpaceInput.value = pretty(defaults.parameter_space || {});
-  objectiveInput.value = pretty({
-    objective_id: "bo-workspace-objective",
-    name: "Specimen printability and performance proxy",
-    metric_name: "objective_score",
-    direction: "maximize",
-    tags: ["bo", "workspace", "tpms"],
-  });
+  objectiveInput.value = "{}";
 }
 
 function applySettings(settings) {
@@ -476,6 +510,255 @@ function renderResult(data) {
   resultJson.textContent = pretty(data);
 }
 
+function objectiveStateKey(state) {
+  return state ? `${state.objective_id}::${state.version}` : "";
+}
+
+function objectiveLifecycle(state) {
+  if (!state) return "No objective";
+  if (state.active) return "Active";
+  if (state.approved) return "Approved";
+  if (state.preview && Number(state.preview.usable_rows || 0) > 0) return "Previewed";
+  if (state.validation && state.validation.valid) return "Validated";
+  return "Draft";
+}
+
+function expressionSummary(node) {
+  if (!node || typeof node !== "object") return String(node ?? "-");
+  if (node.op === "metric") return node.metric_id || "metric";
+  if (node.op === "literal") return numberText(node.value, 5);
+  const children = Array.isArray(node.args)
+    ? node.args
+    : node.arg !== undefined
+      ? [node.arg]
+      : node.left !== undefined || node.right !== undefined
+        ? [node.left, node.right]
+        : [];
+  const rendered = children.filter((item) => item !== undefined).map(expressionSummary);
+  if (!rendered.length) return node.op || "expression";
+  return `${node.op}(${rendered.join(", ")})`;
+}
+
+function expressionTreeHtml(node, label = "objective") {
+  if (!node || typeof node !== "object") return `<li><span>${escapeHtml(label)}</span><strong>${escapeHtml(node)}</strong></li>`;
+  const operator = node.op || "node";
+  const details = Object.entries(node)
+    .filter(([key, value]) => !["op", "args", "arg", "left", "right"].includes(key) && (typeof value !== "object" || value === null))
+    .map(([key, value]) => `<code>${escapeHtml(key)}=${escapeHtml(value)}</code>`)
+    .join("");
+  const children = Array.isArray(node.args)
+    ? node.args.map((value, index) => [`arg ${index + 1}`, value])
+    : node.arg !== undefined
+      ? [["arg", node.arg]]
+      : [["left", node.left], ["right", node.right]].filter(([, value]) => value !== undefined);
+  return `<li><div class="bo-equation-node"><span>${escapeHtml(label)}</span><strong>${escapeHtml(operator)}</strong>${details}</div>${children.length ? `<ul>${children.map(([childLabel, value]) => expressionTreeHtml(value, childLabel)).join("")}</ul>` : ""}</li>`;
+}
+
+function renderMetricRegistry() {
+  if (!objectiveMetricBrowser) return;
+  if (!objectiveMetrics.length) {
+    objectiveMetricBrowser.textContent = "No registered metrics.";
+    return;
+  }
+  objectiveMetricBrowser.innerHTML = objectiveMetrics.map((metric) => `
+    <article class="bo-metric-entry" title="${escapeHtml(metric.description || metric.metric_id)}">
+      <strong>${escapeHtml(metric.label || metric.metric_id)}</strong>
+      <code>${escapeHtml(metric.metric_id)}</code>
+      <span>${escapeHtml(metric.unit || "dimensionless")} · ${escapeHtml((metric.fidelity || []).join(" / "))}</span>
+    </article>
+  `).join("");
+}
+
+function objectiveBarChart(values, options = {}) {
+  const entries = Object.entries(values || {}).filter(([, value]) => Number.isFinite(Number(value)));
+  if (!entries.length) return `<p class="bo-objective-empty">No preview data.</p>`;
+  const maxAbs = Math.max(1e-9, ...entries.map(([, value]) => Math.abs(Number(value))));
+  return `<div class="bo-objective-bars">${entries.map(([key, value]) => {
+    const numeric = Number(value);
+    const width = Math.max(2, Math.abs(numeric) / maxAbs * 100);
+    return `<div class="bo-objective-bar-row"><span>${escapeHtml(key)}</span><div><i style="width:${width}%" class="${numeric < 0 ? "negative" : ""}"></i></div><strong>${escapeHtml(numberText(numeric, options.digits ?? 4))}</strong></div>`;
+  }).join("")}</div>`;
+}
+
+function renderObjectiveDiff(state) {
+  if (!objectiveVersionDiff) return;
+  if (!state) {
+    objectiveVersionDiff.textContent = "No prior version.";
+    return;
+  }
+  const previous = (objectiveRuntimeStatus.objective_states || []).find((item) => item.objective_id === state.objective_id && Number(item.version) === Number(state.version) - 1);
+  if (!previous) {
+    objectiveVersionDiff.innerHTML = `<span class="hint">Version ${escapeHtml(state.version)} is the first stored version.</span>`;
+    return;
+  }
+  const currentSpec = state.spec || {};
+  const previousSpec = previous.spec || {};
+  const changes = [
+    ["Intent", previousSpec.intent, currentSpec.intent],
+    ["Direction", previousSpec.direction, currentSpec.direction],
+    ["Equation", expressionSummary(previousSpec.expression), expressionSummary(currentSpec.expression)],
+    ["Constraints", (previousSpec.constraints || []).length, (currentSpec.constraints || []).length],
+  ].filter(([, before, after]) => String(before ?? "") !== String(after ?? ""));
+  objectiveVersionDiff.innerHTML = changes.length
+    ? `<div class="bo-objective-diff-list">${changes.map(([label, before, after]) => `<div><strong>${escapeHtml(label)}</strong><del>${escapeHtml(before ?? "-")}</del><ins>${escapeHtml(after ?? "-")}</ins></div>`).join("")}</div>`
+    : `<span class="hint">No semantic changes detected from version ${escapeHtml(previous.version)}.</span>`;
+}
+
+function renderObjectivePreview(preview) {
+  if (objectivePreviewPanel) {
+    objectivePreviewPanel.innerHTML = preview
+      ? `<div class="bo-objective-kpis"><div><span>usable</span><strong>${escapeHtml(preview.usable_rows)}</strong></div><div><span>feasible</span><strong>${escapeHtml(preview.feasible_ratio === null ? "n/a" : `${numberText(Number(preview.feasible_ratio) * 100, 1)}%`)}</strong></div><div><span>rejected</span><strong>${escapeHtml(preview.rejected_rows)}</strong></div><div><span>fidelity</span><strong>${escapeHtml(Object.keys(preview.fidelity_groups || {}).join(" / ") || "n/a")}</strong></div></div>`
+      : "No preview.";
+  }
+  if (objectiveScoreChart) objectiveScoreChart.innerHTML = objectiveBarChart(preview?.score_distribution);
+  if (objectiveContributionChart) objectiveContributionChart.innerHTML = objectiveBarChart(preview?.contribution_summary);
+  if (objectiveSensitivityChart) objectiveSensitivityChart.innerHTML = objectiveBarChart(preview?.sensitivity);
+}
+
+function updateObjectiveButtons() {
+  const state = selectedObjectiveState;
+  const valid = Boolean(state?.validation?.valid);
+  const previewed = Boolean(state?.preview && Number(state.preview.usable_rows || 0) > 0);
+  const approved = Boolean(state?.approved);
+  [btnObjectiveCompose, btnObjectiveRefresh].forEach((button) => { if (button) button.disabled = objectiveActionBusy; });
+  if (btnObjectiveRevise) btnObjectiveRevise.disabled = objectiveActionBusy || !state;
+  if (btnObjectiveValidate) btnObjectiveValidate.disabled = objectiveActionBusy || !state;
+  if (btnObjectivePreview) btnObjectivePreview.disabled = objectiveActionBusy || !state || !valid;
+  if (btnObjectiveApprove) btnObjectiveApprove.disabled = objectiveActionBusy || !valid || !previewed || approved;
+  if (btnObjectiveActivate) btnObjectiveActivate.disabled = objectiveActionBusy || !approved || !String(objectiveRunIdInput?.value || "").trim();
+}
+
+function renderSelectedObjective(state) {
+  selectedObjectiveState = state || null;
+  const lifecycle = objectiveLifecycle(state);
+  if (objectiveLifecycleChip) {
+    objectiveLifecycleChip.textContent = lifecycle;
+    objectiveLifecycleChip.className = `runtime-chip ${state?.active || state?.approved ? "ok" : state?.validation?.valid ? "running" : state ? "warning" : "idle"}`;
+  }
+  if (objectiveActiveIdentity) objectiveActiveIdentity.textContent = state ? `${state.objective_id} · v${state.version}` : "Unbound";
+  if (objectiveActiveHash) objectiveActiveHash.textContent = state?.objective_hash ? `hash ${state.objective_hash.slice(0, 12)}` : "hash -";
+  if (objectiveIntentInput && state?.spec?.intent) objectiveIntentInput.value = state.spec.intent;
+  if (objectiveEquationTree) {
+    const expression = state?.spec?.expression;
+    const constraints = state?.spec?.constraints || [];
+    objectiveEquationTree.innerHTML = expression
+      ? `<p class="bo-equation-summary">${escapeHtml(state.spec.direction || "maximize")} · ${escapeHtml(expressionSummary(expression))}</p><ul class="bo-equation-root">${expressionTreeHtml(expression)}${constraints.map((constraint, index) => expressionTreeHtml(constraint, `constraint ${index + 1}`)).join("")}</ul>`
+      : "Compose or select an objective.";
+  }
+  if (objectiveValidationPanel) {
+    const validation = state?.validation;
+    objectiveValidationPanel.innerHTML = validation
+      ? `<div class="bo-objective-validation ${validation.valid ? "valid" : "invalid"}"><strong>${validation.valid ? "VALID" : "INVALID"}</strong><span>${escapeHtml(validation.node_count)} nodes · depth ${escapeHtml(validation.max_depth)} · ${escapeHtml(validation.result_dimension || "dimensionless")}</span>${validation.warnings?.length ? `<p>${escapeHtml(validation.warnings.join("; "))}</p>` : ""}${validation.errors?.length ? `<p>${escapeHtml(validation.errors.join("; "))}</p>` : ""}</div>`
+      : "Not validated.";
+  }
+  renderObjectivePreview(state?.preview || null);
+  renderObjectiveDiff(state);
+  objectiveInput.value = state ? pretty({
+    objective_id: state.objective_id,
+    objective_version: state.version,
+    objective_hash: state.objective_hash || "",
+    name: state.spec?.name || "",
+    direction: state.spec?.direction || "maximize",
+  }) : "{}";
+  updateObjectiveButtons();
+}
+
+function populateObjectiveVersions(preferredKey = "") {
+  if (!objectiveVersionSelect) return;
+  const states = [...(objectiveRuntimeStatus.objective_states || [])].sort((left, right) => {
+    if (left.objective_id !== right.objective_id) return left.objective_id.localeCompare(right.objective_id);
+    return Number(right.version) - Number(left.version);
+  });
+  const currentKey = preferredKey || objectiveVersionSelect.value || objectiveStateKey(states.find((item) => item.active)) || objectiveStateKey(states[0]);
+  objectiveVersionSelect.innerHTML = states.length
+    ? states.map((state) => `<option value="${escapeHtml(objectiveStateKey(state))}">${escapeHtml(state.objective_id)} · v${escapeHtml(state.version)} · ${escapeHtml(objectiveLifecycle(state))}</option>`).join("")
+    : `<option value="">No saved objective</option>`;
+  const selected = states.find((state) => objectiveStateKey(state) === currentKey) || states[0] || null;
+  if (selected) objectiveVersionSelect.value = objectiveStateKey(selected);
+  renderSelectedObjective(selected);
+}
+
+async function refreshObjectiveCompiler(preferredKey = "") {
+  const runId = String(objectiveRunIdInput?.value || "").trim();
+  const [metrics, status] = await Promise.all([
+    getJson("/api/objectives/metrics"),
+    getJson(`/api/objectives/status${runId ? `?run_id=${encodeURIComponent(runId)}` : ""}`),
+  ]);
+  objectiveMetrics = Array.isArray(metrics.metrics) ? metrics.metrics : [];
+  objectiveRuntimeStatus = status || {};
+  renderMetricRegistry();
+  populateObjectiveVersions(preferredKey);
+}
+
+async function runObjectiveAction(label, action) {
+  if (objectiveActionBusy) return;
+  objectiveActionBusy = true;
+  if (objectiveActionStatus) objectiveActionStatus.textContent = label;
+  updateObjectiveButtons();
+  try {
+    const preferredKey = await action();
+    await refreshObjectiveCompiler(preferredKey || objectiveStateKey(selectedObjectiveState));
+    if (objectiveActionStatus) objectiveActionStatus.textContent = `${label} complete.`;
+  } catch (err) {
+    if (objectiveActionStatus) objectiveActionStatus.textContent = `Error: ${err.message || err}`;
+    try {
+      await refreshObjectiveCompiler(objectiveStateKey(selectedObjectiveState));
+    } catch (_refreshErr) {
+      // Preserve the original action error when state refresh is also unavailable.
+    }
+  } finally {
+    objectiveActionBusy = false;
+    updateObjectiveButtons();
+  }
+}
+
+function selectedObjectiveReference() {
+  if (!selectedObjectiveState) throw new Error("Select or compose an objective first.");
+  return { objective_id: selectedObjectiveState.objective_id, version: Number(selectedObjectiveState.version) };
+}
+
+async function composeObjective() {
+  const intent = String(objectiveIntentInput?.value || "").trim();
+  if (!intent) throw new Error("Research intent is required.");
+  const result = await postJson("/api/objectives/compose", { intent });
+  return `${result.draft.objective_id}::${result.draft.version}`;
+}
+
+async function reviseObjective() {
+  const intent = String(objectiveIntentInput?.value || "").trim();
+  if (!intent) throw new Error("Revision instruction is required.");
+  const reference = selectedObjectiveReference();
+  const result = await postJson("/api/objectives/revise", { objective_id: reference.objective_id, instruction: intent });
+  return `${result.draft.objective_id}::${result.draft.version}`;
+}
+
+async function validateObjective() {
+  await postJson("/api/objectives/validate", selectedObjectiveReference());
+  return objectiveStateKey(selectedObjectiveState);
+}
+
+async function previewObjective() {
+  const observations = parseJsonField(objectivePreviewObservationsInput, []);
+  if (!Array.isArray(observations) || !observations.length) throw new Error("Preview requires at least one observation row.");
+  await postJson("/api/objectives/preview", { ...selectedObjectiveReference(), observations });
+  return objectiveStateKey(selectedObjectiveState);
+}
+
+async function approveObjective() {
+  const operator = String(objectiveOperatorInput?.value || "").trim();
+  if (!operator) throw new Error("Operator is required.");
+  await postJson("/api/objectives/approve", { ...selectedObjectiveReference(), operator });
+  return objectiveStateKey(selectedObjectiveState);
+}
+
+async function activateObjective() {
+  const operator = String(objectiveOperatorInput?.value || "").trim();
+  const runId = String(objectiveRunIdInput?.value || "").trim();
+  if (!operator || !runId) throw new Error("Operator and Run ID are required.");
+  await postJson("/api/objectives/activate", { ...selectedObjectiveReference(), operator, run_id: runId });
+  return objectiveStateKey(selectedObjectiveState);
+}
+
 async function loadConfig() {
   setDot(boStatusDot, "idle");
   boStatusLabel.textContent = "Loading";
@@ -490,6 +773,13 @@ async function loadConfig() {
   boStatusDetail.textContent = data.recent && data.recent.recommendation ? `Latest: ${data.recent.recommendation.candidate_id}${savedNote}` : `No recent BO Agent run.${savedNote}`;
   if (data.recent && data.recent.recommendation) {
     renderResult({ data: { bo_result: data.recent } });
+  }
+  const recentRunId = data.state && data.state.run_id ? String(data.state.run_id) : "";
+  if (objectiveRunIdInput && !objectiveRunIdInput.value && recentRunId) objectiveRunIdInput.value = recentRunId;
+  try {
+    await refreshObjectiveCompiler();
+  } catch (err) {
+    if (objectiveActionStatus) objectiveActionStatus.textContent = `Objective state unavailable: ${err.message || err}`;
   }
 }
 
@@ -544,5 +834,17 @@ btnBenchmark.addEventListener("click", runBenchmark);
 btnRun.addEventListener("click", runBOAgent);
 btnSave.addEventListener("click", saveSettings);
 btnReset.addEventListener("click", () => applyDefaults({ defaults }));
+if (objectiveVersionSelect) objectiveVersionSelect.addEventListener("change", () => {
+  const state = (objectiveRuntimeStatus.objective_states || []).find((item) => objectiveStateKey(item) === objectiveVersionSelect.value);
+  renderSelectedObjective(state || null);
+});
+if (objectiveRunIdInput) objectiveRunIdInput.addEventListener("input", updateObjectiveButtons);
+if (btnObjectiveCompose) btnObjectiveCompose.addEventListener("click", () => runObjectiveAction("Composing bounded objective", composeObjective));
+if (btnObjectiveRevise) btnObjectiveRevise.addEventListener("click", () => runObjectiveAction("Revising objective version", reviseObjective));
+if (btnObjectiveRefresh) btnObjectiveRefresh.addEventListener("click", () => runObjectiveAction("Refreshing objective state", async () => objectiveStateKey(selectedObjectiveState)));
+if (btnObjectiveValidate) btnObjectiveValidate.addEventListener("click", () => runObjectiveAction("Validating objective contract", validateObjective));
+if (btnObjectivePreview) btnObjectivePreview.addEventListener("click", () => runObjectiveAction("Evaluating preview observations", previewObjective));
+if (btnObjectiveApprove) btnObjectiveApprove.addEventListener("click", () => runObjectiveAction("Recording operator approval", approveObjective));
+if (btnObjectiveActivate) btnObjectiveActivate.addEventListener("click", () => runObjectiveAction("Binding objective to run", activateObjective));
 
 loadConfig();

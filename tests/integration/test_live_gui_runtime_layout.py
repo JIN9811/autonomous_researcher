@@ -4140,3 +4140,24 @@ def test_joint_telemetry_terminal_snapshot_finalizes_artifacts(tmp_path, monkeyp
     assert payload["artifacts"]["ok"] is True
     assert Path(payload["artifacts"]["plot_png_path"]).is_file()
     assert payload["artifacts"]["plot_png_url"].startswith("/api/lerobot/visualization/file?path=")
+
+
+def test_live_gui_contains_compact_objective_runtime_card() -> None:
+    client = TestClient(app)
+
+    html = client.get("/live").text
+    script = client.get("/static/planning.js").text
+
+    for element_id in (
+        "live-objective-runtime-card",
+        "live-objective-identity",
+        "live-objective-hash",
+        "live-objective-equation",
+        "live-objective-score",
+        "live-objective-feasibility",
+        "live-objective-contributions",
+        "live-objective-readiness",
+    ):
+        assert f'id="{element_id}"' in html
+    assert "/api/objectives/status" in script
+    assert "refreshLiveObjectiveState" in script

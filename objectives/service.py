@@ -354,12 +354,37 @@ class ObjectiveService:
     def status(self, *, run_id: str = "") -> dict[str, Any]:
         specs = self.store.list_specs()
         binding = self.store.load_binding(run_id) if run_id else None
+        objective_states: list[dict[str, Any]] = []
+        for spec in specs:
+            validation = self.store.load_validation(spec.objective_id, spec.version)
+            preview = self.store.load_preview(spec.objective_id, spec.version)
+            approved_hash = self._approved_hash(spec.objective_id, spec.version)
+            objective_hash = validation.objective_hash if validation else ""
+            is_active = bool(
+                binding
+                and binding.objective_id == spec.objective_id
+                and binding.version == spec.version
+                and binding.objective_hash == objective_hash
+            )
+            objective_states.append(
+                {
+                    "objective_id": spec.objective_id,
+                    "version": spec.version,
+                    "objective_hash": objective_hash,
+                    "spec": spec.model_dump(mode="json"),
+                    "validation": validation.model_dump(mode="json") if validation else None,
+                    "preview": preview.model_dump(mode="json") if preview else None,
+                    "approved": bool(approved_hash and approved_hash == objective_hash),
+                    "active": is_active,
+                }
+            )
         return {
             "ok": True,
             "registry_version": self.registry.version_id,
             "metric_count": len(self.registry.list()),
             "objective_count": len(specs),
             "objectives": [item.model_dump(mode="json") for item in specs],
+            "objective_states": objective_states,
             "active_binding": binding.model_dump(mode="json") if binding else None,
             "evaluations": self.store.list_evaluations(run_id=run_id) if run_id else [],
         }

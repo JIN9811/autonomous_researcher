@@ -40,6 +40,14 @@ const btnPlanningSend = document.getElementById("btn-planning-send");
 const liveAgentBinderList = document.getElementById("live-agent-binder-list");
 const liveCenterTitle = document.getElementById("live-center-title");
 const liveFocusStrip = document.getElementById("live-focus-strip");
+const liveObjectiveRuntimeCard = document.getElementById("live-objective-runtime-card");
+const liveObjectiveIdentity = document.getElementById("live-objective-identity");
+const liveObjectiveHash = document.getElementById("live-objective-hash");
+const liveObjectiveEquation = document.getElementById("live-objective-equation");
+const liveObjectiveScore = document.getElementById("live-objective-score");
+const liveObjectiveFeasibility = document.getElementById("live-objective-feasibility");
+const liveObjectiveContributions = document.getElementById("live-objective-contributions");
+const liveObjectiveReadiness = document.getElementById("live-objective-readiness");
 const liveReportToolbar = document.getElementById("live-report-toolbar");
 const liveBinderContextMenu = document.getElementById("live-binder-context-menu");
 const liveReportPanel = document.getElementById("live-report-panel");
@@ -250,6 +258,8 @@ let liveLastEventAt = null;
 let liveSyncFailureCount = 0;
 let liveRefreshInFlight = null;
 let liveAuxRefreshInFlight = null;
+let liveObjectiveRefreshInFlight = null;
+let liveObjectiveRefreshedAt = 0;
 const LIVE_AUTO_REFRESH_MS = 5000;
 const LIVE_SYNC_STALE_MS = 15000;
 const LIVE_SYNC_ERROR_MS = 60000;
@@ -5993,6 +6003,84 @@ function renderAgentSpecificReportSection(report, status, agentLabel) {
 function liveCurrentRunId() {
   const state = (liveLastSession && liveLastSession.state) || (liveLastSnapshot && liveLastSnapshot.state) || {};
   return String(state.run_id || "");
+}
+
+function liveObjectiveExpressionSummary(node) {
+  if (!node || typeof node !== "object") return String(node ?? "-");
+  if (node.op === "metric") return String(node.metric_id || "metric");
+  if (node.op === "literal") return String(node.value ?? "0");
+  const children = Array.isArray(node.args)
+    ? node.args
+    : node.arg !== undefined
+      ? [node.arg]
+      : [node.left, node.right].filter((value) => value !== undefined);
+  return children.length
+    ? `${String(node.op || "expression")}(${children.map(liveObjectiveExpressionSummary).join(", ")})`
+    : String(node.op || "expression");
+}
+
+function renderLiveObjectiveState(payload) {
+  if (!liveObjectiveRuntimeCard) return;
+  const binding = payload && payload.active_binding && typeof payload.active_binding === "object" ? payload.active_binding : null;
+  const states = Array.isArray(payload?.objective_states) ? payload.objective_states : [];
+  const state = binding
+    ? states.find((item) => item.objective_id === binding.objective_id && Number(item.version) === Number(binding.version))
+    : null;
+  const evaluations = Array.isArray(payload?.evaluations) ? payload.evaluations : [];
+  const latest = evaluations.length ? evaluations[evaluations.length - 1] : null;
+  const contributions = latest && latest.term_contributions && typeof latest.term_contributions === "object"
+    ? Object.entries(latest.term_contributions)
+      .sort((left, right) => Math.abs(Number(right[1])) - Math.abs(Number(left[1])))
+      .slice(0, 2)
+      .map(([key, value]) => `${key} ${Number(value).toFixed(3)}`)
+      .join(" · ")
+    : "-";
+  liveObjectiveRuntimeCard.classList.toggle("active", Boolean(binding));
+  if (liveObjectiveIdentity) liveObjectiveIdentity.textContent = binding ? `${binding.objective_id} · v${binding.version}` : "No run binding";
+  if (liveObjectiveHash) liveObjectiveHash.textContent = binding?.objective_hash ? `hash ${String(binding.objective_hash).slice(0, 12)}` : "hash -";
+  if (liveObjectiveEquation) {
+    const summary = state?.spec?.expression ? liveObjectiveExpressionSummary(state.spec.expression) : "No approved objective is bound to this run.";
+    liveObjectiveEquation.textContent = state?.spec?.direction ? `${state.spec.direction} · ${summary}` : summary;
+    liveObjectiveEquation.title = summary;
+  }
+  if (liveObjectiveScore) liveObjectiveScore.textContent = latest && Number.isFinite(Number(latest.score)) ? Number(latest.score).toFixed(4) : "-";
+  if (liveObjectiveFeasibility) liveObjectiveFeasibility.textContent = latest ? (latest.feasible ? "yes" : "no") : "-";
+  if (liveObjectiveContributions) {
+    liveObjectiveContributions.textContent = contributions;
+    liveObjectiveContributions.title = contributions;
+  }
+  if (liveObjectiveReadiness) {
+    liveObjectiveReadiness.textContent = latest ? "evaluated" : binding ? "bound / awaiting evidence" : "unbound";
+    liveObjectiveReadiness.className = latest ? "ok" : binding ? "running" : "idle";
+  }
+}
+
+async function refreshLiveObjectiveState(session = liveLastSession, options = {}) {
+  if (!liveObjectiveRuntimeCard) return null;
+  const now = Date.now();
+  if (!options.force && now - liveObjectiveRefreshedAt < LIVE_AUTO_REFRESH_MS) return null;
+  if (liveObjectiveRefreshInFlight) return liveObjectiveRefreshInFlight;
+  const state = (session && session.state) || (liveLastSnapshot && liveLastSnapshot.state) || {};
+  const runId = String(state.run_id || liveCurrentRunId() || "");
+  liveObjectiveRefreshInFlight = (async () => {
+    try {
+      const response = await fetch(`/api/objectives/status${runId ? `?run_id=${encodeURIComponent(runId)}` : ""}`);
+      if (!response.ok) throw new Error(`objective status HTTP ${response.status}`);
+      const payload = await response.json();
+      renderLiveObjectiveState(payload);
+      liveObjectiveRefreshedAt = Date.now();
+      return payload;
+    } catch (err) {
+      if (liveObjectiveReadiness) {
+        liveObjectiveReadiness.textContent = "status unavailable";
+        liveObjectiveReadiness.className = "warning";
+      }
+      return null;
+    } finally {
+      liveObjectiveRefreshInFlight = null;
+    }
+  })();
+  return liveObjectiveRefreshInFlight;
 }
 
 function ensureOperatorReportStateRun(runId = liveCurrentRunId()) {
@@ -17944,6 +18032,7 @@ async function refreshPlanningAuxiliaryState(session) {
         fetch("/api/events/recent"),
         refreshLivePrinterMonitorStatus(session),
         fetch("/api/knowledge/relations/summary"),
+        refreshLiveObjectiveState(session),
       ]);
       let guardianPayload = null;
       if (guardianResult.status === "fulfilled" && guardianResult.value.ok) {

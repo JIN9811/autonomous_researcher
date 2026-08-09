@@ -33,8 +33,8 @@ Modification guide:
           <p class="eyebrow">Optimization Workspace</p>
           <h1>BO Workspace</h1>
           <p class="subhead">
-            Acquisition function, BO/MBO strategy, parameter space, and benchmark budget을 조정합니다.
-            이 화면은 후보 제안과 virtual benchmark만 수행하며 프린터/로봇을 직접 구동하지 않습니다.
+            자연어 연구 목표를 검증 가능한 수식으로 구성하고, 승인된 버전을 BO/MBO 실행에 고정합니다.
+            후보 제안과 virtual benchmark만 수행하며 프린터/로봇을 직접 구동하지 않습니다.
           </p>
         </div>
         <article class="status-card">
@@ -45,6 +45,92 @@ Modification guide:
           <strong id="bo-status-label">Loading</strong>
           <p id="bo-status-detail">Reading BO defaults.</p>
         </article>
+      </section>
+
+      <section id="objective-compiler-workspace" class="panel bo-objective-workspace" aria-label="Objective Compiler Workspace">
+        <header class="bo-objective-header">
+          <div>
+            <p class="eyebrow">Bounded Objective Compiler</p>
+            <h2>Research Intent to Executable Objective</h2>
+            <p class="hint">LLM은 등록된 metric과 제한된 연산자만 조합합니다. 검증과 데이터 미리보기를 통과한 버전만 승인·활성화됩니다.</p>
+          </div>
+          <div class="bo-objective-identity">
+            <span id="objective-lifecycle-chip" class="runtime-chip idle">No objective</span>
+            <strong id="objective-active-identity">Unbound</strong>
+            <code id="objective-active-hash">hash -</code>
+          </div>
+        </header>
+
+        <div class="bo-objective-compose-grid">
+          <label class="planning-message-label bo-objective-intent">
+            Research Intent
+            <textarea id="objective-intent-input" class="text-input" rows="4" placeholder="예: 압축강도를 최대화하되 변위와 프린팅 품질 제약을 만족하도록 구성"></textarea>
+          </label>
+          <div class="bo-objective-binding-grid">
+            <label>Operator<input id="objective-operator-input" class="text-input" type="text" value="JIN" /></label>
+            <label>Run ID<input id="objective-run-id-input" class="text-input" type="text" placeholder="run-..." /></label>
+            <label>Objective Version<select id="objective-version-select" class="text-input"><option value="">No saved objective</option></select></label>
+          </div>
+        </div>
+
+        <div class="button-row bo-objective-compose-actions">
+          <button id="btn-objective-compose" class="btn primary">Compose Draft</button>
+          <button id="btn-objective-revise" class="btn" disabled>Revise Version</button>
+          <button id="btn-objective-refresh" class="btn">Refresh State</button>
+        </div>
+
+        <div class="bo-objective-inspection-grid">
+          <article class="bo-objective-card">
+            <h3>Metric Registry</h3>
+            <div id="objective-metric-browser" class="bo-metric-browser">Loading registered metrics...</div>
+          </article>
+          <article class="bo-objective-card">
+            <h3>Equation Tree</h3>
+            <div id="objective-equation-tree" class="bo-equation-tree">Compose or select an objective.</div>
+          </article>
+          <article class="bo-objective-card">
+            <h3>Validation</h3>
+            <div id="objective-validation-panel" class="bo-objective-state-panel">Not validated.</div>
+          </article>
+        </div>
+
+        <details class="bo-objective-preview-input">
+          <summary>Preview observations</summary>
+          <p class="hint">등록 metric 값을 포함한 관측 JSON 배열입니다. 승인 전 실제 데이터에서 점수 분포와 민감도를 확인합니다.</p>
+          <textarea id="objective-preview-observations-input" class="text-input" rows="8">[]</textarea>
+        </details>
+
+        <div class="bo-objective-preview-grid">
+          <article id="objective-preview-panel" class="bo-objective-card bo-objective-preview-summary">
+            <h3>Preview Readiness</h3>
+            <div id="objective-preview-summary">No preview.</div>
+          </article>
+          <article class="bo-objective-card">
+            <h3>Score Distribution</h3>
+            <div id="objective-preview-score-chart" class="bo-objective-chart"></div>
+          </article>
+          <article class="bo-objective-card">
+            <h3>Term Contributions</h3>
+            <div id="objective-preview-contribution-chart" class="bo-objective-chart"></div>
+          </article>
+          <article class="bo-objective-card">
+            <h3>Sensitivity</h3>
+            <div id="objective-preview-sensitivity-chart" class="bo-objective-chart"></div>
+          </article>
+        </div>
+
+        <article class="bo-objective-card bo-objective-diff-card">
+          <h3>Version Diff</h3>
+          <div id="objective-version-diff">No prior version.</div>
+        </article>
+
+        <div class="button-row bo-objective-lifecycle-actions">
+          <button id="btn-objective-validate" class="btn" disabled>Validate</button>
+          <button id="btn-objective-preview" class="btn" disabled>Run Preview</button>
+          <button id="btn-objective-approve" class="btn" disabled>Approve Version</button>
+          <button id="btn-objective-activate" class="btn primary" disabled>Activate for Run</button>
+        </div>
+        <p id="objective-action-status" class="hint">Compose a research intent to begin.</p>
       </section>
 
       <section class="panel equipment-setup-grid printer-setup-grid">
@@ -123,10 +209,7 @@ Modification guide:
               <input id="bo-top-k-input" class="text-input" type="number" min="1" max="12" step="1" value="5" />
             </label>
           </div>
-          <label class="planning-message-label">
-            Objective JSON
-            <textarea id="bo-objective-input" class="text-input" rows="7"></textarea>
-          </label>
+          <textarea id="bo-objective-input" hidden>{}</textarea>
           <label class="planning-message-label">
             Parameter Space JSON
             <textarea id="bo-parameter-space-input" class="text-input" rows="12"></textarea>

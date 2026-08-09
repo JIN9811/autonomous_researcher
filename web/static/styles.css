@@ -3474,6 +3474,109 @@ textarea {
   }
 }
 
+body.planning-live-body .live-objective-runtime-card {
+  display: grid;
+  grid-template-columns: minmax(250px, 0.7fr) minmax(0, 1.8fr);
+  min-width: 0;
+  margin: 0 0 8px;
+  border: 1px solid rgba(83, 111, 145, 0.55);
+  background: rgba(10, 21, 36, 0.82);
+  color: #dce8f7;
+}
+
+body.planning-live-body .live-objective-runtime-card.active {
+  border-color: rgba(52, 211, 153, 0.72);
+  box-shadow: inset 3px 0 0 #34d399;
+}
+
+body.planning-live-body .live-objective-runtime-card > header {
+  display: grid;
+  align-content: center;
+  gap: 3px;
+  min-width: 0;
+  padding: 8px 11px;
+  border-right: 1px solid rgba(83, 111, 145, 0.36);
+}
+
+body.planning-live-body .live-objective-runtime-card > header span {
+  color: #48d8f5;
+  font: 700 0.58rem/1.1 "IBM Plex Mono", Consolas, monospace;
+  letter-spacing: 0.08em;
+}
+
+body.planning-live-body .live-objective-runtime-card > header strong,
+body.planning-live-body .live-objective-runtime-card > header code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.planning-live-body .live-objective-runtime-card > header strong { font-size: 0.76rem; }
+body.planning-live-body .live-objective-runtime-card > header code { color: #8195ad; font-size: 0.58rem; }
+
+body.planning-live-body .live-objective-runtime-body {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.2fr) minmax(0, 2fr);
+  align-items: center;
+  min-width: 0;
+  gap: 10px;
+  padding: 7px 10px;
+}
+
+body.planning-live-body #live-objective-equation {
+  margin: 0;
+  overflow: hidden;
+  color: #aebed2;
+  font: 600 0.64rem/1.3 "IBM Plex Mono", Consolas, monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.planning-live-body .live-objective-runtime-metrics {
+  display: grid;
+  grid-template-columns: 0.6fr 0.6fr 1.5fr 1.2fr;
+  min-width: 0;
+  gap: 5px;
+}
+
+body.planning-live-body .live-objective-runtime-metrics > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 5px 7px;
+  border-left: 1px solid rgba(83, 111, 145, 0.45);
+}
+
+body.planning-live-body .live-objective-runtime-metrics span {
+  color: #71869f;
+  font-size: 0.52rem;
+  text-transform: uppercase;
+}
+
+body.planning-live-body .live-objective-runtime-metrics strong {
+  overflow: hidden;
+  color: #e8f1fb;
+  font: 700 0.62rem/1.2 "IBM Plex Mono", Consolas, monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.planning-live-body #live-objective-readiness.ok { color: #34d399; }
+body.planning-live-body #live-objective-readiness.running { color: #fbbf24; }
+body.planning-live-body #live-objective-readiness.warning { color: #fb7185; }
+
+@media (max-width: 980px) {
+  body.planning-live-body .live-objective-runtime-card,
+  body.planning-live-body .live-objective-runtime-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  body.planning-live-body .live-objective-runtime-card > header {
+    border-right: 0;
+    border-bottom: 1px solid rgba(83, 111, 145, 0.36);
+  }
+}
+
 .lerobot-visualization {
   margin-top: 14px;
   display: grid;
@@ -3829,6 +3932,260 @@ textarea {
   .runtime-ide-transition-editor {
     grid-template-columns: 1fr;
   }
+}
+
+/* BO Objective Compiler */
+.bo-objective-workspace {
+  display: grid;
+  gap: 16px;
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.98), rgba(237, 245, 255, 0.96));
+}
+
+.bo-objective-header,
+.bo-objective-compose-grid,
+.bo-objective-inspection-grid,
+.bo-objective-preview-grid {
+  display: grid;
+  gap: 14px;
+}
+
+.bo-objective-header {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 14px;
+}
+
+.bo-objective-header h2,
+.bo-objective-card h3 {
+  margin: 0;
+}
+
+.bo-objective-identity {
+  min-width: 250px;
+  display: grid;
+  justify-items: end;
+  gap: 7px;
+}
+
+.bo-objective-identity code {
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+
+.bo-objective-compose-grid {
+  grid-template-columns: minmax(0, 1.65fr) minmax(300px, 0.85fr);
+  align-items: stretch;
+}
+
+.bo-objective-binding-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.bo-objective-binding-grid label:last-child {
+  grid-column: 1 / -1;
+}
+
+.bo-objective-inspection-grid {
+  grid-template-columns: minmax(260px, 0.8fr) minmax(320px, 1.3fr) minmax(260px, 0.8fr);
+}
+
+.bo-objective-preview-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.bo-objective-card,
+.bo-objective-preview-input {
+  min-width: 0;
+  border: 1px solid rgba(20, 54, 179, 0.18);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.76);
+  padding: 14px;
+}
+
+.bo-objective-card h3,
+.bo-objective-preview-input summary {
+  color: #17306e;
+  font-size: 0.9rem;
+  font-weight: 760;
+  margin-bottom: 11px;
+}
+
+.bo-metric-browser {
+  max-height: 310px;
+  overflow: auto;
+  display: grid;
+  gap: 7px;
+}
+
+.bo-metric-entry {
+  display: grid;
+  gap: 3px;
+  padding: 9px 10px;
+  border-left: 3px solid #2f72ff;
+  background: #f1f6ff;
+}
+
+.bo-metric-entry strong,
+.bo-metric-entry code,
+.bo-metric-entry span {
+  overflow-wrap: anywhere;
+}
+
+.bo-metric-entry code,
+.bo-metric-entry span {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.bo-equation-tree {
+  max-height: 310px;
+  overflow: auto;
+}
+
+.bo-equation-summary {
+  margin: 0 0 10px;
+  color: #17306e;
+  font: 700 0.78rem/1.45 "IBM Plex Mono", Consolas, monospace;
+  overflow-wrap: anywhere;
+}
+
+.bo-equation-root,
+.bo-equation-root ul {
+  list-style: none;
+  padding-left: 18px;
+  margin: 5px 0;
+  border-left: 1px solid rgba(47, 114, 255, 0.24);
+}
+
+.bo-equation-node {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0;
+  padding: 7px 8px;
+  border-radius: 8px;
+  background: #f5f8ff;
+}
+
+.bo-equation-node span,
+.bo-equation-node code {
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+
+.bo-objective-validation {
+  display: grid;
+  gap: 9px;
+}
+
+.bo-objective-validation.valid strong { color: var(--ok); }
+.bo-objective-validation.invalid strong { color: var(--danger); }
+
+.bo-objective-kpis {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.bo-objective-kpis > div {
+  display: grid;
+  gap: 3px;
+  padding: 9px;
+  background: #f3f7ff;
+  border-radius: 8px;
+}
+
+.bo-objective-kpis span {
+  color: var(--muted);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+}
+
+.bo-objective-bars {
+  display: grid;
+  gap: 8px;
+}
+
+.bo-objective-bar-row {
+  display: grid;
+  grid-template-columns: minmax(76px, 0.9fr) minmax(70px, 1.4fr) auto;
+  align-items: center;
+  gap: 7px;
+  font-size: 0.68rem;
+}
+
+.bo-objective-bar-row > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bo-objective-bar-row > div {
+  height: 8px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #dfe9fb;
+}
+
+.bo-objective-bar-row i {
+  display: block;
+  height: 100%;
+  background: #2f72ff;
+}
+
+.bo-objective-bar-row i.negative { background: #e38477; }
+.bo-objective-empty { color: var(--muted); }
+
+.bo-objective-diff-list {
+  display: grid;
+  gap: 8px;
+}
+
+.bo-objective-diff-list > div {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+}
+
+.bo-objective-diff-list del,
+.bo-objective-diff-list ins {
+  padding: 7px;
+  border-radius: 7px;
+  overflow-wrap: anywhere;
+  text-decoration: none;
+}
+
+.bo-objective-diff-list del { background: #fff0ee; color: #9d3c31; }
+.bo-objective-diff-list ins { background: #eaf8ef; color: #176f40; }
+
+.bo-objective-lifecycle-actions .btn:disabled,
+.bo-objective-compose-actions .btn:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
+@media (max-width: 1080px) {
+  .bo-objective-inspection-grid,
+  .bo-objective-preview-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .bo-objective-header,
+  .bo-objective-compose-grid,
+  .bo-objective-inspection-grid,
+  .bo-objective-preview-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .bo-objective-identity { justify-items: start; min-width: 0; }
+  .bo-objective-diff-list > div { grid-template-columns: minmax(0, 1fr); }
 }
 
 .runtime-ide-node.edge-active {
@@ -24482,6 +24839,22 @@ body.planning-live-body #btn-live-emergency-reset {
   letter-spacing: 0.02em !important;
   text-transform: uppercase !important;
   box-shadow: none !important;
+}
+
+/* Objective status occupies a bounded row between runtime focus and the active report. */
+body.planning-live-body .live-center-panel.panel {
+  grid-template-rows: 36px 26px auto minmax(0, 1fr) !important;
+}
+
+body.planning-live-body .live-center-panel.panel #live-objective-runtime-card {
+  grid-column: 1 / -1 !important;
+  grid-row: 3 !important;
+  width: 100% !important;
+  margin: 0 !important;
+}
+
+body.planning-live-body .live-center-panel.panel .live-center-view {
+  grid-row: 4 !important;
 }
 
 body.planning-live-body #btn-live-emergency-resume {
