@@ -60,6 +60,14 @@ reconciliation service/store, route handlers, and Knowledge operations Guide.
 
 ## Closed-Loop Position and Handoffs
 
+![Knowledge closed-loop position and handoffs](assets/figures/knowledge_01_closed_loop_handoffs.svg)
+
+**Figure Knowledge-1.** Accepted reports, artifacts, decisions, provenance, and
+Analysis evidence become durable local records and bounded contexts for BO,
+Design, Orchestrator, Guardian, and operator-reviewed Evolution work. This is
+an `inspection`-backed projection of baseline `0b7627b`, not proof of graph
+availability or knowledge quality.
+
 | Direction | Component | Contract/state | Purpose | Gate |
 |---|---|---|---|---|
 | In | All completed agents | reports/artifacts/decisions | durable cycle record | accepted schema/provenance |
@@ -108,6 +116,26 @@ evolution_evidence_packs exists or explicit no_evolution_needed reason exists
 | `11_emit_knowledge_report` | human/machine report | report schema |
 | `12_emit_evolution_lab_prefill` | workspace prefill | no activation |
 
+![Knowledge internal execution and effect boundary](assets/figures/knowledge_02_execution_effect_boundary.svg)
+
+**Figure Knowledge-2.** Twelve internal entries, eight output contracts, and
+five transition conditions separate provenance/schema gates, experiment
+records, patterns, performance, BO context, evolution evidence, reports,
+durable local state, outbox, and optional graph receipts. This `inspection`
+figure groups contract steps and grants no automatic variant activation.
+
+### Execution trace details
+
+| Phase | State read | Validation/transformation | Durable output | Failure/degraded behavior |
+|---|---|---|---|---|
+| Collect | accepted stage reports, artifacts, decisions and run/cycle IDs | bound complete referenced set | collection record and explicit missing refs | unreferenced or rejected outputs are not promoted |
+| Provenance/report ingest | producer, source, use and schema | normalize provenance and validate typed reports | ledger event and accepted report records | invalid provenance/schema blocks affected record |
+| Experiment record | complete accepted cycle context | construct typed knowledge record | `experiment_knowledge_v1` | required record absence blocks transition |
+| Patterns/performance | accepted results and failures | update typed success/failure patterns and stage performance | three typed record families | completed stages require performance or explicit defect |
+| BO context | compatible trials, constraints and evidence | create bounded context or explicit no-context reason | `knowledge_context.v1`/BO context | absence reason is data, not an empty field |
+| Evolution | evidence-backed performance/failure targets | rank targets and build packs or no-evolution reason | `evolution_proposal.v1` and evidence packs | recommendation never activates a variant |
+| Report/prefill | complete output contract set | emit human/machine report and workspace prefill | `knowledge_report.v1` and prefill | transition waits for declared conditions |
+
 ## API Surface
 
 | Class | Method | Path/family | Effect | Notes |
@@ -137,6 +165,30 @@ evolution_evidence_packs exists or explicit no_evolution_needed reason exists
 
 The module declares no direct tools; persistence is through Knowledge service
 contracts.
+
+![Knowledge API and connection architecture](assets/figures/knowledge_03_api_connection_architecture.svg)
+
+**Figure Knowledge-3.** Knowledge output, context, relation, ontology, graph,
+and Graphify APIs pass through the validated service into an audit ledger,
+local records, and durable outbox; configured graph writes require receipts,
+and relation/model proposals remain operator-reviewed. This `inspection`
+figure is not graph-availability or reconciliation-quality evidence.
+
+### Connection lifecycle
+
+| Lifecycle | Authoritative boundary | Required evidence/state | Failure/recovery rule |
+|---|---|---|---|
+| Validate | Knowledge service, provenance and ontology registry | accepted schema/class/relation/source/use | reject before persistence on failure |
+| Append local | audit ledger and typed JSONL/local repositories | immutable event plus typed record | local append/flush failure blocks acknowledgement |
+| Enqueue sync | durable outbox | payload identity, attempt and pending state | retain pending/dead-letter state across outage |
+| Apply graph | bounded repository/query plan | matching graph health and write receipt | never acknowledge graph success without receipt |
+| Read context | bounded service queries | provenance-filtered run/BO/safety response | no raw Cypher or unbounded query surface |
+| Relation review | scan/reconcile proposal and immutable operator decision | evidence/confidence/structural gates | defer/reject/re-evaluate without overwriting history |
+| Evolution handoff | ranked evidence pack and workspace prefill | operator-reviewable recommendation | no automatic activation edge |
+
+When optional graph sync is degraded, the audit ledger, typed local records,
+and durable outbox remain the persistence authority; the UI must not present a
+missing receipt as a successful graph write.
 
 ## State, Events, Artifacts, and Storage
 

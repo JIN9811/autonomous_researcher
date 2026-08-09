@@ -1,0 +1,21 @@
+digraph knowledge_api_connection_architecture {
+  graph [rankdir=LR, bgcolor="transparent", pad="0.25", nodesep="0.27", ranksep="0.48", fontname="DejaVu Sans", label="Knowledge API and connection architecture", labelloc="t", fontsize=18];
+  node [shape=box, style="rounded,filled", fillcolor="#EEF4FF", color="#315C9B", fontname="DejaVu Sans", fontsize=7.8, margin="0.08,0.06"];
+  edge [color="#52667A", fontname="DejaVu Sans", fontsize=6.8, arrowsize=0.62];
+  api [label="Knowledge APIs\noutputs · context · activity\nrelations · ontology · graph · Graphify"];
+  service [label="Knowledge service\nvalidated ingest/query", shape=component, fillcolor="#F2ECFA", color="#6B4C9A"];
+  gate [label="Provenance · ontology · duplicate\nexisting-node · evidence gate", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];
+  local [label="Audit ledger · JSONL records\nrelation store · durable outbox", shape=component, fillcolor="#F2ECFA", color="#6B4C9A"];
+  graph_backend [label="Optional graph / Neo4j / Graphify\nbounded query + receipt", shape=component, fillcolor="#F2ECFA", color="#6B4C9A"];
+  review [label="Operator relation/edit review", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];
+  model [label="Already-loaded model\npriority-30 reconciliation", shape=component, fillcolor="#F2ECFA", color="#6B4C9A"];
+  evidence [label="Ledger event · outbox state · graph receipt\nproposal · immutable decision", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
+  blocked [label="No raw Cypher / auto activation", fillcolor="#FFE9E7", color="#A33A32", penwidth=2];
+  api -> service -> gate -> local;
+  local -> graph_backend [style=dashed, label="configured sync"];
+  graph_backend -> evidence [label="receipt", color="#2E7D59"];
+  local -> evidence [label="durable evidence", color="#2E7D59"];
+  model -> review [style=dashed, label="proposal only"];
+  review -> gate [label="approved bounded edit"];
+  gate -> blocked [style=dashed, arrowhead=tee, label="prohibited"];
+}

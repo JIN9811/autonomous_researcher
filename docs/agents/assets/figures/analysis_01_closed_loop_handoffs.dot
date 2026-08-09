@@ -1,0 +1,24 @@
+digraph analysis_closed_loop_handoffs {
+  graph [rankdir=LR, bgcolor="transparent", pad="0.25", nodesep="0.34", ranksep="0.55", fontname="DejaVu Sans", label="Analysis closed-loop position and handoffs", labelloc="t", fontsize=18];
+  node [shape=box, style="rounded,filled", fillcolor="#EEF4FF", color="#315C9B", fontname="DejaVu Sans", fontsize=9, margin="0.10,0.07"];
+  edge [color="#52667A", fontname="DejaVu Sans", fontsize=8, arrowsize=0.7];
+  equipment [label="Equipment raw measurement +\nidentity · proof"];
+  prior [label="Prior compatible trials", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
+  cae [label="Optional CAE capability", shape=component, fillcolor="#F2ECFA", color="#6B4C9A"];
+  analysis [label="ANALYSIS\nvalidated derivation", penwidth=2.2];
+  quality [label="Input · units · curve\nquality valid?", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];
+  knowledge [label="Knowledge\nartifacts + provenance"];
+  bo [label="BO\nobjective + uncertainty"];
+  reject [label="Reject / correct input / error", fillcolor="#FFE9E7", color="#A33A32", penwidth=2];
+  evidence [label="Fingerprint · curve · metrics · CAE\nobjective · evaluation · handoff", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
+  equipment -> analysis;
+  prior -> analysis;
+  cae -> analysis [style=dashed, label="configured optional"];
+  analysis -> quality;
+  quality -> knowledge [label="valid"];
+  quality -> bo [label="valid"];
+  quality -> reject [label="invalid / ambiguous"];
+  analysis -> evidence [label="evidence", color="#2E7D59"];
+  evidence -> knowledge [label="lineage", color="#2E7D59"];
+  evidence -> bo [label="evaluation", color="#2E7D59"];
+}

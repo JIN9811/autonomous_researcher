@@ -1,0 +1,24 @@
+digraph knowledge_execution_effect_boundary {
+  graph [rankdir=TB, bgcolor="transparent", pad="0.25", nodesep="0.28", ranksep="0.42", fontname="DejaVu Sans", label="Knowledge internal execution and effect boundary", labelloc="t", fontsize=18];
+  node [shape=box, style="rounded,filled", fillcolor="#EEF4FF", color="#315C9B", fontname="DejaVu Sans", fontsize=8.0, margin="0.08,0.06"];
+  edge [color="#52667A", fontname="DejaVu Sans", fontsize=7.0, arrowsize=0.62];
+  collect [label="01 collect artifacts\n02 normalize provenance\n03 ingest reports"];
+  gate [label="Schema · provenance · ontology", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];
+  record [label="04 experiment knowledge record"];
+  patterns [label="05 failure · 06 success patterns\n07 performance ledger"];
+  context [label="08 BO context\nor explicit no-context reason"];
+  evolution [label="09 rank evolution targets\n10 evidence packs or no-evolution reason"];
+  output [label="11 knowledge report\n12 Evolution Lab prefill"];
+  service [label="Ledger · local repository · outbox\noptional graph receipt", shape=component, fillcolor="#F2ECFA", color="#6B4C9A"];
+  evidence [label="8 output contracts + 5 transition conditions\nrecords · receipts · proposals", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
+  reject [label="Reject / pending / degraded sync", fillcolor="#FFE9E7", color="#A33A32", penwidth=2];
+  effect [label="Effect ceiling:\nlocal/external persistence · model", shape=octagon, fillcolor="#FFE9E7", color="#A33A32", penwidth=2];
+  collect -> gate;
+  gate -> record [label="valid"];
+  gate -> reject [label="invalid"];
+  record -> patterns -> context -> evolution -> output -> effect;
+  record -> service;
+  patterns -> service;
+  output -> evidence [label="evidence", color="#2E7D59"];
+  service -> evidence [label="receipt / durable state", color="#2E7D59"];
+}

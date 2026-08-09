@@ -58,6 +58,14 @@ and CAE APIs.
 
 ## Closed-Loop Position and Handoffs
 
+![Analysis closed-loop position and handoffs](assets/figures/analysis_01_closed_loop_handoffs.svg)
+
+**Figure Analysis-1.** An identity-checked Equipment artifact becomes a
+canonical curve, measured metrics, optional CAE comparison, objective, and
+uncertainty for Knowledge and BO; invalid input or ambiguous units stop the
+handoff. This is an `inspection`-backed projection of baseline `0b7627b`, not
+measurement or solver-accuracy evidence.
+
 | Direction | Component | Contract/state | Purpose | Gate |
 |---|---|---|---|---|
 | In | Equipment | measurement file/handoff/proof | raw analysis input | identity/completion |
@@ -90,6 +98,27 @@ analysis artifacts, experiment evaluation, and BO handoff.
 
 All 22 manifest IDs are represented above.
 
+![Analysis internal execution and effect boundary](assets/figures/analysis_02_execution_effect_boundary.svg)
+
+**Figure Analysis-2.** Twenty-two internal entries preserve raw identity,
+parsing, units, canonical and processed curves, quality, measured metrics,
+optional CAE, objective/uncertainty, artifacts, evaluation, and BO handoff as
+distinct records. This `inspection` figure groups contract steps; optional CAE
+is dashed and no physical-device authority is implied.
+
+### Execution trace details
+
+| Phase | Identity/configuration | Transformation/gate | Evidence/output | Failure/recovery |
+|---|---|---|---|---|
+| Receive | run/specimen/equipment artifact and expected hash | verify existence and fingerprint | immutable raw reference/hash | missing or mismatched input blocks |
+| Parse | format hint and parser version | detect format, parse raw table | parser record and raw columns | unsupported/corrupt input stays rejected |
+| Normalize | column mapping and declared units | resolve columns/units without guessing | normalized mapping | ambiguous units require corrected input |
+| Curve | raw values and preprocessing configuration | build canonical curve, preprocess, quality-check | canonical and processed curves plus quality report | failed quality blocks evaluation |
+| Metrics | quality-approved physical curve | compute typed UTM metrics | measured metric record | missing measurement is never synthesized |
+| Optional CAE | validated problem/payload and available runtime | probe, run, compare and accept/refine | solver config/log/result and FEM comparison | unavailable/failed solver remains explicit |
+| Evaluate | measured metrics, optional FEM and compatible priors | compute objective, uncertainty and comparison | evaluation and decisions | incompatible prior is excluded with reason |
+| Persist/handoff | complete lineage | write artifacts and package BO contract | artifact refs, experiment evaluation, BO handoff | incomplete lineage blocks downstream claim |
+
 ## API Surface
 
 | Class | Method | Path | Service | Effect | Notes |
@@ -113,6 +142,27 @@ The graph-stage agent runs through the graph handler, not a dedicated
 
 An empty module `llm_role` keeps Python task routes distinct rather than
 granting one broad Analysis role.
+
+![Analysis API and connection architecture](assets/figures/analysis_03_api_connection_architecture.svg)
+
+**Figure Analysis-3.** Run artifacts feed deterministic parsing and metric
+logic, while validated optional CAE requests pass through the registered bridge
+to a configured solver process; all derived outputs retain raw/configuration
+lineage. This `inspection` figure does not establish solver availability,
+accuracy, or physical equivalence.
+
+### Connection lifecycle
+
+| Connection | Resolve/preflight | Invoke/observe | Persist/recover |
+|---|---|---|---|
+| Run artifacts | run/specimen/artifact ID and hash | retrieve immutable raw input | preserve raw reference across reruns |
+| Parser/metrics | parser version, mapping, units and preprocessing | deterministic curve/metric calculation | store mapping, configuration and derived hashes |
+| CAE config | solver/runtime selection and validated payload | probe capability before run | configuration change creates a distinct result context |
+| CAE process | bounded `cae.run_static_analysis` request | observe process/log/result or cancellation | known failure may rerun; ambiguous external state remains failed/pending |
+| Derived retrieval | raw and configuration lineage complete | expose curve/metric/FEM/objective artifacts | never overwrite or relabel raw measurement |
+
+The CAE workspace and model rationale cannot bypass input identity, unit, curve
+quality, registered-tool, or artifact-lineage gates.
 
 ## State, Events, Artifacts, and Storage
 

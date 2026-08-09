@@ -1,0 +1,19 @@
+digraph analysis_api_connection_architecture {
+  graph [rankdir=LR, bgcolor="transparent", pad="0.25", nodesep="0.30", ranksep="0.52", fontname="DejaVu Sans", label="Analysis API and connection architecture", labelloc="t", fontsize=18];
+  node [shape=box, style="rounded,filled", fillcolor="#EEF4FF", color="#315C9B", fontname="DejaVu Sans", fontsize=8.3, margin="0.09,0.06"];
+  edge [color="#52667A", fontname="DejaVu Sans", fontsize=7.3, arrowsize=0.65];
+  artifacts [label="Run artifact API\nraw measurement + metadata"];
+  agent [label="Analysis handler\nparser · curve · metrics", penwidth=2];
+  gate [label="Hash · parser · units ·\ncurve quality", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];
+  caeapi [label="/api/cae/config + /run"];
+  bridge [label="CAE bridge\ncae.run_static_analysis", shape=component, fillcolor="#F2ECFA", color="#6B4C9A"];
+  solver [label="Optional CalculiX /\nCAE process", shape=component, fillcolor="#F2ECFA", color="#6B4C9A"];
+  derived [label="Canonical curve · UTM metrics\nFEM comparison · objective", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
+  no_device [label="No direct physical device path", fillcolor="#FFE9E7", color="#A33A32", penwidth=2];
+  artifacts -> agent -> gate -> derived;
+  caeapi -> bridge -> solver [style=dashed, label="configured external process"];
+  gate -> bridge [style=dashed, label="validated payload"];
+  solver -> derived [style=dashed, label="solver evidence", color="#2E7D59"];
+  derived -> artifacts [label="stored/retrievable", color="#2E7D59"];
+  gate -> no_device [style=dashed, arrowhead=tee, label="prohibited"];
+}
