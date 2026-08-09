@@ -132,6 +132,89 @@ AGENT_REFERENCE_TITLES = {
     "bo": "BO",
     "guardian": "Guardian",
 }
+DEVICE_BRIDGE_REFERENCE_PATHS = {
+    "printer_fleet": "docs/device_bridges/printer_fleet_bridge.md",
+    "bambu_x2d": "docs/device_bridges/bambu_x2d_bridge.md",
+    "prusa_mk4s": "docs/device_bridges/prusa_mk4s_bridge.md",
+    "lerobot": "docs/device_bridges/lerobot_bridge.md",
+    "windows_pyautogui": "docs/device_bridges/windows_pyautogui_bridge.md",
+    "utm_vision": "docs/device_bridges/utm_vision_bridge.md",
+    "cae_computation": "docs/device_bridges/cae_computation_bridges.md",
+    "base_simulator": "docs/device_bridges/base_simulator_bridges.md",
+}
+DEVICE_BRIDGE_REFERENCE_TITLES = {
+    "printer_fleet": "Printer Fleet",
+    "bambu_x2d": "Bambu X2D",
+    "prusa_mk4s": "Prusa MK4S",
+    "lerobot": "LeRobot",
+    "windows_pyautogui": "Windows PyAutoGUI",
+    "utm_vision": "UTM Vision",
+    "cae_computation": "CAE Computation",
+    "base_simulator": "Base Simulator",
+}
+DEVICE_BRIDGE_REFERENCE_FIGURES = {
+    "printer_fleet": (
+        "printer_fleet_01_system_handoffs",
+        "printer_fleet_02_execution_effect_boundary",
+        "printer_fleet_03_api_connection_architecture",
+    ),
+    "bambu_x2d": (
+        "bambu_x2d_01_system_handoffs",
+        "bambu_x2d_02_execution_effect_boundary",
+        "bambu_x2d_03_api_connection_architecture",
+    ),
+    "prusa_mk4s": (
+        "prusa_mk4s_01_system_handoffs",
+        "prusa_mk4s_02_execution_effect_boundary",
+        "prusa_mk4s_03_api_connection_architecture",
+    ),
+    "lerobot": (
+        "lerobot_01_system_handoffs",
+        "lerobot_02_execution_effect_boundary",
+        "lerobot_03_api_connection_architecture",
+    ),
+    "windows_pyautogui": (
+        "windows_pyautogui_01_system_handoffs",
+        "windows_pyautogui_02_execution_effect_boundary",
+        "windows_pyautogui_03_api_connection_architecture",
+    ),
+    "utm_vision": (
+        "utm_vision_01_system_handoffs",
+        "utm_vision_02_execution_effect_boundary",
+        "utm_vision_03_api_connection_architecture",
+    ),
+    "cae_computation": (
+        "cae_computation_01_system_handoffs",
+        "cae_computation_02_execution_effect_boundary",
+        "cae_computation_03_api_connection_architecture",
+    ),
+    "base_simulator": (
+        "base_simulator_01_system_handoffs",
+        "base_simulator_02_execution_effect_boundary",
+        "base_simulator_03_api_connection_architecture",
+    ),
+}
+DEVICE_BRIDGE_REQUIRED_SECTIONS = (
+    "Summary",
+    "Scope",
+    "Source of Truth",
+    "Actual Role",
+    "System Position and Agent Handoffs",
+    "Inputs, Commands, and Outputs",
+    "Internal Execution",
+    "API Surface",
+    "Tools and Registry Integration",
+    "Connections and Protocols",
+    "Configuration and Secrets",
+    "State, Events, Artifacts, and Evidence",
+    "Runtime Modes and Fallbacks",
+    "Safety, Approval, and Effect Boundary",
+    "Errors, Timeouts, and Recovery",
+    "Operator and GUI Surfaces",
+    "Current Verification",
+    "Limitations and Known Gaps",
+    "Related Documents",
+)
 
 
 def split_front_matter(text: str) -> tuple[dict[str, Any], str]:
@@ -281,6 +364,62 @@ def _validate_agent_reference_figures(
     return errors
 
 
+def _validate_device_bridge_reference(
+    path: Path, body: str, root: Path, label: str
+) -> list[str]:
+    """Validate the common outline and figure contract for one bridge Reference."""
+
+    try:
+        relative_path = path.resolve().relative_to(root.resolve()).as_posix()
+    except ValueError:
+        return []
+    bridge_id = next(
+        (
+            candidate
+            for candidate, expected_path in DEVICE_BRIDGE_REFERENCE_PATHS.items()
+            if relative_path == expected_path
+        ),
+        None,
+    )
+    if bridge_id is None:
+        return []
+
+    errors: list[str] = []
+    headings = re.findall(r"^##\s+(.+?)\s*$", body, re.MULTILINE)
+    heading_positions = {heading: headings.index(heading) for heading in headings}
+    previous_position = -1
+    for section in DEVICE_BRIDGE_REQUIRED_SECTIONS:
+        position = heading_positions.get(section)
+        if position is None:
+            errors.append(f"{label}: missing device bridge section: {section}")
+            continue
+        if position < previous_position:
+            errors.append(f"{label}: device bridge section out of order: {section}")
+        previous_position = max(previous_position, position)
+
+    targets = set(_markdown_link_targets(body))
+    title = DEVICE_BRIDGE_REFERENCE_TITLES[bridge_id]
+    figure_root = root / "docs/device_bridges/assets/figures"
+    for index, stem in enumerate(DEVICE_BRIDGE_REFERENCE_FIGURES[bridge_id], start=1):
+        source = figure_root / f"{stem}.dot"
+        rendering = figure_root / f"{stem}.svg"
+        link = f"assets/figures/{stem}.svg"
+        caption = f"**Figure {title}-{index}.**"
+        if not source.is_file():
+            errors.append(
+                f"{label}: missing device bridge figure source: {source.relative_to(root)}"
+            )
+        if not rendering.is_file():
+            errors.append(
+                f"{label}: missing device bridge figure rendering: {rendering.relative_to(root)}"
+            )
+        if link not in targets:
+            errors.append(f"{label}: missing device bridge figure link: {link}")
+        if caption not in body:
+            errors.append(f"{label}: missing device bridge figure caption: {caption}")
+    return errors
+
+
 def validate_document(path: Path, root: Path) -> list[str]:
     """Return all governance defects found in one Markdown document."""
 
@@ -347,6 +486,7 @@ def validate_document(path: Path, root: Path) -> list[str]:
     errors.extend(_validate_paths(metadata, root, label))
     errors.extend(_validate_local_links(path, body, root, label))
     errors.extend(_validate_agent_reference_figures(path, body, root, label))
+    errors.extend(_validate_device_bridge_reference(path, body, root, label))
     return errors
 
 
@@ -431,6 +571,62 @@ def _validate_root_agent_navigation(
     ]
 
 
+def _validate_device_bridge_navigation(
+    root: Path, documents: list[str], manifest_label: str
+) -> list[str]:
+    """Require root and bridge-index links when canonical bridge docs are governed."""
+
+    required_paths = set(DEVICE_BRIDGE_REFERENCE_PATHS.values())
+    if not required_paths.issubset(set(documents)):
+        return []
+
+    errors: list[str] = []
+    readme = root / "README.md"
+    if not readme.is_file():
+        errors.append(f"{manifest_label}: missing root README for device bridge navigation")
+    else:
+        try:
+            _, root_body = split_front_matter(readme.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, ValueError, yaml.YAMLError) as exc:
+            errors.append(
+                f"{manifest_label}: cannot inspect root README device bridge navigation: {exc}"
+            )
+        else:
+            root_targets = set(_markdown_link_targets(root_body))
+            errors.extend(
+                f"{manifest_label}: missing root README device bridge link: {path}"
+                for path in DEVICE_BRIDGE_REFERENCE_PATHS.values()
+                if path not in root_targets
+            )
+
+    index_path = "docs/device_bridges/README.md"
+    if index_path not in documents:
+        return errors
+    index = root / index_path
+    if not index.is_file():
+        errors.append(f"{manifest_label}: missing device bridge index")
+        return errors
+    try:
+        _, index_body = split_front_matter(index.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ValueError, yaml.YAMLError) as exc:
+        errors.append(f"{manifest_label}: cannot inspect device bridge index: {exc}")
+        return errors
+    index_targets = set(_markdown_link_targets(index_body))
+    for bridge_id, path in DEVICE_BRIDGE_REFERENCE_PATHS.items():
+        relative_reference = Path(path).name
+        if relative_reference not in index_targets:
+            errors.append(
+                f"{manifest_label}: missing device bridge index reference link: {relative_reference}"
+            )
+        for stem in DEVICE_BRIDGE_REFERENCE_FIGURES[bridge_id]:
+            figure_link = f"assets/figures/{stem}.svg"
+            if figure_link not in index_targets:
+                errors.append(
+                    f"{manifest_label}: missing device bridge index figure link: {figure_link}"
+                )
+    return errors
+
+
 def validate_manifest(root: Path, manifest_path: Path) -> list[str]:
     """Validate the governed document set declared by one manifest."""
 
@@ -471,6 +667,7 @@ def validate_manifest(root: Path, manifest_path: Path) -> list[str]:
             errors.extend(validate_document(document_path, root))
 
     errors.extend(_validate_root_agent_navigation(root, documents, label))
+    errors.extend(_validate_device_bridge_navigation(root, documents, label))
     errors.extend(_validate_snapshot(root, manifest.get("snapshot"), label))
     return errors
 

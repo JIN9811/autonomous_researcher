@@ -127,6 +127,103 @@ TEST_AGENT_TITLES = {
     "guardian": "Guardian",
 }
 
+TEST_DEVICE_BRIDGE_REFERENCES = {
+    "printer_fleet": (
+        "docs/device_bridges/printer_fleet_bridge.md",
+        "Printer Fleet",
+        (
+            "printer_fleet_01_system_handoffs",
+            "printer_fleet_02_execution_effect_boundary",
+            "printer_fleet_03_api_connection_architecture",
+        ),
+    ),
+    "bambu_x2d": (
+        "docs/device_bridges/bambu_x2d_bridge.md",
+        "Bambu X2D",
+        (
+            "bambu_x2d_01_system_handoffs",
+            "bambu_x2d_02_execution_effect_boundary",
+            "bambu_x2d_03_api_connection_architecture",
+        ),
+    ),
+    "prusa_mk4s": (
+        "docs/device_bridges/prusa_mk4s_bridge.md",
+        "Prusa MK4S",
+        (
+            "prusa_mk4s_01_system_handoffs",
+            "prusa_mk4s_02_execution_effect_boundary",
+            "prusa_mk4s_03_api_connection_architecture",
+        ),
+    ),
+    "lerobot": (
+        "docs/device_bridges/lerobot_bridge.md",
+        "LeRobot",
+        (
+            "lerobot_01_system_handoffs",
+            "lerobot_02_execution_effect_boundary",
+            "lerobot_03_api_connection_architecture",
+        ),
+    ),
+    "windows_pyautogui": (
+        "docs/device_bridges/windows_pyautogui_bridge.md",
+        "Windows PyAutoGUI",
+        (
+            "windows_pyautogui_01_system_handoffs",
+            "windows_pyautogui_02_execution_effect_boundary",
+            "windows_pyautogui_03_api_connection_architecture",
+        ),
+    ),
+    "utm_vision": (
+        "docs/device_bridges/utm_vision_bridge.md",
+        "UTM Vision",
+        (
+            "utm_vision_01_system_handoffs",
+            "utm_vision_02_execution_effect_boundary",
+            "utm_vision_03_api_connection_architecture",
+        ),
+    ),
+    "cae_computation": (
+        "docs/device_bridges/cae_computation_bridges.md",
+        "CAE Computation",
+        (
+            "cae_computation_01_system_handoffs",
+            "cae_computation_02_execution_effect_boundary",
+            "cae_computation_03_api_connection_architecture",
+        ),
+    ),
+    "base_simulator": (
+        "docs/device_bridges/base_simulator_bridges.md",
+        "Base Simulator",
+        (
+            "base_simulator_01_system_handoffs",
+            "base_simulator_02_execution_effect_boundary",
+            "base_simulator_03_api_connection_architecture",
+        ),
+    ),
+}
+
+TEST_DEVICE_BRIDGE_SECTIONS = (
+    "Summary",
+    "Scope",
+    "Source of Truth",
+    "Actual Role",
+    "System Position and Agent Handoffs",
+    "Inputs, Commands, and Outputs",
+    "Internal Execution",
+    "API Surface",
+    "Tools and Registry Integration",
+    "Connections and Protocols",
+    "Configuration and Secrets",
+    "State, Events, Artifacts, and Evidence",
+    "Runtime Modes and Fallbacks",
+    "Safety, Approval, and Effect Boundary",
+    "Errors, Timeouts, and Recovery",
+    "Operator and GUI Surfaces",
+    "Current Verification",
+    "Limitations and Known Gaps",
+    "Related Documents",
+)
+
 
 def _write(root: Path, relative_path: str, content: str = "") -> Path:
     path = root / relative_path
@@ -185,6 +282,25 @@ def _write_agent_reference(
         )
     body = VALID_REFERENCE + "\n" + "\n\n".join(figures) + "\n"
     return _write(root, f"docs/agents/{agent_id}_agent.md", body)
+
+
+def _write_device_bridge_reference(root: Path, bridge_id: str) -> Path:
+    _write(root, "app/main.py")
+    _write(root, "docs/related.md", "# Related\n")
+    path, title, stems = TEST_DEVICE_BRIDGE_REFERENCES[bridge_id]
+    figures: list[str] = []
+    for index, stem in enumerate(stems, start=1):
+        _write(root, f"docs/device_bridges/assets/figures/{stem}.dot", "digraph G {}\n")
+        _write(root, f"docs/device_bridges/assets/figures/{stem}.svg", "<svg/>\n")
+        figures.extend(
+            (
+                f"![{title} figure {index}](assets/figures/{stem}.svg)",
+                f"**Figure {title}-{index}.** Inspection-backed architecture scope.",
+            )
+        )
+    sections = "\n\n".join(f"## {heading}\n\nCurrent inspected behavior." for heading in TEST_DEVICE_BRIDGE_SECTIONS)
+    body = VALID_REFERENCE + "\n" + sections + "\n\n" + "\n\n".join(figures) + "\n"
+    return _write(root, path, body)
 
 
 def _load_validator():
@@ -359,6 +475,81 @@ def test_manifest_accepts_root_readme_links_for_all_canonical_agents(
     manifest = _write_manifest(tmp_path, documents)
 
     assert module.validate_manifest(tmp_path, manifest) == []
+
+
+def test_device_bridge_reference_requires_all_sections_in_order(tmp_path: Path) -> None:
+    module = _load_validator()
+    document = _write_device_bridge_reference(tmp_path, "printer_fleet")
+    text = document.read_text(encoding="utf-8").replace(
+        "## Configuration and Secrets\n\nCurrent inspected behavior.\n\n",
+        "",
+    )
+    document.write_text(text, encoding="utf-8")
+
+    errors = module.validate_document(document, tmp_path)
+
+    assert any("missing device bridge section: Configuration and Secrets" in error for error in errors)
+
+
+def test_device_bridge_reference_requires_figure_source_and_rendering(tmp_path: Path) -> None:
+    module = _load_validator()
+    document = _write_device_bridge_reference(tmp_path, "bambu_x2d")
+    source = tmp_path / "docs/device_bridges/assets/figures/bambu_x2d_01_system_handoffs.dot"
+    rendering = tmp_path / "docs/device_bridges/assets/figures/bambu_x2d_02_execution_effect_boundary.svg"
+    source.unlink()
+    rendering.unlink()
+
+    errors = module.validate_document(document, tmp_path)
+
+    assert any("missing device bridge figure source" in error for error in errors)
+    assert any("missing device bridge figure rendering" in error for error in errors)
+
+
+def test_device_bridge_reference_requires_figure_embed_and_caption(tmp_path: Path) -> None:
+    module = _load_validator()
+    document = _write_device_bridge_reference(tmp_path, "prusa_mk4s")
+    text = document.read_text(encoding="utf-8")
+    text = text.replace(
+        "![Prusa MK4S figure 3](assets/figures/prusa_mk4s_03_api_connection_architecture.svg)\n\n",
+        "",
+    )
+    text = text.replace("**Figure Prusa MK4S-2.**", "**Execution boundary.**")
+    document.write_text(text, encoding="utf-8")
+
+    errors = module.validate_document(document, tmp_path)
+
+    assert any("missing device bridge figure link" in error for error in errors)
+    assert any("missing device bridge figure caption" in error for error in errors)
+
+
+def test_manifest_requires_root_readme_links_for_all_device_bridges(tmp_path: Path) -> None:
+    module = _load_validator()
+    _write(tmp_path, "README.md", VALID_INDEX)
+    documents = ["README.md"]
+    for bridge_id in TEST_DEVICE_BRIDGE_REFERENCES:
+        document = _write_device_bridge_reference(tmp_path, bridge_id)
+        documents.append(document.relative_to(tmp_path).as_posix())
+    manifest = _write_manifest(tmp_path, documents)
+
+    errors = module.validate_manifest(tmp_path, manifest)
+
+    assert len([error for error in errors if "missing root README device bridge link" in error]) == 8
+
+
+def test_manifest_requires_device_bridge_index_reference_and_figure_links(tmp_path: Path) -> None:
+    module = _load_validator()
+    _write(tmp_path, "README.md", VALID_INDEX)
+    _write(tmp_path, "docs/device_bridges/README.md", VALID_INDEX)
+    documents = ["README.md", "docs/device_bridges/README.md"]
+    for bridge_id in TEST_DEVICE_BRIDGE_REFERENCES:
+        document = _write_device_bridge_reference(tmp_path, bridge_id)
+        documents.append(document.relative_to(tmp_path).as_posix())
+    manifest = _write_manifest(tmp_path, documents)
+
+    errors = module.validate_manifest(tmp_path, manifest)
+
+    assert len([error for error in errors if "missing device bridge index reference link" in error]) == 8
+    assert len([error for error in errors if "missing device bridge index figure link" in error]) == 24
 
 
 def test_manifest_rejects_duplicate_documents(tmp_path: Path) -> None:
