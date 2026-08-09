@@ -224,6 +224,42 @@ TEST_DEVICE_BRIDGE_SECTIONS = (
     "Related Documents",
 )
 
+TEST_DEVICE_BRIDGE_SOURCE_CONTRACTS = {
+    "printer_fleet": (
+        ("mcp_tools/printer_tools.py", 'registry.register("printer.prepare"'),
+        ("app/main.py", '@app.get("/api/printer/fleet")'),
+    ),
+    "bambu_x2d": (
+        ("device_bridges/bambu_bridge.py", "class PrinterDeviceBridgeManager:"),
+        ("app/main.py", '@app.post("/api/printer/bambu-prestart-check")'),
+    ),
+    "prusa_mk4s": (
+        ("device_bridges/prusa_bridge.py", "class PrinterAgenticWorkflow:"),
+        ("mcp_tools/printer_tools.py", 'selected_provider(normalized) == "prusa_mk4s"'),
+    ),
+    "lerobot": (
+        ("mcp_tools/lerobot_tools.py", 'registry.register("lerobot.rollout.start"'),
+        ("app/main.py", '@app.post("/api/lerobot/rollout/start")'),
+    ),
+    "windows_pyautogui": (
+        ("mcp_tools/equipment_tools.py", 'registry.register("equipment.pyautogui.run"'),
+        ("app/main.py", '@app.post("/api/equipment/windows/run-program")'),
+    ),
+    "utm_vision": (
+        ("device_bridges/utm_runtime_bridge.py", "class UTMRuntimeProcessManager:"),
+        ("app/main.py", '@app.get("/api/equipment/utm-runtime/status")'),
+    ),
+    "cae_computation": (
+        ("mcp_tools/calculix_tools.py", 'registry.register("calculix.run_job"'),
+        ("mcp_tools/pinn_tools.py", 'registry.register("pinn.predict"'),
+        ("app/main.py", '@app.post("/api/cae/run")'),
+    ),
+    "base_simulator": (
+        ("device_bridges/base_bridge.py", "class BaseBridge(ABC):"),
+        ("device_bridges/simulator/printer_sim.py", "class PrinterSimulator(BaseBridge):"),
+    ),
+}
+
 
 def _write(root: Path, relative_path: str, content: str = "") -> Path:
     path = root / relative_path
@@ -285,7 +321,11 @@ def _write_agent_reference(
 
 
 def _write_device_bridge_reference(root: Path, bridge_id: str) -> Path:
-    _write(root, "app/main.py")
+    for source_path, token in TEST_DEVICE_BRIDGE_SOURCE_CONTRACTS[bridge_id]:
+        path = root / source_path
+        existing = path.read_text(encoding="utf-8") if path.is_file() else ""
+        if token not in existing:
+            _write(root, source_path, existing + token + "\n")
     _write(root, "docs/related.md", "# Related\n")
     path, title, stems = TEST_DEVICE_BRIDGE_REFERENCES[bridge_id]
     figures: list[str] = []
@@ -520,6 +560,18 @@ def test_device_bridge_reference_requires_figure_embed_and_caption(tmp_path: Pat
 
     assert any("missing device bridge figure link" in error for error in errors)
     assert any("missing device bridge figure caption" in error for error in errors)
+
+
+def test_device_bridge_reference_detects_registered_tool_or_api_drift(tmp_path: Path) -> None:
+    module = _load_validator()
+    document = _write_device_bridge_reference(tmp_path, "lerobot")
+    source = tmp_path / "mcp_tools/lerobot_tools.py"
+    source.write_text("# registration removed\n", encoding="utf-8")
+
+    errors = module.validate_document(document, tmp_path)
+
+    assert any("missing device bridge source contract" in error for error in errors)
+    assert any("lerobot.rollout.start" in error for error in errors)
 
 
 def test_manifest_requires_root_readme_links_for_all_device_bridges(tmp_path: Path) -> None:

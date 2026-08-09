@@ -215,6 +215,41 @@ DEVICE_BRIDGE_REQUIRED_SECTIONS = (
     "Limitations and Known Gaps",
     "Related Documents",
 )
+DEVICE_BRIDGE_SOURCE_CONTRACTS = {
+    "printer_fleet": (
+        ("mcp_tools/printer_tools.py", 'registry.register("printer.prepare"'),
+        ("app/main.py", '@app.get("/api/printer/fleet")'),
+    ),
+    "bambu_x2d": (
+        ("device_bridges/bambu_bridge.py", "class PrinterDeviceBridgeManager:"),
+        ("app/main.py", '@app.post("/api/printer/bambu-prestart-check")'),
+    ),
+    "prusa_mk4s": (
+        ("device_bridges/prusa_bridge.py", "class PrinterAgenticWorkflow:"),
+        ("mcp_tools/printer_tools.py", 'selected_provider(normalized) == "prusa_mk4s"'),
+    ),
+    "lerobot": (
+        ("mcp_tools/lerobot_tools.py", 'registry.register("lerobot.rollout.start"'),
+        ("app/main.py", '@app.post("/api/lerobot/rollout/start")'),
+    ),
+    "windows_pyautogui": (
+        ("mcp_tools/equipment_tools.py", 'registry.register("equipment.pyautogui.run"'),
+        ("app/main.py", '@app.post("/api/equipment/windows/run-program")'),
+    ),
+    "utm_vision": (
+        ("device_bridges/utm_runtime_bridge.py", "class UTMRuntimeProcessManager:"),
+        ("app/main.py", '@app.get("/api/equipment/utm-runtime/status")'),
+    ),
+    "cae_computation": (
+        ("mcp_tools/calculix_tools.py", 'registry.register("calculix.run_job"'),
+        ("mcp_tools/pinn_tools.py", 'registry.register("pinn.predict"'),
+        ("app/main.py", '@app.post("/api/cae/run")'),
+    ),
+    "base_simulator": (
+        ("device_bridges/base_bridge.py", "class BaseBridge(ABC):"),
+        ("device_bridges/simulator/printer_sim.py", "class PrinterSimulator(BaseBridge):"),
+    ),
+}
 
 
 def split_front_matter(text: str) -> tuple[dict[str, Any], str]:
@@ -417,6 +452,16 @@ def _validate_device_bridge_reference(
             errors.append(f"{label}: missing device bridge figure link: {link}")
         if caption not in body:
             errors.append(f"{label}: missing device bridge figure caption: {caption}")
+    for source_path, token in DEVICE_BRIDGE_SOURCE_CONTRACTS[bridge_id]:
+        source = root / source_path
+        try:
+            source_text = source.read_text(encoding="utf-8")
+        except (OSError, UnicodeError):
+            source_text = ""
+        if token not in source_text:
+            errors.append(
+                f"{label}: missing device bridge source contract in {source_path}: {token}"
+            )
     return errors
 
 
