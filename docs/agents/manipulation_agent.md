@@ -56,6 +56,14 @@ primary graph/sidecar handoffs.
 
 ## Closed-Loop Position and Handoffs
 
+![Manipulation closed-loop position and handoffs](assets/figures/manipulation_01_closed_loop_handoffs.svg)
+
+**Figure Manipulation-1.** A specimen result and unexpired Vision readiness
+enter one of two bounded transfer tasks; robot motion is followed by post-place
+Vision verification before Equipment or Knowledge handoff. This is an
+`inspection`-backed projection of baseline `0b7627b`, not evidence of motion
+accuracy or live transfer reliability.
+
 | Direction | Component | Contract/state | Purpose | Gate |
 |---|---|---|---|---|
 | In | Specimen | specimen result/location | transfer target | specimen ready |
@@ -97,6 +105,26 @@ Supported task contracts:
 - `clear_utm_to_disposal`: `utm_fixture` → `discard_bin`, verified by
   `utm_home_restored`, next agent Knowledge.
 
+![Manipulation internal execution and effect boundary](assets/figures/manipulation_02_execution_effect_boundary.svg)
+
+**Figure Manipulation-2.** Two supported tasks, eleven internal entries, and
+four registered tools preserve task resolution, fresh context, live gates,
+backend selection, bounded rollout, monitoring, SARM progress, Vision
+verification, decision, reporting, and evidence. This `inspection` figure does
+not imply independent graph scheduling or validated physical performance.
+
+### Execution trace details
+
+| Phase | Required identity/state | Operation/gate | Evidence/output | Unknown-effect rule |
+|---|---|---|---|---|
+| Task resolution | allowlisted task, source and target | bind `transfer_to_utm` or `clear_utm_to_disposal` | task/skill/terminal pose | unsupported task blocks before motion |
+| Context | specimen ID and unexpired Vision signal | merge pose/readiness and camera-return state | bounded transfer context | stale or mismatched signal blocks |
+| Preflight | robot profile, policy/checkpoint, camera, approval and mode | validate profile/policy/live gates | preflight result and blockers | no shell or arbitrary model motion fallback |
+| Rollout | task, policy and session configuration | start bounded bridge session | session ID, start result and action budget | start response alone does not prove final pose |
+| Monitor | session events/status | track phase, SARM risk and recovery hint | event log, stage machine, progress | missing status triggers stop/status review |
+| Post-place | matching session and camera observation | request fresh Vision verification | placement result and evidence refs | failed verification blocks downstream handoff |
+| Decide/store | verified result or explicit failure | handoff, bounded recover, or stop | typed report/result, logs, dataset/checkpoint refs | unknown state requires stop, status and visual proof before restart |
+
 ## API Surface
 
 | Class | Method | Path/family | Effect | Notes |
@@ -128,6 +156,28 @@ evidence responsibilities.
 | SARM-lite | in-process progress monitor | read_only/local_state | progress/risk trace |
 | Vision | camera/signal handoff | read_only | pose/verification evidence |
 | Isaac | optional simulation/mirror services | external_service/model | scenario/output artifacts |
+
+![Manipulation API and connection architecture](assets/figures/manipulation_03_api_connection_architecture.svg)
+
+**Figure Manipulation-3.** Configuration, data, execution, and optional Isaac
+API families converge on LeRobot services, then pass profile, policy, camera,
+Vision, and approval gates before a bounded process can reach the robot.
+Status, stop results, visual proof, and training artifacts return separately.
+This `inspection` figure is not live or simulation-performance evidence.
+
+### Connection lifecycle
+
+| Lifecycle | Service boundary | Required observation | Recovery rule |
+|---|---|---|---|
+| Configure | ports, cameras, profiles, sessions and policy refs | stable robot/camera/profile/checkpoint identity | invalid profile or missing port blocks action |
+| Prepare | policy/file/dataset services and camera test | policy validation, camera readiness, fresh Vision | downloaded or trained policy is not automatically active |
+| Invoke | rollout, manipulation-agent or explicit teleoperation API | session ID, bounded task and action budget | each motion surface retains server/bridge gates |
+| Observe/stop | rollout status, events, camera and stop API | current session status plus visual state | timeout/unknown effect prohibits blind replay |
+| Persist | logs, dataset, checkpoint, images and result | run/session/specimen-linked references | unlinked artifacts do not satisfy handoff proof |
+| Optional simulation | Isaac/synthetic/mirror/visualization | declared simulation configuration | simulation evidence never becomes Live evidence |
+
+UI controls, model output, downloaded policies, and module descriptors cannot
+bypass the LeRobot bridge or establish direct-shell authority.
 
 ## State, Events, Artifacts, and Storage
 

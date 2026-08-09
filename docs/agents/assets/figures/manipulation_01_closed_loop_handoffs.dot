@@ -1,0 +1,23 @@
+digraph manipulation_closed_loop_handoffs {
+  graph [rankdir=LR, bgcolor="transparent", pad="0.25", nodesep="0.34", ranksep="0.55", fontname="DejaVu Sans", label="Manipulation closed-loop position and handoffs", labelloc="t", fontsize=18];
+  node [shape=box, style="rounded,filled", fillcolor="#EEF4FF", color="#315C9B", fontname="DejaVu Sans", fontsize=9, margin="0.10,0.07"];
+  edge [color="#52667A", fontname="DejaVu Sans", fontsize=8, arrowsize=0.7];
+  specimen [label="Specimen result +\nsource/target identity"];
+  vision [label="Fresh Vision signal +\ncamera return", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
+  manipulation [label="MANIPULATION\nbounded transfer", penwidth=2.2];
+  robot [label="Robot motion", shape=octagon, fillcolor="#FFE9E7", color="#A33A32", penwidth=2];
+  verify [label="Post-place Vision\nverified?", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];
+  equipment [label="Equipment\nspecimen on UTM"];
+  knowledge [label="Knowledge\ndisposal / rollout evidence"];
+  review [label="Stop / recover / review", fillcolor="#FFE9E7", color="#A33A32", penwidth=2];
+  evidence [label="Session · events · SARM · images\nresult · dataset · checkpoint", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
+  specimen -> manipulation;
+  vision -> manipulation [label="unexpired readiness"];
+  manipulation -> robot [label="gated rollout"];
+  robot -> verify;
+  verify -> equipment [label="transfer_to_utm"];
+  verify -> knowledge [label="clear_utm_to_disposal"];
+  verify -> review [label="failed / uncertain"];
+  manipulation -> evidence [label="evidence", color="#2E7D59"];
+  robot -> evidence [label="evidence", color="#2E7D59"];
+}

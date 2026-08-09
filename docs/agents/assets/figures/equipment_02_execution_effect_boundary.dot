@@ -1,0 +1,26 @@
+digraph equipment_execution_effect_boundary {
+  graph [rankdir=TB, bgcolor="transparent", pad="0.25", nodesep="0.30", ranksep="0.45", fontname="DejaVu Sans", label="Equipment internal execution and effect boundary", labelloc="t", fontsize=18];
+  node [shape=box, style="rounded,filled", fillcolor="#EEF4FF", color="#315C9B", fontname="DejaVu Sans", fontsize=8.2, margin="0.09,0.06"];
+  edge [color="#52667A", fontname="DejaVu Sans", fontsize=7.2, arrowsize=0.65];
+  resolve [label="01 resolve exact profile /\nskill / version"];
+  validate [label="02 bridge · capability · schema\nlive preflight · placement · approval", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];
+  execute [label="03 deterministic registered segments", shape=octagon, fillcolor="#FFE9E7", color="#A33A32", penwidth=2];
+  recover [label="04 exception recovery gate", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];
+  handoff [label="05 evidence handoff validation", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];
+  analysis [label="Analysis artifact handoff"];
+  evidence [label="Request log · segment state · screenshots\nmeasurement · proof · completion audit", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
+  stop [label="Stop / inspect / operator review", fillcolor="#FFE9E7", color="#A33A32", penwidth=2];
+  model [label="tool_formatting\nno arbitrary command authority", shape=component, fillcolor="#F2ECFA", color="#6B4C9A"];
+  resolve -> validate;
+  model -> validate [style=dashed, label="bounded formatting"];
+  validate -> execute [label="pass"];
+  validate -> stop [label="blocked"];
+  execute -> recover;
+  recover -> handoff [label="known complete"];
+  recover -> stop [label="unknown / failed"];
+  handoff -> analysis [label="complete proof"];
+  handoff -> stop [label="incomplete"];
+  execute -> evidence [label="evidence", color="#2E7D59"];
+  recover -> evidence [label="evidence", color="#2E7D59"];
+  handoff -> evidence [label="evidence", color="#2E7D59"];
+}

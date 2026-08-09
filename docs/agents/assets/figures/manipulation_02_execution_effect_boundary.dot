@@ -1,0 +1,27 @@
+digraph manipulation_execution_effect_boundary {
+  graph [rankdir=TB, bgcolor="transparent", pad="0.25", nodesep="0.30", ranksep="0.43", fontname="DejaVu Sans", label="Manipulation internal execution and effect boundary", labelloc="t", fontsize=18];
+  node [shape=box, style="rounded,filled", fillcolor="#EEF4FF", color="#315C9B", fontname="DejaVu Sans", fontsize=8.1, margin="0.09,0.06"];
+  edge [color="#52667A", fontname="DejaVu Sans", fontsize=7.1, arrowsize=0.65];
+  resolve [label="01 task resolve\ntransfer_to_utm / clear_utm_to_disposal"];
+  context [label="02 Vision + specimen context"];
+  gate [label="03 profile · policy · fresh Vision\ncamera return · live approval", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];
+  backend [label="04 select LeRobot / Pi0.5\nno direct shell"];
+  rollout [label="05 bounded rollout start", shape=octagon, fillcolor="#FFE9E7", color="#A33A32", penwidth=2];
+  monitor [label="06 events/status\n07 SARM progress"];
+  verify [label="08 post-place Vision verification", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];
+  decide [label="09 recover / stop / handoff", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];
+  report [label="10 report/result\n11 rollout evidence"];
+  evidence [label="Session · logs · status · SARM\nimage · result · dataset/checkpoint", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
+  stop [label="Stop + status + visual review", fillcolor="#FFE9E7", color="#A33A32", penwidth=2];
+  resolve -> context -> gate;
+  gate -> backend [label="pass"];
+  gate -> stop [label="blocked"];
+  backend -> rollout -> monitor -> verify;
+  verify -> decide [label="fresh match"];
+  verify -> stop [label="failed / stale"];
+  decide -> report [label="verified handoff"];
+  decide -> stop [label="recover / uncertain"];
+  rollout -> evidence [label="evidence", color="#2E7D59"];
+  monitor -> evidence [label="evidence", color="#2E7D59"];
+  report -> evidence [label="evidence", color="#2E7D59"];
+}

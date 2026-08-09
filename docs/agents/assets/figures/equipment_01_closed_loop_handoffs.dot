@@ -1,0 +1,21 @@
+digraph equipment_closed_loop_handoffs {
+  graph [rankdir=LR, bgcolor="transparent", pad="0.25", nodesep="0.34", ranksep="0.55", fontname="DejaVu Sans", label="Equipment closed-loop position and handoffs", labelloc="t", fontsize=18];
+  node [shape=box, style="rounded,filled", fillcolor="#EEF4FF", color="#315C9B", fontname="DejaVu Sans", fontsize=9, margin="0.10,0.07"];
+  edge [color="#52667A", fontname="DejaVu Sans", fontsize=8, arrowsize=0.7];
+  placement [label="Vision-verified specimen +\nManipulation handoff"];
+  protocol [label="Exact profile · skill · protocol\napproval · mode", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
+  equipment [label="LAB EQUIPMENT\nregistered protocol execution", penwidth=2.2];
+  effect [label="Desktop + instrument effect", shape=octagon, fillcolor="#FFE9E7", color="#A33A32", penwidth=2];
+  proofgate [label="Measurement + proof\ncomplete?", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];
+  analysis [label="Analysis\nraw artifact handoff"];
+  review [label="Guardian/operator\nreview · stop · error", fillcolor="#FFE9E7", color="#A33A32", penwidth=2];
+  evidence [label="Request · segments · screenshots\nmeasurement · completion audit", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
+  placement -> equipment;
+  protocol -> equipment;
+  equipment -> effect [label="gated segments"];
+  effect -> proofgate;
+  proofgate -> analysis [label="complete"];
+  proofgate -> review [label="partial / uncertain"];
+  equipment -> evidence [label="evidence", color="#2E7D59"];
+  effect -> evidence [label="evidence", color="#2E7D59"];
+}

@@ -1,0 +1,26 @@
+digraph equipment_api_connection_architecture {
+  graph [rankdir=LR, bgcolor="transparent", pad="0.25", nodesep="0.27", ranksep="0.48", fontname="DejaVu Sans", label="Equipment API and connection architecture", labelloc="t", fontsize=18];
+  node [shape=box, style="rounded,filled", fillcolor="#EEF4FF", color="#315C9B", fontname="DejaVu Sans", fontsize=7.8, margin="0.08,0.06"];
+  edge [color="#52667A", fontname="DejaVu Sans", fontsize=6.8, arrowsize=0.62];
+  registry [label="Bridge registry/actions\nskill + profile lifecycle"];
+  windowsapi [label="Windows worker APIs\ndiscover · connect · preflight\nlocator · screenshot · run · proof"];
+  utmapi [label="UTM runtime/camera APIs\nstatus · graph · frame · calibration"];
+  agent [label="Equipment handler +\nregistered tools", penwidth=2];
+  gate [label="Exact identity · bridge · skill\nplacement · Guardian/operator", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];
+  worker [label="PyAutoGUI worker /\nlocal bridge", shape=component, fillcolor="#F2ECFA", color="#6B4C9A"];
+  ros [label="ROS/UTM runtime + camera", shape=component, fillcolor="#F2ECFA", color="#6B4C9A"];
+  device [label="Desktop application +\nUTM instrument", shape=octagon, fillcolor="#FFE9E7", color="#A33A32", penwidth=2];
+  evidence [label="Health · request · screenshot · frame\nmeasurement · proof · audit", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
+  blocked [label="No UI/model/descriptor bypass", fillcolor="#FFE9E7", color="#A33A32", penwidth=2];
+  registry -> agent;
+  windowsapi -> worker;
+  utmapi -> ros;
+  agent -> gate;
+  gate -> worker;
+  gate -> ros;
+  worker -> device;
+  ros -> device;
+  device -> evidence [label="evidence", color="#2E7D59"];
+  evidence -> agent [label="status / proof", color="#2E7D59"];
+  gate -> blocked [style=dashed, arrowhead=tee, label="prohibited"];
+}

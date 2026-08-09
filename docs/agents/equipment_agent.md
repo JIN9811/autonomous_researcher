@@ -58,6 +58,14 @@ bridges, API routes, and hardware/runtime Guides.
 
 ## Closed-Loop Position and Handoffs
 
+![Equipment closed-loop position and handoffs](assets/figures/equipment_01_closed_loop_handoffs.svg)
+
+**Figure Equipment-1.** Fresh placement evidence and an exact enabled
+profile/skill/protocol become bounded desktop and instrument segments; only a
+complete measurement/proof package reaches Analysis. This is an
+`inspection`-backed projection of baseline `0b7627b`, not evidence that a live
+protocol completed safely or correctly.
+
 | Direction | Component | Contract/state | Purpose | Gate |
 |---|---|---|---|---|
 | In | Vision/Manipulation | verified specimen/fixture state | permit protocol | fresh placement evidence |
@@ -83,6 +91,25 @@ completion audit, decisions, metrics, errors, and artifact references.
 | `03_execute_registered_protocol` | deterministic segments | bounded tool result |
 | `04_exception_recovery_gate` | classify/recover through Guardian | no unrestricted recovery |
 | `05_validate_evidence_handoff` | artifact/proof completeness | Analysis handoff or review |
+
+![Equipment internal execution and effect boundary](assets/figures/equipment_02_execution_effect_boundary.svg)
+
+**Figure Equipment-2.** Five internal entries and four registered tools keep
+identity resolution, bridge/capability validation, deterministic segments,
+bounded recovery, and evidence handoff distinct. Desktop and instrument effects
+occur only after placement, preflight, policy, and approval gates. This
+`inspection` figure does not claim independently scheduled steps.
+
+### Execution trace details
+
+| Phase | State read | Gate/transformation | Evidence written | Recovery boundary |
+|---|---|---|---|---|
+| Resolve | equipment/profile/skill/program/version IDs | exact registry lookup and enabled-state check | resolved immutable identities | ambiguous or missing identity blocks |
+| Validate | bridge health, capability schema, placement, mode and approval | live preflight and allowlisted parameter validation | readiness snapshot and blockers | model formatting cannot create commands |
+| Execute | validated deterministic segment plan | invoke registered worker/UTM segment | request, segment transitions and command result | no unregistered recovery segment |
+| Observe | desktop screenshot/locator or instrument/runtime state | compare expected postcondition | image/status/measurement references | timeout with unknown effect requires inspection |
+| Recover | classified failure, current proof and safety state | continue bounded recovery, stop, or escalate | corrective action and Guardian result | retry only after known no-effect or resolved state |
+| Handoff | measurement identity and complete proof | validate Analysis package | artifact hash, report and completion audit | partial output remains evidence, not a complete result |
 
 ## API Surface
 
@@ -111,6 +138,28 @@ completion audit, decisions, metrics, errors, and artifact references.
 | LLM `tool_formatting` | selected model | model | bounded formatting only |
 | Equipment skill runtime | versioned local packages | local_state/physical_possible | manifest/validation/deployment |
 | UTM ROS runtime | local/remote ROS and camera | external_service/physical_possible | graph/frame/status |
+
+![Equipment API and connection architecture](assets/figures/equipment_03_api_connection_architecture.svg)
+
+**Figure Equipment-3.** Registry, skill/profile, Windows worker, and UTM
+runtime/camera surfaces reach desktop and instrument effects only through exact
+identity, bridge, placement, Guardian, and operator gates; health, screenshots,
+frames, measurements, and audits return as evidence. This `inspection` figure
+is not live protocol validation.
+
+### Connection lifecycle
+
+| Connection | Resolve/preflight | Invoke/observe | Persist/recover |
+|---|---|---|---|
+| Skill runtime | draft/compile/validate/deploy/enable exact version | select registered program and parameters | retain manifest, validation and deployment identity |
+| Equipment profile | profile, capability and state/readiness | preflight or bounded test | explicit provider/profile selection; no silent fallback |
+| Windows worker | discover/connect/readiness/local bridge | run allowlisted program and inspect locators/screenshots | request log, segment state and proof package |
+| UTM ROS runtime | status/probe/graph/camera mapping | start/stop/frame/stream and protocol connection | graph/frame/status plus measurement identity |
+| Desktop/instrument | current precondition and stop procedure | bounded physical/desktop action | inspect postcondition before retry after uncertainty |
+| Audit/release | proof, evidence and completion packages | verify without rewriting source evidence | incomplete audit blocks Analysis completion claim |
+
+Neither the workspace, a model response, nor a module UI descriptor grants a
+bypass around the registered tool, worker/bridge, and Guardian/operator path.
 
 ## State, Events, Artifacts, and Storage
 
