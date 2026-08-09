@@ -25,6 +25,11 @@ def audit(base_url: str, out_dir: Path, *, geckodriver: str) -> dict[str, object
         driver.get(f"{base_url.rstrip('/')}/bo")
         wait.until(conditions.visibility_of_element_located((By.ID, "objective-compiler-workspace")))
         wait.until(lambda item: len(item.find_elements(By.CSS_SELECTOR, "#objective-metric-browser .bo-metric-entry")) > 0)
+        wait.until(
+            lambda item: item.execute_script(
+                "return getComputedStyle(document.getElementById('objective-compiler-workspace')).opacity === '1'"
+            )
+        )
         workspace = driver.find_element(By.ID, "objective-compiler-workspace")
         driver.execute_script("arguments[0].scrollIntoView({block: 'start'});", workspace)
         bo_layout = driver.execute_script(
@@ -61,6 +66,12 @@ def audit(base_url: str, out_dir: Path, *, geckodriver: str) -> dict[str, object
         driver.get(f"{base_url.rstrip('/')}/live")
         card = wait.until(conditions.visibility_of_element_located((By.ID, "live-objective-runtime-card")))
         wait.until(lambda item: item.find_element(By.ID, "live-objective-readiness").text != "")
+        wait.until(
+            lambda item: item.execute_script(
+                "return getComputedStyle(document.querySelector('.live-center-panel')).opacity === '1'"
+            )
+        )
+        wait.until(lambda item: item.find_element(By.ID, "planning-stage-label").text != "Mission loading")
         live_layout = driver.execute_script(
             """
             const card = document.getElementById('live-objective-runtime-card').getBoundingClientRect();

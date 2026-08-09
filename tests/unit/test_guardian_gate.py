@@ -5,11 +5,17 @@ Unit tests for graph-wide Guardian gate alarm normalization.
 from __future__ import annotations
 
 from orchestrator.state import Mode, OrchestratorState, Stage
-from policies.guardian_gate import equipment_skill_recovery_gate, gate_blocks_execution, guardian_gate
+from policies.guardian_gate import equipment_skill_recovery_gate, gate_blocks_execution, guardian_gate, tool_requires_action_shield
 
 
 def _state(stage: Stage = Stage.MANIPULATION) -> OrchestratorState:
     return OrchestratorState(run_id="run-gate-test", experiment_id="exp-gate-test", mode=Mode.LIVE, stage=stage)
+
+
+def test_rollout_stop_and_status_are_not_action_shielded() -> None:
+    assert tool_requires_action_shield("lerobot.rollout.start") is True
+    assert tool_requires_action_shield("lerobot.rollout.stop") is False
+    assert tool_requires_action_shield("lerobot.rollout.status") is False
 
 
 def test_guardian_gate_blocks_boolean_workflow_alarm() -> None:

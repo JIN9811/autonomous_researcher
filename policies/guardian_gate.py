@@ -259,6 +259,8 @@ def equipment_skill_recovery_gate(
 def tool_requires_action_shield(tool: str) -> bool:
     """Return True when a tool has physical, persistent, or runtime-mutating side effects."""
     name = str(tool or "").strip()
+    if name in {"lerobot.rollout.stop", "lerobot.rollout.status"}:
+        return False
     if name in ACTION_SHIELDED_TOOLS:
         return True
     return name.startswith(("lerobot.rollout.", "printer.", "self_evolution.", "graph.active_config."))

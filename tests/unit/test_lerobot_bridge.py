@@ -1401,7 +1401,12 @@ def test_camera_test_returns_synthetic_preview_in_test_mode(tmp_path: Path) -> N
     assert result["tool"] == "lerobot.camera.test"
     assert result["camera_key"] == "wrist"
     assert result["capture"]["synthetic"] is True
-    assert Path(result["capture"]["path"]).exists()
+    capture_path = Path(result["capture"]["path"])
+    assert capture_path.exists()
+    assert capture_path.suffix == ".png"
+    with Image.open(capture_path) as image:
+        assert image.format == "PNG"
+        assert image.size == (960, 540)
 
 
 def test_live_camera_test_preserves_saved_realsense_backend_when_request_omits_backend(tmp_path: Path, monkeypatch) -> None:

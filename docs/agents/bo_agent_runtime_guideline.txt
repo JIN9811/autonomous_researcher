@@ -28,6 +28,18 @@ Runtime identity
 - Next-design state key: run_metadata["bo_recommended_constraints"]
 - Next-design handoff key: run_metadata["next_design_request"]
 
+Compiled objective contract
+- The operator starts with research intent, not a fixed objective template.
+- The LLM may compose or revise one objective_spec.v1 JSON document, but that
+  output is untrusted until deterministic validation succeeds.
+- Required lifecycle: draft -> validate -> preview -> operator approve ->
+  activate for run_id.
+- Activation binds objective_id, version, and canonical objective_hash
+  immutably to the run.
+- Analysis is the only runtime stage that evaluates the bound expression from
+  registered metrics. BO consumes the resulting objective_evaluation.v1.
+- BO must not call the LLM to recalculate an existing score.
+
 Closed-loop position
 - Default closed loop:
   design -> specimen -> vision -> manipulation -> equipment -> analysis -> knowledge -> bo -> guardian -> design|complete|error
@@ -127,8 +139,15 @@ Input evidence priority
 BO-ready prior format
 - source
 - candidate_id
+- observation_id
+- objective_id
+- objective_version
+- objective_hash
 - parameters
 - score
+- feasible
+- fidelity
+- provenance_refs
 - uncertainty
 - quality_score
 - ok_for_bo
@@ -139,6 +158,10 @@ Failed prior rule
 - ok_for_bo=false, failure_tags, failed/blocked status, missing parameter vector, or poor quality gates must not be treated as successful BO observations.
 - Failed priors feed failure_model.risk_patterns and forbidden_regions.
 - Failure data must be preserved, not discarded.
+- Duplicate Analysis packets with the same observation_id count as one
+  observation even when both bo_handoff and bo_observation are present.
+- Live mode rejects synthetic or simulation proxy scores. Test mode accepts
+  only explicitly labelled synthetic/simulation fidelity.
 
 LLM reasoning contract
 - Task route: bo_policy
@@ -264,6 +287,9 @@ next_design_request.v1
 - experiment_id
 - producer_agent: bo_agent
 - consumer_agent: design_agent
+- objective_id
+- objective_version
+- objective_hash
 - status
 - candidate_id
 - constraints

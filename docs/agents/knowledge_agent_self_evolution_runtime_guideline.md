@@ -50,6 +50,20 @@ Important records:
 - `FailurePatternRecord`: repeated/current failure pattern with do-not-repeat rules and recommended evolution target.
 - `SuccessPatternRecord`: reusable successful procedure/skill card.
 - `EvolutionEvidencePack`: Knowledge-to-SelfEvolution contract.
+
+### Compiled objective lineage
+
+`ExperimentKnowledgeRecord.objective_evaluation` preserves the active
+objective id, version, canonical hash, observation id, score, feasibility,
+term contributions, constraint results, uncertainty, registered metrics,
+fidelity, and provenance references produced by Analysis. The record is
+written to the run artifact set and long-term JSONL memory without asking an
+LLM to reconstruct the formula or score.
+
+Knowledge records can be filtered by `objective_hash`; comparisons across
+different hashes are not treated as observations of the same objective. This
+lineage is evidence for BO and graph queries, not authority to approve or
+activate a new objective version.
 - `EvolutionOutcomeRecord`: before/after attribution after variant activation.
 
 ## Persistence

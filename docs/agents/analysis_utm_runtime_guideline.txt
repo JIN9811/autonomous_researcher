@@ -135,6 +135,24 @@ If CAE succeeds, the final objective blends UTM and CAE:
 This lets test-mode closed-loop runs use simulation data without replacing the
 primary UTM-derived metrics.
 
+### 5.1 Compiled Objective Runtime
+
+When `state.current_experiment_objective` requests `objective_spec.v1`, an
+active run binding is mandatory. Analysis resolves the shared
+`objective.service`, maps only Metric Registry source paths to registered
+metric ids, and performs deterministic evaluation. The LLM is not used to
+calculate the score.
+
+The evaluation emits `objective_evaluation.v1` with objective id/version/hash,
+observation id, finite score, feasibility, term contributions, constraint
+results, uncertainty, metric values, provenance references, and fidelity.
+The same record is embedded in `analysis`, `bo_observation`, `bo_handoff`, and
+the Knowledge payload. Missing service/binding or a requested hash/id mismatch
+blocks objective evaluation with `OBJECTIVE_BINDING_REQUIRED` or
+`OBJECTIVE_BINDING_MISMATCH`; it must not fall back to the legacy keyword
+score. The legacy score remains available only when no compiled objective was
+requested.
+
 ## 6. Test Mode
 
 Test mode behavior:
@@ -242,7 +260,7 @@ Expected artifact files:
 The BO-facing payload is available as both:
 
 - `result.data["bo_observation"]` with schema `bo_observation.v1`
-- `result.data["bo_handoff"]` with schema `analysis_bo_handoff_v1`
+- `result.data["bo_handoff"]` with schema `analysis_bo_handoff_v2`
 
 `experiment_evaluation.v1` is also emitted so the controller can append it to
 `state.experiment_evaluations` and BO/Knowledge can consume measured history.

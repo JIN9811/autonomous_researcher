@@ -15,6 +15,9 @@ scope:
 summary: Reproducible snapshot of the routes, graph, workspaces, and runtime contracts, including Knowledge relation reconciliation.
 source_of_truth:
   - app/main.py
+  - objectives/service.py
+  - objectives/compiler.py
+  - objectives/evaluator.py
   - graphs/configs/atr_closed_loop.yaml
   - orchestrator/langgraph_runtime.py
   - web/templates/knowledge.html
@@ -72,6 +75,28 @@ are available in every environment.
 - The 60-second background worker reports `model_unloaded` instead of loading a model and uses reconciliation priority `30`, below Guardian `0`, workflow `10`, and chat `20`.
 - Graph Explorer defaults to View Mode. Edit Mode supports drafts over existing nodes/relations and allowlisted metadata only, with undo/redo, server validation, optimistic graph revision, and audited apply.
 - Live GUI Knowledge report exposes compact persisted reconciliation metrics. ATT produces at most one aggregate pending-review item and does not block the experiment loop.
+
+## Objective Compiler Runtime (2026-08-09)
+
+- `objectives/metric_registry.py` exposes nine Analysis-produced metrics with
+  units, source paths, valid ranges, fidelity, quality, and provenance rules.
+- `objectives/compiler.py` accepts only the bounded declarative DSL. Python,
+  shell, Cypher, arbitrary file paths, unknown metrics, incompatible units,
+  and unbounded ASTs are rejected.
+- `ObjectiveService` owns compose/revise, validate, preview, approve, activate,
+  evaluate, compare, and status. A run binding is immutable by objective
+  id/version/hash and survives process restart.
+- Eleven `/api/objectives/*` routes and eleven `objective.*` ToolRegistry
+  operations expose the same lifecycle without request-supplied code or
+  storage roots.
+- `/bo` contains the authoring/lifecycle workspace. `/live` exposes a compact
+  read-only active-objective card and does not invoke an LLM during polling.
+- Analysis evaluates the active expression, Knowledge persists its complete
+  lineage, and BO accepts one deduplicated hash-matched observation per
+  `observation_id`. Live BO rejects synthetic proxy scores.
+- End-to-end regression covers invalid-unit rejection, nonlinear revision,
+  preview/approval/activation, Analysis evaluation, Knowledge JSONL lineage,
+  BO handoff, and score replay after service restart without an LLM.
 - Operational endpoints also include `/api/knowledge/relations/*` review actions and `/api/knowledge/graph/edit/{validate,apply}` in addition to ontology, graph stats/activity/sync/query endpoints.
 
 Last checked against the local source tree on 2026-08-09.

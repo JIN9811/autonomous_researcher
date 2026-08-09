@@ -85,6 +85,17 @@ ontology schema 변경, raw Cypher 운영, dead-letter 파일 수동 삭제, 물
 
 ATR Knowledge 계층은 다음 순서로 기록합니다.
 
+컴파일된 목적함수가 활성화된 run에서는 Analysis가 생성한
+`objective_evaluation.v1`도 같은 흐름으로 기록합니다. 이 레코드는
+`objective_id`, `objective_version`, `objective_hash`, observation, score,
+feasibility, contribution, constraint, uncertainty, fidelity, provenance를
+포함합니다. Knowledge는 이 값을 LLM으로 재계산하지 않습니다.
+
+서로 다른 `objective_hash`의 실험 결과는 동일 목적함수의 반복 측정으로
+합치지 않습니다. `JsonlKnowledgeStore.list_experiment_records`의
+`objective_hash` 필터로 동일 정의의 evidence만 조회하며, BO에도 같은 hash와
+provenance가 있는 관측만 전달합니다.
+
 ```text
 Knowledge event validation
 -> append-only JSONL ledger + fsync

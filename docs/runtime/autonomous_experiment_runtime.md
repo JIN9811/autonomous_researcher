@@ -38,6 +38,41 @@ Agent/UI entry points:
 - `bo_agent`
 - `/bo` BO Workspace
 
+## Objective Compiler Runtime
+
+The optional compiled-objective layer is implemented in `objectives/`. It
+extends, rather than replaces, `ExperimentObjective` and the existing
+`objective_score` contract.
+
+Runtime sequence:
+
+1. An LLM composes or revises one bounded `objective_spec.v1` from operator
+   intent and the implemented Metric Registry.
+2. Deterministic compilation validates allowlisted operators, metric ids,
+   units, AST depth/node limits, finite literals, and division epsilon.
+3. Preview evaluates only usable observations and reports rejected/missing
+   rows, score distribution, feasibility, contributions, sensitivity,
+   uncertainty stability, fidelity groups, and exact observation references.
+4. Explicit operator approval records the validated preview hash.
+5. Activation binds one objective id/version/hash immutably to one run.
+6. Analysis evaluates measured metrics; Knowledge stores lineage; BO accepts
+   only hash-matched traceable observations and emits the same identity in
+   `next_design_request.v1`.
+
+Persistence is inspectable under `memory/objectives/` and
+`runs/<run_id>/objective/`. Mutable indexes use atomic replacement; decisions
+and evaluations are append-only JSONL. Restarting the service reloads the run
+binding and deterministically reproduces scores without an LLM.
+
+Registered tools are `objective.metrics.list`, `objective.metrics.describe`,
+`objective.compose`, `objective.validate`, `objective.preview`,
+`objective.revise`, `objective.approve`, `objective.activate`,
+`objective.evaluate`, `objective.compare`, and `objective.status`. The bounded
+HTTP equivalents are under `/api/objectives/*`.
+
+Objective failure blocks BO only. It does not command hardware, replace
+Guardian authority, or authorize a physical action.
+
 ## Naming
 
 Use system-native names in user-facing docs and GUI:

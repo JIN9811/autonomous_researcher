@@ -33,6 +33,25 @@ failure penalties, and validators are authoritative; LLM hypothesis/preference
 and top-k critique are advisory. The recommendation returns through Guardian
 and Design before any physical action.
 
+## Compiled Objective Binding
+
+BO can consume a run-bound `objective_spec.v1` produced by the Objective
+Compiler. There is no fixed objective-template picker or implicit formula
+fallback. An objective becomes eligible only after deterministic validation,
+historical-observation preview, explicit operator approval, and activation for
+one `run_id`.
+
+For a compiled objective, BO accepts observations only when all of the
+following are present and valid: matching `objective_hash`, finite score,
+`feasible=true`, fidelity, parameter vector, provenance references, and
+`ok_for_bo=true`. Records duplicated through `bo_handoff` and
+`bo_observation` are deduplicated by `observation_id`. Live mode additionally
+requires measured fidelity and rejects synthetic proxy observations. Test mode
+may accept explicitly labelled synthetic or simulation evidence.
+
+`next_design_request.v1` carries `objective_id`, `objective_version`, and
+`objective_hash`; it never recompiles or changes the active expression.
+
 ## Scope
 
 Included are priors, evidence table, search-space update, candidate pool,
@@ -135,6 +154,11 @@ physical experiment occurred.
 | connected | POST | `/api/bo/benchmark` | experiment benchmark | local_state/model | bounded comparative tooling, not live loop |
 | owned | POST | `/api/bo/run` | BO agent workspace execution | local_state/model | direct bounded recommendation and node event |
 | shared | POST | `/api/run/start` | graph/controller | physical_possible | closed-loop execution, not BO alone |
+
+Objective authoring and lifecycle operations are exposed separately through
+`/api/objectives/*`. The BO Workspace can compose/revise, validate, preview,
+approve, and activate an objective, while the Live GUI only displays the
+active binding as a compact read-only card.
 
 ## Tools and Connections
 

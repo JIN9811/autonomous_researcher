@@ -444,7 +444,15 @@ class BOAgent(BaseAgent):
         seen: set[tuple[str, str]] = set()
 
         for record in cls._analysis_handoff_records(state):
-            key = (record.get("candidate_id", ""), json.dumps(record.get("parameters", {}), sort_keys=True, ensure_ascii=True))
+            observation_id = str(record.get("observation_id") or "").strip()
+            key = (
+                ("observation", observation_id)
+                if observation_id
+                else (
+                    str(record.get("candidate_id") or ""),
+                    json.dumps(record.get("parameters", {}), sort_keys=True, ensure_ascii=True),
+                )
+            )
             if key in seen:
                 continue
             seen.add(key)

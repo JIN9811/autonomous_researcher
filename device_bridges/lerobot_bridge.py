@@ -46,6 +46,8 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlparse
 from urllib.request import Request, urlopen
 
+from PIL import Image, ImageDraw
+
 from mcp_tools.lerobot_schemas import (
     IsaacLabSyntheticRequest,
     LeRobotBaseRequest,
@@ -14764,19 +14766,14 @@ print(json.dumps(ids))
         capture_dir = self.config.repo_root / "artifacts" / "lerobot" / "camera_tests"
         capture_dir.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        path = capture_dir / f"{profile.profile_id}_{camera_key}_{timestamp}.svg"
-        svg = f"""<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540">
-  <rect width="960" height="540" fill="#f8fbff"/>
-  <rect x="30" y="30" width="900" height="480" rx="28" fill="#ffffff" stroke="#1436b3" stroke-width="4"/>
-  <text x="70" y="140" font-family="Arial, sans-serif" font-size="44" font-weight="700" fill="#091225">LeRobot Camera Test</text>
-  <text x="70" y="220" font-family="Arial, sans-serif" font-size="30" fill="#1436b3">profile={profile.profile_id}</text>
-  <text x="70" y="280" font-family="Arial, sans-serif" font-size="30" fill="#1436b3">camera_key={camera_key}</text>
-  <text x="70" y="340" font-family="Arial, sans-serif" font-size="30" fill="#1436b3">port={camera_port}</text>
-  <circle cx="805" cy="170" r="56" fill="#28a1ff" opacity="0.28"/>
-  <circle cx="805" cy="170" r="22" fill="#28a1ff"/>
-</svg>
-"""
-        path.write_text(svg, encoding="utf-8")
+        path = capture_dir / f"{profile.profile_id}_{camera_key}_{timestamp}.png"
+        image = Image.new("RGB", (960, 540), (210, 210, 210))
+        draw = ImageDraw.Draw(image)
+        draw.rectangle((30, 30, 930, 510), fill=(245, 245, 245), outline=(20, 54, 179), width=4)
+        # Test-mode ActiveCam evidence includes a deterministic red specimen in
+        # the same workspace ROI consumed by VisionAgent.
+        draw.rectangle((410, 150, 550, 300), fill=(225, 30, 35))
+        image.save(path, format="PNG")
         return {
             "ok": True,
             "path": str(path),

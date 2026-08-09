@@ -1556,6 +1556,7 @@ class AnalysisAgent(BaseAgent):
                 "score": analysis.get("objective_score", 0.0),
                 "uncertainty": analysis.get("uncertainty", 1.0),
             },
+            "objective_evaluation": analysis.get("objective_evaluation", {}),
             "metrics": metrics,
             "fidelity": {
                 "mode": "single_high_fidelity_with_low_fidelity_context",

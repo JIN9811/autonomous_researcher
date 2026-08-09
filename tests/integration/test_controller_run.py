@@ -9,11 +9,49 @@ from pathlib import Path
 import pytest
 
 from app.bootstrap import load_runtime
+from device_bridges.lerobot_bridge import LeRobotBridge
 from orchestrator.state import Mode, Stage
 
 
 @pytest.mark.asyncio
-async def test_controller_completes_test_run() -> None:
+async def test_controller_completes_test_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    def virtual_post_place_telemetry(_bridge: LeRobotBridge, session: dict[str, object]) -> dict[str, object]:
+        session_id = str(session.get("session_id") or "test-rollout")
+        packet = {
+            "schema": "atr.robot_joint_telemetry.v1",
+            "type": "joint_sample",
+            "session_id": session_id,
+            "sequence": 2,
+            "actual_source": {"source": "virtual_controller_fixture"},
+            "target_source": {"source": "virtual_controller_fixture"},
+            "motion_state": {
+                "measured": {"base_state": "home", "gripper_state": "idle", "home_gate": {"passed": True}},
+                "policy": {"base_state": "home", "gripper_state": "idle", "home_gate": {"passed": True}},
+            },
+        }
+        return {
+            "joint_telemetry": {
+                "schema": "atr.robot_joint_telemetry.v1",
+                "status": "available",
+                "session_id": session_id,
+                "log_path": "virtual://controller-test-rollout",
+                "packet": packet,
+            },
+            "post_place_interlock": {
+                "schema": "post_place_interlock.v1",
+                "session_id": session_id,
+                "ungrasping_seen": True,
+                "ungrasping_sequence": 1,
+                "measured_base_state": "home",
+                "measured_gripper_state": "idle",
+                "home_gate_passed": True,
+                "home_after_ungrasping": True,
+                "ready_for_utm_snapshot": True,
+                "latest_sequence": 2,
+            },
+        }
+
+    monkeypatch.setattr(LeRobotBridge, "_rollout_joint_telemetry_contract", virtual_post_place_telemetry)
     controller = load_runtime()
     result = await controller.start(mode=Mode.TEST, goal="integration test run")
     assert result["ok"] is True
