@@ -1,0 +1,18 @@
+digraph bambu_connections {
+  rankdir=LR; graph [bgcolor="transparent", fontname="DejaVu Sans", pad="0.25", ranksep="0.6"];
+  node [fontname="DejaVu Sans", fontsize=9, margin="0.10,0.07", shape=box, style="rounded,filled", fillcolor="#e8f1fb", color="#285f8f"];
+  edge [fontname="DejaVu Sans", fontsize=8, arrowsize=0.7, color="#334155"];
+  api [label="/api/printer\nslice / patch / probe / start\nvideo / bed-clear / proof"];
+  tool [label="printer.prepare"];
+  manager [label="PrinterDeviceBridgeManager"];
+  patcher [label="G-code patcher + validator\nlocal files only"];
+  slicer [label="Bambu Studio wrapper", shape=component, fillcolor="#eee8ff", color="#654ea3"];
+  mqtt [label="MQTT TLS\nreport/request topics", shape=component, fillcolor="#eee8ff", color="#654ea3"];
+  ftps [label="FTPS\nstorage + upload", shape=component, fillcolor="#eee8ff", color="#654ea3"];
+  video [label="LAN video\nframe/MJPEG", shape=component, fillcolor="#eee8ff", color="#654ea3"];
+  http [label="HTTP artifact route", shape=component, fillcolor="#eee8ff", color="#654ea3"];
+  printer [label="Bambu X2D", shape=octagon, style="filled,bold", fillcolor="#fde8e8", color="#a32929"];
+  evidence [label="hashes / reports / frames / proof", shape=note, fillcolor="#e7f6ec", color="#29733b"];
+  api -> manager; tool -> manager; manager -> patcher; manager -> slicer; manager -> mqtt [label="live", style=dashed]; manager -> ftps [label="live", style=dashed]; manager -> video [label="optional", style=dashed]; manager -> http [label="guarded route"];
+  mqtt -> printer; ftps -> printer; http -> printer [label="fetch", style=dashed]; video -> printer [dir=back, label="stream"]; patcher -> evidence [label="artifact evidence", color="#29733b"]; mqtt -> evidence [label="telemetry", color="#29733b"]; video -> evidence [label="visual evidence", color="#29733b"];
+}

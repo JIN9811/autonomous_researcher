@@ -1,0 +1,18 @@
+digraph prusa_execution {
+  rankdir=LR; graph [bgcolor="transparent", fontname="DejaVu Sans", pad="0.25"];
+  node [fontname="DejaVu Sans", fontsize=9, margin="0.10,0.07", shape=box, style="rounded,filled", fillcolor="#e8f1fb", color="#285f8f"];
+  edge [fontname="DejaVu Sans", fontsize=8, arrowsize=0.7, color="#334155"];
+  input [label="Exact Prusa profile + source"];
+  slice [label="PrusaSlicer\nlocal G-code"];
+  validate [label="Print/ejection G-code\nbounds + envelope valid?", shape=diamond, fillcolor="#fff3cd", color="#946200"];
+  preflight [label="Version / status / storage / job\nready within budget?", shape=diamond, fillcolor="#fff3cd", color="#946200"];
+  upload [label="PrusaLink upload"];
+  remote [label="REMOTE STORAGE EFFECT", shape=octagon, style="filled,bold", fillcolor="#fde8e8", color="#a32929"];
+  start [label="Start allowed + idle?", shape=diamond, fillcolor="#fff3cd", color="#946200"];
+  motion [label="PRINT / EJECTION EFFECT\nheat + motion", shape=octagon, style="filled,bold", fillcolor="#fde8e8", color="#a32929"];
+  observe [label="file/transfer/job/status evidence", shape=note, fillcolor="#e7f6ec", color="#29733b"];
+  blocked [label="BLOCKED\nknown no effect", style="filled,bold", fillcolor="#fde8e8", color="#a32929"];
+  unknown [label="EFFECT UNKNOWN\nquery remote state", style="filled,bold", fillcolor="#fde8e8", color="#a32929"];
+  input -> slice -> validate; validate -> preflight [label="valid"]; validate -> blocked [label="invalid", color="#a32929"]; preflight -> upload [label="ready"]; preflight -> blocked [label="not ready", color="#a32929"];
+  upload -> remote -> start; start -> motion [label="allow"]; start -> observe [label="upload only", color="#29733b"]; motion -> observe [label="evidence", color="#29733b"]; upload -> unknown [label="timeout", color="#a32929"]; motion -> unknown [label="lost status", color="#a32929"];
+}
