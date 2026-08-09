@@ -1142,7 +1142,7 @@ Live physical print 조건:
 
 - `docs/hardware/printer_agent_prusabridge_phase1_runtime_guideline.txt`는 Prusa 전용 문서로 유지.
 - 새 문서: `docs/hardware/bambulab_x2d_bridge_runtime_guideline.md`.
-- `docs/hardware/prusa_mk4s_live_validation_20260506.md`와 같은 방식으로 X2D validation log 생성.
+- `docs/hardware/evidence/prusa_mk4s_live_validation_20260506.md`와 같은 방식으로 X2D validation log 생성.
 - `docs/agents/specimen_design_existing_runtime_guideline.txt`에 `provider=bambulab_x2d` 표시 규칙 추가.
 - `REQUIREMENTS.md`에 Bambu Studio CLI, MQTT client, FTPS client 후보 추가.
 

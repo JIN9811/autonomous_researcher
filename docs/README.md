@@ -21,6 +21,7 @@ related_docs:
   - docs/agents/agent_api_connection_matrix.md
   - docs/device_bridges/README.md
   - docs/device_bridges/bridge_api_connection_matrix.md
+  - docs/oldversion/README.md
   - docs/runtime/current_code_snapshot.md
 supersedes: []
 ---
@@ -40,7 +41,8 @@ Reference와 도메인 Guide로 내려갑니다. 시스템 지시, Codex 실행 
 이 인덱스는 사용자·운영자·개발자가 읽는 문서, 문서 작성 규칙, 현재 구현
 Reference, 절차 Guide, 목표 Design, 실행 Plan, 조사·감사 Evidence를 안내합니다.
 `docs/document_manifest.yaml`에 아직 포함되지 않은 기존 문서는 그대로
-노출하되 1차 거버넌스 이관 완료 문서로 간주하지 않습니다.
+노출하되 1차 거버넌스 이관 완료 문서로 간주하지 않습니다. manifest 밖에
+있거나 inbound link가 없다는 사실만으로 미사용 문서로 판정하지 않습니다.
 
 ## Evidence Basis
 
@@ -74,6 +76,7 @@ Reference, 절차 Guide, 목표 Design, 실행 Plan, 조사·감사 Evidence를 
 | BambuLab X2D bridge 구조 | [hardware/bambulab_x2d_device_bridge_runtime_guideline.md](hardware/bambulab_x2d_device_bridge_runtime_guideline.md) |
 | 첫 실행 튜토리얼 | [tutorials/first_autonomous_run.ko.md](tutorials/first_autonomous_run.ko.md), [tutorials/first_autonomous_run.en.md](tutorials/first_autonomous_run.en.md) |
 | Git/GitHub 운영 | [repository/github_version_control.md](repository/github_version_control.md) |
+| 보관된 미사용·대체 문서 | [oldversion/README.md](oldversion/README.md) — 현재 구현 기준으로 사용 금지 |
 
 ## 1.1 Documents by Type
 
@@ -86,6 +89,7 @@ Reference, 절차 Guide, 목표 Design, 실행 Plan, 조사·감사 Evidence를 
 | Design | [superpowers/specs/2026-08-08-documentation-governance-design.md](superpowers/specs/2026-08-08-documentation-governance-design.md) | 승인 또는 제안된 목표 결정; 현재 구현 사실이 아님 |
 | Plan | `superpowers/plans/` | Design을 실현하는 작업 순서 |
 | Evidence | [paper/06_evaluation_and_results.md](paper/06_evaluation_and_results.md), [paper/09_claim_evidence_traceability.md](paper/09_claim_evidence_traceability.md), 조사·감사·시험 보고서 | 기록된 날짜·환경·방법에 한정된 근거 |
+| Archived | [oldversion/README.md](oldversion/README.md) | 현재 소비자가 없고 대체물이 명시된 역사 자료; 정상 읽기 경로에서 제외 |
 
 새 문서를 만들 때는 [templates/document_types.md](templates/document_types.md)의
 해당 유형 템플릿을 사용합니다.
@@ -214,7 +218,7 @@ UTM ROS Vision Runtime은 현재 Windows/PyAutoGUI UTM 제어 증거를 대체�
 | Specimen Making | `graphs/modules/specimen` | [Specimen Making](agents/specimen_agent.md) | [BambuLab X2D bridge](hardware/bambulab_x2d_device_bridge_runtime_guideline.md), [기존 Prusa bridge guideline](hardware/printer_agent_prusabridge_phase1_runtime_guideline.txt) |
 | Vision | `graphs/modules/vision` | [Vision](agents/vision_agent.md) | [기존 pickup observation guideline](agents/vision_pickup_observation_runtime_guideline.txt), [UTM ROS Vision bridge](hardware/utm_ros_vision_runtime_bridge.md) |
 | Manipulation | `graphs/modules/manipulation` | [Manipulation](agents/manipulation_agent.md) | [기존 Pi0.5 transfer guideline](agents/manipulation_pi05_transfer_runtime_guideline.txt), [LeRobot runtime](hardware/lerobot_robotis_manipulation_runtime_guideline.md) |
-| Lab Equipment | `graphs/modules/equipment` | [Lab Equipment](agents/equipment_agent.md) | [Windows equipment guideline](hardware/windows_pyautogui_equipment_agent_guideline.md), [UTM completion audit](hardware/lab_equipment_utm_visual_control_completion_audit.md) |
+| Lab Equipment | `graphs/modules/equipment` | [Lab Equipment](agents/equipment_agent.md) | [Windows equipment guideline](hardware/windows_pyautogui_equipment_agent_guideline.md), [UTM completion audit](hardware/evidence/lab_equipment_utm_visual_control_completion_audit.md) |
 | Analysis | `graphs/modules/analysis` | [Analysis](agents/analysis_agent.md) | [기존 UTM guideline](agents/analysis_utm_runtime_guideline.txt), [기존 CAE guideline](agents/cae_analysis_runtime_guideline.txt) |
 | Knowledge | `graphs/modules/knowledge` | [Knowledge](agents/knowledge_agent.md) | [Self-evolution guideline](agents/knowledge_agent_self_evolution_runtime_guideline.md), [Knowledge operations](knowledge/knowledge_graph_operations.ko.md) |
 | BO | `graphs/modules/bo` | [Bayesian Optimization](agents/bo_agent.md) | [기존 BO guideline](agents/bo_agent_runtime_guideline.txt) |
@@ -264,10 +268,10 @@ API·프로토콜·효과·복구를 비교할 때는
 ## 6. 설명용 문서 폴더
 
 - `docs/runtime/`: runtime, graph, loop, logging, test mode, self-evolution 설명
-- `docs/gui/`: GUI 사용/개선 계획
+- `docs/gui/`: 현재 GUI 설명; `docs/gui/history/`는 구현 계획 이력
 - `docs/agents/`: agent별 역할과 runtime guideline
 - `docs/device_bridges/`: bridge/provider별 현재 역할, API, 프로토콜, 효과, 증거, 복구 Reference와 피겨
-- `docs/hardware/`: 장비 브릿지와 실제 장비 연동
+- `docs/hardware/`: 장비 브릿지와 실제 장비 연동; `research/`와 `evidence/`는 조사·검증 기록
 - `docs/tutorials/`: 사용자 종합 매뉴얼과 첫 실행 튜토리얼
 - `docs/repository/`: GitHub/버전관리 규칙
 - `docs/process/`: Codex 작업 절차
@@ -278,6 +282,7 @@ API·프로토콜·효과·복구를 비교할 때는
 - `docs/templates/`: 문서 유형별 작성 틀
 - `docs/superpowers/specs/`: Design 문서
 - `docs/superpowers/plans/`: 실행 Plan 문서
+- `docs/oldversion/`: 현재 소비자가 없고 대체물이 확인된 보관 자료와 색인
 
 ## 7. 시스템 지시 문서
 
@@ -297,6 +302,8 @@ API·프로토콜·효과·복구를 비교할 때는
   [standards/documentation_standard.md](standards/documentation_standard.md)를 따릅니다.
 - `docs/document_manifest.yaml` 밖의 기존 문서는 1차 이관 debt이며, active
   Reference나 Guide처럼 자동으로 간주하지 않습니다.
+- 보관 여부는 [oldversion/README.md](oldversion/README.md)와 Standard의 archive
+  admission rule로 판단하며, 나이·파일 형식·inbound link 수만으로 이동하지 않습니다.
 - 코드와 문서가 다르면 우선 `runtime/current_code_snapshot.md`를 갱신한 뒤
   관련 문서를 따라 수정합니다.
 - runtime loop나 API를 바꾸면 `runtime/closed_loop_and_pages_reference.md`를 같이 갱신합니다.
@@ -310,6 +317,8 @@ API·프로토콜·효과·복구를 비교할 때는
 1차 이관 범위는 root Index, 이 인덱스, 문서 Standard/템플릿, 세 개의 핵심
 runtime Reference, Knowledge operations Guide입니다. 그 외 Markdown과 기존
 `.txt` guideline은 경로를 유지한 채 도메인별 후속 분류 대상으로 남습니다.
+2026-08-09 위치 정리에서는 명백한 research/history/evidence 문서만 도메인
+하위로 이동했고, 대체가 확인된 미사용 이미지 패키지 하나만 보관했습니다.
 
 ## Limitations and Known Gaps
 

@@ -232,6 +232,41 @@ changes. A stale date alone is a review signal; a contradicted fact is a defect.
 - Renames SHOULD update inbound links in the same change.
 - This rollout MUST NOT move files solely to group them by document type.
 
+## Document Relocation and Archive
+
+Active material SHOULD stay near its owning domain. A reviewable migration MAY
+introduce a domain-local `research/`, `history/`, or `evidence/` directory when
+the existing location obscures the document's purpose. Such a move MUST keep
+the document body and authority stable, update all inbound relative links and
+repository-root literal paths in the same change, and pass link validation.
+
+`docs/oldversion/` is reserved for material excluded from normal reading paths.
+Age, file format, missing front matter, exclusion from
+`docs/document_manifest.yaml`, or a zero inbound-link count is insufficient on
+its own. An item MAY be archived only when the same change demonstrates all of
+the following:
+
+1. no active README, document, executable code, configuration, validator, or
+   package manifest consumes it;
+2. a current replacement is named;
+3. the item is not required implementation history, Evidence, or a
+   reproducibility artifact;
+4. all affected Markdown links and repository-root literal paths are updated
+   or shown absent;
+5. `docs/oldversion/README.md` records the archive date, original path,
+   archived path, reason, and replacement.
+
+An archived tree SHOULD retain its former repository-relative context beneath
+`docs/oldversion/`. Active References and Guides MUST NOT cite archived
+material as current implementation authority. Internal manifests and relative
+assets in an archived package MUST continue to resolve from the new location.
+
+Restoration requires a named active consumer, an owning domain, and current
+verification. Restore with a path-preserving move into the active domain,
+update inbound references and the archive index in the same change, and add the
+document to `docs/document_manifest.yaml` only after its metadata and type
+contract pass validation.
+
 ## Manifest and Migration Debt
 
 `docs/document_manifest.yaml` is the canonical governed set. A document MUST be

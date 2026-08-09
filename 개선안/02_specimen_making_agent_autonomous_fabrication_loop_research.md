@@ -152,7 +152,7 @@ AutoMEX는 LLM agent와 manufacturing knowledge graph를 결합해 material extr
 프로젝트 내부 근거:
 
 - `configs/devices.yaml`: 기본 프린터는 test mode + `virtual_prusalink_dry_run=true`이며, PrusaLink 형태의 status/storage/job/transfer/upload/start/ejection boundary를 검증할 수 있다.
-- `docs/hardware/prusa_mk4s_live_validation_20260506.md`: Prusa MK4S + PrusaLink upload/start, PrusaSlicer Docker wrapper, storage/job/transfer endpoint가 검증되어 있다. 단, ejection은 비활성 정책이다.
+- `docs/hardware/evidence/prusa_mk4s_live_validation_20260506.md`: Prusa MK4S + PrusaLink upload/start, PrusaSlicer Docker wrapper, storage/job/transfer endpoint가 검증되어 있다. 단, ejection은 비활성 정책이다.
 - `docs/agents/specimen_design_existing_runtime_guideline.txt`: `printer.prepare`는 내부 tool boundary로 유지해야 하며, Specimen Agent는 STL viewer가 아니라 manufacturing runtime state를 Live GUI에 보여줘야 한다.
 - `agents/specimen_agent.py`: 이미 `geometry_result`, `mesh_result`, `manufacturability_result`, `handoff_result`, `experiment_response`, `printer.prepare`의 `step_trace`를 하나의 `specimen_result`에 모을 수 있는 구조가 있다.
 

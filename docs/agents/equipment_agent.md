@@ -219,4 +219,4 @@ ROS, cameras, and workers are optional/environment-specific.
 - [Analysis](analysis_agent.md)
 - [Windows Equipment Guide](../hardware/windows_pyautogui_equipment_agent_guideline.md)
 - [UTM ROS Vision Guide](../hardware/utm_ros_vision_runtime_bridge.md)
-- [Completion Audit](../hardware/lab_equipment_utm_visual_control_completion_audit.md)
+- [Completion Audit](../hardware/evidence/lab_equipment_utm_visual_control_completion_audit.md)

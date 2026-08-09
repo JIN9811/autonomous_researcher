@@ -163,7 +163,7 @@ Purpose:
 Windows host setup:
 
 - See `docs/hardware/windows_pyautogui_bridge_windows_setup.md` for Windows PC installation, firewall, token, bridge startup, and manual validation procedure.
-- See `docs/hardware/lab_equipment_utm_visual_control_completion_audit.md` for the Improvement 05 evidence matrix, validation commands, and remaining real-UTM live validation checklist.
+- See `docs/hardware/evidence/lab_equipment_utm_visual_control_completion_audit.md` for the Improvement 05 evidence matrix, validation commands, and remaining real-UTM live validation checklist.
 
 Primary target:
 

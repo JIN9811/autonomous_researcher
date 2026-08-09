@@ -23,7 +23,7 @@ verified_against: 188a1d6
 related_docs:
   - docs/device_bridges/printer_fleet_bridge.md
   - docs/hardware/printer_agent_prusabridge_phase1_runtime_guideline.txt
-  - docs/hardware/prusa_mk4s_live_validation_20260506.md
+  - docs/hardware/evidence/prusa_mk4s_live_validation_20260506.md
   - docs/agents/specimen_agent.md
 supersedes: []
 ---
@@ -185,5 +185,5 @@ promotion. Firmware/auth/storage variations are not exhaustively evaluated.
 
 - [Printer Fleet](printer_fleet_bridge.md)
 - [Prusa Phase-One Guide](../hardware/printer_agent_prusabridge_phase1_runtime_guideline.txt)
-- [Prusa Live Validation Record](../hardware/prusa_mk4s_live_validation_20260506.md)
+- [Prusa Live Validation Record](../hardware/evidence/prusa_mk4s_live_validation_20260506.md)
 - [Specimen Agent](../agents/specimen_agent.md)
