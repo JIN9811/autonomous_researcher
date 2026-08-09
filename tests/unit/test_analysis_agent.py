@@ -12,6 +12,10 @@ import pytest
 from agents.analysis_agent import AnalysisAgent
 from mcp_tools.cae_tools import register_cae_tools
 from mcp_tools.tool_registry import ToolRegistry
+from objectives.metric_registry import MetricRegistry
+from objectives.schemas import ObjectiveSpec
+from objectives.service import ObjectiveService
+from objectives.store import ObjectiveStore
 from orchestrator.state import Mode, OrchestratorState, Stage
 
 
@@ -67,6 +71,41 @@ def _state(*, mode: Mode = Mode.TEST, equipment_result: dict[str, Any] | None = 
     )
 
 
+def _active_objective_service(tmp_path: Path) -> ObjectiveService:
+    service = ObjectiveService(
+        store=ObjectiveStore(tmp_path / "memory" / "objectives", run_root=tmp_path / "runs"),
+        registry=MetricRegistry.default(),
+    )
+    service.create_draft(
+        ObjectiveSpec(
+            objective_id="analysis-objective",
+            version=1,
+            expression={
+                "op": "normalize",
+                "value": {"op": "metric", "metric_id": "compressive_strength_mpa"},
+                "min": {"op": "literal", "value": 0.0, "unit": "MPa"},
+                "max": {"op": "literal", "value": 2.0, "unit": "MPa"},
+            },
+        )
+    )
+    service.validate("analysis-objective", 1)
+    service.preview(
+        "analysis-objective",
+        1,
+        [
+            {
+                "observation_id": "preview-analysis",
+                "metrics": {"compressive_strength_mpa": 1.0},
+                "quality_ok": True,
+                "provenance_refs": ["preview-artifact"],
+            }
+        ],
+    )
+    service.approve("analysis-objective", 1, operator="operator")
+    service.activate("analysis-objective", 1, run_id="run-analysis", operator="operator")
+    return service
+
+
 @pytest.mark.asyncio
 async def test_analysis_agent_extracts_inline_utm_metrics() -> None:
     result = await AnalysisAgent().run(_state(), _CtxStub())
@@ -80,6 +119,41 @@ async def test_analysis_agent_extracts_inline_utm_metrics() -> None:
     assert analysis["utm_metrics"]["energy_absorption_mJ"] > 1500
     assert analysis["specimen_geometry"]["cross_section_area_mm2"] == 400.0
     assert analysis["recommendation"] == "ready_for_knowledge_guardian"
+
+
+@pytest.mark.asyncio
+async def test_analysis_agent_evaluates_active_compiled_objective(tmp_path: Path) -> None:
+    service = _active_objective_service(tmp_path)
+    tools = ToolRegistry()
+    tools.register_resource("objective.service", service)
+
+    result = await AnalysisAgent().run(_state(), _CtxStub(tools=tools))
+
+    analysis = result.data["analysis"]
+    evaluation = analysis["objective_evaluation"]
+    binding = service.status(run_id="run-analysis")["active_binding"]
+    assert result.success is True
+    assert analysis["objective_score"] == evaluation["score"]
+    assert evaluation["objective_hash"] == binding["objective_hash"]
+    assert evaluation["metrics"]["compressive_strength_mpa"] == 1.3
+    assert evaluation["provenance_refs"]
+
+
+@pytest.mark.asyncio
+async def test_analysis_agent_blocks_requested_objective_without_binding() -> None:
+    state = _state()
+    state.current_experiment_objective = {
+        "schema_version": "objective_spec.v1",
+        "objective_id": "missing-objective",
+        "version": 1,
+        "objective_hash": "sha256:missing",
+    }
+
+    result = await AnalysisAgent().run(state, _CtxStub())
+
+    assert result.success is False
+    assert result.data["analysis"]["failure_code"] == "OBJECTIVE_BINDING_REQUIRED"
+    assert result.data["analysis"]["objective_score"] is None
 
 
 @pytest.mark.asyncio

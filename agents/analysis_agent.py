@@ -805,6 +805,77 @@ class AnalysisAgent(BaseAgent):
             score = 0.75 * score + 0.25 * cae_score
         return round(max(0.0, min(score, 1.0)), 4)
 
+    @staticmethod
+    def _compiled_objective_requested(state: OrchestratorState) -> bool:
+        objective = state.current_experiment_objective if isinstance(state.current_experiment_objective, dict) else {}
+        return bool(
+            objective.get("schema_version") == "objective_spec.v1"
+            or objective.get("objective_hash")
+            or objective.get("compiled_objective")
+        )
+
+    @staticmethod
+    def _objective_service(ctx: AgentContext) -> Any | None:
+        tools = getattr(ctx, "tools", None)
+        resource = getattr(tools, "resource", None)
+        return resource("objective.service") if callable(resource) else None
+
+    @staticmethod
+    def _registry_metric_values(service: Any, metrics: dict[str, Any]) -> dict[str, Any]:
+        values: dict[str, Any] = {}
+        for definition in service.registry.list():
+            source_name = str(definition.source_path).rsplit(".", 1)[-1]
+            if source_name in metrics:
+                values[definition.metric_id] = metrics[source_name]
+        return values
+
+    def _evaluate_compiled_objective(
+        self,
+        *,
+        state: OrchestratorState,
+        ctx: AgentContext,
+        metrics: dict[str, Any],
+        uncertainty: float,
+        source_meta: dict[str, Any],
+        equipment_result: dict[str, Any],
+        cae_result: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        service = self._objective_service(ctx)
+        requested = self._compiled_objective_requested(state)
+        if service is None:
+            if requested:
+                raise RuntimeError("OBJECTIVE_BINDING_REQUIRED: objective service is unavailable")
+            return None
+        binding = service.status(run_id=state.run_id).get("active_binding")
+        if not isinstance(binding, dict):
+            if requested:
+                raise RuntimeError("OBJECTIVE_BINDING_REQUIRED: run has no active objective binding")
+            return None
+        requested_objective = state.current_experiment_objective if isinstance(state.current_experiment_objective, dict) else {}
+        requested_hash = str(requested_objective.get("objective_hash") or "")
+        if requested_hash and requested_hash != str(binding.get("objective_hash") or ""):
+            raise RuntimeError("OBJECTIVE_BINDING_MISMATCH: requested and active objective hashes differ")
+        requested_id = str(requested_objective.get("objective_id") or "")
+        if requested and requested_id and requested_id != str(binding.get("objective_id") or ""):
+            raise RuntimeError("OBJECTIVE_BINDING_MISMATCH: requested and active objective ids differ")
+        provenance_refs = [
+            str(item.get("path") or item.get("source") or "")
+            for item in self._artifact_refs(equipment_result, source_meta, cae_result)
+            if str(item.get("path") or item.get("source") or "").strip()
+        ]
+        if not provenance_refs:
+            provenance_refs = [str(source_meta.get("source") or "analysis_agent")]
+        fidelity = "synthetic" if str(source_meta.get("source") or "").startswith("synthetic") else "measured"
+        evaluation = service.evaluate(
+            run_id=state.run_id,
+            metrics=self._registry_metric_values(service, metrics),
+            observation_id=f"{state.run_id}:{state.experiment_id}:analysis",
+            uncertainty=uncertainty,
+            provenance_refs=provenance_refs,
+            fidelity=fidelity,
+        )
+        return evaluation.model_dump(mode="json")
+
     def _uncertainty(
         self,
         source_meta: dict[str, Any],
@@ -1416,6 +1487,7 @@ class AnalysisAgent(BaseAgent):
             "consumer_agent": "bo_agent",
             "status": "ready" if bo_ready else "blocked",
             "objective_score": analysis.get("objective_score", 0.0),
+            "objective_evaluation": analysis.get("objective_evaluation", {}),
             "uncertainty": analysis.get("uncertainty", 1.0),
             "observed_metrics": metrics,
             "simulation_metrics": simulation_metrics,
@@ -1510,6 +1582,7 @@ class AnalysisAgent(BaseAgent):
             "summary": analysis.get("summary", ""),
             "raw_artifact_refs": artifact_refs,
             "metrics": metrics,
+            "objective_evaluation": analysis.get("objective_evaluation", {}),
             "parameters": parameters,
             "quality": quality_gate,
             "artifact_refs": analysis_artifacts,
@@ -1712,9 +1785,53 @@ class AnalysisAgent(BaseAgent):
             raw_fem_metrics = fem_result.get("fem_metrics") if isinstance(fem_result.get("fem_metrics"), dict) else fem_result.get("metrics")
             fem_metrics = dict(raw_fem_metrics) if isinstance(raw_fem_metrics, dict) else {}
         objective_simulation = cae_result if isinstance(cae_result, dict) and cae_result.get("ok") else fem_result
-        objective = self._objective_score(metrics, state, objective_simulation)
         uncertainty = self._uncertainty(source_meta, metrics, state, objective_simulation)
         quality_gate = self._quality_gate(signal_quality, metrics, source_meta, True)
+        try:
+            objective_evaluation = self._evaluate_compiled_objective(
+                state=state,
+                ctx=ctx,
+                metrics=metrics,
+                uncertainty=uncertainty,
+                source_meta=source_meta,
+                equipment_result=equipment_result,
+                cae_result=cae_result,
+            )
+        except Exception as exc:
+            failure_code = str(exc).split(":", 1)[0]
+            if failure_code not in {"OBJECTIVE_BINDING_REQUIRED", "OBJECTIVE_BINDING_MISMATCH"}:
+                failure_code = "OBJECTIVE_EVALUATION_FAILED"
+            analysis = {
+                "ok": False,
+                "failure_code": failure_code,
+                "summary": str(exc),
+                "objective_score": None,
+                "objective_evaluation": {},
+                "uncertainty": uncertainty,
+                "utm_metrics": metrics,
+                "source": source_meta,
+                "specimen_geometry": geometry,
+                "quality_gate": quality_gate,
+                "cae_result": cae_result or {},
+                "cae_metrics": cae_metrics,
+                "fem_result": fem_result or self._cae_as_fem_result(cae_result),
+                "fem_metrics": fem_metrics,
+                "equipment_handoff_gate": live_handoff_gate,
+            }
+            return self._blocked_result(
+                state=state,
+                summary=f"Analysis blocked: {failure_code}",
+                analysis=analysis,
+                metrics=metrics,
+                source_meta=source_meta,
+                equipment_result=equipment_result,
+                cae_result=cae_result,
+            )
+        objective = (
+            self._safe_float(objective_evaluation.get("score"), 0.0)
+            if isinstance(objective_evaluation, dict)
+            else self._objective_score(metrics, state, objective_simulation)
+        )
         comparison = self._comparison(state, objective, metrics)
         fem_utm_comparison = self._fem_utm_comparison(metrics, fem_result, cae_result)
         closed_loop_sources = [source_meta.get("source", "utm")]
@@ -1723,6 +1840,7 @@ class AnalysisAgent(BaseAgent):
             "ok": True,
             "source": source_meta,
             "objective_score": objective,
+            "objective_evaluation": objective_evaluation or {},
             "uncertainty": uncertainty,
             "utm_metrics": metrics,
             "utm_curve": self._curve_preview(curve),

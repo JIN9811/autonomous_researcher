@@ -79,6 +79,16 @@ class JsonlKnowledgeStore(KnowledgeStore):
     def append_experiment_record(self, record: ExperimentKnowledgeRecord) -> None:
         self._append("experiment_records", record)
 
+    def list_experiment_records(self, *, objective_hash: str | None = None, limit: int = 200) -> list[ExperimentKnowledgeRecord]:
+        records = self._read_model_list("experiment_records", ExperimentKnowledgeRecord, limit=max(limit * 4, limit))
+        if objective_hash:
+            records = [
+                record
+                for record in records
+                if str(record.objective_evaluation.get("objective_hash") or "") == objective_hash
+            ]
+        return records[-limit:]
+
     def append_agent_performance_records(self, records: list[AgentPerformanceRecord]) -> None:
         self._append_many("agent_performance_records", records)
 

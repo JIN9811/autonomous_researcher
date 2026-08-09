@@ -11,7 +11,8 @@ import pytest
 from agents.knowledge_agent import KnowledgeAgent
 from knowledge.evolution_bridge import build_outcomes_for_active_variants
 from knowledge.experiment_db import ExperimentDB
-from knowledge.schemas import AgentPerformanceRecord, EvolutionOutcomeRecord
+from knowledge.schemas import AgentPerformanceRecord, EvolutionOutcomeRecord, ExperimentKnowledgeRecord
+from knowledge.stores import JsonlKnowledgeStore
 from orchestrator.state import Mode, OrchestratorState, Stage
 
 
@@ -49,6 +50,27 @@ def _state() -> OrchestratorState:
     )
 
 
+def _objective_evaluation() -> dict[str, Any]:
+    return {
+        "schema_version": "objective_evaluation.v1",
+        "evaluation_id": "objective-evaluation-1",
+        "objective_id": "compression-performance",
+        "objective_version": 3,
+        "objective_hash": "sha256:objective-3",
+        "observation_id": "run-knowledge:exp-knowledge:analysis",
+        "score": 0.73,
+        "feasible": True,
+        "raw_value": 0.73,
+        "term_contributions": {"strength": 0.44, "energy": 0.29},
+        "constraint_results": [],
+        "uncertainty": 0.12,
+        "metrics": {"compressive_strength_mpa": 0.6},
+        "provenance_refs": ["artifacts/equipment/run/utm.csv"],
+        "fidelity": "measured",
+        "created_at": "2026-08-09T00:00:00+00:00",
+    }
+
+
 @pytest.mark.asyncio
 async def test_knowledge_agent_persists_analysis_artifacts_metrics_and_failure_tags() -> None:
     ctx = _CtxStub()
@@ -74,6 +96,38 @@ async def test_knowledge_agent_persists_analysis_artifacts_metrics_and_failure_t
     assert record.artifact_refs[0]["kind"] == "utm_csv"
     assert record.metrics["peak_force_N"] == 240.0
     assert record.failure_tags == ["low_point_count"]
+
+
+@pytest.mark.asyncio
+async def test_knowledge_agent_preserves_objective_evaluation_lineage() -> None:
+    ctx = _CtxStub()
+    state = _state()
+    state.latest_analysis["objective_evaluation"] = _objective_evaluation()
+
+    result = await KnowledgeAgent().run(state, ctx)
+
+    persisted = result.data["knowledge"]["knowledge_report"]["experiment_memory"]
+    assert persisted["objective_evaluation"]["objective_hash"] == "sha256:objective-3"
+    assert persisted["objective_evaluation"]["term_contributions"]["strength"] == 0.44
+    assert persisted["objective_evaluation"]["provenance_refs"] == ["artifacts/equipment/run/utm.csv"]
+
+
+def test_knowledge_store_filters_experiment_records_by_objective_hash(tmp_path) -> None:
+    store = JsonlKnowledgeStore(memory_root=tmp_path / "memory", run_root=tmp_path / "runs")
+    for suffix, objective_hash in (("a", "sha256:one"), ("b", "sha256:two")):
+        store.append_experiment_record(
+            ExperimentKnowledgeRecord(
+                record_id=f"record-{suffix}",
+                run_id=f"run-{suffix}",
+                experiment_id=f"experiment-{suffix}",
+                summary="test",
+                objective_evaluation={**_objective_evaluation(), "objective_hash": objective_hash},
+            )
+        )
+
+    records = store.list_experiment_records(objective_hash="sha256:two")
+
+    assert [record.record_id for record in records] == ["record-b"]
 
 
 def test_knowledge_builds_outcome_attribution_for_active_variant(tmp_path) -> None:

@@ -42,6 +42,7 @@ class MemoryRecord(BaseModel):
     artifact_refs: list[dict[str, Any]] = Field(default_factory=list, description="Raw artifact references used by analysis")
     metrics: dict[str, Any] = Field(default_factory=dict, description="Key observed metrics for downstream retrieval")
     failure_tags: list[str] = Field(default_factory=list, description="Quality or failure tags from the loop")
+    objective_evaluation: dict[str, Any] = Field(default_factory=dict, description="Deterministic objective evaluation lineage")
 
 
 KnowledgeSourceType = Literal[
@@ -90,6 +91,7 @@ class ExperimentKnowledgeRecord(BaseModel):
     summary: str
     parameters: dict[str, Any] = Field(default_factory=dict)
     metrics: dict[str, Any] = Field(default_factory=dict)
+    objective_evaluation: dict[str, Any] = Field(default_factory=dict)
     quality: dict[str, Any] = Field(default_factory=dict)
     artifact_refs: dict[str, Any] = Field(default_factory=dict)
     provenance: ProvenanceRef = Field(default_factory=ProvenanceRef)

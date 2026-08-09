@@ -82,6 +82,13 @@ class KnowledgeAgent(BaseAgent):
         guardian_incident_evidence = _guardian_incident_evidence_from_state(state)
         guardian_failure_tags = [str(item) for item in guardian_incident_evidence.get("failure_tags", []) if item]
         failure_tags = sorted(dict.fromkeys([*failure_tags, *guardian_failure_tags]))
+        objective_evaluation = (
+            dict(state.latest_analysis.get("objective_evaluation"))
+            if isinstance(state.latest_analysis.get("objective_evaluation"), dict)
+            else dict(knowledge_payload.get("objective_evaluation"))
+            if isinstance(knowledge_payload.get("objective_evaluation"), dict)
+            else {}
+        )
 
         memory_record = MemoryRecord(
             run_id=state.run_id,
@@ -92,6 +99,7 @@ class KnowledgeAgent(BaseAgent):
             artifact_refs=artifact_refs,
             metrics=metrics,
             failure_tags=failure_tags,
+            objective_evaluation=objective_evaluation,
         )
         ctx.experiment_db.add(memory_record)
 
@@ -118,6 +126,7 @@ class KnowledgeAgent(BaseAgent):
             summary=memory_summary,
             parameters=parameters,
             metrics={"objective_score": objective, "uncertainty": uncertainty, **metrics},
+            objective_evaluation=objective_evaluation,
             quality={
                 "ok_for_bo": bool(state.latest_analysis.get("ok_for_bo", True)) and not failure_tags,
                 "ok_for_evolution": bool(artifact_refs or metrics or failure_tags),
