@@ -1,0 +1,17 @@
+digraph lerobot_connections {
+  rankdir=LR; graph [bgcolor="transparent", fontname="DejaVu Sans", pad="0.25", ranksep="0.55"];
+  node [fontname="DejaVu Sans", fontsize=9, margin="0.10,0.07", shape=box, style="rounded,filled", fillcolor="#e8f1fb", color="#285f8f"];
+  edge [fontname="DejaVu Sans", fontsize=8, arrowsize=0.7, color="#334155"];
+  api [label="/api/lerobot/*\nconfig / devices / process / artifacts"];
+  tools [label="Tool Registry\nlerobot.* + lerobot.bridge"];
+  bridge [label="LeRobotBridge", penwidth=2];
+  gate [label="Profile / ports / policy\noperator / mode gates", shape=diamond, fillcolor="#fff3cd", color="#946200"];
+  subprocess [label="LeRobot subprocesses\nteleop / record / train / rollout", shape=component, fillcolor="#eee8ff", color="#654ea3"];
+  serial [label="Serial + camera devices", shape=component, fillcolor="#eee8ff", color="#654ea3"];
+  isaac [label="Isaac Lab / Sim\nrender / Mimic / RL / mirror", shape=component, fillcolor="#eee8ff", color="#654ea3"];
+  stores [label="datasets / policies / HF\nW&B / files", shape=component, fillcolor="#eee8ff", color="#654ea3"];
+  robot [label="Robot motion", shape=octagon, style="filled,bold", fillcolor="#fde8e8", color="#a32929"];
+  evidence [label="sessions / logs / telemetry\nHDF5 / checkpoints / previews", shape=note, fillcolor="#e7f6ec", color="#29733b"];
+  api -> bridge; tools -> bridge; bridge -> gate; gate -> subprocess [label="allow"]; subprocess -> serial [label="hardware", style=dashed]; serial -> robot; bridge -> isaac [label="optional", style=dashed]; bridge -> stores;
+  subprocess -> evidence [label="status/log", color="#29733b"]; serial -> evidence [label="joints/frames", color="#29733b"]; isaac -> evidence [label="summary/artifacts", color="#29733b"]; stores -> evidence [label="identity", color="#29733b"];
+}

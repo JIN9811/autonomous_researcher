@@ -1,0 +1,17 @@
+digraph windows_execution {
+  rankdir=LR; graph [bgcolor="transparent", fontname="DejaVu Sans", pad="0.25"];
+  node [fontname="DejaVu Sans", fontsize=9, margin="0.10,0.07", shape=box, style="rounded,filled", fillcolor="#e8f1fb", color="#285f8f"];
+  edge [fontname="DejaVu Sans", fontsize=8, arrowsize=0.7, color="#334155"];
+  input [label="Program/version + run/specimen IDs"];
+  candidate [label="Resolve healthy candidate\nURL + token"];
+  validate [label="Program registered?\nactions/hotkeys/limits valid?", shape=diamond, fillcolor="#fff3cd", color="#946200"];
+  preflight [label="Live + app/window/locator\nVision + approval ready?", shape=diamond, fillcolor="#fff3cd", color="#946200"];
+  execute [label="Authenticated HTTP /execute"];
+  desktop [label="DESKTOP EFFECT\nfocus / click / write / hotkey", shape=octagon, style="filled,bold", fillcolor="#fde8e8", color="#a32929"];
+  instrument [label="INSTRUMENT EFFECT\nstart / stop / save", shape=octagon, style="filled,bold", fillcolor="#fde8e8", color="#a32929"];
+  observe [label="step trace + screenshot + file\nrequest log + proof", shape=note, fillcolor="#e7f6ec", color="#29733b"];
+  blocked [label="BLOCKED\nknown no execute", style="filled,bold", fillcolor="#fde8e8", color="#a32929"];
+  unknown [label="EFFECT UNKNOWN\ndesktop/instrument audit", style="filled,bold", fillcolor="#fde8e8", color="#a32929"];
+  input -> candidate -> validate; validate -> preflight [label="valid"]; validate -> blocked [label="no", color="#a32929"]; preflight -> execute [label="allow"]; preflight -> blocked [label="deny", color="#a32929"];
+  execute -> desktop -> instrument [label="program step", style=dashed]; desktop -> observe [label="evidence", color="#29733b"]; instrument -> observe [label="data/proof", color="#29733b"]; execute -> unknown [label="timeout", color="#a32929"];
+}
