@@ -236,7 +236,7 @@ inspection boundary, and required root/index/runtime navigation.
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit navigation and governance**
+- [x] **Step 6: Commit navigation and governance**
 
 ```bash
 git add README.md README.ko.md README.en.md docs/README.md docs/runtime/langgraph_runtime.md docs/document_manifest.yaml docs/standards/documentation_standard.md
@@ -252,13 +252,13 @@ git commit -m "docs: govern Runtime IDE reference navigation"
 - Consumes: the final Reference, figures, validator contract, navigation, and existing Runtime IDE implementation/tests.
 - Produces: verified documentation commits pushed to `origin/main` with the unrelated `.env.example` change left local.
 
-- [ ] **Step 1: Verify figure rendering determinism**
+- [x] **Step 1: Verify figure rendering determinism**
 
 Render all `runtime_ide_*.dot` files to an explicit temporary directory and use
 `cmp` against the checked-in SVG files. Expected: all three pairs are
 byte-identical.
 
-- [ ] **Step 2: Run documentation validation and tests**
+- [x] **Step 2: Run documentation validation and tests**
 
 ```bash
 .venv/bin/python scripts/validate_documentation.py
@@ -267,7 +267,7 @@ byte-identical.
 
 Expected: PASS.
 
-- [ ] **Step 3: Run focused Runtime IDE implementation tests**
+- [x] **Step 3: Run focused Runtime IDE implementation tests**
 
 ```bash
 .venv/bin/pytest -q tests/unit/test_langgraph_runtime.py -k 'validate or compile or dry_run or activated_graph or approval or artifact'
@@ -277,13 +277,13 @@ Expected: PASS.
 Expected: PASS. Browser execution requires a running server and WebDriver and
 is reported separately if unavailable.
 
-- [ ] **Step 4: Verify all repository Markdown links and archive integrity**
+- [x] **Step 4: Verify all repository Markdown links and archive integrity**
 
 Run the existing read-only repository link and oldversion manifest checks used
 by the previous documentation cleanup. Expected: zero missing tracked local
 links and eleven valid archived PNG entries.
 
-- [ ] **Step 5: Review scope and commit state**
+- [x] **Step 5: Review scope and commit state**
 
 ```bash
 git diff --check HEAD
