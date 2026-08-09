@@ -23,6 +23,7 @@ related_docs:
   - docs/device_bridges/bridge_api_connection_matrix.md
   - docs/oldversion/README.md
   - docs/runtime/current_code_snapshot.md
+  - docs/runtime/runtime_ide.md
 supersedes: []
 ---
 
@@ -67,6 +68,7 @@ Reference, 절차 Guide, 목표 Design, 실행 Plan, 조사·감사 Evidence를 
 | 실제 닫힌 루프, 페이지, 에이전트 | [runtime/closed_loop_and_pages_reference.md](runtime/closed_loop_and_pages_reference.md) |
 | 현재 코드/API 스냅샷 | [runtime/current_code_snapshot.md](runtime/current_code_snapshot.md) |
 | LangGraph 실행 계약 | [runtime/langgraph_runtime.md](runtime/langgraph_runtime.md) |
+| Runtime IDE 편집·검증·활성화·실행·관측·복구 | [runtime/runtime_ide.md](runtime/runtime_ide.md) |
 | Guardian safety/alarm 계약 | [runtime/guardian_graphwide_safety.md](runtime/guardian_graphwide_safety.md) |
 | Experiment API 계약 | [runtime/autonomous_experiment_runtime.md](runtime/autonomous_experiment_runtime.md) |
 | API key / OpenAI fallback | [runtime/api_keys.md](runtime/api_keys.md) |
@@ -84,7 +86,7 @@ Reference, 절차 Guide, 목표 Design, 실행 Plan, 조사·감사 Evidence를 
 |---|---|---|
 | Index | [../README.md](../README.md), 이 문서 | 언어·대상·도메인별 탐색 |
 | Standard | [standards/documentation_standard.md](standards/documentation_standard.md), [standards/paper_documentation_standard.md](standards/paper_documentation_standard.md) | 문서 분류·권한·메타데이터·검증 및 논문 주장·증거·도표·공개 규칙 |
-| Reference | [agents/README.md](agents/README.md), [device_bridges/README.md](device_bridges/README.md), [device_bridges/bridge_api_connection_matrix.md](device_bridges/bridge_api_connection_matrix.md), [runtime/current_code_snapshot.md](runtime/current_code_snapshot.md), [runtime/langgraph_runtime.md](runtime/langgraph_runtime.md), [runtime/closed_loop_and_pages_reference.md](runtime/closed_loop_and_pages_reference.md) | 현재 코드가 실제로 제공하는 역할·계약·동작과 편집 가능한 Graphviz/SVG 피겨 |
+| Reference | [agents/README.md](agents/README.md), [device_bridges/README.md](device_bridges/README.md), [device_bridges/bridge_api_connection_matrix.md](device_bridges/bridge_api_connection_matrix.md), [runtime/current_code_snapshot.md](runtime/current_code_snapshot.md), [runtime/runtime_ide.md](runtime/runtime_ide.md), [runtime/langgraph_runtime.md](runtime/langgraph_runtime.md), [runtime/closed_loop_and_pages_reference.md](runtime/closed_loop_and_pages_reference.md) | 현재 코드가 실제로 제공하는 역할·계약·동작과 편집 가능한 Graphviz/SVG 피겨 |
 | Guide | [knowledge/knowledge_graph_operations.ko.md](knowledge/knowledge_graph_operations.ko.md), `tutorials/` | 사용자·운영자 절차와 성공/복구 기준 |
 | Design | [superpowers/specs/2026-08-08-documentation-governance-design.md](superpowers/specs/2026-08-08-documentation-governance-design.md) | 승인 또는 제안된 목표 결정; 현재 구현 사실이 아님 |
 | Plan | `superpowers/plans/` | Design을 실현하는 작업 순서 |
@@ -193,7 +195,7 @@ UTM ROS Vision Runtime은 현재 Windows/PyAutoGUI UTM 제어 증거를 대체�
 |---|---|---|---|
 | Main GUI | `/` | `web/templates/index.html`, `web/static/app.js` | [gui/gui.md](gui/gui.md) |
 | Live GUI | `/live`, `/planning` | `web/templates/planning.html`, `web/static/planning.js` | [gui/gui.md](gui/gui.md), [runtime/closed_loop_and_pages_reference.md](runtime/closed_loop_and_pages_reference.md) |
-| Runtime IDE | `/ide` | `web/templates/runtime_ide.html`, `web/static/runtime_ide.js` | [runtime/langgraph_runtime.md](runtime/langgraph_runtime.md) |
+| Runtime IDE | `/ide` | `web/templates/runtime_ide.html`, `web/static/runtime_ide.js` | [runtime/runtime_ide.md](runtime/runtime_ide.md), [runtime/langgraph_runtime.md](runtime/langgraph_runtime.md) |
 | Module Management | `/module-management` | `web/templates/module_management.html`, `web/static/module_management.js` | [runtime/langgraph_runtime.md](runtime/langgraph_runtime.md), [runtime/agent_program_baseline.md](runtime/agent_program_baseline.md) |
 | Knowledge Workspace | `/knowledge` | `web/templates/knowledge.html`, `web/static/knowledge.js`, `web/static/knowledge.css` | [knowledge/knowledge_graph_operations.ko.md](knowledge/knowledge_graph_operations.ko.md), [runtime/current_code_snapshot.md](runtime/current_code_snapshot.md) |
 | 3DP Workspace | `/printer` | `web/templates/printer.html`, `web/static/printer.js`, `device_bridges/bambu_bridge.py`, `device_bridges/bambu_autoejection.py` | [gui/gui.md](gui/gui.md), [runtime/closed_loop_and_pages_reference.md](runtime/closed_loop_and_pages_reference.md), [hardware/bambulab_x2d_device_bridge_runtime_guideline.md](hardware/bambulab_x2d_device_bridge_runtime_guideline.md), [../개선안/13_bambulab_x2d_spc_device_bridge_research.md](../개선안/13_bambulab_x2d_spc_device_bridge_research.md), [../개선안/14_bambulab_gcode_autoejection_runtime_plan.md](../개선안/14_bambulab_gcode_autoejection_runtime_plan.md), [tutorials/device_workspace_3dp_usage.ko.md](tutorials/device_workspace_3dp_usage.ko.md), [hardware/printer_agent_prusabridge_phase1_runtime_guideline.txt](hardware/printer_agent_prusabridge_phase1_runtime_guideline.txt) |
@@ -267,7 +269,7 @@ API·프로토콜·효과·복구를 비교할 때는
 
 ## 6. 설명용 문서 폴더
 
-- `docs/runtime/`: runtime, graph, loop, logging, test mode, self-evolution 설명
+- `docs/runtime/`: Runtime IDE, graph, loop, logging, test mode, self-evolution 설명
 - `docs/gui/`: 현재 GUI 설명; `docs/gui/history/`는 구현 계획 이력
 - `docs/agents/`: agent별 역할과 runtime guideline
 - `docs/device_bridges/`: bridge/provider별 현재 역할, API, 프로토콜, 효과, 증거, 복구 Reference와 피겨

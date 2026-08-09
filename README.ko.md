@@ -35,7 +35,8 @@ Autonomous Researcher Framework(ATR)는 연구 목표, 실험 설계, 시편 제
 가능한 폐루프로 연결하는 안전 게이트·증거 중심 멀티에이전트 시스템입니다.
 
 [English paper landing page](README.md) · [상세 영문 가이드](README.en.md) ·
-[논문 문서 패키지](docs/paper/README.md) · [전체 문서 인덱스](docs/README.md)
+[논문 문서 패키지](docs/paper/README.md) · [전체 문서 인덱스](docs/README.md) ·
+[Runtime IDE Reference](docs/runtime/runtime_ide.md)
 
 ## 그래피컬 애브스트랙트
 

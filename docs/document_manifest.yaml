@@ -49,6 +49,7 @@ documents:
   - docs/paper/evidence/documentation_validation.md
   - docs/paper/assets/tables/README.md
   - docs/runtime/current_code_snapshot.md
+  - docs/runtime/runtime_ide.md
   - docs/runtime/langgraph_runtime.md
   - docs/runtime/closed_loop_and_pages_reference.md
   - docs/knowledge/knowledge_graph_operations.ko.md

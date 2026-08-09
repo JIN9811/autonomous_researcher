@@ -105,7 +105,7 @@ PowerShell process with `install\windows_pyautogui_bridge_server.py`.
 |---|---|---|---|
 | Main GUI | `http://localhost:7860/` | `web/templates/index.html`, `web/static/app.js` | Runtime status, run control, model state, device workspace entry |
 | Live GUI | `http://localhost:7860/live` | `web/templates/planning.html`, `web/static/planning.js` | Chat-based orchestration, agent progress, artifacts, backend trace |
-| Runtime IDE | `http://localhost:7860/ide` | `web/templates/runtime_ide.html`, `web/static/runtime_ide.js` | LangGraph graph/node/edge editing, validation, dry-run, execution |
+| Runtime IDE | `http://localhost:7860/ide` | `web/templates/runtime_ide.html`, `web/static/runtime_ide.js` | [Reference](docs/runtime/runtime_ide.md): graph/module draft editing, validation, compile evidence, dry-run gates, version activation, saved execution, approvals, timeline, and artifact lineage |
 | Module Management | `http://localhost:7860/module-management` | `web/templates/module_management.html`, `web/static/module_management.js` | Module loading, validation, versioning, draft module creation, `ui.yaml` descriptor management, generated adapter management |
 | Knowledge Workspace | `http://localhost:7860/knowledge` | `web/templates/knowledge.html`, `web/static/knowledge.js`, `web/static/knowledge.css` | Graph Explorer, Memory, Ontology, Sync, Project Graph, and activity state |
 | 3DP Workspace | `http://localhost:7860/printer` | `web/templates/printer.html`, `web/static/printer.js` | Bambu Lab X2D default bridge, explicit Prusa selection, live video/status, slicing/start gates, auto-ejection, test-print settings |

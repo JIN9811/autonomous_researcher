@@ -444,6 +444,65 @@ update its Reference and figures, the matrix when a shared boundary changes,
 root/index navigation when inventory changes, and validator/tests when the
 normative contract changes.
 
+## Runtime IDE Reference Figures
+
+`docs/runtime/runtime_ide.md` is the canonical operator-facing Reference for
+the Runtime IDE. It MUST describe the current UI and backend contract without
+replacing the lower-level execution detail in `langgraph_runtime.md`. Its
+ordered section inventory, source tokens, navigation, and figure inventory are
+enforced by `scripts/validate_documentation.py`.
+
+The Reference MUST contain exactly these three editable/rendered figure pairs
+under `docs/runtime/assets/figures/`:
+
+1. `runtime_ide_01_system_boundaries.dot` and `.svg` — system position,
+   ownership, and authority boundaries;
+2. `runtime_ide_02_config_activation_flow.dot` and `.svg` — draft validation,
+   compile evidence, dry-run, version save, and activation;
+3. `runtime_ide_03_observability_evidence_flow.dot` and `.svg` — runtime
+   events, timeline, approvals, artifacts, and operator inspection.
+
+The owning Reference MUST embed every SVG and use the stable caption markers
+`**Figure Runtime IDE-1.**`, `**Figure Runtime IDE-2.**`, and
+`**Figure Runtime IDE-3.**`. Each caption MUST state the message, scope, and
+`inspection` evidence boundary. Figures MUST use solid edges for current
+required paths, dashed edges only for labeled optional, contextual, or
+inspection paths, and text/shape/edge-style semantics that remain legible
+without color. A legend or directly readable edge labels MUST explain those
+semantics.
+
+Runtime IDE figures are implementation-inspection projections. They MUST NOT:
+
+- portray non-executable overlay edges as compiled execution order;
+- imply that an edited or validated draft is active before version save and
+  activation complete;
+- portray Module Management `Load` state as graph attachment or runtime
+  activation;
+- imply that saving a bridge action descriptor invokes an endpoint or
+  hardware;
+- treat a timeline event, UI badge, or artifact link as proof that a physical
+  action succeeded safely.
+
+Executable code, checked-in graph/module configuration, imported API routes,
+registered handlers, bridge implementations, device gates, and persisted run
+evidence remain authoritative. The root README, both language READMEs, the
+documentation index, and `langgraph_runtime.md` MUST provide direct navigation
+to the Runtime IDE Reference.
+
+Render changed Runtime IDE sources from repository root:
+
+```bash
+for source in docs/runtime/assets/figures/runtime_ide_*.dot; do
+  dot -Tsvg "$source" -o "${source%.dot}.svg"
+done
+```
+
+Before completion, render all three sources into an explicit temporary
+directory and compare them byte-for-byte with the checked-in SVG files. A
+missing pair, undeclared `runtime_ide_*.dot`/`.svg` asset, missing embedding,
+missing caption, stale rendering, or broken required navigation link is a
+documentation defect.
+
 ## Required Checks
 
 Every change to a governed document MUST run:

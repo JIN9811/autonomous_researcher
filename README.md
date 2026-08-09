@@ -36,7 +36,8 @@ specimen preparation, perception, manipulation, equipment operation, analysis,
 durable knowledge, and Bayesian optimization in a resumable closed loop.
 
 [한국어](README.ko.md) · [Detailed English guide](README.en.md) ·
-[Paper package](docs/paper/README.md) · [Documentation index](docs/README.md)
+[Paper package](docs/paper/README.md) · [Documentation index](docs/README.md) ·
+[Runtime IDE Reference](docs/runtime/runtime_ide.md)
 
 ## Graphical Abstract
 
@@ -197,6 +198,19 @@ boundaries as well as graph entries.
 | [UTM Vision](docs/device_bridges/utm_vision_bridge.md) | Manages ROS/camera runtime, streams, calibration, pose, and temporal state evidence | Vision/Equipment · camera and UTM tools | ROS 2 · subprocess · RealSense/USB · MJPEG | process/camera side effects; no UTM mechanics authority | [Reference](docs/device_bridges/utm_vision_bridge.md) | [Flow](docs/device_bridges/assets/figures/utm_vision_01_system_handoffs.svg) · [Execution](docs/device_bridges/assets/figures/utm_vision_02_execution_effect_boundary.svg) · [Connections](docs/device_bridges/assets/figures/utm_vision_03_api_connection_architecture.svg) |
 | [CAE Computation](docs/device_bridges/cae_computation_bridges.md) | Provides deterministic CAE, guarded CalculiX jobs, and explicit-availability PINN contracts | Analysis · `cae.*`/`calculix.*`/`pinn.*` | filesystem · Gmsh/CalculiX subprocess · model registry | local compute/resource effects; no physical device action | [Reference](docs/device_bridges/cae_computation_bridges.md) | [Flow](docs/device_bridges/assets/figures/cae_computation_01_system_handoffs.svg) · [Execution](docs/device_bridges/assets/figures/cae_computation_02_execution_effect_boundary.svg) · [Connections](docs/device_bridges/assets/figures/cae_computation_03_api_connection_architecture.svg) |
 | [Base and Simulators](docs/device_bridges/base_simulator_bridges.md) | Supplies deterministic schema/routing substitutes and labels their evidence limits | test-mode agents · mock tools | in-process/local fixtures only | no external device effect | [Reference](docs/device_bridges/base_simulator_bridges.md) | [Flow](docs/device_bridges/assets/figures/base_simulator_01_system_handoffs.svg) · [Execution](docs/device_bridges/assets/figures/base_simulator_02_execution_effect_boundary.svg) · [Connections](docs/device_bridges/assets/figures/base_simulator_03_api_connection_architecture.svg) |
+
+## Runtime IDE Reference
+
+The Runtime IDE is the operator workbench for graph drafting, validation,
+compilation evidence, dry-run gates, version activation, saved-run control,
+approval resolution, timeline inspection, and artifact lineage. Its UI is an
+authoring and control surface: active configuration, backend gates, registered
+handlers, bridge implementations, and device-specific safeguards retain
+authority over execution.
+
+| Surface | Route | Actual role | Highest effect | Details | Figures |
+|---|---|---|---|---|---|
+| [Runtime IDE](docs/runtime/runtime_ide.md) | `/ide` | Draft, validate, inspect compiled structure, dry-run, version/activate, run, approve, stop, and inspect evidence | Active configuration and run-control effects; physical effects remain downstream of runtime and device gates | [Reference](docs/runtime/runtime_ide.md) | [Boundaries](docs/runtime/assets/figures/runtime_ide_01_system_boundaries.svg) · [Activation](docs/runtime/assets/figures/runtime_ide_02_config_activation_flow.svg) · [Evidence](docs/runtime/assets/figures/runtime_ide_03_observability_evidence_flow.svg) |
 
 ## Safety
 

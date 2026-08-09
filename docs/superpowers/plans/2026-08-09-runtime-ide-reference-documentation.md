@@ -202,32 +202,32 @@ git commit -m "docs: add illustrated Runtime IDE reference"
 - Consumes: the governed Reference and figure inventory from Tasks 1-2.
 - Produces: root/language/documentation/runtime entry points and a normative Runtime IDE figure contract.
 
-- [ ] **Step 1: Add root and language README links**
+- [x] **Step 1: Add root and language README links**
 
 Link the existing Runtime IDE page rows to
 `docs/runtime/runtime_ide.md`. Keep route, implementation files, and concise
 capability summary; do not copy the detailed API table into root READMEs.
 
-- [ ] **Step 2: Add documentation-index navigation**
+- [x] **Step 2: Add documentation-index navigation**
 
 Add the Runtime IDE Reference to audience paths, the Reference row, the `/ide`
 page map, and runtime folder navigation. Link figures only from the owning
 Reference unless a concise figure entry materially improves discovery.
 
-- [ ] **Step 3: Link the engine companion**
+- [x] **Step 3: Link the engine companion**
 
 Add `docs/runtime/runtime_ide.md` to `langgraph_runtime.md` `related_docs` and
 the final Related Documents section with text identifying it as the operator/UI
 companion.
 
-- [ ] **Step 4: Govern the Reference and figure contract**
+- [x] **Step 4: Govern the Reference and figure contract**
 
 Add `docs/runtime/runtime_ide.md` to `docs/document_manifest.yaml`. Add a
 `Runtime IDE Reference Figures` section to the Documentation Standard naming
 the document, three stems, DOT/SVG/caption requirements, edge semantics,
 inspection boundary, and required root/index/runtime navigation.
 
-- [ ] **Step 5: Run governance and navigation validation**
+- [x] **Step 5: Run governance and navigation validation**
 
 ```bash
 .venv/bin/python scripts/validate_documentation.py

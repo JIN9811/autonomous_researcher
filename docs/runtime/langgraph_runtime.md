@@ -23,6 +23,7 @@ verified_against: 09bbe32
 related_docs:
   - docs/runtime/current_code_snapshot.md
   - docs/runtime/closed_loop_and_pages_reference.md
+  - docs/runtime/runtime_ide.md
   - docs/standards/documentation_standard.md
 supersedes: []
 ---
@@ -702,6 +703,8 @@ stage-dispatch mappings; reproduction commands are maintained in
 
 ## Related Documents
 
+- [Runtime IDE Reference](runtime_ide.md) — operator-facing editing, activation,
+  run-control, observability, approval, and recovery contract
 - [Current Code Snapshot](current_code_snapshot.md)
 - [Closed Loop and Pages Reference](closed_loop_and_pages_reference.md)
 - [Documentation Standard](../standards/documentation_standard.md)
