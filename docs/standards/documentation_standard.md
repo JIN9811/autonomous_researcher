@@ -14,6 +14,7 @@ related_docs:
   - docs/templates/document_types.md
   - docs/standards/paper_documentation_standard.md
   - docs/superpowers/specs/2026-08-08-documentation-governance-design.md
+  - docs/superpowers/specs/2026-08-09-device-bridge-reference-documentation-design.md
 supersedes: []
 ---
 
@@ -302,6 +303,112 @@ Before completion, render every source into an explicit temporary directory
 and compare it byte-for-byte with the checked-in SVG. A missing pair, missing
 embedding, missing caption, or stale rendering is a documentation defect.
 
+## Device Bridge Reference Figures
+
+The eight canonical capability-oriented References under
+`docs/device_bridges/` MUST follow one common content and figure contract. The
+canonical set is:
+
+- `printer_fleet_bridge.md`;
+- `bambu_x2d_bridge.md`;
+- `prusa_mk4s_bridge.md`;
+- `lerobot_bridge.md`;
+- `windows_pyautogui_bridge.md`;
+- `utm_vision_bridge.md`;
+- `cae_computation_bridges.md`;
+- `base_simulator_bridges.md`.
+
+The boundary is operator-visible capability rather than one Python class. The
+index MUST distinguish `graph_projected`, `tool_registered`, `api_exposed`,
+`provider`, `runtime_sidecar`, `artifact_transformer`, and `test_only` so a
+reader does not mistake the graph projection for the complete executable
+inventory.
+
+Each Reference MUST contain these H2 sections in order:
+
+1. `Summary`;
+2. `Scope`;
+3. `Source of Truth`;
+4. `Actual Role`;
+5. `System Position and Agent Handoffs`;
+6. `Inputs, Commands, and Outputs`;
+7. `Internal Execution`;
+8. `API Surface`;
+9. `Tools and Registry Integration`;
+10. `Connections and Protocols`;
+11. `Configuration and Secrets`;
+12. `State, Events, Artifacts, and Evidence`;
+13. `Runtime Modes and Fallbacks`;
+14. `Safety, Approval, and Effect Boundary`;
+15. `Errors, Timeouts, and Recovery`;
+16. `Operator and GUI Surfaces`;
+17. `Current Verification`;
+18. `Limitations and Known Gaps`;
+19. `Related Documents`.
+
+A section with no owned API, live protocol, secret, or physical effect MUST
+state `none` and explain the actual access/effect boundary rather than being
+omitted.
+
+Every bridge Reference MUST contain three figures:
+
+1. system position and agent handoffs;
+2. internal execution and effect boundary;
+3. API and connection architecture.
+
+The stable figure stems are defined by the approved
+[Device Bridge Reference Documentation Design](../superpowers/specs/2026-08-09-device-bridge-reference-documentation-design.md)
+and enforced by `scripts/validate_documentation.py`. This produces exactly 24
+`.dot` sources and 24 same-stem `.svg` renderings under
+`docs/device_bridges/assets/figures/`; undeclared figure assets are defects.
+
+All bridge figures MUST:
+
+- use a stable caption marker such as `**Figure LeRobot-2.**`;
+- state the figure message, scope, and `inspection` evidence boundary;
+- distinguish agent/API/tool, manager/provider, protocol/process, external
+  target, artifact/evidence, gate, and physical/desktop effect;
+- show required paths as solid and condition-label optional, compatibility,
+  provider-choice, virtual, or fallback paths as dashed;
+- distinguish command/control flow from status and evidence return;
+- show validation, capability, allowlist, authentication, approval, preflight,
+  freshness, proof, or runtime gates that actually exist;
+- identify the first possible network, subprocess, desktop, serial, camera, or
+  physical effect;
+- show `known_no_effect` versus `effect_unknown` recovery where invocation can
+  time out after an external effect;
+- remain understandable without color and include textual node/edge labels;
+- avoid implying that a UI, model, graph descriptor, or bridge registry entry
+  grants authority outside registered runtime and policy gates.
+
+`docs/device_bridges/README.md` MUST link all eight References and all 24
+renderings. The root `README.md` MUST contain exactly eight canonical rows and
+direct links to each Reference and its three figures whenever all References
+are governed. `bridge_api_connection_matrix.md` owns cross-boundary comparison;
+individual References own lifecycle and recovery detail.
+
+Executable code, checked-in configuration, Tool Registry wiring, imported API
+routes, and declared evidence remain authoritative. A bridge figure is an
+explanatory projection and MUST NOT promote inspection or test behavior into
+live reliability, hardware compatibility, safety effectiveness, or scientific
+evidence. A missing graph entry, code-only provider, compatibility stub, or
+test-only simulator MUST be labeled as such rather than normalized away.
+
+Render changed bridge sources from repository root:
+
+```bash
+find docs/device_bridges/assets/figures -name '*.dot' -print0 \
+  | while IFS= read -r -d '' source; do
+      dot -Tsvg "$source" -o "${source%.dot}.svg"
+    done
+```
+
+Before completion, render all 24 sources into a temporary directory and compare
+them byte-for-byte with the checked-in SVGs. Changes to a bridge contract MUST
+update its Reference and figures, the matrix when a shared boundary changes,
+root/index navigation when inventory changes, and validator/tests when the
+normative contract changes.
+
 ## Required Checks
 
 Every change to a governed document MUST run:
@@ -377,12 +484,14 @@ Compliant migration behavior:
 
 ## Verification
 
-This Standard was checked on 2026-08-08 against the approved governance Design,
-manifest schema, validator implementation, and validator unit tests in the
-working tree after commit `09bbe32`.
+This Standard was checked on 2026-08-09 against the approved governance and
+device-bridge documentation Designs, manifest schema, validator implementation,
+and validator unit tests. Runtime behavior described by the bridge References
+uses implementation baseline `188a1d6`.
 
 ## Related Documents
 
 - [Document Type Templates](../templates/document_types.md)
 - [Documentation Governance Design](../superpowers/specs/2026-08-08-documentation-governance-design.md)
+- [Device Bridge Reference Documentation Design](../superpowers/specs/2026-08-09-device-bridge-reference-documentation-design.md)
 - [Documentation Index](../README.md)

@@ -19,6 +19,8 @@ related_docs:
   - docs/templates/document_types.md
   - docs/agents/README.md
   - docs/agents/agent_api_connection_matrix.md
+  - docs/device_bridges/README.md
+  - docs/device_bridges/bridge_api_connection_matrix.md
   - docs/runtime/current_code_snapshot.md
 supersedes: []
 ---
@@ -58,6 +60,8 @@ Reference, 절차 Guide, 목표 Design, 실행 Plan, 조사·감사 Evidence를 
 | 초보자/상급자 통합 매뉴얼 | [tutorials/user_manual.ko.md](tutorials/user_manual.ko.md), [tutorials/user_manual.en.md](tutorials/user_manual.en.md) |
 | 에이전트별 실제 역할·API·연결·안전 계약과 피겨 | [agents/README.md](agents/README.md) |
 | 10개 에이전트 교차 비교 | [agents/agent_api_connection_matrix.md](agents/agent_api_connection_matrix.md) |
+| 디바이스 브릿지별 실제 역할·API·프로토콜·효과·복구와 피겨 | [device_bridges/README.md](device_bridges/README.md) |
+| 8개 디바이스 브릿지 교차 비교 | [device_bridges/bridge_api_connection_matrix.md](device_bridges/bridge_api_connection_matrix.md) |
 | 실제 닫힌 루프, 페이지, 에이전트 | [runtime/closed_loop_and_pages_reference.md](runtime/closed_loop_and_pages_reference.md) |
 | 현재 코드/API 스냅샷 | [runtime/current_code_snapshot.md](runtime/current_code_snapshot.md) |
 | LangGraph 실행 계약 | [runtime/langgraph_runtime.md](runtime/langgraph_runtime.md) |
@@ -77,7 +81,7 @@ Reference, 절차 Guide, 목표 Design, 실행 Plan, 조사·감사 Evidence를 
 |---|---|---|
 | Index | [../README.md](../README.md), 이 문서 | 언어·대상·도메인별 탐색 |
 | Standard | [standards/documentation_standard.md](standards/documentation_standard.md), [standards/paper_documentation_standard.md](standards/paper_documentation_standard.md) | 문서 분류·권한·메타데이터·검증 및 논문 주장·증거·도표·공개 규칙 |
-| Reference | [agents/README.md](agents/README.md), [agents/agent_api_connection_matrix.md](agents/agent_api_connection_matrix.md), [runtime/current_code_snapshot.md](runtime/current_code_snapshot.md), [runtime/langgraph_runtime.md](runtime/langgraph_runtime.md), [runtime/closed_loop_and_pages_reference.md](runtime/closed_loop_and_pages_reference.md) | 현재 코드가 실제로 제공하는 역할·계약·동작과 편집 가능한 Graphviz/SVG 피겨 |
+| Reference | [agents/README.md](agents/README.md), [device_bridges/README.md](device_bridges/README.md), [device_bridges/bridge_api_connection_matrix.md](device_bridges/bridge_api_connection_matrix.md), [runtime/current_code_snapshot.md](runtime/current_code_snapshot.md), [runtime/langgraph_runtime.md](runtime/langgraph_runtime.md), [runtime/closed_loop_and_pages_reference.md](runtime/closed_loop_and_pages_reference.md) | 현재 코드가 실제로 제공하는 역할·계약·동작과 편집 가능한 Graphviz/SVG 피겨 |
 | Guide | [knowledge/knowledge_graph_operations.ko.md](knowledge/knowledge_graph_operations.ko.md), `tutorials/` | 사용자·운영자 절차와 성공/복구 기준 |
 | Design | [superpowers/specs/2026-08-08-documentation-governance-design.md](superpowers/specs/2026-08-08-documentation-governance-design.md) | 승인 또는 제안된 목표 결정; 현재 구현 사실이 아님 |
 | Plan | `superpowers/plans/` | Design을 실현하는 작업 순서 |
@@ -216,6 +220,25 @@ UTM ROS Vision Runtime은 현재 Windows/PyAutoGUI UTM 제어 증거를 대체�
 | BO | `graphs/modules/bo` | [Bayesian Optimization](agents/bo_agent.md) | [기존 BO guideline](agents/bo_agent_runtime_guideline.txt) |
 | Guardian | `graphs/modules/guardian` | [Guardian](agents/guardian_agent.md) | [Guardian graph-wide safety](runtime/guardian_graphwide_safety.md), [Agent program baseline](runtime/agent_program_baseline.md) |
 
+## 4.1 디바이스 브릿지별 문서 맵
+
+기준 진입점은 [Device Bridge Reference Index](device_bridges/README.md)이며,
+API·프로토콜·효과·복구를 비교할 때는
+[Bridge API and Connection Matrix](device_bridges/bridge_api_connection_matrix.md)를
+사용합니다. `Reference`가 현재 인터페이스 기준이고 기존 `hardware` 문서는
+설치·운영·검증 절차를 보충합니다.
+
+| Boundary | Reference | 주요 구현/대상 | 운용 상세 |
+|---|---|---|---|
+| Printer Fleet | [Printer Fleet](device_bridges/printer_fleet_bridge.md) | provider selection and shared printer routing | [3DP usage](tutorials/device_workspace_3dp_usage.ko.md) |
+| Bambu Lab X2D | [Bambu X2D](device_bridges/bambu_x2d_bridge.md) | Bambu Studio, MQTT, FTPS, video, printer | [Bambu runtime](hardware/bambulab_x2d_device_bridge_runtime_guideline.md) |
+| Prusa MK4S | [Prusa MK4S](device_bridges/prusa_mk4s_bridge.md) | PrusaSlicer, PrusaLink, printer | [Prusa runtime](hardware/printer_agent_prusabridge_phase1_runtime_guideline.txt) |
+| LeRobot | [LeRobot](device_bridges/lerobot_bridge.md) | serial/camera/process/Isaac robot stack | [LeRobot runtime](hardware/lerobot_robotis_manipulation_runtime_guideline.md) |
+| Windows PyAutoGUI | [Windows PyAutoGUI](device_bridges/windows_pyautogui_bridge.md) | token HTTP server, desktop app, instrument | [Equipment runtime](hardware/windows_pyautogui_equipment_agent_guideline.md) |
+| UTM Vision | [UTM Vision](device_bridges/utm_vision_bridge.md) | ROS 2, camera, pose, UTM state | [UTM ROS Vision](hardware/utm_ros_vision_runtime_bridge.md) |
+| CAE Computation | [CAE/CalculiX/PINN](device_bridges/cae_computation_bridges.md) | solver subprocess and model registry | [Analysis Reference](agents/analysis_agent.md) |
+| Base and Simulators | [Base/Simulators](device_bridges/base_simulator_bridges.md) | in-process deterministic test substitutes | [Agent matrix](agents/agent_api_connection_matrix.md) |
+
 ## 5. 폴더별 책임
 
 | 폴더 | 책임 |
@@ -243,6 +266,7 @@ UTM ROS Vision Runtime은 현재 Windows/PyAutoGUI UTM 제어 증거를 대체�
 - `docs/runtime/`: runtime, graph, loop, logging, test mode, self-evolution 설명
 - `docs/gui/`: GUI 사용/개선 계획
 - `docs/agents/`: agent별 역할과 runtime guideline
+- `docs/device_bridges/`: bridge/provider별 현재 역할, API, 프로토콜, 효과, 증거, 복구 Reference와 피겨
 - `docs/hardware/`: 장비 브릿지와 실제 장비 연동
 - `docs/tutorials/`: 사용자 종합 매뉴얼과 첫 실행 튜토리얼
 - `docs/repository/`: GitHub/버전관리 규칙

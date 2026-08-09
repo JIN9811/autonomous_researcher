@@ -598,6 +598,26 @@ def _validate_device_bridge_navigation(
                 for path in DEVICE_BRIDGE_REFERENCE_PATHS.values()
                 if path not in root_targets
             )
+            section_match = re.search(
+                r"^## Device Bridge References\s*$\n(.*?)(?=^##\s|\Z)",
+                root_body,
+                re.MULTILINE | re.DOTALL,
+            )
+            section = section_match.group(1) if section_match else ""
+            table_rows = [
+                line
+                for line in section.splitlines()
+                if line.lstrip().startswith("|")
+                and any(
+                    f"]({path})" in line
+                    for path in DEVICE_BRIDGE_REFERENCE_PATHS.values()
+                )
+            ]
+            if len(table_rows) != len(DEVICE_BRIDGE_REFERENCE_PATHS):
+                errors.append(
+                    f"{manifest_label}: root README device bridge table must contain "
+                    f"exactly {len(DEVICE_BRIDGE_REFERENCE_PATHS)} rows; found {len(table_rows)}"
+                )
 
     index_path = "docs/device_bridges/README.md"
     if index_path not in documents:
@@ -624,6 +644,38 @@ def _validate_device_bridge_navigation(
                 errors.append(
                     f"{manifest_label}: missing device bridge index figure link: {figure_link}"
                 )
+    return errors
+
+
+def _validate_device_bridge_figure_inventory(
+    root: Path, documents: list[str], manifest_label: str
+) -> list[str]:
+    """Reject bridge figure assets outside the stable governed inventory."""
+
+    required_paths = set(DEVICE_BRIDGE_REFERENCE_PATHS.values())
+    if not required_paths.issubset(set(documents)):
+        return []
+    figure_root = root / "docs/device_bridges/assets/figures"
+    if not figure_root.is_dir():
+        return []
+    expected = {
+        stem
+        for stems in DEVICE_BRIDGE_REFERENCE_FIGURES.values()
+        for stem in stems
+    }
+    errors: list[str] = []
+    for source in sorted(figure_root.glob("*.dot")):
+        if source.stem not in expected:
+            errors.append(
+                f"{manifest_label}: undeclared device bridge figure source: "
+                f"{source.relative_to(root)}"
+            )
+    for rendering in sorted(figure_root.glob("*.svg")):
+        if rendering.stem not in expected:
+            errors.append(
+                f"{manifest_label}: undeclared device bridge figure rendering: "
+                f"{rendering.relative_to(root)}"
+            )
     return errors
 
 
@@ -668,6 +720,7 @@ def validate_manifest(root: Path, manifest_path: Path) -> list[str]:
 
     errors.extend(_validate_root_agent_navigation(root, documents, label))
     errors.extend(_validate_device_bridge_navigation(root, documents, label))
+    errors.extend(_validate_device_bridge_figure_inventory(root, documents, label))
     errors.extend(_validate_snapshot(root, manifest.get("snapshot"), label))
     return errors
 

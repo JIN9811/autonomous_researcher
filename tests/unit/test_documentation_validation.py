@@ -552,6 +552,46 @@ def test_manifest_requires_device_bridge_index_reference_and_figure_links(tmp_pa
     assert len([error for error in errors if "missing device bridge index figure link" in error]) == 24
 
 
+def test_manifest_rejects_duplicate_device_bridge_root_table_row(tmp_path: Path) -> None:
+    module = _load_validator()
+    rows = [
+        f"| [{bridge_id}]({path}) | role | entry | protocol | effect | details | figures |"
+        for bridge_id, (path, _title, _stems) in TEST_DEVICE_BRIDGE_REFERENCES.items()
+    ]
+    root_body = VALID_INDEX + "\n## Device Bridge References\n\n" + "\n".join(rows + [rows[0]]) + "\n"
+    _write(tmp_path, "README.md", root_body)
+    documents = ["README.md"]
+    for bridge_id in TEST_DEVICE_BRIDGE_REFERENCES:
+        document = _write_device_bridge_reference(tmp_path, bridge_id)
+        documents.append(document.relative_to(tmp_path).as_posix())
+    manifest = _write_manifest(tmp_path, documents)
+
+    errors = module.validate_manifest(tmp_path, manifest)
+
+    assert any("root README device bridge table must contain exactly 8 rows" in error for error in errors)
+
+
+def test_manifest_rejects_undeclared_device_bridge_figure_assets(tmp_path: Path) -> None:
+    module = _load_validator()
+    links = "\n".join(
+        f"[{bridge_id}]({path})"
+        for bridge_id, (path, _title, _stems) in TEST_DEVICE_BRIDGE_REFERENCES.items()
+    )
+    _write(tmp_path, "README.md", VALID_INDEX + "\n" + links + "\n")
+    documents = ["README.md"]
+    for bridge_id in TEST_DEVICE_BRIDGE_REFERENCES:
+        document = _write_device_bridge_reference(tmp_path, bridge_id)
+        documents.append(document.relative_to(tmp_path).as_posix())
+    _write(tmp_path, "docs/device_bridges/assets/figures/untracked_figure.dot", "digraph G {}\n")
+    _write(tmp_path, "docs/device_bridges/assets/figures/untracked_figure.svg", "<svg/>\n")
+    manifest = _write_manifest(tmp_path, documents)
+
+    errors = module.validate_manifest(tmp_path, manifest)
+
+    assert any("undeclared device bridge figure source" in error for error in errors)
+    assert any("undeclared device bridge figure rendering" in error for error in errors)
+
+
 def test_manifest_rejects_duplicate_documents(tmp_path: Path) -> None:
     module = _load_validator()
     _write(tmp_path, "README.md", VALID_INDEX)

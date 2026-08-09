@@ -22,6 +22,16 @@ documents:
   - docs/agents/knowledge_agent.md
   - docs/agents/bo_agent.md
   - docs/agents/guardian_agent.md
+  - docs/device_bridges/README.md
+  - docs/device_bridges/bridge_api_connection_matrix.md
+  - docs/device_bridges/printer_fleet_bridge.md
+  - docs/device_bridges/bambu_x2d_bridge.md
+  - docs/device_bridges/prusa_mk4s_bridge.md
+  - docs/device_bridges/lerobot_bridge.md
+  - docs/device_bridges/windows_pyautogui_bridge.md
+  - docs/device_bridges/utm_vision_bridge.md
+  - docs/device_bridges/cae_computation_bridges.md
+  - docs/device_bridges/base_simulator_bridges.md
   - docs/paper/README.md
   - docs/paper/01_problem_and_contributions.md
   - docs/paper/02_system_architecture.md
