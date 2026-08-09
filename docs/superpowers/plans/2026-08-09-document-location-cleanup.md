@@ -157,14 +157,14 @@ git diff --stat
 Expected: no whitespace errors; `.env.example` is the only unrelated change and
 is not staged.
 
-- [ ] **Step 4: Commit only documentation cleanup files**
+- [x] **Step 4: Commit only documentation cleanup files**
 
 ```bash
 git add docs
 git commit -m "docs: organize legacy documentation locations"
 ```
 
-- [ ] **Step 5: Verify and push**
+- [x] **Step 5: Verify and push**
 
 Confirm the commit contains no `.env.example` change, then push the current
 branch to its configured upstream.
