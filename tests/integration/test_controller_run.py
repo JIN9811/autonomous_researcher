@@ -106,12 +106,18 @@ async def test_controller_completes_test_run(monkeypatch: pytest.MonkeyPatch) ->
     artifact_paths = {item.relative_to(run_dir).as_posix() for item in run_dir.rglob("*") if item.is_file()}
     runtime_artifacts = snapshot["state"]["run_metadata"].get("runtime_artifacts", [])
     runtime_artifact_paths = {str(item.get("path") or "") for item in runtime_artifacts if isinstance(item, dict)}
-    assert any(path.startswith("runtime/bo/") and path.endswith("_bo_progress.svg") for path in artifact_paths)
+    posterior_artifacts = {
+        path for path in artifact_paths if path.startswith("runtime/bo/") and "_posterior." in path
+    }
+    assert {path.rsplit(".", 1)[-1] for path in posterior_artifacts} == {"png", "svg", "csv"}
     assert any(path.startswith("runtime/analysis/") and path.endswith(".contour.svg") for path in artifact_paths)
     assert any(path.startswith("runtime/analysis/") and path.endswith(".report.json") for path in artifact_paths)
     assert any(path.startswith("vision/") and path.endswith("detection.json") for path in artifact_paths)
     assert any(path.startswith("vision/") and path.endswith("scene_map.svg") for path in artifact_paths)
-    assert any(path.startswith("runtime/bo/") and path.endswith("_bo_progress.svg") for path in runtime_artifact_paths)
+    runtime_posterior_artifacts = {
+        path for path in runtime_artifact_paths if path.startswith("runtime/bo/") and "_posterior." in path
+    }
+    assert {path.rsplit(".", 1)[-1] for path in runtime_posterior_artifacts} == {"png", "svg", "csv"}
     assert any(path.startswith("runtime/analysis/") and path.endswith(".contour.svg") for path in runtime_artifact_paths)
 
     await controller.emit_workspace_result(

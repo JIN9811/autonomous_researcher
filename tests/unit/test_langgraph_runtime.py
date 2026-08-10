@@ -2526,7 +2526,7 @@ def test_runtime_ide_page_and_main_entry_render() -> None:
     assert "scenario_workspace_artifacts" in browser_audit
     assert "workspace-artifacts" in browser_audit
     assert "runtime_ide_browser_audit_workspace_artifacts.png" in browser_audit
-    assert "BO progress artifact.created event missing" in browser_audit
+    assert "BO posterior artifact.created event missing" in browser_audit
     assert "CAE contour artifact.created event missing" in browser_audit
     assert "scenario_saved_test_run" in browser_audit
     assert "runtime_ide_browser_audit_saved_test_run.png" in browser_audit

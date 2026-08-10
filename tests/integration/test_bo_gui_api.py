@@ -220,7 +220,12 @@ def test_bo_run_endpoint_returns_recommendation() -> None:
     artifacts = client.get(f"/api/runs/{run_id}/artifacts").json()["artifacts"]
     artifact_paths = {item["path"] for item in artifacts}
     assert any(path.startswith("workspace/bo/") and path.endswith("_result.json") for path in artifact_paths)
-    assert any(path.startswith("workspace/bo/") and path.endswith("_bo_progress.svg") for path in artifact_paths)
+    posterior_artifacts = {
+        path
+        for path in artifact_paths
+        if path.startswith("workspace/bo/") and "_posterior." in path
+    }
+    assert {path.rsplit(".", 1)[-1] for path in posterior_artifacts} == {"png", "svg", "csv"}
     assert any(
         event.get("type") == "artifact.created"
         and event.get("payload", {}).get("artifact", {}).get("path") in artifact_paths

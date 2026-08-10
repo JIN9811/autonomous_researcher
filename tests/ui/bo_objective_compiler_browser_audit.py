@@ -142,7 +142,7 @@ def audit(base_url: str, out_dir: Path, *, geckodriver: str) -> dict[str, object
 
         budget = driver.find_element(By.ID, "bo-budget-input")
         budget.clear()
-        budget.send_keys("3")
+        budget.send_keys("5")
         driver.find_element(By.ID, "btn-bo-benchmark").click()
         wait.until(lambda item: "Benchmark complete" in item.find_element(By.ID, "bo-status-label").text)
         wait.until(lambda item: len(item.find_elements(By.CSS_SELECTOR, "#bo-posterior-plot svg.bo-viz-svg")) == 1)
@@ -247,6 +247,23 @@ def audit(base_url: str, out_dir: Path, *, geckodriver: str) -> dict[str, object
             raise AssertionError(f"Live BO cards did not restore the latest projection: {live_bo_layout}")
         if live_bo_layout["reportScrollWidth"] > live_bo_layout["reportWidth"] + 2:
             raise AssertionError(f"Live BO report overflow: {live_bo_layout}")
+        repeated_svg_count = driver.execute_async_script(
+            """
+            const done = arguments[arguments.length - 1];
+            fetch('/api/bo/config')
+              .then((response) => response.json())
+              .then((payload) => {
+                for (let index = 0; index < 20; index += 1) {
+                  updateLiveBoVisualizationCards(payload.recent_visualization);
+                }
+                done(document.querySelectorAll('[data-live-bo-posterior] svg.bo-viz-svg').length);
+              })
+              .catch((error) => done(`error:${error}`));
+            """
+        )
+        if repeated_svg_count != 1:
+            raise AssertionError(f"Live BO repeated updates mounted {repeated_svg_count} SVG nodes")
+        live_bo_layout["svgCountAfter20Updates"] = repeated_svg_count
         live_bo_screenshot = out_dir / "live_bo_posterior_1920x1080.png"
         driver.save_screenshot(str(live_bo_screenshot))
         return {

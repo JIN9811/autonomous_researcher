@@ -8,6 +8,8 @@ scope: [agents, bayesian_optimization, next_candidate]
 summary: Current contract for evidence-filtered candidate generation, numeric acquisition, bounded LLM advice, and next-Design recommendation.
 source_of_truth:
   - agents/bo_agent.py
+  - experiments/bo_visualization.py
+  - reporting/bo_visualization_artifacts.py
   - graphs/modules/bo/module.yaml
   - app/main.py
   - objectives/authoring.py
@@ -213,6 +215,50 @@ search-space version, pool, scores, penalties, top-k, recommendation, rationale,
 and handoff. Direct workspace execution emits a BO node-completion/result event;
 graph execution merges through normal stage state.
 
+### Objective and posterior visualization contract
+
+Every completed BO step projects its already-computed candidate pool into one
+validated `bo_visualization.v1` payload. This projection is read-only: it does
+not select a candidate, alter an acquisition value, or call a device. The same
+payload is consumed by `/bo`, the Live GUI BO report, and completion-artifact
+rendering, so displayed values share one backend source.
+
+| Field | Meaning |
+|---|---|
+| `objective` | active equation, direction, unit, constraints, and immutable identity |
+| `posterior.mean` | backend surrogate mean for each candidate in the selected slice |
+| `posterior.lower_95` / `upper_95` | exact `mean +/- 1.96 * std` bounds supplied by the backend |
+| `observations` | measured or explicitly labelled test observations already accepted by BO |
+| `current_best` | best accepted observation under the objective direction |
+| `next_point` | candidate selected by the existing BO execution path |
+| `acquisition` | configured acquisition values for the same candidate coordinates |
+| `parameter_slices` | backend projections for every numeric parameter selector |
+| `candidate_index_view` | auditable candidate-pool order when a parameter slice is ambiguous |
+
+The current backend label is `pool_projection`. It connects available
+candidate values for operator inspection; it is **not** an arbitrary-point
+Gaussian-process posterior and does not interpolate new scientific evidence.
+Browsers must not rescale uncertainty or recompute confidence bounds.
+
+A normal live update occurs only after one BO step completes. The controller
+emits `bo.visualization.updated`, persists the latest projection in run
+metadata, and keeps compact step identities for selector restoration. A stale,
+missing, invalid, or unbound payload is shown explicitly rather than replaced
+with invented values.
+
+On completed BO workspace/agent results, the controller writes a 7.2 x 5.2 inch
+Matplotlib figure and its numeric companion under the run-local BO artifact
+directory:
+
+- `<run>_bo_step_<NNN>_posterior.png`, 150 DPI preview/report figure
+- `<run>_bo_step_<NNN>_posterior.svg`, vector publication artifact
+- `<run>_bo_step_<NNN>_posterior.csv`, exact `x`, mean, standard deviation,
+  confidence bounds, and acquisition values
+
+Artifact-rendering errors are recorded as warnings and cannot change BO
+selection or fail the experiment. The older compact progress SVG is retained
+only for legacy BO results that do not contain `bo_visualization.v1`.
+
 ## Modes and Fallbacks
 
 Test uses bounded synthetic/fixture observations. Replay reuses recorded trials.
@@ -244,6 +290,13 @@ unsaved manual draft until explicit revision loading. Live GUI shows
 surrogate/acquisition, candidate ranking, uncertainty, recommendation, and
 artifacts. Workspace run or manual-draft creation does not prove graph or
 physical execution.
+
+The BO Workspace and Live GUI both place `BO Objective Equation` before a
+single replace-in-place `Live Posterior` figure. The default view is a selected
+numeric-parameter slice. Operators can switch the BO Workspace to candidate
+pool index for an ordering audit, change numeric parameters, or inspect a prior
+completed step without running BO again. Repeated events replace the existing
+SVG; they do not append hidden figures or base64 image copies to browser state.
 
 ## Current Verification
 

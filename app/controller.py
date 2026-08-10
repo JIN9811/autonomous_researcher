@@ -69,6 +69,7 @@ from utils.vision_operator_intervention import (
 )
 from device_bridges.bambu_bridge import PrinterDeviceBridgeManager
 from experiments.bo_visualization import validate_bo_visualization
+from reporting.bo_visualization_artifacts import write_bo_visualization_artifacts
 from utils.config_loader import load_all_configs
 from utils.paths import resolve_path
 from utils.printer_profile import adapt_print_profile_for_provider, load_prusa_print_profile
@@ -1154,6 +1155,53 @@ class MainController:
             return benchmark["strategies"]
         return {}
 
+    @staticmethod
+    def _bo_visualization_from_result(result: dict[str, Any]) -> dict[str, Any]:
+        """Extract the latest shared BO visualization from supported result shapes."""
+        direct = result.get("visualization")
+        if isinstance(direct, dict):
+            return direct
+        data = result.get("data") if isinstance(result.get("data"), dict) else {}
+        bo_result = data.get("bo_result") if isinstance(data.get("bo_result"), dict) else {}
+        if isinstance(bo_result.get("visualization"), dict):
+            return bo_result["visualization"]
+        strategies = MainController._bo_strategies_from_result(result)
+        bo_payload = strategies.get("bo") if isinstance(strategies.get("bo"), dict) else {}
+        trace = bo_payload.get("surrogate_trace") if isinstance(bo_payload.get("surrogate_trace"), list) else []
+        for item in reversed(trace):
+            if isinstance(item, dict) and isinstance(item.get("visualization"), dict):
+                return item["visualization"]
+        return {}
+
+    def _write_bo_visualization_artifacts(self, *, workspace: str, result: dict[str, Any]) -> list[dict[str, Any]]:
+        """Write publication artifacts without allowing rendering to fail BO execution."""
+        visualization = self._bo_visualization_from_result(result)
+        if not visualization:
+            return []
+        try:
+            output_dir = self._workspace_artifact_dir(workspace)
+            records = write_bo_visualization_artifacts(visualization, output_dir)
+            return [
+                {
+                    **record,
+                    "key": f"workspace.bo_posterior.{Path(str(record['path'])).suffix.lstrip('.')}",
+                    "path": self._workspace_artifact_relpath(Path(str(record["path"]))),
+                    "workspace": workspace,
+                }
+                for record in records
+            ]
+        except Exception as exc:
+            return [
+                {
+                    "key": "workspace.bo_posterior.warning",
+                    "path": "",
+                    "name": "",
+                    "source": "bo_visualization.v1",
+                    "workspace": workspace,
+                    "error": f"{exc.__class__.__name__}: {exc}",
+                }
+            ]
+
     def _write_bo_plot_artifact(self, *, workspace: str, result: dict[str, Any]) -> dict[str, Any] | None:
         """Write a compact BO progress/acquisition SVG for Runtime IDE artifact lineage."""
         strategies = self._bo_strategies_from_result(result)
@@ -1265,9 +1313,13 @@ class MainController:
         if result_record:
             records.append(result_record)
         if workspace == "bo":
-            bo_plot = self._write_bo_plot_artifact(workspace=workspace, result=result)
-            if bo_plot:
-                records.append(bo_plot)
+            bo_visualization = self._bo_visualization_from_result(result)
+            if bo_visualization:
+                records.extend(self._write_bo_visualization_artifacts(workspace=workspace, result=result))
+            else:
+                bo_plot = self._write_bo_plot_artifact(workspace=workspace, result=result)
+                if bo_plot:
+                    records.append(bo_plot)
         seen_sources: set[str] = set()
         for key, value in self._iter_workspace_file_candidates(result):
             source_path = str(value)

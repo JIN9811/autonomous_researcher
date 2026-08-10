@@ -14,6 +14,14 @@ Web dashboard panels:
 
 Real-time updates are streamed via SSE endpoint `/api/events/stream`.
 
+BO visualization surfaces:
+- `/bo` shows the active objective equation and one current posterior/acquisition Figure before candidate audit details.
+- The Live GUI BO Agent report uses the same `bo_visualization.v1` values and shared SVG renderer; it does not maintain a second uncertainty formula.
+- A completed BO step emits `bo.visualization.updated`. The current SVG is replaced in place, while compact step metadata supports prior-step selection in `/bo`.
+- The default plot is a numeric parameter slice. `Candidate pool index` is an audit view of the finite candidate set, not a continuous GP posterior.
+- Missing, invalid, or stale data renders an explicit waiting/stale card. The frontend never fabricates posterior values.
+- Completed BO execution registers PNG, SVG, and CSV artifacts under the active run's BO artifact directory. PNG/SVG are publication-style Matplotlib outputs; CSV is the exact numeric source.
+
 Terminal launcher:
 - Install with `bash install/install_cli.sh`.
 - `atr` with no arguments must print available commands and short descriptions.

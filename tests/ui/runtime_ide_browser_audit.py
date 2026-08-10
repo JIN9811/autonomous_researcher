@@ -611,11 +611,12 @@ def scenario_workspace_artifacts(driver: WebDriverAudit, base_url: str, out_dir:
     assert_true(bool(bo_response.get("ok")), f"BO workspace run failed: {bo_response}", failures)
     assert_true(bool(cae_response.get("ok")), f"CAE workspace run failed: {cae_response}", failures)
     assert_true(any(path.startswith("workspace/bo/") and path.endswith("_result.json") for path in artifact_paths), "BO result JSON artifact missing", failures)
-    assert_true(any(path.startswith("workspace/bo/") and path.endswith("_bo_progress.svg") for path in artifact_paths), "BO progress SVG artifact missing", failures)
+    posterior_paths = {path for path in artifact_paths if path.startswith("workspace/bo/") and "_posterior." in path}
+    assert_true({path.rsplit(".", 1)[-1] for path in posterior_paths} == {"png", "svg", "csv"}, "BO posterior artifact set missing", failures)
     assert_true(any(path.startswith("workspace/cae/") and path.endswith("_result.json") for path in artifact_paths), "CAE result JSON artifact missing", failures)
     assert_true(any(path.startswith("workspace/cae/") and path.endswith(".contour.svg") for path in artifact_paths), "CAE contour SVG artifact missing", failures)
     assert_true(any(path.startswith("workspace/cae/") and path.endswith(".report.json") for path in artifact_paths), "CAE report JSON artifact missing", failures)
-    assert_true(any(path in event_artifact_paths for path in artifact_paths if path.startswith("workspace/bo/") and path.endswith("_bo_progress.svg")), "BO progress artifact.created event missing", failures)
+    assert_true(all(path in event_artifact_paths for path in posterior_paths), "BO posterior artifact.created event missing", failures)
     assert_true(any(path in event_artifact_paths for path in artifact_paths if path.startswith("workspace/cae/") and path.endswith(".contour.svg")), "CAE contour artifact.created event missing", failures)
 
     driver.open(f"{base_url.rstrip('/')}/ide")
@@ -631,7 +632,7 @@ return (async () => {
   }));
   const items = [...document.querySelectorAll('#ide-artifact-lineage .runtime-artifact-item')].map((item) => item.innerText || '');
   const boItem = [...document.querySelectorAll('#ide-artifact-lineage .runtime-artifact-item')]
-    .find((item) => item.innerText.includes('_bo_progress.svg'));
+    .find((item) => item.innerText.includes('_posterior.svg'));
   const boPreviewButton = boItem?.querySelector('[data-artifact-preview-index]');
   if (boPreviewButton) boPreviewButton.click();
   await new Promise((resolve) => setTimeout(resolve, 350));
@@ -644,9 +645,9 @@ return (async () => {
     items,
     preview,
     previewImageSrc: previewImage?.getAttribute('src') || '',
-    hasBoGroup: groups.some((group) => String(group.title || '').toLowerCase() === 'bo' && group.text.includes('_bo_progress.svg')),
+    hasBoGroup: groups.some((group) => String(group.title || '').toLowerCase() === 'bo' && group.text.includes('_posterior.svg')),
     hasAnalysisGroup: groups.some((group) => String(group.title || '').toLowerCase() === 'analysis' && group.text.includes('.contour.svg')),
-    boPreviewOpened: Boolean(previewImage && (previewImage.getAttribute('src') || '').includes('_bo_progress.svg')),
+    boPreviewOpened: Boolean(previewImage && (previewImage.getAttribute('src') || '').includes('_posterior.svg')),
   };
 })();
 ''',
