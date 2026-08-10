@@ -209,6 +209,7 @@ let liveKnowledgeActivityRefreshedAt = 0;
 let liveKnowledgeActivityChart = null;
 let liveKnowledgeActivityChartMount = null;
 let liveKnowledgeActivityResizeObserver = null;
+let liveBoVisualization = null;
 let liveKnowledgeRelationSummary = {
   examined: 0,
   proposed: 0,
@@ -4857,7 +4858,15 @@ function latestKnowledgeEvolutionProposal(report) {
 function latestReportBoResult(report) {
   const state = report && report.state ? report.state : {};
   const metadata = state && typeof state.run_metadata === "object" && state.run_metadata ? state.run_metadata : {};
-  if (metadata.bo_agent && typeof metadata.bo_agent === "object") return metadata.bo_agent;
+  const metadataVisualization = metadata.bo_visualization && typeof metadata.bo_visualization === "object"
+    ? metadata.bo_visualization
+    : null;
+  if (metadata.bo_agent && typeof metadata.bo_agent === "object") {
+    return metadataVisualization && !metadata.bo_agent.visualization
+      ? { ...metadata.bo_agent, visualization: metadataVisualization }
+      : metadata.bo_agent;
+  }
+  if (metadataVisualization) return { visualization: metadataVisualization };
   for (let index = (report.messages || []).length - 1; index >= 0; index -= 1) {
     const value = report.messages[index].bo_result;
     if (value) return value;
@@ -15508,6 +15517,20 @@ function renderKnowledgeDashboardCards(report, status, agentLabel, profile) {
 
 function renderBoDashboardCards(report, status, agentLabel, profile) {
   const boResult = latestReportBoResult(report) || {};
+  const visualization = boResult.visualization || liveBoVisualization;
+  const renderer = window.BOVisualization;
+  const hasVisualization = Boolean(renderer && renderer.isValid(visualization));
+  if (hasVisualization) liveBoVisualization = visualization;
+  const equationBody = hasVisualization
+    ? BOVisualization.renderEquationCard(visualization)
+    : '<div class="bo-viz-empty">Waiting for a completed BO step.</div>';
+  const posteriorBody = hasVisualization
+    ? BOVisualization.renderPlot(visualization, { mode: "parameter_slice", parameter: visualization.view?.selected_parameter || "" })
+    : '<div class="bo-viz-empty">Waiting for a completed BO step.</div>';
+  const visualizationCards = `
+    ${renderDashboardCard("BO Objective Equation", `<div data-live-bo-equation>${equationBody}</div>`, { span: 4, tone: "bo", eyebrow: "active objective" })}
+    ${renderDashboardCard("Live Posterior", `<div data-live-bo-posterior>${posteriorBody}</div>`, { span: 8, tone: "bo", eyebrow: "uncertainty + acquisition" })}
+  `;
   const recommendation = boResult.recommendation || boResult.selected || {};
   const reasoning = boResult.reasoning || {};
   const priorSummary = boResult.prior_summary || {};
@@ -15520,6 +15543,7 @@ function renderBoDashboardCards(report, status, agentLabel, profile) {
     const evolution = latestKnowledgeEvolutionProposal(report) || {};
     const packs = Array.isArray(evolution.evidence_packs) ? evolution.evidence_packs : [];
     return `
+      ${visualizationCards}
       ${renderDashboardCard("BO Gate Status", renderBoGateState(report), { span: 8, tone: "bo", eyebrow: "route state" })}
       ${renderDashboardCard("Optimization Input", renderDashboardRows([
         ["objective_score", analysis.objective_score ?? "-"],
@@ -15537,6 +15561,7 @@ function renderBoDashboardCards(report, status, agentLabel, profile) {
     `;
   }
   return `
+    ${visualizationCards}
     ${renderDashboardCard("Candidate Ranking", renderBoRankingBoard(boResult), { span: 8, tone: "bo", eyebrow: "top-k" })}
     ${renderDashboardCard("Recommendation", renderDashboardRows([
       ["candidate_id", recommendation.candidate_id || recommendation.id || "-"],
@@ -18282,6 +18307,21 @@ function shouldRefreshPlanningForRuntimeEvent(eventType, data = {}) {
   return Boolean(payload.stage || payload.agent || payload.node_id || payload.module_id || payload.status);
 }
 
+function updateLiveBoVisualizationCards(visualization) {
+  const renderer = window.BOVisualization;
+  if (!renderer || !renderer.isValid(visualization)) return false;
+  liveBoVisualization = visualization;
+  if (liveSelectedAgent !== "bo" || liveCurrentView !== "report") return true;
+  const equation = liveReportPanel?.querySelector("[data-live-bo-equation]");
+  const posterior = liveReportPanel?.querySelector("[data-live-bo-posterior]");
+  if (equation) equation.innerHTML = renderer.renderEquationCard(visualization);
+  if (posterior) posterior.innerHTML = renderer.renderPlot(visualization, {
+    mode: "parameter_slice",
+    parameter: visualization.view?.selected_parameter || "",
+  });
+  return Boolean(equation || posterior);
+}
+
 function connectPlanningEventStream() {
   if (!window.EventSource) {
     markLiveStreamState("unsupported");
@@ -18298,6 +18338,9 @@ function connectPlanningEventStream() {
       const eventType = String(data.event_type || data.type || "");
       const eventTime = data.ts || data.timestamp || new Date().toISOString();
       markLiveStreamState("live", eventTime);
+      if (eventType === "bo.visualization.updated") {
+        updateLiveBoVisualizationCards(data.payload?.visualization);
+      }
       if (eventType) {
         liveRecentEvents.push(data);
         liveRecentEvents = liveRecentEvents.slice(-160);

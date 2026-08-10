@@ -2994,6 +2994,7 @@ class MainController:
             "knowledge_report",
             "knowledge_context",
             "bo_agent",
+            "bo_visualization",
             "bo_recommended_constraints",
             "next_design_request",
             "guardian",

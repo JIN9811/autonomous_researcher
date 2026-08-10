@@ -18,6 +18,22 @@ from graphs import load_graph_config
 from orchestrator.state import AgentRuntimeStatus, Mode, Stage
 
 
+def test_planning_snapshot_preserves_latest_bo_visualization_projection() -> None:
+    controller = load_runtime()
+    visualization = {
+        "schema": "bo_visualization.v1",
+        "run_id": controller._state.run_id,
+        "step": 3,
+        "posterior": {"x": [0.2], "mean": [0.7], "std": [0.1], "lower_95": [0.504], "upper_95": [0.896]},
+        "acquisition": {"x": [0.2], "value": [0.3]},
+    }
+    controller._state.run_metadata["bo_visualization"] = visualization
+
+    compact = controller.planning_snapshot()["state"]["run_metadata"]
+
+    assert compact["bo_visualization"] == visualization
+
+
 def test_live_gui_test_mode_flags_survive_design_adaptation() -> None:
     controller = load_runtime()
     controller._state.mode = Mode.LIVE

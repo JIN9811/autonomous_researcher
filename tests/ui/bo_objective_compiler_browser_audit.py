@@ -227,6 +227,28 @@ def audit(base_url: str, out_dir: Path, *, geckodriver: str) -> dict[str, object
             raise AssertionError(f"Live objective card overlaps report: {live_layout}")
         live_screenshot = out_dir / "live_objective_card_1920x1080.png"
         driver.save_screenshot(str(live_screenshot))
+        driver.find_element(By.CSS_SELECTOR, '[data-agent-id="bo"]').click()
+        wait.until(lambda item: "BO Agent" in item.find_element(By.ID, "live-center-title").text)
+        wait.until(lambda item: len(item.find_elements(By.CSS_SELECTOR, "[data-live-bo-posterior] svg.bo-viz-svg")) == 1)
+        live_bo_layout = driver.execute_script(
+            """
+            const report = document.getElementById('live-report-panel');
+            const equation = report.querySelector('[data-live-bo-equation]');
+            const posterior = report.querySelector('[data-live-bo-posterior]');
+            return {
+              equation: equation?.textContent.trim() || '',
+              svgCount: posterior?.querySelectorAll('svg.bo-viz-svg').length || 0,
+              reportWidth: report.getBoundingClientRect().width,
+              reportScrollWidth: report.scrollWidth,
+            };
+            """
+        )
+        if not live_bo_layout["equation"] or live_bo_layout["svgCount"] != 1:
+            raise AssertionError(f"Live BO cards did not restore the latest projection: {live_bo_layout}")
+        if live_bo_layout["reportScrollWidth"] > live_bo_layout["reportWidth"] + 2:
+            raise AssertionError(f"Live BO report overflow: {live_bo_layout}")
+        live_bo_screenshot = out_dir / "live_bo_posterior_1920x1080.png"
+        driver.save_screenshot(str(live_bo_screenshot))
         return {
             "ok": True,
             "bo": bo_layout,
@@ -235,6 +257,7 @@ def audit(base_url: str, out_dir: Path, *, geckodriver: str) -> dict[str, object
             "posterior": posterior_layout,
             "posterior_mobile": posterior_mobile,
             "live": live_layout,
+            "live_bo": live_bo_layout,
             "screenshots": [
                 bo_screenshot.as_posix(),
                 manual_screenshot.as_posix(),
@@ -242,6 +265,7 @@ def audit(base_url: str, out_dir: Path, *, geckodriver: str) -> dict[str, object
                 posterior_screenshot.as_posix(),
                 posterior_mobile_screenshot.as_posix(),
                 live_screenshot.as_posix(),
+                live_bo_screenshot.as_posix(),
             ],
             "card_text": card.text,
         }

@@ -4161,3 +4161,7 @@ def test_live_gui_contains_compact_objective_runtime_card() -> None:
         assert f'id="{element_id}"' in html
     assert "/api/objectives/status" in script
     assert "refreshLiveObjectiveState" in script
+def test_live_gui_loads_shared_bo_visualization_before_planning_runtime() -> None:
+    html = TestClient(app).get("/live").text
+
+    assert html.index('<script src="/static/bo_visualization.js') < html.index('<script src="/static/planning.js')
