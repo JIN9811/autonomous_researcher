@@ -29,6 +29,29 @@ The runtime-facing experiment API is documented in `runtime/autonomous_experimen
 It standardizes `ExperimentObjective`, `ExperimentCandidate`, `ExperimentExecution`,
 and `ExperimentEvaluationResult` so test, virtual, and live bridge paths remain externally consistent.
 
+Objective authoring is a control-plane workflow before BO runtime evaluation.
+AI Compose, Visual Builder, and Advanced JSON all produce the same
+`objective_spec.v1` contract and enter the same deterministic lifecycle:
+
+```text
+AI research intent -----------+
+Visual expression tree -------+--> draft --> validate --> preview --> approve --> activate(run_id)
+Advanced objective JSON ------+                                      |
+                                                                     v
+Analysis evaluates registered metrics --> BO consumes objective_evaluation.v1
+```
+
+`GET /api/objectives/authoring-contract` is the frontend/backend compatibility
+boundary for enabled compiler operators, fields, child shapes, supported units,
+and AST limits. The browser keeps one canonical last-valid manual tree plus a
+separate JSON edit buffer, so malformed JSON cannot corrupt the visual state.
+`POST /api/objectives/manual` normalizes server-owned lifecycle, provenance,
+registry, timestamp, and immutable version fields. Stored Objective selection
+and unsaved authoring state remain separate until an operator explicitly loads
+the selected version as a revision. None of these authoring routes executes an
+experiment or bypasses Preview, approval, activation, Analysis evaluation, BO,
+or Guardian.
+
 LLM routing is configured from `configs/models.yaml` and surfaced through Main GUI
 `Current Models`. The local-first default is NemoClaw/vLLM with `gemma4:31b` for
 the orchestrator route and `gemma4:e4b-it-nvfp4` for subordinate `e4b` routes.
@@ -42,13 +65,13 @@ returns to first priority.
 ## Agent responsibilities
 
 - `orchestrator_agent`: top-level planning text
-- `bo_agent`: mandatory LangGraph stage after `knowledge_agent` and before `guardian_agent`; exposed through `/bo` for acquisition/BO/MBO controls. It consumes KnowledgeAgent context and writes next-cycle DesignAgent constraints to `run_metadata["bo_recommended_constraints"]`.
+- `bo_agent`: mandatory LangGraph stage after `knowledge_agent` and before `guardian_agent`; exposed through `/bo` for acquisition/BO/MBO controls and bounded Objective Compiler authoring. It consumes KnowledgeAgent context and writes next-cycle DesignAgent constraints to `run_metadata["bo_recommended_constraints"]`.
 - `design/specimen/vision/manipulation/equipment/analysis/knowledge/guardian`: stage-specific execution
 - `specimen_agent`: geometry/handoff owner plus printer preparation delegation; it does not directly implement PrusaLink write logic.
 - `experiment.evaluate`: common evaluation facade that routes candidates through virtual scoring or a hardware bridge while preserving session/experiment IDs.
 - `experiment.benchmark`: random/grid/BO comparison mode for objective and candidate-generation validation.
 - `experiment.queue.status`: current device-job queue diagnostics for printer, robot, and Windows equipment actions.
-- `/bo`: dedicated BO Workspace for acquisition function, BO/MBO strategy, budget, and parameter-space tuning.
+- `/bo`: dedicated BO Workspace for acquisition function, BO/MBO strategy, budget, parameter-space tuning, AI objective composition, template-free visual AST authoring, and advanced `objective_spec.v1` JSON authoring.
 - `/cae`: dedicated CAE Analysis Workspace for bottom-fixed/top-cyclic simulation settings and metric review.
 - `printer.prepare`: provider-neutral 3DP handoff boundary for slicing, upload/transfer, start gates, and ejection gates. The active printer provider is selected by the printer fleet registry; BambuLab X2D is the default provider and Prusa MK4S is an operator-selected provider, not a fallback path.
 - `vision_agent`: lightweight 3DP output-area observation owner. It combines `camera.capture` with the latest `specimen_result` and emits `pose_estimate`, `pickup_target`, and `transfer_readiness` for the robot transfer stage.

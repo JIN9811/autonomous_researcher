@@ -32,6 +32,8 @@ Compiled objective contract
 - The operator starts with research intent, not a fixed objective template.
 - The LLM may compose or revise one objective_spec.v1 JSON document, but that
   output is untrusted until deterministic validation succeeds.
+- The operator may instead author the same contract through Visual Builder or
+  Advanced JSON. These are authoring surfaces, not alternate runtime formats.
 - Required lifecycle: draft -> validate -> preview -> operator approve ->
   activate for run_id.
 - Activation binds objective_id, version, and canonical objective_hash
@@ -39,6 +41,41 @@ Compiled objective contract
 - Analysis is the only runtime stage that evaluates the bound expression from
   registered metrics. BO consumes the resulting objective_evaluation.v1.
 - BO must not call the LLM to recalculate an existing score.
+
+Manual objective authoring
+- Route: /bo -> Bounded Objective Compiler.
+- Modes: AI Compose, Visual Builder, Advanced JSON.
+- Visual Builder reads GET /api/objectives/authoring-contract. Do not hardcode a
+  separate frontend operator list, unit list, AST depth, or AST node limit.
+- The authoring contract is derived from the deterministic compiler. Disabled
+  operators such as reference remain visible to contract inspection but cannot
+  be selected or accepted.
+- The visual tree supports registered metric and literal leaves, unary and
+  variadic expressions, named binary slots, weighted terms, aggregates,
+  conditions, comparisons, Boolean constraints, and piecewise penalty points.
+- Compatible subtrees may be reordered, duplicated, deleted, or reparented.
+  These operations only mutate the unsaved browser draft.
+- Visual Builder and Advanced JSON share one canonical last-valid spec.
+- Invalid JSON must remain visible with path-specific errors. It must not
+  replace the last valid visual tree or silently revert to a different draft.
+- Restore Last Valid discards only the invalid JSON buffer and redraws the
+  canonical visual tree.
+- Unsaved manual work may be retained in browser storage across refresh. A
+  successful server save clears that recovery state.
+- Selecting Objective Version changes the read-only lifecycle inspection only.
+  It must never overwrite the manual draft automatically.
+- Load Selected as Revision is the explicit operation that copies a stored
+  version into the manual builder and records its parent identity.
+- POST /api/objectives/manual accepts spec, operator, and optional revision_of.
+  The server assigns lifecycle=draft, created_by=operator:<name>, timestamp,
+  Metric Registry version, and immutable version. Client-supplied values for
+  those fields are not authoritative.
+- Creating an existing objective_id without revision_of is a conflict. A
+  revision must use the same objective_id and the next immutable version.
+- A saved manual draft is not executable. Validate, observation Preview,
+  operator Approve, and Activate for one run_id remain mandatory.
+- Manual authoring never executes Python, JavaScript, shell, filesystem,
+  network, Cypher, or arbitrary code supplied in the objective document.
 
 Closed-loop position
 - Default closed loop:

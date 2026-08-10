@@ -10,9 +10,12 @@ source_of_truth:
   - agents/bo_agent.py
   - graphs/modules/bo/module.yaml
   - app/main.py
+  - objectives/authoring.py
+  - objectives/service.py
+  - web/static/objective_builder.js
   - experiments
-last_verified: 2026-08-09
-verified_against: 0b7627b
+last_verified: 2026-08-10
+verified_against: 4cccb05
 related_docs:
   - docs/agents/README.md
   - docs/agents/agent_api_connection_matrix.md
@@ -51,6 +54,37 @@ may accept explicitly labelled synthetic or simulation evidence.
 
 `next_design_request.v1` carries `objective_id`, `objective_version`, and
 `objective_hash`; it never recompiles or changes the active expression.
+
+### Operator-authored objectives
+
+The BO Workspace provides three authoring surfaces that converge on the same
+bounded contract and lifecycle:
+
+| Surface | Purpose | Authority boundary |
+|---|---|---|
+| AI Compose | turn research intent into a bounded draft | LLM output remains untrusted |
+| Visual Builder | construct a registered expression tree and Boolean constraints | browser edits remain unsaved until accepted by the server |
+| Advanced JSON | edit the complete `objective_spec.v1` document | only registered metrics, units, and enabled operators are accepted |
+
+The Visual Builder is not a fixed objective-template selector. It reads the
+server-owned `/api/objectives/authoring-contract`, which describes every
+enabled operator, child slot, field, supported unit, and AST limit. Nested
+unary, variadic, binary, weighted-term, aggregate, conditional, comparison,
+logical, and piecewise-penalty structures share one canonical tree. Compatible
+subtrees can be reordered, duplicated, removed, or moved through drag and drop.
+
+Visual and JSON modes share one unsaved browser state. Invalid JSON remains in
+the editor with path-specific errors and does not replace the last valid visual
+tree. Unsaved work is kept in browser storage for refresh recovery; a
+successful server save clears that recovery record.
+
+`POST /api/objectives/manual` is the only manual-draft persistence boundary.
+The server ignores client lifecycle, version, creator, timestamp, and Metric
+Registry version fields, then writes operator provenance and an immutable new
+version. Selecting a stored version is read-only: the operator must explicitly
+choose `Load Selected as Revision` before it can become the parent of a new
+manual version. Manual drafts still require Validate, Preview, Approve, and
+Activate before BO can consume them.
 
 ## Scope
 
@@ -153,6 +187,8 @@ physical experiment occurred.
 | operator | POST | `/api/bo/config` | BO workspace config | local_state | validated save |
 | connected | POST | `/api/bo/benchmark` | experiment benchmark | local_state/model | bounded comparative tooling, not live loop |
 | owned | POST | `/api/bo/run` | BO agent workspace execution | local_state/model | direct bounded recommendation and node event |
+| connected | GET | `/api/objectives/authoring-contract` | Objective Compiler | read_only | operators, units, fields, and AST limits |
+| operator | POST | `/api/objectives/manual` | Objective Compiler | local_state | normalized immutable operator-authored draft |
 | shared | POST | `/api/run/start` | graph/controller | physical_possible | closed-loop execution, not BO alone |
 
 Objective authoring and lifecycle operations are exposed separately through
@@ -201,15 +237,20 @@ visible.
 
 ## Operator and GUI Surfaces
 
-BO workspace exposes configuration, benchmark, and direct run. Live GUI shows
+BO workspace exposes configuration, benchmark, direct run, AI objective
+composition, a template-free visual expression-tree builder, and a synchronized
+advanced JSON editor. Saved objective versions remain separate from the
+unsaved manual draft until explicit revision loading. Live GUI shows
 surrogate/acquisition, candidate ranking, uncertainty, recommendation, and
-artifacts. Workspace run does not prove graph or physical execution.
+artifacts. Workspace run or manual-draft creation does not prove graph or
+physical execution.
 
 ## Current Verification
 
-Verified against all 15 internal steps, `experiment.benchmark`, four BO API
-routes, and Analysis/Knowledge/Design handoffs at baseline `0b7627b`. No
-comparative optimization benefit is claimed.
+Verified against all 15 internal steps, `experiment.benchmark`, BO and Objective
+Compiler APIs, manual Visual/JSON browser authoring at desktop/mobile widths,
+and Analysis/Knowledge/Design handoffs at baseline `4cccb05`. No comparative
+optimization benefit is claimed.
 
 ## Limitations and Known Gaps
 
