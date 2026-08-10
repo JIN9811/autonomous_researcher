@@ -153,3 +153,57 @@ def test_objective_api_rejects_composer_code_payload(tmp_path, monkeypatch) -> N
 
     assert response.status_code == 422
     assert "code" in response.text
+
+
+def test_objective_api_creates_and_revises_manual_draft(tmp_path, monkeypatch) -> None:
+    client, service = client_for(tmp_path, monkeypatch)
+    payload = spec()
+    payload.update({"version": 42, "created_by": "forged", "lifecycle": "active"})
+
+    created = client.post(
+        "/api/objectives/manual",
+        json={"spec": payload, "operator": "JIN", "revision_of": None},
+    )
+    revised_payload = spec()
+    revised_payload["expression"] = {
+        "op": "square",
+        "arg": {"op": "metric", "metric_id": "compressive_strength_mpa"},
+    }
+    revised = client.post(
+        "/api/objectives/manual",
+        json={"spec": revised_payload, "operator": "JIN", "revision_of": "api-objective"},
+    )
+
+    assert created.status_code == 200
+    assert created.json()["source"] == "manual"
+    assert created.json()["objective"]["version"] == 1
+    assert created.json()["objective"]["created_by"] == "operator:JIN"
+    assert created.json()["validation"]["valid"] is True
+    assert revised.status_code == 200
+    assert revised.json()["objective"]["version"] == 2
+    assert service.store.load_spec("api-objective", 1).expression == payload["expression"]
+
+
+def test_objective_api_rejects_manual_overwrite_and_code_field(tmp_path, monkeypatch) -> None:
+    client, service = client_for(tmp_path, monkeypatch)
+    created = client.post(
+        "/api/objectives/manual",
+        json={"spec": spec(), "operator": "JIN"},
+    )
+    conflict = client.post(
+        "/api/objectives/manual",
+        json={"spec": spec(), "operator": "JIN"},
+    )
+    unsafe = spec()
+    unsafe["objective_id"] = "unsafe-manual"
+    unsafe["expression"]["code"] = "open('/etc/passwd').read()"
+    rejected = client.post(
+        "/api/objectives/manual",
+        json={"spec": unsafe, "operator": "JIN"},
+    )
+
+    assert created.status_code == 200
+    assert conflict.status_code == 409
+    assert rejected.status_code == 422
+    assert "code" in rejected.text
+    assert service.store.list_specs() == [service.store.load_spec("api-objective", 1)]

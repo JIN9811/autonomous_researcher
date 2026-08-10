@@ -664,6 +664,12 @@ class ObjectiveComposeRequest(BaseModel):
     intent: str = Field(..., min_length=1, max_length=4000)
 
 
+class ObjectiveManualDraftRequest(BaseModel):
+    spec: dict[str, object]
+    operator: str = Field(..., min_length=1, max_length=160)
+    revision_of: str | None = Field(default=None, min_length=1)
+
+
 class ObjectiveReferenceRequest(BaseModel):
     objective_id: str = Field(..., min_length=1)
     version: int | None = Field(default=None, ge=1)
@@ -7410,6 +7416,25 @@ async def post_objective_compose(req: ObjectiveComposeRequest) -> dict[str, obje
     except Exception as exc:
         raise _objective_http_error(exc) from exc
     return {"ok": True, "draft": draft.model_dump(mode="json")}
+
+
+@app.post("/api/objectives/manual")
+async def post_objective_manual(req: ObjectiveManualDraftRequest) -> dict[str, object]:
+    """Create one server-normalized operator-authored objective draft."""
+    try:
+        draft, validation = _objective_service().create_manual_draft(
+            req.spec,
+            operator=req.operator,
+            revision_of=req.revision_of,
+        )
+    except Exception as exc:
+        raise _objective_http_error(exc) from exc
+    return {
+        "ok": True,
+        "source": "manual",
+        "objective": draft.model_dump(mode="json"),
+        "validation": validation.model_dump(mode="json"),
+    }
 
 
 @app.post("/api/objectives/validate")

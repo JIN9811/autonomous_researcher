@@ -19,6 +19,7 @@ from objectives.schemas import (
     ObjectivePreview,
     ObjectiveSpec,
     ObjectiveValidation,
+    now_iso,
 )
 from objectives.store import ObjectiveConflict, ObjectiveNotFound, ObjectiveStore
 
@@ -37,7 +38,13 @@ class ObjectiveService:
     def default(cls, *, project_root=None, context: Any = None) -> "ObjectiveService":
         return cls(store=ObjectiveStore.default(project_root), registry=MetricRegistry.default(), context=context)
 
-    def create_draft(self, spec: ObjectiveSpec | dict[str, Any]) -> ObjectiveSpec:
+    def create_draft(
+        self,
+        spec: ObjectiveSpec | dict[str, Any],
+        *,
+        decision_operator: str = "",
+        decision_reason: str | None = None,
+    ) -> ObjectiveSpec:
         parsed = spec if isinstance(spec, ObjectiveSpec) else ObjectiveSpec.model_validate(spec)
         validation = validate_objective(parsed, self.registry)
         prohibited = [error for error in validation.errors if "unexpected fields" in error]
@@ -53,10 +60,77 @@ class ObjectiveService:
                 objective_id=parsed.objective_id,
                 version=parsed.version,
                 objective_hash=validation.objective_hash,
-                reason=parsed.intent,
+                operator=decision_operator,
+                reason=parsed.intent if decision_reason is None else decision_reason,
             )
         )
         return parsed
+
+    def create_manual_draft(
+        self,
+        spec: dict[str, Any],
+        *,
+        operator: str,
+        revision_of: str | None = None,
+    ) -> tuple[ObjectiveSpec, ObjectiveValidation]:
+        """Create a server-normalized operator-authored objective draft."""
+        operator_name = operator.strip()
+        if not operator_name:
+            raise ValueError("operator is required for manual objective drafts")
+        if not isinstance(spec, dict):
+            raise ValueError("manual objective spec must be one JSON object")
+        payload = dict(spec)
+        objective_id = str(payload.get("objective_id") or "").strip()
+        if not objective_id:
+            raise ValueError("objective_id is required for manual objective drafts")
+
+        parent_version: int | None = None
+        if revision_of is not None:
+            revision_id = revision_of.strip()
+            if revision_id != objective_id:
+                raise ObjectiveConflict("revision_of must match objective_id")
+            parent_version = self.store.latest_version(revision_id)
+            resolved_version = parent_version + 1
+        else:
+            try:
+                self.store.latest_version(objective_id)
+            except ObjectiveNotFound:
+                resolved_version = 1
+            else:
+                raise ObjectiveConflict(
+                    f"objective {objective_id} already exists; create an explicit revision"
+                )
+
+        raw_metadata = payload.get("metadata")
+        metadata = dict(raw_metadata) if isinstance(raw_metadata, dict) else {}
+        metadata.update({"authoring_mode": "manual", "operator": operator_name})
+        if parent_version is not None:
+            metadata.update(
+                {
+                    "parent_objective_id": objective_id,
+                    "parent_version": parent_version,
+                }
+            )
+        payload.update(
+            {
+                "schema_version": "objective_spec.v1",
+                "objective_id": objective_id,
+                "version": resolved_version,
+                "lifecycle": "draft",
+                "created_by": f"operator:{operator_name}",
+                "created_at": now_iso(),
+                "metric_registry_version": self.registry.version_id,
+                "metadata": metadata,
+            }
+        )
+        draft = self.create_draft(
+            payload,
+            decision_operator=operator_name,
+            decision_reason="manual objective draft",
+        )
+        validation = validate_objective(draft, self.registry)
+        self.store.save_validation(validation)
+        return draft, validation
 
     def _composition_prompt(self, intent: str, *, current: ObjectiveSpec | None = None) -> str:
         metrics = [item.model_dump(mode="json") for item in self.registry.list()]

@@ -55,6 +55,21 @@ def sample_spec() -> ObjectiveSpec:
     )
 
 
+def manual_spec(**updates) -> dict:
+    payload = sample_spec().model_dump(mode="json")
+    payload.update(
+        {
+            "objective_id": "manual-strength",
+            "version": 99,
+            "lifecycle": "active",
+            "created_by": "client-forged",
+            "metric_registry_version": "client-registry",
+        }
+    )
+    payload.update(updates)
+    return payload
+
+
 def observations() -> list[dict]:
     return [
         {
@@ -155,6 +170,69 @@ def test_approval_requires_successful_validation_and_preview(tmp_path) -> None:
 
     with pytest.raises(ObjectiveConflict, match="validation"):
         service.approve("service-objective", 1, operator="operator")
+
+
+def test_manual_draft_normalizes_server_owned_fields(tmp_path) -> None:
+    service = make_service(tmp_path)
+
+    draft, validation = service.create_manual_draft(manual_spec(), operator="JIN")
+
+    assert draft.version == 1
+    assert draft.lifecycle == "draft"
+    assert draft.created_by == "operator:JIN"
+    assert draft.metric_registry_version == service.registry.version_id
+    assert draft.metadata["authoring_mode"] == "manual"
+    assert draft.metadata["operator"] == "JIN"
+    assert validation.valid is True
+
+
+def test_manual_revision_uses_next_version_without_overwrite(tmp_path) -> None:
+    service = make_service(tmp_path)
+    first, _ = service.create_manual_draft(manual_spec(), operator="JIN")
+    revised_expression = {
+        "op": "square",
+        "arg": {"op": "metric", "metric_id": "compressive_strength_mpa"},
+    }
+
+    revised, _ = service.create_manual_draft(
+        manual_spec(version=1, expression=revised_expression),
+        operator="JIN",
+        revision_of=first.objective_id,
+    )
+
+    assert revised.version == 2
+    assert service.store.load_spec(first.objective_id, 1).expression == first.expression
+    assert revised.expression == revised_expression
+    assert revised.metadata["parent_objective_id"] == first.objective_id
+    assert revised.metadata["parent_version"] == 1
+
+
+def test_manual_draft_rejects_existing_id_without_revision(tmp_path) -> None:
+    service = make_service(tmp_path)
+    service.create_manual_draft(manual_spec(), operator="JIN")
+
+    with pytest.raises(ObjectiveConflict, match="already exists"):
+        service.create_manual_draft(manual_spec(), operator="JIN")
+
+
+def test_manual_draft_persists_structural_draft_with_semantic_errors(tmp_path) -> None:
+    service = make_service(tmp_path)
+    incompatible = {
+        "op": "add",
+        "args": [
+            {"op": "metric", "metric_id": "compressive_strength_mpa"},
+            {"op": "metric", "metric_id": "displacement_at_peak_mm"},
+        ],
+    }
+
+    draft, validation = service.create_manual_draft(
+        manual_spec(objective_id="manual-invalid", expression=incompatible),
+        operator="JIN",
+    )
+
+    assert service.store.load_spec("manual-invalid", 1) == draft
+    assert validation.valid is False
+    assert any("incompatible units" in error for error in validation.errors)
 
 
 class _Context:
