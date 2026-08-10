@@ -5,12 +5,14 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import uuid
 
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.firefox.options import Options
 from selenium.webdriver.firefox.service import Service
 from selenium.webdriver.support import expected_conditions as conditions
+from selenium.webdriver.support.ui import Select
 from selenium.webdriver.support.ui import WebDriverWait
 
 
@@ -59,6 +61,81 @@ def audit(base_url: str, out_dir: Path, *, geckodriver: str) -> dict[str, object
         bo_screenshot = out_dir / "bo_objective_compiler_1920x1080.png"
         driver.save_screenshot(str(bo_screenshot))
 
+        objective_id = f"browser-audit-{uuid.uuid4().hex[:10]}"
+        driver.find_element(By.CSS_SELECTOR, '[data-objective-mode="visual"]').click()
+        wait.until(conditions.visibility_of_element_located((By.ID, "objective-manual-builder")))
+        identity = driver.find_element(By.ID, "objective-manual-id")
+        identity.clear()
+        identity.send_keys(objective_id)
+        driver.execute_script("arguments[0].blur();", identity)
+        name = driver.find_element(By.ID, "objective-manual-name")
+        name.send_keys("Browser audit weighted objective")
+        driver.execute_script("arguments[0].blur();", name)
+        root_operator = wait.until(conditions.presence_of_element_located((By.CSS_SELECTOR, '[data-node-path="expression"] > .bo-tree-node-head .bo-tree-operator')))
+        Select(root_operator).select_by_value("weighted_sum")
+        term_operator = wait.until(conditions.presence_of_element_located((By.CSS_SELECTOR, '[data-node-path="expression.terms.0.expression"] .bo-tree-operator')))
+        Select(term_operator).select_by_value("metric")
+        driver.find_element(By.ID, "btn-objective-add-constraint").click()
+        wait.until(lambda item: len(item.find_elements(By.CSS_SELECTOR, "#objective-constraints-builder .bo-tree-node")) >= 3)
+
+        driver.find_element(By.CSS_SELECTOR, '[data-objective-mode="json"]').click()
+        json_editor = wait.until(conditions.visibility_of_element_located((By.ID, "objective-json-editor")))
+        valid_json = json_editor.get_attribute("value")
+        json_editor.clear()
+        json_editor.send_keys('{"expression":')
+        driver.find_element(By.ID, "btn-objective-json-apply").click()
+        wait.until(lambda item: "JSON parse error" in item.find_element(By.ID, "objective-json-errors").text)
+        if driver.find_element(By.ID, "objective-json-editor").get_attribute("value") == valid_json:
+            raise AssertionError("Invalid JSON replaced its buffer instead of remaining visible")
+        driver.find_element(By.ID, "btn-objective-json-restore").click()
+        wait.until(lambda item: item.find_element(By.ID, "objective-json-editor").get_attribute("value") == valid_json)
+
+        driver.find_element(By.ID, "btn-objective-manual-save").click()
+        wait.until(lambda item: objective_id in item.find_element(By.ID, "objective-active-identity").text)
+        wait.until(lambda item: "Saved" in item.find_element(By.ID, "objective-manual-status").text)
+        driver.find_element(By.ID, "btn-objective-load-revision").click()
+        wait.until(lambda item: "Revision of" in item.find_element(By.ID, "objective-manual-revision-label").text)
+        manual_layout = driver.execute_script(
+            """
+            const workspace = document.getElementById('objective-compiler-workspace');
+            const rect = workspace.getBoundingClientRect();
+            return {
+              authorMode: document.querySelector('[data-objective-mode].active')?.dataset.objectiveMode,
+              nodeCount: document.querySelectorAll('#objective-expression-builder .bo-tree-node').length,
+              constraintCount: document.querySelectorAll('#objective-constraints-builder > .bo-tree-node').length,
+              dirty: document.getElementById('objective-builder-dirty').textContent.trim(),
+              workspaceWidth: rect.width,
+              workspaceScrollWidth: workspace.scrollWidth,
+            };
+            """
+        )
+        if manual_layout["authorMode"] != "visual" or manual_layout["nodeCount"] < 2 or manual_layout["constraintCount"] != 1:
+            raise AssertionError(f"Manual builder interaction did not persist: {manual_layout}")
+        if manual_layout["workspaceScrollWidth"] > manual_layout["workspaceWidth"] + 2:
+            raise AssertionError(f"Manual builder horizontal overflow: {manual_layout}")
+        manual_screenshot = out_dir / "bo_manual_objective_builder_1920x1080.png"
+        driver.save_screenshot(str(manual_screenshot))
+
+        driver.set_window_size(390, 844)
+        driver.execute_script("document.getElementById('objective-compiler-workspace').scrollIntoView({block: 'start'});")
+        mobile_layout = driver.execute_script(
+            """
+            return {
+              viewportWidth: window.innerWidth,
+              bodyScrollWidth: document.body.scrollWidth,
+              workspaceWidth: document.getElementById('objective-compiler-workspace').getBoundingClientRect().width,
+              workspaceScrollWidth: document.getElementById('objective-compiler-workspace').scrollWidth,
+            };
+            """
+        )
+        if mobile_layout["bodyScrollWidth"] > mobile_layout["viewportWidth"] + 2:
+            raise AssertionError(f"Manual builder mobile page overflow: {mobile_layout}")
+        if mobile_layout["workspaceScrollWidth"] > mobile_layout["workspaceWidth"] + 2:
+            raise AssertionError(f"Manual builder mobile workspace overflow: {mobile_layout}")
+        mobile_screenshot = out_dir / "bo_manual_objective_builder_390x844.png"
+        driver.save_screenshot(str(mobile_screenshot))
+        driver.set_window_size(1920, 1080)
+
         driver.refresh()
         wait.until(conditions.visibility_of_element_located((By.ID, "objective-compiler-workspace")))
         wait.until(lambda item: item.find_element(By.ID, "objective-lifecycle-chip").text != "")
@@ -98,8 +175,15 @@ def audit(base_url: str, out_dir: Path, *, geckodriver: str) -> dict[str, object
         return {
             "ok": True,
             "bo": bo_layout,
+            "manual": manual_layout,
+            "mobile": mobile_layout,
             "live": live_layout,
-            "screenshots": [bo_screenshot.as_posix(), live_screenshot.as_posix()],
+            "screenshots": [
+                bo_screenshot.as_posix(),
+                manual_screenshot.as_posix(),
+                mobile_screenshot.as_posix(),
+                live_screenshot.as_posix(),
+            ],
             "card_text": card.text,
         }
     finally:
