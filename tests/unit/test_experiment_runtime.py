@@ -115,6 +115,9 @@ def test_benchmark_runs_random_grid_bo() -> None:
     assert bo_trace[0]["selected"]["candidate_id"]
     assert bo_trace[0]["selected"]["acquisition_value"] is not None
     assert bo_trace[0]["x_axis"] == "candidate_pool_index"
+    assert bo_trace[0]["visualization"]["schema"] == "bo_visualization.v1"
+    assert bo_trace[0]["visualization"]["step"] == 1
+    assert bo_trace[-1]["visualization"]["next_point"]["candidate_id"] == bo_trace[-1]["selected"]["candidate_id"]
 
 
 def test_benchmark_accepts_optional_botorch_backend() -> None:

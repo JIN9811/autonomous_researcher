@@ -1196,6 +1196,22 @@ class BOAgent(BaseAgent):
             candidate_ranking=candidate_ranking,
             next_candidate=next_design_request,
         )
+        strategy_payload = (
+            benchmark.get("strategies", {}).get(recommendation.get("source_strategy"), {})
+            if isinstance(benchmark.get("strategies"), dict)
+            else {}
+        )
+        visualization_trace = (
+            strategy_payload.get("surrogate_trace", [])
+            if isinstance(strategy_payload, dict) and isinstance(strategy_payload.get("surrogate_trace"), list)
+            else []
+        )
+        visualizations = [
+            item.get("visualization")
+            for item in visualization_trace
+            if isinstance(item, dict) and isinstance(item.get("visualization"), dict)
+        ]
+        latest_visualization = visualizations[-1] if visualizations else {}
         bo_result = {
             "ok": bool(benchmark.get("ok", False)) and bool(recommendation.get("parameters")),
             "tool": "bo.agent",
@@ -1218,6 +1234,14 @@ class BOAgent(BaseAgent):
             "next_design_request": next_design_request,
             "observation_integrity": observation_integrity,
             "best_so_far": self._best_so_far(benchmark, recommendation["source_strategy"]),
+            "visualization": latest_visualization,
+            "visualization_steps": [
+                {
+                    "step": int(item.get("step") or 0),
+                    "selected_parameter": str((item.get("view") or {}).get("selected_parameter") or ""),
+                }
+                for item in visualizations
+            ],
             "knowledge_context": knowledge_context,
             "warnings": warnings,
             "artifacts": artifacts,

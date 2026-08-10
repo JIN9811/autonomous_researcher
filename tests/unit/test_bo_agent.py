@@ -56,6 +56,9 @@ async def test_bo_agent_returns_recommendation_and_curve() -> None:
     assert bo_result["recommendation"]["parameters"]
     assert bo_result["knowledge_context"]["memory_summary"].startswith("Prefer FDM-printable")
     assert len(bo_result["best_so_far"]) == 4
+    assert bo_result["visualization"]["schema"] == "bo_visualization.v1"
+    assert bo_result["visualization"]["step"] == 4
+    assert [item["step"] for item in bo_result["visualization_steps"]] == [1, 2, 3, 4]
     assert state.run_metadata["bo_agent"]["recommendation"]["candidate_id"] == bo_result["recommendation"]["candidate_id"]
 
 

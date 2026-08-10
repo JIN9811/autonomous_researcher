@@ -27,6 +27,7 @@ from collections.abc import Callable
 from typing import Any
 
 from experiments.api import evaluate_experiment
+from experiments.bo_visualization import build_bo_visualization
 from experiments.schemas import ExperimentEvaluationRequest
 from learning.bo_engine import propose_next
 from learning.botorch_backend import BoTorchBackendUnavailable, score_candidate_pool as score_botorch_candidate_pool
@@ -475,19 +476,25 @@ def run_benchmark(
                     ],
                     landscape,
                 )
-                surrogate_trace.append(
-                    {
-                        "step": idx + 1,
-                        "acquisition": acquisition,
-                        "x_axis": "candidate_pool_index",
-                        "candidate_count": len(candidates),
-                        "selected": selected_trace,
-                        "backend_requested": bo_backend,
-                        "backend_active": active_backend,
-                        "evaluated_points": observed_records,
-                        "candidates": landscape,
-                    }
+                trace_item = {
+                    "step": idx + 1,
+                    "acquisition": acquisition,
+                    "x_axis": "candidate_pool_index",
+                    "candidate_count": len(candidates),
+                    "selected": selected_trace,
+                    "backend_requested": bo_backend,
+                    "backend_active": active_backend,
+                    "evaluated_points": observed_records,
+                    "candidates": landscape,
+                }
+                trace_item["visualization"] = build_bo_visualization(
+                    run_id=str(base_request.get("run_id") or ""),
+                    objective=payload.get("objective") if isinstance(payload.get("objective"), dict) else {},
+                    parameter_space=parameter_space,
+                    trace=trace_item,
+                    selected_parameter=str(payload.get("visualization_parameter") or ""),
                 )
+                surrogate_trace.append(trace_item)
                 scores.append(score_value)
                 evaluated_vectors.append(vectors[pick])
                 evaluated_records.append(
