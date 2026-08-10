@@ -128,12 +128,24 @@ def test_bo_benchmark_endpoint_runs_virtual_bo() -> None:
     assert len(payload["benchmark"]["strategies"]["bo"]["curve"]) == 3
     assert len(payload["benchmark"]["strategies"]["bo"]["surrogate_trace"]) == 3
     assert payload["benchmark"]["strategies"]["bo"]["surrogate_trace"][0]["selected"]["parameters"]
+    latest_visualization = payload["benchmark"]["strategies"]["bo"]["surrogate_trace"][-1]["visualization"]
+    assert latest_visualization["schema"] == "bo_visualization.v1"
+    assert latest_visualization["step"] == 3
     assert any(
         event.get("type") == "tool.completed"
         and event.get("node_id") == "bo"
         and event.get("payload", {}).get("workspace") == "bo"
         for event in app_main.controller.recent_events()
     )
+    assert any(
+        event.get("event_type") == "bo.visualization.updated"
+        and event.get("payload", {}).get("step") == 3
+        and event.get("payload", {}).get("visualization", {}).get("schema") == "bo_visualization.v1"
+        for event in app_main.controller.recent_events()
+    )
+    config = client.get("/api/bo/config").json()
+    assert config["recent_visualization"]["step"] == 3
+    assert [item["step"] for item in config["visualization_steps"]][-3:] == [1, 2, 3]
 
 
 def test_bo_benchmark_endpoint_maps_reasoning_strategy_to_bo_backend() -> None:

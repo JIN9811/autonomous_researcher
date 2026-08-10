@@ -7537,6 +7537,8 @@ async def get_bo_config() -> dict[str, object]:
         "saved": saved,
         "settings_path": str(BO_WORKSPACE_SETTINGS_PATH),
         "recent": metadata.get("bo_agent", {}),
+        "recent_visualization": metadata.get("bo_visualization", {}),
+        "visualization_steps": metadata.get("bo_visualization_steps", []),
         "state": state,
     }
 
@@ -7603,6 +7605,13 @@ async def post_bo_benchmark(req: BOAgentRequest) -> dict[str, object]:
             },
         },
     )
+    strategies_payload = result.get("strategies") if isinstance(result.get("strategies"), dict) else {}
+    for strategy_payload in strategies_payload.values():
+        if not isinstance(strategy_payload, dict):
+            continue
+        for trace_item in strategy_payload.get("surrogate_trace", []):
+            if isinstance(trace_item, dict) and isinstance(trace_item.get("visualization"), dict):
+                await controller.emit_bo_visualization(trace_item["visualization"], source="bo_workspace_benchmark")
     await controller.emit_workspace_result(
         workspace="bo",
         tool="experiment.benchmark",
@@ -7624,6 +7633,9 @@ async def post_bo_run(req: BOAgentRequest) -> dict[str, object]:
     agent = controller._deps.agent_registry.get("bo_agent")
     result = await agent.run_with_settings(state, controller._deps.agent_context, req.model_dump())
     workspace_result = {"ok": bool(result.success), "summary": result.summary, "data": result.data}
+    bo_result = result.data.get("bo_result") if isinstance(result.data.get("bo_result"), dict) else {}
+    if isinstance(bo_result.get("visualization"), dict) and bo_result["visualization"]:
+        await controller.emit_bo_visualization(bo_result["visualization"], source="bo_workspace_agent")
     await controller.emit_workspace_result(
         workspace="bo",
         tool="bo_agent.run_with_settings",

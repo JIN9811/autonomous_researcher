@@ -68,6 +68,7 @@ from utils.vision_operator_intervention import (
     mark_intervention_retrying,
 )
 from device_bridges.bambu_bridge import PrinterDeviceBridgeManager
+from experiments.bo_visualization import validate_bo_visualization
 from utils.config_loader import load_all_configs
 from utils.paths import resolve_path
 from utils.printer_profile import adapt_print_profile_for_provider, load_prusa_print_profile
@@ -927,6 +928,8 @@ class MainController:
                     if k in value and (isinstance(value.get(k), (str, int, float, bool)) or value.get(k) is None)
                 }
             elif key_text == "monitor_snapshot" and isinstance(value, dict):
+                out[key_text] = compact_runtime_payload(value)
+            elif key_text == "visualization" and isinstance(value, dict):
                 out[key_text] = compact_runtime_payload(value)
         return out
 
@@ -1807,6 +1810,50 @@ class MainController:
         }
         await self._broadcast_controller_event(event)
         return event
+
+    async def emit_bo_visualization(self, visualization: dict[str, Any], *, source: str) -> dict[str, Any]:
+        """Persist and stream one monotonic BO visualization projection."""
+        normalized = dict(validate_bo_visualization(visualization))
+        run_id = str(normalized.get("run_id") or self._state.run_id)
+        normalized["run_id"] = run_id
+        step = int(normalized.get("step") or 0)
+        metadata = self._state.run_metadata
+        latest = metadata.get("bo_visualization") if isinstance(metadata.get("bo_visualization"), dict) else {}
+        latest_run_id = str(latest.get("run_id") or "")
+        latest_step = int(latest.get("step") or 0)
+        if latest_run_id == run_id and latest_step >= step:
+            return {"emitted": False, "reason": "duplicate_or_older_step", "run_id": run_id, "step": step}
+
+        metadata["bo_visualization"] = normalized
+        steps = metadata.setdefault("bo_visualization_steps", [])
+        if not isinstance(steps, list):
+            steps = []
+            metadata["bo_visualization_steps"] = steps
+        steps.append(
+            {
+                "run_id": run_id,
+                "step": step,
+                "selected_parameter": str((normalized.get("view") or {}).get("selected_parameter") or ""),
+                "generated_at": str(normalized.get("generated_at") or ""),
+            }
+        )
+        metadata["bo_visualization_steps"] = steps[-80:]
+        event = await self.emit_runtime_event(
+            event_type="bo.visualization.updated",
+            message=f"BO visualization step {step} updated",
+            run_id=run_id,
+            payload={
+                "agent": "bo",
+                "node_id": "bo",
+                "module_id": "bo",
+                "status": "done",
+                "source": source,
+                "run_id": run_id,
+                "step": step,
+                "visualization": normalized,
+            },
+        )
+        return {"emitted": True, "run_id": run_id, "step": step, "event": event}
 
     def apply_runtime_approval_resolution(
         self,
