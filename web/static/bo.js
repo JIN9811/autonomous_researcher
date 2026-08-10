@@ -72,12 +72,42 @@ const btnObjectiveValidate = document.getElementById("btn-objective-validate");
 const btnObjectivePreview = document.getElementById("btn-objective-preview");
 const btnObjectiveApprove = document.getElementById("btn-objective-approve");
 const btnObjectiveActivate = document.getElementById("btn-objective-activate");
+const objectiveAuthorMode = document.getElementById("objective-author-mode");
+const objectiveAuthorModeButtons = Array.from(document.querySelectorAll("[data-objective-mode]"));
+const objectiveAiComposePanel = document.getElementById("objective-ai-compose-panel");
+const objectiveManualBuilder = document.getElementById("objective-manual-builder");
+const objectiveVisualEditor = document.getElementById("objective-visual-editor");
+const objectiveJsonPanel = document.getElementById("objective-json-panel");
+const objectiveExpressionBuilder = document.getElementById("objective-expression-builder");
+const objectiveConstraintsBuilder = document.getElementById("objective-constraints-builder");
+const objectiveJsonEditor = document.getElementById("objective-json-editor");
+const objectiveJsonErrors = document.getElementById("objective-json-errors");
+const objectiveBuilderDirty = document.getElementById("objective-builder-dirty");
+const objectiveManualStatus = document.getElementById("objective-manual-status");
+const objectiveManualRevisionLabel = document.getElementById("objective-manual-revision-label");
+const btnObjectiveAddConstraint = document.getElementById("btn-objective-add-constraint");
+const btnObjectiveJsonFormat = document.getElementById("btn-objective-json-format");
+const btnObjectiveJsonRestore = document.getElementById("btn-objective-json-restore");
+const btnObjectiveJsonApply = document.getElementById("btn-objective-json-apply");
+const btnObjectiveLoadRevision = document.getElementById("btn-objective-load-revision");
+const btnObjectiveManualSave = document.getElementById("btn-objective-manual-save");
+const objectiveManualMetadata = {
+  objective_id: document.getElementById("objective-manual-id"),
+  name: document.getElementById("objective-manual-name"),
+  direction: document.getElementById("objective-manual-direction"),
+  description: document.getElementById("objective-manual-description"),
+  intent: document.getElementById("objective-manual-intent"),
+};
 
 let defaults = {};
 let objectiveMetrics = [];
 let objectiveRuntimeStatus = {};
 let selectedObjectiveState = null;
 let objectiveActionBusy = false;
+let objectiveAuthoringContract = null;
+let objectiveBuilderState = null;
+let objectiveBuilderView = null;
+let objectiveAuthoringMode = "ai";
 
 function setDot(el, state) {
   if (!el) return;
@@ -615,6 +645,64 @@ function renderObjectivePreview(preview) {
   if (objectiveSensitivityChart) objectiveSensitivityChart.innerHTML = objectiveBarChart(preview?.sensitivity);
 }
 
+function setObjectiveAuthoringMode(mode) {
+  objectiveAuthoringMode = ["ai", "visual", "json"].includes(mode) ? mode : "ai";
+  if (objectiveAiComposePanel) objectiveAiComposePanel.hidden = objectiveAuthoringMode !== "ai";
+  if (objectiveManualBuilder) objectiveManualBuilder.hidden = objectiveAuthoringMode === "ai";
+  if (objectiveVisualEditor) objectiveVisualEditor.hidden = objectiveAuthoringMode !== "visual";
+  if (objectiveJsonPanel) objectiveJsonPanel.hidden = objectiveAuthoringMode !== "json";
+  objectiveAuthorModeButtons.forEach((button) => {
+    const selected = button.dataset.objectiveMode === objectiveAuthoringMode;
+    button.classList.toggle("active", selected);
+    button.setAttribute("aria-selected", String(selected));
+  });
+}
+
+function renderManualRevisionState() {
+  if (!objectiveBuilderState) return;
+  const snapshot = objectiveBuilderState.snapshot();
+  const parent = snapshot.selectedObjective;
+  if (objectiveManualRevisionLabel) {
+    objectiveManualRevisionLabel.textContent = parent
+      ? `Revision of ${parent.objective_id} · v${parent.version}`
+      : "New objective draft";
+  }
+  if (btnObjectiveManualSave) {
+    btnObjectiveManualSave.textContent = parent ? "Save New Revision" : "Create Manual Draft";
+  }
+}
+
+function initializeObjectiveBuilder() {
+  if (objectiveBuilderState || !objectiveAuthoringContract || !window.ObjectiveBuilder) return;
+  objectiveBuilderState = ObjectiveBuilder.createState({
+    manifest: objectiveAuthoringContract,
+    metrics: objectiveMetrics,
+  });
+  objectiveBuilderView = ObjectiveBuilder.mountEditor({
+    state: objectiveBuilderState,
+    manifest: objectiveAuthoringContract,
+    metrics: objectiveMetrics,
+    elements: {
+      metadata: objectiveManualMetadata,
+      expression: objectiveExpressionBuilder,
+      constraints: objectiveConstraintsBuilder,
+      json: objectiveJsonEditor,
+      jsonErrors: objectiveJsonErrors,
+      dirty: objectiveBuilderDirty,
+      status: objectiveManualStatus,
+      addConstraint: btnObjectiveAddConstraint,
+      applyJson: btnObjectiveJsonApply,
+      restoreJson: btnObjectiveJsonRestore,
+      formatJson: btnObjectiveJsonFormat,
+    },
+    onChange: () => {
+      renderManualRevisionState();
+      updateObjectiveButtons();
+    },
+  });
+  renderManualRevisionState();
+}
+
 function updateObjectiveButtons() {
   const state = selectedObjectiveState;
   const valid = Boolean(state?.validation?.valid);
@@ -626,6 +714,8 @@ function updateObjectiveButtons() {
   if (btnObjectivePreview) btnObjectivePreview.disabled = objectiveActionBusy || !state || !valid;
   if (btnObjectiveApprove) btnObjectiveApprove.disabled = objectiveActionBusy || !valid || !previewed || approved;
   if (btnObjectiveActivate) btnObjectiveActivate.disabled = objectiveActionBusy || !approved || !String(objectiveRunIdInput?.value || "").trim();
+  if (btnObjectiveManualSave) btnObjectiveManualSave.disabled = objectiveActionBusy || !objectiveBuilderState;
+  if (btnObjectiveLoadRevision) btnObjectiveLoadRevision.disabled = objectiveActionBusy || !state || !objectiveBuilderState;
 }
 
 function renderSelectedObjective(state) {
@@ -680,12 +770,18 @@ function populateObjectiveVersions(preferredKey = "") {
 
 async function refreshObjectiveCompiler(preferredKey = "") {
   const runId = String(objectiveRunIdInput?.value || "").trim();
-  const [metrics, status] = await Promise.all([
+  const authoringRequest = objectiveAuthoringContract
+    ? Promise.resolve(objectiveAuthoringContract)
+    : getJson("/api/objectives/authoring-contract");
+  const [metrics, status, authoring] = await Promise.all([
     getJson("/api/objectives/metrics"),
     getJson(`/api/objectives/status${runId ? `?run_id=${encodeURIComponent(runId)}` : ""}`),
+    authoringRequest,
   ]);
   objectiveMetrics = Array.isArray(metrics.metrics) ? metrics.metrics : [];
   objectiveRuntimeStatus = status || {};
+  objectiveAuthoringContract = authoring || null;
+  initializeObjectiveBuilder();
   renderMetricRegistry();
   populateObjectiveVersions(preferredKey);
 }
@@ -756,6 +852,46 @@ async function activateObjective() {
   const runId = String(objectiveRunIdInput?.value || "").trim();
   if (!operator || !runId) throw new Error("Operator and Run ID are required.");
   await postJson("/api/objectives/activate", { ...selectedObjectiveReference(), operator, run_id: runId });
+  return objectiveStateKey(selectedObjectiveState);
+}
+
+async function saveManualObjective() {
+  if (!objectiveBuilderState) throw new Error("Manual Objective Builder is not ready.");
+  const operator = String(objectiveOperatorInput?.value || "").trim();
+  if (!operator) throw new Error("Operator is required.");
+  const snapshot = objectiveBuilderState.snapshot();
+  const revisionOf = snapshot.selectedObjective?.objective_id || null;
+  const result = await postJson("/api/objectives/manual", {
+    spec: snapshot.lastValidSpec,
+    operator,
+    revision_of: revisionOf,
+  });
+  objectiveBuilderState.markSaved(result.objective);
+  objectiveBuilderView?.render();
+  renderManualRevisionState();
+  if (objectiveManualStatus) {
+    objectiveManualStatus.textContent = result.validation?.valid
+      ? `Saved ${result.objective.objective_id} v${result.objective.version}. Ready for preview.`
+      : `Saved draft with validation issues: ${(result.validation?.errors || []).join("; ")}`;
+  }
+  return `${result.objective.objective_id}::${result.objective.version}`;
+}
+
+function loadSelectedObjectiveAsRevision() {
+  if (!objectiveBuilderState || !selectedObjectiveState?.spec) {
+    throw new Error("Select a saved objective version first.");
+  }
+  const snapshot = objectiveBuilderState.snapshot();
+  if (snapshot.dirty && !window.confirm("Replace the unsaved manual draft with the selected objective version?")) {
+    return objectiveStateKey(selectedObjectiveState);
+  }
+  objectiveBuilderState.loadRevision(selectedObjectiveState.spec);
+  objectiveBuilderView?.render();
+  renderManualRevisionState();
+  setObjectiveAuthoringMode("visual");
+  if (objectiveManualStatus) {
+    objectiveManualStatus.textContent = `${selectedObjectiveState.objective_id} v${selectedObjectiveState.version} loaded as an unsaved revision.`;
+  }
   return objectiveStateKey(selectedObjectiveState);
 }
 
@@ -834,6 +970,10 @@ btnBenchmark.addEventListener("click", runBenchmark);
 btnRun.addEventListener("click", runBOAgent);
 btnSave.addEventListener("click", saveSettings);
 btnReset.addEventListener("click", () => applyDefaults({ defaults }));
+if (objectiveAuthorMode) objectiveAuthorMode.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-objective-mode]");
+  if (button) setObjectiveAuthoringMode(button.dataset.objectiveMode);
+});
 if (objectiveVersionSelect) objectiveVersionSelect.addEventListener("change", () => {
   const state = (objectiveRuntimeStatus.objective_states || []).find((item) => objectiveStateKey(item) === objectiveVersionSelect.value);
   renderSelectedObjective(state || null);
@@ -846,5 +986,8 @@ if (btnObjectiveValidate) btnObjectiveValidate.addEventListener("click", () => r
 if (btnObjectivePreview) btnObjectivePreview.addEventListener("click", () => runObjectiveAction("Evaluating preview observations", previewObjective));
 if (btnObjectiveApprove) btnObjectiveApprove.addEventListener("click", () => runObjectiveAction("Recording operator approval", approveObjective));
 if (btnObjectiveActivate) btnObjectiveActivate.addEventListener("click", () => runObjectiveAction("Binding objective to run", activateObjective));
+if (btnObjectiveManualSave) btnObjectiveManualSave.addEventListener("click", () => runObjectiveAction("Saving operator-authored objective", saveManualObjective));
+if (btnObjectiveLoadRevision) btnObjectiveLoadRevision.addEventListener("click", () => runObjectiveAction("Loading selected objective for revision", async () => loadSelectedObjectiveAsRevision()));
 
+setObjectiveAuthoringMode("ai");
 loadConfig();

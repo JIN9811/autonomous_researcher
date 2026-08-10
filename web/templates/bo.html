@@ -61,23 +61,83 @@ Modification guide:
           </div>
         </header>
 
-        <div class="bo-objective-compose-grid">
-          <label class="planning-message-label bo-objective-intent">
-            Research Intent
-            <textarea id="objective-intent-input" class="text-input" rows="4" placeholder="예: 압축강도를 최대화하되 변위와 프린팅 품질 제약을 만족하도록 구성"></textarea>
-          </label>
-          <div class="bo-objective-binding-grid">
-            <label>Operator<input id="objective-operator-input" class="text-input" type="text" value="JIN" /></label>
-            <label>Run ID<input id="objective-run-id-input" class="text-input" type="text" placeholder="run-..." /></label>
-            <label>Objective Version<select id="objective-version-select" class="text-input"><option value="">No saved objective</option></select></label>
-          </div>
+        <nav id="objective-author-mode" class="bo-objective-mode-switch" aria-label="Objective authoring mode">
+          <button class="bo-objective-mode active" type="button" data-objective-mode="ai" aria-selected="true">AI Compose</button>
+          <button class="bo-objective-mode" type="button" data-objective-mode="visual" aria-selected="false">Visual Builder</button>
+          <button class="bo-objective-mode" type="button" data-objective-mode="json" aria-selected="false">Advanced JSON</button>
+        </nav>
+
+        <div class="bo-objective-binding-grid bo-objective-common-binding">
+          <label>Operator<input id="objective-operator-input" class="text-input" type="text" value="JIN" /></label>
+          <label>Run ID<input id="objective-run-id-input" class="text-input" type="text" placeholder="run-..." /></label>
+          <label>Objective Version<select id="objective-version-select" class="text-input"><option value="">No saved objective</option></select></label>
         </div>
 
-        <div class="button-row bo-objective-compose-actions">
-          <button id="btn-objective-compose" class="btn primary">Compose Draft</button>
-          <button id="btn-objective-revise" class="btn" disabled>Revise Version</button>
-          <button id="btn-objective-refresh" class="btn">Refresh State</button>
-        </div>
+        <section id="objective-ai-compose-panel" class="bo-objective-author-panel" data-author-panel="ai">
+          <div class="bo-objective-compose-grid">
+            <label class="planning-message-label bo-objective-intent">
+              Research Intent
+              <textarea id="objective-intent-input" class="text-input" rows="4" placeholder="예: 압축강도를 최대화하되 변위와 프린팅 품질 제약을 만족하도록 구성"></textarea>
+            </label>
+          </div>
+
+          <div class="button-row bo-objective-compose-actions">
+            <button id="btn-objective-compose" class="btn primary">Compose Draft</button>
+            <button id="btn-objective-revise" class="btn" disabled>Revise Version</button>
+            <button id="btn-objective-refresh" class="btn">Refresh State</button>
+          </div>
+        </section>
+
+        <section id="objective-manual-builder" class="bo-objective-author-panel bo-manual-builder" data-author-panel="manual" hidden>
+          <div id="objective-manual-metadata" class="bo-manual-metadata">
+            <label>Objective ID<input id="objective-manual-id" class="text-input" type="text" value="manual-objective" autocomplete="off" /></label>
+            <label>Name<input id="objective-manual-name" class="text-input" type="text" placeholder="Operator-facing objective name" /></label>
+            <label>Direction<select id="objective-manual-direction" class="text-input"><option value="maximize">maximize</option><option value="minimize">minimize</option></select></label>
+            <label class="bo-manual-description">Description<input id="objective-manual-description" class="text-input" type="text" placeholder="What this score represents" /></label>
+            <label class="bo-manual-intent">Intent note<input id="objective-manual-intent" class="text-input" type="text" placeholder="Why this objective is being used" /></label>
+          </div>
+
+          <div id="objective-visual-editor" class="bo-manual-editor" data-manual-mode="visual">
+            <article class="bo-objective-card bo-builder-card">
+              <div class="bo-builder-heading">
+                <div><span class="eyebrow">Numeric AST</span><h3>Expression</h3></div>
+                <span id="objective-builder-dirty" class="runtime-chip idle">saved</span>
+              </div>
+              <div id="objective-expression-builder" class="bo-expression-builder" aria-live="polite"></div>
+            </article>
+            <article class="bo-objective-card bo-builder-card">
+              <div class="bo-builder-heading">
+                <div><span class="eyebrow">Boolean AST</span><h3>Constraints</h3></div>
+                <button id="btn-objective-add-constraint" class="btn compact" type="button">Add Constraint</button>
+              </div>
+              <div id="objective-constraints-builder" class="bo-expression-builder bo-constraint-builder"></div>
+            </article>
+          </div>
+
+          <div id="objective-json-panel" class="bo-manual-json-panel" data-manual-mode="json" hidden>
+            <div class="bo-builder-heading">
+              <div><span class="eyebrow">Canonical Contract</span><h3>objective_spec.v1</h3></div>
+              <div class="button-row compact-row">
+                <button id="btn-objective-json-format" class="btn compact" type="button">Format JSON</button>
+                <button id="btn-objective-json-restore" class="btn compact" type="button">Restore Last Valid</button>
+                <button id="btn-objective-json-apply" class="btn primary compact" type="button">Apply to Builder</button>
+              </div>
+            </div>
+            <textarea id="objective-json-editor" class="text-input bo-objective-json-editor" rows="22" spellcheck="false" aria-label="Complete objective_spec.v1 JSON"></textarea>
+            <div id="objective-json-errors" class="bo-objective-json-errors" aria-live="polite"></div>
+          </div>
+
+          <footer class="bo-manual-actions">
+            <div>
+              <strong id="objective-manual-revision-label">New objective draft</strong>
+              <p id="objective-manual-status" class="hint">Visual and JSON edits share one unsaved draft.</p>
+            </div>
+            <div class="button-row compact-row">
+              <button id="btn-objective-load-revision" class="btn" type="button" disabled>Load Selected as Revision</button>
+              <button id="btn-objective-manual-save" class="btn primary" type="button">Create Manual Draft</button>
+            </div>
+          </footer>
+        </section>
 
         <div class="bo-objective-inspection-grid">
           <article class="bo-objective-card">
@@ -269,6 +329,7 @@ Modification guide:
         </article>
       </section>
     </main>
+    <script src="/static/objective_builder.js"></script>
     <script src="/static/bo.js"></script>
   </body>
 </html>

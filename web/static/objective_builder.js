@@ -75,6 +75,50 @@
     return new Map((manifest?.operators || []).map((item) => [item.op, item]));
   }
 
+  function createDefaultNode(operator, manifest, metrics) {
+    const descriptors = descriptorMap(manifest);
+    const descriptor = descriptors.get(operator);
+    if (!descriptor || descriptor.enabled === false) throw new Error(`operator is not available: ${operator}`);
+    if (operator === "literal") return { op: "literal", value: 0, unit: "1" };
+    if (operator === "metric") {
+      const metricId = metrics?.[0]?.metric_id;
+      if (!metricId) throw new Error("Metric Registry is empty");
+      return { op: "metric", metric_id: metricId };
+    }
+
+    const node = { op: operator };
+    (descriptor.fields || []).forEach((field) => {
+      if (field.default !== undefined) node[field.name] = clone(field.default);
+    });
+    const numericChild = () => ({ op: "literal", value: 0, unit: "1" });
+    const booleanChild = () => {
+      const comparison = ["greater_equal", "equal", "less_equal"].find((name) => descriptors.get(name)?.enabled !== false && descriptors.has(name));
+      return comparison
+        ? { op: comparison, args: [numericChild(), numericChild()] }
+        : numericChild();
+    };
+    const contract = descriptor.children || { mode: "none" };
+    if (contract.mode === "arg") node.arg = operator === "not" ? booleanChild() : numericChild();
+    if (contract.mode === "args") {
+      const makeChild = ["and", "or"].includes(operator) ? booleanChild : numericChild;
+      node.args = Array.from({ length: Number(contract.minimum || 0) }, makeChild);
+    }
+    if (contract.mode === "slots") {
+      (contract.slots || []).forEach((slot) => { node[slot] = numericChild(); });
+    }
+    if (contract.mode === "terms") {
+      node.terms = [{ name: "term_1", weight: 1, expression: numericChild() }];
+    }
+    if (contract.mode === "piecewise") {
+      node.value = numericChild();
+      node.points = [
+        { x: numericChild(), y: 0 },
+        { x: { op: "literal", value: 1, unit: "1" }, y: 1 },
+      ];
+    }
+    return node;
+  }
+
   function validateSpec(spec, options) {
     const { manifest, metrics, allowIncomplete = false } = options;
     const operators = descriptorMap(manifest);
@@ -212,7 +256,7 @@
         storage.removeItem(storageKey);
         return;
       }
-      storage.setItem(storageKey, JSON.stringify({ lastValidSpec, dirty: true }));
+      storage.setItem(storageKey, JSON.stringify({ lastValidSpec, jsonBuffer, jsonErrors, dirty: true }));
     }
 
     function replaceCanonical(next, { persistState = true, allowIncomplete = true } = {}) {
@@ -238,7 +282,8 @@
         const errors = validateSpec(payload.lastValidSpec, { manifest, metrics, allowIncomplete: true });
         if (!errors.length && payload.dirty === true) {
           lastValidSpec = clone(payload.lastValidSpec);
-          jsonBuffer = pretty(lastValidSpec);
+          jsonBuffer = typeof payload.jsonBuffer === "string" ? payload.jsonBuffer : pretty(lastValidSpec);
+          jsonErrors = Array.isArray(payload.jsonErrors) ? clone(payload.jsonErrors) : [];
           dirty = true;
         }
       } catch (_) {
@@ -262,6 +307,11 @@
       replaceNode(path, node) {
         const next = clone(lastValidSpec);
         setAt(next, path, clone(node));
+        replaceCanonical(next);
+      },
+      updateValue(path, value) {
+        const next = clone(lastValidSpec);
+        setAt(next, path, clone(value));
         replaceCanonical(next);
       },
       addChild(path, node) {
@@ -309,6 +359,47 @@
         replaceCanonical(next);
         return true;
       },
+      reparentNode(sourcePath, targetPath) {
+        const sourceParts = pathParts(sourcePath);
+        const targetParts = pathParts(targetPath);
+        if (!sourceParts.length || sourceParts.join(".") === "expression") {
+          throw new Error("root expression cannot be reparented");
+        }
+        if (targetParts.join(".").startsWith(`${sourceParts.join(".")}.`)) {
+          throw new Error("a node cannot be moved into its own subtree");
+        }
+        const next = clone(lastValidSpec);
+        const sourceNode = clone(getAt(next, sourceParts));
+        const targetNode = getAt(next, targetParts);
+        const descriptor = descriptorMap(manifest).get(targetNode?.op);
+        if (!sourceNode || !descriptor || descriptor.enabled === false) {
+          throw new Error("source or target node is not available");
+        }
+        const { parent, key } = parentAt(next, sourceParts);
+        if (Array.isArray(parent) && Number.isInteger(key)) parent.splice(key, 1);
+        else delete parent[key];
+
+        const contract = descriptor.children || { mode: "none" };
+        if (contract.mode === "args") {
+          if (!Array.isArray(targetNode.args)) targetNode.args = [];
+          targetNode.args.push(sourceNode);
+        } else if (contract.mode === "arg") {
+          if (targetNode.arg !== undefined) throw new Error("target child slot is already populated");
+          targetNode.arg = sourceNode;
+        } else if (contract.mode === "slots") {
+          const slot = (contract.slots || []).find((name) => targetNode[name] === undefined);
+          if (!slot) throw new Error("target child slots are already populated");
+          targetNode[slot] = sourceNode;
+        } else if (contract.mode === "terms") {
+          if (!Array.isArray(targetNode.terms)) targetNode.terms = [];
+          targetNode.terms.push({ name: `term_${targetNode.terms.length + 1}`, weight: 1, expression: sourceNode });
+        } else if (contract.mode === "piecewise" && targetNode.value === undefined) {
+          targetNode.value = sourceNode;
+        } else {
+          throw new Error("target operator cannot accept the subtree");
+        }
+        replaceCanonical(next);
+      },
       removeNode(path) {
         const next = clone(lastValidSpec);
         const { parent, key } = parentAt(next, path);
@@ -328,6 +419,30 @@
           throw failure;
         }
         replaceCanonical(probe);
+      },
+      addPoint(path) {
+        const next = clone(lastValidSpec);
+        const node = getAt(next, path);
+        if (node?.op !== "piecewise_penalty") throw new Error("piecewise penalty node is required");
+        if (!Array.isArray(node.points)) node.points = [];
+        const previous = node.points.at(-1);
+        const previousX = previous?.x?.op === "literal" ? Number(previous.x.value) : node.points.length - 1;
+        const previousY = Number(previous?.y);
+        node.points.push({
+          x: { op: "literal", value: Number.isFinite(previousX) ? previousX + 1 : node.points.length, unit: previous?.x?.unit || "1" },
+          y: Number.isFinite(previousY) ? previousY + 1 : node.points.length,
+        });
+        replaceCanonical(next);
+      },
+      removePoint(path, index) {
+        const next = clone(lastValidSpec);
+        const node = getAt(next, path);
+        if (node?.op !== "piecewise_penalty" || !Array.isArray(node.points)) {
+          throw new Error("piecewise penalty node is required");
+        }
+        if (node.points.length <= 2) throw new Error("piecewise penalty requires at least two points");
+        node.points.splice(Number(index), 1);
+        replaceCanonical(next);
       },
       setJsonBuffer(text) {
         jsonBuffer = String(text ?? "");
@@ -362,6 +477,26 @@
         persist();
         return clone(lastValidSpec);
       },
+      loadRevision(serverSpec) {
+        const errors = validateSpec(serverSpec, { manifest, metrics, allowIncomplete: false });
+        if (errors.length) throw new Error(errors[0].message);
+        lastValidSpec = clone(serverSpec);
+        lastValidSpec.lifecycle = "draft";
+        lastValidSpec.metadata = {
+          ...(lastValidSpec.metadata || {}),
+          authoring_mode: "manual",
+          parent_objective_id: serverSpec.objective_id,
+          parent_version: serverSpec.version,
+        };
+        jsonBuffer = pretty(lastValidSpec);
+        selectedObjective = {
+          objective_id: serverSpec.objective_id,
+          version: serverSpec.version,
+        };
+        jsonErrors = [];
+        dirty = true;
+        persist();
+      },
       markSaved(serverSpec) {
         const errors = validateSpec(serverSpec, { manifest, metrics, allowIncomplete: false });
         if (errors.length) throw new Error(errors[0].message);
@@ -378,9 +513,381 @@
     };
   }
 
+  function mountEditor(options) {
+    const state = options.state;
+    const manifest = options.manifest;
+    const metrics = options.metrics || [];
+    const elements = options.elements || {};
+    const operators = descriptorMap(manifest);
+    const doc = elements.expression?.ownerDocument || document;
+    let dragPath = "";
+
+    function button(label, action, title = label) {
+      const control = doc.createElement("button");
+      control.type = "button";
+      control.className = "bo-tree-action";
+      control.textContent = label;
+      control.title = title;
+      control.setAttribute("aria-label", title);
+      control.addEventListener("click", action);
+      return control;
+    }
+
+    function notify(message = "") {
+      if (elements.status && message) elements.status.textContent = message;
+      if (typeof options.onChange === "function") options.onChange(state.snapshot());
+    }
+
+    function runMutation(action, successMessage) {
+      try {
+        action();
+        render();
+        notify(successMessage);
+      } catch (error) {
+        if (elements.status) elements.status.textContent = `Error: ${error.message || error}`;
+      }
+    }
+
+    function inputFor(path, value, type = "text", config = {}) {
+      const input = doc.createElement("input");
+      input.className = "bo-tree-field";
+      input.type = type;
+      input.value = value ?? "";
+      if (config.min !== undefined) input.min = config.min;
+      if (config.max !== undefined) input.max = config.max;
+      if (config.step !== undefined) input.step = config.step;
+      input.addEventListener("change", () => {
+        const next = type === "number" ? Number(input.value) : input.value;
+        runMutation(() => state.updateValue(path, next), "Manual objective updated.");
+      });
+      return input;
+    }
+
+    function selectFor(path, value, choices, className = "bo-tree-field") {
+      const select = doc.createElement("select");
+      select.className = className;
+      choices.forEach((choice) => {
+        const option = doc.createElement("option");
+        const resolvedValue = typeof choice === "object" ? choice.value : choice;
+        option.value = resolvedValue;
+        option.textContent = typeof choice === "object" ? choice.label : choice;
+        option.selected = String(resolvedValue) === String(value);
+        select.append(option);
+      });
+      select.addEventListener("change", () => runMutation(
+        () => state.updateValue(path, select.value),
+        "Manual objective updated.",
+      ));
+      return select;
+    }
+
+    function operatorSelect(node, path, expectedKind) {
+      const choices = (manifest.operators || [])
+        .filter((item) => item.enabled !== false && item.result_kind === expectedKind)
+        .map((item) => ({ value: item.op, label: item.label || item.op }));
+      const select = doc.createElement("select");
+      select.className = "bo-tree-operator";
+      select.setAttribute("aria-label", `Operator at ${path}`);
+      choices.forEach((choice) => {
+        const option = doc.createElement("option");
+        option.value = choice.value;
+        option.textContent = choice.label;
+        option.selected = choice.value === node.op;
+        select.append(option);
+      });
+      select.addEventListener("change", () => runMutation(
+        () => state.replaceNode(path, createDefaultNode(select.value, manifest, metrics)),
+        `Operator changed to ${select.value}.`,
+      ));
+      return select;
+    }
+
+    function canListOperate(path) {
+      return /\.(args|constraints)\.\d+$/.test(path);
+    }
+
+    function renderScalarFields(node, path, descriptor) {
+      const fields = doc.createElement("div");
+      fields.className = "bo-tree-fields";
+      if (node.op === "literal") {
+        const valueLabel = doc.createElement("label");
+        valueLabel.textContent = "Value";
+        valueLabel.append(inputFor(`${path}.value`, node.value, "number", { step: "any" }));
+        const unitLabel = doc.createElement("label");
+        unitLabel.textContent = "Unit";
+        unitLabel.append(selectFor(`${path}.unit`, node.unit || "1", manifest.units || []));
+        fields.append(valueLabel, unitLabel);
+      } else if (node.op === "metric") {
+        const label = doc.createElement("label");
+        label.textContent = "Registered metric";
+        label.append(selectFor(
+          `${path}.metric_id`,
+          node.metric_id,
+          metrics.map((metric) => ({
+            value: metric.metric_id,
+            label: `${metric.label || metric.metric_id} [${metric.unit || "1"}]`,
+          })),
+        ));
+        fields.append(label);
+      }
+      (descriptor.fields || []).forEach((field) => {
+        if (["value", "unit", "metric_id"].includes(field.name)) return;
+        const label = doc.createElement("label");
+        label.textContent = field.name.replaceAll("_", " ");
+        if (field.type === "choice") {
+          label.append(selectFor(`${path}.${field.name}`, node[field.name] ?? field.default, field.choices || []));
+        } else {
+          label.append(inputFor(`${path}.${field.name}`, node[field.name] ?? field.default, "number", {
+            min: field.min,
+            max: field.max,
+            step: "any",
+          }));
+        }
+        fields.append(label);
+      });
+      return fields;
+    }
+
+    function appendNodeControls(container, node, path, descriptor) {
+      const mode = descriptor.children?.mode || "none";
+      const comparisons = new Set(["less_than", "less_equal", "greater_than", "greater_equal", "equal"]);
+      const canAdd = mode === "terms"
+        || (mode === "args" && !comparisons.has(node.op))
+        || (mode === "arg" && node.arg === undefined)
+        || (mode === "slots" && (descriptor.children.slots || []).some((slot) => node[slot] === undefined));
+      if (canAdd) {
+        container.append(button("+", () => runMutation(
+          () => state.addChild(path, { op: "literal", value: 0, unit: "1" }),
+          "Child expression added.",
+        ), "Add child expression"));
+      }
+      if (mode === "piecewise") {
+        container.append(button("+ point", () => runMutation(
+          () => state.addPoint(path),
+          "Piecewise point added.",
+        ), "Add piecewise point"));
+      }
+      if (canListOperate(path)) {
+        container.append(
+          button("↑", () => runMutation(() => state.moveNode(path, -1), "Node moved up."), "Move node up"),
+          button("↓", () => runMutation(() => state.moveNode(path, 1), "Node moved down."), "Move node down"),
+          button("⧉", () => runMutation(() => state.duplicateNode(path), "Node duplicated."), "Duplicate node"),
+          button("×", () => runMutation(() => state.removeNode(path), "Node removed."), "Delete node"),
+        );
+      }
+    }
+
+    function renderNode(node, path, expectedKind = "number", label = "") {
+      const descriptor = operators.get(node?.op);
+      const card = doc.createElement("article");
+      card.className = `bo-tree-node ${expectedKind === "boolean" ? "constraint" : "numeric"}`;
+      card.dataset.nodePath = path;
+      card.draggable = path !== "expression";
+      card.addEventListener("dragstart", (event) => {
+        dragPath = path;
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData("text/plain", path);
+        card.classList.add("dragging");
+      });
+      card.addEventListener("dragend", () => {
+        dragPath = "";
+        card.classList.remove("dragging");
+      });
+      card.addEventListener("dragover", (event) => {
+        if (!dragPath || !descriptor || descriptor.children?.mode === "none") return;
+        event.preventDefault();
+        card.classList.add("drag-target");
+      });
+      card.addEventListener("dragleave", () => card.classList.remove("drag-target"));
+      card.addEventListener("drop", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        card.classList.remove("drag-target");
+        const sourcePath = event.dataTransfer.getData("text/plain") || dragPath;
+        if (sourcePath && sourcePath !== path) {
+          runMutation(() => state.reparentNode(sourcePath, path), "Subtree moved.");
+        }
+      });
+
+      if (!descriptor) {
+        card.textContent = `Unknown operator: ${String(node?.op || "")}`;
+        return card;
+      }
+      const head = doc.createElement("header");
+      head.className = "bo-tree-node-head";
+      const identity = doc.createElement("div");
+      identity.className = "bo-tree-node-identity";
+      if (label) {
+        const slotLabel = doc.createElement("span");
+        slotLabel.className = "bo-tree-slot-label";
+        slotLabel.textContent = label;
+        identity.append(slotLabel);
+      }
+      identity.append(operatorSelect(node, path, expectedKind));
+      const controls = doc.createElement("div");
+      controls.className = "bo-tree-node-actions";
+      appendNodeControls(controls, node, path, descriptor);
+      head.append(identity, controls);
+      card.append(head, renderScalarFields(node, path, descriptor));
+
+      const children = doc.createElement("div");
+      children.className = "bo-tree-children";
+      const contract = descriptor.children || { mode: "none" };
+      const nestedKind = ["and", "or", "not"].includes(node.op) ? "boolean" : "number";
+      if (contract.mode === "arg" && node.arg) children.append(renderNode(node.arg, `${path}.arg`, nestedKind, "arg"));
+      if (contract.mode === "args") {
+        (node.args || []).forEach((child, index) => children.append(renderNode(child, `${path}.args.${index}`, nestedKind, `arg ${index + 1}`)));
+      }
+      if (contract.mode === "slots") {
+        (contract.slots || []).forEach((slot) => {
+          if (node[slot]) children.append(renderNode(node[slot], `${path}.${slot}`, "number", slot));
+        });
+      }
+      if (contract.mode === "terms") {
+        (node.terms || []).forEach((term, index) => {
+          const wrapper = doc.createElement("section");
+          wrapper.className = "bo-weighted-term";
+          const termHead = doc.createElement("div");
+          termHead.className = "bo-weighted-term-head";
+          const termPath = `${path}.terms.${index}`;
+          const nameInput = inputFor(`${termPath}.name`, term.name, "text");
+          nameInput.setAttribute("aria-label", `Term ${index + 1} name`);
+          const weightInput = inputFor(`${termPath}.weight`, term.weight, "number", { step: "any" });
+          weightInput.setAttribute("aria-label", `Term ${index + 1} weight`);
+          termHead.append(nameInput, weightInput);
+          const termActions = doc.createElement("div");
+          termActions.className = "bo-tree-node-actions";
+          termActions.append(
+            button("↑", () => runMutation(() => state.moveNode(termPath, -1), "Term moved up."), "Move term up"),
+            button("↓", () => runMutation(() => state.moveNode(termPath, 1), "Term moved down."), "Move term down"),
+            button("⧉", () => runMutation(() => state.duplicateNode(termPath), "Term duplicated."), "Duplicate term"),
+            button("×", () => runMutation(() => state.removeNode(termPath), "Term removed."), "Delete term"),
+          );
+          termHead.append(termActions);
+          wrapper.append(termHead, renderNode(term.expression, `${termPath}.expression`, "number", `term ${index + 1}`));
+          children.append(wrapper);
+        });
+      }
+      if (contract.mode === "piecewise") {
+        if (node.value) children.append(renderNode(node.value, `${path}.value`, "number", "value"));
+        const points = doc.createElement("div");
+        points.className = "bo-piecewise-points";
+        (node.points || []).forEach((point, index) => {
+          const pointRow = doc.createElement("div");
+          pointRow.className = "bo-piecewise-point";
+          pointRow.append(renderNode(point.x, `${path}.points.${index}.x`, "number", `x ${index + 1}`));
+          pointRow.append(inputFor(`${path}.points.${index}.y`, point.y, "number", { step: "any" }));
+          const removePoint = button("×", () => runMutation(
+            () => state.removePoint(path, index),
+            "Piecewise point removed.",
+          ), `Delete piecewise point ${index + 1}`);
+          removePoint.disabled = (node.points || []).length <= 2;
+          pointRow.append(removePoint);
+          points.append(pointRow);
+        });
+        children.append(points);
+      }
+      if (children.childElementCount) card.append(children);
+      return card;
+    }
+
+    function renderJsonErrors(snapshot) {
+      if (!elements.jsonErrors) return;
+      elements.jsonErrors.replaceChildren();
+      if (!snapshot.jsonErrors.length) return;
+      snapshot.jsonErrors.forEach((item) => {
+        const row = doc.createElement("p");
+        row.textContent = `${item.path}: ${item.message}`;
+        elements.jsonErrors.append(row);
+      });
+    }
+
+    function syncMetadata(spec) {
+      const fields = elements.metadata || {};
+      Object.entries(fields).forEach(([key, input]) => {
+        if (input && doc.activeElement !== input) input.value = spec[key] ?? "";
+      });
+    }
+
+    function render() {
+      const snapshot = state.snapshot();
+      const spec = snapshot.lastValidSpec;
+      syncMetadata(spec);
+      if (elements.expression) elements.expression.replaceChildren(renderNode(spec.expression, "expression", "number", "root"));
+      if (elements.constraints) {
+        elements.constraints.replaceChildren();
+        if (!spec.constraints.length) {
+          const empty = doc.createElement("p");
+          empty.className = "bo-builder-empty";
+          empty.textContent = "No hard constraints. Add a Boolean expression when required.";
+          elements.constraints.append(empty);
+        } else {
+          spec.constraints.forEach((constraint, index) => elements.constraints.append(
+            renderNode(constraint, `constraints.${index}`, "boolean", `constraint ${index + 1}`),
+          ));
+        }
+      }
+      if (elements.json && doc.activeElement !== elements.json) elements.json.value = snapshot.jsonBuffer;
+      if (elements.dirty) {
+        elements.dirty.textContent = snapshot.dirty ? "unsaved" : "saved";
+        elements.dirty.className = `runtime-chip ${snapshot.dirty ? "warning" : "ok"}`;
+      }
+      renderJsonErrors(snapshot);
+      return snapshot;
+    }
+
+    Object.entries(elements.metadata || {}).forEach(([key, input]) => {
+      if (!input) return;
+      input.addEventListener("change", () => runMutation(
+        () => state.setMetadata({ [key]: input.value }),
+        "Objective metadata updated.",
+      ));
+    });
+    elements.addConstraint?.addEventListener("click", () => runMutation(
+      () => state.addConstraint(createDefaultNode("greater_equal", manifest, metrics)),
+      "Constraint added.",
+    ));
+    elements.json?.addEventListener("input", () => {
+      state.setJsonBuffer(elements.json.value);
+      if (elements.dirty) {
+        elements.dirty.textContent = "unsaved";
+        elements.dirty.className = "runtime-chip warning";
+      }
+    });
+    elements.applyJson?.addEventListener("click", () => {
+      const result = state.applyJson(elements.json.value);
+      if (result.ok) {
+        render();
+        notify("JSON applied to Visual Builder.");
+      } else {
+        renderJsonErrors(state.snapshot());
+        if (elements.status) elements.status.textContent = "JSON was not applied. Fix the listed errors.";
+      }
+    });
+    elements.restoreJson?.addEventListener("click", () => {
+      state.restoreLastValid();
+      render();
+      notify("Last valid objective restored.");
+    });
+    elements.formatJson?.addEventListener("click", () => {
+      try {
+        elements.json.value = pretty(JSON.parse(elements.json.value));
+        state.setJsonBuffer(elements.json.value);
+        if (elements.status) elements.status.textContent = "JSON formatted. Apply it to update the builder.";
+      } catch (error) {
+        if (elements.status) elements.status.textContent = `JSON parse error: ${error.message || error}`;
+      }
+    });
+
+    render();
+    return { render };
+  }
+
   return {
     STORAGE_KEY,
+    createDefaultNode,
     createState,
+    mountEditor,
     defaultSpec,
     validateSpec,
   };

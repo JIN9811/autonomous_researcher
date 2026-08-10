@@ -2,7 +2,7 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { createState } = require("../../web/static/objective_builder.js");
+const { createDefaultNode, createState } = require("../../web/static/objective_builder.js");
 
 function manifest() {
   return {
@@ -16,6 +16,7 @@ function manifest() {
       { op: "add", enabled: true, kind: "expression", result_kind: "number", children: { mode: "args", minimum: 2 }, fields: [] },
       { op: "square", enabled: true, kind: "expression", result_kind: "number", children: { mode: "arg", slots: ["arg"] }, fields: [] },
       { op: "weighted_sum", enabled: true, kind: "expression", result_kind: "number", children: { mode: "terms", minimum: 1 }, fields: [] },
+      { op: "piecewise_penalty", enabled: true, kind: "expression", result_kind: "number", children: { mode: "piecewise", minimum_points: 2 }, fields: [] },
       { op: "greater_equal", enabled: true, kind: "expression", result_kind: "boolean", children: { mode: "args", minimum: 2 }, fields: [] },
       { op: "and", enabled: true, kind: "expression", result_kind: "boolean", children: { mode: "args", minimum: 1 }, fields: [] },
     ],
@@ -61,7 +62,8 @@ test("visual mutation updates canonical JSON without mutating prior snapshot", (
 });
 
 test("invalid JSON preserves the last valid visual tree", () => {
-  const state = createState({ manifest: manifest(), metrics: metrics(), storage: memoryStorage() });
+  const storage = memoryStorage();
+  const state = createState({ manifest: manifest(), metrics: metrics(), storage });
   state.replaceNode("expression", { op: "metric", metric_id: "compressive_strength_mpa" });
   const before = state.snapshot().lastValidSpec;
 
@@ -71,6 +73,9 @@ test("invalid JSON preserves the last valid visual tree", () => {
   assert.match(result.errors[0].message, /JSON|Unexpected|position|end/i);
   assert.deepEqual(state.snapshot().lastValidSpec, before);
   assert.equal(state.snapshot().jsonBuffer, '{"expression":');
+  const restored = createState({ manifest: manifest(), metrics: metrics(), storage });
+  assert.equal(restored.snapshot().jsonBuffer, '{"expression":');
+  assert.deepEqual(restored.snapshot().lastValidSpec, before);
   state.restoreLastValid();
   assert.deepEqual(JSON.parse(state.snapshot().jsonBuffer), before);
 });
@@ -144,6 +149,19 @@ test("weighted terms and boolean constraint roots keep their required shape", ()
   );
 });
 
+test("piecewise points can be added and removed without replacing the value expression", () => {
+  const state = createState({ manifest: manifest(), metrics: metrics(), storage: memoryStorage() });
+  state.replaceNode("expression", createDefaultNode("piecewise_penalty", manifest(), metrics()));
+
+  state.addPoint("expression");
+  state.removePoint("expression", 1);
+  const expression = state.snapshot().lastValidSpec.expression;
+
+  assert.equal(expression.value.op, "literal");
+  assert.equal(expression.points.length, 2);
+  assert.deepEqual(expression.points.map((point) => point.y), [0, 2]);
+});
+
 test("saved server state clears dirty flag and browser storage restores unsaved work", () => {
   const storage = memoryStorage();
   const first = createState({ manifest: manifest(), metrics: metrics(), storage });
@@ -161,4 +179,69 @@ test("saved server state clears dirty flag and browser storage restores unsaved 
   assert.equal(restored.snapshot().dirty, false);
   assert.equal(restored.snapshot().selectedObjective.version, 4);
   assert.equal(storage.dump()["atr.objective-builder.v1"], undefined);
+});
+
+test("operator defaults and field updates preserve valid node shapes", () => {
+  const contract = manifest();
+  const availableMetrics = metrics();
+  const sum = createDefaultNode("weighted_sum", contract, availableMetrics);
+  assert.deepEqual(sum, {
+    op: "weighted_sum",
+    terms: [
+      {
+        name: "term_1",
+        weight: 1,
+        expression: { op: "literal", value: 0, unit: "1" },
+      },
+    ],
+  });
+  const state = createState({ manifest: contract, metrics: availableMetrics, storage: memoryStorage() });
+  state.replaceNode("expression", createDefaultNode("metric", contract, availableMetrics));
+  state.updateValue("expression.metric_id", "displacement_at_peak_mm");
+  assert.equal(state.snapshot().lastValidSpec.expression.metric_id, "displacement_at_peak_mm");
+});
+
+test("loading a saved objective for revision keeps parent identity without overwriting it", () => {
+  const state = createState({ manifest: manifest(), metrics: metrics(), storage: memoryStorage() });
+  const saved = {
+    schema_version: "objective_spec.v1",
+    objective_id: "saved-objective",
+    version: 3,
+    direction: "maximize",
+    expression: { op: "metric", metric_id: "compressive_strength_mpa" },
+    constraints: [],
+    lifecycle: "approved",
+    created_by: "llm",
+  };
+
+  state.loadRevision(saved);
+  const snapshot = state.snapshot();
+
+  assert.equal(snapshot.lastValidSpec.objective_id, "saved-objective");
+  assert.equal(snapshot.lastValidSpec.version, 3);
+  assert.deepEqual(snapshot.selectedObjective, { objective_id: "saved-objective", version: 3 });
+  assert.equal(snapshot.dirty, true);
+});
+
+test("reparenting moves a compatible subtree without copying it", () => {
+  const state = createState({ manifest: manifest(), metrics: metrics(), storage: memoryStorage() });
+  state.replaceNode("expression", {
+    op: "add",
+    args: [
+      { op: "square", arg: { op: "metric", metric_id: "compressive_strength_mpa" } },
+      {
+        op: "add",
+        args: [
+          { op: "literal", value: 1, unit: "1" },
+          { op: "literal", value: 2, unit: "1" },
+        ],
+      },
+    ],
+  });
+
+  state.reparentNode("expression.args.0.arg", "expression.args.1");
+  const expression = state.snapshot().lastValidSpec.expression;
+
+  assert.equal(expression.args[0].arg, undefined);
+  assert.equal(expression.args[1].args[2].metric_id, "compressive_strength_mpa");
 });

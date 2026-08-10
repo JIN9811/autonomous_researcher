@@ -66,7 +66,7 @@ _FIELD_DESCRIPTORS: dict[str, list[dict[str, Any]]] = {
     "ratio": [{"name": "epsilon", "type": "positive_number", "required": True, "default": 1e-9}],
     "power": [{"name": "exponent", "type": "number", "required": True, "default": 2.0, "min": -4.0, "max": 4.0}],
     "hinge_penalty": [{"name": "side", "type": "choice", "required": True, "default": "above", "choices": ["above", "below"]}],
-    "aggregate": [{"name": "method", "type": "choice", "required": True, "default": "mean", "choices": ["mean", "median", "min", "max"]}],
+    "aggregate": [{"name": "method", "type": "choice", "required": True, "default": "mean", "choices": ["mean", "sum", "product"]}],
 }
 
 
@@ -74,8 +74,7 @@ def _children_for(operator: str) -> dict[str, Any]:
     if operator in {"literal", "metric", "reference"}:
         return {"mode": "none"}
     if operator in _VARIADIC_OPERATORS:
-        minimum = 1 if operator in {"and", "or"} else 2
-        return {"mode": "args", "minimum": minimum}
+        return {"mode": "args", "minimum": 2}
     if operator in _UNARY_OPERATORS:
         return {"mode": "arg", "slots": ["arg"]}
     if operator in _SLOT_OPERATORS:

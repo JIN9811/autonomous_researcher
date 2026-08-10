@@ -33,6 +33,37 @@ def test_bo_workspace_contains_objective_compiler_surfaces() -> None:
     assert "objective-template" not in html
 
 
+def test_bo_workspace_contains_manual_visual_and_json_authoring() -> None:
+    html = TestClient(app).get("/bo").text
+
+    for element_id in (
+        "objective-author-mode",
+        "objective-manual-builder",
+        "objective-manual-metadata",
+        "objective-expression-builder",
+        "objective-constraints-builder",
+        "objective-json-editor",
+        "objective-json-errors",
+        "btn-objective-json-apply",
+        "btn-objective-json-restore",
+        "btn-objective-json-format",
+        "btn-objective-manual-save",
+    ):
+        assert f'id="{element_id}"' in html
+    assert html.index('<script src="/static/objective_builder.js"') < html.index('<script src="/static/bo.js"')
+    assert "objective-function-body" not in html
+
+    script = TestClient(app).get("/static/bo.js").text
+    for contract in (
+        'getJson("/api/objectives/authoring-contract")',
+        "ObjectiveBuilder.createState",
+        "ObjectiveBuilder.mountEditor",
+        'postJson("/api/objectives/manual"',
+        "loadRevision",
+    ):
+        assert contract in script
+
+
 def test_bo_config_endpoint_reports_defaults() -> None:
     client = TestClient(app)
 

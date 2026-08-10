@@ -126,6 +126,9 @@ def test_objective_api_exposes_server_owned_authoring_contract(tmp_path, monkeyp
     assert operators["add"]["children"] == {"mode": "args", "minimum": 2}
     assert operators["weighted_sum"]["children"]["mode"] == "terms"
     assert operators["divide"]["children"]["slots"] == ["numerator", "denominator"]
+    assert operators["and"]["children"] == {"mode": "args", "minimum": 2}
+    aggregate_method = next(field for field in operators["aggregate"]["fields"] if field["name"] == "method")
+    assert aggregate_method["choices"] == ["mean", "sum", "product"]
     assert operators["reference"]["enabled"] is False
 
 
