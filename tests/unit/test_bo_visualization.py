@@ -113,6 +113,20 @@ def test_build_bo_visualization_emits_shared_finite_contract() -> None:
     assert payload["backend"]["model"] == "pool_projection"
 
 
+def test_build_bo_visualization_includes_backend_projection_for_each_numeric_parameter() -> None:
+    payload = build_bo_visualization(
+        run_id="run-bo-slices",
+        objective=_objective(),
+        parameter_space={"relative_density": [0.2, 0.4], "cell_size_mm": [5.0, 10.0]},
+        trace=_trace(),
+        selected_parameter="relative_density",
+    )
+
+    assert set(payload["parameter_slices"]) == {"relative_density", "cell_size_mm"}
+    assert payload["parameter_slices"]["cell_size_mm"]["posterior"]["x"] == [5.0, 5.0, 5.0]
+    assert payload["parameter_slices"]["cell_size_mm"]["next_point"]["x"] == 5.0
+
+
 def test_build_bo_visualization_selects_largest_numeric_range_deterministically() -> None:
     payload = build_bo_visualization(
         run_id="run-bo-2",

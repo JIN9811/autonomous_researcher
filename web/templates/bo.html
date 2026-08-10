@@ -314,14 +314,26 @@ Modification guide:
             <h3>Best-So-Far</h3>
             <div id="bo-curve-table" class="log-viewer compact-log"></div>
           </div>
-          <div class="printer-subsection">
-            <h3>Surrogate / Acquisition Trace</h3>
-            <p class="hint">
-              각 BO step에서 현재까지 평가한 점으로 surrogate mean과 acquisition curve를 계산하고, 선택된 다음 후보를 표시합니다.
-            </p>
-            <div id="bo-surrogate-plot" class="bo-plot-stack">No BO trace yet.</div>
+          <article id="bo-objective-equation-card" class="printer-subsection bo-viz-workspace-card">
+            <div class="bo-viz-empty">Run BO to bind an objective equation.</div>
+          </article>
+          <article id="bo-posterior-card" class="printer-subsection bo-viz-workspace-card">
+            <header class="bo-viz-workspace-head">
+              <div>
+                <span class="bo-viz-kicker">LIVE SURROGATE</span>
+                <h3>Posterior and Acquisition</h3>
+              </div>
+              <div class="bo-viz-toolbar">
+                <label>View<select id="bo-posterior-view" class="text-input compact-select"><option value="parameter_slice">Parameter slice</option><option value="candidate_index">Candidate pool index</option></select></label>
+                <label>Parameter<select id="bo-posterior-parameter" class="text-input compact-select"><option value="">Auto</option></select></label>
+                <label>Step<select id="bo-posterior-step" class="text-input compact-select"><option value="">Latest</option></select></label>
+                <button id="bo-posterior-latest" class="btn compact" type="button">Latest</button>
+              </div>
+            </header>
+            <div id="bo-posterior-plot" class="bo-viz-plot-host"><div class="bo-viz-empty">Waiting for a completed BO step.</div></div>
+            <div id="bo-posterior-artifacts" class="bo-viz-artifacts"></div>
             <div id="bo-selected-points" class="bo-selected-points"></div>
-          </div>
+          </article>
           <div class="printer-subsection">
             <h3>Raw Result</h3>
             <pre id="bo-result-json" class="log-viewer compact-log">{}</pre>
@@ -330,6 +342,7 @@ Modification guide:
       </section>
     </main>
     <script src="/static/objective_builder.js"></script>
+    <script src="/static/bo_visualization.js"></script>
     <script src="/static/bo.js"></script>
   </body>
 </html>

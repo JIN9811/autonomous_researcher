@@ -99,7 +99,7 @@
     return rows.map(([x, y]) => `${x.toFixed(2)},${y.toFixed(2)}`).join(" ");
   }
 
-  function plotData(payload, mode) {
+  function plotData(payload, mode, parameter) {
     if (mode === "candidate_index") {
       const audit = payload.candidate_index_view;
       const ids = Array.isArray(audit.candidate_ids) ? audit.candidate_ids.map(String) : [];
@@ -120,18 +120,23 @@
         candidateIds: ids, xLabel: "Candidate pool index", xUnit: "", mode,
       };
     }
+    const selectedSlice = parameter && payload.parameter_slices && payload.parameter_slices[parameter]
+      ? payload.parameter_slices[parameter]
+      : null;
+    const posterior = selectedSlice ? selectedSlice.posterior : payload.posterior;
+    const acquisition = selectedSlice ? selectedSlice.acquisition : payload.acquisition;
     return {
-      x: payload.posterior.x,
-      mean: payload.posterior.mean,
-      lower: payload.posterior.lower_95,
-      upper: payload.posterior.upper_95,
-      acquisition: payload.acquisition.value,
-      observations: Array.isArray(payload.observations) ? payload.observations : [],
-      currentBest: payload.current_best || {},
-      nextPoint: payload.next_point || {},
+      x: posterior.x,
+      mean: posterior.mean,
+      lower: posterior.lower_95,
+      upper: posterior.upper_95,
+      acquisition: acquisition.value,
+      observations: Array.isArray(selectedSlice?.observations) ? selectedSlice.observations : (Array.isArray(payload.observations) ? payload.observations : []),
+      currentBest: selectedSlice?.current_best || payload.current_best || {},
+      nextPoint: selectedSlice?.next_point || payload.next_point || {},
       candidateIds: [],
-      xLabel: payload.view.x_label || payload.view.selected_parameter || "Design parameter",
-      xUnit: payload.view.x_unit && payload.view.x_unit !== "1" ? payload.view.x_unit : "",
+      xLabel: selectedSlice?.x_label || payload.view.x_label || payload.view.selected_parameter || "Design parameter",
+      xUnit: (selectedSlice?.x_unit || payload.view.x_unit) !== "1" ? (selectedSlice?.x_unit || payload.view.x_unit || "") : "",
       mode: "parameter_slice",
     };
   }
@@ -139,7 +144,7 @@
   function renderPlot(payload, options = {}) {
     if (!isValid(payload)) return '<div class="bo-viz-empty bo-viz-stale">BO visualization unavailable</div>';
     const mode = options.mode === "candidate_index" ? "candidate_index" : "parameter_slice";
-    const data = plotData(payload, mode);
+    const data = plotData(payload, mode, options.parameter);
     if (!data.x.length) return '<div class="bo-viz-empty">Waiting for first BO observation</div>';
 
     const width = 960;

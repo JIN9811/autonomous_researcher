@@ -41,7 +41,13 @@ const btnReset = document.getElementById("btn-bo-reset");
 const recommendationLabel = document.getElementById("bo-recommendation-label");
 const bestScoreLabel = document.getElementById("bo-best-score-label");
 const curveTable = document.getElementById("bo-curve-table");
-const surrogatePlot = document.getElementById("bo-surrogate-plot");
+const objectiveEquationCard = document.getElementById("bo-objective-equation-card");
+const posteriorPlot = document.getElementById("bo-posterior-plot");
+const posteriorView = document.getElementById("bo-posterior-view");
+const posteriorParameter = document.getElementById("bo-posterior-parameter");
+const posteriorStep = document.getElementById("bo-posterior-step");
+const posteriorLatest = document.getElementById("bo-posterior-latest");
+const posteriorArtifacts = document.getElementById("bo-posterior-artifacts");
 const selectedPoints = document.getElementById("bo-selected-points");
 const priorSummaryPanel = document.getElementById("bo-prior-summary");
 const reasoningPanel = document.getElementById("bo-reasoning-panel");
@@ -108,6 +114,10 @@ let objectiveAuthoringContract = null;
 let objectiveBuilderState = null;
 let objectiveBuilderView = null;
 let objectiveAuthoringMode = "ai";
+let currentVisualization = null;
+let currentVisualizationRunId = "";
+const visualizationByStep = new Map();
+let boEventSource = null;
 
 function setDot(el, state) {
   if (!el) return;
@@ -261,151 +271,92 @@ function boStrategyFromBenchmark(benchmark) {
   return firstKey ? strategies[firstKey] : null;
 }
 
-function finiteRange(values, fallback = [0, 1]) {
-  const nums = values.map(Number).filter(Number.isFinite);
-  if (!nums.length) return fallback;
-  let min = Math.min(...nums);
-  let max = Math.max(...nums);
-  if (Math.abs(max - min) < 1e-9) {
-    min -= 0.5;
-    max += 0.5;
-  }
-  return [min, max];
-}
-
-function scaleLinear(value, domain, range) {
-  const v = Number(value);
-  if (!Number.isFinite(v)) return range[0];
-  const t = (v - domain[0]) / Math.max(1e-9, domain[1] - domain[0]);
-  return range[0] + Math.max(0, Math.min(1, t)) * (range[1] - range[0]);
-}
-
-function polyline(points) {
-  return points.map(([x, y]) => `${numberText(x, 2)},${numberText(y, 2)}`).join(" ");
-}
-
-function compactParams(params) {
-  const p = params || {};
-  const keys = ["relative_density", "wall_thickness_mm", "cell_size_mm", "tpms_thickness", "orientation_deg", "anisotropy_ratio"];
-  return keys
-    .filter((key) => p[key] !== undefined && p[key] !== null)
-    .map((key) => `${key}=${numberText(p[key], 4)}`)
-    .join(", ");
-}
-
-function traceSvg(trace) {
-  const candidates = Array.isArray(trace.candidates) ? trace.candidates : [];
-  if (!candidates.length) {
-    return `<div class="bo-plot-empty">No candidate landscape for step ${escapeHtml(trace.step || "")}.</div>`;
-  }
-
-  const width = 840;
-  const height = 320;
-  const pad = { left: 52, right: 24, top: 28, bottom: 48 };
-  const plotW = width - pad.left - pad.right;
-  const plotH = height - pad.top - pad.bottom;
-  const xDomain = finiteRange(candidates.map((item) => item.x), [1, candidates.length || 1]);
-  const meanValues = candidates.flatMap((item) => [
-    Number(item.surrogate_mean) - Number(item.uncertainty || 0) * 0.12,
-    Number(item.surrogate_mean),
-    Number(item.surrogate_mean) + Number(item.uncertainty || 0) * 0.12,
-  ]);
-  const acqValues = candidates.map((item) => item.acquisition_value);
-  const scoreValues = (trace.evaluated_points || []).map((item) => item.score);
-  const meanDomain = finiteRange(meanValues, [0, 1]);
-  const acqDomain = finiteRange(acqValues, [0, 1]);
-  const scoreDomain = finiteRange(scoreValues.length ? scoreValues : meanValues, meanDomain);
-  const xScale = (value) => pad.left + scaleLinear(value, xDomain, [0, plotW]);
-  const yMean = (value) => pad.top + scaleLinear(value, meanDomain, [plotH, 0]);
-  const yAcq = (value) => pad.top + scaleLinear(value, acqDomain, [plotH, 0]);
-  const yScore = (value) => pad.top + scaleLinear(value, scoreDomain, [plotH, 0]);
-  const meanLine = candidates.map((item) => [xScale(item.x), yMean(item.surrogate_mean)]);
-  const acqLine = candidates.map((item) => [xScale(item.x), yAcq(item.acquisition_value)]);
-  const upper = candidates.map((item) => [xScale(item.x), yMean(Number(item.surrogate_mean) + Number(item.uncertainty || 0) * 0.12)]);
-  const lower = candidates
-    .slice()
-    .reverse()
-    .map((item) => [xScale(item.x), yMean(Number(item.surrogate_mean) - Number(item.uncertainty || 0) * 0.12)]);
-  const band = [...upper, ...lower];
-  const selected = trace.selected || {};
-  const selectedX = Number(selected.x);
-  const selectedY = yAcq(selected.acquisition_value);
-  const observed = Array.isArray(trace.evaluated_points) ? trace.evaluated_points.filter((item) => Number.isFinite(Number(item.x))) : [];
-  const candidateCount = Number(trace.candidate_count || candidates.length);
-  const xTicks = [1, Math.max(1, Math.round(candidateCount / 2)), candidateCount].filter((v, i, arr) => arr.indexOf(v) === i);
-  const yTicks = [0, 0.5, 1];
-
-  return `
-    <svg class="bo-trace-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="BO surrogate and acquisition trace step ${escapeHtml(trace.step)}">
-      <rect x="0" y="0" width="${width}" height="${height}" rx="18" class="bo-svg-bg"></rect>
-      <line x1="${pad.left}" y1="${pad.top + plotH}" x2="${pad.left + plotW}" y2="${pad.top + plotH}" class="bo-axis"></line>
-      <line x1="${pad.left}" y1="${pad.top}" x2="${pad.left}" y2="${pad.top + plotH}" class="bo-axis"></line>
-      ${xTicks.map((tick) => `
-        <g>
-          <line x1="${xScale(tick)}" y1="${pad.top}" x2="${xScale(tick)}" y2="${pad.top + plotH}" class="bo-grid"></line>
-          <text x="${xScale(tick)}" y="${height - 18}" text-anchor="middle" class="bo-axis-label">${tick}</text>
-        </g>
-      `).join("")}
-      ${yTicks.map((tick) => `
-        <g>
-          <line x1="${pad.left}" y1="${pad.top + plotH * (1 - tick)}" x2="${pad.left + plotW}" y2="${pad.top + plotH * (1 - tick)}" class="bo-grid"></line>
-          <text x="${pad.left - 12}" y="${pad.top + plotH * (1 - tick) + 4}" text-anchor="end" class="bo-axis-label">${tick}</text>
-        </g>
-      `).join("")}
-      <polygon points="${polyline(band)}" class="bo-uncertainty-band"></polygon>
-      <polyline points="${polyline(meanLine)}" class="bo-mean-line"></polyline>
-      <polyline points="${polyline(acqLine)}" class="bo-acq-line"></polyline>
-      ${observed.map((point) => `
-        <circle cx="${xScale(point.x)}" cy="${yScore(point.score)}" r="5.8" class="bo-observed-point">
-          <title>${escapeHtml(point.candidate_id || point.source || "observed")} score=${escapeHtml(numberText(point.score, 5))} ${escapeHtml(compactParams(point.parameters))}</title>
-        </circle>
-      `).join("")}
-      ${Number.isFinite(selectedX) ? `
-        <line x1="${xScale(selectedX)}" y1="${pad.top}" x2="${xScale(selectedX)}" y2="${pad.top + plotH}" class="bo-selected-line"></line>
-        <circle cx="${xScale(selectedX)}" cy="${selectedY}" r="8" class="bo-selected-point">
-          <title>${escapeHtml(selected.candidate_id || "selected")} acquisition=${escapeHtml(numberText(selected.acquisition_value, 5))} ${escapeHtml(compactParams(selected.parameters))}</title>
-        </circle>
-      ` : ""}
-      <text x="${pad.left}" y="20" class="bo-svg-title">step ${escapeHtml(trace.step)} · ${escapeHtml(trace.acquisition || "acquisition")} · x: candidate pool index</text>
-      <g class="bo-legend">
-        <line x1="${width - 330}" y1="20" x2="${width - 300}" y2="20" class="bo-mean-line"></line>
-        <text x="${width - 294}" y="24">surrogate mean</text>
-        <line x1="${width - 190}" y1="20" x2="${width - 160}" y2="20" class="bo-acq-line"></line>
-        <text x="${width - 154}" y="24">acquisition</text>
-      </g>
-    </svg>
-  `;
-}
-
-function renderSurrogateTrace(benchmark) {
-  const strategyPayload = boStrategyFromBenchmark(benchmark);
-  const trace = strategyPayload && Array.isArray(strategyPayload.surrogate_trace) ? strategyPayload.surrogate_trace : [];
-  if (!surrogatePlot || !selectedPoints) return;
-  if (!trace.length) {
-    surrogatePlot.innerHTML = `<div class="bo-plot-empty">BO strategy trace가 아직 없습니다. strategy=bo 또는 mbo로 실행하세요.</div>`;
-    selectedPoints.innerHTML = "";
+function renderVisualization() {
+  const renderer = window.BOVisualization;
+  if (!renderer || !currentVisualization) {
+    if (objectiveEquationCard) objectiveEquationCard.innerHTML = '<div class="bo-viz-empty">Run BO to bind an objective equation.</div>';
+    if (posteriorPlot) posteriorPlot.innerHTML = '<div class="bo-viz-empty">Waiting for a completed BO step.</div>';
     return;
   }
-  const visibleTrace = trace.length > 20 ? trace.slice(-20) : trace;
-  const hiddenNote = trace.length > visibleTrace.length ? `<p class="hint">최근 ${visibleTrace.length}/${trace.length} step만 표시합니다.</p>` : "";
-  surrogatePlot.innerHTML = `${hiddenNote}${visibleTrace.map((item) => `
-    <article class="bo-trace-card">
-      ${traceSvg(item)}
-    </article>
-  `).join("")}`;
-  selectedPoints.innerHTML = trace
-    .map((item) => {
-      const selected = item.selected || {};
-      return `
-        <div class="bo-selected-row">
-          <strong>#${escapeHtml(item.step || "")}</strong>
-          <span>${escapeHtml(selected.candidate_id || "candidate")}</span>
-          <code>${escapeHtml(compactParams(selected.parameters))}</code>
-          <em>score=${escapeHtml(numberText(selected.score, 5))} · acq=${escapeHtml(numberText(selected.acquisition_value, 5))}</em>
-        </div>
-      `;
-    })
-    .join("");
+  if (objectiveEquationCard) objectiveEquationCard.innerHTML = renderer.renderEquationCard(currentVisualization);
+  if (posteriorPlot) {
+    posteriorPlot.innerHTML = renderer.renderPlot(currentVisualization, {
+      mode: posteriorView?.value || "parameter_slice",
+      parameter: posteriorParameter?.value || currentVisualization.view?.selected_parameter || "",
+    });
+  }
+  if (posteriorArtifacts) {
+    posteriorArtifacts.innerHTML = renderer.artifactLinks(currentVisualization)
+      .map((item) => `<a class="btn compact" href="${escapeHtml(item.url)}" download>${escapeHtml(item.kind.toUpperCase())}</a>`)
+      .join("");
+  }
+  if (selectedPoints) {
+    const point = currentVisualization.next_point || {};
+    selectedPoints.innerHTML = `<div class="bo-selected-row"><strong>#${escapeHtml(currentVisualization.step || "")}</strong><span>${escapeHtml(point.candidate_id || "candidate")}</span><code>${escapeHtml(currentVisualization.view?.selected_parameter || "parameter")}=${escapeHtml(numberText(point.x, 5))}</code><em>mean=${escapeHtml(numberText(point.mean, 5))} · acq=${escapeHtml(numberText(point.acquisition, 5))}</em></div>`;
+  }
+}
+
+function refreshVisualizationSelectors() {
+  const renderer = window.BOVisualization;
+  if (!renderer || !currentVisualization) return;
+  const selectedParameter = posteriorParameter?.value || currentVisualization.view?.selected_parameter || "";
+  if (posteriorParameter) {
+    posteriorParameter.innerHTML = renderer.availableParameters(currentVisualization)
+      .map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name.replaceAll("_", " "))}</option>`)
+      .join("");
+    posteriorParameter.value = renderer.availableParameters(currentVisualization).includes(selectedParameter)
+      ? selectedParameter
+      : (currentVisualization.view?.selected_parameter || "");
+    posteriorParameter.disabled = posteriorView?.value === "candidate_index";
+  }
+  if (posteriorStep) {
+    const activeStep = String(currentVisualization.step || "");
+    posteriorStep.innerHTML = Array.from(visualizationByStep.keys()).sort((a, b) => a - b)
+      .map((step) => `<option value="${step}">Step ${step}</option>`)
+      .join("");
+    posteriorStep.value = activeStep;
+  }
+}
+
+function acceptVisualization(payload) {
+  const renderer = window.BOVisualization;
+  if (!renderer || !renderer.isValid(payload)) return false;
+  const runId = String(payload.run_id || "");
+  if (currentVisualizationRunId && runId && runId !== currentVisualizationRunId) visualizationByStep.clear();
+  currentVisualizationRunId = runId;
+  visualizationByStep.set(Number(payload.step || 0), payload);
+  currentVisualization = payload;
+  refreshVisualizationSelectors();
+  renderVisualization();
+  return true;
+}
+
+function acceptBenchmarkVisualizations(benchmark) {
+  const strategyPayload = boStrategyFromBenchmark(benchmark);
+  const trace = strategyPayload && Array.isArray(strategyPayload.surrogate_trace) ? strategyPayload.surrogate_trace : [];
+  trace.forEach((item) => acceptVisualization(item.visualization));
+}
+
+function connectBoEventStream() {
+  if (!window.EventSource || boEventSource) return;
+  const source = new EventSource("/api/events/stream");
+  boEventSource = source;
+  source.addEventListener("update", (message) => {
+    try {
+      const event = JSON.parse(message.data || "{}");
+      if (event.event_type === "bo.visualization.updated") acceptVisualization(event.payload?.visualization);
+    } catch (_error) {
+      // The next valid event or config refresh restores the card.
+    }
+  });
+  source.onerror = () => {
+    source.close();
+    boEventSource = null;
+    setTimeout(async () => {
+      try { await loadConfig(); } catch (_error) { /* reconnect still proceeds */ }
+      connectBoEventStream();
+    }, 1200);
+  };
 }
 
 function paramsHtml(params) {
@@ -536,7 +487,8 @@ function renderResult(data) {
   renderReasoning(boResult ? boResult.reasoning : null, boResult ? boResult.failure_model : null);
   renderCandidateRanking(boResult ? boResult.candidate_ranking || boResult.candidate_pool : []);
   renderCurve(boResult ? boResult.best_so_far || [] : firstCurveFromBenchmark(benchmark));
-  renderSurrogateTrace(benchmark);
+  acceptBenchmarkVisualizations(benchmark);
+  if (boResult?.visualization) acceptVisualization(boResult.visualization);
   resultJson.textContent = pretty(data);
 }
 
@@ -910,6 +862,7 @@ async function loadConfig() {
   if (data.recent && data.recent.recommendation) {
     renderResult({ data: { bo_result: data.recent } });
   }
+  if (data.recent_visualization) acceptVisualization(data.recent_visualization);
   const recentRunId = data.state && data.state.run_id ? String(data.state.run_id) : "";
   if (objectiveRunIdInput && !objectiveRunIdInput.value && recentRunId) objectiveRunIdInput.value = recentRunId;
   try {
@@ -988,6 +941,17 @@ if (btnObjectiveApprove) btnObjectiveApprove.addEventListener("click", () => run
 if (btnObjectiveActivate) btnObjectiveActivate.addEventListener("click", () => runObjectiveAction("Binding objective to run", activateObjective));
 if (btnObjectiveManualSave) btnObjectiveManualSave.addEventListener("click", () => runObjectiveAction("Saving operator-authored objective", saveManualObjective));
 if (btnObjectiveLoadRevision) btnObjectiveLoadRevision.addEventListener("click", () => runObjectiveAction("Loading selected objective for revision", async () => loadSelectedObjectiveAsRevision()));
+if (posteriorView) posteriorView.addEventListener("change", () => { refreshVisualizationSelectors(); renderVisualization(); });
+if (posteriorParameter) posteriorParameter.addEventListener("change", renderVisualization);
+if (posteriorStep) posteriorStep.addEventListener("change", () => {
+  const selected = visualizationByStep.get(Number(posteriorStep.value));
+  if (selected) { currentVisualization = selected; refreshVisualizationSelectors(); renderVisualization(); }
+});
+if (posteriorLatest) posteriorLatest.addEventListener("click", () => {
+  const steps = Array.from(visualizationByStep.keys());
+  const selected = visualizationByStep.get(Math.max(...steps));
+  if (selected) { currentVisualization = selected; refreshVisualizationSelectors(); renderVisualization(); }
+});
 
 setObjectiveAuthoringMode("ai");
-loadConfig();
+loadConfig().finally(connectBoEventStream);

@@ -64,6 +64,21 @@ def test_bo_workspace_contains_manual_visual_and_json_authoring() -> None:
         assert contract in script
 
 
+def test_bo_workspace_contains_shared_live_visualization_cards() -> None:
+    html = TestClient(app).get("/bo").text
+
+    for element_id in (
+        "bo-objective-equation-card",
+        "bo-posterior-card",
+        "bo-posterior-view",
+        "bo-posterior-parameter",
+        "bo-posterior-step",
+        "bo-posterior-latest",
+    ):
+        assert f'id="{element_id}"' in html
+    assert html.index('<script src="/static/bo_visualization.js"') < html.index('<script src="/static/bo.js"')
+
+
 def test_bo_config_endpoint_reports_defaults() -> None:
     client = TestClient(app)
 

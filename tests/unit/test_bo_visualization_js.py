@@ -124,6 +124,36 @@ console.log(JSON.stringify({{
     }
 
 
+def test_shared_renderer_uses_backend_supplied_parameter_slice() -> None:
+    payload = _payload()
+    payload["parameter_slices"] = {
+        "cell_size_mm": {
+            "x_label": "Cell Size Mm",
+            "x_unit": "mm",
+            "posterior": {
+                "x": [5.0, 7.5, 10.0],
+                "mean": [0.3, 0.6, 0.5],
+                "std": [0.1, 0.1, 0.1],
+                "lower_95": [0.104, 0.404, 0.304],
+                "upper_95": [0.496, 0.796, 0.696],
+            },
+            "acquisition": {"x": [5.0, 7.5, 10.0], "value": [0.1, 0.4, 0.2]},
+            "observations": [{"candidate_id": "c1", "x": 5.0, "score": 0.28}],
+            "current_best": {"candidate_id": "c2", "x": 7.5, "score": 0.58},
+            "next_point": {"candidate_id": "c2", "x": 7.5, "mean": 0.6},
+        }
+    }
+    result = _node_eval(
+        f"""
+const renderer = require({json.dumps(str(RENDERER))});
+const html = renderer.renderPlot({json.dumps(payload)}, {{ parameter: "cell_size_mm" }});
+console.log(JSON.stringify({{ selectedSlice: html.includes("Cell Size Mm (mm)") }}));
+"""
+    )
+
+    assert result == {"selectedSlice": True}
+
+
 def test_shared_renderer_rejects_invalid_payload_without_throwing() -> None:
     result = _node_eval(
         f"""

@@ -2642,6 +2642,42 @@ textarea {
 
 .bo-viz-stale { color: #f59e0b; }
 
+.bo-viz-workspace-card {
+  border: 1px solid rgba(34, 211, 238, 0.22);
+  overflow: hidden;
+}
+
+.bo-viz-workspace-head {
+  align-items: flex-end;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.bo-viz-workspace-head h3 { margin: 3px 0 0; }
+
+.bo-viz-toolbar label {
+  color: var(--muted);
+  display: grid;
+  font-size: 0.7rem;
+  gap: 4px;
+}
+
+.bo-viz-toolbar .compact-select {
+  min-width: 130px;
+  padding: 7px 9px;
+}
+
+.bo-viz-plot-host { min-width: 0; }
+
+@media (max-width: 720px) {
+  .bo-viz-workspace-head { align-items: stretch; flex-direction: column; }
+  .bo-viz-toolbar { align-items: stretch; display: grid; grid-template-columns: 1fr 1fr; }
+  .bo-viz-toolbar label { min-width: 0; }
+  .bo-viz-toolbar .compact-select { min-width: 0; width: 100%; }
+}
+
 .inline-filter {
   display: flex;
   align-items: center;

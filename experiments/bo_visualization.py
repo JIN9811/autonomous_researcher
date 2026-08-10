@@ -155,6 +155,62 @@ def _parameter_unit(name: str) -> str:
     return "1"
 
 
+def _parameter_slice(
+    *,
+    parameter: str,
+    candidates: list[dict[str, Any]],
+    trace: dict[str, Any],
+    direction: str,
+) -> dict[str, Any]:
+    rows: list[dict[str, Any]] = []
+    for item in candidates:
+        parameters = item.get("parameters") if isinstance(item.get("parameters"), dict) else {}
+        x = _finite(parameters.get(parameter))
+        mean = _finite(item.get("surrogate_mean"))
+        std = _finite(item.get("uncertainty"))
+        acquisition = _finite(item.get("acquisition_value"))
+        if None in {x, mean, std, acquisition}:
+            continue
+        rows.append(
+            {
+                "candidate_id": str(item.get("candidate_id") or ""),
+                "x": x,
+                "mean": mean,
+                "std": max(0.0, std),
+                "acquisition": acquisition,
+            }
+        )
+    rows.sort(key=lambda item: (item["x"], item["candidate_id"]))
+    observations = _observations(trace, parameter)
+    current_best = _best_observation(observations, direction)
+    selected = trace.get("selected") if isinstance(trace.get("selected"), dict) else {}
+    selected_parameters = selected.get("parameters") if isinstance(selected.get("parameters"), dict) else {}
+    return {
+        "x_label": parameter.replace("_", " ").title(),
+        "x_unit": _parameter_unit(parameter),
+        "posterior": {
+            "x": [item["x"] for item in rows],
+            "mean": [item["mean"] for item in rows],
+            "std": [item["std"] for item in rows],
+            "lower_95": [item["mean"] - 1.96 * item["std"] for item in rows],
+            "upper_95": [item["mean"] + 1.96 * item["std"] for item in rows],
+        },
+        "acquisition": {
+            "x": [item["x"] for item in rows],
+            "value": [item["acquisition"] for item in rows],
+        },
+        "observations": observations,
+        "current_best": current_best,
+        "next_point": {
+            "candidate_id": str(selected.get("candidate_id") or ""),
+            "x": _finite(selected_parameters.get(parameter)),
+            "mean": _finite(selected.get("surrogate_mean")),
+            "std": _finite(selected.get("uncertainty")),
+            "acquisition": _finite(selected.get("acquisition_value")),
+        },
+    }
+
+
 def build_bo_visualization(
     *,
     run_id: str,
@@ -165,30 +221,19 @@ def build_bo_visualization(
 ) -> dict[str, Any]:
     parameter = select_slice_parameter(parameter_space, trace, selected_parameter)
     candidates = _candidate_rows(trace)
-    slice_rows: list[dict[str, Any]] = []
-    for item in candidates:
-        parameters = item.get("parameters") if isinstance(item.get("parameters"), dict) else {}
-        x = _finite(parameters.get(parameter))
-        mean = _finite(item.get("surrogate_mean"))
-        std = _finite(item.get("uncertainty"))
-        acquisition = _finite(item.get("acquisition_value"))
-        if None in {x, mean, std, acquisition}:
-            continue
-        slice_rows.append(
-            {
-                "candidate_id": str(item.get("candidate_id") or ""),
-                "x": x,
-                "mean": mean,
-                "std": max(0.0, std),
-                "acquisition": acquisition,
-                "parameters": dict(parameters),
-            }
-        )
-    slice_rows.sort(key=lambda item: (item["x"], item["candidate_id"]))
-
-    observations = _observations(trace, parameter)
     objective_info = objective_display(objective)
-    current_best = _best_observation(observations, objective_info["direction"])
+    parameter_slices = {
+        name: _parameter_slice(
+            parameter=name,
+            candidates=candidates,
+            trace=trace,
+            direction=objective_info["direction"],
+        )
+        for name in numeric_parameter_names(parameter_space)
+    }
+    selected_slice = parameter_slices[parameter]
+    observations = selected_slice["observations"]
+    current_best = selected_slice["current_best"]
     best_parameters: dict[str, Any] = {}
     if current_best:
         match = next((item for item in candidates if str(item.get("candidate_id") or "") == current_best["candidate_id"]), None)
@@ -196,14 +241,7 @@ def build_bo_visualization(
             best_parameters = dict(match["parameters"])
     selected = trace.get("selected") if isinstance(trace.get("selected"), dict) else {}
     selected_parameters = selected.get("parameters") if isinstance(selected.get("parameters"), dict) else {}
-    selected_x = _finite(selected_parameters.get(parameter))
-    next_point = {
-        "candidate_id": str(selected.get("candidate_id") or ""),
-        "x": selected_x,
-        "mean": _finite(selected.get("surrogate_mean")),
-        "std": _finite(selected.get("uncertainty")),
-        "acquisition": _finite(selected.get("acquisition_value")),
-    }
+    next_point = selected_slice["next_point"]
 
     audit_rows = []
     for index, item in enumerate(candidates, start=1):
@@ -221,7 +259,7 @@ def build_bo_visualization(
         if key != parameter and isinstance(value, (str, int, float, bool))
     }
     warnings: list[str] = []
-    if not slice_rows:
+    if not selected_slice["posterior"]["x"]:
         warnings.append(f"No candidate posterior values contain selected parameter: {parameter}")
     warnings.append("Parameter slice is a candidate-pool projection, not an arbitrary-point GP posterior.")
 
@@ -240,21 +278,12 @@ def build_bo_visualization(
             "fixed_parameters": fixed_parameters,
             "fixed_parameter_source": "current_best" if best_parameters else "selected_candidate",
         },
-        "posterior": {
-            "x": [item["x"] for item in slice_rows],
-            "mean": [item["mean"] for item in slice_rows],
-            "std": [item["std"] for item in slice_rows],
-            "lower_95": [item["mean"] - 1.96 * item["std"] for item in slice_rows],
-            "upper_95": [item["mean"] + 1.96 * item["std"] for item in slice_rows],
-        },
-        "acquisition": {
-            "name": str(trace.get("acquisition") or "acquisition"),
-            "x": [item["x"] for item in slice_rows],
-            "value": [item["acquisition"] for item in slice_rows],
-        },
+        "posterior": selected_slice["posterior"],
+        "acquisition": {"name": str(trace.get("acquisition") or "acquisition"), **selected_slice["acquisition"]},
         "observations": observations,
         "current_best": current_best,
         "next_point": next_point,
+        "parameter_slices": parameter_slices,
         "candidate_index_view": {
             "x": [item[0] for item in audit_rows],
             "mean": [item[1] for item in audit_rows],
@@ -299,4 +328,16 @@ def validate_bo_visualization(payload: dict[str, Any]) -> dict[str, Any]:
     _validate_numeric_arrays(audit, ("x", "mean", "std", "lower_95", "upper_95", "acquisition"), "candidate index")
     if len(audit["x"]) != len(audit.get("candidate_ids", [])):
         raise ValueError("candidate index arrays must match candidate ids")
+    parameter_slices = payload.get("parameter_slices", {})
+    if not isinstance(parameter_slices, dict):
+        raise ValueError("parameter slices must be an object")
+    for name, slice_payload in parameter_slices.items():
+        if not isinstance(slice_payload, dict):
+            raise ValueError(f"parameter slice {name} must be an object")
+        slice_posterior = slice_payload.get("posterior") if isinstance(slice_payload.get("posterior"), dict) else {}
+        _validate_numeric_arrays(slice_posterior, ("x", "mean", "std", "lower_95", "upper_95"), f"parameter slice {name} posterior")
+        slice_acquisition = slice_payload.get("acquisition") if isinstance(slice_payload.get("acquisition"), dict) else {}
+        _validate_numeric_arrays(slice_acquisition, ("x", "value"), f"parameter slice {name} acquisition")
+        if len(slice_posterior["x"]) != len(slice_acquisition["x"]):
+            raise ValueError(f"parameter slice {name} arrays must have equal lengths")
     return payload

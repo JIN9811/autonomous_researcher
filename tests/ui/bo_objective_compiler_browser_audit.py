@@ -140,6 +140,61 @@ def audit(base_url: str, out_dir: Path, *, geckodriver: str) -> dict[str, object
         wait.until(conditions.visibility_of_element_located((By.ID, "objective-compiler-workspace")))
         wait.until(lambda item: item.find_element(By.ID, "objective-lifecycle-chip").text != "")
 
+        budget = driver.find_element(By.ID, "bo-budget-input")
+        budget.clear()
+        budget.send_keys("3")
+        driver.find_element(By.ID, "btn-bo-benchmark").click()
+        wait.until(lambda item: "Benchmark complete" in item.find_element(By.ID, "bo-status-label").text)
+        wait.until(lambda item: len(item.find_elements(By.CSS_SELECTOR, "#bo-posterior-plot svg.bo-viz-svg")) == 1)
+        posterior_layout = driver.execute_script(
+            """
+            const card = document.getElementById('bo-posterior-card');
+            const equation = document.getElementById('bo-objective-equation-card');
+            const plot = document.getElementById('bo-posterior-plot');
+            return {
+              svgCount: plot.querySelectorAll('svg.bo-viz-svg').length,
+              confidenceBands: plot.querySelectorAll('.bo-viz-confidence-band').length,
+              observations: plot.querySelectorAll('.bo-viz-observation').length,
+              nextPoints: plot.querySelectorAll('.bo-viz-next').length,
+              equation: equation.textContent.trim(),
+              cardWidth: card.getBoundingClientRect().width,
+              cardScrollWidth: card.scrollWidth,
+            };
+            """
+        )
+        if posterior_layout["svgCount"] != 1 or posterior_layout["confidenceBands"] < 1 or posterior_layout["nextPoints"] < 1:
+            raise AssertionError(f"BO posterior plot contract missing: {posterior_layout}")
+        if not posterior_layout["equation"]:
+            raise AssertionError(f"BO objective equation did not render: {posterior_layout}")
+        if posterior_layout["cardScrollWidth"] > posterior_layout["cardWidth"] + 2:
+            raise AssertionError(f"BO posterior card overflow: {posterior_layout}")
+        Select(driver.find_element(By.ID, "bo-posterior-view")).select_by_value("candidate_index")
+        wait.until(lambda item: "Candidate pool index" in item.find_element(By.ID, "bo-posterior-plot").text)
+        posterior_screenshot = out_dir / "bo_posterior_1920x1080.png"
+        driver.find_element(By.ID, "bo-posterior-card").screenshot(str(posterior_screenshot))
+
+        driver.set_window_size(390, 844)
+        driver.execute_script("document.getElementById('bo-posterior-card').scrollIntoView({block: 'start'});")
+        posterior_mobile = driver.execute_script(
+            """
+            const card = document.getElementById('bo-posterior-card');
+            return {
+              viewportWidth: window.innerWidth,
+              bodyScrollWidth: document.body.scrollWidth,
+              cardWidth: card.getBoundingClientRect().width,
+              cardScrollWidth: card.scrollWidth,
+              svgCount: card.querySelectorAll('svg.bo-viz-svg').length,
+            };
+            """
+        )
+        if posterior_mobile["bodyScrollWidth"] > posterior_mobile["viewportWidth"] + 2:
+            raise AssertionError(f"BO posterior mobile page overflow: {posterior_mobile}")
+        if posterior_mobile["cardScrollWidth"] > posterior_mobile["cardWidth"] + 2 or posterior_mobile["svgCount"] != 1:
+            raise AssertionError(f"BO posterior mobile card invalid: {posterior_mobile}")
+        posterior_mobile_screenshot = out_dir / "bo_posterior_390x844.png"
+        driver.find_element(By.ID, "bo-posterior-card").screenshot(str(posterior_mobile_screenshot))
+        driver.set_window_size(1920, 1080)
+
         driver.get(f"{base_url.rstrip('/')}/live")
         card = wait.until(conditions.visibility_of_element_located((By.ID, "live-objective-runtime-card")))
         wait.until(lambda item: item.find_element(By.ID, "live-objective-readiness").text != "")
@@ -177,11 +232,15 @@ def audit(base_url: str, out_dir: Path, *, geckodriver: str) -> dict[str, object
             "bo": bo_layout,
             "manual": manual_layout,
             "mobile": mobile_layout,
+            "posterior": posterior_layout,
+            "posterior_mobile": posterior_mobile,
             "live": live_layout,
             "screenshots": [
                 bo_screenshot.as_posix(),
                 manual_screenshot.as_posix(),
                 mobile_screenshot.as_posix(),
+                posterior_screenshot.as_posix(),
+                posterior_mobile_screenshot.as_posix(),
                 live_screenshot.as_posix(),
             ],
             "card_text": card.text,
