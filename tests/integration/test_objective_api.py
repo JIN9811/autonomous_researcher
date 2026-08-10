@@ -111,6 +111,24 @@ def test_objective_api_exposes_metrics_and_full_lifecycle(tmp_path, monkeypatch)
     assert lifecycle["active"] is True
 
 
+def test_objective_api_exposes_server_owned_authoring_contract(tmp_path, monkeypatch) -> None:
+    client, _ = client_for(tmp_path, monkeypatch)
+
+    response = client.get("/api/objectives/authoring-contract")
+    payload = response.json()
+
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert payload["limits"] == {"max_depth": 16, "max_nodes": 256}
+    assert "MPa" in payload["units"]
+    operators = {item["op"]: item for item in payload["operators"]}
+    assert operators["metric"]["kind"] == "leaf"
+    assert operators["add"]["children"] == {"mode": "args", "minimum": 2}
+    assert operators["weighted_sum"]["children"]["mode"] == "terms"
+    assert operators["divide"]["children"]["slots"] == ["numerator", "denominator"]
+    assert operators["reference"]["enabled"] is False
+
+
 def test_objective_api_maps_lifecycle_and_validation_errors(tmp_path, monkeypatch) -> None:
     client, service = client_for(tmp_path, monkeypatch, payload=spec(incompatible=True))
 

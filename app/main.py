@@ -92,6 +92,7 @@ from device_bridges.windows_pyautogui_bridge import (
     discover_windows_pyautogui_bridges,
 )
 from orchestrator.state import Mode, OrchestratorState, Stage
+from objectives.authoring import objective_authoring_manifest
 from objectives.compiler import ObjectiveCompileError
 from objectives.service import ObjectiveConflict, ObjectiveNotFound, ObjectiveService
 from orchestrator.supervisor import build_mission_contract, build_orchestration_plan, build_orchestrator_control_plane_snapshot
@@ -7385,6 +7386,12 @@ async def get_objective_metrics() -> dict[str, object]:
         "registry_version": service.registry.version_id,
         "metrics": [item.model_dump(mode="json") for item in service.registry.list()],
     }
+
+
+@app.get("/api/objectives/authoring-contract")
+async def get_objective_authoring_contract() -> dict[str, object]:
+    """Return the bounded operator and unit contract used by manual editors."""
+    return {"ok": True, **objective_authoring_manifest()}
 
 
 @app.get("/api/objectives/metrics/{metric_id}")
