@@ -2523,6 +2523,125 @@ textarea {
   background: rgba(255, 255, 255, 0.78);
 }
 
+/* Shared BO objective/posterior cards. Runtime numbers come from bo_visualization.v1. */
+.bo-viz-equation-head,
+.bo-viz-equation-meta,
+.bo-viz-toolbar,
+.bo-viz-artifacts {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.bo-viz-equation-head h4 {
+  margin: 3px 0 0;
+  color: #e8eef8;
+  font-size: 16px;
+}
+
+.bo-viz-kicker {
+  color: #22d3ee;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.11em;
+}
+
+.bo-viz-direction {
+  border: 1px solid #3b82f6;
+  border-radius: 3px;
+  color: #bfdbfe;
+  font-size: 11px;
+  font-weight: 800;
+  padding: 5px 8px;
+}
+
+.bo-viz-equation {
+  align-items: baseline;
+  background: #f8fafc;
+  border: 1px solid #cbd5e1;
+  color: #0f172a;
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+  overflow-wrap: anywhere;
+  padding: 14px 16px;
+}
+
+.bo-viz-equation strong {
+  font-family: "IBM Plex Mono", "Noto Sans Mono", monospace;
+  font-size: 16px;
+}
+
+.bo-viz-equation em {
+  color: #475569;
+  font-style: normal;
+}
+
+.bo-viz-constraints {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 9px;
+}
+
+.bo-viz-constraints code {
+  background: #172033;
+  border: 1px solid #334155;
+  border-radius: 3px;
+  color: #dbeafe;
+  padding: 5px 7px;
+}
+
+.bo-viz-equation-meta {
+  color: #94a3b8;
+  font-size: 11px;
+  margin-top: 9px;
+}
+
+.bo-viz-svg {
+  background: #fff;
+  border: 1px solid #cbd5e1;
+  display: block;
+  height: auto;
+  max-width: 100%;
+  width: 100%;
+}
+
+.bo-viz-paper { fill: #fff; }
+.bo-viz-axis { stroke: #111827; stroke-width: 1.2; }
+.bo-viz-grid { stroke: #d8dee8; stroke-dasharray: 3 4; stroke-width: 0.8; }
+.bo-viz-title { fill: #111827; font-size: 16px; font-weight: 700; }
+.bo-viz-subtitle,
+.bo-viz-tick,
+.bo-viz-axis-label,
+.bo-viz-acquisition-label,
+.bo-viz-legend text { fill: #334155; font-family: "IBM Plex Sans", sans-serif; font-size: 11px; }
+.bo-viz-axis-label { font-size: 12px; }
+.bo-viz-acquisition-label { fill: #9a3412; font-weight: 700; }
+.bo-viz-confidence-band { fill: #60a5fa; fill-opacity: 0.24; stroke: none; }
+.bo-viz-mean-line { fill: none; stroke: #2563eb; stroke-linecap: round; stroke-linejoin: round; stroke-width: 2.4; }
+.bo-viz-acquisition-line { fill: none; stroke: #f97316; stroke-linecap: round; stroke-linejoin: round; stroke-width: 2; }
+.bo-viz-observation { fill: #111827; stroke: #fff; stroke-width: 1.5; }
+.bo-viz-best { fill: #16a34a; stroke: #fff; stroke-width: 2; }
+.bo-viz-next { fill: #dc2626; stroke: #fff; stroke-width: 2; }
+.bo-viz-next-guide { stroke: #dc2626; stroke-dasharray: 5 4; stroke-width: 1.2; }
+.bo-viz-warning { fill: #92400e; font-size: 9px; }
+
+.bo-viz-empty {
+  align-items: center;
+  border: 1px dashed #475569;
+  color: #94a3b8;
+  display: flex;
+  justify-content: center;
+  min-height: 190px;
+  padding: 20px;
+  text-align: center;
+}
+
+.bo-viz-stale { color: #f59e0b; }
+
 .inline-filter {
   display: flex;
   align-items: center;
