@@ -112,6 +112,11 @@ const locatorXInput = document.getElementById("equipment-locator-x");
 const locatorYInput = document.getElementById("equipment-locator-y");
 const locatorWidthInput = document.getElementById("equipment-locator-width");
 const locatorHeightInput = document.getElementById("equipment-locator-height");
+const {
+  candidateSelectionView,
+  confirmCandidateSelection,
+  profileConnectionStatus: profileConnectionStatusValue,
+} = window.atrWindowsEquipmentSelection;
 let latestProofPackagePath = "";
 let selectedBridgeUrl = "";
 let latestUtmReadiness = {};
@@ -148,7 +153,7 @@ async function loadEquipmentProfileState() {
   const connection = state.connection || {};
   const readiness = state.readiness || {};
   if (profileConnectionStatus) {
-    profileConnectionStatus.textContent = `profile=${state.profile?.label || "UTM"} · bridge=${connection.status || "unknown"} · readiness=${readiness.status || "unknown"}`;
+    profileConnectionStatus.textContent = `profile=${state.profile?.label || "UTM"} · bridge=${profileConnectionStatusValue(connection)} · readiness=${readiness.status || "unknown"}`;
   }
   const evidence = state.evidence && typeof state.evidence === "object" ? state.evidence : {};
   if (profileEvidenceStatus) {
@@ -618,7 +623,8 @@ async function runLocalBridgeAction(action) {
   }
 }
 
-async function refreshConfig() {
+async function refreshConfig(options = {}) {
+  const logResult = !(options && options.logResult === false);
   const data = await apiJson("/api/equipment/windows/config");
   setConnectionStatus(data.connection || {});
   hydrateUtmProfile(data.utm_profile || {});
@@ -628,7 +634,8 @@ async function refreshConfig() {
   renderCompletionAudit(data.utm_completion_audit || {});
   latestVisionProofDraft = data.utm_vision_proof_draft && typeof data.utm_vision_proof_draft === "object" ? data.utm_vision_proof_draft : {};
   renderRequestAudit(data.request_audit || {});
-  writeLog(data);
+  if (logResult) writeLog(data);
+  return data;
 }
 
 function renderCandidates(candidates) {
@@ -672,8 +679,10 @@ function renderSavedCandidates(candidates) {
   savedCandidatesEl.innerHTML = "";
   candidates.forEach((candidate) => {
     const card = document.createElement("div");
-    card.className = "equipment-candidate-card";
-    const selected = candidate.selected ? "selected" : "standby";
+    const view = candidateSelectionView(candidate);
+    card.className = view.cardClass;
+    if (view.ariaCurrent) card.setAttribute("aria-current", view.ariaCurrent);
+    const selected = view.selected ? "selected" : "standby";
     const target = candidate.managed_local ? "local managed" : `${candidate.platform || "windows"} · ${candidate.scope || "network"}`;
     card.innerHTML = `
       <div>
@@ -681,13 +690,14 @@ function renderSavedCandidates(candidates) {
         <p class="hint">${candidate.bridge_url} · ${target} · ${selected} · ${candidate.allow_live_execute ? "live enabled" : "live blocked"}</p>
       </div>
       <div class="button-row">
-        <button class="btn mini" data-action="select">Select</button>
+        <button class="${view.buttonClass}" data-action="select" aria-pressed="${view.ariaPressed}">${view.buttonText}</button>
         <button class="btn mini danger" data-action="delete">Delete</button>
       </div>
     `;
     const selectButton = card.querySelector('[data-action="select"]');
     const deleteButton = card.querySelector('[data-action="delete"]');
-    selectButton.addEventListener("click", () => selectSavedCandidate(candidate.candidate_alias));
+    selectButton.disabled = view.buttonDisabled;
+    selectButton.addEventListener("click", () => selectSavedCandidate(candidate.candidate_alias, selectButton));
     deleteButton.addEventListener("click", () => deleteSavedCandidate(candidate.candidate_alias));
     savedCandidatesEl.appendChild(card);
   });
@@ -749,13 +759,37 @@ async function saveCandidate(candidate, aliasValue) {
   writeLog(data);
 }
 
-async function selectSavedCandidate(candidateAlias) {
-  const data = await apiJson("/api/equipment/windows/select", {
-    method: "POST",
-    body: JSON.stringify({ candidate_alias: candidateAlias }),
-  });
-  setConnectionStatus(data);
-  writeLog(data);
+async function selectSavedCandidate(candidateAlias, button = null) {
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Selecting...";
+  }
+  try {
+    const data = await apiJson("/api/equipment/windows/select", {
+      method: "POST",
+      body: JSON.stringify({ candidate_alias: candidateAlias }),
+    });
+    confirmCandidateSelection(data, candidateAlias);
+    setConnectionStatus(data);
+    writeLog(data);
+    setActionStatus("Bridge selected", `${candidateAlias} · ${data.bridge_url || "saved candidate"}`, "ok");
+    await Promise.all([
+      refreshConfig({ logResult: false }),
+      loadEquipmentProfileState(),
+    ]);
+  } catch (err) {
+    writeLog({
+      ok: false,
+      status: "failed",
+      failure_code: "PYAUTOGUI_CANDIDATE_SELECTION_FAILED",
+      message: err.message,
+    });
+  } finally {
+    if (button && button.isConnected && !button.closest(".equipment-candidate-card.selected")) {
+      button.disabled = false;
+      button.textContent = "Select";
+    }
+  }
 }
 
 async function deleteSavedCandidate(candidateAlias) {

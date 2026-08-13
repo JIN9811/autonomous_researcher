@@ -27,16 +27,16 @@
 - Consumes: `POST /api/equipment/windows/select`, `GET /api/equipment/windows/config`, `setConnectionStatus(connection)`, and `renderSavedCandidates(candidates)`.
 - Produces: confirmed selected-card state, in-flight state, application-failure handling, and derived profile connection status.
 
-- [ ] **Step 1: Write a failing browser-script test**
+- [x] **Step 1: Write a failing browser-script test**
 
-Execute the real `windows_equipment.js` in a controlled DOM/fetch harness and
-assert that selecting `windows_192.168.50.40_Nextpc` disables the in-flight
-button, confirms the exact returned alias, refetches config, renders one
-selected card with accessible state, and never calls live bridge endpoints.
-Add a failure case for `ok=false` and a display case for selected profile state
-without `connection.status`.
+Exercise the selection-state module consumed by `windows_equipment.js` and
+assert that `windows_192.168.50.40_Nextpc` renders one selected card with
+accessible state, rejects `ok=false` or mismatched confirmations, and derives a
+selected profile display when status is absent or `unknown`. Verify the actual
+in-flight request, config refetch, and absence of live bridge calls in Step 5's
+browser run.
 
-- [ ] **Step 2: Run the focused test and confirm RED**
+- [x] **Step 2: Run the focused test and confirm RED**
 
 ```bash
 node --test tests/js/windows_equipment_selection.test.js
@@ -45,13 +45,13 @@ node --test tests/js/windows_equipment_selection.test.js
 Expected: failure because selected cards and application-level errors are not
 yet represented.
 
-- [ ] **Step 3: Implement the minimal UI fix**
+- [x] **Step 3: Implement the minimal UI fix**
 
 Update saved-card rendering, selection request handling, config refresh, and
 profile status fallback. Add only scoped selected/busy styles to the Windows
 Equipment template or existing scoped stylesheet area.
 
-- [ ] **Step 4: Run focused and existing tests**
+- [x] **Step 4: Run focused and existing tests**
 
 ```bash
 node --test tests/js/windows_equipment_selection.test.js
@@ -59,7 +59,7 @@ node --check web/static/windows_equipment.js
 .venv/bin/pytest -q tests/unit/test_equipment_pyautogui_bridge.py -k 'save_connection or candidate or live_health'
 ```
 
-- [ ] **Step 5: Run browser and live non-actuating verification**
+- [x] **Step 5: Run browser and live non-actuating verification**
 
 Run `tests/ui/windows_equipment_browser_audit.py`, then select
 `windows_192.168.50.40_Nextpc` in the browser and confirm the selected-card DOM.

@@ -12,6 +12,7 @@ Inputs/outputs:
 
 Dependencies:
 - /static/styles.css
+- /static/windows_equipment_selection.js
 - /static/windows_equipment.js
 
 Modification guide:
@@ -25,6 +26,16 @@ Modification guide:
     <title>{{ title }}</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
     <link rel="stylesheet" href="/static/styles.css" />
+    <style>
+      .equipment-candidate-card.selected {
+        border-color: var(--ok);
+        background: rgba(29, 145, 80, 0.09);
+        box-shadow: 0 0 0 3px rgba(29, 145, 80, 0.12);
+      }
+      .equipment-candidate-card.selected [data-action="select"]:disabled {
+        opacity: 1;
+      }
+    </style>
   </head>
   <body>
     <main class="page equipment-setup-page">
@@ -370,6 +381,7 @@ Modification guide:
       </div>
     </main>
 
+    <script src="/static/windows_equipment_selection.js" defer></script>
     <script src="/static/windows_equipment.js" defer></script>
   </body>
 </html>
